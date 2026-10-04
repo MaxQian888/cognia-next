@@ -216,6 +216,7 @@ export async function dispatchSubagent(
       // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
       // the plan-mode force-offer — instead of treating the child as top-level.
       isDispatchedSubagent: true,
+      ...(options._sessionId ? { sessionId: options._sessionId } : {}),
       // The definition's prompt is the child's identity. Frame it with the
       // environment and the dispatched-subagent contract (shared with the CLI
       // runner) so the child knows its cwd, the date, and that only its final
@@ -272,7 +273,10 @@ export async function dispatchSubagent(
           }
         : {}),
     },
-    { surface: "plugin" }
+    {
+      surface: "plugin",
+      identity: { runId, ...(options._sessionId ? { sessionId: options._sessionId } : {}) },
+    }
   )
 
   void fireAgentHook("SubagentStop", hookCtx, {

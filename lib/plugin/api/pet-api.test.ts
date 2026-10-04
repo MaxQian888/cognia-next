@@ -11,10 +11,16 @@
  * REWARD (needs still settle) rather than a no-op interaction or an error.
  */
 
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import {
   createPetAPI,
+  MAX_COINS_PER_EMIT,
   MAX_XP_PER_EMIT,
+  PET_API_PERMISSIONS,
+  PetCooldownError,
   PetEventKindNotAllowedError,
+  PetItemKindMismatchError,
   PetItemNotOwnedError,
   PLUGIN_EMITTABLE_PET_EVENT_KINDS,
 } from "./pet-api"
@@ -358,10 +364,163 @@ describe("emitEvent", () => {
   it("strips free-form meta down to the id-shaped whitelist", async () => {
     const api = grantedApi()
     await api.emitEvent("fed", {
-      meta: { itemId: "berry", userText: "secret words", nested: { x: 1 } },
+      meta: { goalId: "g1", userText: "secret words", nested: { x: 1 } },
     })
     const emitted = emitPetEvent.mock.calls.at(-1)![0] as PetEvent
-    expect(emitted.meta).toEqual({ itemId: "berry", pluginId: PLUGIN, coins: 0 })
+    expect(emitted.meta).toEqual({ goalId: "g1", pluginId: PLUGIN, coins: 0 })
+  })
+
+  it("never carries an item, so an unowned item cannot ride a reward", async () => {
+    // Before, `emitEvent("fed", { meta: { itemId } })` applied a premium item's
+    // restore with no ownership check and no stock taken.
+    const api = grantedApi()
+    ownedItems.clear()
+    await api.emitEvent("fed", { meta: { itemId: "royal-feast" } })
+    const emitted = emitPetEvent.mock.calls.at(-1)![0] as PetEvent
+    expect(emitted.meta).not.toHaveProperty("itemId")
+    // And end to end: the applied restore is the base one.
+    const base = applyPetEvent(makeProfile(), { ...emitted, meta: { coins: 0 }, at: 1 }, 1)
+    expect(applyPetEvent(makeProfile(), { ...emitted, at: 1 }, 1).profile.needs).toEqual(
+      base.profile.needs
+    )
+  })
+
+  it("accepts the neutral pluginReward kind for rewards that are not care", async () => {
+    const api = grantedApi()
+    expect(PLUGIN_EMITTABLE_PET_EVENT_KINDS).toContain("pluginReward")
+    await expect(api.emitEvent("pluginReward", { xp: 5, coins: 4 })).resolves.toEqual({
+      grantedXp: 5,
+      grantedCoins: 4,
+    })
+    expect(emitPetEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ source: "plugin", kind: "pluginReward", xp: 5 })
+    )
+  })
+
+  it("clamps coins per call", async () => {
+    const api = grantedApi()
+    const res = await api.emitEvent("pluginReward", { coins: 1000 })
+    expect(res.grantedCoins).toBe(MAX_COINS_PER_EMIT)
+  })
+
+  it("throws PetCooldownError for a cooling care kind and spends nothing", async () => {
+    const api = grantedApi()
+    profileValue = makeProfile({ interactionGate: { lastAtByKind: { fed: Date.now() } } })
+    const before = api.getRemainingBudget()
+    const err = await api.emitEvent("fed", { xp: 5 }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(PetCooldownError)
+    expect((err as PetCooldownError).retryAfterMs).toBeGreaterThan(0)
+    expect(api.getRemainingBudget()).toEqual(before)
+    expect(emitPetEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe("refusals plugins can act on", () => {
+  it("interact throws PetCooldownError while cooling, keeping the item", async () => {
+    const api = grantedApi()
+    profileValue = makeProfile({ interactionGate: { lastAtByKind: { fed: Date.now() } } })
+    await expect(api.interact("fed", { itemId: "berry" })).rejects.toBeInstanceOf(PetCooldownError)
+    expect(ownedItems.has("berry")).toBe(true)
+  })
+
+  it("interact throws PetItemKindMismatchError for an item that is not for the action", async () => {
+    const api = grantedApi()
+    const err = await api.interact("petted", { itemId: "berry" }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(PetItemKindMismatchError)
+    expect(err).toMatchObject({ itemId: "berry", kind: "petted", itemKind: "fed" })
+    expect(ownedItems.has("berry")).toBe(true)
+  })
+
+  it("grants zero quietly while the pet is switched off", async () => {
+    const api = grantedApi()
+    mockPetEnabled = false
+    await expect(api.interact("played")).resolves.toEqual({ grantedXp: 0, grantedCoins: 0 })
+    await expect(api.emitEvent("pluginReward", { xp: 5 })).resolves.toEqual({
+      grantedXp: 0,
+      grantedCoins: 0,
+    })
+    expect(emitPetEvent).not.toHaveBeenCalled()
+  })
+
+  it("grants zero quietly for an unhatched egg", async () => {
+    const api = grantedApi()
+    profileValue = makeProfile({ soul: null })
+    await expect(api.interact("played")).resolves.toEqual({ grantedXp: 0, grantedCoins: 0 })
+    expect(emitPetEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe("getAvailability", () => {
+  it("is available for a hatched pet on the desktop shell", async () => {
+    await expect(grantedApi().getAvailability()).resolves.toEqual({ available: true })
+  })
+
+  it("explains each unavailable state", async () => {
+    const api = grantedApi()
+    mockPetEnabled = false
+    await expect(api.getAvailability()).resolves.toEqual({ available: false, reason: "disabled" })
+    mockPetEnabled = true
+    mockPlatform = "web"
+    await expect(api.getAvailability()).resolves.toEqual({
+      available: false,
+      reason: "unsupported-host",
+    })
+    mockPlatform = "tauri"
+    profileValue = undefined
+    await expect(api.getAvailability()).resolves.toEqual({
+      available: false,
+      reason: "uninitialized",
+    })
+    profileValue = makeProfile({ soul: null })
+    await expect(api.getAvailability()).resolves.toEqual({
+      available: false,
+      reason: "not-hatched",
+    })
+  })
+
+  it("requires pet:read", () => {
+    getPermissionGuard().registerPlugin(PLUGIN, ["pet:interact"])
+    const api = createPetAPI({ pluginId: PLUGIN, capabilities: ["pet"] })
+    expect(() => api.getAvailability()).toThrow(PermissionError)
+  })
+
+  it("names the missing capability on the no-op API", async () => {
+    const api = createPetAPI({ pluginId: PLUGIN, capabilities: [] })
+    await expect(api.getAvailability()).resolves.toEqual({
+      available: false,
+      reason: "missing-capability",
+    })
+  })
+})
+
+describe("published contract", () => {
+  // The catalog generates the SDK reference, the Python/Rust mirrors and the
+  // audit view; it once said `interact`/`emitEvent` needed no permission while
+  // the host required `pet:interact`.
+  const catalog = JSON.parse(
+    readFileSync(join(process.cwd(), "packages/plugin-sdk/contract/catalog.json"), "utf8")
+  ) as {
+    apiNamespaces: Array<{
+      id: string
+      methods: Array<{ name: string; requiredPermissions: string[] }>
+    }>
+  }
+  const namespace = catalog.apiNamespaces.find((n) => n.id === "pet")!
+
+  it("lists exactly the methods the host implements", () => {
+    expect(namespace.methods.map((m) => m.name).sort()).toEqual(
+      Object.keys(PET_API_PERMISSIONS).sort()
+    )
+  })
+
+  it("declares the permission the host enforces for every method", () => {
+    for (const method of namespace.methods) {
+      const enforced = PET_API_PERMISSIONS[method.name as keyof typeof PET_API_PERMISSIONS]
+      expect({ method: method.name, required: method.requiredPermissions }).toEqual({
+        method: method.name,
+        required: [enforced],
+      })
+    }
   })
 })
 

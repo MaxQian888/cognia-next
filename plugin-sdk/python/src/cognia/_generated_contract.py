@@ -213,6 +213,7 @@ VALID_CAPABILITIES = (
     "wallpapers",
     "quick-action",
     "cli-tools",
+    "pi-package",
     "tray",
     "automation",
     "companion",
@@ -398,6 +399,9 @@ CAPABILITY_FIELDS = {
     "cli-tools": [
         "cliTools",
     ],
+    "pi-package": [
+        "piPackages",
+    ],
     "tray": [
         "trayItems",
     ],
@@ -493,6 +497,7 @@ CAPABILITY_SUPPORT = {
     "wallpapers": "supported",
     "quick-action": "supported",
     "cli-tools": "supported",
+    "pi-package": "supported",
     "tray": "supported",
     "automation": "experimental",
     "companion": "experimental",
@@ -570,6 +575,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "wallpapers": "0.1.0",
     "quick-action": "0.1.0",
     "cli-tools": "0.1.0",
+    "pi-package": "0.1.0",
     "tray": "0.1.0",
     "automation": "0.1.0",
     "companion": "0.1.0",
@@ -647,6 +653,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "wallpapers": "0.1.0",
     "quick-action": "0.1.0",
     "cli-tools": "0.1.0",
+    "pi-package": "0.1.0",
     "tray": "0.1.0",
     "automation": "0.1.0",
     "companion": "0.1.0",
@@ -1066,6 +1073,13 @@ MANIFEST_CONTRIBUTIONS = [
         "execution": "host",
     },
     {
+        "field": "piPackages",
+        "capabilities": [
+            "pi-package",
+        ],
+        "execution": "host",
+    },
+    {
         "field": "contextPanels",
         "capabilities": [
             "context-panel",
@@ -1250,6 +1264,27 @@ PLUGIN_PATH_FIELD_CONTRACTS = [
         "runtime": "asset",
         "requiredFor": [],
         "executable": True,
+    },
+    {
+        "path": "piPackages[].path",
+        "runtime": "asset",
+        "requiredFor": [],
+        "executable": False,
+        "kind": "directory",
+    },
+    {
+        "path": "piPackages[].prepare.marker",
+        "runtime": "asset",
+        "requiredFor": [],
+        "executable": False,
+        "kind": "contained-only",
+    },
+    {
+        "path": "piPackages[].hostedSession.extensions[]",
+        "runtime": "asset",
+        "requiredFor": [],
+        "executable": True,
+        "kind": "file",
     },
     {
         "path": "vscodeGrammars[].path",
@@ -2397,6 +2432,7 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.1.0",
+        "permission": "pet:read",
     },
     {
         "id": "onPetLevelUp",
@@ -2404,6 +2440,7 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.1.0",
+        "permission": "pet:read",
     },
     {
         "id": "onPetEvolved",
@@ -2411,6 +2448,7 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.1.0",
+        "permission": "pet:read",
     },
     {
         "id": "onPetAchievementUnlocked",
@@ -2418,6 +2456,7 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.1.0",
+        "permission": "pet:read",
     },
     {
         "id": "onPetUnwell",
@@ -2425,6 +2464,7 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.1.0",
+        "permission": "pet:read",
     },
     {
         "id": "onShareLinkCreate",
@@ -3646,12 +3686,9 @@ PLUGIN_POINT_CONTRACTS = [
     {
         "id": "onLanguage:*",
         "kind": "activation",
-        "stability": "deprecated",
-        "status": "deprecated",
+        "stability": "stable",
+        "status": "implemented",
         "introducedIn": "0.1.0",
-        "deprecatedIn": "0.2.0",
-        "replacementId": "startup",
-        "retirementNote": "No language-based runtime dispatch in Cognia; declare startup activation and filter inside the plugin.",
     },
     {
         "id": "onFile:*",
@@ -3673,16 +3710,18 @@ PLUGIN_POINT_CONTRACTS = [
     {
         "id": "onWebviewPanel:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Restoring webview panels after a restart is not supported.",
     },
     {
         "id": "onCustomEditor:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Cognia has no custom editors.",
     },
     {
         "id": "onAuthenticationRequest",
@@ -3694,24 +3733,26 @@ PLUGIN_POINT_CONTRACTS = [
     {
         "id": "onTaskType:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Fetching tasks does not start extensions.",
     },
     {
         "id": "onFileSystem:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Cognia does not read files through extension file systems.",
     },
     {
         "id": "onDebugResolve:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
-        "retirementNote": "Validated as a known pattern but the sidecar's vscode-shim raises NotSupportedError at runtime — Cognia has no DAP viewport.",
+        "retirementNote": "Cognia has no debugger.",
     },
     {
         "id": "onStartupFinished",
@@ -3730,44 +3771,50 @@ PLUGIN_POINT_CONTRACTS = [
     {
         "id": "onTerminal",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Opening a terminal does not start extensions.",
     },
     {
         "id": "onTerminalProfile:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Cognia has no extension terminal profiles.",
     },
     {
         "id": "onNotebook:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Cognia has no notebooks.",
     },
     {
         "id": "onWalkthrough:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Cognia has no walkthroughs.",
     },
     {
         "id": "onChatParticipant:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Extension chat participants are not invoked.",
     },
     {
         "id": "onLanguageModelTool:*",
         "kind": "activation",
-        "stability": "stable",
-        "status": "implemented",
+        "stability": "experimental",
+        "status": "virtual",
         "introducedIn": "0.5.0",
+        "retirementNote": "Models never call extension tools.",
     },
     {
         "id": "workspaceContains:*",
@@ -12476,10 +12523,26 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "pet.emitEvent",
                 "name": "emitEvent",
-                "requiredPermissions": [],
-                "consentTier": "none",
-                "risk": "low",
+                "requiredPermissions": [
+                    "pet:interact",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
                 "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "pet.getAvailability",
+                "name": "getAvailability",
+                "requiredPermissions": [
+                    "pet:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
@@ -12530,9 +12593,11 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "pet.interact",
                 "name": "interact",
-                "requiredPermissions": [],
-                "consentTier": "none",
-                "risk": "low",
+                "requiredPermissions": [
+                    "pet:interact",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
@@ -13522,7 +13587,7 @@ API_NAMESPACE_CONTRACTS = [
                 "name": "cancelExecution",
                 "requiredPermissions": [],
                 "consentTier": "none",
-                "risk": "low",
+                "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
@@ -13534,7 +13599,7 @@ API_NAMESPACE_CONTRACTS = [
                 "name": "createTask",
                 "requiredPermissions": [],
                 "consentTier": "none",
-                "risk": "low",
+                "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
@@ -13546,7 +13611,19 @@ API_NAMESPACE_CONTRACTS = [
                 "name": "deleteTask",
                 "requiredPermissions": [],
                 "consentTier": "none",
-                "risk": "low",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "scheduler.emitEvent",
+                "name": "emitEvent",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
@@ -13602,6 +13679,18 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "scheduler.getStatistics",
+                "name": "getStatistics",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "scheduler.getTask",
                 "name": "getTask",
                 "requiredPermissions": [],
@@ -13638,12 +13727,36 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "scheduler.onExecution",
+                "name": "onExecution",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
+            },
+            {
                 "id": "scheduler.pauseTask",
                 "name": "pauseTask",
                 "requiredPermissions": [],
                 "consentTier": "none",
                 "risk": "low",
                 "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "scheduler.previewTrigger",
+                "name": "previewTrigger",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
@@ -13678,7 +13791,7 @@ API_NAMESPACE_CONTRACTS = [
                 "name": "runTaskNow",
                 "requiredPermissions": [],
                 "consentTier": "none",
-                "risk": "low",
+                "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
@@ -13702,7 +13815,7 @@ API_NAMESPACE_CONTRACTS = [
                 "name": "updateTask",
                 "requiredPermissions": [],
                 "consentTier": "none",
-                "risk": "low",
+                "risk": "medium",
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
@@ -16276,6 +16389,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",
@@ -16291,6 +16405,21 @@ API_NAMESPACE_CONTRACTS = [
         "errorPolicy": "preserve",
         "lifecycle": "plugin",
         "methods": [
+            {
+                "id": "userScheduler.cancelExecution",
+                "name": "cancelExecution",
+                "requiredPermissions": [
+                    "agent:control",
+                    "database:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
             {
                 "id": "userScheduler.createTask",
                 "name": "createTask",
@@ -16321,10 +16450,66 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "userScheduler.getExecution",
+                "name": "getExecution",
+                "requiredPermissions": [
+                    "database:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "userScheduler.getPolicy",
                 "name": "getPolicy",
                 "requiredPermissions": [
                     "settings:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "userScheduler.getTask",
+                "name": "getTask",
+                "requiredPermissions": [
+                    "database:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "userScheduler.getUpcoming",
+                "name": "getUpcoming",
+                "requiredPermissions": [
+                    "database:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "userScheduler.listExecutions",
+                "name": "listExecutions",
+                "requiredPermissions": [
+                    "database:read",
                 ],
                 "consentTier": "policy",
                 "risk": "medium",
@@ -16349,10 +16534,52 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "userScheduler.pauseTask",
+                "name": "pauseTask",
+                "requiredPermissions": [
+                    "database:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "userScheduler.resumeTask",
+                "name": "resumeTask",
+                "requiredPermissions": [
+                    "database:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "userScheduler.runTaskNow",
                 "name": "runTaskNow",
                 "requiredPermissions": [
                     "agent:control",
+                    "database:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "userScheduler.updateTask",
+                "name": "updateTask",
+                "requiredPermissions": [
                     "database:write",
                 ],
                 "consentTier": "policy",
@@ -17282,6 +17509,9 @@ PLUGIN_PATH_FIELDS = (
     "fonts[].files[].src",
     "wallpapers[].source.relPath",
     "cliTools[].binary.relPath",
+    "piPackages[].path",
+    "piPackages[].prepare.marker",
+    "piPackages[].hostedSession.extensions[]",
     "vscodeGrammars[].path",
     "vscodeLanguages[].configuration",
     "vscodeLanguages[].icon.light",

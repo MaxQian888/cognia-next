@@ -111,6 +111,8 @@ PYTHON_MIRRORS: dict[str, str] = {
     # desktop-pet family
     "pet-item": "define_pet_item",
     "pet-achievement": "define_pet_achievement",
+    # pi-package (ADR-0210)
+    "pi-package": "define_pi_package",
 }
 
 

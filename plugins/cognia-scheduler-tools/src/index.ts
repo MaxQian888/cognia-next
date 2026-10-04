@@ -350,6 +350,13 @@ export async function deleteScheduledTask(
   if (!task) {
     return { ok: false, error: `No scheduled task with id ${args.taskId}. List the tasks first.` }
   }
+  // Made as the plugin (`ctx.userScheduler`'s default actor), not as the
+  // agent. The host's mutate gate refuses an AGENT write while
+  // `agentAutoCreate` is off, because it reads an agent write as unattended;
+  // this one is not: the user approves every call (`requiresApproval`), and
+  // `refuseWhenAgentToolsDisabled` above already applied the agent switch. The
+  // plugin-actor gate still refuses script tasks while they are off and types
+  // the host cannot run.
   const deleted = await deps.deleteTask(task.id)
   if (!deleted) return { ok: false, error: `The scheduler did not delete task ${task.id}.` }
   return { ok: true, action: "delete", taskId: task.id, name: task.name }
@@ -374,6 +381,7 @@ export async function runScheduledTask(
       error: `"${task.name}" is a ${task.type} task. Agents cannot run those; the user can run it from the scheduler panel.`,
     }
   }
+  // Made as the plugin for the same reason as the delete above.
   const execution = await deps.runTaskNow(task.id, { triggerSource: "run-now" })
   if (!execution) return { ok: false, error: `The scheduler did not start task ${task.id}.` }
   return {

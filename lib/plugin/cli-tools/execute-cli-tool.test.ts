@@ -409,6 +409,126 @@ describe("executeCliTool", () => {
   })
 })
 
+describe("executeCliTool plugin-root tokens", () => {
+  // A plugin-shipped script run by a PATH binary (`node <plugin>/cli.ts`) with
+  // the workspace as cwd — the case `${COGNIA_PLUGIN_ROOT}` in literals exists for.
+  const NODE_TOOL: PluginCliToolDef = {
+    name: "latexwb_build",
+    description: "Build",
+    parameters: { type: "object", properties: { project: { type: "string" } } },
+    binary: { kind: "requires", name: "node" },
+    argv: [
+      { literal: "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts" },
+      { literal: "build" },
+      { param: "project", eachPrefixedBy: "--project" },
+    ],
+    env: { LATEXWB_REPO_ROOT: "${COGNIA_PLUGIN_ROOT}/vendor" },
+    cwd: { kind: "workspace" },
+    outputParse: "json",
+  }
+  const NODE_CTX: ExecuteCliToolContext = {
+    pluginPath: "/Users/me/.cognia/plugins/cognia-pi-latex-workbench",
+    requiresBinaries: [{ name: "node", minVersion: "24.0.0" }],
+  }
+  const nodeDeps = () =>
+    makeDeps({
+      detect: jest.fn(async () => ({
+        available: true,
+        version: "v24.1.0",
+        path: "/usr/local/bin/node",
+        error: null,
+      })),
+      invokeExec: jest.fn(async () => ({
+        stdout: '{"ok":true}',
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        truncated: false,
+      })),
+    })
+
+  it("spawns the expanded absolute script path and binds static env values", async () => {
+    const { deps } = nodeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool("cognia-pi-latex-workbench", NODE_TOOL, { project: "demo" }, NODE_CTX)
+    expect(deps.invokeExec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        program: "/usr/local/bin/node",
+        args: [
+          "/Users/me/.cognia/plugins/cognia-pi-latex-workbench/vendor/packages/cli/src/bin.ts",
+          "build",
+          "--project",
+          "demo",
+        ],
+        cwd: "C:/work/repo",
+        env: { LATEXWB_REPO_ROOT: "/Users/me/.cognia/plugins/cognia-pi-latex-workbench/vendor" },
+      })
+    )
+  })
+
+  it("shows the expanded path, never the placeholder, in the consent prompt and audit row", async () => {
+    const { deps, permissionReasons, audits } = nodeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool("cognia-pi-latex-workbench", NODE_TOOL, { project: "demo" }, NODE_CTX)
+    expect(permissionReasons[0]).toBe(
+      "Run CLI tool latexwb_build: node " +
+        "/Users/me/.cognia/plugins/cognia-pi-latex-workbench/vendor/packages/cli/src/bin.ts " +
+        "build --project demo (cwd: C:/work/repo)"
+    )
+    expect(permissionReasons[0]).not.toContain("${")
+    expect(audits[0]!.command).toContain(
+      "/Users/me/.cognia/plugins/cognia-pi-latex-workbench/vendor/packages/cli/src/bin.ts"
+    )
+  })
+
+  it("never expands a token the model put into a param value", async () => {
+    const { deps } = nodeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool(
+      "cognia-pi-latex-workbench",
+      NODE_TOOL,
+      { project: "${COGNIA_PLUGIN_ROOT}" },
+      NODE_CTX
+    )
+    const request = (deps.invokeExec as jest.Mock).mock.calls[0]![0] as { args: string[] }
+    expect(request.args.slice(-2)).toEqual(["--project", "${COGNIA_PLUGIN_ROOT}"])
+  })
+
+  it("refuses a builtin:// plugin before consent, probing or spawning", async () => {
+    const { deps } = nodeDeps()
+    __setCliToolDepsForTesting(deps)
+    await expect(
+      executeCliTool(
+        "cognia-pi-latex-workbench",
+        NODE_TOOL,
+        { project: "demo" },
+        { ...NODE_CTX, pluginPath: "builtin://cognia-pi-latex-workbench" }
+      )
+    ).rejects.toMatchObject({
+      code: "template",
+      message: expect.stringContaining("no on-disk install directory"),
+    })
+    expect(deps.checkPermission).not.toHaveBeenCalled()
+    expect(deps.detect).not.toHaveBeenCalled()
+    expect(deps.invokeExec).not.toHaveBeenCalled()
+  })
+
+  it("leaves token-free tools on builtin:// plugins untouched", async () => {
+    const { deps, invocations } = makeDeps()
+    __setCliToolDepsForTesting(deps)
+    await executeCliTool(
+      "ripgrep-tools",
+      { ...TOOL, env: { RIPGREP_CONFIG_PATH: "" } },
+      { pattern: "x" },
+      { ...CTX, pluginPath: "builtin://ripgrep-tools" }
+    )
+    expect(invocations[0]).toMatchObject({
+      args: ["--json", "x"],
+      env: { RIPGREP_CONFIG_PATH: "" },
+    })
+  })
+})
+
 // The ledger's allow-branch was dead code until the "remember this binary"
 // checkbox landed: nothing wrote `approvedBinaries`, so `evaluateCliBinary`
 // could never reach `allowed: true` and every plugin binary re-prompted on

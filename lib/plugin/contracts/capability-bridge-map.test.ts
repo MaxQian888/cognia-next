@@ -52,12 +52,13 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "auth-provider",
         "pet-achievement",
         "pet-item",
+        "pi-package",
       ])
     )
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(21)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(22)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {
@@ -105,7 +106,21 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
               protocol: "openai",
               models: ["model"],
             }
-          : { id: `pr-d-test-${key}`, _testTag: true }
+          : key === "pet-achievement"
+            ? {
+                id: `pr-d-test-${key}`,
+                labels: { en: "Test" },
+                condition: { type: "level", gte: 2 },
+              }
+            : key === "pet-item"
+              ? {
+                  id: `pr-d-test-${key}`,
+                  labels: { en: "Test" },
+                  category: "decor",
+                  price: 5,
+                  consumable: false,
+                }
+              : { id: `pr-d-test-${key}`, _testTag: true }
       const ctx = { pluginId: `pr-d-test-plugin-${key}` }
       // Should not throw — registries are idempotent under PR-D's
       // contract.
@@ -113,6 +128,34 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
       const removed = descriptor.unregisterAllByPlugin(ctx.pluginId)
       expect(removed).toBeGreaterThanOrEqual(1)
     })
+  })
+})
+
+describe("pet contributions are shape-checked at registration", () => {
+  // The guard for manifests stored before manifest validation checked them:
+  // the dispatch loop isolates a throwing entry, so only that one is dropped.
+  it("refuses an achievement that could never unlock", () => {
+    const ctx = { pluginId: "pet-shape-plugin" }
+    expect(() =>
+      OVERLAY_REGISTRY_CAPABILITIES["pet-achievement"].registerEntry(
+        { id: "never", labels: { en: "Never" }, condition: { type: "feedCount", gte: 1 } },
+        ctx
+      )
+    ).toThrow(/condition\.type/)
+    expect(
+      OVERLAY_REGISTRY_CAPABILITIES["pet-achievement"].unregisterAllByPlugin(ctx.pluginId)
+    ).toBe(0)
+  })
+
+  it("refuses a malformed item", () => {
+    const ctx = { pluginId: "pet-shape-plugin" }
+    expect(() =>
+      OVERLAY_REGISTRY_CAPABILITIES["pet-item"].registerEntry(
+        { id: "free", labels: { en: "Free" }, category: "food", price: 0, consumable: true },
+        ctx
+      )
+    ).toThrow(/price/)
+    expect(OVERLAY_REGISTRY_CAPABILITIES["pet-item"].unregisterAllByPlugin(ctx.pluginId)).toBe(0)
   })
 })
 

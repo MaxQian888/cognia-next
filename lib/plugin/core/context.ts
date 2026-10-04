@@ -469,7 +469,7 @@ export function createFullPluginContext(
     recorder: createRecorderAPI(pluginId),
     securityScans: createSecurityScansAPI(),
     eval: createEvalAPI(),
-    userScheduler: createUserSchedulerAPI(),
+    userScheduler: createUserSchedulerAPI(pluginId),
     companion: createCompanionAPI(pluginId),
     pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
     resources: createResourcesAPI(pluginId),
@@ -2269,6 +2269,17 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
 // =============================================================================
 // Scheduler API
 // =============================================================================
+//
+// `ctx.scheduler` owns the tasks a plugin creates for ITSELF: ordinary
+// `type: "plugin"` scheduler rows (ADR-0079) whose payload names a handler the
+// plugin registers with `registerHandler`. Every task-scoped method goes
+// through `loadOwnedTask`, so a plugin can neither read nor touch the user's
+// schedule or another plugin's tasks from here (`ctx.userScheduler` is the
+// policy-gated surface for the user's schedule).
+//
+// It talks to the LOCAL scheduler engine and the local scheduler database on
+// purpose, never to a paired host's: the handlers that run these tasks are
+// functions registered in this process, and a remote host has nothing to call.
 
 import type {
   PluginSchedulerAPI,
@@ -2278,8 +2289,19 @@ import type {
   PluginTaskFilter,
   PluginScheduledTask,
   PluginTaskExecution,
-  PluginTaskTrigger,
+  PluginTaskExecutionEvent,
+  PluginTaskExecutionOptions,
+  PluginTaskExecutionPhase,
   PluginTaskExecutionStatus,
+  PluginTaskResult,
+  PluginTaskRetryConfig,
+  PluginTaskStatistics,
+  PluginTaskStatus,
+  PluginTaskTrigger,
+} from "@/types/plugin/plugin-scheduler"
+import {
+  PLUGIN_TASK_HANDLER_LOG_KIND,
+  PLUGIN_TASK_METRICS_LOG_KIND,
 } from "@/types/plugin/plugin-scheduler"
 import {
   registerPluginTaskHandler,
@@ -2287,18 +2309,506 @@ import {
   getPluginTaskHandler,
 } from "../scheduler/scheduler-plugin-executor"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
-import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
-import { nanoid } from "nanoid"
+import type {
+  ScheduledTask,
+  TaskExecution,
+  TaskExecutionConfig,
+  TaskOverlapPolicy,
+  TaskTrigger,
+  UpdateScheduledTaskInput,
+} from "@/types/scheduler"
 
-function mapPluginTaskTrigger(trigger: PluginTaskTrigger): ScheduledTask["trigger"] {
+/** The payload every plugin task row carries (`lib/scheduler/executors/plugin-executor.ts`). */
+interface PluginTaskRowPayload {
+  pluginId?: unknown
+  handler?: unknown
+  args?: unknown
+  metadata?: unknown
+  /** `IntervalTrigger.startImmediately`, kept so it reads back as it was set. */
+  startImmediately?: unknown
+}
+
+const OVERLAP_POLICIES: ReadonlySet<string> = new Set<TaskOverlapPolicy>([
+  "allow",
+  "skip",
+  "queue-one",
+  "queue-all",
+  "cancel-previous",
+])
+
+/** Upper bound on `previewTrigger`'s `count`, matching the panel's per-task cap. */
+const MAX_TRIGGER_PREVIEW = 100
+
+/** Most recent runs `getStatistics` averages durations over. */
+const STATISTICS_DURATION_WINDOW = 100
+
+/** Recent rows read when looking for a task's last settled result. */
+const LAST_RESULT_LOOKBACK = 20
+
+/**
+ * Whether `task` is one of `pluginId`'s own plugin tasks.
+ *
+ * Three facts, all required: the row is a `plugin` task (a chat task whose
+ * payload happened to carry a `pluginId` key is not one), the payload names
+ * this plugin (that is what the executor dispatches on), and, when the row
+ * records a creator plugin, it is this one. The creator is only checked when
+ * present: rows the manifest bridge wrote before it attributed them carry the
+ * scheduler's default `{ kind: "user" }`, and refusing those would orphan
+ * every existing manifest task.
+ */
+function isPluginTaskOwnedBy(task: ScheduledTask, pluginId: string): boolean {
+  if (task.type !== "plugin") return false
+  const payload = task.payload as PluginTaskRowPayload | undefined
+  if (payload?.pluginId !== pluginId) return false
+  const creatorPluginId = task.createdBy?.pluginId
+  return creatorPluginId === undefined || creatorPluginId === pluginId
+}
+
+function schedulerInputError(message: string): Error {
+  return new Error(`ctx.scheduler: ${message}`)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw schedulerInputError(`${field} must be a non-empty string`)
+  }
+  return value
+}
+
+function requireNumber(
+  value: unknown,
+  field: string,
+  rule: { min: number; integer?: boolean; exclusiveMin?: boolean }
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw schedulerInputError(`${field} must be a finite number`)
+  }
+  if (rule.integer && !Number.isInteger(value)) {
+    throw schedulerInputError(`${field} must be an integer`)
+  }
+  if (rule.exclusiveMin ? value <= rule.min : value < rule.min) {
+    throw schedulerInputError(
+      `${field} must be ${rule.exclusiveMin ? "greater than" : "at least"} ${rule.min}`
+    )
+  }
+  return value
+}
+
+function requireDate(value: unknown, field: string): Date {
+  const date =
+    value instanceof Date ? value : typeof value === "string" ? new Date(value) : undefined
+  if (!date || Number.isNaN(date.getTime())) {
+    throw schedulerInputError(`${field} must be a Date or an ISO date string`)
+  }
+  return date
+}
+
+/**
+ * Project a plugin trigger into the scheduler's vocabulary, rejecting a
+ * malformed one.
+ *
+ * This used to copy whatever fields were present into a trigger object and
+ * let the scheduler cope, so `{ type: "interval" }` with no `seconds` reached
+ * the normalizer as `intervalMs: NaN` and an unknown type became a row the
+ * output mapping then reported as a one-hour interval it never was. Every
+ * shape is checked here, with an error that names the field. Semantic checks
+ * (cron syntax, time zone, a `once` instant in the past) stay with the
+ * scheduler's normalizer, which every write path shares.
+ */
+function mapPluginTaskTrigger(trigger: unknown): TaskTrigger {
+  if (!isPlainRecord(trigger) || typeof trigger.type !== "string") {
+    throw schedulerInputError(
+      "trigger must be an object whose type is cron, interval, once or event"
+    )
+  }
+  switch (trigger.type) {
+    case "cron": {
+      const expression = requireNonEmptyString(trigger.expression, "trigger.expression").trim()
+      if (trigger.timezone !== undefined && typeof trigger.timezone !== "string") {
+        throw schedulerInputError("trigger.timezone must be an IANA time zone name")
+      }
+      return {
+        type: "cron",
+        cronExpression: expression,
+        ...(trigger.timezone ? { timezone: trigger.timezone } : {}),
+      }
+    }
+    case "interval": {
+      const seconds = requireNumber(trigger.seconds, "trigger.seconds", {
+        min: 0,
+        exclusiveMin: true,
+      })
+      const intervalMs = Math.round(seconds * 1000)
+      if (intervalMs < 1) throw schedulerInputError("trigger.seconds must be at least 0.001")
+      if (trigger.startImmediately !== undefined && typeof trigger.startImmediately !== "boolean") {
+        throw schedulerInputError("trigger.startImmediately must be a boolean")
+      }
+      return { type: "interval", intervalMs }
+    }
+    case "once":
+      return { type: "once", runAt: requireDate(trigger.runAt, "trigger.runAt") }
+    case "event": {
+      const eventType = requireNonEmptyString(trigger.eventType, "trigger.eventType").trim()
+      if (trigger.eventSource !== undefined && typeof trigger.eventSource !== "string") {
+        throw schedulerInputError("trigger.eventSource must be a string")
+      }
+      return {
+        type: "event",
+        eventType,
+        ...(trigger.eventSource ? { eventSource: trigger.eventSource } : {}),
+      }
+    }
+    default:
+      throw schedulerInputError(
+        `unknown trigger type "${trigger.type}"; expected cron, interval, once or event`
+      )
+  }
+}
+
+function startsImmediately(trigger: PluginTaskTrigger | undefined): boolean {
+  return trigger?.type === "interval" && trigger.startImmediately === true
+}
+
+/**
+ * The scheduler-config half of a create or update, in the scheduler's units.
+ * Only the fields the input sets: an update must not reset what it omits.
+ */
+function mapExecutionConfig(
+  input: PluginTaskExecutionOptions & { retry?: PluginTaskRetryConfig; timeout?: number }
+): Partial<TaskExecutionConfig> {
+  const config: Partial<TaskExecutionConfig> = {}
+  if (input.timeout !== undefined) {
+    config.timeout = requireNumber(input.timeout, "timeout", { min: 0, exclusiveMin: true }) * 1000
+  }
+  let fixedDelay = false
+  if (input.retry !== undefined) {
+    if (!isPlainRecord(input.retry)) throw schedulerInputError("retry must be an object")
+    const retry = input.retry as unknown as Record<string, unknown>
+    config.maxRetries = requireNumber(retry.maxAttempts, "retry.maxAttempts", {
+      min: 0,
+      integer: true,
+    })
+    config.retryDelay = requireNumber(retry.delaySeconds, "retry.delaySeconds", { min: 0 }) * 1000
+    const multiplier = retry.backoffMultiplier
+    if (multiplier !== undefined && multiplier !== 1 && multiplier !== 2) {
+      throw schedulerInputError(
+        "retry.backoffMultiplier must be 2 (exponential, the default) or 1 (a fixed delay); the scheduler has no other retry curve"
+      )
+    }
+    if (multiplier === 1) {
+      // `delay = min(base * 2^n + jitter, cap)`: with the cap at the base delay
+      // every retry waits exactly `delaySeconds`, which is what a multiplier of
+      // 1 means.
+      fixedDelay = true
+      config.maxRetryDelay = config.retryDelay
+    }
+  }
+  if (input.maxRetryDelaySeconds !== undefined) {
+    if (fixedDelay) {
+      throw schedulerInputError(
+        "maxRetryDelaySeconds cannot be combined with retry.backoffMultiplier 1, which fixes every delay at retry.delaySeconds"
+      )
+    }
+    config.maxRetryDelay =
+      requireNumber(input.maxRetryDelaySeconds, "maxRetryDelaySeconds", {
+        min: 0,
+        exclusiveMin: true,
+      }) * 1000
+  }
+  if (input.overlapPolicy !== undefined) {
+    if (typeof input.overlapPolicy !== "string" || !OVERLAP_POLICIES.has(input.overlapPolicy)) {
+      throw schedulerInputError(
+        "overlapPolicy must be one of allow, skip, queue-one, queue-all, cancel-previous"
+      )
+    }
+    config.overlapPolicy = input.overlapPolicy
+  }
+  if (input.maxQueueSize !== undefined) {
+    config.maxQueueSize = requireNumber(input.maxQueueSize, "maxQueueSize", {
+      min: 1,
+      integer: true,
+    })
+  }
+  if (input.maxRuns !== undefined) {
+    config.maxRuns = requireNumber(input.maxRuns, "maxRuns", { min: 1, integer: true })
+  }
+  if (input.pauseAfterConsecutiveFailures !== undefined) {
+    config.pauseAfterConsecutiveFailures = requireNumber(
+      input.pauseAfterConsecutiveFailures,
+      "pauseAfterConsecutiveFailures",
+      { min: 1, integer: true }
+    )
+  }
+  if (input.catchupWindowSeconds !== undefined) {
+    config.catchupWindowMs =
+      requireNumber(input.catchupWindowSeconds, "catchupWindowSeconds", { min: 0 }) * 1000
+  }
+  if (input.runMissedOnStartup !== undefined) {
+    if (typeof input.runMissedOnStartup !== "boolean") {
+      throw schedulerInputError("runMissedOnStartup must be a boolean")
+    }
+    config.runMissedOnStartup = input.runMissedOnStartup
+  }
+  if (input.maxMissedRuns !== undefined) {
+    config.maxMissedRuns = requireNumber(input.maxMissedRuns, "maxMissedRuns", {
+      min: 0,
+      integer: true,
+    })
+  }
+  return config
+}
+
+/**
+ * `jitterSeconds` as the trigger's `jitterMs`. The scheduler only jitters
+ * cron and interval fires (an event has no armed instant, and a `once` slot is
+ * a promise to the minute), so asking for it on any other trigger is refused
+ * rather than stored and ignored.
+ */
+function mapJitterMs(jitterSeconds: unknown, triggerType: TaskTrigger["type"]): number {
+  const seconds = requireNumber(jitterSeconds, "jitterSeconds", { min: 0 })
+  if (seconds > 0 && triggerType !== "cron" && triggerType !== "interval") {
+    throw schedulerInputError(`jitterSeconds only applies to cron and interval triggers`)
+  }
+  return Math.round(seconds * 1000)
+}
+
+/**
+ * A stored trigger, as the plugin wrote it.
+ *
+ * The scheduler's normalizer guarantees each type's field on every write path,
+ * so a row missing one is corrupt. It is reported with the empty value it
+ * actually holds: this used to fall back to "every hour", a schedule the task
+ * never had and the scheduler never ran.
+ */
+function mapStoredTrigger(task: ScheduledTask): PluginTaskTrigger {
+  const trigger = task.trigger
+  const payload = task.payload as PluginTaskRowPayload | undefined
+  switch (trigger.type) {
+    case "cron":
+      return {
+        type: "cron",
+        expression: trigger.cronExpression ?? "",
+        ...(trigger.timezone ? { timezone: trigger.timezone } : {}),
+      }
+    case "interval":
+      return {
+        type: "interval",
+        seconds: (trigger.intervalMs ?? 0) / 1000,
+        ...(payload?.startImmediately === true ? { startImmediately: true } : {}),
+      }
+    case "once":
+      return { type: "once", runAt: trigger.runAt ?? "" }
+    case "event":
+      return {
+        type: "event",
+        eventType: trigger.eventType ?? "",
+        ...(trigger.eventSource ? { eventSource: trigger.eventSource } : {}),
+      }
+    default:
+      throw new Error(
+        `Scheduled task ${task.id} has an unknown trigger type "${String((trigger as TaskTrigger).type)}"`
+      )
+  }
+}
+
+/** Whether the task's last terminal run failed and nothing has succeeded since. */
+function taskHasErrors(task: ScheduledTask): boolean {
+  return (task.consecutiveFailures ?? 0) > 0 || Boolean(task.lastError)
+}
+
+/**
+ * The plugin-facing status of a row. See `PluginTaskStatus` for the meaning
+ * of each member; this is the one place they are decided.
+ */
+function derivePluginTaskStatus(task: ScheduledTask): PluginTaskStatus {
+  switch (task.status) {
+    case "paused":
+      return "paused"
+    case "disabled":
+      return "disabled"
+    case "expired": {
+      const finished =
+        task.lastTerminalReason === "max-runs-reached" ||
+        (task.trigger.type === "once" && task.runCount > 0)
+      return finished ? "completed" : "expired"
+    }
+    case "active":
+    default:
+      // `consecutiveFailures` is the scheduler's own "this is failing" signal:
+      // only a terminal failure raises it, so a run still being retried is not
+      // an error yet. A legacy row without the counter falls back to
+      // `lastError`, which the scheduler clears on success.
+      return (task.consecutiveFailures ?? (task.lastError ? 1 : 0)) > 0 ? "error" : "active"
+  }
+}
+
+function mapExecutionStatus(execution: TaskExecution): PluginTaskExecutionStatus {
+  if (execution.status === "failed" && execution.terminalReason === "execution-timeout") {
+    return "timeout"
+  }
+  return execution.status
+}
+
+/** The handler's metrics, read back from the executor's tagged log entry. */
+function readExecutionMetrics(execution: TaskExecution): Record<string, unknown> | undefined {
+  for (let index = execution.logs.length - 1; index >= 0; index -= 1) {
+    const data = execution.logs[index].data
+    if (isPlainRecord(data) && data.kind === PLUGIN_TASK_METRICS_LOG_KIND) {
+      return isPlainRecord(data.metrics) ? data.metrics : undefined
+    }
+  }
+  return undefined
+}
+
+/** The result of a settled run; undefined for one that has not run to an outcome. */
+function mapExecutionResult(execution: TaskExecution): PluginTaskResult | undefined {
+  if (
+    execution.status !== "completed" &&
+    execution.status !== "failed" &&
+    execution.status !== "cancelled"
+  ) {
+    return undefined
+  }
+  const metrics = readExecutionMetrics(execution)
+  const hasMetrics = metrics !== undefined || execution.duration !== undefined
   return {
-    type: trigger.type,
-    cronExpression: trigger.type === "cron" ? trigger.expression : undefined,
-    intervalMs: trigger.type === "interval" ? trigger.seconds * 1000 : undefined,
-    runAt: trigger.type === "once" ? new Date(trigger.runAt) : undefined,
-    eventType: trigger.type === "event" ? trigger.eventType : undefined,
-    eventSource: trigger.type === "event" ? trigger.eventSource : undefined,
-    timezone: trigger.type === "cron" ? trigger.timezone : undefined,
+    success: execution.status === "completed",
+    ...(execution.output !== undefined ? { output: execution.output } : {}),
+    ...(execution.error !== undefined ? { error: execution.error } : {}),
+    ...(hasMetrics
+      ? {
+          metrics: {
+            ...(metrics ?? {}),
+            ...(execution.duration !== undefined ? { duration: execution.duration } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+function mapToPluginExecution(execution: TaskExecution, pluginId: string): PluginTaskExecution {
+  const result = mapExecutionResult(execution)
+  return {
+    id: execution.id,
+    taskId: execution.taskId,
+    pluginId,
+    status: mapExecutionStatus(execution),
+    // The slot the run was due at. A run that was not slot-bound (run-now, an
+    // event, a retry) has no slot, and its start is the honest answer.
+    scheduledAt: execution.scheduledFor ?? execution.startedAt,
+    ...(execution.triggerSource ? { triggerSource: execution.triggerSource } : {}),
+    ...(execution.terminalReason ? { terminalReason: execution.terminalReason } : {}),
+    startedAt: execution.startedAt,
+    completedAt: execution.completedAt,
+    duration: execution.duration,
+    ...(result ? { result } : {}),
+    attemptNumber: execution.retryAttempt + 1,
+    error: execution.error ? { message: execution.error } : undefined,
+    logs: execution.logs.map((entry) => {
+      // A handler's own line carries its `data` inside the executor's tag,
+      // and is handed back as the handler wrote it.
+      const raw = entry.data
+      const data =
+        isPlainRecord(raw) && raw.kind === PLUGIN_TASK_HANDLER_LOG_KIND
+          ? isPlainRecord(raw.data)
+            ? raw.data
+            : undefined
+          : isPlainRecord(raw)
+            ? raw
+            : undefined
+      return {
+        timestamp: entry.timestamp,
+        level: entry.level,
+        message: entry.message,
+        ...(data ? { data } : {}),
+      }
+    }),
+  }
+}
+
+function mapToPluginTask(
+  task: ScheduledTask,
+  pluginId: string,
+  lastResult?: PluginTaskResult
+): PluginScheduledTask {
+  const payload = task.payload as PluginTaskRowPayload | undefined
+  const config = task.config
+  const overlapPolicy: PluginTaskExecutionOptions["overlapPolicy"] = config?.overlapPolicy
+    ? config.overlapPolicy
+    : config?.allowConcurrent === true
+      ? "allow"
+      : "skip"
+  return {
+    id: task.id,
+    pluginId,
+    name: task.name,
+    description: task.description,
+    trigger: mapStoredTrigger(task),
+    handler: typeof payload?.handler === "string" ? payload.handler : "",
+    handlerArgs: isPlainRecord(payload?.args) ? payload.args : undefined,
+    metadata: isPlainRecord(payload?.metadata) ? payload.metadata : undefined,
+    status: derivePluginTaskStatus(task),
+    lastRunAt: task.lastRunAt,
+    nextRunAt: task.nextRunAt,
+    runCount: task.runCount,
+    ...(lastResult ? { lastResult } : {}),
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    retry: config
+      ? {
+          maxAttempts: config.maxRetries,
+          delaySeconds: config.retryDelay / 1000,
+          backoffMultiplier:
+            config.maxRetryDelay !== undefined && config.maxRetryDelay === config.retryDelay
+              ? 1
+              : 2,
+        }
+      : undefined,
+    timeout: config?.timeout ? config.timeout / 1000 : undefined,
+    tags: task.tags,
+    endAt: task.endAt,
+    consecutiveFailures: task.consecutiveFailures ?? 0,
+    ...(task.lastError ? { lastError: task.lastError } : {}),
+    ...(task.lastTerminalReason ? { lastTerminalReason: task.lastTerminalReason } : {}),
+    overlapPolicy,
+    ...(config?.maxQueueSize !== undefined ? { maxQueueSize: config.maxQueueSize } : {}),
+    ...(config?.maxRuns !== undefined ? { maxRuns: config.maxRuns } : {}),
+    ...(config?.pauseAfterConsecutiveFailures !== undefined
+      ? { pauseAfterConsecutiveFailures: config.pauseAfterConsecutiveFailures }
+      : {}),
+    ...(task.trigger.jitterMs !== undefined ? { jitterSeconds: task.trigger.jitterMs / 1000 } : {}),
+    ...(config?.catchupWindowMs !== undefined
+      ? { catchupWindowSeconds: config.catchupWindowMs / 1000 }
+      : {}),
+    ...(config?.runMissedOnStartup !== undefined
+      ? { runMissedOnStartup: config.runMissedOnStartup }
+      : {}),
+    ...(config?.maxMissedRuns !== undefined ? { maxMissedRuns: config.maxMissedRuns } : {}),
+    ...(config?.maxRetryDelay !== undefined
+      ? { maxRetryDelaySeconds: config.maxRetryDelay / 1000 }
+      : {}),
+  }
+}
+
+/** The lifecycle phase an execution event announces, or null for one that is not announced. */
+function executionPhase(execution: TaskExecution): PluginTaskExecutionPhase | null {
+  switch (execution.status) {
+    case "running":
+      return "started"
+    case "completed":
+      return "completed"
+    case "failed":
+      return "failed"
+    case "cancelled":
+      return "cancelled"
+    case "skipped":
+      return "skipped"
+    default:
+      return null
   }
 }
 
@@ -2312,6 +2822,7 @@ const SCHEDULER_SYNC_METHODS = new Set([
   "unregisterHandler",
   "hasHandler",
   "getHandlers",
+  "onExecution",
 ])
 
 function deniedSchedulerAPI(pluginId: string): PluginSchedulerAPI {
@@ -2342,28 +2853,96 @@ function createSchedulerAPI(
   // Local handler registry for this plugin
   const handlers = new Map<string, PluginTaskHandler>()
 
+  /** The task, when it exists and is this plugin's own; null otherwise. */
+  const loadOwnedTask = async (taskId: string): Promise<ScheduledTask | null> => {
+    if (typeof taskId !== "string" || taskId.length === 0) return null
+    const task = await schedulerDb.getTask(taskId)
+    return task && isPluginTaskOwnedBy(task, pluginId) ? task : null
+  }
+
+  /** The most recent settled run's result, for `lastResult`. */
+  const loadLastResult = async (task: ScheduledTask): Promise<PluginTaskResult | undefined> => {
+    if (!task.lastRunAt) return undefined
+    const recent = await schedulerDb.getTaskExecutions(task.id, LAST_RESULT_LOOKBACK)
+    for (const execution of recent) {
+      const result = mapExecutionResult(execution)
+      if (result) return result
+    }
+    return undefined
+  }
+
+  const describeTask = async (task: ScheduledTask): Promise<PluginScheduledTask> =>
+    mapToPluginTask(task, pluginId, await loadLastResult(task))
+
+  /**
+   * Fire the first run of a `startImmediately` interval task. It is the
+   * schedule's own first slot, so it is recorded as `schedule`, and its
+   * completion re-measures the next slot from this run like any interval run.
+   */
+  const startFirstRun = (taskId: string): void => {
+    void loadTaskScheduler()
+      .then((scheduler) => scheduler.runTaskNow(taskId, { triggerSource: "schedule" }))
+      .catch((error: unknown) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "scheduler.createTask.startImmediately",
+            message: `Failed to start the first run of task ${taskId}`,
+            expected: false,
+          },
+          error
+        )
+      )
+  }
+
   return {
     // Task Management
     createTask: async (input: CreatePluginTaskInput): Promise<PluginScheduledTask> => {
+      if (!isPlainRecord(input as unknown))
+        throw schedulerInputError("createTask needs an input object")
+      const name = requireNonEmptyString(input.name, "name")
+      const handler = requireNonEmptyString(input.handler, "handler")
+      if (input.handlerArgs !== undefined && !isPlainRecord(input.handlerArgs)) {
+        throw schedulerInputError("handlerArgs must be an object")
+      }
+      if (input.metadata !== undefined && !isPlainRecord(input.metadata)) {
+        throw schedulerInputError("metadata must be an object")
+      }
+      const trigger = mapPluginTaskTrigger(input.trigger)
+      if (input.jitterSeconds !== undefined) {
+        trigger.jitterMs = mapJitterMs(input.jitterSeconds, trigger.type)
+      }
+      const config = mapExecutionConfig(input)
+      const endAt = input.endAt !== undefined ? requireDate(input.endAt, "endAt") : undefined
+
+      // The same gate every non-user write passes. For a plugin source it
+      // applies the host check and the per-source quota, and it refuses when
+      // the user put `plugin` on the confirmation list, because this API has
+      // no way to ask them.
+      const { assertTaskWriteAllowed } = await import("@/lib/scheduler/write-authority")
+      await assertTaskWriteAllowed({ taskType: "plugin", source: "plugin", pluginId })
+
       const scheduler = await loadTaskScheduler()
       const task = await scheduler.createTask({
-        name: input.name,
+        name,
         description: input.description,
         type: "plugin",
-        trigger: mapPluginTaskTrigger(input.trigger),
+        trigger,
         payload: {
           pluginId,
-          handler: input.handler,
-          args: input.handlerArgs || {},
-          ...(input.metadata && { metadata: input.metadata }),
+          handler,
+          args: input.handlerArgs ?? {},
+          ...(input.metadata ? { metadata: input.metadata } : {}),
+          ...(startsImmediately(input.trigger) ? { startImmediately: true } : {}),
         },
         config: {
-          timeout: (input.timeout || 300) * 1000,
-          maxRetries: input.retry?.maxAttempts || 0,
-          retryDelay: (input.retry?.delaySeconds || 60) * 1000,
+          timeout: 300_000,
+          maxRetries: 0,
+          retryDelay: 60_000,
           runMissedOnStartup: false,
           maxMissedRuns: 0,
           allowConcurrent: false,
+          ...config,
         },
         notification: {
           onStart: false,
@@ -2372,13 +2951,18 @@ function createSchedulerAPI(
           onProgress: false,
           channels: ["toast"],
         },
+        // Recorded so the per-source quota counts this row and the ownership
+        // check can read the owner off it, not only off the payload.
+        createdBy: { kind: "plugin", pluginId },
         tags: input.tags,
+        ...(endAt ? { endAt } : {}),
       })
 
       if (input.enabled === false) {
         await scheduler.pauseTask(task.id)
         return mapToPluginTask({ ...task, status: "paused" }, pluginId)
       }
+      if (startsImmediately(input.trigger)) startFirstRun(task.id)
       return mapToPluginTask(task, pluginId)
     },
 
@@ -2386,242 +2970,353 @@ function createSchedulerAPI(
       taskId: string,
       input: UpdatePluginTaskInput
     ): Promise<PluginScheduledTask | null> => {
-      const existingTask = await schedulerDb.getTask(taskId)
+      const existingTask = await loadOwnedTask(taskId)
+      if (!existingTask) return null
+      if (!isPlainRecord(input as unknown))
+        throw schedulerInputError("updateTask needs an input object")
+
+      const update: UpdateScheduledTaskInput = {}
+      if (input.name !== undefined) update.name = requireNonEmptyString(input.name, "name")
+      if (input.description !== undefined) update.description = input.description
+
+      let trigger: Partial<TaskTrigger> | undefined
+      if (input.trigger !== undefined) trigger = mapPluginTaskTrigger(input.trigger)
+      if (input.jitterSeconds !== undefined) {
+        const triggerType = trigger?.type ?? existingTask.trigger.type
+        trigger = { ...(trigger ?? {}), jitterMs: mapJitterMs(input.jitterSeconds, triggerType) }
+      }
+      if (trigger) update.trigger = trigger
+
+      if (input.handler !== undefined) requireNonEmptyString(input.handler, "handler")
+      if (input.handlerArgs !== undefined && !isPlainRecord(input.handlerArgs)) {
+        throw schedulerInputError("handlerArgs must be an object")
+      }
+      if (input.metadata !== undefined && !isPlainRecord(input.metadata)) {
+        throw schedulerInputError("metadata must be an object")
+      }
       if (
-        !existingTask ||
-        (existingTask.payload as Record<string, unknown>)?.pluginId !== pluginId
+        input.handler !== undefined ||
+        input.handlerArgs !== undefined ||
+        input.metadata !== undefined ||
+        input.trigger !== undefined
       ) {
-        return null
+        update.payload = {
+          ...(existingTask.payload as Record<string, unknown>),
+          ...(input.handler !== undefined && { handler: input.handler }),
+          ...(input.handlerArgs !== undefined && { args: input.handlerArgs }),
+          ...(input.metadata !== undefined && { metadata: input.metadata }),
+          // A replaced trigger replaces the flag too. It fires nothing here:
+          // `startImmediately` is a creation-time instruction (see the type).
+          ...(input.trigger !== undefined && {
+            startImmediately: startsImmediately(input.trigger),
+          }),
+        }
+      }
+
+      const config = mapExecutionConfig(input)
+      if (Object.keys(config).length > 0) update.config = config
+      if (input.tags !== undefined) update.tags = input.tags
+      if (input.endAt !== undefined) {
+        update.endAt = input.endAt === null ? null : requireDate(input.endAt, "endAt")
       }
 
       const scheduler = await loadTaskScheduler()
-      const updatedTask = await scheduler.updateTask(taskId, {
-        name: input.name,
-        description: input.description,
-        trigger: input.trigger ? mapPluginTaskTrigger(input.trigger) : undefined,
-        payload:
-          input.handler !== undefined ||
-          input.handlerArgs !== undefined ||
-          input.metadata !== undefined
-            ? {
-                ...(existingTask.payload as Record<string, unknown>),
-                ...(input.handler !== undefined && { handler: input.handler }),
-                ...(input.handlerArgs !== undefined && { args: input.handlerArgs }),
-                ...(input.metadata !== undefined && { metadata: input.metadata }),
-              }
-            : undefined,
-        config:
-          input.timeout !== undefined || input.retry !== undefined
-            ? {
-                ...(input.timeout !== undefined && { timeout: input.timeout * 1000 }),
-                ...(input.retry !== undefined && {
-                  maxRetries: input.retry.maxAttempts,
-                  retryDelay: input.retry.delaySeconds * 1000,
-                }),
-              }
-            : undefined,
-        tags: input.tags,
-      })
+      const updatedTask = await scheduler.updateTask(taskId, update)
       if (!updatedTask) return null
-      return mapToPluginTask(updatedTask, pluginId)
+      return describeTask(updatedTask)
     },
 
     deleteTask: async (taskId: string): Promise<boolean> => {
-      const existingTask = await schedulerDb.getTask(taskId)
-      if (
-        !existingTask ||
-        (existingTask.payload as Record<string, unknown>)?.pluginId !== pluginId
-      ) {
-        return false
-      }
+      if (!(await loadOwnedTask(taskId))) return false
       const scheduler = await loadTaskScheduler()
       return scheduler.deleteTask(taskId)
     },
 
     getTask: async (taskId: string): Promise<PluginScheduledTask | null> => {
-      const task = await schedulerDb.getTask(taskId)
-      if (!task || (task.payload as Record<string, unknown>)?.pluginId !== pluginId) {
-        return null
-      }
-      return mapToPluginTask(task, pluginId)
+      const task = await loadOwnedTask(taskId)
+      return task ? describeTask(task) : null
     },
 
     listTasks: async (filter?: PluginTaskFilter): Promise<PluginScheduledTask[]> => {
-      const rawStatuses = filter?.status
-        ? Array.isArray(filter.status)
-          ? filter.status
-          : [filter.status]
+      const statuses = filter?.status
+        ? new Set(Array.isArray(filter.status) ? filter.status : [filter.status])
         : undefined
-      // Filter to only valid ScheduledTaskStatus values (exclude 'error'/'completed' which are PluginTaskStatus-only)
-      const schedulerCompatible = rawStatuses?.filter((s) =>
-        ["active", "paused", "disabled", "expired"].includes(s)
-      ) as import("@/types/scheduler").ScheduledTaskStatus[] | undefined
-      const allTasks = await schedulerDb.getFilteredTasks({
+      const offset =
+        filter?.offset !== undefined
+          ? requireNumber(filter.offset, "filter.offset", { min: 0, integer: true })
+          : 0
+      const limit =
+        filter?.limit !== undefined
+          ? requireNumber(filter.limit, "filter.limit", { min: 0, integer: true })
+          : undefined
+
+      // No status pre-filter at the database: the plugin statuses are DERIVED
+      // (`error`, `completed` and `expired` are not stored values), so the
+      // filter runs on the mapped status below. Filtering the stored column
+      // instead is how a request for `error` tasks used to return every task.
+      const rows = await schedulerDb.getFilteredTasks({
         types: ["plugin"],
-        statuses:
-          schedulerCompatible && schedulerCompatible.length > 0 ? schedulerCompatible : undefined,
         tags: filter?.tags,
         search: filter?.name,
       })
 
-      // Filter to only this plugin's tasks
-      const pluginTasks = allTasks.filter(
-        (t) => (t.payload as Record<string, unknown>)?.pluginId === pluginId
-      )
+      const matching = rows.filter((task) => {
+        if (!isPluginTaskOwnedBy(task, pluginId)) return false
+        if (statuses && !statuses.has(derivePluginTaskStatus(task))) return false
+        if (
+          filter?.handler !== undefined &&
+          (task.payload as PluginTaskRowPayload | undefined)?.handler !== filter.handler
+        ) {
+          return false
+        }
+        if (filter?.hasErrors !== undefined && taskHasErrors(task) !== filter.hasErrors) {
+          return false
+        }
+        return true
+      })
 
-      // Apply additional filters
-      let filtered = pluginTasks
-      if (filter?.handler) {
-        filtered = filtered.filter(
-          (t) => (t.payload as Record<string, unknown>)?.handler === filter.handler
-        )
-      }
-
-      // Apply limit and offset
-      if (filter?.offset) {
-        filtered = filtered.slice(filter.offset)
-      }
-      if (filter?.limit) {
-        filtered = filtered.slice(0, filter.limit)
-      }
-
-      return filtered.map((t) => mapToPluginTask(t, pluginId))
+      const page = matching.slice(offset, limit !== undefined ? offset + limit : undefined)
+      return Promise.all(page.map(describeTask))
     },
 
     // Task Control
     pauseTask: async (taskId: string): Promise<boolean> => {
-      const existingTask = await schedulerDb.getTask(taskId)
-      if (
-        !existingTask ||
-        (existingTask.payload as Record<string, unknown>)?.pluginId !== pluginId
-      ) {
-        return false
-      }
+      if (!(await loadOwnedTask(taskId))) return false
       const scheduler = await loadTaskScheduler()
       return scheduler.pauseTask(taskId)
     },
 
     resumeTask: async (taskId: string): Promise<boolean> => {
-      const existingTask = await schedulerDb.getTask(taskId)
-      if (
-        !existingTask ||
-        (existingTask.payload as Record<string, unknown>)?.pluginId !== pluginId
-      ) {
-        return false
-      }
+      if (!(await loadOwnedTask(taskId))) return false
       const scheduler = await loadTaskScheduler()
       return scheduler.resumeTask(taskId)
     },
 
-    runTaskNow: async (taskId: string, _args?: Record<string, unknown>): Promise<string> => {
-      const existingTask = await schedulerDb.getTask(taskId)
-      if (
-        !existingTask ||
-        (existingTask.payload as Record<string, unknown>)?.pluginId !== pluginId
-      ) {
-        throw new Error(`Task not found: ${taskId}`)
+    runTaskNow: async (taskId: string, args?: Record<string, unknown>): Promise<string> => {
+      const task = await loadOwnedTask(taskId)
+      if (!task) throw new Error(`Task not found: ${taskId}`)
+      if (args !== undefined && !isPlainRecord(args)) {
+        throw schedulerInputError("runTaskNow args must be an object")
       }
 
-      // Create a manual execution record
-      const executionId = nanoid()
-      const execution: TaskExecution = {
-        id: executionId,
-        taskId,
-        taskName: existingTask.name,
-        taskType: "plugin",
-        status: "pending",
-        retryAttempt: 0,
-        startedAt: new Date(),
-        logs: [],
+      // This used to write a `pending` row of its own, fire the engine
+      // separately, and return the hand-made row's id: an id no run ever
+      // updated, for a run that had ignored `args`. The engine now makes the
+      // only row, and the id returned is that row's.
+      const existingArgs = isPlainRecord((task.payload as PluginTaskRowPayload)?.args)
+        ? ((task.payload as PluginTaskRowPayload).args as Record<string, unknown>)
+        : {}
+      const scheduler = await loadTaskScheduler()
+      const execution = await new Promise<TaskExecution | null>((resolve, reject) => {
+        let answered = false
+        const answer = (row: TaskExecution | null) => {
+          if (answered) return
+          answered = true
+          resolve(row)
+        }
+        scheduler
+          .runTaskNow(taskId, {
+            triggerSource: "run-now",
+            ...(args ? { payload: { args: { ...existingArgs, ...args } } } : {}),
+            // A running start answers here, long before the handler is done.
+            // A skipped or buffered start answers when the call returns, which
+            // for those is immediately.
+            onAccepted: answer,
+          })
+          .then(answer, (error: unknown) => {
+            if (!answered) {
+              answered = true
+              reject(error)
+              return
+            }
+            recordSilentFailure(
+              pluginId,
+              {
+                site: "scheduler.runTaskNow",
+                message: `Run of task ${taskId} failed after it started`,
+                expected: false,
+              },
+              error
+            )
+          })
+      })
+      if (!execution) {
+        throw new Error(`Task ${taskId} could not be started: the scheduler no longer has it`)
+      }
+      return execution.id
+    },
+
+    cancelExecution: async (executionId: string): Promise<boolean> => {
+      if (typeof executionId !== "string" || executionId.length === 0) return false
+      const scheduler = await loadTaskScheduler()
+      // A start the overlap policy buffered has no row yet, only a queue entry
+      // in the engine; its owner is read from there.
+      const execution = await schedulerDb.getExecution(executionId)
+      const taskId = execution?.taskId ?? scheduler.getQueuedStartTaskId(executionId)
+      if (!taskId || !(await loadOwnedTask(taskId))) return false
+      if (execution && execution.status !== "running" && execution.status !== "pending") {
+        return false
       }
 
-      await schedulerDb.createExecution(execution)
+      // The engine's cancel is the real one: it aborts the run's controller, so
+      // the run settles `cancelled` through its own `finally`, frees its slot
+      // and drains the queue. This used to write "cancelled" over the row and
+      // return true while the handler ran on to completion.
+      const outcome = await scheduler.cancelExecution(executionId)
+      if (outcome.cancelled || outcome.reason === "requested") return true
 
-      // Execute the task asynchronously
-      import("@/lib/scheduler/task-scheduler")
-        .then(({ getTaskScheduler }) => {
-          getTaskScheduler()
-            .runTaskNow(taskId)
-            .catch((error: Error) =>
+      // A run the engine has no controller for but the plugin executor still
+      // holds (a run started by a scheduler instance that has since been
+      // replaced) can still be stopped at the handler.
+      const { isPluginTaskExecutionActive, cancelPluginTaskExecution } =
+        await import("@/lib/scheduler/executors/plugin-executor")
+      if (isPluginTaskExecutionActive(executionId)) return cancelPluginTaskExecution(executionId)
+      return false
+    },
+
+    emitEvent: async (eventType: string, payload?: Record<string, unknown>): Promise<number> => {
+      const type = requireNonEmptyString(eventType, "eventType").trim()
+      if (payload !== undefined && !isPlainRecord(payload)) {
+        throw schedulerInputError("emitEvent payload must be an object")
+      }
+      const scheduler = await loadTaskScheduler()
+      return scheduler.fireEventTasks(type, `plugin:${pluginId}`, payload, {
+        filter: (task) => isPluginTaskOwnedBy(task, pluginId),
+      })
+    },
+
+    // Execution History
+    getExecutions: async (taskId: string, limit: number = 50): Promise<PluginTaskExecution[]> => {
+      if (!(await loadOwnedTask(taskId))) return []
+      const pageSize = requireNumber(limit, "limit", { min: 1, integer: true })
+      const executions = await schedulerDb.getTaskExecutions(taskId, pageSize)
+      return executions.map((e) => mapToPluginExecution(e, pluginId))
+    },
+
+    getExecution: async (executionId: string): Promise<PluginTaskExecution | null> => {
+      if (typeof executionId !== "string" || executionId.length === 0) return null
+      const execution = await schedulerDb.getExecution(executionId)
+      if (!execution) return null
+      if (!(await loadOwnedTask(execution.taskId))) return null
+      return mapToPluginExecution(execution, pluginId)
+    },
+
+    getLatestExecution: async (taskId: string): Promise<PluginTaskExecution | null> => {
+      if (!(await loadOwnedTask(taskId))) return null
+      const executions = await schedulerDb.getTaskExecutions(taskId, 1)
+      return executions.length > 0 ? mapToPluginExecution(executions[0], pluginId) : null
+    },
+
+    getStatistics: async (taskId: string): Promise<PluginTaskStatistics | null> => {
+      const task = await loadOwnedTask(taskId)
+      if (!task) return null
+      const settled = task.successCount + task.failureCount
+      // Duration is not kept on the task row, so it is averaged over recent
+      // runs. Rows that never ran (skipped, buffered) have no meaningful
+      // duration and are left out.
+      const recent = await schedulerDb.getTaskExecutions(taskId, STATISTICS_DURATION_WINDOW)
+      const durations = recent
+        .filter(
+          (execution) =>
+            (execution.status === "completed" || execution.status === "failed") &&
+            typeof execution.duration === "number"
+        )
+        .map((execution) => execution.duration as number)
+      return {
+        runCount: task.runCount,
+        successCount: task.successCount,
+        failureCount: task.failureCount,
+        successRate: settled > 0 ? task.successCount / settled : null,
+        averageDurationMs:
+          durations.length > 0
+            ? durations.reduce((sum, value) => sum + value, 0) / durations.length
+            : null,
+        consecutiveFailures: task.consecutiveFailures ?? 0,
+        lastRunAt: task.lastRunAt ?? null,
+        nextRunAt: task.nextRunAt ?? null,
+        lastError: task.lastError ?? null,
+      }
+    },
+
+    onExecution: (listener: (event: PluginTaskExecutionEvent) => void): (() => void) => {
+      if (typeof listener !== "function") {
+        throw schedulerInputError("onExecution needs a listener function")
+      }
+      let disposed = false
+      let unsubscribe: (() => void) | undefined
+      // The engine is loaded lazily, like every other scheduler call here, so
+      // a plugin that only observes does not pull it into the boot graph. A
+      // disposer called before the import settles still wins.
+      void import("@/lib/scheduler/task-scheduler")
+        .then(({ subscribeToTaskExecutions }) => {
+          if (disposed) return
+          unsubscribe = subscribeToTaskExecutions(({ task, execution }) => {
+            if (!isPluginTaskOwnedBy(task, pluginId)) return
+            const phase = executionPhase(execution)
+            if (!phase) return
+            const payload = task.payload as PluginTaskRowPayload | undefined
+            try {
+              listener({
+                phase,
+                taskId: task.id,
+                taskName: task.name,
+                handler: typeof payload?.handler === "string" ? payload.handler : "",
+                execution: mapToPluginExecution(execution, pluginId),
+              })
+            } catch (error) {
               recordSilentFailure(
                 pluginId,
                 {
-                  site: "scheduler.runTaskNow",
-                  message: `Failed to execute task ${taskId}`,
+                  site: "scheduler.onExecution",
+                  message: "An execution listener threw",
                   expected: false,
                 },
                 error
               )
-            )
+            }
+          })
         })
-        .catch((error: Error) =>
+        .catch((error: unknown) =>
           recordSilentFailure(
             pluginId,
             {
-              site: "scheduler.loadTaskScheduler",
+              site: "scheduler.onExecution",
               message: "Failed to load task-scheduler module",
               expected: false,
             },
             error
           )
         )
-
-      return executionId
+      return () => {
+        disposed = true
+        unsubscribe?.()
+        unsubscribe = undefined
+      }
     },
 
-    cancelExecution: async (executionId: string): Promise<boolean> => {
-      const execution = await schedulerDb.getExecution(executionId)
-      if (!execution) return false
-
-      const task = await schedulerDb.getTask(execution.taskId)
-      if (!task || (task.payload as Record<string, unknown>)?.pluginId !== pluginId) {
-        return false
+    previewTrigger: async (trigger: PluginTaskTrigger, count: number = 5): Promise<Date[]> => {
+      const mapped = mapPluginTaskTrigger(trigger)
+      const wanted = requireNumber(count, "count", { min: 1, integer: true })
+      if (wanted > MAX_TRIGGER_PREVIEW) {
+        throw schedulerInputError(`count must be at most ${MAX_TRIGGER_PREVIEW}`)
       }
-
-      if (execution.status !== "running" && execution.status !== "pending") {
-        return false
+      // The scheduler's own normalizer, so a preview fails exactly where
+      // `createTask` would: invalid cron syntax, an unknown time zone, a past
+      // `once` instant.
+      const { normalizeTaskTrigger } = await import("@/lib/scheduler/trigger-normalizer")
+      const { projectTriggerFireTimes } = await import("@/lib/scheduler/upcoming-occurrences")
+      const now = new Date()
+      const normalized = normalizeTaskTrigger(mapped, { now })
+      if (startsImmediately(trigger) && normalized.intervalMs) {
+        return [
+          now,
+          ...projectTriggerFireTimes(normalized, wanted - 1, {
+            from: now,
+            nextRunAt: new Date(now.getTime() + normalized.intervalMs),
+          }),
+        ]
       }
-
-      const updatedExecution = {
-        ...execution,
-        status: "cancelled" as const,
-        completedAt: new Date(),
-      }
-      await schedulerDb.updateExecution(updatedExecution)
-      return true
-    },
-
-    // Execution History
-    getExecutions: async (taskId: string, limit: number = 50): Promise<PluginTaskExecution[]> => {
-      const task = await schedulerDb.getTask(taskId)
-      if (!task || (task.payload as Record<string, unknown>)?.pluginId !== pluginId) {
-        return []
-      }
-
-      const executions = await schedulerDb.getTaskExecutions(taskId, limit)
-      return executions.map((e) => mapToPluginExecution(e, pluginId))
-    },
-
-    getExecution: async (executionId: string): Promise<PluginTaskExecution | null> => {
-      const execution = await schedulerDb.getExecution(executionId)
-      if (!execution) return null
-
-      const task = await schedulerDb.getTask(execution.taskId)
-      if (!task || (task.payload as Record<string, unknown>)?.pluginId !== pluginId) {
-        return null
-      }
-
-      return mapToPluginExecution(execution, pluginId)
-    },
-
-    getLatestExecution: async (taskId: string): Promise<PluginTaskExecution | null> => {
-      const task = await schedulerDb.getTask(taskId)
-      if (!task || (task.payload as Record<string, unknown>)?.pluginId !== pluginId) {
-        return null
-      }
-
-      const executions = await schedulerDb.getTaskExecutions(taskId, 1)
-      return executions.length > 0 ? mapToPluginExecution(executions[0], pluginId) : null
+      return projectTriggerFireTimes(normalized, wanted, { from: now })
     },
 
     // Handler Registration
@@ -2648,82 +3343,6 @@ function createSchedulerAPI(
     },
 
     getHandlers: (): string[] => Array.from(handlers.keys()),
-  }
-}
-
-// Helper functions for mapping scheduler types to plugin types
-function mapToPluginTask(task: ScheduledTask, pluginId: string): PluginScheduledTask {
-  const trigger = task.trigger
-  let pluginTrigger: PluginTaskTrigger
-
-  if (trigger.type === "cron" && trigger.cronExpression) {
-    pluginTrigger = { type: "cron", expression: trigger.cronExpression, timezone: trigger.timezone }
-  } else if (trigger.type === "interval" && trigger.intervalMs) {
-    pluginTrigger = { type: "interval", seconds: trigger.intervalMs / 1000 }
-  } else if (trigger.type === "once" && trigger.runAt) {
-    pluginTrigger = { type: "once", runAt: trigger.runAt }
-  } else if (trigger.type === "event" && trigger.eventType) {
-    pluginTrigger = {
-      type: "event",
-      eventType: trigger.eventType,
-      eventSource: trigger.eventSource,
-    }
-  } else {
-    pluginTrigger = { type: "interval", seconds: 3600 } // Default fallback
-  }
-
-  const payload = task.payload as Record<string, unknown> | undefined
-
-  return {
-    id: task.id,
-    pluginId,
-    name: task.name,
-    description: task.description,
-    trigger: pluginTrigger,
-    handler: (payload?.handler as string) || "",
-    handlerArgs: payload?.args as Record<string, unknown> | undefined,
-    metadata: payload?.metadata as Record<string, unknown> | undefined,
-    status: task.status as "active" | "paused" | "disabled" | "completed" | "error",
-    lastRunAt: task.lastRunAt,
-    nextRunAt: task.nextRunAt,
-    runCount: task.runCount,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    retry: task.config
-      ? {
-          maxAttempts: task.config.maxRetries,
-          delaySeconds: task.config.retryDelay / 1000,
-        }
-      : undefined,
-    timeout: task.config?.timeout ? task.config.timeout / 1000 : undefined,
-    tags: task.tags,
-  }
-}
-
-function mapToPluginExecution(
-  execution: TaskExecution,
-  pluginId: string = ""
-): PluginTaskExecution {
-  return {
-    id: execution.id,
-    taskId: execution.taskId,
-    pluginId,
-    status: execution.status as PluginTaskExecutionStatus,
-    scheduledAt: execution.startedAt,
-    startedAt: execution.startedAt,
-    completedAt: execution.completedAt,
-    duration: execution.duration,
-    attemptNumber: execution.retryAttempt + 1,
-    error: execution.error ? { message: execution.error } : undefined,
-    logs: execution.logs.map((log) => ({
-      timestamp: log.timestamp,
-      level: log.level,
-      message: log.message,
-      data:
-        log.data && typeof log.data === "object" && !Array.isArray(log.data)
-          ? (log.data as Record<string, unknown>)
-          : undefined,
-    })),
   }
 }
 

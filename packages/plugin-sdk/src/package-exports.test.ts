@@ -43,6 +43,7 @@ describe("plugin-sdk package exports", () => {
     "./api/host-environment",
     "./api/message-renderer",
     "./api/ocr-provider",
+    "./api/pet",
     "./api/scheduled-task",
     "./api/security-findings",
     "./api/sandbox",

@@ -132,9 +132,18 @@ import {
   registerPetItem,
   unregisterPetItemsByPlugin,
 } from "@/lib/plugin/registries/pet-item-registry"
+import {
+  assertValidPetAchievementDef,
+  assertValidPetItemDef,
+} from "@/lib/plugin/registries/pet-contribution-validation"
 import type { PluginQuickActionDef, PluginAuthProviderDef } from "@/types/plugin"
 import { registerTrayItem, unregisterTrayItemsByPlugin } from "@/lib/tray/registry"
 import type { PluginPetAchievementDef, PluginPetItemDef } from "@/types/plugin/plugin-pet"
+import type { PluginPiPackageDef } from "@/types/plugin/plugin-pi-package"
+import {
+  registerContributedPiPackage,
+  unregisterContributedPiPackagesByPlugin,
+} from "@/lib/plugin/pi-packages/registry"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -501,6 +510,10 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // can't collide with the static PET_ACHIEVEMENTS.
     manifestField: "petAchievements",
     registerEntry: (def, ctx) => {
+      // Shape-checked here too, not only at manifest validation: a manifest
+      // stored before the check existed must not register an achievement that
+      // can never unlock. Throwing drops this entry alone.
+      assertValidPetAchievementDef(def, `petAchievements "${String(def?.id)}"`)
       registerPetAchievement(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterPetAchievementsByPlugin,
@@ -510,9 +523,22 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // (lib/pet/economy/item-catalog.ts listAllPetItems/getPetItem).
     manifestField: "petItems",
     registerEntry: (def, ctx) => {
+      assertValidPetItemDef(def, `petItems "${String(def?.id)}"`)
       registerPetItem(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterPetItemsByPlugin,
+  }),
+  "pi-package": defineOverlayCapability<PluginPiPackageDef>({
+    // ADR-0210. Pi coding-agent packages shipped inside the plugin directory.
+    // The registry keeps the def verbatim alongside the plugin's install root;
+    // every consumer resolves paths through `resolveContributedPiPackage`,
+    // which refuses a non-disk root (`builtin://`) with a typed error rather
+    // than letting a pseudo-path reach `pi install` or `-e`.
+    manifestField: "piPackages",
+    registerEntry: (def, ctx) => {
+      registerContributedPiPackage(def, ctx)
+    },
+    unregisterAllByPlugin: unregisterContributedPiPackagesByPlugin,
   }),
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

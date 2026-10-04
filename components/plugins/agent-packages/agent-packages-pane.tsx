@@ -34,6 +34,8 @@ import { piConfigPath } from "@/lib/pi-packages/config-templates"
 import { PI_INSTALL_PARAM, readPiInstallParam } from "@/lib/pi-packages/deep-link"
 import { planPiMutation, type PiMutationPlan } from "@/lib/pi-packages/mutate"
 import type { PiPackageScope } from "@/lib/pi-packages/types"
+import { useContributedPiPackageEntries } from "@/hooks/plugins/use-contributed-pi-packages"
+import { ContributedPiPackageList } from "./contributed-pi-package-list"
 import { PiCatalogList } from "./pi-catalog-list"
 import { PiContextBudget, piPackageShortName } from "./pi-context-budget"
 import { PiInstallDialog, type PiInstallRequest } from "./pi-install-dialog"
@@ -43,7 +45,9 @@ import { PiPackageConfigEditor } from "./pi-package-config-editor"
 
 export function AgentPackagesPane() {
   const t = useTranslations("plugins.agentPackages")
+  const tPlugin = useTranslations("plugins.piPackages")
   const pi = usePiPackages()
+  const contributedPackages = useContributedPiPackageEntries()
 
   const [manualPending, setManualPending] = useState<PiInstallRequest | null>(null)
   const [dismissedSpec, setDismissedSpec] = useState<string | null>(null)
@@ -286,6 +290,15 @@ export function AgentPackagesPane() {
               onRemove={(spec, scope) => void remove(spec, scope)}
               onConfigure={setConfigSpec}
             />
+            {contributedPackages.length > 0 && (
+              <section className="space-y-2" data-testid="pi-contributed-group">
+                <div>
+                  <h3 className="text-xs font-semibold">{tPlugin("paneGroupTitle")}</h3>
+                  <p className="text-muted-foreground text-xs">{tPlugin("paneGroupDescription")}</p>
+                </div>
+                <ContributedPiPackageList pi={pi} />
+              </section>
+            )}
             <PiCatalogList
               resolved={pi.resolved}
               busySpec={busySpec}

@@ -112,6 +112,11 @@ from .pet import (
     define_pet_achievement,
     define_pet_item,
 )
+from .pi_package import (
+    PI_PACKAGE_ENV_PREFIX,
+    PiPackage,
+    define_pi_package,
+)
 from .bot import (
     BOT_EVENT_SOURCES,
     BOT_EXECUTORS,
@@ -300,6 +305,10 @@ __all__ = [
     "define_pet_item",
     "PetAchievement",
     "define_pet_achievement",
+    # pi-package manifest mirror (ADR-0210)
+    "PI_PACKAGE_ENV_PREFIX",
+    "PiPackage",
+    "define_pi_package",
     # types
     "types",
     "ToolDefinition",

@@ -14,6 +14,7 @@ import type { PluginManifest } from "@/types/plugin"
 import { PluginContributedTab } from "./plugin-contributed-tab"
 import { PluginTriggersTab } from "./plugin-triggers-tab"
 import { PluginCliToolsSection } from "./plugin-cli-tools-section"
+import { PluginPiPackagesSection } from "./plugin-pi-packages-section"
 
 export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
@@ -83,6 +84,11 @@ export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
       )}
 
       <PluginCliToolsSection manifest={plugin.manifest as unknown as PluginManifest} />
+
+      <PluginPiPackagesSection
+        pluginId={pluginId}
+        manifest={plugin.manifest as unknown as PluginManifest}
+      />
 
       <section className="space-y-2">
         <h3 className="text-xs font-semibold">{t("runtimeContributions")}</h3>

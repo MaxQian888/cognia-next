@@ -54,6 +54,8 @@ const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze(
   "cognia-character-seeds": "Copy-paste character-pack template for plugin authors (ADR-0030).",
   "cognia-impeccable":
     "Installable desktop skill bundle — discovered from the on-disk plugin directory and deliberately blocked in browser/mobile shells.",
+  "cognia-pi-latex-workbench":
+    "Installable desktop plugin — its cliTools run a vendored CLI at ${COGNIA_PLUGIN_ROOT} and its Pi package is installed from the plugin directory, neither of which a builtin:// plugin has; blocked in browser/mobile/headless shells (ADR-0210).",
   "cognia-rfc-toolkit":
     "Installable desktop skill bundle — its local-bundle references resolve through the desktop filesystem bridge, so it is blocked in browser/mobile shells and deliberately not bundled.",
   "cognia-bugfix-review":

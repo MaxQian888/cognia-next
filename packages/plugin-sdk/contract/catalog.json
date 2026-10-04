@@ -564,6 +564,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "pi-package",
+      "support": "supported",
+      "manifestFields": ["piPackages"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "tray",
       "support": "supported",
       "manifestFields": ["trayItems"],
@@ -662,6 +669,22 @@
       "minimumHostVersion": "0.1.0"
     }
   ],
+  "localizedLabelPaths": [
+    "nameKey",
+    "descriptionKey",
+    "views[].titleKey",
+    "viewsContainers[].titleKey",
+    "webviews[].titleKey",
+    "quickActions[].labelKey",
+    "modalMounts[].labelKey",
+    "contextPanels[].labelKey",
+    "extensions[].labelKey",
+    "trayItems[].labelKey",
+    "commands[].descriptionKey",
+    "piPackages[].nameKey",
+    "piPackages[].descriptionKey",
+    "cliTools[].descriptionKey"
+  ],
   "pathFields": [
     {
       "path": "main",
@@ -716,6 +739,27 @@
       "runtime": "asset",
       "requiredFor": [],
       "executable": true
+    },
+    {
+      "path": "piPackages[].path",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false,
+      "kind": "directory"
+    },
+    {
+      "path": "piPackages[].prepare.marker",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false,
+      "kind": "contained-only"
+    },
+    {
+      "path": "piPackages[].hostedSession.extensions[]",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": true,
+      "kind": "file"
     },
     {
       "path": "vscodeGrammars[].path",
@@ -1285,6 +1329,11 @@
     {
       "field": "cliTools",
       "capabilities": ["cli-tools"],
+      "execution": "host"
+    },
+    {
+      "field": "piPackages",
+      "capabilities": ["pi-package"],
       "execution": "host"
     },
     {
@@ -8925,10 +8974,22 @@
         {
           "id": "pet.emitEvent",
           "name": "emitEvent",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
+          "requiredPermissions": ["pet:interact"],
+          "consentTier": "policy",
+          "risk": "medium",
           "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "pet.getAvailability",
+          "name": "getAvailability",
+          "requiredPermissions": ["pet:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
@@ -8973,9 +9034,9 @@
         {
           "id": "pet.interact",
           "name": "interact",
-          "requiredPermissions": [],
-          "consentTier": "none",
-          "risk": "low",
+          "requiredPermissions": ["pet:interact"],
+          "consentTier": "policy",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -9816,7 +9877,7 @@
           "name": "cancelExecution",
           "requiredPermissions": [],
           "consentTier": "none",
-          "risk": "low",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -9828,7 +9889,7 @@
           "name": "createTask",
           "requiredPermissions": [],
           "consentTier": "none",
-          "risk": "low",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -9840,7 +9901,19 @@
           "name": "deleteTask",
           "requiredPermissions": [],
           "consentTier": "none",
-          "risk": "low",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "scheduler.emitEvent",
+          "name": "emitEvent",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -9896,6 +9969,18 @@
           }
         },
         {
+          "id": "scheduler.getStatistics",
+          "name": "getStatistics",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "scheduler.getTask",
           "name": "getTask",
           "requiredPermissions": [],
@@ -9932,12 +10017,36 @@
           }
         },
         {
+          "id": "scheduler.onExecution",
+          "name": "onExecution",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
           "id": "scheduler.pauseTask",
           "name": "pauseTask",
           "requiredPermissions": [],
           "consentTier": "none",
           "risk": "low",
           "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "scheduler.previewTrigger",
+          "name": "previewTrigger",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
@@ -9972,7 +10081,7 @@
           "name": "runTaskNow",
           "requiredPermissions": [],
           "consentTier": "none",
-          "risk": "low",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -9996,7 +10105,7 @@
           "name": "updateTask",
           "requiredPermissions": [],
           "consentTier": "none",
-          "risk": "low",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
@@ -12190,7 +12299,7 @@
       "type": "PluginUserSchedulerAPI",
       "stability": "stable",
       "introducedIn": "0.3.228",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.userScheduler",
@@ -12201,6 +12310,18 @@
       "errorPolicy": "preserve",
       "lifecycle": "plugin",
       "methods": [
+        {
+          "id": "userScheduler.cancelExecution",
+          "name": "cancelExecution",
+          "requiredPermissions": ["agent:control", "database:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
         {
           "id": "userScheduler.createTask",
           "name": "createTask",
@@ -12226,9 +12347,57 @@
           }
         },
         {
+          "id": "userScheduler.getExecution",
+          "name": "getExecution",
+          "requiredPermissions": ["database:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "userScheduler.getPolicy",
           "name": "getPolicy",
           "requiredPermissions": ["settings:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "userScheduler.getTask",
+          "name": "getTask",
+          "requiredPermissions": ["database:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "userScheduler.getUpcoming",
+          "name": "getUpcoming",
+          "requiredPermissions": ["database:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "userScheduler.listExecutions",
+          "name": "listExecutions",
+          "requiredPermissions": ["database:read"],
           "consentTier": "policy",
           "risk": "medium",
           "idempotent": true,
@@ -12250,9 +12419,45 @@
           }
         },
         {
+          "id": "userScheduler.pauseTask",
+          "name": "pauseTask",
+          "requiredPermissions": ["database:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "userScheduler.resumeTask",
+          "name": "resumeTask",
+          "requiredPermissions": ["database:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "userScheduler.runTaskNow",
           "name": "runTaskNow",
           "requiredPermissions": ["agent:control", "database:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "userScheduler.updateTask",
+          "name": "updateTask",
+          "requiredPermissions": ["database:write"],
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,

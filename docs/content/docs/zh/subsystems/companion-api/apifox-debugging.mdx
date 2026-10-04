@@ -8,7 +8,7 @@ description: 使用独立 Headless data dir、service token、自签名 CA 和�
 <Status variant="beta">本地开发配置</Status>
 
 <TLDR>
-  使用 `pnpm dev:headless --local-debug` 启动，再把生成的 Postman 环境和
+  使用 `pnpm dev:headless --local-debug` 启动服务。再把生成的 Postman 环境和
   `docs/api/headless-service-api.openapi.yaml` 导入 Apifox。启动器会把服务绑定到
   `127.0.0.1`，生成仅当前进程有效的随机 Bearer token，并在服务退出时删除环境文件。这样无需手工
   签发或复制持久 service token，同时不会把内部 API 变成无鉴权接口。
@@ -47,11 +47,9 @@ Apifox environment: <repo-root>/.cache/headless-apifox/apifox/cognia-local-debug
 The token expires when this server process stops.
 ```
 
-导入和调试期间保持服务运行。环境文件权限为仅 owner 可读写（`0600`），服务退出时自动删除。已经导入
-Apifox 的环境中可能还保留旧值，但旧 token 在进程退出后已无法使用；下一次启动会生成不同 token。
+导入和调试期间保持服务运行。环境文件权限为仅 owner 可读写（`0600`），服务退出时自动删除。已经导入 Apifox 的环境中可能还保留旧值，但旧 token 在进程退出后已无法使用；下一次启动会生成不同 token。
 
-不要随意复用未知来源的 `.cache/headless`。data dir 同时保存 `master.key`、加密 secret store、数据库
-和 TLS identity；原 key 丢失后，生成新 key 无法解密旧 store，会报：
+不要随意复用未知来源的 `.cache/headless`。data dir 同时保存 `master.key`、加密 secret store、数据库和 TLS identity；原 key 丢失后，生成新 key 无法解密旧 store，会报：
 
 ```text
 secret store init: secret-store decrypt failed: aead::Error
@@ -59,8 +57,7 @@ secret store init: secret-store decrypt failed: aead::Error
 
 ## 2. 导入生成的环境
 
-使用 Apifox 的 Postman 数据导入功能，选择启动器输出的文件。导入后会得到私有环境
-`Cognia Headless Local Debug`，包含：
+使用 Apifox 的 Postman 数据导入功能，选择启动器输出的文件。导入后会得到私有环境 `Cognia Headless Local Debug`，包含：
 
 | 变量 | 生成值 |
 | --- | --- |
@@ -68,8 +65,7 @@ secret store init: secret-store decrypt failed: aead::Error
 | `serviceToken` | 当前进程的随机 Bearer token |
 | `caCertPath` | 当前 data dir 下的 `cognia/companion/tls.pem` |
 
-不要把该环境同步到 Apifox 团队。每次服务重启后，重新导入新文件，或只替换本地
-`serviceToken` 的值。
+不要把该环境同步到 Apifox 团队。每次服务重启后，重新导入新文件，或只替换本地 `serviceToken` 的值。
 
 ## 3. 导入 Headless OpenAPI
 
@@ -78,11 +74,9 @@ secret store init: secret-store decrypt failed: aead::Error
 1. 打开“项目设置 → 手动导入”；
 2. 选择 OpenAPI；
 3. 选择 `docs/api/headless-service-api.openapi.yaml`；
-4. 再次导入时，对 method/path 相同的接口选择“覆盖已有接口”。否则 Apifox 可能继续保留旧的通用
-   request body，而不加载新生成的字段。
+4. 再次导入时，对 method/path 相同的接口选择“覆盖已有接口”。否则 Apifox 可能继续保留旧的通用 request body，而不加载新生成的字段。
 
-Apifox 支持通过文件或 URL 导入 OpenAPI；本仓库当前提交的是本地文件，没有在 Headless server 上
-暴露 spec URL。详见 [Apifox 导入说明](https://apifox.com/help/api-manage/import-api/intro)。
+Apifox 支持通过文件或 URL 导入 OpenAPI；本仓库当前提交的是本地文件，没有在 Headless server 上暴露 spec URL。详见 [Apifox 导入说明](https://apifox.com/help/api-manage/import-api/intro)。
 
 ## 4. 连接导入的变量
 
@@ -93,8 +87,7 @@ Auth: Bearer Token
 Token: {{serviceToken}}
 ```
 
-OpenAPI security scheme 提供 Bearer Auth 结构，环境提供临时 token 值。Apifox 的环境由服务前置 URL
-和变量组成；详见 [环境管理](https://docs.apifox.com/environments-and-services)。
+OpenAPI security scheme 提供 Bearer Auth 结构，环境提供临时 token 值。Apifox 的环境由服务前置 URL 和变量组成；详见 [环境管理](https://docs.apifox.com/environments-and-services)。
 
 ## 5. 信任本地自签名证书
 
@@ -110,9 +103,7 @@ OpenAPI security scheme 提供 Bearer Auth 结构，环境提供临时 token 值
 <repo-root>/.cache/headless-apifox/cognia/companion/tls.pem
 ```
 
-推荐在“Apifox 设置 → 证书管理 → CA 证书”中导入该 PEM。详见
-[CA 和客户端证书](https://docs.apifox.com/ca-and-client-certificates)。仅为临时本地排障时，才在请求
-设置中关闭 SSL 证书验证；不要把关闭校验的配置用于远程环境。
+推荐在“Apifox 设置 → 证书管理 → CA 证书”中导入该 PEM。详见 [CA 和客户端证书](https://docs.apifox.com/ca-and-client-certificates)。仅为临时本地排障时，才在请求设置中关闭 SSL 证书验证；不要把关闭校验的配置用于远程环境。
 
 ## 6. 验证 HTTP 调用
 
@@ -142,14 +133,11 @@ Content-Type: application/json
 }
 ```
 
-body 写成 `{}` 也可以，按默认每页 50 条分页。数据多时答案里还会带 `nextPageToken`，把它原样作为
-`pageToken` 传回去就是下一页，不要解析它。旧的 `limit`、`offset` 参数名会被拒绝并返回
-`400 malformed_request`（ADR-0175）。
+body 写成 `{}` 也可以，按默认每页 50 条分页。数据多时答案里还会带 `nextPageToken`，把它原样作为 `pageToken` 传回去就是下一页，不要解析它。旧的 `limit`、`offset` 参数名会被拒绝并返回 `400 malformed_request`（ADR-0175）。
 
 ## 7. 配置 WebSocket
 
-OpenAPI 里的 `101` GET 只是协议文档；在 Apifox 中应手动新建 WebSocket 接口。Apifox 桌面客户端支持
-握手 Params、Headers 和变量，详见 [WebSocket 调试](https://docs.apifox.com/websocket)。
+OpenAPI 里的 `101` GET 只是协议文档；在 Apifox 中应手动新建 WebSocket 接口。Apifox 桌面客户端支持握手 Params、Headers 和变量，详见 [WebSocket 调试](https://docs.apifox.com/websocket)。
 
 事件流 URL：
 
@@ -169,20 +157,13 @@ Authorization: Bearer {{serviceToken}}
 wss://127.0.0.1:27890/internal/events?since=0&token={{serviceToken}}
 ```
 
-`/internal/bridge` 是 Brain 的双向协议连接，需要 bridge hello 与后续协议 frame，不适合作为普通手动
-WebSocket 请求。
+`/internal/bridge` 是 Brain 的双向协议连接，需要 bridge hello 与后续协议 frame，不适合作为普通手动 WebSocket 请求。
 
 ## 8. 自动生成请求参数
 
-每条具体 RPC 路径都有可供 Apifox 使用的请求 schema。已有详细契约位于
-`protocol/companion-request-schemas.json`；委托调用与深层嵌套契约使用
-`scripts/build/companion-request-schema-contracts.mjs` 中的 Zod 4；其余标量请求结构来自直接 Rust
-dispatch arm。Zod 原生 JSON Schema 转换会递归生成嵌套对象、数组 `items`、enum 与 required 字段。
+每条具体 RPC 路径都有可供 Apifox 使用的请求 schema。已有详细契约位于 `protocol/companion-request-schemas.json`；委托调用与深层嵌套契约使用 `scripts/build/companion-request-schema-contracts.mjs` 中的 Zod 4；其余标量请求结构来自直接 Rust dispatch arm。Zod 原生 JSON Schema 转换会递归生成嵌套对象、数组 `items`、enum 与 required 字段。
 
-已知对象会被关闭，因此 Apifox 不再虚构 `property1`、`property2`。真正自由结构的 map 仍保持 map
-语义，但带空对象 example。Apifox 既能生成上面的 `session_list` body，也能把
-`browser_set_files.paths` 生成为字符串数组，并完整描述
-`scheduled_task_import.data.tasks` 中的任务对象。
+已知对象会被关闭，因此 Apifox 不再虚构 `property1`、`property2`。真正自由结构的 map 仍保持 map 语义，但带空对象 example。Apifox 既能生成上面的 `session_list` body，也能把 `browser_set_files.paths` 生成为字符串数组，并完整描述 `scheduled_task_import.data.tasks` 中的任务对象。
 
 每条具体 RPC operation 都带有 `x-cognia-request-schema-source`：
 
@@ -191,10 +172,7 @@ dispatch arm。Zod 原生 JSON Schema 转换会递归生成嵌套对象、数组
 - `runtime-inferred`：字段来自直接 Rust dispatch arm；
 - `manifest`：command descriptor 提供了非通用 schema。
 
-根级 `x-cognia-generated` 同时记录 `generatedRequestSchemaCount`、
-`runtimeInferredRequestSchemaCount`、`contractRequestSchemaCount` 与
-`genericRequestSchemaCount`。只要任一 Headless 命令退回通用 `RpcArgs`、数组缺少 `items`，或 schema
-可能生成任意占位属性，生成过程就会失败。
+根级 `x-cognia-generated` 同时记录 `generatedRequestSchemaCount`、`runtimeInferredRequestSchemaCount`、`contractRequestSchemaCount` 与 `genericRequestSchemaCount`。只要任一 Headless 命令退回通用 `RpcArgs`、数组缺少 `items`，或 schema 可能生成任意占位属性，生成过程就会失败。
 
 ## 手工 token 备用方案
 
@@ -205,9 +183,7 @@ pnpm dev:headless --skip-build --data-dir .cache/headless-apifox
 pnpm --silent dev:headless token --data-dir .cache/headless-apifox
 ```
 
-该备用模式会让普通 Headless listener 绑定到 `0.0.0.0`，并要求 token issuer 与 server 共用同一个
-data dir；JWT 仍只接受来自 loopback 的请求。Apifox 调试优先使用 `--local-debug`，因为它还会把
-listener 本身限制在 loopback。
+该备用模式会让普通 Headless listener 绑定到 `0.0.0.0`，并要求 token issuer 与 server 共用同一个 data dir；JWT 仍只接受来自 loopback 的请求。Apifox 调试优先使用 `--local-debug`，因为它还会把 listener 本身限制在 loopback。
 
 ## 排障
 

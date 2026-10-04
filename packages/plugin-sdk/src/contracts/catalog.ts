@@ -71,6 +71,12 @@ export interface PluginPathFieldContract {
   requiredFor: readonly string[]
   executable: boolean
   sentinels?: readonly string[]
+  /**
+   * What must exist at the path in an installed tree: `file` (default) — an
+   * existing regular file; `directory` — an existing directory (`.` is the
+   * plugin root); `contained-only` — lexical containment only (created later).
+   */
+  kind?: "file" | "directory" | "contained-only"
 }
 
 export interface PluginServiceContract {
@@ -194,6 +200,7 @@ export const AUTHOR_CAPABILITY_CONTRACTS = catalog.capabilities.map((contract) =
       ? contract.minimumHostVersion
       : catalog.minimumHostVersion,
 })) as readonly AuthorCapabilityContract[]
+export const PLUGIN_LOCALIZED_LABEL_PATHS = catalog.localizedLabelPaths as readonly string[]
 export const PLUGIN_PATH_FIELD_CONTRACTS = catalog.pathFields as readonly PluginPathFieldContract[]
 export const PLUGIN_MANIFEST_CONTRIBUTIONS =
   catalog.manifestContributions as readonly PluginManifestContributionContract[]

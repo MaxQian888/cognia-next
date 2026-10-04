@@ -19,8 +19,8 @@
 // description), and the configuration step uses the real config-form renderer
 // instead of a second parser that only understood string / number / boolean.
 
-import type { ReactNode } from "react"
-import { useTranslations } from "next-intl"
+import { useMemo, type ReactNode } from "react"
+import { useLocale, useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
   AlertTriangleIcon,
@@ -49,6 +49,7 @@ import type {
   PreInstallConfigPayload,
   PreInstallBinaryPayload,
 } from "@/lib/plugin/marketplace/install-flow"
+import { localizeConfigSchema } from "@/lib/plugin/i18n/config-schema-text"
 import { ConfigSchemaFields, useConfigSchemaForm } from "../detail/plugin-config-form"
 import { PermissionIdentity } from "../plugin-permission-review"
 
@@ -453,7 +454,14 @@ function ConfigStep({
   onCancel: () => void
 }) {
   const t = useTranslations("plugins.preInstall")
-  const form = useConfigSchemaForm(config.configSchema, undefined)
+  const locale = useLocale()
+  // No runtime bundle exists before install, so schema labels resolve through
+  // the manifest's own locale bundle carried on the payload.
+  const localizedSchema = useMemo(
+    () => localizeConfigSchema(config.configSchema, config.i18n, locale),
+    [config.configSchema, config.i18n, locale]
+  )
+  const form = useConfigSchemaForm(localizedSchema, undefined)
   const hasFields = !form.schema.unknown && Object.keys(form.schema.fields).length > 0
 
   return (

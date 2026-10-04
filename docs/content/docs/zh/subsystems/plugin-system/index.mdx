@@ -10,7 +10,7 @@ description: Cognia 的一等插件运行时——惰性加载的 PluginManager 
 <TLDR>
   Cognia 中的插件是一个经过签名、由 manifest 描述的 bundle，宿主把它加载进隔离运行时，并授予一份
   **能力受限的 API**（`ctx`）。中枢编排器是 `PluginManager`（`lib/plugin/core/manager.ts:364`）——一个
-  惰性单例，把每个插件走完 `发现 → 校验 → 兼容性闸门 → 验签 → 加载 → 激活 → 启用 → 注册贡献`，每一步都有
+  惰性单例，让每个插件依次完成 `发现 → 校验 → 兼容性闸门 → 验签 → 加载 → 激活 → 启用 → 注册贡献`，每一步都有
   基于快照的回滚。插件以三种方式扩展应用：**调用** `ctx.*` API（约 48 个权限受控命名空间，在
   `lib/plugin/core/context.ts:233` 组装）；**声明贡献**，由 34 个*桥接器文件*（`lib/plugin/bridge/`）投射进
   宿主子系统（chat、主题、字体、Monaco、连接器、工作流、调度器……）；以及通过 `define*()` SDK 助手把类型化
@@ -32,20 +32,14 @@ description: Cognia 的一等插件运行时——惰性加载的 PluginManager 
 
 ## 它是什么
 
-Cognia 提供的是一个真正的插件平台，而非脚本钩子。第三方（以及在仓库内的一等）代码无需 fork 即可扩展应用，
-并以显式的按权限用户同意为前提。一个插件可以：
+Cognia 提供的是一个真正的插件平台，而非脚本钩子。第三方（以及在仓库内的一等）代码无需 fork 即可扩展应用，并以显式的按权限用户同意为前提。一个插件可以：
 
-- **调用宿主能力**：通过 `ctx.*`——chat、向量检索、agent、文件系统、终端、git、连接器、Computer Use 自动化、
-  伴侣设备等。
-- **贡献界面**：在 manifest 中声明——主题、字体、壁纸、图标主题、TextMate 语法、语言、代码片段、消息分段渲染器、
-  A2UI 组件、配置面板、模态挂载、AI/OCR/工作区 provider、连接器适配器、chat 中间件。
-- **注册类型化条目**：通过 SDK——技能、子智能体、MCP server 预设、原生 Anthropic 工具、agent 团队模板、
-  工作流模板、角色包。
-- **运行计划任务**：经由[调度器](../scheduler)，发出工作流触发器，并监听约 150 个生命周期 hook（chat 收发、
-  工具使用、twin 摄取、团队事件……）。
+- **调用宿主能力**：通过 `ctx.*`——chat、向量检索、agent、文件系统、终端、git、连接器、Computer Use 自动化、伴侣设备等。
+- **贡献界面**：在 manifest 中声明——主题、字体、壁纸、图标主题、TextMate 语法、语言、代码片段、消息分段渲染器、A2UI 组件、配置面板、模态挂载、AI/OCR/工作区 provider、连接器适配器、chat 中间件。
+- **注册类型化条目**：通过 SDK——技能、子智能体、MCP server 预设、原生 Anthropic 工具、agent 团队模板、工作流模板、角色包。
+- **运行计划任务**：经由[调度器](../scheduler)，发出工作流触发器，并监听约 150 个生命周期 hook（chat 收发、工具使用、twin 摄取、团队事件……）。
 
-一等插件在仓库内 `plugins/` 目录下（`computer-use`、`clipboard-history`、`screenshot`、
-`web-tools` 等），由与市场插件相同的 manager 加载——唯一区别是安装来源。
+一等插件在仓库内 `plugins/` 目录下（`computer-use`、`clipboard-history`、`screenshot`、`web-tools` 等），由与市场插件相同的 manager 加载——唯一区别是安装来源。
 
 ## 代码位置
 
@@ -189,8 +183,7 @@ flowchart LR
   RC -. disable .-> RB["rollback snapshot restore<br/>manager.ts:1670"]
 ```
 
-每一次状态转换都是幂等且回滚受保护的：load/enable 在已处于目标状态时提前返回，并发加载经由 promise map 去重，
-失败的 enable 会重放它的 `unregister*ByPlugin` 清理——因此一个坏主题或坏技能不会阻塞其余部分。
+每一次状态转换都是幂等且回滚受保护的：load/enable 在已处于目标状态时提前返回，并发加载经由 promise map 去重，失败的 enable 会重放它的 `unregister*ByPlugin` 清理——因此一个坏主题或坏技能不会阻塞其余部分。
 
 ## 插件运行时
 
@@ -216,18 +209,11 @@ flowchart LR
 
 ## 信任与沙箱边界
 
-- **危险权限按调用同意。** `confirmDangerousByDefault` 为 `true`（`permission-guard.ts:254`）：约 22 个
-  `DANGEROUS_PERMISSIONS`（`shell:execute`、`filesystem:write`、全部 `terminal:*`、全部 `automation:*`、
-  `connectors:send`……）在每次调用时弹出提示，而非安装时静默授予。
-- **守卫没有通配符。** `check()` 进行精确的 `grants.get(pluginId)?.get(permission)` 查找——任何地方都不存在
-  `*:allow` 展开（`permission-guard.ts:402`）。
-- **签名既闸门加载也闸门安装。** 开启 `trustedPublishersOnly` 且无构建期公钥时，*每个*插件都会被拒——锚点为 `[]`，
-  绝非可伪造的空密钥发布者（`signature.ts:85`）。
-- **JS 沙箱是软隔离；WASM 宿主与 Node 启动器是硬隔离。** 进程内 JS 隔离是权限受控的全局表面，并非 OS 边界。
-  WASI preopen 是 fail-closed（空授权直接抛错），Node `--permission` 启动器在某作用域为空时整段省略该 flag，
-  而不是传 `*`。
-- **Web 模式降级而非崩溃。** WASM、transport 网关、签名加密与 VS Code shim 在 Tauri 之外都返回 warn-stub；
-  只读市场预览在浏览器中仍可用。
+- **危险权限按调用同意。** `confirmDangerousByDefault` 为 `true`（`permission-guard.ts:254`）：约 22 个 `DANGEROUS_PERMISSIONS`（`shell:execute`、`filesystem:write`、全部 `terminal:*`、全部 `automation:*`、`connectors:send`……）在每次调用时弹出提示，而非安装时静默授予。
+- **守卫没有通配符。** `check()` 进行精确的 `grants.get(pluginId)?.get(permission)` 查找——任何地方都不存在 `*:allow` 展开（`permission-guard.ts:402`）。
+- **签名既闸门加载也闸门安装。** 开启 `trustedPublishersOnly` 且无构建期公钥时，*每个*插件都会被拒——锚点为 `[]`，绝非可伪造的空密钥发布者（`signature.ts:85`）。
+- **JS 沙箱是软隔离；WASM 宿主与 Node 启动器是硬隔离。** 进程内 JS 隔离是权限受控的全局表面，并非 OS 边界。WASI preopen 是 fail-closed（空授权直接抛错），Node `--permission` 启动器在某作用域为空时整段省略该 flag，而不是传 `*`。
+- **Web 模式降级而非崩溃。** WASM、transport 网关、签名加密与 VS Code shim 在 Tauri 之外都返回 warn-stub；只读市场预览在浏览器中仍可用。
 
 ## 下一步
 

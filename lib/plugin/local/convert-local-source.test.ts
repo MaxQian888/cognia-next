@@ -55,6 +55,33 @@ describe("inspectLocalPluginSource", () => {
     expect(Object.keys(result.generatedFiles)).toContain("plugin.json")
   })
 
+  it("produces an overlay the directory installer accepts for MCP configs and dotenv files", async () => {
+    const result = await inspectLocalPluginSource(
+      "/p",
+      fakeFs({
+        "/p/.claude-plugin/plugin.json": CLAUDE_MANIFEST,
+        "/p/.mcp.json": JSON.stringify({
+          mcpServers: { docs: { command: "npx", env: { API_KEY: "local-secret" } } },
+        }),
+        "/p/.env": "API_KEY=local-secret",
+        "/p/skills/review/SKILL.md": "---\nname: review\ndescription: Review code\n---\nBody",
+      })
+    )
+    expect(result.convertible).toBe(true)
+    // Only generated entries plus neutralizations of files that already exist.
+    expect(Object.keys(result.generatedFiles).sort()).toEqual([
+      ".claude-plugin/plugin.json",
+      ".env",
+      ".mcp.json",
+      "dist/index.js",
+      "plugin.json",
+    ])
+    expect(result.generatedFiles[".mcp.json"]).toBe("{}\n")
+    expect(result.generatedFiles[".claude-plugin/plugin.json"]).toBe("{}\n")
+    expect(result.generatedFiles[".env"]).toBe("\n")
+    expect(JSON.stringify(result.generatedFiles)).not.toContain("local-secret")
+  })
+
   it("marks a native bundle as needing no conversion", async () => {
     const result = await inspectLocalPluginSource(
       "/p",

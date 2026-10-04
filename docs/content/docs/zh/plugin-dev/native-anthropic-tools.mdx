@@ -5,7 +5,7 @@ description: 从插件注册自定义 Anthropic 原生工具（computer / bash /
 
 # 原生 Anthropic 工具
 
-ADR-0020（"Computer Use Completeness"）发布了 **原生 Anthropic 工具** 注册表 —— Anthropic API 原生认识的 `computer_20251124`、`bash_20250124`、`text_editor_20250728` 等 shape。Cognia 内置的 `cognia-computer-use` 插件使用这个面；但 **任意插件** 都可以贡献自己的原生工具：例如一个电子表格插件可以发布 `spreadsheet_20260601` 让模型直接用单元格范围 + 公式调用。
+ADR-0020（「Computer Use Completeness」）提供了**原生 Anthropic 工具**注册表，支持 Anthropic API 原生识别的 `computer_20251124`、`bash_20250124`、`text_editor_20250728` 等结构。Cognia 内置的 `cognia-computer-use` 插件使用该接口，**任意插件**也可提供自己的原生工具。例如，电子表格插件可以发布 `spreadsheet_20260601`，让模型使用单元格范围和公式直接调用。
 
 本页是实操参考。设计原由见 [ADR-0020](../adr/0020-computer-use-completeness)。
 

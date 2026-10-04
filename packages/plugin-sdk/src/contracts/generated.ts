@@ -1800,6 +1800,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.pet.emitEvent": {
     kind: "none",
   },
+  "ctx.pet.getAvailability": {
+    kind: "none",
+  },
   "ctx.pet.getRemainingBudget": {
     kind: "none",
   },
@@ -1995,6 +1998,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.scheduler.deleteTask": {
     kind: "none",
   },
+  "ctx.scheduler.emitEvent": {
+    kind: "none",
+  },
   "ctx.scheduler.getExecution": {
     kind: "none",
   },
@@ -2007,6 +2013,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.scheduler.getLatestExecution": {
     kind: "none",
   },
+  "ctx.scheduler.getStatistics": {
+    kind: "none",
+  },
   "ctx.scheduler.getTask": {
     kind: "none",
   },
@@ -2016,7 +2025,13 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.scheduler.listTasks": {
     kind: "none",
   },
+  "ctx.scheduler.onExecution": {
+    kind: "returned-disposer",
+  },
   "ctx.scheduler.pauseTask": {
+    kind: "none",
+  },
+  "ctx.scheduler.previewTrigger": {
     kind: "none",
   },
   "ctx.scheduler.registerHandler": {
@@ -2494,19 +2509,43 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.ui.openViewContainer": {
     kind: "none",
   },
+  "ctx.userScheduler.cancelExecution": {
+    kind: "none",
+  },
   "ctx.userScheduler.createTask": {
     kind: "none",
   },
   "ctx.userScheduler.deleteTask": {
     kind: "none",
   },
+  "ctx.userScheduler.getExecution": {
+    kind: "none",
+  },
   "ctx.userScheduler.getPolicy": {
+    kind: "none",
+  },
+  "ctx.userScheduler.getTask": {
+    kind: "none",
+  },
+  "ctx.userScheduler.getUpcoming": {
+    kind: "none",
+  },
+  "ctx.userScheduler.listExecutions": {
     kind: "none",
   },
   "ctx.userScheduler.listTasks": {
     kind: "none",
   },
+  "ctx.userScheduler.pauseTask": {
+    kind: "none",
+  },
+  "ctx.userScheduler.resumeTask": {
+    kind: "none",
+  },
   "ctx.userScheduler.runTaskNow": {
+    kind: "none",
+  },
+  "ctx.userScheduler.updateTask": {
     kind: "none",
   },
   "ctx.uri.registerHandler": {

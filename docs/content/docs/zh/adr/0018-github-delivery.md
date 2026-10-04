@@ -1,26 +1,15 @@
 ---
 title: "0018 — GitHub 交付"
-description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动化收编到 cognia 可视化 Workflow 里。"
+description: "将 AI 驱动的 PR 审阅、Issue → PR 完整流程与 Release 自动化纳入 cognia 可视化 Workflow。"
 ---
 
 # ADR 0018 — GitHub 交付
 
 **状态：** 已接受 —— 2026-08-13 修订。
 
-**当前交付边界。** 旧的高权限、自动启用交付栈已于 2026-07-28 移除：专属 Settings
-区域、`/github-delivery` 看板、直接 Connector，以及插件自带的高权限 Git workspace
-实现均不再交付。`plugins/github-delivery/` 中的可选前端插件仍在交付，并通过 ADR-0026
-定义的 Marketplace Integration 与 workflow bridge 工作。插件可被发现，但必须由用户
-明确启用，启动时绝不自动激活。现有 HTTP provider、normalizer、action、projection 与
-workflow alias 可在支持 Integration bridge 的宿主运行。Tauri 完整支持；Browser、mobile
-和 headless 为降级支持，因为 `runIssueLoop` 依赖宿主持有的本地 Git workspace，因而被明确
-限制为桌面能力。通用接缝 `lib/github/pr-observe/` 与
-`lib/github/workspace-backend-registry.ts` 继续保留。
+**当前交付边界。** 旧的高权限、自动启用交付栈已于 2026-07-28 移除：专属 Settings 区域、`/github-delivery` 看板、直接 Connector，以及插件自带的高权限 Git workspace 实现均不再交付。`plugins/github-delivery/` 中的可选前端插件仍在交付，并通过 ADR-0026 定义的 Marketplace Integration 与 workflow bridge 工作。插件可被发现，但必须由用户明确启用，启动时绝不自动激活。现有 HTTP provider、normalizer、action、projection 与 workflow alias 可在支持 Integration bridge 的宿主运行。Tauri 完整支持；Browser、mobile 和 headless 为降级支持，因为 `runIssueLoop` 依赖宿主持有的本地 Git workspace，因而被明确限制为桌面能力。通用接口 `lib/github/pr-observe/` 与 `lib/github/workspace-backend-registry.ts` 继续保留。
 
-下文保留原始交付设计作为决策历史，不表示已移除的高权限 UI 或 Connector 栈仍在交付；
-以上可选插件边界为当前权威说明。
-**日期：** 2026-05-12
-**分支：** `feat/github-delivery`
+下文保留原始交付设计作为决策历史，不表示已移除的高权限 UI 或 Connector 栈仍在交付；以上可选插件边界为当前权威说明。**日期：** 2026-05-12 **分支：** `feat/github-delivery`
 
 > **编号说明.** 该 ADR 在初次落地时使用过 `0012-github-delivery.md` 的临时编号,
 > 与既有的 `0012-transport-abstraction.md` 冲突。当前编号 **0018** 是规范化后的最终编号,
@@ -28,24 +17,15 @@ workflow alias 可在支持 Integration bridge 的宿主运行。Tauri 完整支
 
 ## 背景
 
-cognia-next 已经具备四个稳定子系统 —— 可视化工作流编辑器(38 种节点,schema v22)、插件运行时
-(13 个扩展点)、调度器(8 类执行器)以及 ConnectorBus(5 个平台适配器),但没有一种官方手段
-来"在 GitHub 上做事"。我们的 `.github/workflows/` 下虽然有 CI 配置,客户端却无法参与到 PR 评审、
-Issue 分诊或发布自动化里去 —— 哪怕针对自己正在开发的同一个仓库。
+cognia-next 已经具备四个稳定子系统 —— 可视化工作流编辑器(38 种节点,schema v22)、插件运行时 (13 个扩展点)、调度器(8 类执行器)以及 ConnectorBus(5 个平台适配器),但没有一种官方手段来"在 GitHub 上做事"。我们的 `.github/workflows/` 下虽然有 CI 配置,客户端却无法参与到 PR 评审、Issue 分诊或发布自动化里去 —— 哪怕针对自己正在开发的同一个仓库。
 
-**目标:**用户在可视化 Workflow 里把 **PR 自动审阅 + Issue → PR 闭环 + Release 自动化**
-组装起来,跑在 cognia 已有的原语之上。任何机器人动作都要经过策略门、写审计、并在与平台消息同源的
-Inbox 里露面。
+**目标:**用户在可视化 Workflow 里把 **PR 自动审阅 + Issue → PR 闭环 + Release 自动化**组装起来,跑在 cognia 已有的原语之上。任何机器人动作都要经过策略门、写审计、并在与平台消息同源的 Inbox 里露面。
 
-**不在本 ADR 内:**CI/CD 编排(lint / test / build / deploy 继续留在 GitHub Actions);
-通用的 GitLab / Gitea 适配器;cognia 自托管的 token-exchange 服务。
+**不在本 ADR 内:**CI/CD 编排(lint / test / build / deploy 继续留在 GitHub Actions); 通用的 GitLab / Gitea 适配器;cognia 自托管的 token-exchange 服务。
 
 ## 决策
 
-GitHub Delivery 由 **薄核心层**(`lib/github/`)+ **插件外壳**(`plugins/github-delivery/`)
-组成。插件向工作流注入 13 个 `action.github.*` 节点执行器、一个 webhook 触发器、一个轮询任务、
-一个写入 Inbox 的连接器适配器,以及 Settings 下的 5 个子 Tab。Rust 侧只新增一项:在现有的
-webhook 接收器上加一个 `signatureMode: "github"`,让 `x-hub-signature-256` 头复用同一套校验路径。
+GitHub Delivery 由 **薄核心层**(`lib/github/`)+ **插件外壳**(`plugins/github-delivery/`) 组成。插件向工作流注入 13 个 `action.github.*` 节点执行器、一个 webhook 触发器、一个轮询任务、一个写入 Inbox 的连接器适配器,以及 Settings 下的 5 个子 Tab。Rust 侧只新增一项:在现有的 webhook 接收器上加一个 `signatureMode: "github"`,让 `x-hub-signature-256` 头复用同一套校验路径。
 
 ### 架构
 
@@ -94,20 +74,15 @@ github-delivery 是 M0 "Plugin Dexie Tables" 平台特性的第一个用户。�
 
 按仓选择两种凭据模式:
 
-- **GitHub App**(推荐)。5K 次/小时,按 installation 隔离,每个 installation 有独立审计。
-  App 由用户自己创建;cognia 不托管共享 App,也不持有其私钥。
+- **GitHub App**(推荐)。5K 次/小时,按 installation 隔离,每个 installation 有独立审计。App 由用户自己创建;cognia 不托管共享 App,也不持有其私钥。
 - **Personal Access Token**(快速上手)。配置更简单,绑定到具体的人。适合个人仓库和试运行。
 
-两者都通过插件的 secrets API 存放(桌面端走 OS keyring、Web 端走加密 blob)。App installation
-token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提前 5 分钟刷新**,
-让调用方永远看不到 401。
+两者都通过插件的 secrets API 存放(桌面端走 OS keyring、Web 端走加密 blob)。App installation token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提前 5 分钟刷新**, 让调用方永远看不到 401。
 
 ### 触发器(D2)
 
-- **Webhook(默认)。** `trigger.github.webhook` 在 Rust axum 接收器上注册路径。校验逻辑读取
-  `x-hub-signature-256`(签名模式 = `github`)。用户粘贴公开 URL;一键 cloudflared 在 M4 上线。
-- **仅 Webhook（2026-07-16 更新）。** 未接入生产链路的轮询原型已删除；入站事件统一使用
-  Rust webhook receiver。
+- **Webhook(默认)。** `trigger.github.webhook` 在 Rust axum 接收器上注册路径。校验逻辑读取 `x-hub-signature-256`(签名模式 = `github`)。用户粘贴公开 URL;一键 cloudflared 在 M4 上线。
+- **仅 Webhook（2026-07-16 更新）。** 未接入生产链路的轮询原型已删除；入站事件统一使用 Rust webhook receiver。
 
 两路最终都吐出同一个 `NormalizedGhEvent`,下游只面对一种形状。
 
@@ -122,8 +97,7 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 - `allowedAuthors: { kind: "collaborators" }` —— 只对仓库 collaborator 的 PR/Issue 动手。
 - `quietHours?` —— 复用 `lib/connectors/outbound-runner` 的安静时段工具函数。
 
-每一个决定(允许 + 拒绝)都会写进命名空间下的 `audit` 表,附带完整的 `GhAction` 判别式
-和 `runId` / `stepId` 上下文。
+每一个决定(允许 + 拒绝)都会写进命名空间下的 `audit` 表,附带完整的 `GhAction` 判别式和 `runId` / `stepId` 上下文。
 
 ### 工作流节点分类(13)
 
@@ -145,8 +119,7 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 | `action.github.pushTag`           | `POST /git/refs`                        | `push`      |
 | `action.github.runIssueLoop`      | clone → AI → push → openPr              | `push`      |
 
-`runIssueLoop` 依赖 M5 的 Claude Code 子进程集成,M0..M4 期间会抛出一个友好的
-"M5 pending" 错误。
+`runIssueLoop` 依赖 M5 的 Claude Code 子进程集成,M0..M4 期间会抛出一个友好的 "M5 pending" 错误。
 
 ### 内置模板(8)
 
@@ -163,21 +136,17 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 
 ### UI 入口
 
-- **Settings → GitHub Delivery** — 5 个子 Tab(Repos / Credentials / Policies / Audit / Usage),
-  URL 反映为 `?section=github-delivery&ghTab=...`。
+- **Settings → GitHub Delivery** — 5 个子 Tab(Repos / Credentials / Policies / Audit / Usage), URL 反映为 `?section=github-delivery&ghTab=...`。
 - **独立页面 `/github-delivery`** — 基于 `workOrders` 表的 6 列看板。
-- **Inbox**(M4 之后)—— 带 PR/Issue 上下文的事件(review_requested / assigned)出现为
-  `InboundMessage`。
+- **Inbox**(M4 之后)—— 带 PR/Issue 上下文的事件(review_requested / assigned)出现为 `InboundMessage`。
 
 ### Rust 侧改动(最小)
 
 `src-tauri/src/workflow/triggers/webhook_router.rs`:
 
 - 在每个 `WebhookEntry` 上新增 `SignatureMode` 枚举(`Cognia` | `Github`)。
-- `verify_hmac_signature` 改为读 `mode.header_name()`:`cognia → x-signature-256`,
-  `github → x-hub-signature-256`。
-- `workflow_register_trigger` IPC 在 `kind == "trigger.github.webhook"` 时隐式选择
-  `Github`;若入参显式带 `signatureMode` 字段则继续优先采用,留出前向兼容空间。
+- `verify_hmac_signature` 改为读 `mode.header_name()`:`cognia → x-signature-256`, `github → x-hub-signature-256`。
+- `workflow_register_trigger` IPC 在 `kind == "trigger.github.webhook"` 时隐式选择 `Github`;若入参显式带 `signatureMode` 字段则继续优先采用,留出前向兼容空间。
 
 ## 后果
 
@@ -195,8 +164,7 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 
 **中性**
 
-- 在插件命名空间下新增 4 张 Dexie 表。按 M0 的保留规则,卸载插件时数据默认保留,除非用户
-  在 Settings → Plugins 中显式选择"Delete data"。
+- 在插件命名空间下新增 4 张 Dexie 表。按 M0 的保留规则,卸载插件时数据默认保留,除非用户在 Settings → Plugins 中显式选择"Delete data"。
 
 ## M5 / M6 / M7 增量(2026-05-13)
 
@@ -204,45 +172,21 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 
 ### M5 — Issue → PR 核心闭环(已关闭)
 
-- `IssueLoopDriver` 接上真实实现。`plugins/github-delivery/src/drivers/sidecar-driver.ts`
-  (~80 行)向 cognia 现有的 Claude sidecar(`lib/claude/ipc.ts:sendPrompt`)送一条 prompt,
-  `cwd` 指向克隆出来的 worktree,sidecar 自带的 cognia-tools MCP server(file / git / shell
-  / process / environment)在线上跑。Agent 最终的 assistant 文本从 `system-prompt.ts` 里的
-  `<SUMMARY>…</SUMMARY>` 块抽出,作为 PR 主体。
-- `lib/workflow/runtime/long-step-runner.ts` 是新加的帮助器,把任意长跑步骤包成 checkpoint
-  感知的执行。每次拉新事件落到 `workflowRunEvents`;进程崩溃后重入,`runLongStep` 自动检测
-  最近一次 checkpoint 并经 `onResume` 回放状态,使多分钟级的 Claude 跑能渡劫。Orchestrator
-  原本的 `resume-controller` 重入路径不变 —— runner 自己处理 resume 检测。
-- `lib/runtime/approval-bus.ts` 把 agent-team 的 plan-approval 发布订阅抽成了一个泛型、按
-  scope 索引的原语。`lib/ai/agent/plan-approval-bus.ts` 现在是一个 100% API 兼容的薄再导出。
+- `IssueLoopDriver` 接上真实实现。`plugins/github-delivery/src/drivers/sidecar-driver.ts` (~80 行)向 cognia 现有的 Claude sidecar(`lib/claude/ipc.ts:sendPrompt`)送一条 prompt, `cwd` 指向克隆出来的 worktree,sidecar 自带的 cognia-tools MCP server(file / git / shell / process / environment)在线上跑。Agent 最终的 assistant 文本从 `system-prompt.ts` 里的 `<SUMMARY>…</SUMMARY>` 块抽出,作为 PR 主体。
+- `lib/workflow/runtime/long-step-runner.ts` 是新加的帮助器,把任意长跑步骤包成 checkpoint 感知的执行。每次拉新事件落到 `workflowRunEvents`;进程崩溃后重入,`runLongStep` 自动检测最近一次 checkpoint 并经 `onResume` 回放状态,使多分钟级的 Claude 跑能渡劫。Orchestrator 原本的 `resume-controller` 重入路径不变 —— runner 自己处理 resume 检测。
+- `lib/runtime/approval-bus.ts` 把 agent-team 的 plan-approval 发布订阅抽成了一个泛型、按 scope 索引的原语。`lib/ai/agent/plan-approval-bus.ts` 现在是一个 100% API 兼容的薄再导出。
 
 ### M6 — HITL 审批 + PR 行级评审(已关闭)
 
-- 当 `policy-gate` 因 `requireHumanApproval` 拒绝时,decision 上挂 `needsApproval: true`。
-  `plugins/github-delivery/src/workflow/shared.ts` 里的 `guardedExecutor` 把这种 decision
-  路由进 `plugins/github-delivery/src/approval/draft-bridge.ts`,后者向既有的 `connectorDrafts`
-  表写一行,然后用 Dexie 轮询阻塞等待。用户在 Inbox 的 `<DraftEditor/>` 上点 Approve / Reject
-  / Edit body,工作流步骤带着用户改过的正文继续往下走。重启安全 —— 草稿留在 Dexie 里,bridge
-  会复用既有的 pending 行,不会重复开。
-- `plugins/github-delivery/src/workflow/review-pr-inline.ts` 替换了"PR auto-review"的快通道。
-  LLM 不再吐一条大评论,而是输出结构化 JSON `{ body, comments: [{ path, line, side, body }] }`,
-  执行器以 Octokit 的 review API 提交带行级注释的评审。注册为 `action.github.reviewPrInline`;
-  模板 1 的快版本和新模板 `wf_builtin_gh_pr_inline_review` 并存。
+- 当 `policy-gate` 因 `requireHumanApproval` 拒绝时,decision 上挂 `needsApproval: true`。`plugins/github-delivery/src/workflow/shared.ts` 里的 `guardedExecutor` 把这种 decision 路由进 `plugins/github-delivery/src/approval/draft-bridge.ts`,后者向既有的 `connectorDrafts` 表写一行,然后用 Dexie 轮询阻塞等待。用户在 Inbox 的 `<DraftEditor/>` 上点 Approve / Reject / Edit body,工作流步骤带着用户改过的正文继续往下走。重启安全 —— 草稿留在 Dexie 里,bridge 会复用既有的 pending 行,不会重复开。
+- `plugins/github-delivery/src/workflow/review-pr-inline.ts` 替换了"PR auto-review"的快通道。LLM 不再吐一条大评论,而是输出结构化 JSON `{ body, comments: [{ path, line, side, body }] }`, 执行器以 Octokit 的 review API 提交带行级注释的评审。注册为 `action.github.reviewPrInline`; 模板 1 的快版本和新模板 `wf_builtin_gh_pr_inline_review` 并存。
 
 ### M7 — 出站连接器 + E2B 后端 + cloudflared 依赖(已关闭)
 
-- `plugins/github-delivery/src/adapter/github-adapter.ts` 实现了 `PlatformAdapter` 并通过
-  插件 connectors bridge 注册(`plugin.json:connectors[]` + `createGithubAdapterForBridge`
-  导出)。`action.connector.send` 和 Inbox 的 Composer 现在可以借助跟其他连接器一样的出站队列
-  (quiet-hours、circuit-breaker、idempotency)往 PR / Issue 评论。
-- `plugins/github-delivery/src/adapter/conversation-key.ts` 为 `gh:owner/repo/<kind>-<n>`
-  共享编解码器,inbox-bridge 与出站适配器在路由键上保持一致。
-- `plugins/e2b-sandbox/src/workspace-backend.ts` 实现 `E2BBackend`,在该插件 activate 时通过
-  `ctx.workspace.registerBackend({ id: "e2b" })` 注册（旧 `setE2BBackend()` shim 已于 2026-08-18 移除）。默认沙盒工厂动态 `import('@e2b/sdk')`;若 SDK 未安装,在克隆点显示
-  安装提示而不是在插件激活点崩溃。
-- `@tauri-apps/plugin-shell` 加入 `package.json`,Rust crate 加入 `Cargo.toml`,plugin init
-  加到 `src-tauri/src/lib.rs`,`tauri.conf.json` 的 shell scope 里给 `cloudflared` 留了一条
-  allow rule。`lib/github/cloudflared-tauri.ts` 的动态 import 现在可以正常解析。
+- `plugins/github-delivery/src/adapter/github-adapter.ts` 实现了 `PlatformAdapter` 并通过插件 connectors bridge 注册(`plugin.json:connectors[]` + `createGithubAdapterForBridge` 导出)。`action.connector.send` 和 Inbox 的 Composer 现在可以借助跟其他连接器一样的出站队列 (quiet-hours、circuit-breaker、idempotency)往 PR / Issue 评论。
+- `plugins/github-delivery/src/adapter/conversation-key.ts` 为 `gh:owner/repo/<kind>-<n>` 共享编解码器,inbox-bridge 与出站适配器在路由键上保持一致。
+- `plugins/e2b-sandbox/src/workspace-backend.ts` 实现 `E2BBackend`,在该插件 activate 时通过 `ctx.workspace.registerBackend({ id: "e2b" })` 注册（旧 `setE2BBackend()` shim 已于 2026-08-18 移除）。默认沙盒工厂动态 `import('@e2b/sdk')`;若 SDK 未安装,在克隆点显示安装提示而不是在插件激活点崩溃。
+- `@tauri-apps/plugin-shell` 加入 `package.json`,Rust crate 加入 `Cargo.toml`,plugin init 加到 `src-tauri/src/lib.rs`,`tauri.conf.json` 的 shell scope 里给 `cloudflared` 留了一条 allow rule。`lib/github/cloudflared-tauri.ts` 的动态 import 现在可以正常解析。
 
 ## 留待的开放问题
 

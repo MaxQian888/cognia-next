@@ -1,4 +1,4 @@
-import { assessPluginDelivery } from "./delivery"
+import { PLUGIN_ECOSYSTEMS, assessPluginDelivery } from "./delivery"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginConversionReport } from "./ecosystem"
 
@@ -129,5 +129,36 @@ describe("plugin delivery assessment", () => {
         target: "codex",
       }).hosted.status
     ).toBe("unavailable")
+  })
+
+  it("retains Pi packages in Cognia except when Pi itself is the target", () => {
+    const report: PluginConversionReport = {
+      fidelity: "structured",
+      converted: [
+        { capability: "piPackages", path: "piPackages.x", message: "Exported", blocking: false },
+      ],
+      warnings: [],
+      blocking: [],
+    }
+    const piManifest = { id: "x", capabilities: ["skills", "pi-package"] } as PluginManifest
+    const toPi = assessPluginDelivery({ manifest: piManifest, report, target: "pi" })
+    expect(toPi.hosted.retained).toEqual(["skills"])
+    expect(toPi.capabilities).toContainEqual({ capability: "pi-package", status: "native" })
+    const toClaude = assessPluginDelivery({ manifest: piManifest, report, target: "claude-code" })
+    expect(toClaude.hosted.retained).toEqual(["skills", "pi-package"])
+  })
+
+  it("lists every converter ecosystem once", () => {
+    expect(new Set(PLUGIN_ECOSYSTEMS).size).toBe(PLUGIN_ECOSYSTEMS.length)
+    expect(PLUGIN_ECOSYSTEMS).toEqual(
+      expect.arrayContaining([
+        "factory-droid",
+        "qoder",
+        "codebuddy",
+        "auggie",
+        "open-plugins",
+        "pi",
+      ])
+    )
   })
 })

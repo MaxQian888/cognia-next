@@ -5,6 +5,7 @@
 export * from "./plugin"
 export * from "./plugin-host-tools"
 export * from "./plugin-cli-tool"
+export * from "./plugin-pi-package"
 export * from "./plugin-routing-strategy"
 export * from "./plugin-deployment-filter"
 export * from "./plugin-protocol-adapter"

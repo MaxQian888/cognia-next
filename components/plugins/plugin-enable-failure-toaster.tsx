@@ -9,7 +9,7 @@
  * Pattern mirrors `PluginConsentOverlay` — listens on `window`, holds
  * no state of its own beyond a small dedupe set so a noisy retry
  * loop doesn't spam the toaster. Mounted once near the app root in
- * `app/layout.tsx` alongside `<PluginConsentOverlay />`.
+ * `components/runtime/app-runtime.tsx` alongside `<PluginConsentOverlay />`.
  */
 
 import { useEffect, useRef } from "react"

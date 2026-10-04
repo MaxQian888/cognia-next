@@ -6,12 +6,33 @@ import type { TaskTrigger } from "@/types/scheduler"
 export { defineScheduledTask } from "../define/define-scheduled-task"
 export type { PluginScheduledTaskDef } from "@/types/plugin"
 export type {
+  CreatePluginTaskInput,
+  PluginScheduledTask,
   PluginSchedulerAPI,
   PluginTaskContext,
+  PluginTaskExecution,
+  PluginTaskExecutionEvent,
+  PluginTaskExecutionOptions,
+  PluginTaskExecutionPhase,
+  PluginTaskExecutionStatus,
+  PluginTaskFilter,
   PluginTaskHandler,
+  PluginTaskOverlapPolicy,
   PluginTaskResult,
+  PluginTaskRetryConfig,
+  PluginTaskStatistics,
+  PluginTaskStatus,
   PluginTaskTrigger,
+  UpdatePluginTaskInput,
 } from "@/types/plugin/plugin-scheduler"
+export type {
+  PluginSchedulerActor,
+  PluginSchedulerExecutionPage,
+  PluginSchedulerRunOptions,
+  PluginSchedulerWriteOptions,
+  PluginUpcomingRun,
+  PluginUserSchedulerAPI,
+} from "@/lib/plugin/api/scheduler-tasks"
 export type {
   CreateScheduledTaskInput,
   ScheduledTask,
@@ -23,6 +44,7 @@ export type {
   TaskExecutionTriggerSource,
   TaskTrigger,
   TaskTriggerType,
+  UpdateScheduledTaskInput,
 } from "@/types/scheduler"
 export { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
 

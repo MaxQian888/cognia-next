@@ -14,6 +14,11 @@ export const PLUGIN_ECOSYSTEMS = [
   "devin",
   "opencode",
   "pi",
+  "factory-droid",
+  "qoder",
+  "codebuddy",
+  "auggie",
+  "open-plugins",
 ] as const
 export type PluginDeliveryTarget = (typeof PLUGIN_ECOSYSTEMS)[number]
 export type PluginDeliverySurface = "cli" | "desktop" | "cloud"
@@ -74,6 +79,9 @@ export function assessPluginDelivery({
     commandHooks: "command-hooks",
     mcpServers: "mcp-server-preset",
     mcp: "mcp-server-preset",
+    // A complete Pi package is one contribution: themes, extensions and the
+    // package manifest are retained by it, never converted on their own.
+    piPackages: "pi-package",
   }
   const canonicalCapability = (value: string) =>
     value.startsWith("skill-") ? "skills" : (aliases[value] ?? value)
@@ -126,7 +134,13 @@ export function assessPluginDelivery({
     hosted: {
       status: hostedStatus,
       capabilities: hostedTools,
-      retained: capabilities.filter((capability) => !HOSTED_TOOL_CAPABILITIES.has(capability)),
+      // A Pi package is delivered natively to Pi; everywhere else it stays in
+      // Cognia (installed into Pi or loaded into Cognia-hosted Pi sessions).
+      retained: capabilities.filter(
+        (capability) =>
+          !HOSTED_TOOL_CAPABILITIES.has(capability) &&
+          !(capability === "pi-package" && target === "pi")
+      ),
     },
   }
 }

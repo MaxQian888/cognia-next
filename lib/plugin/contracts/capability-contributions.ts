@@ -77,6 +77,7 @@ interface ContributionManifestShape {
   workflowTemplates?: Array<{ id?: string; name?: string }>
   quickActions?: Array<{ id?: string; title?: string }>
   cliTools?: Array<{ id?: string; name?: string }>
+  piPackages?: Array<{ id?: string; name?: string }>
   workflows?: {
     nodeExecutors?: Array<{ id?: string; name?: string }>
     triggers?: Array<{ id?: string; name?: string }>
@@ -220,6 +221,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.quickActions).map((s) => entry(s.id, s.title)))
     case "cli-tools":
       return compact(asArray(m.cliTools).map((s) => entry(s.id, s.name)))
+    case "pi-package":
+      return compact(asArray(m.piPackages).map((s) => entry(s.id, s.name)))
     case "chat-middleware":
       return compact(asArray(m.chatMiddlewares).map((s) => entry(s.id, s.name)))
     case "view-container":

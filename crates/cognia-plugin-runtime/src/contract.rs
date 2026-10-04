@@ -41,6 +41,23 @@ struct PathField {
     path: String,
     #[serde(default)]
     sentinels: Vec<String>,
+    /// What must exist at the path in an installed tree (catalog `kind`).
+    #[serde(default)]
+    kind: PathFieldKind,
+}
+
+/// Catalog `pathFields[].kind`. Every kind keeps the lexical containment
+/// check; they differ only in what must already exist at install time.
+#[derive(Deserialize, Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "kebab-case")]
+enum PathFieldKind {
+    /// An existing regular file (entry points, assets).
+    #[default]
+    File,
+    /// An existing directory; `.` names the plugin root (a Pi package dir).
+    Directory,
+    /// Lexically contained only — created later (a dependency marker).
+    ContainedOnly,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +218,11 @@ fn validate_path_fields(manifest: &Value, fields: &[PathField]) -> Result<(), St
             let path = value
                 .as_str()
                 .ok_or_else(|| format!("manifest {} must be a string", field.path))?;
+            if field.kind == PathFieldKind::Directory
+                && crate::contained_path::is_plugin_root_selector(path)
+            {
+                continue;
+            }
             crate::contained_path::validate_plugin_relative_path(path)
                 .map_err(|error| format!("manifest {} is unsafe: {error}", field.path))?;
         }
@@ -260,7 +282,18 @@ pub(crate) fn validate_existing_manifest_paths(
             if field.sentinels.iter().any(|sentinel| sentinel == path) {
                 continue;
             }
-            crate::contained_path::resolve_existing_plugin_file(root, path).map_err(|error| {
+            let resolved = match field.kind {
+                PathFieldKind::File => {
+                    crate::contained_path::resolve_existing_plugin_file(root, path).map(|_| ())
+                }
+                PathFieldKind::Directory => {
+                    crate::contained_path::resolve_existing_plugin_dir(root, path).map(|_| ())
+                }
+                PathFieldKind::ContainedOnly => {
+                    crate::contained_path::validate_plugin_relative_path(path).map(|_| ())
+                }
+            };
+            resolved.map_err(|error| {
                 format!("manifest {} does not resolve safely: {error}", field.path)
             })?;
         }
@@ -587,6 +620,116 @@ mod tests {
         assert!(validate_existing_manifest_paths(root.path(), &manifest)
             .unwrap_err()
             .contains("chatPromptFiles"));
+    }
+
+    fn pi_package_manifest(path: &str) -> Value {
+        json!({
+            "main": "dist/index.js",
+            "piPackages": [{
+                "id": "latex",
+                "name": "LaTeX",
+                "path": path,
+                "prepare": {
+                    "program": "npm",
+                    "args": ["ci"],
+                    "marker": "vendor/node_modules/.package-lock.json"
+                },
+                "hostedSession": { "extensions": ["pi/cognia-workbench.ts"] }
+            }]
+        })
+    }
+
+    #[test]
+    fn pi_package_path_fields_validate_by_kind() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("dist")).unwrap();
+        std::fs::create_dir_all(root.path().join("vendor")).unwrap();
+        std::fs::create_dir_all(root.path().join("pi")).unwrap();
+        std::fs::write(root.path().join("dist/index.js"), "export default {}").unwrap();
+        std::fs::write(
+            root.path().join("pi/cognia-workbench.ts"),
+            "export default 1",
+        )
+        .unwrap();
+
+        // `path` is an existing directory; the marker need not exist yet (it is
+        // created by the prepare step); the extension is an existing file.
+        validate_existing_manifest_paths(root.path(), &pi_package_manifest("vendor")).unwrap();
+        validate_path_fields(
+            &pi_package_manifest("vendor"),
+            &runtime_contract().path_fields,
+        )
+        .unwrap();
+        // `.` is the plugin root — valid for a directory field.
+        validate_existing_manifest_paths(root.path(), &pi_package_manifest(".")).unwrap();
+        validate_path_fields(&pi_package_manifest("."), &runtime_contract().path_fields).unwrap();
+
+        // A package path naming a FILE, or a missing directory, is refused.
+        assert!(validate_existing_manifest_paths(
+            root.path(),
+            &pi_package_manifest("pi/cognia-workbench.ts")
+        )
+        .unwrap_err()
+        .contains("piPackages[].path"));
+        assert!(
+            validate_existing_manifest_paths(root.path(), &pi_package_manifest("missing")).is_err()
+        );
+        // Containment still applies to every kind, the marker included.
+        let mut escaping_marker = pi_package_manifest("vendor");
+        escaping_marker["piPackages"][0]["prepare"]["marker"] = json!("../outside");
+        assert!(validate_existing_manifest_paths(root.path(), &escaping_marker).is_err());
+        assert!(validate_path_fields(&escaping_marker, &runtime_contract().path_fields).is_err());
+        let mut escaping_dir = pi_package_manifest("../elsewhere");
+        escaping_dir["piPackages"][0]["path"] = json!("../elsewhere");
+        assert!(validate_path_fields(&escaping_dir, &runtime_contract().path_fields).is_err());
+        // An extension must exist as a regular file.
+        std::fs::remove_file(root.path().join("pi/cognia-workbench.ts")).unwrap();
+        assert!(
+            validate_existing_manifest_paths(root.path(), &pi_package_manifest("vendor"))
+                .unwrap_err()
+                .contains("hostedSession.extensions")
+        );
+    }
+
+    #[test]
+    fn only_dot_and_dot_slash_select_the_plugin_root_for_directory_fields() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("dist")).unwrap();
+        std::fs::create_dir_all(root.path().join("pi")).unwrap();
+        std::fs::write(root.path().join("dist/index.js"), "x").unwrap();
+        std::fs::write(root.path().join("pi/cognia-workbench.ts"), "x").unwrap();
+        for accepted in [".", "./"] {
+            let manifest = pi_package_manifest(accepted);
+            validate_path_fields(&manifest, &runtime_contract().path_fields).unwrap();
+            validate_existing_manifest_paths(root.path(), &manifest).unwrap();
+        }
+        for refused in ["/", "//", "\\", "./.", ".\\", " . "] {
+            let manifest = pi_package_manifest(refused);
+            assert!(
+                validate_path_fields(&manifest, &runtime_contract().path_fields).is_err()
+                    || validate_existing_manifest_paths(root.path(), &manifest).is_err(),
+                "{refused:?} must not select the plugin root"
+            );
+            assert!(
+                !crate::contained_path::is_plugin_root_selector(refused),
+                "{refused:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pi_package_directory_must_not_traverse_a_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("dist")).unwrap();
+        std::fs::create_dir_all(root.path().join("pi")).unwrap();
+        std::fs::write(root.path().join("dist/index.js"), "x").unwrap();
+        std::fs::write(root.path().join("pi/cognia-workbench.ts"), "x").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("vendor")).unwrap();
+        assert!(
+            validate_existing_manifest_paths(root.path(), &pi_package_manifest("vendor")).is_err()
+        );
     }
 
     #[test]

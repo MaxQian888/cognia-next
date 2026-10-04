@@ -55,16 +55,30 @@ import {
 } from "@/types/plugin/plugin-bot"
 import { DECLARATIVE_CONTEXT_PANEL_KINDS } from "@/types/plugin/plugin-context-panel"
 import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "@/types/plugin/plugin-modal"
+import { collectConfigSchemaI18nKeys } from "@/lib/plugin/i18n/config-schema-text"
+import {
+  PI_PACKAGE_ENV_NAME_PATTERN,
+  PI_PACKAGE_EXTENSION_SUFFIXES,
+  PI_PACKAGE_ID_PATTERN,
+  PI_PACKAGE_PREPARE_MAX_TIMEOUT_MS,
+  PI_PACKAGE_PREPARE_PROGRAMS,
+  PI_PACKAGE_TOOL_NAME_PATTERN,
+} from "@/types/plugin/plugin-pi-package"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
 import { validateTemplateDefinition } from "@/lib/templates/contracts"
 import { validateTemplatePackageManifest } from "@/lib/templates/package-manifest"
 import { isValidLinkMatcherPattern } from "@/lib/plugin/api/link-matchers"
 import {
+  validatePetAchievementDef,
+  validatePetItemDef,
+} from "@/lib/plugin/registries/pet-contribution-validation"
+import {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_PERMISSIONS,
   CANONICAL_PLUGIN_TYPES,
   PLUGIN_MANIFEST_CONTRIBUTIONS,
+  PLUGIN_LOCALIZED_LABEL_PATHS,
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
 } from "@/packages/plugin-sdk/src/contracts/catalog"
@@ -1143,6 +1157,35 @@ function validateWorkflowKindAliases(
   }
 }
 
+/**
+ * `petItems[]` / `petAchievements[]` shapes, through the same validator the
+ * overlay registration and the SDK define-helpers use. Icons are checked with
+ * every other icon below.
+ */
+function validatePetContributions(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const fields = [
+    ["petItems", validatePetItemDef, "manifest.pet_items.invalid"],
+    ["petAchievements", validatePetAchievementDef, "manifest.pet_achievements.invalid"],
+  ] as const
+  for (const [field, validate, code] of fields) {
+    const entries = (manifest as unknown as Record<string, unknown>)[field]
+    if (entries === undefined) continue
+    if (!Array.isArray(entries)) {
+      pushError(field, code, `"${field}" must be an array`)
+      continue
+    }
+    entries.forEach((entry, index) => {
+      for (const issue of validate(entry)) {
+        const path = issue.path ? `${field}[${index}].${issue.path}` : `${field}[${index}]`
+        pushError(path, code, `"${path}" ${issue.message}`)
+      }
+    })
+  }
+}
+
 const NATIVE_LUCIDE_ICON_PATHS = [
   "commands[].icon",
   "modes[].icon",
@@ -2091,6 +2134,14 @@ export function validatePluginManifest(
     validateBots(m as unknown as PluginManifest, pushError)
   }
 
+  // piPackages[] — Pi coding-agent packages (ADR-0210). Every path ends up as
+  // an argument to `pi install` / `-e`, the prepare step spawns a package
+  // manager, and env values cross into the agent process, so each of those is
+  // checked here rather than trusted at use.
+  if (m.piPackages !== undefined) {
+    validatePiPackages(m, pushError, pushWarning)
+  }
+
   if (m.modes && Array.isArray(m.modes)) {
     for (let i = 0; i < m.modes.length; i++) {
       const mode = m.modes[i] as Record<string, unknown>
@@ -2475,6 +2526,7 @@ export function validatePluginManifest(
   validateIntegrations(m as unknown as PluginManifest, pushError)
   validateExternalServices(m as unknown as PluginManifest, pushError)
   validateWorkflowKindAliases(m as unknown as PluginManifest, pushError)
+  validatePetContributions(m as unknown as PluginManifest, pushError)
   validateNativeLucideIcons(m as unknown as PluginManifest, pushError, pushWarning)
   validateLazyFactoryArray(
     m.workspaceBackends,
@@ -3003,51 +3055,44 @@ export function validatePluginManifest(
     }
   }
 
-  const localizedLabelPaths = [
-    "nameKey",
-    "descriptionKey",
-    "views[].titleKey",
-    "viewsContainers[].titleKey",
-    "webviews[].titleKey",
-    "quickActions[].labelKey",
-    "modalMounts[].labelKey",
-    "contextPanels[].labelKey",
-    "extensions[].labelKey",
-    "trayItems[].labelKey",
-    "commands[].descriptionKey",
-  ] as const
   const localeMaps =
     isPlainObject(m.i18n) && isPlainObject(m.i18n.locales)
       ? Object.entries(m.i18n.locales).filter((entry): entry is [string, Record<string, unknown>] =>
           isPlainObject(entry[1])
         )
       : []
-  for (const path of localizedLabelPaths) {
-    for (const { field, value } of collectCatalogPathValues(m, path.split("."))) {
-      if (typeof value !== "string" || value.length === 0) {
-        pushError(
-          field,
-          "manifest.i18n.key.invalid",
-          `"${field}" must be a non-empty plugin i18n key`
-        )
-        continue
-      }
-      if (localeMaps.length === 0) {
+  const localizedLabelRefs = [
+    ...PLUGIN_LOCALIZED_LABEL_PATHS.flatMap((path) => collectCatalogPathValues(m, path.split("."))),
+    // configSchema labels (`titleKey`, `enumItemLabelKeys[]`, …) at any depth.
+    ...collectConfigSchemaI18nKeys(m.configSchema).map(({ field, key }) => ({
+      field,
+      value: key,
+    })),
+  ]
+  for (const { field, value } of localizedLabelRefs) {
+    if (typeof value !== "string" || value.length === 0) {
+      pushError(
+        field,
+        "manifest.i18n.key.invalid",
+        `"${field}" must be a non-empty plugin i18n key`
+      )
+      continue
+    }
+    if (localeMaps.length === 0) {
+      pushError(
+        field,
+        "manifest.i18n.key.missing",
+        `"${field}" declares "${value}" but manifest.i18n.locales is empty`
+      )
+      continue
+    }
+    for (const [locale, messages] of localeMaps) {
+      if (!Object.prototype.hasOwnProperty.call(messages, value)) {
         pushError(
           field,
           "manifest.i18n.key.missing",
-          `"${field}" declares "${value}" but manifest.i18n.locales is empty`
+          `"${field}" references missing key "${value}" in locale "${locale}"`
         )
-        continue
-      }
-      for (const [locale, messages] of localeMaps) {
-        if (!Object.prototype.hasOwnProperty.call(messages, value)) {
-          pushError(
-            field,
-            "manifest.i18n.key.missing",
-            `"${field}" references missing key "${value}" in locale "${locale}"`
-          )
-        }
       }
     }
   }
@@ -3241,6 +3286,35 @@ function validateConfigProperty(name: string, prop: unknown, depth = 0): Validat
     errors.push(`Config property "${name}" missing "type" field`)
   } else if (!validTypes.includes(p.type)) {
     errors.push(`Config property "${name}" has invalid type "${p.type}"`)
+  }
+
+  for (const keyField of [
+    "titleKey",
+    "descriptionKey",
+    "markdownDescriptionKey",
+    "patternMessageKey",
+    "deprecationMessageKey",
+  ]) {
+    if (p[keyField] !== undefined && (typeof p[keyField] !== "string" || p[keyField] === "")) {
+      errors.push(
+        `Config property "${name}" has invalid "${keyField}" (must be a non-empty string)`
+      )
+    }
+  }
+  for (const listField of ["enumItemLabels", "enumItemLabelKeys", "enumDescriptionKeys"]) {
+    const list = p[listField]
+    if (list === undefined) continue
+    if (!Array.isArray(list) || list.some((entry) => typeof entry !== "string")) {
+      errors.push(
+        `Config property "${name}" has invalid "${listField}" (must be an array of strings)`
+      )
+    } else if (!Array.isArray(p.enum)) {
+      warnings.push(`Config property "${name}" declares "${listField}" without an "enum"`)
+    } else if (list.length !== p.enum.length) {
+      errors.push(
+        `Config property "${name}" has ${list.length} "${listField}" entries for ${p.enum.length} enum values`
+      )
+    }
   }
 
   if (p.type === "array" && p.items) {
@@ -3955,6 +4029,383 @@ function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
       }
     })
   })
+}
+
+// =============================================================================
+// piPackages validation (plugin-shipped Pi packages, ADR-0210)
+// =============================================================================
+
+/** Pi's built-in tool names; a package may not claim one as its own. */
+const PI_BUILTIN_TOOL_NAMES = new Set(["read", "grep", "find", "ls", "edit", "write", "bash"])
+
+/**
+ * A plugin-relative path that is safe to hand to Pi: forward slashes only (a
+ * backslash is a separator on Windows and a literal elsewhere, so the same
+ * manifest would name two different files), no absolute/scheme prefix, no
+ * `..`, no control characters. The catalog path-field pass reports the
+ * traversal/absolute cases too; this one adds the backslash and type rules.
+ */
+function piPackagePathProblem(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return "must be a non-empty string"
+  if (value.includes("\\")) return "must use forward slashes"
+  if (getPluginPathViolations(value).length > 0) {
+    return "must be a relative path inside the plugin directory (no absolute path, no `..`)"
+  }
+  // Only the literal `.` / `./` may name the plugin root (and only for
+  // `path`, which exempts them); `./.`, `//` and friends are refused, as the
+  // install-time Rust check refuses them.
+  if (value.split("/").every((segment) => segment === "" || segment === ".")) {
+    return "must name a file or directory inside the plugin (use `.` for the plugin root)"
+  }
+  return null
+}
+
+function validatePiPackages(
+  m: Record<string, unknown>,
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  const packages = m.piPackages
+  if (!Array.isArray(packages)) {
+    pushError("piPackages", "manifest.piPackages.invalid", '"piPackages" must be an array')
+    return
+  }
+  const configSchema = isPlainObject(m.configSchema) ? m.configSchema : undefined
+  const schemaProperties =
+    configSchema && isPlainObject(configSchema.properties) ? configSchema.properties : {}
+  const defaultConfig = isPlainObject(m.defaultConfig) ? m.defaultConfig : {}
+  const seenIds = new Set<string>()
+
+  packages.forEach((entry: unknown, index) => {
+    const field = `piPackages[${index}]`
+    if (!isPlainObject(entry)) {
+      pushError(field, "manifest.piPackages.entry.invalid", `${field} must be an object`)
+      return
+    }
+
+    if (typeof entry.id !== "string" || !PI_PACKAGE_ID_PATTERN.test(entry.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.piPackages.id.invalid",
+        `${field}.id must be lowercase kebab-case (e.g. "latex-workbench")`
+      )
+    } else if (seenIds.has(entry.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.piPackages.id.duplicate",
+        `Duplicate Pi package id "${entry.id}"`
+      )
+    } else {
+      seenIds.add(entry.id)
+    }
+
+    if (typeof entry.name !== "string" || entry.name.trim().length === 0) {
+      pushError(`${field}.name`, "manifest.piPackages.name.missing", `${field}.name is required`)
+    }
+    for (const key of ["nameKey", "description", "descriptionKey"] as const) {
+      if (entry[key] !== undefined && typeof entry[key] !== "string") {
+        pushError(
+          `${field}.${key}`,
+          `manifest.piPackages.${key}.invalid`,
+          `${field}.${key} must be a string`
+        )
+      }
+    }
+
+    const pathProblem = piPackagePathProblem(entry.path)
+    if (pathProblem && !(typeof entry.path === "string" && /^\.\/?$/.test(entry.path))) {
+      pushError(`${field}.path`, "manifest.piPackages.path.invalid", `${field}.path ${pathProblem}`)
+    }
+
+    if (
+      entry.minPiVersion !== undefined &&
+      (typeof entry.minPiVersion !== "string" || !VERSION_PATTERN.test(entry.minPiVersion))
+    ) {
+      pushError(
+        `${field}.minPiVersion`,
+        "manifest.piPackages.minPiVersion.invalid",
+        `${field}.minPiVersion must be a semver version (e.g. "0.85.1")`
+      )
+    }
+
+    if (entry.prepare !== undefined) {
+      validatePiPackagePrepare(entry.prepare, `${field}.prepare`, pushError, pushWarning)
+    }
+
+    if (entry.hostedSession !== undefined) {
+      validatePiPackageHostedSession(
+        entry.hostedSession,
+        `${field}.hostedSession`,
+        { schemaProperties, defaultConfig },
+        pushError,
+        pushWarning
+      )
+    }
+  })
+}
+
+function validatePiPackagePrepare(
+  prepare: unknown,
+  field: string,
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  if (!isPlainObject(prepare)) {
+    pushError(field, "manifest.piPackages.prepare.invalid", `${field} must be an object`)
+    return
+  }
+  if (!(PI_PACKAGE_PREPARE_PROGRAMS as readonly unknown[]).includes(prepare.program)) {
+    pushError(
+      `${field}.program`,
+      "manifest.piPackages.prepare.program.invalid",
+      `${field}.program must be one of: ${PI_PACKAGE_PREPARE_PROGRAMS.join(", ")}`
+    )
+  } else if (prepare.program === "pnpm") {
+    pushWarning(
+      `${field}.program`,
+      "manifest.piPackages.prepare.program.symlinks",
+      `${field} uses pnpm, which links dependencies by default; Cognia refuses to load a plugin whose tree contains symbolic links`,
+      'Use npm (Cognia adds --no-bin-links), or pass pnpm options that install without links (e.g. "--config.node-linker=hoisted").'
+    )
+  }
+  if (
+    !Array.isArray(prepare.args) ||
+    prepare.args.some((arg) => typeof arg !== "string" || /[\u0000-\u001f\u007f]/.test(arg))
+  ) {
+    pushError(
+      `${field}.args`,
+      "manifest.piPackages.prepare.args.invalid",
+      `${field}.args must be an array of static strings (no control characters)`
+    )
+  }
+  if (prepare.timeoutMs !== undefined) {
+    const timeout = prepare.timeoutMs
+    if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0) {
+      pushError(
+        `${field}.timeoutMs`,
+        "manifest.piPackages.prepare.timeoutMs.invalid",
+        `${field}.timeoutMs must be a positive number of milliseconds`
+      )
+    } else if (timeout > PI_PACKAGE_PREPARE_MAX_TIMEOUT_MS) {
+      pushWarning(
+        `${field}.timeoutMs`,
+        "manifest.piPackages.prepare.timeoutMs.clamped",
+        `${field}.timeoutMs exceeds ${PI_PACKAGE_PREPARE_MAX_TIMEOUT_MS}ms and will be clamped`
+      )
+    }
+  }
+  if (prepare.marker === undefined) {
+    pushWarning(
+      `${field}.marker`,
+      "manifest.piPackages.prepare.marker.missing",
+      `${field} declares no marker, so Cognia cannot tell whether it ran`,
+      "Name a PLUGIN-relative file the step creates (e.g. vendor/node_modules/.package-lock.json for a package at vendor/) so install and hosted sessions can wait for it."
+    )
+  } else {
+    const problem = piPackagePathProblem(prepare.marker)
+    if (problem) {
+      pushError(
+        `${field}.marker`,
+        "manifest.piPackages.prepare.marker.invalid",
+        `${field}.marker ${problem}`
+      )
+    }
+  }
+}
+
+function validatePiPackageHostedSession(
+  hosted: unknown,
+  field: string,
+  config: {
+    schemaProperties: Record<string, unknown>
+    defaultConfig: Record<string, unknown>
+  },
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  if (!isPlainObject(hosted)) {
+    pushError(field, "manifest.piPackages.hostedSession.invalid", `${field} must be an object`)
+    return
+  }
+
+  const extensions = hosted.extensions
+  if (!Array.isArray(extensions) || extensions.length === 0) {
+    pushError(
+      `${field}.extensions`,
+      "manifest.piPackages.hostedSession.extensions.missing",
+      `${field}.extensions must list at least one extension entry file`
+    )
+  } else {
+    extensions.forEach((ext: unknown, index) => {
+      const extField = `${field}.extensions[${index}]`
+      const problem = piPackagePathProblem(ext)
+      if (problem) {
+        pushError(
+          extField,
+          "manifest.piPackages.hostedSession.extensions.invalid",
+          `${extField} ${problem}`
+        )
+        return
+      }
+      const path = ext as string
+      if (!PI_PACKAGE_EXTENSION_SUFFIXES.some((suffix) => path.endsWith(suffix))) {
+        pushError(
+          extField,
+          "manifest.piPackages.hostedSession.extensions.suffix",
+          `${extField} must end in ${PI_PACKAGE_EXTENSION_SUFFIXES.join(", ")}`
+        )
+      }
+    })
+  }
+
+  if (hosted.env !== undefined) {
+    if (!Array.isArray(hosted.env)) {
+      pushError(
+        `${field}.env`,
+        "manifest.piPackages.hostedSession.env.invalid",
+        `${field}.env must be an array`
+      )
+    } else {
+      const seenNames = new Set<string>()
+      hosted.env.forEach((binding: unknown, index) => {
+        const envField = `${field}.env[${index}]`
+        if (!isPlainObject(binding)) {
+          pushError(
+            envField,
+            "manifest.piPackages.hostedSession.env.invalid",
+            `${envField} must be an object`
+          )
+          return
+        }
+        if (typeof binding.name !== "string" || !PI_PACKAGE_ENV_NAME_PATTERN.test(binding.name)) {
+          pushError(
+            `${envField}.name`,
+            "manifest.piPackages.hostedSession.env.name.invalid",
+            `${envField}.name must match ${PI_PACKAGE_ENV_NAME_PATTERN.source} (it becomes COGNIA_PIPKG_<name>)`
+          )
+        } else if (seenNames.has(binding.name)) {
+          pushError(
+            `${envField}.name`,
+            "manifest.piPackages.hostedSession.env.name.duplicate",
+            `Duplicate env name "${binding.name}"`
+          )
+        } else {
+          seenNames.add(binding.name)
+        }
+        validatePiPackageEnvSource(binding.from, `${envField}.from`, config, pushError, pushWarning)
+      })
+    }
+  }
+
+  if (hosted.tools !== undefined) {
+    if (!Array.isArray(hosted.tools)) {
+      pushError(
+        `${field}.tools`,
+        "manifest.piPackages.hostedSession.tools.invalid",
+        `${field}.tools must be an array of tool names`
+      )
+    } else {
+      const seenTools = new Set<string>()
+      hosted.tools.forEach((tool: unknown, index) => {
+        const toolField = `${field}.tools[${index}]`
+        if (typeof tool !== "string" || !PI_PACKAGE_TOOL_NAME_PATTERN.test(tool)) {
+          pushError(
+            toolField,
+            "manifest.piPackages.hostedSession.tools.invalid",
+            `${toolField} must match ${PI_PACKAGE_TOOL_NAME_PATTERN.source}`
+          )
+        } else if (PI_BUILTIN_TOOL_NAMES.has(tool)) {
+          pushError(
+            toolField,
+            "manifest.piPackages.hostedSession.tools.builtin",
+            `${toolField} "${tool}" is a Pi built-in tool and cannot be declared by a package`
+          )
+        } else if (seenTools.has(tool)) {
+          pushError(
+            toolField,
+            "manifest.piPackages.hostedSession.tools.duplicate",
+            `Duplicate tool name "${tool}"`
+          )
+        } else {
+          seenTools.add(tool)
+        }
+      })
+    }
+  }
+
+  if (hosted.controlsSession !== undefined && typeof hosted.controlsSession !== "boolean") {
+    pushError(
+      `${field}.controlsSession`,
+      "manifest.piPackages.hostedSession.controlsSession.invalid",
+      `${field}.controlsSession must be a boolean`
+    )
+  }
+}
+
+function validatePiPackageEnvSource(
+  from: unknown,
+  field: string,
+  config: {
+    schemaProperties: Record<string, unknown>
+    defaultConfig: Record<string, unknown>
+  },
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  const keys = isPlainObject(from) ? Object.keys(from) : []
+  if (!isPlainObject(from) || keys.length !== 1) {
+    pushError(
+      field,
+      "manifest.piPackages.hostedSession.env.from.invalid",
+      `${field} must be exactly one of { config }, { value } or { workspace: true }`
+    )
+    return
+  }
+  if ("config" in from) {
+    if (typeof from.config !== "string" || from.config.length === 0) {
+      pushError(
+        field,
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        `${field}.config must name a configuration key`
+      )
+    } else if (
+      !Object.prototype.hasOwnProperty.call(config.schemaProperties, from.config) &&
+      !Object.prototype.hasOwnProperty.call(config.defaultConfig, from.config)
+    ) {
+      pushWarning(
+        field,
+        "manifest.piPackages.hostedSession.env.config.unknown",
+        `${field}.config "${from.config}" is not declared in configSchema or defaultConfig`,
+        "Declare the key so users can set it; an unset key forwards nothing."
+      )
+    }
+    return
+  }
+  if ("value" in from) {
+    if (typeof from.value !== "string") {
+      pushError(
+        field,
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        `${field}.value must be a string`
+      )
+    }
+    return
+  }
+  if ("workspace" in from) {
+    if (from.workspace !== true) {
+      pushError(
+        field,
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        `${field}.workspace must be true`
+      )
+    }
+    return
+  }
+  pushError(
+    field,
+    "manifest.piPackages.hostedSession.env.from.invalid",
+    `${field} must be exactly one of { config }, { value } or { workspace: true }`
+  )
 }
 
 function validateCliTools(m: PluginManifest, pushError: PushDiagnostic): void {

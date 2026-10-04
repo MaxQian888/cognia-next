@@ -66,6 +66,7 @@ import type { PluginWebviewDef } from "./plugin-webview"
 import type { PluginAuthProviderDef } from "./plugin-auth"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 import type { PluginCliToolDef } from "./plugin-cli-tool"
+import type { PluginPiPackageDef } from "./plugin-pi-package"
 import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
 import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
 import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
@@ -217,6 +218,7 @@ export type PluginCapability =
   | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
   | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
+  | "pi-package" // Ships Pi coding-agent packages: install into Pi + load into hosted Pi sessions (manifest.piPackages, ADR-0210)
   | "subscription-provider" // Declarative API-key subscription setup; credentials remain host-owned
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
   | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
@@ -776,6 +778,14 @@ export interface PluginManifest {
    * the `"cli:execute"` permission (DANGEROUS, confirm-tier).
    */
   cliTools?: PluginCliToolDef[]
+
+  /**
+   * Pi coding-agent packages shipped inside the plugin directory (ADR-0210).
+   * Requires the `"pi-package"` capability. Each can be installed into the
+   * user's Pi (`pi install <abs path>`) and, when `hostedSession` is declared,
+   * loaded into Cognia-hosted Pi sessions of agents that opt in.
+   */
+  piPackages?: PluginPiPackageDef[]
 
   /** Agent modes provided */
   modes?: PluginModeDef[]
@@ -1607,9 +1617,15 @@ export type PluginConfigScope = "application" | "machine" | "window" | "resource
 export interface PluginConfigProperty {
   type: "string" | "number" | "integer" | "boolean" | "array" | "object"
   title?: string
+  /** Key into this manifest's own `i18n.locales` bundle for `title`. */
+  titleKey?: string
   description?: string
+  /** Key into this manifest's own `i18n.locales` bundle for `description`. */
+  descriptionKey?: string
   /** Markdown description rendered (sanitised) in place of `description` when set. */
   markdownDescription?: string
+  /** Key into this manifest's own `i18n.locales` bundle for `markdownDescription`. */
+  markdownDescriptionKey?: string
   default?: unknown
   enum?: unknown[]
   /**
@@ -1628,6 +1644,12 @@ export interface PluginConfigProperty {
   secret?: boolean
   /** Per-enum-value plain-text descriptions, surfaced beside each option. */
   enumDescriptions?: string[]
+  /** Per-enum-value keys (manifest `i18n.locales`) for `enumDescriptions`. */
+  enumDescriptionKeys?: string[]
+  /** Per-enum-value display labels (the raw value is shown when absent). */
+  enumItemLabels?: string[]
+  /** Per-enum-value keys (manifest `i18n.locales`) for `enumItemLabels`. */
+  enumItemLabelKeys?: string[]
   /** Per-enum-value markdown descriptions (takes precedence over enumDescriptions). */
   markdownEnumDescriptions?: string[]
   /** UI sort key within the form (lower first; unset sorts after, then by declaration order). */
@@ -1636,6 +1658,8 @@ export interface PluginConfigProperty {
   scope?: PluginConfigScope
   /** When set, the field renders a deprecation warning carrying this message. */
   deprecationMessage?: string
+  /** Key into this manifest's own `i18n.locales` bundle for `deprecationMessage`. */
+  deprecationMessageKey?: string
   minimum?: number
   maximum?: number
   minLength?: number
@@ -1643,6 +1667,8 @@ export interface PluginConfigProperty {
   pattern?: string
   /** Custom message shown when a value fails the `pattern` check. */
   patternMessage?: string
+  /** Key into this manifest's own `i18n.locales` bundle for `patternMessage`. */
+  patternMessageKey?: string
   /** Input hint for string fields: render a wider textarea or validate a known format. */
   format?: "email" | "url" | "uri" | "textarea"
   items?: PluginConfigProperty

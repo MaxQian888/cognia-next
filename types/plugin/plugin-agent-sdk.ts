@@ -220,6 +220,8 @@ export interface PluginDispatchSubagentOptions {
   _permissionCeiling?: import("@/lib/ai/agent/external/policy/permission-cascade").ExternalSessionPermissionSpec
   /** Explicit run id (defaults to a generated one) — also the background key. */
   _runId?: string
+  /** Host-owned persistent child session for durable background dispatch. */
+  _sessionId?: string
   /**
    * Live capture-stream sink for the child run, populated by the host's
    * `dispatch_agent` tool. Forwarded into `executeAgent` so tool-call /

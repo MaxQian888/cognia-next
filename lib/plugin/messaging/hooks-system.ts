@@ -50,6 +50,8 @@ import {
   unregisterPluginHookContribution,
 } from "@/lib/plugin/registries/hook-registry"
 import { loggers } from "../core/logger"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { getHookPointPermission } from "@/lib/plugin/contracts/plugin-points"
 import type {
   PluginHooksAll,
   HookSandboxExecutionResult,
@@ -1019,10 +1021,17 @@ export class PluginEventHooks {
     const store = usePluginStore.getState()
     const pluginIds = this.getPluginsByPriority(hookName)
     const results: HookSandboxExecutionResult<T>[] = []
+    // A hook whose payload a plugin API guards with a permission is delivered
+    // only to plugins granted it (`HOOK_POINT_PERMISSIONS`); the contract
+    // publishes the same requirement.
+    const permission = getHookPointPermission(hookName)
 
     for (const pluginId of pluginIds) {
       const plugin = store.plugins[pluginId]
       if (!plugin || plugin.status !== "enabled" || !plugin.hooks) continue
+      if (permission && !getPermissionGuard().check(pluginId, permission, `hook:${hookName}`)) {
+        continue
+      }
 
       const startTime = performance.now()
       // The timeout timer must be cleared on the fast path (W3.7): per-chunk
@@ -1110,6 +1119,8 @@ export class PluginEventHooks {
     return this.executeHook("onGoalDelete", (hooks) => hooks.onGoalDelete?.(goalId))
   }
 
+  // Delivered only to plugins granted `pet:read` (see HOOK_POINT_PERMISSIONS,
+  // enforced in executeHook), exactly like the ctx.pet reads.
   async dispatchPetInteract(payload: PetInteractHookPayload) {
     return this.executeHook("onPetInteract", (hooks) => hooks.onPetInteract?.(payload))
   }

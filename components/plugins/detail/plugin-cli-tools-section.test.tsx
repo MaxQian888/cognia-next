@@ -5,6 +5,7 @@
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
+  useLocale: jest.fn(() => "zh-CN"),
   useTranslations: () => {
     const t = (key: string, values?: Record<string, unknown>) =>
       values ? `${key}:${JSON.stringify(values)}` : key
@@ -22,6 +23,7 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args: unknown) => invokeMock(cmd, args),
 }))
 
+import { useLocale } from "next-intl"
 import { PluginCliToolsSection } from "./plugin-cli-tools-section"
 import type { PluginManifest } from "@/types/plugin"
 
@@ -55,6 +57,7 @@ async function renderSection(manifest: PluginManifest = MANIFEST) {
 
 describe("PluginCliToolsSection", () => {
   beforeEach(() => {
+    jest.mocked(useLocale).mockReturnValue("zh-CN")
     getStatusesMock.mockReset()
     invokeMock.mockReset()
     invokeMock.mockResolvedValue(undefined)
@@ -64,6 +67,40 @@ describe("PluginCliToolsSection", () => {
     getStatusesMock.mockResolvedValue([])
     await renderSection({ ...MANIFEST, cliTools: [] } as PluginManifest)
     expect(screen.queryByTestId("plugin-cli-tools-section")).not.toBeInTheDocument()
+  })
+
+  it("localizes the UI description without changing the model-facing manifest", async () => {
+    getStatusesMock.mockResolvedValue([])
+    const manifest: PluginManifest = {
+      ...MANIFEST,
+      cliTools: [{ ...MANIFEST.cliTools![0], descriptionKey: "tool.search" }],
+      i18n: {
+        locales: { en: { "tool.search": "Search files" }, "zh-CN": { "tool.search": "搜索文件" } },
+      },
+    }
+    await renderSection(manifest)
+    expect(screen.getByText("搜索文件")).toBeInTheDocument()
+    expect(screen.queryByText("Search files")).not.toBeInTheDocument()
+    expect(manifest.cliTools![0].description).toBe("Search files")
+    expect(getStatusesMock).toHaveBeenCalledWith(manifest)
+  })
+
+  it.each([
+    ["fr", "tool.search", "Search in English"],
+    ["zh-CN", "tool.search", "Search in English"],
+    ["zh-CN", "missing", "Search files"],
+    ["zh-CN", undefined, "Search files"],
+  ])("uses locale %s and key %s with fallback %s", async (locale, descriptionKey, expected) => {
+    jest.mocked(useLocale).mockReturnValue(locale)
+    getStatusesMock.mockResolvedValue([])
+    await renderSection({
+      ...MANIFEST,
+      cliTools: [{ ...MANIFEST.cliTools![0], descriptionKey }],
+      i18n: {
+        locales: { en: { "tool.search": "Search in English" }, "zh-CN": { "tool.search": "" } },
+      },
+    })
+    expect(screen.getByText(expected)).toBeInTheDocument()
   })
 
   it("shows the available pill with the detected version", async () => {

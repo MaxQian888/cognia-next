@@ -73,10 +73,49 @@ pub(crate) fn validate_plugin_relative_path(value: &str) -> Result<PathBuf, Stri
     Ok(relative)
 }
 
+/// True when `value` names the plugin root itself: exactly `.` or `./`, the
+/// same rule as the TypeScript manifest validator (`/^\.\/?$/`). Anything
+/// else — `/`, `//`, `\\`, `./.` — is an ordinary path and gets the normal
+/// relative-path checks (which refuse those).
+pub(crate) fn is_plugin_root_selector(value: &str) -> bool {
+    matches!(value, "." | "./")
+}
+
+/// Resolve an existing directory under `root` with the same no-symlink,
+/// containment guarantees as [`resolve_existing_plugin_file`]. `.` names the
+/// root itself (a plugin-shipped Pi package can live at the plugin root).
+pub(crate) fn resolve_existing_plugin_dir(root: &Path, value: &str) -> Result<PathBuf, String> {
+    if is_plugin_root_selector(value) {
+        let metadata = std::fs::symlink_metadata(root)
+            .map_err(|error| format!("stat plugin root {root:?}: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("plugin root must be a non-symlink directory".into());
+        }
+        return root
+            .canonicalize()
+            .map_err(|error| format!("canonicalize plugin root {root:?}: {error}"));
+    }
+    let target = resolve_contained_existing(root, value)?;
+    if !target.is_dir() {
+        return Err(format!("plugin path is not a directory: {target:?}"));
+    }
+    Ok(target)
+}
+
 /// Resolve an existing regular file under `root`, rejecting every symlinked
 /// segment. Callers invoke this immediately before loading so development
 /// directories are revalidated on every load.
 pub(crate) fn resolve_existing_plugin_file(root: &Path, value: &str) -> Result<PathBuf, String> {
+    let target = resolve_contained_existing(root, value)?;
+    if !target.is_file() {
+        return Err(format!("plugin path is not a regular file: {target:?}"));
+    }
+    Ok(target)
+}
+
+/// The shared walk: an existing entry under `root`, no symlinked segment,
+/// still inside `root` after canonicalization. The caller checks its kind.
+fn resolve_contained_existing(root: &Path, value: &str) -> Result<PathBuf, String> {
     let relative = validate_plugin_relative_path(value)?;
     let canonical_root = root
         .canonicalize()
@@ -97,11 +136,6 @@ pub(crate) fn resolve_existing_plugin_file(root: &Path, value: &str) -> Result<P
         .map_err(|error| format!("canonicalize plugin path {cursor:?}: {error}"))?;
     if !canonical_target.starts_with(&canonical_root) {
         return Err("plugin path escapes its root after canonicalization".into());
-    }
-    if !canonical_target.is_file() {
-        return Err(format!(
-            "plugin path is not a regular file: {canonical_target:?}"
-        ));
     }
     Ok(canonical_target)
 }

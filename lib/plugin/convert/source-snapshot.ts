@@ -59,20 +59,58 @@ export function isPluginEnvironmentFile(relativePath: string): boolean {
 }
 
 /**
+ * Paths a conversion may write with arbitrary content. Mirrors
+ * `GENERATED_FILE_PATHS` in `crates/cognia-plugin-runtime/src/generated_files.rs`.
+ */
+export const GENERATED_FILE_PATHS: readonly string[] = ["plugin.json", "dist/index.js"]
+
+/**
+ * The only contents a conversion may write over an EXISTING source file: an
+ * empty JSON object (consumed vendor manifests and MCP configs, which may hold
+ * literal credentials) or a bare newline (`.env*`). Mirrors
+ * `NEUTRALIZED_CONTENTS` in `generated_files.rs`.
+ */
+export const NEUTRALIZED_CONTENTS: readonly string[] = ["{}\n", "\n"]
+
+/** True when an overlay entry is something the Rust installers will apply. */
+export function isOverlayEntryAllowed(
+  snapshot: ReadonlyMap<string, string>,
+  path: string,
+  contents: string
+): boolean {
+  return (
+    GENERATED_FILE_PATHS.includes(path) ||
+    (snapshot.has(path) && NEUTRALIZED_CONTENTS.includes(contents))
+  )
+}
+
+/**
  * Which converted files differ from what the source already contained.
  *
  * The installers copy the source tree verbatim and then overlay only what
  * conversion actually changed, so an unchanged file is never rewritten and the
  * overlay stays small enough for the installer's allowlist to police. This was
  * inlined in the GitHub path and needed identically by the local one.
+ *
+ * The overlay contract is the Rust one: generate `plugin.json` /
+ * `dist/index.js`, or neutralize a file the source already has. Anything else
+ * would be refused at install time, so it is refused here, at preview time,
+ * with the offending paths named.
  */
 export function generatedFilesFrom(
   snapshot: ReadonlyMap<string, string>,
   converted: ReadonlyMap<string, string>
 ): Record<string, string> {
   const generated: Record<string, string> = {}
+  const refused: string[] = []
   for (const [path, contents] of converted) {
-    if (snapshot.get(path) !== contents) generated[path] = contents
+    if (snapshot.get(path) === contents) continue
+    if (!isOverlayEntryAllowed(snapshot, path, contents)) refused.push(path)
+    else generated[path] = contents
   }
+  if (refused.length)
+    throw new Error(
+      `conversion changed files the plugin installers cannot overlay: ${refused.sort().join(", ")}`
+    )
   return generated
 }

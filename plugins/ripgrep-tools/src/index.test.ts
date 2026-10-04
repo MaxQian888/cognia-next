@@ -31,6 +31,13 @@ function argvFor(params: Record<string, unknown>): string[] {
 }
 
 describe("ripgrep-tools manifest", () => {
+  it("ships localized UI descriptions while retaining the English model description", () => {
+    expect(tool.descriptionKey).toBeTruthy()
+    const locales = manifest.i18n.locales as Record<string, Record<string, string>>
+    expect(locales.en[tool.descriptionKey!]).toBe(tool.description)
+    expect(locales["zh-CN"][tool.descriptionKey!]).toMatch(/[\u4e00-\u9fff]/)
+  })
+
   it("exposes the module manifest straight from plugin.json", () => {
     // Guards the `builtinManifest` module-over-JSON merge trap: a hand-written
     // TS subset would silently win over these keys.

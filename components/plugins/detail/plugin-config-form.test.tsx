@@ -184,6 +184,46 @@ describe("PluginConfigFormContent", () => {
     expect(text.indexOf("First Field")).toBeLessThan(text.indexOf("Second Field"))
   })
 
+  it("resolves titleKey / descriptionKey / enumItemLabelKeys through the manifest's own locales", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        i18n: {
+          locales: {
+            en: {
+              "config.mode.title": "Protection mode",
+              "config.mode.description": "How protected content is gated.",
+              "config.mode.strict": "Strict",
+            },
+          },
+        },
+        configSchema: {
+          type: "object",
+          properties: {
+            mode: {
+              type: "string",
+              title: "raw mode title",
+              titleKey: "config.mode.title",
+              descriptionKey: "config.mode.description",
+              enum: ["strict", "authoring"],
+              enumItemLabelKeys: ["config.mode.strict", "config.mode.missing"],
+              enumItemLabels: ["strict raw", "Authoring (raw)"],
+              default: "strict",
+            },
+          },
+        },
+      },
+      config: {},
+    }
+    renderForm()
+    expect(screen.getByText("Protection mode")).toBeInTheDocument()
+    expect(screen.queryByText("raw mode title")).not.toBeInTheDocument()
+    expect(screen.getByText("How protected content is gated.")).toBeInTheDocument()
+    // The selected option renders its localized label, not the raw value.
+    expect(screen.getAllByText("Strict").length).toBeGreaterThan(0)
+  })
+
   it("falls back to markdownDescription text when description is absent", () => {
     mockPlugin = {
       ...schemaPlugin,

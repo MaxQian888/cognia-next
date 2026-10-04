@@ -1504,6 +1504,38 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // ADR-0210. A plugin ships Pi coding-agent packages from its own directory:
+    // installed into the user's Pi through `lib/pi-packages/host.ts` and, when
+    // `hostedSession` is declared, loaded with `-e` into Cognia-hosted Pi
+    // sessions of agents that opt in. Pure data: the host owns every spawn.
+    id: "pi-package",
+    support: "supported",
+    manifestFields: ["piPackages"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES dispatch → lib/plugin/pi-packages/registry.ts (install via runPiMutation, hosted sessions via PiRpcClientAdapter -e)",
+    hostBindings: [
+      "lib/plugin/pi-packages/registry.ts",
+      "lib/plugin/pi-packages/resolve.ts",
+      "lib/plugin/pi-packages/operations.ts",
+      "lib/plugin/pi-packages/session.ts",
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/ai/agent/external/runtimes/pi/pi-rpc-client.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-pi-package.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/pi_package.py"],
+    docs: "docs/content/docs/en/plugin-dev/pi-packages.mdx",
+    requiredTests: [
+      "lib/plugin/pi-packages/registry.test.ts",
+      "lib/plugin/pi-packages/resolve.test.ts",
+      "lib/plugin/pi-packages/operations.test.ts",
+      "lib/plugin/pi-packages/session.test.ts",
+      "packages/plugin-sdk/src/define/define-pi-package.test.ts",
+    ],
+  },
+  {
     // Promoted experimental→supported: the two pending items are now covered.
     // Declarative surface — a tray entry that is visible before activation and
     // dispatched by command/slash — is delivered via a `quickActions` manifest

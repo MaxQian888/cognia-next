@@ -132,6 +132,14 @@ export type {
   PluginPetAchievementDef,
   PluginPetItemDef,
 } from "@/types/plugin/plugin-pet"
+export type {
+  PluginPiPackageDef,
+  PluginPiPackageEnvBinding,
+  PluginPiPackageEnvSource,
+  PluginPiPackageHostedSession,
+  PluginPiPackagePrepare,
+  PluginPiPackageRef,
+} from "@/types/plugin/plugin-pi-package"
 export type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
 export type { PluginRoutingStrategyDef } from "@/types/plugin/plugin-routing-strategy"
 export type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
@@ -169,6 +177,12 @@ export type {
   CreatePluginTaskInput,
   UpdatePluginTaskInput,
   PluginTaskFilter,
+  PluginTaskOverlapPolicy,
+  PluginTaskRetryConfig,
+  PluginTaskExecutionOptions,
+  PluginTaskExecutionPhase,
+  PluginTaskExecutionEvent,
+  PluginTaskStatistics,
 } from "@/types/plugin/plugin-scheduler"
 
 export type { VsCodeExtensionBlock } from "@/types/plugin/plugin-vscode"

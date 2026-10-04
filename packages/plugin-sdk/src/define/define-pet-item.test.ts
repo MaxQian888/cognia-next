@@ -38,4 +38,16 @@ describe("definePetItem", () => {
       })
     ).toThrow(/price/)
   })
+
+  it("throws for a consumable without the interaction it is used for", () => {
+    expect(() =>
+      definePetItem({
+        id: "mystery-snack",
+        labels: { en: "Mystery snack" },
+        category: "food",
+        price: 5,
+        consumable: true,
+      })
+    ).toThrow(/interactionKind/)
+  })
 })

@@ -34,6 +34,13 @@ export type PluginCliBinaryRef =
  * `-rf /` or `$(rm -rf)` can never break out into extra arguments.
  */
 export type PluginCliArgvToken =
+  /**
+   * A fixed argv element. Plugin-root tokens (`${COGNIA_PLUGIN_ROOT}` and the
+   * converter spellings in `lib/plugin/utils/plugin-root-tokens.ts`) are bound
+   * to the plugin's install directory at execution — so a tool can run
+   * `node ${COGNIA_PLUGIN_ROOT}/cli.js` with a workspace cwd. Refused for
+   * `builtin://` plugins, which have no directory on disk.
+   */
   | { literal: string }
   | {
       /** Name of a declared parameter whose value fills this slot. */
@@ -61,6 +68,8 @@ export interface PluginCliToolDef {
   /** Tool name (snake_case, same rule as runtime plugin tools). */
   name: string
   description: string
+  /** UI-only description key in the manifest's own i18n.locales. */
+  descriptionKey?: string
   /** JSON Schema (draft-07 object) for the tool's parameters. */
   parameters: Record<string, unknown>
   binary: PluginCliBinaryRef
@@ -97,7 +106,10 @@ export interface PluginCliToolDef {
    * realpath: a symlink operand that escapes the base is not caught.
    */
   confinedPathParams?: string[]
-  /** Static extra environment variables (allowlist map, never templated). */
+  /**
+   * Static extra environment variables (allowlist map; parameters never reach
+   * it). Plugin-root tokens in values bind like `{ literal }` argv tokens do.
+   */
   env?: Record<string, string>
   /**
    * Per-invocation timeout, clamped host-side to 600_000 ms. Also copied

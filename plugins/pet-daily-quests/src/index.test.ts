@@ -8,7 +8,7 @@
 import type { PluginContext, PluginPetEvent } from "@cognia/plugin-sdk"
 import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
 import { createTestPluginContext } from "@cognia/plugin-sdk/testing"
-import definition, { REWARD_EVENT_KIND, manifest } from "./index"
+import definition, { PetCannotReceiveRewardError, REWARD_EVENT_KIND, manifest } from "./index"
 import manifestJson from "../plugin.json"
 import { claimQuestReward, disposeQuestStore, getQuestState } from "./quest-store"
 import { advanceQuests, ensureDay, localDayKey } from "./quest-engine"
@@ -21,6 +21,11 @@ function makeCtx() {
     grantedXp: Math.min(opts?.xp ?? 0, 10),
     grantedCoins: opts?.coins ?? 0,
   }))
+  const getAvailability = jest.fn(
+    async (): Promise<
+      { available: true } | { available: false; reason: "disabled" | "not-hatched" }
+    > => ({ available: true })
+  )
   const registerExtension = jest.fn(() => jest.fn())
   const showToast = jest.fn()
   const test = createTestPluginContext({
@@ -32,6 +37,7 @@ function makeCtx() {
           return () => petSubscribers.delete(cb)
         },
         getRemainingBudget: () => ({ xp: 50, coins: 100 }),
+        getAvailability,
         emitEvent,
       },
       extensions: { registerExtension },
@@ -41,6 +47,7 @@ function makeCtx() {
   return {
     ctx: test.ctx,
     emitEvent,
+    getAvailability,
     registerExtension,
     showToast,
     deliver: (event: PluginPetEvent) => {
@@ -112,6 +119,29 @@ describe("pet-daily-quests activation", () => {
     // No throw + state persists — the goal1 quest only advances on days it
     // was rolled, which is covered deterministically in quest-engine tests.
     expect(getQuestState()).not.toBeNull()
+  })
+
+  it("emits rewards as the neutral pluginReward kind, not a fake workflow run", () => {
+    expect(REWARD_EVENT_KIND).toBe("pluginReward")
+  })
+
+  it("refuses a claim the pet cannot receive and leaves the quest claimable", async () => {
+    const harness = makeCtx()
+    await activate(harness)
+    completeInteractionQuests(harness.deliver)
+    const doneQuest = getQuestState()!.quests.find((q) => q.done)!
+    harness.getAvailability.mockResolvedValueOnce({ available: false, reason: "disabled" })
+
+    await expect(claimQuestReward(doneQuest.id)).rejects.toBeInstanceOf(PetCannotReceiveRewardError)
+    // Nothing was granted (the API would have returned a quiet zero) …
+    expect(harness.emitEvent).not.toHaveBeenCalled()
+    // … the user is told why, and the quest is still there to claim.
+    expect(harness.showToast).toHaveBeenCalledWith("claimPetUnavailable", "error")
+    expect(getQuestState()!.quests.find((q) => q.id === doneQuest.id)?.claimed).toBe(false)
+
+    // Once the pet can receive it, the same claim goes through.
+    await expect(claimQuestReward(doneQuest.id)).resolves.not.toBeNull()
+    expect(getQuestState()!.quests.find((q) => q.id === doneQuest.id)?.claimed).toBe(true)
   })
 
   it("claims a completed quest through ctx.pet.emitEvent", async () => {

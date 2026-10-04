@@ -836,35 +836,40 @@
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "pet:read"
     },
     {
       "id": "onPetLevelUp",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "pet:read"
     },
     {
       "id": "onPetEvolved",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "pet:read"
     },
     {
       "id": "onPetAchievementUnlocked",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "pet:read"
     },
     {
       "id": "onPetUnwell",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "pet:read"
     },
     {
       "id": "onShareLinkCreate",

@@ -225,6 +225,27 @@ describe("runMarketplaceInstall", () => {
     expect(client.installPlugin).not.toHaveBeenCalled()
   })
 
+  it("forwards the manifest's own locale bundles with the config schema", async () => {
+    const i18n = { locales: { en: { "config.token.title": "Token" } } }
+    const configSchema = {
+      type: "object",
+      properties: { token: { type: "string", titleKey: "config.token.title" } },
+    }
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({ configSchema, i18n } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn(),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "cancel" }),
+    })
+    await runMarketplaceInstall(opts)
+    expect(opts.requestConfig).toHaveBeenCalledWith(expect.objectContaining({ configSchema, i18n }))
+  })
+
   it("does NOT request permission review when there are no declared or optional permissions", async () => {
     const opts = makeOpts()
     await runMarketplaceInstall(opts)

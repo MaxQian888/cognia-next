@@ -1,5 +1,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 
 import {
   checkAuthorImports,
@@ -9,6 +12,7 @@ import {
   isHostIntegrationTest,
   readGovernanceBaseline,
   stripComments,
+  UPSTREAM_SNAPSHOT_DIRS,
 } from "./check-author-imports.mjs"
 
 test("host integration opt-out is explicit and test-file-only", () => {
@@ -72,6 +76,33 @@ test("the reference in-tree plugin compiles against the SDK alone", () => {
 
 test("repository author templates pass the private-import gate", () => {
   assert.deepEqual(checkAuthorImports(), [])
+})
+
+test("only explicitly listed upstream snapshots are exempt, and only below their own root", () => {
+  const repo = mkdtempSync(join(tmpdir(), "author-imports-"))
+  const write = (path, body) => {
+    mkdirSync(dirname(join(repo, path)), { recursive: true })
+    writeFileSync(join(repo, path), body)
+  }
+  try {
+    const hostImport = 'import x from "@/lib/private"\n'
+    // The listed snapshot is upstream code: not gated.
+    write("plugins/pi-latex-workbench/vendor/packages/cli/src/bin.ts", hostImport)
+    assert.deepEqual(checkAuthorImports(repo, ["plugins/pi-latex-workbench"]), [])
+    // Glue beside it is still the author's code.
+    write("plugins/pi-latex-workbench/pi/glue.ts", hostImport)
+    assert.deepEqual(checkAuthorImports(repo, ["plugins/pi-latex-workbench"]), [
+      "plugins/pi-latex-workbench/pi/glue.ts imports @/lib/private",
+    ])
+    // A `vendor/` directory anywhere else is not an escape hatch.
+    write("plugins/other/vendor/x.ts", hostImport)
+    assert.deepEqual(checkAuthorImports(repo, ["plugins/other"]), [
+      "plugins/other/vendor/x.ts imports @/lib/private",
+    ])
+    assert.deepEqual(UPSTREAM_SNAPSHOT_DIRS, ["plugins/pi-latex-workbench/vendor"])
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
 })
 
 test("in-tree plugins are governed by a baseline that may only shrink", () => {

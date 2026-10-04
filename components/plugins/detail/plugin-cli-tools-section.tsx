@@ -8,7 +8,7 @@
 // install shows up without waiting out the 300s TTL.
 
 import { useCallback, useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { ExternalLinkIcon, RefreshCwIcon, TerminalSquareIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,7 @@ import {
   type PluginBinaryStatus,
 } from "@/lib/plugin/cli-tools/binary-status"
 import type { PluginCliToolDef, PluginManifest } from "@/types/plugin"
+import { resolvePluginI18nText } from "@/lib/plugin/i18n/config-schema-text"
 
 function binaryNameOf(def: PluginCliToolDef): string {
   return def.binary.kind === "requires" ? def.binary.name : def.binary.relPath
@@ -25,6 +26,7 @@ function binaryNameOf(def: PluginCliToolDef): string {
 
 export function PluginCliToolsSection({ manifest }: { manifest: PluginManifest }) {
   const t = useTranslations("plugins.detail.cliTools")
+  const locale = useLocale()
   const cliTools = Array.isArray(manifest.cliTools) ? manifest.cliTools : []
   const [statuses, setStatuses] = useState<Map<string, PluginBinaryStatus>>(new Map())
   const [probing, setProbing] = useState(false)
@@ -101,7 +103,7 @@ export function PluginCliToolsSection({ manifest }: { manifest: PluginManifest }
             <li key={def.name} className="flex flex-wrap items-center gap-2 text-sm">
               <code className="font-mono text-xs">{def.name}</code>
               <span className="text-xs text-muted-foreground flex-1 min-w-32 truncate">
-                {def.description}
+                {resolvePluginI18nText(def.description, def.descriptionKey, manifest.i18n, locale)}
               </span>
               <span className="text-xs text-muted-foreground font-mono">{binaryNameOf(def)}</span>
               {def.binary.kind === "requires" &&

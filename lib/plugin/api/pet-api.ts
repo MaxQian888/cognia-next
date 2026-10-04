@@ -22,21 +22,43 @@
 
 import { loggers } from "@cognia/logging"
 import type { PluginCapability } from "@/types/plugin/plugin"
-import type { PetEventKind, PetEventSource } from "@/types/pet"
 import { getPetProfile } from "@/lib/db/pet"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
+import { resolveLivePetAvailability } from "@/lib/pet/access/availability"
+import { useSettingsStore } from "@/stores/settings"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { projectPetSummary, type PetSummary } from "@/lib/pet/access/summary"
 import {
-  MAX_XP_PER_REWARD,
-  PET_REWARDABLE_KINDS,
   remainingPetAllowance,
   requestPetInteraction,
   requestPetReward,
   type PetAccessResult,
   type PetInteractionKind,
 } from "@/lib/pet/access/gate"
+import {
+  PetCooldownError,
+  PetEventKindNotAllowedError,
+  PetItemKindMismatchError,
+  PetItemNotOwnedError,
+  type PluginEmittablePetEventKind,
+  type PluginPetAvailability,
+  type PluginPetEvent,
+} from "./pet-api-contract"
+
+export {
+  MAX_COINS_PER_EMIT,
+  MAX_XP_PER_EMIT,
+  PLUGIN_EMITTABLE_PET_EVENT_KINDS,
+  PetCooldownError,
+  PetEventKindNotAllowedError,
+  PetItemKindMismatchError,
+  PetItemNotOwnedError,
+  type PluginEmittablePetEventKind,
+  type PluginPetAvailability,
+  type PluginPetEvent,
+  type PluginPetUnavailableReason,
+} from "./pet-api-contract"
 
 /**
  * PII-safe projection of the pet's public state.
@@ -51,50 +73,22 @@ export type PluginPetSummary = PetSummary
 /** Direct nurture interactions a plugin may perform. */
 export type PluginPetInteractionKind = PetInteractionKind
 
-/** Kinds a plugin may emit through `emitEvent`, nurture and neutral only. */
-export const PLUGIN_EMITTABLE_PET_EVENT_KINDS: readonly PetEventKind[] = PET_REWARDABLE_KINDS
-
-/** Hard per-call XP ceiling, below the daily budget. */
-export const MAX_XP_PER_EMIT = MAX_XP_PER_REWARD
-
-/** Sanitized event forwarded to plugin subscribers. */
-export interface PluginPetEvent {
-  source: PetEventSource
-  kind: PetEventKind
-  xp?: number
-  /** Reduced meta — id-shaped keys only; free-form text never crosses. */
-  meta?: {
-    achievementId?: string
-    itemId?: string
-    goalId?: string
-    level?: number
-    stage?: string
-  }
-  at: number
-}
-
-export class PetEventKindNotAllowedError extends Error {
-  constructor(kind: string) {
-    super(
-      `Pet event kind "${kind}" is not plugin-emittable. Allowed: ${PLUGIN_EMITTABLE_PET_EVENT_KINDS.join(", ")}`
-    )
-    this.name = "PetEventKindNotAllowedError"
-  }
-}
-
 /**
- * Thrown when a plugin names an item it does not own (or one that is not a
- * consumable). `applyPetEvent` applies the named item's stronger `needsEffect`
- * in place of the base restore, so before the access gate an unowned id was a
- * free upgrade: the shop path checked ownership and decremented stock, this
- * path did neither.
+ * The permission each method requires. The single source for the guard
+ * below, and pinned against the published contract catalog by a parity test,
+ * so the catalog (and everything generated from it: the SDK reference, the
+ * Python and Rust mirrors, the audit view) cannot drift from what the host
+ * actually enforces.
  */
-export class PetItemNotOwnedError extends Error {
-  constructor(itemId: string) {
-    super(`Pet item "${itemId}" is not owned, or is not a consumable.`)
-    this.name = "PetItemNotOwnedError"
-  }
-}
+export const PET_API_PERMISSIONS = {
+  getView: "pet:read",
+  getSummary: "pet:read",
+  getAvailability: "pet:read",
+  onEvent: "pet:read",
+  getRemainingBudget: "pet:read",
+  interact: "pet:interact",
+  emitEvent: "pet:interact",
+} as const satisfies Record<keyof PluginPetAPI, string>
 
 export interface PluginPetAPI {
   /** Live public view of the pet (null before the profile is initialized). */
@@ -103,6 +97,13 @@ export interface PluginPetAPI {
   getSummary(): Promise<PluginPetSummary | null>
   /** Subscribe to sanitized pet events. Returns a disposer. */
   onEvent(cb: (event: PluginPetEvent) => void): () => void
+  /**
+   * Whether interactions and rewards would reach the pet right now, and if
+   * not, why. A pet that is switched off, still an egg, or not set up yet
+   * makes `interact`/`emitEvent` grant zero quietly; ask this first so a quest
+   * is not marked claimed for a reward the pet never received.
+   */
+  getAvailability(): Promise<PluginPetAvailability>
   /** Remaining daily reward budget for THIS plugin (for quest UIs). */
   getRemainingBudget(): { xp: number; coins: number }
   /**
@@ -110,6 +111,11 @@ export interface PluginPetAPI {
    * amounts are spent from the SAME daily budget as `emitEvent`. At zero
    * remaining budget the interaction still settles needs/mood and plays its
    * flourish, it just grants nothing. Returns what was actually granted.
+   *
+   * Throws `PetCooldownError` while the pet is recovering from the same action
+   * (nothing is spent), `PetItemNotOwnedError` for an item this plugin's user
+   * does not own, and `PetItemKindMismatchError` for an item that is not for
+   * this action.
    */
   interact(
     kind: PluginPetInteractionKind,
@@ -117,10 +123,13 @@ export interface PluginPetAPI {
   ): Promise<{ grantedXp: number; grantedCoins: number }>
   /**
    * Emit a whitelisted event with an optional XP/coin reward, clamped per
-   * call and against the daily budget. Returns what was actually granted.
+   * call (`MAX_XP_PER_EMIT`, `MAX_COINS_PER_EMIT`) and against the daily
+   * budget. Returns what was actually granted. Use `pluginReward` for a
+   * reward that is not itself a care action. A reward never carries an item.
+   * A care kind throws `PetCooldownError` while it is cooling.
    */
   emitEvent(
-    kind: PetEventKind,
+    kind: PluginEmittablePetEventKind,
     opts?: { xp?: number; coins?: number; meta?: Record<string, unknown> }
   ): Promise<{ grantedXp: number; grantedCoins: number }>
 }
@@ -159,11 +168,30 @@ function unwrap(result: PetAccessResult): { grantedXp: number; grantedCoins: num
     case "unknown-item":
     case "item-not-owned":
       throw new PetItemNotOwnedError(refusal.itemId)
+    case "item-kind-mismatch":
+      throw new PetItemKindMismatchError(refusal.itemId, refusal.kind, refusal.itemKind)
     case "rate-limited":
       throw refusal.cause instanceof Error ? refusal.cause : new Error("Pet rate limit exceeded")
+    case "cooling-down":
+      throw new PetCooldownError(refusal.kind, refusal.retryAfterMs)
+    // The pet's own state, not the plugin's fault: quiet, like a switched-off
+    // pet. `getAvailability()` is how a plugin tells these apart from a grant.
     case "unavailable":
+    case "uninitialized":
+    case "not-hatched":
       return { grantedXp: 0, grantedCoins: 0 }
   }
+}
+
+/** Host + pet availability, the way the access gate answers it. */
+async function readAvailability(): Promise<PluginPetAvailability> {
+  const enabled = useSettingsStore.getState().settings?.petSettings?.enabled !== false
+  const host = resolveLivePetAvailability(enabled)
+  if (!host.available) return { available: false, reason: host.reason }
+  const profile = await getPetProfile()
+  if (!profile) return { available: false, reason: "uninitialized" }
+  if (!profile.soul) return { available: false, reason: "not-hatched" }
+  return { available: true }
 }
 
 export function createPetAPI({ pluginId, capabilities }: CreatePetAPIArgs): PluginPetAPI {
@@ -178,6 +206,7 @@ export function createPetAPI({ pluginId, capabilities }: CreatePetAPIArgs): Plug
       const profile = await getPetProfile()
       return profile ? projectPetSummary(profile, Date.now()) : null
     },
+    getAvailability: () => readAvailability(),
     onEvent: (cb) =>
       getPetEventBus().subscribe((event) => {
         try {
@@ -215,14 +244,7 @@ export function createPetAPI({ pluginId, capabilities }: CreatePetAPIArgs): Plug
       ),
   }
 
-  return createGuardedAPI(pluginId, api, {
-    getView: "pet:read",
-    getSummary: "pet:read",
-    onEvent: "pet:read",
-    getRemainingBudget: "pet:read",
-    interact: "pet:interact",
-    emitEvent: "pet:interact",
-  })
+  return createGuardedAPI(pluginId, api, PET_API_PERMISSIONS)
 }
 
 function noopPetAPI(pluginId: string): PluginPetAPI {
@@ -235,6 +257,10 @@ function noopPetAPI(pluginId: string): PluginPetAPI {
     getSummary: async () => {
       warnOnce()
       return null
+    },
+    getAvailability: async () => {
+      warnOnce()
+      return { available: false, reason: "missing-capability" }
     },
     onEvent: () => {
       warnOnce()

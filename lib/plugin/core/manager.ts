@@ -367,7 +367,6 @@ export interface PluginManagerConfig {
 
 /** Default concurrency for layered startup restore. */
 const DEFAULT_MAX_LOAD_CONCURRENCY = 4
-let pluginManagerSequence = 0
 const PLUGIN_HOST_EPOCH = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
 /**
@@ -710,14 +709,47 @@ export const CONNECTOR_HOOK_PERMISSIONS = {
 // Plugin Manager Singleton + Factory (PR-E)
 // =============================================================================
 
-let pluginManagerInstance: PluginManager | null = null
-let pluginManagerInitialization: Promise<PluginManager> | null = null
+interface PluginManagerRuntime {
+  instance: PluginManager | null
+  initialization: Promise<PluginManager> | null
+  sequence: number
+  teardownRequested: boolean
+}
+
+const moduleRuntime: PluginManagerRuntime = {
+  instance: null,
+  initialization: null,
+  sequence: 0,
+  teardownRequested: false,
+}
+
+export class PluginManagerTeardownError extends Error {
+  constructor(detail: string) {
+    super(`Plugin manager teardown is incomplete: ${detail}`)
+    this.name = "PluginManagerTeardownError"
+  }
+}
+
+function getPluginManagerRuntime(): PluginManagerRuntime {
+  if (typeof window === "undefined") return moduleRuntime
+  // Fast Refresh can replace this module while the old manager still owns
+  // plugin leases and registrations. Keep its identity AND pending boot in
+  // the browser realm; a full page reload naturally starts a fresh runtime.
+  const scope = window as Window & { __COGNIA_PLUGIN_MANAGER_RUNTIME__?: PluginManagerRuntime }
+  return (scope.__COGNIA_PLUGIN_MANAGER_RUNTIME__ ??= {
+    instance: null,
+    initialization: null,
+    sequence: 0,
+    teardownRequested: false,
+  })
+}
 
 export function getPluginManager(): PluginManager {
-  if (!pluginManagerInstance) {
+  const { instance } = getPluginManagerRuntime()
+  if (!instance) {
     throw new Error("Plugin manager not initialized. Call initializePluginManager first.")
   }
-  return pluginManagerInstance
+  return instance
 }
 
 /**
@@ -733,23 +765,30 @@ export function createPluginManager(config: PluginManagerConfig): PluginManager 
 }
 
 export async function initializePluginManager(config: PluginManagerConfig): Promise<PluginManager> {
-  if (pluginManagerInitialization) {
-    return pluginManagerInitialization
+  const runtime = getPluginManagerRuntime()
+  if (runtime.teardownRequested) {
+    throw new PluginManagerTeardownError(
+      "finish unloading the previous account runtime before boot"
+    )
   }
-  if (pluginManagerInstance?.isInitialized()) {
-    return pluginManagerInstance
+  if (runtime.initialization) {
+    return runtime.initialization
+  }
+  if (runtime.instance?.isInitialized()) {
+    return runtime.instance
   }
 
-  const manager = pluginManagerInstance ?? createPluginManager(config)
-  pluginManagerInstance = manager
-  pluginManagerInitialization = manager.initialize().then(() => manager)
+  const manager = runtime.instance ?? createPluginManager(config)
+  runtime.instance = manager
+  const initialization = manager.initialize().then(() => manager)
+  runtime.initialization = initialization
   try {
-    return await pluginManagerInitialization
-  } catch (error) {
-    if (pluginManagerInstance === manager) pluginManagerInstance = null
-    throw error
+    return await initialization
   } finally {
-    pluginManagerInitialization = null
+    // A failed boot can already own live plugins. Retain its manager so a
+    // retry or account teardown can reconcile those resources, rather than
+    // leaving leases behind and constructing a conflicting replacement.
+    if (runtime.initialization === initialization) runtime.initialization = null
   }
 }
 
@@ -764,21 +803,27 @@ export function __resetPluginManagerForTesting(): void {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("__resetPluginManagerForTesting is only callable in NODE_ENV=test")
   }
-  pluginManagerInstance?.stopIdleSweep()
-  pluginManagerInstance = null
-  pluginManagerInitialization = null
+  const runtime = getPluginManagerRuntime()
+  runtime.instance?.stopIdleSweep()
+  runtime.instance = null
+  runtime.initialization = null
+  runtime.teardownRequested = false
 }
 
 /**
- * Tear down the module-level manager (W6.5): stops the periodic idle sweep
- * (previously never wired into any dispose path, leaking the interval across
- * app teardown / HMR) and drops the instance so the next
- * `initializePluginManager()` starts fresh.
+ * Finish account teardown after callers unload its plugins. Keep the owner
+ * reachable if cleanup is incomplete, and refuse a new boot until disposal
+ * succeeds. Fast Refresh reuses the browser runtime instead of disposing it.
  */
 export function disposePluginManager(): void {
-  pluginManagerInstance?.stopIdleSweep()
-  pluginManagerInstance = null
-  pluginManagerInitialization = null
+  const runtime = getPluginManagerRuntime()
+  runtime.teardownRequested = true
+  if (runtime.initialization) {
+    throw new PluginManagerTeardownError("initialization is still running")
+  }
+  runtime.instance?.dispose()
+  runtime.instance = null
+  runtime.teardownRequested = false
 }
 
 /**
@@ -851,6 +896,9 @@ export class PluginManager {
   private lifecycleQueues: Map<string, Promise<unknown>> = new Map()
 
   private withLifecycleLock<T>(pluginId: string, fn: () => Promise<T>): Promise<T> {
+    if (this.disposed) {
+      return Promise.reject(new PluginManagerTeardownError("the manager has been disposed"))
+    }
     const prev = this.lifecycleQueues.get(pluginId) ?? Promise.resolve()
     const run = prev.then(fn, fn)
     const tail = run.then(
@@ -875,6 +923,7 @@ export class PluginManager {
    * next interval tick start a second concurrent sweep on the same plugins. */
   private idleSweepRunning = false
   private initialized = false
+  private disposed = false
   private compatibilityMode: "warn" | "block"
   private pluginPointGovernanceMode: PluginPointGovernanceMode
   private compatibilityRuntime: CompatibilityRuntime
@@ -890,7 +939,7 @@ export class PluginManager {
 
   constructor(config: PluginManagerConfig) {
     this.config = config
-    this.managerId = config.managerId ?? `plugin-manager-${++pluginManagerSequence}`
+    this.managerId = config.managerId ?? `plugin-manager-${++getPluginManagerRuntime().sequence}`
     this.serviceRegistry =
       config.serviceRegistry ??
       (process.env.NODE_ENV === "test" ? new PluginServiceRegistry() : pluginServiceRegistry)
@@ -1915,6 +1964,7 @@ export class PluginManager {
   // ===========================================================================
 
   async initialize(): Promise<void> {
+    if (this.disposed) throw new PluginManagerTeardownError("the manager has been disposed")
     if (this.initialized) return
 
     const store = usePluginStore.getState()
@@ -4779,6 +4829,23 @@ export class PluginManager {
     // the next manager's registrations would inherit a dead generation.
     this.interceptorIdentityDisposer?.()
     this.interceptorIdentityDisposer = undefined
+  }
+
+  /** Release the manager only after its lifecycle queues and plugin leases are empty. */
+  dispose(): void {
+    const outstanding = new Set([...this.activationLeases.keys(), ...this.lifecycleQueues.keys()])
+    if (outstanding.size > 0) {
+      throw new PluginManagerTeardownError(
+        `plugins still own runtime resources: ${[...outstanding].join(", ")}`
+      )
+    }
+    this.stopIdleSweep()
+    this.pythonEventsUnlisten?.()
+    this.pythonEventsUnlisten = null
+    this.pythonHostRequestsUnlisten?.()
+    this.pythonHostRequestsUnlisten = null
+    this.initialized = false
+    this.disposed = true
   }
 
   /**

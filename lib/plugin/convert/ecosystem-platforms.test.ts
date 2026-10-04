@@ -3,7 +3,8 @@ import {
   detectPluginEcosystem,
   UnsupportedPluginConversionError,
 } from "./ecosystem"
-import { AGENT_PLUGINS_SCHEMA, type PlatformBundleTarget } from "./platform-bundles"
+import { AGENT_PLUGINS_SCHEMA } from "./platform-bundles"
+import { PLUGIN_ECOSYSTEMS } from "./delivery"
 
 const source = () =>
   new Map([
@@ -44,31 +45,30 @@ describe("native platform integration", () => {
     expect(detectPluginEcosystem(source())).toBe("cognia")
   })
 
-  it.each<PlatformBundleTarget>([
-    "agent-plugins",
-    "cursor",
-    "copilot",
-    "kimi",
-    "devin",
-    "opencode",
-    "pi",
-  ])("exports and reimports a complete skill resource bundle for %s", (target) => {
-    const result = convertPluginBundle(source(), target, {
-      binaryPaths: new Set(["skills/review/assets/ref.png"]),
-    })
-    expect(result.target).toBe(target)
-    expect(result.report.delivery).toMatchObject({ target, hostVerified: false })
-    const path =
-      target === "opencode"
-        ? ".opencode/skills/review/assets/ref.png"
-        : "skills/review/assets/ref.png"
-    expect(result.copies).toContainEqual({ from: "skills/review/assets/ref.png", to: path })
-    const exported = new Map(result.files)
-    for (const copy of result.copies) exported.set(copy.to, "")
-    const imported = convertPluginBundle(exported, "cognia", { binaryPaths: new Set([path]) })
-    expect(imported.manifest.skills).toHaveLength(1)
-    expect(imported.report.blocking).toEqual([])
-  })
+  it.each(PLUGIN_ECOSYSTEMS.filter((target) => target !== "cognia"))(
+    "exports and reimports a complete skill resource bundle for %s",
+    (target) => {
+      const result = convertPluginBundle(source(), target, {
+        binaryPaths: new Set(["skills/review/assets/ref.png"]),
+      })
+      expect(result.target).toBe(target)
+      expect(result.report.delivery).toMatchObject({ target, hostVerified: false })
+      const path =
+        target === "opencode"
+          ? ".opencode/skills/review/assets/ref.png"
+          : target === "kimi"
+            ? "assets/ref.png"
+            : "skills/review/assets/ref.png"
+      expect(result.copies).toContainEqual({ from: "skills/review/assets/ref.png", to: path })
+      const exported = new Map(result.files)
+      for (const copy of result.copies) exported.set(copy.to, "")
+      const imported = convertPluginBundle(exported, "cognia", { binaryPaths: new Set([path]) })
+      // Copilot export writes the portable Agent Plugins layout Copilot reads natively.
+      expect(imported.source).toBe(target === "copilot" ? "agent-plugins" : target)
+      expect(imported.manifest.skills).toHaveLength(1)
+      expect(imported.report.blocking).toEqual([])
+    }
+  )
 
   it("converts foreign bundles through the canonical contract with source warnings preserved", () => {
     const files = new Map([
@@ -97,10 +97,19 @@ describe("native platform integration", () => {
       detectPluginEcosystem(
         new Map([
           [".cursor-plugin/plugin.json", "{}"],
-          [".claude-plugin/plugin.json", "{}"],
+          [".factory-plugin/plugin.json", "{}"],
         ])
       )
     ).toThrow(/multiple|ambiguous/i)
+    // A generic Claude manifest next to a vendor manifest is shadowed, not ambiguous.
+    expect(
+      detectPluginEcosystem(
+        new Map([
+          [".cursor-plugin/plugin.json", "{}"],
+          [".claude-plugin/plugin.json", "{}"],
+        ])
+      )
+    ).toBe("cursor")
     const files = source()
     files.set("/etc/example", "x")
     expect(() => convertPluginBundle(files, "codex")).toThrow(/path/i)

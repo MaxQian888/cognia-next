@@ -126,7 +126,7 @@ describe("collectLocalPluginSource", () => {
   it("preserves new platform markers and compiled or binary resources", async () => {
     const tree = {
       "/p/.cursor-plugin/plugin.json": '{"name":"demo"}',
-      "/p/kimi.plugin.json": '{"name":"demo"}',
+      "/p/.factory-plugin/plugin.json": '{"name":"demo"}',
       "/p/opencode.json": "{}",
       "/p/package.json": '{"name":"demo","pi":{"skills":["./skills"]}}',
       "/p/dist/server.js": "run()",

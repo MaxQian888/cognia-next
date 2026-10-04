@@ -57,7 +57,11 @@ export async function teardownPluginAccountRuntime(
   deps.clearConsent()
   deps.clearPermissionGuard()
   deps.clearApiPermissions()
-  deps.disposeManager()
+  try {
+    deps.disposeManager()
+  } catch (error) {
+    failures.push(error)
+  }
   deps.clearAccount()
   if (failures.length === 1) throw failures[0]
   if (failures.length > 1) {

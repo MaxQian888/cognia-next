@@ -1,5 +1,6 @@
 import sourcePluginPoints from "../../contract/plugin-points.json"
 import {
+  PLUGIN_LOCALIZED_LABEL_PATHS,
   AUTHOR_CAPABILITY_CONTRACTS,
   AUTHOR_PLUGIN_POINT_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,
@@ -22,6 +23,10 @@ describe("canonical plugin author contract", () => {
     ["path fields", PLUGIN_PATH_FIELD_CONTRACTS.map((entry) => entry.path)],
   ])("contains unique %s", (_label, values) => {
     expect(new Set(values).size).toBe(values.length)
+  })
+
+  it("declares CLI descriptions as optional localized UI text", () => {
+    expect(PLUGIN_LOCALIZED_LABEL_PATHS).toContain("cliTools[].descriptionKey")
   })
 
   it("describes every capability with a support policy", () => {

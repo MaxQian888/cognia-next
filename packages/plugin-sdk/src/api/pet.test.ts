@@ -1,19 +1,15 @@
 import * as sdk from "./pet"
 
 describe("plugin-sdk: api/pet", () => {
-  it("re-exports the pet manifest helpers and overlay registries", () => {
+  it("re-exports the manifest helpers, the read side of the registries and the plugin-scoped teardown", () => {
     expect(typeof sdk.definePetAchievement).toBe("function")
     expect(typeof sdk.definePetItem).toBe("function")
-    expect(typeof sdk.registerPetAchievement).toBe("function")
-    expect(typeof sdk.unregisterPetAchievementById).toBe("function")
     expect(typeof sdk.unregisterPetAchievementsByPlugin).toBe("function")
     expect(typeof sdk.listPetAchievementEntries).toBe("function")
     expect(typeof sdk.buildPluginAchievementId).toBe("function")
     expect(typeof sdk.compilePluginAchievement).toBe("function")
     expect(typeof sdk.listCompiledPluginAchievements).toBe("function")
     expect(typeof sdk.getPluginAchievementDisplay).toBe("function")
-    expect(typeof sdk.registerPetItem).toBe("function")
-    expect(typeof sdk.unregisterPetItemById).toBe("function")
     expect(typeof sdk.unregisterPetItemsByPlugin).toBe("function")
     expect(typeof sdk.listPetItemEntries).toBe("function")
     expect(typeof sdk.buildPluginItemId).toBe("function")
@@ -23,19 +19,45 @@ describe("plugin-sdk: api/pet", () => {
     expect(typeof sdk.getPluginItemDisplay).toBe("function")
   })
 
+  it("does not hand authors the host's registration primitives", () => {
+    // Items and achievements are contributed through the manifest, which the
+    // host validates and registers; a direct register skipped that, and a
+    // by-id unregister could remove another plugin's contribution.
+    const surface = sdk as Record<string, unknown>
+    for (const name of [
+      "registerPetItem",
+      "registerPetAchievement",
+      "unregisterPetItemById",
+      "unregisterPetAchievementById",
+    ]) {
+      expect(surface[name]).toBeUndefined()
+    }
+  })
+
+  it("publishes the vocabulary, limits and errors ctx.pet enforces", () => {
+    expect(sdk.PLUGIN_EMITTABLE_PET_EVENT_KINDS).toContain("pluginReward")
+    expect(sdk.PLUGIN_EMITTABLE_PET_EVENT_KINDS).not.toContain("levelUp")
+    expect(sdk.MAX_XP_PER_EMIT).toBeGreaterThan(0)
+    expect(sdk.MAX_COINS_PER_EMIT).toBeGreaterThan(0)
+    expect(new sdk.PetCooldownError("fed", 1000)).toBeInstanceOf(Error)
+    expect(new sdk.PetItemKindMismatchError("berry", "petted", "fed").itemKind).toBe("fed")
+    expect(new sdk.PetItemNotOwnedError("berry").name).toBe("PetItemNotOwnedError")
+    expect(new sdk.PetEventKindNotAllowedError("evolved").name).toBe("PetEventKindNotAllowedError")
+  })
+
   it("definePetAchievement is a typesafe identity helper", () => {
     const achievement = sdk.definePetAchievement({
       id: "quest-master",
       labels: { en: "Quest master" },
       descriptions: { en: "Complete daily quests." },
       icon: "Sparkles",
-      condition: { type: "counter", kind: "quest.completed", gte: 3 },
+      condition: { type: "counter", kind: "pluginReward", gte: 3 },
     })
 
     expect(achievement.id).toBe("quest-master")
     expect(achievement.condition).toEqual({
       type: "counter",
-      kind: "quest.completed",
+      kind: "pluginReward",
       gte: 3,
     })
   })

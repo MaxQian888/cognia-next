@@ -14,6 +14,7 @@ import {
   createPluginManager,
   getPluginManager,
   initializePluginManager,
+  disposePluginManager,
   __resetPluginManagerForTesting,
   shouldEnablePluginDebug,
   toClonableManifest,
@@ -5818,6 +5819,41 @@ describe("PluginManager", () => {
       )
     })
 
+    it("retains an occupied default manager until its plugins are unloaded", async () => {
+      __resetPluginManagerForTesting()
+      const plugin = createTypedPlugin("cognia-screenshot", "frontend")
+      plugin.source = "builtin"
+      mockGetState.mockReturnValue({
+        ...createLoadStore(plugin),
+        unloadPlugin: jest.fn(async () => undefined),
+      })
+      const initialize = jest
+        .spyOn(PluginManager.prototype, "initialize")
+        .mockResolvedValue(undefined)
+      try {
+        const manager = await initializePluginManager({ pluginDirectory: "/plugins" })
+        stubLoader(manager)
+        await manager.loadPlugin(plugin.manifest.id)
+
+        expect(() => disposePluginManager()).toThrow(/cognia-screenshot/)
+        expect(getPluginManager()).toBe(manager)
+        await expect(
+          initializePluginManager({ pluginDirectory: "/other-account" })
+        ).rejects.toThrow(/teardown/)
+
+        await manager.unloadPlugin(plugin.manifest.id)
+        disposePluginManager()
+        expect(() => getPluginManager()).toThrow(/not initialized/)
+        await expect(manager.loadPlugin(plugin.manifest.id)).rejects.toThrow(/disposed/)
+        await expect(
+          initializePluginManager({ pluginDirectory: "/other-account" })
+        ).resolves.not.toBe(manager)
+      } finally {
+        initialize.mockRestore()
+        __resetPluginManagerForTesting()
+      }
+    })
+
     it("disablePlugin unloads the Python module only for python/hybrid plugins", async () => {
       const pythonPlugin = createTypedPlugin("py-plugin", "hybrid", "enabled")
       const store = {
@@ -6858,6 +6894,95 @@ describe("PluginManager", () => {
       const [firstManager, secondManager] = await Promise.all([first, second])
       expect(firstManager).toBe(secondManager)
       initialize.mockRestore()
+    })
+
+    it("retains the manager after a partial boot failure so retry can reuse its leases", async () => {
+      const initialize = jest
+        .spyOn(PluginManager.prototype, "initialize")
+        .mockRejectedValueOnce(new Error("boot interrupted"))
+        .mockResolvedValueOnce(undefined)
+      try {
+        const first = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+        const owner = getPluginManager()
+        await expect(first).rejects.toThrow("boot interrupted")
+        expect(getPluginManager()).toBe(owner)
+        await expect(initializePluginManager({ pluginDirectory: "/tmp/plugins" })).resolves.toBe(
+          owner
+        )
+      } finally {
+        initialize.mockRestore()
+        __resetPluginManagerForTesting()
+      }
+    })
+
+    it("does not discard an initializing manager or admit a replacement during teardown", async () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const initialize = jest.spyOn(PluginManager.prototype, "initialize").mockReturnValue(gate)
+      try {
+        const boot = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+        const owner = getPluginManager()
+        expect(() => disposePluginManager()).toThrow(/initializ/)
+        expect(getPluginManager()).toBe(owner)
+        await expect(
+          initializePluginManager({ pluginDirectory: "/other-account" })
+        ).rejects.toThrow(/teardown/)
+        release()
+        await boot
+        disposePluginManager()
+        expect(() => getPluginManager()).toThrow(/not initialized/)
+      } finally {
+        release()
+        initialize.mockRestore()
+        __resetPluginManagerForTesting()
+      }
+    })
+
+    it("reuses the browser runtime and its pending boot across manager module reloads", async () => {
+      let reloaded!: typeof import("./manager")
+      jest.isolateModules(() => {
+        reloaded = jest.requireActual("./manager")
+      })
+      const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")
+      Object.defineProperty(globalThis, "window", { configurable: true, value: {} })
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const initialize = jest.spyOn(PluginManager.prototype, "initialize").mockReturnValue(gate)
+      const isInitialized = jest
+        .spyOn(PluginManager.prototype, "isInitialized")
+        .mockReturnValue(true)
+      const reinitialize = jest
+        .spyOn(reloaded.PluginManager.prototype, "initialize")
+        .mockResolvedValue(undefined)
+
+      try {
+        const first = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+        const second = reloaded.initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+        release()
+        const [original, replacement] = await Promise.all([first, second])
+        expect(replacement).toBe(original)
+        expect(reinitialize).not.toHaveBeenCalled()
+        expect(reloaded.getPluginManager()).toBe(original)
+        await expect(
+          reloaded.initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+        ).resolves.toBe(original)
+
+        reloaded.disposePluginManager()
+        expect(() => getPluginManager()).toThrow(/not initialized/)
+      } finally {
+        release()
+        __resetPluginManagerForTesting()
+        reloaded.__resetPluginManagerForTesting()
+        initialize.mockRestore()
+        isInitialized.mockRestore()
+        reinitialize.mockRestore()
+        if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor)
+        else Reflect.deleteProperty(globalThis, "window")
+      }
     })
   })
 

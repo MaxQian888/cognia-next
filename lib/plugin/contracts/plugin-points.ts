@@ -10,6 +10,7 @@
  * these definitions to avoid contract drift.
  */
 
+import type { PluginPermission } from "@/types/plugin/plugin"
 import type { PluginSurfaceFormFactor } from "@/types/plugin/plugin-surface"
 import type {
   InterceptorPointSemantics,
@@ -978,6 +979,29 @@ const VIRTUAL_HOOK_POINTS = new Set<CanonicalHookPoint>([
 /** The file whose fire sites `audit:hooks` checks for non-virtual hooks. */
 export const HOOK_POINT_BINDING = "lib/plugin/messaging/hooks-system.ts"
 
+/**
+ * Hooks whose payload is data a plugin API already guards with a permission.
+ * The dispatcher delivers them only to plugins granted it, and the published
+ * contract states it. The pet hooks carry what `ctx.pet.getView` / `onEvent`
+ * return (level, stage, achievements, care condition); behind the `hooks`
+ * capability alone, any plugin could follow the pet without ever asking for
+ * `pet:read`.
+ */
+export const HOOK_POINT_PERMISSIONS: Readonly<
+  Partial<Record<CanonicalHookPoint, PluginPermission>>
+> = {
+  onPetInteract: "pet:read",
+  onPetLevelUp: "pet:read",
+  onPetEvolved: "pet:read",
+  onPetAchievementUnlocked: "pet:read",
+  onPetUnwell: "pet:read",
+}
+
+/** The permission a hook's delivery requires, if any. */
+export function getHookPointPermission(hookName: string): PluginPermission | undefined {
+  return (HOOK_POINT_PERMISSIONS as Record<string, PluginPermission | undefined>)[hookName]
+}
+
 export function isVirtualHookPoint(hookName: CanonicalHookPoint): boolean {
   return VIRTUAL_HOOK_POINTS.has(hookName)
 }
@@ -997,6 +1021,7 @@ const hookPointContracts: Record<CanonicalHookPoint, PluginPointContract> = Obje
         docs: HOOK_POINT_DOCS,
         requiredTests: HOOK_POINT_TESTS,
         introducedIn: "0.1.0",
+        ...(HOOK_POINT_PERMISSIONS[id] ? { permission: HOOK_POINT_PERMISSIONS[id] } : {}),
       } as PluginPointContract,
     ]
   })

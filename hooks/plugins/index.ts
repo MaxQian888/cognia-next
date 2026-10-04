@@ -39,6 +39,12 @@ export {
 } from "./use-builtin-plugin-entries"
 export { useDevtoolsGate } from "./use-devtools-gate"
 export { usePiPackages, type UsePiPackagesResult } from "./use-pi-packages"
+export {
+  useContributedPiPackages,
+  useContributedPiPackageEntries,
+  type ContributedPiPackageView,
+  type UseContributedPiPackagesResult,
+} from "./use-contributed-pi-packages"
 export { usePluginRow, type PluginRowState } from "./use-plugin-row"
 export { usePluginDiagnostics } from "./use-plugin-diagnostics"
 export {

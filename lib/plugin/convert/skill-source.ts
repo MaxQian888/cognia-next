@@ -69,6 +69,10 @@ export const UNSUPPORTED_SKILL_EXECUTION_FIELDS = [
   "bashPatterns",
   "importPatterns",
   "promptSignals",
+  // OpenHands keyword triggers decide WHEN a skill activates. (Devin's
+  // `triggers` user/model list is mapped by the Devin adapter, and an installed
+  // Devin-origin SKILL.md keeps it as inert frontmatter.)
+  "trigger",
 ] as const
 
 export interface BuiltSkill {

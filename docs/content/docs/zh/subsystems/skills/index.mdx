@@ -10,7 +10,7 @@ description: Cognia 中最小的可移植能力单元——在主从式工作台
 <TLDR>
   一个**技能**是一行 `SKILL.md` 形态的记录——名称、Markdown 正文、可选的 `allowedTools`，外加打包的
   `scripts/` / `references/` / `assets/` 资源。浏览器端的事实来源是 Dexie
-  （`lib/db/skills.ts`）；其余一切都是流入或流出该表的管道：一个 **bundle 导入器**
+  （`lib/db/skills.ts`）；其他模块负责导入或导出该表的数据：一个 **bundle 导入器**
   （`lib/skills/bundle/loader.ts:65`），用于 zip / 文件夹 / OpenAI-Codex 布局；一个**双来源
   市场**（`skills-lock.json` 注册表 + skills.sh 目录）；一个**三目标原生同步**
   （`lib/skills/sync.ts:145` → `skills_install_mirrored` 写入 cognia / `~/.claude/skills` /
@@ -32,14 +32,10 @@ description: Cognia 中最小的可移植能力单元——在主从式工作台
 
 在本代码库中，有两个截然不同的东西都叫"技能"，本章节将它们严格区分开来：
 
-1. **提示技能**——Dexie 记录，其 Markdown 正文在发送时被追加到系统提示。
-   在工作台中编写、导入、同步，并在市场上销售。它们*从不被执行*。
-2. **内置工具技能**——经过代码评审的 TypeScript 模块（`lib/skills/built-in/`），注册为
-   MCP 形态的工具供模型*调用*，以六道门控的分发器封装 `lark-cli`。ADR-0026。
+1. **提示技能**——Dexie 记录，其 Markdown 正文在发送时被追加到系统提示。在工作台中编写、导入、同步，并在市场上销售。它们*从不被执行*。
+2. **内置工具技能**——经过代码评审的 TypeScript 模块（`lib/skills/built-in/`），注册为 MCP 形态的工具供模型*调用*，以六道门控的分发器封装 `lark-cli`。ADR-0026。
 
-内置层级的原始设计理据见
-[ADR-0026](../../adr/0026-builtin-skills-and-lark-cli-bridge)；提示技能
-一侧则是有机生长起来的，在此按模块逐一对照当前实现进行记录。
+内置层级的原始设计理据见 [ADR-0026](../../adr/0026-builtin-skills-and-lark-cli-bridge)；提示技能一侧则是有机生长起来的，在此按模块逐一对照当前实现进行记录。
 
 ## 它的代码位置
 
@@ -123,20 +119,11 @@ flowchart LR
 
 ## 关键不变量
 
-- **技能是提示后缀，不是程序。** Cognia 中没有任何东西会执行技能的 `scripts/`；
-  安全扫描器（`scanner.rs:16`）是针对你可能在*别处*运行的脚本的保存前卫生检查，
-  它从不阻止保存。
-- **`allowedTools` 是并集。** 角色 ∪ 每个激活的技能 ∪ 插件技能 ∪ agent 模式
-  （`build-options.ts:823-836`）。如果无人声明任何内容，该字段被省略，于是 SDK
-  默认值（一切）生效。旧文档曾描述为交集——那从来不是实际发布的行为。
-- **`canonicalId` 是身份主轴。** 市场安装、bundle 重新导入和卸载
-  全部汇聚到 `upsertSkillByCanonicalId`（`lib/db/skills.ts:202`），它保持 `Skill.id`
-  稳定，从而让会话引用和工作流节点在重新安装后得以存续。
-- **内置项有两种互不相关的形态。** 5 个种子 Dexie 记录（`skill_builtin_*`）是
-  无法删除的普通提示技能；40 个 ADR-0026 技能是工具，且从不
-  出现在 `skills` 表中。
-- **Web 模式只会降级，从不崩溃。** 同步、安全扫描、文件夹导入和注册表 IPC
-  都是仅桌面端的；工作台会回退到打包的 JSON 并禁用相应按钮。
+- **技能是提示后缀，不是程序。** Cognia 中没有任何东西会执行技能的 `scripts/`；安全扫描器（`scanner.rs:16`）是针对你可能在*别处*运行的脚本的保存前卫生检查，它从不阻止保存。
+- **`allowedTools` 是并集。** 角色 ∪ 每个激活的技能 ∪ 插件技能 ∪ agent 模式（`build-options.ts:823-836`）。如果无人声明任何内容，该字段被省略，于是 SDK 默认值（一切）生效。旧文档曾描述为交集——那从来不是实际发布的行为。
+- **`canonicalId` 是身份主轴。** 市场安装、bundle 重新导入和卸载全部汇聚到 `upsertSkillByCanonicalId`（`lib/db/skills.ts:202`），它保持 `Skill.id` 稳定，从而让会话引用和工作流节点在重新安装后得以存续。
+- **内置项有两种互不相关的形态。** 5 个种子 Dexie 记录（`skill_builtin_*`）是无法删除的普通提示技能；40 个 ADR-0026 技能是工具，且从不出现在 `skills` 表中。
+- **Web 模式只会降级，从不崩溃。** 同步、安全扫描、文件夹导入和注册表 IPC 都是仅桌面端的；工作台会回退到打包的 JSON 并禁用相应按钮。
 
 ## 相关
 

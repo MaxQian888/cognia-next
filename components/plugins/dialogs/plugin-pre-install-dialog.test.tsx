@@ -5,6 +5,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: (namespace?: string) => {
     const t = (key: string, vars?: Record<string, unknown>) =>
       namespace === "plugins.permissions.descriptions"
@@ -265,6 +266,29 @@ describe("PluginPreInstallDialog", () => {
   })
 
   // The step had its own parser that only knew string / number / boolean, so
+  it("labels config fields from the manifest's own locales before install", () => {
+    render(
+      <PluginPreInstallDialog
+        target={{
+          ...configTarget,
+          config: {
+            pluginId: "p",
+            i18n: { locales: { en: { "config.region.title": "Data region" } } },
+            configSchema: {
+              type: "object",
+              properties: {
+                region: { type: "string", titleKey: "config.region.title", default: "us" },
+              },
+            },
+          },
+        }}
+        onContinue={() => {}}
+        onCancel={() => {}}
+      />
+    )
+    expect(screen.getByLabelText("Data region")).toBeInTheDocument()
+  })
+
   // enums, nested objects and validation were silently lost before install.
   it("renders the config step with the full config-form renderer", () => {
     const onContinue = jest.fn()

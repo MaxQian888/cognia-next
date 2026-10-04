@@ -39,7 +39,7 @@ import {
 import { nodeCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
-import type { ScheduledTask } from "@/types/scheduler"
+import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import {
   __resetCharacterPacksForTesting,
   getPackWarnings,
@@ -112,8 +112,30 @@ jest.mock("@/lib/scheduler/scheduler-db", () => ({
   },
 }))
 
+const mockUnsubscribeExecutions = jest.fn()
+const mockSubscribeToTaskExecutions = jest.fn(
+  (_listener: (event: { task: ScheduledTask; execution: TaskExecution }) => void) =>
+    mockUnsubscribeExecutions
+)
 jest.mock("@/lib/scheduler/task-scheduler", () => ({
   getTaskScheduler: jest.fn(),
+  subscribeToTaskExecutions: (
+    listener: (event: { task: ScheduledTask; execution: TaskExecution }) => void
+  ) => mockSubscribeToTaskExecutions(listener),
+}))
+
+// The write gate has its own suite; here it is a spy, so `createTask` can be
+// shown to ask it, and to stop when it refuses.
+const mockAssertTaskWriteAllowed = jest.fn(async (_request: unknown) => undefined as void)
+jest.mock("@/lib/scheduler/write-authority", () => ({
+  assertTaskWriteAllowed: (request: unknown) => mockAssertTaskWriteAllowed(request),
+}))
+
+const mockIsPluginTaskExecutionActive = jest.fn((_id: string) => false)
+const mockCancelPluginTaskExecution = jest.fn((_id: string) => false)
+jest.mock("@/lib/scheduler/executors/plugin-executor", () => ({
+  isPluginTaskExecutionActive: (id: string) => mockIsPluginTaskExecutionActive(id),
+  cancelPluginTaskExecution: (id: string) => mockCancelPluginTaskExecution(id),
 }))
 
 // Sonner toast — `ui.showToast` routes here.
@@ -498,84 +520,755 @@ describe("createPluginContext", () => {
   })
 
   describe("scheduler API", () => {
-    const createTask = jest.fn()
-    const updateTask = jest.fn()
-    const deleteTask = jest.fn()
-    const pauseTask = jest.fn()
-    const resumeTask = jest.fn()
+    const engine = {
+      createTask: jest.fn(),
+      updateTask: jest.fn(),
+      deleteTask: jest.fn(),
+      pauseTask: jest.fn(),
+      resumeTask: jest.fn(),
+      runTaskNow: jest.fn(),
+      cancelExecution: jest.fn(),
+      getQueuedStartTaskId: jest.fn(),
+      fireEventTasks: jest.fn(),
+    }
 
     beforeEach(() => {
       jest.clearAllMocks()
-      mockGetTaskScheduler.mockReturnValue({
-        createTask,
-        updateTask,
-        deleteTask,
-        pauseTask,
-        resumeTask,
-      } as never)
+      mockGetTaskScheduler.mockReturnValue(engine as never)
+      mockSchedulerDb.getTask.mockResolvedValue(null)
+      mockSchedulerDb.getExecution.mockResolvedValue(null)
+      mockSchedulerDb.getTaskExecutions.mockResolvedValue([])
+      mockSchedulerDb.getFilteredTasks.mockResolvedValue([])
+      mockAssertTaskWriteAllowed.mockResolvedValue(undefined)
+      engine.createTask.mockImplementation(async (input: Partial<ScheduledTask>) =>
+        pluginTask({
+          name: input.name,
+          trigger: input.trigger,
+          payload: input.payload,
+          config: input.config as ScheduledTask["config"],
+          createdBy: input.createdBy,
+          endAt: input.endAt,
+        })
+      )
     })
 
     const schedulerPlugin = () =>
       createMockPlugin({
         manifest: { ...mockManifest, capabilities: ["tools", "scheduler"] },
       })
+    const api = () => createPluginContext(schedulerPlugin(), mockManager).scheduler
+
+    function execution(overrides: Partial<TaskExecution> = {}): TaskExecution {
+      return {
+        id: "exec-1",
+        taskId: "plugin-task-1",
+        taskName: "Plugin task",
+        taskType: "plugin",
+        status: "completed",
+        retryAttempt: 0,
+        startedAt: new Date("2026-07-16T01:00:00.000Z"),
+        logs: [],
+        ...overrides,
+      }
+    }
 
     it("rejects scheduler calls when the manifest omits the capability", async () => {
       const context = createPluginContext(createMockPlugin(), mockManager)
 
       await expect(context.scheduler.listTasks()).rejects.toThrow(/scheduler.*capability/i)
+      await expect(context.scheduler.emitEvent("x")).rejects.toThrow(/capability/i)
+      expect(() => context.scheduler.onExecution(() => undefined)).toThrow(/capability/i)
 
       expect(mockGetTaskScheduler).not.toHaveBeenCalled()
     })
 
-    it("creates tasks through the live scheduler engine", async () => {
-      createTask.mockResolvedValue(
-        pluginTask({
-          payload: { pluginId: "test-plugin", handler: "heartbeat", metadata: { tier: 2 } },
-        })
-      )
-      const context = createPluginContext(schedulerPlugin(), mockManager)
+    describe("createTask", () => {
+      it("creates through the live engine, attributed to the plugin and past the write gate", async () => {
+        engine.createTask.mockResolvedValueOnce(
+          pluginTask({
+            payload: { pluginId: "test-plugin", handler: "heartbeat", metadata: { tier: 2 } },
+          })
+        )
 
-      const created = await context.scheduler.createTask({
-        name: "Plugin task",
-        trigger: { type: "interval", seconds: 60 },
-        handler: "heartbeat",
+        const created = await api().createTask({
+          name: "Plugin task",
+          trigger: { type: "interval", seconds: 60 },
+          handler: "heartbeat",
+        })
+
+        expect(mockAssertTaskWriteAllowed).toHaveBeenCalledWith({
+          taskType: "plugin",
+          source: "plugin",
+          pluginId: "test-plugin",
+        })
+        expect(engine.createTask).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: "Plugin task",
+            type: "plugin",
+            trigger: { type: "interval", intervalMs: 60_000 },
+            payload: expect.objectContaining({ pluginId: "test-plugin", handler: "heartbeat" }),
+            createdBy: { kind: "plugin", pluginId: "test-plugin" },
+          })
+        )
+        expect(created.id).toBe("plugin-task-1")
+        expect(created.metadata).toEqual({ tier: 2 })
       })
 
-      expect(createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: "Plugin task",
-          type: "plugin",
-          trigger: expect.objectContaining({ type: "interval", intervalMs: 60_000 }),
-          payload: expect.objectContaining({
-            pluginId: "test-plugin",
-            handler: "heartbeat",
-          }),
+      it("throws the gate's refusal and creates nothing", async () => {
+        mockAssertTaskWriteAllowed.mockRejectedValueOnce(new Error("quota reached"))
+        await expect(
+          api().createTask({ name: "n", trigger: { type: "interval", seconds: 60 }, handler: "h" })
+        ).rejects.toThrow("quota reached")
+        expect(engine.createTask).not.toHaveBeenCalled()
+      })
+
+      it("maps every execution option onto the scheduler's units", async () => {
+        const created = await api().createTask({
+          name: "n",
+          handler: "h",
+          trigger: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+          timeout: 30,
+          retry: { maxAttempts: 2, delaySeconds: 10 },
+          overlapPolicy: "queue-all",
+          maxQueueSize: 4,
+          maxRuns: 9,
+          pauseAfterConsecutiveFailures: 3,
+          jitterSeconds: 5,
+          catchupWindowSeconds: 600,
+          runMissedOnStartup: true,
+          maxMissedRuns: 2,
+          maxRetryDelaySeconds: 120,
+          endAt: "2030-01-01T00:00:00.000Z",
         })
-      )
-      expect(created.id).toBe("plugin-task-1")
-      expect(created.metadata).toEqual({ tier: 2 })
+
+        const input = engine.createTask.mock.calls[0][0]
+        expect(input.trigger).toEqual({
+          type: "cron",
+          cronExpression: "0 9 * * *",
+          timezone: "UTC",
+          jitterMs: 5_000,
+        })
+        expect(input.config).toEqual(
+          expect.objectContaining({
+            timeout: 30_000,
+            maxRetries: 2,
+            retryDelay: 10_000,
+            overlapPolicy: "queue-all",
+            maxQueueSize: 4,
+            maxRuns: 9,
+            pauseAfterConsecutiveFailures: 3,
+            catchupWindowMs: 600_000,
+            runMissedOnStartup: true,
+            maxMissedRuns: 2,
+            maxRetryDelay: 120_000,
+          })
+        )
+        expect(input.endAt).toEqual(new Date("2030-01-01T00:00:00.000Z"))
+        // And the same fields read back on the task.
+        expect(created).toMatchObject({
+          overlapPolicy: "queue-all",
+          maxQueueSize: 4,
+          maxRuns: 9,
+          pauseAfterConsecutiveFailures: 3,
+          jitterSeconds: 5,
+          catchupWindowSeconds: 600,
+          runMissedOnStartup: true,
+          maxMissedRuns: 2,
+          maxRetryDelaySeconds: 120,
+          retry: { maxAttempts: 2, delaySeconds: 10, backoffMultiplier: 2 },
+          timeout: 30,
+        })
+      })
+
+      it("implements backoffMultiplier 1 as a fixed delay and rejects any other curve", async () => {
+        const created = await api().createTask({
+          name: "n",
+          handler: "h",
+          trigger: { type: "interval", seconds: 60 },
+          retry: { maxAttempts: 3, delaySeconds: 20, backoffMultiplier: 1 },
+        })
+        expect(engine.createTask.mock.calls[0][0].config).toEqual(
+          expect.objectContaining({ retryDelay: 20_000, maxRetryDelay: 20_000 })
+        )
+        expect(created.retry?.backoffMultiplier).toBe(1)
+
+        await expect(
+          api().createTask({
+            name: "n",
+            handler: "h",
+            trigger: { type: "interval", seconds: 60 },
+            retry: { maxAttempts: 3, delaySeconds: 20, backoffMultiplier: 3 },
+          })
+        ).rejects.toThrow(/backoffMultiplier/)
+        await expect(
+          api().createTask({
+            name: "n",
+            handler: "h",
+            trigger: { type: "interval", seconds: 60 },
+            retry: { maxAttempts: 3, delaySeconds: 20, backoffMultiplier: 1 },
+            maxRetryDelaySeconds: 60,
+          })
+        ).rejects.toThrow(/cannot be combined/)
+      })
+
+      it.each([
+        [{ type: "interval" }, /trigger.seconds/],
+        [{ type: "interval", seconds: 0 }, /trigger.seconds/],
+        [{ type: "cron", expression: "  " }, /trigger.expression/],
+        [{ type: "once", runAt: "not a date" }, /trigger.runAt/],
+        [{ type: "event" }, /trigger.eventType/],
+        [{ type: "hourly" }, /unknown trigger type "hourly"/],
+        [null, /trigger must be an object/],
+      ])("rejects the malformed trigger %j instead of guessing", async (trigger, message) => {
+        await expect(
+          api().createTask({ name: "n", handler: "h", trigger: trigger as never })
+        ).rejects.toThrow(message)
+        expect(engine.createTask).not.toHaveBeenCalled()
+      })
+
+      it("refuses jitter on a trigger the scheduler does not jitter", async () => {
+        await expect(
+          api().createTask({
+            name: "n",
+            handler: "h",
+            trigger: { type: "event", eventType: "x" },
+            jitterSeconds: 5,
+          })
+        ).rejects.toThrow(/jitterSeconds only applies/)
+      })
+
+      it("starts the first run of a startImmediately interval and reports the flag back", async () => {
+        engine.runTaskNow.mockResolvedValue(null)
+        const created = await api().createTask({
+          name: "n",
+          handler: "h",
+          trigger: { type: "interval", seconds: 60, startImmediately: true },
+        })
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(engine.createTask.mock.calls[0][0].payload).toEqual(
+          expect.objectContaining({ startImmediately: true })
+        )
+        expect(engine.runTaskNow).toHaveBeenCalledWith("plugin-task-1", {
+          triggerSource: "schedule",
+        })
+        expect(created.trigger).toEqual({ type: "interval", seconds: 60, startImmediately: true })
+      })
+
+      it("parks a task created disabled, without starting it", async () => {
+        engine.pauseTask.mockResolvedValue(true)
+        const created = await api().createTask({
+          name: "n",
+          handler: "h",
+          trigger: { type: "interval", seconds: 60, startImmediately: true },
+          enabled: false,
+        })
+        expect(engine.pauseTask).toHaveBeenCalledWith("plugin-task-1")
+        expect(engine.runTaskNow).not.toHaveBeenCalled()
+        expect(created.status).toBe("paused")
+      })
+    })
+
+    describe("ownership", () => {
+      const foreign: Array<[string, Partial<ScheduledTask>]> = [
+        ["another plugin's task", { payload: { pluginId: "another-plugin", handler: "h" } }],
+        [
+          "a non-plugin task whose payload names this plugin",
+          { type: "chat", payload: { pluginId: "test-plugin", handler: "h" } },
+        ],
+        [
+          "a task another plugin created",
+          { createdBy: { kind: "plugin", pluginId: "another-plugin" } },
+        ],
+      ]
+
+      it.each(foreign)("refuses %s on every task-scoped method", async (_label, overrides) => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask(overrides))
+        mockSchedulerDb.getExecution.mockResolvedValue(execution({ status: "running" }))
+        const scheduler = api()
+
+        await expect(scheduler.getTask("plugin-task-1")).resolves.toBeNull()
+        await expect(scheduler.updateTask("plugin-task-1", { name: "x" })).resolves.toBeNull()
+        await expect(scheduler.deleteTask("plugin-task-1")).resolves.toBe(false)
+        await expect(scheduler.pauseTask("plugin-task-1")).resolves.toBe(false)
+        await expect(scheduler.resumeTask("plugin-task-1")).resolves.toBe(false)
+        await expect(scheduler.runTaskNow("plugin-task-1")).rejects.toThrow(/Task not found/)
+        await expect(scheduler.cancelExecution("exec-1")).resolves.toBe(false)
+        await expect(scheduler.getExecutions("plugin-task-1")).resolves.toEqual([])
+        await expect(scheduler.getExecution("exec-1")).resolves.toBeNull()
+        await expect(scheduler.getLatestExecution("plugin-task-1")).resolves.toBeNull()
+        await expect(scheduler.getStatistics("plugin-task-1")).resolves.toBeNull()
+
+        for (const method of Object.values(engine)) expect(method).not.toHaveBeenCalled()
+      })
+
+      it("accepts a legacy manifest row the scheduler attributed to the user", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask({ createdBy: { kind: "user" } }))
+        await expect(api().getTask("plugin-task-1")).resolves.toMatchObject({
+          id: "plugin-task-1",
+        })
+      })
+    })
+
+    describe("reads and status", () => {
+      it.each<[string, Partial<ScheduledTask>, string]>([
+        ["a healthy active task", {}, "active"],
+        ["a task whose last terminal run failed", { consecutiveFailures: 2 }, "error"],
+        ["a legacy row with only lastError", { lastError: "boom" }, "error"],
+        ["a paused task", { status: "paused" }, "paused"],
+        ["an auto-paused task", { status: "paused", lastTerminalReason: "auto-paused" }, "paused"],
+        ["a disabled task", { status: "disabled" }, "disabled"],
+        [
+          "a task that used its maxRuns",
+          { status: "expired", lastTerminalReason: "max-runs-reached" },
+          "completed",
+        ],
+        [
+          "a once task that ran",
+          {
+            status: "expired",
+            runCount: 1,
+            trigger: { type: "once", runAt: new Date("2026-07-16T02:00:00Z") },
+          },
+          "completed",
+        ],
+        ["a task past its endAt", { status: "expired", lastTerminalReason: "ended" }, "expired"],
+        [
+          "a once task whose slot was missed",
+          {
+            status: "expired",
+            runCount: 0,
+            trigger: { type: "once", runAt: new Date("2026-07-16T02:00:00Z") },
+          },
+          "expired",
+        ],
+      ])("derives the status of %s", async (_label, overrides, status) => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask(overrides))
+        await expect(api().getTask("plugin-task-1")).resolves.toMatchObject({ status })
+      })
+
+      it("filters listTasks on the derived status, handler, errors and page", async () => {
+        mockSchedulerDb.getFilteredTasks.mockResolvedValue([
+          pluginTask({ id: "ok" }),
+          pluginTask({ id: "failing", consecutiveFailures: 1, lastError: "boom" }),
+          pluginTask({
+            id: "done",
+            status: "expired",
+            lastTerminalReason: "max-runs-reached",
+            payload: { pluginId: "test-plugin", handler: "other" },
+          }),
+          pluginTask({ id: "foreign", payload: { pluginId: "another-plugin", handler: "h" } }),
+        ])
+        const scheduler = api()
+
+        const ids = async (filter: Parameters<typeof scheduler.listTasks>[0]) =>
+          (await scheduler.listTasks(filter)).map((task) => task.id)
+
+        // `error` and `completed` are not stored values. Filtering the stored
+        // column used to drop them and return every task instead.
+        await expect(ids({ status: "error" })).resolves.toEqual(["failing"])
+        await expect(ids({ status: ["completed", "active"] })).resolves.toEqual(["ok", "done"])
+        await expect(ids({ hasErrors: true })).resolves.toEqual(["failing"])
+        await expect(ids({ hasErrors: false })).resolves.toEqual(["ok", "done"])
+        await expect(ids({ handler: "other" })).resolves.toEqual(["done"])
+        await expect(ids({ offset: 1, limit: 1 })).resolves.toEqual(["failing"])
+        await expect(ids(undefined)).resolves.toEqual(["ok", "failing", "done"])
+        expect(mockSchedulerDb.getFilteredTasks).toHaveBeenCalledWith({
+          types: ["plugin"],
+          tags: undefined,
+          search: undefined,
+        })
+      })
+
+      it("fills lastResult from the latest settled run, metrics included", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(
+          pluginTask({ lastRunAt: new Date("2026-07-16T01:00:00Z") })
+        )
+        mockSchedulerDb.getTaskExecutions.mockResolvedValue([
+          execution({ id: "skipped", status: "skipped" }),
+          execution({
+            id: "done",
+            status: "completed",
+            output: { rows: 3 },
+            duration: 1200,
+            logs: [
+              {
+                id: "m",
+                timestamp: new Date(),
+                level: "info",
+                message: "Handler metrics",
+                data: { kind: "plugin-task-metrics", metrics: { itemsProcessed: 3 } },
+              },
+            ],
+          }),
+        ])
+        await expect(api().getTask("plugin-task-1")).resolves.toMatchObject({
+          lastResult: {
+            success: true,
+            output: { rows: 3 },
+            metrics: { itemsProcessed: 3, duration: 1200 },
+          },
+        })
+      })
+
+      it("reports a stored trigger faithfully, never as an invented interval", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(
+          pluginTask({ trigger: { type: "cron" } as ScheduledTask["trigger"] })
+        )
+        await expect(api().getTask("plugin-task-1")).resolves.toMatchObject({
+          trigger: { type: "cron", expression: "" },
+        })
+      })
+
+      it("maps executions: slot, timeout, skipped, result and the handler's own log data", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+        const slot = new Date("2026-07-16T00:59:00.000Z")
+        mockSchedulerDb.getTaskExecutions.mockResolvedValue([
+          execution({
+            id: "slow",
+            status: "failed",
+            terminalReason: "execution-timeout",
+            error: "timed out",
+            scheduledFor: slot,
+            triggerSource: "schedule",
+            logs: [
+              {
+                id: "l",
+                timestamp: new Date(),
+                level: "warn",
+                message: "slow page",
+                data: { kind: "plugin-task-log", data: { page: 4 } },
+              },
+            ],
+          }),
+          execution({ id: "skip", status: "skipped", terminalReason: "overlap-skipped" }),
+        ])
+
+        const [slow, skip] = await api().getExecutions("plugin-task-1", 10)
+
+        expect(mockSchedulerDb.getTaskExecutions).toHaveBeenCalledWith("plugin-task-1", 10)
+        expect(slow).toMatchObject({
+          status: "timeout",
+          scheduledAt: slot,
+          triggerSource: "schedule",
+          terminalReason: "execution-timeout",
+          result: { success: false, error: "timed out" },
+          logs: [{ level: "warn", message: "slow page", data: { page: 4 } }],
+        })
+        expect(skip.status).toBe("skipped")
+        expect(skip.result).toBeUndefined()
+        // A run with no slot reports its start.
+        expect(skip.scheduledAt).toEqual(skip.startedAt)
+      })
+
+      it("computes statistics for an owned task", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(
+          pluginTask({
+            runCount: 5,
+            successCount: 3,
+            failureCount: 1,
+            consecutiveFailures: 1,
+            lastError: "boom",
+            lastRunAt: new Date("2026-07-16T01:00:00Z"),
+            nextRunAt: new Date("2026-07-16T02:00:00Z"),
+          })
+        )
+        mockSchedulerDb.getTaskExecutions.mockResolvedValue([
+          execution({ status: "completed", duration: 100 }),
+          execution({ status: "failed", duration: 300 }),
+          execution({ status: "skipped", duration: 0 }),
+        ])
+        await expect(api().getStatistics("plugin-task-1")).resolves.toEqual({
+          runCount: 5,
+          successCount: 3,
+          failureCount: 1,
+          successRate: 0.75,
+          averageDurationMs: 200,
+          consecutiveFailures: 1,
+          lastRunAt: new Date("2026-07-16T01:00:00Z"),
+          nextRunAt: new Date("2026-07-16T02:00:00Z"),
+          lastError: "boom",
+        })
+      })
+
+      it("has no success rate or average before anything settled", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+        await expect(api().getStatistics("plugin-task-1")).resolves.toMatchObject({
+          successRate: null,
+          averageDurationMs: null,
+          lastRunAt: null,
+          nextRunAt: null,
+          lastError: null,
+        })
+      })
+    })
+
+    describe("updateTask", () => {
+      it("maps the new execution options and trigger without resetting what it omits", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+        engine.updateTask.mockResolvedValue(pluginTask())
+
+        await api().updateTask("plugin-task-1", {
+          trigger: { type: "cron", expression: "*/5 * * * *" },
+          jitterSeconds: 2,
+          maxRuns: 4,
+          endAt: null,
+        })
+
+        expect(engine.updateTask).toHaveBeenCalledWith("plugin-task-1", {
+          trigger: { type: "cron", cronExpression: "*/5 * * * *", jitterMs: 2_000 },
+          payload: expect.objectContaining({ startImmediately: false }),
+          config: { maxRuns: 4 },
+          endAt: null,
+        })
+      })
+
+      it("jitters against the stored trigger type when the trigger is not replaced", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(
+          pluginTask({ trigger: { type: "event", eventType: "x" } })
+        )
+        await expect(api().updateTask("plugin-task-1", { jitterSeconds: 3 })).rejects.toThrow(
+          /jitterSeconds only applies/
+        )
+        expect(engine.updateTask).not.toHaveBeenCalled()
+      })
     })
 
     it("pauses owned tasks through the engine so the timing driver is disarmed", async () => {
       mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
-      pauseTask.mockResolvedValue(true)
-      const context = createPluginContext(schedulerPlugin(), mockManager)
+      engine.pauseTask.mockResolvedValue(true)
 
-      await expect(context.scheduler.pauseTask("plugin-task-1")).resolves.toBe(true)
+      await expect(api().pauseTask("plugin-task-1")).resolves.toBe(true)
 
-      expect(pauseTask).toHaveBeenCalledWith("plugin-task-1")
+      expect(engine.pauseTask).toHaveBeenCalledWith("plugin-task-1")
     })
 
-    it("preserves the cross-plugin ownership boundary before mutations", async () => {
-      mockSchedulerDb.getTask.mockResolvedValue(
-        pluginTask({ payload: { pluginId: "another-plugin", handler: "heartbeat" } })
-      )
-      const context = createPluginContext(schedulerPlugin(), mockManager)
+    it("resumes and deletes owned tasks through the engine", async () => {
+      mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+      engine.resumeTask.mockResolvedValue(true)
+      engine.deleteTask.mockResolvedValue(true)
+      const scheduler = api()
 
-      await expect(context.scheduler.deleteTask("plugin-task-1")).resolves.toBe(false)
+      await expect(scheduler.resumeTask("plugin-task-1")).resolves.toBe(true)
+      await expect(scheduler.deleteTask("plugin-task-1")).resolves.toBe(true)
+      expect(engine.deleteTask).toHaveBeenCalledWith("plugin-task-1")
+    })
 
-      expect(deleteTask).not.toHaveBeenCalled()
+    describe("runTaskNow", () => {
+      it("returns the engine's real execution id as soon as the run starts, with args merged", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(
+          pluginTask({ payload: { pluginId: "test-plugin", handler: "h", args: { a: 1, b: 1 } } })
+        )
+        let settle: (row: TaskExecution) => void = () => undefined
+        engine.runTaskNow.mockImplementation(
+          (_id: string, opts: { onAccepted?: (row: TaskExecution) => void }) => {
+            opts.onAccepted?.(execution({ id: "real-exec", status: "running" }))
+            return new Promise((resolve) => {
+              settle = resolve
+            })
+          }
+        )
+
+        await expect(api().runTaskNow("plugin-task-1", { b: 2 })).resolves.toBe("real-exec")
+        expect(engine.runTaskNow).toHaveBeenCalledWith("plugin-task-1", {
+          triggerSource: "run-now",
+          payload: { args: { a: 1, b: 2 } },
+          onAccepted: expect.any(Function),
+        })
+        // No hand-made row: the engine writes the only one.
+        expect(mockSchedulerDb.createExecution).not.toHaveBeenCalled()
+        settle(execution({ id: "real-exec" }))
+      })
+
+      it("returns the id of a start the overlap policy skipped or buffered", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+        engine.runTaskNow.mockResolvedValue(execution({ id: "skipped-exec", status: "skipped" }))
+        await expect(api().runTaskNow("plugin-task-1")).resolves.toBe("skipped-exec")
+        expect(engine.runTaskNow.mock.calls[0][1]).not.toHaveProperty("payload")
+      })
+
+      it("throws a descriptive error when the engine no longer has the task", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+        engine.runTaskNow.mockResolvedValue(null)
+        await expect(api().runTaskNow("plugin-task-1")).rejects.toThrow(/could not be started/)
+      })
+
+      it("rejects non-object args", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+        await expect(api().runTaskNow("plugin-task-1", [] as never)).rejects.toThrow(/args/)
+      })
+    })
+
+    describe("cancelExecution", () => {
+      beforeEach(() => {
+        mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+      })
+
+      it("cancels through the engine's real cancel path", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue(execution({ status: "running" }))
+        engine.cancelExecution.mockResolvedValue({ cancelled: true })
+        await expect(api().cancelExecution("exec-1")).resolves.toBe(true)
+        expect(engine.cancelExecution).toHaveBeenCalledWith("exec-1")
+        // No hand-written "cancelled" over a run that was still going.
+        expect(mockSchedulerDb.updateExecution).not.toHaveBeenCalled()
+      })
+
+      it("counts a request handed to the owning context as cancelled", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue(execution({ status: "running" }))
+        engine.cancelExecution.mockResolvedValue({ cancelled: false, reason: "requested" })
+        await expect(api().cancelExecution("exec-1")).resolves.toBe(true)
+      })
+
+      it("falls back to the plugin executor for a run only it still holds", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue(execution({ status: "running" }))
+        engine.cancelExecution.mockResolvedValue({ cancelled: false, reason: "not-owned-here" })
+        mockIsPluginTaskExecutionActive.mockReturnValueOnce(true)
+        mockCancelPluginTaskExecution.mockReturnValueOnce(true)
+        await expect(api().cancelExecution("exec-1")).resolves.toBe(true)
+        expect(mockCancelPluginTaskExecution).toHaveBeenCalledWith("exec-1")
+      })
+
+      it("answers false for a run nobody can reach", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue(execution({ status: "running" }))
+        engine.cancelExecution.mockResolvedValue({ cancelled: false, reason: "not-owned-here" })
+        mockIsPluginTaskExecutionActive.mockReturnValueOnce(false)
+        await expect(api().cancelExecution("exec-1")).resolves.toBe(false)
+      })
+
+      it("does not touch a settled run", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue(execution({ status: "completed" }))
+        await expect(api().cancelExecution("exec-1")).resolves.toBe(false)
+        expect(engine.cancelExecution).not.toHaveBeenCalled()
+      })
+
+      it("reaches a buffered start, whose owner is read from the engine's queue", async () => {
+        engine.getQueuedStartTaskId.mockReturnValue("plugin-task-1")
+        engine.cancelExecution.mockResolvedValue({ cancelled: true })
+        await expect(api().cancelExecution("queued")).resolves.toBe(true)
+        expect(engine.cancelExecution).toHaveBeenCalledWith("queued")
+      })
+    })
+
+    describe("emitEvent", () => {
+      it("fires only this plugin's own event tasks and returns the count", async () => {
+        engine.fireEventTasks.mockResolvedValue(2)
+        await expect(api().emitEvent(" sync:done ", { n: 1 })).resolves.toBe(2)
+
+        const [type, source, payload, options] = engine.fireEventTasks.mock.calls[0]
+        expect([type, source, payload]).toEqual(["sync:done", "plugin:test-plugin", { n: 1 }])
+        const filter = (options as { filter: (task: ScheduledTask) => boolean }).filter
+        expect(filter(pluginTask())).toBe(true)
+        expect(filter(pluginTask({ payload: { pluginId: "another-plugin", handler: "h" } }))).toBe(
+          false
+        )
+        // The user's own event task is never fired from here.
+        expect(filter(pluginTask({ type: "chat" }))).toBe(false)
+      })
+
+      it("rejects an empty event type and a non-object payload", async () => {
+        await expect(api().emitEvent("")).rejects.toThrow(/eventType/)
+        await expect(api().emitEvent("x", "nope" as never)).rejects.toThrow(/payload/)
+        expect(engine.fireEventTasks).not.toHaveBeenCalled()
+      })
+    })
+
+    describe("onExecution", () => {
+      const flush = async () => {
+        for (let index = 0; index < 5; index += 1) await Promise.resolve()
+      }
+
+      it("delivers this plugin's executions only, with their phase", async () => {
+        const events: unknown[] = []
+        const dispose = api().onExecution((event) => events.push(event))
+        await flush()
+        expect(mockSubscribeToTaskExecutions).toHaveBeenCalledTimes(1)
+        const publish = mockSubscribeToTaskExecutions.mock.calls[0][0]
+
+        publish({ task: pluginTask(), execution: execution({ status: "running" }) })
+        publish({ task: pluginTask(), execution: execution({ status: "failed", error: "x" }) })
+        publish({
+          task: pluginTask({ payload: { pluginId: "another-plugin", handler: "h" } }),
+          execution: execution({ status: "running" }),
+        })
+        publish({ task: pluginTask({ type: "chat" }), execution: execution() })
+        publish({ task: pluginTask(), execution: execution({ status: "pending" }) })
+
+        expect(events).toEqual([
+          expect.objectContaining({
+            phase: "started",
+            taskId: "plugin-task-1",
+            handler: "heartbeat",
+            execution: expect.objectContaining({ status: "running" }),
+          }),
+          expect.objectContaining({ phase: "failed" }),
+        ])
+
+        dispose()
+        expect(mockUnsubscribeExecutions).toHaveBeenCalledTimes(1)
+      })
+
+      it("never subscribes when disposed before the engine loaded", async () => {
+        const dispose = api().onExecution(() => undefined)
+        dispose()
+        await flush()
+        expect(mockSubscribeToTaskExecutions).not.toHaveBeenCalled()
+      })
+
+      it("is removed with the plugin's lifecycle scope", async () => {
+        const scope = new PluginDisposableScope("test-plugin")
+        const manager = {
+          ...mockManager,
+          getPluginDisposableScope: () => scope,
+        } as unknown as PluginManager
+        const context = createFullPluginContext(schedulerPlugin(), manager)
+        context.scheduler.onExecution(() => undefined)
+        await flush()
+        expect(mockSubscribeToTaskExecutions).toHaveBeenCalledTimes(1)
+
+        await scope.dispose()
+        expect(mockUnsubscribeExecutions).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    describe("previewTrigger", () => {
+      it("projects cron and interval fire times in order", async () => {
+        const cron = await api().previewTrigger({ type: "cron", expression: "0 9 * * *" }, 3)
+        expect(cron).toHaveLength(3)
+        expect(cron[1].getTime() - cron[0].getTime()).toBe(24 * 60 * 60 * 1000)
+
+        const before = Date.now()
+        const interval = await api().previewTrigger({ type: "interval", seconds: 60 }, 2)
+        expect(interval[0].getTime()).toBeGreaterThanOrEqual(before + 60_000)
+        expect(interval[1].getTime() - interval[0].getTime()).toBe(60_000)
+      })
+
+      it("starts with now for a startImmediately interval", async () => {
+        const before = Date.now()
+        const runs = await api().previewTrigger(
+          { type: "interval", seconds: 60, startImmediately: true },
+          3
+        )
+        expect(runs).toHaveLength(3)
+        expect(runs[0].getTime() - before).toBeLessThan(1000)
+        expect(runs[1].getTime() - runs[0].getTime()).toBe(60_000)
+      })
+
+      it("has nothing to project for an event trigger", async () => {
+        await expect(api().previewTrigger({ type: "event", eventType: "x" })).resolves.toEqual([])
+      })
+
+      it("rejects an invalid cron with the validator's message, and a bad count", async () => {
+        await expect(
+          api().previewTrigger({ type: "cron", expression: "not a cron" })
+        ).rejects.toThrow(/cron/i)
+        await expect(api().previewTrigger({ type: "interval", seconds: 60 }, 0)).rejects.toThrow(
+          /count/
+        )
+        await expect(api().previewTrigger({ type: "interval", seconds: 60 }, 101)).rejects.toThrow(
+          /at most 100/
+        )
+      })
     })
   })
 
@@ -2409,6 +3102,11 @@ describe("python host-call parity (ADR-0145)", () => {
         "secrets",
         "storage",
         "templates",
+        // The user's schedule is request/response end to end, and its writes
+        // are policy-gated and attributed in `lib/plugin/api/scheduler-tasks.ts`,
+        // so a Python plugin gets it on the same terms. `ctx.scheduler` stays
+        // JS-only: its handlers are functions registered in the JS runtime.
+        "userScheduler",
         // A Python plugin could START a Squad through `ctx.agent.runTeam`, which
         // is python-open and needs only `agent:dispatch`, and could not READ
         // one, because `ctx.team` listed only frontend and hybrid. That inverts
@@ -2508,10 +3206,36 @@ describe("ctx → catalog parity", () => {
     })
   }
 
+  it("enumerates the scheduler's methods, so the check below is not vacuous for it", () => {
+    const context = createFullPluginContext(
+      createMockPlugin({ manifest: { ...mockManifest, capabilities: ["tools", "scheduler"] } }),
+      mockManager
+    )
+    const paths = callablePaths(context.scheduler, "scheduler")
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "scheduler.createTask",
+        "scheduler.emitEvent",
+        "scheduler.getStatistics",
+        "scheduler.onExecution",
+        "scheduler.previewTrigger",
+      ])
+    )
+    expect(paths.filter((path) => !catalogMethodIds.has(path))).toEqual([])
+  })
+
   it.each(PLUGIN_API_NAMESPACE_CONTRACTS.map((namespace) => [namespace.id] as const))(
     "every function on ctx.%s has a catalog row",
     (id) => {
-      const context = createFullPluginContext(createMockPlugin(), mockManager)
+      // The scheduler capability is declared so `ctx.scheduler` is the real
+      // API rather than the denied proxy, whose empty target made this check
+      // vacuous for that namespace: it enumerated no methods at all.
+      const context = createFullPluginContext(
+        createMockPlugin({
+          manifest: { ...mockManifest, capabilities: ["tools", "scheduler"] },
+        }),
+        mockManager
+      )
       const surface = (context as unknown as Record<string, unknown>)[id]
       const unmapped = callablePaths(surface, id).filter((path) => !catalogMethodIds.has(path))
       expect(unmapped).toEqual([])

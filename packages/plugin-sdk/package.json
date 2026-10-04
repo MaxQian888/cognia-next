@@ -165,6 +165,12 @@
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
+    "./api/pet": {
+      "types": "./dist/pet.d.ts",
+      "import": "./dist/pet.js",
+      "require": "./dist/pet.cjs",
+      "default": "./dist/pet.js"
+    },
     "./api/ocr-provider": {
       "types": "./dist/ocr-provider.d.ts",
       "import": "./dist/ocr-provider.js",

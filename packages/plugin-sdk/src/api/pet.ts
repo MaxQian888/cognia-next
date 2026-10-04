@@ -1,12 +1,29 @@
 /**
- * Plugin SDK — `pet` capability surface.
+ * Plugin SDK — `pet` capability surface (`@cognia/plugin-sdk/api/pet`).
  *
- * Re-exports the data-only pet contribution helpers and the host overlay
- * registries for `manifest.petAchievements[]` and `manifest.petItems[]`.
+ * Everything an author needs around `ctx.pet`: the data-only contribution
+ * helpers for `manifest.petItems[]` / `manifest.petAchievements[]`, the
+ * vocabulary and limits the host enforces (so a reward can be typed and sized
+ * to what will actually be granted), the errors a refused call throws (so they
+ * can be told apart with `instanceof`), and the plugin-scoped teardown for the
+ * contribution registries.
+ *
+ * The constants and errors come from the dependency-free contract module; the
+ * ctx.pet implementation itself stays host-side.
  */
 
 export { definePetAchievement } from "../define/define-pet-achievement"
 export { definePetItem } from "../define/define-pet-item"
+
+export {
+  MAX_COINS_PER_EMIT,
+  MAX_XP_PER_EMIT,
+  PLUGIN_EMITTABLE_PET_EVENT_KINDS,
+  PetCooldownError,
+  PetEventKindNotAllowedError,
+  PetItemKindMismatchError,
+  PetItemNotOwnedError,
+} from "@/lib/plugin/api/pet-api-contract"
 
 export {
   buildPluginAchievementId,
@@ -14,8 +31,6 @@ export {
   getPluginAchievementDisplay,
   listCompiledPluginAchievements,
   listPetAchievementEntries,
-  registerPetAchievement,
-  unregisterPetAchievementById,
   unregisterPetAchievementsByPlugin,
 } from "@/lib/plugin/registries/pet-achievement-registry"
 
@@ -26,8 +41,6 @@ export {
   listPetItemEntries,
   listProjectedPluginItems,
   projectPluginItem,
-  registerPetItem,
-  unregisterPetItemById,
   unregisterPetItemsByPlugin,
 } from "@/lib/plugin/registries/pet-item-registry"
 
@@ -37,9 +50,17 @@ export type {
   PluginPetItemDef,
 } from "@/types/plugin/plugin-pet"
 
+export type { PetEventKind, PetEventSource } from "@/types/pet"
+
+export type {
+  PluginEmittablePetEventKind,
+  PluginPetAvailability,
+  PluginPetEvent,
+  PluginPetUnavailableReason,
+} from "@/lib/plugin/api/pet-api-contract"
+
 export type {
   PluginPetAPI,
-  PluginPetEvent,
   PluginPetInteractionKind,
   PluginPetSummary,
 } from "@/lib/plugin/api/pet-api"

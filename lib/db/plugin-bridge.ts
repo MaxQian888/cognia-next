@@ -24,6 +24,10 @@ import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { invalidatePersistSnapshot } from "./messages"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import {
+  invalidateTranscriptRuntime,
+  withTranscriptRuntimeLock,
+} from "@/lib/chat/transcript/revision-events"
 
 /**
  * Proxy that lazy-resolves Dexie tables. Plugin code that hooks
@@ -185,7 +189,18 @@ export const messageRepository = {
       patch.metadata = meta
     }
 
-    await dexie.messages.update(messageId, patch as Partial<StoredMessage>)
+    if (
+      updates.role !== undefined ||
+      updates.parts !== undefined ||
+      updates.content !== undefined
+    ) {
+      await withTranscriptRuntimeLock(existing.sessionId, async () => {
+        await invalidateTranscriptRuntime(existing.sessionId)
+        await dexie.messages.update(messageId, patch as Partial<StoredMessage>)
+      })
+    } else {
+      await dexie.messages.update(messageId, patch as Partial<StoredMessage>)
+    }
     invalidatePersistSnapshot(existing.sessionId)
     void emitMessageEvent("updated", {
       sessionId: existing.sessionId,
@@ -198,8 +213,13 @@ export const messageRepository = {
     const existing = await getDb().messages.get(messageId)
     if (existing) {
       assertSessionWritable(await getDb().sessions.get(existing.sessionId), "send-message")
+      await withTranscriptRuntimeLock(existing.sessionId, async () => {
+        await invalidateTranscriptRuntime(existing.sessionId)
+        await getDb().messages.delete(messageId)
+      })
+    } else {
+      await getDb().messages.delete(messageId)
     }
-    await getDb().messages.delete(messageId)
     if (existing) {
       invalidatePersistSnapshot(existing.sessionId)
       void emitMessageEvent("deleted", {
@@ -211,6 +231,9 @@ export const messageRepository = {
 
   async deleteBySessionId(sessionId: string): Promise<void> {
     assertSessionWritable(await getDb().sessions.get(sessionId), "send-message")
-    await getDb().messages.where("sessionId").equals(sessionId).delete()
+    await withTranscriptRuntimeLock(sessionId, async () => {
+      await invalidateTranscriptRuntime(sessionId)
+      await getDb().messages.where("sessionId").equals(sessionId).delete()
+    })
   },
 }

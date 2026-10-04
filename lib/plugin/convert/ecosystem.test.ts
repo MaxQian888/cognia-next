@@ -940,7 +940,7 @@ User input: {{args}}
         ],
       },
       "codex",
-      "subagent execution",
+      "no subagent contribution",
     ],
     [
       "Cognia-only subagent routing",
@@ -1068,20 +1068,21 @@ User input: {{args}}
     expect(exported.report.fidelity).toBe("structured")
   })
 
-  it.each(["hooks/hooks.json", "agents/reviewer.md", "policies/security.toml"])(
-    "does not silently ignore Gemini native %s",
-    (path) => {
-      expect(() =>
-        convertPluginBundle(
-          snapshot({
-            "gemini-extension.json": JSON.stringify({ name: "native" }),
-            [path]: "native content",
-          }),
-          "cognia"
-        )
-      ).toThrow(/platform-specific/)
-    }
-  )
+  it.each([
+    ["hooks/hooks.json", /could not parse hooks\/hooks.json/],
+    ["agents/reviewer.md", /missing `description`/],
+    ["policies/security.toml", /policy engine/],
+  ])("does not silently ignore Gemini native %s", (path, message) => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          "gemini-extension.json": JSON.stringify({ name: "native" }),
+          [path]: "native content",
+        }),
+        "cognia"
+      )
+    ).toThrow(message)
+  })
 
   it("sanitizes complete MCP bundles and removes raw configuration and dotenv copies", () => {
     const files = snapshot({
@@ -1236,20 +1237,50 @@ User input: {{args}}
     expect(output.mcpServers.remote.headers.Authorization).toBe("${COGNIA_REMOTE_AUTHORIZATION}")
   })
 
-  it.each(["gemini-cli", "codex"] as const)(
-    "reports missing %s hook adapters without pretending the platform lacks hooks",
-    (target) => {
-      expect(() =>
-        convertPluginBundle(
-          cognia({
-            capabilities: ["command-hooks"],
-            commandHooks: { Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }] },
-          }),
-          target
-        )
-      ).toThrow(/event\/payload\/decision adapter/)
-    }
-  )
+  it("exports hooks only through each host's exact event map", () => {
+    const hooked = cognia({
+      capabilities: ["command-hooks"],
+      commandHooks: { Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }] },
+    })
+    expect(() => convertPluginBundle(hooked, "gemini-cli")).toThrow(
+      /Gemini CLI has no hook event equivalent to Stop/
+    )
+    const codex = convertPluginBundle(hooked, "codex")
+    expect(JSON.parse(codex.files.get("hooks/hooks.json")!)).toEqual({
+      hooks: { Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }] },
+    })
+    expect(JSON.parse(codex.files.get(".codex-plugin/plugin.json")!).hooks).toBe(
+      "./hooks/hooks.json"
+    )
+    const gemini = convertPluginBundle(
+      cognia(
+        {
+          capabilities: ["command-hooks"],
+          commandHooks: {
+            PreToolUse: [
+              {
+                hooks: [
+                  { type: "command", command: "node ${COGNIA_PLUGIN_ROOT}/g.js", timeout: 3 },
+                ],
+              },
+            ],
+          },
+        },
+        { "g.js": "process.exit(0)" }
+      ),
+      "gemini-cli"
+    )
+    expect(JSON.parse(gemini.files.get("hooks/hooks.json")!)).toEqual({
+      hooks: {
+        BeforeTool: [
+          { hooks: [{ type: "command", command: "node ${extensionPath}/g.js", timeout: 3000 }] },
+        ],
+      },
+    })
+    expect(gemini.report.warnings.map((issue) => issue.message).join("\n")).toMatch(
+      /differ from Claude/
+    )
+  })
 
   it("rejects a Gemini export that would lose explicit invocation policy", () => {
     expect(() =>
@@ -1606,7 +1637,7 @@ User input: {{args}}
 describe("root skill resources and environment placeholders", () => {
   it("preserves root skill resources across Kimi import and native export", () => {
     const source = snapshot({
-      "kimi.plugin.json": JSON.stringify({ name: "example", version: "1.0.0" }),
+      "plugin.json": JSON.stringify({ name: "example", version: "1.0.0", tools: [] }),
       "SKILL.md":
         "---\nname: example\ndescription: Example skill\n---\nRead references/data.md and run scripts/run.py.\n",
       "references/data.md": "Important reference content",
@@ -1645,5 +1676,401 @@ describe("root skill resources and environment placeholders", () => {
     const exported = convertPluginBundle(source, "claude-code", { binaryPaths })
     expect(exported.copies).toEqual([])
     expect([...exported.files.keys()].some((path) => path.includes(".env"))).toBe(false)
+  })
+})
+
+describe("latest host formats (2026-10-02 refresh)", () => {
+  const json = JSON.stringify
+  const skill = (name: string) => `---\nname: ${name}\ndescription: ${name} skill\n---\nDo ${name}.`
+  const blockingOf = (run: () => unknown): string => {
+    try {
+      run()
+    } catch (error) {
+      if (error instanceof UnsupportedPluginConversionError)
+        return error.report.blocking.map((issue) => `${issue.path}: ${issue.message}`).join("\n")
+      throw error
+    }
+    return ""
+  }
+
+  it("treats Claude presentation keys and unknown keys as warnings and maps the icon", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        ".claude-plugin/plugin.json": json({
+          $schema: "https://json.schemastore.org/claude-code-plugin-manifest.json",
+          name: "kit",
+          displayName: "Kit",
+          icon: "assets/icon.png",
+          metadata: { category: "dev" },
+          defaultEnabled: true,
+          futureFlag: true,
+          skills: "./extra",
+          mcpServers: { inline: { command: "npx", args: ["inline"] } },
+        }),
+        "skills/a/SKILL.md": skill("a"),
+        "extra/b/SKILL.md": skill("b"),
+        ".mcp.json": json({ mcpServers: { file: { command: "npx", args: ["file"] } } }),
+        "bin/tool": "",
+      }),
+      "cognia"
+    )
+    expect(result.manifest.name).toBe("Kit")
+    expect(result.manifest.icon).toBe("assets/icon.png")
+    // skills adds to skills/; mcpServers merges with .mcp.json.
+    expect(result.manifest.skills?.map((entry) => entry.id).sort()).toEqual(["a", "b"])
+    expect(result.manifest.mcpServerPresets?.map((preset) => preset.id).sort()).toEqual([
+      "file",
+      "inline",
+    ])
+    expect(result.report.blocking).toEqual([])
+    expect(result.report.warnings.map((issue) => issue.capability)).toEqual(
+      expect.arrayContaining(["$schema", "metadata", "defaultEnabled", "futureFlag", "bin"])
+    )
+  })
+
+  it("converts Claude inline command maps and blocks packaged MCP and command models", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        ".claude-plugin/plugin.json": json({
+          name: "kit",
+          commands: {
+            check: { content: "Check the diff.", description: "Check", argumentHint: "<file>" },
+            run: { source: "./prompts/run.md" },
+          },
+        }),
+        "prompts/run.md": "Run the suite.",
+      }),
+      "cognia"
+    )
+    expect(result.manifest.skills?.map((entry) => entry.id).sort()).toEqual(["check", "run"])
+    expect(result.report.warnings.map((issue) => issue.path)).toContain("commands.check")
+    expect(
+      blockingOf(() =>
+        convertPluginBundle(
+          snapshot({
+            ".claude-plugin/plugin.json": json({
+              name: "kit",
+              commands: { check: { content: "Check.", model: "opus" } },
+              mcpServers: "./server.mcpb",
+            }),
+          }),
+          "cognia"
+        )
+      )
+    ).toMatch(/model[\s\S]*\.mcpb|\.mcpb[\s\S]*model/)
+  })
+
+  it("blocks reserved Claude Code names on export only", () => {
+    const files = snapshot({
+      "plugin.json": json({
+        id: "claude-helper",
+        name: "Helper",
+        version: "1.0.0",
+        type: "frontend",
+        capabilities: [],
+      }),
+    })
+    expect(blockingOf(() => convertPluginBundle(files, "claude-code"))).toMatch(/reserves/)
+    expect(convertPluginBundle(files, "codex").files.has(".codex-plugin/plugin.json")).toBe(true)
+  })
+
+  it("imports Codex commands as skills and blocks OpenAI-only surfaces", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        ".codex-plugin/plugin.json": json({
+          name: "kit",
+          commands: "./commands",
+          interface: { websiteUrl: "https://kit.test" },
+        }),
+        "commands/fix.md": "---\ndescription: Fix\n---\nFix it.",
+      }),
+      "cognia"
+    )
+    expect(result.manifest.skills?.map((entry) => entry.id)).toEqual(["fix"])
+    expect(result.manifest.homepage).toBe("https://kit.test")
+    expect(
+      blockingOf(() =>
+        convertPluginBundle(
+          snapshot({
+            ".codex-plugin/plugin.json": json({
+              name: "kit",
+              extensions: { "com.openai": { x: 1 } },
+            }),
+            ".app.json": "{}",
+          }),
+          "cognia"
+        )
+      )
+    ).toMatch(/extensions[\s\S]*apps|apps[\s\S]*extensions/)
+  })
+
+  it("imports Gemini hooks, agents, context arrays and path separators", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        "gemini-extension.json": json({
+          name: "kit",
+          version: "1.0.0",
+          contextFileName: ["GEMINI.md", "docs/more.md"],
+          migratedTo: "https://github.com/acme/new",
+          mcpServers: { s: { command: "node", args: ["${extensionPath}${/}s.js"] } },
+        }),
+        "GEMINI.md": "Context one.",
+        "docs/more.md": "Context two.",
+        "s.js": "process.exit(0)",
+        "hooks/hooks.json": json({
+          hooks: {
+            BeforeTool: [
+              { hooks: [{ type: "command", command: "${extensionPath}${/}g.sh", timeout: 500 }] },
+            ],
+          },
+        }),
+        "g.sh": "#!/bin/sh",
+        "agents/helper.md": "---\nname: helper\ndescription: Help\nmax_turns: 3\n---\nHelp.",
+        ".mcp.json": json({ mcpServers: { ignored: { command: "x" } } }),
+      }),
+      "cognia"
+    )
+    expect(result.manifest.skills?.map((entry) => entry.id)).toEqual([
+      "gemini-context",
+      "gemini-context-2",
+    ])
+    expect(result.manifest.commandHooks?.PreToolUse?.[0].hooks[0]).toMatchObject({
+      command: "${COGNIA_PLUGIN_ROOT}/g.sh",
+      timeout: 0.5,
+    })
+    expect(result.manifest.subagents?.[0]).toMatchObject({ id: "helper", maxTurns: 3 })
+    expect(result.manifest.mcpServerPresets?.map((preset) => preset.id)).toEqual(["s"])
+    expect(result.manifest.mcpServerPresets?.[0].config.args).toEqual([
+      "${COGNIA_PLUGIN_ROOT}/s.js",
+    ])
+    expect(result.report.warnings.map((issue) => issue.capability)).toEqual(
+      expect.arrayContaining(["migratedTo", "variables", "agents", "commandHooks"])
+    )
+    expect(
+      blockingOf(() =>
+        convertPluginBundle(
+          snapshot({ "gemini-extension.json": json({ name: "kit", themes: [{ name: "x" }] }) }),
+          "cognia"
+        )
+      )
+    ).toMatch(/themes/)
+  })
+
+  it("exports subagents to Gemini extension agents", () => {
+    const files = snapshot({
+      "plugin.json": json({
+        id: "kit",
+        name: "Kit",
+        version: "1.0.0",
+        type: "frontend",
+        capabilities: ["subagent"],
+        subagents: [
+          { id: "helper", name: "helper", description: "Help", prompt: "Help.", maxTurns: 3 },
+        ],
+      }),
+    })
+    const result = convertPluginBundle(files, "gemini-cli")
+    expect(result.files.get("agents/helper.md")).toContain("max_turns: 3")
+    files.set(
+      "plugin.json",
+      json({
+        id: "kit",
+        name: "Kit",
+        version: "1.0.0",
+        type: "frontend",
+        capabilities: ["subagent"],
+        subagents: [
+          { id: "helper", name: "helper", description: "Help", prompt: "Help.", model: "x" },
+        ],
+      })
+    )
+    expect(blockingOf(() => convertPluginBundle(files, "gemini-cli"))).toMatch(/model/)
+  })
+
+  it("binds Cursor variables to preset fields and projects preset fields back to variables", () => {
+    const cursor = snapshot({
+      ".cursor-plugin/plugin.json": json({
+        name: "kit",
+        variables: {
+          type: "object",
+          properties: { API_TOKEN: { type: "string", title: "API token" } },
+        },
+      }),
+      "mcp.json": json({
+        mcpServers: { api: { url: "https://x.test/mcp", headers: { "X-Token": "${API_TOKEN}" } } },
+      }),
+    })
+    const imported = convertPluginBundle(cursor, "cognia")
+    expect(imported.manifest.mcpServerPresets?.[0].fields).toEqual([
+      expect.objectContaining({
+        key: "X-Token",
+        label: "API token",
+        placement: "header",
+        secret: true,
+      }),
+    ])
+    const exported = convertPluginBundle(imported.files, "cursor")
+    const manifest = JSON.parse(exported.files.get(".cursor-plugin/plugin.json")!)
+    const variable = Object.keys(manifest.variables.properties)[0]
+    expect(JSON.parse(exported.files.get("mcp.json")!).mcpServers.api.headers["X-Token"]).toBe(
+      `\${${variable}}`
+    )
+    cursor.set(
+      "mcp.json",
+      json({
+        mcpServers: {
+          api: { url: "https://x.test", headers: { Authorization: "Bearer ${API_TOKEN}" } },
+        },
+      })
+    )
+    expect(blockingOf(() => convertPluginBundle(cursor, "cognia"))).toMatch(
+      /Composed header binding/
+    )
+  })
+
+  it("imports Agent Plugins client namespaces without leaking normalization files", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        "plugin.json": json({
+          $schema: "https://agent-plugins.org/schemas/1.1.0/plugin.schema.json",
+          name: "kit",
+        }),
+        "dev.openhands/agents/helper.md": "---\ndescription: Help\n---\nHelp.",
+        "dev.openhands/commands/check.md": "---\ndescription: Check\n---\nCheck.",
+        "dev.openhands/hooks/hooks.json": json({
+          hooks: {
+            SessionStart: [{ hooks: [{ type: "command", command: "${PLUGIN_ROOT}/boot.sh" }] }],
+          },
+        }),
+        "boot.sh": "#!/bin/sh",
+      }),
+      "cognia"
+    )
+    expect(result.source).toBe("agent-plugins")
+    expect(result.manifest.subagents?.map((agent) => agent.id)).toEqual(["helper"])
+    expect(result.manifest.skills?.map((entry) => entry.id)).toEqual(["check"])
+    expect(result.manifest.commandHooks?.SessionStart?.[0].hooks[0]).toMatchObject({
+      command: "${COGNIA_PLUGIN_ROOT}/boot.sh",
+    })
+    expect([...result.files.keys()].some((path) => path.startsWith(".cognia-normalized/"))).toBe(
+      false
+    )
+    expect(result.files.has(".claude-plugin/plugin.json")).toBe(false)
+  })
+
+  it("reports shadowed manifests when a vendor layout wins", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        ".factory-plugin/plugin.json": json({ name: "kit" }),
+        ".claude-plugin/plugin.json": json({ name: "kit", mcpServers: { s: { command: "x" } } }),
+        "skills/a/SKILL.md": skill("a"),
+      }),
+      "cognia"
+    )
+    expect(result.source).toBe("factory-droid")
+    expect(result.manifest.mcpServerPresets).toBeUndefined()
+    expect(result.report.warnings[0]).toMatchObject({
+      capability: "format",
+      path: ".claude-plugin/plugin.json",
+    })
+    expect(result.files.get(".claude-plugin/plugin.json")).toBe("{}\n")
+  })
+
+  describe("Pi packages", () => {
+    const pi = () =>
+      snapshot({
+        "package.json": json({
+          name: "@acme/pi-tools",
+          version: "1.0.0",
+          keywords: ["pi-package"],
+          dependencies: { zod: "^3.0.0" },
+          peerDependencies: { "@earendil-works/pi-coding-agent": "*" },
+        }),
+        "package-lock.json": "{}",
+        "skills/review/SKILL.md": skill("review"),
+        "skills/review/assets/logo.png": "",
+        "prompts/fix.md": "---\ndescription: Fix\n---\nFix $@.",
+        "extensions/index.ts": "export default (pi) => pi.registerTool({ name: 'x' })",
+        "themes/dark.json": "{}",
+      })
+
+    it("retains the whole package and converts skills and prompts", () => {
+      const source = pi()
+      const result = convertPluginBundle(source, "cognia", {
+        binaryPaths: new Set(["skills/review/assets/logo.png"]),
+      })
+      expect(result.source).toBe("pi")
+      expect(result.manifest.capabilities).toEqual(expect.arrayContaining(["skills", "pi-package"]))
+      expect(result.manifest.piPackages).toEqual([
+        expect.objectContaining({ id: "acme-pi-tools", path: ".", prepare: expect.any(Object) }),
+      ])
+      expect(result.manifest.skills?.map((entry) => entry.id).sort()).toEqual(["fix", "review"])
+      expect(result.manifest.skills?.find((entry) => entry.id === "fix")?.invocationPolicy).toBe(
+        "explicit"
+      )
+      expect(result.report.fidelity).toBe("contextual")
+      for (const path of [
+        "package.json",
+        "package-lock.json",
+        "extensions/index.ts",
+        "themes/dark.json",
+      ])
+        expect(result.files.get(path)).toBe(source.get(path))
+      expect(result.report.delivery?.hosted.retained).toContain("pi-package")
+    })
+
+    it("round-trips the package back to Pi byte-for-byte", () => {
+      const source = pi()
+      const imported = convertPluginBundle(source, "cognia", {
+        binaryPaths: new Set(["skills/review/assets/logo.png"]),
+      })
+      const exported = convertPluginBundle(imported.files, "pi", {
+        binaryPaths: new Set(["skills/review/assets/logo.png"]),
+      })
+      expect(exported.files.get("extensions/index.ts")).toBe(source.get("extensions/index.ts"))
+      expect(exported.files.get("skills/review/SKILL.md")).toBe(
+        source.get("skills/review/SKILL.md")
+      )
+      expect(JSON.parse(exported.files.get("package.json")!)).toEqual(
+        JSON.parse(source.get("package.json")!)
+      )
+      expect(exported.files.has("plugin.json")).toBe(false)
+      expect(exported.files.has("dist/index.js")).toBe(false)
+      expect(exported.copies).toEqual([
+        { from: "skills/review/assets/logo.png", to: "skills/review/assets/logo.png" },
+      ])
+      expect(exported.report.delivery?.hosted.retained).not.toContain("pi-package")
+      const again = convertPluginBundle(
+        new Map([...exported.files, ["skills/review/assets/logo.png", ""]]),
+        "cognia"
+      )
+      expect(again.manifest.piPackages).toHaveLength(1)
+    })
+
+    it("keeps Pi packages in Cognia for every other target and blocks Pi-incompatible exports", () => {
+      const imported = convertPluginBundle(pi(), "cognia")
+      expect(blockingOf(() => convertPluginBundle(imported.files, "claude-code"))).toMatch(
+        /Pi packages install only into Pi/
+      )
+      expect(
+        blockingOf(() =>
+          convertPluginBundle(
+            snapshot({
+              "plugin.json": json({
+                id: "kit",
+                name: "Kit",
+                version: "1.0.0",
+                type: "frontend",
+                capabilities: ["mcp-server-preset"],
+                mcpServerPresets: [
+                  { id: "s", name: "s", transport: "stdio", config: { command: "x" } },
+                ],
+              }),
+            }),
+            "pi"
+          )
+        )
+      ).toMatch(/registerMcpServer/)
+    })
   })
 })

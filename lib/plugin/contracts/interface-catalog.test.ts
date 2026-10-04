@@ -14,7 +14,20 @@ describe("plugin interface catalog", () => {
   it("indexes the canonical ctx method surface", () => {
     // A canary, not a fact worth memorising: any catalog edit lands here so
     // the method surface cannot grow or shrink without someone noticing.
-    expect(listPluginApiMethodContracts()).toHaveLength(842)
+    expect(listPluginApiMethodContracts()).toHaveLength(855)
+    // The scheduler surfaces: plugin-owned tasks are capability-gated, the
+    // user's schedule is permission-gated and reachable from python.
+    expect(getPluginApiMethodContract("scheduler.onExecution")).toMatchObject({
+      resourceEffect: { kind: "returned-disposer" },
+    })
+    expect(getPluginApiMethodContract("scheduler.runTaskNow")).toMatchObject({ risk: "medium" })
+    expect(getPluginApiMethodContract("userScheduler.cancelExecution")).toMatchObject({
+      requiredPermissions: ["agent:control", "database:write"],
+      namespace: { runtimes: ["frontend", "hybrid", "python"] },
+    })
+    expect(getPluginApiMethodContract("userScheduler.getUpcoming")).toMatchObject({
+      requiredPermissions: ["database:read"],
+    })
     // The one opener for a `location: "panel"` view container; guarded, not free.
     expect(getPluginApiMethodContract("ui.openViewContainer")).toMatchObject({
       requiredPermissions: ["extension:ui"],

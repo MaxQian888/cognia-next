@@ -53,9 +53,10 @@ test("a standalone bundle preserves root Skill resources and removes dotenv cred
     const source = join(root, "source")
     mkdirSync(join(source, "references"), { recursive: true })
     mkdirSync(join(source, "assets"), { recursive: true })
+    // Kimi CLI's manifest is a root plugin.json; an explicit tools list marks it as Kimi's.
     writeFileSync(
-      join(source, "kimi.plugin.json"),
-      JSON.stringify({ name: "resource-test", version: "1.0.0" })
+      join(source, "plugin.json"),
+      JSON.stringify({ name: "resource-test", version: "1.0.0", tools: [] })
     )
     writeFileSync(
       join(source, "SKILL.md"),

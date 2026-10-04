@@ -12,8 +12,27 @@
  * Idempotent across restarts: before creating, the bridge checks for an
  * existing plugin task matching `(pluginId, name, handler)` so the manager's
  * boot-time re-enable doesn't duplicate rows the scheduler already persisted.
- * On disable, every `"plugin"` task owned by the plugin is deleted (matching
- * the contribution model — a disabled plugin's tasks disappear).
+ * A def whose trigger, timeout or retry changed since the row was written
+ * re-arms that row instead of being skipped.
+ *
+ * Attribution: rows are created with `createdBy: { kind: "plugin", pluginId }`,
+ * so the per-source quota counts them and `ctx.scheduler`'s ownership check can
+ * read the owner off the row. They are deliberately NOT passed through the
+ * write gate (`assertTaskWriteAllowed`). The user consented to these exact
+ * tasks by installing and enabling a plugin whose manifest declares them, and
+ * refusing one at the quota would leave the plugin half-registered with a
+ * handler that never fires. They still occupy the plugin source's quota, so a
+ * runtime `ctx.scheduler.createTask` is measured against them.
+ *
+ * On disable (and suspend, unload, uninstall: the manager tears every module
+ * bridge down through the same hook) every `"plugin"` task owned by the
+ * plugin is deleted, runtime-created ones included. That is the contribution
+ * model: a plugin's tasks are only runnable while its handlers are
+ * registered, and a handler-less task can only fail, raise an error toast and
+ * eventually auto-pause. ADR-0079 makes plugin tasks ordinary scheduler rows
+ * and says nothing about them outliving the plugin, so nothing here keeps a
+ * row the plugin cannot serve. A plugin that creates tasks at runtime should
+ * recreate them idempotently in `activate`.
  *
  * The scheduler is injected (defaults to the live `getTaskScheduler()`) so the
  * bridge stays unit-testable without the Dexie/timer machinery.
@@ -21,10 +40,11 @@
  * See ADR-0026 (plugin extension-point expansion).
  */
 
-import type { PluginManifest } from "@/types/plugin/plugin"
+import type { PluginManifest, PluginScheduledTaskDef } from "@/types/plugin/plugin"
 import type {
   CreateScheduledTaskInput,
   ScheduledTask,
+  TaskExecutionConfig,
   UpdateScheduledTaskInput,
 } from "@/types/scheduler"
 import { toTaskTrigger } from "@cognia/plugin-sdk/api/scheduled-task"
@@ -64,6 +84,33 @@ const PLUGIN_TASK_TAG = (pluginId: string): string => `plugin:${pluginId}`
 interface PluginTaskPayload {
   pluginId: string
   handler: string
+}
+
+/**
+ * The execution config a def asks for, in the scheduler's units. Only the
+ * fields the def sets: an omitted `timeout` or `retry` keeps the scheduler's
+ * defaults, as it always has.
+ */
+function configForDef(def: PluginScheduledTaskDef): Partial<TaskExecutionConfig> {
+  return {
+    ...(def.timeout ? { timeout: def.timeout * 1000 } : {}),
+    ...(def.retry
+      ? {
+          maxRetries: Math.max(0, Math.floor(def.retry.maxAttempts)),
+          retryDelay: Math.max(0, def.retry.delaySeconds) * 1000,
+        }
+      : {}),
+  }
+}
+
+/** Whether a stored config already matches every field the def sets. */
+function configMatches(
+  stored: TaskExecutionConfig | undefined,
+  wanted: Partial<TaskExecutionConfig>
+): boolean {
+  return Object.entries(wanted).every(
+    ([key, value]) => stored?.[key as keyof TaskExecutionConfig] === value
+  )
 }
 
 async function getScheduler(
@@ -107,14 +154,21 @@ export async function registerScheduledTasksForPlugin(
       })
       if (existingTask) {
         const trigger = toTaskTrigger(def)
-        if (JSON.stringify(existingTask.trigger) === JSON.stringify(trigger)) {
+        const config = configForDef(def)
+        const triggerChanged = JSON.stringify(existingTask.trigger) !== JSON.stringify(trigger)
+        const configChanged = !configMatches(existingTask.config, config)
+        if (!triggerChanged && !configChanged) {
           result.skipped += 1
         } else {
-          await scheduler.updateTask(existingTask.id, { trigger })
+          await scheduler.updateTask(existingTask.id, {
+            ...(triggerChanged ? { trigger } : {}),
+            ...(configChanged ? { config } : {}),
+          })
           result.updated += 1
         }
         continue
       }
+      const config = configForDef(def)
       const input: CreateScheduledTaskInput = {
         name: def.name,
         description: def.description,
@@ -122,7 +176,8 @@ export async function registerScheduledTasksForPlugin(
         trigger: toTaskTrigger(def),
         payload: { pluginId, handler: def.handler } satisfies PluginTaskPayload,
         tags: [PLUGIN_TASK_TAG(pluginId), ...(def.tags ?? [])],
-        ...(def.timeout ? { config: { timeout: def.timeout * 1000 } } : {}),
+        createdBy: { kind: "plugin", pluginId },
+        ...(Object.keys(config).length > 0 ? { config } : {}),
       }
       const task = await scheduler.createTask(input)
       // Honour `defaultEnabled: false` by parking the freshly-created task.

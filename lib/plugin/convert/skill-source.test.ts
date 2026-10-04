@@ -173,6 +173,7 @@ describe("skill execution portability", () => {
     "model: opus",
     "user-invocable: false",
     "paths: ['src/**']",
+    "trigger: {type: keyword}",
   ])("blocks unsupported %s", (field) => {
     const built = buildSkill(`---\nname: vendor\n${field}\n---\nBody.`)
     expect(built.blockers.join(" ")).toContain(field.split(":")[0])

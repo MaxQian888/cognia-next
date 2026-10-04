@@ -48,3 +48,22 @@ it("clears authority but rejects the switch when any runtime survives", async ()
   ).rejects.toThrow("still running")
   expect(cleared).toEqual(["consent", "guard", "api", "dispose", "account"])
 })
+
+it("clears account authority even when the manager cannot yet be disposed", async () => {
+  const clearAccount = jest.fn()
+  await expect(
+    teardownPluginAccountRuntime("acct_a", {
+      block: jest.fn(),
+      rejectPendingConsent: jest.fn(),
+      runtimePluginIds: () => [],
+      clearConsent: jest.fn(),
+      clearPermissionGuard: jest.fn(),
+      clearApiPermissions: jest.fn(),
+      disposeManager: () => {
+        throw new Error("manager is still initializing")
+      },
+      clearAccount,
+    })
+  ).rejects.toThrow("manager is still initializing")
+  expect(clearAccount).toHaveBeenCalledTimes(1)
+})

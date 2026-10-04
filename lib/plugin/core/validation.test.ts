@@ -512,6 +512,62 @@ describe("Plugin Validation", () => {
       )
     })
 
+    it("checks pet item and achievement shapes with the shared validator", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = [...(manifest.capabilities ?? []), "pet-item", "pet-achievement"]
+      manifest.petItems = [
+        {
+          id: "star-cookie",
+          labels: { en: "Star cookie" },
+          category: "food",
+          price: 25,
+          consumable: true,
+          interactionKind: "fed",
+        },
+      ]
+      manifest.petAchievements = [
+        {
+          id: "quest-master",
+          labels: { en: "Quest master" },
+          condition: { type: "level", gte: 3 },
+        },
+      ]
+      expect(
+        (validatePluginManifest(manifest).diagnostics ?? []).filter((d) =>
+          d.code.startsWith("manifest.pet_")
+        )
+      ).toEqual([])
+
+      manifest.petItems[0] = { ...manifest.petItems[0], price: 0 }
+      manifest.petAchievements[0] = {
+        id: "never",
+        labels: { en: "Never" },
+        condition: { type: "counter", kind: "quest.completed", gte: 1 },
+      }
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.pet_items.invalid",
+            field: "petItems[0].price",
+          }),
+          expect.objectContaining({
+            code: "manifest.pet_achievements.invalid",
+            field: "petAchievements[0].condition.kind",
+          }),
+        ])
+      )
+    })
+
+    it("rejects pet contributions that are not arrays", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.petItems = { id: "x" }
+      expect(
+        (validatePluginManifest(manifest).diagnostics ?? []).some(
+          (d) => d.code === "manifest.pet_items.invalid" && d.field === "petItems"
+        )
+      ).toBe(true)
+    })
+
     it("enforces capability minimums through engines.cognia", () => {
       const manifest = createValidManifest()
       manifest.engines = { cognia: ">=0.0.9" }
@@ -3384,6 +3440,43 @@ describe("validatePluginManifest cliTools", () => {
   const codesOf = (result: ReturnType<typeof validatePluginManifest>) =>
     (result.diagnostics ?? []).map((d) => d.code)
 
+  it("accepts description keys in every declared locale", () => {
+    const manifest = cliManifest({
+      i18n: { locales: { en: { "tool.search": "Search" }, "zh-CN": { "tool.search": "搜索" } } },
+    })
+    manifest.cliTools![0].descriptionKey = "tool.search"
+    expect(validatePluginManifest(manifest).errors).toEqual([])
+  })
+
+  it.each(["", 42])("rejects an invalid CLI description key %s", (key) => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].descriptionKey = key as string
+    expect(validatePluginManifest(manifest).diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "cliTools[0].descriptionKey",
+          code: "manifest.i18n.key.invalid",
+        }),
+      ])
+    )
+  })
+
+  it("rejects CLI description keys missing in any locale or without a bundle", () => {
+    for (const i18n of [undefined, { locales: { en: { "tool.search": "Search" }, "zh-CN": {} } }]) {
+      const manifest = cliManifest({ i18n })
+      manifest.cliTools![0].descriptionKey = "tool.search"
+      const result = validatePluginManifest(manifest)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "cliTools[0].descriptionKey",
+            code: "manifest.i18n.key.missing",
+          }),
+        ])
+      )
+    }
+  })
+
   it("accepts a fully-specified valid cliTool", () => {
     const result = validatePluginManifest(cliManifest())
     expect(result.errors).toHaveLength(0)
@@ -4091,5 +4184,310 @@ describe("declarative subscriptionProviders validation", () => {
   })
   it("requires the corresponding capability", () => {
     expect(validatePluginManifest(manifest([definition], [])).valid).toBe(false)
+  })
+})
+
+describe("validatePluginManifest piPackages (ADR-0210)", () => {
+  const piManifest = (
+    pkg: Record<string, unknown> = {},
+    overrides: Record<string, unknown> = {}
+  ): PluginManifest =>
+    ({
+      id: "pi-demo",
+      name: "Pi Demo",
+      version: "1.0.0",
+      description: "demo",
+      type: "frontend",
+      capabilities: ["pi-package"],
+      main: "index.js",
+      configSchema: {
+        type: "object",
+        properties: { engine: { type: "string", default: "lualatex" } },
+      },
+      piPackages: [
+        {
+          id: "latex-workbench",
+          name: "LaTeX workbench",
+          path: "pi",
+          minPiVersion: "0.85.1",
+          prepare: {
+            program: "npm",
+            args: ["ci", "--ignore-scripts"],
+            marker: "pi/node_modules/.package-lock.json",
+            timeoutMs: 120000,
+          },
+          hostedSession: {
+            extensions: ["pi/extensions/latex.ts"],
+            env: [
+              { name: "TEX_ENGINE", from: { config: "engine" } },
+              { name: "MODE", from: { value: "hosted" } },
+              { name: "WORKSPACE", from: { workspace: true } },
+            ],
+            tools: ["latex_compile"],
+            controlsSession: true,
+          },
+          ...pkg,
+        },
+      ],
+      ...overrides,
+    }) as unknown as PluginManifest
+
+  const codesOf = (result: ReturnType<typeof validatePluginManifest>) =>
+    (result.diagnostics ?? []).map((d) => d.code)
+  const errorCodesOf = (result: ReturnType<typeof validatePluginManifest>) =>
+    (result.diagnostics ?? []).filter((d) => d.severity === "error").map((d) => d.code)
+
+  it("accepts a fully specified package", () => {
+    const result = validatePluginManifest(piManifest())
+    expect(result.errors).toEqual([])
+    expect(result.valid).toBe(true)
+  })
+
+  it("accepts the plugin root as the package path, spelled only `.` or `./`", () => {
+    expect(validatePluginManifest(piManifest({ path: "." })).valid).toBe(true)
+    expect(validatePluginManifest(piManifest({ path: "./" })).valid).toBe(true)
+    for (const path of ["./.", "//"]) {
+      expect(validatePluginManifest(piManifest({ path })).valid).toBe(false)
+    }
+    expect(
+      validatePluginManifest(piManifest({ prepare: { program: "npm", args: ["ci"], marker: "." } }))
+        .valid
+    ).toBe(false)
+  })
+
+  it("requires kebab-case, unique ids", () => {
+    expect(codesOf(validatePluginManifest(piManifest({ id: "Latex_WB" })))).toContain(
+      "manifest.piPackages.id.invalid"
+    )
+    const dup = piManifest()
+    ;(dup.piPackages as unknown[]).push({ ...(dup.piPackages as object[])[0] })
+    expect(codesOf(validatePluginManifest(dup))).toContain("manifest.piPackages.id.duplicate")
+  })
+
+  it.each([
+    ["../outside", "manifest.piPackages.path.traversal"],
+    ["/abs/dir", "manifest.piPackages.path.absolute"],
+    ["pi\\win", "manifest.piPackages.path.invalid"],
+  ])("rejects package path %s", (path, code) => {
+    const result = validatePluginManifest(piManifest({ path }))
+    expect(result.valid).toBe(false)
+    expect(codesOf(result)).toContain(code)
+  })
+
+  it("restricts prepare to npm/pnpm with static string args", () => {
+    const bad = validatePluginManifest(
+      piManifest({ prepare: { program: "sh", args: ["-c", 1], marker: "m" } })
+    )
+    expect(errorCodesOf(bad)).toEqual(
+      expect.arrayContaining([
+        "manifest.piPackages.prepare.program.invalid",
+        "manifest.piPackages.prepare.args.invalid",
+      ])
+    )
+  })
+
+  it("warns that pnpm links dependencies, which the plugin loader refuses", () => {
+    const result = validatePluginManifest(
+      piManifest({ prepare: { program: "pnpm", args: ["install"], marker: "pi/m" } })
+    )
+    expect(result.valid).toBe(true)
+    expect(codesOf(result)).toContain("manifest.piPackages.prepare.program.symlinks")
+    expect(codesOf(validatePluginManifest(piManifest()))).not.toContain(
+      "manifest.piPackages.prepare.program.symlinks"
+    )
+  })
+
+  it("warns on a timeout above the ceiling and on a missing marker", () => {
+    const result = validatePluginManifest(
+      piManifest({ prepare: { program: "pnpm", args: ["install"], timeoutMs: 9_000_000 } })
+    )
+    expect(result.valid).toBe(true)
+    expect(codesOf(result)).toEqual(
+      expect.arrayContaining([
+        "manifest.piPackages.prepare.timeoutMs.clamped",
+        "manifest.piPackages.prepare.marker.missing",
+      ])
+    )
+    expect(
+      errorCodesOf(
+        validatePluginManifest(
+          piManifest({ prepare: { program: "npm", args: [], timeoutMs: -1, marker: "m" } })
+        )
+      )
+    ).toContain("manifest.piPackages.prepare.timeoutMs.invalid")
+  })
+
+  it("rejects a marker that escapes the plugin", () => {
+    expect(
+      codesOf(
+        validatePluginManifest(
+          piManifest({ prepare: { program: "npm", args: ["ci"], marker: "../lock" } })
+        )
+      )
+    ).toContain("manifest.piPackages.prepare.marker.invalid")
+  })
+
+  it("requires non-empty, in-plugin .ts/.js/.mjs extensions", () => {
+    expect(
+      codesOf(validatePluginManifest(piManifest({ hostedSession: { extensions: [] } })))
+    ).toContain("manifest.piPackages.hostedSession.extensions.missing")
+    expect(
+      codesOf(validatePluginManifest(piManifest({ hostedSession: { extensions: ["pi/ext.py"] } })))
+    ).toContain("manifest.piPackages.hostedSession.extensions.suffix")
+    const escaping = validatePluginManifest(
+      piManifest({ hostedSession: { extensions: ["../../evil.ts"] } })
+    )
+    expect(codesOf(escaping)).toEqual(
+      expect.arrayContaining([
+        "manifest.piPackages.hostedSession.extensions.invalid",
+        "manifest.piPackages.hostedSession.extensions.traversal",
+      ])
+    )
+    for (const ext of ["pi/a.ts", "pi/b.js", "pi/c.mjs"]) {
+      expect(
+        validatePluginManifest(piManifest({ hostedSession: { extensions: [ext] } })).valid
+      ).toBe(true)
+    }
+  })
+
+  it("validates env names and sources", () => {
+    const result = validatePluginManifest(
+      piManifest({
+        hostedSession: {
+          extensions: ["pi/x.ts"],
+          env: [
+            { name: "lower", from: { value: "x" } },
+            { name: "OK", from: { value: "a", config: "engine" } },
+            { name: "OK", from: { workspace: false } },
+          ],
+        },
+      })
+    )
+    expect(codesOf(result)).toEqual(
+      expect.arrayContaining([
+        "manifest.piPackages.hostedSession.env.name.invalid",
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        "manifest.piPackages.hostedSession.env.name.duplicate",
+      ])
+    )
+  })
+
+  it("warns when an env config key is not declared by the plugin", () => {
+    const result = validatePluginManifest(
+      piManifest({
+        hostedSession: {
+          extensions: ["pi/x.ts"],
+          env: [{ name: "TOKEN", from: { config: "notDeclared" } }],
+        },
+      })
+    )
+    expect(result.valid).toBe(true)
+    expect(codesOf(result)).toContain("manifest.piPackages.hostedSession.env.config.unknown")
+    // defaultConfig counts as a declaration too.
+    const declared = validatePluginManifest(
+      piManifest(
+        {
+          hostedSession: {
+            extensions: ["pi/x.ts"],
+            env: [{ name: "TOKEN", from: { config: "fromDefaults" } }],
+          },
+        },
+        { defaultConfig: { fromDefaults: "x" } }
+      )
+    )
+    expect(codesOf(declared)).not.toContain("manifest.piPackages.hostedSession.env.config.unknown")
+  })
+
+  it("rejects invalid, built-in and duplicate tool names", () => {
+    const result = validatePluginManifest(
+      piManifest({
+        hostedSession: { extensions: ["pi/x.ts"], tools: ["9bad", "bash", "ok_tool", "ok_tool"] },
+      })
+    )
+    expect(errorCodesOf(result)).toEqual(
+      expect.arrayContaining([
+        "manifest.piPackages.hostedSession.tools.invalid",
+        "manifest.piPackages.hostedSession.tools.builtin",
+        "manifest.piPackages.hostedSession.tools.duplicate",
+      ])
+    )
+  })
+
+  it("requires a semver minPiVersion", () => {
+    expect(codesOf(validatePluginManifest(piManifest({ minPiVersion: "latest" })))).toContain(
+      "manifest.piPackages.minPiVersion.invalid"
+    )
+  })
+
+  it("cross-checks the capability against the field in both directions", () => {
+    expect(codesOf(validatePluginManifest(piManifest({}, { capabilities: ["tools"] })))).toContain(
+      "manifest.capability.field_undeclared"
+    )
+    expect(codesOf(validatePluginManifest(piManifest({}, { piPackages: [] })))).toContain(
+      "manifest.capability.field_missing"
+    )
+  })
+})
+
+describe("validatePluginManifest configSchema label keys", () => {
+  const base = (configSchema: unknown, i18n?: unknown): PluginManifest =>
+    ({
+      id: "cfg-demo",
+      name: "Cfg",
+      version: "1.0.0",
+      description: "demo",
+      type: "frontend",
+      capabilities: ["configuration"],
+      main: "index.js",
+      configSchema,
+      ...(i18n ? { i18n } : {}),
+    }) as unknown as PluginManifest
+  const codesOf = (result: ReturnType<typeof validatePluginManifest>) =>
+    (result.diagnostics ?? []).map((d) => d.code)
+  const locales = {
+    locales: {
+      en: { "t.mode": "Mode", "t.strict": "Strict", "t.authoring": "Authoring" },
+      "zh-CN": { "t.mode": "模式", "t.strict": "严格", "t.authoring": "创作" },
+    },
+  }
+  const schema = (prop: Record<string, unknown>) => ({
+    type: "object",
+    properties: { mode: { type: "string", enum: ["strict", "authoring"], ...prop } },
+  })
+
+  it("accepts keys present in every locale", () => {
+    const result = validatePluginManifest(
+      base(schema({ titleKey: "t.mode", enumItemLabelKeys: ["t.strict", "t.authoring"] }), locales)
+    )
+    expect(result.errors).toEqual([])
+  })
+
+  it("rejects a key missing from a locale, and keys without any locale bundle", () => {
+    expect(
+      codesOf(validatePluginManifest(base(schema({ titleKey: "t.absent" }), locales)))
+    ).toContain("manifest.i18n.key.missing")
+    expect(codesOf(validatePluginManifest(base(schema({ titleKey: "t.mode" }))))).toContain(
+      "manifest.i18n.key.missing"
+    )
+  })
+
+  it("rejects enum label arrays that do not match the enum", () => {
+    const result = validatePluginManifest(
+      base(schema({ enumItemLabelKeys: ["t.strict"] }), locales)
+    )
+    expect(result.valid).toBe(false)
+    expect(result.errors.join("\n")).toMatch(/1 "enumItemLabelKeys" entries for 2 enum values/)
+    expect(
+      validatePluginManifest(base(schema({ enumItemLabels: [1, 2] }), locales)).errors.join("\n")
+    ).toMatch(/invalid "enumItemLabels"/)
+  })
+
+  it("validates piPackages nameKey / descriptionKey against the locales", () => {
+    const manifest = {
+      ...base(undefined, locales),
+      capabilities: ["pi-package"],
+      piPackages: [{ id: "p", name: "P", path: ".", nameKey: "t.absent" }],
+    } as unknown as PluginManifest
+    expect(codesOf(validatePluginManifest(manifest))).toContain("manifest.i18n.key.missing")
   })
 })

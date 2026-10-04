@@ -17,14 +17,33 @@ import { renderDist } from "./scaffold"
 import { buildSkill } from "./skill-source"
 import { sanitizeMcpConfig } from "./secrets"
 import { assessPluginDelivery } from "./delivery"
-import { isPluginEnvironmentFile } from "./source-snapshot"
+import { isOverlayEntryAllowed, isPluginEnvironmentFile } from "./source-snapshot"
 import {
-  detectPlatformBundle,
+  checkSkillSemantics,
   normalizePlatformBundle,
   projectPlatformBundle,
   PLATFORM_BUNDLE_PROFILES,
+  type PlatformBundleProjection,
   type PlatformBundleTarget,
 } from "./platform-bundles"
+import {
+  CLAUDE_FAMILY_PROFILES,
+  claudeFamilyManifestPath,
+  projectClaudeFamilyBundle,
+  replaceRootTokens,
+  type ClaudeFamilyEcosystem,
+  type ClaudeFamilyProfile,
+} from "./claude-family"
+import {
+  HOOK_DIALECTS,
+  canonicalHooksToDialect,
+  hookDocumentToCanonical,
+  type HookDialect,
+} from "./hook-dialects"
+import { detectPluginBundle, VENDOR_MANIFEST_PATHS } from "./bundle-detection"
+import { classifySkillsForPiPackage, planPiExport, planPiImport } from "./pi-package"
+import type { PluginPiPackageDef } from "@/types/plugin/plugin-pi-package"
+import matter from "gray-matter"
 
 export type PluginEcosystem = import("./delivery").PluginDeliveryTarget
 export type PluginConversionFidelity = "native-exact" | "structured" | "contextual" | "unsupported"
@@ -72,31 +91,6 @@ export class UnsupportedPluginConversionError extends Error {
 
 type SourceFiles = ReadonlyMap<string, string>
 
-interface ClaudePluginManifest {
-  name?: unknown
-  displayName?: unknown
-  version?: unknown
-  description?: unknown
-  author?: unknown
-  homepage?: unknown
-  repository?: unknown
-  license?: unknown
-  keywords?: unknown
-  skills?: unknown
-  commands?: unknown
-  agents?: unknown
-  mcpServers?: unknown
-  hooks?: unknown
-  lspServers?: unknown
-  outputStyles?: unknown
-  workflows?: unknown
-  settings?: unknown
-  userConfig?: unknown
-  channels?: unknown
-  dependencies?: unknown
-  experimental?: unknown
-}
-
 interface ForeignPluginMetadata {
   id: string
   name: string
@@ -117,6 +111,8 @@ interface CanonicalContributions {
   presets: PluginMcpServerPresetDef[]
   /** Converted `hooks.json` / manifest `hooks` blocks → `manifest.commandHooks`. */
   commandHooks?: HooksConfig
+  /** Complete Pi packages retained in the plugin directory. */
+  piPackages?: PluginPiPackageDef[]
   needsFilesystem: boolean
 }
 
@@ -218,28 +214,34 @@ function authorFields(
   return { name: fallbackName }
 }
 
-function replacePluginRootToken(value: unknown): unknown {
-  if (typeof value === "string") {
-    return value
-      .replaceAll("${CLAUDE_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}")
-      .replaceAll("${CODEX_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}")
-      .replaceAll("${PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}")
-      .replaceAll("${extensionPath}", "${COGNIA_PLUGIN_ROOT}")
-  }
-  if (Array.isArray(value)) return value.map(replacePluginRootToken)
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, replacePluginRootToken(item)])
-    )
-  }
-  return value
+/** Plugin-root bindings a source host expands, canonicalized to `${COGNIA_PLUGIN_ROOT}`. */
+interface RootTokenSet {
+  tokens: readonly string[]
+  envVars: readonly string[]
+}
+
+/** Codex, Gemini and normalized platform bundles: the historical token set. */
+const DEFAULT_ROOT_TOKENS: RootTokenSet = {
+  tokens: ["${CLAUDE_PLUGIN_ROOT}", "${CODEX_PLUGIN_ROOT}", "${PLUGIN_ROOT}", "${extensionPath}"],
+  envVars: [],
+}
+
+function replacePluginRootToken(
+  value: unknown,
+  roots: RootTokenSet = DEFAULT_ROOT_TOKENS
+): unknown {
+  return replaceRootTokens(value, roots.tokens, roots.envVars, "${COGNIA_PLUGIN_ROOT}")
 }
 
 const UNSUPPORTED_RUNTIME_TOKENS = [
   "${PLUGIN_DATA}",
   "${CLAUDE_PLUGIN_DATA}",
+  "${COPILOT_PLUGIN_DATA}",
+  "${QODER_PLUGIN_DATA}",
+  "${CODEBUDDY_PLUGIN_DATA}",
   "${CLAUDE_PROJECT_DIR}",
   "${workspacePath}",
+  "${user_config.",
 ] as const
 
 function rejectUnsupportedRuntimeTokens(args: {
@@ -248,7 +250,9 @@ function rejectUnsupportedRuntimeTokens(args: {
   path: string
   report: PluginConversionReport
 }): boolean {
-  const found = UNSUPPORTED_RUNTIME_TOKENS.filter((token) => args.text.includes(token))
+  const found = UNSUPPORTED_RUNTIME_TOKENS.filter((token) => args.text.includes(token)).map(
+    (token) => (token.endsWith(".") ? `${token}KEY}` : token)
+  )
   if (found.length === 0) return false
   args.report.blocking.push({
     capability: args.capability,
@@ -327,11 +331,17 @@ function metadataFromForeignManifest(
       "",
     author: authorFields(manifest.author),
     license: optionalString(manifest.license) ?? "MIT",
-    homepage: optionalString(manifest.homepage) ?? optionalString(interfaceMetadata?.websiteURL),
+    homepage:
+      optionalString(manifest.homepage) ??
+      optionalString(interfaceMetadata?.websiteUrl) ??
+      optionalString(interfaceMetadata?.websiteURL),
     repository: optionalString(manifest.repository),
     keywords: stringArray(manifest.keywords),
     icon:
-      optionalString(interfaceMetadata?.logo) ?? optionalString(interfaceMetadata?.composerIcon),
+      optionalString(interfaceMetadata?.logo) ??
+      optionalString(interfaceMetadata?.composerIcon) ??
+      optionalString(manifest.icon) ??
+      optionalString(manifest.logo),
     screenshots: stringArray(interfaceMetadata?.screenshots),
   }
 }
@@ -343,6 +353,8 @@ function finalizeForeignConversion(args: {
   contributions: CanonicalContributions
   report: PluginConversionReport
   options: PluginConversionOptions
+  /** Keep source manifests byte-for-byte (a retained Pi package is read by Pi itself). */
+  retainSourceManifests?: boolean
 }): PluginConversionResult {
   const { source, output, metadata, contributions, report, options } = args
   if (report.blocking.length > 0) {
@@ -358,9 +370,13 @@ function finalizeForeignConversion(args: {
     (groups) => Array.isArray(groups) && groups.length > 0
   )
   if (hasCommandHooks) capabilities.push("command-hooks")
+  const piPackages = contributions.piPackages ?? []
+  if (piPackages.length > 0) capabilities.push("pi-package")
 
   const need: RuntimeNeed =
-    hasCommandHooks || contributions.presets.some((preset) => preset.transport === "stdio")
+    hasCommandHooks ||
+    piPackages.length > 0 ||
+    contributions.presets.some((preset) => preset.transport === "stdio")
       ? "host-process"
       : contributions.needsFilesystem
         ? "host-filesystem"
@@ -383,6 +399,7 @@ function finalizeForeignConversion(args: {
       ...(contributions.subagents.length > 0 ? { subagents: contributions.subagents } : {}),
       ...(contributions.presets.length > 0 ? { mcpServerPresets: contributions.presets } : {}),
       ...(hasCommandHooks ? { commandHooks: contributions.commandHooks } : {}),
+      ...(piPackages.length > 0 ? { piPackages } : {}),
     },
   })
   manifest.homepage = metadata.homepage
@@ -396,12 +413,8 @@ function finalizeForeignConversion(args: {
   // Imported source manifests/configuration may contain credentials. The canonical
   // manifest replaces their role. Overwrite, rather than delete, because installers
   // apply generated-file overlays on top of the original source snapshot.
-  for (const path of [
-    ".claude-plugin/plugin.json",
-    ".codex-plugin/plugin.json",
-    "gemini-extension.json",
-  ])
-    if (output.has(path)) output.set(path, "{}\n")
+  if (!args.retainSourceManifests)
+    for (const path of VENDOR_MANIFEST_PATHS) if (output.has(path)) output.set(path, "{}\n")
   for (const path of output.keys()) {
     if (isPluginEnvironmentFile(path)) output.set(path, "\n")
   }
@@ -420,25 +433,57 @@ function finalizeForeignConversion(args: {
   }
 }
 
-function collectSkillMarkdownFiles(files: SourceFiles, declared: unknown): string[] {
+type DeclaredPathMode = "additive" | "replace" | "ambiguous"
+
+function skillFilesBelow(files: SourceFiles, root: string): string[] {
+  if (files.has(`${root}/SKILL.md`)) return [`${root}/SKILL.md`]
+  return Array.from(files.keys())
+    .map(normalizePath)
+    .filter((path) => path.startsWith(`${root}/`) && path.endsWith("/SKILL.md"))
+}
+
+/**
+ * Skill files a manifest selects. `additive` hosts (Claude Code) read declared
+ * paths on top of `skills/`; `replace` hosts read only the declared paths;
+ * `ambiguous` hosts do not document which, so a declaration that would change
+ * the answer is reported instead of guessed.
+ */
+function collectSkillMarkdownFiles(
+  files: SourceFiles,
+  declared: unknown,
+  mode: DeclaredPathMode = "replace",
+  report?: PluginConversionReport
+): string[] {
   const declaredPaths = pathList(declared)
-  const roots = declaredPaths.length > 0 ? declaredPaths : ["skills"]
+  const roots =
+    declaredPaths.length === 0
+      ? ["skills"]
+      : mode === "additive"
+        ? ["skills", ...declaredPaths]
+        : declaredPaths
   const result = new Set<string>()
   for (const root of roots) {
     if (/\.md$/i.test(root)) {
       if (files.has(root)) result.add(root)
       continue
     }
-    if (files.has(`${root}/SKILL.md`)) {
-      result.add(`${root}/SKILL.md`)
+    // `"."` normalizes to the plugin root: the root SKILL.md is the skill.
+    if (root === "") {
+      if (files.has("SKILL.md")) result.add("SKILL.md")
       continue
     }
-    for (const path of files.keys()) {
-      const normalized = normalizePath(path)
-      if (normalized.startsWith(`${root}/`) && normalized.endsWith("/SKILL.md")) {
-        result.add(normalized)
-      }
-    }
+    for (const path of skillFilesBelow(files, root)) result.add(path)
+  }
+  if (mode === "ambiguous" && declaredPaths.length > 0 && report) {
+    const conventional = skillFilesBelow(files, "skills").filter((path) => !result.has(path))
+    if (conventional.length)
+      report.blocking.push({
+        capability: "skills",
+        path: "skills",
+        message:
+          "The manifest declares skill paths while skills/ holds other skills; this host does not document whether declared paths add to or replace skills/",
+        blocking: true,
+      })
   }
   return Array.from(result).sort()
 }
@@ -449,7 +494,7 @@ function rootSkillFiles(files: SourceFiles, runtimeEntry?: string): string[] {
     (path) =>
       path !== runtimeEntry &&
       !isPluginEnvironmentFile(path) &&
-      !/^(?:\.(?:claude|codex|cursor|kimi|devin)-plugin\/|\.github\/|\.opencode\/|(?:skills|agents|commands|hooks|policies|output-styles|workflows)\/|(?:plugin|kimi\.plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(
+      !/^(?:\.(?:claude|codex|cursor|devin|factory|qoder|codebuddy|workbuddy|augment|goose)-plugin\/|\.plugin\/|\.cognia-normalized\/|\.github\/|\.opencode\/|(?:skills|agents|droids|commands|hooks|policies|rules|output-styles|workflows)\/|(?:plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(
         path
       )
   )
@@ -460,10 +505,26 @@ function convertSkillFiles(args: {
   declared: unknown
   output: Map<string, string>
   report: PluginConversionReport
+  mode?: DeclaredPathMode
+  /** Exact skill files already resolved by the host's own discovery rules (Pi). */
+  explicit?: string[]
+  /** Fall back to a root SKILL.md when nothing is declared (legacy hosts). */
+  rootFallback?: boolean
+  /** Resources of a root SKILL.md when the host treats the whole directory as the skill. */
+  rootResources?: string[]
 }): { skills: PluginSkillDef[]; needsFilesystem: boolean } {
   const { files, declared, report } = args
-  const paths = collectSkillMarkdownFiles(files, declared)
-  if (!configured(declared) && files.has("SKILL.md")) paths.unshift("SKILL.md")
+  const paths = args.explicit
+    ? [...args.explicit]
+    : collectSkillMarkdownFiles(files, declared, args.mode, report)
+  if (
+    !args.explicit &&
+    args.rootFallback !== false &&
+    !configured(declared) &&
+    files.has("SKILL.md") &&
+    !paths.includes("SKILL.md")
+  )
+    paths.unshift("SKILL.md")
   const skills: PluginSkillDef[] = []
   let needsFilesystem = false
   if (configured(declared) && paths.length === 0) {
@@ -483,8 +544,15 @@ function convertSkillFiles(args: {
       path: skillFile,
       report,
     })
-    const directory = skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")))
-    const resources = directory ? filesBelow(files, directory) : rootSkillFiles(files)
+    // A Markdown file not named SKILL.md is a standalone skill (Pi flat skills):
+    // its directory is shared, so it owns no resources.
+    const standalone = !/(^|\/)SKILL\.md$/.test(skillFile)
+    const directory = standalone ? "" : skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")))
+    const resources = standalone
+      ? []
+      : directory
+        ? filesBelow(files, directory)
+        : (args.rootResources ?? rootSkillFiles(files))
     const built = buildSkill(text, resources, displayNameFromPath(directory || skillFile))
     for (const message of built.blockers)
       report.blocking.push({ capability: "skills", path: skillFile, message, blocking: true })
@@ -515,24 +583,53 @@ function mcpDocuments(
   files: SourceFiles,
   declared: unknown,
   defaultPath: string,
-  rootKey = "mcpServers"
+  rootKey = "mcpServers",
+  mode: "merge" | "replace" | "ambiguous" = "replace",
+  report?: PluginConversionReport
 ): Array<{ path: string; value: Record<string, unknown> }> {
-  if (declared && typeof declared === "object" && !Array.isArray(declared)) {
-    const record = declared as Record<string, unknown>
-    return [
-      {
-        path: rootKey,
-        value: rootKey in record ? record : { [rootKey]: record },
-      },
-    ]
+  const documents: Array<{ path: string; value: Record<string, unknown> }> = []
+  const declaredItems = Array.isArray(declared)
+    ? declared
+    : declared === undefined
+      ? []
+      : [declared]
+  for (const item of declaredItems) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const record = item as Record<string, unknown>
+      documents.push({ path: rootKey, value: rootKey in record ? record : { [rootKey]: record } })
+    } else if (typeof item === "string" && item.trim()) {
+      if (/^https?:\/\//i.test(item) || /\.(?:mcpb|dxt)$/i.test(item)) {
+        report?.blocking.push({
+          capability: "mcpServers",
+          path: item,
+          message:
+            "Packaged (.mcpb/.dxt) or remote MCP declarations are installed by the host; no Cognia preset can be derived without fetching them",
+          blocking: true,
+        })
+        continue
+      }
+      const path = normalizePath(item)
+      const text = files.get(path)
+      if (text === undefined) throw new Error(`declared MCP configuration was not found: ${path}`)
+      documents.push({ path, value: parseJsonObject(text, path) })
+    } else if (item !== undefined) {
+      throw new Error("mcpServers must be a path, an inline server map, or an array of these")
+    }
   }
-  const paths = pathList(declared)
-  if (paths.length === 0 && files.has(defaultPath)) paths.push(defaultPath)
-  return paths.map((path) => {
-    const text = files.get(path)
-    if (text === undefined) throw new Error(`declared MCP configuration was not found: ${path}`)
-    return { path, value: parseJsonObject(text, path) }
-  })
+  const conventional = files.has(defaultPath) && !documents.some((doc) => doc.path === defaultPath)
+  if (conventional && (documents.length === 0 || mode === "merge"))
+    documents.push({
+      path: defaultPath,
+      value: parseJsonObject(files.get(defaultPath)!, defaultPath),
+    })
+  else if (conventional && mode === "ambiguous")
+    report?.blocking.push({
+      capability: "mcpServers",
+      path: defaultPath,
+      message: `The manifest declares MCP servers while ${defaultPath} also exists; this host does not document whether they merge`,
+      blocking: true,
+    })
+  return documents
 }
 
 function convertMcpDocuments(args: {
@@ -540,6 +637,7 @@ function convertMcpDocuments(args: {
   adapterSourceName: string
   output: Map<string, string>
   report: PluginConversionReport
+  roots?: RootTokenSet
 }): PluginMcpServerPresetDef[] {
   const presets: PluginMcpServerPresetDef[] = []
   for (const document of args.documents) {
@@ -549,7 +647,7 @@ function convertMcpDocuments(args: {
       path: document.path,
       report: args.report,
     })
-    const canonicalText = JSON.stringify(replacePluginRootToken(document.value))
+    const canonicalText = JSON.stringify(replacePluginRootToken(document.value, args.roots))
     const declaredServers = document.value.mcpServers
     let drafts: ReturnType<typeof readMcpDrafts>["drafts"]
     try {
@@ -577,11 +675,7 @@ function convertMcpDocuments(args: {
     // Overwrite original configuration in generated-file overlays: deleting a map
     // entry would leave the original source file intact in local/GitHub installs.
     if (args.output.has(document.path)) args.output.set(document.path, "{}\n")
-    for (const path of [
-      ".claude-plugin/plugin.json",
-      ".codex-plugin/plugin.json",
-      "gemini-extension.json",
-    ])
+    for (const path of VENDOR_MANIFEST_PATHS)
       if (args.output.has(path)) args.output.set(path, "{}\n")
     for (const path of args.output.keys())
       if (isPluginEnvironmentFile(path)) args.output.set(path, "\n")
@@ -689,6 +783,10 @@ function collectHookDocuments(args: {
   sourcePath: string
   report: PluginConversionReport
   defaultDiscovery?: boolean
+  /** Conventional hook files, in host read order. */
+  defaultFiles?: readonly string[]
+  /** Declared hooks add to (`merge`) or replace the conventional files. */
+  mode?: "merge" | "replace" | "ambiguous"
 }): Array<{ path: string; value: Record<string, unknown> }> {
   const { files, declared, sourcePath, report } = args
   const documents: Array<{ path: string; value: Record<string, unknown> }> = []
@@ -728,9 +826,21 @@ function collectHookDocuments(args: {
     }
   }
   addDeclared(declared, `${sourcePath}.hooks`)
+  const declaredCount = documents.length
+  const defaults = (args.defaultFiles ?? ["hooks/hooks.json", "hooks.json"]).filter(
+    (path) => files.has(path) && !seen.has(path)
+  )
+  const mode = args.mode ?? "merge"
   if (args.defaultDiscovery !== false) {
-    addFile("hooks/hooks.json")
-    addFile("hooks.json")
+    if (declaredCount === 0 || mode === "merge") for (const path of defaults) addFile(path)
+    else if (mode === "ambiguous" && defaults.length)
+      report.blocking.push({
+        capability: "commandHooks",
+        path: defaults[0],
+        message:
+          "The manifest declares hooks while the conventional hook file also exists; this host does not document whether they merge",
+        blocking: true,
+      })
   }
   return documents
 }
@@ -753,8 +863,22 @@ function collectHookDocuments(args: {
 function convertHookDocuments(args: {
   documents: Array<{ path: string; value: Record<string, unknown> }>
   report: PluginConversionReport
+  roots?: RootTokenSet
+  /** Source host dialect; non-Claude documents are translated before validation. */
+  dialect?: HookDialect
 }): HooksConfig {
-  const { documents, report } = args
+  const { report } = args
+  const documents = args.dialect
+    ? args.documents.map((document) => ({
+        path: document.path,
+        value: hookDocumentToCanonical({
+          value: document.value,
+          path: document.path,
+          dialect: args.dialect!,
+          sink: report,
+        }),
+      }))
+    : args.documents
   const merged: Record<string, HookGroup[]> = {}
   let convertedGroups = 0
   for (const document of documents) {
@@ -765,7 +889,7 @@ function convertHookDocuments(args: {
       path: document.path,
       report,
     })
-    const canonical = replacePluginRootToken(document.value) as Record<string, unknown>
+    const canonical = replacePluginRootToken(document.value, args.roots) as Record<string, unknown>
     // `hooks/hooks.json` wraps the map in a `hooks` key; a manifest's inline
     // `hooks` field IS the map. Accept the wrapper when present.
     const inner = canonical.hooks
@@ -951,204 +1075,374 @@ function convertHookDocuments(args: {
 }
 
 export function detectPluginEcosystem(files: SourceFiles): PluginEcosystem {
-  const rootText = files.get("plugin.json")
-  if (rootText !== undefined) {
-    const root = parseJsonObject(rootText, "plugin.json")
-    // Converted packages retain neutralized source markers. The canonical
-    // Cognia identity wins over those inert overlay files.
-    if (typeof root.id === "string" && typeof root.type === "string") return "cognia"
-  }
-  const markers: Array<[string, PluginEcosystem]> = [
-    [".claude-plugin/plugin.json", "claude-code"],
-    [".codex-plugin/plugin.json", "codex"],
-    ["gemini-extension.json", "gemini-cli"],
-    [".cursor-plugin/plugin.json", "cursor"],
-    [".github/plugin/plugin.json", "copilot"],
-    [".github/plugin.json", "copilot"],
-    ["kimi.plugin.json", "kimi"],
-    [".kimi-plugin/plugin.json", "kimi"],
-    [".devin-plugin/plugin.json", "devin"],
-    ["opencode.json", "opencode"],
-    ["opencode.jsonc", "opencode"],
-  ]
-  const candidates = markers.filter(([path]) => files.has(path))
-  const active = candidates.filter(([path]) => !/^\s*\{\s*\}\s*$/.test(files.get(path)!))
-  const formats = [...new Set((active.length ? active : candidates).map(([, format]) => format))]
-  if (formats.length > 1)
-    throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle")
-  const platformFiles = new Map(files)
-  for (const [path] of candidates)
-    if (!active.some(([entry]) => entry === path)) platformFiles.delete(path)
-  const platform = detectPlatformBundle(platformFiles)
-  if (platform) {
-    if (formats.length && formats[0] !== platform)
-      throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle")
-    return platform
-  }
-  if (formats.length) return formats[0]
-  if (rootText !== undefined) {
-    const root = parseJsonObject(rootText, "plugin.json")
-    if (root.$schema)
-      throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format")
-    return "cognia"
-  }
-  throw new Error(
-    "plugin format not recognized — provide a Cognia, Agent Plugins, Claude Code, Codex, Gemini, Cursor, Copilot, Kimi, Devin, OpenCode or Pi bundle"
-  )
+  return detectPluginBundle(files).ecosystem
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+/**
+ * Convert one Markdown agent definition. `allowedFields === null` keeps the
+ * Claude parser's own field handling; otherwise every frontmatter key must be
+ * listed (values in `defaults` only restate Cognia's default and are dropped).
+ */
+function convertMarkdownAgent(args: {
+  path: string
+  text: string
+  id: string
+  label: string
+  allowedFields: readonly string[] | null
+  defaults?: Readonly<Record<string, unknown>>
+  /** Host spellings of a Cognia field (`max_turns` → `maxTurns`). */
+  renames?: Readonly<Record<string, string>>
+  report: PluginConversionReport
+}): PluginSubagentDef | null {
+  const { path, report } = args
+  let text = args.text
+  if (args.allowedFields) {
+    let parsed: matter.GrayMatterFile<string>
+    try {
+      parsed = matter(text)
+    } catch (error) {
+      report.blocking.push({
+        capability: "agents",
+        path,
+        message: `frontmatter parse failed: ${error instanceof Error ? error.message : String(error)}`,
+        blocking: true,
+      })
+      return null
+    }
+    const data: Record<string, unknown> = { ...parsed.data }
+    for (const [from, to] of Object.entries(args.renames ?? {})) {
+      if (data[from] === undefined) continue
+      data[to] = data[from]
+      delete data[from]
+    }
+    for (const [key, value] of Object.entries(args.defaults ?? {}))
+      if (data[key] === value) delete data[key]
+    const unsupported = Object.keys(data).filter((key) => !args.allowedFields!.includes(key))
+    if (unsupported.length) {
+      report.blocking.push({
+        capability: "agents",
+        path,
+        message: `${args.label} agent fields have no exact Cognia equivalent: ${unsupported.join(", ")}`,
+        blocking: true,
+      })
+      return null
+    }
+    if (typeof data.name === "string" && slugify(data.name) !== slugify(args.id))
+      report.warnings.push({
+        capability: "agents",
+        path,
+        message: `${args.label} display name "${data.name}" is not projected; the agent id is "${slugify(args.id)}"`,
+        blocking: false,
+      })
+    delete data.name
+    text = matter.stringify(parsed.content, data)
+  }
+  rejectUnsupportedRuntimeTokens({ text, capability: "agents", path, report })
+  const parsed = parseMarkdownAgent(slugify(args.id), text)
+  if ("error" in parsed) {
+    report.blocking.push({ capability: "agents", path, message: parsed.error, blocking: true })
+    return null
+  }
+  if (parsed.unsupportedFields.length > 0) {
+    report.blocking.push({
+      capability: "agents",
+      path,
+      message: `unsupported subagent fields: ${parsed.unsupportedFields.join(", ")}`,
+      blocking: true,
+    })
+    return null
+  }
+  report.converted.push({
+    capability: "agents",
+    path,
+    message: `converted subagent ${parsed.id}`,
+    blocking: false,
+  })
+  return { id: parsed.id, name: parsed.id, ...parsed.def }
+}
+
+/** Claude command object form: `{ name: { source | content, description, … } }`. */
+function convertCommandMap(args: {
+  commands: Record<string, unknown>
+  files: SourceFiles
+  report: PluginConversionReport
+}): PluginSkillDef[] {
+  const skills: PluginSkillDef[] = []
+  for (const [name, raw] of Object.entries(args.commands)) {
+    const path = `commands.${name}`
+    if (!isRecord(raw)) {
+      args.report.blocking.push({
+        capability: "commands",
+        path,
+        message: "command entries must be objects with source or content",
+        blocking: true,
+      })
+      continue
+    }
+    const unknown = Object.keys(raw).filter(
+      (key) => !["source", "content", "description", "argumentHint", "allowedTools"].includes(key)
+    )
+    if (unknown.length) {
+      args.report.blocking.push({
+        capability: "commands",
+        path,
+        message: `command fields have no exact Cognia equivalent: ${unknown.join(", ")}`,
+        blocking: true,
+      })
+      continue
+    }
+    let body: string | undefined
+    if (typeof raw.content === "string") body = raw.content
+    else if (typeof raw.source === "string") {
+      const sourcePath = normalizePath(raw.source)
+      body = args.files.get(sourcePath)
+      if (body === undefined) {
+        args.report.blocking.push({
+          capability: "commands",
+          path,
+          message: `command source was not found: ${sourcePath}`,
+          blocking: true,
+        })
+        continue
+      }
+    } else {
+      args.report.blocking.push({
+        capability: "commands",
+        path,
+        message: "command entries require source or content",
+        blocking: true,
+      })
+      continue
+    }
+    if (raw.argumentHint !== undefined)
+      args.report.warnings.push({
+        capability: "commands",
+        path,
+        message: "argumentHint only labels the command in the host UI and was not projected",
+        blocking: false,
+      })
+    const parsed = matter(body)
+    const data: Record<string, unknown> = { ...parsed.data, name }
+    if (typeof raw.description === "string") data.description = raw.description
+    if (Array.isArray(raw.allowedTools)) data["allowed-tools"] = raw.allowedTools
+    rejectUnsupportedRuntimeTokens({
+      text: body,
+      capability: "commands",
+      path,
+      report: args.report,
+    })
+    const built = buildSkill(matter.stringify(parsed.content, data), [], name)
+    for (const message of built.blockers)
+      args.report.blocking.push({ capability: "commands", path, message, blocking: true })
+    skills.push(built.skill)
+    args.report.converted.push({
+      capability: "commands",
+      path,
+      message: `converted prompt command to skill ${built.skill.id}`,
+      blocking: false,
+    })
+  }
+  return skills
+}
+
+/**
+ * Import a Claude-family plugin (Claude Code itself, or a vendor layout that
+ * adopted it) through its profile. Normalized platform bundles reuse this with
+ * the Claude Code profile and their own declared-path semantics.
+ */
 function convertClaudePlugin(
   files: SourceFiles,
-  options: PluginConversionOptions
+  options: PluginConversionOptions,
+  profile: ClaudeFamilyProfile = CLAUDE_FAMILY_PROFILES["claude-code"],
+  overrides: {
+    skillsMode?: DeclaredPathMode
+    mcpMode?: "merge" | "replace" | "ambiguous"
+    /** Skill files a platform adapter already resolved with its host's rules. */
+    explicitSkills?: string[]
+    /** Read the profile's conventional hook files when nothing is declared. */
+    hookDefaults?: boolean
+    /** Install-time settings referenced by MCP servers (Cursor variables). */
+    settings?: PlatformBundleProjection["settings"]
+    rootSkillResources?: string[]
+  } = {}
 ): PluginConversionResult {
-  const sourcePath = ".claude-plugin/plugin.json"
-  const source = parseJsonObject(
-    requiredString(files.get(sourcePath), sourcePath),
-    sourcePath
-  ) as ClaudePluginManifest
-  const sourceRecord = source as Record<string, unknown>
-
-  const blocking = [
-    ["lspServers", source.lspServers],
-    ["outputStyles", source.outputStyles],
-    ["workflows", source.workflows],
-    ["settings", source.settings],
-    ["userConfig", source.userConfig],
-    ["channels", source.channels],
-    ["dependencies", source.dependencies],
-    ["experimental", source.experimental],
-  ]
-    .filter(([, value]) => configured(value))
-    .map(([capability]) => unsupportedIssue(String(capability)))
-  const discoveredExecutableSurfaces = [
-    ["monitors", ["monitors/"]],
-    ["themes", ["themes/"]],
-    ["workflows", ["workflows/"]],
-    ["outputStyles", ["output-styles/"]],
-    ["settings", ["settings.json"]],
-    ["lspServers", [".lsp.json"]],
-  ] as const
-  for (const [capability, prefixes] of discoveredExecutableSurfaces) {
-    if (
-      prefixes.some((prefix) =>
-        Array.from(files.keys()).some((path) =>
-          prefix.endsWith("/")
-            ? normalizePath(path).startsWith(prefix)
-            : normalizePath(path) === prefix
-        )
-      ) &&
-      !blocking.some((issue) => issue.capability === capability)
-    ) {
-      blocking.push(unsupportedIssue(capability))
-    }
-  }
-
+  const sourcePath = claudeFamilyManifestPath(files, profile) ?? profile.manifestPaths[0]
+  const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath)
+  const roots: RootTokenSet = { tokens: profile.rootTokens, envVars: profile.rootEnvVars }
+  const honored = new Set(profile.componentFields)
   const report: PluginConversionReport = {
-    fidelity: blocking.length > 0 ? "unsupported" : "structured",
+    fidelity: "structured",
     converted: [],
     warnings: [],
-    blocking,
+    blocking: [],
   }
-  reportUnknownManifestFields({
-    manifest: sourceRecord,
-    known: new Set([
+  const fail = (capability: string, path: string, message: string) =>
+    report.blocking.push({ capability, path, message, blocking: true })
+  const warn = (capability: string, path: string, message: string) =>
+    report.warnings.push({ capability, path, message, blocking: false })
+
+  for (const field of Object.keys(source).sort()) {
+    const value = source[field]
+    if (profile.metadataFields.includes(field) || honored.has(field)) continue
+    if (Object.hasOwn(profile.ignoredFields, field)) {
+      if (configured(value)) warn(field, `${sourcePath}.${field}`, profile.ignoredFields[field])
+      continue
+    }
+    if (Object.hasOwn(profile.blockedFields, field)) {
+      if (configured(value)) fail(field, field, profile.blockedFields[field])
+      continue
+    }
+    if (profile.unknownFields === "warn")
+      warn(
+        field,
+        `${sourcePath}.${field}`,
+        `${profile.label} ignores unknown manifest keys; this field carries no behavior there and was not projected`
+      )
+    else
+      fail(
+        field,
+        `${sourcePath}.${field}`,
+        "unknown manifest field may carry behavior and cannot be converted safely"
+      )
+  }
+  if (typeof source.name === "string" && !profile.nameRule.pattern.test(source.name))
+    warn(
       "name",
-      "displayName",
-      "version",
-      "description",
-      "author",
-      "homepage",
-      "repository",
-      "license",
-      "keywords",
-      "skills",
-      "commands",
-      "agents",
-      "mcpServers",
-      "hooks",
-      "lspServers",
-      "outputStyles",
-      "workflows",
-      "settings",
-      "userConfig",
-      "channels",
-      "dependencies",
-      "experimental",
-    ]),
-    sourcePath,
-    report,
-  })
-  // Hooks convert rather than block: `hooks.json` files, plus a manifest
-  // `hooks` path/inline map, land in `manifest.commandHooks`. Run this before
-  // the early throw so unmappable hook surfaces (PostMarketplace, `plugin`
-  // handlers, unsupported runtime tokens) surface alongside the other
-  // blockers in one report instead of a second failed attempt.
+      `${sourcePath}.name`,
+      `${profile.nameRule.message}; the host may refuse this plugin`
+    )
+  if (profile.requireDotSlashPaths) {
+    for (const field of honored) {
+      const value = source[field]
+      const paths =
+        typeof value === "string"
+          ? [value]
+          : Array.isArray(value)
+            ? value.filter((v) => typeof v === "string")
+            : []
+      for (const path of paths as string[])
+        if (!path.startsWith("./") && !(field === "skills" && path === "."))
+          warn(
+            field,
+            `${sourcePath}.${field}`,
+            `${profile.label} requires component paths to start with ./ (got ${JSON.stringify(path)}); the host may refuse this manifest`
+          )
+    }
+  }
+  for (const entry of profile.blockedPaths) {
+    const present = Array.from(files.keys()).some((path) =>
+      entry.path.endsWith("/")
+        ? normalizePath(path).startsWith(entry.path)
+        : normalizePath(path) === entry.path
+    )
+    if (!present) continue
+    if ("warn" in entry && entry.warn) warn(entry.capability, entry.path, entry.message)
+    else if (!report.blocking.some((issue) => issue.capability === entry.capability))
+      fail(entry.capability, entry.path, entry.message)
+  }
+
+  // Hooks convert rather than block. Run this before the early throw so
+  // unmappable hook surfaces surface alongside the other blockers in one report.
   const commandHooks = convertHookDocuments({
     documents: collectHookDocuments({
       files,
-      declared: source.hooks,
+      declared: honored.has("hooks") ? source.hooks : undefined,
       sourcePath,
       report,
+      defaultFiles: profile.hookFiles,
+      mode: profile.hooksMode,
+      defaultDiscovery: overrides.hookDefaults !== false,
     }),
     report,
+    roots,
+    dialect: profile.hookDialect.id === "claude-code" ? undefined : profile.hookDialect,
   })
-  // `report.blocking` aliases the surface list above plus anything the hook
-  // conversion appended, so one check covers both.
   if (report.blocking.length > 0) {
-    throw new UnsupportedPluginConversionError("claude-code", "cognia", report)
+    report.fidelity = "unsupported"
+    throw new UnsupportedPluginConversionError(profile.ecosystem, "cognia", report)
   }
 
   const output = cloneFiles(files)
   const convertedSkills = convertSkillFiles({
     files,
-    declared: source.skills,
+    declared: honored.has("skills") ? source.skills : undefined,
     output,
     report,
+    mode: overrides.skillsMode ?? profile.skillsMode,
+    explicit: overrides.explicitSkills,
+    rootResources: overrides.rootSkillResources,
   })
   const skills = convertedSkills.skills
 
-  const commandConversionStart = report.converted.length
-  const commandPaths = pathList(source.commands, "commands")
-  for (const path of commandPaths) {
-    const candidates = path.toLowerCase().endsWith(".md")
-      ? [path]
-      : Array.from(files.keys()).filter(
-          (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
+  if (profile.commandsDir) {
+    const declaredCommands = honored.has("commands") ? source.commands : undefined
+    if (isRecord(declaredCommands)) {
+      if (profile.ecosystem === "claude-code")
+        skills.push(...convertCommandMap({ commands: declaredCommands, files, report }))
+      else
+        fail(
+          "commands",
+          `${sourcePath}.commands`,
+          `${profile.label} does not document inline command maps`
         )
-    for (const commandPath of candidates) {
-      const text = files.get(commandPath)
-      if (text === undefined) continue
-      rejectUnsupportedRuntimeTokens({
-        text,
-        capability: "commands",
-        path: commandPath,
-        report,
-      })
-      const built = buildSkill(text, [], displayNameFromPath(commandPath))
-      for (const message of built.blockers)
-        report.blocking.push({ capability: "commands", path: commandPath, message, blocking: true })
-      skills.push(built.skill)
-      report.converted.push({
-        capability: "commands",
-        path: commandPath,
-        message: `converted prompt command to skill ${built.skill.id}`,
-        blocking: false,
-      })
+    } else {
+      const commandConversionStart = report.converted.length
+      for (const path of pathList(declaredCommands, profile.commandsDir)) {
+        const below = path.toLowerCase().endsWith(".md")
+          ? [path]
+          : Array.from(files.keys()).filter((file) => normalizePath(file).startsWith(`${path}/`))
+        for (const commandPath of below) {
+          if (!/\.md$/i.test(commandPath)) {
+            if (profile.ecosystem === "factory-droid")
+              fail(
+                "commands",
+                commandPath,
+                "Droid executable command files run host code; Cognia has no executable slash-command contribution"
+              )
+            continue
+          }
+          const text = files.get(commandPath)
+          if (text === undefined) continue
+          rejectUnsupportedRuntimeTokens({
+            text,
+            capability: "commands",
+            path: commandPath,
+            report,
+          })
+          const built = buildSkill(text, [], displayNameFromPath(commandPath))
+          for (const message of built.blockers)
+            report.blocking.push({
+              capability: "commands",
+              path: commandPath,
+              message,
+              blocking: true,
+            })
+          skills.push(built.skill)
+          report.converted.push({
+            capability: "commands",
+            path: commandPath,
+            message: `converted prompt command to skill ${built.skill.id}`,
+            blocking: false,
+          })
+        }
+      }
+      if (configured(declaredCommands) && report.converted.length === commandConversionStart)
+        fail(
+          "commands",
+          "commands",
+          "declared command paths did not contain Markdown command files"
+        )
     }
-  }
-  if (configured(source.commands) && report.converted.length === commandConversionStart) {
-    report.blocking.push({
-      capability: "commands",
-      path: "commands",
-      message: "declared command paths did not contain Markdown command files",
-      blocking: true,
-    })
   }
 
   const subagents: PluginSubagentDef[] = []
   const agentConversionStart = report.converted.length
-  const agentPaths = pathList(source.agents, "agents")
-  for (const path of agentPaths) {
+  const declaredAgents = honored.has("agents") ? source.agents : undefined
+  for (const path of pathList(declaredAgents, profile.agentsDir)) {
     const candidates = path.toLowerCase().endsWith(".md")
       ? [path]
       : Array.from(files.keys()).filter(
@@ -1157,64 +1451,50 @@ function convertClaudePlugin(
     for (const agentPath of candidates) {
       const text = files.get(agentPath)
       if (text === undefined) continue
-      rejectUnsupportedRuntimeTokens({
-        text,
-        capability: "agents",
+      const id = profile.agentId(normalizePath(agentPath).split("/").pop() ?? agentPath)
+      if (!id) continue
+      const agent = convertMarkdownAgent({
         path: agentPath,
+        text,
+        id,
+        label: profile.label,
+        allowedFields: profile.agentFields,
+        defaults: profile.agentDefaults,
         report,
       })
-      const agentId = slugify(displayNameFromPath(agentPath))
-      const parsed = parseMarkdownAgent(agentId, text)
-      if ("error" in parsed) {
-        report.blocking.push({
-          capability: "agents",
-          path: agentPath,
-          message: parsed.error,
-          blocking: true,
-        })
-        continue
-      }
-      if (parsed.unsupportedFields.length > 0) {
-        report.blocking.push({
-          capability: "agents",
-          path: agentPath,
-          message: `unsupported subagent fields: ${parsed.unsupportedFields.join(", ")}`,
-          blocking: true,
-        })
-        continue
-      }
-      subagents.push({
-        id: parsed.id,
-        name: parsed.id,
-        ...parsed.def,
-      })
-      report.converted.push({
-        capability: "agents",
-        path: agentPath,
-        message: `converted subagent ${parsed.id}`,
-        blocking: false,
-      })
+      if (agent) subagents.push(agent)
     }
   }
-  if (configured(source.agents) && report.converted.length === agentConversionStart) {
-    report.blocking.push({
-      capability: "agents",
-      path: "agents",
-      message: "declared agent paths did not contain valid Markdown agents",
-      blocking: true,
-    })
-  }
+  if (configured(declaredAgents) && report.converted.length === agentConversionStart)
+    fail("agents", "agents", "declared agent paths did not contain valid Markdown agents")
 
   const presets = convertMcpDocuments({
-    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    documents: mcpDocuments(
+      files,
+      honored.has("mcpServers") ? source.mcpServers : undefined,
+      profile.mcpFile,
+      "mcpServers",
+      overrides.mcpMode ?? profile.mcpMode,
+      report
+    ),
     adapterSourceName: "claude-code.json",
     output,
     report,
+    roots,
   })
+  if (overrides.settings)
+    importInstallSettings({
+      declarations: overrides.settings.declarations,
+      presets,
+      servers: overrides.settings.servers as Record<string, Record<string, unknown>>,
+      report,
+      capability: "variables",
+      exposeToStdio: false,
+    })
   return finalizeForeignConversion({
-    source: "claude-code",
+    source: profile.ecosystem,
     output,
-    metadata: metadataFromForeignManifest(sourceRecord, sourcePath),
+    metadata: metadataFromForeignManifest(source, sourcePath),
     contributions: {
       skills,
       subagents,
@@ -1233,9 +1513,14 @@ function convertCodexPlugin(
 ): PluginConversionResult {
   const sourcePath = ".codex-plugin/plugin.json"
   const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath)
-  const blocking = [["apps", source.apps]]
+  const blocking = [
+    ["apps", source.apps],
+    ["extensions", source.extensions],
+  ]
     .filter(([, value]) => configured(value))
     .map(([capability]) => unsupportedIssue(String(capability)))
+  // `.app.json` is discovered by convention: ChatGPT app connectors need OpenAI's host.
+  if (files.has(".app.json") && !configured(source.apps)) blocking.push(unsupportedIssue("apps"))
   const report: PluginConversionReport = {
     fidelity: blocking.length > 0 ? "unsupported" : "structured",
     converted: [],
@@ -1258,12 +1543,14 @@ function convertCodexPlugin(
       "mcpServers",
       "apps",
       "interface",
+      "extensions",
+      "commands",
     ]),
     sourcePath,
     report,
   })
-  // Same conversion as the Claude path — `.codex-plugin` manifests carry the
-  // same hooks.json convention (see `convertClaudePlugin`).
+  // Codex hooks use the Claude event-map shape with Codex's own event and
+  // handler subset (see HOOK_DIALECTS.codex). Declared hooks replace defaults.
   const commandHooks = convertHookDocuments({
     documents: collectHookDocuments({
       files,
@@ -1271,8 +1558,14 @@ function convertCodexPlugin(
       sourcePath,
       report,
       defaultDiscovery: source.hooks === undefined,
+      defaultFiles: ["hooks/hooks.json"],
     }),
     report,
+    roots: {
+      tokens: ["${PLUGIN_ROOT}", "${CLAUDE_PLUGIN_ROOT}", "${CODEX_PLUGIN_ROOT}"],
+      envVars: ["PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"],
+    },
+    dialect: HOOK_DIALECTS.codex,
   })
   const output = cloneFiles(files)
   const convertedSkills = convertSkillFiles({
@@ -1281,6 +1574,37 @@ function convertCodexPlugin(
     output,
     report,
   })
+  // Codex migrates declared Markdown commands into skills at install time.
+  const commandSkills: PluginSkillDef[] = []
+  for (const path of pathList(source.commands)) {
+    const candidates = /\.md$/i.test(path)
+      ? [path]
+      : Array.from(files.keys()).filter(
+          (file) => normalizePath(file).startsWith(`${path}/`) && /\.md$/i.test(file)
+        )
+    if (candidates.length === 0)
+      report.blocking.push({
+        capability: "commands",
+        path,
+        message: "declared command paths did not contain Markdown command files",
+        blocking: true,
+      })
+    for (const commandPath of candidates) {
+      const text = files.get(commandPath)
+      if (text === undefined) continue
+      rejectUnsupportedRuntimeTokens({ text, capability: "commands", path: commandPath, report })
+      const built = buildSkill(text, [], displayNameFromPath(commandPath))
+      for (const message of built.blockers)
+        report.blocking.push({ capability: "commands", path: commandPath, message, blocking: true })
+      commandSkills.push(built.skill)
+      report.converted.push({
+        capability: "commands",
+        path: commandPath,
+        message: `converted command to skill ${built.skill.id} (Codex migrates commands to skills)`,
+        blocking: false,
+      })
+    }
+  }
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "claude-code.json",
@@ -1308,13 +1632,13 @@ function convertCodexPlugin(
     source.author = { name: interfaceMetadata.developerName }
     mappedInterfaceFields.add("developerName")
   }
-  if (
-    interfaceMetadata &&
-    !optionalString(source.homepage) &&
-    optionalString(interfaceMetadata.websiteURL)
-  ) {
-    mappedInterfaceFields.add("websiteURL")
-  }
+  for (const key of ["websiteUrl", "websiteURL"])
+    if (
+      interfaceMetadata &&
+      !optionalString(source.homepage) &&
+      optionalString(interfaceMetadata[key])
+    )
+      mappedInterfaceFields.add(key)
   if (interfaceMetadata) {
     if (optionalString(interfaceMetadata.logo)) {
       mappedInterfaceFields.add("logo")
@@ -1328,7 +1652,7 @@ function convertCodexPlugin(
     output,
     metadata: metadataFromForeignManifest(source, sourcePath, interfaceMetadata),
     contributions: {
-      skills: convertedSkills.skills,
+      skills: [...convertedSkills.skills, ...commandSkills],
       subagents: [],
       presets,
       commandHooks,
@@ -1416,7 +1740,13 @@ function convertGeminiPlugin(
 ): PluginConversionResult {
   const sourcePath = "gemini-extension.json"
   const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath)
-  const blocking = configured(source.excludeTools) ? [unsupportedIssue("excludeTools")] : []
+  const blocking = [
+    ["excludeTools", source.excludeTools],
+    ["themes", source.themes],
+    ["plan", source.plan],
+  ]
+    .filter(([, value]) => configured(value))
+    .map(([capability]) => unsupportedIssue(String(capability)))
   const report: PluginConversionReport = {
     fidelity: blocking.length > 0 ? "unsupported" : "structured",
     converted: [],
@@ -1438,50 +1768,125 @@ function convertGeminiPlugin(
       "excludeTools",
       "mcpServers",
       "settings",
+      "themes",
+      "plan",
+      "migratedTo",
     ]),
     sourcePath,
     report,
   })
+  if (configured(source.migratedTo))
+    report.warnings.push({
+      capability: "migratedTo",
+      path: `${sourcePath}.migratedTo`,
+      message: "Gemini update redirection is an install-time concern and was not projected",
+      blocking: false,
+    })
+  if (typeof source.name === "string" && !/^[a-zA-Z0-9-]+$/.test(source.name))
+    report.warnings.push({
+      capability: "name",
+      path: `${sourcePath}.name`,
+      message:
+        "Gemini extension names must match ^[a-zA-Z0-9-]+$; the host may refuse this extension",
+      blocking: false,
+    })
+  // `${/}` (alias `${pathSeparator}`) is the OS path separator; "/" is valid on every Cognia desktop OS.
+  const separatorFiles = new Map(files)
+  for (const path of [sourcePath, "hooks/hooks.json"]) {
+    const text = files.get(path)
+    if (text === undefined || !/\$\{(?:\/|pathSeparator)\}/.test(text)) continue
+    separatorFiles.set(path, text.replaceAll("${/}", "/").replaceAll("${pathSeparator}", "/"))
+    report.warnings.push({
+      capability: "variables",
+      path,
+      message: "Gemini ${/} path separators were normalized to /",
+      blocking: false,
+    })
+  }
+  const geminiSource =
+    separatorFiles.get(sourcePath) === files.get(sourcePath)
+      ? source
+      : parseJsonObject(separatorFiles.get(sourcePath)!, sourcePath)
   const output = cloneFiles(files)
   const convertedSkills = convertSkillFiles({ files, declared: undefined, output, report })
   const skills: PluginSkillDef[] = [...convertedSkills.skills]
-  for (const directory of ["hooks", "agents", "policies"]) {
-    if (filesBelow(files, directory).length)
-      report.blocking.push({
-        capability: directory,
-        path: `${directory}/`,
-        message: `Gemini ${directory} use platform-specific event, execution, or policy semantics; a Cognia adapter is not implemented`,
-        blocking: true,
-      })
-  }
-  const contextPath = optionalString(source.contextFileName) ?? "GEMINI.md"
-  const context = files.get(normalizePath(contextPath))
-  if (context !== undefined && context.trim()) {
-    rejectUnsupportedRuntimeTokens({
-      text: context,
-      capability: "context",
-      path: contextPath,
-      report,
-    })
-    skills.push({
-      id: "gemini-context",
-      name: "Gemini Context",
-      description: "Extension context imported from Gemini CLI.",
-      source: { kind: "inline", markdown: context.trim() },
-    })
-    report.converted.push({
-      capability: "context",
-      path: contextPath,
-      message: "converted extension context to a skill",
-      blocking: false,
-    })
-  } else if (source.contextFileName !== undefined) {
+  if (filesBelow(files, "policies").length)
     report.blocking.push({
-      capability: "context",
-      path: contextPath,
-      message: "declared context file was not found or was empty",
+      capability: "policies",
+      path: "policies/",
+      message: "Gemini policy engine rules (policies/*.toml) have no Cognia equivalent",
       blocking: true,
     })
+  const commandHooks = convertHookDocuments({
+    documents: collectHookDocuments({
+      files: separatorFiles,
+      declared: undefined,
+      sourcePath,
+      report,
+      defaultFiles: ["hooks/hooks.json"],
+    }),
+    report,
+    roots: { tokens: ["${extensionPath}"], envVars: [] },
+    dialect: HOOK_DIALECTS["gemini-cli"],
+  })
+  const subagents: PluginSubagentDef[] = []
+  for (const agentPath of Array.from(files.keys()).map(normalizePath).sort()) {
+    if (!/^agents\/[^/]+\.md$/i.test(agentPath)) continue
+    const agent = convertMarkdownAgent({
+      path: agentPath,
+      text: files.get(agentPath)!,
+      id: displayNameFromPath(agentPath),
+      label: "Gemini CLI",
+      allowedFields: ["name", "description", "maxTurns"],
+      defaults: { kind: "local" },
+      renames: { max_turns: "maxTurns" },
+      report,
+    })
+    if (agent) {
+      subagents.push(agent)
+      report.warnings.push({
+        capability: "agents",
+        path: agentPath,
+        message: "Gemini extension agents are a preview feature; routing parity must be verified",
+        blocking: false,
+      })
+    }
+  }
+  const contextPaths =
+    typeof source.contextFileName === "string"
+      ? [source.contextFileName]
+      : Array.isArray(source.contextFileName)
+        ? source.contextFileName.filter((entry): entry is string => typeof entry === "string")
+        : ["GEMINI.md"]
+  for (const [index, contextPath] of contextPaths.entries()) {
+    const context = files.get(normalizePath(contextPath))
+    if (context !== undefined && context.trim()) {
+      rejectUnsupportedRuntimeTokens({
+        text: context,
+        capability: "context",
+        path: contextPath,
+        report,
+      })
+      skills.push({
+        id: index === 0 ? "gemini-context" : `gemini-context-${index + 1}`,
+        name: index === 0 ? "Gemini Context" : `Gemini Context ${index + 1}`,
+        description: "Extension context imported from Gemini CLI.",
+        source: { kind: "inline", markdown: context.trim() },
+      })
+      report.converted.push({
+        capability: "context",
+        path: contextPath,
+        message: "converted extension context to a skill",
+        blocking: false,
+      })
+    } else if (source.contextFileName !== undefined) {
+      report.blocking.push({
+        capability: "context",
+        path: contextPath,
+        message: "declared context file was not found or was empty",
+        blocking: true,
+      })
+    }
   }
 
   for (const path of Array.from(files.keys()).map(normalizePath).sort()) {
@@ -1493,21 +1898,24 @@ function convertGeminiPlugin(
     report.fidelity = "contextual"
   }
 
+  // Gemini reads MCP servers from the manifest only; a stray .mcp.json is not loaded.
   const presets = convertMcpDocuments({
-    documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
+    documents: mcpDocuments(files, geminiSource.mcpServers, ""),
     adapterSourceName: "gemini.json",
     output,
     report,
+    roots: { tokens: ["${extensionPath}"], envVars: [] },
   })
-  importGeminiSettings({ settings: source.settings, presets, source, report })
+  importGeminiSettings({ settings: source.settings, presets, source: geminiSource, report })
   return finalizeForeignConversion({
     source: "gemini-cli",
     output,
     metadata: metadataFromForeignManifest(source, sourcePath),
     contributions: {
       skills,
-      subagents: [],
+      subagents,
       presets,
+      commandHooks,
       needsFilesystem: convertedSkills.needsFilesystem,
     },
     report,
@@ -1530,7 +1938,7 @@ function importGeminiSettings(args: {
     fail("settings", "Gemini settings must be an array")
     return
   }
-  const servers = args.source.mcpServers as Record<string, Record<string, unknown>> | undefined
+  const declarations: Array<InstallSetting & { path: string }> = []
   const seen = new Set<string>()
   for (const [index, value] of args.settings.entries()) {
     const path = `settings[${index}]`
@@ -1558,10 +1966,55 @@ function importGeminiSettings(args: {
       continue
     }
     seen.add(variable)
+    declarations.push({
+      path,
+      envVar: variable,
+      name: label,
+      description: optionalString(setting.description),
+      sensitive: Boolean(setting.sensitive),
+    })
+  }
+  importInstallSettings({
+    declarations,
+    presets: args.presets,
+    servers: (args.source.mcpServers ?? {}) as Record<string, Record<string, unknown>>,
+    report: args.report,
+    capability: "settings",
+    // Gemini also exposes declared settings directly to local server processes.
+    exposeToStdio: true,
+  })
+}
+
+interface InstallSetting {
+  envVar: string
+  name: string
+  description?: string
+  sensitive: boolean
+}
+
+/**
+ * Bind install-time settings (Gemini `settings`, Cursor `variables`) to the
+ * preset fields of the servers that reference them as `${NAME}`. A setting
+ * composed into a larger value has no field placement and is blocking.
+ */
+function importInstallSettings(args: {
+  declarations: Array<InstallSetting & { path?: string }>
+  presets: PluginMcpServerPresetDef[]
+  servers: Record<string, Record<string, unknown>>
+  report: PluginConversionReport
+  capability: string
+  exposeToStdio: boolean
+}): void {
+  const fail = (path: string, message: string) =>
+    args.report.blocking.push({ capability: args.capability, path, message, blocking: true })
+  for (const setting of args.declarations) {
+    const path = setting.path ?? `${args.capability}.${setting.envVar}`
+    const variable = setting.envVar
+    const label = setting.name
     const reference = "${" + variable + "}"
     let used = false
     for (const preset of args.presets) {
-      const original = servers?.[preset.id] ?? {}
+      const original = args.servers[preset.id] ?? {}
       const fields = (preset.fields ??= [])
       const add = (field: NonNullable<PluginMcpServerPresetDef["fields"]>[number]) => {
         const existing = fields.findIndex(
@@ -1570,10 +2023,8 @@ function importGeminiSettings(args: {
         const mapped = {
           ...field,
           label,
-          ...(optionalString(setting.description)
-            ? { description: optionalString(setting.description) }
-            : {}),
-          secret: Boolean(setting.sensitive),
+          ...(setting.description ? { description: setting.description } : {}),
+          secret: setting.sensitive,
         }
         if (existing >= 0) fields[existing] = mapped
         else fields.push(mapped)
@@ -1609,8 +2060,7 @@ function importGeminiSettings(args: {
         original.args.some((arg) => typeof arg === "string" && arg.includes(reference))
       )
         add({ key: variable, label, placement: "arg-replace", token: reference })
-      // Gemini also exposes declared settings directly to local server processes.
-      if (preset.transport === "stdio" && !(variable in (env ?? {}))) {
+      if (args.exposeToStdio && preset.transport === "stdio" && !(variable in (env ?? {}))) {
         preset.config.env = {
           ...((preset.config.env as Record<string, unknown>) ?? {}),
           [variable]: "",
@@ -1620,7 +2070,7 @@ function importGeminiSettings(args: {
     }
     if (!used)
       args.report.warnings.push({
-        capability: "settings",
+        capability: args.capability,
         path,
         message:
           "Setting is not referenced by a converted MCP contribution; no Cognia field was created",
@@ -1812,13 +2262,62 @@ function exportCogniaSubagents(args: {
 }): void {
   const subagents = args.manifest.subagents ?? []
   if (subagents.length === 0) return
-  if (args.target !== "claude-code") {
+  if (args.target !== "claude-code" && args.target !== "gemini-cli") {
     args.report.blocking.push({
       capability: "subagent",
       path: "subagents",
-      message: `${args.target} subagent execution and routing require a dedicated adapter; native export is not implemented`,
+      message: `${args.target} plugins have no subagent contribution; native export is not possible`,
       blocking: true,
     })
+    return
+  }
+  if (args.target === "gemini-cli") {
+    for (const agent of subagents) {
+      const unsupported = Object.entries({
+        provider: agent.provider,
+        externalPresetId: agent.externalPresetId,
+        mcpServerIds: agent.mcpServerIds?.length,
+        allowNesting: agent.allowNesting,
+        maxDepth: agent.maxDepth,
+        hidden: agent.hidden,
+        disabled: agent.disabled,
+        tools: agent.tools?.length,
+        disallowedTools: agent.disallowedTools?.length,
+        model: agent.model,
+        effort: agent.effort,
+      })
+        .filter(([, value]) => configured(value))
+        .map(([key]) => key)
+      if (unsupported.length) {
+        args.report.blocking.push({
+          capability: "subagent",
+          path: `subagents.${agent.id}`,
+          message: `Gemini extension agents have no exact equivalent for: ${unsupported.join(", ")}`,
+          blocking: true,
+        })
+        continue
+      }
+      args.output.set(
+        `agents/${agent.id}.md`,
+        matter.stringify(agent.prompt.endsWith("\n") ? agent.prompt : `${agent.prompt}\n`, {
+          name: agent.id,
+          description: agent.description,
+          ...(agent.maxTurns ? { max_turns: agent.maxTurns } : {}),
+        })
+      )
+      args.report.converted.push({
+        capability: "subagent",
+        path: `subagents.${agent.id}`,
+        message: `exported subagent ${agent.id}`,
+        blocking: false,
+      })
+      args.report.warnings.push({
+        capability: "subagent",
+        path: `subagents.${agent.id}`,
+        message: "Gemini extension agents are a preview feature; routing parity must be verified",
+        blocking: false,
+      })
+    }
     return
   }
   for (const agent of subagents) {
@@ -1868,7 +2367,11 @@ function exportMcpServers(args: {
   report: PluginConversionReport
   settings: Array<Record<string, unknown>>
   removedValues: Set<string>
+  /** Install-time fields project to Gemini settings or Cursor variables. */
+  fieldProjection?: "gemini-settings" | "cursor-variables"
 }): Record<string, unknown> | undefined {
+  const fieldProjection =
+    args.fieldProjection ?? (args.target === "gemini-cli" ? "gemini-settings" : undefined)
   const presets = args.manifest.mcpServerPresets ?? []
   if (presets.length === 0) return undefined
   const servers: McpServer[] = []
@@ -1938,7 +2441,7 @@ function exportMcpServers(args: {
       })
       continue
     }
-    if (fields.length && args.target !== "gemini-cli") {
+    if (fields.length && !fieldProjection) {
       args.report.blocking.push({
         capability: "mcp-server-preset",
         path: `mcpServerPresets.${preset.id}.fields`,
@@ -1997,7 +2500,9 @@ function exportMcpServers(args: {
         capability: "mcp-server-preset",
         path: `mcpServerPresets.${preset.id}.fields`,
         message:
-          "Gemini requests these settings during installation; values must be supplied before use",
+          fieldProjection === "cursor-variables"
+            ? "Cursor declares these as plugin variables; an administrator sets the values in the Cursor dashboard before use"
+            : "Gemini requests these settings during installation; values must be supplied before use",
         blocking: false,
       })
     if (args.target === "codex" && preset.transport === "sse") {
@@ -2038,8 +2543,8 @@ function exportMcpServers(args: {
   return projected as Record<string, unknown>
 }
 
-/** Native hooks are only emitted where Cognia shares the Claude hook contract.
- * Gemini event renaming is deliberately not an adapter: payloads and decisions differ. */
+/** Native hooks are emitted through each host's dialect (see hook-dialects.ts);
+ * only exact 1:1 events and handler types convert, everything else blocks. */
 function exportCommandHooks(args: {
   manifest: PluginManifest
   output: Map<string, string>
@@ -2048,11 +2553,19 @@ function exportCommandHooks(args: {
 }): void {
   const hooks = args.manifest.commandHooks
   if (!hooks || !Object.keys(hooks).length) return
-  if (args.target !== "claude-code") {
+  const dialect =
+    args.target === "claude-code"
+      ? undefined
+      : args.target === "codex"
+        ? HOOK_DIALECTS.codex
+        : args.target === "gemini-cli"
+          ? HOOK_DIALECTS["gemini-cli"]
+          : null
+  if (dialect === null) {
     args.report.blocking.push({
       capability: "command-hooks",
       path: "commandHooks",
-      message: `${args.target} hooks require an event/payload/decision adapter; native export is not implemented`,
+      message: `${args.target} hooks are not declarative; native export is not possible`,
       blocking: true,
     })
     return
@@ -2061,6 +2574,20 @@ function exportCommandHooks(args: {
     documents: [{ path: "commandHooks", value: { hooks } }],
     report: args.report,
   })
+  if (dialect) {
+    const projected = canonicalHooksToDialect({
+      hooks: validated,
+      dialect,
+      sink: args.report,
+      path: "hooks/hooks.json",
+    })
+    if (projected)
+      args.output.set(
+        "hooks/hooks.json",
+        JSON.stringify(replaceCanonicalRootToken(projected, args.target), null, 2) + "\n"
+      )
+    return
+  }
   for (const [event, groups] of Object.entries(hooks)) {
     for (const group of groups ?? []) {
       if (group.agents)
@@ -2072,7 +2599,7 @@ function exportCommandHooks(args: {
         })
       for (const handler of group.hooks) {
         if (
-          !["command", "http", "prompt", "agent"].includes(handler.type) ||
+          !["command", "http", "prompt", "agent", "mcp_tool"].includes(handler.type) ||
           handler.policyClass === "managed"
         ) {
           args.report.blocking.push({
@@ -2143,7 +2670,9 @@ function exportRuntimeResources(args: {
     if (
       path === "plugin.json" ||
       path === args.manifest.main ||
-      path === "gemini-extension.json" ||
+      (VENDOR_MANIFEST_PATHS as readonly string[]).includes(path) ||
+      path === "mcp.json" ||
+      /^\.cognia-normalized\//.test(path) ||
       /^\.(?:claude|codex)-plugin\//.test(path) ||
       /(^|\/)\.env(?:\.|$)/.test(path) ||
       path === ".mcp.json" ||
@@ -2155,7 +2684,7 @@ function exportRuntimeResources(args: {
     // their non-definition resources at their original paths for root refs.
     if (
       (path.startsWith("skills/") && path.endsWith("/SKILL.md")) ||
-      (path.startsWith("agents/") && path.endsWith(".md")) ||
+      (/^(?:agents|droids)\//.test(path) && path.endsWith(".md")) ||
       (path.startsWith("commands/") && /\.(?:toml|md)$/.test(path)) ||
       path.startsWith("policies/") ||
       path.startsWith("output-styles/") ||
@@ -2201,13 +2730,24 @@ function authorForForeign(manifest: PluginManifest): Record<string, string> | un
   }
 }
 
+/** Settings an export projected into install-time configuration (Cursor variables). */
+const PROJECTED_SETTINGS = new WeakMap<PluginConversionResult, Array<Record<string, unknown>>>()
+
+interface ExportContext {
+  /** The ecosystem the user asked for when `target` is an intermediate Claude export. */
+  finalTarget?: Exclude<PluginEcosystem, "cognia">
+  fieldProjection?: "cursor-variables"
+}
+
 function convertCogniaPlugin(
   files: SourceFiles,
   target: Exclude<PluginEcosystem, "cognia">,
-  options: PluginConversionOptions
+  options: PluginConversionOptions,
+  context: ExportContext = {}
 ): PluginConversionResult {
   const loaded = loadCogniaPlugin(files)
-  const { manifest } = loaded
+  const manifest = loaded.manifest
+  const finalTarget = context.finalTarget ?? target
   const report: PluginConversionReport = {
     fidelity: "structured",
     converted: [],
@@ -2218,21 +2758,28 @@ function convertCogniaPlugin(
     "skills",
     "mcp-server-preset",
     "command-hooks",
-    ...(target === "claude-code" ? ["subagent"] : []),
+    ...(target === "claude-code" || target === "gemini-cli" ? ["subagent"] : []),
+    ...(target === "pi" ? ["pi-package"] : []),
   ])
   for (const capability of manifest.capabilities ?? []) {
-    if (!allowedCapabilities.has(capability)) {
-      report.blocking.push(unsupportedIssue(capability, target))
-    }
+    if (allowedCapabilities.has(capability)) continue
+    if (capability === "pi-package")
+      report.blocking.push({
+        capability,
+        path: "piPackages",
+        message: `Pi packages install only into Pi (pi install) or load into Cognia-hosted Pi sessions; they stay in Cognia and have no ${finalTarget} equivalent`,
+        blocking: true,
+      })
+    else report.blocking.push(unsupportedIssue(capability, finalTarget))
   }
   if (manifest.permissions?.length) {
-    report.blocking.push(unsupportedIssue("permissions", target))
+    report.blocking.push(unsupportedIssue("permissions", finalTarget))
   }
   const executableEntries = [manifest.pythonMain, manifest.wasmMain, manifest.vscodeMain].filter(
     configured
   )
   if (executableEntries.length > 0) {
-    report.blocking.push(unsupportedIssue("runtime", target))
+    report.blocking.push(unsupportedIssue("runtime", finalTarget))
   }
   if (manifest.main) {
     const entry = files.get(normalizePath(manifest.main))
@@ -2245,6 +2792,25 @@ function convertCogniaPlugin(
       })
     }
   }
+  if (target === "pi") return exportPiPackage({ manifest, files, report, options })
+  if (target === "claude-code" && finalTarget === "claude-code") {
+    const { nameRule, reservedNames } = CLAUDE_FAMILY_PROFILES["claude-code"]
+    for (const rule of [nameRule, reservedNames])
+      if (rule && rule.pattern.test(manifest.id) !== (rule === nameRule))
+        report.blocking.push({
+          capability: "name",
+          path: "id",
+          message: rule.message,
+          blocking: true,
+        })
+  }
+  if (target === "gemini-cli" && !/^[a-zA-Z0-9-]+$/.test(manifest.id))
+    report.blocking.push({
+      capability: "name",
+      path: "id",
+      message: "Gemini extension names must match ^[a-zA-Z0-9-]+$",
+      blocking: true,
+    })
 
   const output = new Map<string, string>()
   const copies: Array<{ from: string; to: string }> = []
@@ -2260,7 +2826,15 @@ function convertCogniaPlugin(
   exportCogniaSubagents({ manifest, output, target, report })
   const settings: Array<Record<string, unknown>> = []
   const removedValues = new Set<string>()
-  const mcp = exportMcpServers({ manifest, output, target, report, settings, removedValues })
+  const mcp = exportMcpServers({
+    manifest,
+    output,
+    target,
+    report,
+    settings,
+    removedValues,
+    fieldProjection: context.fieldProjection,
+  })
   exportCommandHooks({ manifest, output, target, report })
   exportRuntimeResources({
     manifest,
@@ -2282,7 +2856,7 @@ function convertCogniaPlugin(
   }
   if (report.blocking.length > 0) {
     report.fidelity = "unsupported"
-    throw new UnsupportedPluginConversionError("cognia", target, report)
+    throw new UnsupportedPluginConversionError("cognia", finalTarget, report)
   }
 
   const baseManifest = {
@@ -2319,6 +2893,7 @@ function convertCogniaPlugin(
           ...baseManifest,
           ...(manifest.skills?.length ? { skills: "./skills" } : {}),
           ...(mcp ? { mcpServers: "./.mcp.json" } : {}),
+          ...(output.has("hooks/hooks.json") ? { hooks: "./hooks/hooks.json" } : {}),
           interface: {
             displayName: manifest.name,
             shortDescription: manifest.description,
@@ -2348,7 +2923,7 @@ function convertCogniaPlugin(
     )
   }
 
-  return {
+  const result: PluginConversionResult = {
     source: "cognia",
     target,
     manifest,
@@ -2356,6 +2931,202 @@ function convertCogniaPlugin(
     copies,
     report,
   }
+  if (context.fieldProjection && settings.length) PROJECTED_SETTINGS.set(result, settings)
+  return result
+}
+
+/** Cognia → Pi: the retained package root plus Cognia skills it does not already deliver. */
+function exportPiPackage(args: {
+  manifest: PluginManifest
+  files: SourceFiles
+  report: PluginConversionReport
+  options: PluginConversionOptions
+}): PluginConversionResult {
+  const { manifest, files, report, options } = args
+  if (manifest.mcpServerPresets?.length)
+    report.blocking.push({
+      capability: "mcp-server-preset",
+      path: "mcpServerPresets",
+      message:
+        "Pi core has no declarative MCP servers; an extension must call pi.registerMcpServer. Select hosted use or ship a Pi extension",
+      blocking: true,
+    })
+  if (manifest.commandHooks && Object.keys(manifest.commandHooks).length)
+    report.blocking.push({
+      capability: "command-hooks",
+      path: "commandHooks",
+      message:
+        "Pi hooks are extension event handlers (pi.on); a declarative command hook cannot become one",
+      blocking: true,
+    })
+  let skills = manifest.skills ?? []
+  const packages = manifest.piPackages ?? []
+  if (packages.length === 1) {
+    const classified = classifySkillsForPiPackage({
+      skills,
+      files,
+      piPackage: packages[0],
+    })
+    report.blocking.push(...classified.collisions)
+    for (const id of classified.delivered)
+      report.converted.push({
+        capability: "skills",
+        path: `skills.${id}`,
+        message: `skill ${id} is delivered by the retained Pi package`,
+        blocking: false,
+      })
+    skills = classified.remaining
+  }
+  const exported = new Map<string, string>()
+  const exportedCopies: Array<{ from: string; to: string }> = []
+  exportCogniaSkills({
+    manifest: { ...manifest, skills },
+    files,
+    output: exported,
+    target: "pi",
+    report,
+    copies: exportedCopies,
+    binaryPaths: options.binaryPaths,
+  })
+  const probe = new Map(exported)
+  for (const copy of exportedCopies) if (!probe.has(copy.to)) probe.set(copy.to, "")
+  const semantics = checkSkillSemantics(probe, "pi", "export")
+  report.blocking.push(...semantics.blocking)
+  report.warnings.push(...semantics.warnings)
+  const plan = planPiExport({
+    manifest,
+    files,
+    exported,
+    exportedCopies,
+    binaryPaths: options.binaryPaths,
+    generatedEntry: renderDist(manifest),
+  })
+  report.converted.push(...plan.issues.converted)
+  report.warnings.push(...plan.issues.warnings)
+  report.blocking.push(...plan.issues.blocking)
+  if (report.blocking.length > 0) {
+    report.fidelity = "unsupported"
+    throw new UnsupportedPluginConversionError("cognia", "pi", report)
+  }
+  report.warnings.push({
+    capability: "compatibility",
+    path: "package.json",
+    message: "Native Pi installation and execution require separate verification",
+    blocking: false,
+  })
+  return {
+    source: "cognia",
+    target: "pi",
+    manifest,
+    files: plan.files,
+    copies: plan.copies,
+    report,
+  }
+}
+
+/** Pi package → Cognia: the package is retained in place, skills and prompts also convert. */
+function convertPiPlugin(
+  files: SourceFiles,
+  options: PluginConversionOptions
+): PluginConversionResult {
+  const plan = planPiImport(files)
+  const report: PluginConversionReport = {
+    fidelity: plan.contextual ? "contextual" : "structured",
+    converted: [...plan.issues.converted],
+    warnings: [...plan.issues.warnings],
+    blocking: [...plan.issues.blocking],
+  }
+  const semantics = checkSkillSemantics(
+    files,
+    "pi",
+    "import",
+    plan.skillFiles.filter((path) => /(^|\/)SKILL\.md$/.test(path))
+  )
+  report.blocking.push(...semantics.blocking)
+  report.warnings.push(...semantics.warnings)
+  if (report.blocking.length > 0) {
+    report.fidelity = "unsupported"
+    throw new UnsupportedPluginConversionError("pi", "cognia", report)
+  }
+  const output = cloneFiles(files)
+  const converted = convertSkillFiles({
+    files,
+    declared: undefined,
+    output,
+    report,
+    explicit: plan.skillFiles,
+  })
+  const skills = [...converted.skills]
+  for (const prompt of plan.promptSkills) {
+    if (skills.some((skill) => skill.id === prompt.id)) {
+      report.blocking.push({
+        capability: "prompts",
+        path: `prompts.${prompt.id}`,
+        message: `Pi prompt /${prompt.name} and a Pi skill both become Cognia skill ${prompt.id}`,
+        blocking: true,
+      })
+      continue
+    }
+    skills.push(prompt)
+  }
+  for (const path of files.keys())
+    if (isPluginEnvironmentFile(path))
+      report.warnings.push({
+        capability: "secrets",
+        path,
+        message:
+          "Environment files inside the Pi package are blanked; credentials are never copied",
+        blocking: false,
+      })
+  return finalizeForeignConversion({
+    source: "pi",
+    output,
+    metadata: metadataFromForeignManifest(plan.metadata, "package.json"),
+    contributions: {
+      skills,
+      subagents: [],
+      presets: [],
+      piPackages: [plan.piPackage],
+      needsFilesystem: true,
+    },
+    report,
+    options,
+    retainSourceManifests: true,
+  })
+}
+
+/** Normalized platform bundles carry only canonical keys; no Claude Code host rules apply. */
+const NORMALIZED_PROFILE: ClaudeFamilyProfile = {
+  ...CLAUDE_FAMILY_PROFILES["claude-code"],
+  ignoredFields: {},
+  blockedFields: {},
+  unknownFields: "block",
+  blockedPaths: [],
+  requireDotSlashPaths: false,
+  nameRule: { pattern: /[\s\S]*/, message: "" },
+}
+
+const ECOSYSTEM_LABELS: Record<PluginEcosystem, string> = {
+  cognia: "Cognia",
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  "gemini-cli": "Gemini CLI",
+  "agent-plugins": "Agent Plugins",
+  cursor: "Cursor",
+  copilot: "GitHub Copilot",
+  kimi: "Kimi CLI",
+  devin: "Devin",
+  opencode: "OpenCode",
+  pi: "Pi",
+  "factory-droid": "Factory Droid",
+  qoder: "Qoder CLI",
+  codebuddy: "CodeBuddy",
+  auggie: "Auggie",
+  "open-plugins": "Open Plugins",
+}
+
+function isClaudeFamily(value: PluginEcosystem): value is ClaudeFamilyEcosystem {
+  return value in CLAUDE_FAMILY_PROFILES
 }
 
 export function convertPluginBundle(
@@ -2373,7 +3144,14 @@ export function convertPluginBundle(
       throw new Error(`plugin source path must stay relative to the bundle: ${path}`)
     }
   }
-  const source = detectPluginEcosystem(files)
+  const detected = detectPluginBundle(files)
+  const source = detected.ecosystem
+  const shadowWarnings: PluginConversionIssue[] = detected.shadowed.map((entry) => ({
+    capability: "format",
+    path: entry.path,
+    message: `${ECOSYSTEM_LABELS[entry.ecosystem]} manifest is also present; this conversion reads ${detected.manifestPath} (${ECOSYSTEM_LABELS[source]}) and does not convert it`,
+    blocking: false,
+  }))
   let canonical: PluginConversionResult | undefined
   const platformTarget = (value: PluginEcosystem): value is PlatformBundleTarget =>
     value in PLATFORM_BUNDLE_PROFILES
@@ -2389,41 +3167,94 @@ export function convertPluginBundle(
   }
   try {
     if (source === "cognia") canonical = loadCogniaPlugin(files)
-    else if (source === "claude-code") canonical = convertClaudePlugin(files, options)
+    else if (isClaudeFamily(source))
+      canonical = convertClaudePlugin(files, options, CLAUDE_FAMILY_PROFILES[source])
     else if (source === "codex") canonical = convertCodexPlugin(files, options)
     else if (source === "gemini-cli") canonical = convertGeminiPlugin(files, options)
+    else if (source === "pi") canonical = convertPiPlugin(files, options)
     else {
       const normalized = normalizePlatformBundle(files, source)
       if (normalized.blocking.length)
         throw new UnsupportedPluginConversionError(source, target, {
           fidelity: "unsupported",
           converted: [],
-          warnings: normalized.warnings,
+          warnings: [...shadowWarnings, ...normalized.warnings],
           blocking: normalized.blocking,
         })
-      canonical = convertClaudePlugin(normalized.files, options)
+      canonical = convertClaudePlugin(normalized.files, options, NORMALIZED_PROFILE, {
+        explicitSkills: normalized.skills ?? [],
+        hookDefaults: false,
+        mcpMode: "replace",
+        settings: normalized.settings,
+        rootSkillResources: normalized.rootSkillResources,
+      })
+      for (const path of normalized.transient) canonical.files.delete(path)
+      canonical.copies = canonical.copies.filter((copy) => !normalized.transient.has(copy.to))
       canonical.report.warnings.unshift(...normalized.warnings)
     }
-    if (target === "cognia") return finish(canonical)
-    const exportTarget = platformTarget(target) ? "claude-code" : target
-    const result = convertCogniaPlugin(canonical.files, exportTarget, options)
+    canonical.report.warnings.unshift(...shadowWarnings)
+    if (target === "cognia") {
+      // An imported plugin is installed as "source tree + overlay", and the
+      // installers only accept generated plugin.json / dist/index.js plus
+      // neutralizations of existing files. Adapter-side rewrites of source
+      // files (skill frontmatter aliases) informed the canonical manifest,
+      // which carries their meaning; the installed copy keeps source bytes.
+      if (source !== "cognia")
+        for (const [path, text] of canonical.files) {
+          const original = files.get(path)
+          if (original === undefined || original === text) continue
+          if (!isOverlayEntryAllowed(files, path, text)) canonical.files.set(path, original)
+        }
+      return finish(canonical)
+    }
+    const exportTarget =
+      platformTarget(target) || (isClaudeFamily(target) && target !== "claude-code")
+        ? "claude-code"
+        : target
+    const result = convertCogniaPlugin(canonical.files, exportTarget, options, {
+      finalTarget: target,
+      fieldProjection: target === "cursor" ? "cursor-variables" : undefined,
+    })
     result.report.warnings.unshift(...canonical.report.warnings)
-    if (platformTarget(target)) {
+    if (exportTarget === "claude-code" && target !== "claude-code") {
       // Binary placeholders must take part in path relocation just like text.
       const nativeFiles = new Map(result.files)
       for (const copy of result.copies) if (!nativeFiles.has(copy.to)) nativeFiles.set(copy.to, "")
-      const projected = projectPlatformBundle(nativeFiles, target)
+      const projected = platformTarget(target)
+        ? projectPlatformBundle(nativeFiles, target, {
+            variables: (PROJECTED_SETTINGS.get(result) ?? []).map((setting) => ({
+              envVar: String(setting.envVar),
+              name: String(setting.name),
+              description:
+                typeof setting.description === "string" ? setting.description : undefined,
+              sensitive: Boolean(setting.sensitive),
+            })),
+          })
+        : projectClaudeFamilyBundle(
+            nativeFiles,
+            CLAUDE_FAMILY_PROFILES[target as ClaudeFamilyEcosystem]
+          )
       result.report.warnings.push(...projected.warnings)
       result.report.blocking.push(...projected.blocking)
       if (projected.blocking.length) {
         result.report.fidelity = "unsupported"
         throw new UnsupportedPluginConversionError(source, target, result.report)
       }
+      const relocated = new Map<string, string>()
+      for (const copy of result.copies) {
+        // Kimi moves the single skill to the plugin root; OpenCode into .opencode/.
+        const to =
+          target === "opencode" && copy.to.startsWith("skills/")
+            ? `.opencode/${copy.to}`
+            : target === "kimi" && /^skills\/[^/]+\//.test(copy.to)
+              ? copy.to.replace(/^skills\/[^/]+\//, "")
+              : copy.to
+        relocated.set(copy.to, to)
+      }
       result.files = projected.files
       result.copies = result.copies.map((copy) => ({
         ...copy,
-        to:
-          target === "opencode" && copy.to.startsWith("skills/") ? `.opencode/${copy.to}` : copy.to,
+        to: relocated.get(copy.to) ?? copy.to,
       }))
       // Explicit copies own their destination; placeholder text must not write
       // over binary data in either CLI or workspace apply.
@@ -2433,6 +3264,8 @@ export function convertPluginBundle(
   } catch (error) {
     if (!(error instanceof UnsupportedPluginConversionError)) throw error
     const report = { ...error.report, fidelity: "unsupported" as const }
+    if (!report.warnings.some((issue) => shadowWarnings.includes(issue)))
+      report.warnings = [...shadowWarnings, ...report.warnings]
     report.delivery = assessPluginDelivery({ manifest: canonical?.manifest, report, target })
     throw new UnsupportedPluginConversionError(source, target, report)
   }

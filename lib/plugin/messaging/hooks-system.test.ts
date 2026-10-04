@@ -49,6 +49,7 @@ jest.mock("@/stores/plugin-runtime", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { __resetSlashCommandsForTesting, registerSlashCommand } from "@/lib/slash-commands/registry"
 import {
   registerPluginHookContribution,
@@ -789,7 +790,9 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
   })
 
   describe("Pet dispatchers", () => {
-    function withHooks(hooks: Record<string, unknown>) {
+    function withHooks(hooks: Record<string, unknown>, permissions: string[] = ["pet:read"]) {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("pet-plugin", permissions as never)
       seedPlugins({
         plugins: { "pet-plugin": { status: "enabled", hooks } },
       })
@@ -820,6 +823,32 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
       expect(onPetEvolved).toHaveBeenCalledWith({ stage: "juvenile", level: 5, at: 3 })
       expect(onPetAchievementUnlocked).toHaveBeenCalledWith({ achievementId: "well-fed", at: 4 })
       expect(onPetUnwell).toHaveBeenCalledWith({ condition: "unwell", at: 5 })
+    })
+
+    it("withholds every pet hook from a plugin without pet:read", async () => {
+      const onPetInteract = jest.fn()
+      const onPetLevelUp = jest.fn()
+      const onPetEvolved = jest.fn()
+      const onPetAchievementUnlocked = jest.fn()
+      const onPetUnwell = jest.fn()
+      withHooks(
+        { onPetInteract, onPetLevelUp, onPetEvolved, onPetAchievementUnlocked, onPetUnwell },
+        ["pet:interact"]
+      )
+      await eventHooks.dispatchPetInteract({ kind: "fed", source: "user", xp: 3, at: 1 })
+      await eventHooks.dispatchPetLevelUp({ level: 5, stage: "juvenile", at: 2 })
+      await eventHooks.dispatchPetEvolved({ stage: "juvenile", level: 5, at: 3 })
+      await eventHooks.dispatchPetAchievementUnlocked({ achievementId: "well-fed", at: 4 })
+      await eventHooks.dispatchPetUnwell({ condition: "unwell", at: 5 })
+      for (const hook of [
+        onPetInteract,
+        onPetLevelUp,
+        onPetEvolved,
+        onPetAchievementUnlocked,
+        onPetUnwell,
+      ]) {
+        expect(hook).not.toHaveBeenCalled()
+      }
     })
 
     it("isolates a throwing pet hook", async () => {

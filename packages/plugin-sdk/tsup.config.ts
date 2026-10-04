@@ -38,6 +38,7 @@ const runtimeEntries = {
   "host-environment": "src/api/host-environment.ts",
   "message-renderer": "src/api/message-renderer.ts",
   "ocr-provider": "src/api/ocr-provider.ts",
+  pet: "src/api/pet.ts",
   "decision-provider": "src/api/decision-provider.ts",
   sandbox: "src/api/sandbox.ts",
   "scheduled-task": "src/api/scheduled-task.ts",

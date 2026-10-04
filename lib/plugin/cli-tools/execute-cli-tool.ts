@@ -3,7 +3,10 @@
  *
  * Security gates, in order:
  *   ① injection-proof argv substitution (`buildArgv`) — params land as
- *      discrete argv elements, never through a shell — plus cwd policy
+ *      discrete argv elements, never through a shell — after the
+ *      plugin-root tokens in LITERAL argv tokens and static env values are
+ *      bound to the real install dir (`bindCliToolPluginRoot`; never in
+ *      param values, refused for `builtin://` plugins), plus cwd policy
  *      resolution (workspace-bounded for `param` cwds), the
  *      `confinedPathParams` containment check, and stdin validation. All
  *      pure validation, run BEFORE consent so a malformed call fails fast
@@ -11,15 +14,17 @@
  *   ② `cli:execute` permission via the guard + consent broker (defense in
  *      depth — `invokePluginTool` gates the plugin's declared permission
  *      set too, but this executor must hold on every path it's reachable
- *      from). The reason string carries the rendered `program argv` so the
- *      user approves a command, not a tool name.
+ *      from). The reason string carries the rendered `program argv` — with
+ *      plugin-root tokens already expanded, so the user approves the
+ *      absolute script path that will run — not a tool name.
  *   ③ binary resolution + trust: `requires` binaries resolve through
  *      `detect_binary` to an absolute path with a minVersion gate;
  *      `plugin-dir` binaries pass the `approvedBinaries` policy (no
  *      hash-matching user approval → consent prompt, which is also where
  *      the user can opt into a durable, hash-pinned approval). Probing the
  *      filesystem stays post-consent.
- *   ④ static manifest env only — params can never set env vars
+ *   ④ static manifest env only — params can never set env vars (plugin-root
+ *      tokens in env values are bound in ①)
  *   ⑤ `plugin_cli_exec` (no shell, kill_on_drop, output caps)
  *   ⑥ exit-code policy + output parsing
  *   ⑦ an `automationAuditLog` row per invocation
@@ -41,6 +46,7 @@ import {
   resolveCwd,
   CliTemplateError,
 } from "./template"
+import { bindCliToolPluginRoot } from "./plugin-root-binding"
 import { getActiveWorkspaceRoot } from "@/lib/plugin/api/workspace-root"
 
 const CLI_EXECUTE: PluginPermission = "cli:execute"
@@ -252,6 +258,9 @@ function confinementBase(
  * The command line the consent prompt shows: declared program (the
  * `requires` name or plugin-relative path — the form the user recognises,
  * not the post-detection absolute path) plus the rendered argv and cwd.
+ * `argv` is post-binding, so a `${COGNIA_PLUGIN_ROOT}/…` literal appears as
+ * the absolute path inside the plugin's install dir — the user approves the
+ * file that will actually run, not a placeholder.
  * Whitespace/quote-bearing elements are JSON-quoted so the string stays
  * unambiguous; the whole reason is capped at 500 chars.
  */
@@ -282,10 +291,13 @@ export async function executeCliTool(
   // ① template substitution + cwd + confinement + stdin — all pure
   // validation, ahead of any prompting or filesystem probing.
   let argv: string[]
+  let env: Record<string, string>
   let cwd: string | undefined
   let stdinValue: string | undefined
   try {
-    argv = buildArgv(def.argv, args)
+    const bound = bindCliToolPluginRoot(def, ctx.pluginPath)
+    env = bound.env
+    argv = buildArgv(bound.argv, args)
     cwd = resolveCwd(def.cwd, args, {
       pluginPath: ctx.pluginPath,
       workspaceRoot: deps.getWorkspaceRoot(),
@@ -331,7 +343,7 @@ export async function executeCliTool(
       program,
       args: argv,
       cwd: cwd ?? null,
-      env: def.env ?? {},
+      env,
       stdin: stdinValue ?? null,
       timeoutMs: def.timeoutMs ?? null,
       maxOutputBytes: def.maxOutputBytes ?? null,

@@ -15,7 +15,8 @@
     "capabilities",
     "manifestContributions",
     "runtimeEntries",
-    "pathFields"
+    "pathFields",
+    "localizedLabelPaths"
   ],
   "properties": {
     "$schema": {
@@ -169,6 +170,12 @@
         "additionalProperties": false
       }
     },
+    "localizedLabelPaths": {
+      "description": "Optional UI text key fields resolved from manifest i18n.locales; literals remain model-facing.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "pathFields": {
       "type": "array",
       "items": {
@@ -196,6 +203,10 @@
               "type": "string"
             },
             "uniqueItems": true
+          },
+          "kind": {
+            "enum": ["file", "directory", "contained-only"],
+            "description": "What must exist at the path in an installed tree. `file` (the default): an existing regular file. `directory`: an existing directory (`.` names the plugin root). `contained-only`: no existence check, only lexical containment — for paths a later step creates, such as a dependency marker."
           }
         },
         "additionalProperties": false

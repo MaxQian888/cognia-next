@@ -56,6 +56,7 @@
         "claimed": "Claimed",
         "claimAria": "Claim the reward for “{quest}”",
         "claimFailed": "Couldn't claim that reward. It is still waiting for you — try again in a moment.",
+        "claimPetUnavailable": "Your pet can't take a reward right now — it may be switched off or still an egg. The quest stays claimable.",
         "reward": "+{xp} XP · +{coins} coins",
         "budgetLeft": "Today's reward budget left: {xp} XP · {coins} coins",
         "resetsDaily": "Quests reset at midnight."
@@ -80,6 +81,7 @@
         "claimed": "已领取",
         "claimAria": "领取「{quest}」的奖励",
         "claimFailed": "奖励领取失败，任务仍可领取，请稍后再试。",
+        "claimPetUnavailable": "宠物暂时无法领取奖励（可能已关闭或尚未孵化），任务仍可稍后领取。",
         "reward": "+{xp} 经验 · +{coins} 金币",
         "budgetLeft": "今日剩余奖励额度：{xp} 经验 · {coins} 金币",
         "resetsDaily": "任务每天零点刷新。"

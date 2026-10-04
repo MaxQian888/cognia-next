@@ -7,6 +7,7 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }))
 
 let mockPlugin: PluginRow | undefined
@@ -27,6 +28,16 @@ jest.mock("./plugin-contributed-tab", () => ({
 jest.mock("./plugin-triggers-tab", () => ({
   PluginTriggersTab: ({ pluginId }: { pluginId: string }) => (
     <div data-testid="triggers" data-plugin-id={pluginId} />
+  ),
+}))
+
+jest.mock("./plugin-pi-packages-section", () => ({
+  PluginPiPackagesSection: ({ pluginId, manifest }: { pluginId: string; manifest: unknown }) => (
+    <div
+      data-testid="pi-packages-section"
+      data-plugin-id={pluginId}
+      data-count={String((manifest as { piPackages?: unknown[] }).piPackages?.length ?? 0)}
+    />
   ),
 }))
 
@@ -70,6 +81,17 @@ describe("PluginDetailCapabilities", () => {
     render(<PluginDetailCapabilities pluginId="alpha" />)
     expect(screen.getByText("tools")).toBeInTheDocument()
     expect(screen.getByText("onStartup")).toBeInTheDocument()
+  })
+
+  it("mounts the Pi packages section with the plugin id and manifest", () => {
+    mockPlugin = makePlugin({
+      capabilities: ["pi-package"],
+      manifest: { id: "alpha", piPackages: [{ id: "latex", name: "LaTeX", path: "pi" }] },
+    })
+    render(<PluginDetailCapabilities pluginId="alpha" />)
+    const section = screen.getByTestId("pi-packages-section")
+    expect(section).toHaveAttribute("data-plugin-id", "alpha")
+    expect(section).toHaveAttribute("data-count", "1")
   })
 
   it("renders the noCapabilities message when nothing to show", () => {

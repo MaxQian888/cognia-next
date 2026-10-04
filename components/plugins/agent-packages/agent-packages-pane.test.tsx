@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -12,6 +12,10 @@ import type { PiPackagesSnapshot } from "@/lib/pi-packages/host"
 import { resolvePiPackages } from "@/lib/pi-packages/resolve"
 import type { PiPackageSource } from "@/lib/pi-packages/types"
 import messages from "@/i18n/messages/en.json"
+import {
+  __resetContributedPiPackagesForTesting,
+  registerContributedPiPackage,
+} from "@/lib/plugin/pi-packages/registry"
 import { AgentPackagesPane } from "./agent-packages-pane"
 
 jest.mock("@/hooks/plugins", () => ({ usePiPackages: () => mockResult }))
@@ -116,6 +120,31 @@ beforeEach(() => {
 })
 
 describe("AgentPackagesPane", () => {
+  afterEach(() => __resetContributedPiPackagesForTesting())
+
+  it("lists Pi packages from enabled Cognia plugins in their own group", async () => {
+    registerContributedPiPackage(
+      {
+        id: "latex",
+        name: "LaTeX workbench",
+        path: "pi",
+        hostedSession: { extensions: ["pi/latex.ts"] },
+      },
+      { pluginId: "latex-workbench", installRoot: "/p/latex-workbench" }
+    )
+    setup()
+    const group = screen.getByTestId("pi-contributed-group")
+    expect(group).toHaveTextContent("From Cognia plugins")
+    expect(
+      await within(group).findByTestId("contributed-pi-package-latex-workbench-latex")
+    ).toHaveTextContent("LaTeX workbench")
+  })
+
+  it("omits the plugin group when no plugin contributes a package", () => {
+    setup()
+    expect(screen.queryByTestId("pi-contributed-group")).not.toBeInTheDocument()
+  })
+
   it("shows a loading line and no panels while reading", () => {
     setup({ loading: true })
     expect(screen.getByText(/Reading Pi's settings/i)).toBeInTheDocument()

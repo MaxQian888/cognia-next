@@ -1,3 +1,11 @@
+// The bridge must never consult the write gate: the user consented to these
+// tasks by enabling the plugin, and a quota refusal would half-register it.
+const assertTaskWriteAllowed = jest.fn()
+jest.mock("@/lib/scheduler/write-authority", () => ({
+  assertTaskWriteAllowed: (...args: unknown[]) => assertTaskWriteAllowed(...args),
+  authorizeTaskWrite: (...args: unknown[]) => assertTaskWriteAllowed(...args),
+}))
+
 import {
   registerScheduledTasksForPlugin,
   unregisterScheduledTasksForPlugin,
@@ -115,6 +123,84 @@ describe("registerScheduledTasksForPlugin", () => {
     expect(listScheduledTaskDefs()).toHaveLength(1)
   })
 
+  it("attributes the rows to the plugin without passing the write gate", async () => {
+    const scheduler = makeFakeScheduler()
+    await registerScheduledTasksForPlugin(
+      makeManifest([{ name: "daily", handler: "h", trigger: { type: "interval", seconds: 60 } }]),
+      { scheduler }
+    )
+    expect(scheduler.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ createdBy: { kind: "plugin", pluginId: "sched-plugin" } })
+    )
+    expect(assertTaskWriteAllowed).not.toHaveBeenCalled()
+  })
+
+  it("maps the def's retry and timeout onto the scheduler config", async () => {
+    const scheduler = makeFakeScheduler()
+    await registerScheduledTasksForPlugin(
+      makeManifest([
+        {
+          name: "daily",
+          handler: "h",
+          trigger: { type: "interval", seconds: 60 },
+          timeout: 30,
+          retry: { maxAttempts: 2, delaySeconds: 10 },
+        },
+      ]),
+      { scheduler }
+    )
+    expect(scheduler.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: { timeout: 30_000, maxRetries: 2, retryDelay: 10_000 },
+      })
+    )
+  })
+
+  it("leaves the scheduler's defaults alone when the def sets neither", async () => {
+    const scheduler = makeFakeScheduler()
+    await registerScheduledTasksForPlugin(
+      makeManifest([{ name: "daily", handler: "h", trigger: { type: "interval", seconds: 60 } }]),
+      { scheduler }
+    )
+    expect(
+      (scheduler.createTask as jest.Mock).mock.calls[0][0] as CreateScheduledTaskInput
+    ).not.toHaveProperty("config")
+  })
+
+  it("re-arms an existing row whose retry changed, and skips one that matches", async () => {
+    const seed = (config: Record<string, unknown>) =>
+      ({
+        id: "existing",
+        name: "daily",
+        type: "plugin",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        payload: { pluginId: "sched-plugin", handler: "doDaily" },
+        config,
+      }) as unknown as ScheduledTask
+    const manifest = makeManifest([
+      {
+        name: "daily",
+        handler: "doDaily",
+        trigger: { type: "interval", seconds: 60 },
+        retry: { maxAttempts: 3, delaySeconds: 5 },
+      },
+    ])
+
+    const stale = makeFakeScheduler([seed({ timeout: 300_000, maxRetries: 0, retryDelay: 60_000 })])
+    const result = await registerScheduledTasksForPlugin(manifest, { scheduler: stale })
+    expect(result.updated).toBe(1)
+    expect(stale.updateTask).toHaveBeenCalledWith("existing", {
+      config: { maxRetries: 3, retryDelay: 5_000 },
+    })
+
+    const current = makeFakeScheduler([
+      seed({ timeout: 300_000, maxRetries: 3, retryDelay: 5_000 }),
+    ])
+    const again = await registerScheduledTasksForPlugin(manifest, { scheduler: current })
+    expect(again.skipped).toBe(1)
+    expect(current.updateTask).not.toHaveBeenCalled()
+  })
+
   it("is idempotent — skips a def whose task already exists", async () => {
     const scheduler = makeFakeScheduler([
       {
@@ -209,5 +295,22 @@ describe("unregisterScheduledTasksForPlugin", () => {
       scheduler.tasks.some((t) => (t.payload as { pluginId?: string }).pluginId === "other")
     ).toBe(true)
     expect(listScheduledTaskDefs()).toHaveLength(0)
+  })
+
+  it("also deletes the plugin's runtime-created tasks, which cannot run without its handlers", async () => {
+    // Documented contribution model: a plugin task is only runnable while the
+    // plugin's handlers are registered, so disable removes every plugin row
+    // it owns, not just the manifest-declared ones.
+    const scheduler = makeFakeScheduler([
+      {
+        id: "runtime",
+        name: "made at runtime",
+        type: "plugin",
+        payload: { pluginId: "sched-plugin", handler: "later" },
+        createdBy: { kind: "plugin", pluginId: "sched-plugin" },
+      } as unknown as ScheduledTask,
+    ])
+    await expect(unregisterScheduledTasksForPlugin("sched-plugin", { scheduler })).resolves.toBe(1)
+    expect(scheduler.tasks).toHaveLength(0)
   })
 })

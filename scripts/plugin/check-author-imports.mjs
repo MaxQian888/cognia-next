@@ -168,13 +168,28 @@ function isVendoredAuthorTypes(root, path) {
   )
 }
 
-function sourceFiles(root, pluginRoot = root) {
+/**
+ * Untouched upstream source snapshots vendored inside an in-tree plugin. The
+ * policy is repowiki's (`plugins/repowiki/repowiki/` is the upstream package,
+ * left as-is): the plugin author did not write these files, may not edit
+ * them, and they are not compiled against the SDK, so the author-import
+ * boundary does not apply to them — the plugin's own glue beside them is
+ * still gated. Listed explicitly (repo-relative) rather than matched by name,
+ * so a `vendor/` directory cannot become a way around the gate; each entry is
+ * byte-pinned to its upstream commit by its own check.
+ *
+ * - `plugins/pi-latex-workbench/vendor` — `pnpm plugin:pi-latex-workbench:check`
+ */
+export const UPSTREAM_SNAPSHOT_DIRS = ["plugins/pi-latex-workbench/vendor"]
+
+function sourceFiles(root, pluginRoot = root, skip = new Set()) {
   const files = []
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name === "dist") continue
     const path = join(root, entry.name)
     if (isVendoredAuthorTypes(pluginRoot, path)) continue
-    if (entry.isDirectory()) files.push(...sourceFiles(path, pluginRoot))
+    if (skip.has(path)) continue
+    if (entry.isDirectory()) files.push(...sourceFiles(path, pluginRoot, skip))
     else if (SOURCE_EXTENSIONS.has(extname(entry.name))) files.push(path)
   }
   return files
@@ -182,8 +197,9 @@ function sourceFiles(root, pluginRoot = root) {
 
 export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOTS) {
   const violations = []
+  const skip = new Set(UPSTREAM_SNAPSHOT_DIRS.map((dir) => resolve(repoRoot, dir)))
   for (const root of roots.map((path) => resolve(repoRoot, path))) {
-    for (const file of sourceFiles(root)) {
+    for (const file of sourceFiles(root, root, skip)) {
       const source = readFileSync(file, "utf8")
       if (isHostIntegrationTest(file, source)) continue
       for (const specifier of findForbiddenAuthorImports(source)) {

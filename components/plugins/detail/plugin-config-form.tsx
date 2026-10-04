@@ -26,9 +26,10 @@
 // silently and Cancel was wired to a no-op.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
 import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
+import { localizeConfigSchema } from "@/lib/plugin/i18n/config-schema-text"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
@@ -533,10 +534,19 @@ function SchemaConfigBody({
   const t = useTranslations("plugins.configForm")
   const tDetail = useTranslations("plugins.detail")
   const { name: displayName } = useLocalizedPluginText(plugin)
-  const form = useConfigSchemaForm(
-    (plugin.manifest as { configSchema?: Record<string, unknown> })?.configSchema,
-    plugin.config
+  const locale = useLocale()
+  // Plugin-authored labels resolve through the manifest's own locale bundle
+  // (`titleKey`, `descriptionKey`, `enumItemLabelKeys`, …), falling back to
+  // the literal text, before the schema is parsed into fields.
+  const { configSchema: rawConfigSchema, i18n: manifestI18n } = (plugin.manifest ?? {}) as {
+    configSchema?: Record<string, unknown>
+    i18n?: PluginManifest["i18n"]
+  }
+  const localizedSchema = useMemo(
+    () => localizeConfigSchema(rawConfigSchema, manifestI18n, locale),
+    [rawConfigSchema, manifestI18n, locale]
   )
+  const form = useConfigSchemaForm(localizedSchema, plugin.config)
   const { schema, values, errors, hasErrors, dirty, reset } = form
   const [saving, setSaving] = useState(false)
 
@@ -865,15 +875,22 @@ function renderInput(args: RenderArgs) {
                 Array.isArray(descs) && typeof descs[i] === "string"
                   ? (descs[i] as string)
                   : undefined
+              // `enumItemLabels` (already localized via `enumItemLabelKeys`)
+              // names the option; the raw value is the fallback.
+              const labels = field.raw.enumItemLabels
+              const label =
+                Array.isArray(labels) && typeof labels[i] === "string" && labels[i]
+                  ? (labels[i] as string)
+                  : opt
               return (
                 <SelectItem key={opt} value={opt}>
                   {desc ? (
                     <span className="flex flex-col">
-                      <span>{opt}</span>
+                      <span>{label}</span>
                       <span className="text-[10px] text-muted-foreground">{desc}</span>
                     </span>
                   ) : (
-                    opt
+                    label
                   )}
                 </SelectItem>
               )

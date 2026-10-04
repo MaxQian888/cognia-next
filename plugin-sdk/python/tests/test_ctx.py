@@ -318,6 +318,31 @@ def test_team_carries_reads_writes_and_run_control():
         assert name in methods, name
 
 
+def test_user_scheduler_namespace_is_open_to_python():
+    """``ctx.userScheduler`` is request/response end to end and its writes are
+    policy-gated and attributed on the host, so it is opened to python.
+    ``ctx.scheduler`` is not: its task handlers are functions registered in
+    the JS runtime, which a python process cannot provide."""
+    methods = PYTHON_HOST_NAMESPACES["userScheduler"]
+    for name in (
+        "getPolicy",
+        "listTasks",
+        "getTask",
+        "createTask",
+        "updateTask",
+        "pauseTask",
+        "resumeTask",
+        "deleteTask",
+        "runTaskNow",
+        "listExecutions",
+        "getExecution",
+        "cancelExecution",
+        "getUpcoming",
+    ):
+        assert name in methods, name
+    assert "scheduler" not in PYTHON_HOST_NAMESPACES
+
+
 def test_bot_publication_references_survive_serialized_host_response(fresh_runtime):
     import json
     from cognia.bot import BotPublicationReference

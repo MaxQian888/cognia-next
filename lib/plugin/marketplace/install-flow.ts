@@ -80,6 +80,12 @@ export interface PreInstallConfigPayload {
   pluginId: string
   /** Loose shape — the dialog renders whatever it can parse. */
   configSchema: Record<string, unknown>
+  /**
+   * The manifest's own locale bundles, so the dialog can resolve the schema's
+   * `titleKey` / `descriptionKey` / `enumItemLabelKeys` before install, when
+   * no runtime bundle for the plugin is loaded yet.
+   */
+  i18n?: PluginManifest["i18n"]
 }
 
 export interface RunMarketplaceInstallOpts {
@@ -421,7 +427,12 @@ export async function runMarketplaceInstall(
   let configValue: Record<string, unknown> | undefined
   if (hasConfigSchema(manifest)) {
     const schema = (manifest as { configSchema?: Record<string, unknown> }).configSchema!
-    const decision = await opts.requestConfig({ pluginId, configSchema: schema })
+    const i18n = (manifest as { i18n?: PluginManifest["i18n"] }).i18n
+    const decision = await opts.requestConfig({
+      pluginId,
+      configSchema: schema,
+      ...(i18n ? { i18n } : {}),
+    })
     if (decision.result === "cancel") {
       return { status: "cancelled", stage: "config" }
     }

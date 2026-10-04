@@ -242,7 +242,14 @@ export type {
   PluginRunCalibrationArgs,
   PluginRunDatasetArgs,
 } from "@/lib/plugin/api/eval-api"
-export type { PluginUserSchedulerAPI } from "@/lib/plugin/api/scheduler-tasks"
+export type {
+  PluginSchedulerActor,
+  PluginSchedulerExecutionPage,
+  PluginSchedulerRunOptions,
+  PluginSchedulerWriteOptions,
+  PluginUpcomingRun,
+  PluginUserSchedulerAPI,
+} from "@/lib/plugin/api/scheduler-tasks"
 export type { PluginCompanionAPI, CompanionServerStatus } from "@/lib/plugin/api/companion-api"
 export type {
   PluginMemoryAPI,
@@ -251,10 +258,13 @@ export type {
   PluginMemoryStoreInput,
 } from "@/lib/plugin/api/memory-api"
 export type {
+  PluginEmittablePetEventKind,
   PluginPetAPI,
+  PluginPetAvailability,
   PluginPetEvent,
   PluginPetInteractionKind,
   PluginPetSummary,
+  PluginPetUnavailableReason,
 } from "@/lib/plugin/api/pet-api"
 export type { PluginMessagePartAPI } from "@/lib/plugin/api/message-part-api"
 export type {
@@ -271,7 +281,11 @@ export type FullPluginContext = CtxPluginContext
 // Scheduler runtime API (separate file for the manifest types; this is the
 // runtime-side façade plugins call via `ctx.scheduler`).
 // =============================================================================
-export type { PluginSchedulerAPI } from "@/types/plugin/plugin-scheduler"
+export type {
+  PluginSchedulerAPI,
+  PluginTaskExecutionEvent,
+  PluginTaskStatistics,
+} from "@/types/plugin/plugin-scheduler"
 
 // =============================================================================
 // Additional callable APIs (from types/plugin/plugin.ts). These are merged

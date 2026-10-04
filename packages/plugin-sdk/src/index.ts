@@ -257,6 +257,12 @@ export { defineOcrProvider } from "./define/define-ocr-provider"
 export { defineDecisionProvider } from "./define/define-decision-provider"
 export { definePetAchievement } from "./define/define-pet-achievement"
 export { definePetItem } from "./define/define-pet-item"
+export { definePiPackage } from "./define/define-pi-package"
+export {
+  PI_PACKAGE_ENV_PREFIX,
+  formatPiPackageRef,
+  parsePiPackageRef,
+} from "@/types/plugin/plugin-pi-package"
 export { defineScheduledTask } from "./define/define-scheduled-task"
 export { defineWorkspaceBackend } from "./define/define-workspace-backend"
 export { defineMessageRenderer } from "./define/define-message-renderer"
@@ -481,6 +487,12 @@ export type {
   TaskExecutionTriggerSource,
   TaskTrigger,
   TaskTriggerType,
+  UpdateScheduledTaskInput,
+  PluginSchedulerActor,
+  PluginSchedulerExecutionPage,
+  PluginSchedulerRunOptions,
+  PluginSchedulerWriteOptions,
+  PluginUpcomingRun,
 } from "./api/scheduled-task"
 
 /**

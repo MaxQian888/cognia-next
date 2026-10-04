@@ -165,7 +165,10 @@ describe("dispatchSubagent", () => {
       degradedReason: "sidecar-unavailable",
     })
     const res = await dispatchSubagent(subagent, "go")
-    expect(mockRendererTurn.mock.calls[0][2]).toEqual({ surface: "plugin" })
+    expect(mockRendererTurn.mock.calls[0][2]).toEqual({
+      surface: "plugin",
+      identity: { runId: expect.any(String) },
+    })
     expect(res).toMatchObject({
       text: "authoritative",
       runtime: "claude-agent-sdk",
@@ -774,4 +777,25 @@ describe("dispatchSubagent definition fidelity", () => {
     expect(config).not.toHaveProperty("disallowedTools")
     expect(config).not.toHaveProperty("effort")
   })
+})
+
+it("threads a host-owned persistent child session and exact execution identity", async () => {
+  mockRendererTurn.mockResolvedValueOnce({ text: "ok", channel: "text", toolsAvailable: false })
+  await dispatchSubagent(
+    { id: "persistent", name: "Persistent", description: "Review", prompt: "review" },
+    "task",
+    {
+      toolsEnabled: false,
+      _runId: "run-owned",
+      _sessionId: "child-owned",
+    }
+  )
+  expect(mockRendererTurn).toHaveBeenCalledWith(
+    "task",
+    expect.objectContaining({ sessionId: "child-owned" }),
+    {
+      surface: "plugin",
+      identity: { runId: "run-owned", sessionId: "child-owned" },
+    }
+  )
 })

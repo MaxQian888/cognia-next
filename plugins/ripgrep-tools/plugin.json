@@ -29,6 +29,7 @@
     {
       "name": "ripgrep_search",
       "description": "Search file contents in the workspace with ripgrep. Returns an array of strings: each element is ONE ripgrep --json event (a JSON object encoded as a string — parse each element; \"match\" events carry path, line_number and lines). Exit code 1 (no matches) is a successful empty result. The search path is confined to the workspace root; credential paths (.ssh, .aws, id_rsa, …) are always refused. Output is capped at 500 KB. Prefer the built-in `grep` for most searches — it normalizes results; use this when you need raw --json or flags grep lacks.",
+      "descriptionKey": "cliTools.ripgrep_search.description",
       "access": "read",
       "confinedPathParams": ["path"],
       "parameters": {
@@ -165,11 +166,13 @@
     "locales": {
       "en": {
         "manifest.name": "Ripgrep Tools",
-        "manifest.description": "First-party reference plugin for declarative CLI wrapper tools: exposes ripgrep as an agent tool with zero plugin code."
+        "manifest.description": "First-party reference plugin for declarative CLI wrapper tools: exposes ripgrep as an agent tool with zero plugin code.",
+        "cliTools.ripgrep_search.description": "Search file contents in the workspace with ripgrep. Returns an array of strings: each element is ONE ripgrep --json event (a JSON object encoded as a string — parse each element; \"match\" events carry path, line_number and lines). Exit code 1 (no matches) is a successful empty result. The search path is confined to the workspace root; credential paths (.ssh, .aws, id_rsa, …) are always refused. Output is capped at 500 KB. Prefer the built-in `grep` for most searches — it normalizes results; use this when you need raw --json or flags grep lacks."
       },
       "zh-CN": {
         "manifest.name": "Ripgrep 工具",
-        "manifest.description": "声明式命令行包装工具的官方参考插件：零插件代码即可把 ripgrep 作为 Agent 工具。"
+        "manifest.description": "声明式命令行包装工具的官方参考插件：零插件代码即可把 ripgrep 作为 Agent 工具。",
+        "cliTools.ripgrep_search.description": "使用 ripgrep 搜索工作区中的文件内容。返回字符串数组，每项均为一个 ripgrep --json 事件（编码为字符串的 JSON 对象，需逐项解析；\"match\" 事件包含 path、line_number 与 lines）。退出码 1（无匹配）视为成功的空结果。搜索路径限定在工作区根目录内；始终拒绝凭据路径（.ssh、.aws、id_rsa 等）。输出上限为 500 KB。多数搜索优先使用内置 `grep`，其会规范化结果；需要原始 --json 或 grep 不支持的参数时使用此工具。"
       }
     }
   }

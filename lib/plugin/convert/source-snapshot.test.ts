@@ -1,5 +1,9 @@
+import { convertPluginBundle } from "./ecosystem"
 import {
+  GENERATED_FILE_PATHS,
+  NEUTRALIZED_CONTENTS,
   generatedFilesFrom,
+  isOverlayEntryAllowed,
   isSnapshotTextFile,
   isPluginEnvironmentFile,
   MAX_SNAPSHOT_ENTRIES,
@@ -84,6 +88,109 @@ describe("generatedFilesFrom", () => {
     // Both sides carry "" for a non-text file, so it must not be overlaid.
     const snapshot = new Map([["assets/icon.png", ""]])
     expect(generatedFilesFrom(snapshot, new Map([["assets/icon.png", ""]]))).toEqual({})
+  })
+
+  it("only emits what the Rust overlay contract accepts", () => {
+    const snapshot = new Map([
+      [".mcp.json", '{"mcpServers":{}}'],
+      ["skills/a/SKILL.md", "body"],
+    ])
+    expect(
+      generatedFilesFrom(
+        snapshot,
+        new Map([
+          [".mcp.json", "{}\n"],
+          ["dist/index.js", "x"],
+        ])
+      )
+    ).toEqual({ ".mcp.json": "{}\n", "dist/index.js": "x" })
+    // A new file, even with neutral content, or chosen content over a source file.
+    expect(() => generatedFilesFrom(snapshot, new Map([["new.json", "{}\n"]]))).toThrow(
+      /cannot overlay: new.json/
+    )
+    expect(() =>
+      generatedFilesFrom(snapshot, new Map([["skills/a/SKILL.md", "rewritten"]]))
+    ).toThrow(/skills\/a\/SKILL.md/)
+    expect(isOverlayEntryAllowed(snapshot, ".mcp.json", "{ }\n")).toBe(false)
+    expect(GENERATED_FILE_PATHS).toEqual(["plugin.json", "dist/index.js"])
+    expect(NEUTRALIZED_CONTENTS).toEqual(["{}\n", "\n"])
+  })
+})
+
+describe("converted bundles fit the installer overlay contract", () => {
+  const json = JSON.stringify
+  const skill = "---\nname: review\ndescription: Review\n---\nReview."
+  it.each<[string, Record<string, string>]>([
+    [
+      "claude-code",
+      {
+        ".claude-plugin/plugin.json": json({
+          name: "kit",
+          mcpServers: { inline: { command: "npx", env: { TOKEN: "literal-secret" } } },
+        }),
+        ".mcp.json": json({ mcpServers: { docs: { command: "npx", env: { KEY: "secret-2" } } } }),
+        ".env": "",
+        "skills/review/SKILL.md": skill,
+      },
+    ],
+    [
+      "cursor",
+      {
+        ".cursor-plugin/plugin.json": json({ name: "kit" }),
+        ".claude-plugin/plugin.json": json({ name: "kit" }),
+        "mcp.json": json({ mcpServers: { docs: { command: "npx" } } }),
+        "skills/review/SKILL.md": skill,
+      },
+    ],
+    [
+      "factory-droid",
+      {
+        ".factory-plugin/plugin.json": json({ name: "kit" }),
+        "mcp.json": json({ mcpServers: { docs: { command: "npx" } } }),
+        "skills/review/SKILL.md": skill,
+      },
+    ],
+    [
+      "kimi",
+      {
+        "plugin.json": json({ name: "kit", version: "1.0.0", tools: [] }),
+        "SKILL.md": skill.replace("description:", "disableModelInvocation: true\ndescription:"),
+      },
+    ],
+    [
+      "devin",
+      {
+        ".devin-plugin/plugin.json": json({ name: "kit" }),
+        ".mcp.json": json({ mcpServers: { docs: { command: "npx" } } }),
+        "skills/review/SKILL.md": skill.replace("description:", "triggers: [user]\ndescription:"),
+        "skills/review/notes.md": "resource",
+      },
+    ],
+    [
+      "gemini-cli",
+      {
+        "gemini-extension.json": json({
+          name: "kit",
+          version: "1.0.0",
+          mcpServers: { s: { command: "npx", args: ["${extensionPath}${/}s.js"] } },
+        }),
+        "s.js": "",
+      },
+    ],
+  ])("%s", (ecosystem, tree) => {
+    const snapshot = new Map(Object.entries(tree))
+    const converted = convertPluginBundle(snapshot, "cognia", {
+      binaryPaths: new Set(snapshot.has(".env") ? [".env"] : []),
+    })
+    expect(converted.source).toBe(ecosystem)
+    const overlay = generatedFilesFrom(snapshot, converted.files)
+    for (const [path, contents] of Object.entries(overlay))
+      expect(isOverlayEntryAllowed(snapshot, path, contents)).toBe(true)
+    expect(Object.keys(overlay)).toEqual(expect.arrayContaining(["plugin.json", "dist/index.js"]))
+    // No raw credential survives anywhere in the installed tree.
+    const installed = new Map([...snapshot, ...Object.entries(overlay)])
+    expect([...installed.values()].join("\n")).not.toMatch(/literal-secret|secret-2/)
+    if (snapshot.has(".env")) expect(overlay[".env"]).toBe("\n")
   })
 })
 
