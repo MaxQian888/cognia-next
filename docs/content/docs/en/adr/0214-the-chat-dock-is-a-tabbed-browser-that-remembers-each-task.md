@@ -90,11 +90,19 @@ of tabs that includes pages with URLs.
 - Web pages default to local Chromium, localhost included, once it is installed. An empty pane
   outside the dock stays on the webview. Without Chromium the system webview serves the page
   and the New Tab page offers the install control. A page tab can switch to the lightweight
-  preview (system webview) from its menu or the address bar's engine chip. The lightweight
-  preview keeps element pick, annotations, Adjust, CDP controls and the inspection rail. Leaving
-  Chromium closes the tab's page. `browser_annotate` on a Chromium page moves the
-  conversation's page there and asks the model for a fresh snapshot (`browser_engine_switched`):
-  a Chromium snapshot's refs mean nothing in the webview.
+  preview (system webview) from its menu or the address bar's engine chip. Leaving Chromium
+  closes the tab's page. Only the lightweight preview has the developer (CDP) panel.
+- Element pick, annotations, Browser Adjust and the inspection rail work on Chromium pages too,
+  including the user's Chrome. The overlay that implements them is the one the webview runs, and
+  it was already injected into every Chromium page. What Chromium lacked was a way back: the
+  webview's sentinel navigation becomes a Playwright binding (`__cogniaSignal`) that the runtime
+  forwards as an `element.selected` event. The pick, drain, clear, selection-for-ref and Adjust
+  steps are runtime ops that each call one fixed overlay function with JSON arguments, never
+  caller JS. That is why they work where `browser.evaluate` does not (public origins, or after
+  the user has typed). Adjust's page code moved into the overlay (`__cogniaAdjust`), so both
+  engines run one implementation. `browser_annotate` reads a Chromium page's ref through the
+  same path. Only a cloud-browser page still moves to the lightweight preview first
+  (`browser_engine_switched`).
 
 ### Narrow windows
 
@@ -111,6 +119,7 @@ Tablet and mobile keep the Sheet and drawer. The card works there as a popover.
 - ADR-0201's table changes for localhost: React DevTools and other extensions now work on dev
   servers. The cost is one Chromium page per open page tab while visible, bounded by the
   runtime's 32-page cap and by closing background tasks' pages.
-- Localhost pages lose the embedded-only tools unless the user picks the lightweight preview.
+- Localhost pages keep pick, annotations and Adjust in Chromium. Only the developer (CDP) panel
+  needs the lightweight preview.
 - Line totals depend on the task-workspace ledger. Web sessions show file counts only.
 - The previously unwired `sourceCount` and `uncommittedChangeCount` dock badges are now wired.

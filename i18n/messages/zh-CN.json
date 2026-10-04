@@ -5495,7 +5495,7 @@
         "chromium": "Chromium",
         "lightweight": "轻量",
         "toChromium": "在 Chromium 中打开",
-        "toLightweight": "在轻量预览中打开（元素选取、批注、Adjust）"
+        "toLightweight": "在轻量预览中打开"
       },
       "failed": "本地浏览器无法启动：{code}",
       "newTab": "新标签页",

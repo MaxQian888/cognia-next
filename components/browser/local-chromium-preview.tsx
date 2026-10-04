@@ -29,6 +29,7 @@ import {
   ExternalLinkIcon,
   Loader2Icon,
   MonitorXIcon,
+  MousePointerSquareDashedIcon,
   PlusIcon,
   PuzzleIcon,
   SearchIcon,
@@ -60,10 +61,15 @@ import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
-import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
+import {
+  BrowserToolbar,
+  addressDisplayParts,
+  toolbarTier,
+} from "@/components/browser/browser-toolbar"
 import { BrowserToolsDock } from "@/components/browser/browser-tools-dock"
 import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
+import { BrowserInspectionRail } from "@/components/browser/browser-inspection-rail"
 import { BrowserExtensionsPanel } from "@/components/browser/extensions/browser-extensions-panel"
 import { LocalBrowserDialog } from "@/components/browser/local-browser-dialog"
 import { EngineRecorder } from "@/components/browser/remote-browser-preview"
@@ -75,6 +81,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
+import { useElementSelection } from "@/hooks/browser/use-element-selection"
+import { useElementWidth } from "@/hooks/use-element-width"
 import {
   useLocalBrowserSession,
   type LocalSessionState,
@@ -88,6 +96,10 @@ import type { LocalChromiumEngine, LocalEngineBackend } from "@/lib/browser/loca
 import type { BrowserPageSummary } from "@/lib/browser/session-types"
 import type { LocalBrowserDialog as LocalBrowserDialogState } from "@/lib/browser/shared-local-browser"
 import { canvasPointToFrame, decodeRemoteBrowserFrame } from "@/lib/browser/remote-stream"
+import type { BrowserAdjustDriver } from "@/lib/browser/adjust"
+import { BROWSER_DETAIL_STORAGE_KEY } from "@/lib/browser/preview-data"
+import type { OutputDetailLevel } from "@/lib/browser/protocol"
+import { localSelectionSource } from "@/lib/browser/selection-source"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
 
@@ -147,6 +159,17 @@ interface FrameCanvas {
   canvasRef: RefObject<HTMLCanvasElement | null>
   frameSizeRef: RefObject<{ width: number; height: number }>
   drawFrame: (bytes: Uint8Array) => void
+}
+
+const DETAIL_LEVELS: readonly OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
+
+/** The comment detail level the lightweight preview's selector last stored. */
+function storedDetailLevel(): OutputDetailLevel {
+  if (typeof window === "undefined") return "standard"
+  const stored = window.localStorage.getItem(BROWSER_DETAIL_STORAGE_KEY)
+  return DETAIL_LEVELS.includes(stored as OutputDetailLevel)
+    ? (stored as OutputDetailLevel)
+    : "standard"
 }
 
 /** The canvas the screencast is drawn into. */
@@ -301,6 +324,41 @@ function LocalPreviewBody({
   )
   const { recent: recentHistory, clear: clearRecentPages } = useRecentPages()
   const { sendScreenshotBytes, sendText } = useSelectionToChat()
+
+  // Element pick, annotations and Browser Adjust on the page in front (ADR-0214):
+  // the same overlay as the lightweight preview, reached through runtime ops.
+  const shownPageId = activePage?.id ?? null
+  const panelDetails = browserT("panel.details")
+  const panelCollapse = browserT("panel.collapse")
+  const selectionSource = useMemo(
+    () =>
+      engine && shownPageId
+        ? localSelectionSource(engine, shownPageId, {
+            details: panelDetails,
+            collapse: panelCollapse,
+          })
+        : undefined,
+    [engine, shownPageId, panelDetails, panelCollapse]
+  )
+  const { selection, selections, selectMode, setSelectMode, clearSelection } = useElementSelection({
+    source: selectionSource,
+    enabled: ready && !!selectionSource,
+  })
+  const adjustDriver = useMemo<BrowserAdjustDriver | undefined>(
+    () => (engine ? { run: (action, input) => engine.adjust(action, input) } : undefined),
+    [engine]
+  )
+  const clearPicks = useCallback(() => {
+    clearSelection()
+    void selectionSource?.clear().catch(() => undefined)
+  }, [clearSelection, selectionSource])
+  const railCapture = useCallback(
+    () => ({ capture: async () => (engine ? engine.screenshot() : null) }),
+    [engine]
+  )
+  const [detailLevel] = useState(storedDetailLevel)
+  const toolbarWidth = useElementWidth(toolbarRef)
+  const railPlacement = toolbarTier(toolbarWidth) === "compact" ? "bottom" : "side"
   const devtools = useBrowserDevtools({
     poll: useMemo(
       () =>
@@ -487,6 +545,15 @@ function LocalPreviewBody({
                 disabled={recentHistory.length === 0}
               />
               <TooltipIconButton
+                tooltip={selectMode ? actionsT("cancelSelect") : actionsT("selectElement")}
+                aria-label={selectMode ? actionsT("cancelSelect") : actionsT("selectElement")}
+                disabled={!ready || !selectionSource}
+                className={cn(selectMode && "bg-primary/15 text-primary")}
+                onClick={() => void setSelectMode(!selectMode).catch(fail)}
+              >
+                <MousePointerSquareDashedIcon />
+              </TooltipIconButton>
+              <TooltipIconButton
                 tooltip={actionsT("screenshot")}
                 aria-label={actionsT("screenshot")}
                 disabled={!ready || capturing}
@@ -630,110 +697,124 @@ function LocalPreviewBody({
         )}
         {sessionId && <BrowserSavePasswordPrompt sessionId={sessionId} />}
 
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
-          <canvas
-            ref={canvasRef}
-            tabIndex={0}
-            role="application"
-            aria-label={t("canvas")}
-            className="h-full w-full object-contain outline-none"
-            onPointerMove={(event) => {
-              if (!ready || moveInFlightRef.current) return
-              moveInFlightRef.current = true
-              void sendInput({
-                kind: "mouse",
-                payload: { type: "mouseMoved", ...pointerPayload(event) },
-              }).finally(() => {
-                moveInFlightRef.current = false
-              })
-            }}
-            onPointerDown={(event) => {
-              event.currentTarget.focus()
-              if (!ready) return
-              const rect = event.currentTarget.getBoundingClientRect()
-              const x = rect.width ? ((event.clientX - rect.left) / rect.width) * 100 : 0
-              const y = rect.height ? ((event.clientY - rect.top) / rect.height) * 100 : 0
-              setClickPointer((previous) => ({
-                x: Math.max(0, Math.min(100, x)),
-                y: Math.max(0, Math.min(100, y)),
-                key: (previous?.key ?? 0) + 1,
-              }))
-              void sendInput({
-                kind: "mouse",
-                payload: { type: "mousePressed", ...pointerPayload(event) },
-              })
-            }}
-            onPointerUp={(event) => {
-              if (!ready) return
-              void sendInput({
-                kind: "mouse",
-                payload: { type: "mouseReleased", ...pointerPayload(event) },
-              })
-            }}
-            onWheel={(event) => {
-              if (!ready) return
-              void sendInput({
-                kind: "mouse",
-                payload: {
-                  type: "mouseWheel",
-                  ...pointerPayload(event as unknown as PointerEvent<HTMLCanvasElement>),
-                  deltaX: event.deltaX,
-                  deltaY: event.deltaY,
-                },
-              })
-            }}
-            onKeyDown={(event) => {
-              if (isFindShortcut(event)) {
-                event.preventDefault()
-                setFindOpen(true)
-                return
-              }
-              sendKey(event, "keyDown")
-            }}
-            onKeyUp={(event) => sendKey(event, "keyUp")}
-          />
-          {clickPointer && (
-            <span
-              key={clickPointer.key}
-              className="pointer-events-none absolute size-5 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border-2 border-primary bg-primary/20"
-              style={{ left: `${clickPointer.x}%`, top: `${clickPointer.y}%` }}
-              aria-hidden
+        <div className={cn("flex min-h-0 flex-1", railPlacement === "bottom" && "flex-col")}>
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
+            <canvas
+              ref={canvasRef}
+              tabIndex={0}
+              role="application"
+              aria-label={t("canvas")}
+              className="h-full w-full object-contain outline-none"
+              onPointerMove={(event) => {
+                if (!ready || moveInFlightRef.current) return
+                moveInFlightRef.current = true
+                void sendInput({
+                  kind: "mouse",
+                  payload: { type: "mouseMoved", ...pointerPayload(event) },
+                }).finally(() => {
+                  moveInFlightRef.current = false
+                })
+              }}
+              onPointerDown={(event) => {
+                event.currentTarget.focus()
+                if (!ready) return
+                const rect = event.currentTarget.getBoundingClientRect()
+                const x = rect.width ? ((event.clientX - rect.left) / rect.width) * 100 : 0
+                const y = rect.height ? ((event.clientY - rect.top) / rect.height) * 100 : 0
+                setClickPointer((previous) => ({
+                  x: Math.max(0, Math.min(100, x)),
+                  y: Math.max(0, Math.min(100, y)),
+                  key: (previous?.key ?? 0) + 1,
+                }))
+                void sendInput({
+                  kind: "mouse",
+                  payload: { type: "mousePressed", ...pointerPayload(event) },
+                })
+              }}
+              onPointerUp={(event) => {
+                if (!ready) return
+                void sendInput({
+                  kind: "mouse",
+                  payload: { type: "mouseReleased", ...pointerPayload(event) },
+                })
+              }}
+              onWheel={(event) => {
+                if (!ready) return
+                void sendInput({
+                  kind: "mouse",
+                  payload: {
+                    type: "mouseWheel",
+                    ...pointerPayload(event as unknown as PointerEvent<HTMLCanvasElement>),
+                    deltaX: event.deltaX,
+                    deltaY: event.deltaY,
+                  },
+                })
+              }}
+              onKeyDown={(event) => {
+                if (isFindShortcut(event)) {
+                  event.preventDefault()
+                  setFindOpen(true)
+                  return
+                }
+                sendKey(event, "keyDown")
+              }}
+              onKeyUp={(event) => sendKey(event, "keyUp")}
             />
-          )}
-          {showEmpty && (
-            <div className="absolute inset-0 bg-background">
-              <BrowserEmptyState onOpen={(url) => void go(url)} recent={recentHistory} />
-            </div>
-          )}
-          {state === "starting" && (
-            <div
-              className="absolute inset-0 flex items-center justify-center gap-2 bg-background/80 p-6 text-center"
-              role="status"
-              aria-live="polite"
-            >
-              <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                {session.restoring ? t("restoring") : t("starting")}
-              </p>
-            </div>
-          )}
-          {(state === "failed" || state === "closed") && (
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center"
-              role="alert"
-            >
-              <MonitorXIcon className="size-6 text-muted-foreground" />
-              <p className="max-w-sm text-sm text-muted-foreground">
-                {state === "failed"
-                  ? t("failed", { code: session.error ?? "browser_local_unavailable" })
-                  : t("closed")}
-              </p>
-              <Button size="sm" variant="outline" onClick={session.restart}>
-                {t("restart")}
-              </Button>
-              {backendSwitcher && <div className="w-64 text-left">{backendSwitcher}</div>}
-            </div>
-          )}
+            {clickPointer && (
+              <span
+                key={clickPointer.key}
+                className="pointer-events-none absolute size-5 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border-2 border-primary bg-primary/20"
+                style={{ left: `${clickPointer.x}%`, top: `${clickPointer.y}%` }}
+                aria-hidden
+              />
+            )}
+            {showEmpty && (
+              <div className="absolute inset-0 bg-background">
+                <BrowserEmptyState onOpen={(url) => void go(url)} recent={recentHistory} />
+              </div>
+            )}
+            {state === "starting" && (
+              <div
+                className="absolute inset-0 flex items-center justify-center gap-2 bg-background/80 p-6 text-center"
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  {session.restoring ? t("restoring") : t("starting")}
+                </p>
+              </div>
+            )}
+            {(state === "failed" || state === "closed") && (
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center"
+                role="alert"
+              >
+                <MonitorXIcon className="size-6 text-muted-foreground" />
+                <p className="max-w-sm text-sm text-muted-foreground">
+                  {state === "failed"
+                    ? t("failed", { code: session.error ?? "browser_local_unavailable" })
+                    : t("closed")}
+                </p>
+                <Button size="sm" variant="outline" onClick={session.restart}>
+                  {t("restart")}
+                </Button>
+                {backendSwitcher && <div className="w-64 text-left">{backendSwitcher}</div>}
+              </div>
+            )}
+          </div>
+          <BrowserInspectionRail
+            selection={selection}
+            selections={selections}
+            onClearSelection={clearPicks}
+            pageUrl={activePage?.url ?? null}
+            sessionId={chatSessionId}
+            browserSessionId={sessionId ? `local:${sessionId}` : `browser:${chatSessionId ?? ""}`}
+            capture={railCapture}
+            detailLevel={detailLevel}
+            {...(adjustDriver ? { adjustDriver } : {})}
+            placement={railPlacement}
+          />
         </div>
 
         {engine && (

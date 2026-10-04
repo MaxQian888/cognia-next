@@ -47,7 +47,8 @@ description: "会话摘要不再是一列会挤掉产物右侧栏的侧栏，改
 - 每个会话的网页标签保存 `{ url, title, engine }`。`browser` 面板本身不再是一个标签：它负责渲染前台的网页标签，每个标签重新挂载一次；没有打开任何网页时的展示请求会落到新标签页。链接、`browser_open` 和外部桥接的 `revealPane` 都会变成网页标签。用户点击的链接会复用同一地址的标签；智能体复用它正在驱动的页面所在的标签；发给后台会话的请求只在那个会话里排好标签，不会抢占屏幕上的右侧栏。
 - 切走时关闭离开任务的页面；如果它的运行还在进行（流式输出或等待审批），页面保留，等运行结束且任务仍在后台时再关闭。切回来时，网页标签变为激活才按记住的地址重新创建页面。
 - 智能体路由和浏览器工具记住的“上一个网址”都按会话区分。智能体的第一个页面会填进该会话正在显示的标签。外部桥接客户端在第一次调用时绑定到当时屏幕上的会话。接管了智能体 user-chrome session 的面板在卸载时只断开，不再关闭它。
-- 安装后，网页（含 localhost）默认用本地 Chromium；右侧栏之外的空面板仍用 webview。没装时由系统 webview 打开，新标签页提供安装入口。网页标签可以从标签菜单或地址栏的引擎标识切到轻量预览（系统 webview），保留元素拾取、标注、Adjust、CDP 控制和检查侧栏；离开 Chromium 时会关闭该标签的页面。在 Chromium 页面上调用 `browser_annotate` 会把会话的页面切到轻量预览，并要求模型重新获取快照（`browser_engine_switched`）：Chromium 快照里的引用在 webview 中没有意义。
+- 安装后，网页（含 localhost）默认用本地 Chromium；右侧栏之外的空面板仍用 webview。没装时由系统 webview 打开，新标签页提供安装入口。网页标签可以从标签菜单或地址栏的引擎标识切到轻量预览（系统 webview）；离开 Chromium 时会关闭该标签的页面。只有轻量预览带开发者（CDP）面板。
+- 元素拾取、标注、Browser Adjust 和检查侧栏在 Chromium 页面（包括用户自己的 Chrome）上同样可用。实现它们的 overlay 与 webview 运行的是同一份，原本就注入了每个 Chromium 页面，缺的只是回传通道：webview 的哨兵导航换成 Playwright 绑定（`__cogniaSignal`），由运行时转发为 `element.selected` 事件。拾取开关、取回、清除、按引用取元素和 Adjust 都是运行时 op，各自只调用一个固定的 overlay 函数并传 JSON 参数，从不执行调用方的 JS，所以在 `browser.evaluate` 不可用的地方（公网来源、用户输入过之后）也能工作。Adjust 的页面代码移入 overlay（`__cogniaAdjust`），两个引擎共用一份实现。`browser_annotate` 通过同一路径读取 Chromium 页面的引用；只有云端浏览器的页面仍会先切到轻量预览（`browser_engine_switched`）。
 
 ### 窄窗口
 
@@ -59,6 +60,6 @@ description: "会话摘要不再是一列会挤掉产物右侧栏的侧栏，改
 
 - 聊天右侧栏不再遵守 ADR-0098 的“开关全局唯一”；Canvas、工作流编辑器和项目编辑器仍然遵守。
 - ADR-0201 中 localhost 的默认后端改变：React DevTools 等扩展在开发服务上可用。代价是每个可见的网页标签占一个 Chromium 页面，上限为运行时的 32 页；后台任务的页面会被关闭。
-- localhost 页面默认失去 webview 专属工具，需要时手动切到轻量预览。
+- localhost 页面在 Chromium 中仍可使用拾取、标注和 Adjust；只有开发者（CDP）面板需要切到轻量预览。
 - `+/−` 行数依赖 task-workspace 记录，网页版只显示文件数。
 - 之前没接上的 `sourceCount` 和 `uncommittedChangeCount` 角标现在接上了。

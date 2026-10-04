@@ -8,13 +8,10 @@ import {
   MonitorXIcon,
   MousePointerSquareDashedIcon,
   SearchIcon,
-  SendIcon,
-  XIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { useLiveQuery } from "dexie-react-hooks"
 
 import {
   BrowserAgentIndicator,
@@ -22,7 +19,7 @@ import {
 } from "@/components/browser/browser-agent-indicator"
 import { onBrowserUrlRequest } from "@/lib/browser/open-url-request"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
-import { BrowserAdjustControls } from "@/components/browser/browser-adjust-controls"
+import { BrowserInspectionRail } from "@/components/browser/browser-inspection-rail"
 import { BrowserCdpControls } from "@/components/browser/browser-cdp-controls"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
@@ -50,14 +47,9 @@ import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
 import { RemoteBrowserPreview } from "@/components/browser/remote-browser-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
-import { AnnotationIntentControls } from "@/components/annotations/annotation-intent-controls"
-import { AnnotationQueueList } from "@/components/annotations/annotation-queue-list"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useRecentPages } from "@/hooks/browser/use-recent-pages"
@@ -67,14 +59,6 @@ import { useElementSelection } from "@/hooks/browser/use-element-selection"
 import { useRegionVisibility } from "@/hooks/browser/use-region-visibility"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { browserClient } from "@/lib/browser/client"
-import {
-  deleteExpiredBrowserAnnotations,
-  listActionableBrowserAnnotations,
-  transitionBrowserAnnotation,
-  type BrowserAnnotationIntent,
-  type BrowserAnnotationSeverity,
-  type BrowserAnnotationStatus,
-} from "@/lib/db/browser-annotations"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
 import { BROWSER_DETAIL_STORAGE_KEY, BROWSER_ZOOM_STORAGE_KEY } from "@/lib/browser/preview-data"
 import {
@@ -93,8 +77,6 @@ import { isTauri } from "@/lib/tauri"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
-import { serializeBrowserAdjustmentFeedback } from "@/lib/browser/adjust"
-import type { BrowserAdjustmentFeedback } from "@/types/browser-developer"
 import { dockPageEngineFor } from "@/lib/artifacts/dock-pages"
 import type { DockPageEngine } from "@/stores/artifact/dock-tabs-store"
 import { useChatStore } from "@/stores/chat/chat-store"
@@ -194,10 +176,6 @@ export function BrowserPreviewPane({
   dockPage?: BrowserDockPage
 }) {
   const t = useTranslations("browser")
-  // The annotation vocabulary is shared with the artifact preview, so it lives
-  // in its own namespace rather than under `browser.*` — one of its own values
-  // ("Browser Adjust") is what makes the rest of that namespace browser-only.
-  const tAnnotations = useTranslations("annotations")
   const tCdp = useTranslations("browserCdp")
   const tLocal = useTranslations("browserLocal")
   const normalizedInitialUrl = initialUrl ? normalizePreviewUrl(initialUrl) : null
@@ -247,16 +225,7 @@ export function BrowserPreviewPane({
       nonce: (previous?.nonce ?? 0) + 1,
     }))
   }
-  const [comment, setComment] = useState("")
-  const [acceptedAdjustment, setAcceptedAdjustment] = useState<{
-    pageUrl: string
-    feedback: BrowserAdjustmentFeedback
-  } | null>(null)
-  const [sending, setSending] = useState(false)
   const [capturing, setCapturing] = useState(false)
-  const [annotationIntent, setAnnotationIntent] = useState<BrowserAnnotationIntent>("change")
-  const [annotationSeverity, setAnnotationSeverity] =
-    useState<BrowserAnnotationSeverity>("suggestion")
   const [detailLevel, setDetailLevel] = useState<OutputDetailLevel>(() => {
     if (typeof window === "undefined") return "standard"
     const stored = window.localStorage.getItem(BROWSER_DETAIL_STORAGE_KEY)
@@ -309,16 +278,6 @@ export function BrowserPreviewPane({
    * One derived id keeps writer and reader in agreement.
    */
   const effectiveSessionId = sessionId ?? activeChatSessionId ?? undefined
-  const annotationQueue =
-    useLiveQuery(
-      () =>
-        effectiveSessionId
-          ? listActionableBrowserAnnotations(effectiveSessionId)
-          : Promise.resolve([]),
-      [effectiveSessionId],
-      []
-    ) ?? []
-  const pendingAnnotations = annotationQueue.filter((annotation) => annotation.status === "pending")
 
   // The committed url mirrored into a ref so the rect callback (which fires on
   // every scroll/resize frame) can gate pane-rect publishing without being
@@ -468,9 +427,8 @@ export function BrowserPreviewPane({
   )
   const devtools = useBrowserDevtools({ paneId: "browser-embed", enabled: owned })
   const { selection, selections, navigated, selectMode, setSelectMode, clearSelection } =
-    useElementSelection({ driver: browserClient.embedSetSelectMode, enabled: owned })
-  const { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText } =
-    useSelectionToChat()
+    useElementSelection({ enabled: owned })
+  const { sendScreenshot, sendText } = useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
   const toolbarWidth = useElementWidth(toolbarRef)
 
@@ -492,9 +450,6 @@ export function BrowserPreviewPane({
       void browserClient.embedSetZoom(zoom).catch(() => {})
     }
   }, [owned, committedUrl, hasPainted, regionVisible, webviewReady, zoom])
-  useEffect(() => {
-    void deleteExpiredBrowserAnnotations(new Date().getTime())
-  }, [])
 
   // The in-page info panel (drawn by the injected overlay) can't reach next-intl,
   // so push its localized toggle labels down once the preview webview exists.
@@ -515,15 +470,6 @@ export function BrowserPreviewPane({
   useEffect(() => {
     if (embeddedUrl && onDockNavigated) onDockNavigated(embeddedUrl)
   }, [embeddedUrl, onDockNavigated])
-  const adjustmentFeedback =
-    acceptedAdjustment?.pageUrl === currentUrl ? acceptedAdjustment.feedback : null
-  const acceptAdjustment = useCallback(
-    (feedback: BrowserAdjustmentFeedback) => {
-      if (!currentUrl) return
-      setAcceptedAdjustment({ pageUrl: currentUrl, feedback })
-    },
-    [currentUrl]
-  )
 
   const tier = toolbarTier(toolbarWidth)
 
@@ -574,14 +520,6 @@ export function BrowserPreviewPane({
     setSyncedNavUrl(navigated.url)
     if (!editingUrl) setUrlInput(navigated.url)
   }
-
-  // The inspection rail (selection + annotation queue) slides in beside the
-  // reserved region. Keep it mounted through its slide-out so the exit
-  // animation can play, then unmount on animationEnd. Set-state-during-render
-  // (not an effect) — same "adjust state on prop change" pattern as syncedNavUrl.
-  const railWanted = !!selection || annotationQueue.length > 0
-  const [railRendered, setRailRendered] = useState(railWanted)
-  if (railWanted && !railRendered) setRailRendered(true)
 
   const commitAddress = useCallback(
     (next: string) => {
@@ -637,156 +575,13 @@ export function BrowserPreviewPane({
     [currentUrl]
   )
 
-  const cancelComment = useCallback(() => {
+  // The rail's picks live in the page too: clearing one clears both.
+  const clearPicks = useCallback(() => {
     clearSelection()
-    setComment("")
-    setAcceptedAdjustment(null)
     void browserClient.embedClearSelection().catch(() => {})
   }, [clearSelection])
-
-  const onQueue = useCallback(async () => {
-    if (!selection || (!comment.trim() && !adjustmentFeedback)) return
-    setSending(true)
-    try {
-      const baseUrl = new URL(currentUrl ?? selection.pageUrl).origin
-      const feedbackPayload = adjustmentFeedback
-        ? serializeBrowserAdjustmentFeedback(adjustmentFeedback)
-        : ""
-      const outgoingComment = [comment.trim(), feedbackPayload].filter(Boolean).join("\n\n")
-      const targets = selections.length > 0 ? selections : [selection]
-      const annotations = await Promise.all(
-        targets.map((target) =>
-          queueAnnotation(target, outgoingComment, {
-            sessionId: effectiveSessionId,
-            baseUrl,
-            intent: annotationIntent,
-            severity: annotationSeverity,
-          })
-        )
-      )
-      const saved = annotations.filter((item) => item != null)
-      if (saved.length > 0) {
-        setComment("")
-        setAcceptedAdjustment(null)
-        clearSelection()
-        void browserClient.embedClearSelection().catch(() => {})
-      } else {
-        toast.error(t("comment.noSession"))
-      }
-    } catch {
-      toast.error(t("comment.failed"))
-    } finally {
-      setSending(false)
-    }
-  }, [
-    selection,
-    selections,
-    comment,
-    currentUrl,
-    effectiveSessionId,
-    queueAnnotation,
-    clearSelection,
-    t,
-    annotationIntent,
-    annotationSeverity,
-    adjustmentFeedback,
-  ])
-
-  const onSend = useCallback(async () => {
-    if (!selection || (!comment.trim() && !adjustmentFeedback)) return
-    setSending(true)
-    try {
-      const feedbackPayload = adjustmentFeedback
-        ? serializeBrowserAdjustmentFeedback(adjustmentFeedback)
-        : ""
-      const outgoingComment = [comment.trim(), feedbackPayload].filter(Boolean).join("\n\n")
-      const ok = await sendComment(
-        selections.length > 0 ? selections : selection,
-        outgoingComment,
-        {
-          sessionId: effectiveSessionId,
-          captureRect: getRect() ?? undefined,
-          detailLevel,
-        }
-      )
-      if (ok) {
-        toast.success(t("comment.sent"))
-        setComment("")
-        setAcceptedAdjustment(null)
-        clearSelection()
-        void browserClient.embedClearSelection().catch(() => {})
-      } else {
-        toast.error(t("comment.noSession"))
-      }
-    } catch {
-      toast.error(t("comment.failed"))
-    } finally {
-      setSending(false)
-    }
-  }, [
-    selection,
-    selections,
-    comment,
-    effectiveSessionId,
-    getRect,
-    sendComment,
-    clearSelection,
-    t,
-    detailLevel,
-    adjustmentFeedback,
-  ])
-
-  const onSendQueue = useCallback(async () => {
-    setSending(true)
-    try {
-      const ok = await sendAnnotations(pendingAnnotations, {
-        sessionId: effectiveSessionId,
-        captureRect: getRect() ?? undefined,
-        detailLevel,
-      })
-      if (ok) {
-        toast.success(tAnnotations("sent", { count: pendingAnnotations.length }))
-      } else {
-        toast.error(t("comment.noSession"))
-      }
-    } catch {
-      toast.error(t("comment.failed"))
-    } finally {
-      setSending(false)
-    }
-  }, [
-    pendingAnnotations,
-    effectiveSessionId,
-    getRect,
-    sendAnnotations,
-    t,
-    tAnnotations,
-    detailLevel,
-  ])
-
-  const transitionQueuedAnnotation = useCallback(
-    async (id: string, status: BrowserAnnotationStatus) => {
-      try {
-        await transitionBrowserAnnotation(id, status, new Date().getTime(), "human")
-      } catch {
-        toast.error(t("comment.failed"))
-      }
-    },
-    [t]
-  )
-
-  const onCommentKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Escape") {
-        e.preventDefault()
-        cancelComment()
-      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        void onSend()
-      }
-    },
-    [cancelComment, onSend]
-  )
+  // The embedded capture reads the reserved region at send time.
+  const railCapture = useCallback(() => ({ captureRect: getRect() ?? undefined }), [getRect])
 
   const onScreenshot = useCallback(async () => {
     const rect = getRect()
@@ -1214,119 +1009,19 @@ export function BrowserPreviewPane({
             <BrowserEmptyState onOpen={openQuickUrl} recent={recentHistory} />
           )}
         </div>
-        {railRendered && (
-          <aside
-            data-testid="browser-inspection-rail"
-            data-state={railWanted ? "open" : "closed"}
-            role="region"
-            aria-label={t("rail.label")}
-            onAnimationEnd={(e) => {
-              if (e.target === e.currentTarget && !railWanted) setRailRendered(false)
-            }}
-            className={cn(
-              "flex shrink-0 flex-col overflow-hidden bg-background duration-200",
-              "data-[state=open]:animate-in data-[state=open]:fade-in",
-              "data-[state=closed]:animate-out data-[state=closed]:fade-out",
-              tier === "compact"
-                ? [
-                    "h-1/2 border-t",
-                    "data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom",
-                  ]
-                : [
-                    "w-80 border-l",
-                    "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
-                  ]
-            )}
-          >
-            <ScrollArea className="min-h-0 flex-1">
-              {selection && (
-                <div className="bg-background p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
-                        {selection.tagName.toLowerCase()}
-                      </Badge>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        {selection.componentName
-                          ? `<${selection.componentName}>`
-                          : selection.selector}
-                      </p>
-                    </div>
-                    <TooltipIconButton
-                      tooltip={t("comment.cancel")}
-                      aria-label={t("comment.cancel")}
-                      size="icon-xs"
-                      onClick={cancelComment}
-                    >
-                      <XIcon />
-                    </TooltipIconButton>
-                  </div>
-                  <Textarea
-                    autoFocus
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    onKeyDown={onCommentKeyDown}
-                    placeholder={t("comment.placeholder")}
-                    aria-label={t("comment.title")}
-                    rows={2}
-                    className="resize-none text-sm"
-                  />
-                  {/* The Esc / Ctrl+Enter bindings in `onCommentKeyDown` have
-                      always worked; nothing ever told the user about them. */}
-                  <p className="mt-1 text-[11px] text-muted-foreground">{t("comment.hint")}</p>
-                  {currentUrl && effectiveSessionId && (
-                    <BrowserAdjustControls
-                      sessionId={effectiveSessionId}
-                      browserSessionId={ownerId ?? `browser:${effectiveSessionId}`}
-                      pageUrl={currentUrl}
-                      selector={selection.selector}
-                      onAccept={acceptAdjustment}
-                    />
-                  )}
-                  {adjustmentFeedback && (
-                    <p className="mt-1 text-xs text-muted-foreground">{t("adjust.accepted")}</p>
-                  )}
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <AnnotationIntentControls
-                      intent={annotationIntent}
-                      onIntentChange={setAnnotationIntent}
-                      severity={annotationSeverity}
-                      onSeverityChange={setAnnotationSeverity}
-                    />
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={sending || (!comment.trim() && !adjustmentFeedback)}
-                        onClick={() => void onQueue()}
-                      >
-                        {tAnnotations("add")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        disabled={sending || (!comment.trim() && !adjustmentFeedback)}
-                        onClick={() => void onSend()}
-                      >
-                        <SendIcon className="size-3.5" />
-                        {t("comment.send")}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {annotationQueue.length > 0 && (
-                <AnnotationQueueList
-                  annotations={annotationQueue}
-                  pendingCount={pendingAnnotations.length}
-                  busy={sending}
-                  onSend={() => void onSendQueue()}
-                  onTransition={(id, status) => void transitionQueuedAnnotation(id, status)}
-                />
-              )}
-            </ScrollArea>
-          </aside>
-        )}
+        {/* The inspection rail (selection + annotation queue) slides in beside
+            the reserved region, or below it when the toolbar is compact. */}
+        <BrowserInspectionRail
+          selection={selection}
+          selections={selections}
+          onClearSelection={clearPicks}
+          pageUrl={currentUrl}
+          sessionId={effectiveSessionId}
+          browserSessionId={ownerId ?? `browser:${effectiveSessionId}`}
+          capture={railCapture}
+          detailLevel={detailLevel}
+          placement={tier === "compact" ? "bottom" : "side"}
+        />
       </div>
 
       {/* One collapsed strip for the recorder, the ADR-0127 console / network

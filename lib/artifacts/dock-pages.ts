@@ -250,6 +250,15 @@ export async function releaseDockPages(sessionId: string): Promise<void> {
   await releaseOwner(owner)
 }
 
+/**
+ * An address a tab may remember and reopen. Not `about:blank` (a page before
+ * it loads) and not Chromium's own `chrome-error://` page: reopening either
+ * restores nothing the user asked for.
+ */
+function rememberableUrl(url: string): boolean {
+  return /^(https?|file):/i.test(url)
+}
+
 /** A title worth showing; the runtime reports "" while a page loads. */
 function pageTitle(title: string, url: string): string {
   return title || (url === "about:blank" ? "" : url)
@@ -259,8 +268,9 @@ function pageTitle(title: string, url: string): string {
  * Mirror the runtime's pages into the conversations' page tabs:
  *
  * - a page a conversation's agent or one of its pages opened gets a tab;
- * - a tab follows its page's address and title (a fresh page is `about:blank`
- *   until it loads, which never overwrites the address the tab remembers);
+ * - a tab follows its page's address and title, but only to an address worth
+ *   reopening (a fresh page's `about:blank` or an error page never overwrites
+ *   the address the tab remembers);
  * - a page that closed by itself takes its tab with it, unless it was closed
  *   on purpose (`released`) or the whole session went away;
  * - the tab on screen follows the page the conversation's agent moved to.
@@ -307,7 +317,7 @@ export function startDockPageSync(): () => void {
       }
       const tab = selectPageTabs(tabs(), sessionId).find((existing) => existing.id === entry.tag)
       if (!tab) continue
-      if (page.url && page.url !== "about:blank") {
+      if (rememberableUrl(page.url)) {
         tabs().updatePageTab(sessionId, tab.id, {
           url: page.url,
           title: pageTitle(page.title, page.url),

@@ -215,6 +215,17 @@ interface SelectionForRefResult {
   selection: BrowserSelection | null
 }
 
+/**
+ * Chromium engines name the element behind a snapshot ref through a dedicated
+ * runtime op (ADR-0214); the plugin-facing engine type does not list it.
+ */
+interface SelectionForRefEngine {
+  selectionForRef(ref: string): Promise<unknown>
+}
+
+/** Backends whose engine has {@link SelectionForRefEngine.selectionForRef}. */
+const LOCAL_ANNOTATE_BACKENDS: ReadonlySet<string> = new Set(["local-chromium", "user-chrome"])
+
 function parseSelectionForRef(value: unknown): SelectionForRefResult {
   try {
     const parsed = typeof value === "string" ? JSON.parse(value) : value
@@ -447,11 +458,12 @@ const definition = definePlugin({
       if (!sessionId) return { ok: false, error: "No active chat session" }
 
       const route = await currentRoute(callCtx)
-      // Annotations live in the lightweight preview: its element picker, the
-      // inspection rail and the queue they land in. A ref from a Chromium
-      // snapshot means nothing there, so the page moves over and the model
-      // takes a fresh snapshot rather than having its ref silently re-mapped.
-      if ((route.backend ?? "embedded") !== "embedded") {
+      const backend = route.backend ?? "embedded"
+      // Local Chromium and the user's Chrome read a ref's element through a
+      // runtime op (ADR-0214). Only the cloud browser has no way to, so its
+      // page moves to the lightweight preview and the model takes a fresh
+      // snapshot rather than having its ref silently re-mapped.
+      if (backend !== "embedded" && !LOCAL_ANNOTATE_BACKENDS.has(backend)) {
         const page = await route.engine.getPage().catch(() => null)
         const pageUrl = page?.url || lastUrlFor(callCtx) || ""
         backendChoices.set(sessionId, "embedded")
@@ -466,18 +478,29 @@ const definition = definePlugin({
           backend: "embedded",
           paneShown,
           error:
-            "browser_annotate works in the lightweight preview, and this page was open in Chromium. It is now open in the lightweight preview: call browser_snapshot for fresh refs, then call browser_annotate again.",
+            "browser_annotate cannot read elements in the cloud browser, so this page is now open in the lightweight preview: call browser_snapshot for fresh refs, then call browser_annotate again.",
         }
       }
       const { engine, untrusted } = route
       if (untrusted) {
         return { ok: false, error: "browser_annotate is disabled on public origins" }
       }
-      const evaluated = await engine.evaluate(
-        `window.__cogniaSelectionForRef(${JSON.stringify(ref)})`
-      )
-      if (!evaluated.ok) return { ok: false, error: evaluated.error ?? "Could not resolve ref" }
-      const resolved = parseSelectionForRef(evaluated.value)
+      let resolved: SelectionForRefResult
+      if (backend === "embedded") {
+        const evaluated = await engine.evaluate(
+          `window.__cogniaSelectionForRef(${JSON.stringify(ref)})`
+        )
+        if (!evaluated.ok) return { ok: false, error: evaluated.error ?? "Could not resolve ref" }
+        resolved = parseSelectionForRef(evaluated.value)
+      } else {
+        try {
+          resolved = parseSelectionForRef(
+            await (engine as unknown as SelectionForRefEngine).selectionForRef(ref)
+          )
+        } catch (error) {
+          return toolFailure(error)
+        }
+      }
       if (!resolved.ok || !resolved.selection) return { ok: false, error: resolved.error }
 
       let baseUrl: string

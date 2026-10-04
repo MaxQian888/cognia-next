@@ -192,6 +192,11 @@ const PAGE_ADDRESSABLE_OPS = new Set([
   "browser.set-zoom",
   "browser.find",
   "browser.find.clear",
+  "browser.select-mode",
+  "browser.selection.drain",
+  "browser.selection.clear",
+  "browser.selection.for-ref",
+  "browser.adjust",
   "browser.input",
   "browser.cancel",
   "browser.forms.detect-login",
@@ -278,6 +283,12 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.set-zoom": ({ sessionId, zoom }) => browser.setZoom(sessionId, zoom),
     "browser.find": ({ sessionId, query, options }) => browser.find(sessionId, query, options),
     "browser.find.clear": ({ sessionId }) => browser.findClear(sessionId),
+    "browser.select-mode": ({ sessionId, on, labels }) =>
+      browser.setSelectMode(sessionId, on, labels),
+    "browser.selection.drain": ({ sessionId }) => browser.drainSelection(sessionId),
+    "browser.selection.clear": ({ sessionId }) => browser.clearSelection(sessionId),
+    "browser.selection.for-ref": ({ sessionId, ref }) => browser.selectionForRef(sessionId, ref),
+    "browser.adjust": ({ sessionId, action, input }) => browser.adjust(sessionId, action, input),
     "browser.screencast.start": async ({ sessionId, quality }) => {
       await browser.startScreencast(sessionId, (frame) => media.publish(sessionId, frame), {
         quality,

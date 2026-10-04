@@ -3,6 +3,21 @@
 // be self-contained: no closures over module scope.
 
 export const CREDENTIAL_BINDING = "__cogniaCredentialSubmitted"
+
+/**
+ * Runs before the injected overlay in every Chromium page. The overlay was
+ * written for the system webview, which it reports to by navigating to
+ * `https://cognia.invalid/...` sentinel URLs that Rust intercepts: load
+ * complete, SPA navigations, and console / network / DOM-change pushes. Nothing
+ * intercepts those in Chromium, so each report navigated the page to an error
+ * page. The runtime already learns all of it from Playwright, so the overlay's
+ * report hooks are no-ops here. (Element picks report through the
+ * `__cogniaSignal` binding instead.)
+ */
+export const OVERLAY_TRANSPORT_SCRIPT =
+  "window.__cogniaSignalNav=function(){};" +
+  "window.__cogniaSignalLoaded=function(){};" +
+  "window.__cogniaSignalPush=function(){};"
 export const LOGIN_REGISTRY_KEY = "cognia.loginRegistry"
 
 /**

@@ -93,7 +93,7 @@
     "engineChip": {
       "chromium": "Chromium",
       "lightweight": "Lightweight",
-      "toLightweight": "Open in lightweight preview (element pick, annotations, Adjust)",
+      "toLightweight": "Open in lightweight preview",
       "toChromium": "Open in Chromium"
     }
   },

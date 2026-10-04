@@ -15,7 +15,15 @@ jest.mock("@/hooks/browser/use-local-file-chooser", () => ({
   useLocalFileChooser: jest.fn(),
 }))
 jest.mock("@/lib/browser/local-client", () => ({
-  localBrowser: { rpc: jest.fn() },
+  localBrowser: { rpc: jest.fn(), onEvent: jest.fn(async () => () => undefined) },
+}))
+// The rail is tested on its own and reaches Dexie; record what the pane hands it.
+let mockRailProps: Record<string, unknown> | null = null
+jest.mock("@/components/browser/browser-inspection-rail", () => ({
+  BrowserInspectionRail: (props: Record<string, unknown>) => {
+    mockRailProps = props
+    return <div data-testid="inspection-rail" />
+  },
 }))
 jest.mock("@/components/browser/browser-address", () => ({
   resolveBrowserAddress: jest.fn(),
@@ -125,6 +133,11 @@ function makeEngine() {
     findClear: jest.fn().mockResolvedValue(undefined),
     readConsole: jest.fn().mockResolvedValue([]),
     readNetwork: jest.fn().mockResolvedValue([]),
+    sessionId: "pane-1",
+    setSelectMode: jest.fn().mockResolvedValue(undefined),
+    drainSelection: jest.fn().mockResolvedValue([]),
+    clearSelection: jest.fn().mockResolvedValue(undefined),
+    adjust: jest.fn().mockResolvedValue('{"ok":true}'),
   }
 }
 
@@ -417,4 +430,50 @@ it("offers the empty state on a blank tab", async () => {
   const engine = session.engine as unknown as ReturnType<typeof makeEngine>
   expect(engine.navigate).toHaveBeenCalledWith("http://localhost:5173/")
   expect(screen.queryByTestId("autofill")).toBeNull()
+})
+
+describe("element pick, annotations and Adjust (ADR-0214)", () => {
+  it("arms the picker on the page in front, with the panel's labels", async () => {
+    const session = makeSession()
+    renderPreview(session)
+    const engine = session.engine as unknown as ReturnType<typeof makeEngine>
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Select element" }))
+    })
+    expect(engine.setSelectMode).toHaveBeenCalledWith(true, {
+      details: expect.any(String),
+      collapse: expect.any(String),
+    })
+    const cancel = screen.getByRole("button", { name: "Cancel selection" })
+    await act(async () => {
+      fireEvent.click(cancel)
+    })
+    expect(engine.setSelectMode).toHaveBeenLastCalledWith(false, undefined)
+  })
+
+  it("gives the rail this page, this chat and this engine for screenshots and Adjust", async () => {
+    const session = makeSession()
+    renderPreview(session)
+    const engine = session.engine as unknown as ReturnType<typeof makeEngine>
+    expect(screen.getByTestId("inspection-rail")).toBeInTheDocument()
+    const props = mockRailProps as {
+      pageUrl: string
+      sessionId: string
+      capture: () => { capture: () => Promise<unknown> }
+      adjustDriver: { run: (action: string, input: unknown) => Promise<string> }
+      onClearSelection: () => void
+    }
+    expect(props.pageUrl).toBe("https://example.com/")
+    expect(props.sessionId).toBe("chat-1")
+    await expect(props.capture().capture()).resolves.toEqual({ bytes: "AAAA" })
+    await props.adjustDriver.run("revert", { previewId: "x" })
+    expect(engine.adjust).toHaveBeenCalledWith("revert", { previewId: "x" })
+    act(() => props.onClearSelection())
+    expect(engine.clearSelection).toHaveBeenCalled()
+  })
+
+  it("keeps the picker off until the session is ready", () => {
+    renderPreview(makeSession({ state: "starting" }))
+    expect(screen.getByRole("button", { name: "Select element" })).toBeDisabled()
+  })
 })

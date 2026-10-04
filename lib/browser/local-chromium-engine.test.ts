@@ -417,3 +417,64 @@ describe("toLocalBrowserError", () => {
     expect(toLocalBrowserError("plain text")).toMatchObject({ message: "plain text" })
   })
 })
+
+describe("element pick and Browser Adjust (ADR-0214)", () => {
+  const pick = {
+    paneId: "local:p2",
+    selector: "#go",
+    domPath: "body > button#go",
+    tagName: "button",
+    id: "go",
+    classes: null,
+    rect: { x: 1, y: 2, width: 3, height: 4 },
+    outerHTML: '<button id="go">go</button>',
+    text: "go",
+    pageUrl: "https://example.com/",
+    pageTitle: "Example",
+  }
+
+  it("addresses its page and maps each step onto a dedicated op", async () => {
+    const e = new LocalChromiumEngine("s1", "local-chromium", { pageId: "p2" })
+    mockRpc.mockImplementation(async (op: string) =>
+      op === "browser.selection.drain"
+        ? { ok: true, selections: [pick] }
+        : op === "browser.adjust"
+          ? { ok: true, result: '{"ok":true}' }
+          : { ok: true }
+    )
+    await e.setSelectMode(true, { details: "Details", collapse: "Hide" })
+    await e.setSelectMode(false)
+    await expect(e.drainSelection()).resolves.toEqual([pick])
+    await e.clearSelection()
+    await e.selectionForRef("r1")
+    await expect(e.adjust("revert", { previewId: "x" })).resolves.toBe('{"ok":true}')
+    expect(mockRpc.mock.calls).toEqual([
+      [
+        "browser.select-mode",
+        {
+          sessionId: "s1",
+          pageId: "p2",
+          on: true,
+          labels: { details: "Details", collapse: "Hide" },
+        },
+      ],
+      ["browser.select-mode", { sessionId: "s1", pageId: "p2", on: false }],
+      ["browser.selection.drain", { sessionId: "s1", pageId: "p2" }],
+      ["browser.selection.clear", { sessionId: "s1", pageId: "p2" }],
+      ["browser.selection.for-ref", { sessionId: "s1", pageId: "p2", ref: "r1" }],
+      [
+        "browser.adjust",
+        { sessionId: "s1", pageId: "p2", action: "revert", input: { previewId: "x" } },
+      ],
+    ])
+  })
+
+  it("refuses a drain whose picks are not selections", async () => {
+    mockRpc.mockResolvedValueOnce({ ok: true, selections: [{ selector: "#go" }] })
+    await expect(engine().drainSelection()).rejects.toThrow("invalid selection drain payload")
+    mockRpc.mockResolvedValueOnce({ ok: true, selections: Array.from({ length: 21 }, () => pick) })
+    await expect(engine().drainSelection()).rejects.toThrow("invalid selection drain payload")
+    mockRpc.mockResolvedValueOnce({ ok: true })
+    await expect(engine().adjust("preview", {})).rejects.toThrow("Browser adjustment failed")
+  })
+})

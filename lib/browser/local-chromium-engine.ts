@@ -13,7 +13,10 @@ import type { Screenshot } from "@/lib/automation/types"
 import { emitAgentActivity } from "@/lib/browser/agent-activity"
 import { saveDownloadAs } from "@/lib/browser/downloads-client"
 import { listExtensions, type BrowserExtension } from "@/lib/browser/extensions-client"
+import { isBrowserSelection } from "@/lib/browser/client"
 import { localBrowser } from "@/lib/browser/local-client"
+import type { BrowserSelection } from "@/lib/browser/protocol"
+import type { BrowserAdjustAction } from "@/lib/browser/adjust"
 import { fillCredential } from "@/lib/browser/passwords"
 import {
   credentialFilledEvaluateRefusal,
@@ -135,6 +138,19 @@ function userChromeOnly(feature: string): BrowserSessionError {
     "browser_feature_unsupported",
     `${feature} is not available when attached to your own Chrome: it uses Chrome's own extensions and profile.`
   )
+}
+
+/** The picker's info-panel toggle labels, localized by the pane. */
+export interface SelectionPanelLabels {
+  details: string
+  collapse: string
+}
+
+/** `selectionForRef`'s answer: the overlay's envelope, stamped with the pane. */
+export interface SelectionForRefResult {
+  ok: boolean
+  error: string | null
+  selection: unknown
 }
 
 export interface LocalEngineOptions {
@@ -310,6 +326,42 @@ export class LocalChromiumEngine implements BrowserEngine {
   }
   findClear(): Promise<void> {
     return this.op("browser.find.clear")
+  }
+
+  // ── Element pick and Browser Adjust (ADR-0214) ───────────────────────────
+  // The lightweight preview's picker, run by the same injected overlay. Each
+  // op calls one fixed overlay function, so none of them is `evaluate`.
+
+  /** Arm or disarm the in-page picker; `labels` localizes its info panel. */
+  async setSelectMode(on: boolean, labels?: SelectionPanelLabels): Promise<void> {
+    await this.op("browser.select-mode", { on, ...(labels ? { labels } : {}) })
+  }
+  /** The picks buffered since the last drain (the overlay empties its buffer). */
+  async drainSelection(): Promise<BrowserSelection[]> {
+    const result = await this.op<{ ok?: unknown; selections?: unknown }>("browser.selection.drain")
+    const selections = result?.selections
+    if (
+      !Array.isArray(selections) ||
+      selections.length > 20 ||
+      !selections.every(isBrowserSelection)
+    ) {
+      throw new Error("invalid selection drain payload")
+    }
+    return selections
+  }
+  /** Drop the picks and the in-page info panel. */
+  async clearSelection(): Promise<void> {
+    await this.op("browser.selection.clear")
+  }
+  /** The pick payload for a snapshot ref (`browser_annotate`). */
+  selectionForRef(ref: string): Promise<SelectionForRefResult> {
+    return this.op("browser.selection.for-ref", { ref })
+  }
+  /** Runs the overlay's `__cogniaAdjust`; resolves its JSON answer (a {@link BrowserAdjustDriver}). */
+  async adjust(action: BrowserAdjustAction, input: Record<string, unknown>): Promise<string> {
+    const answer = await this.op<{ result?: unknown }>("browser.adjust", { action, input })
+    if (typeof answer?.result !== "string") throw new Error("Browser adjustment failed")
+    return answer.result
   }
 
   // ── ADR-0201 local-only surface ──────────────────────────────────────────

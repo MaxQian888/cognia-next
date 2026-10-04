@@ -5495,7 +5495,7 @@
         "chromium": "Chromium",
         "lightweight": "Lightweight",
         "toChromium": "Open in Chromium",
-        "toLightweight": "Open in lightweight preview (element pick, annotations, Adjust)"
+        "toLightweight": "Open in lightweight preview"
       },
       "failed": "The local browser could not start: {code}",
       "newTab": "New tab",

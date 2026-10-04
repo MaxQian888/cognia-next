@@ -13,7 +13,12 @@ import {
   isLoopbackOrigin,
 } from "./browser-service.mjs"
 import { WorkspaceFileBridge } from "./file-bridge.mjs"
-import { CREDENTIAL_BINDING, CREDENTIAL_CAPTURE_SCRIPT } from "./page-scripts.mjs"
+import {
+  CREDENTIAL_BINDING,
+  CREDENTIAL_CAPTURE_SCRIPT,
+  OVERLAY_TRANSPORT_SCRIPT,
+} from "./page-scripts.mjs"
+import { SELECTION_SIGNAL_BINDING } from "./element-selection.mjs"
 
 let targetSeq = 0
 
@@ -101,6 +106,7 @@ class FakePage extends EventEmitter {
     this.viewport = { width: 1280, height: 720 }
     this.media = []
     this._opener = null
+    this.bindings = new Map()
   }
   url() {
     return this._url
@@ -118,6 +124,9 @@ class FakePage extends EventEmitter {
   }
   async addInitScript(script) {
     this.initScripts.push(script)
+  }
+  async exposeBinding(name, callback) {
+    this.bindings.set(name, callback)
   }
   async bringToFront() {}
   async close() {
@@ -446,7 +455,9 @@ test("launches local Chromium on the persistent profile with extensions and stag
     downloadsPath: path.join(root, ".download-staging"),
     viewport: { width: 1024, height: 768 },
   })
+  // The overlay's sentinel report hooks are stubbed out before it runs.
   assert.deepEqual(launch.context.initScripts, [
+    OVERLAY_TRANSPORT_SCRIPT,
     "window.__overlay = true",
     CREDENTIAL_CAPTURE_SCRIPT,
   ])
@@ -1376,7 +1387,9 @@ test("user-chrome attaches over CDP, opens agent tabs in a new window, and final
   assert.deepEqual(connection.context.initScripts, [])
   assert.equal(connection.context.bindings.size, 0)
   const agentTab = connection.context._pages[2]
-  assert.deepEqual(agentTab.initScripts, ["window.__overlay = true"])
+  assert.deepEqual(agentTab.initScripts, [OVERLAY_TRANSPORT_SCRIPT, "window.__overlay = true"])
+  // The pick signal is bound on that tab alone (ADR-0214).
+  assert.deepEqual([...agentTab.bindings.keys()], [SELECTION_SIGNAL_BINDING])
 
   const second = await service.createPage("uc", "https://news.example.com/")
   assert.equal(second.url, "https://news.example.com/")
@@ -1489,5 +1502,136 @@ test("finalize is refused for launched local Chromium", async (t) => {
   await assert.rejects(
     () => service.finalizeTabs("s1"),
     (error) => error.code === "browser_feature_unsupported"
+  )
+})
+
+// ---- Element pick and Browser Adjust (ADR-0214) ------------------------------
+
+test("the overlay's pick signal becomes an element.selected event for that page", async (t) => {
+  const { service, chromium, events } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const context = chromium.launches[0].context
+  const page = context._pages[0]
+  const signal = context.bindings.get(SELECTION_SIGNAL_BINDING)
+  assert.equal(typeof signal, "function")
+
+  signal({ frame: page.mainFrame, page }, { count: 2, generation: 3 })
+  // A child frame, a page the session does not hold and nonsense counts are dropped.
+  signal({ frame: { url: () => "https://ads.example/" }, page }, { count: 1, generation: 4 })
+  signal({ frame: page.mainFrame, page: new FakePage(context) }, { count: 1, generation: 5 })
+  signal({ frame: page.mainFrame, page }, { count: 21, generation: 6 })
+  signal({ frame: page.mainFrame, page }, { count: 1, generation: 0 })
+  signal({ frame: page.mainFrame, page }, { count: "1", generation: "x" })
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "element.selected"),
+    [
+      {
+        kind: "browser.event",
+        type: "element.selected",
+        sessionId: "s1",
+        pageId: pageIdOf(service, "s1", page),
+        count: 2,
+        generation: 1,
+      },
+    ]
+  )
+  // A reload restarts the page's counter; the forwarded one keeps growing.
+  signal({ frame: page.mainFrame, page }, { count: 1, generation: 1 })
+  assert.equal(events.filter((event) => event.type === "element.selected").at(-1).generation, 2)
+})
+
+test("pick ops call the overlay directly, after keyboard input and on public origins", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const page = chromium.launches[0].context._pages[0]
+  await page.goto("https://news.example.com/")
+  // The gate that stops `evaluate` must not stop the user's own picker.
+  service.sessions.get("s1").humanKeyboardInputOccurred = true
+  const calls = []
+  page.evaluate = async (fn, argument) => {
+    const source = String(fn)
+    calls.push([source.match(/__cognia\w+/)?.[0], argument])
+    if (source.includes("__cogniaSetSelectMode")) return true
+    if (source.includes("__cogniaGetSelection")) {
+      return JSON.stringify({ ok: true, error: null, selections: [{ selector: "#a" }] })
+    }
+    return undefined
+  }
+  const pageId = pageIdOf(service, "s1", page)
+
+  assert.deepEqual(
+    await service.setSelectMode("s1", true, { details: "Details", collapse: "Hide", extra: 1 }),
+    { ok: true, on: true }
+  )
+  assert.deepEqual(calls[0][1], {
+    on: true,
+    labels: JSON.stringify({ details: "Details", collapse: "Hide" }),
+  })
+  assert.deepEqual(await service.drainSelection("s1"), {
+    ok: true,
+    selections: [{ selector: "#a", paneId: `local:${pageId}` }],
+  })
+  assert.deepEqual(await service.clearSelection("s1"), { ok: true })
+  assert.equal(calls.length, 3)
+})
+
+test("a page that answers nonsense, or has no overlay, fails the pick op", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const page = chromium.launches[0].context._pages[0]
+  // FakePage.evaluate answers null: the overlay is not there (yet).
+  await assert.rejects(
+    () => service.setSelectMode("s1", true),
+    (error) => error.code === "browser_feature_unsupported"
+  )
+  await assert.rejects(
+    () => service.drainSelection("s1"),
+    (error) => error.code === "browser_feature_unsupported"
+  )
+  page.evaluate = async () =>
+    JSON.stringify({ ok: true, selections: Array.from({ length: 21 }, () => ({})) })
+  await assert.rejects(
+    () => service.drainSelection("s1"),
+    (error) => error.code === "browser_selection_invalid" && /item limit/.test(error.message)
+  )
+  page.evaluate = async () => "<html>"
+  await assert.rejects(
+    () => service.drainSelection("s1"),
+    (error) => error.code === "browser_selection_invalid"
+  )
+})
+
+test("adjust hands the overlay checked JSON and passes its JSON answer back", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "s1" })
+  const page = chromium.launches[0].context._pages[0]
+  const seen = []
+  page.evaluate = async (_fn, argument) => {
+    seen.push(argument)
+    return JSON.stringify({ ok: true, error: null, changes: [] })
+  }
+  const answer = await service.adjust("s1", "preview", {
+    previewId: "p1",
+    selector: "#title",
+    draft: { color: "red", ignored: "x" },
+  })
+  assert.deepEqual(answer, {
+    ok: true,
+    result: JSON.stringify({ ok: true, error: null, changes: [] }),
+  })
+  assert.deepEqual(seen[0], {
+    action: "preview",
+    json: JSON.stringify({ previewId: "p1", selector: "#title", draft: { color: "red" } }),
+  })
+  await service.adjust("s1", "revert", { previewId: "p1", selector: "ignored" })
+  assert.deepEqual(seen[1], { action: "revert", json: JSON.stringify({ previewId: "p1" }) })
+  await assert.rejects(
+    () => service.adjust("s1", "eval", { previewId: "p1" }),
+    (error) => error.code === "browser_option_invalid"
+  )
+  await assert.rejects(
+    () => service.adjust("s1", "preview", { previewId: "p1", selector: "" }),
+    (error) => error.code === "browser_option_invalid"
   )
 })

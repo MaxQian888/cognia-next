@@ -6,6 +6,7 @@ import {
   CREDENTIAL_BINDING,
   CREDENTIAL_CAPTURE_SCRIPT,
   LOGIN_REGISTRY_KEY,
+  OVERLAY_TRANSPORT_SCRIPT,
   clearStorageInPage,
   detectLoginFormsInPage,
   readStorageInPage,
@@ -242,4 +243,15 @@ test("storage helpers read, write and clear the requested area", () => {
       assert.equal(sessionStorage.length, 1)
     }
   )
+})
+
+test("the overlay transport script turns every sentinel report hook into a no-op", () => {
+  const window = {}
+  new Function("window", OVERLAY_TRANSPORT_SCRIPT)(window)
+  for (const hook of ["__cogniaSignalNav", "__cogniaSignalLoaded", "__cogniaSignalPush"]) {
+    assert.equal(typeof window[hook], "function", hook)
+    assert.equal(window[hook]({ url: "https://example.com/" }), undefined)
+  }
+  // The pick signal is a Playwright binding, not a stub.
+  assert.equal(window.__cogniaSignal, undefined)
 })

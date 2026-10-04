@@ -22,6 +22,10 @@ class FakeFrame {
     return this._url
   }
   async evaluate(fn, argument) {
+    if (String(fn).includes("__cogniaSelectionForRef")) {
+      this.selectionRefs = [...(this.selectionRefs ?? []), argument]
+      return JSON.stringify({ ok: true, error: null, selection: { selector: `#${argument}` } })
+    }
     if (String(fn).includes("__cogniaFindClear")) {
       await this.page.triggerDialog("nextFindDialog")
       return { ok: true }
@@ -345,6 +349,25 @@ test("runs find-in-page via the injected helper, not the gated evaluate", async 
     index: 0,
   })
   assert.deepEqual(await service.findClear("session-1"), { ok: true })
+})
+
+test("selectionForRef reads the overlay in the frame that produced the ref", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const page = chromium.launches[0].context.pages[0]
+  const snapshot = await service.snapshot("session-1")
+  const ref = snapshot.nodes[0].ref
+  const result = await service.selectionForRef("session-1", ref)
+  assert.equal(result.ok, true)
+  assert.equal(result.selection.selector, "#e1")
+  assert.match(result.selection.paneId, /^local:/)
+  // The page's own ref travels, never the runtime's opaque one.
+  assert.deepEqual(page.mainFrame.selectionRefs, ["e1"])
+  assert.deepEqual(await service.selectionForRef("session-1", "nope"), {
+    ok: false,
+    error: "Unknown or stale ref: nope",
+    selection: null,
+  })
 })
 
 test("creates one isolated context with pinned DNS and a single active page", async (t) => {

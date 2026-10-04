@@ -64,9 +64,30 @@ export interface SendCommentOptions {
   includeScreenshot?: boolean
   /** The embedded preview's reserved rect — required to capture a screenshot. */
   captureRect?: ElementRect
+  /**
+   * Captures the page another way (local Chromium: the engine's viewport
+   * screenshot). Wins over `captureRect`.
+   */
+  capture?: () => Promise<{ bytes?: string } | null | undefined>
   /** Target chat session. Defaults to the focused session. */
   sessionId?: string
   detailLevel?: OutputDetailLevel
+}
+
+/** The one screenshot a comment or batch carries; best-effort, never a failure. */
+async function captureForSend(options: SendCommentOptions): Promise<SubmittedFile[]> {
+  if (options.includeScreenshot === false) return []
+  try {
+    const shot = options.capture
+      ? await options.capture()
+      : options.captureRect
+        ? await browserClient.embedCapture(options.captureRect)
+        : null
+    return shot?.bytes ? [screenshotToFile(shot.bytes)] : []
+  } catch {
+    // Selector + outerHTML is enough context without the picture.
+    return []
+  }
 }
 
 /**
@@ -109,15 +130,7 @@ export function useSelectionToChat() {
       const text = Array.isArray(selection)
         ? formatSelectionsComment(selection, comment, options.detailLevel)
         : formatSelectionComment(selection, comment, options.detailLevel)
-      const files: SubmittedFile[] = []
-      if (options.includeScreenshot !== false && options.captureRect) {
-        try {
-          const shot = await browserClient.embedCapture(options.captureRect)
-          if (shot?.bytes) files.push(screenshotToFile(shot.bytes))
-        } catch {
-          // Screenshot is best-effort — selector + outerHTML is enough context.
-        }
-      }
+      const files = await captureForSend(options)
       const { content } = await buildSendContent(text, files)
 
       // A mid-stream `send` is enqueued text-only (the steer queue drops image
@@ -141,18 +154,10 @@ export function useSelectionToChat() {
       const sessionId = options.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return false
 
-      const files: SubmittedFile[] = []
       // A batch gets one pane-level screenshot at send time. Annotation indexes
       // in the text are the stable reference; N screenshots would be noisy and
       // disproportionately expensive.
-      if (options.includeScreenshot !== false && options.captureRect) {
-        try {
-          const shot = await browserClient.embedCapture(options.captureRect)
-          if (shot?.bytes) files.push(screenshotToFile(shot.bytes))
-        } catch {
-          // Selection metadata remains sufficient when capture is unavailable.
-        }
-      }
+      const files = await captureForSend(options)
       const { content } = await buildSendContent(
         formatAnnotationBatch(annotations, options.detailLevel),
         files

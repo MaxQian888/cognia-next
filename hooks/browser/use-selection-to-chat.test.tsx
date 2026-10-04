@@ -423,3 +423,26 @@ describe("queueing against a non-web target", () => {
     expect(written.target).toEqual({ kind: "web", baseUrl: "https://example.test" })
   })
 })
+
+it("takes the screenshot from the pane's own capture instead of the embedded webview", async () => {
+  const capture = jest.fn().mockResolvedValue({ bytes: "BBBB" })
+  const { result } = renderHook(() => useSelectionToChat())
+  await result.current.sendComment(SELECTION, "fix", {
+    capture,
+    captureRect: { x: 0, y: 0, width: 10, height: 10 },
+  })
+  const annotation = await result.current.queueAnnotation(SELECTION, "later", {
+    baseUrl: "https://example.com",
+  })
+  await result.current.sendAnnotations([annotation!], { capture })
+  expect(capture).toHaveBeenCalledTimes(2)
+  expect(mockCapture).not.toHaveBeenCalled()
+  expect(Array.isArray(mockSend.mock.calls[0][0])).toBe(true)
+  // A failed or empty capture still sends the text.
+  capture.mockRejectedValueOnce(new Error("page gone"))
+  await result.current.sendComment(SELECTION, "again", { capture })
+  capture.mockResolvedValueOnce(null)
+  await result.current.sendComment(SELECTION, "and again", { capture })
+  expect(typeof mockSend.mock.calls[2][0]).toBe("string")
+  expect(typeof mockSend.mock.calls[3][0]).toBe("string")
+})

@@ -9,6 +9,7 @@ import {
   acceptBrowserAdjustment,
   previewBrowserAdjustment,
   revertBrowserAdjustment,
+  type BrowserAdjustDriver,
   type BrowserAdjustmentDraft,
 } from "@/lib/browser/adjust"
 import type { BrowserAdjustmentChange, BrowserAdjustmentFeedback } from "@/types/browser-developer"
@@ -18,12 +19,15 @@ export function BrowserAdjustControls({
   browserSessionId,
   pageUrl,
   selector,
+  driver,
   onAccept,
 }: {
   sessionId: string
   browserSessionId: string
   pageUrl: string
   selector: string
+  /** The engine the page runs in; the embedded webview when omitted. */
+  driver?: BrowserAdjustDriver
   onAccept(feedback: BrowserAdjustmentFeedback): void
 }) {
   const t = useTranslations("browser.adjust")
@@ -35,9 +39,9 @@ export function BrowserAdjustControls({
   useEffect(() => {
     const id = previewId.current
     return () => {
-      void revertBrowserAdjustment(id).catch(() => undefined)
+      void revertBrowserAdjustment(id, driver).catch(() => undefined)
     }
-  }, [pageUrl, selector])
+  }, [pageUrl, selector, driver])
 
   /**
    * Every one of these drives an `embedEvaluate` round-trip that can reject —
@@ -58,26 +62,31 @@ export function BrowserAdjustControls({
 
   const preview = () =>
     run(async () => {
-      setChanges(await previewBrowserAdjustment({ previewId: previewId.current, selector, draft }))
+      setChanges(
+        await previewBrowserAdjustment({ previewId: previewId.current, selector, draft }, driver)
+      )
     })
 
   const revert = () =>
     run(async () => {
-      await revertBrowserAdjustment(previewId.current)
+      await revertBrowserAdjustment(previewId.current, driver)
       setChanges([])
     })
 
   const accept = () =>
     run(async () => {
       onAccept(
-        await acceptBrowserAdjustment({
-          previewId: previewId.current,
-          sessionId,
-          browserSessionId,
-          pageUrl,
-          selector,
-          changes,
-        })
+        await acceptBrowserAdjustment(
+          {
+            previewId: previewId.current,
+            sessionId,
+            browserSessionId,
+            pageUrl,
+            selector,
+            changes,
+          },
+          driver
+        )
       )
       setChanges([])
     })

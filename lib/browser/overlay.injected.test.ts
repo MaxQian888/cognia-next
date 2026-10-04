@@ -1401,3 +1401,93 @@ describe("push channels (ADR-0127)", () => {
     expect(api.setPushEnabled("not json")).toContain('"console":false')
   })
 })
+
+describe("__cogniaAdjust", () => {
+  type AdjustResult = {
+    ok: boolean
+    error: string | null
+    changes?: Array<{ property: string; before: string; after: string }>
+    reverted?: boolean
+  }
+  const adjust = (action: string, input: unknown): AdjustResult =>
+    JSON.parse(
+      (window as unknown as { __cogniaAdjust: (a: string, json: string) => string }).__cogniaAdjust(
+        action,
+        JSON.stringify(input)
+      )
+    )
+
+  it("previews the controlled properties and reverts them exactly", () => {
+    document.body.innerHTML = `<h1 id="title" style="color: blue">Before</h1>`
+    install()
+    const title = document.getElementById("title")!
+
+    const preview = adjust("preview", {
+      previewId: "p1",
+      selector: "#title",
+      draft: { color: "red", text: "After", spacing: "4px" },
+    })
+    expect(preview.ok).toBe(true)
+    expect(preview.changes?.map((change) => change.property)).toEqual(["spacing", "color", "text"])
+    expect(title.style.color).toBe("red")
+    expect(title.style.padding).toBe("4px")
+    expect(title.textContent).toBe("After")
+
+    expect(adjust("revert", { previewId: "p1" })).toMatchObject({ ok: true, reverted: true })
+    expect(title.style.color).toBe("blue")
+    expect(title.style.padding).toBe("")
+    expect(title.textContent).toBe("Before")
+    // Nothing left to undo.
+    expect(adjust("revert", { previewId: "p1" })).toMatchObject({ ok: true, reverted: false })
+  })
+
+  it("replaces an earlier preview for the same id instead of stacking on it", () => {
+    document.body.innerHTML = `<p id="copy">Original</p>`
+    install()
+    adjust("preview", { previewId: "p1", selector: "#copy", draft: { text: "First" } })
+    const second = adjust("preview", {
+      previewId: "p1",
+      selector: "#copy",
+      draft: { text: "Second" },
+    })
+    expect(second.changes?.[0]).toMatchObject({ before: "Original", after: "Second" })
+    adjust("revert", { previewId: "p1" })
+    expect(document.getElementById("copy")!.textContent).toBe("Original")
+  })
+
+  it("reports a missing element, a missing id and an unknown action as errors", () => {
+    install()
+    expect(adjust("preview", { previewId: "p1", selector: "#gone", draft: {} })).toMatchObject({
+      ok: false,
+      error: "selected element is no longer available",
+    })
+    expect(adjust("preview", { selector: "#gone" }).ok).toBe(false)
+    expect(adjust("explode", { previewId: "p1" }).ok).toBe(false)
+    expect(
+      JSON.parse(
+        (
+          window as unknown as { __cogniaAdjust: (a: string, json: string) => string }
+        ).__cogniaAdjust("preview", "{not json")
+      ).ok
+    ).toBe(false)
+  })
+})
+
+describe("install before the document has a root element", () => {
+  it("defers its stylesheet instead of aborting the whole install (Chromium init scripts)", () => {
+    // A fresh document: no earlier install, no stylesheet from one.
+    delete (window as unknown as Record<string, unknown>).__cogniaRecordInstalled
+    document.getElementById("__cognia-credential-mask")?.remove()
+    const root = document.documentElement
+    document.removeChild(root)
+    expect(document.documentElement).toBeNull()
+    expect(() => install()).not.toThrow()
+    // Everything after the stylesheet got installed too.
+    expect(typeof (window as unknown as Record<string, unknown>).__cogniaSetSelectMode).toBe(
+      "function"
+    )
+    document.appendChild(root)
+    document.dispatchEvent(new Event("DOMContentLoaded"))
+    expect(document.getElementById("__cognia-credential-mask")).not.toBeNull()
+  })
+})

@@ -11,6 +11,7 @@ import { encodeBody, redactHeaders } from "./network-details.mjs"
 import { LocalNetworkPolicy, NetworkPolicy } from "./network-policy.mjs"
 import {
   CREDENTIAL_BINDING,
+  OVERLAY_TRANSPORT_SCRIPT,
   CREDENTIAL_CAPTURE_SCRIPT,
   LOGIN_REGISTRY_KEY,
   clearStorageInPage,
@@ -19,6 +20,16 @@ import {
   resolveLoginRegistryEntry,
   writeStorageInPage,
 } from "./page-scripts.mjs"
+import {
+  MAX_SELECTIONS,
+  SELECTION_SIGNAL_BINDING,
+  SelectionError,
+  normalizeAdjustRequest,
+  normalizeAdjustResult,
+  normalizePanelLabels,
+  normalizeSelectionDrain,
+  normalizeSelectionForRef,
+} from "./element-selection.mjs"
 import { encodeMediaFrame } from "./protocol.mjs"
 
 const SECRET_FIELD =
@@ -231,6 +242,29 @@ function finiteInRange(value, min, max, field) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function overlayUnavailable() {
+  return new RemoteBrowserError(
+    "browser_feature_unsupported",
+    "The page has not loaded Cognia's page helpers yet"
+  )
+}
+
+/** The `paneId` a local page's picks carry (the embedded webview stamps its label). */
+function selectionPaneId(pageId) {
+  return `local:${pageId}`
+}
+
+function selectionResult(build) {
+  try {
+    return build()
+  } catch (error) {
+    if (error instanceof SelectionError) {
+      throw new RemoteBrowserError("browser_selection_invalid", error.message)
+    }
+    throw error
+  }
 }
 
 function frameOrigin(frame) {
@@ -512,6 +546,7 @@ export class RemoteChromiumService {
       context,
     })
     this.sessions.set(id, session)
+    await context.addInitScript(OVERLAY_TRANSPORT_SCRIPT)
     await context.addInitScript(this.overlayScript)
     await context.route("**/*", async (route) => this.authorizeRoute(session, route))
     context.on("page", (page) => this.onContextPage(session, page))
@@ -629,9 +664,13 @@ export class RemoteChromiumService {
     // Shutdown began while Chromium was starting: bail out so the caller
     // closes this context instead of wiring it up.
     this.assertNotShuttingDown()
+    await context.addInitScript(OVERLAY_TRANSPORT_SCRIPT)
     await context.addInitScript(this.overlayScript)
     await context.exposeBinding(CREDENTIAL_BINDING, (source, payload) =>
       this.onCredentialSubmitted(session, source, payload)
+    )
+    await context.exposeBinding(SELECTION_SIGNAL_BINDING, (source, payload) =>
+      this.onSelectionSignal(session, source, payload)
     )
     await context.addInitScript(CREDENTIAL_CAPTURE_SCRIPT)
     context.on("page", (page) => this.onContextPage(session, page))
@@ -747,7 +786,9 @@ export class RemoteChromiumService {
     })
     session.targetIds.add(targetId)
     const page = await this.waitForTargetPage(session, targetId)
+    await page.addInitScript(OVERLAY_TRANSPORT_SCRIPT)
     await page.addInitScript(this.overlayScript)
+    await this.exposeSelectionSignal(session, page)
     const pageId = this.registerPage(session, page)
     if (!pageId) throw new RemoteBrowserError("browser_page_quota_exceeded", "Page quota exceeded")
     return { page, pageId }
@@ -760,7 +801,9 @@ export class RemoteChromiumService {
     if (!openerId) return
     const targetId = await this.pageTargetId(session, page).catch(() => null)
     if (targetId) session.targetIds.add(targetId)
+    await page.addInitScript(OVERLAY_TRANSPORT_SCRIPT)
     await page.addInitScript(this.overlayScript)
+    await this.exposeSelectionSignal(session, page)
     const pageId = this.registerPage(session, page)
     if (pageId) await this.linkOpener(session, pageId, openerId)
   }
@@ -1454,6 +1497,144 @@ export class RemoteChromiumService {
     const { page } = this.activeRecord(session)
     await page.evaluate(() => window.__cogniaFindClear())
     return { ok: true }
+  }
+
+  // ---- Element pick and Browser Adjust (ADR-0214) ---------------------------
+  // Each op calls one fixed overlay function with JSON arguments, never caller
+  // JS, so like `find` it skips the loopback- and keyboard-gated `evaluate`.
+  // What the page answers is untrusted and checked in element-selection.mjs.
+
+  /** Arm or disarm the in-page picker on the addressed (else the front) page. */
+  async setSelectMode(sessionId, on, labels) {
+    const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
+    const { page } = this.activeRecord(session)
+    const panelLabels = normalizePanelLabels(labels)
+    const armed = await page.evaluate(
+      (args) => {
+        if (typeof window.__cogniaSetSelectMode !== "function") return false
+        if (args.labels && typeof window.__cogniaSetPanelLabels === "function") {
+          window.__cogniaSetPanelLabels(args.labels)
+        }
+        window.__cogniaSetSelectMode(args.on)
+        return true
+      },
+      { on: Boolean(on), labels: panelLabels ? JSON.stringify(panelLabels) : null }
+    )
+    if (!armed) throw overlayUnavailable()
+    return { ok: true, on: Boolean(on) }
+  }
+
+  /** Take the picks the overlay buffered since the last drain. */
+  async drainSelection(sessionId) {
+    const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
+    const { page, pageId } = this.activeRecord(session)
+    const raw = await page.evaluate(() =>
+      typeof window.__cogniaGetSelection === "function" ? window.__cogniaGetSelection() : null
+    )
+    if (raw === null) throw overlayUnavailable()
+    return selectionResult(() => normalizeSelectionDrain(raw, selectionPaneId(pageId)))
+  }
+
+  /** Drop the picks and the in-page info panel (the comment was sent or cancelled). */
+  async clearSelection(sessionId) {
+    const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
+    const { page } = this.activeRecord(session)
+    await page.evaluate(() => {
+      if (typeof window.__cogniaClearSelection === "function") window.__cogniaClearSelection()
+    })
+    return { ok: true }
+  }
+
+  /** The selection payload for a snapshot ref (`browser_annotate`). */
+  async selectionForRef(sessionId, reference) {
+    const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
+    const { pageId, record } = this.activeRecord(session)
+    const target = this.references.get(String(reference ?? ""))
+    if (
+      !target ||
+      target.sessionId !== session.id ||
+      target.pageId !== pageId ||
+      target.generation !== record.generation
+    ) {
+      return { ok: false, error: `Unknown or stale ref: ${String(reference)}`, selection: null }
+    }
+    const raw = await target.frame.evaluate(
+      (ref) =>
+        typeof window.__cogniaSelectionForRef === "function"
+          ? window.__cogniaSelectionForRef(ref)
+          : null,
+      target.nativeRef
+    )
+    if (raw === null) throw overlayUnavailable()
+    return selectionResult(() => normalizeSelectionForRef(raw, selectionPaneId(pageId)))
+  }
+
+  /** Browser Adjust: preview or revert a draft; resolves the overlay's JSON answer. */
+  async adjust(sessionId, action, input) {
+    const session = this.requireSession(sessionId)
+    this.assertNoPendingDialog(session)
+    const { page } = this.activeRecord(session)
+    let request
+    try {
+      request = normalizeAdjustRequest(action, input)
+    } catch (error) {
+      throw new RemoteBrowserError("browser_option_invalid", error.message)
+    }
+    const raw = await page.evaluate(
+      (args) =>
+        typeof window.__cogniaAdjust === "function"
+          ? window.__cogniaAdjust(args.action, args.json)
+          : null,
+      { action: request.action, json: JSON.stringify(request.input) }
+    )
+    if (raw === null) throw overlayUnavailable()
+    return selectionResult(() => ({ ok: true, result: normalizeAdjustResult(raw) }))
+  }
+
+  /**
+   * A user-chrome tab lives in the user's own browser context, so the pick
+   * signal is bound per tab Cognia drives rather than on the whole context.
+   */
+  async exposeSelectionSignal(session, page) {
+    if (typeof page.exposeBinding !== "function") return
+    await page.exposeBinding(SELECTION_SIGNAL_BINDING, (source, payload) =>
+      this.onSelectionSignal(session, source, payload)
+    )
+  }
+
+  /**
+   * The overlay's page→runtime pick signal. The embedded webview gets the same
+   * `{count, generation}` from a sentinel navigation it intercepts; here it is a
+   * Playwright binding, forwarded as an `element.selected` event so the pane
+   * showing that page drains it. Only a page's main frame picks. The page's
+   * `generation` is checked but not forwarded (see below).
+   */
+  onSelectionSignal(session, source, payload) {
+    if (session.closing) return
+    const page = source?.page
+    const pageId = page ? session.pageIds.get(page) : undefined
+    if (!pageId) return
+    if (source.frame && source.frame !== pageMainFrame(page)) return
+    const count = Number(payload?.count)
+    const generation = Number(payload?.generation)
+    if (!Number.isSafeInteger(count) || count < 0 || count > MAX_SELECTIONS) return
+    if (!Number.isSafeInteger(generation) || generation < 1) return
+    const record = session.pages.get(pageId)
+    if (!record) return
+    // The page's own generation restarts with every document; the pane
+    // dedupes on this one, which only grows for the page's lifetime.
+    record.selectionSignals = (record.selectionSignals ?? 0) + 1
+    this.emit({
+      type: "element.selected",
+      sessionId: session.id,
+      pageId,
+      count,
+      generation: record.selectionSignals,
+    })
   }
 
   /** The addressed (else the front) page's console since the last read. */

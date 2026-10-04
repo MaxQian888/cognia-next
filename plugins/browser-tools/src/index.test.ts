@@ -1044,13 +1044,63 @@ describe("browser-tools ADR-0201 surface", () => {
     setLiveUrl("http://localhost/")
   })
 
-  it("browser_annotate moves a Chromium page to the lightweight preview first", async () => {
+  it("browser_annotate reads a Chromium page's ref through the runtime and stays there", async () => {
     const tools = await collectTools()
     await tools.browser_open({ backend: "local-chromium" }, { sessionId: "chat-h" })
     setLiveUrl("http://localhost:5173/app")
+    const selection = {
+      paneId: "local:p1",
+      selector: "#cta",
+      domPath: "body > button#cta",
+      tagName: "BUTTON",
+      id: "cta",
+      classes: null,
+      rect: { x: 0, y: 0, width: 10, height: 10 },
+      outerHTML: "<button></button>",
+      text: "Go",
+      pageUrl: "http://localhost:5173/app",
+      pageTitle: "App",
+    }
+    engine.selectionForRef = jest.fn(async () => ({ ok: true, error: null, selection }))
+    const result = (await tools.browser_annotate(
+      { ref: "opaque-7", comment: "Too tight", intent: "change", severity: "suggestion" },
+      { sessionId: "chat-h" }
+    )) as Record<string, unknown>
+    expect(result).toMatchObject({ ok: true })
+    expect(engine.selectionForRef).toHaveBeenCalledWith("opaque-7")
+    expect(engine.evaluate).not.toHaveBeenCalledWith(
+      expect.stringContaining("__cogniaSelectionForRef")
+    )
+    expect(saveBrowserAnnotationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "chat-h", baseUrl: "http://localhost:5173", selection })
+    )
+    expect(browserApi.openPane).not.toHaveBeenCalledWith(expect.anything(), {
+      backend: "embedded",
+      chatSessionId: "chat-h",
+    })
+    // A stale ref is the runtime's answer, not a crash.
+    engine.selectionForRef.mockResolvedValueOnce({
+      ok: false,
+      error: "Unknown or stale ref: x",
+      selection: null,
+    })
+    await expect(
+      tools.browser_annotate(
+        { ref: "x", comment: "c", intent: "fix", severity: "important" },
+        { sessionId: "chat-h" }
+      )
+    ).resolves.toEqual({ ok: false, error: "Unknown or stale ref: x" })
+    delete engine.selectionForRef
+    setLiveUrl("http://localhost/")
+  })
+
+  it("browser_annotate moves a cloud-browser page to the lightweight preview first", async () => {
+    const tools = await collectTools()
+    await tools.browser_open({ backend: "remote-chromium" }, { sessionId: "chat-r" })
+    setLiveUrl("http://localhost:5173/app")
     const result = (await tools.browser_annotate(
       { ref: "e1", comment: "Too tight", intent: "change", severity: "suggestion" },
-      { sessionId: "chat-h" }
+      { sessionId: "chat-r" }
     )) as Record<string, unknown>
     expect(result).toMatchObject({
       ok: false,
@@ -1059,12 +1109,11 @@ describe("browser-tools ADR-0201 surface", () => {
     })
     expect(browserApi.openPane).toHaveBeenLastCalledWith("http://localhost:5173/app", {
       backend: "embedded",
-      chatSessionId: "chat-h",
+      chatSessionId: "chat-r",
     })
     expect(saveBrowserAnnotationMock).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith("annotate.switchedToLightweight", "info")
-    // The conversation now routes to the lightweight preview, where it annotates.
-    await tools.browser_snapshot({}, { sessionId: "chat-h" })
+    await tools.browser_snapshot({}, { sessionId: "chat-r" })
     expect(routeEngineMock().mock.calls.at(-1)?.[1]).toMatchObject({
       backendPreference: "embedded",
     })

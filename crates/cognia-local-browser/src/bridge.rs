@@ -80,6 +80,13 @@ pub const RENDERER_OPS: &[&str] = &[
     "browser.set-zoom",
     "browser.find",
     "browser.find.clear",
+    // Element pick and Browser Adjust (ADR-0214): each runs one fixed overlay
+    // function with JSON arguments, never renderer-supplied JS.
+    "browser.select-mode",
+    "browser.selection.drain",
+    "browser.selection.clear",
+    "browser.selection.for-ref",
+    "browser.adjust",
     "browser.screencast.start",
     "browser.screencast.ack",
     "browser.input",
@@ -487,6 +494,8 @@ pub const FORWARDED_EVENT_TYPES: &[&str] = &[
     "credential.submitted",
     "extensions.changed",
     "filechooser.opened",
+    // The overlay's pick signal: `{pageId, count, generation}`, no page data.
+    "element.selected",
 ];
 
 /// A journal entry the shell acts on.
@@ -731,6 +740,15 @@ mod tests {
         assert!(is_renderer_op("browser.session.create"));
         assert!(is_renderer_op("browser.tabs.finalize"));
         assert!(is_renderer_op("browser.filechooser.set"));
+        for op in [
+            "browser.select-mode",
+            "browser.selection.drain",
+            "browser.selection.clear",
+            "browser.selection.for-ref",
+            "browser.adjust",
+        ] {
+            assert!(is_renderer_op(op), "{op}");
+        }
         assert!(!is_renderer_op("browser.cookies.set"));
         assert!(!is_renderer_op("browser.credential.fill"));
         assert!(!is_renderer_op("browser.extensions.reload"));
@@ -886,6 +904,25 @@ mod tests {
         );
         assert_eq!(map_event(&json!({"type": "stdout", "agentId": "a"})), None);
         assert_eq!(map_event(&json!("pages.changed")), None);
+        // The pick signal reaches the pane showing that page.
+        assert_eq!(
+            map_event(&json!({
+                "sequence": 5,
+                "kind": "browser.event",
+                "type": "element.selected",
+                "sessionId": "s1",
+                "pageId": "p2",
+                "count": 1,
+                "generation": 3
+            })),
+            Some(BridgeEvent::Forward(json!({
+                "type": "element.selected",
+                "sessionId": "s1",
+                "pageId": "p2",
+                "count": 1,
+                "generation": 3
+            })))
+        );
     }
 
     #[test]

@@ -94,6 +94,7 @@ lib/browser/
   client.ts                # 渲染端客户端
   agent-activity.ts        # 在聊天中呈现的活动事件
   annotation-queue.ts      # 浮层标注
+  selection-source.ts      # 面板的元素拾取来自哪里（按引擎区分）
   pane-rect.ts             # webview 在应用布局中的几何
   cookie-import.ts         # Chromium Cookie 导入（ADR-0073）
   session-types.ts
@@ -107,6 +108,17 @@ components/browser/     # 12 个组件 —— 浏览器外壳、地址栏、浮�
 hooks/browser/          # pane webview、历史、加载态、元素选择、
                         # 区域可见性、流程录制、选区→聊天
 ```
+
+## 元素拾取、标注与 Adjust
+
+两个桌面引擎运行同一份注入的 overlay（`lib/browser/overlay.injected.js`）：拾取器、悬停框和信息面板、多选/框选/文本选取，以及 Browser Adjust（`__cogniaAdjust`）。它们只有传输方式不同，`ElementSelectionSource`（`lib/browser/selection-source.ts`）替 `useElementSelection` 屏蔽了这一点：
+
+- 内嵌 webview 用哨兵导航发出拾取信号，Rust 拦截后发出 `browser://element-selected`；面板通过 `browser_embed_*` 命令取回拾取结果。
+- 本地 Chromium 和用户自己的 Chrome 通过 Playwright 绑定（`__cogniaSignal`）发信号，运行时把它转发为携带 `{pageId, count, generation}` 的 `element.selected` 事件，并按页面自行编号，刷新页面后也不会重复编号；显示该页面的面板通过 `browser.selection.drain` 取回。
+
+`browser.select-mode`、`.selection.drain`、`.selection.clear`、`.selection.for-ref` 和 `browser.adjust` 各自只调用一个固定的 overlay 函数并传 JSON 参数，运行时会对页面返回的内容做大小限制和结构校验（`services/workspace-runtime/src/element-selection.mjs`）。它们都不是 `browser.evaluate`，所以在公网来源、用户输入过之后也能工作。选择卡片和标注队列在两个面板里是同一个组件（`BrowserInspectionRail`，ADR-0214）。
+
+overlay 的其他上报（加载完成、SPA 导航、控制台、网络和 DOM 变化推送）同样靠哨兵导航传递，而只有内嵌 webview 会拦截它们。在 Chromium 中每次上报都会把页面带到错误页，因此运行时在 overlay 之前注入 `OVERLAY_TRANSPORT_SCRIPT`，把这些钩子设为空操作：Playwright 本来就会报告同样的信息。Chromium 还会在文档还没有根元素时就运行 init 脚本，所以 overlay 改为等有根元素后再挂载样式表（`appendWhenRooted`），而不是抛错导致整个 overlay 没有安装。
 
 ## 录制与回放
 

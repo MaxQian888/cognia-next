@@ -8,103 +8,87 @@ export interface BrowserAdjustmentDraft {
   color?: string
 }
 
-interface PreviewResult {
-  before: BrowserAdjustmentChange[]
-  after: BrowserAdjustmentChange[]
+/** The two things Adjust asks of a page: try a draft on, and take it off again. */
+export type BrowserAdjustAction = "preview" | "revert"
+
+/**
+ * Runs the injected overlay's `window.__cogniaAdjust(action, json)` in the page
+ * a pane shows and resolves its JSON string. Each engine supplies one: the
+ * embedded webview evaluates the call, local Chromium has a dedicated runtime
+ * op (its `evaluate` is loopback-only), so the page code is the same for both.
+ */
+export interface BrowserAdjustDriver {
+  run(action: BrowserAdjustAction, input: Record<string, unknown>): Promise<string>
 }
 
-function adjustmentExpression(
-  previewId: string,
-  selector: string,
-  draft: BrowserAdjustmentDraft
-): string {
-  const payload = JSON.stringify({ previewId, selector, draft })
-  return `(() => {
-    const input = ${payload};
-    const key = "__cogniaBrowserAdjust";
-    const registry = window[key] || (window[key] = {});
-    const previous = registry[input.previewId];
-    if (previous?.element?.isConnected) {
-      for (const [name, value] of Object.entries(previous.styles)) previous.element.style[name] = value;
-      if (previous.text !== null) previous.element.textContent = previous.text;
-    }
-    const element = document.querySelector(input.selector);
-    if (!element) throw new Error("selected element is no longer available");
-    const computed = getComputedStyle(element);
-    const styles = {
-      fontFamily: element.style.fontFamily,
-      fontSize: element.style.fontSize,
-      padding: element.style.padding,
-      color: element.style.color,
-    };
-    const before = [];
-    if (input.draft.font) {
-      before.push({property:"font",cssProperty:"font",before:computed.font,after:input.draft.font});
-      element.style.font = input.draft.font;
-    }
-    if (input.draft.spacing) {
-      before.push({property:"spacing",cssProperty:"padding",before:computed.padding,after:input.draft.spacing});
-      element.style.padding = input.draft.spacing;
-    }
-    if (input.draft.color) {
-      before.push({property:"color",cssProperty:"color",before:computed.color,after:input.draft.color});
-      element.style.color = input.draft.color;
-    }
-    const originalText = input.draft.text !== undefined ? element.textContent : null;
-    if (input.draft.text !== undefined) {
-      before.push({property:"text",before:element.textContent || "",after:input.draft.text});
-      element.textContent = input.draft.text;
-    }
-    registry[input.previewId] = { element, styles, text: originalText };
-    return { before, after: before };
-  })()`
+/** The embedded webview's driver (the lightweight preview). */
+export const embeddedAdjustDriver: BrowserAdjustDriver = {
+  async run(action, input) {
+    const result = await browserClient.embedEvaluate(
+      `window.__cogniaAdjust(${JSON.stringify(action)}, ${JSON.stringify(JSON.stringify(input))})`
+    )
+    if (!result.ok) throw new Error(result.error ?? "Browser adjustment failed")
+    if (typeof result.value !== "string") throw new Error("Browser adjustment failed")
+    return result.value
+  },
 }
 
-function revertExpression(previewId: string): string {
-  return `(() => {
-    const registry = window.__cogniaBrowserAdjust || {};
-    const previous = registry[${JSON.stringify(previewId)}];
-    if (!previous) return false;
-    if (previous.element?.isConnected) {
-      for (const [name, value] of Object.entries(previous.styles)) previous.element.style[name] = value;
-      if (previous.text !== null) previous.element.textContent = previous.text;
-    }
-    delete registry[${JSON.stringify(previewId)}];
-    return true;
-  })()`
+interface AdjustEnvelope {
+  ok: boolean
+  error?: string | null
+  changes?: BrowserAdjustmentChange[]
 }
 
-export async function previewBrowserAdjustment(input: {
-  previewId: string
-  selector: string
-  draft: BrowserAdjustmentDraft
-}): Promise<BrowserAdjustmentChange[]> {
-  const result = (await browserClient.embedEvaluate(
-    adjustmentExpression(input.previewId, input.selector, input.draft)
-  )) as { ok: boolean; value?: PreviewResult; error?: string }
-  if (!result.ok) throw new Error(result.error ?? "Browser adjustment preview failed")
-  return result.value?.before ?? []
-}
-
-export async function revertBrowserAdjustment(previewId: string): Promise<void> {
-  const result = (await browserClient.embedEvaluate(revertExpression(previewId))) as {
-    ok: boolean
-    value?: boolean
-    error?: string
+async function runAdjust(
+  driver: BrowserAdjustDriver,
+  action: BrowserAdjustAction,
+  input: Record<string, unknown>,
+  failure: string
+): Promise<AdjustEnvelope> {
+  let envelope: AdjustEnvelope
+  try {
+    envelope = JSON.parse(await driver.run(action, input)) as AdjustEnvelope
+  } catch (cause) {
+    throw cause instanceof SyntaxError ? new Error(failure) : cause
   }
-  if (!result.ok) throw new Error(result.error ?? "Browser adjustment revert failed")
+  if (!envelope || typeof envelope !== "object" || envelope.ok !== true) {
+    throw new Error(envelope?.error || failure)
+  }
+  return envelope
 }
 
-export async function acceptBrowserAdjustment(input: {
-  previewId: string
-  sessionId: string
-  browserSessionId: string
-  pageUrl: string
-  selector: string
-  changes: BrowserAdjustmentChange[]
-  now?: number
-}): Promise<BrowserAdjustmentFeedback> {
-  await revertBrowserAdjustment(input.previewId)
+export async function previewBrowserAdjustment(
+  input: {
+    previewId: string
+    selector: string
+    draft: BrowserAdjustmentDraft
+  },
+  driver: BrowserAdjustDriver = embeddedAdjustDriver
+): Promise<BrowserAdjustmentChange[]> {
+  const envelope = await runAdjust(driver, "preview", input, "Browser adjustment preview failed")
+  return Array.isArray(envelope.changes) ? envelope.changes : []
+}
+
+export async function revertBrowserAdjustment(
+  previewId: string,
+  driver: BrowserAdjustDriver = embeddedAdjustDriver
+): Promise<void> {
+  await runAdjust(driver, "revert", { previewId }, "Browser adjustment revert failed")
+}
+
+export async function acceptBrowserAdjustment(
+  input: {
+    previewId: string
+    sessionId: string
+    browserSessionId: string
+    pageUrl: string
+    selector: string
+    changes: BrowserAdjustmentChange[]
+    now?: number
+  },
+  driver: BrowserAdjustDriver = embeddedAdjustDriver
+): Promise<BrowserAdjustmentFeedback> {
+  await revertBrowserAdjustment(input.previewId, driver)
   const now = input.now ?? Date.now()
   return {
     id: input.previewId,

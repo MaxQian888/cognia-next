@@ -88,3 +88,29 @@ it("re-disables Preview when the only field is cleared again", () => {
   fireEvent.change(color, { target: { value: "   " } })
   expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled()
 })
+
+it("drives every step through the engine it was given", async () => {
+  const driver = { run: jest.fn() }
+  const { unmount } = render(
+    <BrowserAdjustControls
+      sessionId="session-1"
+      browserSessionId="browser-1"
+      pageUrl="https://example.com/"
+      selector="#title"
+      driver={driver}
+      onAccept={jest.fn()}
+    />
+  )
+  fireEvent.change(screen.getByLabelText("Color (for example, #2563eb)"), {
+    target: { value: "red" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+  await waitFor(() => expect(previewMock).toHaveBeenCalled())
+  expect(previewMock.mock.calls[0][1]).toBe(driver)
+  fireEvent.click(screen.getByRole("button", { name: "Accept feedback" }))
+  await waitFor(() => expect(acceptMock).toHaveBeenCalled())
+  expect(acceptMock.mock.calls[0][1]).toBe(driver)
+  unmount()
+  // Leaving reverts the preview on the same engine.
+  expect(revertMock.mock.calls.at(-1)?.[1]).toBe(driver)
+})

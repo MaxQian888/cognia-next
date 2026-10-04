@@ -102,6 +102,7 @@ lib/browser/
   client.ts                # renderer-side client
   agent-activity.ts        # activity events surfaced in chat
   annotation-queue.ts      # overlay annotations
+  selection-source.ts      # where a pane's element picks come from, per engine
   pane-rect.ts             # webview geometry inside the app layout
   cookie-import.ts         # Chromium cookie import (ADR-0073)
   session-types.ts
@@ -115,6 +116,35 @@ components/browser/     # 12 components — chrome, address bar, overlays
 hooks/browser/          # pane webview, history, loading, element selection,
                         # region visibility, flow recorder, selection→chat
 ```
+
+## Element pick, annotations and Adjust
+
+Both desktop engines run the same injected overlay (`lib/browser/overlay.injected.js`): the picker,
+its hover box and info panel, multi, area and text picks, and Browser Adjust (`__cogniaAdjust`). They
+differ only in transport, and `ElementSelectionSource` (`lib/browser/selection-source.ts`) hides that
+from `useElementSelection`:
+
+- The embedded webview signals a pick with a sentinel navigation that Rust intercepts and emits as
+  `browser://element-selected`. The pane drains the picks through `browser_embed_*` commands.
+- Local Chromium and the user's Chrome signal through a Playwright binding (`__cogniaSignal`). The
+  runtime forwards it as an `element.selected` event carrying `{pageId, count, generation}`, and
+  numbers the signals per page so a reload never repeats a generation. The pane showing that page
+  drains through `browser.selection.drain`.
+
+`browser.select-mode`, `.selection.drain`, `.selection.clear`, `.selection.for-ref` and
+`browser.adjust` each call one fixed overlay function with JSON arguments. The runtime size-caps and
+shape-checks what the page answers (`services/workspace-runtime/src/element-selection.mjs`). None of
+them is `browser.evaluate`, so they also work on public origins and after the user has typed. The
+selection card and annotation queue are one component (`BrowserInspectionRail`) in both panes
+(ADR-0214).
+
+The overlay's other reports (load complete, SPA navigations, console, network and DOM-change
+pushes) also travel by sentinel navigation, which only the embedded webview intercepts. In
+Chromium each one sent the page to an error page, so the runtime installs
+`OVERLAY_TRANSPORT_SCRIPT` before the overlay. It makes those hooks no-ops, because Playwright
+already reports the same things. Chromium also runs init scripts before the document has a root
+element, so the overlay attaches its stylesheet once there is one (`appendWhenRooted`) instead of
+throwing and installing nothing.
 
 ## Recording and replay
 

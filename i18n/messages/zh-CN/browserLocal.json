@@ -93,7 +93,7 @@
     "engineChip": {
       "chromium": "Chromium",
       "lightweight": "轻量",
-      "toLightweight": "在轻量预览中打开（元素选取、批注、Adjust）",
+      "toLightweight": "在轻量预览中打开",
       "toChromium": "在 Chromium 中打开"
     }
   },

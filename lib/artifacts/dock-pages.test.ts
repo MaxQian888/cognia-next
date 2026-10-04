@@ -279,6 +279,19 @@ describe("startDockPageSync", () => {
     expect(tabs()[0].url).toBe("https://remembered.test/")
   })
 
+  it("never remembers Chromium's error page, only an address worth reopening", async () => {
+    const tabId = openDockPage("s1", "https://remembered.test/")!
+    const { page } = await ensureTaggedPage("chat:s1", tabId)
+    const at = (url: string, title: string) => {
+      pages = pages.map((item) => (item.id === page.id ? { ...item, url, title } : item))
+      pagesChanged()
+    }
+    at("chrome-error://chromewebdata/", "cognia.invalid")
+    expect(tabs()[0]).toMatchObject({ url: "https://remembered.test/" })
+    at("https://moved.test/next", "Next")
+    expect(tabs()[0]).toMatchObject({ url: "https://moved.test/next", title: "Next" })
+  })
+
   it("drops the tab of a page that closed by itself, not of one released on purpose", async () => {
     const kept = openDockPage("s1", "https://kept.test/")!
     const gone = openDockPage("s1", "https://gone.test/", { newTab: true })!

@@ -70,6 +70,17 @@ export type LocalBrowserEvent =
       chooserId: string
       multiple: boolean
     }
+  | {
+      /**
+       * The in-page picker took `count` picks on `pageId` (ADR-0214). Only the
+       * signal crosses: the pane showing that page drains the picks itself.
+       */
+      type: "element.selected"
+      sessionId: string
+      pageId: string
+      count: number
+      generation: number
+    }
 
 export type LocalBrowserEventType = LocalBrowserEvent["type"]
 
@@ -81,6 +92,7 @@ export const LOCAL_BROWSER_EVENT_TYPES: readonly LocalBrowserEventType[] = [
   "credential.submitted",
   "extensions.changed",
   "filechooser.opened",
+  "element.selected",
 ]
 
 export const USER_CHROME_BROWSERS = [

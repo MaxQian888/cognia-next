@@ -22,6 +22,10 @@ jest.mock("@/lib/browser/client", () => ({
 }))
 
 import { browserClient } from "@/lib/browser/client"
+import type {
+  ElementSelectionHandlers,
+  ElementSelectionSource,
+} from "@/lib/browser/selection-source"
 import { useElementSelection } from "./use-element-selection"
 
 const SELECTION: BrowserSelection = {
@@ -117,15 +121,65 @@ it("clearSelection resets the picked element", async () => {
   expect(result.current.selections).toEqual([])
 })
 
-it("uses a custom select-mode driver when provided", async () => {
-  const driver = jest.fn().mockResolvedValue(undefined)
-  const { result } = renderHook(() => useElementSelection({ driver }))
+function fakeSource() {
+  let handlers: ElementSelectionHandlers | null = null
+  const stop = jest.fn()
+  const source: ElementSelectionSource = {
+    setSelectMode: jest.fn().mockResolvedValue(undefined),
+    drain: jest.fn().mockResolvedValue([SELECTION]),
+    clear: jest.fn().mockResolvedValue(undefined),
+    subscribe: jest.fn(async (next: ElementSelectionHandlers) => {
+      handlers = next
+      return stop
+    }),
+  }
+  return {
+    source,
+    stop,
+    signal: (count: number, generation: number) =>
+      handlers?.onSignal({ paneId: "local:p1", count, generation }),
+  }
+}
+
+it("drives and drains another engine through the source it is given", async () => {
+  const { source, signal } = fakeSource()
+  const { result } = renderHook(() => useElementSelection({ source }))
   await act(async () => {
     await result.current.setSelectMode(true)
   })
-  expect(driver).toHaveBeenCalledWith(true)
+  expect(source.setSelectMode).toHaveBeenCalledWith(true)
   expect(browserClient.embedSetSelectMode).not.toHaveBeenCalled()
   expect(result.current.selectMode).toBe(true)
+  await waitFor(() => expect(source.subscribe).toHaveBeenCalled())
+
+  act(() => signal(1, 1))
+  await waitFor(() => expect(result.current.selection?.selector).toBe("#go"))
+  expect(source.drain).toHaveBeenCalledTimes(1)
+  expect(browserClient.embedDrainSelection).not.toHaveBeenCalled()
+  expect(result.current.selectMode).toBe(false)
+})
+
+it("drops the picks and the armed state when the pane moves to another page", async () => {
+  const first = fakeSource()
+  const second = fakeSource()
+  const { result, rerender } = renderHook(
+    ({ source }: { source: ElementSelectionSource }) => useElementSelection({ source }),
+    { initialProps: { source: first.source } }
+  )
+  await waitFor(() => expect(first.source.subscribe).toHaveBeenCalled())
+  act(() => first.signal(1, 1))
+  await waitFor(() => expect(result.current.selections).toHaveLength(1))
+  await act(async () => {
+    await result.current.setSelectMode(true)
+  })
+
+  rerender({ source: second.source })
+  expect(result.current.selections).toEqual([])
+  expect(result.current.selection).toBeNull()
+  expect(result.current.selectMode).toBe(false)
+  // The old page's subscription is gone; the new page's is live.
+  expect(first.stop).toHaveBeenCalled()
+  await waitFor(() => expect(second.source.subscribe).toHaveBeenCalled())
 })
 
 it("unsubscribes on unmount", async () => {

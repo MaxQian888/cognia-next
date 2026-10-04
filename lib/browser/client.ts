@@ -23,7 +23,8 @@ import { transport } from "@/lib/tauri"
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value)
 
-function isBrowserSelection(value: unknown): value is BrowserSelection {
+/** Shape check for a pick coming back from a page (the page is untrusted). */
+export function isBrowserSelection(value: unknown): value is BrowserSelection {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   const item = value as Record<string, unknown>
   const rect = item.rect

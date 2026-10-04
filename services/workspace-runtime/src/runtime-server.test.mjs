@@ -580,3 +580,57 @@ test("a named pageId addresses that tab, except where the page is the op's subje
     ["createPage", "s", undefined, { activate: false }],
   ])
 })
+
+test("pick and adjust ops reach the service on the tab they name", async (t) => {
+  const calls = []
+  const browser = serviceStub()
+  browser.withPageTarget = async (sessionId, pageId, operation) => {
+    calls.push(["target", sessionId, pageId])
+    return operation()
+  }
+  for (const method of [
+    "setSelectMode",
+    "drainSelection",
+    "clearSelection",
+    "selectionForRef",
+    "adjust",
+  ]) {
+    browser[method] = async (...args) => {
+      calls.push([method, ...args])
+      return { ok: true }
+    }
+  }
+  const baseUrl = await fixture(t, browser)
+  const control = (type, payload) =>
+    fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${"x".repeat(32)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ version: 1, type, payload }),
+    })
+  const labels = { details: "Details", collapse: "Hide" }
+  await control("browser.select-mode", { sessionId: "s", pageId: "p2", on: true, labels })
+  await control("browser.selection.drain", { sessionId: "s", pageId: "p2" })
+  await control("browser.selection.clear", { sessionId: "s", pageId: "p2" })
+  await control("browser.selection.for-ref", { sessionId: "s", pageId: "p2", ref: "r1" })
+  await control("browser.adjust", {
+    sessionId: "s",
+    pageId: "p2",
+    action: "revert",
+    input: { previewId: "x" },
+  })
+  assert.deepEqual(calls, [
+    ["target", "s", "p2"],
+    ["setSelectMode", "s", true, labels],
+    ["target", "s", "p2"],
+    ["drainSelection", "s"],
+    ["target", "s", "p2"],
+    ["clearSelection", "s"],
+    ["target", "s", "p2"],
+    ["selectionForRef", "s", "r1"],
+    ["target", "s", "p2"],
+    ["adjust", "s", "revert", { previewId: "x" }],
+  ])
+})

@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react"
 
-import { browserClient } from "@/lib/browser/client"
-import {
-  BROWSER_EVENTS,
-  type BrowserNavigated,
-  type BrowserSelection,
-  type BrowserSelectionSignal,
+import type {
+  BrowserNavigated,
+  BrowserSelection,
+  BrowserSelectionSignal,
 } from "@/lib/browser/protocol"
+import {
+  embeddedSelectionSource,
+  type ElementSelectionSource,
+} from "@/lib/browser/selection-source"
 import { isTauri } from "@/lib/tauri"
-import { onTauriEvent } from "@/lib/tauri/events"
-import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+
+const NO_SELECTIONS: BrowserSelection[] = []
 
 export interface UseElementSelection {
   /** The most recently picked element, or null. */
@@ -29,34 +31,42 @@ export interface UseElementSelection {
 
 export interface UseElementSelectionOptions {
   /**
-   * Drives the in-page picker on/off. Defaults to the embedded-pane command;
-   * callers may inject a different driver.
+   * The engine the page runs in. Defaults to the embedded webview; a local
+   * Chromium pane passes {@link localSelectionSource} for the page it shows.
+   * Keep it referentially stable: a new source re-subscribes.
    */
-  driver?: (on: boolean) => Promise<void>
+  source?: ElementSelectionSource
   /**
-   * Whether this pane owns the shared page→Rust channel. Defaults to true.
+   * Whether this pane owns the page's pick channel. Defaults to true.
    *
-   * `embedDrainSelection` empties a buffer that lives in the page, so it is a
-   * one-shot read: with two panes mounted, both wake on the same
-   * `browser://element-selected` event, both drain, and the loser burns its
-   * five retries before silently dropping the pick. Only the lease holder may
-   * subscribe.
+   * A drain empties a buffer that lives in the page, so it is a one-shot
+   * read: with two panes mounted, both wake on the same signal, both drain,
+   * and the loser burns its five retries before silently dropping the pick.
+   * Only the lease holder (embedded) or the pane showing the page (Chromium)
+   * may subscribe.
    */
   enabled?: boolean
 }
 
 /**
- * Subscribes to the in-app browser's Rust-emitted events and exposes the
- * picker toggle. Teardown uses {@link safeUnlisten} to tolerate the StrictMode
- * mount→unmount→mount unlisten race.
+ * Subscribes to a pane's pick signals and exposes the picker toggle. The
+ * embedded source's teardown tolerates the StrictMode mount→unmount→mount
+ * unlisten race.
  */
 export function useElementSelection(options: UseElementSelectionOptions = {}): UseElementSelection {
-  const driver = options.driver ?? browserClient.embedSetSelectMode
+  const source = options.source ?? embeddedSelectionSource
   const enabled = options.enabled !== false
-  const [selection, setSelection] = useState<BrowserSelection | null>(null)
-  const [selections, setSelections] = useState<BrowserSelection[]>([])
+  // Picks and the armed state belong to the source (the page) they came
+  // from: a pane that moves to another page starts with neither.
+  const [picks, setPicks] = useState<{
+    source: ElementSelectionSource
+    selections: BrowserSelection[]
+  } | null>(null)
   const [navigated, setNavigated] = useState<BrowserNavigated | null>(null)
-  const [selectMode, setSelectModeState] = useState(false)
+  const [armedSource, setArmedSource] = useState<ElementSelectionSource | null>(null)
+  const selections = picks?.source === source ? picks.selections : NO_SELECTIONS
+  const selection = selections.at(-1) ?? null
+  const selectMode = armedSource === source
 
   useEffect(() => {
     if (!isTauri() || !enabled) return
@@ -64,12 +74,7 @@ export function useElementSelection(options: UseElementSelectionOptions = {}): U
     let draining = false
     let handledGeneration = 0
     let pendingSignal: BrowserSelectionSignal | null = null
-    const subs: Array<() => void> = []
-    const add = async <T>(event: string, handler: (p: T) => void) => {
-      const unlisten = await onTauriEvent<T>(event, handler)
-      if (cancelled) unlisten()
-      else subs.push(unlisten)
-    }
+    let unsubscribe: (() => void) | null = null
     const drainPending = async () => {
       if (draining || !pendingSignal) return
       draining = true
@@ -81,7 +86,7 @@ export function useElementSelection(options: UseElementSelectionOptions = {}): U
           if (delay) await new Promise((resolve) => globalThis.setTimeout(resolve, delay))
           if (cancelled) return
           try {
-            const candidate = await browserClient.embedDrainSelection()
+            const candidate = await source.drain()
             if (candidate.length < signal.count) throw new Error("incomplete selection drain")
             drained = candidate
             break
@@ -92,20 +97,19 @@ export function useElementSelection(options: UseElementSelectionOptions = {}): U
         if (!drained) throw lastError
         if (cancelled) return
         handledGeneration = Math.max(handledGeneration, signal.generation)
-        setSelections(drained)
-        setSelection(drained.at(-1) ?? null)
-        setSelectModeState(false) // the overlay disarms itself after a pick
+        setPicks({ source, selections: drained })
+        setArmedSource(null) // the overlay disarms itself after a pick
       } catch {
         // Keep the prior renderer state. The page buffer is intentionally left
         // intact and a restored document will re-signal it after navigation.
-        if (!cancelled) setSelectModeState(false)
+        if (!cancelled) setArmedSource(null)
       } finally {
         draining = false
         if (pendingSignal === signal) pendingSignal = null
         if (!cancelled && pendingSignal) void drainPending()
       }
     }
-    void add<BrowserSelectionSignal>(BROWSER_EVENTS.elementSelected, (signal) => {
+    const onSignal = (signal: BrowserSelectionSignal) => {
       if (
         !Number.isSafeInteger(signal.count) ||
         signal.count < 1 ||
@@ -117,29 +121,33 @@ export function useElementSelection(options: UseElementSelectionOptions = {}): U
       }
       if (!pendingSignal || signal.generation >= pendingSignal.generation) pendingSignal = signal
       void drainPending()
-    })
-    void add<BrowserNavigated>(BROWSER_EVENTS.navigated, (payload) => {
+    }
+    const onNavigated = (payload: BrowserNavigated) => {
       handledGeneration = 0
       setNavigated(payload)
-    })
+    }
+    void source
+      .subscribe({ onSignal, onNavigated })
+      .then((stop) => {
+        if (cancelled) stop()
+        else unsubscribe = stop
+      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
-      for (const unlisten of subs) safeUnlisten(unlisten)
+      unsubscribe?.()
     }
-  }, [enabled])
+  }, [enabled, source])
 
   const setSelectMode = useCallback(
     async (on: boolean) => {
-      await driver(on)
-      setSelectModeState(on)
+      await source.setSelectMode(on)
+      setArmedSource(on ? source : null)
     },
-    [driver]
+    [source]
   )
 
-  const clearSelection = useCallback(() => {
-    setSelection(null)
-    setSelections([])
-  }, [])
+  const clearSelection = useCallback(() => setPicks(null), [])
 
   return { selection, selections, navigated, selectMode, setSelectMode, clearSelection }
 }
