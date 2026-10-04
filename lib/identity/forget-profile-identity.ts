@@ -32,6 +32,7 @@ import {
 } from "@/lib/logto/app-session"
 
 import { unbindHostPerson, type HostPersonDeps } from "./host-person"
+import { forgetOfficialPromptDecision } from "./official-sign-in-prompt"
 import { UserBindingRegistry } from "./user-binding"
 
 export const PROFILE_CLOUD_IDENTITY_STEPS = [
@@ -98,6 +99,11 @@ export async function forgetProfileCloudIdentity(
     steps[step] = { status: "failed", error: message }
     failures.push({ step, error: message })
   }
+
+  // The official account's sign-in screen was answered by this profile; a
+  // profile created later under the same id is asked afresh. Not a reported
+  // step: it holds nothing about the person, and its removal cannot fail.
+  forgetOfficialPromptDecision(localAccountId)
 
   let tokensMayRemainLive = false
   try {

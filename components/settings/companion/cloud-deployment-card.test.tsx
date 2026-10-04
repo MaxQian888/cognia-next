@@ -7,6 +7,7 @@ import en from "@/i18n/messages/en/account.json"
 import { CLOUD_OFFLINE_KEY_PREFIX } from "@/components/account/cloud-sign-in-gate"
 import type { DeploymentDiscovery, ReadyDeployment } from "@/lib/identity/deployment-discovery"
 import type { CloudSessionState } from "@/lib/identity/cloud-session"
+import { officialDeployment } from "@/lib/identity/official-deployment"
 
 import { CloudDeploymentCard, type CloudDeploymentCardDeps } from "./cloud-deployment-card"
 
@@ -230,6 +231,38 @@ describe("CloudDeploymentCard", () => {
     expect(screen.getByTestId("cloud-deployment-form")).toBeInTheDocument()
     expect(local.map.has("cognia.cloud.deployment.acct_a")).toBe(false)
     expect(clearHost).toHaveBeenCalledTimes(1)
+  })
+
+  it("presents the official account as the default until a gateway replaces it", async () => {
+    const local = memory()
+    render(
+      <CloudDeploymentCard
+        deps={deps({ storage: { local }, official: () => officialDeployment({}) })}
+      />
+    )
+    expect(screen.getByTestId("cloud-deployment-official")).toHaveTextContent("official.title")
+    expect(screen.getByTestId("cloud-deployment-form")).toBeInTheDocument()
+
+    local.setItem(
+      "cognia.cloud.deployment.acct_b",
+      JSON.stringify({ baseUrl: "https://c.example" })
+    )
+    render(
+      <CloudDeploymentCard
+        deps={deps({
+          localAccountId: "acct_b",
+          storage: { local },
+          official: () => officialDeployment({}),
+        })}
+      />
+    )
+    // With a gateway stored, forgetting it is going back to the official account.
+    expect(await screen.findByTestId("cloud-deployment-forget")).toHaveTextContent("useOfficial")
+  })
+
+  it("leaves the official notice out of a build without the official account", () => {
+    render(<CloudDeploymentCard deps={deps({ official: () => null })} />)
+    expect(screen.queryByTestId("cloud-deployment-official")).not.toBeInTheDocument()
   })
 
   it("keeps the local forget when the host refuses to forget", async () => {

@@ -1532,6 +1532,12 @@
           "urlPlaceholder": "https://cognia.example.com"
         },
         "forget": "Forget",
+        "official": {
+          "default": "Default",
+          "description": "This profile signs in to the official Cognia account ({issuer}). Choose a gateway below only if your organization runs its own deployment.",
+          "selfHosted": "Your organization’s deployment",
+          "title": "Official Cognia account"
+        },
         "result": {
           "collaboration": "Collaboration",
           "collaborationMissing": "Not announced. Sign-in will stop before joining a workspace.",
@@ -1560,7 +1566,8 @@
         "signOutDone": "Signed out of the cloud account.",
         "signOutFailed": "Sign-out failed: {message}",
         "title": "Cloud deployment",
-        "use": "Use this deployment"
+        "use": "Use this deployment",
+        "useOfficial": "Use the official account"
       },
       "description": "This deployment uses a shared identity provider. Sign in once and this profile is yours everywhere.",
       "error": {
@@ -1579,10 +1586,17 @@
         "tokenLabel": "Invitation token",
         "tokenPlaceholder": "Paste the token"
       },
+      "official": {
+        "description": "One account for Cognia on all your devices. Signing in is optional: everything you do stays on this device either way.",
+        "offlineHint": "You can sign in later from Settings → Account. This screen will not appear again.",
+        "privacy": "Cognia keeps only who you are (your name, email and linked sign-ins), never access to the account you sign in with.",
+        "title": "Sign in to your Cognia account"
+      },
       "offline": {
         "body": "Your last session is kept. You can keep working offline and it will refresh once the provider is reachable."
       },
       "provider": {
+        "apple": "Apple",
         "feishu": "Feishu",
         "feishu-web": "Feishu",
         "github": "GitHub",
@@ -1703,13 +1717,42 @@
     },
     "identity": {
       "current": "Current",
+      "deletion": {
+        "awaitingSignIn": "Confirm in your browser",
+        "back": "Back",
+        "backupFirst": "Back up first",
+        "cancel": "Cancel deletion",
+        "cancelled": "Account deletion cancelled.",
+        "confirm": "Sign in again to confirm",
+        "confirmBody": "Your account and its linked sign-ins will be deleted in 7 days. Until then you can sign in and cancel.",
+        "confirmLocal": "Conversations and files on this device are not deleted. Back them up first if you plan to remove this device too.",
+        "delete": "Delete account",
+        "description": "Deletes your Cognia account and its linked sign-ins after 7 days. Everything on this device stays.",
+        "error": {
+          "differentPerson": "You confirmed with a different account than the one signed in here. Nothing was deleted.",
+          "generic": "Could not reach the account service: {message}",
+          "staleSignIn": "That sign-in was not recent enough. Confirm again.",
+          "unauthorized": "Your session expired. Sign in again first."
+        },
+        "loading": "Checking the account",
+        "pending": "Your account will be deleted after {date}.",
+        "pendingNoDate": "Your account is scheduled for deletion.",
+        "requested": "Account deletion scheduled.",
+        "retry": "Try again",
+        "stop": "Stop",
+        "title": "Delete account"
+      },
       "description": "Who this profile is on the shared deployment, and which organization it works in.",
+      "linked": "Signs in with",
+      "linkedNone": "No linked sign-ins reported.",
       "loading": "Reading the cloud session",
       "memberships": "Organizations",
       "membershipsEmpty": "No organizations yet.",
       "membershipsFailed": "Could not read organizations: {message}",
       "membershipsLoading": "Loading organizations",
       "noDeployment": "No cloud deployment is configured for this profile.",
+      "officialDescription": "The person this profile is signed in as, and the sign-ins linked to them.",
+      "officialTitle": "Cognia account",
       "organization": "Organization",
       "person": "Person",
       "revocationFailed": "Signed out locally, but the identity provider could not be told.",
@@ -1719,6 +1762,7 @@
         "member": "Member",
         "owner": "Owner"
       },
+      "selfHosted": "Use your organization’s deployment instead",
       "session": "Session",
       "sessionExpires": "Expires {date}",
       "sessionUnknownExpiry": "Expiry unknown",

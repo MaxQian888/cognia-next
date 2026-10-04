@@ -63,7 +63,8 @@ Usage:
   cognia-agent update [check] [--yes] [--json]         upgrade the CLI through its
                                                        own package manager
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
-  cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
+  cognia-agent logto <login|status|logout>          Cognia account (default) or Logto session
+                     [--provider feishu|github|google|apple]
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
   cognia-agent config <get|set|path>
                      config set agentBackends.<backend>.piExtensionPolicy

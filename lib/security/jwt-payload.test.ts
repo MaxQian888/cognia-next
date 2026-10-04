@@ -27,6 +27,11 @@ describe("decodeJwtPayload", () => {
     }
   })
 
+  it("decodes non-ASCII claims as UTF-8", () => {
+    const token = `header.${Buffer.from(JSON.stringify({ name: "张三 Ünïcode" })).toString("base64url")}.sig`
+    expect(decodeJwtPayload(token)).toEqual({ name: "张三 Ünïcode" })
+  })
+
   it("returns null rather than throwing for anything malformed", () => {
     expect(decodeJwtPayload("")).toBeNull()
     expect(decodeJwtPayload("not-a-jwt")).toBeNull()

@@ -16,6 +16,15 @@
  * and the answer is shown (sign-in methods, collaboration service, join
  * policy) before anything is stored, so a wrong address is a message here
  * rather than an "unavailable" screen at the next boot.
+ *
+ * # The official account is the default
+ *
+ * With nothing stored, a build that offers the official Cognia account
+ * (ADR-0215 §2) signs in there, and the card says so above the form: naming a
+ * gateway is how an organization's self-hosted deployment replaces it, and
+ * forgetting the gateway returns to it. The check asks the typed gateway
+ * only (`officialFallback: false`), so a single-user gateway reads as one
+ * rather than as the official account.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
@@ -48,6 +57,7 @@ import {
   type DeploymentSource,
   type DeploymentSourceDeps,
 } from "@/lib/identity/deployment-source"
+import { officialDeployment, type OfficialDeployment } from "@/lib/identity/official-deployment"
 import { signOutFromLogto, signOutLeftTokensLive } from "@/lib/logto/app-session"
 import { openUrl } from "@/lib/native/opener"
 
@@ -64,6 +74,8 @@ export interface CloudDeploymentCardDeps {
   /** Forget the desktop host's own trust anchor. Defaults to the Tauri command. */
   clearHost?: () => Promise<boolean>
   storage?: DeploymentSourceDeps
+  /** The official account this build offers. Defaults to the build's own. */
+  official?: () => OfficialDeployment | null
 }
 
 export interface CloudDeploymentCardProps {
@@ -91,6 +103,7 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
     depsRef.current = deps
   })
   const [localAccountId] = useState(() => deps.localAccountId ?? getActiveAccountId())
+  const [official] = useState(() => (deps.official ?? officialDeployment)())
   const [stored, setStored] = useState<DeploymentSource | null>(() =>
     loadDeploymentSource(localAccountId, deps.storage)
   )
@@ -140,7 +153,11 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
       const result = await (
         depsRef.current.discover ??
         ((candidate: DeploymentSource) =>
-          discoverDeployment({ localAccountId, deploymentSource: () => candidate }))
+          discoverDeployment({
+            localAccountId,
+            deploymentSource: () => candidate,
+            officialFallback: false,
+          }))
       )(source)
       setChecked({ source, result })
     } catch (cause) {
@@ -350,7 +367,7 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
           data-testid="cloud-deployment-forget"
         >
           <Trash2Icon data-icon="inline-start" />
-          {t("forget")}
+          {official ? t("useOfficial") : t("forget")}
         </Button>
       </div>
     </div>
@@ -360,6 +377,21 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
     <div className="flex flex-col gap-3" data-testid="cloud-deployment-card" data-frame={frame}>
       {frame === "plain" ? (
         <p className="text-xs text-muted-foreground">{t("description")}</p>
+      ) : null}
+      {official && !stored ? (
+        <div
+          className="flex flex-col gap-1 rounded-md border border-border/60 p-3"
+          data-testid="cloud-deployment-official"
+        >
+          <p className="flex items-center gap-2 text-sm font-medium">
+            {t("official.title")}
+            <Badge variant="secondary">{t("official.default")}</Badge>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("official.description", { issuer: safeHost(official.issuer) })}
+          </p>
+          <p className="pt-2 text-xs font-medium">{t("official.selfHosted")}</p>
+        </div>
       ) : null}
       {stored && !editing ? current : form}
     </div>
@@ -379,6 +411,14 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
   )
 }
 
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
 function CheckResult({
   checked,
   providerLabel,
@@ -388,6 +428,9 @@ function CheckResult({
 }) {
   const t = useTranslations("account.cloud.deployment")
   const { result } = checked
+  // A check never falls back to the official account; should a caller's
+  // discovery do so anyway, it still is not this gateway accepting sign-in.
+  const status = result.status === "official" ? "none" : result.status
   let content: ReactNode
   if (result.status === "ready") {
     content = (
@@ -410,7 +453,7 @@ function CheckResult({
         ) : null}
       </dl>
     )
-  } else if (result.status === "none") {
+  } else if (result.status === "none" || result.status === "official") {
     content = <p className="text-xs text-muted-foreground">{t("result.singleUser")}</p>
   } else {
     content = (
@@ -423,9 +466,9 @@ function CheckResult({
     <div
       className="rounded-md border border-border/60 p-3"
       data-testid="cloud-deployment-result"
-      data-status={result.status}
+      data-status={status}
     >
-      <p className="mb-2 text-xs font-medium">{t(`result.status.${result.status}`)}</p>
+      <p className="mb-2 text-xs font-medium">{t(`result.status.${status}`)}</p>
       {content}
     </div>
   )

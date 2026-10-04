@@ -8,7 +8,7 @@
 
 import { useId, useState, type FormEvent, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { CloudIcon, LogInIcon, LogOutIcon, WifiOffIcon } from "lucide-react"
+import { CloudIcon, LogInIcon, LogOutIcon, UserRoundIcon, WifiOffIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ import {
   type SocialProvider,
 } from "@/lib/identity/deployment-discovery"
 import type { CloudSessionReauthReason } from "@/lib/identity/cloud-session"
+import type { OfficialDeployment, OfficialSocialProvider } from "@/lib/identity/official-deployment"
 import type { LogtoClientConfig } from "@/lib/logto/client"
 
 export type CloudSignInView =
@@ -34,6 +35,12 @@ export type CloudSignInView =
       /** Why a previous session is not enough, when there was one. */
       reauth?: CloudSessionReauthReason | "offline"
       canContinueOffline: boolean
+    }
+  | {
+      /** The official Cognia account: personal, its providers only, no advanced form. */
+      kind: "official"
+      deployment: OfficialDeployment
+      reauth?: CloudSessionReauthReason
     }
   | { kind: "awaiting-code" }
   | { kind: "signing-in" }
@@ -53,6 +60,7 @@ export interface CloudSignInScreenProps {
   /** Shown once a session exists, so the person knows who they are joining as. */
   personName?: string | null
   onSocial: (provider: SocialProvider) => void
+  onOfficialProvider: (provider: OfficialSocialProvider) => void
   onLogto: () => void
   onManual: (config: LogtoClientConfig) => void
   onSubmitCode: (pasted: string) => void
@@ -88,6 +96,8 @@ export function CloudSignInScreen(props: CloudSignInScreenProps) {
         ) : null}
 
         {view.kind === "sign-in" ? <SignInBody {...props} view={view} /> : null}
+
+        {view.kind === "official" ? <OfficialBody {...props} view={view} /> : null}
 
         {view.kind === "awaiting-code" ? (
           <CodeForm busy={busy} onSubmit={props.onSubmitCode} onCancel={props.onCancelCode} />
@@ -175,7 +185,7 @@ function Pending({ label }: { label: string }) {
   )
 }
 
-function OfflineButton({ onClick }: { onClick: () => void }) {
+function OfflineButton({ onClick, hint }: { onClick: () => void; hint?: string }) {
   const t = useTranslations("account.cloud")
   return (
     <div className="flex flex-col gap-1">
@@ -183,7 +193,7 @@ function OfflineButton({ onClick }: { onClick: () => void }) {
         <WifiOffIcon data-icon="inline-start" />
         {t("continueOffline")}
       </Button>
-      <p className="text-xs text-muted-foreground">{t("continueOfflineHint")}</p>
+      <p className="text-xs text-muted-foreground">{hint ?? t("continueOfflineHint")}</p>
     </div>
   )
 }
@@ -260,6 +270,46 @@ function SignInBody({
         </Button>
         {advanced ? <ManualForm busy={busy} onSubmit={onManual} /> : null}
       </div>
+    </div>
+  )
+}
+
+function OfficialBody({
+  view,
+  busy,
+  onOfficialProvider,
+  onContinueOffline,
+}: CloudSignInScreenProps & { view: Extract<CloudSignInView, { kind: "official" }> }) {
+  const t = useTranslations("account.cloud")
+  return (
+    <div className="flex flex-col gap-4" data-testid="cloud-sign-in-official">
+      <Heading icon={<UserRoundIcon className="size-5" aria-hidden />}>
+        {t("official.title")}
+      </Heading>
+      {view.reauth ? (
+        <p className="text-sm" data-testid={`cloud-sign-in-reauth-${view.reauth}`}>
+          {t(`reauth.${view.reauth}`)}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("official.description")}</p>
+      )}
+      <div className="flex flex-col gap-2">
+        {view.deployment.social.map((provider) => (
+          <Button
+            key={provider}
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onOfficialProvider(provider)}
+            data-testid={`cloud-sign-in-official-${provider}`}
+          >
+            <LogInIcon data-icon="inline-start" />
+            {t("continueWith", { provider: t(`provider.${provider}`) })}
+          </Button>
+        ))}
+      </div>
+      <OfflineButton onClick={onContinueOffline} hint={t("official.offlineHint")} />
+      <p className="text-xs text-muted-foreground">{t("official.privacy")}</p>
     </div>
   )
 }

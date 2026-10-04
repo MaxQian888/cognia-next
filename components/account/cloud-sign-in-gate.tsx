@@ -14,6 +14,18 @@
  * looks the person's memberships up and either adopts the one org, offers
  * the several, or asks for an invitation or the bootstrap credential.
  *
+ * # The official account
+ *
+ * With no self-hosted deployment, discovery offers the official Cognia
+ * account instead (`status: "official"`, ADR-0215 §2). It is personal: an
+ * active session passes with no organization, and signing in binds the
+ * profile and links the person's sign-ins (`personal-sign-in.ts`). Its screen
+ * is offered ONCE per profile (`official-sign-in-prompt.ts`): signing in or
+ * continuing offline is remembered for good, and after that Settings →
+ * Account asks for the screen through `sign-in-request.ts`. Answering that
+ * request swaps the app for the screen until it is done, the same as a
+ * deployment chosen in Settings re-runs the decision.
+ *
  * # Offline is a choice, not a failure
  *
  * The local profile works without the cloud. "Continue offline" is always on
@@ -36,11 +48,8 @@ import { extractCallback } from "@/lib/logto/extract-callback"
 import { isDevLocalAccountEnabled } from "@/lib/accounts/dev-auto-unlock"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
-import { isCapacitor as detectCapacitor } from "@/lib/platform/detect"
-import { openUrl } from "@/lib/native/opener"
-import { createLogtoWebPopupDrivers } from "@/lib/logto/web-popup"
-import { waitForLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
-import { LogtoSignInCancelled, createLogtoCapacitorDrivers } from "@/lib/logto/capacitor-drivers"
+import { platformSignInDrivers } from "@/lib/logto/platform-drivers"
+import { LogtoSignInCancelled } from "@/lib/logto/capacitor-drivers"
 import { signOutFromLogto } from "@/lib/logto/app-session"
 import { CollabError, type CollabAccountMembership } from "@/lib/collab/client"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
@@ -56,6 +65,12 @@ import {
 } from "@/lib/identity/deployment-discovery"
 import { subscribeDeploymentSource } from "@/lib/identity/deployment-source"
 import {
+  recordOfficialPromptDecision,
+  shouldOfferOfficialSignIn,
+} from "@/lib/identity/official-sign-in-prompt"
+import { signInToOfficialAccount } from "@/lib/identity/personal-sign-in"
+import { subscribeCloudSignInRequest } from "@/lib/identity/sign-in-request"
+import {
   CloudSignInError,
   adoptOrganization,
   claimDeployment,
@@ -67,13 +82,9 @@ import {
 import { isShareViewerRoute } from "@/lib/share/viewer-context"
 import { useAccountStore } from "@/stores/account/account-store"
 
-import {
-  nativeCallbackUriFor,
-  type LogtoDrivers,
-  type LogtoSession,
-  type OidcIssuerKind,
-} from "@/lib/logto/client"
+import { type LogtoSession, type OidcIssuerKind } from "@/lib/logto/client"
 import type { SocialProvider } from "@/lib/identity/deployment-discovery"
+import type { OfficialDeployment, OfficialSocialProvider } from "@/lib/identity/official-deployment"
 
 import { CloudSignInScreen, type CloudSignInView } from "./cloud-sign-in-screen"
 
@@ -84,6 +95,8 @@ export interface CloudSignInGateDeps {
   discover?: () => Promise<DeploymentDiscovery>
   readState?: (localAccountId: string) => Promise<CloudSessionState>
   signIn?: typeof signInWithDeployment
+  /** Sign in to the official account. Defaults to the personal flow. */
+  signInOfficial?: typeof signInToOfficialAccount
   settle?: typeof settleAfterSignIn
   adopt?: typeof adoptOrganization
   claim?: typeof claimDeployment
@@ -159,6 +172,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   // the decision runs again against the new host without a reload.
   const [discoveryEpoch, setDiscoveryEpoch] = useState(0)
   const deploymentRef = useRef<ReadyDeployment | null>(null)
+  const officialRef = useRef<OfficialDeployment | null>(null)
   const sessionRef = useRef<LogtoSession | null>(null)
   // The decision effect reads its collaborators through refs: the deps
   // object, the translator and the settle step all take new identities on
@@ -260,6 +274,26 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
 
   useEffect(() => subscribeDeploymentSource(() => setDiscoveryEpoch((epoch) => epoch + 1)), [])
 
+  // Settings → Account asks for the screen; the gate shows it for the
+  // deployment it already discovered, without a reload.
+  useEffect(
+    () =>
+      subscribeCloudSignInRequest((request) => {
+        if (request.localAccountId !== localAccountId) return
+        const official = officialRef.current
+        const deployment = deploymentRef.current
+        if (!official && !deployment) return
+        setError(null)
+        setView(
+          official
+            ? { kind: "official", deployment: official }
+            : { kind: "sign-in", deployment: deployment!, canContinueOffline: true }
+        )
+        setPhase("screen")
+      }),
+    [localAccountId]
+  )
+
   // The decision, once per profile, path and chosen deployment. Deferred out
   // of the effect body so no state is set synchronously inside it.
   useEffect(() => {
@@ -284,9 +318,38 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
         if (cancelled) return
         if (discovery.status === "none") {
           deploymentRef.current = null
+          officialRef.current = null
           setPhase("pass")
           return
         }
+        if (discovery.status === "official") {
+          deploymentRef.current = null
+          officialRef.current = discovery.deployment
+          const state = await (
+            depsRef.current.readState ??
+            ((id: string) => readCloudSessionState({ localAccountId: id }))
+          )(localAccountId)
+          if (cancelled) return
+          // A session (or one kept while its issuer is unreachable) is enough:
+          // the official account has no organization to settle. Without one,
+          // the screen is offered until the profile answers it, once.
+          if (
+            state.status === "active" ||
+            state.status === "offline" ||
+            !shouldOfferOfficialSignIn(localAccountId)
+          ) {
+            setPhase("pass")
+            return
+          }
+          setView({
+            kind: "official",
+            deployment: discovery.deployment,
+            ...(state.status === "reauth-required" ? { reauth: state.reason } : {}),
+          })
+          setPhase("screen")
+          return
+        }
+        officialRef.current = null
         if (discovery.status === "unavailable") {
           if (hasChosenOffline(localAccountId)) {
             setPhase("pass")
@@ -365,65 +428,36 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   }, [loaded, locked, localAccountId, ungated, discoveryEpoch])
 
   const driversFor = useCallback(
-    (
-      issuerKind: OidcIssuerKind
-    ): {
-      drivers: LogtoDrivers
-      redirectUri: string
-      clientKind: "web" | "native"
-    } => {
-      // Logto keeps the callback its native application registered; any other
-      // issuer gets the RFC 8252 reverse-domain one (ADR-0215 §2).
-      const nativeRedirectUri = nativeCallbackUriFor(issuerKind)
-      // The Capacitor WebView cannot pop a window and has no https origin to
-      // land on, so it is asked before the popup test that would otherwise
-      // claim it: the in-app browser plus the native deep link is its path.
-      if ((deps.isCapacitor ?? detectCapacitor)()) {
-        return {
-          drivers: createLogtoCapacitorDrivers(),
-          redirectUri: nativeRedirectUri,
-          clientKind: "native",
-        }
-      }
-      const profile = deps.profile ?? detectHostProfile()
-      const popupCapable =
-        profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
-      if (popupCapable) {
-        return {
-          drivers: createLogtoWebPopupDrivers(),
-          redirectUri: `${window.location.origin}/logto/callback`,
-          clientKind: "web",
-        }
-      }
-      // The desktop has no popup: the system browser is sent to the deep link
-      // registered on the native application. The OS hands that link back to
-      // the running app, which resolves the wait on its own; pasting the
-      // address stays available for a browser that never comes back.
-      return {
-        drivers: {
-          openUrl: (url) => {
-            void openUrl(url)
-          },
-          waitForCode: ({ state }) => {
-            pendingState.current = state
-            setView({ kind: "awaiting-code" })
-            deepLinkWait.current?.abort()
-            const controller = new AbortController()
-            deepLinkWait.current = controller
-            const pasted = new Promise<{ code: string; state: string }>((resolve, reject) => {
-              codeResolver.current = resolve
-              codeRejecter.current = reject
-            })
-            const delivered = waitForLogtoDeepLinkCallback({ state, signal: controller.signal })
-            return Promise.race([pasted, delivered]).finally(() => controller.abort())
-          },
+    (issuerKind: OidcIssuerKind) => {
+      deepLinkWait.current?.abort()
+      const controller = new AbortController()
+      deepLinkWait.current = controller
+      return platformSignInDrivers({
+        issuerKind,
+        ...(deps.profile ? { profile: deps.profile } : {}),
+        ...(deps.isCapacitor ? { isCapacitor: deps.isCapacitor } : {}),
+        signal: controller.signal,
+        // The desktop also accepts a pasted callback address, for a browser
+        // that never hands the deep link back.
+        pasted: (state) => {
+          pendingState.current = state
+          setView({ kind: "awaiting-code" })
+          return new Promise<{ code: string; state: string }>((resolve, reject) => {
+            codeResolver.current = resolve
+            codeRejecter.current = reject
+          })
         },
-        redirectUri: nativeRedirectUri,
-        clientKind: "native",
-      }
+      })
     },
     [deps.profile, deps.isCapacitor]
   )
+
+  const endCodeWait = () => {
+    codeResolver.current = null
+    codeRejecter.current = null
+    deepLinkWait.current?.abort()
+    deepLinkWait.current = null
+  }
 
   const runSignIn = async (method: CloudSignInMethod) => {
     const deployment = deploymentRef.current
@@ -449,10 +483,34 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       setError(message || null)
       setView({ kind: "sign-in", deployment, canContinueOffline: true })
     } finally {
-      codeResolver.current = null
-      codeRejecter.current = null
-      deepLinkWait.current?.abort()
-      deepLinkWait.current = null
+      endCodeWait()
+    }
+  }
+
+  const runOfficialSignIn = async (provider: OfficialSocialProvider) => {
+    const deployment = officialRef.current
+    if (!deployment || !localAccountId) return
+    setError(null)
+    setBusy(true)
+    const { drivers, redirectUri, clientKind } = driversFor(deployment.issuerKind)
+    setView({ kind: "signing-in" })
+    try {
+      await (deps.signInOfficial ?? signInToOfficialAccount)(
+        deployment,
+        drivers,
+        { redirectUri, clientKind, socialProvider: provider },
+        { localAccountId }
+      )
+      recordOfficialPromptDecision(localAccountId, "signed-in")
+      setBusy(false)
+      setPhase("pass")
+    } catch (cause) {
+      setBusy(false)
+      const message = explain(cause)
+      setError(message || null)
+      setView({ kind: "official", deployment })
+    } finally {
+      endCodeWait()
     }
   }
 
@@ -491,6 +549,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       onSocial={(provider: SocialProvider) =>
         void runSignIn({ kind: "social", directSignIn: provider.directSignIn })
       }
+      onOfficialProvider={(provider) => void runOfficialSignIn(provider)}
       onLogto={() => void runSignIn({ kind: "logto" })}
       onManual={(config) => void runSignIn({ kind: "manual", config })}
       onSubmitCode={(pasted) => {
@@ -509,11 +568,14 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       }}
       onCancelCode={() => {
         codeRejecter.current?.(new CloudSignInError("cancelled", "cancelled"))
+        const official = officialRef.current
         const deployment = deploymentRef.current
-        if (deployment) setView({ kind: "sign-in", deployment, canContinueOffline: true })
+        if (official) setView({ kind: "official", deployment: official })
+        else if (deployment) setView({ kind: "sign-in", deployment, canContinueOffline: true })
       }}
       onContinueOffline={() => {
-        rememberOffline(localAccountId)
+        if (view.kind === "official") recordOfficialPromptDecision(localAccountId, "offline")
+        else rememberOffline(localAccountId)
         setPhase("pass")
       }}
       onChoose={(membership: CollabAccountMembership) =>

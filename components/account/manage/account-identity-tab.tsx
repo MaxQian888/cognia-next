@@ -8,6 +8,14 @@
  * Reads the same cloud session state the settings card reads, and switches
  * organizations through the same `adoptOrganization` the sign-in gate uses,
  * so there is one way to change standing and it is tested once.
+ *
+ * # The official account
+ *
+ * When discovery offers the official Cognia account (ADR-0215 §2) the tab is
+ * personal: the person, the sign-ins the issuer linked to them, the session,
+ * and the account's deletion. There is no organization. "Sign in" asks the
+ * gate for its screen (`sign-in-request.ts`) instead of reloading, and the
+ * deployment card below names a self-hosted gateway that would replace it.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -23,11 +31,15 @@ import { adoptOrganization } from "@/lib/identity/cloud-sign-in-flow"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
 import { discoverDeployment, type DeploymentDiscovery } from "@/lib/identity/deployment-discovery"
+import { issuerIdentities } from "@/lib/identity/issuer-identities"
+import { externalProviderFor } from "@/lib/identity/link-signed-in-identities"
+import { requestCloudSignIn } from "@/lib/identity/sign-in-request"
 import { signOutFromLogto, signOutLeftTokensLive } from "@/lib/logto/app-session"
 import { openUrl } from "@/lib/native/opener"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
 import { forgetOfflineChoice } from "@/components/account/cloud-sign-in-gate"
 import { CloudDeploymentCard } from "@/components/settings/companion/cloud-deployment-card"
+import { OfficialAccountDeletion } from "@/components/account/manage/official-account-deletion"
 
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
@@ -43,6 +55,8 @@ export interface AccountIdentityTabDeps {
     localAccountId: string
   ) => Promise<{ endSessionUrl?: string | null; tokensLive: boolean }>
   reload?: () => void
+  /** Ask the gate for its sign-in screen. Defaults to the request bus. */
+  requestSignIn?: (localAccountId: string) => void
 }
 
 export interface AccountIdentityTabProps {
@@ -67,6 +81,7 @@ async function defaultSignOut(localAccountId: string) {
 
 export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabProps) {
   const t = useTranslations("account.identity")
+  const tProvider = useTranslations("account.cloud.provider")
   const [state, setState] = useState<CloudSessionState | null>(null)
   const [discovery, setDiscovery] = useState<DeploymentDiscovery | null>(null)
   const [memberships, setMemberships] = useState<CollabAccountMembership[] | null>(null)
@@ -145,6 +160,10 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
   }
 
   const signIn = () => {
+    if (discovery?.status === "official") {
+      ;(depsRef.current.requestSignIn ?? requestCloudSignIn)(account.id)
+      return
+    }
     // The gate decides at boot. Forget the tab's offline choice and let it.
     forgetOfflineChoice(account.id)
     ;(depsRef.current.reload ?? (() => window.location.reload()))()
@@ -160,6 +179,17 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
   }
 
   const currentOrgId = state.status === "active" ? state.identity.orgId : undefined
+  const official = discovery.status === "official" ? discovery.deployment : null
+  const linked =
+    official && state.status === "active"
+      ? issuerIdentities(state.session).map((identity) => {
+          const provider = externalProviderFor(identity.provider) ?? identity.provider
+          return {
+            key: `${identity.provider}:${identity.tenant ?? ""}:${identity.subject}`,
+            label: provider === "lark" ? "feishu" : provider,
+          }
+        })
+      : []
 
   return (
     <div
@@ -170,9 +200,11 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
       <div>
         <h3 className="flex items-center gap-2 text-sm font-medium">
           <CloudIcon className="size-4" aria-hidden />
-          {t("title")}
+          {official ? t("officialTitle") : t("title")}
         </h3>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
+        <p className="text-xs text-muted-foreground">
+          {official ? t("officialDescription") : t("description")}
+        </p>
       </div>
 
       {state.status === "active" ? (
@@ -181,12 +213,29 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
           <dd className="truncate" data-testid="account-identity-person">
             {state.identity.displayName ?? state.identity.email ?? state.identity.userId}
           </dd>
-          <dt className="text-muted-foreground">{t("organization")}</dt>
-          <dd className="truncate font-mono text-xs" data-testid="account-identity-org">
-            {memberships?.find((row) => row.orgId === currentOrgId)?.orgName ??
-              currentOrgId ??
-              t("membershipsEmpty")}
-          </dd>
+          {official ? (
+            <>
+              <dt className="text-muted-foreground">{t("linked")}</dt>
+              <dd className="text-xs" data-testid="account-identity-linked">
+                {linked.length > 0
+                  ? linked
+                      .map((identity) =>
+                        tProvider.has(identity.label) ? tProvider(identity.label) : identity.label
+                      )
+                      .join(", ")
+                  : t("linkedNone")}
+              </dd>
+            </>
+          ) : (
+            <>
+              <dt className="text-muted-foreground">{t("organization")}</dt>
+              <dd className="truncate font-mono text-xs" data-testid="account-identity-org">
+                {memberships?.find((row) => row.orgId === currentOrgId)?.orgName ??
+                  currentOrgId ??
+                  t("membershipsEmpty")}
+              </dd>
+            </>
+          )}
           {state.identity.orgRole ? (
             <>
               <dt className="text-muted-foreground">{t("role")}</dt>
@@ -207,7 +256,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
         </p>
       )}
 
-      {state.status === "active" ? (
+      {state.status === "active" && !official ? (
         <section className="flex flex-col gap-2">
           <h4 className="text-xs font-medium text-muted-foreground">{t("memberships")}</h4>
           {membershipsError ? (
@@ -268,7 +317,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
             <LogOutIcon data-icon="inline-start" />
             {t("signOut")}
           </Button>
-        ) : discovery.status === "ready" ? (
+        ) : discovery.status === "ready" || official ? (
           <Button type="button" size="sm" onClick={signIn} data-testid="account-identity-sign-in">
             <LogInIcon data-icon="inline-start" />
             {t("signIn")}
@@ -276,12 +325,19 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
         ) : null}
       </div>
 
+      {official && state.status === "active" ? (
+        <OfficialAccountDeletion deployment={official} session={state.session} />
+      ) : null}
+
       {discovery.status !== "ready" ? (
         // No deployment to sign in to: the only useful control is naming one.
         // A desktop or a phone cannot discover a cloud deployment any other
-        // way, and the card's own explanation replaces the bare notice.
+        // way, and the card's own explanation replaces the bare notice. With
+        // the official account, the card is how a self-hosted one replaces it.
         <section className="flex flex-col gap-2" data-testid="account-identity-deployment">
-          <h4 className="text-xs font-medium text-muted-foreground">{t("noDeployment")}</h4>
+          <h4 className="text-xs font-medium text-muted-foreground">
+            {official ? t("selfHosted") : t("noDeployment")}
+          </h4>
           <CloudDeploymentCard frame="plain" deps={{ localAccountId: account.id }} />
         </section>
       ) : null}

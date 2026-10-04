@@ -1,6 +1,14 @@
 /**
- * `cognia-agent logto <login|status|logout>` — obtain and manage a Logto OIDC
- * session for the cloud/headless multi-user deployment (ADR-0059).
+ * `cognia-agent logto <login|status|logout>` — obtain and manage an OIDC
+ * session: the official Cognia account by default (ADR-0215), or a
+ * self-hosted Logto deployment (ADR-0059) when its issuer is named.
+ *
+ * `login` with no issuer configured signs in to the official account with the
+ * first-party `cognia-app` client; `--provider feishu|github|google|apple`
+ * goes straight to that provider, and `COGNIA_ID_ISSUER` /
+ * `COGNIA_ID_AUDIENCE` point it at staging or a local identity Worker.
+ * `--issuer`, `--client-id` and `--resource` (or `COGNIA_LOGTO_*`) together
+ * select a self-hosted Logto instead; naming only some of them is an error.
  *
  * `login` runs the authorization-code + PKCE flow: it stands up a loopback
  * callback server (`../mcp/oauth-callback-server`), opens the browser
@@ -18,6 +26,13 @@ import {
   type LogtoClientConfig,
   type LogtoDrivers,
 } from "@/lib/logto/client"
+
+import {
+  isOfficialSocialProvider,
+  officialDeployment,
+  officialLogtoConfig,
+  OFFICIAL_SOCIAL_PROVIDERS,
+} from "@/lib/identity/official-deployment"
 
 import { resolveHome } from "../config/load"
 import {
@@ -77,16 +92,31 @@ async function loginSub(
   const issuer = stringFlag(args, "issuer") ?? env.COGNIA_LOGTO_ISSUER
   const clientId = stringFlag(args, "client-id") ?? env.COGNIA_LOGTO_CLIENT_ID
   const resource = stringFlag(args, "resource") ?? env.COGNIA_LOGTO_AUDIENCE
-  if (!issuer || !clientId || !resource) {
+  const provider = stringFlag(args, "provider")
+  const official = !issuer && !clientId && !resource
+  if (!official && (!issuer || !clientId || !resource)) {
     out.error(
-      "logto login: --issuer, --client-id and --resource are required " +
-        "(or set COGNIA_LOGTO_ISSUER / COGNIA_LOGTO_CLIENT_ID / COGNIA_LOGTO_AUDIENCE)"
+      "logto login: --issuer, --client-id and --resource go together " +
+        "(or set COGNIA_LOGTO_ISSUER / COGNIA_LOGTO_CLIENT_ID / COGNIA_LOGTO_AUDIENCE); " +
+        "name none of them to sign in to the official Cognia account"
+    )
+    return 2
+  }
+  if (provider && (!official || !isOfficialSocialProvider(provider))) {
+    out.error(
+      official
+        ? `logto login: --provider must be one of ${OFFICIAL_SOCIAL_PROVIDERS.join(", ")}`
+        : "logto login: --provider applies to the official Cognia account only"
     )
     return 2
   }
   const scopesRaw = stringFlag(args, "scope") ?? env.COGNIA_LOGTO_SCOPES
   const scopes = scopesRaw ? scopesRaw.split(/[,\s]+/).filter(Boolean) : undefined
   const organizationId = stringFlag(args, "org") ?? env.COGNIA_LOGTO_ORG
+  if (official && organizationId) {
+    out.error("logto login: --org applies to a self-hosted Logto deployment only")
+    return 2
+  }
 
   const startCallbackServer = deps.startCallbackServer ?? defaultStartCallback
   const openBrowser = deps.openBrowser ?? defaultOpenBrowser
@@ -95,14 +125,25 @@ async function loginSub(
 
   const server = await startCallbackServer({})
   try {
-    const config: LogtoClientConfig = {
-      issuer,
-      clientId,
-      redirectUri: server.redirectUrl,
-      resource,
-      scopes,
-      organizationId,
-    }
+    const config: LogtoClientConfig = official
+      ? officialLogtoConfig(
+          // Always on for the CLI: the self-hosted web image's build flag
+          // does not apply here, and COGNIA_ID_* replace the defaults.
+          officialDeployment({ issuer: env.COGNIA_ID_ISSUER, audience: env.COGNIA_ID_AUDIENCE })!,
+          {
+            redirectUri: server.redirectUrl,
+            clientKind: "native",
+            ...(provider && isOfficialSocialProvider(provider) ? { socialProvider: provider } : {}),
+          }
+        )
+      : {
+          issuer: issuer!,
+          clientId: clientId!,
+          redirectUri: server.redirectUrl,
+          resource: resource!,
+          scopes,
+          organizationId,
+        }
     const drivers: LogtoDrivers = {
       openUrl: async (url) => {
         const opened = await openBrowser(url)
@@ -119,7 +160,7 @@ async function loginSub(
     const session = await login(config, drivers)
     writeLogtoSessionFile(home, session, deps.sessionFs)
     out.write(
-      `Signed in to Logto (resource ${session.resource}` +
+      `Signed in to ${accountName(session)} (resource ${session.resource}` +
         `${session.organizationId ? `, org ${session.organizationId}` : ""}).\n` +
         `Saved session to ${home}/logto.json\n`
     )
@@ -130,6 +171,11 @@ async function loginSub(
   } finally {
     server.close()
   }
+}
+
+/** What to call the account a session belongs to. */
+function accountName(session: { issuerKind?: string }): string {
+  return session.issuerKind === "oidc" ? "your Cognia account" : "Logto"
 }
 
 /**
@@ -174,19 +220,20 @@ function statusSub(deps: LogtoCommandDeps, out: OutputSink, home: string): numbe
   const session = readLogtoSessionFile(home, deps.sessionFs)
   if (!session) {
     out.write(
-      "Not signed in to Logto. Run: " +
-        "cognia-agent logto login --issuer <url> --client-id <id> --resource <api>\n"
+      "Not signed in. Run: cognia-agent logto login [--provider feishu|github|google|apple]\n" +
+        "  (or, for a self-hosted Logto: --issuer <url> --client-id <id> --resource <api>)\n"
     )
     return 0
   }
   const now = (deps.now ?? Date.now)()
   const expired = session.expiresAt !== undefined && session.expiresAt <= now
   const expires = session.expiresAt ? new Date(session.expiresAt).toISOString() : "unknown"
+  const name = accountName(session)
   const heading = expired
     ? session.refreshToken
-      ? "Signed in to Logto (access token expired; will refresh on next use)\n"
-      : "Logto session expired; run `cognia-agent logto login` again\n"
-    : "Signed in to Logto\n"
+      ? `Signed in to ${name} (access token expired; will refresh on next use)\n`
+      : `Session for ${name} expired; run \`cognia-agent logto login\` again\n`
+    : `Signed in to ${name}\n`
   out.write(
     heading +
       `  issuer:   ${session.issuer}\n` +

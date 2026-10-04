@@ -46,7 +46,14 @@ import {
   hasChosenOffline,
   type CloudSignInGateDeps,
 } from "./cloud-sign-in-gate"
-import type { ReadyDeployment } from "@/lib/identity/deployment-discovery"
+import type { DeploymentDiscovery, ReadyDeployment } from "@/lib/identity/deployment-discovery"
+import { officialDeployment } from "@/lib/identity/official-deployment"
+import {
+  OFFICIAL_PROMPT_KEY_PREFIX,
+  readOfficialPromptDecision,
+  recordOfficialPromptDecision,
+} from "@/lib/identity/official-sign-in-prompt"
+import { requestCloudSignIn } from "@/lib/identity/sign-in-request"
 import type { LogtoSession } from "@/lib/logto/client"
 
 const deployment: ReadyDeployment = {
@@ -97,6 +104,7 @@ function renderGate(d: CloudSignInGateDeps) {
 
 beforeEach(() => {
   sessionStorage.clear()
+  localStorage.clear()
   mockStore = {
     loaded: true,
     locked: false,
@@ -572,5 +580,137 @@ describe("CloudSignInGate", () => {
     expect(hasChosenOffline("acct_a")).toBe(true)
     forgetOfflineChoice("acct_a")
     expect(hasChosenOffline("acct_a")).toBe(false)
+  })
+})
+
+describe("CloudSignInGate with the official account", () => {
+  const official = officialDeployment({})!
+  const discoverOfficial = () =>
+    jest.fn(async (): Promise<DeploymentDiscovery> => ({
+      status: "official",
+      deployment: official,
+      reason: "single-user",
+    }))
+  const personal = { session: {}, identity: {}, identityConflicts: [] } as never
+
+  it("offers the official account once, with its providers and no Logto or advanced form", async () => {
+    renderGate(deps({ discover: discoverOfficial() }))
+    expect(await screen.findByTestId("cloud-sign-in-official")).toBeInTheDocument()
+    for (const provider of ["feishu", "github", "google", "apple"]) {
+      expect(screen.getByTestId(`cloud-sign-in-official-${provider}`)).toBeInTheDocument()
+    }
+    expect(screen.queryByTestId("cloud-sign-in-logto")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("cloud-sign-in-advanced-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("app")).not.toBeInTheDocument()
+  })
+
+  it("remembers continuing offline for good, not just for the tab", async () => {
+    const first = renderGate(deps({ discover: discoverOfficial() }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-offline"))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(readOfficialPromptDecision("acct_a")).toBe("offline")
+    first.unmount()
+
+    sessionStorage.clear()
+    renderGate(deps({ discover: discoverOfficial() }))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(screen.queryByTestId("cloud-sign-in")).not.toBeInTheDocument()
+  })
+
+  it("signs in on the official issuer with the provider pressed, then lets the app through", async () => {
+    const signInOfficial = jest.fn(async () => personal)
+    renderGate(deps({ discover: discoverOfficial(), signInOfficial, profile: "desktop" }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-official-feishu"))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(signInOfficial).toHaveBeenCalledWith(
+      official,
+      expect.anything(),
+      {
+        redirectUri: "cn.cognia.app:/auth/callback",
+        clientKind: "native",
+        socialProvider: "feishu",
+      },
+      { localAccountId: "acct_a" }
+    )
+    expect(readOfficialPromptDecision("acct_a")).toBe("signed-in")
+  })
+
+  it("uses the web client and its callback in a browser", async () => {
+    const signInOfficial = jest.fn(async () => personal)
+    renderGate(deps({ discover: discoverOfficial(), signInOfficial, profile: "web-standalone" }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-official-github"))
+    await screen.findByTestId("app")
+    expect(signInOfficial).toHaveBeenCalledWith(
+      official,
+      expect.anything(),
+      {
+        redirectUri: `${window.location.origin}/logto/callback`,
+        clientKind: "web",
+        socialProvider: "github",
+      },
+      { localAccountId: "acct_a" }
+    )
+  })
+
+  it("keeps the screen and says why when the sign-in fails", async () => {
+    const signInOfficial = jest.fn(async () => {
+      throw new Error("issuer down")
+    })
+    renderGate(deps({ discover: discoverOfficial(), signInOfficial }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-official-google"))
+    expect(await screen.findByTestId("cloud-sign-in-error")).toHaveTextContent("issuer down")
+    expect(screen.getByTestId("cloud-sign-in-official")).toBeInTheDocument()
+    expect(readOfficialPromptDecision("acct_a")).toBeNull()
+  })
+
+  it("passes a personal session with no organization, and never settles it", async () => {
+    const settle = jest.fn()
+    renderGate(
+      deps({
+        discover: discoverOfficial(),
+        settle,
+        readState: jest.fn(async () => ({
+          status: "active" as const,
+          session,
+          identity: { userId: "usr_1", logtoSubject: "usr_1" },
+        })),
+      })
+    )
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(settle).not.toHaveBeenCalled()
+  })
+
+  it("does not ask again after the screen was answered, even when signed out", async () => {
+    recordOfficialPromptDecision("acct_a", "signed-in")
+    renderGate(deps({ discover: discoverOfficial() }))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(localStorage.getItem(`${OFFICIAL_PROMPT_KEY_PREFIX}.acct_a`)).toBe("signed-in")
+  })
+
+  it("shows the screen again when Settings asks, for the profile it serves only", async () => {
+    recordOfficialPromptDecision("acct_a", "offline")
+    renderGate(deps({ discover: discoverOfficial() }))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+
+    act(() => requestCloudSignIn("acct_other"))
+    expect(screen.getByTestId("app")).toBeInTheDocument()
+
+    act(() => requestCloudSignIn("acct_a"))
+    expect(await screen.findByTestId("cloud-sign-in-official")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("cloud-sign-in-offline"))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+  })
+
+  it("names the reason a previous session is not enough", async () => {
+    renderGate(
+      deps({
+        discover: discoverOfficial(),
+        readState: jest.fn(async () => ({
+          status: "reauth-required" as const,
+          reason: "expired" as const,
+        })) as never,
+      })
+    )
+    expect(await screen.findByTestId("cloud-sign-in-reauth-expired")).toBeInTheDocument()
   })
 })

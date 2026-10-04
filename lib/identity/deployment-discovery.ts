@@ -27,6 +27,15 @@
  * installs and is reported as `none` with the reason, so the gate can let the
  * person straight through instead of treating an absent server as a fault.
  *
+ * # The official account
+ *
+ * Wherever this would answer `none`, a build that offers the official Cognia
+ * account (`official-deployment.ts`, ADR-0215 §2) answers `official` instead,
+ * with the reason there was nothing else: no self-hosted deployment means the
+ * official account is the one on offer. Headless never does, because it is
+ * the host, and a probe of one particular gateway (Settings checking an
+ * address) passes `officialFallback: false` to hear about that gateway only.
+ *
  * # A paired Host this build can only reach over the relay
  *
  * A LAN Host presents a self-signed certificate that the pairing pinned by
@@ -57,6 +66,7 @@ import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { NATIVE_SPKI_PINNING_UNAVAILABLE } from "@/lib/tauri/pinned-fetch"
 import { loadCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import { loadDeploymentSource, type DeploymentSource } from "./deployment-source"
+import { officialDeployment, type OfficialDeployment } from "./official-deployment"
 
 export type SocialProvider = ReturnType<typeof authConfigSocialProviders>[number]
 
@@ -77,15 +87,20 @@ export const KNOWN_SOCIAL_PROVIDERS: ReadonlySet<string> = new Set([
   "wechat",
 ])
 
+/**
+ * `host-link-only`: the paired Host can only be reached over the relay data
+ * lane, which carries RPCs but not its plain-HTTP auth config (see the module
+ * docs). The gate passes; nothing about the Host link changes.
+ */
+export type NoDeploymentReason = "no-host" | "single-user" | "server-stopped" | "host-link-only"
+
 export type DeploymentDiscovery =
+  | { status: "none"; reason: NoDeploymentReason }
   | {
-      status: "none"
-      /**
-       * `host-link-only`: the paired Host can only be reached over the relay
-       * data lane, which carries RPCs but not its plain-HTTP auth config (see
-       * the module docs). The gate passes; nothing about the Host link changes.
-       */
-      reason: "no-host" | "single-user" | "server-stopped" | "host-link-only"
+      status: "official"
+      deployment: OfficialDeployment
+      /** Why no self-hosted deployment answered instead. */
+      reason: NoDeploymentReason
     }
   | {
       status: "unavailable"
@@ -125,6 +140,10 @@ export interface DiscoverDeploymentDeps {
   serverStatus?: () => Promise<{ running: boolean; boundPort?: number | null }>
   buildTimeUrl?: () => string | null
   fetchConfig?: (baseUrl: string, fingerprint?: string) => Promise<CompanionAuthConfig>
+  /** The official account this build offers. Defaults to the build's own. */
+  official?: () => OfficialDeployment | null
+  /** `false` reports `none` where the official account would be offered. */
+  officialFallback?: boolean
 }
 
 async function desktopServerStatus(): Promise<{ running: boolean; boundPort?: number | null }> {
@@ -229,14 +248,26 @@ function isPinningUnavailable(error: unknown): boolean {
   )
 }
 
+/** `none`, or the official account where this build offers it. */
+function nothingElse(
+  deps: DiscoverDeploymentDeps,
+  reason: NoDeploymentReason
+): DeploymentDiscovery {
+  if (deps.officialFallback === false) return { status: "none", reason }
+  const deployment = (deps.official ?? officialDeployment)()
+  return deployment ? { status: "official", deployment, reason } : { status: "none", reason }
+}
+
 /** Ask the host what it offers. Never throws: every failure is a state. */
 export async function discoverDeployment(
   deps: DiscoverDeploymentDeps = {}
 ): Promise<DeploymentDiscovery> {
+  if ((deps.profile ?? detectHostProfile()) === "headless")
+    return { status: "none", reason: "no-host" }
   let source: DiscoverySource | undefined
   try {
     const resolved = await resolveSourceWithOrigin(deps)
-    if ("none" in resolved) return { status: "none", reason: resolved.none }
+    if ("none" in resolved) return nothingElse(deps, resolved.none)
     source = resolved.source
     const { pairing } = resolved
     const fetchConfig = deps.fetchConfig ?? fetchCompanionAuthConfig
@@ -246,12 +277,12 @@ export async function discoverDeployment(
     } catch (error) {
       // See "A paired Host this build can only reach over the relay" above.
       if (pairing && isPinningUnavailable(error) && pairingHasRelayRoom(pairing)) {
-        return { status: "none", reason: "host-link-only" }
+        return nothingElse(deps, "host-link-only")
       }
       throw error
     }
     if (config.deploymentMode !== "multi-tenant" || !config.oidc) {
-      return { status: "none", reason: "single-user" }
+      return nothingElse(deps, "single-user")
     }
     return {
       status: "ready",

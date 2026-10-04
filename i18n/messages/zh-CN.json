@@ -1532,6 +1532,12 @@
           "urlPlaceholder": "https://cognia.example.com"
         },
         "forget": "忘记",
+        "official": {
+          "default": "默认",
+          "description": "此配置文件登录 Cognia 官方账号（{issuer}）。只有当你的组织自行部署时，才需要在下方填写网关。",
+          "selfHosted": "你所在组织的部署",
+          "title": "Cognia 官方账号"
+        },
         "result": {
           "collaboration": "协作服务",
           "collaborationMissing": "未公布。登录会在加入工作区前停下。",
@@ -1560,7 +1566,8 @@
         "signOutDone": "已退出云账号。",
         "signOutFailed": "退出失败：{message}",
         "title": "云端部署",
-        "use": "使用此部署"
+        "use": "使用此部署",
+        "useOfficial": "改用官方账号"
       },
       "description": "此部署使用共享的身份提供方。登录一次，这个配置文件在任何地方都是你的。",
       "error": {
@@ -1579,10 +1586,17 @@
         "tokenLabel": "邀请令牌",
         "tokenPlaceholder": "粘贴令牌"
       },
+      "official": {
+        "description": "一个账号，在你所有设备上使用 Cognia。登录是可选的：无论是否登录，你的数据都保存在本设备上。",
+        "offlineHint": "之后可以在“设置 → 账号”中登录。此页面不会再次出现。",
+        "privacy": "Cognia 只保存你是谁（姓名、邮箱和已关联的登录方式），不会获得你所用登录账号的访问权限。",
+        "title": "登录你的 Cognia 账号"
+      },
       "offline": {
         "body": "上一次的会话已保留。你可以继续离线工作，连上以后会自动刷新。"
       },
       "provider": {
+        "apple": "Apple",
         "feishu": "飞书",
         "feishu-web": "飞书",
         "github": "GitHub",
@@ -1703,13 +1717,42 @@
     },
     "identity": {
       "current": "当前",
+      "deletion": {
+        "awaitingSignIn": "请在浏览器中确认",
+        "back": "返回",
+        "backupFirst": "先备份",
+        "cancel": "撤销注销",
+        "cancelled": "已撤销注销。",
+        "confirm": "重新登录以确认",
+        "confirmBody": "你的账号及其关联的登录方式将在 7 天后删除。在此之前，你可以登录并撤销。",
+        "confirmLocal": "本设备上的对话和文件不会被删除。如果你也打算移除这台设备，请先备份。",
+        "delete": "注销账号",
+        "description": "7 天后删除你的 Cognia 账号及其关联的登录方式。本设备上的内容全部保留。",
+        "error": {
+          "differentPerson": "你确认时使用的账号与此处登录的账号不同。未删除任何内容。",
+          "generic": "无法连接账号服务：{message}",
+          "staleSignIn": "该次登录不够新，请再次确认。",
+          "unauthorized": "会话已过期，请先重新登录。"
+        },
+        "loading": "正在检查账号",
+        "pending": "你的账号将在 {date} 之后删除。",
+        "pendingNoDate": "你的账号已安排注销。",
+        "requested": "已安排注销账号。",
+        "retry": "重试",
+        "stop": "停止",
+        "title": "注销账号"
+      },
       "description": "此配置文件在共享部署上是谁，以及它在哪个组织中工作。",
+      "linked": "登录方式",
+      "linkedNone": "未报告已关联的登录方式。",
       "loading": "正在读取云端会话",
       "memberships": "组织",
       "membershipsEmpty": "还没有加入任何组织。",
       "membershipsFailed": "无法读取组织：{message}",
       "membershipsLoading": "正在加载组织",
       "noDeployment": "此配置文件没有配置云端部署。",
+      "officialDescription": "此配置文件登录的身份，以及与之关联的登录方式。",
+      "officialTitle": "Cognia 账号",
       "organization": "组织",
       "person": "人",
       "revocationFailed": "已在本地退出，但无法通知身份提供方。",
@@ -1719,6 +1762,7 @@
         "member": "成员",
         "owner": "所有者"
       },
+      "selfHosted": "改用你所在组织的部署",
       "session": "会话",
       "sessionExpires": "{date} 过期",
       "sessionUnknownExpiry": "过期时间未知",

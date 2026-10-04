@@ -323,7 +323,8 @@
       "lark": "Lark",
       "google": "Google",
       "microsoft": "Microsoft",
-      "wechat": "WeChat"
+      "wechat": "WeChat",
+      "apple": "Apple"
     },
     "continueWithLogto": "Continue with Logto",
     "signingIn": "Signing in",
@@ -450,7 +451,20 @@
         "policy": "Join policy",
         "singleUser": "This gateway runs in single-user mode. There is no cloud account to sign in to.",
         "unavailableMessage": "{message}"
+      },
+      "useOfficial": "Use the official account",
+      "official": {
+        "title": "Official Cognia account",
+        "default": "Default",
+        "description": "This profile signs in to the official Cognia account ({issuer}). Choose a gateway below only if your organization runs its own deployment.",
+        "selfHosted": "Your organization’s deployment"
       }
+    },
+    "official": {
+      "title": "Sign in to your Cognia account",
+      "description": "One account for Cognia on all your devices. Signing in is optional: everything you do stays on this device either way.",
+      "offlineHint": "You can sign in later from Settings → Account. This screen will not appear again.",
+      "privacy": "Cognia keeps only who you are (your name, email and linked sign-ins), never access to the account you sign in with."
     }
   },
   "identity": {
@@ -488,6 +502,36 @@
       "owner": "Owner",
       "admin": "Admin",
       "member": "Member"
+    },
+    "officialTitle": "Cognia account",
+    "officialDescription": "The person this profile is signed in as, and the sign-ins linked to them.",
+    "linked": "Signs in with",
+    "linkedNone": "No linked sign-ins reported.",
+    "selfHosted": "Use your organization’s deployment instead",
+    "deletion": {
+      "title": "Delete account",
+      "loading": "Checking the account",
+      "description": "Deletes your Cognia account and its linked sign-ins after 7 days. Everything on this device stays.",
+      "delete": "Delete account",
+      "confirmBody": "Your account and its linked sign-ins will be deleted in 7 days. Until then you can sign in and cancel.",
+      "confirmLocal": "Conversations and files on this device are not deleted. Back them up first if you plan to remove this device too.",
+      "backupFirst": "Back up first",
+      "confirm": "Sign in again to confirm",
+      "back": "Back",
+      "awaitingSignIn": "Confirm in your browser",
+      "stop": "Stop",
+      "pending": "Your account will be deleted after {date}.",
+      "pendingNoDate": "Your account is scheduled for deletion.",
+      "cancel": "Cancel deletion",
+      "requested": "Account deletion scheduled.",
+      "cancelled": "Account deletion cancelled.",
+      "retry": "Try again",
+      "error": {
+        "differentPerson": "You confirmed with a different account than the one signed in here. Nothing was deleted.",
+        "staleSignIn": "That sign-in was not recent enough. Confirm again.",
+        "unauthorized": "Your session expired. Sign in again first.",
+        "generic": "Could not reach the account service: {message}"
+      }
     }
   },
   "invite": {

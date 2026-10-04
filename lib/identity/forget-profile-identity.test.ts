@@ -4,6 +4,7 @@ jest.mock("@/lib/logto/app-session", () => ({
   signOutLeftTokensLive: jest.requireActual("@/lib/logto/app-session").signOutLeftTokensLive,
 }))
 jest.mock("./host-person", () => ({ unbindHostPerson: jest.fn() }))
+jest.mock("./official-sign-in-prompt", () => ({ forgetOfficialPromptDecision: jest.fn() }))
 jest.mock("./user-binding", () => ({
   UserBindingRegistry: jest.fn().mockImplementation(() => ({ unbind: jest.fn() })),
 }))
@@ -13,6 +14,7 @@ import { signOutFromLogto, type LogtoSignOutReport } from "@/lib/logto/app-sessi
 
 import { forgetProfileCloudIdentity, PROFILE_CLOUD_IDENTITY_STEPS } from "./forget-profile-identity"
 import { unbindHostPerson } from "./host-person"
+import { forgetOfficialPromptDecision } from "./official-sign-in-prompt"
 
 const signOut = signOutFromLogto as jest.Mock
 const forgetConnection = forgetCollabConnection as jest.Mock
@@ -48,6 +50,11 @@ describe("forgetProfileCloudIdentity", () => {
     expect(Object.values(result.steps).every((step) => step.status === "done")).toBe(true)
     expect(result.failures).toEqual([])
     expect(result.tokensMayRemainLive).toBe(false)
+  })
+
+  it("forgets the profile's answer to the official sign-in screen", async () => {
+    await forgetProfileCloudIdentity("acct_a", { registry: { unbind: jest.fn(async () => {}) } })
+    expect(forgetOfficialPromptDecision).toHaveBeenCalledWith("acct_a")
   })
 
   it("skips the host for a profile the host does not hold, rather than failing it", async () => {

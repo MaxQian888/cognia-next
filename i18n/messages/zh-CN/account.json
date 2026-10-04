@@ -323,7 +323,8 @@
       "lark": "Lark",
       "google": "Google",
       "microsoft": "Microsoft",
-      "wechat": "微信"
+      "wechat": "微信",
+      "apple": "Apple"
     },
     "continueWithLogto": "使用 Logto 继续",
     "signingIn": "正在登录",
@@ -450,7 +451,20 @@
         "policy": "加入策略",
         "singleUser": "此网关运行在单用户模式，没有可登录的云账号。",
         "unavailableMessage": "{message}"
+      },
+      "useOfficial": "改用官方账号",
+      "official": {
+        "title": "Cognia 官方账号",
+        "default": "默认",
+        "description": "此配置文件登录 Cognia 官方账号（{issuer}）。只有当你的组织自行部署时，才需要在下方填写网关。",
+        "selfHosted": "你所在组织的部署"
       }
+    },
+    "official": {
+      "title": "登录你的 Cognia 账号",
+      "description": "一个账号，在你所有设备上使用 Cognia。登录是可选的：无论是否登录，你的数据都保存在本设备上。",
+      "offlineHint": "之后可以在“设置 → 账号”中登录。此页面不会再次出现。",
+      "privacy": "Cognia 只保存你是谁（姓名、邮箱和已关联的登录方式），不会获得你所用登录账号的访问权限。"
     }
   },
   "identity": {
@@ -488,6 +502,36 @@
       "owner": "所有者",
       "admin": "管理员",
       "member": "成员"
+    },
+    "officialTitle": "Cognia 账号",
+    "officialDescription": "此配置文件登录的身份，以及与之关联的登录方式。",
+    "linked": "登录方式",
+    "linkedNone": "未报告已关联的登录方式。",
+    "selfHosted": "改用你所在组织的部署",
+    "deletion": {
+      "title": "注销账号",
+      "loading": "正在检查账号",
+      "description": "7 天后删除你的 Cognia 账号及其关联的登录方式。本设备上的内容全部保留。",
+      "delete": "注销账号",
+      "confirmBody": "你的账号及其关联的登录方式将在 7 天后删除。在此之前，你可以登录并撤销。",
+      "confirmLocal": "本设备上的对话和文件不会被删除。如果你也打算移除这台设备，请先备份。",
+      "backupFirst": "先备份",
+      "confirm": "重新登录以确认",
+      "back": "返回",
+      "awaitingSignIn": "请在浏览器中确认",
+      "stop": "停止",
+      "pending": "你的账号将在 {date} 之后删除。",
+      "pendingNoDate": "你的账号已安排注销。",
+      "cancel": "撤销注销",
+      "requested": "已安排注销账号。",
+      "cancelled": "已撤销注销。",
+      "retry": "重试",
+      "error": {
+        "differentPerson": "你确认时使用的账号与此处登录的账号不同。未删除任何内容。",
+        "staleSignIn": "该次登录不够新，请再次确认。",
+        "unauthorized": "会话已过期，请先重新登录。",
+        "generic": "无法连接账号服务：{message}"
+      }
     }
   },
   "invite": {

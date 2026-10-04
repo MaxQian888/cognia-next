@@ -1,6 +1,7 @@
 import type { CompanionAuthConfig } from "@/lib/tauri/companion-auth"
 
 import { discoverDeployment, resolveDiscoverySource } from "./deployment-discovery"
+import { officialDeployment } from "./official-deployment"
 
 jest.mock("@/lib/tauri", () => ({
   localTransport: { call: jest.fn() },
@@ -230,8 +231,81 @@ describe("discoverDeployment", () => {
       profile: "desktop",
       serverStatus: async () => ({ running: true, boundPort: 1 }),
       fetchConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
+      official: () => null,
     })
     expect(result).toEqual({ status: "none", reason: "single-user" })
+  })
+
+  describe("the official account", () => {
+    const official = officialDeployment({})!
+
+    it("is offered where no self-hosted deployment answers", async () => {
+      expect(
+        await discoverDeployment({
+          profile: "desktop",
+          serverStatus: async () => ({ running: true, boundPort: 1 }),
+          fetchConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
+          official: () => official,
+        })
+      ).toEqual({ status: "official", deployment: official, reason: "single-user" })
+      expect(
+        await discoverDeployment({
+          profile: "web-standalone",
+          deploymentSource: () => null,
+          buildTimeUrl: () => null,
+          sameOrigin: () => null,
+          official: () => official,
+        })
+      ).toEqual({ status: "official", deployment: official, reason: "no-host" })
+    })
+
+    it("is the build's own by default", async () => {
+      expect(
+        await discoverDeployment({
+          profile: "desktop",
+          serverStatus: async () => ({ running: false }),
+          buildTimeUrl: () => null,
+        })
+      ).toMatchObject({ status: "official", deployment: { issuer: official.issuer } })
+    })
+
+    it("never replaces a self-hosted deployment, nor one that failed", async () => {
+      expect(
+        await discoverDeployment({
+          profile: "desktop",
+          serverStatus: async () => ({ running: true, boundPort: 1 }),
+          fetchConfig: async () => MULTI,
+          official: () => official,
+        })
+      ).toMatchObject({ status: "ready" })
+      expect(
+        await discoverDeployment({
+          profile: "desktop",
+          serverStatus: async () => ({ running: true, boundPort: 1 }),
+          fetchConfig: async () => {
+            throw new Error("connect ECONNREFUSED")
+          },
+          official: () => official,
+        })
+      ).toMatchObject({ status: "unavailable" })
+    })
+
+    it("is not offered to a probe of one gateway, nor on a headless host", async () => {
+      expect(
+        await discoverDeployment({
+          profile: "desktop",
+          deploymentSource: () => ({ baseUrl: "https://gw.example" }) as never,
+          fetchConfig: async () => ({ deploymentMode: "single-user" }) as CompanionAuthConfig,
+          official: () => official,
+          officialFallback: false,
+        })
+      ).toEqual({ status: "none", reason: "single-user" })
+      const fetchConfig = jest.fn()
+      expect(
+        await discoverDeployment({ profile: "headless", fetchConfig, official: () => official })
+      ).toEqual({ status: "none", reason: "no-host" })
+      expect(fetchConfig).not.toHaveBeenCalled()
+    })
   })
 
   it("keeps the host's address on a failed read so the gate can say where it looked", async () => {
@@ -280,6 +354,7 @@ describe("discoverDeployment", () => {
         deploymentSource: () => null,
         companionConfig: () => pairing(true),
         fetchConfig: pinningRefused,
+        official: () => null,
       })
       expect(result).toEqual({ status: "none", reason: "host-link-only" })
     })
@@ -338,6 +413,7 @@ describe("discoverDeployment", () => {
         profile: "desktop",
         serverStatus: async () => ({ running: false }),
         fetchConfig,
+        official: () => null,
       })
     ).toEqual({ status: "none", reason: "server-stopped" })
     expect(fetchConfig).not.toHaveBeenCalled()

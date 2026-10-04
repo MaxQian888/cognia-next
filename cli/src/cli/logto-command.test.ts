@@ -142,15 +142,127 @@ describe("logtoCommand", () => {
     })
   })
 
-  it("login: exits 2 when required config is missing", async () => {
+  it("login: exits 2 when only part of a Logto configuration is named", async () => {
     const cap = captureOut()
-    const code = await logtoCommand(parseArgv(["logto", "login"]), {
-      home: HOME,
-      out: cap.sink,
-      env: {},
-    })
+    const code = await logtoCommand(
+      parseArgv(["logto", "login", "--issuer", "https://logto.test/oidc"]),
+      { home: HOME, out: cap.sink, env: {} }
+    )
     expect(code).toBe(2)
     expect(cap.errText()).toMatch(/--issuer/)
+  })
+
+  it("login: signs in to the official Cognia account when no issuer is named", async () => {
+    const cap = captureOut()
+    const fs = memFs()
+    const officialSession: LogtoSession = {
+      ...sampleSession,
+      issuer: "https://id.cognia.cn/api/auth",
+      organizationId: undefined,
+      issuerKind: "oidc",
+    }
+    const login = jest.fn<Promise<LogtoSession>, [LogtoClientConfig, LogtoDrivers]>(
+      async () => officialSession
+    )
+    const code = await logtoCommand(parseArgv(["logto", "login", "--provider", "feishu"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: fs,
+      login,
+      startCallbackServer: async () => fakeServer() as never,
+      openBrowser: async () => true,
+      env: {},
+    })
+    expect(code).toBe(0)
+    expect(login.mock.calls[0][0]).toEqual({
+      issuer: "https://id.cognia.cn/api/auth",
+      clientId: "cognia-app",
+      redirectUri: "http://127.0.0.1:9321/callback",
+      resource: "https://sync.cognia.cn",
+      scopes: ["profile", "email"],
+      issuerKind: "oidc",
+      socialProvider: "feishu",
+    })
+    expect(cap.text()).toMatch(/Signed in to your Cognia account/)
+    expect(JSON.parse(fs.store.get(SESSION_FILE)!).issuerKind).toBe("oidc")
+  })
+
+  it("login: points the official account at COGNIA_ID_ISSUER for staging or a local Worker", async () => {
+    const login = jest.fn<Promise<LogtoSession>, [LogtoClientConfig, LogtoDrivers]>(
+      async () => sampleSession
+    )
+    await logtoCommand(parseArgv(["logto", "login"]), {
+      home: HOME,
+      out: captureOut().sink,
+      sessionFs: memFs(),
+      login,
+      startCallbackServer: async () => fakeServer() as never,
+      openBrowser: async () => true,
+      env: {
+        COGNIA_ID_ISSUER: "http://localhost:8787/api/auth",
+        COGNIA_ID_AUDIENCE: "https://sync-staging.cognia.cn",
+      },
+    })
+    expect(login.mock.calls[0][0]).toMatchObject({
+      issuer: "http://localhost:8787/api/auth",
+      resource: "https://sync-staging.cognia.cn",
+      clientId: "cognia-app",
+    })
+    expect(login.mock.calls[0][0].socialProvider).toBeUndefined()
+  })
+
+  it("login: refuses a provider the official account does not offer, or one aimed at Logto", async () => {
+    const startCallbackServer = jest.fn()
+    const unknown = captureOut()
+    expect(
+      await logtoCommand(parseArgv(["logto", "login", "--provider", "wechat"]), {
+        home: HOME,
+        out: unknown.sink,
+        env: {},
+        startCallbackServer,
+      })
+    ).toBe(2)
+    expect(unknown.errText()).toMatch(/feishu, github, google, apple/)
+
+    const logto = captureOut()
+    expect(
+      await logtoCommand(parseArgv(["logto", "login", "--provider", "github"]), {
+        home: HOME,
+        out: logto.sink,
+        env: {
+          COGNIA_LOGTO_ISSUER: "https://logto.test/oidc",
+          COGNIA_LOGTO_CLIENT_ID: "c",
+          COGNIA_LOGTO_AUDIENCE: "r",
+        },
+        startCallbackServer,
+      })
+    ).toBe(2)
+    expect(logto.errText()).toMatch(/official Cognia account only/)
+
+    const org = captureOut()
+    expect(
+      await logtoCommand(parseArgv(["logto", "login", "--org", "org_1"]), {
+        home: HOME,
+        out: org.sink,
+        env: {},
+        startCallbackServer,
+      })
+    ).toBe(2)
+    expect(startCallbackServer).not.toHaveBeenCalled()
+  })
+
+  it("status: names the official account for an oidc session", async () => {
+    const cap = captureOut()
+    await logtoCommand(parseArgv(["logto", "status"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: memFs({
+        [SESSION_FILE]: JSON.stringify({ ...sampleSession, issuerKind: "oidc" }),
+      }),
+      env: {},
+      now: () => 0,
+    })
+    expect(cap.text()).toMatch(/^Signed in to your Cognia account/)
   })
 
   it("login: exits 1 and closes the server when the flow throws", async () => {

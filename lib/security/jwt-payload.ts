@@ -28,7 +28,10 @@ export class MalformedJwtError extends Error {
 function decodeSegment(segment: string): unknown {
   const normalized = segment.replaceAll("-", "+").replaceAll("_", "/")
   const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4)
-  return JSON.parse(atob(padded)) as unknown
+  // `atob` yields one character per byte; the payload is UTF-8 JSON, so a
+  // name like 张三 must be decoded from those bytes, not read as Latin-1.
+  const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0))
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown
 }
 
 /**

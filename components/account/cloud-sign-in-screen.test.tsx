@@ -12,6 +12,7 @@ jest.mock("next-intl", () => ({
 }))
 
 import type { ReadyDeployment } from "@/lib/identity/deployment-discovery"
+import { officialDeployment } from "@/lib/identity/official-deployment"
 
 import { CloudSignInScreen, type CloudSignInScreenProps } from "./cloud-sign-in-screen"
 
@@ -35,6 +36,7 @@ const deployment: ReadyDeployment = {
 function handlers(): Omit<CloudSignInScreenProps, "view" | "error" | "busy"> {
   return {
     onSocial: jest.fn(),
+    onOfficialProvider: jest.fn(),
     onLogto: jest.fn(),
     onManual: jest.fn(),
     onSubmitCode: jest.fn(),
@@ -48,6 +50,44 @@ function handlers(): Omit<CloudSignInScreenProps, "view" | "error" | "busy"> {
 }
 
 describe("CloudSignInScreen", () => {
+  it("presents the official account with its four providers and a lasting offline choice", () => {
+    const h = handlers()
+    render(
+      <CloudSignInScreen
+        view={{ kind: "official", deployment: officialDeployment({})! }}
+        error={null}
+        busy={false}
+        {...h}
+      />
+    )
+    expect(screen.getByRole("heading")).toHaveTextContent("official.title")
+    expect(screen.getByText("official.description")).toBeInTheDocument()
+    expect(screen.getByTestId("cloud-sign-in-official-apple")).toHaveTextContent(
+      "continueWith(provider.apple)"
+    )
+    fireEvent.click(screen.getByTestId("cloud-sign-in-official-feishu"))
+    expect(h.onOfficialProvider).toHaveBeenCalledWith("feishu")
+    // The offline hint says the screen will not come back.
+    expect(screen.getByText("official.offlineHint")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("cloud-sign-in-offline"))
+    expect(h.onContinueOffline).toHaveBeenCalled()
+    expect(screen.queryByTestId("cloud-sign-in-logto")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("cloud-sign-in-manual")).not.toBeInTheDocument()
+  })
+
+  it("disables the official providers while busy and names an expired session", () => {
+    render(
+      <CloudSignInScreen
+        view={{ kind: "official", deployment: officialDeployment({})!, reauth: "expired" }}
+        error={null}
+        busy
+        {...handlers()}
+      />
+    )
+    expect(screen.getByTestId("cloud-sign-in-official-github")).toBeDisabled()
+    expect(screen.getByTestId("cloud-sign-in-reauth-expired")).toHaveTextContent("reauth.expired")
+  })
+
   it("offers every social method by name, the plain Logto page, offline, and a manual form", () => {
     const h = handlers()
     render(
