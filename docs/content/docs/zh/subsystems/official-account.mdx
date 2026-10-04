@@ -1,0 +1,83 @@
+---
+title: Cognia 官方账号
+description: 各端登录背后的可选官方账号——运行在 Cloudflare Workers 上的 Better Auth OIDC 签发方；每个配置文件只提示一次，个人账号（无组织），可注销，桌面宿主凭自身配置信任它。
+---
+
+# Cognia 官方账号
+
+<Status variant="beta">第 1 阶段 · 仅身份 · ADR-0215</Status>
+
+<TLDR>
+  每个构建都内置一个无需配置的部署：位于 `https://id.cognia.cn/api/auth` 的 Cognia 官方账号。
+  没有自托管部署时，发现逻辑会提供它，云端闸门对每个配置文件**只展示一次**登录页；登录后，配置文件绑定到一个人，
+  其 id 就是签发方自己的 `usr_` subject。自托管的 Logto 部署仍会取代它，自托管 Web 镜像则会关闭它。
+  同步属于第 3 阶段，本页只讲身份。
+</TLDR>
+
+<StatGrid>
+  <Stat label="登录方式" value="4" hint="飞书 · GitHub · Google · Apple" />
+  <Stat label="客户端" value="2" hint="cognia-app（原生、CLI）· cognia-web" />
+  <Stat label="访问令牌" value="15 分钟" hint="ES256 at+jwt，aud 为 https://sync.cognia.cn" />
+  <Stat label="注销" value="7 天" hint="冷静期后由每小时任务清除" />
+</StatGrid>
+
+## 各部分所在位置
+
+| 部分 | 位置 |
+| --- | --- |
+| 签发方（Worker + D1） | `services/identity-server/`（运维指南见其 README） |
+| 官方默认值与环境变量覆盖 | `lib/identity/official-deployment.ts` |
+| 发现逻辑的 `official` 状态 | `lib/identity/deployment-discovery.ts` |
+| 登录与个人账号收尾 | `lib/identity/personal-sign-in.ts`、`lib/identity/issuer-identities.ts` |
+| “只展示一次”的记录 | `lib/identity/official-sign-in-prompt.ts` |
+| 设置 → 闸门的请求 | `lib/identity/sign-in-request.ts` |
+| 闸门与登录页 | `components/account/cloud-sign-in-gate.tsx`、`cloud-sign-in-screen.tsx` |
+| 设置 → 账号 | `components/account/manage/account-identity-tab.tsx`、`official-account-deletion.tsx` |
+| 注销客户端 | `lib/identity/official-account-deletion.ts` |
+| 桌面信任锚 | `crates/cognia-companion-security/src/official_identity.rs` |
+| CLI | `cli/src/cli/logto-command.ts`（`cognia-agent logto login [--provider p]`） |
+| 故障处理 | `docs/runbooks/identity-worker.md` |
+
+## 登录
+
+1. 发现逻辑在原先返回 `none` 的地方返回 `official`：没有宿主、单用户宿主、桌面服务已停止，或手机只能经中继访问宿主。
+   headless 宿主永远不会；“设置”探测单个网关时传入 `officialFallback: false`。
+2. 在配置文件作出选择之前，闸门会一直提供官方登录页。“登录”和“继续离线”都按配置文件永久记在 `localStorage` 中。
+   此后登录页不会自行出现；“设置 → 账号”通过请求总线要求展示，闸门会把应用替换为登录页直到完成。
+3. 登录页在授权请求上带 `provider=<id>`，签发方页面直接跳到该提供方。桌面和手机使用 `cognia-app` 与
+   `cn.cognia.app:/auth/callback`；浏览器使用 `cognia-web` 与本站的 `/logto/callback`；CLI 使用回环地址。
+4. `completeSignIn` 绑定配置文件并通知桌面宿主。ID 令牌中的 `cognia_identities`（飞书为
+   `{provider: "lark", tenant, subject: union_id}`）关联到此人，union id 匹配的飞书主体会记下这次登录的 subject。
+
+没有组织，也没有协作服务器：已激活的会话直接通过闸门。
+
+## 此人的 id
+
+Logto 的 subject 不透明，因此其 id 由哈希派生（`usr_` + SHA-256(`user\n<issuer>\n<subject>`) 的前 24 个十六进制字符）。
+官方签发方本身就签发 `usr_` id，因此对 `oidc` 签发方，合法用户 id 形式的 subject **就是** id。
+渲染层（`expectedUserId`）与宿主（`expected_user_id`）都读取
+`crates/cognia-companion-security/fixtures/identity-id-vectors.json`。
+
+## 桌面宿主信任什么
+
+`account_bind_person` 在记录此人之前验证访问令牌。它的信任锚是环境变量（headless 宿主）或用户选定的部署，
+**再加上**编译进构建的官方签发方。令牌中未经验证的 `iss` 只用于选择；release 构建绝不从运行环境读取官方签发方。
+
+| 覆盖项 | 位置 | 作用 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_COGNIA_ID_ISSUER`、`NEXT_PUBLIC_COGNIA_ID_AUDIENCE` | 应用构建 | 让渲染层指向 staging 或本地 Worker |
+| `NEXT_PUBLIC_COGNIA_OFFICIAL_ACCOUNT=0` | 应用构建 | 关闭官方账号（自托管 Web 镜像） |
+| `COGNIA_OFFICIAL_ISSUER`、`COGNIA_OFFICIAL_AUDIENCE` | 桌面构建；仅 debug 构建可在运行时设置 | 宿主的信任锚 |
+| `COGNIA_ID_ISSUER`、`COGNIA_ID_AUDIENCE` | CLI 环境 | CLI 的签发方 |
+
+## 注销账号
+
+“设置 → 账号 → 注销账号”会说明删除什么（账号及其关联登录方式）、保留什么（设备上的一切），提供备份入口，
+并要求重新登录一次（`prompt=login&max_age=0`）。只有新登录的是同一个人时才发出请求，并以其 ID 令牌作为证明；
+配置文件保留原有会话。待注销状态会显示清除日期，在此之前可以撤销。7 天后，Worker 的每小时任务会删除令牌、授权、会话、关联账号和用户。
+
+## 已知限制
+
+- 在飞书应用市场版应用就绪前，只有自建应用所在租户能用飞书登录。
+- Capacitor 仍把令牌放在 `localStorage`。
+- 签发方会关联 Google 和 Apple 身份，但本地身份词汇表会跳过它们。

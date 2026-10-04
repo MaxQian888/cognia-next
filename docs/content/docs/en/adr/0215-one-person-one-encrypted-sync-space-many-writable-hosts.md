@@ -5,7 +5,7 @@ description: "Cognia operates an official, optional account on Cloudflare Worker
 
 # ADR 0215 — One person, one encrypted sync space, many writable hosts
 
-**Status:** Accepted (design; implementation not started)
+**Status:** Accepted (phase 1, identity, implemented; phases 2–7 not started)
 **Date:** 2026-10-04
 **Amends:** [ADR-0054](./0054-local-multi-account-isolation) (account sync in scope; at-rest encryption exists), [ADR-0097](./0097-cross-device-settings-contract-and-companion-reach) D5 (per-field clocks adopted for synced tables), [ADR-0103](./0103-cross-host-session-handoff) (single writable copy applies to a live turn, not to data), [ADR-0116](./0116-host-authoritative-session-state) (authority is the lease holder), [ADR-0136](./0136-cross-device-placement) (inter-host leases now exist), [ADR-0149](./0149-a-person-is-not-a-device) §6 (its premise for rejecting E2E is stale; personal sync is E2E)
 **Related:** [ADR-0001](./0001-backup-schema-v3) (backup package), [ADR-0021](./0021-webrtc-datachannel-wan-transport) and [ADR-0170](./0170-cognia-relay-and-connectivity-center) (pairing stays), [ADR-0027](./0027-mobile-offline-and-discovery) (companion sync stays for unsigned pairs), [ADR-0059](./0059-cloud-deployment-headless-brain) (headless host), [ADR-0091](./0091-lark-unified-identity-dual-entry) (Feishu principals), [ADR-0167](./0167-the-schedule-belongs-to-the-account) (schedules), [ADR-0209](./0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs) (plugin intent)
@@ -194,6 +194,45 @@ A prototype in `services/identity-server/` (better-auth 1.7.7, wrangler 4.141, l
 - Feishu sign-in worked end to end in a browser through `genericOAuth` with a custom v2 token exchange; the account is keyed `<tenant_key>:<union_id>`.
 - The app's existing PKCE client (`lib/logto/client.ts`) logs in, refreshes with rotation, revokes, and classifies a refresh after revocation as `invalid_grant` against Better Auth, once `prompt=consent` is not sent.
 - What changed in this ADR as a result: the native callback scheme, the Logto-only parameters, discarding provider tokens, the issuer-published identities claim, and closed client management (all in §2). The spike also found defect 9 below.
+
+## Implementation (phase 1)
+
+Phase 1 ships the identity half: the official account, signing in to it everywhere, and deleting it. No sync yet.
+
+**The issuer** is `services/identity-server/`, a Worker named `cognia-identity` on `id.cognia.cn` (staging `id-staging.cognia.cn`).
+
+- It speaks only OIDC through a method-and-path allowlist. Client and resource management is closed.
+- Two public PKCE clients are seeded by migration:
+  - `cognia-app` for desktop, phone and CLI, using `cn.cognia.app:/auth/callback` and loopback;
+  - `cognia-web`, whose URIs come from `WEB_ORIGINS`.
+- Sign-in is through Feishu (self-built), GitHub, Google or Apple. Provider tokens are dropped. Accounts link only on an email both providers verified.
+- `cognia_identities` lists the person's linked sign-ins in the ID token and UserInfo.
+- CORS covers the web origins. `/api/account/deletion` runs the §10 cooling-off, and an hourly cron purges.
+- Operator guide: its README. Incidents: `docs/runbooks/identity-worker.md`.
+
+**The person's id.** For an `oidc` issuer, a subject that is a valid `usr_` id is the person's id. A Logto subject is still hashed. The renderer (`lib/identity/sign-in.ts`) and the desktop host (`crates/cognia-companion-security/src/official_identity.rs`) read the same vectors (`fixtures/identity-id-vectors.json`).
+
+**The desktop's trust anchor.** The host trusts:
+
+- the official issuer compiled into the build (`COGNIA_OFFICIAL_ISSUER` at build time, or in the environment in debug builds only);
+- plus the environment, or the deployment the person chose.
+
+A token's unverified `iss` only picks among those anchors.
+
+**The client.**
+
+- Discovery answers `official` wherever it used to answer `none` (`lib/identity/official-deployment.ts`). The only exceptions are a headless host and a probe of one gateway.
+- The cloud gate shows the official screen once per profile, whether new or existing. Signing in and continuing offline are both remembered for good (`official-sign-in-prompt.ts`). After that, Settings → Account asks the gate for the screen without a reload.
+- Signing in binds the profile and links the identities the issuer listed (`personal-sign-in.ts`). There is no organization.
+- Settings → Account shows the person and linked sign-ins, and requests or cancels deletion. Requesting needs a fresh sign-in as the same person.
+- The CLI `logto login` defaults to the official account (`--provider`, `COGNIA_ID_ISSUER`).
+- The self-hosted web image is built with `NEXT_PUBLIC_COGNIA_OFFICIAL_ACCOUNT=0`.
+
+**Still open from phase 1.**
+
+- Only the self-built Feishu app's tenant can sign in until the marketplace app exists.
+- Capacitor keeps tokens in `localStorage` (defect 6).
+- Google and Apple identities are listed but have no word in the local identity vocabulary yet.
 
 ## Roadmap
 

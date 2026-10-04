@@ -1,0 +1,95 @@
+---
+title: Official Cognia Account
+description: The optional official account behind sign-in on every shell — a Better Auth OIDC issuer on Cloudflare Workers, offered once per profile, personal (no organization), deletable, and trusted by the desktop host on its own authority.
+---
+
+# Official Cognia Account
+
+<Status variant="beta">Phase 1 · identity only · ADR-0215</Status>
+
+<TLDR>
+  Every build knows one deployment without being told: the official Cognia account at
+  `https://id.cognia.cn/api/auth`. With no self-hosted deployment, discovery offers it, the cloud
+  gate shows its sign-in screen **once** per profile, and signing in binds the profile to a person
+  whose id is the issuer's own `usr_` subject. A self-hosted Logto deployment still replaces it,
+  and the self-hosted web image switches it off. Sync is phase 3; this page covers identity.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Providers" value="4" hint="Feishu · GitHub · Google · Apple" />
+  <Stat label="Clients" value="2" hint="cognia-app (native, CLI) · cognia-web" />
+  <Stat label="Access token" value="15 min" hint="ES256 at+jwt, aud https://sync.cognia.cn" />
+  <Stat label="Deletion" value="7 days" hint="cooling-off, then an hourly purge" />
+</StatGrid>
+
+## Where each part lives
+
+| Part | Lives in |
+| --- | --- |
+| Issuer (Worker + D1) | `services/identity-server/` (operator guide in its README) |
+| Official defaults, env overrides | `lib/identity/official-deployment.ts` |
+| Discovery's `official` status | `lib/identity/deployment-discovery.ts` |
+| Sign-in and the personal settle | `lib/identity/personal-sign-in.ts`, `lib/identity/issuer-identities.ts` |
+| "Shown once" decision | `lib/identity/official-sign-in-prompt.ts` |
+| Settings → gate request | `lib/identity/sign-in-request.ts` |
+| Gate and screen | `components/account/cloud-sign-in-gate.tsx`, `cloud-sign-in-screen.tsx` |
+| Settings → Account | `components/account/manage/account-identity-tab.tsx`, `official-account-deletion.tsx` |
+| Deletion client | `lib/identity/official-account-deletion.ts` |
+| Desktop trust anchor | `crates/cognia-companion-security/src/official_identity.rs` |
+| CLI | `cli/src/cli/logto-command.ts` (`cognia-agent logto login [--provider p]`) |
+| Incidents | `docs/runbooks/identity-worker.md` |
+
+## Signing in
+
+1. Discovery answers `official` wherever it used to answer `none`: no host, a single-user host, a
+   stopped desktop server, or a phone that reaches its Host only over the relay. A headless host
+   never does, and Settings probing one gateway passes `officialFallback: false`.
+2. The gate offers the official screen until the profile answers it. **Sign in** and
+   **Continue offline** are both remembered in `localStorage`, per profile, for good. After that the
+   screen never returns on its own; Settings → Account asks for it through the request bus, and
+   the gate swaps the app for the screen until it is done.
+3. The screen sends `provider=<id>` on the authorize request, so the issuer's page goes straight to
+   that provider. Desktop and phone use `cognia-app` with `cn.cognia.app:/auth/callback`; a browser
+   uses `cognia-web` with its own `/logto/callback`; the CLI uses loopback.
+4. `completeSignIn` binds the profile and tells the desktop host. The ID token's
+   `cognia_identities` (Feishu as `{provider: "lark", tenant, subject: union_id}`) are linked onto
+   the person, and Feishu principals with a matching union id learn the login's subject.
+
+There is no organization and no collaboration server: an active session passes the gate as it is.
+
+## The person's id
+
+A Logto subject is opaque, so its person id is derived (`usr_` + 24 hex of
+SHA-256(`user\n<issuer>\n<subject>`)). The official issuer already mints `usr_` ids, so for an
+`oidc` issuer a subject that is a valid user id **is** the id. The renderer (`expectedUserId`) and
+the host (`expected_user_id`) both read
+`crates/cognia-companion-security/fixtures/identity-id-vectors.json`.
+
+## What the desktop host trusts
+
+`account_bind_person` verifies the access token before recording the person. Its anchors are the
+environment (a headless host) or the deployment the person chose, **plus** the official issuer
+compiled into the build. The token's unverified `iss` only selects among them; a release build
+never reads the official issuer from the runtime environment.
+
+| Override | Where | Effect |
+| --- | --- | --- |
+| `NEXT_PUBLIC_COGNIA_ID_ISSUER`, `NEXT_PUBLIC_COGNIA_ID_AUDIENCE` | app build | point the renderer at staging or a local Worker |
+| `NEXT_PUBLIC_COGNIA_OFFICIAL_ACCOUNT=0` | app build | switch the official account off (the self-hosted web image) |
+| `COGNIA_OFFICIAL_ISSUER`, `COGNIA_OFFICIAL_AUDIENCE` | desktop build; runtime in debug builds only | the host's anchor |
+| `COGNIA_ID_ISSUER`, `COGNIA_ID_AUDIENCE` | CLI environment | the CLI's issuer |
+
+## Deleting the account
+
+Settings → Account → **Delete account** explains what goes (the account and its linked sign-ins)
+and what stays (everything on the device), offers a backup, and asks the person to sign in again
+(`prompt=login&max_age=0`). The request is sent only when that fresh sign-in is the same person,
+with its ID token as proof; the profile keeps its own session. A pending deletion shows its purge
+date and can be cancelled until then. After 7 days the Worker's hourly cron removes tokens,
+consents, sessions, linked accounts and the user.
+
+## Known limits
+
+- Until the Feishu marketplace app exists, only the self-built app's own tenant can sign in with Feishu.
+- Capacitor keeps tokens in `localStorage`.
+- Google and Apple identities are linked by the issuer but skipped by the local identity vocabulary.

@@ -5,7 +5,7 @@ description: "Cognia 运营一个可选的官方账号，跑在 Cloudflare Worke
 
 # ADR 0215 — 一个人、一个加密同步空间、多台可写主机
 
-**状态：** 已接受（设计；尚未实现）
+**状态：** 已接受（第 1 阶段“身份”已实现；第 2–7 阶段尚未开始）
 **日期：** 2026-10-04
 **修订：** [ADR-0054](./0054-local-multi-account-isolation)（账号同步纳入范围；静态加密已存在）、[ADR-0097](./0097-cross-device-settings-contract-and-companion-reach) D5（同步表采用按字段时钟）、[ADR-0103](./0103-cross-host-session-handoff)（"单一可写副本"只约束进行中的回合，不约束数据）、[ADR-0116](./0116-host-authoritative-session-state)（权威方是租约持有者）、[ADR-0136](./0136-cross-device-placement)（主机间租约从此存在）、[ADR-0149](./0149-a-person-is-not-a-device) §6（其拒绝端到端加密的前提已过时；个人同步是端到端加密的）
 **相关：** [ADR-0001](./0001-backup-schema-v3)（备份包）、[ADR-0021](./0021-webrtc-datachannel-wan-transport) 与 [ADR-0170](./0170-cognia-relay-and-connectivity-center)（配对保留）、[ADR-0027](./0027-mobile-offline-and-discovery)（未登录的配对继续用伴随同步）、[ADR-0059](./0059-cloud-deployment-headless-brain)（无头主机）、[ADR-0091](./0091-lark-unified-identity-dual-entry)（飞书主体）、[ADR-0167](./0167-the-schedule-belongs-to-the-account)（定时任务）、[ADR-0209](./0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs)（插件意图）
@@ -194,6 +194,45 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 - 飞书登录在浏览器中端到端跑通：经 `genericOAuth`，并自定义 v2 令牌交换；账号以 `<tenant_key>:<union_id>` 为键。
 - 应用现有的 PKCE 客户端（`lib/logto/client.ts`）在不发送 `prompt=consent` 的前提下，能对 Better Auth 完成登录、带轮换的刷新、吊销，并把吊销后的刷新正确归类为 `invalid_grant`。
 - 本 ADR 据此修改的内容：原生回调 scheme、Logto 专有参数、丢弃第三方令牌、签发方公布身份声明、关闭客户端管理接口（均在 §2）。spike 还发现了下面的第 9 项缺陷。
+
+## 实现（第 1 阶段）
+
+第 1 阶段交付身份部分：官方账号、在各端登录它、以及注销它。尚无同步。
+
+**签发方**是 `services/identity-server/`，名为 `cognia-identity` 的 Worker，部署在 `id.cognia.cn`（staging 为 `id-staging.cognia.cn`）。
+
+- 它只通过“方法 + 路径”白名单提供 OIDC，客户端与资源管理全部关闭。
+- 迁移脚本预置两个公共 PKCE 客户端：
+  - `cognia-app`：用于桌面、手机和 CLI，回调为 `cn.cognia.app:/auth/callback` 与回环地址；
+  - `cognia-web`：URI 来自 `WEB_ORIGINS`。
+- 登录方式为飞书（自建应用）、GitHub、Google、Apple。提供方令牌一律丢弃；只有当双方提供方都验证了同一邮箱时才合并账号。
+- ID 令牌和 UserInfo 中的 `cognia_identities` 列出此人关联的登录方式。
+- CORS 只开放给 Web 源。`/api/account/deletion` 实现 §10 的冷静期，由每小时的 cron 清除到期账号。
+- 运维指南见其 README，故障处理见 `docs/runbooks/identity-worker.md`。
+
+**此人的 id。** 对 `oidc` 签发方，若 subject 本身是合法的 `usr_` id，它就是此人的 id；Logto 的 subject 仍做哈希派生。渲染层（`lib/identity/sign-in.ts`）与桌面宿主（`crates/cognia-companion-security/src/official_identity.rs`）读取同一组向量（`fixtures/identity-id-vectors.json`）。
+
+**桌面的信任锚。** 宿主信任：
+
+- 编译进构建的官方签发方（构建时的 `COGNIA_OFFICIAL_ISSUER`；仅 debug 构建可从运行环境读取）；
+- 再加上环境变量，或用户选定的部署。
+
+令牌中未经验证的 `iss` 只用于在这些锚之间选择。
+
+**客户端。**
+
+- 发现逻辑在原本返回 `none` 的地方返回 `official`（`lib/identity/official-deployment.ts`）。唯一的例外是 headless 宿主和对单个网关的探测。
+- 云端闸门对每个配置文件（新旧皆然）只展示一次官方登录页；“登录”与“继续离线”都会永久记住（`official-sign-in-prompt.ts`）。此后由“设置 → 账号”请求闸门展示登录页，无需重新加载。
+- 登录会绑定配置文件，并关联签发方列出的身份（`personal-sign-in.ts`）。没有组织。
+- “设置 → 账号”显示此人及其关联的登录方式，并可申请或撤销注销。申请注销需要以同一身份重新登录一次。
+- CLI 的 `logto login` 默认登录官方账号（支持 `--provider` 和 `COGNIA_ID_ISSUER`）。
+- 自托管 Web 镜像以 `NEXT_PUBLIC_COGNIA_OFFICIAL_ACCOUNT=0` 构建。
+
+**第 1 阶段遗留问题。**
+
+- 在应用市场版应用就绪前，只有自建飞书应用所在租户能登录。
+- Capacitor 仍把令牌放在 `localStorage`（缺陷 6）。
+- Google 和 Apple 身份已列出，但本地身份词汇表中尚无对应项。
 
 ## 路线图
 
