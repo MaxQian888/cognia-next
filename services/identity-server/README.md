@@ -1,41 +1,137 @@
-# Identity Worker — spike (ADR-0215 phase 1)
+# Identity Worker — the official Cognia account
 
-Throwaway prototype answering ADR-0215's identity assumptions before phase 1
-is built. Not production code: email sign-up is on, the setup routes are
-guarded only by a dev token, and there are no tests.
+The OIDC issuer behind the optional official Cognia account (ADR-0215 §2):
+Better Auth 1.7 with its OAuth 2.1 provider and JWT plugins on Cloudflare
+Workers + D1.
 
-## Run
+| Environment | Issuer (`iss`)                          | D1                        | Web origins                                       |
+| ----------- | --------------------------------------- | ------------------------- | ------------------------------------------------- |
+| production  | `https://id.cognia.cn/api/auth`         | `cognia-identity`         | `https://app.cognia.cn`                           |
+| staging     | `https://id-staging.cognia.cn/api/auth` | `cognia-identity-staging` | `https://app-staging.cognia.cn`, `localhost:3000` |
+| dev         | `http://localhost:8787/api/auth`        | local                     | `http://localhost:3000`                           |
+
+Access tokens for the sync API (`resource=https://sync.cognia.cn`) are ES256
+`at+jwt` with a `kid`. Their `sub` is the person's `usr_` id, and
+`cognia-tenant-auth::oidc` verifies them. ID tokens and UserInfo carry
+`cognia_identities`, the person's linked sign-ins (Feishu as
+`{provider:"lark", tenant, subject: union_id}`).
+
+## What it does, and what it refuses
+
+**Clients.**
+
+- There are exactly two, both seeded by `migrations/0002_first_party_clients.sql`.
+- `cognia-app` (desktop, phone, CLI) redirects to `cn.cognia.app:/auth/callback`, or to loopback `http://127.0.0.1/callback` on any port.
+- `cognia-web` uses the official web app's `/logto/callback`. Its URIs are reconciled from `WEB_ORIGINS` at runtime.
+- Both are public PKCE clients and skip the consent screen.
+- Client and resource management is closed: privileges deny everything, and dynamic registration is off.
+
+**Routes.**
+
+- Only the routes in `src/route-allowlist.ts` reach Better Auth: discovery, JWKS, the authorization-code flow, consent, logout, social sign-in and its callbacks.
+- Everything else under `/api/auth` returns 404. That covers password sign-up, client CRUD, account linking and the jwt plugin's `/token`.
+
+**Sign-in.**
+
+- Social only: Feishu (self-built app, keyed `<tenant_key>:<union_id>`), GitHub, Google and Apple. Each is offered only when all of its secrets are set.
+- Provider tokens are discarded before they are written. The issuer keeps who the person is, never access to their provider account.
+- Two sign-ins merge into one person only when both providers verified the same email. Feishu never vouches for an email; its accounts carry a `.invalid` placeholder.
+
+**Pages.**
+
+- `/sign-in`, `/consent`, `/error` and `/signed-out`, served in English or Chinese with a per-request CSP nonce.
+- The apps pass `provider=<id>` on the authorize request, so the sign-in page goes straight to that provider.
+
+**CORS.** Only for `WEB_ORIGINS`, on token, revoke, userinfo, JWKS, discovery and `/api/account/deletion`. Never with credentials.
+
+**Account deletion.**
+
+- `GET`/`POST`/`DELETE /api/account/deletion` with a bearer access token.
+- Requesting a deletion also needs an ID token from a sign-in at most 10 minutes old.
+- After a 7-day cooling-off period the hourly cron purges the person: tokens, consents, sessions, linked accounts and the user. The `account_deletion` row stays as the record.
+- Purging the sync space plugs into `AccountPurgeHook` in phase 3.
+
+**Rate limits.** Better Auth's limiter, counted in D1, per `cf-connecting-ip`.
+
+## Develop
 
 ```bash
 cd services/identity-server
 pnpm install
-# .dev.vars (gitignored): BETTER_AUTH_SECRET, SPIKE_ADMIN_TOKEN,
-# optional FEISHU_APP_ID / FEISHU_APP_SECRET, DEMO_CLIENT_ID
-pnpm dev                                   # http://localhost:8787, local D1
-curl -X POST -H "x-spike-admin: $TOKEN" localhost:8787/spike/migrate
-curl -X POST -H "x-spike-admin: $TOKEN" localhost:8787/spike/seed-client
-node scripts/pkce-flow.mjs http://localhost:8787/api/auth <client_id> https://sync.cognia.cn
+cp .dev.vars.example .dev.vars        # set BETTER_AUTH_SECRETS (+ any provider)
+pnpm migrate:local                    # local D1
+pnpm dev                              # http://localhost:8787 (wrangler --env dev)
+pnpm test                             # vitest in workerd + D1, providers stubbed
+pnpm typecheck
 ```
 
-`/demo/client` is an in-browser public PKCE client for the Feishu round trip.
+For a provider to work locally, register
+`http://localhost:8787/api/auth/callback/<feishu|github|google|apple>` with it.
+The app reaches the dev issuer through `NEXT_PUBLIC_COGNIA_ID_ISSUER` (and, for
+the desktop host, `COGNIA_OFFICIAL_ISSUER`).
 
-## Results (2026-10-04, better-auth 1.7.7, wrangler 4.141)
+### Schema changes
 
-| Assumption                                                                 | Result                                                                                                                                                                                                                                                                                                                                |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Better Auth on Workers + D1 is an OIDC issuer                              | Yes. D1 auto-detected; discovery at `<issuer>/.well-known/openid-configuration`; issuer is `BASE_URL/api/auth`. Bundle 3.0 MiB / 510 KiB gzip.                                                                                                                                                                                        |
-| Access token `aud` = sync API, `sub` = `usr_`                              | Yes. `resource=https://sync.cognia.cn` yields an ES256 `at+jwt` with `kid`; `aud` is an array (sync API + userinfo). `advanced.database.generateId` mints `usr_<32 hex>`.                                                                                                                                                             |
-| The Rust verifiers accept it                                               | Yes. The real `cognia-tenant-auth::oidc::OidcAuthenticator::authenticate_subject` accepts it, `UserId` validates the `sub`, and wrong audience, wrong issuer and a tampered payload are rejected.                                                                                                                                     |
-| Feishu through `genericOAuth`, token v2, keyed on `(tenant_key, union_id)` | Yes, end to end in a real browser. Custom `getToken` (v2 takes JSON) and `getUserInfo` (unwrap `data`); account id `<tenant_key>:<union_id>`. Feishu returned no email, so a non-routable placeholder is used, never verified.                                                                                                        |
-| The app client signs in to both issuers unchanged                          | **No, one line.** `lib/logto/client.ts` always sends `prompt=consent` (a Logto workaround to get a refresh token); Better Auth then shows a consent page even for a `skip_consent` client. With `prompt` dropped the unchanged client does login, refresh (rotating), revoke, and classifies refresh-after-revoke as `invalid_grant`. |
+D1 is reachable only from a Worker, so Better Auth's CLI cannot migrate it.
+After changing anything in `src/auth.ts` that affects the schema (a plugin, an
+option that adds a table or column):
 
-## Findings that change the plan
+```bash
+pnpm schema:generate <snake_case_name>   # writes migrations/NNNN_<name>.sql
+```
 
-1. **Native callback scheme.** Better Auth enforces RFC 8252 §7.1: `cognia://auth/callback` (ADR-0215) and today's `cognia://logto/callback` are rejected. Use a reverse-domain private-use scheme without authority, e.g. `cn.cognia.app:/auth/callback`, registered in Tauri and Capacitor. _Done: the apps register it and send it to non-Logto issuers._
-2. **`prompt=consent` must become issuer-specific** in the client (Logto only). _Done: `/api/auth/config` announces `oidc.issuerKind`; set `COGNIA_OIDC_ISSUER_KIND=oidc` for this Worker._
-3. **Provider tokens.** Better Auth stores the Feishu login access token in D1 in clear by default and has no switch to stop it. A `databaseHooks.account` before-hook now drops provider tokens (verified on create and update); the issuer keeps only the `(tenant_key, union_id)` key.
-4. **Resources and clients need explicit seeding.** Per-client resource linkage is enforced (`adminLinkClientResource`); resource seeding defaults to `insertOnly`, so set `resourceSeedMode: "overwrite"`; scopes not in a resource's `allowedScopes` are silently dropped (no `id_token` if `openid` is missing). Managed clients must be owned by a session, so the official client is seeded from an operator account.
-5. **Lock down client management.** Without `clientPrivileges` / `resourcePrivileges`, any signed-in user can create OAuth clients.
-6. **The issuer has to publish the person's social identities.** Today the app learns them from the collaboration server reading the Logto Management API; personal accounts have no collaboration server, so the issuer must expose `(provider, tenant, subject)` itself (a userinfo / id-token claim).
-7. **Existing bug, Logto side.** `crates/cognia-collab-server/src/logto_management.rs:identities_from_user` looks for `details.unionId` / `details.tenantKey`, but Logto's Feishu connector stores them under `details.rawData` (`union_id`, `tenant_key`) and keys `userId` on `open_id`. The join therefore files an untenanted `ou_…` open id, and the sign-in ↔ Feishu principal link never forms.
-8. **Smaller notes.** The authorize endpoint answers non-navigation requests with `{redirect, url}` JSON instead of a 302. Discovery does not list `none` in `token_endpoint_auth_methods_supported` although public clients work. The Rust verifier does not check `typ: at+jwt` (RFC 9068), so it relies on `aud` alone to refuse an ID token.
+The script replays the checked-in migrations into `node:sqlite` and writes only
+what is missing. `src/auth.test.ts` ("schema") fails while a migration is
+missing, and CI also re-runs the generator.
+
+## Provision an environment
+
+Run once per environment. Use `--env staging` and the `-staging` names for staging.
+
+```bash
+wrangler d1 create cognia-identity --location apac
+#   → set the GitHub environment variable CF_IDENTITY_D1_DATABASE_ID to its id
+#     (deploy.yml injects it into wrangler.toml)
+wrangler secret put BETTER_AUTH_SECRETS        # "1:$(openssl rand -base64 36)"
+wrangler secret put FEISHU_APP_ID              # and FEISHU_APP_SECRET
+wrangler secret put GITHUB_CLIENT_ID           # and GITHUB_CLIENT_SECRET
+wrangler secret put GOOGLE_CLIENT_ID           # and GOOGLE_CLIENT_SECRET
+wrangler secret put APPLE_SERVICE_ID           # APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY (p8)
+```
+
+**Redirect URIs to register with each provider:**
+
+| Provider | Redirect URI                                    | Notes                                                           |
+| -------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| Feishu   | `https://id.cognia.cn/api/auth/callback/feishu` | Developer console → Security → Redirect URLs. No scopes needed. |
+| GitHub   | `https://id.cognia.cn/api/auth/callback/github` | OAuth App.                                                      |
+| Google   | `https://id.cognia.cn/api/auth/callback/google` | Web client; scopes `openid email profile`.                      |
+| Apple    | `https://id.cognia.cn/api/auth/callback/apple`  | Services ID with Sign in with Apple; domain `id.cognia.cn`.     |
+
+**Custom domains** (`id.cognia.cn`, `id-staging.cognia.cn`) are declared in `wrangler.toml` and created on deploy.
+
+**Deploy** through `deploy.yml` (target `identity-worker`). The workflow tests the Worker, injects the D1 id, applies migrations, and then deploys. To do it by hand:
+
+```bash
+pnpm migrate:staging && pnpm deploy:staging
+```
+
+**Smoke test:**
+
+```bash
+curl https://id-staging.cognia.cn/api/auth/.well-known/openid-configuration
+curl https://id-staging.cognia.cn/api/auth/jwks        # ES256 keys with alg + kid
+```
+
+## Operate
+
+- **Secret rotation.** Prepend a new version to `BETTER_AUTH_SECRETS` (`"2:<new>,1:<old>"`) and redeploy. New data uses version 2, and data under version 1 still decrypts. Drop the old version only after every session and encrypted JWKS key from it has expired.
+- **Signing keys.** ES256 keys rotate lazily every 30 days. An old key stays in the JWKS for 7 more days, longer than any token it signed (15-minute access tokens, 10-hour ID tokens). Verifiers re-fetch on an unknown `kid`.
+- **Deletion cron.** Runs hourly at minute 17. A failed purge stays `pending` and is retried on the next run; the Worker logs the failure.
+- **Rollback.** `wrangler rollback [--env staging]`. Migrations are additive; never edit an applied one.
+- **Misconfiguration.** An invalid variable or secret makes every request answer `503 server_misconfigured`, with the reason in the Worker log, instead of issuing tokens under a wrong issuer.
+
+## Known limits
+
+- Until Cognia has a Feishu marketplace (ISV) app, only the self-built login app's own tenant can sign in with Feishu.
+- Mainland China reaches Cloudflare with higher latency. Login redirects are the most sensitive step.

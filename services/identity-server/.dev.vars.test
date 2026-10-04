@@ -1,0 +1,3 @@
+# The test environment (vitest) injects fake secrets from vitest.config.ts.
+# This file exists so wrangler never falls back to the developer's .dev.vars.
+SERVICE_ENV=test

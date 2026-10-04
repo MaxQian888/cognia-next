@@ -144,6 +144,9 @@ const baseTestPathIgnorePatterns = [
   // The status service (Worker, external probe, operator CLI) is three
   // standalone Vitest packages with their own lockfiles.
   "/services/status-server/",
+  // The official account's identity Worker (ADR-0215) is a standalone Vitest
+  // package (workerd + D1) with its own lockfile.
+  "/services/identity-server/",
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",

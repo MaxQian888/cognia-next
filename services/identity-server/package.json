@@ -1,21 +1,36 @@
 {
   "name": "cognia-identity-worker",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.18.0",
-  "description": "SPIKE (ADR-0215 phase 1): Better Auth OIDC issuer on Cloudflare Workers + D1.",
+  "description": "Cloudflare Worker for the official Cognia account (ADR-0215): a Better Auth OIDC issuer on Workers + D1.",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8787",
-    "typecheck": "tsc --noEmit"
+    "dev": "wrangler dev --env dev --port 8787",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "migrate:local": "wrangler d1 migrations apply cognia-identity-dev --local --env dev",
+    "migrate:staging": "wrangler d1 migrations apply cognia-identity-staging --remote --env staging",
+    "migrate": "wrangler d1 migrations apply cognia-identity --remote",
+    "schema:generate": "tsx scripts/generate-schema.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.7",
-    "better-auth": "1.7.7"
+    "better-auth": "1.7.7",
+    "jose": "6.2.12"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
     "@cloudflare/workers-types": "5.20260927.1",
+    "@types/node": "26.1.2",
+    "tsx": "4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "4.1.11",
     "wrangler": "4.141.0"
   }
 }

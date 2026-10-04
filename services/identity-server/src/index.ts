@@ -1,136 +1,132 @@
-import { getMigrations } from "better-auth/db/migration"
+/**
+ * The identity Worker's entry point (ADR-0215 §2).
+ *
+ *   /sign-in, /consent, /error, /signed-out   hosted pages
+ *   /api/auth/*                               Better Auth, behind the route allowlist
+ *   /api/account/deletion                     account deletion (src/deletion/)
+ *   cron                                      purge accounts past their cooling-off period
+ *
+ * One Better Auth instance per isolate: constructing it seeds the sync
+ * resource into D1, which must not happen on every request.
+ */
 
-import { createAuth } from "./auth"
+import { waitUntil } from "cloudflare:workers"
+import type { JSONWebKeySet } from "jose"
+
+import { createAuth, type Auth } from "./auth"
+import { ConfigError, readConfig, type IdentityConfig } from "./config"
+import { ACCOUNT_DELETION_PATH, isCorsPath, preflightResponse, withCors } from "./cors"
+import { handleDeletionRequest } from "./deletion/routes"
+import { purgeDueDeletions } from "./deletion/purge"
 import type { Env } from "./env"
-import { demoClientPage } from "./demo-client"
-import { signInPage } from "./pages"
+import { reconcileWebClient } from "./first-party-clients"
+import { consentPage } from "./pages/consent"
+import { signInPage } from "./pages/sign-in"
+import { errorPage, signedOutPage } from "./pages/status-pages"
+import { mintAppleClientSecret } from "./providers/apple-secret"
+import { isAllowedAuthRoute } from "./route-allowlist"
+import { serveOwnJwks } from "./self-jwks"
 
-/** The Cognia apps, registered as one public PKCE client (ADR-0215 §2). */
-const COGNIA_APP_REDIRECTS = [
-  // RFC 8252 §7.1 private-use scheme: reverse domain of cognia.cn, no authority.
-  "cn.cognia.app:/auth/callback",
-  // Loopback for the CLI and for this spike's verification script.
-  "http://127.0.0.1:53682/callback",
-  // The spike's in-browser demo client (src/demo-client.ts).
-  "http://localhost:8787/demo/client/callback",
-]
+interface CachedAuth {
+  fingerprint: string
+  auth: Auth
+}
 
-function authorized(request: Request, env: Env): boolean {
-  return (
-    request.headers.get("x-spike-admin") === env.SPIKE_ADMIN_TOKEN &&
-    env.SPIKE_ADMIN_TOKEN.length >= 16
-  )
+let cached: CachedAuth | null = null
+
+async function authFor(config: IdentityConfig, env: Env): Promise<Auth> {
+  const appleClientSecret = config.providers.apple
+    ? await mintAppleClientSecret(config.providers.apple)
+    : undefined
+  // A rotated Apple secret or a changed configuration builds a new instance.
+  const fingerprint = JSON.stringify([config, appleClientSecret ?? null])
+  if (cached?.fingerprint === fingerprint) return cached.auth
+  const auth = createAuth(config, env.DB, {
+    ...(appleClientSecret ? { appleClientSecret } : {}),
+    waitUntil,
+  })
+  cached = { fingerprint, auth }
+  // RP-initiated logout downloads this issuer's own JWKS; answer it in-process.
+  serveOwnJwks(`${config.issuer}/jwks`, () => auth.api.getJwks())
+  return auth
+}
+
+async function jwksOf(auth: Auth): Promise<JSONWebKeySet> {
+  return (await auth.api.getJwks()) as unknown as JSONWebKeySet
+}
+
+function notFound(): Response {
+  return Response.json({ error: "not_found" }, { status: 404 })
+}
+
+export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  let config: IdentityConfig
+  try {
+    config = readConfig(env)
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error
+    console.error(`[identity] configuration error: ${error.message}`)
+    return Response.json({ error: "server_misconfigured" }, { status: 503 })
+  }
+  const { pathname } = new URL(request.url)
+  const method = request.method.toUpperCase()
+
+  if (method === "OPTIONS") {
+    return isCorsPath(pathname) ? preflightResponse(request, config.webOrigins) : notFound()
+  }
+
+  if (method === "GET" || method === "HEAD") {
+    if (pathname === "/sign-in") return signInPage(request, config)
+    if (pathname === "/consent") return consentPage(request, env.DB)
+    if (pathname === "/error") return errorPage(request)
+    if (pathname === "/signed-out") return signedOutPage(request)
+  }
+
+  if (pathname === ACCOUNT_DELETION_PATH) {
+    const auth = await authFor(config, env)
+    const response = await handleDeletionRequest(request, {
+      db: env.DB,
+      issuer: config.issuer,
+      audience: config.syncAudience,
+      coolingOffDays: config.coolingOffDays,
+      jwks: () => jwksOf(auth),
+    })
+    return withCors(response, request, config.webOrigins)
+  }
+
+  if (!isAllowedAuthRoute(method, pathname)) return notFound()
+  await reconcileWebClient(env.DB, config.webOrigins)
+  const auth = await authFor(config, env)
+  const response = await auth.handler(request)
+  return isCorsPath(pathname) ? withCors(response, request, config.webOrigins) : response
+}
+
+export async function runScheduled(env: Env, now: Date = new Date()) {
+  const config = readConfig(env)
+  const auth = await authFor(config, env)
+  const context = await auth.$context
+  const report = await purgeDueDeletions({
+    db: env.DB,
+    deleteUser: (userId) => context.internalAdapter.deleteUser(userId),
+    now: () => now,
+  })
+  if (report.purged.length || report.failed.length) {
+    console.log(
+      `[identity] purged ${report.purged.length} account(s); ${report.failed.length} failed`,
+      report.failed
+    )
+  }
+  return report
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
-    const url = new URL(request.url)
-    const auth = createAuth(env)
-
-    if (url.pathname === "/sign-in" && request.method === "GET") {
-      return new Response(signInPage(Boolean(env.FEISHU_APP_ID && env.FEISHU_APP_SECRET)), {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      })
-    }
-
-    if (
-      (url.pathname === "/demo/client" || url.pathname === "/demo/client/callback") &&
-      env.DEMO_CLIENT_ID
-    ) {
-      return new Response(demoClientPage(env.DEMO_CLIENT_ID, env.SYNC_AUDIENCE), {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      })
-    }
-
-    if (url.pathname.startsWith("/spike/")) {
-      if (!authorized(request, env)) return new Response("forbidden", { status: 403 })
-      if (url.pathname === "/spike/migrate" && request.method === "POST") {
-        const { toBeCreated, toBeAdded, runMigrations } = await getMigrations(auth.options)
-        await runMigrations()
-        return Response.json({
-          created: toBeCreated.map((table) => table.table),
-          added: toBeAdded.map((table) => table.table),
-        })
-      }
-      if (url.pathname === "/spike/seed-client" && request.method === "POST") {
-        try {
-          // A managed client must be owned by a session. The official deployment
-          // seeds it once from an operator account; the spike does the same.
-          const operator = await auth.api.signUpEmail({
-            body: {
-              email: `operator-${Date.now()}@cognia.invalid`,
-              password: crypto.randomUUID(),
-              name: "operator",
-            },
-            returnHeaders: true,
-          })
-          const cookie = (operator.headers.get("set-cookie") ?? "")
-            .split(/,(?=\s*[^;=,\s]+=)/)
-            .map((part) => part.split(";")[0]?.trim())
-            .filter(Boolean)
-            .join("; ")
-          const client = await auth.api.adminCreateOAuthClient({
-            headers: new Headers({ cookie }),
-            body: {
-              client_name: "Cognia",
-              redirect_uris: COGNIA_APP_REDIRECTS,
-              token_endpoint_auth_method: "none",
-              application_type: "native",
-              grant_types: ["authorization_code", "refresh_token"],
-              response_types: ["code"],
-              require_pkce: true,
-              // First-party app: no consent screen for our own client.
-              skip_consent: true,
-            },
-          })
-          // Per-client resource linkage is enforced: the sync API audience must
-          // be granted to this client explicitly.
-          await auth.api.adminLinkClientResource({
-            headers: new Headers({ cookie }),
-            params: {
-              identifier: encodeURIComponent(env.SYNC_AUDIENCE),
-              client_id: client.client_id,
-            },
-          })
-          return Response.json(client)
-        } catch (error) {
-          const detail = error as { status?: string; body?: unknown; message?: string }
-          return Response.json(
-            { status: detail.status, body: detail.body, message: detail.message },
-            { status: 500 }
-          )
-        }
-      }
-      if (url.pathname === "/spike/hook-check" && request.method === "POST") {
-        // Writes a social account WITH tokens through the hooked adapter and
-        // reads back what was stored.
-        const context = await auth.$context
-        const user = await context.internalAdapter.createUser(
-          { email: `hook-${Date.now()}@example.com`, name: "hook", emailVerified: false },
-          { method: "email-password" } as never
-        )
-        const account = await context.internalAdapter.createAccount({
-          userId: user.id,
-          providerId: "feishu",
-          accountId: `tenant:on_${Date.now()}`,
-          accessToken: "u-provider-access",
-          refreshToken: "ur-provider-refresh",
-          idToken: "provider-id-token",
-        })
-        await context.internalAdapter.updateAccount(account.id, {
-          accessToken: "u-provider-access-2",
-        })
-        const stored = await env.DB.prepare(
-          "select accessToken, refreshToken, idToken from account where id = ?"
-        )
-          .bind(account.id)
-          .first()
-        return Response.json({ userId: user.id, stored })
-      }
-      return new Response("not found", { status: 404 })
-    }
-
-    if (url.pathname.startsWith("/api/auth/")) return auth.handler(request)
-    return new Response("not found", { status: 404 })
+  fetch: (request, env) => handleRequest(request, env),
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(runScheduled(env))
   },
 } satisfies ExportedHandler<Env>
+
+/** Test seam: drop the cached Better Auth instance. */
+export function resetAuthCache(): void {
+  cached = null
+}

@@ -1,0 +1,19 @@
+# Copy to .dev.vars for `pnpm dev` (wrangler --env dev). Never commit real values.
+#
+# Versioned secrets, newest first: "<version>:<at least 32 chars>,…".
+# Generate one with: echo "1:$(openssl rand -base64 36)"
+BETTER_AUTH_SECRETS=1:replace-with-a-long-random-secret-at-least-32-chars
+
+# Optional sign-in providers; each is offered only when all its values are set.
+# Register http://localhost:8787/api/auth/callback/<provider> with the provider.
+# FEISHU_APP_ID=cli_xxx
+# FEISHU_APP_SECRET=
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# APPLE_SERVICE_ID=
+# APPLE_TEAM_ID=
+# APPLE_KEY_ID=
+# APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+# APPLE_APP_BUNDLE_ID=com.cognia.mobile

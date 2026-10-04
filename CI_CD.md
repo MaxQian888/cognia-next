@@ -18,15 +18,15 @@ what to do when one goes red, and how to set up the optional integrations.
 
 ## Tiers
 
-| Tier         | Trigger                                                   | Runs                                                                      |
-| ------------ | --------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **Hot path** | push to `dev`/`master`, any PR                            | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`      |
-| **Nightly**  | `nightly.yml`, 03:00 UTC + manual                         | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E |
-| **Release**  | `v*` tag                                                  | `release.yml` → quality + test + signed Tauri release                     |
-| **Report**   | `workflow_run` after the hot path                         | `report.yml` → PR comment + job summary                                   |
-| **Services** | changes under `services/**`                               | `share-server.yml`, `signaling-server.yml`, `compose-e2e.yml`             |
-| **Deploy**   | manual, opt-in                                            | `deploy.yml` (see below)                                                  |
-| **Feishu**   | source workflow completion, opt-in digest, manual preview | `feishu-notify.yml` → signed group cards and delivery diagnostics         |
+| Tier         | Trigger                                                   | Runs                                                                                 |
+| ------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **Hot path** | push to `dev`/`master`, any PR                            | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`                 |
+| **Nightly**  | `nightly.yml`, 03:00 UTC + manual                         | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E            |
+| **Release**  | `v*` tag                                                  | `release.yml` → quality + test + signed Tauri release                                |
+| **Report**   | `workflow_run` after the hot path                         | `report.yml` → PR comment + job summary                                              |
+| **Services** | changes under `services/**`                               | `share-server.yml`, `signaling-server.yml`, `identity-server.yml`, `compose-e2e.yml` |
+| **Deploy**   | manual, opt-in                                            | `deploy.yml` (see below)                                                             |
+| **Feishu**   | source workflow completion, opt-in digest, manual preview | `feishu-notify.yml` → signed group cards and delivery diagnostics                    |
 
 Tauri **bundling** is deliberately off the hot path — it is the largest
 wall-clock item in the repo. The Tauri crate is compiled for affected PRs and full runs:
@@ -400,11 +400,12 @@ unsigned release would be un-updatable. See `src-tauri/UPDATER.md`.
 | ------------------ | ----------------- | ----------------------------------- |
 | `signaling-worker` | Cloudflare Worker | `services/signaling-server/worker/` |
 | `share-worker`     | Cloudflare Worker | `services/share-server/worker/`     |
+| `identity-worker`  | Cloudflare Worker | `services/identity-server/`         |
 | `signaling-fly`    | Fly.io (axum)     | `services/signaling-server/`        |
 | `share-fly`        | Fly.io (axum)     | `services/share-server/`            |
 
 Dispatch inputs: `environment` (`staging` / `production`) and `target` (`all`,
-`workers`, `fly`, or one of the four above). Staging Workers deploy via the
+`workers`, `fly`, or one of the targets above). Staging Workers deploy via the
 `[env.staging]` stanzas in each `wrangler.toml`.
 
 Three gates keep forks green with zero configuration: manual trigger only, the
@@ -415,19 +416,22 @@ job rather than failing it.
 The GitHub Environments `staging` and `production` hold the same names, so the
 workflow reads one set:
 
-| Kind     | Name                       | Notes                                        |
-| -------- | -------------------------- | -------------------------------------------- |
-| secret   | `CLOUDFLARE_API_TOKEN`     | Workers deploy token                         |
-| secret   | `FLY_API_TOKEN`            | `fly tokens create deploy`                   |
-| variable | `CLOUDFLARE_ACCOUNT_ID`    |                                              |
-| variable | `CF_SHARE_KV_NAMESPACE_ID` | injected into `wrangler.toml` at deploy time |
-| variable | `FLY_SIGNALING_APP`        | e.g. `cognia-signaling` / `-staging`         |
-| variable | `FLY_SHARE_APP`            | e.g. `cognia-share` / `-staging`             |
+| Kind     | Name                         | Notes                                                  |
+| -------- | ---------------------------- | ------------------------------------------------------ |
+| secret   | `CLOUDFLARE_API_TOKEN`       | Workers deploy token                                   |
+| secret   | `FLY_API_TOKEN`              | `fly tokens create deploy`                             |
+| variable | `CLOUDFLARE_ACCOUNT_ID`      |                                                        |
+| variable | `CF_SHARE_KV_NAMESPACE_ID`   | injected into `wrangler.toml` at deploy time           |
+| variable | `CF_IDENTITY_D1_DATABASE_ID` | the environment's identity D1; injected at deploy time |
+| variable | `FLY_SIGNALING_APP`          | e.g. `cognia-signaling` / `-staging`                   |
+| variable | `FLY_SHARE_APP`              | e.g. `cognia-share` / `-staging`                       |
 
 Give `production` protection rules (required reviewers, branch restriction)
 under **Settings → Environments**. One-time provisioning per environment is
 documented in each service README: R2 bucket, KV namespace,
-`wrangler secret put SHARE_UPLOAD_SECRET`, `flyctl volumes create share_data`.
+`wrangler secret put SHARE_UPLOAD_SECRET`, `flyctl volumes create share_data`,
+and for the identity Worker the D1 database, `BETTER_AUTH_SECRETS` and the
+sign-in provider credentials (`services/identity-server/README.md`).
 
 ### Codecov
 

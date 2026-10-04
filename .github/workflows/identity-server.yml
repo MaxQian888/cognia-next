@@ -1,0 +1,70 @@
+name: Identity Server
+
+# ============================================================================
+# identity-server — the official Cognia account's OIDC issuer (ADR-0215 §2)
+# ============================================================================
+# A standalone TypeScript Cloudflare Worker (Better Auth + D1) with its own
+# lockfile, outside the pnpm workspace like the other service Workers. Its
+# specs run inside workerd via @cloudflare/vitest-pool-workers against a local
+# D1 with every migration applied, so the SQL Better Auth issues runs for real.
+# Never part of the root Jest suite.
+# ============================================================================
+
+on:
+  push:
+    branches: [master, dev]
+    paths:
+      - "services/identity-server/**"
+      - ".github/workflows/identity-server.yml"
+  pull_request:
+    paths:
+      - "services/identity-server/**"
+      - ".github/workflows/identity-server.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: identity-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker:
+    name: Worker (typecheck + vitest)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: services/identity-server
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: services/identity-server/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (vitest / miniflare + D1)
+        run: pnpm test
+
+      - name: Schema is generated
+        # A config change that alters Better Auth's schema must ship its
+        # generated migration; the drift test catches it, this keeps the
+        # generator itself runnable.
+        run: |
+          pnpm schema:generate drift_check
+          test -z "$(git status --porcelain -- migrations)"

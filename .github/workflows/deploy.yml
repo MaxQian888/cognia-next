@@ -3,7 +3,8 @@ name: Deploy
 # ============================================================================
 # Real, opt-in deployments for the cloud services (ADR-0059 P0.1):
 #   - Cloudflare Workers: cognia-signaling (Rust/wasm), cognia-share (TS),
-#     cognia-status (TS + D1 + the status-only static export)
+#     cognia-status (TS + D1 + the status-only static export),
+#     cognia-identity (TS + D1, the official account's OIDC issuer, ADR-0215)
 #   - Fly.io axum twins:  signaling-server, share-server
 #
 # Safety model (forks stay green with zero configuration):
@@ -16,7 +17,8 @@ name: Deploy
 # holding the SAME names so the workflow reads one set:
 #   secrets:  CLOUDFLARE_API_TOKEN, FLY_API_TOKEN
 #   variables: CLOUDFLARE_ACCOUNT_ID, CF_SHARE_KV_NAMESPACE_ID,
-#              CF_STATUS_D1_DATABASE_ID (staging), FLY_SIGNALING_APP, FLY_SHARE_APP
+#              CF_STATUS_D1_DATABASE_ID (staging), CF_IDENTITY_D1_DATABASE_ID,
+#              FLY_SIGNALING_APP, FLY_SHARE_APP
 # `production` should carry protection rules (required reviewers) — configured
 # in Settings → Environments, documented in CI_CD.md.
 #
@@ -44,6 +46,7 @@ on:
           - signaling-worker
           - share-worker
           - status-worker
+          - identity-worker
           - signaling-fly
           - share-fly
           - docs
@@ -254,6 +257,66 @@ jobs:
             deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
             --var BUILD_SHA:${{ github.sha }}
 
+  deploy-identity-worker:
+    name: Worker — identity
+    needs: gate
+    # The official account (ADR-0215 §2). Tests run first; migrations are
+    # applied before the deploy so new code never meets an old schema.
+    # Secrets (BETTER_AUTH_SECRETS, provider credentials) are set once per
+    # environment with `wrangler secret put`; see services/identity-server/README.md.
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","workers","identity-worker"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: services/identity-server/pnpm-lock.yaml
+
+      - name: Install and test the identity Worker
+        working-directory: services/identity-server
+        run: |
+          pnpm install --frozen-lockfile --prefer-offline
+          pnpm typecheck
+          pnpm test
+
+      - name: Inject D1 database id
+        env:
+          D1_ID: ${{ vars.CF_IDENTITY_D1_DATABASE_ID }}
+          PLACEHOLDER: ${{ inputs.environment == 'staging' && 'REPLACE_WITH_STAGING_D1_DATABASE_ID' || 'REPLACE_WITH_PRODUCTION_D1_DATABASE_ID' }}
+        run: |
+          if [ -z "$D1_ID" ]; then
+            echo "::error::CF_IDENTITY_D1_DATABASE_ID environment variable is not set"
+            exit 1
+          fi
+          sed -i "s/$PLACEHOLDER/$D1_ID/" services/identity-server/wrangler.toml
+
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/identity-server
+          command: >
+            d1 migrations apply
+            ${{ inputs.environment == 'staging' && 'cognia-identity-staging --env staging' || 'cognia-identity' }}
+            --remote
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/identity-server
+          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+
   deploy-signaling-fly:
     name: Fly — signaling
     needs: gate
@@ -449,6 +512,7 @@ jobs:
         deploy-signaling-worker,
         deploy-share-worker,
         deploy-status-worker,
+        deploy-identity-worker,
         deploy-signaling-fly,
         deploy-share-fly,
         deploy-docs,
@@ -467,6 +531,7 @@ jobs:
             echo "| Worker — signaling | ${{ needs.deploy-signaling-worker.result }} |"
             echo "| Worker — share | ${{ needs.deploy-share-worker.result }} |"
             echo "| Worker — status | ${{ needs.deploy-status-worker.result }} |"
+            echo "| Worker — identity | ${{ needs.deploy-identity-worker.result }} |"
             echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
             echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
             echo "| Pages — docs | ${{ needs.deploy-docs.result }} |"

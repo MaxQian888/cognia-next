@@ -1,4 +1,8 @@
 node_modules/
 .wrangler/
-.dev.vars
 dist/
+# Local secrets. The test env's file holds no secrets and is committed so
+# vitest never reads a developer's .dev.vars.
+.dev.vars*
+!.dev.vars.test
+!.dev.vars.example

@@ -1,16 +1,100 @@
-# SPIKE (ADR-0215 phase 1): Better Auth OIDC issuer on Workers + D1.
-# Dev: pnpm dev (local D1). Secrets for dev live in .dev.vars (gitignored).
-name = "cognia-identity-spike"
+# Cloudflare Worker for the official Cognia account (ADR-0215 §2): a Better
+# Auth OIDC issuer on Workers + D1. Operator guide: ./README.md.
+#
+# Dev:     pnpm migrate:local && pnpm dev     (local D1, secrets in .dev.vars)
+# Test:    pnpm test                          (miniflare + local D1 with every migration)
+# Build:   pnpm build                         (dry-run bundle into dist/)
+# Deploy:  pnpm migrate:staging && pnpm deploy:staging    (staging)
+#          pnpm migrate && pnpm deploy                    (production)
+#
+# Top level is production (id.cognia.cn). Secrets, per environment
+# (`wrangler secret put <NAME> [--env staging]`):
+#   BETTER_AUTH_SECRETS   versioned signing/encryption secrets, "2:<b64>,1:<b64>"
+#   FEISHU_APP_ID, FEISHU_APP_SECRET           Feishu self-built login app
+#   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+#   APPLE_SERVICE_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY (p8 PEM)
+#   APPLE_APP_BUNDLE_ID                        optional, native Sign in with Apple
+# A provider whose secrets are not all set is simply not offered.
+name = "cognia-identity"
 main = "src/index.ts"
 compatibility_date = "2026-08-20"
+# Better Auth keeps per-request state in AsyncLocalStorage (node:async_hooks).
 compatibility_flags = ["nodejs_compat"]
 workers_dev = false
+preview_urls = false
 
-[vars]
-BASE_URL = "http://localhost:8787"
-SYNC_AUDIENCE = "https://sync.cognia.cn"
+routes = [{ pattern = "id.cognia.cn", custom_domain = true }]
+
+[triggers]
+# Hourly: purge accounts whose deletion cooling-off period has ended.
+crons = ["17 * * * *"]
+
+[observability]
+enabled = true
 
 [[d1_databases]]
 binding = "DB"
-database_name = "cognia-identity-spike"
+database_name = "cognia-identity"
+database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+SERVICE_ENV = "production"
+BASE_URL = "https://id.cognia.cn"
+# RFC 8707 resource of the sync API: the access-token `aud`. The same value in
+# every environment; `iss` tells environments apart.
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+# Exact origins of the official web app (the `cognia-web` client and CORS).
+WEB_ORIGINS = "https://app.cognia.cn"
+ACCOUNT_DELETION_COOLING_OFF_DAYS = "7"
+
+[env.staging]
+name = "cognia-identity-staging"
+routes = [{ pattern = "id-staging.cognia.cn", custom_domain = true }]
+[env.staging.triggers]
+crons = ["17 * * * *"]
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "cognia-identity-staging"
+database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"
+migrations_dir = "migrations"
+[env.staging.vars]
+SERVICE_ENV = "staging"
+BASE_URL = "https://id-staging.cognia.cn"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "https://app-staging.cognia.cn,http://localhost:3000"
+ACCOUNT_DELETION_COOLING_OFF_DAYS = "7"
+
+[env.dev]
+name = "cognia-identity-dev"
+routes = []
+[env.dev.triggers]
+crons = ["17 * * * *"]
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "cognia-identity-dev"
 database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+[env.dev.vars]
+SERVICE_ENV = "dev"
+BASE_URL = "http://localhost:8787"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "http://localhost:3000"
+ACCOUNT_DELETION_COOLING_OFF_DAYS = "7"
+
+# Used only by vitest (vitest.config.ts); secrets are injected there.
+[env.test]
+name = "cognia-identity-test"
+routes = []
+[[env.test.d1_databases]]
+binding = "DB"
+database_name = "cognia-identity-test"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+[env.test.vars]
+SERVICE_ENV = "test"
+BASE_URL = "https://id.test"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "https://app.test,http://localhost:3000"
+ACCOUNT_DELETION_COOLING_OFF_DAYS = "7"
