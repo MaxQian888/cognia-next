@@ -52,6 +52,7 @@ export async function consentPage(request: Request, db: D1Database): Promise<Res
       locale,
       title: t(locale, "error.title"),
       nonce,
+      mascot: "worried",
       body: `<h1>${escapeHtml(t(locale, "error.title"))}</h1><p>${escapeHtml(t(locale, "error.expired"))}</p>`,
     })
     return htmlResponse(html, nonce, 400)
@@ -63,13 +64,14 @@ export async function consentPage(request: Request, db: D1Database): Promise<Res
   const body = `<h1>${escapeHtml(t(locale, "consent.title", { client: name }))}</h1>
 <p>${escapeHtml(t(locale, "consent.scopes"))}</p>
 <ul>${scopes.map((scope) => `<li>${escapeHtml(t(locale, `scope.${scope}` as MessageKey))}</li>`).join("")}</ul>
-<button type="button" class="primary" data-accept="true">${escapeHtml(t(locale, "consent.allow"))}</button>
-<button type="button" data-accept="false">${escapeHtml(t(locale, "consent.deny"))}</button>
+<div class="actions"><button type="button" class="primary" data-accept="true">${escapeHtml(t(locale, "consent.allow"))}</button>
+<button type="button" data-accept="false">${escapeHtml(t(locale, "consent.deny"))}</button></div>
 <div id="status" class="status" role="status" aria-live="polite"></div>`
   const html = renderDocument({
     locale,
     title: t(locale, "consent.title", { client: name }),
     nonce,
+    mascot: "welcome",
     body,
     data: { failed: t(locale, "consent.failed") },
     script: SCRIPT,

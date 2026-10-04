@@ -7,7 +7,8 @@
  * The page validates the state, hands the code to the window that opened it,
  * and closes. It is still a page a person sees: for a moment on success, and
  * for as long as it takes to read when something went wrong. So it says which
- * of these happened, in the same card the sign-in screen uses:
+ * of these happened, in the card the identity Worker's hosted pages use, with
+ * the sign-in mascot's expression (lib/identity/sign-in-mascot.ts) matching:
  *
  * - `done`: the code went back to Cognia; the window closes (a button covers
  *   a browser that refuses to let script close it);
@@ -19,9 +20,10 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { CircleAlertIcon, CircleCheckIcon, LoaderCircleIcon } from "lucide-react"
+import { LoaderCircleIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { mascotDataUri, type MascotMood } from "@/lib/identity/sign-in-mascot"
 import { readValidatedLogtoCallback } from "@/lib/logto/web-popup"
 
 type Outcome =
@@ -44,90 +46,89 @@ export default function LogtoCallbackPage() {
   }, [])
 
   const close = () => window.close()
+  const mood: MascotMood =
+    outcome.kind === "working" ? "thinking" : outcome.kind === "done" ? "happy" : "worried"
 
   return (
     <main
-      className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground"
+      className="flex min-h-dvh items-center justify-center bg-background px-4 py-10 text-foreground"
       data-testid="logto-callback"
       data-outcome={outcome.kind}
     >
-      <section className="flex w-full max-w-sm flex-col gap-4 rounded-xl border bg-card p-6 shadow-sm">
-        {outcome.kind === "working" ? (
-          <Heading icon={<LoaderCircleIcon className="size-5 animate-spin" aria-hidden />}>
-            {t("working")}
-          </Heading>
-        ) : null}
+      <section className="relative w-full max-w-md overflow-hidden rounded-3xl border bg-card text-center shadow-xl">
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-primary/70 to-transparent"
+        />
+        <div className="flex h-44 items-end justify-center border-b bg-gradient-to-b from-primary/10 to-transparent">
+          {/* eslint-disable-next-line @next/next/no-img-element -- generated SVG data: URL, nothing for next/image to optimize */}
+          <img
+            src={mascotDataUri(mood)}
+            alt=""
+            width={164}
+            height={164}
+            className="size-40"
+            data-testid="logto-callback-mascot"
+            data-mood={mood}
+          />
+        </div>
 
-        {outcome.kind === "done" ? (
-          <>
-            <Heading icon={<CircleCheckIcon className="size-5" aria-hidden />}>
-              {t("doneTitle")}
+        <div className="flex flex-col items-center gap-3 px-8 pt-7 pb-8">
+          {outcome.kind === "working" ? (
+            <Heading>
+              <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" aria-hidden />
+              {t("working")}
             </Heading>
-            <p className="text-sm text-muted-foreground">{t("doneBody")}</p>
-            <Button type="button" variant="outline" onClick={close}>
-              {t("close")}
-            </Button>
-          </>
-        ) : null}
+          ) : null}
 
-        {outcome.kind === "failed" ? (
-          <>
-            <Heading tone="destructive" icon={<CircleAlertIcon className="size-5" aria-hidden />}>
-              {t("failedTitle")}
-            </Heading>
-            <p className="text-sm text-muted-foreground" data-testid="logto-callback-reason">
-              {outcome.error === "access_denied"
-                ? t("cancelled")
-                : outcome.error === "state_mismatch"
-                  ? t("stateMismatch")
-                  : t("providerError", { error: outcome.error })}
-            </p>
-            <p className="text-xs text-muted-foreground">{t("tryAgain")}</p>
-            <Button type="button" variant="outline" onClick={close}>
-              {t("close")}
-            </Button>
-          </>
-        ) : null}
+          {outcome.kind === "done" ? (
+            <>
+              <Heading>{t("doneTitle")}</Heading>
+              <p className="text-sm text-muted-foreground">{t("doneBody")}</p>
+              <CloseButton onClick={close}>{t("close")}</CloseButton>
+            </>
+          ) : null}
 
-        {outcome.kind === "orphaned" ? (
-          <>
-            <Heading tone="destructive" icon={<CircleAlertIcon className="size-5" aria-hidden />}>
-              {t("orphanedTitle")}
-            </Heading>
-            <p className="text-sm text-muted-foreground">{t("orphanedBody")}</p>
-            <Button type="button" variant="outline" onClick={close}>
-              {t("close")}
-            </Button>
-          </>
-        ) : null}
+          {outcome.kind === "failed" ? (
+            <>
+              <Heading>{t("failedTitle")}</Heading>
+              <p className="text-sm text-muted-foreground" data-testid="logto-callback-reason">
+                {outcome.error === "access_denied"
+                  ? t("cancelled")
+                  : outcome.error === "state_mismatch"
+                    ? t("stateMismatch")
+                    : t("providerError", { error: outcome.error })}
+              </p>
+              <p className="text-xs text-muted-foreground">{t("tryAgain")}</p>
+              <CloseButton onClick={close}>{t("close")}</CloseButton>
+            </>
+          ) : null}
+
+          {outcome.kind === "orphaned" ? (
+            <>
+              <Heading>{t("orphanedTitle")}</Heading>
+              <p className="text-sm text-muted-foreground">{t("orphanedBody")}</p>
+              <CloseButton onClick={close}>{t("close")}</CloseButton>
+            </>
+          ) : null}
+        </div>
       </section>
     </main>
   )
 }
 
-function Heading({
-  icon,
-  tone = "primary",
-  children,
-}: {
-  icon: ReactNode
-  tone?: "primary" | "destructive"
-  children: ReactNode
-}) {
+function Heading({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center gap-3">
-      <div
-        className={
-          tone === "destructive"
-            ? "flex size-10 items-center justify-center rounded-lg bg-destructive/10 text-destructive"
-            : "flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
-        }
-      >
-        {icon}
-      </div>
-      <h1 className="text-base font-semibold" role="status">
-        {children}
-      </h1>
-    </div>
+    <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight" role="status">
+      {children}
+    </h1>
+  )
+}
+
+function CloseButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <Button type="button" variant="outline" size="lg" className="mt-2 w-full" onClick={onClick}>
+      {children}
+    </Button>
   )
 }

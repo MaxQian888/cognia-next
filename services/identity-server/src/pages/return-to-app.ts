@@ -15,7 +15,7 @@
  */
 
 import { NATIVE_CALLBACK_URI } from "../first-party-clients"
-import { escapeHtml, htmlResponse, newNonce, renderDocument } from "./document"
+import { GO_ICON, escapeHtml, htmlResponse, newNonce, renderDocument } from "./document"
 import { localeFrom, t } from "./strings"
 
 const SCRIPT = `
@@ -44,11 +44,11 @@ export function returnToAppPage(request: Request, target: string): Response {
     locale,
     title,
     nonce,
-    state: failed ? "error" : "success",
+    mascot: failed ? "worried" : "happy",
     body:
       `<h1>${escapeHtml(title)}</h1>` +
       `<p>${escapeHtml(t(locale, failed ? "return.failedBody" : "return.body"))}</p>` +
-      `<a class="button primary" href="${escapeHtml(target)}">${escapeHtml(t(locale, "return.open"))}</a>` +
+      `<div class="actions"><a class="button primary" href="${escapeHtml(target)}">${escapeHtml(t(locale, "return.open"))}${GO_ICON}</a></div>` +
       `<footer>${escapeHtml(t(locale, "return.hint"))}</footer>`,
     data: { target },
     script: SCRIPT,

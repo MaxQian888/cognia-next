@@ -10,6 +10,8 @@
  */
 import nodeHttp from "node:http"
 
+import { mascotSvg } from "@/lib/identity/sign-in-mascot"
+
 export interface CallbackResult {
   code?: string
   state?: string
@@ -44,6 +46,7 @@ const PAGE_COPY = {
   en: {
     okTitle: "Authorization complete",
     okBody: "You can close this tab and return to the terminal.",
+    terminal: "cognia-agent is continuing",
     failTitle: "Authorization did not complete",
     failNext: "Return to the terminal and run the command again.",
     unknown: "unknown error",
@@ -51,6 +54,7 @@ const PAGE_COPY = {
   zh: {
     okTitle: "授权完成",
     okBody: "可以关闭此标签页，回到终端继续。",
+    terminal: "cognia-agent 正在继续",
     failTitle: "授权未完成",
     failNext: "请回到终端，重新运行刚才的命令。",
     unknown: "未知错误",
@@ -66,23 +70,26 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;")
 }
 
-// Cognia's palette and mark, as the identity Worker's hosted pages draw them
-// (services/identity-server/src/pages/document.ts; sources of truth
-// web/app/globals.css and web/components/brand-mark.tsx), so the browser tab
-// a sign-in ends on looks like the pages it started on.
-const PAGE_STYLE = `:root{color-scheme:light dark;--paper:#f3f1ec;--surface:#faf9f6;--ink:#0c1115;--muted:#5f666e;--hairline:#d7d8d5;--action:#35cedd;--success:#2a6f49;--destructive:#b3261e}
-@media (prefers-color-scheme:dark){:root{--paper:#0c1115;--surface:#151b20;--ink:#f3f1ec;--muted:#8e959b;--hairline:#2a333a;--action:#4fdcea;--success:#57c08a;--destructive:#f2837c}}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--paper);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
-main{width:min(400px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:28px 28px 24px;box-shadow:0 1px 2px rgb(12 17 21 / 4%),0 12px 32px -16px rgb(12 17 21 / 18%)}
-.brand{display:flex;align-items:center;gap:8px;margin:0 0 24px;font-weight:600;letter-spacing:-.01em}.brand svg{width:22px;height:22px}
-.state{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;margin:0 0 14px;border:1px solid var(--hairline)}.state svg{width:20px;height:20px}
-.state.success{color:var(--success)}.state.error{color:var(--destructive)}
-h1{font-size:19px;line-height:1.3;margin:0 0 8px;letter-spacing:-.01em}p{margin:0 0 16px;color:var(--muted)}p:last-child{margin:0}
-.code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;padding:8px 10px;border:1px solid var(--hairline);border-radius:8px;overflow-wrap:anywhere}`
+// Cognia's palette, mark and sign-in mascot, as the identity Worker's hosted
+// pages draw them (services/identity-server/src/pages/document.ts; sources of
+// truth web/app/globals.css and web/components/brand-mark.tsx), so the browser
+// tab a sign-in ends on looks like the pages it started on.
+const PAGE_STYLE = `:root{color-scheme:light dark;--paper:#f3f1ec;--surface:#faf9f6;--ink:#0c1115;--muted:#5f666e;--hairline:#d7d8d5;--hairline-strong:#b9bcb8;--action:#35cedd;--glow:rgb(53 206 221 / 16%);--grid:rgb(12 17 21 / 7%);--band-top:#dff4f6;--band-bottom:#f4faf9}
+@media (prefers-color-scheme:dark){:root{--paper:#0c1115;--surface:#151b20;--ink:#f3f1ec;--muted:#8e959b;--hairline:#2a333a;--hairline-strong:#3c464e;--action:#4fdcea;--glow:rgb(79 220 234 / 14%);--grid:rgb(243 241 236 / 6%);--band-top:#12292e;--band-bottom:#151b20}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--ink);font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;background:radial-gradient(64rem 34rem at 50% -10rem,var(--glow),transparent 70%),radial-gradient(circle,var(--grid) 1px,transparent 1.3px) 0 0/24px 24px,var(--paper)}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 20px}.top,.stage{width:min(1040px,100%)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:16px;letter-spacing:-.01em}.brand svg{width:26px;height:26px}
+.stage{flex:1;display:grid;place-items:center;padding:36px 0}
+.card{position:relative;width:min(440px,100%);background:var(--surface);border:1px solid var(--hairline);border-radius:22px;overflow:hidden;text-align:center;box-shadow:0 1px 2px rgb(12 17 21 / 4%),0 28px 64px -32px rgb(12 17 21 / 30%)}
+.card::after{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,transparent,var(--action),transparent);opacity:.75}
+.hero{position:relative;height:176px;display:flex;justify-content:center;align-items:flex-end;border-bottom:1px solid var(--hairline);background:radial-gradient(circle at 50% 118%,var(--glow),transparent 62%),linear-gradient(180deg,var(--band-top),var(--band-bottom))}
+.hero svg{position:relative;width:164px;height:164px;display:block}
+.content{padding:28px 36px 32px}h1{font-size:23px;line-height:1.3;margin:0 0 8px;letter-spacing:-.015em}p{margin:0 0 18px;color:var(--muted)}p:last-child{margin:0}
+.code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;padding:8px 10px;border:1px dashed var(--hairline-strong);border-radius:8px;overflow-wrap:anywhere}
+.terminal{display:inline-flex;align-items:center;gap:8px;margin-top:4px;padding:6px 12px;border:1px solid var(--hairline);border-radius:999px;font:12px ui-monospace,SFMono-Regular,monospace;color:var(--muted)}.terminal::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--action)}
+@media (max-width:480px){.content{padding:24px 22px 26px}.hero{height:160px}.hero svg{width:150px;height:150px}h1{font-size:21px}}`
 
 const BRAND_MARK = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="17.5" height="17.5" rx="2.5" stroke="currentColor" stroke-width="1.4" opacity=".55"/><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".9"><path d="M12 1.5v2.4"/><path d="M12 20.1v2.4"/><path d="M1.5 12h2.4"/><path d="M20.1 12h2.4"/></g><path d="M6.9 9.1h3.4a1.6 1.6 0 0 1 1.6 1.6v3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11.9" cy="15.9" r="1.75" fill="var(--action)"/></svg>`
-const OK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`
-const FAIL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 7v6"/><path d="M12 17h.01"/></svg>`
 
 /**
  * The page the browser tab shows once the redirect lands. The error and its
@@ -97,14 +104,15 @@ export function resultPage(result: CallbackResult, locale: CallbackPageLocale = 
     result.errorDescription ? `: ${result.errorDescription}` : ""
   }`
   const body = ok
-    ? `<div class="state success">${OK_ICON}</div><h1>${title}</h1><p>${copy.okBody}</p>`
-    : `<div class="state error">${FAIL_ICON}</div><h1>${title}</h1>` +
-      `<p class="code">${escapeHtml(reason)}</p><p>${copy.failNext}</p>`
+    ? `<h1>${title}</h1><p>${copy.okBody}</p><span class="terminal">${copy.terminal}</span>`
+    : `<h1>${title}</h1><p class="code">${escapeHtml(reason)}</p><p>${copy.failNext}</p>`
   return (
     `<!doctype html><html lang="${locale === "zh" ? "zh-CN" : "en"}"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">` +
     `<title>${title} · Cognia</title><style>${PAGE_STYLE}</style></head>` +
-    `<body><main><div class="brand">${BRAND_MARK}<span>Cognia</span></div>${body}</main></body></html>`
+    `<body><div class="page"><header class="top"><div class="brand">${BRAND_MARK}<span>Cognia</span></div></header>` +
+    `<div class="stage"><main class="card" data-outcome="${ok ? "ok" : "failed"}"><div class="hero">${mascotSvg(ok ? "happy" : "worried")}</div>` +
+    `<div class="content">${body}</div></main></div></div></body></html>`
   )
 }
 

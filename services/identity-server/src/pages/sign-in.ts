@@ -13,7 +13,7 @@
  */
 
 import { enabledProviders, type IdentityConfig, type ProviderId } from "../config"
-import { escapeHtml, htmlResponse, newNonce, renderDocument } from "./document"
+import { GO_ICON, escapeHtml, htmlResponse, newNonce, renderDocument } from "./document"
 import { localeFrom, t, type MessageKey } from "./strings"
 
 const SCRIPT = `
@@ -59,20 +59,22 @@ export function signInPage(request: Request, config: Pick<IdentityConfig, "provi
       ? requested
       : null
 
-  let body = `<h1>${escapeHtml(t(locale, "signIn.title"))}</h1><p>${escapeHtml(t(locale, "signIn.subtitle"))}</p>`
+  let body = `<h1>${escapeHtml(t(locale, "signIn.title"))}</h1>`
   if (!fromAuthorize) {
     body += `<p>${escapeHtml(t(locale, "signIn.startFromApp"))}</p>`
   } else if (providers.length === 0) {
     body += `<p>${escapeHtml(t(locale, "signIn.noProviders"))}</p>`
   } else {
+    body += `<p>${escapeHtml(t(locale, "signIn.choose"))}</p><div class="actions">`
     body += providers
       .map(
         (id) =>
-          `<button type="button" data-provider="${id}"${autoProvider ? " disabled" : ""}>${escapeHtml(
+          `<button type="button" class="provider" data-provider="${id}"${autoProvider ? " disabled" : ""}><span>${escapeHtml(
             t(locale, "signIn.continueWith", { provider: providerLabel(locale, id) })
-          )}</button>`
+          )}</span>${GO_ICON}</button>`
       )
       .join("")
+    body += `</div>`
   }
   body += `<div id="status" class="status" role="status" aria-live="polite"></div>`
 
@@ -90,6 +92,9 @@ export function signInPage(request: Request, config: Pick<IdentityConfig, "provi
     locale,
     title: t(locale, "signIn.title"),
     nonce,
+    // Going straight to a provider is a wait; choosing one is a welcome.
+    mascot: autoProvider ? "thinking" : "welcome",
+    showcase: { heading: t(locale, "brand.tagline"), text: t(locale, "signIn.subtitle") },
     body,
     ...(fromAuthorize && providers.length > 0 ? { data, script: SCRIPT } : {}),
   })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { escapeHtml, htmlResponse, jsonForScript, newNonce, renderDocument } from "./document"
+import { mascotSvg } from "./mascot"
 
 describe("page document", () => {
   it("escapes HTML and keeps JSON from closing its script tag", () => {
@@ -19,6 +20,7 @@ describe("page document", () => {
       locale: "zh",
       title: "<T>",
       nonce,
+      mascot: "welcome",
       body: "<p>x</p>",
       data: { a: 1 },
       script: "run()",
@@ -45,20 +47,42 @@ describe("page document", () => {
     expect(newNonce()).not.toBe(newNonce())
   })
 
-  it("carries the Cognia mark on every page, and a state tile only when asked", async () => {
-    const plain = renderDocument({ locale: "en", title: "t", nonce: "n", body: "<h1>t</h1>" })
-    expect(plain).toContain('class="brand"')
-    expect(plain).toContain("<span>Cognia</span>")
-    expect(plain).not.toContain('class="state')
+  it("carries the Cognia mark and the mascot's expression on every page", async () => {
     const failed = renderDocument({
+      locale: "zh",
+      title: "t",
+      nonce: "n",
+      body: "<h1>t</h1>",
+      mascot: "worried",
+    })
+    expect(failed).toContain('class="brand"')
+    expect(failed).toContain("<span>Cognia</span><small>账号</small>")
+    expect(failed).toContain('data-mascot="worried"')
+    expect(failed).toContain(mascotSvg("worried"))
+    // The mark and the mascot sit before the page's own heading.
+    expect(failed.indexOf('class="brand"')).toBeLessThan(failed.indexOf("<h1>"))
+    expect(failed.indexOf('class="hero"')).toBeLessThan(failed.indexOf("<h1>"))
+    expect(failed).not.toContain('class="showcase"')
+  })
+
+  it("adds the wide-screen showcase only when asked, with its text escaped", () => {
+    const html = renderDocument({
       locale: "en",
       title: "t",
       nonce: "n",
       body: "<h1>t</h1>",
-      state: "error",
+      mascot: "welcome",
+      showcase: { heading: "<Agents>", text: "a & b" },
     })
-    expect(failed).toContain('class="state error"')
-    // The mark sits before the page's own heading.
-    expect(failed.indexOf('class="brand"')).toBeLessThan(failed.indexOf("<h1>"))
+    expect(html).toContain('class="stage split"')
+    expect(html).toContain("<h2>&lt;Agents&gt;</h2><p>a &amp; b</p>")
+    // Narrow screens still get the card's own hero.
+    expect(html.match(/<svg xmlns/g)).toHaveLength(2)
+  })
+
+  it("styles nothing outside the nonce'd style element", () => {
+    const html = renderDocument({ locale: "en", title: "t", nonce: "n", body: "", mascot: "happy" })
+    expect(html).not.toMatch(/\sstyle="/)
+    expect(html.match(/<style/g)).toHaveLength(1)
   })
 })

@@ -6,6 +6,9 @@
 export type Locale = "en" | "zh"
 
 const en = {
+  "brand.account": "Account",
+  "brand.tagline": "Your open workspace for AI agents",
+  "signIn.choose": "Choose how you want to sign in.",
   "signIn.title": "Sign in to Cognia",
   "signIn.subtitle": "One Cognia account for all your devices.",
   "signIn.continueWith": "Continue with {provider}",
@@ -49,6 +52,9 @@ const en = {
 export type MessageKey = keyof typeof en
 
 const zh: Record<MessageKey, string> = {
+  "brand.account": "账号",
+  "brand.tagline": "你的开放 AI Agent 工作空间",
+  "signIn.choose": "选择一种方式登录。",
   "signIn.title": "登录 Cognia",
   "signIn.subtitle": "一个 Cognia 账号，连接你的所有设备。",
   "signIn.continueWith": "使用{provider}继续",
