@@ -1,6 +1,7 @@
 import {
   CONTEXT_WORKBENCH_LAYOUT_MAX_AGE_MS,
   createContextWorkbenchStoreForTesting,
+  pruneByLastUsed,
   pruneContextWorkbenchLayouts,
   useContextWorkbenchStore,
   visibleContextPanelIds,
@@ -721,5 +722,19 @@ describe("browser tab navigation preferences", () => {
     expect(store.getState().layouts.a.activatedPanelIds).toEqual(["one"])
     store.getState().closePanelTab("a", "one")
     expect(store.getState().layouts.a.activePanelId).toBeNull()
+  })
+})
+
+describe("pruneByLastUsed", () => {
+  it("keeps the most recent entries within the age, ties broken by key", () => {
+    const now = 1_000_000
+    const entries = {
+      old: { lastUsedAt: now - 100 },
+      b: { lastUsedAt: now },
+      a: { lastUsedAt: now },
+      expired: { lastUsedAt: now - 1000 },
+    }
+    expect(Object.keys(pruneByLastUsed(entries, now, 500, 2))).toEqual(["a", "b"])
+    expect(Object.keys(pruneByLastUsed(entries, now, 500, 10))).toEqual(["a", "b", "old"])
   })
 })

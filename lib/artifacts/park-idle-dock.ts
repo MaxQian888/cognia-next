@@ -15,9 +15,10 @@
  * - the dock is open;
  * - the conversation has no artifact of its own, no open artifact tabs and no
  *   revision proposal awaiting review;
- * - the session surface is on its default artifact-list panel (or has no
- *   recorded panel yet). A dock parked on the browser, the workspace, memory or
- *   logs was opened *for* that panel and is not idle.
+ * - the session surface is on its default panel — the New Tab page, or the
+ *   artifact list it replaced — or has no recorded panel yet. A dock parked on
+ *   the browser, the workspace, memory or logs was opened *for* that panel and
+ *   is not idle.
  *
  * Runs from the session-focus seam, i.e. on a conversation switch and once at
  * start-up, never on an ordinary re-render — so opening the dock by hand on an
@@ -38,6 +39,7 @@ import {
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import {
   ARTIFACT_DOCK_WORKBENCH_HOST_KEY,
+  NEW_TAB_PANEL_ID,
   SESSION_ARTIFACT_LIST_PANEL_ID,
   sessionWorkbenchScopeKey,
 } from "./session-workbench-scope-key"
@@ -83,7 +85,13 @@ export function parkIdleArtifactDock(sessionId: string | null): boolean {
   if (dock.dockCollapsed) return false
   if (sessionHoldsArtifacts(sessionId)) return false
   const activePanelId = sessionSurfaceActivePanelId(sessionId)
-  if (activePanelId && activePanelId !== SESSION_ARTIFACT_LIST_PANEL_ID) return false
+  if (
+    activePanelId &&
+    activePanelId !== SESSION_ARTIFACT_LIST_PANEL_ID &&
+    activePanelId !== NEW_TAB_PANEL_ID
+  ) {
+    return false
+  }
   dock.parkDock()
   return true
 }

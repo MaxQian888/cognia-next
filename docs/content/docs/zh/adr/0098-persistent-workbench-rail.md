@@ -5,7 +5,7 @@ description: "收起 Context Workbench 时保留活动图标栏，支持拖拽�
 
 # ADR 0098 — 常驻工作台图标栏
 
-**状态：** 已接受
+**状态：** 已接受 — 聊天右侧面板部分由 [ADR-0214](./0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task) 修订：打开时显示统一的标签栏而不是活动栏，收起时仍收成本 ADR 的活动栏。
 **日期：** 2026-07-29
 
 ## 背景

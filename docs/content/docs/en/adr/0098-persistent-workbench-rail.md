@@ -5,7 +5,7 @@ description: "Collapsing the Context Workbench leaves its activity rail on scree
 
 # ADR 0098 — Persistent Workbench Rail
 
-**Status:** Accepted
+**Status:** Accepted — amended for the chat dock by [ADR-0214](./0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task): an open chat dock shows its one tab strip instead of the activity rail; a collapsed one still shrinks to this rail.
 **Date:** 2026-07-29
 
 ## Context

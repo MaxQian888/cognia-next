@@ -65,7 +65,8 @@
     "workflowCommandPaletteToggle": "Workflow editor: command palette",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
-    "zoomReset": "Reset zoom"
+    "zoomReset": "Reset zoom",
+    "dockNewTab": "Side panel: new tab"
   },
   "categories": {
     "a2ui": "A2UI workspace",

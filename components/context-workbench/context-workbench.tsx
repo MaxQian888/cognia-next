@@ -331,6 +331,26 @@ export interface ContextWorkbenchProps {
    * reset, which hides the entry.
    */
   onResetLayout?: () => void
+  /**
+   * Who draws the tab strip.
+   *
+   * - `"internal"` (default) — the workbench: its panel tabs or activity rail,
+   *   per the user's navigation style. Every host but the chat dock.
+   * - `"external"` — the host, as `headerLeading` (the chat dock's one strip of
+   *   panels *and* artifacts, ADR-0214 D6). The workbench then draws no tablist,
+   *   no "open panel" menu, no tabs/rail toggle and no rail beside an open body;
+   *   `headerLeading` is the header's whole navigation. A rail-only host
+   *   (`railOnly`) still gets its rail — it is what a collapsed dock shrinks to.
+   */
+  tabStrip?: "internal" | "external"
+  /**
+   * With `tabStrip="external"`: draw a compact row switching between this
+   * resource's own panels. Session-scoped panels are left out — in the chat
+   * dock those are tabs on the host's strip. The dock's artifact surface sets
+   * this, so an artifact's preview, comments and AI panels stay one click away
+   * without each becoming a tab.
+   */
+  resourcePanelSwitcher?: boolean
 }
 
 export interface ContextWorkbenchMobileDrawerProps extends Omit<
@@ -609,6 +629,8 @@ export function ContextWorkbench({
   resolvedMode,
   sessionScopeKey,
   onResetLayout,
+  tabStrip = "internal",
+  resourcePanelSwitcher = false,
 }: ContextWorkbenchProps) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -653,7 +675,10 @@ export function ContextWorkbench({
   const navigationStyle = useContextWorkbenchStore((state) => state.navigationStyle)
   const setNavigationStyle = useContextWorkbenchStore((state) => state.setNavigationStyle)
   const closePanelTab = useContextWorkbenchStore((state) => state.closePanelTab)
-  const useTabs = navigationStyle !== "rail"
+  const externalTabs = tabStrip === "external"
+  // An external strip is a tab strip: everything keyed on "tabs, not rail"
+  // (no rail beside an open body, no history chevrons) follows it.
+  const useTabs = externalTabs || navigationStyle !== "rail"
   useEffect(() => {
     if (useTabs)
       panelTabsRef.current
@@ -1416,6 +1441,8 @@ export function ContextWorkbench({
   // The header row — either drawn above the panel body or, when the host hands
   // over `headerOutlet`, rendered into the shell's title bar so the workbench
   // sits under a single 40px row (`components/shell/title-bar-outlets.tsx`).
+  // The resource's own views, for the external strip's switcher row.
+  const switcherPanels = resolvedPanels.filter((panel) => panel.scope !== "session")
   const openPanels = layout.activatedPanelIds
     .map((id) => resolvedPanels.find((panel) => panel.id === id))
     .filter((panel): panel is ContextPanelDefinition => Boolean(panel))
@@ -1469,7 +1496,19 @@ export function ContextWorkbench({
         </div>
       ) : null}
       {headerLeading}
-      {useTabs ? (
+      {externalTabs ? (
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0"
+          aria-label={t("contextWorkbench.actions.collapse")}
+          onClick={handleCollapse}
+          data-testid="context-workbench-external-collapse"
+        >
+          <XIcon className="size-4" />
+        </Button>
+      ) : useTabs ? (
         <>
           <div
             role={splitActive ? "group" : "tablist"}
@@ -1583,18 +1622,24 @@ export function ContextWorkbench({
           </Button>
         </>
       ) : null}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        className="shrink-0"
-        aria-label={t(
-          useTabs ? "contextWorkbench.navigation.compactRail" : "contextWorkbench.navigation.tabs"
-        )}
-        onClick={() => setNavigationStyle(useTabs ? "rail" : "tabs")}
-      >
-        {useTabs ? <PanelLeftIcon className="size-4" /> : <PanelsTopLeftIcon className="size-4" />}
-      </Button>
+      {externalTabs ? null : (
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0"
+          aria-label={t(
+            useTabs ? "contextWorkbench.navigation.compactRail" : "contextWorkbench.navigation.tabs"
+          )}
+          onClick={() => setNavigationStyle(useTabs ? "rail" : "tabs")}
+        >
+          {useTabs ? (
+            <PanelLeftIcon className="size-4" />
+          ) : (
+            <PanelsTopLeftIcon className="size-4" />
+          )}
+        </Button>
+      )}
       {!useTabs && activeGroup.length > 1 && headerLeading ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -2092,6 +2137,36 @@ export function ContextWorkbench({
                 the layout controls — so the controls fold into a menu on the
                 narrow end rather than squashing everything. */}
             {headerRow}
+            {externalTabs && resourcePanelSwitcher && switcherPanels.length > 1 ? (
+              <div
+                role="group"
+                aria-label={t("contextWorkbench.dockTabs.resourceViews")}
+                data-testid="context-workbench-resource-switcher"
+                className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              >
+                {switcherPanels.map((panel) => {
+                  const Icon = panel.icon ?? PanelRightIcon
+                  const selected = layout.activePanelId === panel.id
+                  return (
+                    <Button
+                      key={panel.id}
+                      type="button"
+                      size="sm"
+                      variant={selected ? "secondary" : "ghost"}
+                      aria-pressed={selected}
+                      className="h-6 shrink-0 gap-1.5 px-2 text-xs"
+                      onClick={() => handleActivate(panel)}
+                    >
+                      <Icon className="size-3.5" />
+                      {getPanelLabel(panel)}
+                      {layout.pendingPanelIds.includes(panel.id) ? (
+                        <span className="size-1.5 rounded-full bg-primary" />
+                      ) : null}
+                    </Button>
+                  )
+                })}
+              </div>
+            ) : null}
             <div
               ref={bodyRef}
               className="relative min-h-0 flex-1 overflow-hidden"

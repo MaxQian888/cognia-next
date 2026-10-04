@@ -249,19 +249,40 @@ function normalizeLayout(
   }
 }
 
-export function pruneContextWorkbenchLayouts(
-  layouts: Record<string, ContextWorkbenchLayout>,
-  now = Date.now()
-): Record<string, ContextWorkbenchLayout> {
+/**
+ * Keep the `limit` most recently used entries younger than `maxAgeMs`.
+ *
+ * The retention policy for every per-scope record a workbench host keeps —
+ * these layouts, and the chat dock's per-task tab memory
+ * (`stores/artifact/dock-tabs-store.ts`) — so both forget at the same age and
+ * size. Ties on recency fall back to the key, which keeps the cut stable.
+ */
+export function pruneByLastUsed<T extends { lastUsedAt: number }>(
+  entries: Record<string, T>,
+  now = Date.now(),
+  maxAgeMs = CONTEXT_WORKBENCH_LAYOUT_MAX_AGE_MS,
+  limit = CONTEXT_WORKBENCH_LAYOUT_LIMIT
+): Record<string, T> {
   return Object.fromEntries(
-    Object.entries(layouts)
-      .map(([scopeKey, layout]) => [scopeKey, normalizeLayout(layout, now)] as const)
-      .filter(([, layout]) => now - layout.lastUsedAt <= CONTEXT_WORKBENCH_LAYOUT_MAX_AGE_MS)
+    Object.entries(entries)
+      .filter(([, entry]) => now - entry.lastUsedAt <= maxAgeMs)
       .sort(([leftKey, left], [rightKey, right]) => {
         const recency = right.lastUsedAt - left.lastUsedAt
         return recency === 0 ? leftKey.localeCompare(rightKey) : recency
       })
-      .slice(0, CONTEXT_WORKBENCH_LAYOUT_LIMIT)
+      .slice(0, limit)
+  )
+}
+
+export function pruneContextWorkbenchLayouts(
+  layouts: Record<string, ContextWorkbenchLayout>,
+  now = Date.now()
+): Record<string, ContextWorkbenchLayout> {
+  return pruneByLastUsed(
+    Object.fromEntries(
+      Object.entries(layouts).map(([scopeKey, layout]) => [scopeKey, normalizeLayout(layout, now)])
+    ),
+    now
   )
 }
 

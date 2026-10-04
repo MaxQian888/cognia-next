@@ -11138,6 +11138,13 @@
       "restoreDefaults": "Restore defaults",
       "showItem": "Show"
     },
+    "dockTabs": {
+      "allTabs": "All tabs",
+      "close": "Close {name}",
+      "label": "Open in this task",
+      "newTab": "New tab",
+      "resourceViews": "Views of this item"
+    },
     "exportResourceSession": "Export this resource conversation",
     "logsPanel": {
       "count": "{count, plural, one {# entry} other {# entries}}",
@@ -11196,6 +11203,25 @@
       "compactRail": "Compact icon rail",
       "openPanel": "Open panel",
       "tabs": "Labeled tabs"
+    },
+    "newTab": {
+      "artifacts": "This task's artifacts",
+      "changes": "Changes",
+      "chromeWebStore": "Chrome Web Store",
+      "chromeWebStoreHint": "Add extensions to the built-in Chromium",
+      "go": "Go",
+      "installTitle": "Pages open in the system webview until Chromium is installed",
+      "moreTools": "More tools",
+      "noArtifacts": "No artifacts in this task yet",
+      "omniboxLabel": "Search or enter an address",
+      "omniboxPlaceholder": "Search files, artifacts and tools, or enter an address",
+      "openFailed": "Couldn't open {path}",
+      "recent": "Recent pages (all tasks)",
+      "suggestions": "Suggestions",
+      "taskLinks": "Links from this task",
+      "terminal": "Terminal",
+      "title": "New tab",
+      "tools": "Tools"
     },
     "panelError": "Panel unavailable",
     "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
@@ -45841,6 +45867,7 @@
         "dockLayoutRedo": "Redo dock layout change",
         "dockLayoutReset": "Reset the dock layout",
         "dockLayoutUndo": "Undo dock layout change",
+        "dockNewTab": "Side panel: new tab",
         "dockPanelClose": "Close the active dock panel",
         "dockPanelFloat": "Float the active dock panel",
         "dockPanelPopout": "Move the active dock panel to a new window",

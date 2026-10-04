@@ -462,5 +462,31 @@
     "contextFailed": "The plugin couldn't provide this resource's context, so your last message was sent without it.",
     "dismiss": "Dismiss",
     "selectionToolbar": "Selection actions"
+  },
+  "dockTabs": {
+    "label": "Open in this task",
+    "newTab": "New tab",
+    "close": "Close {name}",
+    "allTabs": "All tabs",
+    "resourceViews": "Views of this item"
+  },
+  "newTab": {
+    "title": "New tab",
+    "omniboxLabel": "Search or enter an address",
+    "omniboxPlaceholder": "Search files, artifacts and tools, or enter an address",
+    "go": "Go",
+    "tools": "Tools",
+    "changes": "Changes",
+    "terminal": "Terminal",
+    "moreTools": "More tools",
+    "artifacts": "This task's artifacts",
+    "noArtifacts": "No artifacts in this task yet",
+    "suggestions": "Suggestions",
+    "taskLinks": "Links from this task",
+    "chromeWebStore": "Chrome Web Store",
+    "chromeWebStoreHint": "Add extensions to the built-in Chromium",
+    "recent": "Recent pages (all tasks)",
+    "installTitle": "Pages open in the system webview until Chromium is installed",
+    "openFailed": "Couldn't open {path}"
   }
 }

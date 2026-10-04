@@ -23,6 +23,8 @@ import {
 } from "@/stores/artifact/artifact-dock-layout-store"
 import type { ArtifactPanelMode } from "./artifact-panel-content"
 import { ArtifactTabStrip, useOpenArtifactTabs } from "./artifact-tab-strip"
+import { DockTabStrip } from "./dock-tab-strip"
+import { DOCK_SESSION_PANEL_META } from "./dock-panel-meta"
 import {
   PROJECT_OVERVIEW_PANEL_ID,
   WORKSPACE_PANEL_ID,
@@ -39,7 +41,6 @@ import {
   ARTIFACT_DOCK_WORKBENCH_HOST_KEY,
   sessionWorkbenchScopeKey,
 } from "@/lib/artifacts/session-workbench-scope-key"
-import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import type { ContextPanelMode, ContextResource } from "@/types/context-workbench"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
@@ -237,14 +238,13 @@ export function ArtifactContextWorkbench({
   railOnly?: boolean
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
+  // The phone Sheet keeps the artifact strip; the desktop dock draws its one
+  // strip of panels and artifacts (`DockTabStrip`) in its own header row — a
+  // strip of tabs needs the dock's full width, so it is never projected into
+  // the title bar.
   const showSingleArtifactTab = useContextWorkbenchStore(
     (state) => state.navigationStyle !== "rail"
   )
-  // Named tabs need the panel's full width. Compact icon mode can share the
-  // shell title bar; mobile and collapsed docks never project a header.
-  const headerOutlet = useTitleBarProjection("end", {
-    active: !mobile && !railOnly && !showSingleArtifactTab,
-  })
   const artifact = useArtifactStore((state) => state.artifacts[artifactId])
   const unresolvedCommentCount = useContextCommentBadge("artifact", artifactId)
   const pendingReview = useArtifactStore((state) => state.pendingReviews[artifactId] ?? null)
@@ -335,7 +335,7 @@ export function ArtifactContextWorkbench({
     }
   }, [dockWidthHint, pendingReview, scopeKey, smartReveal])
 
-  const panels = useArtifactSurfacePanels({
+  const surfacePanels = useArtifactSurfacePanels({
     artifactId,
     artifact,
     activeSessionId,
@@ -352,6 +352,28 @@ export function ArtifactContextWorkbench({
     scopeKey,
     onWidthHint: dockWidthHint,
   })
+  // On the desktop dock the conversation-wide panels (browser, workspace,
+  // project overview) are tabs of their own on the strip (ADR-0214, D6), so
+  // the artifact surface keeps only the artifact's views. Drawn here as well,
+  // they would put a browser on screen under a highlighted artifact tab. The
+  // phone Sheet keeps them: it has no strip to hold them.
+  const panels = useMemo(
+    () => (mobile ? surfacePanels : surfacePanels.filter((panel) => panel.scope !== "session")),
+    [mobile, surfacePanels]
+  )
+  // A reveal aimed at one of those (a link opening the browser, an Edit
+  // review opening the workspace) parks the artifact — its tab stays — so the
+  // session surface comes up and takes the reveal as its own.
+  const revealIntent = useArtifactDockLayoutStore((state) => state.revealIntent)
+  const revealTargetsSessionTab =
+    !mobile &&
+    revealIntent !== null &&
+    !panels.some((panel) => panel.id === revealIntent.panelId) &&
+    revealIntent.panelId in DOCK_SESSION_PANEL_META
+  useEffect(() => {
+    if (revealTargetsSessionTab)
+      useArtifactStore.getState().setActiveArtifact(null, activeSessionId)
+  }, [activeSessionId, revealTargetsSessionTab])
   // Claim no panels when the artifact is gone: the fallback below mounts the
   // session workbench as a child, and both would otherwise race to consume the
   // same one-shot reveal intent — with this dead scope usually winning.
@@ -421,15 +443,18 @@ export function ArtifactContextWorkbench({
       onCollapse={() => setDockCollapsed(true)}
       onEnsureVisible={() => setDockCollapsed(false)}
       railOnly={railOnly}
-      headerOutlet={headerOutlet}
       attentionActivity={unreadArtifact ? ARTIFACT_ATTENTION_ACTIVITY : undefined}
       onModeWidthHint={dockWidthHint}
       resolvedMode={resolvedDockMode}
       onResetLayout={resetDockLayout}
+      tabStrip="external"
+      resourcePanelSwitcher
       headerLeading={
-        hasArtifactTabs ? (
-          <ArtifactTabStrip showSingle={showSingleArtifactTab} className="min-w-0 flex-1" />
-        ) : undefined
+        <DockTabStrip
+          sessionId={activeSessionId}
+          sessionScopeKey={sessionScopeKey}
+          onWidthHint={dockWidthHint}
+        />
       }
       placement="chat-dock"
       manageOwnWidth={false}
@@ -455,11 +480,6 @@ export function SessionContextWorkbench({
   const showSingleArtifactTab = useContextWorkbenchStore(
     (state) => state.navigationStyle !== "rail"
   )
-  // Named tabs need the panel's full width. Compact icon mode can share the
-  // shell title bar; mobile and collapsed docks never project a header.
-  const headerOutlet = useTitleBarProjection("end", {
-    active: !mobile && !railOnly && !showSingleArtifactTab,
-  })
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   // Query the same persisted record as the chat. The plugin session adapter is
   // lazy and may never load in an ordinary conversation.
@@ -532,6 +552,7 @@ export function SessionContextWorkbench({
     pendingRunLearningCount,
     scopeKey,
     onWidthHint: dockWidthHint,
+    newTab: !mobile,
   })
   useDockPanelSync(
     scopeKey,
@@ -589,15 +610,17 @@ export function SessionContextWorkbench({
           workbenchInstanceId={workbenchInstanceId}
           resource={resource}
           panels={panels}
+          tabStrip="external"
           headerLeading={
-            hasArtifactTabs ? (
-              <ArtifactTabStrip showSingle={showSingleArtifactTab} className="min-w-0 flex-1" />
-            ) : undefined
+            <DockTabStrip
+              sessionId={activeSessionId}
+              sessionScopeKey={scopeKey}
+              onWidthHint={dockWidthHint}
+            />
           }
           onCollapse={() => setDockCollapsed(true)}
           onEnsureVisible={() => setDockCollapsed(false)}
           railOnly={railOnly}
-          headerOutlet={headerOutlet}
           attentionActivity={unreadArtifact ? SESSION_ATTENTION_ACTIVITY : undefined}
           onModeWidthHint={dockWidthHint}
           resolvedMode={resolvedDockMode}

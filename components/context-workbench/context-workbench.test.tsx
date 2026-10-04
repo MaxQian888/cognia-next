@@ -114,6 +114,7 @@ const messages = {
     },
     activityRailLabel: "Activities",
     aiLoading: "Loading",
+    dockTabs: { resourceViews: "Views of this item" },
   },
 }
 
@@ -2530,5 +2531,109 @@ describe("Workbench labeled tabs", () => {
       "aria-selected",
       "true"
     )
+  })
+})
+
+describe("ContextWorkbench — a host-drawn tab strip (ADR-0214)", () => {
+  const Preview = () => <div>preview-panel</div>
+  const Comments = () => <div>comments-panel</div>
+  const Browser = () => <div>browser-panel</div>
+  const PANELS: ContextPanelDefinition[] = [
+    {
+      id: "preview",
+      activity: "review",
+      labelKey: "contextWorkbench.panels.review",
+      order: 1,
+      appliesTo: () => true,
+      renderer: Preview,
+    },
+    {
+      id: "comments",
+      activity: "comments",
+      labelKey: "contextWorkbench.panels.comments",
+      order: 2,
+      appliesTo: () => true,
+      renderer: Comments,
+    },
+    {
+      id: "browser",
+      activity: "ai",
+      labelKey: "contextWorkbench.panels.ai",
+      order: 3,
+      appliesTo: () => true,
+      scope: "session",
+      renderer: Browser,
+    },
+  ]
+
+  function renderExternal(props: Partial<React.ComponentProps<typeof ContextWorkbench>> = {}) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ContextWorkbench
+          workbenchInstanceId="external"
+          resource={resource}
+          panels={PANELS}
+          tabStrip="external"
+          headerLeading={<div data-testid="host-strip">host strip</div>}
+          {...props}
+        />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+    useSettingsStore.setState({ settings: {} as never })
+  })
+
+  it("draws the host's strip as the header's only navigation, in either style", () => {
+    renderExternal()
+    expect(screen.getByTestId("host-strip")).toBeInTheDocument()
+    // Not the rail the stored "rail" style asks for, nor the workbench's tabs.
+    expect(screen.queryByTestId("context-workbench-activity-rail")).toBeNull()
+    expect(screen.queryByTestId("context-workbench-panel-tabs")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Open panel" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Tabs" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Compact rail" })).toBeNull()
+    expect(screen.getByText("preview-panel")).toBeInTheDocument()
+  })
+
+  it("keeps the collapse button and still mounts what the store says is in front", () => {
+    const onCollapse = jest.fn()
+    renderExternal({ onCollapse })
+    act(() =>
+      useContextWorkbenchStore.getState().navigatePanel("external::canvas:doc-1", "comments")
+    )
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("context-workbench-external-collapse"))
+    expect(onCollapse).toHaveBeenCalled()
+  })
+
+  it("still draws the rail a collapsed host shrinks to", () => {
+    renderExternal({ railOnly: true })
+    expect(screen.getByTestId("context-workbench-activity-rail")).toHaveAttribute(
+      "data-rail-only",
+      "true"
+    )
+  })
+
+  it("switches the resource's own views from a compact row, leaving session panels out", () => {
+    renderExternal({ resourcePanelSwitcher: true })
+    const views = screen.getByRole("group", { name: "Views of this item" })
+    const names = within(views)
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+    expect(names).toEqual(["contextWorkbench.panels.review", "contextWorkbench.panels.comments"])
+    fireEvent.click(within(views).getByRole("button", { name: "contextWorkbench.panels.comments" }))
+    expect(screen.getByText("comments-panel")).toBeInTheDocument()
+    expect(
+      within(views).getByRole("button", { name: "contextWorkbench.panels.comments" })
+    ).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("leaves internal hosts exactly as they were", () => {
+    renderWorkbench(PANELS)
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: "Views of this item" })).toBeNull()
   })
 })

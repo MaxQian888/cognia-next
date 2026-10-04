@@ -12,6 +12,7 @@ import {
 } from "./park-idle-dock"
 import {
   ARTIFACT_DOCK_WORKBENCH_HOST_KEY,
+  NEW_TAB_PANEL_ID,
   SESSION_ARTIFACT_LIST_PANEL_ID,
   sessionWorkbenchScopeKey,
 } from "./session-workbench-scope-key"
@@ -143,6 +144,14 @@ describe("parkIdleArtifactDock", () => {
     })
     expect(parkIdleArtifactDock(SESSION_A)).toBe(true)
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
+  it("treats the New Tab page, the dock's landing now, as idle too", () => {
+    openDock()
+    act(() => {
+      useContextWorkbenchStore.getState().navigatePanel(dockScope(SESSION_A), NEW_TAB_PANEL_ID)
+    })
+    expect(parkIdleArtifactDock(SESSION_A)).toBe(true)
   })
 
   it("parks a dock with no conversation behind it", () => {

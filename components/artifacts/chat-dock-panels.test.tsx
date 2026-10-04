@@ -13,11 +13,14 @@ import {
   type SessionSurfacePanelsInput,
 } from "./chat-dock-panels"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import { DOCK_SESSION_PANEL_META } from "./dock-panel-meta"
+import { useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
 import type { Artifact } from "@/types/artifact/artifact"
 import type { Project, Session } from "@/types/plugin/_compat"
 
 const navigatePanel = jest.fn()
 const smartReveal = jest.fn(() => true)
+const closePanelTab = jest.fn()
 const setDockCollapsed = jest.fn()
 let jumpToMessage: ((id: string, a?: unknown, b?: unknown) => boolean) | null = null
 const toastError = jest.fn()
@@ -44,8 +47,27 @@ jest.mock("@/components/agent/plan/plan-panel", () => ({
   ),
 }))
 
+let workbenchLayouts: Record<string, unknown> = {}
 jest.mock("@/stores/context-workbench/context-workbench-store", () => ({
-  useContextWorkbenchStore: { getState: () => ({ navigatePanel, smartReveal }) },
+  ...jest.requireActual("@/stores/context-workbench/context-workbench-store"),
+  useContextWorkbenchStore: {
+    getState: () => ({ navigatePanel, smartReveal, closePanelTab, layouts: workbenchLayouts }),
+  },
+}))
+
+// The New Tab page has its own suite; here it only has to hand a tool back.
+jest.mock("./dock-new-tab-page", () => ({
+  DockNewTabPage: ({
+    sessionId,
+    onOpenPanel,
+  }: {
+    sessionId: string | null
+    onOpenPanel: (panelId: string) => void
+  }) => (
+    <button type="button" data-session={sessionId} onClick={() => onOpenPanel("workspace")}>
+      open workspace
+    </button>
+  ),
 }))
 
 let browserRequestUrl: string | null = null
@@ -634,9 +656,10 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the fifteen session-surface panels, in a stable order", () => {
+  it("offers exactly the sixteen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
+      ["new-tab", "preview-run", 0],
       ["artifacts", "review", 10],
       ["plan", "review", 12],
       ["session-sidechat", "ai", 15],
@@ -659,11 +682,65 @@ describe("useSessionSurfacePanels", () => {
     // Team members and plan are the conditional entries — see the tests below.
     // Give the plan query a record so the panel claims its slot.
     sessionPlans = [{ id: "p1", status: "completed" }]
-    const panels = collect(useSessionSurfacePanels, sessionInput({ session: teamSession })).filter(
-      (p) => p.id !== "team-members"
-    )
+    const panels = collect(
+      useSessionSurfacePanels,
+      sessionInput({ session: teamSession, newTab: true })
+    ).filter((p) => p.id !== "team-members")
     expect(panels.every((p) => p.appliesTo(SESSION_RESOURCE))).toBe(true)
     expect(panels.some((p) => p.appliesTo(ARTIFACT_RESOURCE))).toBe(false)
+  })
+
+  it("offers the New Tab page to the desktop dock only, as its landing panel", () => {
+    const sheet = panelById(collect(useSessionSurfacePanels, sessionInput()), "new-tab")
+    expect(sheet.appliesTo(SESSION_RESOURCE)).toBe(false)
+    const dock = panelById(
+      collect(useSessionSurfacePanels, sessionInput({ newTab: true })),
+      "new-tab"
+    )
+    expect(dock.appliesTo(SESSION_RESOURCE)).toBe(true)
+    expect(dock.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+    expect(dock).toMatchObject({ order: 0, retention: "ephemeral" })
+  })
+
+  it("names every session panel exactly as the dock's tab strip does", () => {
+    sessionPlans = [{ id: "p1", status: "completed" }]
+    const panels = collect(
+      useSessionSurfacePanels,
+      sessionInput({ session: teamSession, newTab: true })
+    )
+    expect(Object.keys(DOCK_SESSION_PANEL_META).sort()).toEqual(panels.map((p) => p.id).sort())
+    for (const panel of panels) {
+      expect([panel.id, DOCK_SESSION_PANEL_META[panel.id]]).toEqual([
+        panel.id,
+        {
+          labelKey: panel.labelKey,
+          icon: panel.icon,
+          ...(panel.preferredMode ? { preferredMode: panel.preferredMode } : {}),
+        },
+      ])
+    }
+  })
+
+  it("opens a tool from the New Tab page in the page's place", () => {
+    const scopeKey = "scope::session:s1"
+    workbenchLayouts = {
+      [scopeKey]: { activatedPanelIds: ["browser", "new-tab"], activePanelId: "new-tab" },
+    }
+    useDockTabsStore.setState({ bySession: {} })
+    const panel = panelById(
+      collect(useSessionSurfacePanels, sessionInput({ newTab: true })),
+      "new-tab"
+    )
+    renderPanel(panel, SESSION_RESOURCE)
+    fireEvent.click(screen.getByRole("button", { name: "open workspace" }))
+    expect(closePanelTab).toHaveBeenCalledWith(scopeKey, "new-tab")
+    expect(navigatePanel).toHaveBeenCalledWith(scopeKey, "workspace", "wide")
+    expect(onWidthHint).toHaveBeenCalledWith("wide", "workspace")
+    expect(useDockTabsStore.getState().bySession.s1.order).toEqual([
+      "panel:browser",
+      "panel:workspace",
+    ])
+    workbenchLayouts = {}
   })
 
   it("claims a rail slot for the team roster only inside a team conversation", () => {

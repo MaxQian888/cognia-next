@@ -20,6 +20,12 @@ export const ARTIFACT_DOCK_WORKBENCH_HOST_KEY = "artifact"
  */
 export const SESSION_ARTIFACT_LIST_PANEL_ID = "artifacts"
 
+/**
+ * The desktop dock's start page (ADR-0214, D7) — what a conversation with
+ * nothing recorded opens on, in place of the empty artifact list.
+ */
+export const NEW_TAB_PANEL_ID = "new-tab"
+
 export function sessionWorkbenchScopeKey(
   workbenchInstanceId: string,
   activeSessionId: string | null

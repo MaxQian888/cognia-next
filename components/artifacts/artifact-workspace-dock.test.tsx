@@ -9,6 +9,7 @@ jest.mock("@/hooks/ui", () => ({
   useBreakpoint: jest.fn(() => "desktop"),
 }))
 
+jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({ useAppShortcut: jest.fn() }))
 jest.mock("@/hooks/artifacts/use-artifact-dock-shortcuts", () => ({
   useArtifactDockShortcuts: jest.fn(),
 }))
@@ -235,6 +236,8 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { useChatRowBudget } from "@/hooks/shell/use-chat-row-budget"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import { useContextWorkbenchStore as useWorkbenchLayouts } from "@/stores/context-workbench/context-workbench-store"
 
 const SESSION = "session-1"
 import {
@@ -1528,5 +1531,26 @@ describe("ArtifactWorkspaceDock — the chat-floor cap is the window's, not the 
     groupWidth = 420 / 0.58
     fireEvent.click(screen.getByTestId("resize-dock-to-35.5"))
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(35.5)
+  })
+})
+
+describe("ArtifactWorkspaceDock — ⌘T (ADR-0214, D7)", () => {
+  it("opens a shut dock on the conversation's New Tab page", () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    const call = jest.mocked(useAppShortcut).mock.calls.find(([id]) => id === "dock.newTab")
+    expect(call?.[2]).toMatchObject({ allowInEditable: true, preventDefault: true })
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+
+    act(() => call![1](new KeyboardEvent("keydown")))
+
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+    const scope = Object.keys(useWorkbenchLayouts.getState().layouts).find((key) =>
+      key.endsWith(`::session:${SESSION}`)
+    )
+    expect(scope && useWorkbenchLayouts.getState().layouts[scope].activePanelId).toBe("new-tab")
   })
 })

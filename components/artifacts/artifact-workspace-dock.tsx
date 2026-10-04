@@ -61,6 +61,14 @@ import {
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactDockShortcuts } from "@/hooks/artifacts/use-artifact-dock-shortcuts"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
+import {
+  ARTIFACT_DOCK_WORKBENCH_HOST_KEY,
+  sessionWorkbenchScopeKey,
+} from "@/lib/artifacts/session-workbench-scope-key"
+import { useChatStore } from "@/stores/chat"
+import { openDockNewTab } from "./dock-tab-strip"
 import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
@@ -356,6 +364,19 @@ function ArtifactWorkspaceDockNarrow({ children }: { children: ReactNode }) {
 }
 
 function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
+  const workbenchInstanceId = useContextWorkbenchInstanceId(ARTIFACT_DOCK_WORKBENCH_HOST_KEY)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  // ⌘T (ADR-0214, D7) — here rather than on the strip, which only exists while
+  // the dock is open; a shut dock opens on the New Tab page.
+  useAppShortcut(
+    "dock.newTab",
+    () =>
+      openDockNewTab(
+        activeSessionId,
+        sessionWorkbenchScopeKey(workbenchInstanceId, activeSessionId)
+      ),
+    { allowInEditable: true, preventDefault: true }
+  )
   const dockSize = useArtifactDockLayoutStore((s) => s.dockSize)
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const dockProfile = useArtifactDockLayoutStore((s) => s.dockProfile)

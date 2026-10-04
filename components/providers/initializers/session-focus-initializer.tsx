@@ -12,10 +12,11 @@
  * - `artifactStore` — the artifact list's search query and type/runtime filters
  *   are one global blob, so narrowing typed in one conversation silently keeps
  *   narrowing every conversation after it.
- * - `artifactDockLayoutStore.dockCollapsed` — persisted and written `false` by
- *   every reveal, so a dock raised by one conversation's artifact stays open,
- *   empty, for every conversation after it. `parkIdleArtifactDock` folds it
- *   away when the incoming conversation has nothing to show in it.
+ * - `artifactDockLayoutStore.dockCollapsed` — one global flag for a dock the
+ *   user experiences per task. Each conversation remembers how it left the dock
+ *   (`dockTabsStore`, ADR-0214 D9) and gets it back on the way in; one that
+ *   never set it falls back to `parkIdleArtifactDock`, which folds a dock away
+ *   when the incoming conversation has nothing to show in it.
  *
  * Both need the same trigger, so they share one subscriber rather than each
  * store growing its own chat-store dependency. Doing it here rather than inside
@@ -36,6 +37,7 @@ import { useChatStore } from "@/stores/chat"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { parkIdleArtifactDock } from "@/lib/artifacts/park-idle-dock"
+import { rememberedDockFor, useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
 import { retryTitleIfNeeded } from "@/lib/ai/generation/title-retry"
 import { subscribeResume } from "@/lib/capacitor/app"
 import { migrateLegacyConversationListState } from "@/lib/connectors/session-bindings"
@@ -48,11 +50,41 @@ import { migrateLegacyConversationListState } from "@/lib/connectors/session-bin
 export function applySessionFocusChange(sessionId: string | null): void {
   useArtifactDockLayoutStore.getState().clearSessionScopedReveals()
   useArtifactStore.getState().resetSessionScopedWorkspaceFilters(sessionId)
-  // A dock left open by an earlier conversation's artifact must not follow the
-  // user into one that has none — see `parkIdleArtifactDock`.
-  parkIdleArtifactDock(sessionId)
+  restoreDockFor(sessionId)
   // Retry failed title generation when the user re-focuses a session.
   if (sessionId) void retryTitleIfNeeded(sessionId)
+}
+
+/**
+ * The dock as this conversation left it; for one that never set it, a dock
+ * left open by an earlier conversation's artifact must not follow the user in
+ * when there is nothing to show — see `parkIdleArtifactDock`.
+ */
+export function restoreDockFor(sessionId: string | null): void {
+  const remembered = rememberedDockFor(sessionId)
+  if (remembered) useArtifactDockLayoutStore.getState().restoreDock(remembered)
+  else parkIdleArtifactDock(sessionId)
+}
+
+/**
+ * Record every change to the dock against the conversation on screen. Whatever
+ * moved it — the toggle, ⌘J, closing the last tab, an artifact raising it — is
+ * how this task's dock now stands.
+ */
+export function subscribeDockMemory(): () => void {
+  return useArtifactDockLayoutStore.subscribe((state, previous) => {
+    if (
+      state.dockCollapsed === previous.dockCollapsed &&
+      state.userDismissed === previous.userDismissed
+    ) {
+      return
+    }
+    const sessionId = useChatStore.getState().activeSessionId
+    if (!sessionId) return
+    useDockTabsStore
+      .getState()
+      .rememberDock(sessionId, { open: !state.dockCollapsed, dismissed: state.userDismissed })
+  })
 }
 
 export function SessionFocusInitializer() {
@@ -70,9 +102,12 @@ export function SessionFocusInitializer() {
       applySessionFocusChange(state.activeSessionId)
     })
     // `dockCollapsed` is persisted, so the conversation restored at start-up
-    // never passes through the switch above — park an idle dock once here too,
-    // or a reload lands on the empty panel the previous session left open.
-    parkIdleArtifactDock(useChatStore.getState().activeSessionId)
+    // never passes through the switch above — restore (or park) once here too,
+    // or a reload lands on the dock the previous session left open.
+    restoreDockFor(useChatStore.getState().activeSessionId)
+    // After the restore, so start-up does not record the global flag it is
+    // about to replace as this conversation's choice.
+    const unsubDockMemory = subscribeDockMemory()
 
     // On app resume (foreground), retry title for the currently active session.
     let disposed = false
@@ -88,6 +123,7 @@ export function SessionFocusInitializer() {
     return () => {
       disposed = true
       unsubFocus()
+      unsubDockMemory()
       unsubResume?.()
     }
   }, [])

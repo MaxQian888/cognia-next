@@ -65,7 +65,8 @@
     "workflowCommandPaletteToggle": "工作流编辑器：命令面板",
     "zoomIn": "放大",
     "zoomOut": "缩小",
-    "zoomReset": "重置缩放"
+    "zoomReset": "重置缩放",
+    "dockNewTab": "右侧面板：新标签页"
   },
   "categories": {
     "a2ui": "A2UI 工作区",

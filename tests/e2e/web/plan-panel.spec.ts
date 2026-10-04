@@ -71,7 +71,9 @@ async function openPlanPanel(page: Page) {
   // it is a dev-only artifact, not app UI, so remove it before clicking.
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()))
   await page.getByRole("button", { name: "Show artifacts panel", exact: true }).click()
-  await page.getByRole("button", { name: "Open panel", exact: true }).click()
+  // Panels open from the dock's New Tab page (ADR-0214): `+`, then the tool.
+  await page.getByTestId("dock-tab-new").click()
+  await page.getByTestId("dock-new-tab-more-tools").click()
   await page.getByRole("menuitem", { name: "Plan", exact: true }).click()
   await expect(page.getByTestId("plan-panel")).toBeVisible({ timeout: 10_000 })
 }

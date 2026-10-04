@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, within } from "@testing-library/react"
 import { useEffect } from "react"
 import {
   TitleBarOutletsProvider,
@@ -95,6 +95,21 @@ jest.mock("./workspace-mode/project-overview-panel", () => ({
       <button type="button" onClick={onOpenWorkspace}>
         open-project-workspace
       </button>
+    </div>
+  ),
+}))
+
+// The New Tab page has its own suite. Here it is a launcher with one button per
+// tool, so the dock's tests reach a panel the way a user does: `+`, then the
+// tool, which opens in the page's place (`SessionNewTabRenderer`).
+jest.mock("./dock-new-tab-page", () => ({
+  DockNewTabPage: ({ onOpenPanel }: { onOpenPanel: (panelId: string) => void }) => (
+    <div data-testid="new-tab-page">
+      {["workspace", "project-overview", "browser", "session-sidechat", "artifacts"].map((id) => (
+        <button key={id} type="button" onClick={() => onOpenPanel(id)}>
+          {`open:${id}`}
+        </button>
+      ))}
     </div>
   ),
 }))
@@ -210,6 +225,28 @@ import { useContextWorkbenchStore } from "@/stores/context-workbench/context-wor
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { revealActiveWorkbenchPanel } from "@/lib/context-workbench/active-context"
 
+/** Open a conversation tool the way a user does: `+`, then the tool. */
+function openFromNewTab(panelId: string) {
+  fireEvent.click(screen.getByTestId("dock-tab-new"))
+  fireEvent.click(screen.getByRole("button", { name: `open:${panelId}` }))
+}
+
+/** Put `ids` on the conversation's strip as open artifact tabs. */
+function openArtifactTabs(...ids: string[]) {
+  act(() => useArtifactStore.setState({ openArtifactIdsBySession: { "sess-1": ids } }))
+}
+
+function addSecondArtifact() {
+  act(() => {
+    useArtifactStore.setState((state) => ({
+      artifacts: {
+        ...state.artifacts,
+        "artifact-2": { ...state.artifacts["artifact-1"]!, id: "artifact-2", title: "Second" },
+      },
+    }))
+  })
+}
+
 /** The panel a scope is currently showing, per the workbench's own store. */
 function activePanelId(scope: "artifact:artifact-1" | "session:sess-1") {
   return useContextWorkbenchStore.getState().layouts[`test-workbench::${scope}`]?.activePanelId
@@ -268,14 +305,21 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("panel-content")).toHaveAttribute("data-mode", "desktop")
   })
 
-  it("keeps the workbench chrome for the no-artifact empty state instead of the legacy dock", () => {
+  it("opens an empty dock on the New Tab page, inside the one tab strip", () => {
     render(<ArtifactDock />)
 
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
     // The legacy top-tab chrome must not appear — that shape change is the bug.
     expect(screen.queryByTestId("artifact-dock-mode-artifact")).not.toBeInTheDocument()
-    // The session surface opens on its artifact browser, scoped to the chat.
-    expect(screen.getByTestId("list")).toHaveAttribute("data-session", "sess-1")
+    // One strip, no activity rail beside an open body, no workbench tablist.
+    expect(screen.getByTestId("dock-tab-strip")).toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-panel-tabs")).not.toBeInTheDocument()
+    // In place of "No artifacts yet" (ADR-0214, D7).
+    expect(screen.getByRole("tab", { name: "contextWorkbench.newTab.title" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    expect(screen.getByTestId("new-tab-page")).toBeInTheDocument()
   })
 
   it("passes rail-only through to whichever surface is active", () => {
@@ -323,68 +367,71 @@ describe("ArtifactDock — converged workbench shell", () => {
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
 
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
     expect(screen.queryByTestId("artifact-dock-mode-browser")).not.toBeInTheDocument()
     expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-session", "sess-1")
     expect(screen.queryByTestId("panel-content")).not.toBeInTheDocument()
   })
 
-  it("opens the browser without dropping the artifact you were looking at", () => {
+  it("opens the browser as its own tab, keeping the artifact one click away", () => {
     activateArtifact()
+    openArtifactTabs("artifact-1")
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
 
-    // The browser used to force a swap to the session surface, evicting the
-    // artifact scope entirely. It is now a panel on the artifact surface too,
-    // so the artifact is still what backs the workbench and one click returns
-    // to it — with the browser left mounted behind, holding its page.
+    // The artifact is parked, not closed: drawn on the artifact surface the
+    // browser would sit under a highlighted artifact tab (ADR-0214, D6).
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
-    expect(activePanelId("artifact:artifact-1")).toBe("browser")
+    expect(useArtifactStore.getState().activeArtifactIdBySession["sess-1"]).toBeNull()
+    expect(activePanelId("session:sess-1")).toBe("browser")
+    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
 
-    // Preview and browser share the `preview-run` activity, so the way back is
-    // the group tab rather than the rail button (which now names the browser).
-    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.artifactMode" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
 
-    expect(activePanelId("artifact:artifact-1")).toBe("preview")
+    expect(useArtifactStore.getState().activeArtifactIdBySession["sess-1"]).toBe("artifact-1")
     expect(screen.getByTestId("panel-content")).toBeInTheDocument()
-    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
+      "aria-selected",
+      "false"
+    )
   })
 
-  it("keeps the browser mounted across an artifact tab switch", () => {
+  it("keeps the browser's tab on the strip across artifact tab switches", () => {
     activateArtifact()
-    act(() => {
-      useArtifactStore.setState((state) => ({
-        artifacts: {
-          ...state.artifacts,
-          "artifact-2": { ...state.artifacts["artifact-1"], id: "artifact-2", title: "Second" },
-        },
-        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
-      }))
-      useArtifactDockLayoutStore.getState().openBrowser()
-    })
-    const { rerender } = render(<ArtifactDock />)
-    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
-
-    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { "sess-1": "artifact-2" } }))
-    rerender(<ArtifactDock />)
-
-    // The browser's content is session-scoped, so it survives the tab switch.
-    // Keyed only to the artifact scope, the new tab's empty `activatedPanelIds`
-    // unmounted it — releasing a process-wide embedded-webview lease and losing
-    // the page, with a blank one on the way back.
-    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
-  })
-
-  it("keeps the artifact scope when moving from the browser to the workspace", () => {
-    activateArtifact()
+    addSecondArtifact()
+    openArtifactTabs("artifact-1", "artifact-2")
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Second" }))
+    expect(screen.getByTestId("panel-content")).toBeInTheDocument()
 
-    expect(activePanelId("artifact:artifact-1")).toBe("workspace")
+    // The page belongs to the conversation, so its tab outlives the switch and
+    // brings the browser straight back.
+    fireEvent.click(screen.getByRole("tab", { name: "browser.title" }))
+    expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-session", "sess-1")
+  })
+
+  it("opens a tool from the New Tab page in that page's place on the strip", () => {
+    activateArtifact()
+    openArtifactTabs("artifact-1")
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
+
+    openFromNewTab("workspace")
+
+    expect(activePanelId("session:sess-1")).toBe("workspace")
     expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
+    const names = screen.getAllByRole("tab").map((tab) => tab.textContent)
+    expect(names).toEqual(["browser.title", "artifacts.dock.workspaceMode", "Document"])
   })
 
   it("keeps the conversation project overview reachable while an artifact is open", () => {
@@ -401,12 +448,14 @@ describe("ArtifactDock — converged workbench shell", () => {
       },
     ]
     activateArtifact()
+    openArtifactTabs("artifact-1")
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "projectOverview.panelTitle" }))
+    openFromNewTab("project-overview")
 
     expect(screen.getByTestId("project-overview")).toHaveAttribute("data-project", "project-b")
-    expect(activePanelId("artifact:artifact-1")).toBe("project-overview")
+    expect(activePanelId("session:sess-1")).toBe("project-overview")
+    expect(screen.getByRole("tab", { name: "Document" })).toBeInTheDocument()
   })
 
   it("opens the session workspace panel scoped to the active chat session", () => {
@@ -425,10 +474,13 @@ describe("ArtifactDock — converged workbench shell", () => {
     workspaceAvailable = false
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    openFromNewTab("workspace")
 
     expect(screen.queryByTestId("workspace")).not.toBeInTheDocument()
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
   })
 
   it("feeds the artifact body to its embedded AI panel and clears a consumed prompt", () => {
@@ -463,47 +515,29 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("resource-workbench-chat")).not.toHaveTextContent("Rewrite this")
   })
 
-  it("shows no tab strip for a single artifact, and keeps the group tabs inline", () => {
+  it("switches the artifact's own views from a compact row under the strip", () => {
     activateArtifact()
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
-
-    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
-    // The header slot must stay free, or the panel's own tabs get displaced
-    // into an overflow menu for no reason.
-    expect(screen.getByRole("tab", { name: "contextWorkbench.proposalReview" })).toBeInTheDocument()
-    expect(screen.queryByTestId("context-workbench-group-overflow")).not.toBeInTheDocument()
+    const views = screen.getByTestId("context-workbench-resource-switcher")
+    fireEvent.click(within(views).getByRole("button", { name: "contextWorkbench.proposalReview" }))
+    expect(screen.getByTestId("review-view")).toHaveAttribute("data-artifact", "artifact-1")
+    // The conversation-wide panels are tabs on the strip, not views of the item.
+    expect(within(views).queryByRole("button", { name: "browser.title" })).toBeNull()
+    expect(within(views).queryByRole("button", { name: "artifacts.dock.workspaceMode" })).toBeNull()
   })
 
-  it("hands the header to the artifact tabs once a second artifact is open", () => {
+  it("shows every open artifact on the one strip", () => {
     activateArtifact()
-    act(() => {
-      useArtifactStore.setState((state) => ({
-        artifacts: {
-          ...state.artifacts,
-          "artifact-2": { ...state.artifacts["artifact-1"], id: "artifact-2", title: "Second" },
-        },
-        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
-      }))
-    })
+    addSecondArtifact()
+    openArtifactTabs("artifact-1", "artifact-2")
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
-
-    // Both cannot share a ~34% wide header, so the panel's group tabs step
-    // aside into an overflow menu rather than a third header band appearing.
-    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
-    const overflow = screen.getByTestId("context-workbench-group-overflow")
-    expect(overflow).toBeInTheDocument()
-    expect(
-      screen.queryByRole("tab", { name: "contextWorkbench.proposalReview" })
-    ).not.toBeInTheDocument()
-
-    // A bare ⋯ glyph hid both which panel was showing and that there were any
-    // others — and in this state it is the only route to the rest of the group.
-    expect(overflow).toHaveTextContent("artifacts.dock.browseArtifacts")
-    expect(overflow).toHaveTextContent("1")
+    expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Second" })).toHaveAttribute("aria-selected", "false")
+    // No second navigation competing for the header.
+    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-group-overflow")).not.toBeInTheDocument()
   })
 
   it("collapses the dock from the artifact surface rail too", () => {
@@ -665,7 +699,7 @@ describe("ArtifactDock — converged workbench shell", () => {
       expect(screen.getByTestId("session-sources-panel")).toHaveAttribute("data-count", "1")
     })
 
-    it("counts the conversation's sources and changed files on the rail", () => {
+    it("counts the conversation's sources and changed files on the collapsed rail", () => {
       mockChangedFiles = 3
       mockSessionMessages = [
         {
@@ -674,7 +708,8 @@ describe("ArtifactDock — converged workbench shell", () => {
           parts: [{ type: "source-url", sourceId: "docs", url: "https://example.com" }],
         },
       ]
-      render(<SessionContextWorkbench />)
+      // The rail is what a collapsed dock shrinks to; an open one has the strip.
+      render(<SessionContextWorkbench railOnly />)
 
       expect(screen.getByTestId("workbench-activity-inspect")).toHaveTextContent("1")
       // Once, though the source-control panel shares the activity.
@@ -686,7 +721,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     it("opens a default sidechat beside the active conversation", () => {
       render(<SessionContextWorkbench />)
 
-      fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.sessionSidechat" }))
+      openFromNewTab("session-sidechat")
 
       expect(screen.getByTestId("resource-workbench-chat")).toHaveAttribute(
         "data-aside-target",
@@ -739,7 +774,7 @@ describe("ArtifactDock — converged workbench shell", () => {
       ]
       render(<SessionContextWorkbench />)
 
-      fireEvent.click(screen.getByRole("button", { name: "projectOverview.panelTitle" }))
+      openFromNewTab("project-overview")
 
       expect(screen.getByTestId("project-overview")).toHaveAttribute("data-project", "project-b")
       fireEvent.click(screen.getByRole("button", { name: "open-project-workspace" }))
@@ -764,7 +799,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     })
   })
 
-  it("uses the full panel width for labels and projects only compact navigation", () => {
+  it("keeps the one strip in the dock, whatever the navigation style", () => {
     function HeaderOutlet() {
       const ref = useTitleBarOutletRef("end")
       return <div ref={ref} data-testid="title-outlet" />
@@ -778,24 +813,24 @@ describe("ArtifactDock — converged workbench shell", () => {
         </TitleBarProjectionScope>
       </TitleBarOutletsProvider>
     )
-    const tabs = screen.getByTestId("context-workbench-panel-tabs")
-    expect(screen.getByTestId("context-workbench")).toContainElement(tabs)
+    // A strip of tabs needs the dock's full width: never projected.
+    const strip = screen.getByTestId("dock-tab-strip")
+    expect(screen.getByTestId("context-workbench")).toContainElement(strip)
     expect(screen.getByTestId("title-outlet")).toBeEmptyDOMElement()
     act(() => useContextWorkbenchStore.setState({ navigationStyle: "rail" }))
-    expect(screen.getByTestId("title-outlet")).not.toBeEmptyDOMElement()
+    expect(screen.getByTestId("title-outlet")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("dock-tab-strip")).toBeInTheDocument()
+    expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
   })
 
-  it("labels a single artifact in tab mode and preserves the compact rail presentation", () => {
+  it("labels a single open artifact as a tab, without the workbench's own tabs", () => {
     activateArtifact()
-    act(() => useArtifactStore.setState({ openArtifactIdsBySession: { "sess-1": ["artifact-1"] } }))
+    openArtifactTabs("artifact-1")
     act(() => useContextWorkbenchStore.setState({ navigationStyle: "tabs" }))
     render(<ArtifactDock />)
-    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
-    expect(screen.getByTestId("context-workbench-panel-tabs")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByTestId("context-workbench-panel-tabs")).not.toBeInTheDocument()
     expect(screen.queryByTestId("context-workbench-activity-rail")).not.toBeInTheDocument()
-    act(() => useContextWorkbenchStore.setState({ navigationStyle: "rail" }))
-    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
-    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
   })
 
   it("keeps the artifact tabs on the session surface when no artifact is active", () => {
@@ -832,9 +867,13 @@ describe("ArtifactDock — converged workbench shell", () => {
     render(<ArtifactDock />)
 
     // "Tabs open, none active" is an ordinary state now that tabs are bucketed
-    // per conversation. The session surface passed no `headerLeading`, so the
-    // strip vanished and every other open artifact became unreachable.
-    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+    // per conversation; every open artifact stays reachable beside the panels.
+    expect(screen.getByRole("tab", { name: "First" })).toHaveAttribute("aria-selected", "false")
+    expect(screen.getByRole("tab", { name: "Second" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "contextWorkbench.newTab.title" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
   })
 
   it("collapses the dock from the workbench rail", () => {
@@ -920,7 +959,10 @@ describe("ArtifactDock — converged workbench shell", () => {
     )
     render(<ArtifactDock />)
 
-    expect(activePanelId("artifact:artifact-1")).toBe("workspace")
+    // The workspace is a conversation tab: the artifact is parked so the
+    // session surface can take the reveal as its own.
+    expect(activePanelId("session:sess-1")).toBe("workspace")
+    expect(useArtifactStore.getState().activeArtifactIdBySession["sess-1"]).toBeNull()
     // Consumed on arrival: a lingering intent would re-route the next
     // navigation the user makes by hand.
     expect(useArtifactDockLayoutStore.getState().revealIntent).toBeNull()
@@ -929,16 +971,16 @@ describe("ArtifactDock — converged workbench shell", () => {
   it("follows the active panel with the sizing profile, in one direction only", () => {
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    openFromNewTab("workspace")
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
+    openFromNewTab("artifacts")
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("compact")
 
     // The predecessor wrote the mode from panel lifecycle hooks AND read it
     // back to order the panels, so re-entering a visited panel could bounce the
     // dock out of the surface asked for. Re-entry must simply work.
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" }))
     expect(useArtifactDockLayoutStore.getState().dockProfile).toBe("workspace")
     expect(activePanelId("session:sess-1")).toBe("workspace")
   })
@@ -962,7 +1004,7 @@ describe("ArtifactDock — converged workbench shell", () => {
 
   it("lets wide reach the workspace cap once the workspace panel is showing", () => {
     render(<ArtifactDock />)
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    openFromNewTab("workspace")
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
 
@@ -986,11 +1028,9 @@ describe("ArtifactDock — converged workbench shell", () => {
   it("widens the dock for a panel that asked for it, at that panel's own cap", () => {
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    openFromNewTab("workspace")
 
-    // Activating a `preferredMode: "wide"` panel used to light up the header's
-    // wide button while leaving the dock at whatever width it already had.
-    // The cap has to come from the *arriving* panel too: `dockProfile` is only
+    // The cap has to come from the *arriving* panel: `dockProfile` is only
     // flipped by an effect after `activePanelId` changes, so reading it here
     // would look up compact.wide (50%) instead of workspace.wide (65%).
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
@@ -1006,7 +1046,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     // External reveals (the chat header's browser button, the Edit/Write review
     // bridge, save-to-project) reach the workbench through the intent path
     // rather than a click, so they need the same width wiring.
-    expect(activePanelId("artifact:artifact-1")).toBe("browser")
+    expect(activePanelId("session:sess-1")).toBe("browser")
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(
       DOCK_MODE_WIDTH_PERCENT.compact.wide
     )
@@ -1088,18 +1128,21 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.queryByRole("separator")).not.toBeInTheDocument()
   })
 
-  it("gives the workspace its own rail entry rather than burying it under metadata", () => {
+  it("opens the conversation's workspace from an artifact, and keeps the artifact's views", () => {
     activateArtifact(3)
+    openArtifactTabs("artifact-1")
     render(<ArtifactDock />)
 
-    // `workspace` used to share the inspect activity with `metadata`, which
-    // sorts first — so the project workspace sat behind an info icon plus a
-    // group tab. It is a one-click rail entry now, and metadata keeps its own.
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.workspaceMode" }))
+    openFromNewTab("workspace")
     expect(screen.getByTestId("workspace")).toBeInTheDocument()
-    expect(activePanelId("artifact:artifact-1")).toBe("workspace")
+    expect(activePanelId("session:sess-1")).toBe("workspace")
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.metadata.artifactTitle" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }))
+    fireEvent.click(
+      within(screen.getByTestId("context-workbench-resource-switcher")).getByRole("button", {
+        name: "contextWorkbench.metadata.artifactTitle",
+      })
+    )
     expect(activePanelId("artifact:artifact-1")).toBe("metadata")
   })
 
@@ -1143,12 +1186,15 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(activePanelId("artifact:artifact-1")).toBe("artifacts")
   })
 
-  it("still reaches the proposal review as a group tab behind the same activity", () => {
+  it("still reaches the proposal review from the artifact's views", () => {
     activateArtifact()
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.browseArtifacts" }))
-    fireEvent.click(screen.getByRole("tab", { name: "contextWorkbench.proposalReview" }))
+    fireEvent.click(
+      within(screen.getByTestId("context-workbench-resource-switcher")).getByRole("button", {
+        name: "contextWorkbench.proposalReview",
+      })
+    )
 
     expect(screen.getByTestId("review-view")).toHaveAttribute("data-artifact", "artifact-1")
   })
@@ -1222,7 +1268,7 @@ describe("ArtifactDock — with no conversation open", () => {
     mockActiveSessionId = null
     render(<SessionContextWorkbench />)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.sessionSidechat" }))
+    openFromNewTab("session-sidechat")
 
     expect(screen.getByText("sidechatPlaceholder.title")).toBeInTheDocument()
     expect(screen.getByText("sidechatPlaceholder.description")).toBeInTheDocument()
@@ -1230,29 +1276,15 @@ describe("ArtifactDock — with no conversation open", () => {
 })
 
 describe("ArtifactDock — the header tab strip", () => {
-  it("appears once a second artifact is open, and not before", () => {
-    // The strip is the only way back to an artifact you left open, so its
-    // presence is load-bearing rather than decoration — and it deliberately
-    // stays hidden for a single artifact, where it would say nothing.
+  it("draws a single open artifact as a tab on the desktop strip", () => {
+    // The desktop strip carries panels and artifacts alike, so even one open
+    // artifact is a tab there — the old rule of hiding a lone tab belonged to a
+    // strip that held artifacts only. The phone Sheet keeps that strip.
     activateArtifact()
-    act(() => {
-      useArtifactStore.setState({ openArtifactIdsBySession: { "sess-1": ["artifact-1"] } })
-    })
-    const single = render(<ArtifactDock />)
-    expect(single.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
-    single.unmount()
-
-    act(() => {
-      useArtifactStore.setState((s) => ({
-        artifacts: {
-          ...s.artifacts,
-          "artifact-2": { ...s.artifacts["artifact-1"]!, id: "artifact-2", title: "Second" },
-        },
-        openArtifactIdsBySession: { "sess-1": ["artifact-1", "artifact-2"] },
-      }))
-    })
+    openArtifactTabs("artifact-1")
     render(<ArtifactDock />)
-    expect(screen.getByTestId("artifact-tab-strip")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Document" })).toBeInTheDocument()
+    expect(screen.queryByTestId("artifact-tab-strip")).not.toBeInTheDocument()
   })
 
   it("carries the strip onto the mobile Sheet host too", () => {

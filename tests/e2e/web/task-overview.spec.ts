@@ -202,62 +202,47 @@ test("@smoke task summary floats beside a wide chat and stays out of the column"
   await expect(card.getByTestId("summary-row-changes")).toHaveCount(0)
 })
 
-test("@smoke workbench tabs switch close reopen and preserve navigation preference", async ({
+test("@smoke the dock's one tab strip switches, closes and remembers its tabs", async ({
   page,
 }) => {
   await prepareConversations(page)
   await openOverview(page)
-  const tabs = page.getByRole("tablist", { name: "Labeled tabs", exact: true })
-  await expect(tabs.getByRole("tab", { name: "Task overview", exact: true })).toHaveAttribute(
+  const strip = page.getByRole("tablist", { name: "Open in this task", exact: true })
+  await expect(strip.getByRole("tab", { name: "Task overview", exact: true })).toHaveAttribute(
     "aria-selected",
     "true"
   )
-  await page.getByRole("button", { name: "Open panel", exact: true }).click()
-  await page.getByRole("menuitem", { name: "Run Context", exact: true }).click()
-  await expect(tabs.getByRole("tab", { name: "Run Context", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  )
-  await expect(page.getByRole("tab", { name: "Working Set", exact: true })).toBeVisible()
-  await tabs.getByRole("tab", { name: "Task overview", exact: true }).click()
-  await expect(page.getByTestId("session-overview-panel")).toBeVisible()
-  await tabs.getByRole("button", { name: "Close Task overview", exact: true }).click()
-  await expect(tabs.getByRole("tab", { name: "Task overview", exact: true })).toHaveCount(0)
-  await expect(tabs.getByRole("tab", { name: "Run Context", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  )
-  await page.getByRole("button", { name: "Open panel", exact: true }).click()
-  await page.getByRole("menuitem", { name: "Task overview", exact: true }).click()
-  await expect(tabs.getByRole("tab", { name: "Task overview", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  )
-  await expect(tabs.getByRole("tab", { name: "Run Context", exact: true })).toBeInViewport({
-    ratio: 1,
-  })
-  await expect(tabs.getByRole("tab", { name: "Task overview", exact: true })).toBeInViewport({
-    ratio: 1,
-  })
-  await page.screenshot({ path: test.info().outputPath("workbench-tabs.png"), fullPage: true })
+  // No second navigation beside it: no workbench tabs, no activity rail.
+  await expect(page.getByTestId("context-workbench-panel-tabs")).toHaveCount(0)
+  await expect(page.getByTestId("context-workbench-activity-rail")).toHaveCount(0)
 
-  await page.getByRole("button", { name: "Compact icon rail", exact: true }).click()
-  const rail = page.getByRole("navigation", { name: "Context Workbench activities" })
-  await expect(rail).toBeVisible()
-  await expect(tabs).toHaveCount(0)
+  await page
+    .getByTestId("session-overview-panel")
+    .getByRole("button", { name: "Open run context" })
+    .click()
+  await expect(strip.getByRole("tab", { name: "Run Context", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
+  await strip.getByRole("tab", { name: "Task overview", exact: true }).click()
+  await expect(page.getByTestId("session-overview-panel")).toBeVisible()
+  await page.getByRole("button", { name: "Close Task overview", exact: true }).click()
+  await expect(strip.getByRole("tab", { name: "Task overview", exact: true })).toHaveCount(0)
+  await expect(strip.getByRole("tab", { name: "Run Context", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
+  await page.screenshot({ path: test.info().outputPath("dock-tab-strip.png"), fullPage: true })
+
+  // The tabs are this conversation's: a reload brings them back.
   await page.reload()
   await waitForTestGlobals(page, 30_000)
-  // Reload can select another conversation and park its empty dock. Reopen
-  // through the same user action, then verify the global navigation preference.
   await openOverview(page)
-  await expect(rail).toBeVisible()
-  await page.getByRole("button", { name: "Labeled tabs", exact: true }).click()
-  await expect(tabs).toBeVisible()
-  await page.reload()
-  await waitForTestGlobals(page, 30_000)
-  await openOverview(page)
-  await expect(tabs).toBeVisible()
-  await expect(rail).toHaveCount(0)
+  await expect(strip.getByRole("tab", { name: "Run Context", exact: true })).toBeVisible()
+  await expect(strip.getByRole("tab", { name: "Task overview", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  )
 })
 
 // Exercise the registered overview and its existing run-context destination.

@@ -197,6 +197,28 @@ describe("useArtifactDockLayoutStore", () => {
       // Identity-stable: no subscriber wakes for a park that changed nothing.
       expect(useArtifactDockLayoutStore.getState()).toBe(before)
     })
+
+    it("restoreDock puts back a conversation's dock, dismissal included (ADR-0214 D9)", () => {
+      const store = useArtifactDockLayoutStore.getState()
+      act(() => store.restoreDock({ open: true, dismissed: false }))
+      expect(useArtifactDockLayoutStore.getState()).toMatchObject({
+        dockCollapsed: false,
+        userDismissed: false,
+        unreadArtifact: false,
+        // The phone Sheet stays runtime-only.
+        mobileSheetOpen: false,
+      })
+
+      act(() => store.restoreDock({ open: false, dismissed: true }))
+      expect(useArtifactDockLayoutStore.getState()).toMatchObject({
+        dockCollapsed: true,
+        userDismissed: true,
+      })
+
+      const before = useArtifactDockLayoutStore.getState()
+      act(() => store.restoreDock({ open: false, dismissed: true }))
+      expect(useArtifactDockLayoutStore.getState()).toBe(before)
+    })
   })
 
   describe("dismiss + unread artifact", () => {

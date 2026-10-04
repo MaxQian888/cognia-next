@@ -218,6 +218,15 @@ export interface ArtifactDockLayoutState {
    */
   parkDock: () => void
   /**
+   * Put the dock back the way the user left it in the conversation coming on
+   * screen (ADR-0214, D9 — `stores/artifact/dock-tabs-store.ts`). Restores the
+   * dismissal with it, so a dock closed there stays closed when its parked
+   * artifact comes back into view (the toggle only flags it unread), while one
+   * that was merely idle still opens for the next artifact. Never raises the
+   * phone Sheet: that one is runtime-only by design.
+   */
+  restoreDock: (dock: { open: boolean; dismissed: boolean }) => void
+  /**
    * A new artifact became active. Expands the dock unless the user dismissed it
    * (then only flags it unread), so we never yank open a panel the user closed.
    */
@@ -424,6 +433,13 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set((state) =>
           state.dockCollapsed ? state : { dockCollapsed: true, mobileSheetOpen: false }
         ),
+      restoreDock: ({ open, dismissed }) =>
+        set((state) => {
+          if (state.dockCollapsed === !open && state.userDismissed === dismissed) return state
+          return open
+            ? { dockCollapsed: false, userDismissed: dismissed, unreadArtifact: false }
+            : { dockCollapsed: true, userDismissed: dismissed, mobileSheetOpen: false }
+        }),
       notifyNewArtifact: () =>
         set((state) =>
           state.userDismissed

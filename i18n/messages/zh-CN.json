@@ -11138,6 +11138,13 @@
       "restoreDefaults": "恢复默认",
       "showItem": "显示"
     },
+    "dockTabs": {
+      "allTabs": "全部标签页",
+      "close": "关闭 {name}",
+      "label": "本任务中打开的内容",
+      "newTab": "新标签页",
+      "resourceViews": "此项的视图"
+    },
     "exportResourceSession": "导出此资源会话",
     "logsPanel": {
       "count": "{count, plural, other {# 条日志}}",
@@ -11196,6 +11203,25 @@
       "compactRail": "紧凑图标栏",
       "openPanel": "打开面板",
       "tabs": "文字标签页"
+    },
+    "newTab": {
+      "artifacts": "本任务的产物",
+      "changes": "改动",
+      "chromeWebStore": "Chrome 应用商店",
+      "chromeWebStoreHint": "为内置 Chromium 添加扩展",
+      "go": "前往",
+      "installTitle": "安装 Chromium 之前，网页会在系统 WebView 中打开",
+      "moreTools": "更多工具",
+      "noArtifacts": "本任务还没有产物",
+      "omniboxLabel": "搜索或输入网址",
+      "omniboxPlaceholder": "搜索文件、产物和工具，或输入网址",
+      "openFailed": "无法打开 {path}",
+      "recent": "最近访问（全部任务）",
+      "suggestions": "建议",
+      "taskLinks": "本任务中的链接",
+      "terminal": "终端",
+      "title": "新标签页",
+      "tools": "工具"
     },
     "panelError": "面板暂不可用",
     "panelErrorDescription": "此面板意外停止，其他工作内容未受影响。",
@@ -45885,6 +45911,7 @@
         "dockLayoutRedo": "重做停靠布局更改",
         "dockLayoutReset": "重置停靠布局",
         "dockLayoutUndo": "撤销停靠布局更改",
+        "dockNewTab": "右侧面板：新标签页",
         "dockPanelClose": "关闭当前停靠面板",
         "dockPanelFloat": "浮动当前停靠面板",
         "dockPanelPopout": "将当前停靠面板移到新窗口",

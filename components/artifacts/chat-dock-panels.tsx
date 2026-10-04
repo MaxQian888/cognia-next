@@ -42,6 +42,7 @@ import {
   CornerUpLeftIcon,
   ListChecksIcon,
   ListTodoIcon,
+  PlusIcon,
   UsersIcon,
 } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
@@ -73,6 +74,11 @@ import { ArtifactPanelContent, type ArtifactPanelMode } from "./artifact-panel-c
 import { ArtifactList } from "./artifact-list"
 import { SESSION_ARTIFACT_LIST_PANEL_ID } from "@/lib/artifacts/session-workbench-scope-key"
 import { ArtifactReviewView } from "./artifact-review-view"
+import { DockNewTabPage } from "./dock-new-tab-page"
+import { isKnownDockPanel, presentDockTabs } from "./dock-tab-strip"
+import { orderDockTabs, panelTabKey, useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
+import { selectOpenArtifactIds, useArtifactStore } from "@/stores/artifact/artifact-store"
+import { DOCK_SESSION_PANEL_META, NEW_TAB_PANEL_ID } from "./dock-panel-meta"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
 import { MemoryWorkbenchPanel } from "@/components/context-workbench/panels/memory-workbench-panel"
@@ -566,6 +572,11 @@ export interface SessionSurfacePanelsInput {
   pendingRunLearningCount?: number
   scopeKey: string
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+  /**
+   * Offer the New Tab page (ADR-0214, D7). The desktop dock, whose one tab
+   * strip opens it with `+`; the phone Sheet keeps its own panels (R13).
+   */
+  newTab?: boolean
 }
 
 interface SessionPanelInputs extends DockPanelInputs {
@@ -632,6 +643,48 @@ function SessionSourcesRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   return <SessionSourcesPanel messages={sessionMessages} />
 }
 
+function SessionNewTabRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const sessionMessages = usePanelInput(inputs, (input) => input.sessionMessages)
+  // A tool opens in place of the New Tab page, the way a link replaces a
+  // browser's start page — with the width its panel asks for.
+  const openPanel = useCallback(
+    (panelId: string) => {
+      const { scopeKey, onWidthHint, activeSessionId: sessionId } = inputs.getState()
+      const mode = DOCK_SESSION_PANEL_META[panelId]?.preferredMode ?? "narrow"
+      const store = useContextWorkbenchStore.getState()
+      if (sessionId) {
+        const layout = store.layouts[scopeKey]
+        const artifacts = useArtifactStore.getState()
+        const drawn = orderDockTabs(
+          useDockTabsStore.getState().bySession[sessionId]?.order,
+          presentDockTabs({
+            activatedPanelIds: layout?.activatedPanelIds ?? [],
+            activePanelId: layout?.activePanelId ?? null,
+            openArtifactIds: selectOpenArtifactIds(artifacts, sessionId),
+            artifactExists: (id) => Boolean(artifacts.artifacts[id]),
+            isKnownPanel: isKnownDockPanel,
+          })
+        )
+        useDockTabsStore
+          .getState()
+          .replaceTab(sessionId, drawn, panelTabKey(NEW_TAB_PANEL_ID), panelTabKey(panelId))
+      }
+      store.closePanelTab(scopeKey, NEW_TAB_PANEL_ID)
+      store.navigatePanel(scopeKey, panelId, mode)
+      onWidthHint(mode, panelId)
+    },
+    [inputs]
+  )
+  return (
+    <DockNewTabPage
+      sessionId={activeSessionId}
+      messages={sessionMessages}
+      onOpenPanel={openPanel}
+    />
+  )
+}
+
 function SessionPlanRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
   return activeSessionId ? <PlanPanel sessionId={activeSessionId} /> : null
@@ -662,6 +715,7 @@ export function useSessionSurfacePanels({
   pendingRunLearningCount = 0,
   scopeKey,
   onWidthHint,
+  newTab = false,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
   const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
   // The plan panel claims its rail slot only when the session actually has a
@@ -706,6 +760,7 @@ export function useSessionSurfacePanels({
       logs: () => <LogsWorkbenchPanel key={key} />,
       squad: () => <SessionSquadRenderer key={key} inputs={inputs} />,
       teamMembers: () => <SessionTeamMembersRenderer key={key} inputs={inputs} />,
+      newTab: () => <SessionNewTabRenderer key={key} inputs={inputs} />,
     }
   }, [activeSessionId, inputs])
 
@@ -715,6 +770,23 @@ export function useSessionSurfacePanels({
 
   return useMemo<ContextPanelDefinition[]>(
     () => [
+      {
+        // The dock's start page (D7). Lowest-ordered, so a conversation whose
+        // dock has nothing recorded opens on it — the workbench seeds a fresh
+        // scope with its first panel — instead of the empty artifact list.
+        // Not customizable: it is where the strip's `+` goes, not a panel to
+        // reorder or hide (`lib/shell/workbench-panels.test.ts` exempts it).
+        id: NEW_TAB_PANEL_ID,
+        // Filed beside the browser it starts pages for; on a collapsed rail
+        // the button lands here, as the group's lowest-ordered panel.
+        activity: "preview-run",
+        labelKey: "contextWorkbench.newTab.title",
+        icon: PlusIcon,
+        order: 0,
+        appliesTo: (resource) => newTab && resource.kind === "session",
+        retention: "ephemeral",
+        renderer: renderers.newTab,
+      },
       {
         id: SESSION_ARTIFACT_LIST_PANEL_ID,
         activity: "review",
@@ -913,6 +985,7 @@ export function useSessionSurfacePanels({
       hasActiveSession,
       hasProjectRoots,
       isTeamSession,
+      newTab,
       pendingPlanCount,
       pendingRunLearningCount,
       planCount,

@@ -41,7 +41,15 @@ const PANEL_ID_CONSTANTS: Record<string, string> = {
   SESSION_ARTIFACT_LIST_PANEL_ID: "artifacts",
   TEAM_MEMBERS_PANEL_ID: "team-members",
   SQUAD_CONTEXT_PANEL_ID: "squad-context",
+  NEW_TAB_PANEL_ID: "new-tab",
 }
+
+/**
+ * Declared by the dock but deliberately not customizable. The New Tab page is
+ * where the tab strip's `+` goes (ADR-0214, D7), not a panel to reorder or
+ * hide — hiding it would leave `+` opening nothing.
+ */
+const NOT_CUSTOMIZABLE = new Set(["new-tab"])
 
 function declaredPanels(): Map<string, string> {
   const source = readFileSync(
@@ -55,6 +63,7 @@ function declaredPanels(): Map<string, string> {
     const groups = match.groups!
     const id = groups.literal ?? PANEL_ID_CONSTANTS[groups.constant!]
     if (!id) throw new Error(`Unmapped panel id constant: ${groups.constant}`)
+    if (NOT_CUSTOMIZABLE.has(id)) continue
     found.set(id, groups.activity!)
   }
   return found
@@ -75,6 +84,10 @@ describe("WORKBENCH_PANEL_CATALOG parity", () => {
       // in, so the customizer would offer a tab the rail can never show.
       expect([item.id, item.activity]).toEqual([item.id, declared.get(item.id)])
     }
+  })
+
+  it("keeps the New Tab page out of the customizer", () => {
+    expect(WORKBENCH_PANEL_CATALOG.map((item) => item.id)).not.toContain("new-tab")
   })
 
   it("holds no duplicate ids", () => {

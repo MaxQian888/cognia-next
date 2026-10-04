@@ -364,6 +364,17 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     defaultChord: "ctrl+alt+s",
   },
   {
+    // The dock's New Tab page (ADR-0214, D7). Desktop only: a browser tab
+    // never hands ⌘T / Ctrl+T to the page, so the web build would advertise a
+    // chord that opens a browser tab instead.
+    id: "dock.newTab",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.dockNewTab",
+    category: "app.panels",
+    defaultChord: "ctrl+t",
+    when: "platform.tauri",
+  },
+  {
     id: "canvasLayout.toggleLeft",
     scope: "app",
     labelKey: "settings.shortcuts.catalog.canvasToggleLeft",

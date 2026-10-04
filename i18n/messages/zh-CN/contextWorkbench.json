@@ -462,5 +462,31 @@
     "contextFailed": "插件未能提供此资源的上下文，你的上一条消息已在没有上下文的情况下发送。",
     "dismiss": "关闭",
     "selectionToolbar": "选中文本操作"
+  },
+  "dockTabs": {
+    "label": "本任务中打开的内容",
+    "newTab": "新标签页",
+    "close": "关闭 {name}",
+    "allTabs": "全部标签页",
+    "resourceViews": "此项的视图"
+  },
+  "newTab": {
+    "title": "新标签页",
+    "omniboxLabel": "搜索或输入网址",
+    "omniboxPlaceholder": "搜索文件、产物和工具，或输入网址",
+    "go": "前往",
+    "tools": "工具",
+    "changes": "改动",
+    "terminal": "终端",
+    "moreTools": "更多工具",
+    "artifacts": "本任务的产物",
+    "noArtifacts": "本任务还没有产物",
+    "suggestions": "建议",
+    "taskLinks": "本任务中的链接",
+    "chromeWebStore": "Chrome 应用商店",
+    "chromeWebStoreHint": "为内置 Chromium 添加扩展",
+    "recent": "最近访问（全部任务）",
+    "installTitle": "安装 Chromium 之前，网页会在系统 WebView 中打开",
+    "openFailed": "无法打开 {path}"
   }
 }
