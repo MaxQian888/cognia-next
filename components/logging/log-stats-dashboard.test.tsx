@@ -27,11 +27,18 @@ jest.mock("recharts", () => {
         /* noop */
       }
     }
+    const onClick = props.onClick as ((entry: unknown) => void) | undefined
+    const data = props.data as Array<Record<string, unknown>> | undefined
     return (
       <div
         data-testid={`series-${String(props.name ?? props.dataKey ?? "anon")}`}
         data-name={String(props.name ?? "")}
         data-key={String(props.dataKey ?? "")}
+        data-clickable={onClick ? "true" : undefined}
+        // A click on the series hands back what Recharts would: the datum
+        // under the pointer, as `payload`. Pie gets its own data; a Bar's data
+        // lives on the chart, so a fixed module datum stands in.
+        onClick={() => onClick?.({ payload: data?.[0] ?? { name: "bar-module" } })}
       />
     )
   }
@@ -64,7 +71,11 @@ jest.mock("@/lib/observability/chart-config", () => ({
   },
 }))
 
-import { LogStatsDashboard } from "./log-stats-dashboard"
+import {
+  LogStatsDashboard,
+  computeVolumeBuckets,
+  pickVolumeBucketMinutes,
+} from "./log-stats-dashboard"
 import type { StructuredLogEntry, LogLevel } from "@cognia/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
@@ -170,6 +181,13 @@ describe("LogStatsDashboard", () => {
       />
     )
     expect(screen.getByText("permission denied")).toBeInTheDocument()
+    // Labelled as the error it is, not as a second "Platform Health".
+    expect(screen.getByText("Platform Error")).toBeInTheDocument()
+    expect(screen.getAllByText("Platform Health")).toHaveLength(1)
+    // Health and threshold read in words, not as raw enum values.
+    expect(screen.getByText("degraded")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Platform Logging" })).toHaveTextContent("Info")
+    expect(screen.queryByText("info")).not.toBeInTheDocument()
   })
 
   it("renders the responsive 1/2/3/4 columns grid on the stat cards row", () => {
@@ -275,5 +293,129 @@ describe("LogStatsDashboard", () => {
     for (let i = 0; i < 30; i++) logs.push(makeLog("error", "m", "boom", (90 + i) * 60_000))
     render(<LogStatsDashboard logs={logs} />)
     expect(screen.getByText("Total Logs")).toBeInTheDocument()
+  })
+})
+
+describe("LogStatsDashboard — click-throughs", () => {
+  it("lists each level with its exact count, in words, as a click-through", async () => {
+    const user = userEvent.setup({ skipHover: true })
+    const onLevelFilter = jest.fn()
+    const logs = [
+      makeLog("error", "a", "x", 0),
+      makeLog("error", "a", "y", 1),
+      makeLog("warn", "a", "z", 2),
+    ]
+    render(<LogStatsDashboard logs={logs} onLevelFilter={onLevelFilter} />)
+    const error = screen.getByTestId("dashboard-level-error")
+    expect(error).toHaveTextContent("Error")
+    expect(error).toHaveTextContent("2")
+    await user.click(screen.getByTestId("dashboard-level-warn"))
+    expect(onLevelFilter).toHaveBeenCalledWith("warn")
+  })
+
+  it("leaves the legend rows inert without a handler", () => {
+    render(<LogStatsDashboard logs={[makeLog("info", "a", "x")]} />)
+    expect(screen.getByTestId("dashboard-level-info")).toBeDisabled()
+  })
+
+  it("a pie slice click selects its level", async () => {
+    const user = userEvent.setup({ skipHover: true })
+    const onLevelFilter = jest.fn()
+    render(
+      <LogStatsDashboard
+        logs={[makeLog("error", "a", "x"), makeLog("error", "a", "y", 1)]}
+        onLevelFilter={onLevelFilter}
+      />
+    )
+    await user.click(screen.getByTestId("series-value"))
+    expect(onLevelFilter).toHaveBeenCalledWith("error")
+  })
+
+  it("a module bar click filters by that module", async () => {
+    const user = userEvent.setup({ skipHover: true })
+    const onModuleFilter = jest.fn()
+    render(<LogStatsDashboard logs={buildLogs(10)} onModuleFilter={onModuleFilter} />)
+    const bar = screen.getByTestId("series-Logs")
+    expect(bar).toHaveAttribute("data-clickable", "true")
+    await user.click(bar)
+    expect(onModuleFilter).toHaveBeenCalledWith("bar-module")
+  })
+
+  it("does not make the charts clickable without handlers", () => {
+    render(<LogStatsDashboard logs={buildLogs(10)} />)
+    expect(screen.getByTestId("series-Logs")).not.toHaveAttribute("data-clickable")
+    expect(screen.getByTestId("series-value")).not.toHaveAttribute("data-clickable")
+  })
+})
+
+describe("LogStatsDashboard — clickable stat tiles", () => {
+  const logs = [
+    makeLog("error", "auth", "x", 0),
+    makeLog("warn", "auth", "y", 1000),
+    makeLog("info", "api", "z", 2000),
+    makeLog("info", "auth", "w", 3000),
+  ]
+
+  it("error rate, warning rate and top module are buttons that filter", async () => {
+    const user = userEvent.setup({ skipHover: true })
+    const onLevelFilter = jest.fn()
+    const onModuleFilter = jest.fn()
+    render(
+      <LogStatsDashboard
+        logs={logs}
+        onLevelFilter={onLevelFilter}
+        onModuleFilter={onModuleFilter}
+      />
+    )
+    const errors = screen.getByTestId("dashboard-stat-errors")
+    expect(errors.tagName).toBe("BUTTON")
+    await user.click(errors)
+    expect(onLevelFilter).toHaveBeenCalledWith("error")
+
+    // Keyboard: Tab reaches the tile, Enter activates it.
+    screen.getByTestId("dashboard-stat-warnings").focus()
+    await user.keyboard("{Enter}")
+    expect(onLevelFilter).toHaveBeenCalledWith("warn")
+
+    await user.click(screen.getByTestId("dashboard-stat-top-module"))
+    expect(onModuleFilter).toHaveBeenCalledWith("auth")
+  })
+
+  it("leaves the tiles inert without handlers", () => {
+    render(<LogStatsDashboard logs={logs} />)
+    expect(screen.getByTestId("dashboard-stat-errors").tagName).not.toBe("BUTTON")
+    expect(screen.queryByTestId("dashboard-module-list")).not.toBeInTheDocument()
+  })
+
+  it("gives the module bar chart a keyboard path", async () => {
+    const user = userEvent.setup({ skipHover: true })
+    const onModuleFilter = jest.fn()
+    render(<LogStatsDashboard logs={logs} onModuleFilter={onModuleFilter} />)
+    const list = screen.getByTestId("dashboard-module-list")
+    expect(list).toHaveClass("sr-only", "focus-within:not-sr-only")
+    screen.getByTestId("dashboard-module-api").focus()
+    await user.keyboard("{Enter}")
+    expect(onModuleFilter).toHaveBeenCalledWith("api")
+  })
+})
+
+describe("volume buckets", () => {
+  it("derives the bucket width from the span of the data", () => {
+    expect(pickVolumeBucketMinutes(0)).toBe(1)
+    expect(pickVolumeBucketMinutes(30 * 60_000)).toBe(1)
+    expect(pickVolumeBucketMinutes(3 * 60 * 60_000)).toBe(5)
+    expect(pickVolumeBucketMinutes(24 * 60 * 60_000)).toBe(30)
+    expect(pickVolumeBucketMinutes(7 * 24 * 60 * 60_000)).toBe(180)
+  })
+
+  it("keeps the oldest entry on the chart for a week-long window", () => {
+    const week = [
+      makeLog("error", "a", "old", 0),
+      makeLog("info", "a", "new", 7 * 24 * 60 * 60_000),
+    ]
+    const buckets = computeVolumeBuckets(week, "en")
+    expect(buckets.length).toBeLessThanOrEqual(60)
+    expect(buckets[0].error).toBe(1)
+    expect(buckets[buckets.length - 1].info).toBe(1)
   })
 })

@@ -3,6 +3,9 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import type { SubmissionRecord } from "@/lib/native/diagnostic-submit"
 
 import {
+  countActionableIncidents,
+  isActionableIncident,
+  listDiagnosticIncidents,
   loadDiagnosticIncidents,
   useDiagnosticIncidents,
   type DiagnosticIncidentDependencies,
@@ -10,6 +13,7 @@ import {
 
 function dependencies(): DiagnosticIncidentDependencies {
   return {
+    isDesktop: () => true,
     listDesktop: jest.fn(async () => [
       {
         stem: "desktop-panic",
@@ -145,5 +149,124 @@ describe("useDiagnosticIncidents", () => {
     })
     expect(deps.deleteMobile).toHaveBeenCalledWith("mobile-native")
     expect(deps.listDesktop).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("normalization onto the service vocabulary", () => {
+  it("carries a mobile receipt and its state, and rewrites a camelCase state", async () => {
+    const deps = dependencies()
+    deps.listDesktop = jest.fn(async () => [])
+    deps.listMobile = jest.fn(async () => ({
+      kind: "ok" as const,
+      value: [
+        {
+          incidentId: "m-sent",
+          source: "android-acra" as const,
+          detectedAt: Date.parse("2026-08-02T00:00:00.000Z"),
+          state: "processing",
+          receiptCode: " MOB-7 ",
+          sizeBytes: 10,
+        },
+        {
+          incidentId: "m-legacy",
+          source: "android-acra" as const,
+          detectedAt: Date.parse("2026-08-01T00:00:00.000Z"),
+          state: "awaitingConsent",
+          sizeBytes: 10,
+        },
+      ],
+    }))
+    const incidents = await loadDiagnosticIncidents(deps)
+    expect(incidents[0]).toMatchObject({ id: "m-sent", state: "processing", receiptCode: "MOB-7" })
+    expect(incidents[1]).toMatchObject({ id: "m-legacy", state: "awaiting_consent" })
+  })
+
+  it("reads an unknown state with a receipt as sent, and without one as detected", async () => {
+    const deps = dependencies()
+    deps.listDesktop = jest.fn(async () => [])
+    deps.listMobile = jest.fn(async () => ({
+      kind: "ok" as const,
+      value: [
+        {
+          incidentId: "with-receipt",
+          source: "ios-kscrash" as const,
+          detectedAt: 2,
+          state: "something_newer",
+          receiptCode: "SUP-1",
+          sizeBytes: 1,
+        },
+        {
+          incidentId: "without",
+          source: "ios-kscrash" as const,
+          detectedAt: 1,
+          state: "something_newer",
+          sizeBytes: 1,
+        },
+      ],
+    }))
+    const incidents = await loadDiagnosticIncidents(deps)
+    expect(incidents.find((incident) => incident.id === "with-receipt")?.state).toBe("processing")
+    expect(incidents.find((incident) => incident.id === "without")?.state).toBe("detected")
+  })
+})
+
+describe("runtimes", () => {
+  it("names the desktop under Tauri and mobile only when the plugin answered", async () => {
+    const desktopOnly = dependencies()
+    desktopOnly.listMobile = jest.fn(async () => ({ kind: "unsupported" as const }))
+    await expect(listDiagnosticIncidents(desktopOnly)).resolves.toMatchObject({
+      runtimes: ["desktop"],
+    })
+
+    const mobileOnly = dependencies()
+    mobileOnly.isDesktop = () => false
+    mobileOnly.listDesktop = jest.fn(async () => [])
+    await expect(listDiagnosticIncidents(mobileOnly)).resolves.toMatchObject({
+      runtimes: ["mobile"],
+    })
+
+    // The plain browser: no crash handler at all.
+    const browser = dependencies()
+    browser.isDesktop = () => false
+    browser.listDesktop = jest.fn(async () => [])
+    browser.listMobile = jest.fn(async () => ({ kind: "unsupported" as const }))
+    await expect(listDiagnosticIncidents(browser)).resolves.toEqual({ incidents: [], runtimes: [] })
+  })
+
+  it("exposes them from the hook", async () => {
+    const deps = dependencies()
+    const { result } = renderHook(() => useDiagnosticIncidents(deps))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.runtimes).toEqual(["desktop", "mobile"])
+  })
+})
+
+describe("an unreadable crash directory", () => {
+  it("surfaces as the hook's error instead of an empty, healthy list", async () => {
+    const deps = dependencies()
+    deps.listDesktop = jest.fn(async () => {
+      throw new Error("permission denied")
+    })
+    const { result } = renderHook(() => useDiagnosticIncidents(deps))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error?.message).toBe("permission denied")
+    expect(result.current.incidents).toEqual([])
+  })
+})
+
+describe("countActionableIncidents", () => {
+  it("counts only reports still waiting on the user", () => {
+    expect(
+      countActionableIncidents([
+        { state: "detected" },
+        { state: "packaged" },
+        { state: "awaiting_consent" },
+        { state: "processing" },
+        { state: "accepted" },
+        { state: "rejected" },
+      ])
+    ).toBe(3)
+    expect(countActionableIncidents([])).toBe(0)
+    expect(isActionableIncident({ state: "queued" })).toBe(false)
   })
 })

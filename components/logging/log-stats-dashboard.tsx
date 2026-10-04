@@ -6,10 +6,16 @@
  * Recharts-based visualization dashboard for log analytics.
  * Shows level distribution, log volume over time, module activity,
  * summary stat cards, error trend detection, and top errors.
+ *
+ * Every click-through has a keyboard path. The stat tiles that name a filter
+ * (error rate, warning rate, most active module) are buttons; the level pie
+ * has its legend rows; the module bar chart — a canvas of SVG rects no key
+ * can reach — has a ranked list of the same modules that stays visually
+ * hidden until keyboard focus enters it.
  */
 
 import { useId, useMemo } from "react"
-import { useTranslations, useLocale } from "next-intl"
+import { useFormatter, useTranslations, useLocale } from "next-intl"
 import {
   PieChart,
   Pie,
@@ -47,11 +53,19 @@ import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import type { StructuredLogEntry, LogLevel } from "@cognia/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
+const KNOWN_LEVELS = new Set<string>(["trace", "debug", "info", "warn", "error", "fatal"])
+const KNOWN_HEALTH = new Set<string>(["healthy", "degraded", "offline", "inactive"])
+
 export interface LogStatsDashboardProps {
   logs: StructuredLogEntry[]
   logRate?: number
   nativeLogging?: NativeLoggingReadiness
+  /** "Top errors" click-through: search for the message. */
   onSearchFilter?: (query: string) => void
+  /** Module-activity bar click-through. */
+  onModuleFilter?: (moduleName: string) => void
+  /** Level-distribution click-through (slice or legend row). */
+  onLevelFilter?: (level: LogLevel) => void
   className?: string
 }
 
@@ -78,37 +92,60 @@ function DashboardSection({
   )
 }
 
+/** Bucket widths the volume chart may use, in minutes — round numbers only. */
+const BUCKET_STEPS_MINUTES = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080]
+/** Upper bound on bars: past this a bucket is a pixel or two wide. */
+const MAX_VOLUME_BUCKETS = 60
+
 /**
- * Compute time-bucketed log counts for the volume chart.
+ * The bucket width for a span of data: the smallest round step that keeps the
+ * chart within `MAX_VOLUME_BUCKETS`. It used to be a fixed five minutes, capped
+ * at 96 buckets — so anything older than eight hours was cut off the chart
+ * (the window is up to seven days), and a two-minute burst was one fat bar.
  */
-function computeVolumeBuckets(
+export function pickVolumeBucketMinutes(spanMs: number): number {
+  const span = Math.max(0, spanMs)
+  for (const step of BUCKET_STEPS_MINUTES) {
+    if (Math.floor(span / (step * 60_000)) + 1 <= MAX_VOLUME_BUCKETS) return step
+  }
+  return BUCKET_STEPS_MINUTES[BUCKET_STEPS_MINUTES.length - 1]
+}
+
+/**
+ * Compute time-bucketed log counts for the volume chart. The bucket width
+ * follows the data's span (see `pickVolumeBucketMinutes`).
+ */
+export function computeVolumeBuckets(
   logs: StructuredLogEntry[],
-  bucketMinutes = 5,
   locale = "en"
 ): { time: string; info: number; warn: number; error: number; other: number }[] {
   if (logs.length === 0) return []
 
-  const bucketMs = bucketMinutes * 60 * 1000
-  const sorted = [...logs].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  )
-
-  const first = new Date(sorted[0].timestamp).getTime()
-  const last = new Date(sorted[sorted.length - 1].timestamp).getTime()
-  const bucketCount = Math.max(1, Math.ceil((last - first) / bucketMs) + 1)
-  const capped = Math.min(bucketCount, 96)
+  let first = Infinity
+  let last = -Infinity
+  for (const log of logs) {
+    const ts = new Date(log.timestamp).getTime()
+    if (ts < first) first = ts
+    if (ts > last) last = ts
+  }
+  const span = last - first
+  const bucketMs = pickVolumeBucketMinutes(span) * 60 * 1000
+  const bucketCount = Math.min(MAX_VOLUME_BUCKETS, Math.floor(span / bucketMs) + 1)
+  // Buckets are aligned to the first entry, so the oldest entry is always on
+  // the chart and the last bucket holds the newest.
+  const startTime = first
+  // A chart over more than a day labels its buckets with the date too —
+  // "09:00" alone repeats once per day.
+  const labelFormat: Intl.DateTimeFormatOptions =
+    span >= 24 * 60 * 60 * 1000
+      ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
+      : { hour: "2-digit", minute: "2-digit", hour12: false }
 
   const buckets: { time: string; info: number; warn: number; error: number; other: number }[] = []
-  const startTime = last - (capped - 1) * bucketMs
-
-  for (let i = 0; i < capped; i++) {
+  for (let i = 0; i < bucketCount; i++) {
     const bucketStart = startTime + i * bucketMs
     buckets.push({
-      time: new Date(bucketStart).toLocaleTimeString(locale, {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: new Date(bucketStart).toLocaleString(locale, labelFormat),
       info: 0,
       warn: 0,
       error: 0,
@@ -116,10 +153,10 @@ function computeVolumeBuckets(
     })
   }
 
-  for (const log of sorted) {
+  for (const log of logs) {
     const ts = new Date(log.timestamp).getTime()
-    const idx = Math.floor((ts - startTime) / bucketMs)
-    if (idx < 0 || idx >= capped) continue
+    const idx = Math.min(Math.floor((ts - startTime) / bucketMs), bucketCount - 1)
+    if (idx < 0) continue
 
     if (log.level === "error" || log.level === "fatal") {
       buckets[idx].error++
@@ -169,11 +206,16 @@ export function LogStatsDashboard({
   logRate = 0,
   nativeLogging,
   onSearchFilter,
+  onModuleFilter,
+  onLevelFilter,
   className,
 }: LogStatsDashboardProps) {
   const t = useTranslations("logging")
   const locale = useLocale()
+  const format = useFormatter()
   const themeColors = useThemeColors()
+  const percent = (ratio: number) =>
+    format.number(ratio, { style: "percent", maximumFractionDigits: 1 })
 
   // Level distribution data
   const levelData = useMemo(() => {
@@ -184,12 +226,14 @@ export function LogStatsDashboard({
     return Object.entries(counts)
       .filter(([, count]) => count > 0)
       .map(([level, count]) => ({
-        name: level,
+        level: level as LogLevel,
+        // The slice label and tooltip print `name`; it was the raw level key.
+        name: t(`levels.${level as LogLevel}`),
         value: count,
         color: themeColors[LEVEL_THEME[level as LogLevel].chartColor],
       }))
       .sort((a, b) => b.value - a.value)
-  }, [logs, themeColors])
+  }, [logs, themeColors, t])
 
   // Module activity data
   const moduleData = useMemo(() => {
@@ -204,15 +248,15 @@ export function LogStatsDashboard({
   }, [logs])
 
   // Volume timeline data
-  const volumeData = useMemo(() => computeVolumeBuckets(logs, 5, locale), [logs, locale])
+  const volumeData = useMemo(() => computeVolumeBuckets(logs, locale), [logs, locale])
   const errorTrendData = useMemo(() => computeErrorTrendData(volumeData), [volumeData])
 
   // Summary stats
   const stats = useMemo(() => {
     const errorCount = logs.filter((l) => l.level === "error" || l.level === "fatal").length
     const warnCount = logs.filter((l) => l.level === "warn").length
-    const errorRate = logs.length > 0 ? ((errorCount / logs.length) * 100).toFixed(1) : "0"
-    const warnRate = logs.length > 0 ? ((warnCount / logs.length) * 100).toFixed(1) : "0"
+    const errorRate = logs.length > 0 ? errorCount / logs.length : 0
+    const warnRate = logs.length > 0 ? warnCount / logs.length : 0
 
     const moduleCounts: Record<string, number> = {}
     const traceIds = new Set<string>()
@@ -224,17 +268,20 @@ export function LogStatsDashboard({
     const uniqueModules = Object.keys(moduleCounts).length
     const uniqueTraces = traceIds.size
 
+    // The unit comes from the message bundle ("3.0 h" / "3.0 小时"); the
+    // number keeps one decimal above an hour so a 25-hour window does not
+    // read as "1 day".
     let timeSpan = ""
     if (logs.length > 0) {
       const sorted = logs.map((l) => new Date(l.timestamp).getTime()).sort((a, b) => a - b)
       const diffMs = sorted[sorted.length - 1] - sorted[0]
       const diffHours = diffMs / (1000 * 60 * 60)
       if (diffHours < 1) {
-        timeSpan = `${Math.round(diffMs / (1000 * 60))}m`
+        timeSpan = t("dashboard.spanMinutes", { value: Math.round(diffMs / (1000 * 60)) })
       } else if (diffHours < 24) {
-        timeSpan = `${diffHours.toFixed(1)}h`
+        timeSpan = t("dashboard.spanHours", { value: diffHours.toFixed(1) })
       } else {
-        timeSpan = `${(diffHours / 24).toFixed(1)}d`
+        timeSpan = t("dashboard.spanDays", { value: (diffHours / 24).toFixed(1) })
       }
     }
 
@@ -269,7 +316,7 @@ export function LogStatsDashboard({
       uniqueTraces,
       errorTrend,
     }
-  }, [logs, volumeData])
+  }, [logs, volumeData, t])
 
   // Top errors: group error-level logs by message prefix
   const topErrors = useMemo(() => {
@@ -307,23 +354,33 @@ export function LogStatsDashboard({
         <StatCard
           icon={Layers}
           label={t("dashboard.totalLogs")}
-          value={logs.length.toLocaleString()}
+          value={format.number(logs.length)}
           color="bg-chart-3/10 text-chart-3"
         />
         <StatCard
           icon={AlertTriangle}
           label={t("dashboard.errorRate")}
-          value={`${stats.errorRate}%`}
-          sub={`${stats.errorCount} ${t("dashboard.errors")}`}
+          value={percent(stats.errorRate)}
+          sub={t("dashboard.errorCount", { count: stats.errorCount })}
           color="bg-destructive/10 text-destructive"
           trend={stats.errorTrend}
+          data-testid="dashboard-stat-errors"
+          onClick={onLevelFilter && stats.errorCount > 0 ? () => onLevelFilter("error") : undefined}
+          actionLabel={t("dashboard.showErrors")}
         />
         <StatCard
           icon={Activity}
           label={t("dashboard.topModule")}
           value={stats.topModule?.[0] || "-"}
-          sub={stats.topModule ? `${stats.topModule[1]} ${t("panel.logs")}` : undefined}
+          sub={stats.topModule ? t("dashboard.logCount", { count: stats.topModule[1] }) : undefined}
           color="bg-success/10 text-success"
+          data-testid="dashboard-stat-top-module"
+          onClick={
+            onModuleFilter && stats.topModule
+              ? () => onModuleFilter(stats.topModule![0])
+              : undefined
+          }
+          actionLabel={t("dashboard.showModule")}
         />
         <StatCard
           icon={Clock}
@@ -334,27 +391,30 @@ export function LogStatsDashboard({
         <StatCard
           icon={Gauge}
           label={t("dashboard.logRate")}
-          value={logRate > 0 ? logRate : "-"}
+          value={logRate > 0 ? format.number(logRate) : "-"}
           sub={logRate > 0 ? t("dashboard.logsPerMinUnit") : undefined}
           color="bg-chart-2/10 text-chart-2"
         />
         <StatCard
           icon={AlertCircle}
           label={t("dashboard.warningRate")}
-          value={`${stats.warnRate}%`}
-          sub={`${stats.warnCount} ${t("dashboard.warnings")}`}
+          value={percent(stats.warnRate)}
+          sub={t("dashboard.warningCount", { count: stats.warnCount })}
           color="bg-warning/10 text-warning"
+          data-testid="dashboard-stat-warnings"
+          onClick={onLevelFilter && stats.warnCount > 0 ? () => onLevelFilter("warn") : undefined}
+          actionLabel={t("dashboard.showWarnings")}
         />
         <StatCard
           icon={Grid3X3}
           label={t("dashboard.uniqueModules")}
-          value={stats.uniqueModules}
+          value={format.number(stats.uniqueModules)}
           color="bg-chart-5/10 text-chart-5"
         />
         <StatCard
           icon={Hash}
           label={t("dashboard.uniqueTraces")}
-          value={stats.uniqueTraces}
+          value={format.number(stats.uniqueTraces)}
           color="bg-chart-1/10 text-chart-1"
         />
       </div>
@@ -364,15 +424,31 @@ export function LogStatsDashboard({
           <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("dashboard.platformBackend")}</p>
-              <p className="font-medium">{nativeLogging.platformLogging.backend}</p>
+              <p className="font-medium">
+                {/* A backend is a product name (OSLog, journald, Event Log)
+                    and is printed as reported; "none" is the one word. */}
+                {nativeLogging.platformLogging.backend === "none"
+                  ? t("dashboard.platformBackendNone")
+                  : nativeLogging.platformLogging.backend}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("dashboard.platformHealth")}</p>
-              <p className="font-medium">{nativeLogging.platformLogging.health}</p>
+              <p className="font-medium">
+                {KNOWN_HEALTH.has(nativeLogging.platformLogging.health)
+                  ? t(
+                      `panel.healthStatus.${nativeLogging.platformLogging.health as "healthy" | "degraded" | "inactive"}`
+                    )
+                  : nativeLogging.platformLogging.health}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("dashboard.platformThreshold")}</p>
-              <p className="font-medium">{nativeLogging.platformLogging.minLevel}</p>
+              <p className="font-medium">
+                {KNOWN_LEVELS.has(nativeLogging.platformLogging.minLevel)
+                  ? t(`levels.${nativeLogging.platformLogging.minLevel}`)
+                  : nativeLogging.platformLogging.minLevel}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("dashboard.platformTargets")}</p>
@@ -384,7 +460,7 @@ export function LogStatsDashboard({
             </div>
             {nativeLogging.platformLogging.error && (
               <div className="space-y-1 sm:col-span-2 xl:col-span-4">
-                <p className="text-xs text-muted-foreground">{t("dashboard.platformHealth")}</p>
+                <p className="text-xs text-muted-foreground">{t("dashboard.platformError")}</p>
                 <p className="text-sm text-destructive">{nativeLogging.platformLogging.error}</p>
               </div>
             )}
@@ -419,9 +495,17 @@ export function LogStatsDashboard({
                     `${String(props.name ?? "")} ${(((props.percent as number) ?? 0) * 100).toFixed(0)}%`
                   }
                   labelLine={false}
+                  onClick={
+                    onLevelFilter
+                      ? (slice: { payload?: { level?: LogLevel } }) => {
+                          if (slice.payload?.level) onLevelFilter(slice.payload.level)
+                        }
+                      : undefined
+                  }
+                  className={cn(onLevelFilter && "cursor-pointer")}
                 >
                   {levelData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
+                    <Cell key={entry.level} fill={entry.color} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -431,6 +515,34 @@ export function LogStatsDashboard({
               </PieChart>
             </ResponsiveContainer>
           </div>
+          {/* The same distribution as rows: exact counts (the slices only
+              carry a percentage), and a click-through that does not need a
+              pointer on a 40px arc. */}
+          <ul className="mt-2 space-y-0.5" data-testid="dashboard-level-legend">
+            {levelData.map((entry) => (
+              <li key={entry.level}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!onLevelFilter}
+                  className="h-7 w-full justify-start gap-2 px-2 text-xs font-normal disabled:opacity-100"
+                  data-testid={`dashboard-level-${entry.level}`}
+                  onClick={() => onLevelFilter?.(entry.level)}
+                >
+                  <span
+                    aria-hidden
+                    className="size-2 shrink-0 rounded-sm"
+                    style={{ backgroundColor: entry.color }}
+                  />
+                  <span className="flex-1 text-left">{entry.name}</span>
+                  <span className="font-mono tabular-nums text-muted-foreground">
+                    {format.number(entry.value)}
+                  </span>
+                </Button>
+              </li>
+            ))}
+          </ul>
         </DashboardSection>
 
         {/* Log Volume Timeline - Area Chart */}
@@ -588,10 +700,47 @@ export function LogStatsDashboard({
                     fill={themeColors["chart-3"]}
                     radius={[0, 4, 4, 0]}
                     name={t("dashboard.logsSeries")}
+                    onClick={
+                      onModuleFilter
+                        ? (bar: { name?: string; payload?: { name?: string } }) => {
+                            const moduleName = bar.payload?.name ?? bar.name
+                            if (moduleName) onModuleFilter(moduleName)
+                          }
+                        : undefined
+                    }
+                    className={cn(onModuleFilter && "cursor-pointer")}
                   />
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            {/* The bars are SVG a keyboard cannot reach. The same ranking as
+                buttons, hidden until focus enters it, so Tab finds the module
+                click-through without the chart printing every count twice. */}
+            {onModuleFilter && (
+              <ul
+                className="sr-only focus-within:not-sr-only focus-within:mt-2 focus-within:space-y-0.5"
+                aria-label={t("dashboard.moduleListLabel")}
+                data-testid="dashboard-module-list"
+              >
+                {moduleData.map((entry) => (
+                  <li key={entry.name}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-full justify-start gap-2 px-2 text-xs font-normal"
+                      data-testid={`dashboard-module-${entry.name}`}
+                      onClick={() => onModuleFilter(entry.name)}
+                    >
+                      <span className="flex-1 truncate text-left font-mono">{entry.name}</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {format.number(entry.count)}
+                      </span>
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </DashboardSection>
         )}
 

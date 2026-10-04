@@ -7,6 +7,7 @@
 export {
   useLogStream,
   useLogModules,
+  createLogSearchMatcher,
   type LogStreamOptions,
   type LogStreamResult,
 } from "./use-log-stream"
@@ -17,6 +18,8 @@ export {
 } from "./use-agent-trace-logs"
 export {
   useTransportHealth,
+  summarizeTransportHealth,
+  type TransportHealthSummaryCounts,
   type UseTransportHealthOptions,
   type UseTransportHealthResult,
 } from "./use-transport-health"

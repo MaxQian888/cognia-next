@@ -24,6 +24,50 @@ const MAX_HISTORY_SAMPLES = 30
 const DEFAULT_OPTIONS: Required<UseTransportHealthOptions> = {
   autoRefresh: true,
   refreshInterval: 3000,
+  enabled: true,
+}
+
+/** What one health chip says: how many tiles are healthy, out of how many. */
+export interface TransportHealthSummaryCounts {
+  /** Tiles whose status is `healthy`. */
+  healthy: number
+  /** Every tile the chip renders: one per transport, plus the native pipeline on Tauri. */
+  total: number
+  /** Whether the native pipeline is a tile at all and reports `degraded`. */
+  nativeNeedsAttention: boolean
+}
+
+/**
+ * The aggregate the log panel's transport chip prints, as a pure function, so
+ * every surface that summarises delivery health counts the same things.
+ *
+ * The `/logs` header pill and the panel chip used to disagree: the pill
+ * counted transports only (5/6) while the chip beside the list also counted
+ * the native pipeline as a tile (6/7), so the same page printed two
+ * denominators for one fact. Both now call this. The native pipeline is a tile
+ * only on Tauri — in a browser it is permanently `inactive` and counting it
+ * would make every web session read "one unhealthy".
+ */
+export function summarizeTransportHealth(
+  healthByTransport: Record<string, TransportHealthSnapshot>,
+  nativeLogging: Pick<NativeLoggingReadiness, "runtime" | "status"> | null | undefined
+): TransportHealthSummaryCounts {
+  let healthy = 0
+  let total = 0
+  for (const health of Object.values(healthByTransport)) {
+    total += 1
+    if (health.status === "healthy") healthy += 1
+  }
+  const nativeIsTile = nativeLogging?.runtime === "tauri"
+  if (nativeIsTile) {
+    total += 1
+    if (nativeLogging.status === "healthy") healthy += 1
+  }
+  return {
+    healthy,
+    total,
+    nativeNeedsAttention: nativeIsTile && nativeLogging.status === "degraded",
+  }
 }
 
 /**
@@ -72,7 +116,7 @@ export function useTransportHealth(
   const [nativeLogging, setNativeLogging] = useState<NativeLoggingReadiness>(
     getNativeLoggingReadiness()
   )
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(opts.enabled !== false)
   const [error, setError] = useState<Error | null>(null)
 
   const lastSnapshotRef = useRef<Record<string, TransportHealthSnapshot>>({})
@@ -110,19 +154,24 @@ export function useTransportHealth(
     }
   }, [])
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load
-    refresh()
-  }, [refresh])
+  // Disabled, the hook reads nothing: a consumer handed a host's shared poll
+  // calls it unconditionally (rules of hooks) and must not start a second one.
+  const enabled = opts.enabled !== false
 
   useEffect(() => {
-    if (!opts.autoRefresh) {
+    if (!enabled) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load
+    refresh()
+  }, [refresh, enabled])
+
+  useEffect(() => {
+    if (!enabled || !opts.autoRefresh) {
       return
     }
 
     const timer = setInterval(refresh, opts.refreshInterval)
     return () => clearInterval(timer)
-  }, [opts.autoRefresh, opts.refreshInterval, refresh])
+  }, [enabled, opts.autoRefresh, opts.refreshInterval, refresh])
 
   return {
     healthByTransport,

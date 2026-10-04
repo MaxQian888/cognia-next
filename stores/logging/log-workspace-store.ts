@@ -25,17 +25,26 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
+import {
+  INCIDENT_CLIENT_STATES,
+  normalizeIncidentClientState,
+  type IncidentClientState,
+} from "@/lib/diagnostic-service/types"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import { useObservabilityStore } from "@/stores/observability/observability-store"
+import type { CrashLogLevelFilter, CrashLogSourceFilter } from "@/types/logging"
 
 /**
  * The channels run local → remote:
  *
- * - `diagnostics` is this machine's crash logs plus the diagnostic snapshot
- *   taken with them. It used to be Settings → Diagnostics → "Crash logs",
- *   which sent the user out of the page named after logs to read the crash
- *   ones; it is a channel here now.
- * - `incidents` is the packaged native crash *reports* awaiting consent.
+ * - `diagnostics` (labelled "Errors") is this machine's error-level logger
+ *   entries — the in-memory recent-error buffer plus stored error/fatal (and
+ *   diagnostic-origin warn) entries — and the native diagnostic snapshot
+ *   taken with them. They are *logged* failures, not process crashes; the id
+ *   stays `diagnostics` because `?channel=diagnostics` links already exist.
+ * - `incidents` (labelled "Crash reports") is the native crash reports this
+ *   device captured — Rust panics and minidumps on the desktop, the crash
+ *   plugin's reports on mobile — with their consent and submission state.
  * - `service` is the diagnostic service's triage console (ADR-0102). It reads
  *   a remote host rather than local state, which is why it is a channel of its
  *   own rather than a filter on `incidents`: those are the crashes this
@@ -55,17 +64,39 @@ export const TRACE_SUB_VIEWS: readonly TraceSubView[] = ["explore", "dashboard"]
 
 export type LogWorkspaceDensity = "compact" | "comfortable" | "spacious"
 export type LogWorkspaceSource = "all" | "desktop" | "mobile"
-export type IncidentStateFilter =
-  | "all"
-  | "detected"
-  | "awaitingConsent"
-  | "queued"
-  | "uploading"
-  | "processing"
-  | "accepted"
-  | "rejected"
-  | "cancelled"
-  | "deleted"
+/**
+ * The Crash reports channel's lifecycle filter, in the service's own
+ * `incident_state` vocabulary (snake_case, `packaged` included). It used to be
+ * a camelCase copy without `packaged`, which no stored state could ever match.
+ */
+export type IncidentStateFilter = "all" | IncidentClientState
+
+export const INCIDENT_STATE_FILTERS: readonly IncidentStateFilter[] = [
+  "all",
+  ...INCIDENT_CLIENT_STATES,
+]
+
+/** Narrow an untrusted value (stale persisted state) to a state filter. */
+export function resolveIncidentStateFilter(raw: unknown): IncidentStateFilter {
+  if (raw === "all") return "all"
+  return normalizeIncidentClientState(raw) ?? "all"
+}
+
+const CRASH_SOURCE_FILTERS: readonly CrashLogSourceFilter[] = [
+  "all",
+  "recent",
+  "persisted",
+  "diagnostic",
+]
+const CRASH_LEVEL_FILTERS: readonly CrashLogLevelFilter[] = [
+  "all",
+  "trace",
+  "debug",
+  "info",
+  "warn",
+  "error",
+  "fatal",
+]
 
 export const LOG_WORKSPACE_VIEWS: readonly LogWorkspaceView[] = [
   "logs",
@@ -75,20 +106,36 @@ export const LOG_WORKSPACE_VIEWS: readonly LogWorkspaceView[] = [
   "service",
 ]
 
+/**
+ * Detail-pane width bounds, shared by every channel with a resizable detail
+ * pane (Errors, Crash reports, Service) so a user who widened one meant "detail
+ * panes are too narrow", not "this one is".
+ */
+export const DEFAULT_DETAIL_WIDTH = 384
+export const DETAIL_WIDTH_MIN = 280
+export const DETAIL_WIDTH_MAX = 640
+
 const DEFAULTS = {
   activeView: "logs" as LogWorkspaceView,
   density: "comfortable" as LogWorkspaceDensity,
-  detailWidth: 384,
+  detailWidth: DEFAULT_DETAIL_WIDTH,
   activeSource: "all" as LogWorkspaceSource,
   incidentStateFilter: "all" as IncidentStateFilter,
   /** The former `receipts` view, demoted to a filter on the incidents channel. */
   receiptsOnly: false,
   traceSubView: "explore" as TraceSubView,
   traceErrorsOnly: false,
+  /**
+   * The Errors channel's filters. They used to be local state in
+   * `useCrashLogs`, so switching to another channel and back silently reset
+   * them. Source and level persist; the search text lives here for the
+   * session only (see `partialize`) — a query restored days later is a list
+   * that looks empty for no visible reason.
+   */
+  crashSource: "all" as CrashLogSourceFilter,
+  crashLevel: "all" as CrashLogLevelFilter,
+  crashSearch: "",
 }
-
-export const DETAIL_WIDTH_MIN = 280
-export const DETAIL_WIDTH_MAX = 640
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
@@ -125,6 +172,9 @@ interface LogWorkspaceState {
   receiptsOnly: boolean
   traceSubView: TraceSubView
   traceErrorsOnly: boolean
+  crashSource: CrashLogSourceFilter
+  crashLevel: CrashLogLevelFilter
+  crashSearch: string
   setActiveView: (view: LogWorkspaceView) => void
   setDensity: (density: LogWorkspaceDensity) => void
   setDetailWidth: (width: number) => void
@@ -133,6 +183,9 @@ interface LogWorkspaceState {
   setReceiptsOnly: (receiptsOnly: boolean) => void
   setTraceSubView: (subView: TraceSubView) => void
   setTraceErrorsOnly: (errorsOnly: boolean) => void
+  setCrashSource: (source: CrashLogSourceFilter) => void
+  setCrashLevel: (level: CrashLogLevelFilter) => void
+  setCrashSearch: (search: string) => void
   resetWorkspace: () => void
 }
 
@@ -171,10 +224,10 @@ export function migrateLogWorkspace(persisted: unknown): Partial<LogWorkspaceSta
     )
       ? (raw.activeSource as LogWorkspaceSource)
       : DEFAULTS.activeSource,
-    incidentStateFilter:
-      typeof raw.incidentStateFilter === "string"
-        ? (raw.incidentStateFilter as IncidentStateFilter)
-        : DEFAULTS.incidentStateFilter,
+    // v3 persisted the camelCase `awaitingConsent`; v4 speaks the service's
+    // `awaiting_consent`. Anything else unrecognized falls back to `all`
+    // rather than to a filter nothing can match.
+    incidentStateFilter: resolveIncidentStateFilter(raw.incidentStateFilter),
     receiptsOnly: legacy?.receiptsOnly ?? Boolean(raw.receiptsOnly),
     // v2 persisted `traceWindow` ("today" | "week" | "month" | "all"). The
     // channel now shares the dashboard's Grafana-style range, which lives in
@@ -183,6 +236,12 @@ export function migrateLogWorkspace(persisted: unknown): Partial<LogWorkspaceSta
     // sliding preset.
     traceSubView: resolveTraceSubView(raw.traceSubView as string | undefined),
     traceErrorsOnly: Boolean(raw.traceErrorsOnly),
+    crashSource: CRASH_SOURCE_FILTERS.includes(raw.crashSource as CrashLogSourceFilter)
+      ? (raw.crashSource as CrashLogSourceFilter)
+      : DEFAULTS.crashSource,
+    crashLevel: CRASH_LEVEL_FILTERS.includes(raw.crashLevel as CrashLogLevelFilter)
+      ? (raw.crashLevel as CrashLogLevelFilter)
+      : DEFAULTS.crashLevel,
   }
 }
 
@@ -199,6 +258,9 @@ export const useLogWorkspaceStore = create<LogWorkspaceState>()(
       setReceiptsOnly: (receiptsOnly) => set({ receiptsOnly }),
       setTraceSubView: (traceSubView) => set({ traceSubView }),
       setTraceErrorsOnly: (traceErrorsOnly) => set({ traceErrorsOnly }),
+      setCrashSource: (crashSource) => set({ crashSource }),
+      setCrashLevel: (crashLevel) => set({ crashLevel }),
+      setCrashSearch: (crashSearch) => set({ crashSearch }),
       resetWorkspace: () => {
         set(DEFAULTS)
         // The Traces channel is only half here. Its range, variable filters,
@@ -212,13 +274,17 @@ export const useLogWorkspaceStore = create<LogWorkspaceState>()(
     }),
     {
       name: "cognia-log-workspace-v1",
-      version: 3,
+      version: 4,
       storage: persistLocalStorage(),
+      // Everything but the Errors channel's search text: see `crashSearch`.
+      partialize: ({ crashSearch: _crashSearch, ...persisted }) => persisted,
       // The v1 blob carries `activeView: "health"` plus `navigationWidth` /
       // `navigationCollapsed` for a rail that no longer exists. Without this
       // every existing install would rehydrate into a channel that renders
       // nothing. v2 additionally carries `traceWindow`, which the shared
       // Grafana-style range replaced — `migrateLogWorkspace` simply drops it.
+      // v3 carries the camelCase `awaitingConsent` state filter, which v4
+      // rewrites onto the service vocabulary.
       migrate: (persisted) => migrateLogWorkspace(persisted) as LogWorkspaceState,
     }
   )

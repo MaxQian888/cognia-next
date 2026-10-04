@@ -6,7 +6,8 @@
  * Extracted from log-panel.tsx — 3-layer toolbar:
  *   Layer 1: Primary bar (view mode, search + regex, filters toggle, refresh, more)
  *   Layer 2: Level tabs (All, Error, Warn, Info, Debug, Trace, Bookmarked) + `statsSlot`
- *   Layer 3: Advanced filters — collapsible (module, source, session, time, presets, focus chips)
+ *   Layer 3: Advanced filters — collapsible (module, source, session, time, presets)
+ *   Facet chips: every active facet, with a "Clear all", directly above the list
  *
  * Layer 1 used to be eight controls wide, five of them unlabelled icon
  * buttons, two of which had no accessible name at all (the view-mode toggles
@@ -17,18 +18,22 @@
  *     is visible;
  *   - the keyboard-shortcuts button was deleted — it opened the same dialog as
  *     the More menu's "Keyboard shortcuts" item, which is still there;
- *   - auto-refresh got a real menu item. It was reachable only by shift-click
- *     or right-click on the refresh button, i.e. only if you had read the
- *     tooltip. The accelerators still work.
+ *   - live follow got a button of its own beside refresh. It was reachable
+ *     only by shift-click or right-click on the refresh button (whose
+ *     accessible name then contradicted what a plain click did), and later by
+ *     a More-menu item; now each control does exactly what it is named.
+ *
+ * Transport health (`healthSlot`) sits beside Live / Refresh: whether entries
+ * are being delivered is a property of the live stream those two control.
  *
  * Layer 2 absorbed the stats/pagination bar (`statsSlot`), which had been a
  * fourth full-width band restating the same per-level counts as the tabs.
  */
 
-import { Fragment, memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react"
-import { useTranslations } from "next-intl"
+import { Fragment, memo, useCallback, useId, useRef, useState, type ReactNode } from "react"
+import { useFormatter, useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { format } from "date-fns"
+import { endOfDay, startOfDay } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import {
   Search,
@@ -60,6 +65,7 @@ import {
   Check,
   Link as LinkIcon,
   Rows3,
+  FilterX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -70,7 +76,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -89,15 +95,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Badge } from "@/components/ui/badge"
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { LogLevel } from "@cognia/logging"
 import type { LogFilterPreset, PresetTimeRange } from "@/types/logging"
@@ -109,7 +115,12 @@ export interface LogPanelToolbarProps {
   // View mode
   viewMode: ViewMode
   setViewMode: (v: ViewMode | ((prev: ViewMode) => ViewMode)) => void
-  includeAgentTrace: boolean
+  /**
+   * Whether the trace view has anything to group. It used to follow
+   * `includeAgentTrace` alone, so a panel with agent spans switched off hid
+   * the view even while every row carried a trace id.
+   */
+  traceViewAvailable: boolean
 
   // Search
   searchQuery: string
@@ -131,20 +142,19 @@ export interface LogPanelToolbarProps {
   timeRange: PresetTimeRange
   setTimeRange: (v: PresetTimeRange) => void
 
-  // Stats
+  // Stats — faceted: each level's count is what that tab would show with every
+  // other active filter applied, so a badge and the rows under it agree.
   stats: { total: number; byLevel: Record<LogLevel, number> }
 
   // Presets
   presets: LogFilterPreset[]
   activePresetId: string
   handlePresetChange: (id: string) => void
-  saveCurrentPreset: () => void
+  saveCurrentPreset: (name?: string) => void
   removeActivePreset: () => void
   EMPTY_PRESET_VALUE: string
 
   // Actions
-  highSeverityOnly: boolean
-  setHighSeverityOnly: (v: boolean | ((prev: boolean) => boolean)) => void
   traceFocusId: string | null
   setTraceFocusId: (v: string | null) => void
   autoRefresh: boolean
@@ -154,16 +164,25 @@ export interface LogPanelToolbarProps {
   clearLogs: () => void
   showDetailPanel: boolean
   setShowDetailPanel: (v: boolean) => void
+  /** Whether there is a selected entry the detail pane could show. The menu
+   * item that toggles the pane used to be live with nothing selected, and
+   * "opened" a pane that the layout then refused to render. */
+  canShowDetail?: boolean
+  /** Resets every facet (level, module, source, session, time, search, trace,
+   * transport, bookmarks) in one go — the chip row's "Clear all". */
+  onClearAllFilters?: () => void
 
   // Scroll
   autoScroll: boolean
   setAutoScroll: (v: boolean) => void
   scrollToTop: () => void
   scrollToBottom: () => void
-
-  // Session focus
-  clearSessionFocus: () => void
-  hasSessionFocus: boolean
+  /** Whether there is a list to scroll (list view, at least one row). The
+   * scroll items are hidden otherwise rather than offered as no-ops. */
+  scrollActionsAvailable?: boolean
+  /** Whether auto-scroll can act: it follows new entries, so only while live
+   * follow is on and the list is showing. */
+  autoScrollAvailable?: boolean
 
   // New props
   bookmarkFilterActive: boolean
@@ -183,8 +202,6 @@ export interface LogPanelToolbarProps {
   // Custom time range (opens a Calendar popover when "Custom..." picked).
   customTimeRange: { start: Date; end: Date } | null
   setCustomTimeRange: (v: { start: Date; end: Date } | null) => void
-  /** When true, the toolbar hides the preset Select so the host page can own it. */
-  hideToolbarPresets?: boolean
 
   // Row density controls
   density: Density
@@ -197,10 +214,169 @@ export interface LogPanelToolbarProps {
    * now. `null` when the host hides stats.
    */
   statsSlot?: ReactNode
+  /** Delivery health (the transport chip), beside Live / Refresh in row one.
+   * `null` when the host hides stats. */
+  healthSlot?: ReactNode
 }
+
+/** How the custom-range chip prints each end. */
+const CUSTOM_RANGE_FORMAT = {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+} as const
+
+/** The time-range item that opens the calendar (see its `onValueChange`). */
+const CUSTOM_RANGE_EDIT = "custom:edit"
 
 // Levels to show as tabs (fatal is merged into error)
 const TAB_LEVELS: Array<LogLevel> = ["error", "warn", "info", "debug", "trace"]
+
+/** The time-range chip printed the raw preset key ("24h") next to chips that
+ * all read in the user's language; it reuses the select's own labels now. */
+const TIME_RANGE_LABEL_KEYS: Record<
+  Exclude<PresetTimeRange, "all">,
+  | "panel.timeRange15m"
+  | "panel.timeRange1h"
+  | "panel.timeRange6h"
+  | "panel.timeRange24h"
+  | "panel.timeRange7d"
+> = {
+  "15m": "panel.timeRange15m",
+  "1h": "panel.timeRange1h",
+  "6h": "panel.timeRange6h",
+  "24h": "panel.timeRange24h",
+  "7d": "panel.timeRange7d",
+}
+
+/** One active facet: optional icon, optional muted label, the value, and a ×. */
+function FacetChip({
+  testId,
+  icon,
+  label,
+  value,
+  title,
+  mono = false,
+  clearLabel,
+  onClear,
+}: {
+  testId: string
+  icon?: ReactNode
+  label?: string
+  value: string
+  title?: string
+  mono?: boolean
+  clearLabel: string
+  onClear: () => void
+}) {
+  return (
+    <Badge
+      variant="secondary"
+      data-testid={testId}
+      className="h-6 gap-1 pl-2 pr-1 text-xs font-normal"
+      title={title}
+    >
+      {icon}
+      {label ? <span className="text-muted-foreground">{label}</span> : null}
+      <span className={cn("max-w-[160px] truncate", mono && "font-mono")}>{value}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        onClick={onClear}
+        className="ml-0.5 size-4 rounded p-0.5"
+        aria-label={clearLabel}
+      >
+        <X className="h-3 w-3" />
+      </Button>
+    </Badge>
+  )
+}
+
+/**
+ * Save-as-preset with a name. The button used to save immediately as
+ * "Preset 1", "Preset 2" … — English on every locale, with no way to rename,
+ * so a list of three presets could not be told apart without applying each.
+ */
+function SavePresetButton({
+  defaultName,
+  onSave,
+}: {
+  defaultName: string
+  onSave: (name: string) => void
+}) {
+  const t = useTranslations("logging")
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(defaultName)
+
+  const commit = () => {
+    onSave(name.trim() || defaultName)
+    setOpen(false)
+  }
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setName(defaultName)
+        setOpen(next)
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-2"
+              aria-label={t("panel.savePreset")}
+              data-testid="log-panel-save-preset"
+            >
+              <BookmarkPlus className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t("panel.savePreset")}</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        align="start"
+        className="w-64 p-3"
+        data-testid="log-panel-save-preset-popover"
+      >
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            commit()
+          }}
+        >
+          <label htmlFor="log-panel-preset-name" className="text-xs font-medium">
+            {t("panel.presetNameLabel")}
+          </label>
+          <Input
+            id="log-panel-preset-name"
+            autoFocus
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="h-8"
+            data-testid="log-panel-preset-name"
+          />
+          <p className="text-[11px] text-muted-foreground">{t("panel.presetNameHint")}</p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              {t("panel.presetCancel")}
+            </Button>
+            <Button type="submit" size="sm" data-testid="log-panel-save-preset-confirm">
+              {t("panel.savePreset")}
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 /** The view-mode segment, as data — three near-identical Tooltip/Button pairs
  * before, which is how two of them ended up without an `aria-label`. */
@@ -217,7 +393,7 @@ const VIEW_MODES: ReadonlyArray<{
 function LogPanelToolbarImpl({
   viewMode,
   setViewMode,
-  includeAgentTrace,
+  traceViewAvailable,
   searchQuery,
   setSearchQuery,
   useRegex,
@@ -241,8 +417,6 @@ function LogPanelToolbarImpl({
   saveCurrentPreset,
   removeActivePreset,
   EMPTY_PRESET_VALUE,
-  highSeverityOnly,
-  setHighSeverityOnly,
   traceFocusId,
   setTraceFocusId,
   autoRefresh,
@@ -252,12 +426,14 @@ function LogPanelToolbarImpl({
   clearLogs,
   showDetailPanel,
   setShowDetailPanel,
+  canShowDetail = true,
+  onClearAllFilters,
   autoScroll,
   setAutoScroll,
   scrollToTop,
   scrollToBottom,
-  clearSessionFocus,
-  hasSessionFocus,
+  scrollActionsAvailable = true,
+  autoScrollAvailable = true,
   bookmarkFilterActive,
   setBookmarkFilterActive,
   bookmarkedCount,
@@ -273,14 +449,16 @@ function LogPanelToolbarImpl({
   setDiagnosticTransportFilter,
   customTimeRange,
   setCustomTimeRange,
-  hideToolbarPresets = false,
   density,
   setDensity,
   statsSlot = null,
+  healthSlot = null,
 }: LogPanelToolbarProps) {
   const t = useTranslations("logging")
+  const format = useFormatter()
   const [showSearchHistory, setShowSearchHistory] = useState(false)
   const [customRangeOpen, setCustomRangeOpen] = useState(false)
+  const openingCustomRangeRef = useRef(false)
   const handleCopyShareUrl = useCallback(async () => {
     if (typeof window === "undefined") return
     const url = window.location.href
@@ -308,20 +486,28 @@ function LogPanelToolbarImpl({
     customTimeRange ? { from: customTimeRange.start, to: customTimeRange.end } : undefined
   )
 
-  // Determine if any advanced filter is active
-  const hasActiveAdvancedFilters =
-    moduleFilter !== "all" ||
-    sourceFilter !== "all" ||
-    sessionFilter.trim() !== "" ||
-    timeRange !== "all" ||
-    customTimeRange !== null ||
-    activePresetId !== EMPTY_PRESET_VALUE ||
-    traceFocusId !== null ||
-    hasSessionFocus ||
-    diagnosticTransportFilter !== null
+  /** Facets the chip row renders — one per chip, so "Clear all" only shows
+   * when it would clear more than the single chip's own ×. */
+  const activeFacetCount = [
+    sourceFilter !== "all",
+    sessionFilter.trim() !== "",
+    moduleFilter !== "all",
+    timeRange !== "all" && customTimeRange === null,
+    customTimeRange !== null,
+    traceFocusId !== null,
+    diagnosticTransportFilter !== null,
+  ].filter(Boolean).length
 
+  // Determine if any advanced filter is active
+  const hasActiveAdvancedFilters = activeFacetCount > 0 || activePresetId !== EMPTY_PRESET_VALUE
+
+  // The app locale's month names and order; `date-fns/format` printed
+  // "Jan 5 09:00" on every locale.
   const customRangeLabel = customTimeRange
-    ? `${format(customTimeRange.start, "MMM d HH:mm")} → ${format(customTimeRange.end, "MMM d HH:mm")}`
+    ? t("panel.customTimeRangeValue", {
+        start: format.dateTime(customTimeRange.start, CUSTOM_RANGE_FORMAT),
+        end: format.dateTime(customTimeRange.end, CUSTOM_RANGE_FORMAT),
+      })
     : null
 
   const errorFatalCount = (stats.byLevel["error"] || 0) + (stats.byLevel["fatal" as LogLevel] || 0)
@@ -365,7 +551,11 @@ function LogPanelToolbarImpl({
           role="group"
           aria-label={t("panel.viewModeGroup")}
         >
-          {VIEW_MODES.filter((mode) => mode.value !== "trace" || includeAgentTrace).map((mode) => {
+          {VIEW_MODES.filter(
+            // The active view always keeps its button, so a deep link to the
+            // trace view still shows which view this is.
+            (mode) => mode.value !== "trace" || traceViewAvailable || viewMode === "trace"
+          ).map((mode) => {
             const Icon = mode.icon
             const label = t(mode.labelKey)
             return (
@@ -414,38 +604,58 @@ function LogPanelToolbarImpl({
           </TooltipContent>
         </Tooltip>
 
-        {/* Refresh button */}
+        {/* Live follow and refresh are two controls. They used to be one
+            button whose plain click refreshed while its accessible name — with
+            follow on — said "Disable auto-refresh"; turning follow on or off
+            took a shift-click, a right-click, or a trip into the More menu. */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant={autoRefresh ? "default" : "outline"}
               size="sm"
-              className="h-8 px-2 shrink-0"
-              aria-label={autoRefresh ? t("panel.disableAutoRefresh") : t("panel.refresh")}
-              data-testid="log-panel-refresh"
-              onClick={(e) => {
-                if (e.shiftKey) {
-                  setAutoRefresh(!autoRefresh)
-                } else {
-                  refresh()
-                }
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                setAutoRefresh(!autoRefresh)
-              }}
+              className="h-8 shrink-0 gap-1.5 px-2"
+              aria-pressed={autoRefresh}
+              aria-label={autoRefresh ? t("panel.liveOnAria") : t("panel.liveOffAria")}
+              data-testid="log-panel-auto-refresh-toggle"
+              onClick={() => setAutoRefresh(!autoRefresh)}
             >
-              <RefreshCw className={cn("h-4 w-4", autoRefresh && "motion-safe:animate-spin")} />
+              {autoRefresh ? (
+                <span aria-hidden className="relative flex size-2">
+                  <span className="absolute inline-flex size-full rounded-full bg-current opacity-60 motion-safe:animate-ping" />
+                  <span className="relative inline-flex size-2 rounded-full bg-current" />
+                </span>
+              ) : (
+                <Play className="h-3.5 w-3.5" aria-hidden />
+              )}
+              <span className="hidden text-xs sm:inline">{t("panel.live")}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {autoRefresh ? t("panel.disableAutoRefresh") : t("panel.refresh")}
-            <span className="block text-muted-foreground text-[10px]">
-              {t("panel.shiftClickPrefix")}{" "}
-              {autoRefresh ? t("panel.disableAutoRefresh") : t("panel.enableAutoRefresh")}
-            </span>
+            {autoRefresh ? t("panel.disableAutoRefresh") : t("panel.enableAutoRefresh")}
           </TooltipContent>
         </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-2 shrink-0"
+              aria-label={t("panel.refresh")}
+              data-testid="log-panel-refresh"
+              onClick={() => refresh()}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("panel.refresh")}</TooltipContent>
+        </Tooltip>
+
+        {healthSlot ? (
+          <div className="flex shrink-0 items-center" data-testid="log-panel-health-slot">
+            {healthSlot}
+          </div>
+        ) : null}
 
         {/* More actions dropdown */}
         <DropdownMenu>
@@ -490,51 +700,67 @@ function LogPanelToolbarImpl({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => clearLogs()}>
-                <Trash2 className="h-4 w-4 mr-2" />
-                {t("panel.clear")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setShowDetailPanel(!showDetailPanel)}>
+              <DropdownMenuItem
+                data-testid="log-panel-toggle-detail"
+                disabled={!showDetailPanel && !canShowDetail}
+                onClick={() => setShowDetailPanel(!showDetailPanel)}
+              >
                 <PanelRightClose className="h-4 w-4 mr-2" />
                 {showDetailPanel ? t("panel.closeDetails") : t("panel.openDetailsPanel")}
               </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
               <DropdownMenuItem
-                data-testid="log-panel-auto-refresh-toggle"
-                onClick={() => setAutoRefresh(!autoRefresh)}
+                variant="destructive"
+                data-testid="log-panel-clear"
+                onClick={() => clearLogs()}
               >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                <span className="flex-1">{t("panel.autoRefresh")}</span>
-                {autoRefresh && <Check className="h-3.5 w-3.5" />}
+                <Trash2 className="h-4 w-4 mr-2" />
+                {t("panel.clear")}
               </DropdownMenuItem>
             </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t("panel.scrollMenuLabel")}</DropdownMenuLabel>
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={scrollToTop}>
-                <ChevronsUp className="h-4 w-4 mr-2" />
-                {t("panel.scrollToTop")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setAutoScroll(!autoScroll)}>
-                {autoScroll ? (
-                  <>
-                    <Pause className="h-4 w-4 mr-2" />
-                    {t("panel.pauseAutoScroll")}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4 mr-2" />
-                    {t("panel.resumeAutoScroll")}
-                  </>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={scrollToBottom}>
-                <ChevronsDown className="h-4 w-4 mr-2" />
-                {t("panel.scrollToBottom")}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
+            {/* Scroll items only where they can act: no list (dashboard,
+                trace view, an empty result) means nothing to scroll, and
+                auto-scroll follows new entries, which only arrive live. */}
+            {scrollActionsAvailable || autoScrollAvailable ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t("panel.scrollMenuLabel")}</DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  {scrollActionsAvailable ? (
+                    <DropdownMenuItem onClick={scrollToTop} data-testid="log-panel-scroll-top">
+                      <ChevronsUp className="h-4 w-4 mr-2" />
+                      {t("panel.scrollToTop")}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {autoScrollAvailable ? (
+                    <DropdownMenuItem
+                      onClick={() => setAutoScroll(!autoScroll)}
+                      data-testid="log-panel-auto-scroll"
+                    >
+                      {autoScroll ? (
+                        <>
+                          <Pause className="h-4 w-4 mr-2" />
+                          {t("panel.pauseAutoScroll")}
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-4 w-4 mr-2" />
+                          {t("panel.resumeAutoScroll")}
+                        </>
+                      )}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {scrollActionsAvailable ? (
+                    <DropdownMenuItem
+                      onClick={scrollToBottom}
+                      data-testid="log-panel-scroll-bottom"
+                    >
+                      <ChevronsDown className="h-4 w-4 mr-2" />
+                      {t("panel.scrollToBottom")}
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuGroup>
+              </>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuLabel>{t("panel.densityMenuLabel")}</DropdownMenuLabel>
             <DropdownMenuGroup>
@@ -562,168 +788,6 @@ function LogPanelToolbarImpl({
         </DropdownMenu>
       </div>
 
-      {/* ── Facet chips — always visible when any facet is active ── */}
-      {(sourceFilter !== "all" ||
-        sessionFilter.trim() !== "" ||
-        traceFocusId ||
-        hasSessionFocus ||
-        diagnosticTransportFilter ||
-        moduleFilter !== "all" ||
-        timeRange !== "all" ||
-        customTimeRange !== null) && (
-        <div
-          data-testid="log-panel-facet-chip-row"
-          className="flex flex-wrap items-center gap-1.5 px-2 pb-2 border-t border-border/40"
-        >
-          {sourceFilter !== "all" && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-source"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <span className="text-muted-foreground">{t("panel.filterChip.sourceLabel")}</span>
-              <span>{t(`panel.sources.${sourceFilter}`)}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setSourceFilter("all")}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.filterChip.clearSource", { value: sourceFilter })}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {sessionFilter.trim() !== "" && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-session"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <span className="text-muted-foreground">{t("panel.filterChip.sessionLabel")}</span>
-              <span className="font-mono truncate max-w-[120px]">{sessionFilter}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setSessionFilter("")}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.filterChip.clearSession")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {moduleFilter !== "all" && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-module"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <span className="text-muted-foreground">{t("panel.filterChip.moduleLabel")}</span>
-              <span className="truncate max-w-[140px]">
-                {moduleFilter === AGENT_TRACE_MODULE ? t("panel.agentTraceModule") : moduleFilter}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setModuleFilter("all")}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.filterChip.clearModule")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {timeRange !== "all" && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-time"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <CalendarIcon className="h-3 w-3" />
-              <span>{timeRange}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setTimeRange("all")}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.filterChip.clearTimeRange")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {customRangeLabel && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-custom-time"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <CalendarRange className="h-3 w-3" />
-              <span className="text-muted-foreground">{t("panel.customTimeRangeChipPrefix")}</span>
-              <span>{customRangeLabel}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => {
-                  setCustomTimeRange(null)
-                  setPendingRange(undefined)
-                }}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.customTimeRangeClear")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {traceFocusId && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-trace"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <Crosshair className="h-3 w-3" />
-              <span>{t("panel.filterChip.traceLabel")}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setTraceFocusId(null)}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.filterChip.clearTrace")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-          {diagnosticTransportFilter && (
-            <Badge
-              variant="secondary"
-              data-testid="facet-chip-transport"
-              className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
-            >
-              <span className="text-muted-foreground">{t("panel.filterChip.transportLabel")}</span>
-              <span>{diagnosticTransportFilter}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setDiagnosticTransportFilter(null)}
-                className="ml-0.5 size-4 rounded p-0.5"
-                aria-label={t("panel.filterChip.clearTransport")}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </Badge>
-          )}
-        </div>
-      )}
-
       {/* ── Layer 2: Level filters + stats/pagination ──
           One row, two halves. The filters size to their content (`flex-auto`),
           so when both halves do not fit the row wraps and the stats take the
@@ -733,8 +797,12 @@ function LogPanelToolbarImpl({
           showing "All" and nothing else, so Error/Warning/Info could not be
           reached until the stats text happened to get longer again. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2">
+        {/* Below `sm` the tabs scroll sideways; the trailing edge fades so a
+            phone shows there is more than "All · Error · Warning" — the cut
+            used to fall cleanly between two buttons and read as the end. */}
         <div
-          className="flex min-w-0 flex-auto items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 flex-auto items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-sm:pr-6 max-sm:[mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]"
+          data-edge-fade="true"
           role="group"
           data-testid="log-panel-level-filters"
           aria-label={t("panel.levelFilterGroup")}
@@ -744,9 +812,10 @@ function LogPanelToolbarImpl({
             variant={levelFilter === "all" && !bookmarkFilterActive ? "default" : "ghost"}
             size="sm"
             className="h-7 px-2 shrink-0 gap-1 text-xs"
+            aria-pressed={levelFilter === "all" && !bookmarkFilterActive}
+            data-testid="log-panel-level-all"
             onClick={() => {
               setLevelFilter("all")
-              setHighSeverityOnly(false)
               setBookmarkFilterActive(false)
             }}
           >
@@ -768,14 +837,12 @@ function LogPanelToolbarImpl({
                 variant={isActive ? "default" : "ghost"}
                 size="sm"
                 className="h-7 px-2 shrink-0 gap-1 text-xs capitalize"
-                aria-pressed={level === "error" ? highSeverityOnly : undefined}
+                aria-pressed={isActive}
+                data-testid={`log-panel-level-${level}`}
                 onClick={() => {
+                  // The Error tab is error + fatal by itself; there is no
+                  // separate high-severity flag to keep in step any more.
                   setLevelFilter(level)
-                  if (level === "error") {
-                    setHighSeverityOnly(true)
-                  } else {
-                    setHighSeverityOnly(false)
-                  }
                   setBookmarkFilterActive(false)
                 }}
               >
@@ -796,6 +863,8 @@ function LogPanelToolbarImpl({
             variant={bookmarkFilterActive ? "default" : "ghost"}
             size="sm"
             className="h-7 px-2 shrink-0 gap-1 text-xs"
+            aria-pressed={bookmarkFilterActive}
+            data-testid="log-panel-level-bookmarked"
             onClick={() => {
               if (bookmarkFilterActive) {
                 setBookmarkFilterActive(false)
@@ -831,7 +900,11 @@ function LogPanelToolbarImpl({
         >
           {/* Module selector */}
           <Select value={moduleFilter} onValueChange={setModuleFilter}>
-            <SelectTrigger className="h-8 w-full sm:w-[140px]">
+            <SelectTrigger
+              className="h-8 w-full sm:w-[140px]"
+              aria-label={t("panel.modulePlaceholder")}
+              data-testid="log-panel-module-trigger"
+            >
               <SelectValue placeholder={t("panel.modulePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
@@ -851,7 +924,11 @@ function LogPanelToolbarImpl({
             value={sourceFilter}
             onValueChange={(value) => setSourceFilter(value as PanelSource | "all")}
           >
-            <SelectTrigger className="h-8 w-full sm:w-[130px]">
+            <SelectTrigger
+              className="h-8 w-full sm:w-[130px]"
+              aria-label={t("panel.sourceFilterLabel")}
+              data-testid="log-panel-source-trigger"
+            >
               <SelectValue placeholder={t("panel.allSources")} />
             </SelectTrigger>
             <SelectContent>
@@ -870,63 +947,79 @@ function LogPanelToolbarImpl({
           <InputGroup className="h-8 w-full sm:w-[180px]">
             <InputGroupInput
               placeholder={t("panel.sessionPlaceholder")}
+              aria-label={t("panel.sessionPlaceholder")}
               value={sessionFilter}
               onChange={(e) => setSessionFilter(e.target.value)}
             />
           </InputGroup>
 
-          {/* Time range selector — picking "custom" opens the calendar popover */}
-          <Select
-            value={customTimeRange ? "custom" : timeRange}
-            onValueChange={(v) => {
-              if (v === "custom") {
-                setPendingRange(
-                  customTimeRange
-                    ? { from: customTimeRange.start, to: customTimeRange.end }
-                    : undefined
-                )
-                setCustomRangeOpen(true)
-                return
-              }
-              setCustomTimeRange(null)
-              setTimeRange(v as PresetTimeRange)
-            }}
-          >
-            <SelectTrigger
-              className="h-8 w-full sm:w-[120px]"
-              data-testid="log-panel-time-range-trigger"
-            >
-              <CalendarIcon className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              <SelectValue placeholder={t("panel.timePlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">{t("panel.timeRangeAll")}</SelectItem>
-                <SelectItem value="15m">{t("panel.timeRange15m")}</SelectItem>
-                <SelectItem value="1h">{t("panel.timeRange1h")}</SelectItem>
-                <SelectItem value="6h">{t("panel.timeRange6h")}</SelectItem>
-                <SelectItem value="24h">{t("panel.timeRange24h")}</SelectItem>
-                <SelectItem value="7d">{t("panel.timeRange7d")}</SelectItem>
-                <SelectItem value="custom" data-testid="log-panel-time-range-custom">
-                  {t("panel.customTimeRange")}
-                </SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-
-          {/* Custom range popover — also reachable directly via this trigger */}
+          {/* Time range — one control. Picking "Custom…" opens the calendar
+              anchored to this select; there used to be a second calendar
+              button beside it doing the same thing. */}
           <Popover open={customRangeOpen} onOpenChange={setCustomRangeOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant={customTimeRange ? "default" : "outline"}
-                size="sm"
-                className="h-8 px-2"
-                data-testid="log-panel-custom-range-trigger"
-                aria-label={t("panel.customTimeRangePickerLabel")}
-              >
-                <CalendarRange className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
+            <PopoverAnchor asChild>
+              <div className="w-full sm:w-auto">
+                <Select
+                  value={customTimeRange ? "custom" : timeRange}
+                  onValueChange={(v) => {
+                    // "Custom…" is an action, not a value: it opens the calendar
+                    // whether or not a range is already set (selecting the current
+                    // value fires nothing, so it could not have been the value).
+                    if (v === CUSTOM_RANGE_EDIT) {
+                      setPendingRange(
+                        customTimeRange
+                          ? { from: customTimeRange.start, to: customTimeRange.end }
+                          : undefined
+                      )
+                      // Open once the select has finished closing: it hands focus
+                      // back to its trigger as it goes, and a popover already open
+                      // reads that as focus moving outside and dismisses itself.
+                      openingCustomRangeRef.current = true
+                      setTimeout(() => setCustomRangeOpen(true), 0)
+                      return
+                    }
+                    setCustomTimeRange(null)
+                    setTimeRange(v as PresetTimeRange)
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-8 w-full sm:w-[120px]"
+                    aria-label={t("panel.timePlaceholder")}
+                    data-testid="log-panel-time-range-trigger"
+                  >
+                    <CalendarIcon className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                    <SelectValue placeholder={t("panel.timePlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent
+                    onCloseAutoFocus={(event) => {
+                      // Leave focus for the calendar that is about to open.
+                      if (openingCustomRangeRef.current) {
+                        openingCustomRangeRef.current = false
+                        event.preventDefault()
+                      }
+                    }}
+                  >
+                    <SelectGroup>
+                      <SelectItem value="all">{t("panel.timeRangeAll")}</SelectItem>
+                      <SelectItem value="15m">{t("panel.timeRange15m")}</SelectItem>
+                      <SelectItem value="1h">{t("panel.timeRange1h")}</SelectItem>
+                      <SelectItem value="6h">{t("panel.timeRange6h")}</SelectItem>
+                      <SelectItem value="24h">{t("panel.timeRange24h")}</SelectItem>
+                      <SelectItem value="7d">{t("panel.timeRange7d")}</SelectItem>
+                      {customTimeRange ? (
+                        <SelectItem value="custom">{t("panel.customTimeRangeActive")}</SelectItem>
+                      ) : null}
+                      <SelectItem
+                        value={CUSTOM_RANGE_EDIT}
+                        data-testid="log-panel-time-range-custom"
+                      >
+                        {t("panel.customTimeRange")}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </PopoverAnchor>
             <PopoverContent
               align="start"
               className="w-auto p-0"
@@ -959,7 +1052,15 @@ function LogPanelToolbarImpl({
                   disabled={!pendingRange?.from || !pendingRange?.to}
                   onClick={() => {
                     if (pendingRange?.from && pendingRange?.to) {
-                      setCustomTimeRange({ start: pendingRange.from, end: pendingRange.to })
+                      // The calendar hands back midnights. Taken literally the
+                      // range ended at 00:00 of its last day, so picking a
+                      // single day matched nothing and a week lost its final
+                      // day. Days are whole here; the timeline brush is the
+                      // tool for sub-day ranges.
+                      setCustomTimeRange({
+                        start: startOfDay(pendingRange.from),
+                        end: endOfDay(pendingRange.to),
+                      })
                       setTimeRange("all")
                       setCustomRangeOpen(false)
                     }
@@ -971,100 +1072,148 @@ function LogPanelToolbarImpl({
             </PopoverContent>
           </Popover>
 
-          {/* Preset selector — hidden when host page owns presets */}
-          {!hideToolbarPresets && (
-            <Select value={activePresetId} onValueChange={handlePresetChange}>
-              <SelectTrigger
-                className="h-8 w-full sm:w-[150px]"
-                data-testid="log-panel-preset-trigger"
+          {/* Presets */}
+          <Select value={activePresetId} onValueChange={handlePresetChange}>
+            <SelectTrigger
+              className="h-8 w-full sm:w-[150px]"
+              aria-label={t("panel.presets")}
+              data-testid="log-panel-preset-trigger"
+            >
+              <Bookmark className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+              <SelectValue placeholder={t("panel.presets")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={EMPTY_PRESET_VALUE}>{t("panel.noPreset")}</SelectItem>
+                {presets.map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+
+          <SavePresetButton
+            defaultName={t("panel.presetDefaultName", { index: presets.length + 1 })}
+            onSave={saveCurrentPreset}
+          />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2"
+                aria-label={t("panel.deletePreset")}
+                data-testid="log-panel-delete-preset"
+                onClick={removeActivePreset}
+                disabled={activePresetId === EMPTY_PRESET_VALUE}
               >
-                <Bookmark className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                <SelectValue placeholder={t("panel.presets")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value={EMPTY_PRESET_VALUE}>{t("panel.noPreset")}</SelectItem>
-                  {presets.map((preset) => (
-                    <SelectItem key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          )}
+                <BookmarkX className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("panel.deletePreset")}</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
 
-          {/* Save preset */}
-          {!hideToolbarPresets && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-2"
-                  onClick={saveCurrentPreset}
-                >
-                  <BookmarkPlus className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("panel.savePreset")}</TooltipContent>
-            </Tooltip>
+      {/* ── Active facets ──
+          One row, last before the list, so it reads as "what is narrowing the
+          rows below". It used to sit between the search bar and the level row,
+          and the advanced panel rendered the trace / session / transport
+          facets a second time as "focus" buttons beside it. */}
+      {activeFacetCount > 0 && (
+        <div
+          data-testid="log-panel-facet-chip-row"
+          className="flex flex-wrap items-center gap-1.5 border-t border-border/40 px-2 py-2"
+        >
+          {sourceFilter !== "all" && (
+            <FacetChip
+              testId="facet-chip-source"
+              label={t("panel.filterChip.sourceLabel")}
+              value={t(`panel.sources.${sourceFilter}`)}
+              clearLabel={t("panel.filterChip.clearSource", {
+                value: t(`panel.sources.${sourceFilter}`),
+              })}
+              onClear={() => setSourceFilter("all")}
+            />
           )}
-
-          {/* Delete preset */}
-          {!hideToolbarPresets && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-2"
-                  onClick={removeActivePreset}
-                  disabled={activePresetId === EMPTY_PRESET_VALUE}
-                >
-                  <BookmarkX className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("panel.deletePreset")}</TooltipContent>
-            </Tooltip>
+          {sessionFilter.trim() !== "" && (
+            <FacetChip
+              testId="facet-chip-session"
+              label={t("panel.filterChip.sessionLabel")}
+              value={sessionFilter.trim()}
+              mono
+              clearLabel={t("panel.filterChip.clearSession")}
+              onClear={() => setSessionFilter("")}
+            />
           )}
-
-          {/* Active focus chips */}
+          {moduleFilter !== "all" && (
+            <FacetChip
+              testId="facet-chip-module"
+              label={t("panel.filterChip.moduleLabel")}
+              value={
+                moduleFilter === AGENT_TRACE_MODULE ? t("panel.agentTraceModule") : moduleFilter
+              }
+              clearLabel={t("panel.filterChip.clearModule")}
+              onClear={() => setModuleFilter("all")}
+            />
+          )}
+          {timeRange !== "all" && customTimeRange === null && (
+            <FacetChip
+              testId="facet-chip-time"
+              icon={<CalendarIcon className="h-3 w-3" />}
+              value={t(TIME_RANGE_LABEL_KEYS[timeRange])}
+              clearLabel={t("panel.filterChip.clearTimeRange")}
+              onClear={() => setTimeRange("all")}
+            />
+          )}
+          {customRangeLabel && (
+            <FacetChip
+              testId="facet-chip-custom-time"
+              icon={<CalendarRange className="h-3 w-3" />}
+              label={t("panel.customTimeRangeChipPrefix")}
+              value={customRangeLabel}
+              clearLabel={t("panel.customTimeRangeClear")}
+              onClear={() => {
+                setCustomTimeRange(null)
+                setPendingRange(undefined)
+              }}
+            />
+          )}
           {traceFocusId && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-7 px-2 gap-1 text-xs"
-              onClick={() => setTraceFocusId(null)}
-            >
-              <Crosshair className="h-3 w-3" />
-              {t("panel.clearTraceFocus")}
-              <X className="h-3 w-3" />
-            </Button>
+            <FacetChip
+              testId="facet-chip-trace"
+              icon={<Crosshair className="h-3 w-3" />}
+              label={t("panel.filterChip.traceLabel")}
+              value={traceFocusId.slice(0, 12)}
+              title={traceFocusId}
+              mono
+              clearLabel={t("panel.filterChip.clearTrace")}
+              onClear={() => setTraceFocusId(null)}
+            />
           )}
-
-          {hasSessionFocus && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-7 px-2 gap-1 text-xs"
-              onClick={clearSessionFocus}
-            >
-              <Filter className="h-3 w-3" />
-              {t("panel.clearSessionFocus")}
-              <X className="h-3 w-3" />
-            </Button>
-          )}
-
           {diagnosticTransportFilter && (
+            <FacetChip
+              testId="facet-chip-transport"
+              label={t("panel.filterChip.transportLabel")}
+              value={diagnosticTransportFilter}
+              clearLabel={t("panel.filterChip.clearTransport")}
+              onClear={() => setDiagnosticTransportFilter(null)}
+            />
+          )}
+          {onClearAllFilters && activeFacetCount > 1 && (
             <Button
-              variant="secondary"
+              type="button"
+              variant="ghost"
               size="sm"
-              className="h-7 px-2 gap-1 text-xs"
-              onClick={() => setDiagnosticTransportFilter(null)}
+              className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+              data-testid="log-panel-clear-all-filters"
+              onClick={onClearAllFilters}
             >
-              {t("panel.filterChip.transportPrefix", { name: diagnosticTransportFilter })}
-              <X className="h-3 w-3" />
+              <FilterX className="h-3 w-3" />
+              {t("panel.filterChip.clearAll")}
             </Button>
           )}
         </div>
@@ -1075,19 +1224,23 @@ function LogPanelToolbarImpl({
         <DialogContent className="max-w-sm sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("panel.keyboardShortcuts")}</DialogTitle>
+            <DialogDescription>{t("panel.shortcutsDescription")}</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
             {(
               [
                 ["r", t("panel.shortcuts.refresh")],
                 ["d", t("panel.shortcuts.dashboardView")],
+                ...(traceViewAvailable
+                  ? ([["t", t("panel.shortcuts.traceView")]] as [string, string][])
+                  : []),
                 ["/", t("panel.shortcuts.focusSearch")],
                 ["b", t("panel.shortcuts.bookmarkEntry")],
                 ["g", t("panel.shortcuts.openPresets")],
                 ["j / ↓", t("panel.shortcuts.nextEntry")],
                 ["k / ↑", t("panel.shortcuts.previousEntry")],
-                ["Enter", t("panel.shortcuts.expandEntry")],
-                ["o", t("panel.shortcuts.openDetails")],
+                ["Enter / o", t("panel.shortcuts.openDetails")],
+                ["e", t("panel.shortcuts.expandEntry")],
                 ["Esc", t("panel.shortcuts.closeOrClear")],
                 ["?", t("panel.shortcuts.showShortcuts")],
               ] as [string, string][]
@@ -1121,6 +1274,16 @@ interface SearchWithHistoryProps {
   searchPlaceholder: string
 }
 
+/**
+ * The search field with its recent-search list, as a WAI-ARIA combobox.
+ *
+ * Focus never leaves the input. ArrowDown / ArrowUp move an active option
+ * that the input points at through `aria-activedescendant`, Enter picks it,
+ * Escape closes the list, Delete removes the active entry. The list used to
+ * be a cmdk `Command` whose items took DOM focus on ArrowDown — which blurred
+ * the input, so the screen reader left the field it was describing, and the
+ * window-level `/` and `Esc` shortcuts started firing from inside the list.
+ */
 function SearchWithHistory({
   searchQuery,
   setSearchQuery,
@@ -1138,7 +1301,25 @@ function SearchWithHistory({
   const t = useTranslations("logging")
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const historyItems = useMemo(() => searchHistory, [searchHistory])
+  const baseId = useId()
+  const listboxId = `${baseId}-search-history`
+  const optionId = (index: number) => `${baseId}-search-history-option-${index}`
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const open = showSearchHistory && searchHistory.length > 0
+  // The history can shrink under the cursor (remove / clear); clamp on read.
+  const active = open && activeIndex >= 0 && activeIndex < searchHistory.length ? activeIndex : -1
+
+  const close = () => {
+    setShowSearchHistory(false)
+    setActiveIndex(-1)
+  }
+  // Focus is already on the input — the keyboard never leaves it and the
+  // list swallows pointer presses — so picking does not refocus it (which
+  // would re-run `onFocus` against the not-yet-updated query and reopen).
+  const pick = (query: string) => {
+    setSearchQuery(query)
+    close()
+  }
 
   return (
     // The 12rem floor used to be a desktop-only assumption: with the view
@@ -1155,36 +1336,67 @@ function SearchWithHistory({
         <InputGroupInput
           ref={inputRef}
           role="combobox"
-          aria-expanded={showSearchHistory}
-          aria-controls="log-search-history-listbox"
+          aria-label={useRegex ? regexPlaceholder : searchPlaceholder}
+          aria-expanded={open}
+          aria-controls={listboxId}
           aria-autocomplete="list"
+          aria-activedescendant={active >= 0 ? optionId(active) : undefined}
           placeholder={useRegex ? regexPlaceholder : searchPlaceholder}
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => {
+            setSearchQuery(e.target.value)
+            setActiveIndex(-1)
+          }}
           onFocus={() => {
-            if (!searchQuery && historyItems.length > 0) {
+            if (!searchQuery && searchHistory.length > 0) {
               setShowSearchHistory(true)
             }
           }}
           onBlur={(e) => {
-            // Keep the dropdown open when focus moves into the listbox.
+            // A pointer press inside the list keeps the input focused (the
+            // list prevents mousedown); anything else closes it.
             if (listRef.current?.contains(e.relatedTarget as Node | null)) {
               return
             }
-            setShowSearchHistory(false)
+            close()
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && searchQuery.trim()) {
-              addSearchHistory(searchQuery.trim())
-              setShowSearchHistory(false)
-            } else if (e.key === "Escape") {
-              setShowSearchHistory(false)
-            } else if (e.key === "ArrowDown" && showSearchHistory && historyItems.length > 0) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              if (searchHistory.length === 0) return
               e.preventDefault()
-              const firstItem = listRef.current?.querySelector(
-                '[data-testid^="log-search-history-item-"]'
-              ) as HTMLElement | null
-              firstItem?.focus()
+              if (!open) {
+                setShowSearchHistory(true)
+                setActiveIndex(e.key === "ArrowDown" ? 0 : searchHistory.length - 1)
+                return
+              }
+              const step = e.key === "ArrowDown" ? 1 : -1
+              const last = searchHistory.length - 1
+              setActiveIndex(
+                active < 0 ? (step > 0 ? 0 : last) : Math.min(Math.max(active + step, 0), last)
+              )
+            } else if (e.key === "Home" && active >= 0) {
+              e.preventDefault()
+              setActiveIndex(0)
+            } else if (e.key === "End" && active >= 0) {
+              e.preventDefault()
+              setActiveIndex(searchHistory.length - 1)
+            } else if (e.key === "Enter") {
+              if (active >= 0) {
+                e.preventDefault()
+                pick(searchHistory[active])
+              } else if (searchQuery.trim()) {
+                addSearchHistory(searchQuery.trim())
+                close()
+              }
+            } else if (e.key === "Delete" && active >= 0) {
+              e.preventDefault()
+              removeSearchHistoryItem(searchHistory[active])
+            } else if (e.key === "Escape" && open) {
+              // Closing the list is this Escape's whole job; the panel's
+              // window-level Escape (clear search / close detail) must not
+              // also run.
+              e.preventDefault()
+              close()
             }
           }}
           className={useRegex && searchQuery ? "font-mono text-xs" : ""}
@@ -1210,67 +1422,73 @@ function SearchWithHistory({
         </InputGroupAddon>
       </InputGroup>
 
-      {showSearchHistory && historyItems.length > 0 && (
+      {open && (
         <div
           ref={listRef}
-          id="log-search-history-listbox"
           className="absolute top-full left-0 z-50 mt-1 w-full rounded-md border bg-popover shadow-md"
+          data-testid="log-search-history-combobox"
+          // Keep focus (and so the combobox) on the input while the pointer
+          // works the list.
+          onMouseDown={(e) => e.preventDefault()}
         >
-          <Command
-            shouldFilter={false}
-            className="w-full"
-            data-testid="log-search-history-combobox"
+          <div className="flex items-center justify-between px-2 py-1 border-b">
+            <span className="text-xs text-muted-foreground" id={`${listboxId}-label`}>
+              {t("panel.searchHistory")}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              tabIndex={-1}
+              className="h-auto px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                clearSearchHistory()
+                close()
+              }}
+              data-testid="log-search-history-clear"
+            >
+              {t("panel.recentSearches.clear")}
+            </Button>
+          </div>
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-labelledby={`${listboxId}-label`}
+            className="max-h-60 overflow-y-auto p-1"
           >
-            <div className="flex items-center justify-between px-2 py-1 border-b">
-              <span className="text-xs text-muted-foreground">{t("panel.searchHistory")}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-auto px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:text-foreground"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  clearSearchHistory()
-                }}
-                data-testid="log-search-history-clear"
+            {searchHistory.map((item, index) => (
+              <div
+                key={item}
+                id={optionId(index)}
+                role="option"
+                aria-selected={index === active}
+                data-testid={`log-search-history-item-${item}`}
+                data-active={index === active || undefined}
+                className={cn(
+                  "flex cursor-default items-center justify-between gap-2 rounded-sm px-2 py-1.5",
+                  "hover:bg-accent/60",
+                  index === active && "bg-accent text-accent-foreground"
+                )}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => pick(item)}
               >
-                {t("panel.recentSearches.clear")}
-              </Button>
-            </div>
-            <CommandList className="max-h-60">
-              <CommandEmpty>{t("panel.recentSearches.empty")}</CommandEmpty>
-              <CommandGroup>
-                {historyItems.map((item) => (
-                  <CommandItem
-                    key={item}
-                    value={item}
-                    data-testid={`log-search-history-item-${item}`}
-                    className="flex items-center justify-between gap-2"
-                    onSelect={(selected) => {
-                      setSearchQuery(selected)
-                      setShowSearchHistory(false)
-                      inputRef.current?.focus()
-                    }}
-                  >
-                    <span className="flex-1 text-sm truncate">{item}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      tabIndex={-1}
-                      className="ml-2 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        removeSearchHistoryItem(item)
-                      }}
-                      aria-label={t("panel.recentSearches.removeAria", { query: item })}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
+                <span className="flex-1 text-sm truncate">{item}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  tabIndex={-1}
+                  className="ml-2 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    removeSearchHistoryItem(item)
+                  }}
+                  aria-label={t("panel.recentSearches.removeAria", { query: item })}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

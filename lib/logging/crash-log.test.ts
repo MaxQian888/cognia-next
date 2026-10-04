@@ -5,6 +5,7 @@
 import {
   buildCrashLogExportBundle,
   buildCrashLogItems,
+  deriveDiagnosticsSummary,
   isCrashRelevantLogEntry,
   serializeCrashLogBundle,
   summarizeCrashLogItems,
@@ -134,6 +135,58 @@ describe("buildCrashLogItems", () => {
     expect(items[0].sources).toEqual(["diagnostic"])
     expect(items[0].level).toBe("warn")
     expect(items[0].summary).toBe("stdout-only")
+    // A code, not English prose: the component translates it.
+    expect(items[0].title).toBe("")
+    expect(items[0].snapshot).toEqual({ summaryCode: "native_degraded", detail: "stdout-only" })
+  })
+
+  it("derives a translatable code for every snapshot condition", () => {
+    const base: CrashDiagnosticsSnapshot = {
+      capturedAt: "2026-04-29T00:00:00.000Z",
+      nativeLogging: makeReadiness("healthy"),
+      windowDiagnostics: null,
+      localRuntimeDiagnostics: null,
+      logDirectoryPath: null,
+      diagnosticsError: null,
+    }
+    expect(deriveDiagnosticsSummary({ ...base, diagnosticsError: "ipc closed" })).toEqual({
+      summaryCode: "diagnostics_error",
+      detail: "ipc closed",
+    })
+    expect(
+      deriveDiagnosticsSummary({ ...base, localRuntimeDiagnostics: { status: "error" } })
+    ).toEqual({ summaryCode: "runtime_error", detail: null })
+    expect(deriveDiagnosticsSummary({ ...base, nativeLogging: makeReadiness("degraded") })).toEqual(
+      { summaryCode: "native_degraded", detail: null }
+    )
+    expect(deriveDiagnosticsSummary({ ...base, nativeLogging: makeReadiness("inactive") })).toEqual(
+      { summaryCode: "native_inactive", detail: null }
+    )
+    expect(deriveDiagnosticsSummary(base)).toEqual({ summaryCode: "snapshot", detail: null })
+  })
+
+  it("exports a snapshot row as its code rather than an empty title", () => {
+    const items = buildCrashLogItems({
+      recentErrors: [],
+      persistedLogs: [],
+      diagnostics: {
+        capturedAt: "2026-04-29T00:00:00.000Z",
+        nativeLogging: makeReadiness("healthy"),
+        windowDiagnostics: null,
+        localRuntimeDiagnostics: null,
+        logDirectoryPath: null,
+        diagnosticsError: "ipc closed",
+      },
+    })
+    const bundle = buildCrashLogExportBundle({
+      items,
+      diagnostics: null,
+      exportedAt: "2026-04-29T00:00:00.000Z",
+      filters: { source: "all", level: "all", search: "" },
+    })
+    expect(serializeCrashLogBundle(bundle, "text").content).toContain(
+      "[snapshot:diagnostics_error] ipc closed"
+    )
   })
 
   it("skips the diagnostic snapshot when everything is healthy", () => {

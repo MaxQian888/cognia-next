@@ -5,10 +5,23 @@ import { render, screen } from "@testing-library/react"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AgentTraceTreeView } from "./agent-trace-tree"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 function makeSpan(over: Partial<AgentTraceSpan> = {}): AgentTraceSpan {
   const id = over.id ?? over.spanId ?? "span-" + Math.random().toString(36).slice(2, 8)
@@ -59,7 +72,8 @@ describe("AgentTraceTreeView", () => {
     const row = screen.getByTestId("agent-trace-tree-row-a")
     expect(row.textContent).toContain("invoke_agent")
     expect(row.textContent).toContain("claude-opus-4-7")
-    expect(row.textContent).toContain("100/30t")
+    // Token split is a message (word order is the translator's), not "100/30t".
+    expect(row.textContent).toContain('tokens:{"input":"100","output":"30"}')
     expect(row.textContent).toContain("$0.0050")
     expect(row.textContent).toContain("250ms")
   })
@@ -88,14 +102,19 @@ describe("AgentTraceTreeView", () => {
       parentSpanId: "root",
     })
     render(<AgentTraceTreeView spans={[parent, childB, childA]} />)
-    const rows = screen.getAllByRole("treeitem")
+    // A nested list, not an ARIA tree with none of the tree keyboard contract.
+    expect(screen.queryByRole("tree")).not.toBeInTheDocument()
+    const rows = screen.getAllByTestId(/^agent-trace-tree-row-/)
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "agent-trace-tree-row-root",
       "agent-trace-tree-row-child-a",
       "agent-trace-tree-row-child-b",
     ])
-    expect(rows[0].getAttribute("aria-level")).toBe("1")
-    expect(rows[1].getAttribute("aria-level")).toBe("2")
+    const rootItem = rows[0].closest("li")!
+    const childItem = rows[1].closest("li")!
+    // The child's list item lives in a list nested inside the root's item.
+    expect(rootItem.contains(childItem)).toBe(true)
+    expect(childItem.parentElement?.tagName).toBe("UL")
   })
 
   it("promotes orphan children (parentSpanId not in set) to root", () => {
@@ -105,19 +124,36 @@ describe("AgentTraceTreeView", () => {
       startTime: 50,
     })
     render(<AgentTraceTreeView spans={[orphan]} />)
-    const row = screen.getByTestId("agent-trace-tree-row-orphan")
-    expect(row.getAttribute("aria-level")).toBe("1")
+    const item = screen.getByTestId("agent-trace-tree-row-orphan").closest("li")!
+    // Top level: its list is the outermost one, labelled as the span tree.
+    expect(item.parentElement).toHaveAttribute("aria-label", "treeLabel")
   })
 
-  it("marks the active span via aria-selected", () => {
+  it("marks the active span via aria-current", () => {
     render(
       <AgentTraceTreeView
         spans={[makeSpan({ id: "x", startTime: 1 }), makeSpan({ id: "y", startTime: 2 })]}
         activeSpanId="y"
       />
     )
-    expect(screen.getByTestId("agent-trace-tree-row-x").getAttribute("aria-selected")).toBe("false")
-    expect(screen.getByTestId("agent-trace-tree-row-y").getAttribute("aria-selected")).toBe("true")
+    expect(screen.getByTestId("agent-trace-tree-row-x").closest("li")).not.toHaveAttribute(
+      "aria-current"
+    )
+    expect(screen.getByTestId("agent-trace-tree-row-y").closest("li")).toHaveAttribute(
+      "aria-current",
+      "true"
+    )
+  })
+
+  it("keeps the raw operation id as the label's title", () => {
+    render(<AgentTraceTreeView spans={[makeSpan({ id: "x", operationName: "execute_tool" })]} />)
+    expect(screen.getByTitle("execute_tool")).toBeInTheDocument()
+  })
+
+  it("folds the model column by container query, not a viewport breakpoint", () => {
+    render(<AgentTraceTreeView spans={[makeSpan({ id: "x", requestModel: "opus" })]} />)
+    expect(screen.getByText("opus")).toHaveClass("@md:inline")
+    expect(screen.getByTestId("agent-trace-tree")).toHaveClass("@container")
   })
 
   it("styles error spans with destructive marker", () => {
@@ -135,6 +171,8 @@ describe("AgentTraceTreeView", () => {
     )
     const row = screen.getByTestId("agent-trace-tree-row-e")
     expect(row.className).toMatch(/text-destructive/)
+    // Colour is not the only signal.
+    expect(row).toHaveTextContent("failed")
   })
 
   it("formats durations: ms / s / min thresholds", () => {

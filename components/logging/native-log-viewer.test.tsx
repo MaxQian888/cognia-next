@@ -41,6 +41,7 @@ function makeState(overrides: Record<string, unknown> = {}) {
     files: [],
     loading: false,
     available: true,
+    error: null,
     refresh: jest.fn(),
     ...overrides,
   }
@@ -58,8 +59,9 @@ describe("NativeLogViewer", () => {
     expect(screen.getByText("slow response")).toBeInTheDocument()
     expect(screen.getByText("send failed")).toBeInTheDocument()
     expect(screen.getByText("network::lark")).toBeInTheDocument()
-    expect(screen.getByText("warn")).toBeInTheDocument()
-    expect(screen.getByText("error")).toBeInTheDocument()
+    // Level names are translated, not the file's raw tokens.
+    expect(screen.getByText("Warning")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
   })
 
   it("shows the file path and entry count metadata", () => {
@@ -88,6 +90,34 @@ describe("NativeLogViewer", () => {
     expect(screen.getByText(/native logs unavailable/i)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /retry/i }))
     expect(refresh).toHaveBeenCalled()
+  })
+
+  it("keeps the toolbar and shows the error when a host answered with a failure", async () => {
+    const refresh = jest.fn()
+    useNativeLogQueryMock.mockReturnValue(
+      makeState({ available: true, error: "log file is locked", refresh })
+    )
+    const user = userEvent.setup()
+
+    render(<NativeLogViewer />)
+
+    expect(screen.queryByText(/native logs unavailable/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId("native-log-viewer-error")).toHaveTextContent("log file is locked")
+    // The last good read stays visible under the error...
+    expect(screen.getByText("slow response")).toBeInTheDocument()
+    // ...and the controls to try something else are still there.
+    expect(screen.getByRole("combobox", { name: /log file/i })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /retry/i }))
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it("does not claim 'no matching entries' when the read failed", () => {
+    useNativeLogQueryMock.mockReturnValue(
+      makeState({ available: true, error: "timeout", result: null })
+    )
+    render(<NativeLogViewer />)
+    expect(screen.queryByText(/no matching entries/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId("native-log-viewer-error")).toBeInTheDocument()
   })
 
   it("renders an empty state when there are no entries", () => {
@@ -124,7 +154,7 @@ describe("NativeLogViewer", () => {
 
     render(<NativeLogViewer />)
     await user.click(screen.getByRole("combobox", { name: /minimum level/i }))
-    await user.click(screen.getByRole("option", { name: "warn" }))
+    await user.click(screen.getByRole("option", { name: "Warning" }))
 
     expect(setQuery).toHaveBeenCalledWith({ minLevel: "warn" })
   })

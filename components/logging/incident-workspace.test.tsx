@@ -1,44 +1,79 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render as rtlRender, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+import { TooltipProvider } from "@/components/ui/tooltip"
 import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-incidents"
+import {
+  IDLE_SUBMISSION_STATE,
+  type IncidentSubmissionState,
+} from "@/hooks/logging/use-incident-submission"
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`,
+  useFormatter: () => ({
+    dateTime: (value: Date) => value.toISOString(),
+    number: (value: number, options?: { unit?: string }) =>
+      options?.unit ? `${value} ${options.unit}` : String(value),
+  }),
+}))
+
+// The detail is a pane at xl and a sheet below it, chosen in JS.
+let wide = true
+jest.mock("@/hooks/ui", () => ({
+  ...jest.requireActual("@/hooks/ui"),
+  useMediaQuery: () => wide,
 }))
 
 import {
+  INCIDENT_STATES,
   IncidentDetail,
   IncidentWorkspace,
   displayPreview,
-  formatBytes,
+  formatByteSize,
   type IncidentSubmissionControls,
 } from "./incident-workspace"
 
-function controls(over: Partial<IncidentSubmissionControls> = {}): IncidentSubmissionControls {
+function render(ui: React.ReactElement) {
+  return rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
+}
+
+beforeEach(() => {
+  wide = true
+})
+
+/** Submission controls whose every incident is in `state`. */
+function controls(
+  over: Partial<IncidentSubmissionControls> & Partial<IncidentSubmissionState> = {}
+): IncidentSubmissionControls {
+  const { busy, errorCode, lastOutcome, ...rest } = over
+  const state: IncidentSubmissionState = {
+    ...IDLE_SUBMISSION_STATE,
+    ...(busy !== undefined ? { busy } : {}),
+    ...(errorCode !== undefined ? { errorCode } : {}),
+    ...(lastOutcome !== undefined ? { lastOutcome } : {}),
+  }
   return {
     supported: true,
+    checkingSupport: false,
     configured: true,
-    busy: false,
-    errorCode: null,
-    lastOutcome: null,
+    stateFor: () => state,
     onSubmit: jest.fn(),
     onRefresh: jest.fn(),
     onWithdraw: jest.fn(),
     onDeleteRemote: jest.fn(),
     onConfigure: jest.fn(),
-    ...over,
+    ...rest,
   }
 }
 
 const incident: DiagnosticIncidentSummary = {
   id: "incident-1",
   runtime: "desktop",
-  source: "tauri-panic",
+  source: "panic",
   capturedAt: "2026-08-01T08:00:00.000Z",
   state: "detected",
   sizeBytes: 2048,
@@ -78,6 +113,7 @@ function renderWorkspace(over: Partial<React.ComponentProps<typeof IncidentWorks
     selected: null,
     preview: null,
     previewLoading: false,
+    runtimes: ["desktop"] as const,
     activeSource: "all" as const,
     incidentStateFilter: "all" as const,
     onSourceChange: jest.fn(),
@@ -96,11 +132,27 @@ function renderWorkspace(over: Partial<React.ComponentProps<typeof IncidentWorks
   return { props, ...render(<IncidentWorkspace {...props} />) }
 }
 
-describe("formatBytes", () => {
-  it("scales through B / KB / MB", () => {
-    expect(formatBytes(512)).toBe("512 B")
-    expect(formatBytes(2048)).toBe("2.0 KB")
-    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB")
+describe("formatByteSize", () => {
+  it("scales through byte / kilobyte / megabyte with a localized unit", () => {
+    const calls: Array<[number, Intl.NumberFormatOptions]> = []
+    const format = {
+      number: (value: number, options: Intl.NumberFormatOptions) => {
+        calls.push([value, options])
+        return `${value} ${options.unit}`
+      },
+    } as unknown as Parameters<typeof formatByteSize>[0]
+    expect(formatByteSize(format, 512)).toBe("512 byte")
+    expect(formatByteSize(format, 2048)).toBe("2 kilobyte")
+    expect(formatByteSize(format, 5 * 1024 * 1024)).toBe("5 megabyte")
+    expect(calls[0][1]).toMatchObject({ style: "unit", unitDisplay: "short" })
+  })
+})
+
+describe("INCIDENT_STATES", () => {
+  it("speaks the service vocabulary, packaged included", () => {
+    expect(INCIDENT_STATES).toContain("awaiting_consent")
+    expect(INCIDENT_STATES).toContain("packaged")
+    expect(INCIDENT_STATES).not.toContain("awaitingConsent")
   })
 })
 
@@ -118,8 +170,33 @@ describe("IncidentWorkspace", () => {
     renderWorkspace()
     const row = screen.getByTestId("incident-row")
     expect(row).toHaveTextContent("incident-1")
-    expect(row).toHaveTextContent("2.0 KB")
+    expect(row).toHaveTextContent("2 kilobyte")
     expect(row).toHaveTextContent("logging.workspace.states.detected")
+    // The capture source is translated, not the raw `panic`.
+    expect(row).toHaveTextContent("logging.workspace.sources.panic")
+  })
+
+  it("labels an unrecognized capture source under a generic label", () => {
+    renderWorkspace({ incidents: [{ ...incident, source: "future-collector" }] })
+    expect(screen.getByTestId("incident-row")).toHaveTextContent(
+      'logging.workspace.sources.other:{"source":"future-collector"}'
+    )
+  })
+
+  it("hides the source filter unless both runtimes can hold reports", () => {
+    renderWorkspace()
+    expect(screen.queryByLabelText("logging.workspace.filters.sourceLabel")).toBeNull()
+
+    renderWorkspace({ runtimes: ["desktop", "mobile"] })
+    expect(screen.getByLabelText("logging.workspace.filters.sourceLabel")).toBeInTheDocument()
+  })
+
+  it("says a browser collects nothing rather than that nothing crashed", () => {
+    renderWorkspace({ incidents: [], runtimes: [] })
+    expect(screen.getByTestId("incident-uncollected")).toHaveTextContent(
+      "logging.workspace.incidents.uncollectedTitle"
+    )
+    expect(screen.queryByText("logging.workspace.incidents.emptyTitle")).toBeNull()
   })
 
   it("selects an incident", () => {
@@ -169,6 +246,21 @@ describe("IncidentWorkspace", () => {
     renderWorkspace({ selected: incident })
     expect(screen.getByTestId("incident-detail-pane")).toBeInTheDocument()
   })
+
+  it("never mounts the sheet at xl, even after a row is clicked", () => {
+    renderWorkspace({ selected: incident })
+    fireEvent.click(screen.getByTestId("incident-row"))
+    expect(screen.queryByTestId("incident-detail-drawer")).not.toBeInTheDocument()
+  })
+
+  it("uses a sheet below xl, opened only by a click", () => {
+    wide = false
+    renderWorkspace({ selected: incident })
+    expect(screen.queryByTestId("incident-detail-pane")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("incident-detail-drawer")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("incident-row"))
+    expect(screen.getByTestId("incident-detail-drawer")).toBeInTheDocument()
+  })
 })
 
 describe("IncidentDetail", () => {
@@ -183,7 +275,8 @@ describe("IncidentDetail", () => {
       />
     )
     expect(screen.getByText(/"redacted": true/)).toBeInTheDocument()
-    fireEvent.click(screen.getByText("logging.workspace.delete.action"))
+    // The local delete is an icon button in the header; the caller confirms.
+    fireEvent.click(screen.getByRole("button", { name: "logging.workspace.delete.action" }))
     expect(onDelete).toHaveBeenCalled()
   })
 
@@ -274,7 +367,7 @@ describe("IncidentDetail submission", () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("says so plainly off the desktop shell instead of failing on click", () => {
+  it("hides the form and says why on a device with no submission path", () => {
     render(
       <IncidentDetail
         incident={incident}
@@ -284,8 +377,89 @@ describe("IncidentDetail submission", () => {
         submission={controls({ supported: false })}
       />
     )
-    expect(screen.getByText("logging.workspace.submission.desktopOnly")).toBeInTheDocument()
+    expect(screen.getByTestId("incident-submission-unsupported")).toHaveTextContent(
+      "logging.workspace.submission.unsupported"
+    )
+    expect(screen.queryByTestId("incident-submit")).toBeNull()
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
+  })
+
+  it("waits for the mobile capability probe before offering anything", () => {
+    render(
+      <IncidentDetail
+        incident={{ ...incident, runtime: "mobile", artifacts: ["report"] }}
+        preview={null}
+        previewLoading={false}
+        onDelete={jest.fn()}
+        submission={controls({ supported: false, checkingSupport: true })}
+      />
+    )
+    expect(screen.getByTestId("incident-support-checking")).toBeInTheDocument()
+    expect(screen.queryByTestId("incident-submission-unsupported")).toBeNull()
+  })
+
+  it("never offers a screenshot for a mobile report, whose path cannot take one", () => {
+    render(
+      <IncidentDetail
+        incident={{ ...incident, runtime: "mobile", source: "ios-kscrash", artifacts: ["report"] }}
+        preview={null}
+        previewLoading={false}
+        onDelete={jest.fn()}
+        submission={controls()}
+      />
+    )
+    expect(screen.queryByLabelText("logging.workspace.consent.screenshot")).toBeNull()
+    expect(screen.getByTestId("incident-submit")).toBeEnabled()
+  })
+
+  it("shows a phone's receipt without remote actions it cannot perform", () => {
+    render(
+      <IncidentDetail
+        incident={{
+          ...incident,
+          runtime: "mobile",
+          state: "processing",
+          receiptCode: "MOB-1",
+          artifacts: ["report"],
+        }}
+        preview={null}
+        previewLoading={false}
+        onDelete={jest.fn()}
+        submission={controls()}
+      />
+    )
+    const receipt = screen.getByTestId("incident-receipt")
+    expect(receipt).toHaveTextContent("MOB-1")
+    expect(receipt).toHaveTextContent("logging.workspace.submission.mobileReceiptNote")
+    expect(screen.queryByText("logging.workspace.submission.withdraw")).toBeNull()
+    expect(screen.queryByTestId("incident-submit")).toBeNull()
+  })
+
+  it("reads state per incident, not hook-wide", () => {
+    const stateFor = jest.fn((target: { id: string }) =>
+      target.id === "incident-1" ? { ...IDLE_SUBMISSION_STATE, busy: true } : IDLE_SUBMISSION_STATE
+    )
+    const { unmount } = render(
+      <IncidentDetail
+        incident={incident}
+        preview={null}
+        previewLoading={false}
+        onDelete={jest.fn()}
+        submission={{ ...controls(), stateFor }}
+      />
+    )
     expect(screen.getByTestId("incident-submit")).toBeDisabled()
+    unmount()
+    render(
+      <IncidentDetail
+        incident={{ ...incident, id: "incident-2" }}
+        preview={null}
+        previewLoading={false}
+        onDelete={jest.fn()}
+        submission={{ ...controls(), stateFor }}
+      />
+    )
+    expect(screen.getByTestId("incident-submit")).toBeEnabled()
   })
 
   it("renders the receipt instead of the consent panel once submitted", () => {
@@ -300,12 +474,17 @@ describe("IncidentDetail submission", () => {
     )
     expect(screen.getByTestId("incident-receipt")).toBeInTheDocument()
     expect(screen.getByText("ABC123")).toBeInTheDocument()
+    // The processing state is translated, not the raw enum.
+    expect(
+      screen.getByText("logging.workspace.console.processingStates.received")
+    ).toBeInTheDocument()
     expect(screen.getByText("logging.workspace.submission.includedMinidump")).toBeInTheDocument()
     // Re-consenting to something already sent is not a thing.
     expect(screen.queryByTestId("incident-submit")).toBeNull()
   })
 
-  it("offers withdraw and remote delete on a live submission", async () => {
+  it("confirms withdraw and remote delete before acting on a live submission", async () => {
+    const user = userEvent.setup()
     const onWithdraw = jest.fn()
     const onDeleteRemote = jest.fn()
     render(
@@ -317,9 +496,28 @@ describe("IncidentDetail submission", () => {
         submission={controls({ onWithdraw, onDeleteRemote })}
       />
     )
-    await userEvent.click(screen.getByText("logging.workspace.submission.withdraw"))
-    await userEvent.click(screen.getByText("logging.workspace.submission.deleteRemote"))
+    await user.click(screen.getByText("logging.workspace.submission.withdraw"))
+    expect(onWithdraw).not.toHaveBeenCalled()
+    let dialog = within(await screen.findByTestId("incident-remote-confirm"))
+    expect(
+      dialog.getByText("logging.workspace.submission.confirmWithdrawTitle")
+    ).toBeInTheDocument()
+    await user.click(dialog.getByRole("button", { name: "logging.workspace.submission.withdraw" }))
     expect(onWithdraw).toHaveBeenCalledWith(submittedIncident)
+
+    await user.click(screen.getByText("logging.workspace.submission.deleteRemote"))
+    dialog = within(await screen.findByTestId("incident-remote-confirm"))
+    // Cancelling sends nothing.
+    await user.click(
+      dialog.getByRole("button", { name: "logging.workspace.submission.confirmCancel" })
+    )
+    expect(onDeleteRemote).not.toHaveBeenCalled()
+
+    await user.click(screen.getByText("logging.workspace.submission.deleteRemote"))
+    dialog = within(await screen.findByTestId("incident-remote-confirm"))
+    await user.click(
+      dialog.getByRole("button", { name: "logging.workspace.submission.deleteRemote" })
+    )
     expect(onDeleteRemote).toHaveBeenCalledWith(submittedIncident)
   })
 

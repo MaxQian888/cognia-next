@@ -30,6 +30,6 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
-export const GroupedByTrace: Story = {
-  args: { groupByTraceId: true },
+export const WithoutAgentTrace: Story = {
+  args: { includeAgentTrace: false },
 }

@@ -32,12 +32,15 @@ jest.mock("@/lib/logging/crash-log", () => ({
 }))
 
 const transportDeleteMock = jest.fn().mockResolvedValue(undefined)
+const transportGetLogsMock = jest.fn(async (_filter?: unknown) => [] as Array<{ id: string }>)
 const fakeTransport = {
   deleteEntries: (ids: string[]) => transportDeleteMock(ids),
+  getLogs: (filter?: unknown) => transportGetLogsMock(filter),
   clear: jest.fn(async () => undefined),
 }
+let transportAvailable = true
 jest.mock("@/lib/logging", () => ({
-  getIndexedDBTransport: () => fakeTransport,
+  getIndexedDBTransport: () => (transportAvailable ? fakeTransport : undefined),
 }))
 
 const recentSubscribers: Array<() => void> = []
@@ -90,6 +93,8 @@ jest.mock("./use-log-stream", () => ({
   useLogStream: (opts: unknown) => useLogStreamMock(opts),
 }))
 
+import { useLogWorkspaceStore } from "@/stores/logging/log-workspace-store"
+
 import { useCrashLogs } from "./use-crash-logs"
 
 beforeEach(() => {
@@ -98,6 +103,9 @@ beforeEach(() => {
   buildBundleMock.mockReset().mockReturnValue({ items: [], generatedAt: "now" })
   isCrashRelevantMock.mockReset().mockReturnValue(true)
   transportDeleteMock.mockReset().mockResolvedValue(undefined)
+  transportGetLogsMock.mockReset().mockResolvedValue([])
+  transportAvailable = true
+  useLogWorkspaceStore.setState({ crashSource: "all", crashLevel: "all", crashSearch: "" })
   fakeTransport.clear.mockReset().mockResolvedValue(undefined)
   recentSubscribers.length = 0
   recentLogs = []
@@ -224,10 +232,13 @@ describe("useCrashLogs", () => {
     expect(clearRecentMock).toHaveBeenCalled()
   })
 
-  it("clearPersisted: uses transport.deleteEntries when persisted ids exist", async () => {
-    buildItemsMock.mockReturnValue([
-      { id: "p1", title: "x", sources: ["persisted"], level: "error" },
-    ])
+  it("clearPersisted deletes every stored crash-relevant entry by id, not just the ones in view", async () => {
+    // Nothing in view: the old code fell back to wiping the whole store here.
+    buildItemsMock.mockReturnValue([])
+    transportGetLogsMock.mockResolvedValue([{ id: "p1" }, { id: "p2" }, { id: "info-1" }])
+    isCrashRelevantMock.mockImplementation(
+      (log: unknown) => (log as { id: string }).id !== "info-1"
+    )
     const refresh = jest.fn().mockResolvedValue(undefined)
     useLogStreamMock.mockReturnValue({
       logs: [],
@@ -237,16 +248,18 @@ describe("useCrashLogs", () => {
       clearLogs: jest.fn().mockResolvedValue(undefined),
     })
     const { result } = renderHook(() => useCrashLogs())
-    await waitFor(() => expect(result.current.items.length).toBe(1))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    let removed: number | undefined
     await act(async () => {
-      await result.current.clearPersisted()
+      removed = await result.current.clearPersisted()
     })
-    expect(transportDeleteMock).toHaveBeenCalledWith(["p1"])
+    expect(transportGetLogsMock).toHaveBeenCalledWith({ level: "warn" })
+    expect(transportDeleteMock).toHaveBeenCalledWith(["p1", "p2"])
+    expect(removed).toBe(2)
     expect(refresh).toHaveBeenCalled()
   })
 
-  it("clearPersisted: falls back to clearLogs when no persisted ids", async () => {
-    buildItemsMock.mockReturnValue([])
+  it("clearPersisted never wipes the whole store", async () => {
     const clearLogs = jest.fn().mockResolvedValue(undefined)
     useLogStreamMock.mockReturnValue({
       logs: [],
@@ -257,10 +270,39 @@ describe("useCrashLogs", () => {
     })
     const { result } = renderHook(() => useCrashLogs())
     await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    // No matching entries: nothing deleted, nothing cleared.
+    let removed: number | undefined
     await act(async () => {
-      await result.current.clearPersisted()
+      removed = await result.current.clearPersisted()
     })
-    expect(clearLogs).toHaveBeenCalled()
+    expect(removed).toBe(0)
+    expect(transportDeleteMock).not.toHaveBeenCalled()
+
+    // No transport at all: still nothing cleared.
+    transportAvailable = false
+    await act(async () => {
+      removed = await result.current.clearPersisted()
+    })
+    expect(removed).toBe(0)
+    expect(clearLogs).not.toHaveBeenCalled()
+    expect(fakeTransport.clear).not.toHaveBeenCalled()
+  })
+
+  it("keeps its filters in the workspace store, so they survive a remount", async () => {
+    const first = renderHook(() => useCrashLogs())
+    act(() => {
+      first.result.current.setSourceFilter("persisted")
+      first.result.current.setLevelFilter("fatal")
+      first.result.current.setSearchQuery("renderer")
+    })
+    first.unmount()
+    const second = renderHook(() => useCrashLogs())
+    expect(second.result.current.filters).toEqual({
+      source: "persisted",
+      level: "fatal",
+      search: "renderer",
+    })
   })
 
   it("copySelected returns false when nothing is selected", async () => {

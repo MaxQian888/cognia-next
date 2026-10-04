@@ -3,7 +3,7 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -18,7 +18,7 @@ function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolb
   return {
     viewMode: "list",
     setViewMode: jest.fn(),
-    includeAgentTrace: true,
+    traceViewAvailable: true,
     searchQuery: "",
     setSearchQuery: jest.fn(),
     useRegex: false,
@@ -52,8 +52,6 @@ function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolb
     saveCurrentPreset: jest.fn(),
     removeActivePreset: jest.fn(),
     EMPTY_PRESET_VALUE: "__EMPTY__",
-    highSeverityOnly: false,
-    setHighSeverityOnly: jest.fn(),
     traceFocusId: null,
     setTraceFocusId: jest.fn(),
     autoRefresh: false,
@@ -67,8 +65,6 @@ function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolb
     setAutoScroll: jest.fn(),
     scrollToTop: jest.fn(),
     scrollToBottom: jest.fn(),
-    clearSessionFocus: jest.fn(),
-    hasSessionFocus: false,
     bookmarkFilterActive: false,
     setBookmarkFilterActive: jest.fn(),
     bookmarkedCount: 0,
@@ -84,7 +80,6 @@ function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolb
     setDiagnosticTransportFilter: jest.fn(),
     customTimeRange: null,
     setCustomTimeRange: jest.fn(),
-    hideToolbarPresets: false,
     density: "comfortable",
     setDensity: jest.fn(),
     ...overrides,
@@ -102,18 +97,35 @@ function renderToolbar(overrides: Partial<LogPanelToolbarProps> = {}) {
 }
 
 describe("LogPanelToolbar — primary bar", () => {
-  it("renders three view-mode buttons when includeAgentTrace=true", () => {
+  it("renders three view-mode buttons when the trace view is available", () => {
     renderToolbar()
     expect(
       within(screen.getByRole("group", { name: "Log view" })).getAllByRole("button")
     ).toHaveLength(3)
   })
 
-  it("hides the trace view button when includeAgentTrace=false", () => {
-    renderToolbar({ includeAgentTrace: false })
+  it("hides the trace view button when nothing carries a trace id", () => {
+    renderToolbar({ traceViewAvailable: false })
     expect(
       within(screen.getByRole("group", { name: "Log view" })).getAllByRole("button")
     ).toHaveLength(2)
+  })
+
+  it("keeps the trace button while the trace view is the active one", () => {
+    renderToolbar({ traceViewAvailable: false, viewMode: "trace" })
+    expect(screen.getByRole("button", { name: "Trace View" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+  })
+
+  it("puts the health slot in the first row beside Live and Refresh", () => {
+    renderToolbar({ healthSlot: <button data-testid="stub-health">health</button> })
+    const slot = screen.getByTestId("log-panel-health-slot")
+    expect(slot).toContainElement(screen.getByTestId("stub-health"))
+    // Same row as Refresh; not the level row.
+    expect(screen.getByTestId("log-panel-refresh").parentElement).toBe(slot.parentElement)
+    expect(screen.getByTestId("log-panel-level-filters")).not.toContainElement(slot)
   })
 
   it("names each view-mode button and marks the active one pressed", () => {
@@ -193,12 +205,20 @@ describe("LogPanelToolbar — primary bar", () => {
     expect(props.setShowShortcutsDialog).toHaveBeenCalledWith(true)
   })
 
-  it("exposes auto-refresh as a menu item, not only as a shift-click", async () => {
-    const user = userEvent.setup()
+  it("gives live follow a pressed-state button of its own", () => {
     const { props } = renderToolbar({ autoRefresh: false })
-    await user.click(screen.getByTestId("log-panel-more-actions"))
-    await user.click(await screen.findByTestId("log-panel-auto-refresh-toggle"))
+    const live = screen.getByTestId("log-panel-auto-refresh-toggle")
+    expect(live).toHaveAttribute("aria-pressed", "false")
+    expect(live).toHaveAccessibleName(/Live follow off/)
+    fireEvent.click(live)
     expect(props.setAutoRefresh).toHaveBeenCalledWith(true)
+  })
+
+  it("names the live button for its on state", () => {
+    renderToolbar({ autoRefresh: true })
+    const live = screen.getByTestId("log-panel-auto-refresh-toggle")
+    expect(live).toHaveAttribute("aria-pressed", "true")
+    expect(live).toHaveAccessibleName(/Live follow on/)
   })
 
   it("renders the stats slot inside the level-filter row instead of a row of its own", () => {
@@ -208,30 +228,17 @@ describe("LogPanelToolbar — primary bar", () => {
     expect(levelRow).toContainElement(stats)
   })
 
-  it("normal click on Refresh fires refresh(); Shift+Click toggles autoRefresh", () => {
-    const { props } = renderToolbar({ autoRefresh: false })
-    const refreshBtn = document
-      .querySelector(".lucide-refresh-cw")
-      ?.closest("button") as HTMLButtonElement
+  it("Refresh only refreshes, whatever the live state — and is named for that", () => {
+    const { props } = renderToolbar({ autoRefresh: true })
+    const refreshBtn = screen.getByTestId("log-panel-refresh")
+    // The old button was named "Disable auto-refresh" while live was on, yet
+    // a plain click refreshed.
+    expect(refreshBtn).toHaveAccessibleName("Refresh logs")
     fireEvent.click(refreshBtn)
-    expect(props.refresh).toHaveBeenCalled()
     fireEvent.click(refreshBtn, { shiftKey: true })
-    expect(props.setAutoRefresh).toHaveBeenCalledWith(true)
-  })
-
-  it("contextmenu on Refresh toggles autoRefresh and prevents default", () => {
-    const { props } = renderToolbar({ autoRefresh: false })
-    const refreshBtn = document
-      .querySelector(".lucide-refresh-cw")
-      ?.closest("button") as HTMLButtonElement
     fireEvent.contextMenu(refreshBtn)
-    expect(props.setAutoRefresh).toHaveBeenCalledWith(true)
-  })
-
-  it("renders motion-safe spin class when autoRefresh is true", () => {
-    renderToolbar({ autoRefresh: true })
-    const spinIcon = document.querySelector(".lucide-refresh-cw")
-    expect(spinIcon).toHaveClass("motion-safe:animate-spin")
+    expect(props.refresh).toHaveBeenCalledTimes(2)
+    expect(props.setAutoRefresh).not.toHaveBeenCalled()
   })
 })
 
@@ -306,6 +313,23 @@ describe("LogPanelToolbar — More actions menu", () => {
     expect(props.scrollToBottom).toHaveBeenCalled()
   })
 
+  it("hides the scroll items when there is no list to scroll", async () => {
+    renderToolbar({ scrollActionsAvailable: false, autoScrollAvailable: false })
+    await userEvent.click(screen.getByTestId("log-panel-more-actions"))
+    await screen.findByRole("menu")
+    expect(screen.queryByText("Scroll to top")).not.toBeInTheDocument()
+    expect(screen.queryByText("Scroll to bottom")).not.toBeInTheDocument()
+    expect(screen.queryByText("Resume auto-scroll")).not.toBeInTheDocument()
+    expect(screen.queryByText("Scroll")).not.toBeInTheDocument()
+  })
+
+  it("offers auto-scroll only while it can follow something", async () => {
+    renderToolbar({ scrollActionsAvailable: true, autoScrollAvailable: false })
+    await userEvent.click(screen.getByTestId("log-panel-more-actions"))
+    expect(await screen.findByText("Scroll to top")).toBeInTheDocument()
+    expect(screen.queryByTestId("log-panel-auto-scroll")).not.toBeInTheDocument()
+  })
+
   it("shows Pause auto-scroll variant when autoScroll=true", async () => {
     const { props } = renderToolbar({ autoScroll: true })
     await openMore()
@@ -327,7 +351,8 @@ describe("LogPanelToolbar — facet chips", () => {
     const chip = screen.getByTestId("facet-chip-source")
     expect(chip).toBeInTheDocument()
     const closeBtn = chip.querySelector("button") as HTMLButtonElement
-    expect(closeBtn.getAttribute("aria-label")).toMatch(/tauri/)
+    // The source's display name, not the raw key.
+    expect(closeBtn.getAttribute("aria-label")).toBe("Clear source filter Tauri")
     fireEvent.click(closeBtn)
     expect(props.setSourceFilter).toHaveBeenCalledWith("all")
   })
@@ -393,28 +418,33 @@ describe("LogPanelToolbar — level tabs", () => {
     expect(screen.getByText("Warning")).toBeInTheDocument()
   })
 
-  it("clicking All resets levelFilter, highSeverityOnly, bookmark", () => {
+  it("clicking All resets the level and the bookmark tab", () => {
     const { props } = renderToolbar({ levelFilter: "warn" as LogLevel })
     fireEvent.click(screen.getByText("All"))
     expect(props.setLevelFilter).toHaveBeenCalledWith("all")
-    expect(props.setHighSeverityOnly).toHaveBeenCalledWith(false)
     expect(props.setBookmarkFilterActive).toHaveBeenCalledWith(false)
   })
 
-  it("clicking Error tab sets highSeverityOnly=true", () => {
+  it("clicking Error selects the Error tab — no separate severity flag", () => {
     const { props } = renderToolbar()
     const errorTab = screen.getAllByText("Error")[0].closest("button") as HTMLButtonElement
     fireEvent.click(errorTab)
     expect(props.setLevelFilter).toHaveBeenCalledWith("error")
-    expect(props.setHighSeverityOnly).toHaveBeenCalledWith(true)
+    expect(props).not.toHaveProperty("setHighSeverityOnly")
   })
 
-  it("clicking Warning tab sets highSeverityOnly=false", () => {
+  it("clicking Warning selects the Warning tab", () => {
     const { props } = renderToolbar()
     const warnTab = screen.getAllByText("Warning")[0].closest("button") as HTMLButtonElement
     fireEvent.click(warnTab)
     expect(props.setLevelFilter).toHaveBeenCalledWith("warn")
-    expect(props.setHighSeverityOnly).toHaveBeenCalledWith(false)
+  })
+
+  it("fades the tab strip's trailing edge on a phone so overflow reads as more", () => {
+    renderToolbar()
+    const tabs = screen.getByTestId("log-panel-level-filters")
+    expect(tabs).toHaveAttribute("data-edge-fade", "true")
+    expect(tabs.className).toMatch(/max-sm:\[mask-image:/)
   })
 
   it("Bookmark tab toggles bookmarkFilterActive on/off", () => {
@@ -447,16 +477,32 @@ describe("LogPanelToolbar — advanced filters", () => {
     expect(screen.getByTestId("log-panel-filter-group")).toBeInTheDocument()
   })
 
-  it("invokes saveCurrentPreset and removeActivePreset", () => {
+  it("saves a preset under the name the user types", async () => {
+    const user = userEvent.setup()
+    const { props } = renderToolbar({ showAdvancedFilters: true, presets: [] })
+    await user.click(screen.getByTestId("log-panel-save-preset"))
+    const name = await screen.findByTestId("log-panel-preset-name")
+    // Pre-filled with a translated, numbered default.
+    expect(name).toHaveValue("Preset 1")
+    await user.clear(name)
+    await user.type(name, "Chat errors{Enter}")
+    expect(props.saveCurrentPreset).toHaveBeenCalledWith("Chat errors")
+    expect(screen.queryByTestId("log-panel-save-preset-popover")).not.toBeInTheDocument()
+  })
+
+  it("falls back to the default name when the field is cleared", async () => {
+    const user = userEvent.setup()
+    const { props } = renderToolbar({ showAdvancedFilters: true, presets: [] })
+    await user.click(screen.getByTestId("log-panel-save-preset"))
+    await user.clear(await screen.findByTestId("log-panel-preset-name"))
+    await user.click(screen.getByTestId("log-panel-save-preset-confirm"))
+    expect(props.saveCurrentPreset).toHaveBeenCalledWith("Preset 1")
+  })
+
+  it("removes the active preset", () => {
     const { props } = renderToolbar({ showAdvancedFilters: true, activePresetId: "p1" })
-    const saveBtn = document
-      .querySelector(".lucide-bookmark-plus")
-      ?.closest("button") as HTMLButtonElement
-    fireEvent.click(saveBtn)
-    expect(props.saveCurrentPreset).toHaveBeenCalled()
-    const removeBtn = document
-      .querySelector(".lucide-bookmark-x")
-      ?.closest("button") as HTMLButtonElement
+    const removeBtn = screen.getByTestId("log-panel-delete-preset")
+    expect(removeBtn).toHaveAccessibleName("Delete selected preset")
     fireEvent.click(removeBtn)
     expect(props.removeActivePreset).toHaveBeenCalled()
   })
@@ -469,37 +515,28 @@ describe("LogPanelToolbar — advanced filters", () => {
     expect(removeBtn).toBeDisabled()
   })
 
-  it("renders clear-trace-focus button when traceFocusId set, and fires setTraceFocusId(null)", () => {
-    const { props } = renderToolbar({
+  it("does not render the trace / session / transport facets a second time inside the panel", () => {
+    renderToolbar({
       showAdvancedFilters: true,
       traceFocusId: "trace-1",
-    })
-    const btn = screen.getByText("Clear trace focus").closest("button") as HTMLButtonElement
-    fireEvent.click(btn)
-    expect(props.setTraceFocusId).toHaveBeenCalledWith(null)
-  })
-
-  it("renders clear-session-focus button when hasSessionFocus, and fires clearSessionFocus", () => {
-    const { props } = renderToolbar({
-      showAdvancedFilters: true,
-      hasSessionFocus: true,
-    })
-    const btn = screen.getByText("Clear session focus").closest("button") as HTMLButtonElement
-    fireEvent.click(btn)
-    expect(props.clearSessionFocus).toHaveBeenCalled()
-  })
-
-  it("renders transport prefix chip with interpolated value", () => {
-    const { props } = renderToolbar({
-      showAdvancedFilters: true,
+      sessionFilter: "s-1",
       diagnosticTransportFilter: "langfuse",
     })
-    // The transport prefix chip inside advanced filters
-    const transportBtn = screen
-      .getByText("Transport: langfuse")
-      .closest("button") as HTMLButtonElement
-    fireEvent.click(transportBtn)
-    expect(props.setDiagnosticTransportFilter).toHaveBeenCalledWith(null)
+    const panel = screen.getByTestId("log-panel-filter-group")
+    expect(within(panel).queryByText(/trace/i)).not.toBeInTheDocument()
+    expect(within(panel).queryByText(/langfuse/)).not.toBeInTheDocument()
+    // They are on the chip row, once each.
+    expect(screen.getByTestId("facet-chip-trace")).toBeInTheDocument()
+    expect(screen.getByTestId("facet-chip-session")).toBeInTheDocument()
+    expect(screen.getByTestId("facet-chip-transport")).toBeInTheDocument()
+  })
+
+  it("labels the module, source, session and time controls", () => {
+    renderToolbar({ showAdvancedFilters: true })
+    expect(screen.getByTestId("log-panel-module-trigger")).toHaveAccessibleName("Module")
+    expect(screen.getByTestId("log-panel-source-trigger")).toHaveAccessibleName("Source")
+    expect(screen.getByRole("textbox", { name: "Session ID..." })).toBeInTheDocument()
+    expect(screen.getByTestId("log-panel-time-range-trigger")).toHaveAccessibleName("Time range")
   })
 
   it("uses motion-safe animation classes on the expand", () => {
@@ -509,93 +546,119 @@ describe("LogPanelToolbar — advanced filters", () => {
   })
 })
 
-describe("LogPanelToolbar — search history dropdown", () => {
-  it("renders 'No recent searches' empty state when history empty", () => {
-    renderToolbar({ searchHistory: [] })
-    const input = screen.getByPlaceholderText("Search logs...")
+describe("LogPanelToolbar — search history combobox", () => {
+  function openHistory(history: string[], overrides: Partial<LogPanelToolbarProps> = {}) {
+    const utils = renderToolbar({ searchHistory: history, ...overrides })
+    const input = screen.getByRole("combobox")
     fireEvent.focus(input)
-    // Empty state only renders when showSearchHistory is true and items.length > 0;
-    // with [] it stays closed. So just confirm the dropdown doesn't open.
+    return { ...utils, input }
+  }
+
+  it("stays closed with an empty history", () => {
+    openHistory([])
     expect(screen.queryByTestId("log-search-history-combobox")).not.toBeInTheDocument()
   })
 
-  it("opens the dropdown when focused with non-empty history", () => {
-    renderToolbar({ searchHistory: ["query-a", "query-b"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    expect(screen.getByTestId("log-search-history-combobox")).toBeInTheDocument()
-    expect(screen.getByText("query-a")).toBeInTheDocument()
+  it("opens a listbox the input controls when focused with history", () => {
+    const { input } = openHistory(["query-a", "query-b"])
+    const listbox = screen.getByRole("listbox")
+    expect(input).toHaveAttribute("aria-controls", listbox.id)
+    expect(input).toHaveAttribute("aria-expanded", "true")
+    expect(within(listbox).getAllByRole("option")).toHaveLength(2)
   })
 
-  it("Enter on the input with a value addSearchHistory and closes the dropdown", () => {
-    const { props } = renderToolbar({ searchQuery: "needle", searchHistory: ["x"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
+  it("moves the active option with the arrows while focus stays in the input", () => {
+    const { input } = openHistory(["a", "b", "c"])
+    input.focus()
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    const options = screen.getAllByRole("option")
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id)
+    expect(options[0]).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    // Clamped at the last option.
+    expect(input).toHaveAttribute("aria-activedescendant", options[2].id)
+    fireEvent.keyDown(input, { key: "ArrowUp" })
+    expect(input).toHaveAttribute("aria-activedescendant", options[1].id)
+    fireEvent.keyDown(input, { key: "Home" })
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id)
+    fireEvent.keyDown(input, { key: "End" })
+    expect(input).toHaveAttribute("aria-activedescendant", options[2].id)
+    expect(input).toHaveFocus()
+  })
+
+  it("Enter picks the active option", () => {
+    const { input, props } = openHistory(["first", "second"])
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(props.setSearchQuery).toHaveBeenCalledWith("second")
+    expect(props.addSearchHistory).not.toHaveBeenCalled()
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  })
+
+  it("Enter without an active option records the typed query", () => {
+    const { input, props } = openHistory(["x"], { searchQuery: "needle" })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(props.addSearchHistory).toHaveBeenCalledWith("needle")
   })
 
-  it("Escape closes the dropdown", () => {
-    renderToolbar({ searchHistory: ["x"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    fireEvent.keyDown(input, { key: "Escape" })
+  it("Delete removes the active entry", () => {
+    const { input, props } = openHistory(["x", "y"])
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Delete" })
+    expect(props.removeSearchHistoryItem).toHaveBeenCalledWith("x")
+  })
+
+  it("Escape closes the list and claims the key", () => {
+    const { input } = openHistory(["x"])
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    act(() => {
+      input.dispatchEvent(event)
+    })
+    expect(event.defaultPrevented).toBe(true)
     expect(screen.queryByTestId("log-search-history-combobox")).not.toBeInTheDocument()
   })
 
-  it("ArrowDown moves focus into the listbox when open", () => {
-    renderToolbar({ searchHistory: ["x", "y"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
+  it("ArrowDown on a closed field opens the list on the first option", () => {
+    const { input } = openHistory(["x", "y"])
+    fireEvent.keyDown(input, { key: "Escape" })
     fireEvent.keyDown(input, { key: "ArrowDown" })
-    // No assertion on focus position — jsdom doesn't track focus reliably; just ensure no crash.
-    expect(screen.getByTestId("log-search-history-combobox")).toBeInTheDocument()
+    const options = screen.getAllByRole("option")
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id)
   })
 
-  it("Clear button (shadcn Button) calls clearSearchHistory", () => {
-    const { props } = renderToolbar({ searchHistory: ["x"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    fireEvent.mouseDown(screen.getByTestId("log-search-history-clear"))
+  it("Clear calls clearSearchHistory", () => {
+    const { props } = openHistory(["x"])
+    fireEvent.click(screen.getByTestId("log-search-history-clear"))
     expect(props.clearSearchHistory).toHaveBeenCalledTimes(1)
   })
 
-  it("Remove per-item X has localized aria-label and fires removeSearchHistoryItem", () => {
-    const { props } = renderToolbar({ searchHistory: ["query-a"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    const removeBtn = screen.getByLabelText("Remove recent search query-a")
-    fireEvent.mouseDown(removeBtn)
+  it("the per-item remove button is named and removes only that entry", () => {
+    const { props } = openHistory(["query-a"])
+    fireEvent.click(screen.getByLabelText("Remove recent search query-a"))
     expect(props.removeSearchHistoryItem).toHaveBeenCalledWith("query-a")
+    expect(props.setSearchQuery).not.toHaveBeenCalled()
   })
 
-  it("CommandItem onSelect fills setSearchQuery and closes the dropdown", () => {
-    const { props } = renderToolbar({ searchHistory: ["picked-query"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    const item = screen.getByTestId("log-search-history-item-picked-query")
-    // cmdk listens on click for item selection
-    fireEvent.click(item)
+  it("a click on an option fills the search", () => {
+    const { props } = openHistory(["picked-query"])
+    fireEvent.click(screen.getByTestId("log-search-history-item-picked-query"))
     expect(props.setSearchQuery).toHaveBeenCalledWith("picked-query")
   })
 
-  it("onBlur closes the dropdown when focus moves outside the listbox", () => {
-    renderToolbar({ searchHistory: ["a"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    expect(screen.getByTestId("log-search-history-combobox")).toBeInTheDocument()
+  it("blur to somewhere else closes the list", () => {
+    const { input } = openHistory(["a"])
     fireEvent.blur(input, { relatedTarget: document.body })
     expect(screen.queryByTestId("log-search-history-combobox")).not.toBeInTheDocument()
   })
 
-  it("onBlur keeps the dropdown open when focus moves into the listbox", () => {
-    renderToolbar({ searchHistory: ["a"] })
-    const input = screen.getByPlaceholderText("Search logs...")
-    fireEvent.focus(input)
-    const listbox = document.getElementById("log-search-history-listbox") as HTMLElement
-    expect(listbox).toBeInTheDocument()
-    fireEvent.blur(input, { relatedTarget: listbox })
-    expect(screen.queryByTestId("log-search-history-combobox")).toBeInTheDocument()
+  it("a pointer press inside the list does not take focus from the input", () => {
+    openHistory(["a"])
+    const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+    screen.getByTestId("log-search-history-combobox").dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
   })
 })
 
@@ -633,8 +696,8 @@ describe("LogPanelToolbar — visual state coverage", () => {
     expect(container.querySelector(".bg-primary.rounded-full")).toBeInTheDocument()
   })
 
-  it("includeAgentTrace=false hides trace view button and trims advanced filter offering", () => {
-    const { container } = renderToolbar({ includeAgentTrace: false })
+  it("an unavailable trace view leaves no trace button", () => {
+    const { container } = renderToolbar({ traceViewAvailable: false })
     expect(container.querySelectorAll(".lucide-activity").length).toBe(0)
   })
 
@@ -680,8 +743,142 @@ describe("LogPanelToolbar — shortcuts dialog", () => {
     expect(screen.getByText("Show shortcuts")).toBeInTheDocument()
   })
 
+  it("describes itself and lists the trace view shortcut when that view exists", () => {
+    const { rerender } = renderToolbar({ showShortcutsDialog: true })
+    expect(screen.getByRole("dialog")).toHaveAccessibleDescription(
+      "Keys work anywhere in the panel except while typing in a field."
+    )
+    expect(screen.getByText("Trace view").previousElementSibling).toHaveTextContent("t")
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <LogPanelToolbar {...makeProps({ showShortcutsDialog: true, traceViewAvailable: false })} />
+      </TooltipProvider>
+    )
+    expect(screen.queryByText("Trace view")).not.toBeInTheDocument()
+  })
+
   it("does not render the dialog body when showShortcutsDialog=false", () => {
     renderToolbar({ showShortcutsDialog: false })
     expect(screen.queryByText("Refresh")).not.toBeInTheDocument()
+  })
+})
+
+describe("LogPanelToolbar — facet row and level row semantics", () => {
+  it("prints the time-range chip in words, not the preset key", () => {
+    renderToolbar({ timeRange: "15m" })
+    expect(screen.getByTestId("facet-chip-time")).toHaveTextContent("Last 15m")
+    expect(screen.getByTestId("facet-chip-time").textContent).not.toMatch(/^15m$/)
+  })
+
+  it("offers Clear all only when it would clear more than one chip", () => {
+    const onClearAllFilters = jest.fn()
+    const { rerender } = renderToolbar({ sourceFilter: "tauri", onClearAllFilters })
+    expect(screen.queryByTestId("log-panel-clear-all-filters")).not.toBeInTheDocument()
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <LogPanelToolbar
+          {...makeProps({ sourceFilter: "tauri", timeRange: "1h", onClearAllFilters })}
+        />
+      </TooltipProvider>
+    )
+    fireEvent.click(screen.getByTestId("log-panel-clear-all-filters"))
+    expect(onClearAllFilters).toHaveBeenCalledTimes(1)
+  })
+
+  it("places the chip row after the level row, directly above the list", () => {
+    renderToolbar({ sourceFilter: "tauri" })
+    const levelRow = screen.getByTestId("log-panel-level-filters")
+    const chipRow = screen.getByTestId("log-panel-facet-chip-row")
+    expect(levelRow.compareDocumentPosition(chipRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+  })
+
+  it("marks the active level tab as pressed", () => {
+    renderToolbar({ levelFilter: "warn" as LogLevel })
+    expect(screen.getByTestId("log-panel-level-warn")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("log-panel-level-all")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("log-panel-level-error")).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("counts Error with fatal folded in", () => {
+    renderToolbar({
+      stats: {
+        total: 7,
+        byLevel: { trace: 0, debug: 0, info: 0, warn: 0, error: 4, fatal: 3 } as Record<
+          LogLevel,
+          number
+        >,
+      },
+    })
+    expect(screen.getByTestId("log-panel-level-error")).toHaveTextContent("7")
+  })
+
+  it("applies a calendar range as whole days", async () => {
+    const user = userEvent.setup()
+    const setCustomTimeRange = jest.fn()
+    renderToolbar({
+      showAdvancedFilters: true,
+      customTimeRange: {
+        start: new Date(2026, 2, 5, 10, 30),
+        end: new Date(2026, 2, 5, 11, 0),
+      },
+      setCustomTimeRange,
+    })
+    // One control: the time-range select's "Custom…" opens the calendar —
+    // there is no second calendar button any more.
+    expect(screen.queryByTestId("log-panel-custom-range-trigger")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("log-panel-time-range-trigger"))
+    await user.click(await screen.findByTestId("log-panel-time-range-custom"))
+    fireEvent.click(await screen.findByTestId("log-panel-custom-range-apply"))
+    const range = setCustomTimeRange.mock.calls[0][0] as { start: Date; end: Date }
+    expect(range.start).toEqual(new Date(2026, 2, 5, 0, 0, 0, 0))
+    expect(range.end).toEqual(new Date(2026, 2, 5, 23, 59, 59, 999))
+  })
+})
+
+describe("LogPanelToolbar — More menu safety", () => {
+  async function openMore() {
+    await userEvent.click(screen.getByTestId("log-panel-more-actions"))
+  }
+
+  it("disables 'open details' when nothing is selected", async () => {
+    renderToolbar({ showDetailPanel: false, canShowDetail: false })
+    await openMore()
+    expect(await screen.findByTestId("log-panel-toggle-detail")).toHaveAttribute("data-disabled")
+  })
+
+  it("keeps 'close details' available even without a selection", async () => {
+    renderToolbar({ showDetailPanel: true, canShowDetail: false })
+    await openMore()
+    expect(await screen.findByTestId("log-panel-toggle-detail")).not.toHaveAttribute(
+      "data-disabled"
+    )
+  })
+
+  it("styles Clear logs as destructive", async () => {
+    renderToolbar()
+    await openMore()
+    expect(await screen.findByTestId("log-panel-clear")).toHaveAttribute(
+      "data-variant",
+      "destructive"
+    )
+  })
+
+  it("no longer carries a live-follow item now that the bar has the button", async () => {
+    renderToolbar()
+    await openMore()
+    const menu = await screen.findByRole("menu")
+    expect(within(menu).queryByText("Auto-refresh")).not.toBeInTheDocument()
+  })
+})
+
+describe("LogPanelToolbar — shortcuts dialog key map", () => {
+  it("documents Enter as open (like a click) and e as expand in place", () => {
+    renderToolbar({ showShortcutsDialog: true })
+    const openKey = screen.getByText("Open details").previousElementSibling
+    const expandKey = screen.getByText("Expand entry").previousElementSibling
+    expect(openKey).toHaveTextContent("Enter / o")
+    expect(expandKey).toHaveTextContent("e")
   })
 })

@@ -19,7 +19,6 @@ export interface LogPanelFilterState {
   sessionFilter: string
   searchQuery: string
   useRegex: boolean
-  highSeverityOnly: boolean
   timeRange: PresetTimeRange
   customTimeRange: { start: Date; end: Date } | null
   traceFocusId: string | null
@@ -31,13 +30,23 @@ export interface LogPanelFilterState {
   selectedNativeLogging: boolean
   diagnosticTransportFilter: string | null
   expandedIds: Set<string>
+  /**
+   * Keyboard cursor (j / k / arrows) as an index into the panel's filtered
+   * list. There is no page any more — the list is virtualized over the whole
+   * loaded window — so the index is absolute and the cursor, the detail pane's
+   * prev / next and the URL selection all address the same rows.
+   */
   focusedIndex: number
-  currentPage: number
-  pageSize: number
   density: Density
 
   // Presets
   presets: LogFilterPreset[]
+  /**
+   * The applied preset, or `EMPTY_PRESET_VALUE`. Derived, not stored: it reads
+   * as the preset's id only while every facet the preset carries still matches
+   * the live filters, so the picker stops claiming "Errors last hour" the
+   * moment the user widens the range by hand.
+   */
   activePresetId: string
 
   // Bookmarks
@@ -63,7 +72,6 @@ export interface LogPanelFilterState {
   setSessionFilter: (v: string) => void
   setSearchQuery: (v: string) => void
   setUseRegex: (v: boolean) => void
-  setHighSeverityOnly: (v: boolean | ((prev: boolean) => boolean)) => void
   setTimeRange: (v: PresetTimeRange) => void
   setCustomTimeRange: (v: { start: Date; end: Date } | null) => void
   setTraceFocusId: (v: string | null) => void
@@ -75,8 +83,6 @@ export interface LogPanelFilterState {
   setSelectedNativeLogging: (v: boolean) => void
   setDiagnosticTransportFilter: (v: string | null) => void
   setFocusedIndex: (v: number | ((prev: number) => number)) => void
-  setCurrentPage: (v: number | ((prev: number) => number)) => void
-  setPageSize: (v: number) => void
   setDensity: (v: Density) => void
 
   // Expansion
@@ -86,7 +92,9 @@ export interface LogPanelFilterState {
   toggleBookmark: (id: string) => void
 
   // Presets
-  saveCurrentPreset: () => void
+  /** Saves the current filters as a preset. `name` is the user's label; a
+   * blank name falls back to a numbered default so a preset is never nameless. */
+  saveCurrentPreset: (name?: string) => void
   applyPreset: (preset: LogFilterPreset) => void
   handlePresetChange: (presetId: string) => void
   removeActivePreset: () => void
@@ -116,4 +124,12 @@ export interface UseLogPanelFiltersOptions {
   /** Required for `density` to be honoured; without it there is nothing to
    * write back to and the control would render inert. */
   onDensityChange?: (density: Density) => void
+  /**
+   * Namespace for the panel's per-embed preferences (live follow). The panel
+   * is embedded twice — `/logs` and Settings → MCP → Health & Logs, which
+   * defaults to live — and with one shared key turning Live off in one place
+   * turned it off in the other on its next mount. Omitted, the hook keeps the
+   * original unscoped key, so the `/logs` preference survives the change.
+   */
+  storageScope?: string
 }

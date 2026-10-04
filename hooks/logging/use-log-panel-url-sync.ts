@@ -12,13 +12,30 @@
  * The write pass only owns the keys in `OWNED_PARAMS`; anything else already in
  * the query string is carried through untouched, so a host page can keep its
  * own params alongside the panel's.
+ *
+ * The selected entry (`sel`) is the one key that cannot be applied at mount:
+ * the URL carries an id and the panel needs the entry, which only exists once
+ * the logs have loaded. It is held as pending, kept in the URL meanwhile (the
+ * first write pass used to erase it before anything could read it), and
+ * resolved against `logs` as soon as they arrive — or dropped once a load
+ * finishes without it, since the entry was cleared or aged out of the window.
  */
 
 import { useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import type { Density, LogPanelFilterState, ViewMode, PanelSource } from "./use-log-panel-filters"
-import type { LogLevel } from "@cognia/logging"
+import type { LogLevel, StructuredLogEntry } from "@cognia/logging"
 import type { PresetTimeRange } from "@cognia/logging/filter-presets"
+
+export interface UseLogPanelUrlSyncOptions {
+  /** The rows the panel can select from — `sel` is resolved against them. */
+  logs?: readonly StructuredLogEntry[]
+  /**
+   * Whether `logs` reflects a finished load. A pending `sel` that is still
+   * absent once this is true is dropped instead of being carried forever.
+   */
+  logsReady?: boolean
+}
 
 const VALID_LEVELS = new Set<LogLevel | "all">([
   "all",
@@ -41,8 +58,6 @@ const VALID_SOURCES = new Set<PanelSource | "all">([
 ])
 const VALID_DENSITIES = new Set<Density>(["compact", "comfortable", "spacious"])
 
-const DEFAULT_PAGE_SIZE = 50
-
 /**
  * Every query key this hook owns. The write pass rebuilds them from filter
  * state, so it must DELETE exactly these from the live query string rather
@@ -64,8 +79,12 @@ const OWNED_PARAMS = [
   "trace",
   "dx",
   "bm",
+  // Legacy: the "high severity only" flag. Read once on hydrate (as the Error
+  // tab) and never written again, so old links still open on errors.
   "hsev",
   "view",
+  // Legacy pagination keys — the list is virtualized over the whole window
+  // now. Owned only so a stale `page=3` is cleaned out of a shared link.
   "page",
   "size",
   "detail",
@@ -73,9 +92,20 @@ const OWNED_PARAMS = [
   "density",
 ] as const
 
-export function useLogPanelUrlSync(filters: LogPanelFilterState): void {
+interface PendingSelection {
+  id: string
+  /** Whether the link also had the detail pane open. */
+  detail: boolean
+}
+
+export function useLogPanelUrlSync(
+  filters: LogPanelFilterState,
+  options: UseLogPanelUrlSyncOptions = {}
+): void {
+  const { logs, logsReady = false } = options
   const searchParams = useSearchParams()
   const hydratedRef = useRef(false)
+  const pendingSelectionRef = useRef<PendingSelection | null>(null)
 
   // Mount-time hydration. Done in a ref guard so toggling filter values later
   // never re-applies stale URL values.
@@ -137,35 +167,49 @@ export function useLogPanelUrlSync(filters: LogPanelFilterState): void {
     if (dx) filters.setDiagnosticTransportFilter(dx)
 
     if (params.get("bm") === "1") filters.setBookmarkFilterActive(true)
-    if (params.get("hsev") === "1") filters.setHighSeverityOnly(true)
+    // The Error tab carries error + fatal, which is what the old toggle meant.
+    // An explicit `level` wins: a link with both was written by the version
+    // that kept them in step, so they agree anyway.
+    if (params.get("hsev") === "1" && (!level || level === "all")) {
+      filters.setLevelFilter("error")
+    }
 
     const view = params.get("view")
     if (view && VALID_VIEW_MODES.has(view as ViewMode)) {
       filters.setViewMode(view as ViewMode)
     }
 
-    const page = params.get("page")
-    if (page) {
-      const n = Number(page)
-      if (Number.isFinite(n) && n >= 1) filters.setCurrentPage(Math.floor(n))
-    }
-
-    const size = params.get("size")
-    if (size) {
-      const n = Number(size)
-      if (Number.isFinite(n) && n >= 1 && n <= 1000) filters.setPageSize(Math.floor(n))
-    }
-
-    if (params.get("detail") === "1") filters.setShowDetailPanel(true)
-
     const density = params.get("density")
     if (density && VALID_DENSITIES.has(density as Density)) {
       filters.setDensity(density as Density)
     }
-    // `sel` (selectedLog.id) is preserved on write so deep links round-trip
-    // visually, but we can't rehydrate the StructuredLogEntry payload at mount
-    // time (logs haven't loaded yet). The panel re-resolves it organically.
+
+    // `detail=1` alone opened an empty pane the layout refused to draw; it
+    // only means something together with the entry it was showing.
+    const sel = params.get("sel")
+    if (sel) pendingSelectionRef.current = { id: sel, detail: params.get("detail") === "1" }
   }, [filters, searchParams])
+
+  // Resolve a deep-linked selection once the rows it names have loaded.
+  const { setSelectedLog, setShowDetailPanel } = filters
+  const userSelected = filters.selectedLog !== null
+  useEffect(() => {
+    const pending = pendingSelectionRef.current
+    if (!pending) return
+    // The user picked something before the link resolved; theirs wins.
+    if (userSelected) {
+      pendingSelectionRef.current = null
+      return
+    }
+    const match = logs?.find((log) => log.id === pending.id)
+    if (match) {
+      pendingSelectionRef.current = null
+      setSelectedLog(match)
+      if (pending.detail) setShowDetailPanel(true)
+    } else if (logsReady) {
+      pendingSelectionRef.current = null
+    }
+  }, [logs, logsReady, userSelected, setSelectedLog, setShowDetailPanel])
 
   const lastUrlRef = useRef<string>("")
   useEffect(() => {
@@ -190,12 +234,17 @@ export function useLogPanelUrlSync(filters: LogPanelFilterState): void {
     if (filters.traceFocusId) params.set("trace", filters.traceFocusId)
     if (filters.diagnosticTransportFilter) params.set("dx", filters.diagnosticTransportFilter)
     if (filters.bookmarkFilterActive) params.set("bm", "1")
-    if (filters.highSeverityOnly) params.set("hsev", "1")
     if (filters.viewMode !== "list") params.set("view", filters.viewMode)
-    if (filters.currentPage > 1) params.set("page", String(filters.currentPage))
-    if (filters.pageSize !== DEFAULT_PAGE_SIZE) params.set("size", String(filters.pageSize))
-    if (filters.showDetailPanel) params.set("detail", "1")
-    if (filters.selectedLog?.id) params.set("sel", filters.selectedLog.id)
+    const pending = pendingSelectionRef.current
+    if (filters.selectedLog?.id) {
+      params.set("sel", filters.selectedLog.id)
+      // `detail=1` with nothing selected described a pane that cannot render.
+      if (filters.showDetailPanel) params.set("detail", "1")
+    } else if (pending) {
+      // Not resolved yet — keep the link's selection until the logs arrive.
+      params.set("sel", pending.id)
+      if (pending.detail) params.set("detail", "1")
+    }
     if (filters.density !== "comfortable") params.set("density", filters.density)
 
     const queryString = params.toString()
@@ -223,12 +272,12 @@ export function useLogPanelUrlSync(filters: LogPanelFilterState): void {
     filters.traceFocusId,
     filters.diagnosticTransportFilter,
     filters.bookmarkFilterActive,
-    filters.highSeverityOnly,
     filters.viewMode,
-    filters.currentPage,
-    filters.pageSize,
     filters.showDetailPanel,
     filters.selectedLog,
     filters.density,
+    // A pending `sel` is dropped when a load finishes without it; re-run so
+    // the URL stops carrying it.
+    logsReady,
   ])
 }

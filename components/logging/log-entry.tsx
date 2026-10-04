@@ -3,15 +3,24 @@
 /**
  * LogEntry Components
  *
- * Extracted from log-panel.tsx — log entry rendering, highlighting, and trace group display.
+ * Extracted from log-panel.tsx — log entry rendering and search highlighting.
+ *
+ * A row is an `option` in the list's `listbox`, and the list keeps one of
+ * them in the tab order (roving tabindex, driven by the panel's keyboard
+ * cursor). Tab used to walk every row AND every hover action inside it —
+ * four or five stops per entry, a thousand entries deep — before reaching the
+ * detail pane. The row's own actions are out of the tab order now; each is
+ * still one keystroke away (b bookmarks, Enter opens, e expands) and all of
+ * them are in the row's context menu (the Menu key / Shift+F10).
  */
 
 import { useState, useCallback, memo } from "react"
-import { useTranslations } from "next-intl"
+import { isToday } from "date-fns"
+import { useLocale, useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   ChevronDown,
   ChevronRight,
-  Clock,
   Copy,
   Check,
   Filter,
@@ -25,7 +34,6 @@ import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -109,6 +117,29 @@ export interface LogEntryProps {
   onToggleBookmark?: (id: string) => void
   /** Whether this row's detail panel is currently open. */
   isSelected?: boolean
+  /**
+   * The row's primary action — a click on the row, or Enter while it has
+   * focus. Hosts with a detail view pass "open this entry"; without it the
+   * row falls back to expanding in place.
+   */
+  onActivate?: (log: StructuredLogEntry, index: number) => void
+  /** The row's position in the host list, handed back to `onActivate` so the
+   * host can bind one callback for every row and `React.memo` still holds. */
+  index?: number
+  /** Whether the keyboard cursor (j / k / arrows) is on this row. */
+  isFocused?: boolean
+  /**
+   * Whether this row is the list's single tab stop (roving tabindex). Every
+   * other row is `tabIndex={-1}`: reachable with the arrow keys, skipped by
+   * Tab. Defaults to `true` so a row rendered on its own stays focusable.
+   */
+  isTabStop?: boolean
+  /** Called with `index` when the row itself receives focus, so the host's
+   * keyboard cursor follows a click or a Tab into the list. */
+  onFocusRow?: (index: number) => void
+  /** Total rows in the host list — `aria-setsize`, since a virtualized list
+   * only mounts the rows on screen and the count cannot be inferred. */
+  setSize?: number
   /** Visual density — controls row padding. Default `"comfortable"`. */
   density?: LogEntryDensity
   t: ReturnType<typeof useTranslations>
@@ -132,9 +163,16 @@ export function LogEntry({
   isBookmarked,
   onToggleBookmark,
   isSelected = false,
+  onActivate,
+  index = -1,
+  isFocused = false,
+  isTabStop = true,
+  onFocusRow,
+  setSize,
   density = "comfortable",
   t,
 }: LogEntryProps) {
+  const locale = useLocale()
   const [copied, setCopied] = useState(false)
   const theme = LEVEL_THEME[log.level]
   const isTraceEntry = log.module === AGENT_TRACE_MODULE
@@ -149,14 +187,23 @@ export function LogEntry({
   const Icon = (TraceIcon ?? theme.icon) as React.ComponentType<{ className?: string }>
   const iconColor = traceColor ?? theme.iconColor
 
-  const handleCopy = useCallback(() => {
-    const text = JSON.stringify(log, null, 2)
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [log])
+  // The write is awaited: it rejects when the document is not focused or the
+  // permission is denied, and the check mark used to appear regardless.
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(log, null, 2))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error(t("panel.copyFailed"))
+    }
+  }, [log, t])
 
   const handleToggle = useCallback(() => onToggle(log.id), [onToggle, log.id])
+  const handleActivate = useCallback(() => {
+    if (onActivate) onActivate(log, index)
+    else onToggle(log.id)
+  }, [onActivate, onToggle, log, index])
   const handleSelect = useCallback(() => onSelect?.(log), [onSelect, log])
   const handleToggleBookmark = useCallback(
     () => onToggleBookmark?.(log.id),
@@ -170,13 +217,24 @@ export function LogEntry({
   }, [onFocusSession, log])
 
   const timestamp = new Date(log.timestamp)
-  const timeStr = timestamp.toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-  })
+  const validTimestamp = !Number.isNaN(timestamp.getTime())
+  // The app locale's digits and separators; the row was pinned to en-US.
+  const timeStr = validTimestamp
+    ? timestamp.toLocaleTimeString(locale, {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        fractionalSecondDigits: 3,
+      })
+    : log.timestamp
+  // A row from another day says which. The list spans up to seven days under
+  // the time-range presets, and "09:14:02.118" alone could be any of them.
+  const dateStr =
+    validTimestamp && !isToday(timestamp)
+      ? timestamp.toLocaleDateString(locale, { month: "2-digit", day: "2-digit" })
+      : null
+  const expandLabel = isExpanded ? t("panel.collapseEntry") : t("panel.expandEntry")
 
   const hasDetails = log.data || log.stack || log.source
 
@@ -187,11 +245,24 @@ export function LogEntry({
           data-testid="log-entry-row"
           data-level={log.level}
           data-selected={isSelected || undefined}
-          tabIndex={0}
-          role="button"
-          aria-expanded={hasDetails ? isExpanded : undefined}
+          data-focused={isFocused || undefined}
+          data-index={index >= 0 ? index : undefined}
+          tabIndex={isTabStop ? 0 : -1}
+          role="option"
+          aria-selected={isSelected}
+          aria-posinset={index >= 0 ? index + 1 : undefined}
+          aria-setsize={setSize}
+          onFocus={(event) => {
+            if (event.target === event.currentTarget && index >= 0) onFocusRow?.(index)
+          }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
+            // Only keys aimed at the row itself; a button inside it handles
+            // its own Enter / Space.
+            if (event.target !== event.currentTarget) return
+            if (event.key === "Enter") {
+              event.preventDefault()
+              handleActivate()
+            } else if (event.key === " " && hasDetails) {
               event.preventDefault()
               handleToggle()
             }
@@ -201,6 +272,7 @@ export function LogEntry({
             "hover:bg-muted/50 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40",
             isExpanded && theme.bgClass,
             theme.gutterClass,
+            isFocused && "bg-muted/60 ring-1 ring-inset ring-ring/50",
             isSelected && "border-l-primary bg-primary/5 hover:bg-primary/10"
           )}
         >
@@ -210,16 +282,31 @@ export function LogEntry({
               DENSITY_ROW_PADDING[density]
             )}
             data-density={density}
-            onClick={handleToggle}
+            onClick={handleActivate}
           >
             {hasDetails ? (
-              isExpanded ? (
-                <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-              )
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                tabIndex={-1}
+                className="mt-0.5 size-4 shrink-0 rounded p-0 text-muted-foreground"
+                aria-label={expandLabel}
+                aria-expanded={isExpanded}
+                data-testid="log-entry-expand"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleToggle()
+                }}
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </Button>
             ) : (
-              <div className="w-4" />
+              <div className="w-4 shrink-0" />
             )}
 
             <Icon className={cn("h-4 w-4 mt-0.5 shrink-0", iconColor)} />
@@ -233,7 +320,13 @@ export function LogEntry({
               original single row back.
             */}
             <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2 sm:flex-nowrap">
-              <span className="text-xs text-muted-foreground font-mono shrink-0">{timeStr}</span>
+              <span
+                className="text-xs text-muted-foreground font-mono shrink-0"
+                title={log.timestamp}
+              >
+                {dateStr ? <span className="mr-1 text-muted-foreground/70">{dateStr}</span> : null}
+                {timeStr}
+              </span>
 
               <Badge variant="outline" className="text-xs shrink-0 font-mono">
                 {log.module}
@@ -241,15 +334,28 @@ export function LogEntry({
 
               {log.traceId && (
                 <Tooltip>
+                  {/* A real button, so the tooltip opens on focus as well as on
+                      hover — a bare Badge could only ever be hovered. It is
+                      out of the tab order like the row's other controls; the
+                      full id is also in its accessible name. */}
                   <TooltipTrigger asChild>
-                    <Badge variant="secondary" className="text-xs shrink-0 font-mono">
-                      {log.traceId.slice(0, 8)}
+                    <Badge
+                      asChild
+                      variant="secondary"
+                      className="text-xs shrink-0 font-mono"
+                      data-testid="log-entry-trace-badge"
+                    >
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label={t("panel.traceIdValue", { id: log.traceId })}
+                      >
+                        {log.traceId.slice(0, 8)}
+                      </button>
                     </Badge>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>
-                      {t("panel.traceId")}: {log.traceId}
-                    </p>
+                    <p>{t("panel.traceIdValue", { id: log.traceId })}</p>
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -259,12 +365,11 @@ export function LogEntry({
               </span>
             </div>
 
-            {/* Row actions: revealed on row hover, on keyboard focus inside the
-                cluster, while a popup from it is open, and always on touch. The
-                cluster is the only gate (the bookmark button used to fade a
-                second time on hover, which left it invisible under keyboard
-                focus); only the opacity fades, so every action stays focusable
-                and clickable. */}
+            {/* Row actions: revealed on row hover, while a popup from it is
+                open, and always on touch. They are pointer shortcuts — out of
+                the tab order (see the header), each with a key and a context
+                menu entry. "Open details" is not among them any more: the row
+                click opens the entry, and the icon restated it. */}
             <div
               data-testid="log-entry-actions"
               className={cn("flex items-center gap-0.5 shrink-0", HOVER_REVEAL_GROUP_CLASS)}
@@ -275,6 +380,7 @@ export function LogEntry({
                     <Button
                       variant="ghost"
                       size="icon"
+                      tabIndex={-1}
                       className="h-6 w-6"
                       data-testid="log-entry-bookmark"
                       aria-label={isBookmarked ? t("panel.removeBookmark") : t("panel.addBookmark")}
@@ -297,33 +403,13 @@ export function LogEntry({
                 </Tooltip>
               )}
 
-              {onSelect && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      data-testid="log-entry-open-details"
-                      aria-label={t("panel.viewDetails")}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleSelect()
-                      }}
-                    >
-                      <PanelRightOpen className="h-3 w-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("panel.viewDetails")}</TooltipContent>
-                </Tooltip>
-              )}
-
               {onFocusTrace && log.traceId && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
+                      tabIndex={-1}
                       className="h-6 w-6"
                       aria-label={t("panel.focusTrace")}
                       onClick={(e) => {
@@ -344,6 +430,7 @@ export function LogEntry({
                     <Button
                       variant="ghost"
                       size="icon"
+                      tabIndex={-1}
                       className="h-6 w-6"
                       aria-label={t("panel.focusSession")}
                       onClick={(e) => {
@@ -363,10 +450,13 @@ export function LogEntry({
                   <Button
                     variant="ghost"
                     size="icon"
+                    tabIndex={-1}
                     className="h-6 w-6"
+                    aria-label={t("panel.copyEntry")}
+                    data-testid="log-entry-copy"
                     onClick={(e) => {
                       e.stopPropagation()
-                      handleCopy()
+                      void handleCopy()
                     }}
                   >
                     {copied ? (
@@ -412,7 +502,7 @@ export function LogEntry({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onClick={handleCopy}>
+        <ContextMenuItem onClick={() => void handleCopy()}>
           <Copy className="h-4 w-4 mr-2" /> {t("panel.copyLogEntry")}
         </ContextMenuItem>
         {onSelect && (
@@ -450,79 +540,3 @@ export function LogEntry({
 }
 
 export const MemoizedLogEntry = memo(LogEntry)
-
-export interface TraceGroupProps {
-  traceId: string
-  logs: StructuredLogEntry[]
-  expandedIds: Set<string>
-  toggleExpanded: (id: string) => void
-  onFocusTrace?: (traceId: string, log: StructuredLogEntry) => void
-  onFocusSession?: (sessionId: string, log: StructuredLogEntry) => void
-  searchQuery: string
-  useRegex: boolean
-  bookmarkedIds: Set<string>
-  onToggleBookmark?: (id: string) => void
-  selectedLogId?: string | null
-  density?: LogEntryDensity
-  t: ReturnType<typeof useTranslations>
-}
-
-export function TraceGroup({
-  traceId,
-  logs,
-  expandedIds,
-  toggleExpanded,
-  onFocusTrace,
-  onFocusSession,
-  searchQuery,
-  useRegex,
-  bookmarkedIds,
-  onToggleBookmark,
-  selectedLogId = null,
-  density = "comfortable",
-  t,
-}: TraceGroupProps) {
-  const [isOpen, setIsOpen] = useState(true)
-  const hasErrors = logs.some((l) => l.level === "error" || l.level === "fatal")
-  const hasWarnings = logs.some((l) => l.level === "warn")
-
-  return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-2 border-y">
-      <CollapsibleTrigger className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50">
-        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        <Clock className="h-4 w-4 text-muted-foreground" />
-        <span className="font-mono text-sm">
-          {traceId === "no-trace" ? t("panel.noTraceId") : traceId}
-        </span>
-        <Badge variant="outline" className="ml-auto">
-          {logs.length} {t("panel.logs")}
-        </Badge>
-        {hasErrors && <Badge variant="destructive">{t("panel.error")}</Badge>}
-        {hasWarnings && !hasErrors && (
-          <Badge variant="secondary" className="bg-warning/15 text-warning">
-            {t("panel.warning")}
-          </Badge>
-        )}
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        {logs.map((log) => (
-          <MemoizedLogEntry
-            key={log.id}
-            log={log}
-            isExpanded={expandedIds.has(log.id)}
-            onToggle={toggleExpanded}
-            onFocusTrace={onFocusTrace}
-            onFocusSession={onFocusSession}
-            searchQuery={searchQuery}
-            useRegex={useRegex}
-            isBookmarked={bookmarkedIds.has(log.id)}
-            onToggleBookmark={onToggleBookmark}
-            isSelected={log.id === selectedLogId}
-            density={density}
-            t={t}
-          />
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}

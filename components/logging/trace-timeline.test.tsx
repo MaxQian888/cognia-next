@@ -7,10 +7,24 @@ import userEvent from "@testing-library/user-event"
 import { makeSpan } from "@/lib/observability/fixtures"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
-jest.mock("next-intl", () => ({
-  useTranslations: (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`
+  return {
+    useTranslations: (namespace: string) =>
+      Object.assign(translator(namespace), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 jest.mock("@/hooks/logging/use-theme-colors", () => ({
   useThemeColors: () => ({
@@ -299,5 +313,103 @@ describe("TraceTimeline", () => {
   it("renders inert blocks when the host supplies no select handler", () => {
     renderTimeline({ onSelectSpan: undefined })
     expect(screen.getByTestId("timeline-block-root")).toBeDisabled()
+  })
+})
+
+describe("TraceTimeline — header, zoom and search", () => {
+  it("hosts the pane header: leading identity and trailing actions, in every state", () => {
+    renderTimeline({
+      loading: true,
+      leading: <span data-testid="lead">trace-id</span>,
+      actions: <button data-testid="act">export</button>,
+    })
+    expect(screen.getByTestId("lead")).toBeInTheDocument()
+    expect(screen.getByTestId("act")).toBeInTheDocument()
+    expect(screen.getByTestId("trace-timeline-loading")).toBeInTheDocument()
+  })
+
+  it("counts the window against the whole trace when zoomed — one count, not two", () => {
+    renderTimeline({ window: { since: 1_150, until: 1_350 } })
+    expect(screen.getByTestId("timeline-total-spans")).toHaveTextContent("spansOf")
+    expect(screen.getByTestId("timeline-total-spans")).toHaveTextContent('"total":3')
+  })
+
+  it("zooms with + / - / 0 from anywhere in the strip", () => {
+    const { props } = renderTimeline()
+    const block = screen.getByTestId("timeline-block-root")
+    fireEvent.keyDown(block, { key: "+" })
+    expect(props.onWindowChange).toHaveBeenLastCalledWith({ since: 1_250, until: 1_750 })
+    fireEvent.keyDown(block, { key: "0" })
+    expect(props.onWindowChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it("zooms out by doubling the window, back to null at the full trace", () => {
+    const { props } = renderTimeline({ window: { since: 1_250, until: 1_750 } })
+    fireEvent.keyDown(screen.getByTestId("trace-timeline"), { key: "-" })
+    expect(props.onWindowChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it("offers zoom buttons, with zoom-out disabled at the full trace", () => {
+    const { props } = renderTimeline()
+    expect(screen.getByTestId("timeline-zoom-out")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("timeline-zoom-in"))
+    expect(props.onWindowChange).toHaveBeenCalledWith({ since: 1_250, until: 1_750 })
+  })
+
+  it("starts a zoom drag on a lane's empty space, not only on the brush", () => {
+    const { props } = renderTimeline()
+    stubTrackWidth(1000)
+    const lane = screen.getByTestId("timeline-lane-execute_tool")
+    fireEvent.pointerDown(lane, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(lane, { clientX: 500, pointerId: 1 })
+    fireEvent.pointerUp(lane, { clientX: 500, pointerId: 1 })
+    expect(props.onWindowChange).toHaveBeenCalledWith({ since: 1_100, until: 1_500 })
+  })
+
+  it("ignores a press in the lane-label gutter", () => {
+    const { props } = renderTimeline()
+    stubTrackWidth(1000)
+    // The brush rect starts at 0; a press left of it is off the time axis.
+    const lane = screen.getByTestId("timeline-lane-execute_tool")
+    fireEvent.pointerDown(lane, { button: 0, clientX: -50, pointerId: 1 })
+    fireEvent.pointerUp(lane, { clientX: 400, pointerId: 1 })
+    expect(props.onWindowChange).not.toHaveBeenCalled()
+  })
+
+  it("highlights with the list's matcher — a trace id lights every block", () => {
+    const all = spans().map((span) => ({ ...span, traceId: "abc123" }))
+    renderTimeline({ spans: all, highlightQuery: "ABC123" })
+    for (const id of ["root", "tool-a", "tool-b"]) {
+      expect(screen.getByTestId(`timeline-block-${id}`)).not.toHaveClass("opacity-25")
+    }
+  })
+
+  it("matches a block's own surface, as the list matches a trace's", () => {
+    const mixed = spans()
+    mixed[1] = { ...mixed[1], surface: "mcp" }
+    renderTimeline({ spans: mixed, highlightQuery: "mcp" })
+    expect(screen.getByTestId("timeline-block-tool-a")).not.toHaveClass("opacity-25")
+    expect(screen.getByTestId("timeline-block-root")).toHaveClass("opacity-25")
+  })
+
+  it("folds to its toolbar and caps the lane area so it scrolls", () => {
+    const onCollapsedChange = jest.fn()
+    const { rerender, props } = renderTimeline({ onCollapsedChange })
+    expect(screen.getByTestId("trace-timeline-lanes")).toHaveClass("max-h-40", "overflow-y-auto")
+    fireEvent.click(screen.getByTestId("timeline-collapse"))
+    expect(onCollapsedChange).toHaveBeenCalledWith(true)
+    rerender(<TraceTimeline {...props} collapsed />)
+    expect(screen.queryByTestId("trace-timeline-lanes")).not.toBeInTheDocument()
+    expect(screen.getByTestId("timeline-collapse")).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("labels ruler ticks with app-locale durations", () => {
+    renderTimeline()
+    expect(screen.getByTestId("trace-timeline-ruler")).toHaveTextContent("1s")
+  })
+
+  it("keeps the raw lane id as the lane label's title", () => {
+    renderTimeline()
+    expect(screen.getAllByTitle("execute_tool").length).toBeGreaterThan(0)
   })
 })

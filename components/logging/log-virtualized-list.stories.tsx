@@ -31,8 +31,6 @@ const meta = {
     isLoading: false,
     error: null,
     filteredLogs: makeLogStream(60),
-    groupByTraceId: false,
-    groupedLogs: new Map(),
     expandedIds: new Set<string>(),
     toggleExpanded: fn(),
     searchQuery: "",

@@ -13,8 +13,26 @@ jest.mock("@/hooks/logging/use-crash-logs", () => ({
   useCrashLogs: () => useCrashLogsMock(),
 }))
 
+// The detail is a pane at xl and a sheet below it, chosen in JS.
+let wide = true
+jest.mock("@/hooks/ui", () => ({
+  ...jest.requireActual("@/hooks/ui"),
+  useMediaQuery: () => wide,
+}))
+
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}))
+
 jest.mock("@/components/logging/log-detail-panel", () => ({
-  LogDetailPanel: () => <div data-testid="log-detail-panel-stub" />,
+  LogDetailPanel: ({ variant }: { variant?: string }) => (
+    <div data-testid="log-detail-panel-stub" data-variant={variant} />
+  ),
 }))
 
 import { CrashDiagnosticsWorkspace } from "./crash-diagnostics-workspace"
@@ -67,7 +85,7 @@ function buildResult(overrides: Partial<UseCrashLogsResult> = {}): UseCrashLogsR
     selectItem: jest.fn(),
     refresh: jest.fn().mockResolvedValue(undefined),
     clearRecent: jest.fn(),
-    clearPersisted: jest.fn().mockResolvedValue(undefined),
+    clearPersisted: jest.fn().mockResolvedValue(3),
     copySelected: jest.fn().mockResolvedValue(true),
     exportBundle: jest.fn(),
     openNativeLogDirectory: jest.fn().mockResolvedValue(true),
@@ -94,15 +112,17 @@ function setup(overrides: Partial<UseCrashLogsResult> = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  wide = true
 })
 
 describe("counts strip", () => {
   it("reports the total, the poll state and the native status", () => {
     setup()
     const strip = within(screen.getByTestId("crash-summary-strip"))
-    expect(strip.getByText("Visible Incidents")).toBeInTheDocument()
+    expect(strip.getByText("Visible errors")).toBeInTheDocument()
     expect(strip.getByText("2")).toBeInTheDocument()
-    expect(strip.getByText("healthy")).toBeInTheDocument()
+    // Translated, not the raw readiness enum.
+    expect(strip.getByText("Healthy")).toBeInTheDocument()
     expect(strip.getByText(/^On/)).toBeInTheDocument()
   })
 
@@ -137,7 +157,7 @@ describe("toolbar", () => {
 
   it("forwards the search query and the source filter", () => {
     const result = setup()
-    fireEvent.change(screen.getByPlaceholderText("Search crash logs..."), {
+    fireEvent.change(screen.getByPlaceholderText("Search errors…"), {
       target: { value: "renderer" },
     })
     expect(result.setSearchQuery).toHaveBeenCalledWith("renderer")
@@ -174,17 +194,67 @@ describe("list and detail", () => {
     const detail = within(screen.getByTestId("crash-detail-pane"))
     expect(detail.getByText("Renderer crashed")).toBeInTheDocument()
     expect(detail.getByText("Unhandled exception in the renderer process")).toBeInTheDocument()
-    expect(detail.getByTestId("log-detail-panel-stub")).toBeInTheDocument()
+    // The body only — the crash header already prints level, title, time and
+    // trace; the full pane printed them all again under its own heading.
+    expect(detail.getByTestId("log-detail-panel-stub")).toHaveAttribute("data-variant", "embedded")
     expect(detail.getByText("C:\\cognia\\logs")).toBeInTheDocument()
-    expect(detail.getByText("degraded")).toBeInTheDocument()
+    expect(detail.getByText("Degraded")).toBeInTheDocument()
   })
 
-  it("copies the selection and opens the native log directory", async () => {
+  it("translates the diagnostic snapshot instead of printing a code", () => {
+    const snapshotItem: CrashLogItem = {
+      id: "crash:diagnostic-snapshot",
+      title: "",
+      summary: "",
+      snapshot: { summaryCode: "native_inactive", detail: null },
+      timestamp: "2026-06-01T11:00:00Z",
+      level: "info",
+      module: "native",
+      sources: ["diagnostic"],
+    }
+    setup({ items: [snapshotItem], selectedItem: snapshotItem })
+    const row = screen.getByTestId("crash-row")
+    expect(within(row).getByText("Diagnostic snapshot")).toBeInTheDocument()
+    expect(within(row).getByText("Native logging is inactive in this runtime")).toBeInTheDocument()
+  })
+
+  it("copies the selection with feedback and opens the native log directory", async () => {
     const result = setup()
     fireEvent.click(screen.getByRole("button", { name: "Copy Selected" }))
     await waitFor(() => expect(result.copySelected).toHaveBeenCalled())
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Copied to the clipboard"))
     fireEvent.click(screen.getByRole("button", { name: "Open Directory" }))
     await waitFor(() => expect(result.openNativeLogDirectory).toHaveBeenCalled())
+  })
+
+  it("answers a failed action with a toast instead of an unhandled rejection", async () => {
+    const result = setup({
+      copySelected: jest.fn().mockRejectedValue(new Error("denied")),
+      openNativeLogDirectory: jest.fn().mockResolvedValue(false),
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Copy Selected" }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not write to the clipboard"))
+    fireEvent.click(screen.getByRole("button", { name: "Open Directory" }))
+    await waitFor(() => expect(result.openNativeLogDirectory).toHaveBeenCalled())
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not open the log directory"))
+    // The busy flag is released after a failure too.
+    await waitFor(() => expect(screen.getByTestId("crash-refresh")).not.toBeDisabled())
+  })
+
+  it("renders the pane at xl and never mounts the sheet's overlay there", () => {
+    setup()
+    expect(screen.getByTestId("crash-detail-aside")).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTestId("crash-row")[0])
+    expect(screen.queryByTestId("crash-detail-drawer")).not.toBeInTheDocument()
+  })
+
+  it("opens a sheet below xl only once a row is chosen", () => {
+    wide = false
+    setup()
+    expect(screen.queryByTestId("crash-detail-aside")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("crash-detail-drawer")).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByTestId("crash-row")[0])
+    expect(screen.getByTestId("crash-detail-drawer")).toBeInTheDocument()
   })
 
   it("renders the empty state instead of a list when nothing matches", () => {
@@ -195,7 +265,31 @@ describe("list and detail", () => {
 
   it("surfaces a load failure above the list", () => {
     setup({ error: new Error("indexeddb unavailable") })
-    expect(screen.getByText("Failed to Load Crash Logs")).toBeInTheDocument()
+    expect(screen.getByText("Could not load error logs")).toBeInTheDocument()
     expect(screen.getByText("indexeddb unavailable")).toBeInTheDocument()
+  })
+})
+
+describe("clearing", () => {
+  it("asks before clearing stored logs, then reports how many went", async () => {
+    const user = userEvent.setup()
+    const result = setup()
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    await user.click(await screen.findByTestId("crash-clear-stored"))
+    // Nothing is deleted until the dialog is confirmed.
+    expect(result.clearPersisted).not.toHaveBeenCalled()
+    const dialog = within(await screen.findByTestId("crash-clear-stored-confirm"))
+    await user.click(dialog.getByRole("button", { name: "Clear stored" }))
+    await waitFor(() => expect(result.clearPersisted).toHaveBeenCalled())
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Cleared 3 stored error logs"))
+  })
+
+  it("keeps the logs when the confirmation is dismissed", async () => {
+    const user = userEvent.setup()
+    const result = setup()
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    await user.click(await screen.findByTestId("crash-clear-stored"))
+    await user.click(await screen.findByRole("button", { name: "Keep logs" }))
+    expect(result.clearPersisted).not.toHaveBeenCalled()
   })
 })

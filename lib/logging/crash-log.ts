@@ -9,6 +9,7 @@ import {
   type CrashLogExportBundle,
   type CrashLogSource,
   type CrashLogSummary,
+  type CrashDiagnosticsSummaryCode,
 } from "@/types/logging"
 import { downloadFile } from "@/lib/files/download"
 import {
@@ -27,6 +28,7 @@ export type {
   CrashLogExportFilters,
   CrashLogExportBundle,
   CrashLogSummary,
+  CrashDiagnosticsSummaryCode,
 } from "@/types/logging"
 
 const SOURCE_ORDER: CrashLogSource[] = ["recent", "persisted", "diagnostic"]
@@ -58,20 +60,36 @@ function toTimestampValue(timestamp: string): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-function deriveDiagnosticsSummary(diagnostics: CrashDiagnosticsSnapshot): string {
+/** The id of the synthetic item a degraded diagnostic snapshot adds. */
+export const DIAGNOSTIC_SNAPSHOT_ITEM_ID = "crash:diagnostic-snapshot"
+
+/**
+ * Why the snapshot is worth a row, as a code plus whatever raw detail came
+ * with it. The component translates the code; this module writes no prose.
+ */
+export function deriveDiagnosticsSummary(diagnostics: CrashDiagnosticsSnapshot): {
+  summaryCode: CrashDiagnosticsSummaryCode
+  detail: string | null
+} {
   if (diagnostics.diagnosticsError) {
-    return diagnostics.diagnosticsError
+    return { summaryCode: "diagnostics_error", detail: diagnostics.diagnosticsError }
   }
   if (diagnostics.localRuntimeDiagnostics?.status === "error") {
-    return diagnostics.localRuntimeDiagnostics.lastError || "Local runtime reported an error"
+    return {
+      summaryCode: "runtime_error",
+      detail: diagnostics.localRuntimeDiagnostics.lastError || null,
+    }
   }
   if (diagnostics.nativeLogging?.status === "degraded") {
-    return diagnostics.nativeLogging.fallbackReason?.message || "Native logging is degraded"
+    return {
+      summaryCode: "native_degraded",
+      detail: diagnostics.nativeLogging.fallbackReason?.message || null,
+    }
   }
   if (diagnostics.nativeLogging?.status === "inactive") {
-    return "Native logging is inactive in the current runtime"
+    return { summaryCode: "native_inactive", detail: null }
   }
-  return "Latest native diagnostics snapshot"
+  return { summaryCode: "snapshot", detail: null }
 }
 
 export function isCrashRelevantLogEntry(log: StructuredLogEntry): boolean {
@@ -167,6 +185,12 @@ function sanitizeCrashLogItem(item: CrashLogItem): CrashLogItem {
     ...item,
     title: sanitizeText(item.title),
     summary: sanitizeText(item.summary),
+    snapshot: item.snapshot
+      ? {
+          ...item.snapshot,
+          detail: item.snapshot.detail ? sanitizeText(item.snapshot.detail) : null,
+        }
+      : item.snapshot,
     logEntry: item.logEntry ? sanitizeLogEntry(item.logEntry) : item.logEntry,
     diagnostics: item.diagnostics
       ? (sanitizeValue(item.diagnostics) as CrashDiagnosticsSnapshot)
@@ -218,10 +242,12 @@ export function buildCrashLogItems(params: {
   const items = [...merged.values()]
 
   if (shouldAddDiagnosticsItem(params.diagnostics)) {
+    const snapshot = deriveDiagnosticsSummary(params.diagnostics)
     items.push({
-      id: "crash:diagnostic-snapshot",
-      title: "Diagnostic snapshot",
-      summary: deriveDiagnosticsSummary(params.diagnostics),
+      id: DIAGNOSTIC_SNAPSHOT_ITEM_ID,
+      title: "",
+      summary: snapshot.detail ?? "",
+      snapshot,
       timestamp: params.diagnostics.capturedAt,
       level: deriveDiagnosticsLevel(params.diagnostics),
       module: "native",
@@ -326,7 +352,14 @@ export function serializeCrashLogBundle(
       filename: `cognia-crash-logs-${datePart}.txt`,
       content: bundle.items
         .map(
-          (item) => `${item.timestamp} [${item.level.toUpperCase()}] ${item.module} ${item.title}`
+          (item) =>
+            // A snapshot has no message of its own: its code (and detail) is
+            // what a reader of the export needs.
+            `${item.timestamp} [${item.level.toUpperCase()}] ${item.module} ${
+              item.snapshot
+                ? `[snapshot:${item.snapshot.summaryCode}]${item.snapshot.detail ? ` ${item.snapshot.detail}` : ""}`
+                : item.title
+            }`
         )
         .join("\n"),
       mimeType: "text/plain",

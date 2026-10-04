@@ -36,7 +36,103 @@ const BOOKMARKS_STORAGE_KEY = "cognia-log-bookmarks"
 const DENSITY_STORAGE_KEY = "cognia-log-density"
 const AUTO_REFRESH_STORAGE_KEY = "cognia-log-auto-refresh"
 const VALID_DENSITIES: Density[] = ["compact", "comfortable", "spacious"]
+const VALID_SOURCES = new Set<PanelSource | "all">([
+  "all",
+  "frontend",
+  "tauri",
+  "mcp",
+  "plugin",
+  "internal",
+])
 const EMPTY_PRESET_VALUE = "__none__"
+
+/**
+ * The live-follow key for one embed. The unscoped key stays the `/logs`
+ * panel's so its stored preference survives; every other embed gets a key of
+ * its own and can no longer flip `/logs` (or be flipped by it).
+ */
+export function autoRefreshStorageKey(scope?: string): string {
+  const trimmed = scope?.trim()
+  return trimmed ? `${AUTO_REFRESH_STORAGE_KEY}:${trimmed}` : AUTO_REFRESH_STORAGE_KEY
+}
+
+/** The facets a preset captures, normalised to the shape the panel holds them in. */
+interface PresetFacets {
+  levelFilter: LogLevel | "all"
+  moduleFilter: string
+  timeRange: PresetTimeRange
+  searchQuery: string
+  useRegex: boolean
+  sourceFilter: PanelSource | "all"
+  sessionFilter: string
+  customTimeRange: { start: number; end: number } | null
+  traceFocusId: string | null
+  diagnosticTransportFilter: string | null
+}
+
+/**
+ * Read a stored preset defensively. The v1 validator only checks the original
+ * six keys, so the later optional ones arrive unchecked from localStorage — a
+ * malformed value falls back to the facet's default instead of reaching state.
+ * `defaultSource` is the embed's own default (Settings → MCP opens on `mcp`),
+ * which is what "this preset did not pin a source" restores.
+ */
+export function resolvePresetFacets(
+  filters: LogFilterPresetFilters,
+  defaultSource: PanelSource | "all"
+): PresetFacets {
+  // Legacy: before the Error tab carried fatal on its own, "errors only" was
+  // `levelFilter: "all"` plus this flag. Such a preset now opens the Error tab.
+  const levelFilter =
+    filters.levelFilter === "all" && filters.highSeverityOnly ? "error" : filters.levelFilter
+  const source = filters.sourceFilter
+  const range = filters.customTimeRange
+  const validRange =
+    range &&
+    typeof range === "object" &&
+    Number.isFinite(range.start) &&
+    Number.isFinite(range.end) &&
+    range.start < range.end
+      ? { start: range.start, end: range.end }
+      : null
+  return {
+    levelFilter,
+    moduleFilter: filters.moduleFilter,
+    timeRange: validRange ? "all" : filters.timeRange,
+    searchQuery: filters.searchQuery,
+    useRegex: filters.useRegex,
+    sourceFilter:
+      typeof source === "string" && VALID_SOURCES.has(source as PanelSource | "all")
+        ? (source as PanelSource | "all")
+        : defaultSource,
+    sessionFilter: typeof filters.sessionFilter === "string" ? filters.sessionFilter : "",
+    customTimeRange: validRange,
+    traceFocusId:
+      typeof filters.traceFocusId === "string" && filters.traceFocusId
+        ? filters.traceFocusId
+        : null,
+    diagnosticTransportFilter:
+      typeof filters.diagnosticTransportFilter === "string" && filters.diagnosticTransportFilter
+        ? filters.diagnosticTransportFilter
+        : null,
+  }
+}
+
+function facetsEqual(a: PresetFacets, b: PresetFacets): boolean {
+  return (
+    a.levelFilter === b.levelFilter &&
+    a.moduleFilter === b.moduleFilter &&
+    a.timeRange === b.timeRange &&
+    a.searchQuery === b.searchQuery &&
+    a.useRegex === b.useRegex &&
+    a.sourceFilter === b.sourceFilter &&
+    a.sessionFilter.trim() === b.sessionFilter.trim() &&
+    (a.customTimeRange?.start ?? null) === (b.customTimeRange?.start ?? null) &&
+    (a.customTimeRange?.end ?? null) === (b.customTimeRange?.end ?? null) &&
+    a.traceFocusId === b.traceFocusId &&
+    a.diagnosticTransportFilter === b.diagnosticTransportFilter
+  )
+}
 
 export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): LogPanelFilterState {
   const {
@@ -44,39 +140,44 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
     sources,
     density: controlledDensity,
     onDensityChange,
+    storageScope,
   } = options
+  const autoRefreshKey = autoRefreshStorageKey(storageScope)
   // Controlled only when the host can actually receive the write — a `density`
   // with no `onDensityChange` would render a control that moves nothing.
   const densityControlled = controlledDensity !== undefined && onDensityChange !== undefined
 
   // Persisted across sessions (like density) — reopening the panel keeps the
-  // user's live-follow preference instead of resetting to off.
+  // user's live-follow preference instead of resetting to off. Per embed: see
+  // `autoRefreshStorageKey`.
   const [autoRefresh, setAutoRefreshState] = useState(() => {
     if (typeof window === "undefined") return defaultAutoRefresh
     try {
-      const stored = window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY)
+      const stored = window.localStorage.getItem(autoRefreshKey)
       return stored === null ? defaultAutoRefresh : stored === "1"
     } catch {
       return defaultAutoRefresh
     }
   })
-  const setAutoRefresh = useCallback((next: boolean) => {
-    setAutoRefreshState(next)
-    try {
-      window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, next ? "1" : "0")
-    } catch {
-      // ignore storage quota / private-mode errors
-    }
-  }, [])
+  const setAutoRefresh = useCallback(
+    (next: boolean) => {
+      setAutoRefreshState(next)
+      try {
+        window.localStorage.setItem(autoRefreshKey, next ? "1" : "0")
+      } catch {
+        // ignore storage quota / private-mode errors
+      }
+    },
+    [autoRefreshKey]
+  )
   const [levelFilter, setLevelFilter] = useState<LogLevel | "all">("all")
   const [moduleFilter, setModuleFilter] = useState<string>("all")
-  const [sourceFilter, setSourceFilter] = useState<PanelSource | "all">(
+  const defaultSourceFilter: PanelSource | "all" =
     sources && sources.length === 1 ? sources[0] : "all"
-  )
+  const [sourceFilter, setSourceFilter] = useState<PanelSource | "all">(defaultSourceFilter)
   const [sessionFilter, setSessionFilter] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [useRegex, setUseRegex] = useState(false)
-  const [highSeverityOnly, setHighSeverityOnly] = useState(false)
   const [timeRange, setTimeRange] = useState<PresetTimeRange>("all")
   const [customTimeRange, setCustomTimeRange] = useState<{ start: Date; end: Date } | null>(null)
   const [traceFocusId, setTraceFocusId] = useState<string | null>(null)
@@ -91,8 +192,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
   const [diagnosticTransportFilter, setDiagnosticTransportFilter] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [focusedIndex, setFocusedIndex] = useState(-1)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(50)
   const [uncontrolledDensity, setUncontrolledDensity] = useState<Density>(() => {
     if (typeof window === "undefined") return "comfortable"
     try {
@@ -141,7 +240,48 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
     if (typeof window === "undefined") return []
     return loadLogFilterPresets(localStorage.getItem(LOG_FILTER_PRESETS_STORAGE_KEY))
   })
-  const [activePresetId, setActivePresetId] = useState<string>(EMPTY_PRESET_VALUE)
+  const [appliedPresetId, setAppliedPresetId] = useState<string>(EMPTY_PRESET_VALUE)
+
+  const currentFacets = useMemo<PresetFacets>(
+    () => ({
+      levelFilter,
+      moduleFilter,
+      timeRange,
+      searchQuery,
+      useRegex,
+      sourceFilter,
+      sessionFilter,
+      customTimeRange: customTimeRange
+        ? { start: customTimeRange.start.getTime(), end: customTimeRange.end.getTime() }
+        : null,
+      traceFocusId,
+      diagnosticTransportFilter,
+    }),
+    [
+      levelFilter,
+      moduleFilter,
+      timeRange,
+      searchQuery,
+      useRegex,
+      sourceFilter,
+      sessionFilter,
+      customTimeRange,
+      traceFocusId,
+      diagnosticTransportFilter,
+    ]
+  )
+
+  // The picker names a preset only while the filters still are that preset.
+  // Derived during render rather than cleared from an effect: every setter
+  // that diverges from it would otherwise need to remember to reset it.
+  const activePresetId = useMemo(() => {
+    if (appliedPresetId === EMPTY_PRESET_VALUE) return EMPTY_PRESET_VALUE
+    const preset = presets.find((item) => item.id === appliedPresetId)
+    if (!preset) return EMPTY_PRESET_VALUE
+    return facetsEqual(resolvePresetFacets(preset.filters, defaultSourceFilter), currentFacets)
+      ? appliedPresetId
+      : EMPTY_PRESET_VALUE
+  }, [appliedPresetId, presets, currentFacets, defaultSourceFilter])
 
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set()
@@ -190,54 +330,78 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
     }
   }, [])
 
-  const saveCurrentPreset = useCallback(() => {
-    const defaultName = `Preset ${presets.length + 1}`
-    const presetFilters: LogFilterPresetFilters = {
-      levelFilter: levelFilter as LogLevel | "all",
-      moduleFilter,
-      timeRange,
-      searchQuery,
-      useRegex,
-      highSeverityOnly,
-    }
-    const preset = createLogFilterPreset(defaultName, presetFilters)
-    const next = [...presets, preset]
-    setPresets(next)
-    setActivePresetId(preset.id)
-    persistPresets(next)
-  }, [
-    presets,
-    levelFilter,
-    moduleFilter,
-    timeRange,
-    searchQuery,
-    useRegex,
-    highSeverityOnly,
-    persistPresets,
-  ])
+  const saveCurrentPreset = useCallback(
+    (name?: string) => {
+      const trimmed = name?.trim() ?? ""
+      // The fallback is only reached by programmatic callers; the toolbar always
+      // supplies a (translated, editable) name.
+      const presetName = trimmed.length > 0 ? trimmed : `#${presets.length + 1}`
+      // Every facet the panel narrows by, not just the original five: a preset
+      // saved on "source = MCP, last session" used to come back as "all
+      // sources, every session" and silently show something else.
+      const presetFilters: LogFilterPresetFilters = {
+        levelFilter: currentFacets.levelFilter,
+        moduleFilter: currentFacets.moduleFilter,
+        timeRange: currentFacets.timeRange,
+        searchQuery: currentFacets.searchQuery,
+        useRegex: currentFacets.useRegex,
+        // Kept for the v1 validator; see the type's note.
+        highSeverityOnly: currentFacets.levelFilter === "error",
+        sourceFilter: currentFacets.sourceFilter,
+        sessionFilter: currentFacets.sessionFilter.trim(),
+        customTimeRange: currentFacets.customTimeRange,
+        traceFocusId: currentFacets.traceFocusId,
+        diagnosticTransportFilter: currentFacets.diagnosticTransportFilter,
+      }
+      const preset = createLogFilterPreset(presetName, presetFilters)
+      const next = [...presets, preset]
+      setPresets(next)
+      setAppliedPresetId(preset.id)
+      persistPresets(next)
+    },
+    [presets, currentFacets, persistPresets]
+  )
 
-  const applyPreset = useCallback((preset: LogFilterPreset) => {
-    setLevelFilter(preset.filters.levelFilter)
-    setModuleFilter(preset.filters.moduleFilter)
-    setTimeRange(preset.filters.timeRange)
-    setSearchQuery(preset.filters.searchQuery)
-    setUseRegex(preset.filters.useRegex)
-    setHighSeverityOnly(preset.filters.highSeverityOnly)
-    setActivePresetId(preset.id)
-  }, [])
+  const applyPreset = useCallback(
+    (preset: LogFilterPreset) => {
+      const facets = resolvePresetFacets(preset.filters, defaultSourceFilter)
+      setLevelFilter(facets.levelFilter)
+      setModuleFilter(facets.moduleFilter)
+      setTimeRange(facets.timeRange)
+      setSearchQuery(facets.searchQuery)
+      setUseRegex(facets.useRegex)
+      setSourceFilter(facets.sourceFilter)
+      setSessionFilter(facets.sessionFilter)
+      setCustomTimeRange(
+        facets.customTimeRange
+          ? {
+              start: new Date(facets.customTimeRange.start),
+              end: new Date(facets.customTimeRange.end),
+            }
+          : null
+      )
+      setTraceFocusId(facets.traceFocusId)
+      setDiagnosticTransportFilter(facets.diagnosticTransportFilter)
+      // A preset names a filter set, not the bookmark view; leaving the
+      // bookmark tab on would show "Errors last hour" ∩ bookmarks.
+      setBookmarkFilterActive(false)
+      setAppliedPresetId(preset.id)
+    },
+    [defaultSourceFilter]
+  )
 
   const removeActivePreset = useCallback(() => {
     if (activePresetId === EMPTY_PRESET_VALUE) return
     const next = presets.filter((preset) => preset.id !== activePresetId)
     setPresets(next)
-    setActivePresetId(EMPTY_PRESET_VALUE)
+    setAppliedPresetId(EMPTY_PRESET_VALUE)
     persistPresets(next)
   }, [activePresetId, presets, persistPresets])
 
   const handlePresetChange = useCallback(
     (presetId: string) => {
       if (presetId === EMPTY_PRESET_VALUE) {
-        setActivePresetId(EMPTY_PRESET_VALUE)
+        setAppliedPresetId(EMPTY_PRESET_VALUE)
         return
       }
       const preset = presets.find((item) => item.id === presetId)
@@ -253,17 +417,21 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
     setShowDetailPanel(true)
   }, [])
 
+  // Narrowing to a trace or a session leaves the detail pane as it was: the
+  // pivot is usually made from the detail pane itself, and closing it there
+  // threw away the entry the user was reading the moment they asked for its
+  // neighbours. Trace focus used to force the pane open as well, so the row
+  // crosshair (meant as "show me just this trace") also covered a third of the
+  // list it had just narrowed; the two pivots now behave the same.
   const handleFocusTrace = useCallback((traceId: string, log: StructuredLogEntry) => {
     setTraceFocusId(traceId)
     setModuleFilter("all")
     setSelectedLog(log)
-    setShowDetailPanel(true)
   }, [])
 
   const handleFocusSession = useCallback((sessionId: string, log: StructuredLogEntry) => {
     setSessionFilter(sessionId)
     setSelectedLog(log)
-    setShowDetailPanel(false)
   }, [])
 
   const addSearchHistory = useCallback((query: string) => {
@@ -321,7 +489,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       sessionFilter,
       searchQuery,
       useRegex,
-      highSeverityOnly,
       timeRange,
       customTimeRange,
       traceFocusId,
@@ -334,8 +501,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       diagnosticTransportFilter,
       expandedIds,
       focusedIndex,
-      currentPage,
-      pageSize,
       density,
       presets,
       activePresetId,
@@ -352,7 +517,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       setSessionFilter,
       setSearchQuery,
       setUseRegex,
-      setHighSeverityOnly,
       setTimeRange,
       setCustomTimeRange,
       setTraceFocusId,
@@ -364,8 +528,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       setSelectedNativeLogging,
       setDiagnosticTransportFilter,
       setFocusedIndex,
-      setCurrentPage,
-      setPageSize,
       setDensity,
       setBookmarkFilterActive,
       setShowAdvancedFilters,
@@ -395,7 +557,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       sessionFilter,
       searchQuery,
       useRegex,
-      highSeverityOnly,
       timeRange,
       customTimeRange,
       traceFocusId,
@@ -408,8 +569,6 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
       diagnosticTransportFilter,
       expandedIds,
       focusedIndex,
-      currentPage,
-      pageSize,
       density,
       setDensity,
       presets,

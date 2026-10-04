@@ -9,7 +9,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-import { LogTraceView } from "./log-trace-view"
+jest.mock("@cognia/agent-trace/log-adapter", () => ({
+  AGENT_TRACE_MODULE: "agent.trace",
+}))
+
+import { LogTraceView, formatTraceDuration } from "./log-trace-view"
 import type { StructuredLogEntry } from "@cognia/logging"
 
 function makeLog(overrides: Partial<StructuredLogEntry>): StructuredLogEntry {
@@ -63,8 +67,8 @@ describe("LogTraceView", () => {
     expect(row).toHaveTextContent("levels.warn")
   })
 
-  it("displays an overflow notice when more than 50 traces exist", () => {
-    const logs: StructuredLogEntry[] = Array.from({ length: 55 }, (_, i) =>
+  it("pages through more than 50 traces with Show more", () => {
+    const logs: StructuredLogEntry[] = Array.from({ length: 105 }, (_, i) =>
       makeLog({
         id: `l-${i}`,
         traceId: `trace-${String(i).padStart(8, "0")}`,
@@ -72,8 +76,55 @@ describe("LogTraceView", () => {
       })
     )
     render(<LogTraceView filteredLogs={logs} onSelectTrace={jest.fn()} />)
+    expect(screen.getAllByTestId(/^log-trace-row-/)).toHaveLength(50)
     expect(screen.getByTestId("log-trace-view-overflow")).toHaveTextContent(
-      'panel.traceOverflow:{"count":5}'
+      'panel.traceOverflow:{"count":55}'
     )
+    const more = screen.getByTestId("log-trace-view-show-more")
+    expect(more).toBeEnabled()
+    fireEvent.click(more)
+    expect(screen.getAllByTestId(/^log-trace-row-/)).toHaveLength(100)
+    fireEvent.click(screen.getByTestId("log-trace-view-show-more"))
+    expect(screen.getAllByTestId(/^log-trace-row-/)).toHaveLength(105)
+    expect(screen.queryByTestId("log-trace-view-show-more")).not.toBeInTheDocument()
+  })
+
+  it("offers Open in Traces only on traces with agent spans, and only with a host handler", () => {
+    const onOpenTrace = jest.fn()
+    const logs = [
+      makeLog({ id: "a", traceId: "t-agent", module: "agent.trace" }),
+      makeLog({ id: "b", traceId: "t-agent", module: "chat" }),
+      makeLog({ id: "c", traceId: "t-plain", module: "chat" }),
+    ]
+    const { rerender } = render(
+      <LogTraceView filteredLogs={logs} onSelectTrace={jest.fn()} onOpenTrace={onOpenTrace} />
+    )
+    expect(screen.queryByTestId("log-trace-open-t-plain")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("log-trace-open-t-agent"))
+    expect(onOpenTrace).toHaveBeenCalledWith("t-agent")
+
+    rerender(<LogTraceView filteredLogs={logs} onSelectTrace={jest.fn()} />)
+    expect(screen.queryByTestId("log-trace-open-t-agent")).not.toBeInTheDocument()
+  })
+
+  it("names each row with its id, size and duration instead of an English svg label", () => {
+    const logs = [makeLog({ id: "a", traceId: "t-1" })]
+    render(<LogTraceView filteredLogs={logs} onSelectTrace={jest.fn()} />)
+    const row = screen.getByTestId("log-trace-row-t-1")
+    expect(row.getAttribute("aria-label")).toContain("panel.traceRowAria")
+    expect(row.querySelector("svg[aria-hidden]")).not.toBeNull()
+    expect(row.querySelector("svg[role='img']")).toBeNull()
+  })
+})
+
+describe("formatTraceDuration", () => {
+  const t = ((key: string, vars?: Record<string, unknown>) =>
+    `${key}:${JSON.stringify(vars)}`) as unknown as Parameters<typeof formatTraceDuration>[1]
+
+  it("picks the unit from the message bundle", () => {
+    expect(formatTraceDuration(850, t)).toBe('panel.durationUnits.ms:{"value":850}')
+    expect(formatTraceDuration(1_250, t)).toBe('panel.durationUnits.s:{"value":"1.3"}')
+    expect(formatTraceDuration(120_000, t)).toBe('panel.durationUnits.m:{"value":2}')
+    expect(formatTraceDuration(7_200_000, t)).toBe('panel.durationUnits.h:{"value":2}')
   })
 })

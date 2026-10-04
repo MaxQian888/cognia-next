@@ -21,7 +21,6 @@ import {
   VirtualizedLogList,
   LogEntry,
   MemoizedLogEntry,
-  TraceGroup,
   HighlightedText,
   LEVEL_THEME,
   ALL_LEVELS,
@@ -41,7 +40,6 @@ describe("components/logging barrel", () => {
       VirtualizedLogList,
       LogEntry,
       MemoizedLogEntry,
-      TraceGroup,
       HighlightedText,
     } as const
     for (const [name, value] of Object.entries(components)) {

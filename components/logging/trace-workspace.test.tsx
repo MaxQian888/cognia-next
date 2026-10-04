@@ -1,17 +1,31 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { makeSpan } from "@/lib/observability/fixtures"
 import { buildWaterfall } from "@/lib/observability/trace-rollup"
 import type { TraceRollupRow } from "@/lib/observability/trace-rollup"
 
-jest.mock("next-intl", () => ({
-  useTranslations: (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`
+  return {
+    useTranslations: (namespace: string) =>
+      Object.assign(translator(namespace), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 jest.mock("next/link", () => ({
   __esModule: true,
@@ -26,6 +40,9 @@ jest.mock("@/components/logging/trace-timeline", () => ({
     timelineProps(props)
     return (
       <div data-testid="stub-timeline">
+        {/* The pane header lives in the timeline toolbar now. */}
+        {props.leading as React.ReactNode}
+        {props.actions as React.ReactNode}
         <button
           type="button"
           data-testid="stub-timeline-select"
@@ -88,10 +105,15 @@ jest.mock("@/components/observability/observability-settings-sheet", () => ({
 jest.mock("@/hooks/observability/use-observability-url-sync", () => ({
   useObservabilityUrlSync: jest.fn(),
 }))
+const exploreUrlSyncArgs = jest.fn()
+jest.mock("@/hooks/observability/use-trace-explore-url-sync", () => ({
+  useTraceExploreUrlSync: (options: unknown) => exploreUrlSyncArgs(options),
+}))
 jest.mock("@/hooks/observability/use-refresh-tick", () => ({
   useRefreshTick: () => ({ tick: 0, lastUpdated: null, refresh: jest.fn() }),
 }))
 
+const retryRead = jest.fn()
 let observabilityData = {
   spans: [] as unknown[],
   windowSpans: [] as unknown[],
@@ -99,6 +121,8 @@ let observabilityData = {
   spanCount: 0,
   windowSpanCount: 0,
   truncated: false,
+  error: null as Error | null,
+  retry: retryRead,
 }
 const observabilityDataArgs = jest.fn()
 jest.mock("@/hooks/observability/use-observability-data", () => ({
@@ -111,11 +135,15 @@ jest.mock("@/hooks/observability/use-observability-data", () => ({
 const traceListResult = {
   traces: [] as TraceRollupRow[],
   matched: [] as TraceRollupRow[],
+  all: [] as TraceRollupRow[],
   windowTotal: 0,
   matchedTotal: 0,
   pageCount: 1,
   page: 0,
   loading: false,
+  pendingCount: 0,
+  newestStart: null as number | null,
+  selectedIndex: -1,
 }
 const traceListOptions = jest.fn()
 jest.mock("@/hooks/logging/use-trace-list", () => ({
@@ -125,7 +153,18 @@ jest.mock("@/hooks/logging/use-trace-list", () => ({
   },
 }))
 
-let traceDetail = { waterfall: buildWaterfall([]), loading: false }
+const retryDetail = jest.fn()
+function detailOf(spans: ReturnType<typeof makeSpan>[], over: Record<string, unknown> = {}) {
+  return {
+    waterfall: buildWaterfall(spans),
+    loading: false,
+    notFound: false,
+    error: null as Error | null,
+    retry: retryDetail,
+    ...over,
+  }
+}
+let traceDetail = detailOf([])
 jest.mock("@/hooks/observability/use-trace-detail", () => ({
   useTraceDetail: () => traceDetail,
 }))
@@ -181,7 +220,7 @@ function renderWorkspace(over: Partial<React.ComponentProps<typeof TraceWorkspac
 beforeEach(() => {
   jest.clearAllMocks()
   containerWidth = 1400
-  traceDetail = { waterfall: buildWaterfall([]), loading: false }
+  traceDetail = detailOf([])
   observabilityData = {
     spans: [],
     windowSpans: [],
@@ -189,6 +228,8 @@ beforeEach(() => {
     spanCount: 0,
     windowSpanCount: 0,
     truncated: false,
+    error: null,
+    retry: retryRead,
   }
   useObservabilityStore.setState({
     layouts: null,
@@ -200,15 +241,25 @@ beforeEach(() => {
     editMode: false,
     thresholds: {},
     hiddenPanels: [],
+    timelineScale: "duration",
+    timelineGrouping: "operation",
+    timelineCollapsed: false,
+    timelineZoom: null,
+    exploreQuery: "",
+    exploreSpanId: null,
   })
   Object.assign(traceListResult, {
     traces: [],
     matched: [],
+    all: [],
     windowTotal: 0,
     matchedTotal: 0,
     pageCount: 1,
     page: 0,
     loading: false,
+    pendingCount: 0,
+    newestStart: null,
+    selectedIndex: -1,
   })
 })
 
@@ -305,14 +356,14 @@ describe("TraceWorkspace", () => {
       operationName: "execute_tool",
       toolName: "Bash",
     })
-    traceDetail = { waterfall: buildWaterfall([root, child]), loading: false }
+    traceDetail = detailOf([root, child])
     renderWorkspace({ selectedTraceId: "t" })
 
     expect(screen.getByTestId("waterfall-row-root")).toBeInTheDocument()
     expect(screen.getByTestId("waterfall-row-child")).toBeInTheDocument()
     // Root span drives the detail pane until the user picks another.
     expect(screen.getByTestId("trace-span-detail")).toBeInTheDocument()
-    expect(screen.getByTestId("waterfall-row-root")).toHaveAttribute("aria-current", "true")
+    expect(screen.getByTestId("waterfall-select-root")).toHaveAttribute("aria-current", "true")
   })
 
   it("feeds the timeline the trace's raw spans", () => {
@@ -324,7 +375,7 @@ describe("TraceWorkspace", () => {
       startTime: 1_100,
       durationMs: 100,
     })
-    traceDetail = { waterfall: buildWaterfall([root, child]), loading: false }
+    traceDetail = detailOf([root, child])
     renderWorkspace({ selectedTraceId: "t" })
     expect(screen.getByTestId("stub-timeline")).toBeInTheDocument()
     const props = timelineProps.mock.calls.at(-1)![0]
@@ -343,7 +394,7 @@ describe("TraceWorkspace", () => {
       startTime: 1_100,
       durationMs: 50,
     })
-    traceDetail = { waterfall: buildWaterfall([root, child]), loading: false }
+    traceDetail = detailOf([root, child])
     renderWorkspace({ selectedTraceId: "t" })
     const menu = screen.getByTestId("stub-export")
     expect(menu).toHaveAttribute("data-trace", "t")
@@ -351,7 +402,7 @@ describe("TraceWorkspace", () => {
   })
 
   it("passes the list query to the timeline as a highlight, not a filter", () => {
-    traceDetail = { waterfall: buildWaterfall([makeSpan({ spanId: "root" })]), loading: false }
+    traceDetail = detailOf([makeSpan({ spanId: "root" })])
     renderWorkspace({ selectedTraceId: "t" })
     fireEvent.change(screen.getByTestId("trace-search"), { target: { value: "bash" } })
     expect(timelineProps.mock.calls.at(-1)![0].highlightQuery).toBe("bash")
@@ -368,10 +419,10 @@ describe("TraceWorkspace", () => {
       operationName: "execute_tool",
       toolName: "Bash",
     })
-    traceDetail = { waterfall: buildWaterfall([root, child]), loading: false }
+    traceDetail = detailOf([root, child])
     renderWorkspace({ selectedTraceId: "t" })
     fireEvent.click(screen.getByTestId("stub-timeline-select"))
-    expect(screen.getByTestId("waterfall-row-child")).toHaveAttribute("aria-current", "true")
+    expect(screen.getByTestId("waterfall-select-child")).toHaveAttribute("aria-current", "true")
   })
 
   it("narrows the waterfall to the timeline's zoom window", () => {
@@ -390,25 +441,26 @@ describe("TraceWorkspace", () => {
       startTime: 1_400,
       durationMs: 10,
     })
-    traceDetail = { waterfall: buildWaterfall([root, inside, outside]), loading: false }
+    traceDetail = detailOf([root, inside, outside])
     renderWorkspace({ selectedTraceId: "t" })
     expect(screen.getByTestId("waterfall-row-outside")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("stub-timeline-zoom"))
     expect(screen.queryByTestId("waterfall-row-outside")).not.toBeInTheDocument()
     expect(screen.getByTestId("waterfall-row-inside")).toBeInTheDocument()
-    expect(screen.getByTestId("trace-window-chip")).toBeInTheDocument()
+    // One count, in the timeline toolbar ("N of M spans") — no second chip.
+    expect(timelineProps.mock.calls.at(-1)![0].window).toEqual({ since: 1_050, until: 1_150 })
   })
 
   it("clears the zoom when another trace is selected", () => {
     Object.assign(traceListResult, { traces: [row()], windowTotal: 1, matchedTotal: 1 })
-    traceDetail = { waterfall: buildWaterfall([makeSpan({ spanId: "root" })]), loading: false }
+    traceDetail = detailOf([makeSpan({ spanId: "root" })])
     renderWorkspace({ selectedTraceId: "t" })
     fireEvent.click(screen.getByTestId("stub-timeline-zoom"))
-    expect(screen.getByTestId("trace-window-chip")).toBeInTheDocument()
+    expect(timelineProps.mock.calls.at(-1)![0].window).not.toBeNull()
 
     fireEvent.click(screen.getByTestId("trace-row-trace-1"))
-    expect(screen.queryByTestId("trace-window-chip")).not.toBeInTheDocument()
+    expect(useObservabilityStore.getState().timelineZoom).toBeNull()
   })
 
   it("moves the detail pane to whichever span is clicked", () => {
@@ -422,12 +474,11 @@ describe("TraceWorkspace", () => {
       operationName: "execute_tool",
       toolName: "Bash",
     })
-    traceDetail = { waterfall: buildWaterfall([root, child]), loading: false }
+    traceDetail = detailOf([root, child])
     renderWorkspace({ selectedTraceId: "t" })
 
-    const childRow = screen.getByTestId("waterfall-row-child").querySelector('[role="button"]')!
-    fireEvent.click(childRow)
-    expect(screen.getByTestId("waterfall-row-child")).toHaveAttribute("aria-current", "true")
+    fireEvent.click(screen.getByTestId("waterfall-select-child"))
+    expect(screen.getByTestId("waterfall-select-child")).toHaveAttribute("aria-current", "true")
     expect(screen.getByTestId("trace-span-detail")).toHaveTextContent("Bash")
   })
 
@@ -438,8 +489,9 @@ describe("TraceWorkspace", () => {
     expect(props.onErrorsOnlyChange).toHaveBeenCalledWith(true)
 
     fireEvent.change(screen.getByTestId("trace-search"), { target: { value: "bash" } })
+    // `page: null` = back to the page holding the selection, else the first.
     expect(traceListOptions).toHaveBeenLastCalledWith(
-      expect.objectContaining({ query: "bash", page: 0 })
+      expect.objectContaining({ query: "bash", page: null })
     )
   })
 
@@ -545,10 +597,12 @@ describe("TraceWorkspace", () => {
     expect(screen.getByTestId("trace-columns-layout")).toBeInTheDocument()
   })
 
-  it("renders the widest tier before the first measurement lands", () => {
+  it("mounts no pane group before the first measurement lands", () => {
     containerWidth = 0
     renderWorkspace()
-    expect(screen.getByTestId("trace-workspace")).toHaveAttribute("data-tier", "columns")
+    expect(screen.getByTestId("trace-workspace")).toHaveAttribute("data-tier", "pending")
+    expect(screen.getByTestId("trace-layout-pending")).toBeInTheDocument()
+    expect(screen.queryByTestId("trace-columns-layout")).not.toBeInTheDocument()
     // …and does not claim a compact toolbar it has no evidence for.
     expect(screen.getByTestId("stub-toolbar")).toHaveAttribute("data-compact", "false")
   })
@@ -569,5 +623,287 @@ describe("TraceWorkspace", () => {
     containerWidth = 390
     renderWorkspace()
     expect(screen.getByTestId("stub-toolbar")).toHaveAttribute("data-dense", "true")
+  })
+
+  describe("dashboard drill-down", () => {
+    function drill() {
+      return dashboardProps.mock.calls.at(-1)![0].onDrill as (d: unknown) => void
+    }
+
+    it("turns errors-only on and switches to Explore for a failing-count stat", () => {
+      const { props } = renderWorkspace({ subView: "dashboard" })
+      act(() => drill()({ kind: "errors" }))
+      expect(props.onErrorsOnlyChange).toHaveBeenCalledWith(true)
+      expect(props.onSubViewChange).toHaveBeenCalledWith("explore")
+    })
+
+    it("pins the range to a chart point's bucket", () => {
+      const { props } = renderWorkspace({ subView: "dashboard" })
+      act(() => drill()({ kind: "window", since: 1_000, until: 2_000 }))
+      const state = useObservabilityStore.getState()
+      expect(state.rangePreset).toBe("custom")
+      expect([state.customSince, state.customUntil]).toEqual([1_000, 2_000])
+      expect(props.onSubViewChange).toHaveBeenCalledWith("explore")
+    })
+
+    it("makes sure a breakdown value is selected — never toggles it off", () => {
+      useObservabilityStore.setState({ filters: { model: ["opus"] } })
+      renderWorkspace({ subView: "dashboard" })
+      act(() => drill()({ kind: "filter", dimension: "model", value: "opus" }))
+      expect(useObservabilityStore.getState().filters).toEqual({ model: ["opus"] })
+      act(() => drill()({ kind: "filter", dimension: "surface", value: "chat" }))
+      expect(useObservabilityStore.getState().filters).toEqual({
+        model: ["opus"],
+        surface: ["chat"],
+      })
+    })
+
+    it("hands the dashboard its first-read, error and retry states", () => {
+      const error = new Error("blocked")
+      observabilityData = { ...observabilityData, loading: true, error }
+      renderWorkspace({ subView: "dashboard" })
+      const props = dashboardProps.mock.calls.at(-1)![0]
+      expect(props.loading).toBe(true)
+      expect(props.error).toBe(error)
+      expect(props.onRetry).toBe(retryRead)
+    })
+  })
+
+  it("exports every counted trace from the Dashboard, the visible list from Explore", () => {
+    Object.assign(traceListResult, {
+      matched: [row()],
+      all: [row(), row({ traceId: "trace-2" }), row({ traceId: "trace-3" })],
+    })
+    renderWorkspace({ subView: "dashboard" })
+    expect(screen.getByTestId("stub-toolbar")).toHaveAttribute("data-traces", "3")
+  })
+
+  it("normalizes an imported dashboard config against the registry", () => {
+    renderWorkspace({ subView: "dashboard" })
+    const onImportConfig = toolbarProps.mock.calls.at(-1)![0].onImportConfig as (
+      cfg: unknown
+    ) => void
+    act(() =>
+      onImportConfig({
+        version: 1,
+        layouts: { lg: [{ i: "kpi-cost", x: 0, y: 0, w: 1, h: 1 }], md: [], sm: [] },
+        hiddenPanels: ["kpi-cost", "no-such-panel"],
+        thresholds: {},
+        rangePreset: "1h",
+        customSince: null,
+        customUntil: null,
+        refreshMs: 0,
+        filters: { provider: ["anthropic"] },
+      })
+    )
+    const state = useObservabilityStore.getState()
+    expect(state.hiddenPanels).toEqual(["kpi-cost"])
+    expect(state.layouts!.lg.find((item) => item.i === "kpi-cost")).toMatchObject({ w: 2, h: 2 })
+    expect(state.layouts!.lg.length).toBeGreaterThan(1)
+    expect(state.filters).toEqual({ provider: ["anthropic"] })
+  })
+
+  it("mirrors errors-only to the URL through the same wrapper the toggle uses", () => {
+    const { props } = renderWorkspace({ errorsOnly: true })
+    const options = exploreUrlSyncArgs.mock.calls.at(-1)![0] as {
+      errorsOnly: boolean
+      onErrorsOnlyChange: (next: boolean) => void
+    }
+    expect(options.errorsOnly).toBe(true)
+    act(() => options.onErrorsOnlyChange(false))
+    expect(props.onErrorsOnlyChange).toHaveBeenCalledWith(false)
+    expect(traceListOptions).toHaveBeenLastCalledWith(expect.objectContaining({ page: null }))
+  })
+
+  it("keeps the timeline's scale and grouping in the store", () => {
+    useObservabilityStore.setState({ timelineScale: "sequence", timelineGrouping: "model" })
+    traceDetail = detailOf([makeSpan({ spanId: "root" })])
+    renderWorkspace({ selectedTraceId: "t" })
+    const props = timelineProps.mock.calls.at(-1)![0]
+    expect(props.scale).toBe("sequence")
+    expect(props.grouping).toBe("model")
+  })
+
+  describe("selection states", () => {
+    it("says 'Trace not found' for an id with no spans, and clears it", () => {
+      traceDetail = detailOf([], { notFound: true })
+      const { props } = renderWorkspace({ selectedTraceId: "ghost" })
+      expect(screen.getByTestId("trace-not-found")).toHaveTextContent(
+        "logging.workspace.traces.notFoundTitle"
+      )
+      fireEvent.click(screen.getByTestId("trace-not-found-clear"))
+      expect(props.onSelectTrace).toHaveBeenCalledWith(null)
+    })
+
+    it("offers a retry when the trace read fails", () => {
+      traceDetail = detailOf([], { error: new Error("nope") })
+      renderWorkspace({ selectedTraceId: "t" })
+      fireEvent.click(screen.getByTestId("observability-retry"))
+      expect(retryDetail).toHaveBeenCalled()
+    })
+
+    it("flags a selection that is not in the list", () => {
+      Object.assign(traceListResult, {
+        traces: [row()],
+        windowTotal: 1,
+        matchedTotal: 1,
+        selectedIndex: -1,
+      })
+      traceDetail = detailOf([makeSpan({ spanId: "root" })])
+      renderWorkspace({ selectedTraceId: "elsewhere" })
+      expect(screen.getByTestId("trace-selection-outside")).toBeInTheDocument()
+    })
+
+    it("does not flag a selection the list holds", () => {
+      Object.assign(traceListResult, {
+        traces: [row()],
+        windowTotal: 1,
+        matchedTotal: 1,
+        selectedIndex: 0,
+      })
+      traceDetail = detailOf([makeSpan({ spanId: "root" })])
+      renderWorkspace({ selectedTraceId: "trace-1" })
+      expect(screen.queryByTestId("trace-selection-outside")).not.toBeInTheDocument()
+    })
+
+    it("reveals a selection by following it to its page", () => {
+      renderWorkspace({ selectedTraceId: "trace-1" })
+      expect(traceListOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: null, selectedTraceId: "trace-1" })
+      )
+    })
+
+    it("clears the selection with Esc and with the close button", () => {
+      traceDetail = detailOf([makeSpan({ spanId: "root" })])
+      const { props } = renderWorkspace({ selectedTraceId: "t" })
+      fireEvent.keyDown(screen.getByTestId("trace-list-pane"), { key: "Escape" })
+      expect(props.onSelectTrace).toHaveBeenLastCalledWith(null)
+      ;(props.onSelectTrace as jest.Mock).mockClear()
+      fireEvent.click(screen.getByTestId("trace-close"))
+      expect(props.onSelectTrace).toHaveBeenLastCalledWith(null)
+    })
+
+    it("leaves Esc alone while typing in the search box", () => {
+      traceDetail = detailOf([makeSpan({ spanId: "root" })])
+      const { props } = renderWorkspace({ selectedTraceId: "t" })
+      fireEvent.keyDown(screen.getByTestId("trace-search"), { key: "Escape" })
+      expect(props.onSelectTrace).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("a list that holds still", () => {
+    const spansAt = (...starts: number[]) =>
+      starts.map((startTime, i) => makeSpan({ spanId: `s${i}`, traceId: `t${i}`, startTime }))
+
+    it("freezes at the newest span start while a trace is selected", () => {
+      observabilityData = { ...observabilityData, spans: spansAt(100, 300, 200) }
+      renderWorkspace({ selectedTraceId: "t0" })
+      expect(traceListOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ freezeAfter: 300 })
+      )
+    })
+
+    it("does not freeze page 1 with nothing selected", () => {
+      observabilityData = { ...observabilityData, spans: spansAt(100) }
+      renderWorkspace()
+      expect(traceListOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ freezeAfter: null })
+      )
+    })
+
+    it("freezes once the user pages past the first page", () => {
+      observabilityData = { ...observabilityData, spans: spansAt(100, 500) }
+      Object.assign(traceListResult, { traces: [row()], pageCount: 3, windowTotal: 90 })
+      renderWorkspace()
+      fireEvent.click(screen.getByTestId("trace-page-next"))
+      expect(traceListOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, freezeAfter: 500 })
+      )
+    })
+
+    it("offers the held-back traces and brings them in on request", () => {
+      observabilityData = { ...observabilityData, spans: spansAt(100) }
+      Object.assign(traceListResult, { traces: [row()], windowTotal: 3, pendingCount: 2 })
+      renderWorkspace({ selectedTraceId: "trace-1" })
+      expect(screen.getByTestId("trace-pending")).toHaveTextContent('"count":2')
+      fireEvent.click(screen.getByTestId("trace-pending"))
+      expect(traceListOptions).toHaveBeenLastCalledWith(expect.objectContaining({ page: null }))
+    })
+  })
+
+  it("offers to widen an empty window, and hides it at the widest preset", () => {
+    renderWorkspace()
+    fireEvent.click(screen.getByTestId("trace-list-widen"))
+    expect(useObservabilityStore.getState().rangePreset).toBe("30d")
+    renderWorkspace()
+    expect(screen.getAllByTestId("trace-list-pane").at(-1)).not.toContainElement(
+      screen.queryByTestId("trace-list-widen")
+    )
+  })
+
+  it("shows a failed window read with a retry instead of an empty list", () => {
+    observabilityData = { ...observabilityData, error: new Error("blocked") }
+    renderWorkspace()
+    expect(screen.queryByTestId("trace-list-empty")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("observability-retry"))
+    expect(retryRead).toHaveBeenCalled()
+  })
+
+  it("moves through the list with j/k and the arrows under one tab stop", () => {
+    Object.assign(traceListResult, {
+      traces: [row(), row({ traceId: "trace-2" }), row({ traceId: "trace-3" })],
+      windowTotal: 3,
+      matchedTotal: 3,
+    })
+    renderWorkspace()
+    const first = screen.getByTestId("trace-row-trace-1")
+    expect(first).toHaveAttribute("tabindex", "0")
+    expect(screen.getByTestId("trace-row-trace-2")).toHaveAttribute("tabindex", "-1")
+    first.focus()
+    fireEvent.keyDown(first, { key: "j" })
+    expect(screen.getByTestId("trace-row-trace-2")).toHaveFocus()
+    fireEvent.keyDown(screen.getByTestId("trace-row-trace-2"), { key: "ArrowDown" })
+    expect(screen.getByTestId("trace-row-trace-3")).toHaveFocus()
+    fireEvent.keyDown(screen.getByTestId("trace-row-trace-3"), { key: "k" })
+    expect(screen.getByTestId("trace-row-trace-2")).toHaveFocus()
+    expect(screen.getByTestId("trace-row-trace-2")).toHaveAttribute("tabindex", "0")
+  })
+
+  it("names icon-only sub-view tabs and gives them a tooltip", () => {
+    containerWidth = 400
+    renderWorkspace()
+    const tab = screen.getByTestId("trace-sub-view-dashboard")
+    expect(tab).toHaveAccessibleName("logging.workspace.traces.subViews.dashboard")
+    expect(tab).toHaveAttribute("title")
+  })
+
+  describe("the stacked sheet", () => {
+    beforeEach(() => {
+      containerWidth = 700
+      traceDetail = detailOf([makeSpan({ spanId: "root" })])
+    })
+
+    it("splits waterfall and span detail with a resizable handle", () => {
+      renderWorkspace({ selectedTraceId: "t" })
+      expect(screen.getByTestId("trace-sheet-split")).toBeInTheDocument()
+      expect(screen.getByRole("separator")).toBeInTheDocument()
+    })
+
+    it("does not reopen after a trip to the Dashboard", () => {
+      const { rerender, props } = renderWorkspace({ selectedTraceId: "t" })
+      expect(screen.getByRole("dialog")).toBeInTheDocument()
+      rerender(<TraceWorkspace {...props} selectedTraceId="t" subView="dashboard" />)
+      rerender(<TraceWorkspace {...props} selectedTraceId="t" subView="explore" />)
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    })
+
+    it("opens again once the user picks a trace", () => {
+      Object.assign(traceListResult, { traces: [row()], windowTotal: 1, matchedTotal: 1 })
+      const { rerender, props } = renderWorkspace({ selectedTraceId: "trace-1" })
+      rerender(<TraceWorkspace {...props} selectedTraceId="trace-1" subView="dashboard" />)
+      rerender(<TraceWorkspace {...props} selectedTraceId="trace-1" subView="explore" />)
+      fireEvent.click(screen.getByTestId("trace-row-trace-1"))
+      expect(screen.getByRole("dialog")).toBeInTheDocument()
+    })
   })
 })

@@ -8,6 +8,11 @@ import { useTranslations } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: Object.assign(jest.fn(), { error: (...args: unknown[]) => mockToastError(...args) }),
+}))
+
 jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
 }))
@@ -25,7 +30,6 @@ jest.mock("@/lib/agent", () => ({
 
 import {
   LogEntry,
-  TraceGroup,
   MemoizedLogEntry,
   HighlightedText,
   splitByQuery,
@@ -74,6 +78,12 @@ function LogHarness(props: {
   searchQuery?: string
   useRegex?: boolean
   isSelected?: boolean
+  onActivate?: (log: StructuredLogEntry, index: number) => void
+  index?: number
+  isFocused?: boolean
+  isTabStop?: boolean
+  onFocusRow?: (index: number) => void
+  setSize?: number
 }) {
   const t = useTranslations("logging")
   return (
@@ -89,31 +99,12 @@ function LogHarness(props: {
       isBookmarked={props.isBookmarked ?? false}
       onToggleBookmark={props.onToggleBookmark}
       isSelected={props.isSelected}
-      t={t}
-    />
-  )
-}
-
-function TraceHarness(props: {
-  logs: StructuredLogEntry[]
-  traceId?: string
-  onFocusTrace?: (traceId: string, log: StructuredLogEntry) => void
-  onFocusSession?: (sessionId: string, log: StructuredLogEntry) => void
-  onToggleBookmark?: (id: string) => void
-}) {
-  const t = useTranslations("logging")
-  return (
-    <TraceGroup
-      traceId={props.traceId ?? "abc-123"}
-      logs={props.logs}
-      expandedIds={new Set()}
-      toggleExpanded={jest.fn()}
-      onFocusTrace={props.onFocusTrace}
-      onFocusSession={props.onFocusSession}
-      searchQuery=""
-      useRegex={false}
-      bookmarkedIds={new Set()}
-      onToggleBookmark={props.onToggleBookmark}
+      onActivate={props.onActivate}
+      index={props.index}
+      isFocused={props.isFocused}
+      isTabStop={props.isTabStop}
+      onFocusRow={props.onFocusRow}
+      setSize={props.setSize}
       t={t}
     />
   )
@@ -252,28 +243,152 @@ describe("LogEntry interactions", () => {
     expect(onToggle).toHaveBeenCalledWith("log-1")
   })
 
-  it("fires onToggle on Enter and Space keydown", () => {
+  it("without a host activation, Enter falls back to expanding; Space expands an entry with details", () => {
     const onToggle = jest.fn()
-    renderWithTooltip(<LogHarness log={makeLog()} onToggle={onToggle} />)
+    renderWithTooltip(<LogHarness log={makeLog({ data: { a: 1 } })} onToggle={onToggle} />)
     const row = screen.getByTestId("log-entry-row")
     fireEvent.keyDown(row, { key: "Enter" })
     fireEvent.keyDown(row, { key: " " })
     expect(onToggle).toHaveBeenCalledTimes(2)
   })
 
+  it("Space does nothing on an entry with no details to expand", () => {
+    const onToggle = jest.fn()
+    renderWithTooltip(<LogHarness log={makeLog()} onToggle={onToggle} />)
+    fireEvent.keyDown(screen.getByTestId("log-entry-row"), { key: " " })
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it("a row click and Enter open the entry when the host passes onActivate", () => {
+    const onActivate = jest.fn()
+    const onToggle = jest.fn()
+    renderWithTooltip(
+      <LogHarness
+        log={makeLog({ data: { a: 1 } })}
+        onToggle={onToggle}
+        onActivate={onActivate}
+        index={4}
+      />
+    )
+    const row = screen.getByTestId("log-entry-row")
+    fireEvent.click(row.firstChild as Element)
+    fireEvent.keyDown(row, { key: "Enter" })
+    expect(onActivate).toHaveBeenCalledTimes(2)
+    expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ id: "log-1" }), 4)
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it("the chevron expands in place without opening the entry", () => {
+    const onActivate = jest.fn()
+    const onToggle = jest.fn()
+    renderWithTooltip(
+      <LogHarness log={makeLog({ data: { a: 1 } })} onToggle={onToggle} onActivate={onActivate} />
+    )
+    const chevron = screen.getByTestId("log-entry-expand")
+    expect(chevron).toHaveAccessibleName("Expand entry")
+    expect(chevron).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(chevron)
+    expect(onToggle).toHaveBeenCalledWith("log-1")
+    expect(onActivate).not.toHaveBeenCalled()
+  })
+
+  it("names the chevron for collapsing once expanded", () => {
+    renderWithTooltip(<LogHarness log={makeLog({ data: { a: 1 } })} isExpanded />)
+    expect(screen.getByTestId("log-entry-expand")).toHaveAccessibleName("Collapse entry")
+    expect(screen.getByTestId("log-entry-expand")).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("ignores Enter aimed at a button inside the row", () => {
+    const onActivate = jest.fn()
+    renderWithTooltip(<LogHarness log={makeLog()} onActivate={onActivate} onSelect={jest.fn()} />)
+    fireEvent.keyDown(screen.getByTestId("log-entry-copy"), { key: "Enter" })
+    expect(onActivate).not.toHaveBeenCalled()
+  })
+
+  it("is an option of the list with roving tabindex", () => {
+    const onFocusRow = jest.fn()
+    const { rerender } = renderWithTooltip(
+      <LogHarness
+        log={makeLog()}
+        index={4}
+        setSize={10}
+        isTabStop={false}
+        onFocusRow={onFocusRow}
+      />
+    )
+    const row = screen.getByRole("option")
+    expect(row).toHaveAttribute("tabindex", "-1")
+    expect(row).toHaveAttribute("aria-posinset", "5")
+    expect(row).toHaveAttribute("aria-setsize", "10")
+    expect(row).toHaveAttribute("aria-selected", "false")
+
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <LogHarness
+          log={makeLog()}
+          index={4}
+          setSize={10}
+          isTabStop
+          isSelected
+          onFocusRow={onFocusRow}
+        />
+      </TooltipProvider>
+    )
+    expect(row).toHaveAttribute("tabindex", "0")
+    expect(row).toHaveAttribute("aria-selected", "true")
+    act(() => row.focus())
+    expect(onFocusRow).toHaveBeenCalledWith(4)
+  })
+
+  it("keeps the row's own controls out of the tab order", () => {
+    renderWithTooltip(
+      <LogHarness
+        log={makeLog({ traceId: "trace-1234567890", sessionId: "s", data: { a: 1 } })}
+        onToggleBookmark={jest.fn()}
+        onFocusTrace={jest.fn()}
+        onFocusSession={jest.fn()}
+      />
+    )
+    const row = screen.getByTestId("log-entry-row")
+    for (const button of within(row).getAllByRole("button", { hidden: true })) {
+      expect(button).toHaveAttribute("tabindex", "-1")
+    }
+  })
+
+  it("names the trace badge with the full id and lets it take focus for its tooltip", () => {
+    renderWithTooltip(<LogHarness log={makeLog({ traceId: "trace-1234567890" })} />)
+    const badge = screen.getByTestId("log-entry-trace-badge")
+    expect(badge.tagName).toBe("BUTTON")
+    expect(badge).toHaveAccessibleName("Trace ID: trace-1234567890")
+    badge.focus()
+    expect(badge).toHaveFocus()
+  })
+
+  it("no longer renders a separate 'open details' icon; the row and its menu open the entry", () => {
+    renderWithTooltip(<LogHarness log={makeLog()} onSelect={jest.fn()} />)
+    expect(screen.queryByTestId("log-entry-open-details")).not.toBeInTheDocument()
+  })
+
+  it("shows the keyboard cursor", () => {
+    renderWithTooltip(<LogHarness log={makeLog()} isFocused />)
+    expect(screen.getByTestId("log-entry-row")).toHaveAttribute("data-focused", "true")
+  })
+
+  it("prefixes the date on entries from another day", () => {
+    renderWithTooltip(<LogHarness log={makeLog({ timestamp: "2020-02-03T10:00:00.000Z" })} />)
+    // In the app locale's own order and separator ("en" → 02/03).
+    expect(screen.getByTestId("log-entry-row")).toHaveTextContent(/02\/0[34]/)
+  })
+
+  it("prints only the time for today's entries", () => {
+    renderWithTooltip(<LogHarness log={makeLog({ timestamp: new Date().toISOString() })} />)
+    expect(screen.getByTestId("log-entry-row").textContent).not.toMatch(/\d{2}-\d{2}\s?\d{2}:/)
+  })
+
   it("ignores non-toggle keys", () => {
     const onToggle = jest.fn()
     renderWithTooltip(<LogHarness log={makeLog()} onToggle={onToggle} />)
     fireEvent.keyDown(screen.getByTestId("log-entry-row"), { key: "Tab" })
-    expect(onToggle).not.toHaveBeenCalled()
-  })
-
-  it("fires onSelect via PanelRightOpen button and stops propagation", () => {
-    const onSelect = jest.fn()
-    const onToggle = jest.fn()
-    renderWithTooltip(<LogHarness log={makeLog()} onSelect={onSelect} onToggle={onToggle} />)
-    fireEvent.click(screen.getByTestId("log-entry-open-details"))
-    expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onToggle).not.toHaveBeenCalled()
   })
 
@@ -334,12 +449,6 @@ describe("LogEntry interactions", () => {
     expect(bookmark).toHaveFocus()
     fireEvent.click(bookmark)
     expect(onToggleBookmark).toHaveBeenCalledWith("log-1")
-
-    const details = screen.getByTestId("log-entry-open-details")
-    details.focus()
-    expect(details).toHaveFocus()
-    fireEvent.click(details)
-    expect(onSelect).toHaveBeenCalledTimes(1)
   })
 
   it("uses BookmarkCheck icon when isBookmarked=true", () => {
@@ -349,11 +458,14 @@ describe("LogEntry interactions", () => {
     expect(container.querySelector(".lucide-bookmark-check")).toBeInTheDocument()
   })
 
-  it("copies log JSON to clipboard and shows the Check icon transiently", () => {
+  it("copies log JSON to clipboard and shows the Check icon transiently", async () => {
     jest.useFakeTimers()
     const { container } = renderWithTooltip(<LogHarness log={makeLog()} />)
-    const copyBtn = container.querySelector(".lucide-copy")?.closest("button") as HTMLButtonElement
-    fireEvent.click(copyBtn)
+    const copyBtn = screen.getByTestId("log-entry-copy")
+    expect(copyBtn).toHaveAccessibleName("Copy log entry")
+    await act(async () => {
+      fireEvent.click(copyBtn)
+    })
     expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1)
     expect(container.querySelector(".lucide-check")).toBeInTheDocument()
     act(() => {
@@ -394,57 +506,6 @@ describe("MemoizedLogEntry", () => {
   })
 })
 
-describe("TraceGroup", () => {
-  function info(id: string): StructuredLogEntry {
-    return makeLog({ id, level: "info" })
-  }
-  function warn(id: string): StructuredLogEntry {
-    return makeLog({ id, level: "warn" })
-  }
-  function err(id: string): StructuredLogEntry {
-    return makeLog({ id, level: "error" })
-  }
-
-  it("renders default-open with traceId and log count", () => {
-    renderWithTooltip(<TraceHarness logs={[info("a"), info("b")]} traceId="t-1" />)
-    expect(screen.getByText("t-1")).toBeInTheDocument()
-    // Count Badge contains "2 logs"
-    const countBadge = screen
-      .getAllByText((_content, node) => node?.textContent === "2 logs")
-      .find((el) => el.tagName === "DIV" || el.tagName === "SPAN" || el.tagName === "P")
-    expect(countBadge).toBeDefined()
-  })
-
-  it('shows "No Trace ID" when traceId equals "no-trace"', () => {
-    renderWithTooltip(<TraceHarness logs={[info("a")]} traceId="no-trace" />)
-    expect(screen.getByText("No Trace ID")).toBeInTheDocument()
-  })
-
-  it("renders destructive Badge when any log is error/fatal", () => {
-    renderWithTooltip(<TraceHarness logs={[info("a"), err("b")]} />)
-    expect(screen.getByText("Error")).toBeInTheDocument()
-  })
-
-  it("renders warning Badge when only warnings present", () => {
-    renderWithTooltip(<TraceHarness logs={[info("a"), warn("b")]} />)
-    expect(screen.getByText("Warning")).toBeInTheDocument()
-    expect(screen.queryByText("Error")).not.toBeInTheDocument()
-  })
-
-  it("renders neither severity Badge when only info logs", () => {
-    renderWithTooltip(<TraceHarness logs={[info("a")]} />)
-    expect(screen.queryByText("Error")).not.toBeInTheDocument()
-    expect(screen.queryByText("Warning")).not.toBeInTheDocument()
-  })
-
-  it("collapses when trigger clicked", () => {
-    renderWithTooltip(<TraceHarness logs={[info("a")]} />)
-    const trigger = screen.getByText("abc-123").closest("button") as HTMLButtonElement
-    fireEvent.click(trigger)
-    expect(trigger).toHaveAttribute("data-state", "closed")
-  })
-})
-
 // Keep type-import alive so unused-imports linter doesn't strip it.
 const _logLevelGuard: LogLevel | undefined = undefined
 void _logLevelGuard
@@ -460,5 +521,17 @@ describe("LogEntry — selected state", () => {
   it("omits data-selected when not selected", () => {
     renderWithTooltip(<LogHarness log={makeLog()} />)
     expect(screen.getByTestId("log-entry-row")).not.toHaveAttribute("data-selected")
+  })
+})
+
+describe("LogEntry copy failure", () => {
+  it("reports a clipboard rejection instead of showing a false check mark", async () => {
+    ;(navigator.clipboard.writeText as jest.Mock).mockRejectedValueOnce(new Error("denied"))
+    const { container } = renderWithTooltip(<LogHarness log={makeLog()} />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("log-entry-copy"))
+    })
+    expect(container.querySelector(".lucide-check")).toBeNull()
+    expect(mockToastError).toHaveBeenCalledWith("Couldn't copy to the clipboard")
   })
 })

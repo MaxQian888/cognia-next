@@ -8,6 +8,13 @@ import type { TransportHealthSnapshot } from "@cognia/logging/types/transport"
 export interface UseTransportHealthOptions {
   autoRefresh?: boolean
   refreshInterval?: number
+  /**
+   * `false` skips the hook entirely — no mount-time read, no interval. For a
+   * component that can be handed a host's shared poll (the log panel inside
+   * `/logs`) and must not start a second one, while still calling the hook
+   * unconditionally. Default `true`.
+   */
+  enabled?: boolean
 }
 
 export interface UseTransportHealthResult {

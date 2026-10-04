@@ -74,7 +74,8 @@ describe("LogDetailPanel — header & metadata", () => {
   it("renders title, level Badge, and message", () => {
     renderPanel({ log: makeLog({ level: "warn" }) })
     expect(screen.getByText("Log Detail")).toBeInTheDocument()
-    expect(screen.getByText("WARN")).toBeInTheDocument()
+    // The level badge reads in the user's language, like the level tabs.
+    expect(screen.getByText("Warning")).toBeInTheDocument()
     expect(screen.getByText("primary log message")).toBeInTheDocument()
   })
 
@@ -150,18 +151,48 @@ describe("LogDetailPanel — header & metadata", () => {
 })
 
 describe("LogDetailPanel — copy buttons", () => {
-  it("copies message text and shows transient Check icon", () => {
+  it("copies message text and shows transient Check icon", async () => {
     jest.useFakeTimers()
+    try {
+      const { container } = renderPanel({ log: makeLog({ message: "boom" }) })
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy message" }))
+      })
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("boom")
+      expect(container.querySelector(".lucide-check")).toBeInTheDocument()
+      act(() => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(container.querySelector(".lucide-check")).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("copies the whole entry as JSON", async () => {
+    const log = makeLog({ message: "boom", data: { a: 1 } })
+    renderPanel({ log })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy entry" }))
+    })
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(JSON.stringify(log, null, 2))
+  })
+
+  it("copies the session id", async () => {
+    renderPanel({ log: makeLog({ sessionId: "sess-7" }) })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy session ID" }))
+    })
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("sess-7")
+  })
+
+  it("does not show a check mark when the clipboard refuses", async () => {
+    mockWriteText.mockRejectedValueOnce(new Error("denied"))
     const { container } = renderPanel({ log: makeLog({ message: "boom" }) })
-    const copyButtons = container.querySelectorAll(".lucide-copy")
-    fireEvent.click(copyButtons[0].closest("button") as HTMLButtonElement)
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("boom")
-    expect(container.querySelector(".lucide-check")).toBeInTheDocument()
-    act(() => {
-      jest.advanceTimersByTime(2000)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy message" }))
     })
     expect(container.querySelector(".lucide-check")).toBeNull()
-    jest.useRealTimers()
   })
 
   it("copyButton with showText renders an outline Button with the label visible", () => {
@@ -198,7 +229,7 @@ describe("LogDetailPanel — data tree", () => {
 
   it("toggles arrays open/close", () => {
     renderPanel({ log: makeLog({ data: [1, 2, 3] as unknown as Record<string, unknown> }) })
-    expect(screen.getByText("items")).toBeInTheDocument()
+    expect(screen.getByText("3 items")).toBeInTheDocument()
   })
 })
 
@@ -327,19 +358,76 @@ describe("LogDetailPanel — agent trace section", () => {
     renderPanel({
       log: makeLog({ module: "agent.trace", data: {} }),
     })
-    expect(screen.getByText("unknown")).toBeInTheDocument()
+    expect(screen.getByText("unknown event")).toBeInTheDocument()
+  })
+
+  it("names a known span operation in words instead of the raw token", () => {
+    renderPanel({
+      log: makeLog({ module: "agent.trace", data: { eventType: "execute_tool" } }),
+    })
+    expect(screen.getByTestId("log-detail-trace-operation")).toHaveTextContent("Tool call")
+    expect(screen.queryByText(/execute.tool/)).not.toBeInTheDocument()
+  })
+
+  it("prints an unknown operation as the identifier it is", () => {
+    renderPanel({
+      log: makeLog({ module: "agent.trace", data: { eventType: "tool.call" } }),
+    })
+    const badge = screen.getByTestId("log-detail-trace-operation")
+    expect(badge).toHaveTextContent("tool.call")
+    expect(badge).toHaveClass("font-mono")
   })
 })
 
 describe("LogDetailPanel — related logs", () => {
-  it("renders related-log buttons filtered to exclude the current log", () => {
+  it("lists the trace in time order with this entry in its place, not as a button", () => {
     const related = [
-      makeLog({ id: "l-1", message: "self" }),
-      makeLog({ id: "l-2", level: "error", message: "second" }),
+      makeLog({ id: "l-3", timestamp: "2026-01-01T12:00:03Z", message: "after" }),
+      makeLog({ id: "l-1", timestamp: "2026-01-01T12:00:02Z", message: "self" }),
+      makeLog({ id: "l-2", timestamp: "2026-01-01T12:00:01Z", level: "error", message: "before" }),
     ]
-    renderPanel({ log: makeLog({ id: "l-1" }), relatedLogs: related })
-    expect(screen.queryByText("self")).not.toBeInTheDocument()
-    expect(screen.getByText("second")).toBeInTheDocument()
+    renderPanel({
+      log: makeLog({ id: "l-1", timestamp: "2026-01-01T12:00:02Z", message: "self" }),
+      relatedLogs: related,
+    })
+    const block = screen.getByTestId("log-detail-related")
+    const rows = Array.from(block.querySelectorAll('[data-testid^="related-log-"]')).map((node) =>
+      node.getAttribute("data-testid")
+    )
+    expect(rows).toEqual(["related-log-l-2", "related-log-current", "related-log-l-3"])
+    expect(screen.getByTestId("related-log-current")).toHaveAttribute("aria-current", "true")
+    expect(screen.getByTestId("related-log-current").tagName).not.toBe("BUTTON")
+    // The count is the neighbours, not the entry itself.
+    expect(block).toHaveTextContent("Related Logs (2)")
+  })
+
+  it("places the entry among neighbours a host passed without it", () => {
+    const related = [
+      makeLog({ id: "n-1", timestamp: "2026-01-01T12:00:01Z", traceId: "t" }),
+      makeLog({ id: "n-3", timestamp: "2026-01-01T12:00:03Z", traceId: "t" }),
+    ]
+    renderPanel({
+      log: makeLog({ id: "me", timestamp: "2026-01-01T12:00:02Z", traceId: "t" }),
+      relatedLogs: related,
+    })
+    const rows = Array.from(
+      screen.getByTestId("log-detail-related").querySelectorAll('[data-testid^="related-log-"]')
+    ).map((node) => node.getAttribute("data-testid"))
+    expect(rows).toEqual(["related-log-n-1", "related-log-current", "related-log-n-3"])
+  })
+
+  it("keeps a window around the entry in a long trace and says so", () => {
+    const related = Array.from({ length: 61 }, (_, i) =>
+      makeLog({
+        id: `r-${i}`,
+        timestamp: new Date(Date.parse("2026-01-01T12:00:00Z") + i * 1000).toISOString(),
+        traceId: "t",
+      })
+    )
+    renderPanel({ log: related[30], relatedLogs: related })
+    const block = screen.getByTestId("log-detail-related")
+    expect(block.querySelectorAll('[data-testid^="related-log-r-"]')).toHaveLength(40)
+    expect(block).toHaveTextContent("Showing 40 of 60 entries around this one.")
   })
 
   it("fires onSelectRelated when a related row is clicked", () => {
@@ -351,7 +439,7 @@ describe("LogDetailPanel — related logs", () => {
     expect(onSelectRelated.mock.calls[0][0].id).toBe("l-2")
   })
 
-  it("caps the related list at 20 entries", () => {
+  it("caps the related list when the entry has no place in it", () => {
     const related = Array.from({ length: 30 }, (_, i) =>
       makeLog({ id: `l-${i + 2}`, message: `msg-${i}` })
     )
@@ -438,5 +526,81 @@ describe("LogDetailPanel — lazy JSON copy", () => {
     const copyJson = screen.getByText("Copy JSON").closest("button") as HTMLButtonElement
     fireEvent.click(copyJson)
     expect(mockWriteText).toHaveBeenCalledWith(JSON.stringify(data, null, 2))
+  })
+})
+
+describe("LogDetailPanel — pivots", () => {
+  it("offers trace / session focus and open-in-Traces only when the host passes them", () => {
+    const onFocusTrace = jest.fn()
+    const onFocusSession = jest.fn()
+    const onOpenTrace = jest.fn()
+    const { rerender } = renderPanel({
+      log: makeLog({ traceId: "t-1", sessionId: "s-1" }),
+      onFocusTrace,
+      onFocusSession,
+      onOpenTrace,
+    })
+    fireEvent.click(screen.getByTestId("log-detail-focus-trace"))
+    fireEvent.click(screen.getByTestId("log-detail-focus-session"))
+    fireEvent.click(screen.getByTestId("log-detail-open-trace"))
+    expect(onFocusTrace).toHaveBeenCalledTimes(1)
+    expect(onFocusSession).toHaveBeenCalledTimes(1)
+    expect(onOpenTrace).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("log-detail-open-trace")).toHaveTextContent("Open in Traces")
+
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <LogDetailPanel log={makeLog({ traceId: "t-1" })} />
+      </TooltipProvider>
+    )
+    expect(screen.queryByTestId("log-detail-focus-trace")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("log-detail-open-trace")).not.toBeInTheDocument()
+    // Copying the entry is always there.
+    expect(screen.getByRole("button", { name: "Copy entry" })).toBeInTheDocument()
+  })
+
+  it("names the icon-only header buttons", () => {
+    renderPanel({ log: makeLog(), onClose: jest.fn(), onToggleBookmark: jest.fn() })
+    expect(screen.getByTestId("log-detail-close")).toHaveAccessibleName("Close details")
+    expect(screen.getByTestId("log-detail-bookmark")).toHaveAccessibleName("Bookmark")
+    expect(screen.getByTestId("log-detail-bookmark")).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("lets an unbroken source path wrap instead of widening the pane", () => {
+    renderPanel({
+      log: makeLog({
+        source: { file: "http://localhost:3000/_next/static/chunks/a_very_long_chunk.js", line: 1 },
+      }),
+    })
+    expect(screen.getByText(/a_very_long_chunk/)).toHaveClass("break-all")
+  })
+})
+
+describe("LogDetailPanel — embedded variant", () => {
+  it("renders only the body: no header, no message, no time / module / trace rows", () => {
+    renderPanel({
+      log: makeLog({
+        message: "the message",
+        traceId: "t-1",
+        sessionId: "s-1",
+        data: { a: 1 },
+      }),
+      variant: "embedded",
+      onClose: jest.fn(),
+    })
+    expect(screen.getByTestId("log-detail-embedded")).toBeInTheDocument()
+    expect(screen.queryByText("Log Detail")).not.toBeInTheDocument()
+    expect(screen.queryByText("the message")).not.toBeInTheDocument()
+    expect(screen.queryByText("Timestamp")).not.toBeInTheDocument()
+    expect(screen.queryByText("t-1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("log-detail-close")).not.toBeInTheDocument()
+    // What the host header does not print is still here.
+    expect(screen.getByText("s-1")).toBeInTheDocument()
+    expect(screen.getByText('"a"')).toBeInTheDocument()
+  })
+
+  it("does not open a scroll region of its own", () => {
+    const { container } = renderPanel({ log: makeLog(), variant: "embedded" })
+    expect(container.querySelector('[data-slot="scroll-area"]')).toBeNull()
   })
 })

@@ -24,7 +24,7 @@ jest.mock("@cognia/logging", () => {
   }
 })
 
-import { useLogModules, useLogStream } from "./use-log-stream"
+import { createLogSearchMatcher, useLogModules, useLogStream } from "./use-log-stream"
 
 beforeEach(() => {
   getLogsMock.mockReset().mockResolvedValue([])
@@ -94,18 +94,6 @@ describe("useLogStream", () => {
     await waitFor(() => expect(result.current.logs.map((l) => l.id)).toEqual(["1"]))
   })
 
-  it("groups logs by trace id when groupByTraceId is true", async () => {
-    getLogsMock.mockResolvedValueOnce([
-      sampleEntry({ id: "1", traceId: "t1" }),
-      sampleEntry({ id: "2", traceId: "t1" }),
-      sampleEntry({ id: "3" }),
-    ])
-    const { result } = renderHook(() => useLogStream({ groupByTraceId: true }))
-    await waitFor(() => expect(result.current.groupedLogs.size).toBeGreaterThan(0))
-    expect(result.current.groupedLogs.get("t1")).toHaveLength(2)
-    expect(result.current.groupedLogs.get("no-trace")).toHaveLength(1)
-  })
-
   it("exportLogs returns text and JSON formats", async () => {
     getLogsMock.mockResolvedValueOnce([sampleEntry()])
     const { result } = renderHook(() => useLogStream())
@@ -123,6 +111,38 @@ describe("useLogStream", () => {
     })
     expect(clearMock).toHaveBeenCalled()
     expect(result.current.logs).toHaveLength(0)
+  })
+
+  it("rethrows a failed clear without replacing the list with a load error", async () => {
+    getLogsMock.mockResolvedValueOnce([sampleEntry()])
+    clearMock.mockRejectedValueOnce(new Error("locked"))
+    const { result } = renderHook(() => useLogStream())
+    await waitFor(() => expect(result.current.logs).toHaveLength(1))
+    await act(async () => {
+      await expect(result.current.clearLogs()).rejects.toThrow("locked")
+    })
+    expect(result.current.logs).toHaveLength(1)
+    expect(result.current.error).toBeNull()
+  })
+
+  it("flags a full window from the pre-search fetch length", async () => {
+    // Three entries fill a three-entry window; the search keeps one of them,
+    // but the panel still only searched the newest three.
+    getLogsMock.mockResolvedValueOnce([
+      sampleEntry({ id: "1", message: "needle" }),
+      sampleEntry({ id: "2", message: "hay" }),
+      sampleEntry({ id: "3", message: "hay" }),
+    ])
+    const { result } = renderHook(() => useLogStream({ maxLogs: 3, searchQuery: "needle" }))
+    await waitFor(() => expect(result.current.logs.map((l) => l.id)).toEqual(["1"]))
+    expect(result.current.windowCapped).toBe(true)
+  })
+
+  it("does not flag a window that is not full", async () => {
+    getLogsMock.mockResolvedValueOnce([sampleEntry({ id: "1" })])
+    const { result } = renderHook(() => useLogStream({ maxLogs: 3 }))
+    await waitFor(() => expect(result.current.logs).toHaveLength(1))
+    expect(result.current.windowCapped).toBe(false)
   })
 
   it("captures fetch errors", async () => {
@@ -155,5 +175,36 @@ describe("useLogModules", () => {
   it("initializes with the registered modules", async () => {
     const { result } = renderHook(() => useLogModules())
     expect(result.current).toEqual(["alpha", "beta"])
+  })
+})
+
+describe("createLogSearchMatcher", () => {
+  const entry = (message: string, extra: Record<string, unknown> = {}) =>
+    ({
+      id: message,
+      level: "info",
+      module: "agent.trace",
+      message,
+      timestamp: "2026-01-01T00:00:00Z",
+      ...extra,
+    }) as never
+
+  it("returns null without a query", () => {
+    expect(createLogSearchMatcher("", false)).toBeNull()
+    expect(createLogSearchMatcher(undefined, true)).toBeNull()
+  })
+
+  it("matches message, module, trace id and data fields case-insensitively", () => {
+    const match = createLogSearchMatcher("TOOL", false)!
+    expect(match(entry("ran tool"))).toBe(true)
+    expect(match(entry("x", { data: { name: "tool-call" } }))).toBe(true)
+    expect(createLogSearchMatcher("agent.trace", false)!(entry("x"))).toBe(true)
+    expect(match(entry("nothing"))).toBe(false)
+  })
+
+  it("treats the query as a pattern with useRegex, and degrades to a literal when invalid", () => {
+    expect(createLogSearchMatcher("^ran\\s+t", true)!(entry("ran tool"))).toBe(true)
+    expect(createLogSearchMatcher("[x", true)!(entry("has [x inside"))).toBe(true)
+    expect(createLogSearchMatcher("[x", true)!(entry("plain"))).toBe(false)
   })
 })

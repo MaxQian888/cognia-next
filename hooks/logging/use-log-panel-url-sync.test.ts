@@ -22,7 +22,6 @@ function makeFilters(overrides: Partial<LogPanelFilterState> = {}): LogPanelFilt
     sessionFilter: "",
     searchQuery: "",
     useRegex: false,
-    highSeverityOnly: false,
     timeRange: "all",
     customTimeRange: null,
     traceFocusId: null,
@@ -35,8 +34,6 @@ function makeFilters(overrides: Partial<LogPanelFilterState> = {}): LogPanelFilt
     diagnosticTransportFilter: null,
     expandedIds: new Set(),
     focusedIndex: -1,
-    currentPage: 1,
-    pageSize: 50,
     density: "comfortable",
     presets: [],
     activePresetId: "__none__",
@@ -58,21 +55,18 @@ function makeFilters(overrides: Partial<LogPanelFilterState> = {}): LogPanelFilt
     setSessionFilter: jest.fn() as unknown as LogPanelFilterState["setSessionFilter"],
     setSearchQuery: jest.fn() as unknown as LogPanelFilterState["setSearchQuery"],
     setUseRegex: jest.fn() as unknown as LogPanelFilterState["setUseRegex"],
-    setHighSeverityOnly: jest.fn() as unknown as LogPanelFilterState["setHighSeverityOnly"],
     setTimeRange: jest.fn() as unknown as LogPanelFilterState["setTimeRange"],
     setCustomTimeRange: jest.fn() as unknown as LogPanelFilterState["setCustomTimeRange"],
     setTraceFocusId: jest.fn() as unknown as LogPanelFilterState["setTraceFocusId"],
     setAutoScroll: noop,
     setViewMode: jest.fn() as unknown as LogPanelFilterState["setViewMode"],
-    setSelectedLog: noop,
+    setSelectedLog: jest.fn() as unknown as LogPanelFilterState["setSelectedLog"],
     setShowDetailPanel: jest.fn() as unknown as LogPanelFilterState["setShowDetailPanel"],
     setSelectedTransportHealthName: noop,
     setSelectedNativeLogging: noop,
     setDiagnosticTransportFilter:
       jest.fn() as unknown as LogPanelFilterState["setDiagnosticTransportFilter"],
     setFocusedIndex: noop,
-    setCurrentPage: jest.fn() as unknown as LogPanelFilterState["setCurrentPage"],
-    setPageSize: jest.fn() as unknown as LogPanelFilterState["setPageSize"],
     setDensity: jest.fn() as unknown as LogPanelFilterState["setDensity"],
     toggleExpanded: noop,
     toggleBookmark: noop,
@@ -103,7 +97,7 @@ function seedUrl(query: string): void {
 describe("useLogPanelUrlSync — hydration from URL", () => {
   it("applies parsed search params on mount", () => {
     seedUrl(
-      "q=login&re=1&level=error&module=auth&src=tauri&session=s1&t=1h&trace=t-1&dx=remote&bm=1&hsev=1&view=dashboard&page=3&size=100&detail=1&density=compact"
+      "q=login&re=1&level=error&module=auth&src=tauri&session=s1&t=1h&trace=t-1&dx=remote&bm=1&view=dashboard&density=compact"
     )
     const filters = makeFilters()
     renderHook(() => useLogPanelUrlSync(filters))
@@ -117,12 +111,34 @@ describe("useLogPanelUrlSync — hydration from URL", () => {
     expect(filters.setTraceFocusId).toHaveBeenCalledWith("t-1")
     expect(filters.setDiagnosticTransportFilter).toHaveBeenCalledWith("remote")
     expect(filters.setBookmarkFilterActive).toHaveBeenCalledWith(true)
-    expect(filters.setHighSeverityOnly).toHaveBeenCalledWith(true)
     expect(filters.setViewMode).toHaveBeenCalledWith("dashboard")
-    expect(filters.setCurrentPage).toHaveBeenCalledWith(3)
-    expect(filters.setPageSize).toHaveBeenCalledWith(100)
-    expect(filters.setShowDetailPanel).toHaveBeenCalledWith(true)
     expect(filters.setDensity).toHaveBeenCalledWith("compact")
+  })
+
+  it("opens a legacy hsev=1 link on the Error tab", () => {
+    seedUrl("hsev=1")
+    const filters = makeFilters()
+    renderHook(() => useLogPanelUrlSync(filters))
+    expect(filters.setLevelFilter).toHaveBeenCalledWith("error")
+    // ...and never writes the flag back.
+    expect(new URLSearchParams(window.location.search).get("hsev")).toBeNull()
+  })
+
+  it("lets an explicit level win over the legacy hsev flag", () => {
+    seedUrl("level=warn&hsev=1")
+    const filters = makeFilters()
+    renderHook(() => useLogPanelUrlSync(filters))
+    expect(filters.setLevelFilter).toHaveBeenCalledTimes(1)
+    expect(filters.setLevelFilter).toHaveBeenCalledWith("warn")
+  })
+
+  it("drops stale pagination keys from a shared link", () => {
+    seedUrl("page=3&size=100&q=x")
+    const filters = makeFilters({ searchQuery: "x" })
+    renderHook(() => useLogPanelUrlSync(filters))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get("page")).toBeNull()
+    expect(params.get("size")).toBeNull()
   })
 
   it("parses from/to into a customTimeRange when both are valid", () => {
@@ -145,8 +161,6 @@ describe("useLogPanelUrlSync — hydration from URL", () => {
     expect(filters.setViewMode).not.toHaveBeenCalled()
     expect(filters.setTimeRange).not.toHaveBeenCalled()
     expect(filters.setSourceFilter).not.toHaveBeenCalled()
-    expect(filters.setCurrentPage).not.toHaveBeenCalled()
-    expect(filters.setPageSize).not.toHaveBeenCalled()
   })
 
   it("ignores from/to when reversed or non-numeric", () => {
@@ -180,6 +194,68 @@ describe("useLogPanelUrlSync — hydration from URL", () => {
   })
 })
 
+describe("useLogPanelUrlSync — deep-linked selection", () => {
+  const entry = { id: "log-7", timestamp: "2026-01-01T00:00:00.000Z" } as never
+
+  it("keeps sel in the URL until the logs load, then selects the entry", () => {
+    seedUrl("sel=log-7&detail=1")
+    const filters = makeFilters()
+    const { rerender } = renderHook(
+      ({ f, logs, ready }: { f: LogPanelFilterState; logs: never[]; ready: boolean }) =>
+        useLogPanelUrlSync(f, { logs, logsReady: ready }),
+      { initialProps: { f: filters, logs: [] as never[], ready: false } }
+    )
+    expect(filters.setSelectedLog).not.toHaveBeenCalled()
+    let params = new URLSearchParams(window.location.search)
+    expect(params.get("sel")).toBe("log-7")
+    expect(params.get("detail")).toBe("1")
+
+    rerender({ f: filters, logs: [entry], ready: true })
+    expect(filters.setSelectedLog).toHaveBeenCalledWith(entry)
+    expect(filters.setShowDetailPanel).toHaveBeenCalledWith(true)
+    // The panel's state now carries the selection; the URL keeps describing it.
+    rerender({
+      f: { ...filters, selectedLog: entry, showDetailPanel: true } as LogPanelFilterState,
+      logs: [entry],
+      ready: true,
+    })
+    params = new URLSearchParams(window.location.search)
+    expect(params.get("sel")).toBe("log-7")
+    expect(params.get("detail")).toBe("1")
+  })
+
+  it("does not open the pane when the link only selected the entry", () => {
+    seedUrl("sel=log-7")
+    const filters = makeFilters()
+    renderHook(() => useLogPanelUrlSync(filters, { logs: [entry], logsReady: true }))
+    expect(filters.setSelectedLog).toHaveBeenCalledWith(entry)
+    expect(filters.setShowDetailPanel).not.toHaveBeenCalled()
+  })
+
+  it("drops a selection the finished load does not contain", () => {
+    seedUrl("sel=gone&detail=1")
+    const filters = makeFilters()
+    const { rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useLogPanelUrlSync(filters, { logs: [], logsReady: ready }),
+      { initialProps: { ready: false } }
+    )
+    rerender({ ready: true })
+    expect(filters.setSelectedLog).not.toHaveBeenCalled()
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get("sel")).toBeNull()
+    expect(params.get("detail")).toBeNull()
+  })
+
+  it("ignores a bare detail=1 with nothing selected", () => {
+    seedUrl("detail=1")
+    const filters = makeFilters()
+    renderHook(() => useLogPanelUrlSync(filters, { logs: [], logsReady: true }))
+    expect(filters.setShowDetailPanel).not.toHaveBeenCalled()
+    expect(new URLSearchParams(window.location.search).get("detail")).toBeNull()
+  })
+})
+
 describe("useLogPanelUrlSync — writes to URL on state change", () => {
   it("writes a fully-encoded query string for non-default state", () => {
     mockSearchParams.mockReturnValue(new URLSearchParams())
@@ -197,10 +273,7 @@ describe("useLogPanelUrlSync — writes to URL on state change", () => {
       traceFocusId: "t-42",
       diagnosticTransportFilter: "remote",
       bookmarkFilterActive: true,
-      highSeverityOnly: true,
       viewMode: "dashboard",
-      currentPage: 4,
-      pageSize: 100,
       showDetailPanel: true,
       selectedLog: { id: "log-1" } as never,
       density: "spacious",
@@ -220,12 +293,16 @@ describe("useLogPanelUrlSync — writes to URL on state change", () => {
     expect(url).toContain("trace=t-42")
     expect(url).toContain("dx=remote")
     expect(url).toContain("bm=1")
-    expect(url).toContain("hsev=1")
+    expect(url).not.toContain("hsev")
     expect(url).toContain("view=dashboard")
-    expect(url).toContain("page=4")
-    expect(url).toContain("size=100")
     expect(url).toContain("detail=1")
     expect(url).toContain("sel=log-1")
+  })
+
+  it("drops detail=1 when nothing is selected", () => {
+    const filters = makeFilters({ showDetailPanel: true, selectedLog: null })
+    renderHook(() => useLogPanelUrlSync(filters))
+    expect(new URLSearchParams(window.location.search).get("detail")).toBeNull()
   })
 
   it("omits default values to keep the URL clean", () => {

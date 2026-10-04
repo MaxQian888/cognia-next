@@ -10,6 +10,7 @@
 
 import { useState, useMemo, useCallback } from "react"
 import { useTranslations, useLocale } from "next-intl"
+import { toast } from "sonner"
 import {
   X,
   Copy,
@@ -30,6 +31,9 @@ import {
   XCircle,
   Wrench,
   Brain,
+  Crosshair,
+  Filter,
+  Waypoints,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -80,8 +84,47 @@ export interface LogDetailPanelProps {
   onNavigate?: (delta: -1 | 1) => void
   /** 1-based position of this log in the visible list, for the header. */
   navPosition?: { index: number; total: number }
+  /*
+   * Pivots out of the entry. The pane used to be a dead end: it showed the
+   * trace and session ids as text, and narrowing the list to either meant
+   * closing it, hovering the row and finding the right icon. Each is offered
+   * only when it would change something.
+   */
+  /** Narrow the list to this entry's trace. */
+  onFocusTrace?: () => void
+  /** Narrow the list to this entry's session. */
+  onFocusSession?: () => void
+  /** Open this entry's trace in the trace explorer (the Traces channel). */
+  onOpenTrace?: () => void
+  /**
+   * `panel` (default) is the standalone pane: header, navigation, its own
+   * scroll. `embedded` is the body only, for a host that already renders the
+   * entry's level, title, time and trace in a header of its own and scrolls
+   * the whole column — the Diagnostics channel used to nest the full pane
+   * inside its detail, so the message, timestamp and trace id printed twice
+   * and two scroll regions fought over one column.
+   */
+  variant?: "panel" | "embedded"
   className?: string
 }
+
+/** Span operations the trace detail names in words (`SpanOperationName`). */
+const KNOWN_OPERATIONS = new Set([
+  "invoke_agent",
+  "execute_tool",
+  "chat",
+  "invoke_workflow",
+  "retrieval",
+  "embeddings",
+])
+
+/** How many neighbours either side of the entry the related list keeps. */
+const RELATED_CONTEXT = 20
+
+/** Radix wraps a ScrollArea's content in `display: table`, which sizes it to
+ * its widest unbreakable child — a long source path or a related-log row — and
+ * clips everything else at that width. */
+const SCROLL_AREA_BLOCK = "[&_[data-slot=scroll-area-viewport]>div]:!block"
 
 function JsonPrimitive({ value }: { value: unknown }) {
   if (typeof value === "string") {
@@ -121,6 +164,7 @@ function JsonTreeNode({
       : []
   const isCollapsible = isArray || isObject
   const [open, setOpen] = useState(defaultExpanded)
+  const t = useTranslations("logging")
 
   if (!isCollapsible) {
     return (
@@ -148,8 +192,11 @@ function JsonTreeNode({
           {/* i18n-exempt: JSON syntax literal in the raw log value renderer */}
           {label ? <span className="text-chart-4">&quot;{label}&quot;:</span> : null}
           <span>{wrapperOpen}</span>
-          <span className="text-muted-foreground">{entries.length}</span>
-          <span className="text-muted-foreground">{isArray ? "items" : "keys"}</span>
+          <span className="text-muted-foreground">
+            {isArray
+              ? t("detail.jsonItems", { count: entries.length })
+              : t("detail.jsonKeys", { count: entries.length })}
+          </span>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-1 pt-1">
           {entries.map(([entryLabel, entryValue]) => (
@@ -185,11 +232,16 @@ function CopyButton({
 }) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(typeof text === "function" ? text() : text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [text])
+  const t = useTranslations("logging")
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(typeof text === "function" ? text() : text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error(t("panel.copyFailed"))
+    }
+  }, [text, t])
 
   return (
     <Tooltip>
@@ -198,7 +250,8 @@ function CopyButton({
           variant={showText ? "outline" : "ghost"}
           size={showText ? "sm" : "icon"}
           className={cn(showText ? "h-7 gap-1.5 px-2 text-xs" : "h-6 w-6 shrink-0")}
-          onClick={handleCopy}
+          aria-label={showText ? undefined : label}
+          onClick={() => void handleCopy()}
         >
           {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
           {showText ? <span>{label}</span> : null}
@@ -237,8 +290,23 @@ function AgentTraceDetailSection({
           {EventIcon && (
             <EventIcon className={cn("h-4 w-4", eventColor ?? "text-muted-foreground")} />
           )}
-          <Badge variant="outline" className="text-xs capitalize">
-            {data.eventType?.replace(/_/g, " ") ?? "unknown"}
+          {/* The span's operation, in words. It printed the raw OTel token
+              ("execute_tool" → "execute tool") in every language; an
+              operation this build does not know is shown as written, in mono,
+              so it still reads as an identifier rather than prose. */}
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-xs",
+              data.eventType && !KNOWN_OPERATIONS.has(data.eventType) && "font-mono"
+            )}
+            data-testid="log-detail-trace-operation"
+          >
+            {!data.eventType
+              ? t("trace.unknownEvent")
+              : KNOWN_OPERATIONS.has(data.eventType)
+                ? t(`trace.operations.${data.eventType as "chat"}`)
+                : data.eventType}
           </Badge>
           {data.success === true && (
             <Badge variant="secondary" className="text-xs gap-1 bg-success/15 text-success">
@@ -394,10 +462,15 @@ export function LogDetailPanel({
   onSelectRelated,
   onNavigate,
   navPosition,
+  onFocusTrace,
+  onFocusSession,
+  onOpenTrace,
+  variant = "panel",
   className,
 }: LogDetailPanelProps) {
   const t = useTranslations("logging")
   const locale = useLocale()
+  const embedded = variant === "embedded"
 
   const timestamp = new Date(log.timestamp)
   const timeStr = timestamp.toLocaleString(locale, {
@@ -411,27 +484,343 @@ export function LogDetailPanel({
     fractionalSecondDigits: 3,
   })
 
-  const filteredRelated = useMemo(() => {
-    return relatedLogs.filter((r) => r.id !== log.id).slice(0, 20)
-  }, [relatedLogs, log.id])
+  /**
+   * The trace's entries in the order they happened, with this one in its
+   * place. The list used to be newest-first with the entry itself removed, so
+   * "what led up to this" read bottom-to-top around a gap you had to infer.
+   * Long traces keep `RELATED_CONTEXT` neighbours either side of the entry.
+   */
+  const related = useMemo(() => {
+    const ordered = [...relatedLogs].sort((a, b) =>
+      a.timestamp === b.timestamp ? 0 : a.timestamp < b.timestamp ? -1 : 1
+    )
+    if (!ordered.some((entry) => entry.id === log.id) && log.traceId) {
+      // A host that hands over only the neighbours still gets the entry placed.
+      const at = ordered.findIndex((entry) => entry.timestamp > log.timestamp)
+      ordered.splice(at < 0 ? ordered.length : at, 0, log)
+    }
+    const index = ordered.findIndex((entry) => entry.id === log.id)
+    const start = Math.max(0, index - RELATED_CONTEXT)
+    const window = ordered.slice(start, index + RELATED_CONTEXT + 1)
+    const others = window.filter((entry) => entry.id !== log.id).length
+    return { entries: others > 0 ? window : [], others, total: ordered.length - 1 }
+  }, [relatedLogs, log])
 
   // Serialize on demand — stringifying a large `data` payload on every render
   // is one of the things that made opening the detail panel feel sluggish.
   const copyDataJson = useCallback(() => JSON.stringify(log.data, null, 2), [log.data])
+  const copyEntryJson = useCallback(() => JSON.stringify(log, null, 2), [log])
 
   // The JSON tree only depends on `log.data`; memoizing the element keeps the
   // recursive Collapsible tree from re-rendering on unrelated parent updates
   // (e.g. relatedLogs churning on every poll).
   const dataTree = useMemo(() => (log.data ? <JsonTreeNode value={log.data} /> : null), [log.data])
 
+  const hasPivots = Boolean(onFocusTrace || onFocusSession || onOpenTrace)
+
+  const body = (
+    <div className={cn("space-y-4", embedded ? "min-w-0" : "p-4")}>
+      {!embedded && (
+        <>
+          {/* Message */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                {t("detail.message")}
+              </span>
+              <CopyButton text={log.message} label={t("detail.copyMessage")} />
+            </div>
+            <p className="text-sm break-words whitespace-pre-wrap">{log.message}</p>
+          </div>
+
+          {/* Pivots and whole-entry copy. */}
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="log-detail-actions">
+            {onFocusTrace && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-xs"
+                data-testid="log-detail-focus-trace"
+                onClick={onFocusTrace}
+              >
+                <Crosshair className="h-3 w-3" />
+                {t("detail.focusTrace")}
+              </Button>
+            )}
+            {onFocusSession && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-xs"
+                data-testid="log-detail-focus-session"
+                onClick={onFocusSession}
+              >
+                <Filter className="h-3 w-3" />
+                {t("detail.focusSession")}
+              </Button>
+            )}
+            {onOpenTrace && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-xs"
+                data-testid="log-detail-open-trace"
+                onClick={onOpenTrace}
+              >
+                <Waypoints className="h-3 w-3" />
+                {t("detail.openTrace")}
+              </Button>
+            )}
+            <div className={cn(hasPivots && "ms-auto")}>
+              <CopyButton text={copyEntryJson} label={t("detail.copyEntry")} showText />
+            </div>
+          </div>
+
+          <Separator />
+        </>
+      )}
+
+      {/* Metadata Grid — in the embedded body only what the host header does
+          not already print (session, source), and nothing at all when the
+          entry has neither. */}
+      {(!embedded || log.sessionId || log.source) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          {!embedded && (
+            <>
+              <div className="flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="text-muted-foreground">{t("detail.timestamp")}</p>
+                  <p className="font-mono">{timeStr}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Layers className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="text-muted-foreground">{t("detail.module")}</p>
+                  <p className="font-mono break-all">{log.module}</p>
+                </div>
+              </div>
+
+              {log.traceId && (
+                <div className="flex items-center gap-1.5 sm:col-span-2">
+                  <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-muted-foreground">{t("panel.traceId")}</p>
+                    <div className="flex items-center gap-1">
+                      <p className="font-mono truncate" title={log.traceId}>
+                        {log.traceId}
+                      </p>
+                      <CopyButton text={log.traceId} label={t("detail.copyTraceId")} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {log.sessionId && (
+            <div className="flex items-center gap-1.5 sm:col-span-2">
+              <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="text-muted-foreground">{t("detail.sessionId")}</p>
+                <div className="flex items-center gap-1">
+                  <p className="font-mono truncate" title={log.sessionId}>
+                    {log.sessionId}
+                  </p>
+                  <CopyButton text={log.sessionId} label={t("detail.copySessionId")} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {log.source && (
+            <div className="flex items-start gap-1.5 sm:col-span-2">
+              <FileCode className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <p className="text-muted-foreground">{t("panel.source")}</p>
+                {/* A bundled chunk URL is one unbroken token; it has to be
+                  allowed to break anywhere or it widens the whole pane. */}
+                <p className="font-mono break-all">
+                  {log.source.file}:{log.source.line}
+                  {log.source.function && (
+                    <span className="text-muted-foreground"> ({log.source.function})</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tags */}
+      {log.tags && log.tags.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium text-muted-foreground">{t("detail.tags")}</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {log.tags.map((tag) => (
+                <Badge key={tag} variant="secondary" className="text-xs">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Agent Trace Detail Section */}
+      {log.module === AGENT_TRACE_MODULE &&
+        (() => {
+          const traceData = getAgentTraceLogData(log)
+          return traceData ? <AgentTraceDetailSection data={traceData} t={t} /> : null
+        })()}
+
+      {/* Agent Trace Tree — parent → child span timeline for the same
+          traceId. Rendered alongside the single-span detail above so the
+          user can see the call graph at a glance. */}
+      {log.module === AGENT_TRACE_MODULE && log.traceId && (
+        <>
+          <Separator />
+          <div>
+            <div className="text-xs font-medium text-muted-foreground mb-2">
+              {t("panel.agentTrace.tree.title")}
+            </div>
+            <AgentTraceTree traceId={log.traceId} activeSpanId={log.id} />
+          </div>
+        </>
+      )}
+
+      {/* Data (JSON tree) */}
+      {log.data && !(log.module === AGENT_TRACE_MODULE) && (
+        <>
+          <Separator />
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">{t("panel.data")}</span>
+              <CopyButton text={copyDataJson} label={t("detail.copyJson")} showText />
+            </div>
+            <div className="overflow-x-auto rounded-md bg-muted/50 p-3">{dataTree}</div>
+          </div>
+        </>
+      )}
+
+      {/* Stack Trace (parsed frames) */}
+      {log.stack && (
+        <>
+          <Separator />
+          <div>
+            <StackTrace
+              trace={log.stack}
+              defaultOpen
+              onFilePathClick={(path, line, column) => openFileViewer(path, { line, column })}
+            >
+              <StackTraceHeader aria-label={t("panel.stackTrace")}>
+                <StackTraceError>
+                  <StackTraceErrorType />
+                  <StackTraceErrorMessage />
+                </StackTraceError>
+                <StackTraceActions aria-label={t("detail.copyStack")}>
+                  <StackTraceCopyButton aria-label={t("detail.copyStack")} />
+                  <StackTraceExpandButton aria-label={t("panel.stackTrace")} />
+                </StackTraceActions>
+              </StackTraceHeader>
+              <StackTraceContent maxHeight={320}>
+                <StackTraceFrames showRawWhenEmpty />
+              </StackTraceContent>
+            </StackTrace>
+          </div>
+        </>
+      )}
+
+      {/* Related Logs (same traceId), chronological, with this entry in place */}
+      {related.entries.length > 0 && (
+        <>
+          <Separator />
+          <div data-testid="log-detail-related">
+            <span className="text-xs font-medium text-muted-foreground mb-2 block">
+              {t("detail.relatedLogs")} ({related.total})
+            </span>
+            <div className="space-y-1">
+              {related.entries.map((entry) => {
+                const relTime = new Date(entry.timestamp).toLocaleTimeString(locale, {
+                  hour12: false,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })
+                const isCurrent = entry.id === log.id
+                const content = (
+                  <>
+                    <Badge
+                      className={cn(
+                        "text-[10px] shrink-0 px-1.5",
+                        LEVEL_THEME[entry.level].badgeClass
+                      )}
+                    >
+                      {t(`levels.${entry.level}`)}
+                    </Badge>
+                    <span className="font-mono text-muted-foreground shrink-0">{relTime}</span>
+                    <span className="min-w-0 flex-1 truncate text-left">{entry.message}</span>
+                  </>
+                )
+                return isCurrent ? (
+                  <div
+                    key={entry.id}
+                    aria-current="true"
+                    className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs"
+                    data-testid="related-log-current"
+                  >
+                    {content}
+                    <span className="shrink-0 text-[10px] text-primary">
+                      {t("detail.thisEntry")}
+                    </span>
+                  </div>
+                ) : (
+                  <Button
+                    key={entry.id}
+                    variant="ghost"
+                    className="flex h-auto w-full min-w-0 items-center justify-start gap-2 px-2 py-1.5 text-xs font-normal motion-safe:transition-colors"
+                    onClick={() => onSelectRelated?.(entry)}
+                    data-testid={`related-log-${entry.id}`}
+                  >
+                    {content}
+                  </Button>
+                )
+              })}
+            </div>
+            {related.total > related.others && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {t("detail.relatedWindowed", { shown: related.others, total: related.total })}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+
+  if (embedded) {
+    return (
+      <div className={cn("min-w-0", className)} data-testid="log-detail-embedded">
+        {body}
+      </div>
+    )
+  }
+
   return (
-    <div className={cn("flex flex-col border-l bg-background", className)}>
+    <div className={cn("flex min-w-0 flex-col border-l bg-background", className)}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className="text-sm font-semibold truncate">{t("detail.title")}</h3>
           <Badge className={cn("text-xs shrink-0", LEVEL_THEME[log.level].badgeClass)}>
-            {log.level.toUpperCase()}
+            {t(`levels.${log.level}`)}
           </Badge>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -481,6 +870,9 @@ export function LogDetailPanel({
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7"
+                  aria-label={isBookmarked ? t("detail.removeBookmark") : t("detail.addBookmark")}
+                  aria-pressed={isBookmarked}
+                  data-testid="log-detail-bookmark"
                   onClick={() => onToggleBookmark(log.id)}
                 >
                   {isBookmarked ? (
@@ -496,216 +888,26 @@ export function LogDetailPanel({
             </Tooltip>
           )}
           {onClose && (
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label={t("detail.close")}
+                  data-testid="log-detail-close"
+                  onClick={onClose}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("detail.close")}</TooltipContent>
+            </Tooltip>
           )}
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="p-4 space-y-4">
-          {/* Message */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t("detail.message")}
-              </span>
-              <CopyButton text={log.message} label={t("detail.copyMessage")} />
-            </div>
-            <p className="text-sm break-words">{log.message}</p>
-          </div>
-
-          <Separator />
-
-          {/* Metadata Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-              <div>
-                <p className="text-muted-foreground">{t("detail.timestamp")}</p>
-                <p className="font-mono">{timeStr}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5 text-muted-foreground" />
-              <div>
-                <p className="text-muted-foreground">{t("detail.module")}</p>
-                <p className="font-mono">{log.module}</p>
-              </div>
-            </div>
-
-            {log.traceId && (
-              <div className="flex items-center gap-1.5 sm:col-span-2">
-                <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-muted-foreground">{t("panel.traceId")}</p>
-                  <div className="flex items-center gap-1">
-                    <p className="font-mono truncate">{log.traceId}</p>
-                    <CopyButton text={log.traceId} label={t("detail.copyTraceId")} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {log.sessionId && (
-              <div className="flex items-center gap-1.5 sm:col-span-2">
-                <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-muted-foreground">{t("detail.sessionId")}</p>
-                  <p className="font-mono truncate">{log.sessionId}</p>
-                </div>
-              </div>
-            )}
-
-            {log.source && (
-              <div className="flex items-center gap-1.5 sm:col-span-2">
-                <FileCode className="h-3.5 w-3.5 text-muted-foreground" />
-                <div>
-                  <p className="text-muted-foreground">{t("panel.source")}</p>
-                  <p className="font-mono">
-                    {log.source.file}:{log.source.line}
-                    {log.source.function && (
-                      <span className="text-muted-foreground"> ({log.source.function})</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Tags */}
-          {log.tags && log.tags.length > 0 && (
-            <>
-              <Separator />
-              <div>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t("detail.tags")}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {log.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-xs">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Agent Trace Detail Section */}
-          {log.module === AGENT_TRACE_MODULE &&
-            (() => {
-              const traceData = getAgentTraceLogData(log)
-              return traceData ? <AgentTraceDetailSection data={traceData} t={t} /> : null
-            })()}
-
-          {/* Agent Trace Tree — parent → child span timeline for the same
-              traceId. Rendered alongside the single-span detail above so the
-              user can see the call graph at a glance. */}
-          {log.module === AGENT_TRACE_MODULE && log.traceId && (
-            <>
-              <Separator />
-              <div>
-                <div className="text-xs font-medium text-muted-foreground mb-2">
-                  {t("panel.agentTrace.tree.title")}
-                </div>
-                <AgentTraceTree traceId={log.traceId} activeSpanId={log.id} />
-              </div>
-            </>
-          )}
-
-          {/* Data (JSON tree) */}
-          {log.data && !(log.module === AGENT_TRACE_MODULE) && (
-            <>
-              <Separator />
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t("panel.data")}
-                  </span>
-                  <CopyButton text={copyDataJson} label={t("detail.copyJson")} showText />
-                </div>
-                <div className="rounded-md bg-muted/50 p-3">{dataTree}</div>
-              </div>
-            </>
-          )}
-
-          {/* Stack Trace (parsed frames) */}
-          {log.stack && (
-            <>
-              <Separator />
-              <div>
-                <StackTrace
-                  trace={log.stack}
-                  defaultOpen
-                  onFilePathClick={(path, line, column) => openFileViewer(path, { line, column })}
-                >
-                  <StackTraceHeader aria-label={t("panel.stackTrace")}>
-                    <StackTraceError>
-                      <StackTraceErrorType />
-                      <StackTraceErrorMessage />
-                    </StackTraceError>
-                    <StackTraceActions aria-label={t("detail.copyStack")}>
-                      <StackTraceCopyButton aria-label={t("detail.copyStack")} />
-                      <StackTraceExpandButton aria-label={t("panel.stackTrace")} />
-                    </StackTraceActions>
-                  </StackTraceHeader>
-                  <StackTraceContent maxHeight={320}>
-                    <StackTraceFrames showRawWhenEmpty />
-                  </StackTraceContent>
-                </StackTrace>
-              </div>
-            </>
-          )}
-
-          {/* Related Logs (same traceId) */}
-          {filteredRelated.length > 0 && (
-            <>
-              <Separator />
-              <div>
-                <span className="text-xs font-medium text-muted-foreground mb-2 block">
-                  {t("detail.relatedLogs")} ({filteredRelated.length})
-                </span>
-                <div className="space-y-1">
-                  {filteredRelated.map((related) => {
-                    const relTime = new Date(related.timestamp).toLocaleTimeString(locale, {
-                      hour12: false,
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })
-                    return (
-                      <Button
-                        key={related.id}
-                        variant="ghost"
-                        className="flex items-center gap-2 w-full justify-start px-2 py-1.5 h-auto text-xs font-normal motion-safe:transition-colors"
-                        onClick={() => onSelectRelated?.(related)}
-                        data-testid={`related-log-${related.id}`}
-                      >
-                        <Badge
-                          className={cn(
-                            "text-[10px] shrink-0 px-1.5",
-                            LEVEL_THEME[related.level].badgeClass
-                          )}
-                        >
-                          {related.level}
-                        </Badge>
-                        <span className="font-mono text-muted-foreground shrink-0">{relTime}</span>
-                        <span className="truncate">{related.message}</span>
-                      </Button>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </ScrollArea>
+      <ScrollArea className={cn("min-h-0 flex-1", SCROLL_AREA_BLOCK)}>{body}</ScrollArea>
     </div>
   )
 }

@@ -73,9 +73,21 @@ describe("useIncidentSubmission", () => {
     expect(result.current.supported).toBe(true)
   })
 
-  it("reports itself unsupported off the desktop shell", () => {
-    const { result } = setup({ deps: { desktopSupported: () => false } })
+  it("reports itself unsupported on a shell with no submission path", async () => {
+    const { result } = setup({
+      deps: { desktopSupported: () => false, resolveRuntime: async () => null },
+    })
+    expect(result.current.checkingSupport).toBe(true)
+    await waitFor(() => expect(result.current.checkingSupport).toBe(false))
     expect(result.current.supported).toBe(false)
+  })
+
+  it("is supported on a phone whose crash plugin answers the capability probe", async () => {
+    const { result } = setup({
+      deps: { desktopSupported: () => false, resolveRuntime: async () => "mobile" },
+    })
+    // Used to be `isTauri()`, which told every phone to go find a desktop.
+    await waitFor(() => expect(result.current.supported).toBe(true))
   })
 
   it("passes the consent decisions to the native packager and refreshes after", async () => {
@@ -104,7 +116,7 @@ describe("useIncidentSubmission", () => {
         description: "  I was exporting  ",
       })
     )
-    await waitFor(() => expect(result.current.busy).toBe(false))
+    await waitFor(() => expect(result.current.stateFor(desktopIncident).busy).toBe(false))
 
     expect(submitDesktop).toHaveBeenCalledWith(
       { baseUrl: connection.baseUrl, tenantId: "tenant-1", projectId: "project-1" },
@@ -116,13 +128,13 @@ describe("useIncidentSubmission", () => {
         description: "I was exporting",
       }
     )
-    expect(result.current.lastOutcome).toEqual({
+    expect(result.current.stateFor(desktopIncident).lastOutcome).toEqual({
       uploadedParts: 4,
       resumedParts: 0,
       screenshotUnavailable: true,
     })
     expect(onChanged).toHaveBeenCalled()
-    expect(result.current.errorCode).toBeNull()
+    expect(result.current.stateFor(desktopIncident).errorCode).toBeNull()
   })
 
   it("omits a whitespace-only description entirely", async () => {
@@ -150,7 +162,7 @@ describe("useIncidentSubmission", () => {
         description: "   ",
       })
     )
-    await waitFor(() => expect(result.current.busy).toBe(false))
+    await waitFor(() => expect(result.current.stateFor(desktopIncident).busy).toBe(false))
     expect(submitDesktop.mock.calls[0]![2].description).toBeUndefined()
   })
 
@@ -164,7 +176,9 @@ describe("useIncidentSubmission", () => {
         description: "",
       })
     )
-    await waitFor(() => expect(result.current.errorCode).toBe("ingest_disabled"))
+    await waitFor(() =>
+      expect(result.current.stateFor(desktopIncident).errorCode).toBe("ingest_disabled")
+    )
     // Nothing changed, so nothing to re-read — and the panel keeps the report.
     expect(onChanged).not.toHaveBeenCalled()
   })
@@ -179,7 +193,9 @@ describe("useIncidentSubmission", () => {
         description: "",
       })
     )
-    await waitFor(() => expect(result.current.errorCode).toBe("not_configured"))
+    await waitFor(() =>
+      expect(result.current.stateFor(desktopIncident).errorCode).toBe("not_configured")
+    )
     expect(submitDesktop).not.toHaveBeenCalled()
   })
 
@@ -198,6 +214,94 @@ describe("useIncidentSubmission", () => {
     act(() => result.current.onRefresh(desktopIncident))
     await waitFor(() => expect(refreshDesktop).toHaveBeenCalled())
     expect(onChanged).toHaveBeenCalledTimes(3)
+  })
+
+  it("refuses remote actions for a phone's report, which has no service incident id", async () => {
+    const withdrawDesktop = jest.fn(async () => ({}) as never)
+    const deleteDesktop = jest.fn(async () => undefined)
+    const refreshDesktop = jest.fn(async () => ({}) as never)
+    const { result, onChanged } = setup({
+      deps: { withdrawDesktop, deleteDesktop, refreshDesktop },
+    })
+    act(() => result.current.onWithdraw(mobileIncident))
+    await waitFor(() =>
+      expect(result.current.stateFor(mobileIncident).errorCode).toBe("desktop_only")
+    )
+    act(() => result.current.onDeleteRemote(mobileIncident))
+    act(() => result.current.onRefresh(mobileIncident))
+    await waitFor(() => expect(result.current.stateFor(mobileIncident).busy).toBe(false))
+    expect(withdrawDesktop).not.toHaveBeenCalled()
+    expect(deleteDesktop).not.toHaveBeenCalled()
+    expect(refreshDesktop).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
+  })
+
+  it("keeps each incident's busy flag, failure and outcome to itself", async () => {
+    let release: (() => void) | null = null
+    const submitDesktop = jest.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          release = () => reject({ code: "ingest_disabled" })
+        })
+    )
+    const other: DiagnosticIncidentSummary = { ...desktopIncident, id: "crash-other" }
+    const { result } = setup({ deps: { submitDesktop } })
+    act(() =>
+      result.current.onSubmit(desktopIncident, {
+        includeMinidump: false,
+        includeScreenshot: false,
+        description: "",
+      })
+    )
+    await waitFor(() => expect(result.current.stateFor(desktopIncident).busy).toBe(true))
+    // B never inherits A's in-flight state…
+    expect(result.current.stateFor(other)).toEqual({
+      busy: false,
+      errorCode: null,
+      lastOutcome: null,
+    })
+    act(() => release?.())
+    await waitFor(() =>
+      expect(result.current.stateFor(desktopIncident).errorCode).toBe("ingest_disabled")
+    )
+    // …nor A's failure.
+    expect(result.current.stateFor(other).errorCode).toBeNull()
+    // A mobile incident with the same id is a different key.
+    expect(
+      result.current.stateFor({ id: desktopIncident.id, runtime: "mobile" }).errorCode
+    ).toBeNull()
+  })
+
+  it("keeps the last outcome when a later status refresh succeeds", async () => {
+    const submitDesktop = jest.fn(async () => ({
+      incidentId: "inc-1",
+      supportCode: "ABC123",
+      clientState: "processing",
+      processingState: "received",
+      serviceUrl: connection.baseUrl,
+      submittedAt: "2026-08-20T00:00:00Z",
+      includedMinidump: false,
+      includedScreenshot: false,
+      uploadedParts: 3,
+      resumedParts: 1,
+      screenshotUnavailable: false,
+    }))
+    const refreshDesktop = jest.fn(async () => ({}) as never)
+    const { result } = setup({ deps: { submitDesktop, refreshDesktop } })
+    act(() =>
+      result.current.onSubmit(desktopIncident, {
+        includeMinidump: false,
+        includeScreenshot: false,
+        description: "",
+      })
+    )
+    await waitFor(() =>
+      expect(result.current.stateFor(desktopIncident).lastOutcome?.uploadedParts).toBe(3)
+    )
+    act(() => result.current.onRefresh(desktopIncident))
+    await waitFor(() => expect(refreshDesktop).toHaveBeenCalled())
+    await waitFor(() => expect(result.current.stateFor(desktopIncident).busy).toBe(false))
+    expect(result.current.stateFor(desktopIncident).lastOutcome?.uploadedParts).toBe(3)
   })
 
   describe("mobile", () => {
@@ -253,13 +357,13 @@ describe("useIncidentSubmission", () => {
           description: "",
         })
       )
-      await waitFor(() => expect(result.current.busy).toBe(false))
+      await waitFor(() => expect(result.current.stateFor(mobileIncident).busy).toBe(false))
 
-      expect(result.current.errorCode).toBeNull()
+      expect(result.current.stateFor(mobileIncident).errorCode).toBeNull()
       // `markReceipt` had no production caller before this: the mobile
       // lifecycle could never advance past `detected` either.
       expect(deps.recordMobileReceipt).toHaveBeenCalledWith("crash-mobile", "MOB-1", "processing")
-      expect(result.current.lastOutcome).toEqual({
+      expect(result.current.stateFor(mobileIncident).lastOutcome).toEqual({
         uploadedParts: 1,
         resumedParts: 0,
         screenshotUnavailable: false,
@@ -277,7 +381,7 @@ describe("useIncidentSubmission", () => {
           description: "the app closed while syncing",
         })
       )
-      await waitFor(() => expect(result.current.busy).toBe(false))
+      await waitFor(() => expect(result.current.stateFor(mobileIncident).busy).toBe(false))
       const parts = fetchImpl.mock.calls.filter(([url]) => String(url).includes("/parts/"))
       expect(parts).toHaveLength(2)
       expect(String(parts[1]![0])).toContain("/parts/2")
@@ -293,7 +397,11 @@ describe("useIncidentSubmission", () => {
           description: "",
         })
       )
-      await waitFor(() => expect(result.current.errorCode).toBe("installation_proof_unsupported"))
+      await waitFor(() =>
+        expect(result.current.stateFor(mobileIncident).errorCode).toBe(
+          "installation_proof_unsupported"
+        )
+      )
     })
 
     it("stops before uploading when the plugin cannot read the report", async () => {
@@ -308,7 +416,9 @@ describe("useIncidentSubmission", () => {
           description: "",
         })
       )
-      await waitFor(() => expect(result.current.errorCode).toBe("report_not_found"))
+      await waitFor(() =>
+        expect(result.current.stateFor(mobileIncident).errorCode).toBe("report_not_found")
+      )
       expect(fetchImpl).not.toHaveBeenCalled()
     })
   })

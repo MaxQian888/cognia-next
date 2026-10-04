@@ -35,10 +35,26 @@ export interface CrashDiagnosticsSnapshot {
   diagnosticsError: string | null
 }
 
+/**
+ * Why a diagnostic-snapshot item exists, as a stable code the UI translates.
+ * `crash-log.ts` used to put English prose ("Native logging is degraded") into
+ * `summary`, which every locale then rendered verbatim.
+ */
+export type CrashDiagnosticsSummaryCode =
+  "diagnostics_error" | "runtime_error" | "native_degraded" | "native_inactive" | "snapshot"
+
 export interface CrashLogItem {
   id: string
+  /** The log message; empty for a diagnostic snapshot, whose title is translated. */
   title: string
+  /** First stack line / error message; for a snapshot, the raw detail or empty. */
   summary: string
+  /**
+   * Present only on the synthetic diagnostic-snapshot item. `detail` is the
+   * machine text that came with the condition (an error message, a fallback
+   * reason) — shown as-is because it is not prose this app wrote.
+   */
+  snapshot?: { summaryCode: CrashDiagnosticsSummaryCode; detail: string | null }
   timestamp: string
   level: LogLevel
   module: string
@@ -159,7 +175,12 @@ export interface UseCrashLogsResult {
   selectItem: (itemId: string) => void
   refresh: () => Promise<void>
   clearRecent: () => void
-  clearPersisted: () => Promise<void>
+  /**
+   * Delete the stored error-level entries this channel lists — never the rest
+   * of the log store. Resolves with how many were removed (0 when there is no
+   * IndexedDB transport to remove them from).
+   */
+  clearPersisted: () => Promise<number>
   copySelected: () => Promise<boolean>
   exportBundle: (format?: CrashLogExportFormat) => void
   openNativeLogDirectory: () => Promise<boolean>

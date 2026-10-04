@@ -52,20 +52,20 @@ describe("LogTimeline", () => {
     expect(screen.getByTestId("log-timeline-container")).toBeInTheDocument()
     expect(screen.getByTestId("log-timeline-placeholder")).toBeInTheDocument()
     // No clickable bucket buttons (the empty-state placeholder is decorative).
-    expect(screen.queryAllByLabelText(/logs$/i)).toHaveLength(0)
+    expect(screen.queryAllByTestId("log-timeline-bucket")).toHaveLength(0)
   })
 
   it("renders the timeline title and 60 bucket buttons by default", () => {
     const logs = buildHourlyLogs()
     renderTimeline({ logs })
     expect(screen.getByText("Timeline")).toBeInTheDocument()
-    expect(screen.getAllByLabelText(/logs$/i).length).toBe(60)
+    expect(screen.getAllByTestId("log-timeline-bucket").length).toBe(60)
   })
 
   it("respects custom bucketCount", () => {
     const logs = buildHourlyLogs()
     renderTimeline({ logs, bucketCount: 10 })
-    expect(screen.getAllByLabelText(/logs$/i).length).toBe(10)
+    expect(screen.getAllByTestId("log-timeline-bucket").length).toBe(10)
   })
 
   it("renders error and warning sparklines when those levels are present", () => {
@@ -123,7 +123,7 @@ describe("LogTimeline", () => {
   it("clicking a single bucket (mouseDown→mouseUp same idx) fires onTimeRangeClick with that bucket range", () => {
     const onTimeRangeClick = jest.fn()
     renderTimeline({ logs: buildHourlyLogs(), bucketCount: 10, onTimeRangeClick })
-    const buckets = screen.getAllByLabelText(/logs$/i)
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
     fireEvent.mouseDown(buckets[3])
     fireEvent.mouseUp(buckets[3])
     expect(onTimeRangeClick).toHaveBeenCalledTimes(1)
@@ -132,7 +132,7 @@ describe("LogTimeline", () => {
   it("drag selection (mouseDown→mouseEnter→mouseUp across buckets) fires the broader range", () => {
     const onTimeRangeClick = jest.fn()
     renderTimeline({ logs: buildHourlyLogs(), bucketCount: 10, onTimeRangeClick })
-    const buckets = screen.getAllByLabelText(/logs$/i)
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
     fireEvent.mouseDown(buckets[2])
     fireEvent.mouseEnter(buckets[6])
     fireEvent.mouseUp(buckets[6])
@@ -143,7 +143,7 @@ describe("LogTimeline", () => {
 
   it("mouseLeave on the bar cancels an in-progress drag without firing onTimeRangeClick when no callback", () => {
     renderTimeline({ logs: buildHourlyLogs(), bucketCount: 8 })
-    const buckets = screen.getAllByLabelText(/logs$/i)
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
     fireEvent.mouseDown(buckets[0])
     fireEvent.mouseEnter(buckets[2])
     // mouseLeave on the container ends the drag; no error should be thrown.
@@ -154,7 +154,7 @@ describe("LogTimeline", () => {
   it("renders bucket tooltips with localized total/errors/warnings labels", async () => {
     const logs = buildHourlyLogs()
     renderTimeline({ logs, bucketCount: 5 })
-    const buckets = screen.getAllByLabelText(/logs$/i)
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
     fireEvent.focus(buckets[0])
     fireEvent.mouseEnter(buckets[0])
     // Tooltip content may be portal-rendered; just verify it doesn't throw.
@@ -196,9 +196,90 @@ describe("LogTimeline", () => {
         <LogTimeline logs={buildHourlyLogs()} bucketCount={6} onTimeRangeClick={onTimeRangeClick} />
       </TooltipProvider>
     )
-    const buckets = screen.getAllByLabelText(/logs$/i)
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
     fireEvent.mouseDown(buckets[1])
     fireEvent.mouseUp(buckets[1])
     expect(onTimeRangeClick).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("LogTimeline — histogram and keyboard", () => {
+  function denseThenSparse(): StructuredLogEntry[] {
+    const base = Date.parse("2026-01-01T12:00:00Z")
+    const logs: StructuredLogEntry[] = []
+    // Bucket 0: 9 info + 1 error. Last bucket: a single info.
+    for (let i = 0; i < 9; i++) logs.push(makeLog(`i-${i}`, "info", new Date(base).toISOString()))
+    logs.push(makeLog("e", "error", new Date(base).toISOString()))
+    logs.push(makeLog("late", "info", new Date(base + 10 * 60_000).toISOString()))
+    return logs
+  }
+
+  it("draws volume as height and the level mix as segments", () => {
+    renderTimeline({ logs: denseThenSparse(), bucketCount: 10 })
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
+    const dense = buckets[0].firstElementChild as HTMLElement
+    const sparse = buckets[9].firstElementChild as HTMLElement
+    expect(dense.style.height).toBe("100%")
+    // One entry against ten still gets a visible floor.
+    expect(sparse.style.height).toBe("10%")
+    // One error in ten is a tenth of the column, not the whole of it.
+    const errorSegment = dense.querySelector(".bg-destructive") as HTMLElement
+    expect(errorSegment.style.height).toBe("10%")
+    expect((dense.querySelector(".bg-success") as HTMLElement).style.height).toBe("90%")
+  })
+
+  it("leaves an empty bucket empty", () => {
+    renderTimeline({ logs: denseThenSparse(), bucketCount: 10 })
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
+    expect(buckets[5]).toHaveAttribute("data-total", "0")
+    expect(buckets[5].firstElementChild).toBeNull()
+  })
+
+  it("labels each bucket with its time and counts in the user's language", () => {
+    renderTimeline({ logs: denseThenSparse(), bucketCount: 10 })
+    expect(screen.getAllByTestId("log-timeline-bucket")[0]).toHaveAccessibleName(
+      expect.stringMatching(/10 entries, 1 errors?, 0 warnings$/)
+    )
+  })
+
+  it("is one tab stop; arrows walk the buckets and Enter picks one", () => {
+    const onTimeRangeClick = jest.fn()
+    renderTimeline({ logs: denseThenSparse(), bucketCount: 10, onTimeRangeClick })
+    const buckets = screen.getAllByTestId("log-timeline-bucket")
+    expect(buckets.filter((b) => b.tabIndex === 0)).toHaveLength(1)
+    // The newest bucket is the entry point.
+    expect(buckets[9].tabIndex).toBe(0)
+    buckets[9].focus()
+    fireEvent.keyDown(buckets[9], { key: "ArrowLeft" })
+    expect(buckets[8]).toHaveFocus()
+    fireEvent.keyDown(buckets[8], { key: "Home" })
+    expect(buckets[0]).toHaveFocus()
+    expect(buckets[0].tabIndex).toBe(0)
+    fireEvent.keyDown(buckets[0], { key: "Enter" })
+    expect(onTimeRangeClick).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(buckets[0], { key: "End" })
+    expect(buckets[9]).toHaveFocus()
+  })
+
+  it("does not ring every bucket once the bar is the selected range", () => {
+    const logs = denseThenSparse()
+    renderTimeline({
+      logs,
+      bucketCount: 10,
+      selectedRange: {
+        start: new Date(Date.parse("2026-01-01T12:00:00Z")),
+        end: new Date(Date.parse("2026-01-01T12:10:00Z")),
+      },
+      onClearRange: jest.fn(),
+    })
+    const ringed = screen
+      .getAllByTestId("log-timeline-bucket")
+      .filter((bucket) => bucket.className.includes("ring-primary "))
+    expect(ringed).toHaveLength(0)
+  })
+
+  it("names debug / trace in the legend", () => {
+    renderTimeline({ logs: denseThenSparse() })
+    expect(screen.getByText("Other")).toBeInTheDocument()
   })
 })

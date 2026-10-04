@@ -12,6 +12,13 @@
  * Writes go through the shared cross-platform `saveExport` (Tauri dialog /
  * Capacitor / web download), matching the observability dashboard's export.
  *
+ * Labelled "Export trace" — it exports ONE trace — to tell it apart from the
+ * channel toolbar's "Export list" (every trace in the list, as CSV).
+ *
+ * The text label folds by CONTAINER width (`@lg:`), not the viewport's `sm:`:
+ * the menu sits in the trace pane's header, which is a fraction of the window
+ * and is measured by its own `@container` ancestor.
+ *
  * "Strip content previews" is offered because an export leaves the machine:
  * previews only exist when the user enabled content capture AND the redaction
  * gate passed, but a redacted prompt is still a prompt, and a bug report has a
@@ -97,10 +104,15 @@ export function TraceExportMenu({
           className={className}
           disabled={disabled}
           aria-label={t("label")}
+          title={t("label")}
           data-testid="trace-export-trigger"
         >
-          {copied ? <CheckIcon className="size-3.5" /> : <ShareIcon className="size-3.5" />}
-          <span className="hidden sm:inline">{t("label")}</span>
+          {copied ? (
+            <CheckIcon className="size-3.5" aria-hidden />
+          ) : (
+            <ShareIcon className="size-3.5" aria-hidden />
+          )}
+          <span className="hidden @lg:inline">{t("label")}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

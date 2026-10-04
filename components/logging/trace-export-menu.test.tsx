@@ -7,10 +7,24 @@ import userEvent from "@testing-library/user-event"
 import { makeSpan } from "@/lib/observability/fixtures"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
-jest.mock("next-intl", () => ({
-  useTranslations: (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = (namespace: string) => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${namespace}.${key}:${JSON.stringify(vars)}` : `${namespace}.${key}`
+  return {
+    useTranslations: (namespace: string) =>
+      Object.assign(translator(namespace), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 const success = jest.fn()
 const error = jest.fn()
@@ -146,5 +160,13 @@ describe("TraceExportMenu", () => {
     await user.click(screen.getByTestId("trace-export-trigger"))
     await user.click(screen.getByTestId("trace-export-copy-json"))
     expect(copy.mock.calls.at(-1)?.[0]).toContain("secret prompt")
+  })
+
+  it("names itself for the one trace it exports, with a container-query label", () => {
+    render(<TraceExportMenu traceId="t" spans={spans()} now={() => AT} />)
+    const trigger = screen.getByTestId("trace-export-trigger")
+    expect(trigger).toHaveAccessibleName("logging.workspace.traces.export.label")
+    expect(trigger).toHaveAttribute("title", "logging.workspace.traces.export.label")
+    expect(trigger.querySelector(".\\@lg\\:inline")).not.toBeNull()
   })
 })

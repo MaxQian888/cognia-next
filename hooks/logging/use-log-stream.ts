@@ -2,7 +2,7 @@
  * useLogStream Hook
  *
  * Provides real-time log streaming from IndexedDB storage.
- * Supports filtering, grouping by trace ID, auto-refresh, and incremental loading.
+ * Supports filtering, auto-refresh, and incremental loading.
  */
 
 import { useState, useEffect, useRef, useMemo } from "react"
@@ -23,10 +23,9 @@ const DEFAULT_OPTIONS: LogStreamOptions = {
   maxLogs: 1000,
   level: "all",
   useRegex: false,
-  groupByTraceId: false,
 }
 
-function buildSearchText(log: StructuredLogEntry): string {
+export function buildSearchText(log: StructuredLogEntry): string {
   let text = `${log.message}\n${log.module}`
   if (log.traceId) text += `\n${log.traceId}`
   if (log.data) {
@@ -41,12 +40,55 @@ function buildSearchText(log: StructuredLogEntry): string {
   return text.toLowerCase()
 }
 
+/**
+ * The panel's search rule as a predicate, so every stream it merges is
+ * searched the same way. Matches the message, module, trace id and the
+ * primitive `data` fields, case-insensitively; with `useRegex` the query is a
+ * case-insensitive pattern over the same text, and a pattern that does not
+ * compile degrades to a literal substring match on the message rather than
+ * matching nothing or everything. `null` when there is no query.
+ *
+ * `cache` memoises the per-entry search text by id — the log stream keeps one
+ * across polls; a one-off caller can omit it.
+ */
+export function createLogSearchMatcher(
+  query: string | undefined,
+  useRegex: boolean,
+  cache?: Map<string, string>
+): ((log: StructuredLogEntry) => boolean) | null {
+  if (!query) return null
+  const textOf = (log: StructuredLogEntry): string => {
+    if (!cache) return buildSearchText(log)
+    let cached = cache.get(log.id)
+    if (!cached) {
+      cached = buildSearchText(log)
+      cache.set(log.id, cached)
+    }
+    return cached
+  }
+  if (useRegex) {
+    try {
+      const regex = new RegExp(query, "i")
+      return (log) => regex.test(textOf(log))
+    } catch {
+      const literal = query.toLowerCase()
+      return (log) => log.message.toLowerCase().includes(literal)
+    }
+  }
+  const lowered = query.toLowerCase()
+  return (log) => textOf(log).includes(lowered)
+}
+
 export function useLogStream(options: LogStreamOptions = {}): LogStreamResult {
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
   const [logs, setLogs] = useState<StructuredLogEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+  // Store-side entries scanned so far (before search / tags), capped at
+  // `maxLogs`. `windowCapped` is "that count reached the cap".
+  const scannedCountRef = useRef(0)
+  const [windowCapped, setWindowCapped] = useState(false)
 
   const transportRef = useRef<IndexedDBTransport | null>(null)
   const initialFetchDone = useRef(false)
@@ -75,6 +117,7 @@ export function useLogStream(options: LogStreamOptions = {}): LogStreamResult {
   useEffect(() => {
     lastFetchedTimestamp.current = null
     initialFetchDone.current = false
+    scannedCountRef.current = 0
   }, [filterKey])
 
   // Stable fetch function — deps are React-stable (setters + ref), so the identity
@@ -110,34 +153,32 @@ export function useLogStream(options: LogStreamOptions = {}): LogStreamResult {
 
         let fetchedLogs = await transportRef.current.getLogs(filter)
 
-        if (currentOpts.searchQuery) {
-          if (currentOpts.useRegex) {
-            try {
-              const regex = new RegExp(currentOpts.searchQuery, "i")
-              fetchedLogs = fetchedLogs.filter((log) => {
-                let cached = searchTextCache.current.get(log.id)
-                if (!cached) {
-                  cached = buildSearchText(log)
-                  searchTextCache.current.set(log.id, cached)
-                }
-                return regex.test(cached)
-              })
-            } catch {
-              const query = currentOpts.searchQuery.toLowerCase()
-              fetchedLogs = fetchedLogs.filter((log) => log.message.toLowerCase().includes(query))
-            }
-          } else {
-            const query = currentOpts.searchQuery.toLowerCase()
-            fetchedLogs = fetchedLogs.filter((log) => {
-              let cached = searchTextCache.current.get(log.id)
-              if (!cached) {
-                cached = buildSearchText(log)
-                searchTextCache.current.set(log.id, cached)
-              }
-              return cached.includes(query)
-            })
-          }
-        }
+        // The window is measured on what the store handed back, before the
+        // search below narrows it: a full fetch that hit the limit, or an
+        // incremental one that pushed the running total to it. Once full it
+        // stays full — new arrivals only ever replace the oldest entries.
+        // Incremental fetches count only strictly newer entries: `since` is
+        // inclusive, so the previous newest entry comes back on every poll and
+        // counting it would walk an idle panel up to "full" one poll at a time.
+        const limit = currentOpts.maxLogs ?? DEFAULT_OPTIONS.maxLogs ?? 1000
+        const previousNewest = lastFetchedTimestamp.current
+        const scanned =
+          initialFetchDone.current && filter.since && previousNewest
+            ? Math.min(
+                limit,
+                scannedCountRef.current +
+                  fetchedLogs.filter((log) => log.timestamp > previousNewest).length
+              )
+            : Math.min(limit, fetchedLogs.length)
+        scannedCountRef.current = scanned
+        setWindowCapped(scanned >= limit)
+
+        const matches = createLogSearchMatcher(
+          currentOpts.searchQuery,
+          Boolean(currentOpts.useRegex),
+          searchTextCache.current
+        )
+        if (matches) fetchedLogs = fetchedLogs.filter(matches)
 
         if (currentOpts.tags && currentOpts.tags.length > 0) {
           const tags = currentOpts.tags
@@ -231,30 +272,21 @@ export function useLogStream(options: LogStreamOptions = {}): LogStreamResult {
     }
   }, [logs])
 
-  const groupedLogs = useMemo(() => {
-    if (!opts.groupByTraceId) return new Map<string, StructuredLogEntry[]>()
-    const groups = new Map<string, StructuredLogEntry[]>()
-    for (const log of logs) {
-      const traceId = log.traceId || "no-trace"
-      const existing = groups.get(traceId) || []
-      existing.push(log)
-      groups.set(traceId, existing)
-    }
-    return groups
-  }, [logs, opts.groupByTraceId])
-
   // Stable clearLogs — relies on transport ref and React-stable setters.
+  // A failure is thrown to the caller, not parked in `error`: `error` is the
+  // list's load state, and a failed clear used to replace a perfectly good
+  // list with "failed to load logs" while the caller toasted "cleared".
   const clearLogs = useMemo(() => {
     return async () => {
-      if (!transportRef.current) return
-      try {
-        await transportRef.current.clear()
-        setLogs([])
-        lastFetchedTimestamp.current = null
-        searchTextCache.current.clear()
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error("Failed to clear logs"))
+      if (!transportRef.current) {
+        throw new Error("Log store unavailable")
       }
+      await transportRef.current.clear()
+      setLogs([])
+      lastFetchedTimestamp.current = null
+      scannedCountRef.current = 0
+      setWindowCapped(false)
+      searchTextCache.current.clear()
     }
   }, [])
 
@@ -309,7 +341,6 @@ export function useLogStream(options: LogStreamOptions = {}): LogStreamResult {
 
   return {
     logs,
-    groupedLogs,
     isLoading,
     error,
     refresh: fetchLogs,
@@ -317,6 +348,7 @@ export function useLogStream(options: LogStreamOptions = {}): LogStreamResult {
     exportLogs,
     stats,
     logRate,
+    windowCapped,
   }
 }
 

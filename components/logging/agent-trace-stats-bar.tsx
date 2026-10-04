@@ -8,6 +8,12 @@
  * Data lives in Dexie (the trace transport persists every finished span);
  * the live query refreshes whenever a new span lands. The component itself
  * is pure presentation — pass `summary === null` for the loading state.
+ *
+ * Every card has a fixed `id`, and its test id is built from THAT. It used to
+ * be a slug of the translated label, so the ids were `agent-trace-stats-cost`
+ * in English and an empty `agent-trace-stats-` in Chinese (the slugger only
+ * kept ASCII) — selectors broke the moment the locale changed. Values format
+ * in the app locale; the grid steps by its container, not the viewport.
  */
 
 import { useMemo } from "react"
@@ -15,6 +21,7 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { cn } from "@/lib/utils"
+import { useObservabilityFormatters } from "@/hooks/observability/use-observability-formatters"
 import { aggregateStatsAll, type AgentTraceStatsSummary } from "@/lib/db/agent-traces"
 import { agentTraceWindowSince } from "@/lib/observability/trace-window"
 import type { AgentTraceStatsWindow } from "@/lib/observability/trace-window"
@@ -53,6 +60,7 @@ export function AgentTraceStatsBarView({
   className,
 }: AgentTraceStatsBarViewProps) {
   const t = useTranslations("logging.panel.agentTrace.statsBar")
+  const fmt = useObservabilityFormatters()
 
   if (!summary) {
     return (
@@ -66,31 +74,36 @@ export function AgentTraceStatsBarView({
     )
   }
 
-  const cards: Array<{ label: string; value: string; hint?: string }> = [
+  const cards: Array<{ id: StatsCardId; label: string; value: string; hint?: string }> = [
     {
+      id: "total-cost",
       label: t("totalCost"),
-      value: formatUsd(summary.totalCost),
+      value: fmt.usd(finiteOr0(summary.totalCost)),
       hint: t("totalSpansHint", { count: summary.totalSpans }),
     },
     {
+      id: "input-tokens",
       label: t("inputTokens"),
-      value: formatNumber(summary.totalInputTokens),
-      hint: t("outputHint", { count: summary.totalOutputTokens }),
+      value: fmt.compact(finiteOr0(summary.totalInputTokens)),
+      hint: t("outputHint", { count: fmt.compact(finiteOr0(summary.totalOutputTokens)) }),
     },
     {
+      id: "cache-hit-rate",
       label: t("cacheHitRate"),
-      value: formatPercent(summary.cacheHitRate),
-      hint: t("cacheReadHint", { count: summary.totalCacheReadTokens }),
+      value: fmt.percent(finiteOr0(summary.cacheHitRate)),
+      hint: t("cacheReadHint", { count: fmt.compact(finiteOr0(summary.totalCacheReadTokens)) }),
     },
     {
+      id: "tool-calls",
       label: t("toolCalls"),
-      value: formatNumber(summary.toolCallCount),
+      value: fmt.compact(finiteOr0(summary.toolCallCount)),
       hint: t("toolFailuresHint", { count: summary.toolFailureCount }),
     },
     {
+      id: "errors",
       label: t("errors"),
-      value: formatNumber(summary.errorCount),
-      hint: t("avgLatencyHint", { ms: Math.round(summary.avgLatencyMs) }),
+      value: fmt.compact(finiteOr0(summary.errorCount)),
+      hint: t("avgLatencyHint", { value: fmt.duration(finiteOr0(summary.avgLatencyMs)) }),
     },
   ]
 
@@ -112,18 +125,20 @@ export function AgentTraceStatsBarView({
           {t(`windows.${window}`)}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {cards.map((c) => (
-          <div
-            key={c.label}
-            className="border-y bg-background p-2.5"
-            data-testid={`agent-trace-stats-${slugify(c.label)}`}
-          >
-            <div className="text-xs text-muted-foreground">{c.label}</div>
-            <div className="text-base font-semibold tabular-nums">{c.value}</div>
-            {c.hint && <div className="text-[10px] text-muted-foreground">{c.hint}</div>}
-          </div>
-        ))}
+      <div className="@container">
+        <div className="grid grid-cols-2 gap-2 @lg:grid-cols-3 @3xl:grid-cols-5">
+          {cards.map((c) => (
+            <div
+              key={c.id}
+              className="border-y bg-background p-2.5"
+              data-testid={`agent-trace-stats-${c.id}`}
+            >
+              <div className="text-xs text-muted-foreground">{c.label}</div>
+              <div className="text-base font-semibold tabular-nums">{c.value}</div>
+              {c.hint && <div className="text-[10px] text-muted-foreground">{c.hint}</div>}
+            </div>
+          ))}
+        </div>
       </div>
       {modelEntries.length > 0 && (
         <ul
@@ -133,7 +148,7 @@ export function AgentTraceStatsBarView({
           {modelEntries.map(([model, m]) => (
             <li key={model} className="border-y px-1.5 py-0.5">
               <span className="font-medium text-foreground">{model}</span>
-              <span className="ml-1 tabular-nums">{formatUsd(m.costUsd)}</span>
+              <span className="ml-1 tabular-nums">{fmt.usd(finiteOr0(m.costUsd))}</span>
               <span className="ml-1 text-[10px]">·{t("modelRuns", { count: m.spans })}</span>
             </li>
           ))}
@@ -143,27 +158,16 @@ export function AgentTraceStatsBarView({
   )
 }
 
-function formatUsd(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0.00"
-  if (value < 0.01) return `$${value.toFixed(4)}`
-  return `$${value.toFixed(2)}`
-}
+/** Stable card ids — the test-id contract (see the file header). */
+export const STATS_CARD_IDS = [
+  "total-cost",
+  "input-tokens",
+  "cache-hit-rate",
+  "tool-calls",
+  "errors",
+] as const
+export type StatsCardId = (typeof STATS_CARD_IDS)[number]
 
-function formatNumber(value: number): string {
-  if (!Number.isFinite(value)) return "0"
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
-  return String(Math.round(value))
-}
-
-function formatPercent(value: number): string {
-  if (!Number.isFinite(value)) return "0%"
-  return `${Math.round(value * 100)}%`
-}
-
-function slugify(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
+function finiteOr0(value: number): number {
+  return Number.isFinite(value) ? value : 0
 }

@@ -3,10 +3,11 @@
  */
 
 import React, { createRef } from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 import { useTranslations } from "next-intl"
 
 const mockVirtualizerOptions: Array<{ getItemKey?: (index: number) => string | number }> = []
+const mockScrollToIndex = jest.fn()
 
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: (options: {
@@ -32,6 +33,7 @@ jest.mock("@tanstack/react-virtual", () => ({
       getVirtualItems: () => items,
       getTotalSize: () => count * 44,
       measureElement: jest.fn(),
+      scrollToIndex: mockScrollToIndex,
     }
   },
 }))
@@ -40,16 +42,36 @@ jest.mock("./log-entry", () => ({
   MemoizedLogEntry: ({
     log,
     isSelected,
+    isFocused,
+    isTabStop,
+    setSize,
+    index,
+    onActivate,
+    onFocusRow,
   }: {
     log: { id: string; message: string }
     isSelected?: boolean
+    isFocused?: boolean
+    isTabStop?: boolean
+    setSize?: number
+    index?: number
+    onActivate?: (log: { id: string }, index: number) => void
+    onFocusRow?: (index: number) => void
   }) => (
-    <div data-testid={`memoized-log-${log.id}`} data-selected={isSelected || undefined}>
+    <div
+      role="option"
+      aria-selected={Boolean(isSelected)}
+      aria-setsize={setSize}
+      data-index={index}
+      tabIndex={isTabStop ? 0 : -1}
+      data-testid={`memoized-log-${log.id}`}
+      data-selected={isSelected || undefined}
+      data-focused={isFocused || undefined}
+      onFocus={() => onFocusRow?.(index ?? -1)}
+      onClick={() => onActivate?.(log, index ?? -1)}
+    >
       {log.message}
     </div>
-  ),
-  TraceGroup: ({ traceId, logs }: { traceId: string; logs: Array<{ id: string }> }) => (
-    <div data-testid={`trace-group-${traceId}`}>{logs.length} logs</div>
   ),
 }))
 
@@ -72,16 +94,18 @@ function Harness(props: {
   isLoading?: boolean
   error?: Error | null
   filteredLogs?: StructuredLogEntry[]
-  groupByTraceId?: boolean
-  groupedLogs?: Map<string, StructuredLogEntry[]>
   emptyContext?: {
     activeFilterLabels: string[]
     onClearFilters?: () => void
     onOpenPresets?: () => void
+    windowCappedCount?: number
   }
   onRetry?: () => void
   bookmarkedIds?: Set<string>
   selectedLogId?: string | null
+  focusedIndex?: number
+  onActivateRow?: (log: StructuredLogEntry, index: number) => void
+  onFocusRow?: (index: number) => void
 }) {
   const t = useTranslations("logging")
   const scrollRef = createRef<HTMLDivElement>()
@@ -93,8 +117,6 @@ function Harness(props: {
       isLoading={props.isLoading ?? false}
       error={props.error ?? null}
       filteredLogs={props.filteredLogs ?? []}
-      groupByTraceId={props.groupByTraceId ?? false}
-      groupedLogs={props.groupedLogs ?? new Map()}
       expandedIds={new Set()}
       toggleExpanded={jest.fn()}
       searchQuery=""
@@ -105,6 +127,9 @@ function Harness(props: {
       handleFocusTrace={jest.fn()}
       handleFocusSession={jest.fn()}
       selectedLogId={props.selectedLogId}
+      focusedIndex={props.focusedIndex}
+      onActivateRow={props.onActivateRow}
+      onFocusRow={props.onFocusRow}
       t={t}
       onRetry={props.onRetry}
       emptyStateContext={props.emptyContext}
@@ -220,24 +245,6 @@ describe("VirtualizedLogList", () => {
     })
   })
 
-  describe("grouped view", () => {
-    it("renders one TraceGroup per group entry", () => {
-      const groupedLogs = new Map<string, StructuredLogEntry[]>([
-        ["trace-1", [makeLog("a"), makeLog("b")]],
-        ["trace-2", [makeLog("c")]],
-      ])
-      render(
-        <Harness
-          filteredLogs={[makeLog("a"), makeLog("b"), makeLog("c")]}
-          groupByTraceId
-          groupedLogs={groupedLogs}
-        />
-      )
-      expect(screen.getByTestId("trace-group-trace-1")).toHaveTextContent("2 logs")
-      expect(screen.getByTestId("trace-group-trace-2")).toHaveTextContent("1 logs")
-    })
-  })
-
   describe("flat virtualized view", () => {
     it("renders up to 5 mocked log rows (one MemoizedLogEntry per virtual item)", () => {
       const logs = Array.from({ length: 12 }, (_, i) => makeLog(String(i)))
@@ -261,12 +268,16 @@ describe("VirtualizedLogList", () => {
       expect(options.getItemKey?.(7)).toBe(7)
     })
 
-    it("ignores groupedLogs when groupByTraceId is false", () => {
-      const logs = [makeLog("only")]
-      const grouped = new Map<string, StructuredLogEntry[]>([["t", logs]])
-      render(<Harness filteredLogs={logs} groupedLogs={grouped} />)
-      expect(screen.queryByTestId("trace-group-t")).not.toBeInTheDocument()
-      expect(screen.getByTestId("memoized-log-only")).toBeInTheDocument()
+    it("is a labelled listbox with one tab stop", () => {
+      const logs = Array.from({ length: 3 }, (_, i) => makeLog(String(i)))
+      render(<Harness filteredLogs={logs} />)
+      const list = screen.getByRole("listbox", { name: "Log entries" })
+      expect(list).toHaveAttribute("data-log-list", "true")
+      const options = screen.getAllByRole("option")
+      expect(options.filter((o) => o.getAttribute("tabindex") === "0")).toHaveLength(1)
+      // Without a cursor the first row on screen is the tab stop.
+      expect(options[0]).toHaveAttribute("tabindex", "0")
+      expect(options[0]).toHaveAttribute("aria-setsize", "3")
     })
   })
 })
@@ -278,5 +289,90 @@ describe("VirtualizedLogList — selected row", () => {
     expect(screen.getByTestId("memoized-log-b")).toHaveAttribute("data-selected", "true")
     expect(screen.getByTestId("memoized-log-a")).not.toHaveAttribute("data-selected")
     expect(screen.getByTestId("memoized-log-c")).not.toHaveAttribute("data-selected")
+  })
+})
+
+describe("VirtualizedLogList — keyboard cursor and activation", () => {
+  beforeEach(() => mockScrollToIndex.mockClear())
+  const logs = ["a", "b", "c"].map((id) => makeLog(id))
+
+  it("marks the cursor row and scrolls it into view only when needed", () => {
+    render(<Harness filteredLogs={logs} focusedIndex={2} />)
+    expect(screen.getByTestId("memoized-log-c")).toHaveAttribute("data-focused", "true")
+    expect(screen.getByTestId("memoized-log-a")).not.toHaveAttribute("data-focused")
+    expect(mockScrollToIndex).toHaveBeenCalledWith(2, { align: "auto" })
+  })
+
+  it("does not scroll without a cursor, or with a cursor past the end", () => {
+    const { rerender } = render(<Harness filteredLogs={logs} focusedIndex={-1} />)
+    rerender(<Harness filteredLogs={logs} focusedIndex={9} />)
+    expect(mockScrollToIndex).not.toHaveBeenCalled()
+  })
+
+  it("hands a row's activation back with its index", () => {
+    const onActivateRow = jest.fn()
+    render(<Harness filteredLogs={logs} onActivateRow={onActivateRow} />)
+    fireEvent.click(screen.getByTestId("memoized-log-b"))
+    expect(onActivateRow).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }), 1)
+  })
+
+  it("puts the tab stop on the cursor row", () => {
+    render(<Harness filteredLogs={logs} focusedIndex={1} />)
+    expect(screen.getByTestId("memoized-log-b")).toHaveAttribute("tabindex", "0")
+    expect(screen.getByTestId("memoized-log-a")).toHaveAttribute("tabindex", "-1")
+  })
+
+  it("reports a focused row so the cursor follows a click or Tab", () => {
+    const onFocusRow = jest.fn()
+    render(<Harness filteredLogs={logs} onFocusRow={onFocusRow} />)
+    act(() => screen.getByTestId("memoized-log-c").focus())
+    expect(onFocusRow).toHaveBeenCalledWith(2)
+  })
+
+  it("moves DOM focus with the cursor while focus is inside the list", () => {
+    jest.useFakeTimers()
+    try {
+      const { rerender } = render(<Harness filteredLogs={logs} focusedIndex={0} />)
+      act(() => screen.getByTestId("memoized-log-a").focus())
+      rerender(<Harness filteredLogs={logs} focusedIndex={2} />)
+      act(() => {
+        jest.runOnlyPendingTimers()
+      })
+      expect(screen.getByTestId("memoized-log-c")).toHaveFocus()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("leaves focus alone when it is outside the list", () => {
+    jest.useFakeTimers()
+    try {
+      const outside = document.createElement("button")
+      document.body.appendChild(outside)
+      outside.focus()
+      const { rerender } = render(<Harness filteredLogs={logs} focusedIndex={0} />)
+      rerender(<Harness filteredLogs={logs} focusedIndex={2} />)
+      act(() => {
+        jest.runOnlyPendingTimers()
+      })
+      expect(outside).toHaveFocus()
+      outside.remove()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("VirtualizedLogList — empty state over a full window", () => {
+  it("says only the newest entries were searched", () => {
+    render(
+      <Harness emptyContext={{ activeFilterLabels: ["Search: boom"], windowCappedCount: 1000 }} />
+    )
+    expect(screen.getByTestId("log-virtualized-list-empty-window")).toHaveTextContent("1000")
+  })
+
+  it("does not mention the window when it is not full", () => {
+    render(<Harness emptyContext={{ activeFilterLabels: ["Search: boom"] }} />)
+    expect(screen.queryByTestId("log-virtualized-list-empty-window")).not.toBeInTheDocument()
   })
 })

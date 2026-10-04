@@ -13,7 +13,7 @@ const meta = {
   args: {
     viewMode: "list",
     setViewMode: fn(),
-    includeAgentTrace: true,
+    traceViewAvailable: true,
     searchQuery: "",
     setSearchQuery: fn(),
     useRegex: false,
@@ -40,8 +40,6 @@ const meta = {
     saveCurrentPreset: fn(),
     removeActivePreset: fn(),
     EMPTY_PRESET_VALUE: "",
-    highSeverityOnly: false,
-    setHighSeverityOnly: fn(),
     traceFocusId: null,
     setTraceFocusId: fn(),
     autoRefresh: false,
@@ -55,8 +53,6 @@ const meta = {
     setAutoScroll: fn(),
     scrollToTop: fn(),
     scrollToBottom: fn(),
-    clearSessionFocus: fn(),
-    hasSessionFocus: false,
     bookmarkFilterActive: false,
     setBookmarkFilterActive: fn(),
     bookmarkedCount: 3,
@@ -94,14 +90,13 @@ export const AdvancedFiltersOpen: Story = {
   args: { showAdvancedFilters: true },
 }
 
-// Regex search on + auto-refresh spinning + an error-level tab active.
+// Regex search on + live follow on + the Error tab active.
 export const RegexAndAutoRefresh: Story = {
   args: {
     useRegex: true,
     searchQuery: "tool.*timeout",
     autoRefresh: true,
     levelFilter: "error",
-    highSeverityOnly: true,
   },
 }
 

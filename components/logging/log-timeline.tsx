@@ -3,10 +3,16 @@
 /**
  * LogTimeline
  *
- * Compact horizontal bar showing log density over time,
- * color-coded by severity. Clickable regions to filter by time range.
- * Supports brush selection (click-and-drag) for zooming.
- * Includes level-specific mini-sparklines below the main bar.
+ * Compact histogram of log volume over time. Each bucket is a stacked column:
+ * its height is the bucket's volume, its segments the level mix. Clickable
+ * regions filter by time range; click-and-drag brushes a range; the arrow keys
+ * walk the buckets and Enter picks one. Level-specific mini-sparklines below
+ * the bars mark where errors and warnings fall.
+ *
+ * Buckets used to be equal-height tiles painted in the *worst* level they
+ * contained, faded by volume. One error in a bucket of two hundred infos
+ * painted it red, so a store with a sprinkle of errors rendered a solid red
+ * strip that said nothing about either volume or mix.
  */
 
 import { memo, useEffect, useMemo, useCallback, useState, useRef } from "react"
@@ -40,17 +46,20 @@ interface TimelineBucket {
   other: number
 }
 
-function getBucketColor(bucket: TimelineBucket): string {
-  if (bucket.total === 0) return "bg-muted/30"
-  if (bucket.error > 0) return "bg-destructive"
-  if (bucket.warn > 0) return "bg-warning"
-  if (bucket.info > 0) return "bg-success"
-  return "bg-chart-3"
-}
+/** Stack order, bottom to top: the severe levels sit on the baseline where a
+ * thin segment is still easy to see. */
+const SEGMENTS = [
+  { key: "error", className: "bg-destructive" },
+  { key: "warn", className: "bg-warning" },
+  { key: "info", className: "bg-success" },
+  { key: "other", className: "bg-chart-3" },
+] as const
 
-function getBucketOpacity(bucket: TimelineBucket, maxCount: number): number {
-  if (bucket.total === 0 || maxCount === 0) return 0.15
-  return Math.max(0.2, Math.min(1, bucket.total / maxCount))
+/** Column height as a share of the bar, with a floor so a one-entry bucket
+ * next to a thousand-entry one is still visible and clickable. */
+function getBucketHeightPercent(total: number, maxCount: number): number {
+  if (total === 0 || maxCount === 0) return 0
+  return Math.max(8, Math.round((total / maxCount) * 100))
 }
 
 function isInRange(bucket: TimelineBucket, range: { start: Date; end: Date } | null): boolean {
@@ -63,18 +72,27 @@ interface TimelineBucketTileProps {
   total: number
   error: number
   warn: number
+  info: number
+  other: number
   startMs: number
-  colorClass: string
-  opacity: number
+  heightPercent: number
   isSelected: boolean
   isInBrush: boolean
   clickable: boolean
+  /** Roving tab stop: only the active bucket is in the tab order. */
+  tabbable: boolean
   onMouseDown: (idx: number) => void
   onMouseEnter: (idx: number) => void
   onMouseUp: () => void
+  onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>, idx: number) => void
+  onFocus: (idx: number) => void
+  registerRef: (idx: number, node: HTMLButtonElement | null) => void
+  /** `{label}: {value}` in the user's language (the colon differs by locale). */
+  fieldLabel: (label: string, value: number) => string
   totalLabel: string
   errorsLabel: string
   warningsLabel: string
+  ariaLabel: (time: string, total: number, errors: number, warnings: number) => string
   locale: string
 }
 
@@ -83,22 +101,39 @@ const TimelineBucketTile = memo(function TimelineBucketTile({
   total,
   error,
   warn,
+  info,
+  other,
   startMs,
-  colorClass,
-  opacity,
+  heightPercent,
   isSelected,
   isInBrush,
   clickable,
+  tabbable,
   onMouseDown,
   onMouseEnter,
   onMouseUp,
+  onKeyDown,
+  onFocus,
+  registerRef,
+  fieldLabel,
   totalLabel,
   errorsLabel,
   warningsLabel,
+  ariaLabel,
   locale,
 }: TimelineBucketTileProps) {
   const handleMouseDown = useCallback(() => onMouseDown(index), [onMouseDown, index])
   const handleMouseEnter = useCallback(() => onMouseEnter(index), [onMouseEnter, index])
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => onKeyDown(event, index),
+    [onKeyDown, index]
+  )
+  const handleFocus = useCallback(() => onFocus(index), [onFocus, index])
+  const handleRef = useCallback(
+    (node: HTMLButtonElement | null) => registerRef(index, node),
+    [registerRef, index]
+  )
+  const counts = { error, warn, info, other }
   const startLabel = useMemo(
     () =>
       new Date(startMs).toLocaleTimeString(locale, {
@@ -113,40 +148,52 @@ const TimelineBucketTile = memo(function TimelineBucketTile({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          ref={handleRef}
           type="button"
           variant="ghost"
           size="xs"
+          tabIndex={tabbable ? 0 : -1}
+          data-testid="log-timeline-bucket"
+          data-total={total}
           className={cn(
-            "h-auto min-w-0 flex-1 rounded-none p-0 transition-all",
-            colorClass,
+            "flex h-full min-w-0 flex-1 flex-col-reverse items-stretch justify-start rounded-none p-0 transition-colors",
+            "bg-muted/30 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
             clickable && "cursor-pointer",
-            isSelected && "ring-2 ring-primary ring-inset",
-            isInBrush && "ring-1 ring-primary/70 ring-inset brightness-125",
-            !isSelected && !isInBrush && "hover:ring-1 hover:ring-primary/50"
+            isSelected && "bg-primary/10 ring-2 ring-primary ring-inset",
+            isInBrush && "bg-primary/15 ring-1 ring-primary/70 ring-inset"
           )}
-          style={{ opacity: isSelected || isInBrush ? Math.max(opacity, 0.6) : opacity }}
           onMouseDown={handleMouseDown}
           onMouseEnter={handleMouseEnter}
           onMouseUp={onMouseUp}
-          aria-label={`${total} logs`}
-        />
+          onKeyDown={handleKeyDown}
+          onFocus={handleFocus}
+          aria-label={ariaLabel(startLabel, total, error, warn)}
+        >
+          {total > 0 && (
+            <span
+              aria-hidden
+              className="flex w-full flex-col-reverse overflow-hidden"
+              style={{ height: `${heightPercent}%` }}
+            >
+              {SEGMENTS.map((segment) =>
+                counts[segment.key] > 0 ? (
+                  <span
+                    key={segment.key}
+                    className={cn("w-full shrink-0", segment.className)}
+                    style={{ height: `${(counts[segment.key] / total) * 100}%` }}
+                  />
+                ) : null
+              )}
+            </span>
+          )}
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="text-xs">
         <div className="space-y-0.5">
           <p className="font-medium">{startLabel}</p>
-          <p>
-            {totalLabel}: {total}
-          </p>
-          {error > 0 && (
-            <p className="text-destructive">
-              {errorsLabel}: {error}
-            </p>
-          )}
-          {warn > 0 && (
-            <p className="text-warning">
-              {warningsLabel}: {warn}
-            </p>
-          )}
+          <p>{fieldLabel(totalLabel, total)}</p>
+          {error > 0 && <p className="text-destructive">{fieldLabel(errorsLabel, error)}</p>}
+          {warn > 0 && <p className="text-warning">{fieldLabel(warningsLabel, warn)}</p>}
         </div>
       </TooltipContent>
     </Tooltip>
@@ -291,6 +338,37 @@ export function LogTimeline({
     isDragging.current = false
   }, [])
 
+  // ── Keyboard: one tab stop for the whole bar, arrows to walk it ──
+  const [activeIdx, setActiveIdx] = useState(-1)
+  const tileRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
+  const registerTileRef = useCallback((idx: number, node: HTMLButtonElement | null) => {
+    if (node) tileRefs.current.set(idx, node)
+    else tileRefs.current.delete(idx)
+  }, [])
+  const handleTileFocus = useCallback((idx: number) => setActiveIdx(idx), [])
+  const handleTileKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, idx: number) => {
+      const count = bucketsRef.current.length
+      if (count === 0) return
+      let next: number | null = null
+      if (event.key === "ArrowRight") next = Math.min(idx + 1, count - 1)
+      else if (event.key === "ArrowLeft") next = Math.max(idx - 1, 0)
+      else if (event.key === "Home") next = 0
+      else if (event.key === "End") next = count - 1
+      else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault()
+        const bucket = bucketsRef.current[idx]
+        if (bucket) onTimeRangeClickRef.current?.(bucket.start, bucket.end)
+        return
+      }
+      if (next === null) return
+      event.preventDefault()
+      setActiveIdx(next)
+      tileRefs.current.get(next)?.focus()
+    },
+    []
+  )
+
   const brushRange = useMemo(() => {
     if (dragStartIdx === null || dragCurrentIdx === null) return null
     return {
@@ -309,6 +387,15 @@ export function LogTimeline({
     }),
     [t]
   )
+  const fieldLabel = useCallback(
+    (label: string, value: number) => t("panel.fieldValue", { label, value }),
+    [t]
+  )
+  const bucketAriaLabel = useCallback(
+    (time: string, total: number, errors: number, warnings: number) =>
+      t("timeline.bucketAria", { time, total, errors, warnings }),
+    [t]
+  )
 
   // The timeline stays mounted whenever it is enabled, even when there are no
   // logs yet — that avoids a layout-shift flicker when filters momentarily
@@ -318,6 +405,17 @@ export function LogTimeline({
 
   const firstTime = buckets[0]?.start
   const lastTime = buckets[buckets.length - 1]?.end
+  const midTime =
+    firstTime && lastTime ? new Date((firstTime.getTime() + lastTime.getTime()) / 2) : undefined
+  // After a brush the list — and so this bar — is the selected range. Every
+  // bucket is "in range" then, and ringing all sixty says nothing.
+  const everyBucketSelected =
+    selectedRange !== null &&
+    buckets.length > 0 &&
+    buckets.every((b) => isInRange(b, selectedRange))
+  const rovingIdx = activeIdx >= 0 && activeIdx < buckets.length ? activeIdx : buckets.length - 1
+  const formatAxis = (date: Date | undefined) =>
+    date?.toLocaleTimeString(locale, { hour12: false, hour: "2-digit", minute: "2-digit" })
   const hasErrors = !isEmpty && buckets.some((b) => b.error > 0)
   const hasWarns = !isEmpty && buckets.some((b) => b.warn > 0)
 
@@ -361,6 +459,12 @@ export function LogTimeline({
               {t("levels.error")}
             </span>
           </div>
+          <div className="flex items-center gap-1">
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-chart-3" />
+            <span className="text-xs sm:text-[10px] text-muted-foreground">
+              {t("timeline.otherLevels")}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -370,7 +474,11 @@ export function LogTimeline({
         onMouseLeave={handleMouseUp}
         onMouseUp={handleMouseUp}
       >
-        <div className="flex gap-px h-6 w-full rounded overflow-hidden select-none motion-safe:transition-all">
+        <div
+          role="group"
+          aria-label={t("timeline.title")}
+          className="flex gap-px h-8 w-full rounded overflow-hidden select-none"
+        >
           {isEmpty ? (
             <div
               data-testid="log-timeline-placeholder"
@@ -385,18 +493,25 @@ export function LogTimeline({
                 total={bucket.total}
                 error={bucket.error}
                 warn={bucket.warn}
+                info={bucket.info}
+                other={bucket.other}
                 startMs={bucket.start.getTime()}
-                colorClass={getBucketColor(bucket)}
-                opacity={getBucketOpacity(bucket, maxCount)}
-                isSelected={isInRange(bucket, selectedRange)}
+                heightPercent={getBucketHeightPercent(bucket.total, maxCount)}
+                isSelected={!everyBucketSelected && isInRange(bucket, selectedRange)}
                 isInBrush={brushRange ? i >= brushRange.min && i <= brushRange.max : false}
                 clickable={Boolean(onTimeRangeClick)}
+                tabbable={i === rovingIdx}
                 onMouseDown={handleMouseDown}
                 onMouseEnter={handleMouseMove}
                 onMouseUp={handleMouseUp}
+                onKeyDown={handleTileKeyDown}
+                onFocus={handleTileFocus}
+                registerRef={registerTileRef}
+                fieldLabel={fieldLabel}
                 totalLabel={timelineLabels.total}
                 errorsLabel={timelineLabels.errors}
                 warningsLabel={timelineLabels.warnings}
+                ariaLabel={bucketAriaLabel}
                 locale={locale}
               />
             ))
@@ -438,19 +553,10 @@ export function LogTimeline({
       {/* Time labels */}
       <div className="flex justify-between mt-0.5">
         <span className="text-xs sm:text-[10px] text-muted-foreground">
-          {firstTime?.toLocaleTimeString(locale, {
-            hour12: false,
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {formatAxis(firstTime)}
         </span>
-        <span className="text-xs sm:text-[10px] text-muted-foreground">
-          {lastTime?.toLocaleTimeString(locale, {
-            hour12: false,
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
+        <span className="text-xs sm:text-[10px] text-muted-foreground">{formatAxis(midTime)}</span>
+        <span className="text-xs sm:text-[10px] text-muted-foreground">{formatAxis(lastTime)}</span>
       </div>
     </div>
   )

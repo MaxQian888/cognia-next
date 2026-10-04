@@ -14,6 +14,8 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { cn } from "@/lib/utils"
+import { useObservabilityFormatters } from "@/hooks/observability/use-observability-formatters"
+import { useSpanLabels } from "@/hooks/observability/use-span-labels"
 import { queryByTrace } from "@/lib/db/agent-traces"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
@@ -50,10 +52,24 @@ interface TreeNode {
 }
 
 /** Pure rendering surface. Pass `spans === null` for loading; `[]` for "no
- * spans for this trace yet". */
+ * spans for this trace yet".
+ *
+ * A **nested list**, not an ARIA tree. It used to claim `role="tree"` /
+ * `treeitem` with none of the keyboard contract that role promises (no focus,
+ * no arrow keys, no expand/collapse) — so a screen reader announced a widget
+ * that ignored every key it told the user to press. Nothing here is
+ * interactive; a nested `<ul>` conveys the same parent → child structure
+ * natively (assistive tech announces list depth), and the active span is
+ * marked with `aria-current`.
+ *
+ * Numbers format in the app locale, the operation id renders as its
+ * translated label (raw id in the `title`), and the model column folds by the
+ * CONTAINER's width — the tree lives in the log detail pane, whose width has
+ * nothing to do with the viewport's `sm:` breakpoint. */
 export function AgentTraceTreeView({ spans, activeSpanId, className }: AgentTraceTreeViewProps) {
   const t = useTranslations("logging.panel.agentTrace.tree")
   const tree = useMemo(() => (spans ? buildTree(spans) : []), [spans])
+  const totalDurationMs = useMemo(() => (spans ? computeTotalDuration(spans) : 0), [spans])
 
   if (spans === null) {
     return (
@@ -72,21 +88,17 @@ export function AgentTraceTreeView({ spans, activeSpanId, className }: AgentTrac
   }
 
   return (
-    <div
-      className={cn("flex flex-col gap-0.5", className)}
-      data-testid="agent-trace-tree"
-      role="tree"
-      aria-label={t("treeLabel")}
-    >
-      {tree.map((node) => (
-        <TreeRow
-          key={node.span.id}
-          node={node}
-          activeSpanId={activeSpanId}
-          totalDurationMs={computeTotalDuration(spans)}
-          t={t}
-        />
-      ))}
+    <div className={cn("@container", className)} data-testid="agent-trace-tree">
+      <ul className="flex flex-col gap-0.5" aria-label={t("treeLabel")}>
+        {tree.map((node) => (
+          <TreeRow
+            key={node.span.id}
+            node={node}
+            activeSpanId={activeSpanId}
+            totalDurationMs={totalDurationMs}
+          />
+        ))}
+      </ul>
     </div>
   )
 }
@@ -95,10 +107,12 @@ interface TreeRowProps {
   node: TreeNode
   activeSpanId?: string
   totalDurationMs: number
-  t: ReturnType<typeof useTranslations>
 }
 
-function TreeRow({ node, activeSpanId, totalDurationMs, t }: TreeRowProps) {
+function TreeRow({ node, activeSpanId, totalDurationMs }: TreeRowProps) {
+  const t = useTranslations("logging.panel.agentTrace.tree")
+  const fmt = useObservabilityFormatters()
+  const labels = useSpanLabels()
   const { span, depth, children } = node
   const isActive = activeSpanId === span.id
   const isError = Boolean(span.errorType || span.errorMessage)
@@ -109,11 +123,8 @@ function TreeRow({ node, activeSpanId, totalDurationMs, t }: TreeRowProps) {
   if (span.agentName ?? span.agentId) inlineParts.push(span.agentName ?? span.agentId ?? "")
   const model = span.responseModel ?? span.requestModel
   return (
-    <>
+    <li aria-current={isActive ? "true" : undefined}>
       <div
-        role="treeitem"
-        aria-selected={isActive}
-        aria-level={depth + 1}
         data-testid={`agent-trace-tree-row-${span.id}`}
         className={cn(
           "flex items-center gap-2 rounded px-1.5 py-1 text-xs",
@@ -129,24 +140,31 @@ function TreeRow({ node, activeSpanId, totalDurationMs, t }: TreeRowProps) {
           )}
           aria-hidden
         />
-        <span className="font-medium shrink-0">{span.operationName}</span>
+        {isError && <span className="sr-only">{t("failed")}</span>}
+        <span className="font-medium shrink-0" title={span.operationName}>
+          {labels.operation(span.operationName)}
+        </span>
         {inlineParts.length > 0 && (
           <span className="text-muted-foreground truncate">{inlineParts.join(" · ")}</span>
         )}
         <span className="ml-auto flex items-center gap-2 shrink-0 text-muted-foreground tabular-nums">
-          {model && <span className="hidden sm:inline">{model}</span>}
+          {model && <span className="hidden @md:inline">{model}</span>}
           {span.usage && (
             <span>
-              {span.usage.inputTokens}/{span.usage.outputTokens}t
+              {t("tokens", {
+                input: fmt.compact(span.usage.inputTokens),
+                output: fmt.compact(span.usage.outputTokens),
+              })}
             </span>
           )}
           {typeof span.costUsdEstimate === "number" && span.costUsdEstimate > 0 && (
-            <span>{formatUsd(span.costUsdEstimate)}</span>
+            <span>{fmt.usd(span.costUsdEstimate)}</span>
           )}
-          <span>{formatMs(duration)}</span>
+          <span>{fmt.duration(duration)}</span>
         </span>
       </div>
       <div
+        aria-hidden
         className="ml-1 mr-2 mb-0.5 h-0.5 bg-muted-foreground/10"
         style={{ marginLeft: depth * 16 + 14 }}
       >
@@ -155,16 +173,19 @@ function TreeRow({ node, activeSpanId, totalDurationMs, t }: TreeRowProps) {
           style={{ width: `${widthPct}%` }}
         />
       </div>
-      {children.map((child) => (
-        <TreeRow
-          key={child.span.id}
-          node={child}
-          activeSpanId={activeSpanId}
-          totalDurationMs={totalDurationMs}
-          t={t}
-        />
-      ))}
-    </>
+      {children.length > 0 && (
+        <ul className="flex flex-col gap-0.5">
+          {children.map((child) => (
+            <TreeRow
+              key={child.span.id}
+              node={child}
+              activeSpanId={activeSpanId}
+              totalDurationMs={totalDurationMs}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
   )
 }
 
@@ -203,17 +224,4 @@ function computeTotalDuration(spans: AgentTraceSpan[]): number {
     if (d > total) total = d
   }
   return total
-}
-
-function formatMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "0ms"
-  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`
-  if (ms >= 1_000) return `${(ms / 1_000).toFixed(1)}s`
-  return `${Math.round(ms)}ms`
-}
-
-function formatUsd(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0"
-  if (value < 0.01) return `$${value.toFixed(4)}`
-  return `$${value.toFixed(2)}`
 }

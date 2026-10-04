@@ -13,9 +13,15 @@
  *
  * Sorting: newest-first, matching `useLogStream`. The panel runs a linear
  * two-pointer merge over the two streams.
+ *
+ * `live: false` freezes the output: the panel's "Live off" stopped polling the
+ * log store, while this live query kept pushing spans into the same list. The
+ * live query keeps running underneath (it is what a manual refresh reads),
+ * but what the hook returns is a snapshot taken when following stopped, and
+ * it is re-taken only when `refreshToken` changes.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import type {
@@ -36,6 +42,8 @@ export function useAgentTraceAsLogs(
 ): UseAgentTraceLogsReturn {
   const enabled = options.enabled !== false
   const maxLogs = clampMaxLogs(options.maxLogs)
+  const live = options.live !== false
+  const refreshToken = options.refreshToken ?? 0
 
   const rows = useLiveQuery(
     async () => {
@@ -46,14 +54,33 @@ export function useAgentTraceAsLogs(
     undefined as Awaited<ReturnType<typeof queryRecent>> | undefined
   )
 
+  // Derived-state-from-props: the snapshot is re-taken during render when the
+  // inputs that define it change, which React supports without an effect (and
+  // without the extra frame an effect would show stale rows for). It changes
+  // when following stops or resumes, when a refresh is asked for, and once
+  // when a panel that mounted with Live off sees its first rows land.
+  const [frozen, setFrozen] = useState<{
+    live: boolean
+    token: number
+    rows: typeof rows
+  }>(() => ({ live, token: refreshToken, rows: live ? undefined : rows }))
+  if (
+    frozen.live !== live ||
+    frozen.token !== refreshToken ||
+    (!live && frozen.rows === undefined && rows !== undefined)
+  ) {
+    setFrozen({ live, token: refreshToken, rows: live ? undefined : rows })
+  }
+  const visibleRows = live ? rows : frozen.rows
+
   const logs = useMemo<StructuredLogEntry[]>(() => {
-    if (!rows || rows.length === 0) return EMPTY
-    return rows.map(spanToLogEntry)
-  }, [rows])
+    if (!visibleRows || visibleRows.length === 0) return EMPTY
+    return visibleRows.map(spanToLogEntry)
+  }, [visibleRows])
 
   return {
     logs,
-    isLoading: enabled && rows === undefined,
+    isLoading: enabled && visibleRows === undefined,
     error: null,
   }
 }

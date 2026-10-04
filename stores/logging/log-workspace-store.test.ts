@@ -1,7 +1,12 @@
+/** @jest-environment jsdom */
+
 import {
+  DEFAULT_DETAIL_WIDTH,
   DETAIL_WIDTH_MAX,
   DETAIL_WIDTH_MIN,
+  INCIDENT_STATE_FILTERS,
   migrateLogWorkspace,
+  resolveIncidentStateFilter,
   resolveLogWorkspaceView,
   resolveTraceSubView,
   useLogWorkspaceStore,
@@ -149,5 +154,78 @@ describe("migrateLogWorkspace", () => {
   it("survives a missing or non-object blob", () => {
     expect(migrateLogWorkspace(undefined)).toEqual({})
     expect(migrateLogWorkspace("nope")).toEqual({})
+  })
+})
+
+describe("incident state vocabulary", () => {
+  it("speaks the service's snake_case lifecycle, packaged included", () => {
+    expect(INCIDENT_STATE_FILTERS[0]).toBe("all")
+    expect(INCIDENT_STATE_FILTERS).toContain("awaiting_consent")
+    expect(INCIDENT_STATE_FILTERS).toContain("packaged")
+    expect(INCIDENT_STATE_FILTERS).not.toContain("awaitingConsent")
+  })
+
+  it("resolves legacy and hostile filter values", () => {
+    expect(resolveIncidentStateFilter("all")).toBe("all")
+    expect(resolveIncidentStateFilter("awaitingConsent")).toBe("awaiting_consent")
+    expect(resolveIncidentStateFilter("packaged")).toBe("packaged")
+    expect(resolveIncidentStateFilter("nonsense")).toBe("all")
+    expect(resolveIncidentStateFilter(42)).toBe("all")
+  })
+
+  it("migrates a v3 camelCase state filter onto the service vocabulary", () => {
+    expect(migrateLogWorkspace({ incidentStateFilter: "awaitingConsent" })).toMatchObject({
+      incidentStateFilter: "awaiting_consent",
+    })
+    expect(migrateLogWorkspace({ incidentStateFilter: "bogus" })).toMatchObject({
+      incidentStateFilter: "all",
+    })
+  })
+})
+
+describe("errors channel filters", () => {
+  it("keeps the filters in the store so a channel switch does not reset them", () => {
+    const state = useLogWorkspaceStore.getState()
+    state.setCrashSource("persisted")
+    state.setCrashLevel("fatal")
+    state.setCrashSearch("chunk")
+    state.setActiveView("logs")
+    state.setActiveView("diagnostics")
+    expect(useLogWorkspaceStore.getState()).toMatchObject({
+      crashSource: "persisted",
+      crashLevel: "fatal",
+      crashSearch: "chunk",
+    })
+    state.resetWorkspace()
+    expect(useLogWorkspaceStore.getState()).toMatchObject({
+      crashSource: "all",
+      crashLevel: "all",
+      crashSearch: "",
+    })
+  })
+
+  it("restores persisted source and level and rejects hostile ones", () => {
+    expect(migrateLogWorkspace({ crashSource: "recent", crashLevel: "error" })).toMatchObject({
+      crashSource: "recent",
+      crashLevel: "error",
+    })
+    expect(migrateLogWorkspace({ crashSource: "disk", crashLevel: "loud" })).toMatchObject({
+      crashSource: "all",
+      crashLevel: "all",
+    })
+  })
+
+  it("never persists the search text", () => {
+    useLogWorkspaceStore.getState().setCrashSearch("secret-ish query")
+    const raw = localStorage.getItem("cognia-log-workspace-v1")
+    expect(raw).not.toBeNull()
+    expect(raw).not.toContain("secret-ish query")
+    expect(JSON.parse(raw as string).version).toBe(4)
+  })
+
+  it("exports the shared detail-pane bounds", () => {
+    expect(DETAIL_WIDTH_MIN).toBeLessThan(DEFAULT_DETAIL_WIDTH)
+    expect(DEFAULT_DETAIL_WIDTH).toBeLessThan(DETAIL_WIDTH_MAX)
+    expect(useLogWorkspaceStore.getState().detailWidth).toBe(DEFAULT_DETAIL_WIDTH)
   })
 })

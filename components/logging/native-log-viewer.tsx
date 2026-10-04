@@ -6,11 +6,19 @@
  * `logs_query` API. On desktop it reads the local files; on a paired phone
  * (Capacitor / web companion) it shows the **desktop's** logs remotely —
  * the mobile counterpart of "open the log directory".
+ *
+ * "Unavailable" and "failed" are two states. Unavailable (plain web, an
+ * unpaired phone) replaces the viewer with an explanation, because there is
+ * nothing to query. A failed query — a locked file, a desktop that timed out —
+ * keeps the toolbar, so the user can pick the other file or retry, and shows
+ * the error above whatever the last good read returned. Both used to render
+ * as "unavailable — pair with a desktop first", on a desktop.
  */
 
 import { useEffect, useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
-import { FileTextIcon, RefreshCwIcon, ServerOffIcon } from "lucide-react"
+import { useFormatter, useTranslations } from "next-intl"
+import { AlertCircleIcon, FileTextIcon, RefreshCwIcon, ServerOffIcon } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,23 +47,44 @@ import type { NativeLogQueryEntry } from "@/lib/native/native-logging"
 
 const LEVEL_OPTIONS = ["all", "trace", "debug", "info", "warn", "error"] as const
 const SEARCH_DEBOUNCE_MS = 300
+const KNOWN_LEVELS = new Set<string>(["trace", "debug", "info", "warn", "error", "fatal"])
 
 function levelBadgeClass(level: string): string {
   const theme = LEVEL_THEME[level as LogLevel]
   return theme ? theme.badgeClass : LEVEL_THEME.info.badgeClass
 }
 
-function formatTimestamp(entry: NativeLogQueryEntry): string {
+type Formatter = ReturnType<typeof useFormatter>
+
+function formatTimestamp(entry: NativeLogQueryEntry, format: Formatter): string {
   if (entry.epochMs) {
-    return new Date(entry.epochMs).toLocaleTimeString(undefined, { hour12: false })
+    return format.dateTime(new Date(entry.epochMs), {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
   }
   return entry.timestamp
 }
 
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+/** File size in the app locale's digits and unit names (`1.5 KB`, `1.5 kB`, `1.5 KB`…). */
+export function formatFileSize(size: number, format: Formatter): string {
+  if (size < 1024) return format.number(size, { style: "unit", unit: "byte", unitDisplay: "short" })
+  if (size < 1024 * 1024) {
+    return format.number(size / 1024, {
+      style: "unit",
+      unit: "kilobyte",
+      unitDisplay: "short",
+      maximumFractionDigits: 1,
+    })
+  }
+  return format.number(size / (1024 * 1024), {
+    style: "unit",
+    unit: "megabyte",
+    unitDisplay: "short",
+    maximumFractionDigits: 1,
+  })
 }
 
 interface NativeLogViewerProps {
@@ -64,9 +93,15 @@ interface NativeLogViewerProps {
 
 export function NativeLogViewer({ className }: NativeLogViewerProps) {
   const t = useTranslations("logging.nativeViewer")
-  const { query, setQuery, result, loading, available, refresh } = useNativeLogQuery({
+  const tLogging = useTranslations("logging")
+  const format = useFormatter()
+  const { query, setQuery, result, loading, available, error, refresh } = useNativeLogQuery({
     refreshIntervalMs: 0,
   })
+  // Level names in the user's language; a level the reader does not know
+  // (a future tracing level) is shown as written in the file.
+  const levelLabel = (level: string) =>
+    KNOWN_LEVELS.has(level) ? tLogging(`levels.${level as LogLevel}`) : level
 
   const [search, setSearch] = useState(query.contains ?? "")
   useEffect(() => {
@@ -139,7 +174,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
             <SelectGroup>
               {LEVEL_OPTIONS.map((level) => (
                 <SelectItem key={level} value={level}>
-                  {level === "all" ? t("levelAll") : level}
+                  {level === "all" ? t("levelAll") : levelLabel(level)}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -164,13 +199,26 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
         </Button>
       </div>
 
+      {error ? (
+        <Alert variant="destructive" data-testid="native-log-viewer-error">
+          <AlertCircleIcon aria-hidden />
+          <AlertTitle>{t("errorTitle")}</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 break-words">{error}</span>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => void refresh()}>
+              {t("retry")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {result ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <FileTextIcon className="h-3.5 w-3.5" aria-hidden />
           <span className="truncate max-w-[280px]" title={result.path}>
             {result.path}
           </span>
-          <span>{formatBytes(result.fileSize)}</span>
+          <span>{formatFileSize(result.fileSize, format)}</span>
           {result.truncated ? (
             <Badge variant="outline" className="text-[10px]">
               {t("truncatedBadge")}
@@ -186,7 +234,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
           <Skeleton className="h-6 w-full" />
           <Skeleton className="h-6 w-2/3" />
         </div>
-      ) : entries.length === 0 ? (
+      ) : entries.length === 0 && error ? null : entries.length === 0 ? (
         <Empty className="border-y border-dashed p-6">
           <EmptyHeader>
             <EmptyDescription>{t("empty")}</EmptyDescription>
@@ -200,7 +248,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
               className="flex items-start gap-2 px-2 py-1 hover:bg-muted/50"
             >
               <span className="shrink-0 tabular-nums text-muted-foreground">
-                {formatTimestamp(entry)}
+                {formatTimestamp(entry, format)}
               </span>
               <Badge
                 variant="outline"
@@ -209,7 +257,7 @@ export function NativeLogViewer({ className }: NativeLogViewerProps) {
                   levelBadgeClass(entry.level)
                 )}
               >
-                {entry.level}
+                {levelLabel(entry.level)}
               </Badge>
               {entry.target ? (
                 <span

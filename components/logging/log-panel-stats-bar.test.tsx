@@ -6,11 +6,18 @@ import React from "react"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
+jest.mock("./native-log-viewer", () => ({
+  NativeLogViewer: () => <div data-testid="stub-native-log-viewer" />,
+}))
+
 import {
   LogPanelStatsBar,
   TransportHealthDetail,
+  TransportHealthSummary,
   NativeLoggingDetail,
+  LOG_SETTINGS_HREF,
   type LogPanelStatsBarProps,
+  type TransportHealthSummaryProps,
 } from "./log-panel-stats-bar"
 import type { TransportHealthSnapshot } from "@cognia/logging"
 import type { UseTransportHealthResult } from "@/hooks/logging"
@@ -47,19 +54,8 @@ function makeHealth(overrides: Partial<TransportHealthSnapshot> = {}): Transport
 
 function defaultProps(overrides: Partial<LogPanelStatsBarProps> = {}): LogPanelStatsBarProps {
   return {
-    filteredCount: 100,
     logRate: 30,
     autoRefresh: true,
-    healthByTransport: {},
-    nativeLogging: makeNativeLogging(),
-    onTransportClick: jest.fn(),
-    onNativeLoggingClick: jest.fn(),
-    currentPage: 1,
-    totalPages: 3,
-    pageSize: 50,
-    pageSizeOptions: [50, 100, 200] as const,
-    onPageChange: jest.fn(),
-    onPageSizeChange: jest.fn(),
     ...overrides,
   }
 }
@@ -72,12 +68,48 @@ function renderBar(overrides: Partial<LogPanelStatsBarProps> = {}) {
   )
 }
 
+function summaryProps(
+  overrides: Partial<TransportHealthSummaryProps> = {}
+): TransportHealthSummaryProps {
+  return {
+    healthByTransport: {},
+    nativeLogging: makeNativeLogging(),
+    onTransportClick: jest.fn(),
+    onNativeLoggingClick: jest.fn(),
+    ...overrides,
+  }
+}
+
+function renderSummary(overrides: Partial<TransportHealthSummaryProps> = {}) {
+  return render(
+    <TooltipProvider delayDuration={0}>
+      <TransportHealthSummary {...summaryProps(overrides)} />
+    </TooltipProvider>
+  )
+}
+
 describe("LogPanelStatsBar", () => {
-  it("renders the showing-range and live-rate pulse", () => {
+  it("renders the live rate with a decorative pulse", () => {
     renderBar()
-    expect(screen.getByText(/100/)).toBeInTheDocument()
-    expect(screen.getByText(/logs\/min/)).toBeInTheDocument()
-    expect(screen.getByText(/30/)).toBeInTheDocument()
+    const rate = screen.getByTestId("log-panel-log-rate")
+    expect(rate).toHaveTextContent("~30 logs/min")
+    // The pulse is decoration: hidden from assistive tech, not an unroled span
+    // with an aria-label.
+    const pulse = rate.querySelector(".animate-pulse, .motion-safe\\:animate-pulse")
+    expect(pulse).toHaveAttribute("aria-hidden")
+    expect(pulse).not.toHaveAttribute("aria-label")
+  })
+
+  it("no longer restates the active tab's count as a range, and has no pager", () => {
+    renderBar()
+    expect(screen.queryByText(/ of /)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Previous Page")).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+  })
+
+  it("renders nothing when there is neither a rate nor a full window", () => {
+    const { container } = renderBar({ logRate: 0, windowCapped: false })
+    expect(container.querySelector('[data-testid="log-panel-stats-bar"]')).toBeNull()
   })
 
   it("leaves per-level counts to the level tabs rather than restating them", () => {
@@ -88,94 +120,147 @@ describe("LogPanelStatsBar", () => {
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument()
   })
 
-  it("omits the log-rate pulse when logRate is 0", () => {
-    renderBar({ logRate: 0 })
-    expect(screen.queryByLabelText("Live log stream activity")).not.toBeInTheDocument()
-  })
-
-  it("renders pagination when totalPages > 1", () => {
-    renderBar({ totalPages: 5 })
-    expect(screen.getByText("1 / 5")).toBeInTheDocument()
-    expect(screen.getByLabelText("Previous Page")).toBeInTheDocument()
-    expect(screen.getByLabelText("Next Page")).toBeInTheDocument()
-  })
-
-  it("hides pagination when totalPages <= 1", () => {
-    renderBar({ totalPages: 1 })
-    expect(screen.queryByText("1 / 1")).not.toBeInTheDocument()
-  })
-
-  it("disables prev on page 1 and next on last page", () => {
-    const { rerender } = renderBar({ currentPage: 1, totalPages: 3 })
-    expect(screen.getByLabelText("Previous Page")).toBeDisabled()
-    rerender(
-      <TooltipProvider delayDuration={0}>
-        <LogPanelStatsBar {...defaultProps({ currentPage: 3, totalPages: 3 })} />
-      </TooltipProvider>
-    )
-    expect(screen.getByLabelText("Next Page")).toBeDisabled()
-  })
-
-  it("fires onPageChange when prev / next clicked", () => {
-    const onPageChange = jest.fn()
-    renderBar({ onPageChange, currentPage: 2, totalPages: 5 })
-    fireEvent.click(screen.getByLabelText("Previous Page"))
-    fireEvent.click(screen.getByLabelText("Next Page"))
-    expect(onPageChange).toHaveBeenCalledWith(1)
-    expect(onPageChange).toHaveBeenCalledWith(3)
+  it("omits the log rate when logRate is 0", () => {
+    renderBar({ logRate: 0, windowCapped: true, windowSize: 1000 })
+    expect(screen.queryByTestId("log-panel-log-rate")).not.toBeInTheDocument()
+    expect(screen.getByTestId("log-panel-window-cap")).toBeInTheDocument()
   })
 })
 
-describe("TransportHealthTileGroup", () => {
-  it("renders up to 3 inline tiles and groups the rest under an overflow popover", () => {
-    const healthByTransport: Record<string, TransportHealthSnapshot> = {
-      remote: makeHealth({ transport: "remote", status: "healthy", queueDepth: 1 }),
-      langfuse: makeHealth({ transport: "langfuse", status: "degraded", queueDepth: 3 }),
-      otel: makeHealth({ transport: "otel", status: "offline", queueDepth: 5 }),
-      indexedDB: makeHealth({ transport: "indexedDB", status: "healthy", queueDepth: 0 }),
-    }
-    renderBar({ healthByTransport })
-    expect(screen.getByTestId("transport-tile-remote")).toBeInTheDocument()
-    expect(screen.getByTestId("transport-tile-langfuse")).toBeInTheDocument()
-    expect(screen.getByTestId("transport-tile-otel")).toBeInTheDocument()
-    expect(screen.queryByTestId("transport-tile-indexedDB")).not.toBeInTheDocument()
-    expect(screen.getByTestId("transport-tile-overflow")).toBeInTheDocument()
+describe("TransportHealthSummary", () => {
+  function openSummary() {
+    fireEvent.click(screen.getByTestId("transport-health-summary-trigger"))
+  }
+
+  it("collapses healthy transports into one chip with a healthy/total count", () => {
+    renderSummary({
+      healthByTransport: {
+        remote: makeHealth({ transport: "remote", status: "healthy" }),
+        indexedDB: makeHealth({ transport: "indexedDB", status: "healthy" }),
+      },
+    })
+    const trigger = screen.getByTestId("transport-health-summary-trigger")
+    expect(trigger).toHaveTextContent("2/2")
+    expect(trigger).toHaveAttribute("data-tone", "success")
+    expect(trigger).toHaveAttribute("aria-label", "Log transports: 2 of 2 healthy")
+    // Healthy transports never sit inline — that is what used to wrap the row.
+    expect(screen.queryByTestId("transport-tile-remote")).not.toBeInTheDocument()
   })
 
-  it("clicking a tile fires onTransportClick with that transport name", () => {
-    const onTransportClick = jest.fn()
-    renderBar({
+  it("puts problem transports inline, worst first, and tones the chip by the worst", () => {
+    renderSummary({
       healthByTransport: {
-        remote: makeHealth({ transport: "remote" }),
+        remote: makeHealth({ transport: "remote", status: "healthy" }),
+        langfuse: makeHealth({ transport: "langfuse", status: "degraded", queueDepth: 3 }),
+        otel: makeHealth({ transport: "otel", status: "offline", queueDepth: 5 }),
       },
+    })
+    const inline = screen
+      .getByTestId("transport-health-summary")
+      .querySelectorAll('[data-testid^="transport-tile-"]')
+    expect(Array.from(inline).map((node) => node.getAttribute("data-testid"))).toEqual([
+      "transport-tile-otel",
+      "transport-tile-langfuse",
+    ])
+    expect(screen.getByTestId("transport-health-summary-trigger")).toHaveAttribute(
+      "data-tone",
+      "danger"
+    )
+    expect(screen.getByTestId("transport-health-summary-trigger")).toHaveTextContent("1/3")
+  })
+
+  it("caps the inline problem tiles at two; the popover lists everything", () => {
+    const healthByTransport: Record<string, TransportHealthSnapshot> = {}
+    for (const name of ["a", "b", "c"]) {
+      healthByTransport[name] = makeHealth({ transport: name, status: "offline" })
+    }
+    healthByTransport.ok = makeHealth({ transport: "ok", status: "healthy" })
+    renderSummary({ healthByTransport })
+    expect(
+      screen
+        .getByTestId("transport-health-summary")
+        .querySelectorAll('[data-testid^="transport-tile-"]')
+    ).toHaveLength(2)
+    openSummary()
+    const group = screen.getByTestId("transport-health-tile-group")
+    expect(group.querySelectorAll('[data-testid^="transport-tile-"]')).toHaveLength(4)
+    // Worst first, healthy last.
+    expect(group.lastElementChild).toHaveAttribute("data-testid", "transport-tile-ok")
+  })
+
+  it("clicking a tile in the popover fires onTransportClick and closes it", () => {
+    const onTransportClick = jest.fn()
+    renderSummary({
+      healthByTransport: { remote: makeHealth({ transport: "remote" }) },
+      onTransportClick,
+    })
+    openSummary()
+    fireEvent.click(screen.getByTestId("transport-tile-remote"))
+    expect(onTransportClick).toHaveBeenCalledWith("remote")
+    expect(screen.queryByTestId("transport-health-tile-group")).not.toBeInTheDocument()
+  })
+
+  it("clicking an inline problem tile fires onTransportClick", () => {
+    const onTransportClick = jest.fn()
+    renderSummary({
+      healthByTransport: { remote: makeHealth({ transport: "remote", status: "degraded" }) },
       onTransportClick,
     })
     fireEvent.click(screen.getByTestId("transport-tile-remote"))
     expect(onTransportClick).toHaveBeenCalledWith("remote")
   })
 
-  it("renders the native logging tile only when runtime is tauri", () => {
-    const { rerender } = renderBar({
+  it("includes the native tile only when runtime is tauri", () => {
+    const { rerender } = renderSummary({
       nativeLogging: makeNativeLogging({
         runtime: "browser" as UseTransportHealthResult["nativeLogging"]["runtime"],
       }),
     })
-    expect(screen.queryByTestId("transport-tile-native")).not.toBeInTheDocument()
+    // No transports and no native host → nothing to summarise.
+    expect(screen.queryByTestId("transport-health-summary")).not.toBeInTheDocument()
     rerender(
       <TooltipProvider delayDuration={0}>
-        <LogPanelStatsBar
-          {...defaultProps({
+        <TransportHealthSummary
+          {...summaryProps({
             nativeLogging: makeNativeLogging({ runtime: "tauri", status: "healthy" }),
           })}
         />
       </TooltipProvider>
     )
-    expect(screen.getByTestId("transport-tile-native")).toBeInTheDocument()
+    openSummary()
+    const native = screen.getByTestId("transport-tile-native")
+    // The tile is named in the user's language, not by the word "native".
+    expect(native).toHaveAttribute("aria-label", "Native logging: healthy")
+    expect(native).toHaveTextContent("Native")
   })
 
-  it("clicking the native tile fires onNativeLoggingClick", () => {
+  it("counts the native tile in the chip's denominator on Tauri", () => {
+    renderSummary({
+      healthByTransport: { remote: makeHealth({ transport: "remote", status: "healthy" }) },
+      nativeLogging: makeNativeLogging({ runtime: "tauri", status: "degraded" }),
+    })
+    expect(screen.getByTestId("transport-health-summary-trigger")).toHaveTextContent("1/2")
+  })
+
+  it("abbreviates queue depth and drops through the message bundle", () => {
+    renderSummary({
+      healthByTransport: {
+        remote: makeHealth({
+          transport: "remote",
+          status: "degraded",
+          queueDepth: 7,
+          droppedEntries: 2,
+        }),
+      },
+    })
+    const tile = screen.getByTestId("transport-tile-remote")
+    expect(tile).toHaveTextContent("q7")
+    expect(tile).toHaveTextContent("d2")
+  })
+
+  it("a degraded native pipeline sits inline and its click fires onNativeLoggingClick", () => {
     const onNativeLoggingClick = jest.fn()
-    renderBar({
+    renderSummary({
       nativeLogging: makeNativeLogging({ runtime: "tauri", status: "degraded" }),
       onNativeLoggingClick,
     })
@@ -184,30 +269,32 @@ describe("TransportHealthTileGroup", () => {
   })
 
   it("applies the danger tone when transport is offline", () => {
-    renderBar({
+    renderSummary({
       healthByTransport: { remote: makeHealth({ transport: "remote", status: "offline" }) },
     })
     expect(screen.getByTestId("transport-tile-remote")).toHaveAttribute("data-tone", "danger")
   })
 
-  it("renders +N overflow chip with localized aria-label", () => {
-    const healthByTransport: Record<string, TransportHealthSnapshot> = {}
-    for (const t of ["a", "b", "c", "d", "e"]) {
-      healthByTransport[t] = makeHealth({ transport: t, queueDepth: 0 })
-    }
-    renderBar({ healthByTransport })
-    const overflow = screen.getByTestId("transport-tile-overflow")
-    expect(overflow.getAttribute("aria-label")).toMatch(/Show more transports/)
-    expect(overflow).toHaveTextContent("+2")
+  it("names tiles in the user's language", () => {
+    renderSummary({
+      healthByTransport: {
+        remote: makeHealth({ transport: "remote", status: "offline", queueDepth: 4 }),
+      },
+    })
+    expect(screen.getByTestId("transport-tile-remote")).toHaveAttribute(
+      "aria-label",
+      "remote: offline, queue 4"
+    )
   })
 
-  it("shows formatted relative time (just now / 5m ago) for recent events", () => {
+  it("shows formatted relative time (just now) for recent events", () => {
     jest.useFakeTimers()
     jest.setSystemTime(new Date("2026-01-01T12:00:00Z"))
-    renderBar({
+    renderSummary({
       healthByTransport: {
         recent: makeHealth({
           transport: "recent",
+          status: "degraded",
           lastSuccessAt: new Date("2026-01-01T12:00:00Z").toISOString(),
           updatedAt: new Date("2026-01-01T12:00:00Z").toISOString(),
         }),
@@ -230,10 +317,11 @@ describe("TransportHealthTileGroup", () => {
       [now - 2 * 24 * 60 * 60_000, /2d ago/],
     ]
     for (const [ms, frag] of tonesAndExpectedFragments) {
-      const { unmount } = renderBar({
+      const { unmount } = renderSummary({
         healthByTransport: {
           age: makeHealth({
             transport: "age",
+            status: "degraded",
             lastSuccessAt: new Date(ms).toISOString(),
             updatedAt: new Date(ms).toISOString(),
           }),
@@ -248,10 +336,11 @@ describe("TransportHealthTileGroup", () => {
   })
 
   it("returns dash placeholder for missing or invalid timestamps", () => {
-    renderBar({
+    renderSummary({
       healthByTransport: {
         none: makeHealth({
           transport: "none",
+          status: "degraded",
           lastSuccessAt: undefined,
           lastFailureAt: undefined,
           updatedAt: "not-a-date",
@@ -261,11 +350,27 @@ describe("TransportHealthTileGroup", () => {
     expect(screen.getByTestId("transport-tile-none").textContent).toMatch(/—/)
   })
 
-  it("renders inactive native tile when status is inactive (muted tone)", () => {
-    renderBar({
+  it("renders an inactive native tile with the muted tone", () => {
+    renderSummary({
       nativeLogging: makeNativeLogging({ runtime: "tauri", status: "inactive" }),
     })
+    openSummary()
     expect(screen.getByTestId("transport-tile-native")).toHaveAttribute("data-tone", "muted")
+  })
+})
+
+describe("LogPanelStatsBar — loaded window", () => {
+  it("says when the newest-N window is full", () => {
+    renderBar({ windowCapped: true, windowSize: 1000 })
+    expect(screen.getByTestId("log-panel-window-cap")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("1000")
+    )
+  })
+
+  it("says nothing when it is not", () => {
+    renderBar({ windowCapped: false, windowSize: 1000 })
+    expect(screen.queryByTestId("log-panel-window-cap")).not.toBeInTheDocument()
   })
 })
 
@@ -295,6 +400,12 @@ describe("TransportHealthDetail", () => {
     expect(screen.getByText("1")).toBeInTheDocument()
     expect(screen.getByText("timeout")).toBeInTheDocument()
     expect(screen.getByTestId("transport-health-sparkline")).toBeInTheDocument()
+    // One translated title with the name in it, not "Transport Details" + ": remote".
+    expect(screen.getByText("Transport details: remote")).toBeInTheDocument()
+    expect(screen.getByTestId("transport-detail-settings")).toHaveAttribute(
+      "href",
+      LOG_SETTINGS_HREF
+    )
     fireEvent.click(screen.getByText("Close"))
     fireEvent.click(screen.getByText("View Diagnostics"))
     expect(onClose).toHaveBeenCalledTimes(1)
@@ -342,27 +453,38 @@ describe("TransportHealthDetail", () => {
 })
 
 describe("NativeLoggingDetail", () => {
-  it("renders status / mode / bridge / targets fields and reacts to close", () => {
+  it("renders translated status / mode / bridge / targets fields and reacts to close", () => {
     const onClose = jest.fn()
     render(
       <NativeLoggingDetail
         nativeLogging={makeNativeLogging({
           runtime: "tauri",
           status: "healthy",
-          startupMode: "spawn" as UseTransportHealthResult["nativeLogging"]["startupMode"],
-          bridgeState: "connected" as UseTransportHealthResult["nativeLogging"]["bridgeState"],
+          startupMode: "fallback",
+          bridgeState: "degraded",
           activeTargets: ["console", "file"],
         })}
         onClose={onClose}
-        onViewDiagnostics={jest.fn()}
       />
     )
-    expect(screen.getByText(/healthy/)).toBeInTheDocument()
-    expect(screen.getByText(/spawn/)).toBeInTheDocument()
-    expect(screen.getByText(/connected/)).toBeInTheDocument()
-    expect(screen.getByText(/console, file/)).toBeInTheDocument()
+    expect(screen.getByText("Status: healthy")).toBeInTheDocument()
+    expect(screen.getByText("Startup Mode: Fallback")).toBeInTheDocument()
+    expect(screen.getByText("Bridge: degraded")).toBeInTheDocument()
+    expect(screen.getByText("Targets: console, file")).toBeInTheDocument()
     fireEvent.click(screen.getByText("Close"))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("prints a value it has no words for as reported", () => {
+    render(
+      <NativeLoggingDetail
+        nativeLogging={makeNativeLogging({
+          startupMode: "spawn" as UseTransportHealthResult["nativeLogging"]["startupMode"],
+        })}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByText("Startup Mode: spawn")).toBeInTheDocument()
   })
 
   it('shows the localized "none" placeholder when activeTargets is empty', () => {
@@ -370,11 +492,9 @@ describe("NativeLoggingDetail", () => {
       <NativeLoggingDetail
         nativeLogging={makeNativeLogging({ activeTargets: [] })}
         onClose={jest.fn()}
-        onViewDiagnostics={jest.fn()}
       />
     )
-    // en.json maps logging.panel.nativeLoggingNoTargets → "none"
-    expect(screen.getByText(/none/)).toBeInTheDocument()
+    expect(screen.getByText("Targets: none")).toBeInTheDocument()
   })
 
   it("renders fallback reason and bridge error when present", () => {
@@ -385,23 +505,16 @@ describe("NativeLoggingDetail", () => {
           bridgeLastError: "EPIPE",
         })}
         onClose={jest.fn()}
-        onViewDiagnostics={jest.fn()}
       />
     )
     expect(screen.getByText(/ipc-init failed/)).toBeInTheDocument()
     expect(screen.getByText(/EPIPE/)).toBeInTheDocument()
   })
 
-  it("invokes onViewDiagnostics when its button is clicked", () => {
-    const onViewDiagnostics = jest.fn()
-    render(
-      <NativeLoggingDetail
-        nativeLogging={makeNativeLogging()}
-        onClose={jest.fn()}
-        onViewDiagnostics={onViewDiagnostics}
-      />
-    )
-    fireEvent.click(screen.getByText("View Native Diagnostics"))
-    expect(onViewDiagnostics).toHaveBeenCalledTimes(1)
+  it("mounts the native log viewer and links to the log settings instead of guessing a search", () => {
+    render(<NativeLoggingDetail nativeLogging={makeNativeLogging()} onClose={jest.fn()} />)
+    expect(screen.getByTestId("stub-native-log-viewer")).toBeInTheDocument()
+    expect(screen.getByTestId("native-detail-settings")).toHaveAttribute("href", LOG_SETTINGS_HREF)
+    expect(screen.queryByText("View Native Diagnostics")).not.toBeInTheDocument()
   })
 })

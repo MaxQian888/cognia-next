@@ -24,13 +24,10 @@ export interface LogStreamOptions {
   useRegex?: boolean
   /** Filter by tags */
   tags?: string[]
-  /** Group logs by trace ID */
-  groupByTraceId?: boolean
 }
 
 export interface LogStreamResult {
   logs: StructuredLogEntry[]
-  groupedLogs: Map<string, StructuredLogEntry[]>
   isLoading: boolean
   error: Error | null
   refresh: () => Promise<void>
@@ -44,4 +41,12 @@ export interface LogStreamResult {
     newestEntry?: Date
   }
   logRate: number
+  /**
+   * Whether the store returned as many entries as `maxLogs` allowed, measured
+   * BEFORE the client-side search narrowed them. A search that leaves twelve
+   * rows out of a full window still only searched the newest `maxLogs`
+   * entries; computing this from the filtered length made the "window full"
+   * warning vanish exactly when it mattered.
+   */
+  windowCapped: boolean
 }

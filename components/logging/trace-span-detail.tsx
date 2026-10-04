@@ -12,6 +12,14 @@
  * stream focused on its trace, and into the session that produced it.
  *
  * Pure presentation. The Dexie read lives in `useTraceDetail`, one level up.
+ *
+ * Numbers, durations and the start time format in the APP locale
+ * (`useObservabilityFormatters` → next-intl's `useFormatter`); the start time
+ * used to be `toLocaleTimeString()`, i.e. the browser's locale. Operation,
+ * surface and span-kind badges show translated labels with the raw OTel id as
+ * the badge `title` — the id is what a user greps for, the label is what they
+ * read. Each identity row's copy button is named for what it does ("Copy
+ * trace ID"), not for the value it would copy.
  */
 
 import { useMemo } from "react"
@@ -23,7 +31,8 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { useCopy } from "@/hooks/ui"
-import { formatMs, formatTokens, formatUsd } from "@/lib/observability/format-utils"
+import { useObservabilityFormatters } from "@/hooks/observability/use-observability-formatters"
+import { useSpanLabels } from "@/hooks/observability/use-span-labels"
 import { cn } from "@/lib/utils"
 import type { AgentTraceSpan, SpanStatus } from "@/types/agent-trace/span"
 
@@ -84,7 +93,9 @@ function Section({
 }
 
 function CopyableId({ label, value }: { label: string; value: string }) {
+  const t = useTranslations("logging.workspace.traces.span")
   const { copied, copy } = useCopy()
+  const action = copied ? t("copied", { label }) : t("copyValue", { label })
   return (
     <div className="flex items-center justify-between gap-2 py-1 text-xs">
       <span className="shrink-0 text-muted-foreground">{label}</span>
@@ -96,10 +107,15 @@ function CopyableId({ label, value }: { label: string; value: string }) {
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={`${label}: ${value}`}
+          aria-label={action}
+          title={action}
           onClick={() => void copy(value)}
         >
-          {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+          {copied ? (
+            <CheckIcon className="size-3" aria-hidden />
+          ) : (
+            <CopyIcon className="size-3" aria-hidden />
+          )}
         </Button>
       </div>
     </div>
@@ -114,6 +130,8 @@ export function TraceSpanDetail({
   className,
 }: TraceSpanDetailProps) {
   const t = useTranslations("logging.workspace.traces.span")
+  const fmt = useObservabilityFormatters()
+  const labels = useSpanLabels()
 
   const usage = span?.usage
   const totalTokens = useMemo(() => {
@@ -147,27 +165,29 @@ export function TraceSpanDetail({
             <Badge variant="outline" className={cn("text-[10px]", STATUS_TONE[status])}>
               {t(`status.${status}`)}
             </Badge>
-            <Badge variant="secondary" className="text-[10px]">
-              {span.operationName}
+            <Badge variant="secondary" className="text-[10px]" title={span.operationName}>
+              {labels.operation(span.operationName)}
             </Badge>
-            <Badge variant="outline" className="text-[10px]">
-              {span.surface}
+            <Badge variant="outline" className="text-[10px]" title={span.surface}>
+              {labels.surface(span.surface)}
             </Badge>
             {span.spanKind && span.spanKind !== "internal" && (
-              <Badge variant="outline" className="text-[10px]">
-                {span.spanKind}
+              <Badge variant="outline" className="text-[10px]" title={span.spanKind}>
+                {labels.spanKind(span.spanKind)}
               </Badge>
             )}
           </div>
           <h3 className="text-sm font-semibold break-words">
-            {span.toolName ?? span.agentName ?? span.operationName}
+            {span.toolName ?? span.agentName ?? labels.operation(span.operationName)}
           </h3>
         </div>
 
         <Section title={t("timing")}>
-          <Row label={t("duration")}>{formatMs(span.durationMs ?? 0)}</Row>
-          <Row label={t("startedAt")}>{new Date(span.startTime).toLocaleTimeString()}</Row>
-          <Row label={t("offset")}>+{formatMs(Math.max(0, span.startTime - traceStart))}</Row>
+          <Row label={t("duration")}>{fmt.duration(span.durationMs ?? 0)}</Row>
+          <Row label={t("startedAt")}>{fmt.time(span.startTime)}</Row>
+          <Row label={t("offset")}>
+            {t("offsetValue", { value: fmt.duration(Math.max(0, span.startTime - traceStart)) })}
+          </Row>
         </Section>
 
         <Separator />
@@ -187,29 +207,29 @@ export function TraceSpanDetail({
           <>
             <Separator />
             <Section title={t("usage")} testid="trace-span-usage">
-              <Row label={t("inputTokens")}>{formatTokens(usage.inputTokens)}</Row>
-              <Row label={t("outputTokens")}>{formatTokens(usage.outputTokens)}</Row>
+              <Row label={t("inputTokens")}>{fmt.compact(usage.inputTokens)}</Row>
+              <Row label={t("outputTokens")}>{fmt.compact(usage.outputTokens)}</Row>
               {usage.cacheReadTokens > 0 && (
-                <Row label={t("cacheRead")}>{formatTokens(usage.cacheReadTokens)}</Row>
+                <Row label={t("cacheRead")}>{fmt.compact(usage.cacheReadTokens)}</Row>
               )}
               {usage.cacheCreationTokens > 0 && (
                 <Row label={t("cacheWrite")}>
-                  {formatTokens(usage.cacheCreationTokens)}
+                  {fmt.compact(usage.cacheCreationTokens)}
                   {(usage.cacheCreation5mTokens ?? usage.cacheCreation1hTokens) !== undefined && (
                     <span className="ml-1 font-normal text-muted-foreground">
                       {t("cacheWriteSplit", {
-                        short: formatTokens(usage.cacheCreation5mTokens ?? 0),
-                        long: formatTokens(usage.cacheCreation1hTokens ?? 0),
+                        short: fmt.compact(usage.cacheCreation5mTokens ?? 0),
+                        long: fmt.compact(usage.cacheCreation1hTokens ?? 0),
                       })}
                     </span>
                   )}
                 </Row>
               )}
               {totalTokens !== null && (
-                <Row label={t("totalTokens")}>{formatTokens(totalTokens)}</Row>
+                <Row label={t("totalTokens")}>{fmt.compact(totalTokens)}</Row>
               )}
               {typeof span.costUsdEstimate === "number" && (
-                <Row label={t("cost")}>{formatUsd(span.costUsdEstimate)}</Row>
+                <Row label={t("cost")}>{fmt.usd(span.costUsdEstimate)}</Row>
               )}
             </Section>
           </>
@@ -248,7 +268,9 @@ export function TraceSpanDetail({
                 {events.map((event, index) => (
                   <li key={`${event.name}-${index}`} className="flex gap-2">
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      +{formatMs(Math.max(0, event.at - span.startTime))}
+                      {t("offsetValue", {
+                        value: fmt.duration(Math.max(0, event.at - span.startTime)),
+                      })}
                     </span>
                     <span className="min-w-0 break-words">{event.name}</span>
                   </li>

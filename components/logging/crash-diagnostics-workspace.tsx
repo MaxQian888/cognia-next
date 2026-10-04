@@ -1,20 +1,28 @@
 "use client"
 
 /**
- * The `/logs` Diagnostics channel — local crash logs, their diagnostic
- * snapshot, and the export/clear controls that go with them.
+ * The `/logs` Errors channel (view id `diagnostics`, kept because
+ * `?channel=diagnostics` links exist) — this machine's error-level log
+ * entries, the diagnostic snapshot taken with them, and the export/clear
+ * controls that go with them.
+ *
+ * These are *logged* failures: the in-memory recent-error buffer plus stored
+ * error/fatal entries (and diagnostic-origin warnings). They are not process
+ * crashes — those are the Crash reports channel (`incidents`), native reports
+ * a panic or a fault left behind — and not the Service channel, which is what
+ * a diagnostic service accepted from everyone. Three subjects, one workspace.
  *
  * This surface used to live in Settings → Diagnostics → "Crash logs", which
- * meant the one page named after logs sent you to Settings to read the crash
- * ones, and the settings shell then had to host a full fill-height two-pane
- * inspector next to cards that toggle booleans. It is a channel here now, next
- * to `incidents` (native crash *reports* awaiting consent to upload) and
- * `service` (what a diagnostic service accepted from everyone) — three
- * different subjects, one workspace, no hop.
+ * meant the one page named after logs sent you to Settings to read these.
  *
  * The chrome is deliberately the sibling channels' chrome: a filter row, a
  * flat list that fills, and a resizable detail pane that becomes a sheet below
- * `xl`. What changed beyond the move:
+ * `xl` — with the sheet's `open` gated in JS on that breakpoint, because a
+ * CSS-hidden sheet still mounts its overlay and traps focus. The filters live
+ * in the workspace store, so leaving the channel does not reset them.
+ * "Clear stored" asks first and only removes the entries this channel lists.
+ * Every action reports its outcome in a toast, failures included. What changed
+ * beyond the move:
  *
  *   - Severity no longer paints itself from the raw Tailwind palette
  *     (`bg-red-500`, `emerald-500`, `slate-400`). It goes through the same
@@ -29,7 +37,8 @@
  */
 
 import { useCallback, useMemo, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   AlertTriangleIcon,
   ChevronRightIcon,
@@ -49,6 +58,16 @@ import {
 } from "lucide-react"
 
 import { LogDetailPanel } from "@/components/logging/log-detail-panel"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
@@ -82,7 +101,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
 import { useCrashLogs } from "@/hooks/logging/use-crash-logs"
-import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
+import { useEdgeResize, useIsNarrow, useMediaQuery } from "@/hooks/ui"
 import type {
   CrashLogItem,
   CrashLogLevelFilter,
@@ -90,6 +109,7 @@ import type {
 } from "@/lib/logging/crash-log"
 import { cn } from "@/lib/utils"
 import {
+  DEFAULT_DETAIL_WIDTH,
   DETAIL_WIDTH_MAX,
   DETAIL_WIDTH_MIN,
   useLogWorkspaceStore,
@@ -150,6 +170,28 @@ const NATIVE_TONE: Record<string, Tone> = {
 
 function levelTone(level: string): Tone {
   return LEVEL_TONE[level] ?? "muted"
+}
+
+/** The breakpoint the detail becomes a pane at — Tailwind's `xl`. */
+export const CRASH_DETAIL_PANE_QUERY = "(min-width: 1280px)"
+
+/** A native readiness status, translated; an unknown one under a generic label. */
+function nativeStatusLabel(t: ReturnType<typeof useTranslations>, status: string): string {
+  return status in NATIVE_TONE
+    ? t(`crash.native.statuses.${status}`)
+    : t("crash.native.statuses.other", { status })
+}
+
+/** A row's title and summary, translating the diagnostic snapshot's code. */
+function itemText(
+  t: ReturnType<typeof useTranslations>,
+  item: CrashLogItem
+): { title: string; summary: string } {
+  if (!item.snapshot) return { title: item.title, summary: item.summary }
+  return {
+    title: t("crash.snapshot.title"),
+    summary: item.snapshot.detail ?? t(`crash.snapshot.summaries.${item.snapshot.summaryCode}`),
+  }
 }
 
 /** Levels the counts strip offers as filters, worst first. */
@@ -217,7 +259,9 @@ function CrashRow({
   onSelect: () => void
 }) {
   const t = useTranslations("logging")
+  const format = useFormatter()
   const tone = levelTone(item.level)
+  const text = itemText(t, item)
 
   return (
     <button
@@ -245,15 +289,15 @@ function CrashRow({
         <span className={cn("shrink-0 text-[10px] font-medium uppercase", TONE_TEXT[tone])}>
           {t(`levels.${item.level}`)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{text.title}</span>
         <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
-          {new Date(item.timestamp).toLocaleTimeString()}
+          {format.dateTime(new Date(item.timestamp), { timeStyle: "medium" })}
         </span>
       </div>
       {/* A recent-error item's summary is its message, which is also its title.
           Printing it twice reads as a rendering bug, not as detail. */}
-      {item.summary && item.summary !== item.title ? (
-        <div className="truncate text-xs text-muted-foreground">{item.summary}</div>
+      {text.summary && text.summary !== text.title ? (
+        <div className="truncate text-xs text-muted-foreground">{text.summary}</div>
       ) : null}
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
         <Badge variant="outline" className="h-4 px-1 font-mono text-[10px]">
@@ -334,8 +378,10 @@ function CrashDetail({
   onOpenDirectory: () => void
 }) {
   const t = useTranslations("logging")
+  const format = useFormatter()
   const tone = levelTone(item.level)
   const status = item.diagnostics?.nativeLogging?.status ?? "unavailable"
+  const text = itemText(t, item)
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="crash-detail-pane">
@@ -358,9 +404,14 @@ function CrashDetail({
               </Badge>
             ))}
           </div>
-          <div className="text-sm font-medium">{item.title}</div>
+          <div className="text-sm font-medium break-words">{text.title}</div>
           <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
-            <span className="tabular-nums">{new Date(item.timestamp).toLocaleString()}</span>
+            <span className="tabular-nums">
+              {format.dateTime(new Date(item.timestamp), {
+                dateStyle: "medium",
+                timeStyle: "medium",
+              })}
+            </span>
             {item.traceId ? (
               <span className="font-mono">
                 {t("panel.traceId")}: {item.traceId}
@@ -402,13 +453,21 @@ function CrashDetail({
         </ButtonGroup>
       </header>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-3 p-3">
-          {item.summary && item.summary !== item.title ? (
-            <p className="text-sm text-muted-foreground">{item.summary}</p>
+      {/* `!block`: Radix lays the viewport content out as `display: table`,
+          which grew to the widest unbreakable line (a chunk URL, a related
+          entry's message) and clipped every paragraph at that width. */}
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
+        <div className="min-w-0 space-y-3 p-3">
+          {text.summary && text.summary !== text.title ? (
+            <p className="text-sm break-words text-muted-foreground">{text.summary}</p>
           ) : null}
 
-          {item.logEntry ? <LogDetailPanel log={item.logEntry} relatedLogs={relatedLogs} /> : null}
+          {/* The body only: the header above already prints the level, title,
+              time and trace. The full pane nested here printed all four again
+              under a second "Log Detail" heading, inside a second scroller. */}
+          {item.logEntry ? (
+            <LogDetailPanel log={item.logEntry} relatedLogs={relatedLogs} variant="embedded" />
+          ) : null}
 
           <section className="space-y-2 rounded-lg border p-3">
             <h3 className="flex items-center gap-2 text-sm font-medium">
@@ -430,7 +489,7 @@ function CrashDetail({
                       TONE_DOT[NATIVE_TONE[status] ?? "muted"]
                     )}
                   />
-                  <span className="font-medium capitalize">{status}</span>
+                  <span className="font-medium">{nativeStatusLabel(t, status)}</span>
                 </span>
               </DiagnosticsField>
               <DiagnosticsField label={t("crash.native.logDirectory")} mono>
@@ -469,6 +528,7 @@ function CrashDetail({
 
 export function CrashDiagnosticsWorkspace() {
   const t = useTranslations("logging")
+  const format = useFormatter()
   const {
     isLoading,
     isRefreshing,
@@ -498,8 +558,10 @@ export function CrashDiagnosticsWorkspace() {
   const detailWidth = useLogWorkspaceStore((state) => state.detailWidth)
   const setDetailWidth = useLogWorkspaceStore((state) => state.setDetailWidth)
   const narrow = useIsNarrow()
+  const wide = useMediaQuery(CRASH_DETAIL_PANE_QUERY)
 
   const [busy, setBusy] = useState(false)
+  const [confirmClearStored, setConfirmClearStored] = useState(false)
   // `useCrashLogs` auto-selects a fallback item, so `selectedItem` alone cannot
   // say whether the user asked for the detail — the sheet needs its own flag.
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -510,17 +572,62 @@ export function CrashDiagnosticsWorkspace() {
     max: DETAIL_WIDTH_MAX,
     edge: "left",
     onChange: setDetailWidth,
-    onReset: () => setDetailWidth(384),
+    onReset: () => setDetailWidth(DEFAULT_DETAIL_WIDTH),
   })
 
-  const run = useCallback(async (action: () => Promise<unknown> | unknown) => {
-    setBusy(true)
-    try {
-      await action()
-    } finally {
-      setBusy(false)
-    }
-  }, [])
+  /**
+   * Run one action with the busy flag up, and answer it: `success` (when
+   * given) on completion, `failure` on a throw. A rejected action used to
+   * escape as an unhandled rejection with nothing on screen.
+   */
+  const run = useCallback(
+    async <T,>(
+      action: () => Promise<T> | T,
+      messages: { success?: (result: T) => string | null; failure: string }
+    ) => {
+      setBusy(true)
+      try {
+        const result = await action()
+        const message = messages.success?.(result)
+        if (message) toast.success(message)
+      } catch {
+        toast.error(messages.failure)
+      } finally {
+        setBusy(false)
+      }
+    },
+    []
+  )
+
+  const copy = useCallback(
+    () =>
+      void run(copySelected, {
+        success: (copied) => (copied ? t("crash.toasts.copied") : null),
+        failure: t("crash.toasts.copyFailed"),
+      }),
+    [copySelected, run, t]
+  )
+
+  const openDirectory = useCallback(
+    () =>
+      void run(
+        async () => {
+          // `false` is the native side saying it could not open one.
+          if (!(await openNativeLogDirectory())) throw new Error("open_directory_failed")
+        },
+        { failure: t("crash.toasts.openDirectoryFailed") }
+      ),
+    [openNativeLogDirectory, run, t]
+  )
+
+  const exportAs = useCallback(
+    (kind: "bundle" | "json" | "text") =>
+      void run(() => exportBundle(kind), {
+        success: () => t("crash.toasts.exported"),
+        failure: t("crash.toasts.exportFailed"),
+      }),
+    [exportBundle, run, t]
+  )
 
   const notes = useMemo(
     () => [
@@ -580,7 +687,7 @@ export function CrashDiagnosticsWorkspace() {
                   variant="outline"
                   size="sm"
                   className="h-8"
-                  onClick={() => void run(refresh)}
+                  onClick={() => void run(refresh, { failure: t("crash.toasts.refreshFailed") })}
                   disabled={busy}
                   data-testid="crash-refresh"
                 >
@@ -626,15 +733,15 @@ export function CrashDiagnosticsWorkspace() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => exportBundle("bundle")}>
+                <DropdownMenuItem onClick={() => exportAs("bundle")}>
                   <PackageIcon className="size-4" />
                   {t("crash.actions.exportBundle")}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportBundle("json")}>
+                <DropdownMenuItem onClick={() => exportAs("json")}>
                   <ScrollTextIcon className="size-4" />
                   {t("crash.actions.exportJson")}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportBundle("text")}>
+                <DropdownMenuItem onClick={() => exportAs("text")}>
                   <FileTextIcon className="size-4" />
                   {t("crash.actions.exportText")}
                 </DropdownMenuItem>
@@ -653,12 +760,24 @@ export function CrashDiagnosticsWorkspace() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => clearRecent()}>
+                <DropdownMenuItem
+                  onClick={() =>
+                    void run(clearRecent, {
+                      success: () => t("crash.toasts.recentCleared"),
+                      failure: t("crash.toasts.clearFailed"),
+                    })
+                  }
+                >
                   <RotateCcwIcon className="size-4" />
                   {t("crash.actions.clearRecent")}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onClick={() => void run(clearPersisted)}>
+                {/* Stored entries are gone for good, so this one asks first. */}
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => setConfirmClearStored(true)}
+                  data-testid="crash-clear-stored"
+                >
                   <Trash2Icon className="size-4" />
                   {t("crash.actions.clearPersisted")}
                 </DropdownMenuItem>
@@ -717,7 +836,7 @@ export function CrashDiagnosticsWorkspace() {
               <TooltipTrigger asChild>
                 <span className={cn("flex items-center gap-1.5", TONE_TEXT[nativeTone])}>
                   <span aria-hidden className={cn("size-1.5 rounded-full", TONE_DOT[nativeTone])} />
-                  <span className="capitalize">{summary.nativeLoggingStatus}</span>
+                  <span>{nativeStatusLabel(t, summary.nativeLoggingStatus)}</span>
                 </span>
               </TooltipTrigger>
               <TooltipContent>{t("crash.summary.native")}</TooltipContent>
@@ -736,7 +855,9 @@ export function CrashDiagnosticsWorkspace() {
               </span>
               <span className="tabular-nums">
                 {autoRefresh ? t("crash.autoRefreshOn") : t("crash.autoRefreshOff")}
-                {lastUpdatedAt ? ` · ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}
+                {lastUpdatedAt
+                  ? ` · ${format.dateTime(new Date(lastUpdatedAt), { timeStyle: "medium" })}`
+                  : ""}
               </span>
             </span>
           </span>
@@ -783,11 +904,13 @@ export function CrashDiagnosticsWorkspace() {
         )}
       </section>
 
-      {/* ── Detail: a pane at xl, a sheet below it ── */}
-      {selectedItem ? (
+      {/* ── Detail: a pane at xl, a sheet below it — chosen in JS, so the
+          sheet's overlay and focus trap never exist at xl ── */}
+      {wide && selectedItem ? (
         <aside
-          className="@container/crash-detail relative hidden shrink-0 border-l xl:block"
+          className="@container/crash-detail relative shrink-0 border-l"
           style={{ width: detailWidth }}
+          data-testid="crash-detail-aside"
         >
           <div
             role="separator"
@@ -810,17 +933,17 @@ export function CrashDiagnosticsWorkspace() {
             relatedLogs={relatedLogs}
             nativeStatus={summary.nativeLoggingStatus}
             busy={busy}
-            onCopy={() => void run(copySelected)}
-            onOpenDirectory={() => void run(openNativeLogDirectory)}
+            onCopy={copy}
+            onOpenDirectory={openDirectory}
           />
         </aside>
       ) : null}
 
-      <Sheet open={sheetOpen && selectedItem !== null} onOpenChange={setSheetOpen}>
+      <Sheet open={!wide && sheetOpen && selectedItem !== null} onOpenChange={setSheetOpen}>
         <SheetContent
           side={narrow ? "bottom" : "right"}
           className={cn(
-            "@container/crash-detail p-0 xl:hidden",
+            "@container/crash-detail p-0",
             narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none"
           )}
           data-testid="crash-detail-drawer"
@@ -836,12 +959,34 @@ export function CrashDiagnosticsWorkspace() {
               relatedLogs={relatedLogs}
               nativeStatus={summary.nativeLoggingStatus}
               busy={busy}
-              onCopy={() => void run(copySelected)}
-              onOpenDirectory={() => void run(openNativeLogDirectory)}
+              onCopy={copy}
+              onOpenDirectory={openDirectory}
             />
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={confirmClearStored} onOpenChange={setConfirmClearStored}>
+        <AlertDialogContent data-testid="crash-clear-stored-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("crash.clearStored.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("crash.clearStored.description")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("crash.clearStored.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                void run(clearPersisted, {
+                  success: (removed) => t("crash.toasts.storedCleared", { count: removed }),
+                  failure: t("crash.toasts.clearFailed"),
+                })
+              }
+            >
+              {t("crash.clearStored.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

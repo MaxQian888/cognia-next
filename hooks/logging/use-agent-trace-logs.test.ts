@@ -96,4 +96,35 @@ describe("useAgentTraceAsLogs", () => {
     rerender()
     expect(result.current.logs).toBe(first)
   })
+
+  it("freezes the rows while live is off and re-reads them on refresh", async () => {
+    await bulkInsertSpans([span({ id: "a", startTime: 1 })])
+    const { result, rerender } = renderHook(
+      (props: { live: boolean; refreshToken: number }) => useAgentTraceAsLogs(props),
+      { initialProps: { live: true, refreshToken: 0 } }
+    )
+    await waitFor(() => expect(result.current.logs.length).toBe(1))
+
+    rerender({ live: false, refreshToken: 0 })
+    await act(async () => {
+      await bulkInsertSpans([span({ id: "b", startTime: 2 })])
+    })
+    // Give the live query time to deliver; the frozen output must not move.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    rerender({ live: false, refreshToken: 0 })
+    expect(result.current.logs.map((l) => l.id)).toEqual(["a"])
+
+    // A manual refresh re-snapshots from the live query.
+    await waitFor(() => {
+      rerender({ live: false, refreshToken: 1 })
+      expect(result.current.logs.map((l) => l.id)).toEqual(["b", "a"])
+    })
+  })
+
+  it("takes its first snapshot when a panel mounts with live off", async () => {
+    await bulkInsertSpans([span({ id: "a", startTime: 1 })])
+    const { result } = renderHook(() => useAgentTraceAsLogs({ live: false }))
+    await waitFor(() => expect(result.current.logs.map((l) => l.id)).toEqual(["a"]))
+    expect(result.current.isLoading).toBe(false)
+  })
 })

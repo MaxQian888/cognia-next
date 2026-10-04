@@ -14,7 +14,11 @@ jest.mock("@cognia/logging/filter-presets", () => ({
   }),
 }))
 
-import { useLogPanelFilters } from "./use-log-panel-filters"
+import {
+  autoRefreshStorageKey,
+  resolvePresetFacets,
+  useLogPanelFilters,
+} from "./use-log-panel-filters"
 
 beforeEach(() => {
   localStorage.clear()
@@ -90,12 +94,44 @@ describe("useLogPanelFilters", () => {
   it("handleFocusTrace + handleFocusSession update derived state", () => {
     const { result } = renderHook(() => useLogPanelFilters())
     const log = { id: "x" } as never
+    act(() => result.current.handleSelectLog(log))
     act(() => result.current.handleFocusTrace("trace-1", log))
     expect(result.current.traceFocusId).toBe("trace-1")
     expect(result.current.moduleFilter).toBe("all")
     act(() => result.current.handleFocusSession("session-1", log))
     expect(result.current.sessionFilter).toBe("session-1")
+    // Focusing keeps whatever the detail pane was doing.
+    expect(result.current.showDetailPanel).toBe(true)
+  })
+
+  it("handleFocusTrace does not open a closed detail pane", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    const log = { id: "x" } as never
+    act(() => result.current.handleFocusTrace("trace-1", log))
+    expect(result.current.traceFocusId).toBe("trace-1")
+    expect(result.current.selectedLog).toBe(log)
     expect(result.current.showDetailPanel).toBe(false)
+  })
+
+  it("handleFocusSession does not open a closed detail pane", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    const log = { id: "x" } as never
+    act(() => result.current.handleFocusSession("session-1", log))
+    expect(result.current.sessionFilter).toBe("session-1")
+    expect(result.current.showDetailPanel).toBe(false)
+  })
+
+  it("saveCurrentPreset stores the given name, trimmed", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    act(() => result.current.saveCurrentPreset("  Errors in chat  "))
+    expect(result.current.presets[0].name).toBe("Errors in chat")
+    expect(result.current.activePresetId).toBe(result.current.presets[0].id)
+  })
+
+  it("saveCurrentPreset falls back to a numbered name when the name is blank", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    act(() => result.current.saveCurrentPreset("   "))
+    expect(result.current.presets[0].name).toBe("#1")
   })
 
   it("addSearchHistory dedupes and caps at 5", () => {
@@ -132,12 +168,14 @@ describe("useLogPanelFilters", () => {
     expect(result.current.searchHistory).toEqual(["foo"])
   })
 
-  it("exposes customTimeRange, currentPage, pageSize, and density with sensible defaults", () => {
+  it("exposes customTimeRange and density with sensible defaults, and no pagination", () => {
     const { result } = renderHook(() => useLogPanelFilters())
     expect(result.current.customTimeRange).toBeNull()
-    expect(result.current.currentPage).toBe(1)
-    expect(result.current.pageSize).toBe(50)
     expect(result.current.density).toBe("comfortable")
+    // The list is virtualized over the whole window; there is no page state.
+    expect(result.current).not.toHaveProperty("currentPage")
+    expect(result.current).not.toHaveProperty("pageSize")
+    expect(result.current).not.toHaveProperty("highSeverityOnly")
   })
 
   it("loads density from localStorage on mount and persists changes", () => {
@@ -179,17 +217,13 @@ describe("useLogPanelFilters", () => {
     expect(result.current.density).toBe("comfortable")
   })
 
-  it("setCustomTimeRange / setCurrentPage / setPageSize update their slots", () => {
+  it("setCustomTimeRange updates its slot", () => {
     const { result } = renderHook(() => useLogPanelFilters())
     const range = { start: new Date("2026-01-01T00:00:00Z"), end: new Date("2026-01-02T00:00:00Z") }
     act(() => {
       result.current.setCustomTimeRange(range)
-      result.current.setCurrentPage(4)
-      result.current.setPageSize(100)
     })
     expect(result.current.customTimeRange).toEqual(range)
-    expect(result.current.currentPage).toBe(4)
-    expect(result.current.pageSize).toBe(100)
     act(() => result.current.setCustomTimeRange(null))
     expect(result.current.customTimeRange).toBeNull()
   })
@@ -204,7 +238,6 @@ describe("useLogPanelFilters", () => {
       result.current.setSelectedTransportHealthName("xx")
       result.current.setSelectedNativeLogging(true)
       result.current.setDiagnosticTransportFilter("yy")
-      result.current.setHighSeverityOnly(true)
       result.current.setUseRegex(true)
       result.current.setTimeRange("1h" as never)
       result.current.setTraceFocusId("t-1")
@@ -218,7 +251,6 @@ describe("useLogPanelFilters", () => {
     expect(result.current.selectedTransportHealthName).toBe("xx")
     expect(result.current.selectedNativeLogging).toBe(true)
     expect(result.current.diagnosticTransportFilter).toBe("yy")
-    expect(result.current.highSeverityOnly).toBe(true)
     expect(result.current.useRegex).toBe(true)
     expect(result.current.traceFocusId).toBe("t-1")
     expect(result.current.focusedIndex).toBe(3)
@@ -249,5 +281,131 @@ describe("autoRefresh persistence", () => {
   it("falls back to defaultAutoRefresh when nothing is stored", () => {
     const { result } = renderHook(() => useLogPanelFilters({ defaultAutoRefresh: true }))
     expect(result.current.autoRefresh).toBe(true)
+  })
+})
+
+describe("presets carry every facet", () => {
+  it("saves and restores source, session, custom range, trace and transport", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    const range = { start: new Date("2026-01-01T00:00:00Z"), end: new Date("2026-01-02T00:00:00Z") }
+    act(() => {
+      result.current.setSourceFilter("mcp")
+      result.current.setSessionFilter("  s-1 ")
+      result.current.setCustomTimeRange(range)
+      result.current.setTraceFocusId("t-1")
+      result.current.setDiagnosticTransportFilter("remote")
+    })
+    act(() => result.current.saveCurrentPreset("Everything"))
+    const saved = result.current.presets[0].filters
+    expect(saved).toMatchObject({
+      sourceFilter: "mcp",
+      sessionFilter: "s-1",
+      customTimeRange: { start: range.start.getTime(), end: range.end.getTime() },
+      traceFocusId: "t-1",
+      diagnosticTransportFilter: "remote",
+    })
+
+    act(() => {
+      result.current.setSourceFilter("all")
+      result.current.setSessionFilter("")
+      result.current.setCustomTimeRange(null)
+      result.current.setTraceFocusId(null)
+      result.current.setDiagnosticTransportFilter(null)
+      result.current.setBookmarkFilterActive(true)
+    })
+    act(() => result.current.handlePresetChange(result.current.presets[0].id))
+    expect(result.current.sourceFilter).toBe("mcp")
+    expect(result.current.sessionFilter).toBe("s-1")
+    expect(result.current.customTimeRange).toEqual(range)
+    expect(result.current.traceFocusId).toBe("t-1")
+    expect(result.current.diagnosticTransportFilter).toBe("remote")
+    expect(result.current.bookmarkFilterActive).toBe(false)
+  })
+
+  it("stops naming the preset once a filter diverges, and names it again when restored", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    act(() => result.current.setLevelFilter("warn"))
+    act(() => result.current.saveCurrentPreset("Warnings"))
+    const id = result.current.presets[0].id
+    expect(result.current.activePresetId).toBe(id)
+    act(() => result.current.setTimeRange("1h"))
+    expect(result.current.activePresetId).toBe(result.current.EMPTY_PRESET_VALUE)
+    act(() => result.current.setTimeRange("all"))
+    expect(result.current.activePresetId).toBe(id)
+  })
+
+  it("opens the Error tab for a legacy 'all + high severity' preset", () => {
+    localStorage.setItem(
+      "log-filter-presets",
+      JSON.stringify([
+        {
+          id: "legacy",
+          name: "Legacy",
+          filters: {
+            levelFilter: "all",
+            moduleFilter: "all",
+            timeRange: "all",
+            searchQuery: "",
+            useRegex: false,
+            highSeverityOnly: true,
+          },
+        },
+      ])
+    )
+    const { result } = renderHook(() => useLogPanelFilters({ sources: ["mcp"] }))
+    act(() => result.current.setSourceFilter("all"))
+    act(() => result.current.handlePresetChange("legacy"))
+    expect(result.current.levelFilter).toBe("error")
+    // An absent source restores this embed's own default, not "all".
+    expect(result.current.sourceFilter).toBe("mcp")
+    expect(result.current.activePresetId).toBe("legacy")
+  })
+
+  it("drops malformed optional facets instead of loading them into state", () => {
+    const filters = {
+      levelFilter: "info",
+      moduleFilter: "m",
+      timeRange: "24h",
+      searchQuery: "",
+      useRegex: false,
+      highSeverityOnly: false,
+      sourceFilter: "nonsense",
+      sessionFilter: 42,
+      customTimeRange: { start: 10, end: 5 },
+      traceFocusId: "",
+    } as unknown as Parameters<typeof resolvePresetFacets>[0]
+    expect(resolvePresetFacets(filters, "all")).toEqual({
+      levelFilter: "info",
+      moduleFilter: "m",
+      timeRange: "24h",
+      searchQuery: "",
+      useRegex: false,
+      sourceFilter: "all",
+      sessionFilter: "",
+      customTimeRange: null,
+      traceFocusId: null,
+      diagnosticTransportFilter: null,
+    })
+  })
+})
+
+describe("autoRefresh storage scope", () => {
+  it("keeps the unscoped key for the default embed", () => {
+    expect(autoRefreshStorageKey()).toBe("cognia-log-auto-refresh")
+    expect(autoRefreshStorageKey("  ")).toBe("cognia-log-auto-refresh")
+    expect(autoRefreshStorageKey("settings-mcp")).toBe("cognia-log-auto-refresh:settings-mcp")
+  })
+
+  it("a scoped embed neither reads nor overwrites the /logs preference", () => {
+    localStorage.setItem("cognia-log-auto-refresh", "0")
+    const { result } = renderHook(() =>
+      useLogPanelFilters({ defaultAutoRefresh: true, storageScope: "settings-mcp" })
+    )
+    expect(result.current.autoRefresh).toBe(true)
+    act(() => result.current.setAutoRefresh(false))
+    expect(localStorage.getItem("cognia-log-auto-refresh:settings-mcp")).toBe("0")
+    act(() => result.current.setAutoRefresh(true))
+    expect(localStorage.getItem("cognia-log-auto-refresh:settings-mcp")).toBe("1")
+    expect(localStorage.getItem("cognia-log-auto-refresh")).toBe("0")
   })
 })

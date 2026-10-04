@@ -7,13 +7,7 @@ import {
   serializeCrashLogBundle,
   summarizeCrashLogItems,
 } from "@/lib/logging/crash-log"
-import type {
-  CrashDiagnosticsSnapshot,
-  CrashLogItem,
-  CrashLogLevelFilter,
-  CrashLogSourceFilter,
-  UseCrashLogsResult,
-} from "@/types/logging"
+import type { CrashDiagnosticsSnapshot, CrashLogItem, UseCrashLogsResult } from "@/types/logging"
 import { downloadFile } from "@/lib/files/download"
 import { getIndexedDBTransport } from "@/lib/logging"
 import { clearRecentErrorLogs } from "@cognia/logging/recent-errors"
@@ -25,6 +19,7 @@ import {
   openNativeLogDirectory as openNativeLogDirectoryImpl,
 } from "@/lib/native/native-logging"
 import { getWindowDiagnostics } from "@/lib/native/window-diagnostics"
+import { useLogWorkspaceStore } from "@/stores/logging/log-workspace-store"
 import { useLogStream } from "./use-log-stream"
 import { useRecentErrorLogs } from "./use-recent-error-logs"
 
@@ -55,12 +50,35 @@ function deriveRelatedLogs(items: CrashLogItem[], selectedItem: CrashLogItem | n
 
 export type { UseCrashLogsResult } from "@/types/logging"
 
+/**
+ * Delete every stored entry the Errors channel would list.
+ *
+ * Reads the store rather than the 400 entries currently in view, so "Clear
+ * stored" means all of them; and deletes by id, so the info/debug history the
+ * Logs channel shows is untouched. There used to be a fallback to the log
+ * stream's `clearLogs` — which wipes the whole store — whenever the transport
+ * lacked a targeted delete or nothing was in view.
+ */
+export async function deleteStoredCrashEntries(): Promise<number> {
+  const transport = getIndexedDBTransport()
+  if (!transport) return 0
+  const candidates = await transport.getLogs({ level: "warn" })
+  const ids = candidates.filter((log) => isCrashRelevantLogEntry(log)).map((log) => log.id)
+  if (ids.length > 0) await transport.deleteEntries(ids)
+  return ids.length
+}
+
 export function useCrashLogs(): UseCrashLogsResult {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
-  const [sourceFilter, setSourceFilter] = useState<CrashLogSourceFilter>("all")
-  const [levelFilter, setLevelFilter] = useState<CrashLogLevelFilter>("all")
-  const [search, setSearch] = useState("")
+  // The filters live in the workspace store, so leaving the channel and
+  // coming back no longer resets them (source and level also persist).
+  const sourceFilter = useLogWorkspaceStore((state) => state.crashSource)
+  const setSourceFilter = useLogWorkspaceStore((state) => state.setCrashSource)
+  const levelFilter = useLogWorkspaceStore((state) => state.crashLevel)
+  const setLevelFilter = useLogWorkspaceStore((state) => state.setCrashLevel)
+  const search = useLogWorkspaceStore((state) => state.crashSearch)
+  const setSearch = useLogWorkspaceStore((state) => state.setCrashSearch)
   // Render-safe read of the recent-error buffer — see `useRecentErrorLogs` for
   // why a plain subscription here is a render-phase update waiting to happen.
   const recentErrors = useRecentErrorLogs()
@@ -74,7 +92,6 @@ export function useCrashLogs(): UseCrashLogsResult {
     isLoading: persistedLoading,
     error: persistedError,
     refresh: refreshPersisted,
-    clearLogs,
   } = useLogStream({
     autoRefresh,
     refreshInterval: 3000,
@@ -186,19 +203,10 @@ export function useCrashLogs(): UseCrashLogsResult {
   }, [refreshDiagnostics, refreshPersisted])
 
   const clearPersisted = useCallback(async () => {
-    const persistedIds = allItems
-      .filter((item) => item.sources.includes("persisted"))
-      .map((item) => item.id)
-
-    const transport = getIndexedDBTransport()
-    if (transport && persistedIds.length > 0 && typeof transport.deleteEntries === "function") {
-      await transport.deleteEntries(persistedIds)
-      await refreshPersisted()
-      return
-    }
-
-    await clearLogs()
-  }, [allItems, clearLogs, refreshPersisted])
+    const removed = await deleteStoredCrashEntries()
+    await refreshPersisted()
+    return removed
+  }, [refreshPersisted])
 
   const copySelected = useCallback(async () => {
     if (!selectedItem) {

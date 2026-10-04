@@ -42,6 +42,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -57,7 +58,7 @@ import type { FeatureHeaderAction } from "@/components/feature-shell/feature-pag
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { CrashDiagnosticsWorkspace } from "@/components/logging/crash-diagnostics-workspace"
-import { IncidentDetail, IncidentWorkspace } from "@/components/logging/incident-workspace"
+import { IncidentWorkspace } from "@/components/logging/incident-workspace"
 import { ServiceConsoleWorkspace } from "@/components/logging/service-console-workspace"
 import { LogPanel } from "@/components/logging/log-panel"
 import { TraceWorkspace } from "@/components/logging/trace-workspace"
@@ -79,28 +80,30 @@ import {
   BreadcrumbLink,
   BreadcrumbList,
 } from "@/components/ui/breadcrumb"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDiagnosticConnection } from "@/hooks/diagnostic-service/use-diagnostic-connection"
-import { useDiagnosticIncidents } from "@/hooks/logging/use-diagnostic-incidents"
+import {
+  countActionableIncidents,
+  useDiagnosticIncidents,
+} from "@/hooks/logging/use-diagnostic-incidents"
 import { useIncidentSubmission } from "@/hooks/logging/use-incident-submission"
 import { useTriageConsole } from "@/hooks/diagnostic-service/use-triage-console"
 import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-incidents"
-import { useTransportHealth } from "@/hooks/logging"
-import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
+import { summarizeTransportHealth, useTransportHealth } from "@/hooks/logging"
+import { useEdgeResize } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
+import { TRACE_URL_KEYS } from "@/lib/observability/url-state"
 import {
+  DEFAULT_DETAIL_WIDTH,
+  DETAIL_WIDTH_MAX,
+  DETAIL_WIDTH_MIN,
   LOG_WORKSPACE_VIEWS,
   resolveLogWorkspaceView,
+  resolveTraceSubView,
   useLogWorkspaceStore,
   type LogWorkspaceView,
+  type TraceSubView,
 } from "@/stores/logging/log-workspace-store"
 
 const CHANNEL_ICONS: Record<LogWorkspaceView, typeof ScrollTextIcon> = {
@@ -116,6 +119,26 @@ const CHANNEL_ICONS: Record<LogWorkspaceView, typeof ScrollTextIcon> = {
  * panel's own URL writes. */
 const CHANNEL_PARAM = "channel"
 const TRACE_PARAM = "traceId"
+/** The Traces sub-view; owned by the Traces channel's URL codec. */
+const TRACE_SUB_VIEW_PARAM = TRACE_URL_KEYS.subView
+/** The selected crash report, as `<runtime>:<id>`. */
+const INCIDENT_PARAM = "incident"
+/** The selected group in the Service console. */
+const GROUP_PARAM = "group"
+
+/** Where each channel's configuration lives. Logs and Traces are logging
+ * policy; the crash channels are the diagnostic service's settings. */
+const CONFIGURE_HREF: Record<LogWorkspaceView, string> = {
+  logs: "/settings?section=logs",
+  traces: "/settings?section=logs",
+  diagnostics: "/settings?section=diagnostics",
+  incidents: "/settings?section=diagnostics",
+  service: "/settings?section=diagnostics",
+}
+
+function incidentKey(incident: { runtime: string; id: string }): string {
+  return `${incident.runtime}:${incident.id}`
+}
 
 /** Replace the page's own params without touching the panel's. Uses
  * `history.replaceState` rather than `router.replace` for the same reason the
@@ -166,9 +189,17 @@ export function DiagnosticsWorkspace() {
   // The Incidents channel's consent panel needs a service to submit to; the
   // connection lives with Settings → Diagnostics and is read, not owned, here.
   const diagnosticService = useDiagnosticConnection()
+  // Only the Service channel talks to the remote service: mounted at shell
+  // level, the console used to send `listGroups` on every `/logs` visit.
+  const selectGroup = useCallback((groupId: string | null) => {
+    writePageParams({ [GROUP_PARAM]: groupId })
+  }, [])
   const triageConsole = useTriageConsole({
     client: diagnosticService.client,
     can: diagnosticService.can,
+    enabled: activeView === "service",
+    initialSelectedGroupId: searchParams?.get(GROUP_PARAM) ?? null,
+    onSelectGroup: selectGroup,
   })
   const submission = useIncidentSubmission({
     connection: diagnosticService.connection,
@@ -176,15 +207,28 @@ export function DiagnosticsWorkspace() {
     onChanged: () => incidents.refresh(),
     onConfigure: () => router.push("/settings?section=diagnostics"),
   })
-  const { nativeLogging, healthByTransport } = useTransportHealth({
+  // One poll for the page: the header chip and the Logs channel's transport
+  // tiles used to run two (5 s and 2 s) and could disagree. The panel takes
+  // this one via `transportHealth` and starts none of its own.
+  const transportHealth = useTransportHealth({
     autoRefresh: true,
-    refreshInterval: 5000,
+    refreshInterval: 2000,
   })
-  const narrow = useIsNarrow()
+  const { nativeLogging, healthByTransport } = transportHealth
 
-  const [selectedID, setSelectedID] = useState<string | null>(null)
-  const [preview, setPreview] = useState<unknown>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
+  // `<runtime>:<id>`, seeded from `?incident=` so a crash report is linkable.
+  const [selectedID, setSelectedID] = useState<string | null>(
+    () => searchParams?.get(INCIDENT_PARAM) ?? null
+  )
+  // The preview is keyed by the incident it was read for. It used to be one
+  // slot filled by the last click, so an auto-selected first incident showed
+  // "No preview", and filtering the clicked one away showed the next incident
+  // beside the previous one's preview — with Submit enabled for it.
+  const [previewState, setPreviewState] = useState<{
+    key: string
+    value: unknown
+    error: boolean
+  } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<DiagnosticIncidentSummary | null>(null)
   // Seeded during render from `?traceId=`; an effect would be a set-state-in-effect.
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(
@@ -196,16 +240,64 @@ export function DiagnosticsWorkspace() {
   const [logPanelKey, setLogPanelKey] = useState(0)
   const compact = useCompactLayout()
 
-  // A `?channel=` deep link wins over the persisted channel, once, at mount.
-  // This writes the zustand store rather than local state, so it is a plain
-  // side effect and not a set-state-in-effect.
+  // A `?channel=` deep link wins over the persisted channel. Without one, the
+  // persisted channel is restored — and written into the URL, so "copy link"
+  // and a reload-then-share hand the next person the channel on screen.
+  //
+  // This re-runs whenever the query changes, not just at mount: an in-app link
+  // to `/logs?channel=…` (the cost-budget notification, Performance → Open
+  // trace dashboard) while `/logs` is already open changed the address bar and
+  // nothing else. Our own `replaceState` writes come back through here too;
+  // they carry the values already on screen, so adopting them is a no-op.
+  // These write zustand stores, not local state, so they are plain side
+  // effects rather than set-state-in-effect.
+  const searchKey = searchParams?.toString() ?? ""
   const hydratedRef = useRef(false)
   useEffect(() => {
-    if (hydratedRef.current) return
+    const firstRun = !hydratedRef.current
     hydratedRef.current = true
-    const channel = searchParams?.get(CHANNEL_PARAM)
-    if (channel) setActiveView(resolveLogWorkspaceView(channel))
-  }, [searchParams, setActiveView])
+    const params = new URLSearchParams(searchKey)
+    const channel = params.get(CHANNEL_PARAM)
+    const store = useLogWorkspaceStore.getState()
+    if (channel) {
+      const view = resolveLogWorkspaceView(channel)
+      if (view !== store.activeView) setActiveView(view)
+    } else if (firstRun && store.activeView !== "logs") {
+      writePageParams({ [CHANNEL_PARAM]: store.activeView })
+    }
+    const subView = params.get(TRACE_SUB_VIEW_PARAM)
+    if (subView) {
+      const next = resolveTraceSubView(subView)
+      if (next !== store.traceSubView) setTraceSubView(next)
+    }
+  }, [searchKey, setActiveView, setTraceSubView])
+
+  // `?traceId=` / `?incident=` adopted on in-app navigation, during render
+  // (the "adjust state when a prop changes" pattern). `seen*` is what the URL
+  // last said, never what we wrote, so a stale hook value cannot undo a click.
+  const traceParam = searchParams?.get(TRACE_PARAM) ?? null
+  const [seenTraceParam, setSeenTraceParam] = useState(traceParam)
+  if (traceParam !== seenTraceParam) {
+    setSeenTraceParam(traceParam)
+    setSelectedTraceId(traceParam)
+  }
+  const incidentParam = searchParams?.get(INCIDENT_PARAM) ?? null
+  const [seenIncidentParam, setSeenIncidentParam] = useState(incidentParam)
+  if (incidentParam !== seenIncidentParam) {
+    setSeenIncidentParam(incidentParam)
+    if (incidentParam) setSelectedID(incidentParam)
+  }
+
+  /** The Traces sub-view, mirrored into `?tview=` (explore is the default
+   * and stays out of the URL). Tabs, the `v` shortcut and dashboard
+   * drill-downs all come through here. */
+  const changeTraceSubView = useCallback(
+    (next: TraceSubView) => {
+      setTraceSubView(next)
+      writePageParams({ [TRACE_SUB_VIEW_PARAM]: next === "explore" ? null : next })
+    },
+    [setTraceSubView]
+  )
 
   const selectChannel = useCallback(
     (view: LogWorkspaceView) => {
@@ -228,12 +320,30 @@ export function DiagnosticsWorkspace() {
       writePageParams({
         [CHANNEL_PARAM]: null,
         [TRACE_PARAM]: null,
+        [TRACE_SUB_VIEW_PARAM]: null,
         trace: params.trace ?? null,
         session: params.session ?? null,
       })
       setLogPanelKey((key) => key + 1)
     },
     [setActiveView]
+  )
+
+  /** Logs → Traces: the detail pane's "Open in Traces" on an agent-trace
+   * entry. The reverse of `openInLogs`; the explore sub-view is the one with a
+   * waterfall to land on. */
+  const openTrace = useCallback(
+    (traceId: string) => {
+      setTraceSubView("explore")
+      setActiveView("traces")
+      setSelectedTraceId(traceId)
+      writePageParams({
+        [CHANNEL_PARAM]: "traces",
+        [TRACE_PARAM]: traceId,
+        [TRACE_SUB_VIEW_PARAM]: null,
+      })
+    },
+    [setActiveView, setTraceSubView]
   )
 
   const filteredIncidents = useMemo(
@@ -248,49 +358,85 @@ export function DiagnosticsWorkspace() {
   )
   const selectedIncident = useMemo(
     () =>
-      (selectedID ? filteredIncidents.find((incident) => incident.id === selectedID) : undefined) ??
+      (selectedID
+        ? filteredIncidents.find((incident) => incidentKey(incident) === selectedID)
+        : undefined) ??
       filteredIncidents[0] ??
       null,
     [filteredIncidents, selectedID]
   )
+  const selectedIncidentKey = selectedIncident ? incidentKey(selectedIncident) : null
+
+  // Read the preview for whichever incident is on screen — clicked, deep
+  // linked or auto-selected — and drop a response for one no longer shown.
+  // State is only set in the promise callbacks.
+  const readIncident = incidents.read
+  useEffect(() => {
+    if (!selectedIncident || !selectedIncidentKey) return
+    let cancelled = false
+    readIncident(selectedIncident).then(
+      (value) => {
+        if (!cancelled) setPreviewState({ key: selectedIncidentKey, value, error: false })
+      },
+      () => {
+        if (!cancelled) setPreviewState({ key: selectedIncidentKey, value: null, error: true })
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+    // `selectedIncident` is identified by its key; a new object for the same
+    // report must not re-read it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readIncident, selectedIncidentKey])
+  const previewCurrent = previewState !== null && previewState.key === selectedIncidentKey
+  const preview = previewCurrent ? previewState.value : null
+  const previewLoading = selectedIncidentKey !== null && !previewCurrent
 
   const detailResize = useEdgeResize({
     width: detailWidth,
-    min: 280,
-    max: 640,
+    min: DETAIL_WIDTH_MIN,
+    max: DETAIL_WIDTH_MAX,
     edge: "left",
     onChange: setDetailWidth,
-    onReset: () => setDetailWidth(384),
+    onReset: () => setDetailWidth(DEFAULT_DETAIL_WIDTH),
   })
 
-  const selectIncident = useCallback(
-    async (incident: DiagnosticIncidentSummary) => {
-      setSelectedID(incident.id)
-      setPreviewLoading(true)
-      try {
-        setPreview(await incidents.read(incident))
-      } finally {
-        setPreviewLoading(false)
-      }
-    },
-    [incidents]
-  )
+  const selectIncident = useCallback((incident: DiagnosticIncidentSummary) => {
+    const key = incidentKey(incident)
+    setSelectedID(key)
+    writePageParams({ [INCIDENT_PARAM]: key })
+  }, [])
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return
-    await incidents.remove(deleteTarget)
-    if (selectedID === deleteTarget.id) {
-      setSelectedID(null)
-      setPreview(null)
+    try {
+      await incidents.remove(deleteTarget)
+      if (selectedID === incidentKey(deleteTarget)) {
+        setSelectedID(null)
+        writePageParams({ [INCIDENT_PARAM]: null })
+      }
+      toast.success(t("delete.done"))
+    } catch (error) {
+      toast.error(
+        t("delete.failed", { error: error instanceof Error ? error.message : String(error) })
+      )
+    } finally {
+      setDeleteTarget(null)
     }
-    setDeleteTarget(null)
-  }, [deleteTarget, incidents, selectedID])
+  }, [deleteTarget, incidents, selectedID, t])
 
-  const unhealthyTransports = useMemo(
-    () => Object.values(healthByTransport).filter((health) => health.status !== "healthy").length,
-    [healthByTransport]
+  const actionableIncidents = useMemo(
+    () => countActionableIncidents(incidents.incidents),
+    [incidents.incidents]
   )
-  const transportCount = Object.keys(healthByTransport).length
+  // The same denominator the panel's chip shows — including the native
+  // pipeline on the desktop — so the header can no longer read 4/4 while the
+  // chip below reads 4/5.
+  const healthSummary = useMemo(
+    () => summarizeTransportHealth(healthByTransport, nativeLogging),
+    [healthByTransport, nativeLogging]
+  )
 
   /** "Reset layout" is a rare, whole-page action that used to sit in the
    * header as a labelled button competing with Configure. It lives in the
@@ -302,7 +448,20 @@ export function DiagnosticsWorkspace() {
         id: "reset-workspace",
         label: t("reset"),
         icon: RotateCcwIcon,
-        onSelect: resetWorkspace,
+        // The store reset returns to the Logs channel; the URL has to follow
+        // or a reload reopens the channel that was just reset away from.
+        onSelect: () => {
+          resetWorkspace()
+          writePageParams({
+            [CHANNEL_PARAM]: null,
+            [TRACE_PARAM]: null,
+            [TRACE_SUB_VIEW_PARAM]: null,
+            [INCIDENT_PARAM]: null,
+            [GROUP_PARAM]: null,
+          })
+          setSelectedTraceId(null)
+          setSelectedID(null)
+        },
         testId: "logs-reset-workspace",
       },
     ],
@@ -350,7 +509,10 @@ export function DiagnosticsWorkspace() {
                 // The incident count used to sit in the header status strip,
                 // one row above the tab it describes. It belongs on the tab:
                 // the number and the thing it counts are now the same target.
-                const count = view === "incidents" ? incidents.incidents.length : 0
+                // Only reports waiting on the user: one with a receipt is the
+                // service's to process, and counting it kept the badge lit
+                // forever after every report had been sent.
+                const count = view === "incidents" ? actionableIncidents : 0
                 return (
                   <TabsTrigger
                     key={view}
@@ -358,7 +520,7 @@ export function DiagnosticsWorkspace() {
                     aria-label={t(`views.${view}`)}
                     // The icon-only width below still needs a way to read
                     // the tab; the label shows once the header can fit it.
-                    title={t(`views.${view}`)}
+                    title={`${t(`views.${view}`)} — ${t(`viewDescriptions.${view}`)}`}
                     data-testid={`logs-channel-${view}`}
                     className="gap-1.5"
                   >
@@ -389,15 +551,16 @@ export function DiagnosticsWorkspace() {
         }
         status={
           <WorkspaceHealthPill
-            transportCount={transportCount}
-            unhealthyTransports={unhealthyTransports}
+            healthy={healthSummary.healthy}
+            total={healthSummary.total}
+            nativeNeedsAttention={healthSummary.nativeNeedsAttention}
             nativeStatus={nativeLogging.status}
-            incidentCount={incidents.incidents.length}
+            incidentCount={actionableIncidents}
           />
         }
         actions={
           <Button asChild variant="ghost" size="sm" className="h-8">
-            <Link href="/settings?section=logs">
+            <Link href={CONFIGURE_HREF[activeView]} data-testid="logs-configure">
               <Settings2Icon className="size-4" />
               <span className="hidden @2xl/feature-header:inline">{t("configure")}</span>
             </Link>
@@ -422,11 +585,13 @@ export function DiagnosticsWorkspace() {
             refreshInterval={2000}
             density={density}
             onDensityChange={setDensity}
+            onOpenTrace={openTrace}
+            transportHealth={transportHealth}
           />
         ) : activeView === "traces" ? (
           <TraceWorkspace
             subView={traceSubView}
-            onSubViewChange={setTraceSubView}
+            onSubViewChange={changeTraceSubView}
             errorsOnly={traceErrorsOnly}
             onErrorsOnlyChange={setTraceErrorsOnly}
             selectedTraceId={selectedTraceId}
@@ -440,6 +605,11 @@ export function DiagnosticsWorkspace() {
           <ServiceConsoleWorkspace
             console={triageConsole}
             configured={Boolean(diagnosticService.connection)}
+            authenticated={diagnosticService.authenticated}
+            loading={diagnosticService.loading}
+            roleStatus={diagnosticService.roleStatus}
+            roleErrorCode={diagnosticService.roleErrorCode}
+            onRetryRole={diagnosticService.probeRole}
             can={diagnosticService.can}
             onConfigure={() => router.push("/settings?section=diagnostics")}
           />
@@ -451,12 +621,13 @@ export function DiagnosticsWorkspace() {
             selected={selectedIncident}
             preview={preview}
             previewLoading={previewLoading}
+            runtimes={incidents.runtimes}
             activeSource={activeSource}
             incidentStateFilter={incidentStateFilter}
             onSourceChange={setActiveSource}
             onStateChange={setIncidentStateFilter}
             onRefresh={() => void incidents.refresh()}
-            onSelect={(incident) => void selectIncident(incident)}
+            onSelect={selectIncident}
             onDelete={setDeleteTarget}
             detailWidth={detailWidth}
             detailResize={detailResize}
@@ -466,37 +637,6 @@ export function DiagnosticsWorkspace() {
           />
         )}
       </main>
-
-      <Sheet
-        open={selectedID !== null && selectedIncident !== null && activeView === "incidents"}
-        onOpenChange={(open) => {
-          if (!open) setSelectedID(null)
-        }}
-      >
-        <SheetContent
-          side={narrow ? "bottom" : "right"}
-          className={cn(
-            "p-0 xl:hidden",
-            narrow ? "h-dvh max-h-dvh" : "w-[min(92vw,560px)] sm:max-w-none"
-          )}
-          data-testid="incident-detail-drawer"
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>{t("detail.title")}</SheetTitle>
-            <SheetDescription>{t("detail.description")}</SheetDescription>
-          </SheetHeader>
-          {selectedIncident && (
-            <IncidentDetail
-              key={selectedIncident.id}
-              incident={selectedIncident}
-              preview={preview}
-              previewLoading={previewLoading}
-              onDelete={() => setDeleteTarget(selectedIncident)}
-              submission={submission}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
 
       <AlertDialog
         open={deleteTarget !== null}
@@ -535,29 +675,35 @@ export function DiagnosticsWorkspace() {
  * signals, so a degraded native pipeline still turns the chip amber even when
  * every transport is healthy.
  */
+/** Settings → Logs, opened on the Overview panel (`LOGS_PANEL_PARAM`). */
+export const HEALTH_DETAILS_HREF = "/settings?section=logs&logsPanel=overview"
+
 function WorkspaceHealthPill({
-  transportCount,
-  unhealthyTransports,
+  healthy: healthyCount,
+  total,
+  nativeNeedsAttention,
   nativeStatus,
   incidentCount,
 }: {
-  transportCount: number
-  unhealthyTransports: number
+  healthy: number
+  total: number
+  nativeNeedsAttention: boolean
   nativeStatus: string
   incidentCount: number
 }) {
   const t = useTranslations("logging.workspace.status")
+  const tNative = useTranslations("logging.crash.native.statuses")
 
   // Before the first health poll resolves there is nothing to aggregate, and a
   // "0/0" chip reads as a failure rather than as "not measured yet".
-  if (transportCount === 0) return null
+  if (total === 0) return null
 
-  const healthyTransports = transportCount - unhealthyTransports
-  const nativeNeedsAttention = nativeStatus === "degraded" || nativeStatus === "error"
-  const healthy = unhealthyTransports === 0 && !nativeNeedsAttention
+  const healthy = healthyCount === total && !nativeNeedsAttention
 
-  const transportsLabel = t("transports", { healthy: healthyTransports, total: transportCount })
-  const nativeLabel = t("native", { status: nativeStatus })
+  const transportsLabel = t("transports", { healthy: healthyCount, total })
+  const nativeLabel = t("native", {
+    status: tNative.has(nativeStatus) ? tNative(nativeStatus) : nativeStatus,
+  })
   const incidentsLabel = t("incidents", { count: incidentCount })
 
   return (
@@ -573,16 +719,19 @@ function WorkspaceHealthPill({
             !healthy && "border-warning/50 text-warning"
           )}
         >
-          <button
-            type="button"
+          {/* A link, not a dead button: the breakdown it summarizes — every
+              transport, native readiness, the problem list — is Settings →
+              Logs → Overview, which is what "one click away" promised. */}
+          <Link
+            href={HEALTH_DETAILS_HREF}
             aria-label={`${transportsLabel} · ${nativeLabel} · ${incidentsLabel}`}
           >
             <span
               aria-hidden
               className={cn("size-1.5 rounded-full", healthy ? "bg-success" : "bg-warning")}
             />
-            {`${healthyTransports}/${transportCount}`}
-          </button>
+            {`${healthyCount}/${total}`}
+          </Link>
         </Badge>
       </TooltipTrigger>
       <TooltipContent className="space-y-0.5">
