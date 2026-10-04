@@ -66,7 +66,7 @@ pub fn router() -> Router<SharedState> {
 
 /// Bumped when a field is ADDED. Nothing is ever removed or reshaped: a
 /// client built against version 1 keeps reading version 2.
-pub const AUTH_CONFIG_VERSION: u32 = 3;
+pub const AUTH_CONFIG_VERSION: u32 = 4;
 
 /// Registration policy of every deployment this server describes. The first
 /// owner presents the one-time bootstrap credential; everyone after joins by
@@ -78,6 +78,12 @@ pub const ENV_LOGTO_NATIVE_CLIENT_ID: &str = "COGNIA_LOGTO_NATIVE_CLIENT_ID";
 /// Comma/whitespace-separated Logto social connector names, e.g. `github,feishu`.
 /// Each becomes a `direct_sign_in=social:<name>` button on the client.
 pub const ENV_LOGTO_SOCIAL_PROVIDERS: &str = "COGNIA_LOGTO_SOCIAL_PROVIDERS";
+/// What kind of issuer `COGNIA_LOGTO_ISSUER` names: `logto` (the default, and every
+/// deployment before version 4) or `oidc` for any other standards-only issuer
+/// such as the official Better Auth account (ADR-0215 §2). Clients send Logto's
+/// own parameters (`prompt=consent`, `direct_sign_in`, the organizations scope)
+/// and its registered native callback only to `logto`.
+pub const ENV_OIDC_ISSUER_KIND: &str = "COGNIA_OIDC_ISSUER_KIND";
 /// Base URL of the `cognia-collab-server` this deployment enrols accounts on.
 /// The same variable the brain's read-only collaboration client already takes,
 /// so one deployment names its plane once.
@@ -121,6 +127,8 @@ struct OidcPublicConfig {
     /// is registered at Logto per application and the client already knows
     /// which of these it is.
     callback_modes: Vec<&'static str>,
+    /// Version 4. `logto` or `oidc`; see [`ENV_OIDC_ISSUER_KIND`].
+    issuer_kind: &'static str,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -143,6 +151,24 @@ struct CollaborationPublicConfig {
 }
 
 const CALLBACK_MODES: [&str; 3] = ["web-popup", "native-loopback", "deep-link"];
+
+/// Parse `COGNIA_OIDC_ISSUER_KIND`. Unset means Logto. A value that names no
+/// kind is a configuration error, not a default: guessing `logto` for an
+/// operator who meant `oidc` would send every sign-in to a consent page.
+fn issuer_kind_from(raw: Option<String>) -> Result<&'static str, String> {
+    match raw
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        None | Some("") | Some("logto") => Ok("logto"),
+        Some("oidc") => Ok("oidc"),
+        Some(other) => Err(format!(
+            "{ENV_OIDC_ISSUER_KIND}={other:?} is not a known issuer kind (logto, oidc)"
+        )),
+    }
+}
 
 /// Parse `COGNIA_LOGTO_SOCIAL_PROVIDERS`: trimmed, lower-cased, de-duplicated,
 /// blanks dropped, operator order kept.
@@ -218,6 +244,16 @@ async fn auth_config_handler(
             non_empty_env("COGNIA_LOGTO_WEB_CLIENT_ID"),
         ) {
             (Some(issuer), Some(audience), Some(web_client_id)) => {
+                let issuer_kind = match issuer_kind_from(non_empty_env(ENV_OIDC_ISSUER_KIND)) {
+                    Ok(kind) => kind,
+                    Err(message) => {
+                        tracing::error!("{message}");
+                        return store_unavailable_error(
+                            "multi-tenant browser authentication is not fully configured",
+                        )
+                        .into_response();
+                    }
+                };
                 let mut scopes = vec!["openid".to_string(), "offline_access".to_string()];
                 if let Some(raw) = non_empty_env(super::oidc::ENV_REQUIRED_SCOPES) {
                     for scope in
@@ -238,6 +274,7 @@ async fn auth_config_handler(
                         ENV_LOGTO_SOCIAL_PROVIDERS,
                     )),
                     callback_modes: CALLBACK_MODES.to_vec(),
+                    issuer_kind,
                 })
             }
             _ => {
@@ -3200,6 +3237,16 @@ mod tests {
     }
 
     #[test]
+    fn the_issuer_kind_defaults_to_logto_and_refuses_a_typo() {
+        assert_eq!(issuer_kind_from(None), Ok("logto"));
+        assert_eq!(issuer_kind_from(Some("  ".into())), Ok("logto"));
+        assert_eq!(issuer_kind_from(Some("Logto".into())), Ok("logto"));
+        assert_eq!(issuer_kind_from(Some(" OIDC ".into())), Ok("oidc"));
+        let error = issuer_kind_from(Some("better-auth".into())).unwrap_err();
+        assert!(error.contains(ENV_OIDC_ISSUER_KIND), "{error}");
+    }
+
+    #[test]
     fn the_collaboration_block_is_absent_until_a_service_url_is_set() {
         assert_eq!(collaboration_config_from(None, None), None);
         assert_eq!(collaboration_config_from(Some("  ".into()), None), None);
@@ -3271,6 +3318,7 @@ mod tests {
                 scopes: vec!["openid".into()],
                 social_providers: social_providers_from(Some("github".into())),
                 callback_modes: CALLBACK_MODES.to_vec(),
+                issuer_kind: "logto",
             }),
             signaling: SignalingPublicConfig {
                 url: "wss://s.test".into(),
@@ -3279,7 +3327,8 @@ mod tests {
             collaboration: None,
         };
         let value = serde_json::to_value(&response).unwrap();
-        assert_eq!(value["configVersion"], 3);
+        assert_eq!(value["configVersion"], 4);
+        assert_eq!(value["oidc"]["issuerKind"], "logto");
         assert_eq!(value["deploymentMode"], "multi-tenant");
         assert_eq!(value["oidc"]["webClientId"], "web");
         assert!(value["oidc"].get("nativeClientId").is_none());

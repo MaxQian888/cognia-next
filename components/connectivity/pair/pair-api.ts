@@ -3,6 +3,7 @@
 import { getDeviceLabel } from "./pair-helpers"
 import { decodePairPayload, type DecodeOutcome, type PairPayload } from "@/lib/qr/pair-payload"
 import {
+  authConfigIssuerKind,
   fetchCompanionAuthConfig,
   registerCompanionDevice,
   type PairOidcSession,
@@ -13,7 +14,12 @@ import { createRelayPairFetcher, type RelayPairFetcher } from "@/lib/tauri/relay
 import { getActiveLogtoSession, signInToLogto } from "@/lib/logto/app-session"
 import { createLogtoWebPopupDrivers } from "@/lib/logto/web-popup"
 import { createLogtoCapacitorDrivers } from "@/lib/logto/capacitor-drivers"
-import { NATIVE_CALLBACK_URI, ORGANIZATIONS_SCOPE, type LogtoDrivers } from "@/lib/logto/client"
+import {
+  nativeCallbackUriFor,
+  ORGANIZATIONS_SCOPE,
+  type LogtoDrivers,
+  type OidcIssuerKind,
+} from "@/lib/logto/client"
 import { isCapacitor } from "@/lib/platform/detect"
 
 /**
@@ -185,9 +191,13 @@ async function resolveOidcSession(
   // The session this mints outlives the pairing: the cloud sign-in gate finds
   // it as the active session and adopts an organization by refreshing with
   // `organization_id`, which Logto only honours for a session that asked for
-  // the organizations scope. Ask here, or that adoption fails later.
-  const scopes = Array.from(new Set([...config.oidc.scopes, ORGANIZATIONS_SCOPE]))
-  const { drivers, redirectUri, clientId } = pairSignInDrivers(config.oidc)
+  // the organizations scope. Ask here, or that adoption fails later. Only
+  // Logto has organizations; a generic issuer would refuse the scope.
+  const issuerKind = authConfigIssuerKind(config)
+  const scopes = Array.from(
+    new Set([...config.oidc.scopes, ...(issuerKind === "logto" ? [ORGANIZATIONS_SCOPE] : [])])
+  )
+  const { drivers, redirectUri, clientId } = pairSignInDrivers(config.oidc, issuerKind)
   return signInToLogto(
     {
       issuer: config.oidc.issuer,
@@ -196,6 +206,7 @@ async function resolveOidcSession(
       resource: config.oidc.audience,
       scopes,
       organizationId: payload.tenantId,
+      issuerKind,
     },
     drivers
   )
@@ -206,7 +217,10 @@ async function resolveOidcSession(
  * through the in-app browser and the deep link registered on the native
  * Logto application. Every other shell that reaches `/pair` is a browser.
  */
-function pairSignInDrivers(oidc: { webClientId: string; nativeClientId?: string }): {
+function pairSignInDrivers(
+  oidc: { webClientId: string; nativeClientId?: string },
+  issuerKind: OidcIssuerKind
+): {
   drivers: LogtoDrivers
   redirectUri: string
   clientId: string
@@ -214,7 +228,7 @@ function pairSignInDrivers(oidc: { webClientId: string; nativeClientId?: string 
   if (isCapacitor()) {
     return {
       drivers: createLogtoCapacitorDrivers(),
-      redirectUri: NATIVE_CALLBACK_URI,
+      redirectUri: nativeCallbackUriFor(issuerKind),
       clientId: oidc.nativeClientId ?? oidc.webClientId,
     }
   }

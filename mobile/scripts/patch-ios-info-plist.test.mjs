@@ -86,6 +86,22 @@ test("adds the cognia:// CFBundleURLTypes block to a fresh plist", () => {
   assert.equal(changed, true)
   assert.match(out, /CFBundleURLTypes/)
   assert.match(out, /<string>cognia<\/string>/)
+  assert.match(out, /<string>cn\.cognia\.app<\/string>/)
+})
+
+test("adds the OIDC callback scheme to our own deep-link entry, once", () => {
+  const ownEntry = EMPTY_PLIST.replace(
+    "</dict>\n</plist>",
+    "\t<key>CFBundleURLTypes</key>\n\t<array>\n\t\t<dict>\n\t\t\t<key>CFBundleURLName</key>\n\t\t\t<string>app.cognia.deeplink</string>\n\t\t\t<key>CFBundleURLSchemes</key>\n\t\t\t<array>\n\t\t\t\t<string>cognia</string>\n\t\t\t</array>\n\t\t</dict>\n\t</array>\n</dict>\n</plist>"
+  )
+  const first = patchPlist(ownEntry)
+  assert.equal(first.changed, true)
+  assert.match(
+    first.out,
+    /\t\t\t\t<string>cognia<\/string>\n\t\t\t\t<string>cn\.cognia\.app<\/string>\n\t\t\t<\/array>/
+  )
+  assert.equal(first.out.match(/cn\.cognia\.app/g).length, 1)
+  assert.equal(patchPlist(first.out).out.match(/cn\.cognia\.app/g).length, 1)
 })
 
 test("leaves an existing CFBundleURLTypes block untouched", () => {
@@ -97,6 +113,8 @@ test("leaves an existing CFBundleURLTypes block untouched", () => {
   // No second block is inserted, the hand-maintained scheme stays.
   assert.equal(out.match(/CFBundleURLTypes/g).length, 1)
   assert.match(out, /<string>custom<\/string>/)
+  // A block that is not ours gains nothing either.
+  assert.doesNotMatch(out, /cn\.cognia\.app/)
 })
 
 test("adds UIBackgroundModes remote-notification to a fresh plist (iOS push)", () => {

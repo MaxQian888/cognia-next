@@ -6,6 +6,7 @@ import {
   connectorCallbacks,
   ensureApplication,
   NATIVE_CALLBACK_URI,
+  OIDC_NATIVE_CALLBACK_URI,
   envLines,
   ensureOrganizationRoles,
   ensureSignInExperience,
@@ -183,10 +184,13 @@ const factories = [
 test("the native application accepts the deep link and every CLI loopback port", () => {
   assert.deepEqual(nativeRedirectUris(undefined), [
     NATIVE_CALLBACK_URI,
+    OIDC_NATIVE_CALLBACK_URI,
     "http://127.0.0.1:9321/callback",
   ])
+  assert.equal(OIDC_NATIVE_CALLBACK_URI, "cn.cognia.app:/auth/callback")
   assert.deepEqual(nativeRedirectUris("9321, 9322"), [
     NATIVE_CALLBACK_URI,
+    OIDC_NATIVE_CALLBACK_URI,
     "http://127.0.0.1:9321/callback",
     "http://127.0.0.1:9322/callback",
   ])

@@ -40,6 +40,13 @@ import { argv, env, exit } from "node:process"
 
 const MANAGEMENT_RESOURCE = env.LOGTO_MANAGEMENT_RESOURCE ?? "https://default.logto.app/api"
 export const NATIVE_CALLBACK_URI = "cognia://logto/callback"
+/**
+ * The RFC 8252 reverse-domain callback clients send to non-Logto issuers
+ * (`OIDC_NATIVE_CALLBACK_URI` in lib/logto/client.ts, ADR-0215 §2). Registered
+ * here too, so a deployment can later move its clients over without touching
+ * the application again.
+ */
+export const OIDC_NATIVE_CALLBACK_URI = "cn.cognia.app:/auth/callback"
 export const API_SCOPES = [
   { name: "brain:rpc", description: "Call the companion RPC surface" },
   { name: "brain:read", description: "Read companion state" },
@@ -83,7 +90,11 @@ export function nativeRedirectUris(loopbackPorts) {
     .split(",")
     .map((port) => port.trim())
     .filter(Boolean)
-  return [NATIVE_CALLBACK_URI, ...ports.map((port) => `http://127.0.0.1:${port}/callback`)]
+  return [
+    NATIVE_CALLBACK_URI,
+    OIDC_NATIVE_CALLBACK_URI,
+    ...ports.map((port) => `http://127.0.0.1:${port}/callback`),
+  ]
 }
 
 /** Redirect URIs the SPA application must accept. Pure, for the test. */

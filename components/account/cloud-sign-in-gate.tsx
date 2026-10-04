@@ -48,6 +48,7 @@ import { readLogtoIdentity } from "@/lib/identity/logto-claims"
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
 import { UserBindingError } from "@/lib/identity/user-binding"
 import { configureHostDeployment } from "@/lib/identity/host-person"
+import { authConfigIssuerKind } from "@/lib/tauri/companion-auth"
 import {
   discoverDeployment,
   type DeploymentDiscovery,
@@ -66,15 +67,18 @@ import {
 import { isShareViewerRoute } from "@/lib/share/viewer-context"
 import { useAccountStore } from "@/stores/account/account-store"
 
-import { NATIVE_CALLBACK_URI, type LogtoDrivers, type LogtoSession } from "@/lib/logto/client"
+import {
+  nativeCallbackUriFor,
+  type LogtoDrivers,
+  type LogtoSession,
+  type OidcIssuerKind,
+} from "@/lib/logto/client"
 import type { SocialProvider } from "@/lib/identity/deployment-discovery"
 
 import { CloudSignInScreen, type CloudSignInView } from "./cloud-sign-in-screen"
 
 export const CLOUD_OFFLINE_KEY_PREFIX = "cognia.cloud-sign-in.offline"
 const UNGATED_PATHS = ["/logto/callback", "/invite", "/pair", "/onboarding"]
-export { NATIVE_CALLBACK_URI }
-export const DESKTOP_CALLBACK_URI = NATIVE_CALLBACK_URI
 
 export interface CloudSignInGateDeps {
   discover?: () => Promise<DeploymentDiscovery>
@@ -360,65 +364,73 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     }
   }, [loaded, locked, localAccountId, ungated, discoveryEpoch])
 
-  const driversFor = useCallback((): {
-    drivers: LogtoDrivers
-    redirectUri: string
-    clientKind: "web" | "native"
-  } => {
-    // The Capacitor WebView cannot pop a window and has no https origin to
-    // land on, so it is asked before the popup test that would otherwise
-    // claim it: the in-app browser plus the native deep link is its path.
-    if ((deps.isCapacitor ?? detectCapacitor)()) {
+  const driversFor = useCallback(
+    (
+      issuerKind: OidcIssuerKind
+    ): {
+      drivers: LogtoDrivers
+      redirectUri: string
+      clientKind: "web" | "native"
+    } => {
+      // Logto keeps the callback its native application registered; any other
+      // issuer gets the RFC 8252 reverse-domain one (ADR-0215 §2).
+      const nativeRedirectUri = nativeCallbackUriFor(issuerKind)
+      // The Capacitor WebView cannot pop a window and has no https origin to
+      // land on, so it is asked before the popup test that would otherwise
+      // claim it: the in-app browser plus the native deep link is its path.
+      if ((deps.isCapacitor ?? detectCapacitor)()) {
+        return {
+          drivers: createLogtoCapacitorDrivers(),
+          redirectUri: nativeRedirectUri,
+          clientKind: "native",
+        }
+      }
+      const profile = deps.profile ?? detectHostProfile()
+      const popupCapable =
+        profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
+      if (popupCapable) {
+        return {
+          drivers: createLogtoWebPopupDrivers(),
+          redirectUri: `${window.location.origin}/logto/callback`,
+          clientKind: "web",
+        }
+      }
+      // The desktop has no popup: the system browser is sent to the deep link
+      // registered on the native application. The OS hands that link back to
+      // the running app, which resolves the wait on its own; pasting the
+      // address stays available for a browser that never comes back.
       return {
-        drivers: createLogtoCapacitorDrivers(),
-        redirectUri: NATIVE_CALLBACK_URI,
+        drivers: {
+          openUrl: (url) => {
+            void openUrl(url)
+          },
+          waitForCode: ({ state }) => {
+            pendingState.current = state
+            setView({ kind: "awaiting-code" })
+            deepLinkWait.current?.abort()
+            const controller = new AbortController()
+            deepLinkWait.current = controller
+            const pasted = new Promise<{ code: string; state: string }>((resolve, reject) => {
+              codeResolver.current = resolve
+              codeRejecter.current = reject
+            })
+            const delivered = waitForLogtoDeepLinkCallback({ state, signal: controller.signal })
+            return Promise.race([pasted, delivered]).finally(() => controller.abort())
+          },
+        },
+        redirectUri: nativeRedirectUri,
         clientKind: "native",
       }
-    }
-    const profile = deps.profile ?? detectHostProfile()
-    const popupCapable =
-      profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
-    if (popupCapable) {
-      return {
-        drivers: createLogtoWebPopupDrivers(),
-        redirectUri: `${window.location.origin}/logto/callback`,
-        clientKind: "web",
-      }
-    }
-    // The desktop has no popup: the system browser is sent to the deep link
-    // registered on the native application. The OS hands that link back to
-    // the running app, which resolves the wait on its own; pasting the
-    // address stays available for a browser that never comes back.
-    return {
-      drivers: {
-        openUrl: (url) => {
-          void openUrl(url)
-        },
-        waitForCode: ({ state }) => {
-          pendingState.current = state
-          setView({ kind: "awaiting-code" })
-          deepLinkWait.current?.abort()
-          const controller = new AbortController()
-          deepLinkWait.current = controller
-          const pasted = new Promise<{ code: string; state: string }>((resolve, reject) => {
-            codeResolver.current = resolve
-            codeRejecter.current = reject
-          })
-          const delivered = waitForLogtoDeepLinkCallback({ state, signal: controller.signal })
-          return Promise.race([pasted, delivered]).finally(() => controller.abort())
-        },
-      },
-      redirectUri: NATIVE_CALLBACK_URI,
-      clientKind: "native",
-    }
-  }, [deps.profile, deps.isCapacitor])
+    },
+    [deps.profile, deps.isCapacitor]
+  )
 
   const runSignIn = async (method: CloudSignInMethod) => {
     const deployment = deploymentRef.current
     if (!deployment || !localAccountId) return
     setError(null)
     setBusy(true)
-    const { drivers, redirectUri, clientKind } = driversFor()
+    const { drivers, redirectUri, clientKind } = driversFor(authConfigIssuerKind(deployment.config))
     setView({ kind: "signing-in" })
     try {
       const session = await (deps.signIn ?? signInWithDeployment)(

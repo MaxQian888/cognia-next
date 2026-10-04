@@ -453,6 +453,31 @@ describe("CloudSignInGate", () => {
     )
   })
 
+  /** ADR-0215 §2: a generic OIDC issuer gets the reverse-domain callback. */
+  it.each([
+    ["Capacitor", { profile: "mobile-companion" as const, isCapacitor: (): boolean => true }],
+    ["the desktop", { profile: "desktop" as const, isCapacitor: (): boolean => false }],
+  ])("on %s, a generic OIDC issuer gets the reverse-domain callback", async (_, shell) => {
+    const generic: ReadyDeployment = {
+      ...deployment,
+      config: {
+        ...deployment.config,
+        oidc: { ...deployment.config.oidc!, issuerKind: "oidc" },
+      },
+    }
+    const signIn = jest.fn(async () => session)
+    renderGate(deps({ ...shell, discover: jest.fn(async () => generic), signIn: signIn as never }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-social-github"))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(signIn).toHaveBeenCalledWith(
+      generic,
+      { kind: "social", directSignIn: "social:github" },
+      expect.anything(),
+      { redirectUri: "cn.cognia.app:/auth/callback", clientKind: "native" },
+      { localAccountId: "acct_a" }
+    )
+  })
+
   it("says why a lapsed session must be renewed", async () => {
     renderGate(
       deps({

@@ -9,6 +9,7 @@ import { registerDecodedPairPayload, registerPairPayload } from "./pair-api"
 jest.mock("@/lib/tauri/companion-auth", () => ({
   registerCompanionDevice: jest.fn(),
   fetchCompanionAuthConfig: jest.fn(),
+  authConfigIssuerKind: jest.requireActual("@/lib/tauri/companion-auth").authConfigIssuerKind,
 }))
 jest.mock("@/lib/logto/app-session", () => ({
   getActiveLogtoSession: jest.fn(),
@@ -169,6 +170,48 @@ it("signs in through the in-app browser and the native application on Capacitor"
       expect.objectContaining({
         clientId: "native-client",
         redirectUri: "cognia://logto/callback",
+      }),
+      { flavour: "capacitor" }
+    )
+  } finally {
+    capacitorShell = false
+  }
+})
+
+it("gives a generic OIDC issuer the reverse-domain callback and no organizations scope", async () => {
+  capacitorShell = true
+  try {
+    activeSession.mockResolvedValue(null)
+    authConfig.mockResolvedValue({
+      deploymentMode: "multi-tenant",
+      hostId: payload.hostId,
+      oidc: {
+        issuer: "https://id.cognia.test/api/auth",
+        audience: "https://sync.cognia.test",
+        webClientId: "web-client",
+        nativeClientId: "native-client",
+        scopes: ["openid"],
+        issuerKind: "oidc",
+      },
+      signaling: { url: "wss://host.example/signaling", iceServers: [] },
+    })
+    signIn.mockResolvedValue({
+      issuer: "https://id.cognia.test/api/auth",
+      clientId: "native-client",
+      resource: "https://sync.cognia.test",
+      accessToken: "oidc-access",
+      scopes: ["openid"],
+    })
+    register.mockResolvedValue(config)
+
+    await registerDecodedPairPayload({ ...payload, mode: "oidc", invitation: undefined })
+
+    expect(signIn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "native-client",
+        redirectUri: "cn.cognia.app:/auth/callback",
+        scopes: ["openid"],
+        issuerKind: "oidc",
       }),
       { flavour: "capacitor" }
     )

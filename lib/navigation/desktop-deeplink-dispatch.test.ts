@@ -166,6 +166,13 @@ describe("dispatchDesktopDeeplink", () => {
     )
   })
 
+  it("passes the reverse-domain OIDC callback to the same sign-in seam", async () => {
+    await dispatch("cn.cognia.app:/auth/callback?code=c2&state=s2")
+    expect(publishLogtoDeepLinkCallback).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "logto_callback", code: "c2", state: "s2" })
+    )
+  })
+
   it("leaves mobile-owned routes to the mobile shell", async () => {
     const handlers = deps()
     await dispatch("cognia://pair?payload=p", handlers)

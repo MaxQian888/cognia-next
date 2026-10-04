@@ -141,6 +141,24 @@ describe("logtoConfigFor", () => {
     })
     expect(native.clientId).toBe("native-app")
     expect(native).not.toHaveProperty("directSignIn")
+    // A deployment that announces no kind is Logto.
+    expect(native.issuerKind).toBe("logto")
+  })
+
+  it("asks a generic OIDC issuer for no organizations scope", () => {
+    const generic: ReadyDeployment = {
+      ...deployment,
+      config: {
+        ...deployment.config,
+        oidc: { ...deployment.config.oidc!, issuerKind: "oidc" },
+      },
+    }
+    const config = logtoConfigFor(generic, {
+      redirectUri: "cn.cognia.app:/auth/callback",
+      clientKind: "native",
+    })
+    expect(config.issuerKind).toBe("oidc")
+    expect(config.scopes).toEqual(["collab:read"])
   })
 })
 

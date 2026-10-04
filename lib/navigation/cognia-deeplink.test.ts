@@ -105,6 +105,34 @@ describe("parseCogniaDeeplink", () => {
     expect(parseCogniaDeeplink("cognia://logto/other")).toMatchObject({ kind: "unknown" })
   })
 
+  it("parses the reverse-domain OIDC callback and nothing else on that scheme", () => {
+    const raw = "cn.cognia.app:/auth/callback?code=abc&state=xyz"
+    expect(parseCogniaDeeplink(raw)).toEqual({
+      kind: "logto_callback",
+      code: "abc",
+      state: "xyz",
+      error: null,
+      raw,
+    })
+    expect(
+      parseCogniaDeeplink("cn.cognia.app:/auth/callback?error=access_denied&state=xyz")
+    ).toMatchObject({ kind: "logto_callback", code: null, error: "access_denied" })
+    // An empty authority spells the same route.
+    expect(parseCogniaDeeplink("cn.cognia.app:///auth/callback?code=c")).toMatchObject({
+      kind: "logto_callback",
+      code: "c",
+    })
+    // `auth` as a host, other paths and `cognia` routes on this scheme are unknown.
+    for (const other of [
+      "cn.cognia.app://auth/callback?code=c",
+      "cn.cognia.app:/auth/other?code=c",
+      "cn.cognia.app:/pair?payload=p",
+      "cn.cognia.app:/logto/callback?code=c",
+    ]) {
+      expect(parseCogniaDeeplink(other)).toEqual({ kind: "unknown", raw: other })
+    }
+  })
+
   it("supports query fallbacks used by older shell integrations", () => {
     expect(parseCogniaDeeplink("cognia://pair?payload=pair-token")).toMatchObject({
       kind: "pair_qr",

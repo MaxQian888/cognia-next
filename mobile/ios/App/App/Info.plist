@@ -71,6 +71,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>cognia</string>
+				<string>cn.cognia.app</string>
 			</array>
 		</dict>
 	</array>

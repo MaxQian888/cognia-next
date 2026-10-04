@@ -1,7 +1,11 @@
 import {
   buildLogtoEndSessionUrl,
+  LOGTO_NATIVE_CALLBACK_URI,
   loginToLogto,
   LogtoRefreshError,
+  nativeCallbackUriFor,
+  OIDC_NATIVE_CALLBACK_URI,
+  ORGANIZATIONS_SCOPE,
   refreshLogtoToken,
   revokeLogtoToken,
   toLogtoSessionMetadata,
@@ -134,6 +138,68 @@ describe("loginToLogto", () => {
     })
     const scope = new URL((openUrl.mock.calls[0] as string[])[0]).searchParams.get("scope") ?? ""
     expect(scope.split(" ").sort()).toEqual(["offline_access", "openid"])
+  })
+})
+
+describe("a generic OIDC issuer (ADR-0215 §2)", () => {
+  it("gets none of Logto's parameters on login", async () => {
+    const fetchImpl = routingFetch()
+    const openUrl = jest.fn()
+    const session = await loginToLogto(
+      baseConfig({
+        issuerKind: "oidc",
+        scopes: ["sync", ORGANIZATIONS_SCOPE],
+        directSignIn: "social:feishu",
+        organizationId: "org_9",
+      }),
+      {
+        openUrl,
+        waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+        fetchImpl,
+      }
+    )
+    const authUrl = new URL((openUrl.mock.calls[0] as string[])[0])
+    // Better Auth answers prompt=consent with a consent page.
+    expect(authUrl.searchParams.get("prompt")).toBeNull()
+    expect(authUrl.searchParams.get("direct_sign_in")).toBeNull()
+    expect(authUrl.searchParams.get("resource")).toBe("https://brain.test/api")
+    const scope = (authUrl.searchParams.get("scope") ?? "").split(" ").sort()
+    expect(scope).toEqual(["offline_access", "openid", "sync"])
+    const body = tokenBody(fetchImpl)
+    expect(body.get("resource")).toBe("https://brain.test/api")
+    expect(body.get("organization_id")).toBeNull()
+    expect(session.organizationId).toBeUndefined()
+  })
+
+  it("keeps Logto's parameters for an explicit Logto issuer", async () => {
+    const openUrl = jest.fn()
+    await loginToLogto(baseConfig({ issuerKind: "logto", scopes: [ORGANIZATIONS_SCOPE] }), {
+      openUrl,
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    const authUrl = new URL((openUrl.mock.calls[0] as string[])[0])
+    expect(authUrl.searchParams.get("prompt")).toBe("consent")
+    expect(authUrl.searchParams.get("scope")).toContain(ORGANIZATIONS_SCOPE)
+  })
+
+  it("never refreshes with organization_id", async () => {
+    const fetchImpl = routingFetch()
+    const session = await refreshLogtoToken(
+      baseConfig({ issuerKind: "oidc", organizationId: "org_9" }),
+      "rt-old",
+      fetchImpl
+    )
+    expect(tokenBody(fetchImpl).get("organization_id")).toBeNull()
+    expect(session.organizationId).toBeUndefined()
+  })
+
+  it("picks the native callback by issuer kind", () => {
+    expect(nativeCallbackUriFor("oidc")).toBe(OIDC_NATIVE_CALLBACK_URI)
+    expect(OIDC_NATIVE_CALLBACK_URI).toBe("cn.cognia.app:/auth/callback")
+    // Logto keeps the callback every self-hosted native application registered.
+    expect(nativeCallbackUriFor("logto")).toBe(LOGTO_NATIVE_CALLBACK_URI)
+    expect(nativeCallbackUriFor(undefined)).toBe("cognia://logto/callback")
   })
 })
 

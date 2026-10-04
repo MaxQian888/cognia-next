@@ -119911,6 +119911,15 @@ components:
                   - web-popup
                   - native-loopback
                   - deep-link
+            issuerKind:
+              type: string
+              enum:
+                - logto
+                - oidc
+              description: What kind of issuer `issuer` is. Absent means logto. A client sends Logto's own parameters (prompt=consent,
+                direct_sign_in, the organizations scope, organization_id) and the native callback
+                cognia://logto/callback only to logto; an oidc issuer gets the RFC 8252 callback
+                cn.cognia.app:/auth/callback. Version 4.
         collaboration:
           type: object
           description: Present when the deployment enrols accounts on a collaboration server. Version 2.

@@ -161,6 +161,13 @@ spec:
                   name: cognia-config
                   key: logtoSocialProviders
                   optional: true
+            # `logto` (default) or `oidc` for a non-Logto issuer (ADR-0215 §2).
+            - name: COGNIA_OIDC_ISSUER_KIND
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: oidcIssuerKind
+                  optional: true
             # The collaboration server (internal and as a browser reaches it)
             # and the web app's origin, announced by /api/auth/config.
             - name: COGNIA_COLLAB_URL

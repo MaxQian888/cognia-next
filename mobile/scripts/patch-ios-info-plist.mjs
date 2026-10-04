@@ -51,6 +51,8 @@ const PLIST_PATH = resolve(REPO_ROOT, "mobile/ios/App/App/Info.plist")
 
 const SERVICE_TYPE = "_cognia._tcp"
 const URL_SCHEME = "cognia"
+/** The RFC 8252 reverse-domain scheme of the OIDC sign-in callback (ADR-0215). */
+const OIDC_CALLBACK_SCHEME = "cn.cognia.app"
 
 /**
  * Usage-description keys required by the Capacitor plugins the app ships
@@ -141,17 +143,31 @@ export function patchPlist(xml) {
     changed = true
   }
 
-  // `cognia://` deep-link scheme (OAuth callbacks, share-target, pair QR).
-  // Only inserted when no CFBundleURLTypes block exists at all — merging
-  // into a hand-maintained block is riskier than leaving it alone.
+  // `cognia://` deep-link scheme (OAuth callbacks, share-target, pair QR) and
+  // the `cn.cognia.app:` OIDC callback scheme. The block is inserted only when
+  // no CFBundleURLTypes block exists at all — merging into a hand-maintained
+  // block is riskier than leaving it alone. Our own `app.cognia.deeplink`
+  // entry is the one exception: it gains the OIDC scheme when it lacks it.
   if (!/CFBundleURLTypes/.test(out)) {
     const insert =
       `\t<key>CFBundleURLTypes</key>\n\t<array>\n\t\t<dict>\n` +
       `\t\t\t<key>CFBundleURLName</key>\n\t\t\t<string>app.cognia.deeplink</string>\n` +
       `\t\t\t<key>CFBundleURLSchemes</key>\n\t\t\t<array>\n` +
-      `\t\t\t\t<string>${URL_SCHEME}</string>\n\t\t\t</array>\n\t\t</dict>\n\t</array>\n`
+      `\t\t\t\t<string>${URL_SCHEME}</string>\n` +
+      `\t\t\t\t<string>${OIDC_CALLBACK_SCHEME}</string>\n\t\t\t</array>\n\t\t</dict>\n\t</array>\n`
     out = insertBeforeClosingDict(out, insert)
     changed = true
+  } else if (!out.includes(`<string>${OIDC_CALLBACK_SCHEME}</string>`)) {
+    const ownEntry =
+      /(<string>app\.cognia\.deeplink<\/string>\s*<key>CFBundleURLSchemes<\/key>\s*<array>)(\s*)(<string>cognia<\/string>)/u
+    if (ownEntry.test(out)) {
+      out = out.replace(
+        ownEntry,
+        (_match, head, indent, scheme) =>
+          `${head}${indent}${scheme}${indent}<string>${OIDC_CALLBACK_SCHEME}</string>`
+      )
+      changed = true
+    }
   }
 
   if (!/NSAppTransportSecurity/.test(out)) {

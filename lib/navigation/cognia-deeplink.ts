@@ -1,4 +1,7 @@
-/** Platform-neutral parser for every first-party `cognia://` route. */
+/**
+ * Platform-neutral parser for every first-party `cognia://` route, plus the
+ * one route on the reverse-domain scheme (`cn.cognia.app:/auth/callback`).
+ */
 export type CogniaDeeplinkRoute =
   | {
       kind: "oauth_callback"
@@ -9,8 +12,10 @@ export type CogniaDeeplinkRoute =
     }
   | {
       /**
-       * The Logto authorization response landing on the native application
-       * (`cognia://logto/callback?code=…&state=…`). Consumed by the cloud
+       * The authorization response landing on the native application:
+       * `cognia://logto/callback?code=…&state=…` from a Logto issuer, or
+       * `cn.cognia.app:/auth/callback?…` from any other OIDC issuer
+       * (`nativeCallbackUriFor` in `lib/logto/client.ts`). Consumed by the cloud
        * sign-in gate on the desktop and by the Capacitor drivers; carries the
        * raw parameters and no verdict, because only the flow that minted the
        * `state` can validate it.
@@ -54,6 +59,25 @@ export type CogniaDeeplinkRoute =
   | { kind: "open_workspace"; workspacePath?: string; raw: string }
   | { kind: "unknown"; raw: string }
 
+/** The RFC 8252 private-use scheme of `OIDC_NATIVE_CALLBACK_URI`. */
+const OIDC_CALLBACK_PROTOCOL = "cn.cognia.app:"
+
+/**
+ * The reverse-domain scheme carries exactly one route, spelled without an
+ * authority (`cn.cognia.app:/auth/callback`). Anything else on it, including
+ * `cn.cognia.app://auth/callback` where `auth` would be a host, is unknown.
+ */
+function parseOidcCallback(url: URL, raw: string): CogniaDeeplinkRoute {
+  if (url.hostname !== "" || url.pathname !== "/auth/callback") return { kind: "unknown", raw }
+  return {
+    kind: "logto_callback",
+    code: url.searchParams.get("code"),
+    state: url.searchParams.get("state"),
+    error: url.searchParams.get("error"),
+    raw,
+  }
+}
+
 export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
   let url: URL
   try {
@@ -61,6 +85,7 @@ export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
   } catch {
     return { kind: "unknown", raw }
   }
+  if (url.protocol === OIDC_CALLBACK_PROTOCOL) return parseOidcCallback(url, raw)
   if (url.protocol !== "cognia:") return { kind: "unknown", raw }
 
   const host = url.hostname || url.pathname.replace(/^\/+/, "").split("/")[0] || ""

@@ -45,7 +45,11 @@ Logto requires **PostgreSQL 14+** and **Redis**; both are on the `logto` profile
    - **Native app** (desktop + CLI): note the **App ID** (→ client `clientId`).
      Add redirect URIs: the loopback callback `http://127.0.0.1:<port>/callback`
      (the CLI callback server, `cli/src/mcp/oauth-callback-server.ts`) and the
-     deep-link `cognia://logto/callback`.
+     deep-link `cognia://logto/callback`. Also add
+     `cn.cognia.app:/auth/callback`, the RFC 8252 callback the apps send to a
+     non-Logto issuer (ADR-0215 §2); Logto clients do not use it yet, but
+     registering it now means a later switch needs no console change.
+     `pnpm logto:seed` registers both.
    - **SPA app** (web console): add the web redirect URI, e.g.
      `https://console.example.com/logto/callback`.
    - **M2M apps** (optional): one per internal service (brain ↔ share ↔
@@ -186,6 +190,14 @@ hands back to the running app (the desktop also accepts the pasted address
 when the browser never comes back). All three URIs must be registered on the
 matching Logto application or Logto refuses the authorization request.
 
+**Issuer kind.** `/api/auth/config` announces `oidc.issuerKind` (config
+version 4) from `COGNIA_OIDC_ISSUER_KIND`. Leave it empty or `logto` for a
+Logto issuer. Set `oidc` only for a different, standards-only issuer: the
+apps then send none of Logto's parameters (`prompt=consent`,
+`direct_sign_in`, the organizations scope, `organization_id`) and use the
+native callback `cn.cognia.app:/auth/callback`. Any other value makes the
+endpoint answer 503 rather than guess.
+
 **Which deployment a client asks.** The web app built by `Dockerfile.web`
 asks its own origin. A browser paired through `/pair` asks its paired host.
 The desktop app and the phone know no host until the person names one in
@@ -314,7 +326,7 @@ unrelated Cognia services. Never use `down -v` for this persistent installation.
 | OIDC issuer                  | `http://logto.localhost:3301/oidc`                                         |
 | Cognia API resource          | `http://localhost:27890/api`                                               |
 | Web callback                 | `http://localhost:3000/logto/callback`                                     |
-| Native callback              | `cognia://logto/callback`                                                  |
+| Native callback              | `cognia://logto/callback` (plus `cn.cognia.app:/auth/callback`, unused)    |
 | CLI callback                 | `http://127.0.0.1:9321/callback` (Native loopback port variation verified) |
 | Admin credentials            | `~/.config/cognia/logto-local/admin.json`                                  |
 | Management credentials       | `~/.config/cognia/logto-local/management.json`                             |
@@ -382,7 +394,8 @@ refresh-token issuance/rotation, and omits secret values from dry-run logs.
 The seeder preserves existing redirect URIs and unrelated client metadata.
 
 `lib/logto/client.ts` now sends **`prompt=consent`** together with
-`offline_access`. Without consent, the live Native flow returned no refresh
+`offline_access` to a Logto issuer (every deployment that does not set
+`COGNIA_OIDC_ISSUER_KIND=oidc`). Without consent, the live Native flow returned no refresh
 token, preventing Cognia from adopting an organization. The SPA refresh-token
 setting alone does not fix Native clients.
 

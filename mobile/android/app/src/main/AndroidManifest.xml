@@ -35,6 +35,15 @@
                 <data android:scheme="cognia" />
             </intent-filter>
 
+            <!-- RFC 8252 reverse-domain scheme: the OIDC sign-in callback
+                 cn.cognia.app:/auth/callback for non-Logto issuers (ADR-0215). -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="cn.cognia.app" />
+            </intent-filter>
+
             <!-- Share target: text/URL from the system share sheet (Wave 3).
                  MainActivity rewrites ACTION_SEND into a cognia://share deep
                  link (Capacitor's App plugin only surfaces data-URI intents).

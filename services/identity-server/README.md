@@ -31,8 +31,8 @@ node scripts/pkce-flow.mjs http://localhost:8787/api/auth <client_id> https://sy
 
 ## Findings that change the plan
 
-1. **Native callback scheme.** Better Auth enforces RFC 8252 §7.1: `cognia://auth/callback` (ADR-0215) and today's `cognia://logto/callback` are rejected. Use a reverse-domain private-use scheme without authority, e.g. `cn.cognia.app:/auth/callback`, registered in Tauri and Capacitor.
-2. **`prompt=consent` must become issuer-specific** in the client (Logto only).
+1. **Native callback scheme.** Better Auth enforces RFC 8252 §7.1: `cognia://auth/callback` (ADR-0215) and today's `cognia://logto/callback` are rejected. Use a reverse-domain private-use scheme without authority, e.g. `cn.cognia.app:/auth/callback`, registered in Tauri and Capacitor. _Done: the apps register it and send it to non-Logto issuers._
+2. **`prompt=consent` must become issuer-specific** in the client (Logto only). _Done: `/api/auth/config` announces `oidc.issuerKind`; set `COGNIA_OIDC_ISSUER_KIND=oidc` for this Worker._
 3. **Provider tokens.** Better Auth stores the Feishu login access token in D1 in clear by default and has no switch to stop it. A `databaseHooks.account` before-hook now drops provider tokens (verified on create and update); the issuer keeps only the `(tenant_key, union_id)` key.
 4. **Resources and clients need explicit seeding.** Per-client resource linkage is enforced (`adminLinkClientResource`); resource seeding defaults to `insertOnly`, so set `resourceSeedMode: "overwrite"`; scopes not in a resource's `allowedScopes` are silently dropped (no `id_token` if `openid` is missing). Managed clients must be owned by a session, so the official client is seeded from an operator account.
 5. **Lock down client management.** Without `clientPrivileges` / `resourcePrivileges`, any signed-in user can create OAuth clients.

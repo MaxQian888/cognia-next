@@ -6,6 +6,7 @@ import { requireJwtPayload } from "@/lib/security/jwt-payload"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 import { parseProblem } from "./companion-problem"
 import { recordHostContract } from "./companion-contract"
+import { OIDC_ISSUER_KINDS, type OidcIssuerKind } from "@/lib/logto/client"
 
 /** A social sign-in method the deployment enabled at Logto. */
 export interface CompanionAuthSocialProvider {
@@ -37,6 +38,11 @@ export interface CompanionAuthConfig {
     socialProviders?: CompanionAuthSocialProvider[]
     /** Version 2. */
     callbackModes?: CompanionAuthCallbackMode[]
+    /**
+     * Version 4. What kind of issuer `issuer` is. Absent means `logto`, which
+     * every earlier deployment is; read it through `authConfigIssuerKind`.
+     */
+    issuerKind?: OidcIssuerKind
   }
   signaling: {
     url: string
@@ -52,6 +58,18 @@ export interface CompanionAuthConfig {
      */
     webOrigin?: string
   }
+}
+
+/**
+ * The issuer kind a config announces. Anything other than a known kind reads
+ * as `logto`: the default keeps Logto's parameters flowing to the deployments
+ * that need them, and a generic issuer only has to say so once.
+ */
+export function authConfigIssuerKind(config: Pick<CompanionAuthConfig, "oidc">): OidcIssuerKind {
+  const raw = config.oidc?.issuerKind
+  return typeof raw === "string" && (OIDC_ISSUER_KINDS as readonly string[]).includes(raw)
+    ? (raw as OidcIssuerKind)
+    : "logto"
 }
 
 /**

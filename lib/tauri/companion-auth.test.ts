@@ -1,6 +1,7 @@
 import { decodePairPayload, encodePairPayload } from "@/lib/qr/pair-payload"
 import {
   authConfigCollaborationServiceUrl,
+  authConfigIssuerKind,
   authConfigWebOrigin,
   authConfigSocialProviders,
   clearCompanionAccessTokens,
@@ -609,5 +610,21 @@ describe("auth config version 2 (additive discovery)", () => {
     expect(config.configVersion).toBeUndefined()
     expect(authConfigSocialProviders(config)).toEqual([])
     expect(authConfigCollaborationServiceUrl(config)).toBeNull()
+    // Every deployment before version 4 is Logto.
+    expect(authConfigIssuerKind(config)).toBe("logto")
+  })
+})
+
+describe("auth config version 4 (issuer kind)", () => {
+  const oidc = { issuer: "i", audience: "a", webClientId: "w", scopes: [] }
+
+  it("reads a generic OIDC issuer and defaults everything else to Logto", () => {
+    expect(authConfigIssuerKind({ oidc: { ...oidc, issuerKind: "oidc" } })).toBe("oidc")
+    expect(authConfigIssuerKind({ oidc: { ...oidc, issuerKind: "logto" } })).toBe("logto")
+    expect(authConfigIssuerKind({ oidc })).toBe("logto")
+    expect(authConfigIssuerKind({ oidc: undefined })).toBe("logto")
+    // A proxy or mock with an unknown value keeps Logto's parameters flowing.
+    expect(authConfigIssuerKind({ oidc: { ...oidc, issuerKind: "OIDC" as never } })).toBe("logto")
+    expect(authConfigIssuerKind({ oidc: { ...oidc, issuerKind: 4 as never } })).toBe("logto")
   })
 })

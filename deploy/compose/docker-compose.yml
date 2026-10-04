@@ -201,6 +201,8 @@ services:
       # targets /api/auth/config announces, e.g. `github,feishu`.
       COGNIA_LOGTO_NATIVE_CLIENT_ID: ${COGNIA_LOGTO_NATIVE_CLIENT_ID:-}
       COGNIA_LOGTO_SOCIAL_PROVIDERS: ${COGNIA_LOGTO_SOCIAL_PROVIDERS:-}
+      # `logto` (default) or `oidc` for a non-Logto issuer (ADR-0215 §2).
+      COGNIA_OIDC_ISSUER_KIND: ${COGNIA_OIDC_ISSUER_KIND:-}
       # ── Lark / Feishu entry surfaces (ADR-0091) — OFF unless PUBLIC_BASE is
       # set. It is the origin Feishu redirects back to, so it must match the
       # 重定向 URL registered in the developer console

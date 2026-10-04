@@ -55,6 +55,7 @@ import {
 import { saveLogtoSession } from "@/lib/logto/session-store"
 import { signInToLogto } from "@/lib/logto/app-session"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
+import { authConfigIssuerKind } from "@/lib/tauri/companion-auth"
 
 import type { ReadyDeployment } from "./deployment-discovery"
 
@@ -143,13 +144,18 @@ export function logtoConfigFor(
   if (!oidc) throw new Error("the deployment announces no OIDC configuration")
   const clientId =
     options.clientKind === "native" && oidc.nativeClientId ? oidc.nativeClientId : oidc.webClientId
-  const scopes = Array.from(new Set([...(oidc.scopes ?? []), ORGANIZATIONS_SCOPE]))
+  const issuerKind = authConfigIssuerKind(deployment.config)
+  // Organizations are a Logto concept; a generic issuer would refuse the scope.
+  const scopes = Array.from(
+    new Set([...(oidc.scopes ?? []), ...(issuerKind === "logto" ? [ORGANIZATIONS_SCOPE] : [])])
+  )
   return {
     issuer: oidc.issuer,
     clientId,
     redirectUri: options.redirectUri,
     resource: oidc.audience,
     scopes,
+    issuerKind,
     ...(options.directSignIn ? { directSignIn: options.directSignIn } : {}),
     ...(options.organizationId ? { organizationId: options.organizationId } : {}),
   }

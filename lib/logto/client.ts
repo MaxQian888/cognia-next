@@ -11,6 +11,16 @@
  * `aud` = the API resource (and, for org logins, carries an `organization_id`
  * claim). Those are exactly what the Rust gateway validates
  * (`crates/cognia-companion-security/src/oidc.rs`).
+ *
+ * # Not only Logto (ADR-0215 §2)
+ *
+ * Everything above is plain OIDC except a handful of Logto parameters:
+ * `prompt=consent`, `direct_sign_in`, the organizations scope and
+ * `organization_id`. They are sent only when the issuer is Logto
+ * (`issuerKind`, absent meaning Logto, so every existing deployment behaves as
+ * before). A generic issuer such as the official Better Auth account gets none
+ * of them: Better Auth answers `prompt=consent` with a consent page even for
+ * the first-party client and issues the refresh token without it.
  */
 
 import { runPkceAuthFlow } from "@/lib/plugin/auth/auth-pkce-flow"
@@ -19,6 +29,15 @@ import { discoverLogtoEndpoints, type LogtoEndpoints } from "./discovery"
 
 /** Base OIDC scopes: `openid` for an ID token, `offline_access` for a refresh token. */
 const BASE_SCOPES = ["openid", "offline_access"] as const
+
+/**
+ * What kind of issuer a deployment signs people in with. `logto` is the
+ * self-hosted reference and the default; `oidc` is any other standards-only
+ * issuer (ADR-0215's official account on Better Auth).
+ */
+export type OidcIssuerKind = "logto" | "oidc"
+
+export const OIDC_ISSUER_KINDS: readonly OidcIssuerKind[] = ["logto", "oidc"]
 
 export interface LogtoClientConfig {
   /** Logto OIDC issuer, e.g. `https://logto.example.com/oidc`. */
@@ -42,6 +61,8 @@ export interface LogtoClientConfig {
    * is missing or disabled, Logto falls back to its standard page.
    */
   directSignIn?: string
+  /** Absent means `logto`. Decides which Logto-only parameters are sent. */
+  issuerKind?: OidcIssuerKind
 }
 
 /** Logto only mints organization tokens for a session that asked for this. */
@@ -52,7 +73,27 @@ export const ORGANIZATIONS_SCOPE = "urn:logto:scope:organizations"
  * and the Capacitor shells both land here, and each resolves the wait from
  * the deep link its OS delivers.
  */
-export const NATIVE_CALLBACK_URI = "cognia://logto/callback"
+export const LOGTO_NATIVE_CALLBACK_URI = "cognia://logto/callback"
+
+/**
+ * The native redirect URI for every other issuer: an RFC 8252 §7.1 private-use
+ * URI, a reverse-domain scheme (`cognia.cn` reversed) with no authority.
+ * Better Auth refuses `cognia://…` callbacks. Both schemes are registered with
+ * the OS and parsed by `lib/navigation/cognia-deeplink.ts`.
+ */
+export const OIDC_NATIVE_CALLBACK_URI = "cn.cognia.app:/auth/callback"
+
+/**
+ * The native redirect URI to send for an issuer. Logto keeps its registered
+ * callback so no self-hosted deployment has to change its application.
+ */
+export function nativeCallbackUriFor(issuerKind: OidcIssuerKind | undefined): string {
+  return issuerKind === "oidc" ? OIDC_NATIVE_CALLBACK_URI : LOGTO_NATIVE_CALLBACK_URI
+}
+
+function isLogto(config: Pick<LogtoClientConfig, "issuerKind">): boolean {
+  return (config.issuerKind ?? "logto") === "logto"
+}
 
 export interface LogtoDrivers {
   /** Open the authorize URL (window.open / shell open / CLI browser). */
@@ -173,8 +214,10 @@ export function isLogtoRefreshError(error: unknown): error is LogtoRefreshError 
   return error instanceof LogtoRefreshError
 }
 
-function mergeScopes(extra?: string[]): string[] {
+function mergeScopes(extra: string[] | undefined, logto: boolean): string[] {
   const set = new Set<string>([...BASE_SCOPES, ...(extra ?? [])])
+  // A scope only Logto defines is an `invalid_scope` anywhere else.
+  if (!logto) set.delete(ORGANIZATIONS_SCOPE)
   return [...set]
 }
 
@@ -189,14 +232,18 @@ export async function loginToLogto(
 ): Promise<LogtoSession> {
   const fetchImpl = drivers.fetchImpl ?? fetch
   const endpoints = await discoverLogtoEndpoints(config.issuer, fetchImpl)
-  const scopes = mergeScopes(config.scopes)
+  const logto = isLogto(config)
+  const scopes = mergeScopes(config.scopes, logto)
 
   const extraTokenParams: Record<string, string> = { resource: config.resource }
-  if (config.organizationId) extraTokenParams.organization_id = config.organizationId
-  // OIDC requires consent for offline_access; without it Logto drops the
-  // scope and Native clients receive no refresh token for organization adoption.
-  const extraAuthParams: Record<string, string> = { resource: config.resource, prompt: "consent" }
-  if (config.directSignIn) extraAuthParams.direct_sign_in = config.directSignIn
+  const extraAuthParams: Record<string, string> = { resource: config.resource }
+  if (logto) {
+    if (config.organizationId) extraTokenParams.organization_id = config.organizationId
+    // OIDC requires consent for offline_access; without it Logto drops the
+    // scope and Native clients receive no refresh token for organization adoption.
+    extraAuthParams.prompt = "consent"
+    if (config.directSignIn) extraAuthParams.direct_sign_in = config.directSignIn
+  }
 
   const result = await runPkceAuthFlow({
     authorizeUrl: endpoints.authorizationEndpoint,
@@ -215,7 +262,7 @@ export async function loginToLogto(
     issuer: endpoints.issuer,
     clientId: config.clientId,
     resource: config.resource,
-    organizationId: config.organizationId,
+    organizationId: logto ? config.organizationId : undefined,
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
     idToken: typeof result.raw.id_token === "string" ? result.raw.id_token : undefined,
@@ -251,7 +298,7 @@ export async function refreshLogtoToken(
     client_id: config.clientId,
     resource: config.resource,
   })
-  if (config.organizationId) body.set("organization_id", config.organizationId)
+  if (config.organizationId && isLogto(config)) body.set("organization_id", config.organizationId)
 
   let res: Response
   try {
@@ -290,7 +337,7 @@ export async function refreshLogtoToken(
     issuer: endpoints.issuer,
     clientId: config.clientId,
     resource: config.resource,
-    organizationId: config.organizationId,
+    organizationId: isLogto(config) ? config.organizationId : undefined,
     accessToken,
     refreshToken: typeof json.refresh_token === "string" ? json.refresh_token : refreshToken,
     idToken: typeof json.id_token === "string" ? json.id_token : undefined,
