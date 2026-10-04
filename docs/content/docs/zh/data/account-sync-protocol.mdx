@@ -1,0 +1,249 @@
+---
+title: 账号同步协议 v1
+description: 官方账号端到端加密同步（ADR-0215）的线格式：P-256 设备密钥；按纪元的同步密钥用 HPKE 密封给每台设备和一个恢复公钥；每个账号一个 Durable Object，保存签名并填充的操作日志；客户端加密的快照和大文件；按字段 HLC 合并；租约、计数器和账号生命周期。
+---
+
+# 账号同步协议 v1
+
+<Status variant="planned" />
+
+[ADR-0215](../adr/0215-one-person-one-encrypted-sync-space-many-writable-hosts) 的规范性配套文档。
+ADR 记录"为什么"，本页记录"具体字节"。只要 §0 的不变量成立，本页可以细化而无需修订 ADR。
+每次变更都要提升 `protocolVersion` 或只新增可选字段。本页内容尚未实现。
+
+## 0. 不变量（由 ADR 固定）
+
+1. 服务器从不接收明文的行内容、字段名、表名、资源名或密钥值。
+2. 服务器从不持有能解密用户数据的密钥。
+3. 每个操作都由一台已加入、未被吊销的设备签名；设备登记表本身是一条由客户端校验的签名链。
+4. 合并只在客户端进行。服务器负责排序、去重、存储和转发。
+5. 一个账号 ⇄ 一个 Durable Object。在每台设备上，一个账号 ⇄ 最多一个本地档案。
+
+## 1. 原语
+
+所有原语在各端的 WebCrypto 中都可用，Rust 侧也都有仓库已在使用的 crate（`p256`、`hkdf`、`aes-gcm`）。
+
+| 用途 | 原语 |
+| ---- | ---- |
+| 设备签名 | ECDSA P-256，SHA-256，IEEE P1363 签名（64 字节） |
+| 把密钥密封给设备 | HPKE base 模式（RFC 9180）：DHKEM(P-256, HKDF-SHA256)、HKDF-SHA256、AES-256-GCM |
+| 对称加密 | AES-256-GCM，96 位随机 nonce |
+| 密钥派生 | HKDF-SHA256 |
+| 哈希 | SHA-256 |
+| 线上的二进制 | base64url，无填充 |
+
+下文的 `label(x)` 表示 ASCII 字符串 `cognia-sync/v1/x`。
+
+## 2. 标识符
+
+| ID | 形式 |
+| -- | ---- |
+| `accountKey` | `base64url(SHA-256(iss ‖ 0x00 ‖ sub))`。Durable Object 为 `idFromName(accountKey)`。不绑定签发方：官方签发方和自托管 Logto 都适用。 |
+| `deviceId` | `dev_` + 26 字符的 UUIDv7（Crockford base32） |
+| `epoch` | 无符号整数，从 1 开始 |
+| `serverSeq` | 无符号 53 位整数，由 DO 分配，每个账号内无间断 |
+| `deviceSeq` | 无符号整数，每台设备独立，从 1 开始，无间断 |
+| `opId` | `(deviceId, deviceSeq)` |
+| 行 ID（在密文内） | 新行用 UUIDv7；已有 ID 原样保留 |
+
+## 3. 密钥
+
+### 3.1 设备密钥
+
+每台设备生成以下密钥（壳支持时设为不可导出）：
+
+- `signKey`：ECDSA P-256。
+- `encKey`：ECDH P-256（HPKE 接收方密钥）。
+
+它们与伴随配对用的 P-256 ES256 密钥（ADR-0021/0059）分开，因此吊销同步权限不会影响配对，反之亦然。
+
+### 3.2 恢复密钥
+
+- 128 位随机数，显示为 26 个 Crockford base32 字符，四个一组（`XXXX-XXXX-…-XX`），与现有恢复密钥的显示方式一致。
+- `recoverySeed = HKDF(ikm = recoveryKey, salt = accountKey, info = label(recovery))`，32 字节。
+- `recoveryEncKey` 是通过 RFC 9180 `DeriveKeyPair` 从 `recoverySeed` 派生的 P-256 私钥。只上传 `recoveryEncPub`。
+- 由于密封使用公钥，任何设备不需要知道恢复密钥就能把新纪元密钥封装给恢复公钥。
+
+### 3.3 纪元密钥
+
+- `SK_e`：纪元 `e` 的随机 256 位同步密钥。
+- 服务器上只存密封后的形式：每台活跃设备（`encPub`）一个 HPKE 信封，`recoveryEncPub` 一个。`info = label(epoch) ‖ accountKey ‖ e`。
+- 密钥链：纪元 `e+1` 开始时，`SK_e` 用 `SK_{e+1}` 做 AES-GCM 包裹（`AAD = label(chain) ‖ accountKey ‖ e`）后存储。因此持有当前密钥即可解开全部历史。
+- 子密钥：`HKDF(SK_e, info = label(<用途>))`，用途包括 `op`、`snap`、`blob-id`、`res-id`、`name`（设备显示名）。
+- 在本地，设备把密钥链用其本地档案保险库主密钥（`lib/runtime/browser-vault.ts`）包裹后作为保险库机密保存。
+
+### 3.4 纪元轮换的触发条件
+
+- 吊销一台设备。
+- 重新生成恢复密钥（删除旧的 `recoveryEncPub` 信封）。
+- 用户手动"轮换密钥"。
+
+## 4. 设备登记表
+
+每条记录都带签名：
+
+```
+DeviceRecord {
+  deviceId, signPub, encPub,           // SPKI DER, base64url
+  platform: "desktop"|"mobile"|"web"|"headless",
+  nameCt,                              // display name, AES-GCM under name subkey
+  status: "active"|"revoked",
+  addedAt, addedBy,                    // addedBy = approving deviceId, or "self" for the genesis device, or "recovery"
+  revokedAt?, revokedBy?, wipe?: bool,
+  sig                                  // by addedBy (or revokedBy) over canonical(record minus sig)
+}
+```
+
+- 创世：第一台设备为自己的记录签名。客户端在加入时固定创世设备的 `signPub`（在设备控制台显示为指纹）。
+- 客户端只接受满足以下任一条件的记录：签名者在签名时是已接受的活跃设备；签名者是固定的创世设备；`addedBy = recovery` 且附带恢复证明（§5.3）。服务器无法塞入设备。
+
+## 5. 加入
+
+### 5.1 创世（第一台设备）
+
+1. 生成设备密钥、恢复密钥和 `SK_1`。
+2. 恢复确认门（ADR Q13）：用户重新输入其中 4 个位置，或下载恢复工具包；完成前禁止上传。
+3. `POST /v1/enroll/genesis`，携带创世记录、密封的 `SK_1` 信封（本机 + 恢复）和 `recoveryEncPub`。账号已有创世设备时拒绝。
+4. 初始数据：设备在 `serverSeq = 0` 处写一个快照（§8），而不是为每一行写一个操作。
+
+### 5.2 由已有设备批准
+
+1. 新设备：`POST /v1/enroll/requests` `{deviceId, signPub, encPub, platform, nonce}` → `{requestId, expiresAt}`（15 分钟）。
+2. DO 通过连接通知所有活跃设备。
+3. 双方都显示 `SAS = decimal(HKDF(SHA-256(requestId ‖ signPub ‖ encPub ‖ nonce), info = label(sas)))[0..6]`。
+4. 用户确认 SAS 一致后，批准方提交签名的 `DeviceRecord`，以及一个把当前 `SK_e` 密封给新 `encPub` 的 HPKE 信封。
+5. 过期或被拒绝的请求会被删除。
+
+### 5.3 恢复
+
+1. 新设备从输入的恢复密钥派生 `recoveryEncKey`，取回恢复信封，打开 `SK_e`。
+2. 恢复证明：`HMAC(HKDF(SK_e, info = label(recovery-proof)), canonical(record))`。
+3. 提交自己的记录，`addedBy = "recovery"`，并附上证明；客户端用 `SK_e` 校验。
+4. 随后轮换纪元（使用恢复密钥意味着恢复密钥已暴露在新设备上），并提示重新生成恢复密钥。
+
+### 5.4 带着本地数据加入（ADR Q5）
+
+加入后，客户端先算出预览（双方每张表的行数、有差异的设置键），生成一个 ADR-0001 备份包，然后执行用户的选择：
+
+- **合并**：本地行转为操作；缺少的字段时钟合成为 `hlc = (row.updatedAt ?? row.createdAt ?? now, 0, deviceId)`；
+- **丢弃**：用最新快照加后续操作替换本地数据库。
+
+## 6. 会话
+
+1. `POST /v1/session`，带 `Authorization: Bearer <OIDC access token>`（aud = 同步 API）→ `{challenge}`。
+2. `POST /v1/session` `{deviceId, challenge, sig}` → `{sessionToken, expiresIn: 900}`。已吊销设备 → `403 {code: "device_revoked", wipe}`。
+3. WebSocket `GET /v1/socket?ticket=…`（会话签发的一次性票据），可休眠。WebSocket 失败时退回长轮询 `GET /v1/ops?after=<serverSeq>&wait=25`（中国大陆风险，见 ADR 风险部分）。
+
+## 7. 操作
+
+### 7.1 信封
+
+```
+Op {
+  deviceId, deviceSeq,
+  hlc: { ms, c },            // ms: 48-bit wall clock, c: 16-bit counter
+  epoch, schemaVer,
+  cls: "c"|"s"|"k"|"x"|"a",  // content, settings, secrets, crdt, append-only
+  nonce, ct,                 // ct padded to the next bucket (§7.4)
+  sig
+}
+AAD    = label(op) ‖ accountKey ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
+sigIn  = canonical(Op minus sig)
+```
+
+`canonical(...)` 按声明顺序拼接各字段，每个字段编码为 `u32-be 长度 ‖ 字节`（整数用十进制 ASCII）。表名在 `ct` 内传输，只有粗粒度类别是可见的。
+
+### 7.2 明文载荷
+
+```
+{ t: <table>, id: <rowId>,
+  k: "upsert" | "delete" | "append" | "crdt",
+  f?: { <field>: <value> },     // upsert: fields written by this op
+  y?: <Yjs update bytes>,       // crdt
+  u?: { <field>: <value> }      // unknown fields preserved from newer schema (§9)
+}
+```
+
+### 7.3 推送
+
+`POST /v1/ops` `{ops: Op[]}`（≤ 256 个操作，≤ 1 MiB）。DO 依次：
+
+1. 检查会话设备处于活跃状态，且 `deviceSeq` 紧接其上一个序号（重复 → 确认但不存储；有间断 → `409 seq_gap {expected}`）；
+2. 用登记表中的 `signPub` 校验每个 `sig`；
+3. 分配一段连续的 `serverSeq`；
+4. 把这一批存为**一行 SQL** `{firstSeq, lastSeq, deviceId, bytes}`；
+5. 返回 `{firstSeq, lastSeq}`，并向各连接推送 `{type: "ops", lastSeq}`。
+
+### 7.4 填充
+
+加密前，明文以 `0x80 0x00…` 后缀填充到下一个 PADMÉ 桶，隐藏确切大小。
+
+### 7.5 拉取
+
+`GET /v1/ops?after=<serverSeq>&limit=…` → 按顺序返回批次。如果 `after` 早于压缩下限 → `410 {snapshot: <manifestId>}`。
+
+## 8. 快照
+
+- 只有持有 `compaction` 租约（§11）的设备写快照。
+- 内容：`upToSeq` 处的物化状态（行加每字段时钟），按 4 MiB 分块，每块用 `snap` 子密钥做 AES-GCM，`AAD = label(snap) ‖ accountKey ‖ snapshotId ‖ chunkIndex ‖ chunkCount`。
+- `PUT /v1/snapshots/{snapshotId}/chunks/{i}` 以随机键流式写入大文件存储；`POST /v1/snapshots/{snapshotId}` 登记 `{upToSeq, epoch, schemaVer, chunks: [{key, size, sha256}], sig}`。
+- DO 保留最新两个快照，并删除 `lastSeq < upToSeq − 10 000` 的操作批次。
+- 只有当所有活跃设备确认的 `serverSeq` 都越过墓碑（`isDeleted` 行）后，快照才会丢弃它们。90 天未出现的设备标记为 `stale`，必须从快照重新开始。
+
+## 9. 合并规则（客户端）
+
+- `upsert`：逐字段保留 `(hlc.ms, hlc.c, deviceId)` 更大的值。时钟按行保存在本地附表 `syncFieldClocks`（`[table+rowId] → {field: hlc}`）中，从不写入用户的行。
+- `delete`：以该操作的时钟设置 `isDeleted`；更旧的 upsert 不会让它复活，更新的 upsert 会（显式恢复）。
+- `append`：不存在则插入，从不覆盖（消息）。
+- `crdt`：应用到该行的 Yjs 文档。
+- HLC：发送时 `send = max(local, now)`；接收时最多只采纳到 `now + 5 min`；超出的远端时钟会被存储和应用，但不推进本地时钟（防止时钟偏快的设备永远获胜）。
+- 模式版本差异：客户端遇到 `schemaVer` 大于自身的操作时只存不应用，并提示"更新以查看来自其他设备的修改"。它不认识的字段保存在 `u` 中，下次写该行时原样回写。
+
+## 10. 大文件
+
+- 大文件 ID：`HMAC(blob-id 子密钥, SHA-256(明文))`，可去重且不暴露明文哈希。
+- 每个大文件有自己的随机内容密钥，放在引用它的操作内；内容以 4 MiB 分块做 AES-GCM。
+- `PUT /v1/blobs/{id}`（已存在则 409），`GET /v1/blobs/{id}`。
+- 大文件存储接口：Cloudflare R2 绑定，或任意 S3 兼容端点（自托管，§15）。
+
+## 11. 租约（执行放置）
+
+```
+POST /v1/leases/{resId}/acquire  {ttlMs: 30000}  → {generation, expiresAt} | 409 {holder, expiresAt}
+POST /v1/leases/{resId}/renew    {generation}    → {expiresAt} | 409 lost
+POST /v1/leases/{resId}/release  {generation}
+```
+
+- `resId = HMAC(res-id 子密钥, resourceName)`；资源名（`connector:<id>`、`schedule:<id>`、`session-turn:<id>`、`credential-refresh:<id>`、`compaction`）从不到达服务器。
+- 每 10 秒续约；世代号在每个 `resId` 内单调递增，必须随每次对外操作一起携带，以隔离过期的持有者。
+- 放置在客户端决定：租约过期后，设备在 `rank × 5 s` 后重试，排位依次为无头服务器 → 最近活跃的桌面 → 其他桌面；被固定的资源只由其设备尝试。手机和网页从不获取执行租约。
+- 连不上 DO 的设备在租约本应过期时停止所持资源，从不自行授予。
+
+## 12. 计数器
+
+`POST /v1/counters/{counterId}/next` → `{value}`；`counterId` 与 `resId` 一样是 HMAC。用于议题编号（`issueCounters`）。
+
+## 13. 账号生命周期
+
+| 操作 | 端点 | 效果 |
+| ---- | ---- | ---- |
+| 吊销设备 | `POST /v1/devices/{id}/revoke {wipe}`（签名记录） | 关闭连接；拒绝请求；吊销方轮换纪元 |
+| 移除本设备 | 以 `wipe: true` 自我吊销，然后在本地删除 | |
+| 退出登录 | 无（本地操作） | 保留待发送队列；只在同一个 `accountKey` 下恢复 |
+| 注销账号 | `POST /v1/account/deletion` → `{purgeAt: now + 7 d}`；`DELETE` 撤销 | `purgeAt` 时 DO 闹钟删除 DO 存储、大文件前缀和身份服务中的用户；通知各设备解绑，本地数据保留为普通本地档案 |
+
+## 14. 配额
+
+服务端可调。默认：操作日志加快照软上限 2 GB，大文件软上限 10 GB。超过软上限：大文件上传返回 `413 {code: "quota_blob"}`，操作仍被接受。超过软上限 × 1.25：除删除外一律拒绝（`413 quota_readonly`）。客户端显示用量并提供清理入口。
+
+## 15. 自托管
+
+同一套 Worker 运行在 `workerd` 下，Durable Object 的 SQLite 存在本地磁盘，大文件使用 S3 兼容存储（诊断服务器的技术栈已带有 MinIO）。作为 `deploy/compose` 的一个 profile 打包。在依赖这两点之前，先在第 3 阶段的 spike 中验证。
+
+## 16. 错误码
+
+`device_revoked`、`device_pending`、`seq_gap`、`epoch_stale`（客户端需获取新纪元信封）、`client_too_old`、`snapshot_required`、`quota_blob`、`quota_readonly`、`lease_held`、`lease_lost`、`account_pending_deletion`。
+
+## 17. 测试向量
+
+`packages/sync-protocol/fixtures/`（客户端和 Worker 共用的、不依赖 `@/` 的包）将存放规范编码、签名、HPKE 密封、填充和 HLC 合并的向量。客户端、Worker 以及任何 Rust 使用方都必须通过这些向量。这是防止格式漂移的唯一手段（对照今天三份授权格式实现的情况）。

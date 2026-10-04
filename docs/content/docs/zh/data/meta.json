@@ -6,6 +6,7 @@
     "backup-and-data",
     "search-system",
     "sync-system",
+    "account-sync-protocol",
     "export-system",
     "data-hooks",
     "document-processing"

@@ -209,6 +209,7 @@
     "0211-public-status-measures-the-relay-it-names",
     "0212-the-broker-credential-is-a-file-not-an-environment",
     "0213-conversation-history-has-a-manager-and-the-archive-freezes-place",
-    "0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task"
+    "0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task",
+    "0215-one-person-one-encrypted-sync-space-many-writable-hosts"
   ]
 }

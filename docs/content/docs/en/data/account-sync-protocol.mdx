@@ -1,0 +1,327 @@
+---
+title: Account Sync Protocol v1
+description: Wire format of the official account's end-to-end encrypted sync (ADR-0215) — P-256 device keys, epoch keys sealed with HPKE to each device and to a recovery public key, a signed and padded op log in one Durable Object per account, client-made encrypted snapshots and blobs, per-field HLC merge, leases, counters and the account lifecycle.
+---
+
+# Account Sync Protocol v1
+
+<Status variant="planned" />
+
+Normative companion to [ADR-0215](../adr/0215-one-person-one-encrypted-sync-space-many-writable-hosts).
+The ADR records *why*; this page records *the bytes*. It may be refined
+without amending the ADR as long as the invariants in §0 hold. Every change
+bumps `protocolVersion` or adds an optional field. Nothing here is implemented
+yet.
+
+## 0. Invariants (fixed by the ADR)
+
+1. The server never receives plaintext row content, field names, table names,
+   resource names or secret values.
+2. The server never holds a key that decrypts user data.
+3. Every op is signed by an enrolled, non-revoked device; the registry of
+   devices is itself a signature chain clients verify.
+4. Merge happens on clients only. The server orders, dedupes, stores and
+   relays.
+5. One account ⇄ one Durable Object. One account ⇄ at most one LocalProfile per
+   device.
+
+## 1. Primitives
+
+All primitives are available in WebCrypto on every shell and in the Rust crates
+the repo already uses (`p256`, `hkdf`, `aes-gcm`).
+
+| Use | Primitive |
+| --- | --------- |
+| Device signing | ECDSA P-256, SHA-256, IEEE P1363 signature (64 bytes) |
+| Sealing a key to a device | HPKE base mode (RFC 9180): DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-256-GCM |
+| Symmetric encryption | AES-256-GCM, 96-bit random nonce |
+| Key derivation | HKDF-SHA256 |
+| Hashing | SHA-256 |
+| Binary on the wire | base64url, no padding |
+
+`label(x)` below means the ASCII string `cognia-sync/v1/x`.
+
+## 2. Identifiers
+
+| Id | Form |
+| -- | ---- |
+| `accountKey` | `base64url(SHA-256(iss ‖ 0x00 ‖ sub))`. The DO is `idFromName(accountKey)`. IdP-agnostic: official IdP and self-hosted Logto both work. |
+| `deviceId` | `dev_` + 26-char UUIDv7 (Crockford base32) |
+| `epoch` | unsigned integer, starts at 1 |
+| `serverSeq` | unsigned 53-bit integer, assigned by the DO, gapless per account |
+| `deviceSeq` | unsigned integer, per device, starts at 1, gapless |
+| `opId` | `(deviceId, deviceSeq)` |
+| Row ids (inside ciphertext) | UUIDv7 for new rows; existing ids kept verbatim |
+
+## 3. Keys
+
+### 3.1 Device keys
+
+Each device generates, non-extractable where the shell allows:
+
+- `signKey`: ECDSA P-256.
+- `encKey`: ECDH P-256 (HPKE recipient key).
+
+They are distinct from the companion P-256 ES256 key (ADR-0021/0059) so that
+revoking sync access never breaks pairing and vice versa.
+
+### 3.2 Recovery key
+
+- 128 random bits, displayed as 26 Crockford-base32 characters in groups of
+  four (`XXXX-XXXX-…-XX`), matching the existing recovery-key display.
+- `recoverySeed = HKDF(ikm = recoveryKey, salt = accountKey, info = label(recovery))`, 32 bytes.
+- `recoveryEncKey` = the P-256 private scalar derived from `recoverySeed` by
+  RFC 9180 `DeriveKeyPair`. Only `recoveryEncPub` is ever uploaded.
+- Because sealing uses the public key, any device can wrap a new epoch key for
+  recovery without knowing the recovery key.
+
+### 3.3 Epoch keys
+
+- `SK_e`: random 256-bit sync key for epoch `e`.
+- Stored on the server only sealed: one HPKE envelope per active device
+  (`encPub`) and one for `recoveryEncPub`. `info = label(epoch) ‖ accountKey ‖ e`.
+- Key chain: when epoch `e+1` starts, `SK_e` is AES-GCM-wrapped under
+  `SK_{e+1}` (`AAD = label(chain) ‖ accountKey ‖ e`) and stored. Holding the
+  current key therefore unlocks all history.
+- Subkeys: `HKDF(SK_e, info = label(<purpose>))` for `op`, `snap`, `blob-id`,
+  `res-id`, `name` (device display names).
+- Locally, a device keeps the key chain wrapped under its LocalProfile vault
+  master key (`lib/runtime/browser-vault.ts`) as a vault secret.
+
+### 3.4 Epoch rotation triggers
+
+- A device is revoked.
+- The recovery key is regenerated (old `recoveryEncPub` envelope deleted).
+- Explicit "rotate keys" by the user.
+
+## 4. Device registry
+
+Each entry is a signed record:
+
+```
+DeviceRecord {
+  deviceId, signPub, encPub,           // SPKI DER, base64url
+  platform: "desktop"|"mobile"|"web"|"headless",
+  nameCt,                              // display name, AES-GCM under name subkey
+  status: "active"|"revoked",
+  addedAt, addedBy,                    // addedBy = approving deviceId, or "self" for the genesis device, or "recovery"
+  revokedAt?, revokedBy?, wipe?: bool,
+  sig                                  // by addedBy (or revokedBy) over canonical(record minus sig)
+}
+```
+
+- Genesis: the first device signs its own record. Clients pin the genesis
+  `signPub` at enrollment (shown as a fingerprint in the device console).
+- A client accepts a record only if its signer is an accepted active device
+  at the time of signing, or it is the pinned genesis, or `addedBy = recovery`
+  and the record carries a recovery proof (§5.3). The server cannot inject a
+  device.
+
+## 5. Enrollment
+
+### 5.1 Genesis (first device)
+
+1. Generate device keys, recovery key, `SK_1`.
+2. Recovery confirmation gate (ADR Q13): the user retypes four positions or
+   downloads the recovery kit; upload is blocked until done.
+3. `POST /v1/enroll/genesis` with the genesis record, sealed `SK_1` envelopes
+   (self + recovery), `recoveryEncPub`. Rejected if the account already has a
+   genesis.
+4. Initial data: the device writes a snapshot at `serverSeq = 0` (§8) rather
+   than one op per existing row.
+
+### 5.2 Approval by an existing device
+
+1. New device: `POST /v1/enroll/requests` `{deviceId, signPub, encPub, platform, nonce}` → `{requestId, expiresAt}` (15 min).
+2. The DO notifies active devices over their sockets.
+3. Both sides display `SAS = decimal(HKDF(SHA-256(requestId ‖ signPub ‖ encPub ‖ nonce), info = label(sas)))[0..6]`.
+4. The approver, after the user confirms the SAS matches, posts the signed
+   `DeviceRecord` and an HPKE envelope of the current `SK_e` to the new
+   `encPub`.
+5. Expired or denied requests are deleted.
+
+### 5.3 Recovery
+
+1. New device derives `recoveryEncKey` from the typed recovery key, fetches the
+   recovery envelope, opens `SK_e`.
+2. Recovery proof: `HMAC(HKDF(SK_e, info = label(recovery-proof)), canonical(record))`.
+3. Posts its own record with `addedBy = "recovery"` plus the proof; clients
+   verify it with `SK_e`.
+4. Then rotates the epoch (a recovery use implies the recovery key was exposed
+   on a new device) and offers to regenerate the recovery key.
+
+### 5.4 Joining with existing local data (ADR Q5)
+
+After enrollment the client computes a preview (rows per table on each side,
+settings keys that differ), makes an ADR-0001 backup package, and applies the
+user's choice:
+
+- **merge**: local rows become ops; missing field clocks are synthesized as
+  `hlc = (row.updatedAt ?? row.createdAt ?? now, 0, deviceId)`;
+- **discard**: the local database is replaced from the latest snapshot + ops.
+
+## 6. Sessions
+
+1. `POST /v1/session` with `Authorization: Bearer <OIDC access token>` (aud =
+   sync API) → `{challenge}`.
+2. `POST /v1/session` `{deviceId, challenge, sig}` → `{sessionToken, expiresIn: 900}`.
+   Revoked device → `403 {code: "device_revoked", wipe}`.
+3. WebSocket `GET /v1/socket?ticket=…` (single-use ticket from the session),
+   hibernatable. Fallback: long-poll `GET /v1/ops?after=<serverSeq>&wait=25`
+   when the socket fails (mainland China risk, ADR §Risks).
+
+## 7. Ops
+
+### 7.1 Envelope
+
+```
+Op {
+  deviceId, deviceSeq,
+  hlc: { ms, c },            // ms: 48-bit wall clock, c: 16-bit counter
+  epoch, schemaVer,
+  cls: "c"|"s"|"k"|"x"|"a",  // content, settings, secrets, crdt, append-only
+  nonce, ct,                 // ct padded to the next bucket (§7.4)
+  sig
+}
+AAD    = label(op) ‖ accountKey ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
+sigIn  = canonical(Op minus sig)
+```
+
+`canonical(...)` is the concatenation, in declaration order, of each field as
+`u32-be length ‖ bytes` (integers as decimal ASCII). Table names travel inside
+`ct`; only the coarse class is visible.
+
+### 7.2 Plaintext payload
+
+```
+{ t: <table>, id: <rowId>,
+  k: "upsert" | "delete" | "append" | "crdt",
+  f?: { <field>: <value> },     // upsert: fields written by this op
+  y?: <Yjs update bytes>,       // crdt
+  u?: { <field>: <value> }      // unknown fields preserved from newer schema (§9)
+}
+```
+
+### 7.3 Push
+
+`POST /v1/ops` `{ops: Op[]}` (≤ 256 ops, ≤ 1 MiB). The DO:
+
+1. checks the session device is active and `deviceSeq` continues its last seq
+   (dupes → acknowledged without storing; gaps → `409 seq_gap {expected}`);
+2. verifies each `sig` against the registry `signPub`;
+3. assigns a contiguous `serverSeq` range;
+4. stores the batch as **one SQL row** `{firstSeq, lastSeq, deviceId, bytes}`;
+5. acks `{firstSeq, lastSeq}` and pushes `{type: "ops", lastSeq}` to sockets.
+
+### 7.4 Padding
+
+Plaintext is padded with a `0x80 0x00…` suffix to the next PADMÉ bucket
+before encryption, hiding exact sizes.
+
+### 7.5 Pull
+
+`GET /v1/ops?after=<serverSeq>&limit=…` → batches in order. If `after` is older
+than the compaction floor → `410 {snapshot: <manifestId>}`.
+
+## 8. Snapshots
+
+- Only the holder of the `compaction` lease (§11) writes snapshots.
+- Content: the materialized state at `upToSeq` (rows plus per-field clocks),
+  chunked at 4 MiB, each chunk AES-GCM under the `snap` subkey with
+  `AAD = label(snap) ‖ accountKey ‖ snapshotId ‖ chunkIndex ‖ chunkCount`.
+- `PUT /v1/snapshots/{snapshotId}/chunks/{i}` streams to the blob store under
+  a random key; `POST /v1/snapshots/{snapshotId}` registers
+  `{upToSeq, epoch, schemaVer, chunks: [{key, size, sha256}], sig}`.
+- The DO keeps the two newest snapshots and deletes op batches with
+  `lastSeq < upToSeq − 10 000`.
+- Tombstones (`isDeleted` rows) are dropped from snapshots only when every
+  active device's acknowledged `serverSeq` is past them. A device not seen for
+  90 days is marked `stale` and must restart from a snapshot.
+
+## 9. Merge rules (client)
+
+- `upsert`: per field, keep the value with the greater `(hlc.ms, hlc.c, deviceId)`.
+  Clocks are kept per row in the local side table `syncFieldClocks`
+  (`[table+rowId] → {field: hlc}`), never in the user's row.
+- `delete`: sets `isDeleted` with the op's clock; an older upsert never revives
+  it; a newer upsert does (explicit restore).
+- `append`: insert if absent; never overwritten (messages).
+- `crdt`: applied to the row's Yjs document.
+- HLC: `send = max(local, now)`; on receive, adopt `remote` only up to
+  `now + 5 min`; a remote clock beyond that is stored and applied but does
+  not advance the local clock (prevents a skewed device winning forever).
+- Schema skew: a client stores but does not apply ops with `schemaVer >` its
+  own and shows "update to see changes from your other devices". Fields it
+  does not know are kept in `u` and re-emitted untouched on its next write of
+  that row.
+
+## 10. Blobs
+
+- Blob id: `HMAC(blob-id subkey, SHA-256(plaintext))` → dedupe without revealing
+  the plaintext hash.
+- Each blob has its own random content key, carried inside the op that
+  references it; content AES-GCM in 4 MiB chunks.
+- `PUT /v1/blobs/{id}` (409 if present), `GET /v1/blobs/{id}`.
+- Blob store interface: Cloudflare R2 binding, or any S3-compatible endpoint
+  (self-host, §15).
+
+## 11. Leases (execution placement)
+
+```
+POST /v1/leases/{resId}/acquire  {ttlMs: 30000}  → {generation, expiresAt} | 409 {holder, expiresAt}
+POST /v1/leases/{resId}/renew    {generation}    → {expiresAt} | 409 lost
+POST /v1/leases/{resId}/release  {generation}
+```
+
+- `resId = HMAC(res-id subkey, resourceName)`; resource names (`connector:<id>`,
+  `schedule:<id>`, `session-turn:<id>`, `credential-refresh:<id>`,
+  `compaction`) never reach the server.
+- Renew every 10 s; generation is monotonic per `resId` and must accompany
+  every externally visible effect so stale holders are fenced.
+- Placement is client-side: on expiry, devices retry after
+  `rank × 5 s` where rank follows headless → most recently active desktop →
+  other desktops; a pinned resource is attempted only by its device. Phones and
+  web never acquire execution leases.
+- A device that cannot reach the DO stops a held resource when its lease would
+  have expired and never self-grants.
+
+## 12. Counters
+
+`POST /v1/counters/{counterId}/next` → `{value}`; `counterId` is an HMAC like
+`resId`. Used for human issue numbers (`issueCounters`).
+
+## 13. Account lifecycle
+
+| Action | Endpoint | Effect |
+| ------ | -------- | ------ |
+| Revoke device | `POST /v1/devices/{id}/revoke {wipe}` (signed record) | sockets closed; requests refused; revoker rotates the epoch |
+| Remove this device | self-revoke with `wipe: true`, then local deletion | |
+| Sign out | none (local) | outbox kept; resumes only for the same `accountKey` |
+| Delete account | `POST /v1/account/deletion` → `{purgeAt: now + 7 d}`; `DELETE` cancels | DO alarm at `purgeAt` deletes DO storage, the blob prefix, and the IdP user; devices are told to unbind and keep local data as a plain local profile |
+
+## 14. Quotas
+
+Server-side, tunable. Defaults: op log + snapshots soft 2 GB, blobs soft
+10 GB. Above soft: blob uploads `413 {code: "quota_blob"}`, ops still accepted.
+Above soft × 1.25: everything but deletes refused (`413 quota_readonly`). The
+client shows usage and a cleanup entry.
+
+## 15. Self-host
+
+The same Worker runs under `workerd` with Durable Object SQLite on local disk
+and the S3-compatible blob store (MinIO already ships with the diagnostic
+server stack). Packaged as a profile in `deploy/compose`. Verify both claims in
+the Phase 3 spike before relying on them.
+
+## 16. Error codes
+
+`device_revoked`, `device_pending`, `seq_gap`, `epoch_stale` (client must fetch
+the new epoch envelope), `client_too_old`, `snapshot_required`, `quota_blob`,
+`quota_readonly`, `lease_held`, `lease_lost`, `account_pending_deletion`.
+
+## 17. Test vectors
+
+`packages/sync-protocol/fixtures/` (a zero-`@/` package shared by the client and the Worker) will hold canonical-encoding,
+signature, HPKE-seal, padding and HLC-merge vectors. The client, the
+Worker and any Rust consumer must all pass them. That is the only defense
+against format drift (cf. the three grant-format copies today).
