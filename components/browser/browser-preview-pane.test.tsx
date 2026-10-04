@@ -22,7 +22,8 @@ let mockWebCompanionTarget = true
 jest.mock("@/lib/platform/web-companion", () => ({
   hasWebCompanionTarget: () => mockWebCompanionTarget,
 }))
-jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => false }))
+// The routing plane is real: the pane subscribes to it, so "a desktop drives a
+// remote host" is a transport installed on it (no host attached by default).
 let mockActiveChatSessionId: string | null = "active-chat"
 let mockLoadedUrl: string | null = null
 let mockOwned = true
@@ -48,11 +49,21 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (state: unknown) => unknown) =>
     selector({ activeProjectId: "active-workspace" }),
 }))
-jest.mock("@/components/browser/remote-browser-preview", () => ({
-  RemoteBrowserPreview: (props: Record<string, unknown>) => (
-    <div data-testid="remote-browser-preview" data-props={JSON.stringify(props)} />
-  ),
-}))
+jest.mock("@/components/browser/remote-browser-preview", () => {
+  const { isValidElement } = jest.requireActual<typeof import("react")>("react")
+  return {
+    // On the desktop the pane also hands over its engine switcher, a React
+    // element JSON cannot serialize; it is dropped from the recorded props.
+    RemoteBrowserPreview: (props: Record<string, unknown>) => (
+      <div
+        data-testid="remote-browser-preview"
+        data-props={JSON.stringify(props, (_key, value: unknown) =>
+          isValidElement(value) ? undefined : value
+        )}
+      />
+    ),
+  }
+})
 
 // The recorder panel is a separately-tested unit (browser-recorder-panel.test.tsx)
 // and pulls in the Dexie graph; stub it here and assert only that the pane
@@ -323,6 +334,15 @@ import { listActionableBrowserAnnotations } from "@/lib/db/browser-annotations"
 import { browserClient } from "@/lib/browser/client"
 import { requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { addressDisplayParts, BrowserPreviewPane } from "./browser-preview-pane"
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
+
+const remoteTransport: Transport = {
+  call: jest.fn(async () => undefined) as Transport["call"],
+  subscribe: jest.fn(() => () => undefined) as unknown as Transport["subscribe"],
+}
+
+afterEach(() => __resetRoutingForTests())
 
 const SELECTION: BrowserSelection = {
   paneId: "browser-embed",
@@ -441,6 +461,23 @@ it("keeps the iframe and says why when the cloud browser has nothing to talk to"
   renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
   expect(screen.queryByTestId("remote-browser-preview")).toBeNull()
   expect(screen.getByText("Connect a Cognia server to use the cloud browser")).toBeInTheDocument()
+})
+
+it("follows the desktop attaching to and detaching from a remote host", () => {
+  // Desktop, cloud browser opted in and preferred, but nothing to talk to yet:
+  // the embedded webview serves.
+  mockRemoteBrowserEnabled = true
+  mockWebCompanionTarget = false
+  mockDefaultBackend = "remote"
+  renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+  expect(screen.queryByTestId("remote-browser-preview")).toBeNull()
+
+  // No prop or store change: only the routing plane moves.
+  act(() => setActiveRemoteTransport(remoteTransport))
+  expect(screen.getByTestId("remote-browser-preview")).toBeInTheDocument()
+
+  act(() => setActiveRemoteTransport(null))
+  expect(screen.queryByTestId("remote-browser-preview")).toBeNull()
 })
 
 it("replaces the web iframe with remote Canvas after explicit opt-in", () => {

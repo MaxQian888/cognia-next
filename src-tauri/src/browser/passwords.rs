@@ -786,7 +786,10 @@ fn page_from_pages(pages: &serde_json::Value, page_id: Option<&str>) -> Option<R
                 .unwrap_or(false)
         }),
     }?;
-    let url = page.get("url").and_then(serde_json::Value::as_str)?.to_owned();
+    let url = page
+        .get("url")
+        .and_then(serde_json::Value::as_str)?
+        .to_owned();
     let id = page
         .get("id")
         .and_then(serde_json::Value::as_str)

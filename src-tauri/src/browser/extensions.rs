@@ -326,9 +326,7 @@ pub async fn browser_extension_install_crx(
                 format!("{}: {error}", path.display()),
             )
         })?;
-        if !metadata.is_file()
-            || metadata.len() > MAX_CRX_FILE_BYTES
-        {
+        if !metadata.is_file() || metadata.len() > MAX_CRX_FILE_BYTES {
             return Err(ExtensionError::new(
                 ExtensionErrorCode::CrxInvalid,
                 "the package is not a file or exceeds the size limit",
@@ -461,10 +459,7 @@ pub async fn browser_extensions_check_updates(
 ) -> Result<Vec<ExtensionUpdate>, String> {
     let prodversion = prodversion(&app)?;
     let store = extension_store(&app)?;
-    let updates = store
-        .check_updates(&prodversion)
-        .await
-        .map_err(to_string)?;
+    let updates = store.check_updates(&prodversion).await.map_err(to_string)?;
     crate::browser::local::emit_local_event(&app, changed_event());
     Ok(updates)
 }
@@ -528,7 +523,10 @@ mod tests {
             },
         );
         prune_pending(&mut map, Instant::now());
-        if Instant::now().checked_sub(PENDING_TTL).is_some_and(|limit| old < limit) {
+        if Instant::now()
+            .checked_sub(PENDING_TTL)
+            .is_some_and(|limit| old < limit)
+        {
             assert!(map.is_empty());
         }
         for index in 0..(PENDING_LIMIT + 3) {

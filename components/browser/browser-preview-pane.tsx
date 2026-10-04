@@ -73,8 +73,8 @@ import { primeLocalBrowserRouting, setLocalChromiumInstalled } from "@/lib/brows
 import { localPathFromAddress, serveLocalFile } from "@/lib/browser/local-content-client"
 import type { UserChromeBrowser } from "@/lib/browser/local-client"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { isTauri } from "@/lib/tauri"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
 import { dockPageEngineFor } from "@/lib/artifacts/dock-pages"
@@ -352,11 +352,16 @@ export function BrowserPreviewPane({
   // No address yet: an empty pane stays on the lightweight webview instead of
   // spawning Chromium for nothing.
   const targetUrl = surfaceRequest?.url ?? committedUrl
+  // Subscribed rather than read once: a desktop can attach to or detach from a
+  // remote host while the pane is open, and that decides whether the remote
+  // engine is reachable at all. A one-shot read kept the previous answer (and
+  // with it the engine choice) until something unrelated re-rendered the pane.
+  const remoteHostActive = useRemoteHostActive()
   const backend = resolveDesktopBackend(
     {
       tauri: isTauri(),
       remoteBrowserEnabled,
-      remoteHostActive: isRemoteHostActive(),
+      remoteHostActive,
       webCompanionTarget: hasWebCompanionTarget(),
       localChromiumInstalled: localInstalled,
       userChromeAvailable: userChromeCandidate?.available ?? false,

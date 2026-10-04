@@ -169,9 +169,7 @@ fn core(app: &AppHandle, state: &LocalBrowserState) -> Result<Arc<LocalCore>, St
     let config = SupervisorConfig::new(node, runtime_dir, &root);
     let browsers_path = config.browsers_path.clone();
     let events_app = app.clone();
-    let supervisor = Supervisor::new(config, move |event| {
-        on_supervisor_event(&events_app, event)
-    });
+    let supervisor = Supervisor::new(config, move |event| on_supervisor_event(&events_app, event));
     let client = RuntimeClient::new().map_err(|error| error.to_string())?;
     let transport = bridge::SupervisedTransport::new(client, Arc::clone(&supervisor));
     let core = Arc::new(LocalCore {
@@ -335,7 +333,9 @@ pub async fn shutdown(app: &AppHandle) {
 pub(crate) enum LocalBrowserManagedPhase {
     Running,
     /// Crashed; the supervisor restarts it after a backoff.
-    Restarting { attempt: u32 },
+    Restarting {
+        attempt: u32,
+    },
     /// Restarts exhausted (or start failed); only an explicit start recovers.
     Failed(String),
 }
@@ -351,7 +351,10 @@ pub(crate) struct LocalBrowserManagedInfo {
 }
 
 /// Map a supervisor phase to a registry row source. `Stopped` has no row.
-fn managed_info_from(phase: &supervisor::Phase, pid: Option<u32>) -> Option<LocalBrowserManagedInfo> {
+fn managed_info_from(
+    phase: &supervisor::Phase,
+    pid: Option<u32>,
+) -> Option<LocalBrowserManagedInfo> {
     match phase {
         supervisor::Phase::Stopped => None,
         supervisor::Phase::Running(endpoint) => Some(LocalBrowserManagedInfo {
@@ -641,11 +644,7 @@ async fn call(
 
 /// Rust-only access for value-carrying ops (`browser.cookies.set`,
 /// `browser.credential.fill`). No allow-list: never expose to the renderer.
-pub async fn rpc_privileged(
-    app: &AppHandle,
-    op: &str,
-    payload: Value,
-) -> Result<Value, String> {
+pub async fn rpc_privileged(app: &AppHandle, op: &str, payload: Value) -> Result<Value, String> {
     let state = app
         .try_state::<LocalBrowserState>()
         .ok_or_else(|| "local_browser_unavailable: state is not managed".to_string())?;
@@ -795,7 +794,10 @@ pub async fn browser_local_frames_subscribe(
         log::debug!("local browser frames for {session_id} ended: {end:?}");
         if let Some(state) = poll_app.try_state::<LocalBrowserState>() {
             let mut frames = state.frames.lock();
-            if frames.get(&session_id).is_some_and(|(owner, _)| *owner == token) {
+            if frames
+                .get(&session_id)
+                .is_some_and(|(owner, _)| *owner == token)
+            {
                 frames.remove(&session_id);
             }
         }
@@ -837,7 +839,10 @@ mod tests {
             panic!("install failed");
         });
         assert!(result.is_err());
-        assert!(!flag.load(Ordering::SeqCst), "a panic still clears the flag");
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "a panic still clears the flag"
+        );
     }
 
     #[tokio::test]
@@ -941,7 +946,9 @@ mod tests {
             Some(PathBuf::from("/x"))
         );
         assert_eq!(
-            reported_download_path(&json!({"type": "download.updated", "download": {"savedPath": ""}})),
+            reported_download_path(
+                &json!({"type": "download.updated", "download": {"savedPath": ""}})
+            ),
             None
         );
         assert_eq!(
@@ -992,7 +999,10 @@ mod tests {
         );
 
         let failed = managed_info_from(&supervisor::Phase::Failed("boom".into()), None).unwrap();
-        assert_eq!(failed.phase, LocalBrowserManagedPhase::Failed("boom".into()));
+        assert_eq!(
+            failed.phase,
+            LocalBrowserManagedPhase::Failed("boom".into())
+        );
         assert_eq!(failed.address, None);
     }
 

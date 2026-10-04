@@ -611,8 +611,14 @@ mod tests {
         assert!(import_needs_presence(&site, CookieSinkKind::Local));
         assert!(import_needs_presence(&domains, CookieSinkKind::Embedded));
         assert!(import_needs_presence(&domains, CookieSinkKind::Local));
-        assert!(import_needs_presence(&CookieScope::All, CookieSinkKind::Embedded));
-        assert!(import_needs_presence(&CookieScope::All, CookieSinkKind::Local));
+        assert!(import_needs_presence(
+            &CookieScope::All,
+            CookieSinkKind::Embedded
+        ));
+        assert!(import_needs_presence(
+            &CookieScope::All,
+            CookieSinkKind::Local
+        ));
         for scope in [&site, &domains, &CookieScope::All] {
             assert!(!presence_reason(scope).trim().is_empty());
         }

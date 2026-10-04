@@ -305,8 +305,8 @@ pub(crate) fn forbidden_downloads_dir(
     let lower = |path: &Path| path.to_string_lossy().to_lowercase();
     let dir_text = lower(dir);
     for system_dir in system {
-        let candidates = std::iter::once(system_dir.clone())
-            .chain(std::fs::canonicalize(system_dir).ok());
+        let candidates =
+            std::iter::once(system_dir.clone()).chain(std::fs::canonicalize(system_dir).ok());
         for candidate in candidates {
             // Case-insensitive: macOS and Windows file systems usually are.
             let candidate = lower(&candidate);
@@ -355,8 +355,8 @@ pub(crate) fn validate_custom_dir_with(
     if !path.is_dir() {
         return Err("downloads_dir_invalid: not a directory".to_string());
     }
-    let canonical = std::fs::canonicalize(&path)
-        .map_err(|error| format!("downloads_dir_invalid: {error}"))?;
+    let canonical =
+        std::fs::canonicalize(&path).map_err(|error| format!("downloads_dir_invalid: {error}"))?;
     if let Some(reason) = forbidden_downloads_dir(&canonical, home, system) {
         return Err(format!("downloads_dir_forbidden: {reason}"));
     }
@@ -400,14 +400,11 @@ pub(crate) fn pick_filename(suggested: &Path, url: &str) -> String {
 pub(crate) const SAFE_OPEN_EXTENSIONS: &[&str] = &[
     // Documents
     "pdf", "txt", "md", "markdown", "csv", "tsv", "json", "log", "rtf", "docx", "xlsx", "pptx",
-    "odt", "ods", "odp", "epub",
-    // Images
+    "odt", "ods", "odp", "epub", // Images
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "ico",
     // Audio
-    "mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "opus",
-    // Video
-    "mp4", "m4v", "mov", "webm", "mkv", "avi", "ogv",
-    // Archives
+    "mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "opus", // Video
+    "mp4", "m4v", "mov", "webm", "mkv", "avi", "ogv", // Archives
     "zip", "tar", "gz", "tgz", "bz2", "xz",
 ];
 
@@ -1071,22 +1068,40 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&system).unwrap();
         let systems = vec![system.clone()];
-        let check = |dir: &Path| validate_custom_dir_with(dir.to_str().unwrap(), Some(&home), &systems);
+        let check =
+            |dir: &Path| validate_custom_dir_with(dir.to_str().unwrap(), Some(&home), &systems);
 
-        assert!(check(&home).unwrap_err().starts_with("downloads_dir_forbidden"));
-        assert!(check(&system).unwrap_err().starts_with("downloads_dir_forbidden"));
+        assert!(check(&home)
+            .unwrap_err()
+            .starts_with("downloads_dir_forbidden"));
+        assert!(check(&system)
+            .unwrap_err()
+            .starts_with("downloads_dir_forbidden"));
         assert!(check(&system.join("inner")).is_err());
-        assert!(!system.join("inner").exists(), "nothing is created in a refused dir");
-        for hidden in [".ssh", ".config/autostart", "Library/LaunchAgents", "AppData/Roaming"] {
+        assert!(
+            !system.join("inner").exists(),
+            "nothing is created in a refused dir"
+        );
+        for hidden in [
+            ".ssh",
+            ".config/autostart",
+            "Library/LaunchAgents",
+            "AppData/Roaming",
+        ] {
             let dir = home.join(hidden);
             assert!(
-                check(&dir).unwrap_err().starts_with("downloads_dir_forbidden"),
+                check(&dir)
+                    .unwrap_err()
+                    .starts_with("downloads_dir_forbidden"),
                 "{hidden}"
             );
             assert!(!dir.exists(), "{hidden} was created");
         }
         // Ordinary directories under home are fine.
-        assert_eq!(check(&home.join("Downloads")).unwrap(), home.join("Downloads"));
+        assert_eq!(
+            check(&home.join("Downloads")).unwrap(),
+            home.join("Downloads")
+        );
         assert_eq!(
             check(&home.join("Documents/dl")).unwrap(),
             home.join("Documents/dl")
@@ -1104,7 +1119,9 @@ mod tests {
             // A symlink into a refused directory is caught on the canonical path.
             let link = tmp.path().join("sneaky");
             std::os::unix::fs::symlink(&system, &link).unwrap();
-            assert!(check(&link).unwrap_err().starts_with("downloads_dir_forbidden"));
+            assert!(check(&link)
+                .unwrap_err()
+                .starts_with("downloads_dir_forbidden"));
         }
     }
 
@@ -1231,7 +1248,10 @@ mod tests {
             {"id": "d1", "filename": "../report.pdf"},
             {"id": "d2", "filename": "b.zip"}
         ]);
-        assert_eq!(download_filename(&list, "d1").as_deref(), Some("report.pdf"));
+        assert_eq!(
+            download_filename(&list, "d1").as_deref(),
+            Some("report.pdf")
+        );
         assert_eq!(
             download_filename(&serde_json::json!({"downloads": list}), "d2").as_deref(),
             Some("b.zip")
