@@ -8,10 +8,13 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: { getState: () => remoteHostState },
 }))
 
+import { CpuIcon, LaptopIcon, ServerIcon, SmartphoneIcon, TerminalIcon } from "lucide-react"
+
 import {
   createDevicesProvider,
   loadDeviceSearchRows,
   DEFAULT_DEVICES_PROVIDER_DEPS,
+  DEVICE_KIND_ICON,
   type DevicesProviderDeps,
 } from "./devices"
 import type { GlobalSearchContext } from "../types"
@@ -146,6 +149,37 @@ describe("devicesProvider", () => {
       signal: new AbortController().signal,
     })
     expect(result.items.map((item) => item.title)).toContain("Build box")
+  })
+
+  /**
+   * Every row used to wear a phone, so a cloud host and an SSH box read as
+   * handsets. Each kind now wears the icon the device console gives it.
+   */
+  it.each([
+    ["iphone", "Max's iPhone", SmartphoneIcon],
+    ["build box", "Build box", ServerIcon],
+    ["prod-web", "prod-web-01", TerminalIcon],
+  ])("gives %s its kind's icon", async (needle, title, icon) => {
+    const provider = createDevicesProvider(deps())
+    const result = await provider.search({
+      query: { needle, raw: needle } as never,
+      ctx,
+      limit: 10,
+      signal: new AbortController().signal,
+    })
+    const item = result.items.find((candidate) => candidate.title === title)
+    expect(item?.icon).toEqual({ lucide: icon })
+  })
+
+  it("mirrors the device console's kind icons for every kind", () => {
+    // Kept in step with `KIND_ICON` in components/devices/device-visuals.tsx.
+    expect(DEVICE_KIND_ICON).toEqual({
+      local: LaptopIcon,
+      "paired-device": SmartphoneIcon,
+      "remote-host": ServerIcon,
+      worker: CpuIcon,
+      "ssh-host": TerminalIcon,
+    })
   })
 
   it("returns nothing rather than everything for an unmatched needle", async () => {

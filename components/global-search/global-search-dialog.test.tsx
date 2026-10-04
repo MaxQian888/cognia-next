@@ -48,6 +48,16 @@ jest.mock("@/hooks/chat", () => ({
   },
 }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platformRef.current }))
+const pointerRef = { coarse: false }
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useCoarsePointer: () => pointerRef.coarse,
+  useHasHover: () => !pointerRef.coarse,
+  useShowKeyboardHints: () => !pointerRef.coarse,
+}))
+const keyboardRef = { keyboardHeight: 0, isVisible: false }
+jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
+  useKeyboardInsets: () => keyboardRef,
+}))
 jest.mock("@/hooks/shortcuts/use-app-shortcut", () => ({
   useAppShortcut: (id: string, handler: (event: KeyboardEvent) => void) => {
     shortcutHandlers.set(id, handler)
@@ -83,7 +93,11 @@ jest.mock("@/lib/global-search/recents", () => ({
   recordRecentQuery: (...a: unknown[]) => recordRecentQuery(...a),
 }))
 
-import { GlobalSearchDialog } from "./global-search-dialog"
+import {
+  GlobalSearchDialog,
+  isListNavigationKey,
+  stopTouchPointerSelection,
+} from "./global-search-dialog"
 
 const group = (over: Partial<GlobalSearchGroup> = {}): GlobalSearchGroup => ({
   kind: "session",
@@ -142,6 +156,9 @@ beforeEach(() => {
   searchState.loading = false
   searchState.error = null
   platformRef.current = "tauri"
+  pointerRef.coarse = false
+  keyboardRef.keyboardHeight = 0
+  keyboardRef.isVisible = false
 })
 
 describe("GlobalSearchDialog", () => {
@@ -442,8 +459,10 @@ describe("referencing from the palette", () => {
 
   it("stages the row instead of opening it", async () => {
     await openWithResults()
-    fireEvent.mouseDown(screen.getByTestId("global-search-reference"))
+    await userEvent.click(screen.getByTestId("global-search-reference"))
     await waitFor(() => expect(runItem).toHaveBeenCalled())
+    // The trailing click must not ALSO open the row.
+    expect(runItem).toHaveBeenCalledTimes(1)
     expect(runItem.mock.calls[0]![0].action).toMatchObject({
       type: "reference-in-composer",
       candidate: { entityKind: "message", id: "s1#m1" },
@@ -482,5 +501,214 @@ describe("referencing from the palette", () => {
   it("offers no control on a row that cannot be referenced", async () => {
     await openWithResults([workflowGroup()])
     expect(screen.queryByTestId("global-search-reference")).toBeNull()
+  })
+})
+
+describe("syntax help in the input row", () => {
+  it("sits at the end of the input row and opens the cheat sheet without taking focus", async () => {
+    renderDialog()
+    act(() => requestCommandPalette({}))
+    const input = await screen.findByTestId("global-search-input")
+    const help = screen.getByTestId("global-search-syntax-help")
+    // In the input row, after the input — not in the footer.
+    const inputRow = input.closest('[data-slot="command-input-wrapper"]')!
+    expect(inputRow).toContainElement(help)
+    expect(input.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByTestId("global-search-footer")).not.toContainElement(help)
+    input.focus()
+    await userEvent.click(help)
+    const content = await screen.findByTestId("global-search-syntax-help-content")
+    expect(within(content).getByText("syntax.prefixes")).toBeInTheDocument()
+    expect(within(content).getByText("syntax.in")).toBeInTheDocument()
+    expect(input).toHaveFocus()
+  })
+})
+
+describe("phone layout", () => {
+  it("draws no footer row when there is nothing to warn about", async () => {
+    platformRef.current = "mobile"
+    pointerRef.coarse = true
+    searchState.outcome = outcome([group()])
+    renderDialog({ open: true, onOpenChange: jest.fn() })
+    await screen.findByTestId("global-search-dialog")
+    expect(screen.queryByTestId("global-search-footer")).toBeNull()
+    // The help is still one tap away, in the input row.
+    expect(screen.getByTestId("global-search-syntax-help")).toBeInTheDocument()
+  })
+
+  it("keeps only the coverage warning when results are incomplete", async () => {
+    platformRef.current = "mobile"
+    pointerRef.coarse = true
+    searchState.outcome = outcome([group()], { coverage: "partial" })
+    renderDialog({ open: true, onOpenChange: jest.fn() })
+    await screen.findByTestId("global-search-dialog")
+    act(() => {
+      fireEvent.change(screen.getByTestId("global-search-input"), { target: { value: "deploy" } })
+    })
+    const footer = await screen.findByTestId("global-search-footer")
+    expect(within(footer).getByTestId("global-search-coverage")).toBeInTheDocument()
+    expect(within(footer).queryByTestId("global-search-result-count")).toBeNull()
+  })
+
+  it("lets the list take the remaining height and lifts it above an overlapping keyboard", async () => {
+    platformRef.current = "mobile"
+    keyboardRef.keyboardHeight = 280
+    keyboardRef.isVisible = true
+    renderDialog({ open: true, onOpenChange: jest.fn() })
+    const dialog = await screen.findByTestId("global-search-dialog")
+    expect(dialog.style.paddingBottom).toBe("280px")
+    const list = dialog.querySelector("[cmdk-list]")!
+    expect(list.className).toContain("flex-1")
+    expect(list.className).toContain("min-h-0")
+    expect(list.className).toContain("overscroll-contain")
+  })
+
+  it("adds no keyboard padding when the WebView itself resizes (zero overlap)", async () => {
+    platformRef.current = "mobile"
+    keyboardRef.isVisible = true
+    renderDialog({ open: true, onOpenChange: jest.fn() })
+    const dialog = await screen.findByTestId("global-search-dialog")
+    expect(dialog.style.paddingBottom).toBe("")
+  })
+
+  it("keeps the desktop footer with its key legend", async () => {
+    renderDialog()
+    act(() => requestCommandPalette({}))
+    await screen.findByTestId("global-search-dialog")
+    expect(screen.getByTestId("global-search-key-legend")).toBeInTheDocument()
+  })
+})
+
+describe("touch does not move the highlight", () => {
+  const twoRows = () =>
+    group({
+      items: [
+        {
+          id: "session:1",
+          kind: "session",
+          title: "First",
+          score: 1,
+          action: { type: "open-session", sessionId: "1" },
+        },
+        {
+          id: "session:2",
+          kind: "session",
+          title: "Second",
+          score: 0.9,
+          action: { type: "open-session", sessionId: "2" },
+        },
+      ],
+      total: 2,
+    })
+
+  async function openWithRows() {
+    searchState.outcome = outcome([twoRows()])
+    renderDialog()
+    act(() => requestCommandPalette({ query: "s" }))
+    await screen.findByTestId("global-search-dialog")
+    return screen.getAllByTestId("global-search-row")
+  }
+
+  const pointerMove = (target: Element, pointerType: string) => {
+    const event = new MouseEvent("pointermove", { bubbles: true, cancelable: true })
+    Object.defineProperty(event, "pointerType", { value: pointerType })
+    fireEvent(target, event)
+  }
+  const pointerDown = (target: Element, pointerType: string) => {
+    const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true })
+    Object.defineProperty(event, "pointerType", { value: pointerType })
+    fireEvent(target, event)
+  }
+
+  it("ignores touch and pen pointer moves over rows, but follows the mouse", async () => {
+    const rows = await openWithRows()
+    expect(rows[0]).toHaveAttribute("data-selected", "true")
+    pointerMove(rows[1]!, "touch")
+    expect(rows[1]).toHaveAttribute("data-selected", "false")
+    pointerMove(rows[1]!, "pen")
+    expect(rows[1]).toHaveAttribute("data-selected", "false")
+    expect(rows[0]).toHaveAttribute("data-selected", "true")
+    pointerMove(rows[1]!, "mouse")
+    expect(rows[1]).toHaveAttribute("data-selected", "true")
+  })
+
+  it("opens exactly the tapped row, whatever is highlighted", async () => {
+    const rows = await openWithRows()
+    pointerDown(rows[1]!, "touch")
+    fireEvent.click(rows[1]!)
+    expect(runItem).toHaveBeenCalledTimes(1)
+    expect(runItem).toHaveBeenCalledWith(expect.objectContaining({ id: "session:2" }))
+  })
+
+  it("stops painting the active row after a touch, and paints it again on arrow keys", async () => {
+    const rows = await openWithRows()
+    const root = screen.getByTestId("global-search-dialog").querySelector("[cmdk-root]")!
+    expect(root).toHaveAttribute("data-input-mode", "mouse")
+    pointerDown(rows[1]!, "touch")
+    expect(root).toHaveAttribute("data-input-mode", "touch")
+    expect(root.className).toContain(
+      "data-[input-mode=touch]:[&_[cmdk-item][data-selected=true]]:bg-transparent"
+    )
+    // Soft-keyboard typing does not count as list navigation…
+    fireEvent.keyDown(screen.getByTestId("global-search-input"), { key: "Unidentified" })
+    expect(root).toHaveAttribute("data-input-mode", "touch")
+    // …arrow keys do.
+    fireEvent.keyDown(screen.getByTestId("global-search-input"), { key: "ArrowDown" })
+    expect(root).toHaveAttribute("data-input-mode", "keyboard")
+    expect(rows[1]).toHaveAttribute("data-selected", "true")
+    // A mouse moving over the list hands the highlight back to hover.
+    pointerMove(rows[0]!, "mouse")
+    expect(root).toHaveAttribute("data-input-mode", "mouse")
+  })
+
+  it("starts in touch mode on a coarse primary pointer", async () => {
+    pointerRef.coarse = true
+    await openWithRows()
+    const root = screen.getByTestId("global-search-dialog").querySelector("[cmdk-root]")!
+    expect(root).toHaveAttribute("data-input-mode", "touch")
+  })
+})
+
+describe("isListNavigationKey", () => {
+  const key = (
+    k: string,
+    mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}
+  ) => ({
+    key: k,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    ...mods,
+  })
+
+  it("accepts arrows, Home/End and cmdk's Ctrl vim chords", () => {
+    for (const k of ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]) {
+      expect(isListNavigationKey(key(k))).toBe(true)
+    }
+    expect(isListNavigationKey(key("n", { ctrlKey: true }))).toBe(true)
+    expect(isListNavigationKey(key("k", { ctrlKey: true }))).toBe(true)
+  })
+
+  it("rejects typing, soft-keyboard keys and other chords", () => {
+    expect(isListNavigationKey(key("n"))).toBe(false)
+    expect(isListNavigationKey(key("Unidentified"))).toBe(false)
+    expect(isListNavigationKey(key("Enter"))).toBe(false)
+    expect(isListNavigationKey(key("k", { ctrlKey: true, metaKey: true }))).toBe(false)
+    expect(isListNavigationKey(key("x", { ctrlKey: true }))).toBe(false)
+  })
+})
+
+describe("stopTouchPointerSelection", () => {
+  const event = (pointerType: string) => ({ pointerType, stopPropagation: jest.fn() })
+
+  it("stops non-mouse moves and lets mouse moves through", () => {
+    for (const type of ["touch", "pen"]) {
+      const e = event(type)
+      stopTouchPointerSelection(e as never)
+      expect(e.stopPropagation).toHaveBeenCalled()
+    }
+    const mouse = event("mouse")
+    stopTouchPointerSelection(mouse as never)
+    expect(mouse.stopPropagation).not.toHaveBeenCalled()
   })
 })

@@ -31,7 +31,11 @@ export function GlobalSearchScopeTabs({
       role="tablist"
       aria-label={t("footer.scopes")}
       className={cn(
-        "flex items-center gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none]",
+        // Seven pills overflow a phone's width: the row scrolls sideways with no
+        // visible scrollbar (`scrollbar-width` for current engines, the
+        // `::-webkit-scrollbar` rule for older Android WebViews), and a sideways
+        // fling does not chain into the dialog.
+        "flex shrink-0 items-center gap-1 overflow-x-auto overscroll-x-contain px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className
       )}
       data-testid="global-search-scope-tabs"

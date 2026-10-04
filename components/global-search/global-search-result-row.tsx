@@ -123,20 +123,28 @@ export function GlobalSearchResultRow({
       </span>
       {onReference && isReferenceable(item) && !disabledReason ? (
         // A secondary action, so the row's primary meaning (open it) is
-        // unchanged. `onMouseDown` + preventDefault because `CommandItem`
-        // selects on click, and selecting would open the row out from under
-        // the reference.
+        // unchanged. Activation is on `click` with propagation stopped, because
+        // `CommandItem` opens the row from its own `onClick`: stopping only
+        // `mousedown` left the trailing click (always there after a tap, and
+        // after a mouse press too) free to open the row out from under the
+        // reference. `pointerdown` / `mousedown` are cancelled so the search
+        // input keeps focus (and the phone keeps its keyboard).
         <button
           type="button"
           data-testid="global-search-reference"
           aria-label={t("referenceAria", { title: item.title })}
           title={t("referenceHint")}
-          onMouseDown={(event) => {
+          onPointerDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
             event.preventDefault()
             event.stopPropagation()
             onReference(item)
           }}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-data-[selected=true]:opacity-100"
+          // Revealed on the highlighted row for mouse and keyboard users; a
+          // touch screen has no hover and does not move the highlight while
+          // scrolling, so there it is always shown.
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-data-[selected=true]:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 pointer-coarse:opacity-100"
         >
           <AtSignIcon className="size-3.5" aria-hidden />
         </button>

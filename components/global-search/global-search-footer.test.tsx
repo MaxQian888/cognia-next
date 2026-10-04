@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -32,31 +32,48 @@ const renderFooter = (props: Partial<React.ComponentProps<typeof GlobalSearchFoo
   )
 
 describe("GlobalSearchFooter", () => {
-  it("shows the keyboard hints and the syntax help trigger", () => {
+  it("shows the keyboard hints and no syntax help (that lives in the input row)", () => {
     renderFooter()
     expect(screen.getByText("footer.navigate")).toBeInTheDocument()
     expect(screen.getByText("footer.open")).toBeInTheDocument()
-    const help = screen.getByRole("button", { name: "footer.syntax" })
-    expect(help).toBeInTheDocument()
-    // Pressing the help button must not steal focus from the input.
-    const pointerDown = new MouseEvent("pointerdown", { bubbles: true, cancelable: true })
-    fireEvent(help, pointerDown)
-    expect(pointerDown.defaultPrevented).toBe(true)
+    expect(screen.queryByTestId("global-search-syntax-help")).toBeNull()
+    expect(screen.queryByRole("button")).toBeNull()
     expect(screen.queryByTestId("global-search-result-count")).toBeNull()
     expect(screen.queryByTestId("global-search-coverage")).toBeNull()
   })
 
-  it("draws no key legend on a device without a keyboard, but keeps the syntax help", () => {
+  it("draws no key legend on a device without a keyboard", () => {
     mockShowKeyboardHints = false
     try {
-      renderFooter()
+      renderFooter({ totalHits: 2 })
       expect(screen.queryByTestId("global-search-key-legend")).toBeNull()
       expect(screen.queryByText("footer.navigate")).toBeNull()
       expect(screen.queryByText("footer.open")).toBeNull()
-      expect(screen.getByRole("button", { name: "footer.syntax" })).toBeInTheDocument()
+      expect(screen.getByTestId("global-search-result-count")).toBeInTheDocument()
     } finally {
       mockShowKeyboardHints = true
     }
+  })
+
+  it("renders nothing in compact mode without a coverage warning", () => {
+    const { container } = renderFooter({ compact: true, totalHits: 4, tookMs: 2, loading: false })
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByTestId("global-search-footer")).toBeNull()
+  })
+
+  it("renders nothing in compact mode while loading", () => {
+    const { container } = renderFooter({ compact: true, coverage: "partial", loading: true })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("keeps only the coverage warning in compact mode", () => {
+    renderFooter({ compact: true, totalHits: 4, tookMs: 2, coverage: "indexing" })
+    expect(screen.getByTestId("global-search-coverage")).toHaveTextContent(
+      "footer.coverageIndexing"
+    )
+    expect(screen.queryByTestId("global-search-key-legend")).toBeNull()
+    expect(screen.queryByTestId("global-search-result-count")).toBeNull()
+    expect(screen.queryByText(/footer.took/)).toBeNull()
   })
 
   it("shows count, timing and coverage notes", () => {

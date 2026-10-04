@@ -154,15 +154,40 @@ describe("the reference control", () => {
     expect(screen.queryByTestId("global-search-reference")).toBeNull()
   })
 
-  // `CommandItem` selects on click, and selecting would open the row out from
-  // under the reference.
-  it("references without opening the row", () => {
+  // `CommandItem` opens the row from its own `onClick`, so the reference has to
+  // swallow the whole press — the trailing click included — or a tap would
+  // reference AND open.
+  it("references without opening the row, across the full press sequence", async () => {
     const onSelect = jest.fn()
     const onReference = jest.fn()
     renderReferenceableRow(messageItem(), { onSelect, onReference })
-    fireEvent.mouseDown(screen.getByTestId("global-search-reference"))
-    expect(onReference).toHaveBeenCalled()
+    await userEvent.click(screen.getByTestId("global-search-reference"))
+    expect(onReference).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("does not take focus on press, and only activates on click", () => {
+    const onReference = jest.fn()
+    renderReferenceableRow(messageItem(), { onReference })
+    const button = screen.getByTestId("global-search-reference")
+    const pointerDown = new MouseEvent("pointerdown", { bubbles: true, cancelable: true })
+    fireEvent(button, pointerDown)
+    expect(pointerDown.defaultPrevented).toBe(true)
+    const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+    fireEvent(button, mouseDown)
+    expect(mouseDown.defaultPrevented).toBe(true)
+    expect(onReference).not.toHaveBeenCalled()
+    fireEvent.click(button)
+    expect(onReference).toHaveBeenCalledTimes(1)
+  })
+
+  // No hover on a touch screen, and the highlight does not follow the finger,
+  // so the control is shown on every row of a coarse pointer.
+  it("is always visible under a coarse pointer", () => {
+    renderReferenceableRow(messageItem(), { onReference: jest.fn() })
+    expect(screen.getByTestId("global-search-reference").className).toContain(
+      "pointer-coarse:opacity-100"
+    )
   })
 
   // cmdk lowercases and trims `data-value`, so the dialog's ⌘↵ handler needs

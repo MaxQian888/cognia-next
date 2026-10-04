@@ -12,7 +12,14 @@
  * typing "paired devices" has to land somewhere even when no device matches.
  */
 
-import { SmartphoneIcon } from "lucide-react"
+import {
+  CpuIcon,
+  LaptopIcon,
+  ServerIcon,
+  SmartphoneIcon,
+  TerminalIcon,
+  type LucideIcon,
+} from "lucide-react"
 
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { pairedDeviceRef, remoteHostRef, sshHostRef } from "@/lib/devices/build-device-rows"
@@ -23,6 +30,28 @@ import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { createListProvider } from "./list-provider"
 
 export const DEVICES_PROVIDER_ID = "builtin.devices"
+
+/**
+ * The icon each device kind wears in the palette.
+ *
+ * A mirror of `KIND_ICON` in `components/devices/device-visuals.tsx`, which is
+ * the source of truth: a device has to look the same in ⌘K as on the row it
+ * opens, or the palette reads as a different thing from the console. It is
+ * mirrored rather than imported because that module is a client component
+ * (next-intl, Badge, the fact list), and a search provider in `lib/` must not
+ * pull React UI into its graph. Change both together. The palette used to put
+ * a phone on every row, which made a cloud host and an SSH box look like
+ * handsets.
+ */
+export const DEVICE_KIND_ICON: Readonly<Record<DeviceKind, LucideIcon>> = Object.freeze({
+  local: LaptopIcon,
+  "paired-device": SmartphoneIcon,
+  "remote-host": ServerIcon,
+  worker: CpuIcon,
+  // A terminal, not a server: what a saved SSH host offers is a shell, and the
+  // icon should not suggest it can host work the way a Cognia host does.
+  "ssh-host": TerminalIcon,
+})
 
 /** The identity subset the palette needs. Never the full console row. */
 export interface DeviceSearchRow {
@@ -137,7 +166,7 @@ export function createDevicesProvider(deps: DevicesProviderDeps = DEFAULT_DEVICE
       titlePositions: match.positions,
       subtitle: row.detail,
       meta: ctx.t(`devices.kind.${row.kind}`),
-      icon: { lucide: SmartphoneIcon },
+      icon: { lucide: DEVICE_KIND_ICON[row.kind] },
       score: match.score,
       timestamp: row.timestamp,
       action: { type: "navigate", href: `/devices?device=${encodeURIComponent(row.ref)}` },

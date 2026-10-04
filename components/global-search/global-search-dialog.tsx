@@ -10,11 +10,25 @@
  *
  * Keyboard: ↑↓ move, ↵ open, Tab / Shift+Tab cycle scopes, Alt+1…7 jump to a
  * scope, Backspace on an empty field drops the last filter chip, Esc closes.
+ *
+ * Touch: the highlight never follows a finger. cmdk moves its active row on
+ * every `pointermove` over an item, and a touch scroll is a stream of
+ * `pointermove`s (until the browser claims the gesture with `pointercancel`),
+ * so dragging the list used to drag the highlight along with it — the row
+ * under the finger lit up, and the "selected" styling jumped around while the
+ * user was only scrolling. Non-mouse `pointermove`s are stopped before they
+ * reach the rows (see `stopTouchPointerSelection`), and while the last input
+ * was a touch the active-row styling is suppressed (`data-input-mode="touch"`)
+ * because nothing the user did put it there. A tap still opens exactly the
+ * row tapped (cmdk's `onClick`), and arrow keys bring the highlight back.
+ * `disablePointerSelection` is not used: it is one switch for the whole root,
+ * and would also take mouse hover away on desktop and on hybrid touch laptops.
  */
 
 import { SearchIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react"
 import { Command as CommandPrimitive } from "cmdk"
 import { loggers } from "@cognia/logging"
 
@@ -36,6 +50,8 @@ import {
 } from "@/hooks/global-search/use-global-search-actions"
 import { useGlobalSearchContext } from "@/hooks/global-search/use-global-search-context"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
+import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 import { usePlatform } from "@/hooks/use-platform"
 import { invalidateGlobalSearchCaches } from "@/lib/global-search/cache"
 import { SCOPED_GROUP_LIMIT } from "@/lib/global-search/engine"
@@ -55,10 +71,42 @@ import { GlobalSearchEmptyState } from "./global-search-empty-state"
 import { GlobalSearchFilterChips } from "./global-search-filter-chips"
 import { GlobalSearchFooter } from "./global-search-footer"
 import { GlobalSearchResultRow } from "./global-search-result-row"
+import { GlobalSearchSyntaxHelp } from "./global-search-syntax-help"
 import { isReferenceable, referenceCandidateFor } from "@/lib/global-search/referenceable"
 import { cycleScope, GlobalSearchScopeTabs, scopeForDigit } from "./global-search-scope-tabs"
 
 const log = loggers.ui
+
+/**
+ * How the user last drove the list. `touch` suppresses the active-row styling;
+ * `null` means "nothing yet", which falls back to the primary pointer type.
+ */
+export type GlobalSearchInputMode = "touch" | "mouse" | "keyboard"
+
+/** Keys cmdk moves its highlight on (arrows, Home/End, and its vim chords). */
+const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"])
+const VIM_NAVIGATION_KEYS = new Set(["n", "p", "j", "k"])
+
+/** Whether a keydown is one cmdk treats as moving the active row. */
+export function isListNavigationKey(event: {
+  key: string
+  ctrlKey: boolean
+  metaKey: boolean
+  altKey: boolean
+}): boolean {
+  if (NAVIGATION_KEYS.has(event.key)) return true
+  return event.ctrlKey && !event.metaKey && !event.altKey && VIM_NAVIGATION_KEYS.has(event.key)
+}
+
+/**
+ * Capture-phase `pointermove` filter for the result list: a pointer that is not
+ * a mouse (a finger, a pen) never reaches cmdk's per-row `onPointerMove`, so a
+ * scroll gesture cannot move the highlight. React honours `stopPropagation()`
+ * in the capture phase, so the row handlers below never run for it.
+ */
+export function stopTouchPointerSelection(event: ReactPointerEvent<HTMLElement>): void {
+  if (event.pointerType !== "mouse") event.stopPropagation()
+}
 
 export interface GlobalSearchDialogProps {
   /** Shell-specific effects (settings routing, mobile picker / drawer). */
@@ -75,6 +123,15 @@ export function GlobalSearchDialog({
 }: GlobalSearchDialogProps) {
   const t = useTranslations("globalSearch")
   const platform = usePlatform()
+  const fullScreen = platform === "mobile"
+  const coarsePointer = useCoarsePointer()
+  // Overlap of the soft keyboard with the layout viewport. Zero under the
+  // shipped `Keyboard.resize: "native"` (the WebView itself shrinks, and with
+  // it `100dvh`); non-zero only where the keyboard is drawn over the page, and
+  // then the bottom padding keeps the end of the list above it.
+  const { keyboardHeight } = useKeyboardInsets()
+  const [lastInputMode, setLastInputMode] = useState<GlobalSearchInputMode | null>(null)
+  const inputMode: GlobalSearchInputMode = lastInputMode ?? (coarsePointer ? "touch" : "mouse")
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const open = controlledOpen ?? uncontrolledOpen
   const [rawQuery, setRawQuery] = useState("")
@@ -111,6 +168,7 @@ export function GlobalSearchDialog({
     setRawQuery("")
     setScope("all")
     setLimit(undefined)
+    setLastInputMode(null)
   }, [])
 
   const close = useCallback(() => {
@@ -205,7 +263,10 @@ export function GlobalSearchDialog({
   const groups = useMemo(() => outcome?.groups ?? [], [outcome])
 
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // A soft keyboard's letters arrive as `Unidentified` / plain characters
+      // and do not count; only keys that move cmdk's highlight bring it back.
+      if (isListNavigationKey(event)) setLastInputMode("keyboard")
       if (event.key === "Tab") {
         event.preventDefault()
         changeScope(cycleScope(scope, event.shiftKey ? -1 : 1))
@@ -268,6 +329,20 @@ export function GlobalSearchDialog({
     return acc
   }, [outcome, scope])
 
+  const handlePointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    setLastInputMode(event.pointerType === "mouse" ? "mouse" : "touch")
+  }, [])
+
+  const handleListPointerMoveCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      stopTouchPointerSelection(event)
+      // A mouse moving over the list after a touch or arrow keys hands the
+      // highlight back to hover (hybrid touch laptops).
+      if (event.pointerType === "mouse" && inputMode !== "mouse") setLastInputMode("mouse")
+    },
+    [inputMode]
+  )
+
   const groupHeading = (group: GlobalSearchGroup) =>
     group.kind === "message" && scope === "chats"
       ? t("groups.messagesInChats", { query: parsed.text })
@@ -279,10 +354,11 @@ export function GlobalSearchDialog({
         showCloseButton={false}
         className={cn(
           "overflow-hidden p-0",
-          platform === "mobile"
-            ? "top-0 left-0 h-[100dvh] max-w-none translate-x-0 translate-y-0 rounded-none border-0"
+          fullScreen
+            ? "top-0 left-0 h-[100dvh] max-w-none translate-x-0 translate-y-0 rounded-none border-0 pt-[env(safe-area-inset-top)]"
             : "sm:max-w-2xl"
         )}
+        style={fullScreen && keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : undefined}
         data-testid="global-search-dialog"
       >
         {/* Inside the content so the accessible name only exists while open. */}
@@ -295,13 +371,22 @@ export function GlobalSearchDialog({
           loop
           label={t("title")}
           onKeyDown={handleKeyDown}
+          onPointerDownCapture={handlePointerDownCapture}
           data-slot="command"
-          className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-item]]:px-2 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4"
+          data-input-mode={inputMode}
+          className={cn(
+            "flex h-full min-h-0 w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-item]]:px-2 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4",
+            // Touch: the row cmdk keeps "active" was not chosen by the user, so
+            // it is not painted as chosen; a press paints the row being
+            // pressed instead.
+            "data-[input-mode=touch]:[&_[cmdk-item][data-selected=true]]:bg-transparent data-[input-mode=touch]:[&_[cmdk-item][data-selected=true]]:text-inherit data-[input-mode=touch]:[&_[cmdk-item]:active]:bg-accent",
+            fullScreen && "rounded-none"
+          )}
         >
           <GlobalSearchScopeTabs value={scope} onChange={changeScope} counts={counts} />
           <div
             data-slot="command-input-wrapper"
-            className="flex h-11 items-center gap-2 border-b px-3"
+            className="flex h-11 shrink-0 items-center gap-2 border-b pr-1.5 pl-3"
           >
             <SearchIcon className="size-4 shrink-0 opacity-50" aria-hidden />
             <CommandPrimitive.Input
@@ -311,9 +396,14 @@ export function GlobalSearchDialog({
               autoFocus
               data-slot="command-input"
               data-testid="global-search-input"
-              className="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className={cn(
+                "flex h-10 w-full min-w-0 rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+                // 16px on the phone: anything smaller makes iOS zoom on focus.
+                fullScreen && "text-base"
+              )}
             />
             {loading ? <Spinner className="size-4 shrink-0" aria-hidden /> : null}
+            <GlobalSearchSyntaxHelp />
           </div>
           <GlobalSearchFilterChips
             tokens={parsed.tokens}
@@ -331,11 +421,17 @@ export function GlobalSearchDialog({
                   }
                 : null
             }
-            className="pt-2"
+            className="shrink-0 pt-2"
           />
           <CommandList
             label={t("suggestions")}
-            className={cn("max-h-[min(60vh,560px)]", platform === "mobile" && "max-h-none flex-1")}
+            onPointerMoveCapture={handleListPointerMoveCapture}
+            className={cn(
+              "max-h-[min(60vh,560px)] overscroll-contain [-webkit-overflow-scrolling:touch]",
+              // The list is the one flexible region: when the keyboard shrinks
+              // the viewport it shrinks with it and keeps scrolling.
+              fullScreen && "max-h-none min-h-0 flex-1 pb-[env(safe-area-inset-bottom)]"
+            )}
           >
             {isEmptyQuery ? (
               <GlobalSearchEmptyState
@@ -425,6 +521,7 @@ export function GlobalSearchDialog({
             tookMs={outcome && !isEmptyQuery ? outcome.tookMs : null}
             coverage={outcome && !isEmptyQuery ? outcome.coverage : "complete"}
             loading={loading}
+            compact={fullScreen}
           />
         </CommandPrimitive>
       </DialogContent>
