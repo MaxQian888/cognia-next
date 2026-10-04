@@ -465,6 +465,19 @@
       "description": "One account for Cognia on all your devices. Signing in is optional: everything you do stays on this device either way.",
       "offlineHint": "You can sign in later from Settings → Account. This screen will not appear again.",
       "privacy": "Cognia keeps only who you are (your name, email and linked sign-ins), never access to the account you sign in with."
+    },
+    "callback": {
+      "working": "Completing sign-in…",
+      "doneTitle": "Signed in",
+      "doneBody": "You can return to Cognia. This window closes on its own.",
+      "close": "Close this window",
+      "failedTitle": "Sign-in did not complete",
+      "cancelled": "Sign-in was cancelled.",
+      "stateMismatch": "This response does not belong to the sign-in Cognia started, so it was not used.",
+      "providerError": "The sign-in service returned an error: {error}",
+      "tryAgain": "Close this window and sign in again from Cognia.",
+      "orphanedTitle": "Cognia is no longer waiting here",
+      "orphanedBody": "This window lost its connection to the Cognia page that opened it. Close it and start signing in again from Cognia."
     }
   },
   "identity": {

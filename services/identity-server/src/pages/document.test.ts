@@ -44,4 +44,21 @@ describe("page document", () => {
   it("draws fresh nonces", () => {
     expect(newNonce()).not.toBe(newNonce())
   })
+
+  it("carries the Cognia mark on every page, and a state tile only when asked", async () => {
+    const plain = renderDocument({ locale: "en", title: "t", nonce: "n", body: "<h1>t</h1>" })
+    expect(plain).toContain('class="brand"')
+    expect(plain).toContain("<span>Cognia</span>")
+    expect(plain).not.toContain('class="state')
+    const failed = renderDocument({
+      locale: "en",
+      title: "t",
+      nonce: "n",
+      body: "<h1>t</h1>",
+      state: "error",
+    })
+    expect(failed).toContain('class="state error"')
+    // The mark sits before the page's own heading.
+    expect(failed.indexOf('class="brand"')).toBeLessThan(failed.indexOf("<h1>"))
+  })
 })

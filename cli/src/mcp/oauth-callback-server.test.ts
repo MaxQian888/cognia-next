@@ -3,7 +3,12 @@
  */
 import nodeHttp from "node:http"
 
-import { parseCallback, resultPage, startCallbackServer } from "./oauth-callback-server"
+import {
+  callbackPageLocale,
+  parseCallback,
+  resultPage,
+  startCallbackServer,
+} from "./oauth-callback-server"
 
 describe("parseCallback", () => {
   it("extracts code and state", () => {
@@ -35,6 +40,19 @@ describe("resultPage", () => {
     expect(resultPage({ error: "access_denied", errorDescription: "denied" })).toContain(
       "access_denied"
     )
+  })
+  it("escapes a crafted error instead of rendering it as markup", () => {
+    const html = resultPage({ error: "<script>alert(1)</script>", errorDescription: '"x"' })
+    expect(html).not.toContain("<script>alert(1)")
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;: &quot;x&quot;")
+  })
+  it("carries the Cognia mark and speaks Chinese to a Chinese browser", () => {
+    const html = resultPage({ code: "abc" }, callbackPageLocale("zh-CN,zh;q=0.9,en;q=0.8"))
+    expect(html).toContain("<span>Cognia</span>")
+    expect(html).toContain("授权完成")
+    expect(html).toContain('lang="zh-CN"')
+    expect(callbackPageLocale("en-US,zh;q=0.5")).toBe("en")
+    expect(callbackPageLocale(undefined)).toBe("en")
   })
 })
 

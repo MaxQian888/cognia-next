@@ -381,7 +381,7 @@ describe("refreshLogtoToken failure classification", () => {
 })
 
 describe("revokeLogtoToken", () => {
-  const withRevocation = (status = 200, throwing?: Error): typeof fetch =>
+  const withRevocation = (status = 200, throwing?: Error, body = ""): typeof fetch =>
     jest.fn(async (url: string) => {
       if (String(url).includes("/.well-known/openid-configuration")) {
         return new Response(
@@ -390,7 +390,7 @@ describe("revokeLogtoToken", () => {
         )
       }
       if (throwing) throw throwing
-      return new Response("", { status })
+      return new Response(body, { status })
     }) as unknown as typeof fetch
 
   it("posts the token with its hint and the client id to the revocation endpoint", async () => {
@@ -407,6 +407,21 @@ describe("revokeLogtoToken", () => {
   it("reports an issuer with no revocation endpoint as unsupported", async () => {
     const outcome = await revokeLogtoToken(baseConfig(), "rt-1", "refresh_token", routingFetch())
     expect(outcome).toEqual({ status: "unsupported" })
+  })
+
+  it("reports a self-contained token the issuer cannot revoke as self-expiring, not failed", async () => {
+    const jwtRefused = withRevocation(
+      400,
+      undefined,
+      JSON.stringify({ error: "unsupported_token_type", error_description: "JWT access tokens" })
+    )
+    expect(await revokeLogtoToken(baseConfig(), "at", "access_token", jwtRefused)).toEqual({
+      status: "self-expiring",
+    })
+    const otherRefusal = withRevocation(400, undefined, JSON.stringify({ error: "invalid_client" }))
+    expect(await revokeLogtoToken(baseConfig(), "at", "access_token", otherRefusal)).toMatchObject({
+      status: "failed",
+    })
   })
 
   it("never throws: a refusal or an unreachable issuer is a failed outcome", async () => {

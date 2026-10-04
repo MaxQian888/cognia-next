@@ -1481,6 +1481,19 @@
         "toggle": "Advanced: configure Logto manually"
       },
       "awaitingCode": "Finish signing in in the browser. This screen continues on its own once the browser hands you back. If it does not, paste the address it landed on.",
+      "callback": {
+        "cancelled": "Sign-in was cancelled.",
+        "close": "Close this window",
+        "doneBody": "You can return to Cognia. This window closes on its own.",
+        "doneTitle": "Signed in",
+        "failedTitle": "Sign-in did not complete",
+        "orphanedBody": "This window lost its connection to the Cognia page that opened it. Close it and start signing in again from Cognia.",
+        "orphanedTitle": "Cognia is no longer waiting here",
+        "providerError": "The sign-in service returned an error: {error}",
+        "stateMismatch": "This response does not belong to the sign-in Cognia started, so it was not used.",
+        "tryAgain": "Close this window and sign in again from Cognia.",
+        "working": "Completing sign-in…"
+      },
       "cancel": "Cancel",
       "checking": "Checking how this deployment signs people in",
       "choose": {

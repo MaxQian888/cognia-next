@@ -28,6 +28,12 @@ describe("error page", () => {
     expect(html).not.toContain("Error code:")
   })
 
+  it("says what to do next, under an error state tile", async () => {
+    const html = await errorPage(new Request("https://id.test/error?error=access_denied")).text()
+    expect(html).toContain('class="state error"')
+    expect(html).toContain("<footer>Close this page and sign in again from Cognia.</footer>")
+  })
+
   it("is served by the worker in Chinese", async () => {
     const html = await (
       await call("/error?error=access_denied", { headers: { "accept-language": "zh-CN" } })

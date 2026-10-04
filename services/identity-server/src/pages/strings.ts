@@ -7,7 +7,7 @@ export type Locale = "en" | "zh"
 
 const en = {
   "signIn.title": "Sign in to Cognia",
-  "signIn.subtitle": "One Cognia account for all your devices. Your data is end-to-end encrypted.",
+  "signIn.subtitle": "One Cognia account for all your devices.",
   "signIn.continueWith": "Continue with {provider}",
   "signIn.redirecting": "Opening {provider}…",
   "signIn.noProviders": "Sign-in is not available right now. Please try again later.",
@@ -34,6 +34,14 @@ const en = {
   "error.unavailable": "This sign-in method is not available.",
   "error.generic": "Something went wrong. Please try again from Cognia.",
   "error.code": "Error code: {code}",
+  "error.next": "Close this page and sign in again from Cognia.",
+  "return.title": "Signed in",
+  "return.body": "Returning to Cognia…",
+  "return.failedTitle": "Sign-in did not complete",
+  "return.failedBody": "Returning to Cognia, where you can try again.",
+  "return.open": "Open Cognia",
+  "return.hint":
+    "If Cognia did not open, use the button above. You can close this page afterwards.",
   "signedOut.title": "You are signed out",
   "signedOut.body": "You can close this window and return to Cognia.",
 } as const
@@ -42,7 +50,7 @@ export type MessageKey = keyof typeof en
 
 const zh: Record<MessageKey, string> = {
   "signIn.title": "登录 Cognia",
-  "signIn.subtitle": "一个 Cognia 账号连接你所有的设备，数据端到端加密。",
+  "signIn.subtitle": "一个 Cognia 账号，连接你的所有设备。",
   "signIn.continueWith": "使用{provider}继续",
   "signIn.redirecting": "正在打开{provider}…",
   "signIn.noProviders": "暂时无法登录，请稍后再试。",
@@ -68,6 +76,13 @@ const zh: Record<MessageKey, string> = {
   "error.unavailable": "这种登录方式当前不可用。",
   "error.generic": "出了点问题，请回到 Cognia 重试。",
   "error.code": "错误代码：{code}",
+  "error.next": "请关闭此页面，回到 Cognia 重新登录。",
+  "return.title": "已登录",
+  "return.body": "正在返回 Cognia…",
+  "return.failedTitle": "登录未完成",
+  "return.failedBody": "正在返回 Cognia，你可以在那里重试。",
+  "return.open": "打开 Cognia",
+  "return.hint": "如果 Cognia 没有打开，请点击上方按钮。之后可以关闭此页面。",
   "signedOut.title": "你已退出登录",
   "signedOut.body": "可以关闭此窗口并返回 Cognia。",
 }

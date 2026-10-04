@@ -24,6 +24,8 @@ import { consentPage } from "./pages/consent"
 import { signInPage } from "./pages/sign-in"
 import { errorPage, signedOutPage } from "./pages/status-pages"
 import { mintAppleClientSecret } from "./providers/apple-secret"
+import { normalizeRevocation, REVOKE_PATH } from "./revocation"
+import { isBrowserNavigation, isNativeAppRedirect, returnToAppPage } from "./pages/return-to-app"
 import { isAllowedAuthRoute } from "./route-allowlist"
 import { serveOwnJwks } from "./self-jwks"
 
@@ -97,7 +99,19 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (!isAllowedAuthRoute(method, pathname)) return notFound()
   await reconcileWebClient(env.DB, config.webOrigins)
   const auth = await authFor(config, env)
-  const response = await auth.handler(request)
+  const handled = await auth.handler(request)
+  const location = handled.headers.get("location")
+  // A browser navigation bound for the native app gets a page to land on
+  // (pages/return-to-app.ts). API callers still see the plain redirect.
+  if (
+    handled.status >= 300 &&
+    handled.status < 400 &&
+    isBrowserNavigation(request) &&
+    isNativeAppRedirect(location)
+  ) {
+    return returnToAppPage(request, location)
+  }
+  const response = pathname === REVOKE_PATH ? await normalizeRevocation(handled) : handled
   return isCorsPath(pathname) ? withCors(response, request, config.webOrigins) : response
 }
 

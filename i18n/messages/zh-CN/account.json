@@ -465,6 +465,19 @@
       "description": "一个账号，在你所有设备上使用 Cognia。登录是可选的：无论是否登录，你的数据都保存在本设备上。",
       "offlineHint": "之后可以在“设置 → 账号”中登录。此页面不会再次出现。",
       "privacy": "Cognia 只保存你是谁（姓名、邮箱和已关联的登录方式），不会获得你所用登录账号的访问权限。"
+    },
+    "callback": {
+      "working": "正在完成登录…",
+      "doneTitle": "已登录",
+      "doneBody": "可以回到 Cognia 了，此窗口会自动关闭。",
+      "close": "关闭此窗口",
+      "failedTitle": "登录未完成",
+      "cancelled": "登录已取消。",
+      "stateMismatch": "此响应不属于 Cognia 发起的这次登录，已忽略。",
+      "providerError": "登录服务返回了错误：{error}",
+      "tryAgain": "请关闭此窗口，回到 Cognia 重新登录。",
+      "orphanedTitle": "Cognia 已不在此等待",
+      "orphanedBody": "此窗口与打开它的 Cognia 页面失去了联系。请关闭它，回到 Cognia 重新登录。"
     }
   },
   "identity": {

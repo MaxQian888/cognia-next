@@ -379,6 +379,29 @@ describe("logtoCommand", () => {
     expect(cap.text()).toMatch(/revoked/i)
   })
 
+  it("logout: an official access token that only expires is not reported as a failure", async () => {
+    const cap = captureOut()
+    const fs = memFs({
+      [SESSION_FILE]: JSON.stringify({ ...sampleSession, issuerKind: "oidc" }),
+    })
+    const revoke = jest
+      .fn()
+      .mockResolvedValueOnce({ status: "revoked" })
+      .mockResolvedValueOnce({ status: "self-expiring" })
+    expect(
+      await logtoCommand(parseArgv(["logto", "logout"]), {
+        home: HOME,
+        out: cap.sink,
+        sessionFs: fs,
+        env: {},
+        revoke,
+      })
+    ).toBe(0)
+    expect(cap.text()).toMatch(/^Signed out of your Cognia account/)
+    expect(cap.text()).toMatch(/expires on its own/)
+    expect(cap.text()).not.toMatch(/could not be told/)
+  })
+
   it("logout: still removes the file when the issuer cannot be reached, and says so", async () => {
     const cap = captureOut()
     const fs = memFs({ [SESSION_FILE]: JSON.stringify(sampleSession) })

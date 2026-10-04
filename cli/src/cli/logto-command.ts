@@ -190,9 +190,10 @@ function accountName(session: { issuerKind?: string }): string {
 async function logoutSub(deps: LogtoCommandDeps, out: OutputSink, home: string): Promise<number> {
   const session = readLogtoSessionFile(home, deps.sessionFs)
   if (!session) {
-    out.write("Not signed in to Logto; nothing to sign out of.\n")
+    out.write("Not signed in; nothing to sign out of.\n")
     return 0
   }
+  const name = accountName(session)
   const revoke = deps.revoke ?? defaultRevoke
   const outcomes = []
   if (session.refreshToken) {
@@ -203,19 +204,26 @@ async function logoutSub(deps: LogtoCommandDeps, out: OutputSink, home: string):
   const failed = outcomes.find((outcome) => outcome.status === "failed")
   if (failed && failed.status === "failed") {
     out.write(
-      "Signed out of Logto (removed logto.json), but the issuer could not be told to " +
+      `Signed out of ${name} (removed logto.json), but the issuer could not be told to ` +
         `revoke the token: ${failed.reason}\n`
     )
     return 0
   }
   if (outcomes.some((outcome) => outcome.status === "unsupported")) {
     out.write(
-      "Signed out of Logto (removed logto.json). The issuer advertises no revocation " +
+      `Signed out of ${name} (removed logto.json). The issuer advertises no revocation ` +
         "endpoint, so the token expires on its own schedule.\n"
     )
     return 0
   }
-  out.write("Signed out of Logto (removed logto.json; tokens revoked at the issuer).\n")
+  if (outcomes.some((outcome) => outcome.status === "self-expiring")) {
+    out.write(
+      `Signed out of ${name} (removed logto.json; the session is revoked at the issuer, ` +
+        "and the short-lived access token expires on its own).\n"
+    )
+    return 0
+  }
+  out.write(`Signed out of ${name} (removed logto.json; tokens revoked at the issuer).\n`)
   return 0
 }
 

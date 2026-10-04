@@ -429,6 +429,12 @@ export type LogtoRevocationOutcome =
   | { status: "revoked" }
   /** The issuer advertises no revocation endpoint, so there is nothing to call. */
   | { status: "unsupported" }
+  /**
+   * The issuer cannot revoke this kind of token (RFC 7009
+   * `unsupported_token_type`): a self-contained JWT access token, which simply
+   * expires. Not a failure; the refresh token is what ends the session.
+   */
+  | { status: "self-expiring" }
   /** The call did not go through. The token may still be live at the issuer. */
   | { status: "failed"; reason: string }
 
@@ -468,6 +474,13 @@ export async function revokeLogtoToken(
       body: body.toString(),
     })
     if (!res.ok) {
+      const error = (await res
+        .clone()
+        .json()
+        .catch(() => null)) as { error?: unknown } | null
+      if (res.status === 400 && error?.error === "unsupported_token_type") {
+        return { status: "self-expiring" }
+      }
       return {
         status: "failed",
         reason: `Logto revocation failed: ${res.status} ${res.statusText}`,
