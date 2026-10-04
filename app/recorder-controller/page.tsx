@@ -1,6 +1,6 @@
 "use client"
 
-import { RecorderControllerView } from "@/components/skills/recorder/recorder-controller-view"
+import RecorderControllerView from "./route-body"
 
 export default function RecorderControllerPage() {
   return <RecorderControllerView />

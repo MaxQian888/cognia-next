@@ -7,6 +7,11 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
+  useFormatter: () => ({
+    dateTime: (value: Date | number) => new Date(value).toISOString(),
+    number: (value: number) => String(value),
+    relativeTime: (value: Date | number) => new Date(value).toISOString(),
+  }),
   useTranslations: () => (key: string) => key,
 }))
 

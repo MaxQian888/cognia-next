@@ -1,6 +1,6 @@
 "use client"
 
-import { PetOverlayView } from "@/components/pet/pet-overlay-view"
+import PetOverlayView from "./route-body"
 
 // Transparent desktop-pet overlay route. Rendered inside the frameless,
 // always-on-top "pet" Tauri window. The desktop shell bypasses this prefix

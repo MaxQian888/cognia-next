@@ -1,5 +1,7 @@
 "use client"
 
+import RouteBody from "./route-body"
+
 /**
  * `/squads`, the Squad fleet.
  *
@@ -18,15 +20,11 @@
 
 import { Suspense } from "react"
 
-import { SquadFleetConsole } from "@/components/squads/squad-fleet-console"
-import { SquadsMobileBody } from "@/components/mobile/squads/squads-mobile-body"
 import { useSquadRouteState } from "@/hooks/squads/use-squad-route-state"
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 function SquadsPageInner() {
   const route = useSquadRouteState()
-  const compact = useCompactLayout()
-  return compact ? <SquadsMobileBody route={route} /> : <SquadFleetConsole route={route} />
+  return <RouteBody route={route} />
 }
 
 export default function SquadsPage() {

@@ -1,6 +1,6 @@
 "use client"
 
-import { UsageDockView } from "@/components/usage-dock/usage-dock-view"
+import UsageDockView from "./route-body"
 
 // Transparent Capacity Dock route (ADR-0165). Rendered inside the frameless,
 // always-on-top `usage-dock` Tauri window that `usage_dock_open` creates. The

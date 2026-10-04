@@ -1,6 +1,6 @@
 "use client"
 
-import { SelectionToolbarView } from "@/components/selection-toolbar/selection-toolbar-view"
+import SelectionToolbarView from "./route-body"
 
 export default function SelectionToolbarPage() {
   return <SelectionToolbarView />

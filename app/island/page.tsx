@@ -1,6 +1,6 @@
 "use client"
 
-import { IslandView } from "@/components/fleet/island-view"
+import IslandView from "./route-body"
 
 // Transparent fleet-island overlay route. Rendered inside the frameless,
 // always-on-top "island" Tauri window (fleet/island_window.rs). The desktop

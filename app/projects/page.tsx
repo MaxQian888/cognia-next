@@ -1,5 +1,7 @@
 "use client"
 
+import RouteBody from "./route-body"
+
 /**
  * `/projects` — the tracker's delivery containers (`IssueProject`).
  *
@@ -20,31 +22,14 @@
 import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
-import { CycleConsole } from "@/components/issues/cycles/cycle-console"
-import { ProjectConsole } from "@/components/issues/projects/project-console"
-import { CyclesMobileBody } from "@/components/mobile/issues/cycles-mobile-body"
-import { ProjectsMobileBody } from "@/components/mobile/issues/projects-mobile-body"
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
-
 function ProjectsPageInner() {
   const params = useSearchParams()
-  const compact = useCompactLayout()
   const initialSelectedId = params.get("id") ?? undefined
   const tab = params.get("tab") === "cycles" ? "cycles" : "projects"
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
-      {tab === "cycles" ? (
-        compact ? (
-          <CyclesMobileBody />
-        ) : (
-          <CycleConsole />
-        )
-      ) : compact ? (
-        <ProjectsMobileBody initialSelectedId={initialSelectedId} />
-      ) : (
-        <ProjectConsole initialSelectedId={initialSelectedId} />
-      )}
+      <RouteBody tab={tab} initialSelectedId={initialSelectedId} />
     </div>
   )
 }

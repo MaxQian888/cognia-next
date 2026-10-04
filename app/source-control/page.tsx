@@ -1,5 +1,7 @@
 "use client"
 
+import RouteBody from "./route-body"
+
 /**
  * Dedicated full-page Source Control route, reached from the guild-rail
  * "Source Control" entry.
@@ -30,18 +32,14 @@
 import { Suspense, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 
-import { SourceControlMobileBody } from "@/components/mobile/source-control/source-control-mobile-body"
-import { SourceControlPanel } from "@/components/source-control/source-control-panel"
 import {
   SOURCE_CONTROL_PATH_PARAM,
   SOURCE_CONTROL_ROOT_PARAM,
   SOURCE_CONTROL_STAGED_PARAM,
 } from "@/lib/global-search/providers/git"
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useGitStore } from "@/stores/git/git-store"
 
 function SourceControlPageInner() {
-  const compact = useCompactLayout()
   const searchParams = useSearchParams()
   const requestedRoot = searchParams?.get(SOURCE_CONTROL_ROOT_PARAM) ?? null
   const requestedPath = searchParams?.get(SOURCE_CONTROL_PATH_PARAM) ?? null
@@ -65,11 +63,7 @@ function SourceControlPageInner() {
     }
   }, [requestedRoot, requestedPath, requestedStaged])
 
-  return compact ? (
-    <SourceControlMobileBody initialDiffOpen={requestedPath !== null} />
-  ) : (
-    <SourceControlPanel />
-  )
+  return <RouteBody initialDiffOpen={requestedPath !== null} />
 }
 
 export default function SourceControlPage() {

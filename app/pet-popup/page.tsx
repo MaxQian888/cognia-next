@@ -1,6 +1,6 @@
 "use client"
 
-import { PetPopupView } from "@/components/pet/pet-popup-view"
+import PetPopupView from "./route-body"
 
 // Transparent desktop-pet click popup route. Rendered inside the frameless,
 // always-on-top "pet-popup" Tauri window opened by the Rust `open_pet_popup`

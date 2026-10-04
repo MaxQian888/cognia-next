@@ -1,12 +1,19 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
+const mockIsMobile = jest.fn(() => false)
+const mockGuard = jest.fn()
+jest.mock("@/lib/capacitor/_shared", () => ({
+  ...jest.requireActual("@/lib/capacitor/_shared"),
+  isMobile: () => mockIsMobile(),
+}))
+jest.mock("@/hooks/use-biometric-guard", () => ({ useBiometricGuard: () => mockGuard }))
 
 const settingsRef: { current: Record<string, unknown> | undefined } = {
   current: {
@@ -17,21 +24,24 @@ const settingsRef: { current: Record<string, unknown> | undefined } = {
 }
 
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (
-    selector: (s: {
-      settings: Record<string, unknown> | undefined
-      save: (patch: Record<string, unknown>) => Promise<void>
-    }) => unknown
-  ) =>
-    selector({
-      settings: settingsRef.current,
-      save: async (patch: Record<string, unknown>) => {
-        if (settingsRef.current) {
-          settingsRef.current = { ...settingsRef.current, ...patch }
-        }
-        await saveMock(patch)
-      },
-    }),
+  useSettingsStore: Object.assign(
+    (
+      selector: (s: {
+        settings: Record<string, unknown> | undefined
+        save: (patch: Record<string, unknown>) => Promise<void>
+      }) => unknown
+    ) =>
+      selector({
+        settings: settingsRef.current,
+        save: async (patch: Record<string, unknown>) => {
+          if (settingsRef.current) {
+            settingsRef.current = { ...settingsRef.current, ...patch }
+          }
+          await saveMock(patch)
+        },
+      }),
+    { getState: () => ({ settings: settingsRef.current }) }
+  ),
 }))
 
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
@@ -90,6 +100,8 @@ beforeEach(() => {
   saveMock.mockReset()
   enqueueMock.mockReset()
   mockTrackEvent.mockClear()
+  mockIsMobile.mockReturnValue(false)
+  mockGuard.mockReset()
   settingsRef.current = {
     fontScale: "md",
     defaultModel: "",
@@ -201,15 +213,40 @@ describe("MobilePreferencesPage", () => {
 
   it("toggling the sign-out biometric switch persists the new policy", async () => {
     render(<Page />)
-    fireEvent.click(screen.getByTestId("pref-biometric-sign-out"))
-    await Promise.resolve()
-    await Promise.resolve()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("pref-biometric-sign-out"))
+    })
     expect(saveMock).toHaveBeenCalledWith({
       biometricRequiredFor: {
         ...DEFAULT_BIOMETRIC_GUARD,
         signOut: false,
       },
     })
+  })
+
+  it("keeps the mobile preference unchanged when verification is cancelled", async () => {
+    mockIsMobile.mockReturnValue(true)
+    mockGuard.mockResolvedValue({ kind: "blocked", reason: "cancelled" })
+    render(<Page />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("pref-biometric-sign-out"))
+    })
+    expect(mockGuard.mock.calls[0][0]).toMatchObject({ fallthroughWhenUnavailable: false })
+    expect(saveMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("pref-biometric-sign-out")).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("persists the mobile preference only after verified identity", async () => {
+    mockIsMobile.mockReturnValue(true)
+    mockGuard.mockImplementation(async (_gate, action) => ({ kind: "ok", value: await action() }))
+    render(<Page />)
+    fireEvent.click(screen.getByTestId("pref-biometric-sign-out"))
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith({
+        biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD, signOut: false },
+      })
+    )
+    expect(mockGuard).toHaveBeenCalledTimes(1)
   })
 
   it("changing the font scale persists the new value", async () => {
@@ -225,8 +262,9 @@ describe("MobilePreferencesPage", () => {
     ["pref-biometric-reveal-secrets", "revealSecrets"],
   ] as const)("toggling %s merge-updates the guard", async (testid, key) => {
     const { unmount } = render(<Page />)
-    fireEvent.click(screen.getByTestId(testid))
-    await Promise.resolve()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(testid))
+    })
     expect(saveMock).toHaveBeenCalledWith({
       biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD, [key]: !DEFAULT_BIOMETRIC_GUARD[key] },
     })

@@ -1,5 +1,7 @@
 "use client"
 
+import RouteBody from "./route-body"
+
 /**
  * /workflows/editor?id=… — full-screen visual workflow editor.
  *
@@ -14,18 +16,10 @@ import { Suspense, useEffect, useState } from "react"
 import { notFound, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
-import { WorkflowEditorCanvas } from "@/components/workflow/editor/canvas"
-import { MobileWorkflowEditor } from "@/components/mobile/workflow/editor/mobile-workflow-editor"
-import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { getWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
 function WorkflowEditorInner() {
-  // Branch on `useIsMobile()` (native Capacitor OR viewport < 768px), not the
-  // static `usePlatform() === "mobile"` pin: a phone-width browser / narrow
-  // desktop window otherwise fell through to the desktop 3-pane resizable
-  // canvas, which is unusable below ~700px.
-  const isMobile = useIsMobile()
   const router = useRouter()
   const searchParams = useSearchParams()
   const id = searchParams.get("id")
@@ -73,24 +67,7 @@ function WorkflowEditorInner() {
     notFound()
   }
 
-  if (isMobile) {
-    // `flex-1 min-h-0` (not `h-full`) so the editor fills the height the
-    // mobile shell hands it — on the Capacitor shell that's the flex-column
-    // `MobileShellWrapper` (below the offline banner); on a narrow desktop
-    // browser it's the desktop shell's flex content area. Both give a definite
-    // height the ReactFlow canvas needs; `h-full` collapsed to 0 on mobile.
-    return (
-      <div className="min-h-0 w-full flex-1 overflow-hidden">
-        <MobileWorkflowEditor workflow={workflow} />
-      </div>
-    )
-  }
-
-  return (
-    <div className="h-full w-full overflow-hidden" data-bg-target="canvas">
-      <WorkflowEditorCanvas workflow={workflow} initialTemplateId={initialTemplateId} />
-    </div>
-  )
+  return <RouteBody workflow={workflow} initialTemplateId={initialTemplateId} />
 }
 
 function EditorLoadingSkeleton() {

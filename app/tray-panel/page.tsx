@@ -1,6 +1,6 @@
 "use client"
 
-import { TrayPanelView } from "@/components/tray-panel/tray-panel-view"
+import TrayPanelView from "./route-body"
 
 // Transparent tray quick-panel route. Rendered inside the frameless,
 // always-on-top "tray-panel" Tauri window that `open_tray_panel` opens when the

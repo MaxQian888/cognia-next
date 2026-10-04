@@ -1,5 +1,7 @@
 "use client"
 
+import RouteBody from "./route-body"
+
 /**
  * `/servers/detail?id=…` — one deployment target.
  *
@@ -13,20 +15,11 @@ import { Suspense, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, LogOutIcon, PlugZapIcon, RefreshCwIcon } from "lucide-react"
+import { ArrowLeftIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
-import { ServerDetailMobileBody } from "@/components/mobile/servers/server-detail-mobile-body"
-import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
-import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
-import { ConnectAgentDialog } from "@/components/servers/connect-agent-dialog"
-import { OperationInspector } from "@/components/servers/operation-inspector"
-import { OperationsRail } from "@/components/servers/operations-rail"
 import { OpsConnectPanel } from "@/components/servers/ops-connect-panel"
 import { localizedOpsError, useServerOps } from "@/components/servers/ops-context"
-import { ServerDetailView } from "@/components/servers/server-detail"
-import { HealthLabel } from "@/components/servers/server-visuals"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { PageLoading } from "@/components/ui/loading-states"
@@ -47,7 +40,6 @@ function ServerDetailRoute() {
   const params = useSearchParams()
   const serverId = params.get("id") ?? ""
   const ops = useServerOps()
-  const compact = useCompactLayout()
   /**
    * Keyed by the server it was loaded for, so a stale response for the previous
    * target is discarded during render rather than cleared by a second effect —
@@ -149,115 +141,20 @@ function ServerDetailRoute() {
     onUpgrade: (release: ReleaseImages) => void ops.upgrade(server.id, release),
   }
 
-  /**
-   * The compact body owns its own chrome and the enrollment dialog, so the
-   * branch is here rather than inside the shell. Every action above is shared
-   * verbatim: a phone that could read a target but not roll it back would be
-   * this route telling the user to go and find a laptop.
-   */
-  if (compact) {
-    return (
-      <ServerDetailMobileBody
-        server={server}
-        backups={backups}
-        logs={logs}
-        loadingDetail={loadingDetail}
-        actions={actions}
-      />
-    )
-  }
-
   return (
-    <>
-      <FeaturePageShell
-        storageId="server-detail"
-        header={
-          <FeaturePageHeader
-            variant="management"
-            breadcrumb={backToFleet}
-            title={server.label || server.id}
-            context={
-              <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <HealthLabel health={server.health} />
-                <span aria-hidden="true">·</span>
-                <span className="truncate font-mono">{server.id}</span>
-                {server.publicUrl && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <span className="truncate">{server.publicUrl}</span>
-                  </>
-                )}
-              </span>
-            }
-            secondaryActions={[
-              {
-                id: "enroll",
-                label: t("enroll.action"),
-                icon: PlugZapIcon,
-                onSelect: () => setEnrollOpen(true),
-              },
-              {
-                id: "refresh",
-                label: t("actions.refresh"),
-                icon: RefreshCwIcon,
-                onSelect: () => void ops.refresh(),
-                disabled: ops.loading,
-              },
-            ]}
-            overflowActions={[
-              {
-                id: "disconnect",
-                label: t("connection.disconnect"),
-                icon: LogOutIcon,
-                onSelect: () => void ops.disconnect(),
-                destructive: true,
-              },
-            ]}
-            overflowLabel={t("actions.more")}
-          />
-        }
-        rightPane={{
-          label: t("operations.ariaLabel"),
-          content: (
-            <OperationsRail
-              operations={ops.operations}
-              liveEvents={ops.liveEvents}
-              eventStreamConnected={ops.eventStreamConnected}
-              selectedId={inspected?.id ?? null}
-              onSelect={setInspected}
-              targetId={server.id}
-            />
-          ),
-        }}
-      >
-        <ServerDetailView
-          server={server}
-          backups={backups}
-          logs={logs}
-          loadingDetail={loadingDetail}
-          actions={{ ...actions, onConnectAgent: () => setEnrollOpen(true) }}
-        />
-      </FeaturePageShell>
-
-      <ConnectAgentDialog
-        open={enrollOpen}
-        onOpenChange={setEnrollOpen}
-        servers={ops.servers}
-        controllerUrl={ops.connection.controllerUrl}
-        initialTargetId={server.id}
-        onIssueToken={ops.createEnrollmentToken}
-        onRefresh={ops.refresh}
-      />
-      <OperationInspector
-        operation={inspected}
-        loadEvents={ops.listOperationEvents}
-        onOpenChange={(open) => !open && setInspected(null)}
-        onCancel={(id) => {
-          void ops.cancelOperation(id)
-          setInspected(null)
-        }}
-      />
-    </>
+    <RouteBody
+      server={server}
+      backups={backups}
+      logs={logs}
+      loadingDetail={loadingDetail}
+      actions={actions}
+      backToFleet={backToFleet}
+      controllerUrl={ops.connection.controllerUrl}
+      enrollOpen={enrollOpen}
+      setEnrollOpen={setEnrollOpen}
+      inspected={inspected}
+      setInspected={setInspected}
+    />
   )
 }
 

@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 
 import type { ServerOpsValue } from "@/components/servers/ops-context"
 import type { ServerDetail } from "@/lib/server-ops/client"
@@ -26,6 +26,11 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(mockQuery),
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+let mockCompact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: () => mockCompact }))
+jest.mock("@/components/mobile/servers/server-detail-mobile-body", () => ({
+  ServerDetailMobileBody: () => <div>mobile detail view</div>,
+}))
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import ServerDetailPage from "./page"
@@ -101,6 +106,29 @@ beforeEach(() => {
   mockQuery = "id=staging"
   mockOps = base()
   detailProps = null
+  mockCompact = false
+})
+
+it("keeps the enrollment dialog state across compact layout changes", async () => {
+  const view = renderPage()
+  await waitFor(() => expect(detailProps?.backups).toEqual([{ id: "rp-1" }]))
+  act(() => (detailProps?.actions as { onConnectAgent: () => void }).onConnectAgent())
+  expect(screen.getByText("enroll dialog")).toBeInTheDocument()
+  mockCompact = true
+  view.rerender(
+    <TooltipProvider>
+      <ServerDetailPage />
+    </TooltipProvider>
+  )
+  expect(screen.getByText("mobile detail view")).toBeInTheDocument()
+  expect(screen.queryByText("enroll dialog")).not.toBeInTheDocument()
+  mockCompact = false
+  view.rerender(
+    <TooltipProvider>
+      <ServerDetailPage />
+    </TooltipProvider>
+  )
+  expect(screen.getByText("enroll dialog")).toBeInTheDocument()
 })
 
 it("reads the target from the query string, not a dynamic segment", async () => {

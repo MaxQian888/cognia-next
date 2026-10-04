@@ -1,11 +1,9 @@
 "use client"
 
+import RouteBody from "./route-body"
+
 import { Suspense, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-
-import { BotConsole } from "@/components/bots/bot-console"
-import { BotsMobileBody } from "@/components/mobile/bots/bots-mobile-body"
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 /**
  * `/bots`, the Bot control plane's console.
@@ -27,7 +25,6 @@ import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 function BotsRoute() {
   const router = useRouter()
   const params = useSearchParams()
-  const compact = useCompactLayout()
   const selectedId = params.get("bot") ?? undefined
 
   const select = useCallback(
@@ -56,7 +53,7 @@ function BotsRoute() {
     installParam: params.get("install"),
   }
 
-  return compact ? <BotsMobileBody {...bodyProps} /> : <BotConsole {...bodyProps} />
+  return <RouteBody {...bodyProps} />
 }
 
 export default function BotsPage() {

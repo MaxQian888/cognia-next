@@ -31,6 +31,7 @@ import {
 import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
+import { useBiometricPolicyUpdate } from "@/hooks/use-biometric-policy-update"
 import { isImeComposing } from "@/lib/ui/ime"
 import {
   getBehaviorTelemetrySettings,
@@ -46,6 +47,7 @@ export default function MobilePreferencesPage() {
 
   const settings = useSettingsStore((s) => s.settings)
   const update = useSettingsPatch()
+  const { updatePolicy: updateBiometric, pending: policyPending } = useBiometricPolicyUpdate(update)
 
   const fontScale = settings?.fontScale ?? "md"
   const defaultModel = settings?.defaultModel ?? ""
@@ -80,9 +82,6 @@ export default function MobilePreferencesPage() {
       setModelDraft((current) => (current === draft ? null : current))
     )
   }
-
-  const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
-    update({ biometricRequiredFor: { ...policy, ...patch } })
 
   return (
     <SubPageShell
@@ -149,6 +148,7 @@ export default function MobilePreferencesPage() {
             label={tSec("deletePairing.label")}
             help={tSec("deletePairing.help")}
             checked={policy.deletePairing}
+            disabled={policyPending}
             onChange={(v) => void updateBiometric({ deletePairing: v })}
             testid="pref-biometric-delete-pairing"
           />
@@ -156,6 +156,7 @@ export default function MobilePreferencesPage() {
             label={tSec("exportBackup.label")}
             help={tSec("exportBackup.help")}
             checked={policy.exportBackup}
+            disabled={policyPending}
             onChange={(v) => void updateBiometric({ exportBackup: v })}
             testid="pref-biometric-export-backup"
           />
@@ -163,6 +164,7 @@ export default function MobilePreferencesPage() {
             label={tSec("revealSecrets.label")}
             help={tSec("revealSecrets.help")}
             checked={policy.revealSecrets}
+            disabled={policyPending}
             onChange={(v) => void updateBiometric({ revealSecrets: v })}
             testid="pref-biometric-reveal-secrets"
           />
@@ -170,6 +172,7 @@ export default function MobilePreferencesPage() {
             label={t("signOut.biometricLabel")}
             help={t("signOut.biometricHelp")}
             checked={policy.signOut}
+            disabled={policyPending}
             onChange={(v) => void updateBiometric({ signOut: v })}
             testid="pref-biometric-sign-out"
           />

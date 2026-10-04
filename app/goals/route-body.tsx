@@ -1,0 +1,40 @@
+"use client"
+
+import { Suspense } from "react"
+import { useSearchParams } from "next/navigation"
+
+import { GoalConsole } from "@/components/goal/console/goal-console"
+import { GoalsMobileBody } from "@/components/mobile/goals/goals-mobile-body"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { isGoalConsoleTab } from "@/lib/goal/console-prefs"
+
+/**
+ * Dedicated full-page Goals console route (ADR-0019 Phase 3). Reached from the
+ * guild-rail "Goals" entry. The console owns its own chrome; this page just
+ * hosts it full-height (mirrors `/performance`).
+ *
+ * On a narrow viewport the desktop console has no usable layout, so the
+ * phone-shaped `GoalsMobileBody` renders instead (reached via /me). Keyed on
+ * width rather than on the Capacitor runtime, so a 375px browser gets it too.
+ *
+ * Static-export-safe deep link: the initial bottom tab rides in `?tab=` (read
+ * via `useSearchParams` inside a `<Suspense>` boundary), used by the Settings
+ * launcher and plugin bridges to land users on a specific management tab.
+ */
+function GoalsRoute() {
+  const params = useSearchParams()
+  const tabParam = params.get("tab")
+  return <GoalConsole initialTab={isGoalConsoleTab(tabParam) ? tabParam : undefined} />
+}
+
+export default function GoalsPage() {
+  const compact = useCompactLayout()
+  if (compact) return <GoalsMobileBody />
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-bg-target="chat">
+      <Suspense fallback={null}>
+        <GoalsRoute />
+      </Suspense>
+    </div>
+  )
+}
