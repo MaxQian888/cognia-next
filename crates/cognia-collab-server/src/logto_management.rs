@@ -88,20 +88,51 @@ pub fn identities_from_user(user: &serde_json::Value) -> Vec<ExternalIdentityCla
     for (target, identity) in identities {
         let details = identity.get("details");
         let detail = |key: &str| text(details.and_then(|details| details.get(key)));
-        // Feishu's union id is stable across the apps of one tenant, the open
-        // id only within one app. Logto's `userId` is whatever the connector
-        // chose, so the explicit union id wins when it is there.
-        let subject = if target.starts_with("feishu") || target == "lark" {
-            detail("unionId")
+        // Logto's own Feishu connector keeps only `id`, `name` and `avatar` at
+        // the top of `details` and the provider's userinfo verbatim under
+        // `rawData`, so the union id and tenant key live there.
+        let raw = |key: &str| {
+            text(
+                details
+                    .and_then(|details| details.get("rawData"))
+                    .and_then(|raw| raw.get(key)),
+            )
+        };
+        let (subject, tenant) = if target.starts_with("feishu") || target == "lark" {
+            // Feishu's union id is stable across the apps of one tenant, the
+            // open id only within one app. Logto's `userId` is whatever the
+            // connector chose (its own connector picks the open id), so the
+            // explicit union id wins when it is there.
+            let union_id = detail("unionId")
                 .or_else(|| detail("union_id"))
-                .or_else(|| text(identity.get("userId")))
-                .or_else(|| detail("openId"))
-                .or_else(|| detail("open_id"))
+                .or_else(|| raw("union_id"));
+            match union_id {
+                // Clients file a TENANTED Feishu subject as a union id
+                // (`lark:<tenant_key>:<union_id>`), so the tenant travels only
+                // with a union id.
+                Some(union_id) => (
+                    Some(union_id),
+                    detail("tenantKey")
+                        .or_else(|| detail("tenant_key"))
+                        .or_else(|| raw("tenant_key")),
+                ),
+                // An open id under a bare tenant key would read as a union id
+                // and name the wrong person, so it goes out untenanted.
+                None => (
+                    text(identity.get("userId"))
+                        .or_else(|| detail("openId"))
+                        .or_else(|| detail("open_id"))
+                        .or_else(|| raw("open_id")),
+                    None,
+                ),
+            }
         } else {
-            text(identity.get("userId")).or_else(|| detail("id"))
+            (
+                text(identity.get("userId")).or_else(|| detail("id")),
+                detail("tenantKey").or_else(|| detail("tenant_key")),
+            )
         };
         let Some(subject) = subject else { continue };
-        let tenant = detail("tenantKey").or_else(|| detail("tenant_key"));
         let label = detail("name")
             .or_else(|| detail("login"))
             .or_else(|| detail("nickname"))
@@ -679,6 +710,67 @@ mod tests {
             ]
         );
         assert!(identities_from_user(&serde_json::json!({ "id": "x" })).is_empty());
+    }
+
+    #[test]
+    fn the_feishu_union_id_and_tenant_are_read_from_logto_raw_data() {
+        // The shape Logto's official Feishu connector actually stores: the
+        // identity is keyed on the open id and the userinfo sits in `rawData`.
+        let user = serde_json::json!({
+            "id": "logto-ada",
+            "identities": {
+                "feishu": {
+                    "userId": "ou_open",
+                    "details": {
+                        "id": "ou_open",
+                        "name": "Ada",
+                        "avatar": "https://example.test/a.png",
+                        "rawData": {
+                            "sub": "ou_open",
+                            "name": "Ada",
+                            "open_id": "ou_open",
+                            "union_id": "on_union",
+                            "tenant_key": "tk_1",
+                            "avatar_url": "https://example.test/a.png"
+                        }
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            identities_from_user(&user),
+            vec![ExternalIdentityClaim {
+                provider: "feishu".into(),
+                subject: "on_union".into(),
+                tenant: Some("tk_1".into()),
+                label: Some("Ada".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_feishu_open_id_never_travels_under_a_bare_tenant_key() {
+        // Without a union id the subject falls back to the open id, which is
+        // per app; filing it under the tenant alone would make clients read it
+        // as a union id.
+        let user = serde_json::json!({
+            "id": "logto-ada",
+            "identities": {
+                "feishu": {
+                    "userId": "ou_open",
+                    "details": { "name": "Ada", "rawData": { "open_id": "ou_open", "tenant_key": "tk_1" } }
+                }
+            }
+        });
+        assert_eq!(
+            identities_from_user(&user),
+            vec![ExternalIdentityClaim {
+                provider: "feishu".into(),
+                subject: "ou_open".into(),
+                tenant: None,
+                label: Some("Ada".into()),
+            }]
+        );
     }
 
     #[tokio::test]

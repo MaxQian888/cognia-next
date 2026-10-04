@@ -166,7 +166,7 @@ New ids are UUIDv7 or CSPRNG nanoid. Human issue numbers come from a counter in 
 - People get one account across desktops, phones and the web; a phone keeps working with every host offline; two desktops are both writable; scheduled tasks and bots run once.
 - Cognia now operates user-facing infrastructure: an identity Worker with D1 and an account Durable Object with R2, on Workers Paid. At about 10,000 active users the estimate is $150–200 per month, dominated by DO and R2 storage; batching keeps row writes inside the included allowance.
 - Preconditions before the first synced table: CSPRNG ids, per-key settings rows, BYOK keys out of `settings`, the issue counter in the account object, the outbox middleware, and the catalog's `account-e2e` class with its gate.
-- Defects found during this design and fixed independently of it (items 1–5 fixed on 2026-10-04; see the [ADR-0091](./0091-lark-unified-identity-dual-entry) implementation update):
+- Defects found during this design and fixed independently of it (items 1–5 and 9 fixed on 2026-10-04; see the [ADR-0091](./0091-lark-unified-identity-dual-entry) implementation update):
   1. The Feishu connector never records `union_id` (`LarkSenderId` in `lib/connectors/adapters/lark/parse.ts` has only `open_id`/`user_id`, and principal creation omits `unionId`), so login links and IM principals never match.
   2. Inbound principal resolution never reads `externalIdentities` (`lib/connectors/.../resolve.ts`).
   3. `logtoSubject` on Feishu principals is documented as filled on login but never written.

@@ -166,7 +166,7 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 - 用户获得跨桌面、手机和网页的统一账号；所有主机都离线时手机依然可用；两台桌面都可写；定时任务和机器人只运行一次。
 - Cognia 从此运营面向用户的基础设施：一个带 D1 的身份 Worker，以及一个带 R2 的账号 Durable Object，使用 Workers 付费套餐。按约 1 万活跃用户估算每月 150–200 美元，主要是 DO 和 R2 存储；批量写入让行写入次数保持在套餐包含额度内。
 - 第一张表开始同步之前的前置条件：CSPRNG ID、按键拆分的设置行、BYOK 密钥移出 `settings`、议题计数器移到账号对象、待发送中间件，以及表目录的 `account-e2e` 类别和对应门禁。
-- 本次设计中发现、可独立修复的缺陷（第 1–5 项已于 2026-10-04 修复，见 [ADR-0091](./0091-lark-unified-identity-dual-entry) 的实现更新）：
+- 本次设计中发现、可独立修复的缺陷（第 1–5 项和第 9 项已于 2026-10-04 修复，见 [ADR-0091](./0091-lark-unified-identity-dual-entry) 的实现更新）：
   1. 飞书连接器从不记录 `union_id`（`lib/connectors/adapters/lark/parse.ts` 中的 `LarkSenderId` 只有 `open_id`/`user_id`，创建主体时也不传 `unionId`），所以登录关联和 IM 主体永远对不上。
   2. 入站主体解析从不读取 `externalIdentities`（`lib/connectors/.../resolve.ts`）。
   3. 飞书主体上的 `logtoSubject` 文档说登录时会填写，实际从未写入。
