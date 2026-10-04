@@ -1,0 +1,231 @@
+---
+title: Desktop pet API
+description: What a plugin can do with the desktop pet. Read its public state, follow its events, care for it and reward it under a daily budget, add shop items and achievements, and fill its UI slots. Desktop shell only.
+---
+
+# Desktop pet API
+
+The desktop pet (ADR-0058) runs only in the desktop app's main window.
+A plugin reaches it through four surfaces.
+
+| Surface | What it does | Gate | Runtimes |
+| --- | --- | --- | --- |
+| `ctx.pet` | Read state, follow events, interact, reward | The `pet` capability plus `pet:read` / `pet:interact` | frontend, hybrid |
+| `onPet*` hooks | Lifecycle transitions (interaction, level up, evolution, achievement, unwell) | `pet:read` | frontend, hybrid |
+| `petItems` / `petAchievements` | Data-only shop items and achievements in the manifest | Validated at install and at register | any (manifest) |
+| `pet.console.tab` / `pet.panel.actions` slots | UI in the `/pet` console and the interaction panel | Slot manifest | frontend, hybrid |
+
+The authoritative per-method reference is generated from the contract catalog (`packages/plugin-sdk/contract/catalog.json`).
+This page explains the rules behind those methods.
+
+## Declare the capability and permissions
+
+```json title="plugin.json"
+{
+  "capabilities": ["pet"],
+  "permissions": ["pet:read", "pet:interact"]
+}
+```
+
+Without the `pet` capability every `ctx.pet` method is a no-op.
+It warns once, reads return `null` or zero, and `getAvailability()` answers `missing-capability`.
+`ctx.pet` never throws for a plugin that simply did not opt in.
+
+With the capability, each method still needs its permission.
+A missing permission throws, because the guard fails closed.
+
+| Method | Permission |
+| --- | --- |
+| `getView()`, `getSummary()` | `pet:read` |
+| `getAvailability()` | `pet:read` |
+| `onEvent(cb)` | `pet:read` |
+| `getRemainingBudget()` | `pet:read` |
+| `interact(kind, opts?)` | `pet:interact` |
+| `emitEvent(kind, opts?)` | `pet:interact` |
+
+The host pins this table against the contract catalog with a parity test, so the reference cannot drift from what is enforced.
+
+## Read the pet
+
+`getView()` returns a PII-safe summary, or `null` before the pet profile exists.
+
+```ts
+interface PluginPetSummary {
+  hatched: boolean
+  name: string | null
+  level: number
+  stage: PetStage
+  xp: number
+  mood: PetMood
+  needs: { energy: number; mood: number; bond: number }
+  condition: PetCondition
+  coins: number
+}
+```
+
+`getSummary()` returns the same shape today.
+The summary never carries the account fingerprint, the pet's bones or the soul's personality text.
+
+## Ask before you reward
+
+```ts
+const availability = await ctx.pet.getAvailability()
+if (!availability.available) {
+  // "missing-capability" | "disabled" | "unsupported-host"
+  // | "secondary-window" | "uninitialized" | "not-hatched"
+  return showWhy(availability.reason)
+}
+```
+
+When the pet is switched off, still an egg, or not set up yet, `interact` and `emitEvent` grant zero **quietly**.
+The pet's own state is not your plugin's fault, so they do not throw.
+Check availability first, so a quest is not marked claimed for a reward the pet never received.
+A web or mobile host answers `unsupported-host`, and the overlay and popup windows answer `secondary-window`.
+
+## Interact and reward
+
+Both calls spend one shared daily budget **per plugin**: 50 XP and 100 coins a day.
+They return what was actually granted.
+
+```ts
+const left = ctx.pet.getRemainingBudget() // { xp, coins }
+
+await ctx.pet.interact("fed")
+await ctx.pet.interact("fed", { itemId: "plugin:my-plugin:star-cookie" })
+
+const { grantedXp, grantedCoins } = await ctx.pet.emitEvent("pluginReward", {
+  xp: 10,
+  coins: 20,
+  meta: { goalId: "daily-3" },
+})
+```
+
+- `interact(kind)` performs one of the seven care actions: `fed`, `played`, `petted`, `talked`, `slept`, `cleaned`, `treated`.
+  The kind's host award is spent from the budget.
+  When the budget is spent, the action still settles needs and plays its flourish, but grants nothing.
+- `emitEvent(kind)` accepts the care kinds, `workflowRun` and `pluginReward`.
+  Use `pluginReward` for a reward that is not itself a care action, such as a finished quest or a reached milestone.
+  It cheers the pet up but feeds no care counter or stat.
+- Each `emitEvent` is clamped to `MAX_XP_PER_EMIT` (10) and `MAX_COINS_PER_EMIT` (20) before the budget applies.
+  Explicit coins are minted as asked. The user's care streak does not multiply them.
+- A reward never carries an item. `meta` is reduced to id-shaped keys (`achievementId`, `itemId`, `goalId`, `level`, `stage`).
+- Calls are also rate-limited in bursts.
+
+### Errors
+
+Import the error classes from `@cognia/plugin-sdk/api/pet` to tell them apart.
+
+| Error | When | Spent? |
+| --- | --- | --- |
+| `PetEventKindNotAllowedError` | `emitEvent` with a kind outside the list above | No |
+| `PetCooldownError` (`kind`, `retryAfterMs`) | The pet is still recovering from the same care action | No |
+| `PetItemNotOwnedError` (`itemId`) | An unknown item, or one the user does not own | No |
+| `PetItemKindMismatchError` (`itemId`, `kind`, `itemKind`) | The item is for another action, for example food passed to `petted` | No |
+| rate-limit `Error` | Too many calls in a burst | No |
+
+The cooldown check runs before anything is spent, so a refused call costs neither budget nor items.
+
+```ts
+import { PetCooldownError } from "@cognia/plugin-sdk/api/pet"
+
+try {
+  await ctx.pet.interact("played")
+} catch (err) {
+  if (err instanceof PetCooldownError) retryIn(err.retryAfterMs)
+  else throw err
+}
+```
+
+## Follow events
+
+`onEvent(cb)` forwards sanitized events from the pet's bus and returns a disposer.
+
+```ts
+const dispose = ctx.pet.onEvent((event) => {
+  // { source, kind, xp?, meta?, at }
+})
+```
+
+It forwards every kind on the bus, including ambient agent-state kinds such as `thinking` or `idle`, not only care actions.
+Filter on `kind`.
+`meta` is reduced to id-shaped keys, so free text such as what the user said to the pet never reaches plugin code.
+
+For transitions, prefer the lifecycle hooks.
+They fire once per transition and need only `pet:read`.
+A plugin without `pet:read` is skipped when the hook dispatches.
+
+| Hook | Payload |
+| --- | --- |
+| `onPetInteract` | `{ kind, source, xp, at }`, the seven care kinds only |
+| `onPetLevelUp` | `{ level, stage, at }` |
+| `onPetEvolved` | `{ stage, level, at }` |
+| `onPetAchievementUnlocked` | `{ achievementId, at }` |
+| `onPetUnwell` | `{ condition, at }` |
+
+## Contribute items and achievements
+
+Shop items and achievements are data in the manifest, not code.
+The host validates them when the plugin installs and again when it registers them.
+An invalid entry is refused with a message naming the field.
+The host namespaces every id as `plugin:<pluginId>:<id>`.
+
+```json title="plugin.json"
+{
+  "capabilities": ["pet", "pet-item", "pet-achievement"],
+  "petItems": [
+    {
+      "id": "star-cookie",
+      "labels": { "en": "Star cookie", "zh-CN": "星星饼干" },
+      "category": "food",
+      "price": 25,
+      "consumable": true,
+      "interactionKind": "fed",
+      "needsEffect": { "energy": 12, "mood": 4 }
+    }
+  ],
+  "petAchievements": [
+    {
+      "id": "quest-master",
+      "labels": { "en": "Quest master" },
+      "icon": "Sparkles",
+      "condition": { "type": "counter", "kind": "pluginReward", "gte": 3 }
+    }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `id` | 1–64 characters, letters, digits, `.`, `_`, `-`, starting with a letter or digit |
+| `labels` | Must include `en` |
+| `category` | `food`, `toy` or `decor` |
+| `price` | Whole coins, 1 to 100,000 |
+| `interactionKind` | Required for a consumable; one of the seven care kinds |
+| `needsEffect` | Consumables only; `energy` / `mood` / `bond`, each −100 to 100 |
+| `condition.type` | `counter` (kind is a pet event kind the activity ledger records), `level`, or `need` (`energy` / `mood` / `bond`, `gte` ≤ 100) |
+| `condition.gte` | A finite, non-negative number |
+
+`definePetItem` and `definePetAchievement` from the SDK run the same validation, so a bad entry fails in your build instead of at install.
+The Python SDK (`cognia.pet`) mirrors the rules for Python-authored manifests.
+
+## Fill the pet's UI slots
+
+| Slot | Where | Context |
+| --- | --- | --- |
+| `pet.console.tab` | A tab in the `/pet` console rail | `{ level, stage, mood, condition }` |
+| `pet.panel.actions` | The action row of the interaction panel (widget and console) | `{ level, stage, mood, condition }` |
+
+The desktop popup, the small quick menu the pet opens on right click, renders **no** plugin slot.
+It is a separate, non-activating window sized to its content, and a plugin row there could not be measured, focused or dismissed reliably.
+
+## Import from the SDK
+
+`@cognia/plugin-sdk/api/pet` is the author-facing subpath.
+It carries the contract values (`PLUGIN_EMITTABLE_PET_EVENT_KINDS`, `MAX_XP_PER_EMIT`, `MAX_COINS_PER_EMIT`), the error classes, the types, `definePetItem` / `definePetAchievement`, and read-only views of the item and achievement registries.
+It does not expose register or by-id unregister functions.
+Contributions go through the manifest, which the host validates, and a by-id unregister could remove another plugin's entry.
+
+## Example
+
+`plugins/pet-daily-quests` is the in-tree reference.
+It checks `getAvailability()` before marking a quest claimed, pays out through `emitEvent("pluginReward")`, and shows a localized "your pet can't receive rewards right now" toast when the pet is unavailable.

@@ -8,13 +8,13 @@ description: A real PTY inside the app — transport selection across desktop, m
 <Status variant="stable">Stable · ADR-0031 → 0033</Status>
 
 <TLDR>
-  The terminal is a real PTY, not an emulator over a command runner. Which pipe carries it is decided by
+  The terminal is a real PTY, not an emulator over a command runner. The transport is selected by
   `selectTerminalTransport()` (`lib/terminal/pick-transport.ts:31`): a Tauri desktop gets the in-process
   `tauri-channel`, Capacitor mobile gets `ws` over LAN/mDNS, and a desktop driving a remote Cognia host
   retargets to the host's `/ws/v1/terminal`. Prompt boundaries, exit codes and cwd changes come from
   **OSC 633** shell-integration sequences parsed in Rust (`crates/cognia-terminal/src/osc633.rs`), which
   validates a per-spawn nonce so a hostile process inside the terminal can't fabricate prompt decorations.
-  Agents get their own door — `headless-exec` plus a per-tab trust gate (`lib/terminal/agent-trust.ts`).
+  Agents use a separate entry point — `headless-exec` plus a per-tab trust gate (`lib/terminal/agent-trust.ts`).
 </TLDR>
 
 <StatGrid>

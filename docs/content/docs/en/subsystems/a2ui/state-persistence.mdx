@@ -16,7 +16,7 @@ description: The Zustand runtime store keeps the 20 most recent complete surface
   invoked from the renderer/hook layer, never from the store. On the Mini Apps route,
   `hydratePersistedApps()` restores missing runtime trees from saved `a2uiApps` rows through
   `restoreSurface`; legacy template-only instances retain deterministic regeneration as a fallback.
-  Undo/redo lives in-memory only (50-entry stacks, 300 ms debounce).
+  Undo/redo remains in memory only (50-entry stacks, 300 ms debounce).
 </TLDR>
 
 <StatGrid>

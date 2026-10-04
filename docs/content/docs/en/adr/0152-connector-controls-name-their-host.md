@@ -1,6 +1,6 @@
 ---
 title: "0152 — Connector controls name their host"
-description: "Every connector control in Settings answered 'can I run here?' with isTauri(), and told a cloud companion its adapters needed the desktop app while those adapters were running on the paired server. Replaces the shell check with a host resolver, splits three genuinely desktop-bound controls out from the rest, and gives plugin-contributed connectors the configuration surface the registry already assumed."
+description: "Settings used isTauri() for every connector control. Cloud companions therefore claimed their adapters required desktop even when the adapters ran on the paired server. Replaces the shell check with a host resolver, separates three desktop-only controls, and adds the configuration surface for plugin-contributed connectors."
 ---
 
 # ADR 0152 — Connector controls name their host
@@ -119,9 +119,9 @@ uses, so "route it there" and "it needs a lease" cannot disagree.
 `lib/connectors/credential-lease.ts` acquires a single lease covering all four
 operations and caches it until it expires. A Slack form reads five credentials
 and writes up to five more; ten prompts would train an operator to approve
-without reading. A refusal is remembered briefly so a re-mounting dialog cannot
-queue a prompt per paint, and an explicit retry clears it — which is what the
-new unlock affordance on a `stored` field does. The lease rides in the
+without reading. A refusal is remembered briefly so a remounting dialog cannot
+queue a prompt on every render. An explicit retry clears it through the new
+unlock control on a `stored` field. The lease rides in the
 arguments rather than a header because that is where `rpc.rs` reads it and
 because the WebRTC DataChannel path has no headers.
 

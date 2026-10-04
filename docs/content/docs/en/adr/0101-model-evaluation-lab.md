@@ -10,7 +10,7 @@ description: "Local-first reproducible model and Agent evaluation with durable e
 
 ## Context
 
-The original evaluation workspace was a useful regression runner, but a run was owned by one React promise, cases carried one text string, target snapshots omitted provider/runtime facts, and completion could outrun case persistence. It could not safely answer a model-selection question involving cost, latency, privacy, multimodal inputs, retries, or uncertainty. Comparisons across unrelated datasets also created misleading denominators.
+The original evaluation workspace was a useful regression runner, but a run was owned by one React promise, cases carried one text string, target snapshots omitted provider/runtime facts, and completion could occur before cases were persisted. It could not safely answer a model-selection question involving cost, latency, privacy, multimodal inputs, retries, or uncertainty. Comparisons across unrelated datasets also created misleading denominators.
 
 ## Decision
 

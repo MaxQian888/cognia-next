@@ -1,6 +1,6 @@
 ---
 title: "ADR-0056 — 移动端设置对等性"
-description: "将Capacitor移动设置接口（/me）与桌面设置完全对等性，独立（BYOK）作为主线。解决核心矛盾——独立的Webview引擎没有运行tools/agent循环——通过模式门槛对代理类设置进行限制：它们在配对模式下远程编辑桌面sidecar，并在独立模式下隐藏，而不是直接发布，也不会阻碍更大UI引擎重写的工作。在设置存储驱动的桌面部分组件中，重新使用，并扩展配套app_settings_update允许列表，覆盖已经同步但还无法写回的代理偏好字段，permissionMode被限制在biometric/can_control后面。"
+description: "将Capacitor移动设置接口（/me）与桌面设置保持功能一致，独立（BYOK）作为主线。解决核心矛盾——独立的Webview引擎没有运行tools/agent循环——根据运行模式限制 Agent 类设置：它们在配对模式下远程编辑桌面sidecar，并在独立模式下隐藏，避免在独立模式直接开放这些设置，也不影响后续更大范围的 UI 引擎重写。复用由设置存储驱动的桌面区域组件，并扩展配套 app_settings_update 允许列表，覆盖已经同步但还无法写回的代理偏好字段，permissionMode被限制在biometric/can_control后面。"
 ---
 
 # ADR-0056 — 移动端设置对等性
@@ -19,9 +19,9 @@ description: "将Capacitor移动设置接口（/me）与桌面设置完全对等
 
 2. **独立引擎是一个纯调用AI SDK `streamText`。** 它只消耗模型和已组合的系统提示符。它运行**无工具、无MCP、无代理循环、无权限模式、无`autoMode`/`toolFilter`/thinking预算。** 任何在*独立*手机上显示的任何代理类设置，今天都没有消费者——它UI死了，是仓库中最常见的缺陷类别。
 
-第三个事实限制了wire/security的边界。设置同步是非对称的：
-- 桌面→手机镜像19个密钥（`CROSS_PLATFORM_SETTING_KEYS`），**包括**代理字段`autoMode`、`permissionMode`、`defaultSystemPrompt`、`defaultMaxThinkingTokens`、`bareMode`、`debugMode`、`briefMode`。
-- 手机→桌面允许~36个密钥（`src-tauri/src/companion_api/rpc.rs`中`APP_SETTINGS_MOBILE_ALLOWED_KEYS`），服务器端强制执行OpenAPI spec-对等性+Rust测试。上面的代理字段在里面是**NOT**：手机能看到但无法编辑回去。`apiKey`、`apiBaseUrl`、提供商配置、`sidecarPath`和传输键都是在移动端*不可写*的，并且一直保持这样。
+设置同步的方向也限制了协议与安全边界。设置同步并非双向对称：
+- 桌面→手机镜像 19 个设置键（`CROSS_PLATFORM_SETTING_KEYS`），**包括**代理字段`autoMode`、`permissionMode`、`defaultSystemPrompt`、`defaultMaxThinkingTokens`、`bareMode`、`debugMode`、`briefMode`。
+- 手机→桌面允许 ~36 个设置键（`src-tauri/src/companion_api/rpc.rs`中`APP_SETTINGS_MOBILE_ALLOWED_KEYS`），服务器端强制执行OpenAPI spec-对等性+Rust测试。上述 Agent 字段**不在允许列表中**：手机可查看，但无法修改后写回。`apiKey`、`apiBaseUrl`、提供商配置、`sidecarPath`和传输键都是在移动端*不可写*的，并且一直保持这样。
 
 我们评估了三种解决代理与设定张力的方法：
 

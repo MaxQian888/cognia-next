@@ -9,16 +9,13 @@ description: 当前 Companion TLS listener、cgnp3 初始化、DPoP access token
 
 <TLDR>
   规范设备 API 不再把长期 bearer token 当作正常凭据。设备先注册公钥并签署一分钟 challenge，
-  再换取五分钟 DPoP access token；每次 WebSocket 连接还需签发 60 秒、单次使用的 ticket。
+  再换取五分钟 DPoP access token。每次 WebSocket 连接还需签发 60 秒、单次使用的 ticket。
   Headless 模式使用独立的 loopback service token，不进入设备鉴权流程。
 </TLDR>
 
 ## Listener 边界
 
-desktop 管理的 Companion listener 默认使用 loopback，启用 LAN 后才对外开放。独立入口
-`cognia-server serve` 为部署场景绑定 `0.0.0.0:27890`；选择
-`pnpm dev:headless --local-debug` 时，开发启动器会附加 `--bind-loopback`。TLS 在 Rust 内终止，
-请求体有大小上限，中间件会先按信任边界分类，再交给 handler。
+desktop 管理的 Companion listener 默认使用 loopback，启用 LAN 后才对外开放。独立入口 `cognia-server serve` 为部署场景绑定 `0.0.0.0:27890`；选择 `pnpm dev:headless --local-debug` 时，开发启动器会附加 `--bind-loopback`。TLS 在 Rust 内终止，请求体有大小上限，中间件会先按信任边界分类，再交给 handler。
 
 | 路由族 | 凭据 |
 | --- | --- |
@@ -48,9 +45,7 @@ sequenceDiagram
   C-->>D: DPoP access token（300 秒）
 ```
 
-`cgnp3` 载荷明确声明 `owner-invitation` 或 `oidc`，只有前者携带一次性 invitation。受管模式会在
-注册前校验 Logto issuer、resource/audience、Web client 与 organization。认证私钥和 signaling
-私钥只进入 Browser Vault 或系统安全存储，目标簿只保存公开元数据。
+`cgnp3` 载荷明确声明 `owner-invitation` 或 `oidc`，只有前者携带一次性 invitation。受管模式会在注册前校验 Logto issuer、resource/audience、Web client 与 organization。认证私钥和 signaling 私钥只进入 Browser Vault 或系统安全存储，目标簿只保存公开元数据。
 
 ## 调用规范 HTTP 路由
 
@@ -69,14 +64,11 @@ Content-Type: application/json
 
 ## WebSocket ticket
 
-用有效 DPoP 请求调用 `POST /api/auth/socket-ticket` 并指定 channel。返回 ticket 在 60 秒后过期、
-只能使用一次且绑定目标 socket path。通过 `ticket` query parameter 传入；不要把 DPoP access token
-放进 WebSocket URL。
+用有效 DPoP 请求调用 `POST /api/auth/socket-ticket` 并指定 channel。返回 ticket 在 60 秒后过期、只能使用一次且绑定目标 socket path。通过 `ticket` query parameter 传入；不要把 DPoP access token 放进 WebSocket URL。
 
 ## 破坏性升级策略
 
-服务器只挂载未版本化的规范路由。缺少 P-256 设备密钥的目标记录会被判定为失效，并要求重新完成
-`cgnp3` 配对；长期 bearer device JWT 不再接受或迁移。
+服务器只挂载未版本化的规范路由。缺少 P-256 设备密钥的目标记录会被判定为失效，并要求重新完成 `cgnp3` 配对；长期 bearer device JWT 不再接受或迁移。
 
 ## 开发调试凭据
 
@@ -86,6 +78,4 @@ Content-Type: application/json
 pnpm dev:headless --local-debug --skip-build
 ```
 
-启动器会强制 loopback bind，并写出临时 Apifox/Postman 环境；它不会关闭鉴权。仅在凭据需要跨重启
-保存时，才使用 `pnpm --silent dev:headless token` 获取 24 小时 service JWT。详见
-[Headless service plane](./headless-service-plane)。
+启动器会强制 loopback bind，并写出临时 Apifox/Postman 环境；它不会关闭鉴权。仅在凭据需要跨重启保存时，才使用 `pnpm --silent dev:headless token` 获取 24 小时 service JWT。详见 [Headless service plane](./headless-service-plane)。

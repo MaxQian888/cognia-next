@@ -1,6 +1,6 @@
 ---
 title: "0125 — Durable Work Submission and Immutable Input Ownership"
-description: "Commits a chat turn's message, frozen input and execution run in one transaction before anything is dispatched, so a crash cannot leave a visible message nothing will answer — and never replays work automatically once a tool has run."
+description: "Commits a chat turn's message, frozen input and execution run in one transaction before dispatch. A crash cannot leave a visible message with no work to answer it. Work is never replayed automatically after a tool has run."
 ---
 
 # ADR 0125 — Durable Work Submission and Immutable Input Ownership
@@ -13,10 +13,9 @@ description: "Commits a chat turn's message, frozen input and execution run in o
 When a user pressed send, the intent to do that work existed only in renderer
 memory. `hooks/chat/use-claude-chat-controller.ts` wrote the user message,
 created an `ExecutionRun`, then called `sendPrompt` — three separate commits
-with real gaps between them. A crash in any gap left one of two bad states: a
-message the user can see that nothing will ever answer, or a run with no
-message. Neither was recoverable, because nothing recorded that the work had
-been accepted.
+with real gaps between them. A crash between commits could leave a visible message with no work to
+answer it, or a run with no message. Neither state was recoverable because no
+record showed that the work had been accepted.
 
 Retries had a related problem. Nothing owned the input, so a retry re-derived
 the prompt from whatever the session looked like at retry time. A turn retried

@@ -1,6 +1,6 @@
 ---
 title: MCP 工具与桥接
-description: A2UI 的 MCP 工具 schema 集合，以及三条跨进程派发路径 —— 本地 socket / 命名管道、进程内 Claude Agent SDK、ACP stdout 嗅探 —— 它们最终都汇聚到唯一的 Zustand store 入口。
+description: A2UI 的 MCP 工具 schema 集合，以及三条跨进程派发路径 —— 本地 socket / 命名管道、进程内 Claude Agent SDK、ACP stdout 嗅探 —— 它们最终都汇聚到唯一的 Zustand 状态存储入口。
 ---
 
 # MCP 工具与桥接
@@ -8,11 +8,11 @@ description: A2UI 的 MCP 工具 schema 集合，以及三条跨进程派发路�
 <Status variant="experimental" />
 
 <TLDR>
-  A2UI 由**运行在其它进程里的 agent** 产出 —— 外部 CLI、内置的 Claude Agent SDK 会话、ACP 原生工具
+  A2UI 由**运行在其他进程中的智能体** 产出 —— 外部 CLI、内置的 Claude Agent SDK 会话、ACP 原生工具
   —— 但它必须渲染进**唯一**的 webview React 树。本页描述使其成立的桥接层：MCP **工具 schema**
   （`lib/a2ui/mcp-tool-schemas.ts`）、独立的 stdio MCP 服务器（`sidecar/a2ui-mcp.mjs`）、进程内 SDK
   服务器（`sidecar/a2ui-tools/index.mjs`），以及 Rust 本地 IPC 监听器（`src-tauri/src/a2ui_bridge/`）。
-  三条相互独立的派发路径汇聚到 `useA2UIStore.getState().processMessage`。线上信封恒为
+  三条相互独立的派发路径汇聚到 `useA2UIStore.getState().processMessage`。传输消息的封装格式固定为
   `{ type: "a2ui_dispatch", message }`；Tauri 通道恒为 `a2ui://dispatch`；工具名恒以
   `mcp__a2ui-bridge__*` 命名空间限定。
 </TLDR>

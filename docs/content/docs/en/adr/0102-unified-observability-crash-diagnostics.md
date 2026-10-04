@@ -11,7 +11,7 @@ description: "Adopt a versioned cross-runtime event contract, local-first crash-
 
 Cognia already has a capable renderer logging package, IndexedDB and native
 transports, a Tauri panic hook and out-of-process minidump monitor, crash report
-UI, and OpenTelemetry integration. Those parts use different persisted shapes,
+UI, and OpenTelemetry integration. These parts use different stored data structures,
 retention rules, correlation boundaries, and user surfaces. The Capacitor app,
 CLI, Sidecars, plugins, and remote services do not yet share one crash lifecycle
 or one capability model. Routine log export and crash submission also need

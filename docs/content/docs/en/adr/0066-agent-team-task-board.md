@@ -87,7 +87,7 @@ on runtime state is unchanged). Cross-device visibility is a **one-way projectio
 
 ### 4. Pause / resume (closes the second ADR-0022 deferral)
 
-`agentTeamManager.pause` existed (abort + mark `paused`); `resume` now re-enters
+`agentTeamManager.pause` existed (abort + mark `paused`). `resume` now re-enters
 the lifecycle: stranded `claimed`/`in_progress` tasks reset to `pending` (claims
 released), stuck teammates reset, the blackboard is re-seeded from persisted
 `task.result` (shared memory is in-memory only — a restart would otherwise starve
@@ -98,7 +98,7 @@ synthesize cleanly. `review` tasks are never auto-resumed (they await the board
 verdict). Relatedly, the wave path (adaptive re-plan / progress ledger) now
 re-opens its reused run row between waves — the ADR-0061 P4 ownership guard
 ("terminal rows are never resurrected") silently skipped every wave after the
-first; companion soft-cancel (a `cancelled` row) is still honored.
+first. Companion soft-cancel (a `cancelled` row) is still honored.
 
 ### 5. Plugin + twin de-siloing
 

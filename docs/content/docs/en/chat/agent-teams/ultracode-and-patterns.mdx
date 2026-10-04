@@ -5,9 +5,18 @@ description: Ultracode orchestration (ADR-0022 addendum) — a planner teammate 
 
 # Ultracode & Quality Patterns
 
-A normal team run synthesizes a flat task DAG: one workflow node per `AgentTeamTask`, wired by `dependencies`. **Ultracode mode** replaces that. Instead of mirroring tasks, a lead-planner teammate composes a pipeline of higher-order `pattern.*` workflow nodes — each one internally fans out many tool-enabled `dispatchTeammate` calls under the run's concurrency bound. This is the Claude Code "ultracode" quality-orchestration model ported onto the Agent Team subsystem: parallel blind finders, adversarial refutation, judge panels, a completeness critic, and a terminal synthesizer that folds everything into one cited report.
+A normal team run creates a flat task DAG with one workflow node per `AgentTeamTask`, connected by `dependencies`.
+**Ultracode mode** uses a different structure.
+A lead-planner teammate composes a pipeline of higher-order `pattern.*` workflow nodes instead of mirroring tasks.
+Each node internally dispatches multiple tool-enabled `dispatchTeammate` calls within the run's concurrency bound.
+This adapts Claude Code's "ultracode" quality-orchestration model to Agent Teams.
+The pipeline combines parallel blind finders, adversarial refutation, judge panels, a completeness critic, and a final synthesizer into one cited report.
 
-The six pattern nodes live in `lib/ai/agent/team/patterns/`. The planner (`ultracode-planner.ts`) decides which patterns to compose and how wide; the synthesizer (`synthesize-ultracode.ts`) wires them into a forward-only DAG; the trigger (`ultracode-trigger.ts`) decides whether a run is ultracode at all; the type + Zod surface lives in `types/agent/ultracode.ts`.
+The six pattern nodes are in `lib/ai/agent/team/patterns/`.
+The planner (`ultracode-planner.ts`) chooses the patterns and their parallelism.
+The synthesizer (`synthesize-ultracode.ts`) connects them into a forward-only DAG.
+The trigger (`ultracode-trigger.ts`) determines whether a run uses ultracode.
+The types and Zod definitions are in `types/agent/ultracode.ts`.
 
 <TLDR>
   `isUltracodeActive` (`lib/ai/agent/team/ultracode/ultracode-trigger.ts:15-31`) gates the run: override `force`/`off`

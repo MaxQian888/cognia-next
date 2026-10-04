@@ -5,8 +5,7 @@ description: "在保留 Tauri EmbeddedEngine 的同时，增加按 workspace 持
 
 # ADR-0085 — Cloud/Headless 共享浏览器
 
-**状态**：已采纳；实验性、默认关闭（2026-07-18）
-**基于**：ADR-0055、ADR-0059、ADR-0065、ADR-0072、ADR-0073
+**状态**：已采纳；实验性、默认关闭（2026-07-18）**基于**：ADR-0055、ADR-0059、ADR-0065、ADR-0072、ADR-0073
 
 ## 背景
 
@@ -75,9 +74,4 @@ runtime secret 是 `COGNIA_WORKSPACE_RUNTIME_SECRET_DIR` 下以 workspace id 命
 
 ## 附录（2026-09-25）——删除命名配置会清除其数据
 
-命名配置是 workspace runtime 上的一个用户数据目录。设置中此前可以创建和选择配置却无法删除，
-而 `deleteBrowserProfile` 只会删掉客户端的记录，目录会成为孤儿。现在
-`browser_profile_delete { workspaceId, profileId }` 会调用 runtime 的 `browser.profile.delete` 操作删除
-该目录。网关（按账户与工作区）与 runtime 都会在有会话持有该配置时拒绝，runtime 还会拒绝任何会解析
-到配置根目录之外的 id。客户端先清除 runtime 上的副本，再删除本地记录，因此被拒绝时配置仍会保留，
-可以重试。
+命名配置是 workspace runtime 上的一个用户数据目录。设置中此前可以创建和选择配置却无法删除，而 `deleteBrowserProfile` 只会删掉客户端的记录，目录会残留在运行时。现在 `browser_profile_delete { workspaceId, profileId }` 会调用 runtime 的 `browser.profile.delete` 操作删除该目录。网关（按账户与工作区）与 runtime 都会在有会话持有该配置时拒绝，runtime 还会拒绝任何会解析到配置根目录之外的 id。客户端先清除 runtime 上的副本，再删除本地记录。删除被拒绝时，配置仍会保留，可以重试。

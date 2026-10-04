@@ -9,7 +9,7 @@ description: Current health and readiness endpoints, LAN discovery, TLS identity
 
 <TLDR>
   The Companion listener defaults to TLS on port `27890`. LAN discovery advertises the listener and
-  certificate identity; `GET /healthz` confirms the process, while `/livez` and `/readyz` separate
+  certificate identity. `GET /healthz` confirms the process, while `/livez` and `/readyz` separate
   liveness from dependency readiness. Tunnel or managed front doors preserve the same canonical
   `/api/*` and `/ws/*` paths. There is no versioned compatibility alias.
 </TLDR>

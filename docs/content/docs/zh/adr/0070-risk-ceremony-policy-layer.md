@@ -1,6 +1,6 @@
 ---
 title: "0070 — 风险→审查流程策略层"
-description: "一个确定性的风险分类器，决定何时自动运行需要向人类设置检查点，首先连接到Agent Team的计划审批门禁。"
+description: "一个确定性的风险分类器，决定自动运行何时需要人工确认节点，首先连接到Agent Team的计划审批门禁。"
 ---
 
 ## 状态
@@ -112,7 +112,7 @@ Tool/capability **存在感**是主要信号;关键词集是粗略的次级，�
 
 ### 分类判断
 
-缺席就是设计。门控：连接器send/forward、git push、移动共享（离开机器，无法撤回）;每一个行动或捕获的`action.desktop.*`;实壳节点;连接器删除。**非**门控：`.draft`和`.reaction`（可轻易可逆）;本地git commit/stage/branch;删除应用本地记录（`action.goal.delete`、`action.plan.delete`、`action.scheduler.task.delete`）——整理自身目标的工作流程是常规自动化，门控教操作员关闭`riskGating`，失去了关键的shell/mouse/send门控;以及`action.plugin.invoke` / `action.skill.invoke`——通配符，但规则是门禁每个插件调用门禁最真实的工作流程，并且这些工作流都被按能力限制的插件权限保护保护。这层门禁了应用无法逃脱或无法撤销的部分，而不是所有突变。
+策略有意不限制部分操作。门控：连接器send/forward、git push、移动共享（离开机器，无法撤回）;每一个行动或捕获的`action.desktop.*`;实壳节点;连接器删除。**非**门控：`.draft`和`.reaction`（易于撤销）;本地git commit/stage/branch;删除应用本地记录（`action.goal.delete`、`action.plan.delete`、`action.scheduler.task.delete`）——整理自身目标的工作流程是常规自动化，门控教操作员关闭`riskGating`，失去了关键的shell/mouse/send门控;以及`action.plugin.invoke` / `action.skill.invoke`——通配符，但规则是门禁每个插件调用门禁最真实的工作流程，并且这些工作流都被按能力限制的插件权限保护保护。这一层限制数据离开应用或无法撤销的操作，而不是所有修改。
 
 ### 迁移——决策#2（“B”），以及为何它不是假设性
 

@@ -5,7 +5,8 @@ description: Install Cognia from source, run it in web mode and desktop mode, an
 
 # Getting Started
 
-From a fresh clone to a working web dev server **and** a Tauri desktop window. Allow ~15 minutes for the first build; subsequent runs are seconds.
+This guide starts with a fresh clone and ends with a working web development server and a Tauri desktop window.
+Allow approximately 15 minutes for the first build. Subsequent runs take seconds.
 
 ## Prerequisites
 
@@ -21,7 +22,7 @@ Platform-specific notes:
 <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
   <Tab value="Windows">
     Install **Visual Studio Build Tools** (with the "Desktop development with C++" workload).
-    **WebView2 Runtime** is preinstalled on Windows 11; on Windows 10 install it from
+    **WebView2 Runtime** is preinstalled on Windows 11. On Windows 10, install it from
     [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/).
   </Tab>
   <Tab value="macOS">
@@ -31,12 +32,12 @@ Platform-specific notes:
     xcode-select --install
     ```
 
-    No further setup needed for Apple Silicon or Intel Macs.
+    No further setup is needed for Apple Silicon or Intel Macs.
 
   </Tab>
   <Tab value="Linux">
-    Install GTK / WebKitGTK / libsoup. See the
-    [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your distro.
+    Install GTK, WebKitGTK, and libsoup. See the
+    [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your distribution.
 
     On Ubuntu / Debian:
 
@@ -76,13 +77,15 @@ cargo --version
     pnpm install
     ```
 
-    Installs every workspace member: root (`cognia-next`), `docs/`, `mobile/`, `packages/plugin-sdk/`. Single `pnpm-lock.yaml` at the repo root.
+    This command installs dependencies for every workspace member: root (`cognia-next`), `docs/`, `mobile/`, and `packages/plugin-sdk/`.
+    The repository uses one `pnpm-lock.yaml` at its root.
 
   </Step>
   <Step>
     ### Implicit setup
 
-    `prepare` wires Husky hooks (commitlint + lint-staged); `predev` / `prebuild` copy Monaco assets into `public/` and build the VS Code sidecar.
+    `prepare` installs Husky hooks for commitlint and lint-staged.
+    `predev` / `prebuild` copy Monaco assets into `public/` and build the VS Code sidecar.
 
   </Step>
   <Step>
@@ -105,15 +108,20 @@ pnpm dev:main     # Main-flow startup; optional capabilities load on first use
 pnpm dev:cached   # Full startup with persistent Turbopack cache enabled
 ```
 
-Opens Next.js dev server at [http://localhost:3000](http://localhost:3000). Web mode is suitable for:
+These commands start the Next.js development server at [http://localhost:3000](http://localhost:3000). Web mode is suitable for:
 
-- UI development on components that don't depend on Tauri APIs.
+- UI development on components that do not depend on Tauri APIs.
 - Writing tests.
-- Quick iteration without paying the Rust compile cost.
+- Quick iteration without compiling Rust.
 
-In web mode, code paths that call `invoke()` are gated by `isTauri()` (`lib/tauri.ts`); they no-op in the browser. The native vector store option is hidden in twin settings (cloud backends only).
+In web mode, `isTauri()` (`lib/tauri.ts`) guards code paths that call `invoke()`.
+These paths perform no action in the browser.
+Twin settings hide the native vector store option and offer only cloud backends.
 
-`main` is development-only. Production static exports always use the complete `eager` profile and still emit every optional dynamic chunk. The default cache-off commands remove only `.next/dev/cache/turbopack` before startup; use a `:cached` command when warm-compile speed is more important than bounded disk and native RSS.
+`main` is for development only.
+Production static exports always use the complete `eager` profile and emit every optional dynamic chunk.
+The default commands disable caching and remove only `.next/dev/cache/turbopack` before startup.
+Use a `:cached` command when faster compilation from a warm cache matters more than limiting disk use and native RSS.
 
 ## Run in desktop mode
 
@@ -124,12 +132,14 @@ pnpm tauri:dev:cached   # Full startup with persistent Turbopack cache
 pnpm tauri:dev:full     # Full Rust debug symbols; independent of boot profile
 ```
 
-This runs `beforeDevCommand: pnpm dev` in parallel, then compiles and launches the Tauri window. The first compile takes minutes (downloads + compiles ~300 Rust crates); subsequent runs are seconds.
+These commands run `beforeDevCommand: pnpm dev` in parallel, then compile and open the Tauri window.
+The first compilation takes minutes because it downloads and compiles approximately 300 Rust crates.
+Subsequent runs take seconds.
 
-If the window opens, the install is good. From here you can:
+If the window opens, the installation succeeded. You can then:
 
-- Resize, drag, minimize — window state is persisted by `tauri-plugin-window-state`.
-- `Ctrl/Cmd+Q` quits cleanly; the sidecar is killed by the lifecycle handler in `src-tauri/src/lib.rs`.
+- Resize, drag, or minimize the window. `tauri-plugin-window-state` saves its state.
+- Press `Ctrl/Cmd+Q` to quit cleanly. The lifecycle handler in `src-tauri/src/lib.rs` terminates the sidecar.
 - Open DevTools from the system tray (debug builds only).
 
 ## Verify the toolchain
@@ -185,7 +195,8 @@ If any line shows ❌, fix it before continuing.
       </Tab>
     </Tabs>
 
-    You can also pass `PORT=3010 pnpm dev` and update `tauri.conf.json` → `build.devUrl` accordingly.
+    Alternatively, run `PORT=3010 pnpm dev`.
+    Update `tauri.conf.json` → `build.devUrl` to use the same port.
 
   </Accordion>
   <Accordion title="Rust compile errors" id="rust-errors">

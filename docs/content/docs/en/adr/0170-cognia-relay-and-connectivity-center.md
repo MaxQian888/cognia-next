@@ -1,6 +1,6 @@
 ---
 title: "0170: The relay is the WAN, and connectivity is one surface"
-description: "The hosted signaling rendezvous carries the application data lane, an invitation carries a relay room so first pairing works from anywhere, the Host's connectivity configuration lives on an owner-authenticated RPC plane, and Settings has one Connectivity section."
+description: "The hosted signaling rendezvous carries application data. Invitations include a relay room so first pairing can work from anywhere. The Host's connectivity configuration uses an owner-authenticated RPC plane. Settings provides one Connectivity section."
 ---
 
 # ADR 0170: The relay is the WAN, and connectivity is one surface
@@ -48,9 +48,9 @@ idempotency ledger, the same event cursor and the same 1 MiB message bound
 serve both carriers. On the Host, `carrier.rs` holds a `DataCarrier` that
 prefers an open DataChannel and falls back to the relay. On the client,
 `TransportRtc` opens over the relay the moment the Host's `hello` acknowledges
-it (`relay: true`), reports `open`, and negotiates ICE in the background. A
-DataChannel that opens promotes the carrier. A DataChannel that drops demotes
-it without a reconnect. The tier vocabulary gains `relay`.
+it (`relay: true`), reports `open`, and negotiates ICE in the background. When a
+DataChannel opens, the carrier switches to it. If it drops, the carrier switches
+back to the relay without reconnecting. The tier vocabulary gains `relay`.
 
 The server buckets `Relay` frames by a `lane` field the sender sets without
 the server decrypting anything: the `signal` lane keeps the 20-frame bucket

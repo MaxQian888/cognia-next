@@ -1,6 +1,6 @@
 ---
 title: "0124 — Filesystem Viewer Registry"
-description: "Unifies three file-preview implementations behind one host-owned registry, and confines every read to the open workspace roots."
+description: "Unifies three file-preview implementations through one host-owned registry. Confines every read to the open workspace roots."
 ---
 
 # ADR 0124 — Filesystem Viewer Registry
@@ -76,8 +76,8 @@ at an "outside workspace" error will reach for `cwd` as the obvious fix.
 Instead the root set is the union of every open project's roots — the same set
 `lib/files/allowed-roots-sync.ts` pushes into the Rust allowed-roots registry,
 so the renderer's boundary and the backend's agree, and a stack frame pointing
-into a sibling checkout the user also has open still resolves. Deepest root
-wins; a caller that knows its own workspace passes it as `preferredRoots` to
+into a sibling checkout the user also has open still resolves. The deepest root
+wins. A caller that knows its workspace passes it as `preferredRoots` to
 break a tie.
 
 `openFile(absolutePath, …)` was deleted rather than deprecated. That signature

@@ -99,8 +99,8 @@ Three modes governed by a three-layer policy stack:
 
 ### Inbox UI
 
-`app/inbox/` renders an Inbox shell (`InboxShell`) with a sidebar (`InboxSidebar`) listing
-all platform-bound `ChatSession` rows, and a detail pane with `ConversationHeader` /
+`app/inbox/` renders an Inbox shell (`InboxShell`) with a sidebar (`InboxSidebar`) that lists
+all platform-bound `ChatSession` rows. The detail pane contains `ConversationHeader` /
 `MessageList` / `DraftBanner`. The `/inbox/[conversationKey]` route is a client-only static
 page compatible with `output: "export"`.
 

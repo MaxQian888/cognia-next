@@ -1,6 +1,6 @@
 ---
 title: 会话解析
-description: 已存储的 MCP 服务器如何在一个聊天回合中变成活的工具 —— resolveSendOptions 优先级链（member › character › team › all）加上工具过滤器、buildMcpServerMap、为外部 agent 注入 bridge socket 的 builtin-mcp 占位符解析器，以及在 query() 之前合并 user + cognia-tools + a2ui-bridge + plugin-tools 的 sidecar dispatch。
+description: 已存储的 MCP 服务器如何在一个聊天回合中变成可调用的工具 —— resolveSendOptions 优先级链（member › character › team › all）加上工具过滤器、buildMcpServerMap、为外部 agent 注入 bridge socket 的 builtin-mcp 占位符解析器，以及在 query() 之前合并 user + cognia-tools + a2ui-bridge + plugin-tools 的 sidecar dispatch。
 ---
 
 # 会话解析
@@ -9,9 +9,9 @@ description: 已存储的 MCP 服务器如何在一个聊天回合中变成活�
 
 <TLDR>
   解析分两个阶段。**渲染端**（`build-options.ts:resolveSendOptions`）决定
-  本回合获得 *哪些* 已启用的服务器，沿一条优先级链行走 —— team 成员覆盖胜过
+  本回合获得 *哪些* 已启用的服务器，按优先级依次解析 —— team 成员覆盖胜过
   character 的 `mcpServerIds`，后者胜过 team 的，再回退到所有已启用项 —— 然后应用任何
-  工具过滤器，并将幸存者经 `buildMcpServerMap` 投影进 `opts.mcpServers`。**Sidecar
+  工具过滤器，并将保留的服务器经 `buildMcpServerMap` 投影进 `opts.mcpServers`。**Sidecar
   端**（`dispatch/anthropic.mjs`）拿到那张映射表，并在其上分层叠加进程内服务器：
   `cognia-tools`（内置）、`a2ui-bridge`（始终加载）以及 `cognia-plugin-tools`（存在时），
   每层都带名称遮蔽守卫。对 *外部* agent，第三个辅助函数（`builtin-mcp/resolve.ts`）会改写
@@ -21,8 +21,7 @@ description: 已存储的 MCP 服务器如何在一个聊天回合中变成活�
 
 ## 阶段 1 —— 哪些服务器（渲染端）
 
-`resolveSendOptions`（`lib/claude/build-options.ts:931`）解析出本回合的子集。优先级是
-严格的 —— 第一个匹配的层级获胜：
+`resolveSendOptions`（`lib/claude/build-options.ts:931`）解析出本回合的子集。优先级是严格的 —— 第一个匹配的层级获胜：
 
 | 层级 | 来源 | 何时 |
 | ---- | ------ | ---- |
@@ -63,15 +62,11 @@ if (toolFilter && toolFilter.mode !== "all" && toolFilter.mcpServerIds?.length) 
 if (chosen.length > 0) opts.mcpServers = buildMcpServerMap(chosen)
 ```
 
-输出是 `opts.mcpServers: Record<name, { type, ...config }>` —— 参见
-[`buildMcpServerMap`](./server-config#-agent-sdk-buildmcpservermap)。它随 `SendOptions` 一起进入 sidecar。
+输出是 `opts.mcpServers: Record<name, { type, ...config }>` —— 参见 [`buildMcpServerMap`](./server-config#-agent-sdk-buildmcpservermap)。它随 `SendOptions` 一起进入 sidecar。
 
 ## 阶段 2 —— 占位符解析（外部 agent）
 
-内置的 MCP 行（尤其是被投影的 `a2ui-bridge` 行）携带的是 **占位符 token** 而非
-绝对路径，因为 bundle 位置只有在运行时才知道。`builtin-mcp/resolve.ts` 会改写
-它们。两个操作：在 `command`/`args`/`env` 上替换 `${COGNIA_SIDECAR_DIR}`，以及 —— 仅对
-a2ui-bridge 行 —— 注入 `COGNIA_BRIDGE_SOCKET`，使被 spawn 的子进程能够回派到渲染端：
+内置的 MCP 行（尤其是被投影的 `a2ui-bridge` 行）携带的是 **占位符 token** 而非绝对路径，因为 bundle 位置只有在运行时才知道。`builtin-mcp/resolve.ts` 会改写它们。两个操作：在 `command`/`args`/`env` 上替换 `${COGNIA_SIDECAR_DIR}`，以及 —— 仅对 a2ui-bridge 行 —— 注入 `COGNIA_BRIDGE_SOCKET`，使被 spawn 的子进程能够回派到渲染端：
 
 ```typescript title="lib/claude/builtin-mcp/resolve.ts:93"
 export function resolveBuiltinMcpConfig(server: McpServer, ctx: BuiltinMcpResolveContext): McpServer {
@@ -100,8 +95,7 @@ function substitute(value: string, sidecarDir: string): string {
 }
 ```
 
-运行时路径经 IPC 从 Rust 传来，并在进程生命周期内缓存（它们只在
-应用重启时改变）：
+运行时路径经 IPC 从 Rust 传来，并在进程生命周期内缓存（它们只在应用重启时改变）：
 
 ```typescript title="lib/claude/builtin-mcp/runtime-context.ts:23"
 async function fetchRuntimePaths(): Promise<BuiltinMcpResolveContext | null> {
@@ -113,9 +107,7 @@ async function fetchRuntimePaths(): Promise<BuiltinMcpResolveContext | null> {
 
 ## 阶段 3 —— 合并各层（sidecar）
 
-`sidecar/dispatch/anthropic.mjs` 接收 `sendOptions.mcpServers` 并分四层组装出最终
-映射表。每层先检查 `hasOwnProperty`，因此一个使用保留名称的用户自定义服务器会
-**遮蔽**（胜过）内置项并记录一条警告：
+`sidecar/dispatch/anthropic.mjs` 接收 `sendOptions.mcpServers` 并分四层组装出最终映射表。每层先检查 `hasOwnProperty`，因此一个使用保留名称的用户自定义服务器会**遮蔽**（胜过）内置项并记录一条警告：
 
 | 层 | 来源 | 名称 | alwaysLoad |
 | ----- | ------ | ---- | ---------- |
@@ -139,8 +131,7 @@ A2UI 始终被添加（交互式界面必须常驻，绝不被工具搜索）：
 const a2uiServer = buildA2UIBridgeServer({ sessionId, emit, alwaysLoad: true })
 ```
 
-插件工具以 `sendOptions.pluginTools` 为条件，并构建一个进程内代理，把每次调用
-往返回送到渲染端（参见 [内置工具 › plugin-tools bridge](./builtin-tools#plugin-tools-bridge)）：
+插件工具以 `sendOptions.pluginTools` 为条件，并构建一个进程内代理，把每次调用往返回送到渲染端（参见 [内置工具 › plugin-tools bridge](./builtin-tools#plugin-tools-bridge)）：
 
 ```javascript title="sidecar/dispatch/anthropic.mjs:149"
 if (Array.isArray(sendOptions.pluginTools) && sendOptions.pluginTools.length > 0) {
@@ -183,14 +174,10 @@ sequenceDiagram
 
 ## 边界情况
 
-- **空结果** —— 若 `chosen` 为空，`opts.mcpServers` *不会* 被设置；该回合仍会在
-  sidecar 端获得加入的进程内服务器（cognia-tools / a2ui-bridge）。
-- **名称冲突** —— 两个 `name` 相同的已启用行会在 `buildMcpServerMap` 中坍缩；面板的
-  重名警告就是为防止这种情况而存在。
-- **非 Anthropic 提供方** —— AI-SDK dispatch 路径（`dispatch/ai-sdk.mjs`）消费同一份
-  `mcpServers` 映射表，但以不同方式桥接工具；若存在请参见 [ADR-0043](../../adr/0043-llm-provider-execution)。
-- **Web / jsdom** —— `runtime-context.ts` 在 Tauri 之外返回 `null`，因此占位符解析被
-  跳过，只走本地进程内路径。
+- **空结果** —— 若 `chosen` 为空，`opts.mcpServers` *不会* 被设置；该回合仍会在 sidecar 端获得加入的进程内服务器（cognia-tools / a2ui-bridge）。
+- **名称冲突** —— 两个 `name` 相同的已启用行会在 `buildMcpServerMap` 中坍缩；面板的重名警告就是为防止这种情况而存在。
+- **非 Anthropic 提供方** —— AI-SDK dispatch 路径（`dispatch/ai-sdk.mjs`）消费同一份 `mcpServers` 映射表，但以不同方式桥接工具；若存在请参见 [ADR-0043](../../adr/0043-llm-provider-execution)。
+- **Web / jsdom** —— `runtime-context.ts` 在 Tauri 之外返回 `null`，因此占位符解析被跳过，只走本地进程内路径。
 
 ## 相关页面
 

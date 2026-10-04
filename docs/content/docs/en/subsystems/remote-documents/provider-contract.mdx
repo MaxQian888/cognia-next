@@ -23,7 +23,7 @@ export interface DocsProvider {
 }
 ```
 
-Three properties carry design weight:
+Three properties define the contract:
 
 - **`mentionPrefix`** is colon-terminated (`"lark:"`) and matches the shape of `CHAT_NAMESPACE_PREFIXES` in
   `components/chat/composer-trigger.ts`. The registry rejects a prefix that is not.
@@ -61,7 +61,7 @@ export interface RemoteDocContent {
 }
 ```
 
-A `RemoteDocRef` is cheap: both `search` and `matchRef` produce one without fetching a body. `format` decides
+Creating a `RemoteDocRef` does not fetch the document body. Both `search` and `matchRef` create this reference without fetching content. `format` decides
 the staged attachment's extension and MIME type, which in turn decides how `detectDocumentType` routes it in
 `lib/chat/attachments/dispatch.ts`.
 

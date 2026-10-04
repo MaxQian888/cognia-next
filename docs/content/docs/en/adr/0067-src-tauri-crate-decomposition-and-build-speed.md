@@ -208,11 +208,11 @@ Non-goals), `fleet` (5.7k — tray/window/monitor coupling), `claude` (3.1k — 
 to hooks/companion_api/api_key), `cli_bridge` (2.7k — depends on companion_api), the
 `logging`/`crash`/`perf` telemetry remainder (5.3k — tauri/app wiring around the extracted
 `cognia-instrument` core), windowing/app shell (`pet_window`, `tray`, `menu`, `shortcuts`,
-`browser` — the embedded-webview pane rides tauri's unstable API, `window_*`), `headless`/`bin`
+`browser` — the embedded-webview pane uses tauri's unstable API, `window_*`), `headless`/`bin`
 assembly, the facade modules holding command shells (`subscription/commands.rs`, `proxy_config/`,
 `keyring_secrets.rs`), and sub-1k leaves (`agents`, `github`, `twin`, `parse`, `wallpaper`,
-`capture`, `canvas`, `plugins`, `a2ui_bridge`) where a workspace member's overhead outweighs the
-compile-unit win. `files.rs` (2.2k) and `settings.rs` are app-level by design.
+`capture`, `canvas`, `plugins`, `a2ui_bridge`) where the overhead of a workspace member exceeds the
+benefit of a separate compilation unit. `files.rs` (2.2k) and `settings.rs` are app-level by design.
 
 **Gates run:** per-crate suites (≈1,100 tests across the 13 new crates), targeted app_lib suites
 over every moved seam, `cargo check --workspace` green (0 errors), and

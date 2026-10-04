@@ -1,6 +1,6 @@
 ---
 title: "0208 — Edits to different fields merge; only an edit to the same field conflicts"
-description: "Shared issues and plans keep, next to their record revision, the revision at which each field last changed. A PATCH with a stale baseRevision is applied when none of the fields it names changed after that revision. A 409 is returned only when the same field changed. It then names the conflicting fields and carries the server's values for just those fields, so the conflicts panel shows the real disagreement instead of the whole record. board_order is last-writer-wins in server order. operationId idempotency is unchanged."
+description: "Shared issues and plans record the last-change revision for each field alongside the record revision. A PATCH with stale baseRevision is applied if none of its fields changed after that revision. A 409 identifies only conflicting fields and carries their server values, so the conflicts panel shows the actual disagreement. board_order uses last-writer-wins in server order. operationId idempotency is unchanged."
 ---
 
 # ADR 0208 — Edits to different fields merge; only an edit to the same field conflicts
@@ -49,8 +49,8 @@ work, and it is the one place those products either merge or refuse.
 A new migration (`00NN_field_revisions.sql`, the next free number when this lands) adds `field_revisions jsonb NOT NULL
 DEFAULT '{}'` to `issues` and `plans`. Every accepted write bumps `revision`
 and sets `field_revisions[f] = new revision` for each field it changed. A field
-missing from the map counts as last changed at revision 1. That makes every
-existing row valid without a backfill, and it is conservative: an old row
+missing from the map counts as last changed at revision 1. This keeps every
+existing row valid without a backfill. It is conservative: an old row
 treats a stale base as conflicting on every field.
 
 Runs are excluded. A run is written by the device that holds its lease

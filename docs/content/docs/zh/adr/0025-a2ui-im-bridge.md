@@ -90,9 +90,7 @@ Telegram 文本编辑会合并支持的文本调用及内联键盘；包含媒�
 
 #### 修订（2026-08-31）：处理器不再是唯一去向
 
-上面这一步现在是**默认分支**，不是唯一分支。绑定的 `kind` 若指向产品自己画的卡片，
-会在模型回合之前短路：卡片已经写明了每个按钮做什么，再花一个回合让模型重新解释它，
-既更慢也更不可靠。
+上面这一步现在是**默认分支**，不是唯一分支。绑定的 `kind` 若指向产品自己画的卡片，会在模型回合之前短路：卡片已经写明了每个按钮做什么，再花一个回合让模型重新解释它，既更慢也更不可靠。
 
 | `kind`                | 处理者                                        |
 | --------------------- | --------------------------------------------- |
@@ -102,8 +100,7 @@ Telegram 文本编辑会合并支持的文本调用及内联键盘；包含媒�
 | `notification_action` | `lib/notifications/im-callback-handler.ts`     |
 | 其余                  | `lib/a2ui/connector-callback-handler.ts`       |
 
-词表本身在 `types/connectors/interaction.ts`，那里才是「一个 `kind` 是什么意思」的
-真相源。本 ADR 刻意不逐条复述：那会是第二份会漂移的副本。
+词表本身在 `types/connectors/interaction.ts`，那里才是「一个 `kind` 是什么意思」的真相源。本 ADR 刻意不逐条复述：那会是第二份会漂移的副本。
 
 第五A2UI MCP工具`a2ui_handle_connector_action`加入桥接（`lib/a2ui/mcp-tool-schemas.ts`），是自定义回调处理器想向特定接口注入动作时的投影端点。
 
@@ -113,7 +110,7 @@ Telegram 文本编辑会合并支持的文本调用及内联键盘；包含媒�
 
 ### 来自平台丰富内容的A2UI
 
-`lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts:projectInboundToA2UI` 将一个入站平台载荷发送到匹配的每个平台`inbound-to-a2ui.ts`映射器，生成一个`InboundA2UIBlock`（`inbound-a2ui-types.ts`），该映射会被持久保存到`StoredMessage.metadata.inboundA2UI`并由 `components/chat/message-parts/inbound-a2ui-renderer.tsx` 渲染，使收件箱显示平台原生丰富的结构。
+`lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts:projectInboundToA2UI` 将一个入站平台载荷发送到匹配平台的 `inbound-to-a2ui.ts` 映射器，生成 `InboundA2UIBlock`（`inbound-a2ui-types.ts`），映射结果会保存到 `StoredMessage.metadata.inboundA2UI`，并由 `components/chat/message-parts/inbound-a2ui-renderer.tsx` 渲染，使收件箱能够显示平台原生的结构化内容。
 
 > 注：本ADR早期草稿描述了一种将`MessageSegment[]`折叠成A2UI 接口的`lib/connectors/a2ui-bridge/segments-to-a2ui.ts:segmentsToA2UI`。该模块从未接线（无来电者），后来被**作为死代码**移除了;上述`InboundA2UIBlock`路径是实入射，且不是出射`a2ui-to-segments.ts`投影的倒数。
 

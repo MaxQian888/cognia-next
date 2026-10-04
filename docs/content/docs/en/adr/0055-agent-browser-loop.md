@@ -83,12 +83,12 @@ agent tool call ──► plugins/browser-tools (registerTool ×N)
 
 ### Page → Rust channel
 
-The previewed page is a remote context with no IPC bridge. The key enabler is
+The previewed page is a remote context with no IPC bridge. The result bridge uses
 Tauri 2.11.1's **`Webview::eval_with_callback`**, which serializes the JS result to
 JSON and hands it to a Rust callback on all three engines (WKWebView / WebView2 /
 WebKitGTK). `eval_embed_with_result` bridges that callback to an async command via
 a oneshot channel with a 10 s timeout — so the old `cognia.invalid/__cognia_select`
-sentinel-navigation hack is no longer the only page→Rust path (it is kept only for
+sentinel-navigation mechanism is no longer the only page→Rust path (it is kept only for
 the human click-to-select UX). On Windows `eval_with_callback` swallows exceptions,
 so every injected function wraps its body in `try/catch` and returns an
 error-as-value.

@@ -1,6 +1,6 @@
 ---
 title: "0158 — Artifacts and Canvas: where they live and who may author one"
-description: "Artifacts move out of a 5 MB localStorage blob into Dexie; the model gets tools to create one by name; png/pdf export becomes real; and workflows can reach both. Plus the eight modules retired to get there."
+description: "Moves artifacts from a 5 MB localStorage blob into Dexie. Adds model tools to create an artifact by name. Implements png/pdf export and workflow access to artifacts and Canvas. Retires eight modules."
 ---
 
 # ADR 0158 — Artifacts and Canvas: where they live and who may author one
@@ -258,9 +258,9 @@ All seven use the same shape the measurement condemns — `sandbox="allow-script
 + `srcdoc` + a meta CSP whose `script-src` is `'unsafe-inline'`. In the packaged
 desktop shell **none of their scripts can run**: the MCP Apps sandbox, plugin
 webviews, the VS Code extension panel, `plan-html-view`, the share page's
-`chat-animated`, `code-execution-strategy`, and `task-resources-panel`. Each has
-the same fix available — serve the frame's code from `'self'` or a `blob:`
-script — and each is a separate change, tracked on its own ticket. Nothing in
+`chat-animated`, `code-execution-strategy`, and `task-resources-panel`. Each can
+serve the frame's code from `'self'` or a `blob:`
+script. Each fix is a separate change tracked on its own ticket. Nothing in
 this batch touches them.
 
 Still unfixed: `scripts/gates/check-network-egress.mjs` cannot see a

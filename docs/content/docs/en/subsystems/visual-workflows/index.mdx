@@ -10,8 +10,8 @@ description: n8n-style visual orchestration layer — wire characters, teams, sk
 <TLDR>
   A React Flow v12 editor (Zustand + zundo store, elkjs auto-layout) over **153 node kinds in 7
   categories**, executed by a **hybrid runtime**: Rust owns *when a workflow starts* (cron daemon,
-  HMAC webhook receiver) and *whether a run survived a crash* (SQLite mirror); TS owns *how a run
-  walks the graph step by step* (`runWorkflow` — validate → topo-sort → step loop → durable event
+  HMAC webhook receiver) and *whether a run survived a crash* (SQLite mirror). TS owns *how a run
+  executes the graph step by step* (`runWorkflow` — validate → topo-sort → step loop → durable event
   log). The graph type is `VisualWorkflow` (`types/workflow/visual.ts:242`, `schemaVersion: 1`);
   workflow persistence spans **13 Dexie tables** through schema v156. An AI co-pilot drafts
   Zod-validated batch *proposals* the user previews and applies as a single undo step.

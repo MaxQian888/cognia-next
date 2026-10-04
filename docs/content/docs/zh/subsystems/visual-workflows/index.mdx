@@ -10,7 +10,7 @@ description: n8n 风格的可视化编排层 —— 把角色、团队、技能�
 <TLDR>
   基于 React Flow v12 的编辑器（Zustand + zundo store、elkjs 自动布局），覆盖 **7 大类共 153 种节点**，
   由**混合运行时**执行：Rust 负责*工作流何时启动*（cron 守护进程、HMAC webhook 接收器）以及*某次运行是否
-  从崩溃中幸存*（SQLite 镜像）；TS 负责*给定一次运行如何逐步遍历图*（`runWorkflow` —— 校验 → 拓扑排序 →
+  在崩溃后保留*（SQLite 镜像）；TS 负责*给定一次运行如何逐步遍历图*（`runWorkflow` —— 校验 → 拓扑排序 →
   步骤循环 → 持久化事件日志）。图类型为 `VisualWorkflow`（`types/workflow/visual.ts:242`，`schemaVersion: 1`）；
   工作流持久化横跨 **13 张 Dexie 表**，当前 schema 为 v156。AI 副驾会起草经 Zod 校验的批量*提案（proposal）*，
   用户预览后作为单个撤销步骤应用。
@@ -37,7 +37,7 @@ cognia-next 用这一层把它成熟的运行时实体 —— [角色](../../cha
 
 ## 唯一的承重原则
 
-> **Rust 负责"工作流何时启动"与"这次运行是否从崩溃中幸存"。TS 负责"给定一次运行，如何逐步遍历这些步骤"。**
+> **Rust 负责"工作流何时启动"与"这次运行是否在崩溃后保留"。TS 负责"给定一次运行，如何逐步遍历这些步骤"。**
 
 其余一切都由这条划分推导而来。cron 触发与 webhook 接收必须在 webview 最小化到托盘时仍然工作，因此它们位于 Rust（`src-tauri/src/workflow/`）。逐步编排会接触 Dexie、LLM 客户端、连接器总线与智能体团队运行时 —— 它们都位于 webview —— 因此留在 TS（`lib/workflow/runtime/`）。两侧通过 Tauri 事件以及作用域明确的 trigger、run mirror 与 durable waitpoint IPC 命令通信。Web 模式由 Dexie 提供 waitpoint fallback，TS 编排器继续可用。
 

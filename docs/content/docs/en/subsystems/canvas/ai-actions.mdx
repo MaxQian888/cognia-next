@@ -13,8 +13,8 @@ description: The Canvas AI loop — ten action prompts, the diff-review apply pi
   (`lib/ai/generation/canvas-actions.ts:47`) and write the result back as a reviewable diff
   (`buildCanvasReview:438` → `applyAcceptedCanvasReviewItems:508`). **Suggestions**
   (`useCanvasSuggestions`, `hooks/canvas/use-canvas-suggestions.ts:89`) ask the model for a JSON list
-  and push each into `useArtifactStore.addSuggestion` for accept/reject in the side panel. A built-in
-  `ContextAnalyzer` feeds `useCanvasSuggestions` a bounded scope block; `useCanvasActions` deliberately does not use it.
+  and pass each item to `useArtifactStore.addSuggestion` for accept/reject in the side panel. A built-in
+  `ContextAnalyzer` supplies a bounded scope block to `useCanvasSuggestions`. `useCanvasActions` deliberately does not use it.
 </TLDR>
 
 ## The Ten Actions

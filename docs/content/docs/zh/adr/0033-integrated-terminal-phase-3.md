@@ -1,14 +1,11 @@
 ---
 title: ADR-0033 — 集成终端 Phase 3 — 桌面体验（分屏、命令导航、重载恢复、跳编辑器、定位对话）
-description: Phase 3 把集成终端提升为主力开发终端。(1) VS Code 式的扁平 tab 内分屏，以附加层叠加在既有 tab/session store 之上。(2) 把失效的提示符装饰 stub 重做为真正的 OSC 633 命令 marker + 退出码着色 + 跳上/下条命令。(3) 仅 webview 重载的会话恢复：Rust 进程（及其 PTY）在重载后存活，故用 `SeqEvent` 信封 + 可换 Channel 槽 + `terminal_reattach` 重连并回放保留缓冲——复用 `WsTerminalRegistry` 的 consumer-swap 机制。(4) 终端里可点击的 `path:line:col` 链接按 session cwd 解析后在只读 Monaco 查看器中打开。(5) agent spawn 的终端 tab 可跳回触发它的 chat 会话。WebRTC/移动/服务端阶段维持 scoped out。
+description: Phase 3 把集成终端提升为主力开发终端。(1) VS Code 式的扁平 tab 内分屏，以附加层叠加在既有 tab/session store 之上。(2) 把失效的提示符装饰 stub 重做为真正的 OSC 633 命令 marker + 退出码着色 + 跳上/下条命令。(3) 仅 webview 重载的会话恢复：Rust 进程（及其 PTY）在重载后存活，故用 `SeqEvent` 信封 + 可换 Channel 槽 + `terminal_reattach` 重连并回放保留缓冲——复用 `WsTerminalRegistry` 的 consumer-swap 机制。(4) 终端里可点击的 `path:line:col` 链接按 session cwd 解析后在只读 Monaco 查看器中打开。(5) agent spawn 的终端 tab 可跳回触发它的 chat 会话。WebRTC、移动端与服务端阶段仍不在本次范围内。
 ---
 
 # ADR-0033 — 集成终端 Phase 3
 
-**状态**：Accepted（2026-05-23）
-**作者**：Max Qian + Claude Opus 4.7
-**关系**：扩展 ADR-0031（不替代）
-**影响**：`stores/terminal/`、`components/terminal/`、`lib/terminal/`、`components/providers/initializers/terminal-bridge-initializer.tsx`、`src-tauri/src/terminal/{session,commands,mod}.rs`、`src-tauri/src/companion_api/ws_terminal.rs`、`src-tauri/src/lib.rs`、`i18n/messages/{en,zh-CN}.json`
+**状态**：Accepted（2026-05-23）**作者**：Max Qian + Claude Opus 4.7 **关系**：扩展 ADR-0031（不替代）**影响**：`stores/terminal/`、`components/terminal/`、`lib/terminal/`、`components/providers/initializers/terminal-bridge-initializer.tsx`、`src-tauri/src/terminal/{session,commands,mod}.rs`、`src-tauri/src/companion_api/ws_terminal.rs`、`src-tauri/src/lib.rs`、`i18n/messages/{en,zh-CN}.json`
 
 ## 背景
 
@@ -57,7 +54,7 @@ agent 驱动的终端 tab 已带 `agentSpawner`（chat session id，由 `dock-to
 
 ## 测试覆盖
 
-逐文件 co-located 测试（CLAUDE.md 规则 #3）：`terminal-store.test.ts`（分屏 mutation + anchor 提升）、`terminal-pane-group.test.tsx`、`command-markers.test.ts`、扩展 `terminal-instance.test.tsx`（marker、jump、link provider）、`terminal-links.test.ts`、`file-viewer-store.test.ts`、`file-viewer-dialog.test.tsx`、扩展 `terminal-dock.test.tsx`（分屏/聚焦/定位）、扩展 `terminal-tab-context-menu.test.tsx` 与 `terminal-history-panel.test.tsx`（定位）、扩展 `session.test.ts`（`SeqEvent` 信封 + `reattach`）、`rehydrate.test.ts`。Rust：`session.rs` 的 reattach 回放 + 去重测试（`#[cfg(test)]`）。
+与各源文件同目录的测试（CLAUDE.md 规则 #3）：`terminal-store.test.ts`（分屏 mutation + anchor 提升）、`terminal-pane-group.test.tsx`、`command-markers.test.ts`、扩展 `terminal-instance.test.tsx`（marker、jump、link provider）、`terminal-links.test.ts`、`file-viewer-store.test.ts`、`file-viewer-dialog.test.tsx`、扩展 `terminal-dock.test.tsx`（分屏/聚焦/定位）、扩展 `terminal-tab-context-menu.test.tsx` 与 `terminal-history-panel.test.tsx`（定位）、扩展 `session.test.ts`（`SeqEvent` 信封 + `reattach`）、`rehydrate.test.ts`。Rust：`session.rs` 的 reattach 回放 + 去重测试（`#[cfg(test)]`）。
 
 **305 个前端终端测试通过；`pnpm build` / `pnpm typecheck` / `pnpm lint:i18n` 绿；`cargo check` 干净。** Rust 单测已写但无法在 Windows 开发机执行（Tauri 测试二进制以 `STATUS_ENTRYPOINT_NOT_FOUND` 启动失败——WebView2/运行时 DLL 限制，非代码缺陷；CI 中运行）。真实 app 二进制可正常启动。
 
@@ -82,25 +79,11 @@ agent 驱动的终端 tab 已带 `agentSpawner`（chat session id，由 `dock-to
 
 叠加在本 ADR 之后才落地的「独立进程 durable host」之上。
 
-- **`PathInjection` 归 host 所有。** 应用的 managed-CLI 注册表是进程内 static
-  （`cli_bridge::detect`），独立的 host 进程无从推导。现改为经 `Hello` 帧传入并存于
-  host —— 不是按连接存：远程 spawn（Companion WS、WebRTC）走的连接永远不会发送它，
-  而会话本就归 host 所有。**仅本地身份**可写。应用内下载 CLI 注册新目录后会重新推送；
-  已在运行的 shell 保持旧 PATH（PTY 环境在 `execve` 时固化）。
-- **新增 frame kind 21–23** —— `FlowControl` / `HistoryQuery` / `HistorySnapshot`。
-  此前从未被构造的 `TransportState`(18) 现在承载流控状态变化。**兼容性铁律：host 绝不
-  主动发送 client 未索取的 frame kind**，因为客户端遇到未知判别值会直接抛错。将来若要新增
-  *推送型* kind，必须先经 `Hello` ack 的 `protocolFeatures` 协商。
-- **能力协商。** bridge 会复用已在运行的 host —— 那可能是以登录服务安装的旧二进制，
-  因此新命令都以 host 广播的能力列表把关，并以明确错误降级。
-- **端到端流控。** `FlowGate`（std `Mutex` + `Condvar`）挂起 PTY reader 线程，未读字节
-  留在内核缓冲区、子进程在写入时阻塞。暂停在各 attachment 间引用计数（最慢消费者优先），
-  并由五条独立路径释放 —— detach、断连、attachment 溢出、kill，以及针对「暂停后停止运行的
-  客户端」的 30 秒兜底回收。在此之前，洪流会撑爆 host 的有界每客户端队列并**丢弃整个
-  attachment**：标签页是直接死掉，而不是变慢。
+- **`PathInjection` 归 host 所有。** 应用的 managed-CLI 注册表是进程内 static（`cli_bridge::detect`），独立的 host 进程无从推导。现改为经 `Hello` 帧传入并存于 host —— 不是按连接存：远程 spawn（Companion WS、WebRTC）走的连接永远不会发送它，而会话本就归 host 所有。**仅本地身份**可写。应用内下载 CLI 注册新目录后会重新推送；已在运行的 shell 保持旧 PATH（PTY 环境在 `execve` 时固化）。
+- **新增 frame kind 21–23** —— `FlowControl` / `HistoryQuery` / `HistorySnapshot`。此前从未被构造的 `TransportState`(18) 现在承载流控状态变化。**兼容性铁律：host 绝不主动发送 client 未索取的 frame kind**，因为客户端遇到未知判别值会直接抛错。将来若要新增*推送型* kind，必须先经 `Hello` ack 的 `protocolFeatures` 协商。
+- **能力协商。** bridge 会复用已在运行的 host —— 那可能是以登录服务安装的旧二进制，因此新命令都以 host 广播的能力列表把关，并以明确错误降级。
+- **端到端流控。** `FlowGate`（std `Mutex` + `Condvar`）挂起 PTY reader 线程，未读字节留在内核缓冲区、子进程在写入时阻塞。暂停在各 attachment 间引用计数（最慢消费者优先），并由五条独立路径释放 —— detach、断连、attachment 溢出、kill，以及针对「暂停后停止运行的客户端」的 30 秒兜底回收。在此之前，洪流会撑爆 host 的有界每客户端队列并**丢弃整个 attachment**：标签页是直接死掉，而不是变慢。
 
 ### 已知的下一步
 
-`Channel<HostSeqEvent>` 把 `bytes: Vec<u8>` 序列化成 JSON 十进制数组 —— 约 4 倍膨胀，
-外加每块一次 JSON parse，是洪流路径上最大的常数因子。流控让系统**正确**，但没有让它**快**。
-迁移到二进制 channel body 是后续项。
+`Channel<HostSeqEvent>` 把 `bytes: Vec<u8>` 序列化成 JSON 十进制数组 —— 约 4 倍膨胀，外加每块一次 JSON parse，是洪流路径上最大的常数因子。流控让系统**正确**，但没有让它**快**。迁移到二进制 channel body 是后续项。

@@ -1,6 +1,6 @@
 ---
 title: 触发器与 Rust 后端
-description: 五类工作流触发器的分类、将每一种触发器汇聚到单一 dispatchTrigger 收口的七个 TS 运行时桥，以及负责 cron 触发、本地 axum webhook 接收器与崩溃可恢复的运行镜像的 Tauri/Rust 后端。
+description: 五类工作流触发器的分类、将每一种触发器汇聚到单一 dispatchTrigger 入口的七个 TS 运行时桥，以及负责 cron 触发、本地 axum webhook 接收器与崩溃可恢复的运行镜像的 Tauri/Rust 后端。
 ---
 
 # 触发器与 Rust 后端
@@ -8,7 +8,7 @@ description: 五类工作流触发器的分类、将每一种触发器汇聚到�
 <Status variant="stable" />
 
 <TLDR>
-Rust 负责“何时启动工作流”（cron 守护进程 + axum webhook 接收器）以及“运行或 waitpoint 能否跨崩溃存续”（SQLite 镜像），TS 编排器负责步骤执行。每个正式触发器都汇入 `dispatchTrigger(event)`，再由 Execution Authority 冻结当前 production artifact 后启动编排器。跨进程触发仍通过单一 `workflow:trigger` Tauri 事件；Web 则由 Dexie 承担运行状态与 durable waitpoint fallback。
+Rust 负责「何时启动工作流」（cron 守护进程 + axum webhook 接收器）以及「运行或 waitpoint 能否在崩溃后保留」（SQLite 镜像），TS 编排器负责步骤执行。每个正式触发器都汇入 `dispatchTrigger(event)`，再由 Execution Authority 冻结当前 production artifact 后启动编排器。跨进程触发仍通过单一 `workflow:trigger` Tauri 事件；Web 则由 Dexie 承担运行状态与 durable waitpoint fallback。
 </TLDR>
 
 ## 触发器分类

@@ -28,7 +28,7 @@ description: types/agent/external-agent.ts（2168 行）—— 外部 Agent 运�
 
 ## 协议/传输分类法
 
-两条正交的轴描述 Cognia *如何*抵达一个 Agent。它们最先声明，因为其他每个类型都以它们为键。
+两条相互独立的轴描述 Cognia *如何*连接 Agent。它们在其他类型之前声明，因为其余类型都以这两条轴为键。
 
 | 类型 | 行 | 成员 | 备注 |
 | --- | --- | --- | --- |
@@ -39,8 +39,7 @@ description: types/agent/external-agent.ts（2168 行）—— 外部 Agent 运�
 
 ## 规范诊断模型
 
-这是本文件的承重部分：Manager 用来解释*发生了什么、为什么*的词汇表。[规范契约](./canonical-readiness)
-模块是填充这些字段的逻辑；这里是它们的形状。
+这是本文件的承重部分：Manager 用来解释*发生了什么、为什么*的词汇表。[规范契约](./canonical-readiness)模块是填充这些字段的逻辑；这里是它们的形状。
 
 | 类型 | 行 | 角色 |
 | --- | --- | --- |
@@ -62,8 +61,7 @@ description: types/agent/external-agent.ts（2168 行）—— 外部 Agent 运�
 
 ## ACP 线缆面
 
-325–1032 行一比一镜像 [Agent Client Protocol](https://agentclientprotocol.com) 规范，从而让
-[`acp-client.ts`](./acp-client) 能保持为一层薄传输。主要分组：
+325–1032 行一比一镜像 [Agent Client Protocol](https://agentclientprotocol.com) 规范，从而让 [`acp-client.ts`](./acp-client) 能保持为一层薄传输。主要分组：
 
 | 分组 | 行 | 关键类型 |
 | --- | --- | --- |
@@ -77,14 +75,11 @@ description: types/agent/external-agent.ts（2168 行）—— 外部 Agent 运�
 | 文件系统与终端 | 836 / 851 | `AcpReadTextFileParams`、`AcpTerminalCreateParams`、`AcpTerminalOutputResult` |
 | 权限请求/响应 | 1003 / 1024 | `AcpPermissionRequest`、`AcpPermissionResponse`、`AcpPermissionOption` |
 
-`AcpSessionUpdate` 联合（`:964`）是下游最关键的那个——它就是 [`translators.ts`](./translation) 转换成
-规范事件的原始流。
+`AcpSessionUpdate` 联合（`:964`）是下游最关键的那个——它就是 [`translators.ts`](./translation) 转换成规范事件的原始流。
 
 ## 配置模型
 
-`ExternalAgentConfig`（`:1122`）是被持久化并喂给 Manager 的东西。它是一个判别形状：`transport: "stdio"`
-用 `process?: ExternalAgentProcessConfig`（`:1041`），网络传输用 `network?: ExternalAgentNetworkConfig`
-（`:1076`）。
+`ExternalAgentConfig`（`:1122`）是被持久化并喂给 Manager 的东西。它是一个判别形状：`transport: "stdio"` 用 `process?: ExternalAgentProcessConfig`（`:1041`），网络传输用 `network?: ExternalAgentNetworkConfig`（`:1076`）。
 
 | 字段分组 | 行 | 备注 |
 | --- | --- | --- |
@@ -95,10 +90,7 @@ description: types/agent/external-agent.ts（2168 行）—— 外部 Agent 运�
 | 可靠性 | 1151–1159 | `timeout`、`retryConfig`（`ExternalAgentRetryConfig` `:1106`）、`maxConcurrentSessions`、`sessionIdleTimeout`。 |
 | 投影 | 1166 | `validitySnapshot`——最后已知的规范快照，与配置一起持久化。 |
 
-`CreateExternalAgentInput`（`:1177`）与 `UpdateExternalAgentInput`（`:1197`）是写入形状；默认值由
-[`config-normalizer.ts`](./canonical-readiness) 应用。默认值本身是这里的常量：
-`DEFAULT_EXTERNAL_AGENT_RETRY_CONFIG`（`:1907`，3 次重试 / 1s / 指数退避）与
-`DEFAULT_EXTERNAL_AGENT_CONFIG`（`:1917`，5 分钟超时，3 个并发会话）。
+`CreateExternalAgentInput`（`:1177`）与 `UpdateExternalAgentInput`（`:1197`）是写入形状；默认值由 [`config-normalizer.ts`](./canonical-readiness) 应用。默认值本身是这里的常量：`DEFAULT_EXTERNAL_AGENT_RETRY_CONFIG`（`:1907`，3 次重试 / 1s / 指数退避）与 `DEFAULT_EXTERNAL_AGENT_CONFIG`（`:1917`，5 分钟超时，3 个并发会话）。
 
 ## 会话、消息与步骤模型
 
@@ -114,8 +106,7 @@ description: types/agent/external-agent.ts（2168 行）—— 外部 Agent 运�
 
 ## 流式事件联合
 
-`ExternalAgentEvent`（`:1673`）是每个协议都坍缩进的 21 变体判别联合。它是*协议相关*代码（客户端）与
-*协议无关*代码（Manager、translators、渲染器）之间的接缝。
+`ExternalAgentEvent`（`:1673`）是每个协议都坍缩进的 21 变体判别联合。它是*协议相关*代码（客户端）与*协议无关*代码（Manager、translators、渲染器）之间的接缝。
 
 ```mermaid
 flowchart LR
@@ -158,17 +149,12 @@ flowchart LR
   class PR,PRES,PLAN,CMD,CFG,MODE,PROG ctrl
 ```
 
-所有变体共享 `ExternalAgentEventBase`（`:1462`：`type`、`sessionId?`、`timestamp`）。[翻译页](./translation)
-展示哪些协议更新映射到哪个变体，以及 [`event-to-parts.ts`](./translation) 如何把它们投影进聊天渲染器。
+所有变体共享 `ExternalAgentEventBase`（`:1462`：`type`、`sessionId?`、`timestamp`）。[翻译页](./translation)展示哪些协议更新映射到哪个变体，以及 [`event-to-parts.ts`](./translation) 如何把它们投影进聊天渲染器。
 
 ## 本文件附带的辅助
 
 尽管是个类型文件，它把纯序列化 + 守卫辅助一并放在形状旁边：
 
-- **序列化器** —— `serializeExternalAgentConfig`/`deserialize…`（`:1983`/`:1994`）、`…Session`
-  （`:2006`/`:2022`）、`…Result`（`:2039`/`:2057`）。它们处理 `Date` ⇄ ISO 字符串的往返
-  （`localStorage`/IPC）。
-- **类型守卫** —— `isTextContent`（`:2080`）… `isErrorContent`（`:2130`）针对内容块；
-  `isStreamingTextEvent`（`:2139`）、`isToolUseEvent`（`:2148`）、`isPermissionEvent`（`:2164`）针对事件。
-- **委派** —— `ExternalAgentDelegationRule`（`:1865`）与 `ExternalAgentDelegationResult`（`:1887`）为
-  Manager 在 `checkDelegation`（`manager.ts:2095`）中评估的规则路由定型。
+- **序列化器** —— `serializeExternalAgentConfig`/`deserialize…`（`:1983`/`:1994`）、`…Session`（`:2006`/`:2022`）、`…Result`（`:2039`/`:2057`）。它们处理 `Date` ⇄ ISO 字符串的往返（`localStorage`/IPC）。
+- **类型守卫** —— `isTextContent`（`:2080`）… `isErrorContent`（`:2130`）针对内容块；`isStreamingTextEvent`（`:2139`）、`isToolUseEvent`（`:2148`）、`isPermissionEvent`（`:2164`）针对事件。
+- **委派** —— `ExternalAgentDelegationRule`（`:1865`）与 `ExternalAgentDelegationResult`（`:1887`）为 Manager 在 `checkDelegation`（`manager.ts:2095`）中评估的规则路由定型。

@@ -91,9 +91,9 @@ That spec runs on the Capacitor shell rather than the desktop browser project, b
 build renders a "run inside Tauri" banner where the chat pane would be. The `chromium` project
 `testIgnore`s `tests/e2e/mobile/**`, so the pill's geometry is covered on exactly one project.
 **The right-edge timeline rail's geometry — its lane beside the scrollbar, and its at-rest
-visibility — has no E2E coverage**: the rail is desktop-only (`shouldMountTimeline` bails on
-mobile), so the one project that renders it is `tauri`, which is opt-in and serial. Its behaviour is
-unit-tested; its layout is not.
+visibility — has no E2E coverage**: the rail is desktop-only (`shouldMountTimeline` skips
+mobile), so the one project that renders it is `tauri`, which is opt-in and serial. Its behaviour has
+unit tests. Its layout has no E2E coverage.
 
 The return point is a scroll *offset*, not a message id: what the user wants back is the view they
 had, and the message they were reading may not be a turn anchor. A single slot rather than a stack

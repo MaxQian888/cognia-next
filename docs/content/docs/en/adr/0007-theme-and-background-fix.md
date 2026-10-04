@@ -25,11 +25,11 @@ investigations confirmed:
   setting to defaults.
 - Low background opacity hides foreground text.
 
-The root causes are not "code missing" — they are **hooks that were never
-mounted, fallback orders written backwards, and a CSS scope feature whose
-target attribute was never applied to any container**. Fixing them
-requires a coordinated set of changes that also pulls forward design
-upgrades the half-built feature missed: a dual-variant `{light, dark}`
+The root causes are **hooks that were never mounted, fallback orders
+written backwards, and a CSS scope feature whose target attribute was
+never applied to any container**. The fixes require coordinated changes.
+These changes also add the design features that the partial implementation
+omitted: a dual-variant `{light, dark}`
 token model, automatic OKLCH derivation between variants, real-time WCAG
 contrast feedback, and explicit error surfaces for the import flow.
 

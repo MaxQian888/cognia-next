@@ -5,10 +5,9 @@ description: "Calling the built-in ocr.extract tool from a custom plugin or exte
 
 # OCR Plugin Tool
 
-The built-in `cognia-ocr` plugin (`plugins/ocr/`) exposes a single agent tool —
-`ocr.extract` — wired into every shell. This guide covers the call shape for
-plugin authors that want their own tool to chain into OCR, plus how to invoke
-the slash command from another plugin.
+The built-in `cognia-ocr` plugin (`plugins/ocr/`) exposes one agent tool, `ocr.extract`, in every shell.
+This guide describes how plugin authors can call OCR from their own tools.
+It also explains how to invoke the slash command from another plugin.
 
 ## Tool surface
 

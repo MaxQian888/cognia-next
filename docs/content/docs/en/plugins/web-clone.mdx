@@ -5,12 +5,11 @@ description: "The /web-clone slash command — snapshot a live page into the wor
 
 # Web Clone Plugin
 
-The built-in `cognia-web-clone` plugin (`plugins/web-clone/`) adds the
-`/web-clone` slash command: a user-facing entry point to the same vendored
-snapshot engine that backs the `web_clone` / `web_clone_convert` agent tools
-and the `io.webClone` workflow node. All three funnel through the
-`web_clone_snapshot` Tauri command, so the engine — including its SSRF gate —
-behaves identically everywhere. Desktop only.
+The built-in `cognia-web-clone` plugin (`plugins/web-clone/`) adds the `/web-clone` slash command.
+It uses the same vendored snapshot engine as the `web_clone` / `web_clone_convert` agent tools and the `io.webClone` workflow node.
+All three call the `web_clone_snapshot` Tauri command.
+The engine, including its SSRF gate, behaves identically at each entry point.
+This feature is available only on desktop.
 
 ## Snapshot mode
 

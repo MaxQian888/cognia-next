@@ -5,7 +5,7 @@ description: "在 QQ 开放平台创建机器人，获取 App ID 与 Client Secr
 
 # QQ 官方机器人配置指南
 
-本指南将引导你在 **QQ 开放平台** 创建一个官方授权的机器人、获取所需的 **App ID** 与 **Client Secret**，并配置 cognia-next 通过 HTTPS Webhook 接入。这是 QQ 官方认可的机器人通道，区别于非官方的 OneBot / NapCat 接入方式。
+本指南说明如何在 **QQ 开放平台** 创建官方授权的机器人、获取 **App ID** 和 **Client Secret**，并配置 cognia-next 通过 HTTPS Webhook 接入。这是 QQ 官方认可的机器人通道；OneBot / NapCat 属于非官方接入方式。
 
 ---
 

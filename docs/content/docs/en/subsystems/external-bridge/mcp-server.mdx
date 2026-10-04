@@ -11,7 +11,7 @@ description: buildMcpServer — the transport-agnostic SDK skeleton that registe
   `buildMcpServer(opts)` (`server.ts:58`) builds a `@modelcontextprotocol/sdk` `McpServer` with all of
   Cognia's tools, resources, and prompts pre-wired through the permission gate and audit log. It is
   **transport-agnostic** — the caller supplies stdio / HTTP / in-memory via `server.connect(transport)`.
-  Every tool callback funnels through one helper, `runWithGate` (`server.ts:877`): get fresh settings →
+  Every tool callback uses one helper, `runWithGate` (`server.ts:877`): get fresh settings →
   run the gate → dispatch to a handler → record latency + outcome → wrap the result in the MCP `{ content }`
   envelope. A `SettingsGetter` is injected so the server always reads the *current* whitelist, never a
   stale snapshot captured at build time.

@@ -45,11 +45,11 @@ to the manager. Three pieces:
 
 ### Why there is no protocol `switch`
 
-Selection is **registration + lookup**, not branching. The manager registers default factories in
-`registerDefaultAdapters` (`manager.ts:563`) and resolves one with
-`protocolAdapterRegistry.create(config.protocol)` (`manager.ts:978`). ACP registers under `"acp"`,
-OpenCode under `"opencode"` (`opencode-client.ts:123`). Adding a third protocol is a registration,
-not an edit to the manager.
+The manager selects protocols through registration and lookup.
+It registers default factories in `registerDefaultAdapters` (`manager.ts:563`).
+It resolves a factory with `protocolAdapterRegistry.create(config.protocol)` (`manager.ts:978`).
+ACP registers under `"acp"`, and OpenCode registers under `"opencode"` (`opencode-client.ts:123`).
+To add a third protocol, register its factory. The manager needs no protocol-specific edit.
 
 ### The shared execute() fold
 

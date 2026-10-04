@@ -5,7 +5,10 @@ description: How to evaluate Cognia's built-in agents — the four kinds (modes,
 
 # Evaluating built-in agents
 
-Cognia ships a TS-native, in-process **eval engine** (`lib/ai/eval/*`) that runs an agent against a versioned dataset, captures each run as a trajectory, scores it across four dimensions, and aggregates a report with `pass@1` / `pass^k` reliability. It powers both the **CI gate** (`pnpm test:evals`) and the in-app **`/eval`** dashboard.
+Cognia includes a TS-native, in-process **eval engine** (`lib/ai/eval/*`).
+It runs an agent against a versioned dataset and records each run as a trajectory.
+It scores trajectories across four dimensions and produces a report with `pass@1` / `pass^k` reliability.
+The engine serves both the **CI gate** (`pnpm test:evals`) and the in-app **`/eval`** dashboard.
 
 <TLDR>
   Evaluating a built-in agent is not "build an eval system" — the engine is already there. You point a

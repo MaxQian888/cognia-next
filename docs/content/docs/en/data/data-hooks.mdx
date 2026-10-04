@@ -5,7 +5,11 @@ description: The DataAdapter abstraction — letting chat components run the sam
 
 # Data Hooks
 
-`lib/data-hooks/` is the "slot" between the chat UI and the persistence layer. It extracts the pattern of components directly calling Dexie (`useLiveQuery(() => listCharacters())`) behind an interface called `DataAdapter`, injected via `<DataAdapterProvider adapter={...}>`. The desktop gets a Dexie implementation; the mobile PWA will later get a WebSocket bridge implementation — the same component code runs in both forms.
+`lib/data-hooks/` connects the chat UI to the persistence layer.
+It replaces direct Dexie calls in components (`useLiveQuery(() => listCharacters())`) with the `DataAdapter` interface.
+The app injects that interface through `<DataAdapterProvider adapter={...}>`.
+The desktop uses a Dexie implementation.
+A future WebSocket bridge implementation will serve the mobile PWA, so both can use the same component code.
 
 <TLDR>
   `types.ts` defines the `DataAdapter` interface (4 reactive `use*` reads + 4 one-off mutations).
@@ -19,9 +23,14 @@ description: The DataAdapter abstraction — letting chat components run the sam
 
 ## Design Motivation
 
-The cognia-next desktop app stores data in Dexie (IndexedDB), and chat components read it directly via `useLiveQuery(() => listCharacters())`. But the mobile PWA cannot replicate Dexie — data stays on the desktop machine, and the phone fetches it over LAN/tunnel via WebSocket. The same `ChatHeader / Composer / MessageRenderer` should not have two copies of the code.
+The cognia-next desktop app stores data in Dexie (IndexedDB).
+Chat components read it directly through `useLiveQuery(() => listCharacters())`.
+The mobile PWA cannot replicate Dexie. Data stays on the desktop, and the phone retrieves it through WebSocket over LAN or a tunnel.
+The same `ChatHeader / Composer / MessageRenderer` components should serve both clients without duplicate code.
 
-DataAdapter unifies "reactive data fetching + submitting changes" into an interface; the desktop injects a Dexie implementation, the mobile injects a WS implementation, and components neither know nor need to know.
+DataAdapter provides one interface for reactive data retrieval and changes.
+The desktop injects a Dexie implementation, and the mobile client injects a WS implementation.
+Components do not need to know which implementation they use.
 
 ## Interface
 

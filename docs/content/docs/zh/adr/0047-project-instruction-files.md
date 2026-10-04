@@ -5,10 +5,7 @@ description: "为内置 Agent 增加磁盘指令文件加载：在活动工作�
 
 # ADR-0047 — 项目指令文件
 
-**状态**：已接受（2026-06-09）
-**作者**：Max Qian + Claude Opus 4.8
-**承接**：ADR-0030（角色/人格提示栈）与 `lib/claude/build-options.ts` 中的 `resolveSendOptions` 装配；复用 ADR-0044/0046 确立的"纯解析器 + Tauri 读取器"拆分（`lib/lsp/resolve-config.ts` + `project-file-reader.ts`）
-**影响**：`lib/claude/instructions/*`（新模块）、`lib/claude/build-options.ts`、`lib/claude/types.ts`（`AppSettings.instructions`、`Character.instructionsOverride`）、`lib/claude/agents/markdown-agents.ts`（现已接线）、`components/settings/instructions/instructions-card.tsx`（新增）、`components/settings/general-section.tsx`、`i18n/messages/{en,zh-CN}.json`
+**状态**：已接受（2026-06-09）**作者**：Max Qian + Claude Opus 4.8 **承接**：ADR-0030（角色/人格提示栈）与 `lib/claude/build-options.ts` 中的 `resolveSendOptions` 装配；复用 ADR-0044/0046 确立的"纯解析器 + Tauri 读取器"拆分（`lib/lsp/resolve-config.ts` + `project-file-reader.ts`）**影响**：`lib/claude/instructions/*`（新模块）、`lib/claude/build-options.ts`、`lib/claude/types.ts`（`AppSettings.instructions`、`Character.instructionsOverride`）、`lib/claude/agents/markdown-agents.ts`（现已接线）、`components/settings/instructions/instructions-card.tsx`（新增）、`components/settings/general-section.tsx`、`i18n/messages/{en,zh-CN}.json`
 
 ## 背景
 
@@ -45,7 +42,7 @@ markdown 子代理的解析+合并层（`lib/claude/agents/markdown-agents.ts`�
 
 ### 接线（`build-options.ts`）
 
-`cwd` 解析上提到系统提示装配之前；发现的 `instructionSection` 加入**稳定提示前缀**（在 base/人格之后、记忆之前），使供应商提示缓存持续命中。它在 `--bare` 下跳过（不做磁盘自动发现，Claude Code 一致），并在 `workflow-editor` 会话中自然被丢弃（该路径整体覆写提示）。发现的子代理在 registry/template 子代理**之后**并入 `opts.agents`，使项目胜出。配置解析为 `Character.instructionsOverride ?? AppSettings.instructions ?? 默认值`，由新增的双语「项目指令」设置卡呈现。
+`cwd` 解析移到系统提示组装之前。发现的 `instructionSection` 加入**稳定提示前缀**（在 base/人格之后、记忆之前），使供应商提示缓存持续命中。它在 `--bare` 下跳过（不做磁盘自动发现，Claude Code 一致），并在 `workflow-editor` 会话中自然被丢弃（该路径整体覆写提示）。发现的子代理在 registry/template 子代理**之后**并入 `opts.agents`，使项目配置优先。配置解析为 `Character.instructionsOverride ?? AppSettings.instructions ?? 默认值`，由新增的双语「项目指令」设置卡呈现。
 
 ## 后果
 

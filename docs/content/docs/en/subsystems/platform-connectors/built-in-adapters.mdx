@@ -13,7 +13,7 @@ description: The eleven in-tree IM platform adapters — Telegram, Discord, Lark
   (`OutboundRequest` → platform call), one or more `transport-*.ts` drivers, a `capability.ts` matrix,
   and an `index.ts` `createXxxAdapter(opts)` factory that wires them together. Inbound takes a single
   path: the transport yields raw frames, the parser normalises them, `gateInboundEvent` (`lib/connectors/at-gate.ts`)
-  applies the at-strategy + allow/blocklist gate, then `ctx.emit(event)` lands on `bus.dispatchInboundFull`.
+  applies the at-strategy + allow/blocklist gate, then `ctx.emit(event)` calls `bus.dispatchInboundFull`.
   **Interactive callbacks bypass emit** — inline buttons / cards / interactions call
   `getBus().dispatchConnectorCallback(...)` directly so the A2UI surface binding is recovered. Transports
   span long-poll, webhook, gateway (WSS), reverse-WS, Socket Mode, Stream Mode, and Matrix `/sync`.

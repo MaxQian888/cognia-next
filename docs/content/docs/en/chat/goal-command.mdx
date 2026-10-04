@@ -5,9 +5,12 @@ description: "Set a standing goal and the agent auto-continues until done, pause
 
 # `/goal` — Persistent Chat Goals
 
-cognia-next's `/goal` command turns any chat into a self-driving loop. You set the objective in one line, the agent picks the next concrete step, completes it, evaluates whether the objective is satisfied, and continues automatically until **(a)** a judge model says it's done, **(b)** the turn / token / time budget is exhausted, or **(c)** you pause or stop it.
+cognia-next's `/goal` command makes a chat continue automatically toward an objective.
+Set the objective in one line.
+The agent selects and completes the next concrete step, then evaluates whether the objective is satisfied.
+It continues until **(a)** a judge model says the work is complete, **(b)** the turn/token/time budget is exhausted, or **(c)** you pause or stop it.
 
-Inspired by the `/goal` commands in **Hermes Agent**, **OpenAI Codex CLI**, and **Anthropic Claude Code** — and fused into one design that takes the best of each.
+The design draws on the `/goal` commands in **Hermes Agent**, **OpenAI Codex CLI**, and **Anthropic Claude Code**.
 
 > **Architecture details:** see [ADR-0019](../adr/0019-goal-command).
 

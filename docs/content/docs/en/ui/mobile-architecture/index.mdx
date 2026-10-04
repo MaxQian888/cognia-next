@@ -29,11 +29,12 @@ description: The mobile companion — one Next.js static export wrapped by Capac
 
 ## The thesis: one bundle, three shells
 
-`mobile/capacitor.config.ts` sets `webDir: "../out"` (`:17`); `src-tauri/tauri.conf.json` sets
-`frontendDist: "../out"`. Both native shells point at the **same** directory a single `pnpm build`
-produces. The React running inside the iOS/Android WebView is byte-for-byte the React that runs in
-Tauri — same Zustand stores, same Dexie schema, same `useTranslations()` calls. Only two things differ
-at runtime: which `Transport` the selector returns, and which enum `usePlatform()` reports.
+`mobile/capacitor.config.ts` sets `webDir: "../out"` (`:17`).
+`src-tauri/tauri.conf.json` sets `frontendDist: "../out"`.
+Both native shells use the **same** directory produced by one `pnpm build`.
+The React code in the iOS/Android WebView is byte-for-byte identical to the code in Tauri.
+It uses the same Zustand stores, Dexie schema, and `useTranslations()` calls.
+Only the selected `Transport` and the enum reported by `usePlatform()` differ at runtime.
 
 | Option | Verdict |
 | --- | --- |
@@ -41,16 +42,16 @@ at runtime: which `Transport` the selector returns, and which enum `usePlatform(
 | **React Native** | Rejected — rewriting 57 shadcn/ui components to RN primitives for zero functional gain. |
 | **Capacitor 8** | Adopted — drop the existing static export into a native WebView, no UI rewrite. |
 
-The deeper truth: the phone is **never** a sidecar runtime. The Claude Agent SDK needs Node ≥ 20 and
-native extensions; connector webhooks can't expose a public URL from behind carrier NAT. So five
-subsystems are "desktop-only" by platform reality — the desktop is the true server, the phone a trusted
-client. See [ADR-0014](../../adr/0014-capacitor-mobile-shell).
+The phone **never** runs the sidecar.
+The Claude Agent SDK requires Node ≥ 20 and native extensions.
+Connector webhooks cannot expose a public URL from behind carrier NAT.
+These platform constraints make five subsystems "desktop-only": the desktop acts as the server, and the phone acts as a trusted client.
+See [ADR-0014](../../adr/0014-capacitor-mobile-shell).
 
 ## The client spine
 
-A mobile session walks a fixed spine: **discover** the desktop, **pair** with it, choose a
-**transport**, **sync** local data, and reach **native** capabilities. Each box is annotated with the
-file and line where it lives.
+A mobile session follows five stages: **discover** the desktop, **pair**, select a **transport**, **sync** local data, and use **native** capabilities.
+Each box shows the source file and line for that stage.
 
 ```mermaid
 flowchart TB

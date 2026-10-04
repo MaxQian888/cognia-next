@@ -35,13 +35,13 @@ Eliminated 2 net-new files (`terminal-dock-bridge.mjs`, `terminal-dock-ipc.ts`) 
 
 ### D2 — Headless interactive REPL via `node-pty` (optional dependency)
 
-The dock-relay handles the case where the renderer is alive. For headless contexts (V2 server, agent-only flows that don't need user visibility), the sidecar exposes 4 `terminal_repl_*` tools backed by `node-pty` — a real PTY with bidirectional bytes, ring-buffered output, idle GC, per-agent session cap (8). Lazy `import("node-pty")` so a host without the native binding falls through to a clean structured error rather than crashing.
+The dock-relay handles the case where the renderer is alive. For headless contexts (V2 server, agent-only flows that don't need user visibility), the sidecar exposes 4 `terminal_repl_*` tools backed by `node-pty` — a real PTY with bidirectional bytes, ring-buffered output, idle GC, per-agent session cap (8). The lazy `import("node-pty")` lets a host without the native binding return a structured error without crashing.
 
 `node-pty` is declared in `sidecar/package.json` under `optionalDependencies` so `pnpm install` succeeds even on hosts without a C++ toolchain. The new BuiltinTools category `terminalRepl` (default off) gates the tool surface; a separate flag from `exposeDockToAgents` because the surfaces serve different use cases.
 
 ### D3 — Reconnect/replay protocol with monotonic `seq`
 
-Before: `src-tauri/src/companion_api/ws_terminal.rs:78` flagged reconnect "reserved for future"; the handler rejected anything other than `spawn=1`. Mobile sessions died on any network blip.
+Before: `src-tauri/src/companion_api/ws_terminal.rs:78` flagged reconnect "reserved for future"; the handler rejected anything other than `spawn=1`. Mobile sessions ended whenever the network connection was interrupted.
 
 After: a per-session `ReplayBuffer` (`src-tauri/src/terminal/replay.rs`) stamps each `TerminalEvent` with a monotonic `seq: u64` and retains the most-recent ~512 KiB for up to 5 minutes (matching the renderer-side reconnect budget). The `PtySession`'s reader/waiter threads push every event through the buffer before fan-out. Sessions are NOT dropped when the WS closes — instead a process-wide `WsTerminalRegistry` marks them detached; a background reaper drops sessions whose consumer has been gone past 5 minutes.
 

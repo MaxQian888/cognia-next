@@ -1,6 +1,6 @@
 ---
 title: "ADR-0066 — Agent 团队任务看板与跨界面集成（CQRS）"
-description: "赋予Agent-Team任务模型看板接口并在应用中拆除孤岛化：工作区内的保护拖板、通过伴随同步流水线将板子传输到移动端的单向Dexie投影（v104）、手机端编辑的控制平面RPCs、带team:read/team:write的ctx.team插件API、双绑定可视化以及共享完成链接核心。"
+description: "赋予Agent-Team任务模型看板接口并将看板接入应用：工作区内受保护的卡片拖拽、通过伴随同步流水线将看板同步到移动端的单向Dexie投影（v104）、手机端编辑的控制平面RPCs、带team:read/team:write的ctx.team插件API、双绑定可视化以及共享的完成链接实现。"
 ---
 
 # ADR-0066 — Agent 团队任务看板与跨界面集成（CQRS）
@@ -40,7 +40,7 @@ Zustand代理团队存储仍然是**单一写入源**（ADR-0022对运行时状�
 
 ### 4. 暂停/继续（关闭第二次延期ADR-0022）
 
-`agentTeamManager.pause`存在（中止 + 标记`paused`）;`resume`现在重新进入生命周期：被搁置的`claimed`/`in_progress`任务重置为`pending`（声称已释放），卡住的队友重置，黑板从持久`task.result`重新做种（共享内存仅在内存中——否则重启会使依赖任务枯竭;`autoPublishTaskResult`重新应用PII 门禁），`RunTeamLifecycleDeps.taskFilter`滴落完成工作——过滤后的id会穿线进`synthesizeTeamWorkflow`，因为`satisfiedDependencyIds`存活的依赖项能干净利落地合成。`review`任务从不自动恢复（等待董事会裁决）。相关地，波形路径（自适应重新规划/进度账本）现在会在波浪之间重新开放其重复使用的运行列——ADR-0061 P4所有权守卫（“终端行永不复活”）默默跳过了第一波之后的每一波;伴随的软取消（`cancelled`行）依然被遵守。
+`agentTeamManager.pause` 已存在（中止 + 标记 `paused`）。`resume` 现在重新进入生命周期：被搁置的`claimed`/`in_progress`任务重置为`pending`（释放任务领取状态），卡住的队友重置，黑板从持久化的 `task.result` 重新初始化（共享内存仅在内存中——否则重启会使依赖任务枯竭;`autoPublishTaskResult`重新应用PII 门禁），`RunTeamLifecycleDeps.taskFilter` 排除已完成工作——被过滤的 ID 传入 `synthesizeTeamWorkflow`，作为 `satisfiedDependencyIds`，使剩余依赖任务能够正确合成。`review`任务从不自动恢复（等待看板中的审查决定）。相关地，波形路径（自适应重新规划/进度账本）现在会在各波次之间重新打开复用的运行行——ADR-0061 P4所有权守卫（“终端行永不复活”）默默跳过了第一波之后的每一波;伴随的软取消（`cancelled`行）依然被遵守。
 
 ### 5. 插件 + 双井去隔壁
 

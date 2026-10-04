@@ -14,9 +14,8 @@ bootstrap that boots the bus singleton, wires the runtime + callback handler,
 registers and starts every enabled adapter, and launches four background
 runners. Everything the operator sees (the three-pane Inbox shell, the
 seven-tab Connections settings, mode switcher, draft editor, outbound pill) is
-a thin reactive view over Dexie tables via `useLiveQuery`. Plugins extend the
-fleet by declaring `connectors` in their manifest; `registerPluginAdapters`
-builds each factory's adapter and hands it to the same bus — no new transport,
+a thin reactive view over Dexie tables via `useLiveQuery`. Plugins add adapters by declaring `connectors` in their manifest; `registerPluginAdapters`
+builds each factory's adapter and registers it with the same bus — no new transport,
 no privileged path.
 </TLDR>
 

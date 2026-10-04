@@ -1,18 +1,15 @@
 ---
 title: "0206 — 工作区推送自己的变更，而不是被轮询"
-description: "协同平面为每个组织提供一条变更推送流：一个只携带失效通知（{entity, id, workspaceId, revision}）的 WebSocket，每一帧都按读者的工作区权限过滤。镜像仍只有一条刷新路径，推送流只告诉它刷新哪几段、何时刷新；60 秒轮询保留为降级兜底。共享聊天和 Canvas 各自复制的一次性票据与按键广播合并为一个 SocketHub，三条流共用。"
+description: "协同平面为每个组织提供 WebSocket 变更流，仅携带失效通知（{entity, id, workspaceId, revision}），每帧按工作区权限过滤。镜像保持唯一刷新路径，由推送决定刷新部分和时机。60 秒轮询保留为降级机制。共享聊天、Canvas 和协同流共用 SocketHub 的一次性票据与按键广播。"
 ---
 
 # ADR 0206 — 工作区推送自己的变更，而不是被轮询
 
-**状态：** 已接受，已实现（2026-09-30）
-**日期：** 2026-09-30
-**相关：** [ADR-0149](./0149-a-person-is-not-a-device)（协同平面）、[ADR-0158](./0158-artifacts-and-canvas)（Canvas 流）、[ADR-0207](./0207-a-collaboration-event-reaches-people-who-are-not-in-the-room)（复用这条推送流）、[ADR-0208](./0208-edits-to-different-fields-merge)
-**来源研究：** `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`（缺口 A2）
+**状态：** 已接受，已实现（2026-09-30）**日期：** 2026-09-30 **相关：** [ADR-0149](./0149-a-person-is-not-a-device)（协同平面）、[ADR-0158](./0158-artifacts-and-canvas)（Canvas 流）、[ADR-0207](./0207-a-collaboration-event-reaches-people-who-are-not-in-the-room)（复用这条推送流）、[ADR-0208](./0208-edits-to-different-fields-merge) **来源研究：** `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`（缺口 A2）
 
 ## 背景
 
-共享的议题、计划、运行、工作区和成员关系只通过一条路径到达客户端：`refreshCollabPlane`（`lib/collab/refresh.ts`）。它依次拉取成员关系、工作区、议题、计划与运行这几段，写入可重建的 Dexie 镜像；拉取失败时镜像保持原样。何时刷新由 `installCollabRefreshScheduler`（`lib/collab/refresh-scheduler.ts`）决定：
+共享的议题、计划、运行、工作区和成员关系只通过一条路径到达客户端：`refreshCollabPlane`（`lib/collab/refresh.ts`）。它依次拉取成员关系、工作区、议题、计划与运行数据，写入可重建的 Dexie 镜像；拉取失败时镜像保持原样。何时刷新由 `installCollabRefreshScheduler`（`lib/collab/refresh-scheduler.ts`）决定：
 
 - 启动、获得焦点、恢复联网、窗口变为可见时各刷新一次；
 - 窗口可见期间每 `COLLAB_REFRESH_INTERVAL_MS = 60_000` 刷新一次；

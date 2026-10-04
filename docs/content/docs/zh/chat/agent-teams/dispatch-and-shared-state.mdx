@@ -1,11 +1,11 @@
 ---
 title: 队员派发与共享运行态
-description: 每个 Agent Team 模式都共享的那个单一派发原语、按队员断路器、token 预算升级、按级别路由的通知器，以及结构化输出镜像。
+description: 所有 Agent Team 模式共用的派发原语，包括按队员设置的断路器、token 预算升级、按级别路由的通知器和结构化输出镜像。
 ---
 
 # 队员派发与按运行共享状态
 
-`runTeamLifecycle` 把一个团队合成为一份 `VisualWorkflow`，然后把每个节点交给一个可复用原语：`dispatchTeammate`。该原语认领一名队员、运行一轮（工具启用或纯文本）、校验输出，并喂养按运行的共享状态 —— <Term>队员池</Term>（断路器）、<Term>预算守卫</Term>（token 升级）以及<Term>通知器</Term>（按级别扇出）。重试是编排器的职责，而非派发器的。本页梳理这条派发路径及它触及的每个共享状态模块。
+`runTeamLifecycle` 将团队合成为一份 `VisualWorkflow`，并将每个节点交给可复用的 `dispatchTeammate` 执行。该函数认领一名队员、运行一轮（启用工具或仅生成文本）、校验输出，并更新本次运行的共享状态：<Term>队员池</Term>（断路器）、<Term>预算守卫</Term>（token 升级）和 <Term>通知器</Term>（按级别分发）。重试由编排器负责，派发器不执行重试。本页说明派发路径及其使用的共享状态模块。
 
 <TLDR>
 - 一个派发原语：`dispatchTeammate`（`lib/ai/agent/team/teammate/dispatch-teammate.ts:171-344`）—— 由任务执行器与每个 ultracode 模式经由 `dispatchStructured` 共享。

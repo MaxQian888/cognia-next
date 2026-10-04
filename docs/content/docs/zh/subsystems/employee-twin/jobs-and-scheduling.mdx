@@ -1,6 +1,6 @@
 ---
 title: 任务与调度
-description: twinJobs 队列 —— 带按种类并发上限的轮询 worker、基于 lease 崩溃恢复的原子认领、带死信的指数退避，以及把日程与调度器对账的每孪生 cron 桥。
+description: twinJobs 队列 —— 带按种类并发上限的轮询 worker、基于 lease 崩溃恢复的原子认领、带死信的指数退避，以及同步日程与调度器状态的每孪生 cron 桥。
 ---
 
 # 任务与调度
@@ -9,8 +9,8 @@ description: twinJobs 队列 —— 带按种类并发上限的轮询 worker、�
 
 <TLDR>
   ingest 与 distill 都以持久化的 `twinJobs` 行运行。worker（`lib/twin/job-worker.ts:284`）轮询、原子认领最旧的合格任务
-  （`claimNextQueuedJob`，`twin-jobs.ts:95`）并路由它。崩溃恢复靠 **lease**（10 分钟 TTL）—— lease 过期的 `running` 行会被重新认领。
-  瞬时失败按指数退避重试（`job-retry.ts`），3 次后进入死信。一个每孪生 cron 桥（`cron-bridge.ts:93`）让日程与调度器保持同步。
+  （`claimNextQueuedJob`，`twin-jobs.ts:95`）并路由它。崩溃恢复使用 **lease**（10 分钟 TTL）。lease 过期的 `running` 行会被重新认领。
+  瞬时失败按指数退避重试（`job-retry.ts`），3 次后进入死信。一个每孪生 cron 桥（`cron-bridge.ts:93`）保持日程与调度器同步。
 </TLDR>
 
 ## 任务生命周期
@@ -35,9 +35,7 @@ stateDiagram-v2
 
 ## worker
 
-`startJobWorker(config, twinId?)`（`job-worker.ts:284`）返回一个句柄（`pause` / `resume` / `pauseJob` / `resumeJob` /
-`stop`）并跑一个 `setTimeout` 轮询循环（间隔 `max(500, pollIntervalMs ?? 2000)`）。每次 tick 认领一个任务并分派，受
-**按种类并发上限**（`maxConcurrentIngest` / `maxConcurrentDistill`，各最小 1）约束，由 in-flight `Set` 跟踪：
+`startJobWorker(config, twinId?)`（`job-worker.ts:284`）返回一个句柄（`pause` / `resume` / `pauseJob` / `resumeJob` /`stop`）并跑一个 `setTimeout` 轮询循环（间隔 `max(500, pollIntervalMs ?? 2000)`）。每次 tick 认领一个任务并分派，受**按种类并发上限**（`maxConcurrentIngest` / `maxConcurrentDistill`，各最小 1）约束，由 in-flight `Set` 跟踪：
 
 ```ts title="lib/twin/job-worker.ts:305-326（tickOnce）"
 const job = await claimNextQueuedJob(twinId, (config.now ?? Date.now)())
@@ -54,8 +52,7 @@ const promise = processJob(job.id, config)
 inflightAll.add(promise)
 ```
 
-`processJob`（`job-worker.ts:103`）按 `job.kind` 路由：`"ingest"` → `runIngestJob`，`"distill"` / `"re-distill"` →
-`runDistillJob`（未知种类，或没有配置 LLM 的 distill，会立即失败而不消耗重试）。`failureSummary.allFailed` 为真的 ingest 会被升级为任务失败。
+`processJob`（`job-worker.ts:103`）按 `job.kind` 路由：`"ingest"` → `runIngestJob`，`"distill"` / `"re-distill"` → `runDistillJob`（未知种类，或没有配置 LLM 的 distill，会立即失败而不消耗重试）。`failureSummary.allFailed` 为真的 ingest 会被升级为任务失败。
 
 <Callout type="info" title="无 tab 锁 —— 认领即是锁">
   没有跨 tab 互斥量。唯一的并发守卫是 `claimNextQueuedJob` 内的原子事务 —— queued → running 的翻转发生在
@@ -64,8 +61,7 @@ inflightAll.add(promise)
 
 ## 原子认领 + lease 恢复
 
-`claimNextQueuedJob` 在一个事务里选出合格行：退避（`nextAttemptAt`）已过的 `queued` 行，**加上** `leaseExpiresAt` 已过的
-`running` 行（崩溃或关闭的 worker），按 `queuedAt` FIFO 排序。胜者被翻转为 `running` 并赋予新的 10 分钟 lease：
+`claimNextQueuedJob` 在一个事务里选出合格行：退避（`nextAttemptAt`）已过的 `queued` 行，**加上** `leaseExpiresAt` 已过的 `running` 行（崩溃或关闭的 worker），按 `queuedAt` FIFO 排序。胜者被翻转为 `running` 并赋予新的 10 分钟 lease：
 
 ```ts title="lib/db/twin-jobs.ts:95-129（节选）"
 return db.transaction("rw", db.twinJobs, async () => {
@@ -84,8 +80,7 @@ return db.transaction("rw", db.twinJobs, async () => {
 })
 ```
 
-健康的任务通过 `updateJobProgress`（`twin-jobs.ts:147`）保活 lease，它在每次进度写入时刷新 `leaseExpiresAt`。**没有** lease 的
-`running` 行永不被重新认领（`!== undefined` 守卫），因此尚未开始报告进度的任务不会被竞态重认领。
+健康的任务通过 `updateJobProgress`（`twin-jobs.ts:147`）保活 lease，它在每次进度写入时刷新 `leaseExpiresAt`。**没有** lease 的 `running` 行永不被重新认领（`!== undefined` 守卫），因此尚未开始报告进度的任务不会被竞态重认领。
 
 ## 重试与死信
 
@@ -101,14 +96,11 @@ export function backoffMs(attempt: number, random: () => number = Math.random): 
 }
 ```
 
-可恢复失败时 worker 计算 `backoffMs(retryCount + 1)` 并 `requeueJob(id, now + wait)`；一旦 `shouldRetry(retryCount)`
-为假，就 `formatDeadLetter` 该消息并 `failJob`。死信消息可经 `parseDeadLetter` 往返，使 Jobs tab 能显示原始错误与尝试次数。
+可恢复失败时 worker 计算 `backoffMs(retryCount + 1)` 并 `requeueJob(id, now + wait)`；一旦 `shouldRetry(retryCount)` 为假，就 `formatDeadLetter` 该消息并 `failJob`。死信消息可经 `parseDeadLetter` 往返，使 Jobs tab 能显示原始错误与尝试次数。
 
 ## 每孪生 cron
 
-`syncTwinCronToScheduler(twinId, cron)`（`cron-bridge.ts:93`）把一个孪生的 `TwinCronSettings`（`enabled`、`ingestSchedule`、
-`distillSchedule`、`timezone`）与调度器的任务表对账。它拥有两个任务 id —— `twin::<twinId>::ingest` 与 `twin::<twinId>::distill`
-—— 并针对每一侧，根据日程是否启用且 cron 表达式是否有效，创建 / 更新 / 删除调度器任务：
+`syncTwinCronToScheduler(twinId, cron)`（`cron-bridge.ts:93`）把一个孪生的 `TwinCronSettings`（`enabled`、`ingestSchedule`、`distillSchedule`、`timezone`）与调度器的任务表对账。它拥有两个任务 id —— `twin::<twinId>::ingest` 与 `twin::<twinId>::distill`—— 并针对每一侧，根据日程是否启用且 cron 表达式是否有效，创建 / 更新 / 删除调度器任务：
 
 ```ts title="lib/twin/cron/cron-bridge.ts:108-126（ingest 侧）"
 const ingestExpr = cron?.ingestSchedule?.trim() ?? ""
@@ -125,9 +117,7 @@ if (enabled && ingestExpr) {
 }
 ```
 
-每个任务为 `type: "twin"`，带 `payload: { twinId, kind }`；调度器的 twin 执行器读取该 payload 并调用
-`enqueueIngestJob` / `enqueueDistillJob`，它们铸造 worker 随后认领的 `queued` `twinJobs` 行。`CRON_PRESETS`
-（`cron-bridge.ts:152`）提供每小时 / 每 6 小时 / 每日 03:00 / 每周一 09:00。级联 `deleteTwin` 用 `undefined` 调用它以删除两个任务。
+每个任务为 `type: "twin"`，带 `payload: { twinId, kind }`；调度器的 twin 执行器读取该 payload 并调用 `enqueueIngestJob` / `enqueueDistillJob`，它们铸造 worker 随后认领的 `queued` `twinJobs` 行。`CRON_PRESETS`（`cron-bridge.ts:152`）提供每小时 / 每 6 小时 / 每日 03:00 / 每周一 09:00。级联 `deleteTwin` 用 `undefined` 调用它以删除两个任务。
 
 ## 端到端
 

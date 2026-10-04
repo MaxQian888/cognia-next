@@ -1,0 +1,301 @@
+---
+title: 调度器 API
+description: 插件可用的两个调度器接口。ctx.scheduler 运行插件自己的、由 handler 承载的任务；ctx.userScheduler 在调度器权限策略下读写用户的日程。
+---
+
+# 调度器 API
+
+插件通过两个接口访问调度器，它们的所有者不同。
+
+| 接口 | 拥有的任务 | 门禁 | 运行时 |
+| --- | --- | --- | --- |
+| `ctx.scheduler` | 插件为自己创建、由其注册的 handler 运行的任务 | `scheduler` 清单能力 | frontend、hybrid |
+| `ctx.userScheduler` | 用户 `/scheduler` 中的任务（`chat`、`agent`、`goal`、`plan` 等） | 清单权限加上用户的调度器权限策略 | frontend、hybrid、python |
+
+两者都向同一个调度器写入普通行（ADR-0079）。
+不存在第二个插件专用的日程存储。
+
+## ctx.scheduler：插件自己的任务
+
+在清单中声明能力：
+
+```json title="plugin.json"
+{
+  "capabilities": ["scheduler"]
+}
+```
+
+未声明时，每次调用 `ctx.scheduler` 都会失败，错误信息会指出缺少的能力。
+
+插件任务是一行 `type: "plugin"` 的任务，其 payload 指明一个 handler。
+触发时，执行器在 handler 注册表中查找 `<pluginId>:<handler>`。
+请在任务可能到期之前注册 handler，通常在 `activate` 中完成。
+
+```ts title="src/index.ts"
+export default definePlugin({
+  manifest,
+  async activate(ctx) {
+    ctx.scheduler.registerHandler("sync", async (args, run) => {
+      run.log("info", "sync started", { full: args.full === true })
+      run.reportProgress(0.5, "halfway")
+      if (run.event) run.log("info", `fired by ${run.event.type}`)
+      return { success: true, output: { synced: 12 }, metrics: { itemsProcessed: 12 } }
+    })
+
+    const existing = await ctx.scheduler.listTasks({ handler: "sync" })
+    if (existing.length === 0) {
+      await ctx.scheduler.createTask({
+        name: "Hourly sync",
+        handler: "sync",
+        handlerArgs: { full: false },
+        trigger: { type: "interval", seconds: 3600, startImmediately: true },
+        retry: { maxAttempts: 2, delaySeconds: 30 },
+        overlapPolicy: "skip",
+        pauseAfterConsecutiveFailures: 5,
+      })
+    }
+  },
+})
+```
+
+handler 运行在 JavaScript 运行时中。
+这就是 `ctx.scheduler` 不向 Python 插件开放的原因。
+
+### 所有权
+
+每个针对单个任务的方法在执行前都会检查三件事：
+
+1. 该行是 `plugin` 任务，
+2. 其 payload 指向你的插件，
+3. 若记录了创建者，创建者是你的插件。
+
+未通过检查的任务按不存在处理：返回 `null`、`false` 或 `[]`。
+`runTaskNow` 会抛出 `Task not found`。
+你无法通过这里看到或修改用户的任务或其他插件的任务。
+
+### 创建与写入门禁
+
+`createTask` 与所有非用户写入一样经过同一个写入门禁。
+调用参数为 `{ taskType: "plugin", source: "plugin", pluginId }`。
+门禁会执行主机检查以及 `plugin` 来源的 `maxTasksPerSource` 配额。
+如果用户把 `plugin` 放进了需要确认的列表，门禁会拒绝，因为此 API 无法询问用户。
+拒绝时会抛出门禁给出的消息。
+
+新行会记录 `createdBy: { kind: "plugin", pluginId }`。
+配额正是依据这个归属来计数。
+
+`manifest.scheduledTasks` 中声明的任务也以同样方式归属，但它们从不经过门禁。
+用户启用插件即表示同意这些任务。
+在配额处拒绝其中一个，会让插件只注册了一半。
+它们仍计入配额，因此之后在运行时创建的任务会以它们为基数计算。
+
+引擎始终是本地引擎，从不是配对主机的引擎。
+远程主机无法调用存在于本进程中的 handler。
+
+### 触发器
+
+| 触发器 | 字段 | 说明 |
+| --- | --- | --- |
+| `cron` | `expression`、`timezone?` | 由调度器的 cron 校验器校验 |
+| `interval` | `seconds`、`startImmediately?` | `startImmediately` 在创建时立即运行第一次，之后从那次运行起每隔 `seconds` 运行 |
+| `once` | `runAt`（Date 或 ISO 字符串） | 必须在未来 |
+| `event` | `eventType`、`eventSource?` | 由宿主事件或 `emitEvent` 触发 |
+
+格式错误的触发器会被拒绝，错误信息会指出具体字段。
+它绝不会被存成另一种日程。
+`startImmediately` 只在创建时生效。
+暂停、恢复或用 `updateTask` 替换触发器都不会额外运行一次。
+
+`previewTrigger(trigger, count = 5)` 返回从现在起的下几次触发时间。
+它使用与调度器面板相同的推算逻辑。
+`count` 取值为 1 到 100。
+`event` 触发器返回 `[]`。
+无效的 cron 表达式会以校验器的消息拒绝。
+
+### 执行选项
+
+`createTask` 与 `updateTask` 接受以下字段，`PluginScheduledTask` 也会回报这些字段。
+在此边界上时间单位为秒。
+
+| 字段 | 调度器字段 | 插件任务默认值 |
+| --- | --- | --- |
+| `timeout` | `config.timeout`（毫秒） | 300 |
+| `retry.maxAttempts` | `config.maxRetries` | 0 |
+| `retry.delaySeconds` | `config.retryDelay`（毫秒） | 60 |
+| `retry.backoffMultiplier` | 见下文 | 2 |
+| `maxRetryDelaySeconds` | `config.maxRetryDelay`（毫秒） | 60 |
+| `overlapPolicy` | `config.overlapPolicy` | `skip` |
+| `maxQueueSize` | `config.maxQueueSize` | 10 |
+| `maxRuns` | `config.maxRuns` | 不限 |
+| `pauseAfterConsecutiveFailures` | `config.pauseAfterConsecutiveFailures` | 从不 |
+| `jitterSeconds` | `trigger.jitterMs`（仅 cron 与 interval） | 无 |
+| `catchupWindowSeconds` | `config.catchupWindowMs` | 无 |
+| `runMissedOnStartup` | `config.runMissedOnStartup` | `false` |
+| `maxMissedRuns` | `config.maxMissedRuns` | 0 |
+| `endAt` | `endAt`（更新时传 `null` 可清除） | 无 |
+
+`retry.maxAttempts` 统计的是首次尝试之后的重试次数。
+`maxAttempts: 2` 会让一个失败的任务最多运行三次。
+
+调度器只有两种重试曲线，因此 `backoffMultiplier` 只接受两个值。
+取 `2` 时，延迟为 `delaySeconds * 2^attempt` 加上至多 25% 的抖动，并以 `maxRetryDelaySeconds` 为上限。
+取 `1` 时，每次重试都等待 `delaySeconds`，因为上限被设为基础延迟。
+其他任何值都会被拒绝。
+`1` 不能与 `maxRetryDelaySeconds` 同时使用。
+
+### 状态
+
+`status` 由任务行推导而来，并不存储。
+
+| 状态 | 含义 |
+| --- | --- |
+| `active` | 已布置且健康 |
+| `error` | 已布置，但最近一次终态运行失败（`consecutiveFailures` 大于零）；仍在重试中的运行暂不计入 |
+| `paused` | 被插件、用户或自动暂停功能暂停（`lastTerminalReason: "auto-paused"`） |
+| `disabled` | 被宿主停用 |
+| `completed` | 已运行过的 `once` 任务，或已用完 `maxRuns` 的任务 |
+| `expired` | 被边界终止：`endAt` 已过，或 `once` 时间点被错过 |
+
+`listTasks({ status })` 按推导出的状态过滤，因此每个取值都有效。
+`hasErrors: true` 选出最近一次终态运行失败且之后没有成功过的任务，无论其状态如何。
+`handler`、`tags`、`name`、`offset` 与 `limit` 按其名称过滤。
+
+`lastResult` 是最近一次已结束运行的结果。
+`getStatistics(taskId)` 返回运行计数、`successRate`、最近 100 次已结束运行的平均时长、`consecutiveFailures`、`lastRunAt`、`nextRunAt` 和 `lastError`。
+在有运行结束之前，`successRate` 与 `averageDurationMs` 为 `null`。
+
+### 运行、取消与事件
+
+`runTaskNow(taskId, args?)` 会把 `args` 合并到任务的 `handlerArgs` 上，仅作用于这一次运行。
+调度器一旦决定了这次启动的去向，它就返回真实执行行的 id。
+这次启动可能正在运行、被重叠策略缓冲，或被跳过。
+它不会等待 handler 结束。
+
+`cancelExecution(executionId)` 走调度器自己的取消路径。
+运行会以 `cancelled` 结束，`terminalReason` 为 `"user-cancelled"`，handler 的 `signal` 会中止。
+仍在缓冲中的启动会被撤回，并以同一个 id 记录为已取消。
+当运行被取消，或请求已转交给实际运行它的窗口时，返回 `true`。
+
+`emitEvent(eventType, payload?)` 触发你自己的、`eventType` 匹配的活动 `event` 任务。
+它从不触发用户或其他插件的任务。
+事件来源为 `plugin:<pluginId>`，因此指定了其他 `eventSource` 的任务不会被触发。
+handler 通过 `run.event` 收到事件。
+常规边界同样适用：超过 `endAt` 或 `maxRuns` 的任务会过期而不是被触发。
+`emitEvent` 返回它启动的任务数。
+
+`onExecution(listener)` 报告你的任务的执行情况。
+
+| 阶段 | 时机 |
+| --- | --- |
+| `started` | 一次运行开始 |
+| `completed` | 运行成功 |
+| `failed` | 运行失败、超时（`execution.status: "timeout"`），或某次尝试失败且将被重试（`terminalReason: "retry-scheduled"`） |
+| `cancelled` | 运行被取消 |
+| `skipped` | 一次启动未运行就结束了（重叠策略 `skip`、队列已满、主机并发上限） |
+
+它返回一个注销函数。
+插件停用时，监听器也会被移除。
+
+### 执行历史
+
+`getExecutions`、`getExecution` 与 `getLatestExecution` 返回 `PluginTaskExecution`。
+
+- `status` 取值为 `pending`、`running`、`completed`、`failed`、`cancelled`、`skipped` 或 `timeout`。
+- `scheduledAt` 是这次运行本应执行的时间点。没有时间点的运行报告其开始时间。
+- `triggerSource` 与 `terminalReason` 说明是什么启动和结束了这次运行。
+- `result` 为已结束的运行携带 `success`、`output`、`error` 与 `metrics`。`metrics` 包含 handler 的指标和 `duration`。
+- `logs` 包含 handler 写下的每一行 `run.log(...)` 及其 `data`。每次运行最多保留 200 行，最旧的先被丢弃。
+
+### 停用与卸载
+
+停用、挂起、卸载模块或卸载插件，都会删除它拥有的所有插件任务。
+其中包括它在运行时创建的任务。
+插件任务只有在其 handler 已注册时才能运行。
+没有 handler 时，它只会失败、发出通知，最终被自动暂停。
+请像上面的示例那样，在 `activate` 中以幂等方式重新创建运行时任务。
+
+### 生命周期钩子
+
+插件钩子 `onScheduledTaskStart`、`onScheduledTaskComplete` 与 `onScheduledTaskError` 会为宿主上的每个定时任务触发，而不仅是你的任务。
+如果只关心自己的任务，请使用 `onExecution`。
+
+## ctx.userScheduler：用户的日程
+
+此接口作用于用户的日程，无论调度器面板绑定的是哪台主机。
+
+| 方法 | 权限 |
+| --- | --- |
+| `getPolicy()` | `settings:read` |
+| `listTasks()`、`getTask(id)`、`listExecutions(id, { limit?, before? })`、`getExecution(executionId)`、`getUpcoming(id?, count?)` | `database:read` |
+| `createTask(input)` | `database:write`、`settings:read` |
+| `updateTask(id, input, options?)`、`pauseTask(id, options?)`、`resumeTask(id, options?)`、`deleteTask(id, options?)` | `database:write` |
+| `runTaskNow(id, options?)`、`cancelExecution(executionId, options?)` | `agent:control`、`database:write` |
+
+### 归属
+
+一次写入可以以你的插件身份进行（`{ kind: "plugin" }`，默认值），也可以代表使用你的工具的代理进行（`{ kind: "agent", sessionId }`）。
+
+- 对 `createTask`，把归属写在 `input.createdBy` 中。
+- 对其他所有写入，通过 `options.actor` 传入。
+
+写入永远不能归属于 `"user"` 或 `"system"`。
+策略对用户完全豁免，因此这种归属会绕过用户的所有设置。
+这样的调用会在读取或写入任何内容之前抛出错误。
+`createdBy.pluginId` 总是被覆盖为你的插件 id。
+
+```ts
+await ctx.userScheduler.createTask({
+  name: "Morning brief",
+  type: "agent",
+  trigger: { type: "cron", cronExpression: "0 8 * * 1-5" },
+  payload: { prompt: "Summarise yesterday's inbox" },
+  createdBy: { kind: "agent", sessionId: toolCtx.sessionId },
+})
+
+await ctx.userScheduler.deleteTask(taskId, {
+  actor: { kind: "agent", sessionId: toolCtx.sessionId },
+})
+```
+
+### 每次写入都受策略约束
+
+每次写入都经过 `assertTaskWriteAllowed`。
+`createTask` 使用 `create` 操作，其他写入使用 `mutate`，并都带上任务的真实类型。
+
+- “允许代理管理定时任务”关闭时，代理身份的写入会被拒绝。
+- 自动代理变更（`agentAutoCreate`）关闭时，代理身份的写入同样会被拒绝。这对创建和修改都适用，因为门禁把代理写入视为无人值守。
+- 脚本任务关闭时，`script` 任务会被拒绝。
+- 主机无法运行的类型会被拒绝。
+- 需要确认列表中的类型会被拒绝，因为插件无法询问用户。
+- 仅在创建时，来源的 `maxTasksPerSource` 配额生效。
+
+如果你的工具要求用户逐次批准（`requiresApproval: true`），这次写入就是有人值守的。
+请以插件身份写入，并自行检查 `getPolicy().agentToolsEnabled`。
+内置的 Scheduler Tools 插件的删除与运行工具就是这样做的。
+
+拒绝时会抛出门禁的消息，其中会指出需要修改的设置。
+任务不存在时返回 `null` 或 `false`。
+`cancelExecution` 返回调度器的结果对象。
+该对象为 `{ cancelled: true }`，或带有 `reason`：`not-found`、`already-settled`、`requested`、`not-owned-here` 或 `unsupported-on-remote`。
+
+在提供操作之前先读取 `getPolicy()`。
+它每次调用都会从设置中重新加载。
+
+### 配对主机
+
+调度器绑定到配对主机时，读写都发往该主机。
+该主机不支持按运行 id 查询。
+因此 `getExecution` 会在其最近 200 次运行中查找。
+对于更早的运行，它会抛出错误并提示改用 `listExecutions(taskId)`，而不是回答“未找到”。
+
+### Python
+
+`ctx.userScheduler` 向 Python 插件开放。
+请按位置传参，例如 `await ctx.userScheduler.listExecutions(task_id, {"limit": 20})`。
+日期以 ISO 字符串返回；你以 ISO 字符串发送的日期会在存储前被还原为日期。
+
+## 相关
+
+<Cards>
+  <Card title="Bots" href="./bots" description="以声明方式把执行器绑定到触发器。" />
+</Cards>

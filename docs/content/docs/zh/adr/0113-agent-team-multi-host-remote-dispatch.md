@@ -52,7 +52,7 @@ AgentTeam durable-v2 已经拥有 child admission、attempt、checkpoint、evide
 
 ## 验证
 
-contract test 覆盖新旧 client-host 兼容、capability error、`commandId` 去重、event replay 与 package consumer。Rust test 覆盖 enrollment replay、grant 隔离、跨 tenant 拒绝、ticket replay、revoke、frame limit、heartbeat expiry 与已认证 `hostRef`。Task Workspace test 覆盖 Git identity、trust、symlink escape、missing binding 与并发隔离。AgentTeam test 覆盖稳定 placement、容量等待、模型前失败、lease compare-and-set、重复 event/result、safe migration、unsafe recovery 与 control mapping。产品测试覆盖 desktop、web 与 mobile 的 host grouping 和 recovery control。release smoke 使用真实 Claude Code 与 Codex worker，但 CI 使用 deterministic fake runtime 和临时 Git repository。
+contract test 覆盖新旧 client-host 兼容、capability error、`commandId` 去重、event replay 与 package consumer。Rust test 覆盖 enrollment replay、grant 隔离、跨 tenant 拒绝、ticket replay、revoke、frame limit、heartbeat expiry 与已认证 `hostRef`。Task Workspace test 覆盖 Git identity、trust、symlink escape、missing binding 与并发隔离。AgentTeam test 覆盖稳定 placement、容量等待、模型前失败、lease compare-and-set、重复 event/result、safe migration、unsafe recovery 与 control mapping。产品测试覆盖 desktop、web 与 mobile 的 host grouping 和 recovery control。release smoke 使用真实 Claude Code 与 Codex worker。CI 则使用 deterministic fake runtime 和临时 Git repository。
 
 ## 运维
 

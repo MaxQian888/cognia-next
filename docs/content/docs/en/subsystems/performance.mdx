@@ -34,7 +34,7 @@ cadence and dispatches/down-samples independently per lease.
 
 Listeners attach before open and snapshot. Frames merge only when target,
 routing generation, host incarnation, sampling session and sequence match.
-Recoverable gaps trigger snapshot refill; unrecoverable gaps remain visible and
+Recoverable gaps trigger snapshot refill. Unrecoverable gaps remain visible and
 are persisted with captures. Runtime rates use actual monotonic elapsed time and
 reset whenever cadence, source incarnation, boot/process/runtime session, sleep,
 clock or counter continuity changes.
@@ -45,7 +45,7 @@ The target database stores bounded encrypted frame chunks after five seconds,
 64 frames or 1 MiB. Default duration is 10 minutes and the hard limit is 60
 minutes or 512 MiB including explicitly selected attachments. Account quota is
 2 GiB with conservative cross-target reservations. Unpinned retention is 30 days
-and at most 20 captures per target; pinned evidence still consumes quota.
+and at most 20 captures per target. Pinned evidence still consumes quota.
 
 The account security-generation barrier cancels demand and discards the
 unencrypted tail on lock. AES-GCM AAD binds namespace/version/account/target

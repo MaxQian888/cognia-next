@@ -8,7 +8,7 @@ description: The OCR type model (OcrInput, OcrResult, OcrProvider, UserOcrSettin
 <Status variant="beta">Core surface — lib/ocr/ types · index · registry · runtime</Status>
 
 <TLDR>
-  Everything in the subsystem is phrased in terms of four types in `lib/ocr/types.ts` — `OcrInput`,
+  The subsystem uses four types in `lib/ocr/types.ts` — `OcrInput`,
   `OcrResult`, `OcrProvider`, and `UserOcrSettings`. The single public function `extract(input, deps)`
   (`lib/ocr/index.ts:200`) is **fully dependency-injected**: the registry, settings, platform, credential
   resolver, and source resolvers all arrive via `ExtractDeps`, so tests stub each independently and production

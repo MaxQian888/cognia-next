@@ -5,7 +5,11 @@ description: A unified access layer for ten web search providers — query optim
 
 # Search System
 
-Cognia abstracts "letting AI search the web" into a provider bus: the upper layer only sees `search(query, options)`, while ten providers (Tavily / Perplexity / Exa / SearchAPI / Serper / SerpAPI / Bing / Google / Google AI / Brave) hang underneath, each supporting general / news / images / videos / academic capabilities. All providers conform to the same `SearchResponse` shape, so callers always receive a consistent result format.
+Cognia exposes web search to AI through a provider bus.
+Callers use `search(query, options)`.
+The bus supports ten providers: Tavily, Perplexity, Exa, SearchAPI, Serper, SerpAPI, Bing, Google, Google AI, and Brave.
+Each provider supports general, news, image, video, and academic search capabilities.
+All providers use the same `SearchResponse` shape, so callers receive a consistent result format.
 
 <TLDR>
   App callers use `lib/search/configured-search.ts:searchWithAppSettings()`; CLI callers inject the

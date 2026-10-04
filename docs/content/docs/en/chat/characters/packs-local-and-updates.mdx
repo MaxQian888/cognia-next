@@ -5,7 +5,10 @@ description: The standalone .cognia-pack.json file format, the local-pack disk s
 
 # Local Packs & Apply Update
 
-A character pack can travel as a standalone `.cognia-pack.json` file imported outside the marketplace install pipeline, and a user's *clone* of an overlay character can receive a **selective update** when the pack ships a newer version. This page covers the file format, the disk-backed local-pack store, the per-field diff engine that decides overwrite-vs-preserve, the editor projections, and voice/platform resolution.
+A character pack can be a standalone `.cognia-pack.json` file imported outside the marketplace install pipeline.
+A user's *clone* of an overlay character can receive a **selective update** when the pack has a newer version.
+This page covers the file format, local-pack disk storage, and the diff engine that decides which fields to overwrite or preserve.
+It also covers editor projections and voice/platform resolution.
 
 <TLDR>
 - File format: `CHARACTER_PACK_FILE_SCHEMA_VERSION = 2`, `SUPPORTED_SCHEMA_VERSIONS = Set([1, 2])` — `lib/plugin/character-pack/schema.ts:28` / `:37`.

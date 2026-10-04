@@ -1,6 +1,6 @@
 ---
 title: "0180 — A video reaches the model as what it can read"
-description: "The composer refused every video and silently flattened large GIFs. Videos and animated GIFs now become a storyboard or frames at staging time, with trim, scene-change sampling and an original-file option that is offered only where the model and the route can take it, and re-checked after the route resolves."
+description: "The composer rejected all videos and silently flattened large GIFs. Converts videos and animated GIFs to storyboards or frames during staging. Supports trimming and scene-change sampling. Offers the original file only when the model and route support it, and checks support again after route resolution."
 ---
 
 # ADR 0180 — A video reaches the model as what it can read
@@ -96,7 +96,7 @@ copy.
 
 ### 7. Ceilings (D8)
 
-A 500 MB source ceiling. An original video is at most 10 MB, and the derived
+The source ceiling is 500 MB. An original video is at most 10 MB, and the derived
 images are at most 10 MB, re-encoded at a lower quality once before refusing. A
 draft keeps a video's bytes only up to 10 MB; beyond that it restores as a
 reminder chip, and the sampling settings always persist with the draft.

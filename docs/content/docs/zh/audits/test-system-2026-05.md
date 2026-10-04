@@ -1,6 +1,6 @@
 ---
 title: 测试体系审计 — 2026-05
-description: 对 cognia-next Jest + Playwright + sidecar 测试体系做的一次结构化体检，覆盖 mock 重复、配置漂移、覆盖缺口与陷阱四类问题。
+description: cognia-next 的 Jest、Playwright 和 sidecar 测试体系审计，涵盖 mock 重复、配置漂移、覆盖缺口和常见陷阱。
 ---
 
 # 测试体系审计 — 2026-05
@@ -13,7 +13,7 @@ description: 对 cognia-next Jest + Playwright + sidecar 测试体系做的一�
 
 ## 执行摘要
 
-仓库测试基础设施成长到约 1300 个 Jest 套件 + 200+ Playwright 套件 + 一个 `node:test` sidecar 套件。本次审计在四类问题上得出明确结论：
+仓库的测试基础设施已包含约 1300 个 Jest 套件、200+ Playwright 套件，以及一个 `node:test` sidecar 套件。本次审计围绕四类问题得出以下结论：
 
 1. **Mock 重复**：`jest.setup.ts` 已全局 mock `next-intl`、`next/image`、`next/navigation`，但仓库里仍有 **268 个测试文件** 再次 inline `jest.mock("next-intl", …)`，加上 49 处对 `@tauri-apps/api/*` 与 `nanoid` 的冗余 inline mock。审计代理最初把这 268 处都标为"identical re-declarations"——**这一判断在抽样验证中被推翻**：大量 inline mock 提供自定义翻译字典或返回 `${ns}.${key}` 格式，是测试断言所依赖的固定夹具，不是真冗余。下文 A1 给出新的分类口径。
 2. **真实漏洞 1 处**：`stores/network-proxy/index.test.tsx:43-44` 在 `beforeEach` 中 spy 了 `console.warn` / `console.debug` 却没有 `afterEach` 还原；`jest.config.ts:16` 的 `clearMocks: true` 只清调用历史，不复位 implementation，spy 会在同 worker 的后续测试间残留。本次 PR 已修复。

@@ -11,7 +11,7 @@ description: The McpServer config model and its Dexie store — the transport un
   One Dexie table, `mcpServers`, holds every MCP server definition. Its row type (`McpServer`,
   `lib/claude/types.ts:1969`) carries a `transport` discriminator and a transport-shaped `config`
   blob (stdio → `{ command, args?, env? }`; http/sse → `{ url, headers? }`). `mcp-servers.ts` is the
-  CRUD layer: every create/update/delete bumps `updatedAt` and fires a **fire-and-forget**
+  CRUD layer: every create/update/delete updates `updatedAt` and fires a **fire-and-forget**
   `scheduleSyncFor(appsEnabled)` so the change is mirrored to the relevant external-CLI config files.
   `buildMcpServerMap` projects reviewed rows into the Agent SDK namespace. Settings discovery resolves
   `SecretRef` values only in the trusted host, then uses the sidecar Runtime Gateway; no renderer-owned

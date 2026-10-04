@@ -1,6 +1,6 @@
 ---
 title: "0197 — The sidecar runs its TypeScript unbuilt"
-description: "The Claude sidecar grew to about 50k lines of untyped `.mjs` in a flat `dispatch/` beside a half-foldered `builtin-tools/`, with directory cycles, 2,000-line closures and the same helper written up to seven times. This ADR moves it into a layered `sidecar/src/` of strict TypeScript that Node 26 runs directly by stripping types, keeps every process entry point at its old path as a small `.mjs` launcher, and adds a layer gate, a standalone type-check, one test runner and a fail-closed bundle guard so the structure holds."
+description: "The Claude sidecar had about 50k lines of untyped `.mjs` in a flat `dispatch/` and a partly organized `builtin-tools/`. It had directory cycles, 2,000-line closures and helpers duplicated up to seven times. Moves it to layered strict TypeScript in `sidecar/src/`, which Node 26 runs directly by stripping types. Keeps process entry points at their existing paths as small `.mjs` launchers. Adds a layer gate, standalone type-check, one test runner and a fail-closed bundle guard."
 ---
 
 # ADR 0197 — The sidecar runs its TypeScript unbuilt
@@ -97,14 +97,15 @@ sidecar/
 ### 3. A gate holds the structure
 
 `pnpm audit:sidecar-architecture` (`scripts/gates/check-sidecar-architecture.mjs`,
-config `sidecar-architecture.json`) enforces the layer map; that `src/` never
-imports not-yet-moved code (legacy may import `src/`, which is what lets the
-move go bottom-up); that no production module imports a launcher, a test or
-test-support; explicit extensions; that imports leave the sidecar only for the
-three `lib/*.json` data files; self-contained trees; isomorphic modules (no
-Node built-ins, packages or `import.meta` in code the renderer bundles); the
-list of `public` modules code outside the sidecar may import; and no directory
-import cycles. Legacy violations are baselined and the baseline may only shrink.
+config `sidecar-architecture.json`) enforces the layer map. It prohibits `src/`
+from importing code that has not yet moved. Legacy code may import `src/` to
+allow migration from lower layers upward. Production modules cannot import
+launchers, tests or test-support. Imports must use explicit extensions and can
+leave the sidecar only for the three `lib/*.json` data files. Trees must be
+self-contained. Modules bundled by the renderer must be isomorphic: no Node
+built-ins, packages or `import.meta`. Code outside the sidecar may import only
+the listed `public` modules. Directory import cycles are prohibited. Legacy
+violations are baselined, and the baseline may only shrink.
 
 ### 4. A standalone type contract
 

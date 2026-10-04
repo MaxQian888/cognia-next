@@ -1,6 +1,6 @@
 ---
 title: "0211 — The public status page measures the relay it names"
-description: "The public `/status` page reports the official hosted relay (`signaling.cognia.cn`) from real protocol probes: health, an authenticated two-peer signaling round trip and the explicit data lane, recorded as immutable minute slots in a separate `cognia-status` Worker with D1. Missing evidence is unknown, never 100 %; availability is counted, coverage is shown beside it, and observer health is published apart from service health. Incidents, maintenance, Atom/RSS and double-opt-in email are operator- and consent-controlled. One contract module (`lib/status/`) is bundled into the page, the Worker, the external Node probe and the operator CLI."
+description: "The public `/status` page measures the official hosted relay (`signaling.cognia.cn`) through protocol probes. Health, an authenticated two-peer signaling round trip and the explicit data lane are recorded in immutable minute slots by a separate `cognia-status` Worker with D1. Missing evidence is unknown, never 100 %. Availability and coverage are reported together. Observer health is separate from service health. Operator controls govern incidents and maintenance. Atom/RSS and double-opt-in email provide updates under the applicable operator and consent controls. One contract module (`lib/status/`) is shared by the page, Worker, external Node probe and operator CLI."
 ---
 
 # ADR 0211 — The public status page measures the relay it names
@@ -55,8 +55,8 @@ component. Availability is `pass / (pass + fail)` from summed counts. Coverage i
 availability and a `no_data` cell. Maintenance exclusions are reported separately
 from raw counts. Evidence goes stale after 180 s (900 s for 300 s profiles), and the
 snapshot itself goes stale after 180 s in the browser, calibrated by server time.
-Overall status is the worst failing component; otherwise any unknown component makes
-it unknown. Observer health (`healthy | limited | degraded | unknown`) is published
+Overall status uses the worst failing component. If no component fails, any
+unknown component makes the overall status unknown. Observer health (`healthy | limited | degraded | unknown`) is published
 separately and never becomes an outage.
 
 ### 4. One contract, many bundles

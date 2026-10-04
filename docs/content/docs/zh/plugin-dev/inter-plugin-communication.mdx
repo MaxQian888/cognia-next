@@ -1,11 +1,11 @@
 ---
 title: 插件间通信
-description: 插件之间以及与宿主的通信方式——受权限管控的 ctx.ipc RPC/消息面、ctx.events 全局事件总线、按方法的参数 schema、服务发现，以及熔断器安全网。
+description: 插件之间及插件与宿主的通信方式，包括受权限管控的 ctx.ipc RPC/消息接口、ctx.events 全局事件总线、各方法的参数 schema、服务发现和熔断保护。
 ---
 
 # 插件间通信
 
-`ctx.events` 上有两个面向插件的通信面：
+`ctx.events` 提供两个面向插件的通信接口：
 
 - **`ctx.events.ipc`**——具名插件之间的定向消息与 RPC（请求/响应、带熔断、受权限管控）。
 - **`ctx.events.bus`**——全局发布/订阅事件总线（命名空间事件、通配符 / 正则订阅、回放）。只读侧不受管控。

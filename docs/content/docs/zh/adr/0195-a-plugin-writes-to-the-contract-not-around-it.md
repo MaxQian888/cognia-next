@@ -1,17 +1,15 @@
 ---
 title: "0195 — 插件照着契约写，而不是绕开契约"
-description: "逐个审查 66 个树内插件后发现，同样的变通写法在一个又一个插件里重复：分叉的 SDK 注册表、手写的翻译 hook、为绕过未映射的上下文方法而做的类型断言、移动端静默无效的操作。每一处都是宿主 API 的缺口。本 ADR 在契约层补齐它们：所有 SDK 子路径都是共享模块，契约目录双向校验，缺失的接缝（导航、插件翻译、实时查询、测试上下文、宿主网页克隆工具、本地化的清单名称、插槽上下文）成为公开 API。"
+description: "审查 66 个树内插件发现重复的 SDK 注册表、手写翻译 hook、绕过未映射方法的类型断言和移动端静默无效操作。修复宿主 API 契约缺口：共享 SDK 子路径模块、双向校验契约目录，并公开导航、插件翻译、实时查询、测试上下文、宿主网页克隆、本地化清单名称与插槽上下文 API。"
 ---
 
 # ADR 0195 — 插件照着契约写，而不是绕开契约
 
-**状态：** 已接受 — 已实现
-**日期：** 2026-09-25
-**相关：** [ADR-0155](./0155-plugins-reach-the-host-through-one-door) 与 [ADR-0156](./0156-every-in-tree-plugin-is-a-third-party-plugin)（本 ADR 补全的作者边界）、[ADR-0145](./0145-python-plugin-runtime-alignment)（契约目录）、[ADR-0189](./0189-a-plugin-says-which-of-four-things-it-is-doing)（拦截器）、[ADR-0026](./0026-plugin-extension-point-expansion)（扩展插槽）
+**状态：** 已接受 — 已实现**日期：** 2026-09-25 **相关：** [ADR-0155](./0155-plugins-reach-the-host-through-one-door) 与 [ADR-0156](./0156-every-in-tree-plugin-is-a-third-party-plugin)（本 ADR 补全的作者边界）、[ADR-0145](./0145-python-plugin-runtime-alignment)（契约目录）、[ADR-0189](./0189-a-plugin-says-which-of-four-things-it-is-doing)（拦截器）、[ADR-0026](./0026-plugin-extension-point-expansion)（扩展插槽）
 
 ## 背景
 
-ADR-0156 让每个树内插件只导入公开 SDK，这一点守住了：作者导入检查是绿的。但在桌面端和 375 px 移动端宽度下逐个审查全部 66 个插件后，能看到公开 API 不够用时作者是怎么做的——他们绕开它，而且同一种绕法会在好几个插件里重复出现：
+ADR-0156 让每个树内插件只导入公开 SDK，这一点守住了：作者导入检查通过。但在桌面端和 375 px 移动端宽度下逐个审查全部 66 个插件后，能看到公开 API 不够用时作者是怎么做的——他们绕开它，而且同一种绕法会在好几个插件里重复出现：
 
 - **分叉的注册表。** 只有少数 SDK 子路径是共享模块。插件导入其他子路径时会打包自己的一份副本，于是 `registerX()` 写进了宿主从不读取的注册表。
 - **未映射的上下文方法。** 受治理的上下文对 `catalog.json` 中没有的方法一律抛出 `unmapped`。`PluginContext` 暴露的 37 个方法（产物版本、`chat.appendMessagePart`、`i18n.getLocale`、`integrations.*` 系列等）不在目录中。插件用 `as never`、`ctx.x?.` 绕过类型，结果在运行时失败。

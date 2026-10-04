@@ -1,6 +1,6 @@
 ---
 title: "0025 — 统一订阅模块（Claude + Codex + OpenCode）"
-description: "一个Rust模块 + 一个TS模块 + 一个设置UI标签，涵盖人类学PKCE、OpenAI设备代码和OpenCode发现/Zen粘贴键流程。新增多账户保险库、第三方端点预设和加密导入/导出功能。在存储和多账户方面取代了 ADR 0010;Anthropic专用的使用跟踪流程自0010年起仍为规范。"
+description: "一个 Rust 模块、一个 TS 模块与一个设置 UI 标签页，涵盖 Anthropic PKCE、OpenAI 设备代码与 OpenCode 发现 / Zen 密钥粘贴流程。新增多账户凭证库、第三方端点预设和加密导入 / 导出。在存储和多账户方面取代 ADR 0010；Anthropic 专用的用量跟踪仍以 ADR 0010 为规范。"
 ---
 
 # 0025 — 统一订阅模块（Claude + Codex + OpenCode）
@@ -110,7 +110,7 @@ OpenCode 与 Anthropic / Codex 根本不同：它是一个**多 提供商 客户
 
 ### 6. 加密的导出/导入
 
-`lib/subscription/core/encrypted-package.ts`发布一个自定义包络（`cogniabak-subscription-v1`），使用与`lib/data/` Dexie宽备份相同的原语——AES-GCM 256 + PBKDF2-SHA256，迭代60万次。信封内含明文清单（提供商列表+账户计数+ISO时间戳）和一个加密正体，保存完整的每个提供商保险库。用户用`Export…`在机器间备份，用`Import…`恢复。错误的密码短语接口一个不同的`SubscriptionPassphraseError`，因此UI可以显示“错误密码短语”，而不是通用的解密错误。
+`lib/subscription/core/encrypted-package.ts` 提供自定义封装格式（`cogniabak-subscription-v1`），使用与 `lib/data/` 中 Dexie 全库备份相同的原语：AES-GCM 256 + PBKDF2-SHA256，迭代 60 万次。封装内含明文清单（提供商列表、账户计数、ISO 时间戳）与加密主体。加密主体保存每个提供商的完整凭证库。用户用 `Export…` 在机器间备份，用 `Import…` 恢复。密码短语错误时，会抛出独立的 `SubscriptionPassphraseError`，因此 UI 可以显示「错误密码短语」，而不是通用解密错误。
 
 ### 7. 每节 提供商 有源指针 + sidecar 布线
 
@@ -157,18 +157,11 @@ OpenCode 与 Anthropic / Codex 根本不同：它是一个**多 提供商 客户
 
 ### 2026-08-30 修订 — 账号中心加固与 schema v4
 
-订阅账号 CRUD 统一放在「设置 → 订阅 → 账号」。各 provider 页面只保留用量、探测和路由控件。
-渲染器列表/详情读取使用不含 secret 的 DTO；凭据更新、Codex 重新认证、偏好设置和本地移除使用
-限定范围的命令。运行时凭据解析与 Settings 保持隔离。
+订阅账号 CRUD 统一放在「设置 → 订阅 → 账号」。各 provider 页面只保留用量、探测和路由控件。渲染器列表/详情读取使用不含 secret 的 DTO；凭据更新、Codex 重新认证、偏好设置和本地移除使用限定范围的命令。运行时凭据解析与 Settings 保持隔离。
 
-Codex 刷新与定向重新认证由 host 管理。按账号的生命周期锁会串行化 token 轮换与删除；设备流带
-可取消 generation；轮换后的整套 token 原子持久化；终止型刷新失败会保存稳定的
-`reauth_required` reason。定向重新认证必须同时匹配原 workspace 与 subject；无法验证身份的
-legacy 账号必须另存。Schema v4 迁移只从传入凭据 payload 推导身份，不得检查 host 环境。
+Codex 刷新与定向重新认证由 host 管理。按账号的生命周期锁会串行化 token 轮换与删除；设备流带可取消 generation；轮换后的整套 token 原子持久化；终止型刷新失败会保存稳定的 `reauth_required` reason。定向重新认证必须同时匹配原 workspace 与 subject；无法验证身份的 legacy 账号必须另存。Schema v4 迁移只从传入凭据 payload 推导身份，不得检查 host 环境。
 
-移除严格限定为 Cognia 本地操作。UI 使用「停用」表示清除 active 投影，使用「从 Cognia 移除」
-表示删除 vault 条目。不存在远程 revoke/logout 命令，这些操作也不会编辑外部 agent store 或
-CCSwitch。
+移除严格限定为 Cognia 本地操作。UI 使用「停用」表示清除 active 投影，使用「从 Cognia 移除」表示删除 vault 条目。不存在远程 revoke/logout 命令，这些操作也不会编辑外部 agent store 或 CCSwitch。
 
 > **2026-07-25修订。** 以下列表中有两点内容被删减。
 >

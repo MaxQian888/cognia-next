@@ -29,7 +29,7 @@ Sheet 挂载在应用根部而非技能面板——四个入口中有三个可�
 
 ### 捕获有范围，产物仅追加
 
-`CaptureScope` 为 `Window | Application | Desktop`，以三个并列选项呈现，而不是藏进高级设置。由于 `Window` 与 `Application` 带有身份字段，这个选择是「种类**加目标**」：`record_list_capture_targets` 枚举实时窗口列表（排除 Cognia 自身窗口，聚焦窗口排在最前），`scopeForSelection` 再据所选目标构造范围。选了种类却没有目标时返回 `null`，无法开始录制——既不会被悄悄放宽为整个桌面，预检重试同样不会。`ScopeBinding::decide` 是纯函数；由于操作系统会回收窗口 id，每次捕获都按 `(pid, app_name)` 重新校验窗口身份。**按键序列没有光标位置，因此按焦点 pid 而非鼠标定范围**——否则当被限定的窗口正好位于指针之下时，在密码管理器里输入的内容就会被捕获。范围外的动作生成一个没有元素、没有截图的步骤，渲染端只显示聚合计数。
+`CaptureScope` 为 `Window | Application | Desktop`，以三个并列选项呈现，而不是藏进高级设置。由于 `Window` 与 `Application` 带有身份字段，这个选择是「种类**加目标**」：`record_list_capture_targets` 枚举实时窗口列表（排除 Cognia 自身窗口，聚焦窗口排在最前），`scopeForSelection` 再据所选目标构造范围。选了种类却没有目标时返回 `null`，无法开始录制——既不会被悄悄放宽为整个桌面，预检重试同样不会。`ScopeBinding::decide` 是纯函数。由于操作系统会回收窗口 ID，每次捕获都按 `(pid, app_name)` 重新校验窗口身份。**按键序列没有光标位置，因此按焦点 pid 而非鼠标定范围**——否则当被限定的窗口正好位于指针之下时，在密码管理器里输入的内容就会被捕获。范围外的动作生成一个没有元素、没有截图的步骤，渲染端只显示聚合计数。
 
 产物位于 `<data_dir>/cognia/recordings/<recordingId>/`：不可变的 `manifest.json`、仅追加的 `journal.jsonl`、以及 `assets/<assetId>.png`。**撤销是墓碑，永不截断**；`replay` 是纯折叠，末行撕裂被丢弃而非致命。`AssetId`/`RecordingId` 只解析规范 UUID，这是路径穿越的第一道防线，其后还有规范化前缀的再次断言。配额（单次 60 分钟 / 500 步 / 250 MiB，全局 2 GiB，整数 80% 预警）在写入截图**之前**校验。
 

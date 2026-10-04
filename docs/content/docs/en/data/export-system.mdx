@@ -37,7 +37,9 @@ description: Single-session 5 formats + batch ZIP export — Markdown / JSON / P
 | Historical archiving                                 | Batch ZIP (per-session filenames use unique slugs)                               |
 | Custom brand colors                                  | Beautiful / Animated HTML + `customTheme: ThemeTokens` to override default theme |
 
-For **full-database snapshots (multi-device migration + encryption)**, use the `BackupPackageV3` pipeline from [Backup & Data](./backup-and-data) — a separate, encrypted export path that covers all Dexie tables. This page's export system focuses on "single-session / multi-session readable copies".
+For **full-database snapshots (multi-device migration + encryption)**, use the `BackupPackageV3` pipeline from [Backup & Data](./backup-and-data).
+That separate encrypted export path covers all Dexie tables.
+The export system on this page creates readable copies of one or more sessions.
 
 ## Architecture Diagram
 

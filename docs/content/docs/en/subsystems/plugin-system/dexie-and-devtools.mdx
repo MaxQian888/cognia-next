@@ -8,7 +8,7 @@ description: Namespaced plugin IndexedDB tables in the shared CogniaDB Dexie ins
 <Status variant="experimental" />
 
 <TLDR>
-Plugins get collision-proof IndexedDB tables in the single shared `CogniaDB` Dexie instance. Table names are stored as `<pluginId>:<tableName>` (`namespace.ts:11`), and every enable/disable that changes the table set bumps the global Dexie schema version (`bridge.ts:60`). A separate developer-mode surface watches a locally-sourced plugin's directory (`file-watch.ts`), reloads it through the one verified path the CLI also uses (`plugin-dev-reload.ts`), and merges what it logs into one stream (`runtime-log-stream.ts`). The app never builds: `cognia plugin dev` does that.
+Plugins get collision-proof IndexedDB tables in the single shared `CogniaDB` Dexie instance. Table names are stored as `<pluginId>:<tableName>` (`namespace.ts:11`), and every enable/disable that changes the table set increments the global Dexie schema version (`bridge.ts:60`). A separate developer-mode surface watches a locally-sourced plugin's directory (`file-watch.ts`), reloads it through the one verified path the CLI also uses (`plugin-dev-reload.ts`), and merges what it logs into one stream (`runtime-log-stream.ts`). The app never builds: `cognia plugin dev` does that.
 </TLDR>
 
 <StatGrid>

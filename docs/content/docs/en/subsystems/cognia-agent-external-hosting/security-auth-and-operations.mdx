@@ -18,7 +18,7 @@ Every external backend is validated before spawn:
 - Unix children use a detached process group; shutdown sends `SIGTERM`, escalates to `SIGKILL` after
   two seconds, and waits for exit before the id can be reused.
 
-The Node backend never invokes a shell. Validated argv is handed to the native launcher unchanged.
+The Node backend never invokes a shell. The backend passes validated argv to the native launcher unchanged.
 
 ## Sandbox scope
 
@@ -30,8 +30,8 @@ The Node backend never invokes a shell. Validated argv is handed to the native l
 
 The workspace is writable, home is mounted/readable, and network access is enabled. The shared
 protected-path policy then hides credential stores, including `~/.ssh`, cloud credentials,
-`~/.npmrc`, and `~/.cognia`; VCS and shell control files remain readable but not writable. macOS
-uses final deny rules; Linux shadows secrets with empty read-only binds.
+`~/.npmrc`, and `~/.cognia`. VCS and shell control files remain readable but not writable. macOS
+uses final deny rules. Linux hides secrets with empty read-only binds.
 
 Only the selected agent receives additional state writes:
 
@@ -81,7 +81,7 @@ Before spawn, resolved credentials map to native contracts:
 | Anthropic `baseURL` | `ANTHROPIC_BASE_URL` |
 
 Plain `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from the parent process are also allowed. For Codex,
-the shared env builder may add an explicitly adopted active Cognia subscription account; an explicit
+the shared env builder may add an explicitly adopted active Cognia subscription account. An explicit
 CLI credential wins on conflicts.
 
 If no credential is injected, the child uses its native login (`~/.codex/auth.json` or Claude Code

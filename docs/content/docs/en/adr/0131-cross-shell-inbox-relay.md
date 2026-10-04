@@ -1,6 +1,6 @@
 ---
 title: ADR-0131 — Cross-shell inbox relay
-description: One shell-agnostic write path for every Inbox action — manual replies, draft approvals, and conversation overrides — so a phone, a browser, or a desktop driving a remote host can act on platform conversations the way the machine running the bots always could, with end-to-end idempotency and a notifiable push that carries ids, never message text.
+description: "Defines one write path for every Inbox action across shells: manual replies, draft approvals, and conversation overrides. Phones, browsers, and desktops connected to a remote host can act on platform conversations. The path provides end-to-end idempotency and notification push that carries ids, never message text."
 ---
 
 # ADR-0131 — Cross-shell inbox relay
@@ -64,7 +64,7 @@ The clobbering problem is closed by `pending-overrides.ts`: a conversation key w
 
 ### 4. Two realtime signals, deliberately distinct
 
-`sync://invalidate` says *"table X changed, re-pull it"*. It is table-scoped, always sent, and coalesced 150 ms on the host (`lib/sync/host-invalidate.ts`) plus 100 ms per table on the client. `conversationKey` rides along only when every write in the window targeted the same conversation; a mixed burst drops it so the client does one table-wide pull instead of N keyed ones. It is skipped entirely while this desktop is itself a thin client — its rows are mirrors, not authority.
+`sync://invalidate` says *"table X changed, re-pull it"*. It is table-scoped, always sent, and coalesced 150 ms on the host (`lib/sync/host-invalidate.ts`) plus 100 ms per table on the client. `conversationKey` is included only when every write in the window targeted the same conversation. A mixed burst omits it, so the client makes one table-wide pull instead of N keyed pulls. It is skipped entirely while this desktop is itself a thin client — its rows are mirrors, not authority.
 
 `connector://message-added` is the **notifiable** signal: one frame per inbound human message, carrying ids and a `/inbox/c?key=…` deep link. Rust registers a push trigger on it, so a phone whose WebSocket is closed still gets a lock-screen notification.
 

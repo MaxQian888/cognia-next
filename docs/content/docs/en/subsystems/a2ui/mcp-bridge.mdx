@@ -8,14 +8,14 @@ description: The A2UI MCP tool schema set and the three cross-process dispatch p
 <Status variant="experimental" />
 
 <TLDR>
-  A2UI is produced by **agents that live in other processes** — external CLIs, the bundled Claude
+  A2UI is produced by **agents that run in other processes** — external CLIs, the bundled Claude
   Agent SDK session, ACP-native tools — yet it must render in **one** webview React tree. This page
   documents the bridge that makes that work: the MCP **tool schemas** (`lib/a2ui/mcp-tool-schemas.ts`),
   the standalone stdio MCP server (`sidecar/a2ui-mcp.mjs`), the in-process SDK server
   (`sidecar/a2ui-tools/index.mjs`), and the Rust local-IPC listener (`src-tauri/src/a2ui_bridge/`).
   Three independent dispatch paths converge on `useA2UIStore.getState().processMessage`. The wire
-  envelope is always `{ type: "a2ui_dispatch", message }`; the Tauri channel is always
-  `a2ui://dispatch`; tools are always namespaced `mcp__a2ui-bridge__*`.
+  envelope is always `{ type: "a2ui_dispatch", message }`. The Tauri channel is always
+  `a2ui://dispatch`. Tools always use the namespace `mcp__a2ui-bridge__*`.
 </TLDR>
 
 <StatGrid>
@@ -214,7 +214,7 @@ ipcSocket.write(JSON.stringify({ type: "a2ui_dispatch", source: "a2ui-mcp", mess
 
 For the in-app Claude session there is **no socket and no Rust forward**. `buildA2UIBridgeServer`
 (`sidecar/a2ui-tools/index.mjs:54`) builds an SDK MCP server via `createSdkMcpServer` whose inner
-`dispatch` simply emits the same envelope to the **sidecar parent's stdout** (`:56`):
+`dispatch` emits the same envelope to the **sidecar parent's stdout** (`:56`):
 
 ```js
 emit({ type: "a2ui_dispatch", sessionId, message })
@@ -279,7 +279,7 @@ branches by platform:
 `COGNIA_BRIDGE_SOCKET` env var** (`:82`) so the spawned MCP server can find it, then binds — a
 `UnixListener` on Unix (`:87`) or `named_pipe::ServerOptions` on Windows (`:118`) — and runs an
 accept loop per connection. Each connection is read line-by-line: `handle_unix_stream` (`:143`) and
-`handle_named_pipe` (`:151`) both funnel into `forward_line(app, line)` (`:158`), which parses the
+`handle_named_pipe` (`:151`) both call `forward_line(app, line)` (`:158`), which parses the
 JSON (`:162`), checks `type == "a2ui_dispatch"` (`:170`, otherwise warns and ignores at `:171`), and
 emits it onto the Tauri bus with `app.emit(A2UI_EVENT, &value)` (`:174`). `A2UI_EVENT` is imported
 from `crate::claude::sidecar` (`:28`), where it is defined as
@@ -291,7 +291,7 @@ The bridge is designed so a missing or unbound socket **never fails the tool cal
 `a2ui-mcp.mjs` always returns a successful `tools/call` response after building and writing the
 dispatch line; the socket write is fire-and-forget, and `connectIpc` reconnects on a 2 s timer
 (`scheduleReconnect` `:169`) if the connection was not yet established. From the external agent's
-perspective the tool simply succeeds — the UI shows up once the renderer is listening. The Rust
+perspective, the tool succeeds. The UI appears once the renderer is listening. The Rust
 side likewise drops malformed or non-`a2ui_dispatch` lines with a warning (`mod.rs:171`) rather than
 tearing down the connection. This keeps headless external runs (no webview attached) from erroring
 out: the agent gets `ok`, and the surface materializes if and when a renderer is present.

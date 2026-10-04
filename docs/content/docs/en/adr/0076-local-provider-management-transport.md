@@ -12,8 +12,8 @@ description: "Route every local-provider management call through the Rust HTTP p
 Cognia ships ten local inference providers (ollama, lmstudio, llamacpp,
 llamafile, vllm, localai, jan, textgenwebui, koboldcpp, tabbyapi). Their
 configuration surface — inline provider entries, settings cards, bilingual
-strings — was complete and correct. The management surface was not, and the
-shape of the failure explains why nobody reported it.
+strings — was complete and correct. The management surface was incomplete. Its failure behavior explains why
+users did not report the problem.
 
 **The architecture was asymmetric.** Chat worked; management did not:
 

@@ -13,7 +13,7 @@ description: Desktop hybrid progressive disclosure, scoped loader tools, resourc
 
 ## Effective set
 
-`resolveSendOptions` first resolves enabled Skills from character references and ephemeral message attachments. Session-disabled rows are removed. `invocationPolicy: explicit` removes a character Skill from implicit discovery; the same Skill remains usable when the user attaches it explicitly.
+`resolveSendOptions` first resolves enabled Skills from character references and ephemeral message attachments. Session-disabled rows are removed. `invocationPolicy: explicit` removes a character Skill from implicit discovery. The same Skill remains usable when the user attaches it explicitly.
 
 The effective `allowedTools` set is the union from only:
 
@@ -34,7 +34,7 @@ Inline resource text across one Skill is capped at 64 KiB. Files beyond the cap 
 
 Every send creates an in-memory context keyed by session. It contains only Skills available in that turn. The context is replaced on the next send and released when the turn completes.
 
-`load_skill` returns the body, resource manifest, inline text, and a hint when non-inline text exists. `load_skill_resource` accepts `skill_id`, a normalized relative path, and optional byte `offset` and `limit`. A page is at most 64 KiB and never splits a UTF-8 code point. Binary resources return MIME type and size only; base64 content is never dumped into model context.
+`load_skill` returns the body, resource manifest, inline text, and a hint when non-inline text exists. `load_skill_resource` accepts `skill_id`, a normalized relative path, and optional byte `offset` and `limit`. A page is at most 64 KiB and never splits a UTF-8 code point. Binary resources return MIME type and size only. Base64 content is never added to model context.
 
 Guessing another Skill ID, traversing a path, or reading a resource owned by another Skill is rejected. Both tools are registered as non-side-effecting host tools only when progressive loading is active; the resource reader is omitted when the effective set has no resources.
 

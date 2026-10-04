@@ -15,8 +15,8 @@ description: "One-shot content artifacts: iframe-isolated HTML / SVG / React pre
 </Callout>
 
 <TLDR>
-  When the model generates HTML / SVG / React / Mermaid / Chart / Math / Jupyter, cognia-next wraps
-  it into an `Artifact` row written to the Zustand store, then renders it in the UI through one of 9
+  When the model generates HTML / SVG / React / Mermaid / Chart / Math / Jupyter, cognia-next creates
+  an `Artifact` row in the Zustand store. It then renders the artifact in the UI through one of 9
   renderers. HTML / SVG / React go through iframe + DOMPurify + CSP triple isolation; the rest go
   through a React inline renderer. Running code is a different surface entirely —
   `lib/native/code-execution-strategy.ts`, described below and in [./canvas](./canvas).

@@ -63,7 +63,7 @@ Until any handler ships, every desktop-mode `invoke('plugin_*')` call rejects vi
 
 ### B. Hook dispatch coverage gap (38 of 108)
 
-`lib/plugin/contracts/plugin-points.ts:167-276` declares 108 `CANONICAL_HOOK_POINTS`. The dispatcher classes in `lib/plugin/messaging/hooks-system.ts` (`PluginLifecycleHooks` lines 574-1067 and `PluginEventHooks` lines 1104-1821) **already implement every dispatch method**, including `dispatchThemeModeChange`, `dispatchProjectCreate`, `dispatchCanvasContentChange`, `dispatchWorkflowStart`, `dispatchExternalAgent*`, `dispatchMCP*`. What's missing is **host call sites**: theme stores never call `dispatchThemeModeChange`, canvas stores never call `dispatchCanvasContentChange`, and so on. The proof audit at `lib/plugin/contracts/runtime-proof-audit.ts` marks these as "verified" because the binding metadata exists; the runtime is silent in practice.
+`lib/plugin/contracts/plugin-points.ts:167-276` declares 108 `CANONICAL_HOOK_POINTS`. The dispatcher classes in `lib/plugin/messaging/hooks-system.ts` (`PluginLifecycleHooks` lines 574-1067 and `PluginEventHooks` lines 1104-1821) **already implement every dispatch method**, including `dispatchThemeModeChange`, `dispatchProjectCreate`, `dispatchCanvasContentChange`, `dispatchWorkflowStart`, `dispatchExternalAgent*`, `dispatchMCP*`. The missing part is **host call sites**: theme stores never call `dispatchThemeModeChange`, canvas stores never call `dispatchCanvasContentChange`, and so on. The proof audit at `lib/plugin/contracts/runtime-proof-audit.ts` marks these as "verified" because the binding metadata exists. However, the runtime does not dispatch these events.
 
 Categories with no host wiring today:
 

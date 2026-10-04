@@ -8,7 +8,7 @@ description: 节点执行器注册表、调色板目录、各 kind 的 Zod 参�
 <Status variant="stable" />
 
 <TLDR>
-每个工作流步骤都是一个 `kind@typeVersion` 对，通过一个 overlay 注册表（`lib/workflow/nodes/registry.ts:131`）解析，内置项在跨插件冲突中始终胜出（`registry.ts:77`）。调色板与搜索索引存放在单独的目录中（`lib/workflow/nodes/catalog.ts:489`），按相同的 kind 键控；各 kind 的 Zod schema（`lib/workflow/nodes/params-schemas.ts:384`）同时供给编辑期校验门（`lib/workflow/nodes/validate-params.ts:101`）与编译期 `TypedWorkflowNode` 可辨识联合（`lib/workflow/nodes/typed-params.ts:47`）。宿主内置项在 import 时注册（`lib/workflow/nodes/built-ins.ts:1`，副作用导入 `./desktop` 与 `./terminal`），覆盖 flow / data / io / action 家族；AI 原语与 6 个 `pattern.*` 节点见姊妹页 <a href="./ai-pattern-nodes">AI 与 pattern 节点</a>。`typeVersion` 为精确匹配——版本号上调却没有对应注册，会变成可恢复的「No executor registered」运行失败。
+每个工作流步骤都是一个 `kind@typeVersion` 对，通过一个 overlay 注册表（`lib/workflow/nodes/registry.ts:131`）解析，跨插件冲突时始终优先使用内置项（`registry.ts:77`）。调色板与搜索索引存放在单独的目录中（`lib/workflow/nodes/catalog.ts:489`），按相同的 kind 键控；各 kind 的 Zod schema（`lib/workflow/nodes/params-schemas.ts:384`）同时供给编辑期校验门（`lib/workflow/nodes/validate-params.ts:101`）与编译期 `TypedWorkflowNode` 可辨识联合（`lib/workflow/nodes/typed-params.ts:47`）。宿主内置项在 import 时注册（`lib/workflow/nodes/built-ins.ts:1`，副作用导入 `./desktop` 与 `./terminal`），覆盖 flow / data / io / action 家族。AI 原语与 6 个 `pattern.*` 节点见同级页面 <a href="./ai-pattern-nodes">AI 与 pattern 节点</a>。`typeVersion` 为精确匹配——版本号上调却没有对应注册，会变成可恢复的「No executor registered」运行失败。
 </TLDR>
 
 <StatGrid>

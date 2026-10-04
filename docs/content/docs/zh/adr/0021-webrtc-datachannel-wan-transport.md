@@ -66,7 +66,7 @@ DataChannel携带JSON RPC、事件重放控制和有界块帧：
 
 每个 peer 只接受一个有序、完全可靠的 `cognia.signaling` 主通道。无序、部分可靠或重复的主通道会在注册回调前关闭；`cognia.terminal` 保持独立且行为不变。
 
-RPC请求使用`{id, method, params, idempotencyKey, protocolVersion: 2}`。命令行为来自共享命令清单。HTTPS和RTC共享一个由`(deviceId, method, idempotencyKey)`键的持久24小时账本及参数摘要。完成的结果会被重放;不同的参数返回`idempotency_conflict`;崩溃后留下的待处理记录返回`idempotency_indeterminate`。
+RPC 请求使用 `{id, method, params, idempotencyKey, protocolVersion: 2}`。命令行为由共享命令清单定义。HTTPS 和 RTC 共享持久化 24 小时的账本，以 `(deviceId, method, idempotencyKey)` 为键，并记录参数摘要。已完成的结果会被重放。参数不同时返回 `idempotency_conflict`。崩溃后留下的待处理记录返回 `idempotency_indeterminate`。
 
 事件使用一个全局序列、一个持久的客户端光标、显式ack和24-hour/10，000帧保留。错过窗口会产生`resync_required`;客户端必须从权威snapshot/read RPCs重建受影响的域名，然后才能推进光标。
 

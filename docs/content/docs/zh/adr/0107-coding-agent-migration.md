@@ -17,7 +17,7 @@ Cognia 已分别提供智能体会话、MCP 配置、子智能体、技能和外
 
 支持的工件矩阵包括设置、会话、技能、子智能体、MCP 服务器、命令和记忆。每个预览单元明确标记为 `ready`、`shared`、`empty`、`unsupported` 或 `error`；有损或无法映射的来源设置以警告展示，不会静默丢弃。冲突处理沿用 `skip`、`overwrite` 和 `duplicate`。
 
-Claude Code hooks 与斜杠命令标记为**已共享**而非导入：Cognia 有意读写同一个 `~/.claude/settings.json` hooks 区块和 `.claude/commands/` 目录。Codex 与 OpenCode 命令会转换到这份规范存储。环境感知的厂商根目录解析器由会话、技能、命令、记忆和迁移发现共同使用。
+Claude Code hooks 与斜杠命令标记为**已共享**而非导入：Cognia 有意读写同一个 `~/.claude/settings.json` hooks 区块和 `.claude/commands/` 目录。Codex 与 OpenCode 命令会转换到这份规范存储。根据环境配置选择厂商根目录的解析器由会话、技能、命令、记忆和迁移发现共同使用。
 
 迁移向导是新增入口，不替换各领域既有的专用导入对话框。
 

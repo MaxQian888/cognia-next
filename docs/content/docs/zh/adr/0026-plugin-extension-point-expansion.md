@@ -1,6 +1,6 @@
 ---
 title: "0026 — 插件扩展点扩充（v2）"
-description: "新增6个平面清单字段，8个新运行时点，1个新hook（onBuildOptions），一个带有三次触发断路器的环绕式聊天中间件接口，全局插件模态栈，CSS-variable主题变体，平台功能命名空间，并复活2个废弃的UI槽位。仅添加;遗留命令APIs变成@deprecated垫。"
+description: "新增 6 个平级清单字段、8 个运行时扩展点、1 个 hook（onBuildOptions）、带三次触发断路器的环绕式聊天中间件接口、全局插件模态栈、CSS-variable 主题变体与平台功能命名空间，并恢复 2 个废弃 UI 槽位。变更仅做增量扩展；遗留命令 APIs 改为 @deprecated 兼容封装。"
 ---
 
 # ADR 0026 — 插件扩展点扩充
@@ -68,7 +68,7 @@ description: "新增6个平面清单字段，8个新运行时点，1个新hook�
 
 ### 第二阶段 ·提供商登记册
 
-`ctx.ocr`（`lib/plugin/api/ocr-api.ts`）和`ctx.workspace`（`lib/plugin/api/workspace-api.ts`）加入插件上下文。工作区注册表（`lib/github/workspace-backend-registry.ts`）将遗留单例`_e2bBackend`推广为注册表。`setE2BBackend`在迁移期间保留为`@deprecated` shim，并已于 **2026-08-18 移除**（`plugins/e2b-sandbox` 只通过 `ctx.workspace.registerBackend` 注册）；宿主改为按 kind 解析后端（`resolveWorkspaceBackendByKind("e2b")` 可找到 `cognia-e2b-sandbox:e2b`），同时修复了宿主查找裸 `"e2b"` id 与插件前缀 id 不匹配的问题。四个新的清单驱动桥接：
+`ctx.ocr`（`lib/plugin/api/ocr-api.ts`）和 `ctx.workspace`（`lib/plugin/api/workspace-api.ts`）加入插件上下文。工作区注册表（`lib/github/workspace-backend-registry.ts`）将遗留单例 `_e2bBackend`推广为注册表。`setE2BBackend` 在迁移期间保留为 `@deprecated` shim，并已于 **2026-08-18 移除**（`plugins/e2b-sandbox` 只通过 `ctx.workspace.registerBackend` 注册）；宿主改为按 kind 解析后端（`resolveWorkspaceBackendByKind("e2b")` 可找到 `cognia-e2b-sandbox:e2b`），同时修复了宿主查找裸 `"e2b"` id 与插件前缀 id 不匹配的问题。四个新的清单驱动桥接：
 
 - `lib/plugin/bridge/ocr-providers-bridge.ts`
 - `lib/plugin/bridge/workspace-backend-bridge.ts`

@@ -8,7 +8,7 @@ description: 多文件编辑、原子保存、冲突处理、Codex YAML 与共�
 <Status variant="stable">带共享 LSP 的事务型多文件编辑器</Status>
 
 <TLDR>
-  桌面工作台把 `SKILL.md`、`agents/openai.yaml` 和资源文件作为一个逻辑 workspace 编辑。dirty baseline 提供内容级冲突检查，Save All 原子提交。standalone LSP 发送文档事件前，Monaco model 会映射到物化后的 `file://` 文件。
+  桌面工作台把 `SKILL.md`、`agents/openai.yaml` 和资源文件作为一个逻辑工作区编辑。未保存内容的基线用于内容级冲突检查，Save All 原子提交。standalone LSP 发送文档事件前，Monaco model 会映射到物化后的 `file://` 文件。
 </TLDR>
 
 ## 文件与保存状态

@@ -5,7 +5,12 @@ description: How a Squad consumes the plugin ecosystem. The two-layer capability
 
 # Capabilities & Plugins
 
-A Squad is a first-class plugin ecosystem consumer. It carries a default capability pool, each teammate overlays it, the resolver flattens the pair, the runtime clamps the result to what the execution binding can actually offer, and the teammate then rides the *same* build-options pipeline direct chat uses. Plugins extend all of it through uniform overlay registries, and reach in the other direction through `ctx.team`.
+A Squad consumes capabilities from the plugin ecosystem.
+It has a default capability pool, and each teammate applies an overlay.
+The resolver merges both layers.
+The runtime then restricts the result to the capabilities that the execution binding supports.
+Teammates use the *same* build-options pipeline as direct chat.
+Plugins extend these layers through uniform overlay registries and access the team through `ctx.team`.
 
 <TLDR>
 - **Two layers plus a clamp.** `TeamCapabilityBundle` is the pool, `TeammateCapabilityOverlay` adjusts it per member, `resolveTeammateCapabilities` (`lib/ai/agent/team/teammate/capability-resolver.ts:91`) merges them, and `clampCapabilitiesToRuntime` (`:170`) can only remove.
@@ -18,7 +23,11 @@ A Squad is a first-class plugin ecosystem consumer. It carries a default capabil
 
 ## The two-layer capability scope
 
-A Squad's capabilities are declared in two layers. The Squad-level `TeamCapabilityBundle` is the default pool every teammate inherits, and each teammate optionally narrows or extends it through a `TeammateCapabilityOverlay`. The merge is one pure function producing a flat `ResolvedCapabilities` record with no undefined fields, so downstream consumers iterate without null guards.
+A Squad declares capabilities in two layers.
+The Squad-level `TeamCapabilityBundle` is the default pool that every teammate inherits.
+Each teammate can narrow or extend it through a `TeammateCapabilityOverlay`.
+One pure function merges both layers into a flat `ResolvedCapabilities` record with no undefined fields.
+Consumers can therefore iterate over it without null guards.
 
 ```typescript
 // lib/ai/agent/team/teammate/capability-resolver.ts:36-44

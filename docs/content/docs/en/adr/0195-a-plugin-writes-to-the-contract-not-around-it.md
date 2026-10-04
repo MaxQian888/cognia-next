@@ -1,6 +1,6 @@
 ---
 title: "0195 — A plugin writes to the contract, not around it"
-description: "An audit of all 66 in-tree plugins found the same workarounds repeated plugin by plugin: forked SDK registries, hand-rolled translation hooks, casts past unmapped context methods, silent no-ops on mobile. Each one was a hole in the host API. This ADR closes them at the contract: every SDK subpath is a shared module, the catalog is checked in both directions, and the missing seams (navigation, plugin translations, live queries, a test context, a host web-clone tool, localized manifest names, slot context) become public API."
+description: "An audit of all 66 in-tree plugins found duplicated SDK registries, custom translation hooks, casts around unmapped context methods, and silent mobile no-ops. Closes these host API gaps through shared SDK subpath modules and checks the catalog in both directions. Publishes navigation, plugin translations, live queries, a test context, a host web-clone tool, localized manifest names and slot context as API."
 ---
 
 # ADR 0195 — A plugin writes to the contract, not around it
@@ -107,7 +107,7 @@ All 66 plugins use `definePlugin` + `definePluginManifest` +
 `definePluginTool`, with no `as never` casts. Tools that write or send carry
 `requiresApproval`, tools that take paths declare `access` + `pathParams`, and
 long tools set `timeoutMs`. Strings live in the plugin's own locale bundle,
-including `nameKey` / `descriptionKey`. `runtimeCompatibility` is truthful.
+including `nameKey` / `descriptionKey`. `runtimeCompatibility` declares the supported runtimes accurately.
 Demos, theme packs and `cognia-laya-guard` are manual-enable builtins, so a
 fresh install does not start them unasked.
 

@@ -1,14 +1,11 @@
 ---
 title: "0127 — 聊天渲染与传输效率，以及消息自定义契约"
-description: "所有聊天轨统一一套合并策略、Companion 帧批量化、扩宽消息展示契约，并对每一个休眠的聊天/传输功能给出审计后的处置。"
+description: "所有聊天轨使用同一合并策略，批量发送 Companion 帧，并扩展消息展示契约。对每个未启用的聊天和传输功能记录审计后的处置结论。"
 ---
 
 # ADR 0127 — 聊天渲染与传输效率，以及消息自定义契约
 
-**Status:** Accepted
-**Date:** 2026-08-16
-**Builds on:** ADR-0114（统一消息呈现）、ADR-0090（统一 agent 执行）、ADR-0027（移动同步）、ADR-0021（WebRTC 广域传输）
-**范围：** 主应用（浏览器 / Tauri / Capacitor）与公开分享页。**不含** CLI TUI（`cli/src/tui/` 是独立的 Ink 渲染器）。
+**Status:** Accepted **Date:** 2026-08-16 **Builds on:** ADR-0114（统一消息呈现）、ADR-0090（统一 agent 执行）、ADR-0027（移动同步）、ADR-0021（WebRTC 广域传输）**范围：** 主应用（浏览器 / Tauri / Capacitor）与公开分享页。**不含** CLI TUI（`cli/src/tui/` 是独立的 Ink 渲染器）。
 
 ## 背景
 
@@ -55,7 +52,7 @@ markdown?: {
 bodyFont?: "sans" | "serif";
 ```
 
-每个预设提供默认值；解析仍在 `resolveMessageDisplayOptions`（ADR-0114 优先级：会话覆盖 → 全局 → 预设）。**两条**渲染分支（Streamdown 流式、react-markdown 定稿）与代码块渲染器读取解析值；块内工具栏开关仍是解析默认值之上的临时覆盖。控件出现在 `MessageDisplayControls`（桌面外观页、会话设置抽屉、移动端设置面板）。分享页只读全局。Shiki 主题保持硬编码（`lib/chat/code-theme.ts`）——两渲染器必须一致，选择器不值这份耦合。
+每个预设提供默认值。解析仍由 `resolveMessageDisplayOptions` 完成（ADR-0114 优先级：会话覆盖 → 全局 → 预设）。**两条**渲染分支（Streamdown 流式、react-markdown 定稿）与代码块渲染器读取解析值；块内工具栏开关仍是解析默认值之上的临时覆盖。控件出现在 `MessageDisplayControls`（桌面外观页、会话设置抽屉、移动端设置面板）。分享页只读全局。Shiki 主题保持硬编码（`lib/chat/code-theme.ts`）——两渲染器必须一致，引入选择器带来的耦合不值得。
 
 `globals.css` 声明 `@theme --font-serif`；`bodyFont: "serif"` 应用到消息正文，`typographyExt.serifFamily` 首次有了消费者。
 

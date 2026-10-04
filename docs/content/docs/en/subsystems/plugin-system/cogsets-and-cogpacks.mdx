@@ -8,7 +8,7 @@ description: Named plugin sets you switch between (cogsets), the signed file tha
 <Status variant="experimental" />
 
 <TLDR>
-A **cogset** is a named set of plugins that run together. Switching is exclusive: its members, the host's always-on set and their required dependencies run, everything else is turned off, and nothing is uninstalled. A **cogpack** (`.cogpack`) is a signed zip that pins each member to an exact revision, referencing what can be fetched again and embedding the rest. Every install records its **origin** in `pluginInstallOrigins`, which is what lets a cogset be exported. Decision record: ADR-0209.
+A **cogset** is a named set of plugins that run together. Switching is exclusive: its members, the host's always-on set and their required dependencies run. Everything else is turned off. Nothing is uninstalled. A **cogpack** (`.cogpack`) is a signed zip that pins each member to an exact revision, referencing what can be fetched again and embedding the rest. Every install records its **origin** in `pluginInstallOrigins`, which is what lets a cogset be exported. Decision record: ADR-0209.
 </TLDR>
 
 <StatGrid>

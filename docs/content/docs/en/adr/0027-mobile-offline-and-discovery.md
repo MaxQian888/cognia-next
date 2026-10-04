@@ -214,7 +214,7 @@ update an existing message without changing `createdAt`. Dexie v226 adds a
 local `messageSyncClock` and `[syncRevision+id]` message index. The write
 middleware allocates monotonically increasing revisions in the message
 transaction, including concurrent writes, imports, and streaming updates.
-The clock survives deletion of the newest message. Rollbacks also roll back
+The clock survives deletion of the newest message. A transaction rollback also restores
 the clock. Migration adds metadata to raw records without decrypting or
 rewriting their encrypted content.
 

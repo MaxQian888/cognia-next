@@ -1,13 +1,11 @@
 ---
 title: "0197 — sidecar 直接运行未经构建的 TypeScript"
-description: "Claude sidecar 已膨胀到约 5 万行无类型的 `.mjs`：扁平的 `dispatch/` 旁边是一半分目录的 `builtin-tools/`，目录之间相互循环依赖，存在 2000 行的闭包，同一个工具函数最多被写了七遍。本 ADR 把它迁入分层的 `sidecar/src/`，改写为严格 TypeScript，由 Node 26 通过类型剥离直接运行；每个进程入口保留原路径，改为很短的 `.mjs` 启动器；并用分层门禁、独立类型检查、统一测试运行器和失败即拒绝（fail-closed）的打包守卫保证结构不再退化。"
+description: "Claude sidecar 有约 5 万行无类型 `.mjs`，分散在扁平 `dispatch/` 和部分分目录的 `builtin-tools/` 中。存在循环依赖、2000 行闭包，以及最多重复七遍的工具函数。迁入分层 `sidecar/src/`，改为由 Node 26 类型剥离直接运行的严格 TypeScript。原进程入口保留为 `.mjs` 启动器，以分层门禁、独立类型检查、统一测试运行器和失败即拒绝（fail-closed）的打包守卫保持结构。"
 ---
 
 # ADR 0197 — sidecar 直接运行未经构建的 TypeScript
 
-**状态：** 已接受 — 实施中（基础设施已落地；逐层迁移进度见下表）
-**日期：** 2026-09-26
-**相关：** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（sidecar 的运行时契约）、[ADR-0063](./0063-optical-context-compaction)（光学压缩文件）、[ADR-0119](./0119-pi-native-rpc-integration)（SHA 锁定的 Pi 扩展）、[ADR-0059](./0059-cloud-deployment-headless-brain)（brain 目录布局）、[ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked)（本 ADR 所仿照的 Rust 分层门禁）
+**状态：** 已接受 — 实施中（基础设施已落地；逐层迁移进度见下表）**日期：** 2026-09-26 **相关：** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（sidecar 的运行时契约）、[ADR-0063](./0063-optical-context-compaction)（光学压缩文件）、[ADR-0119](./0119-pi-native-rpc-integration)（SHA 锁定的 Pi 扩展）、[ADR-0059](./0059-cloud-deployment-headless-brain)（brain 目录布局）、[ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked)（本 ADR 所仿照的 Rust 分层门禁）
 
 ## 背景
 
@@ -53,7 +51,7 @@ sidecar/
 
 ### 3. 用门禁守住结构
 
-`pnpm audit:sidecar-architecture`（`scripts/gates/check-sidecar-architecture.mjs`，配置 `sidecar-architecture.json`）检查：分层规则；`src/` 不导入尚未迁移的代码（遗留代码可以导入 `src/`，这正是自底向上迁移得以进行的原因）；生产代码不导入启动器、测试或 test-support；相对导入写明扩展名；导入离开 sidecar 目录时只能指向三个 `lib/*.json` 数据文件；自包含目录；同构模块（被渲染层打包的代码不使用 Node 内置模块、第三方包或 `import.meta`）；sidecar 之外的代码只能导入 `public` 列表中的模块；以及不存在目录级导入循环。遗留违规记入基线，基线只能缩小。
+`pnpm audit:sidecar-architecture`（`scripts/gates/check-sidecar-architecture.mjs`，配置 `sidecar-architecture.json`）检查：分层规则；`src/` 不导入尚未迁移的代码（遗留代码可以导入 `src/`，这正是自底向上迁移得以进行的原因）；生产代码不导入启动器、测试或 test-support；相对导入写明扩展名；导入离开 sidecar 目录时只能指向三个 `lib/*.json` 数据文件；自包含目录；同构模块（被渲染层打包的代码不使用 Node 内置模块、第三方包或 `import.meta`）；sidecar 之外的代码只能导入 `public` 列表中的模块；以及不存在目录级导入循环。遗留违规记录在基线中，基线只允许缩减。
 
 ### 4. 独立的类型契约
 

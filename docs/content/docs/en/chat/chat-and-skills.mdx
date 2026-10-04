@@ -55,7 +55,8 @@ sequenceDiagram
   Store->>Dexie: write final msg + bump session.updatedAt
 ```
 
-The chat store lives in `lib/chat/`; UI in `components/chat/`. The store is intentionally thin — most logic happens in `lib/claude/` so it can be reused outside the chat surface (e.g., the agent-teams workspace).
+The chat store is in `lib/chat/`, and the UI is in `components/chat/`.
+Most logic is in `lib/claude/` so other surfaces, such as the agent-teams workspace, can reuse it.
 
 ## Characters
 

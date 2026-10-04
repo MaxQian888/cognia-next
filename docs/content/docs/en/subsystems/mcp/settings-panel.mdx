@@ -70,7 +70,7 @@ transfer/export dialogs are hosted *outside* the tab content so they survive tab
 ## Filling the settings pane
 
 `mcp` is a member of the settings shell's `FILL_HEIGHT_SECTIONS`, so the section renders in the
-fixed-frame branch and the wrapper simply fills it:
+fixed-frame branch and the wrapper fills it:
 
 ```tsx title="components/settings/mcp-servers-section.tsx:28"
 <div className={cn("flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden", className)}>

@@ -1,6 +1,6 @@
 ---
 title: "ADR-0065 — Agent 工作空间约束与权限模型统一"
-description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运行的工具之间的差距。为sidecar内置file/bash工具添加了一个始终在线的跨平台“工作区约束”层（根外写入升级到审批;凭证路径硬性否认），通过单调的权限上限级联，将每个队友的沙盒OS线连接，统一了两sidecar 门禁始终允许的路径，并将同伴远程原始FS 命令从影子模式切换为强制模式。"
+description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运行的工具之间的差距。为sidecar内置file/bash工具添加了一个始终在线的跨平台“工作区约束”层（根外写入升级到审批;凭证路径强制拒绝），通过单调的权限上限级联，将每个队友的操作系统沙箱接入运行流程，统一了两sidecar 门禁始终允许的路径，并将同伴远程原始FS 命令从观察模式切换为强制模式。"
 ---
 
 # ADR-0065 — Agent 工作空间约束与权限模型统一
@@ -39,7 +39,7 @@ description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运�
 
 ### P3 — 每个队友的沙盒策略（将系统A接入Agent Team）
 
-`ExternalSessionPermissionSpec`获得一个通过单调层级通过`clampSandboxPolicy`（`lib/sandbox/policy-bridge.ts`）递交的`sandboxPolicy`——child/teammate可能只缩小可写根，收紧网络，降低CPU/memory上限，绝不能变宽。`teammateToCharacter`计算被压缩的策略，并在合成的字符上设置`sandboxEnabled`/`sandboxPolicy`，**激活现有的`resolveSendOptions`沙盒门禁**，用于队友调度——这是最终将系统A连接到团队运行时的步骤。队友级别的 `sandboxEnabled`/`sandboxPolicy` 实时在 `AgentTeamConfig`/`TeammateConfig` 上。
+`ExternalSessionPermissionSpec`获得一个通过单调层级通过`clampSandboxPolicy`（`lib/sandbox/policy-bridge.ts`）递交的`sandboxPolicy`——child/teammate可能只缩小可写根，收紧网络，降低CPU/memory上限，绝不能变宽。`teammateToCharacter` 计算权限受限的策略，并在合成角色上设置 `sandboxEnabled`/`sandboxPolicy`，**激活现有的 `resolveSendOptions` 沙箱门禁**，用于队友调度——该步骤将系统 A 接入团队运行时。队友级别的 `sandboxEnabled`/`sandboxPolicy` 保存在 `AgentTeamConfig`/`TeammateConfig` 上。
 
 ### P4 — 统一权限决策路径
 

@@ -14,7 +14,7 @@ description: The Grafana/Langfuse-style Dashboard sub-view of /logs → Traces �
   pipeline persists) — so it works in the browser and on mobile, unlike `/performance`. It used to be
   its own `/observability` route with its own range control, its own filters and its own window read;
   it is now a pane the channel feeds, sharing one read with the Explore sub-view beside it, so the
-  KPI numbers and the trace list cannot disagree. `lib/observability/` is a genuine analytics engine:
+  KPI numbers and the trace list cannot disagree. `lib/observability/` is an analytics engine:
   exact percentiles (`percentiles.ts`), fixed-boundary time bucketing with null-gapping
   (`aggregate-series.ts`), spans→trace rollup + parent/child waterfall (`trace-rollup.ts`), group-by
   breakdowns (`breakdown.ts`), and threshold classification (`thresholds.ts`). A single
@@ -224,9 +224,12 @@ Beyond the read-only panels, the dashboard is interactive:
   → JSON (`serializeDashboardConfig`/`parseDashboardConfig`), via the cross-platform `saveExport`.
 - **Manual refresh + last-updated** (`RefreshStatus` over `useRefreshTick`'s `{ tick, lastUpdated, refresh }`).
 - **Deep links** — the active range + filters mirror to the URL (`useObservabilityUrlSync` over
-  `lib/observability/url-state.ts`), so a `/logs?channel=traces&view=dashboard&range=6h&f=…` link
-  reproduces the view. The sync only rewrites the four params it owns, so the channel's own
-  `channel`/`view`/`traceId` survive it.
+  `lib/observability/url-state.ts`), so a `/logs?channel=traces&tview=dashboard&trange=6h&tf=…` link
+  reproduces the view. Every Traces param is `t`-prefixed (`trange`/`tfrom`/`tto`/`tf`, plus
+  `tspan`/`tq`/`terr` for Explore and `tview` for the sub-view; `TRACE_URL_KEYS`) because the
+  Logs channel owns the unprefixed `from`/`to`/`view` on the same route — sharing them leaked a
+  Traces custom range into the Logs filter. Legacy `range`/`from`/`to`/`f` links still open, once,
+  when `channel=traces` is present.
 - **Keyboard shortcuts** (`useObservabilityHotkeys`) — `e` edit · `r` refresh · `f` focus filters · `s` settings.
 - **Empty state** (`ObservabilityEmptyState`) when the window holds no spans.
 

@@ -61,7 +61,7 @@ The TUI's markdown renderer, tool-call cards, and the sidecar's built-in tools w
 
 Rendering now has a pure `TerminalBlock` layer containing styled terminal lines,
 plain-copy text, exact row count, stable id, and interaction target. It continues
-to use `marked@4`; the renderer work deliberately does not bundle a parser major
+to use `marked@4`. The renderer work does not include a parser major
 upgrade. Golden tests cover narrow widths, CJK/emoji/combining text, hostile
 terminal controls, malformed streaming Markdown, tables/lists/quotes, and
 Mermaid/math/A2UI fence fallbacks.

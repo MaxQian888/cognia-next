@@ -9,7 +9,7 @@ description: 两个本地 CLI 如何发现桌面端、调用经认证的回环 A
 
 <TLDR>
   Cognia 有两个不同的本地 CLI。`cognia-agent` 是 TypeScript 聊天 TUI；`cognia` 是 Rust
-  插件作者 CLI。两者都通过 `cli-endpoint.json` 发现运行中的 Tauri 应用，但消费同一个
+  插件作者 CLI。两者都通过 `cli-endpoint.json` 发现运行中的 Tauri 应用，但调用同一个
   12 路由回环服务的不同部分。桌面端还会把 config、credentials、history 和用户选中的 MCP
   server 直接投影到独立 Agent 的 home。会话可以双向交接，但它是基于副本的：两个 shell
   保持分离的 store，也不会共享一个仍在运行的 sidecar session。
@@ -47,22 +47,15 @@ flowchart LR
 | 插件 CLI client | `crates/cognia-cli/` | 插件生命周期与 ACP token broker |
 | 用户控制 | `components/settings/cli-bridge/` | 手动同步与选择性 auto-sync |
 
-该服务不是 Companion API。`cli_bridge` 在 IPv4 loopback 上使用普通 HTTP 和每次启动随机生成的
-bearer token。`companion_api` 是另一个面向已配对设备的 HTTPS listener，并使用 device JWT。
-两套路由 catalog 不会挂载到彼此。
+该服务不是 Companion API。`cli_bridge` 在 IPv4 loopback 上使用普通 HTTP 和每次启动随机生成的 bearer token。`companion_api` 是另一个面向已配对设备的 HTTPS listener，并使用 device JWT。两套路由 catalog 不会挂载到彼此。
 
 ## 设计不变量
 
-- **两个 CLI 不可互换。** `cognia-agent` 消费 6 条 path，`cognia` 消费 7 条；经认证的
-  health 是唯一交集。
-- **Store 分叉、实现共享。** GUI 持有 browser IndexedDB 和 keyring state。CLI 通过 fake
-  IndexedDB 使用同一个 `CogniaDB` schema，将快照写入 `~/.cognia/db.json`，并把 transcript
-  以 JSONL 存在 `~/.cognia/sessions/`。
+- **两个 CLI 不可互换。** `cognia-agent` 消费 6 条 path，`cognia` 消费 7 条；经认证的 health 是唯一交集。
+- **Store 分叉、实现共享。** GUI 持有 browser IndexedDB 和 keyring state。CLI 通过 fake IndexedDB 使用同一个 `CogniaDB` schema，将快照写入 `~/.cognia/db.json`，并把 transcript 以 JSONL 存在 `~/.cognia/sessions/`。
 - **同步是投影，不是共享持久化。** 桌面拥有的值被复制到 CLI 文件；桌面关闭后 CLI 仍可独立运行。
-- **Handoff 创建 continuation 副本。** 两个方向都不转移活跃 SDK session id；历史 turn 在接收
-  shell 中作为 transcript context 重新注入。
-- **Renderer state 需要活跃 WebView。** Twin context 与三项 team 操作使用 request/response
-  bridge，因为权威状态位于 Dexie、vector storage 或 Zustand。
+- **Handoff 创建 continuation 副本。** 两个方向都不转移活跃 SDK session id；历史 turn 在接收 shell 中作为 transcript context 重新注入。
+- **Renderer state 需要活跃 WebView。** Twin context 与三项 team 操作使用 request/response bridge，因为权威状态位于 Dexie、vector storage 或 Zustand。
 
 > 实现说明：当前原生 Tauri startup block 调用 `cli_bridge::init` 时没有显式的移动端编译门控。
 > Renderer listener 与同步 UI 受 desktop/Tauri gate 保护，但在代码真正强制这一边界前，文档不应

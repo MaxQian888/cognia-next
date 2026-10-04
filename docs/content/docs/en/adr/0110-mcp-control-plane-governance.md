@@ -11,7 +11,7 @@ Accepted â€” implemented in schema v151; extended 2026-08-21 with decisions 13â€
 
 ## Context
 
-Outbound consumption, external-Agent projection, built-in hosting, and the inbound External Bridge are legitimate but different MCP planes. Previously, configuration and lifecycle were split across unvalidated Dexie rows, Agent files, renderer one-shot clients, native probes, and sidecar sessions. Names could collide, credentials could reach backups/mobile, imports could execute before review, and workflow calls repeatedly reconnected.
+Outbound consumption, external-Agent projection, built-in hosting, and the inbound External Bridge are legitimate but different MCP planes. Previously, configuration and lifecycle were split across unvalidated Dexie rows, Agent files, renderer one-shot clients, native probes, and sidecar sessions. Names could collide. Credentials could reach backups or mobile devices. Imports could execute before review, and workflow calls repeatedly reconnected.
 
 ## Decision
 
@@ -20,7 +20,7 @@ Outbound consumption, external-Agent projection, built-in hosting, and the inbou
 3. Persisted config is a transport-discriminated shape. Sensitive env/header/argument/URL values become stable-ID `SecretRef` values after verified keyring writes. OAuth uses server ID with one-release name fallback.
 4. All outbound opens cross the same policy and remote-egress guard. Non-interactive pending decisions fail closed. HTTPS is required by default; redirects and private/reserved endpoints require explicit review.
 5. Agent projection is durable and coalesced in `mcpSyncJobs`. Adapters come only from `MCP_AGENT_ADAPTERS`; rename/delete tombstones are retained until the projected file is re-read and verified.
-6. `McpRuntimeGateway` owns client-managed workflow/plan/CLI connections. Pool keys include scope, server, definition revision, and credential version. Reuse never crosses chat sessions or workflow runs. Connect/discovery concurrency is four; connect/list timeout is 15 seconds; calls are capped at 60 seconds; connects retry once; tool calls never retry; repeated connection failures open a bounded circuit.
+6. `McpRuntimeGateway` owns client-managed workflow/plan/CLI connections. Pool keys include scope, server, definition revision, and credential version. Reuse never crosses chat sessions or workflow runs. Connect/discovery concurrency is four. The connect/list timeout is 15 seconds. Calls are capped at 60 seconds. Connections retry once. Tool calls never retry. Repeated connection failures open a bounded circuit.
 7. Capabilities are cached for five minutes by fingerprint. GUI and custom-mode selection consume one normalized runtime/capability snapshot.
 8. Paired mobile receives only `McpServerSummary`. Default backups contain redacted definitions and a missing-credential manifest. Durable audit rows never contain arguments, results, headers, or secrets and are retained for 30 days / 10,000 rows.
 9. The inbound External Bridge stays separate. Its only MCP URL is `GET|POST|DELETE /mcp/stream`; `/mcp` and `/mcp/sse` are deleted rather than redirected. It uses per-client credential verifiers, scope intersection, client-bound session IDs, loopback/rebinding protection, and default-deny policy while sharing the content-free audit vocabulary. Active sessions are capped at 128, idle sessions are reclaimed, and overload fails explicitly.

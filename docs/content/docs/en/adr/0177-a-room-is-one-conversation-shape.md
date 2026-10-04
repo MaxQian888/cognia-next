@@ -1,6 +1,6 @@
 ---
 title: "0177: A room is one conversation shape with three memberships"
-description: "The character-team room, the shared session and the IM group become one room abstraction: one React-free runner executed by whoever holds the run, one roster projection, one settings row, and a room_send command so a companion hands its turn to the host instead of orchestrating on a phone. Squad stays an executor."
+description: "Unifies character-team rooms, shared sessions and IM groups as one room abstraction. One React-free runner executes where the run is held. Rooms use one roster projection and one settings row. room_send delegates companion turns to the host. Squad remains an executor."
 ---
 
 # ADR 0177: A room is one conversation shape with three memberships
@@ -345,7 +345,7 @@ Landed, each with its UI and its test:
   every other policy block), `mention_only` forces `mention_each`, and
   `auto` defers to the operator's policy.
 
-Three judgements implementation overturned. The mapping table above said
+Implementation changed three earlier judgments. The mapping table above said
 `auto` maps to `always` on the IM plane; it maps to "as configured", because
 a default that overrode every operator's activation policy would have changed
 the behaviour of every group the moment the setting existed. The stop token

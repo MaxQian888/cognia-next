@@ -1,13 +1,11 @@
 ---
 title: "0183 — 把 agent 带进镜像"
-description: "agent CLI 不再预装在项目运行的镜像里。每个版本发布一个多架构 agent bundle，glibc 与 musl 两套目录共用一个 digest。启动时注入任意用户镜像，由探测决定该镜像能承载什么，再由静态监管进程 cognia-sandboxd 以声明的用户身份运行 agent。agent 版本随发布固定，不再用 `latest`。"
+description: "agent CLI 与项目镜像分离。每个版本发布多架构 agent bundle，glibc 和 musl 目录共用一个 digest。启动时注入任意用户镜像，经探测确认可承载能力，再由静态监管进程 cognia-sandboxd 以声明用户运行 agent。agent 版本随发布固定，不使用 `latest`。"
 ---
 
 # ADR 0183 — 把 agent 带进镜像
 
-**Status:** Accepted — 第 ① 步已实现（桌面本地容器保持休眠）；第 ②–④ 步规划中
-**Date:** 2026-09-15
-**Related:** [ADR-0182](./0182-a-project-names-the-image-it-runs-in)（指定镜像与 bundle 的规格）、[ADR-0059](./0059-cloud-deployment-headless-brain)（容器执行后端与发布契约）、[ADR-0085](./0085-cloud-shared-browser)（本文在 agent 托管上替换掉的 WorkspaceRuntime 监管进程）
+**Status:** Accepted — 第 ① 步已实现（桌面本地容器保持休眠）；第 ②–④ 步规划中 **Date:** 2026-09-15 **Related:** [ADR-0182](./0182-a-project-names-the-image-it-runs-in)（指定镜像与 bundle 的规格）、[ADR-0059](./0059-cloud-deployment-headless-brain)（容器执行后端与发布契约）、[ADR-0085](./0085-cloud-shared-browser)（本文在 agent 托管上替换掉的 WorkspaceRuntime 监管进程）
 
 ## 背景
 
@@ -82,7 +80,7 @@ description: "agent CLI 不再预装在项目运行的镜像里。每个版本�
 
 - `init-agent -- <argv>`：会回收子进程的 PID 1。设置用户、环境变量、`PATH` 与 CA 变量，以继承的 stdio 运行一个子进程，转发信号并透传退出码（子进程被信号 `n` 杀死时为 `128 + n`）。通过容器挂接跑 ACP 与以前完全一样。根本无法启动 agent 时（用户不存在、程序不存在、非 root 却要切换用户）退出码为 125。
 
-  在容器内部，镜像的 `ENV` 与驱动设置的变量无法区分，所以驱动把自己设置的变量名列在 `COGNIA_SANDBOXD_PROVIDED_ENV` 里。不在该列表中的环境内模型凭据来自镜像，会被移除；`COGNIA_SANDBOXD_*` 永远不会传给 agent。镜像自己的 `PATH` 排在前面，项目命令用的是项目自己的工具链；agent 本身及其 shim 通过 `/cognia` 下的绝对路径调用。
+  在容器内部，镜像的 `ENV` 与驱动设置的变量无法区分，所以驱动把自己设置的变量名列在 `COGNIA_SANDBOXD_PROVIDED_ENV` 里。不在该列表中的环境内模型凭据来自镜像，会被移除；`COGNIA_SANDBOXD_*` 永远不会传给 agent。镜像自己的 `PATH` 排在前面，项目命令使用项目工具链。agent 本身及其 shim 通过 `/cognia` 下的绝对路径调用。
 
 `cognia-sandboxd` 同时是一个库。驱动读回的探测报告与 bundle 清单类型都在这里，所以它不能链接 `cognia-net` 或 `cognia-environment`：两者都会把网络栈带进静态二进制。
 

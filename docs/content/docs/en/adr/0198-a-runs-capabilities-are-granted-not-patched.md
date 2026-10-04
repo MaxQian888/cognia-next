@@ -1,6 +1,6 @@
 ---
 title: "0198 — A run's capabilities are granted, not patched"
-description: "Features that launch an agent (scheduler, workflow nodes, plugins, bots, subagent dispatch) used to adjust the run by editing the SendOptions the resolver had already returned. That skipped the tool filter, Restricted Mode, the parent ceiling and the finalizer, and let a scheduled task replace the agent's deny list. This ADR adds one versioned contract, AgentCapabilityGrantV1, that every such caller hands to resolveSendOptions instead, and applies each field at the stage of the profile field it extends."
+description: "Agent launchers in the scheduler, workflow nodes, plugins, bots and subagent dispatch edited SendOptions after resolution. This bypassed the tool filter, Restricted Mode, parent ceiling and finalizer. Scheduled tasks could replace the agent's deny list. Adds the versioned AgentCapabilityGrantV1 contract as input to resolveSendOptions. Applies each grant field at the resolution stage of the profile field it extends."
 ---
 
 # ADR 0198 — A run's capabilities are granted, not patched
@@ -34,8 +34,8 @@ the tool filter, Restricted Mode, the parent permission ceiling, and the
 finalizer that seals the tool surface. The scheduler's replace semantics
 dropped the character's denials, the tool filter's, the MCP servers' deny
 rules and the IM safeguard, and its `permissionMode` bypassed the whole chain.
-The payload model was assigned after the provider was chosen, so a task could
-send an Anthropic model id to another provider.
+The payload model was assigned after provider selection. A task could
+therefore send an Anthropic model id to another provider.
 
 Separately, `resolveTurnAgentMode` never read `ctx.compositionSelection`, so a
 connector turn's own composition only reached the transcript stamp while its

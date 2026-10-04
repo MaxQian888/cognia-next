@@ -12,7 +12,7 @@ description: Every place outside the workbench that consumes or feeds the skills
   skill-registry overlay). Two **chat** surfaces attach skills per-send (ephemeral picker) and disable
   them per-session (`disabledSkillIds`). The **character editor** binds a persistent `skillIds` set via a
   real multi-select. **Workflow nodes** resolve (`action.skill.invoke`) and author (`action.skill.upsert`)
-  skills. The **scheduler** splices one ad-hoc skill plus per-task disables onto the same
+  skills. The **scheduler** adds one ad-hoc skill and per-task disables to the same
   `resolveSendOptions` pipeline. **CCSwitch** is a second importer; **Discover** lists + toggles + syncs;
   the **command palette / sidebar** route to the manager; **plugins** contribute overlay skills; **agent
   teams** resolve per-teammate capability pools; and the **mobile sync handler** ships the table to the

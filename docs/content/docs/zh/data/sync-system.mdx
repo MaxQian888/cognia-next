@@ -1,6 +1,6 @@
 ---
 title: 同步系统
-description: 桌面 ↔ 手机的 sync-down 协议 —— Host 的 Dexie 是真相源；配对客户端通过分阶段、并发、游标持久化且带墓碑的拉取镜像 48 张表，写入则经 outbound 队列回传。
+description: 桌面 ↔ 手机的 sync-down 协议。Host 的 Dexie 是权威数据源；配对客户端通过分阶段、并发、持久化游标且含墓碑的拉取，建立 48 张表的镜像。写入通过 outbound 队列回传。
 ---
 
 # 同步系统
@@ -27,7 +27,7 @@ description: 桌面 ↔ 手机的 sync-down 协议 —— Host 的 Dexie 是真�
 
 ## 适用场景
 
-所有场景都通过同一个 `sync_pull` 命令读取 Host；区别在于一张表在哪个阶段被拉取，也就是配对或恢复之后客户端多快能拿到它。
+所有场景均通过 `sync_pull` 命令读取 Host。区别在于各表的拉取阶段，这决定了客户端在配对或恢复后多久能获得相应数据。
 
 | 场景 | 表 | 阶段 |
 | --- | --- | --- |
@@ -40,8 +40,7 @@ description: 桌面 ↔ 手机的 sync-down 协议 —— Host 的 Dexie 是真�
 | Agent 团队与机器人 | `agentTeams`、`agentTeammates`、`agentTeamTasks`、`botDefinitions` | `background` |
 | 在客户端上修改 | 无：写入走 `mobileOutboundQueue`，下一次拉取带回 Host 的结果 | 不适用 |
 
-客户端可以是 Capacitor 手机、配对到 Host 的浏览器，或路由到远端 Host 的 Tauri 桌面。Host 要么是桌面应用（由它的 WebView 应答），要么是无头
-brain（由它的 Node 运行时从自己的 Dexie 应答）。
+客户端可以是 Capacitor 手机、配对到 Host 的浏览器，或路由到远端 Host 的 Tauri 桌面。Host 要么是桌面应用（由它的 WebView 应答），要么是无头 brain（由它的 Node 运行时从自己的 Dexie 应答）。
 
 ## 架构图
 
@@ -175,8 +174,7 @@ sequenceDiagram
   O->>M: saveCursor(serverKey, table, since, cursor, lastSyncAt, lastError)
 ```
 
-在若干页之后失败的拉取会携带 `progress`，因此游标仍会越过已应用的那些页。`rate_limited` 失败会等待（`retryAfterMs`，否则 1 秒，最多 30
-秒），每张表最多重试三次，并从该 progress 继续。
+在若干页之后失败的拉取会携带 `progress`，因此游标仍会越过已应用的那些页。`rate_limited` 失败会等待（`retryAfterMs`，否则 1 秒，最多 30 秒），每张表最多重试三次，并从该 progress 继续。
 
 ## 触发方式
 

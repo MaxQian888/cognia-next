@@ -1,6 +1,6 @@
 ---
 title: "0136 — Cross-device placement"
-description: "One answer to where work runs: a shared liveness rule, a shared placement resolver, an explicit execution authority, and a durable host-to-target dispatch queue."
+description: "Determines where work runs through a shared liveness rule, a shared placement resolver, an explicit execution authority, and a durable host-to-target dispatch queue."
 ---
 
 # ADR 0136 — Cross-device placement
@@ -49,8 +49,8 @@ distinction that matters is not where the signal came from but whether it proves
 presence *now*: a socket does and is trusted outright; a timestamp does only
 inside a TTL, and that TTL is `90_000` ms to match `IDLE_TIMEOUT_SECS` in
 `ws_worker.rs` — the two sides must not disagree about who is online. "Never
-seen" never reads as "here"; clock skew into the future is tolerated, because
-refusing a machine over a few seconds of NTP drift is worse than accepting it.
+seen" does not count as "here". Future clock skew is tolerated to avoid
+rejecting a machine because of a few seconds of NTP drift.
 
 ### 2. One placement resolver (`lib/placement/`)
 

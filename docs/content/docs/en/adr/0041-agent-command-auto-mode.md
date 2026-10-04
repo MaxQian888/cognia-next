@@ -12,7 +12,7 @@ description: "Completes the built-in agent's command-calling module with an Open
 
 ## Context
 
-When the built-in agent runs a shell command (`Bash`, or the sidecar `shell_execute_advanced` / `start_process` built-ins), the renderer's `permission_request` handler always pushed a manual approval modal (unless the tool was on the user's always-allow list). There was no automatic safety judgement: `git status` and `rm -rf /` both prompted identically, and a permission **ruleset** module (`lib/claude/permissions/ruleset.ts`, an OpenCode-inspired `tool → glob → allow|ask|deny` resolver) had been written with its own tests but was **never imported anywhere** — dormant.
+When the built-in agent runs a shell command (`Bash`, or the sidecar `shell_execute_advanced` / `start_process` built-ins), the renderer's `permission_request` handler always opened a manual approval modal (unless the tool was on the user's always-allow list). There was no automatic safety judgement. `git status` and `rm -rf /` both produced the same prompt. A permission **ruleset** module (`lib/claude/permissions/ruleset.ts`, an OpenCode-inspired `tool → glob → allow|ask|deny` resolver) had been written with its own tests but was **never imported anywhere** — dormant.
 
 The goal: complete the agent's command-calling module with a real **Auto-mode** that decides command safety automatically — modeled on how OpenCode and OpenClaw gate execution — without weakening the existing approval path, and expose the whole mechanism to plugins.
 

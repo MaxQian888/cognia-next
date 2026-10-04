@@ -1,6 +1,6 @@
 ---
 title: "0181 — What the user staged is what the model reads"
-description: "Selections, results, earlier prompts and whole runs of messages all enter a conversation through the one staging path ADR-0157 built. The app's framing travels in a marked envelope the transcript can take back out, a derived answer is staged as an excerpt of its source, several messages fold into one chip, the phone gets the same actions, and a paired device asks the host for history it never synced."
+description: "Selections, results, earlier prompts and consecutive messages use the staging path from ADR-0157. App framing uses a marked envelope that the transcript can remove. Derived answers are staged as source excerpts. Multiple messages form one chip. Mobile provides the same actions, and paired devices request unsynced history from the host."
 ---
 
 # ADR 0181 — What the user staged is what the model reads
@@ -128,7 +128,7 @@ action.
 A floating bar offers **Reference**, **Summarize**, **Copy** and **Save as
 memory**. Reference builds **one** combined chip in transcript order, with
 duplicates dropped and each member clamped on its own; the chip lists its
-members and any one can be removed. A single readable message degrades to an
+members, and the user can remove any member. A single readable message degrades to an
 ordinary message reference, identical to picking it with `@msg:`. Summarize
 hands the messages over as separate segments, so a part ends between two
 messages unless one message alone is longer than a part.

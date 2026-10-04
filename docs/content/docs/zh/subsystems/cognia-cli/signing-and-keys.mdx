@@ -1,6 +1,6 @@
 ---
 title: 签名与密钥
-description: Ed25519 作者签名（keygen / sign / verify）、用 cognia plugin info 检视 bundle 或目录、SHA-256 公钥 fingerprint，以及由 scripts/release-sync-keys.mjs 保持同步的三份 release key 镜像。
+description: Ed25519 作者签名（keygen / sign / verify）、用 cognia plugin info 检视 bundle 或目录、SHA-256 公钥指纹，以及由 scripts/release-sync-keys.mjs 保持同步的三份 release key 镜像。
 ---
 
 # 签名与密钥
@@ -13,7 +13,7 @@ description: Ed25519 作者签名（keygen / sign / verify）、用 cognia plugi
   （`RELEASE_PUBLIC_KEY_BASE64`，权威源在 `crates/cognia-cli/src/release_key.rs:25`，当前
   是一个全零占位符）对 CLI release tarball 签名，并由 `scripts/release-sync-keys.mjs`
   镜像到 Tauri 下载器和一个 TS 模块（CI 运行 `--check`）。各处的身份标识都是
-  原始 32 字节公钥的 SHA-256 十六进制 fingerprint（`signing.rs:55-59`）。
+  原始 32 字节公钥的 SHA-256 十六进制指纹（`signing.rs:55-59`）。
 </TLDR>
 
 ## 原语
@@ -42,16 +42,11 @@ must be 32 bytes (got N)`、`signature must be 64 bytes (got N)` —— 并把 d
 
 `cognia plugin keygen [--out-dir .cognia]`（`cmd_keygen.rs`）：
 
-- 写入 `plugin.private.b64` 和 `plugin.public.b64`（`cmd_keygen.rs:19-20`）；两个文件都会
-  经过 `confirm_overwrite`（默认为 **No**，用 `--yes` 强制 —— `:24-37`）
-- 打印 fingerprint、一段可直接复制粘贴进 `plugin.json` 的 `"author"` 块、确切的 `sign`
-  命令，以及警告 `⚠ keep <path> safe — anyone with that file can sign as you.`
-  （`:47-74`）
-- 不设置任何特殊文件权限 —— 私钥的安全依赖于目录属于你自己
-  （`.cognia/` 已在脚手架的 `.gitignore` 中）
+- 写入 `plugin.private.b64` 和 `plugin.public.b64`（`cmd_keygen.rs:19-20`）；两个文件都会经过 `confirm_overwrite`（默认为 **No**，用 `--yes` 强制 —— `:24-37`）
+- 打印 fingerprint、一段可直接复制粘贴进 `plugin.json` 的 `"author"` 块、确切的 `sign` 命令，以及警告 `⚠ keep <path> safe — anyone with that file can sign as you.`（`:47-74`）
+- 不设置任何特殊文件权限 —— 私钥的安全依赖于目录属于你自己（`.cognia/` 已在脚手架的 `.gitignore` 中）
 
-`new --with-keygen` 产出相同的文件，并自动嵌入 `author.publicKey`
-（`cmd_new.rs:78-98` 与 `cmd_new.rs:296-316`）。
+`new --with-keygen` 产出相同的文件，并自动嵌入 `author.publicKey`（`cmd_new.rs:78-98` 与 `cmd_new.rs:296-316`）。
 
 ## sign / verify
 
@@ -72,17 +67,11 @@ sequenceDiagram
   H->>H: same Ed25519 check at install review
 ```
 
-`sign`（`cmd_sign.rs:17-59`）默认把输出定为 `<bundle>.sig`，会为自定义 `--out`
-创建父目录，并对覆盖加门控。`verify`（`cmd_verify.rs`）按优先级顺序解析公钥
-—— 显式的 `--public-key`，否则从 bundle 自己的 `plugin.json` 提取
-（`extract_public_key_from_bundle`，`cmd_verify.rs`；空/缺失 →
-`plugin.json has no author.publicKey; pass --public-key explicitly`）。失败会附带
+`sign`（`cmd_sign.rs:17-59`）默认把输出定为 `<bundle>.sig`，会为自定义 `--out` 创建父目录，并对覆盖加门控。`verify`（`cmd_verify.rs`）按优先级顺序解析公钥—— 显式的 `--public-key`，否则从 bundle 自己的 `plugin.json` 提取（`extract_public_key_from_bundle`，`cmd_verify.rs`；空/缺失 → `plugin.json has no author.publicKey; pass --public-key explicitly`）。失败会附带
 补救提示 `re-sign the bundle with the matching private key, or pass --public-key
 explicitly`。`--json` 输出 `{schemaVersion: 1, ok, action, bundle, signature, publicKey, fingerprint,
 stage?, error?}`（`VerifyJsonPayload`，`cmd_verify.rs`）。验证成功时省略 `stage`；失败时
-会设为 `bundle`、`public-key`、`signature` 或 `verify`。本地 bundle/signature 读取失败、
-缺失或无效公钥、以及签名验证失败都会通过同一个 stdout payload 序列化，命令非零退出并保持
-stderr 为空。
+会设为 `bundle`、`public-key`、`signature` 或 `verify`。本地 bundle/signature 读取失败、缺失或无效公钥、以及签名验证失败都会通过同一个 stdout payload 序列化，命令非零退出并保持 stderr 为空。
 
 <Callout type="warn" title="verify 默认信任 bundle 自带的密钥">
   在没有 `--public-key` 的情况下，验证证明的是*内部一致性* —— 即这个 bundle 是由
@@ -94,14 +83,11 @@ stderr 为空。
 
 `cognia plugin info <bundle.zip|directory> [--json] [--detailed]`（`cmd_info.rs`）报告：
 
-- manifest 摘要 —— id、name、version、type、description、capabilities、permissions
-  （`cmd_info.rs:65-173`）
+- manifest 摘要 —— id、name、version、type、description、capabilities、permissions（`cmd_info.rs:65-173`）
 - 输入类型 —— 不可变 zip bundle 为 `bundle`，unpacked 插件源码目录为 `directory`
 - 大小 + 排序后的文件表（zip 输入会跳过目录条目，目录输入会递归列出文件并跳过 symlink）
-- 内嵌的 `cognia:api-version` —— 通过一个容错的自定义段遍历从 `wasmMain` 条目读取；
-  遇到损坏、缺失文件，或目录 manifest 的 `wasmMain` 会逃出所选插件根目录时返回 `None` 而非报错
-- 签名状态。bundle 输入使用 sidecar 验证；目录输入报告 `not-applicable`，因为目录没有可验证的
-  不可变 zip 字节：
+- 内嵌的 `cognia:api-version` —— 通过一个容错的自定义段遍历从 `wasmMain` 条目读取；遇到损坏、缺失文件，或目录 manifest 的 `wasmMain` 会逃出所选插件根目录时返回 `None` 而非报错
+- 签名状态。bundle 输入使用 sidecar 验证；目录输入报告 `not-applicable`，因为目录没有可验证的不可变 zip 字节：
 
 | 状态 | 含义 |
 | --- | --- |
@@ -117,9 +103,7 @@ wasmApiVersion?}`（`cmd_info.rs:65-173`）。
 
 ## release key —— 三份副本，一个源
 
-作者密钥认证的是*插件*；当桌面应用从 GitHub Releases 下载 CLI 二进制时，**release key**
-认证的是 *CLI 二进制本身*
-（[检测与托管安装](./detection-and-managed-install)）。
+作者密钥认证的是*插件*；当桌面应用从 GitHub Releases 下载 CLI 二进制时，**release key** 认证的是 *CLI 二进制本身*（[检测与托管安装](./detection-and-managed-install)）。
 
 | 副本 | 文件 | 消费者 |
 | --- | --- | --- |
@@ -127,27 +111,11 @@ wasmApiVersion?}`（`cmd_info.rs:65-173`）。
 | Rust 镜像 | `src-tauri/src/cli_bridge/release_key.rs:11` | `download.rs` Ed25519 检查（`download.rs:200-309`） |
 | TS 镜像 | `lib/cli-bridge/embedded-pubkey.ts:13` | 渲染端展示 / `isPlaceholderReleaseKey()` |
 
-这三份当前都持有全零占位符
-`"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`；`is_placeholder_key()`
-（`release_key.rs:27-30`）让下载器**跳过 Ed25519（并记录一条警告），但仍然
-强制执行 SHA-256**。发布一个真实密钥即可把验证翻转为强制，无需改动任何代码。
+这三份当前都持有全零占位符 `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`；`is_placeholder_key()`（`release_key.rs:27-30`）让下载器**跳过 Ed25519（并记录一条警告），但仍然强制执行 SHA-256**。发布一个真实密钥即可把验证翻转为强制，无需改动任何代码。
 
-`cognia release-key` 让操作者无需读取源码即可查看权威副本。人类输出会展示 public key、
-SHA-256 fingerprint、placeholder 状态和当前签名策略；`--json` 输出
-`{schemaVersion, ok, action, publicKey, placeholder, fingerprint, signaturePolicy}`，便于 release
-pipeline 和支持脚本消费。`cognia release-verify <artifact> --checksums <checksums.txt>` 是
-下载器的离线 counterpart：SHA-256 始终强制执行；一旦 release key 被替换为真实密钥，它会默认验证
-`<artifact>.sig`，除非 `--signature` 指向另一个 detached signature 文件。
-当本地路径无法推导 release asset 名称，或文件在校验前被改名时，用 `--artifact-name` 指定
-`checksums.txt` 中的名称；该值必须是 release asset 文件名本身，不能是路径或空白字符串。
-它的 `--json` 模式会把本地文件读取错误、缺失或无效 artifact name、checksum mismatch、
-缺失 checksum 条目和签名失败都放进同一个
-`schemaVersion: 1` stdout payload；非零退出走安静的 JSON failure 路径，脚本不需要从 stderr 过滤人类诊断。
+`cognia release-key` 让操作者无需读取源码即可查看权威副本。人类输出会展示 public key、SHA-256 fingerprint、placeholder 状态和当前签名策略；`--json` 输出 `{schemaVersion, ok, action, publicKey, placeholder, fingerprint, signaturePolicy}`，便于 release pipeline 和支持脚本消费。`cognia release-verify <artifact> --checksums <checksums.txt>` 是下载器的离线 counterpart：SHA-256 始终强制执行；一旦 release key 被替换为真实密钥，它会默认验证 `<artifact>.sig`，除非 `--signature` 指向另一个 detached signature 文件。当本地路径无法推导 release asset 名称，或文件在校验前被改名时，用 `--artifact-name` 指定 `checksums.txt` 中的名称；该值必须是 release asset 文件名本身，不能是路径或空白字符串。它的 `--json` 模式会把本地文件读取错误、缺失或无效 artifact name、checksum mismatch、缺失 checksum 条目和签名失败都放进同一个 `schemaVersion: 1` stdout payload；非零退出走安静的 JSON failure 路径，脚本不需要从 stderr 过滤人类诊断。
 
-`scripts/release-sync-keys.mjs` 让镜像保持诚实：它用正则从权威文件中提取该常量
-（`release-sync-keys.mjs:31-39`），重写两个镜像（`:41-62`），并在
-`--check` 模式下（`:68-75`）在出现漂移时以非零退出 —— 即 CI 守卫。release 私钥从不
-进入仓库；它只存在于 release runner 上。
+`scripts/release-sync-keys.mjs` 让镜像保持诚实：它用正则从权威文件中提取该常量（`release-sync-keys.mjs:31-39`），重写两个镜像（`:41-62`），并在 `--check` 模式下（`:68-75`）在出现漂移时以非零退出 —— 即 CI 守卫。release 私钥从不进入仓库；它只存在于 release runner 上。
 
 ```mermaid
 flowchart LR

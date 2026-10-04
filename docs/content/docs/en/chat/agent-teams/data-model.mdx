@@ -5,7 +5,10 @@ description: The Squad type inventory in types/agent/agent-team.ts, the persist-
 
 # Data Model & Store
 
-A Squad is described by one type module, `types/agent/agent-team.ts`, and held at runtime by one Zustand store under `stores/agent/agent-team-store/`. Since **persist v8** the store is no longer where a Squad lives. Dexie owns squads, teammates and tasks, and the `localStorage` blob is down to templates, the default config and a few view preferences.
+`types/agent/agent-team.ts` defines a Squad.
+One Zustand store under `stores/agent/agent-team-store/` manages it at runtime.
+Since **persist v8**, Dexie owns squads, teammates, and tasks.
+The `localStorage` blob contains only templates, the default config, and a few view preferences.
 
 <Callout title="Two nouns, one subsystem">
   ADR-0140 renamed the product noun to **Squad** (中文「小队」) and deliberately left the code

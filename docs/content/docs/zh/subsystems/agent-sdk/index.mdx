@@ -5,7 +5,7 @@ description: RPC-first @cognia/agent 客户端、CLI host 边界、能力协商�
 
 # 外部 Agent SDK
 
-`@cognia/agent` 是面向 Node.js 应用的强类型客户端，使集成方无需嵌入 Cognia 应用依赖图即可运行 Agent。Provider 凭据、模型适配器、持久化、权限、插件、MCP、sandbox policy 与审计数据都留在本机 `cognia-agent rpc` host 内。
+`@cognia/agent` 是面向 Node.js 应用的强类型客户端，使集成方无需嵌入 Cognia 应用依赖图即可运行 Agent。供应商凭据、模型适配器、持久化、权限、插件、MCP、沙盒策略与审计数据都留在本机 `cognia-agent rpc` host 内。
 
 ```mermaid
 flowchart LR
@@ -17,7 +17,7 @@ flowchart LR
   Host --> Audit["脱敏 trace 与 audit"]
 ```
 
-该包不包含模型运行时，也不接受 provider key。它先查找与 SDK 版本一致的 macOS arm64、Linux x64 或 Windows x64 optional host package，再回退到 `PATH` 中的 `cognia-agent`。托管部署和测试还可指定可执行文件路径或注入已连接的 streams。安装或启动期间不会下载可执行代码。
+该包不包含模型运行时，也不接受 provider key。它先查找与 SDK 版本一致的 macOS arm64、Linux x64 或 Windows x64 optional host package，再回退到 `PATH` 中的 `cognia-agent`。托管部署和测试还可指定可执行文件路径或注入已连接的流。安装或启动期间不会下载可执行代码。
 
 ```ts
 import { createCogniaClient } from "@cognia/agent"

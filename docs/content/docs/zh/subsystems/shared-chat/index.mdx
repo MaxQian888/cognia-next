@@ -10,7 +10,7 @@ description: 覆盖 Web、Tauri 与移动端的服务端权威多人 AI 会话�
 <TLDR>
   共享 AI 聊天是独立的在线协作平面。本地会话保持私有，只有 owner 显式确认完整历史后才会
   导入。协作服务拥有成员关系、权限判定、事件顺序、Agent Run 租约、审批、附件授权与审计。
-  Web、Tauri 和 Capacitor 共用同一套 renderer 实现，本地 Dexie 只保存镜像。
+  Web、Tauri 和 Capacitor 共用同一套渲染器实现，本地 Dexie 只保存镜像。
 </TLDR>
 
 ```mermaid
@@ -27,8 +27,7 @@ flowchart LR
   Runtime --> Service
 ```
 
-服务端是所有跨人状态的唯一权威；本地模型执行只有持有绑定设备与 Run 的短期租约 token 才能
-发布事件。
+服务端是所有跨人状态的唯一权威；本地模型执行只有持有绑定设备与 Run 的短期租约 token 才能发布事件。
 
 ## 产品行为
 
@@ -61,10 +60,6 @@ flowchart LR
 
 ## 灰度
 
-两个开关都必须打开：服务端 `COLLAB_SHARED_CHAT_ENABLED=true`，产品构建
-`NEXT_PUBLIC_SHARED_CHAT_ENABLED=true`。关闭任一开关都会停止新的共享入口和写入，但不会删除
-数据库表、对象、镜像或私有会话。Health 报告协议 v2，并且只有服务端开关打开时才包含
-`shared-chat`。
+两个开关都必须打开：服务端 `COLLAB_SHARED_CHAT_ENABLED=true`，产品构建 `NEXT_PUBLIC_SHARED_CHAT_ENABLED=true`。关闭任一开关都会停止新的共享入口和写入，但不会删除数据库表、对象、镜像或私有会话。Health 报告协议 v2，并且只有服务端开关打开时才包含 `shared-chat`。
 
-架构决策与威胁模型记录在 `docs/plans/2026-08-29-server-authoritative-shared-ai-chat.md`
-以及 ADR-0149 的 2026-08-29 补记中。
+架构决策与威胁模型记录在 `docs/plans/2026-08-29-server-authoritative-shared-ai-chat.md` 以及 ADR-0149 的 2026-08-29 补记中。

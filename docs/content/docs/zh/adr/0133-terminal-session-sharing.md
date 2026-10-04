@@ -1,6 +1,6 @@
 ---
 title: ADR-0133 — 基于持久宿主的终端会话分享（方案 A）
-description: 通过授予已配对设备现有的远程终端能力并复用宿主的控制权租约来分享托管终端——宿主广播参与者名单，dock 新增分享对话框、状态 chip 新增参与者列表；删除休眠的邀请令牌 / editor 角色协作模型。
+description: "通过现有远程终端授权和宿主控制权租约，将托管终端分享给已配对设备。宿主广播参与者名单，dock 提供分享对话框，状态 chip 展示参与者。删除未启用的邀请令牌 / editor 角色协作模型。"
 ---
 
 # ADR-0133 — 基于持久宿主的终端会话分享（方案 A）
@@ -14,7 +14,7 @@ description: 通过授予已配对设备现有的远程终端能力并复用宿�
 
 ## 背景
 
-`lib/terminal/collaboration/{types,share-manager}.ts` 描述了一个协作模型——带 `Math.random` 令牌、令牌放在分享 URL 里的邀请对象，三个角色（`controller` / `editor` / `viewer`），一套私有的 `CollabMessage` 数据通道协议——**没有任何地方导入它**，宿主也无法强制它：持久宿主（`crates/cognia-terminal`）只有两个租约角色（控制者与经 `NotController` 只读的查看者），按已配对设备用一次性 socket ticket + `terminal.open` 能力鉴权远程客户端，并且在附着存活期间每秒重新校验该能力。与此同时宿主早已支持一个会话多个附着以及可 take/release 的控制权租约，但渲染端看不到**是谁**附着着：`SessionInfo` 只带 `attachedClients` 与 `currentController`，宿主也不会在名单变化时重发快照。
+`lib/terminal/collaboration/{types,share-manager}.ts` 描述了一个协作模型——带 `Math.random` 令牌、令牌放在分享 URL 里的邀请对象，三个角色（`controller` / `editor` / `viewer`），一套私有的 `CollabMessage` 数据通道协议——**没有模块导入该模型**，宿主也无法强制执行该模型：持久宿主（`crates/cognia-terminal`）只有两个租约角色（控制者与经 `NotController` 只读的查看者），按已配对设备用一次性 socket ticket + `terminal.open` 能力鉴权远程客户端，并且在附着存活期间每秒重新校验该能力。与此同时宿主早已支持一个会话多个附着以及可 take/release 的控制权租约，但渲染端看不到**是谁**附着着：`SessionInfo` 只带 `attachedClients` 与 `currentController`，宿主也不会在名单变化时重发快照。
 
 Grill 中权衡的方案：**A**——授予已配对设备现有的远程终端能力并复用宿主租约（不新增传输，不发令牌）；B——走 WAN 信令通路的每会话邀请令牌 / 链接；C——保持休眠。选 A：它是唯一已被现有安全边界强制的方案，且不需要新的帧类型或能力。
 

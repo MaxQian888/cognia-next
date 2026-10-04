@@ -19,8 +19,8 @@ description: "A layered plan for running workflows across desktop, mobile, brows
 ## Context
 
 Every workflow run executes inside exactly one desktop WebView. Rust
-(`src-tauri/src/workflow/`) owns "when does a workflow start" (cron daemon,
-webhook router, UIA watcher) and crash recovery; the TS orchestrator
+(`src-tauri/src/workflow/`) owns workflow start triggers (cron daemon,
+webhook router, UIA watcher) and crash recovery. The TS orchestrator
 (`lib/workflow/runtime/orchestrator.ts`) owns all step execution. Every
 "remote" surface that exists today — the Companion
 `workflow_trigger_manual` RPC and IM

@@ -72,7 +72,7 @@ UTF-8数量限制在**64 KiB**，直接丢弃整个文件而不是拆分：一�
 
 ### 董事会地位归谁所有
 
-当 review 开启时，**review 节点拥有终端状态**——`dispatchTeammate` 不会写出状态。完成的派遣还未已接受，正在等待审核，任务会`in_progress`直到主管决定。让调度员先写`completed`会让董事会声称工作在审核期间完成，拒绝时`completed → failed`转。`in_progress`也是运行时拥有的专栏（`task-move-guard.ts`），所以没人可以在审核中转卡片。结果消息仍然会在发送时发布——只有接受决策会移动。
+开启 review 时，**由 review 节点写入最终状态**，`dispatchTeammate` 不写入最终状态。已完成的任务分派仍在等待审核，尚未被接受，因此任务保持 `in_progress`，直至负责人作出决定。如果调度器先写入 `completed`，看板就会把审核中的工作显示为已完成，并在审核被拒绝后发生 `completed → failed` 转换。`in_progress` 列也由运行时控制（`task-move-guard.ts`），因此用户无法在审核中手动移动卡片。任务分派完成时仍发布结果消息；只是接受结果的决策改由审核节点作出。
 
 `requireResultReview`是正交的，并且会合成：自动审批在卡片被设置时将卡片路由到`review`（最终由人类决定），未设置时路由到`completed`。
 

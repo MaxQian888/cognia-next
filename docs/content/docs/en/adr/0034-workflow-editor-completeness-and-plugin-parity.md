@@ -30,9 +30,9 @@ runtime, but four gaps blocked "feature completeness":
 
 ## Decision
 
-- **Node-config completion.** Wire the 11 desktop forms; add forms for the three
-  unwired kinds; fix the `requiredString()` bug; add expression-aware URL
-  validation; add a `trigger.team` passthrough executor. Introduce reusable
+- **Node-config completion.** Wire the 11 desktop forms. Add forms for the three
+  unwired kinds. Fix the `requiredString()` bug. Add expression-aware URL
+  validation. Add a `trigger.team` passthrough executor. Introduce reusable
   `EntityPicker` (searchable, on `components/ui/combobox`), `CronBuilder`
   (reuses `lib/scheduler/cron-parser`), and `DurationField`; surface
   jump-to-next-error in the inspector.

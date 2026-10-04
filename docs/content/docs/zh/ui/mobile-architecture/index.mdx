@@ -29,11 +29,7 @@ description: 移动端伴侣客户端——同一份 Next.js 静态导出由 Cap
 
 ## 核心理念：一个 bundle，三个 Shell
 
-`mobile/capacitor.config.ts` 设置 `webDir: "../out"`（`:17`）；`src-tauri/tauri.conf.json` 设置
-`frontendDist: "../out"`。两个原生 Shell 都指向同一个由单次 `pnpm build` 生成的目录。在
-iOS/Android WebView 内运行的 React 与在 Tauri 中运行的 React 字节完全相同——相同的
-Zustand stores、相同的 Dexie schema、相同的 `useTranslations()` 调用。运行时只有两点不同：
-选择器返回哪个 `Transport`，以及 `usePlatform()` 报告哪个枚举值。
+`mobile/capacitor.config.ts` 将 `webDir: "../out"` 设为资源目录（`:17`），`src-tauri/tauri.conf.json` 将 `frontendDist: "../out"` 设为资源目录。两个原生 Shell 均使用一次 `pnpm build` 生成的同一目录。iOS/Android WebView 与 Tauri 中运行的 React 代码完全相同，包括 Zustand stores、Dexie schema 和 `useTranslations()` 调用。运行时只有两点不同：选择器返回的 `Transport`，以及 `usePlatform()` 返回的枚举值。
 
 | 选项 | 结论 |
 | --- | --- |
@@ -41,15 +37,11 @@ Zustand stores、相同的 Dexie schema、相同的 `useTranslations()` 调用�
 | **React Native** | 已拒绝——将 57 个 shadcn/ui 组件重写为 RN 原语，功能零增益。 |
 | **Capacitor 8** | 已采用——将现有静态导出直接放入原生 WebView，无需重写 UI。 |
 
-更深层的事实：手机**从不**是 sidecar 运行时。Claude Agent SDK 需要 Node ≥ 20 及原生扩展；
-connector webhook 无法从运营商 NAT 后面暴露公网 URL。因此有五个子系统受平台现实限制而仅
-限桌面端——桌面才是真正的服务器，手机是受信任的客户端。参见
-[ADR-0014](../../adr/0014-capacitor-mobile-shell)。
+更深层的事实：手机**从不**是 sidecar 运行时。Claude Agent SDK 需要 Node ≥ 20 及原生扩展；connector webhook 无法从运营商 NAT 后面暴露公网 URL。因此有五个子系统受平台现实限制而仅限桌面端——桌面才是真正的服务器，手机是受信任的客户端。参见 [ADR-0014](../../adr/0014-capacitor-mobile-shell)。
 
 ## 客户端主干
 
-移动端会话沿固定主干推进：**发现**桌面端、与其**配对**、选择**Transport**、**同步**本地
-数据、访问**原生**能力。每个方框都标注了其所在文件和行号。
+移动端会话沿固定主干推进：**发现**桌面端、与其**配对**、选择**Transport**、**同步**本地数据、访问**原生**能力。每个方框都标注了其所在文件和行号。
 
 ```mermaid
 flowchart TB
@@ -120,18 +112,11 @@ flowchart TB
 
 ## 为什么手机是客户端而非服务器
 
-所有有状态且需特权的内容都保留在 Host。手机仅持有 P-256 设备 key、固定的 TLS 指纹、
-room descriptor、独立 signaling key 和本地 Dexie 缓存——仅此而已。它无法运行 agent sidecar、向量存储、
-MCP 或 connector webhook。这使攻击面保持最小（丢失的手机可从桌面端的
-[SecurityStore](../../subsystems/companion-api/server-and-auth) 中撤销），并保持 bundle
-完全相同——这正是 Capacitor 方案的核心价值所在。
+所有有状态且需特权的内容都保留在 Host。手机仅持有 P-256 设备 key、固定的 TLS 指纹、room descriptor、独立 signaling key 和本地 Dexie 缓存——仅此而已。它无法运行 agent sidecar、向量存储、MCP 或 connector webhook。这使攻击面保持最小（丢失的手机可从桌面端的 [SecurityStore](../../subsystems/companion-api/server-and-auth) 中撤销），并保持 bundle 完全相同——这正是 Capacitor 方案的核心价值所在。
 
 ## Web runtime targets
 
-同一份 `out/` 就是生产 Web 客户端。浏览器账户可以留在隔离的 standalone target，或激活任意
-已配对 Headless target；激活时 transport、数据库、manifest 与事件 cursor 一起重新绑定。
-原生专属 `lib/capacitor/*` 包装器仍返回 `unsupported`；standalone 浏览器聊天与
-Headless-backed 能力继续按活动 manifest 可用。
+同一份 `out/` 就是生产 Web 客户端。浏览器账户可以留在隔离的 standalone target，或激活任意已配对 Headless target；激活时 transport、数据库、manifest 与事件 cursor 一起重新绑定。原生专属 `lib/capacitor/*` 包装器仍返回 `unsupported`；standalone 浏览器聊天与 Headless-backed 能力继续按活动 manifest 可用。
 
 ## 相关页面
 

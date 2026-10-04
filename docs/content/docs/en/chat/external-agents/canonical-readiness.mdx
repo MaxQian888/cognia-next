@@ -30,9 +30,9 @@ description: The diagnostics brain of the external runtime — canonical-contrac
 
 ## canonical-contract.ts — One Projection
 
-This is the single place a partial validity snapshot becomes a complete one. The manager funnels
-*every* status change through it (`manager.ts:928`), so the UI never sees an inconsistent
-reason-code/outcome pair.
+This module converts a partial validity snapshot into a complete snapshot.
+The manager sends *every* status change through it (`manager.ts:928`).
+The UI therefore receives a consistent reason-code/outcome pair.
 
 | Symbol | Line | Role |
 | --- | --- | --- |

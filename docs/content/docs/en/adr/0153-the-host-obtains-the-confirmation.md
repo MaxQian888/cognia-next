@@ -1,6 +1,6 @@
 ---
 title: "0153 — The host obtains the confirmation"
-description: "host_admin_lease_issue took its interactive approval as an argument the caller set, and the only client set it to true. The confirmation now happens on the host: a recorded request, an answer from a human who is not the requester, and an approval consumed exactly once."
+description: "host_admin_lease_issue accepted interactive approval as a caller-controlled argument, and its only client set that argument to true. Moves confirmation to the host through a recorded request. A human other than the requester answers it, and the approval is consumed exactly once."
 ---
 
 # ADR 0153 — The host obtains the confirmation
@@ -80,7 +80,7 @@ face the approver with a list of identical rows bearing different codes. An
 answered request, by contrast, is final: a denial that could be overturned by
 anyone still holding the code is not a denial.
 
-**6. One channel, both hosts, and the frame is only a nudge.**
+**6. One channel serves both hosts, and the frame triggers a read.**
 `host-consent://requested` carries the ask and its answer. The desktop emits it
 and the `event_channels` forwarder relays it to paired devices; a headless host
 publishes to the bus directly, because it has no Tauri runtime to emit from.

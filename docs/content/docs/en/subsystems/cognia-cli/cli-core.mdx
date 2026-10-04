@@ -11,11 +11,11 @@ description: cli.rs — the clap-derive command tree, dispatch_plugin() router, 
   `release-verify`, `status`, `open`, `completions`) with a 19-variant `PluginCommand`
   enum under `plugin` — resolves a `ColorMode`, builds a `RuntimeUi`
   (`ui/runtime.rs`), and routes plugin commands through `dispatch_plugin()`.
-  Every interactive touchpoint goes through the **`Prompter` trait**
+  Every interactive operation uses the **`Prompter` trait**
   (`ui/prompter.rs`) with three implementations: `DialoguerPrompter` on a TTY,
   `NoninteractivePrompter` that refuses with an actionable flag hint, and `MockPrompter` for
   deterministic tests. Errors flow `anyhow` → `eyre` (`anyhow_to_eyre`) so
-  color-eyre renders the full cause chain; exit codes are 0 / 1 / 2 (clap) / 101 (panic).
+  color-eyre renders the full cause chain. Exit codes are 0 / 1 / 2 (clap) / 101 (panic).
 </TLDR>
 
 ## Crate identity

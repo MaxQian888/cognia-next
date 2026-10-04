@@ -177,6 +177,6 @@ uses its existing row budget, and width-dependent transcript rendering receives
 the root's reactive columns. Unicode editing is grapheme-safe and `useCursor`
 anchors IME at the painted caret. A single active input provider dispatches by
 priority and stops on handled input, preventing modal keys from leaking into the
-composer. Jest component tests remain fast, while a child-process probe imports
-real Ink/Yoga and the production `TuiViewportFrame`; the PTY harness mounts the
+composer. Jest component tests remain fast. A child-process probe imports
+real Ink/Yoga and the production `TuiViewportFrame`. The PTY harness mounts the
 production `App` with a deterministic agent session.

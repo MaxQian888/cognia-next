@@ -1,0 +1,105 @@
+---
+title: Pi 包
+description: 在 Cognia 插件中携带 Pi coding-agent 包：安装到用户的 Pi，并把扩展加载进 Cognia 托管的 Pi 会话（能力 pi-package，ADR-0210）。
+---
+
+# Pi 包
+
+Cognia 插件可携带完整的 [Pi](https://github.com/badlogic/pi-mono) 包。包可以是在 `package.json` 中声明了 `pi` 清单的目录，也可以采用 Pi 约定的 `extensions/`、`skills/`、`prompts/`、`themes/` 结构。插件通过以下两种相互独立的方式将包提供给 Pi：
+
+1. **安装到用户的 Pi。** Cognia 通过与「Agent 包」面板安装目录包相同的代码路径执行 `pi install <包的绝对目录>`（项目范围加 `-l`）。Pi 不可用时，Cognia 改为把路径写入 Pi 的 `settings.json` 并明确提示：这种回退只记录意图，Pi 会在下次启动时解析该包。
+2. **加载进 Cognia 托管的 Pi 会话。** `pi-rpc` 智能体在设置中选择加入该包。每次会话启动时，为每个声明的扩展追加 `-e <绝对路径>`（位于 Cognia 自身的拦截扩展之前，后者始终最后加载），并把声明的值以 `COGNIA_PIPKG_<NAME>` 环境变量转发。
+
+能力名为 `pi-package`，清单字段为 `piPackages`。背景与安全推理见 ADR-0210 以及 [ADR-0119](../adr/0119-pi-native-rpc-integration) 的修订说明。
+
+## 清单
+
+```jsonc
+// plugin.json
+{
+  "id": "latex-workbench",
+  "capabilities": ["pi-package"],
+  "configSchema": {
+    "type": "object",
+    "properties": { "engine": { "type": "string", "default": "lualatex" } }
+  },
+  "piPackages": [
+    {
+      "id": "latex",
+      "name": "LaTeX workbench",
+      "description": "Compile and preview LaTeX from Pi.",
+      "path": "pi",
+      "minPiVersion": "0.85.1",
+      "prepare": {
+        "program": "npm",
+        "args": ["ci", "--ignore-scripts"],
+        "marker": "pi/node_modules/.package-lock.json",
+        "timeoutMs": 300000
+      },
+      "hostedSession": {
+        "extensions": ["pi/extensions/latex.ts"],
+        "env": [
+          { "name": "TEX_ENGINE", "from": { "config": "engine" } },
+          { "name": "WORKSPACE", "from": { "workspace": true } }
+        ],
+        "tools": ["latex_compile"],
+        "controlsSession": false
+      }
+    }
+  ]
+}
+```
+
+同样的条目也可以在代码中用 `@cognia/plugin-sdk` 的 `definePiPackage`（或 Python SDK 的 `define_pi_package`）编写，它会对宿主校验器会拒绝的错误直接抛出异常。
+
+| 字段                            | 含义                                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                            | 小写 kebab-case，插件内唯一。智能体以 `<pluginId>/<id>` 引用该包。                                                                     |
+| `path`                          | 插件内相对路径的包目录（插件根目录写 `.`）。只用正斜杠，不含 `..`，不可为绝对路径。                                                    |
+| `minPiVersion`                  | 该包验证过的最低 Pi 版本。在更旧的 Pi 上，托管会话会拒绝启动。                                                                         |
+| `prepare`                       | 可选的依赖安装步骤。`program` 为 `npm` 或 `pnpm`；`args` 为静态字符串；`marker` 是该步骤会创建的插件内相对文件；`timeoutMs` 上限 600 000。 |
+| `hostedSession.extensions`      | 以 `-e` 按顺序加载的插件内相对 `.ts` / `.js` / `.mjs` 入口文件。显式列出，使 Cognia 加载的内容仅凭清单即可审查。                        |
+| `hostedSession.env`             | 以 `COGNIA_PIPKG_<name>` 转发的值。`from` 为 `{ "config": key }`、`{ "value": 字面量 }` 或 `{ "workspace": true }`（会话工作目录）。     |
+| `hostedSession.tools`           | 扩展注册的工具名。`dontAsk` 会话要预先批准它们时必须声明。                                                                             |
+| `hostedSession.controlsSession` | 扩展会替换会话的工具面时设置。在智能体选择加入前展示给用户。                                                                           |
+
+## 为什么需要 `prepare`
+
+Pi 从不为本地包安装依赖。如果你的包导入了 npm 模块，请声明 `prepare` 步骤。Cognia 会在确认对话框中显示确切的命令行与工作目录，把 `npm`/`pnpm` 解析为绝对路径，并在包目录中**不经 shell** 执行。该操作仅限桌面端，并写入自动化审计日志。除非依赖确实需要安装脚本，建议使用 `--ignore-scripts`。
+
+Cognia 拒绝加载目录中含有符号链接的插件，而包管理器默认会为依赖的可执行文件创建链接。对 `npm`，Cognia 会在获批的命令中加入 `--no-bin-links`；使用 `pnpm` 时请传入不创建链接的安装选项。若运行后仍留下链接，会以 `symlinks-created` 失败。
+
+请声明 `marker`。没有它 Cognia 无法判断步骤是否执行过，因此安装与托管会话都不会等待它。声明后，安装缺少 marker 的包会先提示运行该步骤，托管会话在 marker 出现前拒绝启动。
+
+## 环境变量
+
+`COGNIA_PIPKG_` 是外部智能体环境策略为插件值放行的唯一前缀（`crates/cognia-external-agent/src/presets.rs`，CLI 中有镜像）。因此包永远无法设置 `NODE_OPTIONS`、`LD_PRELOAD` 或提供商凭据。值只来自你的清单、插件自身的配置或工作区路径；未设置的配置键不会转发任何内容。在扩展中读取：
+
+```ts
+export default async function (pi) {
+  const engine = process.env.COGNIA_PIPKG_TEX_ENGINE ?? "pdflatex"
+  // …注册工具
+}
+```
+
+## 工具与权限
+
+Cognia 的拦截扩展仍会对每次工具调用把关。对逐次调用权限表而言，包内工具属于「扩展工具」：采用权限模式的 fallback 决策（默认模式为 `ask`，plan 模式为 `deny`）。在 `dontAsk` 模式下，会话按名称预先批准的已声明工具会被允许，Pi 的 `--tools` 下限也会保留它；未声明的工具仍被拒绝。
+
+## 既安装到 Pi、又加载进托管会话
+
+用户可能既把你的包安装到自己的 Pi，**又**让托管智能体选择加入它。Pi 会把 `-e` 路径与已安装包的扩展合并，并按规范路径去重，因此托管扩展若正是包自身的文件，只会加载一次。若托管扩展位于包目录**之外**（例如包裹该包的 Cognia 专用包装器），它会与已安装包自身的扩展一起加载并重复注册工具；而 Pi 没有按会话排除某个已安装包的方式。因此 Cognia 会以 `double-load` 拒绝该会话，并提示用户把智能体切换为 `isolated` 策略（不加载已安装的包），或从相应的 Pi 范围中移除该包。`global` 策略只考虑用户范围；`trusted-project` 两个范围都考虑。
+
+## 本地化配置标签
+
+`hostedSession.env` 的值常来自插件的 `configSchema`。配置表单显示的每个标签都可以引用清单自身 `i18n.locales` 中的键：`titleKey`、`descriptionKey`、`markdownDescriptionKey`、`patternMessageKey`、`deprecationMessageKey`，以及按选项的 `enumItemLabelKeys[]` / `enumDescriptionKeys[]`（选项标签的字面回退为 `enumItemLabels[]`）。表单依次解析用户语言、英文、字面文本；校验器要求每个键在你声明的每个语言中都存在。`piPackages[].nameKey` / `descriptionKey` 遵循同样的规则。
+
+## 运行位置
+
+- 从目录或市场安装的插件可用。**内置插件（`builtin://`）不能携带 Pi 包**：没有 Pi 可读取的目录，所有操作都会明确拒绝。
+- 托管会话运行在桌面沙箱中。包目录只对 Pi 进程以只读方式挂载，且仅当它位于应用自身的插件存储（`<data dir>/cognia/plugins`）之内时才挂载；从其他位置加载的插件，以及隐藏了主目录的 Bot 隔离智能体，都无法加载包——会话启动时会明确说明（`bot-isolation`）。
+- 包位于本设备。运行在已配对主机上的智能体无法加载它们，会话启动时会明确说明。
+
+## 失败模式
+
+托管会话从不静默跳过智能体已选择加入的包。会话启动会以 `PiPackageUnavailableError`（原因码 `pi_package_unavailable`）失败，并给出以下之一：`not-found`（插件缺失或已禁用）、`not-on-disk`、`invalid-path`、`not-hosted`、`not-prepared`、`workspace-required`、`double-load`、`bot-isolation`、`env-conflict`（两个包为同一变量设置了不同的值）或 `pi-version`。

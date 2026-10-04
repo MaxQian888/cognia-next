@@ -1,6 +1,6 @@
 ---
 title: "0135 — Diagnostic service completion"
-description: "Wire the self-hosted diagnostic service to the product: a triage console, consented submission from desktop and mobile, and one upload state machine shared with the CLI."
+description: "Connects the self-hosted diagnostic service to the product. Adds a triage console, consented submission from desktop and mobile, and one upload state machine shared with the CLI."
 ---
 
 # ADR 0135 — Diagnostic service completion
@@ -66,10 +66,9 @@ are the ones that are down.
 **One upload state machine, two transports.** The sequence, payload shapes,
 resume rule and installation proof live in
 `cognia_observability::diagnostic_submit` and are shared by the desktop shell
-and the CLI. The transport is a *blocking* trait because the two callers
-genuinely cannot share one — the CLI keeps tokio out of its binary by design,
-the desktop already carries async reqwest — but nothing above the wire is
-duplicated.
+and the CLI. The transport is a *blocking* trait because the two callers cannot share
+one implementation. The CLI excludes tokio from its binary by design, while
+the desktop uses async reqwest. Both share the logic above the transport.
 
 **Packaging stays native on desktop.** A package can reach a gigabyte, the
 WebView cannot read the crash directory, and the desktop CSP would block a

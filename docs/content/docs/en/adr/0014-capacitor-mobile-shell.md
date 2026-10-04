@@ -28,8 +28,8 @@ the desktop over LAN. Three native-shell options were on the table:
 3. **Capacitor 7** — wraps the existing Next.js static export in a native
    WebView. Selected.
 
-Pairing the choice with an HTTP-based companion server (M2) means: the
-phone calls into the desktop the same way an external script would,
+With an HTTP-based companion server (M2), the phone calls the desktop
+in the same way as an external script,
 through `/api/v1/*`. The server-client architecture documented in #56
 makes the mobile client and the future headless `cognia-server` symmetric
 clients of the same API.
@@ -191,10 +191,10 @@ emulator on the same LAN):
 3. Sync into the platform: `pnpm mobile:sync` (chains
    `pnpm build && pnpm -F mobile sync`).
 4. Open the platform: `pnpm mobile:open:android` (or `:ios` on a Mac).
-5. From the on-device app, navigate to `/pair`, enter the desktop's
-   LAN IP + pair JWT, tap **Pair**.
-6. Tap **Smoke RPC** — expect a `claude_sidecar_status` payload.
-7. Tap **Smoke WS** — expect an "OK" or a captured frame within 5s.
+5. In the on-device app, navigate to `/pair`. Enter the desktop's
+   LAN IP + pair JWT. Tap **Pair**.
+6. Tap **Smoke RPC**. Verify that it returns a `claude_sidecar_status` payload.
+7. Tap **Smoke WS**. Verify that it returns "OK" or a captured frame within 5s.
 8. Confirm the JWT is in OS keystore: on Android, `adb shell run-as
 com.cognia.mobile cat shared_prefs/SecureStorage.xml` shows an
    encrypted value; on iOS, `security find-generic-password -a default

@@ -1,6 +1,6 @@
 ---
 title: "0168 - An edit is a new version of the same message"
-description: "Chat images were a dead end: a read-only lightbox over pixels nobody could touch, while the plugin Media API carried a half-implemented image engine that advertised eleven adjustments and applied four. Editing a conversation's image is now first-class, and the result is a new version appended to the message it came from rather than a replacement of it."
+description: "Chat images had only a read-only lightbox. The plugin Media API advertised eleven image adjustments but applied four. Adds conversation-image editing. Each result is a new version appended to its source message, preserving the original."
 ---
 
 # ADR 0168 - An edit is a new version of the same message
@@ -23,8 +23,9 @@ loading, resizing, transforming and adjusting images, plus a hand-rolled
 multipart POST to a provider's `/images/edits` endpoint with its own base URL
 normalisation, its own timeout and its own xAI special case. Its
 `ImageAdjustmentOptions` advertised eleven adjustments and implemented four.
-Exposure, gamma, vibrance, temperature, tint, blur and sharpen were accepted
-from a plugin, discarded, and the unchanged input returned with no error. Its
+The API accepted exposure, gamma, vibrance, temperature, tint, blur and sharpen
+from plugins but discarded those settings. It returned the unchanged input
+without an error. Its
 contrast curve fed a 0..2 scale into a formula that expects -255..255, so past
 about plus or minus 40 the factor went negative, inverting the image and then
 clipping it to pure black and white.

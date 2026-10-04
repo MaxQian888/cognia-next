@@ -1,13 +1,11 @@
 ---
 title: "0188 — 路由后的轮次只花账本预留过的钱"
-description: "Router + Fusion 以可选开启的子系统形式，把 router_fusion 规格接入 cognia-next 的模型路由。动作路由器按轮次选择模式；调用账本在每次模型调用发出前预留，按上报用量结算；运行、调用尝试和资金放在按账户独立的数据库里，并通过 outbox 同步到主库。默认关闭，关闭时既有代码原样运行；基础设施故障时普通流量回退到原路径。B1 交付聊天作为 direct 运行，B2 交付工具类生成入账、网关 Run API 与 companion RPC，B3 交付 cascade、panel、cognia/* 模型与动作目录编辑器，B4 交付带沙箱验收与审批的 delegate，B5 交付 LLM 分类器、Agent/Squad/工作流的动作选择与真实冒烟测试，B6 交付路由实验与只做影子运行的学习型路由器。B7 规划中。"
+description: "Router + Fusion 以可选子系统接入 cognia-next 的 router_fusion 模型路由。动作路由器按轮次选模式；调用账本在发送前预留每次模型调用，按上报用量结算。运行、调用尝试和资金存于账户独立数据库，通过 outbox 同步到主库。默认关闭，关闭时原代码不变。基础设施故障时普通流量回退到原路径。B1 交付聊天 direct 运行。B2 交付工具类生成入账、网关 Run API 与 companion RPC。B3 交付 cascade、panel、cognia/* 模型与动作目录编辑器。B4 交付带沙箱验收与审批的 delegate。B5 交付 LLM 分类器、Agent/Squad/工作流动作选择与真实冒烟测试。B6 交付路由实验与影子运行学习型路由器。B7 规划中。"
 ---
 
 # ADR 0188 — 路由后的轮次只花账本预留过的钱
 
-**Status:** Accepted — B1（聊天作为 direct 运行）、B2（工具类生成、网关、任务驾驶舱、companion RPC）、B3（cascade、panel、`cognia/*` 模型、动作目录）、B4（delegate）、B5（LLM 分类器、动作选择、真实冒烟测试）与 B6（路由实验、影子路由器）已实现；B7 规划中
-**Date:** 2026-09-16
-**Related:** [ADR-0043](./0043-llm-provider-execution)（本文所依托的 provider 路由引擎）、[ADR-0125](./0125-durable-work-submission)（持久化发送与重放）、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)（运行控制与 `executionRuns` 投影）、[ADR-0059](./0059-cloud-deployment-headless-brain)（headless brain）
+**Status:** Accepted — B1（聊天作为 direct 运行）、B2（工具类生成、网关、任务驾驶舱、companion RPC）、B3（cascade、panel、`cognia/*` 模型、动作目录）、B4（delegate）、B5（LLM 分类器、动作选择、真实冒烟测试）与 B6（路由实验、影子路由器）已实现；B7 规划中 **Date:** 2026-09-16 **Related:** [ADR-0043](./0043-llm-provider-execution)（本文所依托的 provider 路由引擎）、[ADR-0125](./0125-durable-work-submission)（持久化发送与重放）、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)（运行控制与 `executionRuns` 投影）、[ADR-0059](./0059-cloud-deployment-headless-brain)（headless brain）
 
 ## 背景
 

@@ -8,7 +8,7 @@ description: "The four isolation families in cognia-next — the ADR-0028 five-t
 <Status variant="beta" />
 
 <TLDR>
-  "Sandbox" in cognia-next is **four distinct families**, not one runtime. The big one is the
+  "Sandbox" in cognia-next is **four distinct families**, not one runtime. The main family is the
   ADR-0028 **execution sandbox**: a five-tier hybrid (OS-native `bwrap` / `sandbox-exec` /
   Windows runner, Node 24 `--permission`, Wasmtime, e2b microVM, and a per-action policy gate)
   that confines `Bash` / `Edit` / `Write` / `text_editor` tool calls. Alongside it sit the

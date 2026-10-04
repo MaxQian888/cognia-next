@@ -9,7 +9,7 @@ description: The two-pass PDF router with its text-layer fast-path, the image-pr
 
 <TLDR>
   PDFs go through `extractPdf` (`pdf-router.ts:79`), a **two-pass** router: each page's embedded text layer is read
-  via pdfjs-dist, and pages with ≥16 non-whitespace characters are accepted as-is (no OCR cost); the rest are
+  via pdfjs-dist, and pages with ≥16 non-whitespace characters are accepted as-is (no OCR cost). The rest are
   rasterized at 220 DPI and routed through the OCR provider. Image normalization, page-range parsing, language
   normalization, the page divider, and canvas downscaling are pure helpers in `image-prep.ts`. `hash.ts` provides
   the SHA-256 file identity (WebCrypto, not node crypto) that anchors the cache key. `ocr-parameter-schemas.ts`

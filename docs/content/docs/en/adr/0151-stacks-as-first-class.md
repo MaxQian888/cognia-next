@@ -1,6 +1,6 @@
 ---
 title: "0151 — Stacks as first-class"
-description: "A stack of dependent pull requests already existed inside Agent Team: no write surface anywhere in the app, layers inferred from row timestamps and never checked against git, and a restack that merged rather than rebased. Extracts the engine, makes git the record, and connects it to the five callers that should have had it."
+description: "Agent Team already supported dependent pull requests, but the app had no write surface. It inferred layers from row timestamps without checking git, and restack merged instead of rebasing. Extracts the engine, uses git as the authoritative record, and connects five callers."
 ---
 
 # ADR 0151 — Stacks as first-class
@@ -110,7 +110,7 @@ Branch-per-layer keeps its parent in git config and is what everything
 produces. Commit-per-pull-request would identify a change by a
 `Cognia-Change-Id` trailer written at commit time (no git hook installed); it is
 declared, because the merge rule genuinely differs and writing that rule against
-a model the type does not know is how it gets forgotten, but nothing authors it.
+a model the type does not know is how it gets forgotten, but no caller creates it.
 That dormancy is labelled on all three axes — the type, the panel, and a sweep
 in `model.test.ts` that asserts its own scanned count before reporting no
 callers.

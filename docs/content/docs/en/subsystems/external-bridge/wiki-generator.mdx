@@ -13,8 +13,8 @@ description: lib/wiki — the offline pipeline that turns Cognia's own source in
   `diffManifest` (added / changed / removed / unchanged) → reuse the Twin code chunker → four sub-agents
   (`RepoMapAgent` heuristic pageRank, no LLM; `ModuleArticleAgent` one LLM call per module, 2048-token
   cap, temp 0; `CrossRefAgent` pure Markdown post-processor inserting `[[slug]]`; `IndexPageAgent`
-  top-level nav, 1500-token cap) → persist to `wikiArticles` + `wikiSections`. Incrementality is the
-  default; only the modules touched by changed files get re-generated. A `wikiSchedule` reconciles to a
+  top-level nav, 1500-token cap) → persist to `wikiArticles` + `wikiSections`. Incremental rebuilding is the
+  default. Only modules that contain changed files are regenerated. A `wikiSchedule` reconciles to a
   single scheduler task so rebuilds can run on a cron.
 </TLDR>
 

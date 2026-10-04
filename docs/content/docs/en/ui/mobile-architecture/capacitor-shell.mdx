@@ -37,10 +37,11 @@ withPlugin<P, R>(
 ): Promise<R | { kind: "unsupported" } | { kind: "error"; message: string }>
 ```
 
-The contract: a `loader()` rejection → `{ kind: "unsupported" }` (`:64`) — no native module, or we're
-on web/Tauri; an `action()` throw → `{ kind: "error", message }` (`:69`); otherwise the action's own
-value (`:67`). The shared outcome types are `SimpleOutcome` (`_shared.ts:40`) and `ValueOutcome<T>`
-(`:45`).
+If `loader()` rejects, the wrapper returns `{ kind: "unsupported" }` (`:64`).
+This means no native module is available, or the app runs on web/Tauri.
+If `action()` throws, it returns `{ kind: "error", message }` (`:69`).
+Otherwise, it returns the action's value (`:67`).
+The shared outcome types are `SimpleOutcome` (`_shared.ts:40`) and `ValueOutcome<T>` (`:45`).
 
 The loader factory `makeDefaultLoader` (`_shared.ts:89`) is the subtle part. It first checks
 `window.Capacitor.Plugins[exportName]` (`:98-103`) so test-injected globals resolve regardless of

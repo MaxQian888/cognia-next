@@ -9,7 +9,7 @@ description: How third-party exports become RawSource — the shared conversatio
 
 <TLDR>
   Importers (`lib/twin/importers/`) turn third-party exports into `RawSource[]` — the shape `parseSource`
-  consumes. Every chat importer normalises its platform's quirky export into a canonical `ChatMessageBlock[]`
+  consumes. Every chat importer normalises its platform-specific export into a canonical `ChatMessageBlock[]`
   and renders one markdown transcript via `conversationToRawSource`. Output is always `format: "markdown"`,
   except git-repo which emits `format: "code"`.
 </TLDR>

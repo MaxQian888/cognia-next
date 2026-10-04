@@ -106,7 +106,7 @@ await ctx.agent.run("...", {
 - **`onPostToolUse`** observes each tool result and may return `updatedToolOutput` to **rewrite** what the model sees. Output rewrite applies where the result is materialized in-process — the **ai-sdk channel and in-process MCP tools**; native Anthropic tools (Bash / Read / Edit / Grep) run inside the SDK subprocess and are **observe-only**. The capture loop fires the hook exactly once per tool (review on the ai-sdk channel, observation otherwise).
 - **`onStop`** fires once on completion, on **both** channels (graceful degradation: tool hooks never fire on the text channel, but `onStop` does).
 
-Output rewrite rides a new opt-in sidecar round-trip (`tool_result_review` → `tool_result_decision`, the `claude_tool_result_decision` Rust command) that mirrors `permission_request`; it only engages when an `onPostToolUse` hook is present. No new permission — hooks ride `agent:control`.
+Output rewriting uses a new opt-in sidecar round-trip (`tool_result_review` → `tool_result_decision`, the `claude_tool_result_decision` Rust command) that mirrors `permission_request`; it only engages when an `onPostToolUse` hook is present. No new permission is required. Hooks use `agent:control`.
 
 ## Guardrails (Package B)
 

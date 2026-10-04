@@ -1,6 +1,6 @@
 ---
 title: 生态与预设
-description: 产品目录与开箱即用配置—— ecosystem-adapters.ts 枚举 9 个产品适配器与 16 个按支持层级打标的面，presets.ts 派生 10 个可执行预设并支持插件贡献的预设，env-builder.ts 在拉起时注入 codex 订阅环境变量叠加。
+description: 产品目录与预设配置：ecosystem-adapters.ts 定义 9 个产品适配器和 16 个标有支持层级的接入方式；presets.ts 派生 10 个可执行预设并支持插件贡献；env-builder.ts 在启动时注入 codex 订阅环境变量覆盖项。
 ---
 
 # 生态与预设
@@ -30,12 +30,10 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts 枚�
 
 ## 产品目录
 
-`EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS`（`:48`）是那份目录。每个适配器是一个产品；每个面是抵达该产品的一种
-方式，并打上**支持层级**：
+`EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS`（`:48`）定义适配器目录。每个适配器对应一个产品；每个接入方式描述如何连接该产品，并标明**支持层级**：
 
 - **executable** —— Cognia 能直接拉起它（有 `presetId` + 进程配置）。
-- **documented-only** —— 产品提供这一集成，但它在 Cognia 之外运行；UI 显示文档链接与 `limitationNote`，而非
-  一个启动按钮。
+- **documented-only** —— 产品提供这一集成，但它在 Cognia 之外运行；UI 显示文档链接与 `limitationNote`，而非一个启动按钮。
 
 | 适配器 | 面 | 层级 | 协议/传输 | 拉起命令 | 前置 | 定义行 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -56,20 +54,14 @@ description: 产品目录与开箱即用配置—— ecosystem-adapters.ts 枚�
 | cursor | mcp-config | documented-only | acp/http | — | Cursor 侧 MCP 配置 | 410 |
 | cursor | background-agent | documented-only | acp/http | — | 托管后台 Agent | 427 |
 
-适配器块起始于：codex `:52`、claude-code `:175`、gemini-cli `:203`、copilot-cli `:231`、kiro `:262`、
-qwen-code `:291`、pi `:320`、droid `:352`、cursor `:383`。查找/解析辅助：
-`getExternalAgentEcosystemAdapter`（`:274`）、`findExternalAgentSurfaceByPresetId`（`:284`）、
-`findExternalAgentSurface`（`:297`）、`checkSurfaceExecutability`（`:324`，对 `documented-only` 返回阻断）、
-`listAllSurfacesWithTier`（`:348`），以及 `resolveExternalAgentSurfaceFromMetadata`（`:387`，被 Manager 的
-就绪度探测使用）。
+适配器块起始于：codex `:52`、claude-code `:175`、gemini-cli `:203`、copilot-cli `:231`、kiro `:262`、qwen-code `:291`、pi `:320`、droid `:352`、cursor `:383`。查找/解析辅助：`getExternalAgentEcosystemAdapter`（`:274`）、`findExternalAgentSurfaceByPresetId`（`:284`）、`findExternalAgentSurface`（`:297`）、`checkSurfaceExecutability`（`:324`，对 `documented-only` 返回阻断）、`listAllSurfacesWithTier`（`:348`），以及 `resolveExternalAgentSurfaceFromMetadata`（`:387`，被 Manager 的就绪度探测使用）。
 
 > **OpenCode 不在这份目录里。** 它是一个*协议*（`config-normalizer.ts:16`），而非打包的产品面——用户把它
 > 指向一个运行中的 OpenCode 服务端，而非挑一个预设。
 
 ## 内置预设
 
-`presets.ts` *从*可执行面派生内置预设——每个预设由 `buildPresetConfig(presetId)` 构建，它按
-`presetId` 查面。目录是 `EXTERNAL_AGENT_PRESETS`：
+`presets.ts` *从*可执行面派生内置预设——每个预设由 `buildPresetConfig(presetId)` 构建，它按 `presetId` 查面。目录是 `EXTERNAL_AGENT_PRESETS`：
 
 | 预设 id | 名称 | 协议 | 传输 | 拉起 |
 | --- | --- | --- | --- | --- |
@@ -84,17 +76,11 @@ qwen-code `:291`、pi `:320`、droid `:352`、cursor `:383`。查找/解析辅�
 | `droid` | Factory Droid | acp | stdio | `droid exec --output-format acp` |
 | `custom` | — | — | — | `null`（用户自定义） |
 
-`ExternalAgentPresetId`（`:26`）是一个封闭联合，但预设不是——见下一节。Pi 没有 ACP 条目：它由 `pi-rpc`
-预设经原生协议驱动。曾经出现在这里的社区 `pi-acp` 桥，已连同它的 runtime 与 `npx` 允许名单条目一并移除
-——见 Pi 适配器页。
+`ExternalAgentPresetId`（`:26`）是一个封闭联合，但预设不是——见下一节。Pi 没有 ACP 条目：它由 `pi-rpc` 预设经原生协议驱动。曾经出现在这里的社区 `pi-acp` 桥，已连同它的 runtime 与 `npx` 允许名单条目一并移除——见 Pi 适配器页。
 
 ### 物化一个配置
 
-`createAgentFromPreset(presetId, overrides?)`（`:242`）把一个预设变成可运行的 `ExternalAgentConfig`：它
-生成一个 id（`nanoid()`，`:252`）除非被覆盖、把 `timeout` 默认为 **30000**（`:278`）、把进程 `args`/`env`
-与覆盖合并（`:262`），并盖上来源元数据——`metadata.preset`、`ecosystemAdapterId`、`ecosystemSurfaceId`、
-`ecosystemSupportTier`、`ecosystemDocsUrl`（`:279`）。`isFromPreset`（`:297`）回读该来源；
-`getPresetDisplayInfo`（`:313`）是 UI 子集。
+`createAgentFromPreset(presetId, overrides?)`（`:242`）把一个预设变成可运行的 `ExternalAgentConfig`：它生成一个 id（`nanoid()`，`:252`）除非被覆盖、把 `timeout` 默认为 **30000**（`:278`）、把进程 `args`/`env` 与覆盖合并（`:262`），并盖上来源元数据——`metadata.preset`、`ecosystemAdapterId`、`ecosystemSurfaceId`、`ecosystemSupportTier`、`ecosystemDocsUrl`（`:279`）。`isFromPreset`（`:297`）回读该来源；`getPresetDisplayInfo`（`:313`）是 UI 子集。
 
 ### 插件贡献的预设
 
@@ -109,50 +95,29 @@ qwen-code `:291`、pi `:320`、droid `:352`、cursor `:383`。查找/解析辅�
 | `getAvailablePresets` | 217 | 内置 ∪ 动态 id。 |
 | `listDynamicPresetEntries` | 195 | 全部动态条目（"贡献"UI 标签页）。 |
 
-它们由 `externalAgentPresets` manifest 字段与 `ctx.registerExternalAgentPreset` 驱动——见
-[集成接缝](./integration)。
+它们由 `externalAgentPresets` manifest 字段与 `ctx.registerExternalAgentPreset` 驱动——见[集成接缝](./integration)。
 
-预设只在内置协议之上配置启动。要贡献**新协议**（适配器行为本身），插件用 `external-agent-adapter` 能力
-（`externalAgentAdapters` / `ctx.agent.registerExternalAgentAdapter`）——它把一个 `() => ProtocolAdapter`
-工厂注册到 `${pluginId}:${id}` 并配套一个预设，见
-[贡献新协议](./integration) 与 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
+预设只在内置协议之上配置启动。要贡献**新协议**（适配器行为本身），插件用 `external-agent-adapter` 能力（`externalAgentAdapters` / `ctx.agent.registerExternalAgentAdapter`）——它把一个 `() => ProtocolAdapter` 工厂注册到 `${pluginId}:${id}` 并配套一个预设，见[贡献新协议](./integration) 与 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
 
 ## Goose 安装与会话
 
-`goose` 预设通过 `goose acp --with-builtin developer` 启动 Goose 原生 ACP 服务。
-它在 macOS 和 Linux 上属于系统安装的 runtime。Cognia 检测可执行文件并通过 `goose --version`
-探测版本，不需要社区桥接，也不会接管系统二进制文件。
+`goose` 预设通过 `goose acp --with-builtin developer` 启动 Goose 原生 ACP 服务。它在 macOS 和 Linux 上属于系统安装的 runtime。Cognia 检测可执行文件并通过 `goose --version` 探测版本，不需要社区桥接，也不会接管系统二进制文件。
 
-macOS 可以使用 `brew install block-goose-cli`。CLI/TUI 的安装操作优先使用 Homebrew；
-没有 Homebrew 时使用官方脚本：
+macOS 可以使用 `brew install block-goose-cli`。CLI/TUI 的安装操作优先使用 Homebrew；没有 Homebrew 时使用官方脚本：
 
 ```sh
 curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash
 ```
 
-运行 `goose configure` 选择 provider 和 model，或在 Agent 环境变量中配置 `GOOSE_PROVIDER`、
-`GOOSE_MODEL` 和对应 provider 的 API key。DeepSeek 可以使用 OpenAI 兼容 provider：
-`GOOSE_PROVIDER=openai`、`GOOSE_MODEL=deepseek-flash`、
-`OPENAI_BASE_URL=https://api.deepseek.com/v1`，并在本地提供 `OPENAI_API_KEY`。
-桌面设置和聊天 Agent 管理器提供同一个 Goose 预设和安装指引。
-Homebrew 安装可通过 `brew upgrade block-goose-cli` 更新，脚本安装可通过 `goose update` 更新。
-在 Cognia 中移除 Agent 只删除保存的配置；卸载系统 Goose 需通过包管理器或移除脚本安装的二进制文件。
+运行 `goose configure` 选择 provider 和 model，或在 Agent 环境变量中配置 `GOOSE_PROVIDER`、`GOOSE_MODEL` 和对应 provider 的 API key。DeepSeek 可以使用 OpenAI 兼容 provider：`GOOSE_PROVIDER=openai`、`GOOSE_MODEL=deepseek-flash`、`OPENAI_BASE_URL=https://api.deepseek.com/v1`，并在本地提供 `OPENAI_API_KEY`。桌面设置和聊天 Agent 管理器提供同一个 Goose 预设和安装指引。Homebrew 安装可通过 `brew upgrade block-goose-cli` 更新，脚本安装可通过 `goose update` 更新。在 Cognia 中移除 Agent 只删除保存的配置；卸载系统 Goose 需通过包管理器或移除脚本安装的二进制文件。
 
-Cognia 强制以 `approve` 模式启动 Goose，使工具请求经过现有权限处理。
-`plan` 对应 Goose 的 `chat`，显式 `bypassPermissions` 对应 `auto`。
-`default`、`acceptEdits` 和 `dontAsk` 保持 Goose `approve`，由 Cognia 执行现有审批策略。
-临时文件使用 Goose 已有的沙箱可写状态目录，不关闭沙箱。
+Cognia 强制以 `approve` 模式启动 Goose，使工具请求经过现有权限处理。`plan` 对应 Goose 的 `chat`，显式 `bypassPermissions` 对应 `auto`。`default`、`acceptEdits` 和 `dontAsk` 保持 Goose `approve`，由 Cognia 执行现有审批策略。临时文件使用 Goose 已有的沙箱可写状态目录，不关闭沙箱。
 
-共享 ACP client 提供流式回复、原生工具、会话级 MCP servers、模型和模式配置、会话列表和恢复、
-取消执行及删除会话。暂不声明 Windows 支持，因为 Cognia 的严格外部 Agent 沙箱目前仅支持 macOS/Linux。
+共享 ACP client 提供流式回复、原生工具、会话级 MCP servers、模型和模式配置、会话列表和恢复、取消执行及删除会话。暂不声明 Windows 支持，因为 Cognia 的严格外部 Agent 沙箱目前仅支持 macOS/Linux。
 
-安装 Goose 并加入 PATH，在本地提供 provider 凭据后，可以运行
-`node scripts/smoke/build-and-run-smoke.mjs --goose-acp` 执行真实回归。
-该测试创建并清理临时工作区，通过 `GOOSE_PATH_ROOT` 隔离 Goose 配置。
+安装 Goose 并加入 PATH，在本地提供 provider 凭据后，可以运行 `node scripts/smoke/build-and-run-smoke.mjs --goose-acp` 执行真实回归。该测试创建并清理临时工作区，通过 `GOOSE_PATH_ROOT` 隔离 Goose 配置。
 
-Sources: [Goose 安装](https://goose-docs.ai/docs/getting-started/installation/)、
-[原生 ACP](https://goose-docs.ai/docs/gdk/acp/)、
-[环境变量](https://goose-docs.ai/docs/guides/environment-variables/)。
+Sources: [Goose 安装](https://goose-docs.ai/docs/getting-started/installation/)、[原生 ACP](https://goose-docs.ai/docs/gdk/acp/)、[环境变量](https://goose-docs.ai/docs/guides/environment-variables/)。
 
 ## Qoder 安装、认证与 ACP
 
@@ -192,14 +157,9 @@ node scripts/smoke/build-and-run-smoke.mjs --qoder-acp
 
 ## env-builder.ts —— 拉起时的凭据
 
-多数预设只需一个用户提供的 API-key 环境变量。**Codex 是例外**：它能经统一订阅系统（ADR-0025）用 ChatGPT
-账户登录，所以它的环境必须在启动时注入。
+多数预设只需一个用户提供的 API-key 环境变量。**Codex 是例外**：它能经统一订阅系统（ADR-0025）用 ChatGPT 账户登录，所以它的环境必须在启动时注入。
 
-`buildAgentEnv(config, baseEnv = {})`（`:36`）计算一个 `codexEnvOverlay`（`:40`）；若没有就原样返回
-`baseEnv`（`:41`），否则**先**合并叠加，使调用方的 `baseEnv` 仍然胜出（`:45`）。`codexEnvOverlay`（`:62`）
-返回 `null` 除非 `metadata.preset === "codex"`（`:65`），然后经订阅传输的 `getActiveAccount("codex")`
-（`:68`）拉取活跃 Codex 账户并复制其环境对（`:72`）。任何错误都以一个警告被吞掉（`:77`），让一次凭据故障
-永不阻断启动。结果交给 Rust 的 `spawn_external_agent` 命令，由它经 `Command::env` 应用。
+`buildAgentEnv(config, baseEnv = {})`（`:36`）计算一个 `codexEnvOverlay`（`:40`）；若没有就原样返回 `baseEnv`（`:41`），否则**先**合并叠加，使调用方的 `baseEnv` 仍然胜出（`:45`）。`codexEnvOverlay`（`:62`）返回 `null` 除非 `metadata.preset === "codex"`（`:65`），然后经订阅传输的 `getActiveAccount("codex")`（`:68`）拉取活跃 Codex 账户并复制其环境对（`:72`）。任何错误都以一个警告被吞掉（`:77`），让一次凭据故障永不阻断启动。结果交给 Rust 的 `spawn_external_agent` 命令，由它经 `Command::env` 应用。
 
 ```mermaid
 flowchart LR
@@ -220,15 +180,11 @@ flowchart LR
   class SPAWN proc
 ```
 
-这里不发生 `PATH` 或 `CLAUDE_CODE_OAUTH_TOKEN` 注入——那个 token 属于进程内 sidecar，而非外部 Agent。
-Claude Code、Gemini、Cursor 原样接收基础环境。
+这里不发生 `PATH` 或 `CLAUDE_CODE_OAUTH_TOKEN` 注入——那个 token 属于进程内 sidecar，而非外部 Agent。Claude Code、Gemini、Cursor 原样接收基础环境。
 
 ## Aider 安装与会话
 
-`aider` 预设通过 `aider-cli` 接入官方 CLI。每轮使用 `aider --message-file`，
-并为 Cognia 会话维护独立的聊天和输入历史。支持流式文本、文件编辑、取消、
-模型切换及通过已知会话 ID 恢复。会话列表仅包含当前适配器已打开的会话，
-不会扫描所有原生 Aider 历史。没有原生 ACP 审批、结构化工具事件和 MCP。
+`aider` 预设通过 `aider-cli` 接入官方 CLI。每轮使用 `aider --message-file`，并为 Cognia 会话维护独立的聊天和输入历史。支持流式文本、文件编辑、取消、模型切换及通过已知会话 ID 恢复。会话列表仅包含当前适配器已打开的会话，不会扫描所有原生 Aider 历史。没有原生 ACP 审批、结构化工具事件和 MCP。
 
 在隔离的 Python 环境中安装已测试的 0.86.2：
 
@@ -236,24 +192,13 @@ Claude Code、Gemini、Cursor 原样接收基础环境。
 uv tool install --force --python python3.12 --with pip aider-chat==0.86.2
 ```
 
-在设置 → Agents 中选择 Aider，配置工作目录、参数 `--model deepseek/deepseek-flash`
-及环境变量 `DEEPSEEK_API_KEY`。其他服务使用对应的 Aider model ID 和 key。
-Cognia 隔离原生 `.aider.conf.yml`、dotenv、OAuth key 与模型设置的自动发现，
-避免启动命令或凭据覆盖这里的配置。禁用 Git 提交、仓库地图上下文、自动 lint/test
-和建议执行 shell 命令。需要的文件请由 Cognia 显式传入。Cognia 对传入提示、
-文件及恢复的历史检查 PII；Aider 自己管理内部模型调用。
+在设置 → Agents 中选择 Aider，配置工作目录、参数 `--model deepseek/deepseek-flash` 及环境变量 `DEEPSEEK_API_KEY`。其他服务使用对应的 Aider model ID 和 key。Cognia 隔离原生 `.aider.conf.yml`、dotenv、OAuth key 与模型设置的自动发现，避免启动命令或凭据覆盖这里的配置。禁用 Git 提交、仓库地图上下文、自动 lint/test 和建议执行 shell 命令。需要的文件请由 Cognia 显式传入。Cognia 对传入提示、文件及恢复的历史检查 PII；Aider 自己管理内部模型调用。
 
-`bypassPermissions` 在强制主机沙箱内自动确认 Aider 操作；`plan` 使用
-`--chat-mode ask --dry-run`。拒绝其他权限模式和逐工具白名单。Cognia 提示中的
-Aider slash 命令作为模型任务文本处理。使用 uv 更新，Cognia 不会卸载系统安装。
-关闭保留历史，删除仅清理选定的 Cognia 会话历史。
+`bypassPermissions` 在强制主机沙箱内自动确认 Aider 操作；`plan` 使用 `--chat-mode ask --dry-run`。拒绝其他权限模式和逐工具白名单。Cognia 提示中的 Aider slash 命令作为模型任务文本处理。使用 uv 更新，Cognia 不会卸载系统安装。关闭保留历史，删除仅清理选定的 Cognia 会话历史。
 
-真实回归脚本为 `node scripts/smoke/build-and-run-smoke.mjs --aider-cli`，需要
-PATH 中存在 Aider，并在本地提供 `AIDER_MODEL` 和对应模型凭据。
+真实回归脚本为 `node scripts/smoke/build-and-run-smoke.mjs --aider-cli`，需要 PATH 中存在 Aider，并在本地提供 `AIDER_MODEL` 和对应模型凭据。
 
-Sources: [Aider 安装](https://aider.chat/docs/install.html)、
-[Aider 脚本调用](https://aider.chat/docs/scripting.html)、
-[Aider CLI 选项](https://aider.chat/docs/config/options.html)。
+Sources: [Aider 安装](https://aider.chat/docs/install.html)、[Aider 脚本调用](https://aider.chat/docs/scripting.html)、[Aider CLI 选项](https://aider.chat/docs/config/options.html)。
 
 
 ## Cline 安装、认证与原生 ACP

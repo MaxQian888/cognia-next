@@ -235,7 +235,7 @@ Standard with `plan` authority, `build` to Standard with `acceptEdits`,
 `workflow` to Standard with workflow orchestration; domain modes stay as
 presets; custom and plugin modes become presets with native presentation. An
 unknown legacy id falls back to Standard with `default` authority and a visible
-compatibility warning — it never infers or inherits `bypassPermissions`. The
+compatibility warning. It never infers or inherits `bypassPermissions`. The
 runtime store moves to persist v2 with `modeId` and `setModeId` retained as a
 compatibility adapter. Rollout is gated by `agentCompositionV2`; Code carries
 its own kill switch, and Creator is hidden by the developer-mode gate. All new

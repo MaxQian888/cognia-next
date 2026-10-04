@@ -1,6 +1,6 @@
 ---
 title: "0144 — The workspace is the unit of work"
-description: "One repository plus N execution slots becomes the thing conversations, schedules, capabilities, panels and search all attribute to — with concurrency serialized per slot rather than per app, and every surface that speaks for the whole app forced to stop describing only the conversation on screen."
+description: "Uses one repository plus N execution slots as the unit for conversations, schedules, capabilities, panels and search. Serializes concurrency per slot. Surfaces that describe the whole app must account for more than the conversation on screen."
 ---
 
 # ADR 0144 — The workspace is the unit of work
@@ -134,8 +134,7 @@ the pane beside it.
 issue — belongs to a workspace and out of scope is noise. A definition does
 not: hiding a skill this workspace switched off produces the worst possible
 search result, "I know I have this and it is not there", so it ranks below what
-the workspace uses and stays findable. A row with NO workspace is shared, not
-foreign, so it always passes. The dialog names the workspace it is confined to,
+the workspace uses and stays findable. A row with no workspace is shared, so it always passes the workspace filter. The dialog names the workspace it is confined to,
 with one click to widen: a default the user cannot see is indistinguishable
 from a search that is simply missing things.
 

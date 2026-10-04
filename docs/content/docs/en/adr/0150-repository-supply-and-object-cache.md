@@ -1,6 +1,6 @@
 ---
 title: "0150 — Repository supply and the object cache"
-description: "Getting a task a working copy was measured rather than guessed, and the answer was not the clone. The per-task snapshot read and hashed the whole tree that git already held; the clone paths that did pay a network cost paid it again every time. Records what was measured, what changed, and the four supply premises the measurements overturned."
+description: "Measurements of working-copy preparation identified per-task snapshots as the bottleneck, rather than cloning. Snapshots read and hashed the whole tree already held by git. Clone paths that used the network repeated that cost each time. Records the measurements, changes, and four repository-supply assumptions they disproved."
 ---
 
 # ADR 0150 — Repository supply and the object cache
@@ -70,10 +70,9 @@ allowed to assert.
 
 ## Consequences
 
-**A clone is not the unit of cost.** The per-task path never cloned; the
-mirror's beneficiaries are the paths that did — the issue loop, plugin
-workspaces, sandboxes — where the second acquisition of a repository is now
-local.
+**A clone is not the unit of cost.** The per-task path never cloned. The
+mirror benefits the paths that did: the issue loop, plugin workspaces and
+sandboxes. Their second repository acquisition is now local.
 
 **Blobless clones defer a cost rather than removing it.** A command that needs
 historical file contents (`git log -p`, `blame` over old revisions) fetches

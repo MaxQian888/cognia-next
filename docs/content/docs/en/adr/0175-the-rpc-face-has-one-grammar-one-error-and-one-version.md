@@ -1,6 +1,6 @@
 ---
 title: "0175: The RPC face has one grammar, one error, and one version"
-description: "Every companion command is named <resource>.<verb> over a declared resource tree and a closed verb vocabulary. Every failure is one RFC 9457 problem document. One contract version names what a client was compiled against. The allowlist stays the security perimeter and is generated from the contract instead of typed twice, and output schemas derive from the Rust types that produce them."
+description: "Names every companion command <resource>.<verb> using a declared resource tree and a closed verb vocabulary. Returns every failure as an RFC 9457 problem document. One contract version identifies the client contract. Generates the security allowlist from that contract and derives output schemas from the Rust types that produce them."
 ---
 
 # ADR 0175: The RPC face has one grammar, one error, and one version
@@ -83,7 +83,7 @@ Every failure on every plane is one RFC 9457 problem document with `Content-Type
 }
 ```
 
-`code` stays a snake_case string. `requestId` equals the `x-request-id` response header. `retryable` says whether repeating the identical request can succeed. `operationId` is present when the failure belongs to a long-running operation. The type lives in a leaf crate, `cognia-problem`, because `cognia-gateway`, `cognia-connectors` and `cognia-headless-contract` do not depend on `cognia-core`. `ExecutionError` already carries exactly these fields and becomes `Problem`. `RpcError` stays an arm-internal type that converts to `Problem` at the plane boundary. Frames on the WebSocket, WebRTC and bridge planes keep their envelope and carry a `Problem` as their error member. Lark's own webhook acknowledgement format is a foreign protocol and stays.
+`code` stays a snake_case string. `requestId` equals the `x-request-id` response header. `retryable` says whether repeating the identical request can succeed. `operationId` is present when the failure belongs to a long-running operation. The type lives in a leaf crate, `cognia-problem`, because `cognia-gateway`, `cognia-connectors` and `cognia-headless-contract` do not depend on `cognia-core`. `ExecutionError` already carries exactly these fields and becomes `Problem`. `RpcError` stays an arm-internal type that converts to `Problem` at the plane boundary. Frames on the WebSocket, WebRTC and bridge planes keep their envelope and carry a `Problem` as their error member. Lark's webhook acknowledgement keeps its own protocol format.
 
 ### 4. One pagination and one operation shape
 

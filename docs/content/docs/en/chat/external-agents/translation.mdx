@@ -31,18 +31,17 @@ description: How a foreign agent's output becomes Cognia's chat — translators.
 
 ## translators.ts — Model Translation
 
-The file is organized into banner-delimited concern groups: message translators (`:25`), tool
-translators (`:72`), result translators (`:547`), event translators (`:637`), permission translators
-(`:829`), and content helpers (`:859`). It produces neither the canonical validity snapshot (that's
-[canonical-contract](./canonical-readiness)) nor UIMessage parts (that's event-to-parts) — it
-converts *models*.
+The file groups related translators between banners.
+The groups are message translators (`:25`), tool translators (`:72`), result translators (`:547`), event translators (`:637`), permission translators (`:829`), and content helpers (`:859`).
+It converts *models*.
+The [canonical-contract](./canonical-readiness) module produces the canonical validity snapshot, and event-to-parts produces UIMessage parts.
 
 ### The JSON-Schema → Zod tool bridge
 
-When an ACP agent advertises a tool, its parameters arrive as JSON Schema. To make the tool callable
-as an `AgentTool` (with runtime validation), `acpToolToAgentTool` (`:82`) compiles that schema to a
-Zod validator via `jsonSchemaToZod` (`:163`). `acpToolsToAgentTools` (`:103`) maps many and prefixes
-keys with `external_<name>`.
+When an ACP agent advertises a tool, its parameters arrive as JSON Schema.
+`acpToolToAgentTool` (`:82`) compiles that schema into a Zod validator through `jsonSchemaToZod` (`:163`).
+This makes the tool callable as an `AgentTool` with runtime validation.
+`acpToolsToAgentTools` (`:103`) converts multiple tools and prefixes their keys with `external_<name>`.
 
 The compiler dispatches in `convertSchemaNode` (`:196`):
 

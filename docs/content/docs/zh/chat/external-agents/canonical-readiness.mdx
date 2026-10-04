@@ -1,6 +1,6 @@
 ---
 title: 规范契约与就绪度
-description: 外部运行时的诊断大脑—— canonical-contract.ts（385 行）把每个有效性快照归一化成一个一致投影（原因码 → 结果 → 恢复提示），config-normalizer.ts（496 行）为原始配置填默认值并跑执行阻断阶梯 + 生态就绪度探测，session-extension-errors.ts（167 行）分类不稳定的 session/list·fork·resume 失败。
+description: 外部运行时的诊断模块：canonical-contract.ts（385 行）将有效性快照统一为一致投影（原因码 → 结果 → 恢复提示）；config-normalizer.ts（496 行）补全配置默认值、执行分级阻断检查并探测生态就绪度；session-extension-errors.ts（167 行）分类不稳定的 session/list·fork·resume 失败。
 ---
 
 # 规范契约与就绪度
@@ -28,8 +28,7 @@ description: 外部运行时的诊断大脑—— canonical-contract.ts（385 �
 
 ## canonical-contract.ts —— 一个投影
 
-这是部分有效性快照变成完整快照的唯一地方。Manager 把*每次*状态变化都汇入它（`manager.ts:928`），于是
-UI 永不会看到不一致的原因码/结果对。
+该模块是将部分有效性快照补全为完整快照的唯一入口。Manager 将*每次*状态变化都提交给它（`manager.ts:928`），确保 UI 中的原因码与结果始终一致。
 
 | 符号 | 行 | 角色 |
 | --- | --- | --- |
@@ -72,22 +71,15 @@ flowchart LR
 | 其余 + eligibility `blocked` | `blocked` |
 | 其余 + eligibility `eligible` | `external` |
 
-**`resolveCanonicalReasonCode`（`:23`）** 在无显式码且 Agent 不可执行时推导一个码：`documented-only`
-生态层级 → `ecosystem_documented_only`（`:33`）；`action-required` 前置条件 →
-`ecosystem_prerequisite_missing`（`:36`）；否则回退穿过
-`canonicalReasonCode ?? blockingReasonCode ?? lastBranchReasonCode ?? "ok"`。
+**`resolveCanonicalReasonCode`（`:23`）** 在无显式码且 Agent 不可执行时推导一个码：`documented-only` 生态层级 → `ecosystem_documented_only`（`:33`）；`action-required` 前置条件 → `ecosystem_prerequisite_missing`（`:36`）；否则回退穿过 `canonicalReasonCode ?? blockingReasonCode ?? lastBranchReasonCode ?? "ok"`。
 
-**`resolveRecoveryHints`（`:125`）** 把每个原因码映射成可操作字符串（如 `transport_blocked` →"在桌面运行"、
-`health_check_failed` →"重连"）；存在时生态 `recommendedActions` 优先于这些（`:201`）。
+**`resolveRecoveryHints`（`:125`）** 把每个原因码映射成可操作字符串（如 `transport_blocked` →"在桌面运行"、`health_check_failed` →"重连"）；存在时生态 `recommendedActions` 优先于这些（`:201`）。
 
-**`mapSourceToLifecycleStage`（`:106`）** 记录生命周期走到哪：结果 `fallback` → 阶段 `fallback`；
-`strict_failure` → `recovery`；来源 `config`/`connect`/`health` → 对应阶段；否则 `execution`。`blockedStage`
-仅在 eligibility 为 `blocked` 时设置（`:192`）。
+**`mapSourceToLifecycleStage`（`:106`）** 记录生命周期走到哪：结果 `fallback` → 阶段 `fallback`；`strict_failure` → `recovery`；来源 `config`/`connect`/`health` → 对应阶段；否则 `execution`。`blockedStage` 仅在 eligibility 为 `blocked` 时设置（`:192`）。
 
 ## config-normalizer.ts —— 默认、阻断与就绪度
 
-`normalizeExternalAgentConfigInput`（`:400`）是前门：原始输入 → 带初始 `validitySnapshot` 的填默认值
-`ExternalAgentConfig`。
+`normalizeExternalAgentConfigInput`（`:400`）是前门：原始输入 → 带初始 `validitySnapshot` 的填默认值 `ExternalAgentConfig`。
 
 | 步骤 | 行 | 做什么 |
 | --- | --- | --- |
@@ -123,16 +115,9 @@ flowchart TB
 
 ### 生态就绪度
 
-`getExternalAgentEcosystemReadiness`（`:107`）同步构建前置条件列表（从 metadata 解析面，回退到存储的
-`metadata.ecosystem*` 字符串），`resolvePrerequisiteStatus`（`:91`）把它们汇总：`documented-only` →
-`not-applicable`、有任一缺失 → `action-required`、有任一未知 → `unknown`、否则 `ready`。异步的
-`probeExternalAgentEcosystemReadiness`（`:238`）加一次**活的 PATH 检查**——当可执行 + Tauri + stdio + 有
-`checkCommandExists` 探测时，它压入一个满足/缺失的 `local-command` 前置条件（`:252`），并对 Windows 上的
-Codex 追加 WSL2 建议（`:278`）。Manager 在每次连接时重跑该探测（`enrichConfigWithDynamicReadiness`，
-`manager.ts:1080`）。
+`getExternalAgentEcosystemReadiness`（`:107`）同步构建前置条件列表（从 metadata 解析面，回退到存储的 `metadata.ecosystem*` 字符串），`resolvePrerequisiteStatus`（`:91`）把它们汇总：`documented-only` → `not-applicable`、有任一缺失 → `action-required`、有任一未知 → `unknown`、否则 `ready`。异步的 `probeExternalAgentEcosystemReadiness`（`:238`）加一次**活的 PATH 检查**——当可执行 + Tauri + stdio + 有 `checkCommandExists` 探测时，它压入一个满足/缺失的 `local-command` 前置条件（`:252`），并对 Windows 上的 Codex 追加 WSL2 建议（`:278`）。Manager 在每次连接时重跑该探测（`enrichConfigWithDynamicReadiness`，`manager.ts:1080`）。
 
-支撑谓词：`isSupportedExternalAgentProtocol`（`:316`）、`isTransportSupportedOnCurrentPlatform`（`:331`，
-stdio 需 Tauri）、`isExternalAgentExecutable`（`:393`，阻断原因 === null）。
+支撑谓词：`isSupportedExternalAgentProtocol`（`:316`）、`isTransportSupportedOnCurrentPlatform`（`:331`，stdio 需 Tauri）、`isExternalAgentExecutable`（`:393`，阻断原因 === null）。
 
 ## session-extension-errors.ts —— 安静降级
 

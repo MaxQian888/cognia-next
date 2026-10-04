@@ -34,9 +34,9 @@ export interface Transport {
 }
 ```
 
-`lib/tauri.ts` is the public barrel — it re-exports the singleton `transport`, the `isTauri` /
-`isCapacitor` detectors, and the plugin wrappers. Nothing in `app/`, `components/`, or `hooks/`
-constructs a transport; they import `transport` and call it.
+`lib/tauri.ts` is the public entry module.
+It re-exports the singleton `transport`, the `isTauri` / `isCapacitor` detectors, and plugin wrappers.
+Code in `app/`, `components/`, and `hooks/` imports and calls `transport` instead of constructing a transport.
 
 ## Runtime-target selection
 
@@ -46,10 +46,11 @@ constructs a transport; they import `transport` and call it.
 // A companion target loads only encrypted credentials for that exact Host.
 ```
 
-`RuntimeTargetRegistry` keeps targets account-scoped and gives every target a separate Dexie database.
-Activation stops old subscriptions, switches the database, rebinds the transport, then refreshes the
-manifest and sync cursor; failure rolls back the active pointer. WebRTC remains a sub-tier inside
-`CompanionTransport`, not a separate application transport.
+`RuntimeTargetRegistry` scopes targets to accounts and gives each target a separate Dexie database.
+Activation stops old subscriptions, switches the database, and rebinds the transport.
+It then refreshes the manifest and sync cursor.
+If activation fails, it restores the active pointer.
+WebRTC remains a sub-tier inside `CompanionTransport`, rather than a separate application transport.
 
 | Implementation | `call` | `subscribe` |
 | --- | --- | --- |
@@ -112,9 +113,21 @@ grace (`WS_CLOSE_GRACE_MS`, `:203`).
 ## TLS-pinned fetch
 
 `pinned-fetch.ts` routes the request through the native `CapacitorHttp` plugin with
-`serverTrustMode: "self-signed"` so the phone trusts the desktop's self-signed cert **and** verifies the
-SPKI fingerprint, something the WebView's `fetch` cannot do. This is why `capacitor.config.ts` sets
-`CapacitorHttp.enabled: true`. The fingerprint comes from the stored `CompanionConfig.serverFingerprint`.
+`serverTrustMode: "pinned"` and the SPKI fingerprint from the stored
+`CompanionConfig.serverFingerprint`, something the WebView's `fetch` cannot do. This is why
+`capacitor.config.ts` sets `CapacitorHttp.enabled: true`. Tunnel hosts (`*.trycloudflare.com`) use
+`"default"` trust, since they present a publicly trusted certificate.
+
+A pinned request is sent only when the native plugin attests SPKI enforcement through
+`getSecurityCapabilities()`. Stock Capacitor does not implement it: its plugin proxy rejects the call
+as "not implemented", and `nativeSpkiPinningAttested` reads that as "no". The request then fails
+closed with `NativePinningUnavailableError` (`native_spki_pinning_unavailable`, not retryable)
+rather than trusting the certificate without checking its identity.
+
+`CompanionTransport` checks the same condition before it touches HTTPS (`isPinnedRouteUnavailable`).
+When the direct route is unavailable it opens the relay data lane itself (ADR-0170) and sends every
+command, binary read and event subscription there. The pairing's room keys authenticate that lane end
+to end. A pairing with no relay room cannot be reached and is refused with the same code.
 
 ## Transport tiers
 

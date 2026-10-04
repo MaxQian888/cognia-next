@@ -9,8 +9,8 @@ description: "Reference Feishu and Google Workspace documents from the chat comp
 
 <TLDR>
   The composer's `@` could only reference files with a local path. Remote Documents adds a peer registry —
-  `lib/docs-providers/` — whose providers answer three questions about documents that live in a third-party
-  cloud: is this pasted string mine (`matchRef`), what matches these keywords (`search`), and give me the body
+  `lib/docs-providers/` — whose providers perform three operations on documents in a third-party
+  cloud: match a pasted reference (`matchRef`), search by keywords (`search`), and return the document body
   as text (`fetch`). Picking one in the `@lark:` / `@gdoc:` panel fetches it immediately and stages it as a
   synthesized `File`, which rejoins the ordinary attachment pipeline. Two providers ship: Feishu (docs, wiki
   nodes, spreadsheets, Bitable) borrowing a bound Lark connector's credentials, and Google Workspace (Docs,

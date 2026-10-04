@@ -8,9 +8,9 @@ description: Compacting conversation history as an image instead of a summary �
 <Status variant="experimental">Experimental · ADR-0063 · opticalArchives (Dexie v101)</Status>
 
 <TLDR>
-  "Snapcompact" renders the middle of a conversation into a PNG and hands the model the image instead of a
-  text summary, on the bet that a legible rendering carries more of the original than a paraphrase at the
-  same token cost. It is deliberately hard to trigger. `compact.mjs` runs a **four-gate funnel** —
+  "Snapcompact" renders the middle of a conversation into a PNG and sends the image to the model instead of a
+  text summary. The assumption is that a legible rendering preserves more of the original than a paraphrase at the
+  same token cost. It is deliberately hard to trigger. `compact.mjs` runs a **four-gate sequence** —
   coverage, budget/overflow, worthwhile, and a round-trip readability check — and **any** gate that fails
   returns `null`, at which point the caller summarizes the very same `middle` as text. Context is never
   dropped into an unreadable image.

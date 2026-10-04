@@ -5,6 +5,9 @@
     "bots",
     "extension-points-v2",
     "inter-plugin-communication",
-    "native-anthropic-tools"
+    "native-anthropic-tools",
+    "pet",
+    "pi-packages",
+    "scheduler"
   ]
 }

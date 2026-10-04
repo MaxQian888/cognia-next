@@ -5,7 +5,10 @@ description: The in-app Claude Agent runtime — how a chat turn travels from th
 
 # Built-in Agent
 
-The **built-in agent** is the Claude agent that runs *inside* Cognia: the one you talk to in the chat pane. Unlike [Agent Teams](./agent-teams) (multi-role squads) or external CLI agents (Codex / Cursor / Claude Code, spawned as subprocesses), the built-in agent is a single, long-lived session driven by the official [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) hosted in the bundled Node **sidecar**.
+The **built-in agent** is the Claude agent inside Cognia's chat pane.
+It runs one long-lived session through the official [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk), hosted in the bundled Node **sidecar**.
+[Agent Teams](./agent-teams) use multi-role squads.
+External CLI agents, such as Codex, Cursor, and Claude Code, run as subprocesses.
 
 <TLDR>
   One chat turn is a pipeline: the composer calls `send` in
@@ -31,7 +34,9 @@ The **built-in agent** is the Claude agent that runs *inside* Cognia: the one yo
 
 ## What It Is
 
-The built-in agent is not a single file — it is a **spine** (chat → assembly → IPC → process → SDK) with **capability modules** clipped onto fixed seams. The architecture exists to satisfy three constraints at once:
+The built-in agent spans several modules along the chat → assembly → IPC → process → SDK path.
+**Capability modules** connect at fixed interfaces.
+The architecture must satisfy three constraints:
 
 1. **The Agent SDK is Node-only.** Its filesystem / `child_process` / native dependencies cannot run in a webview, so it lives in a separate process. See [Sidecar & Claude Agent SDK](../core/sidecar-and-claude-sdk) for *why a sidecar*.
 2. **Static export has no server.** `next.config.ts` forces `output: "export"`; there is no `app/api/` at runtime. Anything needing a long-lived process (the sidecar, hooks, permission interception) lives in Rust, not Next.js routes.

@@ -7,7 +7,7 @@ description: "关于 OneBot QQ 接入的常见问题：UIN 与 OpenID、多账�
 
 ## 为什么用 UIN 而不是 OpenID？
 
-cognia-next 的 OneBot 适配器使用机器人的 **UIN**（QQ 号），这正是 NapCat、Lagrange 和 LLOneBot 所暴露的标识。
+cognia-next 的 OneBot 适配器使用机器人 **UIN**（QQ 号）。NapCat、Lagrange 和 LLOneBot 均提供这一标识。
 
 **QQ 官方机器人**平台使用 **OpenID** —— 这是一套完全不同的 API，走官方 Bot 网关与 REST 接口。如需接入该通道，请使用独立的 [`qq-official` 适配器](./qq-official-setup)。
 
@@ -49,9 +49,7 @@ cognia-next 的 OneBot 适配器使用机器人的 **UIN**（QQ 号），这正�
 2. 更新 NapCat 配置中的 `accessToken`。
 3. 重启或重新连接 NapCat，让它使用新 token 打开新的 WebSocket。
 
-不需要重启 cognia-next。反向 WS 服务器会在每次 WebSocket upgrade 时读取 keyring，
-因此下一次连接会使用已保存的 token。正向 WS 下，cognia-next 连接 OneBot 客户端的
-WebSocket 服务端时，会把已保存的 token 作为 `Authorization: Bearer <token>` 发送。
+不需要重启 cognia-next。反向 WS 服务器会在每次 WebSocket upgrade 时读取 keyring，因此下一次连接会使用已保存的 token。正向 WS 下，cognia-next 连接 OneBot 客户端的 WebSocket 服务端时，会把已保存的 token 作为 `Authorization: Bearer <token>` 发送。
 
 ---
 

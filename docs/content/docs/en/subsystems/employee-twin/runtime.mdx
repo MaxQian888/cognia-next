@@ -8,7 +8,7 @@ description: Send-time applyTwinContext — embed once, hybrid vector + BM25/RRF
 <Status variant="stable" />
 
 <TLDR>
-  `applyTwinContext` (`lib/twin/runtime/apply-twin-context.ts:170`) is the one send-time entry. For a
+  `applyTwinContext` (`lib/twin/runtime/apply-twin-context.ts:170`) is the single send-time entry point. For a
   twin-bound character it embeds the user message **once**, runs RAG (vector, optionally fused with BM25 via
   RRF, optionally over-fetched and lexically reranked), selects style few-shot samples, and assembles a
   four-segment system prompt. It **never throws** — every fallible I/O step is individually guarded and
@@ -77,7 +77,7 @@ const vectorHits = await deps.store.searchByEmbedding(collection, queryEmbedding
 ### Hybrid retrieval (BM25 + RRF)
 
 When `enableHybrid` is on, a per-twin BM25 keyword search runs alongside the vector search and the two ranked
-lists are fused with Reciprocal Rank Fusion. A BM25 failure degrades gracefully back to vector-only:
+lists are fused with Reciprocal Rank Fusion. If BM25 fails, retrieval falls back to vector-only:
 
 ```ts title="lib/twin/runtime/apply-twin-context.ts:245-253"
 const keywordHits = await keywordSearch(character.twinId, userMessage, fetchLimit)
@@ -112,7 +112,7 @@ return 0.7 * c.score + 0.3 * coverage   // 70% cosine, 30% keyword coverage
 ```
 
 `rerank` (`reranker.ts:73`) races the scorers against a 1.5 s timeout and falls back to identity ordering on
-any error — so a reranker hiccup never drops results, it just keeps the fused order.
+any error — so a reranker failure never drops results. It preserves the fused order.
 
 ### Style few-shot selection
 

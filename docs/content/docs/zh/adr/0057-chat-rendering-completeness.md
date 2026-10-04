@@ -1,6 +1,6 @@
 ---
 title: "ADR-0057 — 聊天渲染完整性（MCP 内容块 + 子智能体持久化）"
-description: "在弥补聊天渲染空白时做出的两个难以逆转的决定：（1） 保留第三方MCP工具结果[]块[]块[text/image/resource/audio]在工具部件上，而不是将其压扁成不透明的字符串，从而使任意MCP工具渲染images/resources丰富，而非像base64墙面;以及（2）将已完成的子代理的终端快照（toolCalls/logs/finalResponse）持久化到其消息部分，使内联调度树在冷重载时存活——无需添加Dexie表。两者都是可加的，并且向后兼容变更前的消息。"
+description: "在弥补聊天渲染空白时做出的两个难以逆转的决定：（1） 在工具部件上保留第三方 MCP 工具结果块 [text/image/resource/audio]，避免将其压缩为不透明字符串，使任意 MCP 工具都可渲染 images/resources 等结构化内容，而非 base64 数据堆积；以及（2）将已完成的子代理的终端快照（toolCalls/logs/finalResponse）持久化到其消息部分，使内联调度树在冷重载时存活——无需添加Dexie表。两项变更均为增量扩展，并向后兼容旧消息。"
 ---
 
 # ADR-0057 — 聊天渲染完整性（MCP 内容块 + 子智能体持久化）
@@ -13,7 +13,7 @@ description: "在弥补聊天渲染空白时做出的两个难以逆转的决定
 
 ### Gap 3 — 第三方MCP工具结果
 
-MCP工具的效果，按规格来说，是`content: [{type:'text'|'image'|'resource'|'audio', …}]`。sidecar/SDK完整地交付了该数组，但`lib/claude/adapter.ts:flattenToolResultContent`在任何渲染器看到之前就将其合并为`updateToolPart`字符串：文本块串接，所有非文本块`JSON.stringify`-ed。图像块仅作为JSON代码块内的base64墙保存下来。只有Cognia自有工具（`wiki_*`、`rag_search`等）和Claude内置卡有专用卡;**所有第三方MCP工具都掉进了那个不透明的垃圾堆**。结构化数组正好在一个上游点（`updateToolPart`）处活着，因此需要丰富渲染的数据已经存在——这些数据在UI前一步被丢弃。
+根据规范，MCP 工具结果是`content: [{type:'text'|'image'|'resource'|'audio', …}]`。sidecar/SDK 完整传递该数组，但`lib/claude/adapter.ts:flattenToolResultContent`在任何渲染器读取前，就在 `updateToolPart` 处将其压缩为一个字符串：文本块被拼接，所有非文本块经 `JSON.stringify` 序列化。图像块仅以 JSON 代码块中的 base64 数据保留下来。只有Cognia自有工具（`wiki_*`、`rag_search`等）和Claude内置卡有专用卡片。**所有第三方 MCP 工具都只能显示这份不透明输出**。结构化数组仍存在于上游的 `updateToolPart`，因此渲染结构化结果所需的数据已经存在，却在进入 UI 前一步被丢弃。
 
 ### Gap 7 — 子代理内联树在重新加载时消失
 

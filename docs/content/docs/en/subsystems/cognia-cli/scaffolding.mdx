@@ -7,12 +7,12 @@ description: cognia plugin new — the six-question TTY wizard, name validation,
 
 <TLDR>
   `cmd_new::run()` (`crates/cognia-cli/src/cmd_new.rs:43-103`) collects answers (interactive
-  wizard on a TTY, flags + defaults otherwise), **stamps** an embedded template
+  wizard on a TTY, flags + defaults otherwise), **copies** an embedded template
   (`template.rs:111-267` — every file ships inside the binary via `include_str!` from the five
-  sibling template source directories), **patches** the wizard answers into the generated
+  sibling template source directories), **writes** the wizard answers into the generated
   `plugin.json` (`cmd_new.rs:268-293`), and optionally **embeds a fresh Ed25519 public key**
   (`cmd_new.rs:296-316`). Substitution is two plain `String::replace` calls per file — the
-  template id and its humanized title. The target directory is refused if non-empty.
+  template id and its humanized title. The command rejects a non-empty target directory.
 </TLDR>
 
 ## Flow

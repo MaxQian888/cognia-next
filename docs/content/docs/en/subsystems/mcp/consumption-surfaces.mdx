@@ -10,8 +10,8 @@ description: The places outside the main settings panel that consume MCP config 
 <TLDR>
   Beyond the settings panel, five surfaces read the MCP config in different shapes. The **tool selector**
   (agent custom modes) picks individual tools under a budget, with AI-ranked recommendations. The
-  **scheduler picker** picks whole servers, distinguishing "use defaults" (`undefined`) from "explicitly
-  none" (`[]`). The **CCSwitch tab** is a second importer, pulling MCP configs from CCSwitch-managed CLIs
+  **scheduler picker** selects whole servers, distinguishing "use defaults" (`undefined`) from "explicitly
+  none" (`[]`). The **CCSwitch tab** is a second importer, importing MCP configs from CCSwitch-managed CLIs
   into the `mcpServers` store. The **chat tool-card registry** maps tool names to bespoke result cards
   (wiki/rag/read/plan/grep…) with a generic fallback. The **A2UI bridge tab** controls the always-on
   a2ui-bridge row's per-agent projection and shows live bridge health.

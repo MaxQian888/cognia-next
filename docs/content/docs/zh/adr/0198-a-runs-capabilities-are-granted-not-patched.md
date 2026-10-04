@@ -1,13 +1,11 @@
 ---
 title: "0198 — 一次运行的能力靠授予，而不是事后修补"
-description: "启动智能体的功能（定时任务、工作流节点、插件、Bot、子代理派发）过去都是在解析器返回 SendOptions 之后再去改它。这样绕过了工具过滤器、受限模式、父级权限上限和最终封口，还让定时任务可以整体替换掉智能体的禁用列表。本 ADR 新增一个带版本的契约 AgentCapabilityGrantV1，所有这类调用方改为把它交给 resolveSendOptions，每个字段都在它所扩展的配置字段的同一阶段生效。"
+description: "定时任务、工作流节点、插件、Bot 和子代理派发此前在解析器返回 SendOptions 后修改配置，绕过工具过滤器、受限模式、父级权限上限和最终封口，并允许定时任务替换禁用列表。改为将带版本的 AgentCapabilityGrantV1 交给 resolveSendOptions，每个字段在其扩展配置字段的对应阶段生效。"
 ---
 
 # ADR 0198 — 一次运行的能力靠授予，而不是事后修补
 
-**状态：** 已接受
-**日期：** 2026-09-27
-**相关：** [ADR-0117](./0117-composed-agent-modes-and-creator)（组合轴）、[ADR-0161](./0161-agent-identity-runtime-and-host)（身份、运行时、部署位置）、[ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（统一执行服务）、[ADR-0002](./0002-scheduler-full-agent-resolution)（定时运行解析完整智能体）
+**状态：** 已接受**日期：** 2026-09-27 **相关：** [ADR-0117](./0117-composed-agent-modes-and-creator)（组合轴）、[ADR-0161](./0161-agent-identity-runtime-and-host)（身份、运行时、部署位置）、[ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（统一执行服务）、[ADR-0002](./0002-scheduler-full-agent-resolution)（定时运行解析完整智能体）
 
 ## 背景
 
@@ -43,7 +41,7 @@ description: "启动智能体的功能（定时任务、工作流节点、插件
 | `subagents.only` | 原生子智能体映射，在各分支注册之后、`@agent` 路由之前 | 收窄 |
 | `permissionMode` | 对解析结果的上限 | 只能收窄 |
 
-`BuildOptionsContext.capabilityGrants` 接受一个有序列表。纯函数 `mergeCapabilityGrants` / `foldCapabilityGrants` 负责逐层合并：禁用项取并集，后面的层无法撤销；`restrictTo`、`mcpServers.only` 和 `subagents.only` 取交集；权限上限保留权限更低的那个。
+`BuildOptionsContext.capabilityGrants` 接受一个有序列表。纯函数 `mergeCapabilityGrants` / `foldCapabilityGrants` 负责逐层合并：禁用项取并集，后续层无法撤销已有禁用项；`restrictTo`、`mcpServers.only` 和 `subagents.only` 取交集；权限上限保留权限更低的那个。
 
 ### 允许增加，但仍受约束
 

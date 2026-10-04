@@ -380,13 +380,14 @@ Four surfaces on `/workflows` now play once when they reach the viewport, all th
 (`useScene`: hydrated, on screen, motion permitted, which phase). The Build graph lands one node
 per plan step and then draws a back-edge that is tagged as rejected, because validation refuses
 every cycle on save. The Run ledger plays the four steps from not started to the fixture's
-states. The event-to-evidence rail sends a marker across its four boundaries. And the closing
-"What the runner guarantees" list became `RunnerGuarantees`: each of the four sentences sits
+states. The event-to-evidence rail sends a marker across its four boundaries. The closing
+"What the runner guarantees" list also became `RunnerGuarantees`: each of the four sentences sits
 beside a miniature of the property it states, five triggers reaching one runner, a refused
 cycle, a nesting counter stopping at `MAX_SUBWORKFLOW_DEPTH` (pinned by test to
 `executor-support.ts`), and a run whose failed node leaves the rest recorded as skipped. Every
-demonstration ends on its static picture, which is also what reduced motion renders, and every
-picture is hidden from assistive technology behind the sentence it illustrates.
+demonstration ends on its static picture. Reduced motion renders that same picture.
+Each picture is hidden from assistive technology because the adjacent sentence
+explains what it illustrates.
 
 ## Amendment, 2026-09-30 — product footage films
 

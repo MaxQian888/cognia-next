@@ -8,7 +8,7 @@ description: How Cognia plugins are isolated and how they talk — the new Funct
 <Status variant="experimental" />
 
 <TLDR>
-Plugins never run with raw host privileges. JS plugins evaluate through `PluginSandbox` (`lib/plugin/core/sandbox.ts:34`) — a permission-gated globals surface fed to `new Function` / `AsyncFunction`, never ambient `eval`. OS-level isolation is a separate Node 24 `--permission` re-exec (`lib/plugin/launcher/launchPluginJs.ts:107`). WASM plugins split into a Tauri-IPC client (`lib/plugin/core/wasm-loader.ts:56`) and a browser fallback bounded by the `wasm-grant` preopen ledger (`lib/plugin/core/wasm-runtime.ts:79`). Traffic rides two RPC surfaces — renderer→Rust `transport.ts` and plugin↔plugin `ipc.ts` — plus a typed `message-bus.ts` event bus, all sharing `PLUGIN_MESSAGE_HISTORY_MAX = 500` (`messaging/constants.ts:14`).
+Plugins never run with raw host privileges. JS plugins evaluate through `PluginSandbox` (`lib/plugin/core/sandbox.ts:34`) — a permission-gated globals surface fed to `new Function` / `AsyncFunction`, never ambient `eval`. OS-level isolation is a separate Node 24 `--permission` re-exec (`lib/plugin/launcher/launchPluginJs.ts:107`). WASM plugins split into a Tauri-IPC client (`lib/plugin/core/wasm-loader.ts:56`) and a browser fallback bounded by the `wasm-grant` preopen ledger (`lib/plugin/core/wasm-runtime.ts:79`). Traffic uses two RPC surfaces — renderer→Rust `transport.ts` and plugin↔plugin `ipc.ts` — plus a typed `message-bus.ts` event bus, all sharing `PLUGIN_MESSAGE_HISTORY_MAX = 500` (`messaging/constants.ts:14`).
 </TLDR>
 
 <StatGrid>

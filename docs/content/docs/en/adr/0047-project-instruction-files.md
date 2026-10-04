@@ -45,7 +45,7 @@ Walks `.cognia/agents/*.md` across roots plus a global agents dir into the `Mark
 
 ### Wiring (`build-options.ts`)
 
-The `cwd` resolution is hoisted above the system-prompt assembly; the discovered `instructionSection` joins the **stable prompt prefix** (after base/persona, before memory) so provider prompt caches keep hitting. It is skipped for `--bare` (no on-disk auto-discovery, Claude Code parity) and is naturally dropped for `workflow-editor` sessions, which overwrite the whole prompt. Discovered subagents merge into `opts.agents` **after** the registry/template subagents so the project wins. Config resolves `Character.instructionsOverride ?? AppSettings.instructions ?? defaults`, surfaced by a new bilingual "Project Instructions" settings card.
+The `cwd` resolution runs before system-prompt assembly. The discovered `instructionSection` joins the **stable prompt prefix** (after base/persona, before memory) so providers can continue to reuse cached prompts. It is skipped for `--bare` (no on-disk auto-discovery, Claude Code parity) and is naturally dropped for `workflow-editor` sessions, which overwrite the whole prompt. Discovered subagents merge into `opts.agents` **after** the registry/template subagents so the project wins. Config resolves `Character.instructionsOverride ?? AppSettings.instructions ?? defaults`, surfaced by a new bilingual "Project Instructions" settings card.
 
 ## Consequences
 

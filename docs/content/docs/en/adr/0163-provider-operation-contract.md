@@ -1,6 +1,6 @@
 ---
 title: "0163: One provider operation contract, and the gateway stays inference-only"
-description: "Every provider capability is one of fifty named operations in a single JSON contract, served by a registry that resolves provider, then protocol, then any. The gateway listener only ever accepts the stateless inference family. Management rides the CLI bridge, the headless RPC and the in-process executor through one dispatcher, and a management credential never reaches an agent subprocess."
+description: "Defines every provider capability as one of fifty named operations in a single JSON contract. A registry resolves provider, then protocol, then any. The gateway accepts only stateless inference. One dispatcher handles management through the CLI bridge, headless RPC and in-process executor. Management credentials never reach agent subprocesses."
 ---
 
 # ADR 0163: One provider operation contract
@@ -11,8 +11,8 @@ description: "Every provider capability is one of fifty named operations in a si
 
 ## Context
 
-Before this decision the provider surface was five things that did not know
-about each other. The chat path resolved a provider through
+Before this decision, five separate provider surfaces had no shared
+contract. The chat path resolved a provider through
 `lib/ai/provider-consumption.ts` and called the AI SDK. The subscription
 subsystem (ADR-0025) kept its own balance adapters and limits sources. The
 settings UI asked a hand-written capability table which buttons to show. The

@@ -9,8 +9,8 @@ description: Agent-to-UI protocol — Claude emits a declarative component tree 
 
 <TLDR>
   A2UI (Agent-to-UI) lets a model output **real interactive UI** — a form, a chart, a dashboard —
-  instead of markdown. The agent calls MCP tools that emit a declarative component tree; the
-  browser renderer turns it into a live React panel; user clicks flow back to the agent as
+  instead of markdown. The agent calls MCP tools that emit a declarative component tree. The
+  browser renderer turns it into a live React panel. User clicks return to the agent as
   `userAction` events. The protocol is shared across three runtimes — the in-app Claude session,
   external CLI agents (Cursor / Codex / Gemini / Claude Code), and IM connectors (Lark / Telegram /
   Discord …) — through one schema (`types/a2ui/schema.ts`, v0.9) and one Zustand store

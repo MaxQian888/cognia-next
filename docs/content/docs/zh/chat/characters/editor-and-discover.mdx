@@ -5,7 +5,7 @@ description: 设置中的角色编辑器、聊天角色选择器、应用更新�
 
 # 编辑器、选择器与发现页
 
-让用户创作、选择、更新和发现角色的四个 UI 界面都从同一个 Dexie-∪-覆盖层并集读取（`lib/db/characters.ts:listCharacters` 92–120），并通过同一个 CRUD 模块写回。本页涵盖**设置编辑器**（完整字段清单 + 角色包导入/导出）、**应用更新差异对话框**、**聊天选择器**（三桶分组 + 平台过滤）、**发现页**投影卡片（桌面网格 + 移动端 Sheet），以及扫描本地角色包文件的**启动初始化器**。
+角色创作、选择、更新和发现的四个 UI 界面都读取同一份 Dexie 与覆盖层合并后的角色集合（`lib/db/characters.ts:listCharacters` 92–120），并通过同一个 CRUD 模块写回。本页介绍**设置编辑器**（完整字段清单与角色包导入/导出）、**应用更新差异对话框**、**聊天选择器**（三类分组与平台过滤）、**发现页**投影卡片（桌面网格与移动端 Sheet），以及启动时扫描本地角色包文件的**初始化器**。
 
 <TLDR>
 - 编辑器：`components/settings/characters-section.tsx` —— 按来源过滤的列表（`filterCharacters` / `classifyCharacterSource` `editor-projection.ts:20–41`）、分组的逐角色表单、`.cognia-pack.json` 导入/导出（`characterToPackDef` + `serializeLocalPackFile` 第 117 行）、内置行只读且带复制。

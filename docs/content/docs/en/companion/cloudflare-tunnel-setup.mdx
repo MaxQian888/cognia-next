@@ -5,16 +5,14 @@ description: Expose Cognia's companion server over a stable public hostname with
 
 # Cloudflare Tunnel (persistent WAN access)
 
-Cognia's companion server lets your phone reach your home desktop. On the
-same Wi-Fi that happens over the LAN; off-network it needs a path through
-the internet. Cognia already ships a one-click **Quick Tunnel**, but a
-Quick Tunnel hands you a *random* `*.trycloudflare.com` URL that **changes
-every time it restarts** — so the `baseUrl` your phone stored at pairing
-time goes stale and the phone can no longer connect.
+Cognia's companion server lets your phone connect to your home desktop.
+On the same Wi-Fi network, the phone connects over the LAN. Outside that network, it needs an internet connection path.
+Cognia includes a one-click **Quick Tunnel**.
+The tunnel provides a *random* `*.trycloudflare.com` URL that **changes every time it restarts**.
+The `baseUrl` your phone stores during pairing then becomes invalid, and the phone can no longer connect.
 
-This guide sets up a **named Cloudflare Tunnel** bound to a hostname on a
-domain you own. The URL is **stable across restarts**, so a phone paired
-once keeps reconnecting — no re-pairing.
+This guide configures a **named Cloudflare Tunnel** with a hostname on a domain you own.
+The URL is **stable across restarts**, so a paired phone can reconnect without pairing again.
 
 <Callout type="info">
   This is the **manual** procedure. You run `cloudflared` yourself and

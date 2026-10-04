@@ -8,7 +8,7 @@ description: Loss-aware Agent Skills, Claude, Codex, and Cognia bundle round-tri
 <Status variant="stable">Symmetric zip loader and serializer</Status>
 
 <TLDR>
-  Cognia imports a zip, local folder, Markdown file, native Skill, marketplace snapshot, or skills.sh file set into one `SkillDraft` plus resources. Standard export writes a real bundle zip; compatibility export writes only `SKILL.md` and warns before omitting files.
+  Cognia imports a zip, local folder, Markdown file, native Skill, marketplace snapshot, or skills.sh file set into one `SkillDraft` plus resources. Standard export writes a real bundle zip. Compatibility export writes only `SKILL.md` and warns before omitting files.
 </TLDR>
 
 ## Parsing and compatibility
@@ -27,7 +27,7 @@ Claude `disable-model-invocation` and Codex `allow_implicit_invocation` map to `
 
 ## Codex YAML
 
-When `agents/openai.yaml` exists, the loader parses interface, policy, and dependency hints but also stores the original text in `codexOpenAiYaml`. Dependencies are visible and exportable; Cognia never installs MCP servers or broadens MCP permissions automatically. Editing the virtual YAML file requires a mapping root and valid YAML. Unknown mappings remain present when known policy fields are synchronized.
+When `agents/openai.yaml` exists, the loader parses interface, policy, and dependency hints but also stores the original text in `codexOpenAiYaml`. Dependencies are visible and exportable. Cognia never installs MCP servers or broadens MCP permissions automatically. Editing the virtual YAML file requires a mapping root and valid YAML. Unknown mappings remain present when known policy fields are synchronized.
 
 ## Standard export
 

@@ -8,7 +8,7 @@ description: A2UI 表面必须降级为平台原生富内容 —— Lark、Teleg
 <Status variant="experimental" />
 
 <TLDR>
-  A2UI 输出的是声明式 React 组件树，但一个 IM 平台（Lark / Telegram / Discord）只能渲染自己的富内容原语 —— 一张卡片、一行按钮、一张图片、一个链接。本桥接层就是两个世界之间「有损但忠实」的适配层。**出站**方向：用面向插件的工厂构建表面（`surface-builder.ts`），把助手回复转成带 `plainTextMirror` 兜底的出站 `MessageSegment[]`（`a2ui-to-segments.ts`），并在系统提示里告知模型目标适配器的能力矩阵能承载哪些 A2UI 种类（`capability-evaluator.ts`）。**入站**方向：把平台富内容投射成给 Inbox 渲染器用的 `InboundA2UIBlock`（`projectInboundToA2UI` → 各平台 `inbound-to-a2ui.ts`），并把按钮点击路由到 AI 摘要轮次或某个工作流控制处理器。本桥接层的**工作流投射**只有审批卡片（`workflow-to-a2ui.ts`）；实时进度与终态卡片来自持久化的执行运行流水线 —— `lib/execution/workflow-bridge.ts` + `lib/connectors/run-presentation/runner.ts` —— 而非桥接层本地的循环。
+  A2UI 输出的是声明式 React 组件树，但一个 IM 平台（Lark / Telegram / Discord）只能渲染自己的富内容原语 —— 一张卡片、一行按钮、一张图片、一个链接。本桥接层负责转换两种表示，在丢失部分信息时保留原意。**出站**方向：用面向插件的工厂构建表面（`surface-builder.ts`），把助手回复转成带 `plainTextMirror` 文本回退的出站 `MessageSegment[]`（`a2ui-to-segments.ts`），并在系统提示里告知模型目标适配器的能力矩阵能承载哪些 A2UI 种类（`capability-evaluator.ts`）。**入站**方向：把平台富内容投射成供 Inbox 渲染器使用的 `InboundA2UIBlock`（`projectInboundToA2UI` → 各平台 `inbound-to-a2ui.ts`），并把按钮点击路由到 AI 摘要轮次或某个工作流控制处理器。本桥接层的**工作流投射**只有审批卡片（`workflow-to-a2ui.ts`）；实时进度与终态卡片来自持久化的执行运行流水线 —— `lib/execution/workflow-bridge.ts` + `lib/connectors/run-presentation/runner.ts` —— 而非桥接层本地的循环。
 </TLDR>
 
 <StatGrid>

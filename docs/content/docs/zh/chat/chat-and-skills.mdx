@@ -5,7 +5,7 @@ description: 会话、消息、角色、技能、团队、Agent Mode、斜杠命
 
 # 聊天、角色、技能 & 团队
 
-聊天工作台是 Cognia 最大的用户面，围绕六个可组合概念构建。发送时 `resolveSendOptions` 把所有层（角色 + Agent Mode + 技能 + A2UI + 孪生 + 路由）压成一份 sidecar payload。
+聊天工作台是 Cognia 的主要用户界面，围绕六个可组合概念构建。发送时，`resolveSendOptions` 将角色、Agent Mode、技能、A2UI、孪生和路由等配置层合并为一份 sidecar payload。
 
 ## 概念速览
 
@@ -60,8 +60,7 @@ sequenceDiagram
   Store->>Dexie: 写最终消息 + 更新 session.updatedAt
 ```
 
-聊天 store 在 `lib/chat/`；UI 在 `components/chat/`。Store 故意做得很薄 —— 大部分逻辑在 `lib/claude/`，
-便于在聊天面之外（例如 agent-teams 工作台）复用。
+聊天 store 在 `lib/chat/`；UI 在 `components/chat/`。Store 故意做得很薄 —— 大部分逻辑在 `lib/claude/`，便于在聊天面之外（例如 agent-teams 工作台）复用。
 
 ## 角色（Characters）
 
@@ -189,8 +188,7 @@ sequenceDiagram
 
 ## 技能（Skills）
 
-`Skill` 是一个 markdown 提示片段加可选工具白名单，按角色或会话启用。深度细节见
-[技能子系统](../subsystems/skills)。
+`Skill` 是一个 markdown 提示片段加可选工具白名单，按角色或会话启用。深度细节见[技能子系统](../subsystems/skills)。
 
 <TypeTable
   type={{
@@ -228,9 +226,7 @@ sequenceDiagram
   }}
 />
 
-发送时 `resolveSendOptions`（`lib/claude/build-options.ts`）取启用子集，经
-`renderSkillsSection`（`lib/db/skills.ts:339`）逐条追加正文，并把每个技能的 `allowedTools`
-与角色白名单**取并集** —— 完整机制见[加载与注入](../subsystems/skills/loading-and-injection)。
+发送时 `resolveSendOptions`（`lib/claude/build-options.ts`）取启用子集，经 `renderSkillsSection`（`lib/db/skills.ts:339`）逐条追加正文，并把每个技能的 `allowedTools` 与角色白名单**取并集** —— 完整机制见[加载与注入](../subsystems/skills/loading-and-injection)。
 
 技能管理路径：
 
@@ -244,15 +240,12 @@ sequenceDiagram
 
 ## Agent Mode
 
-Agent Mode 是一个 **提示修饰器**：在角色之上叠加额外的 system prompt，并可覆盖 model / temperature / maxTokens。
-实现：`lib/agent/`。
+Agent Mode 是一个 **提示修饰器**：在角色之上叠加额外的 system prompt，并可覆盖 model / temperature / maxTokens。实现：`lib/agent/`。
 
 - **内置模式**（`BUILT_IN_AGENT_MODES`）—— 例如 "Plan"、"Refactor"、"Default" 等。
 - **自定义模式** —— 用户在设置里加，存在 `useCustomModeStore`（Zustand + localStorage）。
 
-`resolveSendOptions` 通过 `useAgentRuntimeStore.getState().modeId` 读取活动模式，然后调用
-`buildAgentModeSessionUpdate(mode)` 产出会话级覆盖字段。Mode 的 system prompt 与角色 prompt 通过
-`\n\n---\n\n` 分隔串联；allowedTools 取并集。
+`resolveSendOptions` 通过 `useAgentRuntimeStore.getState().modeId` 读取活动模式，然后调用 `buildAgentModeSessionUpdate(mode)` 产出会话级覆盖字段。Mode 的 system prompt 与角色 prompt 通过 `\n\n---\n\n` 分隔串联；allowedTools 取并集。
 
 深度细节与编排见 [agent-teams](./agent-teams) 与 [slash-commands](./slash-commands)。
 
@@ -280,11 +273,9 @@ export interface Team {
 }
 ```
 
-`TeamMember` 携带 per-slot 覆盖（systemPromptOverride、modelOverride、allowedToolsOverride、
-mcpServerIdsOverride）。`resolveMemberConfig(team, member, character)` 是合成有效配置的纯函数。
+`TeamMember` 携带 per-slot 覆盖（systemPromptOverride、modelOverride、allowedToolsOverride、mcpServerIdsOverride）。`resolveMemberConfig(team, member, character)` 是合成有效配置的纯函数。
 
-`lib/agent-team/` 是团队 runtime：mention 解析、conversation context、target 调度、streamer 复用。
-团队工作台在 `app/agent-teams/`、`components/agent/`。深度细节见 [agent-teams](./agent-teams)。
+`lib/agent-team/` 是团队 runtime：mention 解析、conversation context、target 调度、streamer 复用。团队工作台在 `app/agent-teams/`、`components/agent/`。深度细节见 [agent-teams](./agent-teams)。
 
 ## MCP 服务器
 
@@ -318,22 +309,18 @@ mcpServerIdsOverride）。`resolveMemberConfig(team, member, character)` 是合�
   }}
 />
 
-每次发送都会把内置 MCP 服务器（`lib/claude/builtin-mcp/`，包含 `cognia-tools` + `a2ui-bridge`）与用户服务器
-（`mcpServers` 表）合并。`lib/claude/mcp-presets.ts` 提供常用集成（filesystem、GitHub、Slack……）的预设。
+每次发送都会把内置 MCP 服务器（`lib/claude/builtin-mcp/`，包含 `cognia-tools` + `a2ui-bridge`）与用户服务器（`mcpServers` 表）合并。`lib/claude/mcp-presets.ts` 提供常用集成（filesystem、GitHub、Slack……）的预设。
 
-A2UI MCP 默认以 in-process 形式合入；旧 `sidecar/a2ui-mcp.mjs` 独立二进制仅在外部调试时使用。详见
-[Sidecar 与多供应商 SDK](../core/sidecar-and-claude-sdk)。
+A2UI MCP 默认以 in-process 形式合入；旧 `sidecar/a2ui-mcp.mjs` 独立二进制仅在外部调试时使用。详见 [Sidecar 与多供应商 SDK](../core/sidecar-and-claude-sdk)。
 
 ## Provider Routing Engine
 
 `lib/ai/routing/provider-routing-engine.ts` 是新的全局模型 / 供应商路由层。它做两件事：
 
-1. **Alias 解析** —— 把 `claude-fast` / `claude-balanced` / `claude-powerful` 等 tier alias
-   按用户配置或内置 preset（Budget / Performance / Reliability）解析为具体的 `provider:model`。
+1. **Alias 解析** —— 把 `claude-fast` / `claude-balanced` / `claude-powerful` 等 tier alias 按用户配置或内置 preset（Budget / Performance / Reliability）解析为具体的 `provider:model`。
 2. **Fallback chain** —— 当首选 provider 失败时，按 `RoutingConfig.fallback` 顺次尝试备份 provider。
 
-`resolveSendOptions` 在最后一步调用 routing engine，得到 `routingDecision`（包含 chosen
-provider:model + 备份链）并写入 sidecar payload，sidecar 据此选 dispatcher 与构造 credentials。
+`resolveSendOptions` 在最后一步调用 routing engine，得到 `routingDecision`（包含 chosen provider:model + 备份链）并写入 sidecar payload，sidecar 据此选 dispatcher 与构造 credentials。
 
 详见 [provider-system](./provider-system)。
 
@@ -341,21 +328,15 @@ provider:model + 备份链）并写入 sidecar payload，sidecar 据此选 dispa
 
 `lib/slash-commands/registry.ts` 是统一的斜杠命令注册表。三类来源：
 
-- **builtin** —— `lib/slash-commands/builtin.ts` 列出的命令（`/clear`、`/reset`、`/skills`、`/twin` 等）。
-  实际 dispatch 在 composer 的 `BUILTIN_SLASH_COMMANDS` 中携 `SlashContext`（含 `activeSessionId`、
-  `pushSystemMessage`、`openSettings` 等）；registry 中只放描述符。
-- **plugin** —— 插件通过 `lib/plugin/core/manager.ts:registerSlashCommands(pluginId, defs)` 注册；
-  插件禁用时整批移除。
+- **builtin** —— `lib/slash-commands/builtin.ts` 列出的命令（`/clear`、`/reset`、`/skills`、`/twin` 等）。实际 dispatch 在 composer 的 `BUILTIN_SLASH_COMMANDS` 中携 `SlashContext`（含 `activeSessionId`、`pushSystemMessage`、`openSettings` 等）；registry 中只放描述符。
+- **plugin** —— 插件通过 `lib/plugin/core/manager.ts:registerSlashCommands(pluginId, defs)` 注册；插件禁用时整批移除。
 - **custom** —— 用户在设置里加（`lib/slash-commands/custom.ts`），存 Dexie。
 
-设置 → Slash Commands tab 通过 registry 枚举三类来源，渲染一个统一的浏览器。详见
-[slash-commands](./slash-commands)。
+设置 → Slash Commands tab 通过 registry 枚举三类来源，渲染一个统一的浏览器。详见 [slash-commands](./slash-commands)。
 
 ## Agent Trace（占位）
 
-`lib/agent-trace/log-adapter.ts` 是 agent-trace 适配器的 **占位实现**。日志面板的 "agent trace only"
-过滤器使用合成模块名 `agent.trace`；当真正的 trace 子系统落地时，这层会从 stub 升级到完整实现。
-目前所有适配器都返回 null，但 UI 通路已就绪。
+`lib/agent-trace/log-adapter.ts` 是 agent-trace 适配器的 **占位实现**。日志面板的 "agent trace only" 过滤器使用合成模块名 `agent.trace`；当真正的 trace 子系统落地时，这层会从 stub 升级到完整实现。目前所有适配器都返回 null，但 UI 通路已就绪。
 
 ## 系统提示预设
 
@@ -384,8 +365,7 @@ HTML 形式使用 `lib/themes/` 渲染当前主题；用户也可以加载自定
 一条 assistant 消息可包含多个"输出层"：
 
 - **Markdown / 流式文本** —— 用 `streamdown`（`@streamdown/code`、`@streamdown/math`、`@streamdown/mermaid`、`@streamdown/cjk`）渲染。
-- **工具调用 + 结果** —— 来自 `components/ai-elements/` 的可折叠卡片，由 sidecar 的
-  `permission_request` / `event` 流驱动。
+- **工具调用 + 结果** —— 来自 `components/ai-elements/` 的可折叠卡片，由 sidecar 的 `permission_request` / `event` 流驱动。
 - **A2UI** —— 交互式节点（表单、列表、卡片），由 `A2UIDispatchProvider` 路由。
 - **画板文档** —— 长文档物，存放在 `canvasDocuments` 系列表中，由 `CanvasBridgeProvider` 路由。
 - **通用 artifact** —— 代码/文本/HTML 块，用户可 fork 到 `components/artifacts/`。

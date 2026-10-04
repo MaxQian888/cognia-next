@@ -20,11 +20,10 @@ The pairing response contains a public `RoomDescriptor` and a mobile role
 private key. Capacitor stores the key in SecureStorage. A normal browser uses
 a non-extractable WebCrypto key and an encrypted IndexedDB pairing blob.
 
-`SignalingClient` connects to `/signaling`, signs the server challenge with
-ECDSA P-256, generates an ephemeral P-256 ECDH key, and subscribes for the
-mobile role. SDP/ICE are encrypted with directional HKDF-SHA-256/AES-256-GCM
-keys and signed over canonical length-prefixed fields. The relay cannot read
-the encrypted body.
+`SignalingClient` connects to `/signaling` and signs the server challenge with ECDSA P-256.
+It generates an ephemeral P-256 ECDH key and subscribes for the mobile role.
+Directional HKDF-SHA-256/AES-256-GCM keys encrypt SDP/ICE, and signatures cover canonical length-prefixed fields.
+The relay cannot read the encrypted body.
 
 One serialized bounded send queue assigns increasing sequence numbers. The
 receiver verifies the role/session/epoch, timestamp and signature before

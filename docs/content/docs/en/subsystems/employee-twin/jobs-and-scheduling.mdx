@@ -10,7 +10,7 @@ description: The twinJobs queue — the polling worker with per-kind concurrency
 <TLDR>
   Ingest and distill both run as durable `twinJobs` rows. The worker (`lib/twin/job-worker.ts:284`) polls,
   claims the oldest eligible job atomically (`claimNextQueuedJob`, `twin-jobs.ts:95`), and routes it. Crash
-  recovery is a **lease** (10 min TTL) — a `running` row with an expired lease is re-claimed. Transient
+  recovery uses a **lease** (10 min TTL). The worker reclaims a `running` row with an expired lease. Transient
   failures retry with exponential backoff (`job-retry.ts`), dead-lettering after 3 attempts. A per-twin cron
   bridge (`cron-bridge.ts:93`) keeps schedules in sync with the scheduler.
 </TLDR>

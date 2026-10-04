@@ -5,7 +5,10 @@ description: How the bundled Node sidecar bridges the Claude Agent SDK to the Ta
 
 # Sidecar & Claude Agent SDK
 
-Cognia ships a small Node host (the **sidecar**) that wraps the official [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) and exposes it to the Tauri parent process over **stdio with a JSON-lines protocol**. This page covers what the sidecar does, why, and how to extend it.
+Cognia includes a small Node host called the **sidecar**.
+It wraps the official [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk).
+The Tauri parent process communicates with it through **stdio with a JSON-lines protocol**.
+This page explains the sidecar's responsibilities, design, and extension points.
 
 ## Why a separate process
 

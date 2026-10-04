@@ -18,7 +18,7 @@ directory at `cognia/cli-endpoint.json`:
 }
 ```
 
-Unix permissions are changed to `0600` best-effort after the write; Windows relies on the user
+After the write, the host attempts to change Unix permissions to `0600`. Windows relies on the user
 profile ACL. The file can remain after shutdown. Clients therefore treat it as a discovery hint,
 not proof of liveness: `cognia-agent` performs an authenticated health probe, while `cognia`
 translates connection refusal into a stale-endpoint diagnostic. Each successful restart overwrites
@@ -65,7 +65,7 @@ is `/api/dev/*` (stable, shared with the installed CLIs — it is not a debug-on
 | `POST /api/dev/gateway/route-ticket` | `cognia-agent` | Mint LLM-gateway route ticket |
 | `POST /api/dev/gateway/route-ticket/revoke` | `cognia-agent` | Revoke a route ticket |
 
-`cognia` uses eight paths (plugins, ACP ticket, and health); `cognia-agent` uses fifteen. Health is
+`cognia` uses eight paths (plugins, ACP ticket, and health). `cognia-agent` uses fifteen. Health is
 the only shared path, so their union is 22. The installed-plugin projection deliberately excludes
 `runtime_state`, and twin context returns redacted prompt segments rather than raw source chunks.
 

@@ -5,7 +5,9 @@ description: Native sqlite-vec on desktop, plus five cloud backends — how Cogn
 
 # Vector store
 
-Cognia needs a vector index for the [Employee Digital Twin](../subsystems/employee-twin) RAG path. The store lives behind a thin abstraction (`packages/vector/src/store.ts`) so the rest of the app doesn't care which backend is active.
+Cognia needs a vector index for the [Employee Digital Twin](../subsystems/employee-twin) RAG path.
+The store interface is `packages/vector/src/store.ts`.
+The rest of the app uses this interface without needing to know which backend is active.
 
 The full design rationale is in [ADR-0004](../adr/0004-vector-native-backend).
 

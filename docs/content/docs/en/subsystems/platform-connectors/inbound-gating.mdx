@@ -8,7 +8,7 @@ description: How the Platform Connectors subsystem decides which inbound message
 <Status variant="stable" />
 
 <TLDR>
-Every inbound platform message runs a gauntlet before it can reach `ctx.emit()` and the AI. First a **dedup ledger** drops replays. Then a per-adapter **@-gate** (`shouldRespondToMessage`) applies blocklist / allowlist / at-strategy guardrails. Surviving events hit the bus, which resolves a **three-layer binding** (adapter → character → conversation override) into a `(mode, characterId, trigger)` triple, runs the pure **`evaluatePolicy`** evaluator (OR-ed rules, first-match blockers), and feeds the result to the **mode router** which picks one of five `RouteDecision`s — `ai-run`, `manual-store`, `draft-prepare`, `store-only`, or `drop`.
+Every inbound platform message passes through a sequence of checks before it can reach `ctx.emit()` and the AI. First a **dedup ledger** drops replays. Then a per-adapter **@-gate** (`shouldRespondToMessage`) applies blocklist / allowlist / at-strategy guardrails. Accepted events reach the bus, which resolves a **three-layer binding** (adapter → character → conversation override) into a `(mode, characterId, trigger)` triple, runs the pure **`evaluatePolicy`** evaluator (OR-ed rules, first-match blockers), and feeds the result to the **mode router** which picks one of five `RouteDecision`s — `ai-run`, `manual-store`, `draft-prepare`, `store-only`, or `drop`.
 </TLDR>
 
 <StatGrid>

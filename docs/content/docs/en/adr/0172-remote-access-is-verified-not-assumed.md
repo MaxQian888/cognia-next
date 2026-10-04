@@ -1,6 +1,6 @@
 ---
 title: "0172: Remote access is verified, not assumed"
-description: "The rendezvous advertises what it can carry and the settings probe it, the desktop detects the third-party tunnel and overlay clients it can lean on and shows how to install them, an overlay address can be the one an invitation advertises, and the one cloudflared child refuses to be silently repointed."
+description: "The rendezvous advertises its capabilities, and Settings probes them. Desktop detects supported third-party tunnel and overlay clients and shows installation instructions. Invitations can advertise an overlay address. The single cloudflared child rejects silent changes to its destination."
 ---
 
 # ADR 0172: Remote access is verified, not assumed
@@ -65,7 +65,7 @@ Cloud & relay leads with `RemoteAccessSummary`: one verdict from
 network, then one row per route. The relay's switch and URL come from the
 host-admin `companion_signaling_status` arm on any shell with a Host, so a
 browser paired to a headless server probes the Host's relay, not its own
-setting. A standalone browser reads its own setting and says so.
+setting. A standalone browser reads its own setting and identifies it as local.
 
 ### The desktop detects what it can lean on
 

@@ -1,6 +1,6 @@
 ---
 title: "0193 — One guide kit, and setup gaps read live"
-description: "The first-run flow, the pairing flow and the in-app setup reminders were three hand-built looks for one kind of thing. They now render one guide kit under components/guide/. What setup still needs is re-derived from live state instead of printed from the recorded exit path, and each reminder goes straight to the one step that closes its gap."
+description: "Unifies first-run flows, pairing flows and in-app setup reminders through one guide kit under components/guide/. Derives remaining setup needs from live state. Each reminder opens the step that resolves its gap."
 ---
 
 # ADR 0193 — One guide kit, and setup gaps read live
@@ -80,7 +80,7 @@ In both flows the panel narrates and the step body carries the page heading. The
 - The bar mounts the live probes only after its cheap settings-only precondition passes.
 - Settings ignores the bar's dismissal, because closing a reminder is not the same as finishing setup.
 
-The provider banner asks the narrower `useBuiltInModelAccess`. An external agent working on its own credentials changes what adding a provider is *for*; it does not make adding one pointless.
+The provider banner asks the narrower `useBuiltInModelAccess`. An external agent uses its own credentials. Adding a provider remains useful, but serves a different purpose in that configuration.
 
 The exit record stays honest as well:
 

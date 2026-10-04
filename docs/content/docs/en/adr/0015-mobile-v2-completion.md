@@ -134,9 +134,9 @@ browser`. `lib/capacitor/deeplink.ts` parses `cognia://` URLs into a
    `recordFailure`, `vacuumSent`, `retryDeadletter`).
    `lib/queue/retry-policy.ts` provides exponential backoff (1 → 60 s, 25%
    jitter, max 5 attempts) plus 4xx-class non-retryable detection.
-   `lib/queue/outbound-queue.ts` is the runner — subscribes to
-   `@capacitor/network` change events, drains on `kick()`, and respects
-   `nextAttemptAt` so failed rows get the right cooldown.
+   `lib/queue/outbound-queue.ts` is the runner. It subscribes to
+   `@capacitor/network` change events and drains on `kick()`. It respects
+   `nextAttemptAt` so failed rows wait until their next attempt is due.
 
 2. **Mobile Shell wrapper + 4-Tab Bar**
 

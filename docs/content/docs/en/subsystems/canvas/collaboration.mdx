@@ -15,8 +15,8 @@ description: Optional real-time multi-user co-editing on Yjs — Monaco and Code
   transport is the collaboration server (ADR-0149, `crates/cognia-collab-server/src/canvas_api.rs`),
   which stores opaque updates in order, deduplicates by `(document_id, operation_id)`, never decodes
   them, and re-resolves the caller's workspace role on every inbound edit frame. A joining client
-  takes the plane's state before its editor binds, and only seeds an empty document; cursors travel
-  as y-protocols awareness. Membership is the workspace's ladder: viewer reads, member edits and
+  takes the plane's state before its editor binds, and only initializes an empty document. Clients transmit cursors
+  through y-protocols awareness. Membership follows the workspace roles: viewer reads, member edits and
   comments, maintainer compacts and deletes. Off by default behind `COLLAB_CANVAS_ENABLED` and
   `canvas.collaboration.enabled`.
 </TLDR>

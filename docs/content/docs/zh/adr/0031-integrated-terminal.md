@@ -1,13 +1,11 @@
 ---
 title: ADR-0031 — 集成终端 Phase 2 —— Dock↔Agent 统一、断线重连/replay、插件 + 工作流接入
-description: 在已有终端 dock 之上的 Wave 1-4 增强。(1) Agent 的 MCP 终端工具通过现有 `plugin_tool_exec` IPC 直接驱动用户可见的 PTY —— 同一个 shell、同一个 cwd、同一份历史。(2) sidecar 新增 node-pty REPL 内建工具，为 agent 提供私有交互式 shell（与 dock 中继正交）。(3) Rust 端 5 分钟带 `seq` 的回放缓冲存活 WS 断线；WS handler 实现 resume 协议；前端按指数退避重连。(4) `BaseTerminalSession` 抽象类去重三种传输（Tauri / WS / 将来的 WebRTC）共享的 listener/exit-state 模板。(5) 插件 manifest 早已带 `terminal:spawn|write|kill`；本波新增 workflow `action.system.terminal` 节点 + 借助 github-delivery 的 pre-flight 测试路径 dogfood。(6) 收尾：fish + nushell shell-integration、OSC 8 超链接、dock 拖拽调高、可配置 run-in-dock 超时、移动端 search+history 覆盖层对齐。
+description: 在已有终端 dock 之上的 Wave 1-4 增强。(1) Agent 的 MCP 终端工具通过现有 `plugin_tool_exec` IPC 直接驱动用户可见的 PTY —— 同一个 shell、同一个 cwd、同一份历史。(2) sidecar 新增 node-pty REPL 内建工具，为 agent 提供私有交互式 shell（与 dock 中继正交）。(3) Rust 端 5 分钟带 `seq` 的回放缓冲存活 WS 断线；WS handler 实现 resume 协议；前端按指数退避重连。(4) `BaseTerminalSession` 抽象类去重三种传输（Tauri / WS / 将来的 WebRTC）共享的 listener/exit-state 模板。(5) 插件 manifest 早已带 `terminal:spawn|write|kill`；本阶段新增 workflow `action.system.terminal` 节点 + 借助 github-delivery 的 pre-flight 测试路径验证实际使用流程。(6) 收尾：fish + nushell shell-integration、OSC 8 超链接、dock 拖拽调高、可配置 run-in-dock 超时、移动端 search+history 覆盖层功能补全。
 ---
 
 # ADR-0031 — 集成终端 Phase 2
 
-**状态**：Proposed (2026-05-22)
-**作者**：Max Qian + Claude Opus 4.7
-**影响范围**：`lib/terminal/`、`lib/plugin/bridge/sidecar-tools-bridge.ts`、`lib/plugin/security/permission-guard.ts`、`lib/claude/plugin-tool-ipc.ts`、`lib/claude/build-options.ts`、`lib/workflow/nodes/`、`types/workflow/visual.ts`、`components/terminal/`、`components/mobile/mobile-terminal-screen.tsx`、`components/settings/terminal/`、`components/workflow/editor/inspector/`、`sidecar/builtin-tools/`、`src-tauri/src/terminal/`、`src-tauri/src/companion_api/ws_terminal.rs`、`src-tauri/resources/terminal/`、`plugins/github-delivery/plugin.json`
+**状态**：Proposed (2026-05-22) **作者**：Max Qian + Claude Opus 4.7 **影响范围**：`lib/terminal/`、`lib/plugin/bridge/sidecar-tools-bridge.ts`、`lib/plugin/security/permission-guard.ts`、`lib/claude/plugin-tool-ipc.ts`、`lib/claude/build-options.ts`、`lib/workflow/nodes/`、`types/workflow/visual.ts`、`components/terminal/`、`components/mobile/mobile-terminal-screen.tsx`、`components/settings/terminal/`、`components/workflow/editor/inspector/`、`sidecar/builtin-tools/`、`src-tauri/src/terminal/`、`src-tauri/src/companion_api/ws_terminal.rs`、`src-tauri/resources/terminal/`、`plugins/github-delivery/plugin.json`
 
 ## 当前状态修订（2026-08-13）
 

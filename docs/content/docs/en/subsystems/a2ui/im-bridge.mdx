@@ -10,7 +10,7 @@ description: A2UI surfaces must degrade into platform-native rich content — La
 <TLDR>
   A2UI emits a declarative React component tree, but an IM platform (Lark / Telegram / Discord) can
   only render its own rich-content primitives — a card, a button row, an image, a link. This bridge
-  is the lossy-but-faithful adapter layer between the two worlds. **Outbound**, it builds surfaces
+  adapts between the two representations while accounting for lost information. **Outbound**, it builds surfaces
   from plugin-facing factories (`surface-builder.ts`), turns assistant replies into outbound
   `MessageSegment[]` with a `plainTextMirror` fallback (`a2ui-to-segments.ts`), and tells the model —
   in its system prompt — which A2UI kinds the target adapter's capability matrix will carry
@@ -40,7 +40,7 @@ them can execute an arbitrary `component: "Select"` node.
 The bridge is therefore a **lossy, capability-aware projection layer**. It never assumes the surface
 will render verbatim. Every path carries a `plainTextMirror` so the worst case is still a readable
 text message, and the adapter's declared capability matrix is rendered into the model's own system
-prompt so it is told up front what will and won't survive the trip.
+prompt so the model knows which components the platform can render.
 
 <Files>
   - lib/connectors/a2ui-bridge/surface-builder.ts — plugin-facing pure surface builder (backs `ctx.connectors.a2ui`)

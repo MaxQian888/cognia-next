@@ -9,12 +9,12 @@ description: Natural-language → A2UI component tree with no LLM (pure keyword/
 
 <TLDR>
   The **app generator** turns a one-line description into a full A2UI component tree **without ever
-  calling a model** — it is pure keyword/regex rule matching. A short pipeline
+  calling a model**. It uses only keyword/regex rule matching. A short pipeline
   (`createGenerationContext` → `detectAppType` → `extractAppName` → a `switch`) routes to one of ten
   per-type generators, which assemble surfaces from **13 pure component factories**. Separately, a
   registry of **13 hardcoded built-in templates** (`appTemplates`) supplies ready-made apps. Both the
   generator and the templates emit the **same 4-message A2UI sequence**. The
-  [A2UI Hub page](#hub-vs-workspace) (`app/a2ui/page.tsx`) is the front door: `?app=<id>` switches to
+  [A2UI Hub page](#hub-vs-workspace) (`app/a2ui/page.tsx`) is the entry point: `?app=<id>` switches to
   the Workspace, otherwise it renders the Hub with Flash-generate, a searchable library, and
   template gallery.
 </TLDR>
@@ -45,7 +45,7 @@ This subsystem has two cooperating halves:
 
 Both terminate in the **same 4-message A2UI sequence** (`createSurface` · `updateComponents` ·
 `dataModelUpdate` · `surfaceReady`) — the generator via `createAppMessages` (`generators.ts:41`),
-templates via `createAppFromTemplate` (`types.ts:31`). Both mint ids through
+templates via `createAppFromTemplate` (`types.ts:31`). Both create ids through
 `generateTemplateId` (`types.ts:24`).
 
 <Files>
@@ -140,7 +140,7 @@ else `en`; `extractAppName` (197) tries two name regexes (198–201), then a typ
 (108, default `colorful`) feed `createGenerationContext` (234).
 
 <Callout type="warn">
-  **The weather gotcha.** `weather` is a valid detected type in `appPatterns` (`config.ts:161`), but
+  **Weather limitation.** `weather` is a valid detected type in `appPatterns` (`config.ts:161`), but
   the dispatch `switch` (`index.ts:73`) has **no `case "weather"`**. A "weather" description therefore
   falls through `default` and lands in `generateCustomApp`. Weather is only reachable as a finished
   app via its **template** (`utility.ts:235`), never via the generator.

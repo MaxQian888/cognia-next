@@ -74,20 +74,18 @@ flowchart TB
 
 ## 1 · Chat Routing
 
-The runtime is selected by a small store, `useAgentRuntimeStore`, holding `runtime`
-(`"claude-sdk" | "external"`) and `externalAgentId`. The UI picker is
-`components/agent/mode/runtime-selector.tsx` (`AgentRuntimeSelector`) — one radio group holding the
-built-in `claude-sdk` runtime plus one row per configured external agent, so picking a lane and
-picking the agent record are the same click. Rows whose
-`getExternalAgentExecutionBlockReason(...)` is non-null render disabled with that reason, and a
-restored selection that no longer resolves to a runnable agent falls back to `claude-sdk` instead of
-parking the composer on an external lane with nothing to dispatch to.
+`useAgentRuntimeStore` selects the runtime and stores `runtime` (`"claude-sdk" | "external"`) and `externalAgentId`.
+The UI picker is `components/agent/mode/runtime-selector.tsx` (`AgentRuntimeSelector`).
+Its radio group contains the built-in `claude-sdk` runtime and one row per configured external agent.
+One click selects both the runtime and agent record.
+Rows with a non-null `getExternalAgentExecutionBlockReason(...)` are disabled and show that reason.
+If a restored selection no longer resolves to a runnable agent, the picker returns to `claude-sdk` instead of leaving an unusable external selection.
 
-A row also carries what the last real contact with the agent found, read from
-`agentValidity[id]` (written by `useExternalAgent` on connect / health check / execution): a failed
-start shows the runtime's own `blockingReason` verbatim, a pending sign-in and an unhealthy probe
-show a translated hint. These are history, not verdicts — a binary missing an hour ago may be
-installed now — so unlike a config-level block they warn without disabling the row.
+A row also shows the result of the last contact with the agent from `agentValidity[id]`.
+`useExternalAgent` writes that result on connection, health check, or execution.
+A failed start shows the runtime's `blockingReason` verbatim. A pending sign-in or unhealthy probe shows a translated hint.
+These results describe past contact. For example, a binary missing an hour ago may now be installed.
+Unlike configuration blocks, these warnings do not disable the row.
 
 **Two stores hold "which agent", and neither derives from the other**: chat dispatch reads
 `useAgentRuntimeStore.externalAgentId`, while the manager, `useExternalAgent`, and the Agent-Team

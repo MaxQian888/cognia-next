@@ -5,7 +5,9 @@ description: shadcn/ui v3 (new-york style + RSC + Tailwind v4), 57 pre-installed
 
 # shadcn/ui Setup
 
-All UI primitives in cognia-next (buttons, dialogs, inputs, tables, Sheet, Drawer, Sidebar, ...) come from [shadcn/ui](https://ui.shadcn.com/). This page is the single reference for **all conventions and configurations** of shadcn in this repository: style options, installed component inventory, commands for adding new components, theme tokens, and global Providers.
+All UI primitives in cognia-next come from [shadcn/ui](https://ui.shadcn.com/), including buttons, dialogs, inputs, tables, Sheet, Drawer, and Sidebar.
+This page documents shadcn conventions and configuration in this repository.
+It covers style options, installed components, commands for adding components, theme tokens, and global Providers.
 
 ## TL;DR
 
@@ -295,7 +297,8 @@ shadcn components heavily use `asChild` to delegate trigger behavior to the chil
 </DialogTrigger>
 ```
 
-Under the hood this is Radix `Slot` — the child element inherits all props (including event handlers and `aria-*` attributes) without adding extra DOM nodes.
+This uses Radix `Slot`.
+The child element inherits all props, including event handlers and `aria-*` attributes, without additional DOM nodes.
 
 ## `cn()` — The Only Class Name Merge Function
 

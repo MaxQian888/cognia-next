@@ -1,6 +1,6 @@
 ---
 title: "0196 — A library crate links Tauri only when asked"
-description: "ADR-0067 cut the Tauri crate `app_lib` from 170k lines to 67k, and nothing stopped it growing back: ten weeks later it was 187k, `companion_api` alone 96k, nineteen library crates linked `tauri`, and the headless `cognia-server` shipped webkit. This ADR gives the Rust workspace a layer map a gate enforces, makes every library crate Tauri-free by default with its command shells behind a `tauri-host` feature only the app turns on, splits `companion_api` into companion crates behind a host trait, and ends with `cognia-server` as its own package that links no Tauri at all."
+description: "ADR-0067 reduced the Tauri crate `app_lib` from 170k lines to 67k. Ten weeks later it had grown to 187k, with 96k in `companion_api`. Nineteen library crates linked `tauri`, and headless `cognia-server` included webkit. Defines a gated Rust workspace layer map. Library crates are Tauri-free by default. Their command shells use a `tauri-host` feature enabled only by the app. Splits `companion_api` into companion crates behind a host trait. Makes `cognia-server` a separate package with no Tauri dependency."
 ---
 
 # ADR 0196 — A library crate links Tauri only when asked
@@ -45,10 +45,9 @@ The assembly in `lib.rs` had also become fragile. It registered 1,117
 commands, 47 managed states, a 554-line setup hook, and eleven process-global
 setters with three different behaviors when never called. It also called
 `Builder::setup` twice. Tauri keeps only the last closure
-(`self.setup = Box::new(setup)`), so the first one — push credentials, the
-fs allow-list seed, the backups fs scope, task-workspace maintenance, the
-gateway brain bridge and the WASM plugin host services — never ran on
-desktop.
+(`self.setup = Box::new(setup)`), so the first closure never ran on desktop. This skipped push credentials,
+the fs allow-list seed, the backups fs scope, task-workspace maintenance, the
+gateway brain bridge and the WASM plugin host services.
 
 ## Decision
 

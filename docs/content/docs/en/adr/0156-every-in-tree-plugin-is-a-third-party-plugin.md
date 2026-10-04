@@ -1,6 +1,6 @@
 ---
 title: "0156 — Every in-tree plugin is a third-party plugin"
-description: "The 52 first-party plugins now compile against @cognia/plugin-sdk alone, the capability registries the SDK already had are published as subpaths, and a shrinking baseline keeps the boundary from reopening."
+description: "The 52 first-party plugins compile against @cognia/plugin-sdk alone. Publishes existing SDK capability registries as subpaths. A shrinking baseline prevents new boundary violations."
 ---
 
 # ADR 0156 — Every in-tree plugin is a third-party plugin
@@ -30,8 +30,7 @@ five of them were reachable. The rest were built and forgotten: a plugin that
 wanted to register a character pack at activation had no published way to do
 it, so it imported `@/lib/plugin/registries/character-pack-registry`.
 
-**Where the SDK genuinely had a hole, the hole was load-bearing.** Not
-cosmetic gaps: `defineMessageRenderer` could register a renderer for a part
+**The SDK gaps prevented required behavior.** For example, `defineMessageRenderer` could register a renderer for a part
 type nothing could emit; `ctx.sessions.getCurrentSessionId()` returned `null`
 for every plugin in production because the store it read is only populated by
 a `load()` nothing calls; a plugin driving computer use could not read the

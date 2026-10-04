@@ -1,14 +1,11 @@
 ---
 title: "0211 — 公开状态页只报告它实际测量的中继"
-description: "公开的 `/status` 页面通过真实协议探针报告官方托管中继（`signaling.cognia.cn`）的状态：健康检查、两端认证信令往返和显式数据通道，结果作为不可变的分钟槽写入独立的 `cognia-status` Worker 与 D1。缺少证据显示为未知，绝不显示为 100%；可用率按计数计算，覆盖率始终并列展示，观测端健康与服务健康分开发布。事件、维护、Atom/RSS 与双重确认的邮件订阅由运维和用户同意控制。同一份契约模块（`lib/status/`）同时打包进页面、Worker、外部 Node 探针和运维 CLI。"
+description: "公开 `/status` 页面通过协议探针报告官方中继（`signaling.cognia.cn`）状态。健康检查、两端认证信令往返与显式数据通道结果写入独立 `cognia-status` Worker 与 D1 的不可变分钟槽。缺证据显示未知，不显示 100%。可用率按计数计算，覆盖率并列展示，观测端与服务健康分开发布。事件、维护、Atom/RSS 与双重确认邮件订阅由运维和用户同意控制。`lib/status/` 契约共用于页面、Worker、外部 Node 探针与运维 CLI。"
 ---
 
 # ADR 0211 — 公开状态页只报告它实际测量的中继
 
-**状态：** 已采纳
-**日期：** 2026-10-02
-**相关：** [ADR-0170](./0170-cognia-relay-and-connectivity-center)（中继与连接中心）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（WebRTC/WAN 传输）、[ADR-0037](./0037-public-share-links)（公开独立 Worker 模式）、[ADR-0092](./0092-official-website-workspace)（静态公开站点）
-**计划：** [`docs/plans/2026-10-02-signaling-public-status-implementation.md`](https://github.com/MaxQian888/cognia-next/blob/dev/docs/plans/2026-10-02-signaling-public-status-implementation.md)
+**状态：** 已采纳**日期：** 2026-10-02 **相关：** [ADR-0170](./0170-cognia-relay-and-connectivity-center)（中继与连接中心）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（WebRTC/WAN 传输）、[ADR-0037](./0037-public-share-links)（公开独立 Worker 模式）、[ADR-0092](./0092-official-website-workspace)（静态公开站点）**计划：** [`docs/plans/2026-10-02-signaling-public-status-implementation.md`](https://github.com/MaxQian888/cognia-next/blob/dev/docs/plans/2026-10-02-signaling-public-status-implementation.md)
 
 ## 背景
 

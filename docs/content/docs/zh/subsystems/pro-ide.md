@@ -1,6 +1,6 @@
 ---
 title: Pro IDE
-description: 作为真实编辑器面板内嵌的 code-server —— 通往伴生 VS Code 扩展的回环 TCP 控制通道，使 Agent 能施加可撤销的编辑；以及让内嵌工作台真正「长得像、说得像」本应用的主题与语言链路。
+description: 作为真实编辑器面板内嵌的 code-server：通过连接伴生 VS Code 扩展的回环 TCP 控制通道，Agent 可执行可撤销的编辑。主题与语言配置使内嵌工作台与本应用保持一致。
 ---
 
 # Pro IDE
@@ -8,8 +8,8 @@ description: 作为真实编辑器面板内嵌的 code-server —— 通往伴�
 <Status variant="beta">Beta · ADR-0088 · 磁盘 + settings.json（无 Dexie）</Status>
 
 <TLDR>
-  Pro IDE 是一个跑在 webview 里、由应用驱动的真实 code-server 实例。打开文件很简单 ——
-  code-server 自带 CLI 的 `--reuse-window <file>:<line>:<col>` 就够了。再往后就不行了：
+  Pro IDE 是在 webview 中运行、由应用驱动的真实 code-server 实例。打开文件时，
+  code-server 自带 CLI 的 `--reuse-window <file>:<line>:<col>` 即可完成操作。其余编辑器操作需要扩展支持：
   该 CLI **只能**打开与定位，因此「可撤销的编辑」或「读取*当前活动编辑器*」必须运行在
   VS Code 扩展宿主内部。这正是伴生扩展（`sidecar/codeserver-agent-ext/`）与回环控制通道
   （`src-tauri/src/codeserver/agent_channel.rs`）存在的原因。托管通道是跑在
@@ -33,15 +33,9 @@ description: 作为真实编辑器面板内嵌的 code-server —— 通往伴�
 
 ## 为什么要专用通道，又为什么用 TCP
 
-这条通道的两端都是我们自己的，且都不会穿过代理或浏览器。
-WebSocket 的握手、分帧与客户端掩码在此纯属仪式，因此协议 1.0 使用回环 TCP
-上的 JSON-RPC 2.0 与 LSP 风格 `Content-Length` framing。连接发布前会经过
-challenge/HMAC 认证；legacy newline parser 只开放原有编辑器控制方法。
+这条通道的两端都是我们自己的，且都不会穿过代理或浏览器。这条通道不需要 WebSocket 的握手、分帧与客户端掩码，因此协议 1.0 使用回环 TCP 上的 JSON-RPC 2.0 与 LSP 风格 `Content-Length` framing。连接发布前会经过 challenge/HMAC 认证；legacy newline parser 只开放原有编辑器控制方法。
 
-更有意思的决策是它的**托管位置**。它位于 `codeserver` 模块，而不是可选开启的
-`companion_api` 服务，因此它随其驱动的 code-server 进程一同启停。
-一个从未开启远程访问的用户，依然能得到功能完整的编辑器 ——
-agent↔IDE 这条路径不会被一个与它毫无关系的远程访问开关卡住。
+另一个关键决策是它的**托管位置**。它位于 `codeserver` 模块，而不是可选开启的 `companion_api` 服务，因此它随其驱动的 code-server 进程一同启停。一个从未开启远程访问的用户，依然能得到功能完整的编辑器 ——agent↔IDE 这条路径不受远程访问开关限制。
 
 ## 代码位置
 
@@ -74,8 +68,7 @@ components/settings/pro-ide/pro-ide-section.tsx
 sidecar/codeserver-agent-ext/    # 伴生 VS Code 扩展
 ```
 
-`open-file-queue.ts` 的存在是因为打开请求可能早于实例就绪；
-把它们排队，正是「早到的打开文件请求不会被静默丢弃」的原因。
+`open-file-queue.ts` 的存在是因为打开请求可能早于实例就绪；把它们排队，正是「早到的打开文件请求不会被静默丢弃」的原因。
 
 ## 主题：并不是把导入表反过来用
 
@@ -88,15 +81,11 @@ sidecar/codeserver-agent-ext/    # 伴生 VS Code 扩展
   `terminal.*`、`menu.*`、`notifications.*` —— 会全部落空、无人上色。
 </Callout>
 
-因此 `theme/vscode-chrome-map.ts` 是一张独立的**正向**表：应用调色板 → VS Code Theme Color，
-按覆盖整个工作台外壳来编写，而不是沿用导入器恰好采样到的那个子集。
+因此 `theme/vscode-chrome-map.ts` 是一张独立的**正向**表：应用调色板 → VS Code Theme Color，按覆盖整个工作台外壳来编写，而不是沿用导入器恰好采样到的那个子集。
 
 ## 语言在 `argv.json`，不在 `settings.json`
 
-VS Code 的显示语言是**运行时参数**，不是设置项。
-「Configure Display Language」命令会把 `{"locale": "…"}` 写进用户数据目录下的 `argv.json`，
-而工作台只在启动时读取它。`lib/codeserver/locale.ts` 拥有这个文件 ——
-这正是「改语言必须重启实例，而改主题既不需要重启、也不需要本模块拥有的文件」的原因。
+VS Code 的显示语言是**运行时参数**，不是设置项。「Configure Display Language」命令会把 `{"locale": "…"}` 写进用户数据目录下的 `argv.json`，而工作台只在启动时读取它。`lib/codeserver/locale.ts` 拥有这个文件 ——这正是「改语言必须重启实例，而改主题既不需要重启、也不需要本模块拥有的文件」的原因。
 
 ## 相关文档
 

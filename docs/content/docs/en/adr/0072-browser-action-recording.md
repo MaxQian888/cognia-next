@@ -13,12 +13,11 @@ description: "Record real human interaction in the embedded /browser preview int
 ADR-0055 gave the agent a `snapshot → act-by-ref → re-snapshot` loop over the
 embedded `/browser` pane, so the model can drive a local dev preview in the same
 pane the human watches. The reverse direction never existed. A person who
-reproduced a bug, walked a login, or stepped through a checkout produced
+reproduced a bug, completed a login flow, or stepped through a checkout produced
 **nothing reusable**: to hand that flow to the agent they retyped it as prose
 from memory, and to turn it into a regression test they wrote the Playwright
-spec by hand. Both transcriptions are lossy in the same place — the selector of
-the element actually clicked — which is the one detail neither a person nor a
-model can reconstruct after the fact.
+spec by hand. Both transcriptions can lose the selector of the element that was clicked.
+Neither a person nor a model can reliably reconstruct this detail afterwards.
 
 Everything needed to observe the flow was already in the pane. The injected
 overlay (`lib/browser/overlay.injected.js`) is installed in the previewed page

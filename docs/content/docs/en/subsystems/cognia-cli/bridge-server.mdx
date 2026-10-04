@@ -32,7 +32,7 @@ flowchart LR
 
 Startup is **best-effort**: an endpoint-file write failure is logged, not fatal, and a bridge
 start failure logs `cli_bridge auto-start failed` without blocking the app. The token rotates
-every launch; the file is rewritten each boot, so a stale file from a crashed session simply
+every launch; the file is rewritten each boot, so a stale file from a crashed session
 carries a dead port + token. The current native startup block has no explicit mobile compile-time
 guard; renderer listeners and sync controls are desktop/Tauri-gated.
 

@@ -13,7 +13,7 @@ description: ADR-0035——由 Rust perf 子系统支撑的任务管理器风格
   `PerfSample`：(1) 经 `sysinfo` 的**进程树**（`process.rs`），从 app 向下遍历 PID 树
   直到每一个后代进程，分类为 `main`/`sidecar`/`child`，CPU 归一化到
   0–100；(2) 经 `RuntimeMetrics` 的 **Tokio 运行时**（`runtime.rs`），通过对单调 busy 时长
-  做差分得到头条的 worker busy %；(3) **span 热点**（`registry.rs` + `span.rs`）——一个
+  做差分得到主要指标 worker busy %；(3) **span 热点**（`registry.rs` + `span.rs`）——一个
   进程级全局注册表，每个被插桩的 `&'static str` 累积 count/error/total/min/max
   外加一个固定**对数桶直方图**以得到近似 p50/p95。采样器是**引用计数**的——面板关闭时
   零成本。前端（`hooks/perf/use-perf-stream.ts` +
@@ -33,11 +33,7 @@ description: ADR-0035——由 Rust perf 子系统支撑的任务管理器风格
 
 ## 它为何存在
 
-app 已经拥有日志、崩溃上报、前端性能计时以及一个 `dial9` Tokio 飞行
-记录器。缺失的是一个*实时 Rust 运行时*视图：Rust 进程树此刻占用了多少 CPU/内存、
-Tokio 运行时负载有多高，以及哪些后端操作较慢。ADR-0035 恰好补上了这点，
-且不依赖进程内采样剖析器（基于信号的采样器如 `pprof-rs` 在 Windows 上不可用/不安全）——
-而是将已有的 dial9 trace 文件暴露出来供离线分析，并提供一个实时 span 热点表用于归因。
+app 已经拥有日志、崩溃上报、前端性能计时以及一个 `dial9` Tokio 飞行记录器。缺失的是一个*实时 Rust 运行时*视图：Rust 进程树此刻占用了多少 CPU/内存、Tokio 运行时负载有多高，以及哪些后端操作较慢。ADR-0035 恰好补上了这点，且不依赖进程内采样剖析器（基于信号的采样器如 `pprof-rs` 在 Windows 上不可用/不安全）——而是将已有的 dial9 trace 文件暴露出来供离线分析，并提供一个实时 span 热点表用于归因。
 
 ## 架构
 
@@ -65,9 +61,7 @@ flowchart TB
 
 ## 第 1 层——进程树
 
-`process.rs` 采样当前 PID 加上每一个后代进程。它构建一个父索引，计算
-后代集合（迭代式、防环），随后归一化 CPU 并从间隔推导出每秒磁盘字节数。
-sidecar 检测以打包的 Node host 为关键字：
+`process.rs` 采样当前 PID 加上每一个后代进程。它构建一个父索引，计算后代集合（迭代式、防环），随后归一化 CPU 并从间隔推导出每秒磁盘字节数。sidecar 检测以打包的 Node host 为关键字：
 
 ```rust title="src-tauri/src/perf/process.rs:64"
 pub fn classify_role(pid: u32, current_pid: u32, name: &str, cmd: &[String]) -> ProcessRole {
@@ -96,9 +90,7 @@ runSecs`。Processes 标签页渲染一个可排序表格、一个 CPU 热力图
 
 ## 第 2 层——Tokio 运行时
 
-`runtime.rs` 对 `RuntimeMetrics` 拍快照（完整表面之所以可用，是因为 `.cargo/config.toml`
-为 dial9 设置了 `--cfg tokio_unstable`）。头条指标是 **worker busy %**，通过将
-单调的每 worker busy 时长与上一个样本做差分计算得到：
+`runtime.rs` 对 `RuntimeMetrics` 拍快照（完整表面之所以可用，是因为 `.cargo/config.toml` 为 dial9 设置了 `--cfg tokio_unstable`）。头条指标是 **worker busy %**，通过将单调的每 worker busy 时长与上一个样本做差分计算得到：
 
 ```rust title="src-tauri/src/perf/runtime.rs:44"
 pub fn compute_busy_pct(prev: &[Duration], cur: &[Duration], elapsed: Duration) -> (f64, Vec<f64>) {
@@ -114,16 +106,11 @@ pub fn compute_busy_pct(prev: &[Duration], cur: &[Duration], elapsed: Duration) 
 }
 ```
 
-`RuntimeSample` 还携带 `aliveTasks`、`globalQueueDepth`、`blockingThreads`、
-`blockingQueueDepth`、`spawnedTasksCount`，以及汇总后的 `workerStealCount`/`workerParkCount`/
-`workerOverflowCount`。Async Runtime 标签页将这些归入 Workers/Tasks/Queues/Throughput 卡片
-外加每 worker 的 busy 迷你折线图，并列出 dial9 trace 文件（提供打开文件夹的入口）。
+`RuntimeSample` 还携带 `aliveTasks`、`globalQueueDepth`、`blockingThreads`、`blockingQueueDepth`、`spawnedTasksCount`，以及汇总后的 `workerStealCount`/`workerParkCount`/`workerOverflowCount`。Async Runtime 标签页将这些归入 Workers/Tasks/Queues/Throughput 卡片外加每 worker 的 busy 迷你折线图，并列出 dial9 trace 文件（提供打开文件夹的入口）。
 
 ## 第 3 层——Span 热点
 
-`registry.rs` 是一个以 `&'static str` 为键的进程级全局注册表。每个名字累积
-count/error/total/min/max 外加一个固定**对数桶直方图**（25 个桶，桶 *i* 覆盖
-`[2^i, 2^(i+1))` µs），给出无依赖、内存有界的近似分位：
+`registry.rs` 是一个以 `&'static str` 为键的进程级全局注册表。每个名字累积 count/error/total/min/max 外加一个固定**对数桶直方图**（25 个桶，桶 *i* 覆盖 `[2^i, 2^(i+1))` µs），给出无依赖、内存有界的近似分位：
 
 ```rust title="src-tauri/src/perf/registry.rs:73"
 pub fn percentile_micros(&self, q: f64) -> u64 {
@@ -138,8 +125,7 @@ pub fn percentile_micros(&self, q: f64) -> u64 {
 }
 ```
 
-插桩（`span.rs`）是可选且符合人体工学的——一个 RAII guard 在 drop 时记录，因此在
-`.await` 之间也安全：
+插桩（`span.rs`）是可选且符合人体工学的——一个 RAII guard 在 drop 时记录，因此在 `.await` 之间也安全：
 
 ```rust title="src-tauri/src/perf/span.rs:57"
 impl Drop for Guard {
@@ -149,17 +135,11 @@ impl Drop for Guard {
 }
 ```
 
-三种形态：`crate::perf::guard("name")`（RAII）、`timed(name, fut)`（可失败的 async，ok 取自
-`is_ok()`），以及 `record(name, elapsed, ok)`（手动）。精心选取的边界是有意为之（`connector.send`、
-`ocr.extract`、`vector.query`、…）——Tauri 中没有通用的命令中间件，因此覆盖面会随着
-边界被插桩而增长。每个 `SpanSnapshot` 携带
-`name/count/errorCount/totalMs/avgMs/minMs/maxMs/p50Ms/p95Ms/buckets`。Hotspots 标签页是一个可排序
-表格，带一个总耗时相对条和一个对数桶分布迷你条形图。
+三种形态：`crate::perf::guard("name")`（RAII）、`timed(name, fut)`（可失败的 async，ok 取自 `is_ok()`），以及 `record(name, elapsed, ok)`（手动）。精心选取的边界是有意为之（`connector.send`、`ocr.extract`、`vector.query`、…）——Tauri 中没有通用的命令中间件，因此覆盖面会随着边界被插桩而增长。每个 `SpanSnapshot` 携带 `name/count/errorCount/totalMs/avgMs/minMs/maxMs/p50Ms/p95Ms/buckets`。Hotspots 标签页是一个可排序表格，带一个总耗时相对条和一个对数桶分布迷你条形图。
 
 ## 采样器
 
-`sampler.rs` 将全部三层组合成一个 `PerfSample` 并发出它；该循环是**引用计数**的，因此
-面板关闭时没有成本：
+`sampler.rs` 将全部三层组合成一个 `PerfSample` 并发出它；该循环是**引用计数**的，因此面板关闭时没有成本：
 
 ```rust title="src-tauri/src/perf/sampler.rs:126"
 let processes = proc_sampler.sample(interval_secs);
@@ -171,9 +151,7 @@ handle.push(sample.clone());                       // bounded ring (RING_CAP=120
 if let Err(err) = app.emit(SAMPLE_EVENT, &sample) { /* warn */ }
 ```
 
-一个 120 项的环为新打开的面板的滚动图表做 backfill。`PerfSample`
-（`sampler.rs:34`）为 `{ tsMs, intervalMs, processes[], runtime, topSpans[], systemMemory }`，与
-`lib/perf/backend/types.ts` 一一对应。
+一个 120 项的环为新打开的面板的滚动图表做 backfill。`PerfSample`（`sampler.rs:34`）为 `{ tsMs, intervalMs, processes[], runtime, topSpans[], systemMemory }`，与 `lib/perf/backend/types.ts` 一一对应。
 
 ### 命令
 
@@ -190,8 +168,7 @@ if let Err(err) = app.emit(SAMPLE_EVENT, &sample) { /* warn */ }
 
 ## 前端流
 
-`use-perf-stream.ts` 驱动仪表盘——启动后端循环、从快照环 backfill，
-随后订阅实时样本，保持一个滚动的 120 样本窗口：
+`use-perf-stream.ts` 驱动仪表盘——启动后端循环、从快照环 backfill，随后订阅实时样本，保持一个滚动的 120 样本窗口：
 
 ```ts title="hooks/perf/use-perf-stream.ts:73"
 await perfStartSampling(DEFAULT_PERF_INTERVAL)
@@ -201,11 +178,7 @@ unsubscribe = subscribePerfSample(append)
 // cleanup: unsubscribe() + perfStopSampling()
 ```
 
-Pause 冻结 UI 而不停止后端；`setIntervalMs` 也会调用 `perfSetInterval`。
-`PerformanceDashboard` 渲染四个标签页（Overview / Processes / Hotspots / Async Runtime）外加一个
-`perf.panel` 插件扩展槽，并通过一个仅限桌面的门控在 web/移动端渲染一个静态说明页。
-`lib/perf/backend/{commands,export,format}.ts` 提供 `isTauri()` 门控的封装、JSON/CSV 导出，
-以及纯函数格式化器。i18n 命名空间为 `performance`。
+Pause 冻结 UI 而不停止后端；`setIntervalMs` 也会调用 `perfSetInterval`。`PerformanceDashboard` 渲染四个标签页（Overview / Processes / Hotspots / Async Runtime）外加一个 `perf.panel` 插件扩展槽，并通过一个仅限桌面的门控在 web/移动端渲染一个静态说明页。`lib/perf/backend/{commands,export,format}.ts` 提供 `isTauri()` 门控的封装、JSON/CSV 导出，以及纯函数格式化器。i18n 命名空间为 `performance`。
 
 ## 从哪里入手
 

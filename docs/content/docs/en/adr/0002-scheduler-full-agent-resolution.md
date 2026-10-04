@@ -14,11 +14,11 @@ description: Bring scheduled tasks into parity with interactive chat — full ch
 
 The scheduler in `lib/scheduler/` was already feature-complete for triggering,
 persistence, retries, leader election, notifications, and OS-level promotion.
-But the link between the scheduler and the Claude/agent runtime was shallow:
+However, scheduled tasks did not use the full Claude/agent runtime configuration:
 scheduled `chat` / `agent` / `skill` tasks called
 `sendPrompt(sessionId, prompt)` directly **without** going through
-`resolveSendOptions()` (`lib/claude/build-options.ts`). That meant a
-scheduled run bypassed every knob the interactive chat applies:
+`resolveSendOptions()` (`lib/claude/build-options.ts`). As a result, a
+scheduled run bypassed every setting that interactive chat applies:
 
 - character system prompt / model / allowed-tools / disallowed-tools / MCP subset
 - attached skills (system-prompt section + `recordSkillUsage`)
@@ -157,12 +157,12 @@ form; the executor still requires the field at run time).
 
 ## Verification
 
-1. `pnpm install`, then `pnpm tauri dev`.
-2. Configure a character with a non-trivial system prompt + a couple of MCP
-   servers + a skill. Save.
-3. Open `/scheduler` → New Task → choose "Agent" → pick that character + an
-   agent mode + tweak permission mode + toggle some built-in tools →
-   trigger: `interval: 60000ms`.
+1. Run `pnpm install`. Run `pnpm tauri dev`.
+2. Configure a character with a non-trivial system prompt. Add a couple of MCP
+   servers. Add a skill. Save the character.
+3. Open `/scheduler`. Select New Task. Choose "Agent". Select that character.
+   Select an agent mode. Adjust the permission mode. Toggle some built-in tools.
+   Set the trigger to `interval: 60000ms`.
 4. Wait ~60s and verify in DevTools / execution-history that the outbound
    `claude_send` invoke shows merged `SendOptions`: system prompt with
    character + mode + skill sections; `allowedTools` including character +
@@ -172,8 +172,9 @@ form; the executor still requires the field at run time).
    (e.g., Claude Desktop) → `executeOnExternalAgent` is invoked and the
    execution row shows the result.
 6. Create a task via `createScheduledChatTaskDraft({ message: "..." })`
-   (legacy field name) and confirm: it runs successfully; a `scheduler`
-   warn-log fires once; the task continues to work after the migration.
+   (legacy field name). Confirm that it runs successfully. Confirm that a
+   `scheduler` warn-log fires once. Confirm that the task continues to work
+   after the migration.
 7. `pnpm typecheck`, `pnpm lint`, and
    `pnpm test --testPathPatterns="lib/scheduler|components/scheduler/payload-editors|types/scheduler"`
    all green.

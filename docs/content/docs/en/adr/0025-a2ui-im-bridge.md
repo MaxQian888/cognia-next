@@ -107,8 +107,8 @@ invalid payloads intact. The mapper resolves display bindings against the
 surface data model, traverses footer/tab/accordion/action references, and
 omits hidden subtrees. Callback metadata remains unchanged.
 
-Slack input blocks enable `dispatch_action`; text input dispatches on Enter,
-and callback parsing retains text and selected checkbox values. Slack documents
+Slack input blocks enable `dispatch_action`. Text input dispatches on Enter.
+Callback parsing retains text and selected checkbox values. Slack documents
 the default as `false` in its [Input block reference](https://docs.slack.dev/reference/block-kit/blocks/input-block/).
 Slider, Tabs, Accordion, Dialog, and Drawer remain fallback in the current
 Slack implementation; there is no implemented modal or multi-step flow for them.

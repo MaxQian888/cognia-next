@@ -10,7 +10,7 @@ description: The smallest portable capability unit in Cognia — Markdown prompt
 <TLDR>
   A **Skill** is a `SKILL.md`-shaped row — name, Markdown body, optional `allowedTools`, plus bundled
   `scripts/` / `references/` / `assets/` resources. The browser source of truth is Dexie
-  (`lib/db/skills.ts`); everything else is a pipeline in or out of that table: a **bundle importer**
+  (`lib/db/skills.ts`); the other modules import or export data from that table: a **bundle importer**
   (`lib/skills/bundle/loader.ts:65`) for zip / folder / OpenAI-Codex layouts, a **two-source
   marketplace** (`skills-lock.json` registry + the skills.sh directory), a **three-target native sync**
   (`lib/skills/sync.ts:145` → `skills_install_mirrored` writing cognia / `~/.claude/skills` /

@@ -51,7 +51,7 @@ Gated by `NEXT_PUBLIC_UNIFIED_TEMPLATE_PLATFORM`, default on. Surfaced at `/temp
 
 ## Consequences
 
-**Trust is verified cryptographically but no key is pinned.** `signed-unknown` means the bytes match the public key *enclosed in the package* — not that the key belongs to anyone in particular. `verified-publisher` is granted on the strength of the channel (a signed package that arrived via `source: "marketplace"`), not a pinned publisher key. There is no publisher registry, so a self-signed package from a stranger and one from a known author are indistinguishable below the marketplace tier. Anything stronger needs a key-pinning story that does not exist yet.
+**Trust is verified cryptographically but no key is pinned.** `signed-unknown` means the bytes match the public key *enclosed in the package* — not that the key belongs to anyone in particular. `verified-publisher` is granted on the strength of the channel (a signed package that arrived via `source: "marketplace"`), not a pinned publisher key. There is no publisher registry, so a self-signed package from a stranger and one from a known author are indistinguishable below the marketplace tier. Stronger trust requires a key-pinning design that has not yet been implemented.
 
 **Six domains carry two representations during the transition** — their original store or table, which remains the writer, and a derived catalog projection. This is the cost of not rewriting six creation paths at once, and it means a domain that gains a new write path outside its port silently stops being projected.
 

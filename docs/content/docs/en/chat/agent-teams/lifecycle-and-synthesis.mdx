@@ -5,7 +5,11 @@ description: The ADR-0022 F-path spine — agentTeamManager.start, runTeamLifecy
 
 # Lifecycle & Workflow Synthesis
 
-Per ADR-0022 ("Agent Team runtime hardening"), a team run is **not** a second orchestrator — it is a thin synthesizer that translates `(team, tasks)` into a `VisualWorkflow` and hands it to the one workflow runtime. This page traces the F-path spine end to end: the `agentTeamManager` facade, the ten ordered responsibilities of `runTeamLifecycle`, pure workflow synthesis, the per-run `TeamRunContext` registry, the orchestrator's concurrent ready-set scheduler, and the two node executors (`action.team.run`, `action.team.task.dispatch`) that bridge workflows back into teammate dispatch.
+Per ADR-0022 ("Agent Team runtime hardening"), a team run uses the shared workflow runtime.
+A synthesizer converts `(team, tasks)` into a `VisualWorkflow` and passes it to that runtime.
+This page traces the F-path through the `agentTeamManager` facade and the ten ordered responsibilities of `runTeamLifecycle`.
+It covers pure workflow synthesis, the `TeamRunContext` registry for each run, and the orchestrator's concurrent ready-set scheduler.
+It also covers the `action.team.run` and `action.team.task.dispatch` node executors that connect workflows to teammate dispatch.
 
 <TLDR>
   The UI calls `agentTeamManager.start` (`lib/ai/agent/team/agent-team.ts:91-115`), which sets the team

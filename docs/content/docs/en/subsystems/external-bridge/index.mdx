@@ -9,7 +9,7 @@ description: A deny-by-default MCP server that exposes Cognia's own knowledge (c
 
 <TLDR>
   External Bridge reverses Cognia's integration flow: instead of Cognia driving Claude Code / Cursor
-  as subagents, it lets *those* agents read a window into Cognia over the **Model Context Protocol**.
+  as subagents, it lets *those* agents read Cognia data over the **Model Context Protocol**.
   The surface is two-tiered — a **read-only knowledge plane** (generated code wiki, section-level RAG,
   runtime-entity inventory, URI resources) and a **gated action plane** (`computer_use` desktop driving,
   six inbox-connector tools). Every tool/resource call passes through `permission-gate.ts:checkScope`

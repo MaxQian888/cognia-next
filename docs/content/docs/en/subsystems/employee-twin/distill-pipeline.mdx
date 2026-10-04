@@ -12,7 +12,7 @@ description: The six sequential distill agents under one orchestrator, the LlmCl
   Knowledge → EntityMerge → Style → Playbook → Synthesizer → Evaluator — turning `twinChunks` into a
   `twinProfile` plus reviewable Character / Skill `twinDrafts`. Every agent calls through the `LlmClient`
   seam (`llm.ts:45`), each non-load-bearing agent is wrapped in `withTimeoutOrFallback`, and the synthesizer
-  is the one hard dependency (a timeout there throws `SynthesizerError`).
+  is the required dependency (a timeout there throws `SynthesizerError`).
 </TLDR>
 
 ## The six agents

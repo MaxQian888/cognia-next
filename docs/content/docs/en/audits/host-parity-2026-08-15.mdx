@@ -7,9 +7,15 @@ description: Evidence-backed inventory of every gap between the headless/cloud h
 
 ## Why this exists
 
-The goal is a cloud (`headless`) host whose capability is near-equivalent to the desktop's. The question nobody could answer was how far away that is — the guards, the one-sided dispatch arms and the host-keyed UI were never counted, so scoping the work was guesswork.
+The goal is a cloud (`headless`) host with capabilities close to those of the desktop.
+Previously, the size of the gap was unknown.
+No inventory counted the guards, one-sided dispatch arms, or UI conditions based on host identity.
+That absence made the work difficult to scope.
 
-This audit is the count. It is produced mechanically by `pnpm audit:host-parity:report`; the per-subsystem judgment is recorded by hand in `scripts/gates/host-parity-annotations.json`. Both are ratcheted by `pnpm audit:host-parity` so the inventory cannot silently grow.
+This audit provides that inventory.
+`pnpm audit:host-parity:report` generates the counts.
+`scripts/gates/host-parity-annotations.json` records the manually assigned classification for each subsystem.
+`pnpm audit:host-parity` checks both against their baselines, preventing the inventory from growing without detection.
 
 ## Headline
 

@@ -1,6 +1,6 @@
 ---
 title: "0200 — Files is a view that keeps what you keep"
-description: "Artifacts, canvas documents, chat images and uploaded files lived in four stores, each visible only from its own conversation, and all of it vanished with that conversation. This ADR adds /files: an aggregated view over those stores rather than a copy of them, with favorites and folders that pin their item's bytes past session deletion, uploads that belong to no conversation, ⌘K and @canvas references, and a portable backup section."
+description: "Artifacts, canvas documents, chat images and uploaded files used four stores. Each was visible only from its conversation and was deleted with that conversation. Adds /files as an aggregated view of the existing stores. Favorites and folders preserve item bytes after session deletion. Supports uploads without a conversation, ⌘K and @canvas references, and portable backup."
 ---
 
 # ADR 0200 — Files is a view that keeps what you keep
@@ -41,9 +41,9 @@ adds only what the view needs, in two new tables (Dexie v231):
   source row is gone.
 - `libraryFolders` — the folder tree, the same shape as `workflowFolders`.
 
-Folding rules: one image card per canonical hash ("in N conversations"); one
-file card per upload content hash; an image upload is its image card; a
-conversation upload whose bytes were also uploaded to Files folds into the
+Folding rules use one image card per canonical hash ("in N conversations")
+and one file card per upload content hash. An image upload uses its image card.
+A conversation upload whose bytes were also uploaded to Files uses the
 Files card.
 
 ### Keeping is a reference, not a copy

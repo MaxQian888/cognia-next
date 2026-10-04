@@ -1,6 +1,6 @@
 ---
 title: "0143 — One console for every machine"
-description: "Device management becomes a single fleet view over the placement candidate space: paired devices, remote hosts, workers and this machine as one row shape, with the capabilities, presence and grant detail the old surfaces held but never rendered, and the sandbox and workspace runtimes attached per device."
+description: "Unifies paired devices, remote hosts, workers and this machine in one fleet view over placement candidates. Each row shows capabilities, presence and grant details that the previous surfaces did not display. Attaches sandbox and workspace runtimes to each device."
 ---
 
 # ADR 0143 — One console for every machine
@@ -170,6 +170,28 @@ invented.
   in-process map with no subscription; the console polls it and falls back to
   Dexie's durable `lastSeenAt`, so a freshly-loaded window shows durable
   presence until the first stream reports.
+
+## Update — layout and flow (2026-10-01)
+
+The dashboard's order is no longer one fixed sequence. `lib/devices/section-plan.ts`
+decides, per kind, which cards render, in what order and at what width:
+task-first (a phone's grants, this machine's routing and runtimes, a host's
+workspaces lead; the records and diagnostic matrices follow), with half-width
+cards pulled forward in the list to keep them paired, so reading order and
+visual order stay the same. Cards that would only say "not here" become one not-applicable record at the
+end, preserving their explanations. These include a phone's sandbox, a host's
+Access, a worker's capability vocabulary, and the five SSH refusals previously
+shown in `ShellOnlySection`. The masthead carries the device's verbs (host
+connect / rename / remove, phone pause / resume / revoke, the last now behind a
+confirmation) and a jump strip built from the same plan, so a chip can never
+point at a card that did not render. Fleet-level notices moved to the rail.
+
+Selection is `hooks/devices/use-device-selection.ts`, shared by both shells: a
+`?device=` link is applied once per value (it used to be re-applied on every
+render that disagreed with the selection, which snapped a click on another
+device back), the user's choice is mirrored into the URL with `replace`, and a
+link to a device the fleet no longer has is reported rather than silently
+replaced with this machine.
 
 ## Amends
 

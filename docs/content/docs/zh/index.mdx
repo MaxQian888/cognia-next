@@ -7,7 +7,7 @@ description: Cognia 是基于 Next.js 16 + Tauri 2.11 + Capacitor 8 的 Claude C
 
 **Cognia**（代码库 `cognia-next`）是 [Claude Code](https://claude.com/claude-code) 的 AI 客户端。同一份 Next.js 16 静态导出驱动三种外壳 —— 浏览器、Tauri 2.11 桌面、Capacitor 8 移动端，共享同一套 UI、同一份 i18n 词条、同一套业务逻辑。Rust 核心承载常驻服务（HTTP 服务器、调度器、向量存储、自动化、OCR、MCP），随包的 Node sidecar 托管官方 Claude Agent SDK。
 
-本文档严格反映**仓库中的真实实现** —— 每一页都对应 `lib/`、`components/`、`src-tauri/src/` 或 `sidecar/` 下可阅读、可修改的目录。
+本文档反映**仓库中的实际实现**。每一页都对应 `lib/`、`components/`、`src-tauri/src/` 或 `sidecar/` 下可阅读、可修改的目录。
 
 ## 一图速览
 

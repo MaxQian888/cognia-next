@@ -11,7 +11,7 @@ description: Loss-aware graph import for eleven local coding-agent histories, in
   Eleven adapters read local histories or user-provided exports and project them into a version-1
   canonical session graph. Parent/child lineage, subagents, background tasks, lifecycle, tool state,
   checkpoints, rollback/rewind, compaction, multimodal parts, and explicit conversion loss survive when
-  the source exposes them. The scan stays cheap; full graph parsing is paid only for selected sessions.
+  the source exposes them. The scan uses limited resources. The importer parses the full graph only for selected sessions.
 </TLDR>
 
 <StatGrid>

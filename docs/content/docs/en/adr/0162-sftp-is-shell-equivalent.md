@@ -1,6 +1,6 @@
 ---
 title: "0162: SFTP is shell-equivalent, and says so"
-description: "File transfer over a saved SSH profile grants exactly what a shell on that machine already grants, so it is authorized as its own ssh.files grant rather than borrowed workspace vocabulary, approved once per transfer rather than once per chunk, and never confined to a root it cannot enforce."
+description: "File transfer over a saved SSH profile grants the same access as a shell on that machine. Uses a separate ssh.files grant and approves each transfer once, rather than each chunk. Does not claim root confinement that the transfer cannot enforce."
 ---
 
 # ADR 0162: SFTP is shell-equivalent
@@ -35,8 +35,8 @@ confines every one of them to a directory the host has registered. The client
 supplies a `root` and a `relPath`, and a `relPath` that escapes its root is
 rejected on disk. **SFTP has no equivalent.** An SFTP path is a remote absolute
 path. Refusing `..` does not stop `/etc/shadow`, and it does not stop a symlink
-placed by the remote machine's own administrator. There is no root to authorize
-against, because the thing being reached is somebody else's filesystem.
+placed by the remote machine's own administrator. There is no registered root to authorize
+against because these paths address a remote filesystem.
 
 ADR-0082 decision 9 refused to let a paired device start a port forward. It is
 worth being precise about why that refusal does not extend here, rather than

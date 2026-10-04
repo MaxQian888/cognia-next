@@ -12,7 +12,7 @@ description: The three surfaces that drive extract() — the /ocr slash command,
   (`lib/slash-commands/actions/ocr.ts`), the **`ocr.extract` plugin tool** (`plugins/ocr/src/index.ts`), and the
   **composer attachment menu** (`components/chat/composer/ocr-menu.tsx`, via the `useOcr` hook). The plugin and the
   slash command share a parser and converge on `extract()`. Two surfaces are fully built and tested but **not yet
-  live**: the composer menu isn't passed into `composer.tsx`, and there's no production `credentialsResolver` — so
+  active in production**: the composer menu isn't passed into `composer.tsx`, and there's no production `credentialsResolver` — so
   cloud providers can't authenticate until the keyring resolver is wired.
 </TLDR>
 
@@ -133,5 +133,5 @@ native invoker + readiness probes). Two gaps keep the trigger surfaces from bein
    accepts an `ocrDepsFactory?` prop but it defaults to `() => null` and no caller supplies a real one; the
    settings files explicitly defer the `ocr_keyring_*` resolver as out of scope.
 
-The secondary settings route `app/me/ocr/page.tsx` (16 lines) simply wraps `<OcrSectionPersisted/>` in a
+The secondary settings route `app/me/ocr/page.tsx` (16 lines) wraps `<OcrSectionPersisted/>` in a
 `SubPageShell` — it hosts the settings UI rather than triggering `extract()`.

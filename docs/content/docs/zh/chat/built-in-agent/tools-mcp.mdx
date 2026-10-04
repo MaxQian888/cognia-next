@@ -5,7 +5,7 @@ description: 打包在 sidecar 里的进程内 cognia-tools MCP 服务器、内�
 
 # 工具、MCP 与技能
 
-内置 Agent 的工具表面来自五个来源，全部汇聚在 sidecar 的 SDK `query()` 调用里。本页逐一梳理：进程内 `cognia-tools` MCP 服务器、内置 MCP 占位符解析器、技能→SDK 桥、computer-use 原生工具与预设市场。
+内置 Agent 的工具来自五个来源，均汇入 sidecar 的 SDK `query()` 调用。本页逐一说明进程内 `cognia-tools` MCP 服务器、内置 MCP 占位符解析器、技能到 SDK 的桥接、computer-use 原生工具，以及预设市场。
 
 <TLDR>
   sidecar 从 `sidecar/builtin-tools/` 构建一个**进程内 MCP 服务器**（`cognia-tools`）——文件/git/进程/env/

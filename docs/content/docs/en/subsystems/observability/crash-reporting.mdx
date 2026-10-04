@@ -181,8 +181,10 @@ Seven `crash_*` commands (`crash/commands.rs`, registered at `lib.rs:469`): `cra
 
 - `components/desktop/crash-report-dialog.tsx` — the **next-launch dialog**, mounted in
   `app/layout.tsx`; calls `takePendingCrash()` once, offers open-folder / view-report.
-- `components/settings/sections/native-crash-reports-card.tsx` — a read-only **report browser** in
-  Settings → Diagnostics (kind badge, captured-at, ext flags, view/delete/open-folder).
+- `/logs?channel=incidents` (`components/logging/incident-workspace.tsx`) — the one **report
+  browser**: list, preview, consent and submission, receipts, confirmed delete. Settings →
+  Diagnostics only links to it (ADR-0102: settings configure policy, `/logs` inspects); the
+  read-only copy it used to embed was removed.
 
 > Note: `lib/logging/crash-log.ts` + `hooks/logging/use-crash-logs.ts` are a **separate**,
 > renderer-side crash-*log* bundle (recent errors + persisted IndexedDB logs + native-logging

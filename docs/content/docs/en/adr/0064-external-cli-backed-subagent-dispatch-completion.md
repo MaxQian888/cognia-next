@@ -82,10 +82,10 @@ matching the external-agent gallery's quick-add.
 
 ### 5 · First-class authoring for external subagents (A2)
 
-The main agent could dispatch an external subagent, but there was no first-class
-way to *create* one (only markdown frontmatter / plugin SDK). `SubAgentConfig`
-gains `externalPresetId`; `projectSubagentTemplate` carries it onto the
-dispatchable `AgentDefinition`; the subagent template editor gains an "External
+The main agent could dispatch an external subagent. However, users could
+*create* one only through markdown frontmatter / plugin SDK. `SubAgentConfig`
+gains `externalPresetId`. `projectSubagentTemplate` carries it onto the
+dispatchable `AgentDefinition`. The subagent template editor gains an "External
 runtime" selector listing every executable preset (bilingual, desktop-only hint).
 A shared `BUILTIN_EXECUTABLE_PRESET_IDS` (derived from `EXTERNAL_AGENT_PRESETS`,
 no drift) is the single source for external-runtime pickers.

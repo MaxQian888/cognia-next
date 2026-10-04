@@ -1,6 +1,6 @@
 ---
 title: ADR-0132 — 应用内 Issue 追踪器（项目、Issue、执行桥、IM）
-description: 每个工作区一个本地 Issue 追踪器——项目、Issue、固定看板、人类/运行时状态机——只读联邦 agent-task 与 agent-team 行，通过 issue 侧的 `issueRuns` 表把 Issue 派发给执行引擎，并进入通知中心与可交互 IM 卡片。
+description: "每个工作区提供一个本地 Issue 追踪器，包含项目、Issue、固定看板和人类/运行时状态机。只读聚合 agent-task 与 agent-team 行，通过 issue 侧的 `issueRuns` 表派发到执行引擎，并在通知中心与交互式 IM 卡片中展示。"
 ---
 
 # ADR-0132 — 应用内 Issue 追踪器（项目、Issue、执行桥、IM）
@@ -35,7 +35,7 @@ description: 每个工作区一个本地 Issue 追踪器——项目、Issue、�
 
 `lib/db/issue-runs.ts` 新增 `issueRuns` 表（`&id, issueId, [issueId+status], projectId, [projectId+status], adapterId, kind, targetId, status, startedAt, updatedAt`）——「哪些 run 属于这个 Issue」以 **issue 侧为唯一真源**；执行引擎从不加 `issueId` 列，新引擎接入不需要 schema bump（`AgentTeamTask.metadata.issueId` 只是反向便利）。之所以认领 v174 而不是 v172，是因为两个并发分支持有 v172（ADR-0130）与 v173；Dexie 允许留空。
 
-`lib/issues/run/registry.ts` 定义 `IssueRunAdapter { id, kind, canRun(issue, project) → verdict, start(issue, ctx) → IssueRun, cancel(runId) }` 与 `registerIssueRunAdapter` / `listIssueRunOptions` / `startIssueRun`（拒绝或派发；**派发失败必须抛出**，绝不吞掉）。三个 adapter：`agent-task`（`createAgentTask` → `runAgentTaskNow`，由 `agentTaskAttempts` 的 `liveQuery` 结算）、`agent-team`（`createTask({ metadata: { issueId } })` + `agentTeamManager.start`，在唯一汇点 `team-completion-linkage.ts` 结算，产物取自 delivery 节点 / 子运行工作区路径）、`github-loop`（仅当项目持有 `github-repo` 资源；在 `awaiting_approval` 闸门下执行 `executeIntegrationAction("runIssueLoop")`；仅桌面）。`running.ts` 暴露 `listRunningIssueIds()` 与 `viewerAgentKeys()`（所有 Character + AgentTeam 映射为 `agent:<id>` / `team:<id>`），这使得单人应用里「我的 agent」= 全部 agent/team 受让人。
+`lib/issues/run/registry.ts` 定义 `IssueRunAdapter { id, kind, canRun(issue, project) → verdict, start(issue, ctx) → IssueRun, cancel(runId) }` 与 `registerIssueRunAdapter` / `listIssueRunOptions` / `startIssueRun`（拒绝或派发；**派发失败必须抛出**，绝不吞掉）。三个 adapter：`agent-task`（`createAgentTask` → `runAgentTaskNow`，由 `agentTaskAttempts` 的 `liveQuery` 结算）、`agent-team`（`createTask({ metadata: { issueId } })` + `agentTeamManager.start`，在唯一结算入口 `team-completion-linkage.ts` 结算，产物取自 delivery 节点 / 子运行工作区路径）、`github-loop`（仅当项目持有 `github-repo` 资源；在 `awaiting_approval` 闸门下执行 `executeIntegrationAction("runIssueLoop")`；仅桌面）。`running.ts` 暴露 `listRunningIssueIds()` 与 `viewerAgentKeys()`（所有 Character + AgentTeam 映射为 `agent:<id>` / `team:<id>`），这使得单人应用里「我的 agent」= 全部 agent/team 受让人。
 
 ### 3. 联邦源
 

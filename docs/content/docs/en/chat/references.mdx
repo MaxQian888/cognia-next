@@ -5,13 +5,11 @@ description: How selected text, earlier messages, tool results, prompts and whol
 
 # Bringing things into a conversation
 
-Everything that can be brought into a conversation ends up as a **staged
-reference**: a chip above the composer that carries a frozen snapshot of the
-record, is sent with the next message, and says when its source has changed.
-The ways of getting one differ — typing `@`, selecting a passage, ticking
-several messages, long-pressing on a phone — but they all stage through the
-same path, so the chip and the text the model reads are identical whichever
-way it was made.
+Each item added to a conversation becomes a **staged reference**, shown as a chip above the composer.
+The chip carries a frozen snapshot of the record and is sent with the next message.
+It indicates when the source changes.
+You can stage an item by typing `@`, selecting a passage, selecting several messages, or long-pressing on a phone.
+All entry points use the same path, so they produce identical chips and model input.
 
 <TLDR>
   One registry of referenceable records (`lib/chat/mentions/entity-sources.ts`, [ADR-0157](../adr/0157-references-and-result-reuse))

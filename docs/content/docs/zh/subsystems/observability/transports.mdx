@@ -8,7 +8,7 @@ description: 九个日志 transport、行为事件 exporter、通用 OTLP 与相
 <Status variant="stable" />
 
 <TLDR>
-  一个 transport 是任何实现了 `Transport`（`types/logging/transport.ts:33`）的东西：一个 `name` 和一个
+  transport 是实现了 `Transport`（`types/logging/transport.ts:33`）的传输通道：一个 `name` 和一个
   `log(entry)` 方法，可选地有 `flush/close/getHealth/getPendingCount`。管道把每一条
   脱敏后的条目 fan-out 给所有已注册的 transport。共存在九个：**console**（同步、彩色）、**indexeddb**
   （批处理、保留 + LRU 驱逐、跨标签页 `BroadcastChannel`）、**remote**（`fetch` POST + 一条
@@ -40,10 +40,7 @@ export interface Transport {
 }
 ```
 
-`log()` 是唯一必需的成员。接口上**没有** `enabled` 或 `minLevel` 字段 ——
-是否启用在 `bootstrap.ts` 中决定，且只有 `native` 和 `langfuse` 暴露一个每-transport 的
-`minLevel` 选项（两者都默认 `"warn"`）。健康快照是一个固定形状
-（`transport.ts:10`）：
+`log()` 是唯一必需的成员。接口上**没有** `enabled` 或 `minLevel` 字段 ——是否启用在 `bootstrap.ts` 中决定，且只有 `native` 和 `langfuse` 暴露一个每-transport 的 `minLevel` 选项（两者都默认 `"warn"`）。健康快照是一个固定形状（`transport.ts:10`）：
 
 ```ts
 interface TransportHealthSnapshot {
@@ -75,17 +72,13 @@ flowchart LR
 
 ## console
 
-`console-transport.ts` —— 一次性、同步写入到 `globalThis.console`，按
-级别挑选方法（`getConsoleMethod`，`:122`；error+fatal → `console.error`）。彩色 `%c` 前缀仅在
+`console-transport.ts` —— 一次性、同步写入到 `globalThis.console`，按级别挑选方法（`getConsoleMethod`，`:122`；error+fatal → `console.error`）。彩色 `%c` 前缀仅在
 浏览器中，stack 单独打印，traceId 截断到 8 个字符。无缓冲、无健康。`name =
 "console"`（`:65`）。
 
 ## indexeddb
 
-`indexeddb-transport.ts` —— 持久的浏览器存储，也是**日志面板的默认查询
-源**。写入一个专用的 `cognia-logs` IndexedDB 数据库（与主 Dexie DB 分离），
-对象存储为 `logs`，以 `id` 为键，并在 `timestamp/level/module/traceId` 上建索引。带缓冲
-（`bufferSize` 50，`flushInterval` 1000 ms）。两条清理规则在 `cleanup()`（`:175`）中运行：
+`indexeddb-transport.ts` —— 持久的浏览器存储，也是**日志面板的默认查询源**。写入一个专用的 `cognia-logs` IndexedDB 数据库（与主 Dexie DB 分离），对象存储为 `logs`，以 `id` 为键，并在 `timestamp/level/module/traceId` 上建索引。带缓冲（`bufferSize` 50，`flushInterval` 1000 ms）。两条清理规则在 `cleanup()`（`:175`）中运行：
 
 ```ts title="lib/logging/transports/indexeddb-transport.ts:178"
 const cutoff = Date.now() - (this.options.retentionDays || 7) * 24*60*60*1000
@@ -93,16 +86,11 @@ const range = IDBKeyRange.upperBound(cutoffDate)   // 1) time-based purge
 // 2) max-entries LRU: if count > maxEntries (10000), delete oldest-by-timestamp first
 ```
 
-在 flush 时，它向一个跨标签页的 `BroadcastChannel`
-（`cognia-logs-updates`）发送 `{ type: "logs-flushed" }`；`IndexedDBTransport.onLogsUpdated(cb)`（`:448`）是面板
-订阅的**唯一**推送机制 —— 面板的数据路径中没有 Rust 事件。一次失败的 flush
-经由 `buffer.unshift` 重新入队条目。
+在 flush 时，它向一个跨标签页的 `BroadcastChannel`（`cognia-logs-updates`）发送 `{ type: "logs-flushed" }`；`IndexedDBTransport.onLogsUpdated(cb)`（`:448`）是面板订阅的**唯一**推送机制 —— 面板的数据路径中没有 Rust 事件。一次失败的 flush 经由 `buffer.unshift` 重新入队条目。
 
 ## remote
 
-`remote-transport.ts` —— 经 `fetch` POST 把批次发往一个 HTTP 端点，具备在线/离线
-感知、指数退避，以及一条**持久的 IndexedDB 重试队列**。它的健康由队列驱动，
-而非基于阈值：
+`remote-transport.ts` —— 经 `fetch` POST 把批次发往一个 HTTP 端点，具备在线/离线感知、指数退避，以及一条**持久的 IndexedDB 重试队列**。它的健康由队列驱动，而非基于阈值：
 
 ```ts title="lib/logging/transports/remote-transport.ts:195"
 private resolveStatus(): TransportHealthStatus {
@@ -112,9 +100,7 @@ private resolveStatus(): TransportHealthStatus {
 }
 ```
 
-发送使用一个 `AbortController` 超时；在 `maxRetries`（3）次、延迟为 `retryDelay * 2^attempt` 之后，该
-批次被持久化到重试队列，并在重连时重放（`flushRetryQueue` 发出
-`logger.remote.recovered`）。一个可选的 `transform` 重塑请求体 —— 随附两个 shim：
+发送使用一个 `AbortController` 超时；在 `maxRetries`（3）次、延迟为 `retryDelay * 2^attempt` 之后，该批次被持久化到重试队列，并在重连时重放（`flushRetryQueue` 发出 `logger.remote.recovered`）。一个可选的 `transform` 重塑请求体 —— 随附两个 shim：
 
 ```ts title="lib/logging/transports/remote-transport.ts:516"
 export function sentryTransform(entries) { /* → {level, message, timestamp, extra, tags} */ }
@@ -125,10 +111,7 @@ export function logglyTransform(entries) { /* → {level, message, timestamp, ta
 
 ### remote-retry-queue-store
 
-`remote-retry-queue-store.ts` 是 `remote` 的持久后端：一个 IndexedDB 存储
-（`cognia-remote-log-queue` / `retry-batches`），当 IDB 不可用时带内存回退。
-容量通过丢弃最旧的批次（FIFO）来强制执行，直至同时低于两个上限
-（`DEFAULT_LIMITS = { maxEntries: 5000, maxBytes: 10 MiB }`）：
+`remote-retry-queue-store.ts` 是 `remote` 的持久后端：一个 IndexedDB 存储（`cognia-remote-log-queue` / `retry-batches`），当 IDB 不可用时带内存回退。容量通过丢弃最旧的批次（FIFO）来强制执行，直至同时低于两个上限（`DEFAULT_LIMITS = { maxEntries: 5000, maxBytes: 10 MiB }`）：
 
 ```ts title="lib/logging/transports/remote-retry-queue-store.ts:259"
 while (mutable.length > 0 &&
@@ -141,9 +124,7 @@ while (mutable.length > 0 &&
 
 ## native
 
-`native-transport.ts` —— 把条目转发给 Rust 原生 logger，**仅在桌面端**。它受
-`minLevel` 门控（默认 `"warn"`）和 Tauri 门控（`isTauri()`），带批处理（`batchSize` 10）。该
-转发是一个 Tauri **命令**，而非事件：
+`native-transport.ts` —— 把条目转发给 Rust 原生 logger，**仅在桌面端**。它受 `minLevel` 门控（默认 `"warn"`）和 Tauri 门控（`isTauri()`），带批处理（`batchSize` 10）。该转发是一个 Tauri **命令**，而非事件：
 
 ```ts title="lib/logging/transports/native-transport.ts:81"
 const forwarded = await forwardPlatformLoggingEntries(
@@ -153,62 +134,31 @@ const forwarded = await forwardPlatformLoggingEntries(
 // → invoke("platform_logging_forward", { entries })   (lib/native/native-logging.ts:125)
 ```
 
-初始健康为 `isTauri() ? "healthy" : "offline"`。一次失败的转发会重新缓冲并报告
-`"degraded"`。它的 Rust 一侧是 [Rust 分发与 OS 桥接](./rust-logging)。
+初始健康为 `isTauri() ? "healthy" : "offline"`。一次失败的转发会重新缓冲并报告 `"degraded"`。它的 Rust 一侧是 [Rust 分发与 OS 桥接](./rust-logging)。
 
 ## observability spool 与 breadcrumb
 
-`ObservabilitySpoolTransport` 写入有版本、容量受限的本地恢复 envelope。仅桌面的
-`BreadcrumbTransport` 把已脱敏的崩溃上下文转发给 Rust。旧文档遗漏了这两个实现；已删除的
-`otel-transport.ts` 不再是现有 transport。
+`ObservabilitySpoolTransport` 写入有版本、容量受限的本地恢复 envelope。仅桌面的 `BreadcrumbTransport` 把已脱敏的崩溃上下文转发给 Rust。旧文档遗漏了这两个实现；已删除的 `otel-transport.ts` 不再是现有 transport。
 
 ## otlp-http
 
-`otlp-http-transport.ts` —— 一个面向 **agent-trace span**（而非通用日志）的 OTLP/HTTP **JSON** 导出器。`name = "agent-trace-otlp"`，默认关闭。它抽取那些条目携带
-`data.kind === AGENT_TRACE_SPAN_KIND` 的 span，批处理（`bufferSize` 32），并经 `spansToOtlp`
-（见 [agent-trace](./agent-trace)）POST 到一个已配置的 `/v1/traces` 端点。重试分类是
-HTTP 感知的 —— 4xx（除 408/429）不可重试；5xx/超时以
-`delay = min(30s, retryBaseMs * 2^attempt)` 重试。当没有端点或存在
-`lastError` 时健康为 `degraded`，否则为 `healthy`（绝不为 `offline`）。内容捕获经 `hasNoLeakingPii` 做 PII 门控。
-`grafanaCloudHeaders` 为 Grafana Cloud / Tempo / Honeycomb / Datadog
-OTLP 构建 `Authorization: Basic …`。
+`otlp-http-transport.ts` —— 一个面向 **agent-trace span**（而非通用日志）的 OTLP/HTTP **JSON** 导出器。`name = "agent-trace-otlp"`，默认关闭。它抽取那些条目携带 `data.kind === AGENT_TRACE_SPAN_KIND` 的 span，批处理（`bufferSize` 32），并经 `spansToOtlp`（见 [agent-trace](./agent-trace)）POST 到一个已配置的 `/v1/traces` 端点。重试分类是 HTTP 感知的 —— 4xx（除 408/429）不可重试；5xx/超时以 `delay = min(30s, retryBaseMs * 2^attempt)` 重试。当没有端点或存在 `lastError` 时健康为 `degraded`，否则为 `healthy`（绝不为 `offline`）。内容捕获经 `hasNoLeakingPii` 做 PII 门控。`grafanaCloudHeaders` 为 Grafana Cloud / Tempo / Honeycomb / Datadog OTLP 构建 `Authorization: Basic …`。
 
 ### PostHog 目的地
 
-同一个 OTLP transport 类可注册为 `agent-trace-posthog-managed` 与
-`agent-trace-posthog-byo`。这些实例始终禁用内容采集，固定使用 `/i/v0/ai/otel`，在 Tauri
-中通过 Rust 类型化凭据 seam 注入公开项目 token，并为每个 span 打上 `posthog.distinct_id`，
-使渲染端 span 与 sidecar `enrichSpan` 标注的 span 归属同一个 person。Sidecar 在单一
-`NodeSDK` 下，为每个通用 OTLP 或 PostHog 目的地创建独立 `BatchSpanProcessor`。
+同一个 OTLP transport 类可注册为 `agent-trace-posthog-managed` 与 `agent-trace-posthog-byo`。这些实例始终禁用内容采集，固定使用 `/i/v0/ai/otel`，在 Tauri 中通过 Rust 类型化凭据 seam 注入公开项目 token，并为每个 span 打上 `posthog.distinct_id`，使渲染端 span 与 sidecar `enrichSpan` 标注的 span 归属同一个 person。Sidecar 在单一 `NodeSDK` 下，为每个通用 OTLP 或 PostHog 目的地创建独立 `BatchSpanProcessor`。
 
-产品分析不进入日志管道：`track-event.ts` 只有在通过行为授权、分类、采样、标量和 PII 闸门后，
-才把结构化事件 envelope fan-out 到 OTLP Logs 与 `posthog-product.ts`。`posthog-product.ts`
-直接使用 PostHog 批量采集 API —— `POST {host}/batch/`，body 为 `{ api_key, sent_at, batch }` ——
-而不内嵌 `posthog-js`：浏览器 SDK 会从渲染进程自行发起连接，而桌面端 `connect-src` 策略
-不允许任何此类连接。批量请求在 Tauri 上经 `telemetry_otlp_export` 发出，其他壳走 `fetch`；
-累积 20 条或 2 秒后发送。配置未变化的目的地在设置保存时复用同一个 exporter，因此重新应用
-设置不会丢掉待发批次。
+产品分析不进入日志管道：`track-event.ts` 只有在通过行为授权、分类、采样、标量和 PII 闸门后，才把结构化事件 envelope fan-out 到 OTLP Logs 与 `posthog-product.ts`。`posthog-product.ts` 直接使用 PostHog 批量采集 API —— `POST {host}/batch/`，body 为 `{ api_key, sent_at, batch }` ——而不内嵌 `posthog-js`：浏览器 SDK 会从渲染进程自行发起连接，而桌面端 `connect-src` 策略不允许任何此类连接。批量请求在 Tauri 上经 `telemetry_otlp_export` 发出，其他壳走 `fetch`；累积 20 条或 2 秒后发送。配置未变化的目的地在设置保存时复用同一个 exporter，因此重新应用设置不会丢掉待发批次。
 
 ## langfuse
 
-`langfuse-transport.ts` 只接受已完成的 `AgentTraceSpan` envelope；普通应用日志与 metrics 会被
-忽略。它清洗并批量提交 `AgentTraceBatchV1` 到窄 Host ingest command。Host 根据认证账户解析
-只写的 BYO credential，再次校验 schema、PII、授权、速率与大小限制，按 span ID 去重，并固定
-导出到 `/api/public/otel/v1/traces`，Langfuse ingestion version 为 4。
+`langfuse-transport.ts` 只接受已完成的 `AgentTraceSpan` envelope；普通应用日志与 metrics 会被忽略。它清洗并批量提交 `AgentTraceBatchV1` 到窄 Host ingest command。Host 根据认证账户解析只写的 BYO credential，再次校验 schema、PII、授权、速率与大小限制，按 span ID 去重，并固定导出到 `/api/public/otel/v1/traces`，Langfuse ingestion version 为 4。
 
-Sidecar 的共享 `NodeSDK` 同时挂载官方 Langfuse processor，生成 AI SDK 7 的 generation/tool
-子 observation；通用 OTLP 与 PostHog 仍是独立 processor。Renderer 根节点保留稳定的
-`chat.turn`、`agent.run`、`workflow.run` 名称；重复的手写 provider/tool 子节点只在远程目的地
-过滤。模型内容与工具内容分别授权、默认关闭，并都经过有界字段级过滤与 Host PII gate。
+Sidecar 的共享 `NodeSDK` 同时挂载官方 Langfuse processor，生成 AI SDK 7 的 generation/tool 子 observation；通用 OTLP 与 PostHog 仍是独立 processor。Renderer 根节点保留稳定的 `chat.turn`、`agent.run`、`workflow.run` 名称；重复的手写 provider/tool 子节点只在远程目的地过滤。模型内容与工具内容分别授权、默认关闭，并都经过有界字段级过滤与 Host PII gate。
 
 ## agent-trace
 
-`agent-trace-transport.ts` —— span 持久化 sink。它检测 span 形状的条目
-（`data.kind === AGENT_TRACE_SPAN_KIND`），清洗预览，缓冲（32），并经 `bulkInsertSpans` 把内嵌的
-`AgentTraceSpan` 行写入 Dexie 的 `agentTraces` 表，带保留裁剪
-（`pruneOlderThan`，默认 7 天）。健康是二态的：若有 `lastError` 则 `degraded`，否则 `healthy`。
-这是 [追踪仪表盘](./tracing-dashboard) 和日志面板追踪通道的写入侧。隐私：`captureContent: false` 默认会剥离 `inputPreview`/`outputPreview`；开启时，
-预览被截断到 `maxPreviewBytes` 并经 `hasNoLeakingPii` 门控。
+`agent-trace-transport.ts` —— span 持久化 sink。它检测 span 形状的条目（`data.kind === AGENT_TRACE_SPAN_KIND`），清洗预览，缓冲（32），并经 `bulkInsertSpans` 把内嵌的 `AgentTraceSpan` 行写入 Dexie 的 `agentTraces` 表，带保留裁剪（`pruneOlderThan`，默认 7 天）。健康是二态的：若有 `lastError` 则 `degraded`，否则 `healthy`。这是 [追踪仪表盘](./tracing-dashboard) 和日志面板追踪通道的写入侧。隐私：`captureContent: false` 默认会剥离 `inputPreview`/`outputPreview`；开启时，预览被截断到 `maxPreviewBytes` 并经 `hasNoLeakingPii` 门控。
 
 ## 健康模型 —— 一览
 
@@ -224,9 +174,7 @@ Sidecar 的共享 `NodeSDK` 同时挂载官方 Langfuse processor，生成 AI SD
 | langfuse | Cognia Host → Langfuse v4 OTLP traces | 是（32） | `degraded`(未配置 \| lastError) / `healthy` |
 | agent-trace | Dexie `agentTraces` | 是（32） | `degraded`(lastError) / `healthy` |
 
-`getTransportHealthSnapshot()`（`core.ts:587`）一次性拉取所有 transport 快照；日志面板的
-统计栏和设置的 transport 标签页渲染它们，而 `useTransportHealth` hook 每 3 s 轮询它们
-一次，并带一条 30 个样本的 queue-depth 火花线历史。
+`getTransportHealthSnapshot()`（`core.ts:587`）一次性拉取所有 transport 快照；日志面板的统计栏和设置的 transport 标签页渲染它们，而 `useTransportHealth` hook 每 3 s 轮询它们一次，并带一条 30 个样本的 queue-depth 火花线历史。
 
 ## 从哪里开始
 

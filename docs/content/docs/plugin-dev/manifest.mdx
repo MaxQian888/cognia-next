@@ -5,7 +5,7 @@ description: Complete reference for the cognia-plugin.json manifest format — s
 
 # Plugin Manifest
 
-Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single source of truth for the plugin's identity, permissions, surfaces, scheduled jobs, connectors, and workflow nodes. The host validates it with Zod before any code runs.
+Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single source of truth for the plugin's identity, permissions, surfaces, scheduled tasks, connectors, and workflow nodes. The host validates it with Zod before any code runs.
 
 ## Minimal manifest
 
@@ -36,7 +36,6 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
     "chat.read",
     "chat.send",
     "twin.read",
-    "scheduler.register",
     "fs.read:$DOWNLOADS",
     "network.fetch:api.example.com"
   ],
@@ -44,10 +43,14 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
     { "kind": "panel", "id": "main", "title": "My Plugin" },
     { "kind": "chat-action", "id": "summarize", "label": "Summarize" }
   ],
-  "scheduledJobs": [
+  "capabilities": ["scheduler"],
+  "scheduledTasks": [
     {
-      "id": "daily-sync",
-      "trigger": { "type": "cron", "expression": "0 9 * * *" }
+      "name": "Daily sync",
+      "handler": "dailySync",
+      "trigger": { "type": "cron", "expression": "0 9 * * *" },
+      "retry": { "maxAttempts": 2, "delaySeconds": 30 },
+      "timeout": 120
     }
   ],
   "connectors": [{ "type": "custom-im", "factory": "./connectors/my-im.js" }],
@@ -121,9 +124,10 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
       description: "UI surfaces contributed by the plugin.",
       type: "SurfaceDef[]",
     },
-    scheduledJobs: {
-      description: "Tasks to register with the scheduler on activation.",
-      type: "ScheduledJobDef[]",
+    scheduledTasks: {
+      description:
+        "Plugin tasks created on enable and deleted on disable. Needs the `scheduler` capability; each `handler` must be registered with ctx.scheduler.registerHandler.",
+      type: "PluginScheduledTaskDef[]",
     },
     connectors: {
       description: "Connector adapter definitions for ConnectorBus.",

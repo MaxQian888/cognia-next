@@ -1,13 +1,11 @@
 ---
 title: "0148 — 风格包与层级语义表面"
-description: "外观系统有全部的形状旋钮，却没有任何东西把它们成套打包；壁纸的半透明只覆盖 28 个注册过的 data-slot——于是硬朗风格根本无法表达，自研面板始终不透明。本 ADR 引入管形状的风格包层、表达层级的 Surface 原语，以及一条防止两者复发的门禁。"
+description: "外观系统有形状控件，却无法将配置组合为风格包。壁纸半透明仅覆盖 28 个已注册 data-slot，导致硬朗风格无法表达，自研面板保持不透明。增加形状风格包层、表达表面层级的 Surface 原语，以及防止问题再次出现的门禁。"
 ---
 
 # ADR 0148 — 风格包与层级语义表面
 
-**状态：** 已接受
-**日期：** 2026-08-25
-**相关：** [ADR-0007](./0007-theme-and-background-fix)、[ADR-0114](./0114-chat-message-presentation)、[ADR-0127](./0127-chat-render-transport-efficiency)、[ADR-0092](./0092-official-website-workspace)
+**状态：** 已接受**日期：** 2026-08-25 **相关：** [ADR-0007](./0007-theme-and-background-fix)、[ADR-0114](./0114-chat-message-presentation)、[ADR-0127](./0127-chat-render-transport-efficiency)、[ADR-0092](./0092-official-website-workspace)
 
 ## 背景
 
@@ -77,7 +75,7 @@ description: "外观系统有全部的形状旋钮，却没有任何东西把它
 
 **守护算法。** `lib/appearance/wallpaper-legibility.ts` 针对「壁纸 × 主题」求解最大图片权重：在图片最暗与最亮的区域上，`--foreground` 保持 4.5:1、`--muted-foreground` 保持 3:1；两个目标都封顶在裸主题自身对比度的 95%，低对比度主题因此不会被压到权重 0。模型贴合浏览器的真实行为：极值取 WCAG（线性）亮度的第 3 / 97 百分位采样；合成在 gamma 编码的 sRGB 空间进行（`opacity` 就是这样混合的）；模糊只有超过分析栅格本身约 30 px 的平均范围后才计入。表面的 `backdrop-filter` 不计入，因为部分表面并不模糊，且 Android WebView 会把许多声明了模糊的浮层画成不模糊。这与 Windows Mica/Acrylic 的 luminosity 层思路相同：先把背景亮度归一，再让材质只承担装饰。
 
-**接线——三处，没有第四处。** `use-wallpaper-legibility`（由壁纸子系统唯一的挂载点 `BackgroundApplier` 调用）在 `<body>` 上写 `--wp-max-weight`；`globals.css` 把它折叠成 `--app-bg-painted-opacity: min(滑块值, 上限)`，所有壁纸层都按它绘制（见下文「图层」）——淡入、交叉淡化和滑块实时预览都无需重新求解就遵守上限。壁纸面板的对比度标签和「一键修复」使用同一个求解器，不会与实际绘制结果相矛盾。分析结果按「id + 图片字节」镜像到 `localStorage`，重启时不会先无上限地闪一下。`BackgroundSettings.legibilityGuard`（缺省即开启）可关闭该功能；主题颜色通过探针元素解析，并在 `<html>` / `<head>` 发生会改变它们的变更时重新检查。
+**接线——三处，没有第四处。** `use-wallpaper-legibility`（由壁纸子系统唯一的挂载点 `BackgroundApplier` 调用）在 `<body>` 上写 `--wp-max-weight`；`globals.css` 把它折叠成 `--app-bg-painted-opacity: min(滑块值, 上限)`，所有壁纸层都按它绘制（见下文「图层」）——淡入、交叉淡化和滑块实时预览都无需重新求解就遵守上限。壁纸面板的对比度标签和「一键修复」使用同一个求解器，不会与实际绘制结果相矛盾。分析结果按「id + 图片字节」镜像到 `localStorage`，重启时不会先绘制未受上限约束的壁纸。`BackgroundSettings.legibilityGuard`（缺省即开启）可关闭该功能；主题颜色通过探针元素解析，并在 `<html>` / `<head>` 发生会改变它们的变更时重新检查。
 
 **表面。** 控件统一使用 `--control-bg` 填充（只在生效的壁纸作用域内定义；以 `bg-[var(--control-bg,var(--background))]` 读取，`hover:` 与 `dark:` 工具类依旧优先），并新增 `--surface-tonality-control` 令牌，遵守暗色加深、无模糊回退和减少透明度设置——侧栏也改为使用令牌，不再是写死的 `55%`。层级规则移入 `@layer base`，工具类覆盖 `--surface-bg` 终于生效。选中指示、开关/滑块拇指和主按钮刻意保持不透明：在玻璃材质上，不透明本身就是可交互的提示。
 

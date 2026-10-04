@@ -7,8 +7,8 @@ description: The rendezvous as an encrypted application relay (ADR-0170), the si
 
 The same answerer runs in Tauri and in a freshly started `cognia-server`; it
 does not depend on a renderer being present. Since ADR-0170 the rendezvous is
-also the WAN transport: a session is open the moment both peers have said
-`hello` over the relay, and the DataChannel is an upgrade negotiated on top.
+also the WAN transport: a session opens when both peers have sent
+`hello` over the relay. The peers then negotiate a DataChannel upgrade.
 
 ## Components
 

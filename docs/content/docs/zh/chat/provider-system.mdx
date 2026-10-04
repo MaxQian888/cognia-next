@@ -5,7 +5,7 @@ description: 内置 70+ 服务商的目录、API key 持久化、动态注册表
 
 # Provider 系统
 
-Cognia 用一份静态 catalog 维护 70+ 内置服务商（OpenAI / Anthropic / Google / DeepSeek / 本地 Ollama …），按 6 个 protocol family 映射到 5 个 adapter；插件可以动态注册自己的服务商；最后由一个 pure-function 投影层把内置 + 自定义 + 本地 + 插件四条路径合并成 UI 用的扁平数组。
+Cognia 通过静态 catalog 维护 70+ 内置服务商（OpenAI / Anthropic / Google / DeepSeek / 本地 Ollama 等），并将 6 个 protocol family 映射到 5 个 adapter。插件可动态注册服务商。最后，纯函数投影层将内置、自定义、本地和插件四类来源合并为 UI 使用的扁平数组。
 
 Provider 系统覆盖五条职责：
 
@@ -15,8 +15,7 @@ Provider 系统覆盖五条职责：
 4. **Persistence** —— API key（OS keyring）+ 用户偏好（Dexie `settings`）+ 验证态。
 5. **Projection** —— 把全部来源折叠成 UI / picker 用的统一投影。
 
-OAuth 订阅路径单独有自己的子系统，见 [Claude 订阅 OAuth](./claude-subscription-oauth)；
-embedding-only 服务商通过 [向量存储](../data/vector-store) 消费。
+OAuth 订阅路径单独有自己的子系统，见 [Claude 订阅 OAuth](./claude-subscription-oauth)；embedding-only 服务商通过 [向量存储](../data/vector-store) 消费。
 
 ## 总览架构
 
@@ -68,8 +67,7 @@ flowchart TB
 
 ## Catalog —— 70+ 内置服务商
 
-`types/provider/built-in-provider-catalog.ts` 是静态 catalog。`BUILT_IN_PROVIDER_IDS`
-按主题分组：
+`types/provider/built-in-provider-catalog.ts` 是静态 catalog。`BUILT_IN_PROVIDER_IDS` 按主题分组：
 
 | 分组        | 示例 id                                                              |
 | ----------- | -------------------------------------------------------------------- |
@@ -112,9 +110,7 @@ flowchart TB
   }}
 />
 
-Quick-add 预设（`BUILT_IN_PROVIDER_QUICK_ADD_PRESETS`）是 catalog 之外的轻量入口：
-不需要完整 catalog 条目，只声明 baseURL + model 列表即可——主要用于"加一个 OpenAI 兼容
-端点"这种半成品场景。
+Quick-add 预设（`BUILT_IN_PROVIDER_QUICK_ADD_PRESETS`）是 catalog 之外的轻量入口：不需要完整 catalog 条目，只声明 baseURL + model 列表即可——主要用于"加一个 OpenAI 兼容端点"这种半成品场景。
 
 ## Adapter —— 5 个 HTTP 客户端
 
@@ -134,8 +130,7 @@ Quick-add 预设（`BUILT_IN_PROVIDER_QUICK_ADD_PRESETS`）是 catalog 之外的
 - `builtInDefaults` —— 内置 catalog 条目的默认要求（通常不要求 base URL）。
 - `customDefaults` —— 用户自定义条目（通常 **要求** base URL）。
 
-这样"OpenAI 内置"不需要填 base URL，而"自定义 OpenAI 兼容端点"必须填，这两条规则
-都从同一个 adapter 派生而来。
+这样"OpenAI 内置"不需要填 base URL，而"自定义 OpenAI 兼容端点"必须填，这两条规则都从同一个 adapter 派生而来。
 
 ## Dynamic registry —— 插件注册
 
@@ -155,14 +150,11 @@ export interface ProviderDefinition {
 }
 ```
 
-插件通过 `ai-provider` capability 在激活时调用 `registerProviderDefinition(definition, "plugin")`；
-禁用时调用 `unregisterProvidersBySource("plugin")` 清理。
+插件通过 `ai-provider` capability 在激活时调用 `registerProviderDefinition(definition, "plugin")`；禁用时调用 `unregisterProvidersBySource("plugin")` 清理。
 
-注册表 **纯内存**——重启后插件必须重新注册。这是有意为之：避免把插件信任级别的数据写入
-catalog，并让"禁用插件"成为权威撤销动作。
+注册表 **纯内存**——重启后插件必须重新注册。这是有意为之：避免把插件信任级别的数据写入 catalog，并让"禁用插件"成为权威撤销动作。
 
-embedding-only 服务商走独立的 `lib/ai/embedding/embedding-provider-registry.ts`：因为
-embedding 不需要 chat tools / streaming / vision 这套字段，定义结构更紧凑。
+embedding-only 服务商走独立的 `lib/ai/embedding/embedding-provider-registry.ts`：因为 embedding 不需要 chat tools / streaming / vision 这套字段，定义结构更紧凑。
 
 ## Persistence —— 三层存储
 
@@ -186,8 +178,7 @@ embedding 不需要 chat tools / streaming / vision 这套字段，定义结构�
 - **`connectivity.ts`** —— 提供 `verifyProvider`，对 cloud 服务商发一个最便宜的请求
   （/models 或 /me），返回 `outcome: "verified" | "failed" | "limited"`。`limited` 表示
   "凭据合法但端点缺少 /models"，UI 仍把它标绿。
-- **`model-discovery.ts`** —— 从服务商响应解析模型列表，与 catalog 中静态声明的模型合并、
-  打上 `recommendedFor: "coding"` 等标签。
+- **`model-discovery.ts`** —— 从服务商响应解析模型列表，与 catalog 中静态声明的模型合并、打上 `recommendedFor: "coding"` 等标签。
 - **`local-provider-service.ts`** —— 本地推理（Ollama / vLLM / LM Studio …）的端口探活
   - 启停。Ollama 还多一个 `pull` 命令钩子。
 
@@ -203,8 +194,7 @@ flowchart LR
   class Budget,Perf,Rel preset
 ```
 
-`built-in-presets.ts` 内置了 3 套路由预设——它们不是服务商而是 _策略_：preset 引用模型 id，
-路由层 (`lib/ai/routing/`) 把请求映射到当前账号下可用的最便宜 / 最强 / 最稳的实际服务商。
+`built-in-presets.ts` 内置了 3 套路由预设——它们不是服务商而是 _策略_：preset 引用模型 id，路由层 (`lib/ai/routing/`) 把请求映射到当前账号下可用的最便宜 / 最强 / 最稳的实际服务商。
 
 ## Projection —— UI 唯一入口
 
@@ -223,13 +213,11 @@ interface BuildProviderStateProjectionInput {
 
 - **完整 catalog 元数据**——name、icon、dashboardUrl、protocol；
 - **当前用户配置**——api key 是否存在、自定义 base URL、自定义模型；
-- **完成度**——`evaluateBuiltInProviderCompleteness` / `evaluateCustomProviderCompleteness`
-  把"缺 api key / 缺 base URL / 无模型选中" 等编码为枚举 `ProviderNextAction`；
+- **完成度**——`evaluateBuiltInProviderCompleteness` / `evaluateCustomProviderCompleteness` 把"缺 api key / 缺 base URL / 无模型选中" 等编码为枚举 `ProviderNextAction`；
 - **下一步建议**——"添加 API key"、"选择默认模型"、"开始使用" 等文案 key；
 - **模型 discovery 快照**——`ProviderModelDiscoverySnapshot`，记录最近一次列模型的结果。
 
-settings UI 不直接读 catalog 或 registry——这种 fan-in 把分散来源压成一份单向数据，
-让 add wizard、provider list、CCSwitch picker、model selector 都看到一致视图。
+settings UI 不直接读 catalog 或 registry——这种 fan-in 把分散来源压成一份单向数据，让 add wizard、provider list、CCSwitch picker、model selector 都看到一致视图。
 
 ## 数据流
 
@@ -272,25 +260,15 @@ settings UI 不直接读 catalog 或 registry——这种 fan-in 把分散来源
 
 ## 扩展点
 
-- **新的内置服务商** —— 在 `BUILT_IN_PROVIDER_IDS` 加 id、在 `CATALOG_ENTRIES` 加条目、
-  选好 adapter；不需要新代码。
-- **新的 adapter（罕见）** —— 通常意味着新 protocol。在 `provider-adapters.ts` 加条目、
-  在 `provider-helpers.tsx` 加一个 HTTP 客户端策略，必要时在 `provider-normalization.ts`
-  添加 normalization 规则。
-- **插件级 chat provider** —— 实现 `ProviderDefinition` 并在 plugin activate 中调
-  `registerProviderDefinition`。
-- **插件级 embedding provider** —— 实现 `EmbeddingProvider` 并调
-  `registerEmbeddingProvider`；向量存储会自动看见。
-- **本地推理新引擎** —— 在 `types/provider/local-provider.ts` 加端口/URL 常量，并
-  在 `local-provider-service.ts` 加探活逻辑。
+- **新的内置服务商** —— 在 `BUILT_IN_PROVIDER_IDS` 加 id、在 `CATALOG_ENTRIES` 加条目、选好 adapter；不需要新代码。
+- **新的 adapter（罕见）** —— 通常意味着新 protocol。在 `provider-adapters.ts` 加条目、在 `provider-helpers.tsx` 加一个 HTTP 客户端策略，必要时在 `provider-normalization.ts` 添加 normalization 规则。
+- **插件级 chat provider** —— 实现 `ProviderDefinition` 并在 plugin activate 中调 `registerProviderDefinition`。
+- **插件级 embedding provider** —— 实现 `EmbeddingProvider` 并调 `registerEmbeddingProvider`；向量存储会自动看见。
+- **本地推理新引擎** —— 在 `types/provider/local-provider.ts` 加端口/URL 常量，并在 `local-provider-service.ts` 加探活逻辑。
 
 ## 已知限制
 
-- **Verification 缓存可能过期**——如果用户在外部撤销了 API key，UI 还会显示绿色直到下次
-  显式探活。最简单的修复是在每次发送失败的 401 路径上把缓存置为 `failed`。
-- **Dynamic registry 不持久化**——插件每次激活都得 re-register。这是设计——避免插件
-  写入级别外的数据脏掉 catalog——但它使得"禁用插件后用户还看到该 provider"成为不可能。
-- **OAuth 在 catalog 中只是元数据**——真正的 OAuth 流程只针对 Anthropic（[订阅 OAuth](./claude-subscription-oauth)）
-  和 OpenRouter 这种特殊情况；其他 `supportsOAuth: true` 标记目前未通线。
-- **Model-mapping 是字符串映射**——`logical model id → 物理 provider model id` 没有
-  类型保证，依赖 catalog 编辑时手工正确填写。
+- **Verification 缓存可能过期**——如果用户在外部撤销了 API key，UI 还会显示绿色直到下次显式探活。最简单的修复是在每次发送失败的 401 路径上把缓存置为 `failed`。
+- **Dynamic registry 不持久化**——插件每次激活都得 re-register。这是设计——避免插件写入级别外的数据脏掉 catalog——但它使得"禁用插件后用户还看到该 provider"成为不可能。
+- **OAuth 在 catalog 中只是元数据**——真正的 OAuth 流程只针对 Anthropic（[订阅 OAuth](./claude-subscription-oauth)）和 OpenRouter 这种特殊情况；其他 `supportsOAuth: true` 标记目前未通线。
+- **Model-mapping 是字符串映射**——`logical model id → 物理 provider model id` 没有类型保证，依赖 catalog 编辑时手工正确填写。

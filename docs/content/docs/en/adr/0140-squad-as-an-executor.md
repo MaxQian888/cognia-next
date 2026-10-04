@@ -1,6 +1,6 @@
 ---
 title: "0140 — Squad as an executor"
-description: "Agent teams stop being a place you go to and become something a conversation can be handed to; the nine-tab workspace is dissolved into the surfaces that already own each of its parts."
+description: "Lets a conversation delegate work to an agent team. Moves the nine-tab workspace into the existing surfaces that own each of its parts."
 ---
 
 # ADR 0140 — Squad as an executor
@@ -61,7 +61,8 @@ conversation can be handed to one; it is not a place you navigate to.
    single-turn override — which is what its own doc always said it was for.
 
 3. **Routing happens above `resolveSendOptions`, never inside it.** That
-   function answers "how do I run one model turn"; a Squad run is not one. The
+   function answers "how do I run one model turn". A Squad run is a separate
+   orchestration unit. The
    chat controller branches to `startSquadRun` before any direct-chat
    bookkeeping — exactly where the IM lane already branched, and its module
    header already said so: *no second executor, no `resolveSendOptions`

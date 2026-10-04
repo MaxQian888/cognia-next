@@ -32,11 +32,11 @@ description: ExternalAgentManager (manager.ts, 2496 lines) — the singleton tha
 
 ## Shape & Singleton
 
-The manager is a class with a private static `_instance` (`:200`); `getInstance(config?)` (`:542`)
-lazily constructs and `resetInstance()` (`:552`) disposes for tests. The module-level
-`getExternalAgentManager(config?)` (`:2460`) is the canonical accessor used everywhere outside the
-class. Construction registers the default protocol adapters (`registerDefaultAdapters` `:562`) and
-starts the health-check timer if `healthCheckInterval > 0` (`:217`).
+The manager is a class with a private static `_instance` (`:200`).
+`getInstance(config?)` (`:542`) constructs it on first use, and `resetInstance()` (`:552`) disposes of it for tests.
+Code outside the class uses the module-level `getExternalAgentManager(config?)` (`:2460`) accessor.
+Construction registers the default protocol adapters (`registerDefaultAdapters` `:562`).
+It starts the health-check timer if `healthCheckInterval > 0` (`:217`).
 
 State lives in three maps and a few lists:
 
@@ -52,10 +52,10 @@ Sessions are **not** a top-level map — they live per-instance in `instance.ses
 
 ### The module-level entry helper
 
-`executeOnExternalAgent(prompt, options?)` (`:2477`) is what the chat hook imports. If
-`options.agentId` is given it calls `manager.execute(agentId, …)` (`:2485`); otherwise it runs
-`checkDelegation(prompt)` (`:2489`) and, if a rule matches, executes on the delegated agent;
-otherwise it returns `null` so the caller can fall back to the built-in agent.
+The chat hook imports `executeOnExternalAgent(prompt, options?)` (`:2477`).
+If `options.agentId` is provided, it calls `manager.execute(agentId, …)` (`:2485`).
+Otherwise, it runs `checkDelegation(prompt)` (`:2489`) and executes on the delegated agent if a rule matches.
+If no rule matches, it returns `null` so the caller can use the built-in agent.
 
 ## Public API Surface
 

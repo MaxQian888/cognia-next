@@ -5,7 +5,11 @@ description: The single dispatch primitive, per-teammate circuit breaker, token 
 
 # Teammate Dispatch & Per-Run Shared State
 
-`runTeamLifecycle` synthesizes a team into a `VisualWorkflow`, then hands every node off to one reusable primitive: `dispatchTeammate`. That primitive claims a teammate, runs one turn (tool-enabled or text-only), validates the output, and feeds the per-run shared state — the <Term>teammate pool</Term> (circuit breaker), the <Term>budget guard</Term> (token escalation), and the <Term>notifier</Term> (level-routed fan-out). Retry is the orchestrator's job, not the dispatcher's. This page traces that dispatch path and each shared-state module it touches.
+`runTeamLifecycle` converts a team into a `VisualWorkflow`.
+It delegates every node to the reusable `dispatchTeammate` primitive.
+That primitive claims a teammate, runs one tool-enabled or text-only turn, validates the output, and updates shared state for the run.
+The shared modules are the <Term>teammate pool</Term> (circuit breaker), <Term>budget guard</Term> (token escalation), and <Term>notifier</Term> (level-routed fan-out).
+The orchestrator handles retries. This page describes the dispatch path and the shared-state modules it uses.
 
 <TLDR>
 - One dispatch primitive: `dispatchTeammate` (`lib/ai/agent/team/teammate/dispatch-teammate.ts:171-344`) — shared by the task executor and every ultracode pattern via `dispatchStructured`.

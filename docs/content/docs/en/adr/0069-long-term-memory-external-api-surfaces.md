@@ -98,10 +98,10 @@ All route through the desktop_writes_bridge to
 `lib/companion/desktop-write-source.ts` arms (`sourceChannel: "rpc"`).
 Classification: `memory_store`/`memory_update`/`memory_forget` are
 `CONTROL_COMMANDS` (Wave 4.1 policy — every remote mutation of a powerful
-surface is gated); `memory_list` is `READ_ONLY_COMMANDS`;
-**`memory_search` is deliberately neither** — it bumps
+surface is gated); `memory_list` is `READ_ONLY_COMMANDS`.
+**`memory_search` is deliberately neither** — it updates
 `lastAccessedAt`/`accessCount` (the recency signal), so idempotency-caching
-it would freeze decay. The mobile panel sends `memory_update` and
+it would reuse cached results without updating that recency signal. The mobile panel sends `memory_update` and
 `memory_forget` through the durable `MOBILE_OUTBOUND_COMMANDS` queue, then
 optimistically updates its local mirror only after enqueue succeeds. The
 desktop remains authoritative and re-applies PII, governance, audit, and

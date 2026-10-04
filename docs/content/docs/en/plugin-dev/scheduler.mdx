@@ -1,0 +1,301 @@
+---
+title: Scheduler APIs
+description: The two scheduler surfaces a plugin gets. ctx.scheduler runs the plugin's own handler-backed tasks; ctx.userScheduler reads and writes the user's schedule under the scheduler permission policy.
+---
+
+# Scheduler APIs
+
+A plugin reaches the scheduler through two surfaces with different owners.
+
+| Surface | Owns | Gate | Runtimes |
+| --- | --- | --- | --- |
+| `ctx.scheduler` | Tasks the plugin creates for itself, run by handlers it registers | The `scheduler` manifest capability | frontend, hybrid |
+| `ctx.userScheduler` | The user's `/scheduler` tasks (`chat`, `agent`, `goal`, `plan`, ...) | Manifest permissions plus the user's scheduler permission policy | frontend, hybrid, python |
+
+Both write ordinary rows to the one scheduler (ADR-0079).
+There is no second plugin schedule store.
+
+## ctx.scheduler: your own tasks
+
+Declare the capability in the manifest:
+
+```json title="plugin.json"
+{
+  "capabilities": ["scheduler"]
+}
+```
+
+Without it every `ctx.scheduler` call fails with an error naming the missing capability.
+
+A plugin task is a `type: "plugin"` row whose payload names a handler.
+At fire time the executor looks up `<pluginId>:<handler>` in the handler registry.
+Register the handler before the task can come due, usually in `activate`.
+
+```ts title="src/index.ts"
+export default definePlugin({
+  manifest,
+  async activate(ctx) {
+    ctx.scheduler.registerHandler("sync", async (args, run) => {
+      run.log("info", "sync started", { full: args.full === true })
+      run.reportProgress(0.5, "halfway")
+      if (run.event) run.log("info", `fired by ${run.event.type}`)
+      return { success: true, output: { synced: 12 }, metrics: { itemsProcessed: 12 } }
+    })
+
+    const existing = await ctx.scheduler.listTasks({ handler: "sync" })
+    if (existing.length === 0) {
+      await ctx.scheduler.createTask({
+        name: "Hourly sync",
+        handler: "sync",
+        handlerArgs: { full: false },
+        trigger: { type: "interval", seconds: 3600, startImmediately: true },
+        retry: { maxAttempts: 2, delaySeconds: 30 },
+        overlapPolicy: "skip",
+        pauseAfterConsecutiveFailures: 5,
+      })
+    }
+  },
+})
+```
+
+Handlers run in the JavaScript runtime.
+That is why `ctx.scheduler` is not open to Python plugins.
+
+### Ownership
+
+Every task-scoped method checks three things before it acts:
+
+1. the row is a `plugin` task,
+2. its payload names your plugin,
+3. its recorded creator, when present, is your plugin.
+
+A task that fails the check reads as not found: `null`, `false` or `[]`.
+`runTaskNow` throws `Task not found`.
+You cannot see or touch the user's tasks or another plugin's tasks from here.
+
+### Creation and the write gate
+
+`createTask` passes the same write gate as every non-user write.
+It is called with `{ taskType: "plugin", source: "plugin", pluginId }`.
+The gate applies the host check and the `plugin` source's `maxTasksPerSource` quota.
+It refuses when the user put `plugin` on the confirmation list, because this API cannot ask the user.
+A refusal throws with the gate's message.
+
+New rows record `createdBy: { kind: "plugin", pluginId }`.
+That attribution is how the quota counts them.
+
+Tasks declared in `manifest.scheduledTasks` are attributed the same way, but they never pass the gate.
+The user consented to them by enabling the plugin.
+Refusing one at the quota would leave the plugin half registered.
+They still count toward the quota, so later runtime creates are measured against them.
+
+The engine is always the local one, never a paired host's.
+A remote host has no way to call a handler that lives in this process.
+
+### Triggers
+
+| Trigger | Fields | Notes |
+| --- | --- | --- |
+| `cron` | `expression`, `timezone?` | Validated by the scheduler's cron validator |
+| `interval` | `seconds`, `startImmediately?` | `startImmediately` fires the first run at creation, then every `seconds` from that run |
+| `once` | `runAt` (Date or ISO string) | Must be in the future |
+| `event` | `eventType`, `eventSource?` | Fired by host events or `emitEvent` |
+
+A malformed trigger rejects with an error that names the field.
+It is never stored as some other schedule.
+`startImmediately` applies at creation only.
+Pausing, resuming or replacing the trigger with `updateTask` does not fire an extra run.
+
+`previewTrigger(trigger, count = 5)` returns the next fire times, from now.
+It uses the same projection as the scheduler panel.
+`count` may be 1 to 100.
+An `event` trigger yields `[]`.
+An invalid cron expression rejects with the validator's message.
+
+### Execution options
+
+`createTask` and `updateTask` accept these fields, and `PluginScheduledTask` reports them back.
+Times are in seconds at this boundary.
+
+| Field | Scheduler field | Default for plugin tasks |
+| --- | --- | --- |
+| `timeout` | `config.timeout` (ms) | 300 |
+| `retry.maxAttempts` | `config.maxRetries` | 0 |
+| `retry.delaySeconds` | `config.retryDelay` (ms) | 60 |
+| `retry.backoffMultiplier` | see below | 2 |
+| `maxRetryDelaySeconds` | `config.maxRetryDelay` (ms) | 60 |
+| `overlapPolicy` | `config.overlapPolicy` | `skip` |
+| `maxQueueSize` | `config.maxQueueSize` | 10 |
+| `maxRuns` | `config.maxRuns` | unlimited |
+| `pauseAfterConsecutiveFailures` | `config.pauseAfterConsecutiveFailures` | never |
+| `jitterSeconds` | `trigger.jitterMs` (cron and interval only) | none |
+| `catchupWindowSeconds` | `config.catchupWindowMs` | none |
+| `runMissedOnStartup` | `config.runMissedOnStartup` | `false` |
+| `maxMissedRuns` | `config.maxMissedRuns` | 0 |
+| `endAt` | `endAt` (`null` clears it on update) | none |
+
+`retry.maxAttempts` counts retries after the first attempt.
+`maxAttempts: 2` runs a failing task up to three times.
+
+The scheduler has two retry curves, so `backoffMultiplier` accepts two values.
+With `2`, the delay is `delaySeconds * 2^attempt` plus up to 25% jitter, capped by `maxRetryDelaySeconds`.
+With `1`, every retry waits `delaySeconds`, because the cap is set to the base delay.
+Any other value is rejected.
+`1` cannot be combined with `maxRetryDelaySeconds`.
+
+### Status
+
+`status` is derived from the row, not stored.
+
+| Status | Meaning |
+| --- | --- |
+| `active` | Armed and healthy |
+| `error` | Armed, but the last terminal run failed (`consecutiveFailures` above zero); a retry still in flight does not count yet |
+| `paused` | Paused by the plugin, the user, or auto-pause (`lastTerminalReason: "auto-paused"`) |
+| `disabled` | Disabled by the host |
+| `completed` | A `once` task that ran, or a task that used its `maxRuns` |
+| `expired` | Stopped by a bound: `endAt` passed, or a `once` slot was missed |
+
+`listTasks({ status })` filters on the derived value, so every member works.
+`hasErrors: true` selects tasks whose last terminal run failed with no success since, whatever their status.
+`handler`, `tags`, `name`, `offset` and `limit` filter as named.
+
+`lastResult` is the most recent settled run's result.
+`getStatistics(taskId)` returns run counters, `successRate`, the mean duration of the last 100 settled runs, `consecutiveFailures`, `lastRunAt`, `nextRunAt` and `lastError`.
+`successRate` and `averageDurationMs` are `null` until something has settled.
+
+### Running, cancelling and events
+
+`runTaskNow(taskId, args?)` merges `args` over the task's `handlerArgs` for that one run.
+It resolves with the id of the real execution row as soon as the scheduler has decided what the start is.
+That start can be running, buffered by the overlap policy, or skipped.
+It does not wait for the handler.
+
+`cancelExecution(executionId)` uses the scheduler's own cancel path.
+The run settles as `cancelled` with `terminalReason: "user-cancelled"`, and its handler's `signal` aborts.
+A start that is still buffered is withdrawn and recorded as cancelled under the same id.
+It resolves `true` when the run was cancelled, or when the request went to the window that runs it.
+
+`emitEvent(eventType, payload?)` fires your own active `event` tasks whose `eventType` matches.
+It never fires the user's or another plugin's tasks.
+The event source is `plugin:<pluginId>`, so a task that names a different `eventSource` does not fire.
+The handler receives the event as `run.event`.
+The usual bounds apply: a task past its `endAt` or `maxRuns` expires instead of firing.
+`emitEvent` resolves with the number of tasks it started.
+
+`onExecution(listener)` reports executions of your tasks.
+
+| Phase | When |
+| --- | --- |
+| `started` | A run began |
+| `completed` | It succeeded |
+| `failed` | It failed, timed out (`execution.status: "timeout"`), or failed an attempt that will be retried (`terminalReason: "retry-scheduled"`) |
+| `cancelled` | It was cancelled |
+| `skipped` | A start ended without running (overlap `skip`, a full queue, the host concurrency cap) |
+
+It returns a disposer.
+Listeners are also removed when the plugin deactivates.
+
+### Execution history
+
+`getExecutions`, `getExecution` and `getLatestExecution` return `PluginTaskExecution`.
+
+- `status` is one of `pending`, `running`, `completed`, `failed`, `cancelled`, `skipped` or `timeout`.
+- `scheduledAt` is the slot the run was due at. A run with no slot reports its start time.
+- `triggerSource` and `terminalReason` say what started and ended the run.
+- `result` carries `success`, `output`, `error` and `metrics` for a settled run. `metrics` includes the handler's metrics and the `duration`.
+- `logs` include every `run.log(...)` line the handler wrote, with its `data`. Lines are capped at 200 per run and the oldest go first.
+
+### Disable and uninstall
+
+Disabling, suspending, unloading or uninstalling a plugin deletes every plugin task it owns.
+That includes tasks it created at runtime.
+A plugin task can only run while its handlers are registered.
+Without them it can only fail, notify and eventually auto-pause.
+Recreate runtime tasks idempotently in `activate`, as the example above does.
+
+### Lifecycle hooks
+
+Plugin hooks `onScheduledTaskStart`, `onScheduledTaskComplete` and `onScheduledTaskError` fire for every scheduled task on the host, not only yours.
+Use `onExecution` when you only care about your own tasks.
+
+## ctx.userScheduler: the user's schedule
+
+This surface acts on the user's schedule, whichever host the scheduler panel is bound to.
+
+| Method | Permissions |
+| --- | --- |
+| `getPolicy()` | `settings:read` |
+| `listTasks()`, `getTask(id)`, `listExecutions(id, { limit?, before? })`, `getExecution(executionId)`, `getUpcoming(id?, count?)` | `database:read` |
+| `createTask(input)` | `database:write`, `settings:read` |
+| `updateTask(id, input, options?)`, `pauseTask(id, options?)`, `resumeTask(id, options?)`, `deleteTask(id, options?)` | `database:write` |
+| `runTaskNow(id, options?)`, `cancelExecution(executionId, options?)` | `agent:control`, `database:write` |
+
+### Attribution
+
+A write is made as your plugin (`{ kind: "plugin" }`, the default) or for an agent using your tools (`{ kind: "agent", sessionId }`).
+
+- For `createTask`, put the attribution in `input.createdBy`.
+- For every other write, pass it as `options.actor`.
+
+A write can never be attributed to `"user"` or `"system"`.
+The policy exempts the user entirely, so that attribution would bypass every setting the user has.
+Such a call throws before anything is read or written.
+`createdBy.pluginId` is always overwritten with your plugin's id.
+
+```ts
+await ctx.userScheduler.createTask({
+  name: "Morning brief",
+  type: "agent",
+  trigger: { type: "cron", cronExpression: "0 8 * * 1-5" },
+  payload: { prompt: "Summarise yesterday's inbox" },
+  createdBy: { kind: "agent", sessionId: toolCtx.sessionId },
+})
+
+await ctx.userScheduler.deleteTask(taskId, {
+  actor: { kind: "agent", sessionId: toolCtx.sessionId },
+})
+```
+
+### The policy on every write
+
+Every write passes `assertTaskWriteAllowed`.
+`createTask` uses the `create` operation and the other writes use `mutate`, each with the task's real type.
+
+- An agent actor is refused while "Allow agents to manage scheduled tasks" is off.
+- An agent actor is also refused while automatic agent changes (`agentAutoCreate`) are off. This applies to create and mutate alike, because the gate reads an agent write as unattended.
+- `script` tasks are refused while script tasks are off.
+- A type the host cannot run is refused.
+- A type on the confirmation list is refused, because a plugin cannot ask the user.
+- On create only, the source's `maxTasksPerSource` quota applies.
+
+If your tool asks the user to approve each call (`requiresApproval: true`), the write is attended.
+Make it as the plugin and check `getPolicy().agentToolsEnabled` yourself.
+The built-in Scheduler Tools plugin does this for its delete and run tools.
+
+A refusal throws with the gate's message, which names the setting to change.
+A missing task reads as `null` or `false`.
+`cancelExecution` resolves with the scheduler's outcome object.
+That object is `{ cancelled: true }`, or a `reason` of `not-found`, `already-settled`, `requested`, `not-owned-here` or `unsupported-on-remote`.
+
+Read `getPolicy()` before offering an action.
+It is loaded fresh from settings on every call.
+
+### Paired hosts
+
+When the scheduler is bound to a paired host, reads and writes go to that host.
+The host has no lookup by run id.
+`getExecution` therefore searches its 200 most recent runs.
+For an older run it throws and points you at `listExecutions(taskId)`, rather than answering "not found".
+
+### Python
+
+`ctx.userScheduler` is open to Python plugins.
+Pass arguments positionally, for example `await ctx.userScheduler.listExecutions(task_id, {"limit": 20})`.
+Dates arrive as ISO strings, and dates you send as ISO strings are revived before they are stored.
+
+## Related
+
+<Cards>
+  <Card title="Bots" href="./bots" description="Bind executors to triggers declaratively." />
+</Cards>

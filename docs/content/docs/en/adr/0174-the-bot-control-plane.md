@@ -1,6 +1,6 @@
 ---
 title: "0174: The Bot control plane"
-description: "Six trigger kinds and four executors behind one durable delivery queue, a run that parks instead of blocking the host, a phone that can arm and replay without owning a runner, and one answer to where an inbound webhook should point on every host."
+description: "Provides six trigger kinds and four executors through one durable delivery queue. Runs can wait without blocking the host. Phones can arm and replay work without owning a runner. Each host exposes one inbound-webhook address."
 ---
 
 # ADR 0174: The Bot control plane
@@ -255,9 +255,8 @@ the whole Bot rather than leaving a half-registered definition.
 They execute inside the administrative mutation on the owning host
 (`lib/bot/control-writes/lifecycle-hooks.ts`), receive no `runId` because
 there is no run, and must finish within `BOT_LIFECYCLE_HOOK_TIMEOUT_MS`
-(30 s). `onInstall`, `onConfigure` and `onArm` veto; `onUninstall` is advisory
-and its failure is only logged — a hook that cannot stop a deletion must not
-be able to strand one. Remote callers reach them exactly once through
+(30 s). `onInstall`, `onConfigure` and `onArm` can veto the mutation. `onUninstall`
+is advisory, so its failure is logged without blocking deletion. Remote callers reach them exactly once through
 `mutateBotInstallationOnHost`, never once per peer.
 
 ### The payload clamp lives in the envelope, not the caller

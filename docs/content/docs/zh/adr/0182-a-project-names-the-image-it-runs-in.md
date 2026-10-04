@@ -1,13 +1,11 @@
 ---
 title: "0182 — 项目自己指定它运行的镜像"
-description: "云端与容器执行不再是「一个部署只有一个 runner 镜像」。项目从两级镜像目录、经审批的仓库声明（.cognia/workspace.json 或 devcontainer.json）或部署默认值，解析出一份不可变的 EnvironmentSpec。桌面端按设备审批，共享 Host 在服务端审批。整个子系统默认关闭，关闭时原路径不变；基础设施故障时回退，除非隔离是强制要求。"
+description: "云端与容器执行支持项目选择镜像。项目从两级镜像目录、经审批的仓库声明（.cognia/workspace.json 或 devcontainer.json）或部署默认值解析不可变 EnvironmentSpec。桌面按设备审批，共享 Host 在服务端审批。子系统默认关闭，关闭时原路径不变。基础设施故障时可回退，但强制隔离时不允许回退。"
 ---
 
 # ADR 0182 — 项目自己指定它运行的镜像
 
-**Status:** Accepted — 第 ① 步已实现（桌面本地容器保持休眠）；第 ②–④ 步规划中
-**Date:** 2026-09-15
-**Related:** [ADR-0059](./0059-cloud-deployment-headless-brain)（本文替换其镜像选择方式的 T2/T3 执行面）、[ADR-0085](./0085-cloud-shared-browser)（持久 WorkspaceRuntime）、[ADR-0147](./0147-repository-declared-workspace)（本文扩展的仓库文件及其审批门）、[ADR-0149](./0149-a-person-is-not-a-device)（在共享 Host 上负责审批的角色）、[ADR-0183](./0183-the-agent-is-brought-to-the-image)（agent CLI 如何进入任意镜像）
+**Status:** Accepted — 第 ① 步已实现（桌面本地容器保持休眠）；第 ②–④ 步规划中 **Date:** 2026-09-15 **Related:** [ADR-0059](./0059-cloud-deployment-headless-brain)（本文替换其镜像选择方式的 T2/T3 执行面）、[ADR-0085](./0085-cloud-shared-browser)（持久 WorkspaceRuntime）、[ADR-0147](./0147-repository-declared-workspace)（本文扩展的仓库文件及其审批门）、[ADR-0149](./0149-a-person-is-not-a-device)（在共享 Host 上负责审批的角色）、[ADR-0183](./0183-the-agent-is-brought-to-the-image)（agent CLI 如何进入任意镜像）
 
 ## 背景
 

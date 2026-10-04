@@ -23,10 +23,9 @@ The [current authentication reference](https://code.claude.com/docs/en/authentic
 
 Until this ADR, cognia-next's Anthropic integration was strictly **API-key based**:
 the renderer wrote `apiKey` to IndexedDB, the Rust shell forwarded it as
-`ANTHROPIC_API_KEY` when spawning the sidecar, and that was the entire auth
-story. Pro/Max subscribers — Anthropic's most valuable individual users —
-could not (a) sign in with their subscription token and (b) see how close they
-were to the 5-hour rolling window or 7-day weekly cap that
+`ANTHROPIC_API_KEY` when spawning the sidecar, and no other authentication
+method was available. Pro/Max subscribers could not sign in with their
+subscription token. They also could not see how close they were to the 5-hour rolling window or 7-day weekly cap that
 [Anthropic activated on 2025-07-28](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/).
 
 Two CCSwitch-style ecosystems already solved variants of this problem:

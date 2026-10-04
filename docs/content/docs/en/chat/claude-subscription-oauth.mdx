@@ -115,8 +115,10 @@ flowchart TB
 
 ## OAuth Flow
 
-Cognia-next uses the **paste-back-authorization-code (manual code)** variant. We have not registered a loopback redirect,
-so Anthropic's callback page displays the authorization code directly to the user, who copies it back into the Login dialog.
+Cognia-next uses the **paste-back-authorization-code (manual code)** variant.
+Cognia has no registered loopback redirect.
+Anthropic's callback page therefore displays the authorization code to the user.
+The user copies that code into the Login dialog.
 
 <Steps>
 <Step>

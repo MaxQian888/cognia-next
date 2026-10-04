@@ -10,10 +10,10 @@ description: Schema v0.9, the unified parser pipeline, the RFC 6901 JSON-Pointer
 <TLDR>
   The protocol core is the runtime-agnostic layer of `lib/a2ui` — no React, no store, no MCP. It is
   four cooperating modules: `parser.ts` turns raw agent output (strings, code blocks, tool results)
-  into a typed `A2UIServerMessage[]`; `data-model.ts` binds component props to a data model through
-  RFC 6901 JSON Pointers and resolves computed fields; `events.ts` is the in-process bus that fans
-  user actions back out and formats them for the next agent turn; and a set of leaf utilities
-  (`constants.ts`, `format.ts`, `list-utils.ts`) plus the `index.ts` barrel. Everything is keyed to
+  into a typed `A2UIServerMessage[]`. `data-model.ts` binds component props to a data model through
+  RFC 6901 JSON Pointers and resolves computed fields. `events.ts` is the in-process bus that fans
+  user actions back out and formats them for the next agent turn. Leaf utilities
+  (`constants.ts`, `format.ts`, `list-utils.ts`) and the `index.ts` barrel complete the layer. Everything is keyed to
   one schema — `types/a2ui/schema.ts`, header "Based on A2UI Protocol v0.9".
 </TLDR>
 
@@ -65,7 +65,7 @@ already hold typed objects instead of JSON.
 
 ## Parser Pipeline
 
-`parser.ts` (656 lines) is the funnel: arbitrary agent output in, typed `A2UIServerMessage[]` out.
+`parser.ts` (656 lines) converts arbitrary agent output into a typed `A2UIServerMessage[]`.
 The single unified entry is `parseA2UIInput` (`:413`). It imports only `type` declarations from
 `@/types/a2ui/schema` (`:6-16`) — no other `lib/a2ui` modules, no external libraries.
 

@@ -29,7 +29,7 @@ const events = session.events()
 const outcome = await session.run("Diagnose and fix the failing build")
 ```
 
-The host advertises the methods it actually implements during initialization. A method absent from that list fails with `unsupported_capability`; the host does not return a success-shaped placeholder.
+The host advertises the methods it actually implements during initialization. A method absent from that list fails with `unsupported_capability`. The host does not return a success-shaped placeholder.
 
 ## Implementation map
 

@@ -1,6 +1,6 @@
 ---
 title: ADR-0129 — Unified global search
-description: One search surface (⌘K) behind one open seam, one rebindable shortcut and one provider registry — conversations by title, message history with role / date / archive filters, commands, pages, settings, people, and the app's libraries — replacing six palettes and three ⌘K listeners.
+description: "Replaces six palettes and three ⌘K listeners with one search surface (⌘K), one opening interface, one rebindable shortcut, and one provider registry. Searches conversation titles, message history with role / date / archive filters, commands, pages, settings, people, and the app's libraries."
 ---
 
 # ADR-0129 — Unified global search
@@ -146,9 +146,9 @@ degrading to title-only (the message index needs `CONTENT_SEARCH_MIN_QUERY`).
 
 ### 9. Dates follow the sort axis
 
-Buckets used to come from `lastMessageAt` whatever the sort was, so "by date
-created" produced a list bucketed by last activity, and `oldest` ran the rows
-backwards under forward headers. `resolveConversationTimeBasis(sortBy)` now
+Buckets used to use `lastMessageAt` regardless of the sort. Thus "by date
+created" grouped rows by last activity. With `oldest`, rows ran in reverse
+order while headers stayed in forward order. `resolveConversationTimeBasis(sortBy)` now
 decides the timestamp for the buckets, the headers and the activity filter
 alike; `oldest` reverses the bucket order; and `title` / `unread` — which have
 no date axis at all — render one flat section rather than headers that do not

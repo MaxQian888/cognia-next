@@ -1,6 +1,6 @@
 ---
 title: "0204 — A project coordinator runs threads in the background"
-description: "A workspace can turn on project coordination: one long-lived coordinator conversation splits the work into thread conversations that run in the background, each in its own worktree and branch in a git root, report back when their turns end, and are tracked on a threads board with their pull requests. Coordinator and thread are roles on ordinary direct sessions; background holds let a session run with no pane; reports travel as lifecycle-linked peer messages; PR watching generalizes the Agent Team observer; the project gets its own budget, usage tab, pause, notification rule and settings."
+description: "A workspace can enable project coordination. One long-lived coordinator conversation delegates work to background thread conversations. Each thread uses its own worktree and branch within a git root, reports when its turn ends, and appears with its pull requests on a threads board. Coordinator and thread are roles on ordinary direct sessions. Background holds allow sessions to run without a pane. Reports use lifecycle-linked peer messages. PR watching extends the Agent Team observer. The project has its own budget, usage tab, pause, notification rule and settings."
 ---
 
 # ADR 0204 — A project coordinator runs threads in the background
@@ -126,7 +126,7 @@ coordinator, and `report_to_coordinator` for a thread. All are allowed except
 `set_project_preference`, which asks.
 
 Prompt layout keeps the cache stable: the project goal is a PII-gated section
-after the workspace instructions; the role protocol is session-stable; the
+after the workspace instructions; the role protocol is session-stable. The
 project status digest (preferences, roots, up to 12 recent threads with state,
 branch, PR and last result, capped at 6,000 characters) goes in the dynamic
 tail. On a new project's first coordinator turn the tail also carries a one-off

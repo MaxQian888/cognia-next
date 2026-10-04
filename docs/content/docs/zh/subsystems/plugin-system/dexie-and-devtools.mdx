@@ -8,7 +8,7 @@ description: 在共享的 CogniaDB Dexie 实例中为插件提供命名空间化
 <Status variant="experimental" />
 
 <TLDR>
-插件在唯一共享的 `CogniaDB` Dexie 实例中获得不会冲突的 IndexedDB 表。表名以 `<pluginId>:<tableName>` 形式存储（`namespace.ts:11`），任何改变表集合的 enable/disable 都会递增全局 Dexie schema 版本（`bridge.ts:60`）。另有一套开发者模式界面：监听本地来源插件的目录（`file-watch.ts`），走与 CLI 相同的那一条已验证路径重载（`plugin-dev-reload.ts`），并把它打出的日志合成一条流（`runtime-log-stream.ts`）。应用自己从不构建，那是 `cognia plugin dev` 的活。
+插件在唯一共享的 `CogniaDB` Dexie 实例中获得不会冲突的 IndexedDB 表。表名以 `<pluginId>:<tableName>` 形式存储（`namespace.ts:11`），任何改变表集合的 enable/disable 都会递增全局 Dexie schema 版本（`bridge.ts:60`）。另有一套开发者模式界面：监听本地来源插件的目录（`file-watch.ts`），走与 CLI 相同的那一条已验证路径重载（`plugin-dev-reload.ts`），并把插件产生的日志合成一条流（`runtime-log-stream.ts`）。应用本身不执行构建。构建由 `cognia plugin dev` 完成。
 </TLDR>
 
 <StatGrid>
@@ -140,18 +140,12 @@ flowchart LR
 ## Part B — devtools
 ### 目的
 
-面向正在开发中的插件的开发者模式界面。它刻意做得很小：构建、安装、重载的权威在
-`cognia plugin dev` CLI，应用的职责是验证与呈现。
+面向正在开发中的插件的开发者模式界面。它刻意做得很小：构建、安装、重载的权威在 `cognia plugin dev` CLI，应用的职责是验证与呈现。
 
-- **开发者模式**（`developer-mode.ts`）是唯一的门。构建模式与遗留的
-  `localStorage` 标记在启动时被折叠成一个持久化值，所以 devtools 区块和 Creator
-  不可能对「开发者界面是否存在」给出不同答案。
-- **文件监听**（`file-watch.ts`）监听本地来源插件的安装目录，300 ms 防抖后走与
-  CLI 相同的已验证重载路径。
-- **日志环**（`debugger.ts`）保留插件经 `ctx.logger` 写出的每一行，并打上它来自
-  哪个生命周期 generation。
-- **运行时日志流**（`runtime-log-stream.ts`）把这个环与 Python 宿主的缓冲合成
-  一条按时间排序的视图，并点名那些根本没有输出通道的运行时。
+- **开发者模式**（`developer-mode.ts`）是唯一的门。构建模式与遗留的 `localStorage` 标记在启动时被折叠成一个持久化值，所以 devtools 区块和 Creator 不可能对「开发者界面是否存在」给出不同答案。
+- **文件监听**（`file-watch.ts`）监听本地来源插件的安装目录，300 ms 防抖后走与 CLI 相同的已验证重载路径。
+- **日志环**（`debugger.ts`）保留插件经 `ctx.logger` 写出的每一行，并打上它来自哪个生命周期 generation。
+- **运行时日志流**（`runtime-log-stream.ts`）把这个环与 Python 宿主的缓冲合成一条按时间排序的视图，并点名那些根本没有输出通道的运行时。
 
 ### 逐文件映射
 
@@ -164,24 +158,15 @@ flowchart LR
 
 ### 重载的权威在哪里
 
-应用不做构建。`cognia plugin dev` 负责构建与安装，然后经回环桥请求渲染端重载并
-自证。该请求落在 `lib/cli-bridge/handlers/plugin-dev-reload.ts`：它先让插件静默，
-再重新启用，然后等待生命周期协调器报出一个**新的 active generation**，才返回
-`activationProof`。只有这个算成功。安装事件、文件变化、发出一个重载信号，都不算。
+应用不做构建。`cognia plugin dev` 负责构建与安装，然后经回环桥请求渲染端重载并自证。该请求落在 `lib/cli-bridge/handlers/plugin-dev-reload.ts`：它先让插件静默，再重新启用，然后等待生命周期协调器报出一个**新的 active generation**，才返回 `activationProof`。只有这个算成功。安装事件、文件变化、发出一个重载信号，都不算。
 
-`file-watch.ts` 用的是同一个 handler，所以应用内重载与 CLI 重载受同一份证据约束。
-它做不到的是构建：`wasm` 与 `vscode-extension` 会被报为 `needs-build`，因为改源码
-不会产生新产物，重载只会把同一份字节重新激活，看起来却像成功了。
+`file-watch.ts` 用的是同一个 handler，所以应用内重载与 CLI 重载受同一份证据约束。它做不到的是构建：`wasm` 与 `vscode-extension` 会被报为 `needs-build`，因为改源码不会产生新产物，重载只会把同一份字节重新激活，看起来却像成功了。
 
 ### 各个面板展示什么
 
-`components/plugins/devtools/plugin-devtools-pane.tsx` 挂三样东西：**Dev Session
-工作台**（阶段时间线、激活证明、尝试诊断、合并后的运行时日志）、**监听卡片**
-（哪些插件在被监听，以及每个没被监听的为什么），以及**热重载活动**（安装、卸载、
-已验证重载各一行，并标出是谁驱动的）。
+`components/plugins/devtools/plugin-devtools-pane.tsx` 挂三样东西：**Dev Session 工作台**（阶段时间线、激活证明、尝试诊断、合并后的运行时日志）、**监听卡片**（哪些插件在被监听，以及每个没被监听的为什么），以及**热重载活动**（安装、卸载、已验证重载各一行，并标出是谁驱动的）。
 
-工作台的 Advanced 标签另有 **API 调用检查器**（每一次 `ctx.*` 调用及其权限判定，
-不采样地直接读审计环）、**生命周期表**、**触发器审计**与**扩展点诊断**。
+工作台的 Advanced 标签另有 **API 调用检查器**（每一次 `ctx.*` 调用及其权限判定，不采样地直接读审计环）、**生命周期表**、**触发器审计**与**扩展点诊断**。
 
 ```mermaid
 flowchart TD
@@ -212,23 +197,13 @@ flowchart TD
 
 ### 这里曾经有过什么
 
-记下来是为了别再重建。这个界面的上一代曾经有 `PluginDevServer`、`PluginProfiler`、
-`DevExtensionController`、`ManagedIdeDevMode`、一个 console tap，以及一个
-`PluginHotReload` 管理器，由一个九标签页的 `PluginDevtoolsPanel` 驱动。它们全都没有
-生产调用方：那个面板没有挂载点，那些模块只被彼此、以及一个没人导入的 barrel 引用。
+记下来是为了别再重建。这个界面的上一代曾经有 `PluginDevServer`、`PluginProfiler`、`DevExtensionController`、`ManagedIdeDevMode`、一个 console tap，以及一个 `PluginHotReload` 管理器，由一个九标签页的 `PluginDevtoolsPanel` 驱动。它们全都没有生产调用方：那个面板没有挂载点，那些模块只被彼此、以及一个没人导入的 barrel 引用。
 
-`PluginDevServer` 值得单独点名。它提供了 `getUrl()`、`getWebSocketUrl()` 和
-`connectedClients`，而那个服务器并不存在：`plugin_dev_server_start` 只是把内存里的
-`running` 置为 `true` 然后返回。debugger 的断点同样是名义上的，它的条件求值器还会用
-用户字符串构造 `new Function`。
+`PluginDevServer` 值得单独点名。它提供了 `getUrl()`、`getWebSocketUrl()` 和 `connectedClients`，而那个服务器并不存在：`plugin_dev_server_start` 只是把内存里的 `running` 置为 `true` 然后返回。debugger 的断点同样是名义上的，它的条件求值器还会用用户字符串构造 `new Function`。
 
-它们连同各自的 Tauri 命令一起被删除了。底下那个文件监听器是真的，现在由
-`file-watch.ts` 驱动。
+它们连同各自的 Tauri 命令一起被删除了。底下那个文件监听器是真的，现在由 `file-watch.ts` 驱动。
 
-托管 IDE 开发模式后来以不同的方式重建了：开关是宿主标志
-（`cognia_plugin_runtime::managed_ide_dev`），卡片挂载在本面板
-（`components/plugins/devtools/managed-ide/`），并且它把守的是真实路径（broker
-通信记录、授权路径、回执校验与 proxy 激活）。见托管 IDE 运维页面的“Dev Mode”。
+托管 IDE 开发模式后来以不同的方式重建了：开关是宿主标志（`cognia_plugin_runtime::managed_ide_dev`），卡片挂载在本面板（`components/plugins/devtools/managed-ide/`），并且它把守的是真实路径（broker 通信记录、授权路径、回执校验与 proxy 激活）。见托管 IDE 运维页面的“Dev Mode”。
 
 ---
 

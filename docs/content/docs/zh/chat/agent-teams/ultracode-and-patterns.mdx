@@ -5,7 +5,7 @@ description: Ultracode 编排（ADR-0022 补遗）—— 由一名规划者队�
 
 # Ultracode 与质量模式
 
-普通的团队运行会合成一张扁平的任务 DAG：每个 `AgentTeamTask` 对应一个工作流节点，由 `dependencies` 连线。**Ultracode 模式**取代了这种做法。它不再镜像任务，而是由一名主规划者队友组合出一条由更高阶 `pattern.*` 工作流节点构成的流水线——每个节点都在运行的并发上限内向内部扇出大量启用了工具的 `dispatchTeammate` 调用。这是把 Claude Code 的 "ultracode" 质量编排模型移植到 Agent Team 子系统之上：并行的盲查找者、对抗式反驳、评审团、完备性批评者，以及把所有内容折叠成一份带引用报告的终端综合者。
+普通团队运行会合成一张扁平的任务 DAG：每个 `AgentTeamTask` 对应一个工作流节点，节点之间通过 `dependencies` 连接。**Ultracode 模式**改由主规划者队友组合更高阶的 `pattern.*` 工作流节点。每个节点在本次运行的并发上限内，分发多个启用了工具的 `dispatchTeammate` 调用。这套实现将 Claude Code 的「ultracode」质量编排模型引入 Agent Team 子系统：并行执行独立查找、对抗式反驳、评审团评审和完备性检查，最后将结果综合为一份带引用的报告。
 
 这六个 pattern 节点位于 `lib/ai/agent/team/patterns/`。规划者（`ultracode-planner.ts`）决定组合哪些 pattern 以及扇出多宽；综合者（`synthesize-ultracode.ts`）把它们连成一张只向前推进的 DAG；触发器（`ultracode-trigger.ts`）决定一次运行是否启用 ultracode；类型与 Zod 面则位于 `types/agent/ultracode.ts`。
 

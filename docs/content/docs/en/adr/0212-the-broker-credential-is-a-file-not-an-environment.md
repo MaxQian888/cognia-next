@@ -1,6 +1,6 @@
 ---
 title: "0212 — The broker credential is a file, not an environment variable"
-description: "The managed code-server broker no longer puts its secret in code-server's environment, where every terminal, task and language server inherited it. The host writes a single-use bootstrap credential to a private file whose path is the only thing in the environment; the extension reads and unlinks it, and both sides derive a rotating session key from the handshake nonces so the key never crosses the wire. A bootstrap presented twice while its first user is connected trips the instance. The retired newline protocol is gone and the protocol major is negotiated."
+description: "The managed code-server broker previously put its secret in code-server's environment, where terminals, tasks and language servers inherited it. The host now writes a single-use bootstrap credential to a private file and exposes only its path in the environment. The extension reads and unlinks the file. Both sides derive a rotating session key from handshake nonces. The key never crosses the wire. A second bootstrap use while the first consumer is connected triggers connection closure and session revocation. Removes the newline protocol and negotiates the protocol major."
 ---
 
 # ADR 0212 — The broker credential is a file, not an environment variable
@@ -43,8 +43,8 @@ the workspace, and nothing secret. The extension reads the file and unlinks it.
 
 ### 2. A bootstrap is single use; sessions are derived and rotate
 
-The challenge carries a client nonce; the host answers with a server nonce; the
-hello proves possession with `HMAC(secret, server nonce)`. A successful hello
+The challenge carries a client nonce. The host answers with a server nonce.
+The hello proves possession with `HMAC(secret, server nonce)`. A successful hello
 consumes the bootstrap, and both sides compute
 `session = HKDF-SHA256(secret, "cognia-broker-session" ‖ server nonce ‖ client nonce)`.
 The session key never crosses the wire. The hello reply names a `sessionId`;

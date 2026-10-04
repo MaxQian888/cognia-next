@@ -9,7 +9,7 @@ description: "Protocol-aware probes, paid benchmarks, balances, secure scripts, 
 
 ## Context
 
-The former health panel treated model-list latency as model health and kept no comparable history. Balance readers used several transport shapes and could not represent multiple accounts without implying their values were additive. Diagnostics must be useful without contaminating production routing health, and extensions must not gain ambient filesystem, process, cookie, environment, or credential access.
+The former health panel treated model-list latency as model health and kept no comparable history. Balance readers used several transport formats. They could not represent multiple accounts without implying that their values should be added together. Diagnostics must be useful without contaminating production routing health, and extensions must not gain ambient filesystem, process, cookie, environment, or credential access.
 
 This decision extends [ADR-0025](/docs/en/adr/0025-unified-subscription-module) and [ADR-0043](/docs/en/adr/0043-llm-provider-execution).
 

@@ -50,8 +50,8 @@ Each adapter declares a `ConnectorRuntimeCapabilityMatrix`; isolation, attributi
 dedup, durable dispatch, and recovery never degrade. Presentation may degrade from CardKit/native
 streaming to message editing, append-only milestones, or final-only delivery.
 
-For Feishu, CardKit JSON 2.0 uses stable element ids. Text previews use element content streaming;
-phase/actions use component mutations; full replacement is reserved for structural/final changes.
+For Feishu, CardKit JSON 2.0 uses stable element ids. Text previews use element content streaming.
+Phase/actions use component mutations. Full replacement is reserved for structural/final changes.
 Every mutation persists `{sequence, uuid, operation}` before sending and reuses it until
 acknowledged. Interaction conflict `200810` is retried, sequence/missing/expired entities are
 reconciled or recreated, cards are compacted below 30 KB, and entities older than 14 days are

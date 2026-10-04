@@ -222,11 +222,11 @@ execute the middle, utility the bottom, walking down then up — so
 `renderer-llm-client` and `agent-role-client` resolve or drop placeholders
 before transport while explicit role models always win.
 
-Decisions are explainable at the message. `buildRoutingRunMetadata`
+Each message exposes the reason for its routing decision. `buildRoutingRunMetadata`
 (`lib/chat/message-run-metadata.ts`) projects the plan into
 `MessageRunMetadata.routing` — mode, alias, tier, score, strategy, reason
-codes, judge usage, candidate count — read from the plan, never re-derived;
-chat, controller, and room runners attach it to completed assistant messages,
+codes, judge usage, candidate count — read from the plan, never re-derived.
+Chat, controller, and room runners attach it to completed assistant messages,
 and `RoutingIndicator` (`components/chat/routing-indicator.tsx`) renders it as
 a tooltip chip gated by `showRoutingIndicator`. Chat spans emit the shared
 `routingPlanTraceAttributes` projection. Three legacy fields —

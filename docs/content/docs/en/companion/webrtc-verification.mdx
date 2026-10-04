@@ -23,14 +23,14 @@ scenarios passing in each:
 | Public `signaling.cognia.cn` | Enabled | Real DataChannel, `prflx` candidate |
 | Public `signaling.cognia.cn` | No usable candidates | Encrypted public signaling relay |
 
-Each run checks RPC responses, ordered events, peer restart recovery,
-mobile-first startup, duplicate reconnect handling, and observed teardown.
-The harness registers an isolated in-memory device. Its RPC intentionally
-expects `service_unavailable`, because it has no application backend: these
-runs do not prove conversation loading or chat execution. Both peers ran on
-one Mac; neither the direct candidate nor public signaling proves cross-NAT
-connectivity. Public-mode application assets came from the local E2E export
-under an allowed HTTPS origin; WSS was real and was not intercepted.
+Each run checks RPC responses, ordered events, peer restart recovery, mobile-first startup, duplicate reconnect handling, and observed teardown.
+The harness registers an isolated in-memory device.
+Its RPC intentionally expects `service_unavailable` because it has no application backend.
+These runs do not prove that conversations load or chats execute.
+Both peers ran on one Mac. Neither the direct candidate nor public signaling proves connectivity across NAT boundaries.
+
+Public-mode application assets came from the local E2E export under an allowed HTTPS origin.
+The tests used real WSS connections without interception.
 
 Reproduce after building a fresh E2E export with `rtk pnpm test:e2e:build`:
 

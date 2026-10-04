@@ -11,9 +11,9 @@ description: 为 Memory、Twin、Project Knowledge、Knowledge Base 和 External
 
 ## 背景
 
-Cognia 有五个检索域：长期 Memory、Digital Twin、Project Knowledge、Knowledge Base 和 External RAG。它们的所有权、授权、保留、审阅与展示语义不同，不能合并成同一业务实体；但它们重复实现了 query embedding、词法检索、向量融合、重试、索引生命周期与诊断。
+Cognia 有五个检索域：长期 Memory、Digital Twin、Project Knowledge、Knowledge Base 和 External RAG。它们的所有权、授权、保留、审阅与展示语义不同，不能合并成同一业务实体。但它们重复实现了 query embedding、词法检索、向量融合、重试、索引生命周期与诊断。
 
-重复实现造成了真实缺口：locality 有时错误地按 vector backend 判断；部分聊天和 Workflow 路径绕过 PII 边界；向量故障会被伪装为空结果；旧索引可能在新索引成功前被删除；Memory job 把无输出、跳过和成功都记成 `completed`；trace/cache 没有统一的无正文身份与保留策略；未审阅 procedural 内容可能进入检索；旧治理字段把未知值伪装为已知值。
+重复实现造成了真实缺口：locality 有时错误地按 vector backend 判断；部分聊天和 Workflow 路径绕过 PII 边界；向量故障会被当作空结果；旧索引可能在新索引成功前被删除；Memory job 把无输出、跳过和成功都记成 `completed`；trace/cache 没有统一的无正文身份与保留策略；未审阅 procedural 内容可能进入检索；旧治理字段把未知值表示为已知值。
 
 ## 决策
 

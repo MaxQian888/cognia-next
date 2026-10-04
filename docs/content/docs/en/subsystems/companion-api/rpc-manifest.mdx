@@ -10,7 +10,7 @@ description: How the command manifest, runtime allowlist, route catalog, and gen
 <TLDR>
   RPC dispatch is mounted once per trust boundary: `POST /api/_rpc/{name}` for paired devices and
   `POST /internal/_rpc/{name}` for the local Headless Brain. `protocol/companion-commands.json` is
-  the one contract: it supplies target, transport, capability, risk, approval, idempotency, and
+  the single contract: it supplies target, transport, capability, risk, approval, idempotency, and
   schema metadata, and the runtime allowlist is rendered from it into
   `generated/known_commands.rs` (ADR-0175) instead of being typed a second time. A Host lists what
   a caller may dispatch at `GET /api/catalog` and `GET /internal/catalog`.

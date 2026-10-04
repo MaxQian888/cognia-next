@@ -24,8 +24,7 @@ description: 面向 11 种本地编程 Agent 历史的有损可见图导入，�
 
 ## 分两阶段，因为完整解析很贵
 
-用户扫描可导入历史时，面前可能是数千个 JSONL 文件。
-为了显示一个选择列表而把它们全部解析一遍是纯粹的浪费，因此适配器契约被拆成两半：
+用户扫描可导入历史时，面前可能是数千个 JSONL 文件。显示选择列表无需完整解析所有文件，因此适配器契约分为两个阶段：
 
 | 阶段 | 适配器方法 | 代价 | 产出 |
 | --- | --- | --- | --- |
@@ -50,19 +49,16 @@ description: 面向 11 种本地编程 Agent 历史的有损可见图导入，�
 | Copilot CLI | 0.0.350 | `session-state`、SQLite 子集、task/checkpoint/background | 仅本地 chronicle |
 | Qwen Code | 0.16-alpha | JSON/JSONL 导出、resume/branch/fork/rewind | 不依赖未公开私有布局 |
 
-`buildExternalSessionSupportMatrix()` 直接从导入 registry 与 external preset catalog 生成恢复映射。
-Kiro、Droid 与 DeepSeek Harness 因缺少稳定公开 transcript 格式，保持 runtime-only。
+`buildExternalSessionSupportMatrix()` 直接从导入 registry 与 external preset catalog 生成恢复映射。Kiro、Droid 与 DeepSeek Harness 因缺少稳定公开 transcript 格式，保持 runtime-only。
 
 ## 镜像与恢复语义
 
 - `source-mirror` 会跟随来源 rewind、删除、关系移除与 child tombstone，同时保留 Cognia 本地装饰。
 - 使用 Cognia 模型继续后转为 `cognia-owned`；之后的来源变化只标记真实 divergence，不覆盖本地续聊。
-- 仅在存在 native session id 与匹配 preset 时提供原生恢复。preset 必须已配置并连接，
-  `session/resume` 必须经实时验证，原 cwd 必须存在，且握手成功；之后才转为 `native-bound`。
+- 仅在存在 native session id 与匹配 preset 时提供原生恢复。preset 必须已配置并连接，`session/resume` 必须经实时验证，原 cwd 必须存在，且握手成功；之后才转为 `native-bound`。
 - native-bound 的运行事件与文件监听回声按 native session/revision 去重。
 
-`scan.ts` 是所有「按文件组织的 JSONL 数据源」的共享驱动，
-因此新增一个适配器只需提供这两个方法，而不必自带遍历器。
+`scan.ts` 是所有「按文件组织的 JSONL 数据源」的共享驱动，因此新增一个适配器只需提供这两个方法，而不必自带遍历器。
 
 ## 代码位置
 
@@ -88,8 +84,7 @@ hooks/session-import/  components/session-import/
 lib/plugin/api/import-api.ts      # 插件可贡献数据源
 ```
 
-桌面 SQLite 读取由只读 Rust transport 完成，并限制来源 allowlist。文件树、SQLite、固定参数运行时
-transport 与用户导出文件保持独立信任边界；不会把来源内容拼接成 shell 命令。
+桌面 SQLite 读取由只读 Rust transport 完成，并限制来源 allowlist。文件树、SQLite、固定参数运行时 transport 与用户导出文件保持独立信任边界；不会把来源内容拼接成 shell 命令。
 
 ## 相关文档
 

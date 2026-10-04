@@ -1,6 +1,6 @@
 ---
 title: "0145 — Python plugins get the same reach as TypeScript ones"
-description: "A Python plugin could be called but could not call back: the host process was a pure request-responder, so every ctx.* namespace was unreachable and contextPanels was rejected outright. A reverse RPC channel on the existing pipe, an asyncio host, and two declarative panel classes close the gap without a second permission table."
+description: "Python plugins could receive calls but could not call the host. The request-only host process made every ctx.* namespace unreachable and rejected contextPanels. Adds reverse RPC on the existing pipe, an asyncio host, and two declarative panel classes. Reuses the existing permission table."
 ---
 
 # ADR 0145 — Python plugins get the same reach as TypeScript ones
@@ -146,9 +146,9 @@ where `Sidebar` was fixed at two levels.
 
 `ctx.chat` gains `addContextSelection` / `appendToComposer` / `stageIntent`
 behind `session:write`, plus a **plugin-generic** `ContextSelectionRef` variant.
-Not one variant per plugin: the host cannot know a plugin's vocabulary, and a
-`kind: "wiki"` in that union would put one plugin's nouns in the host's type
-system and force a recompile for the next one. What the host does need is what
+The host cannot know every plugin's vocabulary. A
+`kind: "wiki"` in the union would put one plugin's terms in the host type
+system and require recompilation for each new plugin-specific variant. What the host does need is what
 it needs from every kind — a chip label, a prompt heading, and where the excerpt
 came from — so those are the fields, and everything else stays inside an opaque
 `ref`.

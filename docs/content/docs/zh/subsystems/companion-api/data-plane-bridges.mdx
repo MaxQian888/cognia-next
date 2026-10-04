@@ -9,10 +9,10 @@ description: axum 如何通过三条请求/响应 bridge 访问权威 Dexie Brai
 
 <TLDR>
   Companion API handler 运行在 Rust 中，但手机所需的数据——角色、消息、会话、设置——存储在
-  **WebView** 的 IndexedDB（Dexie）中，Rust 无法直接读取。三条 bridge 以相同的模式弥合这一差距：
+  **WebView** 的 IndexedDB（Dexie）中，Rust 无法直接读取。三条桥接通道采用相同的请求/响应模式：
   Rust 发出携带 `request_id` 的 `companion://<kind>-request` Tauri 事件，以该 id 为键注册
-  `oneshot::Sender`，并等待最多 **30 秒**；TS 监听器处理请求后通过 `companion_*_response`
-  Tauri 命令将结果回传；Rust 解析 oneshot 并将结果写入 HTTP 响应。Headless 模式下，同一 bridge
+  `oneshot::Sender`，并等待最多 **30 秒**。TS 监听器处理请求后通过 `companion_*_response`
+  Tauri 命令将结果回传。Rust 解析 oneshot 并将结果写入 HTTP 响应。Headless 模式下，同一 bridge
   协议通过 `/internal/bridge` 连接 Node Brain；直连 SQLite `AppStore` 只在 Brain 未连接时提供受限
   降级能力。
 </TLDR>
@@ -26,8 +26,7 @@ description: axum 如何通过三条请求/响应 bridge 访问权威 Dexie Brai
 
 ## Bridge 模式
 
-三条 bridge 共用同一套请求/响应流程。尽管数据存在于 TS 侧，Rust 仍是发起方——因为调用来自
-Rust 持有的 HTTP 请求。
+三条 bridge 共用同一套请求/响应流程。尽管数据存在于 TS 侧，Rust 仍是发起方——因为调用来自 Rust 持有的 HTTP 请求。
 
 ```mermaid
 sequenceDiagram
@@ -56,10 +55,7 @@ sequenceDiagram
 | `desktop_messages_bridge.rs` | 9 个消息/会话/transcript 事件 | `companion_message_response` | 30 s | 消息 CRUD、会话列表、transcript capability/timeline/detail/media 读取 |
 | `desktop_writes_bridge.rs` | 统一的 `companion://desktop-write-request` `{ request_id, command, payload }` (`:35`) | `companion_desktop_write_response` (`commands.rs:231`) | 30 s (`:36`) | 全部约 40 条 Wave-2/4 变更命令 |
 
-messages bridge 扇出九个不同的事件名，但共用同一个请求 registry 与响应 resolver。writes
-bridge 则采取相反策略：通过
-`dispatch()` (`:68`) 发送**单一**事件，并在其 payload 中携带命令名——这正是 RPC manifest
-能将 40 条写入命令折叠为一条 OR 模式匹配分支的原因（`rpc.rs:1072`）。
+messages bridge 扇出九个不同的事件名，但共用同一个请求 registry 与响应 resolver。writes bridge 则采取相反策略：通过 `dispatch()` (`:68`) 发送**单一**事件，并在其 payload 中携带命令名——这正是 RPC manifest 能将 40 条写入命令折叠为一条 OR 模式匹配分支的原因（`rpc.rs:1072`）。
 
 ## TS bridge 源文件
 
@@ -75,9 +71,7 @@ WebView 侧的实现位于 `lib/companion/`。每个 `install*` 函数在启动�
 
 ## Sync 表 allowlist
 
-`sync_pull` 是批量读取路径——手机在启动时及收到失效通知时拉取表增量。允许拉取哪些表本身由
-allowlist `SyncTableRegistry`（`sync_registry.rs:34`）控制，初始值由 `with_defaults()`
-(`:45`) 填充。默认 **22** 张表：
+`sync_pull` 是批量读取路径——手机在启动时及收到失效通知时拉取表增量。允许拉取哪些表本身由 allowlist `SyncTableRegistry`（`sync_registry.rs:34`）控制，初始值由 `with_defaults()` (`:45`) 填充。默认 **22** 张表：
 
 ```text
 characters · skills · sessions · messages · workflows · workflowRuns · executionRuns
@@ -86,14 +80,11 @@ mcpServers · terminalHistory · agentTeamBoard · agentTasks · agentTaskAttemp
 templateDefinitions · templatePackages · templateInstances
 ```
 
-`contains()`（`sync_registry.rs:58`）在 `rpc.rs:993` 处对 `sync_pull` 进行门控；不在
-allowlist 中的表名会被拒绝，而非静默返回空结果。客户端的 sync handler（[同步与离线](../../ui/mobile-architecture/sync-offline)）
-与之镜像——每张允许的表对应一个 handler。
+`contains()`（`sync_registry.rs:58`）在 `rpc.rs:993` 处对 `sync_pull` 进行门控；不在 allowlist 中的表名会被拒绝，而非静默返回空结果。客户端的 sync handler（[同步与离线](../../ui/mobile-architecture/sync-offline)）与之镜像——每张允许的表对应一个 handler。
 
 ## 无头 DataPlane
 
-Companion API 代码被无头的 `cognia-server` 二进制复用，后者**没有 WebView**。`DataPlane`
-同时抽象 bridge transport 与降级存储：
+Companion API 代码被无头的 `cognia-server` 二进制复用，后者**没有 WebView**。`DataPlane` 同时抽象 bridge transport 与降级存储：
 
 ```rust title="src-tauri/src/companion_api/data_plane.rs"
 enum DataPlane {
@@ -102,17 +93,11 @@ enum DataPlane {
 }
 ```
 
-`pick()` 严格按以下顺序选择：已连接的 socket Brain、desktop WebView、最后才是进程全局
-`HEADLESS_STORE`。这就是 ADR-0059 D3 的实际实现：Brain Dexie 保持权威；SQLite 仅在 Brain
-启动或重启时提供受限降级面，不能遮蔽已经在线的 Brain。桌面端存在 WebView 时仍优先走原有
-transport，因此行为不变。
+`pick()` 严格按以下顺序选择：已连接的 socket Brain、desktop WebView、最后才是进程全局 `HEADLESS_STORE`。这就是 ADR-0059 D3 的实际实现：Brain Dexie 保持权威；SQLite 仅在 Brain 启动或重启时提供受限降级面，不能遮蔽已经在线的 Brain。桌面端存在 WebView 时仍优先走原有 transport，因此行为不变。
 
 ## 为何是 30 秒
 
-bridge 超时（`tokio::time::timeout`，例如 `sync_bridge.rs:98`）故意设置得较为宽裕。当手机
-请求到达时，桌面 WebView 可能处于后台或机器已休眠；30 秒足以让操作系统唤醒进程并完成一次
-Dexie 扫描，同时也为卡住的请求设定了上限，使 HTTP handler 不会永久挂起。超时会以
-`service_unavailable` 类错误返回给手机端，手机随后重试。
+bridge 超时（`tokio::time::timeout`，例如 `sync_bridge.rs:98`）故意设置得较为宽裕。当手机请求到达时，桌面 WebView 可能处于后台或机器已休眠；30 秒足以让操作系统唤醒进程并完成一次 Dexie 扫描，同时也为卡住的请求设定了上限，使 HTTP handler 不会永久挂起。超时会以 `service_unavailable` 类错误返回给手机端，手机随后重试。
 
 ## 相关页面
 

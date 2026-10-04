@@ -10,11 +10,10 @@ Accepted — 2026-05-09
 ## Context
 
 The visual workflow subsystem (ADR 0011) ships 32 built-in node executors
-and 5 trigger kinds. Plugins were only able to participate via a single
-escape hatch — the `action.plugin.invoke` node, which dispatches into a
-plugin's `workflow.task` extension point. That works for a one-shot
-"call my plugin" pattern but fails the moment a plugin wants to
-contribute a domain-specific node (e.g., a "Fetch from JIRA" action with
+and 5 trigger kinds. Plugins could participate only through one
+entry point — the `action.plugin.invoke` node, which dispatches into a
+plugin's `workflow.task` extension point. This supports a single
+plugin call. However, it does not let a plugin contribute a domain-specific node (e.g., a "Fetch from JIRA" action with
 its own params schema and label) or a custom trigger source (e.g., a
 GitHub webhook listener that emits trigger events on push).
 

@@ -11,7 +11,7 @@ Cognia 的同一份 React 代码同时支持三种运行模式：
 - **桌面模式** —— `pnpm tauri dev` 在 Tauri webview 中打开，具有完整 OS 访问权限。
 - **移动模式** —— `pnpm mobile:sync` 把静态导出包到 iOS/Android 的 Capacitor 项目。
 
-绝大多数组件在三种模式下表现一致；少数差异通过 `lib/tauri.ts` 的两个守卫抹平。
+绝大多数组件在三种模式下表现一致；少数平台差异通过 `lib/tauri.ts` 的两个守卫处理。
 
 ## `isTauri()` 与 `isCapacitor()` 守卫
 

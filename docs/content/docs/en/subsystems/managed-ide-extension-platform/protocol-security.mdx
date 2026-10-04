@@ -14,7 +14,7 @@ The broker secret never enters code-server's environment, which every terminal,
 task and language server inherits ([ADR-0212](../../adr/0212-the-broker-credential-is-a-file-not-an-environment)).
 The host writes a single-use bootstrap credential to a `0600` file in a private
 directory outside the user-data dir and puts only its path in
-`COGNIA_CS_AGENT_CREDENTIAL_FILE`; the extension reads and unlinks it.
+`COGNIA_CS_AGENT_CREDENTIAL_FILE`. The extension reads and unlinks the file.
 Challenge/HMAC authentication proves possession without sending the secret, and
 both sides then derive a session key from the secret and the two handshake
 nonces. Reconnects prove the session, which rotates on every hello. The content

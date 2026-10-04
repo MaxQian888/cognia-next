@@ -1,18 +1,15 @@
 ---
 title: ADR-0041 — Agent 命令自动模式（规则 + 小模型安全闸）
-description: "为内置 Agent 的命令调用模块补全：OpenCode 式的权限通配规则集 + OpenClaw 式的自动批准闸——一个确定性命令安全分类器（复合命令 + 提权感知）自动放行安全命令并拒绝灾难性命令，可选的小模型裁判处理不确定的中间地带，休眠的通配规则集被接入 sidecar canUseTool，整套策略通过 ctx.terminal 暴露给插件。"
+description: "为内置 Agent 的命令调用模块补全：OpenCode 式的权限通配规则集 + OpenClaw 式的自动批准闸——一个确定性命令安全分类器（复合命令 + 提权感知）自动放行安全命令并拒绝灾难性命令，可选的小模型裁判处理无法明确分类的命令，此前未使用的通配规则集接入 sidecar canUseTool，整套策略通过 ctx.terminal 暴露给插件。"
 ---
 
 # ADR-0041 — Agent 命令自动模式
 
-**状态**：已接受（2026-06-01）
-**作者**：Max Qian + Claude Opus 4.8
-**基于**：`feat/agent` 中休眠的通配规则集与终端子系统（ADR-0031/0033/0039）
-**影响**：`lib/claude/permissions/*`（新增）、`lib/claude/build-options.ts`、`lib/claude/types.ts`、`sidecar/dispatch/{anthropic,permission-resolver}.mjs`、`hooks/chat/use-claude-chat.ts`、`lib/plugin/registries/command-safety-registry.ts`（新增）、`lib/plugin/api/terminal-api.ts`、`lib/plugin/{core/manager,core/validation,security/permission-guard}.ts`、`types/plugin/plugin.ts`、`crates/cognia-cli/src/cmd_lint.rs`、`components/settings/agent-runtime/command-auto-mode-card.tsx`（新增）、`i18n/messages/{en,zh-CN}.json`
+**状态**：已接受（2026-06-01）**作者**：Max Qian + Claude Opus 4.8 **基于**：`feat/agent` 中休眠的通配规则集与终端子系统（ADR-0031/0033/0039）**影响**：`lib/claude/permissions/*`（新增）、`lib/claude/build-options.ts`、`lib/claude/types.ts`、`sidecar/dispatch/{anthropic,permission-resolver}.mjs`、`hooks/chat/use-claude-chat.ts`、`lib/plugin/registries/command-safety-registry.ts`（新增）、`lib/plugin/api/terminal-api.ts`、`lib/plugin/{core/manager,core/validation,security/permission-guard}.ts`、`types/plugin/plugin.ts`、`crates/cognia-cli/src/cmd_lint.rs`、`components/settings/agent-runtime/command-auto-mode-card.tsx`（新增）、`i18n/messages/{en,zh-CN}.json`
 
 ## 背景
 
-当内置 Agent 执行 Shell 命令（`Bash`，或 sidecar 内置工具 `shell_execute_advanced` / `start_process`）时，渲染端的 `permission_request` 处理器总是弹出手动批准框（除非该工具在用户的「始终允许」列表里）。没有任何自动安全判断：`git status` 和 `rm -rf /` 弹出完全一样的提示。同时，一个 OpenCode 启发的权限**规则集**模块（`lib/claude/permissions/ruleset.ts`，`工具 → 通配 → allow|ask|deny` 解析器）虽然写好且自带测试，却**从未被任何地方引用**——处于休眠状态。
+当内置 Agent 执行 Shell 命令（`Bash`，或 sidecar 内置工具 `shell_execute_advanced` / `start_process`）时，渲染端的 `permission_request` 处理器总是弹出手动批准框（除非该工具在用户的「始终允许」列表里）。没有任何自动安全判断：`git status` 和 `rm -rf /` 弹出完全一样的提示。同时，一个 OpenCode 启发的权限**规则集**模块（`lib/claude/permissions/ruleset.ts`，`工具 → 通配 → allow|ask|deny` 解析器）虽然写好且自带测试，却**从未被任何地方引用**，因此没有参与运行。
 
 目标：为 Agent 的命令调用模块补全一个真正的**自动模式**，仿照 OpenCode 与 OpenClaw 的执行闸自动判断命令安全性，且不削弱既有的批准路径，并把整套机制暴露给插件。
 

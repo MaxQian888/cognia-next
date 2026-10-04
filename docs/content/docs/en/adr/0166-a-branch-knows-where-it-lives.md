@@ -1,6 +1,6 @@
 ---
 title: "0166 - A branch knows where it lives"
-description: "Branches and worktrees were never joined in the data layer, so the picker offered checkouts against worktrees the app had cut itself. The join lands in Rust, the three structural surfaces move out of an overflow menu into one navigator, and the panel measures its own pane instead of the window."
+description: "Branches and worktrees were separate in the data layer, so the picker offered checkouts against worktrees that the app had created. Joins them in Rust. Moves three structural surfaces from an overflow menu into one navigator. The panel measures its own pane instead of the window."
 ---
 
 # ADR 0166 - A branch knows where it lives
@@ -38,7 +38,7 @@ the diff. The branch list lived in a 288px popover hanging off the header chip.
 Fetch and pull, which are one-tap habits, had top-level buttons. Meanwhile
 `/workspace` mounted the entire `SourceControlPanel` a second time as a tab.
 
-**Nothing measured the right thing.** The panel forked its layout on
+**The layout measured the window instead of the pane.** The panel forked its layout on
 `useMediaQuery("(max-width: 959.98px)")`, a question about the window, and used
 the answer for a pane. Nested in a workspace tab, a 1000px window produced a
 side-by-side split with no room for it. Separately, every right-side sheet

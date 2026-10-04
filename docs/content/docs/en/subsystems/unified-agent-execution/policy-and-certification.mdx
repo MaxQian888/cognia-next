@@ -34,8 +34,8 @@ TS↔Rust byte parity for the transport header validator.
 
 A ticket (`sk-cognia-rt-…`, memory-only secret, metadata persisted) freezes a
 candidate deployment set + model bindings at mint time. Requests on a ticket
-bypass alias/decide entirely; unmapped models 400; credential resolution
-happens per attempt at send time; failover is pre-first-byte only, sticky
+bypass alias/decide entirely. Unmapped models return 400. The runtime resolves credentials
+for each attempt at send time. Failover occurs only before the first byte. Sticky
 affinity never switches accounts on 401/403. Snapshot publication is CAS'd
 (`profileVersion` + authority) — no last-writer-wins between desktop and
 headless publishers.

@@ -34,6 +34,6 @@ ADR-0083 让所有右侧表面共用一个外壳，带一条 48px 的活动图�
 
 除非用户主动关闭，每条右栏现在都固定占用 48px；当 `sidebarSide: "right"` 时右边缘会并排两条图标列（64px 导航 + 48px 工作台）。这是接受的代价：两条栏职责不同，而那个开关就是退路。
 
-`workbenchRailPersistent` 由三个持有容器的宿主消费，**刻意不被项目编辑器读取**——它没有容器：它的收起一直就是 rail-only，而且一旦整条消失就没有用户可达的路径把它找回来（`showContextWorkbench` 是调用方传的 prop，不是控件），所以在那里做零宽折叠会把工作台锁死。由「`manageOwnWidth` 且不传 `onCollapse` 的宿主仍通过 per-scope mode 到达 rail-only」这条测试钉住。
+`workbenchRailPersistent` 由三个持有容器的宿主消费，**刻意不被项目编辑器读取**——它没有容器：它的收起一直就是 rail-only，而且一旦整条消失就没有用户可达的路径把它找回来（`showContextWorkbench` 是调用方传的 prop，不是控件），因此，零宽折叠会使用户无法重新打开工作台。由「`manageOwnWidth` 且不传 `onCollapse` 的宿主仍通过 per-scope mode 到达 rail-only」这条测试验证。
 
 工作流编辑器的桌面分支此前同时跑着两套「已关闭」的概念——一个覆盖在零宽面板上的本地 `rightCollapsed` state，加上其侧栏回落到的 per-scope mode。现在它像其他宿主一样传 `onCollapse`/`onEnsureVisible`，只留一个持有者。

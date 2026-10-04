@@ -101,7 +101,7 @@ struct would otherwise drop it at the boundary) → the sidecar `createOpenAI`.
 
 ## Verification
 
-Jest 316 / 11 suites; sidecar `node --test` 63; Rust `cargo test` 14; typecheck
-0 new errors over the pre-existing dev baseline; ESLint clean; i18n key parity +
-sort OK; the six project auditors (test-gap, i18n, static-export, tauri-rust,
-pii-gate, wiring) clean.
+Validation results: Jest 316 / 11 suites; sidecar `node --test` 63;
+Rust `cargo test` 14. Typecheck reported 0 new errors over the pre-existing
+dev baseline. ESLint was clean. i18n key parity + sort passed. The six project
+auditors (test-gap, i18n, static-export, tauri-rust, pii-gate, wiring) were clean.

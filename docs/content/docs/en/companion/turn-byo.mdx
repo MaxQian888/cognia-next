@@ -5,16 +5,13 @@ description: How to plug a TURN server into the WebRTC tier when ICE direct conn
 
 # BYO TURN credentials
 
-Cognia's WebRTC tier (ADR-0021) tries to open a direct DataChannel
-between the mobile app and the home desktop. On the common NAT
-topologies (full-cone, restricted-cone, port-restricted) STUN-based
-hole punching is enough. On **symmetric NAT** — most commonly seen on
-cellular carriers and hotel guest networks — STUN can't get through and
-the tier falls back to cloudflared or LAN.
+Cognia's WebRTC tier (ADR-0021) tries to open a direct DataChannel between the mobile app and the home desktop.
+STUN-based hole punching is sufficient for common NAT types: full-cone, restricted-cone, and port-restricted.
+STUN cannot establish that path through **symmetric NAT**, which is most common on cellular carriers and hotel guest networks.
+The tier then uses cloudflared or LAN instead.
 
-If you regularly hit symmetric NAT (cellular while travelling, certain
-office VPNs, university Wi-Fi), plugging a TURN server gets you a
-WebRTC-relayed path that still avoids the cloudflared tunnel.
+If you regularly encounter symmetric NAT, a TURN server provides a WebRTC relay path without the cloudflared tunnel.
+Examples include cellular connections during travel, certain office VPNs, and university Wi-Fi.
 
 ## What you need
 

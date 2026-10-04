@@ -10,7 +10,7 @@ description: The PlatformAdapter contract that every IM connector implements —
 <TLDR>
   Every platform connector implements the single **`PlatformAdapter`** interface
   (`types/connectors/adapter.ts:135`): lifecycle (`start`/`stop`/`health`), one non-optional mutation
-  (`send`), a fan of optional mutations (`streamReply?`/`edit?`/`delete?`/`setTyping?`/`uploadFile?`/`fetchHistory?`),
+  (`send`), a set of optional mutations (`streamReply?`/`edit?`/`delete?`/`setTyping?`/`uploadFile?`/`fetchHistory?`),
   and the **required synchronous** `a2uiCapability()` (`types/connectors/adapter.ts:180`) read on the hot send
   path by `build-options`. The runtime **factory** `buildAdapterFromRow(row)`
   (`lib/connectors/adapter-registry.ts:42`) switches on `row.type` across 11 builders, each probing its

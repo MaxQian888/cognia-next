@@ -1,6 +1,6 @@
 ---
 title: 权限模型
-description: 13 个 scope 的默认拒绝白名单——它是"桥能看到什么"的唯一真相源。checkScope、四个按入口的包装器，以及资源的软/硬鉴权切分。
+description: 13 个 scope 的默认拒绝白名单——它是桥接服务可访问内容的唯一依据。checkScope、四个按入口的包装器，以及资源的软/硬鉴权切分。
 ---
 
 # 权限模型
@@ -9,16 +9,15 @@ description: 13 个 scope 的默认拒绝白名单——它是"桥能看到什�
 
 <TLDR>
   每次 MCP 调用在做任何工作前都先经过 `checkScope`（`permission-gate.ts:25`）。它的输入只有所请求的
-  `BridgeScope` 和来自 `AppSettings.externalBridge` 的 `enabledScopes` 白名单。白名单是**唯一**真相源：
-  没有任何隐式的"首次使用即启用"，且 `undefined` 设置会失败到关闭态。四个轻包装器把不同入口规整到同一个
+  `BridgeScope` 和来自 `AppSettings.externalBridge` 的 `enabledScopes` 白名单。白名单是**唯一**权限依据：
+  没有任何隐式的「首次使用即启用」，且 `undefined` 设置会按默认拒绝原则处理。四个轻包装器把不同入口规整到同一个
   `checkScope`——`checkToolCall`（查表）、`checkRuntimeCall`（按 `entityType`）、`checkRagCall`（按 `scope` 参数）。
   资源使用两层门：`list` 用**软门**（不在 scope 内的条目被隐藏），`read` 用**硬门**（即便 URI 已知也重新校验 scope）。
 </TLDR>
 
 ## 13 个 scope
 
-每个 *(能力 × 内容)* 组合一个开关（`types/wiki/index.ts:37-90`）。设置 UI 遍历 `ALL_BRIDGE_SCOPES`，
-为每个值渲染一个开关。
+每个 *(能力 × 内容)* 组合一个开关（`types/wiki/index.ts:37-90`）。设置 UI 遍历 `ALL_BRIDGE_SCOPES`，为每个值渲染一个开关。
 
 | Scope | 默认 | 面 | 解锁内容 |
 | --- | :---: | --- | --- |
@@ -36,8 +35,7 @@ description: 13 个 scope 的默认拒绝白名单——它是"桥能看到什�
 | `inbox:connectors:read` | ❌ | **动作** | 5 个只读连接器工具（适配器 / 会话 / 审计 / 草稿） |
 | `inbox:connectors:send` | ❌ | **动作** | `connectors_send_message` —— 入队一条 AI 回复 |
 
-`DEFAULT_ENABLED_SCOPES = ["wiki:cognia", "rag:cognia"]`（`types/wiki/index.ts:93`）。连接器上的
-`read`/`send` 切分沿用 `rag:twin` 的敏感度先例：运维者可在不启用自动回复的前提下授予可观测性。
+`DEFAULT_ENABLED_SCOPES = ["wiki:cognia", "rag:cognia"]`（`types/wiki/index.ts:93`）。连接器上的 `read`/`send` 切分沿用 `rag:twin` 的敏感度先例：运维者可在不启用自动回复的前提下授予可观测性。
 
 ## `checkScope` —— 门
 
@@ -55,8 +53,7 @@ export function checkScope(
 }
 ```
 
-三个按序的失败到关闭条件：无设置 → 无主开关 → scope 不在白名单。`reason` 字符串既是外部代理看到的内容
-（作为 MCP error），也是落入审计行的内容。
+三个按序的失败到关闭条件：无设置 → 无主开关 → scope 不在白名单。`reason` 字符串既是外部代理看到的内容（作为 MCP error），也是落入审计行的内容。
 
 ## 四个入口包装器
 
@@ -80,10 +77,8 @@ flowchart LR
   class T,RQ,RS,RES,CT,CR,CRA,CS,G,A,Deny,Run n
 ```
 
-- **`checkToolCall(settings, name)`**（`:66`）—— 查 `TOOL_TO_SCOPE[name]`；未注册的名字被以
-  `unknown tool '<name>'` 拒绝，所以拼写错误不会意外通过。
-- **`checkRuntimeCall(settings, entityType)`**（`:78`）—— 查 `RUNTIME_ENTITY_TO_SCOPE[entityType]`；
-  未知实体 → `unknown runtime entity`。`runtime_query` 需要它，因为 scope 取决于参数而非工具名。
+- **`checkToolCall(settings, name)`**（`:66`）—— 查 `TOOL_TO_SCOPE[name]`；未注册的名字被以 `unknown tool '<name>'` 拒绝，所以拼写错误不会意外通过。
+- **`checkRuntimeCall(settings, entityType)`**（`:78`）—— 查 `RUNTIME_ENTITY_TO_SCOPE[entityType]`；未知实体 → `unknown runtime entity`。`runtime_query` 需要它，因为 scope 取决于参数而非工具名。
 - **`checkRagCall(settings, ragScope)`**（`:96`）—— 把请求的 rag scope 映射到 `BridgeScope`：
   `"twin" → rag:twin`，`"user-repo" → rag:user-repo`，而 `"cognia-self" | "all" | "" | undefined →
   rag:cognia`。其它值 → `unknown rag scope`。
@@ -105,9 +100,7 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
 }
 ```
 
-`runtime_query` 故意缺席 —— 它带一个 `entityType` 参数，故 `RUNTIME_ENTITY_TO_SCOPE`（`types.ts:55`）
-把 `skill → runtime:skills`、`character → runtime:characters`、`twin → runtime:twins`、
-`plugin → runtime:plugins`、`agent-team → runtime:agent-teams`。
+`runtime_query` 故意缺席 —— 它带一个 `entityType` 参数，故 `RUNTIME_ENTITY_TO_SCOPE`（`types.ts:55`）把 `skill → runtime:skills`、`character → runtime:characters`、`twin → runtime:twins`、`plugin → runtime:plugins`、`agent-team → runtime:agent-teams`。
 
 ## 资源的软/硬鉴权
 
@@ -118,14 +111,11 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
 | `resources/list` | **软** | 该条目被静默地从列举中省略——无错误，代理只是永远看不到读不到的 URI。 |
 | `resources/read` | **硬** | 即便 URI 已知也重新跑 `checkScope`；拒绝会抛出，SDK 将其转成 JSON-RPC error。 |
 
-对 wiki 资源，所需 scope 按 `article.scope` 逐篇推导（`cognia-self → wiki:cognia`，否则 `wiki:user-repo`），
-因此同一个 URI 族横跨两个 scope。
+对 wiki 资源，所需 scope 按 `article.scope` 逐篇推导（`cognia-self → wiki:cognia`，否则 `wiki:user-repo`），因此同一个 URI 族横跨两个 scope。
 
 ## `computer_use` 的两层防御
 
-`mcp:computer-use` scope 只是**第一道**门。通过 `checkScope` 的调用仍会被 `automation_proxy` 强制走 Rust 侧的
-**自动化权限门**（`Surface::Mcp`），后者可独立拒绝、要求同意并限流。见 [动作工具](./action-tools) 与
-[传输](./transports#automation-proxy)。两道门互相独立：启用 MCP scope 不会绕过桌面自动化策略。
+`mcp:computer-use` scope 只是**第一道**门。通过 `checkScope` 的调用仍会被 `automation_proxy` 强制走 Rust 侧的**自动化权限门**（`Surface::Mcp`），后者可独立拒绝、要求同意并限流。见 [动作工具](./action-tools) 与[传输](./transports#automation-proxy)。两道门互相独立：启用 MCP scope 不会绕过桌面自动化策略。
 
 ## 相关
 

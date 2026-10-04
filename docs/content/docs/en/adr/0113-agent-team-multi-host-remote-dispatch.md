@@ -21,7 +21,7 @@ The missing capability is bounded: a headless brain cannot select two concurrent
 
 2. **Agent RPC v2 is the only runtime protocol.** `session/create` accepts an additive `commandId` and optional `HandoffEnvelope`. The envelope has one canonical definition in `@cognia/agent`; `@cognia/agent-config-types/handoff-envelope` is a compatibility re-export. Remote handoff rejects caller-controlled `cwd` and requires the `worker-dispatch-v1` capability.
 
-3. **Authenticated worker identity wins over self-reporting.** `cognia-agent worker enroll` exchanges a one-time enrollment for a Companion device credential. `worker connect` uses DPoP-authenticated HTTP to mint a short-lived, single-use socket ticket, then attaches to `/ws/worker`. Public PKI uses normal CA validation; LAN self-signed deployments pin the peer X.509 SPKI SHA-256 fingerprint without globally disabling TLS validation. Every reconnect remints a ticket and recreates the socket/RPC streams. The front door derives `hostRef` from the authenticated device and requires the narrow `agent.worker` grant. Management DTOs return that derived reference instead of asking clients to reconstruct it.
+3. **Authenticated worker identity wins over self-reporting.** `cognia-agent worker enroll` exchanges a one-time enrollment for a Companion device credential. `worker connect` uses DPoP-authenticated HTTP to mint a short-lived, single-use socket ticket, then attaches to `/ws/worker`. Public PKI uses normal CA validation. LAN self-signed deployments pin the peer X.509 SPKI SHA-256 fingerprint without globally disabling TLS validation. Every reconnect remints a ticket and recreates the socket/RPC streams. The front door derives `hostRef` from the authenticated device and requires the narrow `agent.worker` grant. Management DTOs return that derived reference instead of asking clients to reconstruct it.
 
 4. **The bridge remains opaque.** Bridge protocol v3 adds versioned worker attach, frame, and detach envelopes. It multiplexes newline-delimited Agent RPC frames and applies the existing frame and backpressure ceilings; it does not parse prompts or persist task state. Handshake timeout is 10 seconds, heartbeat interval is 25 seconds, and a worker is offline after 90 seconds without activity.
 
@@ -79,3 +79,23 @@ The per-worker check is unchanged and remains the real fail-closed boundary:
 a worker that does not advertise `taskWorkspace.enabled` is refused placement
 with `task_workspace_unavailable`.
 
+## 2026-10-03 amendment — saved host bindings fail closed
+
+A saved `auto` or `pinned` host target is authoritative even when
+`agentTeamRemoteDispatch` is disabled. New dispatches fail before runtime or
+workspace preparation with a translated reason; users must enable remote
+dispatch or explicitly choose `colocate` before retrying. The flag is checked
+again after durable admission. Missing durable admission also fails closed.
+Neither condition enters a local runtime branch.
+
+With remote dispatch enabled, offline pins and unavailable worker capacity
+retain the existing durable queued-child behavior. The run is parked and can
+be resumed when a worker is ready; this is not a promise of automatic wake or
+retry. The UI distinguishes that queue from a disabled-dispatch refusal.
+
+Host-only bindings remain effective when deployment mode is `inherit`.
+Their resolved target feeds the unified resolver policy. After placement,
+`rebindResolvedAgentExecutionHost` remains the sole authority for freezing the
+authenticated worker and recomputing the fingerprint before lease acquisition.
+Cross-host preflight pins its envelope and no longer returns an unused second
+`hostPin` policy. The lease and handoff carry the same host and fingerprint.

@@ -56,8 +56,8 @@ turns a misleading dead command into a working one.
 
 `findKeybindingConflicts()` existed but was never called. `/keybind <action>
 <key>` now computes the post-rebind table and **refuses** a spec that collides
-with another action's key, naming the conflict and how to resolve it — instead of
-letting the first action in `KEYBINDABLE_ACTIONS` silently win the shared key.
+with another action's key. It names the conflict and explains how to resolve it.
+Previously, the first action in `KEYBINDABLE_ACTIONS` silently used the shared key.
 Rebinding an action onto its own current key is still allowed.
 
 ### 4 · Complete the genuinely-missing argument hints

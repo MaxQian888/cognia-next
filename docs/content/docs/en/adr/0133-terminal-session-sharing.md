@@ -1,6 +1,6 @@
 ---
 title: ADR-0133 — Terminal session sharing over the durable host (design A)
-description: A hosted terminal is shared with paired devices by granting them the existing remote-terminal capability and reusing the host's controller lease — the host broadcasts a participant roster, the dock gains a Share dialog and the chip a participant list; the dormant invite-token / editor-role collaboration model is removed.
+description: "Shares a hosted terminal with paired devices through the existing remote-terminal capability and the host's controller lease. The host broadcasts a participant roster. The dock adds a Share dialog, and the chip shows participants. Removes the dormant invite-token / editor-role collaboration model."
 ---
 
 # ADR-0133 — Terminal session sharing over the durable host (design A)
@@ -16,7 +16,7 @@ description: A hosted terminal is shared with paired devices by granting them th
 
 `lib/terminal/collaboration/{types,share-manager}.ts` described a collaboration model — invite objects with a `Math.random` token carried in a share URL, three roles (`controller` / `editor` / `viewer`), a private `CollabMessage` data-channel protocol — that **nothing imported** and that the host could not enforce: the durable host (`crates/cognia-terminal`) has exactly two lease roles (the controller and read-only viewers via `NotController`), authenticates remote clients per paired device with a single-use socket ticket plus the `terminal.open` capability, and already re-checks that capability every second while an attachment is live. Meanwhile the host already supported multiple attachments per session and a controller lease with take/release, but the renderer could not see **who** was attached: `SessionInfo` carried only `attachedClients` and `currentController`, and the host did not re-send the snapshot when the roster changed.
 
-Options weighed in the grill: **A** — share to paired devices by granting the existing remote-terminal capability and reuse the host lease (no new transport, no tokens); B — a per-session invite token / link over the WAN signaling path; C — leave the model dormant. A was chosen: it is the only one the existing security boundary already enforces, and it needed no new frame kind or capability.
+Options considered during review: **A** — share to paired devices by granting the existing remote-terminal capability and reuse the host lease (no new transport, no tokens); B — a per-session invite token / link over the WAN signaling path; C — leave the model dormant. A was chosen: it is the only one the existing security boundary already enforces, and it needed no new frame kind or capability.
 
 ## Decision
 

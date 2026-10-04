@@ -8,7 +8,7 @@ description: Durable Agent projection, sidecar Runtime Gateway discovery, guarde
 <Status variant="stable">Stable · durable `mcpSyncJobs` · sidecar Runtime Gateway · `mcpAuditLog` (10k / 30d)</Status>
 
 <TLDR>
-  Each `McpServer` row carries an `appsEnabled` matrix mapping `AgentId → boolean`. When you flip a chip,
+  Each `McpServer` row carries an `appsEnabled` matrix mapping `AgentId → boolean`. When you toggle a chip,
   the CRUD layer debounces a write of that server into the agent's on-disk MCP config (`lib/claude/sync`).
   Because files can drift from Cognia's view (hand-edits, failed syncs), `use-agent-status` computes
   per-agent **drift** — `missing` (projected but absent from file) and `unmanaged` (in file, unknown to

@@ -1,11 +1,11 @@
 ---
 title: Build-options 管线
-description: resolveSendOptions —— 把所有 UI 状态坍缩成单个 SendOptions 负载的唯一汇聚点。全部 41 个有序贡献者、优先级链与系统提示词装配。
+description: resolveSendOptions 是将全部 UI 状态汇总为单个 SendOptions 负载的唯一入口。本页介绍 41 个有序贡献者、优先级链和系统提示词装配。
 ---
 
 # Build-options 管线
 
-`lib/claude/build-options.ts` 之所以存在，是为了让**每一个**能力——角色、技能、Twin、记忆、目标、A2UI、computer-use、sandbox、插件、路由——都通过恰好一个函数影响一次对话。`resolveSendOptions`（`:336`）在约 41 个有序段落里修改单个 `opts: SendOptions` 对象并返回它（`:1380`）。代码库中别处都不构造 `SendOptions`。
+`lib/claude/build-options.ts` 通过唯一入口，让角色、技能、Twin、记忆、目标、A2UI、computer-use、sandbox、插件和路由等能力共同影响一轮对话。`resolveSendOptions`（`:336`）按约 41 个有序代码段修改单个 `opts: SendOptions` 对象，并返回该对象（`:1380`）。代码库中的其他位置不构造 `SendOptions`。
 
 <TLDR>
   `resolveSendOptions(ctx)`（`build-options.ts:336`）构建一个 `opts` 对象。贡献者按固定顺序运行并遵循

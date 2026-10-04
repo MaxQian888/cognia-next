@@ -1,6 +1,6 @@
 ---
 title: "0154 — The browser hands over a page, not a session"
-description: "A Chrome side panel that pairs with the desktop Host as its own least-privilege device class, captures a page only on an explicit gesture, and turns it into one new Cognia task. It is not a Browser Use dependency, not a second chat client, and not an automation transport."
+description: "Adds a Chrome side panel that pairs with the desktop Host as a separate least-privilege device class. An explicit user gesture captures a page and creates one Cognia task. The panel has no Browser Use dependency, chat-client role, or automation-transport role."
 ---
 
 # ADR 0154 — The browser hands over a page, not a session
@@ -16,9 +16,9 @@ title, the URL and some text into the desktop app, or gives up on that context.
 
 Two research passes framed the answer. The [market
 comparison](https://github.com/cognia/cognia-next) of browser AI products found
-that "a side panel that answers questions about the current page" is table
-stakes — Gemini in Chrome, Edge Copilot, Comet, Dia, Brave, Firefox, Sider all
-have it — and that the differentiators are elsewhere: visible context selection,
+that "a side panel that answers questions about the current page" is already
+available in Gemini in Chrome, Edge Copilot, Comet, Dia, Brave, Firefox and Sider.
+The products instead differ in: visible context selection,
 layered permissions, task-scoped boundaries, take-over, and the ability to route
 between local, embedded and cloud browsers. The [Browser Use
 study](https://github.com/browser-use/browser-use) established the negative

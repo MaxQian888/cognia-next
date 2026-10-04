@@ -1,6 +1,6 @@
 ---
 title: "ADR-0045 — 统一计划执行中心"
-description: "将内置代理的计划模式从SDK直通提升为一类结构化AgentPlan，作为所有多步代理执行的规范中间表示（IR）。计划是DAG的打字PlanSteps;批准时，它运行在一个混合自适应引擎上，该引擎在对话中执行简单的线性计划，并将delegation/parallel计划编译到现有的工作流编排器中。计划有四种编写方式（ExitPlanMode捕获、显式代理工具、规划器LLM和Team/Goal投影），支持手动/步进失败/判断偏差重新规划，并统一了之前断开的三种拆解驱动机制（计划模式、目标模式、Agent Team）。"
+description: "将内置代理的计划模式从 SDK 原样传递改为使用结构化 AgentPlan，作为所有多步代理执行的规范中间表示（IR）。计划由带类型的 PlanSteps 组成 DAG；批准后，它运行在一个混合自适应引擎上，该引擎在对话中执行简单的线性计划，并将delegation/parallel计划编译到现有的工作流编排器中。计划有四种编写方式（ExitPlanMode捕获、显式代理工具、规划器LLM和Team/Goal投影），支持手动、步骤失败或判断偏差触发的重新规划，并统一了之前断开的三种拆解驱动机制（计划模式、目标模式、Agent Team）。"
 ---
 
 # ADR-0045 — 统一计划执行中心
@@ -17,7 +17,7 @@ description: "将内置代理的计划模式从SDK直通提升为一类结构化
 
 整个**结构化计划模型是死代码**：`types/agent/agent.ts`（`AgentPlan`、`PlanStep`、`PlanRefinementRequest/Result`、`CreatePlanInput`、`AgentExecutionContext`、`PLAN_REFINEMENT_PROMPTS`）仓库范围内**零导入者**。其配套插件hook `onAgentPlanCreate` / `onAgentPlanStepComplete` 被降级为 `DEPRECATED_HOOK_POINTS`（ADR-0016）。这是一种“计划→、批准→完善→执行”的理想设计，但从未建成。
 
-与此同时，**编曲成熟但脱节**。Agent Team 运行时（`lib/ai/agent/team/agent-team-runtime.ts:runTeamLifecycle`）会门禁能力+计划审批，然后**将任务DAG编译成`VisualWorkflow`**（`lib/ai/agent/team/synthesize-workflow.ts`），并委派给`runWorkflow`——继承幂等性、崩溃恢复、并发和事件日志。但**内置的聊天代理无法直接访问编排**：唯一的聊天→团队路径是`action.team.run`工作流节点。而**Goal**子系统（`lib/goal/*`）是一个*第三*自驱动循环（turn-driver + judge + subgoal 分解），与两者都不共享。
+与此同时，**编排功能成熟，但尚未与内置聊天 Agent 连接**。Agent Team 运行时（`lib/ai/agent/team/agent-team-runtime.ts:runTeamLifecycle`）执行能力检查与计划审批，然后**将任务 DAG 编译成 `VisualWorkflow`**（`lib/ai/agent/team/synthesize-workflow.ts`），并委派给 `runWorkflow`——继承幂等性、崩溃恢复、并发和事件日志。但**内置的聊天代理无法直接访问编排**：唯一的聊天→团队路径是 `action.team.run` 工作流节点。而**Goal**子系统（`lib/goal/*`）是一个*第三*自驱动循环（turn-driver + judge + subgoal 分解），与两者都不共享。
 
 结果是**三个并行的分解-驱动机制**，且没有统一表示：
 
@@ -190,104 +190,42 @@ Plan persistence、approval、projection、execution 以及 plan/goal/team integ
 
 ## 工作区修订（2026-08-26）
 
-§3 说计划是「一张由带类型的 `PlanStep` 组成的 DAG」，却没有说这些步骤**在哪里**执行。
-`step-dispatch.ts` 调 `executeAgent` 时根本不传 `cwd`，于是每个 `agent_turn` 步骤都跑在
-应用默认工作目录里——而不是计划所属的工作区。在项目里创建的计划看起来就像 agent 无视了
-仓库，而且这在任何并发度下都成立，不只是并行时。
+§3 说计划是「一张由带类型的 `PlanStep` 组成的 DAG」，却没有说这些步骤**在哪里**执行。`step-dispatch.ts` 调 `executeAgent` 时根本不传 `cwd`，于是每个 `agent_turn` 步骤都跑在应用默认工作目录里——而不是计划所属的工作区。在项目里创建的计划看起来就像 agent 无视了仓库，而且这在任何并发度下都成立，不只是并行时。
 
-**一次运行只有一个目录，且只解析一次。** `resolvePlanExecutionRoot`
-（`lib/agent/plan/step-workspace.ts`）读取计划所属工作区的主根，退回到会话自己的工作目录；
-`PlanRunContext` 在整次运行期间携带它。解析不出来仍然是一个真实的答案：两者都没有的计划
-本来就没有目录可指，凭空造一个路径比让运行器用它自己的默认值更糟。
+**一次运行只有一个目录，且只解析一次。** `resolvePlanExecutionRoot`（`lib/agent/plan/step-workspace.ts`）读取计划所属工作区的主根，退回到会话自己的工作目录；`PlanRunContext` 在整次运行期间携带它。解析不出来仍然是一个真实的答案：两者都没有的计划本来就没有目录可指，凭空造一个路径比让运行器用它自己的默认值更糟。
 
-**逐步骤隔离是被否决的，不是被推迟的。** 早先的草案让每个步骤通过
-`AgentTeamRegistryWorkspaceController` 各切一个工作树。那对团队是对的——成员做的是彼此独立
-的事，最后再收敛；对计划是错的：看不见第 2 步写了什么的第 3 步，根本不成其为计划。计划是
-一件事，它的步骤共用同一个检出。
+**逐步骤隔离是被否决的，不是被推迟的。** 早先的草案让每个步骤通过 `AgentTeamRegistryWorkspaceController` 各切一个工作树。那对团队是对的——成员做的是彼此独立的事，最后再收敛；对计划是错的：看不见第 2 步写了什么的第 3 步，根本不成其为计划。计划是一件事，它的步骤共用同一个检出。
 
-**而这恰恰是并行步骤不能重叠的理由。** `config.maxConcurrency` 会同时放行多个步骤，两个带
-工具的 agent 在同一个检出里会把编辑、构建和 git 操作交织在一起——正是
-`lib/execution/slot-key.ts` 存在要防的那类损坏。现在步骤会占用其目录的执行位。审批门、MCP
-调用，以及没有目录的计划里的任何步骤都不占位，并行度与以前相同。
+**而这恰恰是并行步骤不能重叠的理由。** `config.maxConcurrency` 会同时放行多个步骤，两个带工具的 agent 在同一个检出里会把编辑、构建和 git 操作交织在一起——正是 `lib/execution/slot-key.ts` 存在要防的那类损坏。现在步骤会占用其目录的执行位。审批门、MCP 调用，以及没有目录的计划里的任何步骤都不占位，并行度与以前相同。
 
-**租约刻意不带 `sessionId`。** broker 会豁免任何指向「已有活跃 leg 的会话」的租约——这条规则
-是为了让前台聊天回合不被自己的流阻塞。计划的每个步骤共享计划的会话，所以带上它会让第一个
-之后的每个步骤都被豁免，执行位将什么都不串行。取消仍然能到达这些步骤：计划自己的
-`AbortController` 作为调用方信号链进了租约。
+**租约刻意不带 `sessionId`。** broker 会豁免任何指向「已有活跃 leg 的会话」的租约——这条规则是为了让前台聊天回合不被自己的流阻塞。计划的每个步骤共享计划的会话，所以带上它会让第一个之后的每个步骤都被豁免，执行位将什么都不串行。取消仍然能到达这些步骤：计划自己的 `AbortController` 作为调用方信号链进了租约。
 
 ## 文档界面修订（2026-11-25）
 
-§6 提到了两个界面（审批卡、追踪器），但计划的*文档*形态一直是隐式的。
-plan-preview 原型工作把它确定下来，落地遵循 Cursor 与 Windsurf 采用的
-「计划文件即界面」模型，而非自定义查看器。
+§6 提到了两个界面（审批卡、追踪器），但计划的*文档*形态一直是隐式的。plan-preview 原型工作把它确定下来，落地遵循 Cursor 与 Windsurf 采用的「计划文件即界面」模型，而非自定义查看器。
 
-**`metadata.planText` 是忠实来源；`steps[]` 是它的投影。** 从
-`exit_plan_mode` 捕获的计划通过 `PlanDocument`
-（`components/agent/plan/plan-document.tsx`）渲染其 markdown 正文 —— 而非
-有损的标题列表。可执行步骤内嵌在文档自身步骤列表的位置，因此编辑步骤行
-就是在改写 markdown 本身（`lib/agent/plan/plan-doc.ts` 围绕步骤章节切分
-正文并重建）。`steps[]` 与文档不可能再出现漂移，这正是同时携带两者的
-意义。
+**`metadata.planText` 是忠实来源；`steps[]` 是它的投影。** 从 `exit_plan_mode` 捕获的计划通过 `PlanDocument`（`components/agent/plan/plan-document.tsx`）渲染其 markdown 正文 —— 而非有损的标题列表。可执行步骤内嵌在文档自身步骤列表的位置，因此编辑步骤行就是在改写 markdown 本身（`lib/agent/plan/plan-doc.ts` 围绕步骤章节切分正文并重建）。`steps[]` 与文档不可能再出现漂移，这正是同时携带两者的意义。
 
-投影收集正文中的*每一个*列表项（`parsePlanText` 语义），因此在多列表
-文档上，内嵌编辑器只拥有映射到步骤章节的那段连续 `steps[]` 窗口 ——
-`## Files` 清单保持为正文，一次编辑只重写它所属于的章节。
+投影收集正文中的*每一个*列表项（`parsePlanText` 语义），因此在多列表文档上，内嵌编辑器只拥有映射到步骤章节的那段连续 `steps[]` 窗口 ——`## Files` 清单保持为正文，一次编辑只重写它所属于的章节。
 
-**编辑是文件语义，而非表单语义。** 步骤行就地编辑并防抖自动保存，经由
-`applyPlanEditPatch`（`lib/agent/plan/draft-edit.ts`）—— 审批卡与 dock
-面板共享同一持久化路径，两个界面对「一次编辑」的定义不可能不一致。
-概念性的调整仍走聊天侧的 refinement / keep-planning 通道；文档界面上
-没有 Save/Reset 底栏，因为根本不存在待提交的草稿缓冲。
+**编辑是文件语义，而非表单语义。** 步骤行就地编辑并防抖自动保存，经由 `applyPlanEditPatch`（`lib/agent/plan/draft-edit.ts`）—— 审批卡与 dock 面板共享同一持久化路径，两个界面对「一次编辑」的定义不可能不一致。概念性的调整仍走聊天侧的 refinement / keep-planning 通道；文档界面上没有 Save/Reset 底栏，因为根本不存在待提交的草稿缓冲。
 
-**计划拥有了自己的 dock 面板。** `PlanPanel`
-（`components/agent/plan/plan-panel.tsx`，面板 id `plan`，`review`
-活动组）按时间倒序列出会话的全部计划 —— 即 CLI `/plan list` 的 GUI
-对应物，`listPlansBySession` 存储层早已支持但此前没有界面消费它。终态
-计划以只读呈现并附 `agentPlanEvents` 动态轨迹（对应 `/plan show`）；
-执行状态仍归属 `PlanTrackerPanel`，不进入审批前的编辑器。
+**计划拥有了自己的 dock 面板。** `PlanPanel`（`components/agent/plan/plan-panel.tsx`，面板 id `plan`，`review` 活动组）按时间倒序列出会话的全部计划 —— 即 CLI `/plan list` 的 GUI 对应物，`listPlansBySession` 存储层早已支持但此前没有界面消费它。终态计划以只读呈现并附 `agentPlanEvents` 动态轨迹（对应 `/plan show`）；执行状态仍归属 `PlanTrackerPanel`，不进入审批前的编辑器。
 
-**用 React 而非 iframe。** 文档界面经由 `MarkdownRenderer` 渲染，并基于
-渲染出的标题 DOM 做 scroll-spy —— 刻意不走 `srcdoc` + 内联脚本路径，
-ADR-0158 已记录该路径在打包后的 Tauri 中不可用。交互式 iframe 编辑器仍
-作为 `planSettings.interactiveHtmlView` 之后的可选增强保留。
+**用 React 而非 iframe。** 文档界面经由 `MarkdownRenderer` 渲染，并基于渲染出的标题 DOM 做 scroll-spy —— 刻意不走 `srcdoc` + 内联脚本路径，ADR-0158 已记录该路径在打包后的 Tauri 中不可用。交互式 iframe 编辑器仍作为 `planSettings.interactiveHtmlView` 之后的可选增强保留。
 
 ## 审批卡修订（2026-09-25）
 
-上面的文档界面被放在一张给*自身*设了 `45vh` 上限的卡片里，卡片还同时承载
-标签行、来源行、审批前的进度条（永远是 `0/N` —— 审批前什么都没执行）、
-反馈框和六个按钮。这些外框吃掉了上限，文档的 `flex-1` 区域被压成几个像素
-高的一条；在手机上则完全消失。dock 也漂移到了窗格顶部。现在的卡片：
+上面的文档界面被放在一张给*自身*设了 `45vh` 上限的卡片里，卡片还同时承载标签行、来源行、审批前的进度条（永远是 `0/N` —— 审批前什么都没执行）、反馈框和六个按钮。这些外框吃掉了上限，文档的 `flex-1` 区域被压成几个像素高的一条；在手机上则完全消失。dock 也漂移到了窗格顶部。现在的卡片：
 
-**位于输入框上方的计划槽位**，与 `PlanTrackerDock`、`PlanComposerDock`
-共用（按计划状态互斥），紧挨着它的决策所要恢复的输入框 —— 而不是压在窗格
-标题栏下面。
+**位于输入框上方的计划槽位**，与 `PlanTrackerDock`、`PlanComposerDock` 共用（按计划状态互斥），紧挨着它的决策所要恢复的输入框 —— 而不是压在窗格标题栏下面。
 
-**上限加在正文上，而不是卡片上。** 文档的最大高度取*视口*的一部分（手机
-`34dvh`，`md` 起 `min(42dvh, 30rem)`），因为必须始终可见的决策按钮和输入框
-都在正文之外。卡片分三段：头部（状态 · 来源 · 步骤数、标题、视图控制）、
-正文，以及底部。底部在窄卡片里把决策按钮纵向铺满，这个切换用容器查询实现，
-因为分屏窗格在宽屏上也可能很窄。正文可折叠（grid-rows `0fr↔1fr`，隐藏时
-`inert`）；「在侧边面板中打开」经由 `revealSessionPanel`（`lib/artifacts/reveal.ts`，
-与会话摘要共用）打开 dock 的 `PlanPanel`，同时折叠卡片中的文档副本，两处
-不会并排显示同一份文档。
+**上限加在正文上，而不是卡片上。** 文档的最大高度取*视口*的一部分（手机 `34dvh`，`md` 起 `min(42dvh, 30rem)`），因为必须始终可见的决策按钮和输入框都在正文之外。卡片分三段：头部（状态 · 来源 · 步骤数、标题、视图控制）、正文，以及底部。底部在窄卡片里把决策按钮纵向铺满，这个切换用容器查询实现，因为分屏窗格在宽屏上也可能很窄。正文可折叠（grid-rows `0fr↔1fr`，隐藏时 `inert`）；「在侧边面板中打开」经由 `revealSessionPanel`（`lib/artifacts/reveal.ts`，与会话摘要共用）打开 dock 的 `PlanPanel`，同时折叠卡片中的文档副本，两处不会并排显示同一份文档。
 
-**文档的 `# H1` 就是计划的名字。** 捕获时从开头的 H1 推导标题（`planDocTitle`，
-去掉 `Plan:` 前缀），而不再取第一条列表项；已经显示标题的界面会跳过复述标题
-的 H1；重命名会同步改写它（`retitlePlanText`）。
+**文档的 `# H1` 就是计划的名字。** 捕获时从开头的 H1 推导标题（`planDocTitle`，去掉 `Plan:` 前缀），而不再取第一条列表项；已经显示标题的界面会跳过复述标题的 H1；重命名会同步改写它（`retitlePlanText`）。
 
-**编辑入口已收敛。** 步骤行在文档中就地编辑（Enter 在下方插入，空行上
-Backspace 删除，Alt+↑/↓ 移动）。只有 markdown 计划有第二条路径，即编辑原始
-源文，用于修改正文。「每行一个步骤」的文本框与就地编辑重复，已移除。
-「编写计划」编辑器（步骤类型）移入溢出菜单。
+**编辑入口已收敛。** 步骤行在文档中就地编辑（Enter 在下方插入，空行上 Backspace 删除，Alt+↑/↓ 移动）。只有 markdown 计划有第二条路径，即编辑原始源文，用于修改正文。「每行一个步骤」的文本框与就地编辑重复，已移除。「编写计划」编辑器（步骤类型）移入溢出菜单。
 
-**编辑不会丢失，也不会被抢先。** dock 把自动保存串行化到同一条链上，每次都
-作用于当前最新的行。此前，另一次写入进行中时到达的编辑会被丢弃，而文档
-仍显示「已保存」。焦点离开文档（以及卸载）时会立即写入待保存的编辑，每个
-决策都会先等待这条链并重新读取计划。因此在点击「批准」前刚输入的修改，
-正是被批准、并被嵌入恢复提示词的版本。
+**编辑不会丢失，也不会被抢先。** dock 把自动保存串行化到同一条链上，每次都作用于当前最新的行。此前，另一次写入进行中时到达的编辑会被丢弃，而文档仍显示「已保存」。焦点离开文档（以及卸载）时会立即写入待保存的编辑，每个决策都会先等待这条链并重新读取计划。因此在点击「批准」前刚输入的修改，正是被批准、并被嵌入恢复提示词的版本。
 
-**优化会改写文档。** `refinePlan` 过去只替换 `steps[]`，不动
-`metadata.planText`，卡片仍显示旧列表；又因为没有 `userEdited` 标记，恢复
-提示词会让模型去实现它最初的提议。现在对 markdown 计划，规划器看到的是
-读者看到的步骤章节，结果写回该章节，并重新投影 `steps[]`。每次生效的
-优化都会打上 `userEdited` 标记。
+**优化会改写文档。** `refinePlan` 过去只替换 `steps[]`，不动 `metadata.planText`，卡片仍显示旧列表；又因为没有 `userEdited` 标记，恢复提示词会让模型去实现它最初的提议。现在对 markdown 计划，规划器看到的是读者看到的步骤章节，结果写回该章节，并重新投影 `steps[]`。每次生效的优化都会打上 `userEdited` 标记。

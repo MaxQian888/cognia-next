@@ -22,8 +22,8 @@ subagent defs are excluded from the SDK-native agents map — the orchestrated
 `dispatch_agent` rail honors them instead of the SDK silently mis-running
 them. Team-to-team delegation carries a validated secret-free
 `HandoffEnvelope` and a `maxTeamDelegationDepth` gate (default 2). One
-`RunBudgetGovernor` ledgers every child's usage, attempts and failures on the
-root pool; the plugin budget rebases on it.
+`RunBudgetGovernor` records every child's usage, attempts and failures in the
+root pool. The plugin budget rebases on it.
 
 ## Canonical sessions (Phase 8)
 
@@ -52,5 +52,5 @@ with superset coverage, ≥ fidelity, and agreeing shared-prefix digests —
 forks, ties, and ambiguous side effects all pause as a first-class
 `run.recovery_required` event. `RecoveryCandidate` has no modification-time
 field, so last-modified-wins is structurally impossible. Permission restore
-never replays an allowance; route tickets remint only for the identical
+never replays an allowance. Route tickets are recreated only for the identical
 frozen spec.

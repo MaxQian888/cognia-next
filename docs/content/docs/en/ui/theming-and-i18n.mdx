@@ -45,7 +45,9 @@ Notice three things:
 2. **CSS variables** are the single source of truth — change `--background` and every `bg-background` class follows.
 3. **oklch colour space** (not HSL or RGB) for perceptually uniform contrast across light/dark.
 
-The custom variant `@custom-variant dark (&:is(.dark *))` makes `dark:bg-foo` apply when any ancestor has the `.dark` class. This is class-based dark mode (not `prefers-color-scheme`); `next-themes` toggles `.dark` on `<html>`.
+The custom variant `@custom-variant dark (&:is(.dark *))` applies `dark:bg-foo` when any ancestor has the `.dark` class.
+This is class-based dark mode, rather than `prefers-color-scheme`.
+`next-themes` toggles `.dark` on `<html>`.
 
 ## Theme cascade
 

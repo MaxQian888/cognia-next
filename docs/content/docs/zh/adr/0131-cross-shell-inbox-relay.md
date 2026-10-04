@@ -1,6 +1,6 @@
 ---
 title: ADR-0131 — 跨壳收件箱中继
-description: 为收件箱的每一次写入（人工回复、草稿审批、会话覆盖）建立唯一的、与壳无关的写路径，使手机、浏览器、以及驱动远端宿主的桌面端都能像运行机器人的那台机器一样操作平台会话；幂等贯穿端到端，推送只携带 id，绝不携带消息正文。
+description: "为收件箱的人工回复、草稿审批和会话覆盖提供统一的跨壳写入路径。手机、浏览器和连接远端宿主的桌面端均可操作平台会话。写入支持端到端幂等；推送只携带 id，不携带消息正文。"
 ---
 
 # ADR-0131 — 跨壳收件箱中继
@@ -14,7 +14,7 @@ description: 为收件箱的每一次写入（人工回复、草稿审批、会�
 
 ## Context
 
-收件箱一直只在运行 adapter 的那台机器上真正可用。对三个壳的审计表明，缺的不是某个功能，而是一条**接缝**：每个回复面各自决定如何写入，而其中只有一种决定是有效的。
+收件箱一直只在运行 adapter 的那台机器上真正可用。对三个壳的审计表明，缺少统一的**写入接口**：每个回复面各自决定如何写入，而其中只有一种决定是有效的。
 
 - **手机上的回复被静默丢弃。** `components/mobile/connector/draft-approval-panel.tsx` 把 `connector_approve_draft` 行写入 `mobileOutboundQueue`，而它到达的桌面 arm 只翻转草稿状态——不产生出站作业，因此从未真正投递。操作者看到"已批准"，客户什么也没收到。
 - **`connector_send` 并不发送。** 名字如此，但它的宿主 arm 只追加一条本地 `user` 消息就返回。它是 share-target 的文本注入路径，从来不是投递路径；manifest 中没有任何 RPC 真正入队出站。
@@ -80,7 +80,7 @@ headless brain 没有 Tauri 运行时，因此 `lib/companion/host-event-publish
 
 `connector_enqueue_outbound` 是新命令（target `execution`，要求幂等），它才是 `connector_send` 被误认为的那个命令；`connector_send` 保留其文档化的、更窄的含义。`connectors_discord_upload` 与 `connectors_onebot_probe` 从 client 平面移到 service 平面，使 headless brain 可以执行——刻意**不加** headless 宿主门，因为两者都是不需要 `AppHandle` 的纯函数，而加门会给一条只能收缩的基线增加 class-C host-parity 条目。
 
-Dexie **v173** 为 `outboundQueue` 与 `connectorDrafts` 增加带索引的 `updatedAt`（从 `createdAt` 回填），使二者加入 companion 同步——同步是基于 `updatedAt` 游标的增量。`outboundQueue` 以**投影**方式同步并带 `syncedFromHost: true`，而非新建一张表，因此既有读者（`use-outbound-saturation`、`OutboundStatusPill`）无需改动即可工作；`listDueNow` / `pickNextDue` / `recoverStaleSendingJobs` 会过滤掉这些行，本地 runner 绝不会派发镜像。
+Dexie **v173** 为 `outboundQueue` 与 `connectorDrafts` 增加带索引的 `updatedAt`（从 `createdAt` 回填），使二者加入 companion 同步——同步是基于 `updatedAt` 游标的增量。`outboundQueue` 以**投影**方式同步并带 `syncedFromHost: true`，而非新建一张表，因此既有读者（`use-outbound-saturation`、`OutboundStatusPill`）无需改动即可工作；`listDueNow` / `pickNextDue` / `recoverStaleSendingJobs` 会过滤掉这些行，本地 runner 不会派发镜像行。
 
 ### 6. 交接是一等状态
 

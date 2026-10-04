@@ -1,17 +1,15 @@
 ---
 title: "0178：指向一个已渲染的元素"
-description: "让 artifact 预览变成可以被指着说话的东西：一个取点器覆盖三种渲染通道且不放宽任何沙箱；浏览器的评审队列变成两个界面共用的队列。"
+description: "Artifact 预览支持选择渲染元素。一个取点器覆盖三种渲染通道，保持沙箱限制。两个界面共用浏览器评审队列。"
 ---
 
 # ADR 0178：指向一个已渲染的元素
 
-**状态：** 已接受
-**日期：** 2026-09-12
-**相关：** ADR-0158（Artifacts 与 Canvas）、ADR-0139（视觉输出路由）、ADR-0055（Agent 浏览器循环）、ADR-0083（上下文工作台）、ADR-0155（插件作者边界）
+**状态：** 已接受**日期：** 2026-09-12 **相关：** ADR-0158（Artifacts 与 Canvas）、ADR-0139（视觉输出路由）、ADR-0055（Agent 浏览器循环）、ADR-0083（上下文工作台）、ADR-0155（插件作者边界）
 
 ## 背景
 
-从结构上看，artifacts 右侧栏是完工的：一个外壳（ADR-0083）、十六个已注册面板、`audit:unreachable-components` 全绿。再加一个面板只会是噪音。
+从结构上看，artifacts 右侧栏是完工的：一个外壳（ADR-0083）、十六个已注册面板、`audit:unreachable-components` 全绿。新增面板无法解决现有缺口。
 
 它做不到的是——你没法指着里面的任何东西说话。
 
@@ -59,7 +57,7 @@ artifact 有三种渲染方式，区别在于应用能否够到渲染后的 DOM�
 
 artifact 标注和浏览器标注住在**同一张表**里，用同一批组件渲染，由同一个写入器格式化。关于一个元素的评审备注，不会因为这个元素当时挂在哪个界面上就变成另一种东西。
 
-要让这件事安全，必须先修掉一个早于本次改动的缺陷。`listActionableBrowserAnnotations` 和 `listPendingBrowserAnnotations` 扫全表，然后**只**按 `sessionId` 过滤。在浏览器是唯一写入方时这无害；一旦有第二个写入方，artifact 标注就会出现在浏览器面板的队列里，自动撑开它的检查栏——那会发出 `embedSetBounds` 并真的改变原生 webview 的尺寸——然后被以 `# Browser annotation batch` 为标题、附带一张浏览器截图批量发给模型。现在两个读取函数都必须接收一个域过滤器。
+要让这件事安全，必须先修掉一个早于本次改动的缺陷。`listActionableBrowserAnnotations` 和 `listPendingBrowserAnnotations` 扫全表，然后**只**按 `sessionId` 过滤。在浏览器是唯一写入方时这无害；一旦有第二个写入方，artifact 标注就会出现在浏览器面板的队列里，自动撑开它的检查栏——那会发出 `embedSetBounds` 并改变原生 webview 的尺寸——然后被以 `# Browser annotation batch` 为标题、附带一张浏览器截图批量发给模型。现在两个读取函数都必须接收一个域过滤器。
 
 **没有升 schema 版本。** 域是在内存里判定的，就在这两个读取函数本来就扫描的位置，所以没有任何索引发生移动。这不是偷懒：加一个 `scope` 索引会让所有已存在的行在 `BROWSER_ANNOTATION_RETENTION_MS` 的整整 30 天里掉出该索引，而且 `CURRENT_SCHEMA` 的 `.upgrade()` 回调会在任何一次升版时重写每一条 `messages` 行。
 

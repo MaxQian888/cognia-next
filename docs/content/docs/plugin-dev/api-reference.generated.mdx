@@ -58,14 +58,14 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.ocr` | 8 | `media:image:read`, `database:write`, `native:filesystem`, `automation:screenshot`, `native:screen` | frontend, hybrid | internal |
 | `ctx.perf` | 5 | `perf:read` | frontend, hybrid | internal |
 | `ctx.permissions` | 5 | None | frontend, hybrid | internal |
-| `ctx.pet` | 6 | `pet:read` | frontend, hybrid | internal |
+| `ctx.pet` | 7 | `pet:interact`, `pet:read` | frontend, hybrid | internal |
 | `ctx.project` | 20 | `project:write`, `project:read`, `project:delete` | frontend, hybrid | sensitive |
 | `ctx.python` | 3 | None | frontend, hybrid | internal |
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
 | `ctx.resources` | 7 | `database:read` | frontend, hybrid | sensitive |
 | `ctx.recorder` | 19 | `media:image:write`, `native:input`, `native:screen`, `media:image:read` | frontend, hybrid | sensitive |
 | `ctx.sandbox` | 6 | `session:read`, `native:filesystem`, `native:process`, `native:input` | frontend, hybrid | sensitive |
-| `ctx.scheduler` | 16 | None | frontend, hybrid | internal |
+| `ctx.scheduler` | 20 | None | frontend, hybrid | internal |
 | `ctx.secrets` | 6 | `secrets:write`, `secrets:read` | frontend, hybrid, python | secret |
 | `ctx.services` | 3 | None | frontend, hybrid | internal |
 | `ctx.securityScans` | 2 | `terminal:kill`, `database:write` | frontend, hybrid | sensitive |
@@ -84,7 +84,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.toolResult` | 1 | `extension:ui` | frontend, hybrid | internal |
 | `ctx.tray` | 2 | None | frontend, hybrid | internal |
 | `ctx.ui` | 7 | `extension:ui` | frontend, hybrid, python | internal |
-| `ctx.userScheduler` | 5 | `database:write`, `settings:read`, `database:read`, `agent:control` | frontend, hybrid | sensitive |
+| `ctx.userScheduler` | 13 | `agent:control`, `database:write`, `settings:read`, `database:read` | frontend, hybrid, python | sensitive |
 | `ctx.uri` | 1 | None | frontend, hybrid | internal |
 | `ctx.vector` | 13 | `vector:write`, `vector:read` | frontend, hybrid | internal |
 | `ctx.webview` | 1 | None | frontend, hybrid | internal |
@@ -891,11 +891,12 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
-| `pet.emitEvent` | None | low | No |
+| `pet.emitEvent` | `pet:interact` | medium | No |
+| `pet.getAvailability` | `pet:read` | medium | Yes |
 | `pet.getRemainingBudget` | `pet:read` | medium | Yes |
 | `pet.getSummary` | `pet:read` | medium | Yes |
 | `pet.getView` | `pet:read` | medium | Yes |
-| `pet.interact` | None | low | No |
+| `pet.interact` | `pet:interact` | medium | No |
 | `pet.onEvent` | `pet:read` | medium | No |
 
 ## `ctx.project`
@@ -989,22 +990,26 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
-| `scheduler.cancelExecution` | None | low | No |
-| `scheduler.createTask` | None | low | No |
-| `scheduler.deleteTask` | None | low | No |
+| `scheduler.cancelExecution` | None | medium | No |
+| `scheduler.createTask` | None | medium | No |
+| `scheduler.deleteTask` | None | medium | No |
+| `scheduler.emitEvent` | None | medium | No |
 | `scheduler.getExecution` | None | low | Yes |
 | `scheduler.getExecutions` | None | low | Yes |
 | `scheduler.getHandlers` | None | low | Yes |
 | `scheduler.getLatestExecution` | None | low | Yes |
+| `scheduler.getStatistics` | None | low | Yes |
 | `scheduler.getTask` | None | low | Yes |
 | `scheduler.hasHandler` | None | low | Yes |
 | `scheduler.listTasks` | None | low | Yes |
+| `scheduler.onExecution` | None | low | No |
 | `scheduler.pauseTask` | None | low | No |
+| `scheduler.previewTrigger` | None | low | Yes |
 | `scheduler.registerHandler` | None | low | No |
 | `scheduler.resumeTask` | None | low | No |
-| `scheduler.runTaskNow` | None | low | No |
+| `scheduler.runTaskNow` | None | medium | No |
 | `scheduler.unregisterHandler` | None | low | No |
-| `scheduler.updateTask` | None | low | No |
+| `scheduler.updateTask` | None | medium | No |
 
 ## `ctx.secrets`
 
@@ -1253,11 +1258,19 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
+| `userScheduler.cancelExecution` | `agent:control`, `database:write` | high | No |
 | `userScheduler.createTask` | `database:write`, `settings:read` | high | No |
 | `userScheduler.deleteTask` | `database:write` | high | No |
+| `userScheduler.getExecution` | `database:read` | medium | Yes |
 | `userScheduler.getPolicy` | `settings:read` | medium | Yes |
+| `userScheduler.getTask` | `database:read` | medium | Yes |
+| `userScheduler.getUpcoming` | `database:read` | medium | Yes |
+| `userScheduler.listExecutions` | `database:read` | medium | Yes |
 | `userScheduler.listTasks` | `database:read` | medium | Yes |
+| `userScheduler.pauseTask` | `database:write` | high | No |
+| `userScheduler.resumeTask` | `database:write` | high | No |
 | `userScheduler.runTaskNow` | `agent:control`, `database:write` | high | No |
+| `userScheduler.updateTask` | `database:write` | high | No |
 
 ## `ctx.uri`
 

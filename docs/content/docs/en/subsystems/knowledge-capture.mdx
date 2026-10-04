@@ -8,12 +8,12 @@ description: The three modules ADR-0060 introduced together — capture (fingerp
 <Status variant="beta">Beta · ADR-0060 · capturedItems v97 · radarReports v96</Status>
 
 <TLDR>
-  Three modules that only make sense together. **Capture** turns a confirmed candidate into a persisted
+  Three modules work together. **Capture** turns a confirmed candidate into a persisted
   item — dedup by fingerprint, enrich, save (`lib/capture/capture-manager.ts`). **The web reader** is what
-  enrichment calls for a URL, and it tries a bespoke scraper *before* generic extraction, because for a
-  handful of sites a purpose-built scraper beats extraction outright. **Attention Radar** then runs
+  enrichment calls for a URL, and it tries a bespoke scraper *before* generic extraction, because a
+  purpose-built scraper gives better results for some sites. **Attention Radar** then runs
   `collect → generate → persist` over the accumulated items on an interval, producing an LLM report — with
-  guards that skip the run entirely when there isn't enough new material to be worth the tokens.
+  guards that skip the run entirely when there is not enough new material to justify the token cost.
 </TLDR>
 
 <StatGrid>

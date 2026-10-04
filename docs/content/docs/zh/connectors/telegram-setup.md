@@ -5,7 +5,7 @@ description: "用 @BotFather 创建机器人、获取 Bot Token，并在 cognia 
 
 # Telegram 机器人配置指南
 
-本指南将引导你用 Telegram 官方的 [@BotFather](https://t.me/botfather) 创建机器人、获取 `Bot Token`，并在 cognia 中通过**长轮询**或 **Webhook** 接入你的工作区。
+本指南说明如何通过 Telegram 官方的 [@BotFather](https://t.me/botfather) 创建机器人、获取 `Bot Token`，并在 cognia 中通过**长轮询**或 **Webhook** 接入工作区。
 
 ---
 

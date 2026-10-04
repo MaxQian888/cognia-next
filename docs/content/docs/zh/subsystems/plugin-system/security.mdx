@@ -1,6 +1,6 @@
 ---
 title: 安全与权限
-description: 插件安全的五段链路 —— 清单声明、安装/运行期授权、守卫强制、限流、以及 Ed25519 代码签名。
+description: 插件安全的五阶段流程 —— 清单声明、安装/运行期授权、守卫强制、限流、以及 Ed25519 代码签名。
 ---
 
 # 安全与权限
@@ -8,7 +8,7 @@ description: 插件安全的五段链路 —— 清单声明、安装/运行期�
 <Status variant="experimental" />
 
 <TLDR>
-插件的 `plugin.json` 声明 `PluginPermission` 字符串（规范联合类型位于 `types/plugin/plugin.ts:262`）。注册时守卫将每一项记为 `manifest` 授予，并把 `DANGEROUS_PERMISSIONS` 标记到 `confirm` 层级（`permission-guard.ts:280`）。集中强制点是 `createGuardedAPI`（`permission-guard.ts:777`）—— 一个包裹每个面向插件命名空间的 `Proxy`，对每个方法调用 `guard.require()`，并把 `confirm` 层级的方法路由到每次调用的授权代理。签名校验（`signature.ts:157`）把守加载；令牌桶限流器（`rate-limiter.ts:56`）限制频率。
+插件的 `plugin.json` 声明 `PluginPermission` 字符串（规范联合类型位于 `types/plugin/plugin.ts:262`）。注册时守卫将每一项记为 `manifest` 授予，并把 `DANGEROUS_PERMISSIONS` 标记到 `confirm` 层级（`permission-guard.ts:280`）。集中强制点是 `createGuardedAPI`（`permission-guard.ts:777`）—— 一个包裹每个面向插件命名空间的 `Proxy`，对每个方法调用 `guard.require()`，并把 `confirm` 层级的方法路由到每次调用的授权代理。签名校验（`signature.ts:157`）控制加载。令牌桶限流器（`rate-limiter.ts:56`）限制频率。
 </TLDR>
 
 <StatGrid>
@@ -22,9 +22,9 @@ description: 插件安全的五段链路 —— 清单声明、安装/运行期�
 
 ## 1. 五段链路
 
-安全是一条五段流水线。清单中声明的权限流入安装/运行期授权，再进入每次受控 API 调用的守卫强制，再进入限流，最后在加载时进入代码签名与校验。全部位于 `lib/plugin/security/`。
+安全检查分为五个阶段：清单声明、安装/运行期授权、每次受控 API 调用的守卫强制、限流，以及加载时的代码签名与校验。全部位于 `lib/plugin/security/`。
 
-插件的 `plugin.json` 列出 `PluginPermission` 字符串（规范联合类型位于 `types/plugin/plugin.ts:262`）。注册时守卫将每一项记为 `manifest` 授予，并把 `DANGEROUS_PERMISSIONS` 标记到 `confirm` 层级（`permission-guard.ts:280`）。集中强制点是 `createGuardedAPI`（`permission-guard.ts:777`），一个包裹每个面向插件 API 命名空间的 `Proxy`，对每个方法调用 `guard.require()`（会抛出 `PermissionError`），并把 `confirm` 层级的方法路由到每次调用的授权代理。签名校验（`signature.ts`）把守加载；限流（`rate-limiter.ts`）限制频率。
+插件的 `plugin.json` 列出 `PluginPermission` 字符串（规范联合类型位于 `types/plugin/plugin.ts:262`）。注册时守卫将每一项记为 `manifest` 授予，并把 `DANGEROUS_PERMISSIONS` 标记到 `confirm` 层级（`permission-guard.ts:280`）。集中强制点是 `createGuardedAPI`（`permission-guard.ts:777`），一个包裹每个面向插件 API 命名空间的 `Proxy`，对每个方法调用 `guard.require()`（会抛出 `PermissionError`），并把 `confirm` 层级的方法路由到每次调用的授权代理。签名校验（`signature.ts`）控制加载。限流（`rate-limiter.ts`）限制频率。
 
 ## 2. 守卫 —— `permission-guard.ts`
 
@@ -181,9 +181,7 @@ check(pluginId: string, operation: string): void {
 
 ## 10. 最小权限网络出口
 
-`network:fetch` 是用户同意的能力权限，`manifest.networkAccess` 则是资源策略。
-旧版 `allowedDomains` 用于限制主机；新的 `rules` 会同时校验 HTTP Method 与 URL
-路径：
+`network:fetch` 是用户同意的能力权限，`manifest.networkAccess` 则是资源策略。旧版 `allowedDomains` 用于限制主机；新的 `rules` 会同时校验 HTTP Method 与 URL 路径：
 
 ```json
 {
@@ -199,10 +197,7 @@ check(pluginId: string, operation: string): void {
 }
 ```
 
-Web/移动端由 renderer 执行策略，桌面/headless 端会把同一策略同步到 Rust host
-做纵深防御。`get`、`fetch`、`download`、`upload` 都经过同一策略。出站 URL、
-非凭证 Header 与请求体还会经过宿主 PII gate：默认自动脱敏；需要 fail-closed
-时设置 `piiPolicy: "block"`，并用 `dataClassification` 标记审计记录。
+Web/移动端由 renderer 执行策略，桌面/headless 端会把同一策略同步到 Rust host 做纵深防御。`get`、`fetch`、`download`、`upload` 都经过同一策略。出站 URL、非凭证 Header 与请求体还会经过宿主 PII gate：默认自动脱敏；需要 fail-closed 时设置 `piiPolicy: "block"`，并用 `dataClassification` 标记审计记录。
 
 ### Rust 一致性
 

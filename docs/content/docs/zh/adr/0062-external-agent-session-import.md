@@ -1,6 +1,6 @@
 ---
 title: "ADR-0062 — 外部 Agent 会话历史图导入"
-description: "有损可见地导入 11 种本地编程 Agent 历史，保留关系、生命周期、后台任务、镜像同步、插件兼容与能力门控的原生恢复。"
+description: "导入 11 种本地编程 Agent 历史，并明确显示信息损失，保留关系、生命周期、后台任务、镜像同步、插件兼容与能力门控的原生恢复。"
 ---
 
 # ADR-0062 — 外部 Agent 会话历史图导入
@@ -54,22 +54,14 @@ interface AgentSessionSourceAdapter {
 
 ## 验证
 
-Jest（`lib/session-import`、`hooks/session-import`、`components/session-import`、`lib/plugin/api/import-api`）绿色;Rust `cargo test --lib session_import` 3/3;排版检查 / ESLint / `lint:i18n` 对等性清洁;六个项目审计员（测试间隙、I18N、静态导出、Tauri-Rust、PII-门禁、布线）都清理干净——布线审计员确认注册表、`ctx` API、对话和Rust 命令均可运行时联系。
+Jest（`lib/session-import`、`hooks/session-import`、`components/session-import`、`lib/plugin/api/import-api`）通过；Rust `cargo test --lib session_import` 3/3;排版检查 / ESLint / `lint:i18n` 一致性检查通过；六个项目审计员（测试间隙、I18N、静态导出、Tauri-Rust、PII-门禁、布线）均未发现问题。运行时接入审计确认注册表、`ctx` API、对话框和 Rust 命令均已接入运行时。
 
 ## 2026-08-29 修订 —— canonical graph 与原生恢复
 
-`CanonicalSession` 继续使用 version 1，并增加可选的来源溯源、runtime binding、lineage、lifecycle、
-更完整的 turn/tool/usage、task、plan/goal、checkpoint、历史操作与 inter-agent message。未知上游事件
-会保存为有界、脱敏 diagnostic，并生成精确 loss entry；适配器可以忽略未知字段，但不能静默丢弃未知事件。
+`CanonicalSession` 继续使用 version 1，并增加可选的来源溯源、runtime binding、lineage、lifecycle、更完整的 turn/tool/usage、task、plan/goal、checkpoint、历史操作与 inter-agent message。未知上游事件会保存为有界、脱敏 diagnostic，并生成精确 loss entry；适配器可以忽略未知字段，但不能静默丢弃未知事件。
 
-所有内建来源都实现 `parseGraph`。旧插件的 `parseSession` 仍可读取，会被包装为扁平且明确降级的图。
-registry 派生的来源集合为 Claude Code、Codex、OpenCode、Gemini CLI、Continue、Aider、Pi、
-Cursor、Cline、Copilot CLI 与 Qwen Code。
+所有内建来源都实现 `parseGraph`。旧插件的 `parseSession` 仍可读取，会被包装为扁平且明确降级的图。registry 派生的来源集合为 Claude Code、Codex、OpenCode、Gemini CLI、Continue、Aider、Pi、Cursor、Cline、Copilot CLI 与 Qwen Code。
 
-重导入 digest 覆盖消息内容、parts、tool state、关系与 lifecycle。`source-mirror` 跟随 rewind 与删除，
-tombstone 消失的 child，并保留本地装饰；在 Cognia 续聊后转为 `cognia-owned`。原生恢复要求匹配
-preset 已存在、runtime 已连接且可执行、`session/resume` 经实时验证、cwd 存在且握手成功；只有之后才
-转为 `native-bound`，执行时复用已验证的 native id。系统不会自动创建 preset、凭据或命令。
+重导入 digest 覆盖消息内容、parts、tool state、关系与 lifecycle。`source-mirror` 跟随 rewind 与删除，tombstone 消失的 child，并保留本地装饰；在 Cognia 续聊后转为 `cognia-owned`。原生恢复要求匹配 preset 已存在、runtime 已连接且可执行、`session/resume` 经实时验证、cwd 存在且握手成功；只有之后才转为 `native-bound`，执行时复用已验证的 native id。系统不会自动创建 preset、凭据或命令。
 
-Cursor 云端/后台历史，以及 Kiro、Droid、DeepSeek Harness 等没有稳定公开格式的来源仍不在导入范围；
-其 runtime preset 会单独出现在自动生成的 support matrix 中。
+Cursor 云端/后台历史，以及 Kiro、Droid、DeepSeek Harness 等没有稳定公开格式的来源仍不在导入范围；其 runtime preset 会单独出现在自动生成的 support matrix 中。

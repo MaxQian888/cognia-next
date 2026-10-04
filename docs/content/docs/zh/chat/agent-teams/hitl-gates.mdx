@@ -1,11 +1,11 @@
 ---
 title: 人工审批
-description: 骑在 Action Review 契约上的小队审批（ADR-0169）。ExecutionRunInterrupt 是唯一待决记录，七种审批及其类型化决策、重启安全、team_recovery 审批，以及 approval-bus 时代去了哪里。
+description: 基于 Action Review 契约的小队审批（ADR-0169）。ExecutionRunInterrupt 是唯一待决记录；本页说明七种审批、类型化决策、重启恢复、team_recovery 审批，以及旧 approval-bus 的替代方式。
 ---
 
 # 人工审批
 
-一次小队运行在需要人之前都是自治的。自 ADR-0169 起，每一个这样的时刻都是同一件事：一条带 `reviewKind` 的持久化 `ExecutionRunInterrupt`，由 Action Review 契约投影，经唯一控制入口（带类型化 `reviewDecision` 的 `RunControlCommand`）回答，并以回执结算。小队路径上不再有内存总线、按标签页的闸门 store、模态框宿主。桌面上提出的审批可以在手机、IM 卡片、CLI 或驾驶舱里回答，而且跨重启存活。
+小队运行在需要人工决策前自主执行。自 ADR-0169 起，所有人工审批都使用带有 `reviewKind` 的持久化 `ExecutionRunInterrupt` 记录。Action Review 契约将审批请求投影为该记录；唯一控制入口通过带有类型化 `reviewDecision` 的 `RunControlCommand` 提交决策，再以回执完成结算。小队路径不再使用内存总线、按标签页维护的闸门 store 或模态框宿主。用户可在手机、IM 卡片、CLI 或驾驶舱中处理桌面端提出的审批，审批记录在重启后仍然保留。
 
 <TLDR>
   运行时调用 `openSquadReview({ runId, teamId, kind, instance, subject })`

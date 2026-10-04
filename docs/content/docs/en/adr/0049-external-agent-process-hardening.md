@@ -32,12 +32,12 @@ that on Windows lives as a `.cmd` shim (`npx -y @zed-industries/codex-acp`,
 
 New `src-tauri/src/external_agent/command_resolver.rs` resolves a bare command
 to a concrete path (PATH × `PATHEXT`, default `.COM;.EXE;.BAT;.CMD;.PS1`).
-`process.rs` and `terminal.rs` resolve before `Command::new`; Rust ≥ 1.77.2 then
+`process.rs` and `terminal.rs` resolve before `Command::new`. Rust ≥ 1.77.2 then
 executes the resolved `.cmd`/`.bat` correctly (BatBadBut hardening). The bare
 name is returned unchanged on Unix (no `PATHEXT`; `Command` already PATH-searches)
 and when nothing is found (the spawn surfaces its own error). `check_command_exists`
-is reimplemented on top of the **same** resolver, so a preset reported
-`executable` is now one that will actually spawn.
+uses the **same** resolver, so a preset reported
+`executable` is now one that can spawn.
 
 ### 2 · Event-driven stdout/stderr/exit (complete the migration)
 

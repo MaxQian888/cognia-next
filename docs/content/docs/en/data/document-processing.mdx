@@ -5,7 +5,10 @@ description: A unified parsing layer that converts user files into embeddable te
 
 # Document Processing
 
-`packages/document/src/` is Cognia's "read file" layer. It folds eleven mainstream formats into a single `ProcessedDocument`: raw text + embeddable text + structured metadata + parse diagnostics. Twin ingest, knowledge bases, and canvas "import document" operations all flow through this layer; upstream callers don't need to write their own parser for each format.
+`packages/document/src/` reads files for Cognia.
+It converts eleven mainstream formats into one `ProcessedDocument` with raw text, embeddable text, structured metadata, and parse diagnostics.
+Twin ingest, knowledge bases, and canvas document imports all use this layer.
+Callers do not need a separate parser for each format.
 
 <TLDR>
   Unified entry points: `processDocument()` (synchronous, text-only formats) and

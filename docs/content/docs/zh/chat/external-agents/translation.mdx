@@ -1,6 +1,6 @@
 ---
 title: 事件翻译
-description: 外来 Agent 的输出如何变成 Cognia 的聊天—— translators.ts（981 行）在内部 agent/tool 模型与 ACP 之间转换（含完整的 JSON-Schema→Zod 工具桥与 events→steps 折叠），event-to-parts.ts（208 行）是把规范 ExternalAgentEvent 流投影成渲染器已认得的 UIMessage.parts 的纯映射器。
+description: 外部 Agent 输出到聊天消息的转换。translators.ts（981 行）负责内部 agent/tool 模型与 ACP 之间的转换，包括完整的 JSON-Schema→Zod 工具桥和 events→steps 折叠；event-to-parts.ts（208 行）将规范 ExternalAgentEvent 流映射为渲染器使用的 UIMessage.parts。
 ---
 
 # 事件翻译
@@ -29,15 +29,11 @@ description: 外来 Agent 的输出如何变成 Cognia 的聊天—— translato
 
 ## translators.ts —— 模型翻译
 
-文件按横幅分隔的关注组织织：消息翻译（`:25`）、工具翻译（`:72`）、结果翻译（`:547`）、事件翻译
-（`:637`）、权限翻译（`:829`）、内容辅助（`:859`）。它既不产出规范有效性快照（那是
-[规范契约](./canonical-readiness)），也不产出 UIMessage parts（那是 event-to-parts）——它转换*模型*。
+文件按职责组织，并用横幅注释分隔：消息翻译（`:25`）、工具翻译（`:72`）、结果翻译（`:547`）、事件翻译（`:637`）、权限翻译（`:829`）和内容辅助（`:859`）。该模块只转换*模型*。规范有效性快照由[规范契约](./canonical-readiness)生成，UIMessage parts 由 event-to-parts 生成。
 
 ### JSON-Schema → Zod 工具桥
 
-当一个 ACP Agent 通告一个工具时，其参数以 JSON Schema 到达。为让该工具作为 `AgentTool` 可调用（带运行时
-校验），`acpToolToAgentTool`（`:82`）经 `jsonSchemaToZod`（`:163`）把该 schema 编译成一个 Zod 校验器。
-`acpToolsToAgentTools`（`:103`）映射多个，并以 `external_<name>` 给键加前缀。
+当一个 ACP Agent 通告一个工具时，其参数以 JSON Schema 到达。为让该工具作为 `AgentTool` 可调用（带运行时校验），`acpToolToAgentTool`（`:82`）经 `jsonSchemaToZod`（`:163`）把该 schema 编译成一个 Zod 校验器。`acpToolsToAgentTools`（`:103`）映射多个，并以 `external_<name>` 给键加前缀。
 
 编译器在 `convertSchemaNode`（`:196`）派发：
 
@@ -55,9 +51,7 @@ description: 外来 Agent 的输出如何变成 Cognia 的聊天—— translato
 
 ### Result ⇄ SubAgentResult
 
-为让外部 Agent 能成为**Agent Team 的成员**，`externalResultToSubAgentResult`（`:554`）把一个
-`ExternalAgentResult` 映射进 `SubAgentResult` 形状（steps → 编号 steps、工具调用 → 工具结果、token 用量经
-`externalTokenUsageToSubAgent` `:595` 映射）。`subAgentResultToExternal`（`:606`）是逆向。
+为让外部 Agent 能成为**Agent Team 的成员**，`externalResultToSubAgentResult`（`:554`）把一个 `ExternalAgentResult` 映射进 `SubAgentResult` 形状（steps → 编号 steps、工具调用 → 工具结果、token 用量经 `externalTokenUsageToSubAgent` `:595` 映射）。`subAgentResultToExternal`（`:606`）是逆向。
 
 ### 事件折叠
 
@@ -70,18 +64,13 @@ description: 外来 Agent 的输出如何变成 Cognia 的聊天—— translato
 | `extractToolCallsFromEvents` | 676 | 按 `toolUseId` 折叠的工具调用 |
 | `eventsToSteps` | 721 | `ExternalAgentStep[]`——主状态机 |
 
-`eventsToSteps`（`:727` 的 switch）是规范的事件→步骤机：`message_start` 开一个消息步骤（`:728`），
-`message_delta` 追加（`:741`），`message_end` 关闭它（`:755`），`tool_use_start`/`tool_use_end`/`tool_result`
-构建并完成一个工具步骤（`:765`/`:782`/`:788`），`thinking` 压入一个独立步骤（`:803`），`error` 标记当前
-步骤失败（`:816`）。结果就是填充 `ExternalAgentResult.steps` 的东西。
+`eventsToSteps`（`:727` 的 switch）是规范的事件→步骤机：`message_start` 开一个消息步骤（`:728`），`message_delta` 追加（`:741`），`message_end` 关闭它（`:755`），`tool_use_start`/`tool_use_end`/`tool_result` 构建并完成一个工具步骤（`:765`/`:782`/`:788`），`thinking` 压入一个独立步骤（`:803`），`error` 标记当前步骤失败（`:816`）。结果就是填充 `ExternalAgentResult.steps` 的东西。
 
-权限展示是 `formatPermissionRequest`（`:836`），它把一个 `AcpPermissionRequest` 变成 UI 友好的
-`{title, description, riskLevel, …}`，带风险标签（`:843`）。
+权限展示是 `formatPermissionRequest`（`:836`），它把一个 `AcpPermissionRequest` 变成 UI 友好的 `{title, description, riskLevel, …}`，带风险标签（`:843`）。
 
 ## event-to-parts.ts —— 渲染翻译
 
-这是让聊天渲染器把外部对话当内置对话对待的纯 reducer。它刻意无状态且与 ACP 子进程解耦，从而无需子进程即可
-单测（头部 `:1`）。
+这是让聊天渲染器把外部对话当内置对话对待的纯 reducer。它刻意无状态且与 ACP 子进程解耦，从而无需子进程即可单测（头部 `:1`）。
 
 ```mermaid
 flowchart LR
@@ -126,12 +115,7 @@ flowchart LR
 
 两个设计选择很重要：
 
-- **当事件无 parts 副作用时返回同一引用**让调用方廉价地检测"无变化"——这很重要，因为 Manager 流式很多
-  控制事件（`permission_request`/`plan_update`/`commands_update`），它们有自己的 UI 通道，不该搅动消息。
-- **Artifact 提升。** 名为 `artifact_create`/`artifact_update` 的工具变成一个
-  [`ArtifactPart`](../built-in-agent/runtime-loop) 而非泛型工具 part，其 `kind` 被夹到允许集
-  （`ARTIFACT_KIND_ALLOWED` `:176`，回退 `"code"`）。
+- **当事件无 parts 副作用时返回同一引用**让调用方廉价地检测"无变化"——这很重要，因为 Manager 流式很多控制事件（`permission_request`/`plan_update`/`commands_update`），它们有自己的 UI 通道，不该搅动消息。
+- **Artifact 提升。** 名为 `artifact_create`/`artifact_update` 的工具变成一个 [`ArtifactPart`](../built-in-agent/runtime-loop) 而非泛型工具 part，其 `kind` 被夹到允许集（`ARTIFACT_KIND_ALLOWED` `:176`，回退 `"code"`）。
 
-`buildPartsFromExternalAgentEvents`（`:77`）为测试与非流式调用方一次折叠整条流。它发出的普通 `text` /
-`reasoning` / `tool-<name>` parts 是 AI-SDK 原生 UIMessage parts；[parts-extensions](../built-in-agent/runtime-loop)
-模块定义共享同一 `UIMessage` 的更丰富的 Cognia parts（`A2UIPart`、`ArtifactPart`…）。
+`buildPartsFromExternalAgentEvents`（`:77`）为测试与非流式调用方一次折叠整条流。它发出的普通 `text` /`reasoning` / `tool-<name>` parts 是 AI-SDK 原生 UIMessage parts；[parts-extensions](../built-in-agent/runtime-loop) 模块定义共享同一 `UIMessage` 的更丰富的 Cognia parts（`A2UIPart`、`ArtifactPart`…）。

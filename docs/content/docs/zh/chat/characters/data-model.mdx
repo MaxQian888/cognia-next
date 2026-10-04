@@ -1,11 +1,11 @@
 ---
 title: 数据模型
-description: Character 接口、Dexie characters 表、lib/db/characters.ts CRUD API、cognia-builtin-characters 植入契约，以及 SystemPromptPreset 配置模板。
+description: Character 接口、Dexie characters 表、lib/db/characters.ts CRUD API、cognia-builtin-characters 初始化契约，以及 SystemPromptPreset 配置模板。
 ---
 
 # 数据模型
 
-本页是角色存储层的行级契约：`Character` 接口、持有它的 Dexie 表、读写它的 CRUD 模块、六个内置人格如何被植入，以及那个经常被误认为是角色、但其实并不是角色的独立 `SystemPromptPreset` 模板类型。
+本页说明角色存储层的行级契约：`Character` 接口、对应的 Dexie 表、读写角色的 CRUD 模块、六个内置人格的初始化方式，以及独立的 `SystemPromptPreset` 模板类型。后者常被误认为角色，但属于不同类型。
 
 <TLDR>
   `Character` 定义在 `lib/claude/types.ts:2059-2317` —— 约 50 个对可选友好的字段，横跨

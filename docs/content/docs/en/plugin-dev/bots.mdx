@@ -5,11 +5,18 @@ description: Declaring a Bot in the manifest, the handler contract in TypeScript
 
 # Bots
 
-A Bot is a **binding, not an engine**. Its definition names an executor that already exists — a workflow, a squad, an agent turn, or a plugin handler — plus the triggers that start it. The value is the pairing of "when" with "what" and the policy ceiling that pairing carries. A Bot is declared in `manifest.bots[]`, never registered through a callback: a registration function cannot cross the Python stdio boundary, so declaration is the only shape that gives TypeScript and Python plugins the same capability.
+A Bot binds an existing executor to the triggers that start it.
+The executor can be a workflow, a squad, an agent turn, or a plugin handler.
+The binding pairs "when" with "what" and carries a policy ceiling.
+Declare a Bot in `manifest.bots[]`. Do not register it through a callback.
+A registration function cannot cross the Python stdio boundary.
+A declaration therefore gives TypeScript and Python plugins the same capability.
 
 ## Manifest
 
-Each entry in `manifest.bots[]` requires `id`, `name`, `version`, `executor`, and at least one `triggers[]` entry. Plugin Bot ids are namespaced by the host as `<pluginId>:<botId>`; installations pin that namespaced `definitionId` and a `pinnedVersion`.
+Each entry in `manifest.bots[]` requires `id`, `name`, `version`, `executor`, and at least one `triggers[]` entry.
+The host namespaces plugin Bot ids as `<pluginId>:<botId>`.
+Installations pin that namespaced `definitionId` and a `pinnedVersion`.
 
 ### Executors
 
@@ -20,7 +27,10 @@ Each entry in `manifest.bots[]` requires `id`, `name`, `version`, `executor`, an
 | `agent-turn` | `prompt` | A single agent turn; `{{config.x}}` and `{{event.*}}` interpolate |
 | `handler` | `entry` + `export` (JS) or `backend: "python"` | A durable in-plugin handler function |
 
-For `handler`, JS plugins declare `entry` (a relative module path) and optionally `export` (default `default`). Python plugins declare no `entry`; the host dispatches a `run` method on the `@cognia.contribution("<bot id>")` object.
+For `handler`, JS plugins declare `entry` as a relative module path.
+They can also declare `export`, which defaults to `default`.
+Python plugins declare no `entry`.
+The host dispatches a `run` method on the `@cognia.contribution("<bot id>")` object.
 
 ### Triggers
 

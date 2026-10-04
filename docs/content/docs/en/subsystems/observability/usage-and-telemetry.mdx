@@ -17,8 +17,8 @@ description: The token/cost and connector-telemetry surfaces that round out obse
   `lib/subscription/anthropic/usage-collector.ts` drains `usage_headers` events and an opt-in
   `usage-probe.ts` actively pings `/v1/messages` to read rate-limit headers, persisted to
   `subscriptionUsage` (Dexie v20) and analyzed by `usage-analytics.ts`. **Inbox telemetry** —
-  `lib/telemetry/` writes connector-pipeline breadcrumbs to a ring-buffer. None of these feed the
-  observability dashboard or log panel; they're their own panes.
+  `lib/telemetry/` writes connector-pipeline breadcrumbs to a ring-buffer. These surfaces do not feed the
+  observability dashboard or log panel. Each has a separate pane.
 </TLDR>
 
 <StatGrid>

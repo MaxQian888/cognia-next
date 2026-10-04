@@ -1,14 +1,13 @@
 ---
 title: 同步与 Handoff
-description: 桌面到 CLI 的文件投影、credential 边界、双向 transcript 副本、renderer-backed 实时协同，以及 forked-store 不变量。
+description: 桌面到 CLI 的文件投影、凭据边界、双向会话记录副本、基于渲染端的实时协作，以及 forked-store 不变量。
 ---
 
 # 同步与 Handoff
 
 ## Desktop → CLI 投影
 
-这条路径不使用 HTTP server。Renderer 解析原生宿主使用的同一个 CLI home，并通过 Tauri command
-写入受限的 bare filename。
+这条路径不使用 HTTP server。Renderer 解析原生宿主使用的同一个 CLI home，并通过 Tauri command 写入受限的 bare filename。
 
 | 表面 | 目标 | 触发与行为 |
 | --- | --- | --- |
@@ -17,22 +16,13 @@ description: 桌面到 CLI 的文件投影、credential 边界、双向 transcri
 | Composer history | `~/.cognia/history.json` | 把近期 Dexie history 规范化为 CLI oldest-first 格式 |
 | MCP server | `~/.cognia/mcp.json` | 仅手动同步；复用 per-agent MCP projection 与用户选择 |
 
-手动 **Sync now** 推送全部四个表面。Auto-sync 是 opt-in，在桌面启动或启用时运行；它推送
-config、credentials 与 history，但保留显式 MCP 选择。每项失败彼此隔离，一个不可用的 credential
-来源不会阻塞其他文件。
+手动 **Sync now** 推送全部四个表面。Auto-sync 是 opt-in，在桌面启动或启用时运行；它推送 config、credentials 与 history，但保留显式 MCP 选择。每项失败彼此隔离，一个不可用的 credential 来源不会阻塞其他文件。
 
 ## GUI → CLI transcript
 
-桌面写入 `<CLI_HOME>/handoff/<encodeURIComponent(sessionId)>.jsonl`，每条记录同时保留消息 ID、
-结构化 parts、metadata 和可读文本。工具调用保留标识、状态、输入及完整多行结果。缓存媒体在导出前
-读取实际字节；附件缺失会使交接失败。历史推理不会作为指令发送，未知内容会明确标记。
+桌面写入 `<CLI_HOME>/handoff/<encodeURIComponent(sessionId)>.jsonl`，每条记录同时保留消息 ID、结构化 parts、metadata 和可读文本。工具调用保留标识、状态、输入及完整多行结果。缓存媒体在导出前读取实际字节；附件缺失会使交接失败。历史推理不会作为指令发送，未知内容会明确标记。
 
-CLI 保留结构化快照用于后续接回，并向新的 runtime 注入历史上下文。超长历史必须先成功生成摘要；
-摘要回合禁用工具和 MCP，失败时停止续聊，不写入不完整副本。后续 transcript 只追加新的用户输入，
-避免反复嵌套历史内容。external CLI backend 可通过明确配置的 provider API key 与 model 生成超长历史摘要，不会自动切换
-provider；续聊仍使用选定的外部 Agent。缺少该配置时明确拒绝。摘要整体保留，无法容纳时停止交接，
-不会截掉末尾约束。内联附件在解码前检查 32 MiB 总量上限，写入私有临时目录后交给既有附件解析器；提取失败或被跳过时停止发送。
-只支持文本的外部适配器会明确提示图片经过有损 OCR。历史文件提及不会重新打开旧路径。交接不会转移桌面 SDK session ID、keyring handle、审批授权或实时 stream。
+CLI 保留结构化快照用于后续接回，并向新的 runtime 注入历史上下文。超长历史必须先成功生成摘要；摘要回合禁用工具和 MCP，失败时停止续聊，不写入不完整副本。后续 transcript 只追加新的用户输入，避免反复嵌套历史内容。external CLI backend 可通过明确配置的 provider API key 与 model 生成超长历史摘要，不会自动切换 provider；续聊仍使用选定的外部 Agent。缺少该配置时明确拒绝。摘要整体保留，无法容纳时停止交接，不会截掉末尾约束。内联附件在解码前检查 32 MiB 总量上限，写入私有临时目录后交给既有附件解析器；提取失败或被跳过时停止发送。只支持文本的外部适配器会明确提示图片经过有损 OCR。历史文件提及不会重新打开旧路径。交接不会转移桌面 SDK session ID、keyring handle、审批授权或实时 stream。
 
 ## CLI → GUI transcript
 
@@ -53,40 +43,27 @@ sequenceDiagram
   HTTP-->>CLI: 确认实际目标 session ID
 ```
 
-响应确认 renderer 已持久化，而非仅发送事件。Renderer 不可用或事务失败时返回错误。原生会话不会
-被冲突的 ID 覆盖；重复发送相同快照会打开同一目标，不覆盖桌面端后续工作；发生变化的快照创建独立
-副本。持久化 receipt 关联源 ID、内容摘要值和实际目标 ID。由于 CLI sidecar 无法在桌面中恢复，导入
-对话通过历史上下文继续。健康检查和持久化确认均有超时边界；超时会说明结果尚未确认，提示重试
-同一快照，客户端不会自动另建导入。
-首次使用内置 Agent 续聊时，从持久化消息和历史任务状态重建上下文，超限内容先摘要再发送；后续回合不会重复注入同一 seed。
+响应确认 renderer 已持久化，而非仅发送事件。Renderer 不可用或事务失败时返回错误。原生会话不会被冲突的 ID 覆盖；重复发送相同快照会打开同一目标，不覆盖桌面端后续工作；发生变化的快照创建独立副本。持久化 receipt 关联源 ID、内容摘要值和实际目标 ID。由于 CLI sidecar 无法在桌面中恢复，导入对话通过历史上下文继续。健康检查和持久化确认均有超时边界；超时会说明结果尚未确认，提示重试同一快照，客户端不会自动另建导入。首次使用内置 Agent 续聊时，从持久化消息和历史任务状态重建上下文，超限内容先摘要再发送；后续回合不会重复注入同一 seed。
 
 ## 从 Codex App 接回
 
-接回操作读取最新 Codex transcript，并按内容创建关联快照。重复接回同一内容会打开同一快照，保留
-之后在 Cognia 中的续聊。Codex 内容发生变化时创建新快照，两边历史均不覆盖；子对话关联和消息引用
-随快照图一起重新映射。解析失败不会再把旧的冻结副本当成成功结果。
+接回操作读取最新 Codex transcript，并按内容创建关联快照。重复接回同一内容会打开同一快照，保留之后在 Cognia 中的续聊。Codex 内容发生变化时创建新快照，两边历史均不覆盖；子对话关联和消息引用随快照图一起重新映射。解析失败不会再把旧的冻结副本当成成功结果。
 
 ## 跨宿主任务状态
 
-独立接收端随 transcript 保留历史 tasks、plans、goals、checkpoints 和 inter-agent messages。
-Model/provider 取自通过 preflight 的 ticket；源机器目录与审批授权不会成为目标端的执行权限。
+独立接收端随 transcript 保留历史 tasks、plans、goals、checkpoints 和 inter-agent messages。Model/provider 取自通过 preflight 的 ticket；源机器目录与审批授权不会成为目标端的执行权限。
 
 ## Live renderer-backed 操作
 
 Twin 与 team call 是 `cognia-agent` 唯一的实时协同平面：
 
-- Twin context 在 renderer 中计算、脱敏，并以 prompt segment 和 source metadata 返回；raw chunk
-  留在桌面 runtime 内。
-- Team definition 与 run state 位于 renderer store。CLI 可以列出 team、启动 run 并轮询 status
-  delta；CLI watcher 退出后 run 仍在桌面继续。
+- Twin context 在 renderer 中计算、脱敏，并以 prompt segment 和 source metadata 返回；raw chunk 留在桌面 runtime 内。
+- Team definition 与 run state 位于 renderer store。CLI 可以列出 team、启动 run 并轮询 status delta；CLI watcher 退出后 run 仍在桌面继续。
 
 这些操作要求 WebView 正在运行。除此之外，builtin Agent 与 external-agent hosting path 不依赖桌面进程。
 
 ## Forked store，共享代码
 
-CLI 安装 fake IndexedDB，打开共享的 `CogniaDB` schema，并把自己的数据库快照写入
-`~/.cognia/db.json`。Transcript 位于 `~/.cognia/sessions/`。GUI 继续使用 browser IndexedDB 与
-OS keyring state。共享 database type 和 Agent assembly 会减少行为漂移，但没有 file watcher 或
-双向数据库复制让它们成为同一个数据库。
+CLI 安装 fake IndexedDB，打开共享的 `CogniaDB` schema，并把自己的数据库快照写入 `~/.cognia/db.json`。Transcript 位于 `~/.cognia/sessions/`。GUI 继续使用 browser IndexedDB 与 OS keyring state。共享 database type 和 Agent assembly 会减少行为漂移，但没有 file watcher 或双向数据库复制让它们成为同一个数据库。
 
 这种分离是刻意的：同步与 handoff 都是显式 copy operation，桌面关闭后独立 Agent 仍可使用。

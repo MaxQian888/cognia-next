@@ -8,7 +8,7 @@ description: Five-stage plugin security chain — manifest declaration, install/
 <Status variant="experimental" />
 
 <TLDR>
-A plugin's `plugin.json` declares `PluginPermission` strings (canonical union at `types/plugin/plugin.ts:262`). At registration the guard records each as `manifest`-granted and stamps `DANGEROUS_PERMISSIONS` to the `confirm` tier (`permission-guard.ts:280`). Central enforcement is `createGuardedAPI` (`permission-guard.ts:777`) — a `Proxy` wrapping every plugin-facing namespace that calls `guard.require()` on each method and routes `confirm`-tier methods through the per-call consent broker. Signature verification (`signature.ts:157`) gates load; the token-bucket rate limiter (`rate-limiter.ts:56`) caps frequency.
+A plugin's `plugin.json` declares `PluginPermission` strings (canonical union at `types/plugin/plugin.ts:262`). At registration the guard records each as `manifest`-granted and stamps `DANGEROUS_PERMISSIONS` to the `confirm` tier (`permission-guard.ts:280`). Central enforcement is `createGuardedAPI` (`permission-guard.ts:777`) — a `Proxy` wrapping every plugin-facing namespace that calls `guard.require()` on each method and routes `confirm`-tier methods through the per-call consent broker. Signature verification (`signature.ts:157`) gates load. The token-bucket rate limiter (`rate-limiter.ts:56`) caps frequency.
 </TLDR>
 
 <StatGrid>
@@ -24,7 +24,7 @@ A plugin's `plugin.json` declares `PluginPermission` strings (canonical union at
 
 Security is a five-stage pipeline. Declared permissions in the manifest flow into consent at install/runtime, then into guard enforcement on every gated API call, then rate limiting, then code signing and verification at load. Everything lives under `lib/plugin/security/`.
 
-A plugin's `plugin.json` lists `PluginPermission` strings (canonical union at `types/plugin/plugin.ts:262`). At registration the guard records each one as `manifest`-granted and stamps `DANGEROUS_PERMISSIONS` to the `confirm` tier (`permission-guard.ts:280`). Central enforcement is `createGuardedAPI` (`permission-guard.ts:777`), a `Proxy` wrapping every plugin-facing API namespace, calling `guard.require()` (which throws `PermissionError`) on each method and routing `confirm`-tier methods through the per-call consent broker. Signature verification (`signature.ts`) gates load; rate limiting (`rate-limiter.ts`) caps frequency.
+A plugin's `plugin.json` lists `PluginPermission` strings (canonical union at `types/plugin/plugin.ts:262`). At registration the guard records each one as `manifest`-granted and stamps `DANGEROUS_PERMISSIONS` to the `confirm` tier (`permission-guard.ts:280`). Central enforcement is `createGuardedAPI` (`permission-guard.ts:777`), a `Proxy` wrapping every plugin-facing API namespace, calling `guard.require()` (which throws `PermissionError`) on each method and routing `confirm`-tier methods through the per-call consent broker. Signature verification (`signature.ts`) gates load. Rate limiting (`rate-limiter.ts`) caps frequency.
 
 ## 2. The guard — `permission-guard.ts`
 

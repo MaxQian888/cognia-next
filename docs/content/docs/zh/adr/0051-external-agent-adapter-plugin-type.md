@@ -1,6 +1,6 @@
 ---
 title: "ADR-0051 — 外部智能体适配器作为动态加载的插件类型"
-description: "闭合了让外部代理只剩一半插件类型的循环：预设本来就可以通过插件贡献，但赋予新代理目标行为（握手、会话生命周期、流式传输、健康状态）的协议适配器是硬编码的。添加外部代理适配器功能，使插件能在内置使用protocolAdapterRegistry中贡献全新的外部代理协议，在enable/disable register/unregister，并交付完整的动态加载代理（适配器 + 匹配预设）。"
+description: "补全外部 Agent 的插件扩展能力：预设本来就可以通过插件贡献，但赋予新代理目标行为（握手、会话生命周期、流式传输、健康状态）的协议适配器是硬编码的。添加外部代理适配器功能，使插件能通过内置使用的 protocolAdapterRegistry 提供新的外部 Agent 协议，并在 enable/disable 时 register/unregister，并交付完整的动态加载代理（适配器 + 匹配预设）。"
 ---
 
 # ADR-0051 — 外部智能体适配器作为动态加载的插件类型
@@ -14,7 +14,7 @@ description: "闭合了让外部代理只剩一半插件类型的循环：预设
 - **统一**——通用的Rust进程层（`command_resolver` →事件汇→ `kill_on_drop` →生成，ADR-0049中加固）以及预设→配置→ `addAgent`流水线。每个代理一条代码路径;没有按提供商分支。
 - **被定向**——四个协议适配器（`acp`、`codex-app-server`、`opencode`、`a2a`），它们分别拥有每个协议的握手、会话生命周期、流语义、健康探针和会话扩展。
 
-插件已经可以贡献统一的一半：`external-agent-preset`能力将配置注册为运行时覆盖层，预设则可以搭载内置协议。但**targeted**半部分是关闭的——`ExternalAgentManager.registerDefaultAdapters()`将四个适配器硬编码进`protocolAdapterRegistry`，该注册表从未暴露给插件运行时。一个`protocol`不在四者中的预设`Unsupported protocol` `addAgent`。（同名的`protocolAdapters`插件功能无关——它针对的是**LLM-provider**注册表`lib/ai/providers/protocol-adapter-registry.ts`，而非外部代理。）
+插件已经可以贡献统一的一半：`external-agent-preset`能力将配置注册为运行时覆盖层，预设则可以使用内置协议。但**targeted**半部分是关闭的——`ExternalAgentManager.registerDefaultAdapters()`将四个适配器硬编码进`protocolAdapterRegistry`，该注册表从未暴露给插件运行时。如果预设的 `protocol` 不属于这四种协议，`addAgent` 会抛出 `Unsupported protocol`。（同名的`protocolAdapters`插件功能无关——它针对的是**LLM-provider**注册表`lib/ai/providers/protocol-adapter-registry.ts`，而非外部代理。）
 
 所以“外部代理是一种动态加载的插件类型”这句话只有一半正确：插件可以描述它已经理解的代理在哪里，但无法教会主机一个*新的*代理协议。
 

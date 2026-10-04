@@ -1,6 +1,6 @@
 ---
 title: "ADR-0049 — 外部智能体进程管理加固（Windows 启动 · 事件驱动 I/O · 关机清理 · Codex 存活检测）"
-description: "加强本地外部代理进程层及其TypeScript生命周期以实现正确的全链 loading/startup：解决命令对 Windows PATH × PATHEXT 。cmd/.bat shims（NPX、OpenCode、Cursor-Agent）实际上启动，完成向事件驱动stdout/stderr/exit转发的迁移，终止代理进程并在应用退出时ACP终端，阻止释放终端子节点泄露，并为Codex应用-服务器适配器提供主动健康探针。"
+description: "加强本地外部代理进程层及其TypeScript生命周期以确保整个流程正确呈现 loading/startup：正确解析 Windows PATH × PATHEXT 中的 .cmd/.bat shims（NPX、OpenCode、Cursor-Agent）以实际启动命令，完成事件驱动的 stdout/stderr/exit 转发迁移，终止代理进程并在应用退出时ACP终端，防止释放终端时残留子进程，并为Codex应用-服务器适配器提供主动健康探针。"
 ---
 
 # ADR-0049 — 外部智能体进程管理加固（Windows 启动 · 事件驱动 I/O · 关机清理 · Codex 存活检测）
@@ -17,7 +17,7 @@ description: "加强本地外部代理进程层及其TypeScript生命周期以�
 
 Windows上的`tokio::process::Command::new("npx")`只会自动添加`.exe`;它**不**咨询`PATHEXT`。每个可执行预设都会启动一个裸 命令，在 Windows 上作为 `.cmd` shim 存在（`npx -y @zed-industries/codex-acp`、`opencode serve`、`cursor-agent`），因此生成失败，显示“找不到程序”——而 `check_command_exists` *确实检查过 `.cmd`，报告了预设 `executable`。准备度和生成率在整个链条上存在分歧。
 
-新`src-tauri/src/external_agent/command_resolver.rs`将裸路命令解析为具体路径（PATH × `PATHEXT`，默认路径`.COM;.EXE;.BAT;.CMD;.PS1`）。`process.rs`和`terminal.rs`在`Command::new`之前达成决心;Rust ≥ 1.77.2 则正确执行已解析的`.cmd`/`.bat`（BatBadBut硬化）。在Unix上，原始名称未更改（无`PATHEXT`;`Command`已经PATH-searches了），如果什么都没找到（生成点接口自己的错误）。`check_command_exists`是在**同一个**解析器之上重新实现的，所以预设报告的`executable`现在变成了真正会生成的。
+新增的 `src-tauri/src/external_agent/command_resolver.rs` 将不带路径的命令名解析为具体路径（PATH × `PATHEXT`，默认值为 `.COM;.EXE;.BAT;.CMD;.PS1`）。`process.rs` 和 `terminal.rs` 在调用 `Command::new` 前完成解析。Rust ≥ 1.77.2 可正确执行已解析的 `.cmd`/`.bat`（BatBadBut 加固）。在 Unix 上，解析器保留原始名称（无 `PATHEXT`；`Command` 已搜索 PATH）。未找到命令时，也保留原始名称，由进程启动操作返回自身错误。`check_command_exists` 使用**同一个**解析器，因此报告为 `executable` 的预设现在可以实际启动。
 
 ### 2 ·事件驱动stdout/stderr/exit（完成迁移）
 

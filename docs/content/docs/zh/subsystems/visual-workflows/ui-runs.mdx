@@ -8,7 +8,7 @@ description: 可视化工作流子系统的 React UI —— 三栏编辑器外�
 <Status variant="stable" />
 
 <TLDR>
-用户可触达的一切都位于 `components/workflow/` 之下：三栏编辑器外壳在 `canvas.tsx:894` 挂载“每工作流一份 store”，外层包裹 `ReactFlowProvider` + `EditorStoreProvider`，而 `FlowCanvas`（`flow-canvas.tsx:117`）是**唯一**逐帧订阅者，外壳的其余部分（chrome）通过 `getState()` 读取。选中节点驱动 Config/Input/Output 三段式 NDV 检查器；运行详情显示甘特图、provenance、lineage、immutable version/deployment，并提供三种由 Execution Authority 驱动的重试。路由位于 `app/workflows/`，并通过 `generateStaticParams [{id:"_"}]` 输出静态导出的 `[id]` 占位页。
+工作流 UI 组件位于 `components/workflow/` 之下：三栏编辑器外壳在 `canvas.tsx:894` 为每个工作流挂载独立 store，外层包裹 `ReactFlowProvider` + `EditorStoreProvider`，而 `FlowCanvas`（`flow-canvas.tsx:117`）是**唯一**逐帧订阅者，外壳的其余部分（chrome）通过 `getState()` 读取。选中节点驱动 Config/Input/Output 三段式 NDV 检查器；运行详情显示甘特图、provenance、lineage、immutable version/deployment，并提供三种由 Execution Authority 驱动的重试。路由位于 `app/workflows/`，并通过 `generateStaticParams [{id:"_"}]` 输出静态导出的 `[id]` 占位页。
 </TLDR>
 
 纯 store/几何辅助函数（`createEditorStore`、对齐数学、`resolveNodeIo`、`flattenSchema`）记录于 [./editor-store](./editor-store) —— 本页仅引用而不重复推导。节点语义见 [./node-system](./node-system)，copilot/表达式面板见 [./expressions-copilot](./expressions-copilot)，执行内部见 [./runtime-execution](./runtime-execution)，schema 见 [./data-model](./data-model)。权威：[../../adr/0034-workflow-editor-completeness-and-plugin-parity](../../adr/0034-workflow-editor-completeness-and-plugin-parity)。

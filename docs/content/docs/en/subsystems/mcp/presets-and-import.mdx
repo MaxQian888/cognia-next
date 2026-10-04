@@ -12,10 +12,9 @@ description: Where MCP server rows come from — the 15 built-in presets (lib/cl
   (`MCP_PRESETS`, `lib/claude/mcp-presets.ts:46`) — filesystem, github, postgres, slack, deepwiki, and
   generic http/sse — each declaring typed `fields` (env vars, arg tokens, URLs, headers) that
   `applyPresetFields` substitutes into a config blob. Plugins add their own presets through an
-  **overlay registry** (`registerMcpServerPreset`) that layers atop the static catalog. Importing
-  pulls the other direction: the **import dialog** reads an external CLI's config file (Claude Desktop,
+  **overlay registry** (`registerMcpServerPreset`) that layers atop the static catalog. The import path reads existing configurations: the **import dialog** reads an external CLI's config file (Claude Desktop,
   etc.), previews the servers it finds, and `bulkImportMcpServers` writes the selected ones with a
-  skip/overwrite/duplicate collision strategy. Every path lands in the same `mcpServers` row.
+  skip/overwrite/duplicate collision strategy. Every path writes to the same `mcpServers` row.
 </TLDR>
 
 ## Built-in preset catalog

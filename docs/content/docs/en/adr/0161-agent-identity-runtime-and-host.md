@@ -1,6 +1,6 @@
 ---
 title: "0161: An agent, its runtime, and its host are three questions"
-description: "The first-party runtime becomes an ordinary entry in one catalog, the turn's runtime becomes one AgentRuntimeRef owned by the session, and built-in agent definitions get a single shared catalog instead of one per shell."
+description: "Places the first-party runtime in one catalog as an ordinary entry. The session owns the turn's runtime through one AgentRuntimeRef. Built-in agent definitions use one shared catalog across shells."
 ---
 
 # ADR 0161: An agent, its runtime, and its host are three questions
@@ -18,7 +18,7 @@ external. Neither word described what actually distinguished them.
 `"claude-sdk" | "external"`, and `claude-sdk` did not mean the Claude Agent SDK.
 It meant "whatever the bundled Node sidecar decides to run", and the sidecar
 runs two runtimes (`sidecar/dispatch/runtime-adapter.mjs`): `claude-agent-sdk`
-for Anthropic and `ai-sdk` for every other provider. Which one serves a turn is
+for Anthropic and `ai-sdk` for every other provider. The runtime for a turn is
 derived from the provider by `runtimeFromLegacy`
 (`lib/ai/agent/execution/legacy-mapping.ts`), never from the chip. So a DeepSeek
 session read "Built-in Anthropic SDK sidecar" in the runtime menu, in the

@@ -1,6 +1,6 @@
 ---
 title: "0148 — Style packs and layer-semantic surfaces"
-description: "Appearance had every shape knob and no way to bundle them, and wallpaper translucency reached only 28 registered data-slots — so a hard-edged look was unreachable and the app's own panels stayed opaque. Adds a pack layer for shape, a Surface primitive for tiers, and a gate so neither regrows."
+description: "Appearance settings had individual shape controls but could not combine them into a pack. Wallpaper translucency reached only 28 registered data-slots, leaving app panels opaque and preventing a hard-edged appearance. Adds a shape-pack layer, a Surface primitive for tiers, and a gate to prevent these gaps from returning."
 ---
 
 # ADR 0148 — Style packs and layer-semantic surfaces
@@ -183,8 +183,8 @@ materials be decoration.
 `<body>`; `globals.css` folds it into `--app-bg-painted-opacity: min(slider,
 cap)`, which every wallpaper layer paints at (see *Layers* below) — so fades,
 crossfades and live slider previews honour the cap without re-solving. The wallpaper panel's
-contrast chip and "Auto-fix" run the same solver, so they cannot disagree with
-what is painted. Analyses are mirrored in `localStorage` keyed by id + bytes so a
+contrast chip and "Auto-fix" use the same solver. Their results therefore match
+the rendered wallpaper. Analyses are mirrored in `localStorage` keyed by id + bytes so a
 relaunch never paints uncapped first. `BackgroundSettings.legibilityGuard`
 (absent = on) turns it off; theme colours are resolved through a probe element
 and re-checked on any `<html>` / `<head>` mutation that changes them.

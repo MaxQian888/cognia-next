@@ -1,6 +1,6 @@
 ---
 title: "0157 — References and result reuse"
-description: "One registry behind every @ namespace and the ^ shortcut, message- and result-level granularity on top of the existing chat index, snapshots that admit when they are stale, and citations read back as backlinks."
+description: "Provides one registry for every @ namespace and the ^ shortcut. Adds message-level and result-level references to the existing chat index. Snapshots report when they are stale, and citations can be read as backlinks."
 ---
 
 # ADR 0157 — References and result reuse
@@ -108,7 +108,7 @@ gets, and it is the only version a chip can show synchronously. But the record
 can move underneath it. Refreshing silently at send would be the worse failure:
 the user would have approved one body and sent another.
 
-So the body is never rewritten and the **divergence** is reported on both sides.
+The body is never rewritten. Both the chip and prompt report **divergence**.
 Every source declares an opaque `fingerprint` — only the source knows what
 "changed" means for its record, and the only question asked is whether two
 strings still match. The chip grows a badge and a one-click re-read; the prompt

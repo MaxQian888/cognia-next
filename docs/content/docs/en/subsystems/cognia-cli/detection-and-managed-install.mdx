@@ -14,7 +14,7 @@ description: How the app finds (or fetches) the cognia binary — the cached det
   `cognia-<triple>.tar.gz` (+ `.sig` + `checksums.txt`) from GitHub Releases, **always enforces
   SHA-256**, verifies Ed25519 against the embedded release key unless it's still the placeholder,
   extracts traversal-safely to `<app_data>/cognia/cli/<version>`, chmods on Unix, registers the
-  dir, and invalidates the detection cache so the UI flips to "installed" immediately. On web
+  dir, and invalidates the detection cache so the UI shows "installed" immediately. On web
   and mobile every entry point short-circuits to "unsupported".
 </TLDR>
 

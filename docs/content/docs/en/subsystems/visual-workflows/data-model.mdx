@@ -222,7 +222,7 @@ IndexedDB caveats shape these indexes: booleans are not reliably indexable, so `
 
 ## CRUD layer
 
-`lib/db/workflows.ts` is the only sanctioned mutation surface. `newWorkflowId()` (`lib/db/workflows.ts:22-24`) mints `wf_` + base36(now) + random. Reads: `listWorkflows()` (L30-32, ordered by name), `listWorkflowsByUpdated()` (L34-36), `getWorkflow(id)` (L46-48), `listWorkflowRuns(query)` (L132-142). Writes: `createWorkflow(draft)` (L67-89, defaults `folderId` to `ROOT_FOLDER_ID`, forces `isBuiltIn:false`), `updateWorkflow(id,patch)` (L100-102, auto-bumps `updatedAt` so callers must never pass it), `replaceWorkflow(wf)` (L109-115, full put, throws if id absent).
+`lib/db/workflows.ts` is the only sanctioned mutation surface. `newWorkflowId()` (`lib/db/workflows.ts:22-24`) creates `wf_` + base36(now) + random. Reads: `listWorkflows()` (L30-32, ordered by name), `listWorkflowsByUpdated()` (L34-36), `getWorkflow(id)` (L46-48), `listWorkflowRuns(query)` (L132-142). Writes: `createWorkflow(draft)` (L67-89, defaults `folderId` to `ROOT_FOLDER_ID`, forces `isBuiltIn:false`), `updateWorkflow(id,patch)` (L100-102, auto-bumps `updatedAt` so callers must never pass it), `replaceWorkflow(wf)` (L109-115, full put, throws if id absent).
 
 ```ts
 // lib/db/workflows.ts:144-149

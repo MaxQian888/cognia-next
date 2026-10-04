@@ -1,6 +1,6 @@
 ---
 title: 发现与配对
-description: 手机如何找到并信任桌面端 —— mDNS 订阅、LAN IP 段扫描、WebRTC-ICE 本地 IP 获取技巧、优先级候选连接策略遍历、三步配对向导、QR 载荷，以及 TLS fingerprint pinning。
+description: 手机发现桌面端并建立信任的流程，包括 mDNS 订阅、LAN IP 段扫描、通过 WebRTC ICE 获取本地 IP、按优先级尝试连接候选、三步配对向导、QR 载荷和 TLS 指纹固定。
 ---
 
 # 发现与配对
@@ -20,7 +20,7 @@ description: 手机如何找到并信任桌面端 —— mDNS 订阅、LAN IP �
 
 ## 两套发现系统
 
-两者共用 fingerprint pinning 的思路，但代码完全独立——请勿混淆：
+两套实现都使用指纹固定（fingerprint pinning），但代码相互独立：
 
 - **`lan-scanner.ts` — 发现未知主机。** 配对向导的"发现"步骤调用它，将手机从未见过的桌面端呈现出来。
 - **`connection-strategy.ts` — 连接已知主机。** 在实际调用时使用，为*已配对*且 fingerprint 已知的设备选取最优 URL。

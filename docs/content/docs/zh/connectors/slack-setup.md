@@ -5,7 +5,7 @@ description: "创建 Slack 应用，收集 bot/app 令牌与签名密钥，并�
 
 # Slack 机器人配置指南
 
-本指南将引导你创建 Slack 应用、获取所需的令牌与密钥，并配置 cognia-next 以连接到你的工作区。
+本指南说明如何创建 Slack 应用、获取令牌与密钥，并在 cognia-next 中配置工作区连接。
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: "0176: Every clone shares one object cache"
-description: "The bare-mirror cache, the credential policy, and the git runner move into one leaf crate that cognia-git, cognia-task-workspace and src-tauri all depend on. The cache root becomes process-global and absolute, a clone budget kills the child instead of dropping a future, and the guarded clone gets a cache it never had."
+description: "Moves the bare-mirror cache, credential policy, and git runner into one leaf crate used by cognia-git, cognia-task-workspace and src-tauri. The cache root is process-global and absolute. Clone-budget expiry kills the child process. The guarded clone gains cache access."
 ---
 
 # ADR 0176: Every clone shares one object cache
@@ -214,10 +214,9 @@ checkout's own `.git/config` for the token.
 workspace that exists to push cannot have a local directory as its `origin`. A
 managed *source* checkout is the other case: it never pushes, and two things
 downstream run `git fetch origin` on it with no credential at all
-(`fetch_origin_throttled`, `resolve_pull_request_base`). Against a private
-repository those fail. Leaving `origin` on the mirror makes them work, because
-the mirror is a directory on this machine that was fetched *with* the
-credential. The real remote is recorded as a second credential-free remote named
+(`fetch_origin_throttled`, `resolve_pull_request_base`). These fetches fail against a private
+repository. Keeping `origin` on the mirror allows them to succeed: the local
+mirror was fetched *with* the credential. The real remote is recorded as a second credential-free remote named
 `upstream`, so the checkout still says where the code came from.
 
 A pull-request base is asked for by name at mirror time and fetched into the

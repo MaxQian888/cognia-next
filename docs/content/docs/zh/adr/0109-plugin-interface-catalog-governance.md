@@ -10,7 +10,7 @@ description: 以 Plugin Interface Catalog 统一各 SDK 与运行时中的 ctx.*
 
 ## 背景
 
-公开 Plugin API 分散在 TypeScript 声明、权限映射、Rust 路由、Python 镜像、WIT 与手写文档中，已经发生语义漂移。`PluginContext` 的实际命名空间数量远高于文档描述，生命周期清理散落在 manager 分支中，跨进程版本也被分别硬编码。
+公开 Plugin API 分散在 TypeScript 声明、权限映射、Rust 路由、Python 镜像、WIT 与手写文档中，语义已不一致。`PluginContext` 的实际命名空间数量远高于文档描述，生命周期清理分布在 manager 分支中，跨进程版本也被分别硬编码。
 
 ## 决策
 

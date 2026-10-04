@@ -1,6 +1,6 @@
 ---
 title: "0142 — The Agent SDK is two products, not one"
-description: "@cognia/agent splits into a v0.1 runtime client that must first be correct about replay, backpressure, reconnection and attachments, and a v0.2 authoring layer whose agent definitions are immutable, host-persisted and version-frozen into each session. The client ships Apache-2.0; the host stays AGPL."
+description: "Splits @cognia/agent into two layers. The v0.1 runtime client must first handle replay, backpressure, reconnection and attachments correctly. The v0.2 authoring layer uses immutable agent definitions that the host persists and freezes by version for each session. The client uses Apache-2.0. The host remains AGPL."
 ---
 
 # ADR 0142 — The Agent SDK is two products, not one
@@ -182,9 +182,9 @@ it to JSON Schema. A raw JSON Schema escape hatch stays, typed `unknown`.
 
 The definition stores the tool contract and a schema digest — never handler code.
 The client registers handlers on every connect and reconnect. Before calling the
-model, the host checks that a handler exists and that its digest matches. Input
-and output are validated on both sides; a missing handler, a digest mismatch, or
-an illegal output is a typed error, not a silent degradation.
+model, the host checks that a handler exists and that its digest matches. Both sides validate input
+and output. A missing handler, a digest mismatch, or an illegal output produces
+a typed error.
 
 ### 10. Licensing splits at the process boundary
 

@@ -11,7 +11,7 @@ Accepted (2026-08-11).
 
 ## Context
 
-Cognia already persisted Memory evidence and conflicts, Workflow lineage, Twin observations, connector audit rows, and Action Review receipts. Those domain models answered local questions but could not jointly answer “why did this action happen?” without bespoke joins. Twin re-distillation also de-duplicated equivalent choices but did not preserve contradictory choices as an explicit review object.
+Cognia already persisted Memory evidence and conflicts, Workflow lineage, Twin observations, connector audit rows, and Action Review receipts. Those domain models answered local questions. To jointly answer “why did this action happen?”, they required custom joins. Twin re-distillation also de-duplicated equivalent choices but did not preserve contradictory choices as an explicit review object.
 
 ## Decision
 

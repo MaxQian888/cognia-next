@@ -1,6 +1,6 @@
 ---
 title: "0160 — Docker machines are real machines, and the session follows"
-description: "Containers stop being scratch processes: an explicit create/start/suspend/resume/stop/delete lifecycle backed by docker inspect, adoption by stable name, and a bound session's shell and file work running inside the machine under an attested policy."
+description: "Gives containers an explicit create/start/suspend/resume/stop/delete lifecycle backed by docker inspect. Adopts containers by stable name. A bound session's shell and file operations run inside the machine under an attested policy."
 ---
 
 # ADR 0160 — Docker machines are real machines
@@ -78,9 +78,8 @@ Docker freezes network mode and the cpu and memory ceilings when the container
 is created, and `docker exec` cannot tighten any of them for a single command.
 A request asking for more confinement than the machine has is therefore refused
 with `policy-not-attested` rather than run, following the precedent the e2b
-microvm tier already set. Running it would execute under weaker isolation than
-the caller believes it obtained, which is the failure the sandbox exists to
-prevent.
+microvm tier already set. Otherwise, the command would run with weaker isolation than the
+caller requested, violating the sandbox contract.
 
 Host paths are refused or rebased onto the workspace mount, never passed
 through. A host path names nothing inside a container, or worse, names something

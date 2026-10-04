@@ -13,7 +13,7 @@ description: "Introduce genuine independent local accounts by moving the existin
 
 Cognia's local app is currently single-user by design. The Dexie database is physically named `cognia-claude`, `AppSettings` is a singleton row with id `singleton`, and the active workspace/project id lives inside that singleton. The v86 project layer already provides isolation between workspaces inside one local user by ensuring scoped data resolves to a non-null `projectId`.
 
-The new requirement is different: multiple people must be able to use the same device with independent local accounts, and one account's data must be invisible to another. There is no cloud backend and the main app remains a Next.js static export (`output: "export"`), shelled by Tauri on desktop and Capacitor on mobile. Any privileged local work, such as password verification helpers, remains in Tauri Rust rather than Next.js route handlers.
+Multiple people must be able to use the same device with independent local accounts. One account's data must be invisible to another. There is no cloud backend and the main app remains a Next.js static export (`output: "export"`), wrapped by Tauri on desktop and Capacitor on mobile. Any privileged local work, such as password verification helpers, remains in Tauri Rust rather than Next.js route handlers.
 
 We evaluated three options:
 

@@ -881,3 +881,133 @@ Implementation: `lib/ai/agent/team/teammate/resolve-external-backing.ts`,
 `lib/ai/agent/team/teammate/dispatch-teammate.ts`, `lib/plugin/agent-sdk/dispatch.ts`, and
 `types/agent/external-agent.ts`. CLI/TUI backend selection does not yet expose
 this explicit Cognia model binding; its native model selection remains separate.
+
+## 2026-10-02 amendment — explicit per-agent Cognia model selection
+
+### Selection is per conversation and per agent
+
+A conversation records an explicit model choice for each external agent it
+talks to in `ChatSession.externalAgentModels`, keyed by agent. Each entry has
+three states, kept distinct end to end: absent inherits the agent
+configuration's own `cogniaModel`, `null` selects the agent's native model
+configuration explicitly, and a binding (`providerId`, `modelId`, optional
+`accountId`) runs the agent on a Cognia model through the gateway. The
+built-in agent's model pick is a separate axis and is not changed by, nor does
+it change, any external-agent entry. The eligibility rule for listing a model
+is one pure function, `lib/ai/agent/external/config/cognia-model-options.ts`,
+read by both the desktop picker and the Host catalog below: OpenAI or
+Anthropic protocol, not explicitly lacking tools or streaming, and a credential
+the gateway can use (manual key, API-key subscription, or keyless provider).
+
+### Supported runtimes
+
+The managed path now also covers Kimi CLI and DeepSeek Harness (`dsh` over
+ACP, and the `dsh-sdk` profile) alongside Codex, OpenCode, Pi, Claude Agent ACP
+and Qwen Code. `cogniaGatewaySupport(config)` in `config/gateway-task.ts` is
+the single answer to "can this configuration run on a Cognia model", with a
+refusal reason (`network-endpoint`, `remote-server`, `no-process`,
+`unsupported-runtime`). The final list, including any further runtimes, is
+maintained in `GATEWAY_RUNTIME_TRAITS`:
+
+| Runtime | Ingress | Continuity | Notes |
+| --- | --- | --- | --- |
+| Codex (app-server, ACP) | Responses | native resume | |
+| Claude Agent ACP | Anthropic Messages | native resume | |
+| OpenCode (ACP, V2 with a process), Pi, Qwen Code, DeepSeek Harness ACP | Chat Completions | native resume | |
+| DeepSeek Harness SDK (`dsh-sdk`) | Chat Completions | transcript | |
+| Kimi Code | Chat Completions | native resume | `KIMI_MODEL_*` env; model alias `__kimi_env_model__`; `KIMI_CODE_HOME` is task-owned |
+| Goose | Chat Completions | native resume | env key, keychain disabled |
+| GitHub Copilot CLI | Chat Completions | native resume | `--model` at launch (no model option on this route); GitHub token variables are set to dummies so a build without bring-your-own-model fails to start rather than silently using GitHub models |
+| Aider | Chat Completions | transcript | |
+| OpenCode server (auto-spawn) | Chat Completions | native resume | generated config verified; the legacy-protocol server path itself not run end to end |
+
+Refused with a reason: Cline (`unsupported-runtime`: its key can only live in plain text in `providers.json`), Gemini CLI (no Gemini ingress on the gateway), Cursor, Kiro, Devin, Qoder, Droid (no verified bring-your-own-model contract, or account auth required), and attached servers (`remote-server` / `network-endpoint`). The picker shows these as unavailable with the reason.
+
+Switching Cognia model A → B keeps the agent's own history through an in-task **rebind** when the Cognia owner account, device and runtime are unchanged (enforced by the manager and by sandboxd/the CLI on the retained binding). A Host lane cannot rebind: the switch starts a new task and hands the transcript over. Switching between native and Cognia always starts or resumes the matching side and hands over the turns that side has not seen.
+
+### The Host lane
+
+A phone or browser paired to a Host can run a Host-owned external agent on a
+Cognia model. The binding travels per turn as `external_agent_run_turn.cogniaModel`
+(a nullable object with exactly `providerId`, `modelId` and a nullable
+`accountId`; `additionalProperties: false`). The Host validates it with
+`normalizeCogniaModelBinding`, which refuses any extra or secret field, and
+passes it to `ExternalAgentManager.execute`. The gateway task is prepared on
+the Host with the Host's provider settings and vault
+(`prepareExternalAgentGatewayRoute`, local branch); no credential, header or
+base URL crosses the wire in either direction. The calling device id, injected
+server-side by the RPC layer, rides `context.custom.callerDeviceId` so the
+gateway task is bound to the device that started it. Starting such a turn needs
+the same authority as any Host-run turn: `process.spawn` plus an interactive
+admin lease.
+
+`external_agent_cognia_models { configId }` is a read (`process.spawn`, no
+approval) that answers a `CogniaGatewayModelCatalog`: either
+`{ supported: true, providers }`, where each provider carries ids, names,
+optional vault `accountIds` and per-model capability facts, or
+`{ supported: false, reason }` with `host-update-required`,
+`unsupported-runtime`, `no-eligible-models`, `account-locked` or
+`public-https-required`. The Host advertises the read and a capability marker,
+`external_agent_run_turn_cognia_model`, under `external-agent.host-configs`.
+A client that does not see the marker raises a translatable "update the Host"
+error for a binding or a gateway-session resume instead of sending a field the
+older Host's closed schema would refuse. An explicit `null` is not sent
+to such a Host. The Host continues to use its own configuration to decide. The
+run service does not send its end-of-turn model report for a Cognia-bound turn
+or a `cognia-gateway:` session: the task child is already released, and the
+report would present the gateway route as the agent's native models.
+
+Both Hosts advertise both operations, through different preparation paths.
+The desktop Host takes the local branch above. The headless Host's brain
+hydrates neither the TypeScript provider settings nor the subscription vault,
+so `prepareExternalAgentGatewayRoute` delegates the task lease to the Rust
+gateway (`lib/gateway/host-task-lease.ts`). Three service-only commands do the
+work: `agent_gateway_host_task_prepare`, `agent_gateway_host_task_renew` and
+`agent_gateway_host_task_revoke`.
+
+- **Prepare.** `mint_host_task_lease` in `crates/cognia-gateway/src/task_lease.rs`
+  copies one provider out of the snapshot the gateway already serves into a
+  private per-task deployment. It is minted from the same `task_mint_request`
+  shape as a device lease: one model, `gateway-required`, chat or responses
+  plus models and count-tokens, a 2-minute TTL and no failover. The lease is
+  scoped to the task and the origin device, and ends when that device is
+  revoked.
+- **Renew.** The brain renews every 30 s and aborts the turn if a renewal
+  fails.
+- **Revoke.** The brain revokes the lease when the turn finishes.
+- **Refusals.** A headless binding with an explicit `accountId` is refused,
+  because profile providers have no vault accounts. On `cognia-server`, a
+  service-scope spawn that carries a gateway task must hold a live Host lease
+  for that task and device, with matching endpoints.
+
+On headless, the catalog read answers from `provider_profiles_list` and
+`gateway_provider_capabilities`: names, the enabled flag, the wire family
+(OpenAI or Anthropic) and whether a credential is present. It never returns
+credentials, base URLs or headers.
+
+An operator gives a headless Host its providers through the Rust provider
+profile store. A credential is either an `env` reference or a `secret-store`
+reference. A secret-store value is written while the server is stopped:
+`cognia-server profiles credential-set --id <id>` reads the value from stdin
+and encrypts it under the master key. `credential-delete` and `credential-list`
+manage the stored values. A deployment then refers to the value with
+`credentialProfileRef: { kind: "secret-store", secretId }`. The running server
+caches its secret store, so changes apply on the next start. No credential is
+ever sent to a device.
+
+### Switching models and continuity
+
+A different provider, model or account is a new gateway task. Switching starts
+a new task and hands the conversation over to it; the previous task's native
+history is retained for its own resume. Rebinding inside an existing task is
+permitted only under the same owning Cognia account, the same device and the
+same runtime, and always mints a fresh lease. How a task continues depends on
+its runtime's continuity trait: `native-resume` runtimes resume their own
+session from the retained task home, while `transcript` runtimes (the DSH SDK
+profile, Aider) continue from the conversation transcript Cognia replays.
+
+Implementation: `lib/ai/agent/external/config/cognia-model-options.ts`,
+`lib/ai/agent/external/config/host-config-service.ts` (`getHostCogniaModelCatalog`),
+`lib/ai/agent/external/runtimes/remote/{remote-execute,remote-run-client,remote-run-service,remote-host-configs}.ts`,
+`lib/companion/desktop-write-source.ts`, `lib/platform/host-feature-manifest.ts`,
+`protocol/companion-request-schemas.json` and `protocol/companion-response-schemas.json`.

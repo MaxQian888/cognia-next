@@ -5,9 +5,7 @@ description: "让 cognia-agent TUI 的 markdown 渲染更自然、流式更顺�
 
 # ADR-0053 — Agent CLI TUI 渲染与工具调用打磨
 
-**状态**：Accepted（2026-06-20）
-**作者**：Max Qian + Claude Opus 4.8
-**承接**：[Agent CLI TUI](../subsystems/cognia-agent-tui) 子系统、ADR-0050（操作体验加固），以及 sidecar 内置工具。
+**状态**：Accepted（2026-06-20）**作者**：Max Qian + Claude Opus 4.8 **承接**：[Agent CLI TUI](../subsystems/cognia-agent-tui) 子系统、ADR-0050（操作体验加固），以及 sidecar 内置工具。
 
 ## 当前状态修订（2026-08-13）
 
@@ -59,11 +57,6 @@ TUI 的 markdown 渲染、工具卡片与 sidecar 内置工具均可用，但经
 
 ## 2026-08 跟进——renderer model 与结构化 part
 
-渲染现增加纯 `TerminalBlock` 层，包含 styled terminal line、plain-copy text、精确 row count、
-stable id 与 interaction target。实现继续使用 `marked@4`，不把 renderer 工作与 parser major
-升级捆绑。golden test 覆盖窄宽度、CJK/emoji/combining text、hostile terminal control、
-malformed streaming Markdown、table/list/quote，以及 Mermaid/math/A2UI fence fallback。
+渲染器新增纯 `TerminalBlock` 层，包含带样式的终端行、可直接复制的文本、精确行数、稳定 ID 与交互目标。实现继续使用 `marked@4`，不把 renderer 工作与 parser major 升级捆绑。golden test 覆盖窄宽度、CJK/emoji/combining text、hostile terminal control、malformed streaming Markdown、table/list/quote，以及 Mermaid/math/A2UI fence fallback。
 
-canonical envelope 新增 additive `content-part` event，覆盖 sources、files、A2UI、
-artifact/canvas 引用与 custom fallback。durable event 不保存 binary/base64 body。URI 与 local
-path policy 会约束 hyperlink/media；只有 trusted builder 可以发出 OSC-8、graphics 或 screen control。
+canonical envelope 新增 additive `content-part` event，覆盖 sources、files、A2UI、artifact/canvas 引用与 custom fallback。durable event 不保存 binary/base64 body。URI 与 local path policy 会约束 hyperlink/media；只有 trusted builder 可以发出 OSC-8、graphics 或 screen control。

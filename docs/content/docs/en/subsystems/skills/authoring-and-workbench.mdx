@@ -8,14 +8,14 @@ description: Multi-file editing, atomic saves, conflict handling, Codex YAML, an
 <Status variant="stable">Transactional multi-file editor with shared LSP</Status>
 
 <TLDR>
-  The desktop workbench edits `SKILL.md`, `agents/openai.yaml`, and resource files as one logical workspace. Dirty baselines provide content-level conflict detection; Save All commits atomically. Monaco models are mapped to materialized `file://` files before standalone LSP document events are sent.
+  The desktop workbench edits `SKILL.md`, `agents/openai.yaml`, and resource files as one logical workspace. Dirty baselines provide content-level conflict detection. Save All commits atomically. Monaco models are mapped to materialized `file://` files before standalone LSP document events are sent.
 </TLDR>
 
 ## Files and save state
 
 The file tree always exposes `SKILL.md` and the virtual `agents/openai.yaml`, plus every resource at its true relative path. Each open file stores `draftContent`, `savedContent`, and one state: `clean`, `saving`, `saved`, `blocked`, `conflict`, or `error`.
 
-`saveSkillWorkspace` compares the current Dexie content with the saved baseline. Metadata-only `updatedAt` changes do not create a false conflict. Runtime validation or invalid Codex YAML returns `blocked`; an external content change returns `conflict`; storage failures return `error`. Autosave keeps the draft and state so editing or the save shortcut retries it.
+`saveSkillWorkspace` compares the current Dexie content with the saved baseline. Metadata-only `updatedAt` changes do not create a false conflict. Runtime validation or invalid Codex YAML returns `blocked`. An external content change returns `conflict`. Storage failures return `error`. Autosave keeps the draft and state so editing or the save shortcut retries it.
 
 Save All validates every dirty file first and commits the body, Codex YAML, and resource changes in one transaction. A failure writes nothing and leaves every draft dirty. The “All saved” toast appears only after a real commit. The metadata settings sheet updates metadata only and never submits an unsaved body.
 

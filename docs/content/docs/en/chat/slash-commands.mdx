@@ -5,7 +5,10 @@ description: A unified slash-command registry spanning three sources (built-in /
 
 # Slash Commands
 
-Slash commands (`/<name> [args]`) are "quick shortcuts" inside chat. Cognia unifies three sources — built-in Actions, local `.md` templates, and plugin contributions — into a single registry. The composer pops a picker when the user types `/`, and dispatches along one of two paths: Action or Template.
+Slash commands (`/<name> [args]`) provide shortcuts inside chat.
+Cognia combines built-in Actions, local `.md` templates, and plugin contributions in one registry.
+The composer shows a picker when the user types `/`.
+It dispatches the selected command through either the Action path or the Template path.
 
 The picker ranks candidates with the shared fuzzy matcher (`lib/chat/completion/fuzzy-match.ts`) — the same scorer the `@`-mention picker uses — matching the command name first and its description as a demoted secondary source, so `/gc` surfaces `git/commit` and the closest match sorts to the top.
 

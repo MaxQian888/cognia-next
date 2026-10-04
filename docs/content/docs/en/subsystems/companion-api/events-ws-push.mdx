@@ -9,7 +9,7 @@ description: Canonical socket-ticket authentication, event replay, and terminal,
 
 <TLDR>
   Canonical WebSockets never carry the five-minute DPoP token in the URL. A device authenticates an
-  HTTP request to `POST /api/auth/socket-ticket`, then spends the returned 60-second single-use
+  HTTP request to `POST /api/auth/socket-ticket`, then uses the returned 60-second single-use
   ticket on the exact event, terminal, browser, or ACP path. Event connections may send `since` to
   replay the retained sequence gap. No query-string bearer socket is mounted.
 </TLDR>

@@ -1,6 +1,6 @@
 ---
 title: "0122 — First-Run Onboarding"
-description: "Replaces the first-run dialog with a routed flow that ends in one real, locally-verifiable task, records why a setup was abandoned instead of only that it was, and serves all four shells from one step sequence."
+description: "Replaces the first-run dialog with a routed flow that ends in one task whose result can be verified locally. Records why setup was abandoned. Uses one step sequence for all four shells."
 ---
 
 # ADR 0122 — First-Run Onboarding
@@ -194,8 +194,8 @@ entries, grouped flagship → local → the long tails) is what makes that lengt
 usable, and the form adapts to `getProviderRequirements`: a key field only
 where a credential is required, a base URL only where one is needed, prefilled
 with the well-known port for a local server. Drafts are validated with
-`getBuiltInProviderReadiness` — the same rules Settings validates against, so
-this step cannot form a second opinion about what "configured" means.
+`getBuiltInProviderReadiness`. Settings uses the same rules, so both surfaces
+apply the same definition of "configured".
 
 A provider that needs *neither* a key nor a base URL is one this panel has no
 fields for (Amazon Bedrock wants a region and an access key pair). Those say so

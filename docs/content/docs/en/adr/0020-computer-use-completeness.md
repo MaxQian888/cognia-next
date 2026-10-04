@@ -658,8 +658,9 @@ backend rejects, and `elementRefValue()` returned the first *character* of a
 real reference. Two assertions in `lib/automation/types.test.ts` were pinning
 the wrong format. A Rust test now asserts the tuple form does not deserialize.
 
-**Six dormant wirings reconnected.** `startAutomationAuditMirror` had zero
-callers, so the retention job was cleaning a table automation never wrote.
+**Six dormant wirings reconnected.** `startAutomationAuditMirror` had no
+callers. As a result, the retention job was cleaning a table that automation
+never wrote to.
 `classify-risk.ts` still keyed on the removed tool names, so ADR-0070's
 risk-to-ceremony escalation never fired for Computer Use. Its regression test
 now iterates the shared constant, so a rename cannot silently drop a tool out
@@ -669,8 +670,7 @@ of its tier. The picture-in-picture view had no producer on the live tool path.
 `find_text` / `click_text` were re-registered as tools over the existing
 `ocr-click.ts`, covering the blind spot element handles have (canvas, games,
 remote desktop, custom-drawn controls), with a note in the surface guidance
-that they capture the primary monitor rather than the app window. And
-`app/recorder-controller/page.tsx` was created, because `recorder_window`
+that they capture the primary monitor rather than the app window. `app/recorder-controller/page.tsx` was also created because `recorder_window`
 opened a route that did not exist, leaving a blank always-on-top strip during
 every recording.
 

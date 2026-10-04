@@ -21,7 +21,9 @@ description: Schema v3 backup format with AES-GCM encryption, scheduled auto-bac
   <Stat label="External importers" value="3" hint="ChatGPT · Claude · Gemini" />
 </StatGrid>
 
-Cognia ships a complete backup / restore / transfer system under `lib/data/`. The package format is **v3** (`BackupPackageV3`); v1 files import through the `migrateEnvelope` boundary so legacy users keep working.
+Cognia implements backup, restore, and data transfer under `lib/data/`.
+The package format is **v3** (`BackupPackageV3`).
+The `migrateEnvelope` boundary imports v1 files so users can continue to use legacy backups.
 
 The full design rationale is in [ADR-0001](../adr/0001-backup-schema-v3).
 

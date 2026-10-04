@@ -13,10 +13,9 @@ stack was removed on 2026-07-28: its dedicated Settings section,
 workspace implementation do not ship. The optional frontend plugin at
 `plugins/github-delivery/` does ship through the Marketplace Integration and
 workflow bridges described by ADR-0026. It is discoverable but requires an
-explicit user enable; it is never startup-activated. Its HTTP providers,
+explicit user enable; it never activates at startup. Its HTTP providers,
 normalizer, actions, projections, and workflow aliases run on supported
-integration hosts. Tauri is fully supported. Browser, mobile, and headless are
-degraded because `runIssueLoop` uses the host-owned local Git workspace and is
+integration hosts. Tauri is fully supported. Browser, mobile, and headless hosts have limited support because `runIssueLoop` uses the host-owned local Git workspace and is
 therefore explicitly desktop-only. The remaining generic seams include
 `lib/github/pr-observe/` and `lib/github/workspace-backend-registry.ts`.
 

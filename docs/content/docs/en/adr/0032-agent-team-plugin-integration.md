@@ -45,7 +45,7 @@ seven coordinated mechanisms:
 
 Plugins declare subagents via `manifest.subagents: PluginSubagentDef[]`
 (mirrors the Claude SDK `AgentDefinition` shape). They register through
-`subagent-registry` (a one-liner `createOverlayRegistry` instance). Built-in
+`subagent-registry` (a single `createOverlayRegistry` instance). Built-in
 workflow-\* subagents stay alongside the overlay; runtime projection lives in
 `lib/claude/agents/subagents/index.ts:resolveAllSubagents`. Plugin subagents
 are namespaced as `<pluginId>:<id>` so dispatcher-name collisions are

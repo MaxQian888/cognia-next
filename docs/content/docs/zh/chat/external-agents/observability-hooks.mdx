@@ -29,9 +29,7 @@ description: 一次外部对话如何被追踪与治理—— agent-trace-bridge
 
 ## agent-trace-bridge.ts —— 每次运行一个 Span
 
-桥包裹共享发射器（`startSpan`/`recordEvent`/`endSpan`，从 `@/lib/agent-trace/emitter` 导入 `:16`），让
-外部运行时产出与其他每个 Agent 相同的 span 形状。Manager 在 `createTraceBridge`（`manager.ts:1472`）
-为每次运行建一个，并驱动它走完本轮。
+桥接模块包装共享事件发射器（`startSpan`/`recordEvent`/`endSpan`，从 `@/lib/agent-trace/emitter` 导入 `:16`），使外部运行时生成与其他 Agent 相同结构的 span。Manager 通过 `createTraceBridge`（`manager.ts:1472`）为每次运行创建桥接实例，并在整个轮次中调用它。
 
 | 方法 | 行 | Manager 何时调用 | 记录 |
 | --- | --- | --- | --- |
@@ -64,18 +62,14 @@ sequenceDiagram
 
 两个值得知道的细节：
 
-- **`providerFromProtocol`（`:137`）** 把 `anthropic`/`claude` → `"anthropic"`，把*其他一切*
-  （acp/a2a/opencode）→ `"cognia.team"`。所以在 trace 仪表盘里，一次 Codex 或 Cursor 运行显示在
-  `cognia.team` provider 下，而非模型厂商。
+- **`providerFromProtocol`（`:137`）** 把 `anthropic`/`claude` → `"anthropic"`，把*其他一切*（acp/a2a/opencode）→ `"cognia.team"`。所以在 trace 仪表盘里，一次 Codex 或 Cursor 运行显示在 `cognia.team` provider 下，而非模型厂商。
 - **它吞掉每个错误。** 追踪绝不能破坏一次对话，所以四个方法都被把守，若 span 从未开始则空操作。
 
-span 经发射器的 `agentTraces` Dexie 汇向下游持久化——与 [可观测性仪表盘](../../subsystems/observability)
-读取的是同一份数据。桥本身只发射。
+span 经发射器的 `agentTraces` Dexie 汇向下游持久化——与 [可观测性仪表盘](../../subsystems/observability)读取的是同一份数据。桥本身只发射。
 
 ## agent-hooks.ts —— 两套 Hook 系统
 
-外部 Agent 参与与内置 Agent 相同的 [hooks 机制](../built-in-agent/hooks)（ADR-0040）。`agent-hooks.ts` 是
-那座适配器。每个调用都是尽力而为且被 Tauri 把守。
+外部 Agent 参与与内置 Agent 相同的 [hooks 机制](../built-in-agent/hooks)（ADR-0040）。`agent-hooks.ts` 是那座适配器。每个调用都是尽力而为且被 Tauri 把守。
 
 ```mermaid
 flowchart TB
@@ -112,8 +106,7 @@ flowchart TB
 
 ### 观察式 Hooks
 
-`observeExternalAgentEvent(ctx, event)`（`:72`）对每个非权限事件被调用（`manager.ts:1647`）。它对
-`event.type` 做 switch 并派发进两套系统：
+`observeExternalAgentEvent(ctx, event)`（`:72`）对每个非权限事件被调用（`manager.ts:1647`）。它对 `event.type` 做 switch 并派发进两套系统：
 
 | 事件 | 插件（System A） | settings.json（System B） | 行 |
 | --- | --- | --- | --- |
@@ -129,19 +122,11 @@ flowchart TB
 
 1. 发射插件 `dispatchExternalAgentPermissionRequest` 与一个 `PermissionRequest` hook（`:127`/`:133`）。
 2. **等待一个阻塞式 `PreToolUse` hook**（`:138`）——本流中唯一的同步 hook。
-3. 若 hook 返回 `block`，它调用 `deny(requestId, reason)`（`:145`，路由到 `adapter.respondToPermission`）、
-   发射 `PermissionDenied`，并返回 **`true`**（`:153`）。
+3. 若 hook 返回 `block`，它调用 `deny(requestId, reason)`（`:145`，路由到 `adapter.respondToPermission`）、发射 `PermissionDenied`，并返回 **`true`**（`:153`）。
 4. 否则返回 `false`。
 
-回到 [Manager](./manager)，返回 `true` 意味着该 `permission_request` 事件**被丢弃、从不被产出**到聊天
-（`manager.ts:1645`）——于是一个 settings.json 策略能静默拒绝外部 Agent 试图运行的工具，与对内置 Agent
-完全一致。在 headless `execute` 路径里闸门仍运行但无法抑制 UI（没有交互式流），这是 `manager.ts:1800`
-记录的有意不对称。
+回到 [Manager](./manager)，返回 `true` 意味着该 `permission_request` 事件**被丢弃、从不被产出**到聊天（`manager.ts:1645`）——于是一个 settings.json 策略能静默拒绝外部 Agent 试图运行的工具，与对内置 Agent 完全一致。在 headless `execute` 路径里闸门仍运行但无法抑制 UI（没有交互式流），这是 `manager.ts:1800` 记录的有意不对称。
 
 ### Rust 接缝
 
-`fireAgentHook(event, …)`（`:47`）被 `isTauri()`（`:52`）把守——它在 web/mobile 上返回 `null`——否则
-`invoke<AgentHookDecision>("run_agent_hook", …)`（`:54`）。在 Rust 侧，`run_agent_hook`
-（`hooks/commands.rs:55`）解析 PascalCase 的 `HookEvent`、解析一个受信 cwd、运行匹配的 settings.json
-hooks，并返回一个 `HookDecisionDto`——在这里镜像为 `AgentHookDecision`（`:30`）。TypeScript 拥有事件
-映射，因为 Rust 的 `external_agent` 模块是一个不解析任何东西的纯 stdio 透传（见 [集成接缝](./integration)）。
+`fireAgentHook(event, …)`（`:47`）被 `isTauri()`（`:52`）把守——它在 web/mobile 上返回 `null`——否则 `invoke<AgentHookDecision>("run_agent_hook", …)`（`:54`）。在 Rust 侧，`run_agent_hook`（`hooks/commands.rs:55`）解析 PascalCase 的 `HookEvent`、解析一个受信 cwd、运行匹配的 settings.json hooks，并返回一个 `HookDecisionDto`——在这里镜像为 `AgentHookDecision`（`:30`）。TypeScript 拥有事件映射，因为 Rust 的 `external_agent` 模块是一个不解析任何东西的纯 stdio 透传（见 [集成接缝](./integration)）。

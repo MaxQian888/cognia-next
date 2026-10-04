@@ -1,6 +1,6 @@
 ---
 title: "0134 — Remote Document Providers"
-description: "Reference Feishu and Google Workspace documents from the chat composer without inventing a second attachment pipeline or polluting the IM connector contract."
+description: "References Feishu and Google Workspace documents from the chat composer. Reuses the existing attachment pipeline and keeps document access separate from the IM connector contract."
 ---
 
 # ADR 0134 — Remote Document Providers
@@ -48,7 +48,7 @@ A picked document is fetched immediately and staged as a synthesized `File`,
 which rejoins the ordinary attachment pipeline (`prepareComposerAttachments` →
 `staged-attachment-store` → `lib/chat/attachments/dispatch.ts`).
 
-This is the decision that keeps the feature small. The redaction gate, the token
+This decision keeps the feature within the existing attachment pipeline. The redaction gate, the token
 count on the chip, the `INLINE_TOKEN_CEILING` over-length confirmation, the
 "model view" preview and draft restoration are all inherited rather than
 rebuilt. The alternative — a reference the agent resolves later — would need a

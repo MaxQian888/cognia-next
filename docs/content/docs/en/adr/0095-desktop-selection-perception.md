@@ -106,11 +106,12 @@ actually granted.
 
 That last gate is the reason this section exists. macOS does not error when the grant is
 missing: `CGDisplayCreateImage` and everything on top of it, `xcap` included, succeed and
-return the desktop *with every window's contents omitted*. OCR then produces confident,
-well-formed text that has nothing to do with the selection — and this feature would offer it
+return the desktop *with every window's contents omitted*. OCR then produces
+well-formed text unrelated to the selection — and this feature would offer it
 as "your selection", send it to a model, or write it into long-term memory. A wallpaper with
-words on it is a perfectly valid image, so there is no detecting this afterwards. We preflight
-with `CGPreflightScreenCaptureAccess` and skip silently; we never call
+words on it is a perfectly valid image, so this cannot be detected afterwards. We preflight
+with `CGPreflightScreenCaptureAccess` and skip silently if access is missing.
+We never call
 `CGRequestScreenCaptureAccess` implicitly, because it prompts exactly once per application
 ever and a denial is permanent.
 

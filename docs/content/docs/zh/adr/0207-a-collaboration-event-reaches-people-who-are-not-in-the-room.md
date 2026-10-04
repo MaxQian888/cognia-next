@@ -1,18 +1,15 @@
 ---
 title: "0207 — 协同事件能送达不在房间里的人"
-description: "当某件事指向某个人时——被指派、在议题评论中被明确提及、被请求审批、被邀请——协同服务端为每位接收者写一行通知。通知行受 RLS 约束、可去重，并带已读状态。客户端通过 ADR-0206 推送流收到它，并用游标拉取补齐。客户端把每一行交给现有的 ADR-0042 notify() 管道，来源记为 \"collab\"，因此渠道偏好、安静时段、系统通知、手机推送和 IM 投递都沿用现有实现。在任一设备上读过，其他设备上也会随之清除。"
+description: "协同服务端为被指派、被明确提及、被请求审批或被邀请的接收者创建通知行。通知受 RLS 约束、去重并记录已读状态。客户端通过 ADR-0206 流接收变化，以游标拉取补齐记录，再传入 ADR-0042 notify() 管道，来源为 \"collab\"。渠道偏好、安静时段、系统通知、手机推送和 IM 投递沿用现有实现。任一设备读过后，其他设备同步清除。"
 ---
 
 # ADR 0207 — 协同事件能送达不在房间里的人
 
-**状态：** 已接受，已实现（2026-10-01）
-**日期：** 2026-09-30
-**相关：** [ADR-0042](./0042-unified-notification-center)（通知管道）、[ADR-0149](./0149-a-person-is-not-a-device)（把此事留作「第二轮再议的问题」）、[ADR-0206](./0206-a-workspace-streams-its-changes-instead-of-being-polled)（本方案依托的推送流）、[ADR-0177](./0177-a-room-is-one-conversation-shape)（共享聊天中的人工提及，仍在「以后」）
-**来源研究：** `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`（缺口 A3）
+**状态：** 已接受，已实现（2026-10-01）**日期：** 2026-09-30 **相关：** [ADR-0042](./0042-unified-notification-center)（通知管道）、[ADR-0149](./0149-a-person-is-not-a-device)（把此事留作「第二轮再议的问题」）、[ADR-0206](./0206-a-workspace-streams-its-changes-instead-of-being-polled)（本方案依托的推送流）、[ADR-0177](./0177-a-room-is-one-conversation-shape)（共享聊天中的人工提及，仍在「以后」）**来源研究：** `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`（缺口 A3）
 
 ## 背景
 
-在协同平面上，人可以对别人做一些事：
+在协同平面上，用户可以触发面向他人的协作操作：
 
 - 指派共享议题（`api.rs` 中的 `validate_human_assignee`）；
 - 在共享聊天中请求审批（`chat_approval_requests`）；

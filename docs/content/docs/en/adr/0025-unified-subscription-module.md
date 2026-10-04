@@ -165,7 +165,7 @@ presets (it already manages its own multi-provider endpoints inside
 `lib/data/` Dexie-wide backup — AES-GCM 256 + PBKDF2-SHA256 with 600 000
 iterations. The envelope contains a plaintext manifest (provider list +
 account counts + ISO timestamp) and an encrypted body holding the full
-per-provider vaults. Users back up across machines with `Export…`, restore
+per-provider vaults. Users back up across machines with `Export…` and restore
 with `Import…`. Wrong passphrases surface a distinct `SubscriptionPassphraseError`
 so the UI can show "wrong passphrase" instead of a generic decryption error.
 

@@ -5,7 +5,10 @@ description: The reusable persona + per-send configuration unit — system promp
 
 # Characters
 
-A **Character** (角色) is the unit Cognia uses to package *who the assistant is* and *how a send is configured* into a single, reusable, selectable object. It is far more than a system prompt: one Character carries the persona prompt, model/provider routing, a tool and MCP subset, a permission mode, skills, an optional Employee Digital Twin binding, a TTS voice overlay, and the on/off gates for computer use, sandbox, OCR, and A2UI. When you pick a Character in the composer, every one of those fields flows into the next turn through exactly one function — `resolveSendOptions` in `lib/claude/build-options.ts`.
+A **Character** (角色) packages the assistant's identity and send configuration into one reusable object that the user can select.
+It includes the persona prompt, model/provider routing, a tool and MCP subset, permission mode, and skills.
+It can also include an Employee Digital Twin binding, a TTS voice overlay, and gates for computer use, sandbox, OCR, and A2UI.
+When you select a Character in the composer, all these fields configure the next turn through `resolveSendOptions` in `lib/claude/build-options.ts`.
 
 <TLDR>
   A Character is a row in the Dexie `characters` table (`lib/db/schema.ts:127`) **unioned** at
@@ -30,7 +33,10 @@ A **Character** (角色) is the unit Cognia uses to package *who the assistant i
 
 ## What a Character Is
 
-A Character is **per-send configuration with a face**. It exists so that all the knobs that shape a turn — prompt, model, tools, permissions, capability gates — can be saved once, named, given an avatar, and re-selected, instead of being re-typed into the composer every time. Selecting a Character binds it to the session (`session.characterId`); every subsequent send re-resolves it.
+A Character stores named, reusable **per-send configuration** with an avatar.
+Save the prompt, model, tools, permissions, and capability gates once, then select that Character instead of entering the settings for each turn.
+Selecting a Character binds it to the session (`session.characterId`).
+Each subsequent send resolves it again.
 
 The Character does **not** run anything on its own. It is data. The execution spine is the [built-in agent](./built-in-agent): `resolveSendOptions` reads the Character and folds its fields into the single `SendOptions` payload that crosses the IPC seam into the sidecar. That convergence is the whole point — a new capability touches the Character schema and one branch of `resolveSendOptions`, and nothing else.
 

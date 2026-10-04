@@ -1,6 +1,6 @@
 ---
 title: "0141 — Onboarding: two paths, one picture"
-description: "First run forks into a recommended path that confirms and applies a whole setup on one screen and a step-by-step path that keeps every choice open; the rail is replaced by a narrative panel drawn from live probe data, and the marketing site's brand accents finally cross into the app."
+description: "Provides two first-run paths. The recommended path confirms and applies a complete setup on one screen. The step-by-step path preserves every choice. Replaces the rail with a narrative panel based on live probe data and applies the marketing site's brand accents in the app."
 ---
 
 # ADR 0141 — Onboarding: two paths, one picture
@@ -163,10 +163,9 @@ vocabulary — a machine frame, a core, chips, connectors — so the flow reads 
 one continuous picture. The core never moves between steps; the scan scene's
 column of chips *is* the express scene's plan.
 
-Hand-drawn vector rather than screenshots, for three reasons: the app is a
-static export, so anything here ships in the bundle and is paid for on the
-first-run path; vector adapts to both themes from CSS variables alone; and — the
-load-bearing one — it can be driven by live state. A screenshot cannot light up
+The flow uses hand-drawn vectors for three reasons. First, this static-export
+app bundles these assets for first run. Second, vectors adapt to both themes
+through CSS variables. Third, live state can control individual vector elements. A screenshot cannot light up
 one node per runtime the probe actually found, dash the connector of an
 installed-but-unauthenticated CLI, or tick a plan line the moment it lands.
 

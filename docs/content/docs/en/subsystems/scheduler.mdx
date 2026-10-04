@@ -186,7 +186,7 @@ This prevents duplicate fires when the user has Cognia open in multiple windows.
 
 `conversational-task-intent.ts` reads scheduling intent out of a line the user is typing ("every weekday at 9 send a stand-up reminder", "每天早上提醒我看 PR"); `conversational-task-authoring.ts` turns it into a typed `CreateScheduledTaskInput` with the same payload shape the executors read. It is pattern matching, not an LLM call — the cadence it emits is a starting point (a daily 09:00 cron), not a guess at the real one.
 
-Where it surfaces: the chat composer renders a quiet suggestion row under the input (`components/chat/composer/schedule-suggestion.tsx`). It never intercepts the turn — Enter still sends — and it is dismissible per line. Accepting it parks the draft in `lib/scheduler/task-draft-handoff.ts` and routes to `/scheduler`, which opens the create sheet pre-filled on its next mount. The draft is consumed once and expires after five minutes, so a stale hand-off can never pop a sheet later.
+Where it surfaces: the chat composer renders a quiet suggestion row under the input (`components/chat/composer/schedule-suggestion.tsx`). It never intercepts the turn — Enter still sends — and it is dismissible per line. Accepting it stores the draft in `lib/scheduler/task-draft-handoff.ts` and routes to `/scheduler`, which opens the create sheet pre-filled on its next mount. The draft is consumed once and expires after five minutes, so a stale hand-off cannot open a sheet later.
 
 ## Executors
 

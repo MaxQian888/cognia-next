@@ -5,7 +5,9 @@ description: ChatPane main panel, Composer input, message rendering pipeline, ai
 
 # Chat UI Architecture
 
-The chat interface is the most central visual expression of cognia-next. It unifies the Claude Agent SDK's streaming output, tool calls, reasoning traces, subagent tasks, A2UI forms, artifact sandboxes, canvas boards, and other "message parts" into a scrollable, editable, and resendable conversation flow.
+The chat interface combines the Claude Agent SDK's streaming output, tool calls, reasoning traces, and subagent tasks.
+It also renders A2UI forms, artifact sandboxes, canvas boards, and other "message parts".
+Users can scroll, edit, and resend content in the conversation.
 
 This page explains the component layering, message rendering pipeline, Composer behavior, and how the desktop shell and mobile shell both reuse the same `ChatPane`.
 

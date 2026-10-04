@@ -1,6 +1,6 @@
 ---
 title: 出站队列与投递
-description: 持久化的 outboundQueue、事件驱动的泵，以及每个适配器的投递关卡链——熔断器、令牌桶、带抖动的指数退避、幂等 LRU、按会话的 FIFO 通道、死信处理，以及为其供给数据并对其进行修剪的定时 / 清理面板。
+description: 持久化的 outboundQueue、事件驱动的处理循环，以及每个适配器的投递关卡链——熔断器、令牌桶、带抖动的指数退避、幂等 LRU、按会话的 FIFO 通道、死信处理，以及为其供给数据并对其进行修剪的定时 / 清理面板。
 ---
 
 # 出站队列与投递
@@ -8,7 +8,7 @@ description: 持久化的 outboundQueue、事件驱动的泵，以及每个适�
 <Status variant="stable" />
 
 <TLDR>
-助手发往平台的每一条回复都是 Dexie `outboundQueue` 表中的一行持久化记录，而非对适配器的直接调用。一个由唤醒驱动的单一循环——`startOutboundRunner`（`lib/connectors/outbound-runner.ts:284`）——把到期的行排空进按会话的 FIFO 通道，并让每个作业依次穿过一条有序关卡链：重新拉取 → muted → 静默时段 → 幂等 → 熔断器 → 令牌桶 → 最大尝试次数 → 派发（`processJob`，`lib/connectors/outbound-runner.ts:345`）。失败会以指数退避 + 抖动重试，最多 `MAX_ATTEMPTS=5` 次，之后进入死信。循环从不忙轮询：它会休眠直到下一个重试截止时间（`peekNextWakeAt`）或一次新的入队唤醒（`subscribeOutboundEnqueued`，`lib/db/outbound-jobs.ts:64`）。两个调度器执行器（`lib/connectors/scheduled-outbound.ts:375`）为队列供给数据——一个直接发送，一个走完整 AI 回合——另有三个清理扫描负责修剪回调绑定、在软上限处老化队列，以及导出死信队列。
+助手发往平台的每一条回复都是 Dexie `outboundQueue` 表中的一行持久化记录，而非对适配器的直接调用。一个由唤醒驱动的单一循环——`startOutboundRunner`（`lib/connectors/outbound-runner.ts:284`）——把到期记录加入按会话的 FIFO 通道，并让每个作业依次经过一系列有序检查：重新拉取 → muted → 静默时段 → 幂等 → 熔断器 → 令牌桶 → 最大尝试次数 → 派发（`processJob`，`lib/connectors/outbound-runner.ts:345`）。失败会以指数退避 + 抖动重试，最多 `MAX_ATTEMPTS=5` 次。超过该限制后进入死信。循环从不忙轮询：它会休眠直到下一个重试截止时间（`peekNextWakeAt`）或一次新的入队唤醒（`subscribeOutboundEnqueued`，`lib/db/outbound-jobs.ts:64`）。两个调度器执行器（`lib/connectors/scheduled-outbound.ts:375`）为队列供给数据——一个直接发送，一个走完整 AI 回合——另有三个清理扫描负责修剪回调绑定、在软上限处老化队列，以及导出死信队列。
 </TLDR>
 
 <StatGrid>

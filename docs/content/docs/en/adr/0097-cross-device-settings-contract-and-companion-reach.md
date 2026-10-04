@@ -338,12 +338,12 @@ else does.
 That single rule is what makes host switching non-destructive. Once an account
 has runtime targets, each host's mirror lives in its own Dexie database
 (`activateAccountDatabase(accountId, targetId)`), so switching activates the
-other host's database and the scan finds nothing foreign: both hosts keep their
-mirror and their watermark, and switching back re-pulls nothing. When two hosts
+other host's database and the scan finds no foreign data. Both hosts keep their
+mirror and their watermark. Switching back does not pull the same data again. When two hosts
 *do* share one database — an install with no runtime target, or the legacy
-account-level database — the scan finds the foreign key and the wipe fires
-exactly as it did before. The previous in-memory host-change check is gone; it
-could not tell those two worlds apart, and it also missed every switch that
+account-level database — the scan finds the foreign key and the wipe runs
+exactly as it did before. The previous in-memory host-change check has been removed. It
+could not distinguish these two cases. It also missed every switch that
 happened while the process was not running (routine on iOS, which kills the app
 between the `CompanionConfig` write and the next sync tick).
 

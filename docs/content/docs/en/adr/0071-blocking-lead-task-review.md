@@ -120,12 +120,12 @@ approves is not a gate.**
 ### Who owns the board status
 
 With review on, **the review node owns the terminal status** — `dispatchTeammate`
-does not write one. A dispatch that finished is not accepted yet, it is awaiting
-review, so the task stays `in_progress` until the lead rules. Letting the
+does not write one. A finished dispatch still awaits review and has not been accepted.
+The task stays `in_progress` until the lead makes a decision. Letting the
 dispatcher write `completed` first would have the board claim work was done
 while it was still under review, and flip `completed → failed` on a rejection.
 `in_progress` is also a runtime-owned column (`task-move-guard.ts`), so nobody
-can hand-move a card mid-review. The result message still posts on dispatch —
+can manually move a card during review. The result message still posts on dispatch —
 only the acceptance decision moves.
 
 `requireResultReview` is orthogonal and composes: automated approval routes the

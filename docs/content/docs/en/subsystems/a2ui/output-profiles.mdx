@@ -8,12 +8,12 @@ description: The bridge between an agent's rendering intent and the concrete ren
 <Status variant="experimental" />
 
 <TLDR>
-  When an agent wants to "show" something — a diagram, a chart, a 3D scene, a warm message — it
-  picks an **intent category**, not a renderer. An **output profile** is the lookup that turns that
+  To show a diagram, a chart, a 3D scene, or a warm message, an agent
+  selects an **intent category** rather than a renderer. An **output profile** is the lookup that turns that
   intent into a concrete **render strategy**: inline A2UI native components, a lazy-loaded runtime
   adapter (Chart.js / Three.js / Tone.js / d3 / canvas), or an iframe-isolated artifact preview.
-  `routeRichOutputProfile` (`output-profiles.ts:341`) is the router; it runs a 5-step fallback
-  ladder over the **22**-entry profile registry. The renderer
+  `routeRichOutputProfile` (`output-profiles.ts:341`) is the router. It runs a 5-step fallback
+  sequence over the **22**-entry profile registry. The renderer
   `A2UIRichOutput` (`a2ui-rich-output.tsx:124`) consumes the routing result and dispatches the body.
 </TLDR>
 

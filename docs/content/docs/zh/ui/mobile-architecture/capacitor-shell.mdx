@@ -1,6 +1,6 @@
 ---
 title: Capacitor Shell 与原生桥接
-description: withPlugin 降级模板、20 个原生插件包装器、运行时插件注册、六路 deep link 解析器与路由、capacitor.config.ts，以及 AppShellMobile 抽屉/标签/Sheet 结构。
+description: withPlugin 降级模板、20 个原生插件包装器、运行时插件注册、六种 deep link 解析与路由、capacitor.config.ts，以及 AppShellMobile 的抽屉、标签和 Sheet 结构。
 ---
 
 # Capacitor Shell 与原生桥接
@@ -28,7 +28,7 @@ description: withPlugin 降级模板、20 个原生插件包装器、运行时�
 
 ## withPlugin 模板
 
-每个原生调用都通过 `withPlugin`（`_shared.ts:56`）汇聚：
+所有原生调用都通过 `withPlugin`（`_shared.ts:56`）统一处理：
 
 ```ts title="lib/capacitor/_shared.ts:56"
 withPlugin<P, R>(
@@ -37,18 +37,9 @@ withPlugin<P, R>(
 ): Promise<R | { kind: "unsupported" } | { kind: "error"; message: string }>
 ```
 
-合约如下：`loader()` 拒绝 → `{ kind: "unsupported" }`（`:64`）——无原生模块，或当前运行在
-web/Tauri 上；`action()` 抛出 → `{ kind: "error", message }`（`:69`）；否则返回 action 自身的值（`:67`）。
-共享结果类型为 `SimpleOutcome`（`_shared.ts:40`）和 `ValueOutcome<T>`（`:45`）。
+合约如下：`loader()` 拒绝 → `{ kind: "unsupported" }`（`:64`）——无原生模块，或当前运行在 web/Tauri 上；`action()` 抛出 → `{ kind: "error", message }`（`:69`）；否则返回 action 自身的值（`:67`）。共享结果类型为 `SimpleOutcome`（`_shared.ts:40`）和 `ValueOutcome<T>`（`:45`）。
 
-loader 工厂 `makeDefaultLoader`（`_shared.ts:89`）是其中微妙的部分。它首先检查
-`window.Capacitor.Plugins[exportName]`（`:98-103`），使测试注入的全局变量在任何平台上都能解析，
-然后**除非** `detectNativePlatform() === "mobile"`（`:110-112`）否则抛出——有意将
-web/Tauri 折叠为 `unsupported`，而非等待 Capacitor 的 web-shim Proxy（其 `.then` getter 会抛出）。
-在移动端，它会执行带 `webpackIgnore` 的动态 `import(moduleId)`（`:113`）并验证具名导出（`:115-117`）。
-少数需要更丰富联合类型的包装器绕过 `withPlugin`，直接在 try/catch 中调用 loader：
-`camera.pickPhoto`（`:85`）、`geolocation.getCurrentPosition`（`:70`）、
-`barcode.scan`（`:53`）、`biometric.verify`（`:88`）、`share.share`（`:45`）。
+loader 工厂 `makeDefaultLoader`（`_shared.ts:89`）是其中微妙的部分。它首先检查 `window.Capacitor.Plugins[exportName]`（`:98-103`），使测试注入的全局变量在任何平台上都能解析，然后**除非** `detectNativePlatform() === "mobile"`（`:110-112`）否则抛出——有意将 web/Tauri 折叠为 `unsupported`，而非等待 Capacitor 的 web-shim Proxy（其 `.then` getter 会抛出）。在移动端，它会执行带 `webpackIgnore` 的动态 `import(moduleId)`（`:113`）并验证具名导出（`:115-117`）。少数需要更丰富联合类型的包装器绕过 `withPlugin`，直接在 try/catch 中调用 loader：`camera.pickPhoto`（`:85`）、`geolocation.getCurrentPosition`（`:70`）、`barcode.scan`（`:53`）、`biometric.verify`（`:88`）、`share.share`（`:45`）。
 
 ## 包装器矩阵
 
@@ -77,22 +68,18 @@ web/Tauri 折叠为 `unsupported`，而非等待 Capacitor 的 web-shim Proxy（
 
 ## 运行时插件注册
 
-Capacitor 会注入 `native-bridge.js` 和 `window.Capacitor.PluginHeaders`，但**不会**构建
-`window.Capacitor.Plugins.*` 代理——因为应用从不静态导入 `@capacitor/*`（这些是移动端工作区依赖，
-在共享根构建中不存在）。`registerNativePlugins`（`register-plugins.ts:86`）在启动时填补这一空缺：
+Capacitor 会注入 `native-bridge.js` 和 `window.Capacitor.PluginHeaders`，但**不会**构建 `window.Capacitor.Plugins.*` 代理——因为应用从不静态导入 `@capacitor/*`（这些是移动端工作区依赖，在共享根构建中不存在）。`registerNativePlugins`（`register-plugins.ts:86`）在启动时填补这一空缺：
 
 - 非移动端 → `{ kind: "skipped" }`（`:93`）；
 - 读取 `cap.PluginHeaders`（`:99`）；为空 → `{ kind: "unavailable" }`（`:102`）；
 - 通过可注入的 loader 加载 `@capacitor/core` 的 `registerPlugin`（`:71`）；
-- 遍历 headers，调用 `registerFn(header.name)`（`:123-133`），记录启动自检日志，并返回
-  `{ kind: "registered", registered, available }`（`:143`）。
+- 遍历 headers，调用 `registerFn(header.name)`（`:123-133`），记录启动自检日志，并返回 `{ kind: "registered", registered, available }`（`:143`）。
 
 它注册的是**原生运行时通告的所有内容**，而非硬编码的列表。
 
 ## Deep link
 
-`parseDeeplink(rawUrl)`（`deeplink.ts:49`）将 `cognia://` URL（`SCHEME`，`:47`）映射为
-6 种变体的 `DeeplinkRoute`（`deeplink.ts:16`）：
+`parseDeeplink(rawUrl)`（`deeplink.ts:49`）将 `cognia://` URL（`SCHEME`，`:47`）映射为 6 种变体的 `DeeplinkRoute`（`deeplink.ts:16`）：
 
 | 变体 | Host | 路由目标 |
 | --- | --- | --- |
@@ -103,19 +90,11 @@ Capacitor 会注入 `native-bridge.js` 和 `window.Capacitor.PluginHeaders`，�
 | `open_workflow_run` (`:97`) | `workflow-run` | `/workflows/<wfId>/runs/<runId>` |
 | `unknown` (`:103`) | — | 发出警告 |
 
-`subscribe(handler)`（`:109`）监听 `appUrlOpen`；`getLaunchRoute()`（`:126`）解析冷启动的
-launch URL。`deeplink-router.ts` 随后将已解析的路由映射到导航：`DeeplinkNavigators`（`:22`）
-是合约，`dispatchRoute`（`:33`）是 switch，`makeRouterNavigators(router)`（`:70`）是
-Next `useRouter` 适配器。
+`subscribe(handler)`（`:109`）监听 `appUrlOpen`；`getLaunchRoute()`（`:126`）解析冷启动的 launch URL。`deeplink-router.ts` 随后将已解析的路由映射到导航：`DeeplinkNavigators`（`:22`）是合约，`dispatchRoute`（`:33`）是 switch，`makeRouterNavigators(router)`（`:70`）是 Next `useRouter` 适配器。
 
 ## Capacitor 配置
 
-`mobile/capacitor.config.ts` — `appId: "com.cognia.mobile"`（`:15`），`webDir: "../out"`（`:17`），
-`androidScheme: "https"`，并通过 `COGNIA_MOBILE_DEV`（`:30-35`）门控仅开发环境使用的
-`localhost:3000` 服务器。插件块（`:37`）：SplashScreen（`backgroundColor: "#01061e"`，`:38`）、
-StatusBar、Keyboard（`resize: "body"`）、LocalNotifications（`smallIcon: "ic_stat_icon"`）、
-PushNotifications，以及关键的 **CapacitorHttp `enabled: true`**（`:94`）——这是执行自签名信任
-与证书锁定的原生 HTTP 路径，WebView 的 `fetch` 无法完成这些操作。
+`mobile/capacitor.config.ts` — `appId: "com.cognia.mobile"`（`:15`），`webDir: "../out"`（`:17`），`androidScheme: "https"`，并通过 `COGNIA_MOBILE_DEV`（`:30-35`）门控仅开发环境使用的 `localhost:3000` 服务器。插件块（`:37`）：SplashScreen（`backgroundColor: "#01061e"`，`:38`）、StatusBar、Keyboard（`resize: "body"`）、LocalNotifications（`smallIcon: "ic_stat_icon"`）、PushNotifications，以及关键的 **CapacitorHttp `enabled: true`**（`:94`）——这是执行自签名信任与证书锁定的原生 HTTP 路径，WebView 的 `fetch` 无法完成这些操作。
 
 ## 移动端 Shell
 
@@ -131,21 +110,13 @@ PushNotifications，以及关键的 **CapacitorHttp `enabled: true`**（`:94`）
 └─────────────────────────────────────────────────┘   + MobileTabBar, CommandPalette :486
 ```
 
-关键状态：`navOpen` / `memberSheetOpen` / `searchOpen` / `characterPickerOpen`（`:100-106`）；
-`send`/`stop` 在团队聊天与直接聊天之间切换（`:205`）。横切对话框在 `:448` 处挂载：
-`CharacterPicker`、`OnboardingDialog`、`ToolApprovalDialog`、`MobileCommandPalette`。
+关键状态：`navOpen` / `memberSheetOpen` / `searchOpen` / `characterPickerOpen`（`:100-106`）；`send`/`stop` 在团队聊天与直接聊天之间切换（`:205`）。横切对话框在 `:448` 处挂载：`CharacterPicker`、`OnboardingDialog`、`ToolApprovalDialog`、`MobileCommandPalette`。
 
-`components/mobile/**` 包含 100+ 个按区域分组的组件——`pair/`（配对向导）、`shell/`（顶部栏、
-频道列表、tab bar、自定义器）、`home/`（活动运行、快速操作、命令面板）、`me/`（账户、设备信息、
-同步状态、biometric 行、传输层指示器）、`remote-sessions/`、`workflow/`（含带触控画布和节点面板的
-`editor/` 子树）、`connection-state-sheets/`、`notifications/`、`discover/` 等。
+`components/mobile/**` 包含 100+ 个按区域分组的组件——`pair/`（配对向导）、`shell/`（顶部栏、频道列表、tab bar、自定义器）、`home/`（活动运行、快速操作、命令面板）、`me/`（账户、设备信息、同步状态、biometric 行、传输层指示器）、`remote-sessions/`、`workflow/`（含带触控画布和节点面板的 `editor/` 子树）、`connection-state-sheets/`、`notifications/`、`discover/` 等。
 
 ## Biometric 验证门
 
-敏感操作（解除配对、导出备份、解密）通过 `useBiometricGuard()`（`use-biometric-guard.ts:51`）处理。
-它读取 `lib/capacitor/biometric.isAvailable()`（`:55`）；若未录入生物信息，则**默认直接通过**
-（`fallthroughWhenUnavailable ?? true`，`:53`），避免无生物识别功能的设备被锁定；
-否则运行 `verify(...)`（`:66`）并返回 `ok` 或 `{ blocked, reason }`（`:42`）的 `GuardOutcome`。
+敏感操作（解除配对、导出备份、解密）通过 `useBiometricGuard()`（`use-biometric-guard.ts:51`）处理。它读取 `lib/capacitor/biometric.isAvailable()`（`:55`）；若未录入生物信息，则**默认直接通过**（`fallthroughWhenUnavailable ?? true`，`:53`），避免无生物识别功能的设备被锁定；否则运行 `verify(...)`（`:66`）并返回 `ok` 或 `{ blocked, reason }`（`:42`）的 `GuardOutcome`。
 
 ## 相关页面
 

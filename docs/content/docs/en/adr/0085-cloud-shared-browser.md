@@ -82,5 +82,5 @@ only removed the client's row, which would have orphaned the directory.
 `browser.profile.delete` operation, which removes the directory. Both the
 gateway (per account and workspace) and the runtime refuse while a session holds
 the profile, and the runtime refuses any id that would resolve outside its
-profiles root. The client erases the runtime's copy first and forgets the row
-only afterwards, so a refusal leaves the profile listed and retryable.
+profiles root. The client deletes the runtime's copy before it removes the row.
+If deletion is refused, the profile remains listed so the user can retry.

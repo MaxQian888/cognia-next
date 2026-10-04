@@ -33,7 +33,7 @@ settle 为文件、符号链接、权限位、二进制替换、创建、删除�
 
 旧 `code_adoption` 命令保留一个兼容周期；存在任务账本时，持久化指标由权威的 Agent-origin 资源投影得到。`fs_read_workspace_file` 暂时保留，但编辑器无上限读取不再被静默截断；任务预览统一使用结构化资源接口。
 
-采用结果由现有 Task Workspace 审阅动作最终确定：Apply 与 Partial Apply 记录成功应用的文件/区块选择，Undo 将该选择标记为已撤销，Keep Current 将其标记为拒绝。行采用率为已采用的新增行与删除行之和除以建议的新增行与删除行之和；文件采用率为已采用文件数除以建议文件数。待审阅记录和仅有旧指纹归因的记录不进入这两个分母；跟踪缺失或被截断时报告覆盖情况，不推断为拒绝。
+采用结果由现有 Task Workspace 审阅动作最终确定：Apply 与 Partial Apply 记录成功应用的文件/区块选择。Undo 将该选择标记为已撤销。Keep Current 将其标记为拒绝。行采用率为已采用的新增行与删除行之和除以建议的新增行与删除行之和。文件采用率为已采用文件数除以建议文件数。待审阅记录和仅有旧指纹归因的记录不进入这两个分母；跟踪缺失或被截断时报告覆盖情况，不推断为拒绝。
 
 实验开关保持关闭，直到内置聊天、ACP/Codex/Claude/OpenCode、Agent Team、Tauri、Companion、headless、Docker 和 Kubernetes PVC 通过同一 DTO、权限、重连、隔离和补丁语义。系统不引入第二个 AgentServer 或 WebSocket 协议。
 

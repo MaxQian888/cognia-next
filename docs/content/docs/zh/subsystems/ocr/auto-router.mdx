@@ -11,8 +11,8 @@ description: pickDefaultProvider 的纯函数 4 步选择逻辑、按操作系�
   当调用方未固定 `providerId` 时，`pickDefaultProvider(deps)`（`auto-router.ts:149`）负责选择一个。它是一个
   **纯异步函数** —— registry、settings、platform、一个可选的就绪性探测以及一个可选的凭据探测全部通过
   `AutoRouterDeps` 注入，因此整张决策表无需后端即可单元测试。决策分四步运行：固定设置 → 平台本地引擎 →
-  云端回退 → 兜底任一已启用项。按操作系统区分的偏好表是 `DEFAULT_LOCAL_PREFERENCE`（`auto-router.ts:67`）；
-  MSIX 与模型下载门控实际发生在 **provider 内部**（由 `runtime.ts` 接线），而非在生产环境通过路由器的就绪性
+  云端回退 → 最后选择任一已启用项。按操作系统区分的偏好表是 `DEFAULT_LOCAL_PREFERENCE`（`auto-router.ts:67`）；
+  MSIX 与模型下载门控实际发生在 **provider 内部**（由 `runtime.ts` 接入），而非在生产环境通过路由器的就绪性
   参数实现。
 </TLDR>
 
@@ -69,9 +69,7 @@ flowchart TD
   中硬编码 —— 它来自 `settings.cloudFallbackProviderId`（其默认值存放在 `DEFAULT_OCR_SETTINGS` 中）。
 </Callout>
 
-共享门控 `isProviderUsable`（`auto-router.ts:79`）即 `registered && shellAllows && providerEnabled !== false`。
-`resolveProviderById`（`auto-router.ts:182`）是当调用方 *确实* 固定了某个 id 时所走的同步路径 —— 对未知 id 抛出
-`provider_failed`，当 provider 不在当前 shell 中运行时抛出 `unsupported_shell`。
+共享门控 `isProviderUsable`（`auto-router.ts:79`）即 `registered && shellAllows && providerEnabled !== false`。`resolveProviderById`（`auto-router.ts:182`）是当调用方 *确实* 固定了某个 id 时所走的同步路径 —— 对未知 id 抛出 `provider_failed`，当 provider 不在当前 shell 中运行时抛出 `unsupported_shell`。
 
 ## 按操作系统区分的偏好表
 
@@ -90,19 +88,13 @@ export const DEFAULT_LOCAL_PREFERENCE = {
 }
 ```
 
-`platformBucket`（`auto-router.ts:119`）合并 `{ ...DEFAULT_LOCAL_PREFERENCE, ...deps.localPreference }`，随后在
-`osTag` 存在时以其为键，否则将 `web → browser` 映射。注意裸 `tauri` / `mobile` 桶是 **空的** —— 因此要在
-桌面/移动端命中真正的本地引擎，必须下钻到 `osTag`（`windows`/`macos`/`linux`/`ios`/`android`）。`local-http`
-被刻意排除在每个桶之外（它仅供用户手动固定）。
+`platformBucket`（`auto-router.ts:119`）合并 `{ ...DEFAULT_LOCAL_PREFERENCE, ...deps.localPreference }`，随后在 `osTag` 存在时以其为键，否则将 `web → browser` 映射。注意裸 `tauri` / `mobile` 桶是 **空的** —— 因此要在桌面/移动端命中真正的本地引擎，必须下钻到 `osTag`（`windows`/`macos`/`linux`/`ios`/`android`）。`local-http` 被刻意排除在每个桶之外（它仅供用户手动固定）。
 
-设置中的 **平台覆盖** 标签页写入 `settings.platformOverrides`；将某个桶恢复为其默认排序会删除该键，而不是存储一份
-冗余副本。参见 [设置界面](./settings-ui)。
+设置中的 **平台覆盖** 标签页写入 `settings.platformOverrides`；将某个桶恢复为其默认排序会删除该键，而不是存储一份冗余副本。参见 [设置界面](./settings-ui)。
 
 ## 就绪性与凭据的实际门控方式
 
-`AutoRouterDeps`（`auto-router.ts:41`）暴露两个可注入探测 —— `localReadiness(id)` 与 `hasCredentials(id)` ——
-两者均默认为 `() => true`。它们在单元测试中被详尽演练，**但在生产环境 `extract()` 并不传入它们**
-（`index.ts:220` 调用 `pickDefaultProvider` 时仅传入 registry/settings/platform/osTag/localPreference）。取而代之的是：
+`AutoRouterDeps`（`auto-router.ts:41`）暴露两个可注入探测 —— `localReadiness(id)` 与 `hasCredentials(id)` ——两者均默认为 `() => true`。它们在单元测试中被详尽演练，**但在生产环境 `extract()` 并不传入它们**（`index.ts:220` 调用 `pickDefaultProvider` 时仅传入 registry/settings/platform/osTag/localPreference）。取而代之的是：
 
 ```mermaid
 flowchart LR
@@ -115,14 +107,11 @@ flowchart LR
   WPROV -. router falls through .-> NEXT[next candidate]
 ```
 
-因此 **MSIX 门控**（`windows-media-ocr`）与 **模型下载门控**（`ocrs` / `paddle-ocr`）位于 provider 的
-`extract()` 边界 —— provider 抛出 `unsupported_shell`，分发随即向下回退到下一个候选项。路由器自身的
-`localReadiness` / `hasCredentials` 注入点保留可用，供未来接线及测试使用。
+因此 **MSIX 门控**（`windows-media-ocr`）与 **模型下载门控**（`ocrs` / `paddle-ocr`）位于 provider 的 `extract()` 边界 —— provider 抛出 `unsupported_shell`，分发随即向下回退到下一个候选项。路由器自身的 `localReadiness` / `hasCredentials` 注入点保留可用，供未来接线及测试使用。
 
 ## 连接探测 —— `probe.ts`
 
-`probeOcrProvider(providerId, deps, opts)`（`probe.ts:41`）是设置中的"探测连接"按钮。它针对一张 67 字节的
-1×1 透明 PNG 以 `useCache: false` 运行一次真实的 `extract()`，并将任何抛出归一化为 `ProbeOutcome`：
+`probeOcrProvider(providerId, deps, opts)`（`probe.ts:41`）是设置中的"探测连接"按钮。它针对一张 67 字节的 1×1 透明 PNG 以 `useCache: false` 运行一次真实的 `extract()`，并将任何抛出归一化为 `ProbeOutcome`：
 
 ```ts
 // probe.ts:16
@@ -133,15 +122,11 @@ export interface ProbeOutcome {
 }
 ```
 
-`toProbeError`（`probe.ts:71`）对 `OcrError` 做鸭子类型判定，因此跨模块的 `OcrError` 仍能产出带类型的 `code`。
-这是一次 **连接** 健康检查 —— 与路由器的 **就绪性**（`isReady`）和 **凭据**（`hasCredentials`）门控不同。
-三个互相独立的概念。
+`toProbeError`（`probe.ts:71`）对 `OcrError` 做鸭子类型判定，因此跨模块的 `OcrError` 仍能产出带类型的 `code`。这是一次 **连接** 健康检查 —— 与路由器的 **就绪性**（`isReady`）和 **凭据**（`hasCredentials`）门控不同。三个互相独立的概念。
 
 ## 用例推荐 —— `provider-recommendations.ts`
 
-它 **不** 属于路由器 —— 而是为[设置向导](./settings-ui)提供种子数据。`RECOMMENDATION_MAP`
-（`provider-recommendations.ts:30`）是一张从用例到入门预设的静态精选查找表（按顺序排列的 provider 列表，表头为
-默认项，外加默认语言 / 格式 / 一个 `prefersLlmVision` 标志）：
+它 **不** 属于路由器 —— 而是为[设置向导](./settings-ui)提供种子数据。`RECOMMENDATION_MAP`（`provider-recommendations.ts:30`）是一张从用例到入门预设的静态精选查找表（按顺序排列的 provider 列表，表头为默认项，外加默认语言 / 格式 / 一个 `prefersLlmVision` 标志）：
 
 | 用例 | Providers（表头 = 默认） | 语言 | 格式 |
 | --- | --- | --- | --- |
@@ -152,5 +137,4 @@ export interface ProbeOutcome {
 | `webScreenshots` | `mistral-ocr` · `gemini-vision` · `apple-vision` | en | markdown |
 | `mixed` | `mistral-ocr` · `tesseract-wasm` · `anthropic-vision` | en | markdown |
 
-`validateRecommendationMap`（`provider-recommendations.ts:74`）断言每个预设至少有 1 个 provider，且每个 id 都存在于
-`OCR_PROVIDER_CAPABILITIES` 中 —— 这是一道防漂移守卫，防止某个 provider 被重命名后从向导脚下抽走。
+`validateRecommendationMap`（`provider-recommendations.ts:74`）断言每个预设至少有 1 个 provider，且每个 id 都存在于 `OCR_PROVIDER_CAPABILITIES` 中 —— 这是一道防漂移守卫，防止某个 provider 被重命名后从向导脚下抽走。

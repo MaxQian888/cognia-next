@@ -1,6 +1,6 @@
 ---
 title: ADR-0127 — Chat rendering and transport efficiency, and the message customization contract
-description: One coalescing policy for every chat rail, batched Companion frames, a widened message-display contract, and an audited disposition for every dormant chat/transport feature.
+description: "Defines one coalescing policy for every chat rail, batches Companion frames, and extends the message-display contract. Records the audited disposition of every dormant chat and transport feature."
 ---
 
 # ADR-0127 — Chat rendering and transport efficiency, and the message customization contract
@@ -57,7 +57,7 @@ markdown?: {
 bodyFont?: "sans" | "serif";
 ```
 
-Every preset supplies defaults; resolution stays in `resolveMessageDisplayOptions` (ADR-0114 precedence: session override → global → preset). **Both** renderers (Streamdown streaming branch, react-markdown finalized branch) and the code-block renderer read the resolved values; per-block toolbar toggles remain ephemeral overrides on top of the resolved default. The controls appear in `MessageDisplayControls` (desktop appearance tab, session sheet, and the mobile settings panel). The share view reads global settings only. The Shiki theme stays hard-coded (`lib/chat/code-theme.ts`) — both renderers must agree, and a picker is not worth that coupling.
+Every preset supplies defaults. Resolution stays in `resolveMessageDisplayOptions` (ADR-0114 precedence: session override → global → preset). **Both** renderers (Streamdown streaming branch, react-markdown finalized branch) and the code-block renderer read the resolved values; per-block toolbar toggles remain ephemeral overrides on top of the resolved default. The controls appear in `MessageDisplayControls` (desktop appearance tab, session sheet, and the mobile settings panel). The share view reads global settings only. The Shiki theme stays hard-coded (`lib/chat/code-theme.ts`) — both renderers must agree, and a picker is not worth that coupling.
 
 `@theme --font-serif` is declared in `globals.css`; `bodyFont: "serif"` applies it to message prose, giving `typographyExt.serifFamily` its first consumer.
 

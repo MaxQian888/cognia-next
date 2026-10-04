@@ -1,14 +1,11 @@
 ---
 title: ADR-0042 — 统一通知中心
-description: "一条 notify() 单管道，背靠持久化的 Dexie v68 notifications 表，把 scheduler、agent-team、plugin、connector、session、移动推送等通知路径统一到唯一数据源——含去重/合并、三态读取模型、暂停(snooze)、勿扰/安静时段、按偏好的渠道扇出(center/toast/os/push)、状态栏带两级角标的通知铃、通知中心面板、偏好设置区与移动端 feed。"
+description: "统一的 notify() 通知入口，使用持久化的 Dexie v68 notifications 表，把 scheduler、agent-team、plugin、connector、session、移动推送等通知路径统一到唯一数据源——含去重/合并、三态读取模型、暂停(snooze)、勿扰/安静时段、按偏好的渠道扇出(center/toast/os/push)、状态栏带两级角标的通知铃、通知中心面板、偏好设置区与移动端 feed。"
 ---
 
 # ADR-0042 — 统一通知中心
 
-**状态**：已接受 (2026-06-02)
-**作者**：Max Qian + Claude Opus 4.8
-**基于**：scheduler 通知集成 (ADR-0002)、agent-team notifier (ADR-0022 §3.4)、插件通知 API (ADR-0006/0026)、connector bus (ADR-0009)、移动推送 (ADR-0027)，以及 `lib/connectors/outbound-runner` 的安静时段评估器
-**影响**：`types/notifications/`(新)、`lib/notifications/`(新)、`lib/db/notifications.ts` + `lib/db/schema.ts`(v68)、`stores/notifications/` + `stores/inbox/active-conversation-store.ts`(新)、`hooks/notifications/`(新)、`hooks/chat/use-session-notifications.ts`、`lib/scheduler/notification-integration.ts`、`lib/ai/agent/team/team-notifier.ts` + `agent-team-runtime-deps.ts`、`lib/plugin/api/notification-api.ts`、`components/notifications/` + `components/settings/notifications/` + `components/mobile/notifications/`(新)、`components/desktop/status-bar.tsx`、`components/providers/tauri-provider.tsx`、`app/inbox/c/[conversationKey]/`、`app/me/notifications/`、`lib/claude/types.ts`(`AppSettings.notificationPreferences`)、`i18n/messages/{en,zh-CN}.json`
+**状态**：已接受 (2026-06-02) **作者**：Max Qian + Claude Opus 4.8 **基于**：scheduler 通知集成 (ADR-0002)、agent-team notifier (ADR-0022 §3.4)、插件通知 API (ADR-0006/0026)、connector bus (ADR-0009)、移动推送 (ADR-0027)，以及 `lib/connectors/outbound-runner` 的安静时段评估器**影响**：`types/notifications/`(新)、`lib/notifications/`(新)、`lib/db/notifications.ts` + `lib/db/schema.ts`(v68)、`stores/notifications/` + `stores/inbox/active-conversation-store.ts`(新)、`hooks/notifications/`(新)、`hooks/chat/use-session-notifications.ts`、`lib/scheduler/notification-integration.ts`、`lib/ai/agent/team/team-notifier.ts` + `agent-team-runtime-deps.ts`、`lib/plugin/api/notification-api.ts`、`components/notifications/` + `components/settings/notifications/` + `components/mobile/notifications/`(新)、`components/desktop/status-bar.tsx`、`components/providers/tauri-provider.tsx`、`app/inbox/c/[conversationKey]/`、`app/me/notifications/`、`lib/claude/types.ts`(`AppSettings.notificationPreferences`)、`i18n/messages/{en,zh-CN}.json`
 
 ## 背景
 
@@ -34,7 +31,7 @@ DI 风格(仿 `team-notifier`)，让编排无需 Dexie/sonner/Tauri 即可单测
 
 ### 数据模型 (`types/notifications/`)
 
-`NotificationRecord` 是持久"中心"条目：`id, source, level, title, body?, createdAt, updatedAt, readState, snoozedUntil?, dedupeKey?, groupKey?, count, href?, actions?, sourceRef?, pluginId?, directed, deliveredVia[], expiresAt?`。`notifications` 表(**v68**)索引 `dedupeKey、groupKey、createdAt、readState`，外加复合 `[readState+createdAt]`(最新未读 feed + 角标)与 `[source+createdAt]`(按来源 feed)。Action **可序列化**(`{ id, label, command, args? }`)——点击时经 `action-registry` 解析，绝不存闭包。`NotificationPreferences` 以 JSON 挂在 `AppSettings` 单例上(无迁移)，用 `DEFAULT_NOTIFICATION_PREFERENCES` 兜底合并。
+`NotificationRecord` 是持久化的「通知中心」条目：`id, source, level, title, body?, createdAt, updatedAt, readState, snoozedUntil?, dedupeKey?, groupKey?, count, href?, actions?, sourceRef?, pluginId?, directed, deliveredVia[], expiresAt?`。`notifications` 表（**v68**）索引 `dedupeKey、groupKey、createdAt、readState`，外加复合 `[readState+createdAt]`（最新未读 feed + 角标）与 `[source+createdAt]`（按来源 feed）。Action **可序列化**（`{ id, label, command, args? }`）——点击时经 `action-registry` 解析，绝不存闭包。`NotificationPreferences` 以 JSON 保存在 `AppSettings` 单例中（无迁移），与 `DEFAULT_NOTIFICATION_PREFERENCES` 合并以补全默认值。
 
 ### 三条遗留路径真统一
 

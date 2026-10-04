@@ -1,6 +1,6 @@
 ---
 title: "ADR 0038 — 源代码管理面板（VS Code 风格 Git）"
-description: "一个完整的 VSCode-built-in-Git 等效面板——文件和hunk层stage/unstage/discard、提交（amend/signoff）、分支操作、fetch/pull/push/sync、存储、合并冲突解决、blame、提交图和时间线——由混合Rust子系统（git2 读取 + system-git 作为 network/writes）支持，并用 Monaco 的DiffEditor渲染。"
+description: "一个完整的 VSCode-built-in-Git 等效面板——文件与 hunk 级 stage/unstage/discard、提交（amend/signoff）、分支操作、fetch/pull/push/sync、存储、合并冲突解决、blame、提交图和时间线——由混合 Rust 子系统支持（git2 负责读取，system-git 负责 network/writes），并用 Monaco 的 DiffEditor 渲染。"
 ---
 
 # ADR 0038 — 源代码管理面板（VS Code 风格 Git）
@@ -38,7 +38,7 @@ Tauri 上的面板继续绑定当前项目的 `rootDir`，并保留原生“打�
 
 ### D5 — 类型错误模型
 
-crate的`error.rs`定义了`thiserror`枚举，序列为`{ kind, detail }`（`NotARepo` / `DirtyWorkingTree` / `MergeConflict` / `AuthRequired` / `NetworkFailed` / `PatchFailed` / `LockHeld` / `GitNotInstalled` / ...）。渲染器开启 `err.kind` 来驱动不同的UI→（如解析器冲突、认证→ 凭证 CTA、非仓库 →打开文件夹），而不是局部脆弱子串匹配。每个`detail`都会经过一个URL-credential编辑器（`exec::redact`）后，才离开后端。
+crate 的 `error.rs` 定义 `thiserror` 枚举，序列化为 `{ kind, detail }`（`NotARepo` / `DirtyWorkingTree` / `MergeConflict` / `AuthRequired` / `NetworkFailed` / `PatchFailed` / `LockHeld` / `GitNotInstalled` / ...）。渲染器根据 `err.kind` 选择对应 UI（如冲突处理界面、认证所需的凭证 CTA、非仓库状态下的打开文件夹操作），不依赖容易失效的局部子串匹配。每个 `detail` 都先经过 URL 凭证脱敏函数（`exec::redact`），再返回前端。
 
 ## 居住于
 

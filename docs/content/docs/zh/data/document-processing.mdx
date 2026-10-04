@@ -5,7 +5,7 @@ description: 把用户文件转成可嵌入文本——PDF / Word / Excel / 演�
 
 # 文档处理
 
-`lib/document/` 是 Cognia 的"读文件"层。它把十一种主流格式折叠成同一份 `ProcessedDocument`：原文 + 可嵌入文本 + 结构化元数据 + 解析诊断。Twin ingest、知识库、画板的"导入文档"操作都走这一层；上层调用方不需要为每种格式写自己的 parser。
+`lib/document/` 负责读取文档，将十一种主流格式统一转换为 `ProcessedDocument`，其中包含原文、可嵌入文本、结构化元数据和解析诊断。Twin ingest、知识库和画板的文档导入操作都使用这一层，上层调用方无需为每种格式单独实现解析器。
 ## 总览
 
 ```mermaid

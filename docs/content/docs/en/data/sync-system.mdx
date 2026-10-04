@@ -29,8 +29,9 @@ description: Desktop ↔ Phone sync-down protocol — the Host's Dexie is the so
 
 ## Applicable Scenarios
 
-Every scenario reads the Host through the same `sync_pull` command; what differs is the stage a table
-is pulled in, and therefore how soon after pairing or resume the client has it.
+Every scenario reads the Host through the same `sync_pull` command.
+Tables differ in the stage at which the client retrieves them.
+That stage determines how soon the client receives a table after pairing or resume.
 
 | Scenario | Tables | Stage |
 | --- | --- | --- |

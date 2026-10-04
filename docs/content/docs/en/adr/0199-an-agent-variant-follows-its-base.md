@@ -1,6 +1,6 @@
 ---
 title: "0199 — An agent variant follows its base"
-description: "Several configurations of one agent used to mean several detached copies: duplicating a reviewer to make a strict one froze every other field, so fixing the original's prompt or adding a skill never reached the copy. This ADR adds variants — a Character linked to a base that owns only the profile fields it changed and follows the base for the rest — and lets a workspace name the agent (or variant) its new conversations start as."
+description: "Agent configurations were detached copies. A copied strict reviewer did not receive later prompt or skill changes from its source. Adds Character variants linked to a base. Each variant owns only its changed profile fields and inherits the rest. Workspaces can select the agent or variant used for new conversations."
 ---
 
 # ADR 0199 — An agent variant follows its base
@@ -77,8 +77,8 @@ resolves the first id through `resolveCharacterById`, so a variant arrives
 with its overlay applied, and `teammateToCharacter` starts from that profile:
 knowledge bases, memory policy, output style and the rest come from the agent.
 The teammate's own prompt, model, provider and tools override it, and the
-team's MCP servers and skills are added to the agent's. An id that no longer
-resolves fails the dispatch instead of running a generic teammate.
+team's MCP servers and skills are added to the agent's. If an id no longer
+resolves, dispatch fails. It does not substitute a generic teammate.
 
 ### A workspace names its default agent
 

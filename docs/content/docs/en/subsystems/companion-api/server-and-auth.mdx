@@ -10,7 +10,7 @@ description: The current Companion TLS listener, cgnp3 bootstrap, DPoP access to
 <TLDR>
   The canonical device API no longer treats a long-lived bearer token as the normal credential.
   A device registers a public key, signs a one-minute challenge, exchanges it for a five-minute
-  DPoP-bound access token, and mints a 60-second single-use ticket for each WebSocket connection.
+  DPoP-bound access token, and creates a 60-second single-use ticket for each WebSocket connection.
   Headless mode uses a separate loopback-only service token and never enters the device flow.
 </TLDR>
 
@@ -49,7 +49,7 @@ sequenceDiagram
   C-->>D: DPoP access token (300 s)
 ```
 
-The `cgnp3` payload declares either `owner-invitation` or `oidc`. Only the former contains a one-time
+The `cgnp3` payload declares either `owner-invitation` or `oidc`. Only the owner-invitation payload contains a one-time
 invitation. Managed mode validates Logto issuer, resource/audience, Web client, and organization
 before registering the device. Authentication and signaling private keys remain in Browser Vault or
 system secure storage; the target book contains only public metadata.

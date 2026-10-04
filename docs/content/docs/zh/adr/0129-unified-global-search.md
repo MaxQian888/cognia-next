@@ -1,6 +1,6 @@
 ---
 title: ADR-0129 — 统一全局搜索
-description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的快捷键、一个 provider 注册表——按标题搜会话、按角色 / 日期 / 归档过滤消息历史、命令、页面、设置、人物与应用内各类库——取代六个调色板与三处 ⌘K 监听。
+description: "用一个搜索面（⌘K）、一个打开入口、一个可重绑快捷键和一个 provider 注册表，取代六个调色板与三处 ⌘K 监听。支持按标题搜索会话，按角色、日期和归档状态筛选消息历史，以及搜索命令、页面、设置、人物与应用内各类库。"
 ---
 
 # ADR-0129 — 统一全局搜索
@@ -14,7 +14,7 @@ description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的
 
 ## 背景
 
-对三种壳里所有"搜索"入口的审计发现没有任何统一注册表——六个互不相干的 cmdk `CommandDialog` 调色板、三条查找栏、五六个内联输入框，由四种不同机制打开：
+对三种壳中所有「搜索」入口的审计发现，系统没有统一注册表——六个互不相干的 cmdk `CommandDialog` 调色板、三条查找栏、五六个内联输入框，由四种不同机制打开：
 
 - **⌘/Ctrl+K 被同时占用三次。** 桌面 `CommandPalette`（常驻挂载）、`InboxCommandPalette`（在 `inbox-shell.tsx` 里挂了两次）和 `settings-shell.tsx` 各自有一个裸 `window` keydown 监听。在 `/inbox` 与 `/settings` 上一次按键会打开两个对话框，顺序取决于监听注册顺序。它们都不在可重绑快捷键目录（`lib/shortcuts/app-catalog.ts`）上，因此 ⌘K 既不能改键也不做冲突检查。
 - **原生菜单的"命令面板"在 macOS 上是坏的。** `lib/desktop/menu-actions.ts:commandPaletteAction` 伪造 `Ctrl+K` 按键，而调色板在 Mac 上要求 `⌘K`；`title-bar-workspace.tsx` 早已踩过同一个坑并改用 `requestCommandPalette()`，菜单动作却从未迁移。

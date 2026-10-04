@@ -5,17 +5,14 @@ description: "Drive a real Telegram, Slack, Discord, Lark, Matrix or OneBot conv
 
 # Local Live Testing
 
-Every other connector test in this repo fakes at least one end. The mocked E2E
-suites fake the platform; `scripts/lark-live-smoke.mts` hits the real Feishu API
-but only outbound, through a Node stand-in for Tauri. Neither proves the thing
-you actually care about: that a real message, pushed by a real platform, through
-the real transport (Feishu's long connection and every webhook signature live in
-Rust), past the real admission gates and the PII gate, comes back as a real
-reply.
+Every other connector test in this repository substitutes at least one endpoint.
+Mocked E2E suites substitute the platform.
+`scripts/lark-live-smoke.mts` uses the real Feishu API for outbound messages only, through a Node substitute for Tauri.
+Neither proves the complete message path through the real platform, transport, admission gates, and PII gate to a real reply.
+Feishu's long connection and all webhook signatures are handled in Rust.
 
-This harness closes that loop. The only substitution is the model: a
-deterministic fixture stands in for Anthropic so assertions are stable and the
-runs cost nothing.
+This harness tests that complete path.
+It substitutes only the model: a deterministic fixture replaces Anthropic so assertions stay stable and runs incur no model cost.
 
 ```text
 test identity → real IM platform → your configured Cognia bot → connector inbound

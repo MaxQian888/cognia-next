@@ -1,6 +1,6 @@
 ---
 title: "0123 — Context Workbench Vertical Split"
-description: "Renders the two-pane split that ADR-0121 recorded as dormant, using absolutely-positioned lanes rather than a resizable group so neither pane is ever rebuilt."
+description: "Implements the two-pane split that ADR-0121 recorded as dormant. Uses absolutely positioned lanes to avoid rebuilding either pane when the split changes."
 ---
 
 # ADR 0123 — Context Workbench Vertical Split
@@ -10,7 +10,7 @@ description: "Renders the two-pane split that ADR-0121 recorded as dormant, usin
 
 ## Context
 
-ADR-0121 recorded three features that were built, persisted and invisible.
+ADR-0121 recorded three features that were implemented and persisted but had no visible controls.
 `splitPanelId` / `splitRatio` and their three store actions were one of them:
 complete in the model layer, normalized and clamped on every read, with no
 renderer behind them. Per Working Rule 7 the dormancy was stated on all three

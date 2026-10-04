@@ -1,11 +1,11 @@
 ---
 title: Chat middleware
-description: 挂在完整回复路径上的插件 around 式中间件链——带熔断的注册表、按优先级从后向前执行、每中间件超时，以及默认关闭的开关。
+description: 完整回复路径上的插件 around 式中间件链，包括带熔断的注册表、按优先级逆序执行、每个中间件的超时和默认关闭的开关。
 ---
 
 # Chat middleware
 
-Chat middleware 让插件以 Koa 风格**包裹** Agent 的**完整回复**——检视或变换请求与响应——而不触碰流式 UI 路径。它是唯一一个挂在*非流式* `run-and-capture` 路径上、而非 `resolveSendOptions` 内部的能力模块。
+Chat middleware 允许插件以 Koa 风格**包裹** Agent 的**完整回复**，检查或转换请求与响应，同时保留流式 UI 路径。它是唯一接入*非流式* `run-and-capture` 路径的能力模块，未接入 `resolveSendOptions` 内部。
 
 <TLDR>
   一个中间件是 `(req, next) => Promise<Response>`（`plugin-chat-middleware.ts:115`）。插件经 `ctx.chat.use`

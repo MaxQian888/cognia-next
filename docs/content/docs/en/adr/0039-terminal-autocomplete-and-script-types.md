@@ -41,7 +41,7 @@ Every piece of the suggestion pipeline that can be is kept free of React + xterm
 
 ### D2 — React glue is intentionally thin
 
-`hooks/terminal/use-terminal-autocomplete.ts` wires the controller to the settings + terminal stores and the LLM utility client (`buildUtilityLlmClient`), and registers the built-ins. `components/terminal/terminal-ghost-text.tsx` is a purely presentational overlay (`pointer-events: none`, inherits the terminal font) positioned at the xterm cursor. `terminal-instance.tsx` feeds `onData` chunks into the hook, renders the overlay, intercepts **Tab / → to accept** and **Esc to dismiss** in `attachCustomKeyEventHandler` (falling through when there's no suggestion, so Tab still reaches the shell and → still moves the cursor), and resets the line model on OSC 633 `prompt_start` / `command_start`.
+`hooks/terminal/use-terminal-autocomplete.ts` wires the controller to the settings + terminal stores and the LLM utility client (`buildUtilityLlmClient`), and registers the built-ins. `components/terminal/terminal-ghost-text.tsx` is a purely presentational overlay (`pointer-events: none`, inherits the terminal font) positioned at the xterm cursor. `terminal-instance.tsx` feeds `onData` chunks into the hook and renders the overlay. It intercepts **Tab / → to accept** and **Esc to dismiss** in `attachCustomKeyEventHandler`. When there is no suggestion, it lets these keys pass through: Tab still reaches the shell and → still moves the cursor. It resets the line model on OSC 633 `prompt_start` / `command_start`.
 
 Accepting writes the suffix straight through `session.write` — *not* through `onData` — so there's no double-feed, and it never presses Enter for the user.
 

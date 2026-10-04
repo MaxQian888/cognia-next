@@ -9,12 +9,12 @@ description: A Shimeji-style companion living in transparent overlay windows —
 
 <TLDR>
   The pet is not a widget inside the app window — it lives in its own transparent, always-on-top Tauri
-  windows, and `PetWindowRole` (`lib/pet/window-role.ts:18`) is what tells one bundle which of five roles
-  it is booting into. Rust creates those windows `visible(false)` and never shows them on the create path:
+  windows, and `PetWindowRole` (`lib/pet/window-role.ts:18`) determines which of five roles
+  the bundle uses at startup. Rust creates those windows `visible(false)` and never shows them on the create path:
   on Windows a `transparent(true)` window shown before its WebView commits a first paint renders as an
   opaque black rectangle. The renderer calls the shared reveal (`lib/pet/reveal.ts`) after mount, waiting
   **two rAFs** — layout, then post-commit — so the transparent frame is on screen before the window
-  appears. Underneath sits a real simulation: needs decay, care condition, coins and a shop, XP and
+  appears. The pet simulation includes: needs decay, care condition, coins and a shop, XP and
   levelling, achievements, and a locomotion FSM with ballistics.
 </TLDR>
 
@@ -48,7 +48,28 @@ Transparent overlay windows are created hidden and revealed by the renderer, not
 rectangle on Windows until something forces a recomposite — the "invisible / black until I click it"
 bug. `lib/pet/reveal.ts` waits two animation frames (layout, then post-commit) before calling
 `revealPetWindow()` / `revealIslandWindow()`, mirroring the main window's `WindowShowInitializer`
-contract.
+contract. The renderer's reveal goes through Rust on every platform (a panel generation check lets a close
+that lands between the open and the first frame win over the reveal), then nudges the size by one pixel to force a recomposite. An existing window is never
+re-shown before its first paint. The overlay and popup routes are marked `data-pet-overlay` by the boot
+script, so their background is transparent before React hydrates.
+
+## Window plumbing
+
+The overlay and popup are created non-focusing (`.focused(false)`; `WS_EX_NOACTIVATE` / `WS_EX_TOOLWINDOW`
+on Windows; a non-activating NSPanel on macOS), so the pet never takes focus from the app the user is
+in, and neither window appears in Alt-Tab. An OS close routes through the same close path as the UI.
+
+| Concern | Owner |
+| --- | --- |
+| Which monitor a window is on | `work_area_for` probes the window centre against `available_monitors` physical rects (`pet_window/mod.rs`) |
+| Monitor or scale changes | `ScaleFactorChanged` and a cross-monitor `Moved` emit `pet://work-area-changed` |
+| Live size changes | `pet_window_set_size`, anchored at the bottom centre and clamped to the work area |
+| Popup placement | `resolve_popup_placement` (`pet_window/popup.rs`), from the pet's physical rect on its own monitor; re-placed on every content resize |
+| CSS → physical pointer deltas | `resolveCssToPhysicalScale` / `petBoxScreenRect` (`lib/pet/overlay-geometry.ts`) |
+| Pet settings writes from any window | `updatePetSettings` (`lib/pet/settings-sync.ts`): a Web Lock, a fresh read, then a broadcast that every pet window follows |
+
+While the desktop pet is out, the in-app widget is hidden. `PetMainRuntime` keeps the pet's voice and
+appearance running in the main window either way (ADR-0058 D12).
 
 ## Perchable surfaces degrade by platform
 
@@ -141,7 +162,7 @@ move into a Sheet; `PetConsoleTab`, `?tab=` deep links, plugin visibility, and t
 protocol keep their existing values and wire shapes.
 
 `PetCustomizationWorkspace` is mounted by both `/pet → Customize` and `Settings → Pet`. It is the only
-owner that reads `DEFAULT_PET_SETTINGS` and persists merged settings through `useSettingsStore.save()`, so
+owner that reads `DEFAULT_PET_SETTINGS` and persists merged settings through `updatePetSettings()`, so
 both entry points expose the same SVG genetics overrides, Live2D import/compatibility/transform/motion/
 expression/parameter mapping, Sprite v2 creation/import/activation, dock and motion behavior, speech and
 memory, sound and quiet hours, care alerts, Twin awareness, and capability-gated desktop-window controls.
@@ -161,4 +182,5 @@ economy, interactions, or Tauri window protocols; no schema migration is involve
   <Card title="Characters" href="../chat/characters" description="Where a pet's character and skins come from" />
   <Card title="Voice / TTS" href="./misc-subsystems" description="The TTS stack use-pet-speak drives" />
   <Card title="Scheduler" href="./scheduler" description="What fires the pet's scheduled reminders" />
+  <Card title="Desktop pet API" href="../plugin-dev/pet" description="What plugins can do with the pet" />
 </Cards>

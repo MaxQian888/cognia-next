@@ -208,12 +208,12 @@ fail closed on a headless trigger; never touch a low-risk node.
 
 ### Taxonomy judgment calls
 
-The absences are the design. Gated: connector send/forward, git push, mobile
+The policy deliberately excludes some operations. Gated: connector send/forward, git push, mobile
 share (leave the machine, cannot be unsent); every `action.desktop.*` that acts
 or captures; real-shell nodes; connector delete. **Not** gated: `.draft` and
 `.reaction` (trivially reversible); local git commit/stage/branch; deletes of
 app-local records (`action.goal.delete`, `action.plan.delete`,
-`action.scheduler.task.delete`) — a workflow tidying up its own goals is routine
+`action.scheduler.task.delete`) — a workflow that removes its own goals performs routine
 automation, and gating it teaches operators to switch `riskGating` off, losing
 the shell/mouse/send gating that is the point; and `action.plugin.invoke` /
 `action.skill.invoke` — wildcards, but a rule that gates every plugin call gates

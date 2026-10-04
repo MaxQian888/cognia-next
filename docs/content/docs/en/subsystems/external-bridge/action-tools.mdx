@@ -8,14 +8,14 @@ description: The opt-in action plane — computer_use driving the desktop throug
 <Status variant="stable">Stable · `lib/external-bridge/handlers/{computer-use,connectors}.ts`</Status>
 
 <TLDR>
-  Two handlers form the action plane, both default-OFF. `computer_use` (`computer-use.ts:95`) drives the
+  Two handlers form the action plane, both disabled by default. `computer_use` (`computer-use.ts:95`) drives the
   host desktop — screenshot / click / type / drag / scroll / keys — by opening a TCP socket to the
-  Rust `automation_proxy`; the proxy forces every call through the same automation permission gate
+  Rust `automation_proxy`. The proxy routes every call through the same automation permission gate
   (`Surface::Mcp`) as in-app Computer Use, so the `mcp:computer-use` scope is necessary but not
   sufficient. The six `connectors_*` tools (`connectors.ts`) expose inbox introspection — list adapters,
   conversations, audit, drafts — and one write tool, `connectors_send_message`, which enqueues an AI
-  reply through `runConnectorDigestTurn`, keeping the PII gate, policy resolver, idempotency cache, and
-  outbound runner all in path.
+  reply through `runConnectorDigestTurn`, so the request passes through the PII gate, policy resolver, idempotency cache, and
+  outbound runner.
 </TLDR>
 
 ## `computer_use` — driving the desktop

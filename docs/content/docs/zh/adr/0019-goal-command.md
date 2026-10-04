@@ -1,17 +1,15 @@
 ---
 title: "0019 — /goal 指令（Hermes + Codex + Claude Code 融合）"
-description: "持久化的聊天目标，自动续 turn、judge 模型把关、Codex 风格的 prompt-injection 防御。"
+description: "持久化聊天目标，自动继续 turn，使用 judge 模型判断完成情况，并提供 Codex 风格的 prompt-injection 防御。"
 ---
 
 # ADR 0019 — /goal 指令
 
-**状态:** Accepted
-**日期:** 2026-05-14
-**分支:** `feat/goal-command`
+**状态:** Accepted **日期:** 2026-05-14 **分支:** `feat/goal-command`
 
 ## Context
 
-三家头部 AI agent — **Hermes Agent**（Nous Research）、**OpenAI Codex CLI**、**Anthropic Claude Code** — 都在 2025 年中到 2026 年初各自落地了 `/goal` 指令。cognia-next 已经具备完整的 chat / character / skill / workflow / agent-team 体系，但**缺少把"目标"作为一级概念**的循环机制：用户没办法用一句话设定意图，让 agent 自己一步一步推进直到完成。
+三家头部 AI agent — **Hermes Agent**（Nous Research）、**OpenAI Codex CLI**、**Anthropic Claude Code** — 都在 2025 年中到 2026 年初各自提供了 `/goal` 指令。cognia-next 已经具备完整的 chat / character / skill / workflow / agent-team 体系，但**缺少将「目标」作为一级概念**的循环机制。用户无法用一句话设定意图，再让 agent 自行逐步推进直至完成。
 
 三家实现的横向比较：
 

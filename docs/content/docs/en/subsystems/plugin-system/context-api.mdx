@@ -8,7 +8,7 @@ description: The single runtime object handed to every plugin's activate(ctx), a
 <Status variant="experimental" />
 
 <TLDR>
-`ctx` is the single runtime object passed to every plugin's `activate(ctx)`. It is built in two layers in `lib/plugin/core/context.ts`: `createPluginContext` (`context.ts:181`) assembles the always-on base namespaces defined inline, and `createFullPluginContext` (`context.ts:233`) layers the extended feature namespaces by spreading each `create*API(pluginId)` factory from `lib/plugin/api/` into one `FullPluginContext` (`context.ts:297-317`). Every host-touching namespace is wrapped by `createGuardedAPI` (`permission-guard.ts:777`), a Proxy that hard-requires the declared permission and routes `"confirm"`-tier permissions through the async consent broker (`permission-guard.ts:810-854`). Credential-stripping projections keep secrets out of `ctx.subscription`, `ctx.connectors`, `ctx.backup`, and `ctx.vector`.
+`ctx` is the single runtime object passed to every plugin's `activate(ctx)`. It is built in two layers in `lib/plugin/core/context.ts`: `createPluginContext` (`context.ts:181`) assembles the always-on base namespaces defined inline, and `createFullPluginContext` (`context.ts:233`) layers the extended feature namespaces by spreading each `create*API(pluginId)` factory from `lib/plugin/api/` into one `FullPluginContext` (`context.ts:297-317`). Every host-touching namespace is wrapped by `createGuardedAPI` (`permission-guard.ts:777`), a Proxy that requires the declared permission and routes `"confirm"`-tier permissions through the async consent broker (`permission-guard.ts:810-854`). Credential-stripping projections keep secrets out of `ctx.subscription`, `ctx.connectors`, `ctx.backup`, and `ctx.vector`.
 </TLDR>
 
 <StatGrid>
@@ -55,7 +55,7 @@ Defined inline in `context.ts`.
 | `ctx.tray` | `tray-api.ts:29` | lib/tray/registry + Rust | capability-gated (`"tray"` else no-op `:14`) | `register` |
 | `ctx.window` | `context.ts:1505` | Rust window cmds | no | `create:1549`, `getMain:1556`, `focus:1558` |
 | `ctx.secrets` | `context.ts:1578` | Rust keyring gateway | no | store/get/delete/has (`:1580-1587`) |
-| `ctx.scheduler` | `context.ts:~1592` | scheduler | no | scheduler API |
+| `ctx.scheduler` | `context.ts:2846` (`createSchedulerAPI`) | local `TaskScheduler` + `schedulerDb`, own `type: "plugin"` tasks only | `scheduler` manifest capability (denied proxy otherwise) | `createTask`, `runTaskNow`, `cancelExecution`, `emitEvent`, `onExecution`, `getStatistics`, `previewTrigger`, `registerHandler`; see [Scheduler APIs](../../plugin-dev/scheduler) |
 | `ctx.workflow` | `context.ts:214` | workflow node / trigger registries | no | node / trigger registration |
 | `ctx.dexie` | `dexie-api.ts:40` | namespaced Dexie | namespace-enforced | `table:20`, `rawDb:31` |
 
@@ -94,6 +94,7 @@ From `lib/plugin/api/`.
 | `ctx.share` | `share-api.ts:51` | lib/share + shared-links Dexie | `share:read` / `share:create` | `create:53`, `revoke:54`, `getStats:57` |
 | `ctx.backup` | `backup-api.ts:64` | buildExportEnvelope / importEnvelope | `backup:read` / `backup:write` (never API key) | `create:66`, `restore:75`, `listHistory:82` |
 | `ctx.automation` | `automation-api.ts:101` | lib/automation/client (Computer Use) | `automation:read`/... (ALL DANGEROUS) | `capabilities:53`, `getFocus:54`, `readTree:56` |
+| `ctx.userScheduler` | `scheduler-tasks.ts` (`createUserSchedulerAPI(pluginId)`) | scheduler store + `getSchedulerDataSource()` (honours the paired-host binding) | `database:read` / `database:write` (+ `settings:read`, `agent:control` on create / run / cancel); every write passes `assertTaskWriteAllowed`, attributed to the plugin or an agent, never the user | `getPolicy`, `listTasks`, `getTask`, `createTask`, `updateTask`, `pauseTask`, `resumeTask`, `deleteTask`, `runTaskNow`, `listExecutions`, `getExecution`, `cancelExecution`, `getUpcoming` |
 | `ctx.companion` | `companion-api.ts:85` | paired-device + goal runtime | `companion:read`/`control`/`goal-control` | `listDevices:90`, `setRemoteControl:96`, `pauseGoal:114` |
 
 Helpers (not `ctx.X`): `crypto-helpers.ts` (AES-GCM `deriveKey:17`, used by the Storage API); `message-part-renderers.ts` (the backing registry for `ctx.messagePart`).

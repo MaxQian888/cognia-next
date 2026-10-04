@@ -67,7 +67,7 @@ Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Wo
 
 ## 验证
 
-Rust 单元与集成测试（`cargo test`）：状态机迁移与非法迁移拒绝；启动 reconcile 仅认领签名行；lock reason 校验；默认 detached HEAD；`WorkspaceBaseSpec` 抵达 `create_execution`；Bundle apply 故障注入涵盖 precheck 拒绝、中途 apply 失败补偿成功、以及补偿失败进入 `conflict`；进程重启后 `conflict` 可恢复；retention 分离（目录回收 vs 快照过期）遵守不可 prune 列表；非 Git shadow 拒绝 `..`、绝对路径与逃逸 symlink；敏感路径授权持久化与后台 fail-closed。
+Rust 单元与集成测试（`cargo test`）：状态机迁移与无效迁移拒绝；启动 reconcile 仅认领签名行；lock reason 校验；默认 detached HEAD；`WorkspaceBaseSpec` 抵达 `create_execution`；Bundle apply 故障注入涵盖 precheck 拒绝、中途 apply 失败补偿成功、以及补偿失败进入 `conflict`；进程重启后 `conflict` 可恢复；retention 分离（目录回收 vs 快照过期）遵守不可 prune 列表；非 Git shadow 拒绝 `..`、绝对路径与逃逸 symlink；敏感路径授权持久化，以及后台失败即拒绝（fail-closed）。
 
 前端 co-located 测试（`pnpm test:coverage:changed -- --strict`，改动文件 ≥ 90 %）：新建聊天选择器；Header chip 与 popover 的每个动作与错误分支；统一 Managed Workspaces 页的状态矩阵与受保护删除拒绝路径；多根 Source Control 聚合视图；`worktree-panel.tsx` 拒绝对受管项 force；敏感授权对话框。所有新用户文案在 `i18n/messages/en.json` 与 `zh-CN.json` 同时存在，`pnpm lint:i18n` 通过。
 

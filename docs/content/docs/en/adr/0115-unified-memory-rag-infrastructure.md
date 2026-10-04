@@ -115,14 +115,14 @@ Dexie v163 adds profiles, generations, active pointers, jobs, traces, encrypted 
 
 Migration is journaled and resumable:
 
-1. add schema;
-2. enable dual read and compare results;
-3. encrypt canonical content and lexical segments in bounded batches;
-4. backfill unknown governance fields without model inference;
-5. build and validate new generations;
-6. pass quality gates;
-7. atomically cut over reads and writes;
-8. clear legacy plaintext only after verification.
+1. Add the schema.
+2. Enable dual read. Compare the results.
+3. Encrypt canonical content and lexical segments in bounded batches.
+4. Backfill unknown governance fields without model inference.
+5. Build new generations. Validate them.
+6. Pass the quality gates.
+7. Atomically switch reads and writes to the new generations.
+8. Clear legacy plaintext only after verification.
 
 Rollback changes only the active pointer and compatibility adapter. It never restores plaintext and never downgrades to a client that cannot decrypt the current envelope/key protocol. A single kill switch stops new-kernel reads, ingestion, and promotion while preserving decryption, export, deletion, reconciliation, and safe BM25 reads.
 

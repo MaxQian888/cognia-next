@@ -148,10 +148,10 @@ a chat message already being read.
 
 `alt+shift+1..6` map to the six actions via the existing `ShortcutRegistry`, bound in
 `selection_toolbar_start` and released in `selection_toolbar_stop` — deliberately *not* in
-`seed_builtins`, which would squat six chords for users who never enable the feature. A chord the
+`seed_builtins`, which would reserve six chords for users who never enable the feature. A chord the
 user has already re-bound is left alone. Dispatch is a **notification** (`selection://shortcut`), not
 a second execution path: the renderer owns the chosen translation target, the phase machine and the
-exit animation, and forking those in Rust would guarantee drift.
+exit animation, and duplicating them in Rust would create inconsistent behavior.
 
 The passive `CGEventTapOptions::ListenOnly` monitor cannot consume keystrokes, so reacting to raw
 keys would have typed the digit into the user's document. Real global shortcuts are the only safe

@@ -1,6 +1,6 @@
 ---
 title: ADR-0120 — DeepSeek Harness 托管运行时
-description: "以外部智能体形式接入 DeepSeek Harness，跨两种传输层；因上游既未发布可执行文件也未发布 host 平面，组合由 Cognia 自己拥有。"
+description: "以外部智能体形式接入 DeepSeek Harness，支持两种传输层。由于上游未发布可执行文件或 host 平面，Cognia 负责宿主组合。"
 ---
 
 # ADR-0120 — DeepSeek Harness 托管运行时

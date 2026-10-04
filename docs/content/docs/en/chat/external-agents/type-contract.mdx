@@ -30,8 +30,8 @@ description: types/agent/external-agent.ts (2168 lines) — the single source of
 
 ## The Protocol/Transport Taxonomy
 
-Two orthogonal axes describe *how* Cognia reaches an agent. They are declared first because every
-other type keys off them.
+Two independent axes describe how Cognia connects to an agent.
+They are declared first because every other type depends on them.
 
 | Type | Line | Members | Notes |
 | --- | --- | --- | --- |
@@ -42,9 +42,9 @@ other type keys off them.
 
 ## The Canonical Diagnostics Model
 
-This is the load-bearing part of the file: the vocabulary the manager uses to explain *what happened
-and why*. The [canonical contract](./canonical-readiness) module is the logic that fills these in;
-here are the shapes.
+This part of the file defines the vocabulary that the manager uses to explain what happened and why.
+The [canonical contract](./canonical-readiness) module fills these fields.
+The types below define their shapes.
 
 | Type | Line | Role |
 | --- | --- | --- |

@@ -10,12 +10,12 @@ description: How axum reaches the canonical Dexie brain through three request/re
 <TLDR>
   The Companion API handlers run in Rust, but the data a phone wants — characters, messages,
   sessions, settings — lives in the **WebView's** IndexedDB (Dexie), which Rust cannot read directly.
-  Three bridges close the gap with the same shape: Rust emits a `companion://<kind>-request` Tauri
+  Three bridges use the same request/response pattern: Rust emits a `companion://<kind>-request` Tauri
   event carrying a `request_id`, registers a `oneshot::Sender` keyed by that id, and waits up to
-  **30 seconds**; a TS listener processes the request against Dexie and replies via a
-  `companion_*_response` Tauri command; Rust resolves the oneshot and writes the result into the HTTP
-  response. In Headless mode the same bridge protocol runs over `/internal/bridge` to the Node Brain;
-  the direct SQLite `AppStore` is only a bounded degraded fallback while no Brain is connected.
+  **30 seconds**. A TS listener processes the request against Dexie and replies via a
+  `companion_*_response` Tauri command. Rust resolves the oneshot and writes the result into the HTTP
+  response. In Headless mode the same bridge protocol runs over `/internal/bridge` to the Node Brain.
+  The direct SQLite `AppStore` is only a bounded degraded fallback while no Brain is connected.
 </TLDR>
 
 <StatGrid>

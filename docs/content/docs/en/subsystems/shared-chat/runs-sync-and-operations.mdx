@@ -11,9 +11,9 @@ The initiating client requests a lease with its stable device id, Run id, operat
 generated token retained across retries. The service verifies `session.run`, stores only the token
 digest, and returns the token with a short-lived lease bound to the user, device, session, and Run.
 Reusing an operation id with different credentials or a different Run is rejected. Heartbeat and release
-both require the matching session, device id, and token; an expired heartbeat cannot revive execution.
+both require the matching session, device id, and token. An expired heartbeat cannot revive execution.
 The local model/tool runtime publishes Run events with that token. A competing start
-receives `409`; its input is queued rather than executed.
+receives `409`. Its input is queued rather than executed.
 
 Only the initiator, maintainer, or owner may steer. Heartbeat loss pauses the Run and then fails it after
 the grace deadline. Another device never silently takes over, because repeating an irreversible tool is
@@ -36,7 +36,7 @@ check before more events are sent.
 
 Membership removal closes the person's stream, invalidates attachment tickets, cancels their queued
 input, and ends their active lease. The client purges the corresponding shared projection. Offline mode
-keeps cached reads and drafts only; there is no delayed message or Run outbox.
+keeps cached reads and drafts only. There is no delayed message or Run outbox.
 
 ## Break-glass is not implicit org-admin access
 
@@ -48,7 +48,7 @@ validates expiry and writes a metadata-only `session.breakGlassRead` audit with 
 ## Operating and rolling back
 
 1. Apply additive migrations with both flags disabled.
-2. Enable the service flag for selected organizations and verify protocol v2 health.
+2. Enable the service flag for selected organizations. Verify protocol v2 health.
 3. Ship a client build with its flag enabled to the same canary population.
    Deploy lease-credential changes with the matching client: acquisition sends a stable token, and
    release sends `{ deviceId, token }` in the request body. Older clients cannot release a lease through

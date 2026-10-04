@@ -1,11 +1,11 @@
 ---
 title: 数据 Hooks
-description: DataAdapter 抽象——让聊天组件以同一份代码跑在 Dexie（桌面）或 WebSocket 桥（移动端 PWA）上。
+description: DataAdapter 抽象让同一份聊天组件代码使用 Dexie（桌面端）或 WebSocket 桥（移动端 PWA）访问数据。
 ---
 
 # 数据 Hooks
 
-`lib/data-hooks/` 是聊天 UI 与持久层之间的"插槽"。它把组件原本直连 Dexie 的写法（`useLiveQuery(() => listCharacters())`）抽到一个名为 `DataAdapter` 的接口背后，由 `<DataAdapterProvider adapter={...}>` 注入。桌面注入 Dexie 实现，移动端 PWA 之后将注入 WebSocket 桥实现 —— 同一份组件代码两个形态都能跑。
+`lib/data-hooks/` 为聊天 UI 与持久化层提供接口。组件原先直接调用 Dexie（`useLiveQuery(() => listCharacters())`），现在通过 `DataAdapter` 接口访问数据，并由 `<DataAdapterProvider adapter={...}>` 注入实现。桌面端注入 Dexie 实现，移动端 PWA 后续将注入 WebSocket 桥实现，使两种形态复用同一份组件代码。
 ## 设计动机
 
 cognia-next 的桌面端把数据放 Dexie（IndexedDB），聊天组件直接 `useLiveQuery(() => listCharacters())` 读得到。但移动端 PWA 不能复制 Dexie —— 数据要保留在桌面机器上，手机通过 LAN/tunnel 走 WebSocket 拿。同一个 `ChatHeader / Composer / MessageRenderer` 不该有两份代码。

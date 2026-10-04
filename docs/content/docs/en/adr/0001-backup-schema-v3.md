@@ -106,8 +106,8 @@ they can be written. The additive v4 codec therefore uses newline-delimited
 - Decoders enforce record-size, ordering, checksum, footer, KDF, and nonce
   bounds before exposing a verified chunk.
 
-This is an additive format seam. Existing v1/v3 imports remain readable and
-the current UI, scheduler, and WebDAV flows continue writing v3 until their
+This format change is additive. Existing v1/v3 imports remain readable.
+The current UI, scheduler, and WebDAV flows continue writing v3 until their
 streaming sink and resumable-restore adapters are complete. The v4 codec must
 not be routed into those writers before a matching restore path exists.
 

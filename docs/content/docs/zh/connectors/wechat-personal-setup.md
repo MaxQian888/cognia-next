@@ -5,7 +5,7 @@ description: "通过 iLink 网关扫码登录接入个人微信——非官方�
 
 # 个人微信（iLink）配置指南
 
-本指南将引导你通过 **iLink 网关** 扫码登录，把一个个人微信账号接入 cognia-next。
+本指南说明如何通过 **iLink 网关** 扫码登录，将个人微信账号接入 cognia-next。
 
 ---
 

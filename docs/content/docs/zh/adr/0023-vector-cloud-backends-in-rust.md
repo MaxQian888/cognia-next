@@ -82,7 +82,7 @@ web/SSR损失是可以接受的：该项目目前仅为云向量应用场景提�
 
 ## 迁移路径
 
-一次性启动hook（`lib/vector/migrations/credential-migration.ts`）读取pre-ADR-0023 Zustand持久化的blob，将明文凭证写入`migrated-<provider>` configIds下的密钥环，从localStorage中剥离明文字段，并设置`vector-credentials-migrated`标志。幂零——第二次运行为无操作。
+一次性启动 hook（`lib/vector/migrations/credential-migration.ts`）读取 ADR-0023 之前由 Zustand 持久化的 blob。它将明文凭证写入 `migrated-<provider>` configIds 对应的密钥环，从 localStorage 删除明文字段，并设置 `vector-credentials-migrated` 标志。迁移是幂等的，第二次运行不执行操作。
 
 现有用户不会看到功能变化;他们的云配置在升级后首次发布时就透明地实现了密钥环支持。
 

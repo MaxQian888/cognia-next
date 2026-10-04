@@ -5,7 +5,7 @@ description: "在自定义插件或外部 MCP 客户端中调用内置 ocr.extra
 
 # OCR 插件工具
 
-内置 `cognia-ocr` 插件（`plugins/ocr/`）暴露唯一一个 agent 工具 —— `ocr.extract`，在每一种 shell 中都接线。本指南覆盖：插件作者想把自己的工具链入 OCR 的调用 shape，以及如何从另一个插件调用斜杠命令。
+内置 `cognia-ocr` 插件（`plugins/ocr/`）提供唯一的 agent 工具 `ocr.extract`，并在每种 shell 中接入。本指南说明插件工具如何调用 OCR，以及如何从其他插件调用斜杠命令。
 
 ## 工具面
 
@@ -92,8 +92,7 @@ Tauri 构建可通过 Cargo feature 选择原生 OCR 引擎：
 | `ocr-tesseract` | 通过 `tesseract-rs` crate 的跨平台 Tesseract。                               |
 | `ocr-windows`   | 通过 `winocr` crate 的 `Windows.Media.Ocr`。需要 MSIX 构建。                  |
 
-Apple Vision 无需 feature 标志：目标平台为 macOS 时，`apple-vision` 后端通过
-`objc2-vision` 绑定在进程内直接调用 Vision.framework。
+Apple Vision 无需 feature 标志：目标平台为 macOS 时，`apple-vision` 后端通过 `objc2-vision` 绑定在进程内直接调用 Vision.framework。
 
 未启用这些 feature 时，注册表广告占位后端，上报 `MissingBinding`。TS 层把它显示为 `unsupported_shell`，auto-router 跌穿到下一个候选。
 

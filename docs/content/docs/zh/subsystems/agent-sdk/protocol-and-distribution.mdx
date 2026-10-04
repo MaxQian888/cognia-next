@@ -5,11 +5,11 @@ description: 握手、资源限制、可观测性、包结构与发布验证。
 
 # 协议、安全与分发
 
-协议 v2 是通过 stdin/stdout 上的换行分隔 UTF-8 JSON 承载的双向 JSON-RPC 2.0。客户端发送 `initialize`，host 选择 v2 并返回版本、方法、能力、限制和 instance ID，随后客户端发送 `initialized`。在此状态转换前的调用会失败。stderr 只用于诊断，绝不承载协议 frame。
+协议 v2 是通过 stdin/stdout 上的换行分隔 UTF-8 JSON 承载的双向 JSON-RPC 2.0。客户端发送 `initialize`。宿主选择 v2 并返回版本、方法、能力、限制和实例 ID。随后客户端发送 `initialized`。在此状态转换前的调用会失败。stderr 只用于诊断，绝不承载协议帧。
 
-运行时 schema 使用 Valibot 定义，TypeScript method 类型从同一映射推导。Frame、重放页、打开 session、活动 turn 与 outbound buffer 都有硬限制。无效 frame 和未知方法返回稳定 JSON-RPC error。outbound buffer 超限时会关闭 peer，而不是让内存无界增长。
+运行时 schema 使用 Valibot 定义，TypeScript method 类型从同一映射推导。协议帧、重放页、打开的会话、活动回合与出站缓冲区都有硬限制。无效协议帧和未知方法返回稳定的 JSON-RPC 错误。出站缓冲区超限时会关闭对端，避免内存无界增长。
 
-Audit 行只包含方法、session identity、耗时、结果和 error code；不记录 prompt 或工具 payload。本地 JSONL 文件在 10 MiB 时轮换。`trace/subscribe` 流式发送相同的脱敏投影，`trace/export` 返回 JSON span。高基数 identity 留在 trace/audit 数据中，不作为 metric label。
+审计行只包含方法、会话身份、耗时、结果和错误码，不记录提示词或工具载荷。本地 JSONL 文件在 10 MiB 时轮换。`trace/subscribe` 流式发送相同的脱敏投影，`trace/export` 返回 JSON span。高基数 identity 留在 trace/audit 数据中，不作为 metric label。
 
 SDK 为 Node 20.19 及以上版本提供 ESM、CommonJS、declaration 和 source map。平台包包含现有原生 CLI 构建的产物：
 

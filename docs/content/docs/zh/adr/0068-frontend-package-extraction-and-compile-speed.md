@@ -1,6 +1,6 @@
 ---
 title: "ADR-0068 — 前端包拆分、编译提速与结构优化计划"
-description: "主应用是一个平坦编译单元（单一TSCONFIG程序，单一Next.js图）中包含~873k LOC非测试TypeScript。这ADR记录了研究结论——前端已经高度优化（pixi 单文件别名、runtime-AMD Monaco、所有重库动态导入、自我调优的 Jest），所以剩下的优势是结构性的：冗余的内置 tsc、未缓存的 CI 类型检查、`lib/` 几乎完全没有包边界，以及少数属于组织（而非逻辑）的“神文件”。它提出了一组排名化的零重构编译速度优势（去掉冗余的构建时 tsc、缓存 tsbuildinfo、推迟重度布局初始化器）、一个叶优先`@cognia/*`提取阶梯，镜像既有的源包模式（从 `@cognia/redact` 开始，到750 consumer `@cognia/agent-config-types`编译边界），以及利用树中已有的模式对域对称的 forms/executor god-file 工作流程分解。"
+description: "主应用是一个平坦编译单元（单一 tsconfig 程序，单一Next.js图）中包含~873k LOC非测试TypeScript。这ADR记录了研究结论——前端已经高度优化（pixi 单文件别名、runtime-AMD Monaco、所有重库动态导入、自我调优的 Jest），所以剩下的优势是结构性的：冗余的内置 tsc、未缓存的 CI 类型检查、`lib/` 几乎完全没有包边界，以及少数因组织方式而非逻辑耦合形成的「大型文件」。它提出了一组按优先级排序且无需重构的编译提速措施（去掉冗余的构建时 tsc、缓存 tsbuildinfo、推迟重度布局初始化器）、一个叶优先`@cognia/*`提取阶梯，镜像既有的源包模式（从 `@cognia/redact` 开始，到750 consumer `@cognia/agent-config-types`编译边界），以及利用树中已有的模式按领域拆分 forms/executor 大型工作流文件。"
 ---
 
 # ADR-0068 — 前端包拆分、编译提速与结构优化计划
@@ -31,7 +31,7 @@ description: "主应用是一个平坦编译单元（单一TSCONFIG程序，单�
 
 有三个结构性事实（测量而非假设）使开采风险异常低：
 
-**1.提取模板是一个三文件、零构建移动。** 14个包中有13个没有构建步骤：`package.json`点`main`/`types`在`./src/index.ts`，`exports`映射显示`"cognia-source"`条件+`"default"`，均为原始`.ts`。分辨率精确布线在三个地方——`tsconfig.json` `paths`（`:25-53`）、`jest.config.ts` `moduleNameMapper`（`:130-144`）和`pnpm-workspace.yaml`。因此添加一个包是有成本的：创建`packages/xyz/{package.json,tsconfig.json,src/}` →添加一个`paths`别名→添加一行`moduleNameMapper`→重写导入网站。`next.config.ts`从未提及`@cognia`（Next是从`tsconfig`原生解决了别名），所以那里没什么可触碰的。只有`provider-types`（叶子最多的）也`tsup`-builds `dist/`，并且仅仅证明它能独立编译。
+**1. 提取模板只迁移三个文件，不新增构建步骤。** 14 个包中有 13 个没有构建步骤：`package.json` 将 `main`/`types` 指向 `./src/index.ts`，`exports`映射显示`"cognia-source"`条件+`"default"`，均为原始`.ts`。模块解析配置位于三个地方——`tsconfig.json` `paths`（`:25-53`）、`jest.config.ts` `moduleNameMapper`（`:130-144`）和`pnpm-workspace.yaml`。因此添加一个包是有成本的：创建`packages/xyz/{package.json,tsconfig.json,src/}` →添加一个`paths`别名→添加一行`moduleNameMapper`→修改导入位置。`next.config.ts`从未提及`@cognia`（Next是从`tsconfig`原生解决了别名），所以那里没什么可触碰的。只有`provider-types`（依赖最少的底层包）还使用 `tsup` 构建 `dist/`，仅用于证明它可以独立编译。
 
 **2.跨壳耦合已经存在——_want_ `@/`边界的深度。** 独立CLI（`cli/src`，存在于主TS程序中以便可重用应用逻辑）通过`@/…`别名导入应用内部文件：**`@/lib/claude` 188×**、`@/lib/db` 32×、`@/lib/ai` 28×、`@/lib/plugin` 24×、`@/lib/workflow` 13×。这些不是偶然——它们是稳定依赖，如今没有包边界，因此每次应用端对`lib/claude/*`的编辑都会使CLI的类型图失效。
 

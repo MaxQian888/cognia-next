@@ -5,7 +5,7 @@ description: ChatPane 主面板、Composer 输入器、消息渲染流水线、a
 
 # 聊天 UI 架构
 
-聊天界面是 cognia-next 最核心的视觉表达。它把 Claude Agent SDK 的流式输出、工具调用、reasoning trace、子代理任务、A2UI 表单、artifact 沙箱、画板等多种"消息部件"统一渲染成可滚动、可编辑、可重发的对话流。
+聊天界面将 Claude Agent SDK 的流式输出、工具调用、推理轨迹、子代理任务、A2UI 表单、artifact 沙箱和画板等消息部件，统一渲染为可滚动、可编辑、可重发的对话流。
 
 本页讲清楚组件分层、消息渲染流水线、Composer 行为，以及桌面壳与移动壳如何复用同一个 `ChatPane`。
 

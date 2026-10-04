@@ -27,8 +27,8 @@ The cloud paths were effectively dead code: shipped, included in
 
 Port the five cloud backend implementations from TypeScript to Rust
 under `src-tauri/src/vector/backends/`. Use one shared async trait
-(`VectorBackend`) so each backend exposes the same operation surface;
-dispatch through a per-`configId` `Arc<dyn VectorBackend>` cache
+(`VectorBackend`) so each backend exposes the same operations.
+Dispatch through a per-`configId` `Arc<dyn VectorBackend>` cache
 (`VectorRegistry`) constructed lazily from OS-keyring-stored credentials.
 
 The native sqlite-vec backend continues to use its existing

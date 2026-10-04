@@ -8,7 +8,7 @@ description: The declarative truth layer that states what a plugin may contribut
 <Status variant="experimental" />
 
 <TLDR>
-`lib/plugin/contracts/` is the declarative truth layer: `plugin-points.ts` and `plugin-capabilities.ts` catalog every extension point and capability with binding/docs/requiredTests proof fields, `capability-bridge-map.ts` and `module-bridge-map.ts` wire manifest fields to registries/bridges, and `runtime-proof-audit.ts` asserts every "implemented" surface has evidence. `lib/plugin/registries/` are typed overlay-registry stores (builtin ← plugin overlay, deduped by id); `packages/plugin-sdk/src/define/` contains the pure `define*()` type pass-throughs surfaced through the `@cognia/plugin-sdk` package root.
+`lib/plugin/contracts/` is the authoritative declarative layer: `plugin-points.ts` and `plugin-capabilities.ts` catalog every extension point and capability with binding/docs/requiredTests proof fields, `capability-bridge-map.ts` and `module-bridge-map.ts` wire manifest fields to registries/bridges, and `runtime-proof-audit.ts` asserts every "implemented" surface has evidence. `lib/plugin/registries/` are typed overlay-registry stores (builtin ← plugin overlay, deduped by id); `packages/plugin-sdk/src/define/` contains the pure `define*()` type pass-throughs surfaced through the `@cognia/plugin-sdk` package root.
 </TLDR>
 
 <StatGrid>
@@ -130,6 +130,7 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 | `command-safety-registry.ts` | `ToolRules` per pluginId (plain, merge) | (none — `ctx.terminal` imperative) | `registerPluginCommandRules :30`, `getPluginCommandRulesets :48` |
 | `pet-achievement-registry.ts` | `PluginPetAchievementDef` (plain, data-only condition DSL) | (manifest `petAchievements`) | `registerPetAchievement`, `compilePluginAchievement`, `listCompiledPluginAchievements` |
 | `pet-item-registry.ts` | `PluginPetItemDef` (plain, data-only) | (manifest `petItems`) | `registerPetItem`, `projectPluginItem`, `listProjectedPluginItems` |
+| `../pi-packages/registry.ts` (ADR-0210) | `PluginPiPackageDef` + install root (plain, keyed `<pluginId>/<id>`) | `definePiPackage` | `registerContributedPiPackage`, `listContributedPiPackages`, `getContributedPiPackage`; paths resolved by `resolveContributedPiPackage` |
 | `createOverlayRegistry.ts` | factory — substrate | — | `createOverlayRegistry :144` |
 | `createValidatingOverlayRegistry.ts` | factory — requires-warning wrapper | — | `createValidatingOverlayRegistry :63` |
 

@@ -1,6 +1,6 @@
 ---
 title: "0189 — A plugin says which of four things it is doing"
-description: "The plugin surface answered every participation request with the same shape — a function on a bag of hooks — so the host could not tell an observer apart from something that rewrites a request, vetoes it, or wraps a whole execution. Four semantics (observe / transform / guard / around) get one registry, one ordering rule, one liveness rule and one dispatcher, with next-at-most-once and a declared failure policy per point. Fixes a chat-middleware path that sent two model requests for one turn, a plugin write that ignored its addressed session, and a transport that guessed retry-safety from method names."
+description: "Defines four plugin participation semantics: observe / transform / guard / around. They share one registry, ordering rule, liveness rule and dispatcher. Each point declares a failure policy and permits next at most once. Fixes duplicate model requests from chat middleware, plugin writes that ignored the addressed session, and retry-safety decisions based on transport method names."
 ---
 
 # ADR 0189 — A plugin says which of four things it is doing
@@ -86,9 +86,9 @@ install provenance (`Plugin.source`), never from the manifest — a plugin that
 could name its own tier would name the highest one, and tier decides who sees
 and rewrites a payload first. The DAG is Kahn's algorithm over a queue kept in
 tier/priority order, so that intent survives wherever the graph does not
-contradict it. A dangling `after: ["not-installed"]` or a cycle drops the
-offending **edges** and keeps every registration, with a diagnostic: one
-author's typo must not take a point offline for every other plugin on it.
+contradict it. A dangling `after: ["not-installed"]` or a cycle removes the
+offending **edges** but retains every registration and produces a diagnostic.
+One author's typo must not disable the point for other plugins.
 
 Liveness is `isPluginHooksEnabled`, extracted to a leaf module both registries
 import. Only the pure ordering is cached; enablement is re-read on every

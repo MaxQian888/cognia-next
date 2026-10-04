@@ -1,6 +1,6 @@
 ---
 title: 作者与 SDK
-description: 公共 manifest、Code 1.128 catalog、provider、协议与确定性代理生成。
+description: 公共 manifest、Code 1.128 目录、provider、协议与确定性代理生成。
 ---
 
 # 作者与 SDK
@@ -23,42 +23,19 @@ ide: {
 }
 ```
 
-生成器把 Code 1.128 的实时 extension schema 及全部引用 schema 锁定在
-`packages/plugin-sdk/contract/code-1.128-contribution-schemas.json`，生成前会
-核对精确 upstream digest 与 provenance。生成的 `code-1.128-ide.json`
-catalog hash 同时参与 broker negotiation 与 proxy activation。公共 JSON
-Schema 自包含，不含外部引用。
+生成器把 Code 1.128 的实时 extension schema 及全部引用 schema 锁定在 `packages/plugin-sdk/contract/code-1.128-contribution-schemas.json`，生成前会核对精确的上游摘要与来源信息。生成的 `code-1.128-ide.json` catalog hash 同时参与 broker negotiation 与 proxy activation。公共 JSON Schema 自包含，不含外部引用。
 
-构建产出 TypeScript types/helpers、JSON Schema、engine-neutral IR、穷举
-conformance fixtures 与代理 contribution metadata。任何未分类 stable
-contribution/provider 都会使生成失败。旧 `vscode*` 作者字段只兼容一个 major，
-并产生字段级弃用诊断；SDK 只输出 `manifest.ide`。
+构建产出 TypeScript types/helpers、JSON Schema、engine-neutral IR、穷举 conformance fixtures 与代理 contribution metadata。任何未分类 stable contribution/provider 都会使生成失败。旧 `vscode*` 作者字段只兼容一个主版本，并产生字段级弃用诊断；SDK 只输出 `manifest.ide`。
 
-全局 ID 重写为 `cognia.<pluginId>.*`。Language model tool 例外：VS Code 会丢弃
-名称不匹配 `/^[\w-]+$/` 的 tool，因此名为 `inspect` 的 tool 变为
-`cognia_<pluginId>_inspect`（插件 ID 中的 `.` 替换为 `_`）。tool 名只能包含字母、
-数字、`_` 和 `-`，加上 namespace 后不得超过 64 个字符（模型 API 对函数名的上限）。
-重复、保留或被外部占用的 ID 会拒绝整次 activation transaction。静态资源必须是规范化的插件相对路径，插件不能提供
-extension entrypoint。
+全局 ID 重写为 `cognia.<pluginId>.*`。Language model tool 例外：VS Code 会丢弃名称不匹配 `/^[\w-]+$/` 的 tool，因此名为 `inspect` 的 tool 变为 `cognia_<pluginId>_inspect`（插件 ID 中的 `.` 替换为 `_`）。tool 名只能包含字母、数字、`_` 和 `-`，加上 namespace 后不得超过 64 个字符（模型 API 对函数名的上限）。重复、保留或被外部占用的 ID 会拒绝整次 activation transaction。静态资源必须是规范化的插件相对路径，插件不能提供 extension entrypoint。
 
-代理 VSIX 确定性且内容寻址。Ed25519 签名 descriptor 绑定 plugin id/version、
-manifest hash、platform version、catalog hash、executable resource hash 与
-VSIX digest。`codeserver_build_proxy` 只 stage artifact；
-`codeserver_activate_proxy` 在 live handshake 后提交。重启时以 activation
-marker 而非 artifact cache 为准。
+代理 VSIX 确定性且内容寻址。Ed25519 签名 descriptor 绑定 plugin id/version、manifest hash、platform version、catalog hash、executable resource hash 与 VSIX digest。`codeserver_build_proxy` 只 stage artifact；`codeserver_activate_proxy` 在 live handshake 后提交。重启时以 activation marker 而非 artifact cache 为准。
 
-稳定 provider 覆盖 language feature、virtual filesystem、view/tree/status、
-decoration、webview/custom editor、terminal/task/SCM、debug/test/notebook/comment、
-authentication、URI/storage、Chat participant、language-model tool、MCP definition
-以及锁定 catalog 中的全部稳定 contribution family。
+稳定 provider 覆盖 language feature、virtual filesystem、view/tree/status、decoration、webview/custom editor、terminal/task/SCM、debug/test/notebook/comment、authentication、URI/storage、Chat participant、language-model tool、MCP definition 以及锁定 catalog 中的全部稳定 contribution family。
 
 ## Provider handler
 
-每个 provider 指向插件唯一 Cognia runtime 中导出的 `handler`。broker 以
-`handler(operation, ...args)` 调用它：先是 operation，然后是序列化为 JSON 的
-VS Code 参数（`Uri` 为其组成部分，`TextDocument` 为
-`{ uri, languageId, version, isDirty }`，字节为 content handle）。返回值同样
-以 JSON 返回，由 broker 转换为 VS Code 值。
+每个 provider 指向插件唯一 Cognia runtime 中导出的 `handler`。broker 以 `handler(operation, ...args)` 调用它：先是 operation，然后是序列化为 JSON 的 VS Code 参数（`Uri` 为其组成部分，`TextDocument` 为 `{ uri, languageId, version, isDirty }`，字节为 content handle）。返回值同样以 JSON 返回，由 broker 转换为 VS Code 值。
 
 | 家族 | Operation |
 | --- | --- |
@@ -74,10 +51,6 @@ VS Code 参数（`Uri` 为其组成部分，`TextDocument` 为
 | `language-model-tool` | `prepare`、`invoke`（返回 `{ content: [带类型的 part] }`） |
 | `file-system` | `stat`、`readDirectory`、`readFile`、`writeFile`、`createDirectory`、`delete`、`rename`、`copy` |
 
-selector 或 language server 若引用插件自己的语言，会被指向其 namespace 后的 ID；
-`typescript` 等内置 ID 保持不变。language server 只获得其 `initialize`
-capabilities 声明的 VS Code 特性，并使用它自己的 trigger character。
+selector 或 language server 若引用插件自己的语言，会被指向其 namespace 后的 ID；`typescript` 等内置 ID 保持不变。language server 只获得其 `initialize` capabilities 声明的 VS Code 特性，并使用它自己的 trigger character。
 
-`plugins/pro-ide-fixture` 为上表每个家族各声明一个 provider，是这些形状的参考
-实现。`pnpm test:pro-ide:e2e` 通过真实 code-server 驱动它，
-`pnpm audit:pro-ide-perf` 用该次运行检查性能门禁。
+`plugins/pro-ide-fixture` 为上表每个家族各声明一个 provider，是这些形状的参考实现。`pnpm test:pro-ide:e2e` 通过真实 code-server 驱动它，`pnpm audit:pro-ide-perf` 用该次运行检查性能门禁。

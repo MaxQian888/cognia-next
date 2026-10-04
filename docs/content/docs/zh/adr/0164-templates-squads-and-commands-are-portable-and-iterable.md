@@ -1,6 +1,6 @@
 ---
 title: "0164：模板、小队与命令可携带、可迭代"
-description: "小队记得自己来自哪个模板，会话模板成为一等的可携带产物，插件可以迭代自己拥有的模板与命令，分享在既有平台上分成三层（链接、签名包、受信发布者）。"
+description: "小队记录来源模板，会话模板成为可携带产物，插件可以迭代自己拥有的模板与命令。分享通过既有平台提供链接、签名包和受信发布者三层机制。"
 ---
 
 # ADR 0164：模板、小队与命令可携带、可迭代
@@ -25,7 +25,7 @@ description: "小队记得自己来自哪个模板，会话模板成为一等的
 
 2. **会话模板是仅目录域，也是可携带文件。** 写入方仍是 `lib/db/chat-templates.ts`，目录只做投影，并通过订阅在每次写入后重新投影，因为模板是在输入框里保存的，离展示它的界面只有一次按键。可携带形式就是仓库读取器已经解析的那种 frontmatter markdown。导出不降权，由读取器对「作者不是你选的」文件收回能力。该表加入伴侣同步（带墓碑）、备份与按域传输，内容等级为 `encrypted-content`。
 
-3. **插件迭代自己拥有的东西。** `ctx.templates` 新增 `saveDraft`、`publish`、`fork`、`deprecate`、`deleteDraft`、`exportPackage`、`importPackage`，全部位于 `templates:library:write`、与 `createDraft` 相同的确认代理，以及基于 `provenance.pluginId` 的所有权检查之后。provenance 在内容哈希之外，盖章不会改变包校验的任何内容。`ctx.team.saveAsTemplate` 同时要求两个权限。`ctx.commands` 在运行期注册斜杠命令，命名空间与清单路径一致，跨插件先到先得，并在 `commands:read`、`commands:write` 之后读写自定义 `.md` 命令。`onCommand` 先派发给拥有者插件。桌面扫描器像 CLI 一样读取 `.cognia/commands`。项目范围的命令走配对浏览器或手机已有的工作区文件传输，全局范围仍只在宿主可用并如实说明。
+3. **插件迭代自己拥有的东西。** `ctx.templates` 新增 `saveDraft`、`publish`、`fork`、`deprecate`、`deleteDraft`、`exportPackage`、`importPackage`，全部位于 `templates:library:write`、与 `createDraft` 相同的确认代理，以及基于 `provenance.pluginId` 的所有权检查之后。provenance 在内容哈希之外，写入 provenance 不会改变包校验内容。`ctx.team.saveAsTemplate` 同时要求两个权限。`ctx.commands` 在运行期注册斜杠命令，命名空间与清单路径一致，跨插件先到先得，并在 `commands:read`、`commands:write` 之后读写自定义 `.md` 命令。`onCommand` 先派发给拥有者插件。桌面扫描器像 CLI 一样读取 `.cognia/commands`。项目范围的命令走配对浏览器或手机已有的工作区文件传输，全局范围仍只在宿主可用并如实说明。
 
 4. **分享在既有管线上分三层。** 两种分享类型：`template-definition` 携带已发布版本，对端可校验哈希，分享者的本地 provenance 被中性化；`chat-template` 携带正文、参数与启动配置，出站与入站各降权一次。在应用内，查看器提供「加入我的库」，走解析信任并盖章 provenance 的同一条包导入路径。发布者身份是宿主中立密钥环里的 Ed25519 密钥，指纹算法与插件安装器一致，因此模板发布者与插件发布者在信任账本里是同一行。有密钥后导出默认签名，导入可以信任签名者，包也可以在出站防护之后从 URL 导入。
 

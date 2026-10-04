@@ -1,6 +1,6 @@
 ---
 title: "ADR-0118: Keyless deterministic model-request replay"
-description: "Record the real request surface once, replay agent runs with no API key"
+description: "Record the actual request surface once. Replay agent runs without an API key."
 ---
 
 # ADR-0118: Keyless deterministic model-request replay
@@ -77,9 +77,9 @@ Claude Agent SDK is implemented first, by extending the existing localhost mock
 harness with a permissionless placeholder token that satisfies the SDK's
 argument validation without being a credential and without any outbound
 request. AI SDK follows with a local provider adapter. External and ACP agents
-use a scripted peer; when an external agent does not expose its internal model
-requests, only the wire protocol and canonical events are captured, and the
-report declares the reduced fidelity rather than claiming a full snapshot.
+use a scripted peer. If an external agent does not expose its internal model
+requests, capture includes only the wire protocol and canonical events. The
+report states this fidelity limit instead of claiming a full snapshot.
 Browsers support canonical replay only; runtime replay requires a Tauri or
 headless host and states that reason when unavailable.
 

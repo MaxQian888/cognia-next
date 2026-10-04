@@ -1,6 +1,6 @@
 ---
 title: "0203 — External Bridge workspace, git and shell tools"
-description: "Local MCP clients get bounded dev-machine primitives over the loopback External Bridge: file listing/reading/searching/writing, git reads and supervised shell jobs over workspace roots granted per client, plus a model-facing result vocabulary (pending/continuation, decision-complete failures, clamped inputs, job attention) and tool-owned audit projections. Studied from WebCodex; nothing vendored."
+description: "Gives local MCP clients bounded development-machine operations through the loopback External Bridge. Provides file listing, reading, searching and writing, git reads, and supervised shell jobs within workspace roots granted per client. Model-facing results describe pending work and continuation, decision-complete failures, clamped inputs and jobs needing attention. Each tool owns its audit projection. The design was studied from WebCodex. No code was vendored."
 ---
 
 # ADR 0203 — External Bridge workspace, git and shell tools
@@ -83,9 +83,9 @@ with the user's own permissions.
 user in-app on every call through the consent broker (grants cleared before and
 after, so "always allow" never carries over). Every delete asks the same way.
 File content, match lines, diffs, commit text and job output are PII-redacted
-and the result must then pass `hasNoLeakingPiiDeep`. A write or edit whose text
-carries a redaction placeholder is refused, so a redacted read can never be
-written back over the real text. Author e-mail is dropped from git logs.
+and the result must then pass `hasNoLeakingPiiDeep`. A write or edit is refused if its text
+contains a redaction placeholder. This prevents a redacted read from
+overwriting the original text. Author e-mail is dropped from git logs.
 
 ### Model-facing result vocabulary (`lib/external-bridge/tool-result.ts`)
 

@@ -43,7 +43,7 @@ description: "记录了自主长期记忆子系统（Dexie v65 + v118治理、�
 
 ### 5. 伴侣 RPC — 五`/_rpc/memory_*` 命令
 
-所有路线都经过desktop_writes_bridge `lib/companion/desktop-write-source.ts`臂（`sourceChannel: "rpc"`）。分类：`memory_store`/`memory_update`/`memory_forget`是`CONTROL_COMMANDS`（波4.1政策——强接口的每一次远程突变都被封锁）;`memory_list`是`READ_ONLY_COMMANDS`;**`memory_search` 故意都不是** ——它会撞`lastAccessedAt`/`accessCount`（新近信号），所以用幂零缓存它会冻结衰变。移动面板通过持久`MOBILE_OUTBOUND_COMMANDS`队列发送`memory_update`和`memory_forget`，然后在enqueue成功后乐观地更新本地镜像。桌面保持权威，重新应用PII、治理、审计和向量生命周期规则。
+所有调用都经过 desktop_writes_bridge `lib/companion/desktop-write-source.ts`臂（`sourceChannel: "rpc"`）。分类：`memory_store`/`memory_update`/`memory_forget`是`CONTROL_COMMANDS`（波4.1政策——高权限接口的每次远程修改都受门禁控制）;`memory_list`是`READ_ONLY_COMMANDS`;**`memory_search` 故意都不是** ——它会更新 `lastAccessedAt`/`accessCount`（近期访问信号），因此幂等缓存会阻止该信号更新。移动面板通过持久`MOBILE_OUTBOUND_COMMANDS`队列发送`memory_update`和`memory_forget`，然后在enqueue成功后乐观地更新本地镜像。桌面端仍为权威来源，并重新应用 PII、治理、审计与向量生命周期规则。
 
 ### 6. `/memory`管理命令
 

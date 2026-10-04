@@ -1,13 +1,11 @@
 ---
 title: "0199 — 智能体变体跟随其基础智能体"
-description: "同一个智能体的多套配置，过去只能靠多份互不关联的副本：把审查员复制成一个严格版，其余所有字段都被冻结，此后修正原版的提示词或添加技能都不会同步到副本。本 ADR 引入变体：一个关联到基础智能体的 Character，只拥有它改过的配置字段，其余字段跟随基础智能体；同时允许工作区指定新会话默认使用的智能体（或变体）。"
+description: "智能体配置此前使用互不关联的副本，复制后无法同步原版提示词和技能变化。引入关联基础智能体的 Character 变体，仅覆盖改动字段，其余字段继承基础智能体。工作区可指定新会话默认使用的智能体或变体。"
 ---
 
 # ADR 0199 — 智能体变体跟随其基础智能体
 
-**状态：** 已接受
-**日期：** 2026-09-27
-**相关：** [ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched)（单次运行授予）、[ADR-0161](./0161-agent-identity-runtime-and-host)（身份与运行时）、[ADR-0030](./0030-character-pack-overlay-capability)（插件角色包及其克隆）、[ADR-0144](./0144-workspace-as-the-unit-of-work)（工作区）
+**状态：** 已接受**日期：** 2026-09-27 **相关：** [ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched)（单次运行授予）、[ADR-0161](./0161-agent-identity-runtime-and-host)（身份与运行时）、[ADR-0030](./0030-character-pack-overlay-capability)（插件角色包及其克隆）、[ADR-0144](./0144-workspace-as-the-unit-of-work)（工作区）
 
 ## 背景
 
@@ -43,7 +41,7 @@ description: "同一个智能体的多套配置，过去只能靠多份互不关
 
 ### 队友可以以已保存的智能体运行
 
-团队成员解析出的 `characterPackIds`（智能体 id：用户智能体、变体或插件角色包角色）指定它以哪个智能体运行。`dispatchTeammate` 通过 `resolveCharacterById` 解析第一个 id，因此变体会带着覆盖结果到达；`teammateToCharacter` 以该配置为起点，知识库、记忆策略、输出风格等都来自该智能体。队友自己的提示词、模型、提供商和工具会覆盖它，团队的 MCP 服务器和技能会叠加到智能体自己的配置上。无法解析的 id 会让派发失败，而不是以通用队友运行。
+团队成员解析出的 `characterPackIds`（智能体 id：用户智能体、变体或插件角色包角色）指定它以哪个智能体运行。`dispatchTeammate` 通过 `resolveCharacterById` 解析第一个 id，因此变体会带着覆盖结果到达；`teammateToCharacter` 以该配置为起点，知识库、记忆策略、输出风格等都来自该智能体。队友自己的提示词、模型、提供商和工具会覆盖它，团队的 MCP 服务器和技能会叠加到智能体自己的配置上。无法解析 id 时，派发失败，不会替换为通用队友。
 
 ### 工作区指定默认智能体
 

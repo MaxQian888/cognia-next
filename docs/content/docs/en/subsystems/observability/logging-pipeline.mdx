@@ -8,7 +8,7 @@ description: The browser-side unified logging core in lib/logging — createLogg
 <Status variant="stable" />
 
 <TLDR>
-  Every browser-side log goes through one funnel. `createLogger("module")`
+  Every browser-side log uses one pipeline. `createLogger("module")`
   (`lib/logging/core.ts:713`) returns a `CoreLogger`; calling `.info/.warn/.error/...` reaches the
   private hot path `CoreLogger.log` (`core.ts:404`), which: (1) gates on `minLevel` via
   `LEVEL_PRIORITY`, (2) asks `logSampler.shouldLog` (errors/fatals always pass), (3) merges the
@@ -16,7 +16,7 @@ description: The browser-side unified logging core in lib/logging — createLogg
   `StructuredLogEntry`, (5) `normalizeEntry` (Dates→ISO, Errors→plain), (6)
   `redactStructuredLogEntry`, (7) `dispatchEntry` fans out to every registered transport with
   per-transport try/catch isolation. The default `logger` and 25 pre-made `loggers.*` modules all
-  share this funnel — `createLogger` only tags the `module` label.
+  share this pipeline — `createLogger` only tags the `module` label.
 </TLDR>
 
 <StatGrid>
@@ -82,7 +82,7 @@ fatal:5 }`; every `minLevel` comparison and the recent-error filter rely on it.
 
 ## The Hot Path
 
-`CoreLogger.log` (`core.ts:404`) is the funnel every entry passes through:
+`CoreLogger.log` (`core.ts:404`) is the pipeline every entry passes through:
 
 ```mermaid
 flowchart TB

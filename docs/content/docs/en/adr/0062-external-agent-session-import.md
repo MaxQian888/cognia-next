@@ -73,7 +73,7 @@ Re-import uses a digest over message contents, parts, tool state, relationships,
 `source-mirror` follows rewinds and removals, tombstones vanished children, and preserves local
 decoration. Continuing in Cognia changes ownership to `cognia-owned`. Native resume requires an existing
 matching preset, a connected executable runtime, live-verified `session/resume`, an existing cwd, and a
-successful handshake; only then is the session marked `native-bound` and the verified native id reused
+successful handshake. Only then is the session marked `native-bound` and the verified native id reused
 for execution. No presets, credentials, or commands are created automatically.
 
 Cursor cloud/background history and every source without a stable public format (including Kiro, Droid,

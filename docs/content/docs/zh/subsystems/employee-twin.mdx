@@ -4,14 +4,14 @@ description: 把文档、聊天、代码蒸馏成可对话的孪生，发送时�
 ---
 
 # 员工数字孪生
-**员工数字孪生** 是 Cognia 最深的定制化层。它把用户的文档、聊天导出与代码蒸馏成：
+**员工数字孪生** 是 Cognia 定制程度最高的功能层。它把用户的文档、聊天导出与代码蒸馏成：
 
 - **知识索引（RAG）** —— 发送时检索相关片段。
 - **风格画像** —— 在少样本提示中复现用户的语气。
 - **Playbook 库** —— 重复的工作模式（由蒸馏 agent 抽取）。
 - **角色 + 技能草稿** —— 自动合成，进入待用户审核队列。
 
-本页概述实现，完整设计原由参见 [ADR-0003](../adr/0003-employee-digital-twin)。
+本页概述实现，完整设计依据参见 [ADR-0003](../adr/0003-employee-digital-twin)。
 
 ## 代码位置
 
@@ -66,11 +66,7 @@ lib/db/twin-*.ts # 5 张 Dexie 表（schema v14 加入）
   }}
 />
 
-多个角色可以共享一个孪生（例如"个人"孪生与"工作"孪生都绑到同一个用户角色）。一个 Dexie 数据库里可同时存在多个孪生。
-孪生的嵌入模型属于**孪生**而非角色：默认使用全局 `TwinRuntimeSettings.embedding`，也可以在 `Twin.embedding`
-上为单个孪生覆盖（provider + 可选 model）。导入会在 `Twin.embeddingIndex` 记录构建索引的
-`provider::model::dimensions` 指纹；检索发现生效模型与记录不一致时以 `rebuild-required` 跳过孪生 RAG，
-工作台可一键重建索引。细节见 [vector-store](../data/vector-store)「孪生的嵌入模型与索引指纹」。
+多个角色可以共享一个孪生（例如"个人"孪生与"工作"孪生都绑到同一个用户角色）。一个 Dexie 数据库里可同时存在多个孪生。孪生的嵌入模型属于**孪生**而非角色：默认使用全局 `TwinRuntimeSettings.embedding`，也可以在 `Twin.embedding` 上为单个孪生覆盖（provider + 可选 model）。导入会在 `Twin.embeddingIndex` 记录构建索引的 `provider::model::dimensions` 指纹；检索发现生效模型与记录不一致时以 `rebuild-required` 跳过孪生 RAG，工作台可一键重建索引。细节见 [vector-store](../data/vector-store)「孪生的嵌入模型与索引指纹」。
 
 ## Ingest 流水线（7 阶段）
 
@@ -106,8 +102,7 @@ flowchart LR
 
 ### 1. dispatch
 
-根据 `TwinSource.format` 决定下游 parser。支持格式：`markdown`、`text`、`json`、`code`、`chat-export`、
-`html`、`pdf`、`office`。代码：`dispatch.ts`。详见 [document-processing](../data/document-processing)。
+根据 `TwinSource.format` 决定下游 parser。支持格式：`markdown`、`text`、`json`、`code`、`chat-export`、`html`、`pdf`、`office`。代码：`dispatch.ts`。详见 [document-processing](../data/document-processing)。
 
 ### 2. parse
 
@@ -157,13 +152,11 @@ flowchart LR
   class MD,CODE,PARA,Hash step
 ```
 
-稳定哈希驱动重复 ingest 的去重 —— chunk 内容相同 → 哈希相同 → 不会产生重复行。
-chunker 与 distill 共享同一份 `lib/twin/ingest/chunk.ts:prepareChunks`（wiki 索引器也复用它）。
+稳定哈希驱动重复 ingest 的去重 —— chunk 内容相同 → 哈希相同 → 不会产生重复行。chunker 与 distill 共享同一份 `lib/twin/ingest/chunk.ts:prepareChunks`（wiki 索引器也复用它）。
 
 ### 5. embed
 
-`lib/ai/embedding/embedding.ts` 是嵌入客户端，按 `TwinRuntimeEmbeddingConfig` 调任意支持的供应商（openai /
-google / cohere / mistral / transformersjs）。批量 100 一组嵌入，限流时重试。
+`lib/ai/embedding/embedding.ts` 是嵌入客户端，按 `TwinRuntimeEmbeddingConfig` 调任意支持的供应商（openai /google / cohere / mistral / transformersjs）。批量 100 一组嵌入，限流时重试。
 
 ### 6. persist
 
@@ -172,8 +165,7 @@ google / cohere / mistral / transformersjs）。批量 100 一组嵌入，限流
 - 本地 —— `twinChunks` Dexie 表（chunk + 元数据 + `vectorDocId`）。
 - 远程 —— 当前向量后端（`lib/vector/`，详见 [vector-store](../data/vector-store)），collection 名 `cognia_twin_{twinId}`。
 
-每条 chunk 同时记录 `vectorBackend` 与 `vectorCollection`，便于将来 re-host：迭代表行即可重放向量，无需重 embed。
-远程写失败时，chunk 仍在本地存好，由 job worker 重试。
+每条 chunk 同时记录 `vectorBackend` 与 `vectorCollection`，便于将来 re-host：迭代表行即可重放向量，无需重 embed。远程写失败时，chunk 仍在本地存好，由 job worker 重试。
 
 ### 7. finalize
 
@@ -183,8 +175,7 @@ google / cohere / mistral / transformersjs）。批量 100 一组嵌入，限流
 
 ## Distill 流水线（5 个 agent）
 
-实现：`lib/twin/distill/orchestrator.ts`。每个 agent 都通过 `LlmClient` 接口（`llm.ts`），生产环境绑
-`createAnthropicLlmClient`，测试用 mock。
+实现：`lib/twin/distill/orchestrator.ts`。每个 agent 都通过 `LlmClient` 接口（`llm.ts`），生产环境绑 `createAnthropicLlmClient`，测试用 mock。
 
 ```mermaid
 flowchart TB
@@ -217,13 +208,11 @@ flowchart TB
 
 ### KnowledgeAgent
 
-按 100 chunk 一批遍历，抽取实体（人物、项目、术语、决策）。输出：以规范名为键的实体词典 +
-`chunkId → entityName[]` 反向映射（写入 `twinChunks.entityTags`，供过滤搜索使用）。
+按 100 chunk 一批遍历，抽取实体（人物、项目、术语、决策）。输出：以规范名为键的实体词典 +`chunkId → entityName[]` 反向映射（写入 `twinChunks.entityTags`，供过滤搜索使用）。
 
 ### StyleAgent
 
-单次调用，取 60 chunk 的代表性样本，抽取代表性写作样本——短、中、长形式——保留用户语气。输出：
-`StyleSample[]`，存入 `twinProfile.styleSamples`。
+单次调用，取 60 chunk 的代表性样本，抽取代表性写作样本——短、中、长形式——保留用户语气。输出：`StyleSample[]`，存入 `twinProfile.styleSamples`。
 
 ### PlaybookAgent
 
@@ -240,8 +229,7 @@ flowchart TB
 
 ### Evaluator
 
-从"新人视角"审阅草稿 —— 一位同事是否能理解这个角色的意图与风格？输出 `qualityScore`，加上 `concerns` 与
-`suggestions` 数组，按 draft 的占位 id 索引。在 Drafts tab 展示。
+从"新人视角"审阅草稿 —— 一位同事是否能理解这个角色的意图与风格？输出 `qualityScore`，加上 `concerns` 与 `suggestions` 数组，按 draft 的占位 id 索引。在 Drafts tab 展示。
 
 ## Runtime（发送时）
 
@@ -343,9 +331,7 @@ flowchart TB
 
 ### Team chat embedding 共享
 
-Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.precomputedQueryEmbedding` 共享一次 embed
-调用 —— team runtime 在第一个 member 之前先嵌入一次，然后把向量传给后续所有 member 的
-`resolveSendOptions`，runtime 内部跳过 `generateEmbedding`。详见 [agent-teams](../chat/agent-teams)。
+Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.precomputedQueryEmbedding` 共享一次 embed 调用 —— team runtime 在第一个 member 之前先嵌入一次，然后把向量传给后续所有 member 的 `resolveSendOptions`，runtime 内部跳过 `generateEmbedding`。详见 [agent-teams](../chat/agent-teams)。
 
 少样本选择器（`few-shot-selector.ts`）按主题相似度排名，而非仅看语气，使提示更聚焦。
 
@@ -369,11 +355,8 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
 - 新任务一旦 worker 空闲就处理。
 - 失败任务以指数退避重试（3 次失败后置 `status: "failed"`）。
 - 并发度由 `maxConcurrentIngest` 与 `maxConcurrentDistill` 控制（默认各 1）。
-- 每个任务按孪生解析生效嵌入（`loadTwinEmbeddingPlan`）：ingest 与 distill 的风格样本向量都用它；
-  会把两种模型混进同一索引的 ingest（`rebuild-required`）或缺少凭据的覆盖（`twin-embedding-unconfigured`）
-  直接失败、不重试。成功后写入 `Twin.embeddingIndex`。
-- Worker 是每浏览器 tab **单租户** —— `lib/scheduler/tab-lock.ts` 用 BroadcastChannel + visibilitychange
-  实现的"领导者"锁保证只有一个 tab 跑 worker。其他 tab 仍能看 Jobs UI 但不消费队列。
+- 每个任务按孪生解析生效嵌入（`loadTwinEmbeddingPlan`）：ingest 与 distill 的风格样本向量都用它；会把两种模型混进同一索引的 ingest（`rebuild-required`）或缺少凭据的覆盖（`twin-embedding-unconfigured`）直接失败、不重试。成功后写入 `Twin.embeddingIndex`。
+- Worker 是每浏览器 tab **单租户** —— `lib/scheduler/tab-lock.ts` 用 BroadcastChannel + visibilitychange 实现的"领导者"锁保证只有一个 tab 跑 worker。其他 tab 仍能看 Jobs UI 但不消费队列。
 
 通过调度器执行器实现 cron 触发的重试（如"每周重新 ingest"）是后续追加的能力。
 
@@ -395,8 +378,7 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
   `hasNoLeakingPii`。改动它必须极为谨慎；只能加 fixture，绝不能删。
 </Callout>
 
-`lib/twin/runtime/apply-twin-context.test.ts` 断言"优雅降级"契约（向量库故障不能抛错）。
-`lib/twin/distill/with-timeout.test.ts` 覆盖每个 agent 的超时降级。
+`lib/twin/runtime/apply-twin-context.test.ts` 断言"优雅降级"契约（向量库故障不能抛错）。`lib/twin/distill/with-timeout.test.ts` 覆盖每个 agent 的超时降级。
 
 ## 在哪里入手
 

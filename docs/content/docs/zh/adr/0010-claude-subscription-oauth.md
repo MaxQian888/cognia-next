@@ -1,6 +1,6 @@
 ---
 title: "0010 — Claude 订阅 OAuth + 用量追踪"
-description: "Cognia-NEXT 获得了一流的Claude Pro/Max OAuth登录支持、sidecar持有令牌注入以及基于统一响应首部的实时5小时/7天速率限制可视化。"
+description: "Cognia-NEXT 支持 Claude Pro/Max OAuth 登录、sidecar bearer 令牌注入，以及基于统一响应首部的实时 5 小时 / 7 天速率限制显示。"
 ---
 
 # ADR 0010 — Claude 订阅 OAuth + 用量追踪
@@ -19,7 +19,7 @@ description: "Cognia-NEXT 获得了一流的Claude Pro/Max OAuth登录支持、s
 
 ## 背景
 
-直到本ADR，cognia-next 的 Anthropic 集成严格基于**API-key：渲染器写入`apiKey`给IndexedDB，Rust壳在生成sidecar时将其转发为`ANTHROPIC_API_KEY`，这就是整个认证故事。Pro/Max 订阅者——Anthropic 最有价值的个人用户——无法（a）用订阅令牌登录，（b）查看他们距离 [Anthropic 于 2025-07-28](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/) 激活的 5 小时滚动窗口或 7 天每周上限有多近。
+在本 ADR 之前，cognia-next 的 Anthropic 集成仅支持 API-key。渲染器将 `apiKey` 写入 IndexedDB，Rust 外壳在启动 sidecar 时将其转发为 `ANTHROPIC_API_KEY`。Pro/Max 订阅者无法用订阅令牌登录，也无法查看自身用量距离 [Anthropic 于 2025-07-28](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/) 激活的 5 小时滚动窗口或 7 天每周上限有多近。
 
 已有两个CCSwitch-style生态系统解决了该问题的变体：[Leu-s/CCSwitch](https://github.com/Leu-s/CCSwitch)解析统一速率限制头，[zach-source/ccswitch](https://github.com/zach-source/ccswitch)管理OS-keyring 凭证生命周期，[Claude Code CLI](https://code.claude.com/docs/en/authentication)定义针对`claude.ai`的规范`claude login` OAuth流。我们借用了机制，但在此阶段严格保持**单账户**——多账户自动轮换推迟到ADR 0011。
 

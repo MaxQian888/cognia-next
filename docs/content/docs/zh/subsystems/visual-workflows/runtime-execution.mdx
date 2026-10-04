@@ -8,7 +8,7 @@ description: lib/workflow/runtime 中的 TypeScript 运行时——对 VisualWor
 <Status variant="stable" />
 
 <TLDR>
-`lib/workflow/runtime/orchestrator.ts:118` 的 `runWorkflow(input)` 是核心：它先校验、持久化 `WorkflowRunRow`（`orchestrator.ts:142`）、装配单一 run 级 `AbortController` 加挂钟超时（`orchestrator.ts:165-203`）、对 `VisualWorkflow` 做拓扑排序（`topo-sort.ts:23`），随后进入 ready-set 调度循环（`orchestrator.ts:443-471`），该循环遵守 in-run 的 `maxConcurrency` 预算。每个步骤经由 `step-executor.ts:56` 的 `runStep`，包含缓存短路、`resolveDeep` 参数解析、带退避的重试循环（`step-executor.ts:142-160`，默认 attempts 3 / 指数 / baseMs 1000 / maxMs 30000，无抖动）以及单步超时（`step-executor.ts:186`）。每次状态变迁都通过 `event-log.ts:21` 追加到 `workflowRunEvents`，而 `IdempotencyCache.hydrate(runId)`（`idempotency.ts:33`）只重放该 run 已完成的步骤，因此崩溃恢复（`resume-controller.ts:29`）会复用同一 `runId` 并跳过已完成的工作。触发器桥接与 Rust 镜像见 [./triggers-rust](./triggers-rust)；运行视图见 [./ui-runs](./ui-runs)。
+`lib/workflow/runtime/orchestrator.ts:118` 的 `runWorkflow(input)` 是核心入口：它先校验，再持久化 `WorkflowRunRow`（`orchestrator.ts:142`）、设置单一 run 级 `AbortController` 和按实际经过时间计算的超时（`orchestrator.ts:165-203`）、对 `VisualWorkflow` 做拓扑排序（`topo-sort.ts:23`），随后进入 ready-set 调度循环（`orchestrator.ts:443-471`），该循环遵守 in-run 的 `maxConcurrency` 预算。每个步骤经由 `step-executor.ts:56` 的 `runStep`，包含缓存短路、`resolveDeep` 参数解析、带退避的重试循环（`step-executor.ts:142-160`，默认 attempts 3 / 指数 / baseMs 1000 / maxMs 30000，无抖动）以及单步超时（`step-executor.ts:186`）。每次状态变迁都通过 `event-log.ts:21` 追加到 `workflowRunEvents`。 `IdempotencyCache.hydrate(runId)`（`idempotency.ts:33`）只重放该 run 已完成的步骤，因此崩溃恢复（`resume-controller.ts:29`）会复用同一 `runId` 并跳过已完成的工作。触发器桥接与 Rust 镜像见 [./triggers-rust](./triggers-rust)；运行视图见 [./ui-runs](./ui-runs)。
 </TLDR>
 
 <Callout type="info" title="正式执行权威入口">
@@ -93,7 +93,7 @@ flowchart TD
 | --- | --- | --- |
 | 校验 | `orchestrator.ts:124-134` | 失败时：记录 `run_started` + `run_failed`，触发插件 hooks，返回 `failed` |
 | 持久化 run | `orchestrator.ts:142-162` | `WorkflowRunRow {status:"running", workflowSnapshot: validated}`，`put`，`persistRunState` Rust 镜像，`logger.runStarted` |
-| Abort + 幂等 | `orchestrator.ts:165-203` | 新建 `AbortController`；链接外部 `signal`（`:171-174`）；来自 `settings.timeoutMs` 的挂钟超时（`:178-189`，0 禁用）；`IdempotencyCache.hydrate(runId)`（`:190`）；若缺失则填充 `seedOutputs`（`:193-197`）；`concurrency = input.concurrency ?? createConcurrencyController(settings.maxConcurrency ?? 1)`（`:202-203`） |
+| Abort + 幂等 | `orchestrator.ts:165-203` | 新建 `AbortController`；链接外部 `signal`（`:171-174`）；来自 `settings.timeoutMs` 的实际经过时间的超时（`:178-189`，0 禁用）；`IdempotencyCache.hydrate(runId)`（`:190`）；若缺失则填充 `seedOutputs`（`:193-197`）；`concurrency = input.concurrency ?? createConcurrencyController(settings.maxConcurrency ?? 1)`（`:202-203`） |
 | 拓扑排序 | `orchestrator.ts:206-224` | `order` + `backEdgeIds`；抛出 → `failed` |
 | 调度 | `orchestrator.ts:227-471` | 依赖图、可达性跳过、ready-set 循环 |
 | 收尾 | `orchestrator.ts:478-539` | 成功或失败的终态写入 |
@@ -238,7 +238,7 @@ stateDiagram-v2
   }
 ```
 
-run 状态写入：`running` 于 `orchestrator.ts:143` / `:155`；`succeeded` 于 `:527`；`failed` 来自校验失败（`:132`）、拓扑环（`:215`）、缺失 `startStepId`、`errorPolicy` stop 或挂钟超时（`error.code "timeout"`，`:489`）。取消表现为 `failed`——`run_cancelled` 事件存在，但外部 abort 走失败收尾路径。
+run 状态写入：`running` 于 `orchestrator.ts:143` / `:155`；`succeeded` 于 `:527`；`failed` 来自校验失败（`:132`）、拓扑环（`:215`）、缺失 `startStepId`、`errorPolicy` stop 或实际经过时间的超时（`error.code "timeout"`，`:489`）。取消表现为 `failed`——`run_cancelled` 事件存在，但外部 abort 走失败收尾路径。
 
 ## 通过重放 + 幂等实现崩溃恢复
 

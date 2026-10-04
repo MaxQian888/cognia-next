@@ -1,6 +1,6 @@
 ---
 title: "0183 — The agent is brought to the image"
-description: "Agent CLIs no longer live in the image a project runs in. Each release publishes one multi-arch agent bundle holding glibc and musl trees under a single digest. It is injected into any user image at start, a probe decides what that image can host, and a static supervisor, cognia-sandboxd, runs the agent as the declared user. Agent versions are pinned per release instead of `latest`."
+description: "Agent CLIs are separate from project images. Each release publishes one multi-arch agent bundle containing glibc and musl trees under one digest. The bundle is injected into the user image at start. A probe determines host support, and the static cognia-sandboxd supervisor runs the agent as the declared user. Agent versions are pinned per release instead of `latest`."
 ---
 
 # ADR 0183 — The agent is brought to the image
@@ -151,4 +151,4 @@ The supervisor removes its own secrets from every child's environment, following
 
 ## Implementation
 
-Step ①: `crates/cognia-sandboxd` (install, probe, init-agent), `deploy/bundle/`, the CI matrix entry, the version generator, the fourth release image, and `crates/cognia-sandbox-pool` — the Docker driver that stages the bundle, probes the image, maps the command and starts the agent. It is a separate crate from `cognia-sandboxd` because the Step ② `serve` mode links `cognia-external-agent`, which the driver also needs; putting the driver in either would close that cycle. Step ②: `serve` and protocol v2. The pool, credentials, builds and migration are ADR-0184 to ADR-0187 (planned).
+Step ①: `crates/cognia-sandboxd` (install, probe, init-agent), `deploy/bundle/`, the CI matrix entry, the version generator, the fourth release image, and `crates/cognia-sandbox-pool` — the Docker driver that stages the bundle, probes the image, maps the command and starts the agent. It is a separate crate from `cognia-sandboxd` because the Step ② `serve` mode links `cognia-external-agent`, which the driver also needs; placing the driver in either crate would create a dependency cycle. Step ②: `serve` and protocol v2. The pool, credentials, builds and migration are ADR-0184 to ADR-0187 (planned).

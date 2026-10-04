@@ -135,8 +135,8 @@ stream. The sidecar's `plugin-tools.mjs` builds a synthetic
 invocations back to the renderer via `plugin_tool_exec` IPC.
 `lib/claude/plugin-tool-ipc.ts:handlePluginToolExec` falls back to the
 built-in skill registry by `mcpToolName` when the plugin store has no
-match — so the same handler routes plugin tools AND built-in skills
-without inventing a parallel IPC channel.
+match. Thus, the same handler routes both plugin tools and built-in
+skills through the existing IPC channel.
 
 ### lark-cli execution
 

@@ -90,8 +90,8 @@ multiple unrelated twins without UI gymnastics.
 
 `lib/twin/runtime/apply-twin-context.ts` is the single seam between
 the chat-send pipeline and the twin subsystem. It always returns
-(never throws) so a vector-store outage degrades gracefully to a
-no-context send rather than breaking the chat. Phase 8 will expose it
+and never throws. If the vector store fails, the chat sends the message
+without twin context. Phase 8 will expose it
 through `lib/claude/build-options.ts:resolveSendOptions` so any
 character with a `twinId` automatically picks up RAG + few-shot.
 

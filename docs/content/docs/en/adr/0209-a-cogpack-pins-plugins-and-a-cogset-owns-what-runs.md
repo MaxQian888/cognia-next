@@ -1,6 +1,6 @@
 ---
 title: "0209 — A cogpack pins plugins; a cogset owns what runs"
-description: "Plugin sets become two things. A cogpack is a signed, versioned `.cogpack` file that pins each plugin to an exact revision (by reference when the plugin can be fetched again, embedded when it cannot) and carries each member's non-secret config. A cogset is a named local set of plugins that owns which plugins should run and their non-secret config; switching is exclusive except for a host-kept always-on set, reconciles through the plugin manager rather than overlaying `plugins.enabled`, and can be bound to a workspace. Importing a cogpack creates a cogset. Every install records its origin in its own table so a cogset can be exported back into a cogpack."
+description: "Defines two plugin-set formats. A cogpack is a signed, versioned `.cogpack` file that pins each plugin revision and includes non-secret configuration. Fetchable plugins use references. Other plugins are embedded. A cogset owns the desired running state and non-secret configuration of a named local plugin set. Switching is exclusive except for a host-kept always-on set. The plugin manager reconciles state instead of overlaying `plugins.enabled`. Cogsets can bind to workspaces. Importing a cogpack creates a cogset. Install origins are recorded separately so cogsets can be exported as cogpacks."
 ---
 
 # ADR 0209 — A cogpack pins plugins; a cogset owns what runs
@@ -129,7 +129,8 @@ Every install path writes it through `recordInstallOrigin`:
   their `builtin://` path and need no record;
 - cogpack imports, which add the cogpack's id, version and fingerprint.
 
-A record never fails an install; a plugin without one exports as embedded. On a
+Recording an origin never causes an install to fail. A plugin without an
+origin record exports as embedded. On a
 mirrored client the install runs on the host, so the record is sent there
 (`plugin_install_origin_record`). A record that did not come from an install on
 this host, whether forwarded by a paired client or restored from a backup, is

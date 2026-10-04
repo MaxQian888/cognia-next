@@ -1,6 +1,6 @@
 ---
 title: "0155 — Plugins reach the host through one door"
-description: "Author-callable host tools, per-session runtime resolution, and a structured command result replace the per-plugin dependency injection that made one built-in plugin the only one able to search, read and reason."
+description: "Adds author-callable host tools, per-session runtime resolution, and a structured command result. Replaces per-plugin dependency injection that allowed only one built-in plugin to search, read and reason."
 ---
 
 # ADR 0155 — Plugins reach the host through one door
@@ -60,9 +60,9 @@ closed.**
 `PluginHostRuntime` answers three questions — which web policy, which model,
 which defaults — and `resolvePluginHostRuntime({pluginId, sessionId})` picks the
 answer. Renderer, Tauri and mobile share one ambient runtime backed by the
-settings store. The CLI registers one per session and turns ambient resolution
-off, so a call that names no session, or names an unbound one, throws instead of
-reading an empty store or borrowing another session's credentials.
+settings store. The CLI registers one runtime per session and disables ambient resolution.
+A call with no session, or an unbound session, throws. It cannot read an empty
+store or use another session's credentials.
 
 This is why `AIChatOptions`, `AIEmbedOptions` and `PluginInvocationOptions` all
 carry `sessionId`: on a multi-session host it is not metadata, it is the address.

@@ -5,7 +5,7 @@ description: 带版本的 Renderer 与选中主机指标、需求租约、加密
 
 ## 来源与 surface 合同
 
-性能子系统不会把“运行中的 Cognia”视为单一进程或单一时钟。完整的已认证 shell 会注册本地 Renderer document source；轻量、透明、配对、OAuth 和 overlay 路由不会注册。选中的 execution target 可以独立声明 Rust/Tauri 或 Node/headless host source。Renderer 与 host 数据永远不会合并为一条虚构序列。
+性能子系统不会把「运行中的 Cognia」视为单一进程或单一时钟。完整的已认证 shell 会注册本地 Renderer document source；轻量、透明、配对、OAuth 和 overlay 路由不会注册。选中的 execution target 可以独立声明 Rust/Tauri 或 Node/headless host source。Renderer 与 host 数据永远不会合并为一条虚构序列。
 
 | Surface | Renderer | Captures | 选中主机 | 主机控制 |
 | --- | --- | --- | --- | --- |
@@ -19,15 +19,15 @@ description: 带版本的 Renderer 与选中主机指标、需求租约、加密
 
 ## 需求生命周期
 
-`PerfLease` 取代面板私有的 start/stop 状态。Open 绑定 device、target、routing generation、purpose 和请求 cadence；每五秒 renew，远端 15 秒过期。正常卸载立即 close。每个设备最多一个 live 和一个 capture lease，每台 host 最多 16 个，cadence 不快于 500 ms。单个物理 sampler 按最快已接纳 cadence 运行，再对每个 lease 独立分发与降采样。
+`PerfLease` 取代面板私有的 start/stop 状态。Open 绑定 device、target、routing generation、purpose 和请求 cadence；每五秒续租（renew），远端 15 秒过期。正常卸载立即 close。每个设备最多一个 live 和一个 capture lease，每台 host 最多 16 个，cadence 不快于 500 ms。单个物理 sampler 按最快已接纳 cadence 运行，再对每个 lease 独立分发与降采样。
 
-Listener 先于 open 和 snapshot 绑定。只有 target、routing generation、host incarnation、sampling session 和 sequence 匹配的 frame 才会合并。可恢复 gap 会触发 snapshot 回填；不可恢复 gap 保持可见并随 Capture 持久化。Runtime rate 使用实际单调时间，并在 cadence、source incarnation、boot/process/runtime session、sleep、clock 或 counter 连续性改变时 reset。
+Listener 先于 open 和 snapshot 绑定。只有 target、routing generation、host incarnation、sampling session 和 sequence 匹配的 frame 才会合并。可恢复 gap 会触发 snapshot 回填。不可恢复 gap 保持可见并随 Capture 持久化。Runtime rate 使用实际单调时间，并在 cadence、source incarnation、boot/process/runtime session、sleep、clock 或 counter 连续性改变时 reset。
 
 ## Capture 存储与可移植性
 
 目标数据库在五秒、64 帧或 1 MiB 任一条件达到时保存有界加密 chunk。默认时长 10 分钟，硬限制为 60 分钟或包含明确附件在内的 512 MiB。账户配额为 2 GiB，使用跨目标保守 reservation。未固定 Capture 保留 30 天且每个 target 最多 20 个；固定证据仍占用配额。
 
-账户安全 generation barrier 会在 lock 时取消需求并丢弃未加密 tail。AES-GCM AAD 绑定 namespace/version/account/target database/capture/ordinal/content type。明文仅保留结构状态、时间、大小、capability bits 和摘要。`.cognia-perf` v1 会在创建任何可见行之前校验 manifest、路径、hash、大小、MIME 与可选 P-256 签名。默认使用脱敏导出；原始导出要求账户解锁和绑定摘要及附件选择的二次确认。
+账户安全 generation barrier 会在 lock 时取消需求并丢弃未加密 tail。AES-GCM AAD 绑定 namespace/version/account/target database/capture/ordinal/content type。明文仅保留结构状态、时间、大小、capability bits 和摘要。`.cognia-perf` v1 会在创建任何可见行之前校验 manifest、路径、hash、大小、MIME 与可选 P-256 签名。默认使用脱敏导出。原始导出要求账户解锁和绑定摘要及附件选择的二次确认。
 
 ## 比较合同
 

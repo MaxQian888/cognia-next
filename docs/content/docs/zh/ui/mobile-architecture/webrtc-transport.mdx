@@ -1,12 +1,11 @@
 ---
 title: WebRTC 传输
-description: 单一协议的移动端/浏览器 offerer、端到端加密信令、受界 DataChannel、恢复阶梯与 LAN-first 控制器。
+description: 移动端和浏览器端使用单一协议发起 WebRTC 协商，包括端到端加密信令、有容量限制的 DataChannel、分级恢复和 LAN-first 控制器。
 ---
 
 # WebRTC 传输
 
-`TransportRtc` 是移动端/浏览器 offerer。`CompanionTransport` 按以下顺序
-选路：
+`TransportRtc` 是移动端和浏览器端发起 WebRTC 协商的 offerer。`CompanionTransport` 按以下顺序选择传输路径：
 
 1. 健康的 LAN HTTPS/WebSocket；
 2. 已打开的 WebRTC `cognia.signaling` DataChannel；
@@ -16,27 +15,17 @@ description: 单一协议的移动端/浏览器 offerer、端到端加密信令�
 
 ## 配对与信令
 
-配对响应包含公开 `RoomDescriptor` 和 mobile 角色私钥。Capacitor 将
-私钥放入 SecureStorage；普通浏览器使用 non-extractable WebCrypto key
-与加密 IndexedDB pairing blob。
+配对响应包含公开的 `RoomDescriptor` 和 mobile 角色私钥。Capacitor 将私钥存入 SecureStorage；普通浏览器使用不可导出的 WebCrypto key 与加密的 IndexedDB 配对数据。
 
-`SignalingClient` 连接 `/signaling`，用 ECDSA P-256 签名 challenge，
-生成临时 P-256 ECDH key，并以 mobile 角色订阅。SDP/ICE 使用方向性的
-HKDF-SHA-256/AES-256-GCM key 加密，签名覆盖长度前缀的规范字段；中继
-无法读取密文内容。
+`SignalingClient` 连接 `/signaling`，使用 ECDSA P-256 对 challenge 签名，生成临时 P-256 ECDH key，并以 mobile 角色订阅。SDP/ICE 使用按方向派生的 HKDF-SHA-256/AES-256-GCM key 加密。签名覆盖带长度前缀的规范字段，中继无法读取密文内容。
 
-单一受界发送队列串行分配递增 seq。接收端先验证 role/session/epoch、
-时间和签名，再推进 replay 状态，并在小窗口中重排。
+单一、有容量限制的发送队列串行分配递增 seq。接收端先验证 role/session/epoch、时间和签名，再更新防重放状态，并在小窗口内重新排序。
 
 ## 协商与恢复
 
-移动端创建一个有序可靠的 `cognia.signaling` DataChannel。remote description
-尚未设置时，ICE 按序保留（最多 256 条、30 秒）。每个异步协商回调在
-修改 peer 前校验 epoch。
+移动端创建有序、可靠的 `cognia.signaling` DataChannel。在 remote description 设置前，ICE 按序保留，最多 256 条、30 秒。每个异步协商回调都在修改 peer 前校验 epoch。
 
-host 离线时进入 `awaiting-peer`，不是失败。会话中断后先等待
-disconnected grace，再尝试 ICE restart；失败后完整重建 peer，并使用
-全抖动受界退避。
+host 离线时进入 `awaiting-peer`，不视为失败。会话中断后，先等待 disconnected grace 宽限期，再尝试 ICE restart。若仍失败，则完整重建 peer，并使用带全抖动、有限制的退避策略。
 
 ## RPC、事件与容量
 
@@ -46,21 +35,13 @@ RPC 顶层为：
 { id, method, params, idempotencyKey, protocolVersion: 2 }
 ```
 
-命令 manifest 决定读/重试语义。写命令在 RTC 与 HTTPS fallback 间复用
-同一个 key。host 的持久 ledger 返回旧结果、`idempotency_conflict` 或
-`idempotency_indeterminate`，不会盲目重放不确定写入。
+命令 manifest 决定读取和重试语义。写命令在 RTC 与 HTTPS fallback 之间复用同一个 key。host 的持久化 ledger 返回旧结果、`idempotency_conflict` 或 `idempotency_indeterminate`，不会盲目重放结果不确定的写入。
 
-事件使用全局 `seq`。客户端持久化 cursor，发送 `event-resume`，过滤
-重复/倒序，并 ack 已交付高水位。窗口不足时明确收到
-`resync_required`。
+事件使用全局 `seq`。客户端持久化 cursor，发送 `event-resume`，过滤重复或倒序事件，并确认已交付的高水位。若窗口容量不足，客户端会明确收到 `resync_required`。
 
-物理帧最大 32 KiB，逻辑消息最大 1 MiB；每 peer 最多 8 个并行重组、
-4 MiB 内存和 15 秒期限。浏览器在 `bufferedAmount` 超过 1 MiB 时暂停，
-降至 256 KiB 后恢复；并发 RPC 上限为 32。
+物理帧最大 32 KiB，逻辑消息最大 1 MiB；每 peer 最多 8 个并行重组、4 MiB 内存和 15 秒期限。浏览器在 `bufferedAmount` 超过 1 MiB 时暂停，降至 256 KiB 后恢复；并发 RPC 上限为 32。
 
-静态/BYO ICE 与短期 provider TURN 合并使用。凭证在过期前刷新，并用
-generation guard 防止旧异步响应覆盖新配置。连接状态可显示最终 candidate
-类型：`host`、`srflx`、`prflx` 或 `relay`。
+静态/BYO ICE 与短期 provider TURN 合并使用。凭证在过期前刷新，并用 generation guard 防止旧异步响应覆盖新配置。连接状态可显示最终 candidate 类型：`host`、`srflx`、`prflx` 或 `relay`。
 
 ## 验证
 

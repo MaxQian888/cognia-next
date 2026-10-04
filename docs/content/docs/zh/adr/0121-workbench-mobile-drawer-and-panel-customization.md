@@ -1,6 +1,6 @@
 ---
 title: ADR-0121 — 工作台移动端抽屉与面板级自定义
-description: "移动端 Context Workbench 换成真正的 vaul 抽屉（带吸附高度），在活动图标栏之下新增面板级重排/隐藏，并让三处休眠自定义从沉默变为可见。"
+description: "移动端 Context Workbench 改用带吸附高度的 vaul 抽屉。在活动图标栏下增加面板重排和隐藏功能，让三处已实现但未展示的自定义设置可见。"
 ---
 
 # ADR-0121 — 工作台移动端抽屉与面板级自定义
@@ -9,9 +9,9 @@ description: "移动端 Context Workbench 换成真正的 vaul 抽屉（带吸�
 
 ## 背景
 
-ADR-0083 让所有右侧界面共用一个外壳；ADR-0098 让面板正文关闭后活动图标栏仍留在屏幕上。还剩三处接缝没有处理。
+ADR-0083 让所有右侧界面共用一个外壳；ADR-0098 让面板正文关闭后活动图标栏仍留在屏幕上。仍有三处集成问题需要处理。
 
-**移动端承诺了自己并不具备的手势。** 窄屏宿主是一个 Radix `Sheet`，上面画了一条 `aria-hidden` 的装饰横条，注释还声称它"保留了抓手提示与滑动关闭手势"。`Sheet` 本质是 Dialog：两者都没有。`artifact-panel.tsx` 里重复了同样的说法。围绕这个空缺还有：固定的 `h-[92dvh]`，没有半开状态；32px 的活动按钮，低于 `globals.css` 为全应用其余部分设定的 44px 底线；没有接 `useBackDismiss`（于是 Android 返回键会把路由从 sheet 底下抽走，而应用里另外二十多个移动端 sheet 都处理了）；也没有软键盘避让——sheet 被 portal 到 `mobile-shell-wrapper` 的布局之外，它的底部预留永远够不到 AI 与评论面板里的输入框。
+**移动端承诺了自己并不具备的手势。** 窄屏宿主是一个 Radix `Sheet`，上面画了一条 `aria-hidden` 的装饰横条，注释还声称它"保留了抓手提示与滑动关闭手势"。`Sheet` 本质是 Dialog：两者都没有。`artifact-panel.tsx` 里重复了同样的说法。围绕这个空缺还有：固定的 `h-[92dvh]`，没有半开状态；32px 的活动按钮，低于 `globals.css` 为全应用其余部分设定的 44px 底线；没有接 `useBackDismiss`（于是 Android 返回键会把路由从 sheet 底下抽走，而应用里另外二十多个移动端 sheet 都处理了）；也没有软键盘避让。sheet 被 portal 到 `mobile-shell-wrapper` 布局之外，因此底部预留无法作用于 AI 与评论面板里的输入框。
 
 **自定义只做到了上面一层。** 用户可以重排、隐藏七个*活动*；活动内部那十一到十三个*面板*的顺序由写死的 `order:` 数字决定，而且根本无法隐藏。
 

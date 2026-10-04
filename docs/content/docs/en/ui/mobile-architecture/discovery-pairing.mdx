@@ -64,11 +64,12 @@ flowchart TB
   class PROBE,DROP q
 ```
 
-A candidate is accepted **only** if it returns HTTP `401` with a `{code,message}` body
-(`evaluateProbeResponse`, `:409-432`) — an unauthenticated request to `/api/whoami` *should* be
-rejected, which is exactly what proves the host is a Cognia server. The result is then enriched with
-the TLS fingerprint via `healthz`. Default port `27890` (`:110`); the extra ports `[27890, 7890, 7891, 7900,
-8443]` (`:119`) are tried only for paired/emulator IPs.
+The scanner accepts a candidate **only** if it returns HTTP `401` with a `{code,message}` body (`evaluateProbeResponse`, `:409-432`).
+An unauthenticated request to `/api/whoami` should be rejected. That response identifies the host as a Cognia server.
+The scanner then adds the TLS fingerprint from `healthz`.
+The default port is `27890` (`:110`).
+It tries the extra ports `[27890, 7890, 7891, 7900,
+8443]` (`:119`) only for paired/emulator IPs.
 
 ### The local-IP trick — `local-ip.ts:50`
 

@@ -1,13 +1,11 @@
 ---
 title: "0194 — 判断是一个提供方，而不是一段提示词"
-description: "System-1 决策（一次推理给出带校准概率的是非、单选、打分类型化问题答案）成为宿主能力 `ctx.decisions`，由提供方注册表支撑。laya 插件是本地提供方，TypeSafe 兼容接口是远程提供方。无论提供方声称在哪运行，每次请求都先脱敏并过 PII 门；提供方以类型化信封返回结果而不是抛异常。"
+description: "System-1 决策通过一次推理返回带校准概率的是非、单选和打分答案，作为宿主能力 `ctx.decisions` 由提供方注册表管理。laya 是本地提供方，TypeSafe 兼容接口是远程提供方。每次请求都先脱敏并经过 PII 门，不依赖提供方声明的位置。提供方返回类型化信封，而非抛异常。"
 ---
 
 # ADR 0194 — 判断是一个提供方，而不是一段提示词
 
-**状态：** 已接受 — 已实现
-**日期：** 2026-09-25
-**相关：** [ADR-0145](./0145-python-plugin-runtime-alignment)（Python 支撑的贡献、契约目录）、[ADR-0156](./0156-every-in-tree-plugin-is-a-third-party-plugin)（树内插件只用 SDK）、[ADR-0026](./0026-plugin-extension-points-v2)（惰性工厂模块桥）
+**状态：** 已接受 — 已实现**日期：** 2026-09-25 **相关：** [ADR-0145](./0145-python-plugin-runtime-alignment)（Python 支撑的贡献、契约目录）、[ADR-0156](./0156-every-in-tree-plugin-is-a-third-party-plugin)（树内插件只用 SDK）、[ADR-0026](./0026-plugin-extension-points-v2)（惰性工厂模块桥）
 
 ## 背景
 
@@ -37,7 +35,7 @@ description: "System-1 决策（一次推理给出带校准概率的是非、单
 
 ### 3. 提供方返回信封，而不是抛异常
 
-`decide()` 返回 `{ok: true, answers, latencyMs, routing?, truncation?, stateTrimmed?}` 或 `{ok: false, error: {kind, message}}`。Python 支撑的提供方要跨 RPC，异常到达时只剩字符串，所以类型化的错误种类必须作为数据传递。未知种类归为 `provider_error`；laya 的 `not_ready` / `invalid_question` / `predict_failed` 分别映射为宿主的 `provider_unavailable` / `invalid_request` / `provider_error`。只有请求会跨 RPC——宿主的 `AbortSignal` 无法序列化，因此由 `runDecision` 让调用与信号和截止时间赛跑。
+`decide()` 返回 `{ok: true, answers, latencyMs, routing?, truncation?, stateTrimmed?}` 或 `{ok: false, error: {kind, message}}`。Python 支撑的提供方要跨 RPC，异常到达时只剩字符串，所以类型化的错误种类必须作为数据传递。未知种类归为 `provider_error`；laya 的 `not_ready` / `invalid_question` / `predict_failed` 分别映射为宿主的 `provider_unavailable` / `invalid_request` / `provider_error`。只有请求会跨 RPC——宿主的 `AbortSignal` 无法序列化，因此由 `runDecision` 同时监听调用、取消信号与截止时间，采用先完成的结果。
 
 ### 4. 交付两个后端：本地 laya，远程 TypeSafe 兼容接口
 

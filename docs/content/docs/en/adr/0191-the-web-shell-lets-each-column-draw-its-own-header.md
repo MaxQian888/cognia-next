@@ -1,6 +1,6 @@
 ---
 title: "0191 — The web shell lets each column draw its own header"
-description: "The desktop title bar — drag regions, menubar folding, window controls, eleven customizable segments — was mounted verbatim on the browser shell, where it read as a second window frame inside a tab that already has one. The web shell now defaults to no top bar at all: the conversation rail, chat column, and workbench each draw their own 40px header through the projection system's existing inline fallback, the workspace switcher stays in the rail's header, and the toolbar.* plugin extension points re-home onto the chat column header. A persisted setting (`webTitleBarEnabled`) brings the bar back for users who want it; Tauri is untouched, where the bar is the window chrome and cannot leave."
+description: "The browser shell previously mounted the desktop title bar with drag regions, menubar folding, window controls and eleven customizable segments. Web now defaults to no top bar. The conversation rail, chat column and workbench each use a 40px header through the existing projection fallback. The workspace switcher stays in the rail header. toolbar.* plugin extension points move to the chat header. The persisted `webTitleBarEnabled` setting restores the bar when requested. Tauri retains its window title bar."
 ---
 
 # ADR 0191 — The web shell lets each column draw its own header
@@ -24,7 +24,7 @@ The bar was a second window frame: `bg-muted/40` tinted, stacked with entries
 that duplicated each other (three overlapping doors to the command palette;
 nav arrows that duplicate the browser's own back; window controls wired to
 nothing) and to which every column's header had surrendered its own identity.
-In a browser the result read as weight, not consolidation.
+In a browser, the repeated controls added visual clutter.
 
 The projection system already contained the escape hatch: when a zone's outlet
 does not exist, `useTitleBarProjection` returns `null` and the column header

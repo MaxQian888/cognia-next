@@ -1,11 +1,11 @@
 ---
 title: 数据模型与 Store
-description: types/agent/agent-team.ts 里的小队类型清单、persist-v8 的 Zustand store、从 v215 起成为权威的 Dexie 定义表，以及 ADR-0140 移除了什么。
+description: types/agent/agent-team.ts 中的小队类型、persist-v8 Zustand store、从 v215 起作为权威数据源的 Dexie 定义表，以及 ADR-0140 移除的内容。
 ---
 
 # 数据模型与 Store
 
-一支小队由一个类型模块 `types/agent/agent-team.ts` 描述，并在运行时由 `stores/agent/agent-team-store/` 下的一个 Zustand store 持有。自 **persist v8** 起，store 已经不是小队的家：Dexie 才是小队、队友和任务的权威来源，`localStorage` 那一份只剩模板、默认配置和少数视图偏好。
+`types/agent/agent-team.ts` 定义小队类型，`stores/agent/agent-team-store/` 下的 Zustand store 管理运行时状态。自 **persist v8** 起，Dexie 是小队、队友和任务的权威数据源；`localStorage` 中只保留模板、默认配置和少数视图偏好。
 
 <Callout title="两个名词，一个子系统">
   ADR-0140 把产品名词改成了 **Squad（小队）**，并刻意没有动代码里的名词。下文每一个类型、store、
@@ -169,7 +169,7 @@ export function partializeAgentTeamState(state: AgentTeamState) {
 | `agentTeammates` | `&id, teamId, role, updatedAt, [teamId+createdAt]` | `AgentTeammateRow` |
 | `agentTeamTasks` | `&id, teamId, status, assignedTo, updatedAt, [teamId+order]` | `AgentTeamTaskRow` |
 
-行会把 `Date` 摊平成 epoch 毫秒，并补上一个领域类型从来没有的 `updatedAt`，因为同步需要游标，而镜像是唯一知道某一行真的变了的地方（`lib/db/agent-team-definitions.ts:24-49`）。这三张表在 schema **v215** 落地。运行态那一半（`agentTeamRuns` 加十张子表）自 v145 起就在 Dexie 里了。`lib/db/schema.ts` 现在把整套 schema 一次性声明在 `CURRENT_SCHEMA_VERSION` **217** 上，而不是重放一条迁移链，所以上面那些版本号是历史，而不是 `version(N)` 代码块。
+行记录将 `Date` 转换为 epoch 毫秒，并补充领域类型中没有的 `updatedAt`。同步需要游标，而镜像负责判断哪些行发生了变化（`lib/db/agent-team-definitions.ts:24-49`）。这三张表在 schema **v215** 中引入。运行态数据（`agentTeamRuns` 和十张子表）自 v145 起存储在 Dexie 中。`lib/db/schema.ts` 现在通过 `CURRENT_SCHEMA_VERSION` **217** 一次性声明整套 schema，不再重放迁移链。因此，上述版本号描述历史变更，并非当前的 `version(N)` 代码块。
 
 ### 持久化矩阵
 

@@ -5,7 +5,9 @@ description: The in-process cognia-tools MCP server bundled in the sidecar, buil
 
 # Tools, MCP & Skills
 
-The built-in agent gets its tool surface from five sources, all converging in the sidecar's SDK `query()` call. This page maps each: the in-process `cognia-tools` MCP server, the built-in MCP placeholder resolver, the skills→SDK bridge, computer-use native tools, and the preset gallery.
+The built-in agent receives tools from five sources, all combined in the sidecar's SDK `query()` call.
+These sources are the in-process `cognia-tools` MCP server, the built-in MCP placeholder resolver, the skills-to-SDK bridge, computer-use native tools, and preset gallery.
+This page describes each source.
 
 <TLDR>
   The sidecar builds an **in-process MCP server** (`cognia-tools`) from `sidecar/builtin-tools/` —

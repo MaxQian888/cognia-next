@@ -9,9 +9,9 @@ description: One account model across Anthropic, Codex, OpenCode and CommandCode
 
 <TLDR>
   Built-in and registered subscription providers — including Anthropic, Codex, OpenCode, and CommandCode — share one account model, one vault format
-  and one limits surface. The interesting piece is the **limits-source registry**
-  (`lib/subscription/limits/registry.ts`): a flat ordered list where windowed sources come *before* the
-  generic balance source, so the runner prefers a real utilization window and only falls through to a
+  and one limits surface. The **limits-source registry**
+  (`lib/subscription/limits/registry.ts`) is a flat ordered list. Windowed sources come *before* the
+  generic balance source, so the runner prefers a real utilization window and only falls back to a
   credit meter when no window applies. Aggregation (`limits/aggregate.ts`) queries every configured
   account and returns them with the active one pinned first — which is what both the TUI `/limits` panel
   and the desktop multi-provider view consume. Every seam is injected, so the same code runs offline in

@@ -8,7 +8,7 @@ description: Cognia 插件如何被隔离、如何通信 —— new Function 沙
 <Status variant="experimental" />
 
 <TLDR>
-插件从不以宿主原始权限运行。JS 插件通过 `PluginSandbox`（`lib/plugin/core/sandbox.ts:34`）求值 —— 一个按权限门控的全局对象表面被喂给 `new Function` / `AsyncFunction`，绝不使用环境 `eval`。操作系统级隔离是独立的 Node 24 `--permission` 重新执行（`lib/plugin/launcher/launchPluginJs.ts:107`）。WASM 插件分为 Tauri-IPC 客户端（`lib/plugin/core/wasm-loader.ts:56`）与受 `wasm-grant` 预打开账本约束的浏览器回退（`lib/plugin/core/wasm-runtime.ts:79`）。流量行经两条 RPC 通道 —— 渲染端→Rust 的 `transport.ts` 与插件↔插件的 `ipc.ts` —— 外加类型化的 `message-bus.ts` 事件总线，三者共享 `PLUGIN_MESSAGE_HISTORY_MAX = 500`（`messaging/constants.ts:14`）。
+插件从不以宿主原始权限运行。JS 插件通过 `PluginSandbox`（`lib/plugin/core/sandbox.ts:34`）求值 —— 一个按权限门控的全局对象接口传给 `new Function` / `AsyncFunction`，绝不使用环境 `eval`。操作系统级隔离是独立的 Node 24 `--permission` 重新执行（`lib/plugin/launcher/launchPluginJs.ts:107`）。WASM 插件分为 Tauri-IPC 客户端（`lib/plugin/core/wasm-loader.ts:56`）与受 `wasm-grant` 预打开账本约束的浏览器回退（`lib/plugin/core/wasm-runtime.ts:79`）。流量行经两条 RPC 通道 —— 渲染端→Rust 的 `transport.ts` 与插件↔插件的 `ipc.ts` —— 外加类型化的 `message-bus.ts` 事件总线，三者共享 `PLUGIN_MESSAGE_HISTORY_MAX = 500`（`messaging/constants.ts:14`）。
 </TLDR>
 
 <StatGrid>

@@ -219,9 +219,9 @@ for the full plan + progress log.
 ## 2026-07 host-managed Bridge hardening
 
 Remote Bridge management no longer sends `sidecarPath` or a controller-owned
-bearer secret. The host persists revisioned non-secret configuration and
-irreversible per-client credential verifiers; create/rotate returns plaintext
-once. Each authenticated request is stamped with its client id and scopes,
+bearer secret. The host stores revisioned non-secret configuration and
+irreversible per-client credential verifiers. Creation and rotation return
+the plaintext credential once. Each authenticated request is stamped with its client id and scopes,
 which are intersected with the host allowlist inside the MCP server. Streaming
 sessions are bound to the credential that created them, preventing another
 valid client from reusing a leaked session id.

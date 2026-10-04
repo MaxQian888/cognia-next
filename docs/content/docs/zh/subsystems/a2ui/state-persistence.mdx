@@ -9,11 +9,11 @@ description: Zustand 运行时 store 在 localStorage 中保留最近 20 个完�
 
 <TLDR>
   A2UI 把状态保存在**两个相互独立的层**中，二者互不调用。Zustand store
-  (`stores/a2ui/a2ui-store.ts`) 是所有 server message 的唯一摄入入口，也是运行时的事实来源。它把**最近 20 个
+  (`stores/a2ui/a2ui-store.ts`) 是所有 server message 的唯一接收入口，也是运行时的事实来源。它把**最近 20 个
   ready surface 的完整内容**持久化到 `localStorage`（key 为 `cognia-a2ui-surfaces`）。四张 Dexie 表
-  （`a2uiApps`、`a2uiSurfaces`、`a2uiTemplates`、`a2uiEventHistory`）是一个**独立的可持久化层**，由 renderer/hook
+  （`a2uiApps`、`a2uiSurfaces`、`a2uiTemplates`、`a2uiEventHistory`）是一个**独立的持久化层**，由 renderer/hook
   层调用，store 不直接 import 它。在迷你应用路由中，`hydratePersistedApps()` 读取已保存的 `a2uiApps` 行，并通过
-  `restoreSurface` 恢复缺失的运行时树；没有 durable row 的旧模板实例继续使用确定性重建作为兜底。undo/redo
+  `restoreSurface` 恢复缺失的运行时树；没有 durable row 的旧模板实例继续使用确定性重建作为回退。撤销/重做
   仅存在于内存中（50 条栈，300 ms 防抖）。
 </TLDR>
 
@@ -64,8 +64,7 @@ flowchart LR
 
 ## store 作为消息入口
 
-`useA2UIStore` (`a2ui-store.ts:212`) 通过 `create` 创建一次，持有整个运行时 A2UI 状态。每条 server message——
-来自三条 dispatch 路径中的任意一条——都汇入 `processMessage` (`351`)。
+`useA2UIStore` (`a2ui-store.ts:212`) 通过 `create` 创建一次，持有整个运行时 A2UI 状态。每条 server message——来自三条 dispatch 路径中的任意一条——都汇入 `processMessage` (`351`)。
 
 ### 状态结构
 
@@ -84,10 +83,7 @@ flowchart LR
   }}
 />
 
-相关类型与常量：`A2UIHistoryEntry` (`30`，一个对 `components` + `dataModel` 的 undo/redo 快照)；`A2UIActions`
-(`70`)；`initialState` (`125`)；`MAX_HISTORY_ENTRIES = 50` (`38`)；`HISTORY_DEBOUNCE_MS = 300` (`39`)。
-旧数据迁移辅助：`migrateLegacyComponent` (`144`，`DataExplorer → Table`)、`migrateComponentMap` (`154`)、
-`normalizePersistedSurfaces` (`167`)。
+相关类型与常量：`A2UIHistoryEntry` (`30`，一个对 `components` + `dataModel` 的 undo/redo 快照)；`A2UIActions` (`70`)；`initialState` (`125`)；`MAX_HISTORY_ENTRIES = 50` (`38`)；`HISTORY_DEBOUNCE_MS = 300` (`39`)。旧数据迁移辅助：`migrateLegacyComponent` (`144`，`DataExplorer → Table`)、`migrateComponentMap` (`154`)、`normalizePersistedSurfaces` (`167`)。
 
 ### 动作表
 
@@ -101,7 +97,7 @@ flowchart LR
 | `updateDataModel` | 298 | 快照 (300) + `deepMerge`/`deepClone` (306) |
 | `setDataValue` | 321 | `setValueByPath` (326) 后 `emitDataChange` |
 | `getDataValue` | 344 | `getValueByPath` (347) |
-| `processMessage` | 351 | **唯一摄入入口**（路由见下） |
+| `processMessage` | 351 | **唯一接收入口**（路由见下） |
 | `processMessages` | 377 | 批量 |
 | `processMessageStream` | 384 | 流式 |
 | `setSurfaceStreaming` | 413 | |
@@ -119,8 +115,7 @@ flowchart LR
 
 ### `processMessage` 路由
 
-`processMessage` (`351-373`) 从 `get()` (`352-358`) 解构相关动作，然后跑一条由五个类型守卫组成的 `if/else`
-链（从 `@/lib/a2ui/parser` 导入）：
+`processMessage` (`351-373`) 从 `get()` (`352-358`) 解构相关动作，然后跑一条由五个类型守卫组成的 `if/else` 链（从 `@/lib/a2ui/parser` 导入）：
 
 | 守卫 | 行号 | 调用 |
 | --- | --- | --- |
@@ -170,21 +165,15 @@ flowchart LR
   class CDC,EH,GEE b
 ```
 
-`emitAction` (`426`) 遵循对称路径：`createUserAction` (`427`) → push `eventHistory` 并按 `maxEventHistory`
-切片 (`431`) → `globalEventEmitter.emitAction` (`436`)。`updateDataModel` (`298`) 通过 `deepMerge` /
-`deepClone` (`306`，来自 `@/lib/a2ui/data-model`) 合并。
+`emitAction` (`426`) 遵循对称路径：`createUserAction` (`427`) → push `eventHistory` 并按 `maxEventHistory` 切片 (`431`) → `globalEventEmitter.emitAction` (`436`)。`updateDataModel` (`298`) 通过 `deepMerge` /`deepClone` (`306`，来自 `@/lib/a2ui/data-model`) 合并。
 
 ### 选择器
 
-barrel `stores/a2ui/index.ts` 重新导出 `useA2UIStore` 以及九个选择器 (`1-12`)：`selectSurface` (`710`)、
-`selectActiveSurface` (`712`)、`selectSurfaceComponents` (`715`)、`selectSurfaceDataModel` (`718`)、
-`selectIsSurfaceLoading` (`721`)、`selectSurfaceError` (`724`)、`selectEventHistory` (`727`)、
-`selectRecentEvents` (`729`)、`selectIsSurfaceStreaming` (`732`)。
+barrel `stores/a2ui/index.ts` 重新导出 `useA2UIStore` 以及九个选择器 (`1-12`)：`selectSurface` (`710`)、`selectActiveSurface` (`712`)、`selectSurfaceComponents` (`715`)、`selectSurfaceDataModel` (`718`)、`selectIsSurfaceLoading` (`721`)、`selectSurfaceError` (`724`)、`selectEventHistory` (`727`)、`selectRecentEvents` (`729`)、`selectIsSurfaceStreaming` (`732`)。
 
 ## 撤销 / 重做
 
-undo/redo **仅在内存中**——`undoStacks` / `redoStacks` (`63-64`) 被排除在 persist `partialize` 之外。
-一个快照捕获 `components` + `dataModel`（`A2UIHistoryEntry`，`30`）。
+undo/redo **仅在内存中**——`undoStacks` / `redoStacks` (`63-64`) 被排除在 persist `partialize` 之外。一个快照捕获 `components` + `dataModel`（`A2UIHistoryEntry`，`30`）。
 
 - `pushSnapshot` (`500`) **防抖 300 ms**（`HISTORY_DEBOUNCE_MS`，第 `509` 行），让快速连续的编辑合并为一步历史。
 - 栈以 `MAX_HISTORY_ENTRIES = 50` (`38`) 为上限。
@@ -210,14 +199,11 @@ zustand `persist` 配置 (`641-702`)：
 3. 完整保留入选 surface，包括 `components`、`dataModel` 与 `rootId`。
 4. 持久化 `{ surfaces: persistedSurfaces, activeSurfaceId }`；undo/redo 栈被排除。
 
-LRU 窗口内的最近 surface 可由 store 直接恢复；窗口外的已保存 surface 由 `hydratePersistedApps()` 从
-`a2uiApps` 恢复。只有不存在 durable row 的旧模板实例才走确定性模板重建。已有可渲染本地 surface 优先于
-durable row，因此 hydrate 不会覆盖尚未保存的运行时编辑。
+LRU 窗口内的最近 surface 可由 store 直接恢复；窗口外的已保存 surface 由 `hydratePersistedApps()` 从 `a2uiApps` 恢复。只有不存在 durable row 的旧模板实例才走确定性模板重建。已有可渲染本地 surface 优先于 durable row，因此 hydrate 不会覆盖尚未保存的运行时编辑。
 
 ## 四张 Dexie 表
 
-可持久化层位于 `lib/db/`。这些表最早在 Dexie `version(13)` 引入；**当前**的 schema 版本是
-`version(118)`。表类声明在 `lib/db/schema.ts`。
+可持久化层位于 `lib/db/`。这些表最早在 Dexie `version(13)` 引入；**当前**的 schema 版本是 `version(118)`。表类声明在 `lib/db/schema.ts`。
 
 ### 行类型 (`lib/db/a2ui-types.ts`)
 
@@ -246,8 +232,7 @@ durable row，因此 hydrate 不会覆盖尚未保存的运行时编辑。
 | `a2uiTemplates` | 116 | `id, name, category, updatedAt, source` (575) |
 | `a2uiEventHistory` | 117 | `id, surfaceId, [surfaceId+timestamp], timestamp, type` (576) |
 
-`a2uiEventHistory` 上的 `[surfaceId+timestamp]` 复合索引支撑了按 surface 的逆时序事件查询。`version(13)` 块还会
-upsert 进程内 `a2ui-bridge` MCP server 行，并回填 `a2uiEnabled = false`（`schema.ts:550`、`583`）。
+`a2uiEventHistory` 上的 `[surfaceId+timestamp]` 复合索引支撑了按 surface 的逆时序事件查询。`version(13)` 块还会 upsert 进程内 `a2ui-bridge` MCP server 行，并回填 `a2uiEnabled = false`（`schema.ts:550`、`583`）。
 
 ### CRUD 函数
 
@@ -278,13 +263,9 @@ upsert 进程内 `a2ui-bridge` MCP server 行，并回填 `a2uiEnabled = false`�
 
 ### 可持久化层不变式
 
-- **内置保护** —— single upsert、bulk upsert、metadata patch 与 delete 都拒绝修改已有 `isBuiltIn` app。
-  bulk upsert 使用事务，因此与 built-in 同批的用户行也不会被部分写入。`deleteAllUserApps` 与
-  `deleteAllUserTemplates` 都保留 built-in。
-- **inline 排除** —— `upsertSurface` (`a2ui-surfaces.ts:20`) 对 `type === "inline"` 提前返回 (22)：inline
-  surface 仅运行时存在，从不写入 Dexie。只有 `panel` / `fullscreen`（以及 `dialog`）surface 是可持久化的。
-- **event-history 上限** —— `a2ui-event-history.ts` 以 `MAX_ROWS = 1000` (`9`) 为上限，超出时裁剪
-  `TRIM_BATCH = 100` (`11`) 条最旧行；`appendEvent` 吞掉失败，使审计永不打断 UI 动作。
+- **内置保护** —— single upsert、bulk upsert、metadata patch 与 delete 都拒绝修改已有 `isBuiltIn` app。bulk upsert 使用事务，因此与 built-in 同批的用户行也不会被部分写入。`deleteAllUserApps` 与 `deleteAllUserTemplates` 都保留 built-in。
+- **inline 排除** —— `upsertSurface` (`a2ui-surfaces.ts:20`) 对 `type === "inline"` 提前返回 (22)：inline surface 仅运行时存在，从不写入 Dexie。只有 `panel` / `fullscreen`（以及 `dialog`）surface 是可持久化的。
+- **event-history 上限** —— `a2ui-event-history.ts` 以 `MAX_ROWS = 1000` (`9`) 为上限，超出时裁剪 `TRIM_BATCH = 100` (`11`) 条最旧行；`appendEvent` 吞掉失败，使审计永不打断 UI 动作。
 
 ## schema 版本真相
 

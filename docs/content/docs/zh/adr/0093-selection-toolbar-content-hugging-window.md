@@ -92,7 +92,7 @@ const TOOLBAR_MENU_HEIGHT: f64 = 280.0;
 
 ### 8. 全局快捷方式，与特征绑定
 
-`alt+shift+1..6`通过现有的`ShortcutRegistry`映射到六个动作，绑定在`selection_toolbar_start`中，`selection_toolbar_stop`释放——故意*不*在`seed_builtins`中，否则用户从未启用该功能时会被深陷六个和弦。用户已经重新绑定的和弦保持原样。调度是一种**通知**（`selection://shortcut`），而不是第二条执行路径：渲染器拥有所选的翻译目标、相位机和退出动画，Rust中分叉这些可以保证漂移。
+`alt+shift+1..6`通过现有的`ShortcutRegistry`映射到六个动作，绑定在`selection_toolbar_start`中，`selection_toolbar_stop`释放——故意*不*在`seed_builtins`中，否则即使用户从未启用该功能，也会占用六组组合键。用户已重新绑定的组合键保持原样。调度是一种**通知**（`selection://shortcut`），而不是第二条执行路径：渲染器拥有所选的翻译目标、状态机和退出动画，在 Rust 中重复实现这些逻辑会造成行为不一致。
 
 被动`CGEventTapOptions::ListenOnly`显示器无法消耗按键，因此对原始按键的反应会将数字输入到用户文档中。真正的全球捷径是这里唯一安全的机制。
 

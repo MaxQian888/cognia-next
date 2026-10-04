@@ -7,7 +7,9 @@ description: Evidence-backed audit of ADR catalogue integrity, numbering anomali
 
 ## Scope and method
 
-This audit covers every file under `docs/content/docs/{en,zh}/adr/`, both ADR sidebars, current Git worktree state, and targeted implementation checks for records with missing or visibly stale status metadata. A feature was treated as implemented only when its code, tests, and runtime registration or mounted product surface were all present.
+This audit covers all files under `docs/content/docs/{en,zh}/adr/`, both ADR sidebars, and the current Git worktree state.
+It also includes targeted implementation checks for records with missing or visibly stale status metadata.
+The audit treats a feature as implemented only if its code, tests, and runtime registration or mounted product surface are all present.
 
 This is a snapshot of the current working tree. It includes the in-progress ADR-0114 files and sidebar entries that were already present when the audit began.
 

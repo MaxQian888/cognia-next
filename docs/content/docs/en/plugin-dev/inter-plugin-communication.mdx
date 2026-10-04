@@ -12,9 +12,9 @@ Two plugin-facing surfaces live on `ctx.events`:
 - **`ctx.events.bus`** — the global pub/sub event bus (namespaced events,
   wildcard / regex subscriptions, replay). Read-only side is ungated.
 
-Both are backed by host singletons; the framework cleans up a plugin's
-subscriptions and exposed methods automatically when it is disabled,
-suspended, or unloaded — you never leak listeners across a toggle.
+Both use host singletons.
+The framework automatically removes a plugin's subscriptions and exposed methods when it is disabled, suspended, or unloaded.
+Listeners therefore do not remain across a toggle.
 
 ## Permissions
 

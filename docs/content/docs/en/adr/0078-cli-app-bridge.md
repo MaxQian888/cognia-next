@@ -15,7 +15,7 @@ The local CLI bridge listener, endpoint writer, and initializer are compile-gate
 
 Cognia has two local command-line products with different responsibilities: the TypeScript
 `cognia-agent` chat TUI and the Rust `cognia` plugin-author CLI. Both need selected capabilities
-from a running desktop, while the agent CLI must also remain independently usable. The desktop's
+from a running desktop. The agent CLI must also remain independently usable. The desktop's
 Companion API serves a different audience and threat model: paired devices over HTTPS, WebSocket,
 and WebRTC with device JWTs.
 

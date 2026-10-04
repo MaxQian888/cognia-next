@@ -25,7 +25,7 @@ was still working. Nothing tested it.
 
 **The animation-speed preference was inverted.** The settings UI labels its
 options "Fast (1.5×)" and "Slow (0.5×)", but `resolveMotionState` wrote the
-value straight into `--motion-duration-scale`, which consumers multiply by a
+value directly into `--motion-duration-scale`, which consumers multiply by a
 base duration: `calc(200ms * var(--motion-duration-scale))`. Choosing "Fast"
 made every dialog, sheet, dock and panel transition 50% *slower*. The JS side
 matched: `0.18 * speed` lengthened a fade for a faster preference, and

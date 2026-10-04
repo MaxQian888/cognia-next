@@ -1,6 +1,6 @@
 ---
 title: "ADR-0048 — Codex 支持扩展（用量跟踪 · 聊天提供商 · ACP 保真度）"
-description: "扩展OpenAI Codex支持，超越现有的 凭证 重用 + ACP-execution 层：在 Anthropic 对等性 添加背景usage/limits追踪，使Codex成为一流聊天提供商，支持ChatGPT-login模式（ChatGPT 后端响应 API + 头部）和 api_key 模式，并加固ACP permission-mode/terminal-write保真度差距。记录先前研究、纠正传输设计的openai/codex上游研究，以及批准的D→B→C计划。"
+description: "在现有凭证复用与 ACP-execution 基础上扩展 OpenAI Codex 支持：增加与 Anthropic 相对应的后台 usage/limits 跟踪，使 Codex 成为完整的聊天提供商，支持ChatGPT-login模式（ChatGPT 后端响应 API + 标头）和 api_key 模式，并加固ACP permission-mode/terminal-write保真度差距。记录先前研究、纠正传输设计的openai/codex上游研究，以及已批准的 D→B→C 计划。"
 ---
 
 # ADR-0048 — Codex 支持扩展（用量跟踪 · 聊天提供商 · ACP 保真度）
@@ -49,4 +49,4 @@ Codex在这项工作之前已经**成熟于三层**，由先前ADRs确立，并�
 
 ## 验证
 
-Jest 316 / 11组曲;sidecar `node --test` 63;Rust `cargo test` 14;typecheck 0 新增于已有开发基线的错误;ESLint干净;i18N键对等性+排序OK;六个项目审计员（测试-缺口、I18N、静态-出口、Tauri-Rust、PII-门禁、布线）干净利落。
+验证结果：Jest 316 / 11 个测试套件；sidecar `node --test` 63；Rust `cargo test` 14。typecheck 相比既有开发基线新增 0 个错误。ESLint 无问题，i18n 键一致性与排序检查通过。六个项目审计（测试缺口、i18n、静态导出、Tauri-Rust、PII 门禁、运行时接入）均未发现问题。

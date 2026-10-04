@@ -1,6 +1,6 @@
 ---
 title: ADR-0114 — Unified chat message presentation
-description: Presets, session overrides, honest run metadata, progressive disclosure, and host-owned message chrome.
+description: "Use presets and session overrides to control message presentation. Show accurate run metadata, reveal technical details progressively, and keep message controls under host ownership."
 ---
 
 # ADR-0114 — Unified chat message presentation
@@ -19,7 +19,7 @@ ADR-0057 made rich chat parts complete, but presentation policy remained distrib
 
 ### One resolved presentation contract
 
-Global settings store `MessageDisplayPreferences`; a `ChatSession` may add `messageDisplayOverride`. `resolveMessageDisplayOptions` is the only precedence boundary and produces the complete renderer contract. Its presets are `focused`, `balanced`, and `inspector`; `balanced` is the default. Legacy `agentFlowMode` remains a read fallback for old settings, while new writes go through the unified preference.
+Global settings store `MessageDisplayPreferences`. A `ChatSession` may add `messageDisplayOverride`. `resolveMessageDisplayOptions` is the only precedence boundary and produces the complete renderer contract. Its presets are `focused`, `balanced`, and `inspector`. The default is `balanced`. Legacy `agentFlowMode` remains a read fallback for old settings, while new writes go through the unified preference.
 
 The preference is classified as shared settings. Ordinary branches, SDK forks, desktop, Web, and Capacitor therefore retain the same presentation unless a session explicitly resets to inheritance.
 

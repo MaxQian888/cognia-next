@@ -1,6 +1,6 @@
 ---
 title: "0179 — The schedule answers one question"
-description: "The scheduler page rendered every count four times and the user's real question never; selection could not be linked; the phone showed an empty detail. One list, one detail composition for six kinds, an overview that says what needs you, and a URL that names what is open."
+description: "The scheduler repeated each count four times but did not show what required attention. Selection had no link, and mobile detail was empty. Adds one list, one detail composition for six kinds, an overview of items needing attention, and a URL for the open selection."
 ---
 
 # ADR 0179 — The schedule answers one question
@@ -81,10 +81,10 @@ differently from the desktop.
 The first block is `AttentionBlock`, fed by a pure `deriveAttention` over the
 unified items, the app tasks, the running runs and processes, the pending
 confirmations, the host target, the source errors and the per-source counts
-against `maxTasksPerSource`. Severity orders it: failure state and a failed
-source first; a confirmation, a suspended host, an unsupported type and a
-quota above 80 % next; running work last, with a Stop where a process is
-alive. Below it one agenda replaces the calendar, the timeline and the upcoming
+against `maxTasksPerSource`. Severity determines the order. Failure states and failed
+sources come first. Confirmations, suspended hosts, unsupported types and
+quotas above 80 % come next. Running work comes last, with a Stop control for
+live processes. Below it one agenda replaces the calendar, the timeline and the upcoming
 list, all of which were the same occurrences grouped three ways. The kind
 summary appears once. The recharts bar chart, with its literal hex fills, is
 replaced by a CSS outcome strip the detail shares.
@@ -142,3 +142,34 @@ reporter (Working Rule 7).
 Not done: a `listRuns` for OS tasks, which the platforms do not expose; task
 hand-off between hosts (ADR-0128 decision 6 stands); non-app creation on the
 phone.
+
+## Amendment (2026-10-03)
+
+A second audit read the panes against the same data and found what the first
+left out.
+
+**The detail did not say what a task does.** It showed when an item fires and
+how it ended, never the prompt, command, workflow or handler it runs. A
+"What it runs" section now renders `summarizeTaskPayload`
+(`lib/scheduler/payload-summary.ts`) for every app-table row, resolving
+referenced characters, workflows, plans, teams, agents and sessions by name
+and saying when one no longer exists, with the stored JSON behind a toggle.
+The outcomes section leads with `summarizeItemRuns`
+(`lib/scheduler/item-run-stats.ts`): lifetime counters from the row when it
+has them, duration and last result from the runs.
+
+**Tags were write-only.** Nothing could set or clear them and search ignored
+them. The form now edits them (`task-tags-input.tsx`) and always submits the
+list, and search matches tags, with `#tag` for tags only.
+
+**§4 amended (desktop).** The list pane's floor is 280px rather than a
+percentage, which had crushed it to ~170px on a laptop; the host popover sits
+beside refresh instead of in a header row of its own; the keyboard highlight
+scrolls into view; the agenda lists three days before "show more".
+
+**§6 amended (phone).** What needs you stays above two tabs: Tasks (search,
+the desktop filter bar, rows without the checkbox that had nothing to check)
+and Activity (stat strip, outcomes, agenda, recent runs). A refresh lives in
+the header. The detail gets duplicate, backfill and the dependency graph,
+which are dialogs; OS promotion stays desktop-only. Bulk actions, templates,
+import/export and non-app creation remain desktop, as before.

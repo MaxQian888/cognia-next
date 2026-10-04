@@ -13,8 +13,8 @@ description: cognia plugin build — mandatory lint, toolchain preflight, manife
   zip; **frontend** → resolve the TS entry → `npx --no-install esbuild` with 13 pinned args
   (`build_ts.rs:116-132`) → zip; **python / hybrid / vscode-extension** → package existing
   manifest-declared entry files (`pythonMain`, `main`, `vscodeMain`, optional `styles`) and
-  `bundle_include[]` via `pack_existing_entry_bundle()` (`packaging.rs:278-294`). All bundles land
-  at `target/cognia/<id>-<version>.zip` with the same base layout: pretty-printed `plugin.json`
+  `bundle_include[]` via `pack_existing_entry_bundle()` (`packaging.rs:278-294`). All bundles are written
+  to `target/cognia/<id>-<version>.zip` with the same base layout: pretty-printed `plugin.json`
   first, runtime artifact entries, then deduplicated `bundle_include[]` extras, all
   Deflate-compressed.
 </TLDR>

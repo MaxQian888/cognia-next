@@ -16,7 +16,7 @@ description: Bidirectional sync between the Dexie skill store and on-disk ~/.cla
   Unix, copies on Windows** (`install.rs:226-304`), moving prior copies to `.trash/` on fingerprint change.
   A 13-command IPC surface (`lib/claude/ipc.ts:381-440`, registered `lib.rs:398-410`) covers scan, install,
   trash, remote-fetch, registry, and an **advisory-only** 9-rule regex security scanner (`scanner.rs:59-126`).
-  Everything no-ops in the browser — `isTauri()` guards return an `(env)` error (`sync.ts:147-148`).
+  These operations do not run in the browser — `isTauri()` guards return an `(env)` error (`sync.ts:147-148`).
 </TLDR>
 
 ## Why two copies exist

@@ -8,12 +8,12 @@ description: a2ui-bridge MCP 服务器的两种形态——每个会话挂载的
 <Status variant="stable">稳定 · 5 个工具 · 单一事实源 `tool-defs.mjs` · 进程内 + 独立</Status>
 
 <TLDR>
-  a2ui-bridge 让 agent 能够通过 MCP **绘制交互式 UI**。它以两种共享同一契约的形态存在：
+  a2ui-bridge 让智能体能够通过 MCP **绘制交互式 UI**。它以两种共享同一契约的形态存在：
   一个**进程内**的 SDK 服务器（`a2ui-tools/index.mjs`，由 sidecar 在每个会话挂载，
   `alwaysLoad: true`），以及一个**独立**的 stdio 服务器（`a2ui-mcp.mjs`，由 Claude Code 或 Cursor
   等外部 CLI 派生，通过 stdin/stdout 进行 JSON-RPC 通信）。两者的**五个**工具名称、
   描述、schema 和分发映射都来自同一个模块——`sidecar/a2ui-tools/tool-defs.mjs`——
-  从而让两个服务器永不漂移（一个 Node 测试会断言该契约）。进程内形态会 `emit()` 一个
+  从而保证两个服务器遵循相同契约（一个 Node 测试会断言该契约）。进程内形态会 `emit()` 一个
   分发事件；独立形态则会把它写入 `COGNIA_BRIDGE_SOCKET` Unix socket / 命名管道。
   两者最终都汇聚到渲染端的 A2UI store。第五个工具 `a2ui_handle_connector_action` 会把一个
   IM 用户的动作注入到 surface 上，让浏览器端用户和聊天端用户共享同一套流程。
@@ -39,9 +39,7 @@ export const TOOL_NAMES = [
 | `a2ui_delete_surface` | `deleteSurface` | 移除一个 surface，释放资源 |
 | `a2ui_handle_connector_action` | `connectorAction` | 把 IM 渠道的用户动作注入到 surface 上 |
 
-`tool-defs.mjs` 导出 `TOOL_NAMES`、`TOOL_DESCRIPTIONS`、`RAW_INPUT_SCHEMAS`（JSON Schema）、一个
-`rawTools()` helper，以及 `buildDispatch(name, args)`——两个服务器都用它把工具参数转换为
-一个分发信封：
+`tool-defs.mjs` 导出 `TOOL_NAMES`、`TOOL_DESCRIPTIONS`、`RAW_INPUT_SCHEMAS`（JSON Schema）、一个 `rawTools()` helper，以及 `buildDispatch(name, args)`——两个服务器都用它把工具参数转换为一个分发信封：
 
 ```javascript title="sidecar/a2ui-tools/tool-defs.mjs:221"
 case "a2ui_handle_connector_action":
@@ -69,15 +67,11 @@ test("exposes the five contracted tool names", () => {
 })
 ```
 
-渲染端在 `lib/a2ui/mcp-tool-schemas.ts` 中保留了一份平行的类型化副本（`A2UI_BRIDGE_TOOLS`，第 53 行），
-用于**填充内置的 `a2ui-bridge` 行**（`buildA2UIBridgeMcpRow`，第 197 行）、检测该行
-（`isA2UIBridgeRow`），以及计算其用于投射到外部 agent 的命名空间工具名称。
+渲染端在 `lib/a2ui/mcp-tool-schemas.ts` 中保留了一份平行的类型化副本（`A2UI_BRIDGE_TOOLS`，第 53 行），用于**填充内置的 `a2ui-bridge` 行**（`buildA2UIBridgeMcpRow`，第 197 行）、检测该行（`isA2UIBridgeRow`），以及计算其用于投射到外部 agent 的命名空间工具名称。
 
 ## 进程内形态
 
-`a2ui-tools/index.mjs:buildA2UIBridgeServer({ sessionId, emit, alwaysLoad })` 构建一个名为
-`a2ui-bridge` 的 SDK MCP 服务器。每个工具的 handler 会调用 `buildDispatch`，然后调用 `dispatch`，后者会 `emit()`
-一个单一事件，由 host 写入 stdout：
+`a2ui-tools/index.mjs:buildA2UIBridgeServer({ sessionId, emit, alwaysLoad })` 构建一个名为 `a2ui-bridge` 的 SDK MCP 服务器。每个工具的 handler 会调用 `buildDispatch`，然后调用 `dispatch`，后者会 `emit()` 一个单一事件，由 host 写入 stdout：
 
 ```javascript title="sidecar/a2ui-tools/index.mjs:69"
 const dispatch = (message) => {
@@ -85,8 +79,7 @@ const dispatch = (message) => {
 }
 ```
 
-它被挂载为分发的 [layer 3](./session-resolution#stage-3--merge-layers-sidecar)，并带有
-`alwaysLoad: true`——交互式 surface 绝不能被延后到 tool-search 之后：
+它被挂载为分发的 [layer 3](./session-resolution#stage-3--merge-layers-sidecar)，并带有 `alwaysLoad: true`——交互式 surface 绝不能被延后到 tool-search 之后：
 
 ```javascript title="sidecar/dispatch/anthropic.mjs:132"
 const a2uiServer = buildA2UIBridgeServer({ sessionId, emit, alwaysLoad: true })
@@ -94,9 +87,7 @@ const a2uiServer = buildA2UIBridgeServer({ sessionId, emit, alwaysLoad: true })
 
 ## 独立形态
 
-`sidecar/a2ui-mcp.mjs` 是一个自包含的 stdio MCP 服务器，供运行在 Cognia **之外**的 agent 使用。它
-在以换行符分隔的 stdin/stdout 上手写实现了 JSON-RPC 2.0（它刻意避免引入 SDK
-以保持精简），并通过 `COGNIA_BRIDGE_SOCKET` 给定的 Unix socket / 命名管道进行分发：
+`sidecar/a2ui-mcp.mjs` 是一个自包含的 stdio MCP 服务器，供运行在 Cognia **之外**的 agent 使用。它在以换行符分隔的 stdin/stdout 上手写实现了 JSON-RPC 2.0（它刻意避免引入 SDK 以保持精简），并通过 `COGNIA_BRIDGE_SOCKET` 给定的 Unix socket / 命名管道进行分发：
 
 ```javascript title="sidecar/a2ui-mcp.mjs:82"
 function dispatch(message) {
@@ -111,9 +102,7 @@ function dispatch(message) {
 }
 ```
 
-`tools/call` 会运行相同的 `buildDispatch`，然后报告该分发是否抵达了渲染端。关键在于，
-它会**优雅降级**——如果 socket 不可达（Cognia 未运行、沙箱化的 agent），该工具
-仍会返回 `ok: true` 且 `dispatched: false`，因此外部 agent 的规划循环永不崩溃：
+`tools/call` 会运行相同的 `buildDispatch`，然后报告该分发是否抵达了渲染端。关键在于，它会**优雅降级**——如果 socket 不可达（Cognia 未运行、沙箱化的 agent），该工具仍会返回 `ok: true` 且 `dispatched: false`，因此外部 agent 的规划循环永不崩溃：
 
 ```javascript title="sidecar/a2ui-mcp.mjs:123"
 case "tools/call": {
@@ -127,14 +116,11 @@ case "tools/call": {
 }
 ```
 
-socket 连接以固定的 2 秒退避进行重试；其路径会由 [`resolve.ts`](./session-resolution#stage-2--placeholder-resolution-external-agents)
-注入到被投射的 a2ui-bridge 行中。
+socket 连接以固定的 2 秒退避进行重试；其路径会由 [`resolve.ts`](./session-resolution#stage-2--placeholder-resolution-external-agents) 注入到被投射的 a2ui-bridge 行中。
 
 ## 两条路径的汇聚处
 
-两种形态都会抵达渲染端的 `useA2UIStore.processMessage`（进程内形态通过 Tauri 的 `a2ui://dispatch` 事件，
-独立形态通过 socket → Rust → 事件）。`processMessage` 会把每种分发类型路由到一个
-store action；`connectorAction` 会变成一个与渲染端点击无法区分的 `userAction`：
+两种形态都会抵达渲染端的 `useA2UIStore.processMessage`（进程内形态通过 Tauri 的 `a2ui://dispatch` 事件，独立形态通过 socket → Rust → 事件）。`processMessage` 会把每种分发类型路由到一个 store action；`connectorAction` 会变成一个与渲染端点击无法区分的 `userAction`：
 
 ```typescript title="stores/a2ui/a2ui-store.ts:366"
 if (isConnectorActionMessage(message)) {
@@ -185,11 +171,7 @@ flowchart TB
 
 ## 语境中的第五个工具
 
-`a2ui_handle_connector_action` 正是让 A2UI surface 能从 Slack / Lark / Telegram / Discord 使用的关键：
-connector 适配器接收到一次对平台原生卡片的点按，agent 携带动作
-详情调用此工具，渲染端则把它注入为一个 `userAction`，于是 agent 的下一轮会看到它，
-其形态与浏览器点击完全相同。端到端的 IM 往返（卡片投射 → 回调 → 此工具）记录在
-[A2UI ⇄ IM 桥接](../a2ui/im-bridge)中。
+`a2ui_handle_connector_action` 正是让 A2UI surface 能从 Slack / Lark / Telegram / Discord 使用的关键：connector 适配器接收到一次对平台原生卡片的点按，agent 携带动作详情调用此工具，渲染端则把它注入为一个 `userAction`，于是 agent 的下一轮会看到它，其形态与浏览器点击完全相同。端到端的 IM 往返（卡片投射 → 回调 → 此工具）记录在 [A2UI ⇄ IM 桥接](../a2ui/im-bridge)中。
 
 ## 相关页面
 

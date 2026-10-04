@@ -31,13 +31,13 @@ line running through the capability set that nothing in the codebase named:
   `contextPanels`) need React components in the renderer. A subprocess has no
   DOM.
 
-The dishonesty was not in the runtime — it was encoded in the contract and the
-SDK. `plugin-sdk/python` shipped `define_ocr_provider()`, `define_connector()`
-and friends, so a Python author could write what looked like a working
-provider; `define_connector` even took a `factory: str` naming a JS symbol that
+The contract and SDK incorrectly advertised capabilities that the runtime
+could not execute. `plugin-sdk/python` shipped `define_ocr_provider()`, `define_connector()`
+and similar helpers, so a Python author could write what looked like a working
+provider. `define_connector` even took a `factory: str` naming a JS symbol that
 could not exist. `PluginCapabilityContract.pythonSdk` listed Python SDK files
 for capabilities Python could never execute, and the proof audit *required*
-that field for every `supported` capability — so the contract actively pushed
+that field for every `supported` capability — so the contract required
 every capability to claim Python support. Meanwhile `cognia plugin lint`
 rejected such a plugin outright with
 `manifest.contributions.javascript.unsupported_for_python`, leaving the author

@@ -1,11 +1,11 @@
 ---
 title: 共识、委派与共享记忆
-description: 三个薄编排器覆盖在 Agent Team Zustand store 的 CRUD 之上——法定人数规则投票、带静默时段门控的后台/外部委派，以及带 PII 门控、双向插件适配器同步的共享记忆。
+description: Agent Team Zustand store 的 CRUD 之上的三个策略编排器，分别处理法定人数规则投票、受静默时段限制的后台与外部委派，以及带 PII 门控和双向插件适配器同步的共享记忆。
 ---
 
 # 共识、委派与共享记忆
 
-`lib/ai/agent/team/` 中的三个小型编排器在 `stores/agent/agent-team-store/` 所暴露的原始 store CRUD 之上叠加行为（ADR-0032 §5）。它们都不拥有状态：每一个负责计算、门控、触发插件钩子，然后把持久化推迟给 Zustand store。它们刻意保持轻薄——store 是唯一真相来源，这些模块是策略层。
+`lib/ai/agent/team/` 中的三个小型编排器在 `stores/agent/agent-team-store/` 提供的 store CRUD 操作之上实现策略行为（ADR-0032 §5）。它们负责计算、检查执行条件和触发插件钩子，但不持有状态，持久化由 Zustand store 负责。store 是唯一的数据源，这些模块只承担策略层职责。
 
 <TLDR>
 - **共识** — `lib/ai/agent/team/consensus-orchestrator.ts`（283 行）：投票统计、五种法定人数规则、达到阈值时自动解析、lead 覆盖。驱动工作区的 `ConsensusPanel`。

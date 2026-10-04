@@ -11,7 +11,7 @@ description: Two-tier adapter liveness, the capped audit ring, the 24h health-hi
 Every running adapter is probed by a **single bus-scope heartbeat sweep**: an
 active `adapter.health()` snapshot every 30 s, plus a passive liveness probe
 every 2nd tick for transports that sit idle (Lark webhook, OneBot reverse-WS).
-Heartbeats land in a dedicated `connectorHeartbeats` table; real events land in
+Heartbeats are stored in a dedicated `connectorHeartbeats` table; real events are stored in
 a 5000-row capped `connectorAudit` ring spanning a **48-kind vocabulary**. A
 pure `deriveHistory` folds both into the Health Tab's 24h × 30 min dot grid.
 The same audit ring records the cross-provider **help / welcome** dispatch,

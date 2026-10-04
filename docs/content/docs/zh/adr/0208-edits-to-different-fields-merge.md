@@ -1,18 +1,15 @@
 ---
 title: "0208 — 改不同字段自动合并，只有改同一字段才冲突"
-description: "共享议题和计划在记录修订号之外，还记下每个字段最后一次变更时的修订号。带着过期 baseRevision 的 PATCH，只要它涉及的字段在该修订之后都没变过，就照常应用。只有同一字段被改过才返回 409：响应写明冲突字段，并只带回这些字段的服务端取值，冲突面板因此展示真正的分歧，而不是整条记录。board_order 按服务端顺序后写者胜。operationId 幂等性不变。"
+description: "共享议题和计划记录每个字段最后变更的修订号。PATCH 的 baseRevision 过期时，只要涉及字段此后未改变，就应用更新。同一字段存在变更才返回 409，并附冲突字段与对应服务端取值。冲突面板只展示分歧字段。board_order 按服务端顺序采用后写者胜，operationId 幂等性不变。"
 ---
 
 # ADR 0208 — 改不同字段自动合并，只有改同一字段才冲突
 
-**状态：** 已接受，已实现（2026-10-01）
-**日期：** 2026-09-30
-**相关：** [ADR-0149](./0149-a-person-is-not-a-device)（2026-08-28 的写入路径）、[ADR-0206](./0206-a-workspace-streams-its-changes-instead-of-being-polled)（它让过期基线变少，但还不够少）
-**来源研究：** `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`（缺口 A4）
+**状态：** 已接受，已实现（2026-10-01）**日期：** 2026-09-30 **相关：** [ADR-0149](./0149-a-person-is-not-a-device)（2026-08-28 的写入路径）、[ADR-0206](./0206-a-workspace-streams-its-changes-instead-of-being-polled)（它让过期基线变少，但还不够少）**来源研究：** `docs/plans/2026-09-30-collaboration-multi-device-gap-analysis.md`（缺口 A4）
 
 ## 背景
 
-对共享议题、计划和运行的写入都带 `operationId` 和 `baseRevision`（迁移 `0004_write_concurrency.sql`）。只要基线不等于当前 `revision`，存储就拒绝写入，完全不看这次写入改的是什么。下面摘自 `PgStore::patch_issue`（在 `SELECT … FOR UPDATE` 下执行）；内存实现与之相同：
+对共享议题、计划和运行的写入都带 `operationId` 和 `baseRevision`（迁移 `0004_write_concurrency.sql`）。只要基线不等于当前 `revision`，存储就拒绝写入，不检查此次写入修改了哪些字段。下面摘自 `PgStore::patch_issue`（在 `SELECT … FOR UPDATE` 下执行）；内存实现与之相同：
 
 ```rust
 if issue.revision != guard.base_revision {
@@ -40,7 +37,7 @@ Figma 和 Linear 都按属性解决：改不同属性的写入永不冲突，改
 
 1. 若 `last_operation_id == operationId`，返回已存储的记录。这是现有的幂等重试路径，保持不变。
 2. 若 `baseRevision == revision`，直接应用。这是现有的快速路径。
-3. 若 `baseRevision > revision` 或 `baseRevision < 1`，返回 400。两者都不可能出于诚实。
+3. 若 `baseRevision > revision` 或 `baseRevision < 1`，返回 400。两者均为无效修订号。
 4. 否则，计算 `clashing = { f ∈ patch.fields | field_revisions[f] > baseRevision }`：
    - 为空：应用补丁；
    - 非空：返回 409（见第 3 节）。

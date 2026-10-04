@@ -1,6 +1,6 @@
 ---
 title: A2UI 系统
-description: Agent-to-UI 协议——Claude 通过 MCP 工具发出声明式组件树，浏览器把它渲染成真正的 React 面板，并通过事件总线把用户操作流式回传给 agent。
+description: Agent-to-UI 协议——Claude 通过 MCP 工具发出声明式组件树，浏览器把它渲染成真正的 React 面板，并通过事件总线把用户操作流式回传给智能体。
 ---
 
 # A2UI 系统
@@ -9,8 +9,8 @@ description: Agent-to-UI 协议——Claude 通过 MCP 工具发出声明式组�
 
 <TLDR>
   A2UI（Agent-to-UI）让模型输出**真正可交互的 UI**——一个表单、一张图表、一个仪表盘——而不仅仅是
-  markdown。agent 调用 MCP 工具发出声明式组件树；浏览器 renderer 把它变成实时 React 面板；用户的点击
-  作为 `userAction` 事件流回 agent。这套协议被三种运行时共享——应用内 Claude 会话、外部 CLI agent
+  markdown。智能体调用 MCP 工具发出声明式组件树。浏览器渲染器将其转为实时 React 面板。用户点击
+  作为 `userAction` 事件回传给智能体。这套协议被三种运行时共享——应用内 Claude 会话、外部 CLI agent
   （Cursor / Codex / Gemini / Claude Code）、IM 连接器（飞书 / Telegram / Discord……）——靠的是
   一份 schema（`types/a2ui/schema.ts`，v0.9）和一个 Zustand store
   （`stores/a2ui/a2ui-store.ts:processMessage`）。
@@ -34,8 +34,7 @@ description: Agent-to-UI 协议——Claude 通过 MCP 工具发出声明式组�
 3. 用户点了按钮或改了字段 → renderer 向事件总线发出 `userAction` / `dataModelChange`。
 4. 聊天回路把这些事件折叠进下一轮 → agent 继续编排。
 
-下面的一切都是同一份声明式契约（`types/a2ui/schema.ts`），由同一个 parser、同一个 catalog、同一个
-renderer、同一个 store 实现——再投影到 agent 所在的那个运行时。
+下面的一切都是同一份声明式契约（`types/a2ui/schema.ts`），由同一个 parser、同一个 catalog、同一个 renderer、同一个 store 实现——再投影到 agent 所在的那个运行时。
 
 ## 模块地图
 
@@ -137,8 +136,7 @@ sequenceDiagram
 
 ## 五种 Server 消息
 
-契约是五种消息类型（`types/a2ui/schema.ts`），不是四种。每一种通过一个 parser 类型守卫与一个 store
-action 一一对应。
+契约是五种消息类型（`types/a2ui/schema.ts`），不是四种。每一种通过一个 parser 类型守卫与一个 store action 一一对应。
 
 | 消息 `type` | 守卫（`parser.ts`） | Store action（`a2ui-store.ts`） | 效果 |
 | --- | --- | --- | --- |
@@ -148,13 +146,11 @@ action 一一对应。
 | `deleteSurface` | `isDeleteSurfaceMessage` (59) | `deleteSurface` (241) | 销毁 surface |
 | `surfaceReady` | `isSurfaceReadyMessage` (63) | `setSurfaceReady` (453) | 翻转 `ready`，renderer 揭示面板 |
 
-简化简写 `{ surface, components, dataModel }` 会被 `parseSimplifiedA2UI`（`parser.ts:301`）自动展开成
-这条 4 消息序列。
+简化简写 `{ surface, components, dataModel }` 会被 `parseSimplifiedA2UI`（`parser.ts:301`）自动展开成这条 4 消息序列。
 
 ## 三条入口，一个 store
 
-A2UI 有三条独立的 dispatch 通路，它们最终都汇入
-`useA2UIStore.getState().processMessage`：
+A2UI 有三条独立的 dispatch 通路，它们最终都汇入 `useA2UIStore.getState().processMessage`：
 
 | 通路 | 生产者 | 传输 | 落点 |
 | --- | --- | --- | --- |
@@ -162,8 +158,7 @@ A2UI 有三条独立的 dispatch 通路，它们最终都汇入
 | **进程内 SDK** | 应用内 Claude 会话 | sidecar stdout `emit({type:"a2ui_dispatch"})` → Tauri emit | `ipc.ts:38` |
 | **ACP stdout 嗅探** | ACP 原生 CLI | 逐行扫描 stdout | `acp-bridge.ts:46` |
 
-完整管路、环境变量（`COGNIA_BRIDGE_SOCKET`）与 socket 路径见
-[MCP 工具与桥接](./mcp-bridge) 页。
+完整管路、环境变量（`COGNIA_BRIDGE_SOCKET`）与 socket 路径见 [MCP 工具与桥接](./mcp-bridge) 页。
 
 ## 相比旧文档的变化
 
@@ -182,15 +177,12 @@ A2UI 有三条独立的 dispatch 通路，它们最终都汇入
 
 A2UI 组件**直接渲染进主 React 树**（不同于用 iframe 隔离的 Artifacts）。因此安全边界就是 catalog：
 
-- 只有**预注册**的组件类型会渲染。未知 `component` 字符串落到 `A2UIFallback`
-  （`a2ui-renderer.tsx:197`）——绝不当作代码解释。
+- 只有**预注册**的组件类型会渲染。未知 `component` 字符串落到 `A2UIFallback`（`a2ui-renderer.tsx:197`）——绝不当作代码解释。
 - `Text` 以纯文本渲染，绝不用 `dangerouslySetInnerHTML`。
 - agent 提供的 action 字符串经事件总线路由；**绝不执行**。
-- 当 `widget.hostStrategy` 为 `sandboxed-html` / `artifact-preview` 时，内容被转到 iframe 隔离的
-  artifact 面板，而非内联渲染（见 [输出 profile](./output-profiles)）。
+- 当 `widget.hostStrategy` 为 `sandboxed-html` / `artifact-preview` 时，内容被转到 iframe 隔离的 artifact 面板，而非内联渲染（见 [输出 profile](./output-profiles)）。
 
-扩展 catalog 时，要对每个新组件审计 XSS 面（富文本、`iframe`、SVG `foreignObject`、`data:` URL 都需要
-白名单过滤）。
+扩展 catalog 时，要对每个新组件审计 XSS 面（富文本、`iframe`、SVG `foreignObject`、`data:` URL 都需要白名单过滤）。
 
 ## 下一步
 

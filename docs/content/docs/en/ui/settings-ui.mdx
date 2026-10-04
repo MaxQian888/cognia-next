@@ -5,7 +5,10 @@ description: Navigation registry, URL-driven ?section= routing, tabbed-shell sub
 
 # Settings UI
 
-cognia-next's settings center is a **single-page + sidebar navigation** subsystem: a grouped sidebar on the left, and a dynamically loaded "section" on the right driven by URL parameters. All configurable options for every subsystem are exposed through this single entry point, using the same layout, the same i18n keys, and the same URL protocol (`?section=` selects the section, `?<sectionTab>=` selects its internal sub-tab).
+cognia-next's settings center has a grouped sidebar on the left and a dynamically loaded section on the right.
+URL parameters select the section and its internal tab.
+Every subsystem's configurable options use this single entry point with a shared layout and i18n keys.
+The URL protocol uses `?section=` for sections and `?<sectionTab>=` for internal tabs.
 
 ## TL;DR
 

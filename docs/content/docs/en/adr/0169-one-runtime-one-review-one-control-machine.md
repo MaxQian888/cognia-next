@@ -1,6 +1,6 @@
 ---
 title: "0169 — One runtime, one review contract, one control machine"
-description: "The Squad execution chain is unified: durable-v2 is the only runtime, ExecutionRunInterrupt is the only pending review, RunControlCommand is the only control seam, and every surface reads the same projected snapshot."
+description: "Unifies Squad execution. durable-v2 is the only runtime. ExecutionRunInterrupt is the only pending review. RunControlCommand is the only control interface. Every surface reads the same projected snapshot."
 ---
 
 # ADR 0169 — One runtime, one review contract, one control machine
@@ -83,7 +83,7 @@ the decision validator refuses anything else against the interrupt's
 
 ### One review contract
 
-Squad HITL rides the Action Review contract. `ExecutionRunInterrupt` is the
+Squad HITL uses the Action Review contract. `ExecutionRunInterrupt` is the
 only pending record, `ActionReviewRequest / Decision / Receipt` the only
 protocol. The review kinds are typed (`plan`, `capability_audit`,
 `budget_extension`, `deadlock`, `teammate_repair`, `replan`,

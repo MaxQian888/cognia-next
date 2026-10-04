@@ -8,7 +8,7 @@ description: 4 个 AI 原语执行器（ai.prompt / ai.classify / ai.extract / a
 <Status variant="stable" />
 
 <TLDR>
-本页深入讲解为 Visual Workflows 引入智能的两类节点。四个 **AI 原语**位于 `lib/workflow/nodes/built-ins.ts`（`ai.prompt` 注册于 `built-ins.ts:228`，`ai.classify` 于 `built-ins.ts:984`，`ai.extract` 于 `built-ins.ts:1049`，`ai.embed` 于 `built-ins.ts:1134`），遵循 **fall-open 哲学**——凭证缺失时降级为 stub 或确定性哈希而非抛错（`built-ins.ts:280`）。六个 **Ultracode `pattern.*` 节点**则另置于 `lib/ai/agent/team/patterns/`（ADR-0022 增补），以加载期副作用自注册，仅由 synthesizer 产出，且依赖一个由 `getTeamCtxOrThrow` 解析出的活跃 `TeamRunContext`（`_shared.ts:20`）。它们共享的注册表、catalog 与 schema 机制记录在同级的[节点系统](./node-system)页；本页只讲行为，不重复底层管线。
+本页介绍 Visual Workflows 的两类 AI 节点。四个 **AI 原语**位于 `lib/workflow/nodes/built-ins.ts`（`ai.prompt` 注册于 `built-ins.ts:228`，`ai.classify` 于 `built-ins.ts:984`，`ai.extract` 于 `built-ins.ts:1049`，`ai.embed` 于 `built-ins.ts:1134`），遵循 **fall-open 降级策略**——凭证缺失时降级为 stub 或确定性哈希而非抛错（`built-ins.ts:280`）。六个 **Ultracode `pattern.*` 节点**则另置于 `lib/ai/agent/team/patterns/`（ADR-0022 增补），以加载期副作用自注册，仅由 synthesizer 产出，且依赖一个由 `getTeamCtxOrThrow` 解析出的活跃 `TeamRunContext`（`_shared.ts:20`）。它们共享的注册表、catalog 与 schema 机制记录在同级的[节点系统](./node-system)页；本页只讲行为，不重复底层管线。
 </TLDR>
 
 <StatGrid>

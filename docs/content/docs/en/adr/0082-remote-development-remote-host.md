@@ -257,3 +257,76 @@ workspace whose `workspaceId` is the bare directory name, resolved through
 `authorize_workspace_root` applies to `workspace.files`. Both hosts advertise
 the identical `source-control.git` operation set; the desktop registry and the
 headless policy root never see each other's ids.
+
+## 2026-10 SSH routing, link liveness and host-switch amendment
+
+Measured against the code after an end-to-end audit of the SSH and remote-host
+surfaces. Each item names what changed and the defect it closed.
+
+**1. A synchronized SSH profile carries its jump chain; forwarding still never
+rides it.** §9 bundled the two as "tunnels" and stripped both. They are not the
+same thing: a forwarding rule makes a machine open a listening port, which a
+remote device must never be able to trigger, while a jump chain opens nothing
+and is simply the route to the machine the profile names. Stripping it made
+every host-mediated spawn and every SFTP operation (which resolves its profile
+from the same map, on every shell) connect directly to a bastion-backed target,
+reaching a different machine or failing to connect. `buildSynchronizedConnectRequest`
+(`lib/terminal/ssh-forwarding.ts`) now emits the resolved chain and no rules,
+and leaves out a profile whose chain cannot be walked, so such a spawn answers
+"not on host" instead of connecting somewhere else. Every hop still
+authenticates against its own keyring entry on the host and is TOFU-verified
+against the same `known_hosts`.
+
+**2. A device spawn is narrowed in the host, not only at the sync boundary.** A
+desktop Spawn frame carrying a full `sshRequest` stores it, forwards included,
+in the host's `ssh_profiles` map, and a device naming the same id resolved that
+stored copy. `TerminalHost::spawn_synchronized_profile` now passes every
+non-local request through `narrow_ssh_request_for`, which clears
+`local_forwards`, `remote_forwards` and `project_id` and keeps the jump chain,
+pinned end to end through a real bastion in `host.rs` tests. SFTP dials with no
+forwards for any identity.
+
+**3. The desktop always dials its own SSH profiles.** While a remote Cognia host
+is active, the preferred terminal transport is `ws`, and `connectSshFromDock`
+used to send the profile id to that host, which holds only the profiles its OWN
+desktop synced under ids of the form `ssh-N`: the request failed, or matched a
+different machine's `ssh-1` and opened a shell there with somebody else's
+credential. The profile, its chain and its keyring entry live on this desktop
+and `SshTerminalSession` talks to this desktop's terminal host directly, so on
+the desktop SSH is dialed from here regardless of the active host, and the
+shell picker says so. Off the desktop the host-mediated path is the only one.
+
+**4. Link liveness.** `client_config()` set a 30 s inactivity timeout and no
+keepalive, so an idle shell dropped after 30 s and the reconnect ladder opened
+a fresh one, losing remote shell state. russh's own `keepalive_interval` is not
+used: before authentication it fires without sending anything and keeps
+resetting the inactivity timer, which turns a stalled handshake into a hang.
+`spawn_heartbeat` (`crates/cognia-terminal/src/ssh.rs`) instead sends one
+`keepalive@openssh.com` at a time after authentication, every 15 s, to every
+hop and the target; replies count as received data, so a live idle session
+never trips the 30 s window, and a dead peer is still dropped about 45 s after
+its last packet. Because pooled SFTP connections no longer expire on their own,
+the host's 1 Hz maintenance tick now calls `reap_idle_sftp`, so `IDLE_TTL` is
+enforced rather than applied only on the next SFTP call.
+
+**5. One way to connect, one way to switch.** `useSshConnect`
+(`hooks/terminal/use-ssh-connect.tsx`) is the only connect flow, mounted by the
+settings editor, the dock, the device console and the phone: it refuses a
+password target *or bastion* with nothing stored and a chain that cannot be
+walked before dialing, with an action that opens the profile to fix, retries
+after a changed host key is re-trusted, and translates every marker. Restart on
+an SSH tab reconnects from the saved profile (`restartFromDock` refuses
+non-local-PTY rows instead of respawning `ssh user@host` as a local command).
+For remote hosts, `useExecutionHostSwitch` is the only switch path and every
+user-initiated activation, reconnect, return to local and removal of the active
+host goes through its in-flight guard; the automatic return to local when a
+GitHub runner lease ends is deliberately exempt, because that machine is
+already gone.
+
+**Corrections to the record above.** The registry persists under
+`cognia-remote-hosts` (store version 3), not `cognia.remoteHosts.v1`, and holds
+an ES256 device key in the credential vault rather than a device JWT.
+`RoutingTransport.subscribe` rebinds every open subscription when the active
+host changes (binding the new target before releasing the old), which
+supersedes the Consequences bullet saying open subscriptions are not
+retargeted.

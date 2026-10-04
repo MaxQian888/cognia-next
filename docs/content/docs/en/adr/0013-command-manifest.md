@@ -52,8 +52,8 @@ from any other Rust caller).
 Rationale:
 
 1. **The allowlist IS the API.** Every command exposed to mobile shows up
-   here. No drift risk, no surprise exposure — adding a new mobile-facing
-   command is an explicit, auditable PR. Removing one is a one-line delete.
+   here. Adding a new mobile-facing command requires an explicit, auditable PR.
+   This makes changes to the exposed commands visible to reviewers. Removing one is a one-line delete.
 2. **Security review is bounded.** Reviewers see ~40 entries, not 200.
 3. **Per-command shape control.** Some Tauri commands have ergonomic
    payloads that don't translate cleanly to JSON (e.g., they take
@@ -64,7 +64,7 @@ Rationale:
    when V2 reshapes some inputs — the underlying Tauri command can evolve
    freely.
 5. **No build-time tooling.** No new generator script, no syn-style parsing,
-   no maintainability burden for cargo-watch hot reload, no CI cliff.
+   no maintainability burden for cargo-watch hot reload, no abrupt increase in CI requirements.
 
 ### What was rejected
 

@@ -62,7 +62,7 @@ drive this we add two **additive, backward-compatible** seams:
 live (`finish:false`) via `bus.getAdapter(...)`. The **authoritative** final
 message still flows through the durable `enqueueOutbound` queue, finishing the
 **same** stream id (derived from `conversationRef.reqId`) with `finish:true` — no
-duplicate message. Partials are best-effort; a `streamReply` failure never aborts
+duplicate message. Partials are best-effort. A `streamReply` failure never aborts
 the turn.
 
 ### Reply vs proactive push

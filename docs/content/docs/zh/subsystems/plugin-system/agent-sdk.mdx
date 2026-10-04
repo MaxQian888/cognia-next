@@ -8,7 +8,7 @@ description: 暴露给插件的可嵌入 Agent 运行时 —— 带类型的 run
 <Status variant="experimental" />
 
 <TLDR>
-`ctx.agent` 是聊天 Agent 的可嵌入对应物。除注册类方法（`registerTool` / `registerSkill` / `registerSubagent` …）外，它现在暴露了带类型的运行循环：`run(prompt, options)`（一次性）与 `runStreamed(prompt, options)`（typed 事件的异步可迭代）。二者都包装 `lib/ai/agent/agent-executor.ts:executeAgent` —— 默认纯文本，设置 `toolsEnabled` 时经桌面 sidecar 走工具循环（由 `agent:control` 权限把关）。运行支持结构化 JSON 输出（`outputFormat`）、可改写参数的 `canUseTool` 许可门，以及按名调用任意宿主/插件工具的 `invokeTool(name, args)`。旧的 `executeAgent(config)` 作为已弃用的兼容垫片保留。
+`ctx.agent` 是聊天 Agent 的可嵌入对应物。除注册类方法（`registerTool` / `registerSkill` / `registerSubagent` …）外，它现在暴露了带类型的运行循环：`run(prompt, options)`（一次性）与 `runStreamed(prompt, options)`（带类型事件的异步可迭代对象）。二者都包装 `lib/ai/agent/agent-executor.ts:executeAgent` —— 默认纯文本，设置 `toolsEnabled` 时经桌面 sidecar 走工具循环（由 `agent:control` 权限把关）。运行支持结构化 JSON 输出（`outputFormat`）、可改写参数的 `canUseTool` 许可门，以及按名调用任意宿主/插件工具的 `invokeTool(name, args)`。旧的 `executeAgent(config)` 作为已弃用的兼容层保留。
 </TLDR>
 
 <StatGrid>

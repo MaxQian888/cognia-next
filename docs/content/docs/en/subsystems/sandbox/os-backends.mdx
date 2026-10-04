@@ -12,12 +12,12 @@ description: "The Rust execution-sandbox crate: the SandboxedExec trait, the pur
   ADR-0196 so the terminal and the Python plugin host could reach it without linking the
   UI-automation stack. The `sandbox_exec` Tauri command (still in
   `crates/cognia-automation/src/sandbox.rs`) checks the plugin's grants, derives a `SandboxPolicy`
-  from the tool name via `policy.rs:policy_for`, and hands off to `run_confined`, which selects a
+  from the tool name via `policy.rs:policy_for`, and calls `run_confined`, which selects a
   per-platform backend via `current_backend()`. **Linux (`bwrap`), macOS (`sandbox-exec`), and
   Windows (`cognia-sandbox-runner.exe`) are real backends**. The Windows runner is the bundled
   restricted-token + low-integrity + Job Object crate and captures stdout/stderr through its JSON
   contract. All three Tauri commands are registered (`src-tauri/src/lib.rs:762-764`). The Tauri
-  command is not the only door: `cognia-sandbox-exec` calls the same `run_confined` for hosts
+  command is not the only entry point: `cognia-sandbox-exec` calls the same `run_confined` for hosts
   without Tauri IPC, which is how the CLI and the headless brain reach the tier at all.
 </TLDR>
 

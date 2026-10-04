@@ -14,11 +14,11 @@ description: The PluginManager lifecycle engine in lib/plugin/core/ — a per-sh
   `resolvePluginRuntimeBootstrap` (`bootstrap.ts:21`), which picks the browser-vs-Tauri profile and
   refuses to run in a non-main window. The manager wires four collaborators in its constructor
   (`manager.ts:381`) — `PluginLoader`, `PluginRegistry`, a `PluginLifecycleHooks` manager, and lazy
-  A2UI/Themes bridges — then walks each plugin through a status machine **installed → loaded →
+  A2UI/Themes bridges — then moves each plugin through a state machine **installed → loaded →
   enabled → disabled → uninstalled**. Discovery (`scanPlugins` `manager.ts:873`) validates, compat-
   checks, and signature-checks every manifest before writing to the Zustand `usePluginStore`;
   `enablePlugin` (`manager.ts:1524`) gates dependencies, applies Dexie tables + i18n, and registers
-  contributions; every reverse path captures a rollback snapshot.
+  contributions. Every reverse path captures a rollback snapshot.
 </TLDR>
 
 <StatGrid>

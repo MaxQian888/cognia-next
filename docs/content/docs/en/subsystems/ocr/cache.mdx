@@ -8,9 +8,9 @@ description: The ocrResults Dexie table (schema v36), the SHA-256 cache-key form
 <Status variant="beta">ocrResults — Dexie v36 (DB v70)</Status>
 
 <TLDR>
-  The same image + provider + language combo never spends twice. `extract()` reads through a Dexie table keyed by
+  The cache reuses results for the same image + provider + language combination. `extract()` reads through a Dexie table keyed by
   `sha256(file) | providerId | sortedLangs` (`lib/db/ocr-results.ts:33`); a hit returns instantly with
-  `cached: true`, a miss runs the provider and writes back. The on-disk row stores the `OcrResult` as JSON
+  `cached: true`. On a miss, the function runs the provider and writes the result to the cache. The on-disk row stores the `OcrResult` as JSON
   (`cached: false`) plus `createdAt` for TTL math and `bytesIn` for the settings stats. The `ocrResults` table was
   introduced at **schema v36** and has not changed since (the database is now at v70). A `purgeOcrCacheOlderThan`
   TTL sweep exists but is **not** wired to a cron — clearing is manual.

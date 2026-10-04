@@ -1,6 +1,6 @@
 ---
 title: "0121 — Workbench Mobile Drawer and Panel Customization"
-description: "Moves the mobile Context Workbench onto a real vaul drawer with snap points, adds panel-level reorder/hide beneath the activity rail, and makes three dormant customizations legible instead of silent."
+description: "Moves the mobile Context Workbench to a vaul drawer with snap points. Adds panel reordering and hiding below the activity rail. Makes three previously dormant customizations visible."
 ---
 
 # ADR 0121 — Workbench Mobile Drawer and Panel Customization
@@ -16,7 +16,7 @@ on screen when the panel body is shut. Three seams were left behind.
 **The mobile surface promised gestures it did not have.** The narrow-screen host
 was a Radix `Sheet` with a decorative `aria-hidden` bar and a comment claiming it
 "keeps the grab-handle affordance and the swipe-to-dismiss gesture". `Sheet` is a
-Dialog: it has neither. `artifact-panel.tsx` repeated the claim. Around that
+Dialog and provides neither gesture. `artifact-panel.tsx` repeated the claim. Around that
 absence sat a fixed `h-[92dvh]` with no half-open state, 32px activity buttons
 against the 44px floor `globals.css` sets for the rest of the app, no
 `useBackDismiss` (so Android back tore the route out from under the sheet while

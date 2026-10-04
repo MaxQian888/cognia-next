@@ -13,11 +13,12 @@ description: "cognia-next gains an n8n-style visual orchestration layer that let
 
 ## Context
 
-cognia-next has rich runtime entities — Characters, Agent Teams, Skills, Twins, Connectors, MCP
+cognia-next has many runtime entities — Characters, Agent Teams, Skills, Twins, Connectors, MCP
 servers, Plugins — but no first-class way for a user to compose them into multi-step automations.
 The previous-generation repo (`D:\Project\Cognia`) shipped a mature React Flow editor with
-~46 node types but **omitted character/team integration entirely** — its workflows were pure
-automation, blind to the agent runtime. That gap is the rewrite driver.
+~46 node types but **omitted character/team integration entirely** — its workflows provided
+automation without access to the agent runtime. This limitation is the reason
+for the rewrite.
 
 Goals:
 

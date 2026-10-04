@@ -61,7 +61,7 @@ flowchart LR
 
 ## Authentication
 
-The CLI config loader already resolves `~/.cognia/credentials.json` and ordinary environment
+The CLI config loader already resolves `~/.cognia/credentials.json` and standard environment
 variables. The session adapter maps Codex credentials to `CODEX_ACCESS_TOKEN` or
 `OPENAI_API_KEY`/`CODEX_API_KEY`, and Anthropic credentials to `CLAUDE_CODE_OAUTH_TOKEN` or
 `ANTHROPIC_API_KEY`. The existing shared env builder remains in the spawn path. If Cognia has no

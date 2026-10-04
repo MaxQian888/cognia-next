@@ -1,13 +1,11 @@
 ---
 title: "0203 — External Bridge 工作区、Git 与 Shell 工具"
-description: "本地 MCP 客户端通过 loopback External Bridge 获得受限的开发机能力：在按客户端授权的工作区根目录上列出/读取/搜索/写入文件、只读 Git 与受监管的 Shell 任务；同时引入面向模型的结果词汇（pending/continuation、决策完备的失败、输入钳制、任务 attention）和由工具自身声明的审计投影。借鉴 WebCodex，但不引入其代码。"
+description: "本地 MCP 客户端通过 loopback External Bridge 在授权工作区根内列出、读取、搜索和写入文件，执行只读 Git 操作及受监管 Shell 任务。模型结果描述 pending/continuation、决策完备失败、输入钳制和任务 attention；工具声明自身审计投影。借鉴 WebCodex，未引入其代码。"
 ---
 
 # ADR 0203 — External Bridge 工作区、Git 与 Shell 工具
 
-**状态：** 已接受
-**日期：** 2026-09-29
-**相关：** [ADR-0008](./0008-external-bridge)（External Bridge；远程暴露仍然推迟）、[ADR-0062](./0062-external-agent-session-import)（外部 Agent 观测）、[ADR-0155](./0155-plugins-reach-the-host-through-one-door)（唯一宿主入口）、[ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked)、[ADR-0201](./0201-the-desktop-browser-runs-chromium-locally)（`browser_*` 采用相同的信封拆分）
+**状态：** 已接受**日期：** 2026-09-29 **相关：** [ADR-0008](./0008-external-bridge)（External Bridge；远程暴露仍然推迟）、[ADR-0062](./0062-external-agent-session-import)（外部 Agent 观测）、[ADR-0155](./0155-plugins-reach-the-host-through-one-door)（唯一宿主入口）、[ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked)、[ADR-0201](./0201-the-desktop-browser-runs-chromium-locally)（`browser_*` 采用相同的信封拆分）
 
 ## 背景
 

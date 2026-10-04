@@ -1,6 +1,6 @@
 ---
 title: 源代码管理
-description: 架在原生 Rust 后端之上的 VS Code 形态 Git 面板 —— 65 个 Tauri 命令与 1:1 的 TypeScript 接口面、文件系统监听、交互式变基与 sequencer，以及 AI 提交信息、diff 解释与代码评审。
+description: 基于原生 Rust 后端的 VS Code 形态 Git 面板：65 个 Tauri 命令与 1:1 的 TypeScript 接口、文件系统监听、交互式变基与 sequencer，以及 AI 提交信息、diff 解释与代码评审。
 ---
 
 # 源代码管理
@@ -10,7 +10,7 @@ description: 架在原生 Rust 后端之上的 VS Code 形态 Git 面板 —— 
 <TLDR>
   Git 由 Rust 实现（`crates/cognia-git/`），而不是从渲染端 shell 调用出去，并以 **65 个 Tauri 命令**
   暴露，对应 `lib/git/commands.ts` 中 67 个几乎完全一致的 TypeScript 函数 ——
-  这是一处罕见的前后端 1:1 映射，没有任何休眠的半边。面板（`components/source-control/` 下 51 个组件）
+  前后端按 1:1 映射，两端的接口均已接入运行路径。面板（`components/source-control/` 下 51 个组件）
   是 VS Code 形态的：按 hunk 暂存、提交图、blame、stash、worktree，
   以及经 `sequencer.rs` 驱动的交互式变基。上层还有三个 AI 助手 ——
   提交信息生成、diff 解释与代码评审 —— 每个都拆成「提示词构造 + 一次生成调用」，
@@ -25,13 +25,11 @@ description: 架在原生 Rust 后端之上的 VS Code 形态 Git 面板 —— 
   <Stat label="AI 助手" value="3" hint="提交信息 · diff 解释 · 评审" />
 </StatGrid>
 
-设计动机见 [ADR-0038](../adr/0038-source-control-panel)。面板偏好存放在
-`AppSettings.gitSettings.panel` —— 本子系统没有自己的 Dexie 表。
+设计动机见 [ADR-0038](../adr/0038-source-control-panel)。面板偏好存放在 `AppSettings.gitSettings.panel` —— 本子系统没有自己的 Dexie 表。
 
 ## Rust 层就是 Git 的全部
 
-`crates/cognia-git/src/` 中每个文件负责 Git 的一个领域，
-这正是命令面能保持扁平、而不退化成一个上帝对象的原因：
+`crates/cognia-git/src/` 中每个文件负责 Git 的一个领域，这种划分使命令接口保持扁平，避免由单个对象承担所有职责：
 
 ```
 repo.rs        # 仓库发现 + 打开
@@ -48,8 +46,7 @@ exec.rs        error.rs       types.rs
 commands.rs    # 65 个 Tauri 命令
 ```
 
-`watcher.rs` 正是面板无需轮询的原因：后端监听仓库并推送变更事件，
-TS 侧通过 `lib/git/events.ts` 消费。
+`watcher.rs` 正是面板无需轮询的原因：后端监听仓库并推送变更事件，TS 侧通过 `lib/git/events.ts` 消费。
 
 ## 前端模块
 
@@ -68,11 +65,7 @@ lib/git/
 
 ## AI 助手首先是提示词构造器
 
-每个助手都拆为「纯提示词构造 + 一次生成调用」，因此其中真正有内容的部分无需模型即可做单元测试。
-`ai-commit.ts` 导出 `buildCommitSystemPrompt()`、`buildCommitUserPrompt()`、
-`clampDiff()`（在 diff 进入模型之前按字符预算截断）与 `stripFences()`，
-而 `generateCommitMessage()`（`lib/git/ai-commit.ts:102`）是唯一接触模型的函数。
-`ai-explain.ts` 采用同样的形态，对应 `generateDiffExplanation()`。
+每个助手都拆为「纯提示词构造 + 一次生成调用」，因此其中真正有内容的部分无需模型即可做单元测试。`ai-commit.ts` 导出 `buildCommitSystemPrompt()`、`buildCommitUserPrompt()`、`clampDiff()`（在 diff 进入模型之前按字符预算截断）与 `stripFences()`，而 `generateCommitMessage()`（`lib/git/ai-commit.ts:102`）是唯一接触模型的函数。`ai-explain.ts` 采用同样的形态，对应 `generateDiffExplanation()`。
 
 ## 相关文档
 

@@ -8,7 +8,7 @@ description: Distribution and lifecycle spine for Cognia plugins — five instal
 <Status variant="experimental" />
 
 <TLDR>
-Every plugin install — HTTP registry, GitHub marketplace repo, raw git build, signed HTTP zip, or local directory — funnels through `runMarketplaceInstall` (`install-flow.ts:328`), which runs an ordered gate (manifest → conflict → dependency → permission → binary → config) before calling the source-specific `installPlugin`. No Dexie `plugins` row exists until the install step (`install-flow.ts:6-7`). Once installed, `updater.ts`, `backup.ts`, and `rollback.ts` own versioning, snapshot rotation (default 5), and restore-with-migration.
+Every plugin install — HTTP registry, GitHub marketplace repo, raw git build, signed HTTP zip, or local directory — uses `runMarketplaceInstall` (`install-flow.ts:328`), which runs an ordered gate (manifest → conflict → dependency → permission → binary → config) before calling the source-specific `installPlugin`. No Dexie `plugins` row exists until the install step (`install-flow.ts:6-7`). Once installed, `updater.ts`, `backup.ts`, and `rollback.ts` own versioning, snapshot rotation (default 5), and restore-with-migration.
 </TLDR>
 
 <StatGrid>
@@ -32,7 +32,7 @@ The five sources:
 - **HTTP `.zip` bundles** (`http-installer.ts`) — a bundle URL with a detached Ed25519 signature.
 - **Local on-disk directory** (`local/`) — a "Load unpacked" directory containing `plugin.json`.
 
-All UI installs funnel through `runMarketplaceInstall` (`marketplace/install-flow.ts`), which gates behind an ordered chain — manifest fetch → conflict detection (`conflict-detector.ts`) → dependency resolution (`dependency-resolver.ts`) → permission consent → binary-requirement probe → config — then calls the source-specific `installPlugin`. That source call performs the authoritative **Rust download + signature verification** before the row is promoted. Once installed (a Dexie `plugins` row exists), the lifecycle managers handle versioning: `updater.ts` (backup → download → install → verify), `backup.ts` (snapshot + rotation), `rollback.ts` (backup → disable/unload → restore → migrate → load/enable → verify).
+All UI installs use `runMarketplaceInstall` (`marketplace/install-flow.ts`), which gates behind an ordered chain — manifest fetch → conflict detection (`conflict-detector.ts`) → dependency resolution (`dependency-resolver.ts`) → permission consent → binary-requirement probe → config — then calls the source-specific `installPlugin`. That source call performs the authoritative **Rust download + signature verification** before the row is promoted. Once installed (a Dexie `plugins` row exists), the lifecycle managers handle versioning: `updater.ts` (backup → download → install → verify), `backup.ts` (snapshot + rotation), `rollback.ts` (backup → disable/unload → restore → migrate → load/enable → verify).
 
 ## 2. `install-flow.ts` — `runMarketplaceInstall`
 

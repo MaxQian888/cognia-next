@@ -42,7 +42,7 @@ The raw fs commands take an `FsOrigin` (`Local` | `Remote`). `enforce_check_path
 
 ### P3 — Per-teammate sandbox policy (wiring System A into Agent Team)
 
-`ExternalSessionPermissionSpec` gains a `sandboxPolicy` that cascades monotonically via `clampSandboxPolicy` (`lib/sandbox/policy-bridge.ts`) — a child/teammate may only narrow writable roots, tighten the network, and lower CPU/memory caps, never widen. `teammateToCharacter` computes the clamped policy and sets `sandboxEnabled`/`sandboxPolicy` on the synthesized Character, which **activates the existing `resolveSendOptions` sandbox gate** for a teammate dispatch — the step that finally connects System A to the team runtime. Team- and teammate-level `sandboxEnabled`/`sandboxPolicy` live on `AgentTeamConfig`/`TeammateConfig`.
+`ExternalSessionPermissionSpec` gains a `sandboxPolicy` that cascades monotonically via `clampSandboxPolicy` (`lib/sandbox/policy-bridge.ts`). A child/teammate may only narrow writable roots, tighten network restrictions, and lower CPU/memory caps. It may never widen these permissions. `teammateToCharacter` computes the clamped policy and sets `sandboxEnabled`/`sandboxPolicy` on the synthesized Character, which **activates the existing `resolveSendOptions` sandbox gate** for a teammate dispatch — the step that finally connects System A to the team runtime. Team- and teammate-level `sandboxEnabled`/`sandboxPolicy` live on `AgentTeamConfig`/`TeammateConfig`.
 
 ### P4 — Unified permission decision path
 

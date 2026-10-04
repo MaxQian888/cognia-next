@@ -10,10 +10,10 @@ description: "Own the previously-undocumented voice/TTS subsystem: stream read-a
 ## Context
 
 The voice/TTS subsystem (`packages/tts/`, `crates/cognia-tts/`, `lib/tts/`,
-`components/settings/speech/`, `app/me/speech/`, plus the desktop pet) was real
-and substantial — eleven providers, an adapter registry, a request-id
+`components/settings/speech/`, `app/me/speech/`, plus the desktop pet) was implemented
+with many features — eleven providers, an adapter registry, a request-id
 cancellation model, an IndexedDB audio cache — but **no ADR had ever recorded
-its design**, and an audit surfaced live defects: read-aloud text was mangled
+its design**, and an audit found defects in the running system: read-aloud text was mangled
 (headings read as "number", code blocks spoken), first-audio latency equalled
 "whole reply generated + whole reply synthesized", cache keys collided, the
 Realtime cancel could be lost during the WebSocket handshake, and provider

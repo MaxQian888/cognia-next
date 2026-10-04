@@ -9,8 +9,8 @@ description: 只读知识面 —— wiki_search 词重叠排序、rag_search（w
 
 <TLDR>
   四个只读 handler 支撑知识面。`wiki_search`（`wiki.ts:57`）按加权词重叠对模块文章排序（标题 ×4、模块 ×3、
-  摘要 ×1）外加 `pageRank × 0.5` 的 tie-break。`wiki_read` 按 slug 返回整篇文章。`rag_search`（`rag.ts:66`）是
-  双路径：wiki 段落用段落级词重叠 + 路径加成，而 `scope=twin` 时对孪生的脱敏块跑真正的 **BM25**。`runtime_query`
+  摘要 ×1）并用 `pageRank × 0.5` 区分同分项。`wiki_read` 按 slug 返回整篇文章。`rag_search`（`rag.ts:66`）是
+  双路径：wiki 段落用段落级词重叠 + 路径加成，而 `scope=twin` 时对孪生的脱敏块执行真实的 **BM25** 检索。`runtime_query`
   （`runtime.ts:50`）list 或 get 五个实体族之一，在 `list` 模式裁剪重字段。`resources.ts` 为三个资源族解析
   `cognia://kind/id` URI。
 </TLDR>
@@ -30,19 +30,16 @@ description: 只读知识面 —— wiki_search 词重叠排序、rag_search（w
 - **空查询** → 仅按 pageRank 取 top-K（`wiki.ts:64-73`），免费得到一份"目录"。
 - 得分为 `0` 的文章被丢弃（`wiki.ts:79`），其余切到 `k`。输出报告 `considered`（排序前的候选数）。
 
-`WikiSearchHit` 携带 `{ slug, title, module, scope, summary, pageRank, score }`。代理随后把有潜力的 `slug`
-喂给 `wiki_read`。
+`WikiSearchHit` 携带 `{ slug, title, module, scope, summary, pageRank, score }`。代理随后把有潜力的 `slug` 喂给 `wiki_read`。
 
 ## `wiki_read` —— 整篇文章
 
 `wikiRead({ slug }): Promise<WikiReadOutput | undefined>`（`wiki.ts:170`）。返回
-`{ slug, title, module, scope, summary, contentMd, sourceRefs, generatedAt }`，slug 未知时返回 `undefined`
-（服务器把它转成 `{ error: "wiki article '<slug>' not found" }`）。`sourceRefs` 是生成时携带的 `file:line` 溯源指针。
+`{ slug, title, module, scope, summary, contentMd, sourceRefs, generatedAt }`，slug 未知时返回 `undefined`（服务器把它转成 `{ error: "wiki article '<slug>' not found" }`）。`sourceRefs` 是生成时携带的 `file:line` 溯源指针。
 
 ## `rag_search` —— 段落级检索
 
-`ragSearch(input): Promise<RagSearchOutput>`（`rag.ts:66`）。`k` 钳制到 `[1, 30]`（默认 8）。
-`scope` 参数选择两个检索引擎之一：
+`ragSearch(input): Promise<RagSearchOutput>`（`rag.ts:66`）。`k` 钳制到 `[1, 30]`（默认 8）。`scope` 参数选择两个检索引擎之一：
 
 ```mermaid
 flowchart TB
@@ -58,12 +55,8 @@ flowchart TB
   class Q,D,W,T,WS,TB,O n
 ```
 
-- **Wiki 路径**（`rag.ts:82-112`）—— 取该 scope 的全部文章，然后对每篇取其 `wikiSections`，对每段的 `bodyMd`
-  打分：词命中 + 每个匹配源文件路径 token 的 `+0.5` 加成 + `article.pageRank * 0.25`（`scoreSection`，
-  `rag.ts:161-185`）。
-- **Twin 路径**（`rag.ts:126-159`）—— 对每个块的 `contentRedacted + sourceTitle`（`rag.ts:139`）建
-  `BM25Index`，使排序与孪生运行时的 hybrid 检索器一致，但返回块的**原始** `content`（`rag.ts:154`）。
-  需要 `twinId` 和 `rag:twin` scope。
+- **Wiki 路径**（`rag.ts:82-112`）—— 取该 scope 的全部文章，然后对每篇取其 `wikiSections`，对每段的 `bodyMd` 打分：词命中 + 每个匹配源文件路径 token 的 `+0.5` 加成 + `article.pageRank * 0.25`（`scoreSection`，`rag.ts:161-185`）。
+- **Twin 路径**（`rag.ts:126-159`）—— 对每个块的 `contentRedacted + sourceTitle`（`rag.ts:139`）建 `BM25Index`，使排序与孪生运行时的 hybrid 检索器一致，但返回块的**原始** `content`（`rag.ts:154`）。需要 `twinId` 和 `rag:twin` scope。
 
 <Callout type="warn" title="Twin RAG 以脱敏排序、返回原文">
   BM25 索引建在 `contentRedacted` 上（PII 已替换为占位符），使检索面保持私密；返回的 `content` 是块的原文，
@@ -86,8 +79,7 @@ twinId?（twin）}`。`rerank` 目前是保留的空操作标志。
 | `plugin` | `version, status, source, enabled, capabilities` | 完整行 |
 | `twin` | `{ kind: "twin" }` | 完整行 |
 
-`list` 返回紧凑的 `RuntimeListEntry[]`（`{ id, name, description?, meta }`）—— 它刻意省略重字段
-（skill `content`、prompt 主体、完整定义）以保持响应短小；`get` 按 `id` 返回完整行。
+`list` 返回紧凑的 `RuntimeListEntry[]`（`{ id, name, description?, meta }`）—— 它刻意省略重字段（skill `content`、prompt 主体、完整定义）以保持响应短小；`get` 按 `id` 返回完整行。
 
 ### twin 没有表 —— 它是推导出来的
 
@@ -117,9 +109,7 @@ export function parseResourceUri(uri: string): { kind: string; id: string } | un
 }
 ```
 
-支持的 kind 是 `wiki`、`skill`、`character`。该模块还导出 `listResources`、`scopeForResourceUri`、
-`readResource`，但生产中由 [MCP 服务器](./mcp-server#资源--高级-resourcetemplate) 经 SDK `ResourceTemplate`
-API 直接注册资源，并复用 `parseResourceUri` 做 URI 切分和按文章的 scope 推导。
+支持的 kind 是 `wiki`、`skill`、`character`。该模块还导出 `listResources`、`scopeForResourceUri`、`readResource`，但生产中由 [MCP 服务器](./mcp-server#资源--高级-resourcetemplate) 经 SDK `ResourceTemplate` API 直接注册资源，并复用 `parseResourceUri` 做 URI 切分和按文章的 scope 推导。
 
 ## 相关
 

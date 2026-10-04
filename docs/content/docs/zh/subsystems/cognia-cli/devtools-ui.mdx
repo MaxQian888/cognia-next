@@ -6,39 +6,27 @@ description: 渲染端 Dev Session 工作台、CLI/bridge 状态、终端启动�
 # DevTools UI
 
 <TLDR>
-  一个 hook 喂入四个组件。`useCogniaCliStatus()`
+  一个 Hook 为四个组件提供状态。`useCogniaCliStatus()`
   （`hooks/plugins/use-cognia-cli-status.ts:40-81`）在挂载期间每 **30 s** 并行探测
   `detectCli("cognia")` 与 `getCliBridgeStatus()`，并暴露
   `{loading, installed, version, path, detection, bridge, supported, refresh}`。**状态
   卡片**（DevTools 面板中的首张卡片）渲染探测中 / 已安装 / 缺失状态，并打开
   **安装对话框** —— Download（托管，带进度）· Build from source（可复制的 cargo 命令）· Release tarball 三个 tab。**启动器** 把
   `cognia plugin build/dev/lint/new/install` 跑在真实终端 tab 里，并将托管目录注入 PATH，
-  而 **状态徽标** 把一切浓缩成一个绿 / 琥珀 / 灰的圆点。
+  而 **状态徽标** 用绿 / 琥珀 / 灰的圆点表示状态。
 </TLDR>
 
 ## Dev Session 权威状态
 
-`PluginDevSessionWorkbench` 是 DevTools 主流程。启动器先生成 UUID，再运行
-`cognia plugin dev --session-id <uuid>`，并在内存 `PluginDevSessionStore` 中关联返回的终端
-session。只有 App 启动的 session 提供终端操作；外部 CLI 的事件可观察，但不会出现伪造的控制按钮。
+`PluginDevSessionWorkbench` 是 DevTools 主流程。启动器先生成 UUID，再运行 `cognia plugin dev --session-id <uuid>`，并在内存 `PluginDevSessionStore` 中关联返回的终端 session。只有 App 启动的 session 提供终端操作；外部 CLI 的事件可观察，但不会出现伪造的控制按钮。
 
-工作台不会根据安装或发现事件推断 reload 成功。只有 renderer bridge 记录的
-`activationProof` 同时证明 lifecycle 为 active、generation 已递增且 artifact revision 对应 Rust
-实际安装的 artifact 时，才展示成功。Activity 与 attempt diagnostics 共用同一 session/attempt 身份。
+工作台不会根据安装或发现事件推断 reload 成功。只有 renderer bridge 记录的 `activationProof` 同时证明 lifecycle 为 active、generation 已递增且 artifact revision 对应 Rust 实际安装的 artifact 时，才展示成功。Activity 与 attempt diagnostics 共用同一 session/attempt 身份。
 
-运行时日志不再需要它。有证明时按该 generation 过滤，没有证明时显示全部 generation 并明说这一点：
-因为一直失败的重载永远产不出证明，而那恰恰是作者最需要看输出的时候。日志来自
-`lib/plugin/devtools/runtime-log-stream.ts`，它把前端 `ctx.logger` 环与 Python 宿主缓冲合并，
-并为每一行标出产生它的宿主。`wasm` 与 `vscode-extension` 根本没有 per-plugin 输出通道，卡片会
-点名是哪个、为什么，而不是渲染一个空列表。
+运行时日志不再需要它。有证明时按该 generation 过滤，没有证明时显示全部 generation 并明说这一点：因为一直失败的重载永远产不出证明，而那恰恰是作者最需要看输出的时候。日志来自 `lib/plugin/devtools/runtime-log-stream.ts`，它把前端 `ctx.logger` 环与 Python 宿主缓冲合并，并为每一行标出产生它的宿主。`wasm` 与 `vscode-extension` 根本没有 per-plugin 输出通道，卡片会点名是哪个、为什么，而不是渲染一个空列表。
 
-Advanced diagnostics 里放着插件 API 调用检查器（每次 `ctx.*` 调用及其权限判定，不采样地读审计
-环）、lifecycle 表、trigger audit 与 extension-point 诊断。曾经占据这里的九标签页面板，连同它的
-Hook、Profiler、Bus 标签，已随其背后的模块一起删除：它们没有任何一个有生产挂载点。
+Advanced diagnostics 里放着插件 API 调用检查器（每次 `ctx.*` 调用及其权限判定，不采样地读审计环）、lifecycle 表、trigger audit 与 extension-point 诊断。曾经占据这里的九标签页面板，连同它的 Hook、Profiler、Bus 标签，已随其背后的模块一起删除：它们没有任何一个有生产挂载点。
 
-工作台旁边，该面板还带着**监听卡片**与**热重载活动**。监听卡片驱动
-`lib/plugin/devtools/file-watch.ts`：不开 CLI 也能在本地来源插件的文件变化时，走同一条已验证
-路径重载。热重载活动是安装、卸载、重载尝试各一行，标出是谁驱动的，失败时还标出原因。
+工作台旁边，该面板还带着**监听卡片**与**热重载活动**。监听卡片驱动 `lib/plugin/devtools/file-watch.ts`：不开 CLI 也能在本地来源插件的文件变化时，走同一条已验证路径重载。热重载活动是安装、卸载、重载尝试各一行，标出是谁驱动的，失败时还标出原因。
 
 ## 状态 hook
 
@@ -74,16 +62,11 @@ stateDiagram-v2
 
 ## 状态卡片 —— `cognia-cli-status-card.tsx`
 
-在 `plugin-devtools-pane.tsx:25` 中挂载的首张卡片。四种渲染：仅桌面提示
-（`!supported`）、spinner + `probing`（`loading`）、`InstalledState`（`:78-119`）—— 带版本的绿色
-对勾徽章、一个 bridge 徽章（绿 `bridgeRunning` / 红 `bridgeDown`）、可选中的等宽
-二进制路径，以及 **Reveal** / **Docs** 按钮 —— 或 `MissingState`
-（`:121-139`），带安装 CTA。i18n 命名空间：`plugins.cliStatus`。
+在 `plugin-devtools-pane.tsx:25` 中挂载的首张卡片。四种渲染：仅桌面提示（`!supported`）、spinner + `probing`（`loading`）、`InstalledState`（`:78-119`）—— 带版本的绿色对勾徽章、一个 bridge 徽章（绿 `bridgeRunning` / 红 `bridgeDown`）、可选中的等宽二进制路径，以及 **Reveal** / **Docs** 按钮 —— 或 `MissingState`（`:121-139`），带安装 CTA。i18n 命名空间：`plugins.cliStatus`。
 
 ## 安装对话框 —— `cognia-cli-install-dialog.tsx`
 
-Props `{open, onOpenChange, onInstalled?}` —— 父级把 `status.refresh` 作为
-`onInstalled` 传入，因此一次成功下载会立即重新探测。
+Props `{open, onOpenChange, onInstalled?}` —— 父级把 `status.refresh` 作为 `onInstalled` 传入，因此一次成功下载会立即重新探测。
 
 | Tab | 内容 |
 | --- | --- |
@@ -91,15 +74,11 @@ Props `{open, onOpenChange, onInstalled?}` —— 父级把 `status.refresh` 作
 | Build from source（`:135-151`） | 复制按钮命令：`cargo install --locked --git https://github.com/MaxQian888/cognia-next cognia-cli` |
 | Release tarball（`:153-163`） | 指向 GitHub Releases 的深链 |
 
-页脚（`:166-169`）携带诚实的校验说明，与
-[占位符发布密钥](./detection-and-managed-install#the-release-key-mirror-renderer-side) 挂钩。
-i18n 命名空间：`plugins.cliInstall`。
+页脚（`:166-169`）携带诚实的校验说明，与[占位符发布密钥](./detection-and-managed-install#the-release-key-mirror-renderer-side) 挂钩。i18n 命名空间：`plugins.cliInstall`。
 
 ## 启动器 —— `cognia-cli-launcher.tsx`
 
-经 `launchCognia()`（`lib/terminal/run-cognia`）在集成终端 tab 里运行真实的 CLI 命令，
-它把 `cwd` 设为所选项目，并将托管 CLI 目录注入 PATH —— 因此即便 `cognia` 不在
-用户自己的 PATH 上，按钮也照常工作。
+经 `launchCognia()`（`lib/terminal/run-cognia`）在集成终端 tab 里运行真实的 CLI 命令，它把 `cwd` 设为所选项目，并将托管 CLI 目录注入 PATH —— 因此即便 `cognia` 不在用户自己的 PATH 上，按钮也照常工作。
 
 | 按钮 | argv | 需要 bridge？ |
 | --- | --- | --- |
@@ -109,9 +88,7 @@ i18n 命名空间：`plugins.cliInstall`。
 | `new` | `plugin new` | 否 |
 | `install` | `plugin install "<picked .zip>"` | **是** |
 
-门控（`:142-219`）：仅桌面检查、一个项目选择器（命令相对于项目）、二进制缺失时的
-`needsCli` 提示、一条琥珀色的 bridge 关闭警告，以及一个 `busyKey` 闩锁，
-使同一时刻只跑一条命令。i18n 命名空间：`plugins.cliLauncher`。
+门控（`:142-219`）：仅桌面检查、一个项目选择器（命令相对于项目）、二进制缺失时的 `needsCli` 提示、一条琥珀色的 bridge 关闭警告，以及一个 `busyKey` 闩锁，使同一时刻只跑一条命令。i18n 命名空间：`plugins.cliLauncher`。
 
 ## 状态徽标 —— `cli-status-chip.tsx`
 
@@ -123,8 +100,7 @@ tone = !status.installed ? "missing"
      : "degraded"                            // amber dot — installed, bridge down
 ```
 
-已安装 → 带版本的被动 tooltip；缺失 → 点击打开安装对话框。i18n 键
-`chipReady` / `chipBridgeDown` / `chipMissing`，位于 `plugins.cliStatus` 下。
+已安装 → 带版本的被动 tooltip；缺失 → 点击打开安装对话框。i18n 键 `chipReady` / `chipBridgeDown` / `chipMissing`，位于 `plugins.cliStatus` 下。
 
 ## 组件接线
 

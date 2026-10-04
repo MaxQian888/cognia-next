@@ -8,7 +8,7 @@ description: Cognia 插件的分发与生命周期主干 —— 五种安装来�
 <Status variant="experimental" />
 
 <TLDR>
-任何插件安装 —— HTTP 注册中心、GitHub 市场仓库、原始 git 构建、签名的 HTTP zip、本地目录 —— 都汇入 `runMarketplaceInstall`（`install-flow.ts:328`），它先跑一条有序闸门（manifest → 冲突 → 依赖 → 权限 → 二进制 → 配置），再调用各来源各自的 `installPlugin`。在安装步骤之前不存在任何 Dexie `plugins` 行（`install-flow.ts:6-7`）。安装完成后，`updater.ts`、`backup.ts`、`rollback.ts` 负责版本管理、快照轮转（默认 5）以及带迁移的恢复。
+任何插件安装 —— HTTP 注册中心、GitHub 市场仓库、原始 git 构建、签名的 HTTP zip、本地目录 —— 都汇入 `runMarketplaceInstall`（`install-flow.ts:328`），它先依次执行检查（manifest → 冲突 → 依赖 → 权限 → 二进制 → 配置），再调用各来源各自的 `installPlugin`。在安装步骤之前不存在任何 Dexie `plugins` 行（`install-flow.ts:6-7`）。安装完成后，`updater.ts`、`backup.ts`、`rollback.ts` 负责版本管理、快照轮转（默认 5）以及带迁移的恢复。
 </TLDR>
 
 <StatGrid>

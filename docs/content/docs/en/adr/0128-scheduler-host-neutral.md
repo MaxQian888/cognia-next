@@ -1,6 +1,6 @@
 ---
 title: ADR-0128 — Host-neutral scheduler, executor completeness, and remote backup destinations
-description: One scheduler contract for the desktop, the headless brain, and the web / companion shells — capability-gated executors instead of isTauri() cliffs, host-owned placement, a Node timing driver, headless bridges for workflow triggers and notifications, OS promotion as wake-and-delegate, and GitHub / Google Drive backup backends.
+description: "Defines one scheduler contract for desktop, the headless brain, and web / companion shells. Executors use capability checks in place of isTauri() checks. The contract includes host-owned placement, a Node timing driver, headless workflow-trigger and notification bridges, OS promotion through wake-and-delegate, and GitHub / Google Drive backup backends."
 ---
 
 # ADR-0128 — Host-neutral scheduler, executor completeness, and remote backup destinations
@@ -68,7 +68,7 @@ A promoted task no longer re-executes out of process. The native entry runs a ne
 
 ### 6. Host-owned placement and the host bar
 
-Every host keeps its own `CogniaSchedulerDB`; nothing hands tasks between hosts. A client chooses which reachable schedule it **manages** — `local` (this device) or `paired` (the host it drives / is paired with, through the `scheduled_task_*` RPCs) — in `lib/scheduler/scheduler-host-target.ts`. Defaults: companions and a desktop driving a remote host prefer `paired`; a remembered `paired` degrades to `local` while unreachable. The scheduler pages show a host bar ("Managing: this device / cloud host <name>", suspended badge, only-while-open note, switch button); the type picker resolves the **target** host's capabilities via the `host_capabilities` RPC.
+Every host keeps its own `CogniaSchedulerDB`. Tasks are not transferred between hosts. A client chooses which reachable schedule it **manages** — `local` (this device) or `paired` (the host it drives / is paired with, through the `scheduled_task_*` RPCs) — in `lib/scheduler/scheduler-host-target.ts`. Defaults: companions and a desktop driving a remote host prefer `paired`; a remembered `paired` degrades to `local` while unreachable. The scheduler pages show a host bar ("Managing: this device / cloud host <name>", suspended badge, only-while-open note, switch button); the type picker resolves the **target** host's capabilities via the `host_capabilities` RPC.
 
 > **Amended by ADR-0136 (2026-08-21).** "Nothing hands tasks between hosts"
 > stands — a host still owns its own `CogniaSchedulerDB` and no task row ever

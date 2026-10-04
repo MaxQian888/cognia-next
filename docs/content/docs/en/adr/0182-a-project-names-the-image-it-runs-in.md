@@ -1,6 +1,6 @@
 ---
 title: "0182 — A project names the image it runs in"
-description: "Cloud and container execution stop using one runner image per deployment. A project resolves an immutable EnvironmentSpec from a two-level image catalog, an approved repository declaration (.cognia/workspace.json or devcontainer.json) or the deployment default. Approval is per device on the desktop and server-side on a shared Host. The whole subsystem is off by default, leaves the off path unchanged, and falls back on infrastructure faults unless isolation is mandatory."
+description: "Projects choose the image used for cloud and container execution. Each project resolves an immutable EnvironmentSpec from a two-level image catalog, an approved repository declaration (.cognia/workspace.json or devcontainer.json), or the deployment default. Desktop approval is per device. Shared Hosts approve server-side. The subsystem is off by default and preserves the existing off path. Infrastructure faults permit fallback unless isolation is mandatory."
 ---
 
 # ADR 0182 — A project names the image it runs in
@@ -138,7 +138,7 @@ One guarantee in this ADR needs infrastructure that Step ② builds. Until then 
 
 - **Egress.** `off` is honoured by giving the container no network at all. `allowlist` and `on` get the network the legacy runner had, with nothing filtering it, because the per-tenant L7 egress proxy is ADR-0185. The placement carries `egress.enforced: false`, so nothing downstream can present an unfiltered sandbox as an enforced allowlist.
 
-Credentials are no longer a gap. The driver strips the ambient provider-credential names — the same list the local launcher clears — out of the spawn environment before the container sees them, so a sandbox never holds the host's real keys; a managed gateway task's per-task lease (`COGNIA_GATEWAY_TASK_CONFIG`/`COGNIA_GATEWAY_TOKEN`) is the ingress instead, and the placement says `credentials.mode: "gateway-lease"` for it and `"none"` otherwise. Because the stripped names are never listed as driver-provided, the in-sandbox supervisor also drops an image-baked copy ([ADR-0183](./0183-the-agent-is-brought-to-the-image)). Per-sandbox tickets for ordinary spawns remain ADR-0185 §②.7.
+Credential handling is now implemented. The driver strips the ambient provider-credential names — the same list the local launcher clears — out of the spawn environment before the container sees them, so a sandbox never holds the host's real keys; a managed gateway task's per-task lease (`COGNIA_GATEWAY_TASK_CONFIG`/`COGNIA_GATEWAY_TOKEN`) is the ingress instead, and the placement says `credentials.mode: "gateway-lease"` for it and `"none"` otherwise. Because the stripped names are never listed as driver-provided, the in-sandbox supervisor also drops an image-baked copy ([ADR-0183](./0183-the-agent-is-brought-to-the-image)). Per-sandbox tickets for ordinary spawns remain ADR-0185 §②.7.
 
 Egress is not a silent downgrade: a project cannot ask for an enforced allowlist in Step ① and be told it got one.
 

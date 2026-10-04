@@ -1,6 +1,6 @@
 ---
 title: 消费面
-description: 主设置面板之外消费 MCP 配置的各个场所——agent 自定义模式的工具选择器（预算 + AI 推荐）、调度器的服务器选择器（默认 vs 显式）、CCSwitch 导入标签页、聊天记录的工具卡片渲染器注册表，以及 A2UI bridge 设置标签页。
+description: 主设置面板之外读取 MCP 配置的各个界面——agent 自定义模式的工具选择器（预算 + AI 推荐）、调度器的服务器选择器（默认 vs 显式）、CCSwitch 导入标签页、聊天记录的工具卡片渲染器注册表，以及 A2UI bridge 设置标签页。
 ---
 
 # 消费面
@@ -8,10 +8,10 @@ description: 主设置面板之外消费 MCP 配置的各个场所——agent �
 <Status variant="stable">Stable · 横跨 agent / scheduler / chat / settings 的 5 个消费面</Status>
 
 <TLDR>
-  在设置面板之外，有五个消费面以不同的形态读取 MCP 配置。**工具选择器**
+  在设置面板之外，有五个界面以不同形式读取 MCP 配置。**工具选择器**
   （agent 自定义模式）在预算约束下挑选单个工具，并带有 AI 排序的推荐。**调度器选择器**
   挑选整个服务器，并区分“使用默认”（`undefined`）与“显式置空”
-  （`[]`）。**CCSwitch 标签页**是第二个导入器，把 CCSwitch 托管的 CLI 中的 MCP 配置拉取
+  （`[]`）。**CCSwitch 标签页**是第二个导入器，把 CCSwitch 托管的 CLI 中的 MCP 配置导入
   进 `mcpServers` store。**聊天工具卡片注册表**把工具名映射到定制的结果卡片
   （wiki/rag/read/plan/grep…），并带有通用回退。**A2UI bridge 标签页**控制常驻的
   a2ui-bridge 行的逐 agent 投影，并展示实时的 bridge 健康状况。
@@ -19,10 +19,7 @@ description: 主设置面板之外消费 MCP 配置的各个场所——agent �
 
 ## 工具选择器
 
-`components/agent/mode/custom-mode-editor/mcp-tool-selector.tsx` 允许自定义模式在预算约束下启用一个特定
-的 MCP 工具子集。它从 `useMcpStore` stub 读取已连接的服务器及其工具，从 `toolSelectionConfig`
-读取预算，向 `getRecommendedMcpToolsForMode` 请求基于模式元数据的 AI 排序选项，并发射
-`McpToolReference[]`（`{ serverId, toolName, displayName }`）：
+`components/agent/mode/custom-mode-editor/mcp-tool-selector.tsx` 允许自定义模式在预算约束下启用一个特定的 MCP 工具子集。它从 `useMcpStore` stub 读取已连接的服务器及其工具，从 `toolSelectionConfig` 读取预算，向 `getRecommendedMcpToolsForMode` 请求基于模式元数据的 AI 排序选项，并发射 `McpToolReference[]`（`{ serverId, toolName, displayName }`）：
 
 ```typescript title="components/agent/mode/custom-mode-editor/mcp-tool-selector.tsx:75"
 const recommendedTools = useMemo(() => {
@@ -36,14 +33,11 @@ const recommendedTools = useMemo(() => {
 }, [availableTools, recommendationContext, recommendationsEnabled, toolSelectionConfig.maxTools])
 ```
 
-当选择超出 `toolSelectionConfig.maxTools` 时，会出现一个超预算徽标进行警告；“应用推荐”
-按钮则用推荐面板里的内容填充选择。
+当选择超出 `toolSelectionConfig.maxTools` 时，会出现一个超预算徽标进行警告；“应用推荐”按钮则用推荐面板里的内容填充选择。
 
 ## 调度器选择器
 
-`components/scheduler/payload-editors/mcp-picker.tsx` 为计划任务挑选**服务器**（而非工具）。
-它的关键微妙之处在于这个双状态取值——空数组表示“显式禁用 MCP”，`undefined` 表示
-“让 `resolveSendOptions` 挑选角色/团队默认值”：
+`components/scheduler/payload-editors/mcp-picker.tsx` 为计划任务挑选**服务器**（而非工具）。它的关键微妙之处在于这个双状态取值——空数组表示“显式禁用 MCP”，`undefined` 表示“让 `resolveSendOptions` 挑选角色/团队默认值”：
 
 ```typescript title="components/scheduler/payload-editors/mcp-picker.tsx:5"
 /**
@@ -53,14 +47,11 @@ const recommendedTools = useMemo(() => {
  */
 ```
 
-一个单选按钮在 `default` 与 `custom` 之间切换；在 `custom` 模式下，一份 `listMcpServers()`
-的清单（已过滤掉禁用的行）驱动 id 数组。
+一个单选按钮在 `default` 与 `custom` 之间切换；在 `custom` 模式下，一份 `listMcpServers()` 的清单（已过滤掉禁用的行）驱动 id 数组。
 
 ## CCSwitch MCP 标签页
 
-`components/settings/ccswitch/tabs/mcp-tab.tsx` 是一个**第二导入器**（与
-[导入对话框](./presets-and-import#importing-from-a-cli-config)并列）。它读取 CCSwitch
-为外部 CLI 托管的 MCP 服务器，并以一种冲突策略导入所选项：
+`components/settings/ccswitch/tabs/mcp-tab.tsx` 是一个**第二导入器**（与[导入对话框](./presets-and-import#importing-from-a-cli-config)并列）。它读取 CCSwitch 为外部 CLI 托管的 MCP 服务器，并以一种冲突策略导入所选项：
 
 ```typescript title="components/settings/ccswitch/tabs/mcp-tab.tsx:59"
 const onImport = async () => {
@@ -72,13 +63,11 @@ const onImport = async () => {
 }
 ```
 
-仅限桌面端（否则显示一条 web 模式提示）；每一行展示传输方式 + 备注；策略是一个单选按钮。关于这次同步的
-传播一侧，参见 CCSwitch 子系统。
+仅限桌面端（否则显示一条 web 模式提示）；每一行展示传输方式 + 备注；策略是一个单选按钮。关于这次同步的传播一侧，参见 CCSwitch 子系统。
 
 ## 聊天工具卡片渲染器
 
-`components/chat/message-parts/mcp-tool-card.tsx` 是一个注册表，它把 MCP 工具的**结果**渲染为
-聊天记录中的结构化卡片，对未知工具或解析失败的情况则回退到通用的 `ToolBody`：
+`components/chat/message-parts/mcp-tool-card.tsx` 是一个注册表，它把 MCP 工具的**结果**渲染为聊天记录中的结构化卡片，对未知工具或解析失败的情况则回退到通用的 `ToolBody`：
 
 ```tsx title="components/chat/message-parts/mcp-tool-card.tsx:35"
 const REGISTRY: Record<string, CardComponent> = {
@@ -91,8 +80,7 @@ const REGISTRY: Record<string, CardComponent> = {
 }
 ```
 
-渲染器位于 `mcp-renderers/`。每个渲染器从 part 中取出 `input`，用共享的
-`useParsedOutput<T>()` 校验 `output`（返回 `null` 触发回退），并通过 `McpCardShell` 渲染：
+渲染器位于 `mcp-renderers/`。每个渲染器从 part 中取出 `input`，用共享的 `useParsedOutput<T>()` 校验 `output`（返回 `null` 触发回退），并通过 `McpCardShell` 渲染：
 
 ```tsx title="components/chat/message-parts/mcp-renderers/common.tsx:18"
 export function parseOutputJson(output: unknown): unknown | null {
@@ -109,9 +97,7 @@ export function parseOutputJson(output: unknown): unknown | null {
 
 ## A2UI bridge 设置标签页
 
-`components/settings/a2ui/mcp-bridge-tab.tsx` 控制常驻的 `a2ui-bridge` 行：它获取
-不可变的 bridge 行，展示实时健康状况（工具数 = `A2UI_BRIDGE_TOOLS.length`、`liveSurfaceCount`、
-Tauri 上的 sidecar 目录 + socket 路径），提供一次自检，并暴露逐 agent 的投影矩阵：
+`components/settings/a2ui/mcp-bridge-tab.tsx` 控制常驻的 `a2ui-bridge` 行：它获取不可变的 bridge 行，展示实时健康状况（工具数 = `A2UI_BRIDGE_TOOLS.length`、`liveSurfaceCount`、Tauri 上的 sidecar 目录 + socket 路径），提供一次自检，并暴露逐 agent 的投影矩阵：
 
 ```tsx title="components/settings/a2ui/mcp-bridge-tab.tsx:27"
 const MANAGED_AGENTS: AgentId[] = ["claude-code", "claude-desktop", "cursor", "vscode", "codex", "gemini", "windsurf"]
@@ -129,12 +115,9 @@ const READ_ONLY_AGENTS: AgentId[] = ["cline", "roo-code"]
 | `mcp_set_enabled` | `{ id, enabled }` | `desktop-write-source.ts` → `updateMcpServer` |
 | `mcp_set_tool_rules` | `{ id, disallowedTools?, disallowedToolPatterns? }` | 同上 |
 
-两者都走 `updateMcpServer` 而不是裸 Dexie 写入，这样桌面端开关所带来的治理副作用——信任门、调用方随后读到的同步镜像、
-向每个 agent 配置文件的合并同步——在远端调用时表现完全一致。写入经由持久化的 `mobileOutboundQueue`，
-所以离线时做出的更改之后依然会落地。
+两者都走 `updateMcpServer` 而不是裸 Dexie 写入，这样桌面端开关所带来的治理副作用——信任门、调用方随后读到的同步镜像、向每个 agent 配置文件的合并同步——在远端调用时表现完全一致。写入经由持久化的 `mobileOutboundQueue`，所以离线时做出的更改之后依然会落地。
 
-工具规则是**整体**下发而非增量：客户端渲染的是它从同步镜像读到的那份列表，若把增量应用到一份过期镜像上，
-会悄悄放行用户在另一台设备上刚刚禁用的工具。
+工具规则是**整体**下发而非增量：客户端渲染的是它从同步镜像读到的那份列表，若把增量应用到一份过期镜像上，会悄悄放行用户在另一台设备上刚刚禁用的工具。
 
 <Callout type="info">
   写入面到此为止。新增、编辑、删除定义都携带凭据与信任决策，OAuth 流程又需要桌面端 keyring——这些保持桌面独有，
@@ -142,8 +125,7 @@ const READ_ONLY_AGENTS: AgentId[] = ["cline", "roo-code"]
   因为规则是在有已探测工具列表的地方编写的。
 </Callout>
 
-工具名之所以能到达手机，是因为每次探测后 `writeCapabilityCache` 会把它们投射到 summary 上——能力缓存本身只存在于宿主机。
-因此桌面端从未探测过的服务器会**不显示**工具列表，而不是显示一个空列表，因为"没有工具"和"还没问过"是两个不同的答案。
+工具名之所以能到达手机，是因为每次探测后 `writeCapabilityCache` 会把它们投射到 summary 上——能力缓存本身只存在于宿主机。因此桌面端从未探测过的服务器会**不显示**工具列表，而不是显示一个空列表，因为"没有工具"和"还没问过"是两个不同的答案。
 
 ## 消费面 → 数据映射
 

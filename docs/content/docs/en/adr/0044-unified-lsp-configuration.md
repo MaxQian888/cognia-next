@@ -49,7 +49,7 @@ The editor registry spawns eagerly on register, so feeding it four default toolc
 
 ### Settings surface + migration
 
-Language Servers is promoted to a first-class settings section with builtin rows (read-only, source badge, disable, override) and user rows (add / edit / remove), and a full-field add/edit dialog including a validated-JSON `settings` editor. The slice moves from `developer.userLspServers` / `developer.unsignedLspAllowed` to a first-class `AppSettings.lsp` (`{ servers, enabled, unsignedAllowed }`). `lib/lsp/migrate-settings.ts` performs a one-time, idempotent migration wired at app start before the registry bootstraps; the binary policy reads the new field with a legacy fallback.
+Language Servers becomes a dedicated settings section with builtin rows (read-only, source badge, disable, override) and user rows (add / edit / remove), and a full-field add/edit dialog including a validated-JSON `settings` editor. The slice moves from `developer.userLspServers` / `developer.unsignedLspAllowed` to a first-class `AppSettings.lsp` (`{ servers, enabled, unsignedAllowed }`). `lib/lsp/migrate-settings.ts` performs a one-time, idempotent migration wired at app start before the registry bootstraps. The binary policy reads the new field with a legacy fallback.
 
 ## Consequences
 

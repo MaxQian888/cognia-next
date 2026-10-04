@@ -93,7 +93,7 @@ two hosts cannot drift.
 
 Running instances are rows in the unified managed-process registry
 (`src-tauri/src/process_registry/`), exactly like the chat sidecar, MCP server
-and terminals — so the performance panel's Managed Processes tab lists them with
+and terminals. The performance panel's Managed Processes tab lists them with
 live CPU/memory and a kill button. `ManagedSubsystem::CodeServer` routes control
 on the **canonical project root**, which is also the instance key. code-server is
 the only subsystem that supports native `Restart` (stop + re-ensure), because it

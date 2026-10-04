@@ -21,7 +21,8 @@ The goal is **full settings parity, not a simplified subset**. Two facts shape h
 
 2. **The standalone engine is a plain AI SDK `streamText` call.** It consumes only the model and the composed system prompt. It runs **no tools, no MCP, no agent loop, no permission modes, no `autoMode`/`toolFilter`/thinking budget.** Any agent-class setting shown on a *standalone* phone has no consumer today — it would be dead UI, this repo's most recurrent defect class.
 
-A third fact constrains the wire/security boundary. Setting sync is asymmetric:
+The direction of setting sync also constrains the protocol and security
+boundary. Setting sync is asymmetric:
 - Desktop → phone mirrors 19 keys (`CROSS_PLATFORM_SETTING_KEYS`), **including** the agent fields `autoMode`, `permissionMode`, `defaultSystemPrompt`, `defaultMaxThinkingTokens`, `bareMode`, `debugMode`, `briefMode`.
 - Phone → desktop allows ~36 keys (`APP_SETTINGS_MOBILE_ALLOWED_KEYS` in `src-tauri/src/companion_api/rpc.rs`), enforced server-side with OpenAPI spec-parity + Rust tests. The agent fields above are **NOT** in it: the phone sees them but cannot edit them back. `apiKey`, `apiBaseUrl`, provider config, `sidecarPath`, and transport keys are asserted *non-writable* from mobile and stay that way.
 

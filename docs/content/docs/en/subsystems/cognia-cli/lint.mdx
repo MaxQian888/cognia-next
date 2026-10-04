@@ -9,8 +9,8 @@ description: cognia plugin lint — the diagnostic-code validation catalog over 
   `cmd_lint.rs` (the CLI's largest module) runs **60+ distinct diagnostic codes** over
   `plugin.json` and emits either styled prose or a `schemaVersion: 2` JSON report. Severity is
   three-level: **errors** fail the run (`exit 1`, and they block `build` through
-  `cmd_build::build_inner`); **warnings** don't gate unless you pass `-W` /
-  `--warnings-as-errors`; **notices** never gate. Four whitelists are hard-coded in Rust — 70
+  `cmd_build::build_inner`). **Warnings** do not fail the run unless you pass `-W` /
+  `--warnings-as-errors`. **Notices** never fail the run. Four whitelists are hard-coded in Rust — 70
   permissions (`VALID_PERMISSIONS`), 63 capabilities (`VALID_CAPABILITIES`), 5 plugin types
   (`VALID_PLUGIN_TYPES`), and the 47-entry `CAPABILITY_FIELDS` map — and a Jest test
   (`lib/plugin/contracts/rust-capability-parity.test.ts`) regex-extracts all four from the Rust

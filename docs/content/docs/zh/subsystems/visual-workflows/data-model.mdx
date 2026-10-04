@@ -8,7 +8,7 @@ description: 权威的 VisualWorkflow 图类型、153 种节点 / 7 大类分类
 <Status variant="stable" />
 
 <TLDR>
-一个工作流就是由 `WorkflowNode` 与 `WorkflowEdge` 组成的 `VisualWorkflow` 图。每个节点 `type` 是 153 个 `WorkflowNodeKind` 字面量之一，归入 7 大类。持久化截至 schema v156 涉及 13 张工作流 Dexie 表，包括 immutable version/deployment/invocation 与 durable waitpoint/event。执行前会依次完成 Zod 和图完整性校验。
+一个工作流就是由 `WorkflowNode` 与 `WorkflowEdge` 组成的 `VisualWorkflow` 图。每个节点 `type` 是 153 个 `WorkflowNodeKind` 字面量之一，归入 7 大类。截至 schema v156，持久化涉及 13 张工作流 Dexie 表，包括 immutable version/deployment/invocation 与 durable waitpoint/event。执行前会依次完成 Zod 和图完整性校验。
 </TLDR>
 
 <StatGrid>

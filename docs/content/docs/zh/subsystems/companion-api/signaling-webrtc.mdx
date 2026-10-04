@@ -5,37 +5,19 @@ description: 会合点作为端到端加密的应用层中继（ADR-0170）、�
 
 # 中继、WebRTC 信令与 DataChannel
 
-同一套 answerer 同时运行在 Tauri 和全新启动的 `cognia-server` 中，不依赖
-renderer 参与。自 ADR-0170 起，会合点同时也是广域网传输：双方经中继互道
-`hello` 的那一刻会话即已打开，DataChannel 是在其之上协商出来的升级。
+同一套 answerer 同时运行在 Tauri 和全新启动的 `cognia-server` 中，不依赖 renderer 参与。自 ADR-0170 起，会合点同时也是广域网传输：双方经中继发送 `hello` 后，会话即已打开。DataChannel 是在此基础上协商的升级。
 
 ## 中继数据通道
 
-`hello` 信封双向携带 `relay: true`。从这一帧起，`data` 通道上的
-`EnvelopeKind::Data` 信封原样承载 DataChannel 帧（RPC、`event` /
-`event-batch`、二进制资源及其分片），`dispatch.rs` 通过同一个入站队列消费。
-offer、answer 与 ICE 交换在后台进行；DataChannel 打开即提升载体，掉线即降级，
-不重连、不丢事件游标。不应答 `relay: true` 的主机是旧版主机，客户端保持旧行为：
-要么 DataChannel，要么没有。
+`hello` 信封双向携带 `relay: true`。从这一帧起，`data` 通道上的 `EnvelopeKind::Data` 信封原样承载 DataChannel 帧（RPC、`event` /`event-batch`、二进制资源及其分片），`dispatch.rs` 通过同一个入站队列消费。offer、answer 与 ICE 交换在后台进行；DataChannel 打开即提升载体，掉线即降级，不重连、不丢事件游标。不应答 `relay: true` 的主机是旧版主机，客户端保持旧行为：要么 DataChannel，要么没有。
 
 ## 经中继配对
 
-所有者邀请（`cgnp4`）携带一个配对房间：会合点 URL、一个 `RoomDescriptor`
-（其移动端密钥是主机刚铸造的一次性 P-256 密钥）以及该密钥私钥的 JWK。主机在
-邀请有效期内驻留房间。受邀方经数据通道发送 `pair.http` RPC 帧
-（`{ method, path, headers, body }`），主机在进程内调用自己的 axum 路由应答，
-且只放行四条路由：`/api/auth/config`、`/api/auth/device/challenge`、
-`/api/auth/device/register`、`/api/auth/token`。其余请求在到达路由前即被拒绝。
-客户端先对邀请里的直连地址探测四秒（`registerPairPayload`），失败再走中继。
+所有者邀请（`cgnp4`）携带一个配对房间：会合点 URL、一个 `RoomDescriptor`（其移动端密钥是主机刚铸造的一次性 P-256 密钥）以及该密钥私钥的 JWK。主机在邀请有效期内驻留房间。受邀方经数据通道发送 `pair.http` RPC 帧（`{ method, path, headers, body }`），主机在进程内调用自己的 axum 路由应答，且只放行四条路由：`/api/auth/config`、`/api/auth/device/challenge`、`/api/auth/device/register`、`/api/auth/token`。其余请求在到达路由前即被拒绝。客户端先对邀请里的直连地址探测四秒（`registerPairPayload`），失败再走中继。
 
 ## 中继通道预算
 
-服务端按 `lane` 字段给 `relay` 帧分桶，不解密任何内容。`signal` 通道保留每秒
-补 10 帧的 20 帧桶与 8 KiB 软上限；`data` 通道单独一桶，256 帧、每秒补 64 帧，
-上限 64 KiB，足以容纳 base64 后的 21 KiB 二进制分片加信封。按通道的计数器以
-`signaling_relay_frames_total{lane}` 与 `signaling_relay_bytes_total{lane}`
-导出。拒绝仍使用稳定的 `rate_limited` 与 `frame_too_large` 码；已打开的传输把
-一帧被丢视为该帧自己的超时，而不是重连的理由。
+服务端按 `lane` 字段给 `relay` 帧分桶，不解密任何内容。`signal` 通道保留每秒补 10 帧的 20 帧桶与 8 KiB 软上限；`data` 通道单独一桶，256 帧、每秒补 64 帧，上限 64 KiB，足以容纳 base64 后的 21 KiB 二进制分片加信封。按通道的计数器以 `signaling_relay_frames_total{lane}` 与 `signaling_relay_bytes_total{lane}` 导出。拒绝仍使用稳定的 `rate_limited` 与 `frame_too_large` 码；已打开的传输把一帧被丢视为该帧自己的超时，而不是重连的理由。
 
 ## 模块
 
@@ -67,37 +49,22 @@ sequenceDiagram
   M->>H: "DTLS + cognia.signaling DataChannel"
 ```
 
-配对将 host 角色私钥放入原生 secret store，将公开
-`RoomDescriptor` 放入 SQLite。Tauri 可幂等导入 renderer 记录；
-headless 启动时从同一 store 恢复全部 answerer。
+配对将 host 角色私钥放入原生 secret store，将公开 `RoomDescriptor` 放入 SQLite。Tauri 可幂等导入 renderer 记录；headless 启动时从同一 store 恢复全部 answerer。
 
-五秒 challenge 绑定 room、role、session、随机 epoch、签发时间和临时
-P-256 ECDH 公钥，并由角色 ECDSA 私钥签名。每个 room 只有一个 desktop
-和一个 mobile；新的合法同角色会话原子替换旧会话。
+五秒 challenge 绑定 room、role、session、随机 epoch、签发时间和临时 P-256 ECDH 公钥，并由角色 ECDSA 私钥签名。每个 room 只有一个 desktop 和一个 mobile；新的合法同角色会话原子替换旧会话。
 
 ## 安全边界
 
-SDP/ICE 使用 AES-256-GCM 加密；方向密钥来自临时 P-256 ECDH 与
-HKDF-SHA-256；ECDSA P-256 签名覆盖长度前缀的规范 header 和密文。
-中继只看见路由元数据，无法解密，也无法把合法消息改标成另一个角色。
+SDP/ICE 使用 AES-256-GCM 加密；方向密钥来自临时 P-256 ECDH 与 HKDF-SHA-256；ECDSA P-256 签名覆盖长度前缀的规范 header 和密文。中继只看见路由元数据，无法解密，也无法把合法消息改标成另一个角色。
 
-接收端拒绝过期 descriptor、时钟越界、签名错误、角色错误、旧 epoch、
-重复 seq，以及超出受界重排窗口的缺口。不存在 v1 parser 或降级路径。
+接收端拒绝过期 descriptor、时钟越界、签名错误、角色错误、旧 epoch、重复 seq，以及超出受界重排窗口的缺口。不存在 v1 parser 或降级路径。
 
 ## 数据面边界
 
-有序可靠的 `cognia.signaling` 通道最多并发 32 个 RPC。物理帧最大 32 KiB，
-逻辑消息最大 1 MiB；每 peer 最多 8 个重组、4 MiB 内存、15 秒期限。
-入站队列最多 128 帧；pending ICE 最多 256 条、保存 30 秒，并且只在
-匹配 epoch 的 remote description 设置后应用。
+有序可靠的 `cognia.signaling` 通道最多并发 32 个 RPC。物理帧最大 32 KiB，逻辑消息最大 1 MiB；每 peer 最多 8 个重组、4 MiB 内存、15 秒期限。入站队列最多 128 帧；pending ICE 最多 256 条、保存 30 秒，并且只在匹配 epoch 的 remote description 设置后应用。
 
-RTC 与 HTTPS 共享命令 manifest、设备限流器和持久幂等 ledger。事件从
-持久全局 cursor 恢复并显式 ack；当 24 小时/10,000 条窗口不足时发送
-`resync_required`，禁止静默形成缺口。
+RTC 与 HTTPS 共享命令 manifest、设备限流器和持久幂等 ledger。事件从持久全局 cursor 恢复并显式 ack；当 24 小时/10,000 条窗口不足时发送 `resync_required`，禁止静默形成缺口。
 
 ## 恢复
 
-信令连接使用 8 秒 connect、5 秒 challenge/subscribe deadline、20 秒
-心跳、10 秒 pong deadline 和全抖动受界退避。所有协商任务绑定 epoch，
-旧异步任务不能回写新 peer。对端尚未上线时进入 `awaiting-peer`，不计为
-连接失败。
+信令连接使用 8 秒 connect、5 秒 challenge/subscribe deadline、20 秒心跳、10 秒 pong deadline 和全抖动受界退避。所有协商任务绑定 epoch，旧异步任务不能回写新 peer。对端尚未上线时进入 `awaiting-peer`，不计为连接失败。

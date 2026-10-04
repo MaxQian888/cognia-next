@@ -1,12 +1,11 @@
 ---
 title: "0087 — Python 支持的插件贡献"
-description: "让能力契约如实声明 Python 能执行什么,并通过一层共享 seam 把 module-bridge 贡献路由进插件的 Python 子进程。"
+description: "让能力契约如实声明 Python 能执行什么,并通过一层共享接口 把 module-bridge 贡献路由进插件的 Python 子进程。"
 ---
 
 # ADR 0087 — Python 支持的插件贡献
 
-**状态:** 已接受
-**日期:** 2026-07-21
+**状态:** 已接受**日期:** 2026-07-21
 
 ## 背景
 
@@ -18,7 +17,7 @@ Python 插件运行时(`crates/cognia-plugin-runtime/src/python/`)早已上线:�
 - **module-bridge 能力**(`ocrProviders`、`aiProviders`、`connectors`、`workspaceBackends` 等)解析出来的是一个**带活方法的 JS 对象** —— `provider.extract(...)`、`backend.clone(...)`、`adapter.send(...)`。每个 bridge 动态 import 一个 JS `entry` 并调用具名 `export`。纯 Python 插件交不出 JS 对象。
 - **UI 能力**(`views`/tree-view、`messageRenderers`、`modalMounts`、`contextPanels`)需要渲染进程里的 React 组件。子进程没有 DOM。
 
-**说谎的不是运行时,而是契约和 SDK。** `plugin-sdk/python` 提供了 `define_ocr_provider()`、`define_connector()` 等,让 Python 作者能写出看似可用的 provider;`define_connector` 甚至接收一个 `factory: str` 去指向一个不可能存在的 JS 符号。`PluginCapabilityContract.pythonSdk` 为 Python 永远无法执行的能力列出了 Python SDK 文件,而 proof 审计**要求**每个 `supported` 能力都填该字段——等于契约在**主动推动**每个能力去宣称支持 Python。与此同时 `cognia plugin lint` 又会直接拒绝这类插件(`manifest.contributions.javascript.unsupported_for_python`),作者面对的是一个"SDK 邀请你写、linter 拒绝你交"的局面。
+**契约与 SDK 声明了运行时无法执行的能力。** `plugin-sdk/python` 提供了 `define_ocr_provider()`、`define_connector()` 等,让 Python 作者能写出看似可用的 provider。`define_connector` 甚至接收一个 `factory: str` 去指向一个不可能存在的 JS 符号。`PluginCapabilityContract.pythonSdk` 为 Python 永远无法执行的能力列出了 Python SDK 文件,而 proof 审计**要求**每个 `supported` 能力都填该字段——等于契约在**主动推动**每个能力去宣称支持 Python。与此同时 `cognia plugin lint` 又会直接拒绝这类插件(`manifest.contributions.javascript.unsupported_for_python`),因此，SDK 支持编写的内容会被 linter 拒绝。
 
 ## 决策
 

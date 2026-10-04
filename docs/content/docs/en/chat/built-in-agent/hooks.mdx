@@ -5,7 +5,10 @@ description: Capability-aware lifecycle Hooks for the built-in Claude Agent SDK 
 
 # Hooks
 
-Cognia loads Claude-Code-compatible lifecycle Hooks from `settings.json`. The built-in Claude Agent SDK uses native SDK callbacks; Codex and external agents use provider adapters. All paths share the same event, decision, trust, and audit semantics without executing the same event twice.
+Cognia loads Claude-Code-compatible lifecycle Hooks from `settings.json`.
+The built-in Claude Agent SDK uses native SDK callbacks.
+Codex and external agents use provider adapters.
+All paths share event, decision, trust, and audit semantics, and none executes the same event twice.
 
 <TLDR>
   Runtime capabilities are evidence-based. The pinned Claude Agent SDK exposes **33 events** and

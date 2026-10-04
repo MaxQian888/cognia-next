@@ -1,6 +1,6 @@
 ---
 title: ADR-0044 — 统一 LSP 配置
-description: "单一声明式语言服务器配置源——内置默认值可被用户全局设置和项目本地覆盖。cognia/lsp.json ——驱动BOTH代理运行时 LSP和编辑器LSP，取代了之前硬编码的代理注册表和不同的UserLspServerEntry/PluginLspServerDef形状。增加了全字段配置、真实的每服务器workspace/configuration布线、一流的设置部分以及一次性设置迁移。"
+description: "单一声明式语言服务器配置源——内置默认值可被用户全局设置和项目本地覆盖。cognia/lsp.json ——同时驱动 Agent 运行时 LSP 与编辑器 LSP，取代了之前硬编码的代理注册表和不同的UserLspServerEntry/PluginLspServerDef形状。增加了全字段配置、按服务器接入的 workspace/configuration、独立设置区域以及一次性设置迁移。"
 ---
 
 # ADR-0044 — 统一 LSP 配置
@@ -34,7 +34,7 @@ Scalar/array字段被更高层替换;`settings` / `env` / `initializationOptions
 
 ### 跨越sidecar边界
 
-`sidecar/` 是一个独立的节点项目，无法导入 `lib/` 或 `@/types`。所以渲染器拥有分辨率：`lib/claude/build-options.ts:resolveSendOptions` 解析合并后的列表并将其序列化到 `sendOptions.lsp`（`{ enabled, servers }`）。sidecar 消耗它——`sidecar/lsp/servers.mjs` 现在是 `buildServers(configList)` + `serversForFile(file, servers)`（没有硬编码的注册表）;`resolver.mjs` / `service-loader.mjs` / `anthropic.mjs` 串程通过列表。代理人保持懒惰+PATH-probed。
+`sidecar/` 是一个独立的节点项目，无法导入 `lib/` 或 `@/types`。因此，配置由渲染器解析：`lib/claude/build-options.ts:resolveSendOptions` 解析合并后的列表并将其序列化到 `sendOptions.lsp`（`{ enabled, servers }`）。sidecar 使用这份配置：`sidecar/lsp/servers.mjs` 现在是 `buildServers(configList)` + `serversForFile(file, servers)`（没有硬编码的注册表）；`resolver.mjs` / `service-loader.mjs` / `anthropic.mjs` 依次传递列表。Agent 仍采用惰性加载，并通过 PATH 探测服务器。
 
 ### 每个服务器的设置实际上会生效
 

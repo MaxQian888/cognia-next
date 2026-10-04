@@ -105,7 +105,7 @@ registerMentionPickHandler({
 })
 ```
 
-The token is dropped **before** the fetch. If the fetch then fails the user gets a toast, not a half-typed
+The composer removes the token **before** the fetch. If the fetch then fails, it shows a toast. The user does not have a half-typed
 `@lark:https://…` to delete by hand.
 
 `toContextRef` returns `null` because this is a chip-style pick: the body arrives as an attachment whose
@@ -131,11 +131,11 @@ flowchart LR
   D --> B["text block on the message"]
 ```
 
-What that inheritance buys, without a second implementation: the PII redaction gate, the token count on the
+This reuses the existing behavior: the PII redaction gate, the token count on the
 chip, the `INLINE_TOKEN_CEILING` (12k) over-length confirmation, the attachment preview's "model view" —
 verbatim what the model receives — and draft restoration.
 
-Filenames keep the document title, dropping only what a filesystem would reject. CJK survives; an empty result
+Filenames keep the document title, dropping only what a filesystem would reject. CJK text remains intact. An empty result
 falls back to the document id rather than to a generic placeholder:
 
 ```ts

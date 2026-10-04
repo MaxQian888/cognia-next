@@ -1,6 +1,6 @@
 ---
 title: "ADR-0059 — 云部署：无头 Brain 与前后端分离"
-description: "定义云部署策略：保持桌面经过验证的双平面分割（Rust axum 前门 + TS lib/Brain），只交换Brain主机（WebView →节点无头主机）。涵盖完整计划：现有服务的部署工程（CI部署、GHCR镜像、组合套件）、完成认知服务器无头二进制（BridgeTransport、无头引导注册表、Brain进程、秘密存储）、frontend/backend-separated Web访问、执行平面（sidecar + 通过ExecBackend抽象的外部代理CLIs）以及三层隔离模型（ADR-0028沙箱/工作区容器/租户）microVMs）。"
+description: "定义云部署策略：保持桌面经过验证的双平面分割（Rust axum 前门 + TS lib/Brain），只替换 Brain 宿主（WebView → Node 无头宿主）。涵盖完整计划：现有服务的部署工程（CI 部署、GHCR 镜像、Compose 套件）、完成认知服务器无头二进制（BridgeTransport、无头引导注册表、Brain进程、秘密存储）、frontend/backend-separated Web访问、执行平面（sidecar + 通过ExecBackend抽象的外部代理CLIs）以及三层隔离模型（ADR-0028沙箱/工作区容器/租户 microVMs）。"
 ---
 
 # ADR-0059 — 云部署：无头 Brain 与前后端分离
@@ -106,7 +106,7 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 
 **唯一事实源。** `protocol/companion-commands.json` 对"某主机能到达什么"具有权威性。`lib/platform/capabilities.ts`（粗粒度的按平台基线，用于 UI 降级）与 `lib/platform/host-feature-manifest.ts`（按 feature 的协议协商）是派生视图，不得与之矛盾。三者曾在**两个方向**上漂移 —— `source-control.git` 被声明为 `tauri` 专属，而它的 RPC arm 根本没有宿主门禁；反过来 `capabilities.ts` 为 `headless` 声明了 `connector-runtime`，而 4 个 IM 平台在那里根本收不到消息。门的 E 类负责保持三者一致。
 
-**UI 声明能力，而非主机。** 2026-08-15 完成。按主机判断的 UI 会在后端已等价之后仍把功能藏起来，因此 `components/settings/settings-nav-config.ts` 中的 `desktopOnly: true` 已移除：`NavItem` 现在携带 `requires: CapabilityId[]`——以 `capabilityAvailable` 语义求值（本地 ∪ 服务端提供，与 `CapabilityGate` 同一规则）——外加对应 `CapabilityGateProps.profiles` 的 `profiles: HostProfile[]`。沿用已有先例 `NodeCatalogEntry.requires` + `lib/workflow/runtime/capability-preflight.ts`。21 个分区全部迁移，云端伴生服务现已可达终端、源代码管理、连接、沙箱、LSP、工具、Webhook、网关、Pro IDE、工作区信任与订阅。
+**UI 声明能力，而非主机。** 2026-08-15 完成。按主机类型判断的 UI 即使在后端功能已经等价后，仍会隐藏功能，因此 `components/settings/settings-nav-config.ts` 中的 `desktopOnly: true` 已移除：`NavItem` 现在携带 `requires: CapabilityId[]`——以 `capabilityAvailable` 语义求值（本地 ∪ 服务端提供，与 `CapabilityGate` 同一规则）——外加对应 `CapabilityGateProps.profiles` 的 `profiles: HostProfile[]`。沿用已有先例 `NodeCatalogEntry.requires` + `lib/workflow/runtime/capability-preflight.ts`。21 个分区全部迁移，云端 Companion 服务现已可使用终端、源代码管理、连接、沙箱、LSP、工具、Webhook、网关、Pro IDE、工作区信任与订阅。
 
 七个分区保留 profile 钉定，但原因分两类。桌面、侧边栏、companion、远程主机属于本地外壳界面——真实边界。ccswitch、hooks、fleet 是**过渡性**钉定：其渲染端路径是 Class A seam 绕过，直接裸调 `invoke`（`lib/claude/settings.ts`、`lib/ccswitch/client.ts`、`lib/tauri/fleet.ts`、`lib/claude/hooks/fleet-hooks.ts`），UI 会够到传输层根本到不了的后端。每处钉定的注释都点名了需先迁移的文件；它们是有明确去处的债，不是决定。
 
@@ -188,13 +188,9 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 
 ### 2026-08-26 —— 账户级 Langfuse trace 出口
 
-云端 Langfuse tracing 复用现有 `cognia-server` + brain Host，不新增 relay。已配对的 Web 与
-Capacitor 客户端只通过 Companion RPC 提交 `AgentTraceBatchV1`；认证 principal 决定账户
-namespace，Host 再解析该账户只写的 BYO credential。没有 Host 的 standalone Web 不尝试远程
-Langfuse 导出。
+云端 Langfuse tracing 复用现有 `cognia-server` + brain Host，不新增 relay。已配对的 Web 与 Capacitor 客户端只通过 Companion RPC 提交 `AgentTraceBatchV1`；认证 principal 决定账户 namespace，Host 再解析该账户只写的 BYO credential。没有 Host 的 standalone Web 不尝试远程 Langfuse 导出。
 
-Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、PostHog processor 并存，
-永不接收应用日志或 metrics。
+Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、PostHog processor 并存，永不接收应用日志或 metrics。
 
 ### 第三阶段 — 扩展（仅if/when多租户）
 
@@ -202,9 +198,7 @@ Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、Po
 
 ### 2026-08-02 —— 耐久性阶梯 v4/v5 已落地
 
-`HeadlessDurabilityBackend`（`cli/src/serve/persistence/`）是持久化端口，三级实现，
-由每账户的原子清单（`<home>/durability/<account>/backend-manifest.json`）选定当前档位；
-清单缺失时回落到 `COGNIA_DURABILITY_BACKEND` 灰度开关，最后回落到 `snapshot-v3`。
+`HeadlessDurabilityBackend`（`cli/src/serve/persistence/`）是持久化端口，三级实现，由每账户的原子清单（`<home>/durability/<account>/backend-manifest.json`）选定当前档位；清单缺失时回落到 `COGNIA_DURABILITY_BACKEND` 灰度开关，最后回落到 `snapshot-v3`。
 
 | 档位 | 形态 | 崩溃窗口 |
 | --- | --- | --- |
@@ -212,17 +206,10 @@ Langfuse 只接收 AI trace。它与 brain 单一 NodeSDK 中的通用 OTLP、Po
 | `journal-v4` | 不可变检查点世代 + 追加式、带校验和、序号连续的事务日志 | 无 |
 | `sqlite-v5` | Node 内置 SQLite（WAL、`synchronous=FULL`、`foreign_keys=ON`、打开时 `integrity_check`、文件权限 `0600`），存放通用的 库/表/键/值 行 | 无 |
 
-- **提交点在哪里。** `installTransactionCapture` 在 Dexie 设置自己的 `oncomplete` 之前，
-  先在 DBCore 事务上注册 `complete` 监听器，并在该监听器里同步追加 + `fsync`。因此
-  只要事务对调用方 resolve，它就一定已经落盘。恢复回放处于抑制状态，绝不会被写入日志；
-  若 Dexie 已经打开则直接拒绝安装，而不是静默失效。
-- **SQLite 保持通用** —— 不引入第二套需要手工维护的 Cognia 模式（对应 D3）。迁移期间先写
-  日志、再以同一序号写 SQLite；启动时补放 SQLite 落后的尾部，因此兼容窗口在任意时刻被打断都安全。
-- **除 `finalize` 外不删除任何东西。** 迁移、恢复、回滚都只*新增*世代、回滚包与清单版本。
-  `durability recover` 先落到新世代并校验，之后才允许激活；`durability finalize --confirm`
-  是唯一的裁剪操作，并会报告它留下的回滚水位线。
-- **一致性闸门。** 只有模式版本、表集合、行数、键集合与逐表内容哈希全部通过，才会提升后端；
-  失败则保持原后端权威，并打印全部差异。
+- **提交点在哪里。** `installTransactionCapture` 在 Dexie 设置自己的 `oncomplete` 之前，先在 DBCore 事务上注册 `complete` 监听器，并在该监听器里同步追加 + `fsync`。因此只要事务对调用方 resolve，它就一定已经落盘。恢复回放处于抑制状态，绝不会被写入日志；若 Dexie 已经打开则直接拒绝安装，而不是静默失效。
+- **SQLite 保持通用** —— 不引入第二套需要手工维护的 Cognia 模式（对应 D3）。迁移期间先写日志、再以同一序号写 SQLite；启动时补放 SQLite 落后的尾部，因此兼容窗口在任意时刻被打断都安全。
+- **除 `finalize` 外不删除任何东西。** 迁移、恢复、回滚都只*新增*世代、回滚包与清单版本。`durability recover` 先落到新世代并校验，之后才允许激活；`durability finalize --confirm` 是唯一的裁剪操作，并会报告它留下的回滚水位线。
+- **一致性闸门。** 只有模式版本、表集合、行数、键集合与逐表内容哈希全部通过，才会提升后端；失败则保持原后端权威，并打印全部差异。
 
 ## 风险
 

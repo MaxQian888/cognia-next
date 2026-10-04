@@ -5,7 +5,10 @@ description: The three thin orchestrators that sit over the Agent Team Zustand s
 
 # Consensus, Delegation & Shared Memory
 
-Three small orchestrators in `lib/ai/agent/team/` layer behavior over the raw store CRUD that `stores/agent/agent-team-store/` exposes (ADR-0032 §5). None of them owns state: each computes, gates, fires plugin hooks, and then defers persistence to the Zustand store. They are deliberately thin — the store is the single source of truth, these modules are the policy layer.
+Three orchestrators in `lib/ai/agent/team/` add policy to the store CRUD exposed by `stores/agent/agent-team-store/` (ADR-0032 §5).
+Each module computes results, checks gates, and fires plugin hooks.
+The Zustand store persists the resulting state.
+The store is the single source of truth. The orchestrators own policy, not state.
 
 <TLDR>
 - **Consensus** — `lib/ai/agent/team/consensus-orchestrator.ts` (283 lines): vote tally, five quorum rules, auto-resolve on threshold, lead override. Drives the workspace `ConsensusPanel`.

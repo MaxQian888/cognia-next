@@ -1,14 +1,11 @@
 ---
 title: "0175：RPC 面只有一种语法、一种错误、一个版本"
-description: "每条 companion 命令都命名为 <resource>.<verb>，资源来自声明的资源树，动词来自封闭词表。每个失败都是同一份 RFC 9457 problem 文档。一个契约版本号说明客户端是按哪份契约编译的。白名单仍是安全边界，但改由契约生成而非手写两遍，输出 schema 从产生它们的 Rust 类型派生。"
+description: "companion 命令按 <resource>.<verb> 命名，使用声明的资源树和封闭动词表。失败统一返回 RFC 9457 problem 文档。契约版本表示客户端的编译依据。安全白名单由契约生成，输出 schema 从生成结果的 Rust 类型派生。"
 ---
 
 # ADR 0175：RPC 面只有一种语法、一种错误、一个版本
 
-**状态：** 已接受
-**日期：** 2026-09-09
-**修订：** ADR-0013（命令清单）、ADR-0171（CLI 说的是协议本身）
-**相关：** ADR-0059（无头大脑）、ADR-0090（agent 命令的规范名）、ADR-0143（设备控制台三态）、ADR-0153（确认由宿主取得）
+**状态：** 已接受**日期：** 2026-09-09 **修订：** ADR-0013（命令清单）、ADR-0171（CLI 说的是协议本身）**相关：** ADR-0059（无头大脑）、ADR-0090（agent 命令的规范名）、ADR-0143（设备控制台三态）、ADR-0153（确认由宿主取得）
 
 ## 背景
 
@@ -89,7 +86,7 @@ wire 名是 `<resource>[.<sub>...].<verb>`。每段是小写 snake_case。动词
 
 `list` 动词收 `pageSize` 与 `pageToken`，返回 `{items, nextPageToken}`（AIP-158）。`offset` 与 `length` 保留给 `read`、`write` 动词上的字节 I/O，其他地方一律拒绝。`limit`、`cursor`、`before`、`page` 不再是这个面上的参数名。
 
-分页令牌对调用方不透明。底层是 base64url 编码的 `o:<offset>`（按偏移分页的存储）或 `c:<cursor>`（按序号分页的存储），所以客户端永远不可能把一个平面的游标递给另一个平面。`pageSize` 可选且有上限（默认 50，最多 1000）。今天整体答案有界的 `list` 暂不接分页参数，仍整集返回；门禁对这些只报告，直到它们的 arm 迁移；但凡一个命令声称按令牌分页却还写着 `limit`、`offset`、`cursor` 或 `before`，门禁直接判失败。
+分页令牌对调用方不透明。底层是 base64url 编码的 `o:<offset>`（按偏移分页的存储）或 `c:<cursor>`（按序号分页的存储），所以客户端永远不可能把一个平面的游标递给另一个平面。`pageSize` 可选且有上限（默认 50，最多 1000）。今天整体答案有界的 `list` 暂不接分页参数，仍整集返回；门禁对这些只报告，直到它们的 arm 迁移；若命令声明按令牌分页却仍包含 `limit`、`offset`、`cursor` 或 `before`，门禁直接判失败。
 
 `longRunning` 的命令以 `202 Accepted` 返回 `Operation {id, done, error?, result?, metadata}`，`GET /api/operations/{id}` 与 `GET /internal/operations/{id}` 返回同一形状。run、job、batch、delivery 各家族的动词统一为 `start`、`cancel`、`get`、`list`。
 

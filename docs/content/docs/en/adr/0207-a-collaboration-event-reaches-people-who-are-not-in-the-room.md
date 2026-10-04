@@ -1,6 +1,6 @@
 ---
 title: "0207 — A collaboration event reaches people who are not in the room"
-description: "The collaboration server writes one notification row per recipient when something is addressed to a person: an assignment, a declared mention in an issue comment, an approval request, or an invitation. Rows are RLS-scoped, deduplicated and carry read state. They reach a client over the ADR-0206 feed, and a cursor pull catches up. The client hands each one to the existing ADR-0042 notify() pipe as source \"collab\", so channel preferences, quiet hours, OS toasts, mobile push and IM delivery all come from what already exists. Reading one on any device clears it on the others."
+description: "The collaboration server creates one notification row per recipient for assignments, declared mentions in issue comments, approval requests and invitations. Rows are RLS-scoped, deduplicated and include read state. The ADR-0206 feed delivers changes, and cursor pulls recover missed rows. Each client passes notifications to the existing ADR-0042 notify() pipe as source \"collab\". Existing policy handles channel preferences, quiet hours, OS toasts, mobile push and IM delivery. Reading a notification on one device clears it on the others."
 ---
 
 # ADR 0207 — A collaboration event reaches people who are not in the room
@@ -59,9 +59,9 @@ Migration `0013_notifications.sql` adds `collab_notifications`:
 
 The handler that made the write records the rows after the store commits,
 the same rule the ADR-0206 feed follows. A notification is a consequence of
-the write, not part of it. The assignment stands even if telling the assignee
-fails; that failure is logged instead of turning a successful write into a
-500. The dedupe key is derived from the write
+the write, not part of it. The assignment remains valid if notifying the assignee
+fails. The failure is logged without returning a
+500 for the successful write. The dedupe key is derived from the write
 (`issue.assigned:<id>:rev<n>`, `issue.mentioned:<event id>`,
 `chat.approval_requested:<approval id>`, `chat.invited:<invite id>`). A retried
 write that replays the same revision or event therefore records nothing twice.

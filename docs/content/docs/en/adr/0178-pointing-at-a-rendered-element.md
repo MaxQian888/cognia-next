@@ -1,6 +1,6 @@
 ---
 title: "0178 — Pointing at a rendered element"
-description: "The artifact preview becomes something you can point at, one picker serves three render transports without weakening a sandbox, and the browser's review queue becomes a queue both surfaces share."
+description: "Adds element selection to artifact previews. One picker supports three rendering transports and preserves sandbox restrictions. Both surfaces share the browser review queue."
 ---
 
 # ADR 0178 — Pointing at a rendered element
@@ -19,9 +19,8 @@ What it could not do was let you point at anything.
 
 Selection in artifacts was text-only — `selection-comment-button.tsx` reading
 `window.getSelection()` — and it rendered only in the `code`, `review` and
-`split` view modes. In `preview` there was no selection affordance at all, and
-structurally there could not be one: every rendered artifact lives in an
-iframe, so the parent's `getSelection()` sees nothing inside it. The artifacts
+`split` view modes. In `preview` there was no selection control. Every rendered artifact lives
+in an iframe, so the parent's `getSelection()` cannot read its selection. The artifacts
 where "change *this* element" is the obvious request — `html`, `react`, `svg`,
 `chart` — were exactly the ones with no way to make it.
 

@@ -1,6 +1,6 @@
 ---
 title: Outbound Queue & Delivery
-description: The durable outboundQueue, the event-driven pump, and the per-adapter delivery gauntlet — circuit breaker, token bucket, exponential backoff with jitter, idempotency LRU, per-conversation FIFO lanes, dead-lettering, and the scheduled / housekeeping surfaces that feed and prune it.
+description: The durable outboundQueue, the event-driven pump, and the per-adapter delivery checks — circuit breaker, token bucket, exponential backoff with jitter, idempotency LRU, per-conversation FIFO lanes, dead-lettering, and the scheduled / housekeeping surfaces that feed and prune it.
 ---
 
 # Outbound Queue & Delivery
@@ -8,7 +8,7 @@ description: The durable outboundQueue, the event-driven pump, and the per-adapt
 <Status variant="stable" />
 
 <TLDR>
-Every reply the assistant sends to a platform is a durable row in the Dexie `outboundQueue` table, not a direct adapter call. A single wake-driven loop — `startOutboundRunner` (`lib/connectors/outbound-runner.ts:284`) — drains due rows into per-conversation FIFO lanes and runs each job through an ordered gauntlet: re-fetch → muted → quiet-hours → idempotency → circuit breaker → token bucket → max-attempts → dispatch (`processJob`, `lib/connectors/outbound-runner.ts:345`). Failures retry with exponential backoff + jitter up to `MAX_ATTEMPTS=5`, then dead-letter. The loop never busy-polls: it sleeps until the next retry deadline (`peekNextWakeAt`) or a fresh enqueue wake (`subscribeOutboundEnqueued`, `lib/db/outbound-jobs.ts:64`). Two scheduler executors (`lib/connectors/scheduled-outbound.ts:375`) feed the queue — one direct, one a full AI turn — and three housekeeping sweeps prune callback bindings, age the queue at its soft cap, and export the dead-letter queue.
+Every reply the assistant sends to a platform is a durable row in the Dexie `outboundQueue` table, not a direct adapter call. A single wake-driven loop — `startOutboundRunner` (`lib/connectors/outbound-runner.ts:284`) — drains due rows into per-conversation FIFO lanes and runs each job through an ordered sequence of checks: re-fetch → muted → quiet-hours → idempotency → circuit breaker → token bucket → max-attempts → dispatch (`processJob`, `lib/connectors/outbound-runner.ts:345`). Failures retry with exponential backoff + jitter up to `MAX_ATTEMPTS=5`. After that limit, they enter the dead-letter queue. The loop never busy-polls: it sleeps until the next retry deadline (`peekNextWakeAt`) or a fresh enqueue wake (`subscribeOutboundEnqueued`, `lib/db/outbound-jobs.ts:64`). Two scheduler executors (`lib/connectors/scheduled-outbound.ts:375`) feed the queue — one direct, one a full AI turn — and three housekeeping sweeps prune callback bindings, age the queue at its soft cap, and export the dead-letter queue.
 </TLDR>
 
 <StatGrid>
@@ -94,7 +94,7 @@ flowchart TD
   L -->|"ok===false non-retryable"| M4["markDeadlettered (L570)"]
 ```
 
-In order, the gauntlet is:
+The checks run in this order:
 
 1. **Re-fetch** the row by id (`outbound-runner.ts:351`) — a prior lane execution may have incremented `attempts`; missing row returns silently.
 2. **Muted** (`outbound-runner.ts:358`) — if `adapterRow.muted === true`, `markFailed("muted", …)` deferred `+60_000` ms. Not counted as a failure (the breaker is untouched).
@@ -146,7 +146,7 @@ enqueue(work: () => Promise<void>): Promise<void> {
 }
 ```
 
-The drain loop pulls every due row into its conversation's lane in one pass, guarded by an `inFlight` set so a job that is still `pending` in the DB (because `markSending` happens *late*, after the gauntlet's gates) isn't double-enqueued; the lane's `finally` clears the id and `wake()`s the loop in case the job was rescheduled to a sooner deadline.
+The drain loop pulls every due row into its conversation's lane in one pass, guarded by an `inFlight` set so a job that is still `pending` in the DB (because `markSending` happens *late*, after the delivery checks) isn't double-enqueued; the lane's `finally` clears the id and `wake()`s the loop in case the job was rescheduled to a sooner deadline.
 
 Idempotency is an insertion-ordered, capped `LruMap` (`outbound-runner.ts:151`, `IDEMPOTENCY_LRU_CAP=1000`, `:140`) keyed by `idempotencyKey`. On success the runner records the `platformMessageId`; a later retry that hits the same key short-circuits to `markSent` without a second adapter round-trip. Eviction is oldest-first:
 

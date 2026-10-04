@@ -12,7 +12,7 @@ description: The Rust-spawned Python sandbox (canvas_run_python, 30 s timeout, e
   on the Rust side — `canvas_run_python` (`src-tauri/src/canvas/python_exec.rs:34`), 30 s timeout,
   `exit_code: 124` on timeout — reached through a sandbox-priority strategy, not a direct `invoke`.
   **Comments** are flat `CanvasComment` rows threaded by `parentId`, anchored to a `LineRange`, with
-  emoji reactions and resolve, mirrored to Dexie (`comment-store.ts:59`). **Versioning** lists
+  emoji reactions and resolution, mirrored to Dexie (`comment-store.ts:59`). **Versioning** lists
   `CanvasDocumentVersion` snapshots grouped by date and renders a positional line-diff (not Monaco
   `DiffEditor`).
 </TLDR>

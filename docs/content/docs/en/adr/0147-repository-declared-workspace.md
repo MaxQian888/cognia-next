@@ -1,6 +1,6 @@
 ---
 title: "0147 — The repository declares its own workspace"
-description: "`.cognia/workspace.json` becomes a real source — setup scripts, actions, variables, roots, execution defaults and suggested capabilities shipped with the code — behind a two-layer gate, because a repository file that runs shell is code delivered by git pull."
+description: "Uses `.cognia/workspace.json` as a repository source for setup scripts, actions, variables, roots, execution defaults and suggested capabilities. Applies a two-layer gate because repository declarations that run shell commands are executable code received through git pull."
 ---
 
 # ADR 0147 — The repository declares its own workspace
@@ -112,9 +112,9 @@ the behaviour before this existed, which is a safe floor and a silent one. So
 the verdict is surfaced twice: a card in the environment panel that always
 states it (including the boring "this repository ships none") and shows the
 setup script verbatim before offering to approve it, and one notification per
-workspace per content. Once per content, not once per turn: a turn resolves its
-environment on every message, and three notifications for one standing fact is
-how a user learns to dismiss them unread.
+workspace per content. Notifications are keyed to content, rather than turns. Each message resolves
+the environment, but repeated notifications for unchanged content would encourage
+users to dismiss them unread.
 
 ## Consequences
 

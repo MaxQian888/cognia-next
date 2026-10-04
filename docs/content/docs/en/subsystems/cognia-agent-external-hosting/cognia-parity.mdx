@@ -8,8 +8,8 @@ description: How an external agent receives the same Cognia session context and 
 <Status variant="stable">Shared context assembler · authenticated tool bridge · context-versioned sessions</Status>
 
 <TLDR>
-  Hosting Codex or Claude Code used to change what a session *meant*, not just how it was
-  transported: the external path forwarded `config.systemPrompt` plus four raw config fields, while
+  Hosting Codex or Claude Code previously changed the session context as well as the
+  transport: the external path forwarded `config.systemPrompt` plus four raw config fields, while
   the built-in path resolved project instructions, output style, agent mode, skills, tool policy,
   attachments and twin grounding. Both backends now consume one resolver, and Cognia's own tools
   reach an external agent through an authenticated MCP bridge that Cognia — not the agent —

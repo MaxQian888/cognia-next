@@ -10,11 +10,11 @@ description: Cross-shell text extraction from images and PDFs — one extract() 
 <TLDR>
   The OCR subsystem turns an image or PDF into Markdown / plain text / structured blocks through a single
   entry point — `extract(input, deps)` (`lib/ocr/index.ts:200`). Every caller (composer menu, `/ocr` command,
-  `ocr.extract` plugin tool) funnels through it, so the **SHA-256 read-through cache**, the **pure auto-router**,
+  `ocr.extract` plugin tool) uses this function, so the **SHA-256 read-through cache**, the **pure auto-router**,
   and the **keyring credential lookup** all live in one place. Twenty providers register into a shared registry
   (`lib/ocr/runtime.ts:51`) spanning four families — cloud document OCR, LLM-vision, on-device engines, and a
   self-hosted HTTP adapter. PDFs take a **text-layer fast-path** (`lib/ocr/pdf-router.ts:79`) that skips OCR on
-  digital pages entirely; five native backends ride opt-in Cargo features in `src-tauri/src/ocr/`.
+  digital pages entirely; five native backends use opt-in Cargo features in `src-tauri/src/ocr/`.
 </TLDR>
 
 <StatGrid>

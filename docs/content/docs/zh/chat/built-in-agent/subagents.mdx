@@ -18,7 +18,7 @@ description: 4 个内置工作流子代理、它们如何经 build-options 进�
 
 ## AgentDefinition 形状
 
-`lib/claude/agents/subagents/types.ts:13` 重导出 SDK 的 `AgentDefinition`：`description`、`prompt`、可选 `tools[]`、`disallowedTools[]`、`model`、`maxTurns`、`effort`（`low|medium|high|xhigh|max`）。4 个内置只设 `description`、`prompt`、`tools`、`maxTurns`——模型与 effort 从父轮次继承。
+`lib/claude/agents/subagents/types.ts:13` 重新导出 SDK 的 `AgentDefinition`，包含 `description`、`prompt`，以及可选的 `tools[]`、`disallowedTools[]`、`model`、`maxTurns`、`effort`（`low|medium|high|xhigh|max`）。4 个内置子智能体只设置 `description`、`prompt`、`tools` 和 `maxTurns`；模型与 effort 从父轮次继承。
 
 ## 4 个内置工作流子代理
 

@@ -5,7 +5,7 @@ description: "创建 Discord 应用，获取机器人令牌与公钥，邀请机
 
 # Discord 机器人配置指南
 
-本指南将引导你创建 Discord 应用、获取机器人令牌与公钥、将机器人邀请到服务器，并配置 cognia-next 以使用它。
+本指南说明如何创建 Discord 应用、获取机器人令牌与公钥、邀请机器人加入服务器，并在 cognia-next 中配置连接。
 
 ---
 

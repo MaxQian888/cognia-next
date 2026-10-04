@@ -1,0 +1,231 @@
+---
+title: 桌面宠物 API
+description: 插件能对桌面宠物做什么。读取它的公开状态、订阅它的事件、在每日预算内照料和奖励它、添加商店物品与成就，以及填充它的 UI 插槽。仅限桌面壳。
+---
+
+# 桌面宠物 API
+
+桌面宠物（ADR-0058）只在桌面应用的主窗口中运行。
+插件通过四个接口触达它。
+
+| 接口 | 作用 | 门禁 | 运行时 |
+| --- | --- | --- | --- |
+| `ctx.pet` | 读取状态、订阅事件、互动、奖励 | `pet` 能力加上 `pet:read` / `pet:interact` | frontend、hybrid |
+| `onPet*` 钩子 | 生命周期转换（互动、升级、进化、成就、不适） | `pet:read` | frontend、hybrid |
+| `petItems` / `petAchievements` | 清单中的纯数据商店物品和成就 | 安装时和注册时校验 | 任意（清单） |
+| `pet.console.tab` / `pet.panel.actions` 插槽 | `/pet` 控制台和互动面板中的 UI | 插槽清单 | frontend、hybrid |
+
+每个方法的权威参考由契约目录（`packages/plugin-sdk/contract/catalog.json`）生成。
+本页解释这些方法背后的规则。
+
+## 声明能力和权限
+
+```json title="plugin.json"
+{
+  "capabilities": ["pet"],
+  "permissions": ["pet:read", "pet:interact"]
+}
+```
+
+没有 `pet` 能力时，每个 `ctx.pet` 方法都是空操作。
+它只警告一次，读取返回 `null` 或零，`getAvailability()` 返回 `missing-capability`。
+对于只是没有选择接入的插件，`ctx.pet` 从不抛错。
+
+声明能力后，每个方法仍需要对应权限。
+缺少权限会抛错，因为守卫默认拒绝。
+
+| 方法 | 权限 |
+| --- | --- |
+| `getView()`、`getSummary()` | `pet:read` |
+| `getAvailability()` | `pet:read` |
+| `onEvent(cb)` | `pet:read` |
+| `getRemainingBudget()` | `pet:read` |
+| `interact(kind, opts?)` | `pet:interact` |
+| `emitEvent(kind, opts?)` | `pet:interact` |
+
+宿主用一致性测试把这张表与契约目录对齐，因此参考文档不会偏离实际执行的规则。
+
+## 读取宠物
+
+`getView()` 返回一个不含 PII 的摘要；宠物档案尚未创建时返回 `null`。
+
+```ts
+interface PluginPetSummary {
+  hatched: boolean
+  name: string | null
+  level: number
+  stage: PetStage
+  xp: number
+  mood: PetMood
+  needs: { energy: number; mood: number; bond: number }
+  condition: PetCondition
+  coins: number
+}
+```
+
+`getSummary()` 目前返回相同的结构。
+摘要从不包含账户指纹、宠物骨架或灵魂的性格文本。
+
+## 奖励前先询问
+
+```ts
+const availability = await ctx.pet.getAvailability()
+if (!availability.available) {
+  // "missing-capability" | "disabled" | "unsupported-host"
+  // | "secondary-window" | "uninitialized" | "not-hatched"
+  return showWhy(availability.reason)
+}
+```
+
+当宠物被关闭、仍是蛋、或尚未设置时，`interact` 和 `emitEvent` 会**静默地**发放零奖励。
+宠物自身的状态不是插件的过错，所以它们不会抛错。
+请先检查可用性，避免为宠物从未收到的奖励把任务标记为已领取。
+Web 或移动端宿主返回 `unsupported-host`，悬浮窗和弹出窗口返回 `secondary-window`。
+
+## 互动与奖励
+
+两个调用共享**每个插件**一份每日预算：每天 50 XP 和 100 金币。
+它们返回实际发放的数量。
+
+```ts
+const left = ctx.pet.getRemainingBudget() // { xp, coins }
+
+await ctx.pet.interact("fed")
+await ctx.pet.interact("fed", { itemId: "plugin:my-plugin:star-cookie" })
+
+const { grantedXp, grantedCoins } = await ctx.pet.emitEvent("pluginReward", {
+  xp: 10,
+  coins: 20,
+  meta: { goalId: "daily-3" },
+})
+```
+
+- `interact(kind)` 执行七种照料动作之一：`fed`、`played`、`petted`、`talked`、`slept`、`cleaned`、`treated`。
+  该动作的宿主奖励从预算中扣除。
+  预算用完后，动作仍会结算需求值并播放动画，只是不再发放奖励。
+- `emitEvent(kind)` 接受照料动作、`workflowRun` 和 `pluginReward`。
+  对于本身不是照料动作的奖励（完成的任务、达成的里程碑），请使用 `pluginReward`。
+  它会让宠物开心，但不计入任何照料计数或属性。
+- 每次 `emitEvent` 在应用预算前先被限制在 `MAX_XP_PER_EMIT`（10）和 `MAX_COINS_PER_EMIT`（20）以内。
+  显式指定的金币按请求数量发放，用户的照料连击不会放大它。
+- 奖励从不携带物品。`meta` 会被精简为 id 形式的键（`achievementId`、`itemId`、`goalId`、`level`、`stage`）。
+- 调用还受突发速率限制。
+
+### 错误
+
+从 `@cognia/plugin-sdk/api/pet` 导入错误类以区分它们。
+
+| 错误 | 触发条件 | 是否扣除 |
+| --- | --- | --- |
+| `PetEventKindNotAllowedError` | `emitEvent` 使用了上述列表之外的类型 | 否 |
+| `PetCooldownError`（`kind`、`retryAfterMs`） | 宠物仍在从同一照料动作中恢复 | 否 |
+| `PetItemNotOwnedError`（`itemId`） | 未知物品，或用户并不拥有 | 否 |
+| `PetItemKindMismatchError`（`itemId`、`kind`、`itemKind`） | 物品属于另一种动作，例如把食物传给 `petted` | 否 |
+| 速率限制 `Error` | 突发调用过多 | 否 |
+
+冷却检查在任何扣除之前执行，因此被拒绝的调用既不消耗预算也不消耗物品。
+
+```ts
+import { PetCooldownError } from "@cognia/plugin-sdk/api/pet"
+
+try {
+  await ctx.pet.interact("played")
+} catch (err) {
+  if (err instanceof PetCooldownError) retryIn(err.retryAfterMs)
+  else throw err
+}
+```
+
+## 订阅事件
+
+`onEvent(cb)` 转发宠物事件总线上经过净化的事件，并返回一个注销函数。
+
+```ts
+const dispose = ctx.pet.onEvent((event) => {
+  // { source, kind, xp?, meta?, at }
+})
+```
+
+它转发总线上的所有类型，包括 `thinking`、`idle` 等环境性的智能体状态，不仅仅是照料动作。
+请按 `kind` 过滤。
+`meta` 被精简为 id 形式的键，因此用户对宠物说的话等自由文本永远不会进入插件代码。
+
+对于状态转换，优先使用生命周期钩子。
+它们每次转换只触发一次，并且只需要 `pet:read`。
+没有 `pet:read` 的插件会在钩子分发时被跳过。
+
+| 钩子 | 负载 |
+| --- | --- |
+| `onPetInteract` | `{ kind, source, xp, at }`，仅七种照料动作 |
+| `onPetLevelUp` | `{ level, stage, at }` |
+| `onPetEvolved` | `{ stage, level, at }` |
+| `onPetAchievementUnlocked` | `{ achievementId, at }` |
+| `onPetUnwell` | `{ condition, at }` |
+
+## 贡献物品和成就
+
+商店物品和成就是清单中的数据，而不是代码。
+宿主在插件安装时校验一次，在注册时再校验一次。
+无效条目会被拒绝，错误信息会指出具体字段。
+宿主把每个 id 命名空间化为 `plugin:<pluginId>:<id>`。
+
+```json title="plugin.json"
+{
+  "capabilities": ["pet", "pet-item", "pet-achievement"],
+  "petItems": [
+    {
+      "id": "star-cookie",
+      "labels": { "en": "Star cookie", "zh-CN": "星星饼干" },
+      "category": "food",
+      "price": 25,
+      "consumable": true,
+      "interactionKind": "fed",
+      "needsEffect": { "energy": 12, "mood": 4 }
+    }
+  ],
+  "petAchievements": [
+    {
+      "id": "quest-master",
+      "labels": { "en": "Quest master" },
+      "icon": "Sparkles",
+      "condition": { "type": "counter", "kind": "pluginReward", "gte": 3 }
+    }
+  ]
+}
+```
+
+| 字段 | 规则 |
+| --- | --- |
+| `id` | 1–64 个字符，字母、数字、`.`、`_`、`-`，以字母或数字开头 |
+| `labels` | 必须包含 `en` |
+| `category` | `food`、`toy` 或 `decor` |
+| `price` | 整数金币，1 到 100,000 |
+| `interactionKind` | 消耗品必填；七种照料动作之一 |
+| `needsEffect` | 仅限消耗品；`energy` / `mood` / `bond`，每项 −100 到 100 |
+| `condition.type` | `counter`（kind 为活动账本记录的宠物事件类型）、`level`，或 `need`（`energy` / `mood` / `bond`，`gte` ≤ 100） |
+| `condition.gte` | 有限的非负数 |
+
+SDK 的 `definePetItem` 和 `definePetAchievement` 执行相同的校验，因此错误的条目会在构建时失败，而不是在安装时。
+Python SDK（`cognia.pet`）为用 Python 编写的清单镜像了这些规则。
+
+## 填充宠物的 UI 插槽
+
+| 插槽 | 位置 | 上下文 |
+| --- | --- | --- |
+| `pet.console.tab` | `/pet` 控制台导航栏中的一个标签页 | `{ level, stage, mood, condition }` |
+| `pet.panel.actions` | 互动面板（小部件和控制台）的操作行 | `{ level, stage, mood, condition }` |
+
+桌面弹出窗口（右键宠物时打开的小型快捷菜单）**不**渲染任何插件插槽。
+它是一个独立的、不抢焦点的窗口，尺寸随内容调整，插件行在其中无法被可靠地测量、聚焦或关闭。
+
+## 从 SDK 导入
+
+`@cognia/plugin-sdk/api/pet` 是面向作者的子路径。
+它包含契约值（`PLUGIN_EMITTABLE_PET_EVENT_KINDS`、`MAX_XP_PER_EMIT`、`MAX_COINS_PER_EMIT`）、错误类、类型、`definePetItem` / `definePetAchievement`，以及物品和成就注册表的只读视图。
+它不暴露注册函数或按 id 注销的函数。
+贡献通过清单进行，由宿主校验；按 id 注销则可能移除其他插件的条目。
+
+## 示例
+
+`plugins/pet-daily-quests` 是仓库内的参考实现。
+它在把任务标记为已领取之前检查 `getAvailability()`，通过 `emitEvent("pluginReward")` 发放奖励，并在宠物不可用时显示本地化的「宠物现在无法接收奖励」提示。

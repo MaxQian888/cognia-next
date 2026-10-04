@@ -89,8 +89,8 @@ routing and therefore took the legacy table-sync path permanently — while
 `host_feature_manifest` advertised `session.state-sync@1` unconditionally.
 
 The ladder, the write gate, the `migrationStage` wire field and the four client
-guards are gone. Authority is what it always actually was: the lease plus
-`hostGeneration`. Compatibility is preserved by omission — an older client
+guards are gone. Authority remains the lease plus
+`hostGeneration`. Omission preserves compatibility: an older client
 reading an absent `migrationStage` gets `undefined`, its own
 `hostStateMigrationStageAllowsWrites(undefined)` returns false, and it falls back
 to legacy table sync exactly as before.

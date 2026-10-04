@@ -14,7 +14,7 @@ description: "The selection capsule becomes an extensible host-rendered action s
 ADR-0093 and ADR-0095 established a reliable native selection observer, a
 content-hugging non-activating window, OCR trust provenance, secure-field and URL
 gates, ten built-in actions, and stable action shortcuts. Several implemented
-paths were nevertheless dormant: classification did not sharpen composer
+paths had no active user path: classification did not sharpen composer
 prompts, source provenance was dropped, native health was not shown, contextual
 and search preferences had no Settings UI, long selections could not use action
 shortcuts, and plugin quick actions had no selection surface.

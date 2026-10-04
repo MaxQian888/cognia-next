@@ -43,7 +43,7 @@ Add an **`optical`** compaction strategy to the generic path, implemented as a *
 
 ## Capability boundary
 
-v1 inlines only the two small Latin-1 pixel fonts. The larger X.org BDFs and the CJK TrueType (Silver) are a documented extension point: they are too heavy to inline, and **CJK-heavy transcripts route to the text-summary fallback** via the coverage gate + round-trip check rather than being mis-rendered as blanks. This is an honest capability boundary, not a stripped code path — the full rendering pipeline (all shape controls, hues, dim, block, repeat, doc, stretch, palette narrowing) is implemented. Adding a bundled CJK `.hex` (e.g. a GNU Unifont subset, same parser) would lift the boundary without touching the pipeline.
+v1 inlines only the two small Latin-1 pixel fonts. The larger X.org BDFs and the CJK TrueType (Silver) are a documented extension point: they are too heavy to inline, and **CJK-heavy transcripts route to the text-summary fallback** via the coverage gate + round-trip check rather than being mis-rendered as blanks. The full rendering pipeline (all shape controls, hues, dim, block, repeat, doc, stretch, palette narrowing) is implemented. Adding a bundled CJK `.hex` (e.g. a GNU Unifont subset, same parser) would lift the boundary without touching the pipeline.
 
 ## Consequences
 

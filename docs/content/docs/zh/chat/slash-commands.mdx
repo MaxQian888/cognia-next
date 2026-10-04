@@ -5,7 +5,7 @@ description: 三层来源（built-in / custom / plugin）的统一斜杠命令�
 
 # 斜杠命令
 
-斜杠命令（slash commands）是聊天里 `/<name> [args]` 形式的快捷指令。Cognia 把三种来源 —— 内置 Action、本地 `.md` 模板、插件贡献 —— 统一在一张注册表里，由 composer 在用户敲 `/` 时弹出 picker，并按 "Action vs Template" 两种路径分派。
+斜杠命令（slash commands）是聊天中采用 `/<name> [args]` 格式的快捷指令。Cognia 将内置 Action、本地 `.md` 模板和插件贡献统一放入同一张注册表。用户输入 `/` 时，composer 显示选择器，再按「Action vs Template」两类路径分派命令。
 
 picker 用共享的模糊匹配器（`lib/chat/completion/fuzzy-match.ts`，与 `@` 提及 picker 同一打分器）排序候选：优先匹配命令名，描述作为降权的次要来源，因此 `/gc` 能命中 `git/commit`，且最接近的匹配排在最前。
 

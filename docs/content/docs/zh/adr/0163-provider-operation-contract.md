@@ -1,6 +1,6 @@
 ---
 title: "0163：一份 provider 操作契约，网关只做推理"
-description: "每一项 provider 能力都是同一份 JSON 契约里五十个具名操作之一，由一个先按 provider、再按协议、最后兜底的注册表来服务。网关监听器只接收无状态的推理 JSON 族。管理面走 CLI bridge、headless RPC 与进程内执行器三条腿，共用一个分发器，管理凭据永远不会进入 agent 子进程。"
+description: "每项 provider 能力对应同一 JSON 契约中五十个具名操作之一。注册表依次按 provider、协议和通用规则解析。网关仅接收无状态推理 JSON 族。管理操作通过 CLI bridge、headless RPC 与进程内执行器使用同一分发器；管理凭据不得进入 agent 子进程。"
 ---
 
 # ADR 0163：一份 provider 操作契约
@@ -11,7 +11,7 @@ description: "每一项 provider 能力都是同一份 JSON 契约里五十个�
 
 ## 背景
 
-在此之前，provider 面是五样互不知情的东西。聊天路径经 `lib/ai/provider-consumption.ts` 解析 provider 后直接调 AI SDK。订阅子系统（ADR-0025）自己维护余额适配器与额度源。设置界面靠一张手写能力表决定显示哪些按钮。CLI 只有 `/limits`。网关监听器给 Claude Code 与 Codex 提供聊天，又因为它是外部 agent 唯一认识的端口，不断有人提议把「列模型」「读余额」「铸 ticket」也放上去。
+在此之前，provider 面包含五套彼此独立的实现。聊天路径经 `lib/ai/provider-consumption.ts` 解析 provider 后直接调 AI SDK。订阅子系统（ADR-0025）自己维护余额适配器与额度源。设置界面靠一张手写能力表决定显示哪些按钮。CLI 只有 `/limits`。网关监听器给 Claude Code 与 Codex 提供聊天，又因为它是外部 agent 唯一认识的端口，不断有人提议把「列模型」「读余额」「铸 ticket」也放上去。
 
 三个缺陷让漂移暴露出来。路由 ticket 可以指定一个网关随后绑不上的模型，于是 `cognia-agent x claude` 面对的是一个只会回 404 的监听器。Claude Code 每一轮都会调的 token 计数端点根本不存在，agent 的上下文仪表因此一片空白。而对大多数 provider 的大多数操作，答案都是 `unknown`，用户无从得知这是不支持、未配置，还是只是没试过。
 
@@ -19,7 +19,7 @@ description: "每一项 provider 能力都是同一份 JSON 契约里五十个�
 
 ### 1. 一份契约，五十个操作，具名 schema
 
-`protocol/provider-operations.json` 就是契约。每个操作一条描述符（id、分组、类型、风险、幂等性、计费门、作用域、执行面、远端暴露、PII 门、流式、有状态句柄规则），并具名指向其输入输出的 zod schema。schema 位于 `packages/provider-types/src/provider-operation-schemas.ts`，从 `@cognia/provider-types` 导出。它们就是线上的形状：handler 的输入输出类型是具名 schema 的 `z.infer`，测试用同一个 schema 解析每一个输出。没有 handler 的描述符过不了 `pnpm provider-ops:check`，契约里没有的 id 也一样过不了。
+`protocol/provider-operations.json` 就是契约。每个操作一条描述符（id、分组、类型、风险、幂等性、计费门、作用域、执行面、远端暴露、PII 门、流式、有状态句柄规则），并具名指向其输入输出的 zod schema。schema 位于 `packages/provider-types/src/provider-operation-schemas.ts`，从 `@cognia/provider-types` 导出。这些 schema 定义线上数据结构：handler 的输入输出类型是具名 schema 的 `z.infer`，测试用同一个 schema 解析每一个输出。没有 handler 的描述符过不了 `pnpm provider-ops:check`，契约里没有的 id 也一样过不了。
 
 ### 2. 先 provider、再协议、最后兜底的注册表
 

@@ -23,7 +23,7 @@ Dexie v125 增加了 `feishuTenants`（`&[tenantKey+appId]` → cogniaAccountId�
 
 ### 2. 统一回拨授权
 
-每次回调短路前都会运行一个守卫（`lib/connectors/callback-authorization.ts`）：适配器匹配→到期→消耗一次（`wf_approve`、`wf_cancel`、`wf_fanout_*`、`tool_approve`、`skill_invoke`）→对话匹配（聊天级别;仅当双方携带一个线程时）→主体检查→ allowedActions → actorScope（发起者/操作员/对话/任何人，带有每种遗留备份）→运行控制对话绑定。装订师`actorScope`/`allowedActions`;`consumedAt`修复了陈旧的重新点击，重新授予会话绕过。`larkStrictCallbackAuthorization`默认是**强制执行**。审计在每个适配器上仍然可迁移，但它不是静止状态：在审计模式下，`consume`永远不会铸造，因此永远不会写入`consumedAt`，过时的重新点击仍可重新授予会话绕过——守卫存在的缺口。审计现在也会增加`cognia_lark_callback_auth_would_deny_total`，因此“静音后扩大”程序采用了聚合，而不仅仅是单个审计行。每个终端否定理性都会用双语解释回答点击器;之前只有`actor_forbidden`有，剩下的十个机器人和坏掉的机器人几乎没什么区别。
+每次回调短路前都会运行一个守卫（`lib/connectors/callback-authorization.ts`）：适配器匹配→到期→消耗一次（`wf_approve`、`wf_cancel`、`wf_fanout_*`、`tool_approve`、`skill_invoke`）→对话匹配（聊天级别;仅当双方携带一个线程时）→主体检查→ allowedActions → actorScope（发起者/操作员/对话/任何人，带有每种遗留备份）→运行控制对话绑定。创建绑定时写入 `actorScope`/`allowedActions`。`consumedAt` 防止用户通过过时的重复点击再次获得会话绕过权限。`larkStrictCallbackAuthorization`默认是**强制执行**。各适配器仍可在迁移期间使用审计模式，但不应长期停留在此模式：在审计模式下，`consume` 永远不会生成，因此永远不会写入 `consumedAt`，过时的重新点击仍可重新授予会话绕过——守卫存在的缺口。审计现在也会增加`cognia_lark_callback_auth_would_deny_total`，因此“静音后扩大”程序采用了聚合，而不仅仅是单个审计行。每个最终拒绝原因都会向点击者返回双语说明。此前仅 `actor_forbidden` 提供说明，其他十个拒绝原因在用户看来都像机器人故障。
 
 ### 3. 网络SSO及授权参赛链接
 

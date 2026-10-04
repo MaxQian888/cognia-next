@@ -15,7 +15,7 @@ The chat message renderer (`components/chat/message-renderer.tsx`) was already m
 
 ### Gap 3 — third-party MCP tool results
 
-MCP tool results are, per spec, `content: [{type:'text'|'image'|'resource'|'audio', …}]`. The sidecar/SDK delivers that array intact, but `lib/claude/adapter.ts:flattenToolResultContent` collapsed it to a single string at `updateToolPart` before any renderer saw it: text blocks concatenated, every non-text block `JSON.stringify`-ed. An image block survived only as a base64 wall inside a JSON code block. Only cognia's own tools (`wiki_*`, `rag_search`, …) and Claude built-ins had dedicated cards; **every third-party MCP tool fell through to that opaque dump**. The structured array was alive at exactly one upstream point (`updateToolPart`), so the data needed to render richly already existed — it was being thrown away one step before the UI.
+MCP tool results are, per spec, `content: [{type:'text'|'image'|'resource'|'audio', …}]`. The sidecar/SDK delivers that array intact, but `lib/claude/adapter.ts:flattenToolResultContent` collapsed it to a single string at `updateToolPart` before any renderer saw it. Text blocks were concatenated. Every non-text block was serialized with `JSON.stringify`. An image block survived only as base64 data inside a JSON code block. Only cognia's own tools (`wiki_*`, `rag_search`, …) and Claude built-ins had dedicated cards. **Every third-party MCP tool used that opaque JSON output**. The structured array was available at exactly one upstream point (`updateToolPart`), so the data needed to render structured results already existed. It was discarded one step before the UI.
 
 ### Gap 7 — subagent inline tree vanishing on reload
 

@@ -5,9 +5,14 @@ description: Cognia is a Next.js 16 + Tauri 2.11 + Capacitor 8 desktop and mobil
 
 # Overview
 
-**Cognia** (codebase: `cognia-next`) is an AI client for [Claude Code](https://claude.com/claude-code). One Next.js 16 static export feeds three shells — browser, Tauri 2.11 desktop, Capacitor 8 mobile — sharing one UI, one i18n catalog, and one set of business logic. A Rust core hosts long-lived services (HTTP server, scheduler, vector store, automation, OCR, MCP), and a bundled Node sidecar runs the official Claude Agent SDK.
+**Cognia** (codebase: `cognia-next`) is an AI client for [Claude Code](https://claude.com/claude-code).
+One Next.js 16 static export serves the browser, Tauri 2.11 desktop, and Capacitor 8 mobile shells.
+All three share the UI, i18n catalog, and business logic.
+A Rust core hosts long-lived services: an HTTP server, scheduler, vector store, automation, OCR, and MCP.
+A bundled Node sidecar runs the official Claude Agent SDK.
 
-These docs reflect the **actual implementation** — every page corresponds to code under `lib/`, `components/`, `src-tauri/src/`, or `sidecar/` that you can read and modify.
+These docs describe the **actual implementation**.
+Each page refers to code under `lib/`, `components/`, `src-tauri/src/`, or `sidecar/` that you can read and modify.
 
 ## At a glance
 
@@ -55,9 +60,9 @@ Two standalone services live alongside the monorepo:
 </Cards>
 
 <Callout type="info" title="ADRs">
-  Architecture Decision Records live in the [ADR catalogue](./adr). They preserve decision rationale; current
-  behavior is determined by the implementation and tests. When an ADR and the implementation diverge, the docs
-  describe the implementation and call out the drift instead of silently treating the ADR as runtime truth.
+  Architecture Decision Records are in the [ADR catalogue](./adr). They explain the reasons for decisions.
+  The implementation and tests determine current behavior.
+  When an ADR differs from the implementation, these docs describe the implementation and identify the difference.
 </Callout>
 
 ## Pick your runtime mode
@@ -68,14 +73,16 @@ Two standalone services live alongside the monorepo:
     pnpm install
     pnpm dev    # → http://localhost:3000
     ```
-    Browser-only. Tauri-only features (scheduler, native vector store, connectors, MCP servers, computer use) no-op behind `isTauri()` guards.
+    This mode runs only in the browser.
+    Tauri-only features (scheduler, native vector store, connectors, MCP servers, computer use) perform no action because of `isTauri()` guards.
   </Tab>
   <Tab value="Desktop">
     ```bash
     pnpm install
     pnpm tauri dev
     ```
-    Full-featured. The Tauri shell starts the Next.js dev server, spawns the Node sidecar, and registers the Rust core.
+    This mode supports the full feature set.
+    The Tauri shell starts the Next.js dev server, starts the Node sidecar, and registers the Rust core.
   </Tab>
   <Tab value="Mobile">
     ```bash
@@ -89,7 +96,7 @@ Two standalone services live alongside the monorepo:
     ```bash
     pnpm docs:dev   # → http://localhost:3001
     ```
-    This site. Fumadocs — MDX edits hot-reload instantly.
+    This mode runs the documentation site. Fumadocs reloads MDX edits immediately.
   </Tab>
 </Tabs>
 
@@ -106,10 +113,11 @@ Two standalone services live alongside the monorepo:
   </Step>
   <Step>
     ### Run with hot reload
-    `pnpm tauri dev` reloads React instantly; Rust changes recompile on save.
+    `pnpm tauri dev` reloads React immediately. Rust changes recompile when you save them.
   </Step>
   <Step>
     ### Add tests
-    Coverage gate is ≥90%. Co-locate tests as `<file>.test.ts(x)` and run `pnpm test:coverage`.
+    The coverage gate is ≥90%. Co-locate tests as `<file>.test.ts(x)`.
+    Run `pnpm test:coverage`.
   </Step>
 </Steps>

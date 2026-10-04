@@ -1,6 +1,6 @@
 ---
 title: "0171: The CLI speaks the protocol, not a copy of it"
-description: "cognia-agent reaches the Host command plane through a generated index of the frozen protocol contract, over the two authority modes the dispatcher actually admits, refusing locally whatever the Host would refuse."
+description: "cognia-agent reaches the Host command plane through a generated index of the frozen protocol contract. Uses the two authority modes supported by the dispatcher. Locally rejects requests that the Host would reject."
 ---
 
 # ADR 0171: The CLI speaks the protocol, not a copy of it
@@ -93,9 +93,9 @@ plane. A device principal is deliberately not.
    `/api/dev/_rpc/{name}` there would have to run as a service principal on the
    Internal transport, which would raise the dev-token bridge from its
    8-command low-risk-read allowlist to all 656 commands with every approval
-   bypassed, on the one Host where a human is present to answer them. The
-   desktop is reached by pairing with its Companion API instead, which is the
-   same flow a phone uses.
+   bypassed, on the one Host where a human is present to answer them. Clients
+   reach desktop by pairing with its Companion API, using the same flow as a
+   phone.
 
 ## Consequences
 

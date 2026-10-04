@@ -8,7 +8,7 @@ description: How the two local CLIs discover the desktop, call its authenticated
 <Status variant="stable">22 authenticated loopback routes · two CLI consumers · bidirectional transcript handoff</Status>
 
 <TLDR>
-  Cognia has two different local CLIs. `cognia-agent` is the TypeScript chat TUI; `cognia` is the
+  Cognia has two different local CLIs. `cognia-agent` is the TypeScript chat TUI. `cognia` is the
   Rust plugin-author CLI. Both discover the running Tauri app through
   `cli-endpoint.json`, but they consume different parts of one 22-route loopback server. The
   desktop also projects config, credentials, history, and selected MCP servers directly into the

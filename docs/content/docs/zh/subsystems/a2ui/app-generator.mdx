@@ -1,6 +1,6 @@
 ---
 title: 应用生成器与模板
-description: 自然语言 → A2UI 组件树，全程不调用 LLM（纯关键字/正则规则匹配）、13 个硬编码内置模板，以及双模式的 A2UI Hub/Workspace 页面。
+description: 自然语言 → A2UI 组件树，全程不调用 LLM（纯关键字/正则规则匹配）、13 个硬编码内置模板，以及A2UI Hub/Workspace 页面的两种模式。
 ---
 
 # 应用生成器与模板
@@ -8,10 +8,10 @@ description: 自然语言 → A2UI 组件树，全程不调用 LLM（纯关键�
 <Status variant="experimental" />
 
 <TLDR>
-  **应用生成器**把一行描述变成完整的 A2UI 组件树，**全程不调用任何模型** —— 它是纯关键字/正则规则匹配。
-  一条简短的流水线（`createGenerationContext` → `detectAppType` → `extractAppName` → 一个 `switch`）把请求路由到十个
+  **应用生成器**把一行描述变成完整的 A2UI 组件树，**全程不调用任何模型** —— 它只使用关键字和正则规则匹配。
+  生成流程（`createGenerationContext` → `detectAppType` → `extractAppName` → 一个 `switch`）把请求路由到十个
   按类型划分的生成器之一，这些生成器再从 **13 个纯组件工厂** 组装出 surface。另外，一个含 **13 个硬编码内置模板**
-  的注册表（`appTemplates`）提供开箱即用的应用。生成器与模板都会发出**完全相同的 4 条 A2UI 消息序列**。
+  的注册表（`appTemplates`）提供可直接使用的应用。生成器与模板都会发出**完全相同的 4 条 A2UI 消息序列**。
   [A2UI Hub 页面](#hub-vs-workspace)（`app/a2ui/page.tsx`）是入口：`?app=<id>` 切到 Workspace，否则渲染 Hub，
   含 Flash 生成、可搜索的应用库与模板画廊。
 </TLDR>
@@ -38,9 +38,7 @@ description: 自然语言 → A2UI 组件树，全程不调用 LLM（纯关键�
 | **生成器** | `app-generator/index.ts:67` `generateAppFromDescription` | 通过规则把 NL 字符串 → `GeneratedApp`（components + dataModel + name） |
 | **模板注册表** | `templates/index.ts:48` `appTemplates` | 13 个硬编码 `A2UIAppTemplate`，按 id/分类/搜索查找 |
 
-两者都终结于**相同的 4 条 A2UI 消息序列**（`createSurface` · `updateComponents` · `dataModelUpdate` ·
-`surfaceReady`）—— 生成器经由 `createAppMessages`（`generators.ts:41`），模板经由
-`createAppFromTemplate`（`types.ts:31`）。两者都通过 `generateTemplateId`（`types.ts:24`）铸造 id。
+两者都终结于**相同的 4 条 A2UI 消息序列**（`createSurface` · `updateComponents` · `dataModelUpdate` · `surfaceReady`）—— 生成器经由 `createAppMessages`（`generators.ts:41`），模板经由 `createAppFromTemplate`（`types.ts:31`）。两者都通过 `generateTemplateId`（`types.ts:24`）铸造 id。
 
 <Files>
 - lib/a2ui/
@@ -61,8 +59,7 @@ description: 自然语言 → A2UI 组件树，全程不调用 LLM（纯关键�
 
 ## 生成流水线
 
-`generateAppFromDescription`（`index.ts:67`）是唯一入口。它解析生成上下文、对描述分类、提取名称，
-然后通过一个 `switch` 分派到某个按类型生成器；该生成器调用一个或多个工厂，并把结果包装成 4 条消息序列。
+`generateAppFromDescription`（`index.ts:67`）是唯一入口。它解析生成上下文、对描述分类、提取名称，然后通过一个 `switch` 分派到某个按类型生成器；该生成器调用一个或多个工厂，并把结果包装成 4 条消息序列。
 
 ```mermaid
 flowchart TB
@@ -92,8 +89,7 @@ flowchart TB
 
 ### 分派 switch
 
-`index.ts:73` 处的 `switch(appType)` 把检测到的类型映射到生成器。没有显式 case 的类型落入 `default`（88），
-在那里两个正则先捕获 tracker/converter 意图，再由 `generateCustomApp` 兜底。
+`index.ts:73` 处的 `switch(appType)` 把检测到的类型映射到生成器。没有显式 case 的类型落入 `default`（88），在那里两个正则先捕获 tracker/converter 意图，再由 `generateCustomApp` 兜底。
 
 | `appType` | 路由到 | 生成器行号 |
 | --- | --- | --- |
@@ -110,9 +106,7 @@ flowchart TB
 
 ## 意图检测（`appPatterns`）
 
-`detectAppType`（`config.ts:174`）将描述转小写，并遍历 `Object.entries(appPatterns)`（`config.ts:136`）——
-**首个匹配胜出**，按插入顺序。每个 pattern 携带双语关键字与一个 `templateId`（对应的内置模板，Hub 在选择
-提供模板而非生成应用时使用）。
+`detectAppType`（`config.ts:174`）将描述转小写，并遍历 `Object.entries(appPatterns)`（`config.ts:136`）——**首个匹配胜出**，按插入顺序。每个 pattern 携带双语关键字与一个 `templateId`（对应的内置模板，Hub 在选择提供模板而非生成应用时使用）。
 
 | 意图 | 行号 | 关键字（zh / en） | `templateId` |
 | --- | --- | --- | --- |
@@ -125,10 +119,7 @@ flowchart TB
 | `weather` | 161 | 天气 · weather · 气温 · 温度 | `weather` |
 | `dashboard` | 165 | 仪表盘 · dashboard · 数据 · 统计 · analytics · 图表 | `data-dashboard` |
 
-`config.ts` 中的支撑辅助函数：`detectLanguage`（189）把任意 CJK 字符（`/[一-鿿]/`）映射为 `zh`，否则 `en`；
-`extractAppName`（197）先试两个名称正则（198–201），再用类型名回退表（214–223），最后用默认值。
-`getLocalizedTexts`（101，默认 `zh`）与 `getStyleConfig`（108，默认 `colorful`）喂给
-`createGenerationContext`（234）。
+`config.ts` 中的支撑辅助函数：`detectLanguage`（189）把任意 CJK 字符（`/[一-鿿]/`）映射为 `zh`，否则 `en`；`extractAppName`（197）先试两个名称正则（198–201），再用类型名回退表（214–223），最后用默认值。`getLocalizedTexts`（101，默认 `zh`）与 `getStyleConfig`（108，默认 `colorful`）喂给 `createGenerationContext`（234）。
 
 <Callout type="warn">
   **weather 的陷阱。** `weather` 是 `appPatterns`（`config.ts:161`）中一个有效的可检测类型，但分派 `switch`
@@ -138,9 +129,7 @@ flowchart TB
 
 ## 工厂层（13 个纯工厂）
 
-`component-factories.ts` 含 13 个纯函数，每个返回 `A2UIComponent[]`（每个都以 `] as A2UIComponent[]` 结尾）。
-字符串硬编码为 zh（带 emoji 标题）；绑定用 `{ path: "/foo" }`。calculator、timer、todo、notes、form、tracker
-这几个生成器**委托**给这些工厂；而 converter、custom、dashboard 生成器则是**内联**构建组件树。
+`component-factories.ts` 含 13 个纯函数，每个返回 `A2UIComponent[]`（每个都以 `] as A2UIComponent[]` 结尾）。字符串硬编码为 zh（带 emoji 标题）；绑定用 `{ path: "/foo" }`。calculator、timer、todo、notes、form、tracker 这几个生成器**委托**给这些工厂；而 converter、custom、dashboard 生成器则是**内联**构建组件树。
 
 | 家族 | 工厂 | 行号 | 关键控件 |
 | --- | --- | --- | --- |
@@ -168,15 +157,11 @@ flowchart TB
 | `generateCustomApp` | 452 | 471–535 | 特性标记 input（461）/ button（462）/ list（463）/ chart（464） |
 | `generateDashboardApp` | 552 | 559–606 | ComparisonCards / WidgetStatus / Chart + 预置 dataModel（608–628） |
 
-委托型生成器同样带子路由：`generateCalculatorApp`（58）分支 tip（66）/ BMI（67）/ age（68）/ loan（69）/ basic；
-`generateTimerApp`（104）检测 pomodoro（112）和 `(\d+)分钟` 预设（115）；`generateTodoApp`（143）设置
-categories/priority/dueDate 标记（150–152）；`generateTrackerApp`（227）子路由 expense（234）/ health（236）/ habit。
-所有 id 都来自从 `../templates` 引入的 `generateTemplateId(prefix)`（`generators.ts:7`）。
+委托型生成器同样带子路由：`generateCalculatorApp`（58）分支 tip（66）/ BMI（67）/ age（68）/ loan（69）/ basic；`generateTimerApp`（104）检测 pomodoro（112）和 `(\d+)分钟` 预设（115）；`generateTodoApp`（143）设置 categories/priority/dueDate 标记（150–152）；`generateTrackerApp`（227）子路由 expense（234）/ health（236）/ habit。所有 id 都来自从 `../templates` 引入的 `generateTemplateId(prefix)`（`generators.ts:7`）。
 
 ## 13 个内置模板
 
-`appTemplates`（`templates/index.ts:48`，条目 L49–61）是注册表。它是 **13 个模板，不是 14 个**。
-分布：productivity ×4、utility ×4、form ×2、data ×2、social ×1。
+`appTemplates`（`templates/index.ts:48`，条目 L49–61）是注册表。它是 **13 个模板，不是 14 个**。分布：productivity ×4、utility ×4、form ×2、data ×2、social ×1。
 
 | id | 名称 | 分类 | 定义（`file:line`） |
 | --- | --- | --- | --- |
@@ -194,8 +179,7 @@ categories/priority/dueDate 标记（150–152）；`generateTrackerApp`（227�
 | `expense-tracker` | Expense Tracker | data | `data.ts:147` |
 | `profile-card` | Profile Card | social | `social.ts:12` |
 
-`index.ts` 中的注册表辅助函数：`getTemplateById`（67）、`getTemplatesByCategory`（74）、`searchTemplates`（81）
-—— 后者扫描 name/description/tags，驱动 Hub 搜索框。
+`index.ts` 中的注册表辅助函数：`getTemplateById`（67）、`getTemplatesByCategory`（74）、`searchTemplates`（81）—— 后者扫描 name/description/tags，驱动 Hub 搜索框。
 
 ### `A2UIAppTemplate` 形状与两个并行构建器
 
@@ -210,8 +194,7 @@ categories/priority/dueDate 标记（150–152）；`generateTrackerApp`（227�
 | `createAppMessages` | `generators.ts:41` | 生成的应用（在 48–51 把 components + data 包成 4 条消息） |
 | `createAppFromTemplate` | `types.ts:31` | 模板（template → 4 条 server 消息） |
 
-两者都调用 `generateTemplateId`（`types.ts:24`，`${prefix}-${crypto.randomUUID()}`）铸造 surface id ——
-在生成器路径和模板路径间共享。
+两者都调用 `generateTemplateId`（`types.ts:24`，`${prefix}-${crypto.randomUUID()}`）铸造 surface id ——在生成器路径和模板路径间共享。
 
 ```mermaid
 flowchart LR
@@ -244,20 +227,11 @@ flowchart LR
 
 ## Hub vs Workspace
 
-`app/a2ui/page.tsx`（914）是按 URL 区分的**双模式 hub**。`appIdFromUrl = searchParams.get("app")`（107）
-驱动模式切换（329–331）：若 `appIdFromUrl` 存在则返回 `<A2UIWorkspace surfaceId={appIdFromUrl} />`，
-否则渲染 Hub（333+）。因为用到 `useSearchParams`（101），默认导出把全部内容包进
-`<Suspense fallback={<PageLoading/>}>`（907–913）。`app/a2ui/layout.tsx`（11）只设置 metadata
-（`"A2UI Mini-Apps - Cognia"`，第 3 行）并透传 children。
+`app/a2ui/page.tsx`（914）是按 URL 区分的**双模式 hub**。`appIdFromUrl = searchParams.get("app")`（107）驱动模式切换（329–331）：若 `appIdFromUrl` 存在则返回 `<A2UIWorkspace surfaceId={appIdFromUrl} />`，否则渲染 Hub（333+）。因为用到 `useSearchParams`（101），默认导出把全部内容包进 `<Suspense fallback={<PageLoading/>}>`（907–913）。`app/a2ui/layout.tsx`（11）只设置 metadata（`"A2UI Mini-Apps - Cognia"`，第 3 行）并透传 children。
 
 ### Flash 生成
 
-hero prompt 驱动即时生成：`heroPrompt`（114），配 `QUICK_SUGGESTIONS`（79–86）与 `promptRef`（104）。
-`handleFlashGenerate`（205）调用 `generateAppFromDescription({ description: heroPrompt })`（209），随后
-`appBuilder.createCustomApp(result.name, result.components, result.dataModel)`（210）。Enter 提交（790–795）；
-提交 Button（799）在 `isGenerating` 期间禁用。`handleSuggestionClick`（220）填充 prompt；
-`handleTemplateSelect`（227）调用 `appBuilder.createFromTemplate(template.id)`。`handleOpenWorkspace`（322）执行
-`router.push('/a2ui?app=<id>')`。一个 `?action=create` effect（196–203）聚焦创建 prompt 然后 `router.replace("/a2ui")`。
+hero prompt 驱动即时生成：`heroPrompt`（114），配 `QUICK_SUGGESTIONS`（79–86）与 `promptRef`（104）。`handleFlashGenerate`（205）调用 `generateAppFromDescription({ description: heroPrompt })`（209），随后 `appBuilder.createCustomApp(result.name, result.components, result.dataModel)`（210）。Enter 提交（790–795）；提交 Button（799）在 `isGenerating` 期间禁用。`handleSuggestionClick`（220）填充 prompt；`handleTemplateSelect`（227）调用 `appBuilder.createFromTemplate(template.id)`。`handleOpenWorkspace`（322）执行 `router.push('/a2ui?app=<id>')`。一个 `?action=create` effect（196–203）聚焦创建 prompt 然后 `router.replace("/a2ui")`。
 
 ### Hub 各区块
 
@@ -270,9 +244,7 @@ hero prompt 驱动即时生成：`heroPrompt`（114），配 `QUICK_SUGGESTIONS`
 | 创建工作室侧栏 | 766 | Flash 生成 composer |
 | 对话框 | 873 | `DeleteConfirmDialog`（873）、预览 Dialog + `A2UIInlineSurface`（879）、`AppDetailDialog`（895） |
 
-派生状态：`filteredApps` memo（131）与 `filteredTemplates` memo（166，组合 `searchTemplates` /
-`getTemplatesByCategory` / `appTemplates`）。导出/导入：`handleExport`（268）、`handleExportAll`（287）、
-`downloadJson`（88）、`handleImportFile`（302）。
+派生状态：`filteredApps` memo（131）与 `filteredTemplates` memo（166，组合 `searchTemplates` /`getTemplatesByCategory` / `appTemplates`）。导出/导入：`handleExport`（268）、`handleExportAll`（287）、`downloadJson`（88）、`handleImportFile`（302）。
 
 ## 相关页面
 

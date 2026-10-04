@@ -1,6 +1,6 @@
 ---
 title: "0205 — Video generation runs as durable jobs"
-description: "Video generation becomes a first-class feature: one engine starts a provider job with the AI SDK's startVideo, persists the opaque operation in a Dexie job row, and a renderer reconciler polls it across reloads, downloads the result once and stores it where it was requested. The chat tool, /video, the Files page, a workflow node, the plugin API and the executor's videos.* handlers are all adapters over that engine."
+description: "Adds one video-generation engine. It starts a provider job with the AI SDK's startVideo and persists the opaque operation in a Dexie job row. A renderer reconciler polls across reloads, downloads the result once, and stores it at the requested destination. The chat tool, /video, Files page, workflow node, plugin API and executor videos.* handlers all use this engine."
 ---
 
 # ADR 0205 — Video generation runs as durable jobs
@@ -57,8 +57,8 @@ requested (a session asset for chat, a Files upload for plugins, a file
 under AppData for workflows), and discards the URL. The stored file is named
 after the prompt. All traffic goes through
 `platformFetch`, which fixes the desktop CSP gap for every caller. The desktop
-bridge buffers up to 64 MiB; larger results fail early from a
-`Content-Length` check with `result_too_large`.
+bridge buffers up to 64 MiB. A
+`Content-Length` check rejects larger results early with `result_too_large`.
 
 ### 4. Surfaces are adapters
 

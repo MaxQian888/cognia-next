@@ -45,7 +45,7 @@ Removing `thread-handoff-v1` from the negotiated capability disables new offers 
 
 ## Structured continuation and recovery (2026-09-07)
 
-New offers additionally require `thread-handoff-structured-v1`. This prevents an older target that flattens canonical messages into text from acknowledging a structured handoff. The existing canonical codec preserves reasoning, files, and tool results; an unsupported part blocks export rather than disappearing. Native handles remain provenance, while cross-host continuation is explicitly contextual. Incomplete historical tool calls become interrupted history and do not execute automatically.
+New offers additionally require `thread-handoff-structured-v1`. This prevents an older target that flattens canonical messages into text from acknowledging a structured handoff. The existing canonical codec preserves reasoning, files, and tool results. An unsupported part blocks export instead of being omitted. Native handles remain provenance, while cross-host continuation is explicitly contextual. Incomplete historical tool calls become interrupted history and do not execute automatically.
 
 A manifest is computed from actual canonical attachment bytes. Paired standalone devices fetch missing media through the authenticated source-session binary route. Remote Hosts receive the same bytes through the existing resumable attachment uploader; target-side preflight verifies SHA-256, length, and media type and materializes permanent media references. Canonical URIs and the sequence digest remain stable across staging. Every carriage mode must be locally verifiable before acceptance.
 

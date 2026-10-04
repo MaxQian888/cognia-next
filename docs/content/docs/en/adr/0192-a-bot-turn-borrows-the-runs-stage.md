@@ -1,6 +1,6 @@
 ---
 title: "0192 — A bot turn borrows the run's stage"
-description: "Connector-initiated bot turns used to render like a second-class runtime: progress flattened into one collapsible card panel, the final answer shipped as a bare Card 1.0 div, and `ask_user` opened a desktop dialog nobody in the IM conversation could see. This ADR makes a bot turn borrow the same stage a desktop run gets — Feishu's native `message_cot` chain-of-thought when the tenant supports it, a Card 2.0 result card with a state header / quoted input / footer / inline images, an interactive `ask_user` card routed through the durable callback-binding machinery, unseen group context injected into the first turn, and an execution-run binding so bot deliveries get the same run card, approvals, and COT as any other governed run — all built on the existing A2UI surface, binding, and outbound-queue machinery rather than a parallel bot pipeline."
+description: "Connector bot turns previously used a collapsible progress panel, a bare Card 1.0 result, and desktop `ask_user` dialogs hidden from IM participants. Uses the desktop-run presentation for bot turns. Feishu tenants that support it receive native `message_cot` chain-of-thought. Results use Card 2.0 with a state header, quoted input, footer and inline images. Interactive `ask_user` cards use durable callback bindings. The first turn receives unseen group context. Execution-run bindings provide run cards, approvals and COT. Reuses existing A2UI, binding and outbound-queue infrastructure."
 ---
 
 # ADR 0192 — A bot turn borrows the run's stage
@@ -136,9 +136,9 @@ unhashed.
 `runtime.ts` now assembles the ones the model has never seen — ambient
 messages between the last assistant watermark and the trigger — plus the
 resolved `replyTo.preview` quote, into an XML context block prepended to the
-model prompt. The stored inbound row stays clean; only the prompt carries
-the context, so history reads as the human wrote it while the model reads
-what the room was saying.
+model prompt. The stored inbound row is unchanged. Only the prompt carries
+the added context. History preserves the human message, while the model also
+receives the surrounding room discussion.
 
 ### Bot deliveries get a presentation binding
 

@@ -32,7 +32,7 @@ Cognia 已分别持久化 Memory 证据与冲突、Workflow 血缘、Twin 观察
 
 ## 验证
 
-覆盖契约校验器、Dexie v157 schema/index 迁移、仓储幂等与事件排序、各 producer 的内容脱敏、Twin 证据合并/冲突创建、Memory 冲突解决、Workflow 路由、connector 路由、工具授权成功/失败、Context Inspector 交互、i18n 对齐、数据目录对 sync/backup 的排除、typecheck、lint、coverage 与 static export。
+覆盖契约校验器、Dexie v157 schema/index 迁移、仓储幂等与事件排序、各 producer 的内容脱敏、Twin 证据合并/冲突创建、Memory 冲突解决、Workflow 路由、connector 路由、工具授权成功/失败、Context Inspector 交互、i18n 一致性、数据目录对 sync/backup 的排除、typecheck、lint、coverage 与 static export。
 
 ## 参考
 

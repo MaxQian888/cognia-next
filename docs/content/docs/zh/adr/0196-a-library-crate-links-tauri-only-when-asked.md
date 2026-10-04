@@ -1,13 +1,11 @@
 ---
 title: "0196 — 库 crate 只在被要求时才链接 Tauri"
-description: "ADR-0067 把 Tauri crate `app_lib` 从 17 万行削到 6.7 万行，却没有任何东西阻止它回涨：十周后它回到 18.7 万行，`companion_api` 一个模块就有 9.6 万行，十九个库 crate 链接了 `tauri`，headless 的 `cognia-server` 镜像里装着 webkit。本 ADR 为 Rust workspace 定义一张由门禁强制执行的分层图；让每个库 crate 默认不链接 Tauri，把命令外壳放到只有应用会开启的 `tauri-host` feature 之后；把 `companion_api` 拆成一组位于宿主 trait 之后的 companion crate；最终让 `cognia-server` 成为完全不链接 Tauri 的独立包。"
+description: "ADR-0067 曾将 Tauri crate `app_lib` 从 17 万行减至 6.7 万行。十周后增至 18.7 万行，`companion_api` 占 9.6 万行，十九个库 crate 链接 `tauri`，headless `cognia-server` 镜像包含 webkit。定义强制执行的 Rust workspace 分层。库 crate 默认不链接 Tauri，命令外壳置于仅应用开启的 `tauri-host` feature 后。将 `companion_api` 拆入宿主 trait 后的 companion crate，最终使 `cognia-server` 成为不链接 Tauri 的独立包。"
 ---
 
 # ADR 0196 — 库 crate 只在被要求时才链接 Tauri
 
-**状态：** 已接受 — 实施中（P0–P5 与 P7 已落地，P6 部分落地；见下文"进展"）
-**日期：** 2026-09-25
-**相关：** [ADR-0067](./0067-src-tauri-crate-decomposition-and-build-speed)（第一次拆分；本 ADR 是它的延续）、[ADR-0014](./0014-capacitor-mobile-shell)（headless 服务端）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（`companion_api` 持有的 WebRTC 传输）、[ADR-0059](./0059-cloud-deployment-headless-brain)（`cognia-server` 镜像）
+**状态：** 已接受 — 实施中（P0–P5 与 P7 已落地，P6 部分落地；见下文"进展"）**日期：** 2026-09-25 **相关：** [ADR-0067](./0067-src-tauri-crate-decomposition-and-build-speed)（第一次拆分；本 ADR 是它的延续）、[ADR-0014](./0014-capacitor-mobile-shell)（headless 服务端）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（`companion_api` 持有的 WebRTC 传输）、[ADR-0059](./0059-cloud-deployment-headless-brain)（`cognia-server` 镜像）
 
 ## 背景
 

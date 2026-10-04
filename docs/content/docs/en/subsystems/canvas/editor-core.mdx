@@ -10,8 +10,8 @@ description: How Monaco is mounted, themed, and laid out — the offline loader 
 <TLDR>
   `CanvasPanel` (`components/canvas/canvas-panel.tsx:88`) mounts Monaco through a lazy
   `next/dynamic` import (`:69`, `ssr: false`) and configures it with `useCanvasMonacoSetup`
-  (`hooks/canvas/use-canvas-monaco-setup.ts:50`). The loader is pointed at offline assets under Tauri
-  by `configureMonacoLoader` (`lib/canvas/monaco-loader.ts:25`). Editor theming syncs the app palette
+  (`hooks/canvas/use-canvas-monaco-setup.ts:50`). The loader uses offline assets under Tauri,
+  configured by `configureMonacoLoader` (`lib/canvas/monaco-loader.ts:25`). Editor theming syncs the app palette
   into a single Monaco theme via `syncCogniaActiveTheme` (`lib/canvas/themes/cognia-active-theme.ts:128`).
   Layout is a resizable 3-pane `CanvasShell` (`canvas-shell.tsx:41`) persisted to
   `useCanvasLayoutStore`.

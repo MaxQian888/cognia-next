@@ -1060,6 +1060,585 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/agent_gateway_host_task_prepare:
+    post:
+      operationId: internalRpcAgentGatewayHostTaskPrepare
+      tags:
+        - headless-rpc
+      summary: agent_gateway_host_task_prepare (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - request
+              properties:
+                request:
+                  type: object
+                  required:
+                    - taskId
+                    - providerId
+                    - model
+                    - ingressProtocol
+                  properties:
+                    taskId:
+                      type: string
+                    providerId:
+                      type: string
+                    model:
+                      type: string
+                    ingressProtocol:
+                      enum:
+                        - openai-chat
+                        - openai-responses
+                        - anthropic
+                    originDeviceId:
+                      type:
+                        - string
+                        - "null"
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ticketId
+                  - secret
+                  - endpoint
+                  - accountGeneration
+                  - expiresAtMs
+                  - ownerAccountId
+                properties:
+                  ticketId:
+                    type: string
+                  secret:
+                    type: string
+                  endpoint:
+                    type: string
+                  accountGeneration:
+                    type: integer
+                  expiresAtMs:
+                    type: integer
+                  ownerAccountId:
+                    type:
+                      - string
+                      - "null"
+                  modelMetadata:
+                    type: object
+                    required:
+                      - id
+                    properties:
+                      id:
+                        type: string
+                    additionalProperties: true
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/agent_gateway_host_task_renew:
+    post:
+      operationId: internalRpcAgentGatewayHostTaskRenew
+      tags:
+        - headless-rpc
+      summary: agent_gateway_host_task_renew (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - taskId
+                - ticketId
+                - accountGeneration
+              properties:
+                taskId:
+                  type: string
+                ticketId:
+                  type: string
+                accountGeneration:
+                  type: integer
+                  minimum: 0
+                originDeviceId:
+                  type:
+                    - string
+                    - "null"
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: boolean
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/agent_gateway_host_task_revoke:
+    post:
+      operationId: internalRpcAgentGatewayHostTaskRevoke
+      tags:
+        - headless-rpc
+      summary: agent_gateway_host_task_revoke (service.internal)
+      description: "Loopback service-token command. Target: service; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - taskId
+                - ticketId
+                - accountGeneration
+              properties:
+                taskId:
+                  type: string
+                ticketId:
+                  type: string
+                accountGeneration:
+                  type: integer
+                  minimum: 0
+                originDeviceId:
+                  type:
+                    - string
+                    - "null"
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: boolean
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/agent_gateway_lease_prepare:
     post:
       operationId: internalRpcAgentGatewayLeasePrepare
@@ -46649,6 +47228,240 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/external_agent_cognia_models:
+    post:
+      operationId: internalRpcExternalAgentCogniaModels
+      tags:
+        - headless-rpc
+      summary: external_agent_cognia_models (process.spawn)
+      description: "Loopback service-token command. Target: execution; risk: critical."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - configId
+              properties:
+                configId:
+                  type: string
+                  minLength: 1
+                  description: Host-owned external-agent configuration whose runtime decides whether Cognia models are offered at all.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required:
+                      - supported
+                      - providers
+                    properties:
+                      supported:
+                        const: true
+                      providers:
+                        type: array
+                        items:
+                          type: object
+                          required:
+                            - providerId
+                            - providerName
+                            - models
+                          properties:
+                            providerId:
+                              type: string
+                            providerName:
+                              type: string
+                            accountIds:
+                              type: array
+                              items:
+                                type: string
+                            models:
+                              type: array
+                              items:
+                                type: object
+                                required:
+                                  - id
+                                  - name
+                                properties:
+                                  id:
+                                    type: string
+                                  name:
+                                    type: string
+                                  contextLength:
+                                    type: integer
+                                    minimum: 1
+                                  supportsTools:
+                                    type: boolean
+                                  supportsVision:
+                                    type: boolean
+                                  supportsReasoning:
+                                    type: boolean
+                                  supportsStreaming:
+                                    type: boolean
+                                additionalProperties: false
+                          additionalProperties: false
+                    additionalProperties: false
+                  - type: object
+                    required:
+                      - supported
+                      - reason
+                    properties:
+                      supported:
+                        const: false
+                      reason:
+                        type: string
+                        enum:
+                          - host-update-required
+                          - unsupported-runtime
+                          - no-eligible-models
+                          - account-locked
+                          - public-https-required
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/external_agent_config_create:
     post:
       operationId: internalRpcExternalAgentConfigCreate
@@ -48890,6 +49703,33 @@ paths:
                     chosen model publishes; an agent with no reasoning axis ignores it.
                 externalSessionId:
                   type: string
+                  description: "Resume an agent session this conversation already established on the host: a native session id, or a
+                    `cognia-gateway:` task session id when the turn runs on a Cognia model."
+                cogniaModel:
+                  description: "Cognia provider/model this turn runs on through the host's gateway, using the host's own provider settings
+                    and vault. Omit to inherit the host configuration's own setting; `null` selects the agent's native
+                    model configuration explicitly. Identifiers only: credentials never cross the wire."
+                  oneOf:
+                    - type: object
+                      required:
+                        - providerId
+                        - modelId
+                      properties:
+                        providerId:
+                          type: string
+                          minLength: 1
+                        modelId:
+                          type: string
+                          minLength: 1
+                        accountId:
+                          type:
+                            - string
+                            - "null"
+                          minLength: 1
+                          description: Omit for the provider default; a host vault account id pins the task; null selects the host's manual API
+                            settings.
+                      additionalProperties: false
+                    - type: "null"
                 callerDeviceId:
                   type: string
                 stamp:
@@ -105839,6 +106679,7 @@ paths:
                         - issue-wakeup
                         - radar-report
                         - provider-diagnostics-refresh
+                        - conversation-auto-archive
                     status:
                       type: string
                       enum:
@@ -106490,6 +107331,7 @@ paths:
                         - issue-wakeup
                         - radar-report
                         - provider-diagnostics-refresh
+                        - conversation-auto-archive
                     trigger:
                       oneOf:
                         - type: object
@@ -106780,6 +107622,7 @@ paths:
                       - issue-wakeup
                       - radar-report
                       - provider-diagnostics-refresh
+                      - conversation-auto-archive
                   trigger:
                     type: object
                     x-cognia-wire-source: types/scheduler TaskTrigger
@@ -107568,6 +108411,7 @@ paths:
                             - issue-wakeup
                             - radar-report
                             - provider-diagnostics-refresh
+                            - conversation-auto-archive
                         trigger:
                           type: object
                           x-cognia-wire-source: types/scheduler TaskTrigger
@@ -107998,6 +108842,7 @@ paths:
                           - issue-wakeup
                           - radar-report
                           - provider-diagnostics-refresh
+                          - conversation-auto-archive
                       trigger:
                         type: object
                         x-cognia-wire-source: types/scheduler TaskTrigger
@@ -108410,6 +109255,7 @@ paths:
                               - issue-wakeup
                               - radar-report
                               - provider-diagnostics-refresh
+                              - conversation-auto-archive
                           trigger:
                             oneOf:
                               - type: object
@@ -108920,6 +109766,7 @@ paths:
                           - issue-wakeup
                           - radar-report
                           - provider-diagnostics-refresh
+                          - conversation-auto-archive
                     statuses:
                       type: array
                       items:
@@ -109014,6 +109861,7 @@ paths:
                         - issue-wakeup
                         - radar-report
                         - provider-diagnostics-refresh
+                        - conversation-auto-archive
                     trigger:
                       type: object
                       x-cognia-wire-source: types/scheduler TaskTrigger
@@ -109790,6 +110638,7 @@ paths:
                           - issue-wakeup
                           - radar-report
                           - provider-diagnostics-refresh
+                          - conversation-auto-archive
                       status:
                         type: string
                         enum:
@@ -110095,6 +110944,7 @@ paths:
                         - issue-wakeup
                         - radar-report
                         - provider-diagnostics-refresh
+                        - conversation-auto-archive
                     status:
                       type: string
                       enum:
@@ -110590,6 +111440,7 @@ paths:
                         - issue-wakeup
                         - radar-report
                         - provider-diagnostics-refresh
+                        - conversation-auto-archive
                     trigger:
                       type: object
                       x-cognia-wire-source: types/scheduler TaskTrigger
@@ -111237,6 +112088,7 @@ paths:
                           - issue-wakeup
                           - radar-report
                           - provider-diagnostics-refresh
+                          - conversation-auto-archive
                       trigger:
                         type: object
                         x-cognia-wire-source: types/scheduler TaskTrigger
@@ -154397,6 +155249,9 @@ components:
           - adapter_update_policy
           - agent_close_session
           - agent_compact
+          - agent_gateway_host_task_prepare
+          - agent_gateway_host_task_renew
+          - agent_gateway_host_task_revoke
           - agent_gateway_lease_prepare
           - agent_gateway_lease_renew
           - agent_gateway_lease_revoke
@@ -154623,6 +155478,7 @@ components:
           - execution_run_resume
           - external_agent_admit_run
           - external_agent_cancel_run
+          - external_agent_cognia_models
           - external_agent_config_create
           - external_agent_config_delete
           - external_agent_config_get
@@ -155396,10 +156252,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 735
-  generatedRequestSchemaCount: 735
+  internalCommandCount: 739
+  generatedRequestSchemaCount: 739
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 735
+  contractRequestSchemaCount: 739
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 735
+  generatedResponseSchemaCount: 739
   loopbackOnly: true

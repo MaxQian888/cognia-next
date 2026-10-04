@@ -9,7 +9,7 @@ description: "第三方插件代码如何被约束：渲染端的 PluginSandbox�
 
 <TLDR>
   三个层级共同约束插件代码。`lib/plugin/core/sandbox.ts:PluginSandbox` 是已发布的渲染端隔离：它把每个
-  `PluginPermission` 映射到一个具体的被允许的全局对象，包装 `console` / `setTimeout` / `fetch` /
+  `PluginPermission` 映射到具体的允许访问的全局对象，包装 `console` / `setTimeout` / `fetch` /
   `localStorage`，并通过带显式参数和超时的 `Function` / `AsyncFunction` 运行插件代码。**T2**
   （`launchPluginJs.ts`）把 manifest 的权限翻译为 Node 24 的 `--permission` 标志，用于重新执行
   Node 目标插件。**T3** 是原生 Rust/Wasmtime 宿主。T2 已经通过 `PluginLoader` / `PluginManager`
@@ -19,8 +19,7 @@ description: "第三方插件代码如何被约束：渲染端的 PluginSandbox�
 
 ## 渲染端隔离 —— `PluginSandbox`
 
-`PluginSandbox` 构造时需要插件 id、其 `PluginPermission[]`，以及可选的超时/内存上限。它在构造函数中一次性
-推导出一个 allow-set 和一组沙箱化的全局对象。
+`PluginSandbox` 构造时需要插件 id、其 `PluginPermission[]`，以及可选的超时/内存上限。它在构造函数中一次性推导出一个 allow-set 和一组沙箱化的全局对象。
 
 ### 权限 → API 映射
 
@@ -56,13 +55,11 @@ for (const permission of permissions) {
 - **setTimeout** —— 钳制到配置的上限（默认 30 秒）（`sandbox.ts:151-158`）。
 - **setInterval** —— 下限设为 100 ms 以防止 CPU 滥用（`sandbox.ts:160-167`）。
 - **fetch** —— 在每个请求上盖上一个 `X-Plugin-Id` 头（`sandbox.ts:169-185`）。
-- **localStorage** —— 以 `plugin:<id>:` 作命名空间，并按 key 做读/写权限检查
-  （`sandbox.ts:187-214`）。
+- **localStorage** —— 以 `plugin:<id>:` 作命名空间，并按 key 做读/写权限检查（`sandbox.ts:187-214`）。
 
 ### 代码执行
 
-插件代码通过一个以显式参数名构建的 `Function`（或 `AsyncFunction`）运行，使插件只能看到被授予的全局对象 ——
-没有环境（ambient）作用域：
+插件代码通过一个以显式参数名构建的 `Function`（或 `AsyncFunction`）运行，使插件只能看到被授予的全局对象 ——没有环境（ambient）作用域：
 
 ```ts title="lib/plugin/core/sandbox.ts:223-241 (sync execute)"
 execute<T>(code: string, context: Record<string, unknown> = {}): T {
@@ -78,9 +75,7 @@ execute<T>(code: string, context: Record<string, unknown> = {}): T {
 }
 ```
 
-`executeAsync`（`sandbox.ts:246-273`）增加了一个针对 "Execution timeout" reject 的 `Promise.race`。
-`executeCode(language, code)`（`sandbox.ts:301-318`）要求 `sandbox:web-execute` 权限，并委托给 Web
-沙箱服务 —— 而后者如今是一个 stub（参见 [microVM 与 Web](./microvm-and-web)）。
+`executeAsync`（`sandbox.ts:246-273`）增加了一个针对 "Execution timeout" reject 的 `Promise.race`。`executeCode(language, code)`（`sandbox.ts:301-318`）要求 `sandbox:web-execute` 权限，并委托给 Web 沙箱服务 —— 而后者如今是一个 stub（参见 [microVM 与 Web](./microvm-and-web)）。
 
 <Callout type="info">
   `PluginSandbox` 是一个 **软（soft）** 隔离层：基于 `Function` 的求值、权限门控的全局对象、命名空间化的
@@ -90,8 +85,7 @@ execute<T>(code: string, context: Record<string, unknown> = {}): T {
 
 ## T2 —— Node `--permission` 重新执行（re-exec）
 
-`lib/plugin/launcher/launchPluginJs.ts` 把一个权限范围（scope）翻译为 Node 24 的 `--allow-*` 标志，用于
-重新执行插件的 JS 入口。空列表会 OMIT 该标志（fail-safe 拒绝），绝不使用 `*`。
+`lib/plugin/launcher/launchPluginJs.ts` 把一个权限范围（scope）翻译为 Node 24 的 `--allow-*` 标志，用于重新执行插件的 JS 入口。空列表会 OMIT 该标志（fail-safe 拒绝），绝不使用 `*`。
 
 ```ts title="lib/plugin/launcher/launchPluginJs.ts:91-112"
 export function nodePermissionArgs(scope: NodePermissionScope): string[] {
@@ -104,11 +98,7 @@ export function nodePermissionArgs(scope: NodePermissionScope): string[] {
 }
 ```
 
-`buildLaunchArgv(entryPath, scope, extraArgs)` 返回传给 `child_process.spawn("node", argv)` 的完整
-argv。`deriveScopeFromManifest` 很保守：一个声明了但没有具体路径的权限类别会产生空列表，因此文件系统
-flag 会被完全省略。`PluginLoader.loadFrontendModule()` 会识别 Node-target frontend 插件（`engines.node`
-或 `runtimeCompatibility.tauri.entrypoint === "node"`），从 `permissions` + `fileScope` 推导 scope，
-在 activate 时调用 `launchPluginJs()`，并在 deactivate/unload 时通过正常 `PluginManager` 生命周期杀掉子进程。
+`buildLaunchArgv(entryPath, scope, extraArgs)` 返回传给 `child_process.spawn("node", argv)` 的完整 argv。`deriveScopeFromManifest` 很保守：一个声明了但没有具体路径的权限类别会产生空列表，因此文件系统 flag 会被完全省略。`PluginLoader.loadFrontendModule()` 会识别 Node-target frontend 插件（`engines.node` 或 `runtimeCompatibility.tauri.entrypoint === "node"`），从 `permissions` + `fileScope` 推导 scope，在 activate 时调用 `launchPluginJs()`，并在 deactivate/unload 时通过正常 `PluginManager` 生命周期杀掉子进程。
 
 <Callout type="info">
   Node permission model 只约束入口进程。需要 host allowlist 强制的 shell 类工作与网络访问必须走 brokered
@@ -116,20 +106,13 @@ flag 会被完全省略。`PluginLoader.loadFrontendModule()` 会识别 Node-tar
   `--allow-child-process`。
 </Callout>
 
-权限审查 UI 会如实投影这个边界。scoped filesystem grant 可用；`network:fetch`、
-`network:upload`、`network:websocket`、`shell:execute` 与 `process:spawn` 为兼容 manifest
-仍然可见，但 grant/tier 控件会按缺失 broker 原因禁用，不再显示为已成功落实。
+权限审查 UI 会如实投影这个边界。scoped filesystem grant 可用；`network:fetch`、`network:upload`、`network:websocket`、`shell:execute` 与 `process:spawn` 为兼容 manifest 仍然可见，但 grant/tier 控件会按缺失 broker 原因禁用，不再显示为已成功落实。
 
 ## T3 —— Wasmtime / WASI 运行时
 
-`PluginManager.preloadWasmComponent()` 会在 `plugin_wasm_load` 之前把 `manifest.wasm.fs.preopens` 与
-持久账本对账：过期账本 preopens 带 warning 拒绝，新声明的 manifest preopens 不会自动授权，只有交集会传给
-host。旧 `localStorage` 账本只作为一次性迁移 fallback 写入 `wasmGrantLedger` Dexie 表。
+`PluginManager.preloadWasmComponent()` 会在 `plugin_wasm_load` 之前把 `manifest.wasm.fs.preopens` 与持久账本对账：过期账本 preopens 带 warning 拒绝，新声明的 manifest preopens 不会自动授权，只有交集会传给 host。旧 `localStorage` 账本只作为一次性迁移 fallback 写入 `wasmGrantLedger` Dexie 表。
 
-`PluginLoader` 保存 `plugin_wasm_load` 返回的 generation。缺失 generation 时，`PluginManager`
-拒绝 activation，并把 generation 传入 `buildWasmToolDefinitions` 与 `buildWasmNodeDefs`。
-因此每次 execute 都点名确切的 loaded generation；原生宿主拒绝陈旧的 activate/call/deactivate/unload。
-未使用的浏览器 WASM runtime 与未实现的 JCO 路径已移除，Rust/Wasmtime 是唯一生产权威。
+`PluginLoader` 保存 `plugin_wasm_load` 返回的 generation。缺失 generation 时，`PluginManager` 拒绝 activation，并把 generation 传入 `buildWasmToolDefinitions` 与 `buildWasmNodeDefs`。因此每次 execute 都点名确切的 loaded generation；原生宿主拒绝陈旧的 activate/call/deactivate/unload。未使用的浏览器 WASM runtime 与未实现的 JCO 路径已移除，Rust/Wasmtime 是唯一生产权威。
 
 ```mermaid
 flowchart TB
@@ -151,10 +134,7 @@ flowchart TB
 
 ## 测试
 
-`lib/plugin/core/sandbox.test.ts`（权限映射、钳制、命名空间化存储、执行）、
-`lib/plugin/launcher/launchPluginJs.test.ts`（标志构造、空列表省略）、以及
-`wasm-loader.test.ts` + `manager.test.ts` + 原生 Wasmtime 测试（generation 绑定与 stale
-generation 拒绝）。
+`lib/plugin/core/sandbox.test.ts`（权限映射、钳制、命名空间化存储、执行）、`lib/plugin/launcher/launchPluginJs.test.ts`（标志构造、空列表省略）、以及 `wasm-loader.test.ts` + `manager.test.ts` + 原生 Wasmtime 测试（generation 绑定与 stale generation 拒绝）。
 
 ## 下一步
 

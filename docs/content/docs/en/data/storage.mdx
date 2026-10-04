@@ -17,7 +17,11 @@ description: Database ownership, retention, recovery, and performance boundaries
 
 Database identity comes from the account/runtime initialization path. `cognia-claude` is the legacy/default constructor name, not the name of every account database. Use `lib/accounts/account-db.ts` and existing runtime selectors instead of inventing or renaming databases.
 
-`lib/db/storage-layout.ts` checks the storage-layout marker before opening existing account data. A missing marker store, different layout, or newer schema is refused; the data stays on disk. Reset is a separate explicit user action. Lower schema versions within the supported layout can acquire new stores, but this does not transform old row shapes automatically.
+`lib/db/storage-layout.ts` checks the storage-layout marker before opening existing account data.
+It refuses to open data if the marker store is missing, the layout differs, or the schema is newer.
+The data stays on disk. A reset requires a separate, explicit user action.
+Lower schema versions within the supported layout can acquire new stores.
+This does not automatically transform old row shapes.
 
 The policy authority is `lib/data-governance/table-catalog.ts`: table role, protection, account scope, backup/sync participation, retention owner, cascade relationships, and query budgets. `docs/data-governance.generated.json` records current schema and sync coverage. Run:
 

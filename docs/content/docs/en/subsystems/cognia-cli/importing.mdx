@@ -1,6 +1,6 @@
 ---
 title: Importing
-description: Convert MCP entries, skills, CLI skeletons, or complete Claude Code, Codex, Gemini CLI, and Cognia plugin bundles without executing source code or silently dropping behavior.
+description: Convert MCP entries, skills, CLI skeletons, or complete plugin bundles from sixteen agent ecosystems (Claude Code, Codex, Gemini CLI, Agent Plugins, Copilot, Cursor, Kimi, Devin, OpenCode, Pi, Factory Droid, Qoder, CodeBuddy, Auggie, Open Plugins and Cognia) without executing source code or silently dropping behavior.
 ---
 
 # Importing — `cognia plugin import`
@@ -98,10 +98,59 @@ cognia plugin export --input ./cognia-plugin --to codex --dir ./codex-plugin
 ```
 
 Targets are `cognia`, `claude-code`, `codex`, `gemini-cli`, `agent-plugins`, `cursor`, `copilot`, `kimi`,
-`devin`, `opencode`, and `pi`. The converter detects supported manifests, preserves Skill resource trees
-including binary assets, and returns a fidelity and per-capability delivery report. Foreign → foreign
-conversion uses the same canonical representation. These targets support different subsets: Pi bundles
-cannot directly carry MCP servers, and OpenCode bundles require a portable local MCP command.
+`devin`, `opencode`, `pi`, `factory-droid`, `qoder`, `codebuddy`, `auggie`, and `open-plugins`. The converter
+detects supported manifests, preserves Skill resource trees including binary assets, and returns a fidelity
+and per-capability delivery report. Foreign → foreign conversion uses the same canonical representation.
+
+### Supported ecosystems (formats refreshed 2026-10-02)
+
+| Ecosystem | Manifest the converter reads | Imports into Cognia | Exports from Cognia |
+| --- | --- | --- | --- |
+| Claude Code | `.claude-plugin/plugin.json` (optional fields only `name`) | skills (declared paths add to `skills/`), commands (files or the inline command map), agents, hooks (33 events), MCP (declared + `.mcp.json` merge) | skills, agents, hooks, MCP; reserved name prefixes block |
+| Codex | `.codex-plugin/plugin.json` (a root Agent Plugins manifest wins) | skills, declared `commands` (as skills, the way Codex migrates them), hooks (Codex event subset; `command` and `mcp_tool` only), MCP, `interface` metadata | skills, hooks, MCP |
+| Gemini CLI | `gemini-extension.json` | skills, TOML commands (contextual), context files (`contextFileName` string or list), hooks (`BeforeTool`↔`PreToolUse`, `AfterTool`↔`PostToolUse`, `PreCompress`↔`PreCompact`, session and notification events; timeouts ms↔s), `agents/*.md`, manifest MCP and settings | skills, hooks, agents (`max_turns`), MCP with install settings |
+| Agent Plugins | root `plugin.json` with a 1.0.0 (Published) or 1.1.0 (Working Draft) `$schema` | `skills/<dir>/SKILL.md`, `mcp.json` with the same schema version, and the `dev.openhands/` and `com.github.copilot/` client namespaces (agents, commands, OpenHands hooks) | 1.0.0 manifest, skills, `mcp.json`, agents and hooks under `dev.openhands/` |
+| GitHub Copilot CLI | Agent Plugins root manifest, else the legacy `plugin.json` / `.github/plugin/plugin.json` | skills, `*.agent.md` agents, declared commands, MCP (`.mcp.json` or `.github/mcp.json`) | Agent Plugins layout plus `com.github.copilot/agents/<id>.agent.md` |
+| Cursor | `.cursor-plugin/plugin.json` | skills, agents, commands, hooks (camelCase event map), MCP (path, inline or array), `variables` as preset fields, `logo` | skills, agents, flat hooks, MCP, preset fields as `variables` |
+| Kimi CLI | root `plugin.json` with `tools`, `inject` or `config_file` | the root `SKILL.md` with the whole directory as its resources | one skill as the root `SKILL.md`, `tools: []` |
+| Devin | `.devin-plugin/plugin.json` | skills (`skills: []` disables them), MCP (`{paths, exclusive}` honored), invocation triggers | skills, MCP |
+| OpenCode | `opencode.json` / `opencode.jsonc` | `.opencode/skills`, `.opencode/commands`, `mode: subagent` agents, local MCP with `cwd` and `{env:VAR}` | skills, `mode: subagent` agents, local MCP |
+| Pi | `package.json` with a `pi` key or the `pi-package` keyword | the complete package as one `piPackages` entry, plus skills and prompts (as explicit skills) | the retained package root, Cognia skills merged into `pi.skills` |
+| Factory Droid | `.factory-plugin/plugin.json` (metadata only; Droid discovers by convention) | skills, commands, `droids/` agents, hooks, `mcp.json` | same layout with `DROID_PLUGIN_ROOT` |
+| Qoder CLI | `.qoder-plugin/plugin.json` | skills, commands, agents, hooks, `.mcp.json` | same layout with `QODER_PLUGIN_ROOT` |
+| CodeBuddy | `.codebuddy-plugin/` or `.workbuddy-plugin/plugin.json` | skills, commands, agents (`effort`, `maxTurns`), hooks, `.mcp.json` | same layout |
+| Auggie | `.augment-plugin/plugin.json` | skills, commands, agents, hooks (script files, ms timeouts), `.mcp.json` | same layout with `AUGMENT_PLUGIN_ROOT` |
+| Open Plugins | `.plugin/plugin.json` or `.goose-plugin/plugin.json` (legacy OpenPlugin layout) | skills, commands, agents (`*.agent.md` ids), OpenHands-style hooks, `.mcp.json` | skills, hooks; agents block because hosts disagree on agent files |
+
+Claude-family layouts (Claude Code, Factory Droid, Qoder, CodeBuddy, Auggie, Open Plugins) share one
+reader and one projection driven by a per-host profile in `lib/plugin/convert/claude-family.ts`: manifest
+directory, agents directory, MCP file name, plugin-root variables, honored manifest keys, and the hook
+dialect in `lib/plugin/convert/hook-dialects.ts`. A hook converts only through an explicit event map;
+hosts that use their own tool names (Gemini, Cursor, Droid, Auggie, OpenHands) cannot carry a non-wildcard
+matcher, and a converted hook from a host whose payload or decision schema differs is reported for review.
+
+When a bundle carries several manifests, the most specific vendor manifest wins (`.factory-plugin/` over
+`.claude-plugin/`, a vendor directory over a root Agent Plugins manifest), and the others are reported as
+warnings; two different vendor-specific manifests are refused as ambiguous. The precedence table lives in
+`lib/plugin/convert/bundle-detection.ts`.
+
+### Pi packages and `piPackages`
+
+A Pi package imports as a single `piPackages` entry (capability `pi-package`) whose `path` is the plugin
+root: the extensions, themes, prompts, skills, `package.json`, and lockfile stay byte-for-byte where they are,
+because the GitHub and Load-unpacked installers may only overlay `plugin.json` and `dist/index.js`. Skills
+also become Cognia skills, and prompt templates become explicit-invocation skills whose `$1` / `$@`
+placeholders stay literal (reported as contextual). Runtime `dependencies` add a fixed `prepare` step
+(`npm install --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund`); lifecycle scripts never run.
+Extensions are retained for Pi only: their tools, MCP servers and event handlers are not translated, and no
+`hostedSession` block is generated, because loading a package into Cognia-hosted Pi sessions needs reviewed
+`extensions` and `tools` declarations written by the author. A package that already uses `dist/index.js`, or
+that Pi filters with an ignore file, is blocked.
+
+Exporting to Pi writes the single `piPackages` root back out, adds `pi-package` to the existing keywords, and
+merges Cognia skills the package does not already deliver into `pi.skills`. More than one Pi package, MCP
+presets (Pi core needs an extension), hooks, subagents, and Pi host packages listed under `dependencies`
+block. Every other target keeps a Pi package in Cognia and reports it as retained.
 
 Conversion is fail-closed. Invocation controls, hooks, agents, imperative runtime behavior, permissions, or
 configuration fields without an implemented target mapping block output. Warnings require explicit

@@ -40,11 +40,11 @@ branches by transport:
 - **http / websocket / sse** — `connectViaNetwork` (`:447`) for remote agents, tolerating 404/405
   during the connect probe (`:462`).
 
-Incoming bytes are buffered and split on `\n` in `processMessageBuffer` (`:1739`/`:1747`); each line
-is JSON-parsed and routed by `routeMessage` (`:1752`): an object with a non-null `id` **and** a
-`method` is an **agent→client request** (§ Inverted handlers); `method` with no `id` is a
-**notification** (§ Streaming); a bare `id` is a **response** to one of our requests
-(`handleResponse` `:1777`).
+`processMessageBuffer` (`:1739`/`:1747`) buffers incoming bytes and splits them on `\n`.
+Each line is parsed as JSON and dispatched by `routeMessage` (`:1752`).
+An object with a non-null `id` **and** a `method` is an **agent→client request** (§ Inverted handlers).
+An object with a `method` but no `id` is a **notification** (§ Streaming).
+An object with a bare `id` is a **response** to one of our requests (`handleResponse` `:1777`).
 
 ## The Handshake & Prompt Turn
 

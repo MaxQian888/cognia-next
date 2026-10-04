@@ -8,7 +8,7 @@ description: How Cognia distils a person's documents, chats, and code into a cha
 <Status variant="beta">Beta · phase 8</Status>
 
 <TLDR>
-  Distil documents, chat exports and code into a chat-ready twin. Send time pulls the top-K relevant
+  Distil documents, chat exports and code into a chat-ready twin. At send time, the runtime retrieves the top-K relevant
   chunks and style few-shot samples to keep the assistant faithful to the author's voice. PII is
   replaced with placeholders **before** any embedding or LLM call — the redaction map is encrypted
   on disk.

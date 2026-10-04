@@ -1,17 +1,15 @@
 ---
 title: "0189 — 插件必须说明自己在做四件事中的哪一件"
-description: "插件接入面此前对所有参与请求只有一种形状——hook 包上的一个函数——宿主因此分不清一个处理器是在观察、改写请求、否决它，还是包裹整次执行。四种语义（observe / transform / guard / around）统一到一个注册表、一套排序规则、一条存活规则和一个调度器，next 至多进入一次，失败策略按扩展点声明。修复了一个用户一次发送产生两次模型请求的 chat middleware 路径、一个忽略目标会话的插件写入，以及一个靠方法名猜测重试安全性的 transport。"
+description: "插件参与请求分为 observe / transform / guard / around 四种语义，区分观察、请求改写、否决和执行包装。四者共用注册表、排序规则、存活规则和调度器，next 至多调用一次，各扩展点声明失败策略。修复 chat middleware 重复请求模型、插件写入忽略目标会话，以及 transport 按方法名推测重试安全性的问题。"
 ---
 
 # ADR 0189 — 插件必须说明自己在做四件事中的哪一件
 
-**Status:** Accepted — 已实现
-**Date:** 2026-09-16
-**Related:** [ADR-0026](./0026-plugin-extension-points-v2)（扩展点 v2、`ctx.chat.use`、`onBuildOptions`）、[ADR-0155](./0155-plugin-author-boundary)（SDK 作者边界）、[ADR-0145](./0145-python-plugin-runtime)（契约目录与其镜像）、[ADR-0020](./0020-computer-use)（三档权限模型）
+**Status:** Accepted — 已实现 **Date:** 2026-09-16 **Related:** [ADR-0026](./0026-plugin-extension-points-v2)（扩展点 v2、`ctx.chat.use`、`onBuildOptions`）、[ADR-0155](./0155-plugin-author-boundary)（SDK 作者边界）、[ADR-0145](./0145-python-plugin-runtime)（契约目录与其镜像）、[ADR-0020](./0020-computer-use)（三档权限模型）
 
 ## 背景
 
-插件此前可以从三扇互不相干的门接入宿主管线：
+插件此前可以从三个互相独立的入口接入宿主管线：
 
 - `activate()` 返回的 `PluginHooks` 包；
 - `ctx.chat.use(...)`，around 风格的 chat middleware；
@@ -65,7 +63,7 @@ if (result.kind === "error")   { …; return next(req) }   // ← 第二次调�
 3. 只有在尚未委派且未提交任何副作用时，处理器才可被跳过。
 4. 一旦开始委派，失败意味着等待**同一个**操作（或暴露它的错误），绝不另起一个。
 5. 后处理失败绝不重新发起模型或工具调用。
-6. 下游耗时与下游错误归属下游。把一次缓慢的模型调用记在每一层包裹者头上，正是三个健康插件同时熔断的成因。
+6. 下游耗时与下游错误归属下游。将同一次缓慢模型调用归责于每层包装处理器，会导致三个健康插件同时熔断。
 7. 超时不等于取消成功：撤销该次能力，拒绝迟到的提交，同时不假装回滚了已在别处提交的工作。
 8. transform 默认串行，除非扩展点声明其取值互不相交。
 9. 重入按 operation 维度在调用图上检测。

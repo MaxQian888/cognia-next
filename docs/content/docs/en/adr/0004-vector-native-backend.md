@@ -14,8 +14,8 @@ description: Replace the non-functional NativeVectorStore stub with a real sqlit
 
 cognia-next ships a unified `IVectorStore` interface (`lib/vector/store.ts`) with
 six declared providers — `chroma`, `pinecone`, `qdrant`, `milvus`, `weaviate`,
-and `native`. Five of those providers work; the sixth (`native`, the Tauri-local
-"embedded" backend) was non-functional: `NativeVectorStore` called Tauri commands
+and `native`. Five of those providers work. The sixth (`native`, the Tauri-local
+"embedded" backend) did not work: `NativeVectorStore` called Tauri commands
 (`vector_upsert_points`, `vector_search_points`, …) that were never registered in
 `src-tauri/src/lib.rs`. The `VectorBackend` user-facing setting type
 (`types/twin/index.ts:123`) explicitly omitted `"native"`, so the broken path was

@@ -1,6 +1,6 @@
 ---
 title: "0173: The tracker has one programmatic face"
-description: "Workflow nodes, the /issue command, ctx.issues and the External Bridge all reach the issue tracker through lib/issues/service.ts and the board's own gate, trail entries fan out on one in-process bus, and a work submission that names an issue is finally read."
+description: "Workflow nodes, the /issue command, ctx.issues and the External Bridge use lib/issues/service.ts and the board's authorization gate. Trail entries are distributed through one in-process bus. Work submission now reads its issue reference."
 ---
 
 # ADR 0173: The tracker has one programmatic face
@@ -40,7 +40,7 @@ notification funnel nothing to subscribe to short of polling a table.
 issue by row id or printed identifier, creates into a container (named by id,
 by key, or the workspace's first), applies one `IssueBulkAction` through
 `applyIssueBulkAction` with the workspace's running set, and lists with the
-same filters the board uses plus a text needle. Every caller below goes
+same filters the board uses plus a text query. Every caller below goes
 through it, so a workflow, a slash command, a plugin and an MCP client are
 refused a move on a running issue exactly as the board refuses it, and every
 write lands in the trail with an actor that says who did it:

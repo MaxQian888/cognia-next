@@ -1,6 +1,6 @@
 ---
 title: "0201 — The desktop browser runs Chromium locally"
-description: "The desktop browser gains two Chromium backends beside the embedded webview: a Cognia-managed local Chromium (the workspace-runtime browser service run on loopback by the desktop) and the user's own Chrome attached through Chrome's consent-gated remote debugging. On top of them: multi-tab browsing, a download manager, Chrome extensions, cookie import from every major browser on every desktop OS, a Rust-only password vault with autofill, local files and dev-server discovery, and one session-aware browser tool surface for built-in and external agents."
+description: "Adds two desktop Chromium backends alongside the embedded webview. Cognia-managed local Chromium runs the workspace-runtime browser service on loopback. The user's Chrome connects through consent-gated remote debugging. Adds multi-tab browsing, downloads, Chrome extensions, cookie import from every major browser on every desktop OS, a Rust-only password vault with autofill, local files and dev-server discovery. Built-in and external agents share one session-aware browser tool surface."
 ---
 
 # ADR 0201 — The desktop browser runs Chromium locally
@@ -83,7 +83,7 @@ into the user-data directory and **asks the user to allow each new connection**.
 Chrome Beta/Canary, Edge, Brave (per-OS paths), and the runtime attaches with
 `connectOverCDP`. Cognia never launches the user's browser with debugging flags,
 never copies its profile, and never persists the endpoint. Agent tabs are
-opened in a dedicated window; `finalize` closes tabs the agent created and
+opened in a dedicated window. `finalize` closes tabs the agent created and
 leaves the user's tabs untouched. If the file is missing the discovery result
 carries `reason: "remote_debugging_disabled"` and the UI links the user to the
 Chrome setting.

@@ -23,7 +23,7 @@ The external-agent subsystem splits cleanly into a **unified** layer and a
 
 Plugins could already contribute the unified half: the `external-agent-preset`
 capability registers a configuration into a runtime overlay, and the preset can
-piggy-back on a built-in protocol. But the **targeted** half was closed —
+use a built-in protocol. However, plugins could not extend the **targeted** half:
 `ExternalAgentManager.registerDefaultAdapters()` hardcoded the four adapters into
 the `protocolAdapterRegistry`, and that registry was never exposed to the plugin
 runtime. A preset whose `protocol` was not one of the four threw

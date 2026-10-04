@@ -8,7 +8,7 @@ description: 每个工作流独立的 Zustand+zundo 编辑器 store、带拖拽�
 <Status variant="stable" />
 
 <TLDR>
-每个打开的工作流都会由 `createEditorStore(initial)`（`lib/workflow/editor/store.ts:389`）创建一个 Zustand store，并用 `zundo` temporal 包裹，使得只有 `nodes`+`edges` 可撤销（`store.ts:981`，`EDITOR_HISTORY_LIMIT = 100` 见 `store.ts:387`）。图变更器（`addNode` `store.ts:518`、`updateNodeData` `store.ts:551`、`connect` `store.ts:571`）会置 `dirty:true` 并压入历史；实时运行映射（`runStatusByStepId` `store.ts:96`、稀疏的 `validationByStepId` `store.ts:99`）和临时偏好被刻意设为**不可撤销**。拖拽通过 `beginDragHistory`/`commitDragHistory`（`store.ts:491`/`store.ts:499`）合并为**恰好一条**撤销记录，因为一次朴素拖拽会发出约 60 次 `setNodes`，否则一两次拖拽就会耗尽历史。一个 React 之外的 `Map<id,EditorStore>`（`store-registry.ts:21`）让插件 stdio 回调能触达活动 store；纯辅助函数（`auto-layout.ts`、`connection-validator.ts`、`alignment-guides.ts`、`edge-routing.ts`、`performance-tier.ts`）承载全部画布几何。表达式与 AI 提案模块位于同级页面——见 [./expressions-copilot](./expressions-copilot)。
+每个打开的工作流都会由 `createEditorStore(initial)`（`lib/workflow/editor/store.ts:389`）创建一个 Zustand store，并用 `zundo` temporal 包裹，使得只有 `nodes`+`edges` 可撤销（`store.ts:981`，`EDITOR_HISTORY_LIMIT = 100` 见 `store.ts:387`）。图变更器（`addNode` `store.ts:518`、`updateNodeData` `store.ts:551`、`connect` `store.ts:571`）会设置 `dirty:true` 并记录历史。实时运行映射（`runStatusByStepId` `store.ts:96`、稀疏的 `validationByStepId` `store.ts:99`）和临时偏好被刻意设为**不可撤销**。拖拽通过 `beginDragHistory`/`commitDragHistory`（`store.ts:491`/`store.ts:499`）合并为**恰好一条**撤销记录，因为一次朴素拖拽会发出约 60 次 `setNodes`，否则一两次拖拽就会耗尽历史。一个 React 之外的 `Map<id,EditorStore>`（`store-registry.ts:21`）让插件 stdio 回调能触达活动 store；纯辅助函数（`auto-layout.ts`、`connection-validator.ts`、`alignment-guides.ts`、`edge-routing.ts`、`performance-tier.ts`）承载全部画布几何。表达式与 AI 提案模块位于同级页面——见 [./expressions-copilot](./expressions-copilot)。
 </TLDR>
 
 <StatGrid>

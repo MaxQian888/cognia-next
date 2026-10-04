@@ -13,8 +13,8 @@ description: The single source of truth (useArtifactStore.canvasDocuments), the 
   There is **no** `useCanvasStore`. Five smaller stores own layout, settings, runtime chunks,
   comments, and keybindings. `startCanvasDexieBridge` (`lib/canvas/dexie-bridge.ts:267`) mirrors
   documents + flattened versions + comments into four Dexie tables (introduced at v11; schema now
-  v65) — **hydrate first, then subscribe**, memory always wins on conflict, and any Dexie write
-  failure only warns.
+  v65). The bridge must **hydrate first, then subscribe**. Memory always wins on conflict. A Dexie write
+  failure produces only a warning.
 </TLDR>
 
 <StatGrid>

@@ -1,6 +1,6 @@
 ---
 title: "0137 — Delegation runtime"
-description: "A handed-over task gets a run of its own: one card, steerable, stoppable, and handable to a person without ending it."
+description: "Gives a delegated task its own run and card. Users can steer or stop the run, or hand it to a person without ending it."
 ---
 
 # ADR 0137 — Delegation runtime
@@ -235,8 +235,8 @@ exactly. `ExecutionRun.retry` is an optional, non-indexed column, so it needs no
 Dexie version of its own. `retryWorkflowRun` keeps defaulting to
 `triggeredBy: { source: "ui" }`, so the desktop history view is unchanged.
 `resolveGatePolicy` defaults to *no* approval channel, so every existing caller
-keeps its behaviour byte for byte. Rollback needs no reverse migration; the v176
-index is inert without delegation rows.
+keeps its behaviour byte for byte. Rollback needs no reverse migration. The v176
+index has no effect without delegation rows.
 
 ## Consequences
 

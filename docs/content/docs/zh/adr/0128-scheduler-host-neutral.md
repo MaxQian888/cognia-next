@@ -1,6 +1,6 @@
 ---
 title: ADR-0128 — 主机中立的调度器、executor 补全与远端备份目的地
-description: 桌面、无头大脑与 web / 伴侣壳共用一份调度器契约——用能力门禁替代 isTauri() 断崖、主机自有的任务归属、Node 定时驱动、无头侧的 workflow 触发与通知桥接、"唤醒并委托"式的 OS 提升，以及 GitHub / Google Drive 备份后端。
+description: "桌面、无头大脑与 web / 伴侣壳共用一份调度器契约。执行器用能力检查替代 isTauri() 判断。提供宿主管理的任务归属、Node 定时驱动、无头侧 workflow 触发与通知桥接、通过「唤醒并委托」实现的 OS 提升，以及 GitHub / Google Drive 备份后端。"
 ---
 
 # ADR-0128 — 主机中立的调度器、executor 补全与远端备份目的地
@@ -68,7 +68,7 @@ description: 桌面、无头大脑与 web / 伴侣壳共用一份调度器契约
 
 ### 6. 主机自有的归属与主机栏
 
-每台主机维护自己的 `CogniaSchedulerDB`；任务不在主机间交接。客户端选择它**管理**哪一份可达日程——`local`（本机）或 `paired`（它驱动 / 配对的主机，经 `scheduled_task_*` RPC）——见 `lib/scheduler/scheduler-host-target.ts`。默认：伴侣与驱动远端主机的桌面偏好 `paired`；记住的 `paired` 在不可达时退化为 `local`。调度器页面显示主机栏（"管理中：本机 / 云端主机 <名称>"、已暂停徽章、仅打开时运行提示、切换按钮）；类型选择器通过 `host_capabilities` RPC 解析**目标**主机的能力。
+每台主机维护自己的 `CogniaSchedulerDB`。任务不在主机间交接。客户端选择它**管理**哪一份可达日程——`local`（本机）或 `paired`（它驱动 / 配对的主机，经 `scheduled_task_*` RPC）——见 `lib/scheduler/scheduler-host-target.ts`。默认：伴侣与驱动远端主机的桌面偏好 `paired`；记住的 `paired` 在不可达时退化为 `local`。调度器页面显示主机栏（"管理中：本机 / 云端主机 <名称>"、已暂停徽章、仅打开时运行提示、切换按钮）；类型选择器通过 `host_capabilities` RPC 解析**目标**主机的能力。
 
 > **由 ADR-0136 修订（2026-08-21）。**"任务不在主机间交接"依然成立 —— 每台主机仍拥有自己的 `CogniaSchedulerDB`，任务行永不迁移。变化的是**武装**这一步：`isTimingAuthority()` 过去在驱动没有 leader election 时无条件返回 `true`，而生产里每个驱动都没有，于是两台登录同一账号的桌面各自武装同一个 cron、各自触发一次。现在它会询问已配置的执行权威（`lib/placement/authority.ts`）。**未配置仍然是自任权威**，单机安装行为不变；已配置时该宿主拥有计时权、其余让位；权威超过宽限期仍不可达时由本地接管，并留下可见的 `placement.degraded` 记录，而不是让调度悄悄停摆。交接靠**让位**而非转移状态，重复触发由确定性幂等键吸收，而不是靠选举避免。
 

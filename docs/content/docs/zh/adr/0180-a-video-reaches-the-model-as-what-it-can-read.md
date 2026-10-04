@@ -1,13 +1,11 @@
 ---
 title: "0180：视频以模型读得懂的形式送达"
-description: "输入框过去拒收所有视频，还会悄悄把大 GIF 压成一帧。现在视频和动图在暂存时就变成故事板或逐帧图片，支持截取、按场景切换抽帧，只在模型和线路都能接收时才提供原视频，并在线路解析后再校验一次。"
+description: "输入框此前拒收所有视频，并把大 GIF 静默压为一帧。现在暂存时将视频和动图转换为故事板或逐帧图片，支持截取与场景切换抽帧。仅在模型和线路支持时提供原视频，并在线路解析后再次校验。"
 ---
 
 # ADR 0180：视频以模型读得懂的形式送达
 
-**状态：** 已接受
-**日期：** 2026-09-14
-**相关：** [ADR-0168](./0168-an-edit-is-a-new-version-of-the-same-message)（故事板复用的图像引擎）、[ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（运行时适配器）
+**状态：** 已接受**日期：** 2026-09-14 **相关：** [ADR-0168](./0168-an-edit-is-a-new-version-of-the-same-message)（故事板复用的图像引擎）、[ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（运行时适配器）
 
 ## 背景
 

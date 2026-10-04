@@ -8,15 +8,14 @@ description: 7 阶段先脱敏 ingest 流水线 —— runIngestJob 的逐源循
 <Status variant="stable" />
 
 <TLDR>
-  `runIngestJob`（`lib/twin/ingest/job-runner.ts:104`）把每个已注册的 `twinSource` 转成被嵌入的
+  `runIngestJob`（`lib/twin/ingest/job-runner.ts:104`）把每个已注册的 `twinSource` 转成经过嵌入的
   `twinChunks`。每个源依次执行 **dispatch → parse → redact → chunk → embed → persist → finalize**。
-  脱敏（第 3 阶段）是隐私红线：只有 `contentRedacted` 会离开渲染端。单个源失败不致命 —— 循环继续，由执行器决定全员失败的运行是否令任务失败。
+  脱敏（第 3 阶段）是隐私边界：只有 `contentRedacted` 会离开渲染端。单个源失败不会中止循环。执行器决定所有源均失败的运行是否令任务失败。
 </TLDR>
 
 ## 七个阶段
 
-实现：`lib/twin/ingest/`。编排器：`runIngestJob`（`job-runner.ts:104`）。进度以 `TOTAL_STAGES = 6`
-（`job-runner.ts:73`）跟踪 —— route + parse 共享一个进度步，finalize 钉在 99（100 留给执行器的 `completeJob`）。
+实现：`lib/twin/ingest/`。编排器：`runIngestJob`（`job-runner.ts:104`）。进度以 `TOTAL_STAGES = 6`（`job-runner.ts:73`）跟踪 —— route + parse 共享一个进度步，finalize 固定为 99（100 留给执行器的 `completeJob`）。
 
 ```mermaid
 flowchart LR
@@ -40,8 +39,7 @@ flowchart LR
   class S,END terminal
 ```
 
-runner 逐个处理 `rawSources`。每个源通过分数 `stageBase` 偏移占据进度条的 `1/N` 区段（`job-runner.ts:126`），
-因此 Jobs tab 能显示平滑的逐源进度。
+runner 逐个处理 `rawSources`。每个源通过分数 `stageBase` 偏移占据进度条的 `1/N` 区段（`job-runner.ts:126`），因此 Jobs tab 能显示平滑的逐源进度。
 
 ```ts title="lib/twin/ingest/job-runner.ts:132-149（阶段主干）"
 // Stage 1+2 — dispatch + parse.
@@ -61,21 +59,15 @@ await progress(job.id, `chunking:${raw.filename}`, (stageBase + 3) / TOTAL_STAGE
 
 ### 1 · dispatch
 
-`dispatchSource(format)`（`dispatch.ts:84`）是纯路由 —— 给定 `TwinSourceFormat`，返回
-`{ kind, routesToDocumentProcessor, importerKey? }`。文档格式（`DOCUMENT_FORMATS`，`dispatch.ts:31`）走
-`lib/document/document-processor`；聊天 / 邮件 / 代码格式指定一个导入器（见 [导入器](./importers)）。未知格式抛错。
-`detectSourceFormat(filename)`（`dispatch.ts:146`）为上传器把扩展名映射成格式。
+`dispatchSource(format)`（`dispatch.ts:84`）是纯路由 —— 给定 `TwinSourceFormat`，返回 `{ kind, routesToDocumentProcessor, importerKey? }`。文档格式（`DOCUMENT_FORMATS`，`dispatch.ts:31`）走 `lib/document/document-processor`；聊天 / 邮件 / 代码格式指定一个导入器（见 [导入器](./importers)）。未知格式抛错。`detectSourceFormat(filename)`（`dispatch.ts:146`）为上传器把扩展名映射成格式。
 
 ### 2 · parse
 
-`parseSource(raw)`（`parse.ts:69`）产出含两份文本的 `ParsedSource`：`originalText`（逐字节、含 PII）与
-`embeddableText`（尽力去格式化、进入脱敏的子集）。二进制文档走 `processDocumentAsync`（`mammoth` / `pdfjs-dist`），
-文本文档走 `processDocument`，导入器族被惰性 `import()` 并由 `collectImporterText`（`parse.ts:203`）归约成一个 markdown 块。
+`parseSource(raw)`（`parse.ts:69`）产出含两份文本的 `ParsedSource`：`originalText`（逐字节、含 PII）与 `embeddableText`（尽力去格式化、进入脱敏的子集）。二进制文档走 `processDocumentAsync`（`mammoth` / `pdfjs-dist`），文本文档走 `processDocument`，导入器族被惰性 `import()` 并由 `collectImporterText`（`parse.ts:203`）归约成一个 markdown 块。
 
 ### 3 · redact —— 隐私红线
 
-`redactText(text, nameHints)`（`redact.ts:227`）是隐私模型的核心。它检测 **11 类 PII**，将每类替换为 `<KIND_NNN>`
-占位符（补零、3 位）：
+`redactText(text, nameHints)`（`redact.ts:227`）是隐私模型的核心。它检测 **11 类 PII**，将每类替换为 `<KIND_NNN>` 占位符（补零、3 位）：
 
 | 类别 | 检测方式 |
 | --- | --- |
@@ -126,14 +118,12 @@ const enriched = chunks.map((c) => ({
 
 ### 逆向映射加密
 
-PII↔占位符映射在写入 `twinSources.redactionMapEnc` 前先加密。`redaction-key.ts` 使用 **AES-GCM-256**，密钥为
-**32 字节原始 CSPRNG**（不做口令派生），每次加密用 12 字节随机 IV（`encryptRedactionMap`，`redaction-key.ts:255`）。存储是双路的：
+PII↔占位符映射在写入 `twinSources.redactionMapEnc` 前先加密。`redaction-key.ts` 使用 **AES-GCM-256**，密钥为 **32 字节原始 CSPRNG**（不做口令派生），每次加密用 12 字节随机 IV（`encryptRedactionMap`，`redaction-key.ts:255`）。存储是双路的：
 
 - **Tauri** —— 密钥存于 OS keyring（`namespace: "twin-redaction"`）；从不进 IndexedDB。
 - **Web** —— 密钥以 base64 存于 Dexie `settings` 行（与数据同处，但映射本身仍加密）。
 
-两种模式下都在 Dexie 中存一份密钥的 SHA-256 **指纹**。`getRedactionKey`（`redaction-key.ts:177`）仅在真正首次运行时
-引导新密钥；若密钥缺失但指纹存在，则抛 `RedactionKeyMismatchError`，而非静默换钥、令所有既有映射变孤儿：
+两种模式下都在 Dexie 中存一份密钥的 SHA-256 **指纹**。`getRedactionKey`（`redaction-key.ts:177`）仅在真正首次运行时引导新密钥；若密钥缺失但指纹存在，则抛 `RedactionKeyMismatchError`，而非静默换钥、令所有既有映射变孤儿：
 
 ```ts title="lib/twin/ingest/redaction-key.ts:177-192"
 export async function getRedactionKey(): Promise<CryptoKey> {
@@ -153,9 +143,7 @@ export async function getRedactionKey(): Promise<CryptoKey> {
 
 ### 4 · chunk
 
-`prepareChunks(input)`（`chunk.ts:90`）从 `FORMAT_TO_STRATEGY`（`chunk.ts:31`）选策略 —— markdown → `heading`，
-代码 / git-repo → `code`，pdf → `smart`，聊天 / 邮件 → `paragraph`，csv → `fixed` —— 再委托给 `chunkDocument`
-（`lib/ai/embedding/chunking`），由后者掌管 token 上限与重叠。token 计数用 `~4 字符/token` 近似（`chunk.ts:55`）。
+`prepareChunks(input)`（`chunk.ts:90`）从 `FORMAT_TO_STRATEGY`（`chunk.ts:31`）选策略 —— markdown → `heading`，代码 / git-repo → `code`，pdf → `smart`，聊天 / 邮件 → `paragraph`，csv → `fixed` —— 再委托给 `chunkDocument`（`lib/ai/embedding/chunking`），由后者掌管 token 上限与重叠。token 计数用 `~4 字符/token` 近似（`chunk.ts:55`）。
 
 ```ts title="lib/twin/ingest/chunk.ts:90-95"
 export function prepareChunks(input: ChunkInput): PreparedChunk[] {
@@ -167,9 +155,7 @@ export function prepareChunks(input: ChunkInput): PreparedChunk[] {
 
 ### 5 · embed
 
-`embedRedactedChunks(redactedTexts, config)`（`embed.ts:48`）以 `DEFAULT_BATCH_SIZE = 64`（`embed.ts:32`）
-分批调用 `generateEmbeddings`（`lib/ai/embedding/embedding`）。一个模块级 LRU 缓存（5 000 条，键 `provider::model::text`，
-`embed.ts:44`）加上调用内去重，避免重复嵌入相同文本。本层 **无重试/退避** —— `generateEmbeddings` 的拒绝会冒泡到 runner 的逐源 catch。
+`embedRedactedChunks(redactedTexts, config)`（`embed.ts:48`）以 `DEFAULT_BATCH_SIZE = 64`（`embed.ts:32`）分批调用 `generateEmbeddings`（`lib/ai/embedding/embedding`）。一个模块级 LRU 缓存（5 000 条，键 `provider::model::text`，`embed.ts:44`）加上调用内去重，避免重复嵌入相同文本。本层 **无重试/退避** —— `generateEmbeddings` 的拒绝会冒泡到 runner 的逐源 catch。
 
 ### 6 · persist —— 远程优先双写
 
@@ -189,24 +175,19 @@ await input.store.addDocuments(
 await bulkCreateTwinChunks(rows)
 ```
 
-写入前 persist 做幂等替换：列出该源的既有 chunk，删其远程文档（失败可容忍）与 Dexie 行，再插入新行 —— 因此重跑绝不重复。
-集合名为 `cognia_twin_<twinId>`（`vectorCollectionName`，`persist.ts:24`）。
+写入前 persist 做幂等替换：列出该源的既有 chunk，删其远程文档（失败可容忍）与 Dexie 行，再插入新行 —— 因此重跑绝不重复。集合名为 `cognia_twin_<twinId>`（`vectorCollectionName`，`persist.ts:24`）。
 
 ### 7 · finalize
 
-`finalizeIngestRun`（`job-runner.ts:243`）触碰 `twinProfile.updatedAt`（刷新工作台统计卡）、把任务进度钉到 99，并返回一个
-`failureSummary`，其 `allFailed` 标志告诉执行器：全部源失败的运行是否应令整个任务失败。
+`finalizeIngestRun`（`job-runner.ts:243`）触碰 `twinProfile.updatedAt`（刷新工作台统计卡）、把任务进度钉到 99，并返回一个 `failureSummary`，其 `allFailed` 标志告诉执行器：全部源失败的运行是否应令整个任务失败。
 
 ## 失败模型
 
-单源错误被捕获并记录（`updateTwinSource(..., status: "failed")`），但循环继续到下一个源（`job-runner.ts:196-204`）。
-runner 本身 **无 lease 续期、无重试** —— 那些归 [任务 worker](./jobs-and-scheduling)。它唯一抛出的信号是
-`failureSummary.allFailed`，worker 据此升级为任务级失败。
+单源错误被捕获并记录（`updateTwinSource(..., status: "failed")`），但循环继续到下一个源（`job-runner.ts:196-204`）。runner 本身 **无 lease 续期、无重试** —— 那些归 [任务 worker](./jobs-and-scheduling)。它唯一抛出的信号是 `failureSummary.allFailed`，worker 据此升级为任务级失败。
 
 ## URL ingest
 
-`fetchUrlAsRawSource(url)`（`url-fetcher.ts:47`）以 30 秒 `AbortController` 超时抓取 URL，从 HTML `<title>` 或 URL 提取标题，
-`pickFormatForUrl`（`url-fetcher.ts:75`）按内容类型返回 `html` 或 `markdown` —— 产出一个由普通流水线 ingest 的 `RawSource`。
+`fetchUrlAsRawSource(url)`（`url-fetcher.ts:47`）以 30 秒 `AbortController` 超时抓取 URL，从 HTML `<title>` 或 URL 提取标题，`pickFormatForUrl`（`url-fetcher.ts:75`）按内容类型返回 `html` 或 `markdown` —— 产出一个由普通流水线 ingest 的 `RawSource`。
 
 ## 下一步
 

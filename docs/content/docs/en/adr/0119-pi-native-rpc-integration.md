@@ -1,6 +1,6 @@
 ---
 title: ADR-0119 — Pi native RPC integration
-description: "Adds a built-in `pi-rpc` protocol that drives `pi --mode rpc` directly, replacing the community ACP bridge, without weakening the mandatory external-agent sandbox."
+description: "Adds a built-in `pi-rpc` protocol that controls `pi --mode rpc` directly. It replaces the community ACP bridge and preserves the mandatory external-agent sandbox."
 ---
 
 # ADR-0119 — Pi native RPC integration
@@ -91,11 +91,12 @@ in the original ADR and remains one — it is not an oversight to be corrected.
 
 #### Now in scope
 
-Settings, prompt-template, subagent, skill and memory import; `VendorRoots.piAgentDir`
-/ `piSessionDir` honouring `PI_CODING_AGENT_DIR`; Pi in the migration wizard with
-an honest per-artifact support matrix; MCP through a 14th adapter, `pi-mcp-adapter`
-(its own id, because Pi's core ships no MCP and that file belongs to a third-party
-package); and the package manager at `/plugins` → Agent packages.
+The integration supports settings, prompt-template, subagent, skill and memory
+import. `VendorRoots.piAgentDir` / `piSessionDir` respect `PI_CODING_AGENT_DIR`.
+The migration wizard includes Pi with an explicit per-artifact support matrix.
+MCP uses a 14th adapter, `pi-mcp-adapter`, with its own id because Pi's core ships
+no MCP and the file belongs to a third-party package. The package manager is at
+`/plugins` → Agent packages.
 
 #### Explicit non-goals
 
@@ -195,3 +196,16 @@ Cognia tool calls use the common permission, confinement, PreToolUse argument re
 Desktop resources retain the source extension with its pinned digest and bundled sidecar dependencies. Standalone CLI/brain packaging verifies that source pin, bundles the extension's runtime dependencies, and writes a digest for the resulting artifact. No optional external package installation is required to activate Cognia tools. The launch allowlist admits the exact `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` keys so the selected runtime configuration survives both hosts; it does not admit an arbitrary `PI_` prefix.
 
 See `docs/research/2026-09-12-external-agent-capability-parity.md` for the cross-agent capability matrix and verification boundaries.
+
+### 2026-10-02 — Plugin-shipped Pi packages (ADR-0210)
+
+Plugins can now ship Pi packages (capability `pi-package`, manifest `piPackages`). This revision records only what changes in the native RPC integration; the capability itself is decided in ADR-0210.
+
+- **Opt-in per agent.** A `pi-rpc` agent lists package references in `metadata.piPackages` (`<pluginId>/<packageId>`). An agent with no references takes the unchanged path — the adapter does not even consult the resolver.
+- **Load order.** Each declared extension is appended as `-e <absolute path>` in reference order, **before** Cognia's own extension, which remains the last `-e` Pi loads. `-e` still loads under `--no-extensions`, so plugin packages work under `isolated`.
+- **No silent skips.** References are resolved through an injectable resolver (default: the plugin registry) before capacity is reclaimed. A missing or disabled plugin, a `builtin://` plugin, an unprepared package, a package without `hostedSession`, a workspace binding without a working directory, a conflicting env value or a `minPiVersion` above the running Pi fails the start with `PiPackageUnavailableError` (`pi_package_unavailable`).
+- **Env.** Package values are forwarded only as `COGNIA_PIPKG_<NAME>`, a prefix added to `ENV_PREFIX_ALLOWLIST` (and the CLI mirror) for exactly this purpose. Values come from the manifest, the plugin's own configuration or the workspace path, never from the model, and are spread before every Cognia-owned key.
+- **Permissions.** Package tools are extension tools to the per-call table and take the mode's `fallback`. Under `dontAsk`, a declared package tool (`hostedSession.tools`) that the session pre-approved by name is allowed and kept on the `--tools` floor; built-in names can never be re-declared by a package.
+- **Handshake budget.** `session_start` waits for plugin extensions too, so the budget grows by `PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS` per plugin extension, inside the existing 120 s cap, and a timeout names them.
+- **Double load.** A package that is also installed in a Pi scope the session loads (`global`: user; `trusted-project`: user and project), whose hosted extensions lie outside the package directory, is refused with `double-load`: Pi deduplicates `-e` against installed-package extensions only by canonical path (`ResourceLoader.mergePaths`) and has no per-session package exclusion. Hosted extensions inside the package directory keep their `-e` and load once.
+- **Sandbox.** The desktop wrapper mounts package directories read-only for Pi only, from `COGNIA_TOOLHOST_PI_PACKAGE_ROOTS`, keeping an entry only when it canonicalizes to an existing directory under the host-derived plugin store and does not touch a forbidden, protected or denied root (ADR-0210 §4); remote spawns drop the key. Packages are not loadable when the agent runs on a paired host or under Bot isolation.

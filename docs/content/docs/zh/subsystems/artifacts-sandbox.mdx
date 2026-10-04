@@ -1,12 +1,12 @@
 ---
 title: Artifacts / Sandbox
-description: 一次性内容产物：iframe 隔离的 HTML / SVG / React 预览，CSP-locked 沙箱，DOMPurify 清洗。
+description: 一次性内容制品：iframe 隔离的 HTML / SVG / React 预览，CSP-locked 沙箱，DOMPurify 清洗。
 ---
 
 # Artifacts / Sandbox
 
 <Callout type="info">
-  本页讲的是**渲染沙盒** —— 针对一次性模型产物的 iframe + CSP + DOMPurify 隔离。它是 cognia-next
+  本页介绍**渲染沙盒** —— 针对一次性模型产物的 iframe + CSP + DOMPurify 隔离。它是 cognia-next
   四个沙盒家族之一。执行沙盒（ADR-0028 的 OS / microVM 分层）、CUA 远程桌面沙盒与插件隔离，见
   [沙盒系统](./sandbox) 章节。
 </Callout>
@@ -22,8 +22,7 @@ cognia-next 里有三个相关但不同的概念，先理清：
 | **A2UI**     | 模型用 MCP 工具拼装的交互式声明 UI          | 目录白名单 + 不允许内联脚本字符串      |
 | **Sandbox**  | 用来跑代码（Python / JS / …）的运行时       | 各壳统一 `sandbox="allow-scripts"` iframe；Python 走桌面子进程 |
 
-Artifact 与 Canvas 经常衔接：用户在聊天里看到 artifact → 点 "Open in Canvas" →
-artifact 升级为可编辑文档（`lib/artifacts/reveal.ts`）。详见 [./canvas](./canvas)。
+Artifact 与 Canvas 经常衔接：用户在聊天里看到 artifact → 点 "Open in Canvas" → artifact 升级为可编辑文档（`lib/artifacts/reveal.ts`）。详见 [./canvas](./canvas)。
 
 ## 代码位置
 
@@ -102,8 +101,7 @@ flowchart LR
 | `math`     | renderer  | —                   |   是   |   否   |
 | `jupyter`  | jupyter   | —                   |   是   |   否   |
 
-注意 `react` 是 `allow-scripts` 而不是 `allow-same-origin`——故意切断 iframe 对
-父页的 DOM 访问，靠 `postMessage` 通信。
+注意 `react` 是 `allow-scripts` 而不是 `allow-same-origin`——故意切断 iframe 对父页的 DOM 访问，靠 `postMessage` 通信。
 
 ## 类型检测
 
@@ -119,33 +117,19 @@ math:    [/\$\$[\s\S]+?\$\$/, /\\begin\{(equation|align|...)/, ...]
 jupyter: [/"cells"\s*:\s*\[/, /"cell_type"\s*:\s*"(code|markdown)"/, /"nbformat"\s*:/]
 ```
 
-聊天消息进来时，`useChatStore` 把代码块和消息内嵌内容路由到 `useArtifactStore`，
-检测命中 → 自动建 artifact。`ALWAYS_CREATE_TYPES` 强制创建（如 mermaid、chart）
-不论行数；其他类型有最小行阈值。
+聊天消息进来时，`useChatStore` 把代码块和消息内嵌内容路由到 `useArtifactStore`，检测命中 → 自动建 artifact。`ALWAYS_CREATE_TYPES` 强制创建（如 mermaid、chart）不论行数；其他类型有最小行阈值。
 
 ### 模型也可以直接开口（ADR-0158）
 
-检测是兜底，不是唯一路径。8 个工具——`artifact_{create,update,read,delete}` 与
-`canvas_{create,update,read,open}`——通过 host-routed builtin-tool 中继发布
-（`lib/claude/artifact-builtin-tools.ts`，由 `lib/claude/plugin-tool-ipc.ts` 执行）。
-这正是 chart artifact 能带上 `chartType` 和一个真正标题的原因：两者都不可能靠正则
-从一个 fence 里恢复出来。
+检测是兜底，不是唯一路径。8 个工具——`artifact_{create,update,read,delete}` 与 `canvas_{create,update,read,open}`——通过 host-routed builtin-tool 中继发布（`lib/claude/artifact-builtin-tools.ts`，由 `lib/claude/plugin-tool-ipc.ts` 执行）。这正是 chart artifact 能带上 `chartType` 和一个真正标题的原因：两者都不可能靠正则从一个 fence 里恢复出来。
 
 动这块之前需要知道的三条规则：
 
-- **`ArtifactPart` 从 `tool_result` 发出，绝不从 `tool_use`。** `tool_use` 块早于行的
-  创建，据此构造的 part 只能指向一个解析不出来的 id——这就是「内容已清除」占位符的
-  由来。`lib/artifacts/tool-part.ts` 是两条消息路径共用的唯一转换器。
-- **`types/agent/tool.ts` 是钉死的契约。** 有测试断言该联合恰好等于
-  `buildArtifactManifestEntries()` + `buildCanvasManifestEntries()` 发布的集合，
-  于是「声明了但没实现」是一个红测试，而不是一张许愿单。
-- **manifest 与 ADR-0139 的路由提示共用一道门。** 两者都从
-  `lib/claude/build-options.ts` 里同一个判定式提取出来，常驻提示因此不可能宣传一个
-  工具缺席的界面。IM 绑定的会话两者都拿不到；
-  `settings.artifacts.agentAuthoring: false` 可以关闭。
+- **`ArtifactPart` 从 `tool_result` 发出，绝不从 `tool_use`。** `tool_use` 块早于行的创建，据此构造的 part 只能指向一个解析不出来的 id——这就是「内容已清除」占位符的由来。`lib/artifacts/tool-part.ts` 是两条消息路径共用的唯一转换器。
+- **`types/agent/tool.ts` 是钉死的契约。** 有测试断言该联合恰好等于 `buildArtifactManifestEntries()` + `buildCanvasManifestEntries()` 发布的集合，于是「声明了但没实现」是一个红测试，而不是一张许愿单。
+- **manifest 与 ADR-0139 的路由提示共用一道门。** 两者都从 `lib/claude/build-options.ts` 里同一个判定式提取出来，常驻提示因此不可能宣传一个工具缺席的界面。IM 绑定的会话两者都拿不到；`settings.artifacts.agentAuthoring: false` 可以关闭。
 
-`artifact_update` 会经过与启发式修订同一道「应用前先审阅」的门，而
-`artifact_delete` 是唯一登记为 `ask` 的名字。
+`artifact_update` 会经过与启发式修订同一道「应用前先审阅」的门，而 `artifact_delete` 是唯一登记为 `ask` 的名字。
 
 ### Diagram Design renderer profile
 
@@ -186,17 +170,13 @@ export function renderSVG(doc: Document, content: string): void {
 
 要点：
 
-- **DOMPurify** 移除所有事件处理器（`onload`、`onclick`…）、`javascript:` URL、
-  内联脚本等已知 XSS 向量。
-- **iframe 的 `sandbox="allow-same-origin"`** 仍允许 iframe 读自己的 document，
-  但**不允许 top navigation**——即便 sanitizer 漏一个 `<a target="_top">`，也无
-  法逃出。
+- **DOMPurify** 移除所有事件处理器（`onload`、`onclick`…）、`javascript:` URL、内联脚本等已知 XSS 向量。
+- **iframe 的 `sandbox="allow-same-origin"`** 仍允许 iframe 读自己的 document，但**不允许 top navigation**——即便 sanitizer 漏一个 `<a target="_top">`，也无法逃出。
 - 我们故意不带 `allow-scripts`——HTML 与 SVG artifact 都是**静态展示**用的。
 
 ## React 预览（CSP + postMessage）
 
-React artifact 最棘手——既要跑 JSX 又要隔离。方案是把代码**通过 postMessage 传
-进去**，绝不拼字符串进 HTML：
+React artifact 最棘手——既要跑 JSX 又要隔离。方案是把代码**通过 postMessage 传进去**，绝不拼字符串进 HTML：
 
 <Callout>
   **框架里跑的每一样东西都是本地的。** 沙箱化的 `about:srcdoc` 子框架会继承打包壳
@@ -228,18 +208,12 @@ window.addEventListener("message", (event) => {
 
 四道防线：
 
-1. **`allow-scripts` 但**不**`allow-same-origin`** —— iframe 不能读父页 DOM、
-   不能 cookies、不能 localStorage。
-2. **CSP `default-src 'none'` + `connect-src 'none'`** —— iframe 内的代码完全上不了
-   网；能加载的脚本只有两个同源产物，以及引导器自己造的那个 `blob:`。
-3. **postMessage code injection** —— 代码不通过 template literal 进 HTML（杜绝
-   通过模板字符串注入新 `<script>` 的可能）。父页用 JSON.stringify + `</`
-   转义构造 messages，避免任何「闭合 script 标签」式攻击。
-4. **运行时缺失即刻报错** —— 本地运行时取不到就立刻显示「运行时初始化失败」并给出
-   `pnpm artifact-runtime:build`，而不是等 15 秒 CDN 超时。
+1. **`allow-scripts` 但**不**`allow-same-origin`** —— iframe 不能读父页 DOM、不能 cookies、不能 localStorage。
+2. **CSP `default-src 'none'` + `connect-src 'none'`** —— iframe 内的代码完全上不了网；能加载的脚本只有两个同源产物，以及引导器自己造的那个 `blob:`。
+3. **postMessage code injection** —— 代码不通过 template literal 进 HTML（杜绝通过模板字符串注入新 `<script>` 的可能）。父页用 JSON.stringify + `</` 转义构造 messages，避免任何「闭合 script 标签」式攻击。
+4. **运行时缺失即刻报错** —— 本地运行时取不到就立刻显示「运行时初始化失败」并给出 `pnpm artifact-runtime:build`，而不是等 15 秒 CDN 超时。
 
-错误冒泡：iframe 内部出错 → `postMessage({type: "artifact-preview-error", message})`
-→ 父页 `setError` → 红色 Alert + retry 按钮。
+错误冒泡：iframe 内部出错 → `postMessage({type: "artifact-preview-error", message})` → 父页 `setError` → 红色 Alert + retry 按钮。
 
 ## Mermaid / Chart / Math —— 为什么不要 iframe？
 
@@ -249,13 +223,11 @@ window.addEventListener("message", (event) => {
 - **Chart** —— 我们自己实现的 recharts 包装器，只接受声明式 JSON。
 - **Math** —— KaTeX 渲染，纯字符串变 MathML。
 
-没有任意 JS 执行的可能性，iframe 沙箱反而是浪费。直接 inline 渲染让交互（hover
-tooltip、chart 缩放、math 选区）更顺畅。
+没有任意 JS 执行的可能性，iframe 沙箱反而是浪费。直接 inline 渲染让交互（hover tooltip、chart 缩放、math 选区）更顺畅。
 
 ## Jupyter
 
-`.ipynb` 是 JSON 数组，每个 cell 有 `cell_type` 与 `outputs[]`。
-`jupyter-renderer.tsx`：
+`.ipynb` 是 JSON 数组，每个 cell 有 `cell_type` 与 `outputs[]`。`jupyter-renderer.tsx`：
 
 1. JSON 解析，校验 `cells` 是数组——失败就显示一条「无法解析 notebook」错误。
 2. 每个 cell 根据 `cell_type`：
@@ -263,15 +235,13 @@ tooltip、chart 缩放、math 选区）更顺畅。
      - Shiki 都已经接好）。
    - `code` → `CodeBlock` 显示源码，下面挂 `outputs[]`：
      - `stream` → 终端样式 `<pre>`。
-     - `display_data` / `execute_result` → 选最佳 mime（`image/png` → `<img>`、
-       `text/html` → 受限渲染、`text/plain` → `<pre>`）。
+     - `display_data` / `execute_result` → 选最佳 mime（`image/png` → `<img>`、`text/html` → 受限渲染、`text/plain` → `<pre>`）。
 3. **不**支持「点击执行 cell」——cognia-next 把可编辑改交给 Canvas（`Open in
 Canvas` 把 .ipynb 升级成可执行的文档）。
 
 ## Plugin Renderer 扩展
 
-`lib/artifacts/renderer-registry.ts:registerArtifactRenderer()` 允许[插件](./plugin-system)
-注册自己的渲染器：
+`lib/artifacts/renderer-registry.ts:registerArtifactRenderer()` 允许[插件](./plugin-system)注册自己的渲染器：
 
 ```ts title="lib/artifacts/renderer-registry.ts"
 interface PluginArtifactRenderer {
@@ -284,28 +254,18 @@ interface PluginArtifactRenderer {
 }
 ```
 
-`resolveRegisteredArtifactRenderer()` 在 `ArtifactPreview` 拉起内置渲染前先问一
-轮——如果有插件认领，走插件路径；否则 fallback 到内置。
+`resolveRegisteredArtifactRenderer()` 在 `ArtifactPreview` 拉起内置渲染前先问一轮——如果有插件认领，走插件路径；否则 fallback 到内置。
 
-cognia-next 主程目前**没启用**插件运行时（`registerArtifactRenderer` 总是返回
-空），但接口与 Cognia 上游兼容，未来加插件路径时这条已经准备好。详见
-[./plugin-system](./plugin-system) —— 那条沙箱模型（每插件一个 Web Worker、
-postMessage RPC）与本页的 iframe 模型可以并存。
+cognia-next 主程目前**没启用**插件运行时（`registerArtifactRenderer` 总是返回空），但接口与 Cognia 上游兼容，未来加插件路径时这条已经准备好。详见 [./plugin-system](./plugin-system) —— 那条沙箱模型（每插件一个 Web Worker、postMessage RPC）与本页的 iframe 模型可以并存。
 
 ## 代码执行 —— 另一个面
 
-跑代码**不是** artifact 渲染，也不住在 `lib/sandbox/` 下。它是
-`lib/native/code-execution-strategy.ts:executeCodeWithSandboxPriority`，由
-`hooks/canvas/use-code-execution.ts` → `components/canvas/code-execution-panel.tsx` 触达：
+跑代码**不是** artifact 渲染，也不住在 `lib/sandbox/` 下。它是 `lib/native/code-execution-strategy.ts:executeCodeWithSandboxPriority`，由 `hooks/canvas/use-code-execution.ts` → `components/canvas/code-execution-panel.tsx` 触达：
 
-1. **JavaScript / TypeScript / JSX / HTML / CSS** —— 一个 `sandbox="allow-scripts"` 的 `srcdoc`
-   iframe，执行结果 postMessage 回来。**每个壳**都能跑，桌面和 Web 一样。
-2. **Python** —— `src-tauri/src/canvas/python_exec.rs:canvas_run_python` 真正 spawn 系统 `python`
-   子进程。仅限桌面，详见 [./canvas](./canvas)。
+1. **JavaScript / TypeScript / JSX / HTML / CSS** —— 一个 `sandbox="allow-scripts"` 的 `srcdoc` iframe，执行结果 postMessage 回来。**每个壳**都能跑，桌面和 Web 一样。
+2. **Python** —— `src-tauri/src/canvas/python_exec.rs:canvas_run_python` 真正 spawn 系统 `python` 子进程。仅限桌面，详见 [./canvas](./canvas)。
 
-`lib/sandbox/web/index.ts` 曾放着一个 `getWebSandboxService()` 桩，`execute` 永远返回 `ok: false`。
-它的头注释描述了插件系统 `executeCode` API 里的一个调用方——这棵树里从来没有过这样的调用方——
-所以它被删除了，而不是留作占位。
+`lib/sandbox/web/index.ts` 曾放着一个 `getWebSandboxService()` 桩，`execute` 永远返回 `ok: false`。它的头注释描述了插件系统 `executeCode` API 里的一个调用方——这棵树里从来没有过这样的调用方——所以它被删除了，而不是留作占位。
 
 ## Artifact 存储
 
@@ -322,20 +282,12 @@ interface ArtifactStoreState {
 }
 ```
 
-- **持久化** —— Dexie 的 `artifacts` / `artifactVersions` 两张表（schema v206），由
-  `lib/artifacts/dexie-bridge.ts` 写穿。store 只是内存里的工作副本，Dexie 才是权威。
-- **localStorage 还剩什么** —— 只剩 dock 的偏好，仍放在 `cognia-artifacts` key 下
-  （继承 Cognia 上游命名空间）：工作区筛选、按会话分桶的标签页、每个会话停在哪个 artifact。
-- **不再有容量上限与内容截断** —— v206 之前，`partialize` 会把每个 artifact 的内容切到 100 KB，
-  并淘汰第 200 条之后的全部（`MAX_PERSISTED_ARTIFACTS`），只为塞进 ~5 MB 的 localStorage 上限。
-  两种损失都是静默且不可逆的——下次重载读回来的就是被截断的那份。现在两条限制都没有了。
-- **旧数据迁移** —— 升级后的第一次启动会把旧 blob 里剩下的内容搬进 Dexie。
-  `lib/artifacts/localstorage-migration.ts` 会先把副本寄存起来，等写入落盘后才清除，
-  所以迁移被打断只会重放，不会丢行。
+- **持久化** —— Dexie 的 `artifacts` / `artifactVersions` 两张表（schema v206），由 `lib/artifacts/dexie-bridge.ts` 写穿。store 只是内存里的工作副本，Dexie 才是权威。
+- **localStorage 还剩什么** —— 只剩 dock 的偏好，仍放在 `cognia-artifacts` key 下（继承 Cognia 上游命名空间）：工作区筛选、按会话分桶的标签页、每个会话停在哪个 artifact。
+- **不再有容量上限与内容截断** —— v206 之前，`partialize` 会把每个 artifact 的内容切到 100 KB，并淘汰第 200 条之后的全部（`MAX_PERSISTED_ARTIFACTS`），只为塞进 ~5 MB 的 localStorage 上限。两种损失都是静默且不可逆的——下次重载读回来的就是被截断的那份。现在两条限制都没有了。
+- **旧数据迁移** —— 升级后的第一次启动会把旧 blob 里剩下的内容搬进 Dexie。`lib/artifacts/localstorage-migration.ts` 会先把副本寄存起来，等写入落盘后才清除，所以迁移被打断只会重放，不会丢行。
 - **rehydrate hook** —— `rehydrateArtifact()` 在恢复时补齐缺失字段、Date 反序列化。
-- **指纹去重** —— `lib/artifacts/source-metadata.ts:buildArtifactSourceFingerprint()`
-  用 FNV-1a 哈希同一条消息里的内容，避免同一个 code block 被检测两遍后建出两个
-  artifact 行。
+- **指纹去重** —— `lib/artifacts/source-metadata.ts:buildArtifactSourceFingerprint()` 用 FNV-1a 哈希同一条消息里的内容，避免同一个 code block 被检测两遍后建出两个 artifact 行。
 
 `reveal.ts:revealArtifactInWorkspace(id)` 是「打开右侧 panel + 切换到 artifact tab
 
@@ -346,20 +298,11 @@ interface ArtifactStoreState {
 `components/artifacts/artifact-panel.tsx`：
 
 - **Sheet 容器** —— 右侧滑出式，可拖动改宽。Title / Actions / Content 三段式。
-- **Tabs** —— `preview` / `code` / `versionHistory` / `designer`（cognia-next 没
-  挂 designer，按钮 hidden）。
-- **Code tab** —— Monaco editor（lazy-loaded），按 artifact 类型推断
-  `getMonacoLanguage()`，dark mode 时用 `vs-dark`。
+- **Tabs** —— `preview` / `code` / `versionHistory` / `designer`（cognia-next 没挂 designer，按钮 hidden）。
+- **Code tab** —— Monaco editor（lazy-loaded），按 artifact 类型推断 `getMonacoLanguage()`，dark mode 时用 `vs-dark`。
 - **Preview tab** —— `<ArtifactPreview artifact={...} />` 派发到正确的 renderer。
 - **运行时健康徽章** —— iframe 加载中 / 出错 / 就绪三态显示在右上角，方便调试。
-- **复制 / 下载 / 导出为** —— 由 `runtime-adapters.ts:exportFormats` 驱动。`raw`
-  永远提供；`html`/`svg` 另加自身的源码形式；`png` 与 `pdf` 自 ADR-0158 起是真的
-  （`lib/artifacts/export/`）。`react` 三种都提供，但它的 `png`/`pdf` 需要预览**已挂
-  载**：对未执行的 JSX 做离屏截图就是一个空白矩形，所以导出器改为向仍在运行的帧
-  索取其已渲染 DOM 的快照（`lib/artifacts/frame-capture-registry.ts`）。栅格化
-  `chart`/`mermaid`/`math` 同样需要其预览已挂载，取不到时抛
-  `ArtifactPreviewNotMountedError`，而不是返回空图。所有下载都走 `exportArtifact`，
-  取代了此前三条互相矛盾的路径（其中一条把 chart 存成 `chart.chart`）。
+- **复制 / 下载 / 导出为** —— 由 `runtime-adapters.ts:exportFormats` 驱动。`raw` 永远提供；`html`/`svg` 另加自身的源码形式；`png` 与 `pdf` 自 ADR-0158 起是真的（`lib/artifacts/export/`）。`react` 三种都提供，但它的 `png`/`pdf` 需要预览**已挂载**：对未执行的 JSX 做离屏截图就是一个空白矩形，所以导出器改为向仍在运行的帧索取其已渲染 DOM 的快照（`lib/artifacts/frame-capture-registry.ts`）。栅格化 `chart`/`mermaid`/`math` 同样需要其预览已挂载，取不到时抛 `ArtifactPreviewNotMountedError`，而不是返回空图。所有下载都走 `exportArtifact`，取代了此前三条互相矛盾的路径（其中一条把 chart 存成 `chart.chart`）。
 - **Plugin 扩展槽** —— `PluginExtensionSlot` 让插件追加自定义操作按钮。
 
 ## 测试

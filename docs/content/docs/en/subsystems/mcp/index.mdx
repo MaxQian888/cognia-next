@@ -8,7 +8,7 @@ description: Cognia's complete Model Context Protocol surface — how it consume
 <Status variant="stable">Governed · Dexie schema v151 · 3 transports · scoped runtime</Status>
 
 <TLDR>
-  Cognia wears **four MCP faces**. As a **client**, it stores user/plugin/built-in server definitions in
+  Cognia has **four MCP roles**. As a **client**, it stores user/plugin/built-in server definitions in
   one Dexie table (`mcpServers`) and resolves a per-turn subset into the Claude Agent SDK's `mcpServers`
   option (`build-options.ts:resolveSendOptions` → `buildMcpServerMap`). As a **mirror**, it projects each
   server's `appsEnabled` matrix into the on-disk config of seven external CLIs (Claude Code, Cursor,
@@ -16,7 +16,7 @@ description: Cognia's complete Model Context Protocol surface — how it consume
   the sidecar mounts two in-process SDK MCP servers per session — `cognia-tools` (44 built-in tools across
   7 categories, gated by `safety.mjs`) and `a2ui-bridge` (5 surface tools). As a **server for outsiders**,
   Cognia exposes its own knowledge + action surface over stdio/HTTP — that plane lives in the
-  [External Bridge](../external-bridge) subsystem. This section documents the first three faces.
+  [External Bridge](../external-bridge) subsystem. This section documents the first three roles.
 </TLDR>
 
 <StatGrid>

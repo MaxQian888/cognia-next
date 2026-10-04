@@ -1,6 +1,6 @@
 ---
 title: "0202 — Memory ages, and every change can be undone"
-description: "Long-term memory gains the aging and reversibility machinery ported from ai-memory: every text change keeps the previous text as a revision (restore, as-of recall), retention with access reinforcement drives forgetting, belief strength comes from corroborating evidence, an opt-in daily sweep compacts or folds cold episodes, rule-based lint reports what deserves a look, recall gains session-recall routing and a bounded LLM rerank, recalled facts sit behind a data-only trust boundary, the redactor catches more secret shapes, and a labeled bilingual eval pins retrieval quality."
+description: "Ports memory aging and reversible changes from ai-memory. Every text change preserves a revision for restore and as-of recall. Retention and access reinforcement control forgetting. Corroborating evidence determines belief strength. An opt-in daily sweep compacts or folds cold episodes. Rule-based lint identifies items for review. Recall adds session-recall routing and bounded LLM reranking. Recalled facts use a data-only trust boundary. The redactor detects more secret shapes. A labeled bilingual evaluation checks retrieval quality."
 ---
 
 # ADR 0202 — Memory ages, and every change can be undone
@@ -48,7 +48,7 @@ from recall, eviction and every active-row query; the new fields
 unindexed; snapshots inherit encryption, sync and backup from the table.
 `listMemories` hides snapshots unless `includeRevisions`; external surfaces
 never expose a snapshot by id and refuse to edit or forget one. Deleting a
-memory deletes its history; clearing forgotten memories clears history too.
+memory deletes its history. Clearing forgotten memories also clears their history.
 
 The live row keeps its id and version counter, so MCP/plugin/device callers and
 compare-and-swap checks are unaffected. `restore-revision` puts an earlier text

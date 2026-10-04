@@ -190,10 +190,9 @@ queries `/api/ocr/get_options` and maps BCP-47 hints to the exact advertised
 `ocr.language` model value while preserving each response `end` separator.
 The Paddle dialect sends the PaddleOCR 3.x `/ocr` request shape and accepts its
 `result.ocrResults[].prunedResult` response, while retaining compatibility with
-the older hubserving dict and tuple response shapes. Language hints are hints,
-not evidence that every native backend consumes them. `ocrs` is a Latin-only
-early preview; Tesseract WASM requires traineddata download unless `langPath`
-points to local assets.
+the older hubserving dict and tuple response shapes. Language hints do not show that every native backend uses them.
+`ocrs` is a Latin-only early preview. Tesseract WASM requires a traineddata
+download unless `langPath` points to local assets.
 
 ### Testing strategy
 

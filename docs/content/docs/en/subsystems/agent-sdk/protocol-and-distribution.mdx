@@ -5,11 +5,11 @@ description: Handshake, limits, observability, package layout, and release verif
 
 # Protocol, security, and distribution
 
-Protocol v2 is bidirectional JSON-RPC 2.0 carried as newline-delimited UTF-8 JSON over stdin/stdout. The client sends `initialize`, the host selects v2 and returns versions, methods, capabilities, limits, and an instance ID, then the client sends `initialized`. Calls before that transition fail. stderr is diagnostic-only and never carries protocol frames.
+Protocol v2 is bidirectional JSON-RPC 2.0 carried as newline-delimited UTF-8 JSON over stdin/stdout. The client sends `initialize`. The host selects v2 and returns versions, methods, capabilities, limits, and an instance ID. The client then sends `initialized`. Calls before that transition fail. stderr is diagnostic-only and never carries protocol frames.
 
 Runtime schemas are defined with Valibot and TypeScript method types are inferred from the same map. Frames, replay pages, open sessions, active turns, and outbound buffering have hard limits. Invalid frames and unknown methods receive stable JSON-RPC errors. An outbound-buffer breach closes the peer rather than growing memory without bound.
 
-Audit rows contain method, session identity, timing, result, and error code only; prompts and tool payloads are excluded. The local JSONL file rotates at 10 MiB. `trace/subscribe` streams the same redacted projection and `trace/export` returns JSON spans. High-cardinality identities stay in trace/audit data rather than metric labels.
+Audit rows contain method, session identity, timing, result, and error code only. They exclude prompts and tool payloads. The local JSONL file rotates at 10 MiB. `trace/subscribe` streams the same redacted projection and `trace/export` returns JSON spans. High-cardinality identities stay in trace/audit data rather than metric labels.
 
 The SDK ships ESM, CommonJS, declarations, and source maps for Node 20.19 or newer. Platform packages contain the output of the existing native CLI build:
 

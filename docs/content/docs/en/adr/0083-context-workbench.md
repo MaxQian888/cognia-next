@@ -10,7 +10,7 @@ description: "Unifies the complete project, Canvas, artifact, and workflow right
 
 ## Context
 
-Project files, Canvas documents, artifacts, and workflows each had useful right-side tools, but lifecycle, reveal, sizing, comments, and plugin behavior were implemented independently. That caused capability drift: project comments opened Git review, workflow comments were unavailable, and artifact selections only exposed an AI note. The consolidation must preserve every existing tool and keep each legacy host available as a one-minor-release rollback path.
+Project files, Canvas documents, artifacts, and workflows each had useful right-side tools, but lifecycle, reveal, sizing, comments, and plugin behavior were implemented independently. These separate implementations caused inconsistent capabilities: project comments opened Git review, workflow comments were unavailable, and artifact selections only exposed an AI note. The consolidation must preserve every existing tool and keep each legacy host available as a one-minor-release rollback path.
 
 ## Decision
 

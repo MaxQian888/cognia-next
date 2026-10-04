@@ -5,7 +5,9 @@ description: The Character interface, the Dexie characters table, the lib/db/cha
 
 # Data Model
 
-This page is the line-accurate contract for the Character storage layer: the `Character` interface, the Dexie table that holds it, the CRUD module that reads and writes it, how the six built-in personas are seeded, and the separate `SystemPromptPreset` template type that is often confused with a Character but is not one.
+This page describes the Character storage contract with source line references.
+It covers the `Character` interface, its Dexie table, the CRUD module, and how Cognia seeds the six built-in personas.
+It also distinguishes the `SystemPromptPreset` template type from a Character.
 
 <TLDR>
   `Character` is defined in `lib/claude/types.ts:2059-2317` — ~50 optional-friendly fields across
@@ -126,7 +128,10 @@ characters!: Table<Character, string>
 // indexed by: "id, name, updatedAt, isBuiltIn"
 ```
 
-The schema is **purely additive** — there are no upgrade hooks for `characters`. New optional fields land directly on the interface and legacy rows simply omit them; nothing migrates. The string primary key is `id`.
+The schema is **purely additive** and has no upgrade hooks for `characters`.
+New optional fields are added directly to the interface.
+Legacy rows omit them, and no migration runs.
+The string primary key is `id`.
 
 ## CRUD Module — `lib/db/characters.ts`
 

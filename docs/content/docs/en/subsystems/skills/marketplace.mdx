@@ -10,7 +10,7 @@ description: The skills marketplace — two normalised sources (the bundled skil
 <TLDR>
   Two adapters normalise their wire formats to one `MarketplaceItem` (`marketplace-types.ts:8`): the
   always-on **registry** reads the bundled `skills-lock.json` (`marketplace-registry.ts:74` — Tauri IPC or static
-  import fallback) and the **skills.sh** adapter (`marketplace-skillssh.ts`) talks to the real
+  import fallback) and the **skills.sh** adapter (`marketplace-skillssh.ts`) connects to the real
   [skills.sh](https://skills.sh) directory. skills.sh is **anonymous-first**: search, snapshot download, and
   multi-provider security audits work with zero configuration (the same endpoints the `npx skills` CLI uses). An
   **optional Vercel OIDC token** (`AppSettings.skillsShToken`) unlocks the `/api/v1` leaderboard and curated

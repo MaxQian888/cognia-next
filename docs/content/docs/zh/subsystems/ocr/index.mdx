@@ -1,6 +1,6 @@
 ---
 title: 概览
-description: 跨 shell 从图片和 PDF 中提取文本 —— 单一 extract() 表面在纯函数 auto-router、Dexie 读穿缓存、两遍 PDF 文本层快速通道，以及五个原生 Rust 后端之后接通 20 个 provider（云端、LLM 视觉、端侧、自托管）。
+description: 跨 shell 从图片和 PDF 中提取文本 —— 单一 extract() 接口在纯函数 auto-router、Dexie 读穿缓存、两遍 PDF 文本层快速通道，以及五个原生 Rust 后端之后接通 20 个 provider（云端、LLM 视觉、端侧、自托管）。
 ---
 
 # OCR 子系统
@@ -9,7 +9,7 @@ description: 跨 shell 从图片和 PDF 中提取文本 —— 单一 extract() 
 
 <TLDR>
   OCR 子系统通过单一入口 —— `extract(input, deps)`（`lib/ocr/index.ts:200`）—— 把一张图片或 PDF 转成
-  Markdown / 纯文本 / 结构化块。每个调用方（composer 菜单、`/ocr` 命令、`ocr.extract` 插件工具）都汇聚于此，
+  Markdown / 纯文本 / 结构化块。每个调用方（composer 菜单、`/ocr` 命令、`ocr.extract` 插件工具）都调用此入口，
   因此 **SHA-256 读穿缓存**、**纯函数 auto-router** 和 **keyring 凭据查找** 都集中在一处。20 个 provider 注册进共享
   registry（`lib/ocr/runtime.ts:51`），横跨四个家族 —— 云端文档 OCR、LLM 视觉、端侧引擎，以及一个自托管 HTTP 适配器。
   PDF 走 **文本层快速通道**（`lib/ocr/pdf-router.ts:79`），对数字页完全跳过 OCR；五个原生后端搭载
@@ -25,9 +25,7 @@ description: 跨 shell 从图片和 PDF 中提取文本 —— 单一 extract() 
   <Stat label="详情面板 tab" value="5 + 3" hint="每 provider：Config · Capabilities · Try It · Models · Advanced —— 外加 Auto-Router：Defaults · Platform · Cache" />
 </StatGrid>
 
-OCR 子系统为每个 shell —— 浏览器（静态导出）、Tauri 2.9 桌面端、Capacitor 7 移动端 —— 提供了一种一等的方式，
-在 **不** 把图片和 PDF 转发给多模态模型的前提下提取其中的文本。设计原由见
-[ADR-0024](../../adr/0024-ocr-subsystem)。本节逐模块记录 **当前实现** —— 包括少数几处代码已偏离 ADR 的地方。
+OCR 子系统为每个 shell —— 浏览器（静态导出）、Tauri 2.9 桌面端、Capacitor 7 移动端 —— 提供了一种一等的方式，在 **不** 把图片和 PDF 转发给多模态模型的前提下提取其中的文本。设计原由见 [ADR-0024](../../adr/0024-ocr-subsystem)。本节逐模块记录 **当前实现** —— 包括少数几处代码已偏离 ADR 的地方。
 
 ## 代码位置
 
@@ -86,13 +84,11 @@ flowchart LR
   class EX,RS,H,RP,AR,CALL,RB,W step
 ```
 
-每个方框都是本节的一章。请先读 [类型与分发](./types-and-dispatch) —— 其它每个模块都以
-`OcrInput` / `OcrResult` / `OcrProvider` 来描述。
+每个方框都是本节的一章。请先读 [类型与分发](./types-and-dispatch) —— 其它每个模块都以 `OcrInput` / `OcrResult` / `OcrProvider` 来描述。
 
 ## Provider 矩阵
 
-20 个 provider 注册在 `ALL_PROVIDERS`（`lib/ocr/runtime.ts:51`）中。五个 `OcrProviderCategory` 标签
-（`types.ts:12`）驱动设置侧边栏的分组：
+20 个 provider 注册在 `ALL_PROVIDERS`（`lib/ocr/runtime.ts:51`）中。五个 `OcrProviderCategory` 标签（`types.ts:12`）驱动设置侧边栏的分组：
 
 | 分类 | `category` 标签 | Provider |
 | --- | --- | --- |
@@ -120,8 +116,7 @@ flowchart LR
 
 ## 实现状态（实况 vs ADR）
 
-提取核心、provider、router、PDF 流水线、缓存与设置 UI 全部 **完整构建并经单元测试**。少数几处集成缝已存在但尚未接通 ——
-此处如实记录，让文档与现实一致：
+提取核心、provider、router、PDF 流水线、缓存与设置 UI 全部 **完整构建并经单元测试**。少数几处集成缝已存在但尚未接通 ——此处如实记录，让文档与现实一致：
 
 <Callout type="warn" title="已构建并测试，但尚未接入生产">
   - **运行时引导** —— `installOcrRuntime()`（`runtime.ts:94`）注册全部 20 个 provider，但 **没有生产调用点**

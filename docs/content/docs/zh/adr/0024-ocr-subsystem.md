@@ -1,6 +1,6 @@
 ---
 title: "ADR 0024 — OCR 子系统"
-description: "从图片和PDFs中提取跨壳文本。在一个`extract()` 接口后方有20 OCR 提供商，具备平台自动路由器、Dexie支持的结果缓存和PDF文本层快速路径。"
+description: "在不同应用外壳中从图片和 PDF 提取文本。统一的 `extract()` 接口支持 20 个 OCR 提供商，并提供平台自动路由、基于 Dexie 的结果缓存和 PDF 文本层快速路径。"
 ---
 
 # ADR 0024 — OCR 子系统
@@ -100,7 +100,7 @@ Cognia-Next 提供三个外壳——浏览器（静态导出）、Tauri 2.9 桌�
 
 ### 本地 HTTP 方言
 
-`local-http` 完全由 `OCR_PARAMETER_SCHEMAS` 配置。旧版明文 token 会迁移到 OCR 密钥环并从设置删除。Umi-OCR 会查询 `/api/ocr/get_options`，把 BCP-47 语言提示映射为服务端实际公布的 `ocr.language` 模型值，并保留响应中的 `end` 排版分隔符。Paddle 方言使用 PaddleOCR 3.x `/ocr` 请求与 `result.ocrResults[].prunedResult` 响应，同时兼容旧 hubserving 字典/元组响应。语言提示不代表所有本地模型实际消费它；`ocrs` 是仅支持拉丁文字的早期预览，Tesseract WASM 需要下载 traineddata，除非 `langPath` 指向本地资源。
+`local-http` 完全由 `OCR_PARAMETER_SCHEMAS` 配置。旧版明文 token 会迁移到 OCR 密钥环并从设置删除。Umi-OCR 会查询 `/api/ocr/get_options`，把 BCP-47 语言提示映射为服务端实际公布的 `ocr.language` 模型值，并保留响应中的 `end` 排版分隔符。Paddle 方言使用 PaddleOCR 3.x `/ocr` 请求与 `result.ocrResults[].prunedResult` 响应，同时兼容旧 hubserving 字典/元组响应。提供语言提示不代表所有本地模型都会使用该提示。`ocrs` 是仅支持拉丁文字的早期预览，Tesseract WASM 需要下载 traineddata，除非 `langPath` 指向本地资源。
 
 ### 测试策略
 

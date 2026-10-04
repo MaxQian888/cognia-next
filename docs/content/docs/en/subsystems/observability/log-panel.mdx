@@ -68,9 +68,11 @@ used to be `false` here, which switched off the span merge, the toolbar's trace-
 `AgentTraceStatsBar` in one go; it is on now, so `agent.trace` rows appear in the stream and the
 module chip scopes to them.
 
-The panel still publishes its header API through `useLogPanelHeader()` (a React context) for hosts
-that pass a `headerSlot`; the `/logs` shell owns its own header instead, so the count pill and
-preset dropdown come from the panel's own toolbar.
+The panel has no header API of its own any more (`headerSlot` / `useLogPanelHeader()` had no
+consumer and were removed). The `/logs` shell owns the page header and passes its single transport
+health poll down as `transportHealth`, so the header chip and the panel's toolbar chip read one
+poll and one denominator (`summarizeTransportHealth`). Embeds pass `storageScope` so their
+live-follow preference does not overwrite `/logs`'s.
 
 Because the shell keeps `channel` and `traceId` in the query string alongside the panel's own
 params, `useLogPanelUrlSync` rebuilds only the keys it owns (`OWNED_PARAMS`) and carries everything
@@ -113,7 +115,7 @@ window instead of paging with `queryRecentTraces`.
 
 A span's **Show this trace in logs** action switches to the Logs channel with `?trace=<id>` and
 remounts the panel so its mount-time URL hydration picks the focus up. The aggregate view of the same
-spans is one click away on the same channel: the Dashboard sub-view (`?channel=traces&view=dashboard`),
+spans is one click away on the same channel: the Dashboard sub-view (`?channel=traces&tview=dashboard`),
 which used to be the standalone `/observability` route.
 
 ## The Multi-Source Merge
@@ -170,7 +172,8 @@ const virtualizer = useVirtualizer({
 
 Rows are absolutely positioned with `transform: translateY()` and measured via
 `virtualizer.measureElement`. Density drives row height (`compact:28 / comfortable:44 / spacious:60`).
-When `groupByTraceId` is on it renders `<TraceGroup>` per trace (not virtualized). Each row
+There is no pagination: the whole window (newest 1000 entries) is one virtualized `listbox` with a
+roving tab stop, so j/k and detail prev/next walk every entry. Each row
 (`log-entry.tsx`) shows icon/time/module/trace badge/message with hover actions (bookmark, focus
 trace/session, copy), expandable `data`/`stack`/`source`, and a query-highlight `<mark>`.
 

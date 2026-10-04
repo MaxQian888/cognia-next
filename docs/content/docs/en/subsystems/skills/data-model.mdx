@@ -49,7 +49,7 @@ New rows created in the Skills form must pass runtime and portability validation
 
 ## Transactional persistence
 
-`lib/db/skills.ts` treats one Skill row and its `skillResources` as one bundle. Create, canonical upsert, overwrite, duplicate, and delete use a Dexie transaction over both stores. Omitting `resources` preserves the current set; passing an empty array clears it. Batch import commits each Skill independently, so one rejected bundle does not roll back successful siblings.
+`lib/db/skills.ts` treats one Skill row and its `skillResources` as one bundle. Create, canonical upsert, overwrite, duplicate, and delete use a Dexie transaction over both stores. Omitting `resources` preserves the current set. Passing an empty array clears it. Batch import commits each Skill independently, so one rejected bundle does not roll back successful siblings.
 
 Duplicate copies metadata, Codex YAML, extensions, and all resources, then allocates a fresh display name and collision-free slug. Editing a synced row clears `syncFingerprint`; the next explicit push migrates the native directory and mirrors safely.
 

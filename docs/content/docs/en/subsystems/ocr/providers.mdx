@@ -11,7 +11,7 @@ description: The 20 OCR providers across five families, the three shared dispatc
   Twenty providers implement one interface — `OcrProvider.extract(input, ctx)`. They share three helpers:
   `_http.cloudFetch` (every cloud provider's fetch + error-mapping), `_llm-vision` (prompt + downscale + single-page
   result for the three `*-vision` providers), and `_sigv4` (AWS Signature V4, used only by `aws-textract`). Cloud
-  providers declare `credentialKeys`; LLM-vision providers instead set `reusesMainProviderKey` and pull the main
+  providers declare `credentialKeys`; LLM-vision providers instead set `reusesMainProviderKey` and use the main
   Claude/GPT/Gemini key. The five native engines route through one Tauri invoker; `tesseract-wasm` runs in a WASM
   worker; `local-http` talks to a user-supplied LAN endpoint. Static UI metadata lives in `capabilities.ts`.
 </TLDR>

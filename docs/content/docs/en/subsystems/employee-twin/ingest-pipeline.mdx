@@ -10,8 +10,8 @@ description: The 7-stage redact-first ingest pipeline — runIngestJob's per-sou
 <TLDR>
   `runIngestJob` (`lib/twin/ingest/job-runner.ts:104`) turns each registered `twinSource` into embedded
   `twinChunks`. Per source it runs **dispatch → parse → redact → chunk → embed → persist → finalize**.
-  Redaction (stage 3) is the privacy red-line: only `contentRedacted` ever leaves the renderer. A per-source
-  failure is non-fatal — the loop continues and the executor decides whether an all-failed run fails the job.
+  Redaction (stage 3) enforces the privacy boundary: only `contentRedacted` ever leaves the renderer. A per-source
+  failure is non-fatal. The loop continues, and the executor decides whether an all-failed run fails the job.
 </TLDR>
 
 ## The seven stages

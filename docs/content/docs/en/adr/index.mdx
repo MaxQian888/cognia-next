@@ -5,13 +5,16 @@ description: How to read Cognia's ADR catalogue, its known historical numbering 
 
 # Architecture Decision Records
 
-This catalogue preserves the context, decision, consequences, and verification intent of Cognia's major architectural choices. It is a decision history, not a generated description of the current runtime.
+This catalogue records the context, decisions, consequences, and intended verification of Cognia's major architectural choices.
+It preserves decision history. It does not generate a description of the current runtime.
 
 ## Source-of-truth rule
 
 For current behavior, verify the implementation, co-located tests, and runtime registration or bootstrap point. An ADR explains why a direction was chosen. If those sources diverge, implementation-facing documentation must describe what is actually shipped and explicitly identify the ADR drift.
 
-Do not create an ADR merely to fill a numeric gap, and do not renumber an existing ADR to repair the sequence. Numbers are stable historical identifiers, not proof that every preceding number exists or is unique.
+Do not create an ADR merely to fill a numeric gap.
+Do not renumber an existing ADR to repair the sequence.
+Numbers are stable historical identifiers. They do not prove that every preceding number exists or is unique.
 
 ## Catalogue health snapshot
 
@@ -29,7 +32,7 @@ The detailed evidence and follow-up queue are in the [2026-08-12 ADR gap audit](
 
 - **Proposed** records a direction that has not yet been confirmed as the accepted repository contract.
 - **Accepted** records an adopted decision. It does not, by itself, prove every rollout phase is complete.
-- **Implemented** is historical wording used by some records; verify the current code before relying on it.
+- **Implemented** is historical wording in some records. Verify the current code before relying on it.
 - **Superseded** or **removed** means the record remains useful as history but is no longer the current authority for the replaced scope.
 - Rollout qualifiers such as partial, experimental, dark launch, or default-off describe delivery state separately from the decision state.
 
@@ -41,5 +44,5 @@ When adding or reviewing an ADR:
 2. State decision status separately from rollout status.
 3. Link the implementation, tests, and registration points that prove the current contract.
 4. Add the same slug to both locale trees and both `meta.json` sidebars.
-5. Record supersession or implementation drift explicitly; preserve historical files and slugs.
+5. Record supersession or implementation drift explicitly. Preserve historical files and slugs.
 6. Run the docs build so MDX, links, and both locale routes are verified.

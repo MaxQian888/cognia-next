@@ -8,7 +8,7 @@ description: The full observability surface of cognia-next — a unified logging
 <Status variant="stable" />
 
 <TLDR>
-  Cognia's observability is **five cooperating planes**, not one log box. (1) **Logging** —
+  Cognia's observability uses **five cooperating planes**. (1) **Logging** —
   `createLogger("module")` enters a single browser pipeline (`lib/logging/core.ts:404`: level-gate →
   sample → context-merge → redact → fan-out) that writes to up to 9 transports; the Rust side
   (`src-tauri/src/logging/`) takes the same records through `fern` + `tauri-plugin-log` into the OS
@@ -22,7 +22,7 @@ description: The full observability surface of cognia-next — a unified logging
   the Rust process tree, Tokio runtime, and span hotspots, sampled at ~1 Hz over `perf://sample`. (5)
   **Crash reporting** — `src-tauri/src/crash/` captures Rust panics in-process and native hard-crashes
   out-of-process (minidump), gated by a clean-exit **sentinel**. Token/cost usage
-  (`lib/claude/usage.ts`, Anthropic quota probes, inbox telemetry) rounds out the picture.
+  (`lib/claude/usage.ts`, Anthropic quota probes, inbox telemetry) provides additional usage data.
 </TLDR>
 
 <StatGrid>

@@ -5,18 +5,17 @@ description: Self-host the Cognia share worker on Cloudflare (R2 + KV) so you ca
 
 # Public share links (zero-knowledge)
 
-Cognia can turn an artifact — a chat transcript, a workflow diagram, an A2UI
-app, or a backup package — into a short URL anyone can open in a browser. The
-content is **end-to-end encrypted on your device**: a random key is generated
-locally, placed in the URL `#fragment`, and **never uploaded**. The worker
-stores only opaque ciphertext, and decryption happens in the recipient's
-browser. The `#fragment` is never sent to any server, so the host cannot read
-your shares even in principle.
+Cognia can share an artifact through a short URL that anyone can open in a browser.
+Supported artifacts include chat transcripts, workflow diagrams, A2UI apps, and backup packages.
+Cognia **encrypts the content on your device** and generates a random key locally.
+It places the key in the URL `#fragment` and **never uploads the key**.
+The worker stores only opaque ciphertext. The recipient's browser decrypts it, and the `#fragment` never reaches a server.
+The host therefore cannot read your shares.
 
-This is a **self-hosted, single-tenant** model, mirroring the signaling
-server: you deploy the worker to *your own* Cloudflare account and point the
-app at it. Reads are public (anyone with the link); creating and revoking
-links requires a bearer secret only you hold.
+This is a **self-hosted, single-tenant** model, like the signaling server.
+Deploy the worker to *your own* Cloudflare account. Configure the app to use it.
+Anyone with the link can read the shared content.
+Creating and revoking links requires a bearer secret that only you hold.
 
 <Callout type="info">
   Free-tier friendly: Cloudflare R2 (10&nbsp;GB free), Workers KV, and Workers

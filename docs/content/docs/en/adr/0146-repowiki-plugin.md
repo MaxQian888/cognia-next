@@ -1,6 +1,6 @@
 ---
 title: "0146 — RepoWiki as the acceptance load for the Python runtime"
-description: "An existing MIT wiki generator vendored whole, with exactly three layers swapped — model calls, storage, and file enumeration — so the port proves the plugin runtime rather than re-proving the algorithms."
+description: "Vendors an existing MIT wiki generator in full. Replaces exactly three layers: model calls, storage, and file enumeration. This tests the plugin runtime while preserving the existing algorithms."
 ---
 
 # ADR 0146 — RepoWiki as the acceptance load for the Python runtime
@@ -123,7 +123,7 @@ unknown" is its own badge, muted rather than destructive, because *we could not
 tell* is not *your wiki is wrong*, and it still offers the rescan. *Why* it
 could not be answered joins the existing warnings banner rather than riding on
 the badge: A2UI has no tooltip field, so a reason attached there would have been
-a string nothing ever paints — a diagnostic demoted to decoration.
+a string nothing ever paints — a diagnostic the user could not see.
 
 This is also the one caller that must not use `changed_paths_since`, the
 incremental path's helper: that one collapses "the host could not answer" into

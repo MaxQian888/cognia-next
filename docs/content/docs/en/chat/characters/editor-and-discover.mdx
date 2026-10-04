@@ -5,7 +5,11 @@ description: The settings character editor, the chat character picker, the Apply
 
 # Editor, Picker & Discover
 
-The four UI surfaces that let a user author, choose, update, and discover characters all read from the same Dexie-∪-overlay union (`lib/db/characters.ts:listCharacters` 92–120) and write back through the same CRUD module. This page covers the **settings editor** (full field inventory + pack import/export), the **Apply-Update diff dialog**, the **chat picker** (three-bucket grouping + platform filter), the **Discover** projection cards (desktop grid + mobile sheet), and the **boot initializer** that scans local pack files.
+Four UI surfaces let users create, select, update, and discover characters.
+All read the same union of Dexie and overlay records (`lib/db/characters.ts:listCharacters` 92–120) and write through the same CRUD module.
+This page covers the **settings editor** (full field inventory and pack import/export) and the **Apply-Update diff dialog**.
+It also covers the **chat picker** (three-bucket grouping and platform filter) and **Discover** projection cards (desktop grid and mobile sheet).
+The **boot initializer** scans local pack files.
 
 <TLDR>
 - Editor: `components/settings/characters-section.tsx` — source-filtered list (`filterCharacters` / `classifyCharacterSource` `editor-projection.ts:20–41`), grouped per-character form, `.cognia-pack.json` import/export (`characterToPackDef` + `serializeLocalPackFile` line 117), built-in rows read-only with Duplicate.
@@ -17,7 +21,12 @@ The four UI surfaces that let a user author, choose, update, and discover charac
 
 ## Settings editor
 
-`components/settings/characters-section.tsx` is the authoring surface. The left list is filtered by **source** — `classifyCharacterSource()` (`editor-projection.ts:20–24`) buckets each row into `builtin | plugin | user`, and `filterCharacters()` (`editor-projection.ts:30–41`) applies the active filter plus the search box. Built-in rows render **read-only** with a single Duplicate action; selecting any row opens the per-character form.
+`components/settings/characters-section.tsx` is the authoring surface.
+The left list filters characters by **source**.
+`classifyCharacterSource()` (`editor-projection.ts:20–24`) groups rows into `builtin | plugin | user`.
+`filterCharacters()` (`editor-projection.ts:30–41`) applies the active filter and search text.
+Built-in rows are **read-only** and offer only the Duplicate action.
+Selecting any row opens its character form.
 
 ### Form field inventory
 

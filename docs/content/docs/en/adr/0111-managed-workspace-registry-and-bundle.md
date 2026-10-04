@@ -29,8 +29,8 @@ host-owned startup plus 24-hour maintenance. Chat, Scheduler, Agent Team,
 external agents, connectors, and local Tauri execution now acquire Registry
 Bundles and fail closed instead of writing through to the live project root.
 The legacy Agent Team allocator/reconciler/judge have been removed. The manual
-Worktree panel consumes Registry ownership and refuses removal of owned or
-imported rows; the host repeats this check after reconcile.
+Worktree panel uses Registry ownership and refuses removal of owned or
+imported rows. The host repeats this check after reconcile.
 
 The rollout remains incomplete. `.cognia/workspace.json` parsing and the
 existing Project Environment executor have not yet been joined into one

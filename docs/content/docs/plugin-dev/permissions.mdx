@@ -39,12 +39,13 @@ domain.action:scope
 | `notification` | `toast`, `native`    | none               | `notification.toast`, `notification.native`  |
 | `ai`           | `provider`, `prompt` | none               | `ai.provider`                                |
 | `extension`    | `mount`              | none               | `extension.mount`                            |
-| `scheduler`    | `register`           | none               | `scheduler.register`                         |
 | `canvas`       | `read`, `write`      | none               | `canvas.read`, `canvas.write`                |
 | `artifact`     | `register`           | none               | `artifact.register`                          |
 | `media`        | `filter`, `effect`   | none               | `media.filter`, `media.effect`               |
 | `crypto`       | `digest`, `encrypt`  | none               | `crypto.digest`                              |
 | `permission`   | `read`, `request`    | none               | `permission.read` (implicit, always granted) |
+
+Scheduling is not a permission. Declare the `scheduler` **capability** to use `ctx.scheduler` and `manifest.scheduledTasks`. Reading or writing the user's own schedule through `ctx.userScheduler` needs `database:read` / `database:write` (plus `settings:read` to create and `agent:control` to run or cancel), and every write also passes the user's scheduler permission policy. See [Scheduler APIs](../en/plugin-dev/scheduler).
 
 ## Scope variables
 

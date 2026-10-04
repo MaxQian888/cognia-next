@@ -8,7 +8,7 @@ description: The five-way workflow trigger taxonomy, the seven TS runtime bridge
 <Status variant="stable" />
 
 <TLDR>
-Rust owns two questions — "when does a workflow start" (cron daemon + axum webhook receiver) and "did this run or waitpoint survive a crash" (the SQLite mirror) — while the TS orchestrator on [runtime-execution](./runtime-execution) owns step execution. Every formal trigger fans into `dispatchTrigger(event)`, which calls Execution Authority to pin the active production artifact before the plugin hook and orchestrator run. Cross-process firing rides the single `workflow:trigger` Tauri event. Web falls back to Dexie for run state and durable waitpoints.
+Rust owns two questions — "when does a workflow start" (cron daemon + axum webhook receiver) and "did this run or waitpoint survive a crash" (the SQLite mirror) — while the TS orchestrator on [runtime-execution](./runtime-execution) owns step execution. Every formal trigger calls `dispatchTrigger(event)`, which calls Execution Authority to pin the active production artifact before the plugin hook and orchestrator run. Cross-process trigger delivery uses the single `workflow:trigger` Tauri event. Web falls back to Dexie for run state and durable waitpoints.
 </TLDR>
 
 ## Trigger taxonomy
@@ -143,7 +143,7 @@ sequenceDiagram
 
 ### Crash recovery — run mirror + resume
 
-The mirror is a thin shadow, not canonical — the Dexie event log is the source of truth. `open:60` is LAZY (registers the path, no disk touch); `conn:96` does `get_or_try_init` (mkdir, open, DDL) on first real use. `persist:134` preserves the existing snapshot/started_at (`INSERT ... ON CONFLICT(run_id) DO UPDATE`) so the snapshot is mandatory only on first persist. `list_in_flight:192` selects `status IN (pending/running/waiting/paused) ORDER BY started_at ASC`; `ack_completed:231` simply `DELETE`s the row. On boot, `reloadInFlightRuns` (`tauri-bridge.ts:63`) reads survivors and the resume controller re-runs them as `trigger.manual` (NOT through `dispatchTrigger`, so no hook re-fire).
+The mirror is a secondary copy. The Dexie event log is the source of truth. `open:60` is LAZY (registers the path, no disk touch); `conn:96` does `get_or_try_init` (mkdir, open, DDL) on first real use. `persist:134` preserves the existing snapshot/started_at (`INSERT ... ON CONFLICT(run_id) DO UPDATE`) so the snapshot is mandatory only on first persist. `list_in_flight:192` selects `status IN (pending/running/waiting/paused) ORDER BY started_at ASC`; `ack_completed:231` uses `DELETE` to remove the row. On boot, `reloadInFlightRuns` (`tauri-bridge.ts:63`) reads survivors and the resume controller re-runs them as `trigger.manual` (NOT through `dispatchTrigger`, so no hook re-fire).
 
 ```rust
 // src-tauri/src/workflow/run_mirror.rs:111

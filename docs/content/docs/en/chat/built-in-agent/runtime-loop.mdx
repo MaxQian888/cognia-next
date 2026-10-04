@@ -5,7 +5,11 @@ description: The send → stream → render spine — use-claude-chat, the pure 
 
 # Runtime Loop
 
-This is the spine every built-in-agent turn travels. A React hook builds the payload and fires it; a Rust process owns the Node sidecar; the sidecar runs the SDK `query()` loop; events stream back over one Tauri channel and a **pure** reducer folds them into messages.
+Every built-in-agent turn follows this path.
+A React hook builds and sends the payload.
+A Rust process owns the Node sidecar.
+The sidecar runs the SDK `query()` loop.
+Events return through one Tauri channel, and a **pure** reducer converts them into messages.
 
 <TLDR>
   `send` (`use-claude-chat.ts:596`) builds options, optimistically appends the user message, and

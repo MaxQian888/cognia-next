@@ -313,9 +313,9 @@ had just declared byte-frozen. The sources moved out of the module tree
 to `crates/cognia-plugin-runtime/frozen/v0_1/`, where `rustc`, `clippy`,
 and `cargo fmt` never visit them. A checksum manifest
 (`scripts/gates/frozen-wasm-api.json`, gate `pnpm lint:frozen-wasm-api`)
-audits in three directions — entries match, no unlisted file, no missing
-entry — and an in-crate `include_bytes!` test holds the freeze for
-contributors who never run the node gates.
+checks that entries match, every file is listed, and every listed file
+exists. An in-crate `include_bytes!` test also enforces the freeze for
+contributors who do not run the node gates.
 
 ### Added: capability-first bounded IPC with a stable error vocabulary
 

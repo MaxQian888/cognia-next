@@ -5,7 +5,7 @@ description: 如何评估 Cognia 的内置 Agent —— 四种类别（mode、su
 
 # 评估内置 Agent
 
-Cognia 自带一套 TS 原生、进程内的 **eval 引擎**（`lib/ai/eval/*`）：把 agent 对着一个带版本的数据集跑、把每次运行捕获成轨迹、按四个维度打分、聚合出带 `pass@1` / `pass^k` 可靠性的报告。它同时驱动 **CI 门**（`pnpm test:evals`）和应用内 **`/eval`** 仪表盘。
+Cognia 内置使用 TS 实现、在进程内运行的 **eval 引擎**（`lib/ai/eval/*`）。引擎在带版本的数据集上运行 agent，记录每次运行的轨迹，按四个维度评分，并汇总包含 `pass@1` / `pass^k` 可靠性指标的报告。它同时用于 **CI 门禁**（`pnpm test:evals`）和应用内的 **`/eval`** 仪表盘。
 
 <TLDR>
   评估内置 Agent 不是"从零搭评估系统"——引擎已经在那了。你只要把一个 **target** 指向该 agent，

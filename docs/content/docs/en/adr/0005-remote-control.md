@@ -83,11 +83,11 @@ cognia-next has shipped two adjacent half-features since the scheduler landed:
    free-text input and didn't surface `eventSource` at all. There was no way for
    anything outside the renderer to fire an event.
 
-That left a "remote control" story with no inbound surface (external systems
-can't trigger a task or fire an event) and only a partial outbound surface
-(no auth, no URL field, no custom headers). The user-facing motivation in
-2026-05-03 was that automation suites and personal scripts wanted to drive
-their own cognia install — kick off a scheduled chat from a CI job, fire a
+As a result, remote control had no inbound interface. External systems
+could not trigger a task or fire an event. The outbound interface also
+lacked authentication, a URL field, and custom headers. The user-facing motivation in
+2026-05-03 was that automation suites and personal scripts wanted to control
+their own cognia installation — start a scheduled chat from a CI job, fire a
 `backup:needed` event when an external sync ends, etc. — without writing a
 plugin or learning the MCP toolchain.
 

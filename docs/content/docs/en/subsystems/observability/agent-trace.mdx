@@ -9,7 +9,7 @@ description: The lib/agent-trace span pipeline — the OTel-GenAI-aligned AgentT
 
 <TLDR>
   Agent-trace is a pure-TS span pipeline. `lib/agent-trace/emitter.ts` buffers in-progress spans in a
-  `Map<spanId, AgentTraceSpan>`; `startSpan` → `recordEvent` → `endSpan` hands the finished span to a
+  `Map<spanId, AgentTraceSpan>`; `startSpan` → `recordEvent` → `endSpan` sends the finished span to a
   registered writer. `lib/logging/bootstrap.ts` wires that writer to `dispatchSpanToTransports`, which
   converts the span to a `StructuredLogEntry` (`spanToLogEntry`) and fans it to the transports — the
   **agent-trace** transport persists it to the Dexie `agentTraces` table, and the **otlp-http**

@@ -5,7 +5,7 @@ description: ADR-0022 的 F 路径主干 —— agentTeamManager.start、runTeam
 
 # 生命周期与工作流合成
 
-依据 ADR-0022（“Agent Team 运行时加固”），一次团队运行**不是**第二套编排器 —— 它只是一个轻量的合成器，把 `(team, tasks)` 翻译成一份 `VisualWorkflow`，再交给那唯一的工作流运行时。本页端到端地梳理 F 路径主干：`agentTeamManager` 门面、`runTeamLifecycle` 的十项有序职责、纯函数式工作流合成、按运行注册的 `TeamRunContext` 注册表、编排器的并发就绪集调度，以及把工作流桥接回队员派发的两个节点执行器（`action.team.run`、`action.team.task.dispatch`）。
+依据 ADR-0022（「Agent Team 运行时加固」），团队运行通过轻量合成器将 `(team, tasks)` 转换为一份 `VisualWorkflow`，再交给统一的工作流运行时执行。本页说明 F 路径的完整调用链：`agentTeamManager` 门面、`runTeamLifecycle` 的十项有序职责、纯函数式工作流合成、按运行注册的 `TeamRunContext` 注册表、编排器的并发就绪集调度，以及将工作流桥接到队员派发的两个节点执行器（`action.team.run`、`action.team.task.dispatch`）。
 
 <TLDR>
   UI 调用 `agentTeamManager.start`（`lib/ai/agent/team/agent-team.ts:91-115`），它把团队
@@ -258,15 +258,13 @@ const workflow: VisualWorkflow = {
 
 ### Lead 阻塞式评审（ADR-0071）
 
-当 `team.config.taskReview.enabled` 开启时，合成器会为每个任务额外产出一个节点 ——
-`action.team.task.review`，id 为 `review:<taskId>` —— 并**把该任务所有下游依赖的边改指向它**：
+当 `team.config.taskReview.enabled` 开启时，合成器会为每个任务额外产出一个节点 ——`action.team.task.review`，id 为 `review:<taskId>` —— 并**把该任务所有下游依赖的边改指向它**：
 
 ```
   taskA ──▶ review:taskA ──▶ taskB ──▶ review:taskB
 ```
 
-这一层间接就是全部机制：未通过评审的任务，其下游根本不可运行，因此闸门由就绪集调度器强制执行，
-而不是依赖下游节点自觉去检查某个标志位。默认关闭 → DAG 与此前完全一致。
+这一层间接就是全部机制：未通过评审的任务，其下游根本不可运行，因此闸门由就绪集调度器强制执行，而不是依赖下游节点自觉去检查某个标志位。默认关闭 → DAG 与此前完全一致。
 
 | 细节 | 行为 |
 | --- | --- |
@@ -275,12 +273,7 @@ const workflow: VisualWorkflow = {
 | `params.maxRevisions` | 在合成时冻结，因此运行中途修改配置不会改变 DAG 已据此成形的预算 |
 | 环检测 | 不受影响 —— Kahn 算法跑在任务 id 上，而非节点 id |
 
-执行器会向 Lead 索取结构化的 `{ verdict, feedback }`，并附上成员的产出以及不超过 64 KiB 的确定性
-diff 证据（`review-evidence.ts`）。`changes_requested` 会带着反馈把**同一位**成员重新派发到**同一个**
-worktree；通过后任务标记为 `completed`（若同时开启人工 `requireResultReview` 则为 `review`）。
-评审开启时终态状态由评审节点书写，派发节点不写 —— 否则看板会在任务仍在评审时就宣称其已完成。
-预算耗尽、原成员不可用、评审方失败等任何未决情况都会让该任务与整个运行失败。
-参见 [ADR-0071](../adr/0071-blocking-lead-task-review)。
+执行器会向 Lead 索取结构化的 `{ verdict, feedback }`，并附上成员的产出以及不超过 64 KiB 的确定性 diff 证据（`review-evidence.ts`）。`changes_requested` 会带着反馈把**同一位**成员重新派发到**同一个** worktree；通过后任务标记为 `completed`（若同时开启人工 `requireResultReview` 则为 `review`）。评审开启时终态状态由评审节点书写，派发节点不写 —— 否则看板会在任务仍在评审时就宣称其已完成。预算耗尽、原成员不可用、评审方失败等任何未决情况都会让该任务与整个运行失败。参见 [ADR-0071](../adr/0071-blocking-lead-task-review)。
 
 ## 按运行共享状态 —— `lib/ai/agent/team/team-run-context.ts`
 

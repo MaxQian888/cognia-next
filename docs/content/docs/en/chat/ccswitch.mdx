@@ -111,7 +111,7 @@ flowchart LR
 3. CCSwitch's own `app_paths.json` → `app_config_dir_override` — this is how cloud-sync redirects (Dropbox / iCloud / WebDAV) are followed. A redirect whose target no longer exists on disk falls back to the default.
 4. `~/.cc-switch/cc-switch.db` — the default, consistent across OSes.
 
-`CcswitchStatus.resolutionSource` (`"env" | "manual" | "redirect" | "default"`) is reported back so the Overview tab can show where the path actually came from.
+`CcswitchStatus.resolutionSource` (`"env" | "manual" | "redirect" | "default"`) identifies the source of the path for the Overview tab.
 
 `ccswitch_status()` always succeeds and returns one of three states:
 
@@ -138,7 +138,8 @@ let conn = Connection::open_with_flags(
 )?;
 ```
 
-`SQLITE_OPEN_NO_MUTEX` is used because CCSwitch is a single-threaded writer; read-only connections do not need SQLite's built-in connection lock.
+CCSwitch has a single-threaded writer, so read-only connections do not need SQLite's built-in connection lock.
+The connections use `SQLITE_OPEN_NO_MUTEX`.
 
 ## Tauri Commands
 

@@ -34,7 +34,7 @@ DI-style (mirrors `team-notifier`) so the orchestration is unit-testable without
 
 ### Data model (`types/notifications/`)
 
-`NotificationRecord` is the durable "center" entry: `id, source, level, title, body?, createdAt, updatedAt, readState, snoozedUntil?, dedupeKey?, groupKey?, count, href?, actions?, sourceRef?, pluginId?, directed, deliveredVia[], expiresAt?`. The `notifications` Dexie table (**v68**) indexes `dedupeKey`, `groupKey`, `createdAt`, `readState`, plus the compound `[readState+createdAt]` (newest-unread feed + badge) and `[source+createdAt]` (per-source feed). Actions are **serializable** (`{ id, label, command, args? }`) — resolved at click time through `action-registry`, never closures (they persist). `NotificationPreferences` rides the `AppSettings` singleton as JSON (no migration), resolved with `DEFAULT_NOTIFICATION_PREFERENCES`.
+`NotificationRecord` is the durable "center" entry: `id, source, level, title, body?, createdAt, updatedAt, readState, snoozedUntil?, dedupeKey?, groupKey?, count, href?, actions?, sourceRef?, pluginId?, directed, deliveredVia[], expiresAt?`. The `notifications` Dexie table (**v68**) indexes `dedupeKey`, `groupKey`, `createdAt`, `readState`, plus the compound `[readState+createdAt]` (newest-unread feed + badge) and `[source+createdAt]` (per-source feed). Actions are **serializable** (`{ id, label, command, args? }`). They persist as data, not closures, and are resolved at click time through `action-registry`. `NotificationPreferences` is stored as JSON in the `AppSettings` singleton (no migration) and resolved with `DEFAULT_NOTIFICATION_PREFERENCES`.
 
 ### True unification of legacy paths
 

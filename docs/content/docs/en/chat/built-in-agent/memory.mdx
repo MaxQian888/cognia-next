@@ -5,7 +5,10 @@ description: Autonomous conversation-derived cross-session memory — extract �
 
 # Long-term Memory
 
-The memory subsystem gives the built-in agent **durable, self-maintaining recall** of facts about the user across sessions — without the user curating anything. It reads conversations, decides what is worth keeping, dedupes against what it already knows, and injects the most relevant memories into the next turn's system prompt.
+The memory subsystem retains facts about the user across sessions without requiring the user to curate them.
+It reads conversations and selects facts worth retaining.
+It removes duplicates against existing memories.
+It inserts the most relevant memories into the next turn's system prompt.
 
 <Status variant="experimental" />
 

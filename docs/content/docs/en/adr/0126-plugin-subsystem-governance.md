@@ -1,6 +1,6 @@
 ---
 title: "0126 — Plugin Subsystem Governance"
-description: "Settles who plugins are for, how far their code is trusted, and how a capability that nothing consumes is resolved — so that what the subsystem advertises and what it enforces stop diverging."
+description: "Defines the intended users of plugins, the trust limits on plugin code, and how to resolve unused capabilities. Aligns the capabilities the subsystem advertises with those it enforces."
 ---
 
 # ADR 0126 — Plugin Subsystem Governance
@@ -28,10 +28,9 @@ places, and they share one root cause.
 `native:process` appear in `permission-guard.ts` only as a group label and a
 description string; nothing reads them — and `cognia-sandboxed-tools` ships a
 manifest asking the user to consent to both. `configSchema.secret` is validated
-in `validation.ts`, and its type documentation promises the value is stored in
-the OS keyring and read back through `ctx.configuration.getSecret()`; that
-method does not exist, the form renders a plain input, and the value lands in
-the plaintext config store. Twenty-three lifecycle hooks ship dispatchers with
+in `validation.ts`. Its type documentation promises OS keyring storage and
+reads through `ctx.configuration.getSecret()`. That method does not exist. The
+form renders a plain input and stores the value in the plaintext config store. Twenty-three lifecycle hooks ship dispatchers with
 zero emit sites. `manifest.dexie.migrations` is typed, validated and
 SDK-exported, and `runPendingMigrations` has a full test suite and no
 production caller.

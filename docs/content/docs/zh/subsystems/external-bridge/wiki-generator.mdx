@@ -13,7 +13,7 @@ description: lib/wiki —— 把 Cognia 自身源码变成模块级 Markdown 文
   （added / changed / removed / unchanged）→ 复用 Twin 代码切块器 → 四个子代理（`RepoMapAgent` 启发式
   pageRank，无 LLM；`ModuleArticleAgent` 每模块一次 LLM 调用，2048 token 上限，temp 0；`CrossRefAgent` 纯
   Markdown 后处理器插入 `[[slug]]`；`IndexPageAgent` 顶层导航，1500 token 上限）→ 持久化到 `wikiArticles` +
-  `wikiSections`。增量是默认；只有被变更文件触及的模块会被重新生成。一个 `wikiSchedule` 协调到单个调度任务，
+  `wikiSections`。默认采用增量重建。只有包含变更文件的模块会被重新生成。一个 `wikiSchedule` 协调到单个调度任务，
   使重建能按 cron 运行。
 </TLDR>
 
@@ -41,9 +41,7 @@ export async function rebuildWiki(deps: WikiOrchestratorDeps, opts: RebuildOptio
 // opts: { scope: WikiScope; rootDir: string; generatorVersion: string; force?: boolean; moduleTokenBudget?: number }
 ```
 
-`RebuildResult` 报告 `{ added, changed, removed, unchanged, articles, indexPage?, errors, durationMs }`。
-模块失败被收进 `errors[]`——一个坏模块绝不回滚整次构建。可选的 `EmbedFn` 默认是 `ZERO_EMBEDDING`
-（`orchestrator.ts:56`），因此 Phase 1 排序是词重叠 + pageRank，而非向量。
+`RebuildResult` 报告 `{ added, changed, removed, unchanged, articles, indexPage?, errors, durationMs }`。模块失败被收进 `errors[]`——一个坏模块绝不回滚整次构建。可选的 `EmbedFn` 默认是 `ZERO_EMBEDDING`（`orchestrator.ts:56`），因此 Phase 1 排序是词重叠 + pageRank，而非向量。
 
 ## 文件纳入规则
 
@@ -61,29 +59,24 @@ export const EXCLUDED_FILENAME_PATTERNS = [
 ]
 ```
 
-`shouldIncludeFile`、`filterIncludedPaths`、`bucketByModule`、`moduleToSlug` 推导模块键与 slug。
-`components/ui/`（shadcn）和 `components/ai-elements/`（vendored）被硬排除——无信息价值。
+`shouldIncludeFile`、`filterIncludedPaths`、`bucketByModule`、`moduleToSlug` 推导模块键与 slug。`components/ui/`（shadcn）和 `components/ai-elements/`（vendored）被硬排除——无信息价值。
 
 ## Merkle 增量
 
-`merkle.ts`：`hashContent`（经 SubtleCrypto 的 SHA-256）、`buildMerkleMap(files)` →
-`Record<path, sha256>`，以及用于部分更新的 `refreshSubset`。diff 本身在 `lib/db/wiki-manifest.ts:43`：
+`merkle.ts`：`hashContent`（经 SubtleCrypto 的 SHA-256）、`buildMerkleMap(files)` → `Record<path, sha256>`，以及用于部分更新的 `refreshSubset`。diff 本身在 `lib/db/wiki-manifest.ts:43`：
 
 ```ts title="lib/db/wiki-manifest.ts:43"
 export function diffManifest(manifest: WikiManifest | undefined, current: Record<string, string>):
   { added: string[]; changed: string[]; removed: string[]; unchanged: string[] }
 ```
 
-只有**被触及模块集合**（拥有 added/changed/removed 文件的模块）会被喂给 `ModuleArticleAgent`；未变模块保留其既有文章。
-`force=true` 先删整个 scope（`deleteAllWikiArticlesForScope`）；否则 `deleteStaleWikiArticles` 删除由不匹配
-`generatorVersion` 写入的文章。
+只有**被触及模块集合**（拥有 added/changed/removed 文件的模块）会被喂给 `ModuleArticleAgent`；未变模块保留其既有文章。`force=true` 先删整个 scope（`deleteAllWikiArticlesForScope`）；否则 `deleteStaleWikiArticles` 删除由不匹配 `generatorVersion` 写入的文章。
 
 ## 四个子代理
 
 ### RepoMapAgent —— 启发式 pageRank（无 LLM）
 
-纯函数，无模型调用。`buildModuleStats(chunks)` 聚合每模块的行数/token 数；一个 boost 列表乘子喂入归一化的 `0..1`
-pageRank。
+纯函数，无模型调用。`buildModuleStats(chunks)` 聚合每模块的行数/token 数；一个 boost 列表乘子喂入归一化的 `0..1` pageRank。
 
 ```ts title="lib/wiki/agents/repo-map-agent.ts:22"
 const BOOST_FILES = new Set([
@@ -99,8 +92,7 @@ const BOOST_FILES = new Set([
 
 `runModuleArticleAgent` 发出单次 `llm.complete(moduleArticlePrompt(...), { system: WIKI_SYSTEM_VOICE,
 maxTokens: 2048, temperature: 0 })`（`module-article-agent.ts:43`）。模型产出 H1 + 摘要 +
-`## What it does` / `## Public API` / `## Internals` / `## Related`；`assembleArticle` 把响应切成各段并附上
-`sourceRefs`。
+`## What it does` / `## Public API` / `## Internals` / `## Related`；`assembleArticle` 把响应切成各段并附上 `sourceRefs`。
 
 ```ts title="lib/wiki/prompts.ts:16"
 export const WIKI_SYSTEM_VOICE =
@@ -113,8 +105,7 @@ export const WIKI_SYSTEM_VOICE =
 
 ### CrossRefAgent —— 纯 Markdown 后处理器
 
-让模型在散文里写 `` `lib/twin/ingest` `` 而不必知道 slug 规则；后处理器把它改写成 `[[lib-twin-ingest]]`。
-`applyCrossRefs(body, index)` 掩蔽围栏代码块、匹配反引号路径，并返回 `{ body, linkedSlugs }`。
+让模型在散文里写 `` `lib/twin/ingest` `` 而不必知道 slug 规则；后处理器把它改写成 `[[lib-twin-ingest]]`。`applyCrossRefs(body, index)` 掩蔽围栏代码块、匹配反引号路径，并返回 `{ body, linkedSlugs }`。
 
 ```ts title="lib/wiki/agents/cross-ref-agent.ts:51"
 const BACKTICK_PATH = /`((?:lib|app|components|hooks|types)\/[\w./-]+?)`/g
@@ -124,9 +115,7 @@ const BACKTICK_PATH = /`((?:lib|app|components|hooks|types)\/[\w./-]+?)`/g
 
 ### IndexPageAgent —— 顶层导航
 
-`runIndexPageAgent` 做一次 `llm.complete(..., { maxTokens: 1500, temperature: 0 })` 调用，产出按相关模块分组的
-顶层索引。`assembleIndexPage` 调用 `findDeadLinks`，若任一被链 slug 未知则**抛出**（`index-page-agent.ts:57`）；
-orchestrator 捕获并记录而非中止整次构建。
+`runIndexPageAgent` 做一次 `llm.complete(..., { maxTokens: 1500, temperature: 0 })` 调用，产出按相关模块分组的顶层索引。`assembleIndexPage` 调用 `findDeadLinks`，若任一被链 slug 未知则**抛出**（`index-page-agent.ts:57`）；orchestrator 捕获并记录而非中止整次构建。
 
 ## 提供方选择（rebuild-runner）
 
@@ -142,8 +131,7 @@ orchestrator 捕获并记录而非中止整次构建。
 | 否则 `apiKey` 以 `sk-` 开头 | openai | `gpt-4o` |
 | 默认 | anthropic | `claude-sonnet-4-6` |
 
-`buildTauriFileSystem` 经 `@tauri-apps/plugin-fs` 实现 `FileSystem`；`runWikiRebuild` 在 `isTauri()` 为 false 时
-抛 `WebModeError`——浏览器没有真实文件系统，故 web 用户只能消费已生成的 wiki，永远无法生产。
+`buildTauriFileSystem` 经 `@tauri-apps/plugin-fs` 实现 `FileSystem`；`runWikiRebuild` 在 `isTauri()` 为 false 时抛 `WebModeError`——浏览器没有真实文件系统，故 web 用户只能消费已生成的 wiki，永远无法生产。
 
 ## 排期重建
 

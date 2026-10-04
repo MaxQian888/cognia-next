@@ -10,8 +10,9 @@ description: Define the supported scheduler extension axes, source adapters, plu
 ## Context
 
 Cognia has an in-process TypeScript scheduler, workflow triggers backed by a Rust cron daemon,
-and OS-native promotion backends. Extension points had drifted: plugin writes bypassed the live
-scheduler, unified history bypassed the source registry, and OS capability lists were duplicated.
+and OS-native promotion backends. Extension points had become inconsistent. Plugin writes bypassed the live
+scheduler. Unified history bypassed the source registry. OS capability lists
+were duplicated.
 
 ## Decision
 

@@ -229,7 +229,7 @@ the sidecar injects it into `identifiedInput` before payload serialization
 (`sidecar/dispatch/tool-provenance.mjs`, mirror of
 `lib/claude/hooks/tool-provenance.ts`), fed by `sendOptions.pluginTools`
 (each entry's `manifestPath`) and `sendOptions.mcpDeclaredBy` (per-server
-locators built in `resolveSendOptions`); the external-agent bridge attaches
+locators built in `resolveSendOptions`). The external-agent bridge attaches
 it to the `payload` it already sends through `run_agent_hook`. The Rust
 runtime stays a pass-through — it has no registry access, and `fields`
 flattening preserves the key verbatim (pinned by a `#[cfg(test)]` in

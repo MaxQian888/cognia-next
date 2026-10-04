@@ -17,7 +17,7 @@ description: 单会话 5 种格式 + 批量 ZIP 导出 —— Markdown / JSON / 
 | 历史归档                                    | Batch ZIP（per-session 文件命名按 slug 唯一）                       |
 | 自定义品牌色                                | Beautiful / Animated HTML + `customTheme: ThemeTokens` 覆盖默认主题 |
 
-对于**整库快照（多设备搬运 + 加密）**，请用 [备份与数据](./backup-and-data) 的 `BackupPackageV3` 流水线 —— 那是一条独立的、加密的、覆盖全部 Dexie 表的导出路径。本页的导出系统专注于"单会话 / 多会话的可读副本"。
+**整库快照（多设备迁移与加密）**使用[备份与数据](./backup-and-data)中的 `BackupPackageV3` 流水线。这是一条独立的加密导出路径，覆盖全部 Dexie 表。本页介绍的导出系统用于生成单会话或多会话的可读副本。
 
 ## 架构图
 

@@ -1,6 +1,6 @@
 ---
 title: "0139 — Visual output routing"
-description: "Five ways to show a picture, one resident decision table, and the chart contract written down where a model can read it."
+description: "Defines five ways to display an image through one resident decision table. Documents the chart contract where the model can read it."
 ---
 
 # ADR 0139 — Visual output routing
@@ -144,8 +144,8 @@ deleting the only memorable line in the section to buy fifteen characters of
 permanent headroom. A second guard pins the `disabled` variant under 1,100,
 which encodes this ADR's actual principle better than one global number does:
 the channel that can use the least routing pays the least for it. The
-Consequences note above saying "roughly 150 tokens" was already wrong before
-this change; it is closer to 380 now.
+Consequences note above saying "roughly 150 tokens" was already inaccurate
+before this change. The current value is closer to 380.
 
 **Deliberately not done.** Dropping `diagram-design`'s `artifact-authoring`
 requirement so the full Mermaid contract reaches an IM thread. It is tempting

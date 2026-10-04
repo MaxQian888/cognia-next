@@ -1,6 +1,6 @@
 ---
 title: RPC 命令 Manifest
-description: 命令 manifest、运行时 allowlist、路由目录与生成器如何产出相互隔离的公开设备与 Headless RPC 清单。
+description: 命令 manifest、运行时允许列表、路由目录与生成器如何产出相互隔离的公开设备与 Headless RPC 清单。
 ---
 
 # RPC 命令 Manifest
@@ -43,8 +43,7 @@ flowchart LR
 3. target 为 `execution` 或 `host-admin`；
 4. transports 包含 `http`。
 
-即使代码中存在同名入口，service 与 client-only descriptor 也不会公开。Headless spec 受 loopback
-service token 保护，因此包含 dispatcher 的全部命令。
+即使代码中存在同名入口，service 与 client-only descriptor 也不会公开。Headless spec 受 loopback service token 保护，因此包含 dispatcher 的全部命令。
 
 ## 请求形式
 
@@ -62,13 +61,9 @@ Content-Type: application/json
 }
 ```
 
-Headless 等价路由是 `/internal/_rpc/session_list`，使用
-`Authorization: Bearer <service-token>`。内部 plane 仍执行 descriptor 级验证、幂等与 approval 策略。
+Headless 等价路由是 `/internal/_rpc/session_list`，使用 `Authorization: Bearer <service-token>`。内部 plane 仍执行 descriptor 级验证、幂等与 approval 策略。
 
-对于 manifest 中的通用 input，生成器会依次使用显式 request catalog、递归 Zod 契约或直接 Rust
-dispatch arm。每条 operation 通过 `x-cognia-request-schema-source` 标明 schema 来自 `contract`、
-`zod-contract`、`runtime-inferred` 或 `manifest`。覆盖门禁会拒绝通用 fallback、缺少 `items` 的数组，
-以及会让 Apifox 生成占位字段的无约束对象。
+对于 manifest 中的通用 input，生成器会依次使用显式 request catalog、递归 Zod 契约或直接 Rust dispatch arm。每条 operation 通过 `x-cognia-request-schema-source` 标明 schema 来自 `contract`、`zod-contract`、`runtime-inferred` 或 `manifest`。覆盖门禁会拒绝通用 fallback、缺少 `items` 的数组，以及会让 Apifox 生成占位字段的无约束对象。
 
 ## 更新契约
 
@@ -80,11 +75,9 @@ pnpm companion-api:check
 pnpm companion-api:lint
 ```
 
-`companion-api:check` 检测生成漂移；`spec_parity.rs` 在 Rust 层双向校验：每条预期命令都必须有具体
-生成路径，每条具体路径也必须存在于对应运行时集合。
+`companion-api:check` 检测生成漂移；`spec_parity.rs` 在 Rust 层双向校验：每条预期命令都必须有具体生成路径，每条具体路径也必须存在于对应运行时集合。
 
-不要直接在公开 YAML 中手动加入 service 命令。只有信任与 transport 语义确实改变时才修改
-descriptor，然后交由生成器更新产物。
+不要直接在公开 YAML 中手动加入 service 命令。只有信任与 transport 语义确实改变时才修改 descriptor，然后交由生成器更新产物。
 
 ## 性能命令边界
 

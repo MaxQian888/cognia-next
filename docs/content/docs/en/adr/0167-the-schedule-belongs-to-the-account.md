@@ -1,6 +1,6 @@
 ---
 title: "0167 - The schedule belongs to the account"
-description: "The scheduler kept its own machine-wide unencrypted database outside data governance and backup, its permission policy had zero enforcement callers, and the only agent-facing tools were three IM-gated MCP calls. All three had the same root: the schedule was treated as a machine's property rather than the account's."
+description: "The scheduler used a separate machine-wide unencrypted database outside data governance and backup. No caller enforced its permission policy. Its only agent-facing tools were three IM-gated MCP calls. These gaps came from treating schedules as machine-owned rather than account-owned."
 ---
 
 # ADR 0167 - The schedule belongs to the account
@@ -197,9 +197,9 @@ there can answer the desktop approval dialog, and a scheduled run must not grow
 its own schedule. The entries
 never widen an empty allowlist (that would turn "every tool" into "these
 nine"); a turn something else already narrowed gets them added like any skill.
-With the switch off, the family is stripped in every mode, the legacy IM
-scheduling tools are not offered, `authorizeTaskWrite` refuses any agent write
-with `agent-tools-disabled`, and `list` / `inspect` refuse to read. A policy
+With the switch off, the family is stripped in every mode and legacy IM
+scheduling tools are not offered. `authorizeTaskWrite` refuses agent writes
+with `agent-tools-disabled`. `list` / `inspect` refuse reads. A policy
 module that cannot be loaded reads as off.
 
 **2. A person's confirmation satisfies the "is anyone there" rules.** The skill

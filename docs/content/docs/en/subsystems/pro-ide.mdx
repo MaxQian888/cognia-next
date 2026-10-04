@@ -8,9 +8,9 @@ description: code-server embedded as a real editor pane — a loopback TCP contr
 <Status variant="beta">Beta · ADR-0088 · disk + settings.json (no Dexie)</Status>
 
 <TLDR>
-  The Pro IDE is a real code-server instance in a webview, driven by the app. Opening a file is easy —
-  code-server's own CLI does `--reuse-window <file>:<line>:<col>`. Everything past that is not: the CLI
-  can **only** open and reveal, so an undo-able edit or a read of the *active editor* has to run inside
+  The Pro IDE is a real code-server instance in a webview, driven by the app. To open a file,
+  code-server's own CLI uses `--reuse-window <file>:<line>:<col>`. The CLI
+  can **only** open and reveal. Therefore, an undo-able edit or a read of the *active editor* has to run inside
   the VS Code extension host. That is what the companion extension
   (`sidecar/codeserver-agent-ext/`) and the loopback control channel
   (`src-tauri/src/codeserver/agent_channel.rs`) exist for. The managed channel is JSON-RPC 2.0 with

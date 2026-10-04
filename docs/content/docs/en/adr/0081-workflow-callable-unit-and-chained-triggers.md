@@ -11,7 +11,7 @@ description: One shared typed runner backs every published workflow (no per-work
 
 Publishing a workflow (ADR-0011, D5 in `lib/workflow/CONTEXT.md`) registers three call
 surfaces: a typed agent tool, a typed `flow.subworkflow` target, and a skill-catalog
-entry of `kind:"workflow"`. Two of the three had drifted from what actually shipped:
+entry of `kind:"workflow"`. Two of these interfaces no longer matched the delivered behavior:
 
 1. The generated skill body instructed the model to call a per-workflow `wf_<slug>`
    tool that **no code ever registers** — the real runner is the generic

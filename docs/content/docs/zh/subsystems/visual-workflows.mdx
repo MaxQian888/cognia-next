@@ -4,13 +4,10 @@ description: n8n 风格的可视化编排层 —— 把角色、团队、技能�
 ---
 
 # 可视化工作流
-cognia-next 借这层把已经成熟的运行时实体 —— [角色](../chat/chat-and-skills)、[Agent
-团队](../chat/agent-teams)、[技能](./skills)、[员工孪生](./employee-twin)、
-[平台连接器](./platform-connectors)、MCP 服务器、[插件](./plugin-system)
-—— 拼成可执行图。设计目标对齐 ADR 0011 与 0017：
+cognia-next 借这层把已经成熟的运行时实体 —— [角色](../chat/chat-and-skills)、[Agent 团队](../chat/agent-teams)、[技能](./skills)、[员工孪生](./employee-twin)、[平台连接器](./platform-connectors)、MCP 服务器、[插件](./plugin-system)—— 拼成可执行图。设计目标遵循 ADR 0011 与 0017：
 
 - 可视化图编辑器：左栏拖拽 → 拖到画布 → 句柄连接 → 右栏检查器配置 → Ctrl+S 保存 → zundo 撤销重做 → elkjs 自动布局。
-- 执行引擎：端到端跑图、每步写入持久事件日志、支持重试 / 超时 / 幂等、webview 崩溃后能从日志恢复。
+- 执行引擎：端到端执行工作流图、每步写入持久事件日志、支持重试 / 超时 / 幂等、webview 崩溃后能从日志恢复。
 - 正式执行权威：CLI、触发器、MCP、子工作流、运行历史与 Dead Letter 必须经 Execution Authority 执行已发布 immutable artifact；只有编辑器 Preview/Test 是显式 draft 路径。
 - 持久检查点：审批、risk gate 与 event wait 共用 CAS-controlled repository，使用首次绝对截止时间与“事件先持久化、后匹配”语义。
 - 触发分类：手动 / cron / 连接器入站 / 聊天消息 / webhook —— 都接入现有基础设施，不另起调度器。

@@ -55,9 +55,9 @@ On Tauri, the panel still binds to the active project's `rootDir` and offers the
 native Open Folder picker. A paired Web or mobile renderer never receives that
 absolute path. The host registers current-account project roots and publishes
 only opaque `workspaceId`, display name, repository state, and operation
-availability. Every request resolves the handle on the host, validates a
-relative destination, and re-authorizes both the canonical discovered worktree
-and Git directory inside the granted root. Upward discovery, symlink escape,
+availability. For every request, the host resolves the handle and validates a relative
+destination. It re-authorizes both the canonical discovered worktree and Git
+directory inside the granted root. Upward discovery, symlink escape,
 cross-account handles, and inherited global Git identity are denied. Standalone
 Web keeps Source Control hidden.
 

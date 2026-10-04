@@ -10,7 +10,7 @@ description: The two-layer component registry (61-type catalog + 70-type dispatc
 <TLDR>
   A2UI turns a `component` **type string** (`"Button"`, `"Chart"`, …) into a real React node through
   **two stacked registries**. The lightweight `lib/a2ui/catalog.ts` holds the declarative list of
-  **61** standard types plus metadata and validation; the heavyweight
+  **61** standard types plus metadata and validation. The heavyweight
   `components/a2ui/a2ui-renderer.tsx` holds the **70-entry** `builtInComponents` dispatch map that is
   the *real* runtime registry. A container (`a2ui-surface.tsx`) selects an inline / dialog / panel /
   fullscreen shell, an `A2UIProvider` splits actions from data, and `A2UIRenderer` resolves the type,
@@ -26,8 +26,7 @@ description: The two-layer component registry (61-type catalog + 70-type dispatc
 
 ## Two-Layer Registry Model
 
-A type string survives two lookups, and the two layers do **not** hold the same list. Understanding
-the split is the key to the whole subsystem.
+A type string passes through two lookups. The two layers do **not** contain the same list.
 
 ```mermaid
 flowchart LR
@@ -107,8 +106,8 @@ imported L14) feeds host-strategy hints back into a component's widget metadata 
 ### Layer 2 — `components/a2ui/a2ui-renderer.tsx` dispatch map
 
 The renderer keeps its own `builtInComponents` `Map<typeString, ComponentType>` (L112) with **70**
-entries (L114-190). This is the registry the render path actually hits first; the catalog is only
-consulted on a miss.
+entries (L114-190). This is the registry the render path checks first. The renderer consults the catalog only
+when that lookup fails.
 
 | symbol | line | role |
 | --- | --- | --- |

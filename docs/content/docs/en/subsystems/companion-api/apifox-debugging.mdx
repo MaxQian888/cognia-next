@@ -8,7 +8,7 @@ description: Debug Cognia Agent APIs in Apifox with an isolated Headless data di
 <Status variant="beta">local development profile</Status>
 
 <TLDR>
-  Start with `pnpm dev:headless --local-debug`, then import the generated Postman environment and
+  Run `pnpm dev:headless --local-debug`. Then import the generated Postman environment and
   `docs/api/headless-service-api.openapi.yaml` into Apifox. The launcher binds the server to
   `127.0.0.1`, generates a random process-scoped Bearer token, and deletes the environment file when
   the server exits. This avoids manually issuing or copying a persistent service token without

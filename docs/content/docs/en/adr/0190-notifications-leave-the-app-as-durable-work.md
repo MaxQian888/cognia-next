@@ -1,6 +1,6 @@
 ---
 title: "0190 — Notifications leave the app as durable work"
-description: "The V1 notification center was an inbox with a fire-and-forget IM side-channel: a desktop toast and a best-effort Feishu message shared no identity, no retry, no record of what actually sent, and no policy between 'the run finished' and 'the user's phone buzzed'. V2 keeps the center as the canonical inbox and adds a commit-first durable pipeline behind it — facts are derived synchronously inside the run journal commit, a pure policy engine decides each route's verdict, and governed delivery intents ride the existing outbound queue (or a one-way Feishu webhook lane) with append-only attempts and crash-safe reconciliation. Delivery is evidence, never a guess: an uncertain send is recovered from its job's receipts, not blindly re-fired."
+description: "V1 notifications combined desktop toasts with best-effort Feishu messages without shared identity, retries, delivery records or routing policy. V2 keeps the center as the canonical inbox and adds a durable pipeline. Facts are derived synchronously in the run journal commit. A pure policy engine decides each route. Governed delivery intents use the existing outbound queue or a one-way Feishu webhook lane, with append-only attempts and crash-safe reconciliation. Uncertain sends are recovered from job receipts without blind retries."
 ---
 
 # ADR 0190 — Notifications leave the app as durable work
@@ -124,9 +124,9 @@ intents (receipt drift), recovers stale `sending` claims **by projecting the
 job's own evidence** — a `pending` job requeues the intent, a `sent` job marks
 it accepted — and fires due timers (quiet-release re-queues a deferred intent;
 digest-flush marks a bucket closed for the next pass). Errors are counted per
-item and surfaced in the result, never thrown past the sweep. Nothing that
-might already have sent is re-sent; the reconciler only ever moves an intent
-to a state the evidence already supports.
+item and surfaced in the result, never thrown past the sweep. Work that
+might already have been sent is not re-sent. The reconciler moves an intent
+only to a state supported by the existing evidence.
 
 ### Targets, subscriptions, scope
 

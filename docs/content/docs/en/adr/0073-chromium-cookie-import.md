@@ -110,7 +110,7 @@ WKWebView through `with_webview`. Cookies are constructed with name, value,
 domain, path, Secure, HttpOnly, Expires, and SameSite fields. They are set one at
 a time with `setCookie:completionHandler:` and an aggregate completion counter.
 The newer bulk setter is intentionally not used because it is only available on
-macOS 26. The Rust command reports success only after all singular completion
+macOS 26. The Rust command reports success only after all individual completion
 handlers have fired, with a bounded timeout.
 Cookies rejected by Foundation are skipped individually, and the returned
 summary describes only cookies actually handed to WebKit.

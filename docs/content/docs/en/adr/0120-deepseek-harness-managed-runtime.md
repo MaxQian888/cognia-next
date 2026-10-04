@@ -1,6 +1,6 @@
 ---
 title: ADR-0120 — DeepSeek Harness managed runtime
-description: "Integrates DeepSeek Harness as an external agent over two transports Cognia owns the host composition for, because upstream publishes no executable and no host plane."
+description: "Integrates DeepSeek Harness as an external agent over two transports. Cognia provides the host composition because upstream publishes no executable or host plane."
 ---
 
 # ADR-0120 — DeepSeek Harness managed runtime
@@ -44,7 +44,7 @@ Cognia owns and versions the DSH **host plane** as first-party source under `run
 
 **`DSH_HOME` is pinned inside the runtime home.** The launcher refuses to start unless it canonicalizes there, and `doctor` treats any stray patch layer as fatal on the read-only profile (a warning elsewhere, where the profile already grants write authority). Canonicalization defeats symlink and sibling-prefix escapes.
 
-**Policy is TypeScript; hosts only gather facts.** `doctorDshRuntime()` and `buildDshChannelManifest()` live in `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts`. The Rust and Node hosts return *facts* — digests, Node version, platform, stray patch layers — and the renderer renders the verdict. Duplicating those rules per host is exactly how the desktop and headless answers would drift apart. Install is two-phase for the same reason: the host stages and reports digests, the renderer builds the manifest (it owns the profile and capability vocabulary), the host writes it and swaps the tree in.
+**Policy is TypeScript; hosts only gather facts.** `doctorDshRuntime()` and `buildDshChannelManifest()` live in `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts`. The Rust and Node hosts return *facts* — digests, Node version, platform, stray patch layers — and the renderer renders the verdict. Duplicating those rules per host would let desktop and headless verdicts diverge. Installation uses two phases for the same reason. The host stages the files and reports digests. The renderer builds the manifest because it owns the profile and capability vocabulary. The host then writes the manifest and replaces the tree.
 
 **Capability facts are data, not prose.** `DSH_SDK_CAPABILITIES` and `DSH_ACP_CAPABILITIES` are intersected with the static `RUNTIME_CAPABILITIES.external` table, which grants `session.resume`, `steer`, `set-model`, and `permissions.interrupt-resume` — none of which DSH supports on either transport. Without the intersection the compatibility gate would certify capabilities the runtime lacks and the UI would render controls that do nothing.
 

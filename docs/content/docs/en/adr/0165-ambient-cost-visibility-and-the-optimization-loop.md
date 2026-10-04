@@ -1,6 +1,6 @@
 ---
 title: "0165: Ambient cost visibility and the optimization loop"
-description: "One writer owns the usage ledger and its budget projection, one projection feeds every ambient surface, external agents' spend is indexed separately and never touches a Cognia budget, and every efficiency claim carries the evidence it rests on."
+description: "One writer owns the usage ledger and its budget projection. One projection supplies every ambient surface. External agents' spend is indexed separately and never changes a Cognia budget. Every efficiency claim includes supporting evidence."
 ---
 
 # ADR 0165: Ambient cost visibility and the optimization loop
@@ -25,7 +25,7 @@ Above that, the tray could answer only "how much of my plan is left". It could n
 
 3. **External spend is indexed, separated, and never budgeted.** A `scanUsage` seam on `AgentSessionSourceAdapter` plus a generic bounded scanner gives all eleven first-party session sources external spend indexing with no adapter edits. Every row it writes is `imported: true`, which is the predicate the budget already excluded. `usageSourceStates` records why a scan degraded, so "we could not read this tool" stops rendering as "this tool has no spend". The all-tools scope is opt-in and is the only thing that reads another agent's files.
 
-4. **The Capacity Dock is a second ambient surface, not a second truth.** It reuses the island's overlay recipe and anchors to the work area rather than the full monitor frame. Its placement math is pure and unit-tested on every platform, and every coordinate is pixel-aligned, which is where CodeBurn's documented idle relayout drift comes from. Visibility has exactly one source of truth, the renderer's `enabled` preference: Rust persists geometry and deliberately not visibility, so a failed write on either side cannot make them disagree. Linux reports its capabilities rather than assuming them, and a Wayland session that refuses window positioning gets a disabled card explaining why with the tray named as the fallback.
+4. **The Capacity Dock is a second ambient surface, not a second truth.** It reuses the island's overlay recipe and anchors to the work area rather than the full monitor frame. Its placement math is pure and unit-tested on every platform, and every coordinate is pixel-aligned, which is where CodeBurn's documented idle relayout drift comes from. Visibility has exactly one source of truth, the renderer's `enabled` preference: Rust persists geometry and deliberately not visibility, so a failed write on either side cannot make them disagree. Linux reports its capabilities. If Wayland refuses window positioning, a disabled card explains the refusal and names the tray as the fallback.
 
 5. **Every efficiency claim carries its evidence.** Work-unit metrics report `null` and a named gap for anything the available evidence cannot support, rather than a zero that reads like a measurement. Outcome attribution joins spend to the Task Workspace adoption ledger, which records what was accepted, partially accepted, rejected or reverted. Absence of evidence is never rejection, coverage is reported beside every bucket, and `canJudgeWaste` is a separate function so no caller reaches that verdict by eyeballing a ratio. An imported session is always `unknown` and cannot be called wasteful.
 

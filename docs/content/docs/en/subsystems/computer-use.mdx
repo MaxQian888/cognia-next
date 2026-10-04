@@ -8,12 +8,12 @@ description: Letting an agent drive the host desktop. The revision-bound app ses
 <Status variant="beta">Beta · ADR-0020 · policy layer from ADR-0028 Phase 5</Status>
 
 <TLDR>
-  The `computer_use` tool cannot be process-sandboxed — driving the host UI is the entire point — so the
-  defence is layered instead of walled. **Five gates** sit between a model's intent and a real click: a
+  The `computer_use` tool cannot be process-sandboxed — driving the host UI is the entire point — so it
+  uses multiple protection layers. **Five gates** sit between a model's intent and a real click: a
   three-tier permission (`Off` / `Whitelist` / `PerCall`) keyed by surface, a HITL consent broker, an
-  append-only audit log, a per-character tool-id filter, and a per-action policy. The consent grants a
-  user hands out are **in-memory only** — they die on app shutdown and on the kill switch, and they are
-  never written to disk. That is deliberate: a time-boxed grant lets a remote operator open a working
+  append-only audit log, a per-character tool-id filter, and a per-action policy. User
+  consent grants are **in-memory only**. App shutdown and the kill switch invalidate them. The app
+  never writes them to disk. That is deliberate: a time-boxed grant lets a remote operator open a working
   window without leaving a standing authorization behind.
 </TLDR>
 

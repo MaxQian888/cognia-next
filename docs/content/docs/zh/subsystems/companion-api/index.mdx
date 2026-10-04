@@ -10,7 +10,7 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 <TLDR>
   Cognia 的原生 Rust 运行时提供两套契约。配对设备通过短期 DPoP 凭据访问公开的
   `/api/*` 与 `/ws/*`；无渲染 Brain 通过仅限 loopback 的 24 小时 service token 访问
-  `/internal/*`。两者共享 Rust RPC dispatcher，但属于不同信任边界，并分别生成 OpenAPI。
+  `/internal/*`。两者共享 Rust RPC 分发器，但属于不同信任边界，并分别生成 OpenAPI。
 </TLDR>
 
 <StatGrid>
@@ -28,10 +28,7 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 | 配对设备 | `/api/*`、`/ws/*` | 移动端与受管设备 | 设备密钥、DPoP access token、socket ticket | `docs/api/mobile-companion-api.openapi.yaml` |
 | Headless service | `/internal/*`、`/ide/content*` | 本机无渲染 Brain 与受管 IDE | loopback service token | `docs/api/headless-service-api.openapi.yaml` |
 
-公开命令是远程可执行命令（target 不为 `client` 的全部 descriptor）的子集：descriptor 必须以
-`execution` 或 `host-admin` 为 target，
-并声明支持 HTTP transport。service 命令不会进入公开 spec。Headless spec 包含全部 dispatcher
-命令，因为 Brain 是本机执行权威。
+公开命令是远程可执行命令（target 不为 `client` 的全部 descriptor）的子集：descriptor 必须以 `execution` 或 `host-admin` 为 target，并声明支持 HTTP transport。service 命令不会进入公开 spec。Headless spec 包含全部 dispatcher 命令，因为 Brain 是本机执行权威。
 
 ## 规范公开路由
 
@@ -47,8 +44,7 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 | 事件流 | `GET /ws/events?ticket=…&since=…` |
 | 终端与浏览器 socket | `/ws/terminal`、`/ws/browser/{session_id}` |
 
-服务端不挂载 `/api/v1/*`、`/ws/v1/*`、`cgnp2` 或 bearer device JWT 兼容入口。旧客户端必须
-重新完成 `cgnp3` 配对并使用 DPoP 流程。
+服务端不挂载 `/api/v1/*`、`/ws/v1/*`、`cgnp2` 或 bearer device JWT 兼容入口。旧客户端必须重新完成 `cgnp3` 配对并使用 DPoP 流程。
 
 ## 自动生成契约
 
@@ -60,8 +56,7 @@ pnpm companion-api:check
 pnpm companion-api:lint
 ```
 
-仓库 artifact gate 会运行 `companion-api:check`；Rust 测试还会把两份具体 RPC 路径清单与
-dispatcher 逐项比较，因此路由、descriptor 或 allowlist 变化不会让已提交 OpenAPI 静默过期。
+仓库 artifact gate 会运行 `companion-api:check`；Rust 测试还会把两份具体 RPC 路径清单与 dispatcher 逐项比较，因此路由、descriptor 或 allowlist 变化不会让已提交 OpenAPI 静默过期。
 
 <Cards>
   <Card title="服务器与鉴权" href="./server-and-auth" description="cgnp3、DPoP 注册、access token、socket ticket 与 OIDC。" />

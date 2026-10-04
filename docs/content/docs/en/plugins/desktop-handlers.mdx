@@ -5,14 +5,13 @@ description: "Convention for adding new plugin_* Tauri commands to the cognia-ne
 
 # Desktop Handlers — Rust ↔ TS Loopback
 
-cognia-next's plugin runtime spans two processes: a Next.js webview that
-holds the in-memory plugin manager, and a Rust backend that owns the
-filesystem, OS keychain, native notifications, global shortcuts, and the
-crypto vault. They talk through Tauri's `invoke()` channel.
+cognia-next's plugin runtime spans two processes.
+A Next.js webview holds the in-memory plugin manager.
+A Rust backend owns the filesystem, OS keychain, native notifications, global shortcuts, and crypto vault.
+The processes communicate through Tauri's `invoke()` channel.
 
-ADR 0016 codifies the contract for new `plugin_*` commands. This guide
-distills the mechanics so contributors can add a handler without rediscovering
-the convention.
+ADR 0016 defines the contract for new `plugin_*` commands.
+This guide explains how to add a handler that follows that contract.
 
 ## Module layout
 

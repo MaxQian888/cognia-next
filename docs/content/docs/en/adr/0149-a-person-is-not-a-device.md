@@ -1,6 +1,6 @@
 ---
 title: "0149 — A person is not a device, and a profile is not an account"
-description: "Cognia has three identity systems that do not know each other and no entity for a human being. This ADR introduces User, Org membership and an external-identity table, demotes the device from principal to credential, and defines a server-readable collaboration plane — while the local plane stays single-profile and offline."
+description: "Cognia has three separate identity systems and no entity for a human user. Introduces User, Org membership and an external-identity table. Makes devices credentials rather than principals. Defines a server-readable collaboration plane while the local plane remains single-profile and offline."
 ---
 
 # ADR 0149 — A person is not a device, and a profile is not an account
@@ -359,8 +359,8 @@ So the host enforces the part it can prove — the device's person must be the
 person this host acts for — and the shape stays the intersection the ADR
 describes: the person's ceiling is "everything" for the bound person and
 "nothing" for anyone else, and the device's own `capability_grants` narrow it
-from there. When a membership mirror eventually lands, only the ceiling gets
-finer; the rule does not move.
+from there. A future membership mirror can refine the ceiling without changing
+the authorization rule.
 
 Concretely, what 4b stops: person A signs out, person B signs in on the same
 machine, and A's still-paired phone keeps running agents on B's host. Until now

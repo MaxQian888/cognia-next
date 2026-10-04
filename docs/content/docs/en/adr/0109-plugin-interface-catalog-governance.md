@@ -10,7 +10,7 @@ description: Make the Plugin Interface Catalog the canonical ctx.* contract acro
 
 ## Context
 
-The public Plugin API had drifted across TypeScript declarations, permission maps, Rust routes, the Python mirror, WIT, and manually maintained documentation. `PluginContext` exposed far more namespaces than the documentation claimed, lifecycle cleanup was distributed across manager branches, and transport versions were hard-coded independently.
+The public Plugin API had become inconsistent across TypeScript declarations, permission maps, Rust routes, the Python mirror, WIT, and manually maintained documentation. `PluginContext` exposed far more namespaces than the documentation listed. Lifecycle cleanup was distributed across manager branches. Transport versions were hard-coded independently.
 
 ## Decision
 

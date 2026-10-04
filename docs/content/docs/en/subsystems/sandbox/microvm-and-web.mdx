@@ -8,7 +8,7 @@ description: "The T4 e2b Firecracker microVM tier, the per-session tier router i
 <Status variant="beta" />
 
 <TLDR>
-  `lib/sandbox/microvm-bridge.ts` exposes the currently accepting e2b adapter; per-session tier,
+  `lib/sandbox/microvm-bridge.ts` exposes the e2b adapter that currently accepts bindings. Per-session tier,
   policy, target, and the bound adapter live on an immutable `SandboxRuntimeRef`. Unregister starts
   a graceful drain: new bindings fail while existing owners continue. The e2b pool separately tracks
   workspace-handle and runtime-ref ownership, closes after the final owner, and retains failed closes

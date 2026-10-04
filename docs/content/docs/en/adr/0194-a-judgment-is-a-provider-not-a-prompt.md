@@ -1,6 +1,6 @@
 ---
 title: "0194 — A judgment is a provider, not a prompt"
-description: "System-1 decisions — typed yes/no, pick-one and score questions answered in one pass with calibrated probabilities — become a host capability (`ctx.decisions`) backed by a provider registry. The laya plugin is the local provider, TypeSafe-compatible endpoints the remote one. Every request is redacted and PII-gated regardless of where the provider claims to run, and providers reply with a typed envelope instead of throwing."
+description: "Provides System-1 decisions as a host capability (`ctx.decisions`): typed yes/no, pick-one and score questions answered in one pass with calibrated probabilities. A provider registry uses laya locally and TypeSafe-compatible endpoints remotely. Every request is redacted and PII-gated regardless of reported provider locality. Providers return typed envelopes rather than throwing."
 ---
 
 # ADR 0194 — A judgment is a provider, not a prompt
@@ -19,7 +19,7 @@ decision model** seven typed questions — is the latest message literal, what
 does the other person actually want, how close is this to a fight (0–9), what
 do they need, should the next message carry substance, what action fits, is
 the tension resolved — and gets calibrated probabilities back in about a
-second. An LLM then drafts three replies, and the same decision model ranks
+second. An LLM then drafts three replies. The same decision model ranks
 them. The protocol is small: `POST {model, state, questions}` → `{answers}`,
 with question types `noul` (yes/no), `choice` (pick one key) and `score`
 (ordered levels).

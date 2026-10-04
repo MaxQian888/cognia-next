@@ -5,7 +5,7 @@ description: "提供 homeserver 地址与机器人访问令牌（或用密码登
 
 # Matrix 连接器配置指南
 
-本指南将引导你为一个 Matrix 机器人账号准备访问令牌，并配置 cognia-next 以接入你的 Matrix homeserver。cognia-next 通过标准的客户端-服务端 `/sync` 长轮询接入 Matrix，无需公网地址。
+本指南说明如何为 Matrix 机器人账号准备访问令牌，并在 cognia-next 中配置 Matrix homeserver。cognia-next 通过标准客户端—服务端 `/sync` 长轮询接入 Matrix，无需公网地址。
 
 ---
 

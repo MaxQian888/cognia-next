@@ -44,15 +44,16 @@ adapter match → expiry → consume-once (`wf_approve`, `wf_cancel`, `wf_fanout
 `skill_invoke`) → conversation match (chat-level; thread only when both sides carry one) →
 principal check → allowedActions → actorScope (initiator / operators / conversation / anyone,
 with per-kind legacy fallbacks) → run-control conversation binding. Binding writers stamp
-`actorScope`/`allowedActions`; `consumedAt` fixes stale re-clicks re-granting session bypasses.
+`actorScope`/`allowedActions`. `consumedAt` prevents stale repeat clicks from
+re-granting session bypasses.
 `larkStrictCallbackAuthorization` defaults to **enforce**. Audit remains available per adapter
 for migration, but it is not a resting state: in audit mode `consume` is never minted, so
 `consumedAt` is never written and a stale re-click can still re-grant a session bypass — the
 gap the guard exists to close. Audit now also increments
 `cognia_lark_callback_auth_would_deny_total`, so the "widen once it is quiet" procedure has an
-aggregate rather than only individual audit rows. Every terminal deny reason answers the
-clicker with a bilingual explanation; previously only `actor_forbidden` did, leaving the other
-ten indistinguishable from a broken bot.
+aggregate rather than only individual audit rows. Every terminal deny reason returns a bilingual explanation to the
+user who clicked. Previously, only `actor_forbidden` did this. The other
+ten reasons appeared to the user as a broken bot.
 
 ### 3. Web SSO and authorized entry links
 

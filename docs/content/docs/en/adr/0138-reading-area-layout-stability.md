@@ -1,6 +1,6 @@
 ---
 title: "0138 — Reading-area layout stability"
-description: "One scroll writer in the layout phase, the live tail out of the virtual list, and motion inside the transcript restricted to the compositor."
+description: "Uses one scroll writer in the layout phase. Keeps the live tail outside the virtual list and restricts transcript motion to the compositor."
 ---
 
 # ADR 0138 — Reading-area layout stability
@@ -142,9 +142,9 @@ goes, or is wrapped in a container that does not participate in measurement.
 
 `ReadingCollapse` is `MotionCollapse` minus the height: the body takes its final
 size in one layout pass and only the paint animates (a fast fade with a 2px
-settle). Closing is instantaneous — there is deliberately no `AnimatePresence`,
-because keeping the outgoing body mounted through an exit *is* the height
-animation this exists to avoid. What is lost is the sense of the body unfurling;
+settle). Closing is instantaneous. There is no `AnimatePresence` because keeping
+the outgoing body mounted during exit would create the height animation this
+component avoids. What is lost is the sense of the body unfurling;
 what is gained is that expanding a card costs one reflow instead of seventeen.
 
 The four reading-area disclosures use it — tool rows, activity groups, sub-agent

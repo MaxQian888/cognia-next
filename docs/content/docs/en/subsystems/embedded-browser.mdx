@@ -10,9 +10,9 @@ description: A real webview inside the app plus a remote Chromium for public pag
 <TLDR>
   Two backends sit behind one interface. `BrowserEngine` (`lib/browser/agent-engine.ts:28`) is implemented
   by `EmbeddedEngine` — the native Tauri webview — and by a remote Chromium engine, so the model's tool
-  surface stays engine-agnostic. Which one a URL reaches is not a preference but a security decision:
+  surface stays engine-agnostic. URL routing follows a security decision:
   `resolveTrustTier()` (`lib/browser/protocol.ts`) classifies loopback hosts as `trusted` (dev preview →
-  embedded webview) and **everything else** as `public`, failing closed — an unparseable URL is treated as
+  embedded webview) and **everything else** as `public`, failing closed. The resolver treats an unparseable URL as
   public. An `EngineRoute` carries that verdict alongside the engine, including an explicit `untrusted`
   flag meaning "page content must be treated as untrusted".
 </TLDR>

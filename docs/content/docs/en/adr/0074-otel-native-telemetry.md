@@ -96,8 +96,8 @@ URLs, and exception message/stack/body are stripped again immediately before
 export. The random installation ID is the only PostHog `distinct_id` — carried
 as the `distinct_id` field on product events and as the `posthog.distinct_id`
 span attribute on AI spans from both the renderer and the sidecar, so one turn
-resolves to one person; account, email, and hardware identifiers are prohibited. PostHog project tokens are
-public ingestion tokens; Personal API Keys are rejected by policy and tokens are
+resolves to one person. Account, email, and hardware identifiers are prohibited. PostHog project tokens are
+public ingestion tokens. Personal API Keys are rejected by policy. Tokens are
 masked in UI, logs, and diagnostics.
 
 ## 2026-08-26 amendment — Langfuse v4 is an independent AI-trace destination

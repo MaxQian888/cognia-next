@@ -102,14 +102,14 @@ only when the selected host advertises them. Unsupported metrics are absent, not
 zero.
 
 Sampling ownership is a `PerfLease`. A visible live consumer or explicit capture
-opens and heartbeats a lease; normal hide/unmount closes it immediately. Only an
+opens a lease and sends heartbeats. Normal hide/unmount closes it immediately. Only an
 abnormally disconnected remote device may retain demand until the fixed 15-second
 TTL. The host admits a minimum 500 ms cadence, one live and one capture lease per
 device and 16 leases per host, runs one physical sampler at the fastest admitted
 cadence, and down-samples per lease. Frames carry immutable target/routing,
 source/session/sequence, requested and actual interval, monotonic time, missed
-ticks and reset/discontinuity flags. Event subscription precedes open/snapshot;
-late target generations are rejected and sequence loss becomes a persisted gap.
+ticks and reset/discontinuity flags. Event subscription precedes open/snapshot.
+Late target generations are rejected. Sequence loss becomes a persisted gap.
 
 Captures are target-database evidence with account-wide quota coordination. The
 target schema v160 stores structural rows, AES-GCM chunks, attachments and gaps;
@@ -143,3 +143,50 @@ Normal production retains lightweight Renderer instrumentation without React
 profiling. `pnpm build:profile` runs `next build --profile`, marks and moves the
 static artifact to `out-profile/`; Tauri always consumes `out/` and its packaging
 preflight rejects a profiling marker.
+
+## 2026-10-03 metric catalog, routing and the evidence UI
+
+The workspace above was built, but three parts of it were not reachable or not
+true:
+
+- **The route was walled off.** The surface contract still said
+  `standalone: "hidden"` and gated companions on the sidecar operation, and the
+  rail entry was `desktopOnly`. Web, and a phone whose capture chip links here,
+  got "needs a paired desktop" instead of their Renderer metrics. The contract
+  is now `standalone: "full"`, `companion: "full"`, `offline: "local"`, and the
+  rail entry shows on every shell.
+- **Unsupported metrics were charted as zero.** The overview read five fixed
+  process/Tokio fields from whichever history it had. On a Renderer or Node
+  source those are structural zeros. `lib/perf/metric-catalog.ts` is now the
+  one list of chartable metrics, each with its required capabilities, unit,
+  direction and a versioned extractor that returns `null` (a gap, never a
+  zero) for an unmeasured interval. The overview rail is grouped per source and
+  built from the capabilities each source advertises. The Renderer collector
+  advertises only what the engine measures and now measures frame rate, the
+  share of each interval blocked by long tasks, and JS heap. It also seeds
+  measures written before sampling began.
+- **Comparison and budgets skipped their own rules.** Comparison read
+  main-process CPU off any two captures without
+  `assessCaptureComparisonEligibility`, and the budget service and
+  `evaluateBudget` had no caller. `lib/perf/capture-analysis.ts` joins
+  decrypted frames, the decrypted metadata envelope and the catalog to those
+  rules. The Captures tab now offers a metric-choosable, baseline-explicit
+  comparison that lists every ineligibility reason. It also adds immutable
+  budget creation and a capture check that only returns pass/warn/fail when the
+  rules allow.
+
+Interaction flow:
+- Tab, Resources section and overview metric live in the URL
+  (`lib/perf/dashboard-url.ts`, written with `replaceState`). The capture chip
+  lands on Captures, and the status-bar tiles land on their metric.
+- The source card moved from Overview to Diagnose. Overview keeps a one-line
+  notice, shown only when a lease issue or gaps need attention.
+- Host-only sections render an explanation (no host / connecting / contended /
+  not reported by this runtime) instead of disabled tabs.
+- Diagnose orders what this runtime can measure first: span hotspots plus
+  Renderer timings (chat-turn and React-commit User Timing).
+- The toolbar's "Reset hotspots" only ever cleared graph history. It is now
+  "Clear graphs", and resetting the cumulative span registry is a confirmed
+  action on the hotspot table.
+- Capture deletion is confirmed. Status, stop reason, trust state and error
+  codes are translated.

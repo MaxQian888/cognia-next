@@ -19,7 +19,7 @@ description: The audit-log wrapper and the 5000-cap mcpAuditLog, the four Dexie 
 
 ## Audit log
 
-`recordCall` is the thin policy wrapper every tool/resource path calls. It timestamps, maps the gate
+`recordCall` is the policy wrapper that every tool/resource path calls. It timestamps, maps the gate
 result to a row, and **never throws** — a Dexie failure is logged and swallowed so auditing can't break a
 working call:
 

@@ -8,11 +8,11 @@ description: Durable personal recall — how a fact gets extracted from a conver
 <Status variant="beta">Beta · memories schema v65 → governance v118 → v122</Status>
 
 <TLDR>
-  A **learned memory** is a durable fact inferred from a conversation or deliberately saved by the user. Write
-  goes through one funnel — `storeMemoryCore()` (`lib/memory/api/store-memory.ts:78`) — and read through
+  A **learned memory** is a durable fact inferred from a conversation or deliberately saved by the user. Writing
+  uses one entry point — `storeMemoryCore()` (`lib/memory/api/store-memory.ts:78`) — and reading uses
   another — `retrieveMemories()` (`packages/memory/src/retrieve/retriever.ts:266`), which
   `applyMemoryContext()` (`packages/memory/src/runtime/apply-memory-context.ts:102`) folds into the turn.
-  What keeps it safe is **provenance**: only `user` / `explicit` memories may ever be `procedural`, so an
+  **Provenance** enforces the safety boundary: only `user` / `explicit` memories may ever be `procedural`, so an
   inbound connector message cannot silently rewrite how the agent behaves. Everything durable lives in
   four Dexie tables — `memories` plus the immutable `memoryEvidence`, the durable `memoryJobs` queue, and
   the content-free `memoryAuditEvents` — introduced together at **schema v118**.

@@ -5,7 +5,12 @@ description: Plugins bundle ready-to-use characters into portable packs that reg
 
 # Character Packs
 
-A **character pack** is a portable bundle of ready-to-use characters (system prompt + model defaults + skill / MCP / native-tool wiring) that a plugin contributes through its manifest. ADR-0030 makes `character-pack` the 5th entry in `OVERLAY_REGISTRY_CAPABILITIES`: packs register into an in-memory overlay registry on plugin enable and are dropped on disable. Plugin-contributed characters **never persist to Dexie** — only a user *clone* of an overlay character becomes a Dexie row. The host derives a synthetic runtime id at projection time so collisions with user `char_*` ids are impossible.
+A **character pack** is a portable bundle that a plugin contributes through its manifest.
+Each character combines a system prompt, model defaults, and skill, MCP, and native-tool configuration.
+ADR-0030 makes `character-pack` the 5th entry in `OVERLAY_REGISTRY_CAPABILITIES`.
+Packs register in an in-memory overlay registry when a plugin is enabled and are removed when it is disabled.
+Plugin-contributed characters **never persist to Dexie**. Only a user's *clone* of an overlay character becomes a Dexie row.
+The host derives a synthetic runtime id during projection, preventing collisions with user `char_*` ids.
 
 <TLDR>
 - Manifest field `characterPacks: PluginCharacterPackDef[]` — `types/plugin/plugin.ts:572`; capability `"character-pack"` dispatched at `lib/plugin/contracts/capability-bridge-map.ts:228`.

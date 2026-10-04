@@ -1,11 +1,11 @@
 ---
 title: 运行时主链
-description: send → 流式 → 渲染 主链——use-claude-chat、纯归约器 adapter、JSON-lines sidecar 协议、Rust 生命周期与事件扇出，以及 Claude Agent SDK 的 query() 泵。
+description: send → 流式输出 → 渲染的调用链，包括 use-claude-chat、纯归约器 adapter、JSON-lines sidecar 协议、Rust 生命周期与事件分发，以及 Claude Agent SDK 的 query() 循环。
 ---
 
 # 运行时主链
 
-这是内置 Agent 每一轮都要经过的主链：React hook 装配负载并发出；Rust 进程拥有 Node sidecar；sidecar 运行 SDK 的 `query()` 循环；事件经单一 Tauri 通道回流，由一个**纯**归约器折叠成消息。
+内置 Agent 的每一轮都经过以下调用链：React hook 装配并发送负载；Rust 进程管理 Node sidecar；sidecar 运行 SDK 的 `query()` 循环；事件通过单一 Tauri 通道返回，再由**纯**归约器转换为消息。
 
 <TLDR>
   `send`（`use-claude-chat.ts:596`）装配选项、乐观追加用户消息，并调用 `sendPrompt`（`ipc.ts:19`）。

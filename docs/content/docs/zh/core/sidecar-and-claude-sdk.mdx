@@ -5,19 +5,15 @@ description: 内嵌 Node sidecar 如何把 Claude Agent SDK 与 Vercel AI SDK �
 
 # Sidecar & Claude Agent SDK
 
-Cognia 内嵌一个小型 Node 主机（**sidecar**），通过 stdio 上的 **JSON-lines 协议** 与 Tauri 父进程通信。默认 dispatcher 包装官方 [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)，非 Anthropic 供应商则走 **Vercel AI SDK**（`ai` 包 + `@ai-sdk/*` 家族）。每条消息都带 `sessionId`，支持并行会话；权限请求/响应、用量头采集、OAuth bearer 注入都在这一层。
+Cognia 内嵌小型 Node 主机（**sidecar**），通过 stdio **JSON-lines 协议**与 Tauri 父进程通信。默认 dispatcher 包装官方 [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)；非 Anthropic 供应商使用 **Vercel AI SDK**（`ai` 包与 `@ai-sdk/*` 家族）。每条消息都带有 `sessionId`，以支持并行会话。这一层还负责权限请求与响应、用量响应头采集，以及 OAuth bearer 注入。
 
 ## 为何独立进程
 
-Agent SDK 和 Vercel AI SDK 都依赖 Node-only 能力（filesystem、child_process、原生模块、`undici`
-代理），无法在 webview 中运行。曾考虑三个方案：
+Agent SDK 和 Vercel AI SDK 都依赖 Node-only 能力（filesystem、child_process、原生模块、`undici` 代理），无法在 webview 中运行。曾考虑三个方案：
 
-1. **纯 Web** —— 在 React 中直接调用 Anthropic REST API。
-   被否决：会失去 SDK 的 tool-use 循环、hooks、MCP 集成、凭证发现等能力。
-2. **嵌入 Rust** —— 在 Rust 中和 Anthropic 通信。
-   被否决：SDK 是 JS-first 的，Rust 重写要复制大量逻辑。
-3. **Sidecar** —— Tauri 拉起一个 Node 进程，通过 stdio 通信。
-   选用。SDK 不变；Rust 侧负责生命周期与凭证。
+1. **纯 Web** —— 在 React 中直接调用 Anthropic REST API。被否决：会失去 SDK 的 tool-use 循环、hooks、MCP 集成、凭证发现等能力。
+2. **嵌入 Rust** —— 在 Rust 中和 Anthropic 通信。被否决：SDK 是 JS-first 的，Rust 重写要复制大量逻辑。
+3. **Sidecar** —— Tauri 拉起一个 Node 进程，通过 stdio 通信。选用。SDK 不变；Rust 侧负责生命周期与凭证。
 
 ## `sidecar/` 内容
 
@@ -44,8 +40,7 @@ sidecar/
 Sidecar **不在**根 pnpm workspace 内，原因：
 
 - Node-only 依赖会与浏览器 bundle 冲突。
-- 它作为 Tauri **资源**打包（见 `tauri.conf.json` → `bundle.resources`）—— 整个 `node_modules/`
-  会随安装包一起发给用户。
+- 它作为 Tauri **资源**打包（见 `tauri.conf.json` → `bundle.resources`）—— 整个 `node_modules/` 会随安装包一起发给用户。
 - 版本独立于主应用。
 
 <Callout type="info" title="双 SDK 共存">
@@ -118,13 +113,11 @@ sequenceDiagram
   Note over P,SC: stderr 全程 → Rust logger
 ```
 
-每个 `sessionId` 在 `sessions: Map<string, Session>` 中保留一份状态 —— SDK 句柄、待批权限映射、输入流写入器。
-`session_ended` 时该项被删除。
+每个 `sessionId` 在 `sessions: Map<string, Session>` 中保留一份状态 —— SDK 句柄、待批权限映射、输入流写入器。`session_ended` 时该项被删除。
 
 ### `send.options` 字段
 
-`options` 由 `lib/claude/build-options.ts:resolveSendOptions` 装配，是 UI 状态 → SDK 入参的唯一翻译点。
-其中只有白名单字段会传给 Claude Agent SDK：
+`options` 由 `lib/claude/build-options.ts:resolveSendOptions` 装配，是 UI 状态 → SDK 入参的唯一翻译点。其中只有白名单字段会传给 Claude Agent SDK：
 
 - `cwd` · `model` · `fallbackModel` · `systemPrompt` · `appendSystemPrompt`
 - `allowedTools` · `disallowedTools` · `additionalDirectories` · `permissionMode`
@@ -133,8 +126,7 @@ sequenceDiagram
 
 以下是 **sidecar 协议私有** 字段，由 sidecar 在 dispatch 之前消化（不传给 SDK）：
 
-- `builtinTools`：每个分类（"environment" / "process" / "git" / …）的启用映射，
-  禁用项会被加入 `disallowedTools`。
+- `builtinTools`：每个分类（"environment" / "process" / "git" / …）的启用映射，禁用项会被加入 `disallowedTools`。
 - `bareMode` · `debugMode` · `briefMode`：写入 sidecar 的 env / settingSources 模式。
 - `aliasResolution` · `routingDecision`：上游 `ProviderRoutingEngine` 的决策快照，便于追踪。
 - `provider` · `providerCredentials`：选 dispatcher 与凭证。
@@ -172,12 +164,8 @@ return dispatchAiSdk({ ...params, provider })
 
 `sidecar/claude-host.mjs` 在加载任何 SDK 之前 **副作用导入** `fetch-interceptor.mjs`。它做两件事：
 
-1. **采集 `anthropic-ratelimit-*` 响应头** —— 所有命中 `api.anthropic.com` 的响应都触发
-   `{ type: "usage_headers", headers }` 事件，让渲染端的 usage-collector 实时画出 5h / 7d 用量进度。
-   见 [claude-subscription-oauth](../chat/claude-subscription-oauth)。
-2. **代理透传** —— 当 `HTTPS_PROXY` / `HTTP_PROXY` 设置在 sidecar 环境中时，通过 `undici.setGlobalDispatcher`
-   把 `globalThis.fetch` 路由到 `ProxyAgent`。Tauri 的 `src-tauri/src/claude/sidecar.rs` 在拉起 sidecar
-   时按用户设置注入这两个变量。
+1. **采集 `anthropic-ratelimit-*` 响应头** —— 所有命中 `api.anthropic.com` 的响应都触发 `{ type: "usage_headers", headers }` 事件，让渲染端的 usage-collector 实时画出 5h / 7d 用量进度。见 [claude-subscription-oauth](../chat/claude-subscription-oauth)。
+2. **代理透传** —— 当 `HTTPS_PROXY` / `HTTP_PROXY` 设置在 sidecar 环境中时，通过 `undici.setGlobalDispatcher` 把 `globalThis.fetch` 路由到 `ProxyAgent`。Tauri 的 `src-tauri/src/claude/sidecar.rs` 在拉起 sidecar 时按用户设置注入这两个变量。
 
 ```mermaid
 sequenceDiagram
@@ -208,8 +196,7 @@ pub struct SidecarState {
 会影响 sidecar 的事件：
 
 - **首次 `claude_send`** —— 懒加载启动，后续调用复用同一进程。
-- **`claude_set_api_key` / `claude_set_oauth_bearer`** —— 把新凭证写入 `ApiKeyState`（仅内存，永不落盘）。
-  下次 spawn 时通过 env 传入。详见 [claude-subscription-oauth](../chat/claude-subscription-oauth)。
+- **`claude_set_api_key` / `claude_set_oauth_bearer`** —— 把新凭证写入 `ApiKeyState`（仅内存，永不落盘）。下次 spawn 时通过 env 传入。详见 [claude-subscription-oauth](../chat/claude-subscription-oauth)。
 - **`claude_restart_sidecar`** —— 杀掉当前 sidecar，下次 send 时 fork 新进程（SDK 在 init 时读取环境变量）。
 - **应用退出** —— `RunEvent::ExitRequested` 处理器调用 `kill_sidecar`，避免遗留 Node 进程。
 
@@ -229,15 +216,11 @@ SDK 边界采用版本化和自动审计，而不是透传任意 JSON。`protoco
 
 1. **角色系统提示** —— 当前 `Character.systemPrompt`。
 2. **Agent Mode**（`lib/agent/`）—— 内置或自定义模式追加 system prompt、覆盖 model / temperature / maxTokens。
-3. **技能解析** —— 启用的技能 markdown 经 `renderSkillsSection` 追加进系统提示，工具白名单取并（详见
-   [技能子系统](../subsystems/skills/loading-and-injection)）。
+3. **技能解析** —— 启用的技能 markdown 经 `renderSkillsSection` 追加进系统提示，工具白名单取并（详见[技能子系统](../subsystems/skills/loading-and-injection)）。
 4. **A2UI** —— 当 `Character.a2uiEnabled` 时，注入 `A2UI_SYSTEM_PROMPT` 与 a2ui 工具白名单（`namespacedA2UIToolNames`）。
-5. **孪生上下文（可选）** —— 当活动角色设置了 `twinId` 且 `ctx.twinDeps` + `ctx.twinUserMessage` 提供时，
-   `lib/twin/runtime/apply-twin-context.ts` 包装消息，附加召回片段 + 风格少样本。详见
-   [employee-twin](../subsystems/employee-twin)。
+5. **孪生上下文（可选）** —— 当活动角色设置了 `twinId` 且 `ctx.twinDeps` + `ctx.twinUserMessage` 提供时，`lib/twin/runtime/apply-twin-context.ts` 包装消息，附加召回片段 + 风格少样本。详见 [employee-twin](../subsystems/employee-twin)。
 6. **MCP 配置** —— 内置 MCP 服务器（`lib/claude/builtin-mcp/`）与用户服务器（`lib/db/mcp-servers.ts`）合并。
-7. **Provider routing** —— `ProviderRoutingEngine` 把 alias（如 `claude-fast`）解析成具体
-   `provider:model`，并写入 `aliasResolution` / `routingDecision` 字段。
+7. **Provider routing** —— `ProviderRoutingEngine` 把 alias（如 `claude-fast`）解析成具体 `provider:model`，并写入 `aliasResolution` / `routingDecision` 字段。
 8. **模型 + token 上限** —— `lib/ai/model-limits.ts` 按模型解析 token 上限。
 
 ## Hooks
@@ -248,15 +231,13 @@ SDK 边界采用版本化和自动审计，而不是透传任意 JSON。`protoco
 - `onResponse(content, usage)` —— 在一轮结束之后。
 - `onError(err)` —— sidecar 上报错误时。
 
-Hooks 跑用户定义的代码（存在 Dexie 中的代码片段，或 shell 命令）。它们**不是** Cognia 内部用的 ——
-内部逻辑放在 `lib/chat/`。Rust 侧（`crates/cognia-hooks/src/`）允许 hooks 跑 shell 命令而不必经过主 webview。
+Hooks 跑用户定义的代码（存在 Dexie 中的代码片段，或 shell 命令）。它们**不是** Cognia 内部用的 ——内部逻辑放在 `lib/chat/`。Rust 侧（`crates/cognia-hooks/src/`）允许 hooks 跑 shell 命令而不必经过主 webview。
 
 ## A2UI 工具面
 
 A2UI 把"交互式 UI 卡片 / 表单 / 列表"作为 MCP 工具暴露给模型。两条接入路径：
 
-- **In-process（默认）** —— `sidecar/a2ui-tools/index.mjs` 提供 `buildA2UIBridgeServer({ sessionId, emit })`，
-  在 `dispatchAnthropic` 中作为 MCP 服务器条目并入 `mergedMcpServers`。同进程，无独立 stdio。
+- **In-process（默认）** —— `sidecar/a2ui-tools/index.mjs` 提供 `buildA2UIBridgeServer({ sessionId, emit })`，在 `dispatchAnthropic` 中作为 MCP 服务器条目并入 `mergedMcpServers`。同进程，无独立 stdio。
 - **独立 sidecar（旧路径）** —— `sidecar/a2ui-mcp.mjs` 是早期的独立 MCP 二进制，仍保留以便外部 MCP 客户端调试。
 
 A2UI 通路：
@@ -390,8 +371,7 @@ node claude-host.mjs --smoke   # 一次性冒烟（启动一个 sessionId="smoke
 echo '{"type":"send","sessionId":"s1","prompt":"hi","options":{}}' | node claude-host.mjs
 ```
 
-应用运行时，sidecar 的 `stderr` 会镜像到 Rust logger，并出现在 `app/logs/`。`{type:"log"}` 出站消息也会被
-Rust 侧记录到结构化日志。
+应用运行时，sidecar 的 `stderr` 会镜像到 Rust logger，并出现在 `app/logs/`。`{type:"log"}` 出站消息也会被 Rust 侧记录到结构化日志。
 
 ## 测试
 

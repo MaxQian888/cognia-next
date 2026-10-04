@@ -1,19 +1,17 @@
 ---
 title: "0143 — 一个控制台管所有机器"
-description: "设备管理收敛为一个基于 placement 候选空间的机队视图：配对设备、远程主机、执行 worker 与本机统一为同一种行，展示旧界面持有却从未渲染的能力、在场与授权细节，并把沙盒与工作区运行时按设备接上。"
+description: "设备管理使用统一的 placement 候选机队视图。配对设备、远程主机、执行 worker 与本机使用同一行结构，展示此前未渲染的能力、在场和授权细节，并按设备关联沙盒与工作区运行时。"
 ---
 
 # ADR 0143 — 一个控制台管所有机器
 
-**状态：** 已接受
-**日期：** 2026-08-24
-**相关：** [ADR-0136](./0136-cross-device-placement)、[ADR-0082](./0082-remote-development-remote-host)、[ADR-0028](./0028-sandboxed-execution)、[ADR-0060](./0060-attention-and-capture)、[ADR-0111](./0111-managed-workspace-registry)
+**状态：** 已接受**日期：** 2026-08-24 **相关：** [ADR-0136](./0136-cross-device-placement)、[ADR-0082](./0082-remote-development-remote-host)、[ADR-0028](./0028-sandboxed-execution)、[ADR-0060](./0060-attention-and-capture)、[ADR-0111](./0111-managed-workspace-registry)
 
 ## 背景
 
-「设备管理」原本是两个互不相识的界面，而且两个都比它们背后的数据穷得多。
+「设备管理」原本由两个独立界面组成，展示的信息都远少于已有数据。
 
-`components/settings/companion/paired-devices-card.tsx` 是一张卡片里的十列表格，360px 高、横向滚动。它**不显示任何能力**——尽管自 ADR-0060 起 `lib/companion/capability-reporter.ts` 每次连接都会写入 `pairedDevices.capabilities`。它显示 Dexie 的持久 `lastSeenAt`——尽管 `lib/companion/device-presence-registry.ts` 维护着实时事件通道、前后台状态与打开的流，并在自己的注释里写明没有任何界面渲染它。它从 `revokedAt` / `pausedAt` 推断生命周期状态——尽管 `companion_list_devices`（其注释自称「Device Center 的读取侧」）返回主机权威的 `role` 与 `status`，而它**至今零 TypeScript 调用方**。又因为 `companion_list_device_grants` 对每项授权采用 all-of 判定，一台持有 `agent.run` 却没有 `workspace.write` 的设备会返回 `false`，渲染得与从未获得任何授权的设备一模一样。
+`components/settings/companion/paired-devices-card.tsx` 是一张卡片里的十列表格，360px 高、横向滚动。它**不显示任何能力**——尽管自 ADR-0060 起 `lib/companion/capability-reporter.ts` 每次连接都会写入 `pairedDevices.capabilities`。它显示 Dexie 的持久 `lastSeenAt`——尽管 `lib/companion/device-presence-registry.ts` 维护着实时事件通道、前后台状态与打开的流，并在自己的注释里写明没有任何界面渲染它。它从 `revokedAt` / `pausedAt` 推断生命周期状态——尽管 `companion_list_devices`（其注释自称「Device Center 的读取侧」）返回主机权威的 `role` 与 `status`，但该命令**至今没有 TypeScript 调用方**。又因为 `companion_list_device_grants` 对每项授权采用 all-of 判定，一台持有 `agent.run` 却没有 `workspace.write` 的设备会返回 `false`，渲染得与从未获得任何授权的设备一模一样。
 
 `components/settings/remote-hosts/tabs/hosts-tab.tsx` 则是一个裸 `<ul>`，把能力列表铺成一墙徽章，把特性清单逐条打印成键值行。
 
@@ -74,6 +72,12 @@ description: "设备管理收敛为一个基于 placement 候选空间的机队�
 - **`companion_suspend_device` / `companion_resume_device` 仍未被调用。** 控制台的「暂停」仍与旧卡片一样通过 `companion_revoke_device` 写拒绝名单。迁移到规范的 `LifecycleAction` 词表会改变强制执行路径的行为，应当单独成一次改动。
   *更新（2026-09-30）：* 这一改动已落地。「暂停」现在调用 `companion_suspend_device`，「恢复」调用 `companion_resume_device`；在 Tauri IPC 上直接调用，非 Host 的外壳则走 `POST /api/devices/{id}/suspend|resume`（`hooks/devices/use-device-grant-actions.ts`、`lib/devices/lifecycle-http.ts`）。暂停的设备不再丢失密钥。
 - **在场信息不跨刷新存活。** `device-presence-registry` 是进程内 Map、没有订阅接口；控制台轮询它，并以 Dexie 的持久 `lastSeenAt` 打底，因此刚加载的窗口先显示持久在场，直到第一条流上报。
+
+## 更新：布局与动线（2026-10-01）
+
+仪表盘的顺序不再是所有设备共用的一条固定序列。`lib/devices/section-plan.ts` 按设备类型决定渲染哪些卡片、顺序和宽度：任务优先（手机先看授权，本机先看路由与运行时，主机先看工作区；记录与诊断矩阵在后），半宽卡片在列表中前移以保持成对，阅读顺序与视觉顺序一致。所有只会说"这里没有"的卡片（手机的沙箱、主机的访问权限、Worker 的能力词表、原 `ShellOnlySection` 的五条 SSH 拒绝）合并为末尾的一份"此处不适用"记录，措辞不变。设备头部承载该设备的操作（主机的连接 / 重命名 / 移除，手机的暂停 / 恢复 / 吊销，吊销需要确认），以及由同一份计划生成的跳转条，因此跳转项不可能指向未渲染的卡片。设备群级别的提示移到左侧列表。
+
+选中状态由两种外壳共用的 `hooks/devices/use-device-selection.ts` 管理：`?device=` 链接每个值只应用一次（此前每次渲染只要与选中项不一致就会重新应用，导致点击其他设备后被弹回），用户的选择以 `replace` 同步到 URL，指向已不在设备群中的设备的链接会被明确提示，而不是悄悄换成本机。
 
 ## 修订
 

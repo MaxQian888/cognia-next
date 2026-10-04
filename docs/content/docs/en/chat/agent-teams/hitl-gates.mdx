@@ -5,7 +5,12 @@ description: Squad reviews on the Action Review contract (ADR-0169). ExecutionRu
 
 # Human-in-the-Loop Reviews
 
-A Squad run is autonomous until something needs a person. Since ADR-0169 every such moment is one thing: a durable `ExecutionRunInterrupt` with a `reviewKind`, projected by the Action Review contract, answered through the one control seam (`RunControlCommand` with a typed `reviewDecision`), and settled with a receipt. There is no in-memory bus, no per-tab gate store and no modal host left on the Squad path. A review raised on the desktop is answered from a phone, an IM card, the CLI or the cockpit, and it survives a restart.
+A Squad run continues autonomously until it needs a person.
+Since ADR-0169, each such request is a durable `ExecutionRunInterrupt` with a `reviewKind`.
+The Action Review contract projects the request.
+The control interface answers it through `RunControlCommand` with a typed `reviewDecision`, then settles it with a receipt.
+The Squad path no longer uses an in-memory bus, a per-tab gate store, or a modal host.
+A review raised on desktop can be answered from a phone, an IM card, the CLI, or the cockpit, and survives a restart.
 
 <TLDR>
   The runtime calls `openSquadReview({ runId, teamId, kind, instance, subject })`

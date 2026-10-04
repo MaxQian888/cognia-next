@@ -95,8 +95,8 @@ RPC requests use
 `{id, method, params, idempotencyKey, protocolVersion: 2}`. Command behavior
 comes from the shared command manifest. HTTPS and RTC share a persistent
 24-hour ledger keyed by `(deviceId, method, idempotencyKey)` plus a parameter
-digest. A completed result is replayed; different parameters return
-`idempotency_conflict`; a pending record left by a crash returns
+digest. A completed result is replayed. Different parameters return
+`idempotency_conflict`. A pending record left by a crash returns
 `idempotency_indeterminate`.
 
 Events use one global sequence, a persistent client cursor, explicit ack, and

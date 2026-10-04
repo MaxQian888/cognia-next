@@ -40,9 +40,9 @@ Add a **"Share via link"** capability that publishes an artifact to a short
 public URL backed by a **new, standalone TypeScript Cloudflare worker**. The
 content is **zero-knowledge end-to-end encrypted**: a random 256-bit key is
 generated in the browser, placed in the URL `#fragment`, and **never
-uploaded**. The worker stores only opaque ciphertext; **decryption happens
+uploaded**. The worker stores only opaque ciphertext. **Decryption happens
 client-side in the viewer page** (the `#fragment` is never transmitted to any
-server). Reads are public via a short code; **creating and revoking links
+server). Reads are public via a short code. **Creating and revoking links
 requires a bearer secret only the operator holds** — matching the
 single-tenant posture of the signaling server.
 

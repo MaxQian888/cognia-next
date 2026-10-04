@@ -72,3 +72,5 @@ The initial gap list above records the audit baseline; it is not a description o
 Focused verification after the fixes passed 27 Jest suites / 1,020 tests. The standalone embedded-converter
 test executes from a temporary directory without repository dependencies and verifies binary resource
 preservation and dotenv removal. Coverage checks were explicitly skipped at the user's request.
+
+Follow-up: `2026-10-02-agent-plugin-formats-refresh.md` records the 2026-10-02 format refresh (new ecosystems, hook dialects, Pi packages, corrected Kimi manifest).

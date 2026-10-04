@@ -1,6 +1,6 @@
 ---
 title: Lifecycle Hooks
-description: Subscribing to host events — chat send, chat response, twin ingest, scheduler events, and connector inbound.
+description: Subscribing to host events — chat send, chat response, twin ingest, connector inbound — and where scheduled-task events live.
 ---
 
 # Lifecycle Hooks
@@ -14,7 +14,6 @@ Plugins subscribe to host lifecycle events inside `onActivate()`. The hooks syst
 | `chat.before-send`      | Before a user message is sent to the AI    | `{ sessionId, content, characterId }`    | Yes — return `{ cancel: true, reason }` |
 | `chat.after-response`   | After the AI finishes streaming a response | `{ sessionId, messageId, content }`      | No                                      |
 | `twin.ingest.completed` | When a TwinSource finishes ingest          | `{ sourceId, jobId, chunkCount }`        | No                                      |
-| `scheduler.job.run`     | When a scheduled task runs                 | `{ jobId, trigger, payload }`            | No                                      |
 | `connector.inbound`     | When ConnectorBus receives an event        | `{ platform, conversationKey, content }` | No                                      |
 | `plugin.activated`      | When any plugin is activated               | `{ pluginId }`                           | No                                      |
 | `plugin.deactivated`    | When any plugin is deactivated             | `{ pluginId }`                           | No                                      |
@@ -46,14 +45,24 @@ export async function onActivate(ctx) {
     }
   })
 
-  // Scheduled job: handle plugin-registered cron tasks
-  ctx.hooks.on("scheduler.job.run", async (payload) => {
-    if (payload.jobId.startsWith("my-plugin:")) {
-      await runDailySync(ctx)
-    }
+  // Scheduled work is not a hook. Register a handler for your own tasks and
+  // observe their runs with ctx.scheduler (see "Scheduled tasks" below).
+  ctx.scheduler.registerHandler("dailySync", async () => {
+    await runDailySync(ctx)
+    return { success: true }
   })
 }
 ```
+
+## Scheduled tasks
+
+There is no `scheduler.job.run` hook. A scheduled task reaches a plugin in one of three ways:
+
+- **Your own tasks run your handler.** Declare the `scheduler` capability, register a handler with `ctx.scheduler.registerHandler(name, handler)`, and create tasks with `ctx.scheduler.createTask` or `manifest.scheduledTasks`. The handler is the code that runs when the task fires.
+- **Observe your own tasks' runs** with `ctx.scheduler.onExecution(listener)`, which reports `started`, `completed`, `failed`, `cancelled` and `skipped` for your plugin's tasks only, and is removed on deactivate.
+- **Observe every scheduled task on the host** with the plugin hooks `onScheduledTaskStart(taskId, executionId)`, `onScheduledTaskComplete(taskId, executionId, result)` and `onScheduledTaskError(taskId, executionId, error)`. These fire for every task, not only yours, and cannot cancel a run.
+
+See [Scheduler APIs](../en/plugin-dev/scheduler).
 
 ## Cancelling events
 

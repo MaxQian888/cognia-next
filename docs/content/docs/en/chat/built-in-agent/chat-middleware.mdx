@@ -5,7 +5,9 @@ description: The plugin-contributed around-style middleware chain on the full-re
 
 # Chat Middleware
 
-Chat middleware lets a plugin wrap the agent's **full reply** — inspect or transform the request and the response, Koa-style — without touching the streaming UI path. It is the one capability module that sits on the *non-streaming* `run-and-capture` path rather than inside `resolveSendOptions`.
+Chat middleware lets a plugin inspect or transform the agent's request and **full reply** through a Koa-style wrapper.
+It leaves the streaming UI path unchanged.
+This capability uses the *non-streaming* `run-and-capture` path rather than `resolveSendOptions`.
 
 <TLDR>
   A middleware is `(req, next) => Promise<Response>` (`plugin-chat-middleware.ts:115`). Plugins register

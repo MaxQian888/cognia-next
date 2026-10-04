@@ -5,7 +5,10 @@ description: The four built-in workflow subagents, how they reach opts.agents th
 
 # Subagents
 
-A **subagent** is a scoped sub-persona the SDK can delegate to mid-turn — its own prompt, tool whitelist, model, and turn budget. Cognia ships four built-in workflow subagents, exposes plugin-contributed ones, and can import subagent definitions from other tools' formats.
+A **subagent** is a scoped persona to which the SDK can delegate during a turn.
+It has its own prompt, tool whitelist, model, and turn budget.
+Cognia includes four built-in workflow subagents.
+Plugins can contribute additional subagents, and Cognia can import definitions from other tools' formats.
 
 <TLDR>
   The four built-ins (`workflow-designer/debugger/refactorer/doc-writer`) are `AgentDefinition`s in

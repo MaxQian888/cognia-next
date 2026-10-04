@@ -1,0 +1,169 @@
+---
+title: Pi packages
+description: Ship a Pi coding-agent package inside a Cognia plugin, install it into the user's Pi, and load its extensions into Cognia-hosted Pi sessions (capability pi-package, ADR-0210).
+---
+
+# Pi packages
+
+A Cognia plugin can carry a complete [Pi](https://github.com/badlogic/pi-mono)
+package — a directory whose `package.json` declares a `pi` manifest, or that
+uses Pi's conventional `extensions/` `skills/` `prompts/` `themes/` layout — and
+offer it to Pi in two independent ways:
+
+1. **Install into the user's Pi.** Cognia runs `pi install <absolute package
+   directory>` (`-l` for project scope) through the same code path the Agent
+   packages pane uses for catalog packages. When Pi is not reachable Cognia
+   records the path in Pi's `settings.json` instead and says so: that fallback
+   only records intent, and Pi resolves the package on its next launch.
+2. **Load into a Cognia-hosted Pi session.** A `pi-rpc` agent opts in to the
+   package in its settings. Each session start appends `-e <absolute path>` for
+   every declared extension (before Cognia's own interception extension, which
+   always loads last) and forwards declared values as `COGNIA_PIPKG_<NAME>`
+   environment variables.
+
+The capability is `pi-package`; the manifest field is `piPackages`. Background
+and the security reasoning live in ADR-0210 and the
+[ADR-0119](../adr/0119-pi-native-rpc-integration) revision note.
+
+## Manifest
+
+```jsonc
+// plugin.json
+{
+  "id": "latex-workbench",
+  "capabilities": ["pi-package"],
+  "configSchema": {
+    "type": "object",
+    "properties": { "engine": { "type": "string", "default": "lualatex" } }
+  },
+  "piPackages": [
+    {
+      "id": "latex",
+      "name": "LaTeX workbench",
+      "description": "Compile and preview LaTeX from Pi.",
+      "path": "pi",
+      "minPiVersion": "0.85.1",
+      "prepare": {
+        "program": "npm",
+        "args": ["ci", "--ignore-scripts"],
+        "marker": "pi/node_modules/.package-lock.json",
+        "timeoutMs": 300000
+      },
+      "hostedSession": {
+        "extensions": ["pi/extensions/latex.ts"],
+        "env": [
+          { "name": "TEX_ENGINE", "from": { "config": "engine" } },
+          { "name": "WORKSPACE", "from": { "workspace": true } }
+        ],
+        "tools": ["latex_compile"],
+        "controlsSession": false
+      }
+    }
+  ]
+}
+```
+
+The same entry can be written in code with `definePiPackage` from
+`@cognia/plugin-sdk` (or `define_pi_package` from the Python SDK), which throws
+on the mistakes the host validator would reject.
+
+| Field                           | Meaning                                                                                                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                            | Lowercase kebab-case, unique within the plugin. Agents reference the package as `<pluginId>/<id>`.                                                                              |
+| `path`                          | Plugin-relative package directory (`.` for the plugin root). Forward slashes, no `..`, never absolute.                                                                          |
+| `minPiVersion`                  | Lowest Pi version the package was verified against. A hosted session on an older Pi refuses to start.                                                                           |
+| `prepare`                       | Optional dependency step. `program` is `npm` or `pnpm`; `args` are static strings; `marker` is a plugin-relative file the step creates; `timeoutMs` is clamped to 600 000.      |
+| `hostedSession.extensions`      | Plugin-relative `.ts` / `.js` / `.mjs` entry files loaded with `-e`, in order. Listed explicitly so what Cognia loads is reviewable from the manifest alone.                     |
+| `hostedSession.env`             | Values forwarded as `COGNIA_PIPKG_<name>`. `from` is `{ "config": key }`, `{ "value": literal }` or `{ "workspace": true }` (the session's working directory).                  |
+| `hostedSession.tools`           | Tool names the extensions register. Required for a `dontAsk` session to pre-approve them.                                                                                      |
+| `hostedSession.controlsSession` | Set when the extension replaces the session's tool surface. Shown to the user before an agent opts in.                                                                          |
+
+## Why `prepare` exists
+
+Pi never installs dependencies for a local package. If your package imports
+npm modules, declare a `prepare` step. Cognia shows the exact command line and
+working directory in a confirmation dialog, resolves `npm`/`pnpm` to an
+absolute path, and runs it **without a shell** in the package directory. The
+run is desktop-only and written to the automation audit log. Prefer
+`--ignore-scripts` unless your dependencies genuinely need install scripts.
+
+Cognia refuses to load a plugin whose directory contains a symbolic link, and
+package managers link dependency executables by default. For `npm` Cognia adds
+`--no-bin-links` to the approved command; with `pnpm` pass options that install
+without links. A run that still leaves a link fails with `symlinks-created`.
+
+Declare a `marker`. Without one Cognia cannot tell whether the step ran, so
+install and hosted sessions do not wait for it. With one, installing a package
+whose marker is missing first offers to run the step, and a hosted session
+refuses to start until it exists.
+
+## Environment values
+
+`COGNIA_PIPKG_` is the only prefix the external-agent environment policy admits
+for plugin values (`crates/cognia-external-agent/src/presets.rs`, mirrored in the
+CLI). A package can therefore never set `NODE_OPTIONS`, `LD_PRELOAD` or a
+provider credential. Values come only from your manifest, your plugin's own
+configuration, or the workspace path; an unset configuration key forwards
+nothing. Read them in your extension:
+
+```ts
+export default async function (pi) {
+  const engine = process.env.COGNIA_PIPKG_TEX_ENGINE ?? "pdflatex"
+  // …register tools
+}
+```
+
+## Tools and permissions
+
+Cognia's interception extension still gates every tool call. Package tools are
+"extension tools" to the per-call permission table: they take the permission
+mode's fallback decision (`ask` in default mode, `deny` in plan mode). In
+`dontAsk` mode a declared tool that the session pre-approved by name is allowed,
+and Pi's `--tools` floor keeps it visible; undeclared tools stay denied.
+
+## Installed in Pi and loaded in a hosted session
+
+A user can install your package into their Pi **and** opt a hosted agent into
+it. Pi merges `-e` paths with the extensions of installed packages and
+deduplicates by canonical path, so a hosted extension that is one of the
+package's own files loads once. A hosted extension that lives **outside** the
+package directory (a Cognia-specific wrapper around the package) would load
+next to the installed package's own extension and register its tools twice;
+Pi has no per-session way to exclude one installed package. Cognia therefore
+refuses that session with `double-load` and tells the user to switch the agent
+to the `isolated` policy (which does not load installed packages) or to remove
+the package from that Pi scope. Under `global` only the user scope counts;
+under `trusted-project` both scopes do.
+
+## Localizing configuration labels
+
+`hostedSession.env` values often come from your plugin's `configSchema`. Every
+label the configuration form shows can name a key in your manifest's own
+`i18n.locales`: `titleKey`, `descriptionKey`, `markdownDescriptionKey`,
+`patternMessageKey`, `deprecationMessageKey`, and per-option
+`enumItemLabelKeys[]` / `enumDescriptionKeys[]` (with `enumItemLabels[]` as the
+literal fallback for option labels). The form resolves the user's locale, then
+English, then the literal; the validator requires each key in every locale you
+declare. `piPackages[].nameKey` / `descriptionKey` follow the same rule.
+
+## Where it runs
+
+- Plugins installed from a directory or the marketplace work. **Built-in plugins
+  (`builtin://`) cannot ship Pi packages**: there is no directory Pi could read,
+  and every operation refuses them with a clear error.
+- Hosted sessions run inside the desktop sandbox. The package directory is
+  mounted read-only for the Pi process (and only for Pi), and only when it
+  resolves inside the app's own plugin store (`<data dir>/cognia/plugins`);
+  plugins loaded from elsewhere, and Bot-isolated agents (whose home is hidden),
+  cannot load packages — the session start says so (`bot-isolation`).
+- Packages live on this device. An agent running on a paired host cannot load
+  them, and the session start says so.
+
+## Failure modes
+
+A hosted session never silently skips a package the agent opted into. Session
+start fails with `PiPackageUnavailableError` (reason code
+`pi_package_unavailable`) and one of: `not-found` (plugin missing or disabled),
+`not-on-disk`, `invalid-path`, `not-hosted`, `not-prepared`,
+`workspace-required`, `double-load`, `bot-isolation`, `env-conflict` (two packages set one variable differently)
+or `pi-version`.

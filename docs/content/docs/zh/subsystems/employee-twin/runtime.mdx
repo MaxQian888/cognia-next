@@ -10,7 +10,7 @@ description: 发送时的 applyTwinContext —— 只嵌入一次、向量 + BM2
 <TLDR>
   `applyTwinContext`（`lib/twin/runtime/apply-twin-context.ts:170`）是唯一的发送时入口。对一个绑定孪生的角色，它把用户消息
   **只嵌入一次**，执行 RAG（向量，可选经 RRF 与 BM25 融合，可选过取并做词法重排），挑选风格少样本，组装四段式系统提示。
-  它 **永不抛错** —— 每个可能失败的 I/O 步都被单独守护，宁可降级为"更少上下文"也不打断聊天。它接入了 `resolveSendOptions`
+  它 **永不抛错** —— 每个可能失败的 I/O 步骤都独立处理错误；失败时减少上下文，而不打断聊天。它接入了 `resolveSendOptions`
   （`lib/claude/build-options.ts:625`）。
 </TLDR>
 
@@ -46,9 +46,7 @@ flowchart TB
   class Start,Noop,Done io
 ```
 
-全部六个 `TwinSettings` 在 `settingsFor(character)`（`apply-twin-context.ts:113`）一次性解析，各自以
-`?? DEFAULT_TWIN_SETTINGS.*` 取默认。用户消息只嵌入一次，那一个向量同时喂给 RAG 与风格两条路 —— 团队聊天甚至连这次也省去，靠传入
-`precomputedQueryEmbedding`。
+全部六个 `TwinSettings` 在 `settingsFor(character)`（`apply-twin-context.ts:113`）一次性解析，各自以 `?? DEFAULT_TWIN_SETTINGS.*` 取默认。用户消息只嵌入一次，那一个向量同时喂给 RAG 与风格两条路 —— 团队聊天甚至连这次也省去，靠传入 `precomputedQueryEmbedding`。
 
 ### 过取 + 向量检索
 
@@ -79,10 +77,7 @@ const fused = reciprocalRankFusion(
 orderedIds = fused.slice(0, fetchLimit).map((f) => f.id)
 ```
 
-BM25 索引（`bm25-index.ts`）是对共享 `BM25Index`（`lib/ai/rag/hybrid-search.ts`，`k1 = 1.2`、`b = 0.75`、CJK 感知分词器）的每孪生
-LRU 缓存（最多 3 个孪生）。它索引 `contentRedacted`，即嵌入器所见的同一份文本，使关键词与向量视图保持一致。其缓存键是
-`getTwinChunksVersion`（数量 + 最新 `createdAt`），因此一次 ingest 会自动令其失效。RRF 以 `Σ weight_i · 1/(k + rank + 1)`、`k = 60`
-合并列表（`reciprocalRankFusion`，`hybrid-search.ts:247`）。
+BM25 索引（`bm25-index.ts`）是对共享 `BM25Index`（`lib/ai/rag/hybrid-search.ts`，`k1 = 1.2`、`b = 0.75`、CJK 感知分词器）的每孪生 LRU 缓存（最多 3 个孪生）。它索引 `contentRedacted`，即嵌入器所见的同一份文本，使关键词与向量视图保持一致。其缓存键是 `getTwinChunksVersion`（数量 + 最新 `createdAt`），因此一次 ingest 会自动令其失效。RRF 以 `Σ weight_i · 1/(k + rank + 1)`、`k = 60` 合并列表（`reciprocalRankFusion`，`hybrid-search.ts:247`）。
 
 ### 词法重排
 
@@ -102,9 +97,7 @@ return 0.7 * c.score + 0.3 * coverage   // 70% 余弦, 30% 关键词覆盖
 
 ### 风格少样本挑选
 
-`selectFewShotSamples`（`few-shot-selector.ts:70`）**逐样本** 对风格样本排序：若样本有缓存嵌入，按与查询嵌入的余弦打分，否则逐个回退到词重叠
-（无查询文本时回退到长度启发式）。因此单个未嵌入的样本不会令整条路失效 —— 一个惰性回填（`maybeBackfillStyleEmbeddings`，
-`apply-twin-context.ts:140`）在后台补齐缺失的嵌入。
+`selectFewShotSamples`（`few-shot-selector.ts:70`）**逐样本** 对风格样本排序：若样本有缓存嵌入，按与查询嵌入的余弦打分，否则逐个回退到词重叠（无查询文本时回退到长度启发式）。因此单个未嵌入的样本不会令整条路失效 —— 一个惰性回填（`maybeBackfillStyleEmbeddings`，`apply-twin-context.ts:140`）在后台补齐缺失的嵌入。
 
 ## 四段式提示
 
@@ -121,9 +114,7 @@ return 0.7 * c.score + 0.3 * coverage   // 70% 余弦, 30% 关键词覆盖
 
 ## 依赖注入
 
-`applyTwinContext` 经 `deps` 接收其向量库、嵌入配置与可选重排器。`tryBuildTwinDeps`（`build-deps.ts:14`）从
-`TwinRuntimeSettings` 组装它们 —— 除非 worker 已启用、存在嵌入 API key、且所选向量后端的必需字段齐全，否则返回 `undefined`（不注入）。
-重排器仅在 `settings.reranker.enabled` 时构建，默认用免密钥的 `lexicalRerankScorer`，`overFetch: 3`。
+`applyTwinContext` 经 `deps` 接收其向量库、嵌入配置与可选重排器。`tryBuildTwinDeps`（`build-deps.ts:14`）从 `TwinRuntimeSettings` 组装它们 —— 除非 worker 已启用、存在嵌入 API key、且所选向量后端的必需字段齐全，否则返回 `undefined`（不注入）。重排器仅在 `settings.reranker.enabled` 时构建，默认用免密钥的 `lexicalRerankScorer`，`overFetch: 3`。
 
 ## 运行时在何处被调用
 
@@ -141,9 +132,7 @@ sequenceDiagram
   Hook->>Hook: turnComplete → mergeTwinSourcesIntoLastAssistant（L1460）
 ```
 
-- **聊天（主路径）** —— `resolveSendOptions`（`build-options.ts:625-662`）在角色绑定孪生且调用方提供了 `twinDeps` + `twinUserMessage`
-  时调用 `applyTwinContext`。`result.applied` 时它替换 `baseSystem` 并置 `twinReplacedBase = true`（这会抑制 v2 persona 段，避免矛盾指引）。
-  整块包在 try/catch 中 —— 失败保留原提示。召回的上下文被暂存到 `opts.twinContext` 供 UI 使用。
+- **聊天（主路径）** —— `resolveSendOptions`（`build-options.ts:625-662`）在角色绑定孪生且调用方提供了 `twinDeps` + `twinUserMessage` 时调用 `applyTwinContext`。`result.applied` 时它替换 `baseSystem` 并置 `twinReplacedBase = true`（这会抑制 v2 persona 段，避免矛盾指引）。整块包在 try/catch 中 —— 失败保留原提示。召回的上下文被暂存到 `opts.twinContext` 供 UI 使用。
 - **聊天 hook 握手** —— `use-claude-chat.ts:1139` 在有用户消息时构建 deps；在 `turnComplete`（`use-claude-chat.ts:1460`）把一个 Twin SourcesPart 附到助手消息。
 - **工作流** —— `lib/workflow/nodes/shared/twin-injector.ts:70` 是另一个调用方。
 

@@ -143,7 +143,7 @@ mode: <name>`) instead of per-wrapper-specific strings.
 
 ## What's next
 
-M2 builds on top of this seam: define `/api/v1/*` axum routes mirroring the
+M2 extends this transport interface: define `/api/v1/*` axum routes mirroring the
 Tauri command list (per ADR 0013 — command manifest), JWT pair/auth
 (`pairedDevices` Dexie schema v21), the real `CompanionTransport`, and
 mDNS/cloudflared LAN+tunnel exposure. Mobile shell (M3 onwards) wraps the

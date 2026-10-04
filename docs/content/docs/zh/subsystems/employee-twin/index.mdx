@@ -12,7 +12,7 @@ description: Cognia 如何把一个人的文档、聊天与代码蒸馏成可对
   **Playbook 库**、以及 **角色 / 技能草稿**。发送时 `applyTwinContext`
   （`lib/twin/runtime/apply-twin-context.ts:170`）只对用户消息嵌入一次，执行混合检索（向量 + BM25/RRF）并可选做词法重排，
   挑选风格少样本，组装四段式系统提示 —— 现已直接接入 `resolveSendOptions`（`lib/claude/build-options.ts:625`）。
-  PII 在任何嵌入或 LLM 调用 **之前** 就被替换为 `<KIND_NNN>` 占位符；逆向映射以 AES-GCM-256 加密落盘
+  PII 在任何嵌入或 LLM 调用 **之前** 就被替换为 `<KIND_NNN>` 占位符；逆向映射以 AES-GCM-256 加密后写入文件
   （`lib/twin/ingest/redaction-key.ts:255`）。
 </TLDR>
 
@@ -87,8 +87,7 @@ flowchart LR
 
 ## 多孪生是设计前提
 
-"孪生"是一等的 registry 行（`Twin`，`types/twin/index.ts:480`），但绑定是 **软** 的：角色通过
-`Character.twinId` 启用，并通过 `Character.twinSettings` 调参。
+"孪生"是一等的 registry 行（`Twin`，`types/twin/index.ts:480`），但绑定是 **软** 的：角色通过 `Character.twinId` 启用，并通过 `Character.twinSettings` 调参。
 
 <TypeTable
   type={{
@@ -101,10 +100,7 @@ flowchart LR
   }}
 />
 
-`DEFAULT_TWIN_SETTINGS` 位于 `types/twin/index.ts:445`。多个角色可共享一个孪生，单个 Dexie 数据库可承载多个孪生
-（自己 / 导师 / 前任）—— 每个孪生作用域的行都带 `twinId`。registry（`lib/db/twins.ts`）负责创建 / 重命名 / 克隆 /
-归档，以及 **级联删除**（`deleteTwin`，`lib/db/twins.ts:110`）：抹除每张孪生作用域表、解绑引用它的角色、删除两个 cron
-任务、并删掉远程向量集合。
+`DEFAULT_TWIN_SETTINGS` 位于 `types/twin/index.ts:445`。多个角色可共享一个孪生，单个 Dexie 数据库可承载多个孪生（自己 / 导师 / 前任）—— 每个孪生作用域的行都带 `twinId`。registry（`lib/db/twins.ts`）负责创建 / 重命名 / 克隆 / 归档，以及 **级联删除**（`deleteTwin`，`lib/db/twins.ts:110`）：抹除每张孪生作用域表、解绑引用它的角色、删除两个 cron 任务、并删掉远程向量集合。
 
 ## 隐私红线
 

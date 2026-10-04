@@ -1,6 +1,6 @@
 ---
 title: Distill 流水线
-description: 同一编排器下的六个顺序蒸馏 agent、让测试离线的 LlmClient 抽象缝、用户 pin 如何在重蒸馏中存活，以及把幻觉 PII 从合成草稿中再脱敏出去的两层防线。
+description: 同一编排器下的六个顺序蒸馏 agent、支持离线测试的 LlmClient 接口、重新蒸馏时如何保留用户固定的内容，以及把幻觉 PII 从合成草稿中再脱敏出去的两层防线。
 ---
 
 # Distill 流水线
@@ -10,8 +10,8 @@ description: 同一编排器下的六个顺序蒸馏 agent、让测试离线的 
 <TLDR>
   `runOrchestrator`（`lib/twin/distill/orchestrator.ts:92`）**顺序运行六个 agent** —— Knowledge → EntityMerge
   → Style → Playbook → Synthesizer → Evaluator —— 把 `twinChunks` 转成一个 `twinProfile` 加上可审核的角色 / 技能
-  `twinDrafts`。每个 agent 都经 `LlmClient` 抽象缝（`llm.ts:45`）调用，每个非承重 agent 都被 `withTimeoutOrFallback`
-  包裹，而 synthesizer 是唯一的硬依赖（那里超时会抛 `SynthesizerError`）。
+  `twinDrafts`。每个 agent 都经 `LlmClient` 接口（`llm.ts:45`）调用，每个非关键依赖的 agent 都被 `withTimeoutOrFallback`
+  包裹，而 synthesizer 是唯一的必需依赖（那里超时会抛 `SynthesizerError`）。
 </TLDR>
 
 ## 六个 agent
@@ -63,8 +63,7 @@ for (let i = 0; i < chunks.length; i += KNOWLEDGE_BATCH_SIZE) {
   Object.assign(chunkEntityTags, value.perChunk)
 ```
 
-synthesizer 是唯一 **承重** 阶段。它被喂一个 *临时* 画像（基础画像 + 本次运行的新鲜风格样本、playbook 与合并实体），
-因此即使部分 agent 回退为空它也总能看到最新蒸馏结果，且那里超时会令整个任务失败：
+synthesizer 是唯一 **承重** 阶段。它被喂一个 *临时* 画像（基础画像 + 本次运行的新鲜风格样本、playbook 与合并实体），因此即使部分 agent 回退为空它也总能看到最新蒸馏结果，且那里超时会令整个任务失败：
 
 ```ts title="lib/twin/distill/orchestrator.ts:193-213"
 const transientProfile: TwinProfile = {
@@ -96,10 +95,7 @@ export interface LlmClient {
 }
 ```
 
-`complete` 返回 **原始文本** —— 每个 agent 用 `extractJson`（`llm.ts:188`）自己解析 JSON，它先试围栏块，再回退到一个识别字符串的平衡括号遍历器。
-生产工厂是 `createLlmClient`（`llm.ts:133`）；它惰性构建一个 AI-SDK 模型（`@ai-sdk/anthropic` / openai / google /
-mistral / cohere）并累计用量快照。`createAnthropicLlmClient`（`llm.ts:177`）是保留向后兼容的废弃别名。`getUsageSnapshot`
-是可选的 —— 编排器以 `?.` 守护。
+`complete` 返回 **原始文本** —— 每个 agent 用 `extractJson`（`llm.ts:188`）自己解析 JSON，它先试围栏块，再回退到一个识别字符串的平衡括号遍历器。生产工厂是 `createLlmClient`（`llm.ts:133`）；它惰性构建一个 AI-SDK 模型（`@ai-sdk/anthropic` / openai / google /mistral / cohere）并累计用量快照。`createAnthropicLlmClient`（`llm.ts:177`）是保留向后兼容的废弃别名。`getUsageSnapshot` 是可选的 —— 编排器以 `?.` 守护。
 
 ## pin 在重蒸馏中的保留
 
@@ -115,8 +111,7 @@ mistral / cohere）并累计用量快照。`createAnthropicLlmClient`（`llm.ts:
    if (bucket.length < minBucket) { merged = [...merged, ...bucket]; continue }
    ```
 
-2. **写入时按内容去重 + 保留 pin** —— distill 的 `job-runner` 用 upsert（而非 append），使重跑按内容去重并保留 pin，借助
-   `upsert*` DB 辅助函数（`lib/db/twin-profile.ts`）：
+2. **写入时按内容去重 + 保留 pin** —— distill 的 `job-runner` 用 upsert（而非 append），使重跑按内容去重并保留 pin，借助 `upsert*` DB 辅助函数（`lib/db/twin-profile.ts`）：
 
    ```ts title="lib/twin/distill/job-runner.ts:101-107"
    // Upsert (not append) so a re-distill de-dupes by content and preserves any
@@ -131,24 +126,18 @@ mistral / cohere）并累计用量快照。`createAnthropicLlmClient`（`llm.ts:
 distill 是最可能 *重新引入* PII 的路径，因为 LLM 可能把一个看起来真实的邮箱幻觉进草稿。两道独立守卫拦截它：
 
 - **落库时（静默再脱敏）** —— distill 的 `job-runner` 在写入前对合成草稿负载与 `voiceSummary` 再脱敏，需要清理时记一条警告日志。
-- **编辑时（深度扫描，抛错）** —— 当审核者编辑草稿时，`assertDraftBodyClean(payload)`（`draft-pii-guard.ts:54`）用
-  `hasNoLeakingPiiDeep` 递归遍历每个字段，使 PII 无法藏在嵌套值里；遇泄漏抛 `DraftPiiError`。`assertFieldsClean`
-  （`draft-pii-guard.ts:82`）是 persona 编辑器使用的扁平变体。
+- **编辑时（深度扫描，抛错）** —— 当审核者编辑草稿时，`assertDraftBodyClean(payload)`（`draft-pii-guard.ts:54`）用 `hasNoLeakingPiiDeep` 递归遍历每个字段，使 PII 无法藏在嵌套值里；遇泄漏抛 `DraftPiiError`。`assertFieldsClean`（`draft-pii-guard.ts:82`）是 persona 编辑器使用的扁平变体。
 
 像 `<EMAIL_001>` 这样的占位符 **不会** 被标记 —— 真实值仍加密保存在 `twinSources.redactionMapEnc`，仅在接受时还原。
 
 ### 接受时反脱敏
 
-`unredact-draft.ts` 在草稿被接受时把占位符还原为真实值。`loadTwinUnredactMap`（`unredact-draft.ts:54`）解密并合并每个源的逆向映射；
-`previewUnredact`（`unredact-draft.ts:96`）列出草稿中发现的占位符（每个默认"保留"）；`applyUnredactSelection`
-（`unredact-draft.ts:122`）以 JSON 安全的方式把所选原值拼回。这是 [反脱敏对话框](./workbench-ui#drafts-tab--接受流程) 驱动的界面。
+`unredact-draft.ts` 在草稿被接受时把占位符还原为真实值。`loadTwinUnredactMap`（`unredact-draft.ts:54`）解密并合并每个源的逆向映射；`previewUnredact`（`unredact-draft.ts:96`）列出草稿中发现的占位符（每个默认"保留"）；`applyUnredactSelection`（`unredact-draft.ts:122`）以 JSON 安全的方式把所选原值拼回。这是 [反脱敏对话框](./workbench-ui#drafts-tab--接受流程) 驱动的界面。
 
 ## 辅助件
 
-- **`with-timeout.ts`** 是对 `@cognia/primitives` 的再导出薄封装。`withTimeout` 是会拒绝的硬截止；
-  `withTimeoutOrFallback` 返回 `{ value, error }`，经 `onError` 记日志并产出给定回退值。默认 agent 超时为 90 秒。
-- **`heuristics/style-prefilter.ts`**（`selectStyleCandidates`，L50）用 **TF-IDF 信息量 + 贪心 MMR 多样性**
-  （`MMR_LAMBDA = 0.7`）把 StyleAgent 的候选池缩到约 30 个 chunk，并施加每源惩罚使一篇长文档无法独占样本。双语停用词（英文 + 中文）。
+- **`with-timeout.ts`** 是对 `@cognia/primitives` 的再导出薄封装。`withTimeout` 是会拒绝的硬截止；`withTimeoutOrFallback` 返回 `{ value, error }`，经 `onError` 记日志并产出给定回退值。默认 agent 超时为 90 秒。
+- **`heuristics/style-prefilter.ts`**（`selectStyleCandidates`，L50）用 **TF-IDF 信息量 + 贪心 MMR 多样性**（`MMR_LAMBDA = 0.7`）把 StyleAgent 的候选池缩到约 30 个 chunk，并施加每源惩罚使一篇长文档无法独占样本。双语停用词（英文 + 中文）。
 
 ## 下一步
 

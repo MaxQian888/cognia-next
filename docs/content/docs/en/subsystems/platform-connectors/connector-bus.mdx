@@ -18,7 +18,7 @@ description: The singleton fan-in/fan-out hub for Platform Connectors — its 11
   <Stat label="runtime decisions" value="4 + drop" hint="ai-run / draft / store / drop" />
 </StatGrid>
 
-The ConnectorBus is the **single owner of the routing decision** for every inbound platform event. Adapters never decide whether to reply — they normalize a platform payload into a `NormalizedInboundEvent` and hand it to the bus. Everything downstream (dedup, character binding, policy gate, AI turn, workflow fan-out) is the bus's responsibility. See [the subsystem overview](./index) for where the bus sits in the larger connector stack, and [adapter model](./adapter-model) for what an adapter contributes.
+The ConnectorBus is the **single owner of the routing decision** for every inbound platform event. Adapters never decide whether to reply — they normalize a platform payload into a `NormalizedInboundEvent` and send it to the bus. Everything downstream (dedup, character binding, policy gate, AI turn, workflow fan-out) is the bus's responsibility. See [the subsystem overview](./index) for where the bus sits in the larger connector stack, and [adapter model](./adapter-model) for what an adapter contributes.
 
 ## The Singleton
 

@@ -1,6 +1,6 @@
 ---
 title: "0206 — A workspace streams its changes instead of being polled"
-description: "The collaboration plane gains one change feed per organisation. It is a WebSocket carrying invalidations only ({entity, id, workspaceId, revision}), and each frame is filtered by the reader's workspace access. The mirror keeps its single refresh path; the feed only tells it which legs to run and when. The 60-second poll stays as the degraded fallback. The single-use ticket and per-key broadcast that shared chat and Canvas each copied become one SocketHub, which all three streams share."
+description: "Adds one WebSocket change feed per organisation. Frames carry invalidations only ({entity, id, workspaceId, revision}) and are filtered by workspace access. The mirror keeps one refresh path. The feed selects which parts to refresh and when. The 60-second poll remains the degraded fallback. One SocketHub provides single-use tickets and per-key broadcast for shared chat, Canvas and the collaboration feed."
 ---
 
 # ADR 0206 — A workspace streams its changes instead of being polled
@@ -68,8 +68,8 @@ Frames carry no data, only invalidations:
 - `entity` is one of `issue | issue_event | plan | run | workspace | membership`.
 - A membership frame names the affected `usr_` rather than a revision.
 
-The client does not apply frames. It asks the mirror to refresh the leg the
-entity belongs to. That keeps **one** write path into the mirrors, the one
+The client does not apply frame contents directly. It asks the mirror to
+refresh the part that contains the entity. That keeps **one** write path into the mirrors, the one
 `lib/collab/sync.ts` already guarantees: a failed pull leaves the mirror as it
 was, and nothing is ever rewritten optimistically. A frame that arrives while a
 refresh is running marks that leg dirty for one more pass, and does not queue a

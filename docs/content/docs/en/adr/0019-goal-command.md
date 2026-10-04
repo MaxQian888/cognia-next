@@ -11,7 +11,7 @@ description: "Persistent chat goals with auto-continuation, judged stops, and a 
 
 ## Context
 
-Three competing AI agents — **Hermes Agent** (Nous Research), **OpenAI Codex CLI**, and **Anthropic Claude Code** — all shipped a `/goal` command between mid-2025 and early 2026. cognia-next had its own chat / character / skill / workflow / agent-team stack but no "objective as a first-class concept": users couldn't say "keep going until this is done" without manually pressing Enter every turn.
+Three competing AI agents — **Hermes Agent** (Nous Research), **OpenAI Codex CLI**, and **Anthropic Claude Code** — all shipped a `/goal` command between mid-2025 and early 2026. cognia-next had its own chat / character / skill / workflow / agent-team stack. However, it did not represent objectives as runtime entities. Users who wanted the agent to continue until a task was complete had to press Enter after every turn.
 
 We surveyed the three implementations:
 
