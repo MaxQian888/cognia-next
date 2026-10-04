@@ -35,6 +35,7 @@ import {
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
 import { BrowserBackendSwitcher } from "@/components/browser/browser-backend-switcher"
 import { BrowserDownloadsButton } from "@/components/browser/browser-downloads-panel"
+import { BrowserEngineChip } from "@/components/browser/browser-engine-chip"
 import { LocalChromiumPreview } from "@/components/browser/local-chromium-preview"
 import { BrowserAutofillPrompt } from "@/components/browser/vault/browser-autofill-prompt"
 import {
@@ -94,6 +95,8 @@ import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
 import { serializeBrowserAdjustmentFeedback } from "@/lib/browser/adjust"
 import type { BrowserAdjustmentFeedback } from "@/types/browser-developer"
+import { dockPageEngineFor } from "@/lib/artifacts/dock-pages"
+import type { DockPageEngine } from "@/stores/artifact/dock-tabs-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -126,6 +129,21 @@ function hostOf(url: string | null): string {
 export { addressDisplayParts }
 
 /**
+ * A chat dock page tab the pane shows (ADR-0214). The tab, not the pane, holds
+ * the engine choice and the address, so both survive the pane remounting for
+ * every tab switch.
+ */
+export interface BrowserDockPage {
+  /** Whose pages these are in the shared Chromium session (`chat:<id>`). */
+  owner: string
+  tabId: string
+  engine: DockPageEngine
+  onEngineChange: (engine: DockPageEngine) => void
+  /** Where the lightweight preview went, so the tab can remember it. */
+  onNavigated?: (url: string) => void
+}
+
+/**
  * The v0/Lovable-style preview pane: browser chrome (back / forward / reload +
  * a live-syncing address bar) over a reserved region that the native embedded
  * webview tracks. Picking an element opens a comment box that ships the
@@ -139,6 +157,7 @@ export function BrowserPreviewPane({
   requestId,
   ownerId,
   onRequestReveal,
+  dockPage,
 }: {
   sessionId?: string
   initialUrl?: string
@@ -168,6 +187,11 @@ export function BrowserPreviewPane({
    * `onBrowserUrlRequest` handler below.
    */
   onRequestReveal?: () => boolean
+  /**
+   * Show one chat dock page tab. The dock routes links itself (a link becomes
+   * a tab), so a docked pane never claims URL requests.
+   */
+  dockPage?: BrowserDockPage
 }) {
   const t = useTranslations("browser")
   // The annotation vocabulary is shared with the artifact preview, so it lives
@@ -339,17 +363,35 @@ export function BrowserPreviewPane({
   // iframe is the fallback.
   const local = useLocalBrowser()
   const localInstalled = local.status?.installed ?? false
-  const [paneBackendPreference, setBackendPreference] = useState<BrowserBackend | null>(null)
-  const backendPreference =
-    paneBackendPreference ?? defaultBackendPreference(settingsDefaultBackend)
+  const [paneBackendPreference, setPaneBackendPreference] = useState<BrowserBackend | null>(null)
+  const settingsPreference = defaultBackendPreference(settingsDefaultBackend)
+  // A dock page tab carries its own engine; `auto` is the Settings default.
+  const backendPreference = dockPage
+    ? dockPage.engine === "auto"
+      ? settingsPreference
+      : dockPage.engine
+    : (paneBackendPreference ?? settingsPreference)
+  const dockEngineChangeRef = useRef(dockPage?.onEngineChange)
+  useEffect(() => {
+    dockEngineChangeRef.current = dockPage?.onEngineChange
+  }, [dockPage?.onEngineChange])
+  const docked = Boolean(dockPage)
+  const setBackendPreference = useCallback(
+    (backend: BrowserBackend | null) => {
+      const toTab = dockEngineChangeRef.current
+      if (docked && toTab) toTab(backend ? dockPageEngineFor(backend) : "auto")
+      else setPaneBackendPreference(backend)
+    },
+    [docked]
+  )
   const [paneUserChromeBrowser, setUserChromeBrowser] = useState<string | null>(null)
   const userChromeBrowser = paneUserChromeBrowser ?? settingsUserChromeBrowser
   const userChromeCandidate =
     local.userChrome.find((candidate) => candidate.browser === userChromeBrowser) ??
     local.userChrome.find((candidate) => candidate.available) ??
     null
-  // No address yet reads as a loopback preview: an empty pane stays on the
-  // lightweight webview instead of spawning Chromium for nothing.
+  // No address yet: an empty pane stays on the lightweight webview instead of
+  // spawning Chromium for nothing.
   const targetUrl = surfaceRequest?.url ?? committedUrl
   const backend = resolveDesktopBackend(
     {
@@ -359,7 +401,8 @@ export function BrowserPreviewPane({
       webCompanionTarget: hasWebCompanionTarget(),
       localChromiumInstalled: localInstalled,
       userChromeAvailable: userChromeCandidate?.available ?? false,
-      targetTier: targetUrl ? resolveTrustTier(targetUrl) : "trusted",
+      ...(targetUrl ? { targetTier: resolveTrustTier(targetUrl) } : {}),
+      idle: !targetUrl,
     },
     backendPreference
   )
@@ -466,6 +509,12 @@ export function BrowserPreviewPane({
 
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
+  // A dock page tab remembers where the lightweight preview went.
+  const onDockNavigated = dockPage?.onNavigated
+  const embeddedUrl = embeddedActive ? currentUrl : null
+  useEffect(() => {
+    if (embeddedUrl && onDockNavigated) onDockNavigated(embeddedUrl)
+  }, [embeddedUrl, onDockNavigated])
   const adjustmentFeedback =
     acceptedAdjustment?.pageUrl === currentUrl ? acceptedAdjustment.feedback : null
   const acceptAdjustment = useCallback(
@@ -786,23 +835,22 @@ export function BrowserPreviewPane({
   useEffect(() => {
     regionVisibleRef.current = regionVisible
   }, [regionVisible])
-  useEffect(
-    () =>
-      onBrowserUrlRequest((url, request) => {
-        // An empty address is `browser_open` without a URL: show the pane on
-        // whatever it has open. Anything else must be a navigable address.
-        const normalized = url ? normalizePreviewUrl(url) : null
-        if (url && !normalized) return false
-        if (!regionVisibleRef.current && revealRef.current?.() !== true) return false
-        // ADR-0201: a requested engine is honored when it can be served now;
-        // an unservable one leaves the pane on the engine it already resolved.
-        const wanted = request.backend
-        if (wanted && canServeBackendRef.current(wanted)) setBackendPreference(wanted)
-        if (normalized) openQuickUrl(normalized)
-        return true
-      }),
-    [openQuickUrl]
-  )
+  useEffect(() => {
+    if (docked) return
+    return onBrowserUrlRequest((url, request) => {
+      // An empty address is `browser_open` without a URL: show the pane on
+      // whatever it has open. Anything else must be a navigable address.
+      const normalized = url ? normalizePreviewUrl(url) : null
+      if (url && !normalized) return false
+      if (!regionVisibleRef.current && revealRef.current?.() !== true) return false
+      // ADR-0201: a requested engine is honored when it can be served now;
+      // an unservable one leaves the pane on the engine it already resolved.
+      const wanted = request.backend
+      if (wanted && canServeBackendRef.current(wanted)) setBackendPreference(wanted)
+      if (normalized) openQuickUrl(normalized)
+      return true
+    })
+  }, [openQuickUrl, docked, setBackendPreference])
 
   const reloadAfterCookieImport = useCallback(async () => {
     beginLoad()
@@ -847,6 +895,26 @@ export function BrowserPreviewPane({
     />
   ) : undefined
 
+  // A dock page tab switches between Chromium and the lightweight preview from
+  // the address bar, where both can serve it.
+  const engineChip =
+    dockPage &&
+    (backend.backend === "local-chromium" ||
+      (backend.backend === "embedded" && backend.localReachable)) ? (
+      <BrowserEngineChip
+        engine={backend.backend}
+        onSwitch={(to) =>
+          dockPage.onEngineChange(
+            to === "embedded"
+              ? "embedded"
+              : settingsPreference === null || settingsPreference === "local-chromium"
+                ? "auto"
+                : "local-chromium"
+          )
+        }
+      />
+    ) : null
+
   if (backend.backend === "local-chromium" || backend.backend === "user-chrome") {
     const attached =
       backend.backend === "user-chrome"
@@ -862,6 +930,14 @@ export function BrowserPreviewPane({
         requestedUrl={surfaceRequest?.url}
         requestNonce={surfaceRequest?.nonce}
         backendSwitcher={backendSwitcher}
+        {...(dockPage && backend.backend === "local-chromium"
+          ? {
+              owner: dockPage.owner,
+              pageTag: dockPage.tabId,
+              hideTabRow: true,
+              toolbarExtras: engineChip,
+            }
+          : {})}
       />
     )
   }
@@ -958,6 +1034,7 @@ export function BrowserPreviewPane({
   // Page-setup actions: set once and left alone, so they collapse first.
   const pageActions = (
     <>
+      {engineChip}
       <BrowserZoomControl zoom={zoom} onZoomChange={setZoom} disabled={!nativeReady} />
       <BrowserCookieImportAction
         currentUrl={owned ? currentUrl : null}

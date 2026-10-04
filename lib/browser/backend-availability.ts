@@ -12,9 +12,10 @@
  * ADR-0201 adds two desktop backends that run the same runtime locally:
  * `local-chromium` (a Cognia-managed Chromium on loopback) and `user-chrome`
  * (the user's own Chrome attached through its consent-gated remote debugging).
- * Once local Chromium is installed it becomes the default for public sites;
- * the embedded webview keeps localhost previews; `user-chrome` is only ever an
- * explicit choice.
+ * Once local Chromium is installed it becomes the default for every page —
+ * localhost included since ADR-0214, so dev servers get real tabs and DevTools
+ * extensions; the embedded webview stays one click away as the lightweight
+ * preview. `user-chrome` is only ever an explicit choice.
  *
  * Pure and injectable so the whole matrix is testable without a shell.
  */
@@ -59,11 +60,16 @@ export interface BrowserBackendInputs {
   /** A `browser_user_chrome_discover()` candidate is `available`. */
   userChromeAvailable: boolean
   /**
-   * Trust tier of the page about to be shown, when known. A trusted
-   * (loopback) page stays on the embedded webview by default; a public or
-   * unknown page goes to local Chromium once installed.
+   * Trust tier of the page about to be shown, when known. Informational since
+   * ADR-0214: localhost and public pages alike go to local Chromium once it is
+   * installed.
    */
   targetTier?: TrustTier
+  /**
+   * Nothing to show yet (a pane with no address). The embedded webview serves
+   * it rather than starting Chromium for an empty page.
+   */
+  idle?: boolean
 }
 
 export interface BrowserBackendDecision {
@@ -132,8 +138,9 @@ export function bestLocalDesktopBackend(
  * - `local-chromium` — only once installed.
  * - `user-chrome` — only when a debuggable Chrome was discovered. It is never
  *   picked without being asked for: attaching prompts the user in Chrome.
- * - no preference — local Chromium for public / unknown pages once installed,
- *   the embedded webview for loopback pages and when nothing is installed.
+ * - no preference — local Chromium once installed, for every page with an
+ *   address; the embedded webview for an empty pane and when nothing is
+ *   installed.
  */
 export function resolveDesktopBackend(
   inputs: BrowserBackendInputs,
@@ -150,7 +157,7 @@ export function resolveDesktopBackend(
         : "embedded-host",
   })
   const automatic = (): BrowserBackendDecision => {
-    if (decision.localReachable && inputs.targetTier !== "trusted") {
+    if (decision.localReachable && !inputs.idle) {
       return { ...decision, backend: "local-chromium", reason: "local-ready" }
     }
     return embeddedDefault()

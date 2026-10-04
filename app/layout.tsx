@@ -48,6 +48,7 @@ import { ImNotifyInitializer } from "@/components/providers/initializers/im-noti
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
+import { DockPagesLifecycleInitializer } from "@/components/providers/initializers/dock-pages-lifecycle-initializer"
 import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DeferredBootInitializers } from "@/components/providers/initializers/deferred-boot-initializers"
 import { BootCapabilityRouteActivator } from "@/components/providers/initializers/boot-capability-route-activator"
@@ -339,6 +340,9 @@ export default async function RootLayout({
                                  * (reveal intents, workspace target, artifact-list
                                  * filters) whenever the focused conversation changes. */}
                                 <SessionFocusInitializer />
+                                {/* The chat dock's page tabs: a conversation's pages
+                                 * follow it into the background and back (ADR-0214). */}
+                                <DockPagesLifecycleInitializer />
                                 {/* Single keydown listener for all rebindable in-app
                                  * (renderer-scope) shortcuts. Reads the context-key
                                  * store, so it mounts after ContextKeysInitializer. */}

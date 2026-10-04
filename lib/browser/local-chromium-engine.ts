@@ -137,15 +137,36 @@ function userChromeOnly(feature: string): BrowserSessionError {
   )
 }
 
+export interface LocalEngineOptions {
+  /**
+   * The tab every operation addresses (`pageId` on the runtime op) instead of
+   * the one in front. Several tasks share one local session (ADR-0214), so an
+   * engine working for one of them names its own tab; without it the engine
+   * acts on whatever page the screencast is showing.
+   */
+  pageId?: string
+}
+
 export class LocalChromiumEngine implements BrowserEngine {
+  /** The addressed tab, if any — see {@link LocalEngineOptions.pageId}. */
+  public readonly pageId: string | null
+
   constructor(
     public readonly sessionId: string,
-    public readonly backend: LocalEngineBackend
-  ) {}
+    public readonly backend: LocalEngineBackend,
+    options: LocalEngineOptions = {}
+  ) {
+    this.pageId = options.pageId ?? null
+  }
 
   private async op<T>(op: string, payload: Record<string, unknown> = {}): Promise<T> {
     try {
-      return await localBrowser.rpc<T>(op, { sessionId: this.sessionId, ...payload })
+      // A payload's own `pageId` (activate / close / detect-login …) wins.
+      return await localBrowser.rpc<T>(op, {
+        sessionId: this.sessionId,
+        ...(this.pageId ? { pageId: this.pageId } : {}),
+        ...payload,
+      })
     } catch (error) {
       throw toLocalBrowserError(error)
     }
@@ -218,9 +239,19 @@ export class LocalChromiumEngine implements BrowserEngine {
   closePage(pageId: string): Promise<void> {
     return this.op("browser.page.close", { pageId })
   }
-  createPage(url?: string): Promise<BrowserPageSummary | BrowserActionResult> {
+  /**
+   * Open a tab. `activate: false` opens it behind the page in front, leaving
+   * the screencast where it is.
+   */
+  createPage(
+    url?: string,
+    options: { activate?: boolean } = {}
+  ): Promise<BrowserPageSummary | BrowserActionResult> {
     emitAgentActivity(url ? `new page ${url}` : "new page")
-    return this.op("browser.page.create", url === undefined ? {} : { url })
+    return this.op("browser.page.create", {
+      ...(url === undefined ? {} : { url }),
+      ...(options.activate === false ? { activate: false } : {}),
+    })
   }
   drag(sourceRef: string, targetRef: string): Promise<BrowserActionResult> {
     emitAgentActivity(`drag ${sourceRef}`)

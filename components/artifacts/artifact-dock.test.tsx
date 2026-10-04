@@ -65,7 +65,8 @@ jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
   useResourceWorkbenchSession: () => ({ id: "artifact-resource-session" }),
 }))
 jest.mock("@/hooks/context-workbench/use-context-workbench-instance-id", () => ({
-  useContextWorkbenchInstanceId: () => "test-workbench",
+  getContextWorkbenchWindowScope: () => "test",
+  useContextWorkbenchInstanceId: (hostKey: string) => `test:${hostKey}`,
 }))
 
 jest.mock("@/lib/files/workspace-backend", () => ({
@@ -138,14 +139,30 @@ jest.mock("@/components/context-workbench/context-comments-panel", () => ({
 
 const mockBrowserPreviewCleanup = jest.fn()
 jest.mock("@/components/browser/browser-preview-pane", () => ({
-  BrowserPreviewPane: ({ sessionId }: { sessionId?: string }) => {
+  BrowserPreviewPane: ({
+    sessionId,
+    initialUrl,
+    dockPage,
+  }: {
+    sessionId?: string
+    initialUrl?: string
+    dockPage?: { owner: string; tabId: string; engine: string }
+  }) => {
     useEffect(
       () => () => {
         mockBrowserPreviewCleanup()
       },
       []
     )
-    return <div data-testid="browser-preview" data-session={sessionId ?? ""} />
+    return (
+      <div
+        data-testid="browser-preview"
+        data-session={sessionId ?? ""}
+        data-url={initialUrl ?? ""}
+        data-owner={dockPage?.owner ?? ""}
+        data-engine={dockPage?.engine ?? ""}
+      />
+    )
   },
 }))
 
@@ -224,6 +241,8 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { revealActiveWorkbenchPanel } from "@/lib/context-workbench/active-context"
+import { openDockPage } from "@/lib/artifacts/dock-pages"
+import { useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
 
 /** Open a conversation tool the way a user does: `+`, then the tool. */
 function openFromNewTab(panelId: string) {
@@ -247,9 +266,23 @@ function addSecondArtifact() {
   })
 }
 
+/** A remembered page tab, without showing it. */
+function seedPageTab(url = "https://a.test/") {
+  act(() =>
+    useDockTabsStore.getState().addPageTab("sess-1", { id: "pt-1", url, title: "", engine: "auto" })
+  )
+}
+
+/** Open an address as a page tab of the conversation on screen. */
+function openPage(url = "https://a.test/") {
+  act(() => {
+    openDockPage("sess-1", url)
+  })
+}
+
 /** The panel a scope is currently showing, per the workbench's own store. */
 function activePanelId(scope: "artifact:artifact-1" | "session:sess-1") {
-  return useContextWorkbenchStore.getState().layouts[`test-workbench::${scope}`]?.activePanelId
+  return useContextWorkbenchStore.getState().layouts[`test:artifact::${scope}`]?.activePanelId
 }
 
 function activateArtifact(version = 1) {
@@ -295,6 +328,7 @@ beforeEach(() => {
       sessionOverrides: {},
       navigationStyle: "rail",
     })
+    useDockTabsStore.setState({ bySession: {} })
   })
 })
 
@@ -341,7 +375,7 @@ describe("ArtifactDock — converged workbench shell", () => {
   })
 
   it("unmounts the browser renderer when the entire workspace collapses to rail-only", () => {
-    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    openPage()
     const { rerender } = render(<ArtifactDock />)
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
     mockBrowserPreviewCleanup.mockClear()
@@ -363,23 +397,54 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("context-workbench-activity-attention")).toBeInTheDocument()
   })
 
-  it("opens the browser inside the same workbench chrome, scoped to the chat session", () => {
-    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+  it("shows a page tab inside the same workbench chrome, owned by the chat session", () => {
+    openPage("http://localhost:5173/")
     render(<ArtifactDock />)
 
-    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "localhost:5173" })).toHaveAttribute(
       "aria-selected",
       "true"
     )
-    expect(screen.queryByTestId("artifact-dock-mode-browser")).not.toBeInTheDocument()
-    expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-session", "sess-1")
+    // The browser panel is what renders the tab; it is not a tab of its own.
+    expect(screen.queryByRole("tab", { name: "browser.title" })).toBeNull()
+    const preview = screen.getByTestId("browser-preview")
+    expect(preview).toHaveAttribute("data-session", "sess-1")
+    expect(preview).toHaveAttribute("data-owner", "chat:sess-1")
+    expect(preview).toHaveAttribute("data-url", "http://localhost:5173/")
     expect(screen.queryByTestId("panel-content")).not.toBeInTheDocument()
   })
 
-  it("opens the browser as its own tab, keeping the artifact one click away", () => {
+  it("shows each page tab in its own pane", () => {
+    openPage("https://one.test/")
+    openPage("https://two.test/")
+    render(<ArtifactDock />)
+    expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-url", "https://two.test/")
+    fireEvent.click(screen.getByRole("tab", { name: "one.test" }))
+    expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-url", "https://one.test/")
+  })
+
+  it("opens a browser reveal on what the conversation has open, else the New Tab page", () => {
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    const { unmount } = render(<ArtifactDock />)
+    expect(activePanelId("session:sess-1")).toBe("new-tab")
+    unmount()
+
+    openPage("https://kept.test/")
+    act(() =>
+      useContextWorkbenchStore
+        .getState()
+        .navigatePanel("test:artifact::session:sess-1", "metadata", "narrow")
+    )
+    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    render(<ArtifactDock />)
+    expect(activePanelId("session:sess-1")).toBe("browser")
+    expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-url", "https://kept.test/")
+  })
+
+  it("opens a page as its own tab, keeping the artifact one click away", () => {
     activateArtifact()
     openArtifactTabs("artifact-1")
-    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    openPage()
     render(<ArtifactDock />)
 
     // The artifact is parked, not closed: drawn on the artifact surface the
@@ -387,26 +452,20 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
     expect(useArtifactStore.getState().activeArtifactIdBySession["sess-1"]).toBeNull()
     expect(activePanelId("session:sess-1")).toBe("browser")
-    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    )
+    expect(screen.getByRole("tab", { name: "a.test" })).toHaveAttribute("aria-selected", "true")
 
     fireEvent.click(screen.getByRole("tab", { name: "Document" }))
 
     expect(useArtifactStore.getState().activeArtifactIdBySession["sess-1"]).toBe("artifact-1")
     expect(screen.getByTestId("panel-content")).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
-      "aria-selected",
-      "false"
-    )
+    expect(screen.getByRole("tab", { name: "a.test" })).toHaveAttribute("aria-selected", "false")
   })
 
-  it("keeps the browser's tab on the strip across artifact tab switches", () => {
+  it("keeps a page tab on the strip across artifact tab switches", () => {
     activateArtifact()
     addSecondArtifact()
     openArtifactTabs("artifact-1", "artifact-2")
-    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    openPage()
     render(<ArtifactDock />)
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
 
@@ -415,14 +474,14 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     // The page belongs to the conversation, so its tab outlives the switch and
     // brings the browser straight back.
-    fireEvent.click(screen.getByRole("tab", { name: "browser.title" }))
+    fireEvent.click(screen.getByRole("tab", { name: "a.test" }))
     expect(screen.getByTestId("browser-preview")).toHaveAttribute("data-session", "sess-1")
   })
 
   it("opens a tool from the New Tab page in that page's place on the strip", () => {
     activateArtifact()
     openArtifactTabs("artifact-1")
-    act(() => useArtifactDockLayoutStore.getState().openBrowser())
+    openPage()
     render(<ArtifactDock />)
     expect(screen.getByTestId("browser-preview")).toBeInTheDocument()
 
@@ -431,7 +490,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(activePanelId("session:sess-1")).toBe("workspace")
     expect(screen.getByTestId("workspace")).toHaveAttribute("data-session", "sess-1")
     const names = screen.getAllByRole("tab").map((tab) => tab.textContent)
-    expect(names).toEqual(["browser.title", "artifacts.dock.workspaceMode", "Document"])
+    expect(names).toEqual(["artifacts.dock.workspaceMode", "Document", "a.test"])
   })
 
   it("keeps the conversation project overview reachable while an artifact is open", () => {
@@ -586,6 +645,8 @@ describe("ArtifactDock — converged workbench shell", () => {
   // each of the four host paths has to re-open its own container first.
   describe("re-opening the container for an external reveal", () => {
     it("re-opens the collapsed dock from the session surface", () => {
+      // A page to show: with none, a browser reveal lands on the New Tab page.
+      seedPageTab()
       act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
       render(<ArtifactDock />)
       act(() => {
@@ -653,7 +714,7 @@ describe("ArtifactDock — converged workbench shell", () => {
   // empty on the view users see most — every conversation that has not opened
   // an artifact yet.
   describe("session surface — inspect and comments", () => {
-    const SESSION_SCOPE = "test-workbench::session:sess-1"
+    const SESSION_SCOPE = "test:artifact::session:sess-1"
 
     it("shows the conversation's own metadata under inspect", () => {
       mockSessionRecord = {
@@ -892,7 +953,7 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.focus" }))
     expect(
-      useContextWorkbenchStore.getState().layouts["test-workbench::artifact:artifact-1"]?.mode
+      useContextWorkbenchStore.getState().layouts["test:artifact::artifact:artifact-1"]?.mode
     ).toBe("focus")
 
     // ⌘J, the Views menu and the chat-header toggle all write `dockCollapsed`
@@ -902,7 +963,7 @@ describe("ArtifactDock — converged workbench shell", () => {
     act(() => useArtifactDockLayoutStore.getState().toggleDock())
 
     expect(
-      useContextWorkbenchStore.getState().layouts["test-workbench::artifact:artifact-1"]?.mode
+      useContextWorkbenchStore.getState().layouts["test:artifact::artifact:artifact-1"]?.mode
     ).toBe("narrow")
   })
 
@@ -944,6 +1005,7 @@ describe("ArtifactDock — converged workbench shell", () => {
         artifacts: {},
       })
     )
+    seedPageTab()
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
 
@@ -1040,6 +1102,7 @@ describe("ArtifactDock — converged workbench shell", () => {
 
   it("carries the width through a reveal published from outside the workbench", () => {
     activateArtifact()
+    seedPageTab()
     act(() => useArtifactDockLayoutStore.getState().openBrowser())
     render(<ArtifactDock />)
 
@@ -1114,7 +1177,7 @@ describe("ArtifactDock — converged workbench shell", () => {
   it("never lets the workbench's own width or resize handle reach the chat dock", () => {
     activateArtifact()
     act(() =>
-      useContextWorkbenchStore.getState().setWidth("test-workbench::artifact:artifact-1", 800)
+      useContextWorkbenchStore.getState().setWidth("test:artifact::artifact:artifact-1", 800)
     )
     render(<ArtifactDock />)
 
@@ -1356,7 +1419,7 @@ it("does not expose the old live record while the new session query resolves", (
   act(() =>
     useContextWorkbenchStore
       .getState()
-      .navigatePanel("test-workbench::session:sess-1", "metadata", "narrow")
+      .navigatePanel("test:artifact::session:sess-1", "metadata", "narrow")
   )
   expect(screen.queryByTestId("session-overview-panel")).not.toBeInTheDocument()
   mockSessionRecord = { id: "sess-1", model: "new-model", createdAt: 0, updatedAt: 0 }

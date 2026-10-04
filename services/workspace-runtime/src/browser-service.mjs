@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks"
 import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -57,8 +58,38 @@ function pageSummary(record, pageId, activePageId) {
       url,
       title,
       active: pageId === activePageId,
+      ...(record.openerPageId ? { openerId: record.openerPageId } : {}),
     })
   )
+}
+
+/**
+ * The page an operation was addressed to (`payload.pageId`), for as long as
+ * that operation runs — awaits and callbacks included.
+ *
+ * Every page-level operation acts on "the page" without naming it. That used
+ * to mean the session's active page, the one the screencast shows, which was
+ * fine while one viewer and one agent shared one tab. Several conversations
+ * now keep their own tabs in one session (ADR-0214, D10): a background task's
+ * agent must keep driving its own page while the user looks at another one.
+ * An addressed operation resolves "the page" to the one it named; an
+ * unaddressed one still means the active page, so every existing caller keeps
+ * its meaning.
+ */
+const pageTarget = new AsyncLocalStorage()
+
+/**
+ * The per-page half of the action bookkeeping: an in-flight action, the
+ * dialog it ran into, and who is waiting to hear about one. Kept per page so
+ * an action on one tab neither waits for nor is refused by another tab's.
+ */
+function newActionLane() {
+  return {
+    pendingDialog: null,
+    pendingAction: null,
+    dialogWaiters: new Set(),
+    actionInFlight: false,
+  }
 }
 
 function assertProfileId(profileId) {
@@ -325,8 +356,6 @@ export class RemoteChromiumService {
       pages: new Map(),
       pageIds: new WeakMap(),
       activePageId: null,
-      console: [],
-      network: [],
       requests: new Map(),
       requestSeq: 0,
       blockedDomains: new Set(),
@@ -338,13 +367,12 @@ export class RemoteChromiumService {
       // launch when the profile carries the imported-cookies marker: every
       // response may be authenticated with the user's real credentials.
       cookiesImported: false,
-      pendingDialog: null,
       // Local mode: the page's file chooser waiting for the user's staged
       // files (`filechooser.opened` → `browser.filechooser.set`).
       pendingFileChooser: null,
-      pendingAction: null,
-      dialogWaiters: new Set(),
-      actionInFlight: false,
+      // Actions that address no existing page yet (`browser.page.create`).
+      // Every page record carries its own lane (`newActionLane`).
+      actionLane: newActionLane(),
       closing: false,
       restarting: false,
       pagesChangedTimer: null,
@@ -486,7 +514,7 @@ export class RemoteChromiumService {
     this.sessions.set(id, session)
     await context.addInitScript(this.overlayScript)
     await context.route("**/*", async (route) => this.authorizeRoute(session, route))
-    context.on("page", (page) => this.registerPage(session, page))
+    context.on("page", (page) => this.onContextPage(session, page))
     context.on("close", () => {
       void this.handleConnectionClosed(session).catch(() => undefined)
     })
@@ -606,7 +634,7 @@ export class RemoteChromiumService {
       this.onCredentialSubmitted(session, source, payload)
     )
     await context.addInitScript(CREDENTIAL_CAPTURE_SCRIPT)
-    context.on("page", (page) => this.registerPage(session, page))
+    context.on("page", (page) => this.onContextPage(session, page))
     context.on("close", () => {
       if (session.context !== context) return
       void this.handleConnectionClosed(session).catch(() => undefined)
@@ -728,11 +756,76 @@ export class RemoteChromiumService {
   async adoptUserChromePopup(session, page) {
     if (session.pageIds.get(page)) return
     const opener = typeof page.opener === "function" ? await page.opener() : null
-    if (!opener || !session.pageIds.get(opener)) return
+    const openerId = opener ? session.pageIds.get(opener) : undefined
+    if (!openerId) return
     const targetId = await this.pageTargetId(session, page).catch(() => null)
     if (targetId) session.targetIds.add(targetId)
     await page.addInitScript(this.overlayScript)
-    this.registerPage(session, page)
+    const pageId = this.registerPage(session, page)
+    if (pageId) await this.linkOpener(session, pageId, openerId)
+  }
+
+  /** A page the browser context opened: register it, then find out who opened it. */
+  onContextPage(session, page) {
+    const pageId = this.registerPage(session, page)
+    if (!pageId) return
+    void this.adoptOpener(session, page, pageId).catch(() => undefined)
+  }
+
+  async adoptOpener(session, page, pageId) {
+    const opener = typeof page.opener === "function" ? await page.opener() : null
+    const openerId = opener ? session.pageIds.get(opener) : undefined
+    if (openerId) await this.linkOpener(session, pageId, openerId)
+  }
+
+  /**
+   * Record that `openerId` opened `pageId` (reported as `openerId`, so a
+   * client can give the popup to whoever owns its opener), and bring the
+   * popup forward when its opener was the page in front — what a browser does
+   * when the tab you are using opens a window.
+   */
+  async linkOpener(session, pageId, openerId) {
+    const record = session.pages.get(pageId)
+    if (!record || pageId === openerId) return
+    record.openerPageId = openerId
+    this.schedulePagesChanged(session)
+    if (session.activePageId === openerId) await this.setActivePage(session, pageId)
+  }
+
+  /**
+   * Put `pageId` in front: the page unaddressed operations act on and the one
+   * the screencast shows. The screencast follows here — it is attached to one
+   * page, so switching tabs without moving it kept streaming the old tab.
+   */
+  async setActivePage(session, pageId) {
+    if (!session.pages.has(pageId)) {
+      throw new RemoteBrowserError("browser_page_not_found", "Page not found")
+    }
+    if (session.activePageId !== pageId) {
+      session.activePageId = pageId
+      this.schedulePagesChanged(session)
+    }
+    await this.retargetScreencast(session)
+  }
+
+  /**
+   * Re-attach a running screencast to the page in front, if it is on another
+   * one. Serialized per session: two quick tab switches must not leave two
+   * screencasts attached, or the last one detached.
+   */
+  retargetScreencast(session) {
+    const run = async () => {
+      const request = session.screencastRequest
+      if (!request || session.closing || session.restarting) return
+      if (session.screencast?.pageId === session.activePageId) return
+      if (session.screencast) await this.stopScreencast(session.id).catch(() => undefined)
+      if (!session.activePageId) return
+      await this.startScreencast(session.id, request.onFrame, { quality: request.quality })
+    }
+    session.screencastRetarget = (session.screencastRetarget ?? Promise.resolve())
+      .then(run)
+      .catch(() => undefined)
+    return session.screencastRetarget
   }
 
   onCredentialSubmitted(session, source, payload) {
@@ -811,10 +904,24 @@ export class RemoteChromiumService {
       return null
     }
     const pageId = this.createId()
-    const record = { page, generation: 0, cdp: null, emulationCdp: null }
+    const record = {
+      page,
+      generation: 0,
+      cdp: null,
+      emulationCdp: null,
+      openerPageId: null,
+      console: [],
+      network: [],
+      ...newActionLane(),
+    }
     session.pageIds.set(page, pageId)
     session.pages.set(pageId, record)
-    session.activePageId = pageId
+    // A new page takes the front only when nothing has it yet. Who else gets
+    // it is decided by whoever opened the page: `createPage` (when asked to
+    // activate) and a popup whose opener was in front (`adoptOpener`). A tab
+    // opened for a task in the background must not swap the page the user is
+    // watching.
+    if (session.activePageId === null) session.activePageId = pageId
     this.schedulePagesChanged(session)
     page.on("close", () => {
       void this.dismissPendingDialog(session, pageId).catch(() => undefined)
@@ -823,6 +930,7 @@ export class RemoteChromiumService {
       this.invalidatePage(session.id, pageId)
       if (session.activePageId === pageId) {
         session.activePageId = session.pages.keys().next().value ?? null
+        void this.retargetScreencast(session)
       }
       this.schedulePagesChanged(session)
     })
@@ -849,32 +957,38 @@ export class RemoteChromiumService {
       })
     }
     page.on("dialog", (dialog) => {
-      if (session.pendingDialog) {
+      if (record.pendingDialog) {
         void dialog.dismiss().catch(() => undefined)
         return
       }
       const pending = {
         dialog,
         pageId,
+        /** The lane whose action ran into this dialog, once one claims it. */
+        lane: null,
         metadata: {
           type: dialog.type(),
           message: dialog.message(),
           defaultValue: dialog.defaultValue(),
         },
       }
-      session.pendingDialog = pending
+      record.pendingDialog = pending
       this.emit({
         type: "dialog.opened",
         sessionId: session.id,
         pageId,
         dialog: pending.metadata,
       })
-      for (const resolve of session.dialogWaiters) resolve(pending)
+      // This page's own action, or a page-less one (a tab still being
+      // created) — never an action running on another tab.
+      for (const resolve of [...record.dialogWaiters, ...session.actionLane.dialogWaiters]) {
+        resolve(pending)
+      }
     })
     page.on("console", (message) => {
       const type = message.type()
       const text = message.text()
-      session.console.push({
+      record.console.push({
         level: ["log", "info", "warn", "error", "debug"].includes(type) ? type : "log",
         text: session.humanKeyboardInputOccurred || SECRET_FIELD.test(text) ? "[REDACTED]" : text,
         ts: Date.now(),
@@ -895,7 +1009,7 @@ export class RemoteChromiumService {
       if (session.requests.size > MAX_TRACKED_REQUESTS) {
         session.requests.delete(session.requests.keys().next().value)
       }
-      session.network.push({
+      record.network.push({
         id: requestId,
         url: requestUrl.toString(),
         method: request.method(),
@@ -947,54 +1061,66 @@ export class RemoteChromiumService {
     return this.pageSummaries(session)
   }
 
+  /**
+   * Bring a tab forward. A dialog pending on another tab does not stop it:
+   * that dialog belongs to its own tab and stays pending there.
+   */
   async activatePage(sessionId, pageId) {
     const session = this.requireSession(sessionId)
-    this.assertNoPendingDialog(session)
     const record = session.pages.get(pageId)
     if (!record) throw new RemoteBrowserError("browser_page_not_found", "Page not found")
     await record.page.bringToFront()
-    session.activePageId = pageId
-    this.schedulePagesChanged(session)
+    await this.setActivePage(session, pageId)
   }
 
+  /** Close a tab, dismissing a dialog it was holding open rather than refusing. */
   async closePage(sessionId, pageId) {
     const session = this.requireSession(sessionId)
-    this.assertNoPendingDialog(session)
     const record = session.pages.get(pageId)
     if (!record) throw new RemoteBrowserError("browser_page_not_found", "Page not found")
+    await this.dismissPendingDialog(session, pageId)
     await record.page.close()
   }
 
-  async createPage(sessionId, url = "about:blank") {
+  /**
+   * Open a tab. `activate: false` opens it behind the page in front — a tab
+   * for a task the user is not looking at — and leaves the screencast alone.
+   */
+  async createPage(sessionId, url = "about:blank", { activate = true } = {}) {
     const session = this.requireSession(sessionId)
     if (session.pages.size >= this.maxPages) {
       throw new RemoteBrowserError("browser_page_quota_exceeded", "Page quota exceeded")
     }
     if (url !== "about:blank") await session.policy.authorize(url, session.grants)
-    return this.runActionWithDialog(session, 0, async () => {
-      let page
-      let pageId
-      if (session.kind === "user-chrome") {
-        ;({ page, pageId } = await this.openUserChromeTab(session, {
-          newWindow: session.pages.size === 0,
-        }))
-      } else {
-        page = await session.context.newPage()
-        pageId = this.registerPage(session, page)
-      }
-      if (!pageId)
-        throw new RemoteBrowserError("browser_page_quota_exceeded", "Page quota exceeded")
-      if (url !== "about:blank") await page.goto(url, { waitUntil: "domcontentloaded" })
-      session.activePageId = pageId
-      this.schedulePagesChanged(session)
-      const record = session.pages.get(pageId)
-      return pageSummary(record, pageId, pageId)
-    })
+    return this.runActionWithDialog(
+      session,
+      0,
+      async () => {
+        let page
+        let pageId
+        if (session.kind === "user-chrome") {
+          ;({ page, pageId } = await this.openUserChromeTab(session, {
+            newWindow: session.pages.size === 0,
+          }))
+        } else {
+          page = await session.context.newPage()
+          pageId = this.registerPage(session, page)
+        }
+        if (!pageId)
+          throw new RemoteBrowserError("browser_page_quota_exceeded", "Page quota exceeded")
+        if (url !== "about:blank") await page.goto(url, { waitUntil: "domcontentloaded" })
+        if (activate) await this.setActivePage(session, pageId)
+        this.schedulePagesChanged(session)
+        const record = session.pages.get(pageId)
+        return pageSummary(record, pageId, session.activePageId)
+      },
+      session.actionLane
+    )
   }
 
   async navigate(sessionId, url) {
     const session = this.requireSession(sessionId)
-    const { page, record } = this.activeRecord(session)
+    const { pageId, page, record } = this.activeRecord(session)
     const fromUrl = page.url()
     await session.policy.authorize(url, session.grants)
     return this.runActionWithDialog(session, record.generation, async () => {
@@ -1011,7 +1137,7 @@ export class RemoteChromiumService {
         await page.evaluate(() => window.stop()).catch(() => undefined)
         throw error
       }
-      this.invalidatePage(session.id, session.activePageId)
+      this.invalidatePage(session.id, pageId)
       await this.applyZoom(session)
       return { ok: true, error: null, generation: record.generation }
     })
@@ -1141,13 +1267,19 @@ export class RemoteChromiumService {
     })
   }
 
+  /**
+   * Answer a dialog: the addressed page's, else the one in front, else — for a
+   * caller that cannot know which tab raised it — whichever tab has one.
+   */
   async handleDialog(sessionId, { accept, promptText } = {}) {
     const session = this.requireSession(sessionId)
-    const pending = session.pendingDialog
+    const pending = this.pendingDialogFor(session)
     if (!pending) {
       throw new RemoteBrowserError("browser_dialog_not_found", "No browser dialog is pending")
     }
-    const action = session.pendingAction
+    const holder = session.pages.get(pending.pageId)
+    const lane = pending.lane
+    const action = lane?.pendingAction ?? null
     try {
       if (accept) await pending.dialog.accept(promptText)
       else await pending.dialog.dismiss()
@@ -1159,17 +1291,31 @@ export class RemoteChromiumService {
           actionError = error instanceof Error ? error.message : String(error)
         }
       }
-      const record = session.pages.get(pending.pageId)
       return {
         ok: actionError === null,
         error: actionError,
-        generation: record?.generation ?? 0,
+        generation: holder?.generation ?? 0,
       }
     } finally {
-      session.pendingDialog = null
-      session.pendingAction = null
-      session.actionInFlight = false
+      if (holder?.pendingDialog === pending) holder.pendingDialog = null
+      if (lane) {
+        lane.pendingAction = null
+        lane.actionInFlight = false
+      }
     }
+  }
+
+  pendingDialogFor(session) {
+    const target = pageTarget.getStore()
+    if (target && target.sessionId === session.id) {
+      return session.pages.get(target.pageId)?.pendingDialog ?? null
+    }
+    const active = session.activePageId ? session.pages.get(session.activePageId) : null
+    if (active?.pendingDialog) return active.pendingDialog
+    for (const record of session.pages.values()) {
+      if (record.pendingDialog) return record.pendingDialog
+    }
+    return null
   }
 
   async pressKey(sessionId, key, reference = "") {
@@ -1310,14 +1456,16 @@ export class RemoteChromiumService {
     return { ok: true }
   }
 
+  /** The addressed (else the front) page's console since the last read. */
   async readConsole(sessionId) {
-    const session = this.requireSession(sessionId)
-    return session.console.splice(0)
+    const record = this.addressedRecordOrNull(this.requireSession(sessionId))
+    return record ? record.console.splice(0) : []
   }
 
+  /** The addressed (else the front) page's requests since the last read. */
   async readNetwork(sessionId) {
-    const session = this.requireSession(sessionId)
-    return session.network.splice(0)
+    const record = this.addressedRecordOrNull(this.requireSession(sessionId))
+    return record ? record.network.splice(0) : []
   }
 
   async history(sessionId, operation) {
@@ -1523,13 +1671,20 @@ export class RemoteChromiumService {
       .map((download) => ({ ...download, backend: "remote" }))
   }
 
+  /**
+   * Stream the page in front — never an addressed one: the screencast is what
+   * the user sees, and `setActivePage` moves it when the front page changes.
+   */
   async startScreencast(sessionId, onFrame, { quality = 70 } = {}) {
     const session = this.requireSession(sessionId)
-    const { page } = this.activeRecord(session)
+    const pageId = session.activePageId
+    const record = pageId ? session.pages.get(pageId) : null
+    if (!record) throw new RemoteBrowserError("browser_page_not_found", "No active page")
+    const { page } = record
     if (session.screencast) await this.stopScreencast(sessionId)
     session.screencastRequest = { onFrame, quality }
     const cdp = await session.context.newCDPSession(page)
-    const state = { cdp, sequence: 0, pending: null }
+    const state = { cdp, pageId, sequence: 0, pending: null }
     session.screencast = state
     cdp.on("Page.screencastFrame", async (event) => {
       if (state.pending) return
@@ -2026,7 +2181,7 @@ export class RemoteChromiumService {
 
   async detectLoginForms(sessionId, { pageId } = {}) {
     const session = this.requireSession(sessionId)
-    this.assertNoPendingDialog(session)
+    this.assertNoPendingDialog(session, pageId)
     const target = this.pageRecord(session, pageId)
     const forms = await this.collectLoginForms(session, target.pageId, target.page)
     return {
@@ -2061,7 +2216,7 @@ export class RemoteChromiumService {
   async fillCredential(sessionId, { pageId, username, password, origin } = {}) {
     this.assertLocalMode("browser.credential.fill")
     const session = this.requireSession(sessionId)
-    this.assertNoPendingDialog(session)
+    this.assertNoPendingDialog(session, pageId)
     if (typeof password !== "string" || !password) {
       throw new RemoteBrowserError("browser_credential_invalid", "A password is required")
     }
@@ -2124,7 +2279,7 @@ export class RemoteChromiumService {
    */
   async pdf(sessionId, options = {}) {
     const session = this.requireSession(sessionId)
-    this.assertNoPendingDialog(session)
+    this.assertNoPendingDialog(session, options.pageId)
     const { page } = this.pageRecord(session, options.pageId)
     const params = {
       transferMode: "ReturnAsBase64",
@@ -2196,7 +2351,7 @@ export class RemoteChromiumService {
    */
   async emulate(sessionId, options = {}) {
     const session = this.requireSession(sessionId)
-    this.assertNoPendingDialog(session)
+    this.assertNoPendingDialog(session, options.pageId)
     const { page, record } = this.pageRecord(session, options.pageId)
     const applied = []
     if (options.reset === true) {
@@ -2322,7 +2477,7 @@ export class RemoteChromiumService {
   }
 
   async storageEvaluate(session, pageId, fn, argument) {
-    this.assertNoPendingDialog(session)
+    this.assertNoPendingDialog(session, pageId)
     const { page } = this.pageRecord(session, pageId)
     try {
       return await pageMainFrame(page).evaluate(fn, argument)
@@ -2461,15 +2616,53 @@ export class RemoteChromiumService {
     return { closed }
   }
 
+  /**
+   * Run `operation` with every unaddressed page lookup inside it resolving to
+   * `pageId` (see `pageTarget`). The runtime server wraps an operation whose
+   * payload names a `pageId` in this.
+   */
+  withPageTarget(sessionId, pageId, operation) {
+    return pageTarget.run({ sessionId, pageId }, operation)
+  }
+
+  /**
+   * The page an operation acts on: the one it addressed (`withPageTarget`),
+   * else the page in front.
+   */
   activeRecord(session) {
-    const pageId = session.activePageId
+    const target = pageTarget.getStore()
+    const addressed = Boolean(target && target.sessionId === session.id)
+    const pageId = addressed ? target.pageId : session.activePageId
     const record = pageId ? session.pages.get(pageId) : null
-    if (!record) throw new RemoteBrowserError("browser_page_not_found", "No active page")
+    if (!record) {
+      throw new RemoteBrowserError(
+        "browser_page_not_found",
+        addressed ? "Page not found" : "No active page"
+      )
+    }
     return { pageId, record, page: record.page }
   }
 
-  assertNoPendingDialog(session) {
-    if (session.pendingDialog) {
+  /** `activeRecord`'s record, or null when the session has no such page. */
+  addressedRecordOrNull(session) {
+    try {
+      return this.activeRecord(session).record
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Refuse while the page an operation acts on (`pageId`, else the addressed
+   * or front page) is held by a dialog. A dialog on another tab is that tab's
+   * business.
+   */
+  assertNoPendingDialog(session, pageId) {
+    const record =
+      pageId === undefined || pageId === null
+        ? this.addressedRecordOrNull(session)
+        : session.pages.get(pageId)
+    if (record?.pendingDialog) {
       throw new RemoteBrowserError(
         "browser_dialog_pending",
         "Handle the pending browser dialog before performing another action"
@@ -2504,20 +2697,30 @@ export class RemoteChromiumService {
     }
   }
 
-  async runActionWithDialog(session, generation, action) {
-    this.assertNoPendingDialog(session)
-    if (session.actionInFlight) {
+  /**
+   * Run one dialog-aware action on `lane` — the addressed (else front) page's,
+   * or `session.actionLane` for an action no page exists for yet. One action
+   * at a time per lane: two tabs can each run one, a tab cannot run two.
+   */
+  async runActionWithDialog(session, generation, action, lane = this.activeRecord(session).record) {
+    if (lane.pendingDialog) {
+      throw new RemoteBrowserError(
+        "browser_dialog_pending",
+        "Handle the pending browser dialog before performing another action"
+      )
+    }
+    if (lane.actionInFlight) {
       throw new RemoteBrowserError(
         "browser_action_in_progress",
         "Another browser action is still in progress"
       )
     }
-    session.actionInFlight = true
+    lane.actionInFlight = true
     let resolveDialog
     const dialogPromise = new Promise((resolve) => {
       resolveDialog = resolve
     })
-    session.dialogWaiters.add(resolveDialog)
+    lane.dialogWaiters.add(resolveDialog)
     const actionPromise = Promise.resolve().then(action)
     let keepActionInFlight = false
     try {
@@ -2526,7 +2729,8 @@ export class RemoteChromiumService {
         dialogPromise.then((pending) => ({ kind: "dialog", pending })),
       ])
       if (outcome.kind === "dialog") {
-        session.pendingAction = actionPromise
+        outcome.pending.lane = lane
+        lane.pendingAction = actionPromise
         keepActionInFlight = true
         void actionPromise.catch(() => undefined)
         return {
@@ -2539,22 +2743,32 @@ export class RemoteChromiumService {
       }
       return outcome.result
     } finally {
-      session.dialogWaiters.delete(resolveDialog)
-      if (!keepActionInFlight) session.actionInFlight = false
+      lane.dialogWaiters.delete(resolveDialog)
+      if (!keepActionInFlight) lane.actionInFlight = false
     }
   }
 
+  /** Dismiss `pageId`'s pending dialog, or every tab's when no page is named. */
   async dismissPendingDialog(session, pageId) {
-    const pending = session.pendingDialog
-    if (!pending || (pageId && pending.pageId !== pageId)) return
-    try {
-      await pending.dialog.dismiss()
-      if (session.pendingAction) await Promise.allSettled([session.pendingAction])
-    } finally {
-      session.pendingDialog = null
-      session.pendingAction = null
-      session.actionInFlight = false
-    }
+    // Read synchronously: a closing page leaves `session.pages` right after this call starts.
+    const records = pageId ? [session.pages.get(pageId)] : [...session.pages.values()]
+    await Promise.allSettled(
+      records.map(async (record) => {
+        const pending = record?.pendingDialog
+        if (!pending) return
+        const lane = pending.lane
+        try {
+          await pending.dialog.dismiss()
+          if (lane?.pendingAction) await Promise.allSettled([lane.pendingAction])
+        } finally {
+          if (record.pendingDialog === pending) record.pendingDialog = null
+          if (lane) {
+            lane.pendingAction = null
+            lane.actionInFlight = false
+          }
+        }
+      })
+    )
   }
 
   requireSession(sessionId) {

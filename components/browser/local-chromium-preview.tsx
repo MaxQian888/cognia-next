@@ -13,9 +13,15 @@
  *
  * Tabs, downloads, native dialogs, file choosers (answered with files the
  * user picks and Rust stages under the upload root), extensions, cookie
- * import and the password
- * vault's autofill / save prompts all hang off the one runtime session that
- * `useLocalBrowserSession` owns.
+ * import and the password vault's autofill / save prompts all hang off the
+ * runtime session behind the pane:
+ *
+ * - Cognia's own Chromium is ONE session shared by every pane and agent
+ *   (`useSharedLocalBrowser`, ADR-0214). The pane shows its owner's pages — a
+ *   dock page tab's one page (`pageTag`, tab row hidden: the dock's strip is
+ *   the tab row), or a pane's own pages with its own tab row.
+ * - The user's own Chrome is a session of the pane's own
+ *   (`useLocalBrowserSession`), closed with the pane.
  */
 
 import {
@@ -34,8 +40,10 @@ import {
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -67,12 +75,18 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
-import { useLocalBrowserSession } from "@/hooks/browser/use-local-browser-session"
+import {
+  useLocalBrowserSession,
+  type LocalSessionState,
+} from "@/hooks/browser/use-local-browser-session"
+import { useSharedLocalBrowser } from "@/hooks/browser/use-shared-local-browser"
 import { useLocalFileChooser } from "@/hooks/browser/use-local-file-chooser"
 import { useRecentPages } from "@/hooks/browser/use-recent-pages"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { localBrowser, type UserChromeBrowser } from "@/lib/browser/local-client"
-import type { LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
+import type { LocalChromiumEngine, LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
+import type { BrowserPageSummary } from "@/lib/browser/session-types"
+import type { LocalBrowserDialog as LocalBrowserDialogState } from "@/lib/browser/shared-local-browser"
 import { canvasPointToFrame, decodeRemoteBrowserFrame } from "@/lib/browser/remote-stream"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
@@ -98,31 +112,48 @@ export interface LocalChromiumPreviewProps {
   requestNonce?: number
   /** The engine switch, drawn in the toolbar's overflow popover. */
   backendSwitcher?: ReactNode
+  /**
+   * Whose pages the pane shows in the shared Chromium session (`chat:<id>` for
+   * the dock). Absent: the pane's own, closed when it unmounts.
+   */
+  owner?: string
+  /** Show only the owner's page behind this tag — a dock page tab. */
+  pageTag?: string
+  /** Leave the tab row out: the dock's strip already lists the pages. */
+  hideTabRow?: boolean
+  /** Drawn first among the toolbar's page actions (the dock's engine chip). */
+  toolbarExtras?: ReactNode
 }
 
-export function LocalChromiumPreview({
-  backend,
-  userChromeBrowser,
-  chatSessionId,
-  initialUrl,
-  requestedUrl,
-  requestNonce,
-  backendSwitcher,
-}: LocalChromiumPreviewProps) {
-  const t = useTranslations("browserLocal.pane")
-  const tExt = useTranslations("browserLocal.extensions")
-  const tAddress = useTranslations("browserLocal.address")
-  const browserT = useTranslations("browser")
-  const actionsT = useTranslations("browser.actions")
-  const screenshotT = useTranslations("browser.screenshot")
-  const dialogT = useTranslations("browserLocal.dialog")
+/** What the pane body needs from whichever session is behind it. */
+interface PaneSession {
+  state: LocalSessionState
+  error: string | null
+  sessionId: string | null
+  engine: LocalChromiumEngine | null
+  pages: BrowserPageSummary[]
+  activePageId: string | null
+  dialog: LocalBrowserDialogState | null
+  answerDialog: (answer: { accept: boolean; promptText?: string }) => Promise<void>
+  refreshPages: () => Promise<void>
+  restart: () => void
+  restoring: boolean
+  selectPage: (pageId: string) => Promise<void> | void
+  createPage: () => Promise<void>
+  closePage: (pageId: string) => Promise<void>
+}
 
+interface FrameCanvas {
+  canvasRef: RefObject<HTMLCanvasElement | null>
+  frameSizeRef: RefObject<{ width: number; height: number }>
+  drawFrame: (bytes: Uint8Array) => void
+}
+
+/** The canvas the screencast is drawn into. */
+function useFrameCanvas(): FrameCanvas {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const toolbarRef = useRef<HTMLDivElement>(null)
   const frameSizeRef = useRef({ width: 1, height: 1 })
   const drawingRef = useRef(false)
-  const moveInFlightRef = useRef(false)
-
   const drawFrame = useCallback((bytes: Uint8Array) => {
     // Frames arrive faster than a bitmap decodes; drop the ones that land mid-draw.
     if (drawingRef.current) return
@@ -151,13 +182,90 @@ export function LocalChromiumPreview({
         drawingRef.current = false
       })
   }, [])
+  return { canvasRef, frameSizeRef, drawFrame }
+}
 
-  const session = useLocalBrowserSession({
-    backend,
-    userChromeBrowser,
-    initialUrl,
-    onFrame: drawFrame,
+export function LocalChromiumPreview(props: LocalChromiumPreviewProps) {
+  return props.backend === "user-chrome" ? (
+    <UserChromePreview {...props} />
+  ) : (
+    <SharedChromiumPreview {...props} />
+  )
+}
+
+/** Cognia's own Chromium: pages of the one shared session. */
+function SharedChromiumPreview(props: LocalChromiumPreviewProps) {
+  const canvas = useFrameCanvas()
+  const paneId = useId()
+  const session = useSharedLocalBrowser({
+    owner: props.owner ?? `pane:${paneId}`,
+    tag: props.pageTag,
+    initialUrl: props.initialUrl,
+    onFrame: canvas.drawFrame,
   })
+  return <LocalPreviewBody {...props} session={session} canvas={canvas} />
+}
+
+/** The user's own Chrome: a session of this pane's own. */
+function UserChromePreview(props: LocalChromiumPreviewProps) {
+  const canvas = useFrameCanvas()
+  const session = useLocalBrowserSession({
+    backend: props.backend,
+    userChromeBrowser: props.userChromeBrowser,
+    initialUrl: props.initialUrl,
+    onFrame: canvas.drawFrame,
+  })
+  const { engine, refreshPages, dismissDialog } = session
+  const pane = useMemo<PaneSession>(
+    () => ({
+      ...session,
+      restoring: false,
+      answerDialog: async (answer) => {
+        dismissDialog()
+        await engine?.handleDialog(answer)
+      },
+      selectPage: async (pageId) => {
+        await engine?.activatePage(pageId)
+        await refreshPages()
+      },
+      createPage: async () => {
+        await engine?.createPage()
+        await refreshPages()
+      },
+      closePage: async (pageId) => {
+        await engine?.closePage(pageId)
+        await refreshPages()
+      },
+    }),
+    [session, engine, refreshPages, dismissDialog]
+  )
+  return <LocalPreviewBody {...props} session={pane} canvas={canvas} />
+}
+
+function LocalPreviewBody({
+  backend,
+  chatSessionId,
+  initialUrl,
+  requestedUrl,
+  requestNonce,
+  backendSwitcher,
+  hideTabRow = false,
+  toolbarExtras,
+  session,
+  canvas,
+}: LocalChromiumPreviewProps & { session: PaneSession; canvas: FrameCanvas }) {
+  const t = useTranslations("browserLocal.pane")
+  const tExt = useTranslations("browserLocal.extensions")
+  const tAddress = useTranslations("browserLocal.address")
+  const browserT = useTranslations("browser")
+  const actionsT = useTranslations("browser.actions")
+  const screenshotT = useTranslations("browser.screenshot")
+  const dialogT = useTranslations("browserLocal.dialog")
+
+  const { canvasRef, frameSizeRef } = canvas
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const moveInFlightRef = useRef(false)
+
   const { engine, sessionId, pages, activePageId, state, refreshPages } = session
   // A file input clicked in the page: the user picks, Rust stages, the page gets the copies.
   useLocalFileChooser(sessionId)
@@ -187,7 +295,10 @@ export function LocalChromiumPreview({
     goForward: historyGoForward,
     canGoBack,
     canGoForward,
-  } = useBrowserHistory()
+    // Per page, so a page's back stack survives the dock switching tabs.
+  } = useBrowserHistory(
+    sessionId && activePageId ? `local:${sessionId}:${activePageId}` : undefined
+  )
   const { recent: recentHistory, clear: clearRecentPages } = useRecentPages()
   const { sendScreenshotBytes, sendText } = useSelectionToChat()
   const devtools = useBrowserDevtools({
@@ -322,9 +433,8 @@ export function LocalChromiumPreview({
   }
 
   const answerDialog = async (answer: { accept: boolean; promptText?: string }) => {
-    session.dismissDialog()
     try {
-      await engine?.handleDialog(answer)
+      await session.answerDialog(answer)
     } catch {
       toast.error(dialogT("failed"))
     }
@@ -404,6 +514,7 @@ export function LocalChromiumPreview({
           }
           pageActions={
             <>
+              {toolbarExtras}
               <BrowserZoomControl
                 zoom={zoom}
                 onZoomChange={(next) => {
@@ -463,49 +574,51 @@ export function LocalChromiumPreview({
           />
         )}
 
-        <div
-          className="flex items-center gap-1 overflow-x-auto border-b bg-muted/30 px-2 py-1"
-          role="tablist"
-          aria-label={t("tabs")}
-        >
-          {pages.map((page) => (
-            <div
-              key={page.id}
-              className={cn(
-                "flex min-w-28 max-w-52 items-center rounded-md border",
-                page.id === activePageId ? "bg-background" : "bg-muted/40"
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={page.id === activePageId}
-                className="min-w-0 flex-1 truncate px-2 py-1 text-left text-xs"
-                title={page.url}
-                onClick={() => run(() => engine?.activatePage(page.id))}
-              >
-                {page.title || page.url || t("untitled")}
-              </button>
-              <button
-                type="button"
-                className="p-1 text-muted-foreground hover:text-foreground"
-                aria-label={t("closeTab")}
-                onClick={() => run(() => engine?.closePage(page.id))}
-              >
-                <XIcon className="size-3" />
-              </button>
-            </div>
-          ))}
-          <TooltipIconButton
-            tooltip={t("newTab")}
-            aria-label={t("newTab")}
-            size="icon-xs"
-            disabled={!ready}
-            onClick={() => run(() => engine?.createPage())}
+        {hideTabRow ? null : (
+          <div
+            className="flex items-center gap-1 overflow-x-auto border-b bg-muted/30 px-2 py-1"
+            role="tablist"
+            aria-label={t("tabs")}
           >
-            <PlusIcon />
-          </TooltipIconButton>
-        </div>
+            {pages.map((page) => (
+              <div
+                key={page.id}
+                className={cn(
+                  "flex min-w-28 max-w-52 items-center rounded-md border",
+                  page.id === activePageId ? "bg-background" : "bg-muted/40"
+                )}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={page.id === activePageId}
+                  className="min-w-0 flex-1 truncate px-2 py-1 text-left text-xs"
+                  title={page.url}
+                  onClick={() => run(async () => session.selectPage(page.id))}
+                >
+                  {page.title || page.url || t("untitled")}
+                </button>
+                <button
+                  type="button"
+                  className="p-1 text-muted-foreground hover:text-foreground"
+                  aria-label={t("closeTab")}
+                  onClick={() => run(() => session.closePage(page.id))}
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </div>
+            ))}
+            <TooltipIconButton
+              tooltip={t("newTab")}
+              aria-label={t("newTab")}
+              size="icon-xs"
+              disabled={!ready}
+              onClick={() => run(() => session.createPage())}
+            >
+              <PlusIcon />
+            </TooltipIconButton>
+          </div>
+        )}
 
         {ready && activePage?.url && /^https?:/i.test(activePage.url) && (
           <BrowserAutofillPrompt
@@ -599,7 +712,9 @@ export function LocalChromiumPreview({
               aria-live="polite"
             >
               <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">{t("starting")}</p>
+              <p className="text-sm text-muted-foreground">
+                {session.restoring ? t("restoring") : t("starting")}
+              </p>
             </div>
           )}
           {(state === "failed" || state === "closed") && (

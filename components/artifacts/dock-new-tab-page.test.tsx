@@ -58,8 +58,14 @@ jest.mock("@/components/browser/local-content/browser-local-content-picker", () 
 jest.mock("@/components/browser/browser-backend-switcher", () => ({
   LocalChromiumInstall: () => <div data-testid="chromium-install" />,
 }))
+jest.mock("@/components/browser/extensions/browser-extensions-panel", () => ({
+  BrowserExtensionsPanel: ({ backend, sessionId }: { backend: string; sessionId?: string }) => (
+    <div data-testid="extensions-panel">{`${backend}:${sessionId ?? "settings"}`}</div>
+  ),
+}))
 
 const onOpenPanel = jest.fn()
+const onOpenPage = jest.fn()
 
 function local(installed: boolean | null, supported = true) {
   jest.mocked(useLocalBrowser).mockReturnValue({
@@ -84,14 +90,16 @@ function renderPage(props: Partial<DockNewTabPageProps> = {}) {
       sessionId="s1"
       messages={[]}
       onOpenPanel={onOpenPanel}
+      onOpenPage={onOpenPage}
       desktop={false}
       {...props}
     />
   )
 }
 
+/** The last address opened as a page tab in this tab's place. */
 function lastBrowserRequest() {
-  return useArtifactDockLayoutStore.getState().browserRequestUrl
+  return (onOpenPage.mock.calls.at(-1)?.[0] as string | undefined) ?? null
 }
 
 beforeEach(() => {
@@ -221,6 +229,27 @@ describe("DockNewTabPage tools", () => {
     expect(useTerminalStore.getState().panelOpen).toBe(true)
     expect(terminal).toHaveAttribute("aria-pressed", "true")
     expect(onOpenPanel).not.toHaveBeenCalled()
+  })
+
+  it("never offers the browser as a tool: pages open by address", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    expect(screen.queryByTestId("dock-new-tab-tool-browser")).toBeNull()
+    await user.click(screen.getByTestId("dock-new-tab-more-tools"))
+    expect(screen.queryByRole("menuitem", { name: "browser.title" })).toBeNull()
+  })
+
+  it("manages Chromium's extensions in a dialog once it is installed", async () => {
+    local(false)
+    const view = renderPage({ desktop: true })
+    expect(screen.queryByTestId("dock-new-tab-tool-extensions")).toBeNull()
+    view.unmount()
+    local(true)
+    renderPage({ desktop: true })
+    fireEvent.click(screen.getByTestId("dock-new-tab-tool-extensions"))
+    expect(await screen.findByTestId("extensions-panel")).toHaveTextContent(
+      "local-chromium:settings"
+    )
   })
 
   it("hides the terminal where there is none", () => {

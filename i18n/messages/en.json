@@ -5491,9 +5491,16 @@
       "canvas": "Local browser page",
       "closeTab": "Close tab",
       "closed": "The browser session ended.",
+      "engineChip": {
+        "chromium": "Chromium",
+        "lightweight": "Lightweight",
+        "toChromium": "Open in Chromium",
+        "toLightweight": "Open in lightweight preview (element pick, annotations, Adjust)"
+      },
       "failed": "The local browser could not start: {code}",
       "newTab": "New tab",
       "restart": "Start again",
+      "restoring": "Reopening this page…",
       "starting": "Starting the local browser…",
       "tabs": "Tabs",
       "untitled": "Untitled"
@@ -11142,7 +11149,11 @@
       "allTabs": "All tabs",
       "close": "Close {name}",
       "label": "Open in this task",
+      "lightweightBadge": "Lightweight preview",
       "newTab": "New tab",
+      "openInChromium": "Open in Chromium",
+      "openInDefaultBrowser": "Open in default browser",
+      "openInLightweight": "Open in lightweight preview",
       "resourceViews": "Views of this item"
     },
     "exportResourceSession": "Export this resource conversation",
@@ -11209,6 +11220,7 @@
       "changes": "Changes",
       "chromeWebStore": "Chrome Web Store",
       "chromeWebStoreHint": "Add extensions to the built-in Chromium",
+      "extensions": "Extensions",
       "go": "Go",
       "installTitle": "Pages open in the system webview until Chromium is installed",
       "moreTools": "More tools",

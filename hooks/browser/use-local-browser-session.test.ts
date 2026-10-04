@@ -199,6 +199,25 @@ it("adopts the agent's session for the same backend and drops its own", async ()
   expect(result.current.engine?.navigate).not.toHaveBeenCalled()
 })
 
+it("detaches from an adopted agent session on unmount instead of closing it", async () => {
+  const { result, unmount } = renderSession({ backend: "user-chrome", initialUrl: undefined })
+  await waitFor(() => expect(result.current.sessionId).toBe("pane-1"))
+  act(() => {
+    window.dispatchEvent(
+      new CustomEvent("cognia:browser:agent-local-session", {
+        detail: { sessionId: "agent-9", backend: "user-chrome" },
+      })
+    )
+  })
+  await waitFor(() => expect(result.current.state).toBe("ready"))
+  expect(result.current.sessionId).toBe("agent-9")
+  unmount()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(client.closeSession).not.toHaveBeenCalledWith("agent-9")
+  expect(client.rpc).not.toHaveBeenCalledWith("browser.tabs.finalize", { sessionId: "agent-9" })
+  expect(unsubscribeFrames).toHaveBeenCalled()
+})
+
 it("refreshes pages on demand", async () => {
   const { result } = renderSession()
   await waitFor(() => expect(result.current.state).toBe("ready"))

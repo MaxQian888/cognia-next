@@ -18,8 +18,10 @@
  *   Chrome Web Store for its extensions;
  * - recent pages, which are global (R12) and labelled so.
  *
- * It never starts Chromium: every page it opens goes through the dock's own
- * browser reveal (`openBrowser`), which picks the engine.
+ * It never starts Chromium: an address it opens becomes a page tab in this
+ * tab's place (`onOpenPage`), and the browser panel picks the engine when the
+ * tab is shown. There is no "Browser" tile for the same reason — a page is
+ * opened by its address, and the task's open pages are tabs already.
  */
 
 import { useMemo, useState, useSyncExternalStore, type FormEvent } from "react"
@@ -41,8 +43,10 @@ import {
 import { getArtifactTypeIcon } from "@/components/artifacts/artifact-icons"
 import { historyLabel } from "@/components/browser/browser-history-menu"
 import { LocalChromiumInstall } from "@/components/browser/browser-backend-switcher"
+import { BrowserExtensionsPanel } from "@/components/browser/extensions/browser-extensions-panel"
 import { BrowserLocalContentPicker } from "@/components/browser/local-content/browser-local-content-picker"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,7 +72,6 @@ import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { isTauri } from "@/lib/tauri"
 import { terminalAvailable } from "@/lib/terminal/pick-transport"
 import { cn } from "@/lib/utils"
-import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import type { Artifact } from "@/types"
@@ -76,7 +79,10 @@ import type { Artifact } from "@/types"
 import { DOCK_SESSION_PANEL_META, NEW_TAB_PANEL_ID } from "./dock-panel-meta"
 
 /** The tools drawn as tiles, in this order, when the task has them. */
-export const NEW_TAB_TOOL_PANEL_IDS = ["workspace", "session-sidechat", "browser", "metadata"]
+export const NEW_TAB_TOOL_PANEL_IDS = ["workspace", "session-sidechat", "metadata"]
+
+/** Panels the page never offers as tools: pages are opened by address. */
+const NOT_A_TOOL = new Set([NEW_TAB_PANEL_ID, "browser"])
 
 /** Where the managed Chromium's extensions come from. */
 export const CHROME_WEB_STORE_URL = "https://chromewebstore.google.com/"
@@ -118,6 +124,8 @@ export interface DockNewTabPageProps {
   messages: readonly UIMessage[]
   /** Open a session panel in place of this tab. */
   onOpenPanel: (panelId: string) => void
+  /** Open an address as a page tab in place of this tab. */
+  onOpenPage: (url: string) => void
   /** The desktop host: dev servers, local files and the managed Chromium. */
   desktop?: boolean
 }
@@ -143,7 +151,7 @@ function useAvailablePanels(): ToolEntry[] {
     // session tools to offer.
     if (getActiveContextResource()?.kind !== "session") return []
     return getActiveWorkbenchPanels()
-      .filter((panel) => panel.id !== NEW_TAB_PANEL_ID)
+      .filter((panel) => !NOT_A_TOOL.has(panel.id))
       .map((panel) => ({
         id: panel.id,
         label: resolveWorkbenchPanelLabel(t, panel, panel.labelKey),
@@ -166,12 +174,13 @@ export function DockNewTabPage({
   sessionId,
   messages,
   onOpenPanel,
+  onOpenPage,
   desktop = isTauri(),
 }: DockNewTabPageProps) {
   const t = useTranslations("contextWorkbench.newTab")
   const tSummary = useTranslations("contextWorkbench.summaryCard")
   const [query, setQuery] = useState("")
-  const openBrowser = useArtifactDockLayoutStore((state) => state.openBrowser)
+  const [extensionsOpen, setExtensionsOpen] = useState(false)
   const setActiveArtifact = useArtifactStore((state) => state.setActiveArtifact)
   const allArtifacts = useArtifactStore((state) => state.artifacts)
   const terminalOpen = useTerminalStore((state) => state.panelOpen)
@@ -206,7 +215,7 @@ export function DockNewTabPage({
   const openPath = async (path: string) => {
     try {
       const served = await serveLocalFile(path)
-      openBrowser(served.url)
+      onOpenPage(served.url)
     } catch {
       toast.error(t("openFailed", { path }))
     }
@@ -216,7 +225,7 @@ export function DockNewTabPage({
     event.preventDefault()
     const target = resolveOmniboxTarget(query)
     if (!target) return
-    if (target.kind === "url") openBrowser(target.url)
+    if (target.kind === "url") onOpenPage(target.url)
     else if (target.kind === "path") {
       if (desktop) void openPath(target.path)
       else toast.error(t("openFailed", { path: target.path }))
@@ -291,6 +300,14 @@ export function DockNewTabPage({
                 />
               )
             )}
+            {chromiumInstalled ? (
+              <Tile
+                icon={PuzzleIcon}
+                label={t("extensions")}
+                onClick={() => setExtensionsOpen(true)}
+                testId="dock-new-tab-tool-extensions"
+              />
+            ) : null}
             {terminalAvailable() ? (
               <Tile
                 icon={SquareTerminalIcon}
@@ -352,7 +369,7 @@ export function DockNewTabPage({
         {desktop || links.length > 0 || chromiumInstalled ? (
           <Section title={t("suggestions")}>
             <div className="flex flex-col gap-3">
-              {desktop ? <BrowserLocalContentPicker onOpen={openBrowser} /> : null}
+              {desktop ? <BrowserLocalContentPicker onOpen={onOpenPage} /> : null}
               {links.length > 0 ? (
                 <div className="space-y-1" data-testid="dock-new-tab-links">
                   <p className="text-[11px] text-muted-foreground">{t("taskLinks")}</p>
@@ -362,7 +379,7 @@ export function DockNewTabPage({
                       type="button"
                       className={ROW_CLASS}
                       title={url}
-                      onClick={() => openBrowser(url)}
+                      onClick={() => onOpenPage(url)}
                     >
                       <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate font-mono text-xs">{url}</span>
@@ -374,7 +391,7 @@ export function DockNewTabPage({
                 <button
                   type="button"
                   className={ROW_CLASS}
-                  onClick={() => openBrowser(CHROME_WEB_STORE_URL)}
+                  onClick={() => onOpenPage(CHROME_WEB_STORE_URL)}
                   data-testid="dock-new-tab-web-store"
                 >
                   <PuzzleIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -390,6 +407,14 @@ export function DockNewTabPage({
           </Section>
         ) : null}
 
+        {/* Settings mode: no page is open for the panel to act on. */}
+        <Dialog open={extensionsOpen} onOpenChange={setExtensionsOpen}>
+          <DialogContent className="max-w-md p-0" data-testid="dock-new-tab-extensions-dialog">
+            <DialogTitle className="sr-only">{t("extensions")}</DialogTitle>
+            <BrowserExtensionsPanel backend="local-chromium" />
+          </DialogContent>
+        </Dialog>
+
         {recent.length > 0 ? (
           <Section title={t("recent")} icon={HistoryIcon}>
             <ul className="space-y-1" data-testid="dock-new-tab-recent">
@@ -399,7 +424,7 @@ export function DockNewTabPage({
                     type="button"
                     className={ROW_CLASS}
                     title={url}
-                    onClick={() => openBrowser(url)}
+                    onClick={() => onOpenPage(url)}
                   >
                     <GlobeIcon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate">{historyLabel(url)}</span>

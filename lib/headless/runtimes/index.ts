@@ -134,6 +134,10 @@
  *   local Chromium runtime, both re-emitted by Tauri) into the renderer's Dexie
  *   history (ADR-0201). Only the desktop app hosts those browsers; a headless
  *   host has neither the Tauri event source nor a browser to download from.
+ * - `dock-pages-lifecycle-initializer` — mirrors the shared local-Chromium
+ *   session's pages into the desktop chat dock's page tabs and closes a
+ *   conversation's pages when the renderer switches away from it (ADR-0214).
+ *   The brain hosts no local Chromium and has no dock or active conversation.
  * - `vector-credential-migration-initializer` — migrates browser localStorage
  *   secrets into the desktop OS keyring; headless hosts have neither source
  *   storage nor a renderer-owned credential settings store to rehydrate.

@@ -89,6 +89,15 @@ describe("createBrowserAPI", () => {
     })
     api.openPane("")
     expect(requestBrowserUrl).toHaveBeenLastCalledWith("", { source: "agent" })
+    api.openPane("https://b.test", { chatSessionId: "chat-2" })
+    expect(requestBrowserUrl).toHaveBeenLastCalledWith("https://b.test", {
+      chatSessionId: "chat-2",
+      source: "agent",
+    })
+    await api.ensureLocalEngine("local-chromium", { chatSessionId: "chat-2" })
+    expect(ensureAgentLocalEngine).toHaveBeenLastCalledWith("local-chromium", {
+      chatSessionId: "chat-2",
+    })
     const download = {
       id: "d",
       sessionId: "s",

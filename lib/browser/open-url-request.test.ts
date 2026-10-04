@@ -24,6 +24,18 @@ describe("browser open-url request", () => {
     off()
   })
 
+  it("carries the conversation to the listener", () => {
+    const seen: unknown[] = []
+    const off = onBrowserUrlReveal((_url, request) => {
+      seen.push(request.chatSessionId)
+      return true
+    })
+    expect(requestBrowserUrl("https://x.dev", { chatSessionId: "c1" })).toBe(true)
+    requestBrowserUrl("https://x.dev")
+    expect(seen).toEqual(["c1", undefined])
+    off()
+  })
+
   it("stays unclaimed when the listener declines", () => {
     const off = onBrowserUrlRequest(() => false)
     expect(requestBrowserUrl("https://x.dev")).toBe(false)

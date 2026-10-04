@@ -19,6 +19,12 @@ import type { BrowserExtension } from "@/lib/browser/extensions-client"
 import { isUserChromeBrowser, localBrowser } from "@/lib/browser/local-client"
 import { LocalChromiumEngine, type LocalEngineBackend } from "@/lib/browser/local-chromium-engine"
 import { fillCredential, type CredentialFillReason } from "@/lib/browser/passwords"
+import {
+  chatPageOwner,
+  ensureSharedLocalBrowser,
+  ownedPageEngine,
+  sharedLocalBrowserStore,
+} from "@/lib/browser/shared-local-browser"
 import { getActivePaneRect } from "@/lib/browser/pane-rect"
 import { SnapshotCache } from "@/lib/browser/snapshot-cache"
 import { isTauri, transport } from "@/lib/tauri"
@@ -821,6 +827,12 @@ export interface EngineRoutingContext {
   domainAuthorized?: boolean
   /** Override the primed "local Chromium is installed" snapshot. */
   localChromiumInstalled?: boolean
+  /**
+   * The conversation the call is for (ADR-0214). On local Chromium every
+   * conversation drives its own page in the shared session; without one the
+   * call is the focused conversation's.
+   */
+  chatSessionId?: string
 }
 
 let remoteEngine: BrowserEngine | null = null
@@ -835,15 +847,23 @@ export function configureRemoteBrowserEngine(
   remoteReadiness = readiness
 }
 
-// ── Desktop local runtime (ADR-0201) ─────────────────────────────────────────
+// ── Desktop local runtime (ADR-0201, ADR-0214) ──────────────────────────────
 
-/** The session the browser pane is showing, when it shows a local backend. */
+/**
+ * The user's Chrome a browser pane is showing (`user-chrome` only). While
+ * bound, the agent drives exactly that session — the user chose it.
+ *
+ * Cognia's own Chromium has no such binding any more: every local-Chromium
+ * page lives in the one shared session (`shared-local-browser.ts`) and belongs
+ * to a conversation, so the agent drives its conversation's page whatever pane
+ * is on screen.
+ */
 let paneLocalEngine: LocalChromiumEngine | null = null
-/** A session the router created itself because no pane session was bound. */
+/** A user-chrome session the router created itself because no pane was bound. */
 let agentLocalEngine: LocalChromiumEngine | null = null
 let localChromiumInstalled = false
 
-/** Window event the pane listens to so it can show a router-created session. */
+/** Window event a pane listens to so it can show a router-created user-chrome session. */
 export const BROWSER_AGENT_LOCAL_SESSION_EVENT = "cognia:browser:agent-local-session"
 
 export interface BrowserAgentLocalSession {
@@ -852,16 +872,19 @@ export interface BrowserAgentLocalSession {
 }
 
 /**
- * The browser pane binds (or, with `null`, unbinds) the local runtime session
- * it is showing. While bound, the agent drives exactly that session — the page
- * the user sees — for every URL, because the user chose that backend.
+ * The browser pane binds (or, with `null`, unbinds) the user-chrome session it
+ * is showing. A `local-chromium` session is not bound: it is the shared one,
+ * and binding it would make every conversation's agent drive one page.
  */
 export function configureLocalBrowserEngine(session: BrowserAgentLocalSession | null): void {
   if (!session) {
     paneLocalEngine = null
     return
   }
-  if (session.backend === "local-chromium") localChromiumInstalled = true
+  if (session.backend === "local-chromium") {
+    localChromiumInstalled = true
+    return
+  }
   if (agentLocalEngine?.sessionId === session.sessionId) agentLocalEngine = null
   paneLocalEngine = new LocalChromiumEngine(session.sessionId, session.backend)
 }
@@ -869,7 +892,11 @@ export function configureLocalBrowserEngine(session: BrowserAgentLocalSession | 
 /** Record whether the managed Chromium is installed (the pane / status poll feed this). */
 export function setLocalChromiumInstalled(installed: boolean): void {
   localChromiumInstalled = installed
-  if (!installed) agentLocalEngine = null
+}
+
+/** The last known install state of the managed Chromium (see `primeLocalBrowserRouting`). */
+export function isLocalChromiumInstalled(): boolean {
+  return localChromiumInstalled
 }
 
 /**
@@ -887,12 +914,56 @@ export async function primeLocalBrowserRouting(): Promise<void> {
   }
 }
 
+/**
+ * Which conversation is on screen, for a caller that names none or names one
+ * the dock does not show (an External Bridge client). Wired by
+ * `DockPagesLifecycleInitializer`; unwired, such calls get pages of their own
+ * that no dock shows.
+ */
+let activeChatSessionId: () => string | null = () => null
+/** External clients pinned to the conversation that was on screen at their first call. */
+const foreignOwners = new Map<string, string>()
+
+export function configureAgentPageOwnership(
+  options: {
+    activeChatSessionId: () => string | null
+  } | null
+): void {
+  activeChatSessionId = options?.activeChatSessionId ?? (() => null)
+  foreignOwners.clear()
+}
+
+/** External Bridge clients bind their calls to a synthetic conversation id. */
+const FOREIGN_CHAT_PREFIX = "external-bridge:"
+
+/**
+ * The owner whose pages an agent call drives. A conversation drives its own;
+ * an External Bridge client drives pages shown in the conversation that was on
+ * screen when it first reached for the browser — its pages then appear as tabs
+ * there and follow that task — and keeps that conversation afterwards.
+ */
+export function agentPageOwner(chatSessionId: string | undefined): string {
+  if (chatSessionId && !chatSessionId.startsWith(FOREIGN_CHAT_PREFIX)) {
+    return chatPageOwner(chatSessionId)
+  }
+  const key = chatSessionId ?? "default"
+  const pinned = foreignOwners.get(key)
+  if (pinned) return pinned
+  const active = activeChatSessionId()
+  if (!chatSessionId) return active ? chatPageOwner(active) : "agent:default"
+  const owner = active ? chatPageOwner(active) : `agent:${chatSessionId}`
+  foreignOwners.set(key, owner)
+  return owner
+}
+
 /** Test seam: forget every local binding. */
 export function resetLocalBrowserRouting(): void {
   paneLocalEngine = null
   agentLocalEngine = null
   localChromiumInstalled = false
   lazyLocalPending = null
+  foreignOwners.clear()
+  activeChatSessionId = () => null
 }
 
 let lazyLocalPending: Promise<LocalChromiumEngine> | null = null
@@ -907,14 +978,17 @@ function announceAgentLocalSession(session: BrowserAgentLocalSession): void {
 }
 
 /**
- * Create (once) the router's own local Chromium session. Headless: no
- * Chromium window pops up; the pane can still show it through the screencast
- * once it adopts the session announced on `BROWSER_AGENT_LOCAL_SESSION_EVENT`.
+ * The agent's engine on a desktop backend.
+ *
+ * - `local-chromium`: the conversation's own page in the shared session
+ *   (`ownedPageEngine`), the session created on first use.
+ * - `user-chrome`: the pane's session when one is bound, else a headless
+ *   session of the router's own, announced so a pane can show it.
  */
 export async function ensureAgentLocalEngine(
   backend: LocalEngineBackend = "local-chromium",
-  options: { headless?: boolean; browser?: string } = {}
-): Promise<LocalChromiumEngine> {
+  options: { headless?: boolean; browser?: string; chatSessionId?: string } = {}
+): Promise<BrowserEngine> {
   // Plugins name the browser as a free string; refuse one Rust does not know
   // rather than let it fall back to Chrome silently.
   const browser = backend === "user-chrome" ? options.browser : undefined
@@ -924,24 +998,25 @@ export async function ensureAgentLocalEngine(
       `Unknown browser "${browser}" for user-chrome`
     )
   }
-  if (paneLocalEngine && paneLocalEngine.backend === backend) return paneLocalEngine
-  if (agentLocalEngine && agentLocalEngine.backend === backend) return agentLocalEngine
-  if (lazyLocalPending) {
-    const pending = await lazyLocalPending
-    if (pending.backend === backend) return pending
+  if (backend === "local-chromium") {
+    await ensureSharedLocalBrowser()
+    localChromiumInstalled = true
+    return ownedPageEngine(agentPageOwner(options.chatSessionId))
   }
+  if (paneLocalEngine) return paneLocalEngine
+  if (agentLocalEngine) return agentLocalEngine
+  if (lazyLocalPending) return lazyLocalPending
   const sessionId = `agent-${backend}-${Math.random().toString(36).slice(2, 10)}`
   lazyLocalPending = localBrowser
     .createSession({
       id: sessionId,
-      kind: backend === "user-chrome" ? "user-chrome" : "local",
+      kind: "user-chrome",
       headless: options.headless ?? true,
       ...(browser ? { browser } : {}),
     })
     .then((created) => {
       const engine = new LocalChromiumEngine(created?.id ?? sessionId, backend)
       agentLocalEngine = engine
-      if (backend === "local-chromium") localChromiumInstalled = true
       announceAgentLocalSession({ sessionId: engine.sessionId, backend })
       return engine
     })
@@ -953,21 +1028,19 @@ export async function ensureAgentLocalEngine(
 }
 
 /**
- * A `BrowserEngine` whose first call creates the router's local session.
- * `routeEngine` is synchronous; session creation is not — this bridges them
- * without making every caller async.
+ * A `BrowserEngine` whose first call creates the router's user-chrome
+ * session. `routeEngine` is synchronous; session creation is not — this
+ * bridges them without making every caller async.
  */
-function lazyLocalEngine(backend: LocalEngineBackend): BrowserEngine {
-  const ready = () => ensureAgentLocalEngine(backend)
-  return new Proxy({ backend } as BrowserEngine, {
+function lazyUserChromeEngine(): BrowserEngine {
+  const ready = () => ensureAgentLocalEngine("user-chrome")
+  return new Proxy({ backend: "user-chrome" } as BrowserEngine, {
     get(target, property) {
-      if (property === "backend") return backend
+      if (property === "backend") return "user-chrome"
       if (property === "then") return undefined
       // A data property, not a method: report the session's post-fill lock
       // once the session exists (none yet means nothing was filled).
-      if (property === "credentialFilled") {
-        return agentLocalEngine?.backend === backend ? agentLocalEngine.credentialFilled : false
-      }
+      if (property === "credentialFilled") return agentLocalEngine?.credentialFilled ?? false
       return (...args: unknown[]) =>
         ready().then((engine) => {
           const method = (engine as unknown as Record<PropertyKey, unknown>)[property]
@@ -980,28 +1053,33 @@ function lazyLocalEngine(backend: LocalEngineBackend): BrowserEngine {
   })
 }
 
-function localRoute(backend: LocalEngineBackend, tier: TrustTier): EngineRoute {
-  const engine =
-    paneLocalEngine?.backend === backend
-      ? paneLocalEngine
-      : agentLocalEngine?.backend === backend
-        ? agentLocalEngine
-        : lazyLocalEngine(backend)
-  return { engine, backend, tier, untrusted: tier === "public" }
+function userChromeRoute(tier: TrustTier): EngineRoute {
+  const engine = paneLocalEngine ?? agentLocalEngine ?? lazyUserChromeEngine()
+  return { engine, backend: "user-chrome", tier, untrusted: tier === "public" }
+}
+
+function localChromiumRoute(tier: TrustTier, chatSessionId: string | undefined): EngineRoute {
+  return {
+    engine: ownedPageEngine(agentPageOwner(chatSessionId)),
+    backend: "local-chromium",
+    tier,
+    untrusted: tier === "public",
+  }
 }
 
 /**
- * Resolve the engine for a TARGET URL (ADR-0201). Callers pass the URL the
- * next call will act on — for a navigation that is the destination, not the
- * page being left.
+ * Resolve the engine for a TARGET URL (ADR-0201, ADR-0214). Callers pass the
+ * URL the next call will act on — for a navigation that is the destination,
+ * not the page being left.
  *
  * - Cloud / mobile / headless hosts use the bound remote engine.
  * - An explicit preference is honoured, or refused with the reason.
- * - A pane showing a local runtime session keeps the agent on that session.
+ * - A pane showing the user's own Chrome keeps the agent on that session.
  * - A public URL the user authorized goes to the cloud browser when it is
- *   ready; otherwise — and for every public URL — to the best desktop engine:
- *   local Chromium once installed, the embedded webview before that.
- * - Loopback URLs stay on the embedded webview.
+ *   ready.
+ * - Otherwise local Chromium once installed — localhost included, so dev
+ *   servers get DevTools extensions and real tabs — on the conversation's own
+ *   page; the embedded webview before that.
  *
  * Active sessions never migrate implicitly between remote and local backends.
  */
@@ -1037,20 +1115,15 @@ export function routeEngine(url: string, context: EngineRoutingContext = {}): En
     case "embedded":
       return embeddedRoute()
     case "local-chromium":
-      if (!paneLocalEngine && !agentLocalEngine && !installed) {
+      if (!installed && sharedLocalBrowserStore.getState().status !== "ready") {
         throw new BrowserSessionError(
           "browser_feature_unsupported",
           "Local Chromium is not installed. Install it in Settings → Browser."
         )
       }
-      return localRoute("local-chromium", tier)
+      return localChromiumRoute(tier, context.chatSessionId)
     case "user-chrome":
-      if (
-        paneLocalEngine?.backend === "user-chrome" ||
-        agentLocalEngine?.backend === "user-chrome"
-      ) {
-        return localRoute("user-chrome", tier)
-      }
+      if (paneLocalEngine || agentLocalEngine) return userChromeRoute(tier)
       throw new BrowserSessionError(
         "browser_feature_unsupported",
         "No session is attached to your Chrome. Open the browser pane, choose “Your Chrome”, and allow the connection in Chrome."
@@ -1063,16 +1136,13 @@ export function routeEngine(url: string, context: EngineRoutingContext = {}): En
   if (profile === "cloud-companion" || profile === "mobile-companion" || profile === "headless") {
     return remoteRoute()
   }
-  // The user chose a local runtime backend in the pane: drive what they see.
-  if (paneLocalEngine) return localRoute(paneLocalEngine.backend, tier)
-  if (tier === "trusted") return embeddedRoute()
-  if (context.domainAuthorized === true && remoteReady) return remoteRoute()
-  // Authorized-but-no-cloud and unauthorized public URLs alike: the best
-  // engine this desktop can run itself, instead of throwing.
-  if (agentLocalEngine?.backend === "user-chrome") return localRoute("user-chrome", tier)
+  // The user chose their own Chrome in the pane: drive what they see.
+  if (paneLocalEngine) return userChromeRoute(tier)
+  if (untrusted && context.domainAuthorized === true && remoteReady) return remoteRoute()
+  if (agentLocalEngine) return userChromeRoute(tier)
   // `profile` is the desktop here, so the shell half of the check holds.
   return bestLocalDesktopBackend({ tauri: true, localChromiumInstalled: installed }) ===
     "local-chromium"
-    ? localRoute("local-chromium", tier)
+    ? localChromiumRoute(tier, context.chatSessionId)
     : embeddedRoute()
 }

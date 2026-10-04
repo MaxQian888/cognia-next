@@ -82,7 +82,7 @@ describe("resolveDesktopBackend", () => {
     })
   })
 
-  it("makes local Chromium the default for public and unknown pages once installed", () => {
+  it("makes local Chromium the default for every page once installed", () => {
     const installed = inputs({ localChromiumInstalled: true })
     expect(resolveDesktopBackend(installed, null)).toMatchObject({
       backend: "local-chromium",
@@ -93,10 +93,20 @@ describe("resolveDesktopBackend", () => {
     })
   })
 
-  it("keeps loopback previews on the embedded webview even when installed", () => {
+  it("sends loopback pages to local Chromium too once installed (ADR-0214, D8)", () => {
     expect(
       resolveDesktopBackend(inputs({ localChromiumInstalled: true, targetTier: "trusted" }), null)
-    ).toMatchObject({ backend: "embedded" })
+    ).toMatchObject({ backend: "local-chromium", reason: "local-ready" })
+  })
+
+  it("keeps an empty pane on the embedded webview rather than starting Chromium", () => {
+    expect(
+      resolveDesktopBackend(inputs({ localChromiumInstalled: true, idle: true }), null)
+    ).toMatchObject({ backend: "embedded", reason: "remote-disabled" })
+    // An explicit choice is still served.
+    expect(
+      resolveDesktopBackend(inputs({ localChromiumInstalled: true, idle: true }), "local-chromium")
+    ).toMatchObject({ backend: "local-chromium" })
   })
 
   it("honours an explicit switch to the cloud browser", () => {

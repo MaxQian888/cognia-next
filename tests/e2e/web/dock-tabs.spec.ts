@@ -131,3 +131,31 @@ test("@smoke each conversation gets its own tabs and open state back", async ({ 
   await openConversation(page, "Tabs first task")
   await expect(dockToggle(page)).toHaveAttribute("aria-pressed", "false")
 })
+
+test("@smoke an address from the New Tab page opens as a page tab the conversation keeps", async ({
+  page,
+}) => {
+  await prepareConversations(page)
+  await openConversation(page, "Tabs first task")
+  await openDock(page)
+
+  const omnibox = page.getByTestId("dock-new-tab-omnibox")
+  await omnibox.fill("localhost:4999")
+  await omnibox.press("Enter")
+  const pageTab = strip(page).getByRole("tab", { name: "localhost:4999", exact: true })
+  await expect(pageTab).toHaveAttribute("aria-selected", "true")
+  // The page took the New Tab page's place, and the browser panel is not a tab of its own.
+  await expect(strip(page).getByRole("tab", { name: "New tab", exact: true })).toHaveCount(0)
+  await expect(strip(page).getByRole("tab", { name: "Browser", exact: true })).toHaveCount(0)
+  await page.screenshot({ path: test.info().outputPath("dock-page-tab.png"), fullPage: true })
+
+  // The tab belongs to this conversation: gone in the other, back on return.
+  await openConversation(page, "Tabs second task")
+  await openDock(page)
+  await expect(strip(page).getByRole("tab", { name: "localhost:4999", exact: true })).toHaveCount(0)
+  await openConversation(page, "Tabs first task")
+  await expect(pageTab).toHaveAttribute("aria-selected", "true")
+
+  await page.getByRole("button", { name: "Close localhost:4999", exact: true }).click()
+  await expect(dockToggle(page)).toHaveAttribute("aria-pressed", "false")
+})

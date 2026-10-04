@@ -151,6 +151,11 @@ export interface PluginBrowserRoutingContext {
   domainAuthorized?: boolean
   /** A per-chat backend choice made with `browser_open` (ADR-0201). */
   backendPreference?: EngineBackendPreference
+  /**
+   * The conversation the call is for: on local Chromium each conversation
+   * drives its own page (ADR-0214).
+   */
+  chatSessionId?: string
 }
 
 export interface PluginBrowserAPI {
@@ -163,13 +168,14 @@ export interface PluginBrowserAPI {
   /** Create (once) or reuse the agent's local runtime session for a backend. */
   ensureLocalEngine(
     backend: "local-chromium" | "user-chrome",
-    options?: { headless?: boolean; browser?: string }
+    options?: { headless?: boolean; browser?: string; chatSessionId?: string }
   ): Promise<PluginBrowserEngine>
   /**
    * Ask the browser pane to show `url` (empty: whatever it has open) on
-   * `backend`. True when a pane or a host revealing one took the request.
+   * `backend`, for `chatSessionId`'s page. True when a pane or a host
+   * revealing one took the request.
    */
-  openPane(url: string, options?: { backend?: BrowserBackend }): boolean
+  openPane(url: string, options?: { backend?: BrowserBackend; chatSessionId?: string }): boolean
   /** Hand a finished download to the composer of `chatSessionId`. */
   attachDownload(download: BrowserDownloadSummary, chatSessionId: string): boolean
   /** Whether a person can currently see the app window. */
@@ -203,6 +209,7 @@ export function createBrowserAPI(options: CreateBrowserAPIOptions = {}): PluginB
     openPane: (url, paneOptions = {}) =>
       requestBrowserUrl(url, {
         ...(paneOptions.backend ? { backend: paneOptions.backend } : {}),
+        ...(paneOptions.chatSessionId ? { chatSessionId: paneOptions.chatSessionId } : {}),
         source: "agent",
       }),
     attachDownload: requestBrowserDownloadAttach,

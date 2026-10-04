@@ -135,7 +135,8 @@ const browserApi = {
   isSurfaceVisible: jest.fn(() => true),
 }
 const showConfirmDialog = jest.fn(async () => true)
-const uiApi = { showConfirmDialog }
+const showToast = jest.fn()
+const uiApi = { showConfirmDialog, showToast }
 const i18nApi = {
   t: (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
@@ -965,8 +966,13 @@ describe("browser-tools ADR-0201 surface", () => {
       { sessionId: "chat-a" }
     )) as { ok: boolean; backend: string; paneShown: boolean }
     expect(opened).toMatchObject({ ok: true, backend: "local-chromium", paneShown: true })
-    expect(browserApi.ensureLocalEngine).toHaveBeenCalledWith("local-chromium", {})
-    expect(browserApi.openPane).toHaveBeenCalledWith("", { backend: "local-chromium" })
+    expect(browserApi.ensureLocalEngine).toHaveBeenCalledWith("local-chromium", {
+      chatSessionId: "chat-a",
+    })
+    expect(browserApi.openPane).toHaveBeenCalledWith("", {
+      backend: "local-chromium",
+      chatSessionId: "chat-a",
+    })
     await tools.browser_snapshot({}, { sessionId: "chat-a" })
     expect(routeEngineMock()).toHaveBeenLastCalledWith(
       expect.any(String),
@@ -983,13 +989,17 @@ describe("browser-tools ADR-0201 surface", () => {
   it("browser_open attaches the user's Chrome by browser, maps remote to the pane vocabulary, and navigates", async () => {
     const tools = await collectTools()
     await tools.browser_open({ backend: "user-chrome", browser: "edge" }, { sessionId: "chat-c" })
-    expect(browserApi.ensureLocalEngine).toHaveBeenCalledWith("user-chrome", { browser: "edge" })
+    expect(browserApi.ensureLocalEngine).toHaveBeenCalledWith("user-chrome", {
+      browser: "edge",
+      chatSessionId: "chat-c",
+    })
     const res = (await tools.browser_open(
       { backend: "remote-chromium", url: "https://example.com/" },
       { sessionId: "chat-c" }
     )) as { navigated: string; paneShown: boolean }
     expect(browserApi.openPane).toHaveBeenLastCalledWith("https://example.com/", {
       backend: "remote",
+      chatSessionId: "chat-c",
     })
     expect(res.navigated).toBe("https://example.com/")
     expect(engine.navigate).toHaveBeenCalledWith("https://example.com/")
@@ -1015,6 +1025,50 @@ describe("browser-tools ADR-0201 surface", () => {
     ).resolves.toMatchObject({
       ok: false,
     })
+  })
+
+  it("routes every call for the conversation that made it", async () => {
+    const tools = await collectTools()
+    await tools.browser_snapshot({}, { sessionId: "chat-e" })
+    expect(routeEngineMock().mock.calls.at(-1)?.[1]).toMatchObject({ chatSessionId: "chat-e" })
+  })
+
+  it("keeps each conversation's last page apart", async () => {
+    const tools = await collectTools()
+    setLiveUrl("")
+    engine.getPage.mockRejectedValueOnce(new Error("mid-swap"))
+    await tools.browser_navigate({ url: "https://one.example/" }, { sessionId: "chat-f" })
+    await tools.browser_snapshot({}, { sessionId: "chat-g" })
+    // chat-g has no page of its own yet: it does not inherit chat-f's URL.
+    expect(routeEngineMock().mock.calls.at(-1)?.[0]).not.toBe("https://one.example/")
+    setLiveUrl("http://localhost/")
+  })
+
+  it("browser_annotate moves a Chromium page to the lightweight preview first", async () => {
+    const tools = await collectTools()
+    await tools.browser_open({ backend: "local-chromium" }, { sessionId: "chat-h" })
+    setLiveUrl("http://localhost:5173/app")
+    const result = (await tools.browser_annotate(
+      { ref: "e1", comment: "Too tight", intent: "change", severity: "suggestion" },
+      { sessionId: "chat-h" }
+    )) as Record<string, unknown>
+    expect(result).toMatchObject({
+      ok: false,
+      code: "browser_engine_switched",
+      backend: "embedded",
+    })
+    expect(browserApi.openPane).toHaveBeenLastCalledWith("http://localhost:5173/app", {
+      backend: "embedded",
+      chatSessionId: "chat-h",
+    })
+    expect(saveBrowserAnnotationMock).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith("annotate.switchedToLightweight", "info")
+    // The conversation now routes to the lightweight preview, where it annotates.
+    await tools.browser_snapshot({}, { sessionId: "chat-h" })
+    expect(routeEngineMock().mock.calls.at(-1)?.[1]).toMatchObject({
+      backendPreference: "embedded",
+    })
+    setLiveUrl("http://localhost/")
   })
 
   it("browser_navigate routes on the TARGET url, not the page being left", async () => {

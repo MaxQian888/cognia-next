@@ -45,7 +45,7 @@ import {
   PlusIcon,
   UsersIcon,
 } from "lucide-react"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -75,9 +75,15 @@ import { ArtifactList } from "./artifact-list"
 import { SESSION_ARTIFACT_LIST_PANEL_ID } from "@/lib/artifacts/session-workbench-scope-key"
 import { ArtifactReviewView } from "./artifact-review-view"
 import { DockNewTabPage } from "./dock-new-tab-page"
-import { isKnownDockPanel, presentDockTabs } from "./dock-tab-strip"
-import { orderDockTabs, panelTabKey, useDockTabsStore } from "@/stores/artifact/dock-tabs-store"
-import { selectOpenArtifactIds, useArtifactStore } from "@/stores/artifact/artifact-store"
+import { drawnDockTabs } from "./dock-tab-strip"
+import {
+  panelTabKey,
+  selectActivePageTab,
+  useDockTabsStore,
+  type DockPageEngine,
+} from "@/stores/artifact/dock-tabs-store"
+import { DOCK_BROWSER_PANEL_ID, openDockPage, setDockPageEngine } from "@/lib/artifacts/dock-pages"
+import { chatPageOwner } from "@/lib/browser/shared-local-browser"
 import { DOCK_SESSION_PANEL_META, NEW_TAB_PANEL_ID } from "./dock-panel-meta"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
@@ -213,6 +219,54 @@ function DockBrowserPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
       // tab is showing, so a clicked link must bring it to the front
       // before it may claim the URL, otherwise the link reads as a no-op.
       onRequestReveal={revealBrowserPanel}
+    />
+  )
+}
+
+/**
+ * The desktop dock's browser panel (ADR-0214): the conversation's page tab in
+ * front, remounted per tab so each tab is its own page. With no tab to show —
+ * a reveal from the Views menu, the last tab closed — it shows what the
+ * conversation has open, else the New Tab page.
+ */
+function DockPageBrowserPanel<T extends DockPanelInputs>({ inputs }: Inputs<T>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const scopeKey = usePanelInput(inputs, (input) => input.scopeKey)
+  const tab = useDockTabsStore((state) => selectActivePageTab(state, activeSessionId))
+  const inFront = useContextWorkbenchStore(
+    (state) => state.layouts[scopeKey]?.activePanelId === DOCK_BROWSER_PANEL_ID
+  )
+  useEffect(() => {
+    if (activeSessionId && !tab && inFront) openDockPage(activeSessionId, "")
+  }, [activeSessionId, tab, inFront])
+  const tabId = tab?.id ?? null
+  const onEngineChange = useCallback(
+    (engine: DockPageEngine) => {
+      if (activeSessionId && tabId) setDockPageEngine(activeSessionId, tabId, engine)
+    },
+    [activeSessionId, tabId]
+  )
+  const onNavigated = useCallback(
+    (url: string) => {
+      if (activeSessionId && tabId) {
+        useDockTabsStore.getState().updatePageTab(activeSessionId, tabId, { url })
+      }
+    },
+    [activeSessionId, tabId]
+  )
+  if (!activeSessionId || !tab) return null
+  return (
+    <BrowserPreviewPane
+      key={tab.id}
+      sessionId={activeSessionId}
+      initialUrl={tab.url}
+      dockPage={{
+        owner: chatPageOwner(activeSessionId),
+        tabId: tab.id,
+        engine: tab.engine,
+        onEngineChange,
+        onNavigated,
+      }}
     />
   )
 }
@@ -573,8 +627,9 @@ export interface SessionSurfacePanelsInput {
   scopeKey: string
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
   /**
-   * Offer the New Tab page (ADR-0214, D7). The desktop dock, whose one tab
-   * strip opens it with `+`; the phone Sheet keeps its own panels (R13).
+   * The desktop dock's one tab strip (ADR-0214): offer the New Tab page (D7)
+   * and show web pages as page tabs (D8), the browser panel rendering the one
+   * in front. The phone Sheet keeps its own panels and one browser (R13).
    */
   newTab?: boolean
 }
@@ -654,25 +709,33 @@ function SessionNewTabRenderer({ inputs }: Inputs<SessionPanelInputs>) {
       const mode = DOCK_SESSION_PANEL_META[panelId]?.preferredMode ?? "narrow"
       const store = useContextWorkbenchStore.getState()
       if (sessionId) {
-        const layout = store.layouts[scopeKey]
-        const artifacts = useArtifactStore.getState()
-        const drawn = orderDockTabs(
-          useDockTabsStore.getState().bySession[sessionId]?.order,
-          presentDockTabs({
-            activatedPanelIds: layout?.activatedPanelIds ?? [],
-            activePanelId: layout?.activePanelId ?? null,
-            openArtifactIds: selectOpenArtifactIds(artifacts, sessionId),
-            artifactExists: (id) => Boolean(artifacts.artifacts[id]),
-            isKnownPanel: isKnownDockPanel,
-          })
-        )
         useDockTabsStore
           .getState()
-          .replaceTab(sessionId, drawn, panelTabKey(NEW_TAB_PANEL_ID), panelTabKey(panelId))
+          .replaceTab(
+            sessionId,
+            drawnDockTabs(sessionId, scopeKey),
+            panelTabKey(NEW_TAB_PANEL_ID),
+            panelTabKey(panelId)
+          )
       }
       store.closePanelTab(scopeKey, NEW_TAB_PANEL_ID)
       store.navigatePanel(scopeKey, panelId, mode)
       onWidthHint(mode, panelId)
+    },
+    [inputs]
+  )
+  // So does an address: it becomes a page tab where the New Tab page was.
+  const openPage = useCallback(
+    (url: string) => {
+      const { scopeKey, onWidthHint, activeSessionId: sessionId } = inputs.getState()
+      if (!sessionId) return
+      openDockPage(sessionId, url, {
+        newTab: true,
+        replacing: panelTabKey(NEW_TAB_PANEL_ID),
+        currentOrder: drawnDockTabs(sessionId, scopeKey),
+      })
+      useContextWorkbenchStore.getState().closePanelTab(scopeKey, NEW_TAB_PANEL_ID)
+      onWidthHint("wide", DOCK_BROWSER_PANEL_ID)
     },
     [inputs]
   )
@@ -681,6 +744,7 @@ function SessionNewTabRenderer({ inputs }: Inputs<SessionPanelInputs>) {
       sessionId={activeSessionId}
       messages={sessionMessages}
       onOpenPanel={openPanel}
+      onOpenPage={openPage}
     />
   )
 }
@@ -748,7 +812,9 @@ export function useSessionSurfacePanels({
     return {
       artifactList: () => <DockArtifactListPanel key={key} inputs={inputs} />,
       sidechat: () => <SessionSidechatRenderer key={key} inputs={inputs} />,
-      browser: () => <DockBrowserPanel key={key} inputs={inputs} />,
+      browser: newTab
+        ? () => <DockPageBrowserPanel key={key} inputs={inputs} />
+        : () => <DockBrowserPanel key={key} inputs={inputs} />,
       projectOverview: () => <DockProjectOverviewPanel key={key} inputs={inputs} />,
       workspace: () => <DockWorkspacePanel key={key} inputs={inputs} />,
       sourceControl: () => <SessionSourceControlRenderer key={key} inputs={inputs} />,
@@ -762,7 +828,7 @@ export function useSessionSurfacePanels({
       teamMembers: () => <SessionTeamMembersRenderer key={key} inputs={inputs} />,
       newTab: () => <SessionNewTabRenderer key={key} inputs={inputs} />,
     }
-  }, [activeSessionId, inputs])
+  }, [activeSessionId, inputs, newTab])
 
   const hasProjectRoots = Boolean(sessionProject?.roots.length)
   const isTeamSession = session?.kind === "team"

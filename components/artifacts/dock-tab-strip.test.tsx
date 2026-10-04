@@ -2,7 +2,16 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { DockTabStrip, isKnownDockPanel, openDockNewTab, presentDockTabs } from "./dock-tab-strip"
+import {
+  DockTabStrip,
+  drawnDockTabs,
+  isKnownDockPanel,
+  pageTabLabel,
+  presentDockTabs,
+} from "./dock-tab-strip"
+import { dockSessionScopeKey, openDockNewTab } from "@/lib/artifacts/dock-pages"
+import { setLocalChromiumInstalled } from "@/lib/browser/agent-engine"
+import { openExternal } from "@/lib/tauri/opener"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
@@ -16,12 +25,13 @@ jest.mock("next-intl", () => ({
     values ? `${key}${JSON.stringify(values)}` : key,
 }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("@/lib/tauri/opener", () => ({ openExternal: jest.fn() }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   MotionSelectionIndicator: () => null,
 }))
 
 const SESSION = "s1"
-const SCOPE = "wb::session:s1"
+const SCOPE = dockSessionScopeKey("s1")
 const onWidthHint = jest.fn()
 
 function artifact(id: string, title: string) {
@@ -111,45 +121,49 @@ describe("presentDockTabs", () => {
 
 describe("DockTabStrip", () => {
   it("draws panels and artifacts as one tablist, marking what is in front", () => {
-    setPanels(["new-tab", "browser"], "browser")
+    setPanels(["new-tab", "workspace"], "workspace")
     setArtifacts(["a1"], null)
     renderStrip()
 
     expect(screen.getByRole("tablist", { name: "label" })).toBeInTheDocument()
-    expect(tabNames()).toEqual(["contextWorkbench.newTab.title", "browser.title", "Report"])
-    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
+    expect(tabNames()).toEqual([
+      "contextWorkbench.newTab.title",
+      "artifacts.dock.workspaceMode",
+      "Report",
+    ])
+    expect(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" })).toHaveAttribute(
       "aria-selected",
       "true"
     )
   })
 
   it("shows the artifact in front when one is active, whatever the panel scope says", () => {
-    setPanels(["browser"], "browser")
+    setPanels(["workspace"], "workspace")
     setArtifacts(["a1"], "a1")
     renderStrip()
     expect(screen.getByRole("tab", { name: "Report" })).toHaveAttribute("aria-selected", "true")
-    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" })).toHaveAttribute(
       "aria-selected",
       "false"
     )
   })
 
   it("parks the artifact when a panel tab is chosen, keeping its tab", () => {
-    setPanels(["browser"], "browser")
+    setPanels(["workspace"], "workspace")
     setArtifacts(["a1"], "a1")
     renderStrip()
 
-    fireEvent.click(screen.getByRole("tab", { name: "browser.title" }))
+    fireEvent.click(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" }))
 
     expect(useArtifactStore.getState().activeArtifactIdBySession[SESSION]).toBeNull()
-    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("browser")
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("workspace")
     // The browser wants room: the dock is asked for it.
-    expect(onWidthHint).toHaveBeenCalledWith("wide", "browser")
+    expect(onWidthHint).toHaveBeenCalledWith("wide", "workspace")
     expect(screen.getByRole("tab", { name: "Report" })).toBeInTheDocument()
   })
 
   it("brings an artifact forward from its tab", () => {
-    setPanels(["browser"], "browser")
+    setPanels(["workspace"], "workspace")
     setArtifacts(["a1", "a2"], null)
     renderStrip()
     fireEvent.click(screen.getByRole("tab", { name: "Notes" }))
@@ -157,20 +171,22 @@ describe("DockTabStrip", () => {
   })
 
   it("hands the front to the right-hand neighbour when the active tab closes", () => {
-    setPanels(["browser", "workspace"], "browser")
+    setPanels(["workspace", "comments"], "workspace")
     setArtifacts(["a1"], null)
     renderStrip()
 
-    fireEvent.click(screen.getByRole("button", { name: 'close{"name":"browser.title"}' }))
+    fireEvent.click(
+      screen.getByRole("button", { name: 'close{"name":"artifacts.dock.workspaceMode"}' })
+    )
 
     expect(useContextWorkbenchStore.getState().layouts[SCOPE].activatedPanelIds).toEqual([
-      "workspace",
+      "comments",
     ])
-    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("workspace")
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("comments")
   })
 
   it("closes an artifact tab through the artifact store", () => {
-    setPanels(["browser"], "browser")
+    setPanels(["workspace"], "workspace")
     setArtifacts(["a1", "a2"], "a1")
     renderStrip()
     // Middle-click, the browser convention.
@@ -192,7 +208,7 @@ describe("DockTabStrip", () => {
   })
 
   it("opens the New Tab page from +, parking the artifact", () => {
-    setPanels(["browser"], "browser")
+    setPanels(["workspace"], "workspace")
     setArtifacts(["a1"], "a1")
     renderStrip()
     fireEvent.click(screen.getByTestId("dock-tab-new"))
@@ -201,32 +217,32 @@ describe("DockTabStrip", () => {
   })
 
   it("keeps the order the user dragged tabs into, across kinds", () => {
-    setPanels(["browser"], "browser")
+    setPanels(["workspace"], "workspace")
     setArtifacts(["a1"], null)
     renderStrip()
     const report = screen.getByTestId("dock-tab-artifact:a1")
-    const browser = screen.getByTestId("dock-tab-panel:browser")
+    const browser = screen.getByTestId("dock-tab-panel:workspace")
     fireEvent.dragStart(report, { dataTransfer: { effectAllowed: "" } })
     fireEvent.dragOver(browser)
     fireEvent.drop(browser)
 
-    expect(tabNames()).toEqual(["Report", "browser.title"])
+    expect(tabNames()).toEqual(["Report", "artifacts.dock.workspaceMode"])
     expect(useDockTabsStore.getState().bySession[SESSION].order).toEqual([
       "artifact:a1",
-      "panel:browser",
+      "panel:workspace",
     ])
   })
 
   it("moves through the tabs from the keyboard, activating as it goes", async () => {
     const user = userEvent.setup()
-    setPanels(["new-tab", "browser"], "new-tab")
+    setPanels(["new-tab", "workspace"], "new-tab")
     setArtifacts(["a1"], null)
     renderStrip()
     screen.getByRole("tab", { name: "contextWorkbench.newTab.title" }).focus()
 
     await user.keyboard("{ArrowRight}")
-    expect(screen.getByRole("tab", { name: "browser.title" })).toHaveFocus()
-    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("browser")
+    expect(screen.getByRole("tab", { name: "artifacts.dock.workspaceMode" })).toHaveFocus()
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("workspace")
 
     await user.keyboard("{End}")
     expect(useArtifactStore.getState().activeArtifactIdBySession[SESSION]).toBe("a1")
@@ -255,7 +271,7 @@ describe("DockTabStrip", () => {
   })
 
   it("marks a panel with something pending", () => {
-    setPanels(["browser", "comments"], "browser")
+    setPanels(["workspace", "comments"], "workspace")
     act(() =>
       useContextWorkbenchStore.setState((state) => ({
         layouts: {
@@ -298,5 +314,124 @@ describe("openDockNewTab", () => {
     expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
     expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("new-tab")
     expect(useArtifactStore.getState().activeArtifactIdBySession[SESSION]).toBeNull()
+  })
+})
+
+describe("page tabs", () => {
+  function addPage(id: string, url: string, title = "", activate = false) {
+    act(() =>
+      useDockTabsStore
+        .getState()
+        .addPageTab(SESSION, { id, url, title, engine: "auto" }, { activate })
+    )
+  }
+
+  it("labels a page by its title, else its host, else its address", () => {
+    expect(pageTabLabel({ title: "Docs", url: "https://a.test/x" })).toBe("Docs")
+    expect(pageTabLabel({ title: "", url: "https://a.test/x" })).toBe("a.test")
+    expect(pageTabLabel({ title: "", url: "not a url" })).toBe("not a url")
+  })
+
+  it("stands page tabs in for the browser panel", () => {
+    expect(
+      presentDockTabs({
+        activatedPanelIds: ["browser", "workspace"],
+        activePanelId: "browser",
+        openArtifactIds: ["a1"],
+        artifactExists: () => true,
+        isKnownPanel: () => true,
+        pageTabIds: ["pt-1"],
+      })
+    ).toEqual(["panel:workspace", "artifact:a1", "page:pt-1"])
+  })
+
+  it("draws the strip as the dock shows it, pages included", () => {
+    setPanels(["browser", "workspace"], "browser")
+    addPage("pt-1", "https://a.test/")
+    expect(drawnDockTabs(SESSION, SCOPE)).toEqual(["panel:workspace", "page:pt-1"])
+  })
+
+  it("draws pages with their icon, the one shown in front", () => {
+    setPanels(["browser"], "browser")
+    addPage("pt-1", "https://a.test/", "Alpha")
+    addPage("pt-2", "http://localhost:5173/", "", true)
+    renderStrip()
+    expect(tabNames()).toEqual(["Alpha", "localhost:5173"])
+    expect(screen.getByRole("tab", { name: "localhost:5173" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    expect(screen.queryByRole("tab", { name: "browser.title" })).toBeNull()
+    const icon = screen.getByTestId("dock-tab-page:pt-1").querySelector("img")
+    expect(icon).toHaveAttribute("src", "https://a.test/favicon.ico")
+  })
+
+  it("shows a page from its tab, asking for room", () => {
+    setPanels(["workspace"], "workspace")
+    setArtifacts(["a1"], "a1")
+    addPage("pt-1", "https://a.test/")
+    renderStrip()
+    fireEvent.click(screen.getByRole("tab", { name: "a.test" }))
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE].activePanelId).toBe("browser")
+    expect(useDockTabsStore.getState().bySession[SESSION].activePageTabId).toBe("pt-1")
+    expect(useArtifactStore.getState().activeArtifactIdBySession[SESSION]).toBeNull()
+    expect(onWidthHint).toHaveBeenCalledWith("wide", "browser")
+  })
+
+  it("closes a page tab, and the browser panel with the last one", () => {
+    setPanels(["browser", "workspace"], "browser")
+    addPage("pt-1", "https://a.test/", "", true)
+    renderStrip()
+    fireEvent.click(screen.getByRole("button", { name: 'close{"name":"a.test"}' }))
+    expect(useDockTabsStore.getState().bySession[SESSION].pages).toEqual([])
+    const layout = useContextWorkbenchStore.getState().layouts[SCOPE]
+    expect(layout.activatedPanelIds).toEqual(["workspace"])
+    expect(layout.activePanelId).toBe("workspace")
+  })
+
+  it("moves a page to the lightweight preview from its menu", async () => {
+    const user = userEvent.setup()
+    setPanels(["browser"], "browser")
+    addPage("pt-1", "https://a.test/", "", true)
+    renderStrip()
+    fireEvent.contextMenu(screen.getByTestId("dock-tab-page:pt-1"))
+    await user.click(await screen.findByRole("menuitem", { name: "openInLightweight" }))
+    expect(useDockTabsStore.getState().bySession[SESSION].pages[0].engine).toBe("embedded")
+    expect(screen.getByTestId("dock-tab-lightweight-page:pt-1")).toBeInTheDocument()
+  })
+
+  it("offers Chromium back only where it is installed", async () => {
+    const user = userEvent.setup()
+    setPanels(["browser"], "browser")
+    act(() =>
+      useDockTabsStore
+        .getState()
+        .addPageTab(SESSION, { id: "pt-1", url: "https://a.test/", title: "", engine: "embedded" })
+    )
+    const view = renderStrip()
+    fireEvent.contextMenu(screen.getByTestId("dock-tab-page:pt-1"))
+    await screen.findByRole("menuitem", { name: "openInDefaultBrowser" })
+    expect(screen.queryByRole("menuitem", { name: "openInChromium" })).toBeNull()
+    view.unmount()
+
+    setLocalChromiumInstalled(true)
+    try {
+      renderStrip()
+      fireEvent.contextMenu(screen.getByTestId("dock-tab-page:pt-1"))
+      await user.click(await screen.findByRole("menuitem", { name: "openInChromium" }))
+      expect(useDockTabsStore.getState().bySession[SESSION].pages[0].engine).toBe("auto")
+    } finally {
+      setLocalChromiumInstalled(false)
+    }
+  })
+
+  it("opens a page in the default browser from its menu", async () => {
+    const user = userEvent.setup()
+    setPanels(["browser"], "browser")
+    addPage("pt-1", "https://a.test/", "", true)
+    renderStrip()
+    fireEvent.contextMenu(screen.getByTestId("dock-tab-page:pt-1"))
+    await user.click(await screen.findByRole("menuitem", { name: "openInDefaultBrowser" }))
+    expect(openExternal).toHaveBeenCalledWith("https://a.test/")
   })
 })

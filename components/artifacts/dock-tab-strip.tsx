@@ -11,12 +11,17 @@
  *
  * It owns no tabs. Each kind keeps its existing owner (see
  * `stores/artifact/dock-tabs-store.ts`): panel tabs are the session scope's
- * activated panels, artifact tabs the conversation's open artifacts. The strip
- * reads both, lays them out in the remembered order, and drives the owners —
- * `navigatePanel` / `closePanelTab` for a panel, `setActiveArtifact` /
- * `closeArtifact` for an artifact. Activating a panel tab parks the active
- * artifact (`setActiveArtifact(null)` keeps its tab), which is what brings the
- * dock from the artifact surface back to the session surface.
+ * activated panels, artifact tabs the conversation's open artifacts, page tabs
+ * the conversation's open addresses. The strip reads them, lays them out in
+ * the remembered order, and drives the owners — `navigatePanel` /
+ * `closePanelTab` for a panel, `setActiveArtifact` / `closeArtifact` for an
+ * artifact, `lib/artifacts/dock-pages` for a page. Activating a panel or page
+ * tab parks the active artifact (`setActiveArtifact(null)` keeps its tab),
+ * which is what brings the dock from the artifact surface back to the session
+ * surface.
+ *
+ * The `browser` panel never shows as a tab of its own: it is what renders the
+ * page tab in front, so the pages stand in for it.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
@@ -25,12 +30,16 @@ import { toast } from "sonner"
 import {
   ChevronDownIcon,
   CornerUpLeftIcon,
+  ExternalLinkIcon,
+  FeatherIcon,
+  GlobeIcon,
   MessageSquarePlusIcon,
   PanelRightIcon,
   PlusIcon,
   XIcon,
 } from "lucide-react"
 
+import { SourceFavicon } from "@/components/chat/message-parts/mcp-renderers/common"
 import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"
 import {
@@ -46,18 +55,30 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useActiveArtifactId, useOpenArtifactIds } from "@/hooks/artifacts/use-session-artifacts"
+import {
+  DOCK_BROWSER_PANEL_ID,
+  activateDockPageTab,
+  closeDockPageTab,
+  openDockNewTab,
+  setDockPageEngine,
+} from "@/lib/artifacts/dock-pages"
 import { wholeArtifactSelection } from "@/lib/artifacts/format-selection-context"
+import { isLocalChromiumInstalled } from "@/lib/browser/agent-engine"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { resolveWorkbenchPanelLabel } from "@/lib/context-workbench/panel-label"
+import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
-import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
+import { selectOpenArtifactIds, useArtifactStore } from "@/stores/artifact/artifact-store"
 import {
   artifactTabKey,
   orderDockTabs,
+  pageTabKey,
   panelTabKey,
   parseDockTabKey,
+  selectPageTabs,
   useDockTabsStore,
+  type DockPageTab,
   type DockTabKey,
 } from "@/stores/artifact/dock-tabs-store"
 import { useChatStore } from "@/stores/chat"
@@ -66,15 +87,18 @@ import { useContextWorkbenchStore } from "@/stores/context-workbench/context-wor
 import type { ContextPanelMode } from "@/types/context-workbench"
 
 import { getArtifactTypeIcon } from "./artifact-icons"
-import { DOCK_SESSION_PANEL_META, NEW_TAB_PANEL_ID } from "./dock-panel-meta"
+import { DOCK_SESSION_PANEL_META } from "./dock-panel-meta"
 
 const EMPTY_IDS: string[] = []
+const EMPTY_PAGES: DockPageTab[] = []
 
 /**
  * The tabs the strip has to show before ordering: the session scope's panels
- * (the one in front included, even before the workbench records it) and the
- * conversation's open artifacts that still exist. Shared with the New Tab
- * page, which needs the strip as drawn to put a tool in its own place.
+ * (the one in front included, even before the workbench records it), the
+ * conversation's open artifacts that still exist, and — when `pageTabIds` is
+ * given — its page tabs, which then stand in for the `browser` panel. Shared
+ * with the New Tab page, which needs the strip as drawn to put a tool in its
+ * own place.
  */
 export function presentDockTabs({
   activatedPanelIds,
@@ -82,34 +106,66 @@ export function presentDockTabs({
   openArtifactIds,
   artifactExists,
   isKnownPanel,
+  pageTabIds,
 }: {
   activatedPanelIds: readonly string[]
   activePanelId: string | null
   openArtifactIds: readonly string[]
   artifactExists: (artifactId: string) => boolean
   isKnownPanel: (panelId: string) => boolean
+  pageTabIds?: readonly string[]
 }): DockTabKey[] {
   const panelIds =
     activePanelId && !activatedPanelIds.includes(activePanelId)
       ? [...activatedPanelIds, activePanelId]
       : activatedPanelIds
   return [
-    ...panelIds.filter(isKnownPanel).map(panelTabKey),
+    ...panelIds
+      .filter((id) => isKnownPanel(id) && !(pageTabIds && id === DOCK_BROWSER_PANEL_ID))
+      .map(panelTabKey),
     ...openArtifactIds.filter(artifactExists).map(artifactTabKey),
+    ...(pageTabIds ?? []).map(pageTabKey),
   ]
 }
 
-/**
- * Open (or focus) the New Tab page for a conversation: park its artifact, bring
- * the page forward in the session scope, and open the dock if it was shut.
- * The strip's `+` and ⌘T are this one path.
- */
-export function openDockNewTab(sessionId: string | null, sessionScopeKey: string): void {
+/** The strip for `sessionId` as it is drawn, read outside React. */
+export function drawnDockTabs(sessionId: string, sessionScopeKey: string): DockTabKey[] {
+  const layout = useContextWorkbenchStore.getState().layouts[sessionScopeKey]
   const artifacts = useArtifactStore.getState()
-  if (selectActiveArtifactId(artifacts, sessionId)) artifacts.setActiveArtifact(null, sessionId)
-  useContextWorkbenchStore.getState().navigatePanel(sessionScopeKey, NEW_TAB_PANEL_ID)
-  const dock = useArtifactDockLayoutStore.getState()
-  if (dock.dockCollapsed) dock.setDockCollapsed(false)
+  const tabs = useDockTabsStore.getState()
+  return orderDockTabs(
+    tabs.bySession[sessionId]?.order,
+    presentDockTabs({
+      activatedPanelIds: layout?.activatedPanelIds ?? [],
+      activePanelId: layout?.activePanelId ?? null,
+      openArtifactIds: selectOpenArtifactIds(artifacts, sessionId),
+      artifactExists: (id) => Boolean(artifacts.artifacts[id]),
+      isKnownPanel: isKnownDockPanel,
+      pageTabIds: selectPageTabs(tabs, sessionId).map((tab) => tab.id),
+    })
+  )
+}
+
+/** A page tab's label: its title, else its host, else its address. */
+export function pageTabLabel(tab: Pick<DockPageTab, "title" | "url">): string {
+  if (tab.title) return tab.title
+  try {
+    return new URL(tab.url).host || tab.url
+  } catch {
+    return tab.url
+  }
+}
+
+/** Where a page's icon would be, for addresses that have one. */
+function faviconFor(url: string): { src?: string; host: string } {
+  try {
+    const parsed = new URL(url)
+    return /^https?:$/.test(parsed.protocol)
+      ? { src: `${parsed.origin}/favicon.ico`, host: parsed.hostname }
+      : { host: parsed.hostname || url }
+  } catch {
+    return { host: url }
+  }
 }
 
 /** First-party session panels, and whatever plugins have registered. */
@@ -206,6 +262,12 @@ export function DockTabStrip({
   const storedOrder = useDockTabsStore((state) =>
     sessionId ? state.bySession[sessionId]?.order : undefined
   )
+  const pageTabs = useDockTabsStore((state) =>
+    sessionId ? (state.bySession[sessionId]?.pages ?? EMPTY_PAGES) : EMPTY_PAGES
+  )
+  const activePageTabId = useDockTabsStore((state) =>
+    sessionId ? (state.bySession[sessionId]?.activePageTabId ?? null) : null
+  )
   const moveTab = useDockTabsStore((state) => state.moveTab)
   const addContextSelection = useChatStore((state) => state.addContextSelection)
   const activeTurnMessageIds = useChatViewportStore((state) => state.activeTurnMessageIds)
@@ -228,17 +290,22 @@ export function DockTabStrip({
           openArtifactIds,
           artifactExists: (id) => Boolean(artifacts[id]),
           isKnownPanel: (id) => panelInfo(id) !== null,
+          pageTabIds: pageTabs.map((tab) => tab.id),
         })
       ),
-    [activatedPanelIds, activePanelId, artifacts, openArtifactIds, panelInfo, storedOrder]
+    [activatedPanelIds, activePanelId, artifacts, openArtifactIds, pageTabs, panelInfo, storedOrder]
   )
 
   const activeKey: DockTabKey | null =
     activeArtifactId && artifacts[activeArtifactId]
       ? artifactTabKey(activeArtifactId)
-      : activePanelId && keys.includes(panelTabKey(activePanelId))
-        ? panelTabKey(activePanelId)
-        : null
+      : activePanelId === DOCK_BROWSER_PANEL_ID
+        ? activePageTabId && keys.includes(pageTabKey(activePageTabId))
+          ? pageTabKey(activePageTabId)
+          : null
+        : activePanelId && keys.includes(panelTabKey(activePanelId))
+          ? panelTabKey(activePanelId)
+          : null
 
   const overflow = useOverflow(strip, keys.join("\u0000"))
 
@@ -257,7 +324,11 @@ export function DockTabStrip({
   const activate = (key: DockTabKey) => {
     const tab = parseDockTabKey(key)
     if (tab.kind === "artifact") setActiveArtifact(tab.artifactId, sessionId)
-    else activatePanel(tab.panelId)
+    else if (tab.kind === "page") {
+      if (!sessionId) return
+      activateDockPageTab(sessionId, tab.tabId)
+      onWidthHint("wide", DOCK_BROWSER_PANEL_ID)
+    } else activatePanel(tab.panelId)
   }
 
   const close = (key: DockTabKey) => {
@@ -265,7 +336,9 @@ export function DockTabStrip({
     const remaining = keys.filter((candidate) => candidate !== key)
     const tab = parseDockTabKey(key)
     if (tab.kind === "artifact") closeArtifact(tab.artifactId)
-    else closePanelTab(sessionScopeKey, tab.panelId)
+    else if (tab.kind === "page") {
+      if (sessionId) closeDockPageTab(sessionId, tab.tabId)
+    } else closePanelTab(sessionScopeKey, tab.panelId)
     // Nothing left open in this task: the dock has nothing to show.
     if (remaining.length === 0) {
       setDockCollapsed(true)
@@ -311,6 +384,21 @@ export function DockTabStrip({
           </span>
         ),
         artifact,
+        page: null,
+      }
+    }
+    if (tab.kind === "page") {
+      const page = pageTabs.find((entry) => entry.id === tab.tabId)!
+      const favicon = faviconFor(page.url)
+      return {
+        label: pageTabLabel(page),
+        icon: favicon.host ? (
+          <SourceFavicon key={page.url} src={favicon.src} host={favicon.host} />
+        ) : (
+          <GlobeIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        ),
+        artifact: null,
+        page,
       }
     }
     const info = panelInfo(tab.panelId)!
@@ -319,6 +407,7 @@ export function DockTabStrip({
       label: info.label,
       icon: <Icon className="size-3.5 shrink-0 text-muted-foreground" />,
       artifact: null,
+      page: null,
     }
   }
 
@@ -334,7 +423,7 @@ export function DockTabStrip({
           className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {keys.map((key, index) => {
-            const { label, icon, artifact } = describe(key)
+            const { label, icon, artifact, page } = describe(key)
             const active = key === activeKey
             const tab = parseDockTabKey(key)
             const pending = tab.kind === "panel" && pendingPanelIds.includes(tab.panelId)
@@ -391,7 +480,9 @@ export function DockTabStrip({
                       title={
                         artifact && jumpToMessage
                           ? tArtifacts("dock.tabHint", { title: artifact.title })
-                          : label
+                          : page
+                            ? page.url
+                            : label
                       }
                       onClick={() => activate(key)}
                       onDoubleClick={() => {
@@ -404,6 +495,13 @@ export function DockTabStrip({
                     >
                       {icon}
                       <span className="min-w-0 truncate">{label}</span>
+                      {page?.engine === "embedded" ? (
+                        <FeatherIcon
+                          className="size-3 shrink-0 text-muted-foreground"
+                          aria-label={t("lightweightBadge")}
+                          data-testid={`dock-tab-lightweight-${key}`}
+                        />
+                      ) : null}
                       {pending ? (
                         <span
                           className="size-1.5 shrink-0 rounded-full bg-primary"
@@ -442,6 +540,34 @@ export function DockTabStrip({
                       >
                         <CornerUpLeftIcon className="size-4" />
                         {tArtifacts("dock.goToSource")}
+                      </ContextMenuItem>
+                    </>
+                  ) : null}
+                  {page && sessionId ? (
+                    <>
+                      {page.engine === "embedded" ? (
+                        isLocalChromiumInstalled() ? (
+                          <ContextMenuItem
+                            onSelect={() => setDockPageEngine(sessionId, page.id, "auto")}
+                          >
+                            <GlobeIcon className="size-4" />
+                            {t("openInChromium")}
+                          </ContextMenuItem>
+                        ) : null
+                      ) : (
+                        <ContextMenuItem
+                          onSelect={() => setDockPageEngine(sessionId, page.id, "embedded")}
+                        >
+                          <FeatherIcon className="size-4" />
+                          {t("openInLightweight")}
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuItem
+                        disabled={!/^https?:/i.test(page.url)}
+                        onSelect={() => void openExternal(page.url)}
+                      >
+                        <ExternalLinkIcon className="size-4" />
+                        {t("openInDefaultBrowser")}
                       </ContextMenuItem>
                     </>
                   ) : null}

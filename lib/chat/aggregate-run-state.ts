@@ -65,7 +65,7 @@ const PRECEDENCE: AggregateChatStatus[] = ["awaiting_approval", "streaming", "er
  * {@link backgroundActiveSessionIds}, so the count, the affordance and the list
  * it opens can never disagree about what they are counting.
  */
-function isInFlight(status: AggregateChatStatus): boolean {
+export function isInFlight(status: AggregateChatStatus): boolean {
   return status === "streaming" || status === "awaiting_approval"
 }
 

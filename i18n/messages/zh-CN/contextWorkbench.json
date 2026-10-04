@@ -468,7 +468,11 @@
     "newTab": "新标签页",
     "close": "关闭 {name}",
     "allTabs": "全部标签页",
-    "resourceViews": "此项的视图"
+    "resourceViews": "此项的视图",
+    "lightweightBadge": "轻量预览",
+    "openInChromium": "在 Chromium 中打开",
+    "openInLightweight": "在轻量预览中打开",
+    "openInDefaultBrowser": "在默认浏览器中打开"
   },
   "newTab": {
     "title": "新标签页",
@@ -487,6 +491,7 @@
     "chromeWebStoreHint": "为内置 Chromium 添加扩展",
     "recent": "最近访问（全部任务）",
     "installTitle": "安装 Chromium 之前，网页会在系统 WebView 中打开",
-    "openFailed": "无法打开 {path}"
+    "openFailed": "无法打开 {path}",
+    "extensions": "扩展程序"
   }
 }

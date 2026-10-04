@@ -33,8 +33,8 @@ OpenAI 在 2026 年发布的桌面浏览器收敛到了同样的产品形态：�
 
 | 后端 | 引擎 | 拥有 | 默认用于 |
 | --- | --- | --- | --- |
-| `embedded` | 平台 webview（不变） | 单个页面、注入的 JS | 轻量级 localhost 预览 |
-| `local-chromium` | 回环地址上的工作区运行时服务，Chromium 来自 Playwright 的 Chrome-for-Testing 构建 | 标签页、下载、扩展、原生输入、对话框、上传、与云端完全对齐的快照 | 安装后用于所有公开网站；用户可选 |
+| `embedded` | 平台 webview（不变） | 单个页面、注入的 JS | 轻量预览：切换到它的页面标签，以及安装 Chromium 之前的所有页面（ADR-0214 之前 localhost 默认用它） |
+| `local-chromium` | 回环地址上的工作区运行时服务，Chromium 来自 Playwright 的 Chrome-for-Testing 构建 | 标签页、下载、扩展、原生输入、对话框、上传、与云端完全对齐的快照 | 安装后用于所有页面，自 [ADR-0214](./0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task) 起包括 localhost；用户可选 |
 | `user-chrome` | 同一服务，通过 `connectOverCDP` 连接到用户正在运行的 Chrome/Edge/Brave | 用户的真实配置文件、登录态和扩展 | 用户显式选择 |
 | `remote` | ADR-0085 中的云端运行时（不变） | 云端 / 移动端 / 无头场景 | 非桌面宿主 |
 

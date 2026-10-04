@@ -46,7 +46,8 @@
         "evaluate.confirmTitle": "Allow page script after sign-in?",
         "evaluate.confirm": "A saved password was filled on this browser session. The agent wants to run this expression on {origin}, which could read it back:\n\n{expression}",
         "evaluate.confirmAllow": "Run once",
-        "evaluate.confirmDeny": "Deny"
+        "evaluate.confirmDeny": "Deny",
+        "annotate.switchedToLightweight": "Switched this page to the lightweight preview so the agent can annotate it."
       },
       "zh-CN": {
         "manifest.name": "浏览器工具",
@@ -60,7 +61,8 @@
         "evaluate.confirmTitle": "登录后允许执行页面脚本？",
         "evaluate.confirm": "此浏览器会话中已填入一个保存的密码。Agent 想在 {origin} 上执行下面的表达式，它可能读回该密码：\n\n{expression}",
         "evaluate.confirmAllow": "仅执行本次",
-        "evaluate.confirmDeny": "拒绝"
+        "evaluate.confirmDeny": "拒绝",
+        "annotate.switchedToLightweight": "已将此页面切换到轻量预览，以便 Agent 添加批注。"
       }
     }
   }

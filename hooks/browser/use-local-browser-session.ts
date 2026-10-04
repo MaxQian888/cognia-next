@@ -2,8 +2,12 @@
 
 /**
  * One local-runtime browser session behind the pane (ADR-0201): created on
- * mount for `local-chromium` or `user-chrome`, streamed into the canvas, bound
- * to the agent's engine routing while shown, and closed on unmount.
+ * mount, streamed into the canvas, bound to the agent's engine routing while
+ * shown, and closed on unmount.
+ *
+ * The pane uses it for the user's own Chrome (`user-chrome`). Cognia's own
+ * Chromium is one session shared by every pane and agent instead
+ * (`useSharedLocalBrowser`, ADR-0214): its profile can only be open once.
  *
  * Three runtime events matter to the pane and are folded in here:
  * `pages.changed` (the tab strip), `dialog.opened` (a native alert / confirm /
@@ -13,7 +17,9 @@
  * headless session of its own (`ensureAgentLocalEngine`), announced with
  * `BROWSER_AGENT_LOCAL_SESSION_EVENT`. A pane showing the same backend adopts
  * it — the user then watches exactly the page the agent is driving — and
- * closes the session it had created, which nothing else can see.
+ * closes the session it had created, which nothing else can see. The adopted
+ * session stays the agent's: the pane detaches from it on unmount and never
+ * closes it, or an agent mid-task lost its browser when the pane went away.
  *
  * The backend and attached browser are fixed for the hook's lifetime: the pane
  * remounts it (`key`) when either changes, so no state has to be reset here.
@@ -209,7 +215,8 @@ export function useLocalBrowserSession({
       sessionIdRef.current = null
       setEngine(null)
       setSessionId(null)
-      if (!closing) return
+      // Detach only: an adopted session is the agent's.
+      if (!closing || closing === adopted) return
       // The user's own Chrome keeps every tab it had; only the ones this
       // session opened are closed (`finalize`) before it detaches.
       const finalize =

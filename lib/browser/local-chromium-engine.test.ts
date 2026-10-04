@@ -369,6 +369,38 @@ describe("LocalChromiumEngine", () => {
   })
 })
 
+describe("LocalChromiumEngine addressing a tab", () => {
+  it("names its tab on every op, letting an op's own pageId win", async () => {
+    const e = new LocalChromiumEngine("s1", "local-chromium", { pageId: "p7" })
+    expect(e.pageId).toBe("p7")
+    await e.navigate("https://a.test")
+    await e.readConsole()
+    await e.activatePage("p2")
+    await e.closePage("p3")
+    expect(mockRpc.mock.calls).toEqual([
+      ["browser.navigate", { sessionId: "s1", pageId: "p7", url: "https://a.test" }],
+      ["browser.console", { sessionId: "s1", pageId: "p7" }],
+      ["browser.page.activate", { sessionId: "s1", pageId: "p2" }],
+      ["browser.page.close", { sessionId: "s1", pageId: "p3" }],
+    ])
+  })
+
+  it("leaves the page in front alone when it does not name one", async () => {
+    expect(engine().pageId).toBeNull()
+    await engine().getPage()
+    expect(mockRpc).toHaveBeenCalledWith("browser.page", { sessionId: "s1" })
+  })
+
+  it("opens a tab behind the one in front on request", async () => {
+    await engine().createPage("https://b.test", { activate: false })
+    await engine().createPage(undefined, { activate: true })
+    expect(mockRpc.mock.calls).toEqual([
+      ["browser.page.create", { sessionId: "s1", url: "https://b.test", activate: false }],
+      ["browser.page.create", { sessionId: "s1" }],
+    ])
+  })
+})
+
 describe("toLocalBrowserError", () => {
   it("keeps typed errors and parses coded strings", () => {
     const typed = new BrowserSessionError("browser_page_not_found", "x")

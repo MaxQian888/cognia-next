@@ -160,6 +160,49 @@ function browserAuditMetadata(type, payload = {}) {
   return metadata
 }
 
+/**
+ * Ops whose `pageId` names the page to act on rather than being the subject
+ * of the op itself (`browser.page.activate` / `.close`). They run inside
+ * `browser.withPageTarget`, so "the page" means the named tab and not the one
+ * in front (ADR-0214: tabs owned by tasks in one shared session).
+ */
+const PAGE_ADDRESSABLE_OPS = new Set([
+  "browser.navigate",
+  "browser.snapshot",
+  "browser.act",
+  "browser.press-key",
+  "browser.scroll",
+  "browser.evaluate",
+  "browser.console",
+  "browser.network",
+  "browser.back",
+  "browser.forward",
+  "browser.reload",
+  "browser.stop",
+  "browser.page",
+  "browser.page.create",
+  "browser.drag",
+  "browser.dialog.handle",
+  "browser.wait.text",
+  "browser.wait.selector",
+  "browser.wait.network-idle",
+  "browser.wait.load",
+  "browser.screenshot",
+  "browser.files.set",
+  "browser.set-zoom",
+  "browser.find",
+  "browser.find.clear",
+  "browser.input",
+  "browser.cancel",
+  "browser.forms.detect-login",
+  "browser.credential.fill",
+  "browser.pdf",
+  "browser.emulate",
+  "browser.storage.get",
+  "browser.storage.set",
+  "browser.storage.clear",
+])
+
 function createDispatcher(browser, supervisor, media, eventJournal) {
   const operations = {
     "browser.session.create": (payload) => browser.createSession(payload),
@@ -180,7 +223,10 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.stop": ({ sessionId }) => browser.stop(sessionId),
     "browser.page": ({ sessionId }) => browser.getPage(sessionId),
     "browser.pages": ({ sessionId }) => browser.listPages(sessionId),
-    "browser.page.create": ({ sessionId, url }) => browser.createPage(sessionId, url),
+    "browser.page.create": ({ sessionId, url, activate }) =>
+      activate === false
+        ? browser.createPage(sessionId, url, { activate: false })
+        : browser.createPage(sessionId, url),
     "browser.page.activate": ({ sessionId, pageId }) => browser.activatePage(sessionId, pageId),
     "browser.page.close": ({ sessionId, pageId }) => browser.closePage(sessionId, pageId),
     "browser.drag": ({ sessionId, sourceRef, targetRef }) =>
@@ -262,7 +308,16 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
       type.startsWith("browser.") && type !== "browser.input" && type !== "browser.screencast.ack"
     const startedAt = Date.now()
     try {
-      const result = await operation(safePayload)
+      const addressed =
+        PAGE_ADDRESSABLE_OPS.has(type) &&
+        typeof safePayload.pageId === "string" &&
+        typeof safePayload.sessionId === "string" &&
+        typeof browser.withPageTarget === "function"
+      const result = addressed
+        ? await browser.withPageTarget(safePayload.sessionId, safePayload.pageId, () =>
+            operation(safePayload)
+          )
+        : await operation(safePayload)
       if (shouldAudit) {
         eventJournal.publish({
           kind: "runtime.operation",

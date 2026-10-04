@@ -39,6 +39,21 @@ interface Stack {
 
 const EMPTY: Stack = { entries: [], index: -1 }
 
+/** How many keyed stacks outlive their pane (see `useBrowserHistory`'s `key`). */
+const KEPT_STACKS = 64
+const keptStacks = new Map<string, Stack>()
+
+function keep(key: string, stack: Stack): void {
+  keptStacks.delete(key)
+  keptStacks.set(key, stack)
+  while (keptStacks.size > KEPT_STACKS) keptStacks.delete(keptStacks.keys().next().value!)
+}
+
+/** Test seam. */
+export function resetKeptBrowserHistory(): void {
+  keptStacks.clear()
+}
+
 /**
  * The preview's back/forward stack, plus the most-recent-first list the
  * address-bar menu shows.
@@ -56,17 +71,36 @@ const EMPTY: Stack = { entries: [], index: -1 }
  * outlive it is the list of places visited: every arrival is recorded into the
  * account's `browserHistory` table (`lib/db/browser-history.ts`), which is what
  * the address-bar menu reads through `useRecentPages`.
+ *
+ * `key` names a page that outlives the pane showing it — a dock page tab,
+ * whose pane remounts every time the user switches tabs (ADR-0214). Its stack
+ * is kept in memory under that key (never persisted, so a reload still starts
+ * clean) and picked up again by the next pane on the same page.
  */
-export function useBrowserHistory(): BrowserHistory {
-  const [stack, setStack] = useState<Stack>(EMPTY)
+export function useBrowserHistory(key?: string): BrowserHistory {
+  const [stack, setStack] = useState<Stack>(() => (key ? keptStacks.get(key) : undefined) ?? EMPTY)
   // Mirrored in a ref so `goBack` / `goForward` can return the target address
   // to their caller synchronously. Reading it out of a `setState` updater does
   // not work: React defers the updater to render time, so the caller would
   // always see the pre-update value (or, under StrictMode, see it twice).
-  const stackRef = useRef<Stack>(EMPTY)
+  const stackRef = useRef<Stack>(stack)
+  const keyRef = useRef(key)
+  // A pane that moves to another page picks up that page's stack.
+  const [shownKey, setShownKey] = useState(key)
+  if (key !== shownKey) {
+    setShownKey(key)
+    const restored = (key ? keptStacks.get(key) : undefined) ?? EMPTY
+    setStack(restored)
+  }
+  useEffect(() => {
+    if (keyRef.current === key) return
+    keyRef.current = key
+    stackRef.current = (key ? keptStacks.get(key) : undefined) ?? EMPTY
+  }, [key])
 
   const commit = useCallback((next: Stack) => {
     stackRef.current = next
+    if (keyRef.current) keep(keyRef.current, next)
     setStack(next)
   }, [])
 

@@ -148,7 +148,12 @@ jest.mock("@/components/browser/local-chromium-preview", () => ({
       data-backend={String(props.backend)}
       data-browser={String(props.userChromeBrowser ?? "")}
       data-initial={String(props.initialUrl ?? "")}
-    />
+      data-owner={String(props.owner ?? "")}
+      data-tag={String(props.pageTag ?? "")}
+      data-hide-tab-row={String(props.hideTabRow ?? false)}
+    >
+      {props.toolbarExtras as React.ReactNode}
+    </div>
   ),
 }))
 jest.mock("@/components/browser/vault/browser-autofill-prompt", () => ({
@@ -1720,11 +1725,14 @@ describe("local engines", () => {
     expect(mockWebviewVisible).toBe(false)
   })
 
-  it("keeps localhost on the embedded webview", () => {
+  it("hands localhost to local Chromium too once it is installed (ADR-0214, D8)", () => {
     mockLocalInstalled = true
     renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000" />)
-    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
-    expect(mockPaneUrl).toBe("http://localhost:3000/")
+    expect(screen.getByTestId("local-chromium-preview")).toHaveAttribute(
+      "data-initial",
+      "http://localhost:3000/"
+    )
+    expect(mockPaneUrl).toBeNull()
   })
 
   it("stays embedded for a public page while Chromium is not installed", () => {
@@ -1772,6 +1780,78 @@ describe("local engines", () => {
     expect(
       within(screen.getByTestId("browser-reserved-region")).queryByTestId("autofill-prompt")
     ).toBeNull()
+  })
+})
+
+// ADR-0214: a chat dock page tab.
+describe("dock page tabs", () => {
+  const dockPage = (
+    overrides: Partial<React.ComponentProps<typeof BrowserPreviewPane>["dockPage"]> = {}
+  ) => ({
+    owner: "chat:s1",
+    tabId: "t1",
+    engine: "auto" as const,
+    onEngineChange: jest.fn(),
+    onNavigated: jest.fn(),
+    ...overrides,
+  })
+
+  it("shows the tab's own page in Chromium without a tab row, with the engine chip", () => {
+    mockLocalInstalled = true
+    const page = dockPage()
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={page} />)
+    const local = screen.getByTestId("local-chromium-preview")
+    expect(local).toHaveAttribute("data-owner", "chat:s1")
+    expect(local).toHaveAttribute("data-tag", "t1")
+    expect(local).toHaveAttribute("data-hide-tab-row", "true")
+    fireEvent.click(within(local).getByTestId("browser-engine-chip"))
+    expect(page.onEngineChange).toHaveBeenCalledWith("embedded")
+  })
+
+  it("serves a lightweight tab in the system webview and remembers where it went", () => {
+    mockLocalInstalled = true
+    const page = dockPage({ engine: "embedded" })
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={page} />)
+    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
+    expect(mockPaneUrl).toBe("http://localhost:5173/")
+    expect(page.onNavigated).toHaveBeenCalledWith("http://localhost:5173/")
+    fireEvent.click(screen.getByTestId("browser-engine-chip"))
+    expect(page.onEngineChange).toHaveBeenCalledWith("auto")
+  })
+
+  it("asks for Chromium by name when the Settings default is the webview", () => {
+    mockLocalInstalled = true
+    mockDefaultBackend = "embedded"
+    const page = dockPage()
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={page} />)
+    fireEvent.click(screen.getByTestId("browser-engine-chip"))
+    expect(page.onEngineChange).toHaveBeenCalledWith("local-chromium")
+  })
+
+  it("has no engine chip where Chromium is not installed", () => {
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={dockPage()} />)
+    expect(screen.queryByTestId("browser-engine-chip")).toBeNull()
+  })
+
+  it("files an engine switch on the tab rather than the pane", () => {
+    mockLocalInstalled = true
+    const page = dockPage({ engine: "embedded" })
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={page} />)
+    fireEvent.change(within(overflow()).getByRole("combobox", { name: "Browser engine" }), {
+      target: { value: "local-chromium" },
+    })
+    expect(page.onEngineChange).toHaveBeenCalledWith("local-chromium")
+    // The tab still says embedded, so the pane stays on it until the tab changes.
+    expect(screen.queryByTestId("local-chromium-preview")).toBeNull()
+  })
+
+  it("leaves link requests to the dock, which turns them into tabs", () => {
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={dockPage()} />)
+    let claimed = true
+    act(() => {
+      claimed = requestBrowserUrl("https://example.com/")
+    })
+    expect(claimed).toBe(false)
   })
 })
 

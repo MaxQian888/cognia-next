@@ -62,18 +62,39 @@ of tabs that includes pages with URLs.
 
 ### Browser
 
-- One shared dock session on local Chromium, created on the first page. Pages are owned by
-  chat sessions in a registry. The `browser` panel stays a singleton that shows the active
-  page tab.
+- One local-Chromium session serves the whole desktop. Every local session opens the `default`
+  profile and the runtime lets one session hold a profile, so a session per pane or per task
+  failed with `browser_profile_in_use`. The session is created on the first page and closes
+  after a minute with no page held and nobody watching.
+- Pages have owners: `chat:<sessionId>` for a conversation's page tabs and its agent,
+  `pane:<id>` for a browser pane outside the dock. A popup goes to the owner of the page that
+  opened it (the runtime now reports `openerId`). One owner holds at most 8 pages.
+- Every runtime op may name a `pageId`, and then acts on that page instead of the one in front.
+  Each page has its own in-flight action, pending dialog, console and network buffer. A task's
+  agent keeps working on its own page while the user looks at another, and neither refuses the
+  other with `browser_action_in_progress`. Only the pane on screen activates a page. The
+  screencast now follows the page in front; before, it stayed on the page it started on.
+- A page tab stores `{ url, title, engine }` per conversation. The `browser` panel is not a tab
+  of its own: it renders the page tab in front, remounted per tab, and a reveal with no page
+  open lands on the New Tab page. Links, `browser_open` and the External Bridge's `revealPane`
+  become page tabs. A user's link reuses a tab on the same address. An agent reuses the tab
+  whose page it drives. A request for a background conversation lines its tab up there without
+  taking over the dock on screen.
 - Switching away closes the leaving task's pages unless its run is streaming or awaiting
-  approval. Those close when the run settles, if the task is still in the background.
-  Switching back recreates a page only when its tab becomes active.
-- Agent engine binding and the browser tools' last URL are per chat session. Adopting an
-  agent session never closes it on unmount.
-- Web pages default to local Chromium, localhost included. Without Chromium the system webview
-  serves the page and the New Tab page offers the install control. A page tab can switch to the
-  lightweight preview (system webview), which keeps element pick, annotations, Adjust, CDP
-  controls and the inspection rail. `browser_annotate` routes there.
+  approval. Those close when the run settles, if the task is still in the background. Switching
+  back recreates a page only when its tab becomes active, at the remembered address.
+- Agent routing and the browser tools' last URL are per chat session. An agent's first page
+  fills the tab its conversation is showing. An External Bridge client is pinned to the
+  conversation on screen at its first call. A pane that adopted an agent's user-chrome session
+  detaches from it on unmount instead of closing it.
+- Web pages default to local Chromium, localhost included, once it is installed. An empty pane
+  outside the dock stays on the webview. Without Chromium the system webview serves the page
+  and the New Tab page offers the install control. A page tab can switch to the lightweight
+  preview (system webview) from its menu or the address bar's engine chip. The lightweight
+  preview keeps element pick, annotations, Adjust, CDP controls and the inspection rail. Leaving
+  Chromium closes the tab's page. `browser_annotate` on a Chromium page moves the
+  conversation's page there and asks the model for a fresh snapshot (`browser_engine_switched`):
+  a Chromium snapshot's refs mean nothing in the webview.
 
 ### Narrow windows
 

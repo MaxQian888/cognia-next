@@ -88,7 +88,14 @@
     "restart": "Start again",
     "starting": "Starting the local browser…",
     "tabs": "Tabs",
-    "untitled": "Untitled"
+    "untitled": "Untitled",
+    "restoring": "Reopening this page…",
+    "engineChip": {
+      "chromium": "Chromium",
+      "lightweight": "Lightweight",
+      "toLightweight": "Open in lightweight preview (element pick, annotations, Adjust)",
+      "toChromium": "Open in Chromium"
+    }
   },
   "settings": {
     "chromium": {

@@ -22,6 +22,7 @@ const navigatePanel = jest.fn()
 const smartReveal = jest.fn(() => true)
 const closePanelTab = jest.fn()
 const setDockCollapsed = jest.fn()
+const openBrowser = jest.fn()
 let jumpToMessage: ((id: string, a?: unknown, b?: unknown) => boolean) | null = null
 const toastError = jest.fn()
 
@@ -50,9 +51,12 @@ jest.mock("@/components/agent/plan/plan-panel", () => ({
 let workbenchLayouts: Record<string, unknown> = {}
 jest.mock("@/stores/context-workbench/context-workbench-store", () => ({
   ...jest.requireActual("@/stores/context-workbench/context-workbench-store"),
-  useContextWorkbenchStore: {
-    getState: () => ({ navigatePanel, smartReveal, closePanelTab, layouts: workbenchLayouts }),
-  },
+  useContextWorkbenchStore: Object.assign(
+    (selector: (state: unknown) => unknown) => selector({ layouts: workbenchLayouts }),
+    {
+      getState: () => ({ navigatePanel, smartReveal, closePanelTab, layouts: workbenchLayouts }),
+    }
+  ),
 }))
 
 // The New Tab page has its own suite; here it only has to hand a tool back.
@@ -60,13 +64,20 @@ jest.mock("./dock-new-tab-page", () => ({
   DockNewTabPage: ({
     sessionId,
     onOpenPanel,
+    onOpenPage,
   }: {
     sessionId: string | null
     onOpenPanel: (panelId: string) => void
+    onOpenPage: (url: string) => void
   }) => (
-    <button type="button" data-session={sessionId} onClick={() => onOpenPanel("workspace")}>
-      open workspace
-    </button>
+    <>
+      <button type="button" data-session={sessionId} onClick={() => onOpenPanel("workspace")}>
+        open workspace
+      </button>
+      <button type="button" onClick={() => onOpenPage("https://a.test/")}>
+        open page
+      </button>
+    </>
   ),
 }))
 
@@ -75,7 +86,7 @@ let browserRequestId = 0
 jest.mock("@/stores/artifact/artifact-dock-layout-store", () => {
   const store = (selector: (state: unknown) => unknown) =>
     selector({ browserRequestUrl, browserRequestId })
-  store.getState = () => ({ setDockCollapsed })
+  store.getState = () => ({ setDockCollapsed, openBrowser })
   return { useArtifactDockLayoutStore: store }
 })
 
@@ -175,19 +186,43 @@ jest.mock("@/components/browser/browser-preview-pane", () => ({
     requestedUrl,
     requestId,
     onRequestReveal,
+    initialUrl,
+    dockPage,
   }: {
     sessionId?: string
     requestedUrl?: string
     requestId?: number
     onRequestReveal?: () => boolean
+    initialUrl?: string
+    dockPage?: {
+      owner: string
+      tabId: string
+      engine: string
+      onEngineChange: (engine: string) => void
+      onNavigated?: (url: string) => void
+    }
   }) => (
     <div
       data-testid="browser"
       data-session={sessionId ?? "none"}
       data-requested={requestedUrl ?? ""}
       data-request-id={String(requestId ?? "")}
+      data-initial={initialUrl ?? ""}
+      data-owner={dockPage?.owner ?? ""}
+      data-tab={dockPage?.tabId ?? ""}
       onClick={() => onRequestReveal?.()}
-    />
+    >
+      {dockPage ? (
+        <>
+          <button type="button" onClick={() => dockPage.onEngineChange("embedded")}>
+            lightweight
+          </button>
+          <button type="button" onClick={() => dockPage.onNavigated?.("https://moved.test/")}>
+            navigated
+          </button>
+        </>
+      ) : null}
+    </div>
   ),
 }))
 
@@ -736,11 +771,58 @@ describe("useSessionSurfacePanels", () => {
     expect(closePanelTab).toHaveBeenCalledWith(scopeKey, "new-tab")
     expect(navigatePanel).toHaveBeenCalledWith(scopeKey, "workspace", "wide")
     expect(onWidthHint).toHaveBeenCalledWith("wide", "workspace")
-    expect(useDockTabsStore.getState().bySession.s1.order).toEqual([
-      "panel:browser",
-      "panel:workspace",
-    ])
+    // The browser panel is not a tab of its own on the desktop strip.
+    expect(useDockTabsStore.getState().bySession.s1.order).toEqual(["panel:workspace"])
     workbenchLayouts = {}
+  })
+
+  it("opens an address from the New Tab page as a page tab in the page's place", () => {
+    const scopeKey = "scope::session:s1"
+    useDockTabsStore.setState({ bySession: {} })
+    const panel = panelById(
+      collect(useSessionSurfacePanels, sessionInput({ newTab: true })),
+      "new-tab"
+    )
+    renderPanel(panel, SESSION_RESOURCE)
+    fireEvent.click(screen.getByRole("button", { name: "open page" }))
+    const entry = useDockTabsStore.getState().bySession.s1
+    expect(entry.pages).toEqual([
+      { id: entry.activePageTabId, url: "https://a.test/", title: "", engine: "auto" },
+    ])
+    expect(closePanelTab).toHaveBeenCalledWith(scopeKey, "new-tab")
+    expect(navigatePanel).toHaveBeenCalledWith(expect.any(String), "browser", "wide")
+    expect(openBrowser).toHaveBeenCalled()
+    expect(onWidthHint).toHaveBeenCalledWith("wide", "browser")
+  })
+
+  it("shows the conversation's page tab in the desktop browser panel", () => {
+    useDockTabsStore.setState({ bySession: {} })
+    useDockTabsStore
+      .getState()
+      .addPageTab("s1", { id: "pt-1", url: "http://localhost:5173/", title: "", engine: "auto" })
+    const panel = panelById(
+      collect(useSessionSurfacePanels, sessionInput({ newTab: true })),
+      "browser"
+    )
+    renderPanel(panel, SESSION_RESOURCE)
+    const browser = screen.getByTestId("browser")
+    expect(browser).toHaveAttribute("data-initial", "http://localhost:5173/")
+    expect(browser).toHaveAttribute("data-owner", "chat:s1")
+    expect(browser).toHaveAttribute("data-tab", "pt-1")
+    fireEvent.click(screen.getByRole("button", { name: "navigated" }))
+    expect(useDockTabsStore.getState().bySession.s1.pages[0].url).toBe("https://moved.test/")
+    fireEvent.click(screen.getByRole("button", { name: "lightweight" }))
+    expect(useDockTabsStore.getState().bySession.s1.pages[0].engine).toBe("embedded")
+  })
+
+  it("renders nothing in the desktop browser panel without a page tab", () => {
+    useDockTabsStore.setState({ bySession: {} })
+    const panel = panelById(
+      collect(useSessionSurfacePanels, sessionInput({ newTab: true })),
+      "browser"
+    )
+    renderPanel(panel, SESSION_RESOURCE)
+    expect(screen.queryByTestId("browser")).toBeNull()
   })
 
   it("claims a rail slot for the team roster only inside a team conversation", () => {

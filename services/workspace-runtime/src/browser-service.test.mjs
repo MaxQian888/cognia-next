@@ -730,3 +730,194 @@ test("never deletes outside the profiles root", async (t) => {
   }
   await assert.doesNotReject(() => fs.stat(service.workspaceRoot))
 })
+
+// ADR-0214: several tasks keep their own tabs in one session.
+
+test("an addressed operation acts on the named tab, not the one in front", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const front = (await service.listPages("session-1"))[0]
+  const behind = await service.createPage("session-1", "http://localhost:3000/b", {
+    activate: false,
+  })
+  assert.equal(behind.active, false)
+
+  await service.withPageTarget("session-1", behind.id, () =>
+    service.navigate("session-1", "http://localhost:3000/b2")
+  )
+  const pages = await service.listPages("session-1")
+  assert.equal(pages.find((page) => page.id === behind.id).url, "http://localhost:3000/b2")
+  assert.equal(pages.find((page) => page.id === front.id).url, "http://localhost:3000/")
+  assert.equal(pages.find((page) => page.active).id, front.id)
+
+  // Unaddressed operations keep meaning the page in front.
+  assert.deepEqual(await service.getPage("session-1"), {
+    url: "http://localhost:3000/",
+    title: "App",
+  })
+  await assert.rejects(
+    () => service.withPageTarget("session-1", "missing", () => service.getPage("session-1")),
+    (error) => error.code === "browser_page_not_found"
+  )
+  assert.equal(chromium.launches[0].context.pages.length, 2)
+})
+
+test("each tab runs its own action and keeps its own dialog", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const first = (await service.listPages("session-1"))[0]
+  const second = await service.createPage("session-1", "http://localhost:3000/b", {
+    activate: false,
+  })
+  const [firstPage, secondPage] = chromium.launches[0].context.pages
+  const snapshot = await service.snapshot("session-1")
+  const element = firstPage.elements.get("e1")
+  let releaseClick
+  element.blockClick = new Promise((resolve) => {
+    releaseClick = resolve
+  })
+  const blocked = service.act("session-1", snapshot.nodes[0].ref, "click", {})
+
+  // The other tab is not held up by the first tab's action.
+  const scrolled = await service.withPageTarget("session-1", second.id, () =>
+    service.scroll("session-1", { direction: "down" })
+  )
+  assert.equal(scrolled.ok, true)
+  assert.deepEqual(secondPage.wheelEvents, [[0, 600]])
+  releaseClick()
+  assert.equal((await blocked).ok, true)
+
+  // A dialog on the background tab blocks that tab only.
+  const dialog = new FakeDialog("alert", "Hi")
+  secondPage.nextKeyDialog = dialog
+  const pressed = await service.withPageTarget("session-1", second.id, () =>
+    service.pressKey("session-1", "Enter")
+  )
+  assert.equal(pressed.dialogPending, true)
+  await service.scroll("session-1", { direction: "up" })
+  await assert.rejects(
+    () =>
+      service.withPageTarget("session-1", second.id, () =>
+        service.scroll("session-1", { direction: "down" })
+      ),
+    (error) => error.code === "browser_dialog_pending"
+  )
+  // Switching to another tab while one holds a dialog is allowed.
+  await service.activatePage("session-1", first.id)
+  const handled = await service.withPageTarget("session-1", second.id, () =>
+    service.handleDialog("session-1", { accept: true })
+  )
+  assert.equal(handled.ok, true)
+  assert.equal(dialog.accepted, true)
+})
+
+test("an unaddressed dialog answer finds the tab that raised it", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const second = await service.createPage("session-1", "http://localhost:3000/b", {
+    activate: false,
+  })
+  const secondPage = chromium.launches[0].context.pages[1]
+  const dialog = new FakeDialog("confirm", "Sure?")
+  secondPage.nextKeyDialog = dialog
+  await service.withPageTarget("session-1", second.id, () => service.pressKey("session-1", "Enter"))
+  await service.handleDialog("session-1", { accept: false })
+  assert.equal(dialog.dismissed, true)
+})
+
+test("console and network are read per tab", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const second = await service.createPage("session-1", "http://localhost:3000/b", {
+    activate: false,
+  })
+  const [firstPage, secondPage] = chromium.launches[0].context.pages
+  firstPage.emit("console", { type: () => "log", text: () => "front" })
+  secondPage.emit("console", { type: () => "warn", text: () => "behind" })
+
+  const behind = await service.withPageTarget("session-1", second.id, () =>
+    service.readConsole("session-1")
+  )
+  assert.deepEqual(
+    behind.map((entry) => entry.text),
+    ["behind"]
+  )
+  assert.deepEqual(
+    (await service.readConsole("session-1")).map((entry) => entry.text),
+    ["front"]
+  )
+})
+
+test("the screencast follows the tab in front", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const context = chromium.launches[0].context
+  const attached = []
+  context.newCDPSession = (page) => {
+    attached.push(page)
+    return Promise.resolve(new FakeCdp())
+  }
+  const first = (await service.listPages("session-1"))[0]
+  await service.startScreencast("session-1", () => undefined)
+  assert.deepEqual(attached, [context.pages[0]])
+
+  // A tab opened behind leaves the stream alone; one opened in front takes it.
+  await service.createPage("session-1", "http://localhost:3000/b", { activate: false })
+  assert.equal(attached.length, 1)
+  const front = await service.createPage("session-1", "http://localhost:3000/c")
+  assert.equal(attached.at(-1), context.pages[2])
+
+  await service.activatePage("session-1", first.id)
+  assert.equal(attached.at(-1), context.pages[0])
+
+  // Closing the tab in front hands the stream to the tab that takes over.
+  await service.activatePage("session-1", front.id)
+  await service.closePage("session-1", front.id)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(attached.at(-1), context.pages[0])
+})
+
+test("a popup comes forward only when the tab that opened it was in front", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const context = chromium.launches[0].context
+  const first = (await service.listPages("session-1"))[0]
+  const behind = await service.createPage("session-1", "http://localhost:3000/b", {
+    activate: false,
+  })
+  const settle = () => new Promise((resolve) => setImmediate(resolve))
+
+  const fromFront = new FakePage("http://localhost:3000/popup-a")
+  fromFront.opener = async () => context.pages[0]
+  context.pages.push(fromFront)
+  context.emit("page", fromFront)
+  await settle()
+  let pages = await service.listPages("session-1")
+  const popupA = pages.find((page) => page.url.endsWith("popup-a"))
+  assert.equal(popupA.active, true)
+  assert.equal(popupA.openerId, first.id)
+
+  const fromBehind = new FakePage("http://localhost:3000/popup-b")
+  fromBehind.opener = async () => context.pages[1]
+  context.pages.push(fromBehind)
+  context.emit("page", fromBehind)
+  await settle()
+  pages = await service.listPages("session-1")
+  const popupB = pages.find((page) => page.url.endsWith("popup-b"))
+  assert.equal(popupB.active, false)
+  assert.equal(popupB.openerId, behind.id)
+})
+
+test("closing a tab dismisses the dialog it was holding", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1", grants: [] })
+  const second = await service.createPage("session-1", "http://localhost:3000/b", {
+    activate: false,
+  })
+  const dialog = new FakeDialog("alert", "Hold")
+  chromium.launches[0].context.pages[1].nextKeyDialog = dialog
+  await service.withPageTarget("session-1", second.id, () => service.pressKey("session-1", "Enter"))
+  await service.closePage("session-1", second.id)
+  assert.equal(dialog.dismissed, true)
+  assert.equal((await service.listPages("session-1")).length, 1)
+})

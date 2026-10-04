@@ -2,10 +2,14 @@
 import {
   artifactTabKey,
   orderDockTabs,
+  pageTabKey,
   panelTabKey,
   parseDockTabKey,
   rememberedDockFor,
+  selectActivePageTab,
+  selectPageTabs,
   useDockTabsStore,
+  type DockPageTab,
   type DockTabKey,
 } from "./dock-tabs-store"
 import {
@@ -24,8 +28,9 @@ beforeEach(() => {
 })
 
 describe("tab keys", () => {
-  it("round-trips both kinds", () => {
+  it("round-trips every kind", () => {
     expect(parseDockTabKey(P)).toEqual({ kind: "panel", panelId: "browser" })
+    expect(parseDockTabKey(pageTabKey("pt-1"))).toEqual({ kind: "page", tabId: "pt-1" })
     expect(parseDockTabKey(A)).toEqual({ kind: "artifact", artifactId: "a1" })
     // An artifact id may itself contain a colon.
     expect(parseDockTabKey(artifactTabKey("doc:1"))).toEqual({
@@ -110,13 +115,115 @@ describe("rememberDock", () => {
   })
 })
 
+function page(id: string, url = `https://${id}.test/`): DockPageTab {
+  return { id, url, title: "", engine: "auto" }
+}
+
+describe("page tabs", () => {
+  it("adds a tab, showing the first one opened", () => {
+    const store = useDockTabsStore.getState()
+    store.addPageTab("s1", page("a"))
+    store.addPageTab("s1", page("b"))
+    const state = useDockTabsStore.getState()
+    expect(selectPageTabs(state, "s1").map((tab) => tab.id)).toEqual(["a", "b"])
+    expect(selectActivePageTab(state, "s1")?.id).toBe("a")
+    store.addPageTab("s1", page("c"), { activate: true })
+    expect(selectActivePageTab(useDockTabsStore.getState(), "s1")?.id).toBe("c")
+  })
+
+  it("puts a page where the New Tab page was", () => {
+    useDockTabsStore.getState().addPageTab("s1", page("a"), {
+      replacing: N,
+      currentOrder: [A, N, B],
+    })
+    expect(useDockTabsStore.getState().bySession.s1.order).toEqual([A, pageTabKey("a"), B])
+  })
+
+  it("updates a tab only when something changed", () => {
+    const store = useDockTabsStore.getState()
+    store.addPageTab("s1", page("a"))
+    const before = useDockTabsStore.getState().bySession
+    store.updatePageTab("s1", "a", { url: "https://a.test/" })
+    expect(useDockTabsStore.getState().bySession).toBe(before)
+    store.updatePageTab("s1", "a", { title: "A", engine: "embedded" })
+    expect(selectPageTabs(useDockTabsStore.getState(), "s1")[0]).toMatchObject({
+      title: "A",
+      engine: "embedded",
+    })
+    store.updatePageTab("s1", "missing", { title: "x" })
+    expect(selectPageTabs(useDockTabsStore.getState(), "s1")).toHaveLength(1)
+  })
+
+  it("closes a tab, handing the panel to the most recently opened one left", () => {
+    const store = useDockTabsStore.getState()
+    store.addPageTab("s1", page("a"))
+    store.addPageTab("s1", page("b"))
+    store.addPageTab("s1", page("c"), { activate: true })
+    store.moveTab("s1", [pageTabKey("a"), pageTabKey("b"), pageTabKey("c")], pageTabKey("c"), 0)
+    store.removePageTab("s1", "c")
+    const entry = useDockTabsStore.getState().bySession.s1
+    expect(entry.activePageTabId).toBe("b")
+    expect(entry.order).toEqual([pageTabKey("a"), pageTabKey("b")])
+    store.removePageTab("s1", "a")
+    store.removePageTab("s1", "b")
+    expect(useDockTabsStore.getState().bySession.s1.activePageTabId).toBeNull()
+  })
+
+  it("shows only a tab the conversation has", () => {
+    const store = useDockTabsStore.getState()
+    store.addPageTab("s1", page("a"))
+    store.setActivePageTab("s1", "nope")
+    expect(selectActivePageTab(useDockTabsStore.getState(), "s1")?.id).toBe("a")
+    store.setActivePageTab("s1", null)
+    expect(selectActivePageTab(useDockTabsStore.getState(), "s1")).toBeNull()
+    expect(selectPageTabs(useDockTabsStore.getState(), "other")).toEqual([])
+  })
+})
+
 describe("persistence", () => {
+  it("reads a version-1 entry as one with no page tabs", async () => {
+    window.localStorage.setItem(
+      "cognia-dock-tabs-v1",
+      JSON.stringify({
+        version: 1,
+        state: {
+          bySession: {
+            s1: { order: [A], dock: { open: true, dismissed: false }, lastUsedAt: Date.now() },
+          },
+        },
+      })
+    )
+    await useDockTabsStore.persist.rehydrate()
+    expect(useDockTabsStore.getState().bySession.s1).toMatchObject({
+      order: [A],
+      pages: [],
+      activePageTabId: null,
+    })
+  })
+
+  it("remembers page tabs across a reload", async () => {
+    useDockTabsStore.getState().addPageTab("s1", page("a", "http://localhost:3000/"))
+    const saved = window.localStorage.getItem("cognia-dock-tabs-v1")
+    useDockTabsStore.setState({ bySession: {} })
+    window.localStorage.setItem("cognia-dock-tabs-v1", saved ?? "")
+    await useDockTabsStore.persist.rehydrate()
+    expect(selectActivePageTab(useDockTabsStore.getState(), "s1")).toEqual(
+      page("a", "http://localhost:3000/")
+    )
+  })
+
   it("persists the memory and forgets it with the workbench's retention", () => {
     const now = Date.now()
     const entries = Object.fromEntries(
       Array.from({ length: CONTEXT_WORKBENCH_LAYOUT_LIMIT + 5 }, (_, index) => [
         `s${index}`,
-        { order: [], dock: { open: true, dismissed: false }, lastUsedAt: now - index },
+        {
+          order: [],
+          dock: { open: true, dismissed: false },
+          pages: [],
+          activePageTabId: null,
+          lastUsedAt: now - index,
+        },
       ])
     )
     useDockTabsStore.setState({
@@ -125,6 +232,8 @@ describe("persistence", () => {
         stale: {
           order: [],
           dock: { open: true, dismissed: false },
+          pages: [],
+          activePageTabId: null,
           lastUsedAt: now - CONTEXT_WORKBENCH_LAYOUT_MAX_AGE_MS - 1,
         },
       },

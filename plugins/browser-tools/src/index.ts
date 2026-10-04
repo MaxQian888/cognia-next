@@ -90,14 +90,18 @@ function framedPage<T extends { title?: unknown }>(page: T): T {
 }
 
 /**
- * Last known page URL — a fallback for when the live URL is unreadable
- * (preview not open yet / document mid-swap).
+ * Last known page URL per conversation — a fallback for when the live URL is
+ * unreadable (preview not open yet / document mid-swap).
  *
- * It starts as `null` rather than a localhost literal, because the seed
- * decides a trust tier: an unknown page resolves to `public` / untrusted,
- * which is the safe direction.
+ * Per conversation because each conversation drives its own page (ADR-0214):
+ * one plugin-wide value let a background task's URL decide the route, and the
+ * trust tier, of another conversation's next call.
+ *
+ * A conversation with nothing recorded has no URL rather than a localhost
+ * literal, because the seed decides a trust tier: an unknown page resolves to
+ * `public` / untrusted, which is the safe direction.
  */
-let lastUrl: string | null = null
+const lastUrls = new Map<string, string>()
 let browser: PluginContext["browser"] | undefined
 let ui: PluginContext["ui"] | undefined
 let i18n: PluginContext["i18n"] | undefined
@@ -126,6 +130,14 @@ function callSessionId(callCtx: ToolCallContext | undefined): string | undefined
   return typeof focused === "string" && focused.length > 0 ? focused : undefined
 }
 
+function lastUrlFor(callCtx: ToolCallContext | undefined): string | null {
+  return lastUrls.get(callSessionId(callCtx) ?? "") ?? null
+}
+
+function rememberUrl(callCtx: ToolCallContext | undefined, url: string): void {
+  lastUrls.set(callSessionId(callCtx) ?? "", url)
+}
+
 /**
  * The governed Browser API, or a throw. Every caller must go via this rather
  * than optional-chaining: `browser` is cleared on deactivate, and an executor
@@ -146,12 +158,14 @@ function routingContext(url: string, callCtx: ToolCallContext | undefined) {
   return {
     domainAuthorized: browserApi().isDomainAuthorized(url),
     ...(choice ? { backendPreference: choice } : {}),
+    ...(sessionId ? { chatSessionId: sessionId } : {}),
   }
 }
 
 /** Route for `url` (the TARGET of the next call), defaulting to the last known page. */
-function engineFor(callCtx: ToolCallContext | undefined, url: string = lastUrl ?? ""): Route {
-  return browserApi().routeEngine(url, routingContext(url, callCtx))
+function engineFor(callCtx: ToolCallContext | undefined, url?: string): Route {
+  const target = url ?? lastUrlFor(callCtx) ?? ""
+  return browserApi().routeEngine(target, routingContext(target, callCtx))
 }
 
 /**
@@ -163,7 +177,7 @@ async function currentRoute(callCtx: ToolCallContext | undefined): Promise<Route
   const { engine } = engineFor(callCtx)
   try {
     const { url } = await engine.getPage()
-    if (url) lastUrl = url
+    if (url) rememberUrl(callCtx, url)
   } catch {
     // Page not open / mid-navigation: fall back to the last known URL.
   }
@@ -350,7 +364,7 @@ const definition = definePlugin({
       // Route on the TARGET URL: the page being left may be on another engine.
       const { engine } = engineFor(callCtx, url)
       const pre = await engine.getPage().catch(() => null)
-      lastUrl = url
+      rememberUrl(callCtx, url)
       const navigation = await engine.navigate(url)
       if (isDialogPending(navigation)) return pendingDialogResponse(navigation)
       // Wait for the new document (URL change + readyState complete) so the
@@ -388,12 +402,14 @@ const definition = definePlugin({
         if (choice === "local-chromium" || choice === "user-chrome") {
           await browserApi().ensureLocalEngine(choice, {
             ...(optionalString(input.browser) ? { browser: optionalString(input.browser) } : {}),
+            ...(sessionId ? { chatSessionId: sessionId } : {}),
           })
         }
         // Resolve now so an unservable choice fails here, not on the next call.
-        const route = engineFor(callCtx, url ?? lastUrl ?? "")
+        const route = engineFor(callCtx, url)
         const paneShown = browserApi().openPane(url ?? "", {
           ...(paneBackend(choice) ? { backend: paneBackend(choice) } : {}),
+          ...(sessionId ? { chatSessionId: sessionId } : {}),
         })
         if (url) return { ...(await navigate(url, callCtx)), backend: route.backend, paneShown }
         const page = await route.engine.getPage().catch(() => null)
@@ -430,7 +446,30 @@ const definition = definePlugin({
       const sessionId = callSessionId(callCtx)
       if (!sessionId) return { ok: false, error: "No active chat session" }
 
-      const { engine, untrusted } = await currentRoute(callCtx)
+      const route = await currentRoute(callCtx)
+      // Annotations live in the lightweight preview: its element picker, the
+      // inspection rail and the queue they land in. A ref from a Chromium
+      // snapshot means nothing there, so the page moves over and the model
+      // takes a fresh snapshot rather than having its ref silently re-mapped.
+      if ((route.backend ?? "embedded") !== "embedded") {
+        const page = await route.engine.getPage().catch(() => null)
+        const pageUrl = page?.url || lastUrlFor(callCtx) || ""
+        backendChoices.set(sessionId, "embedded")
+        const paneShown = browserApi().openPane(pageUrl, {
+          backend: "embedded",
+          chatSessionId: sessionId,
+        })
+        ui?.showToast(t("annotate.switchedToLightweight"), "info")
+        return {
+          ok: false,
+          code: "browser_engine_switched",
+          backend: "embedded",
+          paneShown,
+          error:
+            "browser_annotate works in the lightweight preview, and this page was open in Chromium. It is now open in the lightweight preview: call browser_snapshot for fresh refs, then call browser_annotate again.",
+        }
+      }
+      const { engine, untrusted } = route
       if (untrusted) {
         return { ok: false, error: "browser_annotate is disabled on public origins" }
       }
@@ -508,7 +547,7 @@ const definition = definePlugin({
             error: "A saved password was filled; evaluating needs the user's approval",
           }
         }
-        const page = await engine.getPage().catch(() => ({ url: lastUrl ?? "" }))
+        const page = await engine.getPage().catch(() => ({ url: lastUrlFor(callCtx) ?? "" }))
         const approved = await ui.showConfirmDialog({
           title: t("evaluate.confirmTitle"),
           message: t("evaluate.confirm", {
@@ -686,10 +725,10 @@ const definition = definePlugin({
     reg("browser_new_page", async (input, callCtx) => {
       const url = typeof input.url === "string" ? input.url : undefined
       // A new page with a URL routes on that URL; without one, on the current page.
-      const { engine } = engineFor(callCtx, url ?? lastUrl ?? "")
+      const { engine } = engineFor(callCtx, url)
       const page = await engine.createPage(url)
       if (isDialogPending(page)) return pendingDialogResponse(page)
-      if (url) lastUrl = url
+      if (url) rememberUrl(callCtx, url)
       return { ok: true, page, pages: await engine.listPages() }
     })
 
@@ -850,7 +889,7 @@ const definition = definePlugin({
       }
       if (action === "get" || untrusted) {
         if (!ui) return { ok: false, code: "approval_unavailable", error: "No approval surface" }
-        const page = await engine.getPage().catch(() => ({ url: lastUrl ?? "" }))
+        const page = await engine.getPage().catch(() => ({ url: lastUrlFor(callCtx) ?? "" }))
         const approved = await ui.showConfirmDialog({
           title: t("storage.confirmTitle"),
           message: t(`storage.confirm.${action}`, {
@@ -958,6 +997,7 @@ const definition = definePlugin({
     ui = undefined
     i18n = undefined
     backendChoices.clear()
+    lastUrls.clear()
   },
 })
 

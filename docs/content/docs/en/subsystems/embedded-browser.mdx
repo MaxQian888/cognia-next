@@ -35,8 +35,10 @@ Design rationale: [ADR-0055](../adr/0055-agent-browser-loop) for the agent loop,
 type TrustTier = "trusted" | "public"
 ```
 
-`localhost`, `127.0.0.1` and `::1` are the trusted dev-preview tier and route to the embedded webview.
-Everything else is `public`. The classifier is deliberately fail-closed: if `new URL(...)` throws, the
+`localhost`, `127.0.0.1` and `::1` are the trusted dev-preview tier. Everything else is `public`.
+The tier decides how far page content is trusted, not which engine shows it: on the desktop, once
+Cognia's local Chromium is installed, every page goes there (localhost included, ADR-0214), on the
+calling conversation's own page in one shared session; before that the embedded webview serves it. The classifier is deliberately fail-closed: if `new URL(...)` throws, the
 result is `public`, not an error the caller might ignore.
 
 That verdict travels with the engine rather than being recomputed:
@@ -44,7 +46,7 @@ That verdict travels with the engine rather than being recomputed:
 ```ts
 interface EngineRoute {
   engine: BrowserEngine
-  backend: "embedded" | "remote-chromium"
+  backend: "embedded" | "local-chromium" | "user-chrome" | "remote-chromium"
   tier: TrustTier
   /** Page content must be treated as untrusted (public origin). */
   untrusted: boolean

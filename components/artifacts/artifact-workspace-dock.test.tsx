@@ -232,6 +232,11 @@ import {
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
 import { requestBrowserUrl } from "@/lib/browser/open-url-request"
+import {
+  selectActivePageTab,
+  selectPageTabs,
+  useDockTabsStore,
+} from "@/stores/artifact/dock-tabs-store"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
@@ -405,7 +410,66 @@ describe("ArtifactWorkspaceDock", () => {
     expect(screen.getByTestId("artifact-workspace-dock-mobile")).toBeInTheDocument()
   })
 
-  it("opens the browser panel at a link the conversation handed it", async () => {
+  it("opens a link the conversation handed it as a page tab (desktop, ADR-0214)", async () => {
+    useDockTabsStore.setState({ bySession: {} })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+    let claimed = false
+    act(() => {
+      claimed = requestBrowserUrl("https://example.com/cited")
+    })
+    expect(claimed).toBe(true)
+    const tab = selectActivePageTab(useDockTabsStore.getState(), SESSION)
+    expect(tab).toMatchObject({ url: "https://example.com/cited", engine: "auto" })
+    const layout = useArtifactDockLayoutStore.getState()
+    expect(layout.dockCollapsed).toBe(false)
+    expect(layout.revealIntent).toEqual({ panelId: "browser", mode: "wide" })
+    // The address lives on the tab, not in the store's single browser request.
+    expect(layout.browserRequestUrl).toBeNull()
+  })
+
+  it("lines a background conversation's agent page up there, leaving this dock alone", () => {
+    useDockTabsStore.setState({ bySession: {} })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+    let claimed = false
+    act(() => {
+      claimed = requestBrowserUrl("https://bg.example/", {
+        source: "agent",
+        chatSessionId: "background",
+      })
+    })
+    expect(claimed).toBe(true)
+    expect(selectPageTabs(useDockTabsStore.getState(), "background")).toHaveLength(1)
+    expect(selectPageTabs(useDockTabsStore.getState(), SESSION)).toHaveLength(0)
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+  })
+
+  it("leaves a link to the OS browser with no conversation on screen (desktop)", () => {
+    act(() => useChatStore.setState({ activeSessionId: null }))
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    let claimed = true
+    act(() => {
+      claimed = requestBrowserUrl("https://example.com/")
+    })
+    expect(claimed).toBe(false)
+  })
+
+  it("opens the Sheet's browser panel at a link the conversation handed it", async () => {
+    useBreakpointMock.mockReturnValue("mobile")
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />
@@ -429,6 +493,7 @@ describe("ArtifactWorkspaceDock", () => {
   })
 
   it("keeps the link for the conversation it was clicked in", async () => {
+    useBreakpointMock.mockReturnValue("mobile")
     render(
       <ArtifactWorkspaceDock>
         <div data-testid="chat" />

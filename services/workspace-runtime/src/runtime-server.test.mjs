@@ -539,3 +539,44 @@ test("browser.credential.fill forwards origin, pageId, username and password; th
   ])
   assert.doesNotMatch(JSON.stringify(matched.body), /"pw"/)
 })
+
+test("a named pageId addresses that tab, except where the page is the op's subject", async (t) => {
+  const calls = []
+  const browser = serviceStub()
+  browser.withPageTarget = async (sessionId, pageId, operation) => {
+    calls.push(["target", sessionId, pageId])
+    return operation()
+  }
+  browser.navigate = async (...args) => {
+    calls.push(["navigate", ...args])
+    return { ok: true, error: null, generation: 1 }
+  }
+  browser.activatePage = async (...args) => {
+    calls.push(["activatePage", ...args])
+  }
+  browser.createPage = async (...args) => {
+    calls.push(["createPage", ...args])
+    return { id: "page-3", url: "about:blank", title: "", active: false }
+  }
+  const baseUrl = await fixture(t, browser)
+  const control = (type, payload) =>
+    fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${"x".repeat(32)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ version: 1, type, payload }),
+    })
+  await control("browser.navigate", { sessionId: "s", pageId: "p2", url: "http://localhost/" })
+  await control("browser.page.activate", { sessionId: "s", pageId: "p2" })
+  await control("browser.navigate", { sessionId: "s", url: "http://localhost/x" })
+  await control("browser.page.create", { sessionId: "s", activate: false })
+  assert.deepEqual(calls, [
+    ["target", "s", "p2"],
+    ["navigate", "s", "http://localhost/"],
+    ["activatePage", "s", "p2"],
+    ["navigate", "s", "http://localhost/x"],
+    ["createPage", "s", undefined, { activate: false }],
+  ])
+})

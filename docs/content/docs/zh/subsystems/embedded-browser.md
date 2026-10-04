@@ -44,7 +44,7 @@ type TrustTier = "trusted" | "public"
 ```ts
 interface EngineRoute {
   engine: BrowserEngine
-  backend: "embedded" | "remote-chromium"
+  backend: "embedded" | "local-chromium" | "user-chrome" | "remote-chromium"
   tier: TrustTier
   /** 页面内容必须按不可信处理（公网来源）。 */
   untrusted: boolean
@@ -53,6 +53,8 @@ interface EngineRoute {
 
 正因为 `untrusted` 是路由的一部分，调用方不可能一边持有公网来源的页面，
 一边以为自己看的是本地开发预览。
+
+信任层级决定的是页面内容可信到什么程度，而不是由哪个引擎显示：在桌面端安装 Cognia 的本地 Chromium 之后，所有页面（包括 localhost，见 ADR-0214）都在同一个共享 session 中、调用方会话自己的页面上打开；安装之前由内嵌 webview 负责。
 
 ## 一套工具面，两个引擎
 

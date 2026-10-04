@@ -3,6 +3,8 @@ export interface BrowserPageSummary {
   url: string
   title: string
   active: boolean
+  /** The page that opened this one (a popup), when the runtime knows it. */
+  openerId?: string
 }
 
 /** Which engine produced a download (ADR-0201). */
@@ -76,6 +78,8 @@ export type BrowserSessionErrorCode =
   | "browser_session_quota_exceeded"
   | "browser_profile_in_use"
   | "browser_page_not_found"
+  /** An owner already holds its share of the shared session's pages (ADR-0214). */
+  | "browser_page_quota_exceeded"
   | "browser_feature_unsupported"
 
 export class BrowserSessionError extends Error {

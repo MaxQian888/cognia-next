@@ -8,6 +8,9 @@ jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 jest.mock("@/hooks/browser/use-local-browser-session", () => ({
   useLocalBrowserSession: jest.fn(),
 }))
+jest.mock("@/hooks/browser/use-shared-local-browser", () => ({
+  useSharedLocalBrowser: jest.fn(),
+}))
 jest.mock("@/hooks/browser/use-local-file-chooser", () => ({
   useLocalFileChooser: jest.fn(),
 }))
@@ -90,13 +93,18 @@ import {
   useLocalBrowserSession,
   type LocalBrowserSession,
 } from "@/hooks/browser/use-local-browser-session"
+import {
+  useSharedLocalBrowser,
+  type SharedLocalBrowserPane,
+} from "@/hooks/browser/use-shared-local-browser"
 import { useLocalFileChooser } from "@/hooks/browser/use-local-file-chooser"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { localBrowser } from "@/lib/browser/local-client"
 
 import { LocalChromiumPreview } from "./local-chromium-preview"
 
-const sessionMock = useLocalBrowserSession as jest.Mock
+const userChromeMock = useLocalBrowserSession as jest.Mock
+const sharedMock = useSharedLocalBrowser as jest.Mock
 const resolveMock = resolveBrowserAddress as jest.Mock
 const rpcMock = localBrowser.rpc as jest.Mock
 const sendScreenshotBytes = jest.fn()
@@ -120,7 +128,9 @@ function makeEngine() {
   }
 }
 
-function makeSession(overrides: Partial<LocalBrowserSession> = {}): LocalBrowserSession {
+type TestSession = LocalBrowserSession & SharedLocalBrowserPane
+
+function makeSession(overrides: Partial<TestSession> = {}): TestSession {
   return {
     state: "ready",
     error: null,
@@ -135,6 +145,11 @@ function makeSession(overrides: Partial<LocalBrowserSession> = {}): LocalBrowser
     dismissDialog: jest.fn(),
     refreshPages: jest.fn().mockResolvedValue(undefined),
     restart: jest.fn(),
+    answerDialog: jest.fn().mockResolvedValue(undefined),
+    restoring: false,
+    selectPage: jest.fn(),
+    createPage: jest.fn().mockResolvedValue(undefined),
+    closePage: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -146,10 +161,11 @@ beforeEach(() => {
 })
 
 function renderPreview(
-  session: LocalBrowserSession,
+  session: TestSession,
   props: Partial<React.ComponentProps<typeof LocalChromiumPreview>> = {}
 ) {
-  sessionMock.mockReturnValue(session)
+  userChromeMock.mockReturnValue(session)
+  sharedMock.mockReturnValue(session)
   return render(<LocalChromiumPreview backend="local-chromium" chatSessionId="chat-1" {...props} />)
 }
 
@@ -171,9 +187,27 @@ it("answers the session's file choosers with staged uploads", () => {
   expect(useLocalFileChooser).toHaveBeenLastCalledWith("pane-1")
 })
 
-it("manages tabs through the engine", async () => {
+it("manages the pane's own pages in the shared session", async () => {
   const session = makeSession()
   renderPreview(session)
+  await act(async () => {
+    fireEvent.click(screen.getByRole("tab", { name: "https://other.example/" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Close tab" })[0])
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }))
+  })
+  expect(session.selectPage).toHaveBeenCalledWith("p2")
+  expect(session.closePage).toHaveBeenCalledWith("p1")
+  expect(session.createPage).toHaveBeenCalled()
+  expect(session.refreshPages).toHaveBeenCalled()
+  expect(userChromeMock).not.toHaveBeenCalled()
+  expect(sharedMock).toHaveBeenCalledWith(
+    expect.objectContaining({ owner: expect.stringMatching(/^pane:/), tag: undefined })
+  )
+})
+
+it("manages the user's Chrome tabs through its own session's engine", async () => {
+  const session = makeSession()
+  renderPreview(session, { backend: "user-chrome" })
   const engine = session.engine as unknown as ReturnType<typeof makeEngine>
   await act(async () => {
     fireEvent.click(screen.getByRole("tab", { name: "https://other.example/" }))
@@ -183,7 +217,32 @@ it("manages tabs through the engine", async () => {
   expect(engine.activatePage).toHaveBeenCalledWith("p2")
   expect(engine.closePage).toHaveBeenCalledWith("p1")
   expect(engine.createPage).toHaveBeenCalled()
-  expect(session.refreshPages).toHaveBeenCalled()
+  expect(sharedMock).not.toHaveBeenCalled()
+})
+
+it("shows one dock page tab without a tab row of its own", () => {
+  renderPreview(makeSession(), {
+    owner: "chat:s1",
+    pageTag: "t1",
+    hideTabRow: true,
+    initialUrl: "https://remembered.test/",
+    toolbarExtras: <span data-testid="engine-chip" />,
+  })
+  expect(sharedMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      owner: "chat:s1",
+      tag: "t1",
+      initialUrl: "https://remembered.test/",
+    })
+  )
+  expect(screen.queryByRole("tablist", { name: "Tabs" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "New tab" })).toBeNull()
+  expect(screen.getByTestId("engine-chip")).toBeInTheDocument()
+})
+
+it("says a remembered page is being opened again", () => {
+  renderPreview(makeSession({ state: "starting", restoring: true }))
+  expect(screen.getByText("Reopening this page…")).toBeInTheDocument()
 })
 
 it("navigates a typed address, including local files", async () => {
@@ -265,9 +324,18 @@ it("throttles pointer moves to one in flight", () => {
   expect(rpcMock).toHaveBeenCalledTimes(1)
 })
 
-it("answers a page dialog through the engine", async () => {
+it("answers a page dialog through the session", async () => {
   const session = makeSession({ dialog: { type: "confirm", message: "Sure?" } })
   renderPreview(session)
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "OK" }))
+  })
+  expect(session.answerDialog).toHaveBeenCalledWith({ accept: true })
+})
+
+it("answers the user's Chrome dialog through its engine", async () => {
+  const session = makeSession({ dialog: { type: "confirm", message: "Sure?" } })
+  renderPreview(session, { backend: "user-chrome" })
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "OK" }))
   })
@@ -332,7 +400,7 @@ it("offers a restart and the engine switch when the session failed or ended", ()
   fireEvent.click(screen.getByRole("button", { name: "Start again" }))
   expect(session.restart).toHaveBeenCalled()
 
-  sessionMock.mockReturnValue(makeSession({ state: "closed" }))
+  sharedMock.mockReturnValue(makeSession({ state: "closed" }))
   rerender(<LocalChromiumPreview backend="local-chromium" />)
   expect(screen.getByRole("alert")).toHaveTextContent("The browser session ended.")
 })

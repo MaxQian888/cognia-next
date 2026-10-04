@@ -53,10 +53,28 @@ jest.mock("@/lib/browser/local-client", () => ({
   },
 }))
 
+const mockShared = {
+  status: "idle" as string,
+  ensure: jest.fn(async () => "shared-1"),
+  ownedPageEngine: jest.fn((owner: string) => ({
+    backend: "local-chromium",
+    owner,
+    credentialFilled: false,
+  })),
+}
+jest.mock("@/lib/browser/shared-local-browser", () => ({
+  chatPageOwner: (id: string) => `chat:${id}`,
+  ensureSharedLocalBrowser: () => mockShared.ensure(),
+  ownedPageEngine: (owner: string) => mockShared.ownedPageEngine(owner),
+  sharedLocalBrowserStore: { getState: () => ({ status: mockShared.status }) },
+}))
+
 import { browserClient } from "@/lib/browser/client"
 import { LocalChromiumEngine } from "@/lib/browser/local-chromium-engine"
 import {
   BROWSER_AGENT_LOCAL_SESSION_EVENT,
+  agentPageOwner,
+  configureAgentPageOwnership,
   configureLocalBrowserEngine,
   configureRemoteBrowserEngine,
   ensureAgentLocalEngine,
@@ -83,10 +101,13 @@ beforeEach(() => {
   mockFillCredential.mockReset()
   mockTransportCall.mockReset()
   Object.values(mockLocal).forEach((m) => m.mockReset())
+  mockShared.status = "idle"
+  mockShared.ensure.mockClear()
+  mockShared.ownedPageEngine.mockClear()
 })
 
 describe("routeEngine", () => {
-  it("routes localhost to the embedded engine, trusted tier", () => {
+  it("routes localhost to the embedded engine until local Chromium is installed", () => {
     const r = routeEngine("http://localhost:3000/")
     expect(r.engine).toBeInstanceOf(EmbeddedEngine)
     expect(r.tier).toBe("trusted")
@@ -100,7 +121,7 @@ describe("routeEngine", () => {
     expect(r.engine).toBeInstanceOf(EmbeddedEngine)
   })
 
-  it("treats every loopback form as trusted and embedded", () => {
+  it("treats every loopback form as trusted", () => {
     for (const url of ["http://127.0.0.2:8080", "http://app.localhost:3000", "http://[::1]/"]) {
       expect(routeEngine(url)).toMatchObject({ backend: "embedded", tier: "trusted" })
     }
@@ -121,6 +142,11 @@ describe("routeEngine", () => {
         domainAuthorized: true,
       })
     ).toMatchObject({ engine: remote, backend: "remote-chromium" })
+    // An authorized grant is about public sites: localhost stays on the desktop.
+    setLocalChromiumInstalled(true)
+    expect(
+      routeEngine("http://localhost:3000", { hostProfile: "desktop", domainAuthorized: true })
+    ).toMatchObject({ backend: "local-chromium" })
   })
 
   it("falls back to the best desktop engine for an authorized public URL instead of throwing", () => {
@@ -133,13 +159,29 @@ describe("routeEngine", () => {
     ).toMatchObject({ backend: "local-chromium", untrusted: true })
   })
 
-  it("routes on the TARGET URL: public to local Chromium, loopback to embedded", () => {
+  it("sends localhost to local Chromium too once it is installed (ADR-0214, D8)", () => {
     setLocalChromiumInstalled(true)
-    expect(routeEngine("https://example.com").backend).toBe("local-chromium")
-    expect(routeEngine("http://localhost:5173").backend).toBe("embedded")
+    expect(routeEngine("https://example.com")).toMatchObject({
+      backend: "local-chromium",
+      untrusted: true,
+    })
+    expect(routeEngine("http://localhost:5173")).toMatchObject({
+      backend: "local-chromium",
+      tier: "trusted",
+      untrusted: false,
+    })
   })
 
-  it("keeps the agent on the session the pane is showing, for every URL", () => {
+  it("drives the calling conversation's own page in the shared session", () => {
+    setLocalChromiumInstalled(true)
+    const route = routeEngine("http://localhost:5173", { chatSessionId: "c1" })
+    expect(mockShared.ownedPageEngine).toHaveBeenCalledWith("chat:c1")
+    expect(route.engine).toMatchObject({ owner: "chat:c1" })
+    routeEngine("http://localhost:5173", { chatSessionId: "c2" })
+    expect(mockShared.ownedPageEngine).toHaveBeenLastCalledWith("chat:c2")
+  })
+
+  it("keeps the agent on the user's Chrome the pane is showing, for every URL", () => {
     configureLocalBrowserEngine({ sessionId: "pane-1", backend: "user-chrome" })
     const route = routeEngine("http://localhost:3000")
     expect(route.backend).toBe("user-chrome")
@@ -147,6 +189,15 @@ describe("routeEngine", () => {
     expect((route.engine as LocalChromiumEngine).sessionId).toBe("pane-1")
     configureLocalBrowserEngine(null)
     expect(routeEngine("http://localhost:3000").backend).toBe("embedded")
+  })
+
+  it("never binds the shared local-Chromium session as the pane's", () => {
+    configureLocalBrowserEngine({ sessionId: "shared-1", backend: "local-chromium" })
+    // Binding it only records that Chromium is installed.
+    expect(routeEngine("http://localhost:3000", { chatSessionId: "c1" })).toMatchObject({
+      backend: "local-chromium",
+      engine: { owner: "chat:c1" },
+    })
   })
 
   it("honours explicit local preferences and refuses what cannot be served", () => {
@@ -162,40 +213,54 @@ describe("routeEngine", () => {
         localChromiumInstalled: true,
       }).backend
     ).toBe("local-chromium")
+    // A shared session that is already running can serve it as well.
+    mockShared.status = "ready"
+    expect(
+      routeEngine("https://example.com", { backendPreference: "local-chromium" }).backend
+    ).toBe("local-chromium")
     expect(routeEngine("https://example.com", { backendPreference: "embedded" }).backend).toBe(
       "embedded"
     )
   })
 
-  it("lazily creates one headless local session on first use and announces it", async () => {
-    setLocalChromiumInstalled(true)
+  it("hands an agent its conversation's page engine on local Chromium", async () => {
+    const engine = await ensureAgentLocalEngine("local-chromium", { chatSessionId: "c9" })
+    expect(mockShared.ensure).toHaveBeenCalled()
+    expect(engine).toMatchObject({ owner: "chat:c9" })
+    expect(mockLocal.createSession).not.toHaveBeenCalled()
+    // Creating the session proves Chromium is installed.
+    expect(routeEngine("https://example.com").backend).toBe("local-chromium")
+  })
+
+  it("lazily creates one headless user-chrome session on first use and announces it", async () => {
     mockLocal.createSession.mockImplementation(async ({ id }: { id: string }) => ({ id }))
     mockLocal.rpc.mockResolvedValue({ url: "https://example.com/", title: "Example" })
     const announced: unknown[] = []
     const listener = (event: Event) => announced.push((event as CustomEvent).detail)
     window.addEventListener(BROWSER_AGENT_LOCAL_SESSION_EVENT, listener)
-    const { engine } = routeEngine("https://example.com")
-    expect(engine.backend).toBe("local-chromium")
+    const engine = await ensureAgentLocalEngine("user-chrome")
     await expect(engine.getPage()).resolves.toEqual({
       url: "https://example.com/",
       title: "Example",
     })
-    await routeEngine("https://example.com").engine.getPage()
     window.removeEventListener(BROWSER_AGENT_LOCAL_SESSION_EVENT, listener)
-    expect(mockLocal.createSession).toHaveBeenCalledTimes(1)
     expect(mockLocal.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "local", headless: true })
+      expect.objectContaining({ kind: "user-chrome", headless: true })
     )
     const sessionId = (mockLocal.createSession.mock.calls[0][0] as { id: string }).id
     expect(mockLocal.rpc).toHaveBeenCalledWith("browser.page", { sessionId })
-    expect(announced).toEqual([{ sessionId, backend: "local-chromium" }])
+    expect(announced).toEqual([{ sessionId, backend: "user-chrome" }])
     // Once created, routing hands out the concrete engine.
+    expect(routeEngine("https://example.com")).toMatchObject({ backend: "user-chrome" })
     expect(routeEngine("https://example.com").engine).toBeInstanceOf(LocalChromiumEngine)
   })
 
-  it("dedupes concurrent lazy session creation", async () => {
+  it("dedupes concurrent lazy user-chrome session creation", async () => {
     mockLocal.createSession.mockImplementation(async ({ id }: { id: string }) => ({ id }))
-    const [a, b] = await Promise.all([ensureAgentLocalEngine(), ensureAgentLocalEngine()])
+    const [a, b] = await Promise.all([
+      ensureAgentLocalEngine("user-chrome"),
+      ensureAgentLocalEngine("user-chrome"),
+    ])
     expect(a).toBe(b)
     expect(mockLocal.createSession).toHaveBeenCalledTimes(1)
   })
@@ -222,13 +287,34 @@ describe("routeEngine", () => {
     expect(mockLocal.status).not.toHaveBeenCalled()
   })
 
-  it("keeps desktop localhost embedded and rejects unavailable explicit remote routing", () => {
-    expect(routeEngine("http://localhost:3000", { hostProfile: "desktop" }).backend).toBe(
-      "embedded"
-    )
+  it("rejects unavailable explicit remote routing", () => {
     expect(() =>
       routeEngine("http://localhost:3000", { backendPreference: "remote-chromium" })
     ).toThrow(expect.objectContaining({ code: "browser_feature_unsupported" }))
+  })
+})
+
+describe("agentPageOwner", () => {
+  it("gives a conversation its own pages", () => {
+    expect(agentPageOwner("c1")).toBe("chat:c1")
+  })
+
+  it("pins an external client to the conversation on screen at its first call", () => {
+    let active: string | null = "c1"
+    configureAgentPageOwnership({ activeChatSessionId: () => active })
+    expect(agentPageOwner("external-bridge:browser:mcp_x")).toBe("chat:c1")
+    active = "c2"
+    expect(agentPageOwner("external-bridge:browser:mcp_x")).toBe("chat:c1")
+    expect(agentPageOwner("external-bridge:browser:mcp_y")).toBe("chat:c2")
+    // A call naming no conversation is the focused one's.
+    expect(agentPageOwner(undefined)).toBe("chat:c2")
+  })
+
+  it("keeps an external client's pages to itself when nothing is on screen", () => {
+    expect(agentPageOwner("external-bridge:browser:mcp_x")).toBe(
+      "agent:external-bridge:browser:mcp_x"
+    )
+    expect(agentPageOwner(undefined)).toBe("agent:default")
   })
 })
 
@@ -384,10 +470,11 @@ describe("EmbeddedEngine", () => {
     expect(engine.credentialFilled).toBe(false)
   })
 
-  it("reports the lazy local session's post-fill lock as a value, not a method", async () => {
-    setLocalChromiumInstalled(true)
+  it("reports the lazy user-chrome session's post-fill lock as a value, not a method", async () => {
+    mockLocal.createSession.mockImplementation(async ({ id }: { id: string }) => ({ id }))
+    await ensureAgentLocalEngine("user-chrome")
     const route = routeEngine("https://example.com/")
-    expect(route.backend).toBe("local-chromium")
+    expect(route.backend).toBe("user-chrome")
     expect(route.engine.credentialFilled).toBe(false)
   })
 

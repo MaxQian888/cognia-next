@@ -6,6 +6,7 @@ description: "The desktop browser gains two Chromium backends beside the embedde
 # ADR 0201 — The desktop browser runs Chromium locally
 
 **Status:** Accepted
+**Amended by:** [ADR-0214](./0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task) (localhost defaults to local Chromium; one shared local session whose pages belong to conversations)
 **Date:** 2026-09-29
 **Related:** [ADR-0055](./0055-agent-browser-loop) (agent browser loop), [ADR-0072](./0072-browser-action-recording), [ADR-0073](./0073-chromium-cookie-import) (cookie import, amended here), [ADR-0085](./0085-cloud-shared-browser) (workspace-runtime browser service, reused here), [ADR-0154](./0154-browser-companion) (unchanged: the companion extension still never drives a page), [ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked) (crate placement)
 
@@ -36,8 +37,8 @@ the user's own Chrome.
 
 | Backend | Engine | Owns | Default for |
 | --- | --- | --- | --- |
-| `embedded` | platform webview (unchanged) | single page, injected JS | lightweight localhost preview |
-| `local-chromium` | workspace-runtime service on loopback, Chromium from Playwright's Chrome-for-Testing build | tabs, downloads, extensions, native input, dialogs, uploads, full snapshot parity with cloud | every public site once installed; user choice |
+| `embedded` | platform webview (unchanged) | single page, injected JS | the lightweight preview: a page tab switched to it, and every page before Chromium is installed (localhost by default until ADR-0214) |
+| `local-chromium` | workspace-runtime service on loopback, Chromium from Playwright's Chrome-for-Testing build | tabs, downloads, extensions, native input, dialogs, uploads, full snapshot parity with cloud | every page once installed, localhost included since ADR-0214; user choice |
 | `user-chrome` | same service, `connectOverCDP` into the user's running Chrome/Edge/Brave | the user's real profile, logins and extensions | explicit user choice |
 | `remote` | ADR-0085 cloud runtime (unchanged) | cloud / mobile / headless | non-desktop hosts |
 

@@ -5,11 +5,12 @@ jest.mock("@cognia/logging", () => ({ loggers: { store: { warn: jest.fn() } } })
 
 import { loggers } from "@cognia/logging"
 import { recordBrowserVisit } from "@/lib/db/browser-history"
-import { useBrowserHistory } from "./use-browser-history"
+import { resetKeptBrowserHistory, useBrowserHistory } from "./use-browser-history"
 
 const record = recordBrowserVisit as jest.Mock
 
 beforeEach(() => {
+  resetKeptBrowserHistory()
   record.mockReset().mockResolvedValue(undefined)
   ;(loggers.store.warn as jest.Mock).mockClear()
 })
@@ -157,5 +158,41 @@ describe("useBrowserHistory", () => {
       act(() => result.current.traverseTo("zzz"))
       expect(result.current.index).toBe(2)
     })
+  })
+})
+
+describe("useBrowserHistory keyed by page", () => {
+  it("picks a page's stack up again in the next pane that shows it", () => {
+    const first = renderHook(() => useBrowserHistory("page-a"))
+    act(() => first.result.current.push("https://a.test/1"))
+    act(() => first.result.current.push("https://a.test/2"))
+    first.unmount()
+
+    const second = renderHook(() => useBrowserHistory("page-a"))
+    expect(second.result.current.entries).toEqual(["https://a.test/1", "https://a.test/2"])
+    expect(second.result.current.canGoBack).toBe(true)
+    act(() => {
+      second.result.current.goBack()
+    })
+    expect(second.result.current.index).toBe(0)
+  })
+
+  it("switches stacks when the pane moves to another page", () => {
+    const { result, rerender } = renderHook(({ key }) => useBrowserHistory(key), {
+      initialProps: { key: "page-a" },
+    })
+    act(() => result.current.push("https://a.test/"))
+    rerender({ key: "page-b" })
+    expect(result.current.entries).toEqual([])
+    act(() => result.current.push("https://b.test/"))
+    rerender({ key: "page-a" })
+    expect(result.current.entries).toEqual(["https://a.test/"])
+  })
+
+  it("keeps nothing for a pane with no key", () => {
+    const first = renderHook(() => useBrowserHistory())
+    act(() => first.result.current.push("https://a.test/"))
+    first.unmount()
+    expect(renderHook(() => useBrowserHistory()).result.current.entries).toEqual([])
   })
 })

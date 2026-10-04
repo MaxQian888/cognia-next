@@ -27,6 +27,12 @@ export interface BrowserOpenUrlRequest {
   /** Who asked — `agent` requests may come from an external MCP client. */
   source?: "user" | "agent"
   /**
+   * The conversation the request is for (ADR-0214). An agent's request shows
+   * the page that conversation's agent drives; absent, it is the conversation
+   * on screen.
+   */
+  chatSessionId?: string
+  /**
    * Set by a listener that actually opened it. Read back by the caller right
    * after `dispatchEvent` returns — event dispatch is synchronous, so this is a
    * reliable "did anyone take it?" answer without timers or a return channel.
@@ -57,12 +63,17 @@ export const BROWSER_REVEAL_URL_EVENT = "cognia:browser:reveal-url"
  */
 export function requestBrowserUrl(
   url: string,
-  options: { backend?: BrowserBackend; source?: "user" | "agent" } = {}
+  options: {
+    backend?: BrowserBackend
+    source?: "user" | "agent"
+    chatSessionId?: string
+  } = {}
 ): boolean {
   if (typeof window === "undefined") return false
   const extra = {
     ...(options.backend ? { backend: options.backend } : {}),
     ...(options.source ? { source: options.source } : {}),
+    ...(options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
   }
   const detail: BrowserOpenUrlRequest = { url, ...extra, claimed: false }
   window.dispatchEvent(new CustomEvent(BROWSER_OPEN_URL_EVENT, { detail }))

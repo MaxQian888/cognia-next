@@ -68,7 +68,9 @@ import {
   sessionWorkbenchScopeKey,
 } from "@/lib/artifacts/session-workbench-scope-key"
 import { useChatStore } from "@/stores/chat"
-import { openDockNewTab } from "./dock-tab-strip"
+import { openDockNewTab, openDockPage } from "@/lib/artifacts/dock-pages"
+import { agentPageOwner } from "@/lib/browser/agent-engine"
+import { chatSessionOfOwner } from "@/lib/browser/shared-local-browser"
 import { ArtifactPanel } from "./artifact-panel"
 import { ArtifactDock } from "./artifact-dock"
 import { WorkspaceRevealOpener } from "./workspace-mode/workspace-reveal-opener"
@@ -301,28 +303,48 @@ function useDockContentMounted(
  * conversation finds nothing subscribed, which is precisely the click that most
  * needs to work.
  *
- * `openBrowser` already knows how to put that panel on screen from outside the
- * workbench (it is what the Views menu uses); carrying the address with it is
- * all this adds. A pane that is already visible answers the earlier round in
- * `requestBrowserUrl` and this never runs.
+ * On the phone Sheet, `openBrowser` puts the one browser panel on screen from
+ * outside the workbench and carries the address with it. On the desktop dock
+ * an address becomes a page tab instead (`openDockPage`); the docked browser
+ * never claims the first round, so every link comes through here. Elsewhere a
+ * visible pane answers the earlier round in `requestBrowserUrl` and this never
+ * runs.
  */
-function useSideBrowserReveal(): void {
+function useSideBrowserReveal({ pageTabs }: { pageTabs: boolean }): void {
   const openBrowser = useArtifactDockLayoutStore((state) => state.openBrowser)
   useEffect(
     () =>
-      onBrowserUrlReveal((url) => {
-        openBrowser(url)
+      onBrowserUrlReveal((url, request) => {
+        if (!pageTabs) {
+          openBrowser(url)
+          return true
+        }
+        // The desktop dock shows pages as tabs of the conversation they belong
+        // to (ADR-0214): an agent's request goes to its own conversation — an
+        // External Bridge client's to the one it was pinned to — and only the
+        // conversation on screen is brought forward.
+        const active = useChatStore.getState().activeSessionId
+        const target =
+          request.source === "agent"
+            ? (chatSessionOfOwner(agentPageOwner(request.chatSessionId)) ?? active)
+            : active
+        if (!target) return false
+        openDockPage(target, url, {
+          ...(request.source ? { source: request.source } : {}),
+          ...(request.backend ? { backend: request.backend } : {}),
+          reveal: target === active,
+        })
         return true
       }),
-    [openBrowser]
+    [openBrowser, pageTabs]
   )
 }
 
 export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
+  const breakpoint = useBreakpoint()
   useArtifactDockShortcuts()
   useDockAttentionSignal()
-  useSideBrowserReveal()
-  const breakpoint = useBreakpoint()
+  useSideBrowserReveal({ pageTabs: breakpoint === "desktop" })
 
   // Tablet takes the Sheet, not a side-by-side dock, and that is deliberate
   // rather than an oversight in the breakpoint table.

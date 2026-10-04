@@ -468,7 +468,11 @@
     "newTab": "New tab",
     "close": "Close {name}",
     "allTabs": "All tabs",
-    "resourceViews": "Views of this item"
+    "resourceViews": "Views of this item",
+    "lightweightBadge": "Lightweight preview",
+    "openInChromium": "Open in Chromium",
+    "openInLightweight": "Open in lightweight preview",
+    "openInDefaultBrowser": "Open in default browser"
   },
   "newTab": {
     "title": "New tab",
@@ -487,6 +491,7 @@
     "chromeWebStoreHint": "Add extensions to the built-in Chromium",
     "recent": "Recent pages (all tasks)",
     "installTitle": "Pages open in the system webview until Chromium is installed",
-    "openFailed": "Couldn't open {path}"
+    "openFailed": "Couldn't open {path}",
+    "extensions": "Extensions"
   }
 }
