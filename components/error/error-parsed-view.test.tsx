@@ -324,4 +324,30 @@ describe("ErrorParsedView", () => {
     expect(screen.getByText("just some plain text")).toBeInTheDocument()
     expect(screen.queryByTestId("error-parsed-toggle")).not.toBeInTheDocument()
   })
+
+  it("can open on the raw text and still offer the parsed view", () => {
+    render(
+      <ErrorParsedView
+        parsed={{ nodes: [{ kind: "text", content: "parsed" }], parsed: true }}
+        rawText="raw text here"
+        initialView="raw"
+      />
+    )
+    expect(screen.getByTestId("error-parsed-raw")).toHaveTextContent("raw text here")
+    expect(screen.queryByText("parsed")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("error-parsed-toggle"))
+    expect(screen.getByText("parsed")).toBeInTheDocument()
+  })
+
+  it("wraps the raw text so a narrow screen never scrolls it sideways", () => {
+    render(
+      <ErrorParsedView
+        parsed={{ nodes: [{ kind: "text", content: "parsed" }], parsed: true }}
+        rawText="raw"
+        initialView="raw"
+      />
+    )
+    expect(screen.getByTestId("error-parsed-raw").className).toContain("whitespace-pre-wrap")
+  })
 })

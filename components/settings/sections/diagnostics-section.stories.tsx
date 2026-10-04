@@ -6,8 +6,9 @@ import { useSettingsStore } from "@/stores/settings"
 import { clearDb } from "@/lib/storybook/seed-db"
 import { makeAppSettings } from "@/lib/storybook/fixtures/settings-system"
 
-// Composite tabbed section: Crash logs / Native reports / System. The System
-// tab aggregates the developer-flags, sandbox-audit, plugin-messaging, sidecar
+// Composite tabbed section: Native reports / System. Native reports holds the
+// diagnostic-service card and a link to the `/logs` Crash reports channel;
+// the System tab aggregates the developer-flags, sandbox-audit, plugin-messaging, sidecar
 // and inbox-telemetry cards (each storied on its own). Seed the settings store
 // so the developer-flags card renders and start from an empty IndexedDB.
 const meta = {
@@ -31,5 +32,5 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Default tab (Crash logs).
+// Default tab (Native reports).
 export const Default: Story = {}

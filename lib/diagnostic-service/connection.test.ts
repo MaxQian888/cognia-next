@@ -72,6 +72,23 @@ describe("connection persistence", () => {
     expect(deps.localMap.size).toBe(0)
   })
 
+  it("keeps a valid autoSubmitSince stamp and drops a malformed one", () => {
+    const deps = memoryStores()
+    saveDiagnosticConnection(
+      "account-a",
+      { ...connection, autoSubmit: true, autoSubmitSince: "2026-10-01T00:00:00.000Z" },
+      deps
+    )
+    expect(loadDiagnosticConnection("account-a", deps)?.autoSubmitSince).toBe(
+      "2026-10-01T00:00:00.000Z"
+    )
+    deps.localMap.set(
+      "cognia.diagnostic-service.connection.account-a",
+      JSON.stringify({ ...connection, autoSubmit: true, autoSubmitSince: "yesterday-ish" })
+    )
+    expect(loadDiagnosticConnection("account-a", deps)?.autoSubmitSince).toBeUndefined()
+  })
+
   it("treats a missing autoSubmit as off rather than inheriting a truthy default", () => {
     const deps = memoryStores()
     deps.localMap.set(

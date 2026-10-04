@@ -19,7 +19,10 @@ describe("DiagnosticCard", () => {
     )
     expect(screen.getByText("Connection refused")).toBeInTheDocument()
     expect(screen.getByText(/server isn't accepting connections/i)).toBeInTheDocument()
-    expect(screen.getByText("upstream said <nope>")).toBeInTheDocument()
+    // The raw text is evidence, behind the disclosure — not a second headline.
+    expect(screen.queryByText("upstream said <nope>")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("diagnostic-card-detail-toggle"))
+    expect(screen.getByTestId("diagnostic-card-message")).toHaveTextContent("upstream said <nope>")
   })
 
   it("exposes the code and severity for styling and assertions", () => {
@@ -144,14 +147,55 @@ describe("DiagnosticCard", () => {
     expect(screen.queryByTestId("diagnostic-card-detail")).not.toBeInTheDocument()
   })
 
-  it("offers no disclosure when the detail only repeats the message", () => {
+  it("shows a detail that only repeats the message once", () => {
     render(<DiagnosticCard diagnostic={diag("serverError", { message: "boom", detail: "boom" })} />)
+    fireEvent.click(screen.getByTestId("diagnostic-card-detail-toggle"))
+    expect(screen.getAllByText("boom")).toHaveLength(1)
+    expect(screen.queryByTestId("diagnostic-card-detail")).not.toBeInTheDocument()
+  })
+
+  it("offers no disclosure when there is neither raw message nor detail", () => {
+    render(<DiagnosticCard diagnostic={diag("serverError")} />)
     expect(screen.queryByTestId("diagnostic-card-detail-toggle")).not.toBeInTheDocument()
   })
 
-  it("offers no disclosure when there is no detail at all", () => {
-    render(<DiagnosticCard diagnostic={diag("serverError", { message: "boom" })} />)
-    expect(screen.queryByTestId("diagnostic-card-detail-toggle")).not.toBeInTheDocument()
+  /**
+   * The reported mobile case: an external agent's `Request timeout:
+   * session/prompt`. The parser classifies that text as `timeout` — the card's
+   * own code — and used to render its badge and hint again under the card's
+   * identical label and hint, above the raw line.
+   */
+  it("does not repeat its own label and hint inside the raw disclosure", () => {
+    render(
+      <DiagnosticCard
+        diagnostic={diag("timeout", { message: "Request timeout: session/prompt" })}
+        handlers={{ retry: jest.fn() }}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.getAllByText("Request timed out")).toHaveLength(1)
+    fireEvent.click(screen.getByTestId("diagnostic-card-detail-toggle"))
+    expect(screen.getAllByText("Request timed out")).toHaveLength(1)
+    const raw = screen.getByTestId("diagnostic-card-message")
+    expect(raw.tagName).toBe("PRE")
+    expect(raw).toHaveTextContent("Request timeout: session/prompt")
+    expect(raw.className).toContain("font-mono")
+  })
+
+  it("keeps the disclosure and the actions on one row", () => {
+    render(
+      <DiagnosticCard
+        diagnostic={diag("timeout", { message: "Request timeout: session/prompt" })}
+        handlers={{ retry: jest.fn() }}
+      />
+    )
+    const toggle = screen.getByTestId("diagnostic-card-detail-toggle")
+    expect(toggle.parentElement).toContainElement(screen.getByTestId("diagnostic-action-retry"))
+  })
+
+  it("dismisses from a labelled icon button", () => {
+    render(<DiagnosticCard diagnostic={diag("timeout")} onDismiss={jest.fn()} />)
+    expect(screen.getByTestId("diagnostic-card-dismiss")).toHaveAccessibleName("Dismiss")
   })
 
   /**
@@ -182,7 +226,16 @@ describe("DiagnosticCard", () => {
         diagnostic={diag("unknown", { message: "connect ECONNREFUSED 1.2.3.4:80" })}
       />
     )
-    // Category badge from the parser, inside the card's detail area.
+    // `unknown` says nothing on its own, so the raw text starts open…
+    expect(screen.getByTestId("diagnostic-card-detail-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(screen.getByTestId("error-parsed-raw")).toHaveTextContent(
+      "connect ECONNREFUSED 1.2.3.4:80"
+    )
+    // …and a different category than the card's own is one click away.
+    fireEvent.click(screen.getByTestId("error-parsed-toggle"))
     expect(screen.getByText("Connection refused")).toBeInTheDocument()
   })
 })

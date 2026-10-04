@@ -12,12 +12,26 @@
  * The identity session is optional on purpose. A desktop install submits its
  * own crashes with an installation proof and needs no token; a token is what
  * promotes the connection from "can upload my own crashes" to "can triage
- * everyone's", and the card says which of the two this connection is.
+ * everyone's", and the card says which of the two this connection is: saving
+ * a token learns its role right away (`roleStatus`), and a refused token is
+ * reported here rather than discovered later as an empty console.
+ *
+ * The automatic-submission switch is offered wherever this device can submit
+ * at all — the desktop and the mobile app — not only under Tauri. Turning it
+ * on stamps `autoSubmitSince`: automatic submission covers crashes captured
+ * from then on and never uploads a backlog the user was keeping local
+ * (`lib/diagnostic-service/auto-submit.ts`).
  */
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, PlugZapIcon, TriangleAlertIcon, UnplugIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  PlugZapIcon,
+  RefreshCwIcon,
+  TriangleAlertIcon,
+  UnplugIcon,
+} from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -25,10 +39,18 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { useDiagnosticConnection } from "@/hooks/diagnostic-service/use-diagnostic-connection"
+import { useDiagnosticSubmissionSupport } from "@/hooks/diagnostic-service/use-diagnostic-submission-support"
 import { normalizeServiceUrl } from "@/lib/diagnostic-service/client"
-import { canSubmitDiagnostics } from "@/lib/native/diagnostic-submit"
+
+/** Role-probe failures the card has a translated string for. */
+const ROLE_ERROR_CODES = ["invalid_oidc_session", "session_token_missing", "network_unavailable"]
+
+function roleErrorKey(code: string | null): string {
+  return code && ROLE_ERROR_CODES.includes(code) ? code : "other"
+}
 
 /** A tenant/project id has to be a UUID — the service will refuse anything else. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -39,7 +61,9 @@ export function DiagnosticServiceCard() {
   // violation, and the connection hook reaches the account store. The test
   // mocks the module instead, the way `diagnostics-workspace.test.tsx` does.
   const service = useDiagnosticConnection()
-  const desktop = canSubmitDiagnostics()
+  // Desktop answers synchronously; mobile once the crash plugin's capability
+  // probe lands. Either way, "can this device submit" — not "is this Tauri".
+  const support = useDiagnosticSubmissionSupport()
 
   const [baseUrl, setBaseUrl] = useState("")
   const [tenantId, setTenantId] = useState("")
@@ -84,6 +108,7 @@ export function DiagnosticServiceCard() {
         // own; the desktop overrides it with its key-derived id.
         installationId: service.connection?.installationId ?? "",
         autoSubmit: service.connection?.autoSubmit ?? false,
+        autoSubmitSince: service.connection?.autoSubmitSince,
         lastKnownRole: service.connection?.lastKnownRole ?? null,
         sessionToken: sessionToken.trim() || undefined,
       })
@@ -114,7 +139,14 @@ export function DiagnosticServiceCard() {
             ) : (
               <Badge variant="outline">{t("disconnected")}</Badge>
             )}
-            {service.role && <Badge variant="outline">{t(`roles.${service.role}`)}</Badge>}
+            {service.roleStatus === "probing" ? (
+              <Badge variant="outline" data-testid="diagnostic-service-role-probing">
+                <Spinner className="size-3" />
+                {t("roleProbing")}
+              </Badge>
+            ) : service.role ? (
+              <Badge variant="outline">{t(`roles.${service.role}`)}</Badge>
+            ) : null}
           </div>
         </div>
       </CardHeader>
@@ -169,6 +201,19 @@ export function DiagnosticServiceCard() {
           </div>
         </div>
 
+        {service.roleStatus === "failed" && (
+          <Alert variant="destructive" data-testid="diagnostic-service-role-failed">
+            <TriangleAlertIcon className="size-4" />
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+              <span>{t(`roleErrors.${roleErrorKey(service.roleErrorCode)}`)}</span>
+              <Button size="sm" variant="outline" onClick={service.probeRole}>
+                <RefreshCwIcon className="size-4" />
+                {t("roleRetry")}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {error && (
           <Alert variant="destructive" data-testid="diagnostic-service-error">
             <AlertDescription>{t(`errors.${error}`)}</AlertDescription>
@@ -194,7 +239,7 @@ export function DiagnosticServiceCard() {
           )}
         </div>
 
-        {connected && desktop && (
+        {connected && support.supported && (
           <label className="flex items-start gap-2 rounded-md border p-3">
             <Switch
               checked={service.connection?.autoSubmit ?? false}
@@ -202,6 +247,9 @@ export function DiagnosticServiceCard() {
                 void service.connect({
                   ...service.connection!,
                   autoSubmit: checked,
+                  // From now on, never retroactively: reports already on this
+                  // device stay local until the user sends them.
+                  autoSubmitSince: checked ? new Date().toISOString() : undefined,
                 })
               }
               aria-label={t("autoSubmit")}

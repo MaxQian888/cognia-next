@@ -52,6 +52,12 @@ interface ErrorParsedViewProps {
   toolType?: string
   /** Shown when the raw error normalizes to an empty string. */
   fallback?: string
+  /**
+   * Which side of the raw/parsed toggle shows first (default `"parsed"`). The
+   * diagnostic card opens on `"raw"`: its disclosure is literally "show raw
+   * error", and the parsed view is one click further for stacks and JSON.
+   */
+  initialView?: "parsed" | "raw"
 }
 
 export function ErrorParsedView({
@@ -60,9 +66,10 @@ export function ErrorParsedView({
   rawError,
   toolType,
   fallback,
+  initialView = "parsed",
 }: ErrorParsedViewProps) {
   const t = useTranslations("diagnostics.detail")
-  const [showParsed, setShowParsed] = useState(true)
+  const [showParsed, setShowParsed] = useState(initialView === "parsed")
 
   const text = rawText ?? normalizeErrorText(rawError, fallback)
   const computed = useMemo(() => resolvePreset(toolType).parse(text), [text, toolType])
@@ -100,7 +107,10 @@ export function ErrorParsedView({
       {showParsed ? (
         nodes
       ) : (
-        <pre className="max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] font-mono leading-relaxed">
+        <pre
+          className="max-h-60 overflow-auto rounded bg-muted/40 p-2 text-[11px] font-mono leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]"
+          data-testid="error-parsed-raw"
+        >
           {text}
         </pre>
       )}

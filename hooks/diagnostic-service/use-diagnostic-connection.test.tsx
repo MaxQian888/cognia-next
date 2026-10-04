@@ -139,3 +139,83 @@ describe("useDiagnosticConnection", () => {
     await waitFor(() => expect(result.current.authenticated).toBe(true))
   })
 })
+
+function grantResponse(role: string) {
+  return new Response(JSON.stringify({ grant: "g", role, expiresInSeconds: 900 }), {
+    status: 200,
+  })
+}
+
+describe("useDiagnosticConnection role probe", () => {
+  it("is unknown with nothing to ask", async () => {
+    localRecords.set("account-a", connection)
+    const { result } = renderHook(() => useDiagnosticConnection({ fetchImpl }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    // No session token, so no client and no one to ask.
+    expect(result.current.roleStatus).toBe("unknown")
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("learns a null role from one grant exchange instead of reading it as 'below Viewer'", async () => {
+    localRecords.set("account-a", connection)
+    keyring.set("account-a", "session-jwt")
+    fetchImpl.mockResolvedValue(grantResponse("viewer"))
+    const { result } = renderHook(() => useDiagnosticConnection({ fetchImpl }))
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+    // Probing, not "insufficient": the console renders a loading state here.
+    expect(["probing", "known"]).toContain(result.current.roleStatus)
+    await waitFor(() => expect(result.current.roleStatus).toBe("known"))
+    expect(result.current.role).toBe("viewer")
+    expect(result.current.can("viewer")).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("/v1/grants/oidc")
+    // Remembered for the next session.
+    expect(localRecords.get("account-a")?.lastKnownRole).toBe("viewer")
+  })
+
+  it("does not probe when a role is already remembered", async () => {
+    localRecords.set("account-a", { ...connection, lastKnownRole: "triager" })
+    keyring.set("account-a", "session-jwt")
+    const { result } = renderHook(() => useDiagnosticConnection({ fetchImpl }))
+    await waitFor(() => expect(result.current.roleStatus).toBe("known"))
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("reports a refused exchange with its code, and retries on demand", async () => {
+    localRecords.set("account-a", connection)
+    keyring.set("account-a", "session-jwt")
+    fetchImpl.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: "invalid_oidc_session" } }), { status: 401 })
+    )
+    const { result } = renderHook(() => useDiagnosticConnection({ fetchImpl }))
+    await waitFor(() => expect(result.current.roleStatus).toBe("failed"))
+    expect(result.current.roleErrorCode).toBe("invalid_oidc_session")
+    expect(result.current.can("viewer")).toBe(false)
+
+    fetchImpl.mockResolvedValueOnce(grantResponse("admin"))
+    act(() => result.current.probeRole())
+    await waitFor(() => expect(result.current.roleStatus).toBe("known"))
+    expect(result.current.role).toBe("admin")
+    expect(result.current.roleErrorCode).toBeNull()
+  })
+
+  it("forgets the old role when a new token is connected, and learns the new one", async () => {
+    localRecords.set("account-a", { ...connection, lastKnownRole: "admin" })
+    keyring.set("account-a", "old-jwt")
+    const { result } = renderHook(() => useDiagnosticConnection({ fetchImpl }))
+    await waitFor(() => expect(result.current.role).toBe("admin"))
+
+    fetchImpl.mockResolvedValue(grantResponse("viewer"))
+    await act(async () => {
+      await result.current.connect({
+        ...connection,
+        lastKnownRole: "admin",
+        sessionToken: "new-jwt",
+      })
+    })
+    await waitFor(() => expect(result.current.role).toBe("viewer"))
+    expect(result.current.roleStatus).toBe("known")
+    const body = JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))
+    expect(body.sessionToken).toBe("new-jwt")
+  })
+})

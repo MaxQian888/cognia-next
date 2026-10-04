@@ -411,6 +411,20 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     ],
     icon: "settings",
   },
+  piPackageUnavailable: {
+    // ADR-0210. The session was refused because a plugin Pi package the agent
+    // opted into cannot load; retrying changes nothing until the package is
+    // prepared, its plugin enabled, or the agent's selection edited.
+    severity: "error",
+    retryable: false,
+    persistent: true,
+    actions: [
+      { kind: "open-settings", section: "external-bridge" },
+      { kind: "view-logs" },
+      { kind: "switch-to-builtin" },
+    ],
+    icon: "plug",
+  },
   extensionHandshakeFailed: {
     // The permission interception this agent depends on never proved itself
     // live, so the session was refused rather than run ungated. A fresh

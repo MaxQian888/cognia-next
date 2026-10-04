@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -23,6 +23,8 @@ import { Button } from "@/components/ui/button"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { DiagnosticActions, type DiagnosticActionHandlers } from "./diagnostic-actions"
 import { specForCode } from "@cognia/diagnostics"
+import { resolvePreset } from "@cognia/error-parsers"
+import type { ParsedError } from "@cognia/error-parsers/types"
 import type { CogniaDiagnostic, DiagnosticIcon, DiagnosticSeverity } from "@cognia/diagnostics"
 import { cn } from "@/lib/utils"
 
@@ -76,7 +78,6 @@ export function DiagnosticCard({
 }: DiagnosticCardProps) {
   const t = useTranslations("diagnostics")
   const tDetail = useTranslations("diagnostics.detail")
-  const [showDetail, setShowDetail] = useState(false)
   const spec = specForCode(diagnostic.code)
   const Icon = ICONS[spec.icon]
   const destructive = DESTRUCTIVE.has(diagnostic.severity)
@@ -97,14 +98,36 @@ export function DiagnosticCard({
   // coincide with the code's hint. Printing the same sentence twice reads as a
   // rendering bug, so each is dropped when it only repeats what is already up.
   const rawMessage = diagnostic.message.trim()
-  const message = rawMessage === hint.trim() ? "" : diagnostic.message
+  const message = rawMessage === hint.trim() ? "" : rawMessage
   const detail = diagnostic.detail?.trim() ?? ""
-  // Collapsed by default: `detail` is a stack trace or a raw payload — evidence
-  // for whoever is diagnosing, never the headline.
   const hasDetail = detail !== "" && detail !== rawMessage && detail !== hint.trim()
 
+  // The raw provider/transport text is evidence for whoever is diagnosing, not
+  // the headline: the label + hint already say what happened. It used to render
+  // inline through the parser, which re-stated the card's own category as a
+  // badge plus the same hint sentence ("Request timed out" twice) above the raw
+  // line. Now it sits behind the one disclosure, verbatim and monospace. The
+  // parsed view survives only where it adds something — a stack whose frames
+  // open in the viewer, a JSON tree, a different category — and then without
+  // the badge that duplicates this card's own code.
+  const parsedMessage = useMemo<ParsedError | null>(() => {
+    if (!message) return null
+    const result = resolvePreset().parse(message)
+    if (!result.parsed) return null
+    const nodes = result.nodes.filter(
+      (node) => !(node.kind === "category" && node.category === diagnostic.code)
+    )
+    return nodes.some((node) => node.kind !== "text") ? { nodes, parsed: true } : null
+  }, [message, diagnostic.code])
+
+  const hasTechnical = message !== "" || hasDetail
+  // With no vocabulary entry for the code (or the catch-all `unknown`), the raw
+  // text is the only thing that says what went wrong — start it open.
+  const [showDetail, setShowDetail] = useState(() => !hint || diagnostic.code === "unknown")
+
   const runnable = diagnostic.actions.filter((action) => handlers[action.kind])
-  const hasFooter = runnable.length > 0 || Boolean(onDismiss)
+  const hasActionRow = hasTechnical || runnable.length > 0
+  const tone = destructive ? "text-destructive" : "text-warning"
 
   return (
     <div
@@ -113,98 +136,93 @@ export function DiagnosticCard({
       data-code={diagnostic.code}
       data-severity={diagnostic.severity}
       className={cn(
-        "overflow-hidden rounded-xl border shadow-sm",
+        "rounded-lg border px-3 py-2",
         destructive
           ? "border-destructive/30 bg-destructive/[0.06]"
           : "border-warning/30 bg-warning/[0.06]",
         className
       )}
     >
-      <div className="flex gap-3 p-3">
-        <div
-          className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-lg",
-            destructive ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning"
-          )}
-        >
-          <Icon className="size-4" aria-hidden />
-        </div>
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <p
-            className={cn("text-sm font-medium", destructive ? "text-destructive" : "text-warning")}
-          >
-            {label}
-          </p>
-          {hint && <p className="text-xs leading-relaxed text-foreground/80">{hint}</p>}
+      <div className="flex items-start gap-2">
+        <Icon className={cn("mt-0.5 size-4 shrink-0", tone)} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-sm leading-5 font-medium", tone)}>{label}</p>
+          {hint && <p className="mt-0.5 text-xs leading-snug text-foreground/75">{hint}</p>}
           {hints.length > 0 && (
-            <ul className="list-disc space-y-0.5 ps-4 text-xs text-muted-foreground">
+            <ul className="mt-1 list-disc space-y-0.5 ps-4 text-xs text-muted-foreground">
               {hints.map((text, i) => (
                 <li key={i}>{text}</li>
               ))}
             </ul>
           )}
-          {/* The raw provider/transport text, with its stack frames still clickable. */}
-          {message && (
-            <div className="text-xs leading-relaxed text-muted-foreground">
-              <ErrorParsedView rawError={message} fallback={message} />
-            </div>
-          )}
-          {hasDetail && (
-            <div className="space-y-1">
-              <button
-                type="button"
-                onClick={() => setShowDetail((v) => !v)}
-                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                data-testid="diagnostic-card-detail-toggle"
-                aria-expanded={showDetail}
-              >
-                {showDetail ? (
-                  <ChevronDown className="h-3 w-3" aria-hidden />
-                ) : (
-                  <ChevronRight className="h-3 w-3" aria-hidden />
-                )}
-                {showDetail ? tDetail("hideRaw") : tDetail("showRaw")}
-              </button>
-              {showDetail && (
-                <pre
-                  data-testid="diagnostic-card-detail"
-                  className="max-h-60 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
-                >
-                  {diagnostic.detail}
-                </pre>
-              )}
-            </div>
-          )}
         </div>
+        {onDismiss && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-me-1.5 -mt-0.5 size-6 shrink-0 text-muted-foreground hover:text-foreground pointer-coarse:size-8"
+            onClick={onDismiss}
+            aria-label={t("action.dismiss")}
+            title={t("action.dismiss")}
+            data-testid="diagnostic-card-dismiss"
+          >
+            <XIcon className="size-3.5" aria-hidden />
+          </Button>
+        )}
       </div>
 
-      {hasFooter && (
-        <div
-          className={cn(
-            "flex flex-wrap items-center gap-2 border-t px-3 py-2",
-            destructive
-              ? "border-destructive/15 bg-destructive/[0.03]"
-              : "border-warning/15 bg-warning/[0.03]"
-          )}
-        >
-          <DiagnosticActions actions={diagnostic.actions} handlers={handlers} />
-          {onDismiss && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ms-auto h-7 gap-1.5 text-muted-foreground hover:text-foreground"
-              onClick={onDismiss}
-              data-testid="diagnostic-card-dismiss"
+      {hasActionRow && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 ps-6">
+          {hasTechnical && (
+            <button
+              type="button"
+              onClick={() => setShowDetail((v) => !v)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              data-testid="diagnostic-card-detail-toggle"
+              aria-expanded={showDetail}
             >
-              <XIcon className="size-3.5" aria-hidden />
-              {t("action.dismiss")}
-            </Button>
+              {showDetail ? (
+                <ChevronDown className="size-3" aria-hidden />
+              ) : (
+                <ChevronRight className="size-3" aria-hidden />
+              )}
+              {showDetail ? tDetail("hideRaw") : tDetail("showRaw")}
+            </button>
+          )}
+          <DiagnosticActions
+            actions={diagnostic.actions}
+            handlers={handlers}
+            className="ms-auto gap-1.5"
+          />
+        </div>
+      )}
+
+      {hasTechnical && showDetail && (
+        <div className="mt-1.5 ms-6 space-y-1.5" data-testid="diagnostic-card-technical">
+          {message &&
+            (parsedMessage ? (
+              <div className="text-xs" data-testid="diagnostic-card-message">
+                <ErrorParsedView parsed={parsedMessage} rawText={message} initialView="raw" />
+              </div>
+            ) : (
+              <pre className={RAW_BLOCK} data-testid="diagnostic-card-message">
+                {message}
+              </pre>
+            ))}
+          {hasDetail && (
+            <pre className={RAW_BLOCK} data-testid="diagnostic-card-detail">
+              {detail}
+            </pre>
           )}
         </div>
       )}
     </div>
   )
 }
+
+/** Verbatim technical text: small monospace, wrapped so a phone never scrolls it sideways. */
+const RAW_BLOCK =
+  "max-h-60 overflow-auto rounded bg-muted/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground/80"
 
 /**
  * Back-compat shim for callers that still hold a bare string.
@@ -229,21 +247,19 @@ export function InlineError({ message, onRetry, onOpenSettings, onDismiss }: Inl
     <div
       role="alert"
       data-testid="inline-error"
-      className="overflow-hidden rounded-xl border border-destructive/30 bg-destructive/[0.06] shadow-sm"
+      className="rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2"
     >
-      <div className="flex gap-3 p-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-destructive/15 text-destructive">
-          <AlertTriangleIcon className="size-4" aria-hidden />
-        </div>
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <p className="text-sm font-medium text-destructive">{t("title")}</p>
-          <div className="text-xs leading-relaxed text-foreground/80">
+      <div className="flex items-start gap-2">
+        <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <p className="text-sm leading-5 font-medium text-destructive">{t("title")}</p>
+          <div className="text-xs leading-snug text-foreground/80">
             <ErrorParsedView rawError={message} fallback={message} />
           </div>
         </div>
       </div>
       {hasActions && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-destructive/15 bg-destructive/[0.03] px-3 py-2">
+        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5 ps-6">
           {onRetry && (
             <Button variant="outline" size="sm" className="h-7" onClick={() => void onRetry()}>
               {t("retry")}
@@ -258,7 +274,7 @@ export function InlineError({ message, onRetry, onOpenSettings, onDismiss }: Inl
             <Button
               variant="ghost"
               size="sm"
-              className="ms-auto h-7 text-muted-foreground hover:text-foreground"
+              className="h-7 text-muted-foreground hover:text-foreground"
               onClick={onDismiss}
             >
               {t("dismiss")}

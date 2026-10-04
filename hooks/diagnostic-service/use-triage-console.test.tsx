@@ -3,7 +3,11 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import type { DiagnosticServiceClient } from "@/lib/diagnostic-service/client"
 import type { IncidentGroupRecord } from "@/lib/diagnostic-service/types"
 
-import { DEFAULT_TRIAGE_FILTERS, useTriageConsole } from "./use-triage-console"
+import {
+  DEFAULT_TRIAGE_FILTERS,
+  TRIAGE_FILTER_DEBOUNCE_MS,
+  useTriageConsole,
+} from "./use-triage-console"
 
 const group: IncidentGroupRecord = {
   id: "group-1",
@@ -188,5 +192,92 @@ describe("useTriageConsole", () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(result.current.incidentDetail).toBeNull())
+  })
+})
+
+describe("useTriageConsole request discipline", () => {
+  it("issues nothing while disabled, and loads once enabled", async () => {
+    const client = stubClient()
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useTriageConsole({ client, can: allow, enabled }),
+      { initialProps: { enabled: false } }
+    )
+    // Give any stray effect a chance to fire.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, TRIAGE_FILTER_DEBOUNCE_MS + 50))
+    })
+    expect(client.listGroups).not.toHaveBeenCalled()
+    expect(result.current.enabled).toBe(false)
+
+    rerender({ enabled: true })
+    await waitFor(() => expect(result.current.groups).toHaveLength(1))
+    expect(client.listGroups).toHaveBeenCalledTimes(1)
+  })
+
+  it("debounces typing in the free-text filters into one request", async () => {
+    const client = stubClient()
+    const { result } = renderHook(() => useTriageConsole({ client, can: allow }))
+    await waitFor(() => expect(result.current.groups).toHaveLength(1))
+    expect(client.listGroups).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.setFilters({ ...result.current.filters, search: "p" }))
+    act(() => result.current.setFilters({ ...result.current.filters, search: "pa" }))
+    act(() => result.current.setFilters({ ...result.current.filters, search: "pan" }))
+    // The inputs show every keystroke at once…
+    expect(result.current.filters.search).toBe("pan")
+    // …and the service sees one request for the settled text.
+    await waitFor(() =>
+      expect(client.listGroups).toHaveBeenLastCalledWith({
+        status: "open",
+        q: "pan",
+        assignedTo: undefined,
+      })
+    )
+    expect(client.listGroups).toHaveBeenCalledTimes(2)
+  })
+
+  it("applies a status change without waiting for the debounce", async () => {
+    const client = stubClient()
+    const { result } = renderHook(() => useTriageConsole({ client, can: allow }))
+    await waitFor(() => expect(result.current.groups).toHaveLength(1))
+    act(() => result.current.setFilters({ ...result.current.filters, status: "resolved" }))
+    await waitFor(
+      () =>
+        expect(client.listGroups).toHaveBeenLastCalledWith({
+          status: "resolved",
+          q: undefined,
+          assignedTo: undefined,
+        }),
+      { timeout: TRIAGE_FILTER_DEBOUNCE_MS - 50 }
+    )
+  })
+
+  it("opens on an initial group and reports every selection", async () => {
+    const onSelectGroup = jest.fn()
+    const client = stubClient()
+    const { result } = renderHook(() =>
+      useTriageConsole({ client, can: allow, initialSelectedGroupId: "group-1", onSelectGroup })
+    )
+    expect(result.current.selectedGroupId).toBe("group-1")
+    await waitFor(() => expect(result.current.detail?.group.id).toBe("group-1"))
+    act(() => result.current.selectGroup(null))
+    expect(onSelectGroup).toHaveBeenLastCalledWith(null)
+  })
+
+  it("deselects a group that leaves the list, and says so", async () => {
+    const onSelectGroup = jest.fn()
+    const listGroups = jest.fn(async () => [group])
+    const client = stubClient({ listGroups })
+    const { result } = renderHook(() => useTriageConsole({ client, can: allow, onSelectGroup }))
+    await waitFor(() => expect(result.current.groups).toHaveLength(1))
+    act(() => result.current.selectGroup("group-1"))
+    expect(onSelectGroup).toHaveBeenLastCalledWith("group-1")
+
+    // The next read (a filter change) no longer contains it.
+    listGroups.mockResolvedValue([])
+    act(() => result.current.setFilters({ ...result.current.filters, status: "resolved" }))
+    await waitFor(() => expect(result.current.selectedGroupId).toBeNull())
+    expect(result.current.detail).toBeNull()
+    expect(onSelectGroup).toHaveBeenLastCalledWith(null)
   })
 })

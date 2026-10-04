@@ -12,9 +12,20 @@
  * Every request is role-gated server-side (Viewer reads, Triager edits, Admin
  * for tenant policy), so the surface asks `can()` first and hides what this
  * operator may not use rather than discovering it through a wall of 403s.
+ *
+ * Request discipline:
+ *   - `enabled: false` (the Service channel is not on screen) issues nothing.
+ *     The hook is mounted by the `/logs` shell for every channel, and used to
+ *     list groups from a remote host while the user was reading local logs.
+ *   - The free-text filters (search, assignee) are debounced by
+ *     `TRIAGE_FILTER_DEBOUNCE_MS`; the status select applies at once. A
+ *     request per keystroke against a self-hosted service is a load test.
+ *   - A selected group that leaves the list (filtered out, deleted) is
+ *     deselected, and `onSelectGroup(null)` is told, rather than leaving a
+ *     detail pane for a row that is no longer there.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DiagnosticServiceClient } from "@/lib/diagnostic-service/client"
 import type {
@@ -50,10 +61,26 @@ export interface IncidentDetailBundle {
   audit: AuditEventRecord[]
 }
 
+/** How long the free-text filters wait for typing to stop. */
+export const TRIAGE_FILTER_DEBOUNCE_MS = 300
+
 export interface UseTriageConsoleOptions {
   client: DiagnosticServiceClient | null
   /** Whether the current grant satisfies a role. */
   can: (role: "viewer" | "triager" | "admin") => boolean
+  /**
+   * Whether the console may issue requests at all. Defaults to true; the
+   * `/logs` shell passes `activeView === "service"`. While false nothing is
+   * fetched and the last result stays in memory for when it comes back.
+   */
+  enabled?: boolean
+  /** A group to open on, e.g. from a `?group=` deep link. Read once, at mount. */
+  initialSelectedGroupId?: string | null
+  /**
+   * Told whenever the selection changes — by the user, or because the
+   * selected group left the list. For a caller that mirrors it into the URL.
+   */
+  onSelectGroup?: (groupId: string | null) => void
 }
 
 /** Errors arrive carrying the service's code; the UI translates it. */
@@ -66,12 +93,17 @@ function codeOf(cause: unknown): string {
 }
 
 export function useTriageConsole(options: UseTriageConsoleOptions) {
-  const { client, can } = options
+  const { client, can, enabled = true, initialSelectedGroupId = null, onSelectGroup } = options
   const [filters, setFilters] = useState<TriageFilters>(DEFAULT_TRIAGE_FILTERS)
+  // The text filters as last sent; `filters` is what the inputs show.
+  const [queryText, setQueryText] = useState({
+    search: DEFAULT_TRIAGE_FILTERS.search,
+    assignedTo: DEFAULT_TRIAGE_FILTERS.assignedTo,
+  })
   const [groups, setGroups] = useState<IncidentGroupRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [errorCode, setErrorCode] = useState<string | null>(null)
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(initialSelectedGroupId)
   const [detail, setDetail] = useState<GroupDetail | null>(null)
   const [incidentDetail, setIncidentDetail] = useState<IncidentDetailBundle | null>(null)
   const [tenant, setTenant] = useState<TenantRecord | null>(null)
@@ -80,9 +112,30 @@ export function useTriageConsole(options: UseTriageConsoleOptions) {
 
   const readable = Boolean(client) && can("viewer")
 
+  // Read inside the list continuation without re-running the list effect on
+  // every selection. Written in an effect, never during render.
+  const selectedRef = useRef(selectedGroupId)
+  const onSelectGroupRef = useRef(onSelectGroup)
+  useEffect(() => {
+    selectedRef.current = selectedGroupId
+    onSelectGroupRef.current = onSelectGroup
+  }, [onSelectGroup, selectedGroupId])
+
   const refresh = useCallback(() => setGeneration((value) => value + 1), [])
 
+  // Debounce the text filters. The write happens in the timer callback, not in
+  // the effect body.
   useEffect(() => {
+    if (filters.search === queryText.search && filters.assignedTo === queryText.assignedTo) return
+    const timer = setTimeout(
+      () => setQueryText({ search: filters.search, assignedTo: filters.assignedTo }),
+      TRIAGE_FILTER_DEBOUNCE_MS
+    )
+    return () => clearTimeout(timer)
+  }, [filters.assignedTo, filters.search, queryText.assignedTo, queryText.search])
+
+  useEffect(() => {
+    if (!enabled) return
     if (!client || !readable) {
       // No synchronous setState in the effect body — the async continuation
       // owns every write, which is also what `react-hooks/set-state-in-effect`
@@ -93,52 +146,59 @@ export function useTriageConsole(options: UseTriageConsoleOptions) {
       })
       return
     }
-    let active = true
+    let current = true
     setLoadingSoon(setLoading)
     void client
       .listGroups({
         status: filters.status === "all" ? undefined : filters.status,
-        q: filters.search.trim() || undefined,
-        assignedTo: filters.assignedTo.trim() || undefined,
+        q: queryText.search.trim() || undefined,
+        assignedTo: queryText.assignedTo.trim() || undefined,
       })
       .then((result) => {
-        if (!active) return
+        if (!current) return
         setGroups(result)
         setErrorCode(null)
+        const selected = selectedRef.current
+        if (selected && !result.some((group) => group.id === selected)) {
+          setSelectedGroupId(null)
+          setIncidentDetail(null)
+          onSelectGroupRef.current?.(null)
+        }
       })
       .catch((cause: unknown) => {
-        if (active) setErrorCode(codeOf(cause))
+        if (current) setErrorCode(codeOf(cause))
       })
       .finally(() => {
-        if (active) setLoading(false)
+        if (current) setLoading(false)
       })
     return () => {
-      active = false
+      current = false
     }
-  }, [client, filters, generation, readable])
+  }, [client, enabled, filters.status, generation, queryText, readable])
 
   // Group detail: the group itself plus the incidents that fingerprinted into
   // it, which is what makes a group actionable rather than just a counter.
   useEffect(() => {
+    if (!enabled) return
     if (!client || !selectedGroupId || !readable) {
       void Promise.resolve().then(() => setDetail(null))
       return
     }
-    let active = true
+    let current = true
     void Promise.all([
       client.getGroup(selectedGroupId),
       client.listIncidents({ groupId: selectedGroupId, limit: 50 }),
     ])
       .then(([group, incidents]) => {
-        if (active) setDetail({ group, incidents })
+        if (current) setDetail({ group, incidents })
       })
       .catch((cause: unknown) => {
-        if (active) setErrorCode(codeOf(cause))
+        if (current) setErrorCode(codeOf(cause))
       })
     return () => {
-      active = false
+      current = false
     }
-  }, [client, readable, selectedGroupId, generation])
+  }, [client, enabled, readable, selectedGroupId, generation])
 
   const run = useCallback(
     async (action: () => Promise<void>) => {
@@ -243,11 +303,17 @@ export function useTriageConsole(options: UseTriageConsoleOptions) {
   const selectGroup = useCallback((groupId: string | null) => {
     setSelectedGroupId(groupId)
     setIncidentDetail(null)
+    onSelectGroupRef.current?.(groupId)
   }, [])
+
+  // A group selected but not yet loaded (or filtered out) has no detail; the
+  // detail shown is always the selected one's.
+  const visibleDetail = detail && detail.group.id === selectedGroupId ? detail : null
 
   return useMemo(
     () => ({
       readable,
+      enabled,
       filters,
       setFilters,
       groups,
@@ -256,7 +322,7 @@ export function useTriageConsole(options: UseTriageConsoleOptions) {
       errorCode,
       selectedGroupId,
       selectGroup,
-      detail,
+      detail: visibleDetail,
       incidentDetail,
       openIncident,
       closeIncident,
@@ -271,8 +337,8 @@ export function useTriageConsole(options: UseTriageConsoleOptions) {
     [
       busy,
       closeIncident,
-      detail,
       downloadArtifact,
+      enabled,
       errorCode,
       filters,
       groups,
@@ -288,6 +354,7 @@ export function useTriageConsole(options: UseTriageConsoleOptions) {
       setRawMinidumpAccess,
       setStatus,
       tenant,
+      visibleDetail,
     ]
   )
 }

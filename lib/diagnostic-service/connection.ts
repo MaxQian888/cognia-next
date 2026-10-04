@@ -51,6 +51,17 @@ export interface DiagnosticConnection {
    * automatic submission as its own decision.
    */
   autoSubmit: boolean
+  /**
+   * When `autoSubmit` was last switched on (ISO timestamp).
+   *
+   * Automatic submission covers crashes captured from this moment on, never a
+   * backlog: turning the switch on must not quietly upload every report the
+   * user had been deliberately keeping local. Absent on a connection whose
+   * switch was set before automatic submission was wired (or never turned on);
+   * `lib/diagnostic-service/auto-submit.ts` stamps it on first sight and sends
+   * nothing in that pass.
+   */
+  autoSubmitSince?: string
 }
 
 export interface StoredDiagnosticConnection extends DiagnosticConnection {
@@ -114,6 +125,11 @@ export function loadDiagnosticConnection(
       ...parsed,
       baseUrl: normalizeServiceUrl(parsed.baseUrl),
       autoSubmit: parsed.autoSubmit === true,
+      autoSubmitSince:
+        typeof parsed.autoSubmitSince === "string" &&
+        !Number.isNaN(Date.parse(parsed.autoSubmitSince))
+          ? parsed.autoSubmitSince
+          : undefined,
       lastKnownRole: parsed.lastKnownRole ?? null,
     }
   } catch {

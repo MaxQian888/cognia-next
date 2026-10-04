@@ -2,7 +2,17 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
+  ACTIONABLE_INCIDENT_STATES,
+  ARTIFACT_KINDS,
+  AUDIT_ACTIONS,
   DIAGNOSTIC_ROLES,
+  INCIDENT_CLIENT_STATES,
+  INCIDENT_PROCESSING_STATES,
+  isArtifactKind,
+  isAuditAction,
+  isIncidentClientState,
+  isIncidentProcessingState,
+  normalizeIncidentClientState,
   rolePermits,
   type ArtifactKind,
   type CreateIncidentResponse,
@@ -131,5 +141,54 @@ describe("wire enums", () => {
     ]
     expect(new Set(states).size).toBe(states.length)
     expect(states).toContain("awaiting_consent")
+  })
+})
+
+describe("runtime vocabularies", () => {
+  it("exposes the processing states as the contract's enum, in order", () => {
+    expect([...INCIDENT_PROCESSING_STATES]).toEqual(contractEnum("ProcessingState"))
+    expect(isIncidentProcessingState("grouping")).toBe(true)
+    expect(isIncidentProcessingState("Grouping")).toBe(false)
+    expect(isIncidentProcessingState(7)).toBe(false)
+  })
+
+  it("lists every client state once, in lifecycle order", () => {
+    expect(INCIDENT_CLIENT_STATES[0]).toBe("detected")
+    expect(INCIDENT_CLIENT_STATES).toContain("packaged")
+    expect(new Set(INCIDENT_CLIENT_STATES).size).toBe(INCIDENT_CLIENT_STATES.length)
+    expect(ACTIONABLE_INCIDENT_STATES.every((state) => isIncidentClientState(state))).toBe(true)
+  })
+
+  it("normalizes the legacy camelCase spelling and refuses anything else", () => {
+    expect(normalizeIncidentClientState("awaiting_consent")).toBe("awaiting_consent")
+    expect(normalizeIncidentClientState("awaitingConsent")).toBe("awaiting_consent")
+    expect(normalizeIncidentClientState("packaged")).toBe("packaged")
+    expect(normalizeIncidentClientState("submitted")).toBeNull()
+    expect(normalizeIncidentClientState(undefined)).toBeNull()
+  })
+
+  it("narrows artifact kinds and audit actions", () => {
+    expect(ARTIFACT_KINDS).toHaveLength(5)
+    expect(isArtifactKind("minidump")).toBe(true)
+    expect(isArtifactKind("core")).toBe(false)
+    expect(isAuditAction("artifact.read")).toBe(true)
+    expect(isAuditAction("artifact.write")).toBe(false)
+  })
+
+  it("pins every audit action the service writes", () => {
+    // The Rust side spells each action as a string literal passed to one of
+    // three helpers; reading them back keeps this list from drifting behind a
+    // new action, which would otherwise render under the generic label.
+    const source = readFileSync(join(process.cwd(), "services/diagnostic-server/src/db.rs"), "utf8")
+    const written = new Set(
+      [
+        ...source.matchAll(
+          /"((?:alert|artifact|consent|group|incident|retention|symbol|tenant|tenant_key|upload)\.[a-z_]+)"/g
+        ),
+      ]
+        .map((match) => match[1])
+        .filter((action) => action !== "incident.dmp")
+    )
+    for (const action of written) expect(AUDIT_ACTIONS).toContain(action)
   })
 })

@@ -6,9 +6,6 @@ import { render, screen, fireEvent } from "@testing-library/react"
 jest.mock("./diagnostic-service-card", () => ({
   DiagnosticServiceCard: () => <div data-testid="diagnostic-service-stub" />,
 }))
-jest.mock("./native-crash-reports-card", () => ({
-  NativeCrashReportsCard: () => <div data-testid="native-crash-reports-stub" />,
-}))
 jest.mock("./sandbox-audit-card", () => ({
   SandboxAuditCard: () => <div data-testid="sandbox-audit-stub" />,
 }))
@@ -22,7 +19,7 @@ jest.mock("./developer-flags-card", () => ({
   DeveloperFlagsCard: () => <div data-testid="developer-flags-stub" />,
 }))
 
-import { DiagnosticsSection } from "./diagnostics-section"
+import { CRASH_REPORTS_HREF, DiagnosticsSection } from "./diagnostics-section"
 
 it("renders a labelled tablist with the two diagnostics tabs", () => {
   render(<DiagnosticsSection />)
@@ -45,8 +42,17 @@ it("shows the native reports tab by default and hides the system cards", () => {
     "aria-selected",
     "true"
   )
-  expect(screen.getByTestId("native-crash-reports-stub")).toBeInTheDocument()
+  expect(screen.getByTestId("crash-reports-link-card")).toBeInTheDocument()
   expect(screen.queryByTestId("sandbox-audit-stub")).not.toBeInTheDocument()
+})
+
+// The reports themselves live in `/logs`; settings links there rather than
+// keeping a second, weaker list of them.
+it("links to the Crash reports channel instead of listing reports itself", () => {
+  render(<DiagnosticsSection />)
+  const card = screen.getByTestId("crash-reports-link-card")
+  expect(card.querySelector("a")).toHaveAttribute("href", CRASH_REPORTS_HREF)
+  expect(CRASH_REPORTS_HREF).toBe("/logs?channel=incidents")
 })
 
 it("switches to the system tab with the system cards", () => {
@@ -56,13 +62,13 @@ it("switches to the system tab with the system cards", () => {
   expect(screen.getByTestId("sandbox-audit-stub")).toBeInTheDocument()
   expect(screen.getByTestId("sidecar-restart-stub")).toBeInTheDocument()
   expect(screen.getByTestId("inbox-telemetry-stub")).toBeInTheDocument()
-  expect(screen.queryByTestId("native-crash-reports-stub")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("crash-reports-link-card")).not.toBeInTheDocument()
 })
 
 it("returns to the native reports tab after visiting the system tab", () => {
   render(<DiagnosticsSection />)
   fireEvent.click(screen.getByRole("tab", { name: "System" }))
   fireEvent.click(screen.getByRole("tab", { name: "Native reports" }))
-  expect(screen.getByTestId("native-crash-reports-stub")).toBeInTheDocument()
+  expect(screen.getByTestId("crash-reports-link-card")).toBeInTheDocument()
   expect(screen.queryByTestId("sandbox-audit-stub")).not.toBeInTheDocument()
 })

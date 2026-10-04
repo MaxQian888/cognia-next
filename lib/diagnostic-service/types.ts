@@ -21,34 +21,128 @@ export function rolePermits(role: DiagnosticRole, required: DiagnosticRole): boo
   return DIAGNOSTIC_ROLES.indexOf(role) >= DIAGNOSTIC_ROLES.indexOf(required)
 }
 
-/** Client-side lifecycle, mirroring the `incident_state` enum. */
-export type IncidentClientState =
-  | "detected"
-  | "packaged"
-  | "awaiting_consent"
-  | "queued"
-  | "uploading"
-  | "processing"
-  | "accepted"
-  | "rejected"
-  | "cancelled"
-  | "deleted"
+/**
+ * Client-side lifecycle, mirroring the `incident_state` enum, in lifecycle
+ * order.
+ *
+ * This is the one vocabulary every surface speaks. `/logs` used to filter on a
+ * camelCase `awaitingConsent` and had no `packaged` at all, so a report the
+ * service (or the mobile plugin, which stores the service's own value) put in
+ * either state matched no filter and rendered a missing-key placeholder.
+ */
+export const INCIDENT_CLIENT_STATES = [
+  "detected",
+  "packaged",
+  "awaiting_consent",
+  "queued",
+  "uploading",
+  "processing",
+  "accepted",
+  "rejected",
+  "cancelled",
+  "deleted",
+] as const
+export type IncidentClientState = (typeof INCIDENT_CLIENT_STATES)[number]
+
+/**
+ * States in which a captured report is still waiting on the user rather than
+ * on the service: nothing has been sent, so the next move is theirs.
+ */
+export const ACTIONABLE_INCIDENT_STATES: readonly IncidentClientState[] = [
+  "detected",
+  "packaged",
+  "awaiting_consent",
+]
+
+export function isIncidentClientState(value: unknown): value is IncidentClientState {
+  return typeof value === "string" && (INCIDENT_CLIENT_STATES as readonly string[]).includes(value)
+}
+
+/**
+ * Narrow an untrusted state string onto the service vocabulary.
+ *
+ * Accepts the camelCase spelling the UI used before it adopted the service's
+ * (`awaitingConsent` → `awaiting_consent`), so a value persisted or written by
+ * an older build still lands on a real state. Anything else returns `null`
+ * and the caller decides what an unrecognized state means in its context —
+ * there is no honest universal default.
+ */
+export function normalizeIncidentClientState(value: unknown): IncidentClientState | null {
+  if (isIncidentClientState(value)) return value
+  if (typeof value !== "string") return null
+  const snake = value.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
+  return isIncidentClientState(snake) ? snake : null
+}
 
 /** Server-side pipeline position, mirroring the `processing_state` enum. */
-export type IncidentProcessingState =
-  | "received"
-  | "scanning"
-  | "symbolicating"
-  | "grouping"
-  | "accepted"
-  | "retryable_failure"
-  | "permanent_failure"
-  | "deleted"
+export const INCIDENT_PROCESSING_STATES = [
+  "received",
+  "scanning",
+  "symbolicating",
+  "grouping",
+  "accepted",
+  "retryable_failure",
+  "permanent_failure",
+  "deleted",
+] as const
+export type IncidentProcessingState = (typeof INCIDENT_PROCESSING_STATES)[number]
+
+export function isIncidentProcessingState(value: unknown): value is IncidentProcessingState {
+  return (
+    typeof value === "string" && (INCIDENT_PROCESSING_STATES as readonly string[]).includes(value)
+  )
+}
 
 export type GroupStatus = "open" | "suppressed" | "resolved"
 
 /** Kinds `upload_parts.artifact_kind` accepts. */
-export type ArtifactKind = "manifest" | "events" | "attachment" | "minidump" | "screenshot"
+export const ARTIFACT_KINDS = [
+  "manifest",
+  "events",
+  "attachment",
+  "minidump",
+  "screenshot",
+] as const
+export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
+
+export function isArtifactKind(value: unknown): value is ArtifactKind {
+  return typeof value === "string" && (ARTIFACT_KINDS as readonly string[]).includes(value)
+}
+
+/**
+ * Every `audit_events.action` the service writes (`services/diagnostic-server
+ * /src/db.rs`). Pinned so the console can translate each one; an action a
+ * newer service adds renders as its raw code under a generic label rather
+ * than as a missing-key placeholder.
+ */
+export const AUDIT_ACTIONS = [
+  "alert.permanent_failure",
+  "artifact.read",
+  "consent.withdrawn",
+  "group.triaged",
+  "incident.accepted",
+  "incident.cancelled",
+  "incident.created",
+  "incident.deleted",
+  "incident.processing_failed",
+  "incident.processing_queued",
+  "incident.resumed",
+  "retention.artifact_deleted",
+  "retention.incident_deleted",
+  "retention.permanent_failure",
+  "symbol.indexed",
+  "tenant.policy_changed",
+  "tenant_key.created",
+  "tenant_key.crypto_shredded",
+  "tenant_key.rotated",
+  "upload.part_rejected",
+  "upload.part_stored",
+] as const
+export type AuditAction = (typeof AUDIT_ACTIONS)[number]
+
+export function isAuditAction(value: unknown): value is AuditAction {
+  return typeof value === "string" && (AUDIT_ACTIONS as readonly string[]).includes(value)
+}
 
 export interface GrantResponse {
   grant: string

@@ -29,6 +29,25 @@ import { rolePermits, type DiagnosticRole } from "@/lib/diagnostic-service/types
 import { createPlatformFetch, reachesNonCorsHosts } from "@/lib/network/platform-fetch"
 import { useAccountStore } from "@/stores/account/account-store"
 
+/**
+ * How much this surface knows about the operator's role.
+ *
+ * - `unknown` — there is nothing to ask: no client (unconfigured, or no
+ *   identity session to exchange).
+ * - `probing` — a client exists and the role is being learned from a grant
+ *   exchange.
+ * - `known` — `role` holds what the service assigned (or what it assigned
+ *   last time, until the next exchange corrects it).
+ * - `failed` — the exchange was refused or did not complete; `roleErrorCode`
+ *   says why and `probeRole` tries again.
+ *
+ * The console used to treat a null role as "below Viewer". A fresh connection
+ * has a null role until its first grant exchange, and nothing ever triggered
+ * one, so every operator was told they could not read the console they had
+ * just connected.
+ */
+export type DiagnosticRoleStatus = "unknown" | "probing" | "known" | "failed"
+
 export interface DiagnosticConnectionState {
   /** The unlocked local account these facts belong to, or null. */
   accountId: string | null
@@ -40,18 +59,51 @@ export interface DiagnosticConnectionState {
   loading: boolean
   /** Role the last successful grant exchange reported, if any. */
   role: DiagnosticRole | null
+  /** Whether `role` is known, being learned, or could not be learned. */
+  roleStatus: DiagnosticRoleStatus
+  /** The service's code for the last failed role probe, when `roleStatus` is `failed`. */
+  roleErrorCode: string | null
+  /** Learn the role again (after `failed`, or to refresh a stale one). */
+  probeRole: () => void
   /** Whether this shell can reach a host that serves no CORS headers. */
   reachable: boolean
   /** A client bound to this connection, or null when unconfigured. */
   client: DiagnosticServiceClient | null
   /** Whether the current role satisfies `required`. */
   can: (required: DiagnosticRole) => boolean
+  /**
+   * Store the connection (and the session token, when one is given).
+   *
+   * A new token resets the role, so `roleStatus` moves to `probing` and then
+   * to `known` with the role the service assigned to *this* identity — the
+   * Settings card shows it on the spot rather than whatever a previous token
+   * had. A refused exchange does not undo the save: the connection is still
+   * how this device submits its own crashes, which needs no token.
+   * `roleStatus` / `roleErrorCode` report the refusal.
+   */
   connect: (
     input: StoredDiagnosticConnection & { sessionToken?: string }
   ) => Promise<StoredDiagnosticConnection>
   disconnect: () => Promise<void>
   /** Re-read from storage — used after another surface changed the connection. */
   reload: () => void
+}
+
+interface RoleProbe {
+  cache: DiagnosticGrantCache | null
+  status: "idle" | "probing" | "done" | "failed"
+  errorCode: string | null
+}
+
+const IDLE_PROBE: RoleProbe = { cache: null, status: "idle", errorCode: null }
+
+/** The service's code, or a generic one for a transport failure. */
+function codeOf(cause: unknown): string {
+  if (cause && typeof cause === "object" && "code" in cause) {
+    const code = (cause as { code: unknown }).code
+    if (typeof code === "string") return code
+  }
+  return "network_unavailable"
 }
 
 /** Injected in tests; production uses the platform-routed fetch. */
@@ -70,6 +122,9 @@ export function useDiagnosticConnection(
   const [loading, setLoading] = useState(true)
   const [role, setRole] = useState<DiagnosticRole | null>(null)
   const [generation, setGeneration] = useState(0)
+  // Keyed by the grant cache it probed: a new connection or token builds a new
+  // cache, and an outcome recorded against the old one must not leak onto it.
+  const [probe, setProbe] = useState<RoleProbe>(IDLE_PROBE)
 
   const fetchImpl = useMemo(
     () => deps.fetchImpl ?? createPlatformFetch(),
@@ -120,6 +175,57 @@ export function useDiagnosticConnection(
     })
   }, [accountId, authenticated, connection, fetchImpl])
 
+  /**
+   * Exchange a grant to learn the role. Every write lands in the promise
+   * continuation (`react-hooks/set-state-in-effect`), and an outcome for a
+   * cache that has since been replaced is dropped.
+   */
+  const runProbe = useCallback((cache: DiagnosticGrantCache) => {
+    void Promise.resolve()
+      .then(() => {
+        setProbe({ cache, status: "probing", errorCode: null })
+        return cache.grant()
+      })
+      .then(
+        () =>
+          setProbe((current) =>
+            current.cache === cache ? { cache, status: "done", errorCode: null } : current
+          ),
+        (cause: unknown) =>
+          setProbe((current) =>
+            current.cache === cache
+              ? { cache, status: "failed", errorCode: codeOf(cause) }
+              : current
+          )
+      )
+  }, [])
+
+  // Probe once per grant cache whenever the role is not known yet. A role
+  // carried over from `lastKnownRole` is good enough to render with; the first
+  // real request refreshes it through `onRole`.
+  useEffect(() => {
+    if (!grants || role !== null || probe.cache === grants) return
+    runProbe(grants)
+  }, [grants, probe.cache, role, runProbe])
+
+  const probeRole = useCallback(() => {
+    if (grants) runProbe(grants)
+  }, [grants, runProbe])
+
+  // Without a grant cache there is no one to ask, and a remembered role says
+  // nothing about what this (absent) session may do.
+  const roleStatus: DiagnosticRoleStatus = !grants
+    ? "unknown"
+    : probe.cache === grants && probe.status === "probing"
+      ? "probing"
+      : role
+        ? "known"
+        : probe.cache === grants && probe.status === "failed"
+          ? "failed"
+          : // A cache exists and the effect above is about to probe it.
+            "probing"
+  const roleErrorCode = probe.cache === grants && probe.status === "failed" ? probe.errorCode : null
+
   const client = useMemo(() => {
     if (!connection || !grants) return null
     try {
@@ -142,7 +248,13 @@ export function useDiagnosticConnection(
       // Token first: a crash between the two writes should leave a connection
       // that cannot authenticate rather than a URL-less orphan secret.
       if (sessionToken) await saveDiagnosticSessionToken(accountId, sessionToken)
-      const saved = saveDiagnosticConnection(accountId, record)
+      // A new identity session may carry a different role; the old one must
+      // not be shown against it. Clearing it is what makes the probe below
+      // learn this identity's role as soon as the new grant cache exists.
+      const saved = saveDiagnosticConnection(accountId, {
+        ...record,
+        lastKnownRole: sessionToken ? null : record.lastKnownRole,
+      })
       setConnection(saved)
       setRole(saved.lastKnownRole)
       setAuthenticated(sessionToken ? true : authenticated)
@@ -157,6 +269,7 @@ export function useDiagnosticConnection(
     setConnection(null)
     setAuthenticated(false)
     setRole(null)
+    setProbe(IDLE_PROBE)
   }, [accountId])
 
   const can = useCallback(
@@ -173,6 +286,9 @@ export function useDiagnosticConnection(
       authenticated,
       loading,
       role,
+      roleStatus,
+      roleErrorCode,
+      probeRole,
       reachable: reachesNonCorsHosts(),
       client,
       can,
@@ -180,6 +296,20 @@ export function useDiagnosticConnection(
       disconnect,
       reload,
     }),
-    [accountId, authenticated, can, client, connect, connection, disconnect, loading, reload, role]
+    [
+      accountId,
+      authenticated,
+      can,
+      client,
+      connect,
+      connection,
+      disconnect,
+      loading,
+      probeRole,
+      reload,
+      role,
+      roleErrorCode,
+      roleStatus,
+    ]
   )
 }

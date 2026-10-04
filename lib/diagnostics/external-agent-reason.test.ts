@@ -31,6 +31,7 @@ const ALL_REASON_CODES: ExternalAgentBranchReasonCode[] = [
   "runtime_version_unsupported",
   "sandbox_unavailable",
   "extension_handshake_failed",
+  "pi_package_unavailable",
   "protocol_frame_invalid",
   "resource_limit",
 ]
@@ -56,6 +57,12 @@ describe("REASON_CODE_TO_DIAGNOSTIC", () => {
       (c): c is NonNullable<typeof c> => c !== null
     )
     expect(new Set(codes).size).toBe(codes.length)
+  })
+})
+
+describe("plugin Pi package refusals", () => {
+  it("map to their own diagnostic", () => {
+    expect(REASON_CODE_TO_DIAGNOSTIC.pi_package_unavailable).toBe("piPackageUnavailable")
   })
 })
 

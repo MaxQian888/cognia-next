@@ -12,6 +12,7 @@ jest.mock("next-intl", () => ({
 
 const connect = jest.fn(async (input: unknown) => input as StoredDiagnosticConnection)
 const disconnect = jest.fn(async () => undefined)
+const probeRole = jest.fn()
 let state: Record<string, unknown> = {}
 
 // The connection hook reaches the account store, which pulls in the agent-team
@@ -23,6 +24,9 @@ jest.mock("@/hooks/diagnostic-service/use-diagnostic-connection", () => ({
     authenticated: false,
     loading: false,
     role: null,
+    roleStatus: "unknown",
+    roleErrorCode: null,
+    probeRole,
     reachable: true,
     client: null,
     can: () => false,
@@ -33,9 +37,15 @@ jest.mock("@/hooks/diagnostic-service/use-diagnostic-connection", () => ({
   }),
 }))
 
-let desktop = true
-jest.mock("@/lib/native/diagnostic-submit", () => ({
-  canSubmitDiagnostics: () => desktop,
+// "Can this device submit" — the desktop natively, a phone through the crash
+// plugin — not "is this Tauri".
+let supported = true
+jest.mock("@/hooks/diagnostic-service/use-diagnostic-submission-support", () => ({
+  useDiagnosticSubmissionSupport: () => ({
+    runtime: supported ? "mobile" : null,
+    supported,
+    checking: false,
+  }),
 }))
 
 import { DiagnosticServiceCard } from "./diagnostic-service-card"
@@ -51,7 +61,8 @@ const stored: StoredDiagnosticConnection = {
 
 beforeEach(() => {
   state = {}
-  desktop = true
+  supported = true
+  probeRole.mockClear()
   connect.mockClear()
   disconnect.mockClear()
 })
@@ -166,20 +177,72 @@ describe("DiagnosticServiceCard", () => {
     expect(screen.getByTestId("diagnostic-service-unreachable")).toBeInTheDocument()
   })
 
-  it("only offers automatic submission where packaging exists", async () => {
+  it("only offers automatic submission where this device can submit", async () => {
     state = { connection: stored, authenticated: true }
-    desktop = false
+    supported = false
     const { unmount } = await renderCard()
     expect(screen.queryByLabelText("settings.diagnostics.service.autoSubmit")).toBeNull()
     unmount()
 
-    desktop = true
+    // A phone with the crash plugin counts; it used to be desktop-only.
+    supported = true
     await renderCard()
     const toggle = screen.getByLabelText("settings.diagnostics.service.autoSubmit")
     expect(toggle).toBeInTheDocument()
     await userEvent.click(toggle)
     // Off by default, and turning it on is its own decision — never implied by
-    // having configured a service.
-    expect(connect).toHaveBeenCalledWith(expect.objectContaining({ autoSubmit: true }))
+    // having configured a service. It is stamped, so it never covers a backlog.
+    const call = connect.mock.calls.at(-1)?.[0] as StoredDiagnosticConnection
+    expect(call.autoSubmit).toBe(true)
+    expect(Number.isNaN(Date.parse(call.autoSubmitSince ?? ""))).toBe(false)
+  })
+
+  it("clears the stamp when automatic submission is turned off", async () => {
+    state = {
+      connection: { ...stored, autoSubmit: true, autoSubmitSince: "2026-10-01T00:00:00.000Z" },
+      authenticated: true,
+    }
+    await renderCard()
+    await userEvent.click(screen.getByLabelText("settings.diagnostics.service.autoSubmit"))
+    const call = connect.mock.calls.at(-1)?.[0] as StoredDiagnosticConnection
+    expect(call.autoSubmit).toBe(false)
+    expect(call.autoSubmitSince).toBeUndefined()
+  })
+
+  it("shows the role being learned after a token is saved", async () => {
+    state = { connection: stored, authenticated: true, role: null, roleStatus: "probing" }
+    await renderCard()
+    expect(screen.getByTestId("diagnostic-service-role-probing")).toHaveTextContent(
+      "settings.diagnostics.service.roleProbing"
+    )
+  })
+
+  it("reports a refused token and retries the probe on demand", async () => {
+    state = {
+      connection: stored,
+      authenticated: true,
+      role: null,
+      roleStatus: "failed",
+      roleErrorCode: "invalid_oidc_session",
+    }
+    await renderCard()
+    expect(screen.getByTestId("diagnostic-service-role-failed")).toHaveTextContent(
+      "settings.diagnostics.service.roleErrors.invalid_oidc_session"
+    )
+    await userEvent.click(screen.getByText("settings.diagnostics.service.roleRetry"))
+    expect(probeRole).toHaveBeenCalled()
+  })
+
+  it("degrades an unrecognized probe failure to the generic message", async () => {
+    state = {
+      connection: stored,
+      authenticated: true,
+      roleStatus: "failed",
+      roleErrorCode: "http_502",
+    }
+    await renderCard()
+    expect(screen.getByTestId("diagnostic-service-role-failed")).toHaveTextContent(
+      "settings.diagnostics.service.roleErrors.other"
+    )
   })
 })

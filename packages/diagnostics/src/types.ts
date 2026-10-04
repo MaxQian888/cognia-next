@@ -265,6 +265,8 @@ export type DiagnosticCode =
   | "runtimeVersionUnsupported"
   | "sandboxUnavailable"
   | "extensionHandshakeFailed"
+  /** A plugin Pi package an agent opted into cannot be loaded (ADR-0210). */
+  | "piPackageUnavailable"
   | "protocolFrameInvalid"
   | "resourceLimit"
   // --- Route boundaries ---

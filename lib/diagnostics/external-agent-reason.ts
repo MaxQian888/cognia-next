@@ -43,6 +43,7 @@ export const REASON_CODE_TO_DIAGNOSTIC: Readonly<
   runtime_version_unsupported: "runtimeVersionUnsupported",
   sandbox_unavailable: "sandboxUnavailable",
   extension_handshake_failed: "extensionHandshakeFailed",
+  pi_package_unavailable: "piPackageUnavailable",
   protocol_frame_invalid: "protocolFrameInvalid",
   resource_limit: "resourceLimit",
 }
