@@ -19,7 +19,9 @@
  * the two global ceilings, so the per-provider caps and the thresholds were
  * live code no user could reach. All four scopes are editable here now, and the
  * spend against them is rendered by the shared `UsageBudgetMeters`, which the
- * Usage dashboard mounts as well.
+ * Usage dashboard mounts as well. The month-end forecast above the meters is
+ * the shared `UsageForecastPanel`, so a monthly ceiling typed here is measured
+ * against where the month is heading, not only against where it is today.
  */
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
@@ -38,6 +40,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { UsageBudgetMeters } from "@/components/usage/usage-budget-meters"
+import { UsageForecastPanel } from "@/components/usage/usage-forecast-panel"
 import { useCostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
 import { useSettingsStore } from "@/stores/settings"
 import { BUILT_IN_PROVIDER_IDS } from "@cognia/provider-types/built-in-provider-catalog"
@@ -190,8 +193,11 @@ export function UsageCostSection() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <UsageBudgetMeters emptyHint={t("spend.empty")} />
+        <CardContent className="flex flex-col gap-4">
+          <UsageForecastPanel />
+          <div className="border-t pt-4">
+            <UsageBudgetMeters emptyHint={t("spend.empty")} />
+          </div>
         </CardContent>
       </Card>
 

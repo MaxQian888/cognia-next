@@ -168,7 +168,7 @@ export async function notifyCostBudgetThreshold(
     directed: exceeded,
     icon: "wallet",
     // The spend breakdown lives on the Traces channel's dashboard sub-view.
-    href: "/logs?channel=traces&view=dashboard",
+    href: "/logs?channel=traces&tview=dashboard",
   })
 }
 

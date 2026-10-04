@@ -279,7 +279,9 @@ export function aggregateByModel(
   rows: readonly SessionUsageRow[],
   resolve: PricingResolver = resolveModelPricingUsd
 ): ModelUsageRow[] {
-  const map = aggregateBucketsBy(rows, (r) => r.model ?? "(unknown)", resolve)
+  // A blank id is as unknown as a missing one; bucketing it under "" rendered
+  // an unlabeled row.
+  const map = aggregateBucketsBy(rows, (r) => r.model?.trim() || "(unknown)", resolve)
   return [...map.entries()]
     .map(([model, bucket]) => ({ model, ...bucket }))
     .sort(
@@ -303,15 +305,65 @@ export function aggregateBySurface(
   rows: readonly SessionUsageRow[],
   resolve: PricingResolver = resolveModelPricingUsd
 ): SurfaceUsageRow[] {
-  const map = aggregateBucketsBy(rows, (r) => (r.surface ?? "chat") as UsageSurface, resolve)
+  return rankBucketsBy(rows, (r) => (r.surface ?? "chat") as UsageSurface, resolve).map(
+    ({ key, ...bucket }) => ({ surface: key, ...bucket })
+  )
+}
+
+/** One ranked bucket on an arbitrary string axis (provider, project, …). */
+export interface KeyedUsageRow extends UsageBucket {
+  key: string
+}
+
+/**
+ * {@link aggregateBucketsBy} ranked the way every attribution list ranks:
+ * descending by cost, then by total tokens, then by key. Shared by the surface,
+ * provider and project axes so the dashboard's axis toggle can never order the
+ * same rows two different ways.
+ */
+export function rankBucketsBy<K extends string>(
+  rows: readonly SessionUsageRow[],
+  keyOf: (row: SessionUsageRow) => K,
+  resolve: PricingResolver = resolveModelPricingUsd
+): Array<UsageBucket & { key: K }> {
+  const map = aggregateBucketsBy(rows, keyOf, resolve)
   return [...map.entries()]
-    .map(([surface, bucket]) => ({ surface, ...bucket }))
+    .map(([key, bucket]) => ({ key, ...bucket }))
     .sort(
       (a, b) =>
-        b.costUsd - a.costUsd ||
-        bucketTokens(b) - bucketTokens(a) ||
-        a.surface.localeCompare(b.surface)
+        b.costUsd - a.costUsd || bucketTokens(b) - bucketTokens(a) || a.key.localeCompare(b.key)
     )
+}
+
+/** Key for rows that recorded no provider (legacy rows, some shadow writers). */
+export const UNKNOWN_PROVIDER_KEY = "(unknown)"
+
+/** Key for rows that belong to no workspace (the default, project-less chat). */
+export const NO_PROJECT_KEY = "(none)"
+
+/**
+ * Bucket rows by the provider that served them. The model axis cannot answer
+ * "which bill is this on": the same model id is sold by several gateways at
+ * different prices, and the per-provider budget ceilings are keyed on exactly
+ * this field.
+ */
+export function aggregateByProvider(
+  rows: readonly SessionUsageRow[],
+  resolve: PricingResolver = resolveModelPricingUsd
+): KeyedUsageRow[] {
+  return rankBucketsBy(rows, (r) => r.providerId?.trim() || UNKNOWN_PROVIDER_KEY, resolve)
+}
+
+/**
+ * Bucket rows by owning workspace (ADR-0204 `projectId`). The caller maps ids
+ * onto display names; this module stays free of the project store so the CLI
+ * can import it.
+ */
+export function aggregateByProject(
+  rows: readonly SessionUsageRow[],
+  resolve: PricingResolver = resolveModelPricingUsd
+): KeyedUsageRow[] {
+  return rankBucketsBy(rows, (r) => r.projectId?.trim() || NO_PROJECT_KEY, resolve)
 }
 
 /**
@@ -349,7 +401,7 @@ export function parseLocalDay(date: string): Date {
 }
 
 /** Midnight (local) of the day `daysBack` calendar days before `now`. */
-function startOfLocalDay(now: number, daysBack = 0): number {
+export function startOfLocalDay(now: number, daysBack = 0): number {
   const d = new Date(now)
   d.setHours(0, 0, 0, 0)
   d.setDate(d.getDate() - daysBack)
@@ -568,6 +620,24 @@ export function filterByRange(
   if (rangeDays == null) return [...rows]
   const cutoff = startOfLocalDay(now, Math.max(0, Math.floor(rangeDays) - 1))
   return rows.filter((r) => r.at >= cutoff)
+}
+
+/**
+ * The equal-length local calendar window immediately BEFORE the one
+ * {@link filterByRange} keeps: for `7` that is the seven days ending yesterday-
+ * minus-six. Half-open at the current window's first midnight, so a turn is in
+ * exactly one of the two and a period-over-period comparison never counts it
+ * twice.
+ */
+export function filterPreviousRange(
+  rows: readonly SessionUsageRow[],
+  rangeDays: number,
+  now: number = Date.now()
+): SessionUsageRow[] {
+  const days = Math.max(1, Math.floor(rangeDays))
+  const end = startOfLocalDay(now, days - 1)
+  const start = startOfLocalDay(now, days * 2 - 1)
+  return rows.filter((r) => r.at >= start && r.at < end)
 }
 
 // ── Export ──────────────────────────────────────────────────────────────────

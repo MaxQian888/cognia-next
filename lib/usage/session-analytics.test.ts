@@ -4,7 +4,10 @@ import {
   CACHE_WRITE_MULT,
   aggregateByDay,
   aggregateByModel,
+  aggregateByProject,
+  aggregateByProvider,
   aggregateBySession,
+  aggregateBySurface,
   analyzeUsageContributors,
   buildUsageFilename,
   effectiveCostUsd,
@@ -12,7 +15,10 @@ import {
   estimateCostFromTotals,
   fillDailyRange,
   filterByRange,
+  filterPreviousRange,
   HIGH_CONTEXT_THRESHOLD,
+  NO_PROJECT_KEY,
+  UNKNOWN_PROVIDER_KEY,
   localDay,
   parseLocalDay,
   topModelByTokens,
@@ -610,5 +616,71 @@ describe("frozen cost is never re-priced (v172)", () => {
       priceFor
     )
     expect(out.cost).toBeCloseTo(3 * 2, 6)
+  })
+})
+
+describe("aggregateByProvider / aggregateByProject", () => {
+  const priced = (o: Partial<SessionUsageRow>) => row({ costSource: "sdk", costKnown: true, ...o })
+
+  it("ranks providers by cost and buckets a missing provider as unknown", () => {
+    const out = aggregateByProvider([
+      priced({ providerId: "openai", costUsd: 1 }),
+      priced({ providerId: "anthropic", costUsd: 3 }),
+      priced({ providerId: "anthropic", costUsd: 2 }),
+      priced({ providerId: undefined, costUsd: 0.5 }),
+    ])
+    expect(out.map((r) => [r.key, r.turns, r.costUsd])).toEqual([
+      ["anthropic", 2, 5],
+      ["openai", 1, 1],
+      [UNKNOWN_PROVIDER_KEY, 1, 0.5],
+    ])
+  })
+
+  it("buckets project-less rows under the no-project key", () => {
+    const out = aggregateByProject([
+      priced({ projectId: "p1", costUsd: 1 }),
+      priced({ projectId: "  ", costUsd: 2 }),
+      priced({ costUsd: 4 }),
+    ])
+    expect(out.map((r) => [r.key, r.costUsd])).toEqual([
+      [NO_PROJECT_KEY, 6],
+      ["p1", 1],
+    ])
+  })
+
+  it("keeps the surface axis on the same ranking", () => {
+    const out = aggregateBySurface([
+      priced({ surface: "workflow", costUsd: 1 }),
+      priced({ surface: undefined, costUsd: 2 }),
+    ])
+    expect(out.map((r) => r.surface)).toEqual(["chat", "workflow"])
+  })
+})
+
+describe("filterPreviousRange", () => {
+  // Local-time anchors so the window edges are local midnights in any TZ.
+  const now = new Date(2026, 4, 31, 12, 0, 0).getTime()
+  const at = (daysBack: number, hour = 12) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() - daysBack)
+    d.setHours(hour, 0, 0, 0)
+    return d.getTime()
+  }
+
+  it("keeps the equal-length window just before the current one, half-open", () => {
+    const rows = [
+      row({ messageId: "today", at: at(0) }),
+      row({ messageId: "current-edge", at: at(6, 0) }),
+      row({ messageId: "prev-last", at: at(7, 23) }),
+      row({ messageId: "prev-first", at: at(13, 0) }),
+      row({ messageId: "too-old", at: at(14, 23) }),
+    ]
+    expect(filterPreviousRange(rows, 7, now).map((r) => r.messageId)).toEqual([
+      "prev-last",
+      "prev-first",
+    ])
+    // The two windows partition the rows they cover — nothing is counted twice.
+    const current = filterByRange(rows, 7, now).map((r) => r.messageId)
+    expect(current).toEqual(["today", "current-edge"])
   })
 })
