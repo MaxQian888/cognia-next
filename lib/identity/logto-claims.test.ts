@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
+  isPlaceholderEmail,
   mergeGroupIds,
   orgRoleFromOrganizationRoles,
   readLogtoAccessClaims,
@@ -127,6 +128,15 @@ describe("readLogtoProfileClaims", () => {
       picture: undefined,
     })
     expect(readLogtoProfileClaims(token({ name: "" })).name).toBeUndefined()
+  })
+
+  it("drops a reserved-domain placeholder email (the official account's Feishu sign-ins)", () => {
+    expect(
+      readLogtoProfileClaims(token({ name: "飞书用户", email: "on_x.tk@feishu.users.invalid" }))
+        .email
+    ).toBeUndefined()
+    expect(isPlaceholderEmail("someone@Example.INVALID ")).toBe(true)
+    expect(isPlaceholderEmail("someone@invalid.example")).toBe(false)
   })
 })
 

@@ -11,8 +11,8 @@ import { refreshCollabPlaneQuietly } from "@/lib/collab/refresh"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
 import {
   isLogtoRefreshError,
+  refreshConfigFor,
   refreshLogtoToken,
-  type LogtoClientConfig,
   type LogtoSession,
 } from "@/lib/logto/client"
 
@@ -63,13 +63,7 @@ async function freshSession(
   ) {
     return session
   }
-  const config: LogtoClientConfig = {
-    issuer: session.issuer,
-    clientId: session.clientId,
-    resource: session.resource,
-    redirectUri: "",
-    ...(session.organizationId ? { organizationId: session.organizationId } : {}),
-  }
+  const config = refreshConfigFor(session)
   try {
     const refreshed = await (deps.refreshToken ?? refreshLogtoToken)(
       config,

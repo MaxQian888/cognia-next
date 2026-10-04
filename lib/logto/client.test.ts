@@ -6,6 +6,7 @@ import {
   nativeCallbackUriFor,
   OIDC_NATIVE_CALLBACK_URI,
   ORGANIZATIONS_SCOPE,
+  refreshConfigFor,
   refreshLogtoToken,
   revokeLogtoToken,
   toLogtoSessionMetadata,
@@ -142,6 +143,77 @@ describe("loginToLogto", () => {
 })
 
 describe("a generic OIDC issuer (ADR-0215 §2)", () => {
+  it("remembers the issuer kind on the session and its metadata", async () => {
+    const session = await loginToLogto(baseConfig({ issuerKind: "oidc" }), {
+      openUrl: jest.fn(),
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    expect(session.issuerKind).toBe("oidc")
+    expect(toLogtoSessionMetadata(session).issuerKind).toBe("oidc")
+    // A Logto session stays exactly as it was stored before the field existed.
+    const logto = await loginToLogto(baseConfig(), {
+      openUrl: jest.fn(),
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    expect(logto).not.toHaveProperty("issuerKind")
+  })
+
+  it("passes the provider hint and a fresh-login demand to the official issuer only", async () => {
+    const official = jest.fn()
+    await loginToLogto(
+      baseConfig({ issuerKind: "oidc", socialProvider: "feishu", freshLogin: true }),
+      {
+        openUrl: official,
+        waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+        fetchImpl: routingFetch(),
+      }
+    )
+    const officialUrl = new URL((official.mock.calls[0] as string[])[0])
+    expect(officialUrl.searchParams.get("provider")).toBe("feishu")
+    expect(officialUrl.searchParams.get("prompt")).toBe("login")
+    expect(officialUrl.searchParams.get("max_age")).toBe("0")
+
+    const logto = jest.fn()
+    await loginToLogto(baseConfig({ socialProvider: "feishu", freshLogin: true }), {
+      openUrl: logto,
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    const logtoUrl = new URL((logto.mock.calls[0] as string[])[0])
+    expect(logtoUrl.searchParams.get("provider")).toBeNull()
+    expect(logtoUrl.searchParams.get("prompt")).toBe("consent")
+    expect(logtoUrl.searchParams.get("max_age")).toBeNull()
+  })
+
+  it("refreshes a stored official session as the official issuer", async () => {
+    const config = refreshConfigFor({
+      issuer: "https://id.cognia.cn/api/auth",
+      clientId: "cognia-app",
+      resource: "https://sync.cognia.cn",
+      issuerKind: "oidc",
+    })
+    expect(config).toEqual({
+      issuer: "https://id.cognia.cn/api/auth",
+      clientId: "cognia-app",
+      resource: "https://sync.cognia.cn",
+      redirectUri: "",
+      issuerKind: "oidc",
+    })
+    const refreshed = await refreshLogtoToken(config, "rt-old", routingFetch())
+    expect(refreshed.issuerKind).toBe("oidc")
+    expect(
+      refreshConfigFor({ issuer: "i", clientId: "c", resource: "r", organizationId: "org_1" })
+    ).toEqual({
+      issuer: "i",
+      clientId: "c",
+      resource: "r",
+      redirectUri: "",
+      organizationId: "org_1",
+    })
+  })
+
   it("gets none of Logto's parameters on login", async () => {
     const fetchImpl = routingFetch()
     const openUrl = jest.fn()

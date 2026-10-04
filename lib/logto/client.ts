@@ -63,6 +63,18 @@ export interface LogtoClientConfig {
   directSignIn?: string
   /** Absent means `logto`. Decides which Logto-only parameters are sent. */
   issuerKind?: OidcIssuerKind
+  /**
+   * The official account's provider hint (`provider=<id>` on the authorize
+   * request): its hosted sign-in page goes straight to that provider. The
+   * counterpart of Logto's `directSignIn`; sent only to a non-Logto issuer.
+   */
+  socialProvider?: string
+  /**
+   * Ask the person to sign in again even when the issuer still has a session
+   * (`prompt=login`, `max_age=0`), so the ID token's `auth_time` is fresh.
+   * Account deletion needs this proof (ADR-0215 §10). Non-Logto issuers only.
+   */
+  freshLogin?: boolean
 }
 
 /** Logto only mints organization tokens for a session that asked for this. */
@@ -119,6 +131,12 @@ export interface LogtoSession {
   expiresAt?: number
   /** Granted scopes, from the token response's `scope` claim. */
   scopes: string[]
+  /**
+   * Set only for a non-Logto issuer (the official account), so a stored
+   * session refreshes with the parameters its issuer understands. Absent
+   * means Logto, which every session stored before this field was.
+   */
+  issuerKind?: "oidc"
 }
 
 /**
@@ -133,6 +151,7 @@ export interface LogtoSessionMetadata {
   organizationId?: string
   expiresAt?: number
   scopes: string[]
+  issuerKind?: "oidc"
 }
 
 export function toLogtoSessionMetadata(session: LogtoSession): LogtoSessionMetadata {
@@ -144,7 +163,26 @@ export function toLogtoSessionMetadata(session: LogtoSession): LogtoSessionMetad
   }
   if (session.organizationId) metadata.organizationId = session.organizationId
   if (session.expiresAt !== undefined) metadata.expiresAt = session.expiresAt
+  if (session.issuerKind) metadata.issuerKind = session.issuerKind
   return metadata
+}
+
+/**
+ * The client configuration that refreshes a stored session: the issuer,
+ * client, resource, organization and issuer kind it was minted with. The
+ * redirect URI is unused by the refresh grant.
+ */
+export function refreshConfigFor(
+  session: Pick<LogtoSession, "issuer" | "clientId" | "resource" | "organizationId" | "issuerKind">
+): LogtoClientConfig {
+  return {
+    issuer: session.issuer,
+    clientId: session.clientId,
+    resource: session.resource,
+    redirectUri: "",
+    ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+    ...(session.issuerKind ? { issuerKind: session.issuerKind } : {}),
+  }
 }
 
 /**
@@ -243,6 +281,12 @@ export async function loginToLogto(
     // scope and Native clients receive no refresh token for organization adoption.
     extraAuthParams.prompt = "consent"
     if (config.directSignIn) extraAuthParams.direct_sign_in = config.directSignIn
+  } else {
+    if (config.socialProvider) extraAuthParams.provider = config.socialProvider
+    if (config.freshLogin) {
+      extraAuthParams.prompt = "login"
+      extraAuthParams.max_age = "0"
+    }
   }
 
   const result = await runPkceAuthFlow({
@@ -268,6 +312,7 @@ export async function loginToLogto(
     idToken: typeof result.raw.id_token === "string" ? result.raw.id_token : undefined,
     expiresAt: result.expiresAt,
     scopes: grantedScopes(result.raw, scopes),
+    ...(logto ? {} : { issuerKind: "oidc" as const }),
   }
 }
 
@@ -343,6 +388,7 @@ export async function refreshLogtoToken(
     idToken: typeof json.id_token === "string" ? json.id_token : undefined,
     expiresAt: expiresIn ? Date.now() + expiresIn * 1000 : undefined,
     scopes: grantedScopes(json, []),
+    ...(isLogto(config) ? {} : { issuerKind: "oidc" as const }),
   }
 }
 

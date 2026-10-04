@@ -82,11 +82,21 @@ export function readLogtoAccessClaims(accessToken: string): LogtoAccessClaims | 
  */
 export function readLogtoProfileClaims(idToken: string | undefined): LogtoProfileClaims {
   const payload = idToken ? decodeJwtPayload(idToken) : null
+  const email = stringClaim(payload, "email")
   return {
     name: stringClaim(payload, "name") ?? stringClaim(payload, "username"),
-    email: stringClaim(payload, "email"),
+    email: email && !isPlaceholderEmail(email) ? email : undefined,
     picture: stringClaim(payload, "picture"),
   }
+}
+
+/**
+ * An address on the reserved `.invalid` TLD (RFC 2606) names nobody: an
+ * issuer uses one as a placeholder when the provider gave no usable email
+ * (the official account's Feishu sign-ins). It is never shown or stored.
+ */
+export function isPlaceholderEmail(email: string): boolean {
+  return /\.invalid$/i.test(email.trim())
 }
 
 /**

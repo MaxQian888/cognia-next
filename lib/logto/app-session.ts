@@ -29,6 +29,7 @@ import {
   buildLogtoEndSessionUrl,
   isLogtoRefreshError,
   loginToLogto,
+  refreshConfigFor,
   refreshLogtoToken,
   revokeLogtoToken,
   toLogtoSessionMetadata,
@@ -99,17 +100,6 @@ export async function signInToLogto(
   const session = await login(config, drivers)
   await save(session, deps.localAccountId)
   return session
-}
-
-function refreshConfigFor(session: LogtoSession): LogtoClientConfig {
-  return {
-    issuer: session.issuer,
-    clientId: session.clientId,
-    resource: session.resource,
-    // redirectUri is unused by the refresh grant, but the config type requires it.
-    redirectUri: "",
-    ...(session.organizationId ? { organizationId: session.organizationId } : {}),
-  }
 }
 
 /**
