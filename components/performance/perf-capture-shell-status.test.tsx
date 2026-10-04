@@ -88,7 +88,7 @@ describe("PerfCaptureShellStatus", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("summary:target-a:10:2")
     fireEvent.click(screen.getByRole("button", { name: "return" }))
-    expect(push).toHaveBeenCalledWith("/performance")
+    expect(push).toHaveBeenCalledWith("/performance?tab=captures")
 
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "stop" })))
     expect(stop).toHaveBeenCalledWith("manual")

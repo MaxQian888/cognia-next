@@ -4,11 +4,27 @@
  * PerfHotspotsTable — sortable table of instrumented span stats. Total time
  * carries a relative bar so the costliest backend operations jump out at a
  * glance. This is the panel's primary "where is the time going" surface.
+ *
+ * The span registry is process-wide and cumulative since the host started
+ * (or since the last reset). The header says so, and owns the one control
+ * that actually resets it: the toolbar button labelled "Reset hotspots" used
+ * to clear only the panel's graph history, leaving the numbers here intact.
  */
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowDownIcon, ArrowUpIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpIcon, RotateCcwIcon } from "lucide-react"
+import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Table,
   TableBody,
@@ -53,12 +69,35 @@ function SpanDistribution({ buckets, name }: { buckets: number[]; name: string }
 
 export interface PerfHotspotsTableProps {
   spans: SpanSnapshot[]
+  /**
+   * Clears the host's cumulative span registry (`perf_reset_hotspots`).
+   * Omitted when the selected host cannot reset it, which hides the control.
+   */
+  onReset?: () => Promise<void>
 }
 
-export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
+export function PerfHotspotsTable({ spans, onReset }: PerfHotspotsTableProps) {
   const t = useTranslations("performance.hotspots")
   const [sortKey, setSortKey] = useState<SortKey>("totalMs")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
+
+  const reset = async () => {
+    if (!onReset) return
+    setResetting(true)
+    try {
+      await onReset()
+      toast.success(t("reset.done"))
+    } catch (error) {
+      toast.error(
+        t("reset.failed", { error: error instanceof Error ? error.message : String(error) })
+      )
+    } finally {
+      setResetting(false)
+      setConfirmReset(false)
+    }
+  }
 
   const maxTotal = useMemo(() => spans.reduce((m, s) => Math.max(m, s.totalMs), 0), [spans])
 
@@ -108,83 +147,123 @@ export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
     </TableHead>
   )
 
-  if (spans.length === 0) {
-    return (
-      <div className="py-10 text-center" data-testid="perf-hot-empty">
-        <p className="text-sm font-medium">{t("empty")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{t("hint")}</p>
-      </div>
-    )
-  }
-
   return (
-    <div className="border-y" data-testid="perf-hotspots-table">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {header("name", t("columns.name"), false)}
-            {header("count", t("columns.calls"))}
-            {header("avgMs", t("columns.avg"))}
-            {header("p50Ms", t("columns.p50"))}
-            {header("p95Ms", t("columns.p95"))}
-            <TableHead className="text-right">{t("columns.distribution")}</TableHead>
-            {header("maxMs", t("columns.max"))}
-            {header("totalMs", t("columns.total"))}
-            {header("errorCount", t("columns.errors"))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.map((s) => {
-            const pct = maxTotal > 0 ? (s.totalMs / maxTotal) * 100 : 0
-            return (
-              <TableRow key={s.name} data-testid={`perf-hot-row-${s.name}`}>
-                <TableCell className="font-mono text-xs font-medium">{s.name}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatCount(s.count)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatMs(s.avgMs)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatMs(s.p50Ms)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatMs(s.p95Ms)}
-                </TableCell>
-                <TableCell>
-                  <div className="flex justify-end">
-                    <SpanDistribution buckets={s.buckets} name={s.name} />
-                  </div>
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatMs(s.maxMs)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-chart-1"
-                        style={{ width: `${pct}%` }}
-                        data-testid={`perf-hot-bar-${s.name}`}
-                      />
-                    </div>
-                    <span className="font-mono tabular-nums">{formatMs(s.totalMs)}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  {s.errorCount > 0 ? (
-                    <Badge variant="destructive" className="font-mono tabular-nums">
-                      {formatCount(s.errorCount)}
-                    </Badge>
-                  ) : (
-                    <span className="font-mono text-xs text-muted-foreground">0</span>
-                  )}
-                </TableCell>
+    <section className="border-y bg-background" data-testid="perf-hotspots">
+      <header className="flex flex-row flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="text-base font-medium">{t("title")}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
+        </div>
+        {onReset ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmReset(true)}
+            disabled={resetting || spans.length === 0}
+            data-testid="perf-hot-reset"
+          >
+            <RotateCcwIcon aria-hidden />
+            {t("reset.label")}
+          </Button>
+        ) : null}
+      </header>
+      {spans.length === 0 ? (
+        <div className="py-10 text-center" data-testid="perf-hot-empty">
+          <p className="text-sm font-medium">{t("empty")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("hint")}</p>
+        </div>
+      ) : (
+        <div data-testid="perf-hotspots-table">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {header("name", t("columns.name"), false)}
+                {header("count", t("columns.calls"))}
+                {header("avgMs", t("columns.avg"))}
+                {header("p50Ms", t("columns.p50"))}
+                {header("p95Ms", t("columns.p95"))}
+                <TableHead className="text-right">{t("columns.distribution")}</TableHead>
+                {header("maxMs", t("columns.max"))}
+                {header("totalMs", t("columns.total"))}
+                {header("errorCount", t("columns.errors"))}
               </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
-    </div>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((s) => {
+                const pct = maxTotal > 0 ? (s.totalMs / maxTotal) * 100 : 0
+                return (
+                  <TableRow key={s.name} data-testid={`perf-hot-row-${s.name}`}>
+                    <TableCell className="font-mono text-xs font-medium">{s.name}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {formatCount(s.count)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {formatMs(s.avgMs)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {formatMs(s.p50Ms)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {formatMs(s.p95Ms)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end">
+                        <SpanDistribution buckets={s.buckets} name={s.name} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {formatMs(s.maxMs)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-chart-1"
+                            style={{ width: `${pct}%` }}
+                            data-testid={`perf-hot-bar-${s.name}`}
+                          />
+                        </div>
+                        <span className="font-mono tabular-nums">{formatMs(s.totalMs)}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {s.errorCount > 0 ? (
+                        <Badge variant="destructive" className="font-mono tabular-nums">
+                          {formatCount(s.errorCount)}
+                        </Badge>
+                      ) : (
+                        <span className="font-mono text-xs text-muted-foreground">0</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      <AlertDialog open={confirmReset} onOpenChange={(open) => !resetting && setConfirmReset(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("reset.confirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("reset.confirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetting}>{t("reset.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={resetting}
+              onClick={(event) => {
+                event.preventDefault()
+                void reset()
+              }}
+              data-testid="perf-hot-reset-confirm"
+            >
+              {t("reset.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
   )
 }

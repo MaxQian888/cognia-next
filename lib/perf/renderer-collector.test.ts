@@ -81,6 +81,7 @@ describe("RendererPerformanceCollector", () => {
       timeOrigin: 0,
       now: () => 0,
       wallNow: () => 0,
+      supportedEntryTypes: ["measure", "longtask"],
     })
     collector.ingestPerformanceEntries([
       {
@@ -108,5 +109,169 @@ describe("RendererPerformanceCollector", () => {
       "renderer.user-timing.count": 0,
     })
     expect(collector.getMeasurements().get(`${PERF_NAMESPACE}chat-turn`)).toHaveLength(1)
+  })
+
+  it("advertises only the capabilities this engine can measure", () => {
+    const webkit = createRendererCollector({
+      documentId: "doc-w",
+      requestAnimationFrame: null,
+      readHeap: null,
+      supportedEntryTypes: ["measure"],
+    })
+    expect(webkit.source.capabilities).toEqual(["renderer.user-timing", "renderer.chat-latency"])
+
+    const chromium = createRendererCollector({
+      documentId: "doc-c",
+      requestAnimationFrame: () => 1,
+      cancelAnimationFrame: () => {},
+      readHeap: () => ({ usedJSHeapSize: 1, jsHeapSizeLimit: 2 }),
+      supportedEntryTypes: ["measure", "longtask"],
+    })
+    expect(chromium.source.capabilities).toEqual([
+      "renderer.fps",
+      "renderer.long-task",
+      "renderer.user-timing",
+      "renderer.chat-latency",
+      "renderer.js-heap",
+    ])
+  })
+
+  it("reports unmeasured observations as null rather than zero", () => {
+    const collector = createRendererCollector({
+      documentId: "doc-w",
+      now: () => 0,
+      wallNow: () => 0,
+      requestAnimationFrame: null,
+      readHeap: null,
+      supportedEntryTypes: ["measure"],
+    })
+    expect(collector.collectNow().observations).toMatchObject({
+      "renderer.fps": null,
+      "renderer.long-task.count": null,
+      "renderer.main-thread-blocked.pct": null,
+      "renderer.js-heap.used.bytes": null,
+    })
+  })
+
+  it("counts frame callbacks only while sampling, and derives FPS, blocking and heap", () => {
+    let now = 0
+    const callbacks: Array<() => void> = []
+    const cancel = jest.fn()
+    const collector = createRendererCollector({
+      documentId: "doc-c",
+      now: () => now,
+      wallNow: () => now,
+      setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
+      clearInterval: () => {},
+      requestAnimationFrame: (callback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      },
+      cancelAnimationFrame: cancel,
+      readHeap: () => ({ usedJSHeapSize: 4096, jsHeapSizeLimit: 8192 }),
+      supportedEntryTypes: ["measure", "longtask"],
+      bufferedMeasures: () => [],
+      isHidden: () => false,
+    })
+    expect(callbacks).toHaveLength(0)
+    const demand = collector.openDemand({ purpose: "live", cadenceMs: 1000 })
+    // 30 frames painted over a 500 ms interval → 60 fps.
+    for (let index = 0; index < 30; index += 1) callbacks[callbacks.length - 1]()
+    collector.ingestPerformanceEntries([
+      { name: "long-task", duration: 100, startTime: 1, entryType: "longtask" },
+    ])
+    now = 500
+    expect(collector.collectNow().observations).toMatchObject({
+      "renderer.fps": 60,
+      "renderer.main-thread-blocked.pct": 20,
+      "renderer.js-heap.used.bytes": 4096,
+      "renderer.js-heap.limit.bytes": 8192,
+    })
+    collector.closeDemand(demand)
+    expect(cancel).toHaveBeenCalled()
+  })
+
+  it("treats a hidden document's frame rate as unmeasured", () => {
+    let now = 0
+    const collector = createRendererCollector({
+      documentId: "doc-h",
+      now: () => now,
+      wallNow: () => now,
+      requestAnimationFrame: () => 1,
+      cancelAnimationFrame: () => {},
+      readHeap: null,
+      supportedEntryTypes: ["measure"],
+      isHidden: () => true,
+    })
+    now = 1000
+    expect(collector.collectNow().observations?.["renderer.fps"]).toBeNull()
+  })
+
+  it("seeds measures written before sampling began, once, and honours a clear", () => {
+    let now = 0
+    const buffered = [
+      { name: `${PERF_NAMESPACE}chat:turn`, duration: 120, startTime: 5, entryType: "measure" },
+      { name: "unrelated", duration: 1, startTime: 6, entryType: "measure" },
+    ]
+    const collector = createRendererCollector({
+      documentId: "doc-s",
+      now: () => now,
+      wallNow: () => now,
+      setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
+      clearInterval: () => {},
+      requestAnimationFrame: null,
+      readHeap: null,
+      supportedEntryTypes: ["measure"],
+      bufferedMeasures: () => buffered,
+    })
+    const first = collector.openDemand({ purpose: "live", cadenceMs: 1000 })
+    expect(collector.getMeasurements().get(`${PERF_NAMESPACE}chat:turn`)).toHaveLength(1)
+    expect(collector.getMeasurements().has("unrelated")).toBe(false)
+    // Seeded entries belong to no live interval.
+    expect(collector.collectNow().observations?.["renderer.user-timing.count"]).toBe(0)
+
+    // Re-opening after the last demand closed re-seeds without duplicating.
+    collector.closeDemand(first)
+    const second = collector.openDemand({ purpose: "live", cadenceMs: 1000 })
+    expect(collector.getMeasurements().get(`${PERF_NAMESPACE}chat:turn`)).toHaveLength(1)
+
+    // A clear is not undone by the next seed.
+    now = 10
+    collector.clearMeasurements()
+    collector.closeDemand(second)
+    collector.openDemand({ purpose: "live", cadenceMs: 1000 })
+    expect(collector.getMeasurements().size).toBe(0)
+  })
+})
+
+describe("default heap reader", () => {
+  it("reads MemoryInfo's getter fields rather than spreading them", () => {
+    class MemoryInfo {
+      get usedJSHeapSize() {
+        return 1234
+      }
+      get jsHeapSizeLimit() {
+        return 5678
+      }
+    }
+    const original = Object.getOwnPropertyDescriptor(performance, "memory")
+    Object.defineProperty(performance, "memory", { configurable: true, value: new MemoryInfo() })
+    try {
+      const collector = createRendererCollector({
+        documentId: "doc-m",
+        now: () => 0,
+        wallNow: () => 0,
+        requestAnimationFrame: null,
+        supportedEntryTypes: ["measure"],
+      })
+      expect(collector.source.capabilities).toContain("renderer.js-heap")
+      expect(collector.collectNow().observations).toMatchObject({
+        "renderer.js-heap.used.bytes": 1234,
+        "renderer.js-heap.limit.bytes": 5678,
+      })
+    } finally {
+      if (original) Object.defineProperty(performance, "memory", original)
+      else delete (performance as { memory?: unknown }).memory
+    }
   })
 })

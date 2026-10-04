@@ -14,8 +14,8 @@ export interface PerfMetricTileProps {
   label: string
   /** Pre-formatted current value. */
   value: string
-  /** Series values, oldest → newest. */
-  points: number[]
+  /** Series values, oldest → newest; `null` = not measured in that interval. */
+  points: readonly (number | null)[]
   color: string
   active: boolean
   onSelect: () => void

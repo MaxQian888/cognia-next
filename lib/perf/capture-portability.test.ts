@@ -2,7 +2,13 @@
 import "fake-indexeddb/auto"
 import { CogniaDB } from "@/lib/db/schema"
 import { buildCogniaPerfPackage } from "./package-format"
-import { importPerformanceCapture, preparePerformanceRawExport } from "./capture-portability"
+import {
+  importPerformanceCapture,
+  preparePerformanceRawExport,
+  readPerformanceCaptureMetadata,
+} from "./capture-portability"
+import { encryptPerformanceArtifact } from "./capture-crypto"
+import { getPerformanceSecurityGeneration } from "./security-generation"
 import { PerformanceQuotaManager } from "./quota"
 import { CogniaAccountRegistryDB } from "@/lib/accounts/account-db"
 import { PERF_WIRE_VERSION, type PerfFrame } from "./backend/types"
@@ -187,4 +193,101 @@ it("binds raw export confirmation to the capture digest and explicit attachments
     })
   ).rejects.toThrow("performance-capture-attachment-invalid")
   await db.delete()
+})
+
+describe("readPerformanceCaptureMetadata", () => {
+  async function seed(metadata: unknown, withEnvelope = true) {
+    const db = new CogniaDB(`perf-metadata-${crypto.randomUUID()}`)
+    const key = crypto.getRandomValues(new Uint8Array(32))
+    const envelope = await encryptPerformanceArtifact(
+      key,
+      new TextEncoder().encode(JSON.stringify(metadata)),
+      {
+        accountId: "account-a",
+        targetDatabase: db.name,
+        captureId: "capture-1",
+        ordinal: -1,
+        contentType: "application/vnd.cognia.perf-metadata+json",
+      },
+      getPerformanceSecurityGeneration()
+    )
+    const owned = (bytes: Uint8Array) =>
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    await db.performanceCaptures.add({
+      id: "capture-1",
+      status: "ready",
+      purpose: "capture",
+      sourceKind: "renderer",
+      sourceId: "renderer:source",
+      hostInstanceId: "document",
+      targetId: "target",
+      routingGeneration: 0,
+      wireVersion: 1,
+      metricSchemaVersion: 1,
+      capabilityBits: "",
+      startedAt: 0,
+      updatedAt: 0,
+      pinned: 0,
+      payloadBytes: 0,
+      attachmentBytes: 0,
+      frameCount: 0,
+      gapCount: 0,
+      ...(withEnvelope
+        ? {
+            metadataContentType: "application/vnd.cognia.perf-metadata+json" as const,
+            metadataIv: owned(envelope.iv),
+            metadataCiphertext: owned(envelope.ciphertext),
+          }
+        : {}),
+    })
+    return { db, key }
+  }
+
+  it("decrypts the source descriptor and cadence the capture was started with", async () => {
+    const source = { sourceId: "renderer:source", runtimeKind: "browser", kind: "renderer" }
+    const { db, key } = await seed({
+      source,
+      environment: { os: "mac" },
+      requestedCadenceMs: 500,
+      budget: null,
+    })
+    await expect(
+      readPerformanceCaptureMetadata({
+        db,
+        accountId: "account-a",
+        targetDatabase: db.name,
+        captureId: "capture-1",
+        key,
+      })
+    ).resolves.toEqual({
+      source,
+      environment: { os: "mac" },
+      requestedCadenceMs: 500,
+      budget: null,
+    })
+  })
+
+  it("returns null for a capture without an envelope and drops malformed fields", async () => {
+    const missing = await seed({}, false)
+    await expect(
+      readPerformanceCaptureMetadata({
+        db: missing.db,
+        accountId: "account-a",
+        targetDatabase: missing.db.name,
+        captureId: "capture-1",
+        key: missing.key,
+      })
+    ).resolves.toBeNull()
+
+    const malformed = await seed({ source: "nope", requestedCadenceMs: "fast" })
+    await expect(
+      readPerformanceCaptureMetadata({
+        db: malformed.db,
+        accountId: "account-a",
+        targetDatabase: malformed.db.name,
+        captureId: "capture-1",
+        key: malformed.key,
+      })
+    ).resolves.toEqual({ source: null, requestedCadenceMs: null, environment: null, budget: null })
+  })
 })

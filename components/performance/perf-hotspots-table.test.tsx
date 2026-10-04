@@ -3,7 +3,16 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
+
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}))
 import { PerfHotspotsTable } from "./perf-hotspots-table"
 import type { SpanSnapshot } from "@/lib/perf/backend/types"
 
@@ -67,5 +76,33 @@ describe("PerfHotspotsTable", () => {
     fireEvent.click(within(screen.getByTestId("perf-hot-th-name")).getByRole("button"))
     const rows = screen.getAllByTestId(/perf-hot-row-/)
     expect(rows[0]).toHaveAttribute("data-testid", "perf-hot-row-alpha")
+  })
+
+  it("explains that statistics are cumulative and hides reset without a resettable host", () => {
+    render(<PerfHotspotsTable spans={[span("ocr.extract", 100)]} />)
+    expect(screen.getByTestId("perf-hotspots")).toHaveTextContent("cumulative")
+    expect(screen.queryByTestId("perf-hot-reset")).not.toBeInTheDocument()
+  })
+
+  it("resets the host's span registry only after confirmation", async () => {
+    const onReset = jest.fn(async () => {})
+    render(<PerfHotspotsTable spans={[span("ocr.extract", 100)]} onReset={onReset} />)
+    fireEvent.click(screen.getByTestId("perf-hot-reset"))
+    expect(onReset).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("perf-hot-reset-confirm"))
+    await waitFor(() => expect(onReset).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Hotspot statistics reset."))
+  })
+
+  it("reports a failed reset", async () => {
+    const onReset = jest.fn(async () => {
+      throw new Error("host gone")
+    })
+    render(<PerfHotspotsTable spans={[span("ocr.extract", 100)]} onReset={onReset} />)
+    fireEvent.click(screen.getByTestId("perf-hot-reset"))
+    fireEvent.click(await screen.findByTestId("perf-hot-reset-confirm"))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Could not reset hotspot statistics: host gone")
+    )
   })
 })

@@ -41,8 +41,15 @@ export interface PerfGraphCardProps {
   title: string
   /** Pre-formatted current value (e.g. "42.3%" or "1.5 GB"). */
   current: string
-  /** Series values, oldest → newest. */
-  points: number[]
+  /**
+   * Series values, oldest → newest. `null` is an interval that did not measure
+   * the metric; it renders as a break in the line, never as a dip to zero.
+   */
+  points: readonly (number | null)[]
+  /** Wall-clock end of each point (same length as `points`), for the tooltip label. */
+  timestamps?: readonly number[]
+  /** Formats a value for the tooltip; defaults to one decimal place. */
+  formatValue?: (value: number) => string
   /** Stroke/fill color (resolved oklch/hex string). */
   color: string
   /** Fixed Y-axis max (e.g. 100 for percentages); omit for auto. */
@@ -60,6 +67,8 @@ export interface PerfGraphCardProps {
   fill?: boolean
   /** Optional secondary line under the value (e.g. peak / detail). */
   subtitle?: string
+  /** What the metric measures, shown under the title so a number never stands alone. */
+  description?: string
   className?: string
   "data-testid"?: string
   /** Optional horizontal threshold line (e.g. 80 for a warning line). */
@@ -75,12 +84,18 @@ export function PerfGraphCard({
   height = 220,
   fill = false,
   subtitle,
+  description,
   className,
   "data-testid": testId,
   threshold,
+  timestamps,
+  formatValue,
 }: PerfGraphCardProps) {
   const colors = useThemeColors()
-  const data = useMemo(() => points.map((value, index) => ({ index, value })), [points])
+  const data = useMemo(
+    () => points.map((value, index) => ({ index, value, ts: timestamps?.[index] ?? null })),
+    [points, timestamps]
+  )
   const gradientId = useMemo(() => `perf-grad-${title.replace(/[^a-zA-Z0-9]/g, "")}`, [title])
 
   const yDomain = perfYDomain(max)
@@ -91,7 +106,17 @@ export function PerfGraphCard({
       data-testid={testId}
     >
       <header className="flex flex-row flex-wrap items-baseline justify-between gap-2 border-b px-4 py-3">
-        <span className="text-sm font-medium text-muted-foreground">{title}</span>
+        <div className="min-w-0">
+          <span className="text-sm font-medium text-muted-foreground">{title}</span>
+          {description ? (
+            <p
+              className="mt-0.5 max-w-prose text-xs text-muted-foreground/80"
+              data-testid="perf-graph-description"
+            >
+              {description}
+            </p>
+          ) : null}
+        </div>
         <span
           className="font-mono text-2xl font-semibold tabular-nums"
           data-testid="perf-graph-value"
@@ -136,8 +161,14 @@ export function PerfGraphCard({
                   strokeOpacity: 0.5,
                   strokeDasharray: "3 3",
                 }}
-                labelFormatter={() => ""}
-                formatter={(value) => [Number(value).toFixed(1), title]}
+                labelFormatter={(_label, payload) => {
+                  const ts = (payload?.[0]?.payload as { ts?: number | null } | undefined)?.ts
+                  return typeof ts === "number" ? new Date(ts).toLocaleTimeString() : ""
+                }}
+                formatter={(value) => [
+                  formatValue ? formatValue(Number(value)) : Number(value).toFixed(1),
+                  title,
+                ]}
               />
               {typeof threshold === "number" && (
                 <ReferenceLine
@@ -156,6 +187,7 @@ export function PerfGraphCard({
                 fill={`url(#${gradientId})`}
                 isAnimationActive={false}
                 dot={false}
+                connectNulls={false}
               />
             </AreaChart>
           </ResponsiveContainer>

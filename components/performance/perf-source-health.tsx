@@ -2,8 +2,15 @@
 
 import { Surface } from "@/components/surface/surface"
 import { useTranslations } from "next-intl"
-import { AlertCircleIcon, CheckCircle2Icon, Clock3Icon, MinusCircleIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  CheckCircle2Icon,
+  ChevronRightIcon,
+  Clock3Icon,
+  MinusCircleIcon,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type {
   PerfConnectionState,
@@ -30,6 +37,75 @@ const CONTENDED_KEY: Partial<Record<PerfLeaseRejectionCode, string>> = {
   "routing-generation-mismatch": "issue.contended.targetBusy",
 }
 
+/** The localized sentence for a typed host lease issue. */
+function useHostIssueMessage(issue: PerfHostIssue | null): string | null {
+  const t = useTranslations("performance.sourceHealth")
+  if (!issue) return null
+  switch (issue.kind) {
+    case "contended":
+      return t(CONTENDED_KEY[issue.code] ?? "issue.contended.hostBusy")
+    case "rejected":
+      return t("issue.rejected", { code: issue.code })
+    case "renew-failed":
+      return t("issue.renewFailed")
+    case "unreachable":
+      return t("issue.unreachable")
+  }
+}
+
+/**
+ * The overview's one-line "something about the data is off" notice: a host
+ * lease issue, or gaps in the visible window. The full source card moved to
+ * Diagnose — it is evidence about the measurement, and it used to sit above
+ * the graphs on every visit, pushing the metrics below the fold to say
+ * "Renderer: live" in a card. This shows only when there is something to act
+ * on, and links to the detail.
+ */
+export function PerfSourceNotice({
+  hostState,
+  issue = null,
+  gaps,
+  onOpenDetails,
+}: {
+  hostState: PerfConnectionState
+  issue?: PerfHostIssue | null
+  gaps: PerfGap[]
+  onOpenDetails: () => void
+}) {
+  const t = useTranslations("performance.sourceHealth")
+  const issueMessage = useHostIssueMessage(hostState === "unsupported" ? null : issue)
+  if (!issueMessage && gaps.length === 0) return null
+  const contended = issue?.kind === "contended"
+  return (
+    <Surface
+      role="status"
+      className={
+        contended
+          ? "flex flex-wrap items-center gap-2 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs"
+          : "flex flex-wrap items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"
+      }
+      data-testid="perf-source-notice"
+    >
+      <AlertCircleIcon className="size-3.5 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1">
+        {issueMessage ?? t("noticeGaps", { count: gaps.length })}
+        {issueMessage && gaps.length > 0 ? ` · ${t("noticeGaps", { count: gaps.length })}` : null}
+      </span>
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto p-0 text-xs"
+        onClick={onOpenDetails}
+        data-testid="perf-source-notice-details"
+      >
+        {t("details")}
+        <ChevronRightIcon className="size-3" aria-hidden />
+      </Button>
+    </Surface>
+  )
+}
+
 export function PerfSourceHealth({
   sources,
   hostState,
@@ -53,19 +129,7 @@ export function PerfSourceHealth({
   // A lease someone else holds is a wait, not a fault: it is explained in the
   // status line below and retried on its own, so "Latest error" stays clear.
   const contended = issue?.kind === "contended" ? issue : null
-  const issueMessage = (() => {
-    if (!issue) return null
-    switch (issue.kind) {
-      case "contended":
-        return t(CONTENDED_KEY[issue.code] ?? "issue.contended.hostBusy")
-      case "rejected":
-        return t("issue.rejected", { code: issue.code })
-      case "renew-failed":
-        return t("issue.renewFailed")
-      case "unreachable":
-        return t("issue.unreachable")
-    }
-  })()
+  const issueMessage = useHostIssueMessage(issue)
   const errorText = contended ? null : (issueMessage ?? error)
   const overhead =
     collectionDurationMs !== undefined && actualIntervalMs
@@ -143,7 +207,7 @@ export function PerfSourceHealth({
             className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs"
           >
             {t("latestGap", {
-              reason: gaps.at(-1)!.reason,
+              reason: t(`gapReason.${gaps.at(-1)!.reason}`),
               start: new Date(gaps.at(-1)!.wallStartMs).toLocaleTimeString(),
               end: new Date(gaps.at(-1)!.wallEndMs).toLocaleTimeString(),
             })}

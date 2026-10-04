@@ -30,7 +30,7 @@ jest.mock("recharts", () => ({
     </div>
   ),
   AreaChart: ({ children, data }: { children?: React.ReactNode; data?: unknown[] }) => (
-    <div data-testid="area-chart" data-len={data?.length ?? 0}>
+    <div data-testid="area-chart" data-len={data?.length ?? 0} data-data={JSON.stringify(data)}>
       {children}
     </div>
   ),
@@ -44,12 +44,13 @@ jest.mock("recharts", () => ({
     labelFormatter,
   }: {
     formatter?: (v: number) => [string, string]
-    labelFormatter?: (l: string) => string
+    labelFormatter?: (l: string, payload?: Array<{ payload: { ts: number | null } }>) => string
   }) => (
     <div
       data-testid="tooltip"
       data-formatted={formatter ? JSON.stringify(formatter(42.345)) : ""}
       data-label={labelFormatter ? `[${labelFormatter("x")}]` : ""}
+      data-label-ts={labelFormatter ? labelFormatter("x", [{ payload: { ts: 0 } }]) : ""}
     />
   ),
   ReferenceLine: ({ y, stroke }: { y?: number; stroke?: string }) => (
@@ -97,6 +98,36 @@ describe("PerfGraphCard", () => {
     expect(dim.height).toBe(220)
     expect(screen.getByTestId("rc")).toHaveAttribute("data-min-width", "1")
     expect(screen.getByTestId("rc")).toHaveAttribute("data-min-height", "1")
+  })
+
+  it("labels the tooltip with the sample time and the caller's unit formatting", () => {
+    render(
+      <PerfGraphCard
+        title="Frame rate"
+        current="60 fps"
+        points={[60, null, 58]}
+        timestamps={[0, 1000, 2000]}
+        color="#fff"
+        formatValue={(value) => `${Math.round(value)} fps`}
+        description="Frames per second"
+      />
+    )
+    expect(screen.getByTestId("tooltip")).toHaveAttribute(
+      "data-formatted",
+      JSON.stringify(["42 fps", "Frame rate"])
+    )
+    expect(screen.getByTestId("tooltip")).toHaveAttribute(
+      "data-label-ts",
+      new Date(0).toLocaleTimeString()
+    )
+    expect(screen.getByTestId("perf-graph-description")).toHaveTextContent("Frames per second")
+    // An unmeasured interval stays a gap in the series, not a zero.
+    const data = JSON.parse(screen.getByTestId("area-chart").getAttribute("data-data")!) as Array<{
+      value: number | null
+      ts: number | null
+    }>
+    expect(data.map((point) => point.value)).toEqual([60, null, 58])
+    expect(data.map((point) => point.ts)).toEqual([0, 1000, 2000])
   })
 
   it("renders an optional subtitle", () => {

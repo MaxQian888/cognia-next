@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { PERF_WIRE_VERSION, type PerfSourceDescriptor } from "@/lib/perf/backend/types"
-import { PerfSourceHealth } from "./perf-source-health"
+import { PerfSourceHealth, PerfSourceNotice } from "./perf-source-health"
 
 const hostSource: PerfSourceDescriptor = {
   wireVersion: PERF_WIRE_VERSION,
@@ -57,6 +57,60 @@ it("renders explicit source, capability, overhead, error, and gap states", () =>
   expect(screen.getByTestId("perf-source-health")).toHaveTextContent("0.50%")
   expect(screen.getByTestId("perf-source-health")).toHaveTextContent("permission-denied")
   expect(screen.getByRole("status")).toBeInTheDocument()
+  // The gap reason is a translated phrase, not the wire enum.
+  expect(screen.getByRole("status")).toHaveTextContent("missed frames")
+  expect(screen.getByRole("status")).not.toHaveTextContent("sequence-gap")
+})
+
+describe("PerfSourceNotice", () => {
+  const gap = {
+    reason: "lease-expired" as const,
+    sourceId: "host:one",
+    samplingSessionId: "s",
+    sequenceStart: null,
+    sequenceEnd: null,
+    wallStartMs: 0,
+    wallEndMs: 1,
+    recoverable: true,
+    clockUncertaintyMs: null,
+    detail: null,
+  }
+
+  it("renders nothing when there is nothing to act on", () => {
+    const { container } = render(
+      <PerfSourceNotice hostState="live" gaps={[]} onOpenDetails={() => {}} />
+    )
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("stays quiet for the expected 'no host' state on web", () => {
+    const { container } = render(
+      <PerfSourceNotice
+        hostState="unsupported"
+        issue={{ kind: "unreachable", detail: "no transport" }}
+        gaps={[]}
+        onOpenDetails={() => {}}
+      />
+    )
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("names a lease issue and gaps on one line and links to the details", () => {
+    const onOpenDetails = jest.fn()
+    render(
+      <PerfSourceNotice
+        hostState="connecting"
+        issue={{ kind: "contended", code: "device-purpose-limit", detail: "busy" }}
+        gaps={[gap, gap]}
+        onOpenDetails={onOpenDetails}
+      />
+    )
+    const notice = screen.getByTestId("perf-source-notice")
+    expect(notice).toHaveTextContent("Another window on this device")
+    expect(notice).toHaveTextContent("2 gaps in the visible window")
+    fireEvent.click(screen.getByTestId("perf-source-notice-details"))
+    expect(onOpenDetails).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("typed host issues", () => {

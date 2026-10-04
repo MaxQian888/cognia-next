@@ -1,11 +1,35 @@
 "use client"
 
+/**
+ * Captures — record encrypted performance evidence, keep a library of it,
+ * compare two captures and check one against a budget (ADR-0035).
+ *
+ * Layout, top to bottom, in the order the work happens:
+ *
+ *   Recorder   source / cadence / duration, start-stop, progress and gaps
+ *   Library    stored captures with localized status and trust, export,
+ *              raw export (second confirmation), delete (confirmation);
+ *              ticking two opens the comparison right under the list
+ *   Budgets    immutable named thresholds and a capture check
+ *
+ * What changed from the first version: deleting was a single unconfirmed
+ * click; status, stop reason and trust were printed as raw enum strings
+ * (`duration-limit`, `valid-untrusted`); errors surfaced as raw codes
+ * (`performance-capture-account-locked`) in toasts; Start was silently
+ * disabled while the account was locked; comparison skipped every
+ * eligibility rule; and budgets had no UI at all.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import type { PerformanceCaptureAttachmentRow } from "@/lib/perf/capture-types"
+import type {
+  PerformanceCaptureAttachmentRow,
+  PerformanceCaptureRow,
+} from "@/lib/perf/capture-types"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import {
   DownloadIcon,
+  LockIcon,
   PlayIcon,
   ShieldAlertIcon,
   SquareIcon,
@@ -15,9 +39,17 @@ import {
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -48,13 +80,19 @@ import {
   exportPerformanceCapture,
   importPerformanceCapture,
   preparePerformanceRawExport,
-  readPerformanceCaptureFrames,
 } from "@/lib/perf/capture-portability"
-import { compareMetricSeries } from "@/lib/perf/comparison"
+import { readDecodedCapture } from "@/lib/perf/capture-analysis"
+import { PerformanceBudgetService } from "@/lib/perf/budget-service"
 import { PerformanceQuotaManager, PERFORMANCE_ACCOUNT_QUOTA_BYTES } from "@/lib/perf/quota"
-import type { PerfFrame, PerfSourceKind } from "@/lib/perf/backend/types"
+import { formatBytes } from "@/lib/perf/backend/format"
+import type { PerfSourceKind } from "@/lib/perf/backend/types"
+import { formatDurationShort } from "@/lib/utils"
+import { PERF_INTERVAL_OPTIONS } from "@/hooks/perf/use-perf-stream"
+import { PerfCaptureCompare } from "./perf-capture-compare"
+import { PerfBudgetPanel, type PerfBudgetStore } from "./perf-budget-panel"
 
 const controller = getPerformanceCaptureController()
+const DURATION_OPTIONS = [60_000, 600_000, 1_800_000, 3_600_000] as const
 
 function captureState() {
   return controller.snapshot
@@ -70,22 +108,32 @@ function download(bytes: Uint8Array, filename: string): void {
   URL.revokeObjectURL(url)
 }
 
-function validCpuIntervals(frames: PerfFrame[]) {
-  return frames.map((frame) => ({
-    value: frame.processes.find((process) => process.role === "main")?.cpuPct ?? null,
-    valid:
-      !frame.flags.reset &&
-      !frame.flags.discontinuity &&
-      !frame.flags.counterReset &&
-      frame.missedTicks === 0,
-  }))
-}
-
 /** Typed empty default — a bare `[]` infers `never[]` and poisons every row read. */
 const EMPTY_ATTACHMENTS: PerformanceCaptureAttachmentRow[] = []
 
+/**
+ * The lookup key for a thrown capture error. Codes can carry a suffix
+ * (`account-locked:<accountId>`); the prefix is what is translated.
+ */
+export function captureErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.split(":")[0].trim()
+}
+
+const STATUS_TONE: Record<
+  PerformanceCaptureRow["status"],
+  "default" | "secondary" | "outline" | "destructive"
+> = {
+  recording: "default",
+  finalizing: "secondary",
+  importing: "secondary",
+  ready: "outline",
+  failed: "destructive",
+}
+
 export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
   const t = useTranslations("performance.captures")
+  const formatter = useFormatter()
   const state = useSyncExternalStore(
     controller.subscribe.bind(controller),
     captureState,
@@ -95,11 +143,12 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
   const [sourceKind, setSourceKind] = useState<PerfSourceKind>("renderer")
   const [cadenceMs, setCadenceMs] = useState(1000)
   const [durationMs, setDurationMs] = useState(PERFORMANCE_CAPTURE_DEFAULT_DURATION_MS)
+  const [activeDurationMs, setActiveDurationMs] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
-  const [comparison, setComparison] = useState<ReturnType<typeof compareMetricSeries> | null>(null)
   const [rawCaptureId, setRawCaptureId] = useState<string | null>(null)
   const [rawAttachmentIds, setRawAttachmentIds] = useState<string[]>([])
+  const [deleteTarget, setDeleteTarget] = useState<PerformanceCaptureRow | null>(null)
   const [now, setNow] = useState(Date.now)
   const fileRef = useRef<HTMLInputElement>(null)
   const db = getDb()
@@ -127,20 +176,64 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
     return () => clearInterval(timer)
   }, [state.active])
 
-  const run = useCallback(async (operation: () => Promise<void>) => {
-    setBusy(true)
-    try {
-      await operation()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy(false)
+  const describeError = useCallback(
+    (error: unknown) => {
+      const code = captureErrorCode(error)
+      return t.has(`errorCodes.${code}`)
+        ? t(`errorCodes.${code}`)
+        : t("errorCodes.unknown", {
+            detail: error instanceof Error ? error.message : String(error),
+          })
+    },
+    [t]
+  )
+
+  const run = useCallback(
+    async (operation: () => Promise<void>) => {
+      setBusy(true)
+      try {
+        await operation()
+      } catch (error) {
+        toast.error(describeError(error))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [describeError]
+  )
+
+  const loadCapture = useCallback(
+    async (captureId: string) => {
+      if (!accountId) throw new Error("performance-capture-account-locked")
+      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
+      return readDecodedCapture({ db, accountId, targetDatabase: db.name, captureId, key })
+    },
+    [accountId, db]
+  )
+
+  const budgetStore = useMemo<PerfBudgetStore | null>(() => {
+    if (!accountId) return null
+    const withService = async <T,>(
+      operation: (service: PerformanceBudgetService, key: Uint8Array) => Promise<T>
+    ) => {
+      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
+      const service = new PerformanceBudgetService()
+      try {
+        return await operation(service, key)
+      } finally {
+        service.close()
+      }
     }
-  }, [])
+    return {
+      list: () => withService((service, key) => service.list(accountId, key)),
+      create: (input) => withService((service, key) => service.create(accountId, key, input)),
+    }
+  }, [accountId])
 
   const start = () =>
     run(async () => {
       await controller.start({ sourceKind, cadenceMs, durationMs })
+      setActiveDurationMs(durationMs)
       toast.success(t("toast.started"))
     })
 
@@ -152,7 +245,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const remove = (captureId: string) =>
     run(async () => {
-      if (!accountId) throw new Error(t("errors.locked"))
+      if (!accountId) throw new Error("performance-capture-account-locked")
       const quota = new PerformanceQuotaManager()
       try {
         await deletePerformanceCapture({
@@ -165,11 +258,13 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
       } finally {
         quota.close()
       }
+      setSelected((current) => current.filter((id) => id !== captureId))
+      toast.success(t("toast.deleted"))
     })
 
   const exportCapture = (captureId: string) =>
     run(async () => {
-      if (!accountId) throw new Error(t("errors.locked"))
+      if (!accountId) throw new Error("performance-capture-account-locked")
       const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
       const bytes = await exportPerformanceCapture({
         db,
@@ -186,7 +281,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const exportRawCapture = () =>
     run(async () => {
-      if (!accountId || !rawCaptureId) throw new Error(t("errors.locked"))
+      if (!accountId || !rawCaptureId) throw new Error("performance-capture-account-locked")
       const prepared = await preparePerformanceRawExport({
         db,
         captureId: rawCaptureId,
@@ -212,7 +307,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
 
   const importFile = (file: File) =>
     run(async () => {
-      if (!accountId) throw new Error(t("errors.locked"))
+      if (!accountId) throw new Error("performance-capture-account-locked")
       const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
       const quota = new PerformanceQuotaManager()
       try {
@@ -231,27 +326,24 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
       toast.success(t("toast.imported"))
     })
 
-  const compare = () =>
-    run(async () => {
-      if (!accountId || selected.length !== 2) throw new Error(t("errors.compareSelection"))
-      const key = await loadOrCreateAccountArtifactKey(accountId, "performance")
-      const [baseline, candidate] = await Promise.all(
-        selected.map((captureId) =>
-          readPerformanceCaptureFrames({
-            db,
-            accountId,
-            targetDatabase: db.name,
-            captureId,
-            key,
-          })
-        )
-      )
-      setComparison(compareMetricSeries(validCpuIntervals(baseline), validCpuIntervals(candidate)))
-    })
-
   const elapsed = useMemo(
     () => (state.startedAt ? Math.max(0, now - state.startedAt) : 0),
     [now, state.startedAt]
+  )
+  // The controller does not expose the requested duration, so the progress
+  // bar uses the duration this tab started with; a capture started elsewhere
+  // (or before a reload) shows elapsed time without a bar.
+  const progress =
+    state.active && activeDurationMs ? Math.min(100, (elapsed / activeDurationMs) * 100) : null
+  const comparePair = useMemo(() => {
+    const rows = selected
+      .map((id) => captures.find((capture) => capture.id === id))
+      .filter((row): row is PerformanceCaptureRow => Boolean(row))
+    return rows.length === 2 ? ([rows[0], rows[1]] as const) : null
+  }, [captures, selected])
+  const readyCaptures = useMemo(
+    () => captures.filter((capture) => capture.status === "ready"),
+    [captures]
   )
 
   return (
@@ -259,39 +351,40 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">{t("active.title")}</CardTitle>
+          <CardDescription className="text-xs">{t("active.description")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label>{t("controls.source")}</Label>
+              <Label htmlFor="perf-capture-source">{t("controls.source")}</Label>
               <Select
                 value={sourceKind}
                 onValueChange={(value) => setSourceKind(value as PerfSourceKind)}
                 disabled={state.active}
               >
-                <SelectTrigger aria-label={t("controls.source")}>
+                <SelectTrigger id="perf-capture-source" aria-label={t("controls.source")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="renderer">{t("source.renderer")}</SelectItem>
                   <SelectItem value="host" disabled={!hostAvailable}>
-                    {t("source.host")}
+                    {hostAvailable ? t("source.host") : t("source.hostUnavailable")}
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>{t("controls.cadence")}</Label>
+              <Label htmlFor="perf-capture-cadence">{t("controls.cadence")}</Label>
               <Select
                 value={String(cadenceMs)}
                 onValueChange={(value) => setCadenceMs(Number(value))}
                 disabled={state.active}
               >
-                <SelectTrigger aria-label={t("controls.cadence")}>
+                <SelectTrigger id="perf-capture-cadence" aria-label={t("controls.cadence")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[500, 1000, 2000, 4000].map((value) => (
+                  {PERF_INTERVAL_OPTIONS.map((value) => (
                     <SelectItem key={value} value={String(value)}>
                       {t("milliseconds", { value })}
                     </SelectItem>
@@ -300,17 +393,17 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>{t("controls.duration")}</Label>
+              <Label htmlFor="perf-capture-duration">{t("controls.duration")}</Label>
               <Select
                 value={String(durationMs)}
                 onValueChange={(value) => setDurationMs(Number(value))}
                 disabled={state.active}
               >
-                <SelectTrigger aria-label={t("controls.duration")}>
+                <SelectTrigger id="perf-capture-duration" aria-label={t("controls.duration")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[60_000, 600_000, 1_800_000, 3_600_000].map((value) => (
+                  {DURATION_OPTIONS.map((value) => (
                     <SelectItem key={value} value={String(value)}>
                       {t("minutes", { value: value / 60_000 })}
                     </SelectItem>
@@ -321,12 +414,16 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {state.active ? (
-              <Button onClick={stop} disabled={busy}>
+              <Button onClick={stop} disabled={busy} data-testid="perf-capture-stop">
                 <SquareIcon />
                 {t("controls.stop")}
               </Button>
             ) : (
-              <Button onClick={start} disabled={busy || !accountId}>
+              <Button
+                onClick={start}
+                disabled={busy || !accountId}
+                data-testid="perf-capture-start"
+              >
                 <PlayIcon />
                 {t("controls.start")}
               </Button>
@@ -335,33 +432,48 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
               {state.active ? t("state.recording") : t("state.idle")}
             </Badge>
             {state.active && (
-              <span className="text-sm text-muted-foreground">
+              <span className="text-sm text-muted-foreground" data-testid="perf-capture-elapsed">
                 {t("active.elapsed", { seconds: Math.floor(elapsed / 1000) })} ·{" "}
                 {t("active.gaps", { count: state.gapCount })}
               </span>
             )}
           </div>
+          {progress !== null ? (
+            <Progress
+              value={progress}
+              className="h-1.5"
+              aria-label={t("active.progress")}
+              data-testid="perf-capture-progress"
+            />
+          ) : null}
+          {!accountId ? (
+            <p
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              data-testid="perf-capture-locked"
+            >
+              <LockIcon className="size-4" aria-hidden />
+              {t("errors.locked")}
+            </p>
+          ) : null}
           {state.error && (
             <p role="alert" className="text-sm text-destructive">
-              {state.error}
+              {describeError(state.error)}
             </p>
           )}
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between gap-2">
-          <div>
-            <CardTitle className="text-base">{t("library.title")}</CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("library.retention", {
-                count: 20,
-                days: 30,
-                quota: Math.round(PERFORMANCE_ACCOUNT_QUOTA_BYTES / 1024 / 1024 / 1024),
-              })}
-            </p>
-          </div>
-          <div>
+        <CardHeader>
+          <CardTitle className="text-base">{t("library.title")}</CardTitle>
+          <CardDescription className="text-xs">
+            {t("library.retention", {
+              count: 20,
+              days: 30,
+              quota: Math.round(PERFORMANCE_ACCOUNT_QUOTA_BYTES / 1024 / 1024 / 1024),
+            })}
+          </CardDescription>
+          <CardAction>
             <input
               ref={fileRef}
               type="file"
@@ -376,109 +488,169 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
             />
             <Button
               variant="outline"
+              size="sm"
               onClick={() => fileRef.current?.click()}
               disabled={busy || !accountId}
             >
               <UploadIcon />
               {t("controls.import")}
             </Button>
-          </div>
+          </CardAction>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
           {captures.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">{t("library.empty")}</p>
           ) : (
-            captures.map((capture) => (
-              <div
-                key={capture.id}
-                className="flex flex-wrap items-center gap-3 rounded-md border p-3"
-              >
-                <Checkbox
-                  aria-label={t("controls.selectCompare", { id: capture.id })}
-                  checked={selected.includes(capture.id)}
-                  disabled={!selected.includes(capture.id) && selected.length >= 2}
-                  onCheckedChange={(checked) =>
-                    setSelected((current) =>
-                      checked ? [...current, capture.id] : current.filter((id) => id !== capture.id)
-                    )
-                  }
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-xs">{capture.id}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(capture.startedAt).toLocaleString()} ·{" "}
-                    {t(`source.${capture.sourceKind}`)} ·{" "}
-                    {t("library.frames", { count: capture.frameCount })} ·{" "}
-                    {t("library.bytes", { value: capture.payloadBytes + capture.attachmentBytes })}
-                  </p>
-                </div>
-                <Badge variant="outline">{capture.stopReason ?? capture.status}</Badge>
-                {capture.trustState && <Badge variant="secondary">{capture.trustState}</Badge>}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t("controls.export", { id: capture.id })}
-                  onClick={() => void exportCapture(capture.id)}
-                  disabled={busy || capture.status !== "ready"}
-                >
-                  <DownloadIcon />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t("controls.rawExport", { id: capture.id })}
-                  onClick={() => {
-                    setRawCaptureId(capture.id)
-                    setRawAttachmentIds([])
-                  }}
-                  disabled={busy || !accountId || capture.status !== "ready"}
-                >
-                  <ShieldAlertIcon />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={t("controls.delete", { id: capture.id })}
-                  onClick={() => void remove(capture.id)}
-                  disabled={busy || capture.status === "recording"}
-                >
-                  <Trash2Icon />
-                </Button>
-              </div>
-            ))
+            <>
+              <p className="text-xs text-muted-foreground">{t("library.compareHint")}</p>
+              <ul className="space-y-2" data-testid="perf-capture-library">
+                {captures.map((capture) => {
+                  const endedAt = capture.stoppedAt ?? capture.updatedAt
+                  return (
+                    <li
+                      key={capture.id}
+                      className="flex flex-wrap items-center gap-3 rounded-md border p-3"
+                      data-testid={`perf-capture-${capture.id}`}
+                    >
+                      <Checkbox
+                        aria-label={t("controls.selectCompare", { id: capture.id })}
+                        checked={selected.includes(capture.id)}
+                        disabled={
+                          capture.status !== "ready" ||
+                          (!selected.includes(capture.id) && selected.length >= 2)
+                        }
+                        onCheckedChange={(checked) =>
+                          setSelected((current) =>
+                            checked
+                              ? [...current, capture.id]
+                              : current.filter((id) => id !== capture.id)
+                          )
+                        }
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">
+                          {formatter.dateTime(capture.startedAt, {
+                            dateStyle: "medium",
+                            timeStyle: "medium",
+                          })}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t(`source.${capture.sourceKind}`)} ·{" "}
+                          {formatDurationShort(Math.max(0, endedAt - capture.startedAt))} ·{" "}
+                          {t("library.frames", { count: capture.frameCount })} ·{" "}
+                          {formatBytes(capture.payloadBytes + capture.attachmentBytes)}
+                        </p>
+                        <p className="truncate font-mono text-[10px] text-muted-foreground/80">
+                          {capture.id}
+                        </p>
+                      </div>
+                      <Badge variant={STATUS_TONE[capture.status]}>
+                        {t(`status.${capture.status}`)}
+                      </Badge>
+                      {capture.stopReason && capture.stopReason !== "manual" ? (
+                        <Badge variant="outline">{t(`stopReason.${capture.stopReason}`)}</Badge>
+                      ) : null}
+                      {capture.gapCount > 0 ? (
+                        <Badge variant="outline" className="border-warning/50 text-warning">
+                          {t("active.gaps", { count: capture.gapCount })}
+                        </Badge>
+                      ) : null}
+                      {capture.trustState && (
+                        <Badge variant="secondary">{t(`trust.${capture.trustState}`)}</Badge>
+                      )}
+                      <div className="flex items-center">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={t("controls.export", { id: capture.id })}
+                          title={t("controls.exportShort")}
+                          onClick={() => void exportCapture(capture.id)}
+                          disabled={busy || capture.status !== "ready"}
+                        >
+                          <DownloadIcon />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={t("controls.rawExport", { id: capture.id })}
+                          title={t("controls.rawExportShort")}
+                          onClick={() => {
+                            setRawCaptureId(capture.id)
+                            setRawAttachmentIds([])
+                          }}
+                          disabled={busy || !accountId || capture.status !== "ready"}
+                        >
+                          <ShieldAlertIcon />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={t("controls.delete", { id: capture.id })}
+                          title={t("controls.deleteShort")}
+                          onClick={() => setDeleteTarget(capture)}
+                          disabled={busy || capture.status === "recording"}
+                          data-testid={`perf-capture-delete-${capture.id}`}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
           )}
-          <Button variant="outline" onClick={compare} disabled={busy || selected.length !== 2}>
-            {t("comparison.compare")}
-          </Button>
-          {comparison && (
-            <div role="status" className="grid gap-2 rounded-md border p-3 text-sm sm:grid-cols-5">
-              <span>
-                {t("comparison.median")}:{" "}
-                {comparison.baseline.median?.toFixed(2) ?? t("comparison.na")} →{" "}
-                {comparison.candidate.median?.toFixed(2) ?? t("comparison.na")}
-              </span>
-              <span>
-                {t("comparison.p95")}: {comparison.baseline.p95?.toFixed(2) ?? t("comparison.na")} →{" "}
-                {comparison.candidate.p95?.toFixed(2) ?? t("comparison.na")}
-              </span>
-              <span>
-                {t("comparison.mad")}: {comparison.baseline.mad?.toFixed(2) ?? t("comparison.na")} →{" "}
-                {comparison.candidate.mad?.toFixed(2) ?? t("comparison.na")}
-              </span>
-              <span>
-                {t("comparison.absolute")}:{" "}
-                {comparison.absoluteDelta?.toFixed(2) ?? t("comparison.na")}
-              </span>
-              <span>
-                {t("comparison.percent")}:{" "}
-                {comparison.percentDelta === null
-                  ? t("comparison.na")
-                  : `${comparison.percentDelta.toFixed(2)}%`}
-              </span>
-            </div>
-          )}
+          {comparePair ? (
+            <PerfCaptureCompare
+              key={comparePair.map((row) => row.id).join(":")}
+              captures={comparePair}
+              loadCapture={loadCapture}
+              describeError={describeError}
+              disabled={busy || !accountId}
+            />
+          ) : null}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardContent className="pt-6">
+          <PerfBudgetPanel
+            store={budgetStore}
+            captures={readyCaptures}
+            loadCapture={loadCapture}
+            describeError={describeError}
+          />
+        </CardContent>
+      </Card>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setDeleteTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("delete.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("delete.description")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>{t("delete.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              data-testid="perf-capture-delete-confirm"
+              onClick={(event) => {
+                event.preventDefault()
+                const target = deleteTarget
+                if (!target) return
+                void remove(target.id).finally(() => setDeleteTarget(null))
+              }}
+            >
+              {t("delete.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={Boolean(rawCaptureId)}
@@ -518,7 +690,7 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
                     {t("raw.attachment", {
                       ordinal: attachment.ordinal,
                       type: attachment.contentType,
-                      bytes: attachment.byteCount,
+                      bytes: formatBytes(attachment.byteCount),
                     })}
                   </span>
                 </Label>

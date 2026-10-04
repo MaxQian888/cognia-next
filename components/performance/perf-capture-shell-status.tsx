@@ -7,6 +7,7 @@ import { ActivityIcon, SquareIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { getPerformanceCaptureController } from "@/lib/perf/capture-controller"
+import { perfDashboardHref } from "@/lib/perf/dashboard-url"
 
 const controller = getPerformanceCaptureController()
 
@@ -58,7 +59,9 @@ export function PerfCaptureShellStatus({ className }: { className?: string }) {
         variant="ghost"
         size="sm"
         className="h-5 px-1.5 text-[11px]"
-        onClick={() => router.push("/performance")}
+        // Straight to the Captures tab: the capture is what this chip is about,
+        // and a bare `/performance` used to land on Overview.
+        onClick={() => router.push(perfDashboardHref({ tab: "captures" }))}
       >
         {t("return")}
       </Button>

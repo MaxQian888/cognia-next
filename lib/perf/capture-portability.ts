@@ -1,5 +1,5 @@
 import type { CogniaDB } from "@/lib/db/schema"
-import type { PerfFrame } from "./backend/types"
+import type { PerfFrame, PerfSourceDescriptor } from "./backend/types"
 import { decryptPerformanceArtifact, encryptPerformanceArtifact } from "./capture-crypto"
 import type {
   PerformanceCaptureAttachmentRow,
@@ -65,6 +65,71 @@ export async function readPerformanceCaptureFrames(input: {
     frames.push(...(parsed as PerfFrame[]))
   }
   return frames
+}
+
+/** The encrypted per-capture metadata envelope, decoded. */
+export interface PerformanceCaptureMetadata {
+  source: PerfSourceDescriptor | null
+  requestedCadenceMs: number | null
+  environment: unknown
+  budget: unknown
+}
+
+/**
+ * Decrypt a capture's metadata envelope (source descriptor, environment,
+ * requested cadence). Comparison and budget checks need the source's runtime
+ * kind and build profile, which stay encrypted at rest. `null` when the
+ * capture has no envelope (an import that carried none).
+ */
+export async function readPerformanceCaptureMetadata(input: {
+  db: CogniaDB
+  accountId: string
+  targetDatabase: string
+  captureId: string
+  key: Uint8Array
+}): Promise<PerformanceCaptureMetadata | null> {
+  const capture = await input.db.performanceCaptures.get(input.captureId)
+  if (
+    !capture ||
+    capture.metadataContentType !== METADATA_CONTENT_TYPE ||
+    !capture.metadataIv ||
+    !capture.metadataCiphertext
+  ) {
+    return null
+  }
+  const generation = getPerformanceSecurityGeneration()
+  const plain = await decryptPerformanceArtifact(
+    input.key,
+    {
+      version: "cognia-account-artifact/v1",
+      algorithm: "AES-GCM",
+      iv: bytes(capture.metadataIv),
+      ciphertext: bytes(capture.metadataCiphertext),
+    },
+    {
+      accountId: input.accountId,
+      targetDatabase: input.targetDatabase,
+      captureId: capture.id,
+      ordinal: -1,
+      contentType: METADATA_CONTENT_TYPE,
+    },
+    generation
+  )
+  const parsed = JSON.parse(new TextDecoder().decode(plain)) as Record<string, unknown> | null
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("performance-capture-metadata-schema-invalid")
+  }
+  const source = parsed.source as PerfSourceDescriptor | undefined
+  return {
+    source:
+      source && typeof source === "object" && typeof source.sourceId === "string" ? source : null,
+    requestedCadenceMs:
+      typeof parsed.requestedCadenceMs === "number" && Number.isFinite(parsed.requestedCadenceMs)
+        ? parsed.requestedCadenceMs
+        : null,
+    environment: parsed.environment ?? null,
+    budget: parsed.budget ?? null,
+  }
 }
 
 async function sha256(value: Uint8Array): Promise<string> {

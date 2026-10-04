@@ -6,13 +6,30 @@ test.describe("performance — progressive diagnostic workspace", () => {
 
     await expect(page.getByTestId("performance-dashboard")).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole("tab", { name: "Overview" })).toBeVisible()
+    // The rail charts what this browser measures and explains the missing host.
+    await expect(page.getByTestId("perf-rail-renderer")).toBeVisible()
+    await expect(page.getByTestId("perf-rail-host-empty")).toBeVisible()
+    await expect(page.getByTestId("perf-overview-graph")).toBeVisible()
+
+    // Source details live on Diagnose; the tab is in the URL.
+    await page.getByRole("tab", { name: "Diagnose" }).click()
+    await expect(page).toHaveURL(/tab=diagnose/)
     await expect(page.getByText("Local Renderer", { exact: true }).first()).toBeVisible()
+    await expect(page.getByTestId("perf-renderer-timings")).toBeVisible()
+    await expect(page.getByTestId("perf-host-unavailable-hotspots")).toBeVisible()
 
     await page.getByRole("tab", { name: "Captures" }).click()
     await expect(page.getByTestId("perf-captures-tab")).toBeVisible()
     await expect(page.getByRole("button", { name: "Start capture" })).toBeVisible()
     await page.getByRole("combobox", { name: "Capture source" }).click()
-    await expect(page.getByRole("option", { name: "Selected host" })).toBeDisabled()
+    await expect(page.getByRole("option", { name: "Selected host (not connected)" })).toBeDisabled()
+  })
+
+  test("deep-links to a tab and section", async ({ page }) => {
+    await page.goto("/performance?tab=resources&resource=managed", {
+      waitUntil: "domcontentloaded",
+    })
+    await expect(page.getByTestId("perf-host-unavailable-managed")).toBeVisible({ timeout: 30_000 })
   })
 
   test("releases live Renderer demand after leaving the workspace", async ({ page }) => {

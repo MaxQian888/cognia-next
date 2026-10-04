@@ -14,8 +14,8 @@ import { Area, AreaChart, ResponsiveContainer } from "recharts"
 import { cn } from "@/lib/utils"
 
 export interface PerfSparklineProps {
-  /** Series values, oldest → newest. */
-  points: number[]
+  /** Series values, oldest → newest; `null` breaks the line (an unmeasured interval). */
+  points: readonly (number | null)[]
   /** Stroke/fill color (resolved oklch/hex string). */
   color: string
   strokeWidth?: number
@@ -57,6 +57,7 @@ export function PerfSparkline({
             fillOpacity={fillOpacity}
             isAnimationActive={false}
             dot={false}
+            connectNulls={false}
           />
         </AreaChart>
       </ResponsiveContainer>
