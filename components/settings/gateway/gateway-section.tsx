@@ -15,6 +15,15 @@
  * scroll and declares `@container/gateway-pane` so panel internals size off the
  * pane rather than the window.
  *
+ * The config-backed panels mount only once the persisted config has loaded
+ * (`GatewayConfigGate`): the state starts from `DEFAULT_GATEWAY_CONFIG`, and a
+ * load failure used to be swallowed, so those defaults were shown as the saved
+ * values and the first edit wrote them over the real config.
+ *
+ * Panels link to each other through `navigate` — Overview's setup steps to
+ * API keys, a key's usage line to the request log narrowed to that key — so
+ * the next step is a click rather than a hunt through the nav.
+ *
  * Status is polled while the page is visible. Before, it was read on mount and
  * after a key edit only, so the listener could crash or serve a thousand
  * requests while the Overview kept showing the numbers from when it opened —
@@ -55,12 +64,16 @@ import {
   type GatewayStatus,
 } from "@/types/gateway"
 
+import { GatewayConfigGate, type GatewayConfigLoadState } from "./components/config-gate"
 import { GatewayNav, type GatewayNavBadge } from "./components/gateway-nav"
 import { GatewayRestartBanner } from "./components/restart-banner"
 import {
   BIND_TIME_FIELD_PANEL,
+  CONFIG_BACKED_PANELS,
+  GATEWAY_LOG_KEY_PARAM,
   GATEWAY_NAV_GROUPS,
   GATEWAY_PANEL_PARAM,
+  GATEWAY_PANEL_SCOPED_PARAMS,
   resolveGatewayPanel,
   type GatewayPanelId,
 } from "./nav-config"
@@ -73,6 +86,15 @@ import { GatewayExposurePanel } from "./panels/exposure-panel"
 import { GatewayLogViewer } from "./gateway-log-viewer"
 import { GatewayRouteTicketsPanel } from "./panels/route-tickets-panel"
 import { GatewayCustomPanel } from "./panels/custom-panel"
+
+/**
+ * Open another gateway panel, optionally with panel-scoped query params (e.g.
+ * the request log's key filter). Params from the panel being left are dropped.
+ */
+export type GatewayNavigate = (
+  panel: GatewayPanelId,
+  params?: Readonly<Record<string, string | null>>
+) => void
 
 /** Shared handles every config-editing panel needs. */
 export interface GatewayPanelContext {
@@ -110,8 +132,11 @@ export function GatewaySection() {
   const [cooldowns, setCooldowns] = useState<GatewayKeyCooldown[]>([])
   const [starting, setStarting] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [configLoad, setConfigLoad] = useState<GatewayConfigLoadState>({ kind: "loading" })
+  const [retryingConfig, setRetryingConfig] = useState(false)
 
   const activePanel = resolveGatewayPanel(searchParams.get(GATEWAY_PANEL_PARAM))
+  const logKeyFilter = searchParams.get(GATEWAY_LOG_KEY_PARAM)
   const pendingRestartFields = status?.pendingRestartFields ?? NO_PENDING_FIELDS
 
   const refreshStatus = useCallback(
@@ -125,8 +150,27 @@ export function GatewaySection() {
   const refreshConfigAndStatus = useCallback(async () => {
     const [nextConfig, nextStatus] = await Promise.all([gatewayGetConfig(), gatewayGetStatus()])
     setConfig(nextConfig)
+    setConfigLoad({ kind: "ready" })
     setStatus(nextStatus)
   }, [])
+
+  // Resolves either way: the outcome lands in `configLoad`, which is what the
+  // config-backed panels gate on.
+  const loadConfig = useCallback(
+    () =>
+      gatewayGetConfig()
+        .then((next) => {
+          setConfig(next)
+          setConfigLoad({ kind: "ready" })
+        })
+        .catch((e: unknown) => setConfigLoad({ kind: "error", message: errorMessage(e) })),
+    []
+  )
+
+  const onRetryConfig = useCallback(() => {
+    setRetryingConfig(true)
+    void loadConfig().finally(() => setRetryingConfig(false))
+  }, [loadConfig])
 
   const refreshCooldowns = useCallback(() => gatewayListCooldowns().then(setCooldowns), [])
 
@@ -134,12 +178,10 @@ export function GatewaySection() {
     if (!desktop) return
     // setState in promise callbacks — external-system updates, not synchronous
     // effect-body writes (react-hooks/set-state-in-effect).
-    gatewayGetConfig()
-      .then(setConfig)
-      .catch(() => {})
+    void loadConfig()
     void refreshStatus()
     void refreshCooldowns().catch(() => {})
-  }, [desktop, refreshStatus, refreshCooldowns])
+  }, [desktop, loadConfig, refreshStatus, refreshCooldowns])
 
   useEffect(() => {
     if (!desktop) return
@@ -261,13 +303,27 @@ export function GatewaySection() {
     }
   }, [refreshConfigAndStatus, t])
 
-  const onSelect = useCallback(
-    (id: GatewayPanelId) => {
+  const navigate = useCallback<GatewayNavigate>(
+    (panel, params) => {
       const next = new URLSearchParams(searchParams.toString())
-      next.set(GATEWAY_PANEL_PARAM, id)
+      for (const scoped of GATEWAY_PANEL_SCOPED_PARAMS) next.delete(scoped)
+      next.set(GATEWAY_PANEL_PARAM, panel)
+      for (const [name, value] of Object.entries(params ?? {})) {
+        if (value === null) next.delete(name)
+        else next.set(name, value)
+      }
       router.replace(`?${next.toString()}`, { scroll: false })
     },
     [router, searchParams]
+  )
+
+  const onSelect = useCallback((id: GatewayPanelId) => navigate(id), [navigate])
+
+  // The log rewrites its own key filter in place, so a reload or a shared link
+  // reopens it narrowed the same way — without touching the active panel.
+  const onLogKeyFilterChange = useCallback(
+    (keyId: string | null) => navigate("logs", { [GATEWAY_LOG_KEY_PARAM]: keyId }),
+    [navigate]
   )
 
   const badges = useMemo(() => {
@@ -315,6 +371,25 @@ export function GatewaySection() {
     pendingRestartFields,
   }
 
+  // An element, not a `renderPanel(...)` call: `panelContext` carries
+  // `persist`, which reads `configRef`, and calling a plain function here makes
+  // that a render-phase ref access. Letting React own the call also gives each
+  // panel its own fiber, which is what `PanelTransition` keys on anyway.
+  const panelBody = (
+    <GatewayPanelBody
+      panel={activePanel}
+      panelContext={panelContext}
+      cooldowns={cooldowns}
+      starting={starting}
+      onToggleEnabled={onToggleEnabled}
+      refreshStatus={refreshStatus}
+      refreshCooldowns={refreshCooldowns}
+      navigate={navigate}
+      logKeyFilter={logKeyFilter}
+      onLogKeyFilterChange={onLogKeyFilterChange}
+    />
+  )
+
   const navNode = (
     <GatewayNav
       groups={GATEWAY_NAV_GROUPS}
@@ -360,20 +435,17 @@ export function GatewaySection() {
             data-testid="gateway-panel-body"
           >
             <PanelTransition activeKey={activePanel}>
-              {/* A component, not a `renderPanel(...)` call: `panelContext`
-                  carries `persist`, which reads `configRef`, and calling a
-                  plain function here makes that a render-phase ref access.
-                  Letting React own the call also gives each panel its own
-                  fiber, which is what `PanelTransition` keys on anyway. */}
-              <GatewayPanelBody
-                panel={activePanel}
-                panelContext={panelContext}
-                cooldowns={cooldowns}
-                starting={starting}
-                onToggleEnabled={onToggleEnabled}
-                refreshStatus={refreshStatus}
-                refreshCooldowns={refreshCooldowns}
-              />
+              {CONFIG_BACKED_PANELS.has(activePanel) ? (
+                <GatewayConfigGate
+                  state={configLoad}
+                  retrying={retryingConfig}
+                  onRetry={onRetryConfig}
+                >
+                  {panelBody}
+                </GatewayConfigGate>
+              ) : (
+                panelBody
+              )}
             </PanelTransition>
           </div>
         </div>
@@ -420,6 +492,10 @@ interface RenderArgs {
   onToggleEnabled: (next: boolean) => Promise<void>
   refreshStatus: () => Promise<void>
   refreshCooldowns: () => Promise<void>
+  navigate: GatewayNavigate
+  /** The request log's key filter from the URL; `null` = every key. */
+  logKeyFilter: string | null
+  onLogKeyFilterChange: (keyId: string | null) => void
 }
 
 function GatewayPanelBody(args: RenderArgs) {
@@ -431,6 +507,9 @@ function GatewayPanelBody(args: RenderArgs) {
     onToggleEnabled,
     refreshStatus,
     refreshCooldowns,
+    navigate,
+    logKeyFilter,
+    onLogKeyFilterChange,
   } = args
   switch (panel) {
     case "overview":
@@ -440,6 +519,7 @@ function GatewayPanelBody(args: RenderArgs) {
           starting={starting}
           onToggleEnabled={onToggleEnabled}
           onRefreshStatus={refreshStatus}
+          onNavigate={navigate}
         />
       )
     case "listener":
@@ -450,6 +530,7 @@ function GatewayPanelBody(args: RenderArgs) {
           legacyKeyCount={panelContext.status?.legacyKeyCount}
           accountLocked={isGatewayAccountLocked(panelContext.status)}
           onChanged={() => void refreshStatus()}
+          onViewLogs={(keyId) => navigate("logs", { [GATEWAY_LOG_KEY_PARAM]: keyId })}
         />
       )
     case "reliability":
@@ -465,7 +546,7 @@ function GatewayPanelBody(args: RenderArgs) {
     case "exposure":
       return <GatewayExposurePanel ctx={panelContext} />
     case "logs":
-      return <GatewayLogViewer />
+      return <GatewayLogViewer keyFilter={logKeyFilter} onKeyFilterChange={onLogKeyFilterChange} />
     case "tickets":
       return <GatewayRouteTicketsPanel />
     case "custom":

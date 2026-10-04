@@ -83,6 +83,33 @@ const PANEL_IDS = panelIdSet(GATEWAY_NAV_ITEMS)
 
 export const GATEWAY_PANEL_PARAM = "gatewayPanel"
 
+/**
+ * Request-log key filter, carried in the URL so another panel can open the log
+ * already narrowed to one key ("view this key's requests") and the filter
+ * survives a reload. Panel-scoped: picking a panel from the nav drops it.
+ */
+export const GATEWAY_LOG_KEY_PARAM = "gatewayLogKey"
+
+/** Query params that belong to one panel and must not leak into the next. */
+export const GATEWAY_PANEL_SCOPED_PARAMS: readonly string[] = [GATEWAY_LOG_KEY_PARAM]
+
+/**
+ * Panels that render and edit the persisted `GatewayConfig`. They wait for the
+ * real config before mounting: the section starts from
+ * `DEFAULT_GATEWAY_CONFIG`, and `persist` merges each patch into whatever it
+ * holds — so an edit made before the load landed (or after it failed) would
+ * have written the defaults over every untouched field. Keys, logs and tickets
+ * read their own sources and stay usable either way.
+ */
+export const CONFIG_BACKED_PANELS: ReadonlySet<GatewayPanelId> = new Set<GatewayPanelId>([
+  "overview",
+  "listener",
+  "reliability",
+  "upstream",
+  "exposure",
+  "custom",
+])
+
 export const DEFAULT_GATEWAY_PANEL: GatewayPanelId = "overview"
 
 /** Narrow an untrusted deep-link value, falling back to the overview. */

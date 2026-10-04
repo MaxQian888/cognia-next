@@ -5,8 +5,14 @@
  *
  * The controls that keep a failing or rate-limited upstream account from being
  * hammered: in-flight concurrency caps (W1.2), per-key cooldowns (W1.1), the
- * permanent-disable keyword list (W3.1), outbound field stripping (W3.2), and
- * the SSE idle timeout.
+ * permanent-disable keyword list (W3.1) and outbound field stripping (W3.2).
+ *
+ * The live parked-account list comes first. The nav badge counts it, so a click
+ * on that badge is a question about *which* accounts are parked — it used to
+ * land on six config fields with the answer below the fold. Policy follows in
+ * the order it applies: when an account is parked, how much load any account
+ * may take, and what is stripped from the body sent to it. (The SSE idle
+ * timeout moved to Reliability → Timeouts, beside the request timeout.)
  *
  * The parked-key list renders each row's `reason` and counts its recovery down
  * live; when a countdown reaches zero it re-reads the list so the row (and the
@@ -19,7 +25,7 @@
 import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { RefreshCwIcon, ShieldIcon } from "lucide-react"
+import { GaugeIcon, RefreshCwIcon, ScissorsIcon, ShieldIcon, TimerResetIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
@@ -107,89 +113,6 @@ export function GatewayUpstreamPanel({
     <GatewayPanelStack>
       <GatewayPanelSection
         icon={<ShieldIcon className="size-4" />}
-        title={t("concurrencyHeading")}
-        description={t("concurrencyHelp")}
-        badge={t("liveBadge")}
-        badgeVariant="secondary"
-      >
-        <NumberRow
-          id="gw-cc-per-key"
-          label={t("maxConcurrentPerKey")}
-          help={t("maxConcurrentPerKeyHelp")}
-          value={config.maxConcurrentPerKey}
-          min={0}
-          max={1000}
-          onCommit={(v) => void persist({ maxConcurrentPerKey: v })}
-        />
-        <NumberRow
-          id="gw-cc-per-upstream"
-          label={t("maxConcurrentPerUpstreamKey")}
-          help={t("maxConcurrentPerUpstreamKeyHelp")}
-          value={config.maxConcurrentPerUpstreamKey}
-          min={0}
-          max={1000}
-          onCommit={(v) => void persist({ maxConcurrentPerUpstreamKey: v })}
-        />
-        <NumberRow
-          id="gw-cc-wait"
-          label={t("concurrencyWait")}
-          help={t("concurrencyWaitHelp")}
-          value={config.concurrencyWaitMs}
-          min={0}
-          max={120000}
-          onCommit={(v) => void persist({ concurrencyWaitMs: v })}
-        />
-        <NumberRow
-          id="gw-stream-idle"
-          label={t("streamIdleTimeout")}
-          help={t("streamIdleTimeoutHelp")}
-          value={config.streamIdleTimeoutSecs}
-          min={0}
-          max={3600}
-          onCommit={(v) => void persist({ streamIdleTimeoutSecs: v })}
-        />
-      </GatewayPanelSection>
-
-      <GatewayPanelSection
-        title={t("cooldownHeading")}
-        description={t("cooldownHelp")}
-        badge={t("liveBadge")}
-        badgeVariant="secondary"
-      >
-        <NumberRow
-          id="gw-cooldown-fallback"
-          label={t("cooldownFallback")}
-          help={t("cooldownFallbackHelp")}
-          value={config.cooldownFallbackSecs}
-          min={0}
-          max={3600}
-          onCommit={(v) => void persist({ cooldownFallbackSecs: v })}
-        />
-        <NumberRow
-          id="gw-overload-cooldown"
-          label={t("overloadCooldown")}
-          help={t("overloadCooldownHelp")}
-          value={config.overloadCooldownSecs}
-          min={0}
-          max={3600}
-          onCommit={(v) => void persist({ overloadCooldownSecs: v })}
-        />
-
-        <div className="space-y-2">
-          <Label>{t("disableKeywords")}</Label>
-          <ChipInput
-            values={config.disableKeywords}
-            onCommit={(next) => void persist({ disableKeywords: next })}
-            placeholder={t("disableKeywordsPlaceholder")}
-            ariaLabel={t("disableKeywords")}
-            addLabel={t("add")}
-            removeLabel={t("remove")}
-          />
-          <p className="text-xs text-muted-foreground">{t("disableKeywordsHelp")}</p>
-        </div>
-      </GatewayPanelSection>
-
-      <GatewayPanelSection
         title={t("cooldownsHeading")}
         description={t("cooldownsHelp")}
         badge={cooldowns.length > 0 ? String(cooldowns.length) : undefined}
@@ -296,6 +219,83 @@ export function GatewayUpstreamPanel({
       </GatewayPanelSection>
 
       <GatewayPanelSection
+        icon={<TimerResetIcon className="size-4" />}
+        title={t("cooldownHeading")}
+        description={t("cooldownHelp")}
+        badge={t("liveBadge")}
+        badgeVariant="secondary"
+      >
+        <NumberRow
+          id="gw-cooldown-fallback"
+          label={t("cooldownFallback")}
+          help={t("cooldownFallbackHelp")}
+          value={config.cooldownFallbackSecs}
+          min={0}
+          max={3600}
+          onCommit={(v) => void persist({ cooldownFallbackSecs: v })}
+        />
+        <NumberRow
+          id="gw-overload-cooldown"
+          label={t("overloadCooldown")}
+          help={t("overloadCooldownHelp")}
+          value={config.overloadCooldownSecs}
+          min={0}
+          max={3600}
+          onCommit={(v) => void persist({ overloadCooldownSecs: v })}
+        />
+
+        <div className="space-y-2">
+          <Label>{t("disableKeywords")}</Label>
+          <ChipInput
+            values={config.disableKeywords}
+            onCommit={(next) => void persist({ disableKeywords: next })}
+            placeholder={t("disableKeywordsPlaceholder")}
+            ariaLabel={t("disableKeywords")}
+            addLabel={t("add")}
+            removeLabel={t("remove")}
+          />
+          <p className="text-xs text-muted-foreground">{t("disableKeywordsHelp")}</p>
+        </div>
+      </GatewayPanelSection>
+
+      <GatewayPanelSection
+        icon={<GaugeIcon className="size-4" />}
+        title={t("concurrencyHeading")}
+        description={t("concurrencyHelp")}
+        badge={t("liveBadge")}
+        badgeVariant="secondary"
+      >
+        <NumberRow
+          id="gw-cc-per-key"
+          label={t("maxConcurrentPerKey")}
+          help={t("maxConcurrentPerKeyHelp")}
+          value={config.maxConcurrentPerKey}
+          min={0}
+          max={1000}
+          onCommit={(v) => void persist({ maxConcurrentPerKey: v })}
+        />
+        <NumberRow
+          id="gw-cc-per-upstream"
+          label={t("maxConcurrentPerUpstreamKey")}
+          help={t("maxConcurrentPerUpstreamKeyHelp")}
+          value={config.maxConcurrentPerUpstreamKey}
+          min={0}
+          max={1000}
+          onCommit={(v) => void persist({ maxConcurrentPerUpstreamKey: v })}
+        />
+        <NumberRow
+          id="gw-cc-wait"
+          label={t("concurrencyWait")}
+          help={t("concurrencyWaitHelp")}
+          value={config.concurrencyWaitMs}
+          min={0}
+          max={120000}
+          onCommit={(v) => void persist({ concurrencyWaitMs: v })}
+        />
+      </GatewayPanelSection>
+
+      <GatewayPanelSection
+        icon={<ScissorsIcon className="size-4" />}
         title={t("fieldStripHeading")}
         description={t("fieldStripHelp")}
         badge={t("liveBadge")}

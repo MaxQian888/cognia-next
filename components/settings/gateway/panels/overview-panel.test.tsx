@@ -50,6 +50,7 @@ function setup(
   const persist = jest.fn().mockResolvedValue(undefined)
   const onToggleEnabled = jest.fn().mockResolvedValue(undefined)
   const onRefreshStatus = jest.fn().mockResolvedValue(undefined)
+  const onNavigate = jest.fn()
   render(
     <GatewayOverviewPanel
       ctx={{
@@ -62,9 +63,10 @@ function setup(
       starting={starting}
       onToggleEnabled={onToggleEnabled}
       onRefreshStatus={onRefreshStatus}
+      onNavigate={onNavigate}
     />
   )
-  return { onToggleEnabled, onRefreshStatus }
+  return { onToggleEnabled, onRefreshStatus, onNavigate }
 }
 
 beforeEach(() => {
@@ -158,6 +160,7 @@ describe("GatewayOverviewPanel", () => {
         starting={false}
         onToggleEnabled={jest.fn()}
         onRefreshStatus={jest.fn()}
+        onNavigate={jest.fn()}
       />
     )
     expect(screen.getByTestId("gateway-routing-authority")).toHaveTextContent("localRoutingLegacy")
@@ -174,6 +177,7 @@ describe("GatewayOverviewPanel", () => {
         starting={false}
         onToggleEnabled={jest.fn()}
         onRefreshStatus={jest.fn()}
+        onNavigate={jest.fn()}
       />
     )
     expect(screen.getByTestId("gateway-routing-authority")).toHaveTextContent(
@@ -305,7 +309,9 @@ describe("GatewayOverviewPanel", () => {
     setup(status({ hasToken: false }))
 
     expect(screen.getByRole("switch", { name: "enabled" })).toBeDisabled()
-    expect(screen.getByText("requiresKey")).toBeInTheDocument()
+    // The setup list explains the lock and leads to the fix.
+    expect(screen.getByTestId("gateway-setup-step-key")).toHaveAttribute("aria-current", "step")
+    expect(screen.getByTestId("gateway-setup-note-start")).toHaveTextContent("stepStartBlocked")
   })
 
   it("keeps a running listener stoppable after its last usable key is gone", () => {
@@ -467,5 +473,52 @@ describe("gatewayClientOrigin", () => {
     expect(gatewayClientOrigin({ ...base, publicOrigin: "   " }, null)).toBe(
       "http://127.0.0.1:47823"
     )
+  })
+
+  describe("get started", () => {
+    it("walks a keyless first visit to the API keys panel", async () => {
+      const { onNavigate } = setup(status({ hasToken: false }))
+
+      expect(screen.getByTestId("gateway-setup-steps")).toBeInTheDocument()
+      await userEvent.click(screen.getByTestId("gateway-setup-action-key"))
+
+      expect(onNavigate).toHaveBeenCalledWith("keys")
+    })
+
+    it("starts the listener from the setup list", async () => {
+      const { onToggleEnabled } = setup(status({ hasToken: true }))
+
+      await userEvent.click(screen.getByTestId("gateway-setup-action-start"))
+
+      expect(onToggleEnabled).toHaveBeenCalledWith(true)
+    })
+
+    it("moves focus to the first connect snippet", async () => {
+      setup(status({ hasToken: true, running: true, boundPort: 47823 }))
+
+      await userEvent.click(screen.getByTestId("gateway-setup-action-connect"))
+
+      expect(screen.getByRole("textbox", { name: "anthropicSnippet" })).toHaveFocus()
+    })
+
+    it("disappears once the first request has been served", () => {
+      setup(status({ hasToken: true, running: true, callsTotal: 1 }))
+      expect(screen.queryByTestId("gateway-setup-steps")).not.toBeInTheDocument()
+    })
+
+    it("stays hidden until status has hydrated, so it never flashes in", () => {
+      setup(null)
+      expect(screen.queryByTestId("gateway-setup-steps")).not.toBeInTheDocument()
+    })
+  })
+
+  it("opens the request log from the request counter", async () => {
+    const { onNavigate } = setup(status({ callsTotal: 42 }))
+
+    await userEvent.click(screen.getByTestId("gateway-stat-calls"))
+
+    expect(onNavigate).toHaveBeenCalledWith("logs")
+    // The number stays part of the button's name next to what it does.
+    expect(screen.getByTestId("gateway-stat-calls")).toHaveAccessibleName(/42.*statCallsOpenLog/)
   })
 })

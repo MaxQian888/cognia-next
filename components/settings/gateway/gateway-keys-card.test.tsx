@@ -40,6 +40,16 @@ const mockCreate = jest.fn()
 const mockUpdate = jest.fn()
 const mockDelete = jest.fn()
 const mockReveal = jest.fn()
+let mockDisclosureBlocked = false
+const mockDisclosureGate = jest.fn()
+jest.mock("@/hooks/use-secret-reveal", () => ({
+  useSecretReveal: () => async (action: () => void | Promise<void>) => {
+    mockDisclosureGate()
+    if (mockDisclosureBlocked) return "blocked"
+    await action()
+    return "revealed"
+  },
+}))
 const mockResetQuota = jest.fn()
 jest.mock("@/lib/tauri/gateway", () => ({
   gatewayListKeys: () => mockList(),
@@ -85,6 +95,8 @@ const fullKey = (over: Partial<GatewayApiKey> = {}): GatewayApiKey => ({
 })
 
 beforeEach(() => {
+  mockDisclosureBlocked = false
+  mockDisclosureGate.mockClear()
   liveLogRows = []
   mockListLog.mockReset().mockResolvedValue([])
   Object.defineProperty(navigator, "clipboard", {
@@ -102,12 +114,23 @@ beforeEach(() => {
 })
 
 describe("GatewayKeysCard", () => {
+  it("never retrieves or copies a stored key when disclosure is blocked", async () => {
+    mockDisclosureBlocked = true
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    fireEvent.click(screen.getByRole("button", { name: "copyKey CLI" }))
+    await waitFor(() => expect(mockDisclosureGate).toHaveBeenCalledTimes(1))
+    expect(mockReveal).not.toHaveBeenCalled()
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
   it("explains how to replace unbound legacy keys without exposing their secrets", async () => {
     render(<GatewayKeysCard legacyKeyCount={2} />)
     await screen.findByText("CLI")
     expect(screen.getByText("legacyKeysHeading")).toBeInTheDocument()
     expect(screen.getByText("legacyKeysHelp:2")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "createKey" })).toBeEnabled()
+    expect(screen.getByTestId("gateway-key-new")).toBeEnabled()
   })
 
   it("does not show migration guidance for account-owned keys", async () => {
@@ -125,17 +148,65 @@ describe("GatewayKeysCard", () => {
     expect(within(keyList).getAllByRole("listitem")).toHaveLength(1)
   })
 
-  it("shows the empty state when no keys exist", async () => {
+  it("opens the create form, undismissably, when no keys exist", async () => {
     mockList.mockResolvedValue([])
     render(<GatewayKeysCard />)
     expect(await screen.findByText("keysEmpty")).toBeInTheDocument()
+    expect(screen.getByTestId("gateway-key-create-form")).toBeInTheDocument()
+    // Nothing to toggle back to: no header trigger and no cancel.
+    expect(screen.queryByTestId("gateway-key-new")).not.toBeInTheDocument()
+    expect(
+      within(screen.getByTestId("gateway-key-create-form")).queryByRole("button", {
+        name: "cancel",
+      })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the create form closed behind the header action once keys exist", async () => {
+    const user = userEvent.setup()
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("gateway-key-new"))
+    expect(screen.getByTestId("gateway-key-create-form")).toBeInTheDocument()
+    expect(screen.getByTestId("gateway-key-new")).toHaveAttribute("aria-expanded", "true")
+
+    await user.click(
+      within(screen.getByTestId("gateway-key-create-form")).getByRole("button", { name: "cancel" })
+    )
+    await waitFor(() =>
+      expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
+    )
+  })
+
+  it("closes the create form on Escape", async () => {
+    const user = userEvent.setup()
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    await user.click(screen.getByTestId("gateway-key-new"))
+
+    await user.type(screen.getByLabelText("keyName"), "{Escape}")
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
+    )
+  })
+
+  it("shows a loading state rather than an empty list before the first read", () => {
+    mockList.mockReturnValue(new Promise(() => {}))
+    render(<GatewayKeysCard />)
+    expect(screen.getByTestId("gateway-keys-loading")).toHaveAttribute("aria-busy", "true")
+    expect(screen.queryByText("keysEmpty")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
   })
 
   it("creates a scoped key and reveals its secret once", async () => {
     const user = userEvent.setup()
     const onChanged = jest.fn()
     render(<GatewayKeysCard onChanged={onChanged} />)
-    await waitFor(() => expect(mockList).toHaveBeenCalled())
+    await screen.findByText("CLI")
+    await user.click(screen.getByTestId("gateway-key-new"))
 
     await user.type(screen.getByLabelText("keyName"), "Laptop")
     await user.type(screen.getByLabelText("keyModels"), "fast, gpt-4o")
@@ -156,6 +227,64 @@ describe("GatewayKeysCard", () => {
       "sk-cognia-FULLSECRET0000"
     )
     expect(onChanged).toHaveBeenCalled()
+    // No scopes picked, so no follow-up grant.
+    expect(mockUpdate).not.toHaveBeenCalled()
+    // The form closes behind the secret.
+    await waitFor(() =>
+      expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
+    )
+  })
+
+  it("submits the create form with Enter", async () => {
+    const user = userEvent.setup()
+    mockList.mockResolvedValue([])
+    render(<GatewayKeysCard />)
+    await screen.findByTestId("gateway-key-create-form")
+
+    await user.type(screen.getByLabelText("keyName"), "Laptop{Enter}")
+
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ name: "Laptop" }))
+  })
+
+  it("grants the scopes picked at creation right after the key exists", async () => {
+    const user = userEvent.setup()
+    mockList.mockResolvedValue([])
+    render(<GatewayKeysCard />)
+    const form = await screen.findByTestId("gateway-key-create-form")
+
+    await user.type(within(form).getByLabelText("keyName"), "Runner")
+    const scopes = within(form).getByTestId("gateway-key-create-scopes")
+    await user.click(within(scopes).getByLabelText("runs:create"))
+    await user.click(within(scopes).getByLabelText("runs:read"))
+    await user.click(within(form).getByRole("button", { name: "createKey" }))
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith("k2", { scopes: ["runs:create", "runs:read"] })
+    )
+    expect(mockCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      mockUpdate.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("still shows the secret when the scope grant after creation fails", async () => {
+    // The secret is shown exactly once; losing it to a failed follow-up grant
+    // would leave a key nobody can use.
+    const user = userEvent.setup()
+    mockList.mockResolvedValue([])
+    mockUpdate.mockRejectedValue(new Error("keyring locked"))
+    render(<GatewayKeysCard />)
+    const form = await screen.findByTestId("gateway-key-create-form")
+
+    await user.type(within(form).getByLabelText("keyName"), "Runner")
+    await user.click(
+      within(within(form).getByTestId("gateway-key-create-scopes")).getByLabelText("runs:create")
+    )
+    await user.click(within(form).getByRole("button", { name: "createKey" }))
+
+    expect(await screen.findByRole("textbox", { name: "newKeyHeading" })).toHaveValue(
+      "sk-cognia-FULLSECRET0000"
+    )
+    expect(toast.error).toHaveBeenCalledWith("createScopesFailed:keyring locked")
   })
 
   it("toggles a key's enabled state", async () => {
@@ -226,6 +355,25 @@ describe("GatewayKeysCard", () => {
     expect(screen.getByTestId("gateway-key-usage-k1")).toHaveTextContent("keyRecentUsageValue:2,1")
   })
 
+  it("opens the request log narrowed to a key from its usage line", async () => {
+    const user = userEvent.setup()
+    const onViewLogs = jest.fn()
+    render(<GatewayKeysCard onViewLogs={onViewLogs} />)
+    await screen.findByText("CLI")
+
+    const link = screen.getByTestId("gateway-key-usage-k1")
+    expect(link.tagName).toBe("BUTTON")
+    await user.click(link)
+
+    expect(onViewLogs).toHaveBeenCalledWith("k1")
+  })
+
+  it("renders the usage line as plain text without a log to open", async () => {
+    render(<GatewayKeysCard />)
+    await screen.findByText("CLI")
+    expect(screen.getByTestId("gateway-key-usage-k1").tagName).toBe("SPAN")
+  })
+
   it("draws the quota as a bar that turns destructive once spent", async () => {
     mockList.mockResolvedValue([redacted({ quotaTokens: 100, quotaUsedTokens: 100 })])
     render(<GatewayKeysCard />)
@@ -252,7 +400,10 @@ describe("GatewayKeysCard", () => {
 
     expect(await screen.findByText("keysLockedEmpty")).toBeInTheDocument()
     expect(screen.getByTestId("gateway-keys-locked")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "createKey" })).toBeDisabled()
+    // Rust refuses to create while locked, so neither the form nor its trigger
+    // is offered.
+    expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("gateway-key-new")).not.toBeInTheDocument()
   })
 
   it("locks a key's controls while its mutation is in flight", async () => {
@@ -312,6 +463,7 @@ describe("GatewayKeysCard", () => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
+      fireEvent.click(screen.getByTestId("gateway-key-new"))
 
       await user.type(screen.getByLabelText("keyName"), "Laptop")
       await user.click(screen.getByRole("button", { name: "createKey" }))
@@ -327,6 +479,7 @@ describe("GatewayKeysCard", () => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
+      fireEvent.click(screen.getByTestId("gateway-key-new"))
 
       fireEvent.change(screen.getByLabelText("keyName"), { target: { value: "Laptop" } })
       fireEvent.click(screen.getByRole("button", { name: "createKey" }))
@@ -342,6 +495,7 @@ describe("GatewayKeysCard", () => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
+      fireEvent.click(screen.getByTestId("gateway-key-new"))
 
       fireEvent.change(screen.getByLabelText("keyName"), { target: { value: "Laptop" } })
       fireEvent.click(screen.getByRole("button", { name: "createKey" }))
@@ -354,6 +508,7 @@ describe("GatewayKeysCard", () => {
     it("dismisses the banner", async () => {
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
+      fireEvent.click(screen.getByTestId("gateway-key-new"))
 
       fireEvent.change(screen.getByLabelText("keyName"), { target: { value: "Laptop" } })
       fireEvent.click(screen.getByRole("button", { name: "createKey" }))
@@ -367,6 +522,7 @@ describe("GatewayKeysCard", () => {
     it("refuses to create a key with no name, flagging the field itself", async () => {
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
+      fireEvent.click(screen.getByTestId("gateway-key-new"))
 
       fireEvent.click(screen.getByRole("button", { name: "createKey" }))
 
@@ -596,6 +752,7 @@ describe("GatewayKeysCard", () => {
       arrange()
       render(<GatewayKeysCard />)
       await screen.findByText("CLI")
+      fireEvent.click(screen.getByTestId("gateway-key-new"))
       fireEvent.change(screen.getByLabelText("keyName"), { target: { value: "Laptop" } })
 
       fireEvent.click(screen.getByRole("button", { name: buttonName }))
@@ -668,11 +825,27 @@ describe("GatewayKeysCard", () => {
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("keyring locked"))
     })
 
-    it("renders the empty state when the key list cannot be read", async () => {
+    it("says the list could not be read instead of claiming there are no keys", async () => {
+      // A failed read used to render the empty state, inviting the user to
+      // create a key they might already have.
       mockList.mockRejectedValue(new Error("keyring locked"))
       render(<GatewayKeysCard />)
 
-      expect(await screen.findByText("keysEmpty")).toBeInTheDocument()
+      expect(await screen.findByTestId("gateway-keys-error")).toHaveTextContent("keyring locked")
+      expect(screen.queryByText("keysEmpty")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("gateway-key-create-form")).not.toBeInTheDocument()
+    })
+
+    it("retries a failed list read", async () => {
+      const user = userEvent.setup()
+      mockList.mockRejectedValueOnce(new Error("keyring locked"))
+      render(<GatewayKeysCard />)
+      await screen.findByTestId("gateway-keys-error")
+
+      await user.click(screen.getByTestId("gateway-keys-retry"))
+
+      expect(await screen.findByText("CLI")).toBeInTheDocument()
+      expect(screen.queryByTestId("gateway-keys-error")).not.toBeInTheDocument()
     })
 
     it("stringifies a non-Error rejection rather than printing [object Object]", async () => {

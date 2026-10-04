@@ -28,6 +28,7 @@ jest.mock("./panels/overview-panel", () => ({
   GatewayOverviewPanel: ({
     ctx,
     onToggleEnabled,
+    onNavigate,
   }: {
     ctx: {
       config: { port: number }
@@ -35,8 +36,12 @@ jest.mock("./panels/overview-panel", () => ({
       persist: (p: Partial<GatewayConfig>) => void
     }
     onToggleEnabled: (next: boolean) => void
+    onNavigate: (panel: string) => void
   }) => (
     <div data-testid="panel-overview">
+      <button type="button" data-testid="stub-goto-keys" onClick={() => onNavigate("keys")}>
+        go to keys
+      </button>
       <button type="button" data-testid="stub-start" onClick={() => onToggleEnabled(true)}>
         start
       </button>
@@ -91,12 +96,17 @@ jest.mock("./panels/listener-panel", () => ({
 jest.mock("./gateway-keys-card", () => ({
   GatewayKeysCard: ({
     onChanged,
+    onViewLogs,
     accountLocked,
   }: {
     onChanged: () => void
+    onViewLogs: (keyId: string) => void
     accountLocked: boolean
   }) => (
     <div data-testid="panel-keys" data-account-locked={String(accountLocked)}>
+      <button type="button" data-testid="stub-view-key-logs" onClick={() => onViewLogs("k1")}>
+        view key logs
+      </button>
       <button type="button" data-testid="stub-keys-changed" onClick={onChanged}>
         keys changed
       </button>
@@ -156,7 +166,22 @@ jest.mock("./panels/custom-panel", () => ({
   ),
 }))
 jest.mock("./gateway-log-viewer", () => ({
-  GatewayLogViewer: () => <div data-testid="panel-logs" />,
+  GatewayLogViewer: ({
+    keyFilter,
+    onKeyFilterChange,
+  }: {
+    keyFilter: string | null
+    onKeyFilterChange: (keyId: string | null) => void
+  }) => (
+    <div data-testid="panel-logs" data-key-filter={String(keyFilter)}>
+      <button type="button" data-testid="stub-log-key" onClick={() => onKeyFilterChange("k2")}>
+        filter k2
+      </button>
+      <button type="button" data-testid="stub-log-all" onClick={() => onKeyFilterChange(null)}>
+        all keys
+      </button>
+    </div>
+  ),
 }))
 jest.mock("./panels/route-tickets-panel", () => ({
   GatewayRouteTicketsPanel: () => <div data-testid="panel-tickets" />,
@@ -245,8 +270,114 @@ describe("GatewaySection", () => {
 
     render(<GatewaySection />)
 
-    expect(await screen.findByTestId("panel-overview")).toBeInTheDocument()
+    // The nav and the failure are both there; the config panel is not.
+    expect(await screen.findByTestId("gateway-config-error")).toHaveTextContent(
+      "config unavailable"
+    )
+    expect(screen.getByTestId("gateway-nav-item-keys")).toBeInTheDocument()
     await waitFor(() => expect(mockListCooldowns).toHaveBeenCalled())
+  })
+
+  describe("config gate", () => {
+    it("holds the config panels back until the saved config has loaded", async () => {
+      // Shown early they would present DEFAULT_GATEWAY_CONFIG as the saved
+      // values, and `persist` would merge the first edit into those defaults.
+      let resolveConfig!: (c: GatewayConfig) => void
+      mockGetConfig.mockReturnValue(new Promise((resolve) => (resolveConfig = resolve)))
+      render(<GatewaySection />)
+
+      expect(screen.getByTestId("gateway-config-loading")).toBeInTheDocument()
+      expect(screen.queryByTestId("panel-overview")).not.toBeInTheDocument()
+
+      await act(async () => resolveConfig(config({ port: 9999 })))
+      expect(await screen.findByTestId("stub-port")).toHaveTextContent("9999")
+    })
+
+    it("never lets an edit write defaults after a failed load", async () => {
+      mockGetConfig.mockRejectedValue(new Error("keyring unavailable"))
+      render(<GatewaySection />)
+
+      await screen.findByTestId("gateway-config-error")
+      expect(screen.queryByTestId("stub-persist")).not.toBeInTheDocument()
+      expect(mockUpdate).not.toHaveBeenCalled()
+    })
+
+    it("retries a failed load and then shows the panel", async () => {
+      const user = userEvent.setup()
+      mockGetConfig.mockRejectedValueOnce(new Error("keyring unavailable"))
+      mockGetConfig.mockResolvedValueOnce(config({ port: 7777 }))
+      render(<GatewaySection />)
+      await screen.findByTestId("gateway-config-error")
+
+      await user.click(screen.getByTestId("gateway-config-retry"))
+
+      expect(await screen.findByTestId("stub-port")).toHaveTextContent("7777")
+      expect(screen.queryByTestId("gateway-config-error")).not.toBeInTheDocument()
+    })
+
+    it.each([
+      ["keys", "panel-keys"],
+      ["logs", "panel-logs"],
+      ["tickets", "panel-tickets"],
+    ])("does not gate the %s panel, which reads its own source", async (panel, testId) => {
+      searchString = `gatewayPanel=${panel}`
+      mockGetConfig.mockReturnValue(new Promise(() => {}))
+      render(<GatewaySection />)
+
+      expect(await screen.findByTestId(testId)).toBeInTheDocument()
+    })
+  })
+
+  describe("cross-panel links", () => {
+    it("opens another panel from inside one", async () => {
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-overview")
+
+      await user.click(screen.getByTestId("stub-goto-keys"))
+
+      expect(replace).toHaveBeenCalledWith("?gatewayPanel=keys", { scroll: false })
+    })
+
+    it("opens the request log narrowed to the key a row asked about", async () => {
+      searchString = "section=gateway&gatewayPanel=keys"
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-keys")
+
+      await user.click(screen.getByTestId("stub-view-key-logs"))
+
+      expect(replace).toHaveBeenCalledWith("?section=gateway&gatewayPanel=logs&gatewayLogKey=k1", {
+        scroll: false,
+      })
+    })
+
+    it("hands the URL's key filter to the log and writes changes back", async () => {
+      searchString = "gatewayPanel=logs&gatewayLogKey=k1"
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      const logs = await screen.findByTestId("panel-logs")
+      expect(logs).toHaveAttribute("data-key-filter", "k1")
+
+      await user.click(screen.getByTestId("stub-log-key"))
+      expect(replace).toHaveBeenLastCalledWith("?gatewayPanel=logs&gatewayLogKey=k2", {
+        scroll: false,
+      })
+
+      await user.click(screen.getByTestId("stub-log-all"))
+      expect(replace).toHaveBeenLastCalledWith("?gatewayPanel=logs", { scroll: false })
+    })
+
+    it("drops the log's key filter when another panel is picked from the nav", async () => {
+      searchString = "gatewayPanel=logs&gatewayLogKey=k1"
+      const user = userEvent.setup()
+      render(<GatewaySection />)
+      await screen.findByTestId("panel-logs")
+
+      await user.click(screen.getByTestId("gateway-nav-item-overview"))
+
+      expect(replace).toHaveBeenLastCalledWith("?gatewayPanel=overview", { scroll: false })
+    })
   })
 
   it("lands on the overview panel by default", async () => {

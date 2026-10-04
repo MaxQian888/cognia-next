@@ -213,6 +213,11 @@ describe("chatAutoConsidersFusion", () => {
 })
 
 describe("selectChatFusionRun", () => {
+  it("retains the durable delivery identity instead of minting a new run", async () => {
+    const picked = await selectChatFusionRun(makeHost(), selection({ runId: "delivery-panel" }))
+    expect(picked).toMatchObject({ kind: "fusion", stamp: { runId: "delivery-panel" } })
+  })
+
   it("routes an explicit panel to independent members and stamps the turn", async () => {
     const picked = await selectChatFusionRun(makeHost(), selection())
     expect(picked.kind).toBe("fusion")
@@ -291,6 +296,32 @@ describe("selectChatFusionRun", () => {
 })
 
 describe("startChatFusionTurn", () => {
+  it("acknowledges durable acceptance before execution and never executes a duplicate delivery", async () => {
+    const onAccepted = jest.fn()
+    script = async (id) => {
+      expect(onAccepted).toHaveBeenCalledTimes(1)
+      expect(await store.getRun(id)).toBeDefined()
+      return seal(id, "Accepted once")
+    }
+    const runId = uuidFromName("durable-delivery")
+    const first = await selectChatFusionRun(makeHost(), selection({ runId }))
+    if (first.kind !== "fusion") throw new Error("not routed")
+    const input = {
+      sessionId: "session-1",
+      stamp: first.stamp,
+      messages: MESSAGES,
+      workspaceRoot: null,
+      appSettings: APP,
+      onAccepted,
+    }
+    await startChatFusionTurn(input)
+    const second = await selectChatFusionRun(makeHost(), selection({ runId }))
+    if (second.kind !== "fusion") throw new Error("not routed")
+    await startChatFusionTurn({ ...input, stamp: second.stamp })
+    expect(onAccepted).toHaveBeenCalledTimes(2)
+    expect(executed).toHaveLength(1)
+  })
+
   it("[ACC:SSE-02] creates an answer-only run, executes it and hands back the verified answer with its card", async () => {
     const picked = await selectChatFusionRun(makeHost(), selection())
     if (picked.kind !== "fusion") throw new Error("not routed")

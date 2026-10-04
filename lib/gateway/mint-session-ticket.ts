@@ -21,6 +21,7 @@ import { captureRemoteGatewayTarget, acquireRemoteTaskLease } from "./remote-tas
 import { getAllProviders } from "@cognia/provider-types/provider"
 import { resolveProviderProtocol } from "@/sidecar/src/providers/provider-protocol.ts"
 import { isAgentExecutionFlagEnabled } from "@/lib/ai/agent/execution/feature-flags"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import {
   gatewayGetStatus,
   gatewayMintRouteTicket,
@@ -162,7 +163,46 @@ export interface ExternalAgentGatewayRouteInput {
   sessionId: string
   executionFingerprint?: string
   ingressProtocol?: "openai-chat" | "openai-responses" | "anthropic"
+  /**
+   * The paired device a Host-run turn is for. The headless lease is scoped to
+   * it, so another device can neither renew nor reuse the task's route.
+   */
+  originDeviceId?: string | null
   signal?: AbortSignal
+}
+
+/**
+ * The headless brain's route (ADR-0090, 2026-10-02): its providers live in the
+ * server's Provider Profile Store, so `cognia-server` mints the lease from the
+ * snapshot its own gateway serves and no credential ever reaches this process.
+ */
+async function prepareHostGatewayRoute(input: ExternalAgentGatewayRouteInput) {
+  // Profile-store providers carry one Host credential each; there is no vault
+  // account to pin, and silently ignoring an explicit pick would run the task
+  // on a credential the caller did not choose.
+  if (typeof input.accountId === "string" && input.accountId)
+    throw new Error("This Host's Cognia providers have no selectable accounts")
+  const { acquireHostTaskLease } = await import("./host-task-lease")
+  const lease = await acquireHostTaskLease({
+    taskId: input.sessionId,
+    providerId: input.providerId,
+    modelId: input.modelId,
+    ingressProtocol: input.ingressProtocol ?? "openai-chat",
+    originDeviceId: input.originDeviceId ?? null,
+    signal: input.signal,
+  })
+  return {
+    endpoint: lease.endpoint,
+    ticketId: lease.ticketId,
+    secret: lease.secret,
+    model: input.modelId,
+    modelMetadata: lease.modelMetadata,
+    ownerAccountId: lease.ownerAccountId,
+    binding: { providerId: input.providerId, modelId: input.modelId, accountId: null },
+    revoke: lease.revoke,
+    signal: lease.signal,
+    assertCurrent: lease.assertCurrent,
+  }
 }
 
 /**
@@ -185,6 +225,7 @@ export async function prepareExternalAgentGatewayRoute(
 > {
   if (!input.providerId.trim() || !input.modelId.trim() || !input.sessionId.trim())
     throw new Error("A provider, model and task session are required for the Cognia gateway")
+  if (isHeadlessHost()) return prepareHostGatewayRoute(input)
   const remoteScope = getActiveRemoteTransport() ? captureRemoteGatewayTarget() : undefined
   const [
     { useSettingsStore },

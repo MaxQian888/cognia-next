@@ -448,4 +448,80 @@ describe("GatewayLogViewer", () => {
     expect(detail).not.toHaveTextContent("colError")
     expect(detail).toHaveTextContent("streamNo")
   })
+
+  describe("filters driven from outside", () => {
+    it("applies a key filter handed in by the section", () => {
+      render(<GatewayLogViewer keyFilter="k1" onKeyFilterChange={jest.fn()} />)
+      expect(lastFilter).toEqual({ limit: 100, keyId: "k1" })
+    })
+
+    it("reports a chosen key instead of keeping it locally", async () => {
+      const user = userEvent.setup()
+      const onKeyFilterChange = jest.fn()
+      render(<GatewayLogViewer keyFilter={null} onKeyFilterChange={onKeyFilterChange} />)
+
+      await user.click(await screen.findByRole("combobox", { name: "colKey" }))
+      await user.click(await screen.findByRole("option", { name: "Server" }))
+
+      expect(onKeyFilterChange).toHaveBeenCalledWith("k2")
+      // Controlled: the query follows the prop, which has not changed.
+      expect(lastFilter).toEqual({ limit: 100 })
+    })
+
+    it("still filters by, and names, a key that no longer exists", async () => {
+      const user = userEvent.setup()
+      render(<GatewayLogViewer keyFilter="deleted-key-id" onKeyFilterChange={jest.fn()} />)
+
+      expect(lastFilter).toEqual({ limit: 100, keyId: "deleted-key-id" })
+      const trigger = await screen.findByRole("combobox", { name: "colKey" })
+      await waitFor(() => expect(trigger).toHaveTextContent("deleted-"))
+      await user.click(trigger)
+      expect(await screen.findByRole("option", { name: "deleted-" })).toBeInTheDocument()
+    })
+  })
+
+  describe("an empty result", () => {
+    it("says the filters hide everything, not that nothing was logged", () => {
+      render(<GatewayLogViewer keyFilter="k1" onKeyFilterChange={jest.fn()} />)
+
+      expect(screen.getByText("logEmptyFiltered")).toBeInTheDocument()
+      expect(screen.queryByText("logEmpty")).not.toBeInTheDocument()
+    })
+
+    it("clears every filter in one go", async () => {
+      const user = userEvent.setup()
+      const onKeyFilterChange = jest.fn()
+      render(<GatewayLogViewer keyFilter="k1" onKeyFilterChange={onKeyFilterChange} />)
+      await user.type(screen.getByLabelText("colModel"), "fast")
+      await user.click(screen.getByRole("radio", { name: "logFilterErrors" }))
+
+      await user.click(screen.getByTestId("gateway-log-clear-filters"))
+
+      expect(onKeyFilterChange).toHaveBeenCalledWith(null)
+      expect(screen.getByLabelText("colModel")).toHaveValue("")
+      expect(screen.getByRole("radio", { name: "logFilterAll" })).toHaveAttribute(
+        "data-state",
+        "on"
+      )
+    })
+
+    it("offers no clear-filters control while nothing is filtered", () => {
+      render(<GatewayLogViewer />)
+      expect(screen.queryByTestId("gateway-log-clear-filters")).not.toBeInTheDocument()
+    })
+  })
+
+  it("says which rows the usage tiles total", async () => {
+    liveRows = [row(), row({ id: "r2" })]
+    const { rerender } = render(<GatewayLogViewer />)
+    expect(screen.getByTestId("gateway-usage-scope")).toHaveTextContent("summaryScope:2")
+
+    rerender(<GatewayLogViewer keyFilter="k1" onKeyFilterChange={jest.fn()} />)
+    expect(screen.getByTestId("gateway-usage-scope")).toHaveTextContent("summaryScopeFiltered:2")
+  })
+
+  it("drops the scope line when there is nothing to total", () => {
+    render(<GatewayLogViewer />)
+    expect(screen.queryByTestId("gateway-usage-scope")).not.toBeInTheDocument()
+  })
 })

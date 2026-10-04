@@ -1,7 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { allowlistIsLoopbackOnly, GatewayListenerPanel } from "./listener-panel"
+import {
+  allowlistIsLoopbackOnly,
+  GatewayListenerPanel,
+  LOOPBACK_ALLOWLIST_ENTRY,
+  PRIVATE_LAN_RANGES,
+} from "./listener-panel"
 import {
   DEFAULT_GATEWAY_CONFIG,
   type GatewayBindTimeField,
@@ -159,6 +164,26 @@ describe("GatewayListenerPanel", () => {
     setup({ bindInterface: "lan", allowlist: ["127.0.0.1/32", "192.168.1.0/24"] })
 
     expect(screen.queryByTestId("gateway-lan-unreachable")).not.toBeInTheDocument()
+  })
+
+  it("restores loopback from the empty-allowlist warning in one click", async () => {
+    const { persist } = setup({ allowlist: [] })
+
+    await userEvent.click(screen.getByTestId("gateway-allowlist-restore-loopback"))
+
+    expect(persist).toHaveBeenCalledWith({ allowlist: [LOOPBACK_ALLOWLIST_ENTRY] })
+  })
+
+  it("offers each private range as its own add when LAN only admits loopback", async () => {
+    const { persist } = setup({ bindInterface: "lan", allowlist: ["127.0.0.1/32"] })
+
+    for (const range of PRIVATE_LAN_RANGES) {
+      expect(screen.getByTestId(`gateway-allowlist-add-${range}`)).toBeInTheDocument()
+    }
+    await userEvent.click(screen.getByTestId("gateway-allowlist-add-192.168.0.0/16"))
+
+    // Appended to what is there — never a replacement that drops loopback.
+    expect(persist).toHaveBeenCalledWith({ allowlist: ["127.0.0.1/32", "192.168.0.0/16"] })
   })
 
   it("rejects a malformed public origin before it reaches Rust", () => {

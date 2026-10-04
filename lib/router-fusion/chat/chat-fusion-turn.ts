@@ -75,6 +75,8 @@ export function chatAutoConsidersFusion(
 }
 
 export interface ChatFusionSelectionInput {
+  /** Stable identity supplied by durable automatic delivery; ordinary turns mint one. */
+  runId?: string
   requested: ChatFusionRequest
   sessionId: string
   promptText: string
@@ -153,7 +155,7 @@ export async function selectChatFusionRun(
     allow_degraded: true,
     delivery: "verified_buffered",
   }
-  const runId = host.newId()
+  const runId = input.runId ?? host.newId()
   const route = await routeRunRequest(host, {
     runId,
     decisionId: host.newId(),
@@ -188,6 +190,8 @@ export async function selectChatFusionRun(
 }
 
 export interface ChatFusionTurnInput {
+  /** The existing ledger committed this run before any provider execution. */
+  onAccepted?: () => void
   sessionId: string
   stamp: RouterFusionRunStamp
   /** The conversation the run answers, oldest first, the new message last. */
@@ -272,12 +276,19 @@ export async function startChatFusionTurn(
     driver: "orchestrator",
   })
   if (!created.ok) {
+    if (
+      created.code === "RUN_EXISTS" &&
+      (await store.getRun(runId))?.sessionId === input.sessionId
+    ) {
+      input.onAccepted?.()
+    }
     return {
       kind: "refused",
       code: created.code,
       ...(created.activeRunId ? { activeRunId: created.activeRunId } : {}),
     }
   }
+  input.onAccepted?.()
   await store.db.fusionArtifacts.update(inputArtifact.artifactId, { runId })
 
   active.set(input.sessionId, runId)

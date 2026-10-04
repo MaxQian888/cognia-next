@@ -90,6 +90,64 @@ pub struct SecretStoreResolver {
     pub service: String,
 }
 
+/// The secret-store service a provider profile's
+/// `{"kind":"secret-store","secretId":…}` credential reference names.
+pub const PROVIDER_CREDENTIAL_SERVICE: &str = "com.cognia.provider-credentials";
+
+/// A secret id is a reference written into profile documents, so it is a
+/// plain identifier: never empty, never a path, never long enough to carry a
+/// key by mistake.
+pub fn validate_credential_id(id: &str) -> Result<(), CredentialError> {
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+    {
+        return Err(CredentialError::Unavailable(
+            "credential id must be 1-128 characters of [A-Za-z0-9._-]".into(),
+        ));
+    }
+    Ok(())
+}
+
+impl SecretStoreResolver {
+    /// The resolver the Provider Profile Store's `secret-store` references use.
+    pub fn provider_credentials() -> Self {
+        Self {
+            service: PROVIDER_CREDENTIAL_SERVICE.into(),
+        }
+    }
+
+    /// Write (or replace) the secret a `secret-store` reference resolves to.
+    /// The value is encrypted under the store's master key and never logged.
+    pub fn store(&self, id: &str, secret: &str) -> Result<(), CredentialError> {
+        validate_credential_id(id)?;
+        if secret.trim().is_empty() {
+            return Err(CredentialError::Unavailable(
+                "credential value is empty".into(),
+            ));
+        }
+        cognia_secrets::secret_store::set(&self.service, id, secret.trim())
+            .map_err(CredentialError::Unavailable)
+    }
+
+    /// Remove a stored credential. Idempotent.
+    pub fn delete(&self, id: &str) -> Result<(), CredentialError> {
+        validate_credential_id(id)?;
+        cognia_secrets::secret_store::delete(&self.service, id)
+            .map_err(CredentialError::Unavailable)
+    }
+
+    /// The ids stored under this service. Ids only, never values.
+    pub fn ids(&self) -> Result<Vec<String>, CredentialError> {
+        let mut ids = cognia_secrets::secret_store::list_accounts(&self.service)
+            .map_err(CredentialError::Unavailable)?;
+        ids.sort();
+        Ok(ids)
+    }
+}
+
 impl CredentialResolver for SecretStoreResolver {
     fn resolve(
         &self,
@@ -239,6 +297,32 @@ mod tests {
             "…1111"
         );
         std::env::remove_var("COGNIA_GW_TEST_CHAIN");
+    }
+
+    #[test]
+    fn provider_credentials_round_trip_through_the_secret_store_by_id() {
+        let store = SecretStoreResolver::provider_credentials();
+        store.store("stub-openai", "  sk-stub-9876  ").unwrap();
+        let resolved = store
+            .resolve(&CredentialSource::SecretStore { id: "stub-openai" })
+            .unwrap();
+        assert_eq!(resolved.secret, "sk-stub-9876");
+        assert!(store.ids().unwrap().contains(&"stub-openai".to_string()));
+        store.delete("stub-openai").unwrap();
+        assert!(store
+            .resolve(&CredentialSource::SecretStore { id: "stub-openai" })
+            .is_err());
+        store.delete("stub-openai").unwrap();
+    }
+
+    #[test]
+    fn provider_credential_ids_and_values_are_validated() {
+        let store = SecretStoreResolver::provider_credentials();
+        for id in ["", "../x", "a b", &"x".repeat(129)] {
+            assert!(store.store(id, "value").is_err(), "{id}");
+        }
+        assert!(store.store("ok-id", "   ").is_err());
+        assert!(validate_credential_id("Team_1.prod-key").is_ok());
     }
 
     #[test]

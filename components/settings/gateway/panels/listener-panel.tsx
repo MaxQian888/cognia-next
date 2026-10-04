@@ -15,15 +15,21 @@
  * the *saved* config (so it cleared on the next status read), and the global
  * rate limit sat on the Reliability panel under an "applies immediately"
  * badge while Rust only read it at bind.
+ *
+ * The two allowlist warnings carry their own fix. An empty list refuses this
+ * machine too, so its alert restores loopback in one click; a LAN bind whose
+ * list only admits loopback offers each private IPv4 range as a one-click
+ * add — individually, so the list stays as tight as the LAN warning asks.
  */
 
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, ShieldCheckIcon } from "lucide-react"
+import { AlertTriangleIcon, PlusIcon, ShieldCheckIcon } from "lucide-react"
 
 import { MotionCollapse } from "@/components/chat/motion/motion-reveal"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { isValidAllowlistEntry, isValidPublicOrigin } from "@/lib/gateway/config-schema"
@@ -39,6 +45,16 @@ import { GatewayPanelSection, GatewayPanelStack } from "../shared/panel-section"
 export interface GatewayListenerPanelProps {
   ctx: GatewayPanelContext
 }
+
+/** What an empty allowlist is restored to — this machine only (Rust's default). */
+export const LOOPBACK_ALLOWLIST_ENTRY = "127.0.0.1/32"
+
+/** RFC 1918 private IPv4 ranges, offered as one-click adds for a LAN bind. */
+export const PRIVATE_LAN_RANGES: readonly string[] = [
+  "192.168.0.0/16",
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+]
 
 /** True when the allowlist admits this machine and nothing else. */
 export function allowlistIsLoopbackOnly(allowlist: readonly string[]): boolean {
@@ -174,13 +190,42 @@ export function GatewayListenerPanel({ ctx }: GatewayListenerPanelProps) {
           <MotionCollapse open={allowlistEmpty}>
             <Alert variant="destructive" data-testid="gateway-allowlist-empty">
               <AlertTriangleIcon />
-              <AlertDescription>{t("allowlistEmpty")}</AlertDescription>
+              <AlertDescription className="flex w-full flex-col gap-2">
+                <p>{t("allowlistEmpty")}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="self-start"
+                  onClick={() => void persist({ allowlist: [LOOPBACK_ALLOWLIST_ENTRY] })}
+                  data-testid="gateway-allowlist-restore-loopback"
+                >
+                  {t("allowlistRestoreLoopback", { entry: LOOPBACK_ALLOWLIST_ENTRY })}
+                </Button>
+              </AlertDescription>
             </Alert>
           </MotionCollapse>
           <MotionCollapse open={lanUnreachable}>
             <Alert data-testid="gateway-lan-unreachable">
               <AlertTriangleIcon />
-              <AlertDescription>{t("lanAllowlistLoopbackOnly")}</AlertDescription>
+              <AlertDescription className="flex w-full flex-col gap-2">
+                <p>{t("lanAllowlistLoopbackOnly")}</p>
+                <div className="flex flex-wrap gap-2">
+                  {PRIVATE_LAN_RANGES.map((range) => (
+                    <Button
+                      key={range}
+                      size="sm"
+                      variant="outline"
+                      className="font-mono text-xs"
+                      onClick={() => void persist({ allowlist: [...config.allowlist, range] })}
+                      aria-label={t("allowlistAddRangeAria", { range })}
+                      data-testid={`gateway-allowlist-add-${range}`}
+                    >
+                      <PlusIcon className="size-3.5" aria-hidden />
+                      {range}
+                    </Button>
+                  ))}
+                </div>
+              </AlertDescription>
             </Alert>
           </MotionCollapse>
         </div>

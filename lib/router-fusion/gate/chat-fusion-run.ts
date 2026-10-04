@@ -26,6 +26,7 @@ export type RouterFusionChatRunOutcome = Awaited<
 >
 
 export interface RunRouterFusionChatTurnInput {
+  onAccepted?: () => void
   sessionId: string
   stamp: RouterFusionRunStamp
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
@@ -81,6 +82,7 @@ export async function runRouterFusionChatTurn(
           // type only names the part it reads.
           appSettings: input.settings as AppSettings,
           ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+          ...(input.onAccepted ? { onAccepted: input.onAccepted } : {}),
           ...(input.signal ? { signal: input.signal } : {}),
         })
       },

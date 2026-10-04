@@ -86,6 +86,10 @@ jest.mock("@/lib/subscription/core/provider-registry", () => ({
 jest.mock("@/lib/subscription/core/model-discovery", () => ({
   getSubscriptionModel: (...args: unknown[]) => modelDetailMock(...args),
 }))
+const hostLeaseMock = jest.fn()
+jest.mock("./host-task-lease", () => ({
+  acquireHostTaskLease: (...args: unknown[]) => hostLeaseMock(...args),
+}))
 const credentialMock = jest.fn()
 jest.mock("@/lib/claude/provider-attempt-options", () => ({
   resolveSubscriptionProviderCredential: (...args: unknown[]) => credentialMock(...args),
@@ -659,5 +663,91 @@ describe("remote task account authority", () => {
     ).rejects.toThrow("account or model settings changed")
     expect(remoteAcquireMock).not.toHaveBeenCalled()
     expect(accountListeners.size).toBe(0)
+  })
+})
+
+describe("headless Host task route", () => {
+  const marker = globalThis as Record<string, unknown>
+  beforeEach(() => {
+    marker.__COGNIA_HEADLESS__ = true
+  })
+  afterEach(() => {
+    delete marker.__COGNIA_HEADLESS__
+  })
+
+  it("leases the server's own provider and never reads renderer settings or credentials", async () => {
+    const revoke = jest.fn()
+    const signal = new AbortController().signal
+    const assertCurrent = jest.fn()
+    hostLeaseMock.mockResolvedValueOnce({
+      endpoint: "http://127.0.0.1:47823/v1",
+      ticketId: "rt_host",
+      secret: "sk-cognia-rt-host",
+      ownerAccountId: null,
+      accountGeneration: 0,
+      expiresAtMs: Date.now() + 120_000,
+      modelMetadata: { id: "stub-model" },
+      revoke,
+      signal,
+      assertCurrent,
+    })
+    const route = await prepareExternalAgentGatewayRoute({
+      providerId: "stub-openai",
+      modelId: "stub-model",
+      sessionId: "task-1",
+      ingressProtocol: "openai-responses",
+      originDeviceId: "phone-a",
+    })
+    expect(hostLeaseMock).toHaveBeenCalledWith({
+      taskId: "task-1",
+      providerId: "stub-openai",
+      modelId: "stub-model",
+      ingressProtocol: "openai-responses",
+      originDeviceId: "phone-a",
+      signal: undefined,
+    })
+    expect(route).toEqual({
+      endpoint: "http://127.0.0.1:47823/v1",
+      ticketId: "rt_host",
+      secret: "sk-cognia-rt-host",
+      model: "stub-model",
+      modelMetadata: { id: "stub-model" },
+      ownerAccountId: null,
+      binding: { providerId: "stub-openai", modelId: "stub-model", accountId: null },
+      revoke,
+      signal,
+      assertCurrent,
+    })
+    for (const mock of [statusMock, pushMock, mintMock, enrichedMock, credentialMock])
+      expect(mock).not.toHaveBeenCalled()
+  })
+
+  it("defaults the ingress and the origin device", async () => {
+    hostLeaseMock.mockResolvedValueOnce({ modelMetadata: { id: "m" } })
+    await prepareExternalAgentGatewayRoute({ providerId: "p", modelId: "m", sessionId: "t" })
+    expect(hostLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ingressProtocol: "openai-chat", originDeviceId: null })
+    )
+  })
+
+  it("refuses an explicit account rather than running on a credential nobody chose", async () => {
+    await expect(
+      prepareExternalAgentGatewayRoute({
+        providerId: "p",
+        modelId: "m",
+        sessionId: "t",
+        accountId: "vault-account",
+      })
+    ).rejects.toThrow("no selectable accounts")
+    expect(hostLeaseMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces the server's refusal instead of degrading", async () => {
+    hostLeaseMock.mockRejectedValueOnce(
+      new Error("the selected provider is not configured on this Host")
+    )
+    await expect(
+      prepareExternalAgentGatewayRoute({ providerId: "p", modelId: "m", sessionId: "t" })
+    ).rejects.toThrow("not configured on this Host")
   })
 })

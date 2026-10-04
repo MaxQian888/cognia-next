@@ -20,13 +20,28 @@
  * in the detail row, so no field is unreachable at any width. Cost comes from
  * `estimateCallCostUsd` — the same estimator the routed workflow nodes price
  * with, not a second implementation.
+ *
+ * The key filter can be driven from outside (`keyFilter` /
+ * `onKeyFilterChange`): the section keeps it in the URL so a key's usage line
+ * on the API keys panel opens this log already narrowed to that key. A key id
+ * that no longer names a key (deleted since) still filters, and is listed in
+ * the dropdown by its short id rather than leaving the trigger blank.
+ *
+ * "No requests yet" and "nothing matches these filters" are different
+ * answers; the second offers to clear the filters.
  */
 
 import { Spinner } from "@/components/ui/spinner"
 import { useEffect, useMemo, useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ChevronRightIcon, DownloadIcon, ScrollTextIcon, Trash2Icon } from "lucide-react"
+import {
+  ChevronRightIcon,
+  DownloadIcon,
+  FilterXIcon,
+  ScrollTextIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { estimateCallCostUsd } from "@cognia/provider-core/providers/model-pricing"
@@ -106,12 +121,30 @@ function rowCostUsd(row: GatewayRequestLogRow): number | undefined {
   })
 }
 
-export function GatewayLogViewer() {
+export interface GatewayLogViewerProps {
+  /**
+   * Controlled key filter — a key id, or `null` for every key. Omit both props
+   * to let the viewer keep the filter itself.
+   */
+  keyFilter?: string | null
+  onKeyFilterChange?: (keyId: string | null) => void
+}
+
+export function GatewayLogViewer({
+  keyFilter: controlledKeyFilter,
+  onKeyFilterChange,
+}: GatewayLogViewerProps = {}) {
   const t = useTranslations("settings.gateway")
   const format = useFormatter()
   const [outcome, setOutcome] = useState<Outcome>("all")
   const [model, setModel] = useState("")
-  const [keyFilter, setKeyFilter] = useState(ALL_KEYS)
+  const [localKeyFilter, setLocalKeyFilter] = useState<string>(ALL_KEYS)
+  const controlled = controlledKeyFilter !== undefined
+  const keyFilter = controlled ? (controlledKeyFilter ?? ALL_KEYS) : localKeyFilter
+  const setKeyFilter = (value: string) => {
+    if (controlled) onKeyFilterChange?.(value === ALL_KEYS ? null : value)
+    else setLocalKeyFilter(value)
+  }
   const [limit, setLimit] = useState(LOG_PAGE_SIZE)
   const [keys, setKeys] = useState<GatewayApiKeyRedacted[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -128,6 +161,16 @@ export function GatewayLogViewer() {
   const keyName = (id: string | null): string => {
     if (!id) return "—"
     return keys.find((k) => k.id === id)?.name ?? id.slice(0, 8)
+  }
+  // A filter for a key that is not in the list (deleted, or the list has not
+  // loaded) still needs an option, or the trigger renders empty.
+  const orphanKeyFilter =
+    keyFilter !== ALL_KEYS && !keys.some((k) => k.id === keyFilter) ? keyFilter : null
+  const filtersActive = outcome !== "all" || model.trim() !== "" || keyFilter !== ALL_KEYS
+  const clearFilters = () => {
+    setOutcome("all")
+    setModel("")
+    setKeyFilter(ALL_KEYS)
   }
 
   const rows =
@@ -255,6 +298,7 @@ export function GatewayLogViewer() {
             }),
           })}
           tone={summary.errors > 0 ? "warn" : undefined}
+          testId="gateway-usage-requests"
         />
         <SummaryTile
           label={t("summaryTokens")}
@@ -270,6 +314,14 @@ export function GatewayLogViewer() {
           testId="gateway-usage-cost"
         />
       </div>
+      {/* The tiles total the rows below, not the whole log — say so, since a
+          filter or the page window changes every number. With no rows the
+          empty state below already says why everything is zero. */}
+      {rows.length > 0 ? (
+        <p className="-mt-2 text-[11px] text-muted-foreground" data-testid="gateway-usage-scope">
+          {t(filtersActive ? "summaryScopeFiltered" : "summaryScope", { count: rows.length })}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <ToggleGroup
@@ -313,6 +365,9 @@ export function GatewayLogViewer() {
           <SelectContent>
             <SelectGroup>
               <SelectItem value={ALL_KEYS}>{t("logFilterAllKeys")}</SelectItem>
+              {orphanKeyFilter ? (
+                <SelectItem value={orphanKeyFilter}>{keyName(orphanKeyFilter)}</SelectItem>
+              ) : null}
               {keys.map((k) => (
                 <SelectItem key={k.id} value={k.id}>
                   {k.name}
@@ -321,14 +376,41 @@ export function GatewayLogViewer() {
             </SelectGroup>
           </SelectContent>
         </Select>
+        {filtersActive ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8"
+            onClick={clearFilters}
+            data-testid="gateway-log-clear-filters"
+          >
+            <FilterXIcon className="size-3.5" aria-hidden />
+            {t("logClearFilters")}
+          </Button>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
-        <SettingsEmptyState
-          icon={<ScrollTextIcon className="size-5" />}
-          title={t("logEmpty")}
-          className="py-6"
-        />
+        filtersActive ? (
+          <SettingsEmptyState
+            icon={<FilterXIcon className="size-5" />}
+            title={t("logEmptyFiltered")}
+            description={t("logEmptyFilteredHelp")}
+            className="py-6"
+            action={
+              <Button size="sm" variant="outline" onClick={clearFilters}>
+                {t("logClearFilters")}
+              </Button>
+            }
+          />
+        ) : (
+          <SettingsEmptyState
+            icon={<ScrollTextIcon className="size-5" />}
+            title={t("logEmpty")}
+            description={t("logEmptyHelp")}
+            className="py-6"
+          />
+        )
       ) : (
         <div className="flex flex-col gap-2">
           <Table className="text-xs" data-testid="gateway-log">

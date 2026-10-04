@@ -34,6 +34,7 @@ describe("GatewayReliabilityPanel", () => {
   it.each([
     ["connectTimeout", "15", { connectTimeoutSecs: 15 }],
     ["requestTimeout", "0", { requestTimeoutSecs: 0 }],
+    ["streamIdleTimeout", "90", { streamIdleTimeoutSecs: 90 }],
     ["maxRetries", "3", { maxRetries: 3 }],
     ["retryBackoffBase", "400", { retryBackoffBaseMs: 400 }],
     ["retryBackoffMax", "5000", { retryBackoffMaxMs: 5000 }],
@@ -46,6 +47,16 @@ describe("GatewayReliabilityPanel", () => {
     fireEvent.blur(input)
 
     expect(persist).toHaveBeenCalledWith(expected)
+  })
+
+  it("accepts 0 for the stream idle timeout as the documented wait-forever opt-out", () => {
+    const { persist } = setup()
+
+    const input = screen.getByLabelText("streamIdleTimeout")
+    fireEvent.change(input, { target: { value: "0" } })
+    fireEvent.blur(input)
+
+    expect(persist).toHaveBeenCalledWith({ streamIdleTimeoutSecs: 0 })
   })
 
   it("no longer hosts the global rate limit, which is bind-time and lives on Listener", () => {

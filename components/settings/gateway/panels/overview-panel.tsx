@@ -13,15 +13,21 @@
  * of them appeared only in a test fixture. `/healthz/upstream` was likewise
  * fully implemented Rust-side with no caller anywhere in the app.
  *
+ * A "Get started" list sits on top until the first request has been served
+ * (`overview-setup-steps.tsx`): create a key, start, connect — each with the
+ * action that does it, so a keyless first visit no longer ends at a locked
+ * switch. The request counter opens the request log.
+ *
  * Times are relative ("2 minutes ago") with the absolute value on hover, via
  * `SinceTime`: a bare `toLocaleTimeString()` made yesterday's last request
  * read as today's.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useNow, useTranslations } from "next-intl"
 import {
   ActivityIcon,
+  ArrowUpRightIcon,
   CheckCircle2Icon,
   Loader2Icon,
   LockIcon,
@@ -36,6 +42,7 @@ import {
   MotionCollapse,
   MotionReveal,
   MotionStatusSwap,
+  useFlowMotion,
 } from "@/components/chat/motion/motion-reveal"
 import { RollingNumber } from "@/components/settings/subagents/motion/rolling-number"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -49,9 +56,13 @@ import { isGatewayAccountLocked } from "@/lib/gateway/status"
 import { gatewayProbeUpstream } from "@/lib/tauri/gateway"
 import type { GatewayConfig, GatewayStatus, GatewayUpstreamProbeResult } from "@/types/gateway"
 
-import type { GatewayPanelContext } from "../gateway-section"
+import type { GatewayNavigate, GatewayPanelContext } from "../gateway-section"
 import { GatewayPanelSection, GatewayPanelStack } from "../shared/panel-section"
 import { SinceTime } from "../shared/since-time"
+import { GatewaySetupSteps, isGatewaySetupComplete } from "./overview-setup-steps"
+
+/** The first connect snippet — focused when the setup list sends the user there. */
+const FIRST_SNIPPET_INPUT_ID = "gw-snippet-anthropic"
 
 export interface GatewayOverviewPanelProps {
   ctx: GatewayPanelContext
@@ -59,6 +70,8 @@ export interface GatewayOverviewPanelProps {
   starting: boolean
   onToggleEnabled: (next: boolean) => Promise<void>
   onRefreshStatus: () => Promise<void>
+  /** Open another gateway panel (setup steps, the request counter). */
+  onNavigate: GatewayNavigate
 }
 
 /**
@@ -77,16 +90,37 @@ export function GatewayOverviewPanel({
   starting,
   onToggleEnabled,
   onRefreshStatus,
+  onNavigate,
 }: GatewayOverviewPanelProps) {
   const t = useTranslations("settings.gateway")
   const now = useNow({ updateInterval: 15_000 })
+  const { reduce } = useFlowMotion()
   const { config, status } = ctx
+  const connectRef = useRef<HTMLDivElement>(null)
 
   const running = status?.running ?? false
   const origin = gatewayClientOrigin(config, status)
   const accountLocked = isGatewayAccountLocked(status)
   const lastCall = status?.lastCallAt ? new Date(status.lastCallAt) : null
   const snapshotAt = status?.snapshotGeneratedAtMs ? new Date(status.snapshotGeneratedAtMs) : null
+  // Hidden until status has hydrated: before that every step would read as
+  // unfinished and the list would flash in for a returning user.
+  const showSetup =
+    status !== null &&
+    !isGatewaySetupComplete({
+      hasToken: status.hasToken,
+      running: status.running,
+      callsTotal: status.callsTotal,
+    })
+
+  const onShowConnect = useCallback(() => {
+    connectRef.current?.scrollIntoView?.({
+      behavior: reduce ? "auto" : "smooth",
+      block: "start",
+    })
+    // Focus without a second jump, so keyboard users land on the snippet too.
+    document.getElementById(FIRST_SNIPPET_INPUT_ID)?.focus({ preventScroll: true })
+  }, [reduce])
 
   const snippets = [
     { id: "anthropic", label: t("anthropicSnippet"), value: `ANTHROPIC_BASE_URL=${origin}` },
@@ -100,6 +134,19 @@ export function GatewayOverviewPanel({
 
   return (
     <GatewayPanelStack>
+      {showSetup && status ? (
+        <GatewaySetupSteps
+          hasToken={status.hasToken}
+          running={status.running}
+          callsTotal={status.callsTotal}
+          accountLocked={accountLocked}
+          starting={starting}
+          onCreateKey={() => onNavigate("keys")}
+          onStart={() => void onToggleEnabled(true)}
+          onShowConnect={onShowConnect}
+        />
+      ) : null}
+
       <GatewayPanelSection
         icon={<ActivityIcon className="size-4" />}
         title={t("serverHeading")}
@@ -135,15 +182,14 @@ export function GatewayOverviewPanel({
             <AlertDescription>{t("accountLocked")}</AlertDescription>
           </Alert>
         </MotionCollapse>
-        {!accountLocked && !status?.hasToken ? (
-          <p className="text-xs text-muted-foreground">{t("requiresKey")}</p>
-        ) : null}
 
         <div className="grid grid-cols-2 gap-2 @lg/gateway-pane:grid-cols-4">
           <StatTile
             label={t("statCalls")}
             value={<RollingNumber value={status?.callsTotal ?? 0} />}
             testId="gateway-stat-calls"
+            onOpen={() => onNavigate("logs")}
+            openLabel={t("statCallsOpenLog")}
           />
           <StatTile
             label={t("statLastCall")}
@@ -201,40 +247,42 @@ export function GatewayOverviewPanel({
 
       <UpstreamSelfCheckSection running={running} onProbed={onRefreshStatus} />
 
-      <GatewayPanelSection
-        icon={<PlugIcon className="size-4" />}
-        title={t("connectHeading")}
-        description={t("connectHelp")}
-      >
-        {snippets.map((snippet) => (
-          <div key={snippet.id} className="flex min-w-0 flex-col gap-1">
-            <Label htmlFor={`gw-snippet-${snippet.id}`} className="text-xs text-muted-foreground">
-              {snippet.label}
-            </Label>
-            <Snippet code={snippet.value} className="min-w-0">
-              <SnippetInput id={`gw-snippet-${snippet.id}`} className="text-xs" />
-              <SnippetCopyButton
-                aria-label={`${t("copy")} ${snippet.label}`}
-                title={t("copy")}
-                onCopy={() => toast.success(t("copied"))}
-                onError={(error) =>
-                  toast.error(error instanceof Error ? error.message : t("copyFailed"))
-                }
-              />
-            </Snippet>
-          </div>
-        ))}
-        <p className="text-xs text-muted-foreground">{t("authNote")}</p>
-        {config.publicOrigin ? (
-          <p className="text-xs text-muted-foreground" data-testid="gateway-origin-note">
-            {t("connectUsesPublicOrigin")}
-          </p>
-        ) : status?.bindInterface === "lan" ? (
-          <p className="text-xs text-muted-foreground" data-testid="gateway-origin-note">
-            {t("connectLanNote")}
-          </p>
-        ) : null}
-      </GatewayPanelSection>
+      <div ref={connectRef} className="scroll-mt-3" data-testid="gateway-connect-section">
+        <GatewayPanelSection
+          icon={<PlugIcon className="size-4" />}
+          title={t("connectHeading")}
+          description={t("connectHelp")}
+        >
+          {snippets.map((snippet) => (
+            <div key={snippet.id} className="flex min-w-0 flex-col gap-1">
+              <Label htmlFor={`gw-snippet-${snippet.id}`} className="text-xs text-muted-foreground">
+                {snippet.label}
+              </Label>
+              <Snippet code={snippet.value} className="min-w-0">
+                <SnippetInput id={`gw-snippet-${snippet.id}`} className="text-xs" />
+                <SnippetCopyButton
+                  aria-label={`${t("copy")} ${snippet.label}`}
+                  title={t("copy")}
+                  onCopy={() => toast.success(t("copied"))}
+                  onError={(error) =>
+                    toast.error(error instanceof Error ? error.message : t("copyFailed"))
+                  }
+                />
+              </Snippet>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">{t("authNote")}</p>
+          {config.publicOrigin ? (
+            <p className="text-xs text-muted-foreground" data-testid="gateway-origin-note">
+              {t("connectUsesPublicOrigin")}
+            </p>
+          ) : status?.bindInterface === "lan" ? (
+            <p className="text-xs text-muted-foreground" data-testid="gateway-origin-note">
+              {t("connectLanNote")}
+            </p>
+          ) : null}
+        </GatewayPanelSection>
+      </div>
     </GatewayPanelStack>
   )
 }
@@ -243,17 +291,47 @@ function StatTile({
   label,
   value,
   testId,
+  onOpen,
+  openLabel,
 }: {
   label: string
   value: React.ReactNode
   testId: string
+  /** Makes the tile a button that opens the surface behind the number. */
+  onOpen?: () => void
+  /** Accessible name / tooltip for that action; required with `onOpen`. */
+  openLabel?: string
 }) {
+  const content = (
+    <ItemContent className="min-w-0">
+      <ItemDescription className="flex items-center gap-1 text-[11px]">
+        {label}
+        {onOpen ? <ArrowUpRightIcon className="size-3" aria-hidden /> : null}
+      </ItemDescription>
+      <ItemTitle className="truncate text-sm tabular-nums">{value}</ItemTitle>
+    </ItemContent>
+  )
+  if (!onOpen) {
+    return (
+      <Item variant="muted" size="sm" data-testid={testId}>
+        {content}
+      </Item>
+    )
+  }
   return (
-    <Item variant="muted" size="sm" data-testid={testId}>
-      <ItemContent className="min-w-0">
-        <ItemDescription className="text-[11px]">{label}</ItemDescription>
-        <ItemTitle className="truncate text-sm tabular-nums">{value}</ItemTitle>
-      </ItemContent>
+    <Item asChild variant="muted" size="sm">
+      <button
+        type="button"
+        className="cursor-pointer text-left hover:bg-accent/50"
+        onClick={onOpen}
+        title={openLabel}
+        data-testid={testId}
+      >
+        {content}
+        {/* Appended, not an aria-label: that would replace the number itself
+            in the accessible name. */}
+        {openLabel ? <span className="sr-only">{openLabel}</span> : null}
+      </button>
     </Item>
   )
 }

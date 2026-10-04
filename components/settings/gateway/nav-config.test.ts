@@ -2,9 +2,12 @@ import { GATEWAY_BIND_TIME_FIELDS } from "@/types/gateway"
 
 import {
   BIND_TIME_FIELD_PANEL,
+  CONFIG_BACKED_PANELS,
   DEFAULT_GATEWAY_PANEL,
+  GATEWAY_LOG_KEY_PARAM,
   GATEWAY_NAV_GROUPS,
   GATEWAY_NAV_ITEMS,
+  GATEWAY_PANEL_SCOPED_PARAMS,
   resolveGatewayPanel,
 } from "./nav-config"
 
@@ -42,6 +45,18 @@ describe("gateway nav-config", () => {
     expect(resolveGatewayPanel("")).toBe(DEFAULT_GATEWAY_PANEL)
     expect(resolveGatewayPanel(null)).toBe(DEFAULT_GATEWAY_PANEL)
     expect(resolveGatewayPanel(undefined)).toBe(DEFAULT_GATEWAY_PANEL)
+  })
+
+  it("gates exactly the panels that edit the persisted config", () => {
+    // Keys, logs and tickets read their own sources, so a config that has not
+    // loaded must not hide them.
+    expect([...CONFIG_BACKED_PANELS].sort()).toEqual(
+      ["custom", "exposure", "listener", "overview", "reliability", "upstream"].sort()
+    )
+  })
+
+  it("scopes the log key filter param to the log panel", () => {
+    expect(GATEWAY_PANEL_SCOPED_PARAMS).toContain(GATEWAY_LOG_KEY_PARAM)
   })
 
   it("routes every bind-time field to a real panel other than the raw editor", () => {

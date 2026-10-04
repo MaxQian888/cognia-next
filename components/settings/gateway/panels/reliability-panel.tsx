@@ -4,6 +4,10 @@
  * Settings → Gateway → Reliability — timeouts, the failover walk, and which
  * routing engine plans it.
  *
+ * The stream idle timeout sits with the other two timeouts: it is the
+ * streaming counterpart of the request timeout (which streams skip), and it
+ * used to live on Upstream protection among the concurrency caps.
+ *
  * Everything here is read live on each request except the connect timeout,
  * which sizes the upstream HTTP client when the listener binds. The panel used
  * to wear one "applies immediately" badge for all of it — including that
@@ -69,6 +73,15 @@ export function GatewayReliabilityPanel({ ctx }: GatewayReliabilityPanelProps) {
           min={0}
           max={3600}
           onCommit={(v) => void persist({ requestTimeoutSecs: v })}
+        />
+        <NumberRow
+          id="gw-stream-idle"
+          label={t("streamIdleTimeout")}
+          help={t("streamIdleTimeoutHelp")}
+          value={config.streamIdleTimeoutSecs}
+          min={0}
+          max={3600}
+          onCommit={(v) => void persist({ streamIdleTimeoutSecs: v })}
         />
       </GatewayPanelSection>
 

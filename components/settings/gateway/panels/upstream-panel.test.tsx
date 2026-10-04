@@ -102,7 +102,6 @@ describe("GatewayUpstreamPanel", () => {
     ["maxConcurrentPerKey", "4", { maxConcurrentPerKey: 4 }],
     ["maxConcurrentPerUpstreamKey", "6", { maxConcurrentPerUpstreamKey: 6 }],
     ["concurrencyWait", "2500", { concurrencyWaitMs: 2500 }],
-    ["streamIdleTimeout", "90", { streamIdleTimeoutSecs: 90 }],
     ["cooldownFallback", "0", { cooldownFallbackSecs: 0 }],
     ["overloadCooldown", "90", { overloadCooldownSecs: 90 }],
   ])("persists the %s number field", (label, typed, expected) => {
@@ -115,14 +114,23 @@ describe("GatewayUpstreamPanel", () => {
     expect(persist).toHaveBeenCalledWith(expected)
   })
 
-  it("accepts 0 for the stream idle timeout as the documented wait-forever opt-out", () => {
-    const { persist } = setup()
+  it("leaves the stream idle timeout to Reliability → Timeouts", () => {
+    setup()
+    expect(screen.queryByLabelText("streamIdleTimeout")).not.toBeInTheDocument()
+  })
 
-    const input = screen.getByLabelText("streamIdleTimeout")
-    fireEvent.change(input, { target: { value: "0" } })
-    fireEvent.blur(input)
-
-    expect(persist).toHaveBeenCalledWith({ streamIdleTimeoutSecs: 0 })
+  it("leads with the live parked-account list the nav badge points at", () => {
+    // The badge counts parked accounts; clicking it must land on them, not on
+    // six config fields with the list below the fold.
+    setup()
+    const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)
+    expect(headings[0]).toBe("cooldownsHeading")
+    expect(headings).toEqual([
+      "cooldownsHeading",
+      "cooldownHeading",
+      "concurrencyHeading",
+      "fieldStripHeading",
+    ])
   })
 
   it("restores one provider's parked keys without touching the others", async () => {

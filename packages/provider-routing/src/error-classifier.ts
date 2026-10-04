@@ -134,7 +134,7 @@ export function extractRetryAfterMs(
 ): number | undefined {
   const httpDate = RETRY_AFTER_HTTP_DATE.exec(message)
   if (httpDate) {
-    const ts = Date.parse(httpDate[1])
+    const ts = Date.parse(httpDate[1]!)
     if (Number.isFinite(ts)) {
       const delta = ts - now()
       return delta > 0 ? delta : undefined

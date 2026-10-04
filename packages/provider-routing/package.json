@@ -11,12 +11,19 @@
       "cognia-source": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./error-classifier": {
+      "cognia-source": "./src/error-classifier.ts",
+      "types": "./src/error-classifier.ts",
+      "node": "./dist/error-classifier.js",
+      "default": "./src/error-classifier.ts"
+    },
     "./*": {
       "cognia-source": "./src/*.ts",
       "default": "./src/*.ts"
     }
   },
   "scripts": {
+    "build": "tsup",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

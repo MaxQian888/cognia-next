@@ -11,25 +11,40 @@
  * shown exactly once (create returns the full value; every list afterwards is
  * redacted to a fingerprint).
  *
- * A key also carries Run API scopes (ADR-0188 D8). A new key gets none, so it
- * is passthrough-only — the chat endpoints exactly as before — until someone
- * grants it what it needs here. Nothing about a scopeless key changes.
+ * A key also carries Run API scopes (ADR-0188 D8). A key without any is
+ * passthrough-only — the chat endpoints exactly as before. Scopes can be
+ * granted in the create form or later from the edit form. Rust's create
+ * command still issues a scopeless key; the grant follows as an update once
+ * the secret is safely on screen, so a failed grant never costs the secret.
+ *
+ * Creating a key is the panel's primary action, so it opens from the section
+ * header and its form sits above the list. It used to be a second section
+ * below every existing key, so the more keys there were, the further away the
+ * action got. With no keys yet the form is simply open.
  *
  * Each row also shows what the key has done recently, rolled up from the
  * durable request log by `summarizePerKeyUsage` — which was written for this
- * surface and had never been called.
+ * surface and had never been called. That line opens the request log narrowed
+ * to the key.
+ *
+ * The list tells "still loading" and "could not be read" apart from "no keys":
+ * a failed read used to render the empty state, which told the user to create
+ * a key they might already have.
  */
 
 import { Spinner } from "@/components/ui/spinner"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
+import { useSecretReveal } from "@/hooks/use-secret-reveal"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  AlertTriangleIcon,
   CopyIcon,
   KeyRoundIcon,
   LockIcon,
   PencilIcon,
   PlusIcon,
+  RefreshCwIcon,
   RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -42,6 +57,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Progress } from "@/components/ui/progress"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { MotionCollapse, MotionReveal } from "@/components/chat/motion/motion-reveal"
@@ -104,26 +120,34 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+/** Everything a key is created with and edited through. */
 interface KeyDraft {
   name: string
   models: string
   expiry: string
   rate: string
   quota: string
-}
-
-interface EditDraft extends KeyDraft {
   scopes: GatewayRunApiScope[]
 }
 
-const EMPTY_DRAFT: KeyDraft = { name: "", models: "", expiry: "", rate: "", quota: "" }
+const EMPTY_DRAFT: KeyDraft = {
+  name: "",
+  models: "",
+  expiry: "",
+  rate: "",
+  quota: "",
+  scopes: [],
+}
 
 export function GatewayKeysCard({
   onChanged,
+  onViewLogs,
   legacyKeyCount = 0,
   accountLocked = false,
 }: {
   onChanged?: () => void
+  /** Open the request log narrowed to one key; each row's usage line links there. */
+  onViewLogs?: (keyId: string) => void
   legacyKeyCount?: number
   /**
    * An account-scoped gateway with no unlocked account: Rust lists no keys and
@@ -132,17 +156,23 @@ export function GatewayKeysCard({
   accountLocked?: boolean
 }) {
   const t = useTranslations("settings.gateway")
+  const revealSecret = useSecretReveal()
   const format = useFormatter()
   const now = useNow({ updateInterval: 60_000 })
   const [keys, setKeys] = useState<GatewayApiKeyRedacted[]>([])
+  /** The list has been read at least once, successfully or not. */
+  const [loaded, setLoaded] = useState(false)
+  /** The last list read failed; whatever was read before stays visible. */
+  const [listError, setListError] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState(false)
   const [freshKey, setFreshKey] = useState<GatewayApiKey | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
+  const [editDraft, setEditDraft] = useState<KeyDraft | null>(null)
   const [editNameError, setEditNameError] = useState(false)
   /** The key whose mutation is in flight; its controls lock until it lands. */
   const [busyId, setBusyId] = useState<string | null>(null)
-
+  const [createOpen, setCreateOpen] = useState(false)
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT)
   const [nameError, setNameError] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -150,18 +180,39 @@ export function GatewayKeysCard({
   const recentRows = useLiveQuery(() => listGatewayRequestLog({ limit: KEY_USAGE_WINDOW }), [])
   const usageByKey = useMemo(() => summarizePerKeyUsage(recentRows ?? []), [recentRows])
 
-  const refresh = () =>
-    gatewayListKeys()
-      .then(setKeys)
-      .catch(() => {})
+  // Resolves either way; the outcome lands in `keys` / `listError`. The
+  // setState calls sit in promise callbacks — external-system updates, not
+  // synchronous effect-body writes (react-hooks/set-state-in-effect).
+  const refresh = useCallback(
+    () =>
+      gatewayListKeys()
+        .then((next) => {
+          setKeys(next)
+          setListError(null)
+        })
+        .catch((e: unknown) => setListError(errMsg(e)))
+        .finally(() => setLoaded(true)),
+    []
+  )
 
   useEffect(() => {
-    // setState in the promise callback — an external-system update, not a
-    // synchronous effect-body write (react-hooks/set-state-in-effect).
-    gatewayListKeys()
-      .then(setKeys)
-      .catch(() => {})
-  }, [])
+    void refresh()
+  }, [refresh])
+
+  const onRetryList = () => {
+    setRetrying(true)
+    void refresh().finally(() => setRetrying(false))
+  }
+
+  // With nothing to manage yet, creating a key is the only thing to do here,
+  // so the form is open and cannot be dismissed. A failed read is not "none".
+  const createForced = loaded && listError === null && keys.length === 0 && !accountLocked
+  const showCreate = !accountLocked && (createOpen || createForced)
+
+  const closeCreate = () => {
+    setCreateOpen(false)
+    setNameError(false)
+  }
 
   /** Run one key's mutation with its controls locked; report failures. */
   const mutate = async (id: string, run: () => Promise<void>) => {
@@ -193,8 +244,20 @@ export function GatewayKeysCard({
         rateLimitPerMin: parsePositiveInt(draft.rate),
         quotaTokens: parsePositiveInt(draft.quota),
       })
+      // The secret goes on screen first: it is shown exactly once, so nothing
+      // that can still fail may stand between the user and it.
       setFreshKey(created)
+      if (draft.scopes.length > 0) {
+        try {
+          await gatewayUpdateKey(created.id, { scopes: draft.scopes })
+        } catch (e) {
+          // The key exists and works for passthrough; only the grant is
+          // missing, and the edit form can still apply it.
+          toast.error(t("createScopesFailed", { error: errMsg(e) }))
+        }
+      }
       setDraft(EMPTY_DRAFT)
+      closeCreate()
       await refresh()
       onChanged?.()
     } catch (e) {
@@ -207,6 +270,8 @@ export function GatewayKeysCard({
   const startEdit = (k: GatewayApiKeyRedacted) => {
     setConfirmDeleteId(null)
     setEditNameError(false)
+    // One form at a time: the create and edit forms share their field labels.
+    closeCreate()
     setEditId(k.id)
     setEditDraft({
       name: k.name,
@@ -222,6 +287,12 @@ export function GatewayKeysCard({
     setEditId(null)
     setEditDraft(null)
     setEditNameError(false)
+  }
+
+  const openCreate = () => {
+    closeEdit()
+    setConfirmDeleteId(null)
+    setCreateOpen(true)
   }
 
   const onSaveEdit = async (id: string) => {
@@ -257,13 +328,15 @@ export function GatewayKeysCard({
 
   const onCopySecret = async (id: string) => {
     try {
-      const secret = await gatewayRevealKey(id)
-      if (!secret) {
-        toast.error(t("copyFailed"))
-        return
-      }
-      await navigator.clipboard.writeText(secret)
-      toast.success(t("keyCopied"))
+      await revealSecret(async () => {
+        const secret = await gatewayRevealKey(id)
+        if (!secret) {
+          toast.error(t("copyFailed"))
+          return
+        }
+        await navigator.clipboard.writeText(secret)
+        toast.success(t("keyCopied"))
+      })
     } catch (e) {
       // Reported as a failure, not swallowed: the old path toasted "copied"
       // even when the clipboard write had been refused.
@@ -279,6 +352,7 @@ export function GatewayKeysCard({
           <AlertDescription>{t("accountLocked")}</AlertDescription>
         </Alert>
       ) : null}
+
       {legacyKeyCount > 0 && (
         <Alert>
           <KeyRoundIcon />
@@ -286,11 +360,29 @@ export function GatewayKeysCard({
           <AlertDescription>{t("legacyKeysHelp", { count: legacyKeyCount })}</AlertDescription>
         </Alert>
       )}
+
       <GatewayPanelSection
         icon={<KeyRoundIcon className="size-4" />}
         title={t("keysHeading")}
         description={t("keysHelp")}
         badge={keys.length > 0 ? String(keys.length) : undefined}
+        action={
+          // Not offered while the form is forced open (nothing to toggle) or
+          // while the account is locked (Rust refuses to create).
+          createForced || accountLocked ? null : (
+            <Button
+              size="sm"
+              variant={showCreate ? "secondary" : "default"}
+              onClick={() => (showCreate ? closeCreate() : openCreate())}
+              aria-expanded={showCreate}
+              aria-controls="gw-key-create"
+              data-testid="gateway-key-new"
+            >
+              <PlusIcon className="size-3.5" aria-hidden />
+              {t("newKey")}
+            </Button>
+          )
+        }
       >
         {/* The freshly-minted secret is shown exactly once, so it slides in
           rather than popping — the entrance is what draws the eye to the one
@@ -328,12 +420,116 @@ export function GatewayKeysCard({
           ) : null}
         </MotionCollapse>
 
-        {keys.length === 0 ? (
-          <SettingsEmptyState
-            icon={<KeyRoundIcon className="size-5" />}
-            title={t(accountLocked ? "keysLockedEmpty" : "keysEmpty")}
-            className="py-6"
-          />
+        <MotionCollapse open={showCreate}>
+          <form
+            id="gw-key-create"
+            aria-labelledby="gw-key-create-title"
+            className="flex flex-col gap-3 rounded-lg border p-3 @lg/gateway-pane:p-4"
+            data-testid="gateway-key-create-form"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault()
+              void onCreate()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !createForced) {
+                e.preventDefault()
+                closeCreate()
+              }
+            }}
+          >
+            <div className="space-y-0.5">
+              <h4 id="gw-key-create-title" className="text-sm font-medium">
+                {t("createKey")}
+              </h4>
+              <p className="text-xs text-muted-foreground">{t("createKeyHelp")}</p>
+            </div>
+            <FieldGroup className="grid gap-3 @lg/gateway-pane:grid-cols-2">
+              <KeyFormFields
+                idPrefix="gw-key"
+                draft={draft}
+                nameError={nameError}
+                placeholders
+                onChange={(patch) => {
+                  setDraft((current) => ({ ...current, ...patch }))
+                  if (patch.name !== undefined) setNameError(false)
+                }}
+              />
+              <KeyScopeFields
+                idPrefix="gw-key-scope"
+                scopes={draft.scopes}
+                testId="gateway-key-create-scopes"
+                onChange={(scopes) => setDraft((current) => ({ ...current, scopes }))}
+              />
+            </FieldGroup>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" size="sm" disabled={creating}>
+                {creating ? (
+                  <Spinner className="size-4" aria-hidden />
+                ) : (
+                  <PlusIcon className="size-4" aria-hidden />
+                )}
+                {t("createKey")}
+              </Button>
+              {createForced ? null : (
+                <Button type="button" size="sm" variant="ghost" onClick={closeCreate}>
+                  {t("cancel")}
+                </Button>
+              )}
+            </div>
+          </form>
+        </MotionCollapse>
+
+        {listError !== null ? (
+          <Alert variant="destructive" data-testid="gateway-keys-error">
+            <AlertTriangleIcon />
+            <AlertTitle>{t("keysLoadFailed")}</AlertTitle>
+            <AlertDescription className="flex w-full flex-col gap-2">
+              <p className="break-words font-mono text-[11px]">{listError}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="self-start"
+                disabled={retrying}
+                onClick={onRetryList}
+                data-testid="gateway-keys-retry"
+              >
+                {retrying ? (
+                  <Spinner className="size-3.5" aria-hidden />
+                ) : (
+                  <RefreshCwIcon className="size-3.5" aria-hidden />
+                )}
+                {t("configRetry")}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!loaded ? (
+          <div
+            className="flex flex-col gap-2"
+            aria-busy="true"
+            aria-label={t("keysLoading")}
+            data-testid="gateway-keys-loading"
+          >
+            <Skeleton className="h-20" />
+            <Skeleton className="h-20" />
+          </div>
+        ) : keys.length === 0 ? (
+          // Only the locked account gets an empty state: with an unlocked one
+          // the create form above already says what to do, and after a failed
+          // read the error does.
+          accountLocked ? (
+            <SettingsEmptyState
+              icon={<KeyRoundIcon className="size-5" />}
+              title={t("keysLockedEmpty")}
+              className="py-6"
+            />
+          ) : listError === null ? (
+            <p className="text-xs text-muted-foreground" data-testid="gateway-keys-empty">
+              {t("keysEmpty")}
+            </p>
+          ) : null
         ) : (
           <ItemGroup className="gap-2" data-testid="gateway-keys">
             {keys.map((k, index) => {
@@ -344,6 +540,10 @@ export function GatewayKeysCard({
                   ? Math.min(k.quotaUsedTokens / k.quotaTokens, 1)
                   : null
               const usage = usageByKey.get(k.id)
+              const usageText = t("keyRecentUsageValue", {
+                requests: usage?.requests ?? 0,
+                errors: usage?.errors ?? 0,
+              })
               const isEditing = editId === k.id
               const busy = busyId === k.id
               return (
@@ -367,7 +567,6 @@ export function GatewayKeysCard({
                         {expired && <Badge variant="destructive">{t("keyExpired")}</Badge>}
                         {overQuota && <Badge variant="destructive">{t("quotaExceeded")}</Badge>}
                       </ItemTitle>
-
                       <dl
                         className="grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] @md/gateway-pane:grid-cols-2 @2xl/gateway-pane:grid-cols-3"
                         data-testid={`gateway-key-meta-${k.id}`}
@@ -399,15 +598,22 @@ export function GatewayKeysCard({
                           {format.dateTime(new Date(k.createdAtMs), { dateStyle: "medium" })}
                         </KeyMeta>
                         <KeyMeta label={t("keyRecentUsage")}>
-                          <span data-testid={`gateway-key-usage-${k.id}`}>
-                            {t("keyRecentUsageValue", {
-                              requests: usage?.requests ?? 0,
-                              errors: usage?.errors ?? 0,
-                            })}
-                          </span>
+                          {onViewLogs ? (
+                            <button
+                              type="button"
+                              className="max-w-full truncate rounded-sm text-left underline decoration-muted-foreground/60 decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                              onClick={() => onViewLogs(k.id)}
+                              aria-label={t("keyViewLogsAria", { name: k.name, usage: usageText })}
+                              title={t("keyViewLogs")}
+                              data-testid={`gateway-key-usage-${k.id}`}
+                            >
+                              {usageText}
+                            </button>
+                          ) : (
+                            <span data-testid={`gateway-key-usage-${k.id}`}>{usageText}</span>
+                          )}
                         </KeyMeta>
                       </dl>
-
                       <div className="flex flex-col gap-1">
                         <p className="text-[11px] text-muted-foreground">
                           {t("keyQuota")}:{" "}
@@ -434,7 +640,6 @@ export function GatewayKeysCard({
                         ) : null}
                       </div>
                     </ItemContent>
-
                     <ItemActions className="max-w-full flex-wrap justify-end">
                       <Switch
                         checked={k.enabled}
@@ -493,7 +698,6 @@ export function GatewayKeysCard({
                         <Trash2Icon className="size-3.5" aria-hidden />
                       </Button>
                     </ItemActions>
-
                     <div className="w-full basis-full">
                       <MotionCollapse open={confirmDeleteId === k.id}>
                         <Alert variant="destructive" className="mt-1">
@@ -522,68 +726,53 @@ export function GatewayKeysCard({
                       </MotionCollapse>
                       <MotionCollapse open={isEditing && editDraft !== null}>
                         {isEditing && editDraft ? (
-                          <FieldGroup
-                            // `@lg/gateway-pane`, not `sm:` — this sits inside the
-                            // detail pane, which is a fraction of the window, so a
-                            // viewport breakpoint would split it into two columns
-                            // while the pane itself is still narrow.
-                            className="mt-2 grid gap-3 border-t pt-3 @lg/gateway-pane:grid-cols-2"
-                            data-testid={`gateway-key-edit-${k.id}`}
+                          <form
+                            noValidate
+                            onSubmit={(e) => {
+                              e.preventDefault()
+                              void onSaveEdit(k.id)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.preventDefault()
+                                closeEdit()
+                              }
+                            }}
                           >
-                            <KeyFormFields
-                              idPrefix={`edit-${k.id}`}
-                              draft={editDraft}
-                              nameError={editNameError}
-                              onChange={(patch) => {
-                                setEditDraft({ ...editDraft, ...patch })
-                                if (patch.name !== undefined) setEditNameError(false)
-                              }}
-                            />
-                            <Field className="@lg/gateway-pane:col-span-2">
-                              <FieldLabel>{t("keyScopes")}</FieldLabel>
-                              <div
-                                className="flex flex-wrap gap-x-4 gap-y-2"
-                                data-testid={`gateway-key-scopes-${k.id}`}
-                              >
-                                {GATEWAY_RUN_API_SCOPES.map((scope) => (
-                                  <label
-                                    key={scope}
-                                    className="flex items-center gap-2 text-xs"
-                                    htmlFor={`edit-scope-${k.id}-${scope}`}
-                                  >
-                                    <Switch
-                                      id={`edit-scope-${k.id}-${scope}`}
-                                      checked={editDraft.scopes.includes(scope)}
-                                      onCheckedChange={(on) =>
-                                        setEditDraft({
-                                          ...editDraft,
-                                          scopes: on
-                                            ? [...editDraft.scopes, scope]
-                                            : editDraft.scopes.filter((held) => held !== scope),
-                                        })
-                                      }
-                                      aria-label={scope}
-                                    />
-                                    <span className="font-mono">{scope}</span>
-                                  </label>
-                                ))}
+                            <FieldGroup
+                              // `@lg/gateway-pane`, not `sm:` — this sits inside the
+                              // detail pane, which is a fraction of the window, so a
+                              // viewport breakpoint would split it into two columns
+                              // while the pane itself is still narrow.
+                              className="mt-2 grid gap-3 border-t pt-3 @lg/gateway-pane:grid-cols-2"
+                              data-testid={`gateway-key-edit-${k.id}`}
+                            >
+                              <KeyFormFields
+                                idPrefix={`edit-${k.id}`}
+                                draft={editDraft}
+                                nameError={editNameError}
+                                onChange={(patch) => {
+                                  setEditDraft({ ...editDraft, ...patch })
+                                  if (patch.name !== undefined) setEditNameError(false)
+                                }}
+                              />
+                              <KeyScopeFields
+                                idPrefix={`edit-scope-${k.id}`}
+                                scopes={editDraft.scopes}
+                                testId={`gateway-key-scopes-${k.id}`}
+                                onChange={(scopes) => setEditDraft({ ...editDraft, scopes })}
+                              />
+                              <div className="flex flex-wrap items-center gap-2 @lg/gateway-pane:col-span-2">
+                                <Button type="submit" size="sm" disabled={busy}>
+                                  {busy ? <Spinner className="size-3.5 " aria-hidden /> : null}
+                                  {t("save")}
+                                </Button>
+                                <Button type="button" size="sm" variant="ghost" onClick={closeEdit}>
+                                  {t("cancel")}
+                                </Button>
                               </div>
-                              <FieldDescription>{t("keyScopesHelp")}</FieldDescription>
-                            </Field>
-                            <div className="flex flex-wrap items-center gap-2 @lg/gateway-pane:col-span-2">
-                              <Button
-                                size="sm"
-                                disabled={busy}
-                                onClick={() => void onSaveEdit(k.id)}
-                              >
-                                {busy ? <Spinner className="size-3.5 " aria-hidden /> : null}
-                                {t("save")}
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={closeEdit}>
-                                {t("cancel")}
-                              </Button>
-                            </div>
-                          </FieldGroup>
+                            </FieldGroup>
+                          </form>
                         ) : null}
                       </MotionCollapse>
                     </div>
@@ -593,35 +782,6 @@ export function GatewayKeysCard({
             })}
           </ItemGroup>
         )}
-      </GatewayPanelSection>
-
-      <GatewayPanelSection
-        icon={<PlusIcon className="size-4" />}
-        title={t("createKey")}
-        description={t("createKeyHelp")}
-      >
-        <FieldGroup className="grid gap-3 @lg/gateway-pane:grid-cols-2">
-          <KeyFormFields
-            idPrefix="gw-key"
-            draft={draft}
-            nameError={nameError}
-            placeholders
-            onChange={(patch) => {
-              setDraft((current) => ({ ...current, ...patch }))
-              if (patch.name !== undefined) setNameError(false)
-            }}
-          />
-          <div className="@lg/gateway-pane:col-span-2">
-            <Button size="sm" disabled={creating || accountLocked} onClick={() => void onCreate()}>
-              {creating ? (
-                <Spinner className="size-4 " aria-hidden />
-              ) : (
-                <PlusIcon className="size-4" aria-hidden />
-              )}
-              {t("createKey")}
-            </Button>
-          </div>
-        </FieldGroup>
       </GatewayPanelSection>
     </GatewayPanelStack>
   )
@@ -717,5 +877,49 @@ function KeyFormFields({
         <FieldDescription>{t("keyQuotaHelp")}</FieldDescription>
       </Field>
     </>
+  )
+}
+
+/**
+ * Run API scope switches, shared by the create and edit forms. Every scope the
+ * Run API defines is offered, so none is unreachable from the UI.
+ */
+function KeyScopeFields({
+  idPrefix,
+  scopes,
+  testId,
+  onChange,
+}: {
+  idPrefix: string
+  scopes: readonly GatewayRunApiScope[]
+  testId: string
+  onChange: (scopes: GatewayRunApiScope[]) => void
+}) {
+  const t = useTranslations("settings.gateway")
+
+  return (
+    <Field className="@lg/gateway-pane:col-span-2">
+      <FieldLabel>{t("keyScopes")}</FieldLabel>
+      <div className="flex flex-wrap gap-x-4 gap-y-2" data-testid={testId}>
+        {GATEWAY_RUN_API_SCOPES.map((scope) => (
+          <label
+            key={scope}
+            className="flex items-center gap-2 text-xs"
+            htmlFor={`${idPrefix}-${scope}`}
+          >
+            <Switch
+              id={`${idPrefix}-${scope}`}
+              checked={scopes.includes(scope)}
+              onCheckedChange={(on) =>
+                onChange(on ? [...scopes, scope] : scopes.filter((held) => held !== scope))
+              }
+              aria-label={scope}
+            />
+            <span className="font-mono">{scope}</span>
+          </label>
+        ))}
+      </div>
+      <FieldDescription>{t("keyScopesHelp")}</FieldDescription>
+    </Field>
   )
 }

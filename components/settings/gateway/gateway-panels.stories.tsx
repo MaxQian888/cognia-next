@@ -188,6 +188,7 @@ export const Overview: Story = {
         starting={false}
         onToggleEnabled={async () => {}}
         onRefreshStatus={async () => {}}
+        onNavigate={() => {}}
       />
     </Pane>
   ),

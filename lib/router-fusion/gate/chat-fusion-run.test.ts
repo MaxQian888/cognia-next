@@ -61,9 +61,11 @@ describe("runRouterFusionChatTurn", () => {
       return { kind: "cancelled" as const, summary: null }
     })
     const progress = jest.fn()
+    const accepted = jest.fn()
     const outcome = await runRouterFusionChatTurn({
       ...input(ON, { startChatFusionTurn } as never),
       onProgress: progress,
+      onAccepted: accepted,
     })
     expect(outcome).toEqual({ kind: "cancelled", summary: null })
     expect(activeDuring).toBe(true)
@@ -75,6 +77,7 @@ describe("runRouterFusionChatTurn", () => {
         workspaceRoot: "/work",
         appSettings: ON,
         onProgress: progress,
+        onAccepted: accepted,
       })
     )
   })
