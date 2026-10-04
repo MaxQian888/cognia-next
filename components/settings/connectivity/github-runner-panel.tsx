@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl"
 import { ArrowRight, CheckCircle2, ChevronLeft, Circle, ExternalLink, Loader2 } from "lucide-react"
 import { PairStep } from "@/components/connectivity/pair/pair-step"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
+import { useExecutionHostSwitch } from "@/hooks/devices/use-execution-host-switch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -117,12 +118,23 @@ export function GitHubRunnerPanel() {
   const hosts = useRemoteHostStore((state) => state.hosts)
   const activeHostId = useRemoteHostStore((state) => state.activeHostId)
   const addHost = useRemoteHostStore((state) => state.addHost)
-  const activateHost = useRemoteHostStore((state) => state.activateHost)
   const deactivate = useRemoteHostStore((state) => state.deactivate)
+  // Connect and "connect after pairing" are the user choosing to drive the
+  // runner, so they take the shared in-flight guard like every other switch.
+  const { requestSwitch, dialog } = useExecutionHostSwitch()
 
   const updateLease = useCallback(
     (lease: GitHubRunnerLease) => {
       setLeases((previous) => [lease, ...previous.filter((row) => row.id !== lease.id)])
+      // Deliberately NOT through `useExecutionHostSwitch`. A lease that reached
+      // `stopped` or `failed` means the runner machine is gone, whether the
+      // user pressed Stop, the lifetime ran out or GitHub killed the job, and
+      // most of those nobody initiated from this window. Any turn on that host
+      // is already lost with it; asking "switch anyway?" would only keep every
+      // execution call pointed at a dead transport until someone answered.
+      // Stop itself is also left unguarded: the runner keeps serving until its
+      // owner confirms the stop (`stopPending`), so pressing it does not move
+      // the transport, and this deactivation is what follows the confirmation.
       if (lease.state === "stopped" || lease.state === "failed") {
         const linked = runnerHostLinks()[lease.id]
         if (linked && useRemoteHostStore.getState().activeHostId === linked) deactivate()
@@ -248,7 +260,9 @@ export function GitHubRunnerPanel() {
     if (fresh.state !== "ready") return
     const linkedId = runnerHostLinks()[lease.id]
     if (linkedId && hosts.some((host) => host.id === linkedId)) {
-      activateHost(linkedId)
+      // `reconnect`: the button reads "Reconnect" when this runner is already
+      // the active host, and re-running its handshake replaces the transport.
+      void requestSwitch(linkedId, { reconnect: true })
       return
     }
     const payload = await githubRunnerClient.pairing(lease.id)
@@ -276,7 +290,9 @@ export function GitHubRunnerPanel() {
     if (fresh.state !== "ready") throw new Error(t("runnerNotReady"))
     const host = addHost({ label: pairing.lease.label, config })
     linkRunnerHost(pairing.lease.id, host.id)
-    activateHost(host.id)
+    // Not awaited: the pairing is complete once the host is registered, and
+    // whether this window starts driving it may be waiting on the user.
+    void requestSwitch(host.id)
   }
 
   const setupKey = (value: GitHubRunnerRequest) =>
@@ -817,6 +833,7 @@ export function GitHubRunnerPanel() {
           ) : null}
         </div>
       )}
+      {dialog}
     </SettingsBlock>
   )
 }

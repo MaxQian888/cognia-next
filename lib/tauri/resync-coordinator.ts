@@ -32,7 +32,18 @@ export class ResyncCoordinator {
     return this.resolvers.has(eventDomain(event)) || this.resolvers.has("*")
   }
 
+  /**
+   * Run the resolvers for `domains`, rejecting a domain nothing can recover.
+   *
+   * Before anything has registered, a resync asks nothing of anyone: every
+   * resolver is installed after the Host's manifest is read, and the bootstrap
+   * that installs them reads the authoritative snapshot itself, so no state
+   * derived from the event stream exists yet. Rejecting there failed the
+   * transport that very manifest read needed — a phone whose saved cursor
+   * outlived a Host restart reconnected and resynced forever.
+   */
   async resolve(domains: readonly string[]): Promise<void> {
+    if (this.resolvers.size === 0) return
     const requested = domains.length ? [...new Set(domains)] : ["*"]
     const selected = new Set<ResyncResolver>()
     for (const domain of requested) {

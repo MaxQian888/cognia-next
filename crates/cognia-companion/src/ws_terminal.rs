@@ -16,6 +16,7 @@ use axum::{
     http::StatusCode,
     response::Response,
 };
+use cognia_companion_connectivity::signaling::peer::DataChannelTag;
 use cognia_terminal::host::ClientIdentity;
 use cognia_terminal::host_wire::{read_frame, write_frame};
 use cognia_terminal::protocol::{
@@ -191,6 +192,50 @@ async fn close_terminal_data_channel<C: TerminalDataChannel + ?Sized>(channel: &
     }
 }
 
+/// Wait, bounded, for the stack to report the close this side started.
+///
+/// webrtc-rs removes a channel's event sender when its handle is dropped. A
+/// handle dropped before the close event arrives makes the driver log
+/// `ERROR Failed to get data_channel: <handle> for event`, which reads like a
+/// lost channel and sent a previous investigation after the wrong cause.
+async fn await_terminal_close_event(events: &mut tokio::sync::mpsc::Receiver<DataChannelEvent>) {
+    let _ = tokio::time::timeout(TERMINAL_DC_CLOSE_TIMEOUT, async {
+        while let Some(event) = events.recv().await {
+            if matches!(event, DataChannelEvent::OnClose) {
+                break;
+            }
+        }
+    })
+    .await;
+}
+
+/// [`await_terminal_close_event`] for a channel nobody else polls yet.
+async fn await_terminal_channel_close<C: TerminalDataChannel + ?Sized>(channel: &C) {
+    let _ = tokio::time::timeout(TERMINAL_DC_CLOSE_TIMEOUT, async {
+        while let Some(event) = channel.poll().await {
+            if matches!(event, DataChannelEvent::OnClose) {
+                break;
+            }
+        }
+    })
+    .await;
+}
+
+/// Refuse a terminal channel: protocol error frame, close, then wait for the
+/// close event. Only the terminal stream is reset; the main
+/// `cognia.signaling` channel is a separate SCTP stream and is unaffected.
+async fn refuse_terminal_data_channel<C: TerminalDataChannel + ?Sized>(
+    channel: &C,
+    tag: &DataChannelTag,
+    code: TerminalErrorCode,
+    message: &str,
+) {
+    log::info!("terminal data channel refused ({tag}): {code:?}: {message}");
+    let _ = send_datachannel_protocol_error(channel, code, message).await;
+    close_terminal_data_channel(channel).await;
+    await_terminal_channel_close(channel).await;
+}
+
 async fn proxy_terminal_socket(mut socket: WebSocket, device_id: String, state: SharedState) {
     let identity =
         ClientIdentity::remote(format!("companion:{device_id}"), device_id.clone(), true);
@@ -313,17 +358,18 @@ async fn terminal_remote_client_authorized(device_id: &str) -> bool {
 /// and is rechecked while the attachment is live for immediate revocation.
 pub(crate) async fn proxy_terminal_datachannel(
     channel: std::sync::Arc<dyn DataChannel>,
+    tag: DataChannelTag,
     device_id: String,
     state: SharedState,
 ) {
     if !terminal_remote_client_authorized(&device_id).await {
-        let _ = send_datachannel_protocol_error(
+        refuse_terminal_data_channel(
             channel.as_ref(),
+            &tag,
             TerminalErrorCode::PermissionDenied,
             "remote terminal permission is required",
         )
         .await;
-        close_terminal_data_channel(channel.as_ref()).await;
         return;
     }
 
@@ -341,16 +387,17 @@ pub(crate) async fn proxy_terminal_datachannel(
     {
         Ok(stream) => stream,
         Err(message) => {
-            let _ = send_datachannel_protocol_error(
+            refuse_terminal_data_channel(
                 channel.as_ref(),
+                &tag,
                 TerminalErrorCode::HostOffline,
                 &message,
             )
             .await;
-            close_terminal_data_channel(channel.as_ref()).await;
             return;
         }
     };
+    log::info!("terminal data channel attached to the terminal host ({tag})");
     let (mut host_reader, mut host_writer) = tokio::io::split(host_stream);
     let (mut event_rx, event_pump) =
         spawn_terminal_dc_event_pump(std::sync::Arc::clone(&channel), TERMINAL_DC_QUEUE_CAPACITY);
@@ -471,7 +518,10 @@ pub(crate) async fn proxy_terminal_datachannel(
     }
     drop(outbound_tx);
     drop(host_inbound_tx);
+    log::info!("terminal data channel detached ({tag})");
     close_terminal_data_channel(channel.as_ref()).await;
+    // The event pump still owns the poll side; let it hand over the close.
+    await_terminal_close_event(&mut event_rx).await;
     event_pump.abort();
     writer_pump.abort();
     host_writer_pump.abort();
@@ -596,6 +646,74 @@ mod tests {
         assert_eq!(sends.len(), 1);
         let frame = TerminalFrame::decode(&sends[0]).unwrap();
         assert_eq!(frame.kind, FrameKind::Error);
+    }
+
+    fn terminal_tag() -> DataChannelTag {
+        DataChannelTag {
+            label: "cognia.terminal".into(),
+            stream_id: Some(3),
+            handle: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn refusing_a_terminal_channel_sends_the_error_closes_and_waits_for_the_close() {
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel = BlockedDataChannel::with_events(event_rx);
+        // The stack reports the close the refusal started; anything before it
+        // is skipped.
+        event_tx.send(DataChannelEvent::OnClosing).unwrap();
+        event_tx.send(DataChannelEvent::OnClose).unwrap();
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            refuse_terminal_data_channel(
+                &channel,
+                &terminal_tag(),
+                TerminalErrorCode::HostOffline,
+                "terminal host is not running",
+            ),
+        )
+        .await
+        .expect("a reported close must end the refusal promptly");
+
+        assert!(channel.closed.load(Ordering::SeqCst));
+        let sends = channel.immediate_sends.lock().unwrap();
+        assert_eq!(sends.len(), 1);
+        let frame = TerminalFrame::decode(&sends[0]).unwrap();
+        assert_eq!(frame.kind, FrameKind::Error);
+        let body: serde_json::Value = serde_json::from_slice(&frame.payload).unwrap();
+        assert_eq!(body["code"], "host_offline");
+    }
+
+    #[tokio::test]
+    async fn waiting_for_the_close_event_is_bounded() {
+        // A stack that never reports the close must not hold the task.
+        let (_event_tx, mut event_rx) = tokio::sync::mpsc::channel::<DataChannelEvent>(4);
+        let started = std::time::Instant::now();
+        tokio::time::timeout(
+            TERMINAL_DC_CLOSE_TIMEOUT + Duration::from_secs(2),
+            await_terminal_close_event(&mut event_rx),
+        )
+        .await
+        .expect("the wait must give up on its own deadline");
+        assert!(started.elapsed() >= TERMINAL_DC_CLOSE_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn waiting_for_the_close_event_stops_when_the_events_end() {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<DataChannelEvent>(4);
+        event_tx
+            .send(DataChannelEvent::OnBufferedAmountLow)
+            .await
+            .unwrap();
+        drop(event_tx);
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            await_terminal_close_event(&mut event_rx),
+        )
+        .await
+        .expect("a finished event stream ends the wait");
     }
 
     #[tokio::test]

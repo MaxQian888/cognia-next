@@ -65,58 +65,78 @@ export interface ZeroconfWatchResult {
 }
 
 interface ZeroconfPluginShape {
-  watch(opts: { type: string; domain: string }): Promise<void>
-  unwatch(opts?: { type: string; domain: string }): Promise<void>
-  addListener(
-    event: "discover",
-    handler: (result: ZeroconfWatchResult) => void
-  ): Promise<{ remove(): Promise<void> | void }>
+  watch(
+    opts: { type: string; domain: string },
+    callback: (result?: ZeroconfWatchResult, error?: unknown) => void
+  ): Promise<string>
+  unwatch(opts: { type: string; domain: string }): Promise<void>
 }
 
-// Resolve through the shared loader: window.Capacitor.Plugins.ZeroConf first
-// (registered at mobile boot from PluginHeaders), then the dynamic import.
-// NOTE the casing — the package exports and registers as "ZeroConf".
 const loadZeroconf = makeDefaultLoader<ZeroconfPluginShape>("capacitor-zeroconf", "ZeroConf")
+const NATIVE_SERVICE = { type: `${SERVICE_TYPE}.`, domain: "local." }
 
-/**
- * Default mobile loader — adapts `capacitor-zeroconf`'s
- * `watch`/`addListener("discover")` surface to our internal
- * `MdnsScannerShape`. The shared loader throws on web / Tauri so
- * `subscribe()` returns a no-op for those platforms.
- *
- * The plugin fires `discover` with `{ action, service }`; only `resolved`
- * events carry addresses, so `added`/`removed` are dropped here — callers
- * want connectable endpoints, not liveness churn.
- *
- * The plugin's `txtRecord.fp` carries the desktop's SHA-256 SPKI fingerprint
- * we use for TLS pinning before the first request.
- */
+// The native plugin owns one watch per service type. Share it across the pair
+// page and reconnect controller; one caller stopping must not stop the other.
+const nativeSubscribers = new Map<symbol, (svc: DiscoveredService) => void>()
+let nativeOperations: Promise<void> = Promise.resolve()
+let watchGeneration = 0
+function serializeNativeScan(action: () => Promise<void>): Promise<void> {
+  const operation = nativeOperations.then(action)
+  nativeOperations = operation.catch(() => undefined)
+  return operation
+}
+
 const defaultMobileLoader: MdnsLoader = async () => {
   const plugin = await loadZeroconf()
-
-  // Split `_cognia._tcp` into `type` + assume `.local.` domain so the
-  // plugin's IDL matches.
+  const lease = Symbol("mdns scan")
+  let listener: ((svc: DiscoveredService) => void) | undefined
   return {
-    async startScan({ serviceType }) {
-      await plugin.watch({ type: serviceType, domain: "local." })
+    startScan() {
+      return serializeNativeScan(async () => {
+        if (nativeSubscribers.has(lease) || !listener) return
+        nativeSubscribers.set(lease, listener)
+        if (nativeSubscribers.size > 1) return
+        const generation = ++watchGeneration
+        try {
+          // Android and iOS emit through the watch callback, not 'discover'.
+          // Android also sends an empty initial callback acknowledgement.
+          await plugin.watch(NATIVE_SERVICE, (result, error) => {
+            if (error || generation !== watchGeneration || result?.action !== "resolved") return
+            const svc = result.service
+            const ip = svc.ipv4Addresses?.[0] ?? svc.ipv6Addresses?.[0]
+            if (!ip || !svc.port || svc.port < 1 || svc.port > 65535) return
+            const discovered: DiscoveredService = {
+              name: svc.name ?? "cognia",
+              hostname: svc.hostname ?? svc.name ?? ip,
+              ip,
+              port: svc.port,
+              txt: svc.txtRecord ?? {},
+            }
+            for (const notify of nativeSubscribers.values()) notify(discovered)
+          })
+        } catch (error) {
+          nativeSubscribers.delete(lease)
+          watchGeneration += 1
+          await plugin.unwatch(NATIVE_SERVICE).catch(() => undefined)
+          throw error
+        }
+      })
     },
-    async stopScan() {
-      await plugin.unwatch({ type: SERVICE_TYPE, domain: "local." })
+    stopScan() {
+      return serializeNativeScan(async () => {
+        if (!nativeSubscribers.delete(lease) || nativeSubscribers.size > 0) return
+        watchGeneration += 1
+        await plugin.unwatch(NATIVE_SERVICE)
+      })
     },
     async addListener(_event, handler) {
-      const sub = await plugin.addListener("discover", (result) => {
-        if (result.action !== "resolved") return
-        const svc = result.service
-        const ip = svc.ipv4Addresses?.[0] ?? svc.ipv6Addresses?.[0] ?? ""
-        handler({
-          name: svc.name ?? "cognia",
-          hostname: svc.hostname ?? svc.name ?? ip,
-          ip,
-          port: svc.port ?? 0,
-          txt: svc.txtRecord ?? {},
-        })
-      })
-      return sub
+      listener = handler
+      return {
+        remove: () => {
+          listener = undefined
+          nativeSubscribers.delete(lease)
+        },
+      }
     },
   }
 }
@@ -138,18 +158,27 @@ export async function subscribe(
   } catch {
     return () => {}
   }
+  let listener: { remove(): Promise<void> | void } | undefined
+  let disposed = false
   try {
-    const listener = await scanner.addListener("serviceFound", handler)
+    listener = await scanner.addListener("serviceFound", (svc) => {
+      if (!disposed) handler(svc)
+    })
     await scanner.startScan({ serviceType: SERVICE_TYPE })
     return async () => {
+      if (disposed) return
+      disposed = true
       try {
         await scanner.stopScan()
       } catch {
         // Best effort.
       }
-      void listener.remove()
+      await Promise.resolve(listener?.remove()).catch(() => undefined)
     }
   } catch {
+    disposed = true
+    await scanner.stopScan().catch(() => undefined)
+    await Promise.resolve(listener?.remove()).catch(() => undefined)
     return () => {}
   }
 }

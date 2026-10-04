@@ -108,6 +108,14 @@
       "args": ["userMessageId", "options"]
     },
     {
+      "name": "runtimeStatus",
+      "kind": "host",
+      "exposure": "control",
+      "capability": "session.multi-turn",
+      "args": [],
+      "note": "Read the live retained context identity before deciding whether canonical history must be restored."
+    },
+    {
       "name": "seedReadState",
       "kind": "sdk",
       "exposure": "control",

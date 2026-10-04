@@ -162,6 +162,22 @@ describe("RoutingTransport", () => {
     expect(remote.calls).toHaveLength(0)
   })
 
+  it("keeps trusted SSH key reads and forgets on this desktop while a remote host is active", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+
+    await routing.call("ssh_list_host_keys", {})
+    await routing.call("ssh_forget_host_key", { host: "build.example", port: 22 })
+
+    expect(local.calls.map((call) => call.name)).toEqual([
+      "ssh_list_host_keys",
+      "ssh_forget_host_key",
+    ])
+    expect(remote.calls).toHaveLength(0)
+  })
+
   it("keeps desktop webview and relay commands local while a remote host is active", async () => {
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")
@@ -331,6 +347,7 @@ describe("active-remote endpoint + isRemoteHostActive", () => {
   it("stores and clears the raw WebSocket endpoint descriptor", () => {
     expect(getActiveRemoteEndpoint()).toBeNull()
     const endpoint = {
+      remoteHost: { id: "registry-a", label: "Build host" },
       baseUrl: "https://box.example:27890",
       deviceId: "device-1",
       devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },

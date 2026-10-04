@@ -456,7 +456,6 @@ async function probeWithCapacitorHttp(
   const resp = await capacitorHttpGet(cap, url, {
     signal,
     timeoutMs,
-    serverTrustMode: "self-signed",
   })
   if (!resp) return null
   const responseLike = {

@@ -48,6 +48,7 @@ describe("companion command descriptors", () => {
 
   it("keeps external-agent discovery readable without a write approval lease", () => {
     for (const name of [
+      "external_agent_cognia_models",
       "external_agent_config_get",
       "external_agent_config_list",
       "external_agent_list",

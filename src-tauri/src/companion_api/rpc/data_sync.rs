@@ -150,6 +150,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "external_agent_update",
     "external_agent_admit_run",
     "external_agent_cancel_run",
+    "external_agent_cognia_models",
     "external_agent_config_create",
     "external_agent_config_delete",
     "external_agent_config_get",
@@ -908,6 +909,10 @@ pub(super) async fn dispatch(
         | "external_agent_config_list"
         | "external_agent_config_reconcile"
         | "external_agent_config_update"
+        // The Cognia models a configuration can run on through this Host's
+        // gateway. Answered by the Host's TS layer because the eligibility rule
+        // and the provider settings it reads live there.
+        | "external_agent_cognia_models"
         // Run admission. The stamp a caller presents is checked against the
         // head here, so the answer to "may this run start" is decided by the
         // host that owns the configuration rather than by the browser that

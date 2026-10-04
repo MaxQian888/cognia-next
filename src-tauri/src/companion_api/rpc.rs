@@ -392,6 +392,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     // it is allowed to spawn.
     "external_agent_admit_run",
     "external_agent_cancel_run",
+    // Which Cognia provider models the Host can run a configuration on through
+    // its own gateway (ADR-0090, 2026-10-02). Computed from the Host's settings
+    // and vault; identifiers and capability facts only.
+    "external_agent_cognia_models",
     "external_agent_config_create",
     "external_agent_config_delete",
     "external_agent_config_get",
@@ -476,6 +480,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "gateway_list_route_tickets",
     "gateway_revoke_route_ticket",
     "gateway_probe_upstream",
+    // ADR-0090 (2026-10-02) — Host-run Cognia-model turns: the Host's own
+    // process leases one of its providers for one task.
+    "agent_gateway_host_task_prepare",
+    "agent_gateway_host_task_renew",
+    "agent_gateway_host_task_revoke",
     // ADR-0059 T-A5 — connector command plane for the headless brain's
     // connector-runtime. Same names as the Tauri commands; each arm
     // delegates to the same free function the command wraps.
@@ -1278,6 +1287,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Host-owned external-agent configuration reads.
     "external_agent_config_get",
     "external_agent_config_list",
+    // The Cognia model catalog follows the Host's provider settings, which can
+    // change between two polls; never serve it from the idempotency cache.
+    "external_agent_cognia_models",
     // ADR-0059 R11 — read-only status probe on the headless exec backend.
     "get_external_agent_status",
     // ADR-0059 R12 — read-only projection of the webhook ingress registry.
@@ -2322,6 +2334,11 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "gateway_list_route_tickets",
     "gateway_revoke_route_ticket",
     "gateway_probe_upstream",
+    // A Host task lease spends a credential only the Host holds; the brain
+    // asks for it on behalf of a turn the paired device was admitted for.
+    "agent_gateway_host_task_prepare",
+    "agent_gateway_host_task_renew",
+    "agent_gateway_host_task_revoke",
     // Lark dual-entry (plan 2026-07-24): token minting binds principals to
     // accounts, intent completion feeds browser-visible results, and metric
     // names are allowlisted — none of it is a paired-device capability.

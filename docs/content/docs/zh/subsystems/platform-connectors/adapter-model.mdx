@@ -14,7 +14,7 @@ description: 每个 IM 连接器都实现的 PlatformAdapter 契约 —— 同�
   `a2uiCapability()`（`types/connectors/adapter.ts:180`）—— 它在热发送路径上被 `build-options` 读取。运行时
   **工厂** `buildAdapterFromRow(row)`（`lib/connectors/adapter-registry.ts:42`）按 `row.type` 在 11 个构建器
   间分发，每个构建器探测自身 self-id 并装配**惰性凭据解析器**（轮换安全）。一套并行的**纯展示注册表**
-  `CONNECTOR_METADATA`（`lib/connectors/adapter-metadata.ts:42`，16 行）为 Discover 页面供数 —— 其 `status`
+  `CONNECTOR_METADATA`（`lib/connectors/adapter-metadata.ts:42`，16 行）为 Discover 页面提供数据 —— 其 `status`
   现在反映原生适配器可用性，同时为预留平台保留 planned 行。OAuth 完成逻辑存于一个 2 项的 Map（`lib/connectors/oauth-registry.ts:27`），去重与
   自我检测则通过 `MentionAccumulator`（`lib/connectors/adapters/_shared/mention-extractor.ts:24`）共享。
 </TLDR>
@@ -31,9 +31,7 @@ description: 每个 IM 连接器都实现的 PlatformAdapter 契约 —— 同�
 
 ## PlatformAdapter 契约
 
-每个连接器 —— 无论内置还是插件贡献 —— 都实现 `interface PlatformAdapter`
-（`types/connectors/adapter.ts:135`）。该契约刻意保持最小：稳定的 `meta`/`id`、三方法的生命周期、**唯一一个**
-非可选的变更方法（`send`），以及一次必需的同步能力探测。其余一切都是可选的，并在调用点做特性检测。
+每个连接器 —— 无论内置还是插件贡献 —— 都实现 `interface PlatformAdapter`（`types/connectors/adapter.ts:135`）。该契约刻意保持最小：稳定的 `meta`/`id`、三方法的生命周期、**唯一一个**非可选的变更方法（`send`），以及一次必需的同步能力探测。其余一切都是可选的，并在调用点做特性检测。
 
 | 成员 | 行号 | 必需 | 说明 |
 | --- | --- | --- | --- |
@@ -53,16 +51,14 @@ description: 每个 IM 连接器都实现的 PlatformAdapter 契约 —— 同�
 | `a2uiCapability()` | `adapter.ts:180` | **是** | 同步；由 `build-options.ts:resolveSendOptions` 读取以注入能力感知的提示词 |
 | `platformSkillCapabilities?()` | `adapter.ts:193` | 否 | 仅 **Lark** 实现（ADR-0026 技能族） |
 
-`send` 是持久脊柱；`streamReply` 是尽力而为的实时预览，与平台侧 stream id 共享，因此 `send` 在不重复消息的
-前提下收尾该流 —— 而一个抛错的 `streamReply` 绝不能打断本轮（`adapter.ts:157`）。
+`send` 是持久脊柱；`streamReply` 是尽力而为的实时预览，与平台侧 stream id 共享，因此 `send` 在不重复消息的前提下收尾该流 —— 而一个抛错的 `streamReply` 绝不能打断本轮（`adapter.ts:157`）。
 
 ### AdapterContext
 
 `start(ctx)` 接收一个 `AdapterContext`（`types/connectors/adapter.ts:88`）—— 适配器通向宿主的唯一窗口：
 
 - `emit(event)`（`adapter.ts:90`）—— 向总线推送一个 `NormalizedInboundEvent`（入站入口）。
-- `tauri.*`（`adapter.ts:92-100`）—— `httpRequest`、`openWs`、`fetchAttachment`、`bindWebhookRoute`、
-  `unbindWebhookRoute`、`publicBaseUrl`；每一个都包装一条 Rust `connectors_*` 命令。
+- `tauri.*`（`adapter.ts:92-100`）—— `httpRequest`、`openWs`、`fetchAttachment`、`bindWebhookRoute`、`unbindWebhookRoute`、`publicBaseUrl`；每一个都包装一条 Rust `connectors_*` 命令。
 - `secrets`（`adapter.ts:101`）—— 作用于实例的 keyring `get`/`set`/`delete`/`list`。
 - `logger`（`adapter.ts:102`）—— 带前缀的 console 日志器。
 - `signal`（`adapter.ts:104`）—— 适配器停止时触发中止。
@@ -89,20 +85,14 @@ flowchart LR
 
 ## 能力与 A2UI 矩阵
 
-两套标志系统并存。`ALL_CAPABILITIES`（`types/connectors/capability.ts:3`）是粗粒度的布尔汇总 ——
-`send.text`/`markdown`/`html`/`image`/`voice`/`video`/`file`/`card`/`poll`/`location`/`reply`/`emoji`/`mention`/`thread`/`reaction`、
-A2UI 汇总位 `send.a2ui`（`capability.ts:25`）、变更类 `edit`/`delete`/`typing`/`history.fetch`
-（`capability.ts:27-30`），以及平台特定的逃生舱口 `rich-markdown.telegram`/`.slack` 与
-`rich-card.lark`/`.slack`（`capability.ts:32-35`）。`hasCapability(flags, cap)`（`capability.ts:40`）是
-成员检查。
+两套标志系统并存。`ALL_CAPABILITIES`（`types/connectors/capability.ts:3`）是粗粒度的布尔汇总 ——`send.text`/`markdown`/`html`/`image`/`voice`/`video`/`file`/`card`/`poll`/`location`/`reply`/`emoji`/`mention`/`thread`/`reaction`、A2UI 汇总位 `send.a2ui`（`capability.ts:25`）、变更类 `edit`/`delete`/`typing`/`history.fetch`（`capability.ts:27-30`），以及平台特定的逃生舱口 `rich-markdown.telegram`/`.slack` 与 `rich-card.lark`/`.slack`（`capability.ts:32-35`）。`hasCapability(flags, cap)`（`capability.ts:40`）是成员检查。
 
 细粒度的投影计划是 **A2UI 矩阵**：`A2UI_COMPONENT_KINDS`（`capability.ts:54`）枚举全部 **37** 种组件，
 每种映射到一个 `A2UIComponentSupport`（`capability.ts:124`），取值为 `native | simulated | fallback |
 unsupported`。一份完整的 `A2UICapabilityMatrix`（`capability.ts:126`）即
 `Readonly<Record<A2UIComponentKind, A2UIComponentSupport>>`。
 
-**关键不变量**：适配器只声明它能原生处理的部分，每个未提及的种类默认落到 `fallback` —— 于是助手总能发出
-A2UI，不被支持的组件退化为纯文本镜像而非凭空消失：
+**关键不变量**：适配器只声明它能原生处理的部分，每个未提及的种类默认落到 `fallback` —— 于是助手总能发出 A2UI，不被支持的组件退化为纯文本镜像而非凭空消失：
 
 ```ts
 // types/connectors/capability.ts:133-144
@@ -117,20 +107,11 @@ export function buildA2UICapabilityMatrix(
 }
 ```
 
-当某段无法原生发送时，`defaultDegradeChain(from)`（`capability.ts:168`）给出保守的回退顺序。对 A2UI 而言
-是 `a2ui → card → markdown → text`（`capability.ts:191`）—— `card` 居中是因为 Lark/Slack 能把退化后的
-界面裹进通用卡片；纯文本永远是兜底。`PlatformKind`（`platform-kind.ts:33`）经 `ALL_PLATFORM_KINDS`
-（`platform-kind.ts:7`，含 `email`/`kook`/`line`/`mattermost`/`github`）枚举 **16** 种，由
-`isPlatformKind`（`platform-kind.ts:35`）守卫。
+当某段无法原生发送时，`defaultDegradeChain(from)`（`capability.ts:168`）给出保守的回退顺序。对 A2UI 而言是 `a2ui → card → markdown → text`（`capability.ts:191`）—— `card` 居中是因为 Lark/Slack 能把退化后的界面裹进通用卡片；纯文本永远是兜底。`PlatformKind`（`platform-kind.ts:33`）经 `ALL_PLATFORM_KINDS`（`platform-kind.ts:7`，含 `email`/`kook`/`line`/`mattermost`/`github`）枚举 **16** 种，由 `isPlatformKind`（`platform-kind.ts:35`）守卫。
 
 ## 六种原因，一套词表
 
-`effectiveCapabilities()`（`lib/connectors/effective-capabilities.ts:225`）把声明的能力列表收窄成某个
-**实例**真正能提供的那些，并为每一项丢弃记录一条 `CapabilitySuppression`，原因取自五种：
-`transport_unsupported`、`missing_oauth_scope`、`upstream_impl_unsupported`、`instance_setting_off`、
-`scene_unsupported`。`capabilityAvailability(snapshot, capability)`
-（`lib/connectors/capability-availability.ts:100`）是它的读出面，并补上了抑制列表在结构上装不下的
-**第六种**原因：
+`effectiveCapabilities()`（`lib/connectors/effective-capabilities.ts:225`）把声明的能力列表收窄成某个**实例**真正能提供的那些，并为每一项丢弃记录一条 `CapabilitySuppression`，原因取自五种：`transport_unsupported`、`missing_oauth_scope`、`upstream_impl_unsupported`、`instance_setting_off`、`scene_unsupported`。`capabilityAvailability(snapshot, capability)`（`lib/connectors/capability-availability.ts:100`）是它的读出面，并补上了抑制列表在结构上装不下的**第六种**原因：
 
 ```ts
 // lib/connectors/capability-availability.ts:33
@@ -140,17 +121,9 @@ export const CAPABILITY_UNAVAILABLE_CAUSES = [
 ] as const
 ```
 
-`suppressionFor` 在「能力可用」和「平台压根没声明过它」两种相反的情形下都返回 `undefined`，而后者才是
-多数情形 —— 11 个平台里有 4 个没有 `send.reply`，8 个没有 `presence.status`，7 个没有 `history.fetch`。
-所以只建立在五种抑制原因上的读出面，恰恰会在隐藏得最多的那些场景里无话可说。
+`suppressionFor` 在「能力可用」和「平台压根没声明过它」两种相反的情形下都返回 `undefined`，而后者才是多数情形 —— 11 个平台里有 4 个没有 `send.reply`，8 个没有 `presence.status`，7 个没有 `history.fetch`。所以只建立在五种抑制原因上的读出面，恰恰会在隐藏得最多的那些场景里无话可说。
 
-两种没有补救办法的原因（`scene_unsupported`、`not_declared`）被排除在 `isActionableCause` 之外，因此它们
-的读出在说明原因后就结束，而不是编造一个下一步：`CapabilityNotice`
-（`components/connectors/capability-notice.tsx`）渲染 `reason.<cause>`，只有那四种可修复的才追加
-`nextStep.<cause>`。两者都住在唯一的 `connectors.capability` i18n 命名空间下 —— 适配器的能力矩阵卡片曾经
-自带一份私有副本，这正是同一个缺失的 Slack 权限在一个界面上是一句话、在另一个界面上却是一个消失了的控件的
-原因。这两个联合由目录覆盖测试钉在该命名空间上，因为 ``t(`reason.${cause}`)`` 是模板字面量 key，
-`pnpm lint:i18n` 会全部跳过。
+两种没有补救办法的原因（`scene_unsupported`、`not_declared`）被排除在 `isActionableCause` 之外，因此它们的读出在说明原因后就结束，而不是编造一个下一步：`CapabilityNotice`（`components/connectors/capability-notice.tsx`）渲染 `reason.<cause>`，只有那四种可修复的才追加 `nextStep.<cause>`。两者都住在唯一的 `connectors.capability` i18n 命名空间下 —— 适配器的能力矩阵卡片曾经自带一份私有副本，这正是同一个缺失的 Slack 权限在一个界面上是一句话、在另一个界面上却是一个消失了的控件的原因。这两个联合由目录覆盖测试钉在该命名空间上，因为 ``t(`reason.${cause}`)`` 是模板字面量 key，`pnpm lint:i18n` 会全部跳过。
 
 <Callout type="warn">
   **渲染、禁用、写明原因 —— 永远不要隐藏。** 实例无法提供的控件应当带着它存储的值渲染出来、置为禁用，并
@@ -161,8 +134,7 @@ export const CAPABILITY_UNAVAILABLE_CAUSES = [
 
 ## 运行时工厂：buildAdapterFromRow
 
-`buildAdapterFromRow(row)`（`lib/connectors/adapter-registry.ts:42`）是类型联合的运行时对偶 —— 它按
-`row.type` 分发到每个平台的某个 `buildXxxAdapter`，对任何没有构建器的类型返回 `null`（并打印警告）：
+`buildAdapterFromRow(row)`（`lib/connectors/adapter-registry.ts:42`）是类型联合的运行时对偶 —— 它按 `row.type` 分发到每个平台的某个 `buildXxxAdapter`，对任何没有构建器的类型返回 `null`（并打印警告）：
 
 ```ts
 // lib/connectors/adapter-registry.ts:42-68
@@ -200,8 +172,7 @@ export async function buildAdapterFromRow(row: AdapterInstanceRow): Promise<Plat
 | `buildWechatOaAdapter` | `:409` | 无 —— id 在首条入站消息到达 |
 | `buildDingTalkAdapter` | `:429` | 无 —— Stream 模式；令牌按需铸造 |
 
-self-id 探测失败是**非致命**的：适配器仍会启动，但自我提及检测可能漏掉隐式称呼。凭据从不被急切捕获 ——
-它们是闭包于 keyring 之上的**惰性解析器**，因此轮换后的密钥会在下次调用时被采用，无需重启：
+self-id 探测失败是**非致命**的：适配器仍会启动，但自我提及检测可能漏掉隐式称呼。凭据从不被急切捕获 ——它们是闭包于 keyring 之上的**惰性解析器**，因此轮换后的密钥会在下次调用时被采用，无需重启：
 
 ```ts
 // lib/connectors/adapter-registry.ts:104-110 (telegram)
@@ -214,8 +185,7 @@ return createTelegramAdapter({
 })
 ```
 
-Lark 还会把成功的 `selfBotOpenId` 探测回写到 `row.settings`（`:249-258`），让冷启动跳过该 API 调用；UI
-触点 `refreshSelfBotOpenId(adapterId)`（`:470-538`）在静默启动探测失败时重新探测并重新持久化。
+Lark 还会把成功的 `selfBotOpenId` 探测回写到 `row.settings`（`:249-258`），让冷启动跳过该 API 调用；UI 触点 `refreshSelfBotOpenId(adapterId)`（`:470-538`）在静默启动探测失败时重新探测并重新持久化。
 
 ```mermaid
 flowchart TD
@@ -232,8 +202,7 @@ flowchart TD
 
 ## AdapterContext 与 ctx.emit
 
-生产环境的 `AdapterContext` 由 `buildAdapterContext(input)`（`lib/connectors/adapter-context.ts:123`）装配。
-其 `emit` 是唯一的入站入口 —— 它把每个事件直接送入总线的完整流水线：
+生产环境的 `AdapterContext` 由 `buildAdapterContext(input)`（`lib/connectors/adapter-context.ts:123`）装配。其 `emit` 是唯一的入站入口 —— 它把每个事件直接送入总线的完整流水线：
 
 ```ts
 // lib/connectors/adapter-context.ts:128-134
@@ -244,29 +213,19 @@ emit: async (event: NormalizedInboundEvent) => {
 },
 ```
 
-`secrets` 包装 keyring 的 `get`/`set`/`delete`/`list` 命令（`adapter-context.ts:78-91`），`logger` 是带
-前缀的 console（`:60-76`），各 `tauri.*` 方法委托给 `connectors_*` Rust 命令。
-`bindWebhookRoute`/`unbindWebhookRoute` 是已接线但未使用 —— 它们直接 `invoke`，因此若未来某个适配器确需
-按路由注册，会抛出清晰的错误（`:145-153`）。
+`secrets` 包装 keyring 的 `get`/`set`/`delete`/`list` 命令（`adapter-context.ts:78-91`），`logger` 是带前缀的 console（`:60-76`），各 `tauri.*` 方法委托给 `connectors_*` Rust 命令。`bindWebhookRoute`/`unbindWebhookRoute` 是已接线但未使用 —— 它们直接 `invoke`，因此若未来某个适配器确需按路由注册，会抛出清晰的错误（`:145-153`）。
 
 ## 展示注册表 vs 运行时工厂
 
-`adapter-metadata.ts` 是运行时工厂的**纯展示对偶**：`adapter-registry` 回答“为这一行构建适配器”，而
-`CONNECTOR_METADATA`（`lib/connectors/adapter-metadata.ts:42`，16 行）回答“向用户介绍我们支持的每个平台”。
+`adapter-metadata.ts` 是运行时工厂的**纯展示对偶**：`adapter-registry` 回答“为这一行构建适配器”，而 `CONNECTOR_METADATA`（`lib/connectors/adapter-metadata.ts:42`，16 行）回答“向用户介绍我们支持的每个平台”。
 每个 `ConnectorMeta`（`:21`）携带 `type`、`iconName`、`status`（`stable | beta | planned`）、`oauth` 与
-`richMessages`。查找经 `getConnectorMeta`（`:94`）/ `listConnectorMetadata`（`:98`），而 `findMetadataGaps`
-（`:108`）使该表与 `ALL_PLATFORM_KINDS` 对齐。
+`richMessages`。查找经 `getConnectorMeta`（`:94`）/ `listConnectorMetadata`（`:98`），而 `findMetadataGaps`（`:108`）使该表与 `ALL_PLATFORM_KINDS` 对齐。
 
-这里的 `status` 是面向操作者的可用性信号：能从 Settings 配置并启动的源码树内适配器标为 `stable`
-（包括 Matrix、企业微信、个人微信、QQ 官方机器人、微信公众号与钉钉），插件拥有的 inbox surface（例如 GitHub）
-仍为 `beta`，没有原生工厂的预留平台仍为 `planned`。Discover 页面消费该注册表；它从不导入工厂。
+这里的 `status` 是面向操作者的可用性信号：能从 Settings 配置并启动的源码树内适配器标为 `stable`（包括 Matrix、企业微信、个人微信、QQ 官方机器人、微信公众号与钉钉），插件拥有的 inbox surface（例如 GitHub）仍为 `beta`，没有原生工厂的预留平台仍为 `planned`。Discover 页面消费该注册表；它从不导入工厂。
 
 ## OAuth 注册表
 
-`oauth-registry.ts` 把 `PlatformKind` 映射到那个完成 OAuth 授权码交换并将凭据写入 keyring 的异步处理器。
-`OAuthHandler`（`lib/connectors/oauth-registry.ts:22`）是 `(code, state) => Promise<void>`，`oauthRegistry`
-（`:27`）是一个 `Map`。只有两个平台注册 —— **Slack**（`:36`）与 **Lark**（`:55`），各自隐藏在其处理器模块的
-动态 import 之后。Telegram、Discord 与 OneBot 不使用 OAuth。
+`oauth-registry.ts` 把 `PlatformKind` 映射到那个完成 OAuth 授权码交换并将凭据写入 keyring 的异步处理器。`OAuthHandler`（`lib/connectors/oauth-registry.ts:22`）是 `(code, state) => Promise<void>`，`oauthRegistry`（`:27`）是一个 `Map`。只有两个平台注册 —— **Slack**（`:36`）与 **Lark**（`:55`），各自隐藏在其处理器模块的动态 import 之后。Telegram、Discord 与 OneBot 不使用 OAuth。
 
 ### 整个流程都在 brain 里跑，两种宿主一致
 
@@ -278,38 +237,24 @@ emit: async (event: NormalizedInboundEvent) => {
 | 持久 pending 记录 | `adapters/slack/oauth-pending.ts` | `adapters/lark/oauth-pending.ts` |
 | 完成（校验 + 兑换） | `adapters/slack/oauth-handler.ts` | `adapters/lark/oauth-handler.ts` |
 
-pending 记录存在连接器 secret store 里，**而不是** `sessionStorage`。headless brain 的 Web Storage 是内存
-垫片，且打开设置对话框的浏览器是另一个进程 —— 写在那里的 state，需要花掉它的那个进程根本看不见。渲染端
-`CONNECTOR_OAUTH_STATE_KEY` 那份副本只是桌面端的预检；持久记录才是权威的 CSRF 校验，并且在兑换之前就被
-花掉（clear-on-use），所以重放的回跳无法搭上它。
+pending 记录存在连接器 secret store 里，**而不是** `sessionStorage`。headless brain 的 Web Storage 是内存垫片，且打开设置对话框的浏览器是另一个进程 —— 写在那里的 state，需要花掉它的那个进程根本看不见。渲染端 `CONNECTOR_OAUTH_STATE_KEY` 那份副本只是桌面端的预检；持久记录才是权威的 CSRF 校验，并且在兑换之前就被花掉（clear-on-use），所以重放的回跳无法搭上它。
 
-`beginXOAuth` 返回 URL 而不是直接打开 —— 只有调用方知道它所处的位置有没有可用浏览器。桌面端由设置对话框
-在同进程打开；headless 部署通过 `oauth-begin` 运维意图（`lib/connectors/principal/admin-intent.ts`）驱动
-同一个函数，该意图按适配器行自身的 `type` 分派。
+`beginXOAuth` 返回 URL 而不是直接打开 —— 只有调用方知道它所处的位置有没有可用浏览器。桌面端由设置对话框在同进程打开；headless 部署通过 `oauth-begin` 运维意图（`lib/connectors/principal/admin-intent.ts`）驱动同一个函数，该意图按适配器行自身的 `type` 分派。
 
 ### 中继
 
-Slack 与飞书的开发者后台都不接受自定义 scheme，所以回调目标是连接器 ingress 上的一个 https 路由，再由它
-向两种宿主扇出：
+Slack 与飞书的开发者后台都不接受自定义 scheme，所以回调目标是连接器 ingress 上的一个 https 路由，再由它向两种宿主扇出：
 
 | 路由 | 路径 | brain 主题 | 桌面端跳板 |
 | --- | --- | --- | --- |
 | `oauth_lark_callback` | `/oauth/lark/callback` | `connectors://lark-oauth/callback` | `cognia://connector/oauth/lark` |
 | `oauth_connector_callback` | `/oauth/connector/{kind}/callback` | `connectors://connector-oauth/callback`（携带 `kind`） | `cognia://connector/oauth/{kind}` |
 
-两者都在 `crates/cognia-connectors/src/axum_app.rs`。新平台一律走通用路由 ——
-`connectorOAuthRelayPath(kind)`（`lib/connectors/server-transport.ts`）推导路径；Lark 保留自己那条，只是
-因为那个 URL 已经逐字节注册在既有安装的飞书后台里。brain 侧一个订阅服务所有平台：负载里写明 `kind`，
-处理器从 `oauthRegistry` 取，所以一个新平台只要注册处理器就能在 headless 下完成授权。
+两者都在 `crates/cognia-connectors/src/axum_app.rs`。新平台一律走通用路由 ——`connectorOAuthRelayPath(kind)`（`lib/connectors/server-transport.ts`）推导路径；Lark 保留自己那条，只是因为那个 URL 已经逐字节注册在既有安装的飞书后台里。brain 侧一个订阅服务所有平台：负载里写明 `kind`，处理器从 `oauthRegistry` 取，所以一个新平台只要注册处理器就能在 headless 下完成授权。
 
 ## 共享：MentionAccumulator
 
-每个平台解析器都遍历不同的原生消息形状，但遍历后的归约 —— 去重加自我检测加规范返回类型 —— 是一致的，
-由 `MentionAccumulator`（`lib/connectors/adapters/_shared/mention-extractor.ts:24`）持有。其
-`constructor(selfId)`（`:29`）植入 self id；`add(id)`（`:36`）记录一个候选（对空值/重复为空操作，但在重复的
-self-id 上仍翻转 `selfMentioned`）；`markSelfMentioned()`（`:55`）在没有 `@`-实体时强制标记自我提及（例如
-回复一条由机器人撰写的消息）；`finalize()`（`:65`）返回总线消费的 `MentionDescriptor`。Discord、Lark、Slack 与 Telegram 解析器直接驱动
-`MentionAccumulator`；OneBot 内联完成该归约。
+每个平台解析器都遍历不同的原生消息形状，但遍历后的归约 —— 去重加自我检测加规范返回类型 —— 是一致的，由 `MentionAccumulator`（`lib/connectors/adapters/_shared/mention-extractor.ts:24`）持有。其 `constructor(selfId)`（`:29`）植入 self id；`add(id)`（`:36`）记录一个候选（对空值/重复为空操作，但在重复的 self-id 上仍翻转 `selfMentioned`）；`markSelfMentioned()`（`:55`）在没有 `@`-实体时强制标记自我提及（例如回复一条由机器人撰写的消息）；`finalize()`（`:65`）返回总线消费的 `MentionDescriptor`。Discord、Lark、Slack 与 Telegram 解析器直接驱动 `MentionAccumulator`；OneBot 内联完成该归约。
 
 ## 相关
 

@@ -3735,6 +3735,30 @@ async fn dispatch_coverage_gateway_probe_upstream() {
 }
 
 #[tokio::test]
+async fn dispatch_coverage_agent_gateway_host_task_prepare() {
+    assert_not_404!(
+        "agent_gateway_host_task_prepare",
+        json!({ "request": { "taskId": "t", "providerId": "p", "model": "m", "ingressProtocol": "openai-chat" } })
+    );
+}
+
+#[tokio::test]
+async fn dispatch_coverage_agent_gateway_host_task_renew() {
+    assert_not_404!(
+        "agent_gateway_host_task_renew",
+        json!({ "taskId": "t", "ticketId": "rt", "accountGeneration": 0 })
+    );
+}
+
+#[tokio::test]
+async fn dispatch_coverage_agent_gateway_host_task_revoke() {
+    assert_not_404!(
+        "agent_gateway_host_task_revoke",
+        json!({ "taskId": "t", "ticketId": "rt", "accountGeneration": 0 })
+    );
+}
+
+#[tokio::test]
 async fn dispatch_coverage_provider_catalog_refresh() {
     assert_not_404!("provider_catalog_refresh", json!({ "payload": {} }));
 }

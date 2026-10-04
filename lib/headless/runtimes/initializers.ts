@@ -314,15 +314,8 @@ registerHeadlessRuntime({
   name: "background-task",
   hosts: ["brain"],
   start: async () => {
-    const [{ interruptRendererBackgroundTasksOnBoot }, { recoverStaleDirectChatExecutionRuns }] =
-      await Promise.all([
-        import("@/lib/background-tasks/renderer-subagent-registry"),
-        import("@/lib/execution/direct-chat-run"),
-      ])
-    await Promise.all([
-      interruptRendererBackgroundTasksOnBoot(),
-      recoverStaleDirectChatExecutionRuns(),
-    ])
+    const { startBackgroundTaskRecovery } = await import("@/lib/background-tasks/redispatch")
+    return startBackgroundTaskRecovery()
   },
 })
 

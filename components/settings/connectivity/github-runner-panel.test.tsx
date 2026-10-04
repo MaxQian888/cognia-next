@@ -14,9 +14,20 @@ const translate = (key: string, values?: { minutes?: number }) =>
 const alternateTranslate = (key: string) => key
 const activateHost = jest.fn()
 const deactivate = jest.fn()
-const addHost = jest.fn(() => ({ id: "paired-host" }))
+// Like the real action, the host is in the registry the moment `addHost`
+// returns: "connect after pairing" asks for it before any re-render.
+const addHost = jest.fn(() => {
+  if (!store.hosts.some((host) => host.id === "paired-host")) {
+    store.hosts = [...store.hosts, { id: "paired-host", label: "Build" }]
+  }
+  return { id: "paired-host" }
+})
+let mockRunActive = false
+jest.mock("@/lib/devices/execution-host-guard", () => ({
+  anyRunActive: () => Promise.resolve(mockRunActive),
+}))
 const store = {
-  hosts: [] as Array<{ id: string }>,
+  hosts: [] as Array<{ id: string; label?: string }>,
   activeHostId: undefined as string | undefined,
   activateHost,
   deactivate,
@@ -67,6 +78,7 @@ beforeEach(() => {
   locale = "en"
   store.hosts = []
   store.activeHostId = undefined
+  mockRunActive = false
   activateHost.mockClear()
   deactivate.mockClear()
   addHost.mockClear()
@@ -160,6 +172,25 @@ it("uses shared pairing and then reconnects from saved host identity without reu
   fireEvent.click(screen.getByRole("button", { name: "connect" }))
   await waitFor(() => expect(activateHost).toHaveBeenCalledTimes(2))
   expect(githubRunnerClient.pairing).toHaveBeenCalledTimes(1)
+})
+
+/**
+ * Connecting to a runner is the user choosing to drive it, so it is held to
+ * the same in-flight guard as every other host switch.
+ */
+it("asks before connecting to a runner while a turn is in flight", async () => {
+  mockRunActive = true
+  localStorage.setItem(
+    "cognia:github-runner-host-links:v1",
+    JSON.stringify({ lease: "paired-host" })
+  )
+  store.hosts = [{ id: "paired-host", label: "Build" }]
+  render(<GitHubRunnerPanel />)
+  fireEvent.click(await screen.findByRole("button", { name: "connect" }))
+  const confirm = await screen.findByTestId("execution-host-confirm")
+  expect(activateHost).not.toHaveBeenCalled()
+  fireEvent.click(confirm)
+  await waitFor(() => expect(activateHost).toHaveBeenCalledWith("paired-host"))
 })
 
 it("validates environment fields, requires review, and retains immutable images", async () => {

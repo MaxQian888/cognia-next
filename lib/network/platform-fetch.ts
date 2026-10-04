@@ -29,7 +29,13 @@
  * need a dedicated native command; see `supportsLiveOperationEvents`.
  */
 
-import { getCapacitorHttp } from "@/lib/connectivity/capacitor-http"
+import {
+  getCapacitorHttp,
+  requestCapacitorHttp,
+  serializeCapacitorRequestBody,
+  decodeCapacitorResponseBody,
+  waitForCapacitorResult,
+} from "@/lib/connectivity/capacitor-http"
 import { createProxyFetch } from "@/lib/network/proxy-fetch"
 import { detectPlatform } from "@/lib/platform/detect"
 
@@ -89,22 +95,6 @@ export function reachesNonCorsHosts(): boolean {
   return platformFetchKind() !== "browser"
 }
 
-function headerRecord(headers: Headers): Record<string, string> {
-  const record: Record<string, string> = {}
-  headers.forEach((value, key) => {
-    record[key] = value
-  })
-  return record
-}
-
-/**
- * HTTP statuses that MUST NOT carry a body — `new Response(body, {status})`
- * throws a `TypeError` for any non-null body on these, and an empty string is
- * still a body. Mirrors the same list in `proxy-fetch.ts`; both transports hit
- * it, and 204 is what every delete-shaped route in this codebase returns.
- */
-const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 103, 204, 205, 304])
-
 /**
  * `fetch` over `CapacitorHttp`.
  *
@@ -121,44 +111,28 @@ async function capacitorFetch(
   const plugin = getCapacitorHttp()
   if (!plugin) throw new PlatformFetchUnavailableError("CapacitorHttp is unavailable")
   const request = new Request(input, init)
-  const headers = headerRecord(request.headers)
-  const carriesBody = request.method !== "GET" && request.method !== "HEAD"
-  // The native stack has no ArrayBuffer channel. Anything that is not
-  // declared as text or JSON is sent as base64 with an explicit marker the
-  // server side does not see — `CapacitorHttp` decodes it before dispatch on
-  // both platforms when `Content-Type` is binary.
-  const contentType = (headers["content-type"] ?? headers["Content-Type"] ?? "").toLowerCase()
-  const binary =
-    carriesBody &&
-    contentType !== "" &&
-    !contentType.startsWith("text/") &&
-    !contentType.includes("json")
-  let data: unknown
-  if (carriesBody) {
-    data = binary
-      ? bytesToBase64(new Uint8Array(await request.clone().arrayBuffer()))
-      : await request.text()
-  }
-  const response = await plugin.request({
-    url: request.url,
-    method: request.method as CapacitorMethod,
-    headers,
-    data,
-    // Text, not json: error and success bodies are both JSON here, but a
-    // native auto-parse would hand back an object the `Response` constructor
-    // cannot take, and every caller parses either way. `blob` makes both
-    // native stacks answer with base64.
-    responseType: init?.binaryResponse ? "blob" : "text",
-    connectTimeout: init?.timeout ?? DEFAULT_TIMEOUT_MS,
-    readTimeout: init?.timeout ?? DEFAULT_TIMEOUT_MS,
+  if (request.signal.aborted) throw request.signal.reason
+  const body = await waitForCapacitorResult(() => serializeCapacitorRequestBody(request), {
+    signal: request.signal,
+    timeoutMs: init?.timeout ?? DEFAULT_TIMEOUT_MS,
   })
-  const payload: BodyInit =
-    init?.binaryResponse && typeof response.data === "string"
-      ? base64ToBytes(response.data)
-      : typeof response.data === "string"
-        ? response.data
-        : JSON.stringify(response.data ?? null)
-  return new Response(NULL_BODY_STATUSES.has(response.status) ? null : payload, {
+  const response = await requestCapacitorHttp(
+    plugin,
+    {
+      url: request.url,
+      method: request.method as CapacitorMethod,
+      ...body,
+      // Text, not json: error and success bodies are both JSON here, but a
+      // native auto-parse would hand back an object the `Response` constructor
+      // cannot take, and every caller parses either way. `blob` makes both
+      // native stacks answer with base64.
+      responseType: init?.binaryResponse ? "blob" : "text",
+      connectTimeout: init?.timeout ?? DEFAULT_TIMEOUT_MS,
+      readTimeout: init?.timeout ?? DEFAULT_TIMEOUT_MS,
+    },
+    { signal: request.signal, timeoutMs: init?.timeout ?? DEFAULT_TIMEOUT_MS }
+  )
+  return new Response(decodeCapacitorResponseBody(response, init?.binaryResponse, request.method), {
     status: response.status,
     headers: response.headers,
   })
@@ -166,23 +140,7 @@ async function capacitorFetch(
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
-function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  return bytes
-}
-
 type CapacitorMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ""
-  const chunkSize = 0x8000
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
-  }
-  return btoa(binary)
-}
 
 /**
  * The `fetch` implementation this shell should use for a user-configured host.

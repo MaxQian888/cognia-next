@@ -34,7 +34,7 @@ use cognia_signaling_core::{
         ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RelayLane, RoomDescriptor, ServerFrame,
         SignalingEnvelope, SubscribeProof,
     },
-    protocol::{validate_room_descriptor, verify_subscribe_proof},
+    protocol::{validate_room_descriptor, verify_peer_session_proof},
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -606,12 +606,7 @@ impl SessionCrypto {
                 "signaling snapshot carried the wrong peer role".into(),
             ));
         }
-        verify_subscribe_proof(
-            descriptor,
-            &snapshot.proof,
-            &snapshot.proof.challenge,
-            now_ms(),
-        )
+        verify_peer_session_proof(descriptor, &snapshot.proof, now_ms())
         .map_err(|error| SessionError::Protocol(format!("peer proof: {error}")))?;
         let inbound_key = self
             .ephemeral
@@ -1178,13 +1173,42 @@ async fn push_relay(
     enqueue_socket_write(out_tx, Message::Text(text.into()), Some(lane)).await
 }
 
-/// Whether an inbound `rtc:offer` should renegotiate on the live peer (a true
-/// ICE restart that preserves DTLS + the data channel) instead of rebuilding a
-/// fresh [`PeerSession`]. Reuse requires both the restart flag and an existing
-/// peer; a restart flag with no peer (e.g. after a teardown) falls through to a
-/// fresh build.
-fn should_reuse_peer_for_offer(ice_restart: bool, has_peer: bool) -> bool {
-    ice_restart && has_peer
+/// `rtc:close` reason sent when the phone asks to ICE-restart a peer
+/// connection this Host no longer has. Mirrored in
+/// `lib/tauri/transport-rtc.ts:RTC_CLOSE_REASON_RESTART_WITHOUT_PEER`.
+pub(crate) const RTC_CLOSE_REASON_RESTART_WITHOUT_PEER: &str = "ice-restart-without-peer";
+
+/// What the Host does with an inbound `rtc:offer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OfferDisposition {
+    /// A true ICE restart: renegotiate on the live peer so DTLS, SCTP, the
+    /// data channel and the dispatcher survive and only ICE re-gathers.
+    RestartLivePeer,
+    /// A first offer, or a non-restart offer from a new phone-side peer
+    /// connection: build a fresh [`PeerSession`].
+    FreshPeer,
+    /// An ICE restart for a peer this Host already tore down (the phone's
+    /// signaling dropped, `peer-left` ran `teardown_all`, and the phone kept
+    /// its peer connection). Refuse it with `rtc:close`.
+    ///
+    /// Answering it with a fresh `PeerSession` is what broke WAN sessions:
+    /// the phone keeps its `RTCPeerConnection` and its data channels, Chrome
+    /// applies the new DTLS fingerprint as a DTLS restart and restarts its
+    /// SCTP association, but it never re-sends DCEP `DATA_CHANNEL_OPEN` for
+    /// channels it already considers open. The new association therefore has
+    /// no channel on the phone's stream 1, and every message the phone sends
+    /// is dropped inside webrtc-rs (`DataChannelHandler.handle_read got
+    /// error: Unknown PayloadProtocolIdentifier 51`) while the phone still
+    /// reports the channel `open`. RPCs then time out after 30 s each.
+    RefuseOrphanedRestart,
+}
+
+fn offer_disposition(ice_restart: bool, has_peer: bool) -> OfferDisposition {
+    match (ice_restart, has_peer) {
+        (true, true) => OfferDisposition::RestartLivePeer,
+        (true, false) => OfferDisposition::RefuseOrphanedRestart,
+        (false, _) => OfferDisposition::FreshPeer,
+    }
 }
 
 /// Append the rendezvous room id to the signaling URL as `?rid=`. The room id
@@ -1336,7 +1360,25 @@ async fn handle_relay(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
 
-            if should_reuse_peer_for_offer(ice_restart, ps.peer_session.is_some()) {
+            let disposition = offer_disposition(ice_restart, ps.peer_session.is_some());
+            if disposition == OfferDisposition::RefuseOrphanedRestart {
+                log::warn!(
+                    "signaling::client[{}]: refusing ICE-restart offer: no live peer connection \
+                     to restart; asking the phone to negotiate a new one",
+                    config.device_id
+                );
+                // Candidates trickled for the refused restart belong to a
+                // peer connection that will never be answered.
+                ps.pending_remote_ice.clear();
+                let close = crypto.build_outbound(
+                    &config.rendezvous_id,
+                    *next_seq,
+                    EnvelopeKind::RtcClose,
+                    &json!({ "reason": RTC_CLOSE_REASON_RESTART_WITHOUT_PEER }),
+                )?;
+                *next_seq += 1;
+                push_relay(out_tx, &config.rendezvous_id, &close, RelayLane::Signal).await?;
+            } else if disposition == OfferDisposition::RestartLivePeer {
                 // True ICE restart: renegotiate on the EXISTING peer so DTLS,
                 // the data channel, and the dispatcher all survive — only ICE
                 // re-gathers. `accept_offer` (set_remote_description +
@@ -1383,12 +1425,12 @@ async fn handle_relay(
                     terminal_channel: Arc::new({
                         let state = Arc::clone(state);
                         let device_id = config.device_id.clone();
-                        move |channel| {
+                        move |channel, tag| {
                             let state = Arc::clone(&state);
                             let device_id = device_id.clone();
                             tokio::spawn(async move {
                                 crate::ws_terminal::proxy_terminal_datachannel(
-                                    channel, device_id, state,
+                                    channel, tag, device_id, state,
                                 )
                                 .await;
                             });
@@ -1736,15 +1778,31 @@ mod tests {
     use parking_lot::RwLock;
 
     #[test]
-    fn reuse_peer_for_offer_requires_restart_flag_and_existing_peer() {
+    fn offer_disposition_restarts_only_a_live_peer() {
         // True ICE restart: reuse the live peer.
-        assert!(should_reuse_peer_for_offer(true, true));
-        // Restart requested but no peer yet → fresh build.
-        assert!(!should_reuse_peer_for_offer(true, false));
-        // First/non-restart offer with an existing peer → fresh build
-        // (full renegotiation, new DTLS).
-        assert!(!should_reuse_peer_for_offer(false, true));
-        assert!(!should_reuse_peer_for_offer(false, false));
+        assert_eq!(
+            offer_disposition(true, true),
+            OfferDisposition::RestartLivePeer
+        );
+        // First/non-restart offer, with or without a peer → fresh build
+        // (the phone made a new peer connection; full renegotiation).
+        assert_eq!(offer_disposition(false, true), OfferDisposition::FreshPeer);
+        assert_eq!(offer_disposition(false, false), OfferDisposition::FreshPeer);
+    }
+
+    #[test]
+    fn an_ice_restart_for_a_torn_down_peer_is_refused_not_rebuilt() {
+        // The phone kept its RTCPeerConnection across a signaling drop; this
+        // Host's peer is gone. Rebuilding would leave the phone's open data
+        // channels on an SCTP association that never saw their DCEP OPEN.
+        assert_eq!(
+            offer_disposition(true, false),
+            OfferDisposition::RefuseOrphanedRestart
+        );
+        assert_eq!(
+            RTC_CLOSE_REASON_RESTART_WITHOUT_PEER,
+            "ice-restart-without-peer"
+        );
     }
 
     #[tokio::test]

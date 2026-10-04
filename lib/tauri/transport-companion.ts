@@ -2,6 +2,7 @@
 
 import { toWebSocketBase } from "@/lib/network/ws-url"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
+import { DEFAULT_SIGNALING_URL, DEFAULT_STUN_SERVERS } from "@/lib/signaling/types"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import {
@@ -23,7 +24,13 @@ import {
   type TransportBinaryResponse,
   type TransportCallOptions,
 } from "./transport-types"
-import { pinnedFetch } from "./pinned-fetch"
+import {
+  isPinnedRouteUnavailable,
+  NATIVE_SPKI_PINNING_UNAVAILABLE,
+  NativePinningUnavailableError,
+  pinnedFetch,
+  usesNativePinnedRoute,
+} from "./pinned-fetch"
 import { parseProblem } from "./companion-problem"
 import {
   companionAuthorizationHeaders,
@@ -530,6 +537,22 @@ function isTlsBaseUrl(baseUrl: string): boolean {
   }
 }
 
+/**
+ * The `CompanionError` for a request that never got a response. A refusal by
+ * the native stack to send an unpinnable request keeps its own code and is not
+ * retryable: the same request on the same build is refused the same way.
+ */
+function networkFailure(err: unknown): CompanionError {
+  if (err instanceof NativePinningUnavailableError) {
+    return new CompanionError({ code: err.code, message: err.message, retryable: false })
+  }
+  return new CompanionError({
+    code: "network",
+    message: err instanceof Error ? err.message : String(err),
+    retryable: true,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
@@ -779,11 +802,7 @@ export class CompanionTransport implements Transport {
       })
     } catch (err: unknown) {
       this.setPlaneHealth({ rpc: "unavailable" })
-      throw new CompanionError({
-        code: "network",
-        message: err instanceof Error ? err.message : String(err),
-        retryable: true,
-      })
+      throw networkFailure(err)
     }
     if (!response.ok) {
       if (response.status === 401) this.setPlaneHealth({ rpc: "unauthenticated" })
@@ -831,6 +850,28 @@ export class CompanionTransport implements Transport {
         message: "invalid session media resource",
         retryable: false,
       })
+    }
+
+    if (
+      usesNativePinnedRoute(config.baseUrl, config.serverFingerprint) &&
+      (await isPinnedRouteUnavailable(config.baseUrl, config.serverFingerprint))
+    ) {
+      const controller = new AbortController()
+      const rtc = await this.awaitRelayRoute(
+        config,
+        Date.now() + CALL_TIMEOUT_MS,
+        controller.signal
+      )
+      try {
+        return await rtc.readBinary(resource)
+      } catch (err) {
+        if (!(err instanceof RtcCarrierError)) throw err
+        throw new CompanionError({
+          code: "network",
+          message: "session media request over the relay failed",
+          retryable: true,
+        })
+      }
     }
 
     if (this.preferRtc()) {
@@ -959,6 +1000,25 @@ export class CompanionTransport implements Transport {
       const retryable =
         descriptor?.operation === "read" ||
         (descriptor?.idempotency === "required" && idempotencyKey !== undefined)
+      // A Host this build cannot reach directly (pinned HTTPS that the native
+      // stack cannot enforce) is still reachable over the relay data lane,
+      // which the pairing's room keys authenticate end to end (ADR-0170). Every
+      // command goes there: an HTTPS fallback would only fail closed again.
+      if (
+        usesNativePinnedRoute(config.baseUrl, config.serverFingerprint) &&
+        (await isPinnedRouteUnavailable(config.baseUrl, config.serverFingerprint))
+      ) {
+        const rtc = await this.awaitRelayRoute(config, deadlineAt, signal)
+        try {
+          const result = await rtc.call<T>(name, args ?? {}, { idempotencyKey, deadlineAt })
+          this.setPlaneHealth({ rpc: "ready" })
+          return result
+        } catch (err) {
+          if (!(err instanceof RtcCarrierError)) throw err
+          this.setPlaneHealth({ rpc: "unavailable" })
+          throw new CompanionError({ code: "network", message: err.message, retryable: true })
+        }
+      }
       if (this.preferRtc()) {
         try {
           const params = args ?? {}
@@ -1044,6 +1104,7 @@ export class CompanionTransport implements Transport {
     const path = `/ide/content/${encodeURIComponent(handleId)}`
     const response = await pinnedFetch(`${config.baseUrl.replace(/\/+$/, "")}${path}`, {
       method: "GET",
+      binaryResponse: true,
       headers: {
         ...(await authorizationHeadersProvider(config, "GET", path)),
         "X-Cognia-Content-Context": encodeContentContext(context),
@@ -1155,6 +1216,14 @@ export class CompanionTransport implements Transport {
    * one that should decide what a silent host means.
    */
   async whenSubscribed(channels: readonly string[], timeoutMs = 5_000): Promise<void> {
+    // On the WAN tier with no events socket — a phone without native pinning
+    // never has one — the channels are delivered by the data lane, and only
+    // the lane's dispatcher can say it is subscribed. Waiting on socket
+    // acknowledgements there always ran out the full timeout.
+    const rtc = this.rtc
+    if (rtc && this.wsState !== "connected" && this.rtcCarries(channels)) {
+      return rtc.whenSubscribed(channels, timeoutMs)
+    }
     const pending = channels.filter((channel) => !this.acknowledgedChannels.has(channel))
     if (pending.length === 0) return
     await new Promise<void>((resolve) => {
@@ -1455,6 +1524,16 @@ export class CompanionTransport implements Transport {
    * same `(event, seq)` because the dispatcher only forwards once per
    * `EventBus` frame.
    */
+  /** Every named channel has at least one handler mirrored onto the WAN tier. */
+  private rtcCarries(channels: readonly string[]): boolean {
+    return channels.every((channel) => {
+      const handlers = this.channelHandlers.get(channel)
+      return (
+        handlers !== undefined && [...handlers].some((handler) => this.rtcMirrored.has(handler))
+      )
+    })
+  }
+
   private mirrorHandlerOnRtc(event: string, handler: Handler): void {
     if (this.rtcMirrored.has(handler)) return
     const rtc = this.rtc
@@ -1480,6 +1559,104 @@ export class CompanionTransport implements Transport {
   private unmirrorAllHandlers(): void {
     for (const detach of this.rtcMirrored.values()) detach()
     this.rtcMirrored.clear()
+  }
+
+  /**
+   * Start the WAN tier for a Host whose direct route this build cannot use,
+   * unless it is already open or opening. Uses the options the signaling
+   * controller last applied; before it has run (a fresh pairing activates the
+   * Host before the controller re-reads the new config), the pairing's own
+   * signaling URL and ICE servers. The controller's next pass updates the ICE
+   * configuration of the peer this starts, so its TURN servers still apply.
+   */
+  private openRelayRoute(config: CompanionConfig): void {
+    if (this.rtc || this.rtcConnecting) return
+    if (!config.rendezvousId || !config.signalingRoomDescriptor || !config.signalingPrivateKey) {
+      return
+    }
+    void this.enableWanTier(
+      this.lastEnableOptions ?? {
+        signalingUrl: config.signalingUrl ?? DEFAULT_SIGNALING_URL,
+        rtcConfiguration: { iceServers: config.iceServers ?? DEFAULT_STUN_SERVERS },
+      }
+    )
+  }
+
+  /**
+   * The open WAN tier for a Host that is reachable no other way, opening it if
+   * needed and waiting for it until `deadlineAt`.
+   *
+   * A pairing with no relay room has no such route, which is a fact about the
+   * pairing rather than a transient failure, so it is refused as non-retryable
+   * with the pinning code. A tier that does not open in time is an ordinary,
+   * retryable network failure: the next call starts another attempt.
+   */
+  private async awaitRelayRoute(
+    config: CompanionConfig,
+    deadlineAt: number,
+    signal: AbortSignal
+  ): Promise<TransportRtc> {
+    if (!config.rendezvousId || !config.signalingRoomDescriptor || !config.signalingPrivateKey) {
+      this.setPlaneHealth({ rpc: "unavailable" })
+      throw new CompanionError({
+        code: NATIVE_SPKI_PINNING_UNAVAILABLE,
+        message:
+          "this app cannot verify the Host's certificate directly and the pairing has no relay room to fall back on; pair again with an invitation that includes the relay",
+        retryable: false,
+      })
+    }
+    this.openRelayRoute(config)
+    const opened = await this.untilRtcOpen(deadlineAt, signal)
+    if (!opened) {
+      this.setPlaneHealth({ rpc: "unavailable" })
+      throw new CompanionError({
+        code: "network",
+        message: "the relay route to the Host did not open in time",
+        retryable: true,
+      })
+    }
+    return opened
+  }
+
+  /**
+   * Resolve with the WAN tier once it is open, or `null` at `deadlineAt`, on
+   * abort, or when the attempt in flight fails. Covers both a first connect
+   * (`rtcConnecting`) and a live peer that is reconnecting on its own.
+   */
+  private untilRtcOpen(deadlineAt: number, signal: AbortSignal): Promise<TransportRtc | null> {
+    const current = (): TransportRtc | null =>
+      this.rtc && this.rtc.getState() === "open" ? this.rtc : null
+    const ready = current()
+    if (ready) return Promise.resolve(ready)
+    return new Promise((resolve) => {
+      let settled = false
+      const cleanups: Array<() => void> = []
+      const finish = (value: TransportRtc | null) => {
+        if (settled) return
+        settled = true
+        for (const cleanup of cleanups) cleanup()
+        resolve(value)
+      }
+      const timer = setTimeout(() => finish(current()), Math.max(0, deadlineAt - Date.now()))
+      cleanups.push(() => clearTimeout(timer))
+      const onAbort = () => finish(null)
+      signal.addEventListener("abort", onAbort, { once: true })
+      cleanups.push(() => signal.removeEventListener("abort", onAbort))
+      const connecting = this.rtcConnecting
+      if (connecting) {
+        void connecting.then(() => finish(current()))
+      } else if (this.rtc) {
+        // A live peer recovering on its own: wait for it to reopen or give up.
+        cleanups.push(
+          this.rtc.onStateChange((state) => {
+            if (state === "open") finish(current())
+            else if (state === "closed" || state === "failed") finish(null)
+          })
+        )
+      } else {
+        finish(null)
+      }
+    })
   }
 
   /**
@@ -1657,13 +1834,10 @@ export class CompanionTransport implements Transport {
           // Timeout is not retried.
           throw lastError
         }
-        // Network error — retryable.
-        lastError = new CompanionError({
-          code: "network",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        })
+        // Network error — retryable, unless the native stack refused to pin.
+        lastError = networkFailure(err)
         this.setPlaneHealth({ rpc: "unavailable" })
+        if (!lastError.retryable) throw lastError
         if (canRetryRequest && attempt + 1 < HTTP_MAX_ATTEMPTS) {
           continue
         }
@@ -1773,6 +1947,7 @@ export class CompanionTransport implements Transport {
         const headers = await authorizationHeadersProvider(initialConfig, "GET", path)
         response = await pinnedFetch(url, {
           method: "GET",
+          binaryResponse: true,
           headers,
           signal: controller.signal,
           serverFingerprint: initialConfig.serverFingerprint,
@@ -1785,6 +1960,7 @@ export class CompanionTransport implements Transport {
             retryable: true,
           })
         }
+        if (err instanceof NativePinningUnavailableError) throw networkFailure(err)
         lastError = new CompanionError({
           code: "network",
           message: "session media network request failed",
@@ -1853,10 +2029,12 @@ export class CompanionTransport implements Transport {
     if (requiresNativePinnedWebSocket(config)) {
       // The browser WebSocket constructor cannot bind a connection to the
       // accepted SPKI. Keep the channel closed until a native pinned WS
-      // transport exists; WebRTC remains eligible for subscriptions.
+      // transport exists; the WAN tier carries the subscriptions instead, so
+      // open it rather than wait for something else to (ADR-0170).
       this.wsState = "idle"
       this.setPlaneHealth({ events: "idle" })
       this.setConnectionState("offline")
+      this.openRelayRoute(config)
       return
     }
 

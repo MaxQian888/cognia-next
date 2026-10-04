@@ -1,12 +1,11 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ActivityIcon,
   AlertCircleIcon,
   ChevronDownIcon,
-  ChevronUpIcon,
-  CircleIcon,
   LogOutIcon,
   MessageCircleIcon,
   RefreshCwIcon,
@@ -18,14 +17,6 @@ import { NotificationPermissionCta } from "@/components/mobile/notifications/not
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
@@ -203,9 +194,12 @@ export function PairedStep({
       ? "CompanionTransport"
       : "TauriTransport"
 
+  // One flat column, no cards: the live status leads, then a hairline list of
+  // secondary rows (diagnostics, help, sign-out). Stacked cards spent a third
+  // of a phone screen on frames and padding around four short blocks.
   return (
-    <section className="flex flex-col gap-4" data-testid="pair-paired-step">
-      <ConnectionHealthCard
+    <section className="flex flex-col gap-6" data-testid="pair-paired-step">
+      <ConnectionHealth
         baseUrl={baseUrl}
         deviceId={deviceId}
         serverVersion={serverVersion}
@@ -217,45 +211,44 @@ export function PairedStep({
         onContinue={onContinue}
         t={t}
       />
-      <DiagnosticsCard
-        open={diagnosticsOpen}
-        onOpenChange={setDiagnosticsOpen}
-        smoke={smoke}
-        onCallSmoke={() => void onCallSmoke()}
-        onSubscribeSmoke={onSubscribeSmoke}
-        t={t}
-      />
       {/* Wave 4.x — surface the local-notifications permission CTA only on
           Capacitor where it can actually do something. `checkPermission`
           returns `unsupported` on web/Tauri so the component renders null,
           but this guard avoids spinning up the dynamic import there. */}
       <NotificationPermissionCta />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("signOut.cardTitle")}</CardTitle>
-          <CardDescription>{t("signOut.cardDescription")}</CardDescription>
-        </CardHeader>
-        <CardFooter className="flex flex-col items-stretch gap-2">
+      <div className="flex flex-col divide-y divide-border/60 border-y border-border/60">
+        <DiagnosticsRow
+          open={diagnosticsOpen}
+          onOpenChange={setDiagnosticsOpen}
+          smoke={smoke}
+          onCallSmoke={() => void onCallSmoke()}
+          onSubscribeSmoke={onSubscribeSmoke}
+          t={t}
+        />
+        <DiscoverHelp flush />
+        <div className="flex flex-col gap-2 py-1">
           <Button
             type="button"
-            variant="destructive"
-            className="touch-target w-full"
+            variant="ghost"
+            className="touch-target h-auto w-full items-start justify-start gap-3 px-0 py-2.5 text-left font-normal whitespace-normal text-destructive hover:bg-transparent hover:text-destructive"
             onClick={() => void onSignOut()}
             data-testid="pair-signout"
           >
-            <LogOutIcon className="size-4" aria-hidden="true" />
-            {t("signOut.cta")}
+            <LogOutIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-sm font-medium">{t("signOut.cta")}</span>
+              <span className="text-xs text-muted-foreground">{t("signOut.cardDescription")}</span>
+            </span>
           </Button>
           {signOutError ? (
-            <Alert variant="destructive" data-testid="pair-signout-error">
+            <Alert variant="destructive" className="mb-2" data-testid="pair-signout-error">
               <AlertCircleIcon />
               <AlertDescription>{signOutError}</AlertDescription>
             </Alert>
           ) : null}
-        </CardFooter>
-      </Card>
-      <DiscoverHelp />
-      <p className="text-center text-xs text-muted-foreground">
+        </div>
+      </div>
+      <p className="text-center text-[11px] text-muted-foreground/80">
         {t("transportLabel")}: <code className="font-mono">{transportName}</code>
       </p>
     </section>
@@ -264,7 +257,7 @@ export function PairedStep({
 
 type Translator = ReturnType<typeof useTranslations>
 
-interface ConnectionHealthCardProps {
+interface ConnectionHealthProps {
   baseUrl: string
   deviceId: string
   serverVersion: string
@@ -277,7 +270,7 @@ interface ConnectionHealthCardProps {
   t: Translator
 }
 
-function ConnectionHealthCard({
+function ConnectionHealth({
   baseUrl,
   deviceId,
   serverVersion,
@@ -288,13 +281,13 @@ function ConnectionHealthCard({
   onRefresh,
   onContinue,
   t,
-}: ConnectionHealthCardProps) {
+}: ConnectionHealthProps) {
   const dotClass =
     healthState === "live"
-      ? "fill-emerald-500 text-emerald-500"
+      ? "bg-emerald-500"
       : healthState === "checking"
-        ? "fill-amber-500 text-amber-500 animate-pulse"
-        : "fill-destructive text-destructive"
+        ? "bg-amber-500 animate-pulse"
+        : "bg-destructive"
   const titleKey =
     healthState === "live"
       ? "connectedTitle"
@@ -309,78 +302,96 @@ function ConnectionHealthCard({
         ? "health.checking"
         : "health.offline"
   return (
-    <Card data-testid="pair-health-card" data-health={healthState}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <CircleIcon className={cn("size-2.5", dotClass)} aria-hidden="true" />
-          {t(titleKey)}
-          <div className="ml-auto flex items-center gap-1.5">
-            <ConnectionStateBadge />
-            <Badge variant="outline" className="text-[10px] uppercase">
-              {t(badgeKey)}
-            </Badge>
-          </div>
-        </CardTitle>
-        <CardDescription>{t(subtitleKey)}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div
-          className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm"
-          data-testid="pair-status"
-        >
-          <dt className="text-muted-foreground">{t("health.device")}</dt>
-          <dd className="break-all font-mono text-xs">{deviceId}</dd>
-          <dt className="text-muted-foreground">{t("health.server")}</dt>
-          <dd className="break-all font-mono text-xs">
-            {baseUrl} <span className="text-muted-foreground">v{serverVersion}</span>
-          </dd>
-          <dt className="text-muted-foreground">{t("health.lastHeartbeat")}</dt>
-          <dd>
-            {healthState === "checking" ? (
-              // Single source of "in flight" feedback is the pulsing status
-              // dot in the card title — no second spinner here.
-              <span className="text-muted-foreground">{t("health.checking")}</span>
-            ) : (
-              formatRelative(lastHeartbeatMs)
-            )}
-          </dd>
-          <dt className="text-muted-foreground">{t("health.latency")}</dt>
-          <dd>{latencyMs !== null ? `${latencyMs}ms` : t("health.noHeartbeat")}</dd>
+    <div className="flex flex-col gap-4" data-testid="pair-health-card" data-health={healthState}>
+      <div className="flex items-start gap-3">
+        <span className="relative mt-1.5 flex size-2.5 shrink-0" aria-hidden="true">
+          {healthState === "live" ? (
+            <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/60 motion-reduce:hidden" />
+          ) : null}
+          <span className={cn("relative size-2.5 rounded-full", dotClass)} />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="text-base font-semibold leading-tight">{t(titleKey)}</p>
+          <p className="text-sm text-muted-foreground">{t(subtitleKey)}</p>
         </div>
-        {healthError ? (
-          <Alert variant="destructive">
-            <AlertCircleIcon />
-            <AlertDescription>{healthError}</AlertDescription>
-          </Alert>
-        ) : null}
-      </CardContent>
-      <CardFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <ConnectionStateBadge />
+          <Badge variant="outline" className="text-[10px] uppercase">
+            {t(badgeKey)}
+          </Badge>
+        </div>
+      </div>
+      <dl
+        className="flex flex-col divide-y divide-border/60 border-y border-border/60 text-sm"
+        data-testid="pair-status"
+      >
+        <StatusRow label={t("health.device")}>
+          <span className="break-all font-mono text-xs">{deviceId}</span>
+        </StatusRow>
+        <StatusRow label={t("health.server")}>
+          <span className="break-all font-mono text-xs">{baseUrl}</span>{" "}
+          <span className="text-xs text-muted-foreground">v{serverVersion}</span>
+        </StatusRow>
+        <StatusRow label={t("health.lastHeartbeat")}>
+          {healthState === "checking" ? (
+            // Single source of "in flight" feedback is the pulsing status
+            // dot in the header — no second spinner here.
+            <span className="text-muted-foreground">{t("health.checking")}</span>
+          ) : (
+            formatRelative(lastHeartbeatMs)
+          )}
+        </StatusRow>
+        <StatusRow label={t("health.latency")}>
+          <span className="tabular-nums">
+            {latencyMs !== null ? `${latencyMs}ms` : t("health.noHeartbeat")}
+          </span>
+        </StatusRow>
+      </dl>
+      {healthError ? (
+        <Alert variant="destructive">
+          <AlertCircleIcon />
+          <AlertDescription>{healthError}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="grid grid-cols-[auto_1fr] gap-2">
         <Button
           type="button"
           variant="outline"
-          className="w-full touch-target sm:w-auto"
+          className="touch-target"
           onClick={onRefresh}
           disabled={healthState === "checking"}
           data-testid="pair-refresh"
         >
-          <RefreshCwIcon className="size-4" aria-hidden="true" />
+          <RefreshCwIcon
+            className={cn("size-4", healthState === "checking" && "animate-spin")}
+            aria-hidden="true"
+          />
           {t("health.refresh")}
         </Button>
         <Button
           type="button"
-          className="w-full touch-target sm:w-auto"
+          className="touch-target"
           onClick={onContinue}
           data-testid="pair-continue-cta"
         >
           <MessageCircleIcon className="size-4" aria-hidden="true" />
           {t("health.continueToChat")}
         </Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   )
 }
 
-interface DiagnosticsCardProps {
+function StatusRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2.5">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-right">{children}</dd>
+    </div>
+  )
+}
+
+interface DiagnosticsRowProps {
   open: boolean
   onOpenChange: (next: boolean) => void
   smoke: SmokeResults
@@ -389,79 +400,80 @@ interface DiagnosticsCardProps {
   t: Translator
 }
 
-function DiagnosticsCard({
+function DiagnosticsRow({
   open,
   onOpenChange,
   smoke,
   onCallSmoke,
   onSubscribeSmoke,
   t,
-}: DiagnosticsCardProps) {
+}: DiagnosticsRowProps) {
   return (
-    <Card>
-      <Collapsible open={open} onOpenChange={onOpenChange}>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-auto w-full items-start justify-between gap-3 rounded-none px-6 py-3 text-left font-normal hover:bg-transparent"
-            data-testid="pair-diagnostics-toggle"
-          >
-            <span className="flex flex-col gap-1">
-              <span className="text-base font-semibold leading-none">{t("diagnostics.title")}</span>
-              <span className="text-sm text-muted-foreground">{t("diagnostics.subtitle")}</span>
-            </span>
-            <span className="mt-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground">
-              {open ? (
-                <ChevronUpIcon className="size-4" aria-hidden="true" />
-              ) : (
-                <ChevronDownIcon className="size-4" aria-hidden="true" />
-              )}
-              <span className="sr-only">
-                {open ? t("diagnostics.collapse") : t("diagnostics.expand")}
-              </span>
-            </span>
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <CardContent className="flex flex-col gap-4 pt-4">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="touch-target w-full"
-                onClick={onCallSmoke}
-                data-testid="smoke-call"
-              >
-                {t("diagnostics.testRpc")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="touch-target w-full"
-                onClick={onSubscribeSmoke}
-                data-testid="smoke-ws"
-              >
-                {t("diagnostics.testWs")}
-              </Button>
-            </div>
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <CollapsibleTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          className="touch-target h-auto w-full items-center justify-between gap-2 px-0 py-3 font-normal hover:bg-transparent"
+          data-testid="pair-diagnostics-toggle"
+        >
+          <span className="flex items-center gap-3 text-sm font-medium">
+            <ActivityIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+            {t("diagnostics.title")}
+          </span>
+          <ChevronDownIcon
+            aria-hidden="true"
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-180"
+            )}
+          />
+          <span className="sr-only">
+            {open ? t("diagnostics.collapse") : t("diagnostics.expand")}
+          </span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="flex flex-col gap-3 pb-4">
+          <p className="text-xs text-muted-foreground">{t("diagnostics.subtitle")}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="touch-target w-full"
+              onClick={onCallSmoke}
+              data-testid="smoke-call"
+            >
+              {t("diagnostics.testRpc")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="touch-target w-full"
+              onClick={onSubscribeSmoke}
+              data-testid="smoke-ws"
+            >
+              {t("diagnostics.testWs")}
+            </Button>
+          </div>
 
-            <DiagnosticPanel
-              label={t("diagnostics.rpcResultLabel")}
-              value={smoke.rpc}
-              waitingLabel={t("diagnostics.rpcWaiting")}
-              testid="smoke-call-result"
-            />
-            <DiagnosticPanel
-              label={t("diagnostics.wsResultLabel")}
-              value={smoke.ws}
-              waitingLabel={t("diagnostics.wsWaiting")}
-              testid="smoke-ws-result"
-            />
-          </CardContent>
-        </CollapsibleContent>
-      </Collapsible>
-    </Card>
+          <DiagnosticPanel
+            label={t("diagnostics.rpcResultLabel")}
+            value={smoke.rpc}
+            waitingLabel={t("diagnostics.rpcWaiting")}
+            testid="smoke-call-result"
+          />
+          <DiagnosticPanel
+            label={t("diagnostics.wsResultLabel")}
+            value={smoke.ws}
+            waitingLabel={t("diagnostics.wsWaiting")}
+            testid="smoke-ws-result"
+          />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 

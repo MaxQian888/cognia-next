@@ -8,6 +8,7 @@ import {
   deriveDirectionKey,
   generateEcdhKeyPair,
   generateSigningKeyPair,
+  verifyPeerSessionProof,
   verifySubscribeProof,
   verifyAndDecryptEnvelope,
 } from "./crypto"
@@ -78,6 +79,49 @@ describe("signaling crypto", () => {
         nowMs: 1_700_000_000_000,
       })
     ).rejects.toThrow(/challenge/i)
+  })
+
+  it("accepts a peer's long-lived proof but still refuses a future one or an expired room", async () => {
+    const desktopIdentity = await generateSigningKeyPair()
+    const mobileIdentity = await generateSigningKeyPair()
+    const desktopEcdh = await generateEcdhKeyPair()
+    const descriptor = await buildRoomDescriptor({
+      roomNonce: "AAECAwQFBgcICQoLDA0ODw",
+      desktopSigningKey: desktopIdentity.encodedPublicKey,
+      mobileSigningKey: mobileIdentity.encodedPublicKey,
+      notAfter: 1_800_000_000_000,
+    })
+    const subscribedAt = 1_700_000_000_000
+    const proof = await buildSubscribeProof({
+      roomId: descriptor.roomId,
+      role: "desktop",
+      sessionId: "desktop-session",
+      epoch: "desktop-epoch",
+      issuedAt: subscribedAt,
+      challenge: "relay-challenge",
+      ecdhPublicKey: desktopEcdh.encodedPublicKey,
+      signingPrivateKey: desktopIdentity.privateKey,
+    })
+    const anHourLater = subscribedAt + 60 * 60 * 1000
+
+    // The relay forwards the proof the Host subscribed with; an hour in the
+    // room must not make it unjoinable.
+    await expect(
+      verifyPeerSessionProof(descriptor, proof, { nowMs: anHourLater })
+    ).resolves.toBeUndefined()
+    // The same age is still refused at admission, where freshness is checked.
+    await expect(
+      verifySubscribeProof(descriptor, proof, {
+        expectedChallenge: "relay-challenge",
+        nowMs: anHourLater,
+      })
+    ).rejects.toThrow(/expired/i)
+    await expect(
+      verifyPeerSessionProof(descriptor, proof, { nowMs: subscribedAt - 10 * 60 * 1000 })
+    ).rejects.toThrow(/expired/i)
+    await expect(
+      verifyPeerSessionProof(descriptor, proof, { nowMs: 1_800_000_000_000 + 10 * 60 * 1000 })
+    ).rejects.toThrow(/expired/i)
   })
 
   it("encrypts, signs, verifies, and decrypts an envelope across independent peers", async () => {

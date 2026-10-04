@@ -10,8 +10,9 @@
  * `CapacitorHttp.request()` directly avoids the interceptor entirely.
  *
  * Both `lan-scanner.ts` (whoami probe) and `healthz.ts` use the same
- * primitive so a single place owns the bypass + the `serverTrustMode:
- * "self-signed"` policy for pre-pair self-signed certs.
+ * primitive so a single place owns the bypass and request lifecycle.
+ * Stock CapacitorHttp uses OS certificate trust; custom pinning requires
+ * explicit native capability attestation at its caller.
  */
 
 export interface CapacitorHttpResponse {
@@ -29,7 +30,8 @@ export interface CapacitorHttpRequest {
   headers?: Record<string, string>
   params?: Record<string, string>
   data?: unknown
-  /** Per-request server trust mode. */
+  dataType?: "file" | "formData"
+  /** Custom bridge extension. Stock CapacitorHttp does not implement it. */
   serverTrustMode?: "default" | "self-signed" | "pinned"
   /** SHA-256 SPKI fingerprint required when serverTrustMode is `pinned`. */
   serverFingerprint?: string
@@ -38,6 +40,55 @@ export interface CapacitorHttpRequest {
   /** Connect timeout in ms. */
   connectTimeout?: number
   responseType?: "text" | "json" | "blob" | "arraybuffer" | "document"
+}
+
+/**
+ * Cancel the JS wait and discard late results. Stock CapacitorHttp cannot
+ * cancel native I/O; connect/read timeouts still bound that operation.
+ */
+export function waitForCapacitorResult<T>(
+  start: () => Promise<T>,
+  options: { signal?: AbortSignal | null; timeoutMs?: number } = {}
+): Promise<T> {
+  const { signal, timeoutMs } = options
+  const abortReason = () => signal?.reason ?? new DOMException("Request aborted", "AbortError")
+  if (signal?.aborted) return Promise.reject(abortReason())
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (error: boolean, value: unknown) => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      if (error) reject(value)
+      else resolve(value as T)
+    }
+    const onAbort = () => finish(true, abortReason())
+    signal?.addEventListener("abort", onAbort, { once: true })
+    if (timeoutMs !== undefined) {
+      timer = setTimeout(
+        () => finish(true, new DOMException("Request timed out", "TimeoutError")),
+        timeoutMs
+      )
+    }
+    try {
+      start().then(
+        (value) => finish(false, value),
+        (error) => finish(true, error)
+      )
+    } catch (error) {
+      finish(true, error)
+    }
+  })
+}
+
+export function requestCapacitorHttp(
+  cap: CapacitorHttpPlugin,
+  request: CapacitorHttpRequest,
+  options: { signal?: AbortSignal | null; timeoutMs?: number } = {}
+): Promise<CapacitorHttpResponse> {
+  return waitForCapacitorResult(() => cap.request(request), options)
 }
 
 export interface CapacitorHttpPlugin {
@@ -77,37 +128,21 @@ export async function capacitorHttpGet(
   opts: {
     signal: AbortSignal
     timeoutMs: number
-    serverTrustMode?: "default" | "self-signed" | "pinned"
   }
 ): Promise<{ status: number; data: unknown } | null> {
-  const { signal, timeoutMs, serverTrustMode = "self-signed" } = opts
-  // Bail out before issuing the request when the signal is already
-  // aborted — `addEventListener('abort')` below would never fire in that
-  // case and the race would deadlock against a never-resolving request.
-  if (signal.aborted) return null
-  const abortTimer = new Promise<never>((_, reject) => {
-    const t = setTimeout(() => reject(new Error("timeout")), timeoutMs)
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t)
-        reject(new Error("aborted"))
-      },
-      { once: true }
-    )
-  })
+  const { signal, timeoutMs } = opts
   try {
-    const resp = await Promise.race([
-      cap.request({
+    const resp = await requestCapacitorHttp(
+      cap,
+      {
         url,
         method: "GET",
-        serverTrustMode,
         connectTimeout: timeoutMs,
         readTimeout: timeoutMs,
         responseType: "text",
-      }),
-      abortTimer,
-    ])
+      },
+      { signal, timeoutMs }
+    )
     return { status: resp.status, data: resp.data }
   } catch {
     return null
@@ -132,4 +167,49 @@ export function combineAbortSignals(parent: AbortSignal, local: AbortSignal): Ab
     return ctor.any([parent, local])
   }
   return local
+}
+
+/** Serialize a Fetch body once, including multipart boundaries and typed-array slices. */
+export async function serializeCapacitorRequestBody(request: Request): Promise<{
+  headers: Record<string, string>
+  data?: string
+  dataType?: "file"
+}> {
+  const headers: Record<string, string> = {}
+  request.headers.forEach((value, key) => {
+    headers[key] = value
+  })
+  if (request.body === null) return { headers }
+  const contentType = (headers["content-type"] ?? "").toLowerCase()
+  if (contentType.startsWith("text/") || contentType.includes("json")) {
+    return { headers, data: await request.text() }
+  }
+  if (!contentType) headers["content-type"] = "application/octet-stream"
+  const bytes = new Uint8Array(await request.arrayBuffer())
+  let binary = ""
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return { headers, data: btoa(binary), dataType: "file" }
+}
+
+/** Native JSON responses are parsed even when blob was requested. */
+export function decodeCapacitorResponseBody(
+  response: Pick<CapacitorHttpResponse, "status" | "headers" | "data">,
+  binaryResponse = false,
+  method = "GET"
+): string | Uint8Array<ArrayBuffer> | null {
+  if (method === "HEAD" || [204, 205, 304].includes(response.status)) return null
+  const contentType =
+    Object.entries(response.headers).find(([key]) => key.toLowerCase() === "content-type")?.[1] ??
+    ""
+  const isNativeJson = contentType.toLowerCase().includes("application/json")
+  if (binaryResponse && typeof response.data === "string" && !isNativeJson) {
+    const binary = atob(response.data)
+    const bytes = new Uint8Array(new ArrayBuffer(binary.length))
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+    return bytes
+  }
+  if (binaryResponse && isNativeJson) return JSON.stringify(response.data ?? null)
+  return typeof response.data === "string" ? response.data : JSON.stringify(response.data ?? null)
 }

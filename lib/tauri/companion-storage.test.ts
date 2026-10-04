@@ -197,6 +197,16 @@ describe("LocalStorageCompanionStorage", () => {
 })
 
 describe("SecureStorageCompanionStorage", () => {
+  it("propagates native failures instead of forgetting or claiming to delete a pairing", async () => {
+    const { plugin } = makePluginMock()
+    const failure = new Error("Secure storage is unavailable")
+    const storage = new SecureStorageCompanionStorage(async () => plugin)
+    jest.spyOn(plugin, "get").mockRejectedValue(failure)
+    jest.spyOn(plugin, "remove").mockRejectedValue(failure)
+    await expect(storage.load()).rejects.toBe(failure)
+    await expect(storage.clear()).rejects.toBe(failure)
+  })
+
   function makePluginMock(initial: Map<string, string> = new Map()) {
     const store = new Map(initial)
     return {
@@ -208,13 +218,13 @@ describe("SecureStorageCompanionStorage", () => {
         },
         async get(opts: { key: string }) {
           if (!store.has(opts.key)) {
-            throw new Error(`key not found: ${opts.key}`)
+            throw new Error("Item with given key does not exist")
           }
           return { value: store.get(opts.key)! }
         },
         async remove(opts: { key: string }) {
           if (!store.has(opts.key)) {
-            throw new Error(`key not found: ${opts.key}`)
+            throw new Error("Item with given key does not exist")
           }
           store.delete(opts.key)
           return { value: true }
@@ -275,7 +285,7 @@ describe("SecureStorageCompanionStorage", () => {
             return { value: true }
           },
           async get(opts: { key: string }) {
-            if (!store.has(opts.key)) throw new Error(`absent: ${opts.key}`)
+            if (!store.has(opts.key)) throw new Error("Item with given key does not exist")
             return { value: store.get(opts.key)! }
           },
           async remove(opts: { key: string }) {

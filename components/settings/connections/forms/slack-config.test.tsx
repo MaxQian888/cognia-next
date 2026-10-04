@@ -827,10 +827,10 @@ describe("SlackConfigDialog — Events API request URL", () => {
     updatedAt: 2000,
   }
 
-  it("shows the tunnel-off hint and routes to Companion settings when no tunnel is running", () => {
+  it("shows the tunnel-off hint and routes to the tunnel settings when no tunnel is running", () => {
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
     expect(screen.getByTestId("slack-webhook-url-tunnel-off")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /open companion settings/i }))
+    fireEvent.click(screen.getByRole("button", { name: /open tunnel settings/i }))
     expect(mockRouterPush).toHaveBeenCalledWith(
       "/settings?section=connections&connectionsTab=tunnel"
     )

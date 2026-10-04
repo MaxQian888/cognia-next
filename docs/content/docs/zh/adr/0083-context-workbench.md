@@ -28,7 +28,7 @@ Project 文件、Canvas 文档、Artifact 与 Workflow 都已有实用的右侧�
 
 插件可通过 `manifest.contextPanels` 声明可信 React 面板，也可调用 `ctx.contextPanels.register()` 命令式注册。两条路径共用命名空间 registry、懒加载 bridge、诊断、错误隔离、权限重算，以及 disable/uninstall 清理。
 
-权限要求是 `extension:ui` 加对应的 `project:read`、`canvas:read`、`artifact:read` 或 `workflow:read`。`reveal()` 只能打开调用插件自己且适用于当前资源的面板，并遵守 pin。`getActiveContext()` 及订阅只暴露清洗后的身份、selection、revision 和 capabilities，绝不暴露资源内容。本决策不包含 sandbox Webview 面板。
+权限要求是 `extension:ui` 加对应的 `project:read`、`canvas:read`、`artifact:read` 或 `workflow:read`。`reveal()` 只能打开调用插件自己且适用于当前资源的面板，并遵守 pin。`getActiveContext()` 及订阅仅提供经过清理的身份、selection、revision 和 capabilities，绝不暴露资源内容。本决策不包含 sandbox Webview 面板。
 
 Workbench 同时承载 `sidebar.right.top`、`sidebar.right.bottom`、`panel.header` 与 `panel.footer`，上下文同样经过清洗。宿主挂载时触发 `onView:context-workbench` 与资源类型专属 activation event。
 

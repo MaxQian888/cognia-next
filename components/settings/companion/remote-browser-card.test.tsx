@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
@@ -7,7 +7,6 @@ jest.mock("next-intl", () => ({
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
 let mockReachable = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
-jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => mockReachable }))
 jest.mock("@/lib/platform/web-companion", () => ({ hasWebCompanionTarget: () => mockReachable }))
 const deleteRemoteBrowserProfile = jest.fn()
 jest.mock("@/lib/browser/remote-profiles", () => {
@@ -51,10 +50,22 @@ jest.mock("@/stores/settings/settings-store", () => ({
 import { toast } from "sonner"
 import { RemoteProfileDeleteError } from "@/lib/browser/remote-profiles"
 import { RemoteBrowserCard } from "./remote-browser-card"
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
+
+// The desktop's reachability is the real routing plane (the card subscribes to
+// it), so "a remote host is attached" is a transport installed on it.
+const remoteTransport: Transport = {
+  call: jest.fn(async () => undefined) as Transport["call"],
+  subscribe: jest.fn(() => () => undefined) as unknown as Transport["subscribe"],
+}
+
+afterEach(() => __resetRoutingForTests())
 
 beforeEach(() => {
   enabled = false
   mockReachable = true
+  setActiveRemoteTransport(remoteTransport)
   deleteRemoteBrowserProfile.mockReset().mockResolvedValue(undefined)
   ;(toast.success as jest.Mock).mockClear()
   save.mockClear()
@@ -158,11 +169,26 @@ describe("profiles", () => {
   it("cannot erase anything with no server connected", () => {
     enabled = true
     mockReachable = false
+    setActiveRemoteTransport(null)
     render(<RemoteBrowserCard />)
     expect(deleteButton()).toBeDisabled()
     expect(deleteButton()).toHaveAttribute(
       "title",
       "mobile.companion.remoteBrowser.profiles.deleteUnreachable"
     )
+  })
+
+  it("follows the desktop attaching to and detaching from a remote host", () => {
+    enabled = true
+    setActiveRemoteTransport(null)
+    render(<RemoteBrowserCard />)
+    expect(deleteButton()).toBeDisabled()
+
+    // No prop or store change: only the routing plane moves.
+    act(() => setActiveRemoteTransport(remoteTransport))
+    expect(deleteButton()).toBeEnabled()
+
+    act(() => setActiveRemoteTransport(null))
+    expect(deleteButton()).toBeDisabled()
   })
 })

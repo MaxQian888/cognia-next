@@ -35,7 +35,10 @@ import {
 
 const log = loggers.sync
 
-type MobileStepExecutor = (params: Record<string, unknown>) => Promise<RemoteStepResult>
+type MobileStepExecutor = (
+  params: Record<string, unknown>,
+  signal?: AbortSignal
+) => Promise<RemoteStepResult>
 
 function failure(code: string, message: string): RemoteStepResult {
   return { ok: false, code, message }
@@ -67,12 +70,15 @@ async function runCamera(params: Record<string, unknown>): Promise<RemoteStepRes
   return { ok: true, output: { format: outcome.format, base64: outcome.base64 } }
 }
 
-async function runScanBarcode(params: Record<string, unknown>): Promise<RemoteStepResult> {
+async function runScanBarcode(
+  params: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<RemoteStepResult> {
   const { scan } = await import("@/lib/capacitor/barcode")
   const formats = Array.isArray(params.formats)
     ? (params.formats.filter((f) => typeof f === "string") as string[])
     : undefined
-  const outcome = await scan(formats ? { formats } : {})
+  const outcome = await scan({ ...(formats ? { formats } : {}), ...(signal ? { signal } : {}) })
   if (outcome.kind !== "scanned") return mapOutcomeFailure(outcome)
   return { ok: true, output: { raw: outcome.raw } }
 }
@@ -155,6 +161,8 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
   const recoveredDevices = new Set<string>()
   const recoveryByDevice = new Map<string, Promise<void>>()
   let inFlight = false
+  let disposed = false
+  let activeScanController: AbortController | null = null
 
   const recoverDevice = async (deviceId: string): Promise<void> => {
     if (recoveredDevices.has(deviceId)) return
@@ -179,6 +187,7 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
   // restart still converts abandoned native UI work into an interrupted result
   // and vacuums the 24-hour receipt tombstones.
   queueMicrotask(() => {
+    if (disposed) return
     const ownId = deps.getDeviceId()
     if (ownId) void recoverDevice(ownId).catch((error) => logHandlerFailure("recovery", error))
   })
@@ -188,6 +197,7 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
   }
 
   const handle = async (frame: RemoteStepRequest): Promise<void> => {
+    if (disposed) return
     const ownId = deps.getDeviceId()
     if (!ownId || frame.targetDeviceId !== ownId) return
     if (typeof frame.requestId !== "string" || !frame.requestId) return
@@ -198,6 +208,7 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
     // a terminal interrupted result before looking at the replayed frame; the
     // native camera/share UI must never be opened a second time automatically.
     await recoverDevice(ownId)
+    if (disposed) return
     const begin = await receipts.begin({
       requestId: frame.requestId,
       deviceId: ownId,
@@ -206,6 +217,10 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
       now: now(),
     })
     if (!begin.execute) return
+    if (disposed) {
+      await respond(frame.requestId, failure("cancelled", "remote step server was stopped"))
+      return
+    }
 
     if (inFlight) {
       await respond(
@@ -225,12 +240,36 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
     }
 
     inFlight = true
+    // Only the scanner supports cooperative native cancellation. Keep the
+    // busy guard until its cleanup settles, including the GMS UI that cannot
+    // be closed programmatically by the plugin.
+    const controller = frame.kind === "action.mobile.scanBarcode" ? new AbortController() : null
+    activeScanController = controller
+    let timedOut = false
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    if (controller && typeof frame.timeoutAt === "number" && Number.isFinite(frame.timeoutAt)) {
+      const abortAtDeadline = () => {
+        if (controller.signal.aborted) return
+        timedOut = true
+        controller.abort()
+      }
+      const remaining = frame.timeoutAt - now()
+      if (remaining <= 0) abortAtDeadline()
+      else deadline = setTimeout(abortAtDeadline, remaining)
+    }
     try {
       let result: RemoteStepResult
       try {
-        result = await executor(frame.params ?? {})
+        result = controller
+          ? await executor(frame.params ?? {}, controller.signal)
+          : await executor(frame.params ?? {})
       } catch (err) {
         result = failure("error", err instanceof Error ? err.message : String(err))
+      }
+      if (controller?.signal.aborted) {
+        result = timedOut
+          ? failure("timeout", "remote scan deadline expired")
+          : failure("cancelled", "remote step server was stopped")
       }
       await respond(frame.requestId, result)
     } catch (err) {
@@ -241,11 +280,18 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
         error: err instanceof Error ? err.message : String(err),
       })
     } finally {
+      if (deadline !== undefined) clearTimeout(deadline)
+      activeScanController = null
       inFlight = false
     }
   }
 
-  return deps.transport.subscribe<RemoteStepRequest>(STEP_EXECUTE_CHANNEL, (frame) => {
+  const unsubscribe = deps.transport.subscribe<RemoteStepRequest>(STEP_EXECUTE_CHANNEL, (frame) => {
     void handle(frame).catch((error) => logHandlerFailure("request", error))
   })
+  return () => {
+    disposed = true
+    unsubscribe()
+    activeScanController?.abort()
+  }
 }

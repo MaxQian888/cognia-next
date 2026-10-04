@@ -33,6 +33,11 @@ function makeScanner(opts: FakeScannerOpts = {}) {
 }
 
 describe("scanQrCode", () => {
+  it("uses the canonical native cancellation outcome", async () => {
+    const scanner = makeScanner({ scanThrows: new Error("scan canceled.") })
+    expect(await scanQrCode({ loader: async () => scanner })).toEqual({ kind: "cancelled" })
+  })
+
   it("returns scanned with the raw QR value on success", async () => {
     const scanner = makeScanner({ initialPerm: "granted" })
     const out = await scanQrCode({ loader: async () => scanner })

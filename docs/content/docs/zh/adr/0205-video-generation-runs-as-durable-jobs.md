@@ -1,76 +1,49 @@
 ---
 title: "0205 — 视频生成以持久任务运行"
-description: "视频生成成为正式功能：一个引擎用 AI SDK 的 startVideo 发起提供商任务，把不透明的 operation 存进 Dexie 任务行；渲染进程中的协调器跨刷新轮询，只下载一次结果并存到发起的位置。聊天工具、/video、文件页、工作流节点、插件 API 和执行器的 videos.* 处理器都是这个引擎上的适配层。"
+description: "视频生成共用一个引擎。引擎通过 AI SDK startVideo 发起提供商任务，将不透明 operation 存入 Dexie 任务行。渲染协调器跨刷新轮询，只下载一次结果并保存到发起位置。聊天工具、/video、文件页、工作流节点、插件 API 和 videos.* 处理器共用此引擎。"
 ---
 
 # ADR 0205 — 视频生成以持久任务运行
 
-**状态：** 已接受
-**日期：** 2026-09-29
-**相关：** [ADR-0168](./0168-an-edit-is-a-new-version-of-the-same-message)（统一媒体引擎，插件 API 委托给它）、[ADR-0180](./0180-a-video-reaches-the-model-as-what-it-can-read)（视频输入处理）、[ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep)（文件页聚合）、[ADR-0163](./0163-provider-operation-contract)（提供商操作执行器）
+**状态：** 已接受**日期：** 2026-09-29 **相关：** [ADR-0168](./0168-an-edit-is-a-new-version-of-the-same-message)（统一媒体引擎，插件 API 委托给它）、[ADR-0180](./0180-a-video-reaches-the-model-as-what-it-can-read)（视频输入处理）、[ADR-0200](./0200-files-is-a-view-that-keeps-what-you-keep)（文件页聚合）、[ADR-0163](./0163-provider-operation-contract)（提供商操作执行器）
 
 ## 背景
 
-Cognia 能生成视频，但用户用不到。`generateProviderVideo` 和提供商操作执行器的
-`videos.*` 处理器只被插件 API 和 CLI 调用。有三个事实让现有路径无法直接作为产品功能：
+Cognia 已有视频生成能力，但缺少直接的产品入口。`generateProviderVideo` 和提供商操作执行器的 `videos.*` 处理器只被插件 API 和 CLI 调用。有三个事实让现有路径无法直接作为产品功能：
 
-- **它是同步的。** `experimental_generateVideo` 在 SDK 内部最多轮询十分钟。渲染进程的工具调用
-  120 秒就超时，刷新会丢掉任务以及已经花掉的钱。
-- **它在打包后的桌面端跑不起来。** 视频模型构建时没有注入 `fetch`，所有请求都被 WebView 的
-  `connect-src` CSP 拦截。`pnpm dev` 没有 CSP，因此掩盖了这个问题。
-- **任务句柄活不过刷新。** 执行器的任务注册表只在内存里；刷新后对本地句柄调用 `videos.get`
-  会落到 Veo 的接口上，用一个 Veo 从未签发过的 id 去查询。
+- **它是同步的。** `experimental_generateVideo` 在 SDK 内部最多轮询十分钟。渲染进程的工具调用 120 秒就超时，刷新会丢掉任务以及已经花掉的钱。
+- **它在打包后的桌面端跑不起来。** 视频模型构建时没有注入 `fetch`，所有请求都被 WebView 的 `connect-src` CSP 拦截。`pnpm dev` 没有 CSP，因此掩盖了这个问题。
+- **任务句柄活不过刷新。** 执行器的任务注册表只在内存里；刷新后对本地句柄调用 `videos.get` 会落到 Veo 的接口上，用一个 Veo 从未签发过的 id 去查询。
 
-已安装的 AI SDK 本身就有持久化所需的原语：`experimental_startVideo` 返回可 JSON 序列化的
-`operation`，`experimental_getVideoStatus` 可以在任意进程里用它查询。支持的七个提供商
-（Google Veo、xAI、fal、Replicate、豆包与火山引擎 Seedance、通义万相）都实现了它。
+已安装的 AI SDK 本身就有持久化所需的原语：`experimental_startVideo` 返回可 JSON 序列化的 `operation`，`experimental_getVideoStatus` 可以在任意进程里用它查询。支持的七个提供商（Google Veo、xAI、fal、Replicate、豆包与火山引擎 Seedance、通义万相）都实现了它。
 
 ## 决策
 
 ### 1. 一个引擎，持久的任务行
 
-`lib/ai/media/video-jobs/` 用 `startVideo` 发起任务，并写入一行 `mediaGenerationJobs`，
-包含请求、提供商坐标（`providerId`、`modelId`、`baseURL`、凭据归属）以及不透明的
-`operation`。之所以保存 base URL，是因为除 fal 外，每个提供商都会用当前配置重新拼出状态查询地址。
-存储放在一个端口之后：应用里是 Dexie，CLI 里是内存。
+`lib/ai/media/video-jobs/` 用 `startVideo` 发起任务，并写入一行 `mediaGenerationJobs`，包含请求、提供商坐标（`providerId`、`modelId`、`baseURL`、凭据归属）以及不透明的 `operation`。之所以保存 base URL，是因为除 fal 外，每个提供商都会用当前配置重新拼出状态查询地址。存储放在一个端口之后：应用里是 Dexie，CLI 里是内存。
 
 ### 2. 渲染进程协调器，同一时间只有一个窗口
 
-一个初始化器持有 `navigator.locks` 锁，保证只有一个窗口轮询。它按退避节奏查询到期的任务行，
-把超过 30 分钟期限的任务标为 `timed_out`（用户可以再查一次），并在刷新后恢复 `generating`
-状态的任务。按状态抢占保证只下载一次。
+一个初始化器持有 `navigator.locks` 锁，保证只有一个窗口轮询。它按退避节奏查询到期的任务行，把超过 30 分钟期限的任务标为 `timed_out`（用户可以再查一次），并在刷新后恢复 `generating` 状态的任务。按状态抢占保证只下载一次。
 
 ### 3. 只下载一次，绝不保存 URL
 
-提供商返回的是会过期的 URL，Google 的 URL 还带着 API key。引擎在第一次 `completed`
-时就下载，把字节存到发起任务的位置（聊天存为会话资产，插件存为文件页上传项，工作流写到 AppData 下的文件），
-然后丢弃 URL。存下的文件以提示词命名。所有请求都走 `platformFetch`，一并修好了所有调用方在桌面端的 CSP 问题。
-桌面网络桥最多缓冲 64 MiB；更大的结果会在 `Content-Length` 预检时提前以 `result_too_large` 失败。
+提供商返回的是会过期的 URL，Google 的 URL 还带着 API key。引擎在第一次 `completed` 时就下载，把字节存到发起任务的位置（聊天存为会话资产，插件存为文件页上传项，工作流写到 AppData 下的文件），然后丢弃 URL。存下的文件以提示词命名。所有请求都走 `platformFetch`，一并修好了所有调用方在桌面端的 CSP 问题。桌面网络桥最多缓冲 64 MiB。`Content-Length` 预检会提前拒绝更大的结果，并返回 `result_too_large`。
 
 ### 4. 各入口都是适配层
 
-- agent 工具 `video_generate` 立即返回任务 id（审批方式：询问），另有只读的 `video_status`。
-  绑定 IM 的会话和 CLI 不提供它。任务完成不会触发新的 agent 回合，由聊天卡片直接播放。
-- `/video` 不经过 agent 回合就发起任务，并把一条带任务 id 的系统消息写入对话记录；卡片读取任务行，
-  之后无需再写消息即可跟随任务。已添加的图片作为起始帧（存为该对话的附件），不会再随回合发给模型。
+- agent 工具 `video_generate` 立即返回任务 id（审批方式：询问），另有只读的 `video_status`。绑定 IM 的会话和 CLI 不提供它。任务完成不会触发新的 agent 回合，由聊天卡片直接播放。
+- `/video` 不经过 agent 回合就发起任务，并把一条带任务 id 的系统消息写入对话记录；卡片读取任务行，之后无需再写消息即可跟随任务。已添加的图片作为起始帧（存为该对话的附件），不会再随回合发给模型。
 - 任务不跨设备同步。在其他设备上查看这段对话的伴侣端，会把卡片显示为"此设备上没有这个视频任务"。
 - 新增"媒体生成"设置分区保存默认值，每个入口都可以单次覆盖。
-- 在文件页，生成的视频就是任务存下的那个上传项，不单独成卡，因此收藏、移动、删除都和其他上传项一样。
-  聚合时带上任务记录的信息（提示词、提供商、模型、时长、尺寸），用于预览和搜索。新增"视频"类型筛选，
-  覆盖所有视频上传项，预览中可直接播放。任务记录会随发起它的对话一起删除，所以这些信息还会复制到比对话
-  留存更久的文件页条目上：收藏视频时复制一次，删除对话时再复制到它被收藏的上传项以及内容相同的文件页上传项。
-- 工作流节点 `action.media.generateVideo` 等待任务完成，输出文件路径，供其他 `action.media.*` 节点读取。
-  文件放在 AppData 下，这是窗口无需放宽 fs 权限范围就能写入的唯一目录；和裁剪、拼接的产物一样，它不在任何
-  工作区根目录内。默认值与 `/video` 相同。每次发起都是一次付费生成，所以该节点不自动重试。文件放在所属账号和
-  数据库的目录下（`generated-videos/<账号>/<数据库>/`），聊天框为 FFmpeg 暂存的副本也一样，因此"清除所有数据"
-  和删除账号无需打开数据库即可删掉它们。保留期清理会删除没有任务记录对应的文件：已删除数据库的目录、任务已不在的
-  视频，以及超过一天的暂存副本。
+- 在文件页，生成的视频就是任务存下的那个上传项，不单独成卡，因此收藏、移动、删除都和其他上传项一样。聚合时带上任务记录的信息（提示词、提供商、模型、时长、尺寸），用于预览和搜索。新增"视频"类型筛选，覆盖所有视频上传项，预览中可直接播放。任务记录会随发起它的对话一起删除，所以这些信息还会复制到比对话留存更久的文件页条目上：收藏视频时复制一次，删除对话时再复制到它被收藏的上传项以及内容相同的文件页上传项。
+- 工作流节点 `action.media.generateVideo` 等待任务完成，输出文件路径，供其他 `action.media.*` 节点读取。文件放在 AppData 下，这是窗口无需放宽 fs 权限范围就能写入的唯一目录；和裁剪、拼接的产物一样，它不在任何工作区根目录内。默认值与 `/video` 相同。每次发起都是一次付费生成，所以该节点不自动重试。文件放在所属账号和数据库的目录下（`generated-videos/<账号>/<数据库>/`），聊天框为 FFmpeg 暂存的副本也一样，因此"清除所有数据" 和删除账号无需打开数据库即可删掉它们。保留期清理会删除没有任务记录对应的文件：已删除数据库的目录、任务已不在的视频，以及超过一天的暂存副本。
 - 插件 API 和执行器的 `videos.*` 处理器都调用这个引擎。
 
 ### 5. 取消如实说明
 
-SDK 没有取消接口。有取消接口的提供商（Replicate、fal、方舟、排队中的 DashScope）会真正远端取消；
-其余提供商在 UI 上说明"取消只是停止等待，提供商仍可能完成并计费"。
+SDK 没有取消接口。有取消接口的提供商（Replicate、fal、方舟、排队中的 DashScope）会真正远端取消；其余提供商在 UI 上说明"取消只是停止等待，提供商仍可能完成并计费"。
 
 ### 6. Web 端明确标注，不靠猜
 

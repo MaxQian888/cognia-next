@@ -42,74 +42,104 @@ describe("subscribe", () => {
     expect(typeof unsub).toBe("function")
   })
 
-  it("returns no-op unsub when startScan throws", async () => {
+  it("returns no-op unsub and releases resources when startScan throws", async () => {
+    const stopScan = jest.fn().mockResolvedValue(undefined)
+    const remove = jest.fn()
     const unsub = await subscribe(jest.fn(), async () => ({
       startScan: jest.fn().mockRejectedValue(new Error("permission")),
-      stopScan: jest.fn(),
-      addListener: async () => ({ remove: jest.fn() }),
+      stopScan,
+      addListener: async () => ({ remove }),
     }))
     expect(typeof unsub).toBe("function")
+    expect(stopScan).toHaveBeenCalledTimes(1)
+    expect(remove).toHaveBeenCalledTimes(1)
   })
 })
 
-describe("default zeroconf adapter (window.Capacitor.Plugins.ZeroConf)", () => {
+describe("default native zeroconf adapter", () => {
   afterEach(() => {
     delete (window as { Capacitor?: unknown }).Capacitor
   })
 
-  it("watches _cognia._tcp, listens on 'discover', and maps resolved services", async () => {
-    const listeners: Array<(r: unknown) => void> = []
-    const events: string[] = []
-    const watch = jest.fn().mockResolvedValue(undefined)
-    const unwatch = jest.fn().mockResolvedValue(undefined)
-    const remove = jest.fn()
-    ;(window as unknown as { Capacitor?: { Plugins: Record<string, unknown> } }).Capacitor = {
-      Plugins: {
-        ZeroConf: {
-          watch,
-          unwatch,
-          addListener: async (event: string, h: (r: unknown) => void) => {
-            events.push(event)
-            listeners.push(h)
-            return { remove }
-          },
-        },
-      },
-    }
-
-    const seen: DiscoveredService[] = []
-    const unsub = await subscribe((s) => seen.push(s))
-
-    expect(watch).toHaveBeenCalledWith({ type: "_cognia._tcp", domain: "local." })
-    expect(events).toEqual(["discover"])
-
-    // `added` carries no addresses yet — must be dropped, not surfaced empty.
-    listeners[0]!({ action: "added", service: { name: "cognia-X" } })
-    expect(seen).toHaveLength(0)
-
-    listeners[0]!({
-      action: "resolved",
-      service: {
-        name: "cognia-X",
-        hostname: "cognia-X.local",
-        ipv4Addresses: ["192.168.1.10"],
-        port: 7891,
-        txtRecord: { ver: "0.1.0", fp: "abcd" },
-      },
+  function plugin() {
+    const callbacks: Array<(r?: unknown) => void> = []
+    const watch = jest.fn(async (_options, callback) => {
+      callbacks.push(callback)
+      callback()
+      return "watch-id"
     })
-    expect(seen).toEqual([
-      {
-        name: "cognia-X",
-        hostname: "cognia-X.local",
-        ip: "192.168.1.10",
-        port: 7891,
-        txt: { ver: "0.1.0", fp: "abcd" },
-      },
-    ])
+    const unwatch = jest.fn(async () => {})
+    ;(window as unknown as { Capacitor: unknown }).Capacitor = {
+      Plugins: { ZeroConf: { watch, unwatch } },
+    }
+    return { watch, unwatch, callbacks }
+  }
+  const resolved = {
+    action: "resolved",
+    service: {
+      name: "desktop",
+      hostname: "desktop.local",
+      ipv4Addresses: ["192.168.1.10"],
+      port: 27890,
+      txtRecord: { fp: "abcd" },
+    },
+  }
 
-    await unsub()
-    expect(unwatch).toHaveBeenCalledWith({ type: "_cognia._tcp", domain: "local." })
-    expect(remove).toHaveBeenCalled()
+  it("uses the native watch callback and a fully qualified service type", async () => {
+    const p = plugin()
+    const handler = jest.fn()
+    const stop = await subscribe(handler)
+    expect(p.watch).toHaveBeenCalledWith(
+      { type: "_cognia._tcp.", domain: "local." },
+      expect.any(Function)
+    )
+    expect(handler).not.toHaveBeenCalled()
+    p.callbacks[0]({ action: "added", service: {} })
+    p.callbacks[0](resolved)
+    expect(handler).toHaveBeenCalledWith({
+      name: "desktop",
+      hostname: "desktop.local",
+      ip: "192.168.1.10",
+      port: 27890,
+      txt: { fp: "abcd" },
+    })
+    await stop()
+    p.callbacks[0](resolved)
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(p.unwatch).toHaveBeenCalledWith({ type: "_cognia._tcp.", domain: "local." })
+  })
+
+  it("shares one watch and keeps it alive until the final subscriber stops", async () => {
+    const p = plugin()
+    const first = jest.fn(),
+      second = jest.fn()
+    const [stopFirst, stopSecond] = await Promise.all([subscribe(first), subscribe(second)])
+    expect(p.watch).toHaveBeenCalledTimes(1)
+    await stopFirst()
+    expect(p.unwatch).not.toHaveBeenCalled()
+    p.callbacks[0](resolved)
+    expect(first).not.toHaveBeenCalled()
+    expect(second).toHaveBeenCalledTimes(1)
+    await stopSecond()
+    expect(p.unwatch).toHaveBeenCalledTimes(1)
+    const next = jest.fn()
+    const stopNext = await subscribe(next)
+    expect(p.watch).toHaveBeenCalledTimes(2)
+    p.callbacks[0](resolved)
+    expect(next).not.toHaveBeenCalled()
+    p.callbacks[1](resolved)
+    expect(next).toHaveBeenCalledTimes(1)
+    await stopNext()
+  })
+
+  it("cleans a failed watch and permits retry", async () => {
+    const p = plugin()
+    p.watch.mockRejectedValueOnce(new Error("cannot browse"))
+    await subscribe(jest.fn())
+    expect(p.unwatch).toHaveBeenCalledTimes(1)
+    const stop = await subscribe(jest.fn())
+    expect(p.watch).toHaveBeenCalledTimes(2)
+    await stop()
   })
 })
 

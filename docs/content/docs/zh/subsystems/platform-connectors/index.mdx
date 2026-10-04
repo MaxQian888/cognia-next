@@ -12,8 +12,8 @@ description: 把 AI 角色变成 11 个 IM 平台上的真实机器人 —— �
   个人微信 · QQ 官方 · 钉钉 · Matrix）扇入到单例 **ConnectorBus**（`lib/connectors/bus.ts:78`）。
   每条入站消息都跑一条 11 步流水线 —— 去重 → 适配器查找 → 三层绑定解析 → `TriggerPolicy` 评估 →
   模式路由 → 审计 → 帮助/欢迎 → 路由处理器 → 工作流扇出。出站经过一个 Dexie FIFO 队列
-  （`lib/connectors/outbound-runner.ts:284`），外面包裹按会话的串行车道、熔断器、令牌桶、指数退避、
-  幂等 LRU 和死信落库。三种模式 —— `auto`（PII 把关的 AI 回复）、`manual`（人工输入）、
+  （`lib/connectors/outbound-runner.ts:284`），外面包裹按会话串行执行的通道、熔断器、令牌桶、指数退避、
+  幂等 LRU 和死信存储。三种模式 —— `auto`（PII 把关的 AI 回复）、`manual`（人工输入）、
   `draft`（AI 起草、人工审批）。Webhook 签名校验（HMAC / Ed25519 / AES-CBC）与 OneBot / Discord /
   Lark 套接字运行在 Rust 侧（`src-tauri/src/connectors/`）。富交互内容经 **A2UI 桥**双向投影，回调绑定
   持久化在 Dexie 中。
@@ -31,20 +31,14 @@ description: 把 AI 角色变成 11 个 IM 平台上的真实机器人 —— �
 
 ## 它是什么
 
-平台连接器把任意 Cognia 角色变成真实 IM 平台上的真实机器人。运营者在 **设置 → 连接** 里配置一个适配器、
-绑定到一个角色，机器人就会应答 —— 在 `auto` 模式下，它通过与应用内聊天完全相同的 build-options 流水线
-跑一次完整的 Claude 回合；在 `draft` 模式下，AI 准备好回复，由人在收件箱里审批；在 `manual` 模式下，
-人通过机器人手动输入。
+平台连接器把任意 Cognia 角色变成真实 IM 平台上的真实机器人。运营者在 **设置 → 连接** 里配置一个适配器、绑定到一个角色，机器人就会应答 —— 在 `auto` 模式下，它通过与应用内聊天完全相同的 build-options 流水线跑一次完整的 Claude 回合；在 `draft` 模式下，AI 准备好回复，由人在收件箱里审批；在 `manual` 模式下，人通过机器人手动输入。
 
 整个子系统是围绕单一单例的清晰扇入/扇出：
 
-- **扇入** —— 每个适配器把平台原始负载归一化为 `NormalizedInboundEvent`，调用
-  `bus.dispatchInboundFull(event)`。总线去重、解析绑定、评估触发策略、按模式路由，再交给运行时。
-- **扇出** —— 出站回复（AI / 人工 / 草稿审批 / 工作流）入到单一 Dexie 队列，由一个泵抽取，统一施加
-  静默时段、静音、熔断、限流、退避和死信 —— 无论来源为何。
+- **扇入** —— 每个适配器把平台原始负载归一化为 `NormalizedInboundEvent`，调用 `bus.dispatchInboundFull(event)`。总线去重、解析绑定、评估触发策略、按模式路由，再交给运行时。
+- **扇出** —— 出站回复（AI / 人工 / 草稿审批 / 工作流）入到单一 Dexie 队列，由一个泵抽取，统一施加静默时段、静音、熔断、限流、退避和死信 —— 无论来源为何。
 
-本页是**架构中枢**。模块地图里的每个方块都是一篇带行号级内部细节的专门技术页。各平台的配置指南见配套的
-[连接器配置](../../connectors/slack-setup)章节。
+本页是**架构中枢**。模块地图里的每个方块都是一篇带行号级内部细节的专门技术页。各平台的配置指南见配套的[连接器配置](../../connectors/slack-setup)章节。
 
 ## 模块地图
 
@@ -242,8 +236,7 @@ sequenceDiagram
 | `connectorCallbackBindings` | `&id, [adapterId+actionId]`, `kind` | 交互动作 → surface 绑定，TTL 30 天 | v41 |
 | `connectorHeartbeats` | `&id, [adapterId+at]` | 按适配器的存活，48 小时保留 | v51 |
 
-`inboxTelemetryEvents`（v49，3000 上限）是独立的高频面包屑日志，与 `connectorAudit` 解耦，使其轮转
-永不挤占运营可见的审计行。
+`inboxTelemetryEvents`（v49，3000 上限）是独立的高频面包屑日志，与 `connectorAudit` 解耦，使其轮转永不挤占运营可见的审计行。
 
 ## 自旧文档以来的变化
 
@@ -260,16 +253,10 @@ sequenceDiagram
 
 ## 信任边界与 Web 模式降级
 
-- **签名校验在 Rust 侧。** Telegram secret-token、Slack HMAC v0（带 300 秒重放窗口）、Discord Ed25519、
-  Lark AES-CBC 解密 + verification-token、WeChat SHA-1 + AES 全部在 `src-tauri/src/connectors/sigverify/`
-  中运行，任何负载到达 TS 之前都已校验。axum 服务器默认仅绑定回环（`connectors_start_server`，
-  `commands.rs:57`）。
-- **除 keyring 封装外，密钥从不以明文越过 IPC 边界。** App secret 在 Rust 内部读取以建立 Lark 长连接；
-  TS 侧的凭证 getter 是惰性解析器，下一次调用即可取到轮换后的密钥。
-- **自动模式回路有 PII 把关。** 若入站文本或追加的系统提示未通过 `hasNoLeakingPii`，`safeSendPrompt`
-  会中止（不脱敏、不调用模型）—— 这是 Twin、Goal 和 Agent Team 共用的红线。
-- **Web 模式（无 Tauri）没有适配器。** 每种传输都需要 Rust 运行时。连接章节会显示横幅；收件箱的模式
-  切换器与编辑器发送对平台绑定的会话被禁用。
+- **签名校验在 Rust 侧。** Telegram secret-token、Slack HMAC v0（带 300 秒重放窗口）、Discord Ed25519、Lark AES-CBC 解密 + verification-token、WeChat SHA-1 + AES 全部在 `src-tauri/src/connectors/sigverify/` 中运行，任何负载到达 TS 之前都已校验。axum 服务器默认仅绑定回环（`connectors_start_server`，`commands.rs:57`）。
+- **除 keyring 封装外，密钥从不以明文越过 IPC 边界。** App secret 在 Rust 内部读取以建立 Lark 长连接；TS 侧的凭证 getter 是惰性解析器，下一次调用即可取到轮换后的密钥。
+- **自动模式回路有 PII 把关。** 若入站文本或追加的系统提示未通过 `hasNoLeakingPii`，`safeSendPrompt` 会中止（不脱敏、不调用模型）—— 这是 Twin、Goal 和 Agent Team 共用的红线。
+- **Web 模式（无 Tauri）没有适配器。** 每种传输都需要 Rust 运行时。连接章节会显示横幅；收件箱的模式切换器与编辑器发送对平台绑定的会话被禁用。
 
 ## 相关子系统
 

@@ -233,20 +233,30 @@ export async function verifySubscribeProof(
 
 /** Verify a peer's forwarded session proof. The peer cannot know the relay's
  * private per-socket challenge, but the challenge remains signature-bound;
- * the relay already checked equality during admission. */
+ * the relay already checked equality during admission.
+ *
+ * Freshness is the relay's to check, at admission: the proof the relay
+ * forwards is the one the peer subscribed with, so a Host that has sat in its
+ * room for an hour presents an hour-old proof to every phone that joins.
+ * Holding it to the admission window here refused every such join with
+ * "subscription expired". An old proof cannot be abused either: its ECDH key
+ * is the peer's live session key, and a replayed one only derives keys nobody
+ * but that long-gone session could use. A proof from the future is still
+ * refused, as is an expired room. */
 export async function verifyPeerSessionProof(
   descriptor: RoomDescriptor,
   proof: SubscribeProof,
   args: { nowMs?: number; clockSkewMs?: number } = {}
 ): Promise<void> {
-  await verifySubscribeProofCore(descriptor, proof, args.nowMs, args.clockSkewMs)
+  await verifySubscribeProofCore(descriptor, proof, args.nowMs, args.clockSkewMs, "peer")
 }
 
 async function verifySubscribeProofCore(
   descriptor: RoomDescriptor,
   proof: SubscribeProof,
   nowMs?: number,
-  clockSkewMs?: number
+  clockSkewMs?: number,
+  freshness: "admission" | "peer" = "admission"
 ): Promise<void> {
   const recomputed = await buildRoomDescriptor({
     roomNonce: descriptor.roomNonce,
@@ -268,7 +278,11 @@ async function verifySubscribeProofCore(
   }
   const now = nowMs ?? Date.now()
   const clockSkew = clockSkewMs ?? CLOCK_SKEW_MS
-  if (Math.abs(proof.issuedAt - now) > clockSkew || descriptor.notAfter < now - clockSkew) {
+  const stale =
+    freshness === "admission"
+      ? Math.abs(proof.issuedAt - now) > clockSkew
+      : proof.issuedAt - now > clockSkew
+  if (stale || descriptor.notAfter < now - clockSkew) {
     throw new Error("signaling subscription expired")
   }
   const encodedSigningKey =

@@ -21,6 +21,11 @@ import { cn } from "@/lib/utils"
 export interface DiscoverHelpProps {
   /** Open by default + slightly heavier framing when the scan found nothing. */
   emphasised?: boolean
+  /**
+   * Render as a bare row — no frame, no side padding — for a parent that draws
+   * its own hairline list (the Paired step).
+   */
+  flush?: boolean
   className?: string
 }
 
@@ -33,7 +38,7 @@ export interface DiscoverHelpProps {
  * Local Network settings deep link. Reused on the Discover, Pair, and
  * Paired steps so help is one tap away throughout onboarding.
  */
-export function DiscoverHelp({ emphasised = false, className }: DiscoverHelpProps) {
+export function DiscoverHelp({ emphasised = false, flush = false, className }: DiscoverHelpProps) {
   const t = useTranslations("mobile.pair.discover")
   const [open, setOpen] = useState(emphasised)
 
@@ -57,8 +62,8 @@ export function DiscoverHelp({ emphasised = false, className }: DiscoverHelpProp
       open={open}
       onOpenChange={setOpen}
       className={cn(
-        "rounded-lg border bg-card/40",
-        emphasised ? "border-border" : "border-dashed",
+        !flush && "rounded-lg border bg-card/40",
+        !flush && (emphasised ? "border-border" : "border-dashed"),
         className
       )}
       data-testid="pair-discover-help"
@@ -67,10 +72,13 @@ export function DiscoverHelp({ emphasised = false, className }: DiscoverHelpProp
         <Button
           type="button"
           variant="ghost"
-          className="touch-target h-auto w-full items-center justify-between gap-2 px-4 py-3 font-normal hover:bg-transparent"
+          className={cn(
+            "touch-target h-auto w-full items-center justify-between gap-2 py-3 font-normal hover:bg-transparent",
+            flush ? "px-0" : "px-4"
+          )}
           data-testid="pair-discover-help-trigger"
         >
-          <span className="flex items-center gap-2 text-sm font-medium">
+          <span className={cn("flex items-center text-sm font-medium", flush ? "gap-3" : "gap-2")}>
             <HelpCircleIcon className="size-4 text-muted-foreground" aria-hidden="true" />
             {t("help.trigger")}
           </span>
@@ -84,7 +92,7 @@ export function DiscoverHelp({ emphasised = false, className }: DiscoverHelpProp
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="flex flex-col gap-3 px-4 pb-4">
+        <div className={cn("flex flex-col gap-3 pb-4", !flush && "px-4")}>
           <ul className="flex flex-col gap-1.5 text-xs text-muted-foreground">
             {tips.map((tip) => (
               <li key={tip.key} className="flex items-start gap-2">

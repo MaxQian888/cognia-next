@@ -114,23 +114,67 @@ pub fn subscribe_proof_bytes(proof: &SubscribeProof) -> Vec<u8> {
     ])
 }
 
+/// Admission: the relay checks a subscription it just received, so the proof
+/// must be fresh in both directions and answer this socket's challenge.
 pub fn verify_subscribe_proof(
     descriptor: &RoomDescriptor,
     proof: &SubscribeProof,
     expected_challenge: &str,
     now_ms: i64,
 ) -> Result<(), AdmissionError> {
+    verify_proof(descriptor, proof, now_ms, Freshness::Admission(expected_challenge))
+}
+
+/// A peer's proof as the relay forwards it in a room snapshot.
+///
+/// That is the proof the peer subscribed with, so its age is how long the
+/// peer has been in the room: a Host that sat in its room for an hour hands
+/// every phone that joins an hour-old proof. Freshness is the relay's to check
+/// at admission; holding the forwarded proof to the admission window refused
+/// every such join. An old proof is not a replay risk: its ECDH key is that
+/// session's own, and nobody else holds the private half. A proof from the
+/// future and an expired room are still refused, and the signature, room and
+/// session binding are checked exactly as at admission. The challenge was the
+/// relay's private one for that peer's socket; it stays signature-bound but
+/// only the relay can compare it.
+pub fn verify_peer_session_proof(
+    descriptor: &RoomDescriptor,
+    proof: &SubscribeProof,
+    now_ms: i64,
+) -> Result<(), AdmissionError> {
+    verify_proof(descriptor, proof, now_ms, Freshness::Peer)
+}
+
+#[derive(Clone, Copy)]
+enum Freshness<'a> {
+    /// Carries the challenge this socket was issued.
+    Admission(&'a str),
+    Peer,
+}
+
+fn verify_proof(
+    descriptor: &RoomDescriptor,
+    proof: &SubscribeProof,
+    now_ms: i64,
+    freshness: Freshness<'_>,
+) -> Result<(), AdmissionError> {
     validate_room_descriptor(descriptor, now_ms)?;
     if proof.v != PROTOCOL_VERSION || proof.room_id != descriptor.room_id {
         return Err(AdmissionError::BadVersion);
     }
-    if proof.challenge != expected_challenge {
-        return Err(AdmissionError::InvalidChallenge);
+    if let Freshness::Admission(expected_challenge) = freshness {
+        if proof.challenge != expected_challenge {
+            return Err(AdmissionError::InvalidChallenge);
+        }
     }
     if proof.session_id.is_empty() || proof.epoch.is_empty() {
         return Err(AdmissionError::InvalidSession);
     }
-    if proof.issued_at.abs_diff(now_ms) > SUBSCRIBE_CLOCK_SKEW_MS as u64 {
+    let stale = match freshness {
+        Freshness::Admission(_) => proof.issued_at.abs_diff(now_ms) > SUBSCRIBE_CLOCK_SKEW_MS as u64,
+        Freshness::Peer => proof.issued_at.saturating_sub(now_ms) > SUBSCRIBE_CLOCK_SKEW_MS,
+    };
+    if stale {
         return Err(AdmissionError::ClockSkew);
     }
     // Validate the ephemeral ECDH key as a real SEC1 point even though the
@@ -253,6 +297,51 @@ mod tests {
         assert_eq!(
             verify_subscribe_proof(&descriptor, &proof, "challenge-2", 1_700_000_000_000,),
             Err(AdmissionError::InvalidChallenge)
+        );
+    }
+
+    #[test]
+    fn a_forwarded_peer_proof_may_be_old_but_not_from_the_future() {
+        let desktop = SigningKey::from_slice(&[1u8; 32]).unwrap();
+        let mobile = SigningKey::from_slice(&[2u8; 32]).unwrap();
+        let ephemeral = SigningKey::from_slice(&[3u8; 32]).unwrap();
+        let descriptor = descriptor(&desktop, &mobile);
+        let subscribed_at = 1_700_000_000_000;
+        let mut proof = SubscribeProof {
+            v: 2,
+            room_id: descriptor.room_id.clone(),
+            role: PeerRole::Desktop,
+            session_id: "session-1".into(),
+            epoch: "epoch-1".into(),
+            issued_at: subscribed_at,
+            challenge: "relay-private".into(),
+            ecdh_public_key: public_key(&ephemeral),
+            signature: String::new(),
+        };
+        let signature: Signature = desktop.sign(&subscribe_proof_bytes(&proof));
+        proof.signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+        let an_hour_later = subscribed_at + 60 * 60 * 1000;
+
+        // An hour in the room must not make the Host unjoinable...
+        verify_peer_session_proof(&descriptor, &proof, an_hour_later).unwrap();
+        // ...while the relay still refuses the same age at admission.
+        assert_eq!(
+            verify_subscribe_proof(&descriptor, &proof, "relay-private", an_hour_later),
+            Err(AdmissionError::ClockSkew)
+        );
+        assert_eq!(
+            verify_peer_session_proof(&descriptor, &proof, subscribed_at - 10 * 60 * 1000),
+            Err(AdmissionError::ClockSkew)
+        );
+        assert_eq!(
+            verify_peer_session_proof(&descriptor, &proof, 1_800_000_000_000 + 10 * 60 * 1000),
+            Err(AdmissionError::ExpiredDescriptor)
+        );
+        let mut tampered = proof.clone();
+        tampered.issued_at += 1;
+        assert_eq!(
+            verify_peer_session_proof(&descriptor, &tampered, an_hour_later),
+            Err(AdmissionError::InvalidSignature)
         );
     }
 }

@@ -555,7 +555,8 @@
         "runtime": {},
         "session": {},
         "turn": {},
-        "gateway_task": {}
+        "gateway_task": {},
+        "cognia_catalog": {}
       }
     },
     "external_bridge": {

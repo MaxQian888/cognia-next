@@ -429,6 +429,103 @@
       },
       "additionalProperties": false
     },
+    "agent_gateway_host_task_prepare": {
+      "type": "object",
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": [
+            "taskId",
+            "providerId",
+            "model",
+            "ingressProtocol"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "providerId": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "ingressProtocol": {
+              "enum": [
+                "openai-chat",
+                "openai-responses",
+                "anthropic"
+              ]
+            },
+            "originDeviceId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_gateway_host_task_renew": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "ticketId",
+        "accountGeneration"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "ticketId": {
+          "type": "string"
+        },
+        "accountGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "originDeviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_gateway_host_task_revoke": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "ticketId",
+        "accountGeneration"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "ticketId": {
+          "type": "string"
+        },
+        "accountGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "originDeviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "agent_gateway_lease_prepare": {
       "type": "object",
       "required": [
@@ -4858,6 +4955,20 @@
       },
       "additionalProperties": false
     },
+    "external_agent_cognia_models": {
+      "type": "object",
+      "required": [
+        "configId"
+      ],
+      "properties": {
+        "configId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Host-owned external-agent configuration whose runtime decides whether Cognia models are offered at all."
+        }
+      },
+      "additionalProperties": false
+    },
     "external_agent_config_create": {
       "type": "object",
       "required": [
@@ -5007,7 +5118,42 @@
           "description": "Thinking level for this turn, in the app's vocabulary (`low` to `max`). Folded onto whatever ladder the chosen model publishes; an agent with no reasoning axis ignores it."
         },
         "externalSessionId": {
-          "type": "string"
+          "type": "string",
+          "description": "Resume an agent session this conversation already established on the host: a native session id, or a `cognia-gateway:` task session id when the turn runs on a Cognia model."
+        },
+        "cogniaModel": {
+          "description": "Cognia provider/model this turn runs on through the host's gateway, using the host's own provider settings and vault. Omit to inherit the host configuration's own setting; `null` selects the agent's native model configuration explicitly. Identifiers only: credentials never cross the wire.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "providerId",
+                "modelId"
+              ],
+              "properties": {
+                "providerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "accountId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "description": "Omit for the provider default; a host vault account id pins the task; null selects the host's manual API settings."
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "callerDeviceId": {
           "type": "string"

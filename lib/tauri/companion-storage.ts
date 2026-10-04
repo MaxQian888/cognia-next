@@ -22,6 +22,10 @@
  * keeps callers from branching on platform.
  */
 
+import {
+  isMissingSecureStorageItem,
+  ignoreMissingSecureStorageItem,
+} from "@/lib/capacitor/secure-storage"
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 // The credential book imports this module for its TYPES only (`import type`),
 // so this is a one-way runtime edge, not a cycle.
@@ -425,16 +429,16 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
       if (!value) return null
       const config = JSON.parse(value) as CompanionConfig
       if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
-        await plugin.remove({ key: CONFIG_KEY }).catch(() => undefined)
+        await plugin.remove({ key: CONFIG_KEY }).catch(ignoreMissingSecureStorageItem)
         return null
       }
       if (config.signalingPrivateKeyJwk) {
         config.signalingPrivateKey = await importSigningPrivateKey(config.signalingPrivateKeyJwk)
       }
       return config
-    } catch {
-      // get() throws when the key is absent — treat as "not paired yet".
-      return null
+    } catch (error) {
+      if (isMissingSecureStorageItem(error)) return null
+      throw error
     }
   }
 
@@ -453,8 +457,8 @@ export class SecureStorageCompanionStorage implements CompanionConfigStorage {
     try {
       const plugin = await this.loader()
       await plugin.remove({ key: CONFIG_KEY })
-    } catch {
-      // remove() throws when the key is already gone — idempotent.
+    } catch (error) {
+      ignoreMissingSecureStorageItem(error)
     }
   }
 }

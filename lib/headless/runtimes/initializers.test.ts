@@ -25,6 +25,13 @@ import {
 } from "@/lib/workflow/runtime/run-lease"
 import { _waitForPluginTriggerReconciliationForTest } from "@/lib/workflow/triggers/lifecycle"
 
+const mockStopBackgroundRecovery = jest.fn()
+const mockStartBackgroundRecovery = jest.fn(() => mockStopBackgroundRecovery)
+jest.mock("@/lib/background-tasks/redispatch", () => ({
+  ...jest.requireActual("@/lib/background-tasks/redispatch"),
+  startBackgroundTaskRecovery: () => mockStartBackgroundRecovery(),
+}))
+
 const EXPECTED = [
   "scheduler",
   "workflow-runtime",
@@ -75,6 +82,7 @@ describe("initializer batch headless smoke", () => {
     await import("./initializers")
 
     const result = await bootstrapHeadlessRuntimes(makeCtx())
+    expect(mockStartBackgroundRecovery).toHaveBeenCalledTimes(1)
     const failures = result.failed.map(
       (f) => `${f.name}: ${f.error instanceof Error ? f.error.message : String(f.error)}`
     )
@@ -134,6 +142,7 @@ describe("initializer batch headless smoke", () => {
     )
 
     await result.stop()
+    expect(mockStopBackgroundRecovery).toHaveBeenCalledTimes(1)
     expect(stop).toHaveBeenCalledTimes(1)
     expect(getPluginTrigger("trigger.headless.watch", 1)?.instances.size).toBe(0)
     const releasedRun = await getDb().workflowRuns.get(leasedRunId)

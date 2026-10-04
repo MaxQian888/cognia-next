@@ -1324,6 +1324,9 @@
     "external_agent_cancel_run": {
       "to": "external_agent.run.cancel"
     },
+    "external_agent_cognia_models": {
+      "to": "external_agent.cognia_catalog.get"
+    },
     "external_agent_config_create": {
       "to": "external_agent.config.create"
     },

@@ -16,6 +16,10 @@
  * That split is why `list()` never returns secrets and why every credential
  * read is a separate, failable call.
  */
+import {
+  isMissingSecureStorageItem,
+  ignoreMissingSecureStorageItem,
+} from "@/lib/capacitor/secure-storage"
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 import { getActiveBrowserVault, type EncryptedVaultSecret } from "@/lib/runtime/browser-vault"
 
@@ -250,13 +254,14 @@ export class SecureStorageHostCredentialStore implements HostCredentialStore {
       try {
         const jwk = await plugin.get({ key: signingSecretName(key) })
         if (jwk.value) credential.signalingPrivateKeyJwk = JSON.parse(jwk.value) as JsonWebKey
-      } catch {
-        // The signing key is optional — a host with no WebRTC tier has none.
+      } catch (error) {
+        // A signing key is optional; a broken Keystore is not an absent key.
+        ignoreMissingSecureStorageItem(error)
       }
       return credential
-    } catch {
-      // `get()` throws when the key is absent: not paired to this host.
-      return null
+    } catch (error) {
+      if (isMissingSecureStorageItem(error)) return null
+      throw error
     }
   }
 
@@ -266,23 +271,23 @@ export class SecureStorageHostCredentialStore implements HostCredentialStore {
       key: deviceKeySecretName(key),
       value: JSON.stringify(credential.devicePrivateKeyJwk),
     })
-    await plugin.remove({ key: legacyJwtSecretName(key) }).catch(() => undefined)
+    await plugin.remove({ key: legacyJwtSecretName(key) }).catch(ignoreMissingSecureStorageItem)
     if (credential.signalingPrivateKeyJwk) {
       await plugin.set({
         key: signingSecretName(key),
         value: JSON.stringify(credential.signalingPrivateKeyJwk),
       })
     } else {
-      await plugin.remove({ key: signingSecretName(key) }).catch(() => undefined)
+      await plugin.remove({ key: signingSecretName(key) }).catch(ignoreMissingSecureStorageItem)
     }
   }
 
   async remove(key: CompanionHostKey): Promise<void> {
     const plugin = await this.loader()
     await Promise.all([
-      plugin.remove({ key: deviceKeySecretName(key) }).catch(() => undefined),
-      plugin.remove({ key: legacyJwtSecretName(key) }).catch(() => undefined),
-      plugin.remove({ key: signingSecretName(key) }).catch(() => undefined),
+      plugin.remove({ key: deviceKeySecretName(key) }).catch(ignoreMissingSecureStorageItem),
+      plugin.remove({ key: legacyJwtSecretName(key) }).catch(ignoreMissingSecureStorageItem),
+      plugin.remove({ key: signingSecretName(key) }).catch(ignoreMissingSecureStorageItem),
     ])
   }
 }
@@ -301,23 +306,21 @@ export class SecureStorageHostRecordStore implements HostRecordStore {
     try {
       const plugin = await this.loader()
       await Promise.all([
-        plugin.remove({ key: LEGACY_HOST_BOOK_KEY }).catch(() => undefined),
-        plugin.remove({ key: LEGACY_ACTIVE_HOST_KEY }).catch(() => undefined),
+        plugin.remove({ key: LEGACY_HOST_BOOK_KEY }).catch(ignoreMissingSecureStorageItem),
+        plugin.remove({ key: LEGACY_ACTIVE_HOST_KEY }).catch(ignoreMissingSecureStorageItem),
       ])
       const { value } = await plugin.get({ key: HOST_BOOK_KEY })
       return parseHostBook(value || null)
     } catch (error) {
-      // A parse failure is real corruption and must surface; a missing key is
-      // simply "never paired".
-      if (error instanceof Error && error.message.startsWith("Companion host book")) throw error
-      return emptyHostBook()
+      if (isMissingSecureStorageItem(error)) return emptyHostBook()
+      throw error
     }
   }
 
   async write(book: HostBookEnvelope): Promise<void> {
     const plugin = await this.loader()
     if (Object.keys(book.hosts).length === 0) {
-      await plugin.remove({ key: HOST_BOOK_KEY }).catch(() => undefined)
+      await plugin.remove({ key: HOST_BOOK_KEY }).catch(ignoreMissingSecureStorageItem)
       return
     }
     await plugin.set({ key: HOST_BOOK_KEY, value: JSON.stringify(book) })

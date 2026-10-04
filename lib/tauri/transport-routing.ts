@@ -69,6 +69,8 @@ let activeRemoteEndpoint: RemoteHostEndpoint | null = null
 
 /** Connection descriptor for the active remote host's raw WebSocket surfaces. */
 export interface RemoteHostEndpoint {
+  /** Client registry attribution, captured with this endpoint for long-lived terminals. */
+  remoteHost?: { id: string; label: string }
   /** Host origin, `https://…` (flipped to `wss://` by the terminal resolver). */
   baseUrl: string
   /** Stable paired-device id used by multiplexed terminal controller state. */

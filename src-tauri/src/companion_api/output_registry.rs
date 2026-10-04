@@ -385,6 +385,7 @@ mod tests {
         ("external_agent_update", OutputShape::Opaque(RootType::Object)),
         ("external_agent_admit_run", OutputShape::Declared(RootType::Object)),
         ("external_agent_cancel_run", OutputShape::Declared(RootType::Object)),
+        ("external_agent_cognia_models", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_create", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_delete", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_get", OutputShape::Declared(RootType::Object)),
@@ -523,6 +524,9 @@ mod tests {
         ("gateway_list_route_tickets", OutputShape::Declared(RootType::Object)),
         ("gateway_revoke_route_ticket", OutputShape::Declared(RootType::Object)),
         ("gateway_probe_upstream", OutputShape::Declared(RootType::Array)),
+        ("agent_gateway_host_task_prepare", OutputShape::Declared(RootType::Object)),
+        ("agent_gateway_host_task_renew", OutputShape::Scalar(ScalarShape::Bool)),
+        ("agent_gateway_host_task_revoke", OutputShape::Scalar(ScalarShape::Bool)),
 
         // ── host_admin (rpc/host_admin.rs) ───────────────────────────────────
         ("companion_signaling_status", OutputShape::Declared(RootType::Object)),

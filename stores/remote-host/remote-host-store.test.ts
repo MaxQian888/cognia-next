@@ -45,8 +45,10 @@ import {
   activeHostSupportsFeature,
   refreshHostCapabilities,
   refreshHostFeatureManifest,
+  useActiveHostSupportsFeature,
   useRemoteHostStore,
 } from "./remote-host-store"
+import { act, renderHook } from "@testing-library/react"
 import { transport } from "@/lib/tauri"
 
 function makeConfig(overrides: Partial<CompanionConfig> = {}): CompanionConfig {
@@ -203,6 +205,7 @@ describe("activateHost / deactivate", () => {
     expect(useRemoteHostStore.getState().activeHostId).toBe(host.id)
     expect(getActiveRemoteTransport()).toBe(fakeRemote)
     expect(getActiveRemoteEndpoint()).toEqual({
+      remoteHost: { id: host.id, label: host.label },
       baseUrl: "https://box.example:27890",
       deviceId: "device-1",
       devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
@@ -375,6 +378,7 @@ describe("default transport factory", () => {
     useRemoteHostStore.getState().activateHost(host.id)
     expect(getActiveRemoteTransport()).not.toBeNull()
     expect(getActiveRemoteEndpoint()).toEqual({
+      remoteHost: { id: host.id, label: host.label },
       baseUrl: "https://box.example:27890",
       deviceId: "device-1",
       devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-key" },
@@ -579,6 +583,37 @@ describe("host feature manifest", () => {
     expect(activeHostSupportsFeature("skills.catalog", "skills_scan_native")).toBe(true)
     expect(activeHostSupportsFeature("skills.catalog", "skills_install_native")).toBe(false)
     spy.mockRestore()
+  })
+
+  /**
+   * The imperative reader answers once. A component that called it during
+   * render kept the answer for whichever host was active at its last render,
+   * so the hook has to re-render on the switch itself, not on some unrelated
+   * later update.
+   */
+  it("re-answers the subscribed feature check when the active host changes", () => {
+    seedActive()
+    useRemoteHostStore.setState((state) => ({
+      hosts: state.hosts.map((host) => ({ ...host, featureManifest: manifest })),
+    }))
+    const { result } = renderHook(() =>
+      useActiveHostSupportsFeature("skills.catalog", "skills_scan_native")
+    )
+    expect(result.current).toBe(true)
+
+    act(() => useRemoteHostStore.setState({ activeHostId: null }))
+    expect(result.current).toBe(false)
+
+    act(() => useRemoteHostStore.setState({ activeHostId: "h1" }))
+    expect(result.current).toBe(true)
+
+    // A host that is still probing has not earned its manifest yet.
+    act(() =>
+      useRemoteHostStore.setState((state) => ({
+        hosts: state.hosts.map((host) => ({ ...host, connectionState: "connecting" })),
+      }))
+    )
+    expect(result.current).toBe(false)
   })
 
   it("rejects malformed or build-mismatched manifests instead of enabling writes", async () => {

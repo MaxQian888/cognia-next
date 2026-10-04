@@ -4872,7 +4872,8 @@
         "github-issue-sync",
         "issue-wakeup",
         "radar-report",
-        "provider-diagnostics-refresh"
+        "provider-diagnostics-refresh",
+        "conversation-auto-archive"
       ]
     },
     "SchedulerNotificationChannel": {
@@ -10225,6 +10226,94 @@
       },
       "additionalProperties": false
     },
+    "external_agent_cognia_models": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["supported", "providers"],
+          "properties": {
+            "supported": {
+              "const": true
+            },
+            "providers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["providerId", "providerName", "models"],
+                "properties": {
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "providerName": {
+                    "type": "string"
+                  },
+                  "accountIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["id", "name"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "contextLength": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "supportsTools": {
+                          "type": "boolean"
+                        },
+                        "supportsVision": {
+                          "type": "boolean"
+                        },
+                        "supportsReasoning": {
+                          "type": "boolean"
+                        },
+                        "supportsStreaming": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["supported", "reason"],
+          "properties": {
+            "supported": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "host-update-required",
+                "unsupported-runtime",
+                "no-eligible-models",
+                "account-locked",
+                "public-https-required"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "external_agent_config_create": {
       "type": "object",
       "required": ["config"],
@@ -12452,6 +12541,54 @@
     },
     "claude_session_control": {
       "$ref": "#/$defs/NullResult"
+    },
+    "agent_gateway_host_task_prepare": {
+      "type": "object",
+      "required": [
+        "ticketId",
+        "secret",
+        "endpoint",
+        "accountGeneration",
+        "expiresAtMs",
+        "ownerAccountId"
+      ],
+      "properties": {
+        "ticketId": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "accountGeneration": {
+          "type": "integer"
+        },
+        "expiresAtMs": {
+          "type": "integer"
+        },
+        "ownerAccountId": {
+          "type": ["string", "null"]
+        },
+        "modelMetadata": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_gateway_host_task_renew": {
+      "type": "boolean"
+    },
+    "agent_gateway_host_task_revoke": {
+      "type": "boolean"
     },
     "agent_gateway_lease_prepare": {
       "type": "object",

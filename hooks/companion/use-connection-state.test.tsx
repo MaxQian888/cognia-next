@@ -57,7 +57,7 @@ function swapTo(next: Transport) {
   for (const handler of swapHandlers) handler()
 }
 
-import { useConnectionState } from "./use-connection-state"
+import { effectiveConnectionState, useConnectionState } from "./use-connection-state"
 
 beforeEach(() => {
   swapHandlers.clear()
@@ -126,5 +126,55 @@ describe("useConnectionState", () => {
 
     expect(live.listenerCount()).toBe(0)
     expect(swapHandlers.size).toBe(0)
+  })
+
+  it("reports a link carried by the relay or a DataChannel as connected", async () => {
+    // A phone that cannot pin the Host's certificate never opens the event
+    // socket, so the raw state stays `offline` while every command flows.
+    const live = makeStatefulTransport("offline")
+    const tierListeners = new Set<(tier: string) => void>()
+    let tier = "offline"
+    const withTier = Object.assign(live, {
+      onTierChange(cb: (next: string) => void) {
+        tierListeners.add(cb)
+        cb(tier)
+        return () => tierListeners.delete(cb)
+      },
+    })
+    const setTier = (next: string) => {
+      tier = next
+      for (const cb of tierListeners) cb(next)
+    }
+    current = withTier
+    const { result, unmount } = renderHook(() => useConnectionState())
+    await waitFor(() => expect(result.current).toBe("offline"))
+
+    act(() => setTier("relay"))
+    expect(result.current).toBe("connected")
+    act(() => setTier("rtc-direct"))
+    expect(result.current).toBe("connected")
+    act(() => setTier("offline"))
+    expect(result.current).toBe("offline")
+
+    unmount()
+    expect(tierListeners.size).toBe(0)
+    expect(live.listenerCount()).toBe(0)
+  })
+})
+
+describe("effectiveConnectionState", () => {
+  it("lets an open WAN tier stand in for the closed event socket", () => {
+    for (const tier of ["relay", "rtc-direct", "rtc-relay"] as const) {
+      expect(effectiveConnectionState("offline", tier)).toBe("connected")
+      expect(effectiveConnectionState("reconnecting", tier)).toBe("connected")
+    }
+  })
+
+  it("keeps the raw state otherwise, and never masks a revoked device", () => {
+    expect(effectiveConnectionState("offline", "offline")).toBe("offline")
+    expect(effectiveConnectionState("offline", null)).toBe("offline")
+    expect(effectiveConnectionState("reconnecting", "ws-lan")).toBe("reconnecting")
+    expect(effectiveConnectionState("connected", "ws-lan")).toBe("connected")
+    expect(effectiveConnectionState("unauthenticated", "relay")).toBe("unauthenticated")
   })
 })

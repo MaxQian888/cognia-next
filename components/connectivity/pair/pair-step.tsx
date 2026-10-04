@@ -115,6 +115,25 @@ export interface PairStepProps {
   /** Lets the shell's scene follow what the form is doing. */
   onActivityChange?: (activity: PairActivity) => void
   /**
+   * Reports the invitation field's contents whenever they change: typed,
+   * pasted, sniffed from the clipboard, scanned or cleared.
+   *
+   * The field's state lives here, so a caller that needs to read what the user
+   * entered (the add-host form's LAN cross-check, which compares the pasted
+   * invitation's fingerprint against what the network is advertising) has no
+   * other way to see it. Remounting the step with a new `prefilledPairPayload`
+   * is how a caller WRITES the field; this is how it reads it.
+   */
+  onPayloadChange?: (payload: string) => void
+  /**
+   * Offer the camera scan button. Defaults to `!webMode`, which is where the
+   * scanner has always been offered: `scan()` is the Capacitor ML Kit plugin,
+   * so it only works in the native mobile shell. A caller that runs in web
+   * mode for the paste affordances but may also be mounted in that shell (the
+   * add-host form, inside the phone's device console) enables it explicitly.
+   */
+  allowScan?: boolean
+  /**
    * Caller fields rendered inside the form, between the invitation and the
    * submit button, so options the pairing applies (a registry label, "connect
    * after") come before the action that applies them, and Enter in them
@@ -190,6 +209,8 @@ export function PairStep({
   onPaired,
   onBack,
   onActivityChange,
+  onPayloadChange,
+  allowScan,
   extraFields,
 }: PairStepProps) {
   const t = useTranslations("mobile.pair")
@@ -341,9 +362,17 @@ export function PairStep({
     ]
   )
 
+  const scanControllerRef = useRef<AbortController | null>(null)
+  useEffect(() => () => scanControllerRef.current?.abort(), [])
+
   const onScanQr = useCallback(async () => {
+    scanControllerRef.current?.abort()
+    const controller = new AbortController()
+    scanControllerRef.current = controller
     setPhase({ kind: "scanning" })
-    const result = await scanBarcode()
+    const result = await scanBarcode({ signal: controller.signal })
+    if (controller.signal.aborted) return
+    scanControllerRef.current = null
     if (result.kind === "scanned") {
       await completePairing(result.raw)
       return
@@ -380,9 +409,16 @@ export function PairStep({
 
   const autoScanFiredRef = useRef(false)
   useEffect(() => {
-    if (autoScan && !autoScanFiredRef.current) {
-      autoScanFiredRef.current = true
-      void onScanQr()
+    let disposed = false
+    // Wait through StrictMode's effect replay before opening native UI.
+    queueMicrotask(() => {
+      if (autoScan && !autoScanFiredRef.current && !disposed) {
+        autoScanFiredRef.current = true
+        void onScanQr()
+      }
+    })
+    return () => {
+      disposed = true
     }
   }, [autoScan, onScanQr])
 
@@ -487,6 +523,14 @@ export function PairStep({
     onActivityChange?.(activity)
   }, [activity, onActivityChange])
 
+  // Reported from one place rather than at each of the six writes above, so a
+  // new way of filling the field cannot forget to tell the caller.
+  useEffect(() => {
+    onPayloadChange?.(payload)
+  }, [payload, onPayloadChange])
+
+  const scanOffered = allowScan ?? !webMode
+
   const rawField = (
     <Textarea
       id="pair-payload"
@@ -518,7 +562,7 @@ export function PairStep({
           void onPair()
         }}
       >
-        {!webMode ? (
+        {scanOffered ? (
           <Button
             type="button"
             size="lg"

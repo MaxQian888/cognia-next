@@ -256,6 +256,14 @@ export interface TransportRtcOptions {
   iceRestartMaxAttempts?: number
   /** Grace window for a transient ICE `disconnected`/`failed` state. Default 5000. */
   disconnectedGraceMs?: number
+  /**
+   * How often (ms) to probe the open main data channel with a `dc-ping`.
+   * Default 10000; `0` disables the probe. A probe is also sent at once when
+   * ICE recovers from a restart, the moment a Host-side rebuild shows up.
+   */
+  dcLivenessIntervalMs?: number
+  /** How long (ms) a probe waits for its `dc-pong`. Default 5000. */
+  dcLivenessTimeoutMs?: number
   /** Healthy-open duration before recovery counters reset. Default 60000. */
   healthyResetMs?: number
   /** Full-jitter source in [0, 1); injectable for deterministic tests. */
@@ -293,6 +301,8 @@ type Pending = {
   resolve: (value: unknown) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout> | null
+  /** The data channel the request went out on; `null` when it took the relay. */
+  dc?: RTCDataChannel | null
 }
 
 // Eight concurrent 10MiB resources may queue behind the paced relay. Allow
@@ -300,6 +310,8 @@ type Pending = {
 const BINARY_RESOURCE_DEADLINE_MS = 120_000
 
 type PendingBinary = {
+  /** The data channel the request went out on; `null` when it took the relay. */
+  dc?: RTCDataChannel | null
   deadlineAt: number
   resolve: (value: TransportBinaryResponse) => void
   reject: (err: Error) => void
@@ -322,6 +334,36 @@ const BUFFERED_AMOUNT_LOW_WATER = 256 * 1024
 const MAX_PENDING_REMOTE_ICE = 256
 const PENDING_REMOTE_ICE_TTL_MS = 30_000
 export const TERMINAL_DATACHANNEL_LABEL = "cognia.terminal"
+
+/**
+ * Transport liveness probe on the main data channel. Mirrored in
+ * `crates/cognia-companion-connectivity/src/signaling/peer.rs`
+ * (`LIVENESS_PING_KIND` / `LIVENESS_PONG_KIND`), where the Host's channel poll
+ * loop answers on the same SCTP stream, so a pong proves this exact channel
+ * carries data both ways.
+ *
+ * A channel this side reports `open` is not proof the Host has one. When a
+ * Host answered an ICE-restart offer with a brand-new peer connection, Chrome
+ * kept this channel open on a restarted SCTP association that never saw its
+ * DCEP OPEN: the Host's WebRTC stack dropped every frame (`Unknown
+ * PayloadProtocolIdentifier 51`) and each RPC waited out its 30 s timeout.
+ */
+export const DC_LIVENESS_PING_KIND = "dc-ping"
+export const DC_LIVENESS_PONG_KIND = "dc-pong"
+/** Unanswered probes in a row before a channel that has answered is dead. */
+const DC_LIVENESS_MAX_MISSES = 2
+/**
+ * Unanswered probes after which a channel that never answered is taken to be
+ * served by a Host that predates the probe, and probing stops. Such a Host
+ * hands the frame to its dispatcher, which ignores it.
+ */
+const DC_LIVENESS_UNSUPPORTED_AFTER = 3
+/**
+ * `rtc:close` reason for an ICE-restart offer the Host could not apply because
+ * it no longer has the peer connection being restarted. Mirrored in
+ * `crates/cognia-companion/src/signaling/client.rs`.
+ */
+export const RTC_CLOSE_REASON_RESTART_WITHOUT_PEER = "ice-restart-without-peer"
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = ""
@@ -406,6 +448,21 @@ export class TransportRtc {
   private pendingBinary: Map<string, PendingBinary> = new Map()
   private readonly reassembler = new RtcChunkReassembler()
   private channels: Map<string, Set<EventHandler>> = new Map()
+  /**
+   * Channels the Host has acknowledged on the current lane.
+   *
+   * The Host starts every data-channel and relay dispatcher on its catalog
+   * defaults, and every `external-agent://*` channel is off by default. Before
+   * this lane sent `event-subscribe`, `subscribe()` only registered a local
+   * handler, so a phone on the WAN tier never received an agent's stdout: the
+   * agent spawned on the Host, its `initialize` reply went nowhere, and the
+   * phone killed it on timeout, over and over. Cleared whenever a lane opens,
+   * because the subscription is the dispatcher's and a new lane may have a new
+   * one.
+   */
+  private acknowledgedChannels: Set<string> = new Set()
+  /** Callers parked in {@link whenSubscribed}, with the channels they wait on. */
+  private subscribeWaiters: Set<{ channels: readonly string[]; done: () => void }> = new Set()
   private highestSeq: Map<string, number> = new Map()
   private eventCursor = 0
   private resyncInFlight: Promise<void> | null = null
@@ -427,6 +484,20 @@ export class TransportRtc {
   private iceRestartTimer: ReturnType<typeof setTimeout> | null = null
   /** Timer for the transient ICE-disconnected grace phase. */
   private disconnectedGraceTimer: ReturnType<typeof setTimeout> | null = null
+  /** Liveness probe of the main data channel (see `DC_LIVENESS_PING_KIND`). */
+  private liveness: {
+    dc: RTCDataChannel
+    interval: ReturnType<typeof setInterval> | null
+    /** The outstanding probe, if any. */
+    probe: { nonce: string; sentAt: number; timer: ReturnType<typeof setTimeout> } | null
+    /** The Host has answered at least one probe on this channel. */
+    confirmed: boolean
+    misses: number
+    unanswered: number
+    /** Last time any frame arrived on this channel. */
+    lastInboundAt: number
+  } | null = null
+  private livenessNonce = 0
   /** Resets recovery counters only after a genuinely healthy minute. */
   private healthyResetTimer: ReturnType<typeof setTimeout> | null = null
   /**
@@ -456,6 +527,8 @@ export class TransportRtc {
       iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 12_000,
       iceRestartMaxAttempts: opts.iceRestartMaxAttempts ?? 2,
       disconnectedGraceMs: opts.disconnectedGraceMs ?? 5_000,
+      dcLivenessIntervalMs: opts.dcLivenessIntervalMs ?? 10_000,
+      dcLivenessTimeoutMs: opts.dcLivenessTimeoutMs ?? 5_000,
       healthyResetMs: opts.healthyResetMs ?? 60_000,
       peerConnectionFactory:
         opts.peerConnectionFactory ??
@@ -877,6 +950,7 @@ export class TransportRtc {
 
   /** Close pc/dc only (signaling and pending RPCs untouched). */
   private closePeerConnection(): void {
+    this.stopLiveness()
     if (this.dc) {
       const dc = this.dc
       this.dc = null
@@ -952,6 +1026,8 @@ export class TransportRtc {
       this.relayHandshakeTimer = null
     }
     if (this.state !== "open") {
+      // Subscribe before resuming, so the replay already covers our channels.
+      this.resendSubscriptions()
       this.sendRawFrame(JSON.stringify({ kind: "event-resume", since: this.eventCursor }))
       this.setState("open")
       this.settleOpen()
@@ -1120,6 +1196,7 @@ export class TransportRtc {
         resolve: (value) => resolve(value as T),
         reject,
         timer,
+        dc: this.openDataChannel(),
       })
       void this.sendLogicalMessage(JSON.stringify(message)).catch((error) => {
         const pending = this.pending.get(id)
@@ -1148,6 +1225,7 @@ export class TransportRtc {
         reject(new Error("TransportRtc: binary resource timed out"))
       }, BINARY_RESOURCE_DEADLINE_MS)
       this.pendingBinary.set(id, {
+        dc: this.openDataChannel(),
         deadlineAt: Date.now() + BINARY_RESOURCE_DEADLINE_MS,
         resolve,
         reject,
@@ -1163,17 +1241,103 @@ export class TransportRtc {
     })
   }
 
-  /** Subscribe to an event channel sent over the data channel. */
+  /**
+   * Subscribe to an event channel sent over the data channel or relay lane.
+   *
+   * The first handler on a channel asks the Host for it; the last one leaving
+   * tells the Host to drop it. While no lane is open the request is not sent:
+   * the lane's open re-sends the whole set.
+   */
   subscribe<T = unknown>(event: string, handler: (payload: T) => void): () => void {
-    if (!this.channels.has(event)) {
+    const isNewChannel = !this.channels.has(event)
+    if (isNewChannel) {
       this.channels.set(event, new Set())
     }
     this.channels.get(event)!.add(handler as EventHandler)
+    if (isNewChannel) this.sendSubscribeFrame("add", [event])
+    let unsubscribed = false
     return () => {
+      if (unsubscribed) return
+      unsubscribed = true
       const set = this.channels.get(event)
       if (!set) return
       set.delete(handler as EventHandler)
-      if (set.size === 0) this.channels.delete(event)
+      if (set.size === 0) {
+        this.channels.delete(event)
+        // A later re-subscribe must be acknowledged on its own `add`.
+        this.acknowledgedChannels.delete(event)
+        this.sendSubscribeFrame("remove", [event])
+      }
+    }
+  }
+
+  /**
+   * Resolve once the Host has answered for every named channel on the current
+   * lane, or after `timeoutMs`. Mirrors `CompanionTransport.whenSubscribed`:
+   * `subscribe()` is synchronous, so a caller that subscribes and immediately
+   * starts the work it wants to watch would otherwise race its own request.
+   * Resolves rather than rejects; the caller's own deadline decides what a
+   * silent Host means.
+   */
+  async whenSubscribed(channels: readonly string[], timeoutMs = 5_000): Promise<void> {
+    const pending = channels.filter((channel) => !this.acknowledgedChannels.has(channel))
+    if (pending.length === 0) return
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const waiter = {
+        channels: pending,
+        done: () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          this.subscribeWaiters.delete(waiter)
+          resolve()
+        },
+      }
+      const timer = setTimeout(waiter.done, timeoutMs)
+      this.subscribeWaiters.add(waiter)
+    })
+  }
+
+  /** The Host's `event-subscribe` control frame (dispatch.rs `EventControl`). */
+  private sendSubscribeFrame(mode: "add" | "remove", channels: string[]): void {
+    if (channels.length === 0) return
+    if (!this.laneOpen()) return
+    this.sendRawFrame(JSON.stringify({ kind: "event-subscribe", mode, channels }))
+  }
+
+  /** A lane just opened: whatever the last one was told is not this one's. */
+  private resendSubscriptions(): void {
+    this.acknowledgedChannels.clear()
+    const channels = Array.from(this.channels.keys())
+    if (channels.length === 0) return
+    this.sendRawFrame(JSON.stringify({ kind: "event-subscribe", mode: "add", channels }))
+  }
+
+  private laneOpen(): boolean {
+    return this.dc?.readyState === "open" || this.relayUsable()
+  }
+
+  /**
+   * The Host's answer to `event-subscribe`: the resulting set and the
+   * channels it refused. Both count as answered, for exactly the channels
+   * they name; a refusal parked forever would turn into a hang.
+   */
+  private acceptSubscribed(frame: { channels?: unknown; rejected?: unknown }): void {
+    if (Array.isArray(frame.channels)) {
+      for (const channel of frame.channels) {
+        if (typeof channel === "string") this.acknowledgedChannels.add(channel)
+      }
+    }
+    if (Array.isArray(frame.rejected)) {
+      for (const entry of frame.rejected) {
+        const channel =
+          entry && typeof entry === "object" ? (entry as { channel?: unknown }).channel : null
+        if (typeof channel === "string") this.acknowledgedChannels.add(channel)
+      }
+    }
+    for (const waiter of [...this.subscribeWaiters]) {
+      if (waiter.channels.every((channel) => this.acknowledgedChannels.has(channel))) waiter.done()
     }
   }
 
@@ -1233,6 +1397,7 @@ export class TransportRtc {
   close(): void {
     if (this.state === "closed") return
     this.setState("closing")
+    this.stopLiveness()
     this.cancelIceRestart()
     this.cancelRecoveryTimers()
     this.cancelP2pRetry()
@@ -1242,6 +1407,7 @@ export class TransportRtc {
     }
     this.relayOpen = false
     this.helloSent = false
+    this.acknowledgedChannels.clear()
     if (this.negotiationTimer) {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
@@ -1353,7 +1519,13 @@ export class TransportRtc {
       // (re)open resets it (see attachDataChannel.onopen).
       if (ice === "connected" || ice === "completed") {
         this.cancelDisconnectedGrace()
-        if (this.iceRestarting) this.cancelIceRestart()
+        if (this.iceRestarting) {
+          this.cancelIceRestart()
+          // ICE is back, but a restart answered by a Host that rebuilt its
+          // peer leaves this channel pointing at nothing. Check now rather
+          // than at the next interval.
+          this.probeLiveness()
+        }
         return
       }
       if (ice === "disconnected" || ice === "failed") {
@@ -1450,13 +1622,28 @@ export class TransportRtc {
         }
         break
       }
-      case "rtc:close":
+      case "rtc:close": {
+        const reason = (envelope.body as RtcCloseBody | null)?.reason
+        if (reason === RTC_CLOSE_REASON_RESTART_WITHOUT_PEER) {
+          // The Host no longer has the peer connection this side tried to
+          // ICE-restart (its `peer-left` teardown ran while we kept ours).
+          // Nothing on this pc can be resumed: negotiate a new one.
+          console.warn("TransportRtc: Host has no peer to ICE-restart; renegotiating")
+          this.cancelIceRestart()
+          if (this.state === "open") {
+            this.handleMidSessionDisconnect()
+          } else {
+            this.settleNegotiationFailure(new Error("Host has no peer connection to restart"))
+          }
+          break
+        }
         if (this.relayOpen) {
           this.abandonP2p(new Error("peer closed the peer connection"))
         } else {
           this.fail(new Error("peer closed the connection"))
         }
         break
+      }
       case "rtc:offer":
         // We initiate offers; desktop should never re-offer for now.
         console.warn("TransportRtc: unexpected rtc:offer from peer")
@@ -1528,6 +1715,9 @@ export class TransportRtc {
     dc.bufferedAmountLowThreshold = BUFFERED_AMOUNT_LOW_WATER
     dc.onopen = () => {
       if (this.dc !== dc) return
+      // `sendRawFrame` prefers this channel now that it is open, so the
+      // subscription lands on the dispatcher the resume does.
+      this.resendSubscriptions()
       dc.send(JSON.stringify({ kind: "event-resume", since: this.eventCursor }))
       this.cancelP2pRetry()
       this.p2pRetryAttempt = 0
@@ -1539,6 +1729,7 @@ export class TransportRtc {
       this.setState("open")
       this.armHealthyReset()
       this.cancelIceRestart()
+      this.startLiveness(dc)
       this.settleOpen()
       // Promoted from the relay: same state, new carrier. Re-notify so the
       // tier flips to `rtc-*`.
@@ -1559,7 +1750,11 @@ export class TransportRtc {
       }
     }
     dc.onmessage = (event: MessageEvent) => {
+      if (this.liveness?.dc === dc) this.liveness.lastInboundAt = Date.now()
       if (typeof event.data === "string") {
+        // Only a pong that arrived on this channel speaks for it; the relay
+        // lane never carries one.
+        if (this.acceptLivenessPong(dc, event.data)) return
         this.handleDataChannelMessage(event.data)
       } else if (event.data instanceof ArrayBuffer) {
         this.handleBinaryDataChannelMessage(event.data)
@@ -1642,6 +1837,7 @@ export class TransportRtc {
    * machine can re-enter `connect()` cleanly.
    */
   private teardownPeer(): void {
+    this.stopLiveness()
     this.cancelIceRestart()
     this.cancelRecoveryTimers()
     if (this.negotiationTimer) {
@@ -1659,6 +1855,9 @@ export class TransportRtc {
     this.p2pRetryAttempt = 0
     this.relayOpen = false
     this.helloSent = false
+    // The dispatcher these answered for is gone with the peer. Parked waiters
+    // keep their own timeout; the next lane re-sends their channels.
+    this.acknowledgedChannels.clear()
     if (this.relayHandshakeTimer) {
       clearTimeout(this.relayHandshakeTimer)
       this.relayHandshakeTimer = null
@@ -1712,6 +1911,151 @@ export class TransportRtc {
     // open/fail bridges.
     this.onDcOpenResolvers = []
     this.onDcFailResolvers = []
+  }
+
+  /** The main data channel when it is open, else `null`. */
+  private openDataChannel(): RTCDataChannel | null {
+    return this.dc && this.dc.readyState === "open" ? this.dc : null
+  }
+
+  /** Probe `dc` every `dcLivenessIntervalMs` for as long as it is the main channel. */
+  private startLiveness(dc: RTCDataChannel): void {
+    if (this.liveness?.dc === dc) return
+    this.stopLiveness()
+    if (this.opts.dcLivenessIntervalMs <= 0) return
+    this.liveness = {
+      dc,
+      interval: setInterval(() => this.probeLiveness(), this.opts.dcLivenessIntervalMs),
+      probe: null,
+      confirmed: false,
+      misses: 0,
+      unanswered: 0,
+      lastInboundAt: Date.now(),
+    }
+  }
+
+  private stopLiveness(): void {
+    const liveness = this.liveness
+    if (!liveness) return
+    this.liveness = null
+    if (liveness.interval) clearInterval(liveness.interval)
+    if (liveness.probe) clearTimeout(liveness.probe.timer)
+  }
+
+  /** Send one `dc-ping` down the main channel, unless one is outstanding. */
+  private probeLiveness(): void {
+    const liveness = this.liveness
+    if (!liveness || liveness.probe || this.state !== "open") return
+    const dc = liveness.dc
+    if (this.dc !== dc || dc.readyState !== "open") return
+    // Queued outbound bytes sit ahead of the probe on this ordered stream;
+    // a probe behind them measures the upload, not the Host.
+    if (dc.bufferedAmount > BUFFERED_AMOUNT_LOW_WATER) return
+    const nonce = `p${++this.livenessNonce}`
+    try {
+      dc.send(JSON.stringify({ kind: DC_LIVENESS_PING_KIND, nonce }))
+    } catch {
+      return
+    }
+    const sentAt = Date.now()
+    liveness.probe = {
+      nonce,
+      sentAt,
+      timer: setTimeout(
+        () => this.livenessProbeExpired(liveness, nonce),
+        this.opts.dcLivenessTimeoutMs
+      ),
+    }
+  }
+
+  /** True when `raw` was a pong (consumed here, never an RPC frame). */
+  private acceptLivenessPong(dc: RTCDataChannel, raw: string): boolean {
+    if (raw.length > 256 || !raw.includes(DC_LIVENESS_PONG_KIND)) return false
+    let frame: unknown
+    try {
+      frame = JSON.parse(raw)
+    } catch {
+      return false
+    }
+    if (
+      !frame ||
+      typeof frame !== "object" ||
+      (frame as { kind?: unknown }).kind !== DC_LIVENESS_PONG_KIND
+    ) {
+      return false
+    }
+    const liveness = this.liveness
+    if (!liveness || liveness.dc !== dc) return true
+    const nonce = (frame as { nonce?: unknown }).nonce
+    if (liveness.probe && liveness.probe.nonce === nonce) {
+      clearTimeout(liveness.probe.timer)
+      liveness.probe = null
+    }
+    liveness.confirmed = true
+    liveness.misses = 0
+    liveness.unanswered = 0
+    return true
+  }
+
+  private livenessProbeExpired(
+    liveness: NonNullable<TransportRtc["liveness"]>,
+    nonce: string
+  ): void {
+    if (this.liveness !== liveness || liveness.probe?.nonce !== nonce) return
+    const sentAt = liveness.probe.sentAt
+    liveness.probe = null
+    const dc = liveness.dc
+    if (this.dc !== dc || dc.readyState !== "open" || this.state !== "open") return
+    // Frames still arriving mean the Host is reaching us on this channel and
+    // the pong is queued behind them (or was dropped by a full Host buffer).
+    // Not proof the other direction works, but not a miss either.
+    if (liveness.lastInboundAt > sentAt) return
+    if (!liveness.confirmed) {
+      liveness.unanswered += 1
+      if (liveness.unanswered >= DC_LIVENESS_UNSUPPORTED_AFTER) {
+        // A Host that predates the probe never answers; stop asking.
+        this.stopLiveness()
+      }
+      return
+    }
+    liveness.misses += 1
+    if (liveness.misses >= DC_LIVENESS_MAX_MISSES) {
+      this.handleDeadDataChannel(dc)
+      return
+    }
+    // One miss: confirm or clear it without waiting a whole interval.
+    this.probeLiveness()
+  }
+
+  /**
+   * The Host stopped answering on a channel that still reads `open` here.
+   * Fail the requests that went out on it (they will not be answered), then
+   * recover exactly as for a dropped channel: fall back to the relay and
+   * retry P2P, or tear down and renegotiate.
+   */
+  private handleDeadDataChannel(dc: RTCDataChannel): void {
+    console.warn("TransportRtc: the Host stopped answering on the data channel; recovering")
+    this.stopLiveness()
+    const lost = new RtcCarrierError("TransportRtc: the Host stopped answering on the data channel")
+    for (const [id, pending] of this.pending) {
+      if (pending.dc !== dc) continue
+      this.pending.delete(id)
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(lost)
+    }
+    for (const [id, pending] of this.pendingBinary) {
+      if (pending.dc !== dc) continue
+      this.pendingBinary.delete(id)
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(lost)
+    }
+    this.handleMidSessionDisconnect()
+    if (this.state === "open" && this.relayUsable()) {
+      // Events the Host pushed into the dead channel were lost with it; the
+      // relay dispatcher replays them from our cursor.
+      this.resendSubscriptions()
+      this.sendRawFrame(JSON.stringify({ kind: "event-resume", since: this.eventCursor }))
+    }
   }
 
   /**
@@ -1909,6 +2253,11 @@ export class TransportRtc {
       return
     }
 
+    if ("kind" in frame && (frame as { kind: string }).kind === "event-subscribed") {
+      this.acceptSubscribed(frame as { channels?: unknown; rejected?: unknown })
+      return
+    }
+
     if ("kind" in frame && (frame as { kind: string }).kind === "event") {
       this.acceptRtcEvent(frame as RtcEvent)
       return
@@ -2016,7 +2365,12 @@ export class TransportRtc {
         if (!Number.isSafeInteger(notice.cursor) || (notice.cursor ?? -1) < 0) {
           throw new Error("resync notice omitted a valid cursor")
         }
-        this.eventCursor = Math.max(this.eventCursor, notice.cursor!)
+        // The notice's cursor replaces ours rather than raising it. Within one
+        // Host process it is that bus's high-water mark, which a cursor of ours
+        // can never exceed; above it, ours was issued by a Host process that has
+        // since restarted, and keeping it dropped every new event as already
+        // seen until the new numbering caught up.
+        this.eventCursor = notice.cursor!
         this.highestSeq.clear()
         this.saveEventCursor()
         for (const handlers of this.channels.values()) {

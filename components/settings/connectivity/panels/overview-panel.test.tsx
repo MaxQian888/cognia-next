@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import { OverviewPanel } from "./overview-panel"
 
@@ -20,6 +20,13 @@ jest.mock("@/hooks/companion/use-connection-state", () => ({
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: (selector: (s: unknown) => unknown) =>
     selector({ hosts, activeHostId: "h1" }),
+}))
+// The active remote host's own transport, which is what a driving desktop's
+// link rows have to read: the shared `transport` there is the local proxy.
+let remoteTransport: Record<string, unknown> | null = null
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteTransport: () => remoteTransport,
+  subscribeActiveRemoteTransport: () => () => undefined,
 }))
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => [{ deviceId: "d1" }, { deviceId: "d2" }],
@@ -71,5 +78,75 @@ describe("OverviewPanel", () => {
     expect(screen.getByTestId("overview-active-host")).toHaveTextContent("my server")
     expect(screen.getByTestId("overview-own-plane")).toHaveTextContent("plane.degraded")
     expect(screen.queryByTestId("overview-device-planes")).toBeNull()
+  })
+
+  /**
+   * A desktop driving a remote host keeps `target === null` (it is still a
+   * Host), which is how the overview came to say "Is a Host / Local / not
+   * applicable" right next to "Active host: <remote>".
+   */
+  it("describes the driven host on a desktop that is driving one", () => {
+    profile.mockReturnValue("desktop")
+    target = null
+    connection = null
+    hosts = [
+      {
+        id: "h1",
+        label: "build box",
+        connectionState: "degraded",
+        connectionError: "capability probe failed",
+        config: { baseUrl: "https://box:27890" },
+      },
+    ]
+    health = { rpc: "ready", events: "ready" }
+    remoteTransport = {
+      getActiveTier: () => "ws-lan",
+      onTierChange: () => () => undefined,
+      getPlaneHealth: () => health,
+      onPlaneHealthChange: () => () => undefined,
+    }
+    try {
+      render(<OverviewPanel onNavigate={() => undefined} />)
+      expect(screen.getByTestId("overview-host-mode")).toHaveTextContent("hostModeValue.driving")
+      expect(screen.getByTestId("overview-link")).not.toHaveTextContent("linkValue.local")
+      expect(screen.getByTestId("overview-link")).toHaveTextContent("degraded")
+      expect(screen.getByTestId("overview-tier")).toHaveTextContent("wsLan")
+      expect(screen.getByTestId("overview-active-host")).toHaveTextContent("build box")
+      expect(screen.getByTestId("overview-active-host-error")).toHaveTextContent(
+        "capability probe failed"
+      )
+      expect(screen.getByTestId("overview-own-plane")).toHaveTextContent("plane.ready")
+      // Still a Host for its own phones while it drives another.
+      expect(screen.getByTestId("overview-device-planes")).toBeInTheDocument()
+    } finally {
+      remoteTransport = null
+    }
+  })
+
+  it("says the driven link is still negotiating before its transport reports a tier", () => {
+    profile.mockReturnValue("desktop")
+    target = null
+    hosts = [
+      {
+        id: "h1",
+        label: "build box",
+        connectionState: "connecting",
+        config: { baseUrl: "https://box:27890" },
+      },
+    ]
+    remoteTransport = null
+    render(<OverviewPanel onNavigate={() => undefined} />)
+    expect(screen.getByTestId("overview-tier")).toHaveTextContent("tierPending")
+    expect(screen.getByTestId("overview-tier")).not.toHaveTextContent("tierNotApplicable")
+  })
+
+  it("offers a shortcut to the Remote hosts panel", () => {
+    profile.mockReturnValue("desktop")
+    target = null
+    hosts = []
+    const onNavigate = jest.fn()
+    render(<OverviewPanel onNavigate={onNavigate} />)
+    fireEvent.click(screen.getByTestId("overview-go-remote-hosts"))
+    expect(onNavigate).toHaveBeenCalledWith("remote-hosts")
   })
 })

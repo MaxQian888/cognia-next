@@ -4,10 +4,13 @@
  */
 
 import {
+  DC_LIVENESS_PING_KIND,
+  DC_LIVENESS_PONG_KIND,
   parseRelayQuotaRetryAfterMs,
   RELAY_QUOTA_EXCEEDED_CODE,
   RtcRelayQuotaError,
   RECONNECT_BACKOFF_MS,
+  RTC_CLOSE_REASON_RESTART_WITHOUT_PEER,
   RtcCarrierError,
   TransportRtc,
   type RtcMessage,
@@ -657,6 +660,162 @@ describe("TransportRtc", () => {
       kind: "event-ack",
       seq: 5,
     })
+  })
+
+  describe("event subscriptions", () => {
+    async function openDc() {
+      const made = makeRtc()
+      const connect = made.rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      made.sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+      return { ...made, connect, dc: made.pcs[0].channels[0] }
+    }
+    const frames = (dc: FakeDataChannel) => dc.sent.map((raw) => JSON.parse(raw))
+
+    it("asks the Host for a non-default channel, before the resume, when the lane opens", async () => {
+      const { rtc, connect, dc } = await openDc()
+      // Subscribed while negotiating: nothing can be sent yet.
+      rtc.subscribe("external-agent://stdout", () => {})
+      expect(dc.sent).toHaveLength(0)
+      dc.open()
+      await connect
+
+      const sent = frames(dc)
+      const subscribe = sent.findIndex((f) => f.kind === "event-subscribe")
+      const resume = sent.findIndex((f) => f.kind === "event-resume")
+      expect(sent[subscribe]).toEqual({
+        kind: "event-subscribe",
+        mode: "add",
+        channels: ["external-agent://stdout"],
+      })
+      // The replay the resume asks for is filtered by the subscription.
+      expect(subscribe).toBeLessThan(resume)
+      rtc.close()
+    })
+
+    it("adds a channel once, and removes it when its last handler leaves", async () => {
+      const { rtc, connect, dc } = await openDc()
+      dc.open()
+      await connect
+      const before = dc.sent.length
+
+      const first = rtc.subscribe("external-agent://stderr", () => {})
+      const second = rtc.subscribe("external-agent://stderr", () => {})
+      first()
+      first()
+      expect(frames(dc).slice(before)).toEqual([
+        { kind: "event-subscribe", mode: "add", channels: ["external-agent://stderr"] },
+      ])
+      second()
+      expect(frames(dc).slice(before)).toEqual([
+        { kind: "event-subscribe", mode: "add", channels: ["external-agent://stderr"] },
+        { kind: "event-subscribe", mode: "remove", channels: ["external-agent://stderr"] },
+      ])
+      rtc.close()
+    })
+
+    it("resolves whenSubscribed on the Host's answer for exactly the named channels", async () => {
+      const { rtc, connect, dc } = await openDc()
+      dc.open()
+      await connect
+      rtc.subscribe("external-agent://stdout", () => {})
+      rtc.subscribe("external-agent://exit", () => {})
+
+      let resolved = false
+      const waiting = rtc
+        .whenSubscribed(["external-agent://stdout", "external-agent://exit"], 60_000)
+        .then(() => {
+          resolved = true
+        })
+      // An answer naming only one channel does not release a two-channel wait.
+      dc.push({ kind: "event-subscribed", channels: ["external-agent://stdout"], rejected: [] })
+      await new Promise((r) => setTimeout(r, 0))
+      expect(resolved).toBe(false)
+      // A refusal is an answer too: nothing will arrive, and waiting won't help.
+      dc.push({
+        kind: "event-subscribed",
+        channels: ["external-agent://stdout"],
+        rejected: [{ channel: "external-agent://exit", reason: "scope" }],
+      })
+      await waiting
+      expect(resolved).toBe(true)
+      // Already answered: no wait at all.
+      await expect(rtc.whenSubscribed(["external-agent://stdout"])).resolves.toBeUndefined()
+      rtc.close()
+    })
+
+    it("gives up waiting after the timeout instead of hanging on a silent Host", async () => {
+      jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+      try {
+        const { rtc, connect, dc } = await openDcWithFakeTimers()
+        dc.open()
+        await connect
+        rtc.subscribe("external-agent://stdout", () => {})
+        const waiting = rtc.whenSubscribed(["external-agent://stdout"], 1_000)
+        await jest.advanceTimersByTimeAsync(1_000)
+        await expect(waiting).resolves.toBeUndefined()
+        rtc.close()
+      } finally {
+        jest.useRealTimers()
+      }
+
+      async function openDcWithFakeTimers() {
+        const made = makeRtc()
+        const connect = made.rtc.connect()
+        await jest.advanceTimersByTimeAsync(5)
+        made.sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+        return { ...made, connect, dc: made.pcs[0].channels[0] }
+      }
+    })
+  })
+
+  it("takes a restarted Host's lower cursor from its resync instead of dropping its events", async () => {
+    // The phone saved cursor 3850 under the Host's previous process. The
+    // restarted Host's bus is at 238, so it answers the resume with a resync;
+    // keeping 3850 dropped event 239 and everything after it as already seen.
+    const stored = new Map([["cognia:rtc-event-cursor:room-1", "3850"]])
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => void stored.set(key, value),
+      },
+    })
+    // No resolver yet, as on the device: the boot that installs them waits on
+    // the manifest read this very transport has to carry.
+    try {
+      const { rtc, sig, pcs } = makeRtc()
+      const connect = rtc.connect()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+      const dc = pcs[0].channels[0]
+      dc.open()
+      await connect
+      expect(dc.sent.map((raw) => JSON.parse(raw))).toContainEqual({
+        kind: "event-resume",
+        since: 3850,
+      })
+
+      const received: unknown[] = []
+      rtc.subscribe("external-agent://session-event", (payload) => received.push(payload))
+      dc.push({ kind: "resync_required", domains: ["*"], cursor: 238 })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      dc.push({
+        kind: "event",
+        event: "external-agent://session-event",
+        seq: 239,
+        payload: { runId: "rer_1", seq: 1 },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(received).toContainEqual({ runId: "rer_1", seq: 1 })
+      expect(stored.get("cognia:rtc-event-cursor:room-1")).toBe("239")
+      expect(rtc.getState()).toBe("open")
+    } finally {
+      if (previous) Object.defineProperty(globalThis, "localStorage", previous)
+      else Reflect.deleteProperty(globalThis, "localStorage")
+    }
   })
 
   it("surfaces an explicit resync requirement to every registered event domain", async () => {
@@ -1503,6 +1662,45 @@ describe("TransportRtc", () => {
           m.kind === "data" && String((m.body as { text?: string }).text).includes("event-resume")
       )
       expect(resume).toBeDefined()
+      rtc.close()
+    })
+
+    it("subscribes over the relay too, and re-asks with the whole set on a fresh lane", async () => {
+      const { rtc, sig } = makeRtc()
+      rtc.subscribe("external-agent://stdout", () => {})
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      sig.emitEnvelope(hostHello())
+      await connect
+
+      const relayed = sig.sent
+        .filter((m) => m.kind === "data")
+        .map((m) => JSON.parse((m.body as { text: string }).text) as { kind: string })
+      const subscribe = relayed.findIndex((f) => f.kind === "event-subscribe")
+      expect(relayed[subscribe]).toEqual({
+        kind: "event-subscribe",
+        mode: "add",
+        channels: ["external-agent://stdout"],
+      })
+      expect(subscribe).toBeLessThan(relayed.findIndex((f) => f.kind === "event-resume"))
+
+      // The relay's answer is honoured the same way the DataChannel's is.
+      sig.emitEnvelope(
+        envelope(
+          "data",
+          {
+            text: JSON.stringify({
+              kind: "event-subscribed",
+              channels: ["external-agent://stdout"],
+              rejected: [],
+            }),
+          },
+          2
+        )
+      )
+      // A minute-long budget: only the answer, never the timeout, can settle it
+      // inside the test's own deadline.
+      await expect(rtc.whenSubscribed(["external-agent://stdout"], 60_000)).resolves.toBeUndefined()
       rtc.close()
     })
 
@@ -2512,5 +2710,235 @@ describe("TransportRtc framing and teardown failures", () => {
     await connected
     await new Promise((resolve) => setTimeout(resolve, 15))
     expect(rtc.getState()).toBe("open")
+  })
+})
+
+// A channel this side reports `open` can be one the Host never registered: a
+// Host that answered an ICE-restart offer with a brand-new peer connection left
+// Chrome's channels on a restarted SCTP association without their DCEP OPEN,
+// and the Host's WebRTC stack dropped every frame (`Unknown
+// PayloadProtocolIdentifier 51`). These pin the two defences.
+describe("TransportRtc data-channel liveness and orphaned ICE restarts", () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  const hostHello = () => envelope("hello", { deviceId: "host", relay: true }, 1)
+  /** Poll real timers until `predicate` holds (bounded), so slow CI cannot flake. */
+  async function waitUntil(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error("condition not reached in time")
+      await sleep(5)
+    }
+  }
+
+  type Frame = { kind?: string; nonce?: string; id?: string; method?: string }
+  const framesOf = (dc: { sent: string[] }): Frame[] =>
+    dc.sent.flatMap((raw) => {
+      try {
+        return [JSON.parse(raw) as Frame]
+      } catch {
+        return []
+      }
+    })
+  const probesOf = (dc: { sent: string[] }) =>
+    framesOf(dc).filter((frame) => frame.kind === DC_LIVENESS_PING_KIND)
+
+  /** Answer every outstanding probe on `dc`, the way the Host's poll loop does. */
+  function answerProbes(
+    dc: { sent: string[]; push: (data: unknown) => void },
+    answered: Set<string>
+  ) {
+    for (const probe of probesOf(dc)) {
+      if (!probe.nonce || answered.has(probe.nonce)) continue
+      answered.add(probe.nonce)
+      dc.push({ kind: DC_LIVENESS_PONG_KIND, nonce: probe.nonce })
+    }
+  }
+
+  async function openOverDataChannel(
+    overrides: Partial<ConstructorParameters<typeof TransportRtc>[0]> = {}
+  ) {
+    const made = makeRtc({
+      dcLivenessIntervalMs: 20,
+      dcLivenessTimeoutMs: 10,
+      reconnectBackoffMs: [60_000],
+      ...overrides,
+    })
+    const connect = made.rtc.connect()
+    await sleep(5)
+    made.sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    await sleep(5)
+    made.pcs[0].channels[0].open()
+    await connect
+    return made
+  }
+
+  it("probes the open main channel and stays open while the Host answers", async () => {
+    const { rtc, pcs } = await openOverDataChannel({ dcLivenessTimeoutMs: 500 })
+    const main = pcs[0].channels[0]
+    const answered = new Set<string>()
+    // Answer each probe well inside its budget.
+    const deadline = Date.now() + 3_000
+    while (probesOf(main).length < 3 && Date.now() < deadline) {
+      answerProbes(main, answered)
+      await sleep(2)
+    }
+    answerProbes(main, answered)
+    expect(probesOf(main).length).toBeGreaterThanOrEqual(3)
+    // Probes go down the main channel only, never the terminal one.
+    expect(probesOf(pcs[0].channels[1])).toHaveLength(0)
+    expect(rtc.getState()).toBe("open")
+    expect(rtc.getCarrier()).toBe("datachannel")
+    rtc.close()
+  })
+
+  it("never hands a pong to the RPC/event path", async () => {
+    const { rtc, pcs } = await openOverDataChannel({ dcLivenessIntervalMs: 0 })
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const events: unknown[] = []
+    rtc.subscribe(DC_LIVENESS_PONG_KIND, (payload) => events.push(payload))
+    pcs[0].channels[0].push({ kind: DC_LIVENESS_PONG_KIND, nonce: "stray" })
+    await sleep(5)
+    expect(events).toHaveLength(0)
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+    rtc.close()
+  })
+
+  it("declares a confirmed channel dead after two unanswered probes and fails its RPCs at once", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { rtc, pcs } = await openOverDataChannel()
+    const main = pcs[0].channels[0]
+    // The Host answers the first probe, then goes silent (its peer was rebuilt).
+    await waitUntil(() => probesOf(main).length >= 1)
+    answerProbes(main, new Set())
+    const call = rtc.call("sessions_list", { limit: 1 })
+    const started = Date.now()
+    await expect(call).rejects.toBeInstanceOf(RtcCarrierError)
+    // Well under the 30 s RPC timeout the silent channel used to cost.
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(rtc.getState()).toBe("reconnecting")
+    expect(main.readyState).toBe("closed")
+    warn.mockRestore()
+    rtc.close()
+  })
+
+  it("does not count a probe as missed while the Host is still sending on the channel", async () => {
+    const { rtc, pcs } = await openOverDataChannel({ dcLivenessTimeoutMs: 150 })
+    const main = pcs[0].channels[0]
+    await waitUntil(() => probesOf(main).length >= 1)
+    answerProbes(main, new Set())
+    // From here the Host streams events but its pongs are stuck behind them.
+    for (let i = 0; i < 10; i++) {
+      main.push({ kind: "event", event: "noop", seq: 0, payload: null })
+      await sleep(10)
+    }
+    expect(rtc.getState()).toBe("open")
+    rtc.close()
+  })
+
+  it("stops probing a Host that never answers (it predates the probe)", async () => {
+    const { rtc, pcs } = await openOverDataChannel()
+    const main = pcs[0].channels[0]
+    await waitUntil(() => probesOf(main).length >= 3)
+    // Several more intervals pass without another probe.
+    await sleep(150)
+    expect(probesOf(main)).toHaveLength(3)
+    expect(rtc.getState()).toBe("open")
+    rtc.close()
+  })
+
+  it("probes at once when ICE recovers from a restart", async () => {
+    const { rtc, pcs } = await openOverDataChannel({
+      dcLivenessIntervalMs: 60_000,
+      disconnectedGraceMs: 0,
+    })
+    const main = pcs[0].channels[0]
+    pcs[0].setIceState("failed")
+    await sleep(5)
+    expect(pcs[0].offerOptions.some((options) => options?.iceRestart === true)).toBe(true)
+    expect(probesOf(main)).toHaveLength(0)
+    pcs[0].setIceState("connected")
+    expect(probesOf(main)).toHaveLength(1)
+    rtc.close()
+  })
+
+  it("falls back to the relay and replays events when the channel dies under a relay session", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { rtc, sig, pcs } = makeRtc({ dcLivenessIntervalMs: 20, dcLivenessTimeoutMs: 10 })
+    const connect = rtc.connect()
+    await sleep(5)
+    sig.emitEnvelope(hostHello())
+    await connect
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody, 2))
+    await sleep(5)
+    pcs[0].channels[0].open()
+    expect(rtc.getCarrier()).toBe("datachannel")
+    await waitUntil(() => probesOf(pcs[0].channels[0]).length >= 1)
+    answerProbes(pcs[0].channels[0], new Set())
+    const resumesBefore = sig.sent.filter(
+      (m) =>
+        m.kind === "data" && String((m.body as { text?: string }).text).includes("event-resume")
+    ).length
+
+    await waitUntil(() => rtc.getCarrier() === "relay")
+    expect(rtc.getState()).toBe("open")
+    expect(rtc.getCarrier()).toBe("relay")
+    const resumesAfter = sig.sent.filter(
+      (m) =>
+        m.kind === "data" && String((m.body as { text?: string }).text).includes("event-resume")
+    ).length
+    expect(resumesAfter).toBe(resumesBefore + 1)
+    warn.mockRestore()
+    rtc.close()
+  })
+
+  it("renegotiates a new peer when the Host refuses an ICE restart it has no peer for", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { rtc, sig, pcs } = await openOverDataChannel({
+      dcLivenessIntervalMs: 0,
+      disconnectedGraceMs: 0,
+      reconnectBackoffMs: [5],
+      reconnectRandom: () => 0.5,
+    })
+    pcs[0].setIceState("failed")
+    await sleep(5)
+    expect(pcs[0].offerOptions.some((options) => options?.iceRestart === true)).toBe(true)
+
+    sig.emitEnvelope(envelope("rtc:close", { reason: RTC_CLOSE_REASON_RESTART_WITHOUT_PEER }, 3))
+    await sleep(5)
+    expect(pcs[0].channels[0].readyState).toBe("closed")
+    // A brand-new peer connection with fresh channels, not another restart.
+    await waitUntil(() => pcs.length === 2 && pcs[1].offerOptions.length > 0)
+    expect(pcs[1].channels.map((channel) => channel.label)).toEqual([
+      "cognia.signaling",
+      "cognia.terminal",
+    ])
+    expect(pcs[1].offerOptions.every((options) => options?.iceRestart !== true)).toBe(true)
+    expect(warn).toHaveBeenCalledWith(
+      "TransportRtc: Host has no peer to ICE-restart; renegotiating"
+    )
+    warn.mockRestore()
+    rtc.close()
+  })
+
+  it("keeps a relay session on the relay when the Host refuses the restart", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { rtc, sig, pcs } = makeRtc({ dcLivenessIntervalMs: 0, disconnectedGraceMs: 0 })
+    const connect = rtc.connect()
+    await sleep(5)
+    sig.emitEnvelope(hostHello())
+    await connect
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody, 2))
+    await sleep(5)
+    pcs[0].channels[0].open()
+    pcs[0].setIceState("failed")
+    await sleep(5)
+
+    sig.emitEnvelope(envelope("rtc:close", { reason: RTC_CLOSE_REASON_RESTART_WITHOUT_PEER }, 3))
+    await sleep(5)
+    expect(rtc.getState()).toBe("open")
+    expect(rtc.getCarrier()).toBe("relay")
+    warn.mockRestore()
+    rtc.close()
   })
 })

@@ -134,6 +134,19 @@ describe("<PairedStep />", () => {
     expect(screen.getByTestId("pair-status")).toHaveTextContent("0.1.0")
   })
 
+  it("lays the status out as a real definition list and the secondary actions as flat rows", () => {
+    const { container } = render(<PairedStep {...baseProps} />)
+    const status = screen.getByTestId("pair-status")
+    expect(status.tagName).toBe("DL")
+    expect(status.querySelectorAll(":scope > div > dt")).toHaveLength(4)
+    expect(status.querySelectorAll(":scope > div > dd")).toHaveLength(4)
+    // No card frames: the help row renders flush inside the hairline list.
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getByTestId("pair-discover-help")).not.toHaveClass("rounded-lg")
+    expect(screen.getByTestId("pair-signout")).toHaveTextContent("Sign out")
+    expect(screen.getByTestId("pair-signout")).toHaveTextContent("Sign out and re-pair.")
+  })
+
   it("Continue to chat fires the onContinue callback", () => {
     const onContinue = jest.fn()
     render(<PairedStep {...baseProps} onContinue={onContinue} />)

@@ -16,7 +16,11 @@ jest.mock("@/lib/tauri/companion-storage", () => ({
 
 import { defaultCompanionEndpointResolver } from "./companion-endpoint"
 
-const REMOTE = { baseUrl: "https://host.example", deviceId: "d1" }
+const REMOTE = {
+  baseUrl: "https://host.example",
+  deviceId: "d1",
+  remoteHost: { id: "registry-a", label: "Build host" },
+}
 const PAIRED = { baseUrl: "https://paired.example", deviceId: "d2" }
 
 beforeEach(() => {

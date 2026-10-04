@@ -54,7 +54,6 @@ export async function fetchHealthz(
     const resp = await capacitorHttpGet(cap, url, {
       signal,
       timeoutMs,
-      serverTrustMode: "self-signed",
     })
     if (!resp || resp.status !== 200) return null
     return parseHealthz(resp.data)

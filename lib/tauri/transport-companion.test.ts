@@ -14,6 +14,17 @@
  * CompanionTransport (ok, status, json()).
  */
 
+// jsdom lacks Fetch's Request; use the bundled implementation to exercise
+// actual native serialization rather than replacing the serializer with a mock.
+const { Request: NativeRequest } = jest.requireActual(
+  "next/dist/compiled/@edge-runtime/primitives/fetch"
+)
+Object.defineProperty(globalThis, "Request", {
+  configurable: true,
+  writable: true,
+  value: NativeRequest,
+})
+
 import {
   CompanionError,
   CompanionTransport,
@@ -1136,6 +1147,56 @@ describe("call() — idempotency key", () => {
 
 describe("managed IDE raw content transport", () => {
   beforeEach(() => setConfig({ ...MOCK_CONFIG, serverFingerprint: "ab".repeat(32) }))
+
+  it("round-trips managed IDE bytes through the actual native bridge serialization", async () => {
+    const original = (globalThis as { Capacitor?: unknown }).Capacitor
+    const raw = new Uint8Array([0, 255, 128, 1])
+    const request = jest.fn(
+      async (options: {
+        method: string
+        data?: string
+        dataType?: string
+        responseType?: string
+      }) => {
+        if (options.method === "POST") {
+          expect(options.dataType).toBe("file")
+          expect(Uint8Array.from(atob(options.data!), (c) => c.charCodeAt(0))).toEqual(raw)
+          return {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            data: { id: "handle-1" },
+          }
+        }
+        expect(options.responseType).toBe("blob")
+        return {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+          data: "AP+AAQ==",
+        }
+      }
+    )
+    ;(globalThis as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        CapacitorHttp: { request, getSecurityCapabilities: async () => ({ spkiPinning: true }) },
+      },
+    }
+    try {
+      transport = new CompanionTransport()
+      const context = {
+        root: "/workspace",
+        generation: 4,
+        pluginId: "demo",
+        providerId: "cognia.demo.fs",
+        permission: null,
+      }
+      expect(await transport.uploadManagedIdeContent(context, raw)).toEqual({ id: "handle-1" })
+      expect(await transport.redeemManagedIdeContent(context, "handle-1")).toEqual(raw)
+    } finally {
+      if (original === undefined) delete (globalThis as { Capacitor?: unknown }).Capacitor
+      else (globalThis as { Capacitor?: unknown }).Capacitor = original
+    }
+  })
 
   it("uploads bytes as a raw body with service context in a header", async () => {
     fetchSpy.mockResolvedValue({
@@ -3007,6 +3068,40 @@ describe("subscribe() — LAN-first gate", () => {
   })
 })
 
+describe("whenSubscribed() — WAN tier", () => {
+  it("asks the data lane when it carries the channel and no events socket is up", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = { ...makeFakeRtc(), whenSubscribed: jest.fn(async () => undefined) }
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    // The socket is still opening (a phone without native pinning never
+    // finishes): only the lane's dispatcher can acknowledge.
+    transport.subscribe("external-agent://stdout", jest.fn())
+    expect(fakeRtc.subscribe).toHaveBeenCalledWith("external-agent://stdout", expect.any(Function))
+
+    await transport.whenSubscribed(["external-agent://stdout"], 60_000)
+    expect(fakeRtc.whenSubscribed).toHaveBeenCalledWith(["external-agent://stdout"], 60_000)
+  })
+
+  it("keeps waiting on the socket when the lane does not carry the channel", async () => {
+    jest.useFakeTimers()
+    try {
+      await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+      transport = new CompanionTransport()
+      transport.subscribe("external-agent://stdout", jest.fn())
+      // The tier opened after the subscribe and nothing mirrored onto it yet.
+      const fakeRtc = { ...makeFakeRtc(), whenSubscribed: jest.fn(async () => undefined) }
+      ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+      const waiting = transport.whenSubscribed(["external-agent://stdout"], 1_000)
+      await jest.advanceTimersByTimeAsync(1_000)
+      await waiting
+      expect(fakeRtc.whenSubscribed).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
 describe("recomputeTier() — LAN wins over an open DataChannel", () => {
   it("reports ws-lan even when a DataChannel peer is open", async () => {
     await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
@@ -3506,5 +3601,162 @@ describe("remote binary and catalog refusal boundaries", () => {
     await jest.advanceTimersByTimeAsync(2_000)
     await rejected
     expect(fetchSpy).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe("relay-only route when the native stack cannot pin", () => {
+  // A Capacitor plugin proxy answers every property with a function, so an
+  // attestation the native side never registered rejects instead of being
+  // `undefined`. This is what the stock Android CapacitorHttp does.
+  const unimplemented = () =>
+    Promise.reject(
+      new Error('"CapacitorHttp.getSecurityCapabilities()" is not implemented on android')
+    )
+  const relayConfig: CompanionConfig = {
+    ...MOCK_CONFIG,
+    serverFingerprint: "ab".repeat(32),
+    signalingUrl: "wss://signaling.example.test/signaling",
+    rendezvousId: "room-relay-only",
+    signalingRoomDescriptor: {
+      v: 2,
+      roomId: "room-relay-only",
+      roomNonce: "test-nonce",
+      desktopSigningKey: "desktop-test-key",
+      mobileSigningKey: "mobile-test-key",
+      notAfter: Number.MAX_SAFE_INTEGER,
+    },
+    signalingPrivateKey: {} as CryptoKey,
+  }
+  const originalCapacitor = g["Capacitor"]
+  let nativeRequest: jest.Mock
+  let connect: jest.SpyInstance
+  let rtcCall: jest.SpyInstance
+  let rtcSubscribe: jest.SpyInstance
+
+  function installCapacitor(getSecurityCapabilities: () => Promise<{ spkiPinning: boolean }>) {
+    nativeRequest = jest.fn(async () => ({
+      data: JSON.stringify({ result: { via: "https" } }),
+      status: 200,
+      headers: { "content-type": "application/json" },
+      url: relayConfig.baseUrl,
+    }))
+    g["Capacitor"] = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request: nativeRequest, getSecurityCapabilities } },
+    }
+  }
+
+  // `@capacitor/core` assigns `globalThis.Capacitor` when it is first loaded,
+  // which the credential store does lazily on its first save. Load it up front
+  // so that assignment cannot replace the fake native bridge mid-test.
+  beforeAll(async () => {
+    await import("@capacitor/core")
+  })
+
+  beforeEach(() => {
+    connect = jest.spyOn(TransportRtc.prototype, "connect").mockResolvedValue(undefined)
+    jest.spyOn(TransportRtc.prototype, "close").mockImplementation(() => {})
+    jest.spyOn(TransportRtc.prototype, "onStateChange").mockReturnValue(() => {})
+    jest.spyOn(TransportRtc.prototype, "getState").mockReturnValue("open")
+    jest.spyOn(TransportRtc.prototype, "getCarrier").mockReturnValue("relay")
+    jest.spyOn(TransportRtc.prototype, "getSelectedCandidateKind").mockResolvedValue("unknown")
+    rtcCall = jest.spyOn(TransportRtc.prototype, "call").mockResolvedValue({ via: "relay" })
+    rtcSubscribe = jest.spyOn(TransportRtc.prototype, "subscribe").mockReturnValue(() => {})
+  })
+
+  afterEach(() => {
+    transport?.destroy()
+    jest.restoreAllMocks()
+    if (originalCapacitor === undefined) delete g["Capacitor"]
+    else g["Capacitor"] = originalCapacitor
+  })
+
+  it("opens the relay itself and routes commands through it, never through HTTPS", async () => {
+    installCapacitor(unimplemented)
+    await setConfig(relayConfig)
+    transport = new CompanionTransport()
+
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual({ via: "relay" })
+
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(rtcCall).toHaveBeenCalledWith("claude_sidecar_status", {}, expect.any(Object))
+    expect(nativeRequest).not.toHaveBeenCalled()
+    expect(transport.getPlaneHealth().rpc).toBe("ready")
+
+    // The open tier is reused for the next command.
+    await transport.call("claude_sidecar_status")
+    expect(connect).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses a pairing with no relay room as non-retryable instead of failing closed three times", async () => {
+    installCapacitor(unimplemented)
+    await setConfig({
+      ...relayConfig,
+      rendezvousId: undefined,
+      signalingRoomDescriptor: undefined,
+      signalingPrivateKey: undefined,
+    })
+    transport = new CompanionTransport()
+
+    const error = await transport.call("claude_sidecar_status").catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CompanionError)
+    expect((error as CompanionError).code).toBe("native_spki_pinning_unavailable")
+    expect((error as CompanionError).retryable).toBe(false)
+    expect(connect).not.toHaveBeenCalled()
+    expect(nativeRequest).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a lost relay carrier as a retryable network error without an HTTPS fallback", async () => {
+    installCapacitor(unimplemented)
+    await setConfig(relayConfig)
+    transport = new CompanionTransport()
+    rtcCall.mockRejectedValueOnce(new RtcCarrierError("relay closed"))
+
+    const error = await transport.call("claude_sidecar_status").catch((e: unknown) => e)
+    expect((error as CompanionError).code).toBe("network")
+    expect((error as CompanionError).retryable).toBe(true)
+    expect(nativeRequest).not.toHaveBeenCalled()
+  })
+
+  it("reports a retryable failure when the relay does not open", async () => {
+    installCapacitor(unimplemented)
+    await setConfig(relayConfig)
+    transport = new CompanionTransport()
+    connect.mockRejectedValueOnce(new Error("signaling unavailable"))
+
+    const error = await transport.call("claude_sidecar_status").catch((e: unknown) => e)
+    expect((error as CompanionError).code).toBe("network")
+    expect((error as CompanionError).retryable).toBe(true)
+    expect(nativeRequest).not.toHaveBeenCalled()
+  })
+
+  it("opens the relay for subscriptions, since no pinned WebSocket exists", async () => {
+    installCapacitor(unimplemented)
+    await setConfig(relayConfig)
+    transport = new CompanionTransport()
+    const handler = jest.fn()
+
+    transport.subscribe("task:changed", handler)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(MockWebSocket.instances).toHaveLength(0)
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(rtcSubscribe).toHaveBeenCalledWith("task:changed", handler)
+  })
+
+  it("keeps the direct pinned route when the native stack attests SPKI enforcement", async () => {
+    installCapacitor(async () => ({ spkiPinning: true }))
+    await setConfig(relayConfig)
+    transport = new CompanionTransport()
+
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual({ via: "https" })
+    expect(nativeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverTrustMode: "pinned",
+        serverFingerprint: relayConfig.serverFingerprint,
+      })
+    )
+    expect(rtcCall).not.toHaveBeenCalled()
   })
 })

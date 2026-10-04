@@ -544,35 +544,38 @@ describe("installCompanionSignalingController — LAN re-resolution", () => {
     localStorage.clear()
   })
 
-  it("repoints baseUrl to the discovered LAN address and reconnects the WS on network reconnect", async () => {
-    const tx = new FakeTransport()
-    let netHandler: (s: NetworkStatus) => void = () => {}
-    const resolveCalls: Array<{ baseUrl: string }> = []
-    const uninstall = installCompanionSignalingController({
-      isCapacitorOverride: true,
-      transportOverride: tx as unknown as Tx,
-      getSettingsOverride: async () => settings({ webrtcEnabled: true }),
-      subscribeNetworkOverride: async (handler) => {
-        netHandler = handler
-        return () => {}
-      },
-      subscribeResumeOverride: async () => () => {},
-      nowOverride: () => 0,
-      resolveLanBaseUrlOverride: async ({ config }) => {
-        resolveCalls.push({ baseUrl: config.baseUrl })
-        return { lanBaseUrl: "https://192.168.1.5:7890" }
-      },
-    })
-    await new Promise((r) => setTimeout(r, 10))
+  it.each([true, false])(
+    "repoints to the LAN desktop on Wi-Fi with Internet validated=%s",
+    async (connected) => {
+      const tx = new FakeTransport()
+      let netHandler: (s: NetworkStatus) => void = () => {}
+      const resolveCalls: Array<{ baseUrl: string }> = []
+      const uninstall = installCompanionSignalingController({
+        isCapacitorOverride: true,
+        transportOverride: tx as unknown as Tx,
+        getSettingsOverride: async () => settings({ webrtcEnabled: true }),
+        subscribeNetworkOverride: async (handler) => {
+          netHandler = handler
+          return () => {}
+        },
+        subscribeResumeOverride: async () => () => {},
+        nowOverride: () => 0,
+        resolveLanBaseUrlOverride: async ({ config }) => {
+          resolveCalls.push({ baseUrl: config.baseUrl })
+          return { lanBaseUrl: "https://192.168.1.5:7890" }
+        },
+      })
+      await new Promise((r) => setTimeout(r, 10))
 
-    // Advance past both throttle windows so the network trigger re-resolves.
-    netHandler({ connected: true, connectionType: "wifi" })
-    await new Promise((r) => setTimeout(r, 0))
+      // Advance past both throttle windows so the network trigger re-resolves.
+      netHandler({ connected, connectionType: "wifi" })
+      await new Promise((r) => setTimeout(r, 0))
 
-    expect(resolveCalls.length).toBeGreaterThanOrEqual(1)
-    expect(tx.reconnectWsCount).toBe(1)
-    uninstall()
-  })
+      expect(resolveCalls.length).toBeGreaterThanOrEqual(1)
+      expect(tx.reconnectWsCount).toBe(1)
+      uninstall()
+    }
+  )
 
   it("skips re-resolution when already on a connected LAN", async () => {
     const tx = new FakeTransport()

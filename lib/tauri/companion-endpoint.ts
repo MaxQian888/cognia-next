@@ -14,7 +14,7 @@
  * The terminal solved this first; this is that resolver, lifted so both use it.
  */
 
-import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
+import { getActiveRemoteEndpoint, type RemoteHostEndpoint } from "@/lib/tauri/transport-routing"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
@@ -29,7 +29,8 @@ export type CompanionEndpoint = Pick<
   | "accountId"
   | "serverVersion"
   | "serverFingerprint"
->
+> &
+  Pick<RemoteHostEndpoint, "remoteHost">
 
 export type CompanionEndpointResolver = () => Promise<CompanionEndpoint | null>
 

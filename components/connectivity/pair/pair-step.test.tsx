@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { StrictMode } from "react"
 import userEvent from "@testing-library/user-event"
 
 import { encodePairPayload } from "@/lib/qr/pair-payload"
@@ -237,6 +238,40 @@ it("returns to idle when scanning is cancelled", async () => {
   expect(screen.queryByTestId("pair-error")).not.toBeInTheDocument()
 })
 
+it("aborts a scan when leaving pairing and never redeems its late result", async () => {
+  let finish!: (result: Awaited<ReturnType<typeof scanBarcode>>) => void
+  scan.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const { unmount } = render(<PairStep onPaired={jest.fn()} />)
+  await userEvent.click(screen.getByTestId("pair-scan-qr"))
+  const signal = scan.mock.calls[0][0]?.signal
+  expect(signal?.aborted).toBe(false)
+  unmount()
+  expect(signal?.aborted).toBe(true)
+  await act(async () => {
+    finish({ kind: "scanned", raw: payload })
+  })
+  expect(register).not.toHaveBeenCalled()
+})
+
+it("starts one live auto scan through StrictMode effect replay", async () => {
+  scan.mockImplementation(() => new Promise(() => undefined))
+  const { unmount } = render(
+    <StrictMode>
+      <PairStep autoScan onPaired={jest.fn()} />
+    </StrictMode>
+  )
+  await waitFor(() => expect(scan).toHaveBeenCalledTimes(1))
+  const signal = scan.mock.calls[0][0]?.signal
+  expect(signal?.aborted).toBe(false)
+  unmount()
+  expect(signal?.aborted).toBe(true)
+})
+
 it("exposes a stable back affordance on native pair flows", () => {
   render(<PairStep isCredentialStoreReady={readyStore} onPaired={jest.fn()} onBack={jest.fn()} />)
   expect(screen.getByTestId("pair-back-to-discover")).toBeInTheDocument()
@@ -322,6 +357,48 @@ it("marks the invitation spent rather than leaving a 'ready' summary beside the 
 
   await screen.findByTestId("pair-error")
   expect(screen.getByTestId("pair-invitation-card")).not.toHaveAttribute("data-tone", "ready")
+})
+
+/**
+ * The scanner is the Capacitor ML Kit plugin, which only the native mobile
+ * shell has. A web-mode caller that may also be mounted there (the add-host
+ * form inside the phone's device console) turns it on explicitly.
+ */
+it("offers the camera action in web mode when the caller says the scanner exists", () => {
+  render(<PairStep isCredentialStoreReady={readyStore} webMode allowScan onPaired={jest.fn()} />)
+  expect(screen.getByTestId("pair-scan-qr")).toBeInTheDocument()
+  // The web affordances stay: scanning is added, not swapped in.
+  expect(screen.getByTestId("pair-paste-clipboard")).toBeInTheDocument()
+})
+
+it("hides the camera action on native when the caller says there is no scanner", () => {
+  render(<PairStep isCredentialStoreReady={readyStore} allowScan={false} onPaired={jest.fn()} />)
+  expect(screen.queryByTestId("pair-scan-qr")).not.toBeInTheDocument()
+})
+
+/**
+ * The field's state lives in the step, so this callback is the only way a
+ * caller can read what the user entered. Every way of filling it reports.
+ */
+it("reports the field's contents however they change", async () => {
+  const onPayloadChange = jest.fn()
+  mockReadClipboardText.mockResolvedValue(payload)
+  render(
+    <PairStep
+      isCredentialStoreReady={readyStore}
+      webMode
+      onPaired={jest.fn()}
+      onPayloadChange={onPayloadChange}
+    />
+  )
+  // Sniffed from the clipboard on arrival.
+  await waitFor(() => expect(onPayloadChange).toHaveBeenLastCalledWith(payload))
+  // Cleared.
+  fireEvent.click(screen.getByTestId("pair-clear-payload"))
+  await waitFor(() => expect(onPayloadChange).toHaveBeenLastCalledWith(""))
+  // Typed.
+  fireEvent.change(screen.getByTestId("pair-payload"), { target: { value: "cgnp3|typed" } })
+  expect(onPayloadChange).toHaveBeenLastCalledWith("cgnp3|typed")
 })
 
 it("fills the payload from the clipboard on arrival without submitting it", async () => {

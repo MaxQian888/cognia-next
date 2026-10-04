@@ -12,7 +12,12 @@
 //!   `set_local_description`, and exposes the inbound DataChannel through
 //!   the supplied `inbound_data_tx` channel.
 
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{
+    fmt,
+    future::Future,
+    sync::{Arc, OnceLock, Weak},
+    time::{Duration, Instant},
+};
 
 use bytes::{Bytes, BytesMut};
 use tokio::sync::{mpsc, Mutex, Notify, RwLock};
@@ -21,7 +26,7 @@ use webrtc::error::Error as WebrtcError;
 use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
     RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionIceEvent, RTCPeerConnectionState,
-    RTCSessionDescription,
+    RTCSessionDescription, StatsSelector,
 };
 
 /// DataChannel label both peers agree on. Mirrored in
@@ -43,6 +48,94 @@ pub const STATE_QUEUE_CAPACITY: usize = 32;
 const SEND_BUFFER_HIGH_WATER: usize = 1024 * 1024;
 const SEND_BUFFER_LOW_WATER: usize = 256 * 1024;
 const SEND_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// `kind` of the phone's transport liveness probe on the main channel.
+///
+/// The phone (`lib/tauri/transport-rtc.ts:DC_LIVENESS_PING_KIND`) sends
+/// `{"kind":"dc-ping","nonce":"…"}` straight down its `cognia.signaling`
+/// channel and expects `{"kind":"dc-pong","nonce":"…"}` back on the same
+/// channel. The answer is produced here, by the poll loop that owns the
+/// channel, rather than by the dispatcher: a pong then proves that this exact
+/// SCTP stream carries data both ways, which the dispatcher (whose carrier may
+/// fall back to the relay lane) cannot.
+///
+/// Why it exists: a channel the phone still reports `open` can be one this
+/// Host has never registered. A Host that answered an ICE-restart offer with
+/// a brand-new peer connection left the phone's existing channels on an SCTP
+/// association that never saw their DCEP `DATA_CHANNEL_OPEN`; every message
+/// the phone sent was discarded inside the WebRTC stack
+/// (`DataChannelHandler.handle_read got error: Unknown PayloadProtocolIdentifier 51`)
+/// and each RPC timed out after 30 s. The probe turns that into a reconnect.
+pub const LIVENESS_PING_KIND: &str = "dc-ping";
+/// `kind` of the Host's answer to [`LIVENESS_PING_KIND`].
+pub const LIVENESS_PONG_KIND: &str = "dc-pong";
+/// A probe is a few dozen bytes; anything bigger is ordinary traffic.
+const LIVENESS_PROBE_MAX_BYTES: usize = 256;
+/// Upper bound on the echoed nonce, so a probe cannot make the Host echo junk.
+const LIVENESS_NONCE_MAX_CHARS: usize = 64;
+
+/// How a data channel is named in the Host's logs: its label, the SCTP stream
+/// id it occupies on the wire (what the phone's `RTCDataChannel.id` reports),
+/// and the connection-local handle webrtc-rs addresses it by.
+///
+/// The handle and the stream id are different numbers. `webrtc` logs the
+/// handle (`Failed to get data_channel: 1 for event`) while the phone and the
+/// SCTP layer speak in stream ids, so a log line that names only one of them
+/// cannot be matched against the other side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataChannelTag {
+    pub label: String,
+    pub stream_id: Option<u16>,
+    pub handle: usize,
+}
+
+impl fmt::Display for DataChannelTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.stream_id {
+            Some(stream_id) => write!(
+                f,
+                "label={:?} stream={} handle={}",
+                self.label, stream_id, self.handle
+            ),
+            None => write!(f, "label={:?} stream=? handle={}", self.label, self.handle),
+        }
+    }
+}
+
+/// Late-bound access to the peer connection from its own event handler: the
+/// handler has to exist before the connection is built.
+type PeerConnectionSlot = Arc<OnceLock<Weak<dyn PeerConnection>>>;
+
+/// The SCTP stream id behind a channel handle, read from the connection's
+/// `RTCDataChannelStats` (`dataChannelIdentifier`, keyed `RTCDataChannel_<handle>`).
+/// The async `DataChannel` trait exposes only the handle.
+async fn sctp_stream_id(pc: &PeerConnectionSlot, handle: usize) -> Option<u16> {
+    let pc = pc.get()?.upgrade()?;
+    let report = pc.get_stats(Instant::now(), StatsSelector::None).await;
+    let key = format!("RTCDataChannel_{handle}");
+    let stream_id = report
+        .data_channels()
+        .find(|stats| stats.stats.id == key)
+        .map(|stats| stats.data_channel_identifier);
+    stream_id
+}
+
+/// The pong for `data` when it is a liveness probe, `None` for anything else.
+pub fn liveness_pong_for(data: &[u8]) -> Option<String> {
+    if data.len() > LIVENESS_PROBE_MAX_BYTES || data.first() != Some(&b'{') {
+        return None;
+    }
+    #[derive(serde::Deserialize)]
+    struct Probe {
+        kind: String,
+        nonce: String,
+    }
+    let probe: Probe = serde_json::from_slice(data).ok()?;
+    if probe.kind != LIVENESS_PING_KIND || probe.nonce.chars().count() > LIVENESS_NONCE_MAX_CHARS {
+        return None;
+    }
+    Some(serde_json::json!({ "kind": LIVENESS_PONG_KIND, "nonce": probe.nonce }).to_string())
+}
 
 /// Wraps an `RTCPeerConnection` and its (single) data channel, fanning the
 /// callback world out to plain mpsc channels for the signaling client to
@@ -68,8 +161,9 @@ pub struct PeerCallbacks {
     /// Inbound DataChannel binary messages (the RPC / event JSON
     /// envelopes from the mobile peer).
     pub inbound_data: mpsc::Sender<Vec<u8>>,
-    /// Handler for the isolated canonical binary terminal channel.
-    pub terminal_channel: Arc<dyn Fn(Arc<dyn DataChannel>) + Send + Sync>,
+    /// Handler for the isolated canonical binary terminal channel. The tag
+    /// names the channel in logs (label, SCTP stream id, handle).
+    pub terminal_channel: Arc<dyn Fn(Arc<dyn DataChannel>, DataChannelTag) + Send + Sync>,
     /// `RTCPeerConnectionState` transitions for failure detection.
     pub state_change: mpsc::Sender<RTCPeerConnectionState>,
 }
@@ -80,6 +174,7 @@ struct CogniaPeerHandler {
     dc: Arc<RwLock<Option<Arc<dyn DataChannel>>>>,
     open_tx: tokio::sync::watch::Sender<bool>,
     send_capacity: Arc<Notify>,
+    pc: PeerConnectionSlot,
 }
 
 #[async_trait::async_trait]
@@ -106,8 +201,9 @@ impl PeerConnectionEventHandler for CogniaPeerHandler {
         let dc = Arc::clone(&self.dc);
         let open_tx = self.open_tx.clone();
         let send_capacity = Arc::clone(&self.send_capacity);
+        let pc = Arc::clone(&self.pc);
         tokio::spawn(async move {
-            handle_inbound_channel(channel, callbacks, dc, open_tx, send_capacity).await;
+            handle_inbound_channel(channel, callbacks, dc, open_tx, send_capacity, pc).await;
         });
     }
 }
@@ -129,29 +225,38 @@ async fn handle_inbound_channel(
     dc: Arc<RwLock<Option<Arc<dyn DataChannel>>>>,
     open_tx: tokio::sync::watch::Sender<bool>,
     send_capacity: Arc<Notify>,
+    pc: PeerConnectionSlot,
 ) {
-    let (label, ordered, max_packet_lifetime, max_retransmits) =
-        match channel_contract(&channel).await {
-            Ok(contract) => contract,
-            Err(error) => {
-                log::warn!("signaling::peer: read data-channel contract failed: {error}");
-                let _ = channel.close().await;
-                return;
-            }
-        };
-
-    if label == TERMINAL_DATACHANNEL_LABEL {
-        if !is_reliable_ordered_channel(ordered, max_packet_lifetime, max_retransmits) {
-            log::warn!("signaling::peer: rejecting unreliable terminal data channel");
+    let handle = channel.id();
+    let (label, ordered, max_packet_lifetime, max_retransmits) = match channel_contract(&channel)
+        .await
+    {
+        Ok(contract) => contract,
+        Err(error) => {
+            log::warn!("signaling::peer: channel contract unreadable (handle={handle}): {error}");
             let _ = channel.close().await;
             return;
         }
-        (callbacks.terminal_channel)(channel);
+    };
+    let tag = DataChannelTag {
+        label: label.clone(),
+        stream_id: sctp_stream_id(&pc, handle).await,
+        handle,
+    };
+
+    if label == TERMINAL_DATACHANNEL_LABEL {
+        if !is_reliable_ordered_channel(ordered, max_packet_lifetime, max_retransmits) {
+            log::warn!("signaling::peer: rejecting unreliable terminal data channel ({tag})");
+            close_inbound_channel(channel, &tag).await;
+            return;
+        }
+        log::info!("signaling::peer: terminal data channel accepted ({tag})");
+        (callbacks.terminal_channel)(channel, tag);
         return;
     }
     if !is_agent_datachannel_label(&label) {
-        log::warn!("signaling::peer: rejecting data channel with unexpected label {label:?}");
-        let _ = channel.close().await;
+        log::warn!("signaling::peer: rejecting data channel with unexpected label ({tag})");
+        close_inbound_channel(channel, &tag).await;
         return;
     }
 
@@ -170,41 +275,61 @@ async fn handle_inbound_channel(
         decision
     };
     match decision {
-        InboundChannelDecision::AcceptMain => {}
+        InboundChannelDecision::AcceptMain => {
+            log::info!("signaling::peer: main data channel accepted ({tag})");
+        }
         InboundChannelDecision::RejectUnreliable => {
-            log::warn!("signaling::peer: rejecting unreliable main data channel");
-            let _ = channel.close().await;
+            log::warn!("signaling::peer: rejecting unreliable main data channel ({tag})");
+            close_inbound_channel(channel, &tag).await;
             return;
         }
         InboundChannelDecision::RejectDuplicate => {
-            log::warn!("signaling::peer: rejecting duplicate main data channel");
-            let _ = channel.close().await;
+            log::warn!("signaling::peer: rejecting duplicate main data channel ({tag})");
+            close_inbound_channel(channel, &tag).await;
             return;
         }
     }
 
-    if let Err(error) = channel
+    let close_reason = if let Err(error) = channel
         .set_buffered_amount_low_threshold(SEND_BUFFER_LOW_WATER as u32)
         .await
     {
-        log::warn!("signaling::peer: set low-water threshold failed: {error}");
+        log::warn!("signaling::peer: set low-water threshold failed ({tag}): {error}");
         let _ = channel.close().await;
+        "low-water threshold failed"
     } else {
+        let mut reason = "event stream ended";
         while let Some(event) = channel.poll().await {
             match event {
                 DataChannelEvent::OnOpen => {
                     let _ = open_tx.send(true);
                 }
                 DataChannelEvent::OnMessage(message) => {
+                    if message.is_string {
+                        if let Some(pong) = liveness_pong_for(&message.data) {
+                            // Non-blocking: this loop also delivers the
+                            // buffered-amount-low events a blocking send would
+                            // wait on. A full buffer drops the pong; the
+                            // phone treats traffic it still receives as proof
+                            // of life and does not count that as a miss.
+                            if let Err(error) = channel.try_send_text(&pong).await {
+                                log::debug!(
+                                    "signaling::peer: liveness pong not sent ({tag}): {error}"
+                                );
+                            }
+                            continue;
+                        }
+                    }
                     if callbacks
                         .inbound_data
                         .try_send(message.data.to_vec())
                         .is_err()
                     {
                         log::warn!(
-                            "signaling::peer: inbound frame queue overflow; closing peer channel"
+                            "signaling::peer: inbound frame queue overflow; closing peer channel ({tag})"
                         );
                         let _ = channel.close().await;
+                        reason = "inbound queue overflow";
                         break;
                     }
                 }
@@ -213,12 +338,14 @@ async fn handle_inbound_channel(
                     let _ = open_tx.send(false);
                     send_capacity.notify_waiters();
                     if matches!(event, DataChannelEvent::OnClose) {
+                        reason = "closed";
                         break;
                     }
                 }
                 DataChannelEvent::OnError => {
-                    log::warn!("signaling::peer: data channel reported an error");
+                    log::warn!("signaling::peer: data channel reported an error ({tag})");
                     let _ = channel.close().await;
+                    reason = "error";
                     break;
                 }
                 DataChannelEvent::OnBufferedAmountHigh => {}
@@ -226,7 +353,9 @@ async fn handle_inbound_channel(
                 _ => {}
             }
         }
-    }
+        reason
+    };
+    log::info!("signaling::peer: main data channel ended ({tag}): {close_reason}");
 
     let mut slot = dc.write().await;
     if slot
@@ -238,6 +367,30 @@ async fn handle_inbound_channel(
     let _ = open_tx.send(false);
     send_capacity.notify_waiters();
 }
+
+/// Close a channel this Host refuses, and keep polling it until the stack
+/// reports the close. Dropping the handle first makes webrtc-rs log
+/// `Failed to get data_channel: <handle> for event` for the close it can no
+/// longer deliver, which reads like a lost channel when it is not.
+async fn close_inbound_channel(channel: Arc<dyn DataChannel>, tag: &DataChannelTag) {
+    if let Err(error) = channel.close().await {
+        log::debug!("signaling::peer: close refused channel ({tag}): {error}");
+        return;
+    }
+    let drained = tokio::time::timeout(REFUSED_CHANNEL_CLOSE_TIMEOUT, async {
+        while let Some(event) = channel.poll().await {
+            if matches!(event, DataChannelEvent::OnClose) {
+                break;
+            }
+        }
+    })
+    .await;
+    if drained.is_err() {
+        log::debug!("signaling::peer: refused channel did not report its close ({tag})");
+    }
+}
+
+const REFUSED_CHANNEL_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl PeerSession {
     /// Build a new peer session bound to the given ICE configuration. The
@@ -261,11 +414,13 @@ impl PeerSession {
         let (open_tx, open_rx) = tokio::sync::watch::channel(false);
         let send_capacity = Arc::new(Notify::new());
         let callbacks = Arc::new(callbacks);
+        let pc_slot: PeerConnectionSlot = Arc::new(OnceLock::new());
         let handler = Arc::new(CogniaPeerHandler {
             callbacks,
             dc: Arc::clone(&dc),
             open_tx: open_tx.clone(),
             send_capacity: Arc::clone(&send_capacity),
+            pc: Arc::clone(&pc_slot),
         });
         let pc: Arc<dyn PeerConnection> = Arc::new(
             PeerConnectionBuilder::new()
@@ -276,6 +431,9 @@ impl PeerSession {
                 .build()
                 .await?,
         );
+        // Weak: the handler lives inside the connection, so a strong
+        // reference here would keep the connection alive forever.
+        let _ = pc_slot.set(Arc::downgrade(&pc));
 
         Ok(Self {
             pc,
@@ -632,7 +790,7 @@ mod tests {
             PeerCallbacks {
                 outbound_ice: ice_tx,
                 inbound_data: data_tx,
-                terminal_channel: Arc::new(|_| {}),
+                terminal_channel: Arc::new(|_, _| {}),
                 state_change: state_tx,
             },
             ice_rx,
@@ -911,5 +1069,334 @@ mod tests {
         let _ = mobile.close().await;
         ice_pump.abort();
         mobile_event_pump.abort();
+    }
+
+    // -----------------------------------------------------------------------
+    // Two-channel harness: the phone (offerer) opens `cognia.signaling` and
+    // `cognia.terminal` on every negotiation, exactly like
+    // `lib/tauri/transport-rtc.ts`; the Host answers with a real PeerSession.
+    // -----------------------------------------------------------------------
+
+    /// One mobile-side channel: its handle plus the open/close/message events
+    /// its poll loop observed.
+    struct MobileChannel {
+        dc: Arc<dyn DataChannel>,
+        opened: mpsc::Receiver<()>,
+        closed: mpsc::Receiver<()>,
+        messages: mpsc::Receiver<Vec<u8>>,
+        pump: tokio::task::JoinHandle<()>,
+    }
+
+    fn pump_mobile_channel(dc: Arc<dyn DataChannel>) -> MobileChannel {
+        let (open_tx, opened) = mpsc::channel(4);
+        let (close_tx, closed) = mpsc::channel(4);
+        let (msg_tx, messages) = mpsc::channel(256);
+        let events = Arc::clone(&dc);
+        let pump = tokio::spawn(async move {
+            while let Some(event) = events.poll().await {
+                match event {
+                    DataChannelEvent::OnOpen => {
+                        let _ = open_tx.try_send(());
+                    }
+                    DataChannelEvent::OnMessage(message) => {
+                        let _ = msg_tx.try_send(message.data.to_vec());
+                    }
+                    DataChannelEvent::OnClose => {
+                        let _ = close_tx.try_send(());
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+        MobileChannel {
+            dc,
+            opened,
+            closed,
+            messages,
+            pump,
+        }
+    }
+
+    /// A connected phone/Host pair carrying both channels.
+    struct TwoChannelPair {
+        desktop: PeerSession,
+        desktop_data: mpsc::Receiver<Vec<u8>>,
+        desktop_terminal: mpsc::Receiver<(Arc<dyn DataChannel>, DataChannelTag)>,
+        mobile: Arc<dyn PeerConnection>,
+        main: MobileChannel,
+        terminal: MobileChannel,
+        ice_pump: tokio::task::JoinHandle<()>,
+    }
+
+    impl TwoChannelPair {
+        async fn teardown(self) {
+            self.desktop.close().await;
+            let _ = self.mobile.close().await;
+            self.ice_pump.abort();
+            self.main.pump.abort();
+            self.terminal.pump.abort();
+        }
+    }
+
+    const PAIR_TIMEOUT: Duration = Duration::from_secs(10);
+
+    async fn connect_two_channel_pair() -> TwoChannelPair {
+        let (ice_tx, mut ice_rx) = mpsc::channel(ICE_QUEUE_CAPACITY);
+        let (data_tx, desktop_data) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
+        let (state_tx, _state_rx) = mpsc::channel(STATE_QUEUE_CAPACITY);
+        let (terminal_tx, desktop_terminal) =
+            mpsc::channel::<(Arc<dyn DataChannel>, DataChannelTag)>(4);
+        let callbacks = PeerCallbacks {
+            outbound_ice: ice_tx,
+            inbound_data: data_tx,
+            terminal_channel: Arc::new(move |channel, tag| {
+                let _ = terminal_tx.try_send((channel, tag));
+            }),
+            state_change: state_tx,
+        };
+        let desktop = PeerSession::new(vec![], callbacks).await.expect("desktop");
+        let mobile = build_test_peer(Arc::new(ForwardIceHandler {
+            remote: Arc::clone(&desktop.pc),
+        }))
+        .await;
+        let mobile_for_ice = Arc::clone(&mobile);
+        let ice_pump = tokio::spawn(async move {
+            while let Some(init) = ice_rx.recv().await {
+                let _ = mobile_for_ice.add_ice_candidate(init).await;
+            }
+        });
+
+        // Same order and options as `transport-rtc.ts`.
+        let reliable = || webrtc::data_channel::RTCDataChannelInit {
+            ordered: true,
+            ..Default::default()
+        };
+        let main = pump_mobile_channel(
+            mobile
+                .create_data_channel(DATACHANNEL_LABEL, Some(reliable()))
+                .await
+                .expect("mobile main dc"),
+        );
+        let terminal = pump_mobile_channel(
+            mobile
+                .create_data_channel(TERMINAL_DATACHANNEL_LABEL, Some(reliable()))
+                .await
+                .expect("mobile terminal dc"),
+        );
+
+        let offer = mobile.create_offer(None).await.expect("offer");
+        mobile
+            .set_local_description(offer.clone())
+            .await
+            .expect("mobile local");
+        let answer_sdp = desktop.accept_offer(offer.sdp).await.expect("accept");
+        mobile
+            .set_remote_description(RTCSessionDescription::answer(answer_sdp).expect("answer"))
+            .await
+            .expect("mobile remote");
+
+        let mut pair = TwoChannelPair {
+            desktop,
+            desktop_data,
+            desktop_terminal,
+            mobile,
+            main,
+            terminal,
+            ice_pump,
+        };
+        pair.desktop
+            .wait_for_open(PAIR_TIMEOUT)
+            .await
+            .expect("desktop main open");
+        tokio::time::timeout(PAIR_TIMEOUT, pair.main.opened.recv())
+            .await
+            .expect("mobile main open timed out");
+        tokio::time::timeout(PAIR_TIMEOUT, pair.terminal.opened.recv())
+            .await
+            .expect("mobile terminal open timed out");
+        pair
+    }
+
+    /// Phone → Host over the main channel, `count` times, each one asserted.
+    async fn assert_main_channel_delivers(pair: &mut TwoChannelPair, tag: &str, count: usize) {
+        for index in 0..count {
+            let text = format!("{tag}-{index}");
+            pair.main
+                .dc
+                .send_text(&text)
+                .await
+                .expect("mobile main send");
+            let received = tokio::time::timeout(Duration::from_secs(5), pair.desktop_data.recv())
+                .await
+                .unwrap_or_else(|_| panic!("Host never received {text:?} on the main channel"))
+                .expect("desktop inbound queue closed");
+            assert_eq!(received, text.as_bytes());
+        }
+    }
+
+    /// Host → phone over the main channel.
+    async fn assert_main_channel_replies(pair: &mut TwoChannelPair, tag: &str) {
+        pair.desktop
+            .send_bytes(tag.as_bytes().to_vec())
+            .await
+            .expect("desktop main send");
+        let frame = tokio::time::timeout(Duration::from_secs(5), pair.main.messages.recv())
+            .await
+            .unwrap_or_else(|_| panic!("phone never received {tag:?} on the main channel"))
+            .expect("mobile main queue closed");
+        // Below `MAX_FRAME_BYTES`, `send_bytes` sends the payload unframed.
+        assert_eq!(frame, tag.as_bytes());
+    }
+
+    /// What `ws_terminal::proxy_terminal_datachannel` does when the terminal
+    /// host is unreachable: one protocol-error frame, close, drop the handle.
+    async fn host_rejects_terminal_like_proxy(pair: &mut TwoChannelPair) {
+        let (terminal, _tag) = tokio::time::timeout(PAIR_TIMEOUT, pair.desktop_terminal.recv())
+            .await
+            .expect("Host never saw the terminal channel")
+            .expect("terminal queue closed");
+        let _ = terminal
+            .try_send(BytesMut::from(&b"terminal host offline"[..]))
+            .await;
+        terminal.close().await.expect("close terminal");
+        drop(terminal);
+        tokio::time::timeout(PAIR_TIMEOUT, pair.terminal.closed.recv())
+            .await
+            .expect("phone never saw the terminal channel close");
+    }
+
+    #[tokio::test]
+    async fn closing_the_terminal_channel_keeps_the_main_channel_delivering() {
+        let mut pair = connect_two_channel_pair().await;
+        assert_main_channel_delivers(&mut pair, "before", 3).await;
+
+        host_rejects_terminal_like_proxy(&mut pair).await;
+        // Let the SCTP stream-reset exchange for the terminal stream finish.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert!(
+            pair.desktop.channel_open().await,
+            "Host lost its main channel"
+        );
+        assert_main_channel_delivers(&mut pair, "after", 20).await;
+        assert_main_channel_replies(&mut pair, "reply-after").await;
+        pair.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn a_fresh_peer_after_reconnect_keeps_the_main_channel_delivering() {
+        let mut first = connect_two_channel_pair().await;
+        host_rejects_terminal_like_proxy(&mut first).await;
+        assert_main_channel_delivers(&mut first, "first", 3).await;
+        // Phone backgrounded: the Host retires the old peer.
+        first.teardown().await;
+
+        let mut second = connect_two_channel_pair().await;
+        assert_main_channel_delivers(&mut second, "second-before", 3).await;
+        host_rejects_terminal_like_proxy(&mut second).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_main_channel_delivers(&mut second, "second-after", 20).await;
+        assert_main_channel_replies(&mut second, "second-reply").await;
+        second.teardown().await;
+    }
+
+    #[test]
+    fn liveness_probe_is_answered_with_its_own_nonce() {
+        let pong = liveness_pong_for(br#"{"kind":"dc-ping","nonce":"n-42"}"#).expect("pong");
+        let pong: serde_json::Value = serde_json::from_str(&pong).unwrap();
+        assert_eq!(pong["kind"], LIVENESS_PONG_KIND);
+        assert_eq!(pong["nonce"], "n-42");
+    }
+
+    #[test]
+    fn ordinary_traffic_is_not_a_liveness_probe() {
+        // RPCs, event control frames and chunk frames go to the dispatcher.
+        assert!(liveness_pong_for(br#"{"id":"rpc-1","method":"ping","params":{}}"#).is_none());
+        assert!(liveness_pong_for(br#"{"kind":"event-resume","since":0}"#).is_none());
+        assert!(liveness_pong_for(br#"{"kind":"dc-pong","nonce":"x"}"#).is_none());
+        assert!(liveness_pong_for(b"dc-ping").is_none());
+        // A missing or non-string nonce is not a probe either.
+        assert!(liveness_pong_for(br#"{"kind":"dc-ping"}"#).is_none());
+        assert!(liveness_pong_for(br#"{"kind":"dc-ping","nonce":7}"#).is_none());
+        // Oversized: never echoed.
+        let long = format!(r#"{{"kind":"dc-ping","nonce":"{}"}}"#, "x".repeat(65));
+        assert!(liveness_pong_for(long.as_bytes()).is_none());
+        let huge = format!(
+            r#"{{"kind":"dc-ping","nonce":"n","pad":"{}"}}"#,
+            "x".repeat(400)
+        );
+        assert!(liveness_pong_for(huge.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn channel_tags_name_label_stream_and_handle() {
+        let tag = DataChannelTag {
+            label: TERMINAL_DATACHANNEL_LABEL.into(),
+            stream_id: Some(3),
+            handle: 1,
+        };
+        assert_eq!(
+            tag.to_string(),
+            r#"label="cognia.terminal" stream=3 handle=1"#
+        );
+        let unknown = DataChannelTag {
+            stream_id: None,
+            ..tag
+        };
+        assert_eq!(
+            unknown.to_string(),
+            r#"label="cognia.terminal" stream=? handle=1"#
+        );
+    }
+
+    #[tokio::test]
+    async fn the_host_answers_a_liveness_probe_on_the_same_channel() {
+        let mut pair = connect_two_channel_pair().await;
+        pair.main
+            .dc
+            .send_text(r#"{"kind":"dc-ping","nonce":"probe-1"}"#)
+            .await
+            .expect("probe send");
+        let pong = tokio::time::timeout(Duration::from_secs(5), pair.main.messages.recv())
+            .await
+            .expect("no pong on the main channel")
+            .expect("mobile main queue closed");
+        let pong: serde_json::Value = serde_json::from_slice(&pong).unwrap();
+        assert_eq!(pong["kind"], LIVENESS_PONG_KIND);
+        assert_eq!(pong["nonce"], "probe-1");
+        // Answered by the transport, never handed to the dispatcher.
+        assert_main_channel_delivers(&mut pair, "after-probe", 1).await;
+        pair.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn the_terminal_channel_is_handed_over_with_its_stream_id() {
+        let mut pair = connect_two_channel_pair().await;
+        let (terminal, tag) = tokio::time::timeout(PAIR_TIMEOUT, pair.desktop_terminal.recv())
+            .await
+            .expect("Host never saw the terminal channel")
+            .expect("terminal queue closed");
+        assert_eq!(tag.label, TERMINAL_DATACHANNEL_LABEL);
+        assert_eq!(tag.handle, terminal.id());
+        let mobile_stream = pair.terminal.dc.id();
+        assert!(
+            tag.stream_id.is_some(),
+            "the tag must carry the wire stream id"
+        );
+        // The phone's offerer-side channel and the Host's accepted one occupy
+        // the same SCTP stream; the handles are unrelated numbers.
+        let mobile_stream_id = sctp_stream_id(
+            &{
+                let slot: PeerConnectionSlot = Arc::new(OnceLock::new());
+                let _ = slot.set(Arc::downgrade(&pair.mobile));
+                slot
+            },
+            mobile_stream,
+        )
+        .await;
+        assert_eq!(tag.stream_id, mobile_stream_id);
+        drop(terminal);
+        pair.teardown().await;
     }
 }

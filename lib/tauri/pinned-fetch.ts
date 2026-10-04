@@ -13,8 +13,8 @@
  * cert.
  *
  * On Capacitor we use `@capacitor/core`'s `CapacitorHttp` plugin which runs
- * on the native HTTP stack (URLSession / OkHttp) and supports a
- * `serverTrustMode: "self-signed" | "pinned" | "default"` per-request flag.
+ * on the native HTTP stack. Stock Capacitor does not implement pinning;
+ * a custom bridge must attest support before receiving pinning options.
  *
  * # Current trust model (honest)
  *
@@ -39,7 +39,91 @@
 // CapacitorHttp shim — types + runtime detector are owned by the
 // connectivity layer so the LAN scanner, healthz probe, and this fetch
 // wrapper all speak the same plugin shape.
-import { getCapacitorHttp, type CapacitorHttpRequest } from "@/lib/connectivity/capacitor-http"
+import {
+  getCapacitorHttp,
+  requestCapacitorHttp,
+  serializeCapacitorRequestBody,
+  decodeCapacitorResponseBody,
+  waitForCapacitorResult,
+  type CapacitorHttpPlugin,
+  type CapacitorHttpRequest,
+} from "@/lib/connectivity/capacitor-http"
+
+/** Error code for a pinned request the native HTTP stack cannot enforce. */
+export const NATIVE_SPKI_PINNING_UNAVAILABLE = "native_spki_pinning_unavailable"
+
+/**
+ * A pinned request was refused before it left the device because the native
+ * HTTP transport cannot attest SPKI enforcement. Retrying the same request can
+ * never succeed on this build; a caller that has another authenticated route
+ * (the relay data lane, ADR-0170) should take it instead.
+ */
+export class NativePinningUnavailableError extends Error {
+  override name = "NativePinningUnavailableError"
+  readonly code = NATIVE_SPKI_PINNING_UNAVAILABLE
+
+  constructor() {
+    super(
+      `${NATIVE_SPKI_PINNING_UNAVAILABLE}: the native HTTP transport cannot attest SPKI enforcement`
+    )
+  }
+}
+
+/**
+ * One attestation per plugin instance: what the native stack can enforce does
+ * not change while the process runs, and asking costs a bridge round trip.
+ */
+const attestations = new WeakMap<CapacitorHttpPlugin, Promise<boolean>>()
+
+/**
+ * Whether the native HTTP transport attests SPKI pinning.
+ *
+ * A Capacitor plugin proxy answers every property name with a function, so an
+ * attestation method the native side never registered is not `undefined` — it
+ * is a call that rejects with "not implemented on android". That rejection is
+ * the answer "no", not an error to surface: the request it would have guarded
+ * must fail closed exactly as if the method were absent.
+ */
+export function nativeSpkiPinningAttested(
+  cap: CapacitorHttpPlugin | null = getCapacitorHttp()
+): Promise<boolean> {
+  if (!cap || typeof cap.getSecurityCapabilities !== "function") return Promise.resolve(false)
+  const cached = attestations.get(cap)
+  if (cached) return cached
+  const attest = (async () => {
+    try {
+      const capabilities = await cap.getSecurityCapabilities!()
+      return capabilities?.spkiPinning === true
+    } catch {
+      return false
+    }
+  })()
+  attestations.set(cap, attest)
+  return attest
+}
+
+/**
+ * Whether `pinnedFetch` would send a request to `url` as a native pinned
+ * request. Synchronous so a caller can skip the attestation round trip (and
+ * its await) entirely off Capacitor, where nothing is ever pinned, and for
+ * tunnel hosts, which present a publicly trusted certificate.
+ */
+export function usesNativePinnedRoute(url: string, serverFingerprint: string | undefined): boolean {
+  if (!getCapacitorHttp()) return false
+  return pickTrustMode(url, Boolean(serverFingerprint)) === "pinned"
+}
+
+/**
+ * True when a request to `url` would need SPKI pinning that this native build
+ * cannot provide, so `pinnedFetch` is guaranteed to refuse it.
+ */
+export async function isPinnedRouteUnavailable(
+  url: string,
+  serverFingerprint: string | undefined
+): Promise<boolean> {
+  if (!usesNativePinnedRoute(url, serverFingerprint)) return false
+  return !(await nativeSpkiPinningAttested())
+}
 
 function pickTrustMode(
   url: string,
@@ -54,6 +138,8 @@ function pickTrustMode(
 
 export interface PinnedFetchInit extends Omit<RequestInit, "body"> {
   body?: BodyInit | null
+  /** Ask the native bridge for base64 so raw media bytes survive serialization. */
+  binaryResponse?: boolean
   /** Pinned SHA-256 SPKI fingerprint (lower-case hex) from the pair payload. */
   serverFingerprint?: string
 }
@@ -65,38 +151,56 @@ export interface PinnedFetchInit extends Omit<RequestInit, "body"> {
  * Returns a standard `Response` so the caller code shape is unchanged.
  */
 export async function pinnedFetch(url: string, init: PinnedFetchInit = {}): Promise<Response> {
+  if (init.signal?.aborted)
+    throw init.signal.reason ?? new DOMException("Request aborted", "AbortError")
   const cap = getCapacitorHttp()
   if (!cap) {
     // Web / dev / fallback path — strip the non-standard option before
     // delegating to platform fetch.
-    const { serverFingerprint: _unused, ...standard } = init
+    const { serverFingerprint: _unused, binaryResponse: _binaryResponse, ...standard } = init
+    void _binaryResponse
     void _unused
     return fetch(url, standard)
   }
 
-  const headers = normalizeHeaders(init.headers)
   const method = (init.method ?? "GET").toUpperCase() as CapacitorHttpRequest["method"]
   const trustMode = pickTrustMode(url, Boolean(init.serverFingerprint))
   if (trustMode === "pinned") {
-    const capabilities = await cap.getSecurityCapabilities?.()
-    if (capabilities?.spkiPinning !== true) {
-      throw new Error(
-        "native_spki_pinning_unavailable: the native HTTP transport cannot attest SPKI enforcement"
-      )
-    }
+    const attested = await waitForCapacitorResult(() => nativeSpkiPinningAttested(cap), {
+      signal: init.signal,
+      timeoutMs: 30_000,
+    })
+    if (!attested) throw new NativePinningUnavailableError()
   }
 
-  const resp = await cap.request({
-    url,
-    method,
-    headers,
-    data: init.body,
-    serverTrustMode: trustMode,
-    ...(trustMode === "pinned" ? { serverFingerprint: init.serverFingerprint } : {}),
-    responseType: "text",
-  })
+  const body = await waitForCapacitorResult(
+    () => serializeCapacitorRequestBody(new Request(url, init)),
+    {
+      signal: init.signal,
+      timeoutMs: 30_000,
+    }
+  )
 
-  return buildResponseLike(resp.status, resp.headers, resp.data)
+  const resp = await requestCapacitorHttp(
+    cap,
+    {
+      url,
+      method,
+      ...body,
+      serverTrustMode: trustMode,
+      ...(trustMode === "pinned" ? { serverFingerprint: init.serverFingerprint } : {}),
+      responseType: init.binaryResponse ? "blob" : "text",
+      connectTimeout: 30_000,
+      readTimeout: 30_000,
+    },
+    { signal: init.signal, timeoutMs: 30_000 }
+  )
+
+  return buildResponseLike(
+    resp.status,
+    resp.headers,
+    decodeCapacitorResponseBody(resp, init.binaryResponse, method)
+  )
 }
 
 /**
@@ -110,7 +214,14 @@ function buildResponseLike(
   headers: Record<string, string>,
   data: unknown
 ): Response {
-  const text = typeof data === "string" ? data : JSON.stringify(data)
+  const text =
+    data === null
+      ? ""
+      : ArrayBuffer.isView(data)
+        ? new TextDecoder().decode(data)
+        : typeof data === "string"
+          ? data
+          : JSON.stringify(data)
   const bytes =
     data instanceof ArrayBuffer
       ? data
@@ -135,19 +246,4 @@ function buildResponseLike(
     arrayBuffer: async () => bytes,
   }
   return responseLike as unknown as Response
-}
-
-function normalizeHeaders(input: HeadersInit | undefined): Record<string, string> {
-  if (!input) return {}
-  if (input instanceof Headers) {
-    const out: Record<string, string> = {}
-    input.forEach((v, k) => {
-      out[k] = v
-    })
-    return out
-  }
-  if (Array.isArray(input)) {
-    return Object.fromEntries(input)
-  }
-  return { ...(input as Record<string, string>) }
 }

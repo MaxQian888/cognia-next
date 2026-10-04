@@ -8,17 +8,16 @@ description: audit-log 包装器与 5000 上限的 mcpAuditLog、四张 Dexie v1
 <Status variant="stable">稳定 · `audit-log.ts` · `lib/db/*` · `components/settings/external-bridge/`</Status>
 
 <TLDR>
-  每个门决策——允许或拒绝——都由 `recordCall`（`audit-log.ts:38`）记入 `mcpAuditLog` 表，该表在同一次写事务内
-  自剪枝到其最新 **5000** 行。bearer token 是 `token.ts:generateToken` 生成的 32 字节十六进制，以常量时间比较。
+  每个权限决策——允许或拒绝——都由 `recordCall`（`audit-log.ts:38`）记入 `mcpAuditLog` 表，该表在同一次写事务内
+  仅保留最新 **5000** 行。bearer token 是 `token.ts:generateToken` 生成的 32 字节十六进制，以常量时间比较。
   本子系统拥有**四张 Dexie v17 表**（`wikiArticles`、`wikiSections`、`wikiManifest`、`mcpAuditLog`）。设置 UI
-  （`external-bridge-section.tsx`）是五卡片表面——服务器状态 + token、scope 开关（遍历全部 13 个 scope）、wiki 重建卡、
+  （`external-bridge-section.tsx`）是含五张卡片的界面——服务器状态 + token、scope 开关（遍历全部 13 个 scope）、wiki 重建卡、
   IDE 设置片段，以及实时审计日志查看器——由 `settings.externalBridge` 下约 138 个 i18n 键支撑。
 </TLDR>
 
 ## 审计日志
 
-`recordCall` 是每个 tool/resource 路径都调用的轻量策略包装器。它打时间戳、把门结果映射成行，且**绝不抛出**——
-Dexie 失败被记录并吞掉，使审计无法弄坏一次正常调用：
+`recordCall` 是每个 tool/resource 路径都调用的轻量策略包装器。它打时间戳、把门结果映射成行，且**绝不抛出**——Dexie 失败被记录并吞掉，使审计无法弄坏一次正常调用：
 
 ```ts title="lib/external-bridge/audit-log.ts:40"
 const row = await appendMcpAuditLog({
@@ -40,8 +39,7 @@ const AUDIT_CAP = 5000
 // pruneOldest 按 ts 删除（total − keep）个最旧行
 ```
 
-`McpAuditLogRow` = `{ id, ts, tool, scope, allowed, latencyMs, reason?, errorMessage? }`。`listMcpAuditLog`
-按最新优先返回，可选 `{ tool, deniedOnly, limit }` 过滤；`clearMcpAuditLog` 清空它。`scope` 对协议级方法为 `"n/a"`。
+`McpAuditLogRow` = `{ id, ts, tool, scope, allowed, latencyMs, reason?, errorMessage? }`。`listMcpAuditLog` 按最新优先返回，可选 `{ tool, deniedOnly, limit }` 过滤；`clearMcpAuditLog` 清空它。`scope` 对协议级方法为 `"n/a"`。
 
 ## bearer token 工具
 
@@ -54,8 +52,7 @@ const AUDIT_CAP = 5000
 | `verifyToken(stored, candidate)` | 比较器的 null 安全包装 |
 | `parseBearerHeader(header)` | 经 `/^Bearer\s+([A-Za-z0-9._\-]+)\s*$/` 从 `Bearer <token>` 抽取 token |
 
-token 在前端用 `crypto.getRandomValues` 生成，以明文存于 IndexedDB（可接受，因为 IndexedDB 已是用户本地隔离；
-待桥支持远程访问时再议）。轮换会整体覆盖它并打上 `tokenRotatedAt`。
+token 在前端用 `crypto.getRandomValues` 生成，以明文存于 IndexedDB（可接受，因为 IndexedDB 已是用户本地隔离；待桥支持远程访问时再议）。轮换会整体覆盖它并打上 `tokenRotatedAt`。
 
 ## Dexie v17 表
 
@@ -75,8 +72,7 @@ mcpAuditLog:  "&id, ts, tool, allowed, [tool+ts]",
 | `wikiManifest` | `&scope` · `lastBuildAt` | 每 scope 的 Merkle 映射 + 构建元数据 | `lib/db/wiki-manifest.ts` |
 | `mcpAuditLog` | `&id` · `ts` · `tool` · `[tool+ts]` | 每次 MCP 调用一行，上限 5000 | `lib/db/mcp-audit-log.ts` |
 
-`wikiArticles` 拥有**级联删除**：`deleteWikiArticle`（`wiki-articles.ts:103`）和
-`deleteAllWikiArticlesForScope` 都在事务内清掉文章的 `wikiSections`，以唯一 `&slug` 为键，使重建干净地替换旧行。
+`wikiArticles` 拥有**级联删除**：`deleteWikiArticle`（`wiki-articles.ts:103`）和 `deleteAllWikiArticlesForScope` 都在事务内清掉文章的 `wikiSections`，以唯一 `&slug` 为键，使重建干净地替换旧行。
 
 ## 设置 UI
 
@@ -94,24 +90,15 @@ flowchart TB
   class Sec,SS,SC,WR,SI,AL n
 ```
 
-- **ServerStatusCard** —— 切换 `externalBridge.enabled`；启用时解析 sidecar 路径（`~/.cognia/cognia-mcp.js`）
-  并调用 `startMcpServer(...)`，禁用时 `stopMcpServer()`。显示 / 复制 / 轮换 bearer token（`generateToken` +
-  `tokenRotatedAt`）并渲染 live/idle/web 徽标。
-- **ScopeTogglesCard** —— 遍历 `ALL_BRIDGE_SCOPES`，为每个 scope 渲染一个带 i18n 描述（`scopeDescriptions.<scope>`）
-  的开关；两个 `user-repo` scope 被禁用（`PHASE_1_DISABLED_SCOPES`，`external-bridge-section.tsx:72`）。变更时持久化
-  `enabledScopes`。
-- **AuditLogCard** —— `useLiveQuery(listMcpAuditLog({ limit: 50 }))` 渲染最新 50 次调用，带一个接到 `clearMcpAuditLog`
-  的清空确认对话框。
+- **ServerStatusCard** —— 切换 `externalBridge.enabled`；启用时解析 sidecar 路径（`~/.cognia/cognia-mcp.js`）并调用 `startMcpServer(...)`，禁用时 `stopMcpServer()`。显示 / 复制 / 轮换 bearer token（`generateToken` +`tokenRotatedAt`）并渲染 live/idle/web 徽标。
+- **ScopeTogglesCard** —— 遍历 `ALL_BRIDGE_SCOPES`，为每个 scope 渲染一个带 i18n 描述（`scopeDescriptions.<scope>`）的开关；两个 `user-repo` scope 被禁用（`PHASE_1_DISABLED_SCOPES`，`external-bridge-section.tsx:72`）。变更时持久化 `enabledScopes`。
+- **AuditLogCard** —— `useLiveQuery(listMcpAuditLog({ limit: 50 }))` 渲染最新 50 次调用，带一个接到 `clearMcpAuditLog` 的清空确认对话框。
 
 ### wiki 重建卡
 
-`wiki-rebuild-card.tsx`（约 361 行）显示当前 `wikiManifest`（scope、lastBuild、articleCount、generator）、
-一个 force-rebuild 开关、排期子表单（off / daily / weekly / custom cron + force），以及结果框（added / changed /
-removed / unchanged / errors）。`onRebuild` 调用 `runWikiRebuild({ force })`；`onSaveSchedule` 把 `wikiSchedule`
-合并进设置后调用 `syncWikiCronToScheduler(schedule)`（见 [Wiki 生成器 → 排期重建](./wiki-generator#排期重建)）。
+`wiki-rebuild-card.tsx`（约 361 行）显示当前 `wikiManifest`（scope、lastBuild、articleCount、generator）、一个 force-rebuild 开关、排期子表单（off / daily / weekly / custom cron + force），以及结果框（added / changed /removed / unchanged / errors）。`onRebuild` 调用 `runWikiRebuild({ force })`；`onSaveSchedule` 把 `wikiSchedule` 合并进设置后调用 `syncWikiCronToScheduler(schedule)`（见 [Wiki 生成器 → 排期重建](./wiki-generator#排期重建)）。
 
-所有面向用户的字符串位于 `settings.externalBridge` i18n 命名空间下（约 138 个键，跨 `wikiIndex`、`server`、
-`scopes`/`scopeDescriptions`、`setup`、`audit`），en.json 与 zh-CN.json 各一份。
+所有面向用户的字符串位于 `settings.externalBridge` i18n 命名空间下（约 138 个键，跨 `wikiIndex`、`server`、`scopes`/`scopeDescriptions`、`setup`、`audit`），en.json 与 zh-CN.json 各一份。
 
 ## 相关
 

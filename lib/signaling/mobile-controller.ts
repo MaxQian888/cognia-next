@@ -50,13 +50,8 @@ import {
   startTurnProvisioner,
   type ProvisionerHandle,
 } from "@/lib/credentials/turn-provisioning-cache"
-import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
+import { DEFAULT_SIGNALING_URL, DEFAULT_STUN_SERVERS } from "@/lib/signaling/types"
 import type { AppSettings } from "@cognia/agent-config-types"
-
-const DEFAULT_STUN: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun.cloudflare.com:3478" },
-]
 
 /**
  * Minimum spacing between two automatic WebRTC re-upgrade attempts driven by
@@ -454,7 +449,9 @@ export function installCompanionSignalingController(
   let netUnsub: (() => void) | null = null
   let resumeUnsub: (() => void) | null = null
   void subscribeNetworkFn((status) => {
-    if (status.connected) void onTrigger()
+    // Android's connected flag means validated Internet. A LAN-only Wi-Fi
+    // can still reach the paired desktop; the bounded probe decides that.
+    if (status.connected || status.connectionType === "wifi") void onTrigger()
   }).then(
     (u) => {
       // Controller stopped while the subscribe was in flight — the dispose
@@ -526,7 +523,7 @@ export async function applySettings(
     return
   }
   const signalingUrl = targetConfig.signalingUrl ?? settings.signalingUrl ?? DEFAULT_SIGNALING_URL
-  const ice = targetConfig.iceServers ?? settings.iceServers ?? DEFAULT_STUN
+  const ice = targetConfig.iceServers ?? settings.iceServers ?? DEFAULT_STUN_SERVERS
   const turn = settings.turnServers ?? []
   // ADR-0021 LAN-first: when already reaching the desktop over a connected
   // LAN, the WebRTC tier is not needed ("consulted only when LAN is

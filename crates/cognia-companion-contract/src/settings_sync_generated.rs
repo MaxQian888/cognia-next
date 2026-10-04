@@ -39,6 +39,12 @@
 //!   The selected provider is often a plugin that exists on one device only (laya runs in the
 //!   desktop Python host) and the endpoint key sits in that device's keyring.
 //!
+//! `externalAgentModelDefaults` — device-local (never crosses the wire).
+//!   A welcome-screen pick seeds the next conversation created on the SAME device
+//!   (`createSession`); the conversation row then carries the choice and syncs with it. The
+//!   keys are agent ids, and a phone's local agents are not the desktop's, so a default
+//!   mirrored across devices would name agents the other side does not have.
+//!
 //! `languageMode` — device-local (never crosses the wire).
 //!   Following the operating system is a per-device choice; each device resolves its own
 //!   language.

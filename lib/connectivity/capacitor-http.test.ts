@@ -2,8 +2,11 @@
 
 import {
   getCapacitorHttp,
+  serializeCapacitorRequestBody,
+  decodeCapacitorResponseBody,
   capacitorHttpGet,
   combineAbortSignals,
+  requestCapacitorHttp,
   type CapacitorHttpPlugin,
   type CapacitorHttpResponse,
 } from "./capacitor-http"
@@ -103,7 +106,6 @@ describe("capacitorHttpGet — happy path", () => {
       expect.objectContaining({
         url: "https://10.0.0.1:7890",
         method: "GET",
-        serverTrustMode: "self-signed",
         connectTimeout: 5000,
         readTimeout: 5000,
         responseType: "text",
@@ -111,16 +113,16 @@ describe("capacitorHttpGet — happy path", () => {
     )
   })
 
-  it("passes a custom serverTrustMode through to the plugin", async () => {
+  it("uses OS trust without pretending stock native supports trust overrides", async () => {
     const plugin = makePlugin()
-    const ctrl = new AbortController()
-    await capacitorHttpGet(plugin, "https://10.0.0.1:7890", {
-      signal: ctrl.signal,
-      timeoutMs: 3000,
-      serverTrustMode: "default",
+    await capacitorHttpGet(plugin, "https://10.0.0.1", {
+      signal: new AbortController().signal,
+      timeoutMs: 1000,
     })
     expect(plugin.request).toHaveBeenCalledWith(
-      expect.objectContaining({ serverTrustMode: "default" })
+      expect.not.objectContaining({
+        serverTrustMode: expect.anything(),
+      })
     )
   })
 
@@ -296,4 +298,86 @@ describe("combineAbortSignals", () => {
       ;(AbortSignal as { any?: unknown }).any = original
     }
   })
+})
+
+describe("requestCapacitorHttp cleanup", () => {
+  it("removes the abort listener and deadline after native success", async () => {
+    jest.useFakeTimers()
+    try {
+      const controller = new AbortController()
+      const remove = jest.spyOn(controller.signal, "removeEventListener")
+      await requestCapacitorHttp(
+        makePlugin(),
+        { url: "https://test" },
+        {
+          signal: controller.signal,
+          timeoutMs: 1000,
+        }
+      )
+      expect(remove).toHaveBeenCalledWith("abort", expect.any(Function))
+      expect(jest.getTimerCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not dispatch after cancellation and preserves the reason", async () => {
+    const controller = new AbortController()
+    controller.abort(new Error("cancelled by caller"))
+    const plugin = makePlugin()
+    await expect(
+      requestCapacitorHttp(
+        plugin,
+        { url: "https://test" },
+        {
+          signal: controller.signal,
+        }
+      )
+    ).rejects.toThrow("cancelled by caller")
+    expect(plugin.request).not.toHaveBeenCalled()
+  })
+
+  it("cleans up after a synchronous bridge error", async () => {
+    const controller = new AbortController()
+    const remove = jest.spyOn(controller.signal, "removeEventListener")
+    const plugin = makePlugin({
+      request: jest.fn(() => {
+        throw new Error("bridge failed")
+      }),
+    })
+    await expect(
+      requestCapacitorHttp(
+        plugin,
+        { url: "https://test" },
+        {
+          signal: controller.signal,
+        }
+      )
+    ).rejects.toThrow("bridge failed")
+    expect(remove).toHaveBeenCalledWith("abort", expect.any(Function))
+  })
+})
+
+it("serializes URL-encoded forms using the native file decoder without altering bytes", async () => {
+  const serialized = await serializeCapacitorRequestBody(
+    new Request("https://example.test", {
+      method: "POST",
+      body: new URLSearchParams({ value: "a+b &你好" }),
+    })
+  )
+  expect(serialized.dataType).toBe("file")
+  expect(
+    new TextDecoder().decode(Uint8Array.from(atob(serialized.data!), (c) => c.charCodeAt(0)))
+  ).toBe("value=a%2Bb+%26%E4%BD%A0%E5%A5%BD")
+})
+it("omits body bytes for HEAD and preserves native parsed JSON objects", () => {
+  expect(
+    decodeCapacitorResponseBody({ status: 200, headers: {}, data: "invalid base64" }, true, "HEAD")
+  ).toBeNull()
+  expect(
+    decodeCapacitorResponseBody(
+      { status: 403, headers: { "Content-Type": "application/json" }, data: { error: "denied" } },
+      true
+    )
+  ).toBe('{"error":"denied"}')
 })

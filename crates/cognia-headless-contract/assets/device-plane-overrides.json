@@ -2050,7 +2050,42 @@
             "description": "Thinking level for this turn, in the app's vocabulary (`low` to `max`). Folded onto whatever ladder the chosen model publishes; an agent with no reasoning axis ignores it."
           },
           "externalSessionId": {
-            "type": "string"
+            "type": "string",
+            "description": "Resume an agent session this conversation already established on the host: a native session id, or a `cognia-gateway:` task session id when the turn runs on a Cognia model."
+          },
+          "cogniaModel": {
+            "description": "Cognia provider/model this turn runs on through the host's gateway, using the host's own provider settings and vault. Omit to inherit the host configuration's own setting; `null` selects the agent's native model configuration explicitly. Identifiers only: credentials never cross the wire.",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "providerId",
+                  "modelId"
+                ],
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "accountId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "description": "Omit for the provider default; a host vault account id pins the task; null selects the host's manual API settings."
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "callerDeviceId": {
             "type": "string"
@@ -5664,7 +5699,8 @@
                         "github-issue-sync",
                         "issue-wakeup",
                         "radar-report",
-                        "provider-diagnostics-refresh"
+                        "provider-diagnostics-refresh",
+                        "conversation-auto-archive"
                       ]
                     },
                     "trigger": {

@@ -39,6 +39,16 @@ describe("<DiscoverHelp />", () => {
     expect(screen.getByText("Same Wi-Fi network")).toBeInTheDocument()
   })
 
+  it("drops its frame and side padding when flush", () => {
+    const { rerender } = render(<DiscoverHelp />)
+    expect(screen.getByTestId("pair-discover-help")).toHaveClass("rounded-lg", "border-dashed")
+    expect(screen.getByTestId("pair-discover-help-trigger")).toHaveClass("px-4")
+    rerender(<DiscoverHelp flush />)
+    expect(screen.getByTestId("pair-discover-help")).not.toHaveClass("rounded-lg")
+    expect(screen.getByTestId("pair-discover-help")).not.toHaveClass("border-dashed")
+    expect(screen.getByTestId("pair-discover-help-trigger")).toHaveClass("px-0")
+  })
+
   it("toggles open on trigger click and lists all tips", async () => {
     const user = userEvent.setup()
     render(<DiscoverHelp />)

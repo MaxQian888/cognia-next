@@ -1,6 +1,6 @@
 ---
 title: "0095 — 桌面选区感知：监听、门控与 OCR 支撑"
-description: "选择感应从每次点击轮询，转变为AXObserver-driven总线，配备廉价点击回退、无可访问文本的应用OCR路径，以及拒绝盲读屏幕的权限探针。"
+description: "选择感应从每次点击轮询，转变为AXObserver-driven总线，配备低开销点击回退、无可访问文本的应用OCR路径，以及拒绝盲读屏幕的权限探针。"
 ---
 
 # 0095 — 桌面选区感知：监听、门控与 OCR 支撑
@@ -64,7 +64,7 @@ OCR文本有自己的`SelectionOrigin::Ocr`，而不是兄弟布尔值：它有�
 
 ### 6. 可用性是呼叫站点的一种能力，而非功能标志
 
-`NativeOcrRegistry::list_ids()`无法回答“OCR可用吗”——`install_platform_backends`在*每*个ID下注册一个`PlaceholderBackend`，以确保调度表保持稠密。`NativeBackend::is_available()`（占位符为假）和`available_ids()`给出了真实答案，因此在默认的Windows版本中——所有`ocr-*`功能都是选择加入的，且`ocr-windows`还需要MSIX包身份——回退会自行禁用，呼叫站点没有`cfg`。Apple Vision无条件绑定在macOS上，所以回退在那里是在线的。
+`NativeOcrRegistry::list_ids()`无法回答“OCR可用吗”——`install_platform_backends`在*每*个ID下注册一个`PlaceholderBackend`，以确保调度表保持稠密。`NativeBackend::is_available()`（占位符为假）和`available_ids()`给出了真实答案，因此在默认的Windows版本中——所有`ocr-*`功能都是选择加入的，且`ocr-windows`还需要MSIX包身份——回退会自行禁用，调用点无需 `cfg`。Apple Vision无条件绑定在macOS上，所以该回退在 macOS 上可用。
 
 ### 7. 渲染器载荷不值得信任
 

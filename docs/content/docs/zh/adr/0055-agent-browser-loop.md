@@ -1,6 +1,6 @@
 ---
 title: ADR-0055 — 智能体浏览器闭环
-description: "给产品代理一个快照→按引用→重新快照的浏览器循环，覆盖现有的嵌入式/浏览器网页视图（导航、带稳定参考的无障碍树快照、click/type/fill/select/hover、控制台+网络检查、截图），作为门控插件工具公开。第一阶段通过注入的 JS驱动应用内嵌入式网页视图，用于共享的人类+代理面板;第二阶段是基于指导的——URL信任层路由器将公有来源标记为不受信任，并将模型引导到单独连接的Playwright MCP工具（mcp__playwright__*），以实现强大的公共站点自动化，因为渲染插件无法透明调用外部MCP工具。"
+description: "给产品代理一个快照→按引用→重新快照的浏览器循环，覆盖现有的嵌入式/浏览器网页视图（导航、带稳定参考的无障碍树快照、click/type/fill/select/hover、控制台+网络检查、截图），作为门控插件工具公开。第一阶段通过注入的 JS驱动应用内嵌入式网页视图，用于人类与 Agent 共用的面板；第二阶段通过使用指导实现：URL信任层路由器将公有来源标记为不受信任，并将模型引导到单独连接的Playwright MCP工具（mcp__playwright__*），以实现强大的公共站点自动化，因为渲染插件无法透明调用外部MCP工具。"
 ---
 
 # ADR-0055 — 智能体浏览器闭环
@@ -42,7 +42,7 @@ agent tool call ──► plugins/browser-tools (registerTool ×N)
 
 ### → Rust频道
 
-预览页面是一个没有IPC桥接的远程上下文。密钥启用器是Tauri 2.11.1 的 **`Webview::eval_with_callback`**，它将JS结果序列化为 JSON，并在三个引擎（WKWebView / WebView2 / WebKitGTK）上传递给Rust回调。`eval_embed_with_result`通过带有10秒超时的oneshot通道桥接了该回调到异步命令——因此旧的`cognia.invalid/__cognia_select`哨兵导航技巧不再是唯一的页面→Rust路径（仅保留给人类点击选择的UX）。在Windows上`eval_with_callback`吞噬异常，因此每个注入函数都会包裹其主体`try/catch`并返回错误值。
+预览页面是没有 IPC 桥接的远程上下文。结果桥接使用 Tauri 2.11.1 的 **`Webview::eval_with_callback`**，将 JS 结果序列化为 JSON，并在三个引擎（WKWebView / WebView2 / WebKitGTK）中传给 Rust 回调。`eval_embed_with_result` 通过超时为 10 秒的 oneshot 通道将回调连接到异步命令——因此旧的`cognia.invalid/__cognia_select`哨兵导航技巧不再是唯一的页面→Rust路径（仅保留给人类点击选择的UX）。在 Windows 上，`eval_with_callback` 会吞掉异常，因此每个注入函数都用 `try/catch` 包裹主体，并将错误作为返回值。
 
 ### 组成部分（第一阶段）
 
@@ -108,19 +108,8 @@ agent tool call ──► plugins/browser-tools (registerTool ×N)
 
 ## 附录（2026-08-09）——现有浏览器 Seam 与控制面补齐
 
-“公网自动化总是需要隔离的 Playwright 浏览器”这一历史指引已经不完整。Cognia 现在还提供
-`playwright-existing-browser` MCP 预设，运行 `@playwright/mcp@latest --extension`，通过
-Microsoft 官方 Playwright 扩展连接用户在 Chrome 或 Edge 中选择的标签页。连接会复用当前
-浏览器配置和登录态；每次连接仍由用户选择标签页并授权，任一端断开后都可以重新连接。
-Cognia 不持久化免授权 token。
+“公网自动化总是需要隔离的 Playwright 浏览器”这一历史指引已经不完整。Cognia 现在还提供 `playwright-existing-browser` MCP 预设，运行 `@playwright/mcp@latest --extension`，通过 Microsoft 官方 Playwright 扩展连接用户在 Chrome 或 Edge 中选择的标签页。连接会复用当前浏览器配置和登录态；每次连接仍由用户选择标签页并授权，任一端断开后都可以重新连接。Cognia 不持久化免授权 token。
 
-这是一条独立的 MCP Seam，而不是第三个 `BrowserEngine`：扩展传输、浏览器授权和 Manifest V3
-生命周期由上游维护；内部 `browser_*` 命名空间继续保留内嵌 WebView 与隔离 Chromium 两个
-引擎。现有浏览器预设默认禁用 `browser_run_code_unsafe`；修改该服务器级 deny list 会使既有
-信任审核失效并要求重新审核。
+这是一条独立的 MCP Seam，而不是第三个 `BrowserEngine`：扩展传输、浏览器授权和 Manifest V3 生命周期由上游维护；内部 `browser_*` 命名空间继续保留内嵌 WebView 与隔离 Chromium 两个引擎。现有浏览器预设默认禁用 `browser_run_code_unsafe`；修改该服务器级 deny list 会使既有信任审核失效并要求重新审核。
 
-内部控制面现在公开双击、聚焦、缩放、查找、清除查找、新页面、拖放、对话框处理、批量表单，
-以及 viewport、整页或元素截图。`RemoteChromiumEngine` 解析绑定快照与 frame 的 ref，再调用
-Playwright 原生元素动作；ref generation 检查仍然失败即关闭。触发对话框的动作会进入 pending
-状态，直至明确接受或拒绝。`EmbeddedEngine` 复用 WebView 已有能力；对新页面、原生对话框、
-拖放与非 viewport 截图返回 `browser_feature_unsupported`，不提供误导性的模拟实现。
+内部控制面现在公开双击、聚焦、缩放、查找、清除查找、新页面、拖放、对话框处理、批量表单，以及 viewport、整页或元素截图。`RemoteChromiumEngine` 解析绑定快照与 frame 的 ref，再调用 Playwright 原生元素动作；ref generation 检查仍然失败即关闭。触发对话框的动作会进入 pending 状态，直至明确接受或拒绝。`EmbeddedEngine` 复用 WebView 已有能力；对新页面、原生对话框、拖放与非 viewport 截图返回 `browser_feature_unsupported`，不提供误导性的模拟实现。

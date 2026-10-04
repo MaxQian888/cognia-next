@@ -177,3 +177,14 @@ export const DATACHANNEL_LABEL = "cognia.signaling"
  */
 export const DEFAULT_SIGNALING_URL =
   process.env.NEXT_PUBLIC_SIGNALING_URL ?? "wss://signaling.cognia.cn/signaling"
+
+/**
+ * STUN servers a client peer uses when neither the pairing nor the settings
+ * name any. Shared by the mobile signaling controller and the companion
+ * transport, which opens the WAN tier itself when it is the only route to the
+ * Host (ADR-0170).
+ */
+export const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+]

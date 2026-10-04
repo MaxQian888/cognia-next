@@ -13,6 +13,7 @@ jest.mock("@/lib/platform/detect", () => ({
   detectPlatform: () => detectPlatform(),
 }))
 jest.mock("@/lib/connectivity/capacitor-http", () => ({
+  ...jest.requireActual("@/lib/connectivity/capacitor-http"),
   getCapacitorHttp: () => getCapacitorHttp(),
 }))
 jest.mock("@/lib/network/proxy-fetch", () => ({
@@ -86,7 +87,58 @@ describe("createPlatformFetch", () => {
     })
 
     // Without this the artifact would arrive as "[object ArrayBuffer]".
-    expect(request).toHaveBeenCalledWith(expect.objectContaining({ data: "AAEC/Q==" }))
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ data: "AAEC/Q==", dataType: "file" })
+    )
+  })
+
+  it("preserves untyped binary bytes instead of decoding them as UTF-8", async () => {
+    const request = jest.fn().mockResolvedValue({ data: "", status: 200, headers: {} })
+    getCapacitorHttp.mockReturnValue({ request })
+    await createPlatformFetch({ kind: "capacitor" })("https://diag.test/upload", {
+      method: "POST",
+      body: new Uint8Array([0, 255, 128]),
+    })
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: "AP+A",
+        dataType: "file",
+        headers: expect.objectContaining({ "content-type": "application/octet-stream" }),
+      })
+    )
+  })
+
+  it("does not dispatch an already-aborted native request", async () => {
+    const request = jest.fn()
+    getCapacitorHttp.mockReturnValue({ request })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      createPlatformFetch({ kind: "capacitor" })("https://diag.test/upload", {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("rejects on cancellation and ignores a late native response", async () => {
+    let resolve!: (response: unknown) => void
+    const request = jest.fn(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    getCapacitorHttp.mockReturnValue({ request })
+    const controller = new AbortController()
+    const pending = createPlatformFetch({ kind: "capacitor" })("https://diag.test/upload", {
+      signal: controller.signal,
+    })
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await new Promise((done) => setTimeout(done, 0))
+    controller.abort()
+    await rejected
+    resolve({ status: 200, data: "late", headers: {} })
   })
 
   it("asks the Capacitor bridge for base64 and decodes it when the body is binary", async () => {

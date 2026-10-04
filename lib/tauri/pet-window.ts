@@ -82,6 +82,23 @@ export async function setPetWindowPosition(x: number, y: number): Promise<boolea
   }
 }
 
+/**
+ * Resize the open overlay window to a new LOGICAL size. Rust keeps the
+ * window's bottom-center fixed (the pet's feet stay put), clamps it inside the
+ * monitor's work area, and never reveals a hidden window. A no-op when the
+ * window does not exist; the next open applies the size instead.
+ */
+export async function setPetWindowSize(width: number, height: number): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    await invoke("pet_window_set_size", { width, height })
+    return true
+  } catch (err) {
+    console.warn("setPetWindowSize failed", err)
+    return false
+  }
+}
+
 /** Read the overlay window's current absolute screen position. */
 export async function getPetWindowPosition(): Promise<{ x: number; y: number } | null> {
   if (!isTauri()) return null
@@ -153,7 +170,10 @@ export async function getPetSurfaces(): Promise<PetSurface[]> {
   }
 }
 
-/** Whether the overlay window currently exists. */
+/**
+ * Whether the overlay window is open: it exists and its latest lifecycle is
+ * an open. A freshly built window that has not painted yet already counts.
+ */
 export async function isPetWindowOpen(): Promise<boolean> {
   if (!isTauri()) return false
   try {
@@ -165,19 +185,31 @@ export async function isPetWindowOpen(): Promise<boolean> {
 }
 
 /**
+ * Physical rectangle of the pet's own box on screen. Mirrors the Rust
+ * `PetPopupAnchor` DTO; see `popupAnchorForPetBox` in
+ * `lib/pet/overlay-geometry.ts`.
+ */
+export interface PetPopupAnchor {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
  * Options for opening the desktop-pet click popup window (label "pet-popup").
- * `width`/`height` are logical; `x`/`y` are physical screen coords already
- * clamped on-screen by `lib/pet/popup-geometry.ts`. Mirrors the Rust
- * `PetPopupOpts` DTO.
+ * `width`/`height` are the LOGICAL size estimate; Rust resolves the placement
+ * from `anchor` (above the pet, flipped below when there is no room, clamped
+ * to the work area) and re-resolves it whenever the popup re-fits itself.
+ * Mirrors the Rust `PetPopupOpts` DTO.
  */
 export interface PetPopupOpts {
   width: number
   height: number
-  x: number
-  y: number
+  anchor: PetPopupAnchor
 }
 
-/** Open (or show + reposition + focus) the desktop-pet click popup window. */
+/** Open (or show + re-place + focus) the desktop-pet click popup window. */
 export async function openPetPopup(opts: PetPopupOpts): Promise<boolean> {
   if (!isTauri()) return false
   try {
@@ -201,7 +233,11 @@ export async function closePetPopup(): Promise<boolean> {
   }
 }
 
-/** Resize the click popup window to fit its panel (talk composer toggle). */
+/**
+ * Fit the click popup window to its card (logical px). Rust re-places it
+ * against the anchor it was opened for, so it never leaves the screen or
+ * drifts away from the pet when the card grows or shrinks.
+ */
 export async function resizePetPopup(width: number, height: number): Promise<boolean> {
   if (!isTauri()) return false
   try {
@@ -217,9 +253,12 @@ export async function resizePetPopup(width: number, height: number): Promise<boo
 export type PetRevealTarget = "pet" | "pet-popup"
 
 /**
- * Reveal a pet overlay after its first paint. The target is explicit because
- * an overlay can be hosted by a plain Webview rather than a Tauri
- * `WebviewWindow`; Rust resolves this label to its native window.
+ * Reveal a pet overlay after its first paint, on every platform. Rust checks
+ * the window's open generation first, so a close that landed between the open
+ * and the first frame wins over the reveal, and it records the sprite's first
+ * paint. The target is explicit because an overlay can be hosted by a plain
+ * Webview rather than a Tauri `WebviewWindow`; Rust resolves this label to its
+ * native window.
  */
 export async function revealPetWindow(
   focus = false,
@@ -324,4 +363,13 @@ export function onPetWorkAreaChanged(handler: () => void): Disposer {
 /** The popup was natively hidden (blur-to-close) — sync popup UI state. */
 export function onPetPopupHidden(handler: () => void): Disposer {
   return subscribe("pet-popup://hidden", () => handler())
+}
+
+/**
+ * The existing popup window was shown again. Rust reset it to the size
+ * estimate, so the popup must fit itself to its card again even when the card
+ * did not change size.
+ */
+export function onPetPopupShown(handler: () => void): Disposer {
+  return subscribe("pet-popup://shown", () => handler())
 }

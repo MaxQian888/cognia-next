@@ -5,7 +5,13 @@
  * exercise the native-path branch vs. the platform-`fetch` fallback.
  */
 
-import { pinnedFetch } from "./pinned-fetch"
+import {
+  isPinnedRouteUnavailable,
+  NativePinningUnavailableError,
+  nativeSpkiPinningAttested,
+  pinnedFetch,
+  usesNativePinnedRoute,
+} from "./pinned-fetch"
 
 describe("pinnedFetch", () => {
   const originalFetch = globalThis.fetch
@@ -22,6 +28,154 @@ describe("pinnedFetch", () => {
     } else {
       ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = originalCapacitor
     }
+  })
+
+  it.each(["buffer", "slice", "blob", "form"])(
+    "serializes %s bodies as native-decoded bytes",
+    async (kind) => {
+      const raw = new Uint8Array([0, 255, 128, 1])
+      const form = new FormData()
+      form.append("note", "你好")
+      form.append("file", new Blob([raw]), "data.bin")
+      const body =
+        kind === "buffer"
+          ? raw.buffer
+          : kind === "slice"
+            ? raw.subarray(1, 3)
+            : kind === "blob"
+              ? new Blob([raw])
+              : form
+      let nativeBytes: Uint8Array | undefined
+      let nativeHeaders: Record<string, string> = {}
+      const request = jest.fn(async (options) => {
+        expect(options.dataType).toBe("file")
+        nativeBytes = Uint8Array.from(atob(options.data), (c) => c.charCodeAt(0))
+        nativeHeaders = options.headers
+        return { status: 200, headers: {}, data: "" }
+      })
+      ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+        isNativePlatform: () => true,
+        Plugins: { CapacitorHttp: { request } },
+      }
+      await pinnedFetch("https://test.trycloudflare.com/content", { method: "POST", body })
+      if (kind === "form") {
+        const decoded = await new Response(nativeBytes as Uint8Array<ArrayBuffer>, {
+          headers: nativeHeaders,
+        }).formData()
+        expect(decoded.get("note")).toBe("你好")
+        expect(new Uint8Array(await (decoded.get("file") as File).arrayBuffer())).toEqual(raw)
+      } else expect(nativeBytes).toEqual(kind === "slice" ? raw.subarray(1, 3) : raw)
+    }
+  )
+
+  it("decodes native base64 media responses without UTF-8 corruption", async () => {
+    const request = jest.fn(async () => ({
+      status: 200,
+      headers: { "Content-Type": "image/png" },
+      data: "AP+AAQ==",
+    }))
+    ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request } },
+    }
+    const response = await pinnedFetch("https://test.trycloudflare.com/content", {
+      binaryResponse: true,
+    })
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ responseType: "blob" }))
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0, 255, 128, 1]))
+  })
+
+  it("preserves native-parsed JSON error strings on binary requests", async () => {
+    const request = jest.fn(async () => ({
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+      data: "denied",
+    }))
+    ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request } },
+    }
+    const response = await pinnedFetch("https://test.trycloudflare.com/content", {
+      binaryResponse: true,
+    })
+    expect(response.ok).toBe(false)
+    expect(await response.json()).toBe("denied")
+  })
+
+  it("does not decode a forbidden response body on a 204", async () => {
+    const request = jest.fn(async () => ({ status: 204, headers: {}, data: "not base64" }))
+    ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request } },
+    }
+    const response = await pinnedFetch("https://test.trycloudflare.com/content", {
+      binaryResponse: true,
+    })
+    expect(await response.text()).toBe("")
+    expect((await response.arrayBuffer()).byteLength).toBe(0)
+  })
+
+  it("never dispatches an already-cancelled native request", async () => {
+    const request = jest.fn()
+    ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request } },
+    }
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      pinnedFetch("https://example.test", { signal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("rejects cancelled native work and discards its late result", async () => {
+    let resolve!: (response: unknown) => void
+    const request = jest.fn(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: { CapacitorHttp: { request } },
+    }
+    const controller = new AbortController()
+    const pending = pinnedFetch("https://example.test", { signal: controller.signal })
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await new Promise((done) => setTimeout(done, 0))
+    controller.abort()
+    await rejected
+    resolve({ status: 200, headers: {}, data: "late" })
+  })
+
+  it("cancels pending pin attestation without dispatching later", async () => {
+    let attest!: (value: { spkiPinning: boolean }) => void
+    const request = jest.fn()
+    ;(globalThis as unknown as { Capacitor: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: () =>
+            new Promise((resolve) => {
+              attest = resolve
+            }),
+        },
+      },
+    }
+    const controller = new AbortController()
+    const pending = pinnedFetch("https://192.168.1.42/x", {
+      signal: controller.signal,
+      serverFingerprint: "abc",
+    })
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    controller.abort()
+    await rejected
+    attest({ spkiPinning: true })
+    await Promise.resolve()
+    expect(request).not.toHaveBeenCalled()
   })
 
   it("delegates to global fetch when not running in Capacitor", async () => {
@@ -84,6 +238,67 @@ describe("pinnedFetch", () => {
       })
     ).rejects.toThrow("native_spki_pinning_unavailable")
     expect(request).not.toHaveBeenCalled()
+  })
+
+  it("fails closed with a typed error when the plugin proxy rejects the attestation", async () => {
+    // A Capacitor plugin proxy returns a function for every property name, so
+    // an attestation the native side never registered is a call that rejects
+    // ("not implemented on android"), not `undefined`. Stock Android does this.
+    const request = jest.fn()
+    ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        CapacitorHttp: {
+          request,
+          getSecurityCapabilities: () =>
+            Promise.reject(
+              new Error('"CapacitorHttp.getSecurityCapabilities()" is not implemented on android')
+            ),
+        },
+      },
+    }
+
+    const error = await pinnedFetch("https://192.168.1.42:7890/api/_rpc/x", {
+      serverFingerprint: "deadbeef",
+    }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(NativePinningUnavailableError)
+    expect((error as NativePinningUnavailableError).code).toBe("native_spki_pinning_unavailable")
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("asks the native side for its attestation once per plugin", async () => {
+    const getSecurityCapabilities = jest.fn(async () => ({ spkiPinning: true }))
+    const plugin = { request: jest.fn(), getSecurityCapabilities }
+
+    await expect(nativeSpkiPinningAttested(plugin)).resolves.toBe(true)
+    await expect(nativeSpkiPinningAttested(plugin)).resolves.toBe(true)
+    expect(getSecurityCapabilities).toHaveBeenCalledTimes(1)
+    await expect(nativeSpkiPinningAttested(null)).resolves.toBe(false)
+    await expect(nativeSpkiPinningAttested({ request: jest.fn() })).resolves.toBe(false)
+  })
+
+  it("reports the pinned route as unavailable only where pinnedFetch would refuse it", async () => {
+    const lan = "https://192.168.1.42:7890/api/_rpc/x"
+    const tunnel = "https://abc.trycloudflare.com/api/_rpc/x"
+    expect(usesNativePinnedRoute(lan, "deadbeef")).toBe(false)
+    await expect(isPinnedRouteUnavailable(lan, "deadbeef")).resolves.toBe(false)
+
+    ;(globalThis as unknown as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        CapacitorHttp: {
+          request: jest.fn(),
+          getSecurityCapabilities: async () => ({ spkiPinning: false }),
+        },
+      },
+    }
+    expect(usesNativePinnedRoute(lan, "deadbeef")).toBe(true)
+    await expect(isPinnedRouteUnavailable(lan, "deadbeef")).resolves.toBe(true)
+    // Tunnel hosts and unpinned requests never ask for pinning.
+    expect(usesNativePinnedRoute(tunnel, "deadbeef")).toBe(false)
+    await expect(isPinnedRouteUnavailable(tunnel, "deadbeef")).resolves.toBe(false)
+    await expect(isPinnedRouteUnavailable(lan, undefined)).resolves.toBe(false)
   })
 
   it("uses default trust mode for trycloudflare hosts", async () => {

@@ -35,6 +35,13 @@ const remoteRunStartMock = jest.fn(async (_request: unknown) => ({
 jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-service", () => ({
   startRemoteExternalRun: (...args: unknown[]) => remoteRunStartMock(args[0]),
 }))
+const cogniaCatalogMock = jest.fn()
+const cogniaCatalogDeps = { marker: "host-deps" }
+jest.mock("@/lib/ai/agent/external/config/host-config-service", () => ({
+  ...jest.requireActual("@/lib/ai/agent/external/config/host-config-service"),
+  getHostCogniaModelCatalog: (...args: unknown[]) => cogniaCatalogMock(...args),
+  defaultHostCogniaModelCatalogDeps: async () => cogniaCatalogDeps,
+}))
 
 const mockActiveRuntimeTarget = jest.fn()
 // ADR-0131 §2.7 — relayed Inbox writes only run on the process that owns the
@@ -2566,6 +2573,79 @@ it("forwards paired-host canonical instructions and the native tool allowlist", 
       chatSessionId: "chat",
     })
   )
+})
+
+describe("external_agent_run_turn: the Cognia model binding", () => {
+  const base = {
+    runId: "run",
+    chatSessionId: "chat",
+    prompt: "task",
+    stamp: { configId: "cfg", revision: "rev", lifecycleGeneration: 1 },
+  }
+  beforeEach(() => remoteRunStartMock.mockClear())
+
+  it("passes a valid binding through, trimmed to its three fields", async () => {
+    await dispatchCommand("external_agent_run_turn", {
+      ...base,
+      cogniaModel: { providerId: " kimi-sub ", modelId: "kimi-k2", accountId: null },
+      externalSessionId: "cognia-gateway:task_1:native",
+      callerDeviceId: "device-phone",
+    })
+    expect(remoteRunStartMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cogniaModel: { providerId: "kimi-sub", modelId: "kimi-k2", accountId: null },
+        externalSessionId: "cognia-gateway:task_1:native",
+        callerDeviceId: "device-phone",
+      })
+    )
+  })
+
+  it("keeps an explicit null distinct from an absent binding", async () => {
+    await dispatchCommand("external_agent_run_turn", { ...base, cogniaModel: null })
+    expect(remoteRunStartMock.mock.calls[0]![0]).toHaveProperty("cogniaModel", null)
+    await dispatchCommand("external_agent_run_turn", base)
+    expect(remoteRunStartMock.mock.calls[1]![0]).not.toHaveProperty("cogniaModel")
+  })
+
+  it.each([
+    { providerId: "p", modelId: "m", apiKey: "sk-live" },
+    { providerId: "p", modelId: "m", baseURL: "https://evil.example" },
+    { providerId: "p", modelId: "" },
+    { providerId: "p", modelId: "m", accountId: 7 },
+    "p/m",
+    ["p", "m"],
+  ])("refuses a binding with secret, extra or malformed fields: %p", async (cogniaModel) => {
+    await expect(
+      dispatchCommand("external_agent_run_turn", { ...base, cogniaModel })
+    ).rejects.toThrow("external_agent_run_turn.cogniaModel must be")
+    expect(remoteRunStartMock).not.toHaveBeenCalled()
+  })
+
+  it("refuses a non-string resume id", async () => {
+    await expect(
+      dispatchCommand("external_agent_run_turn", { ...base, externalSessionId: 42 })
+    ).rejects.toThrow("externalSessionId must be a string")
+  })
+})
+
+describe("external_agent_cognia_models", () => {
+  beforeEach(() => cogniaCatalogMock.mockReset())
+
+  it("answers the Host's catalog for one configuration", async () => {
+    const catalog = { supported: true, providers: [] }
+    cogniaCatalogMock.mockResolvedValue(catalog)
+    await expect(
+      dispatchCommand("external_agent_cognia_models", { configId: "cfg" })
+    ).resolves.toBe(catalog)
+    expect(cogniaCatalogMock).toHaveBeenCalledWith("cfg", cogniaCatalogDeps)
+  })
+
+  it("requires a configuration id", async () => {
+    await expect(dispatchCommand("external_agent_cognia_models", {})).rejects.toThrow(
+      "external_agent_cognia_models.configId is required"
+    )
+    expect(cogniaCatalogMock).not.toHaveBeenCalled()
+  })
 })
 
 describe("dispatchCommand: session_mark_read", () => {

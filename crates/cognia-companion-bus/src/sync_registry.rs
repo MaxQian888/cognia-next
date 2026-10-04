@@ -476,7 +476,12 @@ mod tests {
         ] {
             assert_eq!(by_name.get(name), Some(&true), "{name} must tombstone");
         }
-        for name in ["settings", "terminalHistory", "connectorHeartbeats", "executionRuns"] {
+        for name in [
+            "settings",
+            "terminalHistory",
+            "connectorHeartbeats",
+            "executionRuns",
+        ] {
             assert_eq!(by_name.get(name), Some(&false), "{name} has no tombstones");
         }
     }

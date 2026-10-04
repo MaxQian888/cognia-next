@@ -3,6 +3,19 @@
   "groups": [
     {
       "disposition": "local-only",
+      "reason": "Sandbox desktop observation and human input belong to the client-local virtual computer. Controller leases arbitrate the local renderer and agent; these commands must not be exposed to remote agents or follow the selected remote Host.",
+      "commands": [
+        "cua_sandbox_desktop_acquire_control",
+        "cua_sandbox_desktop_renew_control",
+        "cua_sandbox_desktop_release_control",
+        "cua_sandbox_desktop_input",
+        "cua_sandbox_desktop_capture",
+        "cua_sandbox_upload_file",
+        "cua_sandbox_download_file"
+      ]
+    },
+    {
+      "disposition": "local-only",
       "reason": "Temporary GitHub runner provisioning belongs to the initiating desktop: it uses that user's GitHub CLI account and durable private-key lease ledger. Remote Hosts cannot dispatch or cancel jobs through these local credentials. Execution after pairing uses the ordinary Companion commands.",
       "commands": [
         "github_runner_preflight",
@@ -729,6 +742,7 @@
         "skills_scan_security",
         "slash_commands_scan",
         "ssh_forget_host_key",
+        "ssh_list_host_keys",
         "ssh_terminal_forward_status",
         "ssh_terminal_kill",
         "ssh_terminal_resize",

@@ -33,8 +33,8 @@ import {
   type BrowserProfileRow,
 } from "@/lib/db/browser-profiles"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { isTauri } from "@/lib/tauri"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
@@ -44,7 +44,12 @@ export function RemoteBrowserCard() {
   const enabled = useSettingsStore((state) => state.settings?.remoteBrowserEnabled ?? false)
   const save = useSettingsStore((state) => state.save)
   const workspaceId = useProjectStore((state) => state.activeProjectId)
-  const reachable = !isTauri() ? hasWebCompanionTarget() : isRemoteHostActive()
+  // Subscribed, and called before the shell branch so the hook order never
+  // changes: a desktop can attach to or detach from a remote host while this
+  // card is open, and a one-shot read kept the delete control enabled (or
+  // disabled) for whichever host was active at the last unrelated re-render.
+  const remoteHostActive = useRemoteHostActive()
+  const reachable = !isTauri() ? hasWebCompanionTarget() : remoteHostActive
   const profiles = useLiveQuery(
     () => (workspaceId ? listBrowserProfiles(workspaceId) : Promise.resolve([])),
     [workspaceId],

@@ -1,6 +1,6 @@
 ---
 title: Context API（ctx）
-description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由内联基础命名空间与扩展 create*API 工厂两层装配而成，所有触及宿主的表面均由 createGuardedAPI 包裹以强制权限校验与异步同意。
+description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由内联基础命名空间与扩展 create*API 工厂两层构建而成。所有访问宿主的接口均由 createGuardedAPI 包裹，强制执行权限校验与异步授权。
 ---
 
 # Context API（ctx）
@@ -8,7 +8,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 <Status variant="experimental" />
 
 <TLDR>
-`ctx` 是传递给每个插件 `activate(ctx)` 的唯一运行时对象，在 `lib/plugin/core/context.ts` 中分两层装配：`createPluginContext`（`context.ts:181`）装配始终在线、内联定义的基础命名空间，`createFullPluginContext`（`context.ts:233`）则把 `lib/plugin/api/` 下每个 `create*API(pluginId)` 工厂展开合入同一个 `FullPluginContext`（`context.ts:297-317`），叠加扩展功能命名空间。所有触及宿主的命名空间均由 `createGuardedAPI`（`permission-guard.ts:777`）包裹——这是一个 Proxy，强制要求声明的权限，并将 `"confirm"` 级权限路由到异步同意经纪人（`permission-guard.ts:810-854`）。凭据剥离投影使 `ctx.subscription`、`ctx.connectors`、`ctx.backup`、`ctx.vector` 不会泄露密钥。
+`ctx` 是传递给每个插件 `activate(ctx)` 的唯一运行时对象，在 `lib/plugin/core/context.ts` 中分两层装配：`createPluginContext`（`context.ts:181`）构建始终可用、内联定义的基础命名空间，`createFullPluginContext`（`context.ts:233`）则把 `lib/plugin/api/` 下每个 `create*API(pluginId)` 工厂展开合入同一个 `FullPluginContext`（`context.ts:297-317`），加入扩展功能命名空间。所有触及宿主的命名空间均由 `createGuardedAPI`（`permission-guard.ts:777`）包裹——这是一个 Proxy，强制要求声明的权限，并将 `"confirm"` 级权限路由到异步授权代理（`permission-guard.ts:810-854`）。投影会移除凭据，确保 `ctx.subscription`、`ctx.connectors`、`ctx.backup`、`ctx.vector` 不会泄露密钥。
 </TLDR>
 
 <StatGrid>
@@ -27,7 +27,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 - `createPluginContext`（`context.ts:181`）构建**基础上下文**——始终在线、本地定义的命名空间：`logger`、`storage`、`events`、`ui`、`a2ui`、`agent`、`settings`、`python`、`network`、`fs`、`clipboard`、`shell`、`db`、`shortcuts`、`contextMenu`、`tray`、`window`、`secrets`、`scheduler`、`workflow`、`dexie`。
 - `createFullPluginContext`（`context.ts:233`）通过调用 `lib/plugin/api/` 下每个 `create*API(pluginId)` 工厂并展开合入同一个 `FullPluginContext`（`context.ts:297-317`），叠加**扩展功能命名空间**。聚合出口是 `lib/plugin/api/index.ts`。
 
-触及宿主的命名空间由 `createGuardedAPI`（`permission-guard.ts:777`）包裹——这是一个 Proxy，拦截每次方法调用，强制要求声明的权限，并对 `"confirm"` 级权限路由到异步同意经纪人（`permission-guard.ts:810-854`）。
+触及宿主的命名空间由 `createGuardedAPI`（`permission-guard.ts:777`）包裹——这是一个 Proxy，拦截每次方法调用，强制要求声明的权限，并对 `"confirm"` 级权限路由到异步授权代理（`permission-guard.ts:810-854`）。
 
 ## 2. 命名空间目录
 
@@ -55,7 +55,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 | `ctx.tray` | `tray-api.ts:29` | lib/tray/registry + Rust | 能力受控（`"tray"` 否则为空操作 `:14`） | `register` |
 | `ctx.window` | `context.ts:1505` | Rust window 命令 | 否 | `create:1549`、`getMain:1556`、`focus:1558` |
 | `ctx.secrets` | `context.ts:1578` | Rust keyring 网关 | 否 | store/get/delete/has（`:1580-1587`） |
-| `ctx.scheduler` | `context.ts:~1592` | scheduler | 否 | scheduler API |
+| `ctx.scheduler` | `context.ts:2846`（`createSchedulerAPI`） | 本地 `TaskScheduler` + `schedulerDb`，仅限插件自己的 `type: "plugin"` 任务 | `scheduler` 清单能力（否则为拒绝代理） | `createTask`、`runTaskNow`、`cancelExecution`、`emitEvent`、`onExecution`、`getStatistics`、`previewTrigger`、`registerHandler`；见[调度器 API](../../plugin-dev/scheduler) |
 | `ctx.workflow` | `context.ts:214` | workflow 节点 / 触发器注册表 | 否 | 节点 / 触发器注册 |
 | `ctx.dexie` | `dexie-api.ts:40` | 命名空间化 Dexie | 强制命名空间 | `table:20`、`rawDb:31` |
 
@@ -94,6 +94,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 | `ctx.share` | `share-api.ts:51` | lib/share + shared-links Dexie | `share:read` / `share:create` | `create:53`、`revoke:54`、`getStats:57` |
 | `ctx.backup` | `backup-api.ts:64` | buildExportEnvelope / importEnvelope | `backup:read` / `backup:write`（绝不含 API key） | `create:66`、`restore:75`、`listHistory:82` |
 | `ctx.automation` | `automation-api.ts:101` | lib/automation/client（Computer Use） | `automation:read`/...（全部 DANGEROUS） | `capabilities:53`、`getFocus:54`、`readTree:56` |
+| `ctx.userScheduler` | `scheduler-tasks.ts`（`createUserSchedulerAPI(pluginId)`） | scheduler store + `getSchedulerDataSource()`（遵循配对主机绑定） | `database:read` / `database:write`（创建 / 运行 / 取消另需 `settings:read`、`agent:control`）；每次写入都经过 `assertTaskWriteAllowed`，归属于插件或代理，绝不归属于用户 | `getPolicy`、`listTasks`、`getTask`、`createTask`、`updateTask`、`pauseTask`、`resumeTask`、`deleteTask`、`runTaskNow`、`listExecutions`、`getExecution`、`cancelExecution`、`getUpcoming` |
 | `ctx.companion` | `companion-api.ts:85` | 配对设备 + goal 运行时 | `companion:read`/`control`/`goal-control` | `listDevices:90`、`setRemoteControl:96`、`pauseGoal:114` |
 
 辅助文件（非 `ctx.X`）：`crypto-helpers.ts`（AES-GCM `deriveKey:17`，被 Storage API 使用）；`message-part-renderers.ts`（`ctx.messagePart` 的底层注册表）。

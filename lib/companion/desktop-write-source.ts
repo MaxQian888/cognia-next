@@ -167,10 +167,12 @@ import type {
 } from "@/lib/data/types"
 import { adaptPermissionMode } from "@/lib/ai/agent/external/policy/permission-modes"
 import { createProfileDekStore } from "@/lib/rag/profile-dek-store"
-import type {
-  AcpPermissionMode,
-  ExternalAgentProtocol,
-  UpdateExternalAgentInput,
+import {
+  normalizeCogniaModelBinding,
+  type AcpPermissionMode,
+  type ExternalAgentCogniaModelBinding,
+  type ExternalAgentProtocol,
+  type UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
@@ -729,6 +731,8 @@ export async function dispatchCommand(
       return externalAgentConfigDelete(payload)
     case "external_agent_config_reconcile":
       return externalAgentConfigReconcile()
+    case "external_agent_cognia_models":
+      return externalAgentCogniaModels(payload)
     case "external_agent_admit_run":
       return externalAgentAdmitRun(payload)
     case "external_agent_release_run":
@@ -3214,6 +3218,25 @@ async function externalAgentConfigGet(
 }
 
 /**
+ * Which Cognia provider models a configuration can run on through THIS Host's
+ * gateway (ADR-0090, 2026-10-02).
+ *
+ * Read-only and computed here because the answer depends on the Host's own
+ * provider settings and vault — the ones a turn's gateway route resolves
+ * against — not on anything the asking device holds. The result names
+ * providers and models only; no key, header or base URL leaves the Host.
+ */
+async function externalAgentCogniaModels(payload: Record<string, unknown>) {
+  const configId = payload.configId
+  if (typeof configId !== "string" || !configId) {
+    throw new Error("external_agent_cognia_models.configId is required")
+  }
+  const { defaultHostCogniaModelCatalogDeps, getHostCogniaModelCatalog } =
+    await import("@/lib/ai/agent/external/config/host-config-service")
+  return getHostCogniaModelCatalog(configId, await defaultHostCogniaModelCatalogDeps())
+}
+
+/**
  * Create a configuration on this host.
  *
  * `fromImport` is the browser's "copy to host": the service then drops the
@@ -3405,6 +3428,23 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
       "external_agent_run_turn.stamp requires configId, revision and lifecycleGeneration"
     )
   }
+  // The Cognia model binding is validated before anything else happens: it
+  // names a provider and model in THIS Host's settings and nothing more, so a
+  // key, a base URL or any field beside the three is refused rather than
+  // carried into the gateway route. Omitted, `null` and a binding are three
+  // different instructions (inherit / native / Cognia) and stay distinct.
+  let cogniaModel: ExternalAgentCogniaModelBinding | null | undefined
+  try {
+    cogniaModel = normalizeCogniaModelBinding(payload.cogniaModel)
+  } catch {
+    throw new Error(
+      "external_agent_run_turn.cogniaModel must be { providerId, modelId, accountId? }"
+    )
+  }
+  const externalSessionId = payload.externalSessionId as string | undefined
+  if (externalSessionId !== undefined && typeof externalSessionId !== "string") {
+    throw new Error("external_agent_run_turn.externalSessionId must be a string")
+  }
   const { startRemoteExternalRun } =
     await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
   const result = await startRemoteExternalRun({
@@ -3419,7 +3459,8 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
     reasoningEffort: payload.reasoningEffort as string | undefined,
     systemPrompt: payload.systemPrompt as string | undefined,
     allowedTools: payload.allowedTools as string[] | undefined,
-    externalSessionId: payload.externalSessionId as string | undefined,
+    externalSessionId,
+    ...(cogniaModel !== undefined ? { cogniaModel } : {}),
     callerDeviceId: payload.callerDeviceId as string | undefined,
     stamp: {
       configId: stamp.configId,

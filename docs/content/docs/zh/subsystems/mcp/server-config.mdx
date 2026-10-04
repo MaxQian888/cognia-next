@@ -1,6 +1,6 @@
 ---
 title: 服务器配置与存储
-description: McpServer 配置模型及其 Dexie 存储——transport 联合类型（stdio/http/sse）、config 载荷形态、mcpServers 表（id·name·enabled，自 v2 起）、触发 agent-sync 副作用的 CRUD 层、供 SDK 使用的 buildMcpServerMap，以及 UI 投射辅助函数。
+description: McpServer 配置模型及其 Dexie 存储——transport 联合类型（stdio/http/sse）、config 载荷形态、mcpServers 表（id·name·enabled，自 v2 起）、触发 agent-sync 副作用的 CRUD 层、供 SDK 使用的 buildMcpServerMap，以及 UI 映射辅助函数。
 ---
 
 # 服务器配置与存储
@@ -51,8 +51,7 @@ export interface McpServer {
 
 ## Dexie 表
 
-`mcpServers` 在 **Dexie v2** 中引入，其索引签名自此一直稳定
-（`lib/db/schema.ts:332`，在之后的版本里原样重复）：
+`mcpServers` 在 **Dexie v2** 中引入，其索引签名自此一直稳定（`lib/db/schema.ts:332`，在之后的版本里原样重复）：
 
 ```typescript title="lib/db/schema.ts"
 this.version(2).stores({
@@ -65,8 +64,7 @@ this.version(2).stores({
 - **索引 `name`** —— 面板用的有序列表。
 - **索引 `enabled`** —— `listEnabledMcpServers` 的快速过滤。
 
-**v7** 升级新增了 `appsEnabled` 这个 per-agent 投射字段，并把 `{}` 回填到遗留
-行上，使下游代码无需做 null 检查。
+**v7** 升级新增了 `appsEnabled` 这个 per-agent 投射字段，并把 `{}` 回填到遗留行上，使下游代码无需做 null 检查。
 
 ## CRUD 层
 
@@ -113,17 +111,13 @@ export async function createMcpServer(
 }
 ```
 
-`scheduleSyncFor`（第 92 行）惰性导入 `@/lib/claude/sync`，从 `appsEnabled` map
-收集启用的 agent id，并对每个 agent 调用 `scheduleSync(id, tombstone)`。它 **从不抛错**——一次同步
-失败属于尽力而为，不会回滚 Dexie 写入。（完整镜像机制 →
-[Agent 同步与健康](./agent-sync-and-health)。）
+`scheduleSyncFor`（第 92 行）惰性导入 `@/lib/claude/sync`，从 `appsEnabled` map 收集启用的 agent id，并对每个 agent 调用 `scheduleSync(id, tombstone)`。它 **从不抛错**——一次同步失败属于尽力而为，不会回滚 Dexie 写入。（完整镜像机制 → [Agent 同步与健康](./agent-sync-and-health)。）
 
 ## 运行时投射
 
 ### → Agent SDK（`buildMcpServerMap`）
 
-该 map 以服务器 **name**（而非 id）为键，因为那是 SDK 向模型暴露的命名空间
-（`mcp__<name>__<tool>`）。被禁用的行会被丢弃。
+该 map 以服务器 **name**（而非 id）为键，因为那是 SDK 向模型暴露的命名空间（`mcp__<name>__<tool>`）。被禁用的行会被丢弃。
 
 ```typescript title="lib/db/mcp-servers.ts:109"
 export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<string, unknown>> {
@@ -147,10 +141,7 @@ export function buildMcpServerMap(servers: McpServer[]): Record<string, Record<s
 
 ### → Sidecar 能力发现（`discoverMcpServerViaSidecar`）
 
-Test 按钮和 workflow 工具选择器把已存储的 server 交给 `lib/claude/feature-call.ts`。该封装先执行
-MCP policy，在可信宿主解析 `SecretRef`，再通过 allowlist 中的 `mcp-discover` feature call 发送临时定义。
-`sidecar/dispatch/mcp-runtime-gateway.mjs` 使用官方 client-managed transport，复用 AI SDK/OAuth 的
-socket 级 DNS 与重定向防护，列出 tools/resources/prompts，并保证 client 与 dispatcher 被拆除。
+Test 按钮和 workflow 工具选择器把已存储的 server 交给 `lib/claude/feature-call.ts`。该封装先执行 MCP policy，在可信宿主解析 `SecretRef`，再通过 allowlist 中的 `mcp-discover` feature call 发送临时定义。`sidecar/dispatch/mcp-runtime-gateway.mjs` 使用官方 client-managed transport，复用 AI SDK/OAuth 的 socket 级 DNS 与重定向防护，列出 tools/resources/prompts，并保证 client 与 dispatcher 被拆除。
 
 ## 按工具的禁用规则
 
@@ -166,12 +157,9 @@ disallowedTools?: string[]
 disallowedToolPatterns?: string[]
 ```
 
-`disallowedTools` 精确钉住用户当时看到并关闭的那些工具——服务器之后新增的工具是放行的，因为用户从未见过它。
-`disallowedToolPatterns` 会持续禁用服务器之后新增的匹配工具，这才是"把所有会写入的工具都关掉"唯一诚实的语义。
+`disallowedTools` 精确钉住用户当时看到并关闭的那些工具——服务器之后新增的工具是放行的，因为用户从未见过它。`disallowedToolPatterns` 会持续禁用服务器之后新增的匹配工具，这才是"把所有会写入的工具都关掉"唯一诚实的语义。
 
-两者都是**裸**工具名。`mcp__<server>__` 命名空间在 send-options 接缝处才拼上，因为这个命名空间是运行时
-server-map 的键，属于 SDK 而不属于规则本身。`lib/mcp/tool-rules.ts` 以纯函数持有全部判定逻辑，所以设置界面、
-发送路径和配对端写入处理器对规则的解释完全一致。
+两者都是**裸**工具名。`mcp__<server>__` 命名空间在 send-options 接缝处才拼上，因为这个命名空间是运行时 server-map 的键，属于 SDK 而不属于规则本身。`lib/mcp/tool-rules.ts` 以纯函数持有全部判定逻辑，所以设置界面、发送路径和配对端写入处理器对规则的解释完全一致。
 
 ### 发送时展开
 
@@ -185,8 +173,7 @@ export async function resolveMcpDisallowedToolNames(
 ): Promise<string[]> {
 ```
 
-未展开的规则不禁用任何东西——这是 fail-open 的方向。另一种做法（把通配符当字面工具名发给 SDK）同样什么都不禁用，
-而且还把这一事实藏了起来，所以界面会直接显示某条规则当前覆盖了几个工具。
+未展开的规则不禁用任何东西——这是 fail-open 的方向。另一种做法（把通配符当字面工具名发给 SDK）同样什么都不禁用，而且还把这一事实藏了起来，所以界面会直接显示某条规则当前覆盖了几个工具。
 
 <Callout type="info">
   已过期的能力缓存行仍然计入。过期的含义是"连接前需要重新探测"，而不是"忘记有哪些工具"；丢掉这些名字会让每条通配规则
@@ -195,8 +182,7 @@ export async function resolveMcpDisallowedToolNames(
 
 ### 规则编辑与信任复核
 
-`fingerprintMcpDefinition` 覆盖了 `disallowedTools`，因为规则变化必须让能力缓存失效。若放任不管，这也意味着任何一次
-规则编辑都会重新触发信任复核——那会禁用服务器，让「按工具开关」根本不可用。因此 `updateMcpServer` 把指纹的两个职责拆开：
+`fingerprintMcpDefinition` 覆盖了 `disallowedTools`，因为规则变化必须让能力缓存失效。若放任不管，这也意味着任何一次规则编辑都会重新触发信任复核——那会禁用服务器，让「按工具开关」根本不可用。因此 `updateMcpServer` 把指纹的两个职责拆开：
 
 ```typescript title="lib/db/mcp-servers.ts:171"
 const shapeChanged =
@@ -231,9 +217,7 @@ export function toMcpServerSummary(
 ): McpServerSummary {
 ```
 
-`toolNames` 采用入参而非内部查询：工具名存在能力缓存里，而这个函数是同步的、运行在写事务内部，并且不能因为调用方手头
-没有缓存就让镜像丢掉工具列表。每次探测之后由 `writeCapabilityCache` 投射（`projectMcpSummaryTools`），
-这正是 `/me/mcp` 有东西可渲染的原因。
+`toolNames` 采用入参而非内部查询：工具名存在能力缓存里，而这个函数是同步的、运行在写事务内部，并且不能因为调用方手头没有缓存就让镜像丢掉工具列表。每次探测之后由 `writeCapabilityCache` 投射（`projectMcpSummaryTools`），这正是 `/me/mcp` 有东西可渲染的原因。
 
 ## UI 辅助函数
 
@@ -292,11 +276,9 @@ flowchart LR
 ## 不变量
 
 - **`updatedAt` 总会刷新**——每次 CRUD 调用都会，驱动面板的实时重排序。
-- **`name` 即 SDK 命名空间**——重名会在 `buildMcpServerMap` 中冲突；导入路径
-  以大小写不敏感的方式去重。
+- **`name` 即 SDK 命名空间**——重名会在 `buildMcpServerMap` 中冲突；导入路径以大小写不敏感的方式去重。
 - **`pluginId` 仅属拥有者**——用户手填的行将其留为 undefined；插件卸载据此枚举。
-- **同步属尽力而为**——Dexie 是事实来源；CLI 文件是镜像，由
-  [漂移检测器](./agent-sync-and-health)进行调和。
+- **同步属尽力而为**——Dexie 是事实来源；CLI 文件是镜像，由[漂移检测器](./agent-sync-and-health)进行调和。
 
 ## 相关页面
 

@@ -180,6 +180,30 @@ describe("VaultHostCredentialStore", () => {
 })
 
 describe("SecureStorage stores", () => {
+  it("propagates credential, optional signing key and record-book native failures", async () => {
+    const failure = new Error("Secure storage read failed")
+    const native = plugin()
+    const credentials = new SecureStorageHostCredentialStore(async () => native)
+    const records = new SecureStorageHostRecordStore(async () => native)
+    await credentials.save(KEY, { devicePrivateKeyJwk: DEVICE_KEY })
+    const get = jest.spyOn(native, "get").mockRejectedValue(failure)
+    await expect(credentials.load(KEY)).rejects.toBe(failure)
+    await expect(records.read()).rejects.toBe(failure)
+    get.mockResolvedValueOnce({ value: JSON.stringify(DEVICE_KEY) })
+    await expect(credentials.load(KEY)).rejects.toBe(failure)
+  })
+
+  it("does not report native removal or empty-book writes as successful on failure", async () => {
+    const failure = new Error("Secure storage delete commit failed")
+    const native = plugin()
+    const credentials = new SecureStorageHostCredentialStore(async () => native)
+    const records = new SecureStorageHostRecordStore(async () => native)
+    jest.spyOn(native, "remove").mockRejectedValue(failure)
+    await expect(credentials.remove(KEY)).rejects.toBe(failure)
+    await expect(records.write(emptyHostBook())).rejects.toBe(failure)
+    await expect(records.read()).rejects.toBe(failure)
+  })
+
   function plugin() {
     const values = new Map<string, string>()
     return {
@@ -189,7 +213,7 @@ describe("SecureStorage stores", () => {
         return { value: true }
       },
       async get({ key }: { key: string }) {
-        if (!values.has(key)) throw new Error("not found")
+        if (!values.has(key)) throw new Error("Item with given key does not exist")
         return { value: values.get(key)! }
       },
       async remove({ key }: { key: string }) {

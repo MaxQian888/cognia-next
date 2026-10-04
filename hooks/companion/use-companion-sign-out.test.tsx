@@ -134,7 +134,7 @@ describe("useCompanionSignOut", () => {
   })
 
   it("falls through 'unavailable' as a successful clear (devices without biometric)", async () => {
-    verifyMock.mockResolvedValueOnce({ kind: "unavailable" })
+    verifyMock.mockResolvedValueOnce({ kind: "unavailable", reason: "not_enrolled" })
     const { result } = renderHook(() => useCompanionSignOut({ prompt: PROMPT }))
     await act(async () => {
       await result.current.signOut()
@@ -153,6 +153,35 @@ describe("useCompanionSignOut", () => {
     })
     expect(verifyMock).not.toHaveBeenCalled()
     expect(clearMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not clear credentials for unclassified unavailability", async () => {
+    verifyMock.mockResolvedValueOnce({ kind: "unavailable" })
+    const { result } = renderHook(() => useCompanionSignOut({ prompt: PROMPT }))
+    await act(async () => {
+      expect(await result.current.signOut()).toEqual({ kind: "blocked", reason: "error" })
+    })
+    expect(clearMock).not.toHaveBeenCalled()
+    expect(anthropicSignOutMock).not.toHaveBeenCalled()
+  })
+
+  it("rejects a second sign-out before React commits pending state", async () => {
+    let finish!: (value: VerifyOutcome) => void
+    verifyMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const { result } = renderHook(() => useCompanionSignOut({ prompt: PROMPT }))
+    await act(async () => {
+      const first = result.current.signOut()
+      expect(await result.current.signOut()).toMatchObject({ kind: "blocked", reason: "error" })
+      finish({ kind: "cancelled" })
+      await first
+    })
+    expect(verifyMock).toHaveBeenCalledTimes(1)
+    expect(clearMock).not.toHaveBeenCalled()
   })
 
   it("swallows anthropicSignOut failures so the pair clear still runs", async () => {

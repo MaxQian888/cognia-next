@@ -14,7 +14,7 @@
  * straight into the re-pair flow.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { verify, type VerifyOutcome } from "@/lib/capacitor/biometric"
@@ -46,9 +46,11 @@ export function useCompanionSignOut(opts: UseCompanionSignOutOptions): UseCompan
   )
   const { signOut: anthropicSignOut } = useActiveAnthropicCredential()
   const [pending, setPending] = useState(false)
+  const pendingRef = useRef(false)
 
   const signOut = useCallback(async (): Promise<SignOutOutcome> => {
-    if (pending) return { kind: "blocked", reason: "error", message: "in-flight" }
+    if (pendingRef.current) return { kind: "blocked", reason: "error", message: "in-flight" }
+    pendingRef.current = true
     setPending(true)
     try {
       // Biometric gate — skipped when the policy is off OR when the
@@ -69,7 +71,14 @@ export function useCompanionSignOut(opts: UseCompanionSignOutOptions): UseCompan
         if (outcome.kind === "error") {
           return { kind: "blocked", reason: "error", message: outcome.message }
         }
-        // "verified" or "unavailable" both fall through.
+        if (
+          outcome.kind === "unavailable" &&
+          outcome.reason !== "unsupported" &&
+          outcome.reason !== "not_enrolled"
+        ) {
+          return { kind: "blocked", reason: "error" }
+        }
+        // Only explicitly unsupported platforms or absent enrollment may skip.
       }
 
       // Order matters: clear the subscription first (the Tauri vault path
@@ -93,10 +102,10 @@ export function useCompanionSignOut(opts: UseCompanionSignOutOptions): UseCompan
       router.replace(redirectTo)
       return { kind: "ok" }
     } finally {
+      pendingRef.current = false
       setPending(false)
     }
   }, [
-    pending,
     policy.signOut,
     prompt.description,
     prompt.reason,

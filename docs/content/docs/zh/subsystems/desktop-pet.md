@@ -1,6 +1,6 @@
 ---
 title: 桌面宠物
-description: 活在透明浮层窗口里的 Shimeji 式伙伴 —— 五种窗口角色、三套受治理渲染器、显式模型兼容性、本地视线跟随，以及有界的实时资源。
+description: 在透明浮层窗口中运行的 Shimeji 式伙伴：五种窗口角色、三套受治理渲染器、显式模型兼容性、本地视线跟随，以及受限的实时资源。
 ---
 
 # 桌面宠物
@@ -8,13 +8,13 @@ description: 活在透明浮层窗口里的 Shimeji 式伙伴 —— 五种窗�
 <Status variant="beta">Beta · ADR-0058 · Dexie（无 schema 升版）</Status>
 
 <TLDR>
-  宠物不是应用窗口内的一个挂件 —— 它活在自己的透明置顶 Tauri 窗口中，
-  由 `PetWindowRole`（`lib/pet/window-role.ts:18`）告诉同一份产物：这次要启动成五种角色中的哪一种。
+  宠物在独立的透明置顶 Tauri 窗口中运行。
+  同一份产物由 `PetWindowRole`（`lib/pet/window-role.ts:18`）决定启动为五种角色中的哪一种。
   Rust 以 `visible(false)` 创建这些窗口，并且**绝不**在创建路径上显示它们：
   在 Windows 上，一个 `transparent(true)` 窗口若在其 WebView 完成首帧提交之前被显示，
   会渲染成一块不透明的黑矩形。渲染端在挂载后调用共享的揭示逻辑（`lib/pet/reveal.ts`），
-  等待**两个 rAF** —— 先布局、后提交 —— 确保透明帧已经上屏，窗口才出现。
-  底层是一套真正的模拟：需求衰减、照料状态、金币与商店、经验与升级、成就，
+  等待**两个 rAF** —— 先布局、后提交 —— 确保透明帧已显示后，再显示窗口。
+  底层模拟包括：需求衰减、照料状态、金币与商店、经验与升级、成就，
   以及带弹道计算的移动状态机。
 </TLDR>
 
@@ -34,30 +34,30 @@ description: 活在透明浮层窗口里的 Shimeji 式伙伴 —— 五种窗�
 type PetWindowRole = "main" | "overlay" | "popup" | "island" | "web"
 ```
 
-同一份静态导出会启动进每一种角色；`getPetWindowRole()`（`lib/pet/window-role.ts:70`）
-从 Tauri webview label 解析出当前角色 —— `PET_WINDOW_LABEL`（`"pet"`）、
-`PET_POPUP_WINDOW_LABEL`（`"pet-popup"`）、`ISLAND_WINDOW_LABEL`（`"island"`）。
-`isSecondaryOverlayRole()` 与 `isMainAppWindow()` 是守卫：
-它们阻止仅限主窗口的工作 —— 启动引导、迁移、单例 —— 在三个浮层窗口里额外再跑三遍。
+同一份静态导出会启动进每一种角色；`getPetWindowRole()`（`lib/pet/window-role.ts:70`）从 Tauri webview label 解析出当前角色 —— `PET_WINDOW_LABEL`（`"pet"`）、`PET_POPUP_WINDOW_LABEL`（`"pet-popup"`）、`ISLAND_WINDOW_LABEL`（`"island"`）。`isSecondaryOverlayRole()` 与 `isMainAppWindow()` 是守卫：它们阻止仅限主窗口的工作 —— 启动引导、迁移、单例 —— 在三个浮层窗口里额外再跑三遍。
 
 ## 揭示协议源自一个真实 bug
 
-透明浮层窗口是「创建时隐藏、由渲染端揭示」，而不是由 Rust 显示。
-在 WebView 完成首帧提交之前显示一个 `transparent(true)` 窗口，
-在 Windows 上会得到一块不透明黑矩形，直到某个操作强制重新合成 ——
-也就是「不可见 / 点一下才出现」那个 bug。`lib/pet/reveal.ts` 会等待两个动画帧
-（先布局，再提交后）才调用 `revealPetWindow()` / `revealIslandWindow()`，
-与主窗口的 `WindowShowInitializer` 契约保持一致。
+透明浮层窗口是「创建时隐藏、由渲染端揭示」，而不是由 Rust 显示。在 WebView 完成首帧提交之前显示一个 `transparent(true)` 窗口，在 Windows 上会得到一块不透明黑矩形，直到某个操作强制重新合成 ——也就是「不可见 / 点一下才出现」那个 bug。`lib/pet/reveal.ts` 会等待两个动画帧（先布局，再提交后）才调用 `revealPetWindow()` / `revealIslandWindow()`，与主窗口的 `WindowShowInitializer` 契约保持一致。渲染端的揭示在所有平台上都经过 Rust（面板代数检查让落在打开与首帧之间的关闭胜过揭示），随后把尺寸微调一个像素以强制重新合成。已有窗口在首帧绘制之前不会再次显示。启动脚本会给悬浮窗与弹出窗口路由打上 `data-pet-overlay` 标记，因此它们在 React hydrate 之前背景就是透明的。
+
+## 窗口管线
+
+悬浮窗与弹出窗口都以不抢焦点的方式创建（`.focused(false)`；Windows 上为 `WS_EX_NOACTIVATE` / `WS_EX_TOOLWINDOW`；macOS 上为不激活的 NSPanel），宠物不会抢走用户正在使用的应用的焦点，两个窗口也不会出现在 Alt-Tab 中。系统关闭会走与 UI 相同的关闭路径。
+
+| 关注点 | 负责者 |
+| --- | --- |
+| 窗口位于哪个显示器 | `work_area_for` 用窗口中心点匹配 `available_monitors` 的物理矩形（`pet_window/mod.rs`） |
+| 显示器或缩放变化 | `ScaleFactorChanged` 与跨显示器的 `Moved` 发出 `pet://work-area-changed` |
+| 实时尺寸变化 | `pet_window_set_size`，以底部中心为锚点并限制在工作区内 |
+| 弹出窗口定位 | `resolve_popup_placement`（`pet_window/popup.rs`），依据宠物在其所在显示器上的物理矩形；每次内容尺寸变化都会重新定位 |
+| CSS → 物理像素的指针增量 | `resolveCssToPhysicalScale` / `petBoxScreenRect`（`lib/pet/overlay-geometry.ts`） |
+| 任意窗口的宠物设置写入 | `updatePetSettings`（`lib/pet/settings-sync.ts`）：Web Lock、重新读取，再广播给所有宠物窗口跟随 |
+
+桌宠在桌面上时，应用内小部件会隐藏。无论哪种情况，`PetMainRuntime` 都让宠物的语音与外观在主窗口中持续运行（ADR-0058 D12）。
 
 ## 可栖附「表面」按平台显式降级
 
-宠物可以爬上其他可见顶层窗口的上边缘并沿其行走（Shimeji 风格）。
-`src-tauri/src/pet_window/surfaces.rs` 把它拆成三层，使业务逻辑无需真实桌面即可测试：
-`PetSurface` / `PetSurfaces` 这组 serde DTO、
-对普通 `WindowCandidate` 记录做纯判定的 `filter_and_sort_surfaces`、
-以及薄薄一层平台枚举。Windows 使用 `EnumWindows`；macOS 使用 Core Graphics 窗口元数据，
-并排除 Cognia 自身进程。Linux 返回空列表，因为 Wayland 有意不公开稳定的跨应用窗口几何信息；
-浮层会明确退化为常规地面游走，而不是悄无声息地损坏。
+宠物可以爬上其他可见顶层窗口的上边缘并沿其行走（Shimeji 风格）。`src-tauri/src/pet_window/surfaces.rs` 把它拆成三层，使业务逻辑无需真实桌面即可测试：`PetSurface` / `PetSurfaces` 这组 serde DTO、对普通 `WindowCandidate` 记录做纯判定的 `filter_and_sort_surfaces`、以及薄薄一层平台枚举。Windows 使用 `EnumWindows`；macOS 使用 Core Graphics 窗口元数据，并排除 Cognia 自身进程。Linux 返回空列表，因为 Wayland 有意不公开稳定的跨应用窗口几何信息；浮层会明确退化为常规地面游走，而不是悄无声息地损坏。
 
 <Callout type="warn">
   `PetSurface` 是**具名结构体，不是元组**。裸元组会序列化成 JSON 数组，
@@ -83,63 +83,31 @@ lib/pet/
   overlay-geometry.ts  popup-geometry.ts  window-role.ts  reveal.ts
 ```
 
-由 `account-id.ts` 播种的 `bones/prng.ts`，正是同一账号下宠物生成外观保持稳定、
-而不会每次启动重掷的原因。
+由 `account-id.ts` 播种的 `bones/prng.ts`，正是同一账号下宠物生成外观保持稳定、而不会每次启动重掷的原因。
 
 ## 三套受治理渲染器
 
-`types/pet/skin.ts` 为内置 SVG、Live2D Cubism 3–5 和 Sprite v2 定义统一契约：
-类型化资源选择、能力矩阵、渲染模式、视线目标和结构化诊断。未知或已删除的选择会带诊断地
-归一化为 SVG；不会出现空白渲染，也不会静默进入永久降级。
+`types/pet/skin.ts` 为内置 SVG、Live2D Cubism 3–5 和 Sprite v2 定义统一契约：类型化资源选择、能力矩阵、渲染模式、视线目标和结构化诊断。未知或已删除的选择会带诊断地归一化为 SVG；不会出现空白渲染，也不会静默进入永久降级。
 
-`lib/pet/skin-runtime.ts` 是每个 WebView JavaScript realm 中唯一的昂贵资源所有者。
-它按 `configuration > interactive > console > thumbnail` 仲裁唯一实时渲染器，为未获得租约的
-预览保留中性快照，按资源复用 Sprite object URL，统计 renderer/WebGL/ticker/timer/URL/load/
-context-loss/fallback，并在资源失效或 WebView 销毁时释放。隐藏、挂起、减少动效和点击穿透暂停
-都会停止更新回调。Live2D 正常上限 60 fps，低功耗为 30 fps，静默期为 12 fps。
+`lib/pet/skin-runtime.ts` 是每个 WebView JavaScript realm 中唯一的昂贵资源所有者。它按 `configuration > interactive > console > thumbnail` 仲裁唯一实时渲染器，为未获得租约的预览保留中性快照，按资源复用 Sprite object URL，统计 renderer/WebGL/ticker/timer/URL/load/context-loss/fallback，并在资源失效或 WebView 销毁时释放。隐藏、挂起、减少动效和点击穿透暂停都会停止更新回调。Live2D 正常上限 60 fps，低功耗为 30 fps，静默期为 12 fps。
 
-`lib/pet/live2d/` 负责 Cubism 模型发现、manifest 解析、导入校验、插件注册、参数/情绪/视线映射、
-口型同步和 URL 替换。兼容性分为 `ready`、`degraded`、`invalid`：settings、moc 或必要纹理不可用时
-阻止激活；缺失可选 motion、expression、sound、physics 或 pose 时，删除对应引用并明确报告。
-路径穿越、归一化重复、大小写不明确、损坏图片、Cubism 2 和超限资源都会在持久化前被拒绝。
-官方 Hiyori/Haru 语料在 `test-fixtures/pet/live2d-public-corpus.json` 中固定 revision 和 SHA-256；
-模型二进制下载到 `.cache`，不进入仓库。
+`lib/pet/live2d/` 负责 Cubism 模型发现、manifest 解析、导入校验、插件注册、参数/情绪/视线映射、口型同步和 URL 替换。兼容性分为 `ready`、`degraded`、`invalid`：settings、moc 或必要纹理不可用时阻止激活；缺失可选 motion、expression、sound、physics 或 pose 时，删除对应引用并明确报告。路径穿越、归一化重复、大小写不明确、损坏图片、Cubism 2 和超限资源都会在持久化前被拒绝。官方 Hiyori/Haru 语料在 `test-fixtures/pet/live2d-public-corpus.json` 中固定 revision 和 SHA-256；模型二进制下载到 `.cache`，不进入仓库。
 
-`lib/pet/sprite-v2/import.ts` 校验固定图集契约。最后两行提供顺时针 16 个视线方向，按 22.5°
-量化，并包含中心死区、迟滞和陈旧输入回到 idle。SVG 移动既有面部元素；Live2D 映射标准的
-head/eye/body/mouth 参数。视线会让位于挂起、被抓住、one-shot、移动和语义状态。应用内小部件与预览跟随
-页内 pointer；悬浮窗使用 Tauri 的最小权限 cursor command，采样不超过 10 Hz，且绝不持久化或传输。
+`lib/pet/sprite-v2/import.ts` 校验固定图集契约。最后两行提供顺时针 16 个视线方向，按 22.5° 量化，并包含中心死区、迟滞和陈旧输入回到 idle。SVG 移动既有面部元素；Live2D 映射标准的 head/eye/body/mouth 参数。视线会让位于挂起、被抓住、one-shot、移动和语义状态。应用内小部件与预览跟随页内 pointer；悬浮窗使用 Tauri 的最小权限 cursor command，采样不超过 10 Hz，且绝不持久化或传输。
 
-角色绑定可以继承全局选择，也可以选择 SVG、某个 Live2D 模型或 Sprite 包。旧的
-`live2dModelId` 会被惰性解释为类型化 Live2D 选择；删除资源时会在事务中清除全局和角色引用，
-随后由 SVG 接管。
+角色绑定可以继承全局选择，也可以选择 SVG、某个 Live2D 模型或 Sprite 包。旧的 `live2dModelId` 会被惰性解释为类型化 Live2D 选择；删除资源时会在事务中清除全局和角色引用，随后由 SVG 接管。
 
 ## 触达宠物
 
-宠物只运行在桌面应用的主窗口中（ADR-0058 D9）；在 web 与移动端，侧栏、⌘K 与设置都不会提供它，`/pet`
-页面会自行说明，`/pet feed` 会告知宠物所在之处。在桌面端，所有召唤路径（全局快捷键、托盘切换、⌘K
-「切换桌宠」、设置中的悬浮窗开关、agent 的 `pet_show`）都运行 `openDesktopPetWindow()`
-（`lib/pet/commands.ts`），按已保存的几何位置打开，并启用已关闭的宠物。六个照料命令可在设置 → 快捷键中
-绑定，宠物关闭时仍保持注册，以一条「宠物已关闭」通知作答而非毫无反应。新的注意力雷达报告以
-`radarReport` 事件抵达，其气泡提供「打开 Insights」（D10）。
+宠物只运行在桌面应用的主窗口中（ADR-0058 D9）；在 web 与移动端，侧栏、⌘K 与设置都不会提供它，`/pet` 页面会自行说明，`/pet feed` 会告知宠物所在之处。在桌面端，所有召唤路径（全局快捷键、托盘切换、⌘K「切换桌宠」、设置中的悬浮窗开关、agent 的 `pet_show`）都运行 `openDesktopPetWindow()`（`lib/pet/commands.ts`），按已保存的几何位置打开，并启用已关闭的宠物。六个照料命令可在设置 → 快捷键中绑定，宠物关闭时仍保持注册，以一条「宠物已关闭」通知作答而非毫无反应。新的注意力雷达报告以 `radarReport` 事件抵达，其气泡提供「打开 Insights」（D10）。
 
 ## 控制台与自定义工作区
 
-`/pet` 使用响应式主从布局，不再依赖横向滚动的 Tab。桌面端由固定分组导航轨道提供养成、聊天、
-商店、自定义、角色、洞察、日记、图鉴、成就和已注册插件入口，详情面板独立滚动；窄容器中，相同
-分组进入 Sheet。`PetConsoleTab`、`?tab=` 深链、插件显隐规则以及跨窗口导航协议的值和 wire shape
-保持不变。
+`/pet` 使用响应式主从布局，不再依赖横向滚动的 Tab。桌面端由固定分组导航轨道提供养成、聊天、商店、自定义、角色、洞察、日记、图鉴、成就和已注册插件入口，详情面板独立滚动；窄容器中，相同分组进入 Sheet。`PetConsoleTab`、`?tab=` 深链、插件显隐规则以及跨窗口导航协议的值和 wire shape 保持不变。
 
-`PetCustomizationWorkspace` 同时由 `/pet → Customize` 与 `Settings → Pet` 直接挂载。它是唯一读取
-`DEFAULT_PET_SETTINGS` 并通过 `useSettingsStore.save()` 合并持久化配置的所有者，因此两个入口完整
-提供 SVG 遗传外观覆盖、Live2D 导入/兼容性/transform/motion/expression/parameter mapping、Sprite v2
-创建/导入/激活、停靠与运动、说话与记忆、声音与安静时段、照料提醒、Twin awareness，以及受能力
-门禁约束的桌宠窗口控制。响应式预览会渲染实际生效的 SVG、Live2D 或 Sprite 选择，并明确显示受
-治理的 fallback 诊断与重试。重置宠物档案需要破坏性确认，并与 Settings Shell 的配置重置保持区分。
+`PetCustomizationWorkspace` 同时由 `/pet → Customize` 与 `Settings → Pet` 直接挂载。它是唯一读取 `DEFAULT_PET_SETTINGS` 并通过 `updatePetSettings()` 合并持久化配置的所有者，因此两个入口完整提供 SVG 遗传外观覆盖、Live2D 导入/兼容性/transform/motion/expression/parameter mapping、Sprite v2 创建/导入/激活、停靠与运动、说话与记忆、声音与安静时段、照料提醒、Twin awareness，以及受能力门禁约束的桌宠窗口控制。响应式预览会渲染实际生效的 SVG、Live2D 或 Sprite 选择，并明确显示受治理的 fallback 诊断与重试。重置宠物档案需要破坏性确认，并与 Settings Shell 的配置重置保持区分。
 
-页面与配置 Dialog 统一使用平铺 Section、Field、Item、Empty、Alert 和 AI Elements 对话组件；紧凑
-widget、overlay 与 popup 仍保留小型边界外框。本次改动不改变 `PetSettings`、`PetProfile`、资产记录、
-Dexie 版本、成长/经济/互动规则或 Tauri 窗口协议，因此不需要 schema migration。
+页面与配置 Dialog 统一使用平铺 Section、Field、Item、Empty、Alert 和 AI Elements 对话组件；紧凑 widget、overlay 与 popup 仍保留小型边界外框。本次改动不改变 `PetSettings`、`PetProfile`、资产记录、Dexie 版本、成长/经济/互动规则或 Tauri 窗口协议，因此不需要 schema migration。
 
 ## 相关文档
 
@@ -148,4 +116,5 @@ Dexie 版本、成长/经济/互动规则或 Tauri 窗口协议，因此不需�
   <Card title="角色" href="../chat/characters" description="宠物的角色与皮肤从何而来" />
   <Card title="语音 / TTS" href="./misc-subsystems" description="use-pet-speak 驱动的 TTS 栈" />
   <Card title="调度器" href="./scheduler" description="触发宠物定时提醒的地方" />
+  <Card title="桌面宠物 API" href="../plugin-dev/pet" description="插件能对宠物做什么" />
 </Cards>

@@ -422,8 +422,60 @@ describe("installRemoteStepServer", () => {
     const { calls, deliver, off } = makeHarness()
     deliver({ kind: "action.mobile.scanBarcode", params: { formats: ["QR_CODE", 42] } })
     await flush()
-    expect(mockScan).toHaveBeenCalledWith({ formats: ["QR_CODE"] })
+    expect(mockScan).toHaveBeenCalledWith({ formats: ["QR_CODE"], signal: expect.any(AbortSignal) })
     expect(parseResult(calls)).toEqual({ ok: true, output: { raw: "QR-VALUE" } })
     off()
+  })
+
+  it("aborts an open scanner at the remote deadline and persists timeout", async () => {
+    let signal: AbortSignal | undefined
+    mockScan.mockImplementationOnce(async (...args: unknown[]) => {
+      signal = (args[0] as { signal: AbortSignal }).signal
+      return new Promise((resolve) => {
+        signal?.addEventListener("abort", () => resolve({ kind: "cancelled" }), { once: true })
+      })
+    })
+    const { calls, deliver, off } = makeHarness()
+    deliver({ kind: "action.mobile.scanBarcode", timeoutAt: Date.now() + 30 })
+    await flush()
+    expect(signal?.aborted).toBe(false)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(signal?.aborted).toBe(true)
+    expect(parseResult(calls)).toMatchObject({ ok: false, code: "timeout" })
+    off()
+  })
+
+  it("aborts the active scanner when its server is disposed", async () => {
+    let signal: AbortSignal | undefined
+    mockScan.mockImplementationOnce(async (...args: unknown[]) => {
+      signal = (args[0] as { signal: AbortSignal }).signal
+      return new Promise((resolve) => {
+        signal?.addEventListener("abort", () => resolve({ kind: "cancelled" }), { once: true })
+      })
+    })
+    const { calls, deliver, off } = makeHarness()
+    deliver({ kind: "action.mobile.scanBarcode" })
+    await flush()
+    expect(signal?.aborted).toBe(false)
+    off()
+    expect(signal?.aborted).toBe(true)
+    await flush()
+    expect(parseResult(calls)).toMatchObject({ ok: false, code: "cancelled" })
+  })
+
+  it("does not launch native UI after disposal during receipt recovery", async () => {
+    let finishRecovery!: (count: number) => void
+    const { deliver, off } = makeHarness("dev-7", {
+      recoverInterrupted: () =>
+        new Promise((resolve) => {
+          finishRecovery = resolve
+        }),
+    })
+    deliver({ kind: "action.mobile.scanBarcode" })
+    await flush()
+    off()
+    finishRecovery(0)
+    await flush()
+    expect(mockScan).not.toHaveBeenCalled()
   })
 })

@@ -231,10 +231,19 @@ impl EventBus {
         // the current high-water mark so the buffer's existing entries are
         // not replayed. `since=Some(0)` keeps the legacy "replay everything
         // we still have" semantics for explicit cold-starts.
+        let high_water = self.seq_counter.load(Ordering::Relaxed);
         let since_seq = match since {
             Some(s) => s,
-            None => self.seq_counter.load(Ordering::Relaxed),
+            None => high_water,
         };
+        // A cursor past every seq this bus ever assigned was issued by an
+        // earlier bus: the Host restarted and its numbering began again. Left
+        // as `Ok` with nothing to replay, the client kept that cursor and
+        // dropped every new frame as already seen until the count overtook
+        // it. Only a resync gives it the cursor of this bus.
+        if since_seq > high_water {
+            return SubscribeResult::ResyncRequired;
+        }
         let mut buf = self.buffer.lock();
         retain_unexpired(&mut buf, now_ms);
 
@@ -415,6 +424,35 @@ mod tests {
             }
             SubscribeResult::ResyncRequired => panic!("unexpected ResyncRequired"),
         }
+    }
+
+    // ── a cursor from before a Host restart → resync, not a silent Ok ────────
+
+    #[test]
+    fn a_cursor_past_the_high_water_mark_requires_a_resync() {
+        // The phone kept cursor 3850 from the Host's previous process; this bus
+        // has only reached 2. An `Ok` here left it dropping every new frame.
+        let bus = EventBus::new();
+        bus.publish("ev".into(), json!(1));
+        bus.publish("ev".into(), json!(2));
+        assert!(matches!(
+            bus.subscribe(Some(3850), now_ms()),
+            SubscribeResult::ResyncRequired
+        ));
+        // At or below the high-water mark is an ordinary resume.
+        match bus.subscribe(Some(2), now_ms()) {
+            SubscribeResult::Ok { replay, .. } => assert!(replay.is_empty()),
+            SubscribeResult::ResyncRequired => panic!("a current cursor resumes"),
+        }
+        match bus.subscribe(Some(1), now_ms()) {
+            SubscribeResult::Ok { replay, .. } => assert_eq!(replay.len(), 1),
+            SubscribeResult::ResyncRequired => panic!("a current cursor resumes"),
+        }
+        // A fresh bus has assigned nothing yet: any non-zero cursor is stale.
+        assert!(matches!(
+            EventBus::new().subscribe(Some(1), now_ms()),
+            SubscribeResult::ResyncRequired
+        ));
     }
 
     // ── subscribe(Some(0)) after 5 publishes → 5-event replay ────────────────

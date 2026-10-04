@@ -1,11 +1,11 @@
 ---
 title: "/goal 指令"
-description: "设定一个持久目标,agent 自动续 turn 直到完成、暂停或预算用尽。"
+description: 设定持久目标后，agent 自动继续执行轮次，直到完成、暂停或预算用尽。
 ---
 
 # `/goal` — 持久化聊天目标
 
-cognia-next 的 `/goal` 指令把任意聊天变成自驱动循环。你一句话设定目标,agent 自己选下一步、执行、judge 模型评估是否达成、然后自动继续,直到 **(a)** judge 判定 done,**(b)** turn / token / 时间预算用尽,或者 **(c)** 你 pause / stop。
+cognia-next 的 `/goal` 指令将聊天转为自主执行循环。用户设定目标后，agent 选择并执行下一步，再由 judge 模型评估目标是否达成。循环自动继续，直到 **(a)** judge 判定 done、**(b)** turn / token / 时间预算用尽，或 **(c)** 用户执行 pause / stop。
 
 灵感来自 **Hermes Agent**、**OpenAI Codex CLI**、**Anthropic Claude Code** 三家的 `/goal` 指令 —— 融合而成一套设计,各取其长。
 

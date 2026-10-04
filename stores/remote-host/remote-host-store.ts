@@ -307,8 +307,17 @@ async function probeHostConnection(id: string): Promise<void> {
   }))
 }
 
-export function activeHostFeatureManifest(): HostFeatureManifest | null {
-  const state = useRemoteHostStore.getState()
+/**
+ * The active host's usable feature manifest within a given store state.
+ *
+ * Pure over its input so the imperative reader below and the React selector in
+ * {@link useActiveHostSupportsFeature} answer from one rule: a manifest only
+ * counts while the host is `ready` and still reports the build it was fetched
+ * from.
+ */
+function activeManifestIn(
+  state: Pick<RemoteHostState, "hosts" | "activeHostId">
+): HostFeatureManifest | null {
   if (!state.activeHostId) return null
   const host = state.hosts.find((candidate) => candidate.id === state.activeHostId)
   if (
@@ -321,8 +330,31 @@ export function activeHostFeatureManifest(): HostFeatureManifest | null {
   return host.featureManifest
 }
 
+export function activeHostFeatureManifest(): HostFeatureManifest | null {
+  return activeManifestIn(useRemoteHostStore.getState())
+}
+
+/**
+ * Imperative read, for non-React callers (transports, lib routes). A component
+ * must use {@link useActiveHostSupportsFeature} instead: this reads the store
+ * once, so a render that calls it keeps the answer for the host that was active
+ * when it last rendered and goes stale after a host switch.
+ */
 export function activeHostSupportsFeature(feature: HostFeatureId, operation?: string): boolean {
   return supportsHostFeatureOperation(activeHostFeatureManifest(), feature, operation)
+}
+
+/**
+ * {@link activeHostSupportsFeature} as a subscription. Re-renders the caller
+ * when the active host changes, when its probe settles (`connecting` →
+ * `ready`), and when its manifest is replaced, which are exactly the moments
+ * the answer can flip. Selects a boolean, so unrelated store writes (a rename,
+ * another host's state) do not re-render.
+ */
+export function useActiveHostSupportsFeature(feature: HostFeatureId, operation?: string): boolean {
+  return useRemoteHostStore((state) =>
+    supportsHostFeatureOperation(activeManifestIn(state), feature, operation)
+  )
 }
 
 export const useRemoteHostStore = create<RemoteHostState>()(
@@ -412,6 +444,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           get().hosts.find((h) => h.id === id)?.config ?? captured
         setActiveRemoteTransport(transportFactory(configProvider))
         setActiveRemoteEndpoint({
+          remoteHost: { id: host.id, label: host.label },
           baseUrl: host.config.baseUrl,
           deviceId: host.config.deviceId,
           devicePrivateKeyJwk: host.config.devicePrivateKeyJwk,
