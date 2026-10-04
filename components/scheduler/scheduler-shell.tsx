@@ -38,8 +38,16 @@ export const SCHEDULER_PANEL_STORAGE_KEY = "scheduler-panels"
 /** localStorage key for the persisted desktop list-panel collapsed flag. */
 export const SCHEDULER_LIST_COLLAPSED_KEY = "scheduler-list-collapsed"
 
-const PANEL_DEFAULTS = { list: 24, detail: 76 } as const
-const PANEL_BOUNDS = { listMin: 16, listMax: 40, detailMin: 40 } as const
+const PANEL_DEFAULTS = { list: 26, detail: 74 } as const
+/**
+ * The list's floor is in pixels, not percent. At 16% of a 1100px window behind
+ * the app rail the pane was ~170px wide: the status control read "A. 3",
+ * "Act… 1" and every task name truncated after one word. 280px is what the
+ * search box, the three-way status control and the filter button need side
+ * by side; the ceiling stays relative so a wide monitor can give the list
+ * more room.
+ */
+const PANEL_BOUNDS = { listMinPx: 280, listMax: 45, detailMin: 40 } as const
 
 function readCollapsedFlag(): boolean {
   if (typeof window === "undefined") return false
@@ -135,7 +143,7 @@ function DesktopSchedulerShell({ sidebar, header, detail, rail }: SchedulerShell
           collapsible
           collapsedSize="0%"
           defaultSize={isListCollapsed ? "0%" : `${PANEL_DEFAULTS.list}%`}
-          minSize={isListCollapsed ? "0%" : `${PANEL_BOUNDS.listMin}%`}
+          minSize={isListCollapsed ? "0%" : `${PANEL_BOUNDS.listMinPx}px`}
           maxSize={`${PANEL_BOUNDS.listMax}%`}
           className={cn(
             "flex flex-col overflow-hidden text-sidebar-foreground",

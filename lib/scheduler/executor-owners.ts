@@ -89,6 +89,11 @@ export const TASK_EXECUTOR_OWNERS: Readonly<Partial<Record<ScheduledTaskType, Ta
         await import("@/lib/provider-diagnostics/refresh")
       registerProviderDiagnosticsRefreshExecutor()
     },
+    "conversation-auto-archive": async () => {
+      const { registerConversationAutoArchiveExecutor } =
+        await import("@/lib/chat/auto-archive-schedule")
+      registerConversationAutoArchiveExecutor()
+    },
     // The issue tracker boot registers it, but a wakeup can come due (or an
     // event can reach its fire gate) in a context that never booted the
     // tracker. The same call registers the gate.

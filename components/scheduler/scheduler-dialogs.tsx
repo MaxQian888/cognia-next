@@ -198,6 +198,7 @@ export function SchedulerDialogs({
                   payload: selectedTask.payload,
                   config: selectedTask.config,
                   notification: selectedTask.notification,
+                  tags: selectedTask.tags,
                   endAt: selectedTask.endAt,
                   onSuccessTaskIds: selectedTask.onSuccessTaskIds,
                   onFailureTaskIds: selectedTask.onFailureTaskIds,

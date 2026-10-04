@@ -28,6 +28,8 @@ export interface StatCardProps {
   className?: string
   /** Optional test id forwarded to the outer Card. */
   testid?: string
+  /** Secondary line under the value, e.g. a period-over-period change chip. */
+  footer?: React.ReactNode
 }
 
 export function StatCard({
@@ -40,6 +42,7 @@ export function StatCard({
   size = "md",
   className,
   testid,
+  footer,
 }: StatCardProps) {
   const isSm = size === "sm"
   return (
@@ -64,6 +67,7 @@ export function StatCard({
             >
               {value}
             </p>
+            {footer ? <div className="mt-0.5 min-h-4">{footer}</div> : null}
           </div>
           <div
             className={cn(

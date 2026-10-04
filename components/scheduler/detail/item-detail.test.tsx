@@ -86,6 +86,7 @@ describe("ItemDetail", () => {
     for (const id of [
       "schedule",
       "outcomes",
+      "payload",
       "runs",
       "notifications",
       "tags",
@@ -127,6 +128,43 @@ describe("ItemDetail", () => {
     expect(screen.queryByTestId("console-section-notifications")).not.toBeInTheDocument()
     expect(screen.getByTestId("runs-section-no-history")).toBeInTheDocument()
     expect(screen.queryByTestId("item-outcomes")).not.toBeInTheDocument()
+    // No app-table row, so nothing to say about what it runs.
+    expect(screen.queryByTestId("console-section-payload")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("item-stats")).not.toBeInTheDocument()
+  })
+
+  it("leads the outcomes with the task's own numbers", () => {
+    const now = Date.now()
+    const runs = [
+      {
+        unifiedId: "app:e2",
+        kind: "app" as const,
+        itemUnifiedId: "app:t1",
+        itemName: "Nightly",
+        status: "failed" as const,
+        startedAt: now - 60_000,
+        durationMs: 3_000,
+        origin: { tableName: "taskExecutions", nativeId: "e2" },
+      },
+      {
+        unifiedId: "app:e1",
+        kind: "app" as const,
+        itemUnifiedId: "app:t1",
+        itemName: "Nightly",
+        status: "succeeded" as const,
+        startedAt: now - 3_600_000,
+        durationMs: 1_000,
+        origin: { tableName: "taskExecutions", nativeId: "e1" },
+      },
+    ]
+    render(<ItemDetail {...props({ runs, task: task({ successCount: 9, failureCount: 1 }) })} />)
+    // Lifetime counters from the row, not the two runs on screen.
+    expect(screen.getByTestId("item-stat-successRate")).toHaveTextContent("90%")
+    expect(screen.getByTestId("item-stat-runs")).toHaveTextContent("10")
+    expect(screen.getByTestId("item-stat-runs")).toHaveTextContent("Runs, all time")
+    // Duration and the last outcome only the runs record.
+    expect(screen.getByTestId("item-stat-averageDuration")).toHaveTextContent("2.0s")
+    expect(screen.getByTestId("item-stat-lastRun")).toHaveTextContent("Failed")
   })
 })
 

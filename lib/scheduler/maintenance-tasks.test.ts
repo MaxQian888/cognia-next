@@ -7,6 +7,7 @@ const task = (type: string, tags?: string[]) =>
 describe("isMaintenanceTask", () => {
   it.each([
     "provider-diagnostics-refresh",
+    "conversation-auto-archive",
     "connection:presence:refresh",
     "connection:housekeeping:clock",
     "connection:housekeeping:outbound-retention",

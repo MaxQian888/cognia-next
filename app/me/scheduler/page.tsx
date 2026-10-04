@@ -4,15 +4,22 @@
  * `/me/scheduler`: the scheduler in the phone shell (ADR-0179 §6).
  *
  * The same components as `/scheduler` over the same store and the same
- * address, narrower: the attention block and a stat strip above the list,
- * the flat rows, a full-screen push of `ItemDetail`, the run sheet, and the
- * same delete confirmation. The desktop shell is not mounted, because a
- * `SidebarProvider` and a resizable group cost a phone something for a
- * layout it never renders.
+ * address, narrower. What needs you comes first, above two tabs: the tasks
+ * (search, the desktop's own filter bar, the flat rows) and the activity
+ * (the stat strip, fourteen days of outcomes, the agenda and recent runs,
+ * which is the desktop overview minus the kind summary the filter menu
+ * already counts). A tap pushes `ItemDetail` full-screen, with the run sheet
+ * and the same delete confirmation. The desktop shell is not mounted,
+ * because a `SidebarProvider` and a resizable group cost a phone something
+ * for a layout it never renders.
  *
  * Creation here is app-only; system, workflow and backup creation, bulk
  * actions, templates and import/export stay on the desktop, each needing a
- * surface the phone shell does not have.
+ * surface the phone shell does not have. The rows therefore carry no
+ * multi-select checkbox: one that checks nothing is a broken control. A
+ * task's own extras (duplicate, backfill, the dependency graph) are dialogs
+ * and work here; promotion to the OS scheduler is a desktop capability and
+ * is not offered.
  *
  * A layout that is not compact is bounced to `/scheduler`; the two routes
  * are a mutually exclusive pair, never a loop.
@@ -21,7 +28,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ChevronLeftIcon, SearchIcon, XIcon } from "lucide-react"
+import { ChevronLeftIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -38,16 +45,22 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ConsoleSection } from "@/components/surface/console-section"
 import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
-import { FilterChips, TaskForm, SchedulerSkeleton } from "@/components/scheduler"
+import { BackfillDialog, TaskForm, SchedulerSkeleton } from "@/components/scheduler"
 import { DeleteItemDialog } from "@/components/scheduler/delete-item-dialog"
 import { ItemDetail } from "@/components/scheduler/detail/item-detail"
 import type { ItemActions } from "@/components/scheduler/detail/item-hero"
-import { KindFilterChips } from "@/components/scheduler/kind-filter-chips"
+import { OutcomeStrip } from "@/components/scheduler/outcome-strip"
+import { Agenda } from "@/components/scheduler/overview/agenda"
 import { AttentionBlock } from "@/components/scheduler/overview/attention-block"
 import { RunDetailSheet } from "@/components/scheduler/run-detail-sheet"
+import { RunRow } from "@/components/scheduler/run-row"
+import { SchedulerFilterBar } from "@/components/scheduler/scheduler-filter-bar"
+import { TaskDependencyDialog } from "@/components/scheduler/task-dependency-dialog"
 import {
   SchedulerHostPopover,
   SchedulerHostStatusBadge,
@@ -78,6 +91,7 @@ import { consumeScheduledTaskDraft } from "@/lib/scheduler/task-draft-handoff"
 import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
 import { deriveUnifiedStatistics, filterUnifiedItems } from "@/lib/scheduler/unified-filter"
 import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
+import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import type { CreateScheduledTaskInput } from "@/types/scheduler"
@@ -93,6 +107,11 @@ import {
   useSchedulerItemActions,
 } from "@/hooks/scheduler/use-scheduler-item-actions"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+
+/** Recent runs the activity tab lists; the same cap as the desktop overview. */
+const MOBILE_RECENT_RUNS = 10
+
+type MobileSchedulerView = "tasks" | "activity"
 
 export default function MobileSchedulerPage() {
   return (
@@ -137,10 +156,12 @@ function MobileSchedulerBody() {
     selectTask,
     refresh,
     cancelExecution,
+    cloneTask,
+    backfillTask,
     hasMoreExecutions,
     loadMoreExecutions,
   } = useScheduler()
-  const { tasks: systemTasks, pendingConfirmations } = useSystemScheduler()
+  const { tasks: systemTasks, pendingConfirmations, refresh: refreshSystem } = useSystemScheduler()
   const maxTasksPerSource = useSchedulerStore((s) => s.permissionPolicy.maxTasksPerSource)
   const taskDefaults = useSchedulerStore((s) => s.permissionPolicy.taskDefaults)
 
@@ -264,6 +285,21 @@ function MobileSchedulerBody() {
   const [showEditSheet, setShowEditSheet] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<UnifiedScheduledItem | null>(null)
+  const [showBackfillDialog, setShowBackfillDialog] = useState(false)
+  const [showDependencyDialog, setShowDependencyDialog] = useState(false)
+  const [view, setView] = useState<MobileSchedulerView>("tasks")
+  const [refreshing, setRefreshing] = useState(false)
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      // Both schedules, as on the desktop: the OS one feeds the attention
+      // block's pending confirmations.
+      await Promise.all([refresh(), refreshSystem()])
+    } finally {
+      setRefreshing(false)
+    }
+  }, [refresh, refreshSystem])
 
   const handleSelectItem = useCallback(
     (item: UnifiedScheduledItem) => selection.selectItem(item.unifiedId),
@@ -376,16 +412,38 @@ function MobileSchedulerBody() {
     [recentRuns, handleCancelRun]
   )
 
+  const handleCloneTask = useCallback(async () => {
+    if (!selectedAppTask) return
+    const clone = await cloneTask(selectedAppTask.id)
+    if (!clone) {
+      toast.error(t("cloneFailed"))
+      return
+    }
+    selection.selectItem(makeUnifiedId(unifiedKindForTaskType(clone.type), clone.id))
+    toast.success(t("cloneSuccess", { name: clone.name }))
+  }, [selectedAppTask, cloneTask, selection, t])
+
   const { runNow: runItemNow, pause: pauseItem, resume: resumeItem } = itemActionsState
+  const selectedKind = selectedItem?.kind
+  const backfillable =
+    selectedKind === "app" &&
+    (selectedAppTask?.trigger.type === "cron" || selectedAppTask?.trigger.type === "interval")
   const itemActions = useMemo<ItemActions>(() => {
     return {
       onRunNow: runItemNow,
       onPause: pauseItem,
       onResume: resumeItem,
       onDelete: (item) => setPendingDelete(item),
-      onEdit: selectedItem?.kind === "app" ? () => setShowEditSheet(true) : undefined,
+      onEdit: selectedKind === "app" ? () => setShowEditSheet(true) : undefined,
+      // The same app-only extras as the desktop masthead, all of them dialogs
+      // that fit a phone. Promotion is absent: it registers the task with the
+      // desktop's OS scheduler, which a phone does not have.
+      onDuplicate: selectedKind === "app" ? handleCloneTask : undefined,
+      onBackfill: backfillable ? () => setShowBackfillDialog(true) : undefined,
+      onOpenDependencyGraph:
+        selectedKind === "app" ? () => setShowDependencyDialog(true) : undefined,
     }
-  }, [runItemNow, pauseItem, resumeItem, selectedItem?.kind])
+  }, [runItemNow, pauseItem, resumeItem, selectedKind, handleCloneTask, backfillable])
 
   if (!mounted || !compact) return null
   if (!isInitialized) return <SchedulerSkeleton variant="sidebar" />
@@ -426,12 +484,6 @@ function MobileSchedulerBody() {
     },
   ]
 
-  const statusFilters = [
-    { key: "all", label: t("filter.all"), count: filter.facets.statusCounts.all },
-    { key: "active", label: t("statuses.active"), count: filter.facets.statusCounts.active },
-    { key: "paused", label: t("statuses.paused"), count: filter.facets.statusCounts.paused },
-  ]
-
   const showingDetail = Boolean(selectedItem)
 
   return (
@@ -441,6 +493,22 @@ function MobileSchedulerBody() {
         backAria={tMobile("appearanceBackAria")}
         testid="mobile-scheduler-page"
         bodyClassName="space-y-4 px-4 py-4 pb-28"
+        headerAccessory={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing || isLoading}
+            aria-label={t("mobile.refresh")}
+            data-testid="mobile-scheduler-refresh"
+          >
+            <RefreshCwIcon
+              className={cn("size-4", (refreshing || isLoading) && "animate-spin")}
+              aria-hidden="true"
+            />
+          </Button>
+        }
       >
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
@@ -451,82 +519,162 @@ function MobileSchedulerBody() {
           <SchedulerHostPopover />
         </div>
 
-        <StatStrip
-          stats={stats}
-          // The shell section is a flex column; without this the grid is the
-          // one child that yields, and it collapses to a single clipped row.
-          className="shrink-0"
-          testId="mobile-scheduler-stats"
-          cellTestIdPrefix="mobile-scheduler-stat"
-        />
-
+        {/* What needs you stays above the tabs: a failure must not hide
+            behind whichever tab was last open. */}
         <AttentionBlock
           signals={signals}
           next={agenda.next}
           onSelectItem={handleSelectUnifiedId}
           onCancelRun={handleCancelRunId}
-          onRetrySources={() => refresh()}
+          onRetrySources={() => void handleRefresh()}
           onSwitchToPaired={host.pairedAvailable ? () => host.setTarget("paired") : undefined}
           onOpenPolicy={() => router.push("/settings?section=scheduled-tasks")}
         />
 
-        <div className="space-y-2" data-testid="mobile-scheduler-filters">
-          <InputGroup className="h-9">
-            <InputGroupAddon align="inline-start">
-              <SearchIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={filter.filter.search}
-              onChange={(event) => filter.setSearch(event.target.value)}
-              placeholder={t("searchTasks")}
-              aria-label={t("searchTasks")}
-              data-testid="mobile-scheduler-search"
-            />
-            {filter.filter.search ? (
-              <InputGroupAddon align="inline-end">
-                <InputGroupButton
-                  size="icon-xs"
-                  onClick={() => filter.setSearch("")}
-                  aria-label={t("clearSearch")}
-                >
-                  <XIcon className="size-3" />
-                </InputGroupButton>
-              </InputGroupAddon>
-            ) : null}
-          </InputGroup>
-          <FilterChips
-            filters={statusFilters}
-            activeFilter={filter.filter.status}
-            onFilterChange={(key) => filter.setStatus(key as typeof filter.filter.status)}
-          />
-          <KindFilterChips
-            selected={new Set(filter.kinds)}
-            onToggle={filter.toggleKind}
-            onClear={filter.clearKindFilters}
-            countsByKind={filter.facets.countsByKind}
-          />
-        </div>
+        <Tabs
+          value={view}
+          onValueChange={(next) => setView(next as MobileSchedulerView)}
+          className="shrink-0 gap-3"
+          data-testid="mobile-scheduler-tabs"
+        >
+          <TabsList className="w-full" aria-label={t("mobile.viewLabel")}>
+            <TabsTrigger value="tasks" className="flex-1" data-testid="mobile-scheduler-tab-tasks">
+              {t("mobile.tabTasks")}
+              <span className="ms-1 tabular-nums text-[10px] opacity-70">{scopedItems.length}</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="activity"
+              className="flex-1"
+              data-testid="mobile-scheduler-tab-activity"
+            >
+              {t("mobile.tabActivity")}
+            </TabsTrigger>
+          </TabsList>
 
-        {scopedItems.length === 0 ? (
-          <TaskListEmptyState onCreate={() => setShowCreateSheet(true)} />
-        ) : orderedItems.length === 0 ? (
-          <TaskListEmptyState variant="filtered" onClearFilters={filter.reset} />
-        ) : (
-          <div className="flex flex-col" role="list" data-testid="mobile-scheduler-list">
-            {orderedItems.map((item) => (
-              <div key={item.unifiedId} role="listitem">
-                <SchedulerListRow
-                  item={item}
-                  signal={signalByItem.get(item.unifiedId) ?? null}
-                  selected={selection.itemId === item.unifiedId}
-                  checked={false}
-                  onSelect={handleSelectItem}
-                  onToggleCheck={() => {}}
+          <TabsContent value="tasks" className="space-y-3">
+            <div className="space-y-2" data-testid="mobile-scheduler-filters">
+              <InputGroup className="h-10">
+                <InputGroupAddon align="inline-start">
+                  <SearchIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  type="search"
+                  enterKeyHint="search"
+                  value={filter.filter.search}
+                  onChange={(event) => filter.setSearch(event.target.value)}
+                  placeholder={t("searchTasks")}
+                  aria-label={t("searchTasks")}
+                  data-testid="mobile-scheduler-search"
                 />
+                {filter.filter.search ? (
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      onClick={() => filter.setSearch("")}
+                      aria-label={t("clearSearch")}
+                    >
+                      <XIcon className="size-3" />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                ) : null}
+              </InputGroup>
+              {/* The desktop's filter bar: one row for status and a menu for
+                  kinds and /loop, where two rows of eleven chips used to sit. */}
+              <SchedulerFilterBar
+                className="px-0 pb-0"
+                status={filter.filter.status}
+                onStatusChange={filter.setStatus}
+                statusCounts={filter.facets.statusCounts}
+                selectedKinds={filter.kinds}
+                onToggleKind={filter.toggleKind}
+                countsByKind={filter.facets.countsByKind}
+                loopOnly={filter.filter.loopOnly}
+                onLoopOnlyChange={filter.setLoopOnly}
+                loopCount={filter.facets.loopCount}
+                onClearKindFilters={filter.clearKindFilters}
+              />
+            </div>
+
+            {scopedItems.length === 0 ? (
+              <TaskListEmptyState onCreate={() => setShowCreateSheet(true)} />
+            ) : orderedItems.length === 0 ? (
+              <TaskListEmptyState variant="filtered" onClearFilters={filter.reset} />
+            ) : (
+              <div className="-mx-2 flex flex-col" role="list" data-testid="mobile-scheduler-list">
+                {orderedItems.map((item) => (
+                  <div key={item.unifiedId} role="listitem">
+                    <SchedulerListRow
+                      item={item}
+                      signal={signalByItem.get(item.unifiedId) ?? null}
+                      selected={selection.itemId === item.unifiedId}
+                      checked={false}
+                      checkable={false}
+                      onSelect={handleSelectItem}
+                      onToggleCheck={() => {}}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="activity"
+            className="@container/console-pane flex flex-col gap-3"
+            data-testid="mobile-scheduler-activity"
+          >
+            <StatStrip
+              stats={stats}
+              // The tab is a flex column; without this the grid is the one
+              // child that yields, and it collapses to a single clipped row.
+              className="shrink-0"
+              testId="mobile-scheduler-stats"
+              cellTestIdPrefix="mobile-scheduler-stat"
+            />
+            <ConsoleSection id="mobile-outcomes" title={t("mobile.outcomesTitle")}>
+              <OutcomeStrip cells={outcomeCells} testId="mobile-scheduler-outcomes" />
+            </ConsoleSection>
+            <ConsoleSection
+              id="mobile-agenda"
+              title={t("overviewPage.agendaTitle", { days: AGENDA_DAYS })}
+              meta={agenda.occurrences.length > 0 ? String(agenda.occurrences.length) : undefined}
+            >
+              <Agenda
+                agenda={agenda}
+                windowDays={AGENDA_DAYS}
+                now={now}
+                onSelectItem={handleSelectUnifiedId}
+              />
+            </ConsoleSection>
+            <ConsoleSection
+              id="mobile-recent-runs"
+              title={t("mobile.recentRunsTitle")}
+              meta={
+                recentRuns.length > 0
+                  ? String(Math.min(recentRuns.length, MOBILE_RECENT_RUNS))
+                  : undefined
+              }
+            >
+              {recentRuns.length === 0 ? (
+                <p className="text-xs text-muted-foreground" data-testid="mobile-scheduler-no-runs">
+                  {t("mobile.noRuns")}
+                </p>
+              ) : (
+                <div className="-mx-2 flex flex-col" data-testid="mobile-scheduler-runs">
+                  {recentRuns.slice(0, MOBILE_RECENT_RUNS).map((run) => (
+                    <RunRow
+                      key={run.unifiedId}
+                      run={run}
+                      onOpen={handleOpenRun}
+                      onCancel={handleCancelRun}
+                      showItem
+                    />
+                  ))}
+                </div>
+              )}
+            </ConsoleSection>
+          </TabsContent>
+        </Tabs>
       </SubPageShell>
 
       {showingDetail ? null : (
@@ -540,21 +688,24 @@ function MobileSchedulerBody() {
 
       {selectedItem ? (
         <div
-          className="fixed inset-0 z-40 flex flex-col bg-background"
+          className="fixed inset-0 z-40 flex flex-col bg-background safe-area-pt safe-area-pb"
           data-testid="mobile-scheduler-detail-overlay"
         >
-          <header className="flex shrink-0 items-center gap-2 border-b px-2 py-2">
+          {/* A back bar, not a title bar: the masthead below already names the
+              item, and repeating the name here was the first thing on screen
+              twice. The label says where back goes. */}
+          <header className="flex shrink-0 items-center border-b px-1 py-1">
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
               onClick={() => selection.clear()}
               aria-label={t("back")}
+              className="h-10 gap-1 px-2 text-sm"
               data-testid="mobile-scheduler-back"
             >
-              <ChevronLeftIcon className="size-5" />
+              <ChevronLeftIcon className="size-5" aria-hidden="true" />
+              {t("mobile.backToList")}
             </Button>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{selectedItem.name}</span>
           </header>
           <ItemDetail
             item={selectedItem}
@@ -634,6 +785,7 @@ function MobileSchedulerBody() {
                   payload: selectedAppTask.payload,
                   config: selectedAppTask.config,
                   notification: selectedAppTask.notification,
+                  tags: selectedAppTask.tags,
                   endAt: selectedAppTask.endAt,
                   onSuccessTaskIds: selectedAppTask.onSuccessTaskIds,
                   onFailureTaskIds: selectedAppTask.onFailureTaskIds,
@@ -647,6 +799,24 @@ function MobileSchedulerBody() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <BackfillDialog
+        open={showBackfillDialog}
+        onOpenChange={setShowBackfillDialog}
+        task={selectedAppTask ?? null}
+        onBackfill={(range) => {
+          if (!selectedAppTask) return Promise.resolve(0)
+          return backfillTask(selectedAppTask.id, range)
+        }}
+      />
+
+      <TaskDependencyDialog
+        open={showDependencyDialog}
+        onOpenChange={setShowDependencyDialog}
+        tasks={tasks}
+        focusTaskId={selectedAppTask?.id}
+        onSelectTask={(taskId) => handleSelectUnifiedId(`app:${taskId}`)}
+      />
 
       <RunDetailSheet
         open={selectedRun !== null}

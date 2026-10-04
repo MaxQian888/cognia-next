@@ -63,6 +63,21 @@ describe("filterUnifiedItems", () => {
     ])
   })
 
+  it("matches tags, and only tags when the query starts with #", () => {
+    const tagged = [
+      item({ sourceId: "t1", name: "Digest", tags: ["Reports", "weekly"] }),
+      item({ sourceId: "t2", name: "Weekly sync", description: "reports go out" }),
+      item({ sourceId: "t3", name: "Untagged" }),
+    ]
+    expect(filterUnifiedItems(tagged, { search: "reports" }).map((i) => i.sourceId)).toEqual([
+      "t1",
+      "t2",
+    ])
+    expect(filterUnifiedItems(tagged, { search: "#weekly" }).map((i) => i.sourceId)).toEqual(["t1"])
+    // A bare "#" names no tag.
+    expect(filterUnifiedItems(tagged, { search: "#" })).toEqual([])
+  })
+
   it("is case-insensitive and trims the query", () => {
     expect(filterUnifiedItems(items, { search: "  PROVIDER " }).map((i) => i.sourceId)).toEqual([
       "a",

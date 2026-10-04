@@ -92,6 +92,7 @@ import {
   parseCronExpression,
 } from "@/lib/scheduler/cron-parser"
 import { TriggerPreview } from "@/components/scheduler/trigger-preview"
+import { TaskTagsInput } from "@/components/scheduler/task-tags-input"
 import { testNotificationChannel } from "@/lib/scheduler/notification-integration"
 import {
   TASK_TEMPLATES,
@@ -343,6 +344,11 @@ interface TaskFormState {
   catchupWindowMinutes: number
   /** 0 = no scheduling jitter (seconds in the UI, ms in the model). */
   jitterSeconds: number
+  /**
+   * Always submitted, empty included: an edit that removes the last tag must
+   * clear them, and `undefined` would leave the stored ones in place.
+   */
+  tags: string[]
   /** Empty strings = no end bound. */
   endAtDate: string
   endAtTime: string
@@ -524,6 +530,7 @@ function createInitialState(
     jitterSeconds: initialValues?.trigger?.jitterMs
       ? Math.round(initialValues.trigger.jitterMs / 1_000)
       : 0,
+    tags: initialValues?.tags ? [...initialValues.tags] : [],
     endAtDate: initialValues?.endAt ? toLocalDateInput(initialValues.endAt) : "",
     endAtTime: initialValues?.endAt ? toLocalTimeInput(initialValues.endAt) : "",
     onSuccessTaskIds: initialValues?.onSuccessTaskIds || [],
@@ -772,6 +779,7 @@ export function TaskForm({
     updateForm({
       name: input.name,
       description: input.description || "",
+      tags: input.tags ? [...input.tags] : [],
       taskType: input.type,
       triggerType: input.trigger.type,
       cronExpression: input.trigger.cronExpression || "0 9 * * *",
@@ -1020,6 +1028,7 @@ export function TaskForm({
           ? { imTarget: { conversationKey: f.notificationImConversationKey.trim() } }
           : {}),
       },
+      tags: f.tags,
       ...(endAt ? { endAt } : {}),
       ...(f.onSuccessTaskIds.length > 0 ? { onSuccessTaskIds: f.onSuccessTaskIds } : {}),
       ...(f.onFailureTaskIds.length > 0 ? { onFailureTaskIds: f.onFailureTaskIds } : {}),
@@ -1126,6 +1135,12 @@ export function TaskForm({
               className="resize-none transition-all focus:ring-2 focus:ring-primary/20"
             />
           </div>
+
+          <TaskTagsInput
+            value={f.tags}
+            onChange={(tags) => updateForm({ tags })}
+            disabled={isSubmitting}
+          />
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">{t("taskType") || "Task Type"}</Label>

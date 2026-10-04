@@ -32,11 +32,22 @@ const selectTaskMock = jest.fn()
 const refreshMock = jest.fn(async () => undefined)
 const cancelExecutionMock = jest.fn(async () => ({ cancelled: true }))
 const loadMoreExecutionsMock = jest.fn()
+const cloneTaskMock = jest.fn(async () => ({ id: "copy", name: "Nightly (copy)", type: "chat" }))
+const backfillTaskMock = jest.fn(async () => 3)
+const refreshSystemMock = jest.fn(async () => undefined)
 
 const executionsRef: { current: unknown[] } = { current: [] }
 jest.mock("@/hooks/scheduler", () => ({
   useScheduler: () => ({
-    tasks: [{ id: "t1", name: "Nightly", type: "chat", status: "active" }],
+    tasks: [
+      {
+        id: "t1",
+        name: "Nightly",
+        type: "chat",
+        status: "active",
+        trigger: { type: "cron", cronExpression: "0 2 * * *" },
+      },
+    ],
     executions: executionsRef.current,
     selectedTask: undefined,
     isInitialized: true,
@@ -50,10 +61,12 @@ jest.mock("@/hooks/scheduler", () => ({
     selectTask: selectTaskMock,
     refresh: refreshMock,
     cancelExecution: cancelExecutionMock,
+    cloneTask: cloneTaskMock,
+    backfillTask: backfillTaskMock,
     hasMoreExecutions: true,
     loadMoreExecutions: loadMoreExecutionsMock,
   }),
-  useSystemScheduler: () => ({ tasks: [], pendingConfirmations: [] }),
+  useSystemScheduler: () => ({ tasks: [], pendingConfirmations: [], refresh: refreshSystemMock }),
 }))
 
 let unifiedItemsRef: UnifiedScheduledItem[] = []
@@ -99,8 +112,19 @@ jest.mock("@/lib/scheduler/task-draft-handoff", () => ({
 }))
 
 jest.mock("@/components/mobile/me/sub-page-shell", () => ({
-  SubPageShell: ({ children, testid }: { children: React.ReactNode; testid?: string }) => (
-    <div data-testid={testid}>{children}</div>
+  SubPageShell: ({
+    children,
+    testid,
+    headerAccessory,
+  }: {
+    children: React.ReactNode
+    testid?: string
+    headerAccessory?: React.ReactNode
+  }) => (
+    <div data-testid={testid}>
+      {headerAccessory}
+      {children}
+    </div>
   ),
 }))
 jest.mock("@/components/scheduler/scheduler-host-popover", () => ({
@@ -127,12 +151,33 @@ jest.mock("@/components/scheduler/detail/item-detail", () => ({
     item: { name: string }
     runs: unknown[]
     hasMoreRuns?: boolean
-    actions: { onDelete: (i: unknown) => void; onPause: (i: unknown) => void }
+    actions: {
+      onDelete: (i: unknown) => void
+      onPause: (i: unknown) => void
+      onDuplicate?: () => void
+      onBackfill?: () => void
+      onOpenDependencyGraph?: () => void
+      onPromote?: () => void
+    }
   }) => (
-    <div data-testid="item-detail" data-runs={runs.length} data-more={String(hasMoreRuns)}>
+    <div
+      data-testid="item-detail"
+      data-runs={runs.length}
+      data-more={String(hasMoreRuns)}
+      data-extras={[
+        actions.onDuplicate ? "duplicate" : "",
+        actions.onBackfill ? "backfill" : "",
+        actions.onOpenDependencyGraph ? "dependencies" : "",
+        actions.onPromote ? "promote" : "",
+      ]
+        .filter(Boolean)
+        .join(",")}
+    >
       {item.name}
       <button data-testid="detail-delete" onClick={() => actions.onDelete(item)} />
       <button data-testid="detail-pause" onClick={() => actions.onPause(item)} />
+      <button data-testid="detail-duplicate" onClick={() => actions.onDuplicate?.()} />
+      <button data-testid="detail-backfill" onClick={() => actions.onBackfill?.()} />
     </div>
   ),
 }))
@@ -141,7 +186,8 @@ jest.mock("@/components/scheduler/run-detail-sheet", () => ({
     open && run ? <div data-testid="run-sheet">{run.unifiedId}</div> : null,
 }))
 jest.mock("@/components/scheduler", () => ({
-  FilterChips: () => <div data-testid="filter-chips" />,
+  BackfillDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="backfill-dialog" /> : null,
   SchedulerSkeleton: () => <div data-testid="skeleton" />,
   TaskForm: ({
     onSubmit,
@@ -157,8 +203,9 @@ jest.mock("@/components/scheduler", () => ({
     />
   ),
 }))
-jest.mock("@/components/scheduler/kind-filter-chips", () => ({
-  KindFilterChips: () => <div data-testid="kind-chips" />,
+jest.mock("@/components/scheduler/task-dependency-dialog", () => ({
+  TaskDependencyDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="dependency-dialog" /> : null,
 }))
 jest.mock("@/components/ui/sheet")
 jest.mock("@/components/scheduler/delete-item-dialog", () => ({
@@ -222,17 +269,67 @@ describe("MobileSchedulerPage", () => {
     expect(routerReplace).toHaveBeenCalledWith("/scheduler?item=app%3At1&run=app%3Ar1")
   })
 
-  it("renders the stat strip, the attention block and one row per item", () => {
+  it("puts the attention block above the tabs and one row per item on the tasks tab", () => {
     render(<MobileSchedulerPage />)
-    // Pinned: the shell section is a flex column and the strip must not be
-    // the child that yields (it collapsed to one clipped row on a phone).
-    expect(screen.getByTestId("mobile-scheduler-stats")).toHaveClass("shrink-0")
-    expect(screen.getByTestId("mobile-scheduler-stat-active")).toHaveTextContent("2/2")
     // jsdom is a web host, so the chat task reads as unsupported: the block has a row.
     expect(screen.getByTestId("attention-block")).toBeInTheDocument()
     expect(screen.getByTestId("scheduler-list-row-app:t1")).toBeInTheDocument()
     expect(screen.getByTestId("scheduler-list-row-workflow:w1")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-scheduler-fab")).toBeInTheDocument()
+    // The desktop's compact filter bar, not two rows of chips.
+    expect(screen.getByTestId("scheduler-filter-bar")).toBeInTheDocument()
+    expect(screen.queryByTestId("kind-filter-chips")).toBeNull()
+    // No bulk toolbar here, so no checkbox that would check nothing.
+    expect(screen.queryByTestId("scheduler-list-row-check")).toBeNull()
+  })
+
+  it("shows the numbers, outcomes, agenda and recent runs on the activity tab", () => {
+    recentRunsRef = [
+      {
+        unifiedId: "workflow:r1",
+        kind: "workflow",
+        itemUnifiedId: "workflow:w1",
+        itemName: "Deploy",
+        status: "succeeded",
+        startedAt: Date.now() - 60_000,
+        origin: { tableName: "t", nativeId: "r1" },
+      },
+    ]
+    render(<MobileSchedulerPage />)
+    fireEvent.mouseDown(screen.getByTestId("mobile-scheduler-tab-activity"))
+    // Pinned: the tab is a flex column and the strip must not be the child
+    // that yields (it collapsed to one clipped row on a phone).
+    expect(screen.getByTestId("mobile-scheduler-stats")).toHaveClass("shrink-0")
+    expect(screen.getByTestId("mobile-scheduler-stat-active")).toHaveTextContent("2/2")
+    expect(screen.getByTestId("mobile-scheduler-outcomes")).toBeInTheDocument()
+    expect(screen.getByTestId("agenda")).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByTestId("run-row-workflow:r1").querySelector("button") as HTMLButtonElement
+    )
+    expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler?run=workflow%3Ar1")
+  })
+
+  it("refreshes both schedules from the header", async () => {
+    render(<MobileSchedulerPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mobile-scheduler-refresh"))
+    })
+    expect(refreshMock).toHaveBeenCalled()
+    expect(refreshSystemMock).toHaveBeenCalled()
+  })
+
+  it("offers an app task's duplicate, backfill and dependency graph, but not promotion", async () => {
+    unifiedItemsRef = [item("app", "t1", "Nightly")]
+    searchParams = new URLSearchParams("item=app:t1")
+    render(<MobileSchedulerPage />)
+    expect(screen.getByTestId("item-detail").dataset.extras).toBe("duplicate,backfill,dependencies")
+    fireEvent.click(screen.getByTestId("detail-backfill"))
+    expect(screen.getByTestId("backfill-dialog")).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("detail-duplicate"))
+    })
+    expect(cloneTaskMock).toHaveBeenCalledWith("t1")
+    expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler?item=app%3Acopy")
   })
 
   it("writes a tap into the address and opens the detail from it with the full run set", () => {
@@ -254,6 +351,12 @@ describe("MobileSchedulerPage", () => {
     expect(detail.dataset.more).toBe("true")
     expect(selectTaskMock).toHaveBeenCalledWith("t1")
     expect(screen.queryByTestId("mobile-scheduler-fab")).not.toBeInTheDocument()
+    // A back bar that says where it goes, not a second copy of the name.
+    expect(screen.getByTestId("mobile-scheduler-back")).toHaveTextContent("Tasks")
+    expect(screen.getByTestId("mobile-scheduler-detail-overlay")).toHaveClass(
+      "safe-area-pt",
+      "safe-area-pb"
+    )
     fireEvent.click(screen.getByTestId("mobile-scheduler-back"))
     expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler")
   })

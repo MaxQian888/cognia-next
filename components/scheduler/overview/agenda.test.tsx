@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
-import { Agenda, densityClass } from "./agenda"
+import { AGENDA_INITIAL_DAYS, Agenda, densityClass } from "./agenda"
 import { buildAgenda } from "@/lib/scheduler/agenda"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
@@ -70,6 +70,28 @@ describe("Agenda", () => {
     expect(Number(rows[0].dataset.count)).toBeGreaterThan(100)
     expect(rows[0]).toHaveTextContent(`×${rows[0].dataset.count}`)
     expect(rows[0]).toHaveTextContent(/until/)
+  })
+})
+
+describe("Agenda · a long window", () => {
+  const now = new Date(2026, 8, 13, 9).getTime()
+
+  it("lists the first days, offers the rest, and a pinned day always shows", () => {
+    const agenda = buildAgenda([item("daily", now + HOUR, DAY)], { now, days: 7 })
+    render(<Agenda agenda={agenda} windowDays={7} now={now} onSelectItem={jest.fn()} />)
+    expect(screen.getAllByTestId(/^agenda-day-/)).toHaveLength(AGENDA_INITIAL_DAYS)
+    const toggle = screen.getByTestId("agenda-toggle-days")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(screen.getAllByTestId(/^agenda-day-/)).toHaveLength(agenda.days.length)
+    expect(screen.getByTestId("agenda-toggle-days")).toHaveTextContent("Show fewer days")
+    fireEvent.click(screen.getByTestId("agenda-toggle-days"))
+    expect(screen.getAllByTestId(/^agenda-day-/)).toHaveLength(AGENDA_INITIAL_DAYS)
+
+    // The sixth day is past the fold, but picking it on the density row shows it.
+    fireEvent.click(screen.getAllByTestId("agenda-density-cell")[5])
+    expect(screen.getAllByTestId(/^agenda-day-/)).toHaveLength(1)
+    expect(screen.queryByTestId("agenda-toggle-days")).toBeNull()
   })
 })
 

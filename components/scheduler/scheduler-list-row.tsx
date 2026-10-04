@@ -43,6 +43,12 @@ export interface SchedulerListRowProps {
   checked: boolean
   onSelect: (item: UnifiedScheduledItem) => void
   onToggleCheck: (item: UnifiedScheduledItem) => void
+  /**
+   * Whether the row offers the multi-select checkbox. The phone has no bulk
+   * toolbar, and a checkbox that checks nothing is a broken control, so it
+   * renders the rows without one (and without the gutter it sits in).
+   */
+  checkable?: boolean
   /** Whether any row is checked; keeps every checkbox visible during a bulk session. */
   checkMode?: boolean
   showIdentity?: boolean
@@ -96,6 +102,7 @@ function SchedulerListRowImpl({
   onToggleCheck,
   checkMode = false,
   showIdentity = false,
+  checkable = true,
 }: SchedulerListRowProps) {
   const t = useTranslations("scheduler")
   const triggerText = useTriggerText()
@@ -111,30 +118,33 @@ function SchedulerListRowImpl({
       data-testid={`scheduler-list-row-${item.unifiedId}`}
       data-selected={selected || undefined}
     >
-      <span
-        data-testid="scheduler-list-row-check-slot"
-        className={cn(
-          "flex w-7 shrink-0 items-center justify-center",
-          // Revealed on row hover, keyboard focus and touch (no hover there);
-          // only the opacity fades, so the checkbox is always reachable.
-          HOVER_REVEAL_GROUP_CLASS,
-          (checkMode || checked) && "opacity-100"
-        )}
-      >
-        <Checkbox
-          checked={checked}
-          onCheckedChange={() => onToggleCheck(item)}
-          aria-label={t("selectRow")}
-          className="size-3.5"
-          data-testid="scheduler-list-row-check"
-        />
-      </span>
+      {checkable ? (
+        <span
+          data-testid="scheduler-list-row-check-slot"
+          className={cn(
+            "flex w-7 shrink-0 items-center justify-center",
+            // Revealed on row hover, keyboard focus and touch (no hover there);
+            // only the opacity fades, so the checkbox is always reachable.
+            HOVER_REVEAL_GROUP_CLASS,
+            (checkMode || checked) && "opacity-100"
+          )}
+        >
+          <Checkbox
+            checked={checked}
+            onCheckedChange={() => onToggleCheck(item)}
+            aria-label={t("selectRow")}
+            className="size-3.5"
+            data-testid="scheduler-list-row-check"
+          />
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={() => onSelect(item)}
         aria-current={selected ? "true" : undefined}
         className={cn(
-          "flex min-w-0 flex-1 items-start gap-2.5 rounded-md py-2 pe-2.5 ps-1 text-left transition-colors",
+          "flex min-w-0 flex-1 items-start gap-2.5 rounded-md py-2 pe-2.5 text-left transition-colors",
+          checkable ? "ps-1" : "ps-2.5",
           "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           selected && "bg-muted",
           checked && !selected && "bg-muted/40"

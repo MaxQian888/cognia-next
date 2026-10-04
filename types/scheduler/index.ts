@@ -97,6 +97,11 @@ export type ScheduledTaskType =
   // Free provider reachability and configured balance refresh only. The
   // executor is forbidden from scheduling paid generation/embedding jobs.
   | "provider-diagnostics-refresh"
+  // Archives conversations idle longer than
+  // `AppSettings.conversationArchive.autoArchiveAfterDays`. Installed at
+  // scheduler init and executed by `lib/chat/auto-archive-schedule.ts`; a
+  // paired client whose Host owns the sessions skips it.
+  | "conversation-auto-archive"
 
 // Task execution status
 export type TaskExecutionStatus =

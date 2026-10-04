@@ -56,4 +56,14 @@ describe("StatCard", () => {
     expect(accent).toHaveClass("from-blue-500")
     expect(accent).toHaveClass("to-sky-400")
   })
+
+  it("renders an optional footer under the value", () => {
+    render(<StatCard {...makeProps()} footer={<span data-testid="delta">+5%</span>} />)
+    expect(screen.getByTestId("delta")).toHaveTextContent("+5%")
+  })
+
+  it("renders no footer slot by default", () => {
+    render(<StatCard {...makeProps()} testid="plain" />)
+    expect(screen.getByTestId("plain").querySelector(".min-h-4")).toBeNull()
+  })
 })

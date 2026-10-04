@@ -1,4 +1,4 @@
-import { render, renderHook, screen } from "@testing-library/react"
+import { act, render, renderHook, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const hostTarget = {
@@ -10,9 +10,13 @@ jest.mock("@/hooks/scheduler/use-scheduler-host-target", () => ({
   useSchedulerHostTarget: () => hostTarget,
 }))
 const profileState = { value: "desktop" as string }
-jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => profileState.value }))
-const routing = { active: false }
-jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => routing.active }))
+// `useRemoteHostActive` stays real and the routing plane is not mocked: the
+// summary subscribes to it, so a test can attach a remote host under a mounted
+// hook and watch the answer change.
+jest.mock("@/hooks/use-host-profile", () => ({
+  ...jest.requireActual("@/hooks/use-host-profile"),
+  useHostProfile: () => profileState.value,
+}))
 interface RemoteHostRow {
   id: string
   label?: string
@@ -32,12 +36,21 @@ import {
   __resetExecutionAuthorityConfigForTests,
   readExecutionAuthorityConfig,
 } from "@/lib/placement/authority"
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
 import {
   SchedulerHostPopover,
   SchedulerHostStatusBadge,
   SchedulerHostSummaryLine,
   useSchedulerHostSummary,
 } from "./scheduler-host-popover"
+
+const remoteTransport: Transport = {
+  call: jest.fn(async () => undefined) as Transport["call"],
+  subscribe: jest.fn(() => () => undefined) as unknown as Transport["subscribe"],
+}
+
+afterEach(() => __resetRoutingForTests())
 
 beforeEach(() => {
   globalThis.localStorage?.clear()
@@ -46,7 +59,6 @@ beforeEach(() => {
   hostTarget.pairedAvailable = false
   hostTarget.setTarget.mockClear()
   profileState.value = "desktop"
-  routing.active = false
   remoteState.hosts = []
   remoteState.activeHostId = null
 })
@@ -63,12 +75,26 @@ describe("useSchedulerHostSummary", () => {
   })
 
   it("marks the local schedule suspended while a desktop drives a remote host", () => {
-    routing.active = true
+    setActiveRemoteTransport(remoteTransport)
     remoteState.hosts = [{ id: "h1", label: "Studio", config: { baseUrl: "https://s" } }]
     remoteState.activeHostId = "h1"
     const { result } = renderHook(() => useSchedulerHostSummary())
     expect(result.current.suspended).toBe(true)
     expect(result.current.pairedLabel).toBe("cloud host Studio")
+  })
+
+  it("follows the desktop attaching to and detaching from a remote host", () => {
+    remoteState.hosts = [{ id: "h1", label: "Studio", config: { baseUrl: "https://s" } }]
+    remoteState.activeHostId = "h1"
+    const { result } = renderHook(() => useSchedulerHostSummary())
+    expect(result.current.suspended).toBe(false)
+
+    act(() => setActiveRemoteTransport(remoteTransport))
+    expect(result.current.suspended).toBe(true)
+    expect(result.current.pairedLabel).toBe("cloud host Studio")
+
+    act(() => setActiveRemoteTransport(null))
+    expect(result.current.suspended).toBe(false)
   })
 
   it("says a companion's own schedule only ticks while open", () => {

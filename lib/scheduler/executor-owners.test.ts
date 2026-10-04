@@ -20,6 +20,18 @@ jest.mock("@/lib/provider-diagnostics/refresh", () => ({
   }),
 }))
 
+const mockConversationAutoArchiveExecutor = jest.fn(async () => ({
+  success: true,
+  output: { scanned: 0, archived: 0, skipped: "off" },
+}))
+
+jest.mock("@/lib/chat/auto-archive-schedule", () => ({
+  registerConversationAutoArchiveExecutor: jest.fn(() => {
+    const { registerTaskExecutor } = jest.requireActual("@/lib/scheduler/task-scheduler")
+    registerTaskExecutor("conversation-auto-archive", mockConversationAutoArchiveExecutor)
+  }),
+}))
+
 const mockBuiltInExecutor = jest.fn(async (task: ScheduledTask) => ({
   success: true,
   output: { ran: task.type },
@@ -109,6 +121,7 @@ jest.mock("@cognia/logging", () => {
 })
 
 import { registerProviderDiagnosticsRefreshExecutor } from "@/lib/provider-diagnostics/refresh"
+import { registerConversationAutoArchiveExecutor } from "@/lib/chat/auto-archive-schedule"
 import { registerBuiltInExecutors } from "./executors"
 import {
   BUILT_IN_EXECUTOR_TASK_TYPES,
@@ -203,6 +216,7 @@ async function startWithoutSchedulerSystem() {
 
 function unregisterEverythingTheOwnersRegister() {
   unregisterTaskExecutor("provider-diagnostics-refresh")
+  unregisterTaskExecutor("conversation-auto-archive")
   for (const type of BUILT_IN_EXECUTOR_TASK_TYPES) unregisterTaskExecutor(type)
 }
 
@@ -395,10 +409,15 @@ describe("a scheduler started without initSchedulerSystem", () => {
 })
 
 describe("TASK_EXECUTOR_OWNERS", () => {
-  it("declares the built-ins, provider diagnostics and issue wakeups, and no connector or deprecated type", () => {
+  it("declares the built-ins, provider diagnostics, conversation auto-archive and issue wakeups, and no connector or deprecated type", () => {
     const owned = Object.keys(TASK_EXECUTOR_OWNERS)
     expect([...owned].sort()).toEqual(
-      [...BUILT_IN_EXECUTOR_TASK_TYPES, "provider-diagnostics-refresh", "issue-wakeup"].sort()
+      [
+        ...BUILT_IN_EXECUTOR_TASK_TYPES,
+        "provider-diagnostics-refresh",
+        "conversation-auto-archive",
+        "issue-wakeup",
+      ].sort()
     )
     expect(owned.filter((type) => type.startsWith("connection:"))).toEqual([])
     expect(
@@ -411,6 +430,7 @@ describe("TASK_EXECUTOR_OWNERS", () => {
   it("answers whether a type has an owner", () => {
     expect(hasTaskExecutorOwner("provider-diagnostics-refresh")).toBe(true)
     expect(hasTaskExecutorOwner("issue-wakeup")).toBe(true)
+    expect(hasTaskExecutorOwner("conversation-auto-archive")).toBe(true)
     expect(hasTaskExecutorOwner("chat")).toBe(true)
     expect(hasTaskExecutorOwner("plugin")).toBe(true)
     expect(hasTaskExecutorOwner("connection:presence:refresh")).toBe(false)
@@ -423,6 +443,14 @@ describe("TASK_EXECUTOR_OWNERS", () => {
     await expect(loadTaskExecutorOwner("provider-diagnostics-refresh")).resolves.toBe(true)
     expect(hasTaskExecutor("provider-diagnostics-refresh")).toBe(true)
     expect(registerBuiltInExecutors).not.toHaveBeenCalled()
+  })
+
+  it("loads the conversation auto-archive sweep from its own module", async () => {
+    await expect(loadTaskExecutorOwner("conversation-auto-archive")).resolves.toBe(true)
+    expect(registerConversationAutoArchiveExecutor).toHaveBeenCalledTimes(1)
+    expect(hasTaskExecutor("conversation-auto-archive")).toBe(true)
+    expect(registerBuiltInExecutors).not.toHaveBeenCalled()
+    expect(registerProviderDiagnosticsRefreshExecutor).not.toHaveBeenCalled()
   })
 
   it("loads the built-ins for any built-in type, which registers every one of them", async () => {

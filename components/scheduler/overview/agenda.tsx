@@ -12,6 +12,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { groupDayByItem, type Agenda as AgendaData, type AgendaEntry } from "@/lib/scheduler/agenda"
 import type { OccurrenceDay } from "@/lib/scheduler/upcoming-occurrences"
@@ -28,6 +29,14 @@ export interface AgendaProps {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Days the list shows before "show more". Fourteen days of a five-minute
+ * task is fourteen headed groups, and they pushed the kinds and the recent
+ * runs a long scroll below the fold. The density row above still covers the
+ * whole window, and picking a day there shows that day whatever this says.
+ */
+export const AGENDA_INITIAL_DAYS = 3
 
 /**
  * Shade relative to the window's busiest day. Absolute thresholds (3 / 8)
@@ -47,6 +56,7 @@ export function densityClass(count: number, max: number): string {
 export function Agenda({ agenda, windowDays, now, onSelectItem, className }: AgendaProps) {
   const t = useTranslations("scheduler.agenda")
   const [pinnedDay, setPinnedDay] = useState<string | null>(null)
+  const [showAllDays, setShowAllDays] = useState(false)
 
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
@@ -58,9 +68,13 @@ export function Agenda({ agenda, windowDays, now, onSelectItem, className }: Age
 
   const busiest = Math.max(0, ...densityDays.map((day) => day.count))
 
-  const days: OccurrenceDay[] = pinnedDay
+  const matchingDays: OccurrenceDay[] = pinnedDay
     ? agenda.days.filter((day) => day.key === pinnedDay)
     : agenda.days
+  const hiddenDayCount =
+    pinnedDay || showAllDays ? 0 : Math.max(0, matchingDays.length - AGENDA_INITIAL_DAYS)
+  const days = hiddenDayCount > 0 ? matchingDays.slice(0, AGENDA_INITIAL_DAYS) : matchingDays
+  const canCollapse = !pinnedDay && showAllDays && matchingDays.length > AGENDA_INITIAL_DAYS
 
   return (
     <div className={cn("min-w-0", className)} data-testid="agenda">
@@ -115,6 +129,21 @@ export function Agenda({ agenda, windowDays, now, onSelectItem, className }: Age
               </ol>
             </section>
           ))}
+          {hiddenDayCount > 0 || canCollapse ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 self-start px-2 text-xs text-muted-foreground"
+              onClick={() => setShowAllDays((value) => !value)}
+              aria-expanded={showAllDays}
+              data-testid="agenda-toggle-days"
+            >
+              {hiddenDayCount > 0
+                ? t("showMoreDays", { count: hiddenDayCount })
+                : t("showFewerDays")}
+            </Button>
+          ) : null}
         </div>
       )}
     </div>

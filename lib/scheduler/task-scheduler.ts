@@ -251,6 +251,68 @@ export function unregisterTaskExpiryHandler(taskType: string): void {
 }
 
 /**
+ * One execution row reaching a state the scheduler records: a run starting
+ * (`running`), a run settling (`completed` / `failed` / `cancelled`), or a
+ * start that ended without running (`skipped`). A buffered start's `pending`
+ * placeholder is never announced, because it is not a row yet; the run it
+ * becomes is.
+ *
+ * `execution` is a snapshot. The scheduler keeps mutating its own object while
+ * the run goes on, and a listener holding that object would see a `running`
+ * event's row turn into the settled one under it.
+ */
+export interface TaskExecutionLifecycleEvent {
+  task: ScheduledTask
+  execution: TaskExecution
+}
+
+export type TaskExecutionListener = (event: TaskExecutionLifecycleEvent) => void
+
+const executionListeners: Set<TaskExecutionListener> = new Set()
+
+/**
+ * Observe every execution state the scheduler writes, in this process.
+ *
+ * The `cognia-scheduler-executions` BroadcastChannel already carries the same
+ * moments, but it cannot serve an in-process consumer: a channel object never
+ * receives its own posts, and a headless Node host may have no
+ * BroadcastChannel at all. The plugin scheduler API's `onExecution` needs an
+ * answer in exactly those places, so this is a plain listener set that every
+ * scheduler instance publishes to. Module level rather than per instance,
+ * because `initTaskScheduler(driver)` replaces the singleton and a subscriber
+ * must not silently go deaf when that happens.
+ *
+ * A listener that throws is logged and skipped. It cannot fail the run whose
+ * state it was told about.
+ */
+export function subscribeToTaskExecutions(listener: TaskExecutionListener): () => void {
+  executionListeners.add(listener)
+  return () => {
+    executionListeners.delete(listener)
+  }
+}
+
+function publishExecutionEvent(task: ScheduledTask, execution: TaskExecution): void {
+  if (executionListeners.size === 0) return
+  const snapshot: TaskExecution = {
+    ...execution,
+    logs: [...execution.logs],
+    ...(execution.phases ? { phases: [...execution.phases] } : {}),
+  }
+  for (const listener of Array.from(executionListeners)) {
+    try {
+      listener({ task, execution: snapshot })
+    } catch (error) {
+      log.warn("A task execution listener threw", {
+        taskId: task.id,
+        executionId: execution.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+}
+
+/**
  * Check whether a task executor is currently registered for a task type.
  */
 export function hasTaskExecutor(taskType: string): boolean {
@@ -382,6 +444,22 @@ interface ExecuteTaskContext {
    * alarm and any buffering made the run relative to when it was due to start.
    */
   armedAtMs?: number
+  /**
+   * Use this id for the row this start produces, whatever it turns out to be:
+   * the running execution, a skipped row, or the placeholder of a buffered
+   * start (and later the run it drains into). Set when a caller was already
+   * handed the id, so the id it holds always names a row that exists or will.
+   */
+  executionId?: string
+  /**
+   * What this one start merged over the row's payload (a run-now's arguments,
+   * an event's envelope). Kept apart from the merged task so a buffered start
+   * can re-apply it to the row it reloads when it drains, instead of running
+   * with the stored payload and silently dropping it.
+   */
+  payloadOverride?: Record<string, unknown>
+  /** Called once with the execution as soon as the scheduler has decided what this start is. */
+  onAccepted?: (execution: TaskExecution) => void
 }
 
 /** A buffered start waiting for the running execution to finish (queue-one / queue-all). */
@@ -391,6 +469,10 @@ interface QueuedStart {
   deferNextRunUpdate?: boolean
   scheduledSlotClaimed?: boolean
   armedAtMs?: number
+  /** The placeholder's id, reused by the run (or skipped row) this start becomes. */
+  executionId: string
+  /** See `ExecuteTaskContext.payloadOverride`. */
+  payloadOverride?: Record<string, unknown>
 }
 
 class TaskSchedulerImpl {
@@ -1335,9 +1417,11 @@ class TaskSchedulerImpl {
   }
 
   /**
-   * Broadcast execution status change via BroadcastChannel
+   * Announce an execution state change: to other contexts over the
+   * BroadcastChannel, and to in-process listeners (`subscribeToTaskExecutions`).
    */
-  private broadcastExecutionStatus(execution: TaskExecution): void {
+  private broadcastExecutionStatus(task: ScheduledTask, execution: TaskExecution): void {
+    publishExecutionEvent(task, execution)
     try {
       this.executionChannel?.postMessage({
         type: "execution-update",
@@ -1794,6 +1878,15 @@ class TaskSchedulerImpl {
       triggerSource?: TaskExecutionTriggerSource
       /** Merged over the row's payload for this one run, as an event fire's is. */
       payload?: Record<string, unknown>
+      /**
+       * Called with the execution row as soon as the run has started, before
+       * it settles. The returned promise still resolves with the settled row;
+       * this is for a caller that has to hand back an execution id now
+       * without waiting for the work, which can take as long as the task's
+       * timeout. Not called for a start that ended without running (skipped
+       * or buffered): the returned promise already answers those right away.
+       */
+      onAccepted?: (execution: TaskExecution) => void
     } = {}
   ): Promise<TaskExecution | null> {
     const task = await schedulerDb.getTask(taskId)
@@ -1803,7 +1896,11 @@ class TaskSchedulerImpl {
     }
 
     const run = opts.payload ? { ...task, payload: { ...task.payload, ...opts.payload } } : task
-    return this.executeTask(run, 0, { triggerSource: opts.triggerSource ?? "run-now" })
+    return this.executeTask(run, 0, {
+      triggerSource: opts.triggerSource ?? "run-now",
+      ...(opts.payload ? { payloadOverride: opts.payload } : {}),
+      ...(opts.onAccepted ? { onAccepted: opts.onAccepted } : {}),
+    })
   }
 
   /**
@@ -1836,6 +1933,31 @@ class TaskSchedulerImpl {
       return { cancelled: true }
     }
 
+    // A start the overlap policy or the concurrency cap is holding has no row
+    // and no controller yet, only a queue entry, so it was answered
+    // "not-found" while its caller held its id and watched it run later.
+    // Withdrawing it is the cancel: the entry leaves the queue and a cancelled
+    // row is written under the same id, so the id resolves to what happened.
+    for (const [taskId, queue] of this.queues) {
+      const index = queue.findIndex((start) => start.executionId === executionId)
+      if (index < 0) continue
+      const [start] = queue.splice(index, 1)
+      if (queue.length === 0) this.queues.delete(taskId)
+      const task = await schedulerDb.getTask(taskId)
+      if (task) {
+        await this.createSettledExecution(task, {
+          id: executionId,
+          status: "cancelled",
+          triggerSource: start.triggerSource,
+          scheduledFor: start.scheduledFor,
+          terminalReason: "user-cancelled",
+          message: "Cancelled before it started: the buffered start was withdrawn",
+        })
+      }
+      log.info(`Buffered start ${executionId} withdrawn on request`)
+      return { cancelled: true }
+    }
+
     const execution = await schedulerDb.getExecution(executionId)
     if (!execution) return { cancelled: false, reason: "not-found" }
     if (execution.status !== "running" && execution.status !== "pending") {
@@ -1856,6 +1978,18 @@ class TaskSchedulerImpl {
       }
     }
     return { cancelled: false, reason: "not-owned-here" }
+  }
+
+  /**
+   * The task a buffered start belongs to, when `executionId` names one that
+   * is still waiting in this context's queue. A buffered start has no row
+   * until it runs, so this is the only way to tell whose it is.
+   */
+  getQueuedStartTaskId(executionId: string): string | undefined {
+    for (const [taskId, queue] of this.queues) {
+      if (queue.some((start) => start.executionId === executionId)) return taskId
+    }
+    return undefined
   }
 
   /**
@@ -2085,7 +2219,7 @@ class TaskSchedulerImpl {
   ): Promise<TaskExecution> {
     const executionLifecycleVersion = this.lifecycleVersion
     const taskLifecycleVersion = this.getTaskLifecycleVersion(task.id)
-    const executionId = nanoid()
+    const executionId = context.executionId ?? nanoid()
     const startTime = new Date()
     const triggerSource = context.triggerSource ?? (retryAttempt > 0 ? "retry" : "schedule")
     const isRetryExecution = triggerSource === "retry"
@@ -2108,6 +2242,7 @@ class TaskSchedulerImpl {
             deferNextRunUpdate: context.deferNextRunUpdate,
             scheduledSlotClaimed: context.scheduledSlotClaimed,
             armedAtMs: context.armedAtMs,
+            payloadOverride: context.payloadOverride,
             blockedBy: "overlap",
           })
         }
@@ -2116,6 +2251,7 @@ class TaskSchedulerImpl {
             // A pending retry timer cannot be aborted safely — treat as skip.
             log.warn(`Task ${task.name} execution skipped due to retry-chain-active`)
             return this.createSkippedExecution(task, {
+              id: executionId,
               triggerSource,
               scheduledFor: context.scheduledFor,
               terminalReason: "retry-chain-active",
@@ -2136,6 +2272,7 @@ class TaskSchedulerImpl {
           const terminalReason = retryBlocked ? "retry-chain-active" : "overlap-skipped"
           log.warn(`Task ${task.name} execution skipped due to ${terminalReason}`)
           return this.createSkippedExecution(task, {
+            id: executionId,
             triggerSource,
             scheduledFor: context.scheduledFor,
             terminalReason,
@@ -2177,11 +2314,13 @@ class TaskSchedulerImpl {
           deferNextRunUpdate: context.deferNextRunUpdate,
           scheduledSlotClaimed: context.scheduledSlotClaimed,
           armedAtMs: context.armedAtMs,
+          payloadOverride: context.payloadOverride,
           blockedBy: "concurrency",
         })
       }
       log.warn(`Task ${task.name} start blocked: host concurrency cap (${concurrencyCap}) reached`)
       return this.createSkippedExecution(task, {
+        id: executionId,
         triggerSource,
         scheduledFor: context.scheduledFor,
         terminalReason: "concurrency-blocked",
@@ -2215,7 +2354,8 @@ class TaskSchedulerImpl {
     this.executionControllers.set(executionId, controller)
     this.trackRunning(execution)
     await schedulerDb.createExecution(execution)
-    this.broadcastExecutionStatus(execution)
+    this.broadcastExecutionStatus(task, execution)
+    context.onAccepted?.(execution)
 
     // Notify start
     if (task.notification.onStart) {
@@ -2501,7 +2641,7 @@ class TaskSchedulerImpl {
       this.untrackRunning(execution)
       this.executionControllers.delete(executionId)
       await schedulerDb.updateExecution(execution)
-      this.broadcastExecutionStatus(execution)
+      this.broadcastExecutionStatus(task, execution)
 
       if (!shouldRetry) {
         this.retryChains.delete(task.id)
@@ -2640,6 +2780,7 @@ class TaskSchedulerImpl {
       deferNextRunUpdate?: boolean
       scheduledSlotClaimed?: boolean
       armedAtMs?: number
+      payloadOverride?: Record<string, unknown>
       blockedBy: "overlap" | "concurrency"
     }
   ): Promise<TaskExecution> {
@@ -2655,12 +2796,18 @@ class TaskSchedulerImpl {
       deferNextRunUpdate: options.deferNextRunUpdate,
       scheduledSlotClaimed: options.scheduledSlotClaimed,
       ...(options.armedAtMs !== undefined ? { armedAtMs: options.armedAtMs } : {}),
+      executionId,
+      ...(options.payloadOverride ? { payloadOverride: options.payloadOverride } : {}),
     }
 
     if (overlapPolicy === "queue-one") {
       // Newest wins: any displaced pending start is dropped as skipped.
       for (const displaced of queue) {
+        // The displaced start's placeholder id was handed to whoever asked for
+        // it, so its skipped row reuses that id: the caller's id resolves to a
+        // row that says what happened, rather than to nothing.
         await this.createSkippedExecution(task, {
+          id: displaced.executionId,
           triggerSource: displaced.triggerSource,
           scheduledFor: displaced.scheduledFor,
           terminalReason: "overlap-skipped",
@@ -2679,6 +2826,7 @@ class TaskSchedulerImpl {
     if (queue.length >= maxQueueSize) {
       log.warn(`Task ${task.name} start dropped: queue full (${maxQueueSize})`)
       return this.createSkippedExecution(task, {
+        id: executionId,
         triggerSource,
         scheduledFor: options.scheduledFor,
         terminalReason: overflowReason,
@@ -2762,12 +2910,20 @@ class TaskSchedulerImpl {
       // moves on to the next candidate, rather than consuming the freed slot.
       if (!latest) continue
 
-      void this.executeTask(latest, 0, {
+      // The row is reloaded so the run sees edits made while it waited, and the
+      // start's own override is laid back over it: a buffered run-now keeps its
+      // arguments and a buffered event fire keeps its event.
+      const run = next.payloadOverride
+        ? { ...latest, payload: { ...latest.payload, ...next.payloadOverride } }
+        : latest
+      void this.executeTask(run, 0, {
         triggerSource: next.triggerSource,
         scheduledFor: next.scheduledFor,
         deferNextRunUpdate: next.deferNextRunUpdate,
         scheduledSlotClaimed: next.scheduledSlotClaimed,
         armedAtMs: next.armedAtMs,
+        executionId: next.executionId,
+        payloadOverride: next.payloadOverride,
       }).catch((err) => {
         log.error(`Error executing buffered start for task ${taskId}:`, err)
       })
@@ -3087,6 +3243,8 @@ class TaskSchedulerImpl {
   private createSkippedExecution(
     task: ScheduledTask,
     params: {
+      /** Reuse an id a caller already holds; a fresh one otherwise. */
+      id?: string
       triggerSource: TaskExecutionTriggerSource
       scheduledFor?: Date
       terminalReason: string
@@ -3107,6 +3265,7 @@ class TaskSchedulerImpl {
   private async createSettledExecution(
     task: ScheduledTask,
     params: {
+      id?: string
       status: TaskExecution["status"]
       triggerSource: TaskExecutionTriggerSource
       scheduledFor?: Date
@@ -3117,7 +3276,7 @@ class TaskSchedulerImpl {
   ): Promise<TaskExecution> {
     const now = new Date()
     const skippedExecution: TaskExecution = {
-      id: nanoid(),
+      id: params.id ?? nanoid(),
       taskId: task.id,
       taskName: task.name,
       taskType: task.type,
@@ -3132,7 +3291,7 @@ class TaskSchedulerImpl {
       logs: [this.createLog("info", params.message)],
     }
     await schedulerDb.createExecution(skippedExecution)
-    this.broadcastExecutionStatus(skippedExecution)
+    this.broadcastExecutionStatus(task, skippedExecution)
     return skippedExecution
   }
 
@@ -3248,10 +3407,37 @@ class TaskSchedulerImpl {
     eventSource?: string,
     payload?: Record<string, unknown>
   ): Promise<void> {
+    await this.fireEventTasks(eventType, eventSource, payload)
+  }
+
+  /**
+   * `triggerEventTask` with a scope and a count: fire only the matching active
+   * event tasks `options.filter` accepts, and answer how many were started.
+   *
+   * A separate method rather than a new return value on `triggerEventTask`,
+   * because that one is also the `scheduled_task_emit_event` RPC, whose output
+   * shape is declared as `null` to the companion contract. The plugin
+   * scheduler API's `emitEvent` uses the filter to fire a plugin's OWN tasks
+   * only, through exactly the same deadline, `maxRuns`, fire-gate and payload
+   * rules every other event obeys.
+   *
+   * "Fired" counts the starts handed to the executor path, including ones the
+   * task's overlap policy then buffers or skips: those are recorded as rows
+   * of their own. A task the filter rejects, an event source that does not
+   * match, an expired bound and a gate refusal are not counted.
+   */
+  async fireEventTasks(
+    eventType: string,
+    eventSource?: string,
+    payload?: Record<string, unknown>,
+    options: { filter?: (task: ScheduledTask) => boolean } = {}
+  ): Promise<number> {
     // Use targeted query instead of loading all tasks
     const eventTasks = await schedulerDb.getActiveEventTasks(eventType)
+    let fired = 0
 
     for (const task of eventTasks) {
+      if (options.filter && !options.filter(task)) continue
       if (!task.trigger.eventSource || task.trigger.eventSource === eventSource) {
         // The deadline timer may not have run (another host held the timing
         // authority, the app was closed across it): an event is never the one
@@ -3272,18 +3458,22 @@ class TaskSchedulerImpl {
         log.info(`Event ${eventType} triggered task: ${task.name}`)
 
         // Merge event payload with task payload
-        const mergedPayload = {
-          ...task.payload,
+        const eventOverride: Record<string, unknown> = {
           event: { type: eventType, source: eventSource, data: payload },
           ...(verdict.payload ?? {}),
         }
-        const taskWithPayload = { ...task, payload: mergedPayload }
+        const taskWithPayload = { ...task, payload: { ...task.payload, ...eventOverride } }
 
-        this.executeTask(taskWithPayload, 0, { triggerSource: "event" }).catch((err) => {
+        fired += 1
+        this.executeTask(taskWithPayload, 0, {
+          triggerSource: "event",
+          payloadOverride: eventOverride,
+        }).catch((err) => {
           log.error(`Error executing event-triggered task ${task.name}:`, err)
         })
       }
     }
+    return fired
   }
 
   /**

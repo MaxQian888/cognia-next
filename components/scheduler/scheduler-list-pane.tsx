@@ -110,6 +110,15 @@ export function SchedulerListPane({
       row.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" })
     }
   }, [justCreatedId, reduceMotion])
+  // Arrow keys move a highlight the page owns; without this it walked off the
+  // bottom of a long list and the user steered by memory.
+  useEffect(() => {
+    if (!highlightedId || !listRef.current) return
+    const row = Array.from(listRef.current.querySelectorAll<HTMLElement>("[data-item-id]")).find(
+      (element) => element.dataset.itemId === highlightedId
+    )
+    if (row && typeof row.scrollIntoView === "function") row.scrollIntoView({ block: "nearest" })
+  }, [highlightedId])
   const checked = useMemo(() => new Set(checkedIds), [checkedIds])
   // Shared with the ⌘K palette (`lib/global-search/providers/system.ts`).
   const sharedNames = useMemo(() => duplicateNames(items), [items])

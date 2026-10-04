@@ -80,6 +80,9 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   // the generic form has no fields for.
   "issue-wakeup",
   "provider-diagnostics-refresh",
+  // Installed at scheduler init (`lib/chat/auto-archive-schedule.ts`) and
+  // driven by the Settings → Conversation control, never from the task form.
+  "conversation-auto-archive",
   "connection:scheduled:digest",
   "connection:outbound:send",
   "connection:housekeeping:clock",

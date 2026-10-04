@@ -179,8 +179,19 @@ describe("CARD_AUTHORED_TASK_TYPES covers every subsystem-authored type", () => 
     "github-issue-sync",
     "issue-wakeup",
     "connection:housekeeping:attachment-cache",
+    "conversation-auto-archive",
   ] as const)("recognises %s", (type) => {
     expect(isCardAuthoredTaskType(type)).toBe(true)
+  })
+
+  it("runs the conversation auto-archive sweep on every host", () => {
+    // It only touches the session rows every host has; a paired client skips
+    // itself at run time (the Host owns the rows), not at the host gate.
+    for (const platform of ["tauri", "headless", "web", "mobile"] as const) {
+      expect(
+        getTaskTypeHostSupport("conversation-auto-archive", { platform, capabilities: [] })
+      ).toEqual({ supported: true, missing: [], requires: [] })
+    }
   })
 
   it("recognises every connector-owned type", () => {

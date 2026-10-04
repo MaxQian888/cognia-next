@@ -174,14 +174,15 @@ describe("SchedulerShell", () => {
     })
 
     // react-resizable-panels v4 interprets bare numbers as PIXELS; sizes must
-    // be percent strings or the panes collapse to px-wide slivers.
-    it("passes percent-string sizes to every resizable panel", () => {
+    // carry an explicit unit or the panes collapse to px-wide slivers.
+    it("passes unit-bearing sizes to every resizable panel", () => {
       renderShell()
       const percent = /^\d+(\.\d+)?%$/
       const list = screen.getByTestId("scheduler-list-pane")
       const detail = screen.getByTestId("scheduler-detail-pane")
       expect(list.dataset.defaultSize).toMatch(percent)
-      expect(list.dataset.minSize).toMatch(percent)
+      // The list's floor is pixels: a percent floor crushed it on a laptop.
+      expect(list.dataset.minSize).toBe("280px")
       expect(list.dataset.maxSize).toMatch(percent)
       expect(detail.dataset.defaultSize).toMatch(percent)
       expect(detail.dataset.minSize).toMatch(percent)

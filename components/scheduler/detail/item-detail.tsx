@@ -23,6 +23,7 @@ import {
   BellIcon,
   CalendarClockIcon,
   CpuIcon,
+  FileCode2Icon,
   GitBranchIcon,
   HistoryIcon,
   InfoIcon,
@@ -31,11 +32,14 @@ import {
 } from "lucide-react"
 
 import { ConsoleSection, type ConsolePaneName } from "@/components/surface/console-section"
+import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import type { AttentionSignal } from "@/lib/scheduler/attention"
 import { buildDependencyGraph, hasDependencyLinks } from "@/lib/scheduler/dependency-graph"
+import { formatDuration } from "@/lib/scheduler/format-utils"
+import { summarizeItemRuns } from "@/lib/scheduler/item-run-stats"
 import type { OutcomeCell } from "@/lib/scheduler/outcome-strip"
 import { taskTypeSpawnsProcesses } from "@/lib/scheduler/task-processes"
 import type { ScheduledTask } from "@/types/scheduler"
@@ -45,6 +49,7 @@ import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import type { PendingItemAction } from "@/hooks/scheduler/use-scheduler-item-actions"
 
 import { OutcomeStrip } from "../outcome-strip"
+import { useRunRelativeTime } from "../run-row"
 import { TaskDependencyGraph } from "../task-dependency-graph"
 import { TaskNotificationDisplay } from "../task-notification-display"
 import { TaskProcessPanel } from "../task-process-panel"
@@ -54,6 +59,7 @@ import { ItemAlerts } from "./item-alerts"
 import { ItemHero, type ItemActions } from "./item-hero"
 import { KindFactsSection, kindHasFacts } from "./sections/kind-facts-section"
 import { OriginSection } from "./sections/origin-section"
+import { PayloadSection } from "./sections/payload-section"
 import { RunsSection } from "./sections/runs-section"
 import { ScheduleSection } from "./sections/schedule-section"
 
@@ -114,6 +120,8 @@ export function ItemDetail({
 }: ItemDetailProps) {
   const t = useTranslations("scheduler")
   const tDetail = useTranslations("scheduler.detail")
+  const tRunStatus = useTranslations("scheduler.unifiedRunStatuses")
+  const relative = useRunRelativeTime()
   const scroller = useRef<HTMLDivElement>(null)
   const id = item?.unifiedId ?? null
 
@@ -132,6 +140,7 @@ export function ItemDetail({
         : null,
     [task, showDependencies, allTasks]
   )
+  const runStats = useMemo(() => summarizeItemRuns(runs, task), [runs, task])
 
   if (!item) {
     return (
@@ -147,6 +156,52 @@ export function ItemDetail({
   const busy = runs.some((run) => run.status === "running")
   const spawnsProcesses = Boolean(task && taskTypeSpawnsProcesses(task.type))
   const containerClass = `@container/${pane}`
+
+  // The four numbers someone opening a task asks first: does it work, how
+  // often has it run, how long does it take, and how did it end last time.
+  const stats: StatStripItem[] = [
+    {
+      id: "successRate",
+      label: tDetail("stats.successRate"),
+      value: runStats.successRate === null ? "—" : `${runStats.successRate}%`,
+      tone:
+        runStats.successRate === null
+          ? "neutral"
+          : runStats.successRate >= 90
+            ? "positive"
+            : runStats.successRate >= 70
+              ? "attention"
+              : "critical",
+    },
+    {
+      id: "runs",
+      label:
+        runStats.basis === "lifetime" ? tDetail("stats.runsLifetime") : tDetail("stats.runsLoaded"),
+      value: runStats.total,
+      tone: runStats.failed > 0 ? "attention" : "neutral",
+    },
+    {
+      id: "averageDuration",
+      label: tDetail("stats.averageDuration"),
+      value: runStats.averageDurationMs === null ? "—" : formatDuration(runStats.averageDurationMs),
+      tone: "neutral",
+    },
+    {
+      id: "lastRun",
+      label: runStats.lastRun
+        ? tDetail("stats.lastRunWhen", { when: relative(runStats.lastRun.startedAt) })
+        : tDetail("stats.lastRun"),
+      value: runStats.lastRun ? tRunStatus(runStats.lastRun.status) : "—",
+      tone:
+        runStats.lastRun?.status === "failed"
+          ? "critical"
+          : runStats.lastRun?.status === "succeeded"
+            ? "positive"
+            : runStats.lastRun?.status === "running"
+              ? "attention"
+              : "neutral",
+    },
+  ]
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)} data-testid="item-detail">
@@ -165,25 +220,46 @@ export function ItemDetail({
 
           <div className={cn("grid gap-3", `@3xl/${pane}:grid-cols-2`)}>
             <ConsoleSection
+              id="outcomes"
+              title={tDetail("outcomesTitle")}
+              icon={ActivityIcon}
+              pane={pane}
+              wide
+            >
+              {item.kind === "system" ? (
+                <p className="text-xs text-muted-foreground">{tDetail("noOsRunHistory")}</p>
+              ) : (
+                <>
+                  <StatStrip
+                    stats={stats}
+                    pane={pane}
+                    testId="item-stats"
+                    cellTestIdPrefix="item-stat"
+                  />
+                  <OutcomeStrip cells={outcomeCells} className="mt-3" testId="item-outcomes" />
+                </>
+              )}
+            </ConsoleSection>
+
+            {task ? (
+              <ConsoleSection
+                id="payload"
+                title={tDetail("payloadTitle")}
+                icon={FileCode2Icon}
+                pane={pane}
+                wide
+              >
+                <PayloadSection task={task} />
+              </ConsoleSection>
+            ) : null}
+
+            <ConsoleSection
               id="schedule"
               title={t("schedule")}
               icon={CalendarClockIcon}
               pane={pane}
             >
               <ScheduleSection item={item} task={task} />
-            </ConsoleSection>
-
-            <ConsoleSection
-              id="outcomes"
-              title={tDetail("outcomesTitle")}
-              icon={ActivityIcon}
-              pane={pane}
-            >
-              {item.kind === "system" ? (
-                <p className="text-xs text-muted-foreground">{tDetail("noOsRunHistory")}</p>
-              ) : (
-                <OutcomeStrip cells={outcomeCells} testId="item-outcomes" />
-              )}
             </ConsoleSection>
 
             {kindHasFacts(item) ? (

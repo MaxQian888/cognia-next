@@ -228,6 +228,35 @@ describe("TaskForm", () => {
     )
   })
 
+  it("seeds tags from the task, edits them, and always submits the list", async () => {
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
+    render(
+      <TaskForm
+        onSubmit={onSubmit}
+        onCancel={jest.fn()}
+        initialValues={{
+          name: "Tagged",
+          type: "chat",
+          trigger: { type: "cron", cronExpression: "0 9 * * *" },
+          payload: { prompt: "hello" },
+          tags: ["ops", "nightly"],
+        }}
+      />
+    )
+    expect(screen.getAllByTestId("task-tags-input-chip").map((chip) => chip.textContent)).toEqual([
+      "ops",
+      "nightly",
+    ])
+    // Remove both: an edit that clears the last tag must submit `[]`, not omit it.
+    fireEvent.keyDown(screen.getByTestId("task-tags-input-field"), { key: "Backspace" })
+    fireEvent.keyDown(screen.getByTestId("task-tags-input-field"), { key: "Backspace" })
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByTestId("scheduler-task-form")
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ tags: [] }))
+  })
+
   it("seeds dueReminder from an existing task and stays enabled on due-time triggers", () => {
     render(
       <TaskForm

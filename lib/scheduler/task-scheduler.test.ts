@@ -17,6 +17,7 @@ import {
   resolveDefaultTimingDriver,
   EXECUTOR_REGISTRATION_GRACE_MS,
   TaskSchedulerImpl,
+  subscribeToTaskExecutions,
 } from "./task-scheduler"
 import { NodeTimingDriver } from "./timing/node-driver"
 import {
@@ -3227,6 +3228,231 @@ describe("TaskScheduler", () => {
           reason: "already-settled",
           status: "completed",
         })
+      })
+    })
+
+    describe("buffered starts keep their id and their payload", () => {
+      it("withdraws a buffered start on cancel and writes a cancelled row under its id", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "queue-cancel",
+          config: { ...makePolicyTask().config, overlapPolicy: "queue-one" },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const buffered = await scheduler.runTaskNow(task.id)
+        expect(buffered?.status).toBe("pending")
+        expect(scheduler.getQueuedStartTaskId(buffered!.id)).toBe(task.id)
+
+        await expect(scheduler.cancelExecution(buffered!.id)).resolves.toEqual({
+          cancelled: true,
+        })
+        expect(scheduler.getQueuedStartTaskId(buffered!.id)).toBeUndefined()
+        expect(mockSchedulerDb.createExecution).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: buffered!.id,
+            status: "cancelled",
+            terminalReason: "user-cancelled",
+          })
+        )
+
+        release()
+        await first
+        await jest.advanceTimersByTimeAsync(10)
+        // The withdrawn start never ran.
+        expect(executor).toHaveBeenCalledTimes(1)
+      })
+
+      it("runs a drained start under the placeholder's id, with the run-now payload re-applied", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({
+          id: "queue-payload",
+          payload: { stored: true, args: { a: 1 } },
+          config: { ...makePolicyTask().config, overlapPolicy: "queue-one" },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const buffered = await scheduler.runTaskNow(task.id, { payload: { args: { a: 2 } } })
+
+        release()
+        await first
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(executor).toHaveBeenCalledTimes(2)
+        const [drainedTask, drainedExecution] = executor.mock.calls[1] as [
+          ScheduledTask,
+          { id: string },
+        ]
+        // Before, the drain reloaded the row and ran it with the stored
+        // payload, so a buffered run-now silently lost its arguments, and the
+        // id its caller held never named a row.
+        expect(drainedTask.payload).toEqual({ stored: true, args: { a: 2 } })
+        expect(drainedExecution.id).toBe(buffered!.id)
+      })
+    })
+
+    describe("runTaskNow onAccepted", () => {
+      it("hands over the running row before the run settles", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "accept-me" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const accepted: Array<{ id: string; status: string }> = []
+        const running = scheduler.runTaskNow(task.id, {
+          onAccepted: (execution) => accepted.push({ ...execution }),
+        })
+        await jest.advanceTimersByTimeAsync(0)
+
+        expect(accepted).toHaveLength(1)
+        expect(accepted[0].status).toBe("running")
+        release()
+        const settled = await running
+        expect(settled?.id).toBe(accepted[0].id)
+        expect(accepted).toHaveLength(1)
+      })
+
+      it("is not called for a start that ended without running", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "skip-me" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const onAccepted = jest.fn()
+        const skipped = await scheduler.runTaskNow(task.id, { onAccepted })
+        expect(skipped?.status).toBe("skipped")
+        expect(onAccepted).not.toHaveBeenCalled()
+        release()
+        await first
+      })
+    })
+
+    describe("subscribeToTaskExecutions", () => {
+      it("announces the start and the settle of a run, as snapshots", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        const task = makePolicyTask({ id: "observed" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        const seen: Array<{ taskId: string; status: string }> = []
+        const rows: unknown[] = []
+        const unsubscribe = subscribeToTaskExecutions(({ task: owner, execution }) => {
+          seen.push({ taskId: owner.id, status: execution.status })
+          rows.push(execution)
+        })
+
+        await scheduler.runTaskNow(task.id)
+        unsubscribe()
+        await scheduler.runTaskNow(task.id)
+
+        expect(seen).toEqual([
+          { taskId: "observed", status: "running" },
+          { taskId: "observed", status: "completed" },
+        ])
+        // A snapshot: the `running` event's row did not turn into the settled
+        // one under the listener.
+        expect((rows[0] as { status: string }).status).toBe("running")
+      })
+
+      it("announces a skipped start", async () => {
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "observed-skip" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        const statuses: string[] = []
+        const unsubscribe = subscribeToTaskExecutions(({ execution }) =>
+          statuses.push(execution.status)
+        )
+
+        const first = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        await scheduler.runTaskNow(task.id)
+        release()
+        await first
+        unsubscribe()
+
+        expect(statuses).toEqual(["running", "skipped", "completed"])
+      })
+
+      it("survives a listener that throws", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        const task = makePolicyTask({ id: "observed-throw" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+        const after = jest.fn()
+        const unsubscribeBad = subscribeToTaskExecutions(() => {
+          throw new Error("listener bug")
+        })
+        const unsubscribeGood = subscribeToTaskExecutions(after)
+
+        await expect(scheduler.runTaskNow(task.id)).resolves.toMatchObject({
+          status: "completed",
+        })
+        expect(after).toHaveBeenCalledTimes(2)
+        unsubscribeBad()
+        unsubscribeGood()
+      })
+    })
+
+    describe("fireEventTasks", () => {
+      function eventTask(id: string, overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+        return makePolicyTask({
+          id,
+          trigger: { type: "event", eventType: "plugin-sync" },
+          config: { ...makePolicyTask().config, overlapPolicy: "allow" },
+          ...overrides,
+        })
+      }
+
+      it("fires only the tasks the filter accepts and answers how many", async () => {
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([
+          eventTask("mine", { payload: { owner: "p1" } }),
+          eventTask("theirs", { payload: { owner: "p2" } }),
+          eventTask("other-source", {
+            payload: { owner: "p1" },
+            trigger: { type: "event", eventType: "plugin-sync", eventSource: "elsewhere" },
+          }),
+        ])
+
+        const fired = await scheduler.fireEventTasks(
+          "plugin-sync",
+          "plugin:p1",
+          { n: 1 },
+          { filter: (task) => (task.payload as { owner?: string }).owner === "p1" }
+        )
+        await jest.advanceTimersByTimeAsync(10)
+
+        expect(fired).toBe(1)
+        expect(executor).toHaveBeenCalledTimes(1)
+        const [ran] = executor.mock.calls[0] as [ScheduledTask]
+        expect(ran.id).toBe("mine")
+        expect(ran.payload).toMatchObject({
+          owner: "p1",
+          event: { type: "plugin-sync", source: "plugin:p1", data: { n: 1 } },
+        })
+      })
+
+      it("does not count a task whose bound has passed; it expires instead", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([
+          eventTask("ended", { endAt: new Date(Date.now() - 1000) }),
+        ])
+        await expect(scheduler.fireEventTasks("plugin-sync")).resolves.toBe(0)
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "ended", status: "expired" })
+        )
+      })
+
+      it("keeps triggerEventTask's void answer for the RPC whose output is declared null", async () => {
+        mockSchedulerDb.getActiveEventTasks.mockResolvedValueOnce([])
+        await expect(scheduler.triggerEventTask("plugin-sync")).resolves.toBeUndefined()
       })
     })
 

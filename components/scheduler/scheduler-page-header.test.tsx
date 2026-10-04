@@ -50,6 +50,13 @@ describe("SchedulerPageHeader", () => {
     expect(screen.getByTestId("sidebar-trigger")).toBeInTheDocument()
   })
 
+  it("puts the host popover beside refresh rather than in a row of its own", () => {
+    render(<SchedulerPageHeader {...props()} />)
+    const popover = screen.getByTestId("host-popover")
+    expect(popover.parentElement).toContainElement(screen.getByTestId("scheduler-refresh-button"))
+    expect(document.querySelector('[data-slot="feature-header-secondary-navigation"]')).toBeNull()
+  })
+
   it("can omit the list trigger and says when the scheduler is stopped", () => {
     render(
       <SchedulerPageHeader {...props({ schedulerStatus: "stopped", showListTrigger: false })} />

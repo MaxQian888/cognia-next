@@ -174,3 +174,12 @@ it("shows the stable task identifier when its name is ambiguous", () => {
   render(<SchedulerListRow {...baseProps} item={task} signal={null} showIdentity />)
   expect(screen.getByTitle(task.unifiedId)).toHaveTextContent(task.sourceId)
 })
+
+it("renders no checkbox, and no gutter for one, when the row is not checkable", () => {
+  const onSelect = jest.fn()
+  render(<SchedulerListRow {...baseProps} item={item()} checkable={false} onSelect={onSelect} />)
+  expect(screen.queryByTestId("scheduler-list-row-check-slot")).toBeNull()
+  expect(screen.queryByRole("checkbox")).toBeNull()
+  fireEvent.click(screen.getByRole("button"))
+  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ unifiedId: "app:t1" }))
+})

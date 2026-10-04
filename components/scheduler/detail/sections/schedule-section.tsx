@@ -91,7 +91,9 @@ export function ScheduleSection({ item, task }: ScheduleSectionProps) {
           ) : null}
           {task.config.catchupWindowMs && task.config.catchupWindowMs > 0 ? (
             <FactRow label={t("catchupWindow.label")}>
-              {`${Math.round(task.config.catchupWindowMs / 60_000)} min`}
+              {/* The label already says "(minutes)" in the form; here the
+                  value carries its own unit, so a day reads "1d", not "1440 min". */}
+              {formatInterval(task.config.catchupWindowMs)}
             </FactRow>
           ) : null}
           {task.trigger.jitterMs && task.trigger.jitterMs > 0 ? (

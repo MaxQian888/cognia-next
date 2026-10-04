@@ -7,7 +7,9 @@
  * route uses. `summary` names the host whose schedule is on screen; `status`
  * says when that schedule is suspended, only ticks while the app is open, or
  * when the app scheduler itself is stopped. The host switch and the timing
- * authority wait in a Popover behind the controls row.
+ * authority wait in a Popover beside the refresh button. It used to sit in
+ * the header's second (controls) row, which it had to itself: a full band of
+ * height spent on one small button, above a pane that is short on height.
  *
  * The breadcrumb leaf that used to repeat the selected item's name is gone:
  * the item's own masthead names it.
@@ -121,7 +123,6 @@ export function SchedulerPageHeader({
           </Badge>
         </span>
       }
-      controls={<SchedulerHostPopover />}
       overflowLabel={t("moreOptions")}
       overflowActions={[
         {
@@ -136,6 +137,7 @@ export function SchedulerPageHeader({
       ]}
       actions={
         <div className="flex shrink-0 items-center gap-2">
+          <SchedulerHostPopover />
           <Button
             variant="ghost"
             size="sm"

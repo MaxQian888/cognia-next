@@ -174,3 +174,22 @@ describe("SchedulerListPane · a row that was just added", () => {
     expect(document.querySelector("[data-just-created]")).toBeNull()
   })
 })
+
+describe("SchedulerListPane · the keyboard highlight", () => {
+  it("scrolls the highlighted row into view as the arrows move it", () => {
+    const scrollIntoView = jest.fn()
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, arg) {
+      scrollIntoView(this.dataset.itemId, arg)
+    }
+    try {
+      const rows = [item("Alpha"), item("Beta")]
+      const { rerender } = render(<SchedulerListPane {...props({ items: rows })} />)
+      expect(scrollIntoView).not.toHaveBeenCalled()
+      rerender(<SchedulerListPane {...props({ items: rows, highlightedId: rows[1].unifiedId })} />)
+      expect(scrollIntoView).toHaveBeenCalledWith(rows[1].unifiedId, { block: "nearest" })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+})

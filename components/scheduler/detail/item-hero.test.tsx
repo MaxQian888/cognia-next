@@ -165,4 +165,18 @@ describe("ItemHero · feedback while an action is in flight", () => {
     expect(screen.getByTestId("item-action-delete")).toHaveAttribute("aria-describedby")
     expect(screen.getByTestId("item-action-pause")).not.toHaveAttribute("aria-describedby")
   })
+
+  it("keeps Edit and Delete named while their words hide on a phone", () => {
+    render(<ItemHero item={item()} actions={actions({ onEdit: jest.fn() })} />)
+    for (const [id, name] of [
+      ["item-action-edit", "Edit"],
+      ["item-action-delete", "Delete"],
+    ] as const) {
+      const button = screen.getByTestId(id)
+      expect(button).toHaveAccessibleName(name)
+      expect(button.querySelector("span")).toHaveClass("hidden", "sm:inline")
+    }
+    // Run and Pause keep their words at every width.
+    expect(screen.getByTestId("item-action-run").querySelector(".hidden")).toBeNull()
+  })
 })

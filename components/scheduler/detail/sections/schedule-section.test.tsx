@@ -60,8 +60,27 @@ describe("ScheduleSection", () => {
     expect(screen.getByText("2")).toBeInTheDocument()
     expect(screen.getByText("4/10")).toBeInTheDocument()
     expect(screen.getByText("3")).toBeInTheDocument()
-    expect(screen.getByText("10 min")).toBeInTheDocument()
+    // Formatted with its own unit, so a day-long window reads "1d", not "1440 min".
+    expect(screen.getByText("10m")).toBeInTheDocument()
     expect(screen.getByText("30s")).toBeInTheDocument()
     expect(screen.getByText("Overlap policy")).toBeInTheDocument()
+  })
+
+  it("formats a day-long catch-up window in days", () => {
+    render(
+      <ScheduleSection
+        item={item()}
+        task={task({
+          config: {
+            timeout: 60_000,
+            maxRetries: 0,
+            retryDelay: 0,
+            runMissedOnStartup: false,
+            catchupWindowMs: 86_400_000,
+          },
+        })}
+      />
+    )
+    expect(screen.getByText("1d")).toBeInTheDocument()
   })
 })

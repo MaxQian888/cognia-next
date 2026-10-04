@@ -79,6 +79,14 @@ export interface ItemHeroProps {
   className?: string
 }
 
+/**
+ * Run and Pause keep their words at every width; Edit and Delete drop theirs
+ * on a phone. With all four labelled, a 375px screen wrapped the row and left
+ * "⋯" and Delete stranded on a second line; their icons are unambiguous and
+ * each carries an `aria-label`, so nothing is lost to a screen reader.
+ */
+const COMPACT_LABEL = "hidden sm:inline"
+
 /** A spinner in place of an action's icon while that action is in flight. */
 function ActionIcon({ pending, icon: Icon }: { pending: boolean; icon: typeof PlayIcon }) {
   return pending ? (
@@ -235,10 +243,11 @@ export function ItemHero({
             variant="outline"
             className="h-7 gap-1.5 text-xs"
             onClick={() => actions.onEdit?.(item)}
+            aria-label={t("edit")}
             data-testid="item-action-edit"
           >
             <PencilIcon className="size-3.5" aria-hidden="true" />
-            {t("edit")}
+            <span className={COMPACT_LABEL}>{t("edit")}</span>
           </Button>
         ) : editElsewhere ? (
           <Button
@@ -248,9 +257,9 @@ export function ItemHero({
             className="h-7 gap-1.5 text-xs"
             data-testid="item-action-edit-elsewhere"
           >
-            <Link href={item.origin.deepLinkHref}>
+            <Link href={item.origin.deepLinkHref} aria-label={t("openInSourceEditor")}>
               <ArrowUpRightIcon className="size-3.5" aria-hidden="true" />
-              {t("openInSourceEditor")}
+              <span className={COMPACT_LABEL}>{t("openInSourceEditor")}</span>
             </Link>
           </Button>
         ) : (
@@ -262,10 +271,11 @@ export function ItemHero({
             disabled
             title={editReason}
             aria-describedby={describedBy(editReason, "edit")}
+            aria-label={t("edit")}
             data-testid="item-action-edit-disabled"
           >
             <PencilIcon className="size-3.5" aria-hidden="true" />
-            {t("edit")}
+            <span className={COMPACT_LABEL}>{t("edit")}</span>
           </Button>
         )}
         <span className="ml-auto flex items-center gap-2">
@@ -352,10 +362,11 @@ export function ItemHero({
             title={deleteReason}
             aria-describedby={describedBy(deleteReason, "delete")}
             aria-busy={deleting || undefined}
+            aria-label={t("delete")}
             data-testid="item-action-delete"
           >
             <ActionIcon pending={deleting} icon={Trash2Icon} />
-            {t("delete")}
+            <span className={COMPACT_LABEL}>{t("delete")}</span>
           </Button>
         </span>
       </div>

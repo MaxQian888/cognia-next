@@ -35,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
-import { useHostProfile } from "@/hooks/use-host-profile"
+import { useHostProfile, useRemoteHostActive } from "@/hooks/use-host-profile"
 import { authorityHostLiveness } from "@/lib/placement/authority-host"
 import {
   getExecutionAuthorityConfigServerSnapshot,
@@ -45,7 +45,6 @@ import {
   writeExecutionAuthorityConfig,
   type ExecutionAuthorityConfig,
 } from "@/lib/placement/authority"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { cn } from "@/lib/utils"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
@@ -78,7 +77,12 @@ export function useSchedulerHostSummary(): SchedulerHostSummary {
     const host = s.hosts.find((h) => h.id === s.activeHostId)
     return host?.label ?? host?.config.baseUrl ?? null
   })
-  const desktopDrivingRemote = profile === "desktop" && isRemoteHostActive()
+  // Subscribed (and called unconditionally, ahead of the profile check): a
+  // desktop can attach to or detach from a remote host while the scheduler is
+  // open, and a one-shot read kept the "local schedule suspended" badge for
+  // whichever state held at the last unrelated re-render.
+  const remoteHostActive = useRemoteHostActive()
+  const desktopDrivingRemote = profile === "desktop" && remoteHostActive
   const pairedLabel =
     desktopDrivingRemote && activeRemoteLabel
       ? t("pairedNamed", { name: activeRemoteLabel })

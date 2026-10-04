@@ -35,7 +35,7 @@ export function isUnifiedStatusFilter(value: string): value is UnifiedStatusFilt
 }
 
 export interface UnifiedFilterCriteria {
-  /** Free-text query matched against name, description, and cron expression. */
+  /** Free-text query matched against name, description, cron expression and tags (`#tag` for tags only). */
   search?: string
   /** Status bucket; `all` (or omitted) disables the status predicate. */
   status?: UnifiedStatusFilter
@@ -77,11 +77,24 @@ export function isLoopItem(item: UnifiedScheduledItem): boolean {
   return item.tags?.includes(LOOP_TAG) === true
 }
 
+/**
+ * Tags count as text. They are the one thing a user adds to a task purely to
+ * find it again, and a search box that cannot see them made them decoration.
+ * A leading `#` matches tags only, so `#nightly` does not also match every
+ * task whose description says "nightly".
+ */
 function matchesSearch(item: UnifiedScheduledItem, query: string): boolean {
+  if (query.startsWith("#")) {
+    const tag = query.slice(1)
+    return (
+      tag !== "" && (item.tags ?? []).some((candidate) => candidate.toLowerCase().includes(tag))
+    )
+  }
   return (
     item.name.toLowerCase().includes(query) ||
     item.description?.toLowerCase().includes(query) === true ||
-    item.triggerSummary.cron?.toLowerCase().includes(query) === true
+    item.triggerSummary.cron?.toLowerCase().includes(query) === true ||
+    (item.tags ?? []).some((tag) => tag.toLowerCase().includes(query))
   )
 }
 
