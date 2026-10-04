@@ -160,6 +160,15 @@ enum CliCommand {
         /// allowlist refuses every browser request.
         #[arg(long)]
         browser_listener_port: Option<u16>,
+        /// Do not advertise this Host as `_cognia._tcp` over mDNS.
+        ///
+        /// A LAN-bound server advertises by default so the mobile app's
+        /// "Find your desktop" scan lists it, exactly as the desktop does. Pass
+        /// this where multicast has no meaning or must not leak the host's
+        /// presence (a container, a shared network). A `--bind-loopback`
+        /// server never advertises: nothing off-host could connect to it.
+        #[arg(long, default_value_t = false)]
+        no_mdns: bool,
     },
     /// Re-encrypt the secret store under a new master key (ADR-0059 R9).
     /// The old key comes from COGNIA_MASTER_KEY(_FILE); stored values —
@@ -369,6 +378,24 @@ enum ProfilesCommand {
     },
     /// Print the current CAS profileVersion.
     Version,
+    /// Store the provider credential a profile's
+    /// `{"kind":"secret-store","secretId":"<id>"}` reference resolves to. The
+    /// value is read from stdin (never argv, so it stays out of shell history
+    /// and the process list) and encrypted under the server master key. It
+    /// never leaves this Host: paired devices only ever see provider and model
+    /// names. Restart `serve` to apply.
+    CredentialSet {
+        /// The `secretId` the deployment's credential reference names.
+        #[arg(long)]
+        id: String,
+    },
+    /// Delete a stored provider credential. Idempotent.
+    CredentialDelete {
+        #[arg(long)]
+        id: String,
+    },
+    /// List stored provider credential ids (never values).
+    CredentialList,
 }
 
 /// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
@@ -432,6 +459,29 @@ fn spawn_headless_push_triggers(shared: app_lib::companion_api::SharedState) {
         }
         log::info!("push triggers: event bus closed");
     });
+}
+
+/// Whether `serve` advertises over mDNS: on unless opted out, and never for a
+/// loopback-only listener, which no device that found it could reach.
+fn should_advertise_mdns(requested: bool, bind_loopback: bool) -> bool {
+    requested && !bind_loopback
+}
+
+/// The mDNS instance name, derived from the TLS fingerprint so it is stable
+/// across restarts (a scanner shows the same Host, not a new one per boot) and
+/// distinct between Hosts on the same LAN.
+fn mdns_instance_name(fingerprint: &str) -> String {
+    let suffix: String = fingerprint
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .take(6)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if suffix.is_empty() {
+        "cognia-headless".to_string()
+    } else {
+        format!("cognia-{suffix}")
+    }
 }
 
 fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
@@ -755,6 +805,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             allow_remote_terminal,
             bind_loopback,
             browser_listener_port,
+            no_mdns,
         } => {
             if allow_remote_terminal {
                 let mut settings = app_lib::terminal_host_service::load_terminal_host_settings()?;
@@ -768,6 +819,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 advertise_url,
                 bind_loopback,
                 browser_listener_port,
+                !no_mdns,
             )
             .await
         }
@@ -1167,6 +1219,7 @@ fn run_profiles(
     data_dir: &std::path::Path,
     command: ProfilesCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use app_lib::gateway::credentials::SecretStoreResolver;
     use app_lib::provider_profiles::{
         headless_store_path, ProviderProfileStore, SqliteProfileStore,
     };
@@ -1186,6 +1239,29 @@ fn run_profiles(
         }
         ProfilesCommand::Version => {
             println!("{}", store.profile_version()?);
+            Ok(())
+        }
+        ProfilesCommand::CredentialSet { id } => {
+            let mut secret = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut secret)?;
+            SecretStoreResolver::provider_credentials()
+                .store(&id, &secret)
+                .map_err(|error| error.to_string())?;
+            eprintln!("[cognia-server] provider credential {id} stored; restart serve to apply");
+            Ok(())
+        }
+        ProfilesCommand::CredentialDelete { id } => {
+            SecretStoreResolver::provider_credentials()
+                .delete(&id)
+                .map_err(|error| error.to_string())?;
+            eprintln!("[cognia-server] provider credential {id} deleted; restart serve to apply");
+            Ok(())
+        }
+        ProfilesCommand::CredentialList => {
+            let ids = SecretStoreResolver::provider_credentials()
+                .ids()
+                .map_err(|error| error.to_string())?;
+            println!("{}", serde_json::to_string_pretty(&ids)?);
             Ok(())
         }
     }
@@ -1316,8 +1392,16 @@ async fn pair_through_running_server(advertised_base_url: &str) -> Option<String
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(5))
         .no_proxy()
-        .build()
-        .ok()?;
+        .build();
+    let client = match client {
+        Ok(client) => client,
+        Err(error) => {
+            log::warn!(
+                "could not build the loopback client ({error}); issuing a standalone invitation"
+            );
+            return None;
+        }
+    };
     let url = format!("https://127.0.0.1:{port}/internal/_rpc/companion_create_owner_invitation");
     let response = match client
         .post(&url)
@@ -1353,7 +1437,13 @@ async fn pair_through_running_server(advertised_base_url: &str) -> Option<String
         }
     };
     let issue = body.get("result").cloned().unwrap_or(body);
-    encode_running_pair_invitation(&issue, advertised_base_url)
+    let encoded = encode_running_pair_invitation(&issue, advertised_base_url);
+    if encoded.is_none() {
+        log::warn!(
+            "running server's invitation is missing a required field; issuing a standalone one"
+        );
+    }
+    encoded
 }
 
 fn encode_running_pair_invitation(
@@ -1458,6 +1548,7 @@ async fn run_serve(
     advertise_url: Option<String>,
     bind_loopback: bool,
     browser_listener_port: Option<u16>,
+    mdns_requested: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Config validation BEFORE anything is installed: a typo'd Lark base
     // would otherwise only surface as a 503 to a user inside a Feishu client.
@@ -1843,6 +1934,23 @@ async fn run_serve(
     log::info!("advertised base URL: {public_url}");
     log::info!("fingerprint: {}", tls_material.fingerprint_sha256);
 
+    // LAN discovery, the same `_cognia._tcp` advertisement the desktop starts
+    // once its listener is up. Held until shutdown; dropping it unregisters.
+    // A failure (no usable interface, multicast refused) costs discovery only,
+    // so it is logged and the server keeps serving.
+    let mdns = app_lib::companion_api::mdns::BroadcasterState::new();
+    if should_advertise_mdns(mdns_requested, bind_loopback) {
+        match mdns.start_auto(app_lib::companion_api::mdns::AutoStartConfig {
+            instance_name: mdns_instance_name(&tls_material.fingerprint_sha256),
+            port: handle.bound_port,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            tls_fingerprint: tls_material.fingerprint_sha256.clone(),
+        }) {
+            Ok(fullname) => log::info!("mDNS: advertising {fullname}"),
+            Err(error) => log::warn!("mDNS advertisement unavailable: {error}"),
+        }
+    }
+
     // Opt-in plaintext loopback plane for browsers (`browser_access`). The
     // desktop reads its allowlist from a saved config because a GUI-launched
     // process inherits no shell environment; a headless deployment is
@@ -1932,6 +2040,9 @@ async fn run_serve(
     // process mid-drain, orphaning the brain and sidecar children.
     app_lib::shutdown::wait_for_signal().await;
     log::info!("shutting down…");
+    // Withdraw the advertisement first so no scanner offers a Host that is
+    // already refusing connections.
+    mdns.stop();
     // Escape hatch: the drain below is bounded but a wedged child can still
     // hold it for a long time. A second signal force-exits instead of leaving
     // the operator with a process that ignores every further Ctrl-C.
@@ -1999,11 +2110,31 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mdns_is_advertised_only_for_a_reachable_listener_that_did_not_opt_out() {
+        assert!(super::should_advertise_mdns(true, false));
+        assert!(!super::should_advertise_mdns(false, false));
+        assert!(!super::should_advertise_mdns(true, true));
+        assert!(!super::should_advertise_mdns(false, true));
+    }
+
+    #[test]
+    fn mdns_instance_name_is_stable_per_fingerprint() {
+        let fingerprint = "61195BE979b8564b5a86c5c52a39d17da2999ef7c5b457ecf952dd1ce619a24b";
+        assert_eq!(super::mdns_instance_name(fingerprint), "cognia-61195b");
+        assert_eq!(
+            super::mdns_instance_name(fingerprint),
+            super::mdns_instance_name(fingerprint)
+        );
+        assert_eq!(super::mdns_instance_name("ab:CD:ef:01"), "cognia-abcdef");
+        assert_eq!(super::mdns_instance_name(""), "cognia-headless");
+    }
+
     use super::{
         agent_session_store_path, browser_plane_base_url, color_enabled,
         encode_pair_invitation_payload, encode_running_pair_invitation, format_log_line,
         lark_entry, plugin_storage_dir, report_lark_env, run_devices_admin, Cli, CliCommand,
-        DevicesCommand,
+        DevicesCommand, ProfilesCommand,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use clap::Parser;
@@ -2196,6 +2327,20 @@ mod tests {
     }
 
     #[test]
+    fn serve_advertises_over_mdns_unless_opted_out() {
+        let default = Cli::try_parse_from(["cognia-server", "serve"]).unwrap();
+        assert!(matches!(
+            default.command,
+            CliCommand::Serve { no_mdns: false, .. }
+        ));
+        let opted_out = Cli::try_parse_from(["cognia-server", "serve", "--no-mdns"]).unwrap();
+        assert!(matches!(
+            opted_out.command,
+            CliCommand::Serve { no_mdns: true, .. }
+        ));
+    }
+
+    #[test]
     fn serve_leaves_the_browser_listener_off_unless_a_port_is_named() {
         let cli = Cli::try_parse_from(["cognia-server", "serve"]).unwrap();
         assert!(matches!(
@@ -2330,6 +2475,53 @@ mod tests {
             CliCommand::Restore {
                 read_only_smoke: true,
                 ..
+            }
+        ));
+    }
+
+    /// Provider credentials are written by id with the value on stdin; the
+    /// command line never carries the secret, so there is no value flag.
+    #[test]
+    fn provider_credentials_are_managed_by_id_with_the_secret_off_argv() {
+        let cli =
+            Cli::try_parse_from(["cognia-server", "profiles", "credential-set", "--id", "k1"])
+                .expect("credential-set arguments");
+        assert!(matches!(
+            cli.command,
+            CliCommand::Profiles {
+                command: ProfilesCommand::CredentialSet { ref id }
+            } if id == "k1"
+        ));
+        assert!(Cli::try_parse_from([
+            "cognia-server",
+            "profiles",
+            "credential-set",
+            "--id",
+            "k1",
+            "--value",
+            "sk-secret",
+        ])
+        .is_err());
+        assert!(matches!(
+            Cli::try_parse_from([
+                "cognia-server",
+                "profiles",
+                "credential-delete",
+                "--id",
+                "k1"
+            ])
+            .expect("credential-delete arguments")
+            .command,
+            CliCommand::Profiles {
+                command: ProfilesCommand::CredentialDelete { .. }
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["cognia-server", "profiles", "credential-list"])
+                .expect("credential-list arguments")
+                .command,
+            CliCommand::Profiles {
+                command: ProfilesCommand::CredentialList
             }
         ));
     }

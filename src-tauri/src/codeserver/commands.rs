@@ -250,7 +250,9 @@ pub async fn codeserver_activate_proxy_temporary(
             "MANAGED_IDE_DEV_MODE_OFF: temporary proxies exist only during Dev Mode".to_string(),
         );
     }
-    state.install_temporary_proxy_artifact(&app, &artifact).await
+    state
+        .install_temporary_proxy_artifact(&app, &artifact)
+        .await
 }
 
 /// List locally signed proxy artifacts that pass hash/signature verification.

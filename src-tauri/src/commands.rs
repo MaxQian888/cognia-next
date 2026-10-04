@@ -143,6 +143,7 @@ pub const MENU_IDS: &[&str] = &[
     "go-browser",
     "go-a2ui",
     "go-dms",
+    "go-conversations",
     "go-canvas",
     "go-files",
     "go-source-control",

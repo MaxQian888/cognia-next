@@ -69,9 +69,15 @@ mod tests {
     #[test]
     fn the_desktop_bridge_delegates_to_the_shared_writes_bridge() {
         let source = include_str!("gateway_brain_bridge.rs");
-        let code = source.split("#[cfg(test)]").next().expect("the module body");
+        let code = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the module body");
         assert!(code.contains("WritesBrainBridge::new("));
-        assert!(!code.contains("fn interpret("), "the envelope reader lives in cognia-gateway");
+        assert!(
+            !code.contains("fn interpret("),
+            "the envelope reader lives in cognia-gateway"
+        );
         assert!(!code.contains("enum BridgeOutcome"));
     }
 }

@@ -226,7 +226,10 @@ mod tests {
     #[test]
     fn bridge_job_owner_refuses_ids_that_could_smuggle_a_session() {
         for bad in ["", "a/b", "a b", "x\ny", &"a".repeat(161)] {
-            assert!(super::bridge_job_owner(bad).is_err(), "{bad:?} must be refused");
+            assert!(
+                super::bridge_job_owner(bad).is_err(),
+                "{bad:?} must be refused"
+            );
         }
     }
 

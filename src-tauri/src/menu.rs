@@ -55,6 +55,7 @@ const GO_MENU_SECTIONS: &[&[GoMenuItem]] = &[
     &[
         ("go-a2ui", "Mini-Apps"),
         ("go-dms", "Chats"),
+        ("go-conversations", "Conversations"),
         ("go-canvas", "Canvas"),
         ("go-files", "Files"),
     ],

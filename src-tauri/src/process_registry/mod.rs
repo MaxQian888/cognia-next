@@ -299,7 +299,8 @@ fn local_browser_row(info: &LocalBrowserManagedInfo) -> ManagedProcess {
     let (status, detail) = match &info.phase {
         LocalBrowserManagedPhase::Running => (
             ManagedStatus::Running,
-            info.generation.map(|generation| format!("generation {generation}")),
+            info.generation
+                .map(|generation| format!("generation {generation}")),
         ),
         LocalBrowserManagedPhase::Restarting { attempt } => (
             ManagedStatus::Starting,

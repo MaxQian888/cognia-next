@@ -69,8 +69,8 @@ pub(crate) fn menu_and_tray(app: &App) {
     }
 }
 
-/// Honor the user's window close-button preference. `Quit` lets the runtime
-/// tear the window down (the app exits); `Tray` hides the window so the app
+/// Honor the user's window close-button preference. `Quit` exits the app
+/// (every window, overlays included); `Tray` hides the window so the app
 /// keeps living in the system tray; `Ask` intercepts the close and asks the
 /// frontend to show the exit-confirmation dialog. The tray menu's "Quit"
 /// always exits cleanly regardless, since it routes through
@@ -167,7 +167,17 @@ pub(crate) fn main_window(app: &App) {
         if let WindowEvent::CloseRequested { api, .. } = event {
             let behavior = handle.state::<WindowBehavior>();
             match behavior.close_behavior() {
-                CloseBehavior::Quit => {}
+                // "Quit" means the app, not this one window. Tauri only exits
+                // when the LAST window closes, and the desktop pet, its popup,
+                // the fleet island and the other overlays are windows too, so
+                // letting the close through left the process alive behind a
+                // frozen pet with no controller and no main window to reach.
+                // Exiting runs the `RunEvent::ExitRequested` teardown, which
+                // takes every window down with the app.
+                CloseBehavior::Quit => {
+                    api.prevent_close();
+                    handle.exit(0);
+                }
                 CloseBehavior::Tray => {
                     api.prevent_close();
                     if let Some(w) = handle.get_webview_window("main") {

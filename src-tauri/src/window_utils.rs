@@ -52,19 +52,29 @@ pub fn no_activate_ex_style(current: i32) -> i32 {
     current | WS_EX_NOACTIVATE_BITS | WS_EX_TOOLWINDOW_BITS
 }
 
-/// Make an overlay window non-activating on Windows.
+/// The extended style a focusable overlay window must end up with.
 ///
-/// Both the selection toolbar and the skill-recorder controller need exactly
-/// this — an overlay that stole focus from the app being observed would change
-/// the thing it is observing.
+/// `WS_EX_TOOLWINDOW` alone: out of the taskbar and Alt-Tab like the
+/// non-activating overlays, but still allowed to take focus. The desktop-pet
+/// popup needs that — its talk composer must accept typing, and its native
+/// blur-to-close only fires once the window has held focus.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn tool_window_ex_style(current: i32) -> i32 {
+    const WS_EX_TOOLWINDOW_BITS: i32 = 0x0000_0080;
+    current | WS_EX_TOOLWINDOW_BITS
+}
+
+/// Read-modify-write one window's extended style, fail-closed.
 ///
-/// Fail-closed. `GetWindowLongW` / `SetWindowLongW` both report failure by
-/// returning 0, which is also a legitimate result, so the documented idiom is to
-/// clear the thread's last error first and consult it when the return value is
-/// 0. Swallowing a failure here would leave a focus-stealing overlay on screen
-/// while every caller's `?` says the window is safe.
+/// `GetWindowLongW` / `SetWindowLongW` both report failure by returning 0,
+/// which is also a legitimate result, so the documented idiom is to clear the
+/// thread's last error first and consult it when the return value is 0.
 #[cfg(target_os = "windows")]
-pub fn apply_windows_no_activate<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+fn apply_windows_ex_style<R: Runtime>(
+    window: &WebviewWindow<R>,
+    what: &str,
+    next_style: fn(i32) -> i32,
+) -> Result<(), String> {
     use windows::Win32::Foundation::{GetLastError, SetLastError, WIN32_ERROR};
     use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, GWL_EXSTYLE};
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
@@ -85,7 +95,7 @@ pub fn apply_windows_no_activate<R: Runtime>(window: &WebviewWindow<R>) -> Resul
         }
     }
 
-    let next = no_activate_ex_style(current);
+    let next = next_style(current);
     // SAFETY: same handle; `next` is a valid extended-style bitmask.
     let previous = unsafe {
         SetLastError(WIN32_ERROR(0));
@@ -95,7 +105,7 @@ pub fn apply_windows_no_activate<R: Runtime>(window: &WebviewWindow<R>) -> Resul
         let code = unsafe { GetLastError() };
         if code.0 != 0 {
             return Err(format!(
-                "could not make the overlay window non-activating (win32 error {})",
+                "could not make the overlay window {what} (win32 error {})",
                 code.0
             ));
         }
@@ -103,9 +113,41 @@ pub fn apply_windows_no_activate<R: Runtime>(window: &WebviewWindow<R>) -> Resul
     Ok(())
 }
 
+/// Make an overlay window non-activating on Windows.
+///
+/// The selection toolbar, the skill-recorder controller and the desktop-pet
+/// sprite need exactly this — an overlay that stole focus from the app being
+/// observed (or, for the pet, from whatever the user is typing in) would
+/// change the thing it is observing.
+///
+/// Fail-closed: swallowing a failure here would leave a focus-stealing overlay
+/// on screen while every caller's `?` says the window is safe.
+#[cfg(target_os = "windows")]
+pub fn apply_windows_no_activate<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    apply_windows_ex_style(window, "non-activating", no_activate_ex_style)
+}
+
+/// Keep a focusable overlay window out of the taskbar and Alt-Tab on Windows.
+/// See [`tool_window_ex_style`] for why it must stay activatable.
+#[cfg(target_os = "windows")]
+pub fn apply_windows_tool_window<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    apply_windows_ex_style(window, "a tool window", tool_window_ex_style)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::no_activate_ex_style;
+    use super::{no_activate_ex_style, tool_window_ex_style};
+
+    #[test]
+    fn tool_window_sets_only_the_tool_window_bit() {
+        // Never WS_EX_NOACTIVATE (0x0800_0000): the pet popup must still take
+        // focus for its composer and its blur-to-close.
+        assert_eq!(tool_window_ex_style(0), 0x0000_0080);
+        assert_eq!(tool_window_ex_style(0) & 0x0800_0000, 0);
+        let layered = 0x0008_0000;
+        assert_eq!(tool_window_ex_style(layered) & layered, layered);
+        assert_eq!(tool_window_ex_style(tool_window_ex_style(0)), 0x0000_0080);
+    }
 
     /// The two bits the overlay contract depends on, as the Win32 headers
     /// define them. Pinned so a typo in the constants cannot ship a toolbar
