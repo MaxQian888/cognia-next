@@ -31,6 +31,12 @@ import {
   setFeishuPrincipalEnabled,
   setFeishuTenantEnabled,
 } from "@/lib/connectors/principal/admin"
+import {
+  bindRequestMatchesOwner,
+  readSignedInOwner,
+  type SignedInOwner,
+} from "@/lib/connectors/principal/login-link"
+import { getActiveRuntimeAccountId } from "@/lib/connectors/principal/resolve"
 import type {
   AdapterInstanceRow,
   FeishuPrincipalBindRequestRow,
@@ -112,6 +118,38 @@ export function LarkPrincipals({ adapterId }: LarkPrincipalsProps) {
               .toArray(),
       [tenantKey, appId]
     ) ?? []
+
+  // The person this profile is signed in as, and which pending requests the
+  // identity plane says are theirs. The match is a label for the approver,
+  // never an admission: "This is me" is still a click (ADR-0215 §9).
+  const requestKey = requests
+    .map((request) => [request.id, request.tenantKey ?? "", request.unionId ?? ""].join("|"))
+    .join(",")
+  const ownership = useLiveQuery(
+    async () => {
+      if (typeof window === "undefined") {
+        return { owner: null as SignedInOwner | null, matching: new Set<string>() }
+      }
+      const owner = await readSignedInOwner(getActiveRuntimeAccountId())
+      const matching = new Set<string>()
+      if (owner) {
+        for (const entry of requestKey.split(",").filter(Boolean)) {
+          const [id, tenantKey, unionId] = entry.split("|")
+          if (
+            await bindRequestMatchesOwner(
+              { tenantKey: tenantKey || undefined, unionId: unionId || undefined },
+              owner
+            )
+          ) {
+            matching.add(id)
+          }
+        }
+      }
+      return { owner, matching }
+    },
+    [requestKey],
+    { owner: null as SignedInOwner | null, matching: new Set<string>() }
+  )
 
   // Keyed on the ids rather than the array: `useLiveQuery` hands back a new
   // array on every tick, which would re-run this on every keystroke elsewhere.
@@ -229,8 +267,37 @@ export function LarkPrincipals({ adapterId }: LarkPrincipalsProps) {
                   className="flex items-center justify-between gap-2 text-xs"
                   data-testid={`lark-bind-request-${request.id}`}
                 >
-                  <span className="font-mono break-all">{request.id}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="font-mono break-all">{request.id}</span>
+                    {ownership.matching.has(request.id) && (
+                      <Badge
+                        variant="secondary"
+                        aria-label={t("requestMatchesSignInAria")}
+                        data-testid={`lark-bind-matches-${request.id}`}
+                      >
+                        {t("requestMatchesSignIn")}
+                      </Badge>
+                    )}
+                  </span>
                   <span className="flex items-center gap-1.5">
+                    {ownership.owner && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={ownership.matching.has(request.id) ? "default" : "outline"}
+                        disabled={busy}
+                        title={t("requestApproveAsMeHint")}
+                        aria-label={t("requestApproveAsMeAria", { code: request.id })}
+                        onClick={() =>
+                          void run(() =>
+                            approveFeishuBind({ code: request.id, asSignedInOwner: true })
+                          )
+                        }
+                        data-testid={`lark-bind-approve-as-me-${request.id}`}
+                      >
+                        {t("requestApproveAsMe")}
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       size="sm"
@@ -303,6 +370,24 @@ export function LarkPrincipals({ adapterId }: LarkPrincipalsProps) {
                         `standing.${people.standings.get(principal.cogniaUserId) ?? "unaffiliated"}`
                       )}
                     </Badge>
+                    {principal.ownerConfirmedAt !== undefined && (
+                      <Badge
+                        variant="outline"
+                        aria-label={t("principalOwnerConfirmedAria")}
+                        data-testid={`lark-principal-confirmed-${principal.id}`}
+                      >
+                        {t("principalOwnerConfirmed")}
+                      </Badge>
+                    )}
+                    {principal.selfBoundAt !== undefined && (
+                      <Badge
+                        variant="outline"
+                        aria-label={t("principalSelfBoundAria")}
+                        data-testid={`lark-principal-self-bound-${principal.id}`}
+                      >
+                        {t("principalSelfBound")}
+                      </Badge>
+                    )}
                     <Badge
                       variant={PRINCIPAL_BADGE_VARIANT[principal.status]}
                       aria-label={t("principalStatusAria")}

@@ -55,6 +55,12 @@ export interface LarkMention {
 export interface LarkSenderId {
   open_id?: string
   user_id?: string
+  /**
+   * Stable for one person across every app of one developer inside a tenant
+   * (`on_…`). The key a login's Feishu identity is filed under, so carrying it
+   * is what lets the principal registry recognise a signed-in person.
+   */
+  union_id?: string
 }
 
 export interface LarkSender {
@@ -160,14 +166,20 @@ export function extractTenantKey(envelope: LarkEventEnvelope): string | undefine
  * `channelData.identityScope` (inbound) / `identityScope` (callbacks) so the
  * principal registry can resolve `tenantKey + appId + openId` without
  * re-touching raw payloads (plan 2026-07-24 Phase 1).
+ *
+ * `senderUnionId` is the acting user's `union_id` from the same verified
+ * envelope. It rides along only when there is a tenancy scope to file it
+ * under: a union id means nothing without its tenant.
  */
 export function identityScopeOf(
-  envelope: LarkEventEnvelope
-): { tenantKey?: string; appId?: string } | undefined {
+  envelope: LarkEventEnvelope,
+  senderUnionId?: string
+): { tenantKey?: string; appId?: string; unionId?: string } | undefined {
   const tenantKey = extractTenantKey(envelope)
   const appId = envelope.header?.app_id
   if (!tenantKey && !appId) return undefined
-  return { tenantKey, appId }
+  const unionId = senderUnionId?.trim()
+  return { tenantKey, appId, ...(unionId ? { unionId } : {}) }
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +699,7 @@ export function parseLarkEventEnvelope(
     threadId !== undefined ? "thread" : message.chat_type === "p2p" ? "private" : "group"
 
   const createTimeMs = message.create_time ? parseInt(message.create_time, 10) : Date.now()
-  const identityScope = identityScopeOf(envelope)
+  const identityScope = identityScopeOf(envelope, sender.sender_id?.union_id)
 
   return {
     platform: "lark",
@@ -771,7 +783,7 @@ export type LarkBotMenuOutcome =
       openId: string
       eventKey: string
       eventId: string
-      identityScope?: { tenantKey?: string; appId?: string }
+      identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
     }
   | {
       kind: "link"
@@ -780,14 +792,14 @@ export type LarkBotMenuOutcome =
       openId: string
       eventKey: string
       eventId: string
-      identityScope?: { tenantKey?: string; appId?: string }
+      identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
     }
   | {
       kind: "unknown"
       openId: string
       eventKey: string
       eventId: string
-      identityScope?: { tenantKey?: string; appId?: string }
+      identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
     }
 
 /**
@@ -814,7 +826,7 @@ export function parseLarkBotMenuEvent(
   if (!openId || !eventKey) return null
 
   const eventId = envelope.header.event_id ?? ""
-  const identityScope = identityScopeOf(envelope)
+  const identityScope = identityScopeOf(envelope, event.operator?.operator_id?.union_id)
   // Adapter-configured rows first; the reserved cognia.* built-ins fill in
   // behind them. Which source matched is part of the outcome — the dispatch
   // site gates built-ins on the `larkNativeSlash` batch flag, while

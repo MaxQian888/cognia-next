@@ -150,6 +150,62 @@ describe("completeSignOut", () => {
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_UNBIND_PERSON_COMMAND)
   })
 
+  it("unlinks the Feishu principals a self-bind admitted for the departing person", async () => {
+    const registry = await freshRegistry("sign-out-unlink")
+    const identity = await completeSignIn(session(), {
+      localAccountId: "acct_alpha",
+      registry,
+      projection: collector().projection,
+      host: { isDesktop: () => false },
+    })
+    const unlinkSelfBound = jest.fn(async () => ["fp_1"])
+
+    await completeSignOut({
+      localAccountId: "acct_alpha",
+      registry,
+      host: { isDesktop: () => false },
+      unlinkSelfBound,
+    })
+
+    expect(unlinkSelfBound).toHaveBeenCalledWith({
+      localAccountId: "acct_alpha",
+      userId: identity.user.id,
+    })
+  })
+
+  it("signs out even when unlinking the principals fails, and skips it when nobody was bound", async () => {
+    const registry = await freshRegistry("sign-out-unlink-fails")
+    await completeSignIn(session(), {
+      localAccountId: "acct_alpha",
+      registry,
+      projection: collector().projection,
+      host: { isDesktop: () => false },
+    })
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const failing = jest.fn(async () => {
+      throw new Error("db closed")
+    })
+
+    await completeSignOut({
+      localAccountId: "acct_alpha",
+      registry,
+      host: { isDesktop: () => false },
+      unlinkSelfBound: failing,
+    })
+    expect(await registry.get("acct_alpha")).toBeNull()
+    expect(warn).toHaveBeenCalled()
+
+    const notCalled = jest.fn(async () => [])
+    await completeSignOut({
+      localAccountId: "acct_alpha",
+      registry,
+      host: { isDesktop: () => false },
+      unlinkSelfBound: notCalled,
+    })
+    expect(notCalled).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it("is idempotent and survives a host that cannot be reached", async () => {
     const registry = await freshRegistry("sign-out-twice")
     const onHostMirrorFailed = jest.fn()

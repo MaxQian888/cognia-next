@@ -1416,9 +1416,27 @@ export interface FeishuPrincipalRow {
    * is the only place one is resolved.
    */
   cogniaUserId: string
-  /** Web SSO linkage (P1.3): populated once the same person logs in via OIDC. */
+  /**
+   * The person's Logto subject (P1.3). Written when the principal is created
+   * for a person whose login is already known (bind approval, the signed-in
+   * owner's self-bind), and back-filled onto matching principals when that
+   * person signs in later (`lib/connectors/principal/login-link.ts`). Never
+   * written for a principal that belongs to somebody else.
+   */
   logtoSubject?: string
   logtoOrganizationId?: string
+  /**
+   * When the profile's signed-in person approved this principal as
+   * THEMSELVES (`approveFeishuBind({ asSignedInOwner: true })`). The only
+   * evidence `principal/self-bind.ts` accepts for admitting the same
+   * `union_id` in another bot app of the tenant. Non-indexed.
+   */
+  ownerConfirmedAt?: number
+  /**
+   * When `principal/self-bind.ts` admitted (or re-admitted) this principal on
+   * the strength of an owner confirmation. Marks the rows a sign-out unlinks.
+   */
+  selfBoundAt?: number
   /** Display-identity reference into `platformIdentities` (directory only). */
   platformIdentityId?: string
   status: FeishuPrincipalStatus
@@ -1527,6 +1545,8 @@ export type FeishuBindRequestStatus = "pending" | "approved" | "rejected" | "exp
 export interface FeishuPrincipalBindRequestRow {
   id: string
   openId: string
+  /** The sender's `union_id`; non-indexed, absent on rows from older parsers. */
+  unionId?: string
   adapterId: string
   tenantKey?: string
   appId?: string

@@ -40,6 +40,7 @@ import { ORG_ID_PREFIX, USER_ID_PREFIX, type Org, type OrgRole, type User } from
 import type { LogtoSession } from "@/lib/logto/client"
 import { readLogtoIdentity, type LogtoIdentity } from "./logto-claims"
 import { UserBindingRegistry, type BindUserInput } from "./user-binding"
+import { unlinkSelfBoundPrincipals } from "@/lib/connectors/principal/login-link"
 
 import type { UserBindingRow } from "@/lib/accounts/account-db"
 
@@ -92,6 +93,8 @@ export interface BindSignedInIdentityDeps {
   /** Take the profile over if it belongs to somebody else. Explicit, never a default. */
   takeOverProfile?: boolean
   now?: () => number
+  /** Unlinks the previous person's self-bound Feishu principals on a takeover. */
+  unlinkSelfBound?: typeof unlinkSelfBoundPrincipals
 }
 
 export class SignInError extends Error {
@@ -172,7 +175,22 @@ export async function bindSignedInIdentity(
   if (user.displayName) input.displayName = user.displayName
   if (user.email) input.email = user.email
 
+  const previous = deps.takeOverProfile ? await registry.get(deps.localAccountId) : null
   const binding = deps.takeOverProfile ? await registry.rebind(input) : await registry.bind(input)
+
+  // A takeover by somebody else ends the previous person's self-bound access
+  // to this profile's bots; their confirmed principals stay as approved.
+  if (previous && previous.userId !== binding.userId) {
+    try {
+      await (deps.unlinkSelfBound ?? unlinkSelfBoundPrincipals)({
+        localAccountId: deps.localAccountId,
+        userId: previous.userId,
+        now,
+      })
+    } catch (error) {
+      console.warn("[identity] could not unlink the previous person's Feishu principals", error)
+    }
+  }
 
   const resolved: SignedInIdentity = { user, binding }
   if (org) resolved.org = org

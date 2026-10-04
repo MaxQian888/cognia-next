@@ -34,7 +34,8 @@ function mkAdapter(overrides: Record<string, unknown> = {}) {
     displayName: "My Lark",
     enabled: true,
     transportMode: "webhook",
-    settings: { appId: "cli_test_app" },
+    // The settings form and OAuth handler keep appId in the keyring, not here.
+    settings: {},
     credentialsRef: { keyringService: "x", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
@@ -72,16 +73,60 @@ describe("resolveLarkAuth", () => {
     }
   })
 
-  it("missing_app_id when settings.appId is blank", async () => {
-    mockListByType.mockResolvedValue([mkAdapter({ settings: {} })])
+  it("missing_app_id when neither the keyring nor settings hold an appId", async () => {
+    mockListByType.mockResolvedValue([mkAdapter()])
+    mockKeyring.mockImplementation(async (_id: string, key: string) =>
+      key === "appSecret" ? "secret-x" : undefined
+    )
     const r = await resolveLarkAuth()
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toBe("missing_app_id")
   })
 
+  it("reads appId from the keyring, where the settings form stores it", async () => {
+    mockListByType.mockResolvedValue([mkAdapter()])
+    mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "  cli_from_keyring  "
+      if (key === "appSecret") return "secret-x"
+      if (key === "user_token") return "uat-aaa"
+      return undefined
+    })
+    const r = await resolveLarkAuth()
+    expect(mockKeyring).toHaveBeenCalledWith("lark-1", "appId")
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.env.LARK_APP_ID).toBe("cli_from_keyring")
+  })
+
+  it("falls back to settings.appId on rows written by an older form", async () => {
+    mockListByType.mockResolvedValue([mkAdapter({ settings: { appId: "cli_legacy" } })])
+    mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appSecret") return "secret-x"
+      if (key === "user_token") return "uat-aaa"
+      return undefined
+    })
+    const r = await resolveLarkAuth()
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.env.LARK_APP_ID).toBe("cli_legacy")
+  })
+
+  it("prefers the keyring appId over a stale settings.appId", async () => {
+    mockListByType.mockResolvedValue([mkAdapter({ settings: { appId: "cli_stale" } })])
+    mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "cli_current"
+      if (key === "appSecret") return "secret-x"
+      if (key === "user_token") return "uat-aaa"
+      return undefined
+    })
+    const r = await resolveLarkAuth()
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.env.LARK_APP_ID).toBe("cli_current")
+  })
+
   it("missing_app_secret when keyring returns undefined", async () => {
     mockListByType.mockResolvedValue([mkAdapter()])
-    mockKeyring.mockResolvedValue(undefined)
+    mockKeyring.mockImplementation(async (_id: string, key: string) =>
+      key === "appId" ? "cli_test_app" : undefined
+    )
     const r = await resolveLarkAuth()
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toBe("missing_app_secret")
@@ -90,6 +135,7 @@ describe("resolveLarkAuth", () => {
   it("returns user identity env when user_token present", async () => {
     mockListByType.mockResolvedValue([mkAdapter()])
     mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "cli_test_app"
       if (key === "appSecret") return "secret-x"
       if (key === "user_token") return "uat-aaa"
       return undefined
@@ -109,6 +155,7 @@ describe("resolveLarkAuth", () => {
   it("falls back to bot identity when user_token absent", async () => {
     mockListByType.mockResolvedValue([mkAdapter()])
     mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "cli_test_app"
       if (key === "appSecret") return "secret-x"
       return undefined // no user_token
     })
@@ -128,6 +175,7 @@ describe("resolveLarkAuth", () => {
   it("identity='bot' explicit override skips user_token lookup", async () => {
     mockListByType.mockResolvedValue([mkAdapter()])
     mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "cli_test_app"
       if (key === "appSecret") return "secret-x"
       if (key === "user_token") return "uat-aaa"
       return undefined
@@ -145,6 +193,7 @@ describe("resolveLarkAuth", () => {
   it("tenant_token_failed surfaces upstream error", async () => {
     mockListByType.mockResolvedValue([mkAdapter()])
     mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "cli_test_app"
       if (key === "appSecret") return "secret-x"
       return undefined
     })
@@ -160,6 +209,7 @@ describe("resolveLarkAuth", () => {
   it("explicit adapterId routes to getAdapterInstance instead of listByType", async () => {
     mockGetAdapter.mockResolvedValue(mkAdapter({ id: "lark-2" }))
     mockKeyring.mockImplementation(async (_id: string, key: string) => {
+      if (key === "appId") return "cli_test_app"
       if (key === "appSecret") return "secret-x"
       if (key === "user_token") return "uat-z"
       return undefined
@@ -172,7 +222,7 @@ describe("resolveLarkAuth", () => {
   })
 
   it("keyring throw is treated as missing credential (graceful)", async () => {
-    mockListByType.mockResolvedValue([mkAdapter()])
+    mockListByType.mockResolvedValue([mkAdapter({ settings: { appId: "cli_legacy" } })])
     mockKeyring.mockRejectedValue(new Error("keyring locked"))
     const r = await resolveLarkAuth()
     expect(r.ok).toBe(false)

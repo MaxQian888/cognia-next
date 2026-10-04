@@ -9,7 +9,7 @@ import {
   getFeishuTenant,
   upsertFeishuTenant,
 } from "@/lib/db/feishu-principals"
-import { findUserIdByExternalIdentity } from "@/lib/db/identity"
+import { findUserIdByExternalIdentity, linkExternalIdentity } from "@/lib/db/identity"
 import { getWebSession, touchWebSession } from "@/lib/db/lark-entry"
 import { isUserId } from "@/types/identity"
 import type { AuditEntry } from "@/types/connectors/audit"
@@ -37,9 +37,12 @@ function auditSpy() {
   return { rows, deps: { audit, now: () => NOW, activeAccountId: () => "acct_a" } }
 }
 
-async function seedPendingRequest(overrides: { tenantKey?: string; appId?: string } = {}) {
+async function seedPendingRequest(
+  overrides: { tenantKey?: string; appId?: string; unionId?: string } = {}
+) {
   return createBindRequest({
     openId: "ou_new",
+    ...(overrides.unionId ? { unionId: overrides.unionId } : {}),
     adapterId: "lark-1",
     tenantKey: overrides.tenantKey ?? "tk_a",
     appId: overrides.appId ?? "cli_1",
@@ -386,6 +389,101 @@ describe("principal admin", () => {
 
     expect(principal.cogniaUserId).toBe("usr_ada")
     expect(await findUserIdByExternalIdentity("lark", "ou_new", "tk_a/cli_1")).toBe("usr_ada")
+  })
+
+  it("resolves a signed-in person by union_id and carries their login subject", async () => {
+    const { deps } = auditSpy()
+    // The person signed in with Feishu: the sign-in filed their union id and
+    // their Logto subject on `usr_ada`.
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "lark",
+      subject: "on_ada",
+      tenant: "tk_a",
+    })
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "logto",
+      subject: "sub_ada",
+      tenant: "https://id.example/oidc",
+    })
+    const request = await seedPendingRequest({ unionId: "on_ada" })
+
+    const principal = await approveFeishuBind({ code: request.id }, deps)
+
+    expect(principal.cogniaUserId).toBe("usr_ada")
+    expect(principal.unionId).toBe("on_ada")
+    expect(principal.logtoSubject).toBe("sub_ada")
+    // This app's open_id now answers for the same person.
+    expect(await findUserIdByExternalIdentity("lark", "ou_new", "tk_a/cli_1")).toBe("usr_ada")
+  })
+
+  it("leaves the login subject empty for a person who never signed in", async () => {
+    const { deps } = auditSpy()
+    const request = await seedPendingRequest({ unionId: "on_stranger" })
+    const principal = await approveFeishuBind({ code: request.id }, deps)
+    expect(principal.unionId).toBe("on_stranger")
+    expect(principal.logtoSubject).toBeUndefined()
+  })
+
+  it("approves a sender as the signed-in owner and confirms them", async () => {
+    const { rows, deps } = auditSpy()
+    const request = await seedPendingRequest({ unionId: "on_owner" })
+    const binding = jest.fn(async () => ({
+      localAccountId: "acct_a",
+      userId: "usr_owner",
+      logtoSubject: "sub_owner",
+      logtoIssuer: "https://id.example/oidc",
+      boundAt: NOW,
+      updatedAt: NOW,
+    }))
+
+    const principal = await approveFeishuBind(
+      { code: request.id, asSignedInOwner: true },
+      { ...deps, binding }
+    )
+
+    expect(binding).toHaveBeenCalledWith("acct_a")
+    expect(principal).toMatchObject({
+      cogniaUserId: "usr_owner",
+      unionId: "on_owner",
+      logtoSubject: "sub_owner",
+      ownerConfirmedAt: NOW,
+    })
+    expect(await findUserIdByExternalIdentity("lark", "ou_new", "tk_a/cli_1")).toBe("usr_owner")
+    // The confirmation is about this principal; the union id is not re-filed.
+    expect(await findUserIdByExternalIdentity("lark", "on_owner", "tk_a")).toBeUndefined()
+    expect(rows.find((r) => r.kind === "principal.bound")?.reason).toBe("signed_in_owner_confirmed")
+  })
+
+  it("refuses 'as me' on a profile nobody signed in on, before admitting anything", async () => {
+    const { deps } = auditSpy()
+    const request = await seedPendingRequest({ unionId: "on_owner" })
+    await expect(
+      approveFeishuBind(
+        { code: request.id, asSignedInOwner: true },
+        { ...deps, binding: async () => null }
+      )
+    ).rejects.toThrow(/needs a signed-in profile/)
+    expect((await getDb().feishuPrincipalBindRequests.get(request.id))?.status).toBe("pending")
+    expect(await getFeishuTenant("tk_a", "cli_1")).toBeUndefined()
+  })
+
+  it("refuses 'as me' together with another named person", async () => {
+    const { deps } = auditSpy()
+    const request = await seedPendingRequest()
+    await expect(
+      approveFeishuBind({ code: request.id, asSignedInOwner: true, cogniaUserId: "usr_ada" }, deps)
+    ).rejects.toThrow(/cannot also name another person/)
+  })
+
+  it("re-points only this app's open_id when an operator names the person", async () => {
+    const { deps } = auditSpy()
+    const request = await seedPendingRequest({ unionId: "on_someone" })
+    await approveFeishuBind({ code: request.id, cogniaUserId: "usr_ada" }, deps)
+    expect(await findUserIdByExternalIdentity("lark", "ou_new", "tk_a/cli_1")).toBe("usr_ada")
+    // One approval must not become tenant-wide through the union id.
+    expect(await findUserIdByExternalIdentity("lark", "on_someone", "tk_a")).toBeUndefined()
   })
 
   it("refuses an approval target that is not a person id", async () => {

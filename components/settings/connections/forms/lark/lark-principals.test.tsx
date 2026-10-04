@@ -21,8 +21,21 @@ import {
   getFeishuTenant,
   upsertFeishuTenant,
 } from "@/lib/db/feishu-principals"
-import { putWorkspaceMembership, upsertUser } from "@/lib/db/identity"
+import { linkExternalIdentity, putWorkspaceMembership, upsertUser } from "@/lib/db/identity"
+import { CogniaAccountRegistryDB } from "@/lib/accounts/account-db"
+import { UserBindingRegistry } from "@/lib/identity/user-binding"
+import { getActiveRuntimeAccountId } from "@/lib/connectors/principal/resolve"
 import { LarkPrincipals } from "./lark-principals"
+
+async function signInAsOwner() {
+  await new UserBindingRegistry().bind({
+    localAccountId: getActiveRuntimeAccountId(),
+    userId: "usr_owner",
+    logtoSubject: "sub_owner",
+    logtoIssuer: "https://id.example/oidc",
+    displayName: "Owner",
+  })
+}
 
 const ADAPTER_ID = "lark-admin-1"
 const WHOAMI = { botName: "bot", appId: "cli_1", openId: "ou_bot", tenantKey: "tk_a" }
@@ -43,6 +56,7 @@ async function seedAdapter(whoami: Record<string, unknown> | undefined = WHOAMI)
 describe("LarkPrincipals", () => {
   beforeEach(async () => {
     await getDb().delete()
+    await new CogniaAccountRegistryDB().delete()
     __resetDbForTesting()
   })
   afterEach(async () => {
@@ -256,5 +270,83 @@ describe("LarkPrincipals", () => {
         await screen.findByTestId(`lark-principal-standing-${principal.id}`)
       ).toHaveTextContent("standing.guest")
     })
+  })
+
+  it("offers no 'this is me' approval on a profile nobody signed in on", async () => {
+    await seedAdapter()
+    const request = await createBindRequest({
+      openId: "ou_new",
+      unionId: "on_owner",
+      adapterId: ADAPTER_ID,
+      tenantKey: "tk_a",
+      appId: "cli_1",
+    })
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
+
+    expect(await screen.findByTestId(`lark-bind-approve-${request.id}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`lark-bind-approve-as-me-${request.id}`)).not.toBeInTheDocument()
+    expect(screen.queryByTestId(`lark-bind-matches-${request.id}`)).not.toBeInTheDocument()
+  })
+
+  it("labels the request that matches the sign-in, and approving it as me confirms the owner", async () => {
+    await seedAdapter()
+    await signInAsOwner()
+    await linkExternalIdentity({
+      userId: "usr_owner",
+      provider: "lark",
+      subject: "on_owner",
+      tenant: "tk_a",
+    })
+    const mine = await createBindRequest({
+      openId: "ou_owner",
+      unionId: "on_owner",
+      adapterId: ADAPTER_ID,
+      tenantKey: "tk_a",
+      appId: "cli_1",
+    })
+    const stranger = await createBindRequest({
+      openId: "ou_stranger",
+      unionId: "on_stranger",
+      adapterId: ADAPTER_ID,
+      tenantKey: "tk_a",
+      appId: "cli_1",
+    })
+    const user = userEvent.setup({ delay: null })
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
+
+    expect(await screen.findByTestId(`lark-bind-matches-${mine.id}`)).toHaveTextContent(
+      "requestMatchesSignIn"
+    )
+    expect(screen.queryByTestId(`lark-bind-matches-${stranger.id}`)).not.toBeInTheDocument()
+    // The label does not approve anything by itself.
+    expect(await getFeishuPrincipal("tk_a", "cli_1", "ou_owner")).toBeUndefined()
+
+    await user.click(screen.getByTestId(`lark-bind-approve-as-me-${mine.id}`))
+
+    await waitFor(async () => {
+      const principal = await getFeishuPrincipal("tk_a", "cli_1", "ou_owner")
+      expect(principal?.cogniaUserId).toBe("usr_owner")
+      expect(principal?.ownerConfirmedAt).toBeDefined()
+      expect(principal?.logtoSubject).toBe("sub_owner")
+    })
+    expect(await screen.findByText("principalOwnerConfirmed")).toBeInTheDocument()
+  })
+
+  it("marks principals a self-bind admitted", async () => {
+    await seedAdapter()
+    const principal = await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      openId: "ou_owner",
+      cogniaAccountId: "acct_a",
+      cogniaUserId: "usr_owner",
+      selfBoundAt: 5,
+    })
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
+
+    expect(
+      await screen.findByTestId(`lark-principal-self-bound-${principal.id}`)
+    ).toHaveTextContent("principalSelfBound")
+    expect(screen.queryByTestId(`lark-principal-confirmed-${principal.id}`)).not.toBeInTheDocument()
   })
 })

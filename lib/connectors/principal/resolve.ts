@@ -17,6 +17,7 @@ import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
   getFeishuPrincipal,
   getFeishuTenant,
+  rebindFeishuPrincipal,
   touchFeishuPrincipalVerification,
 } from "@/lib/db/feishu-principals"
 import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
@@ -30,6 +31,14 @@ import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
 export interface IdentityScope {
   tenantKey?: string
   appId?: string
+  /**
+   * The acting user's `union_id`, read from the same verified envelope.
+   * Identity evidence, never an authorization key: resolution still matches
+   * on `tenantKey + appId + openId`. It is recorded on bind requests and
+   * principals, and it is how a signed-in owner is recognised
+   * (`principal/self-bind.ts`).
+   */
+  unionId?: string
 }
 
 export type PrincipalResolution =
@@ -41,7 +50,13 @@ export type PrincipalResolution =
     }
   /** Registry flag off, or non-Lark platform — today's behavior, no gating. */
   | { status: "legacy" }
-  | { status: "unbound"; tenantKey?: string; appId?: string; openIdHash: string }
+  | {
+      status: "unbound"
+      tenantKey?: string
+      appId?: string
+      unionId?: string
+      openIdHash: string
+    }
   | { status: "principal_disabled"; principal: FeishuPrincipalRow }
   | { status: "tenant_disabled"; tenant: FeishuTenantRow }
   /** Registry maps the sender to a DIFFERENT account than this runtime serves. */
@@ -103,8 +118,10 @@ export function readIdentityScope(
   const scope = raw as Record<string, unknown>
   const tenantKey = typeof scope.tenantKey === "string" ? scope.tenantKey : undefined
   const appId = typeof scope.appId === "string" ? scope.appId : undefined
+  const unionId =
+    typeof scope.unionId === "string" && scope.unionId.length > 0 ? scope.unionId : undefined
   if (!tenantKey && !appId) return undefined
-  return { tenantKey, appId }
+  return { tenantKey, appId, ...(unionId ? { unionId } : {}) }
 }
 
 /**
@@ -124,6 +141,24 @@ export function getActiveRuntimeAccountId(): string {
 // Throttle lastVerifiedAt writes to once per principal per hour.
 const VERIFICATION_TOUCH_INTERVAL_MS = 60 * 60 * 1000
 
+/**
+ * Record the sender's `union_id` on a principal that has none yet.
+ *
+ * Principals seeded from the contact directory or approved before the parser
+ * read `union_id` carry only an `open_id`, which can never meet a login's
+ * Feishu identity. The first verified event that names the union id fills it
+ * in. A principal that already holds a DIFFERENT union id is left alone: one
+ * `open_id` maps to one person inside an app, so a mismatch is evidence of a
+ * fault, not something to overwrite. Best-effort: never blocks resolution.
+ */
+async function backfillUnionId(
+  principal: FeishuPrincipalRow,
+  unionId: string | undefined
+): Promise<FeishuPrincipalRow> {
+  if (!unionId || principal.unionId) return principal
+  return rebindFeishuPrincipal(principal.id, { unionId }).catch(() => principal)
+}
+
 export async function resolveConnectorPrincipal(
   input: ResolvePrincipalInput
 ): Promise<PrincipalResolution> {
@@ -138,37 +173,43 @@ export async function resolveConnectorPrincipal(
   // tenantKey has no such fallback: guessing it from whoami would merge
   // cross-tenant (external-group) senders into the home tenant — refuse.
   const appId = input.identityScope?.appId ?? input.adapterRow.lastWhoamiResult?.appId
-  if (!tenantKey || !appId) {
-    return { status: "unbound", tenantKey, appId, openIdHash }
-  }
+  const unionId = input.identityScope?.unionId
+  const unbound = (): PrincipalResolution => ({
+    status: "unbound",
+    tenantKey,
+    appId,
+    ...(unionId ? { unionId } : {}),
+    openIdHash,
+  })
+  if (!tenantKey || !appId) return unbound()
 
   const tenant = await getFeishuTenant(tenantKey, appId)
-  if (!tenant) return { status: "unbound", tenantKey, appId, openIdHash }
+  if (!tenant) return unbound()
   if (tenant.status === "disabled") return { status: "tenant_disabled", tenant }
 
-  const principal = await getFeishuPrincipal(tenantKey, appId, openId)
-  if (!principal) return { status: "unbound", tenantKey, appId, openIdHash }
-  if (principal.status !== "active") return { status: "principal_disabled", principal }
+  const fetched = await getFeishuPrincipal(tenantKey, appId, openId)
+  if (!fetched) return unbound()
+  if (fetched.status !== "active") return { status: "principal_disabled", principal: fetched }
 
   const activeAccountId = input.activeAccountId ?? getActiveRuntimeAccountId()
-  if (principal.cogniaAccountId !== activeAccountId || tenant.cogniaAccountId !== activeAccountId) {
+  if (fetched.cogniaAccountId !== activeAccountId || tenant.cogniaAccountId !== activeAccountId) {
     return {
       status: "cross_account",
       declaredAccountId:
-        principal.cogniaAccountId !== activeAccountId
-          ? principal.cogniaAccountId
+        fetched.cogniaAccountId !== activeAccountId
+          ? fetched.cogniaAccountId
           : tenant.cogniaAccountId,
     }
   }
 
   const now = Date.now()
-  if (
-    !principal.lastVerifiedAt ||
-    now - principal.lastVerifiedAt > VERIFICATION_TOUCH_INTERVAL_MS
-  ) {
+  if (!fetched.lastVerifiedAt || now - fetched.lastVerifiedAt > VERIFICATION_TOUCH_INTERVAL_MS) {
     // Best-effort freshness marker; never blocks resolution.
-    await touchFeishuPrincipalVerification(principal.id, now).catch(() => undefined)
+    await touchFeishuPrincipalVerification(fetched.id, now).catch(() => undefined)
   }
 
+  // Only a principal that positively resolved learns its union id: inbound
+  // traffic never rewrites a disabled or cross-account row.
+  const principal = await backfillUnionId(fetched, unionId)
   return { status: "resolved", principal, tenant, accountId: activeAccountId }
 }

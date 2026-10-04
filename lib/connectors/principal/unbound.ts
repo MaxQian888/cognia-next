@@ -71,6 +71,7 @@ export async function handleUnresolvedPrincipal(
   if (resolution.status === "unbound") {
     const request = await deps.bindRequest({
       openId: event.sender.remoteUserId,
+      ...(resolution.unionId ? { unionId: resolution.unionId } : {}),
       adapterId: event.adapterId,
       tenantKey: resolution.tenantKey,
       appId: resolution.appId,

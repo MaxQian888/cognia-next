@@ -13,7 +13,9 @@
  *      precise "Lark adapter is disabled — enable it" error)
  *
  * Reads:
- *   - `AdapterInstanceRow.settings.appId`
+ *   - keyring `<adapterId>:appId` (where the settings form and the OAuth
+ *     handler store it), falling back to `settings.appId` on rows written by
+ *     an older form
  *   - keyring `<adapterId>:appSecret`
  *   - keyring `<adapterId>:user_token`         (preferred — narrow scope)
  *   - keyring `<adapterId>:user_refresh_token` (used by future refresh)
@@ -104,12 +106,14 @@ export async function resolveLarkAuth(
     }
   }
 
-  const appId = String(adapter.settings.appId ?? "").trim()
+  const appId =
+    (await safeKeyringGet(adapter.id, "appId"))?.trim() ||
+    String(adapter.settings.appId ?? "").trim()
   if (!appId) {
     return {
       ok: false,
       reason: "missing_app_id",
-      message: `Lark adapter "${adapter.displayName}" has no appId configured.`,
+      message: `Lark adapter "${adapter.displayName}" has no appId in the keyring.`,
       adapterId: adapter.id,
     }
   }

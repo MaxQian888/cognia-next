@@ -100,6 +100,12 @@ export interface CreateFeishuPrincipalInput {
   unionId?: string
   cogniaAccountId: string
   cogniaUserId: string
+  /** The person's Logto subject, when their login is already known. */
+  logtoSubject?: string
+  /** See `FeishuPrincipalRow.ownerConfirmedAt`. */
+  ownerConfirmedAt?: number
+  /** See `FeishuPrincipalRow.selfBoundAt`. */
+  selfBoundAt?: number
   platformIdentityId?: string
   now?: number
 }
@@ -128,6 +134,9 @@ export async function createFeishuPrincipal(
     unionId: input.unionId,
     cogniaAccountId: input.cogniaAccountId,
     cogniaUserId: input.cogniaUserId,
+    ...(input.logtoSubject ? { logtoSubject: input.logtoSubject } : {}),
+    ...(input.ownerConfirmedAt !== undefined ? { ownerConfirmedAt: input.ownerConfirmedAt } : {}),
+    ...(input.selfBoundAt !== undefined ? { selfBoundAt: input.selfBoundAt } : {}),
     platformIdentityId: input.platformIdentityId,
     status: "active",
     linkedAt: now,
@@ -176,6 +185,7 @@ export interface RebindFeishuPrincipalPatch {
   logtoOrganizationId?: string
   platformIdentityId?: string
   unionId?: string
+  selfBoundAt?: number
 }
 
 /** Apply a rebind/linkage patch, bumping the optimistic version. */
@@ -215,10 +225,27 @@ export async function listFeishuPrincipalsByTenant(
   return rows.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/**
+ * Every principal one person holds inside a tenant, across apps: a `union_id`
+ * spans all apps of one developer, so the same person may hold a principal
+ * per bot. A scan rather than an index — `unionId` is non-indexed (no schema
+ * bump) and the registry holds one row per known sender, not per message.
+ */
+export async function listFeishuPrincipalsByUnionId(
+  tenantKey: string,
+  unionId: string
+): Promise<FeishuPrincipalRow[]> {
+  return getDb()
+    .feishuPrincipals.filter((row) => row.tenantKey === tenantKey && row.unionId === unionId)
+    .toArray()
+}
+
 // ─── Bind requests ──────────────────────────────────────────────────────────
 
 export interface CreateBindRequestInput {
   openId: string
+  /** The sender's `union_id`, when the verified envelope carried one. */
+  unionId?: string
   adapterId: string
   tenantKey?: string
   appId?: string
@@ -245,10 +272,19 @@ export async function createBindRequest(
           row.adapterId === input.adapterId && row.status === "pending" && row.expiresAt > now
       )
       .first()
-    if (open) return open
+    if (open) {
+      // A request recorded before the parser read `union_id` learns it from
+      // the next message instead of minting a second code.
+      if (input.unionId && !open.unionId) {
+        await db.feishuPrincipalBindRequests.update(open.id, { unionId: input.unionId })
+        return { ...open, unionId: input.unionId }
+      }
+      return open
+    }
     const row: FeishuPrincipalBindRequestRow = {
       id: "fb_" + Math.random().toString(36).slice(2, 10),
       openId: input.openId,
+      ...(input.unionId ? { unionId: input.unionId } : {}),
       adapterId: input.adapterId,
       tenantKey: input.tenantKey,
       appId: input.appId,
@@ -305,6 +341,8 @@ export async function rejectBindRequest(code: string, now?: number): Promise<voi
 export interface ApproveBindRequestInput {
   cogniaAccountId: string
   cogniaUserId: string
+  logtoSubject?: string
+  ownerConfirmedAt?: number
   now?: number
 }
 
@@ -336,8 +374,11 @@ export async function approveBindRequest(
     tenantKey: request.tenantKey,
     appId: request.appId,
     openId: request.openId,
+    ...(request.unionId ? { unionId: request.unionId } : {}),
     cogniaAccountId: input.cogniaAccountId,
     cogniaUserId: input.cogniaUserId,
+    ...(input.logtoSubject ? { logtoSubject: input.logtoSubject } : {}),
+    ...(input.ownerConfirmedAt !== undefined ? { ownerConfirmedAt: input.ownerConfirmedAt } : {}),
     now,
   })
   await db.feishuPrincipalBindRequests.update(code, {

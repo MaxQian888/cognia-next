@@ -34,6 +34,7 @@ import {
   type IdentityConflict,
   type LinkSignedInIdentitiesReport,
 } from "./link-signed-in-identities"
+import { attachSignInToFeishuPrincipals } from "@/lib/connectors/principal/login-link"
 import { UserBindingRegistry } from "./user-binding"
 
 import {
@@ -99,6 +100,8 @@ export interface CloudSignInDeps {
     userId: string
     identities: readonly CollabExternalIdentity[]
   }) => Promise<LinkSignedInIdentitiesReport>
+  /** Writes the login's subject onto the Feishu principals the person holds. */
+  attachPrincipals?: typeof attachSignInToFeishuPrincipals
   refreshPlane?: (localAccountId: string) => Promise<unknown>
   operationId?: () => string
   now?: () => number
@@ -312,6 +315,24 @@ export async function adoptOrganization(
           "[identity] social identities already belong to another user",
           identityConflicts
         )
+      }
+      // The Feishu bots this person already talks to learn who they are: each
+      // principal of theirs whose union_id matches a linked Feishu identity
+      // records the login's subject.
+      const logtoSubject = binding?.logtoSubject
+      if (logtoSubject && report.linked.length > 0) {
+        const attached = await (deps.attachPrincipals ?? attachSignInToFeishuPrincipals)({
+          userId: target.userId,
+          logtoSubject,
+          identities: report.linked,
+          now: now(),
+        })
+        if (attached.foreign.length > 0) {
+          console.warn(
+            "[identity] Feishu principals matching the sign-in belong to another user",
+            attached.foreign
+          )
+        }
       }
     } catch (error) {
       console.warn("[identity] could not link the sign-in's social identities", error)

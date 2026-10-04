@@ -112,6 +112,7 @@ function harness(
       conflicts: [],
       skipped: [],
     })),
+    attachPrincipals: jest.fn(async () => ({ attached: [] as string[], foreign: [] as string[] })),
     refreshPlane: jest.fn(async () => null),
     operationId: () => "op_fixed",
     now: () => 99,
@@ -303,6 +304,41 @@ describe("adoptOrganization", () => {
     expect(adopted.identityConflicts).toEqual([
       { provider: "lark", subject: "on_union", tenant: "tk_1", existingUserId: "usr_im_first" },
     ])
+  })
+
+  it("writes the login subject onto the Feishu principals the linked identities name", async () => {
+    const { deps } = harness()
+    const linked = [
+      {
+        id: "lark:tk_1:on_union",
+        userId: target.userId,
+        provider: "lark" as const,
+        subject: "on_union",
+        tenant: "tk_1",
+        linkedAt: 99,
+      },
+    ]
+    deps.linkIdentities.mockResolvedValueOnce({ linked, conflicts: [], skipped: [] })
+    deps.attachPrincipals.mockResolvedValueOnce({ attached: ["fp_1"], foreign: ["fp_2"] })
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    await adoptOrganization(deployment, session, { ...target, identities: IDENTITIES }, deps)
+
+    expect(deps.attachPrincipals).toHaveBeenCalledWith({
+      userId: target.userId,
+      logtoSubject: "sub",
+      identities: linked,
+      now: 99,
+    })
+    // A principal of another person is reported, never silently merged.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Feishu principals"), ["fp_2"])
+    warn.mockRestore()
+  })
+
+  it("skips the principal join when nothing was linked", async () => {
+    const { deps } = harness()
+    await adoptOrganization(deployment, session, { ...target, identities: IDENTITIES }, deps)
+    expect(deps.attachPrincipals).not.toHaveBeenCalled()
   })
 
   it("adopts without identities when the server reported none, and survives a failed link", async () => {

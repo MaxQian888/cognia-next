@@ -42,14 +42,19 @@ import {
 } from "@/lib/db/feishu-principals"
 import { isUserId } from "@/types/identity"
 import { bindLarkIdentityTo, resolveLarkPerson } from "./person"
+import { logtoSubjectForUser } from "./login-link"
 import { getActiveRuntimeAccountId, hashOpenId } from "./resolve"
 import { revokeWebSessionsForPrincipal } from "@/lib/db/lark-entry"
+import type { UserBindingRow } from "@/lib/accounts/account-db"
+import { UserBindingRegistry } from "@/lib/identity/user-binding"
 
 export interface PrincipalAdminDependencies {
   audit: typeof appendAudit
   now: () => number
   activeAccountId: () => string
   revokeSessions: typeof revokeWebSessionsForPrincipal
+  /** The person a profile is signed in as, for "approve as me". */
+  binding: (localAccountId: string) => Promise<UserBindingRow | null>
 }
 
 /**
@@ -67,6 +72,7 @@ export function withDefaults(
     now: Date.now,
     activeAccountId: getActiveRuntimeAccountId,
     revokeSessions: revokeWebSessionsForPrincipal,
+    binding: (localAccountId) => new UserBindingRegistry().get(localAccountId),
     ...overrides,
   }
 }
@@ -202,6 +208,15 @@ export interface ApproveBindInput {
   /** Web-SSO linkage captured at approval time, when known. */
   logtoSubject?: string
   logtoOrganizationId?: string
+  /**
+   * The approver states this sender is THEM: the person the profile is signed
+   * in as. The principal is bound to that person and stamped
+   * `ownerConfirmedAt`, which is what lets the same Feishu account reach this
+   * profile's other bots in the tenant without another code
+   * (`principal/self-bind.ts`). Refused on a profile nobody signed in on, and
+   * together with an explicit `cogniaUserId`.
+   */
+  asSignedInOwner?: boolean
 }
 
 /**
@@ -224,6 +239,44 @@ export async function approveFeishuBind(
     throw new Error(`principal-admin: bind request "${input.code}" lacks tenant scope`)
   }
 
+  // ADR-0149 Batch 5 — the person, not the profile. An operator who named one
+  // is making an explicit statement about who this sender is, so their id wins
+  // and the Lark subject is re-pointed at it; "as me" names the signed-in
+  // person the same way; otherwise the platform ids resolve to a person on
+  // their own.
+  let cogniaUserId: string
+  let logtoSubject = input.logtoSubject
+  let ownerConfirmedAt: number | undefined
+  let namedBy: "operator" | "owner" | undefined
+  if (input.asSignedInOwner) {
+    if (input.cogniaUserId) {
+      throw new Error("principal-admin: approving as yourself cannot also name another person")
+    }
+    const binding = await deps.binding(accountId)
+    if (!binding) {
+      throw new Error("principal-admin: approving as yourself needs a signed-in profile")
+    }
+    cogniaUserId = binding.userId
+    logtoSubject = logtoSubject ?? binding.logtoSubject
+    ownerConfirmedAt = now
+    namedBy = "owner"
+  } else if (input.cogniaUserId) {
+    cogniaUserId = requirePersonId(input.cogniaUserId)
+    namedBy = "operator"
+  } else {
+    cogniaUserId = (
+      await resolveLarkPerson({
+        tenantKey: request.tenantKey,
+        appId: request.appId,
+        openId: request.openId,
+        ...(request.unionId ? { unionId: request.unionId } : {}),
+        ...(input.logtoSubject ? { logtoSubject: input.logtoSubject } : {}),
+        now,
+      })
+    ).userId
+  }
+
+  // After the person is settled, so a refused approval admits no tenant.
   await registerFeishuTenant(
     {
       adapterId: request.adapterId,
@@ -234,29 +287,22 @@ export async function approveFeishuBind(
     overrides
   )
 
-  // ADR-0149 Batch 5 — the person, not the profile. An operator who named one
-  // is making an explicit statement about who this sender is, so their id wins
-  // and the Lark subject is re-pointed at it; otherwise the platform ids
-  // resolve to a person on their own.
-  const cogniaUserId = input.cogniaUserId
-    ? requirePersonId(input.cogniaUserId)
-    : (
-        await resolveLarkPerson({
-          tenantKey: request.tenantKey,
-          appId: request.appId,
-          openId: request.openId,
-          ...(input.logtoSubject ? { logtoSubject: input.logtoSubject } : {}),
-          now,
-        })
-      ).userId
+  // The person may already have signed in (their union_id resolved them to the
+  // login's `User`), in which case the principal carries their subject from
+  // the start instead of waiting for the next sign-in to back-fill it.
+  logtoSubject = logtoSubject ?? (await logtoSubjectForUser(cogniaUserId))
 
   const principal = await approveBindRequest(input.code, {
     cogniaAccountId: accountId,
     cogniaUserId,
+    ...(logtoSubject ? { logtoSubject } : {}),
+    ...(ownerConfirmedAt !== undefined ? { ownerConfirmedAt } : {}),
     now,
   })
 
-  if (input.cogniaUserId) {
+  if (namedBy) {
+    // Only this app's open_id is re-pointed. Re-filing the union id would
+    // carry one approval to every bot app of the tenant.
     await bindLarkIdentityTo({
       userId: cogniaUserId,
       tenantKey: request.tenantKey,
@@ -267,7 +313,6 @@ export async function approveFeishuBind(
   }
 
   const linkage: RebindFeishuPrincipalPatch = {}
-  if (input.logtoSubject) linkage.logtoSubject = input.logtoSubject
   if (input.logtoOrganizationId) linkage.logtoOrganizationId = input.logtoOrganizationId
   const linked =
     Object.keys(linkage).length > 0
@@ -278,6 +323,7 @@ export async function approveFeishuBind(
     adapterId: request.adapterId,
     kind: "principal.bound",
     at: now,
+    ...(namedBy === "owner" ? { reason: "signed_in_owner_confirmed" } : {}),
     ...(request.conversationKey ? { conversationKey: request.conversationKey } : {}),
     fields: {
       bindRequestId: request.id,

@@ -12,7 +12,11 @@
  *       parked history_only, audit + one bind-code reply;
  *   (d) a principal disabled after its first turn is rejected on the next
  *       event (the same resolution step recovery replays re-enter);
- *   (e) cross-account principals never execute under this runtime's account.
+ *   (e) cross-account principals never execute under this runtime's account;
+ *   (f) the signed-in owner, once they confirmed a principal as themselves,
+ *       reaches the profile's other bots in the tenant without another code;
+ *       the identity plane's word alone admits nobody, and a union id from a
+ *       token-only webhook is not even recorded.
  */
 
 import "fake-indexeddb/auto"
@@ -24,6 +28,9 @@ import {
   setFeishuPrincipalStatus,
   upsertFeishuTenant,
 } from "@/lib/db/feishu-principals"
+import { linkExternalIdentity } from "@/lib/db/identity"
+import { CogniaAccountRegistryDB } from "@/lib/accounts/account-db"
+import { UserBindingRegistry } from "@/lib/identity/user-binding"
 import { getActiveRuntimeAccountId } from "./principal/resolve"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
@@ -36,7 +43,7 @@ const AUTO_TRIGGER: TriggerPolicy = {
   storeUnmatchedInDraftMode: false,
 }
 
-function makeAdapter(id: string): PlatformAdapter {
+function makeAdapter(id: string, transportModes: readonly string[] = ["stub"]): PlatformAdapter {
   return {
     id,
     meta: {
@@ -44,7 +51,7 @@ function makeAdapter(id: string): PlatformAdapter {
       displayName: `Bot ${id}`,
       version: "1.0.0",
       capabilities: [],
-      transportModes: ["stub"],
+      transportModes,
       configSchema: {},
     },
     start: jest.fn().mockResolvedValue(undefined),
@@ -57,7 +64,10 @@ function makeAdapter(id: string): PlatformAdapter {
 function larkEvent(
   adapterId: string,
   messageId: string,
-  options: { openId?: string; identityScope?: { tenantKey?: string; appId?: string } } = {}
+  options: {
+    openId?: string
+    identityScope?: { tenantKey?: string; appId?: string; unionId?: string }
+  } = {}
 ): NormalizedInboundEvent {
   const openId = options.openId ?? "ou_alice"
   return {
@@ -78,7 +88,10 @@ function larkEvent(
   }
 }
 
-async function seedAdapter(settings: Record<string, unknown> = {}): Promise<string> {
+async function seedAdapter(
+  settings: Record<string, unknown> = {},
+  transportModes: readonly string[] = ["stub"]
+): Promise<string> {
   const row = await createAdapterInstance({
     type: "lark",
     displayName: "Lark Bot",
@@ -90,7 +103,7 @@ async function seedAdapter(settings: Record<string, unknown> = {}): Promise<stri
     defaultMode: "auto",
     mediaModelPolicy: "local_extract_only",
   })
-  getBus().registerAdapter(makeAdapter(row.id))
+  getBus().registerAdapter(makeAdapter(row.id, transportModes))
   return row.id
 }
 
@@ -120,6 +133,7 @@ async function jobRows() {
 
 beforeEach(async () => {
   await getDb().delete()
+  await new CogniaAccountRegistryDB().delete()
   __resetDbForTesting()
   __resetBusForTesting()
   __resetPruneCounterForTesting()
@@ -252,5 +266,148 @@ describe("bus inbound Step 2.5 — principal resolution", () => {
     const audits = await listRecent(adapterId, 20)
     const rejected = audits.find((row) => row.kind === "principal.rejected")
     expect(rejected?.fields?.declaredAccountId).toBe("acct_someone_else")
+  })
+
+  /** The owner signed in, and approved their principal in app `cli_0` as themselves. */
+  async function ownerConfirmedElsewhere() {
+    const accountId = getActiveRuntimeAccountId()
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: accountId })
+    await new UserBindingRegistry().bind({
+      localAccountId: accountId,
+      userId: "usr_owner",
+      logtoSubject: "sub_owner",
+      logtoIssuer: "https://id.example/oidc",
+    })
+    await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_0",
+      openId: "ou_owner_app0",
+      unionId: "on_owner",
+      cogniaAccountId: accountId,
+      cogniaUserId: "usr_owner",
+      ownerConfirmedAt: 1,
+    })
+  }
+
+  async function ownerPrincipal() {
+    return getDb()
+      .feishuPrincipals.where("[tenantKey+appId+openId]")
+      .equals(["tk_a", "cli_1", "ou_owner"])
+      .first()
+  }
+
+  it("admits the confirmed owner on a long connection instead of handing them a code", async () => {
+    const adapterId = await seedAdapter({ larkPrincipalRegistry: true }, ["gateway"])
+    await ownerConfirmedElsewhere()
+    const handled: NormalizedInboundEvent[] = []
+    getBus().routeHandler = async (event) => {
+      handled.push(event)
+    }
+
+    await getBus().dispatchInboundFull(
+      larkEvent(adapterId, "om_owner", {
+        openId: "ou_owner",
+        identityScope: { ...SCOPE, unionId: "on_owner" },
+      })
+    )
+    await flushTurns()
+
+    expect(handled).toHaveLength(1)
+    expect(await ownerPrincipal()).toMatchObject({
+      cogniaUserId: "usr_owner",
+      unionId: "on_owner",
+      logtoSubject: "sub_owner",
+      status: "active",
+    })
+    expect((await ownerPrincipal())?.selfBoundAt).toBeDefined()
+    expect(await getDb().feishuPrincipalBindRequests.count()).toBe(0)
+    const outbound = await getDb().outboundQueue.toArray()
+    expect(outbound.some((row) => row.idempotencyKey?.startsWith("principal-unbound:"))).toBe(false)
+  })
+
+  it("re-admits a self-bound principal that a sign-out unlinked", async () => {
+    const adapterId = await seedAdapter({ larkPrincipalRegistry: true }, ["gateway"])
+    await ownerConfirmedElsewhere()
+    getBus().routeHandler = async () => {}
+    const send = (messageId: string) =>
+      getBus().dispatchInboundFull(
+        larkEvent(adapterId, messageId, {
+          openId: "ou_owner",
+          identityScope: { ...SCOPE, unionId: "on_owner" },
+        })
+      )
+
+    await send("om_first")
+    await flushTurns()
+    const principal = await ownerPrincipal()
+    await setFeishuPrincipalStatus(principal!.id, "unlinked")
+
+    await send("om_back")
+    await flushTurns()
+
+    expect((await ownerPrincipal())?.status).toBe("active")
+    const jobs = await jobRows()
+    expect(jobs.every((job) => job.status !== "history_only")).toBe(true)
+  })
+
+  it("admits nobody on the identity plane's word alone", async () => {
+    const adapterId = await seedAdapter({ larkPrincipalRegistry: true }, ["gateway"])
+    const accountId = getActiveRuntimeAccountId()
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: accountId })
+    await new UserBindingRegistry().bind({
+      localAccountId: accountId,
+      userId: "usr_owner",
+      logtoSubject: "sub_owner",
+      logtoIssuer: "https://id.example/oidc",
+    })
+    // The sign-in filed this union id on the owner, but no principal was ever
+    // confirmed as them.
+    await linkExternalIdentity({
+      userId: "usr_owner",
+      provider: "lark",
+      subject: "on_owner",
+      tenant: "tk_a",
+    })
+    getBus().routeHandler = async () => {}
+
+    await getBus().dispatchInboundFull(
+      larkEvent(adapterId, "om_claimed", {
+        openId: "ou_owner",
+        identityScope: { ...SCOPE, unionId: "on_owner" },
+      })
+    )
+    await flushTurns()
+
+    const [job] = await jobRows()
+    expect(job.recoveryReason).toBe("principal_unbound")
+    expect(await ownerPrincipal()).toBeUndefined()
+    // The request records the union id so the approver can see it is theirs.
+    const [request] = await getDb().feishuPrincipalBindRequests.toArray()
+    expect(request.unionId).toBe("on_owner")
+  })
+
+  it("does not believe a union id from a token-only webhook", async () => {
+    const adapterId = await seedAdapter({ larkPrincipalRegistry: true }, ["webhook"])
+    await ownerConfirmedElsewhere()
+    getBus().routeHandler = async () => {}
+
+    await getBus().dispatchInboundFull(
+      larkEvent(adapterId, "om_forged", {
+        openId: "ou_attacker",
+        identityScope: { ...SCOPE, unionId: "on_owner" },
+      })
+    )
+    await flushTurns()
+
+    const [job] = await jobRows()
+    expect(job.recoveryReason).toBe("principal_unbound")
+    const [request] = await getDb().feishuPrincipalBindRequests.toArray()
+    expect(request.unionId).toBeUndefined()
+    expect(
+      await getDb()
+        .feishuPrincipals.where("[tenantKey+appId+openId]")
+        .equals(["tk_a", "cli_1", "ou_attacker"])
+        .first()
+    ).toBeUndefined()
   })
 })

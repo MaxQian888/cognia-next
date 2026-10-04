@@ -122,7 +122,7 @@ New ids are UUIDv7 or CSPRNG nanoid. Human issue numbers come from a counter in 
 
 - A Feishu user token works only for the app that issued it; `union_id` matches only across apps from the same developer.
 - **Bots are bring-your-own.** The user's own app runs on the user's host; message content never transits Cognia servers. A login can never supply a bot credential.
-- **Login identity binds the bot's sender.** When the signed-in Feishu person messages a bring-your-own bot, the connector recognizes them by `lark:<tenant_key>:<union_id>`. This needs the fixes listed under Consequences.
+- **Login identity binds the bot's sender, after one confirmation.** The identity plane's `lark:<tenant_key>:<union_id>` comes from the IdP and the collaboration server, which this ADR does not trust to decide who reaches an agent, so it only labels a bind request "matches your sign-in". The owner approves it once as themselves; from then on the same `union_id` reaching another of their bots in the tenant is admitted automatically, only over a transport a static token cannot forge, and the admission ends when the profile signs out (see the ADR-0091 implementation update).
 - **User authorization is a separate consent**, prefilled with the signed-in account, requesting `offline_access` and the API scopes. Tokens are client-held and sync as secrets; refresh happens only under the credential's refresh lease, and the new token set is written immediately.
 - Logto's built-in Feishu connector discards the provider token and keys on `open_id`; this design does not depend on it.
 - The login app is a self-built Feishu app for now, which only its own tenant can use. Feishu ISV status and a marketplace app are required before public launch; the application runs in parallel with the work.
@@ -163,7 +163,7 @@ New ids are UUIDv7 or CSPRNG nanoid. Human issue numbers come from a counter in 
 - People get one account across desktops, phones and the web; a phone keeps working with every host offline; two desktops are both writable; scheduled tasks and bots run once.
 - Cognia now operates user-facing infrastructure: an identity Worker with D1 and an account Durable Object with R2, on Workers Paid. At about 10,000 active users the estimate is $150–200 per month, dominated by DO and R2 storage; batching keeps row writes inside the included allowance.
 - Preconditions before the first synced table: CSPRNG ids, per-key settings rows, BYOK keys out of `settings`, the issue counter in the account object, the outbox middleware, and the catalog's `account-e2e` class with its gate.
-- Defects found during this design and fixed independently of it:
+- Defects found during this design and fixed independently of it (items 1–5 fixed on 2026-10-04; see the [ADR-0091](./0091-lark-unified-identity-dual-entry) implementation update):
   1. The Feishu connector never records `union_id` (`LarkSenderId` in `lib/connectors/adapters/lark/parse.ts` has only `open_id`/`user_id`, and principal creation omits `unionId`), so login links and IM principals never match.
   2. Inbound principal resolution never reads `externalIdentities` (`lib/connectors/.../resolve.ts`).
   3. `logtoSubject` on Feishu principals is documented as filled on login but never written.

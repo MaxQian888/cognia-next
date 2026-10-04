@@ -26,6 +26,7 @@ import {
   type SignedInIdentity,
 } from "./sign-in"
 import { UserBindingRegistry } from "./user-binding"
+import { unlinkSelfBoundPrincipals } from "@/lib/connectors/principal/login-link"
 
 import type { LogtoSession } from "@/lib/logto/client"
 import type { UserBindingRow } from "@/lib/accounts/account-db"
@@ -39,6 +40,8 @@ export interface CompleteSignInDeps {
   takeOverProfile?: boolean
   now?: () => number
   onHostMirrorFailed?: (error: unknown) => void
+  /** Unlinks the Feishu principals a self-bind admitted for the departing person. */
+  unlinkSelfBound?: typeof unlinkSelfBoundPrincipals
 }
 
 function reportHostFailure(deps: CompleteSignInDeps, error: unknown): void {
@@ -62,6 +65,7 @@ export async function completeSignIn(
     projection: deps.projection ?? identityProjection,
     ...(deps.takeOverProfile ? { takeOverProfile: true } : {}),
     ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.unlinkSelfBound ? { unlinkSelfBound: deps.unlinkSelfBound } : {}),
   })
 
   try {
@@ -96,7 +100,21 @@ export async function completeSignOut(deps: CompleteSignInDeps = {}): Promise<vo
   const localAccountId = deps.localAccountId ?? getActiveAccountId()
   const registry = deps.registry ?? new UserBindingRegistry()
 
+  const departing = await registry.get(localAccountId)
   await registry.unbind(localAccountId)
+
+  // Bots this person reached only because they were signed in here stop
+  // answering them. Best-effort: the sign-out itself has already happened.
+  if (departing) {
+    try {
+      await (deps.unlinkSelfBound ?? unlinkSelfBoundPrincipals)({
+        localAccountId,
+        userId: departing.userId,
+      })
+    } catch (error) {
+      console.warn("[identity] could not unlink self-bound Feishu principals", error)
+    }
+  }
 
   try {
     await unbindHostPerson(localAccountId, deps.host ?? {})

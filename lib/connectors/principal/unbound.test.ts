@@ -73,6 +73,28 @@ describe("handleUnresolvedPrincipal", () => {
     )
   })
 
+  it("records the sender's union_id on the bind request but never in the audit", async () => {
+    const deps = makeDeps()
+    const expectedHash = await hashOpenId("ou_1")
+    await handleUnresolvedPrincipal(
+      event(),
+      { id: "lk-1" },
+      {
+        status: "unbound",
+        tenantKey: "tk_a",
+        appId: "cli_1",
+        unionId: "on_1",
+        openIdHash: expectedHash,
+      },
+      "job-1",
+      deps
+    )
+    expect(deps.bindRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ openId: "ou_1", unionId: "on_1" })
+    )
+    expect(JSON.stringify(deps.audit.mock.calls[0][0])).not.toContain("on_1")
+  })
+
   it("stays silent (audit only) for disabled principals", async () => {
     const deps = makeDeps()
     await handleUnresolvedPrincipal(

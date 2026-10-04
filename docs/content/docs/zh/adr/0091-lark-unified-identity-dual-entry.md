@@ -19,7 +19,7 @@ Lark连接器很好地覆盖了机器人执行方向（消息、附件、主题�
 
 ### 1. 非书主登记处（默认拒绝）
 
-Dexie v125 增加了 `feishuTenants`（`&[tenantKey+appId]` → cogniaAccountId）、`feishuPrincipals`（`&[tenantKey+appId+openId]` → cogniaAccountId + cogniaUserId，状态 active/disabled/unlinked）和 `feishuPrincipalBindRequests`。入站总线解决适配器查找与覆盖查找之间的每个Lark事件（步骤2.5）：`resolved`事件将`accountId`/`principalId`印在持久作业、会话状态和运行发起者上;`unbound`发件人被`history_only` hashed-open_id审计和每天一次双语绑定码回复;`disabled`、`tenant_disabled`和`cross_account`静静地停着。映射到另一个Cognia账户的租户NEVER在该活跃账户下执行——没有对`HEADLESS_LOCAL_ACCOUNT_ID` 回退，且明确已拒绝每事件更换账户。注册处受`larkPrincipalRegistry`（默认关闭）限制;关闭旗帜后，遗留行为字节完全相同。
+Dexie v125 增加了 `feishuTenants`（`&[tenantKey+appId]` → cogniaAccountId）、`feishuPrincipals`（`&[tenantKey+appId+openId]` → cogniaAccountId + cogniaUserId，状态 active/disabled/unlinked）和 `feishuPrincipalBindRequests`。入站总线解决适配器查找与覆盖查找之间的每个Lark事件（步骤2.5）：`resolved`事件将`accountId`/`principalId`印在持久作业、会话状态和运行发起者上;`unbound`发件人被`history_only` hashed-open_id审计和每天一次双语绑定码回复;`disabled`、`tenant_disabled`和`cross_account`静静地停着。映射到另一个Cognia账户的租户NEVER在该活跃账户下执行——没有对`HEADLESS_LOCAL_ACCOUNT_ID` 回退，且明确已拒绝每事件更换账户。注册表受 `larkPrincipalRegistry` 控制，自 2026-07-25（`2723969e0`）起默认开启：注册表会从工作区已经通信过的发件人自动做种（`principal/bootstrap.ts`），所以开启后不会把现有用户挡在外面。关闭该开关时，遗留行为逐字节保持不变。
 
 ### 2. 统一回拨授权
 
@@ -48,3 +48,14 @@ Dexie v125 增加了 `feishuTenants`（`&[tenantKey+appId]` → cogniaAccountId�
 - 伴随者API建立了一个公共Lark 接口，必须利用现有的HS256秘密、速率限制和拒绝名单;轮换设计使未完成的会议无效。
 - 真实租户操作（控制台配置、聊天标签发布、客户端验证）是故意的运行手册步骤，而非代码——无法从CI执行。机器人菜单列表是生成（`cognia-agent lark menu-manifest`）而非转录的，因此控制台列表不会从命令注册表中漂移。
 - `/integrations/lark/*`仅在无头服务存在时挂载，因此SSO、入口解析、快捷方式导入和JSSDK签名仅无头。桌面安装保留了机器人菜单、回调和命令调度。这是因为接口需要公共的HTTPS回调URL，而桌面机器没有这个功能。
+
+## 实现更新：union_id 与已登录的本人（2026-10-04）
+
+- 解析器现在从消息事件和机器人菜单事件中读取发件人的 `union_id`，与 `tenantKey`、`appId` 一起写入 `identityScope`。它只是身份证据，从不作为授权键：解析仍按 `tenantKey + appId + openId` 匹配。
+- 总线只在无法用静态令牌伪造的传输上相信 `union_id`（长连接，或配置了 encrypt key 的签名 webhook）；否则在解析前丢弃，也不会记录。
+- 绑定请求会记录 `union_id`；审批时把它带到主体上；已成功解析但缺少 `union_id` 的主体，会由第一个带有它的事件补全。
+- 设置卡片中，如果身份平面把某个绑定请求的 `union_id` 归在当前登录的人名下，会标注“与你的登录一致”，并提供“这是我”：把发件人绑定为这个人，并写入 `ownerConfirmedAt`。这个标注本身从不准入任何人：身份平面的记录来自 IdP 和协作服务器。
+- 本人确认一次之后，同一个 `union_id` 给该租户下的其他机器人应用发消息时无需绑定码直接准入（`principal/self-bind.ts`，记录 `selfBoundAt`），且只限于当前运行时所服务账号下已登记、处于启用状态的租户。档案退出登录或被他人接管时，自动准入的主体会被解除关联；同一个人回来时重新准入；操作员的停用永远不会被撤销。
+- `logtoSubject` 现在会被写入：审批时若此人已登录则写入；本人确认和自动准入时写入；此人登录时回填到其已有的主体上（`principal/login-link.ts`）。匹配到但属于他人的主体只会被报告，绝不会被接管。操作员指定人员的审批只重新指向该应用的 `open_id`，一次审批不会扩散到整个租户。
+- 卡片回调不携带 `union_id`；回调只做解析，从不创建主体。
+- 参见 [ADR-0215](./0215-one-person-one-encrypted-sync-space-many-writable-hosts) §9。

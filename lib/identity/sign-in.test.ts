@@ -159,6 +159,42 @@ describe("bindSignedInIdentity", () => {
     expect(await registry.get("acct_alpha")).toMatchObject({ logtoSubject: "logto_bob" })
   })
 
+  it("unlinks the previous person's self-bound Feishu principals on a takeover", async () => {
+    const registry = await freshRegistry("takeover-unlink")
+    const first = await bindSignedInIdentity(session({}), {
+      localAccountId: "acct_alpha",
+      registry,
+    })
+    const unlinkSelfBound = jest.fn(async () => [])
+
+    await bindSignedInIdentity(session({ sub: "logto_bob" }), {
+      localAccountId: "acct_alpha",
+      registry,
+      takeOverProfile: true,
+      now: () => 7,
+      unlinkSelfBound,
+    })
+
+    expect(unlinkSelfBound).toHaveBeenCalledWith({
+      localAccountId: "acct_alpha",
+      userId: first.user.id,
+      now: 7,
+    })
+  })
+
+  it("leaves the principals alone when the same person signs in again with takeover", async () => {
+    const registry = await freshRegistry("takeover-same")
+    await bindSignedInIdentity(session({}), { localAccountId: "acct_alpha", registry })
+    const unlinkSelfBound = jest.fn(async () => [])
+    await bindSignedInIdentity(session({}), {
+      localAccountId: "acct_alpha",
+      registry,
+      takeOverProfile: true,
+      unlinkSelfBound,
+    })
+    expect(unlinkSelfBound).not.toHaveBeenCalled()
+  })
+
   it("signs the same person in twice without duplicating anything", async () => {
     const registry = await freshRegistry("idempotent")
     const first = await bindSignedInIdentity(session({}), {

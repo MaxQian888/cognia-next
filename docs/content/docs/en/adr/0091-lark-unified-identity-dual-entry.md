@@ -34,8 +34,10 @@ with a hashed-open_id audit and a once-per-day bilingual bind-code reply; `disab
 `tenant_disabled`, and `cross_account` are parked silently. A tenant mapped to a different
 Cognia account NEVER executes under the active one — there is no fallback to
 `HEADLESS_LOCAL_ACCOUNT_ID`, and per-event account switching is explicitly rejected. The
-registry is gated by `larkPrincipalRegistry` (default off); with the flag off the legacy
-behavior is byte-identical.
+registry is gated by `larkPrincipalRegistry`, on by default since 2026-07-25 (`2723969e0`):
+the registry seeds itself from the senders a workspace has already talked to
+(`principal/bootstrap.ts`), so turning it on does not park existing users. With the flag off
+the legacy behavior is byte-identical.
 
 ### 2. Unified callback authorization
 
@@ -133,3 +135,30 @@ rollback (including the enforce flip) live in the runbook.
   resolution, shortcut import and JSSDK signing are headless-only. A desktop install keeps
   bot menus, callbacks and command dispatch. This follows from the surface needing a public
   https callback URL, which a desktop machine does not have.
+
+## Implementation update: union_id and the signed-in owner (2026-10-04)
+
+- The parser now reads the sender's `union_id` from message and bot-menu envelopes and
+  stamps it on `identityScope` next to `tenantKey` and `appId`. It is identity evidence,
+  never an authorization key: resolution still matches on `tenantKey + appId + openId`.
+- The bus believes a `union_id` only on a transport a static token cannot forge (the long
+  connection, or a webhook signed with an encrypt key); otherwise it is dropped before
+  resolution and never recorded.
+- Bind requests record the `union_id`; approvals carry it onto the principal; a principal
+  that resolved and lacks one is back-filled by the first event that names it.
+- The settings card labels a bind request "matches your sign-in" when the identity plane
+  files its `union_id` under the signed-in person, and offers "This is me", which binds the
+  sender to that person and stamps `ownerConfirmedAt`. The label never admits anybody: the
+  identity plane's rows come from the IdP and the collaboration server.
+- After one such confirmation, the same `union_id` messaging another bot app of the tenant
+  is admitted without a code (`principal/self-bind.ts`, `selfBoundAt`), only into a
+  registered, active tenant of the account the runtime serves. Self-bound principals are
+  unlinked when the profile signs out or is taken over by someone else, and re-admitted
+  when the same person returns; an operator's disable is never undone.
+- `logtoSubject` is now written: at approval when the person has signed in, at
+  confirmation and self-bind, and on sign-in for the person's existing principals
+  (`principal/login-link.ts`). A matching principal that belongs to another person is
+  reported, never taken over. An operator-named approval re-points only that app's
+  `open_id`, so one approval never spreads across the tenant.
+- Card callbacks do not carry `union_id`; they only resolve, and never create principals.
+- See [ADR-0215](./0215-one-person-one-encrypted-sync-space-many-writable-hosts) §9.

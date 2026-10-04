@@ -106,6 +106,8 @@ import {
 } from "./principal/resolve"
 import { handleUnresolvedPrincipal } from "./principal/unbound"
 import { bootstrapFeishuRegistry } from "./principal/bootstrap"
+import { isForgeResistantTransport, selfBindSignedInOwner } from "./principal/self-bind"
+import { connectorsKeyringGet } from "./tauri/commands"
 import { recordConnectorMetric } from "./metrics"
 import {
   authorizeConnectorCallback,
@@ -638,11 +640,22 @@ export class ConnectorBus {
     // Recovery replays re-enter this pipeline, so recovered jobs re-resolve
     // against the current registry state (a principal disabled between crash
     // and replay is rejected here).
+    // A sender's union_id is recorded (bind requests, principal back-fill) and
+    // matched against an owner confirmation, so it is only believed when the
+    // transport authenticates more than a static token. On a token-only
+    // webhook one forged event could otherwise plant it permanently.
+    const transportModes = this.adapters.get(event.adapterId)?.meta.transportModes
+    const stampedScope = readIdentityScope(event.channelData)
+    const identityScope =
+      stampedScope?.unionId &&
+      !(await isForgeResistantTransport(event.adapterId, transportModes, connectorsKeyringGet))
+        ? { tenantKey: stampedScope.tenantKey, appId: stampedScope.appId }
+        : stampedScope
     const resolveInput = {
       platform: event.platform,
       adapterRow,
       remoteUserId: event.sender.remoteUserId,
-      identityScope: readIdentityScope(event.channelData),
+      identityScope,
       activeAccountId: getActiveRuntimeAccountId(),
     }
     let principalResolution = await resolveConnectorPrincipal(resolveInput)
@@ -659,6 +672,29 @@ export class ConnectorBus {
         adapterRow,
       }).catch(() => ({ status: "skipped" as const, reason: "flag_off" as const }))
       if (seeded.status === "seeded") {
+        principalResolution = await resolveConnectorPrincipal(resolveInput)
+      }
+    }
+    // The signed-in owner, once they confirmed a bot principal as themselves,
+    // is not a stranger to this profile's other bots in the tenant: admit them
+    // (or re-admit a principal a sign-out unlinked) instead of handing them
+    // another bind code. Everyone else stays as resolved.
+    const selfBindable =
+      principalResolution.status === "unbound" ||
+      (principalResolution.status === "principal_disabled" &&
+        principalResolution.principal.status === "unlinked" &&
+        principalResolution.principal.selfBoundAt !== undefined)
+    if (selfBindable) {
+      const selfBound = await selfBindSignedInOwner({
+        adapterId: event.adapterId,
+        transportModes,
+        openId: event.sender.remoteUserId,
+        identityScope: resolveInput.identityScope,
+        fallbackAppId: adapterRow.lastWhoamiResult?.appId,
+        accountId: resolveInput.activeAccountId,
+        conversationKey: event.conversationKey,
+      }).catch(() => ({ status: "skipped" as const }))
+      if (selfBound.status === "bound") {
         principalResolution = await resolveConnectorPrincipal(resolveInput)
       }
     }

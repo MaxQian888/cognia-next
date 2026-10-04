@@ -885,6 +885,78 @@ describe("identityScope stamping (plan 2026-07-24 Phase 1)", () => {
     if (unknown?.kind !== "unknown") throw new Error("expected unknown outcome")
     expect(unknown.identityScope).toEqual({ tenantKey: "tk_menu", appId: "cli_app" })
   })
+
+  it("carries the sender's union_id alongside the tenancy scope", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: {
+        event_id: "evt_union",
+        event_type: "im.message.receive_v1",
+        app_id: "cli_app",
+        tenant_key: "tk_hdr",
+      },
+      event: {
+        sender: { sender_id: { open_id: "ou_scope", union_id: "on_scope" } },
+        message: {
+          message_id: "om_union",
+          chat_id: "oc_scope",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "hi" }),
+        },
+      },
+    }
+    const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+    expect(r!.channelData?.identityScope).toEqual({
+      tenantKey: "tk_hdr",
+      appId: "cli_app",
+      unionId: "on_scope",
+    })
+    // The open_id stays the sender's identity; union_id is evidence only.
+    expect(r!.sender.remoteUserId).toBe("ou_scope")
+  })
+
+  it("drops a union_id that has no tenancy scope to be filed under", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: { event_id: "evt_union2", event_type: "im.message.receive_v1" },
+      event: {
+        sender: { sender_id: { open_id: "ou_scope", union_id: "on_scope" } },
+        message: {
+          message_id: "om_union2",
+          chat_id: "oc_scope",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "hi" }),
+        },
+      },
+    }
+    const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+    expect(r!.channelData).toBeUndefined()
+  })
+
+  it("carries the bot-menu operator's union_id", () => {
+    const envelope = {
+      schema: "2.0",
+      header: {
+        event_id: "evt_menu_union",
+        event_type: "application.bot.menu_v6",
+        app_id: "cli_app",
+        tenant_key: "tk_menu",
+      },
+      event: {
+        operator: { operator_id: { open_id: "ou_menu", union_id: "on_menu" } },
+        event_key: "k",
+      },
+    } as unknown as LarkEventEnvelope
+    const unknown = parseLarkBotMenuEvent(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope, undefined)
+    if (unknown?.kind !== "unknown") throw new Error("expected unknown outcome")
+    expect(unknown.identityScope).toEqual({
+      tenantKey: "tk_menu",
+      appId: "cli_app",
+      unionId: "on_menu",
+    })
+  })
 })
 
 describe("default reply threads", () => {

@@ -12,6 +12,7 @@ import {
   getFeishuTenant,
   listBindRequests,
   listFeishuPrincipalsByTenant,
+  listFeishuPrincipalsByUnionId,
   rebindFeishuPrincipal,
   rejectBindRequest,
   setFeishuPrincipalStatus,
@@ -116,6 +117,35 @@ describe("feishu-principals", () => {
       expect(row?.version).toBe(1)
     })
 
+    it("lists one person's principals across apps by tenant and union_id", async () => {
+      const base = { cogniaAccountId: "acct_a", cogniaUserId: "usr_ada", now: T0 }
+      await createFeishuPrincipal({
+        ...base,
+        tenantKey: "tk_a",
+        appId: "cli_1",
+        openId: "ou_1",
+        unionId: "on_ada",
+      })
+      await createFeishuPrincipal({
+        ...base,
+        tenantKey: "tk_a",
+        appId: "cli_2",
+        openId: "ou_2",
+        unionId: "on_ada",
+      })
+      // Same union id text in another tenant is another person.
+      await createFeishuPrincipal({
+        ...base,
+        tenantKey: "tk_b",
+        appId: "cli_1",
+        openId: "ou_3",
+        unionId: "on_ada",
+      })
+      await createFeishuPrincipal({ ...base, tenantKey: "tk_a", appId: "cli_1", openId: "ou_4" })
+      const rows = await listFeishuPrincipalsByUnionId("tk_a", "on_ada")
+      expect(rows.map((row) => row.openId).sort()).toEqual(["ou_1", "ou_2"])
+    })
+
     it("lists principals for one tenant scope only", async () => {
       await createFeishuPrincipal(base)
       await createFeishuPrincipal({ ...base, openId: "ou_2" })
@@ -142,6 +172,32 @@ describe("feishu-principals", () => {
       // A different adapter mints its own code.
       const other = await createBindRequest({ ...input, adapterId: "lk-2" })
       expect(other.id).not.toBe(first.id)
+    })
+
+    it("records the sender's union_id, and teaches it to an open request", async () => {
+      const withUnion = await createBindRequest({ ...input, unionId: "on_1" })
+      expect(withUnion.unionId).toBe("on_1")
+      expect((await getBindRequest(withUnion.id))?.unionId).toBe("on_1")
+
+      const legacy = await createBindRequest({ ...input, openId: "ou_2" })
+      expect(legacy.unionId).toBeUndefined()
+      const learned = await createBindRequest({ ...input, openId: "ou_2", unionId: "on_2" })
+      expect(learned.id).toBe(legacy.id)
+      expect(learned.unionId).toBe("on_2")
+      expect((await getBindRequest(legacy.id))?.unionId).toBe("on_2")
+    })
+
+    it("carries union_id and the login subject onto the approved principal", async () => {
+      const request = await createBindRequest({ ...input, unionId: "on_1" })
+      const principal = await approveBindRequest(request.id, {
+        cogniaAccountId: "acct_a",
+        cogniaUserId: "usr_ada",
+        logtoSubject: "sub_ada",
+        now: T0 + 1,
+      })
+      expect(principal.unionId).toBe("on_1")
+      expect(principal.logtoSubject).toBe("sub_ada")
+      expect(principal.version).toBe(1)
     })
 
     it("approves a pending request into a principal", async () => {

@@ -176,6 +176,92 @@ describe("resolveConnectorPrincipal", () => {
   })
 })
 
+describe("union_id evidence", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it("carries the sender's union_id on an unbound result, for the bind request", async () => {
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const result = await resolveConnectorPrincipal({
+      platform: "lark",
+      adapterRow,
+      remoteUserId: "ou_new",
+      identityScope: { ...scope, unionId: "on_new" },
+      activeAccountId: "acct_a",
+    })
+    expect(result.status).toBe("unbound")
+    if (result.status === "unbound") expect(result.unionId).toBe("on_new")
+  })
+
+  it("never resolves on union_id alone: the open_id must match a principal", async () => {
+    const principal = await seedResolved()
+    await getDb().feishuPrincipals.update(principal.id, { unionId: "on_1" })
+    const result = await resolveConnectorPrincipal({
+      platform: "lark",
+      adapterRow,
+      remoteUserId: "ou_other_app_id",
+      identityScope: { ...scope, unionId: "on_1" },
+      activeAccountId: "acct_a",
+    })
+    expect(result.status).toBe("unbound")
+  })
+
+  it("back-fills a missing union_id onto the resolved principal", async () => {
+    const principal = await seedResolved()
+    const result = await resolveConnectorPrincipal({
+      platform: "lark",
+      adapterRow,
+      remoteUserId: "ou_1",
+      identityScope: { ...scope, unionId: "on_1" },
+      activeAccountId: "acct_a",
+    })
+    expect(result.status).toBe("resolved")
+    if (result.status === "resolved") expect(result.principal.unionId).toBe("on_1")
+    const stored = await getDb().feishuPrincipals.get(principal.id)
+    expect(stored?.unionId).toBe("on_1")
+    expect(stored?.version).toBe(principal.version + 1)
+  })
+
+  it("never back-fills a principal that did not resolve", async () => {
+    const principal = await seedResolved()
+    await setFeishuPrincipalStatus(principal.id, "disabled")
+    const before = await getDb().feishuPrincipals.get(principal.id)
+    const result = await resolveConnectorPrincipal({
+      platform: "lark",
+      adapterRow,
+      remoteUserId: "ou_1",
+      identityScope: { ...scope, unionId: "on_1" },
+      activeAccountId: "acct_a",
+    })
+    expect(result.status).toBe("principal_disabled")
+    const stored = await getDb().feishuPrincipals.get(principal.id)
+    expect(stored?.unionId).toBeUndefined()
+    expect(stored?.version).toBe(before?.version)
+  })
+
+  it("never overwrites a union_id the principal already records", async () => {
+    const principal = await seedResolved()
+    await getDb().feishuPrincipals.update(principal.id, { unionId: "on_recorded" })
+    await resolveConnectorPrincipal({
+      platform: "lark",
+      adapterRow,
+      remoteUserId: "ou_1",
+      identityScope: { ...scope, unionId: "on_different" },
+      activeAccountId: "acct_a",
+    })
+    const stored = await getDb().feishuPrincipals.get(principal.id)
+    expect(stored?.unionId).toBe("on_recorded")
+    expect(stored?.version).toBe(principal.version)
+  })
+})
+
 describe("helpers", () => {
   it("hashOpenId is stable and hex", async () => {
     const a = await hashOpenId("ou_12345")
@@ -191,6 +277,19 @@ describe("helpers", () => {
     expect(readIdentityScope({ identityScope: "nope" })).toBeUndefined()
     expect(readIdentityScope({ identityScope: {} })).toBeUndefined()
     expect(readIdentityScope({ identityScope: { tenantKey: "tk", appId: 5 } })).toEqual({
+      tenantKey: "tk",
+      appId: undefined,
+    })
+  })
+
+  it("readIdentityScope keeps a string union_id and drops anything else", () => {
+    expect(
+      readIdentityScope({ identityScope: { tenantKey: "tk", appId: "cli", unionId: "on_1" } })
+    ).toEqual({ tenantKey: "tk", appId: "cli", unionId: "on_1" })
+    expect(
+      readIdentityScope({ identityScope: { tenantKey: "tk", appId: "cli", unionId: 7 } })
+    ).toEqual({ tenantKey: "tk", appId: "cli" })
+    expect(readIdentityScope({ identityScope: { tenantKey: "tk", unionId: "" } })).toEqual({
       tenantKey: "tk",
       appId: undefined,
     })
