@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "statistics-economics",
+  "status": "design-unverified",
+  "title": "统计与经济学",
+  "packageHints": [
+    "booktabs",
+    "siunitx",
+    "threeparttable"
+  ],
+  "referenceResourceId": "domain:statistics-economics",
+  "rules": [
+    {
+      "id": "statistics-economics:estimates",
+      "title": "估计值与样本",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "系数、样本数、标准误、显著性注释由输入结果生成。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-04-1",
+        "DOM-04-2",
+        "DOM-04-3"
+      ]
+    },
+    {
+      "id": "statistics-economics:identification",
+      "title": "识别与因果",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "识别假设单独列出；相关关系不能经润色升级为因果结论。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-04-1",
+        "DOM-04-2",
+        "DOM-04-3"
+      ]
+    },
+    {
+      "id": "statistics-economics:uncertainty",
+      "title": "不确定性",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "明确标准误类型、聚类层级、置信水平和缺失值处理。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-04-1",
+        "DOM-04-2",
+        "DOM-04-3"
+      ]
+    },
+    {
+      "id": "statistics-economics:units",
+      "title": "尺度和经济意义",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "百分比、百分点、对数系数和水平量分别解释；计算需可追踪。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-04-1",
+        "DOM-04-2",
+        "DOM-04-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "保护估计值、样本范围和识别限制",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-04-1",
+    "DOM-04-2",
+    "DOM-04-3"
+  ]
+}

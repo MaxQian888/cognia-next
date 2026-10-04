@@ -1,0 +1,82 @@
+% 试卷/练习卷模板（学生版）：exam 文档类 + ctex，XeLaTeX，字体集 fandol（离线可用）。
+% 中英文题目均可直接书写。发布检查依赖以下约定：
+%   1. 分值只写在 \question[分值] 或 \part[分值] 的方括号里，正文中不要再重复
+%      写"（N 分）"之类的分值，否则 score-sum 检查会重复计分。
+%   2. 总分只在下方 \fullmarks 的定义里声明；score-sum 检查核对各题分值之和
+%      是否等于它，增删题目或改分值后要同步修改。
+%   3. 学生版源码中不写任何答案：不要使用 solution 环境、\CorrectChoice 命令，
+%      也不要启用 \printanswers。答案与评分细则放在单独的教师版项目/target
+%      （输出配置 exam-teacher）中；answer-isolation 检查会扫描本源码与 PDF。
+\documentclass[a4paper,11pt,addpoints]{exam}
+
+\usepackage[UTF8,fontset=fandol]{ctex}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+
+% 仅教师版启用下一行；学生版必须保持注释状态。
+% \printanswers
+
+% 试卷总分（score-sum 检查读取此处声明）。
+\newcommand{\fullmarks}{20}
+
+% 分值显示为"（6 分）"；得分表使用中文表头。
+\pointpoints{分}{分}
+\pointformat{（\thepoints）}
+\hqword{题号}
+\hpword{分值}
+\hsword{得分}
+\htword{合计}
+
+\pagestyle{headandfoot}
+\firstpageheader{}{}{}
+\runningheader{课程名称}{}{考试名称}
+\runningheadrule
+\footer{}{第 \thepage\ 页，共 \numpages\ 页}{}
+
+\begin{document}
+
+\begin{center}
+  {\Large\bfseries 课程名称\quad 考试名称\par}
+  \medskip
+  考试时间：90 分钟\qquad 满分：\fullmarks{} 分
+\end{center}
+
+\vspace{1em}
+\noindent 姓名：\underline{\makebox[3.5cm]{}}\hfill
+学号：\underline{\makebox[3.5cm]{}}\hfill
+班级：\underline{\makebox[3cm]{}}
+
+\begin{center}
+  \gradetable[h][questions]
+\end{center}
+
+% 注意事项按实际考试要求修改。
+\noindent\textbf{注意事项：}请将答案写在题目下方的空白处；不得使用计算器。
+
+\vspace{1em}
+% 以下为示例题目，替换为实际题目；每题分值写在方括号中。
+\begin{questions}
+
+\question[6] 计算定积分 $\displaystyle\int_{0}^{1} x^{2}\,\mathrm{d}x$ 的值。
+\vspace{3cm}
+
+\question[6] 下列函数中，在区间 $(0, +\infty)$ 上单调递增的是
+\begin{choices}
+  \choice $y = -x$
+  \choice $y = \dfrac{1}{x}$
+  \choice $y = \ln x$
+  \choice $y = \cos x$
+\end{choices}
+\vspace{1cm}
+
+\question 已知函数 $f(x) = x^{3} - 3x$。
+\begin{parts}
+  \part[4] 求 $f(x)$ 的导函数 $f'(x)$。
+  \vspace{2.5cm}
+  \part[4] 求 $f(x)$ 的单调区间与极值。
+  \vspace{3.5cm}
+\end{parts}
+
+\end{questions}
+
+\end{document}

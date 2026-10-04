@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "id": "data-assets",
+  "version": 1,
+  "initial": "inspect",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 1,
+  "maxSameCauseAttempts": 2,
+  "nodes": [
+    {
+      "id": "inspect",
+      "type": "operation",
+      "operationId": "assets.inspect-source",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "generate",
+      "onFailure": "blocked",
+      "description": "验证数据来源/字段/单位"
+    },
+    {
+      "id": "generate",
+      "type": "operation",
+      "operationId": "assets.generate-approved",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "proposal",
+      "onFailure": "blocked",
+      "description": "受信table/plot/diagram配方"
+    },
+    {
+      "id": "proposal",
+      "type": "agent",
+      "operationId": "agent.propose-asset-insertion",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "attach-asset与TeX引用同一patch"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.patch-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "apply",
+      "onFailure": "blocked",
+      "description": "数据不改；图注明确来源"
+    },
+    {
+      "id": "apply",
+      "type": "operation",
+      "operationId": "patch.apply-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "纳入新快照"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.run-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "check",
+      "onFailure": "blocked",
+      "description": "真实编译"
+    },
+    {
+      "id": "check",
+      "type": "operation",
+      "operationId": "assets.check-mapping-and-layout",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "数值映射及页面检查"
+    }
+  ],
+  "requiredSkills": [
+    "latex-tables",
+    "latex-figures"
+  ]
+}

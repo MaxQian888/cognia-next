@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "notice": "Approved project templates. Every file's sha256 is verified before bytes enter CAS; unlisted templates are not loadable.",
+  "templates": [
+    {
+      "id": "article-basic",
+      "description": "Minimal article draft: amsmath/booktabs/hyperref, BibTeX bibliography, placeholder abstract and introduction.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "bibtex",
+      "outputProfileId": "article",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "article-basic/main.tex",
+          "sha256": "71a26532437f65af34dbde2e77aa04eeac78402a70b89e15b79e12b3545ceb06"
+        },
+        {
+          "path": "references.bib",
+          "resource": "article-basic/references.bib",
+          "sha256": "0992a38c87d5a09844183f417dbe296173cf6e357d53393bc4d27b43fec78186"
+        }
+      ]
+    },
+    {
+      "id": "report-basic",
+      "description": "Minimal report draft: report class with TOC, graphicx, BibTeX bibliography.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "bibtex",
+      "outputProfileId": "book-report",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "report-basic/main.tex",
+          "sha256": "4fc9e47567a30511be1880092006046bdfb4652ddb824f2cb530c4d0d4e8d62e"
+        },
+        {
+          "path": "references.bib",
+          "resource": "report-basic/references.bib",
+          "sha256": "0992a38c87d5a09844183f417dbe296173cf6e357d53393bc4d27b43fec78186"
+        }
+      ]
+    },
+    {
+      "id": "zh-article",
+      "description": "Chinese article (中文文章): ctexart with Fandol fonts; amsthm environments named 定理/引理/定义/证明, booktabs, graphicx, hyperref; sections 摘要+关键词/引言/相关工作/方法/实验与结果/结论; BibTeX bibliography in GB/T 7714-2015 numeric style (gbt7714).",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "bibtex",
+      "outputProfileId": "article",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "zh-article/main.tex",
+          "sha256": "e1a31fe406c3e80323c4373d0f4d3bd3a550596f2a0832b4c5de5bd8cb111da8"
+        },
+        {
+          "path": "references.bib",
+          "resource": "zh-article/references.bib",
+          "sha256": "34d11c3038d8748849d6240be59e8c3d06ad9cb81dacb14ebd28874dbb167ffb"
+        }
+      ]
+    },
+    {
+      "id": "zh-thesis",
+      "description": "Chinese thesis or long report skeleton (中文学位论文/长篇报告): ctexbook with Fandol fonts; cover page, 中文摘要 + English abstract, 目录, chapters 绪论/相关工作/方法/实验/结论, 附录, 致谢; theorem environments; BibTeX in GB/T 7714-2015 numeric style (gbt7714). Generic, not any university's official format.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "bibtex",
+      "outputProfileId": "zh-thesis",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "zh-thesis/main.tex",
+          "sha256": "1177761661e0555daf07fbcb284ec272f521d961925e3a0eff82c7ef99529346"
+        },
+        {
+          "path": "references.bib",
+          "resource": "zh-thesis/references.bib",
+          "sha256": "34d11c3038d8748849d6240be59e8c3d06ad9cb81dacb14ebd28874dbb167ffb"
+        }
+      ]
+    },
+    {
+      "id": "beamer-basic",
+      "description": "English slide deck: beamer 16:9 (Boadilla theme) with title frame, outline, motivation, a frame with a numbered equation, a booktabs results table, take-home messages and a closing frame; no bibliography.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "none",
+      "outputProfileId": "beamer",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "beamer-basic/main.tex",
+          "sha256": "5c5112e6a95f1c01e3219ca4a933be7dae411e073cf7ccc11b450ed7b6625d14"
+        }
+      ]
+    },
+    {
+      "id": "zh-beamer",
+      "description": "Chinese slide deck (中文演示文稿): ctexbeamer 16:9 with Fandol fonts (Boadilla theme); 标题页, 目录, 研究背景, a frame with a numbered equation, a booktabs results table, 总结 and a closing frame; no bibliography.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "none",
+      "outputProfileId": "beamer",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "zh-beamer/main.tex",
+          "sha256": "63dc175ae9500fff7ed2e2a1f3123192dfe4ad2367aea013ae6ac4ba5a98bbcc"
+        }
+      ]
+    },
+    {
+      "id": "letter-basic",
+      "description": "English one-page cover letter (standard letter class): sender and recipient address blocks, date, opening, three guided body paragraphs, closing and enclosure line; for job/fellowship applications or a manuscript-submission letter to a journal editor.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "none",
+      "outputProfileId": "cv-letter",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "letter-basic/main.tex",
+          "sha256": "74269eb16be37c2c4019c70458e192e78ebddf57c3a85f7f1a8a6857a9caddb0"
+        }
+      ]
+    },
+    {
+      "id": "exam-basic",
+      "description": "Chinese exam or worksheet, student version (试卷/练习卷学生版): exam class + ctex with Fandol fonts; marks written only as \\question[N]/\\part[N], total declared once in \\fullmarks (verified by score-sum), grade table, choice and multi-part questions; no answers in source (\\printanswers stays commented; answers belong in a separate exam-teacher target). English questions work too.",
+      "entrypoint": "main.tex",
+      "engine": "xelatex",
+      "bibliography": "none",
+      "outputProfileId": "exam-student",
+      "files": [
+        {
+          "path": "main.tex",
+          "resource": "exam-basic/main.tex",
+          "sha256": "5dfaddaf2bd6e067372672c4113fe2bb1458dcdbb88c58df92a4e76a7d4eeff2"
+        }
+      ]
+    }
+  ]
+}

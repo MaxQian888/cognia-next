@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "id": "acl-anthology-generic",
+  "status": "verified",
+  "venue": "*ACL conference proceedings (generic ACLPUB/acl-style-files requirements)",
+  "year": null,
+  "track": null,
+  "stage": "submission",
+  "checkedAt": "2026-09-21T18:58:07Z",
+  "validUntil": "2027-06-01T00:00:00Z",
+  "sources": [
+    {
+      "id": "aclpub-formatting",
+      "url": "https://acl-org.github.io/ACLPUB/formatting.html",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "4a90de70bc6edc8bd05d2272612574edd27695ac72efe2a0ffaf2f5359b475b8",
+      "locator": "Paper formatting guidelines → Paper Length / File Format / Paper Format"
+    },
+    {
+      "id": "acl-style-files-formatting",
+      "url": "https://raw.githubusercontent.com/acl-org/acl-style-files/master/formatting.md",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "9e004a136c5dd43300d97e5bef5eb3a77d0e2a2d3502f0f2436ec011d1c49e9c",
+      "locator": "Instructions for *ACL Proceedings → Anonymity / Paper Length"
+    }
+  ],
+  "template": {
+    "origin": "official",
+    "templateId": "acl-style-files",
+    "version": null,
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "anonymized",
+      "title": "Double-blind anonymization",
+      "severity": "error",
+      "mode": "automatic",
+      "checkImplementation": "anonymization-scan",
+      "scope": "entire-pdf",
+      "requirement": "As reviewing is double-blind, review versions must not include any identifying information about the authors (names, affiliations, URLs); self-references that reveal identity must be avoided and review versions must not include acknowledgements.",
+      "sourceId": "acl-style-files-formatting",
+      "sourceLocator": "Anonymity",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": [
+        "RELEASE-05"
+      ]
+    },
+    {
+      "id": "long-paper-8",
+      "title": "Long paper: eight content pages",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "main-text",
+      "requirement": "Review versions of long papers may have up to eight (8) pages of content plus unlimited pages for references; all figures and tables that are part of the main text must fit within the limit.",
+      "sourceId": "aclpub-formatting",
+      "sourceLocator": "Paper Length",
+      "parameters": {
+        "maxPages": 8,
+        "includeReferences": false,
+        "includeAppendix": false
+      },
+      "testIds": []
+    },
+    {
+      "id": "a4-paper",
+      "title": "A4 paper format",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "entire-pdf",
+      "requirement": "All papers must use A4 paper format (21 cm x 29.7 cm); papers must not be submitted with any other paper size.",
+      "sourceId": "aclpub-formatting",
+      "sourceLocator": "File Format",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "fonts-embedded",
+      "title": "All fonts embedded",
+      "severity": "error",
+      "mode": "automatic",
+      "checkImplementation": "font-coverage",
+      "scope": "entire-pdf",
+      "requirement": "The PDF file must embed all necessary fonts (especially for tree diagrams, symbols, and Asian languages); START will not let authors upload a final PDF without all fonts embedded.",
+      "sourceId": "aclpub-formatting",
+      "sourceLocator": "File Format / Paper Format",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "two-column",
+      "title": "Two-column layout",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "entire-pdf",
+      "requirement": "Manuscripts must be set in two columns; exceptions are the title, author block, and full-width figures or tables.",
+      "sourceId": "aclpub-formatting",
+      "sourceLocator": "Paper Format → Layout",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "internal-double-blind",
+  "status": "draft",
+  "venue": "Internal double-blind review scaffold; not an official venue",
+  "year": null,
+  "track": null,
+  "stage": "submission",
+  "checkedAt": null,
+  "validUntil": null,
+  "sources": [],
+  "template": {
+    "origin": "internal",
+    "templateId": "internal-article",
+    "version": "design-1",
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "anonymized",
+      "title": "Double-blind anonymization",
+      "severity": "error",
+      "mode": "automatic",
+      "checkImplementation": "anonymization-scan",
+      "scope": "entire-pdf",
+      "requirement": "Camera-visible output must carry no author identity: no \\author content, affiliations, ORCID, emails, or corresponding-author markers in source or extracted PDF text.",
+      "sourceId": "internal-policy",
+      "sourceLocator": "internal:double-blind-scaffold",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": true,
+        "includeAppendix": true
+      },
+      "testIds": []
+    }
+  ]
+}

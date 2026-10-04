@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "zh-thesis",
+  "status": "design-unverified",
+  "title": "中文学位论文",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "font-coverage",
+    "references-resolved",
+    "protected-content",
+    "visual-coverage"
+  ],
+  "humanReview": [
+    "学校/院系/年度模板",
+    "双语题目摘要与盲审要求"
+  ],
+  "notes": [
+    "不强制所有学校同一种文献标准版本。",
+    "前置、正文、后置章节由institutional profile定义。"
+  ]
+}

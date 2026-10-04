@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "mode": "isolated-sdk",
+  "approvedImages": [],
+  "network": {
+    "compiler": "deny",
+    "metadataProviders": [
+      "crossref"
+    ],
+    "venueVerification": true,
+    "allowPrivateAddresses": false,
+    "fakeIpCidrs": [
+      "198.18.0.0/15"
+    ]
+  },
+  "limits": {
+    "buildTimeoutSeconds": 180,
+    "cpu": 2,
+    "memoryMiB": 2048,
+    "pids": 128,
+    "tempSpaceMiB": 512,
+    "logMiB": 20,
+    "unpackedInputMiB": 256,
+    "inputFiles": 10000
+  },
+  "projectConfigCanElevatePermissions": false,
+  "allowProjectRc": false,
+  "allowArbitraryRecipes": false,
+  "requireAllReleasePagesReviewed": true,
+  "protection": {
+    "mode": "strict"
+  },
+  "note": "Host-controlled policy. Empty approvedImages intentionally blocks container execution until provisioning. fakeIpCidrs admits only a TUN/fake-IP proxy's 198.18.0.0/15 DNS answers for metadata/venue fetches (private ranges stay denied). protection.mode is the default for Pi sessions (strict | authoring); LATEXWB_PROTECTION or /latex mode override it per session."
+}

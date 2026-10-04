@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "id": "neurips-2025",
+  "status": "verified",
+  "venue": "39th Conference on Neural Information Processing Systems (NeurIPS 2025)",
+  "year": 2025,
+  "track": "main conference",
+  "stage": "submission",
+  "checkedAt": "2026-09-21T18:58:07Z",
+  "validUntil": "2025-10-23T00:00:00Z",
+  "sources": [
+    {
+      "id": "neurips-2025-cfp",
+      "url": "https://neurips.cc/Conferences/2025/CallForPapers",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "30ace719e7ce5b44aca56bba92ac1b6338f24787264ab719cda737575ea429f2",
+      "locator": "Call For Papers 2025 → Paper Formatting Instructions / Double-blind Reviewing"
+    }
+  ],
+  "template": {
+    "origin": "official",
+    "templateId": "neurips-2025-latex-style",
+    "version": "2025",
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "anonymized",
+      "title": "Double-blind anonymization",
+      "severity": "error",
+      "mode": "automatic",
+      "checkImplementation": "anonymization-scan",
+      "scope": "entire-pdf",
+      "requirement": "All submissions must be anonymized and may not contain any identifying information that may violate the double-blind reviewing policy; this applies to supplementary and linked material as well.",
+      "sourceId": "neurips-2025-cfp",
+      "sourceLocator": "Double-blind Reviewing",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": [
+        "RELEASE-05"
+      ]
+    },
+    {
+      "id": "content-pages-9",
+      "title": "Nine content pages",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "main-text",
+      "requirement": "The main text of a submitted paper is limited to nine content pages, including all figures and tables; references, checklist and optional technical appendices do not count as content pages.",
+      "sourceId": "neurips-2025-cfp",
+      "sourceLocator": "Paper Formatting Instructions",
+      "parameters": {
+        "maxPages": 9,
+        "includeReferences": false,
+        "includeAppendix": false
+      },
+      "testIds": []
+    },
+    {
+      "id": "style-file",
+      "title": "NeurIPS 2025 style file",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "Submissions must be formatted using the NeurIPS 2025 LaTeX style file; submissions violating the style (e.g. decreasing margins or font sizes) may be rejected without further review.",
+      "sourceId": "neurips-2025-cfp",
+      "sourceLocator": "Paper Formatting Instructions",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "file-size",
+      "title": "50MB submission size cap",
+      "severity": "warning",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "The maximum file size for a main paper submission is 50MB.",
+      "sourceId": "neurips-2025-cfp",
+      "sourceLocator": "Paper Formatting Instructions",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    }
+  ]
+}

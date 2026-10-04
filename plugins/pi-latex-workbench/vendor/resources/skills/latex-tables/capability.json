@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "skillId": "latex-tables",
+  "workflowIds": [
+    "data-assets"
+  ],
+  "toolNames": [
+    "latex_project",
+    "latex_figure",
+    "latex_patch",
+    "latex_build",
+    "latex_render",
+    "latex_check"
+  ],
+  "resourceIds": [
+    "skill:latex-tables",
+    "skill:latex-tables:guide"
+  ],
+  "hostCapabilities": [
+    "source.read",
+    "asset.generate",
+    "source.propose",
+    "build.execute"
+  ],
+  "requiresHumanGateFor": [
+    "protected-content-change",
+    "template-migration",
+    "unverified-evidence",
+    "submission-release"
+  ]
+}

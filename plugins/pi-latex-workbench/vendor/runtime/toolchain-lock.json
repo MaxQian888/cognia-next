@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "status": "resolved",
+  "toolchainDigest": "6ffe055852f8faf66c0acbe1a7fb27f87b869a90bad1204f3bf4d9683f597c7c",
+  "piPackageName": null,
+  "piVersion": null,
+  "fonts": [],
+  "templates": [],
+  "profiles": [],
+  "note": "tectonic Tectonic 0.17.0 sha256=568dea0a81f4ceed859e33734bbbea85d54a25f14b12665a48c98b536a887986; bundle=https://relay.fullyjustified.net/default_bundle_v33.tar svnrev=62885 githash=082081a375be008c2e049cd7cf1137314f888b18 extracted to runtime/toolchain/bundle (134978 files, manifest sha256=021e765faa82f1bccec7d765961be14a6e144cd53e99700dac77ae6bd17cc4ec); provisioned 2026-09-21T11:19:19.527Z; offline smoke build ok"
+}

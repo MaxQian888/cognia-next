@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "beamer",
+  "status": "design-unverified",
+  "title": "学术演讲",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "assets-present",
+    "visual-coverage",
+    "protected-content"
+  ],
+  "humanReview": [
+    "观看距离与可读性",
+    "时长预算、讲稿及对原论文忠实程度"
+  ],
+  "notes": [
+    "页数不等于演讲时间；图表信息不能凭空添加。"
+  ]
+}

@@ -1,0 +1,224 @@
+{
+ "schemaVersion": 1,
+ "notice": "Runtime capability registry (M5): honest per-surface status. 'verified' = exercised by a real test or recorded command on this host; 'design-unverified' = designed and present but not exercised end-to-end; 'environment-blocked' = implemented but this host lacks the prerequisite; 'unsupported' = declared in contracts/registry but has no implementation — surfaces honestly as needs-review/unsupported, never a silent pass.",
+ "recordedAt": "2026-09-21T18:58:07Z",
+ "host": "macOS arm64, Node v26.5.0, tectonic 0.17.0, pi 0.85.1 (see docs/ENVIRONMENT.md)",
+ "capabilities": [
+  {
+   "surface": "build.tectonic-local",
+   "status": "verified",
+   "evidence": "packages/core/test/m1.integration.test.ts; packages/core/test/m5.test.ts; runtime/toolchain-lock.json",
+   "reason": "offline tectonic -X compile -b runtime/toolchain/bundle --only-cached; real builds exercised in M1/M4/M5 tests"
+  },
+  {
+   "surface": "build.read-boundary-audit",
+   "status": "verified",
+   "evidence": "packages/core/test/m1.integration.test.ts test 9b + manual: \\input{/tmp/.../host-secret.txt} → compile-failed + SECURITY_BOUNDARY, pdf quarantined (no artifact row); deps.mk published as evidence",
+   "reason": "deps.mk/.fls ledger audited post-run; reads outside job dirs + runner-declared roots quarantine the pdf. Detective control — tectonic --untrusted does not block absolute-path \\input (verified on 0.17)"
+  },
+  {
+   "surface": "build.docker-texlive-latexmk",
+   "status": "environment-blocked",
+   "evidence": "packages/runtime/src/docker-runner.ts; docs/ENVIRONMENT.md",
+   "reason": "no docker daemon (colima socket absent) and host-policy approvedImages is empty; probe reports unavailable honestly"
+  },
+  {
+   "surface": "render.swift-pdfkit-helper",
+   "status": "verified",
+   "evidence": "runtime/render/manifest.json; packages/core/test/m4.test.ts (renderPages/renderText produce real PNG + page-text artifacts)",
+   "reason": "provisioned via latexwb provision-renderer; manifest pins helper sha256; darwin/arm64 only"
+  },
+  {
+   "surface": "metadata.crossref-lookup",
+   "status": "verified",
+   "evidence": "packages/core/test/m3.test.ts; runtime/host-policy.json network.metadataProviders=[\"crossref\"]",
+   "reason": "policy-gated live Crossref lookups with persisted evidence; removing the policy degrades to recorded policy-denied"
+  },
+  {
+   "surface": "pi.tool.latex_project",
+   "status": "verified",
+   "evidence": "packages/adapter-pi/test/m2c.test.ts; docs/ENVIRONMENT.md M2-C transcript",
+   "reason": "inspect/snapshot/read/search/artifact-read/doctor/init/resource actions live"
+  },
+  {
+   "surface": "pi.tool.latex_patch",
+   "status": "verified",
+   "evidence": "packages/core/test/m2.patch.test.ts; packages/adapter-pi/test/m2c.test.ts",
+   "reason": "propose/apply/revert real (replace anchors, byte-range edit, create, delete, attach-asset); no approve action — grants are host-only: latexwb approve, the Pi operator dialog or /latex approve, or host authoring mode for additions"
+  },
+  {
+   "surface": "pi.tool.latex_build",
+   "status": "verified",
+   "evidence": "packages/core/test/m1.integration.test.ts; m5.test.ts",
+   "reason": "run/status/cancel against the provisioned tectonic bundle"
+  },
+  {
+   "surface": "pi.tool.latex_bib",
+   "status": "verified",
+   "evidence": "packages/core/test/m3.test.ts",
+   "reason": "lookup/audit/propose-import with real BibTeX parse + policy-gated crossref"
+  },
+  {
+   "surface": "pi.tool.latex_figure",
+   "status": "verified",
+   "evidence": "packages/core/test/m3.test.ts",
+   "reason": "table/plot/diagram via trusted recipe registry + real tectonic compile; honest per-outcome proof"
+  },
+  {
+   "surface": "pi.tool.latex_check",
+   "status": "verified",
+   "evidence": "packages/core/test/m3.test.ts; m4.test.ts",
+   "reason": "data-assets ruleset live; release ruleset live; unverifiable items report needs-review"
+  },
+  {
+   "surface": "pi.tool.latex_render",
+   "status": "verified",
+   "evidence": "packages/core/test/m4.test.ts",
+   "reason": "pages/text via provisioned render helper; skips honestly when unprovisioned"
+  },
+  {
+   "surface": "pi.tool.latex_export",
+   "status": "verified",
+   "evidence": "packages/core/test/m4.test.ts",
+   "reason": "release prepare/package pipeline: gates → digest approval → deterministic zip → clean-room rebuild → honest finalize"
+  },
+  {
+   "surface": "workflow.engine",
+   "status": "verified",
+   "evidence": "packages/core/test/m2.workflow.test.ts; resources/workflows/*.json",
+   "reason": "definitions hash-pinned into CAS; durable steps; waiting-* states stop without lease"
+  },
+  {
+   "surface": "workflow.repair/revise/bibliography/data-assets/new-document/template-migration/release",
+   "status": "verified",
+   "evidence": "packages/core/test/m2.workflow.test.ts; m3.test.ts; m4.test.ts",
+   "reason": "registered ops execute; unsupported ops (quality.compare-baseline, quality.compare-and-venue) drive blocked honestly — venue.verify-current is live"
+  },
+  {
+   "surface": "release.pipeline",
+   "status": "verified",
+   "evidence": "packages/core/test/m4.test.ts",
+   "reason": "freeze→clean build→checks→page-review gate→whitelist→digest approval→package→clean-room rebuild→finalize"
+  },
+  {
+   "surface": "check.answer-isolation",
+   "status": "verified",
+   "evidence": "packages/core/test/m4.test.ts; m6-gaps.test.ts; resources/profiles/check-registry.json",
+   "reason": "deterministic source+PDF scan for answer/solution/marking markers; live in runReleaseChecks"
+  },
+  {
+   "surface": "check.answer-mapping",
+   "status": "unsupported",
+   "evidence": "resources/profiles/check-registry.json",
+   "reason": "teacher↔student numbering/marks correspondence not modeled"
+  },
+  {
+   "surface": "check.asset-provenance",
+   "status": "verified",
+   "evidence": "packages/core/test/m6-gaps.test.ts; resources/profiles/check-registry.json",
+   "reason": "CAS-hash + generated-asset record verification live in runReleaseChecks; license attestation still not modeled"
+  },
+  {
+   "surface": "check.score-sum",
+   "status": "verified",
+   "evidence": "packages/core/test/m6-gaps.test.ts; resources/profiles/check-registry.json",
+   "reason": "deterministic mark-sum vs declared total in runReleaseChecks"
+  },
+  {
+   "surface": "venue.verify-current (workflow op)",
+   "status": "verified",
+   "evidence": "packages/core/src/venue.ts; packages/core/test/m2.workflow.test.ts venue.verify-current block",
+   "reason": "pinned-HTTPS source refetch + sha256 compare + venue-source evidence; policy-gated by network.venueVerification"
+  },
+  {
+   "surface": "quality.compare-and-venue (workflow op)",
+   "status": "unsupported",
+   "evidence": "resources/workflows/operation-registry.json",
+   "reason": "the compare op is still not implemented; driveWorkflow blocks it with NOT_IMPLEMENTED"
+  },
+  {
+   "surface": "cli.serve / cli.edit",
+   "status": "unsupported",
+   "evidence": "packages/cli/src/bin.ts (exits 3 NOT_IMPLEMENTED); docs/UNSUPPORTED.md",
+   "reason": "HTTP adapter + interactive edit surface not implemented"
+  },
+  {
+   "surface": "pi.user_bash-interactive-hook",
+   "status": "design-unverified",
+   "evidence": "packages/adapter-pi/src/session-control.ts; unit-tested denial; docs/ENVIRONMENT.md",
+   "reason": "pi -p print mode has no interactive '!' prefix; denial is unit-tested but no print-mode transcript exists"
+  },
+  {
+   "surface": "domain-profiles.rules",
+   "status": "design-unverified",
+   "evidence": "resources/profiles/domains/*.json (status design-unverified); fixtures/domains/ M5 fixtures",
+   "reason": "rule checks are advisory (checkImplementation null); M5 fixtures exercise the inputs they describe, not a domain-rule engine"
+  },
+  {
+   "surface": "pi-session.real-agent-eval",
+   "status": "design-unverified",
+   "evidence": "docs/EVAL.md; scripts/pi-canary.sh",
+   "reason": "canary procedure exists; model behavior is a canary signal, not a CI gate"
+  },
+  {
+   "surface": "patch.text-anchored-replace",
+   "status": "verified",
+   "evidence": "packages/core/test/m7-authoring.test.ts (unique/ambiguous/occurrence/missing/overlap, CJK byte ranges, digest parity with byte edits); packages/adapter-pi/test/m2c.parity.test.ts; live deepseek-v4-flash runs 2026-09-24",
+   "reason": "latex_patch op 'replace' resolves exact-text anchors against the base snapshot into byte-range edits before analysis/digest (ADR-0007); ambiguity is refused with match lines, never guessed"
+  },
+  {
+   "surface": "protection.change-classification",
+   "status": "verified",
+   "evidence": "packages/core/test/m7-authoring.test.ts; packages/core/test/m2.patch.test.ts (ADR-0005 cases unchanged)",
+   "reason": "every ProtectedChange carries change=added|modified|removed; comments masked; byte-identical re-emitted math is unchanged; unknown-macro vocabulary = pinned-bundle kernel/package definitions (scripts/generate-known-commands.py) + curated list + commands already used in the project"
+  },
+  {
+   "surface": "protection.authoring-mode",
+   "status": "verified",
+   "evidence": "packages/core/test/m7-authoring.test.ts; packages/adapter-pi/test/m7-approval.test.ts; live run A2 (98 additive changes applied with host-authoring-mode grant)",
+   "reason": "host-chosen (LATEXWB_PROTECTION, host-policy protection.mode, /latex mode): additions-only patches apply with an auto-recorded patch-bound grant attributed to the host principal; modifications/removals keep the per-patch gate"
+  },
+  {
+   "surface": "approval.pi-operator-dialog",
+   "status": "verified",
+   "evidence": "packages/adapter-pi/test/m7-approval.test.ts (approve once / authoring / deny, grantedVia=pi-ui)",
+   "reason": "interactive/RPC sessions ask the human operator via ctx.ui when apply is gated; print/JSON mode keeps POLICY_DENIED. Local-operator trust, same as latexwb approve — not multi-user authentication"
+  },
+  {
+   "surface": "pi.host-commands.pending-approve-mode-pdf-sync",
+   "status": "verified",
+   "evidence": "packages/adapter-pi/test/m7-approval.test.ts",
+   "reason": "/latex pending|approve|mode|pdf|sync — operator-typed host commands; sync uses the journaled materializer with the latest import snapshot as first-sync baseline (external edits conflict)"
+  },
+  {
+   "surface": "templates.approved-set",
+   "status": "verified",
+   "evidence": "packages/core/test/templates.test.ts (all 8 templates: init + offline build clean + profile checks + real citations)",
+   "reason": "article-basic, report-basic, zh-article, zh-thesis, beamer-basic, zh-beamer, letter-basic, exam-basic — digest-verified; Chinese templates use ctex + fandol + gbt7714"
+  },
+  {
+   "surface": "network.fake-ip-proxy",
+   "status": "verified",
+   "evidence": "packages/adapter-pi/test/m7-approval.test.ts (isDeclaredFakeIp); live crossref lookup through a 198.18.0.0/15 fake-IP resolver on this host",
+   "reason": "host-policy network.fakeIpCidrs admits only sub-ranges of 198.18.0.0/15; RFC1918/loopback/link-local can never be opted in"
+  },
+  {
+   "surface": "build.source-date-epoch",
+   "status": "verified",
+   "evidence": "packages/core/test/m7-authoring.test.ts; packages/core/test/m4.test.ts (clean-room rebuild sha256 still matches)",
+   "reason": "SOURCE_DATE_EPOCH = creation time of the earliest snapshot with the same tree hash: \\today shows a real date, identical content rebuilds byte-identically"
+  },
+  {
+   "surface": "diagnostics.file-attribution",
+   "status": "verified",
+   "evidence": "packages/core/test/diagnostics.test.ts (21 log-fixture + 2 real-build tests)",
+   "reason": "placeholder paren stack + project-path resolution for extension-less \\input files; box/input line numbers; page estimate; hints for common errors"
+  },
+  {
+   "surface": "checks.draft-lint",
+   "status": "verified",
+   "evidence": "packages/core/test/checks-draft.test.ts (18 tests incl. real builds, Chinese text, commented-out refs); packages/adapter-pi/test/checks-draft.test.ts",
+   "reason": "ruleset 'draft': references, duplicate-labels, citations, unused-bib-entries, floats, placeholders, typography, build-log — comment-masked source heuristics + build log; requiredCheckIds empty (gates nothing); registry drift is INVALID_REQUEST"
+  }
+ ]
+}

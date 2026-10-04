@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "mathematics",
+  "status": "design-unverified",
+  "title": "数学",
+  "packageHints": [
+    "amsmath",
+    "amsthm",
+    "mathtools",
+    "tikz-cd"
+  ],
+  "referenceResourceId": "domain:mathematics",
+  "rules": [
+    {
+      "id": "mathematics:notation",
+      "title": "符号定义与作用域",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "建立符号登记和局部作用域；多义符号需解释，不能盲目全局替换。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-01-1",
+        "DOM-01-2",
+        "DOM-01-3"
+      ]
+    },
+    {
+      "id": "mathematics:proof",
+      "title": "证明和条件",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "每个证明核对定理条件、量词和依赖；数值试验或排版通过不作为一般证明。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-01-1",
+        "DOM-01-2",
+        "DOM-01-3"
+      ]
+    },
+    {
+      "id": "mathematics:math-preserve",
+      "title": "数学保真",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "公式修改以结构/token差异展示；即使声称代数等价也须核对定义域。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-01-1",
+        "DOM-01-2",
+        "DOM-01-3"
+      ]
+    },
+    {
+      "id": "mathematics:numbering",
+      "title": "编号和交叉引用",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "定理、公式、图引用均指向真实目标，重复标签为错误。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-01-1",
+        "DOM-01-2",
+        "DOM-01-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "不得为消错改量词、负号、上下界或假设",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-01-1",
+    "DOM-01-2",
+    "DOM-01-3"
+  ]
+}

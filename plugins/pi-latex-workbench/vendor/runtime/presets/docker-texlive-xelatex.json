@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "docker-texlive-xelatex",
+  "runnerId": "docker-texlive-latexmk",
+  "engine": "xelatex",
+  "bibliographyMode": "biber",
+  "argvTemplate": [
+    "latexmk",
+    "-norc",
+    "-file-line-error",
+    "-interaction=nonstopmode",
+    "-no-shell-escape",
+    "-recorder",
+    "-synctex=1",
+    "-xelatex",
+    "-outdir={outdir}",
+    "{entry}"
+  ],
+  "envAllowlist": ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"],
+  "limits": {
+    "wallClockMs": 180000,
+    "cpu": 2,
+    "memoryMiB": 2048,
+    "pids": 128,
+    "tmpBytes": 536870912,
+    "maxLogBytes": 20971520,
+    "maxOutputBytes": 134217728
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "reviewDate": "2026-09-21",
+  "status": "research-links-only",
+  "sources": [
+    {
+      "id": "R01",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R02",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R03",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R04",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R05",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R06",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R07",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R08",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R09",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R10",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R11",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R12",
+      "versionPin": null,
+      "importApproved": false
+    },
+    {
+      "id": "R13",
+      "versionPin": null,
+      "importApproved": false
+    }
+  ],
+  "notice": "See docs/REFERENCES.md for URLs. Import requires actual commit/hash, asset-level license review, and tests."
+}

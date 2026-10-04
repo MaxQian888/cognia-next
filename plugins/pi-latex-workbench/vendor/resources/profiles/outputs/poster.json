@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "poster",
+  "status": "design-unverified",
+  "title": "学术海报",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "page-dimensions",
+    "visual-coverage",
+    "asset-provenance"
+  ],
+  "humanReview": [
+    "印刷尺寸与观看距离",
+    "信息路径和图表说明"
+  ],
+  "notes": [
+    "概念示意与实验图明确区分，不强制生成式图片。"
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "acm-sigchi-submission",
+  "status": "verified",
+  "venue": "ACM SIGCHI conference track (acmart manuscript/review workflow; CHI 2027 publication formats)",
+  "year": null,
+  "track": null,
+  "stage": "submission",
+  "checkedAt": "2026-09-21T18:58:07Z",
+  "validUntil": "2027-06-01T00:00:00Z",
+  "sources": [
+    {
+      "id": "chi2027-publication-formats",
+      "url": "https://chi2027.acm.org/chi-publication-formats/",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "a660c7c09242b5b7f2f8c859b5cc11c1d3626f20e9558b23725d8be258cb93c3",
+      "locator": "CHI Publication Formats"
+    }
+  ],
+  "template": {
+    "origin": "official",
+    "templateId": "acmart-manuscript",
+    "version": null,
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "acmart-review-format",
+      "title": "acmart manuscript/review format",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "Initial submissions use the 1-column format; LaTeX authors use \\documentclass[manuscript,review]{acmart}, and anonymous submissions use \\documentclass[manuscript,review,anonymous]{acmart}.",
+      "sourceId": "chi2027-publication-formats",
+      "sourceLocator": "CHI Publication Formats",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "track-limits",
+      "title": "Per-track page/word limits",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "main-text",
+      "requirement": "Page and word limits are set by each track's call for participation; page length is counted in the 1-column submission format.",
+      "sourceId": "chi2027-publication-formats",
+      "sourceLocator": "CHI Publication Formats",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "anonymous-when-required",
+      "title": "Anonymous submission option",
+      "severity": "warning",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "entire-pdf",
+      "requirement": "When the track requires anonymity, submissions use the acmart anonymous option which replaces author block with 'ANONYMOUS AUTHOR(S)'; whether anonymization applies is track-specific.",
+      "sourceId": "chi2027-publication-formats",
+      "sourceLocator": "CHI Publication Formats",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    }
+  ]
+}

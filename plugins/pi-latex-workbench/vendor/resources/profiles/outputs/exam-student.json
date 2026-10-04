@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "exam-student",
+  "status": "design-unverified",
+  "title": "试卷学生版",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "score-sum",
+    "answer-isolation",
+    "visual-coverage"
+  ],
+  "humanReview": [
+    "题目严谨性",
+    "题号/分值与教师版对应"
+  ],
+  "notes": [
+    "从源快照导出也需排除答案；隐藏宏不足以保护源码包。"
+  ]
+}

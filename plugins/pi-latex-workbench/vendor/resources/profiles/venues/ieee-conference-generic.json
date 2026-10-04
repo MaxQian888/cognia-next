@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "ieee-conference-generic",
+  "status": "verified",
+  "venue": "IEEE conference proceedings (generic author-center requirements)",
+  "year": null,
+  "track": null,
+  "stage": "submission",
+  "checkedAt": "2026-09-21T18:58:07Z",
+  "validUntil": "2027-06-01T00:00:00Z",
+  "sources": [
+    {
+      "id": "ctan-ieeetran",
+      "url": "https://ctan.org/pkg/ieeetran",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "e9a6dd1103e7659c634fd22ab0107b583ff5ae4bdbc0bf688f35031b847395e1",
+      "locator": "CTAN: Package IEEEtran — 'Document class for IEEE Transactions journals and conferences'"
+    },
+    {
+      "id": "ieee-authoring-tools",
+      "url": "https://conferences.ieeeauthorcenter.ieee.org/write-your-paper/authoring-tools-and-templates/",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "20601ee0905e6c39db09994e695ff0f1b2cb6f951a53d8bf20920b1003e8c030",
+      "locator": "Authoring Tools and Templates — 'Use IEEE conference templates in Word or LaTeX' (hash covers the retrieved page-text excerpt recorded at fetch time; page is behind Cloudflare for plain curl)"
+    },
+    {
+      "id": "ieee-publishing-info",
+      "url": "https://events.ieee.org/planning-basics/ieee-conference-publications/publishing-information-for-ieee-conference-authors/",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "0086ab8b5a760f111f71f8e558a72fdf9b8c7160816bbdcf0eb55bab280c1f26",
+      "locator": "Conference Paper Templates / PDF Express for Authors / Copyrights (hash covers the retrieved page-text excerpt recorded at fetch time)"
+    }
+  ],
+  "template": {
+    "origin": "official",
+    "templateId": "IEEEtran-conference",
+    "version": null,
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "ieee-template",
+      "title": "IEEE conference template",
+      "severity": "warning",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "IEEE strongly encourages the use of the conference paper templates (LaTeX IEEEtran conference option or Word); page limits are set by each conference's call for papers.",
+      "sourceId": "ctan-ieeetran",
+      "sourceLocator": "CTAN IEEEtran package page + IEEE Author Center templates page",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "xplore-compatible",
+      "title": "IEEE Xplore-compatible PDF",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "entire-pdf",
+      "requirement": "Final PDFs must be IEEE Xplore-compatible; conferences using PDF eXpress require authors to convert or check the PDF there before submitting final papers.",
+      "sourceId": "ieee-publishing-info",
+      "sourceLocator": "PDF Express for Authors",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "copyright-form",
+      "title": "IEEE Copyright Form",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "metadata",
+      "requirement": "Prior to publication all authors must transfer copyright to IEEE by signing and submitting the IEEE Copyright Form (eCF); without it the paper cannot be published.",
+      "sourceId": "ieee-publishing-info",
+      "sourceLocator": "Copyrights",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    }
+  ]
+}

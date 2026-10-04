@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "local-tectonic-xelatex-timeout-800ms",
+  "runnerId": "local-tectonic",
+  "engine": "xelatex",
+  "bibliographyMode": "none",
+  "argvTemplate": [
+    "tectonic",
+    "-X",
+    "compile",
+    "--only-cached",
+    "--untrusted",
+    "--synctex",
+    "--keep-intermediates",
+    "--keep-logs",
+    "--makefile-rules",
+    "{outdir}/deps.mk",
+    "-o",
+    "{outdir}",
+    "{entry}"
+  ],
+  "envAllowlist": [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "TZ"
+  ],
+  "limits": {
+    "wallClockMs": 800,
+    "cpu": null,
+    "memoryMiB": null,
+    "pids": null,
+    "tmpBytes": null,
+    "maxLogBytes": 20971520,
+    "maxOutputBytes": 134217728
+  }
+}

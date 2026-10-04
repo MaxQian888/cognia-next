@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "notice": "Approved local bibliography corpus. sha256 is verified on every load; drift is DIGEST_MISMATCH.",
+  "resources": [
+    {
+      "id": "shared-refs",
+      "path": "shared-refs.bib",
+      "sha256": "57d443e1b18f848eae8fccfbd74c09ab1dbbbdc90851e53e08e00e1c9670cc18"
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "id": "project.inspect",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "检查项目为空或适合初始化，确定已批准模板和目标"
+    },
+    {
+      "id": "project.init-approved",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "只复制批准的内部模板；不下载未知cls"
+    },
+    {
+      "id": "agent.plan-document",
+      "type": "agent",
+      "implementationStatus": "live",
+      "description": "生成结构与证据需求，不编造结果"
+    },
+    {
+      "id": "gate.patch-approval",
+      "type": "gate",
+      "implementationStatus": "live",
+      "description": "检查当前patch审批；未回复保持waiting而非直接失败"
+    },
+    {
+      "id": "patch.apply-current",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "CAS写入完整初稿源快照"
+    },
+    {
+      "id": "build.run-await",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "真实编译；失败可显式启动repair子工作流"
+    },
+    {
+      "id": "quality.review-draft",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "产出草稿检查，缺视觉审阅明确标记"
+    },
+    {
+      "id": "agent.propose-minimal-repair",
+      "type": "agent",
+      "implementationStatus": "live",
+      "description": "读取完整相关日志和源码，生成最小patch"
+    },
+    {
+      "id": "guard.repair-budget",
+      "type": "switch",
+      "implementationStatus": "live",
+      "description": "本次apply预算与相同cause预算由宿主计算"
+    },
+    {
+      "id": "baseline.capture",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "记录当前源和可用PDF"
+    },
+    {
+      "id": "agent.propose-revision",
+      "type": "agent",
+      "implementationStatus": "live",
+      "description": "局部文本修订，生成语义变化说明"
+    },
+    {
+      "id": "quality.compare-baseline",
+      "type": "operation",
+      "implementationStatus": "unsupported",
+      "description": "校验保护内容及受影响版面；未审项明示",
+      "unsupportedReason": "the baseline-compare release check is live, but this workflow op is not implemented — affected-page diffing/review routing is not wired (M4+; renderer exists via runtime/render manifest)"
+    },
+    {
+      "id": "bibliography.audit",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "离线key/语法/引用关系"
+    },
+    {
+      "id": "bibliography.resolve-approved",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "只使用批准provider，区分unavailable"
+    },
+    {
+      "id": "bibliography.propose-import",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "已有key保留；有改变才产生proposal"
+    },
+    {
+      "id": "bibliography.report",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "三层核验状态和原文可用性"
+    },
+    {
+      "id": "assets.inspect-source",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "验证数据来源/字段/单位"
+    },
+    {
+      "id": "assets.generate-approved",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "受信table/plot/diagram配方"
+    },
+    {
+      "id": "agent.propose-asset-insertion",
+      "type": "agent",
+      "implementationStatus": "live",
+      "description": "attach-asset与TeX引用同一patch"
+    },
+    {
+      "id": "assets.check-mapping-and-layout",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "数值映射及页面检查"
+    },
+    {
+      "id": "venue.verify-current",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "官方年份、阶段、规则、许可；模板来源未核验停止 — re-fetches each venue profile sources[] URL over pinned HTTPS (policy-gated by network.venueVerification), sha256-compares against the recorded contentHash, persists observed bytes as venue-source evidence; any mismatch/failure blocks the step"
+    },
+    {
+      "id": "agent.propose-migration",
+      "type": "agent",
+      "implementationStatus": "live",
+      "description": "明确宏/结构/引用后端映射，不全文件重写"
+    },
+    {
+      "id": "build.clean-await",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "实际干净构建"
+    },
+    {
+      "id": "quality.compare-and-venue",
+      "type": "operation",
+      "implementationStatus": "unsupported",
+      "description": "公式结果保真与目标规则，仍不自动投稿",
+      "unsupportedReason": "venue.verify-current is live, but this combined baseline-compare + venue-conformance op is not implemented"
+    },
+    {
+      "id": "release.freeze",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "冻结snapshot/target/profile和审批上下文"
+    },
+    {
+      "id": "quality.run-release-checks",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "必需机器检查与规则时效"
+    },
+    {
+      "id": "gate.all-page-review",
+      "type": "gate",
+      "implementationStatus": "live",
+      "description": "真实全页审阅；waiting直到授权reviewer提交结果"
+    },
+    {
+      "id": "release.prepare-whitelist",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "导出清单与敏感/匿名规则；学生版排除答案源"
+    },
+    {
+      "id": "gate.release-approval",
+      "type": "gate",
+      "implementationStatus": "live",
+      "description": "明确本地打包授权，不包含自动上传或投稿"
+    },
+    {
+      "id": "release.package-staging",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "从白名单暂存区生成source zip"
+    },
+    {
+      "id": "release.rebuild-package",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "新环境仅用ZIP、批准工具链重建"
+    },
+    {
+      "id": "release.finalize",
+      "type": "operation",
+      "implementationStatus": "live",
+      "description": "校验hash和检查覆盖后登记不可变release"
+    }
+  ]
+}

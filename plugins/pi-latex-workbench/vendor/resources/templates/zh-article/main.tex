@@ -1,0 +1,98 @@
+% 中文文章模板：XeLaTeX + ctexart，字体集 fandol（离线字体包内置）。
+% 结构：标题信息 → 摘要/关键词 → 引言 → 相关工作 → 方法 → 实验与结果
+%       → 结论 → 参考文献（BibTeX，GB/T 7714—2015 顺序编码制）。
+% 引用：条目写入 references.bib，正文用 \cite 命令加条目键引用；
+%       只添加真实、可核验的文献。
+\documentclass[UTF8,fontset=fandol,a4paper]{ctexart}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+% 参考文献采用 GB/T 7714—2015（gbt7714 宏包 + gbt7714-numerical 样式）：
+% 这是国内期刊与学位论文通行的国家标准，能正确处理中英文混排条目
+% （作者超过三人时自动写"等"或"et al."），比 plain/unsrt 更适合中文写作。
+% 默认上标引用；需要方括号正文引用 [1] 时取消下一行注释。
+\usepackage{gbt7714}
+% \citestyle{numbers}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+% 定理类环境（中文名称）；证明环境 proof 由 amsthm 提供，ctex 已将其标题设为"证明"。
+\theoremstyle{plain}
+\newtheorem{theorem}{定理}[section]
+\newtheorem{lemma}[theorem]{引理}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{定义}
+
+\title{文章标题}
+\author{作者姓名\\单位名称}
+% \today 显示该版本内容首次构建的日期（构建时钟按快照固定，保证可复现）；投稿时可直接写出日期或留空。
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+% 用 200～300 字概括研究问题、方法、主要结果与结论。
+在此填写摘要。
+
+\medskip
+\noindent\textbf{关键词：}关键词一；关键词二；关键词三
+\end{abstract}
+
+\section{引言}
+% 说明研究背景与动机，界定研究问题，概述本文贡献，并交代全文结构。
+
+\section{相关工作}
+% 按主题归纳已有研究并引用文献，指出本文与它们的区别。
+
+\section{方法}
+% 给出问题的形式化描述、核心定义与主要结论。以下环境仅示范写法，请替换为实际内容。
+\begin{definition}\label{def:main}
+在此给出定义。
+\end{definition}
+
+\begin{lemma}\label{lem:main}
+在此陈述引理。
+\end{lemma}
+
+\begin{theorem}\label{thm:main}
+在此陈述定理。
+\end{theorem}
+
+\begin{proof}
+在此给出证明，可引用引理~\ref{lem:main} 与式~\eqref{eq:main}。
+\end{proof}
+
+编号公式示例（替换为实际公式）：
+\begin{equation}\label{eq:main}
+  f(x) = \sum_{i=1}^{n} w_i\, g_i(x) .
+\end{equation}
+
+\section{实验与结果}
+% 介绍数据、实验设置与评价指标。表中数据必须来自真实实验记录。
+\begin{table}[htbp]
+  \centering
+  \caption{实验结果（表头为示例，数据待填）}
+  \label{tab:results}
+  \begin{tabular}{lcc}
+    \toprule
+    方法     & 指标一 & 指标二 \\
+    \midrule
+    基线方法 & --     & --     \\
+    本文方法 & --     & --     \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% 插图：图片放入 figures/ 目录后，用 figure 环境加 \includegraphics 命令插入，
+% 并配 \caption 与 \label，正文用 \ref 引用。
+
+\section{结论}
+% 总结主要发现，说明局限与后续工作。
+
+\bibliographystyle{gbt7714-numerical}
+\bibliography{references}
+
+\end{document}

@@ -1,0 +1,2524 @@
+{
+  "id": "cognia-pi-latex-workbench",
+  "name": "Pi LaTeX Workbench",
+  "nameKey": "manifest.name",
+  "version": "0.1.0",
+  "description": "Governed LaTeX writing through the Pi LaTeX Workbench: a vendored, untouched snapshot of the upstream host CLI exposed to Cognia agents as declarative tools, writing/revising/tuning/checking skills, and the workbench as a Pi package for your Pi and for opted-in Cognia-hosted Pi agents. Approvals never come from the model. Desktop only.",
+  "descriptionKey": "manifest.description",
+  "type": "frontend",
+  "capabilities": ["cli-tools", "skills", "pi-package", "configuration"],
+  "main": "dist/index.js",
+  "author": {
+    "name": "Arxtect",
+    "url": "https://github.com/Arxtect"
+  },
+  "license": "UNLICENSED",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "homepage": "https://github.com/Arxtect/pi-latex-workbench",
+  "repository": "https://github.com/Arxtect/pi-latex-workbench",
+  "permissions": ["cli:execute"],
+  "activationEvents": ["startup"],
+  "requires": {
+    "binaries": [
+      {
+        "name": "node",
+        "minVersion": "24.0.0",
+        "documentation": "https://nodejs.org/en/download"
+      }
+    ]
+  },
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "The workbench CLI runs as a host process and its skills read files from the plugin directory; desktop only."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "The workbench CLI runs as a host process and its skills read files from the plugin directory; desktop only."
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "CLI tools run through the Tauri plugin_cli_exec command; unavailable in headless hosts."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "project": {
+        "type": "string",
+        "title": "Default project id",
+        "titleKey": "config.project.title",
+        "description": "Workbench project the skills use when you do not name one, and the project a hosted Pi agent is bound to. Empty leaves hosted sessions unbound (the workbench tools refuse work until a project is set).",
+        "descriptionKey": "config.project.description",
+        "default": "",
+        "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "patternMessage": "Use letters, digits, '.', '_', ':' or '-', starting with a letter or digit.",
+        "patternMessageKey": "config.project.patternMessage",
+        "order": 1
+      },
+      "protection": {
+        "type": "string",
+        "title": "Protection mode (hosted Pi agents)",
+        "titleKey": "config.protection.title",
+        "description": "How protected content (math, labels, citations, reported numbers, quotations) is gated in a hosted Pi session. Cognia's own workbench tools always use strict semantics.",
+        "descriptionKey": "config.protection.description",
+        "enum": ["strict", "authoring"],
+        "enumItemLabels": ["Strict", "Authoring"],
+        "enumItemLabelKeys": [
+          "config.protection.strict.label",
+          "config.protection.authoring.label"
+        ],
+        "enumDescriptions": [
+          "Every protected change needs a host approval bound to the patch.",
+          "New protected content applies directly; changing or removing existing protected content still needs an approval."
+        ],
+        "enumDescriptionKeys": [
+          "config.protection.strict.description",
+          "config.protection.authoring.description"
+        ],
+        "default": "strict",
+        "order": 2
+      },
+      "stateDir": {
+        "type": "string",
+        "title": "State directory",
+        "titleKey": "config.stateDir.title",
+        "description": "Workbench state (SQLite database, content-addressed blobs, job workdirs), relative to the workspace root.",
+        "descriptionKey": "config.stateDir.description",
+        "default": ".latexwb",
+        "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!-)(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$",
+        "patternMessage": "Use a path inside the workspace, e.g. .latexwb (no absolute path, no '..').",
+        "patternMessageKey": "config.stateDir.patternMessage",
+        "order": 3
+      }
+    }
+  },
+  "defaultConfig": {
+    "project": "",
+    "protection": "strict",
+    "stateDir": ".latexwb"
+  },
+  "cliTools": [
+    {
+      "name": "latexwb_doctor",
+      "description": "Probe the host for the LaTeX workbench (`latexwb doctor`): node/node:sqlite, tectonic, the provisioned toolchain bundle, the render helper, Pi. Returns the DoctorReport JSON; `blockingCodes` non-empty means builds cannot run (the report is still returned). Toolchain provisioning is a user-run host command, never a tool call.",
+      "descriptionKey": "cliTools.latexwb_doctor.description",
+      "access": "read",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "doctor"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "successExitCodes": [0, 2],
+      "timeoutMs": 120000,
+      "maxOutputBytes": 1000000
+    },
+    {
+      "name": "latexwb_import",
+      "description": "Import a LaTeX project directory inside the workspace into a new workbench snapshot and move the project head (`latexwb import`). The first import registers the directory as the project's host root — the only place latexwb_materialize may write back. Without `project` the id is the sanitized directory name. Returns the ImportReport (accepted/excluded/rejected files, snapshot id).",
+      "descriptionKey": "cliTools.latexwb_import.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir", "path"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Project directory to import, relative to the workspace root."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Project id to create or update (default: sanitized directory name)."
+          }
+        },
+        "required": ["stateDir", "path"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "import"
+        },
+        {
+          "param": "path"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 300000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_inspect",
+      "description": "Analyse the project's head (or a given) snapshot (`latexwb inspect`): root candidates, registered targets, languages, packages, bibliography paths, assets, head snapshot id. Start every task here.",
+      "descriptionKey": "cliTools.latexwb_inspect.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "snapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Snapshot to inspect (default: the project head)."
+          }
+        },
+        "required": ["stateDir", "project"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "inspect"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "snapshotId",
+          "eachPrefixedBy": "--snapshot",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_jobs",
+      "description": "List the project's latest 100 jobs (builds, renders, checks) with state and `resultArtifactIds` (`latexwb jobs`). Use it to recover artifact ids (PDF, log) of an earlier build.",
+      "descriptionKey": "cliTools.latexwb_jobs.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          }
+        },
+        "required": ["stateDir", "project"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "jobs"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_build",
+      "description": "Compile a snapshot with the pinned offline Tectonic toolchain and return the JobResult (`latexwb build`): `buildResult.status`, diagnostics with file:line, and artifact ids (`pdfArtifactId`, `logArtifactId`). A document that does not compile still returns its JobResult (exit 4) — check `buildResult.status`, not tool success. Snapshot defaults to the head. Omit `targetId` on the first build of an imported project: the root is auto-resolved and registered as target `default`; afterwards pass a target id from latexwb_inspect.",
+      "descriptionKey": "cliTools.latexwb_build.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "snapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Snapshot to build (default: head)."
+          },
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Registered target id from latexwb_inspect (never a filename like main.tex). Omit to auto-resolve the root."
+          },
+          "presetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Runner preset id from vendor/runtime/presets (default: the target's preset)."
+          },
+          "clean": {
+            "type": "boolean",
+            "description": "Ignore the build cache (only for a diagnosed cache problem or an explicit request)."
+          }
+        },
+        "required": ["stateDir", "project"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "build"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "snapshotId",
+          "eachPrefixedBy": "--snapshot",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "targetId",
+          "eachPrefixedBy": "--target",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "presetId",
+          "eachPrefixedBy": "--preset",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "clean",
+          "eachPrefixedBy": "--clean",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "successExitCodes": [0, 4],
+      "timeoutMs": 600000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_check_run",
+      "description": "Run a check ruleset against a PDF artifact and persist a check-report artifact (`latexwb check-run`). `draft` lints everyday writing (undefined references, duplicate labels, citations vs bibliography, floats, placeholders, typography, build log — each with file:line; gates nothing). `release` runs the release checks required by the target's output profile; `data-assets` checks a generated asset. Anything a machine cannot verify reports `needs-review`, never `pass`. Returns the full report; its persisted artifact id (`report-…`) is listed in latexwb_jobs `resultArtifactIds`.",
+      "descriptionKey": "cliTools.latexwb_check_run.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "artifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "PDF artifact id (a generated asset for `data-assets`)."
+          },
+          "ruleset": {
+            "type": "string",
+            "enum": ["draft", "release", "data-assets"],
+            "description": "Ruleset (CLI default `release`; use `draft` for everyday lint)."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["draft", "review", "submission"],
+            "description": "Release profile (ruleset `release` only)."
+          },
+          "baselineArtifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Baseline PDF artifact for comparison checks."
+          }
+        },
+        "required": ["stateDir", "project", "artifactId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "check-run"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "artifactId",
+          "eachPrefixedBy": "--artifact"
+        },
+        {
+          "param": "ruleset",
+          "eachPrefixedBy": "--ruleset",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "profile",
+          "eachPrefixedBy": "--profile",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "baselineArtifactId",
+          "eachPrefixedBy": "--baseline",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 600000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_check_report",
+      "description": "Read a persisted check report by its artifact id (`latexwb check-report`).",
+      "descriptionKey": "cliTools.latexwb_check_report.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "reportArtifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Check-report artifact id (`report-…`, from latexwb_jobs `resultArtifactIds`), not the `reportId`."
+          }
+        },
+        "required": ["stateDir", "project", "reportArtifactId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "check-report"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "reportArtifactId",
+          "eachPrefixedBy": "--report"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_render_pages",
+      "description": "Rasterize PDF pages to page-image (PNG) artifacts (`latexwb render-pages`; macOS arm64 render helper, provisioned by the user). Returns artifact ids only — save a page with latexwb_artifact_save and open the PNG to look at it. Omit `pages` to render all.",
+      "descriptionKey": "cliTools.latexwb_render_pages.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "artifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "PDF artifact id."
+          },
+          "pages": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*(,[1-9][0-9]*)*$",
+            "description": "Comma-separated 1-based page numbers, e.g. \"1,3\" (default: all pages)."
+          },
+          "preset": {
+            "type": "string",
+            "enum": ["screen", "detail"],
+            "description": "Render preset (default `screen`)."
+          }
+        },
+        "required": ["stateDir", "project", "artifactId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "render-pages"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "artifactId",
+          "eachPrefixedBy": "--artifact"
+        },
+        {
+          "param": "pages",
+          "eachPrefixedBy": "--pages",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "preset",
+          "eachPrefixedBy": "--preset",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 600000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_render_text",
+      "description": "Extract per-page text from a PDF artifact (`latexwb render-text`; needs the render helper).",
+      "descriptionKey": "cliTools.latexwb_render_text.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "artifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "PDF artifact id."
+          },
+          "pages": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*(,[1-9][0-9]*)*$",
+            "description": "Comma-separated 1-based page numbers (default: all pages)."
+          }
+        },
+        "required": ["stateDir", "project", "artifactId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "render-text"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "artifactId",
+          "eachPrefixedBy": "--artifact"
+        },
+        {
+          "param": "pages",
+          "eachPrefixedBy": "--pages",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 300000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_artifact_save",
+      "description": "Write an artifact (PDF, page PNG, log, diff, release zip) to a file inside the workspace (`latexwb artifact-save`); the blob hash is re-verified on read. Returns {artifactId, dest, bytes}.",
+      "descriptionKey": "cliTools.latexwb_artifact_save.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir", "dest"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "artifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Artifact id."
+          },
+          "dest": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Destination file, relative to the workspace root; its directory must already exist (e.g. \".latexwb/draft.pdf\" or a file in the project folder)."
+          }
+        },
+        "required": ["stateDir", "project", "artifactId", "dest"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "artifact-save"
+        },
+        {
+          "param": "artifactId"
+        },
+        {
+          "param": "dest"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 60000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_materialize",
+      "description": "Write a snapshot (default: head) back into the project's imported folder through the journaled, conflict-safe sync (`latexwb materialize`). Files the user changed on disk since the import/last sync are reported as conflicts and nothing is overwritten. `dir` must lie inside the host root registered at import. Adopting a never-synced folder (`--takeover`) and journal recovery are host decisions and not available here.",
+      "descriptionKey": "cliTools.latexwb_materialize.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir", "dir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "dir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Target directory inside the imported host root, relative to the workspace root."
+          },
+          "snapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Snapshot to write (default: head)."
+          }
+        },
+        "required": ["stateDir", "project", "dir"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "materialize"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "dir",
+          "eachPrefixedBy": "--dir"
+        },
+        {
+          "param": "snapshotId",
+          "eachPrefixedBy": "--snapshot",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_patch_propose",
+      "description": "Propose a governed source patch from an operations JSON file you wrote inside the workspace (`latexwb patch-propose`). File shape: {\"reason\": string, \"operations\": [FileOperation…], \"citekeyMapping\"?: {old: new}}; prefer `replace` ops ({op:\"replace\", path, edits:[{oldText, newText, occurrence?}]}) whose oldText is copied verbatim and occurs once. Returns the proposal: patchId, risk, protectedChanges (added/modified/removed), requiredApprovals, diffArtifactId. Proposing never changes the project.",
+      "descriptionKey": "cliTools.latexwb_patch_propose.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir", "opsFile"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "opsFile": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Operations JSON file, relative to the workspace root (e.g. \".latexwb/ops/intro.json\")."
+          },
+          "baseSnapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Base snapshot (default: head)."
+          }
+        },
+        "required": ["stateDir", "project", "opsFile"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "patch-propose"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "opsFile",
+          "eachPrefixedBy": "--ops"
+        },
+        {
+          "param": "baseSnapshotId",
+          "eachPrefixedBy": "--snapshot",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_patch_show",
+      "description": "Show a stored patch: state, base/result snapshot, digest, reason, operations and protected changes (`latexwb patch-show`).",
+      "descriptionKey": "cliTools.latexwb_patch_show.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "patchId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Patch id."
+          }
+        },
+        "required": ["stateDir", "project", "patchId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "patch-show"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "patchId",
+          "eachPrefixedBy": "--patch"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_patch_apply",
+      "description": "Apply a proposed patch, producing the next snapshot (`latexwb patch-apply`; strict protection semantics). A patch with protected changes applies only when the operator has already granted a host approval bound to its digest; otherwise it fails with POLICY_DENIED — stop and report the patch id and the grant needed. This tool cannot create, request or bypass a grant. A moved head fails with STALE_BASE: re-inspect, re-read and re-propose.",
+      "descriptionKey": "cliTools.latexwb_patch_apply.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "patchId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Patch id from latexwb_patch_propose."
+          }
+        },
+        "required": ["stateDir", "project", "patchId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "patch-apply"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "patchId",
+          "eachPrefixedBy": "--patch"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_patch_revert",
+      "description": "Propose the inverse of an applied patch (`latexwb patch-revert`). Returns a new proposal; apply it with latexwb_patch_apply under the same approval rules.",
+      "descriptionKey": "cliTools.latexwb_patch_revert.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "patchId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Applied patch id to revert."
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "maxLength": 500,
+            "description": "Reason recorded on the proposal."
+          }
+        },
+        "required": ["stateDir", "project", "patchId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "patch-revert"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "patchId",
+          "eachPrefixedBy": "--patch"
+        },
+        {
+          "param": "reason",
+          "eachPrefixedBy": "--reason",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_release_prepare",
+      "description": "Compute and persist a ReleasePlan (source whitelist, required checks and approvals) for a snapshot/target/profile without freezing (`latexwb release-prepare`).",
+      "descriptionKey": "cliTools.latexwb_release_prepare.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "snapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Snapshot to release."
+          },
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Target id."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["draft", "review", "submission"],
+            "description": "Release profile (default `submission`)."
+          }
+        },
+        "required": ["stateDir", "project", "snapshotId", "targetId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "release-prepare"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "snapshotId",
+          "eachPrefixedBy": "--snapshot"
+        },
+        {
+          "param": "targetId",
+          "eachPrefixedBy": "--target"
+        },
+        {
+          "param": "profile",
+          "eachPrefixedBy": "--profile",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 300000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_release_freeze",
+      "description": "Freeze a release candidate and return it with its `approvalDigest` (`latexwb release-freeze`). The operator binds the host `release.package` grant to that digest outside this tool; report the releaseId and digest to the user.",
+      "descriptionKey": "cliTools.latexwb_release_freeze.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "snapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Snapshot to release."
+          },
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Target id."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["draft", "review", "submission"],
+            "description": "Release profile (default `submission`)."
+          }
+        },
+        "required": ["stateDir", "project", "snapshotId", "targetId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "release-freeze"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "snapshotId",
+          "eachPrefixedBy": "--snapshot"
+        },
+        {
+          "param": "targetId",
+          "eachPrefixedBy": "--target"
+        },
+        {
+          "param": "profile",
+          "eachPrefixedBy": "--profile",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 300000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_release_package",
+      "description": "Run the release gates and, when they pass, build the deterministic source package plus a clean-room rebuild whose PDF sha256 must match (`latexwb release-package`). Without human page reviews and the digest-bound host grant it finalizes `blocked` and names every failing gate — report them; never downgrade the profile to get past a gate.",
+      "descriptionKey": "cliTools.latexwb_release_package.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "releaseId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Frozen release id from latexwb_release_freeze."
+          },
+          "artifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Compiled PDF artifact of the frozen snapshot."
+          },
+          "baselineArtifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Baseline PDF for comparison checks."
+          }
+        },
+        "required": ["stateDir", "project", "releaseId", "artifactId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "release-package"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "releaseId",
+          "eachPrefixedBy": "--release"
+        },
+        {
+          "param": "artifactId",
+          "eachPrefixedBy": "--artifact"
+        },
+        {
+          "param": "baselineArtifactId",
+          "eachPrefixedBy": "--baseline",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 600000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_release_status",
+      "description": "Show a release: status (blocked / review-ready / submission-ready), manifest and the approvalDigest a host grant binds to (`latexwb release-status`).",
+      "descriptionKey": "cliTools.latexwb_release_status.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "releaseId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Release id."
+          }
+        },
+        "required": ["stateDir", "project", "releaseId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "release-status"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "releaseId",
+          "eachPrefixedBy": "--release"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_release_list",
+      "description": "List the project's releases with status (`latexwb release-list`).",
+      "descriptionKey": "cliTools.latexwb_release_list.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          }
+        },
+        "required": ["stateDir", "project"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "release-list"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_workflow_start",
+      "description": "Start a persisted managed workflow (`latexwb workflow-start`). It may stop at `waiting-input` (an agent step waits for {\"patchId\"} of a patch you proposed on the current head — continue with latexwb_workflow_resume) or `waiting-approval` (the operator grants on the host, then resume). `revise` and `template-migration` end in an unimplemented comparison step and finish `blocked` by design.",
+      "descriptionKey": "cliTools.latexwb_workflow_start.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir", "contextFile"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "definitionId": {
+            "type": "string",
+            "enum": [
+              "bibliography",
+              "data-assets",
+              "new-document",
+              "release",
+              "repair",
+              "revise",
+              "template-migration"
+            ],
+            "description": "Workflow definition (vendor/resources/workflows)."
+          },
+          "contextFile": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Optional context JSON file inside the workspace: string/null values for snapshotId, targetId, pdfArtifactId, patchId, causeId, baselineArtifactId, templateId, initTargetId, bibReportArtifactId, auditReportArtifactId, generatedArtifactId, checkReportArtifactId, releaseId, releaseProfileId only."
+          }
+        },
+        "required": ["stateDir", "project", "definitionId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "workflow-start"
+        },
+        {
+          "param": "definitionId"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "contextFile",
+          "eachPrefixedBy": "--context",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 600000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_workflow_status",
+      "description": "Show a workflow: state, current node, pending request and steps (`latexwb workflow-status`).",
+      "descriptionKey": "cliTools.latexwb_workflow_status.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "workflowId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workflow id."
+          }
+        },
+        "required": ["stateDir", "project", "workflowId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "workflow-status"
+        },
+        {
+          "param": "workflowId"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_workflow_list",
+      "description": "List the project's workflows (`latexwb workflow-list`).",
+      "descriptionKey": "cliTools.latexwb_workflow_list.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          }
+        },
+        "required": ["stateDir", "project"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "workflow-list"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_workflow_resume",
+      "description": "Continue a workflow from `waiting-input` or `waiting-approval` (`latexwb workflow-resume`). For a patch-proposal request pass an input JSON file containing {\"patchId\": \"<id>\"} of a patch based on the current head; for an approval gate resume without input after the operator granted it. Resuming never grants anything.",
+      "descriptionKey": "cliTools.latexwb_workflow_resume.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir", "inputFile"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "workflowId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workflow id."
+          },
+          "inputFile": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Input JSON file inside the workspace (omit for approval gates)."
+          }
+        },
+        "required": ["stateDir", "project", "workflowId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "workflow-resume"
+        },
+        {
+          "param": "workflowId"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "inputFile",
+          "eachPrefixedBy": "--input",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 600000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_workflow_cancel",
+      "description": "Cancel a workflow; cascades to its jobs (`latexwb workflow-cancel`).",
+      "descriptionKey": "cliTools.latexwb_workflow_cancel.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "workflowId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workflow id."
+          }
+        },
+        "required": ["stateDir", "project", "workflowId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "workflow-cancel"
+        },
+        {
+          "param": "workflowId"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2000000
+    },
+    {
+      "name": "latexwb_assets_inspect",
+      "description": "Analyse a CSV/TSV data file of a snapshot (columns, types, units) into an inspection artifact + evidence (`latexwb assets-inspect`).",
+      "descriptionKey": "cliTools.latexwb_assets_inspect.description",
+      "access": "write",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "sourceAssetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Source asset id from latexwb_inspect."
+          },
+          "snapshotId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Snapshot (default: head)."
+          }
+        },
+        "required": ["stateDir", "project", "sourceAssetId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "assets-inspect"
+        },
+        {
+          "param": "sourceAssetId"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "snapshotId",
+          "eachPrefixedBy": "--snapshot",
+          "omitWhenEmpty": true
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 300000,
+      "maxOutputBytes": 4000000
+    },
+    {
+      "name": "latexwb_review_coverage",
+      "description": "Show which pages of a PDF carry a human page-review verdict (`latexwb review-coverage`). Verdicts themselves are recorded by the operator on the host, never by this plugin.",
+      "descriptionKey": "cliTools.latexwb_review_coverage.description",
+      "access": "read",
+      "confinedPathParams": ["stateDir"],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "stateDir": {
+            "type": "string",
+            "pattern": "^[^-].*$",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Workbench state directory, relative to the workspace root (the plugin setting `stateDir`; default `.latexwb`). Holds the SQLite db, the content-addressed blobs and job workdirs."
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "Workbench project id (the plugin setting `project` when the user has not named one)."
+          },
+          "artifactId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "maxLength": 200,
+            "description": "PDF artifact id."
+          }
+        },
+        "required": ["stateDir", "project", "artifactId"],
+        "additionalProperties": false
+      },
+      "binary": {
+        "kind": "requires",
+        "name": "node"
+      },
+      "argv": [
+        {
+          "literal": "${COGNIA_PLUGIN_ROOT}/vendor/packages/cli/src/bin.ts"
+        },
+        {
+          "literal": "review-coverage"
+        },
+        {
+          "param": "project",
+          "eachPrefixedBy": "--project"
+        },
+        {
+          "param": "artifactId",
+          "eachPrefixedBy": "--artifact"
+        },
+        {
+          "param": "stateDir",
+          "eachPrefixedBy": "--state"
+        }
+      ],
+      "cwd": {
+        "kind": "workspace"
+      },
+      "env": {
+        "LATEXWB_PRINCIPAL": "cognia-agent"
+      },
+      "outputParse": "json",
+      "timeoutMs": 120000,
+      "maxOutputBytes": 2000000
+    }
+  ],
+  "skills": [
+    {
+      "id": "cognia-pi-latex-workbench:latex-workbench",
+      "slug": "latex-workbench",
+      "name": "LaTeX workbench (governed writing)",
+      "description": "Use for any LaTeX writing, revision, layout, build, check or release task in a workbench project: imports the project, compiles with the pinned offline toolchain, edits through governed patches, renders pages, lints drafts and runs the gated release pipeline via the latexwb_* tools. Approvals and page reviews stay with the operator.",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/latex-workbench"
+      },
+      "allowedTools": ["Read"]
+    },
+    {
+      "id": "cognia-pi-latex-workbench:latex-write",
+      "slug": "latex-write",
+      "name": "LaTeX: write",
+      "description": "Draft or extend a LaTeX document from a writing brief through the workbench, then build it to a draft PDF.",
+      "invocationPolicy": "explicit",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/latex-write"
+      },
+      "allowedTools": ["Read"]
+    },
+    {
+      "id": "cognia-pi-latex-workbench:latex-revise",
+      "slug": "latex-revise",
+      "name": "LaTeX: revise",
+      "description": "Revise selected LaTeX text with the smallest governed patch, preserving meaning, values, citations and unrelated content.",
+      "invocationPolicy": "explicit",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/latex-revise"
+      },
+      "allowedTools": ["Read"]
+    },
+    {
+      "id": "cognia-pi-latex-workbench:latex-tune",
+      "slug": "latex-tune",
+      "name": "LaTeX: tune layout",
+      "description": "Adjust LaTeX typography, floats, spacing or a specific page, comparing the affected pages before and after.",
+      "invocationPolicy": "explicit",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/latex-tune"
+      },
+      "allowedTools": ["Read"]
+    },
+    {
+      "id": "cognia-pi-latex-workbench:latex-check",
+      "slug": "latex-check",
+      "name": "LaTeX: check",
+      "description": "Review LaTeX source, compilation or layout without editing: draft lint, build diagnostics and rendered pages.",
+      "invocationPolicy": "explicit",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/latex-check"
+      },
+      "allowedTools": ["Read"]
+    }
+  ],
+  "piPackages": [
+    {
+      "id": "latex-workbench",
+      "name": "LaTeX Workbench",
+      "nameKey": "piPackage.latexWorkbench.name",
+      "description": "The upstream Pi package: eight governed latex_* tools, /latex host commands and the operator approval dialog.",
+      "descriptionKey": "piPackage.latexWorkbench.description",
+      "path": "vendor",
+      "minPiVersion": "0.85.1",
+      "prepare": {
+        "program": "npm",
+        "args": [
+          "install",
+          "--omit=dev",
+          "--omit=peer",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund"
+        ],
+        "marker": "vendor/node_modules/.package-lock.json",
+        "timeoutMs": 300000
+      },
+      "hostedSession": {
+        "extensions": ["pi/cognia-workbench.ts"],
+        "env": [
+          {
+            "name": "LATEXWB_PROJECT",
+            "from": {
+              "config": "project"
+            }
+          },
+          {
+            "name": "LATEXWB_PROTECTION",
+            "from": {
+              "config": "protection"
+            }
+          },
+          {
+            "name": "LATEXWB_WORKSPACE",
+            "from": {
+              "value": "local"
+            }
+          },
+          {
+            "name": "STATE_DIR",
+            "from": {
+              "config": "stateDir"
+            }
+          },
+          {
+            "name": "WORKSPACE_DIR",
+            "from": {
+              "workspace": true
+            }
+          }
+        ],
+        "tools": [
+          "latex_project",
+          "latex_patch",
+          "latex_build",
+          "latex_check",
+          "latex_render",
+          "latex_bib",
+          "latex_figure",
+          "latex_export"
+        ],
+        "controlsSession": true
+      }
+    }
+  ],
+  "bundle_include": [
+    "README.md",
+    "README.zh-CN.md",
+    "VENDOR.md",
+    "vendor-lock.json",
+    "pi/cognia-workbench.ts",
+    "pi/env-binding.ts",
+    "skills/latex-check/SKILL.md",
+    "skills/latex-revise/SKILL.md",
+    "skills/latex-tune/SKILL.md",
+    "skills/latex-workbench/SKILL.md",
+    "skills/latex-write/SKILL.md",
+    "vendor/README.md",
+    "vendor/README.zh-CN.md",
+    "vendor/docs/INSTALL.md",
+    "vendor/docs/PI-SESSION.md",
+    "vendor/docs/RUNBOOK.md",
+    "vendor/docs/UNSUPPORTED.md",
+    "vendor/migrations/0001_init.sql",
+    "vendor/migrations/0002_journal_terminal_states.sql",
+    "vendor/migrations/0003_projects_host_root.sql",
+    "vendor/migrations/0004_workflow_step_ops.sql",
+    "vendor/package-lock.json",
+    "vendor/package.json",
+    "vendor/packages/adapter-pi/extensions/smoke.ts",
+    "vendor/packages/adapter-pi/extensions/workbench.ts",
+    "vendor/packages/adapter-pi/package.json",
+    "vendor/packages/adapter-pi/src/agent-commands.ts",
+    "vendor/packages/adapter-pi/src/agent-context.ts",
+    "vendor/packages/adapter-pi/src/approval.ts",
+    "vendor/packages/adapter-pi/src/envelope.ts",
+    "vendor/packages/adapter-pi/src/index.ts",
+    "vendor/packages/adapter-pi/src/latex-command.ts",
+    "vendor/packages/adapter-pi/src/schemas.ts",
+    "vendor/packages/adapter-pi/src/session-control.ts",
+    "vendor/packages/adapter-pi/src/session.ts",
+    "vendor/packages/adapter-pi/src/smoke.ts",
+    "vendor/packages/adapter-pi/src/tools/bib.ts",
+    "vendor/packages/adapter-pi/src/tools/build.ts",
+    "vendor/packages/adapter-pi/src/tools/check.ts",
+    "vendor/packages/adapter-pi/src/tools/common.ts",
+    "vendor/packages/adapter-pi/src/tools/export.ts",
+    "vendor/packages/adapter-pi/src/tools/figure.ts",
+    "vendor/packages/adapter-pi/src/tools/index.ts",
+    "vendor/packages/adapter-pi/src/tools/patch.ts",
+    "vendor/packages/adapter-pi/src/tools/project.ts",
+    "vendor/packages/adapter-pi/src/tools/render.ts",
+    "vendor/packages/adapter-pi/tsconfig.json",
+    "vendor/packages/cli/package.json",
+    "vendor/packages/cli/src/bin.ts",
+    "vendor/packages/cli/src/doctor.ts",
+    "vendor/packages/cli/src/index.ts",
+    "vendor/packages/cli/tsconfig.json",
+    "vendor/packages/contracts/package.json",
+    "vendor/packages/contracts/schemas/contracts.schema.json",
+    "vendor/packages/contracts/src/errors.ts",
+    "vendor/packages/contracts/src/index.ts",
+    "vendor/packages/contracts/src/repr.ts",
+    "vendor/packages/contracts/src/types.generated.ts",
+    "vendor/packages/contracts/src/validators.ts",
+    "vendor/packages/contracts/tsconfig.json",
+    "vendor/packages/core/package.json",
+    "vendor/packages/core/src/approvals.ts",
+    "vendor/packages/core/src/artifacts.ts",
+    "vendor/packages/core/src/assets.ts",
+    "vendor/packages/core/src/audit.ts",
+    "vendor/packages/core/src/bib.ts",
+    "vendor/packages/core/src/bibliography.ts",
+    "vendor/packages/core/src/budget.ts",
+    "vendor/packages/core/src/build.ts",
+    "vendor/packages/core/src/capabilities.ts",
+    "vendor/packages/core/src/checks.ts",
+    "vendor/packages/core/src/context.ts",
+    "vendor/packages/core/src/csv.ts",
+    "vendor/packages/core/src/diagnostics.ts",
+    "vendor/packages/core/src/evidence.ts",
+    "vendor/packages/core/src/idempotency.ts",
+    "vendor/packages/core/src/import.ts",
+    "vendor/packages/core/src/index.ts",
+    "vendor/packages/core/src/init.ts",
+    "vendor/packages/core/src/inspect.ts",
+    "vendor/packages/core/src/jobs.ts",
+    "vendor/packages/core/src/known-commands.generated.ts",
+    "vendor/packages/core/src/materialize.ts",
+    "vendor/packages/core/src/metadata/crossref.ts",
+    "vendor/packages/core/src/metadata/index.ts",
+    "vendor/packages/core/src/metadata/local-bib.ts",
+    "vendor/packages/core/src/metadata/types.ts",
+    "vendor/packages/core/src/net.ts",
+    "vendor/packages/core/src/operations.ts",
+    "vendor/packages/core/src/patch.ts",
+    "vendor/packages/core/src/paths.ts",
+    "vendor/packages/core/src/project.ts",
+    "vendor/packages/core/src/protect.ts",
+    "vendor/packages/core/src/recipes.ts",
+    "vendor/packages/core/src/release.ts",
+    "vendor/packages/core/src/render.ts",
+    "vendor/packages/core/src/resources.ts",
+    "vendor/packages/core/src/review.ts",
+    "vendor/packages/core/src/scoped.ts",
+    "vendor/packages/core/src/service-job.ts",
+    "vendor/packages/core/src/snapshot.ts",
+    "vendor/packages/core/src/venue.ts",
+    "vendor/packages/core/src/workflow-defs.ts",
+    "vendor/packages/core/src/workflow.ts",
+    "vendor/packages/core/src/zip.ts",
+    "vendor/packages/core/tsconfig.json",
+    "vendor/packages/runtime/package.json",
+    "vendor/packages/runtime/src/docker-runner.ts",
+    "vendor/packages/runtime/src/doctor.ts",
+    "vendor/packages/runtime/src/index.ts",
+    "vendor/packages/runtime/src/presets.ts",
+    "vendor/packages/runtime/src/render-helper/render-helper.swift",
+    "vendor/packages/runtime/src/render.ts",
+    "vendor/packages/runtime/src/runner.ts",
+    "vendor/packages/runtime/src/spawn.ts",
+    "vendor/packages/runtime/src/tectonic.ts",
+    "vendor/packages/runtime/src/toolchain.ts",
+    "vendor/packages/runtime/tsconfig.json",
+    "vendor/packages/storage/package.json",
+    "vendor/packages/storage/src/cas.ts",
+    "vendor/packages/storage/src/db.ts",
+    "vendor/packages/storage/src/index.ts",
+    "vendor/packages/storage/src/migrate.ts",
+    "vendor/packages/storage/src/outbox.ts",
+    "vendor/packages/storage/src/repos.ts",
+    "vendor/packages/storage/tsconfig.json",
+    "vendor/resources/bibliography/registry.json",
+    "vendor/resources/bibliography/shared-refs.bib",
+    "vendor/resources/profiles/capability-registry.json",
+    "vendor/resources/profiles/check-registry.json",
+    "vendor/resources/profiles/domains/biology-biomed.json",
+    "vendor/resources/profiles/domains/biology-biomed.md",
+    "vendor/resources/profiles/domains/chemistry-materials.json",
+    "vendor/resources/profiles/domains/chemistry-materials.md",
+    "vendor/resources/profiles/domains/cs-ml.json",
+    "vendor/resources/profiles/domains/cs-ml.md",
+    "vendor/resources/profiles/domains/cs-systems.json",
+    "vendor/resources/profiles/domains/cs-systems.md",
+    "vendor/resources/profiles/domains/electrical-control.json",
+    "vendor/resources/profiles/domains/electrical-control.md",
+    "vendor/resources/profiles/domains/humanities-linguistics.json",
+    "vendor/resources/profiles/domains/humanities-linguistics.md",
+    "vendor/resources/profiles/domains/mathematics.json",
+    "vendor/resources/profiles/domains/mathematics.md",
+    "vendor/resources/profiles/domains/physics-astronomy.json",
+    "vendor/resources/profiles/domains/physics-astronomy.md",
+    "vendor/resources/profiles/domains/psychology-social.json",
+    "vendor/resources/profiles/domains/psychology-social.md",
+    "vendor/resources/profiles/domains/statistics-economics.json",
+    "vendor/resources/profiles/domains/statistics-economics.md",
+    "vendor/resources/profiles/outputs/article.json",
+    "vendor/resources/profiles/outputs/beamer.json",
+    "vendor/resources/profiles/outputs/book-report.json",
+    "vendor/resources/profiles/outputs/cv-letter.json",
+    "vendor/resources/profiles/outputs/exam-student.json",
+    "vendor/resources/profiles/outputs/exam-teacher.json",
+    "vendor/resources/profiles/outputs/poster.json",
+    "vendor/resources/profiles/outputs/zh-thesis.json",
+    "vendor/resources/profiles/resource-registry.json",
+    "vendor/resources/profiles/source-registry.json",
+    "vendor/resources/profiles/venues/acl-anthology-generic.json",
+    "vendor/resources/profiles/venues/acm-sigchi-submission.json",
+    "vendor/resources/profiles/venues/icml-2025.json",
+    "vendor/resources/profiles/venues/ieee-conference-generic.json",
+    "vendor/resources/profiles/venues/internal-double-blind.json",
+    "vendor/resources/profiles/venues/internal-generic-draft.json",
+    "vendor/resources/profiles/venues/neurips-2025.json",
+    "vendor/resources/profiles/venues/usenix-generic.json",
+    "vendor/resources/prompts/base-system.md",
+    "vendor/resources/prompts/latex-check.md",
+    "vendor/resources/prompts/latex-revise.md",
+    "vendor/resources/prompts/latex-tune.md",
+    "vendor/resources/prompts/latex-write.md",
+    "vendor/resources/prompts/release.md",
+    "vendor/resources/prompts/repair.md",
+    "vendor/resources/recipes/registry.json",
+    "vendor/resources/skills/latex-bibliography/SKILL.md",
+    "vendor/resources/skills/latex-bibliography/capability.json",
+    "vendor/resources/skills/latex-bibliography/references/guide.md",
+    "vendor/resources/skills/latex-build-debug/SKILL.md",
+    "vendor/resources/skills/latex-build-debug/capability.json",
+    "vendor/resources/skills/latex-build-debug/references/guide.md",
+    "vendor/resources/skills/latex-figures/SKILL.md",
+    "vendor/resources/skills/latex-figures/capability.json",
+    "vendor/resources/skills/latex-figures/references/guide.md",
+    "vendor/resources/skills/latex-project/SKILL.md",
+    "vendor/resources/skills/latex-project/capability.json",
+    "vendor/resources/skills/latex-project/references/guide.md",
+    "vendor/resources/skills/latex-release/SKILL.md",
+    "vendor/resources/skills/latex-release/capability.json",
+    "vendor/resources/skills/latex-release/references/guide.md",
+    "vendor/resources/skills/latex-revise/SKILL.md",
+    "vendor/resources/skills/latex-revise/capability.json",
+    "vendor/resources/skills/latex-revise/references/guide.md",
+    "vendor/resources/skills/latex-tables/SKILL.md",
+    "vendor/resources/skills/latex-tables/capability.json",
+    "vendor/resources/skills/latex-tables/references/guide.md",
+    "vendor/resources/skills/latex-template/SKILL.md",
+    "vendor/resources/skills/latex-template/capability.json",
+    "vendor/resources/skills/latex-template/references/guide.md",
+    "vendor/resources/templates/article-basic/main.tex",
+    "vendor/resources/templates/article-basic/references.bib",
+    "vendor/resources/templates/beamer-basic/main.tex",
+    "vendor/resources/templates/exam-basic/main.tex",
+    "vendor/resources/templates/letter-basic/main.tex",
+    "vendor/resources/templates/registry.json",
+    "vendor/resources/templates/report-basic/main.tex",
+    "vendor/resources/templates/report-basic/references.bib",
+    "vendor/resources/templates/zh-article/main.tex",
+    "vendor/resources/templates/zh-article/references.bib",
+    "vendor/resources/templates/zh-beamer/main.tex",
+    "vendor/resources/templates/zh-thesis/main.tex",
+    "vendor/resources/templates/zh-thesis/references.bib",
+    "vendor/resources/workflows/bibliography.json",
+    "vendor/resources/workflows/data-assets.json",
+    "vendor/resources/workflows/new-document.json",
+    "vendor/resources/workflows/operation-registry.json",
+    "vendor/resources/workflows/release.json",
+    "vendor/resources/workflows/repair.json",
+    "vendor/resources/workflows/revise.json",
+    "vendor/resources/workflows/template-migration.json",
+    "vendor/runtime/host-policy.json",
+    "vendor/runtime/presets/docker-texlive-pdflatex.json",
+    "vendor/runtime/presets/docker-texlive-xelatex.json",
+    "vendor/runtime/presets/local-tectonic-xelatex-bibtex.json",
+    "vendor/runtime/presets/local-tectonic-xelatex-timeout-800ms.json",
+    "vendor/runtime/presets/local-tectonic-xelatex.json",
+    "vendor/runtime/toolchain-lock.json",
+    "vendor/tsconfig.base.json",
+    "vendor/tsconfig.json"
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Pi LaTeX Workbench",
+        "manifest.description": "Governed LaTeX writing through the Pi LaTeX Workbench: a vendored, untouched snapshot of the upstream host CLI exposed to Cognia agents as declarative tools, writing/revising/tuning/checking skills, and the workbench as a Pi package for your Pi and for opted-in Cognia-hosted Pi agents. Approvals never come from the model. Desktop only.",
+        "piPackage.latexWorkbench.name": "LaTeX Workbench",
+        "piPackage.latexWorkbench.description": "The upstream Pi package: eight governed latex_* tools, /latex host commands and the operator approval dialog.",
+        "config.project.title": "Default project id",
+        "config.project.description": "Workbench project the skills use when you do not name one, and the project a hosted Pi agent is bound to. Empty leaves hosted sessions unbound (the workbench tools refuse work until a project is set).",
+        "config.project.patternMessage": "Use letters, digits, '.', '_', ':' or '-', starting with a letter or digit.",
+        "config.protection.title": "Protection mode (hosted Pi agents)",
+        "config.protection.description": "How protected content (math, labels, citations, reported numbers, quotations) is gated in a hosted Pi session. Cognia's own workbench tools always use strict semantics.",
+        "config.protection.strict.label": "Strict",
+        "config.protection.authoring.label": "Authoring",
+        "config.protection.strict.description": "Every protected change needs a host approval bound to the patch.",
+        "config.protection.authoring.description": "New protected content applies directly; changing or removing existing protected content still needs an approval.",
+        "config.stateDir.title": "State directory",
+        "config.stateDir.description": "Workbench state (SQLite database, content-addressed blobs, job workdirs), relative to the workspace root.",
+        "config.stateDir.patternMessage": "Use a path inside the workspace, e.g. .latexwb (no absolute path, no '..').",
+        "cliTools.latexwb_doctor.description": "Probe the host for the LaTeX workbench (`latexwb doctor`): node/node:sqlite, tectonic, the provisioned toolchain bundle, the render helper, Pi. Returns the DoctorReport JSON; `blockingCodes` non-empty means builds cannot run (the report is still returned). Toolchain provisioning is a user-run host command, never a tool call.",
+        "cliTools.latexwb_import.description": "Import a LaTeX project directory inside the workspace into a new workbench snapshot and move the project head (`latexwb import`). The first import registers the directory as the project's host root — the only place latexwb_materialize may write back. Without `project` the id is the sanitized directory name. Returns the ImportReport (accepted/excluded/rejected files, snapshot id).",
+        "cliTools.latexwb_inspect.description": "Analyse the project's head (or a given) snapshot (`latexwb inspect`): root candidates, registered targets, languages, packages, bibliography paths, assets, head snapshot id. Start every task here.",
+        "cliTools.latexwb_jobs.description": "List the project's latest 100 jobs (builds, renders, checks) with state and `resultArtifactIds` (`latexwb jobs`). Use it to recover artifact ids (PDF, log) of an earlier build.",
+        "cliTools.latexwb_build.description": "Compile a snapshot with the pinned offline Tectonic toolchain and return the JobResult (`latexwb build`): `buildResult.status`, diagnostics with file:line, and artifact ids (`pdfArtifactId`, `logArtifactId`). A document that does not compile still returns its JobResult (exit 4) — check `buildResult.status`, not tool success. Snapshot defaults to the head. Omit `targetId` on the first build of an imported project: the root is auto-resolved and registered as target `default`; afterwards pass a target id from latexwb_inspect.",
+        "cliTools.latexwb_check_run.description": "Run a check ruleset against a PDF artifact and persist a check-report artifact (`latexwb check-run`). `draft` lints everyday writing (undefined references, duplicate labels, citations vs bibliography, floats, placeholders, typography, build log — each with file:line; gates nothing). `release` runs the release checks required by the target's output profile; `data-assets` checks a generated asset. Anything a machine cannot verify reports `needs-review`, never `pass`. Returns the full report; its persisted artifact id (`report-…`) is listed in latexwb_jobs `resultArtifactIds`.",
+        "cliTools.latexwb_check_report.description": "Read a persisted check report by its artifact id (`latexwb check-report`).",
+        "cliTools.latexwb_render_pages.description": "Rasterize PDF pages to page-image (PNG) artifacts (`latexwb render-pages`; macOS arm64 render helper, provisioned by the user). Returns artifact ids only — save a page with latexwb_artifact_save and open the PNG to look at it. Omit `pages` to render all.",
+        "cliTools.latexwb_render_text.description": "Extract per-page text from a PDF artifact (`latexwb render-text`; needs the render helper).",
+        "cliTools.latexwb_artifact_save.description": "Write an artifact (PDF, page PNG, log, diff, release zip) to a file inside the workspace (`latexwb artifact-save`); the blob hash is re-verified on read. Returns {artifactId, dest, bytes}.",
+        "cliTools.latexwb_materialize.description": "Write a snapshot (default: head) back into the project's imported folder through the journaled, conflict-safe sync (`latexwb materialize`). Files the user changed on disk since the import/last sync are reported as conflicts and nothing is overwritten. `dir` must lie inside the host root registered at import. Adopting a never-synced folder (`--takeover`) and journal recovery are host decisions and not available here.",
+        "cliTools.latexwb_patch_propose.description": "Propose a governed source patch from an operations JSON file you wrote inside the workspace (`latexwb patch-propose`). File shape: {\"reason\": string, \"operations\": [FileOperation…], \"citekeyMapping\"?: {old: new}}; prefer `replace` ops ({op:\"replace\", path, edits:[{oldText, newText, occurrence?}]}) whose oldText is copied verbatim and occurs once. Returns the proposal: patchId, risk, protectedChanges (added/modified/removed), requiredApprovals, diffArtifactId. Proposing never changes the project.",
+        "cliTools.latexwb_patch_show.description": "Show a stored patch: state, base/result snapshot, digest, reason, operations and protected changes (`latexwb patch-show`).",
+        "cliTools.latexwb_patch_apply.description": "Apply a proposed patch, producing the next snapshot (`latexwb patch-apply`; strict protection semantics). A patch with protected changes applies only when the operator has already granted a host approval bound to its digest; otherwise it fails with POLICY_DENIED — stop and report the patch id and the grant needed. This tool cannot create, request or bypass a grant. A moved head fails with STALE_BASE: re-inspect, re-read and re-propose.",
+        "cliTools.latexwb_patch_revert.description": "Propose the inverse of an applied patch (`latexwb patch-revert`). Returns a new proposal; apply it with latexwb_patch_apply under the same approval rules.",
+        "cliTools.latexwb_release_prepare.description": "Compute and persist a ReleasePlan (source whitelist, required checks and approvals) for a snapshot/target/profile without freezing (`latexwb release-prepare`).",
+        "cliTools.latexwb_release_freeze.description": "Freeze a release candidate and return it with its `approvalDigest` (`latexwb release-freeze`). The operator binds the host `release.package` grant to that digest outside this tool; report the releaseId and digest to the user.",
+        "cliTools.latexwb_release_package.description": "Run the release gates and, when they pass, build the deterministic source package plus a clean-room rebuild whose PDF sha256 must match (`latexwb release-package`). Without human page reviews and the digest-bound host grant it finalizes `blocked` and names every failing gate — report them; never downgrade the profile to get past a gate.",
+        "cliTools.latexwb_release_status.description": "Show a release: status (blocked / review-ready / submission-ready), manifest and the approvalDigest a host grant binds to (`latexwb release-status`).",
+        "cliTools.latexwb_release_list.description": "List the project's releases with status (`latexwb release-list`).",
+        "cliTools.latexwb_workflow_start.description": "Start a persisted managed workflow (`latexwb workflow-start`). It may stop at `waiting-input` (an agent step waits for {\"patchId\"} of a patch you proposed on the current head — continue with latexwb_workflow_resume) or `waiting-approval` (the operator grants on the host, then resume). `revise` and `template-migration` end in an unimplemented comparison step and finish `blocked` by design.",
+        "cliTools.latexwb_workflow_status.description": "Show a workflow: state, current node, pending request and steps (`latexwb workflow-status`).",
+        "cliTools.latexwb_workflow_list.description": "List the project's workflows (`latexwb workflow-list`).",
+        "cliTools.latexwb_workflow_resume.description": "Continue a workflow from `waiting-input` or `waiting-approval` (`latexwb workflow-resume`). For a patch-proposal request pass an input JSON file containing {\"patchId\": \"<id>\"} of a patch based on the current head; for an approval gate resume without input after the operator granted it. Resuming never grants anything.",
+        "cliTools.latexwb_workflow_cancel.description": "Cancel a workflow; cascades to its jobs (`latexwb workflow-cancel`).",
+        "cliTools.latexwb_assets_inspect.description": "Analyse a CSV/TSV data file of a snapshot (columns, types, units) into an inspection artifact + evidence (`latexwb assets-inspect`).",
+        "cliTools.latexwb_review_coverage.description": "Show which pages of a PDF carry a human page-review verdict (`latexwb review-coverage`). Verdicts themselves are recorded by the operator on the host, never by this plugin."
+      },
+      "zh-CN": {
+        "manifest.name": "Pi LaTeX 工作台",
+        "manifest.description": "通过 Pi LaTeX Workbench 进行受治理的 LaTeX 写作：以声明式工具向 Cognia 智能体开放原样内置的上游宿主 CLI，提供撰写、修订、排版调优与检查技能，并把工作台作为 Pi 包安装到你的 Pi 或已选择加入的 Cognia 托管 Pi 智能体中。审批永远不由模型给出。仅桌面端。",
+        "piPackage.latexWorkbench.name": "LaTeX 工作台",
+        "piPackage.latexWorkbench.description": "上游 Pi 包：八个受治理的 latex_* 工具、/latex 宿主命令以及操作员审批对话框。",
+        "config.project.title": "默认项目 ID",
+        "config.project.description": "未指定项目时技能使用的工作台项目，也是托管 Pi 智能体绑定的项目。留空则托管会话不绑定项目（在设置项目之前，工作台工具会拒绝执行）。",
+        "config.project.patternMessage": "请使用字母、数字、'.'、'_'、':' 或 '-'，并以字母或数字开头。",
+        "config.protection.title": "保护模式（托管 Pi 智能体）",
+        "config.protection.description": "托管 Pi 会话中受保护内容（公式、标签、引用、报告数值、引文）的把关方式。Cognia 自身的工作台工具始终使用严格语义。",
+        "config.protection.strict.label": "严格",
+        "config.protection.authoring.label": "创作",
+        "config.protection.strict.description": "每一处受保护内容的改动都需要与该补丁绑定的宿主审批。",
+        "config.protection.authoring.description": "新增的受保护内容可直接应用；修改或删除已有受保护内容仍需审批。",
+        "config.stateDir.title": "状态目录",
+        "config.stateDir.description": "工作台状态（SQLite 数据库、内容寻址的 blob、作业工作目录），相对于工作区根目录。",
+        "config.stateDir.patternMessage": "请使用工作区内的路径，例如 .latexwb（不能是绝对路径，不能包含 '..'）。",
+        "cliTools.latexwb_doctor.description": "探测宿主的 LaTeX 工作台环境（`latexwb doctor`）：node/node:sqlite、tectonic、已配置的工具链包、渲染辅助程序与 Pi。返回 DoctorReport JSON；`blockingCodes` 非空表示无法构建，但仍会返回报告。工具链配置必须由用户在宿主运行命令，不能通过工具调用执行。",
+        "cliTools.latexwb_import.description": "将工作区内的 LaTeX 项目目录导入为新的工作台快照，并移动项目 head（`latexwb import`）。首次导入会把目录注册为项目的宿主根目录，latexwb_materialize 只能写回此处。省略 `project` 时使用清理后的目录名作为 ID。返回 ImportReport（接受、排除、拒绝的文件及快照 ID）。",
+        "cliTools.latexwb_inspect.description": "分析项目 head 或指定快照（`latexwb inspect`）：根文档候选、已注册目标、语言、宏包、参考文献路径、资源与 head 快照 ID。每项任务都应从此处开始。",
+        "cliTools.latexwb_jobs.description": "列出项目最近的 100 个作业（构建、渲染、检查），包含状态与 `resultArtifactIds`（`latexwb jobs`）。可用于找回先前构建的 PDF、日志等产物 ID。",
+        "cliTools.latexwb_build.description": "使用固定版本的离线 Tectonic 工具链编译快照，返回 JobResult（`latexwb build`），包含 `buildResult.status`、带文件和行号的诊断以及 `pdfArtifactId`、`logArtifactId`。文档编译失败仍会返回 JobResult（退出码 4），应检查 `buildResult.status`，不能只看工具是否成功。默认使用 head 快照。导入项目后首次构建应省略 `targetId`，系统会自动解析根文档并注册为 `default` 目标；之后使用 latexwb_inspect 返回的目标 ID。",
+        "cliTools.latexwb_check_run.description": "对 PDF 产物运行检查规则集，并保存检查报告产物（`latexwb check-run`）。`draft` 检查日常写作问题（未定义引用、重复标签、引用与参考文献对应关系、浮动体、占位内容、排版、构建日志，均带文件和行号），不会阻止流程；`release` 执行目标输出配置要求的发布检查；`data-assets` 检查生成的资源。机器无法验证的项目必须报告 `needs-review`，不能报告 `pass`。返回完整报告；保存后的报告 ID（`report-…`）可在 latexwb_jobs 的 `resultArtifactIds` 中找到。",
+        "cliTools.latexwb_check_report.description": "通过产物 ID 读取已保存的检查报告（`latexwb check-report`）。",
+        "cliTools.latexwb_render_pages.description": "将 PDF 页面栅格化为页面 PNG 产物（`latexwb render-pages`，需要用户配置 macOS arm64 渲染辅助程序）。仅返回产物 ID；用 latexwb_artifact_save 保存页面，再打开 PNG 查看。省略 `pages` 时渲染所有页面。",
+        "cliTools.latexwb_render_text.description": "从 PDF 产物提取逐页文本（`latexwb render-text`，需要渲染辅助程序）。",
+        "cliTools.latexwb_artifact_save.description": "将产物（PDF、页面 PNG、日志、差异或发布 ZIP）写入工作区内的文件（`latexwb artifact-save`）；读取时会重新校验 blob 哈希。返回 {artifactId, dest, bytes}。",
+        "cliTools.latexwb_materialize.description": "通过带日志且可安全处理冲突的同步机制，将快照（默认 head）写回项目导入目录（`latexwb materialize`）。自导入或上次同步以来被用户修改的磁盘文件会报告为冲突，不会覆盖任何内容。`dir` 必须位于导入时注册的宿主根目录内。接管从未同步过的目录（`--takeover`）与日志恢复必须由宿主决定，此工具不提供这些操作。",
+        "cliTools.latexwb_patch_propose.description": "使用工作区内的操作 JSON 文件提出受治理的源码补丁（`latexwb patch-propose`）。文件格式为 {\"reason\": string, \"operations\": [FileOperation…], \"citekeyMapping\"?: {old: new}}；优先使用 `replace` 操作（{op:\"replace\", path, edits:[{oldText, newText, occurrence?}]}），其中 oldText 必须逐字复制且只出现一次。返回 patchId、risk、protectedChanges（新增、修改、删除）、requiredApprovals 与 diffArtifactId。提出补丁不会修改项目。",
+        "cliTools.latexwb_patch_show.description": "显示已保存补丁的状态、基础与结果快照、摘要、原因、操作及受保护内容的变更（`latexwb patch-show`）。",
+        "cliTools.latexwb_patch_apply.description": "应用已提出的补丁并生成下一快照（`latexwb patch-apply`，使用严格保护语义）。涉及受保护内容的补丁只有在操作员已于宿主授予绑定补丁摘要的审批时才能应用；否则会返回 POLICY_DENIED，应停止并报告补丁 ID 与所需授权。此工具不能创建、请求或绕过授权。head 已移动会返回 STALE_BASE：应重新检查、读取并提出补丁。",
+        "cliTools.latexwb_patch_revert.description": "为已应用的补丁提出逆向补丁（`latexwb patch-revert`）。返回新提案；使用 latexwb_patch_apply 按相同审批规则应用。",
+        "cliTools.latexwb_release_prepare.description": "为快照、目标与输出配置计算并保存 ReleasePlan（源码白名单、必要检查与审批），不会冻结内容（`latexwb release-prepare`）。",
+        "cliTools.latexwb_release_freeze.description": "冻结发布候选并返回候选及其 `approvalDigest`（`latexwb release-freeze`）。操作员须在此工具之外于宿主将 `release.package` 授权绑定该摘要；应向用户报告 releaseId 与摘要。",
+        "cliTools.latexwb_release_package.description": "运行发布检查；通过后生成确定性的源码包，并在洁净环境重建，重建 PDF 的 sha256 必须一致（`latexwb release-package`）。缺少人工页面审阅或绑定摘要的宿主授权时，结果为 `blocked` 并列出所有失败检查；应报告阻塞原因，不能降低输出配置来绕过检查。",
+        "cliTools.latexwb_release_status.description": "显示发布状态（blocked、review-ready 或 submission-ready）、清单与宿主授权绑定的 approvalDigest（`latexwb release-status`）。",
+        "cliTools.latexwb_release_list.description": "列出项目的发布及其状态（`latexwb release-list`）。",
+        "cliTools.latexwb_workflow_start.description": "启动持久化的受管理工作流（`latexwb workflow-start`）。可能停在 `waiting-input`（智能体步骤等待在当前 head 上提出的补丁 {\"patchId\"}，可用 latexwb_workflow_resume 继续）或 `waiting-approval`（操作员在宿主授权后再恢复）。`revise` 与 `template-migration` 会在尚未实现的比较步骤结束，并按设计返回 `blocked`。",
+        "cliTools.latexwb_workflow_status.description": "显示工作流状态、当前节点、待处理请求与步骤（`latexwb workflow-status`）。",
+        "cliTools.latexwb_workflow_list.description": "列出项目的工作流（`latexwb workflow-list`）。",
+        "cliTools.latexwb_workflow_resume.description": "从 `waiting-input` 或 `waiting-approval` 继续工作流（`latexwb workflow-resume`）。补丁提案请求需传入 JSON 文件，内容为 {\"patchId\": \"<id>\"}，且补丁基于当前 head；审批关卡需先由操作员在宿主授权，然后省略输入恢复。恢复不会授予任何授权。",
+        "cliTools.latexwb_workflow_cancel.description": "取消工作流，并连带取消其作业（`latexwb workflow-cancel`）。",
+        "cliTools.latexwb_assets_inspect.description": "分析快照中的 CSV/TSV 数据文件（列、类型、单位），生成检查产物与证据（`latexwb assets-inspect`）。",
+        "cliTools.latexwb_review_coverage.description": "显示 PDF 哪些页面已有人工审阅结论（`latexwb review-coverage`）。审阅结论只能由操作员在宿主记录，不能由此插件记录。"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "internal-generic-draft",
+  "status": "draft",
+  "venue": "Internal scaffold only; not an official venue",
+  "year": null,
+  "track": null,
+  "stage": "submission",
+  "checkedAt": null,
+  "validUntil": null,
+  "sources": [],
+  "template": {
+    "origin": "internal",
+    "templateId": "internal-article",
+    "version": "design-1",
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": []
+}

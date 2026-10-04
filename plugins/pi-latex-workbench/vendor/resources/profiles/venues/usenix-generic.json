@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "usenix-generic",
+  "status": "verified",
+  "venue": "USENIX conference (generic author-resources requirements)",
+  "year": null,
+  "track": null,
+  "stage": "submission",
+  "checkedAt": "2026-09-21T18:58:07Z",
+  "validUntil": "2027-06-01T00:00:00Z",
+  "sources": [
+    {
+      "id": "usenix-paper-templates",
+      "url": "https://www.usenix.org/conferences/author-resources/paper-templates",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "a34123847bac1f28434a1c7dc85871e00dafa8977c386b384f43d6388b8b1bcf",
+      "locator": "Templates for Conference Papers"
+    }
+  ],
+  "template": {
+    "origin": "official",
+    "templateId": "usenix2019-latex",
+    "version": "2019_v3",
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "usenix-format",
+      "title": "USENIX paper format",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "entire-pdf",
+      "requirement": "U.S. letter-sized pages, two-column format, text block 7in wide by 9in deep, 10-point Times Roman or similar type on 12-point leading (single-spaced).",
+      "sourceId": "usenix-paper-templates",
+      "sourceLocator": "Templates for Conference Papers",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "usenix-template",
+      "title": "USENIX LaTeX template",
+      "severity": "warning",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "USENIX provides a LaTeX template (usenix2019) and style file for papers; use of the template is expected unless formatting matches the stated block/type rules.",
+      "sourceId": "usenix-paper-templates",
+      "sourceLocator": "Templates for Conference Papers",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "blindness-per-cfp",
+      "title": "Per-conference blindness policy",
+      "severity": "warning",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "metadata",
+      "requirement": "USENIX templates include author names; whether author names must be omitted depends on the corresponding Call for Papers' blindness policy.",
+      "sourceId": "usenix-paper-templates",
+      "sourceLocator": "Templates for Conference Papers",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    }
+  ]
+}

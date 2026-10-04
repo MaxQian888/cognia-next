@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "skillId": "latex-release",
+  "workflowIds": [
+    "release"
+  ],
+  "toolNames": [
+    "latex_project",
+    "latex_build",
+    "latex_check",
+    "latex_render",
+    "latex_export"
+  ],
+  "resourceIds": [
+    "skill:latex-release",
+    "skill:latex-release:guide"
+  ],
+  "hostCapabilities": [
+    "source.read",
+    "build.execute",
+    "artifact.read",
+    "release.package"
+  ],
+  "requiresHumanGateFor": [
+    "protected-content-change",
+    "template-migration",
+    "unverified-evidence",
+    "submission-release"
+  ]
+}

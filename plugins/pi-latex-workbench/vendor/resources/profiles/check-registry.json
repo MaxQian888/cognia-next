@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "notice": "Release/QA checker registry. M4 implements the release suite in packages/core/src/checks.ts (runReleaseChecks): entries marked 'live' have a real implementation there; entries marked 'unsupported' are declared but have no implementation and report status 'unsupported' at check time (a required-but-unimplemented check blocks the release honestly). The separate 'data-assets' ruleset (numeric-mapping.fidelity/coverage, render.compile-proof, layout.visual-review) was implemented in M3. The 'draft' ruleset (draft.* ids, runDraftChecks) is fast source lint for ordinary writing against any compiled PDF: it gates nothing (requiredCheckIds is empty), and every draft.* id it runs must be registered here as 'live' (registry drift is an INVALID_REQUEST).",
+  "checks": [
+    {
+      "id": "build-current",
+      "status": "live",
+      "implementation": "core.checks: verifies the pdf artifact is the compiled output of a succeeded build.run job on the frozen snapshot",
+      "testIds": ["BUILD-01", "BUILD-08"]
+    },
+    {
+      "id": "references-resolved",
+      "status": "live",
+      "implementation": "core.checks: build diagnostics + '??' markers in extracted PDF text",
+      "testIds": ["BUILD-03", "BIB-01"]
+    },
+    {
+      "id": "required-sections",
+      "status": "live",
+      "implementation": "core.checks: section commands in snapshot sources vs output profile requiredSections",
+      "testIds": []
+    },
+    {
+      "id": "assets-present",
+      "status": "live",
+      "implementation": "core.checks: every \\includegraphics/\\input/\\include/\\addbibresource resolves to a snapshot file + build MISSING_ASSET diagnostics",
+      "testIds": ["PROJECT-04", "RELEASE-06"]
+    },
+    {
+      "id": "protected-content",
+      "status": "live",
+      "implementation": "core.checks: multiset comparison of math/citations/labels/reported-results/quotes between baseline and current snapshot sources; differences produce a source-diff artifact and needs-review",
+      "testIds": ["PATCH-03", "PATCH-04"]
+    },
+    {
+      "id": "text-extraction",
+      "status": "live",
+      "implementation": "core.checks + render-helper: every page yields extractable text",
+      "testIds": ["QA-03"]
+    },
+    {
+      "id": "page-dimensions",
+      "status": "live",
+      "implementation": "core.checks + render-helper: uniform page size across all pages",
+      "testIds": ["QA-03"]
+    },
+    {
+      "id": "font-coverage",
+      "status": "live",
+      "implementation": "core.checks + render-helper: every PDF font resource embeds a font file (FontFile*)",
+      "testIds": ["BUILD-02", "QA-03"]
+    },
+    {
+      "id": "anonymization-scan",
+      "status": "live",
+      "implementation": "core.checks: regex scan of source + extracted PDF text for emails, \\author content, affiliations, ORCID, \\thanks, corresponding-author markers; findings persist as a report artifact",
+      "testIds": ["RELEASE-05"]
+    },
+    {
+      "id": "visual-coverage",
+      "status": "live",
+      "implementation": "core.checks + reviews table: every rendered page-image artifact carries a host review; flagged pages fail",
+      "testIds": ["QA-01", "QA-02"]
+    },
+    {
+      "id": "venue-profile",
+      "status": "live",
+      "implementation": "core.checks: every requirement declared by the target's venue profile maps to a check that passed in this run",
+      "testIds": []
+    },
+    {
+      "id": "baseline-compare",
+      "status": "live",
+      "implementation": "core.checks + render-helper: byte-compare then per-page text diff vs baselineArtifactId; differences produce a source-diff artifact and needs-review",
+      "testIds": []
+    },
+    {
+      "id": "answer-isolation",
+      "status": "live",
+      "implementation": "core.checks: deterministic scan of de-commented source (\\printanswers, solution/answer environments, \\answer/\\CorrectChoice, answer-key/marking-scheme text) + extracted PDF text (answer/solution labels); findings persist as an answer-isolation-scan report artifact",
+      "testIds": ["RELEASE-02"]
+    },
+    {
+      "id": "answer-mapping",
+      "status": "unsupported",
+      "implementation": null,
+      "unsupportedReason": "teacher↔student question numbering/marks correspondence is not modeled",
+      "testIds": ["RELEASE-02"]
+    },
+    {
+      "id": "asset-provenance",
+      "status": "live",
+      "implementation": "core.checks: raw/generated snapshot assets round-trip through CAS under recorded blob hashes; generated-asset evidence records must carry resolvable sourceAssetId + recipeHash + parametersHash + produced artifact ids; results persist as an asset-provenance report artifact. NOTE: byte-origin provenance only — license attestation is still not modeled",
+      "testIds": ["FIG-03", "FIG-04"]
+    },
+    {
+      "id": "score-sum",
+      "status": "live",
+      "implementation": "core.checks: sums observed mark annotations (\\question[N]/\\part[N], '(N marks)', '(N 分)') against declared totals (\\total{N}, \\setcounter{totalmarks}{N}, 'Total: N marks', '满分 N'); a missing side reports needs-review, a mismatch fails",
+      "testIds": ["RELEASE-02"]
+    },
+    {
+      "id": "draft.references",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: every \\ref/\\eqref/\\autoref/\\cref/\\Cref/\\pageref/\\nameref/\\vref (comma lists, ranges, \\hyperref[key]) in the comment-masked sources reachable from the target root must match a \\label (or label= option) in some project .tex file; unmatched → fail/warning with path:line (needs-review when xr \\externaldocument is loaded)",
+      "testIds": ["BUILD-03"]
+    },
+    {
+      "id": "draft.duplicate-labels",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: a \\label key defined more than once across the scanned sources → fail/error listing every path:line",
+      "testIds": []
+    },
+    {
+      "id": "draft.citations",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: cite keys (\\cite, natbib and biblatex families incl. optional args, comma lists, multicite) must exist in the declared bibliography — .bib entries parsed by core.bib (\\bibliography/\\addbibresource, filecontents), \\bibitem for thebibliography, a shipped .bbl only when a database is unresolved; missing keys or unresolved databases → fail/error; no citations → not-applicable",
+      "testIds": ["BIB-01", "BUILD-03"]
+    },
+    {
+      "id": "draft.unused-bib-entries",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: entries of the declared .bib databases / thebibliography that are never cited (case-insensitive) → fail with severity info (hygiene only, never blocking); \\nocite{*} → not-applicable",
+      "testIds": ["BIB-01"]
+    },
+    {
+      "id": "draft.floats",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: figure/table floats (incl. starred, wrap/sideways/SC variants) without \\caption, numbered captions without \\label, or labelled floats never referenced → fail/warning with path:line",
+      "testIds": []
+    },
+    {
+      "id": "draft.placeholders",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: TODO/FIXME/XXX/TBD and 待补充/待完善 markers, \\todo/\\missingfigure, \\lipsum/\\blindtext, 'lorem ipsum', '??' in prose, empty sectioning titles and an empty abstract → fail/warning. Scans comment-masked source only: TODOs inside % comments are legitimate and never reported",
+      "testIds": []
+    },
+    {
+      "id": "draft.typography",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: conservative prose heuristics outside math, verbatim, code environments, URL/key/path arguments and comments — straight \"…\" quotes, '...' instead of \\dots, a breakable space before \\ref/\\eqref/\\pageref (Latin words or 图/表/式) or a plain \\cite (Latin context), immediately repeated Latin words; CJK text never matches. fail with severity info, at most 40 findings listed",
+      "testIds": []
+    },
+    {
+      "id": "draft.build-log",
+      "status": "live",
+      "implementation": "core.checks runDraftChecks: summarizes the stored buildResult diagnostics of the build job that produced the pdf (overfull boxes > 1pt with path:line, undefined references/citations, multiply-defined labels, missing glyphs) plus LaTeX font-substitution warnings from the log artifact → fail/warning when present; unsupported when the producing job stored no build result",
+      "testIds": ["QA-03", "BUILD-05"]
+    }
+  ]
+}

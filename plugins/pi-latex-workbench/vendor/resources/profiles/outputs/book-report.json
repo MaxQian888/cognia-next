@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "book-report",
+  "status": "design-unverified",
+  "title": "长书/报告",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "references-resolved",
+    "assets-present",
+    "visual-coverage"
+  ],
+  "humanReview": [
+    "前置后置内容和术语表",
+    "跨章逻辑"
+  ],
+  "notes": [
+    "章节构建不是全书release；检查目录、索引和长表。"
+  ]
+}

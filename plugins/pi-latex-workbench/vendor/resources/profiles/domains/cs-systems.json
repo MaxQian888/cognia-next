@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "cs-systems",
+  "status": "design-unverified",
+  "title": "计算机系统",
+  "packageHints": [
+    "booktabs",
+    "listings",
+    "tikz"
+  ],
+  "referenceResourceId": "domain:cs-systems",
+  "rules": [
+    {
+      "id": "cs-systems:environment",
+      "title": "测量环境",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "保留硬件、软件版本、并发、负载、预热和样本范围。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-03-1",
+        "DOM-03-2",
+        "DOM-03-3"
+      ]
+    },
+    {
+      "id": "cs-systems:latency",
+      "title": "性能单位",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "吞吐、平均/分位延迟、百分位和时间单位显式区分，逐表逐图核对。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-03-1",
+        "DOM-03-2",
+        "DOM-03-3"
+      ]
+    },
+    {
+      "id": "cs-systems:tradeoffs",
+      "title": "工程取舍",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "描述成本、失败模式和资源约束；不能只保留正向结果。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-03-1",
+        "DOM-03-2",
+        "DOM-03-3"
+      ]
+    },
+    {
+      "id": "cs-systems:architecture",
+      "title": "实现与设计一致",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "架构图和说明对应实际组件，不把设计建议表述成已实现能力。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-03-1",
+        "DOM-03-2",
+        "DOM-03-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "不删除反例、失败配置和测量约束",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-03-1",
+    "DOM-03-2",
+    "DOM-03-3"
+  ]
+}

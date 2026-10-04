@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "id": "repair",
+  "version": 1,
+  "initial": "inspect",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 3,
+  "maxSameCauseAttempts": 2,
+  "nodes": [
+    {
+      "id": "inspect",
+      "type": "operation",
+      "operationId": "project.inspect",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "确定target与基线"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.run-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "check",
+      "onFailure": "diagnose",
+      "description": "成功走检查；编译失败带结构化首错"
+    },
+    {
+      "id": "diagnose",
+      "type": "agent",
+      "operationId": "agent.propose-minimal-repair",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "budget",
+      "onFailure": "blocked",
+      "description": "读取完整相关日志和源码，生成最小patch"
+    },
+    {
+      "id": "budget",
+      "type": "switch",
+      "operationId": "guard.repair-budget",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "本次apply预算与相同cause预算由宿主计算"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.patch-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "apply",
+      "onFailure": "blocked",
+      "description": "受保护变化必须通过宿主审批"
+    },
+    {
+      "id": "apply",
+      "type": "operation",
+      "operationId": "patch.apply-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "新snapshot后重编译；不覆写用户变化"
+    },
+    {
+      "id": "check",
+      "type": "operation",
+      "operationId": "quality.review-draft",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "引用、资源、保护内容与版面待审记录"
+    }
+  ],
+  "requiredSkills": [
+    "latex-build-debug"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "electrical-control",
+  "status": "design-unverified",
+  "title": "电气与控制",
+  "packageHints": [
+    "circuitikz",
+    "tikz",
+    "pgfplots"
+  ],
+  "referenceResourceId": "domain:electrical-control",
+  "rules": [
+    {
+      "id": "electrical-control:connectivity",
+      "title": "连接与标签",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "保留节点、方向、元件值和连接表，图中交叉不等于电连接。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-07-1",
+        "DOM-07-2",
+        "DOM-07-3"
+      ]
+    },
+    {
+      "id": "electrical-control:frequency",
+      "title": "频域尺度",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "Hz/rad·s⁻¹、线性/dB和角度单位显式区分。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-07-1",
+        "DOM-07-2",
+        "DOM-07-3"
+      ]
+    },
+    {
+      "id": "electrical-control:stability",
+      "title": "稳定性主张",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "稳定性或安全性结论需要独立分析依据，电路图可渲染不代表设计安全。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-07-1",
+        "DOM-07-2",
+        "DOM-07-3"
+      ]
+    },
+    {
+      "id": "electrical-control:parameters",
+      "title": "参数来源",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "仿真和测量参数来自输入记录，禁止为美观改变元件数值。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-07-1",
+        "DOM-07-2",
+        "DOM-07-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "保护元件值、拓扑和稳定性条件",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-07-1",
+    "DOM-07-2",
+    "DOM-07-3"
+  ]
+}

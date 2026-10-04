@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "biology-biomed",
+  "status": "design-unverified",
+  "title": "生物与生物医学",
+  "packageHints": [
+    "booktabs",
+    "siunitx",
+    "longtable"
+  ],
+  "referenceResourceId": "domain:biology-biomed",
+  "rules": [
+    {
+      "id": "biology-biomed:naming",
+      "title": "命名与版本",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "物种、基因/蛋白、序列和数据库版本对应来源，不做未授权名称标准化。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-08-1",
+        "DOM-08-2",
+        "DOM-08-3"
+      ]
+    },
+    {
+      "id": "biology-biomed:study-type",
+      "title": "研究类型规则",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "报告清单按实际研究类型和官方版本选择；不用一个泛化清单冒充所有研究规范。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-08-1",
+        "DOM-08-2",
+        "DOM-08-3"
+      ]
+    },
+    {
+      "id": "biology-biomed:ethics",
+      "title": "伦理与注册",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "伦理批准、知情同意、注册号和受试者信息须来自真实材料，不生成补齐。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-08-1",
+        "DOM-08-2",
+        "DOM-08-3"
+      ]
+    },
+    {
+      "id": "biology-biomed:statistics",
+      "title": "统计与证据",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "样本、分组、效应量和置信区间保持一致；结果不越过证据范围。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-08-1",
+        "DOM-08-2",
+        "DOM-08-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "不得伪造实验、伦理批准或临床结论",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-08-1",
+    "DOM-08-2",
+    "DOM-08-3"
+  ]
+}

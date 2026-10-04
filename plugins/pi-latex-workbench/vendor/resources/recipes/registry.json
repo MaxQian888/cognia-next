@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "notice": "Trusted generation recipes. Recipes are declarative presets — no recipe carries or executes code. Unlisted ids are POLICY_DENIED.",
+  "recipes": [
+    {
+      "id": "booktabs-table",
+      "kind": "table",
+      "version": "1",
+      "description": "booktabs tabular inside a table float; \\toprule/\\midrule/\\bottomrule, right-aligned numeric columns.",
+      "requiredPackages": ["booktabs"]
+    },
+    {
+      "id": "pgfplots-line",
+      "kind": "plot",
+      "version": "1",
+      "description": "PGFPlots axis with one or more y-series of (x,y[,error]) coordinates; real axis labels and legend.",
+      "requiredPackages": ["pgfplots"]
+    },
+    {
+      "id": "tikz-flow",
+      "kind": "diagram",
+      "version": "1",
+      "description": "TikZ concept-flow diagram: role-styled nodes (process/input/output/decision/group) with labelled arrows.",
+      "requiredPackages": ["tikz"]
+    },
+    {
+      "id": "tikz-tree",
+      "kind": "diagram",
+      "version": "1",
+      "description": "TikZ layered tree layout for DiagramSpec kind 'tree'.",
+      "requiredPackages": ["tikz"]
+    },
+    {
+      "id": "tikz-circuit-block",
+      "kind": "diagram",
+      "version": "1",
+      "description": "TikZ block diagram for DiagramSpec kind 'circuit-block'.",
+      "requiredPackages": ["tikz"]
+    }
+  ]
+}

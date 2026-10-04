@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "exam-teacher",
+  "status": "design-unverified",
+  "title": "试卷教师版",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "score-sum",
+    "answer-mapping",
+    "visual-coverage"
+  ],
+  "humanReview": [
+    "解答正确性",
+    "评分规则"
+  ],
+  "notes": [
+    "单独target与访问权限；不得把答案产物附给学生版导出。"
+  ]
+}

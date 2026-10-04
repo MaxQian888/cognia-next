@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "id": "release",
+  "version": 1,
+  "initial": "freeze",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 0,
+  "maxSameCauseAttempts": 0,
+  "nodes": [
+    {
+      "id": "freeze",
+      "type": "operation",
+      "operationId": "release.freeze",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "冻结snapshot/target/profile和审批上下文"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.clean-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "checks",
+      "onFailure": "blocked",
+      "description": "不使用最终PDF缓存"
+    },
+    {
+      "id": "checks",
+      "type": "operation",
+      "operationId": "quality.run-release-checks",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "review",
+      "onFailure": "blocked",
+      "description": "必需机器检查与规则时效"
+    },
+    {
+      "id": "review",
+      "type": "gate",
+      "operationId": "gate.all-page-review",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "prepare",
+      "onFailure": "blocked",
+      "description": "真实全页审阅；waiting直到授权reviewer提交结果"
+    },
+    {
+      "id": "prepare",
+      "type": "operation",
+      "operationId": "release.prepare-whitelist",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "导出清单与敏感/匿名规则；学生版排除答案源"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.release-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "package",
+      "onFailure": "blocked",
+      "description": "明确本地打包授权，不包含自动上传或投稿"
+    },
+    {
+      "id": "package",
+      "type": "operation",
+      "operationId": "release.package-staging",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "rebuild",
+      "onFailure": "failed",
+      "description": "从白名单暂存区生成source zip"
+    },
+    {
+      "id": "rebuild",
+      "type": "operation",
+      "operationId": "release.rebuild-package",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "finalize",
+      "onFailure": "blocked",
+      "description": "新环境仅用ZIP、批准工具链重建"
+    },
+    {
+      "id": "finalize",
+      "type": "operation",
+      "operationId": "release.finalize",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "校验hash和检查覆盖后登记不可变release"
+    }
+  ],
+  "requiredSkills": [
+    "latex-release"
+  ]
+}

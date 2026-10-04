@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "id": "new-document",
+  "version": 1,
+  "initial": "inspect",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 1,
+  "maxSameCauseAttempts": 2,
+  "nodes": [
+    {
+      "id": "inspect",
+      "type": "operation",
+      "operationId": "project.inspect",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "initialize",
+      "onFailure": "blocked",
+      "description": "检查项目为空或适合初始化，确定已批准模板和目标"
+    },
+    {
+      "id": "initialize",
+      "type": "operation",
+      "operationId": "project.init-approved",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "outline",
+      "onFailure": "blocked",
+      "description": "只复制批准的内部模板；不下载未知cls"
+    },
+    {
+      "id": "outline",
+      "type": "agent",
+      "operationId": "agent.plan-document",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "生成结构与证据需求，不编造结果"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.patch-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "apply",
+      "onFailure": "blocked",
+      "description": "检查当前patch审批；未回复保持waiting而非直接失败"
+    },
+    {
+      "id": "apply",
+      "type": "operation",
+      "operationId": "patch.apply-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "CAS写入完整初稿源快照"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.run-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "review",
+      "onFailure": "blocked",
+      "description": "真实编译；失败可显式启动repair子工作流"
+    },
+    {
+      "id": "review",
+      "type": "operation",
+      "operationId": "quality.review-draft",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "产出草稿检查，缺视觉审阅明确标记"
+    }
+  ],
+  "requiredSkills": [
+    "latex-project",
+    "latex-template"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "cs-ml",
+  "status": "design-unverified",
+  "title": "机器学习与人工智能",
+  "packageHints": [
+    "amsmath",
+    "booktabs",
+    "algorithmicx"
+  ],
+  "referenceResourceId": "domain:cs-ml",
+  "rules": [
+    {
+      "id": "cs-ml:results",
+      "title": "结果来源",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "表格、图、摘要数字关联原始结果字段和处理规则。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-02-1",
+        "DOM-02-2",
+        "DOM-02-3"
+      ]
+    },
+    {
+      "id": "cs-ml:experimental",
+      "title": "实验说明",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "检查基线、拆分、seed、超参数和误差条语义，不编造缺失实验。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-02-1",
+        "DOM-02-2",
+        "DOM-02-3"
+      ]
+    },
+    {
+      "id": "cs-ml:claims",
+      "title": "主张范围",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "结论限定在实际数据集、评测设置和观察范围；不能把微小提升自动写成全面优越。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-02-1",
+        "DOM-02-2",
+        "DOM-02-3"
+      ]
+    },
+    {
+      "id": "cs-ml:reproducibility",
+      "title": "复现实验信息",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "算法和配置描述与提供的代码/记录对应，缺失内容标记待补。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-02-1",
+        "DOM-02-2",
+        "DOM-02-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "保护所有原始结果、基线标识和统计不确定性",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-02-1",
+    "DOM-02-2",
+    "DOM-02-3"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "skillId": "latex-template",
+  "workflowIds": [
+    "new-document",
+    "template-migration"
+  ],
+  "toolNames": [
+    "latex_project",
+    "latex_patch",
+    "latex_build",
+    "latex_check",
+    "latex_render"
+  ],
+  "resourceIds": [
+    "skill:latex-template",
+    "skill:latex-template:guide"
+  ],
+  "hostCapabilities": [
+    "source.read",
+    "template.resolve",
+    "source.propose",
+    "build.execute"
+  ],
+  "requiresHumanGateFor": [
+    "protected-content-change",
+    "template-migration",
+    "unverified-evidence",
+    "submission-release"
+  ]
+}

@@ -1,0 +1,51 @@
+% English cover letter (standard letter class, XeLaTeX): a job, fellowship or
+% program application, or a manuscript-submission letter to a journal editor.
+% Keep it to one page. State only real facts about yourself and your work.
+\documentclass[11pt]{letter}
+
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage[hidelinks]{hyperref}
+
+% Sender block, printed at the top right.
+\address{Your Name \\
+  Street Address \\
+  City, Postal Code, Country \\
+  \href{mailto:your.name@example.org}{your.name@example.org}}
+\signature{Your Name}
+% Write the sending date; \today would print the date this version was first
+% built (the build clock is pinned per snapshot for reproducibility).
+\date{Month DD, YYYY}
+
+\begin{document}
+
+% Recipient block: name/role, organization, postal address.
+\begin{letter}{Hiring Committee \\
+  Department or Organization \\
+  Street Address \\
+  City, Postal Code, Country}
+
+\opening{Dear Members of the Hiring Committee,}
+
+% Paragraph 1: the position (or the manuscript title and target journal) and
+% a one-sentence summary of why you are a strong fit.
+I am writing to apply for the position of Position Title at Organization.
+
+% Paragraph 2: two or three concrete, verifiable achievements that match the
+% role's requirements (for a journal: the contribution and why it fits the
+% journal's scope).
+State the most relevant experience or contribution here.
+
+% Paragraph 3: why this organization or journal specifically, and what you
+% would bring to it.
+Explain your motivation and fit here.
+
+% Closing paragraph: availability, enclosed documents, thanks.
+Thank you for your time and consideration. I look forward to hearing from you.
+
+\closing{Sincerely,}
+
+\encl{Curriculum vitae}
+
+\end{letter}
+
+\end{document}

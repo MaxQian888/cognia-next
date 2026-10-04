@@ -1,0 +1,30 @@
+{
+  "name": "@latexwb/adapter-pi",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/workbench.ts"
+    ]
+  },
+  "dependencies": {
+    "@latexwb/contracts": "0.0.0",
+    "@latexwb/core": "0.0.0",
+    "@latexwb/runtime": "0.0.0",
+    "@latexwb/storage": "0.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
+    "typebox": "1.3.7"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "skillId": "latex-revise",
+  "workflowIds": [
+    "revise",
+    "template-migration"
+  ],
+  "toolNames": [
+    "latex_project",
+    "latex_patch",
+    "latex_build",
+    "latex_check",
+    "latex_render"
+  ],
+  "resourceIds": [
+    "skill:latex-revise",
+    "skill:latex-revise:guide"
+  ],
+  "hostCapabilities": [
+    "source.read",
+    "source.propose",
+    "build.execute",
+    "artifact.read"
+  ],
+  "requiresHumanGateFor": [
+    "protected-content-change",
+    "template-migration",
+    "unverified-evidence",
+    "submission-release"
+  ]
+}

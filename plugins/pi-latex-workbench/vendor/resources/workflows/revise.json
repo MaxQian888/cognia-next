@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "id": "revise",
+  "version": 1,
+  "initial": "inspect",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 1,
+  "maxSameCauseAttempts": 2,
+  "nodes": [
+    {
+      "id": "inspect",
+      "type": "operation",
+      "operationId": "project.inspect",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "baseline",
+      "onFailure": "blocked",
+      "description": "明确修订范围和保护内容"
+    },
+    {
+      "id": "baseline",
+      "type": "operation",
+      "operationId": "baseline.capture",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "propose",
+      "onFailure": "blocked",
+      "description": "记录当前源和可用PDF"
+    },
+    {
+      "id": "propose",
+      "type": "agent",
+      "operationId": "agent.propose-revision",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "局部文本修订，生成语义变化说明"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.patch-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "apply",
+      "onFailure": "blocked",
+      "description": "对公式/数据/引用/未知宏修改单独审批"
+    },
+    {
+      "id": "apply",
+      "type": "operation",
+      "operationId": "patch.apply-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "CAS应用"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.run-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "compare",
+      "onFailure": "blocked",
+      "description": "生成新产物"
+    },
+    {
+      "id": "compare",
+      "type": "operation",
+      "operationId": "quality.compare-baseline",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "校验保护内容及受影响版面；未审项明示"
+    }
+  ],
+  "requiredSkills": [
+    "latex-revise"
+  ]
+}

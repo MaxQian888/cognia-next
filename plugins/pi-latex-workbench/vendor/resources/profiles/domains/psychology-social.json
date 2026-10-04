@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "psychology-social",
+  "status": "design-unverified",
+  "title": "心理与社会研究",
+  "packageHints": [
+    "booktabs",
+    "apa7",
+    "longtable"
+  ],
+  "referenceResourceId": "domain:psychology-social",
+  "rules": [
+    {
+      "id": "psychology-social:constructs",
+      "title": "构念与量表",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "说明量表版本、译本、评分和构念；未经验证不能声明测量等价。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-09-1",
+        "DOM-09-2",
+        "DOM-09-3"
+      ]
+    },
+    {
+      "id": "psychology-social:effects",
+      "title": "统计报告",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "样本、效应量、区间和显著性与输入一致。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-09-1",
+        "DOM-09-2",
+        "DOM-09-3"
+      ]
+    },
+    {
+      "id": "psychology-social:hypotheses",
+      "title": "假设与分析区分",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "区分预设和探索性分析，不能在润色时改变研究事先承诺。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-09-1",
+        "DOM-09-2",
+        "DOM-09-3"
+      ]
+    },
+    {
+      "id": "psychology-social:format",
+      "title": "目标格式",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "是否使用APA等格式由目标模板决定，不按学科名称硬编码。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-09-1",
+        "DOM-09-2",
+        "DOM-09-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "保护量表题项、预注册描述和统计结果",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-09-1",
+    "DOM-09-2",
+    "DOM-09-3"
+  ]
+}

@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 1,
+  "notice": "Resource allowlist proposal with real hashes of this handoff. Host approval still required before executable installation.",
+  "resources": [
+    {
+      "id": "skill:latex-bibliography",
+      "path": "skills/latex-bibliography/SKILL.md",
+      "sha256": "57d679694eb2ddb87a1982550325e17df0f1bf958238a52688544d4c944dfb49",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-bibliography:guide",
+      "path": "skills/latex-bibliography/references/guide.md",
+      "sha256": "261e400c1a51ec2077a41af92959e74c7f5882ef9070c4db423a5d23264c45f4",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-build-debug",
+      "path": "skills/latex-build-debug/SKILL.md",
+      "sha256": "e48c0ea077e9d9ae75ca891d6b3be078c90279ea605051e19570f2bd90cf253c",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-build-debug:guide",
+      "path": "skills/latex-build-debug/references/guide.md",
+      "sha256": "6d28265ffa5dc719610a16d37c40cbaf71e04e6959ea5f373d0f9e71549ba14c",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-figures",
+      "path": "skills/latex-figures/SKILL.md",
+      "sha256": "4f0298cc75b8ea6c19ab4a9e167931e4c68b6aeb2b48264d3ea5e22f3eccd4f0",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-figures:guide",
+      "path": "skills/latex-figures/references/guide.md",
+      "sha256": "e96f1a878cda555ef18f6edb0de55aca17bbaaf9e31985e629f6561b26633a46",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-project",
+      "path": "skills/latex-project/SKILL.md",
+      "sha256": "5f398167562604ce08f7cee2f906a6ddca7c514f99fa4982b5fd8d470814bece",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-project:guide",
+      "path": "skills/latex-project/references/guide.md",
+      "sha256": "40ba2cf33880c7e59bb1fb3d8724e11bf7fd718cb2a665c4828d206abd0b86d7",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-release",
+      "path": "skills/latex-release/SKILL.md",
+      "sha256": "dafbd4c2d4ab18d3ac3df25b1027886ee0b9645a0eeecb2d5c4ce0a25069edb3",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-release:guide",
+      "path": "skills/latex-release/references/guide.md",
+      "sha256": "2200d93e07e06336ad8eeedc2242b5cf324cb4397ba6d32761c9791ede059105",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-revise",
+      "path": "skills/latex-revise/SKILL.md",
+      "sha256": "f920300ae2ea2aa0c7d44e0da889d14d2d764b87a65a95efab212034bc6b1691",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-revise:guide",
+      "path": "skills/latex-revise/references/guide.md",
+      "sha256": "34056c9855a8a9502532c113454ff5523758e36d3cfa3793af21a9d340daed10",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-tables",
+      "path": "skills/latex-tables/SKILL.md",
+      "sha256": "156e29c42b5d6f43528b26ef35db83ac3786d01bd8af1176f07e83b3cc1b34a9",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-tables:guide",
+      "path": "skills/latex-tables/references/guide.md",
+      "sha256": "e456791587f55139d81ceb703e7e26d68f9c96da581387805e18c50be7cae657",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-template",
+      "path": "skills/latex-template/SKILL.md",
+      "sha256": "b7d0fb86ce4ef7481c388d6c8c10957b12da483ed87820f66f0d9ecc77e072d2",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "skill:latex-template:guide",
+      "path": "skills/latex-template/references/guide.md",
+      "sha256": "4bcdaee8c90329ab42e7e94f895cadd198a3556bf623a605bd6d926b462a252b",
+      "trust": "package-instruction"
+    },
+    {
+      "id": "domain:biology-biomed",
+      "path": "profiles/domains/biology-biomed.md",
+      "sha256": "79c4dd4c213f623992128a53e4bb820c7abb0159fabb5a076860ed30045bfdf9",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:chemistry-materials",
+      "path": "profiles/domains/chemistry-materials.md",
+      "sha256": "37e1081478937db2488070d5eb2ccac5ad0bfa5a85820a49291d9f7bcc984b15",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:cs-ml",
+      "path": "profiles/domains/cs-ml.md",
+      "sha256": "79d00a97e47386d3aecb087f42282f8100f4e6052038bfcb2ac3d3b7dcbdfd18",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:cs-systems",
+      "path": "profiles/domains/cs-systems.md",
+      "sha256": "f53ddfca285f0bb291697cbd3152fb1bf81ed3974ad007b93b0f3f987166c35e",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:electrical-control",
+      "path": "profiles/domains/electrical-control.md",
+      "sha256": "1eceaaf3e6603a34bbdf99d017d0002f10293a9de6d30851b3c941522c98991f",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:humanities-linguistics",
+      "path": "profiles/domains/humanities-linguistics.md",
+      "sha256": "82c9457ca4e3bc5484899455f8b770b8065d5ba23c0a1af96f6838361bee7a89",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:mathematics",
+      "path": "profiles/domains/mathematics.md",
+      "sha256": "0d51699c6316dc4b609ce7de3341712922456f466a0964ca3da52a4a958f76cd",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:physics-astronomy",
+      "path": "profiles/domains/physics-astronomy.md",
+      "sha256": "29e4181ba4c8e1f5721aad059fb9c5239068f0cbd2139541e56685569904a1a9",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:psychology-social",
+      "path": "profiles/domains/psychology-social.md",
+      "sha256": "e29163401e6296970de86f631bd48e45271e312596d427749efe21ed9cd09dff",
+      "trust": "design-reference"
+    },
+    {
+      "id": "domain:statistics-economics",
+      "path": "profiles/domains/statistics-economics.md",
+      "sha256": "bbdb66ce0c4e267a929ef265920f5449ed482c2d06af20dd347467ad74517557",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:article",
+      "path": "profiles/outputs/article.json",
+      "sha256": "ed57c66dd19172f042e5322305c373570e7a0d9ad92f8a11b21dcd91ba940fe6",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:beamer",
+      "path": "profiles/outputs/beamer.json",
+      "sha256": "03a50861fc6bcc08c80521749f29c3964248a215f08b7b21999d260f37b87e5d",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:book-report",
+      "path": "profiles/outputs/book-report.json",
+      "sha256": "f5e5b9652be33170dc216c9b638ebabfd15213918b95e6c8a6062a9f48e0a3ba",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:cv-letter",
+      "path": "profiles/outputs/cv-letter.json",
+      "sha256": "5e00d1ecb418259c48422c86caff36287740405be9556939c3716ecc6e15bb5c",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:exam-student",
+      "path": "profiles/outputs/exam-student.json",
+      "sha256": "6ec30cad77de7a640e77d7a90b32b421eb1309b234859d440db3e150f516528d",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:exam-teacher",
+      "path": "profiles/outputs/exam-teacher.json",
+      "sha256": "32471d8b22d8904291972f453e99b4637d3ca2ac19c6327c279a14a2789c5813",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:poster",
+      "path": "profiles/outputs/poster.json",
+      "sha256": "24ef8f1478ee124af4c31c2a1dc1fdcfb6023e353694a647b84e387ac43d0d4b",
+      "trust": "design-reference"
+    },
+    {
+      "id": "output:zh-thesis",
+      "path": "profiles/outputs/zh-thesis.json",
+      "sha256": "1514fe26e8d58e622a18d7472be3d5d8753480190fba48a0ffd2a84f745f5525",
+      "trust": "design-reference"
+    },
+    {
+      "id": "venue:internal-generic-draft",
+      "path": "profiles/venues/internal-generic-draft.json",
+      "sha256": "5c79a7cf127043408b714f2e0c1bb77107fe471f29886a2ce31a47213d0e1a55",
+      "trust": "design-reference"
+    },
+    {
+      "id": "prompt:base-system",
+      "path": "prompts/base-system.md",
+      "sha256": "654cdff70cfa65c5320c8d2c4cb1b8adb50365638f88c8d62c2ebffe2719f09c",
+      "trust": "host-owned"
+    },
+    {
+      "id": "prompt:latex-write",
+      "path": "prompts/latex-write.md",
+      "sha256": "84062a8ca7779b4098e7bfd1a3716e2ba3fbb017562793d15a0b20a61be6b6fd",
+      "trust": "host-owned"
+    },
+    {
+      "id": "prompt:latex-revise",
+      "path": "prompts/latex-revise.md",
+      "sha256": "2c8f1310f47def5d6ea20ed1e82ce321a1487a5fe01ef913eda8cfa6eb94cc59",
+      "trust": "host-owned"
+    },
+    {
+      "id": "prompt:latex-tune",
+      "path": "prompts/latex-tune.md",
+      "sha256": "b2ebbaae86c92c37ccfcac4b7b4d4d3fb8162107d3af88e10efa83c4ce25428f",
+      "trust": "host-owned"
+    },
+    {
+      "id": "prompt:latex-check",
+      "path": "prompts/latex-check.md",
+      "sha256": "3f7fbb8e39c19e65f7237c8032ae54916fdb55b8ff8c0f560b6e1152d0fd8e5a",
+      "trust": "host-owned"
+    }
+  ]
+}

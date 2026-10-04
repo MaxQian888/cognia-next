@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "id": "bibliography",
+  "version": 1,
+  "initial": "audit",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 1,
+  "maxSameCauseAttempts": 2,
+  "nodes": [
+    {
+      "id": "audit",
+      "type": "operation",
+      "operationId": "bibliography.audit",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "resolve",
+      "onFailure": "blocked",
+      "description": "离线key/语法/引用关系"
+    },
+    {
+      "id": "resolve",
+      "type": "operation",
+      "operationId": "bibliography.resolve-approved",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "proposal",
+      "onFailure": "blocked",
+      "description": "只使用批准provider，区分unavailable"
+    },
+    {
+      "id": "proposal",
+      "type": "operation",
+      "operationId": "bibliography.propose-import",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "已有key保留；有改变才产生proposal"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.patch-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "apply",
+      "onFailure": "blocked",
+      "description": "来源冲突/修改既有条目须批准"
+    },
+    {
+      "id": "apply",
+      "type": "operation",
+      "operationId": "patch.apply-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "无变化使用verified no-change路径"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.run-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "report",
+      "onFailure": "blocked",
+      "description": "文献后端收敛"
+    },
+    {
+      "id": "report",
+      "type": "operation",
+      "operationId": "bibliography.report",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "三层核验状态和原文可用性"
+    }
+  ],
+  "requiredSkills": [
+    "latex-bibliography"
+  ]
+}

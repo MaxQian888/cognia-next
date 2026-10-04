@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "chemistry-materials",
+  "status": "design-unverified",
+  "title": "化学与材料",
+  "packageHints": [
+    "mhchem",
+    "chemfig",
+    "siunitx"
+  ],
+  "referenceResourceId": "domain:chemistry-materials",
+  "rules": [
+    {
+      "id": "chemistry-materials:formula",
+      "title": "化学符号与计量",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "核对元素大小写、电荷、上下标和反应计量；自动规则不代表实验真实性。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-06-1",
+        "DOM-06-2",
+        "DOM-06-3"
+      ]
+    },
+    {
+      "id": "chemistry-materials:structure",
+      "title": "结构保真",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "结构图需绑定原始结构数据；立体构型、手性不确定时标记待审。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-06-1",
+        "DOM-06-2",
+        "DOM-06-3"
+      ]
+    },
+    {
+      "id": "chemistry-materials:conditions",
+      "title": "条件与组成",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "保留溶剂、温度、压力、相态与材料组成；不得凭常见配方补结果。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-06-1",
+        "DOM-06-2",
+        "DOM-06-3"
+      ]
+    },
+    {
+      "id": "chemistry-materials:spectra",
+      "title": "谱图与数据",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "谱图只能由授权原始数据或原图生成，记录单位和处理。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-06-1",
+        "DOM-06-2",
+        "DOM-06-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "不得通过换结构、产率或谱峰修复版面",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-06-1",
+    "DOM-06-2",
+    "DOM-06-3"
+  ]
+}

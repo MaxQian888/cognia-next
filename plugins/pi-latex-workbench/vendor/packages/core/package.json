@@ -1,0 +1,13 @@
+{
+  "name": "@latexwb/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@latexwb/contracts": "0.0.0",
+    "@latexwb/storage": "0.0.0"
+  }
+}

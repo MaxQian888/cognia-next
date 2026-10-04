@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "article",
+  "status": "design-unverified",
+  "title": "论文/文章",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "references-resolved",
+    "assets-present",
+    "protected-content",
+    "visual-coverage"
+  ],
+  "humanReview": [
+    "论证与证据支持范围",
+    "真实venue要求"
+  ],
+  "notes": [
+    "不默认强制某类论文结构；按学科和venue决定章节。"
+  ]
+}

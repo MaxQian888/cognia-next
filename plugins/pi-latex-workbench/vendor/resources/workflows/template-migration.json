@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "id": "template-migration",
+  "version": 1,
+  "initial": "inspect",
+  "terminals": [
+    "completed",
+    "blocked",
+    "failed"
+  ],
+  "maxPatchApplications": 1,
+  "maxSameCauseAttempts": 2,
+  "nodes": [
+    {
+      "id": "inspect",
+      "type": "operation",
+      "operationId": "project.inspect",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "verify",
+      "onFailure": "blocked",
+      "description": "记录当前模板/引擎/后端及完整基线"
+    },
+    {
+      "id": "verify",
+      "type": "operation",
+      "operationId": "venue.verify-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "plan",
+      "onFailure": "blocked",
+      "description": "官方年份、阶段、规则、许可；模板来源未核验停止"
+    },
+    {
+      "id": "plan",
+      "type": "agent",
+      "operationId": "agent.propose-migration",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "approve",
+      "onFailure": "blocked",
+      "description": "明确宏/结构/引用后端映射，不全文件重写"
+    },
+    {
+      "id": "approve",
+      "type": "gate",
+      "operationId": "gate.patch-approval",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "apply",
+      "onFailure": "blocked",
+      "description": "用户批准迁移范围和模板变更"
+    },
+    {
+      "id": "apply",
+      "type": "operation",
+      "operationId": "patch.apply-current",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "build",
+      "onFailure": "blocked",
+      "description": "事务性新快照"
+    },
+    {
+      "id": "build",
+      "type": "operation",
+      "operationId": "build.clean-await",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "check",
+      "onFailure": "blocked",
+      "description": "实际干净构建"
+    },
+    {
+      "id": "check",
+      "type": "operation",
+      "operationId": "quality.compare-and-venue",
+      "inputBindings": {
+        "snapshot": "context.snapshotId",
+        "target": "context.targetId",
+        "artifact": "context.pdfArtifactId"
+      },
+      "onSuccess": "completed",
+      "onFailure": "blocked",
+      "description": "公式结果保真与目标规则，仍不自动投稿"
+    }
+  ],
+  "requiredSkills": [
+    "latex-template",
+    "latex-revise"
+  ]
+}

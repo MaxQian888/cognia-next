@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "skillId": "latex-build-debug",
+  "workflowIds": [
+    "repair"
+  ],
+  "toolNames": [
+    "latex_project",
+    "latex_build",
+    "latex_patch",
+    "latex_check",
+    "latex_render"
+  ],
+  "resourceIds": [
+    "skill:latex-build-debug",
+    "skill:latex-build-debug:guide"
+  ],
+  "hostCapabilities": [
+    "source.read",
+    "source.propose",
+    "build.execute",
+    "artifact.read"
+  ],
+  "requiresHumanGateFor": [
+    "protected-content-change",
+    "template-migration",
+    "unverified-evidence",
+    "submission-release"
+  ]
+}

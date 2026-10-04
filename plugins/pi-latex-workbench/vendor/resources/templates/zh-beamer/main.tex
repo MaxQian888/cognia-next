@@ -1,0 +1,84 @@
+% 中文演示文稿模板：ctexbeamer（beamer + ctex），16:9，XeLaTeX，字体集 fandol（离线可用）。
+% 不含参考文献：引用来源写在对应页的"来源："一行或脚注中。
+% 结构：标题页 → 目录 → 研究背景 → 方法（公式）→ 结果（三线表）→ 总结 → 致谢页。
+% 建议每页只讲一个要点；页数不等于演讲时长。
+\documentclass[UTF8,fontset=fandol,aspectratio=169]{ctexbeamer}
+
+\usetheme{Boadilla}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+
+\title{报告题目}
+\subtitle{副标题（可选）}
+\author{报告人}
+\institute{单位名称}
+% 写明会议与日期；\today 会显示该版本内容首次构建的日期（构建时钟按快照固定，保证可复现）。
+\date{会议或讲座名称，年月}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{目录}
+  \tableofcontents
+\end{frame}
+
+\section{研究背景}
+\begin{frame}{研究背景}
+  % 要解决的问题、为什么值得关注、听众需要记住的一个核心观点。
+  \begin{itemize}
+    \item 本报告要解决的问题
+    \item 这一问题的重要性
+    \item 希望听众记住的核心观点
+  \end{itemize}
+\end{frame}
+
+\section{方法}
+\begin{frame}{核心思路}
+  % 替换为核心公式，并在本页解释每个符号。
+  \begin{equation}
+    \hat{\theta} = \operatorname*{arg\,min}_{\theta}
+      \sum_{i=1}^{n} \ell\bigl(f_{\theta}(x_i),\, y_i\bigr)
+  \end{equation}
+  \begin{itemize}
+    \item $f_{\theta}$：参数为 $\theta$ 的模型
+    \item $\ell$：衡量预测与目标差异的损失函数
+  \end{itemize}
+\end{frame}
+
+\section{实验结果}
+\begin{frame}{实验结果}
+  % 只报告真实测得的数据，并注明来源。
+  \begin{table}
+    \centering
+    \begin{tabular}{lcc}
+      \toprule
+      方法     & 指标一 & 指标二 \\
+      \midrule
+      基线方法 & --     & --     \\
+      本文方法 & --     & --     \\
+      \bottomrule
+    \end{tabular}
+    \caption{表头为示例，数据待填}
+  \end{table}
+\end{frame}
+
+\section{总结}
+\begin{frame}{总结}
+  \begin{enumerate}
+    \item 第一条结论
+    \item 第二条结论
+    \item 局限与下一步工作
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}
+  \centering
+  \Large 谢谢！欢迎提问。
+\end{frame}
+
+\end{document}

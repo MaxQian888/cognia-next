@@ -1,0 +1,27 @@
+{
+  "name": "pi-latex-workbench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent document workbench for LaTeX projects (implementation repo; design inputs under design/).",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "pi": {
+    "extensions": ["./packages/adapter-pi/extensions/workbench.ts"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test 'packages/*/test/*.test.ts'",
+    "test:contracts": "node --test 'packages/contracts/test/*.test.ts'",
+    "contracts:types": "python3 scripts/generate-types.py",
+    "doctor": "node packages/cli/src/bin.ts doctor"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "typescript": "5.9.3"
+  }
+}

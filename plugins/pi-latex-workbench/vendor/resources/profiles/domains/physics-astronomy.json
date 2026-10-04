@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "physics-astronomy",
+  "status": "design-unverified",
+  "title": "物理与天文学",
+  "packageHints": [
+    "siunitx",
+    "amsmath",
+    "revtex",
+    "aastex"
+  ],
+  "referenceResourceId": "domain:physics-astronomy",
+  "rules": [
+    {
+      "id": "physics-astronomy:units",
+      "title": "单位与量纲",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "所有量使用明确单位及单位系统；单位一致不自动证明量纲正确。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-05-1",
+        "DOM-05-2",
+        "DOM-05-3"
+      ]
+    },
+    {
+      "id": "physics-astronomy:uncertainty",
+      "title": "有效数字与不确定度",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "按指定误差传播和舍入规则显示结果，不增加输入不支持的精度。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-05-1",
+        "DOM-05-2",
+        "DOM-05-3"
+      ]
+    },
+    {
+      "id": "physics-astronomy:reference-frame",
+      "title": "坐标和参考系",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "定义坐标、历元、参考系和常数来源，避免静默转换。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-05-1",
+        "DOM-05-2",
+        "DOM-05-3"
+      ]
+    },
+    {
+      "id": "physics-astronomy:template",
+      "title": "专业模板",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "期刊/学会样式必须按真实版本和作者指南核验，宏包hint不表示官方适配已完成。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-05-1",
+        "DOM-05-2",
+        "DOM-05-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "保护常数来源、参考系和原始测量值",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-05-1",
+    "DOM-05-2",
+    "DOM-05-3"
+  ]
+}

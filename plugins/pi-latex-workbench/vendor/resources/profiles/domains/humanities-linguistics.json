@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "humanities-linguistics",
+  "status": "design-unverified",
+  "title": "人文与语言学",
+  "packageHints": [
+    "forest",
+    "expex",
+    "polyglossia"
+  ],
+  "referenceResourceId": "domain:humanities-linguistics",
+  "rules": [
+    {
+      "id": "humanities-linguistics:quotation",
+      "title": "引文与版本",
+      "mode": "deterministic",
+      "severity": "error",
+      "requirement": "直接引文、版本、页码和脚注定位须保留；编辑差异明确展示。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-10-1",
+        "DOM-10-2",
+        "DOM-10-3"
+      ]
+    },
+    {
+      "id": "humanities-linguistics:transcription",
+      "title": "转写保真",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "保护IPA/音调/附加符号及转写体系，不按普通拼写纠错。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-10-1",
+        "DOM-10-2",
+        "DOM-10-3"
+      ]
+    },
+    {
+      "id": "humanities-linguistics:examples",
+      "title": "例句与词间对译",
+      "mode": "assisted",
+      "severity": "warning",
+      "requirement": "例句、词间对译和译文对应，缺资料时不编造真实语料。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-10-1",
+        "DOM-10-2",
+        "DOM-10-3"
+      ]
+    },
+    {
+      "id": "humanities-linguistics:multilingual",
+      "title": "多语与方向",
+      "mode": "manual",
+      "severity": "warning",
+      "requirement": "检查字体覆盖、双向文本、标点和分词，不能仅靠字符抽取判定排版。",
+      "checkImplementation": null,
+      "sourceIds": [],
+      "testIds": [
+        "DOM-10-1",
+        "DOM-10-2",
+        "DOM-10-3"
+      ]
+    }
+  ],
+  "forbiddenActions": [
+    "保护原文、转写符号和来源版本",
+    "不能将排版、自动检查或模型评论表述为学科真实性证明"
+  ],
+  "testIds": [
+    "DOM-10-1",
+    "DOM-10-2",
+    "DOM-10-3"
+  ]
+}

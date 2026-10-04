@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "cv-letter",
+  "status": "design-unverified",
+  "title": "简历/信件",
+  "requiredSections": [],
+  "requiredCheckIds": [
+    "build-current",
+    "text-extraction",
+    "visual-coverage",
+    "protected-content"
+  ],
+  "humanReview": [
+    "事实与经历真实性",
+    "可读性和篇幅"
+  ],
+  "notes": [
+    "不继承学术论文citation/ethics章节；不杜撰经历。"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "skillId": "latex-bibliography",
+  "workflowIds": [
+    "bibliography"
+  ],
+  "toolNames": [
+    "latex_project",
+    "latex_bib",
+    "latex_patch",
+    "latex_build"
+  ],
+  "resourceIds": [
+    "skill:latex-bibliography",
+    "skill:latex-bibliography:guide"
+  ],
+  "hostCapabilities": [
+    "source.read",
+    "metadata.lookup",
+    "source.propose",
+    "build.execute"
+  ],
+  "requiresHumanGateFor": [
+    "protected-content-change",
+    "template-migration",
+    "unverified-evidence",
+    "submission-release"
+  ]
+}

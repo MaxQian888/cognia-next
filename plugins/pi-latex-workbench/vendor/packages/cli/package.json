@@ -1,0 +1,18 @@
+{
+  "name": "@latexwb/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "latexwb": "./src/bin.ts"
+  },
+  "dependencies": {
+    "@latexwb/contracts": "0.0.0",
+    "@latexwb/runtime": "0.0.0",
+    "@latexwb/core": "0.0.0",
+    "@latexwb/storage": "0.0.0"
+  }
+}

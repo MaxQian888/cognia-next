@@ -1,0 +1,86 @@
+% English slide deck: beamer, 16:9, XeLaTeX. No bibliography — cite sources
+% in a short "Source:" line or footnote on the frame that uses them.
+% Structure: title -> outline -> motivation -> method (equation) -> results
+% (booktabs table) -> take-home messages -> closing frame.
+% Rule of thumb: one message per frame; frame count is not talk length.
+\documentclass[aspectratio=169]{beamer}
+
+\usetheme{Boadilla}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+
+\title{Talk Title}
+\subtitle{Optional Subtitle}
+\author{Speaker Name}
+\institute{Affiliation}
+% Name the event and date; \today would print the date this version was
+% first built (the build clock is pinned per snapshot for reproducibility).
+\date{Event Name, Month Year}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Outline}
+  \tableofcontents
+\end{frame}
+
+\section{Motivation}
+\begin{frame}{Motivation}
+  % The problem, why this audience should care, and the one idea to remember.
+  \begin{itemize}
+    \item The problem this talk addresses
+    \item Why it matters to this audience
+    \item The one idea to remember
+  \end{itemize}
+\end{frame}
+
+\section{Method}
+\begin{frame}{Key Idea}
+  % Replace with the central equation; define every symbol on the slide.
+  \begin{equation}
+    \hat{\theta} = \operatorname*{arg\,min}_{\theta}
+      \sum_{i=1}^{n} \ell\bigl(f_{\theta}(x_i),\, y_i\bigr)
+  \end{equation}
+  \begin{itemize}
+    \item $f_{\theta}$: model with parameters $\theta$
+    \item $\ell$: loss comparing prediction and target
+  \end{itemize}
+\end{frame}
+
+\section{Results}
+\begin{frame}{Results}
+  % Report measured numbers only; say where they come from.
+  \begin{table}
+    \centering
+    \begin{tabular}{lcc}
+      \toprule
+      Method   & Metric A & Metric B \\
+      \midrule
+      Baseline & --       & --       \\
+      Proposed & --       & --       \\
+      \bottomrule
+    \end{tabular}
+    \caption{Placeholder header; fill in measured results.}
+  \end{table}
+\end{frame}
+
+\section{Conclusion}
+\begin{frame}{Take-home Messages}
+  \begin{enumerate}
+    \item First message
+    \item Second message
+    \item Limitations and next steps
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}
+  \centering
+  \Large Thank you --- questions?
+\end{frame}
+
+\end{document}

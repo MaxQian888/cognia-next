@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "id": "icml-2025",
+  "status": "verified",
+  "venue": "42nd International Conference on Machine Learning (ICML 2025)",
+  "year": 2025,
+  "track": "main conference",
+  "stage": "submission",
+  "checkedAt": "2026-09-21T18:58:07Z",
+  "validUntil": "2025-06-05T00:00:00Z",
+  "sources": [
+    {
+      "id": "icml-2025-author-instructions",
+      "url": "https://icml.cc/Conferences/2025/AuthorInstructions",
+      "retrievedAt": "2026-09-21T18:58:07Z",
+      "contentHash": "bd76972c738d91136817fb0196303a8f2959bd071633dcdc746c845ee0d0b20f",
+      "locator": "ICML 2025 Author Instructions → Paper Submissions / Double-Blind Reviewing"
+    }
+  ],
+  "template": {
+    "origin": "official",
+    "templateId": "icml2025-latex-style",
+    "version": "2025",
+    "sha256": null,
+    "licenseStatus": "unknown"
+  },
+  "requirements": [
+    {
+      "id": "anonymized",
+      "title": "Double-blind anonymization",
+      "severity": "error",
+      "mode": "automatic",
+      "checkImplementation": "anonymization-scan",
+      "scope": "entire-pdf",
+      "requirement": "All submissions must be anonymized; papers that explicitly or implicitly reveal the authors' identities will be rejected. No acknowledgements, grant numbers, or links to public code repositories identifying the authors.",
+      "sourceId": "icml-2025-author-instructions",
+      "sourceLocator": "Paper Submissions / Double-Blind Reviewing",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": [
+        "RELEASE-05"
+      ]
+    },
+    {
+      "id": "main-body-8",
+      "title": "Eight-page main body",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "main-text",
+      "requirement": "Submitted papers are composed of a main body up to eight pages long, followed by any number of pages for references and appendices, all in a single PDF; over-limit submissions are automatically rejected.",
+      "sourceId": "icml-2025-author-instructions",
+      "sourceLocator": "Paper Submissions",
+      "parameters": {
+        "maxPages": 8,
+        "includeReferences": false,
+        "includeAppendix": false
+      },
+      "testIds": []
+    },
+    {
+      "id": "latex-style",
+      "title": "ICML 2025 LaTeX style",
+      "severity": "error",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "The required format is specified in the ICML 2025 LaTeX style files and the example paper; there is no support for any typesetting software other than LaTeX.",
+      "sourceId": "icml-2025-author-instructions",
+      "sourceLocator": "Paper Submissions",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    },
+    {
+      "id": "file-size",
+      "title": "50MB submission size cap",
+      "severity": "warning",
+      "mode": "manual",
+      "checkImplementation": null,
+      "scope": "source-package",
+      "requirement": "The submission PDF has a maximum size of 50MB (camera-ready 20MB).",
+      "sourceId": "icml-2025-author-instructions",
+      "sourceLocator": "Paper Submissions",
+      "parameters": {
+        "maxPages": null,
+        "includeReferences": null,
+        "includeAppendix": null
+      },
+      "testIds": []
+    }
+  ]
+}
