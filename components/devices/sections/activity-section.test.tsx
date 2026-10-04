@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 
 import type { DeviceRow } from "@/lib/devices/types"
 
-import { ActivitySection, summarizeProvides } from "./activity-section"
+import { DispatchSection, PlacementSection, summarizeProvides } from "./activity-section"
 
 const jobs: unknown[] = []
 const listForTarget = jest.fn()
@@ -68,24 +68,24 @@ describe("summarizeProvides", () => {
   })
 })
 
-describe("ActivitySection — dispatch queue", () => {
+describe("DispatchSection", () => {
   /**
    * `HostDispatchJobRow.targetRef` is in the target's own vocabulary — a raw
    * `deviceId`, not the console's namespaced ref. Querying with the namespaced
    * one returns nothing, which reads as "no work has ever been sent here".
    */
   it("queries with the raw deviceId, not the namespaced console ref", () => {
-    render(<ActivitySection row={row()} />)
+    render(<DispatchSection row={row()} />)
     expect(listForTarget).toHaveBeenCalledWith("d1")
   })
 
   it("queries a worker by its hostRef", () => {
-    render(<ActivitySection row={row({ ref: "worker-1", kind: "worker", deviceId: "w1" })} />)
+    render(<DispatchSection row={row({ ref: "worker-1", kind: "worker", deviceId: "w1" })} />)
     expect(listForTarget).toHaveBeenCalledWith("worker-1")
   })
 
   it("says the local machine is not addressed by the queue at all", () => {
-    render(<ActivitySection row={row({ ref: "local", kind: "local", deviceId: undefined })} />)
+    render(<DispatchSection row={row({ ref: "local", kind: "local", deviceId: undefined })} />)
     expect(
       screen.getByText("This device is not addressed by the dispatch queue.")
     ).toBeInTheDocument()
@@ -93,7 +93,7 @@ describe("ActivitySection — dispatch queue", () => {
   })
 
   it("shows an empty queue as empty rather than as an error", () => {
-    render(<ActivitySection row={row()} />)
+    render(<DispatchSection row={row()} />)
     expect(screen.getByText("Nothing dispatched")).toBeInTheDocument()
   })
 
@@ -109,19 +109,25 @@ describe("ActivitySection — dispatch queue", () => {
       lastError: "device denied the prompt",
       createdAt: 1_700_000_000_000,
     })
-    render(<ActivitySection row={row()} />)
+    render(<DispatchSection row={row()} />)
     expect(screen.getByTestId("dispatch-job-j1")).toBeInTheDocument()
     expect(screen.getByText("Dead-lettered")).toBeInTheDocument()
     expect(screen.getByText("attempt 3 of 3")).toBeInTheDocument()
     expect(screen.getByText("device denied the prompt")).toBeInTheDocument()
     expect(screen.getByText("Workflow step on a device")).toBeInTheDocument()
   })
+
+  it("is its own card, so the plan can place it apart from placement", () => {
+    render(<DispatchSection row={row()} />)
+    expect(screen.getByTestId("device-section-dispatch")).toBeInTheDocument()
+    expect(screen.queryByTestId("device-section-placement")).not.toBeInTheDocument()
+  })
 })
 
-describe("ActivitySection — placement", () => {
+describe("PlacementSection", () => {
   it("lists what the device offers, per dimension", () => {
     render(
-      <ActivitySection
+      <PlacementSection
         row={row({
           placement: {
             provides: [
@@ -143,7 +149,7 @@ describe("ActivitySection — placement", () => {
    * the caller asked for, and that was previously invisible everywhere.
    */
   it("says plainly when a device can never be selected automatically", () => {
-    render(<ActivitySection row={row()} />)
+    render(<PlacementSection row={row()} />)
     expect(screen.getByText(/never be selected automatically/)).toBeInTheDocument()
   })
 })

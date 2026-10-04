@@ -1,19 +1,49 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { DeviceRow } from "@/lib/devices/types"
+import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
 
-import { HostControls } from "./host-controls"
+import { HostConnectionState, HostControls } from "./host-controls"
 
+let anyActive = false
+jest.mock("@/lib/devices/execution-host-guard", () => ({
+  anyRunActive: () => Promise.resolve(anyActive),
+}))
+
+// The real store with its actions stubbed, so the controls run through the
+// real `useExecutionHostSwitch` (and its in-flight guard) without installing a
+// transport.
+const initialStore = useRemoteHostStore.getState()
 const activateHost = jest.fn()
 const deactivate = jest.fn()
 const removeHost = jest.fn()
 const updateHostLabel = jest.fn()
+const storedHost = {
+  id: "h1",
+  label: "Build box",
+  credentialRef: "ref",
+  addedAt: 1,
+  connectionState: "ready",
+  config: { baseUrl: "https://build.example:27890", serverVersion: "1.0.0" },
+} as RemoteHost
 
-jest.mock("@/stores/remote-host/remote-host-store", () => ({
-  useRemoteHostStore: (selector: (state: unknown) => unknown) =>
-    selector({ activateHost, deactivate, removeHost, updateHostLabel }),
-}))
+function seedStore(activeHostId: string | null) {
+  useRemoteHostStore.setState(
+    {
+      ...initialStore,
+      hosts: [storedHost],
+      activeHostId,
+      activateHost,
+      deactivate,
+      removeHost,
+      updateHostLabel,
+    },
+    true
+  )
+}
+
+afterAll(() => useRemoteHostStore.setState(initialStore, true))
 
 function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
   return {
@@ -39,7 +69,11 @@ function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
   }
 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  anyActive = false
+  seedStore(null)
+})
 
 describe("HostControls", () => {
   it("renders nothing for a device that is not a remote host", () => {
@@ -62,49 +96,81 @@ describe("HostControls", () => {
     await userEvent.click(screen.getByTestId("host-connect"))
     expect(activateHost).toHaveBeenCalledWith("h1")
 
+    act(() => seedStore("h1"))
     rerender(<HostControls row={row({ runtime: { ...row().runtime, isRoutingTarget: true } })} />)
     await userEvent.click(screen.getByTestId("host-disconnect"))
     expect(deactivate).toHaveBeenCalled()
   })
 
-  it("renames inline and commits the trimmed label", async () => {
+  /**
+   * Connect repoints every execution call. Under a running turn that strands
+   * the turn, so the masthead asks first, the same as the status-bar switcher.
+   */
+  it("asks before connecting while a turn is in flight", async () => {
+    anyActive = true
     render(<HostControls row={row()} />)
-    await userEvent.click(screen.getByTestId("host-rename"))
-    const input = screen.getByTestId("host-rename-input")
-    await userEvent.clear(input)
-    await userEvent.type(input, "  CI box  ")
-    await userEvent.click(screen.getByTestId("host-rename-save"))
-    expect(updateHostLabel).toHaveBeenCalledWith("h1", "CI box")
+    await userEvent.click(screen.getByTestId("host-connect"))
+    expect(activateHost).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByTestId("execution-host-confirm"))
+    expect(activateHost).toHaveBeenCalledWith("h1")
+  })
+
+  it("asks before disconnecting while a turn is in flight", async () => {
+    anyActive = true
+    seedStore("h1")
+    render(<HostControls row={row({ runtime: { ...row().runtime, isRoutingTarget: true } })} />)
+    await userEvent.click(screen.getByTestId("host-disconnect"))
+    expect(deactivate).not.toHaveBeenCalled()
+    expect(await screen.findByTestId("execution-host-confirm")).toBeInTheDocument()
   })
 
   /**
-   * An empty label leaves a row that cannot be told apart from any other
-   * unnamed host, so it is simply not a rename.
+   * Rename is a menu item that hands the title over to the masthead, where
+   * the rename field lives (`device-hero.test.tsx` covers the field).
    */
-  it("refuses to save an empty label", async () => {
-    render(<HostControls row={row()} />)
-    await userEvent.click(screen.getByTestId("host-rename"))
-    await userEvent.clear(screen.getByTestId("host-rename-input"))
-    expect(screen.getByTestId("host-rename-save")).toBeDisabled()
+  it("hands renaming to the masthead from the overflow menu", async () => {
+    const user = userEvent.setup()
+    const onRename = jest.fn()
+    render(<HostControls row={row()} onRename={onRename} />)
+    await user.click(screen.getByTestId("host-more"))
+    await user.click(screen.getByTestId("host-rename"))
+    expect(onRename).toHaveBeenCalled()
+    expect(updateHostLabel).not.toHaveBeenCalled()
   })
 
-  it("abandons a rename without writing anything", async () => {
+  it("offers no rename where the masthead cannot take one", async () => {
+    const user = userEvent.setup()
     render(<HostControls row={row()} />)
-    await userEvent.click(screen.getByTestId("host-rename"))
-    await userEvent.type(screen.getByTestId("host-rename-input"), "x")
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
-    expect(updateHostLabel).not.toHaveBeenCalled()
-    expect(screen.getByTestId("host-rename")).toBeInTheDocument()
+    await user.click(screen.getByTestId("host-more"))
+    expect(screen.queryByTestId("host-rename")).not.toBeInTheDocument()
+    expect(screen.getByTestId("host-remove")).toBeInTheDocument()
   })
 
   it("confirms before forgetting a host and its stored credential", async () => {
+    const user = userEvent.setup()
     render(<HostControls row={row()} />)
-    await userEvent.click(screen.getByTestId("host-remove"))
+    await user.click(screen.getByTestId("host-more"))
+    await user.click(screen.getByTestId("host-remove"))
     expect(screen.getByText("Remove this host?")).toBeInTheDocument()
     expect(removeHost).not.toHaveBeenCalled()
 
-    await userEvent.click(screen.getByTestId("host-remove-confirm"))
+    await user.click(screen.getByTestId("host-remove-confirm"))
     expect(removeHost).toHaveBeenCalledWith("h1")
+  })
+
+  /**
+   * Removing the active host deactivates it first, so the in-flight warning
+   * rides in the same confirmation rather than being skipped.
+   */
+  it("warns about the running turn when removing the host being driven", async () => {
+    anyActive = true
+    seedStore("h1")
+    const user = userEvent.setup()
+    render(<HostControls row={row({ runtime: { ...row().runtime, isRoutingTarget: true } })} />)
+    await user.click(screen.getByTestId("host-more"))
+    await user.click(screen.getByTestId("host-remove"))
+    expect(await screen.findByTestId("execution-host-remove-active")).toBeInTheDocument()
+    expect(removeHost).not.toHaveBeenCalled()
   })
 })
 
@@ -115,19 +181,29 @@ describe("HostControls", () => {
  * looked exactly like one nobody had connected yet.
  */
 describe("connection health", () => {
-  it("names the state and the reason verbatim", () => {
+  /**
+   * The verbatim error is the dashboard's connection alert now
+   * (`device-detail.test.tsx`); the masthead line names the state only, so
+   * one sentence is not on screen twice.
+   */
+  it("names the state, and leaves the verbatim error to the dashboard", () => {
     render(
-      <HostControls
+      <HostConnectionState
         row={row({ connectionState: "degraded", connectionError: "capability probe timed out" })}
       />
     )
     expect(screen.getByTestId("host-connection-state")).toHaveAttribute("data-state", "degraded")
-    expect(screen.getByTestId("host-connection-error")).toHaveTextContent(
-      "capability probe timed out"
-    )
+    expect(screen.getByText("Degraded")).toBeInTheDocument()
+    expect(screen.queryByText("capability probe timed out")).not.toBeInTheDocument()
+  })
+
+  it("says nothing for a kind with no handshake", () => {
+    const { container } = render(<HostConnectionState row={row({ kind: "worker" })} />)
+    expect(container).toBeEmptyDOMElement()
   })
 
   it("offers a reconnect on a connected host, because connected can still be degraded", async () => {
+    seedStore("h1")
     render(
       <HostControls
         row={row({
@@ -158,7 +234,9 @@ describe("connection health", () => {
 
   it("shows the host's version when it is the thing to upgrade", () => {
     render(
-      <HostControls row={row({ connectionState: "versionMismatch", serverVersion: "0.9.1" })} />
+      <HostConnectionState
+        row={row({ connectionState: "versionMismatch", serverVersion: "0.9.1" })}
+      />
     )
     expect(screen.getByTestId("host-version-mismatch")).toHaveTextContent("0.9.1")
   })
@@ -176,7 +254,6 @@ it("routes Companion management to pairing without offering store-only actions",
     />
   )
   expect(screen.getByRole("link", { name: "Manage paired Host" })).toHaveAttribute("href", "/pair")
-  expect(screen.getByText("connection lost")).toBeInTheDocument()
   expect(screen.queryByTestId("host-connect")).not.toBeInTheDocument()
-  expect(screen.queryByTestId("host-rename")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("host-more")).not.toBeInTheDocument()
 })

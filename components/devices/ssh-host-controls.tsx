@@ -38,7 +38,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useSshProbe, type SshProbeState } from "@/hooks/devices/use-ssh-probe"
-import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
+import { useSshConnect } from "@/hooks/terminal/use-ssh-connect"
 import type { DeviceRow } from "@/lib/devices/types"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
 import {
@@ -47,18 +47,14 @@ import {
   resolveJumpChain,
 } from "@/lib/terminal/ssh-forwarding"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
-import { SSH_PROFILE_NOT_ON_HOST } from "@/lib/terminal/ssh-connect"
 import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
+import { sshHostSettingsHref } from "@/lib/terminal/terminal-settings-link"
 import { terminalHostReachable } from "@/lib/terminal/host-settings"
 import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
-import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 import { DeviceFactList, DeviceFactRow, shortenFingerprint } from "./device-visuals"
-
-/** Default geometry for a session opened from a console row rather than a pane. */
-const DEFAULT_ROWS = 24
-const DEFAULT_COLS = 80
+import { sshProfileIdFrom } from "./sections/files-section"
 
 export interface SshHostControlsProps {
   row: DeviceRow
@@ -66,13 +62,21 @@ export interface SshHostControlsProps {
   connect?: typeof connectSshFromDock
 }
 
-export function SshHostControls({ row, connect = connectSshFromDock }: SshHostControlsProps) {
+export function SshHostControls({ row, connect: connectImpl }: SshHostControlsProps) {
   const t = useTranslations("devices.ssh")
   const savedHosts = useSettingsStore(selectSavedSshHosts)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  /**
+   * The shared launcher, with failures drawn inline under this card rather
+   * than toasted: the card is the thing being looked at, and an error that
+   * fades is no help to someone about to go and fix the host. On success it
+   * opens the dock, which this card never did, so a Connect here used to
+   * produce a tab with no sign it existed.
+   */
+  const sshConnect = useSshConnect({ onFailure: setError, connectImpl })
 
-  const profileId = row.ref.startsWith("ssh:") ? row.ref.slice(4) : null
+  const profileId = sshProfileIdFrom(row.ref)
+  const busy = profileId !== null && sshConnect.pendingHostId === profileId
   // Memoised so `onConnect`'s identity is stable: a jump host is stored as a
   // profile id, so the whole set has to travel with the one being launched or
   // a bastion-backed host connects direct.
@@ -115,15 +119,9 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
    * refuses. A direct host is a chain of length one, holding only itself.
    */
   const chain = useMemo(() => (profile ? resolveJumpChain(profile, hosts) : null), [profile, hosts])
-  const chainBroken = Boolean(profile?.jumpHostId) && chain === null
+  const chainBroken = launch.kind === "chainBroken"
 
   const { state: probeState, probe } = useSshProbe(profile, hosts)
-  /**
-   * A changed host key was the one failure this card could not resolve. It
-   * arrived as the raw `ssh_host_key_changed:{…}` string in the error line,
-   * with the only remedy in a Settings screen nothing pointed at.
-   */
-  const hostKeyGuard = useSshHostKeyChange()
 
   const forwards = useMemo(() => {
     if (!profile) return []
@@ -141,29 +139,14 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
     ]
   }, [profile])
 
+  const { connect } = sshConnect
   const onConnect = useCallback(async () => {
     if (launch.kind !== "ready") return
     setError(null)
-    setBusy(true)
-    try {
-      const outcome = await connect({
-        profile: launch.profile,
-        allProfiles: hosts,
-        rows: DEFAULT_ROWS,
-        cols: DEFAULT_COLS,
-        // Read at call time, like the dock does: subscribing the whole store
-        // here would re-render this card on every keystroke in any terminal.
-        store: useTerminalStore.getState(),
-      })
-      if (outcome.kind === "error") {
-        // Adjudicated rather than printed. The raw payload is JSON and tells
-        // the user nothing they can act on.
-        if (!hostKeyGuard.capture(outcome.message)) setError(outcome.message)
-      }
-    } finally {
-      setBusy(false)
-    }
-  }, [connect, hostKeyGuard, hosts, launch])
+    // A jump host is stored as a profile id, so the whole set travels with the
+    // one being launched or a bastion-backed host connects direct.
+    await connect({ hostId: launch.profile.id, profiles: hosts })
+  }, [connect, hosts, launch])
 
   if (row.kind !== "ssh-host") return null
 
@@ -193,7 +176,14 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
       {launch.kind === "credentialRequired" ? (
         <Alert data-testid="ssh-credential-required">
           <AlertTitle>{t("credentialRequiredTitle")}</AlertTitle>
-          <AlertDescription>{t("credentialRequiredBody", { name: launch.name })}</AlertDescription>
+          <AlertDescription>
+            {launch.bastion
+              ? t("credentialRequiredBastionBody", {
+                  name: launch.name,
+                  bastion: launch.bastion.name,
+                })
+              : t("credentialRequiredBody", { name: launch.name })}
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -299,7 +289,13 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
           {probeState.status === "probing" ? t("probe.running") : t("probe.action")}
         </Button>
         <Button asChild size="sm" variant="ghost" data-testid="ssh-edit">
-          <Link href="/settings?section=terminal">
+          {/* To this host, or to the bastion missing its password: the fix is
+              on whichever profile the check named. */}
+          <Link
+            href={sshHostSettingsHref(
+              launch.kind === "credentialRequired" ? launch.hostId : profileId
+            )}
+          >
             <SettingsIcon className="size-3.5" />
             {t("edit")}
           </Link>
@@ -321,13 +317,11 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
 
       <SshProbeResult state={probeState} />
 
-      {hostKeyGuard.dialog}
+      {sshConnect.dialog}
 
       {error ? (
         <p role="alert" className="text-xs text-destructive" data-testid="ssh-connect-error">
-          {error.startsWith(`${SSH_PROFILE_NOT_ON_HOST}:`)
-            ? t("notOnHost", { name: error.slice(SSH_PROFILE_NOT_ON_HOST.length + 1) })
-            : error}
+          {error}
         </p>
       ) : null}
 
@@ -374,7 +368,11 @@ function SshProbeResult({ state }: { state: SshProbeState }) {
               )
             : state.outcome.kind === "unreachable"
               ? t("probe.unreachable", { message: state.outcome.message })
-              : t("probe.invalid", { reason: state.outcome.reason })}
+              : // The reason is an enum value (`jumpChain`, `localForward`); said
+                // as a sentence, not interpolated raw.
+                t("probe.invalid", {
+                  reason: t(`probe.invalidReason.${state.outcome.reason}`),
+                })}
         </p>
       ) : null}
       <p className="text-[11px] text-muted-foreground">{t("probe.cost")}</p>

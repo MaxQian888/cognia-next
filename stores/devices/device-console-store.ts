@@ -21,16 +21,27 @@ interface DeviceConsoleState {
   selectedRef: string | null
   search: string
   kindFilter: DeviceKindFilter
+  /**
+   * Narrow the rail to rows `rowNeedsAttention` marks. Independent of the kind
+   * filter, so "which hosts need attention" is one click from either side, and
+   * set by the header's attention badge, which used to be a count with nowhere
+   * to go.
+   */
+  attentionOnly: boolean
 
   select: (ref: string | null) => void
   setSearch: (search: string) => void
   setKindFilter: (filter: DeviceKindFilter) => void
+  setAttentionOnly: (attentionOnly: boolean) => void
+  /** Search, kind and attention back to "everything", in one write. */
+  clearFilters: () => void
 }
 
 export const useDeviceConsoleStore = create<DeviceConsoleState>((set) => ({
   selectedRef: null,
   search: "",
   kindFilter: "all",
+  attentionOnly: false,
 
   /**
    * No section state to reset: the detail pane is one scroll, and it returns
@@ -44,4 +55,6 @@ export const useDeviceConsoleStore = create<DeviceConsoleState>((set) => ({
   select: (ref) => set({ selectedRef: ref }),
   setSearch: (search) => set({ search }),
   setKindFilter: (kindFilter) => set({ kindFilter }),
+  setAttentionOnly: (attentionOnly) => set({ attentionOnly }),
+  clearFilters: () => set({ search: "", kindFilter: "all", attentionOnly: false }),
 }))

@@ -175,10 +175,13 @@ describe("CapabilitiesSection", () => {
    * A worker's ids are SecurityStore capabilities, a different vocabulary from
    * platform capabilities — rendering them here would read them wrong.
    */
-  it("says why a worker has no matrix rather than showing an empty one", () => {
-    render(<CapabilitiesSection row={row({ kind: "worker", capabilities: [] })} />)
-    expect(screen.getByText("No capability vocabulary for this device")).toBeInTheDocument()
-    expect(screen.getByText(/different vocabulary/)).toBeInTheDocument()
+  it("renders no card for a worker, whose reason lives in the not-applicable record", () => {
+    // The sentence is not lost: `planDeviceSections` routes it to the shared
+    // record (`section-plan.test.ts`, `not-applicable-section.test.tsx`).
+    const { container } = render(
+      <CapabilitiesSection row={row({ kind: "worker", capabilities: [] })} />
+    )
+    expect(container).toBeEmptyDOMElement()
   })
 })
 

@@ -11,6 +11,7 @@ import { DeviceConsole } from "./device-console"
 
 let rows: DeviceRow[] = []
 let needsAttention = 0
+let loading = false
 let hostUnreachable = false
 const refresh = jest.fn(async () => {})
 
@@ -18,7 +19,7 @@ jest.mock("@/hooks/devices/use-device-rows", () => ({
   useDeviceRows: () => ({
     rows,
     summary: { total: rows.length, online: rows.length, needsAttention },
-    loading: false,
+    loading,
     hostUnreachable,
     refresh,
   }),
@@ -56,8 +57,15 @@ jest.mock("@/lib/platform/web-companion", () => ({
 }))
 
 const push = jest.fn()
+const replace = jest.fn((href: string, _options?: unknown) => {
+  searchParams = new URLSearchParams(href.split("?")[1] ?? "")
+})
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: (...args: unknown[]) => push(...args) }),
+  useRouter: () => ({
+    push: (...args: unknown[]) => push(...args),
+    replace: (href: string, options: unknown) => replace(href, options),
+  }),
+  usePathname: () => "/devices",
   useSearchParams: () => searchParams,
 }))
 
@@ -119,6 +127,7 @@ beforeEach(() => {
   platform = { tauri: true, capacitor: false, webCompanion: false }
   hostUnreachable = false
   needsAttention = 0
+  loading = false
   jest.clearAllMocks()
 })
 
@@ -164,6 +173,33 @@ describe("DeviceConsole", () => {
     expect(screen.getByTestId("detail")).toHaveTextContent("device:a")
   })
 
+  /**
+   * The regression: the link used to be re-applied whenever it differed from
+   * the selection, so with `?device=A` in the URL a click on B snapped back.
+   */
+  it("lets the user leave the device a deep link opened", async () => {
+    rows = [LOCAL, row(), row({ ref: "device:b", label: "Tablet" })]
+    searchParams = new URLSearchParams("device=device:a")
+    const { rerender } = renderConsole()
+    expect(screen.getByTestId("detail")).toHaveTextContent("device:a")
+
+    await userEvent.click(screen.getByTestId("device-row-device:b"))
+    rerender(
+      <TooltipProvider>
+        <DeviceConsole />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("detail")).toHaveTextContent("device:b")
+    expect(replace).toHaveBeenLastCalledWith("/devices?device=device%3Ab", { scroll: false })
+  })
+
+  it("explains a link to a device that is no longer here", () => {
+    searchParams = new URLSearchParams("device=device:gone")
+    renderConsole()
+    expect(screen.getByTestId("device-link-missing")).toHaveTextContent("device:gone")
+    expect(screen.getByTestId("detail")).toHaveTextContent("local")
+  })
+
   it("waits rather than stomping a deep link for a device that has not loaded", () => {
     searchParams = new URLSearchParams("device=device:not-yet")
     rows = []
@@ -181,10 +217,12 @@ describe("DeviceConsole", () => {
    * the local mirror, so `partial` grants and CLI-side suspensions cannot be
    * detected. Stated rather than swallowed.
    */
-  it("says when it is showing the local record only", () => {
+  it("says when it is showing the local record only, in the list it qualifies", () => {
     hostUnreachable = true
     renderConsole()
-    expect(screen.getByTestId("device-host-unreachable")).toBeInTheDocument()
+    expect(screen.getByTestId("device-list-pane")).toContainElement(
+      screen.getByTestId("device-host-unreachable")
+    )
     expect(screen.getByText(/may still read as active/)).toBeInTheDocument()
   })
 
@@ -211,6 +249,8 @@ describe("DeviceConsole", () => {
       standaloneDevicesRequiresHost.remedy
     )
     expect(screen.getByRole("link", { name: /Pair with a host/ })).toHaveAttribute("href", "/pair")
+    // The fleet's empty state, so it sits in the list under the one row.
+    expect(screen.getByTestId("device-list-pane")).toContainElement(alert)
   })
 
   it("keeps showing this machine rather than swapping the console out", () => {
@@ -255,6 +295,17 @@ describe("DeviceConsole", () => {
     expect(screen.getByTestId("devices-attention-count")).toHaveTextContent("2 need attention")
   })
 
+  it("filters the list to what the attention badge counted", async () => {
+    needsAttention = 1
+    useDeviceConsoleStore.getState().setKindFilter("worker")
+    renderConsole()
+    await userEvent.click(screen.getByTestId("devices-attention-count"))
+    expect(useDeviceConsoleStore.getState()).toMatchObject({
+      attentionOnly: true,
+      kindFilter: "all",
+    })
+  })
+
   it("hides the attention badge when nothing needs attention", () => {
     renderConsole()
     expect(screen.queryByTestId("devices-attention-count")).not.toBeInTheDocument()
@@ -272,6 +323,23 @@ describe("DeviceConsole", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add a host" }))
     expect(screen.getByTestId("add-host-sheet")).toBeInTheDocument()
     expect(push).not.toHaveBeenCalled()
+  })
+
+  it("starts a new SSH host in the editor that owns them", async () => {
+    renderConsole()
+    await userEvent.click(screen.getByRole("button", { name: "Add SSH host" }))
+    expect(push).toHaveBeenCalledWith("/settings?section=terminal&terminalPanel=ssh&sshHost=new")
+  })
+
+  it("says it is refreshing until the read settles", async () => {
+    let settle!: () => void
+    refresh.mockImplementationOnce(() => new Promise<void>((resolve) => (settle = resolve)))
+    renderConsole()
+    await userEvent.click(screen.getByTestId("devices-refresh"))
+    expect(screen.getByTestId("devices-refresh")).toBeDisabled()
+    expect(screen.getByTestId("devices-refresh")).toHaveAccessibleName("Refreshing…")
+    settle()
+    await screen.findByRole("button", { name: "Refresh" })
   })
 
   it("opens the sheet from a ?addHost deep link and seeds the base URL", () => {

@@ -16,13 +16,20 @@
  * different remedy, and only the first is fixed by pairing.
  */
 
+import { useMemo } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { FolderIcon } from "lucide-react"
+import { FolderIcon, SettingsIcon } from "lucide-react"
 
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { RemoteFileBrowser } from "@/components/sftp/remote-file-browser"
 import { TransferQueuePanel } from "@/components/sftp/transfer-queue-panel"
+import { Button } from "@/components/ui/button"
+import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
+import { resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
+import { sshHostSettingsHref } from "@/lib/terminal/terminal-settings-link"
+import { useSettingsStore } from "@/stores/settings"
 import type { DeviceRow } from "@/lib/devices/types"
 
 import { DeviceSection } from "../device-section"
@@ -42,6 +49,17 @@ export function FilesSection({ row }: { row: DeviceRow }) {
    */
   const reach = useSurfaceReach({ capability: "pty" })
   const profileId = sshProfileIdFrom(row.ref)
+  const savedHosts = useSettingsStore(selectSavedSshHosts)
+  /**
+   * SFTP dials the same way a shell does, through the same keyring entries and
+   * the same jump chain, so it fails for the same reasons. The browser used to
+   * open regardless and answer a password host with nothing stored with a
+   * native "credential is missing" inside the file tree.
+   */
+  const launch = useMemo(
+    () => (profileId ? resolveSshHostLaunch(profileId, savedHosts) : null),
+    [profileId, savedHosts]
+  )
 
   return (
     <DeviceSection id="files" title={t("title")} icon={FolderIcon} wide>
@@ -51,6 +69,25 @@ export function FilesSection({ row }: { row: DeviceRow }) {
         </p>
       ) : !reach.available ? (
         <SurfaceUnavailableNotice reach={reach} data-testid="files-unavailable" />
+      ) : launch && (launch.kind === "credentialRequired" || launch.kind === "chainBroken") ? (
+        <div className="space-y-2" data-testid="files-not-ready" data-reason={launch.kind}>
+          <p className="text-sm text-muted-foreground">
+            {launch.kind === "chainBroken"
+              ? t("chainBroken", { name: launch.name })
+              : launch.bastion
+                ? t("credentialRequiredBastion", {
+                    name: launch.name,
+                    bastion: launch.bastion.name,
+                  })
+                : t("credentialRequired", { name: launch.name })}
+          </p>
+          <Button asChild size="sm" variant="outline">
+            <Link href={sshHostSettingsHref(launch.hostId)}>
+              <SettingsIcon className="size-3.5" />
+              {t("fixInSettings")}
+            </Link>
+          </Button>
+        </div>
       ) : (
         <div className="space-y-4">
           <RemoteFileBrowser profileId={profileId} profileLabel={row.label} />

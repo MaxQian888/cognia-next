@@ -51,7 +51,11 @@ export function summarizeProvides(row: DeviceRow): PlacementDimensionCounts {
   return counts
 }
 
-export function ActivitySection({ row }: { row: DeviceRow }) {
+/**
+ * What has been sent to this device. Only rendered for a kind the queue
+ * addresses; the rest are told so in the not-applicable record.
+ */
+export function DispatchSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
   const relative = useDeviceRelativeTime()
 
@@ -62,86 +66,88 @@ export function ActivitySection({ row }: { row: DeviceRow }) {
     []
   )
 
+  return (
+    <DeviceSection
+      id="dispatch"
+      title={t("activity.dispatch")}
+      icon={InboxIcon}
+      wide
+      meta={targetRef && jobs.length > 0 ? String(jobs.length) : undefined}
+    >
+      <div data-testid="device-dispatch-queue">
+        {!targetRef ? (
+          <p className="text-xs text-muted-foreground">{t("activity.dispatchNotAddressable")}</p>
+        ) : jobs.length === 0 ? (
+          <Empty className="border-none py-4">
+            <EmptyHeader>
+              <EmptyTitle className="text-sm">{t("activity.dispatchEmptyTitle")}</EmptyTitle>
+              <EmptyDescription className="text-xs">
+                {t("activity.dispatchEmptyBody")}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <ul className="divide-y divide-border/50">
+            {jobs.map((job) => (
+              <li key={job.id} className="py-1.5" data-testid={`dispatch-job-${job.id}`}>
+                <div className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{job.kind}</span>
+                  <span className={cn("shrink-0 text-[11px]", STATUS_TONE[job.status])}>
+                    {t(`activity.status.${job.status}`)}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground/80">
+                    {relative(job.createdAt)}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-baseline gap-2 text-[11px] text-muted-foreground">
+                  <span>{t(`activity.domain.${job.domain}`)}</span>
+                  {job.attempts > 0 ? (
+                    <span className="tabular-nums">
+                      {t("activity.attempts", { attempts: job.attempts, max: job.maxAttempts })}
+                    </span>
+                  ) : null}
+                </div>
+                {job.lastError ? (
+                  <p className="mt-0.5 break-all text-[11px] text-destructive">{job.lastError}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </DeviceSection>
+  )
+}
+
+/** What this device offers a placement decision, per dimension. */
+export function PlacementSection({ row }: { row: DeviceRow }) {
+  const t = useTranslations("devices")
   const provides = useMemo(() => summarizeProvides(row), [row])
   const dimensions = Object.entries(provides)
 
   return (
-    <>
-      <DeviceSection
-        id="dispatch"
-        title={t("activity.dispatch")}
-        icon={InboxIcon}
-        wide
-        meta={targetRef && jobs.length > 0 ? String(jobs.length) : undefined}
-      >
-        <div data-testid="device-dispatch-queue">
-          {!targetRef ? (
-            <p className="text-xs text-muted-foreground">{t("activity.dispatchNotAddressable")}</p>
-          ) : jobs.length === 0 ? (
-            <Empty className="border-none py-4">
-              <EmptyHeader>
-                <EmptyTitle className="text-sm">{t("activity.dispatchEmptyTitle")}</EmptyTitle>
-                <EmptyDescription className="text-xs">
-                  {t("activity.dispatchEmptyBody")}
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ul className="divide-y divide-border/50">
-              {jobs.map((job) => (
-                <li key={job.id} className="py-1.5" data-testid={`dispatch-job-${job.id}`}>
-                  <div className="flex items-baseline gap-2">
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
-                      {job.kind}
-                    </span>
-                    <span className={cn("shrink-0 text-[11px]", STATUS_TONE[job.status])}>
-                      {t(`activity.status.${job.status}`)}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground/80">
-                      {relative(job.createdAt)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex items-baseline gap-2 text-[11px] text-muted-foreground">
-                    <span>{t(`activity.domain.${job.domain}`)}</span>
-                    {job.attempts > 0 ? (
-                      <span className="tabular-nums">
-                        {t("activity.attempts", { attempts: job.attempts, max: job.maxAttempts })}
-                      </span>
-                    ) : null}
-                  </div>
-                  {job.lastError ? (
-                    <p className="mt-0.5 break-all text-[11px] text-destructive">{job.lastError}</p>
-                  ) : null}
+    <DeviceSection id="placement" title={t("activity.placement")} icon={TargetIcon}>
+      <div data-testid="device-placement-provides">
+        {dimensions.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("activity.providesNothing")}</p>
+        ) : (
+          <>
+            <ul className="flex flex-wrap gap-1">
+              {dimensions.map(([dimension, count]) => (
+                <li key={dimension}>
+                  <Badge variant="outline" className="font-normal">
+                    {t(`activity.dimension.${dimension}`)}
+                    <span className="ml-1 tabular-nums text-muted-foreground">{count}</span>
+                  </Badge>
                 </li>
               ))}
             </ul>
-          )}
-        </div>
-      </DeviceSection>
-
-      <DeviceSection id="placement" title={t("activity.placement")} icon={TargetIcon}>
-        <div data-testid="device-placement-provides">
-          {dimensions.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t("activity.providesNothing")}</p>
-          ) : (
-            <>
-              <ul className="flex flex-wrap gap-1">
-                {dimensions.map(([dimension, count]) => (
-                  <li key={dimension}>
-                    <Badge variant="outline" className="font-normal">
-                      {t(`activity.dimension.${dimension}`)}
-                      <span className="ml-1 tabular-nums text-muted-foreground">{count}</span>
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-                {t("activity.placementHint")}
-              </p>
-            </>
-          )}
-        </div>
-      </DeviceSection>
-    </>
+            <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+              {t("activity.placementHint")}
+            </p>
+          </>
+        )}
+      </div>
+    </DeviceSection>
   )
 }

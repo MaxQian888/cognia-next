@@ -123,8 +123,11 @@ const meta = {
     selectedRef: "local",
     search: "",
     kindFilter: "all" as const,
+    attentionOnly: false,
     onSearchChange: () => {},
     onKindFilterChange: () => {},
+    onAttentionOnlyChange: () => {},
+    onClearFilters: () => {},
     onSelect: () => {},
   },
   decorators: [
@@ -152,3 +155,6 @@ export const NoSearchMatch: Story = { args: { search: "zzz" } }
 export const HostsOnly: Story = {
   args: { kindFilter: "remote-host", selectedRef: "host:h1" },
 }
+
+/** Only the rows that need a person, from the header badge or the chip. */
+export const NeedsAttention: Story = { args: { attentionOnly: true } }

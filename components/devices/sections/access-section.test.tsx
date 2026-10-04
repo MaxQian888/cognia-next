@@ -165,19 +165,8 @@ describe("AccessSection — Locked Use dormancy", () => {
   })
 })
 
-describe("AccessSection — lifecycle", () => {
-  it("offers pause for an active device and resume for a paused one", async () => {
-    const handlers = actions()
-    const { rerender } = render(<AccessSection row={row()} actions={handlers} />)
-    expect(screen.getByTestId("paired-device-pause-d1")).toBeInTheDocument()
-    expect(screen.queryByTestId("paired-device-resume-d1")).not.toBeInTheDocument()
-
-    rerender(<AccessSection row={row({ adminState: "paused" })} actions={handlers} />)
-    await userEvent.click(screen.getByTestId("paired-device-resume-d1"))
-    expect(handlers.resume).toHaveBeenCalledWith("d1", "Phone")
-  })
-
-  it("disables every control on a revoked device and says why", () => {
+describe("AccessSection — a revoked device", () => {
+  it("disables every grant and says why", () => {
     const grants = buildGrantRows({
       revoked: true,
       hostCapabilities: ["agent.run"],
@@ -186,16 +175,27 @@ describe("AccessSection — lifecycle", () => {
     render(<AccessSection row={row({ adminState: "revoked", grants })} actions={actions()} />)
     expect(screen.getByText("This device is revoked")).toBeInTheDocument()
     expect(screen.getByTestId("paired-device-remote-control-d1")).toBeDisabled()
-    expect(screen.getByTestId("paired-device-revoke-d1")).toBeDisabled()
+  })
+
+  /**
+   * Pause, resume and revoke act on the device, not on a grant, so they moved
+   * to the masthead (`paired-device-lifecycle.test.tsx` covers them).
+   */
+  it("no longer carries the lifecycle buttons", () => {
+    render(<AccessSection row={row()} actions={actions()} />)
     expect(screen.queryByTestId("paired-device-pause-d1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("paired-device-revoke-d1")).not.toBeInTheDocument()
   })
 })
 
 describe("AccessSection — devices with no grants", () => {
-  it.each(["local", "remote-host", "worker"] as const)("explains why %s has none", (kind) => {
-    render(<AccessSection row={row({ kind })} actions={actions()} />)
-    expect(screen.getByText("No grants to manage")).toBeInTheDocument()
-    expect(screen.queryByTestId("grant-control")).not.toBeInTheDocument()
+  /**
+   * Their reason is one row of the not-applicable record now, in the same
+   * sentence (`section-plan.test.ts` pins the key per kind).
+   */
+  it.each(["local", "remote-host", "worker"] as const)("renders no card for %s", (kind) => {
+    const { container } = render(<AccessSection row={row({ kind })} actions={actions()} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })
 
@@ -272,25 +272,6 @@ describe("AccessSection — writing access off the desktop", () => {
   })
 
   /**
-   * Pause and revoke are the exception (ADR-0170 batch 4): every Host mounts
-   * owner routes for them, so a paired companion reaches them over HTTP. Only
-   * a standalone browser has nowhere to send the change.
-   */
-  it("keeps pause and revoke live for a paired companion", () => {
-    hostProfile = "mobile-companion"
-    render(<AccessSection row={row()} actions={actions()} />)
-    expect(screen.getByTestId("paired-device-pause-d1")).toBeEnabled()
-    expect(screen.getByTestId("paired-device-revoke-d1")).toBeEnabled()
-  })
-
-  it("disables pause and revoke for a browser with no Host", () => {
-    hostProfile = "web-standalone"
-    render(<AccessSection row={row()} actions={actions()} />)
-    expect(screen.getByTestId("paired-device-pause-d1")).toBeDisabled()
-    expect(screen.getByTestId("paired-device-revoke-d1")).toBeDisabled()
-  })
-
-  /**
    * One sentence for the card, not one per control. Four identical reason
    * lines beside four switches is the shape this file already rejected for
    * `ownerSuspended`.
@@ -306,7 +287,6 @@ describe("AccessSection — writing access off the desktop", () => {
     expect(screen.queryByTestId("grant-terminal-unavailable")).not.toBeInTheDocument()
     expect(screen.queryByTestId("device-access-shell-unavailable")).not.toBeInTheDocument()
     expect(screen.getByTestId("paired-device-remote-control-d1")).toBeEnabled()
-    expect(screen.getByTestId("paired-device-pause-d1")).toBeEnabled()
   })
 
   /**

@@ -20,25 +20,21 @@
  *
  * Switching while work is in flight asks first. `aggregateRunState` is the
  * app-wide "is anything running" answer, and repointing the transport under a
- * live turn strands it on a machine the UI has stopped talking to.
+ * live turn strands it on a machine the UI has stopped talking to. The check
+ * and its dialog belong to `useExecutionHostSwitch`, which every other
+ * user-initiated switch (settings, the device masthead, pairing, handoffs)
+ * goes through too, so this popover is one caller rather than the only guard.
  */
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { nanoid } from "nanoid"
 import { CheckIcon, MonitorSmartphoneIcon, ServerIcon } from "lucide-react"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { useExecutionHostSwitch } from "@/hooks/devices/use-execution-host-switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SITE_TONE_DOT, SITE_TONE_TEXT, type SiteTone } from "@/components/sites/site-status"
 import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
@@ -71,20 +67,16 @@ export function hostTone(host: RemoteHost | null): SiteTone {
 interface SwitcherState {
   hosts: readonly RemoteHost[]
   active: RemoteHost | null
-  activate: (id: string) => void
-  deactivate: () => void
 }
 
 function useSwitcherState(): SwitcherState {
   const hosts = useRemoteHostStore((s) => s.hosts)
   const activeHostId = useRemoteHostStore((s) => s.activeHostId)
-  const activate = useRemoteHostStore((s) => s.activateHost)
-  const deactivate = useRemoteHostStore((s) => s.deactivate)
   const active = useMemo(
     () => hosts.find((host) => host.id === activeHostId) ?? null,
     [hosts, activeHostId]
   )
-  return { hosts, active, activate, deactivate }
+  return { hosts, active }
 }
 
 export interface ExecutionHostSwitcherProps {
@@ -104,43 +96,24 @@ export function ExecutionHostSwitcher({
   onAddHost,
 }: ExecutionHostSwitcherProps) {
   const t = useTranslations("devices.executionHost")
-  const { hosts, active, activate, deactivate } = useSwitcherState()
+  const { hosts, active } = useSwitcherState()
+  const { requestSwitch, dialog } = useExecutionHostSwitch()
   const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState<RemoteHost | null | undefined>(undefined)
 
   const tone = hostTone(active)
   const label = active ? active.label : t("local")
 
-  const commit = useCallback(
-    (host: RemoteHost | null) => {
-      if (host) activate(host.id)
-      else deactivate()
-      setOpen(false)
-    },
-    [activate, deactivate]
-  )
-
   /**
-   * Ask before repointing the transport while a turn is streaming. Read lazily
-   * rather than subscribed: this control renders in the desktop status bar on
-   * every route, and subscribing to run state there would re-render the whole
-   * bar on every token.
+   * The popover closes as soon as a row is picked. If a turn is in flight the
+   * hook's dialog takes over from there, and a popover left open behind a
+   * modal would be a second, stale answer to the same question.
    */
   const request = useCallback(
-    async (host: RemoteHost | null) => {
-      const currentId = active?.id ?? null
-      if ((host?.id ?? null) === currentId) {
-        setOpen(false)
-        return
-      }
-      const { anyRunActive } = await import("@/lib/devices/execution-host-guard")
-      if (await anyRunActive()) {
-        setPending(host)
-        return
-      }
-      commit(host)
+    (host: RemoteHost | null) => {
+      setOpen(false)
+      void requestSwitch(host?.id ?? null)
     },
-    [active, commit]
+    [requestSwitch]
   )
 
   const trigger =
@@ -192,7 +165,7 @@ export function ExecutionHostSwitcher({
             label={t("local")}
             detail={t("localDetail")}
             tone="neutral"
-            onSelect={() => void request(null)}
+            onSelect={() => request(null)}
             testId="execution-host-local"
           />
 
@@ -205,7 +178,7 @@ export function ExecutionHostSwitcher({
               detail={host.connectionError ?? host.config.baseUrl}
               stateLabel={t(`state.${host.connectionState}`)}
               tone={STATE_TONE[host.connectionState]}
-              onSelect={() => void request(host)}
+              onSelect={() => request(host)}
               testId={`execution-host-${host.id}`}
             />
           ))}
@@ -238,33 +211,7 @@ export function ExecutionHostSwitcher({
         </PopoverContent>
       </Popover>
 
-      <AlertDialog
-        open={pending !== undefined}
-        onOpenChange={(next) => {
-          if (!next) setPending(undefined)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("confirmTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("confirmBody", { label: pending ? pending.label : t("local") })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("confirmCancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (pending !== undefined) commit(pending)
-                setPending(undefined)
-              }}
-              data-testid="execution-host-confirm"
-            >
-              {t("confirmSwitch")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {dialog}
     </>
   )
 }
@@ -331,8 +278,27 @@ export function ExecutionHostChip(props: Omit<ExecutionHostSwitcherProps, "varia
  */
 export function StatusBarExecutionHost() {
   const { hosts, active } = useSwitcherState()
+  const router = useRouter()
+  // The status bar has no add-host sheet of its own, so "Add a host" hands
+  // over to the device console's: `?addHost=` is the deep link `/servers`
+  // already uses, and `useAddHostSheetState` opens the sheet on arrival.
+  // Without this the popover offered only "Manage devices", one more click
+  // away from the one thing a user with a new machine came to do.
+  const onAddHost = useCallback(() => router.push(addHostHref()), [router])
   if (hosts.length === 0 && !active) return null
-  return <ExecutionHostSwitcher variant="status-bar" />
+  return <ExecutionHostSwitcher variant="status-bar" onAddHost={onAddHost} />
+}
+
+/**
+ * The device console with its add-host sheet open.
+ *
+ * The value is a fresh nonce rather than `1` because the sheet latches only a
+ * *changed* param (`useAddHostSheetState`): after the user closes the sheet
+ * the URL still reads `?addHost=1`, so pushing that same URL again would
+ * change nothing and the second click would silently do nothing.
+ */
+export function addHostHref(): string {
+  return `/devices?addHost=${nanoid(6)}`
 }
 
 export default StatusBarExecutionHost

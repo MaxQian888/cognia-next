@@ -2,7 +2,22 @@ import { render, screen } from "@testing-library/react"
 
 import type { DeviceRow } from "@/lib/devices/types"
 
-import { OverviewSection } from "./overview-section"
+import { EventPlaneSection, IdentitySection, PresenceSection } from "./overview-section"
+
+/**
+ * The three cards as the dashboard used to compose them. They are placed
+ * separately now (`lib/devices/section-plan.ts` orders them per kind), but
+ * what each says is unchanged, so the assertions below read them together.
+ */
+function OverviewSection({ row }: { row: DeviceRow }) {
+  return (
+    <>
+      <IdentitySection row={row} />
+      <PresenceSection row={row} />
+      <EventPlaneSection row={row} />
+    </>
+  )
+}
 
 function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
   return {
@@ -104,6 +119,25 @@ describe("OverviewSection", () => {
   it("labels this machine rather than claiming a last-seen time for it", () => {
     render(<OverviewSection row={row({ kind: "local", isSelf: true })} />)
     expect(screen.getAllByText("This device").length).toBeGreaterThan(0)
+  })
+})
+
+describe("the overview cards placed one at a time", () => {
+  it("renders each card on its own, so the plan can order them per kind", () => {
+    const presence = { eventPlane: "ready" as const, attention: "background" as const, streams: [] }
+    const { unmount } = render(<IdentitySection row={row()} />)
+    expect(screen.getByTestId("device-section-identity")).toBeInTheDocument()
+    expect(screen.queryByTestId("device-section-presence")).not.toBeInTheDocument()
+    unmount()
+
+    render(<PresenceSection row={row({ presence })} />)
+    expect(screen.getByTestId("device-section-presence")).toBeInTheDocument()
+    expect(screen.queryByTestId("device-section-event-plane")).not.toBeInTheDocument()
+  })
+
+  it("renders no event-plane card at all without presence", () => {
+    const { container } = render(<EventPlaneSection row={row()} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })
 

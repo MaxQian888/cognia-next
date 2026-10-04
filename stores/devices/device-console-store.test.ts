@@ -11,6 +11,7 @@ describe("device console store", () => {
     const state = useDeviceConsoleStore.getState()
     expect(state.selectedRef).toBeNull()
     expect(state.kindFilter).toBe("all")
+    expect(state.attentionOnly).toBe(false)
   })
 
   /**
@@ -21,12 +22,15 @@ describe("device console store", () => {
    * `DevicesMobileBody` deliberately owns, rather than quietly reintroducing a
    * second source of "where am I".
    */
-  it("holds no view state beyond selection, search and filter", () => {
+  it("holds no view state beyond selection, search and filters", () => {
     expect(Object.keys(useDeviceConsoleStore.getState()).sort()).toEqual([
+      "attentionOnly",
+      "clearFilters",
       "kindFilter",
       "search",
       "select",
       "selectedRef",
+      "setAttentionOnly",
       "setKindFilter",
       "setSearch",
     ])
@@ -41,6 +45,21 @@ describe("device console store", () => {
       selectedRef: "device:a",
       search: "phone",
       kindFilter: "remote-host",
+    })
+  })
+
+  it("clears every filter at once and leaves the selection alone", () => {
+    const state = useDeviceConsoleStore.getState()
+    state.select("device:a")
+    state.setSearch("phone")
+    state.setKindFilter("worker")
+    state.setAttentionOnly(true)
+    useDeviceConsoleStore.getState().clearFilters()
+    expect(useDeviceConsoleStore.getState()).toMatchObject({
+      selectedRef: "device:a",
+      search: "",
+      kindFilter: "all",
+      attentionOnly: false,
     })
   })
 

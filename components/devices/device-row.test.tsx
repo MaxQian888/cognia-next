@@ -100,6 +100,17 @@ describe("DeviceRowButton", () => {
     expect(screen.getByLabelText("Needs attention")).toBeInTheDocument()
   })
 
+  /**
+   * A label on a role-less span is dropped from the accessibility tree, so
+   * the dot was colour-only to a screen reader until it became an image.
+   */
+  it("exposes the attention dot as an image with a name", () => {
+    render(
+      <DeviceRowButton row={row({ adminState: "revoked" })} selected={false} onSelect={jest.fn()} />
+    )
+    expect(screen.getByRole("img", { name: "Needs attention" })).toBeInTheDocument()
+  })
+
   it("does not flag a healthy device", () => {
     render(<DeviceRowButton row={row()} selected={false} onSelect={jest.fn()} />)
     expect(screen.queryByLabelText("Needs attention")).not.toBeInTheDocument()

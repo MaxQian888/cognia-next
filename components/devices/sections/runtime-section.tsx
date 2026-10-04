@@ -24,13 +24,16 @@
  *
  * Four cards rather than one: tiers are a short list, the registry is a table,
  * and routing is a pair of controls. Carding them separately is what lets the
- * short ones sit beside each other instead of stacking a screen apart.
+ * short ones sit beside each other instead of stacking a screen apart, and
+ * each is exported on its own so `lib/devices/section-plan.ts` can place it
+ * per kind. A surface this kind cannot host has no card here at all: the plan
+ * states its reason once, in the not-applicable record, rather than as a card
+ * frame around one sentence.
  */
 
 import { useCallback, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import {
-  BoxIcon,
   FolderTreeIcon,
   GavelIcon,
   LayersIcon,
@@ -46,6 +49,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { SandboxConnectionsTab } from "@/components/settings/automation/sandbox-connections-tab"
 import { WorkspaceEnvironmentList } from "@/components/workspace/workspace-environment-list"
+import { useExecutionHostSwitch } from "@/hooks/devices/use-execution-host-switch"
 import { useHostProbe } from "@/hooks/devices/use-host-probe"
 import {
   getExecutionAuthorityConfigServerSnapshot,
@@ -54,15 +58,15 @@ import {
   writeExecutionAuthorityConfig,
 } from "@/lib/placement/authority"
 import type { DeviceRow } from "@/lib/devices/types"
+import { canOwnTiming } from "@/lib/devices/section-plan"
 import { openMachineShell } from "@/lib/sandbox/machine-shell"
 import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
-import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { cn } from "@/lib/utils"
 
 import { DeviceSection } from "../device-section"
 
-function ShellTiers({ row }: { row: DeviceRow }) {
+export function ShellTiersSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
   if (row.runtime.shellTiers.length === 0) return null
   const available = row.runtime.shellTiers.filter((tier) => tier.available).length
@@ -111,7 +115,7 @@ function ShellTiers({ row }: { row: DeviceRow }) {
  * right now, the second says which machine is allowed to arm work nobody is
  * watching. Read apart, each invites the wrong conclusion about the other.
  */
-function Routing({ row }: { row: DeviceRow }) {
+export function RoutingSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
   // localStorage is unreadable during the server render, so the server
   // snapshot is the default rather than a read that would mismatch on hydrate.
@@ -121,11 +125,10 @@ function Routing({ row }: { row: DeviceRow }) {
     getExecutionAuthorityConfigServerSnapshot
   )
 
-  // `ExecutionAuthorityConfig.hostId` is a `RemoteHost.id`, or null for self.
-  // A phone or a worker cannot be named, so the control is only offered where
-  // it can actually be honoured.
-  const canOwnTiming = row.kind === "local" || (row.kind === "remote-host" && Boolean(row.hostId))
-  if (!canOwnTiming && !row.runtime.isRoutingTarget) return null
+  // Shared with the section plan, so the card renders exactly when the plan
+  // (and therefore the jump navigation) says it does.
+  const ownsTiming = canOwnTiming(row)
+  if (!ownsTiming && !row.runtime.isRoutingTarget) return null
 
   const isAuthority = row.kind === "local" ? config.hostId === null : config.hostId === row.hostId
 
@@ -140,7 +143,7 @@ function Routing({ row }: { row: DeviceRow }) {
         </p>
       ) : null}
 
-      {canOwnTiming ? (
+      {ownsTiming ? (
         <div
           className="flex items-start justify-between gap-3"
           data-testid="device-timing-authority"
@@ -172,15 +175,22 @@ function Routing({ row }: { row: DeviceRow }) {
   )
 }
 
-function Workspaces({ row }: { row: DeviceRow }) {
+/**
+ * A machine's worktrees, or how to reach them.
+ *
+ * Renders for `supported` and `requires-activation`. An `unsupported` kind is
+ * stated in the not-applicable record instead, so it has no card.
+ */
+export function WorkspacesSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
-  const activateHost = useRemoteHostStore((state) => state.activateHost)
-  const deactivate = useRemoteHostStore((state) => state.deactivate)
+  // Making a machine the routing target is a host switch like any other, so it
+  // asks first when a turn is in flight (`useExecutionHostSwitch`).
+  const { requestSwitch, dialog } = useExecutionHostSwitch()
 
   const activate = useCallback(() => {
-    if (row.kind === "local") deactivate()
-    else if (row.hostId) activateHost(row.hostId)
-  }, [activateHost, deactivate, row.hostId, row.kind])
+    if (row.kind === "local") void requestSwitch(null)
+    else if (row.hostId) void requestSwitch(row.hostId)
+  }, [requestSwitch, row.hostId, row.kind])
 
   const supported = row.runtime.workspaces.support === "supported"
   const inactiveHost = row.runtime.workspaces.support === "requires-activation"
@@ -191,6 +201,8 @@ function Workspaces({ row }: { row: DeviceRow }) {
   const probeRef = inactiveHost && row.kind === "remote-host" ? (row.hostId ?? null) : null
   const { state: probe, probe: runProbe } = useHostProbe(probeRef)
 
+  if (!supported && !inactiveHost) return null
+
   return (
     <DeviceSection id="workspaces" title={t("runtime.workspaces")} icon={FolderTreeIcon} wide>
       <div data-testid="device-workspaces">
@@ -198,51 +210,46 @@ function Workspaces({ row }: { row: DeviceRow }) {
           <WorkspaceEnvironmentList presentation="sheet" showPrune />
         ) : (
           <Alert>
-            <AlertTitle>
-              {inactiveHost
-                ? t("runtime.workspacesInactiveTitle")
-                : t("runtime.workspacesUnsupportedTitle")}
-            </AlertTitle>
+            <AlertTitle>{t("runtime.workspacesInactiveTitle")}</AlertTitle>
             <AlertDescription className="space-y-2">
               <span className="block">
-                {t(`runtime.reason.${row.runtime.workspaces.reasonKey ?? "workspaceNotHosted"}`)}
+                {t(`runtime.reason.${row.runtime.workspaces.reasonKey ?? "activateToInspect"}`)}
               </span>
-              {inactiveHost ? (
-                <span className="flex flex-wrap gap-2">
-                  {/* Reading is the common case, so it leads. Activation is
+              <span className="flex flex-wrap gap-2">
+                {/* Reading is the common case, so it leads. Activation is
                       still offered beside it because everything that WRITES
                       needs this host to be the routing target. */}
-                  {probeRef ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={runProbe}
-                      disabled={probe.status === "probing"}
-                      data-testid="probe-host-workspaces"
-                    >
-                      <RadarIcon className="size-3.5" />
-                      {probe.status === "probing"
-                        ? t("runtime.probing")
-                        : t("runtime.probeWorkspaces")}
-                    </Button>
-                  ) : null}
+                {probeRef ? (
                   <Button
                     size="sm"
-                    variant={probeRef ? "ghost" : "outline"}
-                    onClick={activate}
-                    data-testid="activate-routing-target"
+                    variant="outline"
+                    onClick={runProbe}
+                    disabled={probe.status === "probing"}
+                    data-testid="probe-host-workspaces"
                   >
-                    <PlugZapIcon className="size-3.5" />
-                    {row.kind === "local" ? t("runtime.routeLocally") : t("runtime.activateHost")}
+                    <RadarIcon className="size-3.5" />
+                    {probe.status === "probing"
+                      ? t("runtime.probing")
+                      : t("runtime.probeWorkspaces")}
                   </Button>
-                </span>
-              ) : null}
+                ) : null}
+                <Button
+                  size="sm"
+                  variant={probeRef ? "ghost" : "outline"}
+                  onClick={activate}
+                  data-testid="activate-routing-target"
+                >
+                  <PlugZapIcon className="size-3.5" />
+                  {row.kind === "local" ? t("runtime.routeLocally") : t("runtime.activateHost")}
+                </Button>
+              </span>
             </AlertDescription>
           </Alert>
         )}
 
         <HostProbeResult probe={probe} />
       </div>
+      {dialog}
     </DeviceSection>
   )
 }
@@ -414,9 +421,18 @@ function MachineSummary({
   )
 }
 
-export function RuntimeSection({ row }: { row: DeviceRow }) {
+/**
+ * The machine registry, with the fleet-level count above it.
+ *
+ * The registry is already a titled Card of its own, so it *is* the section
+ * here rather than sitting inside a second one: nesting them would give the
+ * reader two headers and two borders for one thing. The wrapper carries the
+ * `device-section-sandbox` anchor every other card gets from `DeviceSection`,
+ * so the jump navigation can land on it. Nothing renders for a kind that
+ * hosts no sandboxes; the plan says why in the not-applicable record.
+ */
+export function SandboxSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
-  const sandboxSupported = row.runtime.sandbox.support === "supported"
   // A shell lands on whichever machine the terminal routes to, and the
   // containers are always on this one, so the two have to be the same box.
   const shellAvailable = row.runtime.isRoutingTarget && row.isSelf
@@ -446,38 +462,20 @@ export function RuntimeSection({ row }: { row: DeviceRow }) {
     [t]
   )
 
+  if (row.runtime.sandbox.support !== "supported") return null
+
   return (
-    <>
-      <ShellTiers row={row} />
-      <Routing row={row} />
-
-      {/* The registry is already a titled Card of its own, so it *is* the
-          section here rather than sitting inside a second one — nesting them
-          would give the reader two headers and two borders for one thing.
-          Only the explanation we write ourselves needs a frame from us. */}
-      {sandboxSupported ? (
-        <div className="min-w-0 space-y-2 @3xl/device-pane:col-span-2" data-testid="device-sandbox">
-          <MachineSummary
-            connections={row.runtime.sandbox.connections}
-            onOpenShell={onOpenShell}
-            shellAvailable={shellAvailable}
-          />
-          <SandboxConnectionsTab />
-        </div>
-      ) : (
-        <DeviceSection id="sandbox" title={t("runtime.sandbox")} icon={BoxIcon}>
-          <div data-testid="device-sandbox">
-            <Alert>
-              <AlertTitle>{t("runtime.sandboxUnsupportedTitle")}</AlertTitle>
-              <AlertDescription>
-                {t(`runtime.reason.${row.runtime.sandbox.reasonKey ?? "sandboxNotHosted"}`)}
-              </AlertDescription>
-            </Alert>
-          </div>
-        </DeviceSection>
-      )}
-
-      <Workspaces row={row} />
-    </>
+    <div
+      id="device-section-sandbox"
+      className="min-w-0 scroll-mt-3 space-y-2 @3xl/device-pane:col-span-2"
+      data-testid="device-sandbox"
+    >
+      <MachineSummary
+        connections={row.runtime.sandbox.connections}
+        onOpenShell={onOpenShell}
+        shellAvailable={shellAvailable}
+      />
+      <SandboxConnectionsTab />
+    </div>
   )
 }

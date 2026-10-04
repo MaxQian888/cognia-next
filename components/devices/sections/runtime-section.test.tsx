@@ -3,7 +3,28 @@ import userEvent from "@testing-library/user-event"
 
 import type { DeviceRow } from "@/lib/devices/types"
 
-import { RuntimeSection } from "./runtime-section"
+import {
+  RoutingSection,
+  SandboxSection,
+  ShellTiersSection,
+  WorkspacesSection,
+} from "./runtime-section"
+
+/**
+ * The four runtime cards as the dashboard used to compose them. The plan
+ * places them separately now (`lib/devices/section-plan.ts`), but what each
+ * says is unchanged, so the assertions below read them together.
+ */
+function RuntimeSection({ row }: { row: DeviceRow }) {
+  return (
+    <>
+      <ShellTiersSection row={row} />
+      <RoutingSection row={row} />
+      <SandboxSection row={row} />
+      <WorkspacesSection row={row} />
+    </>
+  )
+}
 
 const activateHost = jest.fn()
 const deactivate = jest.fn()
@@ -17,9 +38,27 @@ jest.mock("@/components/workspace/workspace-environment-list", () => ({
   WorkspaceEnvironmentList: () => <div data-testid="workspace-environment-list" />,
 }))
 
+// Another host ("h2") is the routing target, so routing locally and
+// activating "h1" are both real switches for `useExecutionHostSwitch`, which
+// reads the registry at request time through `getState()`.
+let mockRunActive = false
+jest.mock("@/lib/devices/execution-host-guard", () => ({
+  anyRunActive: () => Promise.resolve(mockRunActive),
+}))
+const mockHostState = () => ({
+  hosts: [
+    { id: "h1", label: "H1" },
+    { id: "h2", label: "H2" },
+  ],
+  activeHostId: "h2",
+  activateHost,
+  deactivate,
+})
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
-  useRemoteHostStore: (selector: (state: unknown) => unknown) =>
-    selector({ activateHost, deactivate }),
+  useRemoteHostStore: Object.assign(
+    (selector: (state: unknown) => unknown) => selector(mockHostState()),
+    { getState: () => mockHostState() }
+  ),
 }))
 
 /**
@@ -121,7 +160,15 @@ describe("RuntimeSection — sandbox", () => {
       />
     )
     expect(screen.queryByTestId("sandbox-connections-tab")).not.toBeInTheDocument()
-    expect(screen.getByText(/never routed to another device/)).toBeInTheDocument()
+    // No card says so here any more: the sentence is one row of the
+    // not-applicable record, keyed by `planDeviceSections`.
+    expect(screen.queryByTestId("device-sandbox")).not.toBeInTheDocument()
+  })
+
+  /** The registry is not a `DeviceSection`, so it carries the anchor itself. */
+  it("gives the embedded registry the anchor the jump strip lands on", () => {
+    render(<SandboxSection row={row()} />)
+    expect(screen.getByTestId("device-sandbox")).toHaveAttribute("id", "device-section-sandbox")
   })
 })
 
@@ -172,6 +219,40 @@ describe("RuntimeSection — workspaces", () => {
     expect(activateHost).toHaveBeenCalledWith("h1")
   })
 
+  /**
+   * Making a machine the routing target is a host switch, so it is held to the
+   * same in-flight guard as the status-bar switcher.
+   */
+  it("asks before activating a host while a turn is in flight", async () => {
+    mockRunActive = true
+    try {
+      render(
+        <RuntimeSection
+          row={row({
+            kind: "remote-host",
+            hostId: "h1",
+            runtime: {
+              ...row().runtime,
+              sandbox: {
+                support: "unsupported",
+                reasonKey: "sandboxIsClientLocal",
+                connections: [],
+              },
+              workspaces: { support: "requires-activation", reasonKey: "activateToInspect" },
+              isRoutingTarget: false,
+            },
+          })}
+        />
+      )
+      await userEvent.click(screen.getByTestId("activate-routing-target"))
+      expect(activateHost).not.toHaveBeenCalled()
+      await userEvent.click(await screen.findByTestId("execution-host-confirm"))
+      expect(activateHost).toHaveBeenCalledWith("h1")
+    } finally {
+      mockRunActive = false
+    }
+  })
+
   it("offers no activation for a device that cannot host workspaces at all", () => {
     render(
       <RuntimeSection
@@ -187,9 +268,7 @@ describe("RuntimeSection — workspaces", () => {
       />
     )
     expect(screen.queryByTestId("activate-routing-target")).not.toBeInTheDocument()
-    expect(
-      screen.getByText("This kind of device does not host workspace environments.")
-    ).toBeInTheDocument()
+    expect(screen.queryByTestId("device-workspaces")).not.toBeInTheDocument()
   })
 })
 

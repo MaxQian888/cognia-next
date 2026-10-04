@@ -3,7 +3,7 @@
 /**
  * Who this device is, and whether we can currently reach it.
  *
- * Returns cards rather than one block: identity, presence and the live event
+ * Three cards rather than one block: identity, presence and the live event
  * plane are independent questions, and on a wide pane they sit side by side
  * instead of forcing a scroll past the two nobody asked about. The event-plane
  * card only exists when there is presence to show, so an absent one is
@@ -44,10 +44,13 @@ import {
   useDeviceRelativeTime,
 } from "../device-visuals"
 
-export function OverviewSection({ row }: { row: DeviceRow }) {
+/**
+ * Who the device is. Three exports rather than one fragment, because the
+ * dashboard places them per kind (`lib/devices/section-plan.ts`): a phone
+ * leads with presence and reads identity later, a worker leads with identity.
+ */
+export function IdentitySection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
-  const relative = useDeviceRelativeTime()
-  const absolute = useDeviceAbsoluteTime()
 
   const copyFingerprint = async () => {
     if (!row.fingerprint) return
@@ -56,140 +59,151 @@ export function OverviewSection({ row }: { row: DeviceRow }) {
   }
 
   return (
-    <>
-      <DeviceSection id="identity" title={t("overview.identity")} icon={IdCardIcon}>
-        <DeviceFactList>
-          <DeviceFactRow label={t("overview.kind")}>
-            <DeviceKindLabel kind={row.kind} />
+    <DeviceSection id="identity" title={t("overview.identity")} icon={IdCardIcon}>
+      <DeviceFactList>
+        <DeviceFactRow label={t("overview.kind")}>
+          <DeviceKindLabel kind={row.kind} />
+        </DeviceFactRow>
+        {row.baseUrl ? (
+          <DeviceFactRow label={t("overview.baseUrl")} mono>
+            {row.baseUrl}
           </DeviceFactRow>
-          {row.baseUrl ? (
-            <DeviceFactRow label={t("overview.baseUrl")} mono>
-              {row.baseUrl}
-            </DeviceFactRow>
-          ) : null}
-          {row.fingerprint ? (
-            <DeviceFactRow label={t("overview.fingerprint")}>
-              <span className="inline-flex items-center gap-1">
-                <span className="font-mono text-[11px]" title={row.fingerprint}>
-                  {shortenFingerprint(row.fingerprint)}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="size-5 p-0"
-                  aria-label={t("overview.copyFingerprint")}
-                  onClick={copyFingerprint}
-                  data-testid="copy-fingerprint"
-                >
-                  <CopyIcon className="size-3" />
-                </Button>
+        ) : null}
+        {row.fingerprint ? (
+          <DeviceFactRow label={t("overview.fingerprint")}>
+            <span className="inline-flex items-center gap-1">
+              <span className="font-mono text-[11px]" title={row.fingerprint}>
+                {shortenFingerprint(row.fingerprint)}
               </span>
-            </DeviceFactRow>
-          ) : null}
-          {row.reportedPlatform ? (
-            <DeviceFactRow label={t("overview.platform")} mono>
-              {row.reportedPlatform}
-            </DeviceFactRow>
-          ) : null}
-          {row.appVersion ? (
-            <DeviceFactRow label={t("overview.appVersion")} mono>
-              v{row.appVersion}
-            </DeviceFactRow>
-          ) : null}
-          {row.serverVersion ? (
-            <DeviceFactRow label={t("overview.serverVersion")} mono>
-              v{row.serverVersion}
-            </DeviceFactRow>
-          ) : null}
-          {row.role ? <DeviceFactRow label={t("overview.role")}>{row.role}</DeviceFactRow> : null}
-          {row.ownerUserId ? (
-            <DeviceFactRow label={t("overview.owner")} mono={!row.ownerLabel}>
-              {row.ownerLabel ?? row.ownerUserId}
-            </DeviceFactRow>
-          ) : row.kind === "paired-device" ? (
-            // Named explicitly rather than omitted: "nobody has claimed this"
-            // is a fact worth reading, and an absent row reads as "unknown".
-            <DeviceFactRow label={t("overview.owner")}>{t("overview.ownerNone")}</DeviceFactRow>
-          ) : null}
-          <DeviceFactRow label={t("overview.adminState")}>
-            {row.adminState === "active" ? (
-              t("adminState.active")
-            ) : (
-              <AdminStateBadge state={row.adminState} />
-            )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="size-5 p-0"
+                aria-label={t("overview.copyFingerprint")}
+                onClick={copyFingerprint}
+                data-testid="copy-fingerprint"
+              >
+                <CopyIcon className="size-3" />
+              </Button>
+            </span>
           </DeviceFactRow>
-          <DeviceFactRow label={t("overview.ref")} mono>
-            {row.ref}
+        ) : null}
+        {row.reportedPlatform ? (
+          <DeviceFactRow label={t("overview.platform")} mono>
+            {row.reportedPlatform}
           </DeviceFactRow>
-        </DeviceFactList>
-      </DeviceSection>
-
-      <DeviceSection id="presence" title={t("overview.presence")} icon={RadioIcon}>
-        <DeviceFactList>
-          <DeviceFactRow label={t("overview.reachability")}>
-            <ReachabilityLabel reachability={row.reachability} />
+        ) : null}
+        {row.appVersion ? (
+          <DeviceFactRow label={t("overview.appVersion")} mono>
+            v{row.appVersion}
           </DeviceFactRow>
-          <DeviceFactRow label={t("overview.lastSeen")}>
-            {row.isSelf ? t("overview.isThisDevice") : relative(row.lastSeenAt)}
+        ) : null}
+        {row.serverVersion ? (
+          <DeviceFactRow label={t("overview.serverVersion")} mono>
+            v{row.serverVersion}
           </DeviceFactRow>
-          {row.pairedAt ? (
-            <DeviceFactRow label={t("overview.paired")}>{absolute(row.pairedAt)}</DeviceFactRow>
-          ) : null}
-          {row.addedAt ? (
-            <DeviceFactRow label={t("overview.added")}>{absolute(row.addedAt)}</DeviceFactRow>
-          ) : null}
-          {row.lastConnectedAt ? (
-            <DeviceFactRow label={t("overview.lastConnected")}>
-              {absolute(row.lastConnectedAt)}
-            </DeviceFactRow>
-          ) : null}
-          {row.connectionState ? (
-            <DeviceFactRow label={t("overview.connectionState")}>
-              {t(`connectionState.${row.connectionState}`)}
-            </DeviceFactRow>
-          ) : null}
-        </DeviceFactList>
-      </DeviceSection>
-
-      {row.presence ? (
-        <DeviceSection
-          id="event-plane"
-          title={t("overview.eventPlane")}
-          icon={ActivityIcon}
-          meta={
-            row.presence.streams.length > 0
-              ? t("overview.streamCount", { count: row.presence.streams.length })
-              : undefined
-          }
-        >
-          <DeviceFactList>
-            <DeviceFactRow label={t("overview.eventPlaneState")}>
-              {t(`eventPlane.${row.presence.eventPlane}`)}
-            </DeviceFactRow>
-            <DeviceFactRow label={t("overview.attention")}>
-              {t(`attention.${row.presence.attention}`)}
-            </DeviceFactRow>
-          </DeviceFactList>
-          {row.presence.streams.length > 0 ? (
-            <ul className="mt-3 space-y-1">
-              {row.presence.streams.map((stream) => (
-                <li
-                  key={stream.leaseId}
-                  className="flex items-baseline justify-between gap-2 rounded-md bg-muted/40 px-2 py-1 text-[11px]"
-                >
-                  <span className="font-mono uppercase">{stream.transport}</span>
-                  <span className="text-muted-foreground">
-                    {t(`eventStreamState.${stream.state}`)}
-                  </span>
-                  <span className="text-muted-foreground/80">{relative(stream.openedAt)}</span>
-                </li>
-              ))}
-            </ul>
+        ) : null}
+        {row.role ? <DeviceFactRow label={t("overview.role")}>{row.role}</DeviceFactRow> : null}
+        {row.ownerUserId ? (
+          <DeviceFactRow label={t("overview.owner")} mono={!row.ownerLabel}>
+            {row.ownerLabel ?? row.ownerUserId}
+          </DeviceFactRow>
+        ) : row.kind === "paired-device" ? (
+          // Named explicitly rather than omitted: "nobody has claimed this"
+          // is a fact worth reading, and an absent row reads as "unknown".
+          <DeviceFactRow label={t("overview.owner")}>{t("overview.ownerNone")}</DeviceFactRow>
+        ) : null}
+        <DeviceFactRow label={t("overview.adminState")}>
+          {row.adminState === "active" ? (
+            t("adminState.active")
           ) : (
-            <p className="mt-3 text-[11px] text-muted-foreground">{t("overview.noStreams")}</p>
+            <AdminStateBadge state={row.adminState} />
           )}
-        </DeviceSection>
-      ) : null}
-    </>
+        </DeviceFactRow>
+        <DeviceFactRow label={t("overview.ref")} mono>
+          {row.ref}
+        </DeviceFactRow>
+      </DeviceFactList>
+    </DeviceSection>
+  )
+}
+
+export function PresenceSection({ row }: { row: DeviceRow }) {
+  const t = useTranslations("devices")
+  const relative = useDeviceRelativeTime()
+  const absolute = useDeviceAbsoluteTime()
+
+  return (
+    <DeviceSection id="presence" title={t("overview.presence")} icon={RadioIcon}>
+      <DeviceFactList>
+        <DeviceFactRow label={t("overview.reachability")}>
+          <ReachabilityLabel reachability={row.reachability} />
+        </DeviceFactRow>
+        <DeviceFactRow label={t("overview.lastSeen")}>
+          {row.isSelf ? t("overview.isThisDevice") : relative(row.lastSeenAt)}
+        </DeviceFactRow>
+        {row.pairedAt ? (
+          <DeviceFactRow label={t("overview.paired")}>{absolute(row.pairedAt)}</DeviceFactRow>
+        ) : null}
+        {row.addedAt ? (
+          <DeviceFactRow label={t("overview.added")}>{absolute(row.addedAt)}</DeviceFactRow>
+        ) : null}
+        {row.lastConnectedAt ? (
+          <DeviceFactRow label={t("overview.lastConnected")}>
+            {absolute(row.lastConnectedAt)}
+          </DeviceFactRow>
+        ) : null}
+        {row.connectionState ? (
+          <DeviceFactRow label={t("overview.connectionState")}>
+            {t(`connectionState.${row.connectionState}`)}
+          </DeviceFactRow>
+        ) : null}
+      </DeviceFactList>
+    </DeviceSection>
+  )
+}
+
+/** The live event plane. Renders nothing for a device with no presence entry. */
+export function EventPlaneSection({ row }: { row: DeviceRow }) {
+  const t = useTranslations("devices")
+  const relative = useDeviceRelativeTime()
+  if (!row.presence) return null
+
+  return (
+    <DeviceSection
+      id="event-plane"
+      title={t("overview.eventPlane")}
+      icon={ActivityIcon}
+      meta={
+        row.presence.streams.length > 0
+          ? t("overview.streamCount", { count: row.presence.streams.length })
+          : undefined
+      }
+    >
+      <DeviceFactList>
+        <DeviceFactRow label={t("overview.eventPlaneState")}>
+          {t(`eventPlane.${row.presence.eventPlane}`)}
+        </DeviceFactRow>
+        <DeviceFactRow label={t("overview.attention")}>
+          {t(`attention.${row.presence.attention}`)}
+        </DeviceFactRow>
+      </DeviceFactList>
+      {row.presence.streams.length > 0 ? (
+        <ul className="mt-3 space-y-1">
+          {row.presence.streams.map((stream) => (
+            <li
+              key={stream.leaseId}
+              className="flex items-baseline justify-between gap-2 rounded-md bg-muted/40 px-2 py-1 text-[11px]"
+            >
+              <span className="font-mono uppercase">{stream.transport}</span>
+              <span className="text-muted-foreground">{t(`eventStreamState.${stream.state}`)}</span>
+              <span className="text-muted-foreground/80">{relative(stream.openedAt)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-[11px] text-muted-foreground">{t("overview.noStreams")}</p>
+      )}
+    </DeviceSection>
   )
 }

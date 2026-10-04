@@ -165,16 +165,9 @@ export function CapabilitiesSection({ row }: { row: DeviceRow }) {
   // without reading a single row.
   const reported = row.capabilities.filter((cell) => cell.state === "reported").length
 
-  if (byGroup.length === 0) {
-    return (
-      <DeviceSection id="capabilities" title={t("capabilities.title")} icon={LayersIcon} wide>
-        <Alert data-testid="device-capabilities">
-          <AlertTitle>{t("capabilities.noVocabularyTitle")}</AlertTitle>
-          <AlertDescription>{t(`capabilities.noVocabulary.${row.kind}`)}</AlertDescription>
-        </Alert>
-      </DeviceSection>
-    )
-  }
+  // A kind with no vocabulary has no card. `planDeviceSections` states why in
+  // the not-applicable record, in the sentence this card used to frame alone.
+  if (byGroup.length === 0) return null
 
   return (
     <DeviceSection

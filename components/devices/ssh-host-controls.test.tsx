@@ -34,9 +34,13 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
     selector({ settings: { terminal: { sshHosts: sshHosts ?? [] } } }),
 }))
+// eslint-disable-next-line no-var -- same hoisting rule as `tauri`.
+var setPanelOpen = jest.fn()
 jest.mock("@/stores/terminal/terminal-store", () => ({
-  useTerminalStore: { getState: () => ({}) },
+  useTerminalStore: { getState: () => ({ setPanelOpen }) },
 }))
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 /**
  * Whether any terminal host can answer, which is now the question the Connect
@@ -120,6 +124,35 @@ beforeEach(() => {
   connectImpl = undefined
 })
 
+it("opens the dock once connected, so the new tab is not invisible", async () => {
+  const connect = jest.fn().mockResolvedValue({
+    kind: "connected",
+    sessionId: "t1",
+    hostKeyStatus: "verified",
+    hostKeyFingerprint: "SHA256:x",
+  })
+  render(<SshHostControls row={row()} connect={connect} />)
+  await userEvent.click(screen.getByTestId("ssh-connect"))
+  expect(setPanelOpen).toHaveBeenCalledWith(true)
+})
+
+it("names a bastion missing its password and edits that bastion", () => {
+  sshHosts = [
+    { ...PROFILE, jumpHostId: "b1" },
+    { ...PROFILE, id: "b1", name: "bastion-01", authMethod: "password" },
+  ]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByTestId("ssh-credential-required")).toHaveTextContent(
+    "devices.ssh.credentialRequiredBastionBody"
+  )
+  expect(screen.getByTestId("ssh-credential-required")).toHaveTextContent("bastion-01")
+  expect(screen.getByTestId("ssh-edit")).toHaveAttribute(
+    "href",
+    "/settings?section=terminal&terminalPanel=ssh&sshHost=b1"
+  )
+  expect(screen.getByTestId("ssh-connect")).toBeDisabled()
+})
+
 it("opens a shell through the shared dock launcher", async () => {
   const connect = jest.fn().mockResolvedValue({ kind: "connected", sessionId: "t1" })
   render(<SshHostControls row={row()} connect={connect} />)
@@ -178,7 +211,9 @@ it("rewords a profile the host does not have, instead of the native string", asy
     .mockResolvedValue({ kind: "error", message: "ssh_profile_not_on_host:prod-web-01" })
   render(<SshHostControls row={row()} connect={connect} />)
   await userEvent.click(screen.getByTestId("ssh-connect"))
-  expect(await screen.findByTestId("ssh-connect-error")).toHaveTextContent("devices.ssh.notOnHost")
+  expect(await screen.findByTestId("ssh-connect-error")).toHaveTextContent(
+    "terminal.sshConnect.notOnHost"
+  )
   expect(screen.getByTestId("ssh-connect-error")).toHaveTextContent("prod-web-01")
 })
 
@@ -219,7 +254,10 @@ it("surfaces a connection failure instead of failing silently", async () => {
 it("sends editing back to the Settings editor", () => {
   render(<SshHostControls row={row()} connect={jest.fn()} />)
   // `asChild` merges the Button into the Link, so the testid IS the anchor.
-  expect(screen.getByTestId("ssh-edit")).toHaveAttribute("href", "/settings?section=terminal")
+  expect(screen.getByTestId("ssh-edit")).toHaveAttribute(
+    "href",
+    "/settings?section=terminal&terminalPanel=ssh&sshHost=s1"
+  )
 })
 
 it("renders nothing for a row that is not an SSH host", () => {

@@ -1,42 +1,57 @@
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
-import type { DeviceRow } from "@/lib/devices/types"
+import type { DeviceCapabilityCell, DeviceRow } from "@/lib/devices/types"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 
 import { DeviceDetail } from "./device-detail"
 
-// The sections are covered by their own suites; here they stand in as markers
-// so the assertions are about composition — which cards appear, in what order
-// — rather than about anything they render.
+// The cards are covered by their own suites; here they stand in as markers
+// carrying the anchor id each real card has, so the assertions are about
+// composition (which cards appear, in what order, what the jump strip lists)
+// rather than about anything they render.
+function marker(id: string) {
+  return function Marker() {
+    return <section id={`device-section-${id}`} data-testid={`card-${id}`} />
+  }
+}
 jest.mock("./sections/overview-section", () => ({
-  OverviewSection: () => <div data-testid="section-overview" />,
+  IdentitySection: marker("identity"),
+  PresenceSection: marker("presence"),
+  EventPlaneSection: marker("event-plane"),
 }))
 jest.mock("./sections/capabilities-section", () => ({
-  CapabilitiesSection: () => <div data-testid="section-capabilities" />,
+  CapabilitiesSection: marker("capabilities"),
 }))
-jest.mock("./sections/access-section", () => ({
-  AccessSection: () => <div data-testid="section-access" />,
-}))
+jest.mock("./sections/access-section", () => ({ AccessSection: marker("access") }))
 jest.mock("./sections/runtime-section", () => ({
-  RuntimeSection: () => <div data-testid="section-runtime" />,
+  RoutingSection: marker("routing"),
+  ShellTiersSection: marker("shell-tiers"),
+  SandboxSection: marker("sandbox"),
+  WorkspacesSection: marker("workspaces"),
 }))
 jest.mock("./sections/activity-section", () => ({
-  ActivitySection: () => <div data-testid="section-activity" />,
+  DispatchSection: marker("dispatch"),
+  PlacementSection: marker("placement"),
 }))
-jest.mock("./sections/wan-section", () => ({
-  WanSection: () => <div data-testid="section-wan" />,
-}))
-jest.mock("./host-controls", () => ({
-  HostControls: () => <div data-testid="section-host-controls" />,
-}))
+jest.mock("./sections/wan-section", () => ({ WanSection: marker("wan") }))
+jest.mock("./sections/files-section", () => ({ FilesSection: marker("files") }))
 jest.mock("./ssh-host-controls", () => ({
-  SshHostControls: () => <div data-testid="section-ssh-controls" />,
-}))
-jest.mock("./sections/shell-only-section", () => ({
-  ShellOnlySection: () => <div data-testid="section-shell-only" />,
+  SshHostControls: () => <div data-testid="ssh-controls" />,
 }))
 
-const actions = {} as DeviceGrantActions
+const actions = {
+  pause: jest.fn(async () => {}),
+  resume: jest.fn(async () => {}),
+  revoke: jest.fn(async () => {}),
+} as unknown as DeviceGrantActions
+
+const CELL: DeviceCapabilityCell = {
+  id: "pty",
+  group: "platform",
+  state: "reported",
+  source: "device-report",
+}
 
 function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
   return {
@@ -44,21 +59,30 @@ function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
     kind: "paired-device",
     label: "Max's iPhone",
     isSelf: false,
+    deviceId: "a",
     adminState: "active",
     reachability: "online",
     liveness: { online: true, lastSeenAt: 1, source: "request" },
-    capabilities: [],
+    capabilities: [CELL],
     capabilityReportMissing: false,
     grants: [],
+    wan: { state: "automatic", canWake: false },
     placement: { provides: [], activeUnits: 0, maxUnits: Number.POSITIVE_INFINITY },
     runtime: {
-      sandbox: { support: "unsupported", connections: [] },
+      sandbox: { support: "unsupported", reasonKey: "sandboxNotHosted", connections: [] },
       shellTiers: [],
-      workspaces: { support: "unsupported" },
+      workspaces: { support: "unsupported", reasonKey: "workspaceNotHosted" },
       isRoutingTarget: false,
     },
     ...overrides,
   }
+}
+
+/** Card ids in the order the grid rendered them. */
+function renderedCards(): string[] {
+  return screen
+    .getAllByTestId(/^(card-|device-section-not-applicable$|ssh-controls$)/)
+    .map((element) => element.getAttribute("data-testid")!.replace(/^card-/, ""))
 }
 
 describe("DeviceDetail", () => {
@@ -71,21 +95,109 @@ describe("DeviceDetail", () => {
   it("heads the pane with the device's identity", () => {
     render(<DeviceDetail row={row()} actions={actions} />)
     expect(screen.getByTestId("device-hero")).toBeInTheDocument()
-    expect(screen.getByText("Max's iPhone")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Max's iPhone" })).toBeInTheDocument()
   })
 
   /**
-   * The point of dropping the tab bar: every section is on the page at once,
-   * so nothing is discoverable only by clicking. A regression here would most
-   * likely be a section quietly gated behind a condition.
+   * Owning a phone is mostly about its grants, and those used to sit below a
+   * twenty-row capability matrix. The plan puts them first.
    */
-  it("renders every section at once, with no tab bar", () => {
+  it("lays a phone out task-first, with no tab bar", () => {
     render(<DeviceDetail row={row()} actions={actions} />)
-    for (const id of ["overview", "capabilities", "wan", "access", "runtime", "activity"]) {
-      expect(screen.getByTestId(`section-${id}`)).toBeInTheDocument()
-    }
+    expect(renderedCards()).toEqual([
+      "access",
+      "wan",
+      "presence",
+      "identity",
+      // Pulled up beside `identity`, which would otherwise sit beside a gap
+      // above the wide dispatch card (`packHalfSections`).
+      "placement",
+      "dispatch",
+      "capabilities",
+      "device-section-not-applicable",
+    ])
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
-    expect(screen.queryByRole("tab")).not.toBeInTheDocument()
+  })
+
+  it("lays this machine out by what it runs", () => {
+    render(
+      <DeviceDetail
+        row={row({
+          ref: "local",
+          kind: "local",
+          isSelf: true,
+          deviceId: undefined,
+          wan: undefined,
+          runtime: {
+            sandbox: { support: "supported", connections: [] },
+            shellTiers: [{ tier: "os", available: true }],
+            workspaces: { support: "supported" },
+            isRoutingTarget: true,
+          },
+        })}
+        actions={actions}
+      />
+    )
+    expect(renderedCards().slice(0, 4)).toEqual(["routing", "shell-tiers", "workspaces", "sandbox"])
+  })
+
+  /**
+   * A card frame around one sentence was the shape of every "not here" answer.
+   * They are one record at the end, in the same words.
+   */
+  it("states what does not apply once, in a record at the end", () => {
+    render(<DeviceDetail row={row()} actions={actions} />)
+    const record = screen.getByTestId("device-section-not-applicable")
+    expect(within(record).getByTestId("not-applicable-sandbox")).toHaveTextContent(
+      "This kind of device does not host sandboxes."
+    )
+    expect(within(record).getByTestId("not-applicable-workspaces")).toBeInTheDocument()
+    expect(screen.queryByTestId("card-sandbox")).not.toBeInTheDocument()
+  })
+
+  it("lists every rendered card in the jump strip, in grid order", () => {
+    render(<DeviceDetail row={row()} actions={actions} />)
+    const strip = screen.getByTestId("device-section-nav")
+    expect(
+      within(strip)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual([
+      "Access",
+      "WAN connection",
+      "Presence",
+      "Identity",
+      "Placement",
+      "Dispatch queue",
+      "Capabilities",
+      "Not applicable",
+    ])
+  })
+
+  it("jumps to a card from the strip and marks it as the one in view", async () => {
+    render(<DeviceDetail row={row()} actions={actions} />)
+    // Let the strip take its first reading, which a browser does one frame
+    // after mount, long before anyone can click.
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+    const chip = screen.getByTestId("device-section-nav-device-section-capabilities")
+    await userEvent.click(chip)
+    expect(chip).toHaveAttribute("aria-current", "location")
+  })
+
+  /** The device's verbs are in the masthead, beside its name. */
+  it("puts a phone's lifecycle controls in the masthead", () => {
+    render(<DeviceDetail row={row()} actions={actions} />)
+    expect(screen.getByTestId("device-hero")).toContainElement(
+      screen.getByTestId("paired-device-pause-a")
+    )
+  })
+
+  it("opens the scroll with the device's numbers", () => {
+    render(<DeviceDetail row={row()} actions={actions} />)
+    expect(screen.getByTestId("device-stat-strip")).toBeInTheDocument()
+    expect(screen.getByTestId("device-hero")).not.toContainElement(
+      screen.getByTestId("device-stat-strip")
+    )
   })
 
   /**
@@ -98,19 +210,27 @@ describe("DeviceDetail", () => {
     expect(screen.getByTestId("device-admin-conflict")).toBeInTheDocument()
   })
 
-  it("surfaces a host's last connection error instead of swallowing it", () => {
+  it("says a host's last connection error once", () => {
     render(
       <DeviceDetail
-        row={row({ kind: "remote-host", connectionError: "handshake refused" })}
+        row={row({
+          ref: "host:h1",
+          kind: "remote-host",
+          hostId: "h1",
+          connectionState: "degraded",
+          connectionError: "handshake refused",
+        })}
         actions={actions}
       />
     )
-    expect(screen.getByText("handshake refused")).toBeInTheDocument()
+    expect(screen.getAllByText("handshake refused")).toHaveLength(1)
+    expect(screen.getByTestId("device-connection-error")).toHaveTextContent("handshake refused")
   })
 
   it("stays quiet when there is nothing wrong", () => {
     render(<DeviceDetail row={row()} actions={actions} />)
     expect(screen.queryByTestId("device-admin-conflict")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("device-connection-error")).not.toBeInTheDocument()
   })
 
   /**
@@ -137,31 +257,33 @@ describe("DeviceDetail", () => {
 /**
  * A saved SSH host is not a Cognia machine. It reports no capabilities, holds
  * no grants, hosts neither a sandbox nor a workspace, and the dispatcher
- * cannot address it, so five of the seven sections had nothing to say and each
- * said so in a card of its own. Six card frames around six sentences is what
- * made the pane read as ragged, and it buried the two cards that describe the
- * machine.
+ * cannot address it.
  */
 describe("a machine that can only give a shell", () => {
-  const sshRow = row({ kind: "ssh-host", ref: "ssh:s1", label: "prod-web-01" })
-
-  it("gives it the SSH card and one record of what does not apply", () => {
-    render(<DeviceDetail row={sshRow} actions={actions} />)
-    expect(screen.getByTestId("section-ssh-controls")).toBeInTheDocument()
-    expect(screen.getByTestId("section-shell-only")).toBeInTheDocument()
+  const sshRow = row({
+    kind: "ssh-host",
+    ref: "ssh:s1",
+    label: "prod-web-01",
+    deviceId: undefined,
+    capabilities: [],
+    wan: undefined,
   })
 
-  it("drops the five sections that could only refuse", () => {
+  it("gives it the SSH card, its files, and one record of what does not apply", () => {
     render(<DeviceDetail row={sshRow} actions={actions} />)
-    for (const id of ["capabilities", "wan", "access", "runtime", "activity"]) {
-      expect(screen.queryByTestId(`section-${id}`)).not.toBeInTheDocument()
-    }
+    expect(renderedCards()).toEqual([
+      "ssh-controls",
+      "files",
+      "identity",
+      "presence",
+      "device-section-not-applicable",
+    ])
   })
 
   /**
    * It holds a record, a list of forwarding rules and three controls. In half
    * a pane that is a ribbon several hundred pixels taller than the identity
-   * card beside it, and the column under that card is empty for all of them.
+   * card beside it.
    */
   it("puts the SSH card across the pane rather than in a column", () => {
     render(<DeviceDetail row={sshRow} actions={actions} />)
@@ -170,10 +292,42 @@ describe("a machine that can only give a shell", () => {
     )
   })
 
-  it("leaves every section in place for a machine that can answer them", () => {
-    render(<DeviceDetail row={row()} actions={actions} />)
-    expect(screen.queryByTestId("section-ssh-controls")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("section-shell-only")).not.toBeInTheDocument()
-    expect(screen.getByTestId("section-capabilities")).toBeInTheDocument()
+  it("spans the record across the pane when it has more than two rows", () => {
+    render(<DeviceDetail row={sshRow} actions={actions} />)
+    expect(screen.getByTestId("device-section-not-applicable").className).toContain(
+      "@3xl/device-pane:col-span-2"
+    )
+  })
+  /**
+   * "Browse files" on a live SSH tab links here with `?deviceSection=files`.
+   * The link is spent once applied, so a later row change does not scroll the
+   * pane back to it.
+   */
+  it("applies a deep-linked section once and reports it spent", () => {
+    const applied = jest.fn()
+    const { rerender } = render(
+      <DeviceDetail
+        row={sshRow}
+        actions={actions}
+        initialSection="files"
+        onInitialSectionApplied={applied}
+      />
+    )
+    expect(applied).toHaveBeenCalledTimes(1)
+    rerender(<DeviceDetail row={sshRow} actions={actions} initialSection={null} />)
+    expect(applied).toHaveBeenCalledTimes(1)
+  })
+
+  it("spends a link naming a section this row does not have", () => {
+    const applied = jest.fn()
+    render(
+      <DeviceDetail
+        row={sshRow}
+        actions={actions}
+        initialSection="wan"
+        onInitialSectionApplied={applied}
+      />
+    )
+    expect(applied).toHaveBeenCalledTimes(1)
   })
 })

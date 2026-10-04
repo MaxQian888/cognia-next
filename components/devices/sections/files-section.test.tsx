@@ -4,6 +4,11 @@ import { FilesSection, sshProfileIdFrom } from "./files-section"
 import type { DeviceRow } from "@/lib/devices/types"
 
 let reach = { available: true } as { available: boolean }
+let sshHosts: unknown[] = []
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (s: unknown) => unknown) =>
+    selector({ settings: { terminal: { sshHosts } } }),
+}))
 
 jest.mock("@/hooks/platform/use-surface-reach", () => ({
   useSurfaceReach: () => reach,
@@ -50,6 +55,7 @@ function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
 
 beforeEach(() => {
   reach = { available: true }
+  sshHosts = []
 })
 
 describe("sshProfileIdFrom", () => {
@@ -82,5 +88,59 @@ describe("FilesSection", () => {
   it("says so when the row does not name a saved host", () => {
     render(<FilesSection row={row({ ref: "device:phone-a" })} />)
     expect(screen.getByTestId("files-unknown-profile")).toBeInTheDocument()
+  })
+
+  it("does not open a browser that the same login would refuse, and points at the fix", () => {
+    sshHosts = [
+      {
+        id: "prod-web-01",
+        name: "prod-web-01",
+        host: "prod",
+        port: 22,
+        username: "deploy",
+        authMethod: "password",
+      },
+    ]
+    render(<FilesSection row={row()} />)
+    expect(screen.getByTestId("files-not-ready")).toHaveAttribute(
+      "data-reason",
+      "credentialRequired"
+    )
+    expect(screen.queryByTestId("browser")).not.toBeInTheDocument()
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "/settings?section=terminal&terminalPanel=ssh&sshHost=prod-web-01"
+    )
+  })
+
+  it("refuses a host whose jump chain cannot be walked", () => {
+    sshHosts = [
+      {
+        id: "prod-web-01",
+        name: "prod-web-01",
+        host: "prod",
+        port: 22,
+        username: "deploy",
+        authMethod: "agent",
+        jumpHostId: "gone",
+      },
+    ]
+    render(<FilesSection row={row()} />)
+    expect(screen.getByTestId("files-not-ready")).toHaveAttribute("data-reason", "chainBroken")
+  })
+
+  it("opens the browser for a host that is ready", () => {
+    sshHosts = [
+      {
+        id: "prod-web-01",
+        name: "prod-web-01",
+        host: "prod",
+        port: 22,
+        username: "deploy",
+        authMethod: "agent",
+      },
+    ]
+    render(<FilesSection row={row()} />)
+    expect(screen.getByTestId("browser")).toBeInTheDocument()
   })
 })

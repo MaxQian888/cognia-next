@@ -53,6 +53,7 @@ export function DeviceRowButton({ row, selected, onSelect }: DeviceRowButtonProp
       type="button"
       onClick={() => onSelect(row.ref)}
       aria-current={selected ? "true" : undefined}
+      data-row-ref={row.ref}
       data-testid={`device-row-${row.ref}`}
       className={cn(
         "flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
@@ -66,9 +67,13 @@ export function DeviceRowButton({ row, selected, onSelect }: DeviceRowButtonProp
           <ReachabilityDot reachability={row.reachability} />
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>
           {needsAttention ? (
+            // `role="img"`: a label on a role-less span is dropped from the
+            // accessibility tree, so the dot was colour-only to a screen reader.
             <span
+              role="img"
               aria-label={t("row.needsAttention")}
               className="size-1.5 shrink-0 rounded-full bg-amber-500"
+              data-testid={`device-row-attention-${row.ref}`}
             />
           ) : null}
         </span>

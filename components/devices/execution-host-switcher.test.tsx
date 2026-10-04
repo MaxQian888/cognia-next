@@ -9,6 +9,9 @@ jest.mock("next-intl", () => ({
     vals ? `${ns}.${key}:${JSON.stringify(vals)}` : `${ns}.${key}`,
 }))
 
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush }) }))
+
 let anyActive = false
 jest.mock("@/lib/devices/execution-host-guard", () => ({
   anyRunActive: () => Promise.resolve(anyActive),
@@ -43,6 +46,7 @@ function seed(hosts: RemoteHost[], activeHostId: string | null) {
 
 beforeEach(() => {
   anyActive = false
+  mockPush.mockClear()
   activate.mockClear()
   deactivate.mockClear()
   seed([], null)
@@ -119,4 +123,31 @@ it("renders no status-bar segment until there is a host to switch to", () => {
   act(() => seed([host()], null))
   rerender(<StatusBarExecutionHost />)
   expect(screen.getByTestId("status-execution-host")).toBeInTheDocument()
+})
+
+/**
+ * The status bar has no sheet of its own, so "Add a host" has to land on one
+ * that exists rather than leaving "Manage devices" as the only way forward.
+ */
+it("offers to add a host from the status bar, opening the console's add-host sheet", async () => {
+  seed([host()], null)
+  render(<StatusBarExecutionHost />)
+  await userEvent.click(screen.getByTestId("status-execution-host"))
+  await userEvent.click(await screen.findByText("devices.executionHost.addHost"))
+  expect(mockPush).toHaveBeenCalledWith(expect.stringMatching(/^\/devices\?addHost=.+/))
+})
+
+/**
+ * The sheet latches only a changed `?addHost=` value, so a second click must
+ * not push the same URL the first one left behind.
+ */
+it("asks for the sheet with a fresh value every time", async () => {
+  seed([host()], null)
+  render(<StatusBarExecutionHost />)
+  for (let i = 0; i < 2; i += 1) {
+    await userEvent.click(screen.getByTestId("status-execution-host"))
+    await userEvent.click(await screen.findByText("devices.executionHost.addHost"))
+  }
+  expect(mockPush).toHaveBeenCalledTimes(2)
+  expect(mockPush.mock.calls[0][0]).not.toBe(mockPush.mock.calls[1][0])
 })

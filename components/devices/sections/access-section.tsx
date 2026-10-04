@@ -15,17 +15,15 @@
  */
 
 import { useTranslations } from "next-intl"
-import { KeyRoundIcon, PauseIcon, PlayIcon, TrashIcon } from "lucide-react"
+import { KeyRoundIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { isGrantEnabled } from "@/lib/devices/grant-capabilities"
 import type { DeviceGrantRow, DeviceRow } from "@/lib/devices/types"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
-import { useHostAdminReach } from "@/hooks/connectivity/use-host-admin-reach"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { cn } from "@/lib/utils"
 
@@ -229,44 +227,33 @@ function GrantSection({
   )
 }
 
+/**
+ * The grants a paired device holds here.
+ *
+ * Pause, resume and revoke used to be a block at the bottom of this card, a
+ * full grid of switches below the device's name. They change the whole
+ * device rather than one grant, so they now sit in the masthead
+ * (`PairedDeviceLifecycle`), where they are in reach from anywhere in the
+ * pane. Only paired devices have a card here; every other kind's reason is
+ * in the not-applicable record.
+ */
 export function AccessSection({ row, actions }: { row: DeviceRow; actions: DeviceGrantActions }) {
   const t = useTranslations("devices")
   /**
-   * Pause, resume and revoke are `companion_suspend_device`,
-   * `companion_resume_device` and `companion_revoke_device`, the same
-   * `target: "client"` / `transports: ["internal"]` shape as the four grant
-   * switches, so they too are writable only from the desktop process. One
-   * notice for the whole section rather than one per control: the fact is
-   * about this shell, not about any single button, which is how
+   * Every grant switch writes through `companion_set_*`, `target: "client"` /
+   * `transports: ["internal"]`, so only the desktop process can make them.
+   * One notice for the whole section rather than one per switch: the fact is
+   * about this shell, not about any single grant, which is how
    * `ownerSuspended` below already reads.
    *
    * Above the early return, because a hook cannot be called conditionally.
    */
   const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
   const shellBlocked = !shellReach.available
-  /**
-   * Pause / Resume / Revoke are the exception: every Host mounts owner routes
-   * for them, so a paired companion that is the owner device reaches them over
-   * HTTP (`lib/devices/lifecycle-http.ts`, ADR-0170 batch 4). Only a standalone
-   * browser has nowhere to send the change.
-   */
-  const lifecycleReach = useHostAdminReach("host-admin")
-  const lifecycleBlocked = !lifecycleReach.available
 
-  if (row.kind !== "paired-device") {
-    return (
-      <DeviceSection id="access" title={t("access.title")} icon={KeyRoundIcon} wide>
-        <Alert data-testid="device-access">
-          <AlertTitle>{t("access.notApplicableTitle")}</AlertTitle>
-          <AlertDescription>{t(`access.notApplicable.${row.kind}`)}</AlertDescription>
-        </Alert>
-      </DeviceSection>
-    )
-  }
+  if (row.kind !== "paired-device") return null
 
-  const deviceId = row.deviceId ?? ""
   const revoked = row.adminState === "revoked"
-  const paused = row.adminState === "paused"
 
   const held = row.grants.filter((grant) => grant.available && isGrantEnabled(grant)).length
   // ADR-0149 §5 step two. One banner rather than four identical reason lines:
@@ -314,47 +301,6 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
             <GrantSection key={grant.id} row={row} grant={grant} actions={actions} />
           ))}
         </div>
-
-        <section className="rounded-lg border bg-background/40 p-3">
-          <h4 className="text-sm font-medium">{t("access.lifecycle")}</h4>
-          <p className="mt-1 text-xs text-muted-foreground">{t("access.lifecycleHint")}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {!revoked && !paused ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={lifecycleBlocked}
-                onClick={() => void actions.pause(deviceId, row.label)}
-                data-testid={`paired-device-pause-${deviceId}`}
-              >
-                <PauseIcon className="size-3.5" />
-                {t("access.pause")}
-              </Button>
-            ) : null}
-            {!revoked && paused ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={lifecycleBlocked}
-                onClick={() => void actions.resume(deviceId, row.label)}
-                data-testid={`paired-device-resume-${deviceId}`}
-              >
-                <PlayIcon className="size-3.5" />
-                {t("access.resume")}
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={revoked || lifecycleBlocked}
-              onClick={() => void actions.revoke(deviceId, row.label)}
-              data-testid={`paired-device-revoke-${deviceId}`}
-            >
-              <TrashIcon className="size-3.5" />
-              {t("access.revoke")}
-            </Button>
-          </div>
-        </section>
       </div>
     </DeviceSection>
   )

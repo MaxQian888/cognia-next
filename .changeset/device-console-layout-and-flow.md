@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Device console (`/devices`) layout and interaction pass. Each device's dashboard is now ordered task-first per kind (a phone leads with its grants, this machine with routing and runtimes, a host with its workspaces), half-width cards are kept in pairs, and every "not available here" card is folded into one record at the end. A sticky jump strip under the device header lists the cards and tracks the one in view. Connect/disconnect/re-pair, inline rename and remove for hosts, and pause/resume/revoke for paired devices now sit beside the device's name; revoking asks for confirmation, and disabled lifecycle buttons say why. The list gains kind chips with counts, a "needs attention" filter (also reachable from the header badge), arrow-key navigation and a clear-filters action. Fixes a `?device=` link snapping the selection back after clicking another device, mirrors the selection into the URL, and reports links to devices that are no longer in the fleet. On phones the console now honours `?device=` links, shows the standalone and local-record notices and the attention count, and keeps "Pair a device" reachable at any fleet size.
