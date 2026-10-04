@@ -153,15 +153,17 @@ test.describe("observability — durable trace drill-down", () => {
       expect.arrayContaining([PRIMARY_TRACE_ID, SECONDARY_TRACE_ID])
     )
 
-    // The dashboard is a sub-view of the /logs Traces channel, not a route.
-    await page.goto("/logs?channel=traces&view=dashboard", { waitUntil: "domcontentloaded" })
+    // The dashboard is a sub-view of the /logs Traces channel, not a route. Its
+    // deep-link key is `tview` — the Traces channel's params are `t`-prefixed
+    // so they never collide with the Logs panel's own `view` / `from` / `to`.
+    await page.goto("/logs?channel=traces&tview=dashboard", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("observability-dashboard")).toBeVisible()
     await expect(page.getByTestId("stat-value-kpi-spans")).toHaveText("3")
 
     // Click-to-filter on a breakdown slice writes the shareable filter…
     await page.getByTestId(`donut-legend-bd-model-${PRIMARY_MODEL}`).click()
-    await expect(page).toHaveURL(/f=/)
-    await expect(page).toHaveURL(/view=dashboard/)
+    await expect(page).toHaveURL(/[?&]tf=/)
+    await expect(page).toHaveURL(/[?&]tview=dashboard/)
 
     // …and the Explore sub-view is a fold of the SAME filtered read, so the
     // secondary trace is gone there too. That cross-view agreement is the whole

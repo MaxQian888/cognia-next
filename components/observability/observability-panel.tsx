@@ -4,13 +4,17 @@
  * Maps a panel definition to its concrete panel component, feeding it the
  * right slice of the shared derived series. Kept separate from the dashboard
  * shell so the dispatch is unit-testable in isolation.
+ *
+ * `onDrill` is the one Dashboard → Explore seam: each panel kind translates
+ * its own gesture (a failing-count stat, a chart point, a breakdown row's
+ * "Show traces") into a `DashboardDrill` and the channel applies it.
  */
 
 import { StatPanel } from "./stat-panel"
 import { TimeSeriesPanel } from "./time-series-panel"
 import { DonutPanel } from "./donut-panel"
 import { BreakdownBarPanel } from "./breakdown-bar-panel"
-import type { PanelDef } from "./panel-registry"
+import type { DashboardDrill, PanelDef } from "./panel-registry"
 import type { ObservabilitySeries } from "@/hooks/observability/use-observability-series"
 import type { BreakdownRow, Dimension } from "@/lib/observability/breakdown"
 import type { TraceFilters } from "@/lib/observability/filters"
@@ -48,6 +52,8 @@ export interface ObservabilityPanelProps {
   filters: TraceFilters
   /** Toggle a dimension value in the filters (click-to-filter). */
   onFilterValue: (dim: Dimension, value: string) => void
+  /** Dashboard → Explore drill. Absent → panels offer no drill. */
+  onDrill?: (drill: DashboardDrill) => void
 }
 
 export function ObservabilityPanel({
@@ -57,11 +63,23 @@ export function ObservabilityPanel({
   thresholds,
   filters,
   onFilterValue,
+  onDrill,
 }: ObservabilityPanelProps) {
+  const dimension = panel.dimension
+  const showTraces =
+    onDrill && dimension
+      ? (value: string) => onDrill({ kind: "filter", dimension, value })
+      : undefined
   switch (panel.kind) {
     case "stat":
       return (
-        <StatPanel panel={panel} kpis={series.kpis} editMode={editMode} thresholds={thresholds} />
+        <StatPanel
+          panel={panel}
+          kpis={series.kpis}
+          editMode={editMode}
+          thresholds={thresholds}
+          onDrill={onDrill && panel.drillErrors ? () => onDrill({ kind: "errors" }) : undefined}
+        />
       )
     case "timeseries":
       return (
@@ -70,6 +88,7 @@ export function ObservabilityPanel({
           series={series}
           editMode={editMode}
           thresholds={thresholds}
+          onDrillWindow={onDrill ? (window) => onDrill({ kind: "window", ...window }) : undefined}
         />
       )
     case "donut":
@@ -84,6 +103,7 @@ export function ObservabilityPanel({
           selectedValues={
             panel.dimension ? (filters[panel.dimension] as string[] | undefined) : undefined
           }
+          onShowTraces={showTraces}
         />
       )
     case "bar":
@@ -98,6 +118,7 @@ export function ObservabilityPanel({
           selectedValues={
             panel.dimension ? (filters[panel.dimension] as string[] | undefined) : undefined
           }
+          onShowTraces={showTraces}
         />
       )
   }

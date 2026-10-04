@@ -120,3 +120,55 @@ export function bucketBoundaries(range: TimeRange, bucketMs: number): number[] {
   for (let i = 0; i < capped; i++) out.push(range.since + i * safeBucket)
   return out
 }
+
+/**
+ * True when `since` / `until` describe a usable absolute window: both finite
+ * and strictly ordered. The picker's Apply button gates on this — it used to
+ * accept a reversed or zero-width pair and `customRange` silently swapped the
+ * bounds, so a typo in "From" produced a different window than the one typed.
+ */
+export function isValidCustomRange(since: number | null, until: number | null): boolean {
+  return (
+    typeof since === "number" &&
+    typeof until === "number" &&
+    Number.isFinite(since) &&
+    Number.isFinite(until) &&
+    since < until
+  )
+}
+
+/**
+ * The absolute window one time-series point stands for: `[t, t + bucketMs)`,
+ * clipped to the range it was bucketed from (the last bucket is usually
+ * partial). What a Dashboard chart click drills into — the Explore list then
+ * shows exactly the traces that point counted.
+ */
+export function bucketWindow(
+  bucketStart: number,
+  bucketMs: number,
+  range?: Pick<TimeRange, "until">
+): { since: number; until: number } {
+  const size = Math.max(1, Math.floor(bucketMs))
+  const end = bucketStart + size
+  const until = range ? Math.min(end, Math.max(bucketStart + 1, range.until)) : end
+  return { since: bucketStart, until }
+}
+
+/** Above this, a chart's time axis must say WHICH day each tick is on. */
+export const MULTI_DAY_RANGE_MS = 86_400_000
+
+/**
+ * `Intl.DateTimeFormat` options for a time axis spanning `rangeMs`. A 7-day
+ * window labelled only "14:00 … 14:00 … 14:00" is unreadable — every tick
+ * repeats — so past {@link MULTI_DAY_RANGE_MS} the label carries the date, and
+ * past a week only the date (hours stop meaning anything at that density).
+ */
+export type AxisTimeFormat = Pick<Intl.DateTimeFormatOptions, "month" | "day" | "hour" | "minute">
+
+export function axisTimeFormat(rangeMs: number): AxisTimeFormat {
+  if (rangeMs > 7 * MULTI_DAY_RANGE_MS) return { month: "short", day: "numeric" }
+  if (rangeMs > MULTI_DAY_RANGE_MS) {
+    return { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+  }
+  return { hour: "2-digit", minute: "2-digit" }
+}

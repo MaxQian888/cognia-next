@@ -16,7 +16,7 @@
  * the window rather than by re-deriving anything.
  */
 
-import type { AgentTraceSpan, SpanOperationName } from "@/types/agent-trace/span"
+import type { AgentTraceSpan, SpanOperationName, SpanSurface } from "@/types/agent-trace/span"
 
 /**
  * How the horizontal axis is measured.
@@ -52,6 +52,12 @@ export interface TimelineBlock {
   costUsd: number
   tokens: number
   operationName: SpanOperationName
+  /** The span's own surface — one of the three fields the channel's search
+   * matches (`lib/observability/trace-search.ts`). */
+  surface: SpanSurface
+  /** Same for every block in a timeline; carried so a block can be matched on
+   * its own without the caller threading the trace id alongside. */
+  traceId: string
 }
 
 export interface TimelineLane {
@@ -335,6 +341,8 @@ export function buildTraceTimeline(
       costUsd: spanCost,
       tokens: spanTokens,
       operationName: span.operationName,
+      surface: span.surface,
+      traceId: span.traceId,
     }
 
     const lane = laneMap.get(key)
@@ -438,6 +446,33 @@ export function windowFromDrag(
     since: timeline.window.since + span * Math.max(0, lo),
     until: timeline.window.since + span * Math.min(1, hi),
   }
+}
+
+/**
+ * Keyboard zoom: scale the active window by `factor` around an anchor (0–1 of
+ * the current window; 0.5 = the centre). `factor < 1` zooms in, `> 1` zooms
+ * out. The result is clamped to the trace bounds, and a window that grows back
+ * to cover the whole trace returns `null` — "not zoomed" — so the reset chip and
+ * the waterfall's "windowed to" readout disappear exactly when they should.
+ *
+ * Zooming in is floored at 1% of the trace (or 1ms), the same "too small to be
+ * deliberate" spirit as {@link windowFromDrag}'s minimum.
+ */
+export function zoomWindow(
+  timeline: TraceTimeline,
+  factor: number,
+  anchor = 0.5
+): TimelineWindow | null {
+  const total = timeline.traceEnd - timeline.traceStart
+  if (!Number.isFinite(factor) || factor <= 0 || total <= 0) return null
+  const current = timeline.window.until - timeline.window.since
+  const minimum = Math.max(1, total * 0.01)
+  const next = Math.min(total, Math.max(minimum, current * factor))
+  if (next >= total) return null
+  const pivot = timeline.window.since + current * Math.min(1, Math.max(0, anchor))
+  let since = pivot - next * Math.min(1, Math.max(0, anchor))
+  since = Math.min(Math.max(timeline.traceStart, since), timeline.traceEnd - next)
+  return { since, until: since + next }
 }
 
 /** True when the timeline is showing less than the whole trace. */

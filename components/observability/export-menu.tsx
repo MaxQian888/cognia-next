@@ -1,10 +1,23 @@
 "use client"
 
 /**
- * Toolbar export/import menu:
- *   - Recent traces → CSV
- *   - Dashboard config (layout + thresholds + filters) → JSON
- *   - Import a dashboard config JSON
+ * Toolbar export/import control.
+ *
+ *   Explore     one button, "Export list" — the trace list on screen → CSV
+ *   Dashboard   a menu: traces → CSV · dashboard config → JSON · import JSON
+ *
+ * The dashboard-config entries are grid things (layout, hidden panels,
+ * thresholds), so they only appear where the grid is; offering "Import
+ * dashboard…" from the trace list imported a layout nobody could see change.
+ * And the label says WHAT is exported: the per-trace menu beside the timeline
+ * is "Export trace", this one is "Export list" — two buttons both called
+ * "Export" on one screen exported different things.
+ *
+ * `traces` is the caller's choice of rows, and the two sub-views choose
+ * differently on purpose: Explore exports the list it shows (search and
+ * errors-only applied), the Dashboard exports every trace its panels counted
+ * (neither control exists there, so applying them silently would export a
+ * subset the user cannot see).
  *
  * File writes go through the shared cross-platform `saveExport` (Tauri /
  * Capacitor / web); import reads the picked file, validates it with
@@ -43,6 +56,8 @@ export interface ExportMenuProps {
   traces: TraceRollupRow[]
   buildConfig: () => DashboardConfig
   onImportConfig: (cfg: DashboardConfig) => void
+  /** Offer dashboard-config export/import (the Dashboard sub-view only). */
+  showDashboardConfig?: boolean
   /** Icon-only trigger — narrow toolbars only. */
   compact?: boolean
 }
@@ -51,6 +66,7 @@ export function ExportMenu({
   traces,
   buildConfig,
   onImportConfig,
+  showDashboardConfig = false,
   compact = false,
 }: ExportMenuProps) {
   const t = useTranslations("observability.export")
@@ -100,6 +116,23 @@ export function ExportMenu({
     }
   }
 
+  if (!showDashboardConfig) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        className={compact ? "px-2" : "gap-1.5"}
+        onClick={() => void exportCsv()}
+        data-testid="export-traces-csv"
+        aria-label={t("exportList")}
+        title={compact ? t("exportList") : undefined}
+      >
+        <DownloadIcon className="size-3.5" aria-hidden />
+        {!compact && t("exportList")}
+      </Button>
+    )
+  }
+
   return (
     <>
       <Input
@@ -120,7 +153,7 @@ export function ExportMenu({
             aria-label={t("label")}
             title={compact ? t("label") : undefined}
           >
-            <DownloadIcon className="size-3.5" />
+            <DownloadIcon className="size-3.5" aria-hidden />
             {!compact && t("label")}
           </Button>
         </DropdownMenuTrigger>

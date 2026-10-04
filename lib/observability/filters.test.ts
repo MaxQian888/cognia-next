@@ -1,4 +1,13 @@
-import { applyFilters, isFilterEmpty, isValueSelected, toggleFilterValue } from "./filters"
+import {
+  FILTER_DIMENSIONS,
+  applyFilters,
+  ensureFilterValue,
+  isFilterEmpty,
+  isValueSelected,
+  sanitizeFilters,
+  toggleFilterValue,
+  type TraceFilters,
+} from "./filters"
 import { makeSpan } from "./fixtures"
 
 describe("filters", () => {
@@ -29,6 +38,11 @@ describe("filters", () => {
     })
     it("is false when any dimension has a value", () => {
       expect(isFilterEmpty({ model: ["opus"] })).toBe(false)
+    })
+    it("counts the provider and project dimensions", () => {
+      expect(isFilterEmpty({ provider: ["anthropic"] })).toBe(false)
+      expect(isFilterEmpty({ project: ["p1"] })).toBe(false)
+      expect(isFilterEmpty({ provider: [], project: [] })).toBe(true)
     })
   })
 
@@ -91,6 +105,130 @@ describe("filters", () => {
       expect(isValueSelected({ model: ["opus"] }, "model", "opus")).toBe(true)
       expect(isValueSelected({ model: ["opus"] }, "model", "sonnet")).toBe(false)
       expect(isValueSelected({}, "model", "opus")).toBe(false)
+    })
+  })
+
+  describe("FILTER_DIMENSIONS", () => {
+    it("lists every filterable dimension once, in filter-bar order", () => {
+      expect([...FILTER_DIMENSIONS]).toEqual([
+        "model",
+        "surface",
+        "operation",
+        "tool",
+        "provider",
+        "project",
+        "session",
+      ])
+      expect(new Set(FILTER_DIMENSIONS).size).toBe(FILTER_DIMENSIONS.length)
+    })
+
+    it("covers every key of TraceFilters", () => {
+      const every: Required<TraceFilters> = {
+        model: ["a"],
+        surface: ["chat"],
+        operation: ["chat"],
+        tool: ["a"],
+        session: ["a"],
+        provider: ["a"],
+        project: ["a"],
+      }
+      expect([...FILTER_DIMENSIONS].sort()).toEqual(Object.keys(every).sort())
+    })
+  })
+
+  describe("sanitizeFilters", () => {
+    it("returns {} for anything that is not a plain object", () => {
+      expect(sanitizeFilters(null)).toEqual({})
+      expect(sanitizeFilters(undefined)).toEqual({})
+      expect(sanitizeFilters("model")).toEqual({})
+      expect(sanitizeFilters(42)).toEqual({})
+      expect(sanitizeFilters(["opus"])).toEqual({})
+    })
+
+    it("keeps known dimensions, including provider and project", () => {
+      const raw = {
+        model: ["opus"],
+        surface: ["chat"],
+        operation: ["chat"],
+        tool: ["Bash"],
+        session: ["s1"],
+        provider: ["anthropic"],
+        project: ["p1"],
+      }
+      expect(sanitizeFilters(raw)).toEqual(raw)
+    })
+
+    it("drops unknown dimensions and non-array values", () => {
+      expect(sanitizeFilters({ bogus: ["x"], model: "opus", provider: ["anthropic"] })).toEqual({
+        provider: ["anthropic"],
+      })
+    })
+
+    it("drops non-string and empty-string values, and dimensions left empty", () => {
+      expect(sanitizeFilters({ model: ["opus", 3, null, ""], project: ["", 7] })).toEqual({
+        model: ["opus"],
+      })
+    })
+
+    it("de-duplicates values, keeping first-seen order", () => {
+      expect(sanitizeFilters({ provider: ["b", "a", "b"] })).toEqual({ provider: ["b", "a"] })
+    })
+
+    it("does not hand back the caller's arrays", () => {
+      const model = ["opus"]
+      const out = sanitizeFilters({ model })
+      expect(out.model).toEqual(model)
+      expect(out.model).not.toBe(model)
+    })
+  })
+
+  describe("ensureFilterValue", () => {
+    it("adds a value to an empty dimension", () => {
+      expect(ensureFilterValue({}, "provider", "anthropic")).toEqual({ provider: ["anthropic"] })
+    })
+
+    it("appends without disturbing other dimensions", () => {
+      expect(ensureFilterValue({ model: ["opus"], project: ["p1"] }, "project", "p2")).toEqual({
+        model: ["opus"],
+        project: ["p1", "p2"],
+      })
+    })
+
+    it("never deselects a value that is already selected", () => {
+      const filters: TraceFilters = { model: ["opus"] }
+      const out = ensureFilterValue(filters, "model", "opus")
+      expect(out).toBe(filters)
+      expect(out).toEqual({ model: ["opus"] })
+    })
+
+    it("does not mutate its input", () => {
+      const filters: TraceFilters = { tool: ["Bash"] }
+      ensureFilterValue(filters, "tool", "Read")
+      expect(filters).toEqual({ tool: ["Bash"] })
+    })
+  })
+
+  describe("applyFilters over provider / project", () => {
+    const attributed = [
+      makeSpan({ id: "a", providerName: "anthropic", projectId: "p1" }),
+      makeSpan({ id: "b", providerName: "openai", projectId: "p2" }),
+      makeSpan({
+        id: "c",
+        providerName: "openai",
+        projectId: "p1",
+        metadata: { providerId: "azure-openai" },
+      }),
+    ]
+
+    it("filters by provider, preferring the raw provider id", () => {
+      expect(applyFilters(attributed, { provider: ["openai"] }).map((s) => s.id)).toEqual(["b"])
+      expect(applyFilters(attributed, { provider: ["azure-openai"] }).map((s) => s.id)).toEqual([
+        "c",
+      ])
+    })
+
+    it("filters by project", () => {
+      expect(applyFilters(attributed, { project: ["p1"] }).map((s) => s.id)).toEqual(["a", "c"])
     })
   })
 })

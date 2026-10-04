@@ -6,13 +6,18 @@
  * a compact legend lists the top categories. Both the slices and the legend
  * rows are click-to-filter: choosing one toggles that value in the dashboard's
  * variable filters (Grafana-style cross-filtering).
+ *
+ * The legend is `BreakdownLegend` — the keyboard path, shared with the bar
+ * panel — and carries the "Show traces" drill when `onShowTraces` is given.
+ * Operation / surface ids render as translated labels (raw id in the title);
+ * measures format in the app locale.
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
-import { Button } from "@/components/ui/button"
 import { PanelFrame } from "./panel-frame"
+import { BreakdownLegend, formatBreakdownMetric } from "./breakdown-legend"
 import { BreakdownMetricToggle } from "./breakdown-metric-toggle"
 import type { PanelDef } from "./panel-registry"
 import {
@@ -24,8 +29,8 @@ import {
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import { paletteColor } from "@/lib/observability/chart-palette"
 import { TOOLTIP_STYLE } from "@/lib/observability/chart-config"
-import { formatUsd } from "@/lib/observability/format-utils"
-import { cn } from "@/lib/utils"
+import { useObservabilityFormatters } from "@/hooks/observability/use-observability-formatters"
+import { useBreakdownLabel } from "@/hooks/observability/use-span-labels"
 
 const TOP_N = 6
 
@@ -37,10 +42,8 @@ export interface DonutPanelProps {
   onSelectValue?: (value: string) => void
   /** Values currently active in the filter for this dimension (for highlight). */
   selectedValues?: string[]
-}
-
-function formatMetric(value: number, metric: BreakdownMetric): string {
-  return metric === "cost" ? formatUsd(value) : String(value)
+  /** Drill into Explore narrowed to one value. */
+  onShowTraces?: (value: string) => void
 }
 
 export function DonutPanel({
@@ -49,10 +52,14 @@ export function DonutPanel({
   editMode,
   onSelectValue,
   selectedValues,
+  onShowTraces,
 }: DonutPanelProps) {
   const t = useTranslations("observability")
   const colors = useThemeColors()
+  const fmt = useObservabilityFormatters()
+  const labelFor = useBreakdownLabel(panel.dimension)
   const [metric, setMetric] = useState<BreakdownMetric>("spans")
+  const title = t(`panels.${panel.titleKey}`)
 
   const data = topByMetric(rows, metric, TOP_N).map((r, i) => ({
     key: r.key,
@@ -63,7 +70,7 @@ export function DonutPanel({
 
   return (
     <PanelFrame
-      title={t(`panels.${panel.titleKey}`)}
+      title={title}
       editMode={editMode}
       data-testid={`donut-panel-${panel.id}`}
       actions={<BreakdownMetricToggle value={metric} onChange={setMetric} panelId={panel.id} />}
@@ -110,48 +117,26 @@ export function DonutPanel({
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE.contentStyle}
                   labelStyle={TOOLTIP_STYLE.labelStyle}
-                  formatter={(value) => formatMetric(Number(value), metric)}
+                  formatter={(value) => formatBreakdownMetric(Number(value), metric, fmt)}
+                  labelFormatter={(key) => labelFor(String(key))}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <ul className="flex max-h-full shrink-0 flex-col gap-1 overflow-auto pr-1 text-xs">
-            {data.map((d) => {
-              const isSelected = selected.has(d.key)
-              const content = (
-                <>
-                  <span
-                    className="size-2 shrink-0 rounded-sm"
-                    style={{ backgroundColor: d.color }}
-                  />
-                  <span className="max-w-[120px] truncate text-muted-foreground">{d.key}</span>
-                  <span className="ml-auto tabular-nums">{formatMetric(d.value, metric)}</span>
-                </>
-              )
-              return (
-                <li key={d.key} data-testid={`donut-legend-${panel.id}`}>
-                  {onSelectValue ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => onSelectValue(d.key)}
-                      aria-pressed={isSelected}
-                      data-testid={`donut-legend-${panel.id}-${d.key}`}
-                      className={cn(
-                        "h-auto w-full justify-start gap-1.5 rounded-sm px-1 py-0.5 text-left text-xs whitespace-normal",
-                        isSelected && "bg-accent/60 font-medium"
-                      )}
-                    >
-                      {content}
-                    </Button>
-                  ) : (
-                    <span className="flex items-center gap-1.5 px-1 py-0.5">{content}</span>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
+          <BreakdownLegend
+            className="max-w-[45%] shrink-0"
+            label={title}
+            testIdPrefix={`donut-legend-${panel.id}`}
+            items={data.map((d) => ({
+              key: d.key,
+              label: labelFor(d.key),
+              value: formatBreakdownMetric(d.value, metric, fmt),
+              color: d.color,
+            }))}
+            selected={selected}
+            onSelectValue={onSelectValue}
+            onShowTraces={editMode ? undefined : onShowTraces}
+          />
         </div>
       )}
     </PanelFrame>

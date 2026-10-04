@@ -9,10 +9,23 @@ import {
 } from "@/lib/observability/dashboard-config"
 import type { TraceRollupRow } from "@/lib/observability/trace-rollup"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${Object.values(vars)[0]}` : key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${Object.values(vars)[0]}` : key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 const mockSaveExport = jest.fn()
 jest.mock("@/lib/files/save-export", () => ({
@@ -83,6 +96,7 @@ function setup(props: Partial<React.ComponentProps<typeof ExportMenu>> = {}) {
       traces={traces}
       buildConfig={() => config}
       onImportConfig={onImportConfig}
+      showDashboardConfig
       {...props}
     />
   )
@@ -146,6 +160,26 @@ describe("ExportMenu", () => {
     fireEvent.change(screen.getByTestId("import-file-input"), { target: { files: [file] } })
     await waitFor(() => expect(mockToast.error).toHaveBeenCalled())
     expect(onImportConfig).not.toHaveBeenCalled()
+  })
+
+  it("offers only the list export, labelled as such, off the dashboard", async () => {
+    setup({ showDashboardConfig: false })
+    const button = screen.getByTestId("export-traces-csv")
+    expect(button).toHaveAccessibleName("exportList")
+    expect(screen.queryByTestId("export-menu")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("export-dashboard-json")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("import-dashboard")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("import-file-input")).not.toBeInTheDocument()
+    fireEvent.click(button)
+    await waitFor(() => expect(mockSaveExport).toHaveBeenCalled())
+    expect(mockSaveExport.mock.calls[0][0].mimeType).toBe("text/csv")
+  })
+
+  it("keeps an icon-only list export named when compact", () => {
+    setup({ showDashboardConfig: false, compact: true })
+    const button = screen.getByTestId("export-traces-csv")
+    expect(button).toHaveAccessibleName("exportList")
+    expect(button).toHaveAttribute("title", "exportList")
   })
 
   it("no-ops when no file is chosen", () => {

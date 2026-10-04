@@ -15,9 +15,16 @@
  * and the trace list now share this one array — paying for it twice was the
  * old shape. When the cap bites the hook says so (`truncated`,
  * `windowSpanCount`) rather than quietly showing a partial answer.
+ *
+ * A failed read is caught INSIDE the live query and reported as `error`, with
+ * `retry()` to run it again. `useLiveQuery` rethrows a rejected query during
+ * render, which would have taken the whole `/logs` page down to its error
+ * boundary for what is usually a transient IndexedDB hiccup (a blocked
+ * upgrade, a quota spike); left uncaught the other way it read as "loading"
+ * forever. Both sub-views render the error with a Retry button instead.
  */
 
-import { useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useClientLiveQuery } from "@/hooks/data"
 import { countByWindow, queryByWindow } from "@/lib/db/agent-traces"
 import { applyFilters, type TraceFilters } from "@/lib/observability/filters"
@@ -41,6 +48,25 @@ export interface ObservabilityData {
   windowSpanCount: number
   /** True when the window is larger than {@link SPAN_READ_CAP}. */
   truncated: boolean
+  /** The window read failed; `null` while it succeeds or is in flight. */
+  error: Error | null
+  /** Run the window read again (after a failure, typically). */
+  retry: () => void
+}
+
+type ReadResult<T> = { ok: true; value: T } | { ok: false; error: Error }
+
+function toError(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause))
+}
+
+/** Wrap a read so a rejection becomes data instead of a render-time throw. */
+async function settle<T>(read: () => Promise<T>): Promise<ReadResult<T>> {
+  try {
+    return { ok: true, value: await read() }
+  } catch (cause) {
+    return { ok: false, error: toError(cause) }
+  }
 }
 
 export interface UseObservabilityDataOptions {
@@ -56,18 +82,26 @@ export function useObservabilityData(
 ): ObservabilityData {
   const limit =
     typeof options.limit === "number" && options.limit > 0 ? options.limit : SPAN_READ_CAP
-  const windowSpans = useClientLiveQuery<AgentTraceSpan[]>(
-    () => queryByWindow({ since: range.since, until: range.until, limit }),
-    [range.since, range.until, tick, limit],
-    EMPTY
+  // Bumped by `retry()`; a dep of both reads so they re-run on demand.
+  const [attempt, setAttempt] = useState(0)
+  const retry = useCallback(() => setAttempt((n) => n + 1), [])
+
+  const read = useClientLiveQuery<ReadResult<AgentTraceSpan[]>>(
+    () => settle(() => queryByWindow({ since: range.since, until: range.until, limit })),
+    [range.since, range.until, tick, limit, attempt],
+    { ok: true, value: EMPTY }
   )
   // Cheap key-only count, so "you are seeing the newest 20 000 of 61 004" is
   // available without a second materialization.
-  const windowSpanCount = useClientLiveQuery<number>(
-    () => countByWindow({ since: range.since, until: range.until }),
-    [range.since, range.until, tick],
-    0
+  const counted = useClientLiveQuery<ReadResult<number>>(
+    () => settle(() => countByWindow({ since: range.since, until: range.until })),
+    [range.since, range.until, tick, attempt],
+    { ok: true, value: 0 }
   )
+
+  const windowSpans = read === undefined ? undefined : read.ok ? read.value : EMPTY
+  const windowSpanCount = counted?.ok ? counted.value : 0
+  const error = read && !read.ok ? read.error : counted && !counted.ok ? counted.error : null
 
   const rows = windowSpans ?? EMPTY
   const spans = useMemo(
@@ -80,9 +114,11 @@ export function useObservabilityData(
   return {
     spans,
     windowSpans: rows,
-    loading: windowSpans === undefined,
+    loading: read === undefined,
     spanCount: rows.length,
     windowSpanCount: total,
     truncated: total > rows.length,
+    error,
+    retry,
   }
 }

@@ -5,10 +5,24 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { VariableFilterBar, activeFilterCount, toggleFilterValue } from "./variable-filter-bar"
 import { makeSpan } from "@/lib/observability/fixtures"
+import { FILTER_DIMENSIONS } from "@/lib/observability/filters"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 describe("toggleFilterValue", () => {
   it("adds a value to an empty dimension", () => {
@@ -130,5 +144,18 @@ describe("VariableFilterBar", () => {
       await user.click(screen.getByTestId("filter-clear"))
       expect(onChange).toHaveBeenCalledWith({})
     })
+  })
+
+  it("names each option search box for its dimension", () => {
+    render(<VariableFilterBar windowSpans={spans} filters={{}} onChange={jest.fn()} />)
+    fireEvent.click(screen.getByTestId("filter-model"))
+    expect(screen.getByTestId("filter-search-model")).toHaveAccessibleName("searchLabel")
+  })
+
+  it("offers a control for every shared filter dimension", () => {
+    render(<VariableFilterBar windowSpans={spans} filters={{}} onChange={jest.fn()} />)
+    for (const dim of FILTER_DIMENSIONS) {
+      expect(screen.getByTestId(`filter-${dim}`)).toBeInTheDocument()
+    }
   })
 })

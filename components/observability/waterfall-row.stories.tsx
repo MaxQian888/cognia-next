@@ -5,7 +5,7 @@ import { makeWaterfallNodes } from "@/lib/storybook/fixtures/observability"
 
 // `WaterfallRow` is one span row in the trace waterfall — an indented label, a
 // proportional timing bar, and an expandable mid-span event list. Pure
-// props-only. `trace-05` has an errored tool span so the error variants render.
+// props-only; every row is selectable (`onSelect` logs to the actions panel). `trace-05` has an errored tool span so the error variants render.
 const nodes = makeWaterfallNodes("trace-05")
 const rootNode = nodes[0]
 const chatNode = nodes.find((n) => n.span.operationName === "chat") ?? rootNode
@@ -19,6 +19,7 @@ const meta = {
     node: rootNode,
     totalMs,
     color: "var(--chart-1)",
+    onSelect: () => {},
   },
   decorators: [
     (Story) => (

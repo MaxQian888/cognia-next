@@ -27,6 +27,17 @@ export interface StatCardProps {
   trend?: StatTrend
   className?: string
   "data-testid"?: string
+  /**
+   * Makes the tile a click-through (a native `<button>`, so it is focusable
+   * and Enter / Space activate it). The logs dashboard uses it for the tiles
+   * that name a filter — error rate opens the Error tab, and so on.
+   */
+  onClick?: () => void
+  /**
+   * What activating the tile does ("Show errors"). Becomes the tooltip and is
+   * read after the tile's own label and value; only used with `onClick`.
+   */
+  actionLabel?: string
 }
 
 export function StatCard({
@@ -38,12 +49,11 @@ export function StatCard({
   trend,
   className,
   "data-testid": testId,
+  onClick,
+  actionLabel,
 }: StatCardProps) {
-  return (
-    <div
-      className={cn("flex items-center gap-3 border-y bg-background p-4", className)}
-      data-testid={testId}
-    >
+  const body = (
+    <>
       <div
         className={cn(
           "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
@@ -62,6 +72,31 @@ export function StatCard({
         </div>
         {sub && <p className="truncate text-xs text-muted-foreground">{sub}</p>}
       </div>
+      {onClick && actionLabel ? <span className="sr-only">{actionLabel}</span> : null}
+    </>
+  )
+  const baseClass = "flex items-center gap-3 border-y bg-background p-4"
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={actionLabel}
+        className={cn(
+          baseClass,
+          "w-full text-left outline-none motion-safe:transition-colors hover:bg-muted/50",
+          "focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset",
+          className
+        )}
+        data-testid={testId}
+      >
+        {body}
+      </button>
+    )
+  }
+  return (
+    <div className={cn(baseClass, className)} data-testid={testId}>
+      {body}
     </div>
   )
 }

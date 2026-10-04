@@ -2,13 +2,21 @@
 
 /**
  * Dashboard settings drawer (gear button in the toolbar). Four sections:
- *   - Defaults: default time range + auto-refresh cadence
+ *   - View: the LIVE time range + auto-refresh cadence
  *   - Thresholds: per-metric warn/crit overrides for stat + time-series coloring
  *   - Panels: show/hide individual panels
  *   - Data: stored-span count, retention prune, and clear-all
  *
  * Config lives in the persisted observability store (via `useObservabilityControls`);
  * data operations go straight to the Dexie agent-traces layer.
+ *
+ * The first section used to be titled "Defaults" with a "Default time range"
+ * select — but both controls write the very same store fields the toolbar's
+ * picker and cadence select do, so changing the "default" instantly changed
+ * the window on screen. They are labelled for what they are now. An absolute
+ * window (a pinned link, a chart drill-down) has no preset, and the select used
+ * to show "Last 1h" for it — claiming a range that was not the one applied; it
+ * now shows a distinct, non-selectable "Custom range" item instead.
  */
 
 import { useState } from "react"
@@ -63,6 +71,8 @@ const THRESHOLD_METRICS: { metric: ThresholdMetric; unitKey: string }[] = [
 ]
 
 const PRUNE_DAYS = [7, 30, 90] as const
+/** The store's sentinel for an absolute window — see the file header. */
+const CUSTOM_RANGE_VALUE = "custom"
 const DAY_MS = 86_400_000
 
 export interface ObservabilitySettingsSheetProps {
@@ -107,16 +117,25 @@ export function ObservabilitySettingsSheet({
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-6 p-4" data-testid="observability-settings">
-            {/* Defaults */}
+            {/* View — the live controls, mirrored from the toolbar */}
             <section className="space-y-3">
-              <h3 className="text-sm font-medium">{t("defaults.title")}</h3>
+              <h3 className="text-sm font-medium">{t("view.title")}</h3>
               <div className="flex items-center justify-between gap-3">
-                <Label className="text-sm">{t("defaults.range")}</Label>
+                <Label id="settings-range-label" className="text-sm">
+                  {t("view.range")}
+                </Label>
                 <Select
-                  value={controls.rangePreset === "custom" ? "1h" : controls.rangePreset}
-                  onValueChange={(v) => controls.setRangePreset(v as RangePreset)}
+                  value={controls.rangePreset}
+                  onValueChange={(v) => {
+                    if (v !== CUSTOM_RANGE_VALUE) controls.setRangePreset(v as RangePreset)
+                  }}
                 >
-                  <SelectTrigger size="sm" className="w-[140px]" data-testid="settings-range">
+                  <SelectTrigger
+                    size="sm"
+                    className="w-[140px]"
+                    data-testid="settings-range"
+                    aria-labelledby="settings-range-label"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -126,12 +145,24 @@ export function ObservabilitySettingsSheet({
                           {tObs(`range.presets.${p}`)}
                         </SelectItem>
                       ))}
+                      {/* Only listed while it is the active value: it is a
+                          read-out of a pinned window, not something to pick
+                          (the toolbar picker is where a window is typed). */}
+                      {controls.rangePreset === CUSTOM_RANGE_VALUE && (
+                        <SelectItem
+                          value={CUSTOM_RANGE_VALUE}
+                          disabled
+                          data-testid="settings-range-custom"
+                        >
+                          {t("view.custom")}
+                        </SelectItem>
+                      )}
                     </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <Label className="text-sm">{t("defaults.refresh")}</Label>
+                <Label className="text-sm">{t("view.refresh")}</Label>
                 <RefreshSelect value={controls.refreshMs} onChange={controls.setRefreshMs} />
               </div>
             </section>

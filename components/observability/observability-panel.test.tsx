@@ -9,9 +9,22 @@ import { customRange } from "@/lib/observability/time-range"
 import { DEFAULT_THRESHOLDS } from "@/lib/observability/thresholds"
 import { makeSpan } from "@/lib/observability/fixtures"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 function makeSeries() {
   const range = customRange(0, 3000)
@@ -79,5 +92,28 @@ describe("ObservabilityPanel dispatch", () => {
     render(<ObservabilityPanel panel={panelById("bd-model")!} {...baseProps} />)
     fireEvent.click(screen.getByTestId("donut-legend-bd-model-opus"))
     expect(onFilterValue).toHaveBeenCalledWith("model", "opus")
+  })
+
+  it("turns each panel kind's drill gesture into a DashboardDrill", () => {
+    const onDrill = jest.fn()
+    const { unmount } = render(
+      <ObservabilityPanel
+        panel={panelById("kpi-tool-failures")!}
+        {...baseProps}
+        onDrill={onDrill}
+      />
+    )
+    fireEvent.click(screen.getByTestId("stat-drill-kpi-tool-failures"))
+    expect(onDrill).toHaveBeenLastCalledWith({ kind: "errors" })
+    unmount()
+
+    render(<ObservabilityPanel panel={panelById("bd-model")!} {...baseProps} onDrill={onDrill} />)
+    fireEvent.click(screen.getByTestId("donut-legend-bd-model-show-opus"))
+    expect(onDrill).toHaveBeenLastCalledWith({ kind: "filter", dimension: "model", value: "opus" })
+  })
+
+  it("offers no drill without a handler", () => {
+    render(<ObservabilityPanel panel={panelById("bd-model")!} {...baseProps} />)
+    expect(screen.queryByTestId("donut-legend-bd-model-show-opus")).not.toBeInTheDocument()
   })
 })

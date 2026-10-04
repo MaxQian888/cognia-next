@@ -1,15 +1,34 @@
 /**
- * Minimal observability formatters — stub.
+ * Compact formatters shared by the agent-trace UI.
  *
- * Cognia exposes shared formatters used across the agent-trace UI.
- * cognia-next reuses `formatDurationShort` from `@/lib/utils`; the rest
- * are slim helpers re-implemented here so migrated agent components
- * keep compiling without the full observability layer.
+ * These are locale-NEUTRAL where they can be (`12ms`, `$0.02`, `1.2K`) and
+ * take the app locale explicitly where they cannot. A component that renders a
+ * localized unit or date should prefer `useObservabilityFormatters()`
+ * (`hooks/observability/use-observability-formatters.ts`), which routes through
+ * next-intl's `useFormatter`; these plain functions remain for pure modules
+ * (CSV export, axis math) and for the many non-trace callers that predate it.
  */
 
-export function formatTimestamp(ts: number | Date): string {
+/**
+ * Epoch ms / Date → a date-time string in `locale`.
+ *
+ * `locale` is the APP locale (`useLocale()` from next-intl). Omitting it falls
+ * back to the browser's locale — which is how this used to behave everywhere,
+ * and why a zh-CN user on an en-US system saw US-ordered dates in an otherwise
+ * Chinese UI. Kept optional only for the legacy non-trace callers.
+ */
+export function formatTimestamp(
+  ts: number | Date,
+  locale?: string,
+  options?: Intl.DateTimeFormatOptions
+): string {
   const d = ts instanceof Date ? ts : new Date(ts)
-  return d.toLocaleString()
+  try {
+    return d.toLocaleString(locale, options)
+  } catch {
+    // An unknown locale tag throws a RangeError; the browser default beats a crash.
+    return d.toLocaleString(undefined, options)
+  }
 }
 
 export function formatBytesCompact(bytes: number): string {

@@ -47,4 +47,26 @@ describe("PanelFrame", () => {
     )
     expect(screen.getByRole("button", { name: "act" })).toBeInTheDocument()
   })
+
+  it("names a warn/crit level for screen readers, and stays silent when ok", () => {
+    const { rerender } = render(
+      <PanelFrame title="x" level="warn">
+        c
+      </PanelFrame>
+    )
+    expect(screen.getByTestId("panel-threshold-sr")).toHaveTextContent("Warning threshold crossed")
+    expect(screen.getByTestId("panel-threshold-sr")).toHaveClass("sr-only")
+    rerender(
+      <PanelFrame title="x" level="crit">
+        c
+      </PanelFrame>
+    )
+    expect(screen.getByTestId("panel-threshold-sr")).toHaveTextContent("Critical threshold crossed")
+    rerender(
+      <PanelFrame title="x" level="ok">
+        c
+      </PanelFrame>
+    )
+    expect(screen.queryByTestId("panel-threshold-sr")).not.toBeInTheDocument()
+  })
 })

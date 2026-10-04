@@ -8,6 +8,7 @@
  *   observability.refresh      r → refresh now
  *   observability.focusFilter  f → focus the filter bar
  *   observability.openSettings s → open settings
+ *   observability.toggleSubView v → switch Explore ⇄ Dashboard
  *
  * The single dispatcher owns the listener, the editable guard (so the keys type
  * normally in a field), and the modifier guard (a held modifier makes a
@@ -22,6 +23,7 @@ export interface HotkeyHandlers {
   onRefresh?: () => void
   onFocusFilter?: () => void
   onOpenSettings?: () => void
+  onToggleSubView?: () => void
 }
 
 function run(event: KeyboardEvent, fn: (() => void) | undefined): void {
@@ -35,4 +37,5 @@ export function useObservabilityHotkeys(handlers: HotkeyHandlers): void {
   useAppShortcut("observability.refresh", (e) => run(e, handlers.onRefresh))
   useAppShortcut("observability.focusFilter", (e) => run(e, handlers.onFocusFilter))
   useAppShortcut("observability.openSettings", (e) => run(e, handlers.onOpenSettings))
+  useAppShortcut("observability.toggleSubView", (e) => run(e, handlers.onToggleSubView))
 }

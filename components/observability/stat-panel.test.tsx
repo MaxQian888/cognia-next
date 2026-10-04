@@ -1,14 +1,27 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { StatPanel, resolveStat, statLevel } from "./stat-panel"
 import { panelById } from "./panel-registry"
 import type { WindowKpis } from "@/lib/observability/aggregate-series"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 function kpis(over: Partial<WindowKpis> = {}): WindowKpis {
   return {
@@ -38,6 +51,19 @@ describe("resolveStat", () => {
       "1.50s"
     )
   })
+
+  it("formats with a caller-supplied formatter set", () => {
+    const fmt = {
+      usd: () => "U",
+      compact: () => "C",
+      percent: () => "P",
+      duration: () => "D",
+      decimal: () => "N",
+    }
+    expect(resolveStat(panelById("kpi-cost")!, kpis(), fmt).display).toBe("U")
+    expect(resolveStat(panelById("kpi-rate")!, kpis(), fmt).display).toBe("N")
+    expect(resolveStat(panelById("kpi-latency")!, kpis(), fmt).display).toBe("D")
+  })
 })
 
 describe("statLevel", () => {
@@ -62,5 +88,42 @@ describe("StatPanel", () => {
   it("shows a threshold dot when over the limit", () => {
     render(<StatPanel panel={panelById("kpi-errors")!} kpis={kpis({ errorRate: 0.5 })} />)
     expect(screen.getByTestId("panel-threshold-dot")).toHaveAttribute("data-level", "crit")
+  })
+
+  it("makes a failing-count stat a drill into errors-only", () => {
+    const onDrill = jest.fn()
+    render(
+      <StatPanel
+        panel={panelById("kpi-errors")!}
+        kpis={kpis({ errorRate: 0.1 })}
+        onDrill={onDrill}
+      />
+    )
+    const button = screen.getByTestId("stat-drill-kpi-errors")
+    expect(button).toHaveAccessibleName("drill.showFailing")
+    fireEvent.click(button)
+    expect(onDrill).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not drill from a stat that is not a failure count", () => {
+    render(<StatPanel panel={panelById("kpi-cost")!} kpis={kpis()} onDrill={jest.fn()} />)
+    expect(screen.queryByTestId("stat-drill-kpi-cost")).not.toBeInTheDocument()
+  })
+
+  it("does not drill in edit mode, where a click starts a drag", () => {
+    render(
+      <StatPanel
+        panel={panelById("kpi-tool-failures")!}
+        kpis={kpis()}
+        onDrill={jest.fn()}
+        editMode
+      />
+    )
+    expect(screen.queryByTestId("stat-drill-kpi-tool-failures")).not.toBeInTheDocument()
+  })
+
+  it("formats through the app-locale formatter set", () => {
+    render(<StatPanel panel={panelById("kpi-errors")!} kpis={kpis({ errorRate: 0.123 })} />)
+    expect(screen.getByTestId("stat-value-kpi-errors")).toHaveTextContent("12.3%")
   })
 })

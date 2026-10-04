@@ -6,6 +6,15 @@
  * as a recharts area or line chart, with optional warn/crit threshold
  * reference lines. Colors resolve through `useThemeColors` because recharts
  * SVG attributes can't read CSS vars.
+ *
+ * Values and the time axis format in the APP locale. The axis used to print a
+ * bare `HH:mm` at every width, so a 7-day window read "14:00 · 14:00 · 14:00"
+ * with nothing to say which day a spike was on; `axisTimeFormat` adds the date
+ * past 24h. Units ("/s") are a message, not a template literal.
+ *
+ * With `onDrillWindow`, clicking a point pins the range to that point's bucket
+ * (`bucketWindow`) and the channel switches to Explore — the traces the point
+ * counted, listed.
  */
 
 import { useState } from "react"
@@ -34,7 +43,30 @@ import {
   type ThresholdMetric,
 } from "@/lib/observability/thresholds"
 import { formatMs, formatPercent, formatUsd } from "@/lib/observability/format-utils"
+import { axisTimeFormat, bucketWindow } from "@/lib/observability/time-range"
+import {
+  useObservabilityFormatters,
+  type ObservabilityFormatters,
+} from "@/hooks/observability/use-observability-formatters"
 import { cn } from "@/lib/utils"
+
+/** How a chart prints its values. `perSecond` is a translated "{value}/s". */
+export interface ChartFormatters {
+  usd: (value: number) => string
+  percent: (fraction: number, digits?: number) => string
+  duration: (ms: number) => string
+  compact: (value: number) => string
+  perSecond: (value: number) => string
+}
+
+/** Locale-neutral defaults, for callers (and tests) without a provider. */
+export const NEUTRAL_CHART_FORMATTERS: ChartFormatters = {
+  usd: (v) => formatUsd(v),
+  percent: (v, digits = 0) => formatPercent(v, digits),
+  duration: (v) => formatMs(v),
+  compact: (v) => String(Math.round(v)),
+  perSecond: (v) => `${v.toFixed(2)}/s`,
+}
 
 type SeriesDef = { key: string; labelKey: string; color: string; stackId?: string }
 
@@ -51,7 +83,8 @@ interface ChartConfig {
 export function buildChartConfig(
   panel: PanelDef,
   series: ObservabilitySeries,
-  colors: ThemeColors
+  colors: ThemeColors,
+  fmt: ChartFormatters = NEUTRAL_CHART_FORMATTERS
 ): ChartConfig {
   switch (panel.seriesKind) {
     case "cost":
@@ -59,21 +92,21 @@ export function buildChartConfig(
         type: "area",
         data: series.cost.points,
         series: [{ key: "costUsd", labelKey: "series.cost", color: colors["chart-1"] }],
-        valueFormat: (v) => formatUsd(v),
+        valueFormat: (v) => fmt.usd(v),
       }
     case "requestRate":
       return {
         type: "area",
         data: series.requestRate.points,
         series: [{ key: "perSec", labelKey: "series.perSec", color: colors["chart-2"] }],
-        valueFormat: (v) => `${v.toFixed(2)}/s`,
+        valueFormat: (v) => fmt.perSecond(v),
       }
     case "errorRate":
       return {
         type: "line",
         data: series.errorRate.points,
         series: [{ key: "errorRate", labelKey: "series.errorRate", color: colors.destructive }],
-        valueFormat: (v) => formatPercent(v, 1),
+        valueFormat: (v) => fmt.percent(v, 1),
         yDomain: [0, "auto"],
       }
     case "latency":
@@ -85,7 +118,7 @@ export function buildChartConfig(
           { key: "p95", labelKey: "series.p95", color: colors["chart-4"] },
           { key: "p99", labelKey: "series.p99", color: colors.destructive },
         ],
-        valueFormat: (v) => formatMs(v),
+        valueFormat: (v) => fmt.duration(v),
       }
     case "tokens":
       return {
@@ -107,17 +140,35 @@ export function buildChartConfig(
             stackId: "tok",
           },
         ],
-        valueFormat: (v) => String(Math.round(v)),
+        valueFormat: (v) => fmt.compact(v),
       }
     default:
       return { type: "area", data: [], series: [], valueFormat: (v) => String(v) }
   }
 }
 
-function axisTimeFormatter(t: number): string {
-  const d = new Date(t)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+/** The epoch-ms span a series covers: first bucket start → last bucket end. */
+export function seriesSpanMs(data: unknown[], bucketMs: number): number {
+  const first = (data[0] as { t?: number } | undefined)?.t
+  const last = (data[data.length - 1] as { t?: number } | undefined)?.t
+  if (typeof first !== "number" || typeof last !== "number") return 0
+  return last - first + Math.max(0, bucketMs)
+}
+
+/** The bucket start a recharts click landed on, from its index or its label. */
+export function clickedBucket(
+  state: { activeIndex?: unknown; activeLabel?: unknown } | null | undefined,
+  data: unknown[]
+): number | null {
+  if (!state) return null
+  const index =
+    typeof state.activeIndex === "number" ? state.activeIndex : Number(state.activeIndex)
+  const fromIndex = Number.isInteger(index)
+    ? (data[index] as { t?: number } | undefined)?.t
+    : undefined
+  if (typeof fromIndex === "number") return fromIndex
+  const label = Number(state.activeLabel)
+  return Number.isFinite(label) && state.activeLabel !== undefined ? label : null
 }
 
 export interface TimeSeriesPanelProps {
@@ -126,12 +177,52 @@ export interface TimeSeriesPanelProps {
   editMode?: boolean
   /** Resolved thresholds (defaults merged with user overrides). */
   thresholds?: Record<ThresholdMetric, ThresholdConfig>
+  /** Pin the range to a clicked point's bucket and switch to Explore. */
+  onDrillWindow?: (window: { since: number; until: number }) => void
 }
 
-export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSeriesPanelProps) {
+function toChartFormatters(
+  fmt: ObservabilityFormatters,
+  perSecond: (value: string) => string
+): ChartFormatters {
+  return {
+    usd: (v) => fmt.usd(v),
+    percent: (v, digits) => fmt.percent(v, digits),
+    duration: (v) => fmt.duration(v),
+    compact: (v) => fmt.compact(v),
+    perSecond: (v) => perSecond(fmt.decimal(v, 2)),
+  }
+}
+
+export function TimeSeriesPanel({
+  panel,
+  series,
+  editMode,
+  thresholds,
+  onDrillWindow,
+}: TimeSeriesPanelProps) {
   const t = useTranslations("observability")
   const colors = useThemeColors()
-  const cfg = buildChartConfig(panel, series, colors)
+  const fmt = useObservabilityFormatters()
+  const cfg = buildChartConfig(
+    panel,
+    series,
+    colors,
+    toChartFormatters(fmt, (value) => t("series.perSecValue", { value }))
+  )
+  const axisOptions = axisTimeFormat(seriesSpanMs(cfg.data, series.bucketMs))
+  const axisTime = (value: unknown) => fmt.dateTimeWith(Number(value), axisOptions)
+  // In edit mode a click is the start of a drag; never navigate on it.
+  const drill = onDrillWindow && !editMode ? onDrillWindow : undefined
+  const handleChartClick = drill
+    ? (state: { activeIndex?: unknown; activeLabel?: unknown } | null) => {
+        const start = clickedBucket(state, cfg.data)
+        if (start === null) return
+        const last = (cfg.data[cfg.data.length - 1] as { t?: number } | undefined)?.t
+        const until = typeof last === "number" ? last + series.bucketMs : undefined
+        drill(bucketWindow(start, series.bucketMs, until === undefined ? undefined : { until }))
+      }
+    : undefined
   const table = thresholds ?? DEFAULT_THRESHOLDS
   const threshold = panel.threshold ? table[panel.threshold] : undefined
 
@@ -153,7 +244,12 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
       editMode={editMode}
       data-testid={`ts-panel-${panel.id}`}
     >
-      <div className="flex h-full w-full flex-col" data-testid={`ts-chart-${panel.id}`}>
+      <div
+        className={cn("flex h-full w-full flex-col", drill && "cursor-pointer")}
+        data-testid={`ts-chart-${panel.id}`}
+        data-drillable={drill ? "true" : undefined}
+        title={drill ? t("drill.pointHint") : undefined}
+      >
         {multi && (
           <div
             className="mb-1 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1"
@@ -195,9 +291,9 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
             initialDimension={{ width: 320, height: 180 }}
           >
             {cfg.type === "area" ? (
-              <AreaChart data={cfg.data} margin={CHART_MARGINS.default}>
+              <AreaChart data={cfg.data} margin={CHART_MARGINS.default} onClick={handleChartClick}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="t" tickFormatter={axisTimeFormatter} tick={{ fontSize: 11 }} />
+                <XAxis dataKey="t" tickFormatter={axisTime} tick={{ fontSize: 11 }} />
                 <YAxis
                   tick={{ fontSize: 11 }}
                   width={48}
@@ -206,7 +302,7 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE.contentStyle}
                   labelStyle={TOOLTIP_STYLE.labelStyle}
-                  labelFormatter={(l) => axisTimeFormatter(Number(l))}
+                  labelFormatter={(l) => fmt.dateTime(Number(l))}
                   formatter={(value) => cfg.valueFormat(Number(value))}
                 />
                 {cfg.series.map((s) => (
@@ -226,9 +322,9 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
                 ))}
               </AreaChart>
             ) : (
-              <LineChart data={cfg.data} margin={CHART_MARGINS.default}>
+              <LineChart data={cfg.data} margin={CHART_MARGINS.default} onClick={handleChartClick}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="t" tickFormatter={axisTimeFormatter} tick={{ fontSize: 11 }} />
+                <XAxis dataKey="t" tickFormatter={axisTime} tick={{ fontSize: 11 }} />
                 <YAxis
                   tick={{ fontSize: 11 }}
                   width={48}
@@ -238,7 +334,7 @@ export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSer
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE.contentStyle}
                   labelStyle={TOOLTIP_STYLE.labelStyle}
-                  labelFormatter={(l) => axisTimeFormatter(Number(l))}
+                  labelFormatter={(l) => fmt.dateTime(Number(l))}
                   formatter={(value) => cfg.valueFormat(Number(value))}
                 />
                 {threshold && (

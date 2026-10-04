@@ -70,4 +70,10 @@ describe("DroppedSpansBadge", () => {
     const badge = await screen.findByTestId("dropped-spans-badge")
     expect(badge).toHaveTextContent("5 spans dropped")
   })
+
+  it("is a status live region, so its label is actually announced", async () => {
+    mockedCount.mockReturnValue(2)
+    renderBadge()
+    expect(await screen.findByRole("status")).toHaveAttribute("data-testid", "dropped-spans-badge")
+  })
 })

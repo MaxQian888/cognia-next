@@ -5,9 +5,15 @@
  * optional threshold status dot, an optional actions slot, and a drag handle
  * that only appears (and only carries the `.panel-drag-handle` class
  * react-grid-layout grabs) while the grid is in edit mode.
+ *
+ * The threshold dot is colour alone, so it also carries `sr-only` text naming
+ * the level: a screen reader used to hear "Error rate 12%" with nothing to say
+ * the tile had just turned red. `ok` stays silent — announcing "normal" on
+ * every tile is noise, and the absence of a warning already says it.
  */
 
 import type { ReactNode } from "react"
+import { useTranslations } from "next-intl"
 import { GripVerticalIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ThresholdLevel } from "@/lib/observability/thresholds"
@@ -38,6 +44,7 @@ export function PanelFrame({
   className,
   "data-testid": testId,
 }: PanelFrameProps) {
+  const t = useTranslations("observability.thresholdLevel")
   return (
     <section
       className={cn(
@@ -61,7 +68,13 @@ export function PanelFrame({
             className={cn("size-2 shrink-0 rounded-full", LEVEL_DOT[level])}
             data-testid="panel-threshold-dot"
             data-level={level}
+            aria-hidden="true"
           />
+        )}
+        {level && level !== "ok" && (
+          <span className="sr-only" data-testid="panel-threshold-sr">
+            {t(level)}
+          </span>
         )}
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground uppercase tracking-wide">
           {title}

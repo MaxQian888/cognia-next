@@ -20,7 +20,7 @@
  *
  * `dense` is the last step, for a phone: the auto-refresh cadence select is the
  * one control here that already has a second, identical home (Settings →
- * Defaults → refresh, the gear two buttons along), and dropping it is what takes
+ * View → Auto-refresh, the gear two buttons along), and dropping it is what takes
  * the row count from three to two at 390px. Nothing else is ever hidden — every
  * other control stays on screen at every width, wrapping rather than vanishing.
  *
@@ -64,7 +64,8 @@ export interface ObservabilityToolbarProps {
   onOpenSettings: () => void
   buildConfig: () => DashboardConfig
   onImportConfig: (cfg: DashboardConfig) => void
-  /** Show edit/lock + reset-layout. Only meaningful on the Dashboard sub-view. */
+  /** Show edit/lock + reset-layout and the dashboard-config export/import.
+   * Only meaningful on the Dashboard sub-view. */
   showLayoutControls?: boolean
   /** Narrow-container layout — see the file header. */
   compact?: boolean
@@ -110,7 +111,7 @@ export function ObservabilityToolbar(props: ObservabilityToolbarProps) {
           onCustom={props.onCustom}
           compact={compact}
         />
-        {/* Dense drops it — Settings → Defaults → refresh is the same control. */}
+        {/* Dense drops it — Settings → View → Auto-refresh is the same control. */}
         {!dense && (
           <RefreshSelect value={props.refreshMs} onChange={props.onRefreshMs} compact={compact} />
         )}
@@ -119,6 +120,7 @@ export function ObservabilityToolbar(props: ObservabilityToolbarProps) {
           traces={props.traces}
           buildConfig={props.buildConfig}
           onImportConfig={props.onImportConfig}
+          showDashboardConfig={props.showLayoutControls !== false}
           compact={compact}
         />
         <Button

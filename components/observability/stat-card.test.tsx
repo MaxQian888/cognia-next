@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { ActivityIcon } from "lucide-react"
 import { StatCard } from "./stat-card"
 
@@ -45,5 +45,30 @@ describe("StatCard", () => {
     const { container } = render(<StatCard icon={ActivityIcon} label="X" value={1} trend={trend} />)
     // Two svgs: the chip icon + the trend arrow.
     expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("is a plain tile, not a control, without onClick", () => {
+    render(<StatCard icon={ActivityIcon} label="X" value={1} />)
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  it("becomes a focusable button that fires onClick with the action as its tooltip", () => {
+    const onClick = jest.fn()
+    render(
+      <StatCard
+        icon={ActivityIcon}
+        label="Error rate"
+        value="4%"
+        onClick={onClick}
+        actionLabel="Show errors"
+      />
+    )
+    const button = screen.getByRole("button", { name: /Error rate.*4%.*Show errors/ })
+    expect(button).toHaveAttribute("type", "button")
+    expect(button).toHaveAttribute("title", "Show errors")
+    button.focus()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    expect(onClick).toHaveBeenCalledTimes(1)
   })
 })

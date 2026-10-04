@@ -1,12 +1,33 @@
 import "fake-indexeddb/auto"
-import { waitFor, renderHook } from "@testing-library/react"
-import { useObservabilityData } from "./use-observability-data"
-import { __clearAgentTracesForTesting, bulkInsertSpans } from "@/lib/db/agent-traces"
+import { act, waitFor, renderHook } from "@testing-library/react"
+
+// Real Dexie reads, with both window reads wrapped so a test can make one fail.
+jest.mock("@/lib/db/agent-traces", () => {
+  const actual = jest.requireActual("@/lib/db/agent-traces")
+  return {
+    ...actual,
+    queryByWindow: jest.fn(actual.queryByWindow),
+    countByWindow: jest.fn(actual.countByWindow),
+  }
+})
+
+import { SPAN_READ_CAP, useObservabilityData } from "./use-observability-data"
+import {
+  __clearAgentTracesForTesting,
+  bulkInsertSpans,
+  countByWindow,
+  queryByWindow,
+} from "@/lib/db/agent-traces"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { customRange } from "@/lib/observability/time-range"
 import { makeSpan } from "@/lib/observability/fixtures"
 
+const queryByWindowMock = queryByWindow as jest.MockedFunction<typeof queryByWindow>
+const countByWindowMock = countByWindow as jest.MockedFunction<typeof countByWindow>
+
 beforeEach(async () => {
+  queryByWindowMock.mockClear()
+  countByWindowMock.mockClear()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -65,5 +86,53 @@ describe("useObservabilityData", () => {
     await waitFor(() => expect(result.current.windowSpanCount).toBe(3))
     expect(result.current.spans.map((s) => s.id)).toEqual(["b", "c"])
     expect(result.current.truncated).toBe(true)
+  })
+
+  it("reads with the production cap unless told otherwise", async () => {
+    const { result } = renderHook(() => useObservabilityData(customRange(0, 1000), {}, 0))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(queryByWindowMock).toHaveBeenCalledWith({ since: 0, until: 1000, limit: SPAN_READ_CAP })
+  })
+
+  it("reports a failed window read as error instead of throwing, and retry recovers", async () => {
+    await bulkInsertSpans([makeSpan({ id: "a", startTime: 100 })])
+    queryByWindowMock.mockRejectedValueOnce(new Error("IDB blocked"))
+    const { result } = renderHook(() => useObservabilityData(customRange(0, 1000), {}, 0))
+    await waitFor(() => expect(result.current.error?.message).toBe("IDB blocked"))
+    // Settled, not "loading forever", and no stale rows.
+    expect(result.current.loading).toBe(false)
+    expect(result.current.spans).toEqual([])
+    expect(result.current.windowSpans).toEqual([])
+
+    act(() => result.current.retry())
+    await waitFor(() => expect(result.current.spans.map((s) => s.id)).toEqual(["a"]))
+    expect(result.current.error).toBeNull()
+    expect(queryByWindowMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports a failed count as error too", async () => {
+    await bulkInsertSpans([makeSpan({ id: "a", startTime: 100 })])
+    countByWindowMock.mockRejectedValueOnce(new Error("count failed"))
+    const { result } = renderHook(() => useObservabilityData(customRange(0, 1000), {}, 0))
+    await waitFor(() => expect(result.current.error?.message).toBe("count failed"))
+    expect(result.current.windowSpanCount).toBe(0)
+
+    act(() => result.current.retry())
+    await waitFor(() => expect(result.current.error).toBeNull())
+    await waitFor(() => expect(result.current.windowSpanCount).toBe(1))
+  })
+
+  it("wraps a non-Error rejection in an Error", async () => {
+    queryByWindowMock.mockRejectedValueOnce("quota exceeded")
+    const { result } = renderHook(() => useObservabilityData(customRange(0, 1000), {}, 0))
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error))
+    expect(result.current.error?.message).toBe("quota exceeded")
+  })
+
+  it("keeps a stable retry callback", () => {
+    const { result, rerender } = renderHook(() => useObservabilityData(customRange(0, 1000), {}, 0))
+    const first = result.current.retry
+    rerender()
+    expect(result.current.retry).toBe(first)
   })
 })

@@ -19,6 +19,38 @@ describe("formatTimestamp", () => {
   it("renders epoch ms numbers", () => {
     expect(typeof formatTimestamp(1704110400000)).toBe("string")
   })
+
+  it("formats in the given locale with the given options", () => {
+    const ts = Date.UTC(2026, 9, 3, 14, 3, 22)
+    const options: Intl.DateTimeFormatOptions = {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }
+    expect(formatTimestamp(ts, "en-US", options)).toBe("10/03/2026, 14:03")
+    expect(formatTimestamp(ts, "zh-CN", options)).toBe("2026/10/03 14:03")
+    expect(formatTimestamp(new Date(ts), "en-US", { timeZone: "UTC", month: "short" })).toBe("Oct")
+  })
+
+  it("does not follow the browser locale when one is passed", () => {
+    const ts = Date.UTC(2026, 9, 3, 14, 3, 22)
+    const options: Intl.DateTimeFormatOptions = { timeZone: "UTC", month: "long" }
+    expect(formatTimestamp(ts, "zh-CN", options)).toBe("十月")
+    expect(formatTimestamp(ts, "en-US", options)).toBe("October")
+  })
+
+  it("falls back to the default locale (keeping the options) for a malformed tag", () => {
+    const ts = Date.UTC(2026, 9, 3, 14, 3, 22)
+    const options: Intl.DateTimeFormatOptions = { timeZone: "UTC", year: "numeric" }
+    expect(() => formatTimestamp(ts, "not a locale!!", options)).not.toThrow()
+    expect(formatTimestamp(ts, "not a locale!!", options)).toBe(
+      new Date(ts).toLocaleString(undefined, options)
+    )
+  })
 })
 
 describe("formatBytesCompact", () => {

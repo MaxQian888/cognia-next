@@ -2,11 +2,24 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react"
-import { RefreshSelect } from "./refresh-select"
+import { RefreshSelect, refreshLabel } from "./refresh-select"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 // Render shadcn Select as a native <select> so jsdom can drive it.
 jest.mock("@/components/ui/select", () => ({
@@ -53,5 +66,13 @@ describe("RefreshSelect", () => {
     render(<RefreshSelect value={0} onChange={onChange} />)
     fireEvent.change(screen.getByTestId("refresh-select"), { target: { value: "30000" } })
     expect(onChange).toHaveBeenCalledWith(30_000)
+  })
+
+  it("formats cadences as localized durations, with 0 as Off", () => {
+    const t = (key: string) => `t:${key}`
+    const fmt = { duration: (ms: number | null | undefined) => `d:${ms}` }
+    expect(refreshLabel(0, t, fmt)).toBe("t:off")
+    expect(refreshLabel(5_000, t, fmt)).toBe("d:5000")
+    expect(refreshLabel(60_000, t, fmt)).toBe("d:60000")
   })
 })

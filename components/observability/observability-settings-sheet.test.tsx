@@ -4,9 +4,22 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ObservabilitySettingsSheet } from "./observability-settings-sheet"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 const controls = {
   thresholds: {},
@@ -135,5 +148,24 @@ describe("ObservabilitySettingsSheet", () => {
     fireEvent.click(screen.getByTestId("clear-all-confirm"))
     await waitFor(() => expect(mockClear).toHaveBeenCalled())
     expect(mockToast.success).toHaveBeenCalled()
+  })
+
+  it("labels the view controls for what they are — the live range and cadence", () => {
+    open()
+    expect(screen.getByText("view.title")).toBeInTheDocument()
+    expect(screen.getByText("view.range")).toBeInTheDocument()
+    expect(screen.getByText("view.refresh")).toBeInTheDocument()
+    expect(screen.getByTestId("settings-range")).toHaveAccessibleName("view.range")
+  })
+
+  it("shows a pinned absolute window as 'Custom range', not as a preset", () => {
+    const saved = controls.rangePreset
+    ;(controls as { rangePreset: string }).rangePreset = "custom"
+    try {
+      open()
+      expect(screen.getByTestId("settings-range")).toHaveTextContent("view.custom")
+    } finally {
+      ;(controls as { rangePreset: string }).rangePreset = saved
+    }
   })
 })

@@ -38,22 +38,25 @@ beforeEach(() => {
 })
 
 describe("useObservabilityHotkeys", () => {
-  it("dispatches e/r/f/s to their handlers", () => {
+  it("dispatches e/r/f/s/v to their handlers", () => {
     const h = {
       onToggleEdit: jest.fn(),
       onRefresh: jest.fn(),
       onFocusFilter: jest.fn(),
       onOpenSettings: jest.fn(),
+      onToggleSubView: jest.fn(),
     }
     mount(h)
     press("e")
     press("r")
     press("f")
     press("s")
+    press("v")
     expect(h.onToggleEdit).toHaveBeenCalledTimes(1)
     expect(h.onRefresh).toHaveBeenCalledTimes(1)
     expect(h.onFocusFilter).toHaveBeenCalledTimes(1)
     expect(h.onOpenSettings).toHaveBeenCalledTimes(1)
+    expect(h.onToggleSubView).toHaveBeenCalledTimes(1)
   })
 
   it("is case-insensitive and calls preventDefault", () => {

@@ -12,6 +12,11 @@
  *
  * The count is a module-level counter, not reactive state, so it is polled on
  * the dashboard's own refresh tick rather than subscribed to.
+ *
+ * `role="status"` makes it a polite live region: a bare `<span>` with an
+ * `aria-label` is a generic element, whose label assistive tech is free to (and
+ * mostly does) ignore, so the one signal that the waterfall is incomplete was
+ * invisible to a screen reader.
  */
 
 import { useEffect, useState } from "react"
@@ -43,6 +48,7 @@ export function DroppedSpansBadge({ refreshKey }: DroppedSpansBadgeProps) {
   return (
     <span
       className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] tabular-nums text-amber-700 dark:text-amber-400"
+      role="status"
       data-testid="dropped-spans-badge"
       title={t("tooltip", { count })}
       aria-label={t("tooltip", { count })}

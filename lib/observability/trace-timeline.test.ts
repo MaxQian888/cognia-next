@@ -5,6 +5,7 @@ import {
   isZoomed,
   laneKeyFor,
   windowFromDrag,
+  zoomWindow,
 } from "./trace-timeline"
 
 /** Root model call with two tool children, one of which failed. */
@@ -190,6 +191,17 @@ describe("buildTraceTimeline", () => {
     }
   })
 
+  it("carries each span's own surface and the trace id on its block", () => {
+    const spans = [
+      makeSpan({ traceId: "t-9", spanId: "a", startTime: 0, surface: "chat" }),
+      makeSpan({ traceId: "t-9", spanId: "b", startTime: 5, surface: "workflow" }),
+    ]
+    const blocks = buildTraceTimeline(spans).lanes.flatMap((lane) => lane.blocks)
+    const byId = new Map(blocks.map((b) => [b.spanId, b]))
+    expect(byId.get("a")).toMatchObject({ surface: "chat", traceId: "t-9" })
+    expect(byId.get("b")).toMatchObject({ surface: "workflow", traceId: "t-9" })
+  })
+
   it("totals errors, cost, and tokens across the trace", () => {
     const tl = buildTraceTimeline(trace())
     expect(tl.errorCount).toBe(1)
@@ -232,5 +244,76 @@ describe("windowFromDrag", () => {
 
   it("returns null for a degenerate timeline", () => {
     expect(windowFromDrag(buildTraceTimeline([]), 0, 1)).toBeNull()
+  })
+})
+
+describe("zoomWindow", () => {
+  // trace(): 1_000 → 2_000, so 1 000 ms total.
+  it("zooms in around the centre by default", () => {
+    const tl = buildTraceTimeline(trace())
+    expect(zoomWindow(tl, 0.5)).toEqual({ since: 1_250, until: 1_750 })
+  })
+
+  it("keeps the anchor point fixed on screen", () => {
+    const tl = buildTraceTimeline(trace())
+    // Anchor at 20% of the window = 1_200 ms; it stays 20% into the new one.
+    expect(zoomWindow(tl, 0.5, 0.2)).toEqual({ since: 1_100, until: 1_600 })
+    expect(zoomWindow(tl, 0.5, 0)).toEqual({ since: 1_000, until: 1_500 })
+    expect(zoomWindow(tl, 0.5, 1)).toEqual({ since: 1_500, until: 2_000 })
+  })
+
+  it("clamps an out-of-range anchor to the window edges", () => {
+    const tl = buildTraceTimeline(trace())
+    expect(zoomWindow(tl, 0.5, -3)).toEqual(zoomWindow(tl, 0.5, 0))
+    expect(zoomWindow(tl, 0.5, 7)).toEqual(zoomWindow(tl, 0.5, 1))
+  })
+
+  it("zooms out from an already-zoomed window, staying inside the trace", () => {
+    const tl = buildTraceTimeline(trace(), { window: { since: 1_800, until: 2_000 } })
+    const out = zoomWindow(tl, 2)
+    expect(out).not.toBeNull()
+    expect(out!.until - out!.since).toBeCloseTo(400)
+    // Centred on 1_900 the window would run to 2_100; it is pushed back inside.
+    expect(out).toEqual({ since: 1_600, until: 2_000 })
+  })
+
+  it("returns null once the window grows back to the whole trace", () => {
+    const zoomed = buildTraceTimeline(trace(), { window: { since: 1_250, until: 1_750 } })
+    expect(zoomWindow(zoomed, 2)).toBeNull()
+    expect(zoomWindow(zoomed, 10)).toBeNull()
+    expect(zoomWindow(buildTraceTimeline(trace()), 1)).toBeNull()
+  })
+
+  it("floors a zoom-in at 1% of the trace", () => {
+    const tl = buildTraceTimeline(trace())
+    const out = zoomWindow(tl, 0.000_1)
+    expect(out).not.toBeNull()
+    expect(out!.until - out!.since).toBeCloseTo(10)
+  })
+
+  it("floors a zoom-in at 1 ms on a very short trace", () => {
+    const tl = buildTraceTimeline([makeSpan({ spanId: "a", startTime: 0, durationMs: 50 })])
+    const out = zoomWindow(tl, 0.000_1)
+    expect(out!.until - out!.since).toBeCloseTo(1)
+  })
+
+  it("rejects a non-positive or non-finite factor", () => {
+    const tl = buildTraceTimeline(trace())
+    expect(zoomWindow(tl, 0)).toBeNull()
+    expect(zoomWindow(tl, -1)).toBeNull()
+    expect(zoomWindow(tl, Number.NaN)).toBeNull()
+    expect(zoomWindow(tl, Number.POSITIVE_INFINITY)).toBeNull()
+  })
+
+  it("returns null for a degenerate timeline", () => {
+    expect(zoomWindow(buildTraceTimeline([]), 0.5)).toBeNull()
+    const instant = buildTraceTimeline([makeSpan({ spanId: "a", startTime: 5, durationMs: 0 })])
+    expect(zoomWindow(instant, 0.5)).toBeNull()
+  })
+
+  it("produces a window the timeline reports as zoomed", () => {
+    const tl = buildTraceTimeline(trace())
+    const next = zoomWindow(tl, 0.5)!
+    expect(isZoomed(buildTraceTimeline(trace(), { window: next }))).toBe(true)
   })
 })

@@ -1,6 +1,10 @@
 import {
+  MULTI_DAY_RANGE_MS,
   RANGE_PRESETS,
+  axisTimeFormat,
   bucketBoundaries,
+  bucketWindow,
+  isValidCustomRange,
   customRange,
   pickBucketMs,
   presetDurationMs,
@@ -105,6 +109,54 @@ describe("time-range", () => {
       const r = resolveControlsRange("custom", 100, null, NOW)
       expect(r.preset).toBe("1h")
       expect(r.until).toBe(NOW)
+    })
+  })
+
+  describe("isValidCustomRange", () => {
+    it("accepts a finite, strictly ordered pair", () => {
+      expect(isValidCustomRange(100, 200)).toBe(true)
+    })
+
+    it("rejects reversed, zero-width, missing and non-finite bounds", () => {
+      expect(isValidCustomRange(200, 100)).toBe(false)
+      expect(isValidCustomRange(100, 100)).toBe(false)
+      expect(isValidCustomRange(null, 100)).toBe(false)
+      expect(isValidCustomRange(100, null)).toBe(false)
+      expect(isValidCustomRange(Number.NaN, 100)).toBe(false)
+      expect(isValidCustomRange(100, Number.POSITIVE_INFINITY)).toBe(false)
+    })
+  })
+
+  describe("bucketWindow", () => {
+    it("spans one bucket from its start", () => {
+      expect(bucketWindow(1_000, 500)).toEqual({ since: 1_000, until: 1_500 })
+    })
+
+    it("clips the trailing partial bucket to the range", () => {
+      expect(bucketWindow(1_000, 500, { until: 1_200 })).toEqual({ since: 1_000, until: 1_200 })
+    })
+
+    it("never returns a zero-width window", () => {
+      expect(bucketWindow(1_000, 0)).toEqual({ since: 1_000, until: 1_001 })
+      expect(bucketWindow(1_000, 500, { until: 900 })).toEqual({ since: 1_000, until: 1_001 })
+    })
+  })
+
+  describe("axisTimeFormat", () => {
+    it("is time-of-day within a day", () => {
+      expect(axisTimeFormat(MULTI_DAY_RANGE_MS)).toEqual({ hour: "2-digit", minute: "2-digit" })
+    })
+
+    it("adds the date past 24h", () => {
+      expect(axisTimeFormat(MULTI_DAY_RANGE_MS + 1)).toMatchObject({
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+      })
+    })
+
+    it("drops the time past a week", () => {
+      expect(axisTimeFormat(30 * MULTI_DAY_RANGE_MS)).toEqual({ month: "short", day: "numeric" })
     })
   })
 })

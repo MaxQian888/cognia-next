@@ -4,9 +4,23 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { TimeRangePicker, fromLocalInput, toLocalInput } from "./time-range-picker"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 describe("time-range-picker helpers", () => {
   it("round-trips epoch ms through a datetime-local string", () => {
@@ -55,8 +69,46 @@ describe("TimeRangePicker", () => {
     )
   })
 
-  it("renders a custom-range label when bounds are pinned", () => {
+  it("renders a custom-range label when bounds are pinned, in full as its title", () => {
     render(<TimeRangePicker {...baseProps} preset="custom" customSince={1000} customUntil={2000} />)
-    expect(screen.getByTestId("time-range-trigger")).toHaveTextContent("→")
+    const trigger = screen.getByTestId("time-range-trigger")
+    expect(trigger).toHaveTextContent("customLabel")
+    // Dates come from the app-locale formatter, not `toLocaleString()`.
+    expect(trigger).toHaveTextContent('"from":"Jan 1, 12:00 AM"')
+    // The label truncates; the title carries all of it.
+    expect(trigger).toHaveAttribute("title", trigger.textContent)
+  })
+
+  it("seeds From/To from the active custom range when opened", () => {
+    const since = new Date("2024-03-01T10:00").getTime()
+    const until = new Date("2024-03-01T12:30").getTime()
+    render(
+      <TimeRangePicker {...baseProps} preset="custom" customSince={since} customUntil={until} />
+    )
+    fireEvent.click(screen.getByTestId("time-range-trigger"))
+    expect(screen.getByLabelText("from")).toHaveValue("2024-03-01T10:00")
+    expect(screen.getByLabelText("to")).toHaveValue("2024-03-01T12:30")
+  })
+
+  it("leaves the fields empty for a relative preset", () => {
+    render(<TimeRangePicker {...baseProps} />)
+    fireEvent.click(screen.getByTestId("time-range-trigger"))
+    expect(screen.getByLabelText("from")).toHaveValue("")
+    expect(screen.getByTestId("range-apply-custom")).toBeDisabled()
+  })
+
+  it("refuses a reversed or zero-width range and says why", () => {
+    render(<TimeRangePicker {...baseProps} />)
+    fireEvent.click(screen.getByTestId("time-range-trigger"))
+    fireEvent.change(screen.getByLabelText("from"), { target: { value: "2024-01-01T02:00" } })
+    fireEvent.change(screen.getByLabelText("to"), { target: { value: "2024-01-01T01:00" } })
+    expect(screen.getByTestId("range-apply-custom")).toBeDisabled()
+    expect(screen.getByTestId("range-order-error")).toHaveTextContent("orderError")
+    expect(screen.getByLabelText("to")).toHaveAttribute("aria-invalid", "true")
+    fireEvent.click(screen.getByTestId("range-apply-custom"))
+    expect(baseProps.onCustom).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText("to"), { target: { value: "2024-01-01T02:00" } })
+    expect(screen.getByTestId("range-apply-custom")).toBeDisabled()
   })
 })

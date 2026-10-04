@@ -5,9 +5,22 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { ObservabilityToolbar, type ObservabilityToolbarProps } from "./observability-toolbar"
 import { DASHBOARD_CONFIG_VERSION } from "@/lib/observability/dashboard-config"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 function setup(over: Partial<ObservabilityToolbarProps> = {}) {
   const props: ObservabilityToolbarProps = {
@@ -107,5 +120,8 @@ describe("ObservabilityToolbar", () => {
     // Everything else applies to both sub-views and must survive.
     expect(screen.getByTestId("variable-filter-bar")).toBeInTheDocument()
     expect(screen.getByTestId("open-settings")).toBeInTheDocument()
+    // Off the grid the export is the list alone — no dashboard-config entries.
+    expect(screen.queryByTestId("export-menu")).not.toBeInTheDocument()
+    expect(screen.getByTestId("export-traces-csv")).toBeInTheDocument()
   })
 })

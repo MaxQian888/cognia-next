@@ -10,9 +10,22 @@ import { DEFAULT_THRESHOLDS } from "@/lib/observability/thresholds"
 import { defaultLayouts } from "./panel-registry"
 import type { PanelLayouts } from "@/stores/observability/observability-store"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Key-echo translator (with `has`, which the enum-label hook asks before
+  // translating) plus an Intl-backed formatter — what next-intl's
+  // `useFormatter` does, in "en"/UTC (next-intl itself is ESM-only and cannot
+  // be `requireActual`-ed here) — so units and currency render as in the app.
+  const translator = () => (key: string) => key
+  return {
+    useTranslations: () => Object.assign(translator(), { has: () => false }),
+    useFormatter: () => ({
+      number: (value: number, options?: Intl.NumberFormatOptions) =>
+        new Intl.NumberFormat("en", options).format(value),
+      dateTime: (value: number | Date, options?: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat("en", { timeZone: "UTC", ...options }).format(value),
+    }),
+  }
+})
 
 // Stub PanelGrid: render one real panel through the dispatch so the wiring is
 // covered, plus a button that fires onLayoutChange so the debounce is too.
@@ -38,6 +51,7 @@ jest.mock("./panel-grid", () => ({
           layout
         </button>
         {renderPanel(byId("kpi-cost"))}
+        {renderPanel(byId("kpi-errors"))}
       </div>
     )
   },
@@ -110,5 +124,28 @@ describe("ObservabilityDashboard", () => {
 
   it("no longer ships a recent-traces panel — the Explore sub-view is the list", () => {
     expect(panelById("traces")).toBeUndefined()
+  })
+
+  it("shows skeletons, not the grid, on the first read", () => {
+    renderDashboard({ loading: true })
+    expect(screen.getByTestId("observability-dashboard-skeleton")).toBeInTheDocument()
+    expect(screen.getByTestId("observability-dashboard")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status")).toHaveTextContent("loading")
+    expect(screen.queryByTestId("panel-grid")).not.toBeInTheDocument()
+  })
+
+  it("shows a failed read with a retry", () => {
+    const onRetry = jest.fn()
+    renderDashboard({ error: new Error("blocked"), onRetry })
+    expect(screen.getByTestId("observability-load-error")).toHaveTextContent("blocked")
+    fireEvent.click(screen.getByTestId("observability-retry"))
+    expect(onRetry).toHaveBeenCalled()
+  })
+
+  it("routes a failing-count stat's click into the drill handler", () => {
+    const onDrill = jest.fn()
+    renderDashboard({ onDrill })
+    fireEvent.click(screen.getByTestId("stat-drill-kpi-errors"))
+    expect(onDrill).toHaveBeenCalledWith({ kind: "errors" })
   })
 })

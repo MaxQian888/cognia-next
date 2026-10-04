@@ -1,4 +1,9 @@
+/**
+ * @jest-environment jsdom
+ */
+// jsdom: `resetView` rewrites the address bar through `window.history`.
 import {
+  OBSERVABILITY_URL_PARAMS,
   REFRESH_OPTIONS,
   migrateObservabilityView,
   useObservabilityStore,
@@ -19,7 +24,14 @@ beforeEach(() => {
     editMode: false,
     thresholds: {},
     hiddenPanels: [],
+    timelineScale: "duration",
+    timelineGrouping: "operation",
+    timelineCollapsed: false,
+    timelineZoom: null,
+    exploreQuery: "",
+    exploreSpanId: null,
   })
+  window.history.replaceState({}, "", "/logs")
 })
 
 describe("observability-store", () => {
@@ -30,6 +42,16 @@ describe("observability-store", () => {
     expect(s.refreshMs).toBe(10_000)
     expect(s.filters).toEqual({})
     expect(s.editMode).toBe(false)
+  })
+
+  it("starts the timeline and Explore state at their shipped defaults", () => {
+    const s = useObservabilityStore.getState()
+    expect(s.timelineScale).toBe("duration")
+    expect(s.timelineGrouping).toBe("operation")
+    expect(s.timelineCollapsed).toBe(false)
+    expect(s.timelineZoom).toBeNull()
+    expect(s.exploreQuery).toBe("")
+    expect(s.exploreSpanId).toBeNull()
   })
 
   it("exposes the allowed refresh cadences", () => {
@@ -130,6 +152,79 @@ describe("observability-store", () => {
     expect(s.customUntil).toBeNull()
   })
 
+  it("sets the timeline scale, grouping and collapse", () => {
+    initial.setTimelineScale("sequence")
+    initial.setTimelineGrouping("model")
+    initial.setTimelineCollapsed(true)
+    const s = useObservabilityStore.getState()
+    expect(s.timelineScale).toBe("sequence")
+    expect(s.timelineGrouping).toBe("model")
+    expect(s.timelineCollapsed).toBe(true)
+  })
+
+  it("pins a timeline zoom to its trace, and clears it with a null window", () => {
+    initial.setTimelineZoom("t1", { since: 10, until: 20 })
+    expect(useObservabilityStore.getState().timelineZoom).toEqual({
+      traceId: "t1",
+      window: { since: 10, until: 20 },
+    })
+    initial.setTimelineZoom("t1", null)
+    expect(useObservabilityStore.getState().timelineZoom).toBeNull()
+  })
+
+  it("sets the Explore search and open span", () => {
+    initial.setExploreQuery("bash")
+    initial.setExploreSpanId("s1")
+    expect(useObservabilityStore.getState().exploreQuery).toBe("bash")
+    expect(useObservabilityStore.getState().exploreSpanId).toBe("s1")
+    initial.setExploreSpanId(null)
+    expect(useObservabilityStore.getState().exploreSpanId).toBeNull()
+  })
+
+  it("persists preferences but keeps edit mode, zoom and Explore state transient", () => {
+    const partialize = useObservabilityStore.persist.getOptions().partialize!
+    const s0 = useObservabilityStore.getState()
+    s0.setTimelineZoom("t1", { since: 1, until: 2 })
+    s0.setExploreQuery("bash")
+    s0.setExploreSpanId("s1")
+    s0.setEditMode(true)
+    s0.setTimelineScale("sequence")
+    const persisted = partialize(useObservabilityStore.getState()) as Record<string, unknown>
+    expect(Object.keys(persisted).sort()).toEqual(
+      [
+        "layouts",
+        "rangePreset",
+        "customSince",
+        "customUntil",
+        "refreshMs",
+        "filters",
+        "thresholds",
+        "hiddenPanels",
+        "timelineScale",
+        "timelineGrouping",
+        "timelineCollapsed",
+      ].sort()
+    )
+    expect(persisted).not.toHaveProperty("timelineZoom")
+    expect(persisted).not.toHaveProperty("exploreQuery")
+    expect(persisted).not.toHaveProperty("exploreSpanId")
+    expect(persisted).not.toHaveProperty("editMode")
+    expect(persisted.timelineScale).toBe("sequence")
+  })
+
+  it("names the t-prefixed keys the Traces syncs own, without the shell's tview", () => {
+    expect([...OBSERVABILITY_URL_PARAMS]).toEqual([
+      "trange",
+      "tfrom",
+      "tto",
+      "tf",
+      "tspan",
+      "tq",
+      "terr",
+    ])
+    expect(OBSERVABILITY_URL_PARAMS).not.toContain("tview")
+  })
+
   it("resetView restores every persisted field to its shipped default", () => {
     const s0 = useObservabilityStore.getState()
     s0.setCustomRange(10, 20)
@@ -152,6 +247,70 @@ describe("observability-store", () => {
     expect(s.thresholds).toEqual({})
     expect(s.hiddenPanels).toEqual([])
     expect(s.editMode).toBe(false)
+  })
+
+  it("resetView also restores the timeline and Explore state", () => {
+    const s0 = useObservabilityStore.getState()
+    s0.setTimelineScale("sequence")
+    s0.setTimelineGrouping("agent")
+    s0.setTimelineCollapsed(true)
+    s0.setTimelineZoom("t1", { since: 1, until: 2 })
+    s0.setExploreQuery("bash")
+    s0.setExploreSpanId("s1")
+
+    useObservabilityStore.getState().resetView()
+
+    const s = useObservabilityStore.getState()
+    expect(s.timelineScale).toBe("duration")
+    expect(s.timelineGrouping).toBe("operation")
+    expect(s.timelineCollapsed).toBe(false)
+    expect(s.timelineZoom).toBeNull()
+    expect(s.exploreQuery).toBe("")
+    expect(s.exploreSpanId).toBeNull()
+  })
+
+  it("resetView clears the owned and legacy params from a traces URL, leaving foreign ones", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/logs?channel=traces&traceId=t1&tview=dashboard&trange=custom&tfrom=1&tto=2&tf=x" +
+        "&tspan=s1&tq=bash&terr=1"
+    )
+    useObservabilityStore.getState().resetView()
+    expect(window.location.pathname).toBe("/logs")
+    const p = new URLSearchParams(window.location.search)
+    for (const key of OBSERVABILITY_URL_PARAMS) expect(p.has(key)).toBe(false)
+    expect(p.get("channel")).toBe("traces")
+    expect(p.get("traceId")).toBe("t1")
+    // The sub-view belongs to the /logs shell, which resets it itself.
+    expect(p.get("tview")).toBe("dashboard")
+  })
+
+  it("resetView clears pre-rename legacy params on a channel=traces link", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/logs?channel=traces&traceId=t1&range=custom&from=1&to=2&f=x"
+    )
+    useObservabilityStore.getState().resetView()
+    const p = new URLSearchParams(window.location.search)
+    for (const legacy of ["range", "from", "to", "f"]) expect(p.has(legacy)).toBe(false)
+    expect(p.toString()).toBe("channel=traces&traceId=t1")
+  })
+
+  it("resetView leaves from/to alone on a non-traces URL (they are the Logs panel's)", () => {
+    window.history.replaceState({}, "", "/logs?channel=logs&from=1&to=2&range=6h&trange=24h")
+    useObservabilityStore.getState().resetView()
+    expect(new URLSearchParams(window.location.search).toString()).toBe(
+      "channel=logs&from=1&to=2&range=6h"
+    )
+  })
+
+  it("resetView drops the query string entirely when nothing else is left", () => {
+    window.history.replaceState({}, "", "/logs?trange=6h&tq=bash")
+    useObservabilityStore.getState().resetView()
+    expect(window.location.search).toBe("")
+    expect(window.location.pathname).toBe("/logs")
   })
 })
 

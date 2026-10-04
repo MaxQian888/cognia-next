@@ -1,8 +1,9 @@
 "use client"
 
 /**
- * Persisted UI state for the `/observability` dashboard: panel grid layout,
- * time-range selection, auto-refresh cadence and the variable filters.
+ * Persisted UI state for the `/logs` Traces channel (both sub-views): panel
+ * grid layout, time-range selection, auto-refresh cadence, the variable
+ * filters, and the Explore timeline's scale / grouping / zoom.
  *
  * Kept as its own store (rather than bloating `stores/ui/ui-store.ts`) to
  * match the repo's per-domain store convention (`stores/terminal`,
@@ -11,6 +12,13 @@
  * `editMode` is intentionally transient (not persisted) — the grid always
  * reopens locked so a stray drag from a previous session can't shuffle panels
  * on load.
+ *
+ * The timeline's scale, grouping and collapse are persisted preferences; its
+ * zoom window is transient (a zoom belongs to one trace and one sitting) but
+ * still lives HERE rather than in `TraceWorkspace` state, because the channel
+ * unmounts whenever the user steps over to the Logs channel and back — and a
+ * jump to "show this trace in logs" followed by a return used to throw the
+ * zoom, the scale and the grouping away every time.
  */
 
 import { create } from "zustand"
@@ -20,6 +28,16 @@ import type { RangePreset } from "@/lib/observability/time-range"
 import type { TraceFilters } from "@/lib/observability/filters"
 import type { ThresholdMetric, ThresholdOverrides } from "@/lib/observability/thresholds"
 import type { DashboardConfig } from "@/lib/observability/dashboard-config"
+import type {
+  TimelineGrouping,
+  TimelineScale,
+  TimelineWindow,
+} from "@/lib/observability/trace-timeline"
+import {
+  TRACE_CONTROL_PARAMS,
+  TRACE_EXPLORE_PARAMS,
+  consumedLegacyKeys,
+} from "@/lib/observability/url-state"
 
 export type Breakpoint = "lg" | "md" | "sm"
 
@@ -42,6 +60,12 @@ export type PanelLayouts = Record<Breakpoint, PanelLayoutItem[]>
 export const REFRESH_OPTIONS = [0, 5_000, 10_000, 30_000, 60_000] as const
 export type RefreshMs = (typeof REFRESH_OPTIONS)[number]
 
+/** A timeline zoom, pinned to the trace it was drawn on. */
+export interface TimelineZoom {
+  traceId: string
+  window: TimelineWindow
+}
+
 interface ObservabilityState {
   /** null → fall back to the registry default layout. */
   layouts: PanelLayouts | null
@@ -55,6 +79,23 @@ interface ObservabilityState {
   thresholds: ThresholdOverrides
   /** Panel ids the user has hidden from the grid. */
   hiddenPanels: string[]
+  /** Explore timeline: Duration vs Sequence. */
+  timelineScale: TimelineScale
+  /** Explore timeline: what a lane collects. */
+  timelineGrouping: TimelineGrouping
+  /** Explore timeline folded down to its toolbar, giving the waterfall the pane. */
+  timelineCollapsed: boolean
+  /** Explore timeline zoom. Transient — see the file header. */
+  timelineZoom: TimelineZoom | null
+  /**
+   * Explore's trace-list search and the span open in its detail pane.
+   * Transient like the zoom, and here for the same reason; they also ride the
+   * URL (`tq` / `tspan`), and the URL sync writes them into THIS store rather
+   * than component state so a hydrate is a plain store write, not a
+   * set-state-in-effect.
+   */
+  exploreQuery: string
+  exploreSpanId: string | null
 
   setLayouts: (layouts: PanelLayouts) => void
   resetLayouts: () => void
@@ -67,6 +108,13 @@ interface ObservabilityState {
   resetThresholds: () => void
   setHiddenPanels: (ids: string[]) => void
   togglePanelVisibility: (id: string) => void
+  setTimelineScale: (scale: TimelineScale) => void
+  setTimelineGrouping: (grouping: TimelineGrouping) => void
+  setTimelineCollapsed: (collapsed: boolean) => void
+  /** `window === null` clears the zoom. */
+  setTimelineZoom: (traceId: string, window: TimelineWindow | null) => void
+  setExploreQuery: (query: string) => void
+  setExploreSpanId: (spanId: string | null) => void
   /** Apply an imported/portable config, replacing the persisted view state. */
   importConfig: (cfg: DashboardConfig) => void
   /**
@@ -93,6 +141,12 @@ const DEFAULTS = {
   editMode: false,
   thresholds: {},
   hiddenPanels: [],
+  timelineScale: "duration",
+  timelineGrouping: "operation",
+  timelineCollapsed: false,
+  timelineZoom: null,
+  exploreQuery: "",
+  exploreSpanId: null,
 } satisfies Pick<
   ObservabilityState,
   | "layouts"
@@ -104,7 +158,49 @@ const DEFAULTS = {
   | "editMode"
   | "thresholds"
   | "hiddenPanels"
+  | "timelineScale"
+  | "timelineGrouping"
+  | "timelineCollapsed"
+  | "timelineZoom"
+  | "exploreQuery"
+  | "exploreSpanId"
 >
+
+/**
+ * Query params the Traces channel's deep-link syncs own: the view controls
+ * (`hooks/observability/use-observability-url-sync.ts`, which re-exports this)
+ * and the Explore state (`hooks/observability/use-trace-explore-url-sync.ts`).
+ * The key names themselves live in `lib/observability/url-state.ts`.
+ *
+ * Collected HERE rather than beside the hooks so
+ * {@link ObservabilityState.resetView} can clear them without importing a React
+ * module — and without the import cycle that would create, since the hooks
+ * already import this store. The sub-view key (`tview`) is deliberately absent:
+ * the `/logs` shell owns it, and its own reset clears it.
+ */
+export const OBSERVABILITY_URL_PARAMS = [...TRACE_CONTROL_PARAMS, ...TRACE_EXPLORE_PARAMS] as const
+
+/**
+ * Drop the owned params (and any pre-rename legacy params a `channel=traces`
+ * link still carries) from the address bar without navigating.
+ *
+ * A reset that only touched the store would be undone the moment the channel
+ * remounts: the syncs hydrate from the URL on mount and take priority over
+ * persisted state, so the range and filters the user just cleared would come
+ * straight back out of the query string.
+ */
+function clearObservabilityUrlParams(): void {
+  if (typeof window === "undefined") return
+  const params = new URLSearchParams(window.location.search)
+  for (const key of consumedLegacyKeys(params)) params.delete(key)
+  for (const key of OBSERVABILITY_URL_PARAMS) params.delete(key)
+  const qs = params.toString()
+  window.history.replaceState(
+    window.history.state,
+    "",
+    qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+  )
+}
 
 /**
  * v0 → v1: drop a panel layout written before the registry changed shape.
@@ -126,36 +222,6 @@ const DEFAULTS = {
  * Exported for its test, mirroring `migrateLogWorkspace` in
  * `stores/logging/log-workspace-store.ts`.
  */
-/**
- * Query params the Traces channel's deep-link sync owns
- * (`hooks/observability/use-observability-url-sync.ts`, which re-exports this).
- *
- * Defined HERE rather than beside the hook so {@link ObservabilityState.resetView}
- * can clear them without importing a React module — and without the import
- * cycle that would create, since the hook already imports this store.
- */
-export const OBSERVABILITY_URL_PARAMS = ["range", "from", "to", "f"] as const
-
-/**
- * Drop the owned params from the address bar without navigating.
- *
- * A reset that only touched the store would be undone the moment the channel
- * remounts: `useObservabilityUrlSync` hydrates from the URL on mount and takes
- * priority over persisted state, so the range and filters the user just cleared
- * would come straight back out of the query string.
- */
-function clearObservabilityUrlParams(): void {
-  if (typeof window === "undefined") return
-  const params = new URLSearchParams(window.location.search)
-  for (const key of OBSERVABILITY_URL_PARAMS) params.delete(key)
-  const qs = params.toString()
-  window.history.replaceState(
-    window.history.state,
-    "",
-    qs ? `${window.location.pathname}?${qs}` : window.location.pathname
-  )
-}
-
 export function migrateObservabilityView(
   persisted: unknown,
   from: number
@@ -195,6 +261,13 @@ export const useObservabilityStore = create<ObservabilityState>()(
             ? s.hiddenPanels.filter((p) => p !== id)
             : [...s.hiddenPanels, id],
         })),
+      setTimelineScale: (timelineScale) => set({ timelineScale }),
+      setTimelineGrouping: (timelineGrouping) => set({ timelineGrouping }),
+      setTimelineCollapsed: (timelineCollapsed) => set({ timelineCollapsed }),
+      setTimelineZoom: (traceId, window) =>
+        set({ timelineZoom: window ? { traceId, window } : null }),
+      setExploreQuery: (exploreQuery) => set({ exploreQuery }),
+      setExploreSpanId: (exploreSpanId) => set({ exploreSpanId }),
       importConfig: (cfg) =>
         set({
           layouts: cfg.layouts,
@@ -216,7 +289,8 @@ export const useObservabilityStore = create<ObservabilityState>()(
       storage: persistLocalStorage(),
       version: 1,
       migrate: (persisted, from) => migrateObservabilityView(persisted, from) as ObservabilityState,
-      // editMode stays transient — see file header.
+      // editMode, timelineZoom and the explore query/span stay transient — see
+      // the file header and the field docs.
       partialize: (s) => ({
         layouts: s.layouts,
         rangePreset: s.rangePreset,
@@ -226,6 +300,9 @@ export const useObservabilityStore = create<ObservabilityState>()(
         filters: s.filters,
         thresholds: s.thresholds,
         hiddenPanels: s.hiddenPanels,
+        timelineScale: s.timelineScale,
+        timelineGrouping: s.timelineGrouping,
+        timelineCollapsed: s.timelineCollapsed,
       }),
     }
   )

@@ -34,7 +34,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { distinctValues, type Dimension } from "@/lib/observability/breakdown"
-import { isFilterEmpty, toggleFilterValue, type TraceFilters } from "@/lib/observability/filters"
+import {
+  FILTER_DIMENSIONS,
+  isFilterEmpty,
+  toggleFilterValue,
+  type TraceFilters,
+} from "@/lib/observability/filters"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
 // Re-exported for backward compatibility — the pure toggle now lives in
@@ -42,19 +47,10 @@ import type { AgentTraceSpan } from "@/types/agent-trace/span"
 // share it without importing from a component.
 export { toggleFilterValue }
 
-// Every dimension `applyFilters` understands. `provider` / `project` (the
-// ADR-0130 cost-attribution axes) were filterable in `lib/observability/filters.ts`
-// and plotted by the `bd-provider` / `bd-project` panels, but had no control
-// here — so the only way to set them was to click a breakdown slice.
-const DIMENSIONS: readonly Dimension[] = [
-  "model",
-  "surface",
-  "operation",
-  "tool",
-  "provider",
-  "project",
-  "session",
-]
+// Every dimension `applyFilters` understands, from the ONE shared list in
+// `lib/observability/filters.ts` (the URL codec and the dashboard-config
+// importer read the same constant, so the three can no longer drift apart).
+const DIMENSIONS = FILTER_DIMENSIONS
 
 /** How many individual values are selected across every dimension. */
 export function activeFilterCount(filters: TraceFilters): number {
@@ -137,6 +133,7 @@ export function VariableFilterBar({
               options={distinctValues(windowSpans, dim)}
               selected={selectedFor(dim)}
               searchPlaceholder={t("search")}
+              searchLabel={t("searchLabel", { dimension: t(`dims.${dim}`) })}
               emptyLabel={t("empty")}
               onToggle={(value) => toggle(dim, value)}
             />
@@ -261,6 +258,7 @@ function CollapsedFilters({
                 options={distinctValues(windowSpans, drill)}
                 selected={selectedFor(drill)}
                 searchPlaceholder={t("search")}
+                searchLabel={t("searchLabel", { dimension: t(`dims.${drill}`) })}
                 emptyLabel={t("empty")}
                 onToggle={(value) => onToggle(drill, value)}
               />
@@ -277,6 +275,8 @@ interface OptionListProps {
   options: string[]
   selected: string[]
   searchPlaceholder: string
+  /** Accessible name for the search box — a placeholder is not a label. */
+  searchLabel: string
   emptyLabel: string
   onToggle: (value: string) => void
 }
@@ -287,6 +287,7 @@ function OptionList({
   options,
   selected,
   searchPlaceholder,
+  searchLabel,
   emptyLabel,
   onToggle,
 }: OptionListProps) {
@@ -303,6 +304,7 @@ function OptionList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={searchPlaceholder}
+          aria-label={searchLabel}
           className="h-7 text-xs"
           data-testid={`filter-search-${dim}`}
         />

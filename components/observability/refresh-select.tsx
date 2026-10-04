@@ -4,6 +4,10 @@
  * Auto-refresh cadence selector (off / 5s / 10s / 30s / 1m). The chosen value
  * drives `useRefreshTick`, which slides relative time windows and forces a
  * re-query even when the span table is idle.
+ *
+ * Cadence labels go through `useObservabilityFormatters().duration`, i.e.
+ * next-intl's unit formatting in the APP locale — the old `${ms / 1000}s`
+ * printed "5s" in the zh-CN UI too.
  */
 
 import { useTranslations } from "next-intl"
@@ -16,6 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  useObservabilityFormatters,
+  type ObservabilityFormatters,
+} from "@/hooks/observability/use-observability-formatters"
 import { REFRESH_OPTIONS, type RefreshMs } from "@/stores/observability/observability-store"
 
 export interface RefreshSelectProps {
@@ -25,14 +33,18 @@ export interface RefreshSelectProps {
   compact?: boolean
 }
 
-function labelFor(ms: RefreshMs, t: (key: string) => string): string {
-  if (ms === 0) return t("off")
-  if (ms < 60_000) return `${ms / 1000}s`
-  return `${ms / 60_000}m`
+/** `0` is "Off"; every other cadence is a localized duration. Exported for tests. */
+export function refreshLabel(
+  ms: RefreshMs,
+  t: (key: string) => string,
+  fmt: Pick<ObservabilityFormatters, "duration">
+): string {
+  return ms === 0 ? t("off") : fmt.duration(ms)
 }
 
 export function RefreshSelect({ value, onChange, compact = false }: RefreshSelectProps) {
   const t = useTranslations("observability.refresh")
+  const fmt = useObservabilityFormatters()
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v) as RefreshMs)}>
       <SelectTrigger
@@ -48,7 +60,7 @@ export function RefreshSelect({ value, onChange, compact = false }: RefreshSelec
         <SelectGroup>
           {REFRESH_OPTIONS.map((ms) => (
             <SelectItem key={ms} value={String(ms)} data-testid={`refresh-option-${ms}`}>
-              {labelFor(ms, t)}
+              {refreshLabel(ms, t, fmt)}
             </SelectItem>
           ))}
         </SelectGroup>

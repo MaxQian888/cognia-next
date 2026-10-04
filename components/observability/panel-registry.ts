@@ -26,6 +26,22 @@ export type StatMetric =
 /** Which derived series a time-series panel plots. */
 export type SeriesKind = "cost" | "requestRate" | "errorRate" | "latency" | "tokens"
 
+/**
+ * A Dashboard → Explore jump. The grid answers "how much"; the trace list
+ * answers "which ones" — every chart that can say which traces it counted
+ * offers the jump, and the channel (`TraceWorkspace`) applies it to the shared
+ * controls before switching sub-view, so the list shows exactly what the panel
+ * summarised:
+ *
+ *   errors   errors-only on (the error-rate and tool-failure stats)
+ *   window   the range pinned to one time-series bucket
+ *   filter   one breakdown value made sure-selected (never toggled OFF)
+ */
+export type DashboardDrill =
+  | { kind: "errors" }
+  | { kind: "window"; since: number; until: number }
+  | { kind: "filter"; dimension: Dimension; value: string }
+
 export interface PanelDef {
   id: string
   kind: PanelKind
@@ -36,6 +52,9 @@ export interface PanelDef {
   dimension?: Dimension
   /** Threshold metric for color coding (stat + time-series). */
   threshold?: ThresholdMetric
+  /** A stat whose number is a count of failing traces — clicking it drills
+   * into Explore with errors-only on. */
+  drillErrors?: boolean
 }
 
 export const PANELS: readonly PanelDef[] = [
@@ -54,6 +73,7 @@ export const PANELS: readonly PanelDef[] = [
     titleKey: "errorRate",
     statMetric: "errorRate",
     threshold: "errorRate",
+    drillErrors: true,
   },
   {
     id: "kpi-cache",
@@ -80,6 +100,7 @@ export const PANELS: readonly PanelDef[] = [
     kind: "stat",
     titleKey: "toolFailures",
     statMetric: "toolFailures",
+    drillErrors: true,
   },
   // Time-series group.
   { id: "ts-cost", kind: "timeseries", titleKey: "costOverTime", seriesKind: "cost" },
