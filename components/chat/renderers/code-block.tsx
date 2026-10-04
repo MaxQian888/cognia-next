@@ -6,8 +6,8 @@ import { Expand, ListOrdered, WrapText } from "lucide-react"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { CodeBlockFullscreen } from "@/components/chat/renderers/code-block-fullscreen"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFile } from "@/lib/files/download"
 import { loggers } from "@cognia/logging"
@@ -22,6 +22,12 @@ export interface CodeBlockProps {
   language?: string
   className?: string
   showLineNumbers?: boolean
+  /**
+   * Number the gutter shows on the first line (default 1). A file-tool read of
+   * an `offset` window passes the window's first line so the gutter keeps the
+   * file's own numbering. `highlightLines` uses the same numbering.
+   */
+  startLineNumber?: number
   /**
    * Default soft-wrap (ADR-0127: from `messageDisplay.markdown.codeWrap`). The
    * toolbar toggle is an ephemeral per-block override on top of this default,
@@ -67,11 +73,20 @@ export interface CodeBlockProps {
  */
 export const CODE_AUTO_RENDER_MAX_LINES = 2000
 
+/**
+ * The code surface and its header strip — theme tokens only, so the block
+ * reads as part of the app in light and dark alike (the same `bg-muted/40`
+ * as the tool-row blocks it nests among) rather than as a Shiki theme card.
+ */
+const CODE_SURFACE = "bg-muted/40"
+const HEADER_SURFACE = "bg-muted/70"
+
 export const CodeBlock = memo(function CodeBlock({
   code,
   language,
   className,
   showLineNumbers = true,
+  startLineNumber = 1,
   wrapLines = false,
   highlightLines = [],
   filename,
@@ -200,19 +215,32 @@ export const CodeBlock = memo(function CodeBlock({
       // longer drops syntax colour. `highlightLines` (explicit per-line emphasis)
       // is the one case that still needs the manual table below, so it opts out.
       if (hasHighlighting && highlightLines.length === 0) {
+        // Shiki's `<pre>` sits one level down (inside the light / dark theme
+        // wrappers), so the rules target `[&_pre]` — a `[&>pre]` selector never
+        // matched, which let each theme's own background (one-dark-pro's blue
+        // slate) and zero padding through instead of the app's surface.
+        const offsetGutter = localShowLineNumbers && startLineNumber !== 1
         return (
           <div
             className={cn(
               "code-scroll-x overflow-x-auto",
+              CODE_SURFACE,
               compact ? "text-xs" : "text-sm",
-              compact ? "[&>pre]:p-2.5" : "[&>pre]:p-4",
-              "[&>pre]:m-0 [&>pre]:bg-muted/50!",
+              compact ? "[&_pre]:p-2.5" : "[&_pre]:p-4",
+              "[&_pre]:m-0 [&_pre]:bg-transparent!",
               "[&_code]:font-mono",
               compact ? "[&_code]:text-xs" : "[&_code]:text-sm",
               localShowLineNumbers && "code-line-numbers",
-              wordWrap && "[&>pre]:whitespace-pre-wrap",
-              inFullscreen && "max-h-[70vh]"
+              // The gutter counter (globals.css) resets to 0 per `<code>`; an
+              // offset window resets it to `start - 1` instead.
+              offsetGutter && "[&_.shiki_code]:[counter-reset:shiki-line_var(--code-line-offset)]!",
+              wordWrap && "[&_pre]:whitespace-pre-wrap"
             )}
+            style={
+              offsetGutter
+                ? ({ "--code-line-offset": String(startLineNumber - 1) } as React.CSSProperties)
+                : undefined
+            }
             role="code"
             aria-label={t("ariaInLanguage", { language: langLabel })}
           >
@@ -230,10 +258,10 @@ export const CodeBlock = memo(function CodeBlock({
         <pre
           ref={inFullscreen ? undefined : codeRef}
           className={cn(
-            "code-scroll-x overflow-x-auto bg-muted/50 font-mono",
+            "code-scroll-x overflow-x-auto font-mono",
+            CODE_SURFACE,
             compact ? "p-2.5 text-xs" : "p-4 text-sm",
-            wordWrap && "whitespace-pre-wrap wrap-break-word",
-            inFullscreen && "max-h-[70vh]"
+            wordWrap && "whitespace-pre-wrap wrap-break-word"
           )}
         >
           <code
@@ -249,7 +277,7 @@ export const CodeBlock = memo(function CodeBlock({
                       key={i}
                       className={cn(
                         compact ? "leading-5" : "leading-relaxed",
-                        isLineHighlighted(i + 1) && "bg-primary/10"
+                        isLineHighlighted(startLineNumber + i) && "bg-primary/10"
                       )}
                     >
                       <td
@@ -259,7 +287,7 @@ export const CodeBlock = memo(function CodeBlock({
                         )}
                         aria-hidden="true"
                       >
-                        {i + 1}
+                        {startLineNumber + i}
                       </td>
                       <td
                         className={cn(
@@ -295,6 +323,7 @@ export const CodeBlock = memo(function CodeBlock({
       highlightedHtml,
       darkHighlightedHtml,
       compact,
+      startLineNumber,
       t,
     ]
   )
@@ -344,7 +373,8 @@ export const CodeBlock = memo(function CodeBlock({
       >
         <div
           className={cn(
-            "flex items-center justify-between bg-muted/80 border-b",
+            "flex items-center justify-between gap-2 border-b",
+            HEADER_SURFACE,
             compact ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"
           )}
         >
@@ -439,67 +469,24 @@ export const CodeBlock = memo(function CodeBlock({
         {truncationFooter}
       </div>
 
-      <Dialog open={isFullscreen} onOpenChange={setIsFullscreen}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span>{language || t("defaultLabel")}</span>
-              {filename && <span className="text-muted-foreground font-normal">— {filename}</span>}
-              <div className="flex items-center gap-1 ml-auto">
-                <TooltipIconButton
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
-                  aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
-                  tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
-                >
-                  <ListOrdered className="size-3.5" />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => setWordWrap(!wordWrap)}
-                  aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
-                  tooltip={wordWrap ? t("unwrap") : t("wrap")}
-                >
-                  <WrapText className="size-3.5" />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleCopy}
-                  aria-label={t("copyAria")}
-                  tooltip={t("copy")}
-                >
-                  <CopyFeedbackIcon copied={copied} size={14} />
-                </TooltipIconButton>
-                <TooltipIconButton
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleDownload}
-                  aria-label={t("downloadAria")}
-                  tooltip={t("download")}
-                >
-                  <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
-                </TooltipIconButton>
-              </div>
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-auto rounded-lg border">
-            {renderCode(true)}
-            {truncationFooter}
-          </div>
-
-          <div className="text-xs text-muted-foreground pt-2">
-            {t("footer", { lineCount: lines.length, charCount: code.length })}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CodeBlockFullscreen
+        open={isFullscreen}
+        onOpenChange={setIsFullscreen}
+        filename={filename}
+        languageLabel={langLabel}
+        lineCount={totalLines}
+        charCount={code.length}
+        showLineNumbers={localShowLineNumbers}
+        onToggleLineNumbers={() => setLocalShowLineNumbers(!localShowLineNumbers)}
+        wordWrap={wordWrap}
+        onToggleWordWrap={() => setWordWrap(!wordWrap)}
+        copied={copied}
+        onCopy={() => void handleCopy()}
+        onDownload={handleDownload}
+      >
+        {isFullscreen ? renderCode(true) : null}
+        {isFullscreen ? truncationFooter : null}
+      </CodeBlockFullscreen>
     </>
   )
 })

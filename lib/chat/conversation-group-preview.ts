@@ -46,10 +46,17 @@ function previewLimit(section: ConversationSection): number {
  * pass through with their identity intact, so callers can memo on the array
  * and only the capped groups churn. `expanded` holds the section keys
  * (`team:<id>`) whose caps the user lifted this session.
+ *
+ * `activeId` is the conversation open in the chat pane. A cut never hides it:
+ * the rail is the reader's answer to "where am I", and a conversation reached
+ * from search, a link or ⌘K is usually older than a group's newest few — capped
+ * away, the open chat had no row anywhere on screen. It stays in its own place
+ * after the preview's head, and the expander counts one row fewer.
  */
 export function applyTeamGroupPreviewCaps(
   sections: readonly ConversationSection[],
-  expanded: ReadonlySet<string>
+  expanded: ReadonlySet<string>,
+  activeId?: string | null
 ): ConversationSection[] {
   return sections.map((section) => {
     if (section.kind !== "group" || section.axis !== "team") return section
@@ -59,9 +66,14 @@ export function applyTeamGroupPreviewCaps(
     // A remainder of one or two rows buys nothing — show the tail rather than
     // an expander row nearly as tall as what it hides.
     if (hidden <= PREVIEW_TAIL_TOLERANCE) return section
+    const activeIndex = activeId ? section.sessions.findIndex((s) => s.id === activeId) : -1
+    const keepsActive = activeIndex >= limit
     // A split group's runs are cut at the same row, so the preview draws
     // only the date headers its rows sit under.
-    return { ...sliceGroupRows(section, limit), previewHidden: hidden }
+    return {
+      ...sliceGroupRows(section, limit, keepsActive ? activeId : null),
+      previewHidden: keepsActive ? hidden - 1 : hidden,
+    }
   })
 }
 

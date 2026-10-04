@@ -14,7 +14,11 @@ import {
 } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { normalizeMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { persistMessageSessionAssets } from "./session-assets"
-import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
+import {
+  invalidateTranscriptRuntime,
+  publishTranscriptRevision,
+  withTranscriptRuntimeLock,
+} from "@/lib/chat/transcript/revision-events"
 import { getDb, withDbReopenRetry } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
 import {
@@ -31,6 +35,7 @@ import {
 } from "@/lib/chat/image-edit/version"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { emptyWorkingSet } from "@/lib/chat/working-set"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -86,10 +91,29 @@ async function bumpTranscriptRevision(
  * (clear / truncate / delete) must call `invalidatePersistSnapshot`.
  */
 type PersistSnapshot = Map<string, { ref: WeakRef<UIMessage>; createdAt: number }>
+/** Optional ownership fence for provider-originated transcript writes. */
+export interface MessagePersistOptions {
+  shouldPersist?: () => boolean
+  /** An object also fences legacy frames whose generation value is absent. */
+  runtimeGeneration?: { value?: string }
+}
+
+function canPersist(
+  options: MessagePersistOptions | undefined,
+  session?: { runtimeTranscriptGeneration?: string }
+): boolean {
+  return (
+    options?.shouldPersist?.() !== false &&
+    (!options?.runtimeGeneration ||
+      (session !== undefined &&
+        options.runtimeGeneration.value === session.runtimeTranscriptGeneration))
+  )
+}
 const snapshotsByDatabase = new WeakMap<ReturnType<typeof getDb>, Map<string, PersistSnapshot>>()
 interface PendingStream {
   messages: UIMessage[]
   started: boolean
+  options?: MessagePersistOptions
 }
 const pendingWrites = new Map<
   string,
@@ -260,7 +284,7 @@ function collaborationColumnOf(
  * Every key hoisted here MUST be listed in HOISTED_META_KEYS so the next
  * persist strips it back out — the column stays the source of truth.
  */
-function rowToUIMessage(r: StoredMessage): UIMessage {
+export function rowToUIMessage(r: StoredMessage): UIMessage {
   const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
   if (r.senderId !== undefined) metadata.senderId = r.senderId
   if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
@@ -316,14 +340,22 @@ export async function listRecentMessages(sessionId: string, limit: number): Prom
  * That keeps the IO proportional to *changed* messages instead of total
  * messages, which matters once a session grows past a few dozen turns.
  */
-export function replaceSessionTranscript(sessionId: string, messages: UIMessage[]): Promise<void> {
-  return enqueueTranscriptWrite(sessionId, () => replaceSessionTranscriptNow(sessionId, messages))
+export function replaceSessionTranscript(
+  sessionId: string,
+  messages: UIMessage[],
+  options?: MessagePersistOptions
+): Promise<void> {
+  return enqueueTranscriptWrite(sessionId, () =>
+    replaceSessionTranscriptNow(sessionId, messages, options)
+  )
 }
 
 async function replaceSessionTranscriptNow(
   sessionId: string,
-  messages: UIMessage[]
+  messages: UIMessage[],
+  options?: MessagePersistOptions
 ): Promise<void> {
+  if (options?.shouldPersist?.() === false) return
   const db = getDb()
   const persistSnapshots = snapshotsFor(db)
   const now = Date.now()
@@ -336,6 +368,7 @@ async function replaceSessionTranscriptNow(
   // once per call from the session — messages inherit their session's project.
   // Falls back to the active project for a session row that predates the column.
   const session = await db.sessions.get(sessionId)
+  if (!canPersist(options, session)) return
   assertSessionWritable(session, "send-message")
   const projectId = session?.projectId ?? (await resolveScopeProjectId())
 
@@ -370,7 +403,9 @@ async function replaceSessionTranscriptNow(
       transactionDb.messageMediaRefs,
       transactionDb.sessions,
       async () => {
-        assertSessionWritable(await transactionDb.sessions.get(sessionId), "send-message")
+        const currentSession = await transactionDb.sessions.get(sessionId)
+        if (!canPersist(options, currentSession)) return
+        assertSessionWritable(currentSession, "send-message")
         // Existing ids for this session — used to compute deletions. `primaryKeys`
         // reads the index only (no row/parts deserialization), so this stays cheap.
         return transactionDb.messages
@@ -486,6 +521,20 @@ async function replaceSessionTranscriptNow(
                   : Promise.resolve([])
               return oldRefs.then(async (refs) => {
                 for (const ref of refs) orphanCandidates.add(ref.hash)
+                // This field belongs to the WorkingSet writer, never to a stale
+                // renderer UIMessage. Read only changed existing rows so normal
+                // streaming remains proportional to the changed message count.
+                const previousRows = await transactionDb.messages.bulkGet(
+                  rows.filter((row) => existingIds.has(row.id)).map((row) => row.id)
+                )
+                const previousById = new Map(
+                  previousRows.flatMap((row) => (row ? [[row.id, row] as const] : []))
+                )
+                for (const row of rows) {
+                  row.workingSetSnapshot = existingIds.has(row.id)
+                    ? previousById.get(row.id)?.workingSetSnapshot
+                    : (currentSession?.workingSet ?? emptyWorkingSet())
+                }
                 if (toDelete.length > 0) await transactionDb.messages.bulkDelete(toDelete)
                 if (rows.length > 0) await transactionDb.messages.bulkPut(rows)
                 if (changedIds.length > 0) {
@@ -634,7 +683,8 @@ async function commitMessageDeltaNow(
   let publishedRevision: number | null = null
 
   await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
-    assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+    const currentSession = await db.sessions.get(sessionId)
+    assertSessionWritable(currentSession, "send-message")
     const existingUpserts = await db.messages.bulkGet(upsertIds)
     const existingById = new Map(
       existingUpserts
@@ -667,6 +717,9 @@ async function commitMessageDeltaNow(
         senderKind,
         collaboration: collaborationColumnOf(meta),
         metadata: stripHoistedMeta(meta),
+        workingSetSnapshot: existingById.has(id)
+          ? existingById.get(id)?.workingSetSnapshot
+          : (currentSession?.workingSet ?? emptyWorkingSet()),
         createdAt: existingById.get(id)?.createdAt ?? now + index,
       }
     })
@@ -749,20 +802,26 @@ async function commitMessageDeltaNow(
  * falls back to the full reconciler, so the first chunk and every message
  * boundary retain the normal insertion/deletion guarantees.
  */
-export function persistStreamingMessages(sessionId: string, messages: UIMessage[]): Promise<void> {
+export function persistStreamingMessages(
+  sessionId: string,
+  messages: UIMessage[],
+  options?: MessagePersistOptions
+): Promise<void> {
+  if (options?.shouldPersist?.() === false) return Promise.resolve()
   const pending = pendingWrites.get(getDb().name)?.get(sessionId)
   if (pending?.stream && !pending.stream.started) {
     pending.stream.messages = messages
+    pending.stream.options = options
     return pending.promise as Promise<void>
   }
   // At most one trailing stream snapshot waits behind a slow write. A full
   // persist/delta replaces the queue entry and is an ordering barrier.
-  const stream: PendingStream = { messages, started: false }
+  const stream: PendingStream = { messages, started: false, options }
   return enqueueTranscriptWrite(
     sessionId,
     () => {
       stream.started = true
-      return persistStreamingMessagesNow(sessionId, stream.messages)
+      return persistStreamingMessagesNow(sessionId, stream.messages, stream.options)
     },
     stream
   )
@@ -770,8 +829,10 @@ export function persistStreamingMessages(sessionId: string, messages: UIMessage[
 
 async function persistStreamingMessagesNow(
   sessionId: string,
-  messages: UIMessage[]
+  messages: UIMessage[],
+  options?: MessagePersistOptions
 ): Promise<void> {
+  if (options?.shouldPersist?.() === false) return
   const db = getDb()
   const last = messages.at(-1)
   const snapshot = snapshotsFor(db).get(sessionId)
@@ -788,7 +849,7 @@ async function persistStreamingMessagesNow(
     (previous === undefined || snapshot.has(previous.id))
 
   if (!snapshotMatches) {
-    await replaceSessionTranscriptNow(sessionId, messages)
+    await replaceSessionTranscriptNow(sessionId, messages, options)
     return
   }
 
@@ -812,7 +873,9 @@ async function persistStreamingMessagesNow(
       // Read inside the transaction that it guards: this runs on every stream
       // flush, so a separate `get` was an extra round-trip per flush — and a
       // pre-check outside the write is one a concurrent lock can slip past.
-      assertSessionWritable(await db.sessions.get(sessionId), "continue-run")
+      const currentSession = await db.sessions.get(sessionId)
+      if (!canPersist(options, currentSession)) return -1
+      assertSessionWritable(currentSession, "continue-run")
       const existing = await db.messages.get(last.id)
       if (!existing) return 0
       if (existing.sessionId !== sessionId) {
@@ -851,9 +914,10 @@ async function persistStreamingMessagesNow(
   // An out-of-band delete can invalidate an otherwise compatible in-memory
   // snapshot. Recover through the full path instead of silently dropping the
   // streamed row.
+  if (updated === -1) return
   if (updated === 0) {
     invalidatePersistSnapshot(sessionId)
-    await replaceSessionTranscriptNow(sessionId, messages)
+    await replaceSessionTranscriptNow(sessionId, messages, options)
     return
   }
 
@@ -937,12 +1001,15 @@ async function dispatchChatMessageTriggers(
 }
 
 export function clearMessages(sessionId: string): Promise<void> {
-  return enqueueTranscriptWrite(sessionId, () => clearMessagesNow(sessionId))
+  return enqueueTranscriptWrite(sessionId, () =>
+    withTranscriptRuntimeLock(sessionId, () => clearMessagesNow(sessionId))
+  )
 }
 
 async function clearMessagesNow(sessionId: string): Promise<void> {
   const db = getDb()
   assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+  await invalidateTranscriptRuntime(sessionId)
   const refs = await db.messageMediaRefs
     .where("sessionId")
     .equals(sessionId)
@@ -984,12 +1051,14 @@ export async function deleteStoredMessage(messageId: string): Promise<void> {
   if (!row) return
   assertDatabaseScope(db.name)
   return enqueueTranscriptWrite(row.sessionId, () =>
-    deleteStoredMessageNow(messageId, row.sessionId)
+    withTranscriptRuntimeLock(row.sessionId, () => deleteStoredMessageNow(messageId, row.sessionId))
   )
 }
 
 async function deleteStoredMessageNow(messageId: string, sessionId: string): Promise<void> {
   const db = getDb()
+  assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+  await invalidateTranscriptRuntime(sessionId)
 
   const refs = await db.messageMediaRefs
     .where("messageId")
@@ -1126,7 +1195,9 @@ export function truncateAfter(
   options: { inclusive?: boolean } = {}
 ): Promise<void> {
   return enqueueTranscriptWrite(sessionId, () =>
-    truncateAfterNow(sessionId, anchorMessageId, options)
+    withTranscriptRuntimeLock(sessionId, () =>
+      truncateAfterNow(sessionId, anchorMessageId, options)
+    )
   )
 }
 
@@ -1139,6 +1210,7 @@ async function truncateAfterNow(
   const anchor = await db.messages.get(anchorMessageId)
   if (!anchor || anchor.sessionId !== sessionId) return
   assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+  await invalidateTranscriptRuntime(sessionId)
 
   const lowerBound = options.inclusive ? anchor.createdAt : anchor.createdAt + 1
   const orphanCandidates = new Set<string>()

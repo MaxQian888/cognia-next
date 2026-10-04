@@ -2,18 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { listMessages, persistMessages } from "@/lib/db/messages"
+import { commitMessageDelta, listMessages, persistMessages } from "@/lib/db/messages"
+import { closeEndedTurnToolParts } from "@/lib/chat/phantom-run"
 import {
-  archiveSession,
   assignSessionToFolder,
-  bulkArchiveSessions,
   bulkSetSessionsPinned,
-  bulkUnarchiveSessions,
   getSession,
   listWorkspaceSessions,
   listSessions,
   setSessionRanks,
-  unarchiveSession,
   updateSession,
 } from "@/lib/db/sessions"
 import {
@@ -23,7 +20,7 @@ import {
   renameFolder as renameFolderDb,
   reorderFolders as reorderFoldersDb,
 } from "@/lib/db/session-folders"
-import { deleteSessionsWithTeardown } from "@/lib/chat/session-deletion"
+import { deleteSessionsRouted, setSessionsArchived } from "@/lib/chat/session-archive-writes"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { buildOpeningMessage } from "@/lib/chat/opening-message"
 import { startNewSession, type NewSessionInput } from "@/lib/chat/start-session"
@@ -313,7 +310,23 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
             return
           }
         }
-        if (!cancelled) setMessages(msgs)
+        if (cancelled) return
+        // A turn that ended without delivering its tool results (a timed-out
+        // prompt, a runtime that died, a reload mid-turn) left those calls
+        // open, and every reload would show them "running" again. Close the
+        // ones the transcript proves are over, and write the fix back so the
+        // repair happens once.
+        const busy = (() => {
+          const status = useChatStore.getState().sessions[activeSessionId]?.status
+          return status === "streaming" || status === "awaiting_approval"
+        })()
+        const repaired = closeEndedTurnToolParts(msgs, { trailingMayBeLive: busy })
+        if (repaired.changed.length > 0) {
+          void commitMessageDelta(activeSessionId, { upserts: repaired.changed }).catch(
+            (error: unknown) => console.warn("closing interrupted tool calls failed", error)
+          )
+        }
+        setMessages(repaired.messages)
       })
       .catch((err) => {
         // A transient Dexie read failure must not leave the conversation
@@ -355,16 +368,10 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
       // A paired client hands the delete to its Host, which runs the cascade
       // and the sidecar teardown there and confirms a tombstone every replica
       // applies. Only when no Host takes the write is it carried out here.
-      const queued = await enqueueHostStateIntentIfAvailable({
-        sessionId: id,
-        action: { kind: "session.delete" },
-      })
-      if (!queued) {
-        await deleteSessionsWithTeardown([id])
-        return
-      }
-      // Leave the doomed conversation, as archive does, rather than keep a
-      // composer open against a row about to disappear.
+      // The local teardown deselects what it deleted; a Host-owned delete is
+      // left the same way, rather than keep a composer open against a row
+      // about to disappear.
+      await deleteSessionsRouted([id])
       if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
     },
     [setActiveSession]
@@ -387,15 +394,9 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     async (ids: readonly string[]) => {
       if (ids.length === 0) return
       const uniqueIds = [...new Set(ids)]
-      const queued = await Promise.all(
-        uniqueIds.map((sessionId) =>
-          enqueueHostStateIntentIfAvailable({ sessionId, action: { kind: "session.delete" } })
-        )
-      )
-      const legacyIds = uniqueIds.filter((_, index) => !queued[index])
       // The local cascade deselects what it deleted; the Host-owned ones are
       // left the same way `remove` leaves them.
-      if (legacyIds.length > 0) await deleteSessionsWithTeardown(legacyIds)
+      await deleteSessionsRouted(uniqueIds)
       const current = useChatStore.getState().activeSessionId
       if (current && uniqueIds.includes(current)) setActiveSession(null)
     },
@@ -416,11 +417,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
 
   const archive = useCallback(
     async (id: string) => {
-      const queued = await enqueueHostStateIntentIfAvailable({
-        sessionId: id,
-        action: { kind: "session.archive", archived: true },
-      })
-      if (!queued) await archiveSession(id)
+      await setSessionsArchived([id], true)
       // An archived session leaves the active list; deselect it if active so
       // the chat panel doesn't keep showing a now-hidden conversation.
       if (useChatStore.getState().activeSessionId === id) setActiveSession(null)
@@ -428,45 +425,19 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     [setActiveSession]
   )
 
-  const unarchive = useCallback(async (id: string) => {
-    const queued = await enqueueHostStateIntentIfAvailable({
-      sessionId: id,
-      action: { kind: "session.archive", archived: false },
-    })
-    if (!queued) await unarchiveSession(id)
-  }, [])
+  const unarchive = useCallback((id: string) => setSessionsArchived([id], false), [])
 
   const bulkArchive = useCallback(
     async (ids: readonly string[]) => {
       if (ids.length === 0) return
-      const queued = await Promise.all(
-        ids.map((sessionId) =>
-          enqueueHostStateIntentIfAvailable({
-            sessionId,
-            action: { kind: "session.archive", archived: true },
-          })
-        )
-      )
-      const legacyIds = ids.filter((_, index) => !queued[index])
-      if (legacyIds.length > 0) await bulkArchiveSessions(legacyIds)
+      await setSessionsArchived(ids, true)
       const current = useChatStore.getState().activeSessionId
       if (current && ids.includes(current)) setActiveSession(null)
     },
     [setActiveSession]
   )
 
-  const bulkUnarchive = useCallback(async (ids: readonly string[]) => {
-    const queued = await Promise.all(
-      ids.map((sessionId) =>
-        enqueueHostStateIntentIfAvailable({
-          sessionId,
-          action: { kind: "session.archive", archived: false },
-        })
-      )
-    )
-    const legacyIds = ids.filter((_, index) => !queued[index])
-    if (legacyIds.length > 0) await bulkUnarchiveSessions(legacyIds)
-  }, [])
+  const bulkUnarchive = useCallback((ids: readonly string[]) => setSessionsArchived(ids, false), [])
 
   // Folder writes route themselves (`lib/db/session-folders.ts`): on a paired
   // client each becomes a `folder.*` HostState intent — a create also shows its

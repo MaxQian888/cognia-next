@@ -10,7 +10,13 @@ import {
   HOVER_REVEAL_REQUIRED_VARIANTS,
 } from "@/lib/ui/hover-reveal"
 
-import { InlineCopyButton, ToolRowBlock, ToolRowShell, ToolStatusDot } from "./tool-row"
+import {
+  InlineCopyButton,
+  TOOL_ROW_SCROLL_TEXT_CLASS,
+  ToolRowBlock,
+  ToolRowShell,
+  ToolStatusDot,
+} from "./tool-row"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -91,6 +97,36 @@ describe("ToolRowShell", () => {
     fireEvent.click(button)
     expect(copyMock).toHaveBeenCalledWith("ls -la")
   })
+
+  it("leads with the status dot and the verb label by default", () => {
+    render(
+      <ToolRowShell
+        status="output-available"
+        ariaLabel="row"
+        testId="row"
+        lead={<span>READ</span>}
+        target={<span>file.ts</span>}
+      />
+    )
+    const inner = screen.getByTestId("row-toggle")
+    expect(inner.firstElementChild).toHaveClass("rounded-full")
+    expect(inner).toHaveTextContent("READfile.ts")
+  })
+
+  it("can drop the dot and the lead for rows whose target names them", () => {
+    render(
+      <ToolRowShell
+        status="output-available"
+        ariaLabel="row"
+        testId="row"
+        showDot={false}
+        target={<span>Thought for 3 seconds</span>}
+      />
+    )
+    const inner = screen.getByTestId("row-toggle")
+    expect(inner.querySelector(".rounded-full")).toBeNull()
+    expect(inner.textContent).toBe("Thought for 3 seconds")
+  })
 })
 
 describe("ToolRowBlock", () => {
@@ -123,5 +159,28 @@ describe("ToolRowBlock", () => {
     const block = screen.getByTestId("blk")
     expect(block.className).toContain("border-destructive/40")
     expect(block.querySelector(".border-b")?.className).toContain("text-destructive")
+  })
+})
+
+describe("TOOL_ROW_SCROLL_TEXT_CLASS", () => {
+  const classes = TOOL_ROW_SCROLL_TEXT_CLASS.split(" ")
+
+  it("lets the text box shrink inside the flex row", () => {
+    expect(classes).toContain("min-w-0")
+  })
+
+  it("keeps the ellipsis for fine pointers", () => {
+    expect(classes).toContain("truncate")
+  })
+
+  it("scrolls sideways on touch, with no visible scrollbar in any engine", () => {
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        "pointer-coarse:overflow-x-auto",
+        "pointer-coarse:text-clip",
+        "[scrollbar-width:none]",
+        "[&::-webkit-scrollbar]:hidden",
+      ])
+    )
   })
 })

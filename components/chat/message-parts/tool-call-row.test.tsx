@@ -74,6 +74,30 @@ describe("ToolCallRow", () => {
     expect(queryByText("file.ts")).toBeNull()
   })
 
+  it("lets a long upstream title shrink and scroll inside the row instead of overflowing it", () => {
+    const title = "Reading components/mobile/external-agents/agent-preset-picker.tsx"
+    const { getByTestId } = render(
+      <ToolCallRow part={partWith("tool-Read", { input: { file_path: "/a.ts" }, title })} />
+    )
+    const lead = getByTestId("tool-call-row-lead")
+    expect(lead).toHaveTextContent(title)
+    // A fixed-width (`shrink-0`) lead is what pushed the row past the screen.
+    expect(lead.className).not.toContain("shrink-0")
+    expect(lead.className).toContain("min-w-0")
+    expect(lead.className).toContain("pointer-coarse:overflow-x-auto")
+    expect(lead.className).toContain("[&::-webkit-scrollbar]:hidden")
+    // The row's hover title carries the full text.
+    expect(getByTestId("tool-call-row-Read-toggle")).toHaveAttribute("title", title)
+  })
+
+  it("keeps a short tool name fixed and scrolls the target instead", () => {
+    const { getByTestId, getByText } = render(
+      <ToolCallRow part={part("tool-Read", { file_path: "/a/b/file.ts" })} />
+    )
+    expect(getByTestId("tool-call-row-lead").className).toContain("shrink-0")
+    expect(getByText("file.ts").className).toContain("pointer-coarse:overflow-x-auto")
+  })
+
   it("uses Codex app context as a provided title without showing internal ids", () => {
     const { getByText, queryByText } = render(
       <ToolCallRow

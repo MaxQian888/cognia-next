@@ -12,7 +12,8 @@
  *   (never rejects), so a caller can keep a selection when a bulk write fails;
  * - the confirmations live here (the owner's writers are plain writes), so
  *   single and bulk actions word their outcome the same way, and archive
- *   offers its own undo — the row leaves the view it was archived from;
+ *   and unarchive offer their own undo — the row leaves the view it was in,
+ *   and undoing an archive reopens the conversation that was open;
  * - deleting or archiving the open conversation opens the row that takes its
  *   place (`nextAfterRemoval`) instead of dropping to the welcome screen;
  * - each action is counted once (`trackConversationRowAction`).
@@ -164,6 +165,34 @@ export function useConversationRowActions(options: UseConversationRowActionsOpti
       runWrite("unarchive", rowsFor(ids), () =>
         ids.length === 1 ? cb().onUnarchive?.(ids[0]!) : cb().onBulkUnarchive?.(ids)
       )
+    /**
+     * Undo an archive: restore the rows, and when the conversation that was
+     * open is among them, open it again — the archive moved the user onto its
+     * neighbour, and an undo that left them there would only half undo it.
+     */
+    const undoArchive = async (ids: string[], reopen: string | null) => {
+      const ok = await unarchiveIds(ids)
+      if (ok && reopen) cb().onSelect?.(reopen)
+    }
+    /** The open conversation, if it is one of `ids` — read before the write. */
+    const openAmong = (ids: readonly string[]) => {
+      const active = cb().activeSessionId ?? null
+      return active && ids.includes(active) ? active : null
+    }
+    /**
+     * Undo an unarchive. Written straight through the routed writer rather
+     * than the owner's `onArchive`: the owner's archive leaves the open
+     * conversation, and reversing a restore must not close the chat the user
+     * is reading.
+     */
+    //
+    // Loaded on use: the routed writer reaches the chat store and the sidecar
+    // teardown, which every list importing this hook would otherwise load up
+    // front for a toast button most users never press.
+    const undoUnarchive = async (ids: string[]) => {
+      const { setSessionsArchived } = await import("@/lib/chat/session-archive-writes")
+      await setSessionsArchived(ids, true)
+    }
     return {
       onDelete: (id: string) => {
         void trackConversationRowAction("delete")
@@ -187,12 +216,13 @@ export function useConversationRowActions(options: UseConversationRowActionsOpti
       onArchive: has.archive
         ? (id: string) => {
             void trackConversationRowAction("archive")
+            const reopen = openAmong([id])
             return runRemoval("archive", [id], () => cb().onArchive!(id), {
               success: bulkT()("archiveSuccess", { count: 1 }),
               undo: has.unarchive
                 ? {
                     label: latest.current.tRow("undo"),
-                    run: () => cb().onUnarchive?.(id),
+                    run: () => undoArchive([id], reopen),
                   }
                 : undefined,
             })
@@ -203,6 +233,7 @@ export function useConversationRowActions(options: UseConversationRowActionsOpti
             void trackConversationRowAction("unarchive")
             return runWrite("unarchive", rowsFor([id]), () => cb().onUnarchive!(id), {
               success: bulkT()("unarchiveSuccess", { count: 1 }),
+              undo: { label: latest.current.tRow("undo"), run: () => undoUnarchive([id]) },
             })
           }
         : undefined,
@@ -243,11 +274,15 @@ export function useConversationRowActions(options: UseConversationRowActionsOpti
       onBulkArchive: has.bulkArchive
         ? (ids: string[]) => {
             void trackConversationRowAction("archive", ids.length)
+            const reopen = openAmong(ids)
             return runRemoval("archive", ids, () => cb().onBulkArchive!(ids), {
               success: bulkT()("archiveSuccess", { count: ids.length }),
               undo:
                 has.bulkUnarchive || (ids.length === 1 && has.unarchive)
-                  ? { label: latest.current.tRow("undo"), run: () => unarchiveIds(ids) }
+                  ? {
+                      label: latest.current.tRow("undo"),
+                      run: () => undoArchive(ids, reopen),
+                    }
                   : undefined,
             })
           }
@@ -257,6 +292,7 @@ export function useConversationRowActions(options: UseConversationRowActionsOpti
             void trackConversationRowAction("unarchive", ids.length)
             return runWrite("unarchive", rowsFor(ids), () => cb().onBulkUnarchive!(ids), {
               success: bulkT()("unarchiveSuccess", { count: ids.length }),
+              undo: { label: latest.current.tRow("undo"), run: () => undoUnarchive(ids) },
             })
           }
         : undefined,
@@ -291,6 +327,14 @@ export function useConversationRowActions(options: UseConversationRowActionsOpti
         void trackConversationRowAction("mark-read", ids.length)
         return runWrite("markRead", rowsFor(ids), () =>
           Promise.all(ids.map((id) => markSessionRead(id)))
+        )
+      },
+      // The other direction of the same switch: a selection that is already
+      // read is flagged back for later, as one row's menu does.
+      onBulkMarkUnread: (ids: string[]) => {
+        void trackConversationRowAction("mark-unread", ids.length)
+        return runWrite("markUnread", rowsFor(ids), () =>
+          Promise.all(ids.map((id) => markSessionUnread(id)))
         )
       },
       onRenameFolder: has.renameFolder

@@ -17,6 +17,22 @@ jest.mock("@/stores/chat/chat-store", () => ({
 }))
 
 jest.mock("@/components/chat/skill-picker", () => ({
+  SkillPickerPanel: ({
+    active,
+    value,
+    onChange,
+  }: {
+    active: boolean
+    value: string[]
+    onChange: (ids: string[]) => void
+  }) => (
+    <div
+      data-testid="skill-picker-panel"
+      data-active={String(active)}
+      data-value={value.join(",")}
+      onClick={() => onChange(["s2"])}
+    />
+  ),
   SkillPickerContent: ({
     active,
     value,
@@ -35,10 +51,12 @@ jest.mock("@/components/chat/skill-picker", () => ({
     ) : null,
 }))
 
+import { useCallback, useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { SkillsMenuEntry } from "./skills-menu-entry"
+import { ComposerMenuPanelsProvider, type ComposerMenuPanels } from "./composer-menu-context"
+import { SKILLS_MENU_PANEL_ID, SkillsMenuEntry } from "./skills-menu-entry"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const session = { id: "sess-1" } as ChatSession
@@ -157,5 +175,84 @@ describe("SkillsMenuEntry", () => {
     const flyout = screen.getByTestId("composer-skill-flyout")
     expect(["top", "bottom"]).toContain(flyout.getAttribute("data-side"))
     expect(flyout.className).toContain("max-w-[calc(100vw-1rem)]")
+  })
+})
+
+/**
+ * A minimal drill-in host, standing in for the mobile `+` sheet: one slot, one
+ * active panel id, and the title it was opened with.
+ */
+function SheetHost({ children }: { children: React.ReactNode }) {
+  const [active, setActive] = useState<{ id: string; title: string } | null>(null)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const registerPanel = useCallback(() => () => {}, [])
+  const panels: ComposerMenuPanels = {
+    activePanelId: active?.id ?? null,
+    slot,
+    openPanel: (id, title) => setActive({ id, title }),
+    closePanel: () => setActive(null),
+    registerPanel,
+  }
+  return (
+    <ComposerMenuPanelsProvider value={panels}>
+      {children}
+      <p data-testid="sheet-title">{active?.title ?? ""}</p>
+      <div data-testid="sheet-slot" ref={setSlot} />
+    </ComposerMenuPanelsProvider>
+  )
+}
+
+describe("SkillsMenuEntry inside the mobile sheet", () => {
+  function renderInSheet(props: React.ComponentProps<typeof SkillsMenuEntry> = { session }) {
+    const user = userEvent.setup()
+    render(
+      <TooltipProvider>
+        <SheetHost>
+          <SkillsMenuEntry {...props} />
+        </SheetHost>
+      </TooltipProvider>
+    )
+    return user
+  }
+
+  it("drills the sheet in to the skill list instead of floating a popover", async () => {
+    const user = renderInSheet()
+    expect(screen.queryByTestId("skill-picker-panel")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("composer-skill-trigger"))
+    expect(screen.queryByTestId("composer-skill-flyout")).not.toBeInTheDocument()
+    expect(screen.getByTestId("sheet-slot")).toContainElement(
+      screen.getByTestId("skill-picker-panel")
+    )
+    // Titled by the row's own label (the global next-intl mock resolves en).
+    expect(screen.getByTestId("sheet-title")).toHaveTextContent("Attach skill")
+    // The live skills read starts only once the panel is showing.
+    expect(screen.getByTestId("skill-picker-panel")).toHaveAttribute("data-active", "true")
+  })
+
+  it("announces the panel it opens and whether it is showing", async () => {
+    const user = renderInSheet()
+    const trigger = screen.getByTestId("composer-skill-trigger")
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog")
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    await user.click(trigger)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("applies picks for the turn exactly as the flyout does", async () => {
+    mockSkillIds.current = ["s1"]
+    const user = renderInSheet()
+    await user.click(screen.getByTestId("composer-skill-trigger"))
+    expect(screen.getByTestId("skill-picker-panel")).toHaveAttribute("data-value", "s1")
+    fireEvent.click(screen.getByTestId("skill-picker-panel"))
+    expect(mockSetEphemeralSkillIds).toHaveBeenCalledWith(["s2"], "sess-1")
+  })
+
+  it("keeps the row disabled while a turn streams", () => {
+    renderInSheet({ session, disabled: true })
+    expect(screen.getByTestId("composer-skill-trigger")).toBeDisabled()
+  })
+
+  it("goes by a stable panel id", () => {
+    expect(SKILLS_MENU_PANEL_ID).toBe("skills")
   })
 })

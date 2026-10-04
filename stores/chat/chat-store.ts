@@ -26,6 +26,12 @@ import { getExecutionBroker, DEFAULT_AI_TURN_LIMIT } from "@/lib/execution/broke
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
+/** Optional facts about a status change the store cannot know on its own. */
+export interface SessionStatusOptions {
+  /** Epoch ms the turn actually started (see `setSessionStatus`). */
+  startedAt?: number
+}
+
 /**
  * A queued steer message — a follow-up the user sent while the turn was still
  * running. Holds the framing `text` (for display + replay) plus the original
@@ -489,11 +495,29 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
  * routes through this so the elapsed timer starts, pauses on approval, and
  * clears on settle in one place.
  */
-function statusPatch(state: ChatState, id: string, next: ChatStatus): Partial<SessionChatSlice> {
+function statusPatch(
+  state: ChatState,
+  id: string,
+  next: ChatStatus,
+  opts?: SessionStatusOptions
+): Partial<SessionChatSlice> {
   const prev = sliceForId(state, id)
+  const now = Date.now()
+  // Only a fresh clock can be back-dated; a running or paused one already
+  // carries the turn's real start.
+  const freshClock = prev.runTiming?.startedAt == null
+  const startedAt =
+    freshClock && typeof opts?.startedAt === "number" && Number.isFinite(opts.startedAt)
+      ? Math.min(opts.startedAt, now)
+      : now
   const patch: Partial<SessionChatSlice> = {
     status: next,
-    runTiming: nextRunTiming(prev.runTiming, next, Date.now()),
+    runTiming: nextRunTiming(prev.runTiming, next, startedAt),
+  }
+  // `nextRunTiming` stamps a fresh pause with the same instant; a back-dated
+  // turn that is paused on approval started its pause now, not at its start.
+  if (next === "awaiting_approval" && freshClock && patch.runTiming?.pausedAt != null) {
+    patch.runTiming = { ...patch.runTiming, pausedAt: now }
   }
   // Fresh-turn edge: idle/error → streaming (a non-null prior startedAt means a
   // resume from an approval pause, which must NOT mint a new run). Bump the run
@@ -770,7 +794,16 @@ interface ChatState {
   setSessionMessagesLoading: (id: string, v: boolean) => void
   setSessionMessagesLoadError: (id: string, msg: string | null) => void
   requestSessionMessagesReload: (id: string) => void
-  setSessionStatus: (id: string, s: ChatStatus) => void
+  /**
+   * Move one session's turn status. `opts.startedAt` is when the turn REALLY
+   * started, for a status this realm did not start itself (a Host reporting a
+   * turn that has been running since before this client attached): on the
+   * fresh idle/error → busy edge it seeds the run clock from that instant
+   * instead of "now", so a restored turn's elapsed timer does not count from
+   * app launch. Ignored on any other edge, and clamped to `Date.now()` so a
+   * skewed remote clock cannot produce a negative elapsed.
+   */
+  setSessionStatus: (id: string, s: ChatStatus, opts?: SessionStatusOptions) => void
   /**
    * @deprecated Emit a `CogniaDiagnostic` and call `setSessionDiagnostic`.
    * A bare string loses the code, severity, retryability and actions, forcing
@@ -1120,7 +1153,8 @@ export const useChatStore = create<ChatState>((set) => ({
         messagesLoadError: null,
       })
     ),
-  setSessionStatus: (id, st) => set((s) => patchSliceState(s, id, statusPatch(s, id, st))),
+  setSessionStatus: (id, st, opts) =>
+    set((s) => patchSliceState(s, id, statusPatch(s, id, st, opts))),
   setSessionError: (id, msg) =>
     set((s) =>
       patchSliceState(s, id, {

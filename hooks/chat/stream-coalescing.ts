@@ -17,6 +17,7 @@
  */
 
 import type { UIMessage } from "ai"
+import type { MessagePersistOptions } from "@/lib/db/messages"
 import type { RafThrottleHandle } from "@/hooks/workflow/use-raf-throttle"
 import type { DebouncedCallbackHandle } from "@/hooks/workflow/use-debounced-callback"
 
@@ -132,16 +133,16 @@ export function createDebouncedCallback<TArgs extends readonly unknown[]>(
 /** Coalescing handles for one session's streaming commit + persist. */
 export interface SessionCoalescing {
   /** rAF-throttled React store commit (≤1/frame). `call(msgs)`. */
-  commit: RafThrottleHandle<[UIMessage[]]>
+  commit: RafThrottleHandle<[UIMessage[], MessagePersistOptions?]>
   /** Debounced checkpoint request with bounded postponement. `call(msgs)`. */
-  persist: DebouncedCallbackHandle<[UIMessage[]]>
+  persist: DebouncedCallbackHandle<[UIMessage[], MessagePersistOptions?]>
 }
 
 export interface SessionCoalescingOptions {
   /** Push the latest message snapshot into the store for `sessionId`. */
   onCommit: (sessionId: string, msgs: UIMessage[]) => void
   /** Submit the latest snapshot for persistence; the callback owns durability. */
-  onPersist: (sessionId: string, msgs: UIMessage[]) => void
+  onPersist: (sessionId: string, msgs: UIMessage[], options?: MessagePersistOptions) => void
   /** Debounce window for the persist write (0 → synchronous, used in tests). */
   persistDelayMs: number
   /** Maximum checkpoint postponement while streaming (default: 1000 ms). */
@@ -164,9 +165,16 @@ export class SessionCoalescingRegistry {
     const existing = this.map.get(sessionId)
     if (existing) return existing
     const pair: SessionCoalescing = {
-      commit: createRafThrottle<[UIMessage[]]>((msgs) => this.opts.onCommit(sessionId, msgs)),
-      persist: createDebouncedCallback<[UIMessage[]]>(
-        (msgs) => this.opts.onPersist(sessionId, msgs),
+      commit: createRafThrottle<[UIMessage[], MessagePersistOptions?]>((msgs, options) => {
+        if (options?.shouldPersist?.() === false) return
+        this.opts.onCommit(sessionId, msgs)
+      }),
+      persist: createDebouncedCallback<[UIMessage[], MessagePersistOptions?]>(
+        (msgs, options) => {
+          if (options?.shouldPersist?.() === false) return
+          if (options) this.opts.onPersist(sessionId, msgs, options)
+          else this.opts.onPersist(sessionId, msgs)
+        },
         this.opts.persistDelayMs,
         this.opts.persistMaxWaitMs ?? 1000
       ),

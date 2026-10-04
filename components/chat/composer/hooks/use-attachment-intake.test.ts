@@ -110,6 +110,45 @@ beforeEach(() => {
 })
 
 describe("acceptFiles — the single gate", () => {
+  it("does not prepare files for a destination that already left", async () => {
+    const { view, add } = mount()
+    await expect(
+      view.result.current.acceptFiles([file("photo.png", "image/png")], {
+        isCurrent: () => false,
+      })
+    ).resolves.toEqual([])
+    expect(prepared).not.toHaveBeenCalled()
+    expect(add).not.toHaveBeenCalled()
+  })
+
+  it("discards prepared images after their destination changes without emitting notifications", async () => {
+    const photo = file("photo.png", "image/png")
+    let finish!: (value: unknown) => void
+    prepared.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    const { view, add, expectCitation } = mount()
+    let current = true
+    let pending!: Promise<File[]>
+    act(() => {
+      pending = view.result.current.acceptFiles([photo], { isCurrent: () => current })
+    })
+    expect(view.result.current.isPreparingAttachments).toBe(true)
+    current = false
+    await act(async () => {
+      finish({ files: [photo], unsupportedCount: 1, tooLargeCount: 1, optimizedCount: 1 })
+      await expect(pending).resolves.toEqual([])
+    })
+    expect(add).not.toHaveBeenCalled()
+    expect(expectCitation).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(view.result.current.isPreparingAttachments).toBe(false)
+    expect(view.result.current.preparingImageCount).toBe(0)
+  })
+
   it("stages prepared files", async () => {
     const f = file("a.txt")
     prepared.mockResolvedValue({

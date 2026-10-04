@@ -184,7 +184,9 @@ describe("useStickToBottom", () => {
     content.append(button)
     const { result } = setup(box, content)
     act(() => result.current.handleContentClick({ target: button } as never))
-    expect(result.current.atBottom).toBe(false)
+    // Following stops, but the reader is still physically at the foot.
+    expect(result.current.following).toBe(false)
+    expect(result.current.atBottom).toBe(true)
     box.setHeight(600)
     // A browser clamps the viewport to the shortened content's foot and emits scroll.
     box.el.scrollTop = 400
@@ -266,6 +268,8 @@ describe("useStickToBottom", () => {
       observers.fire(content)
     })
     expect(box.writes).toEqual([])
+    // The expansion pushed the foot 600px below the reader.
+    expect(result.current.following).toBe(false)
     expect(result.current.atBottom).toBe(false)
     act(() => result.current.resetToBottom())
     button.setAttribute("aria-haspopup", "menu")
@@ -305,5 +309,108 @@ describe("useStickToBottom", () => {
       result.current.pinNow()
     })
     expect(box.writes).toEqual([1200])
+  })
+
+  it("keeps following when growth lands between a pin and its scroll event", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const { result } = setup(box, content)
+    expect(box.writes).toEqual([1000])
+    // The stream grew before the pin's scroll event was delivered: the reader
+    // did not move, the foot did.
+    box.setHeight(1600)
+    act(() => result.current.handleScroll())
+    expect(result.current.following).toBe(true)
+    expect(result.current.atBottom).toBe(true)
+    act(() => observers.fire(content))
+    expect(box.writes).toEqual([1000, 1600])
+  })
+
+  it("disarms on an upward wheel before the scroll it causes", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const { result } = setup(box, content)
+    act(() => {
+      box.el.dispatchEvent(new WheelEvent("wheel", { deltaY: -10 }))
+    })
+    expect(result.current.following).toBe(false)
+    // The nudge stays inside the threshold, but it is the reader moving up.
+    box.el.scrollTop = 990
+    act(() => result.current.handleScroll())
+    expect(result.current.following).toBe(false)
+    box.writes.length = 0
+    box.setHeight(1400)
+    act(() => observers.fire(content))
+    expect(box.writes).toEqual([])
+  })
+
+  it("ignores a downward wheel and a wheel taken by a scroller inside a message", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const inner = document.createElement("pre")
+    inner.style.overflowY = "auto"
+    Object.defineProperty(inner, "scrollHeight", { configurable: true, value: 500 })
+    Object.defineProperty(inner, "clientHeight", { configurable: true, value: 100 })
+    inner.scrollTop = 50
+    box.el.append(content)
+    content.append(inner)
+    const { result } = setup(box, content)
+    act(() => {
+      box.el.dispatchEvent(new WheelEvent("wheel", { deltaY: 30 }))
+      inner.dispatchEvent(new WheelEvent("wheel", { deltaY: -30, bubbles: true }))
+    })
+    expect(result.current.following).toBe(true)
+  })
+
+  it("disarms when a finger drags the transcript down (scrolling up)", () => {
+    const box = makeScrollBox()
+    const { result } = setup(box, document.createElement("div"))
+    const touch = (type: string, y: number) => {
+      const event = new Event(type, { bubbles: true }) as Event & { touches: unknown }
+      Object.defineProperty(event, "touches", { value: [{ clientX: 50, clientY: y }] })
+      box.el.dispatchEvent(event)
+    }
+    act(() => {
+      touch("touchstart", 100)
+      touch("touchmove", 90)
+    })
+    // Finger moving up scrolls toward the foot: still following.
+    expect(result.current.following).toBe(true)
+    act(() => touch("touchmove", 130))
+    expect(result.current.following).toBe(false)
+  })
+
+  it("scrollToBottom re-arms following before the smooth scroll lands", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const scrollTo = jest.fn()
+    box.el.scrollTo = scrollTo as unknown as HTMLElement["scrollTo"]
+    const { result } = setup(box, content)
+    box.el.scrollTop = 100
+    act(() => result.current.handleScroll())
+    expect(result.current.atBottom).toBe(false)
+
+    act(() => result.current.scrollToBottom())
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" })
+    expect(result.current.following).toBe(true)
+    expect(result.current.atBottom).toBe(true)
+    // A smooth scroll's intermediate frames move DOWN; they never disarm.
+    box.el.scrollTop = 400
+    act(() => result.current.handleScroll())
+    expect(result.current.following).toBe(true)
+  })
+
+  it("release stops following without moving the viewport", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const { result } = setup(box, content)
+    box.writes.length = 0
+    act(() => result.current.release())
+    expect(result.current.following).toBe(false)
+    box.setHeight(1500)
+    act(() => observers.fire(content))
+    expect(box.writes).toEqual([])
+    // Not following and now 500px short of the foot: the pill may offer it.
+    expect(result.current.atBottom).toBe(false)
   })
 })

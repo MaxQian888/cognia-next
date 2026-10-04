@@ -24,6 +24,7 @@ import type { ChatStatus as PromptStatus, UIMessage } from "ai"
 import { FileTextIcon, XIcon } from "lucide-react"
 import {
   ChangeEvent,
+  type CSSProperties,
   forwardRef,
   KeyboardEvent as ReactKeyboardEvent,
   memo,
@@ -83,9 +84,11 @@ import { isContextSelectionRef } from "@/lib/chat/mentions/selection-guard"
 import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { useBrowserDownloadAttachIntake } from "@/hooks/browser/use-browser-download-attach-intake"
+import { useCameraRecovery } from "@/hooks/use-camera-recovery"
+import { attachmentToFiles } from "@/components/mobile/chat/composer-attachment"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
 import { useComposerVideoRoute } from "./composer/hooks/use-composer-video-route"
-import { ComposerBox } from "./composer/composer-box"
+import { ComposerBox, composerCardRadiusPx } from "./composer/composer-box"
 import {
   resolveComposerSkin,
   toolbarSitsInBox,
@@ -114,6 +117,8 @@ import { cn } from "@/lib/utils"
 import { expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { useSoftKeyboardDevice } from "@/hooks/ui/use-keyboard-insets"
+import { useComposerKeyboardAvoidance } from "./composer/use-composer-keyboard-avoidance"
 import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { Button } from "@/components/ui/button"
@@ -335,6 +340,12 @@ interface Props {
    */
   placeholder?: string
   /**
+   * Placeholder while `disabled`, when the host knows WHY sends are off. The
+   * generic "pick a conversation" copy was wrong over a live transcript whose
+   * Host had merely gone offline.
+   */
+  disabledPlaceholder?: string
+  /**
    * Workflow-editor copilot integration. When set, `@` (and `@node:` /
    * `@edge:`) open a picker over the workflow's graph elements; picking one
    * stages a reference chip. Its presence also flips `@` mode to `"workflow"`.
@@ -375,6 +386,13 @@ interface Props {
    * status toolbar — e.g. the welcome surface's character-entry button.
    */
   toolbar?: ReactNode
+  /**
+   * The live run strip (`RunStatusBar`), docked onto the top edge of the input
+   * card. Passed in by the host rather than mounted above the composer: only
+   * here can it sit flush against the box, inset by the skin's corner radius,
+   * instead of floating above the dock's scrim padding as a separate band.
+   */
+  runStatus?: ReactNode
 }
 
 /**
@@ -520,6 +538,8 @@ interface InnerProps {
   onReviewDrafts?: () => void
   handleRef?: Ref<ComposerHandle>
   placeholder?: string
+  /** See the outer `Props.disabledPlaceholder`. */
+  disabledPlaceholder?: string
   workflowMention?: ComposerWorkflowMention
   /** See the outer `Props.routing`. */
   routing?: boolean
@@ -530,6 +550,8 @@ interface InnerProps {
   /** Resolved by the outer `Composer` so one read feeds the whole tree. */
   skin: ResolvedComposerSkin
   toolbar?: ReactNode
+  /** See the outer `Props.runStatus`. */
+  runStatus?: ReactNode
   /**
    * Whether this conversation could take an original video file. Resolved by
    * the outer `Composer`, whose `handleSubmit` reads the same verdict.
@@ -671,12 +693,22 @@ function ComposerInner(props: InnerProps) {
 
   // Send protection: the chat store only flips to "streaming" once the dispatch
   // pipeline reaches `setSessionStatus`, leaving a window after the click where
-  // the button would still read as "send". `isSending` is set synchronously the
-  // instant a turn is dispatched so the button shows the running state
-  // immediately and a second submit (a fast Enter / double-click) is rejected.
-  // The ref is the synchronous re-entrancy guard; the state drives the render.
-  const [isSending, setIsSending] = useState(false)
-  const isSendingRef = useRef(false)
+  // the button would still read as "send". The in-flight flags are set
+  // synchronously the instant a message is dispatched so the button shows the
+  // running state immediately and a second submit (a fast Enter / double-click)
+  // is rejected. The refs are the synchronous re-entrancy guard; the state
+  // drives the render.
+  //
+  // Two lanes, because `onSubmit` does not settle at the same point for every
+  // runtime: an external agent's send awaits the WHOLE run. A single flag held
+  // the button on a spinner for the entire turn (no Stop) and rejected every
+  // follow-up typed meanwhile. So a fresh turn's dispatch only guards until
+  // the turn is live; a follow-up (a submit made while the turn streams, which
+  // the controller routes into the steer lane) is tracked on its own.
+  const [turnInFlight, setTurnInFlight] = useState(false)
+  const [followUpInFlight, setFollowUpInFlight] = useState(false)
+  const turnInFlightRef = useRef(false)
+  const followUpInFlightRef = useRef(false)
   const chipOverlayRef = useRef<HTMLDivElement>(null)
   const shellDiagnosticOverlayRef = useRef<HTMLDivElement>(null)
   const ghostOverlayRef = useRef<HTMLDivElement>(null)
@@ -1831,7 +1863,11 @@ function ComposerInner(props: InnerProps) {
     // Re-entrancy guard (send protection): reject a second dispatch while one is
     // already in flight — covers the window between the click and the store
     // flipping to "streaming", where a fast Enter could otherwise double-send.
-    if (isSendingRef.current) return
+    // Once the turn is live, its own still-pending dispatch no longer blocks a
+    // follow-up: that send joins the running turn instead of starting one.
+    const liveTurn = props.status === "streaming"
+    if (followUpInFlightRef.current) return
+    if (turnInFlightRef.current && !liveTurn) return
 
     // Emptiness is decided from the synchronous attachment count (blob→data-url
     // conversion below preserves count) so the guard can be armed BEFORE the
@@ -1855,8 +1891,14 @@ function ComposerInner(props: InnerProps) {
       return
     }
 
-    isSendingRef.current = true
-    setIsSending(true)
+    const lane = liveTurn ? "followUp" : "turn"
+    if (lane === "followUp") {
+      followUpInFlightRef.current = true
+      setFollowUpInFlight(true)
+    } else {
+      turnInFlightRef.current = true
+      setTurnInFlight(true)
+    }
 
     // Tactile confirmation for the most frequent chat action. The wrapper
     // no-ops off the Capacitor shell, so this is safe unconditionally.
@@ -2188,8 +2230,13 @@ function ComposerInner(props: InnerProps) {
       // flipped to "streaming" (so the button stays in stop state); on a
       // rejected/aborted send it returns to the idle send state so the user can
       // retry.
-      isSendingRef.current = false
-      setIsSending(false)
+      if (lane === "followUp") {
+        followUpInFlightRef.current = false
+        setFollowUpInFlight(false)
+      } else {
+        turnInFlightRef.current = false
+        setTurnInFlight(false)
+      }
     }
   }, [
     // Both are stable across renders (a `useState` setter and a ref), but they
@@ -2681,6 +2728,27 @@ function ComposerInner(props: InnerProps) {
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
+  useCameraRecovery(
+    sessionId && (!persistDrafts || draftHydratedFor === sessionId)
+      ? { kind: "chat", id: sessionId }
+      : null,
+    async (result, isCurrent) => {
+      const files = await attachmentToFiles(
+        result.kind === "photo"
+          ? { kind: "photo", ...result.photo, mime: `image/${result.photo.format}` }
+          : {
+              kind: "photos",
+              items: result.photos.map((photo) => ({
+                uri: photo.uri,
+                mime: `image/${photo.format}`,
+              })),
+            }
+      )
+      if (!isCurrent() || files.length === 0) return false
+      const accepted = await acceptFiles(files, { isCurrent })
+      return isCurrent() && accepted.length > 0
+    }
+  )
   // Subscribed (not just read at send) so the save effect below re-fires when
   // a chip is staged or removed — the chips are part of the draft now.
   const draftContextSelections = useComposerContextSelections(sessionId)
@@ -2989,9 +3057,14 @@ function ComposerInner(props: InnerProps) {
 
   const isStreaming = props.status === "streaming"
   // The primary button's whole state (send / stop / spinner / draft) in one
-  // decision — see `send-button-mode.ts` for the combination table. The key
-  // case the inline ternaries used to miss: a turn streaming with text already
-  // typed is a *send* (it joins the running turn as a follow-up), not a stop.
+  // decision — see `send-button-mode.ts` for the combination table. While a
+  // turn runs the button is Stop; a typed follow-up gets its own control
+  // beside it rather than taking Stop away.
+  //
+  // A fresh turn's dispatch counts as "sending" only until the turn is live:
+  // past that point the run's own state (Stop) is the truth, however long the
+  // runtime keeps `onSubmit` pending.
+  const isSending = followUpInFlight || (turnInFlight && !isStreaming)
   const sendButton = resolveSendButton({
     status: props.commandRunning
       ? "streaming"
@@ -3139,6 +3212,27 @@ function ComposerInner(props: InnerProps) {
           </Collapse>
           <ComposerStatusBands sessionId={sessionId} />
         </div>
+        {props.runStatus ? (
+          // Docked onto the card's top edge. The inset follows the corner the
+          // card actually draws (`composerCardRadiusPx` — the phone card rounds
+          // further than the classic skin's own radius) so the strip's sides
+          // land where the card's top edge has turned straight; a pill skin
+          // insets more, the square skin not at all. Its own top corners echo
+          // the card's inner curve.
+          <div
+            data-slot="composer-run-status"
+            className="empty:hidden"
+            style={(() => {
+              const radius = composerCardRadiusPx(props.skin, compactLayout)
+              return {
+                paddingInline: `${radius}px`,
+                "--run-strip-radius": `${Math.round(radius * 0.6)}px`,
+              } as CSSProperties
+            })()}
+          >
+            {props.runStatus}
+          </div>
+        ) : null}
         <ComposerBox
           skin={props.skin}
           compactLayout={compactLayout}
@@ -3150,6 +3244,7 @@ function ComposerInner(props: InnerProps) {
           disabled={props.disabled}
           permissionMode={permissionMode}
           placeholder={props.placeholder}
+          disabledPlaceholder={props.disabledPlaceholder}
           placeholderHints={props.placeholderHints}
           onActiveHintChange={noteActiveHint}
           textInput={controller.textInput}
@@ -3531,12 +3626,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     onStop,
     disabled,
     placeholder,
+    disabledPlaceholder,
     workflowMention,
     routing,
     placement = "docked",
     defaultSkin,
     placeholderHints,
     toolbar,
+    runStatus,
   },
   ref
 ) {
@@ -3570,6 +3667,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // browser rendering the same mobile shell — see `useCompactLayout`.
   const compactShell = useCompactLayout()
   const isMobileShell = usePlatform() === "mobile" || compactShell
+  // Keyboard avoidance (soft-keyboard devices only): the docked composer glides
+  // with the keyboard instead of jumping, the hero one scrolls its whole card
+  // (toolbar row included) into view. See `use-composer-keyboard-avoidance.ts`.
+  const softKeyboardDevice = useSoftKeyboardDevice()
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null)
+  useComposerKeyboardAvoidance({ root: rootEl, placement, enabled: softKeyboardDevice })
   // One resolver owns pack default ← preset ← overrides ← mobile floors, so the
   // box never has to reason about any of it. `classic` (the default under the
   // Soft pack) resolves to today's exact geometry and emits no variables at
@@ -4207,6 +4310,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div
+      ref={setRootEl}
+      // The anchor the composer's popovers resolve their collision boundary
+      // from (`COMPOSER_ROOT_ATTRIBUTE` in `composer/composer-popover-boundary.ts`).
+      data-composer-root=""
+      data-placement={placement}
       // `composer-scrim` (app/globals.css §4d) owns the fade from the message
       // list into the input box. It replaces a Tailwind gradient +
       // `data-tonality="glass"` pair that could not compose: the tonality rules
@@ -4216,10 +4324,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       className={cn(
         "@container/composer shrink-0",
         // Docked: the scrim fades the message list into the box, and the top
-        // padding separates them. In the hero there is no list above — the
-        // scrim would paint a gradient across the middle of an empty page, and
-        // the dock padding would push the box off the vertical centre.
-        placement === "docked" && "composer-scrim pb-3 pt-5 sm:pb-4 sm:pt-6"
+        // padding separates them. Kept tight (8px, 12px from `sm`): the list
+        // already ends on its own small gap, and the run strip docks straight
+        // onto the box, so list → strip → input reads as one unit rather than
+        // three bands with air between them. In the hero there is no list
+        // above — the scrim would paint a gradient across the middle of an
+        // empty page, and the dock padding would push the box off the
+        // vertical centre.
+        placement === "docked" && "composer-scrim pb-3 pt-2 sm:pb-4 sm:pt-3"
       )}
     >
       {/* Padding lives INSIDE the max-width cap so the composer box and the
@@ -4328,11 +4440,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                       })
                     : placeholder
                 }
+                disabledPlaceholder={disabledPlaceholder}
                 workflowMention={workflowMention}
                 routing={routing}
                 placeholderHints={placeholderHints}
                 compactLayout={compactLayout}
                 skin={skin}
+                runStatus={runStatus}
                 toolbar={
                   // The skin decides WHERE the status row sits. `detached` keeps
                   // it below the box (today's desktop default); every other

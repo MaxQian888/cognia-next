@@ -112,6 +112,11 @@ jest.mock("@/components/inbox/inbox-composer-actions-host", () => ({
 // Platform is the gate for the mobile (Capacitor) Claude-style layout. Default
 // to "web" so the existing tests keep the desktop/web responsive layout.
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
+// Pass-through spy: the composer's half of soft-keyboard avoidance.
+jest.mock("./composer/use-composer-keyboard-avoidance", () => {
+  const actual = jest.requireActual("./composer/use-composer-keyboard-avoidance")
+  return { useComposerKeyboardAvoidance: jest.fn(actual.useComposerKeyboardAvoidance) }
+})
 // Layout and pointer are separate questions from the platform (see
 // `hooks/ui/use-compact-layout.ts`); each test sets the combination it means.
 jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: jest.fn(() => false) }))
@@ -132,6 +137,15 @@ jest.mock("@/lib/capacitor/keyboard", () => ({
   hideKeyboard: jest.fn(async () => undefined),
   showKeyboard: jest.fn(async () => undefined),
 }))
+jest.mock("@/hooks/use-camera-recovery", () => ({ useCameraRecovery: jest.fn() }))
+jest.mock("@/components/mobile/chat/composer-attachment", () => {
+  const actual = jest.requireActual("@/components/mobile/chat/composer-attachment")
+  return { ...actual, attachmentToFiles: jest.fn(actual.attachmentToFiles) }
+})
+jest.mock("@/lib/chat/attachments/prepare", () => {
+  const actual = jest.requireActual("@/lib/chat/attachments/prepare")
+  return { ...actual, prepareComposerAttachments: jest.fn(actual.prepareComposerAttachments) }
+})
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { act } from "react"
@@ -156,6 +170,11 @@ import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
+import { useComposerKeyboardAvoidance } from "./composer/use-composer-keyboard-avoidance"
+import { useCameraRecovery } from "@/hooks/use-camera-recovery"
+import { getDraft } from "@/lib/db/chat-drafts"
+import * as attachmentConversion from "@/components/mobile/chat/composer-attachment"
+import * as attachmentPreparation from "@/lib/chat/attachments/prepare"
 
 const mockUsePlatform = usePlatform as jest.Mock
 const mockUseCompactLayout = useCompactLayout as jest.Mock
@@ -196,6 +215,7 @@ const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 })
 
 beforeEach(() => {
+  jest.mocked(useCameraRecovery).mockClear()
   useChatStore.getState().clear()
   useComposerIntentStore.setState({ pendingBySession: {} })
   useSettingsStore.setState({ settings: undefined as never })
@@ -236,6 +256,99 @@ function pairCompanionHost(): void {
 }
 
 describe("Composer — data-hooks integration", () => {
+  it("retains a restored photo when the attachment gate refuses every file", async () => {
+    const file = new File(["photo"], "photo.png", { type: "image/png" })
+    const conversion = jest.mocked(attachmentConversion.attachmentToFiles).mockResolvedValue([file])
+    const preparation = jest
+      .mocked(attachmentPreparation.prepareComposerAttachments)
+      .mockResolvedValue({
+        files: [],
+        unsupportedCount: 1,
+        tooLargeCount: 0,
+        optimizedCount: 0,
+        motionTooLargeCount: 0,
+      })
+    const Wrapper = withAdapter(makeAdapter())
+    try {
+      render(
+        <Wrapper>
+          <Composer
+            session={mkSession()}
+            onStartNewSession={async () => undefined}
+            onOpenSettings={() => undefined}
+            onSend={async () => undefined}
+            onStop={async () => undefined}
+          />
+        </Wrapper>
+      )
+      await waitFor(() =>
+        expect(jest.mocked(useCameraRecovery).mock.calls.at(-1)?.[0]).toEqual({
+          kind: "chat",
+          id: "ses_42",
+        })
+      )
+      const deliver = jest.mocked(useCameraRecovery).mock.calls.at(-1)![1]
+      await act(async () => {
+        await expect(
+          deliver({ kind: "photo", photo: { base64: "AAAA", format: "png" } }, () => true)
+        ).resolves.toBe(false)
+      })
+      expect(preparation).toHaveBeenCalledWith([file], expect.any(Object))
+    } finally {
+      conversion.mockImplementation(
+        jest.requireActual("@/components/mobile/chat/composer-attachment").attachmentToFiles
+      )
+      preparation.mockImplementation(
+        jest.requireActual("@/lib/chat/attachments/prepare").prepareComposerAttachments
+      )
+    }
+  })
+
+  it.each([true, false])(
+    "registers camera recovery after draft readiness (persistDrafts=%s)",
+    async (persistDrafts) => {
+      let hydrate!: (value: undefined) => void
+      if (persistDrafts) {
+        jest.mocked(getDraft).mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              hydrate = resolve
+            })
+        )
+      } else {
+        useSettingsStore.setState({
+          settings: { composerBehavior: { persistDrafts: false } } as never,
+        })
+      }
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <Composer
+            session={mkSession()}
+            onStartNewSession={async () => undefined}
+            onOpenSettings={() => undefined}
+            onSend={async () => undefined}
+            onStop={async () => undefined}
+          />
+        </Wrapper>
+      )
+      if (persistDrafts) {
+        expect(jest.mocked(useCameraRecovery).mock.calls.every(([target]) => target === null)).toBe(
+          true
+        )
+        await act(async () => {
+          hydrate(undefined)
+        })
+      }
+      await waitFor(() =>
+        expect(jest.mocked(useCameraRecovery).mock.calls.at(-1)?.[0]).toEqual({
+          kind: "chat",
+          id: "ses_42",
+        })
+      )
+    }
+  )
+
   it("consumes a selection intent after draft hydration without overwriting typed text", async () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
@@ -388,6 +501,133 @@ describe("Composer — data-hooks integration", () => {
     // fold them into at this width.
     expect(footer).toContainElement(screen.getByTestId("composer-execution-controls"))
     expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+  })
+})
+
+describe("Composer — run status slot", () => {
+  it("docks the host's run strip directly on top of the input card, inset by the skin radius", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={() => undefined}
+          runStatus={<div data-testid="run-strip">run</div>}
+        />
+      </Wrapper>
+    )
+    const slot = document.querySelector('[data-slot="composer-run-status"]') as HTMLElement
+    expect(slot).toContainElement(screen.getByTestId("run-strip"))
+    // Classic skin: 16px card radius → the strip's sides land where the
+    // card's top edge turns straight (16px inset), 10px strip corners.
+    expect(slot.style.paddingInline).toBe("16px")
+    expect(slot.style.getPropertyValue("--run-strip-radius")).toBe("10px")
+    // Flush against the card: the very next element is the box itself.
+    expect(slot.nextElementSibling).toBe(document.querySelector("[data-composer-layout]"))
+  })
+
+  // The phone card rounds to 28px, not the classic skin's 16px. Insetting by
+  // the skin's radius ended the strip's sides on the card's curve, leaving a
+  // visible gap at both ends above the card.
+  it("insets the strip by the stacked card's own radius on the phone layout", () => {
+    useSettingsStore.setState({
+      settings: { composerBehavior: { compactLayout: true } } as never,
+    })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={() => undefined}
+          runStatus={<div data-testid="run-strip">run</div>}
+        />
+      </Wrapper>
+    )
+    const slot = document.querySelector('[data-slot="composer-run-status"]') as HTMLElement
+    expect(document.querySelector("[data-composer-layout]")).toHaveAttribute(
+      "data-composer-layout",
+      "compact"
+    )
+    expect(slot.style.paddingInline).toBe("28px")
+    expect(slot.style.getPropertyValue("--run-strip-radius")).toBe("17px")
+  })
+
+  it("renders no slot when the host has no run strip", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={() => undefined}
+        />
+      </Wrapper>
+    )
+    expect(document.querySelector('[data-slot="composer-run-status"]')).toBeNull()
+  })
+})
+
+describe("Composer — keyboard avoidance", () => {
+  function renderAt(placement?: "docked" | "hero") {
+    const Wrapper = withAdapter(makeAdapter())
+    return render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          placement={placement}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={() => undefined}
+        />
+      </Wrapper>
+    )
+  }
+
+  function lastAvoidanceCall() {
+    const calls = (useComposerKeyboardAvoidance as jest.Mock).mock.calls
+    return calls[calls.length - 1][0] as {
+      root: HTMLElement | null
+      placement: string
+      enabled: boolean
+    }
+  }
+
+  it("marks its root so the popovers can resolve their collision boundary", () => {
+    renderAt()
+    const root = document.querySelector("[data-composer-root]") as HTMLElement
+    expect(root).not.toBeNull()
+    expect(root.dataset.placement).toBe("docked")
+    expect(root).toContainElement(document.querySelector("textarea"))
+  })
+
+  it("hands the docked root to keyboard avoidance on a soft-keyboard device", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    try {
+      renderAt()
+      const call = lastAvoidanceCall()
+      expect(call.enabled).toBe(true)
+      expect(call.placement).toBe("docked")
+      expect(call.root).toBe(document.querySelector("[data-composer-root]"))
+    } finally {
+      mockUsePlatform.mockReturnValue("web")
+    }
+  })
+
+  it("passes the hero placement through, and stays off on a desktop", () => {
+    renderAt("hero")
+    const call = lastAvoidanceCall()
+    expect(call.placement).toBe("hero")
+    expect(call.enabled).toBe(false)
+    expect(document.querySelector("[data-composer-root]")).toHaveAttribute("data-placement", "hero")
   })
 })
 
@@ -803,6 +1043,15 @@ describe("Composer — wallpaper-aware tonality", () => {
     expect(bar).toHaveClass("composer-scrim")
     expect(bar).not.toHaveAttribute("data-tonality")
     expect(bar?.className).not.toContain("from-background")
+  })
+
+  // The list ends on its own small gap; a 20-24px top pad here stacked on it
+  // and left the run strip and input floating well below the last message.
+  it("keeps the docked bar's top padding tight", () => {
+    renderComposer()
+    const bar = document.querySelector("[class*='@container/composer']")
+    expect(bar).toHaveClass("pt-2", "sm:pt-3")
+    expect(bar).not.toHaveClass("pt-5")
   })
 
   it("aligns the composer with the conversation reading column", () => {

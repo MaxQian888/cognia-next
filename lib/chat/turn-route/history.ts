@@ -31,27 +31,57 @@ import type { SendContent } from "@cognia/agent-config-types"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
-/** The two kinds of memory a turn can land in. A host lane is an external agent too. */
-export type LaneMemory = "builtin" | "external"
-
 /**
- * Which kind of lane produced an assistant message, from its sealed run
- * metadata. `null` when the message carries no provider (a legacy row, a
- * partial reply that never sealed) — such a message is evidence of nothing.
+ * The memory a turn can land in.
+ *
+ * `builtin` is the SDK session. An external agent keeps one memory PER ROUTE:
+ * its own native session, and each Cognia gateway task it ran
+ * (`externalAgentRouteKey`), so `external:<agentId>:<route>` names one of
+ * them. Bare `external` is what a reply sealed before routes were stamped
+ * says, and is treated as the same memory as any external lane, which is the
+ * comparison those replies were always judged by.
  */
-export function laneMemoryOf(message: UIMessage): LaneMemory | null {
-  if (message.role !== "assistant") return null
-  const providerId = runMetadataOf(message)?.providerId
-  if (!providerId) return null
-  return providerId === "external" ? "external" : "builtin"
+export type LaneMemory = "builtin" | "external" | `external:${string}`
+
+/** The memory one external agent keeps on one route (`native`, `cognia:<task>`). */
+export function externalLaneMemory(agentId: string, route: string): LaneMemory {
+  return `external:${encodeURIComponent(agentId)}:${route}`
 }
 
 /**
- * The messages `lane` has not seen, when another lane answered in the
+ * Whether a reply sealed into `memory` is part of what `lane` has seen.
+ *
+ * Exact for every stamped reply. A legacy unstamped external reply cannot say
+ * which agent or route produced it, so it counts as seen by any external lane
+ * and only by those, which is the behaviour it had before routes existed.
+ */
+export function sameLaneMemory(memory: LaneMemory, lane: LaneMemory): boolean {
+  if (memory === lane) return true
+  if (memory === "builtin" || lane === "builtin") return false
+  return memory === "external" || lane === "external"
+}
+
+/**
+ * Which memory produced an assistant message, from its sealed run metadata.
+ * `null` when the message carries no provider (a legacy row, a partial reply
+ * that never sealed) — such a message is evidence of nothing.
+ */
+export function laneMemoryOf(message: UIMessage): LaneMemory | null {
+  if (message.role !== "assistant") return null
+  const run = runMetadataOf(message)
+  const providerId = run?.providerId
+  if (!providerId) return null
+  if (providerId !== "external") return "builtin"
+  const stamp = run?.externalAgent
+  return stamp?.agentId && stamp.route ? externalLaneMemory(stamp.agentId, stamp.route) : "external"
+}
+
+/**
+ * The messages `lane` has not seen, when another memory answered in the
  * meantime; empty when there is nothing to hand over.
  *
  * Starts after the last reply `lane` produced (a lane that never answered has
- * seen nothing) and ends at the last reply another lane produced. Anything
+ * seen nothing) and ends at the last reply another memory produced. Anything
  * after that final foreign reply is a user message this turn delivers itself —
  * a queued follow-up being replayed — and repeating it in the handoff would
  * only say it twice.
@@ -62,7 +92,8 @@ export function laneMemoryOf(message: UIMessage): LaneMemory | null {
 export function unseenForeignTurns(messages: readonly UIMessage[], lane: LaneMemory): UIMessage[] {
   let start = 0
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (laneMemoryOf(messages[index]) === lane) {
+    const memory = laneMemoryOf(messages[index])
+    if (memory && sameLaneMemory(memory, lane)) {
       start = index + 1
       break
     }
@@ -71,7 +102,7 @@ export function unseenForeignTurns(messages: readonly UIMessage[], lane: LaneMem
   let lastForeign = -1
   tail.forEach((message, index) => {
     const memory = laneMemoryOf(message)
-    if (memory && memory !== lane) lastForeign = index
+    if (memory && !sameLaneMemory(memory, lane)) lastForeign = index
   })
   if (lastForeign < 0) return []
   return tail
@@ -138,18 +169,21 @@ export function prefixForeignTurnsContext(
  * of that same material instead would route around the refusal.
  *
  * `client` is lazy so the model client is only built when a summary is needed.
+ * `state` is the imported task state a whole-history handoff carries along.
  */
 export async function foreignTurnsHandoffText(
   messages: readonly UIMessage[],
-  options: { client: () => Promise<LlmClient | null>; signal?: AbortSignal }
+  options: { client: () => Promise<LlmClient | null>; signal?: AbortSignal; state?: unknown }
 ): Promise<string> {
   if (messages.length === 0) return ""
   const { buildHandoffContext, prepareHandoffContext } = await import("@/lib/chat/handoff-context")
-  const projected = buildHandoffContext(messages)
+  const stateOption = options.state === undefined ? {} : { state: options.state }
+  const projected = buildHandoffContext(messages, stateOption)
   if (!projected.losses.some((loss) => loss.kind === "budget")) return projected.text
   try {
     return (
       await prepareHandoffContext(messages, {
+        ...stateOption,
         client: await options.client(),
         ...(options.signal ? { signal: options.signal } : {}),
       })

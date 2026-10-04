@@ -13,6 +13,7 @@ import { buildDefaultProject, DEFAULT_PROJECT_ID } from "./project-defaults"
 import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
 import { loggers } from "@cognia/logging"
 import { collectUnreferencedMessageMedia } from "./message-media-refs"
+import { managedGatewayLinksOf } from "@/lib/ai/agent/external/session/session-models"
 
 export { DEFAULT_PROJECT_ID } from "./project-defaults"
 
@@ -226,11 +227,10 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
   const childrenBeforeCleanup = runIds.length
     ? await db.agentTeamChildRuns.where("runId").anyOf(runIds).toArray()
     : []
-  if (
-    sessionsBeforeCleanup.some((row) =>
-      row.externalAgentSession?.sessionId.startsWith("cognia-gateway:")
-    )
-  ) {
+  // Every gateway task a row still names: its current link and the retained
+  // ones a model switch kept for resume.
+  const managedSessionLinks = sessionsBeforeCleanup.flatMap((row) => managedGatewayLinksOf(row))
+  if (managedSessionLinks.length > 0) {
     const { cleanupManagedExternalAgentSessions } = await import("./sessions")
     await cleanupManagedExternalAgentSessions(sessionsBeforeCleanup)
   }
@@ -238,9 +238,7 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
     const { purgeManagedChildSessions } = await import("./agent-team-runtime")
     await purgeManagedChildSessions(childrenBeforeCleanup)
   }
-  const cleanedSessionLinks = new Set(
-    sessionsBeforeCleanup.map((row) => row.externalAgentSession?.sessionId)
-  )
+  const cleanedSessionLinks = new Set(managedSessionLinks.map((link) => link.sessionId))
   const cleanedChildLinks = new Set(childrenBeforeCleanup.map((row) => row.sessionId))
 
   const tableNames = new Set<string>([
@@ -255,10 +253,8 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
   await db.transaction("rw", tables, async () => {
     const projectSessions = await scopedWhere(db.sessions, projectId).toArray()
     if (
-      projectSessions.some(
-        (row) =>
-          row.externalAgentSession?.sessionId.startsWith("cognia-gateway:") &&
-          !cleanedSessionLinks.has(row.externalAgentSession.sessionId)
+      projectSessions.some((row) =>
+        managedGatewayLinksOf(row).some((link) => !cleanedSessionLinks.has(link.sessionId))
       )
     ) {
       throw new Error("Workspace sessions changed during native cleanup; retry deletion")

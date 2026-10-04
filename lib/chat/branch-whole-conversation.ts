@@ -23,8 +23,12 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
 import { branchSessionAtMessage } from "@/lib/chat/branch-session"
-import { listMessages } from "@/lib/db/messages"
+import { listMessages, rowToUIMessage } from "@/lib/db/messages"
 import { getSession } from "@/lib/db/sessions"
+import { detectHostProfile } from "@/lib/platform/capabilities"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { transport } from "@/lib/tauri/transport-instance"
+import { getSessionHistoryMode, readCompleteSessionHistory } from "@/lib/sync/session-history"
 import { useChatStore } from "@/stores/chat"
 import { selectVisibleMessages } from "@/stores/chat/chat-store"
 
@@ -42,13 +46,33 @@ async function visibleThread(sessionId: string): Promise<UIMessage[]> {
 }
 
 export async function branchWholeConversation(sessionId: string): Promise<ChatSession | null> {
-  const visible = await visibleThread(sessionId)
+  const profile = detectHostProfile()
+  const remote =
+    profile === "mobile-companion" || profile === "cloud-companion" || isRemoteHostActive()
+  const sourceSnapshot = remote ? await readCompleteSessionHistory(transport, sessionId) : null
+  if (
+    remote &&
+    !sourceSnapshot &&
+    ["timeline", "legacy"].includes(getSessionHistoryMode(sessionId) ?? "")
+  ) {
+    throw new Error("Cannot branch: authoritative session history is unavailable")
+  }
+  const visible = sourceSnapshot
+    ? selectVisibleMessages(
+        sourceSnapshot.messages.map(rowToUIMessage),
+        sourceSnapshot.session.activeBranchByGroup ?? {}
+      )
+    : await visibleThread(sessionId)
   const cutoff = visible.at(-1)
   if (!cutoff) return null
   return branchSessionAtMessage({
     sourceId: sessionId,
+    ...(sourceSnapshot ? { sourceSnapshot } : {}),
     visibleMessages: visible,
     messageId: cutoff.id,
     mode: "direct",
+    // Whole-conversation forks explicitly inherit current domain state, also
+    // for legacy transcripts that predate per-message historical snapshots.
+    workingSetPolicy: "current",
   })
 }

@@ -11,14 +11,16 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
     code,
     language,
     headerTitle,
+    startLineNumber,
   }: {
     code: string
     language?: string
     headerTitle?: React.ReactNode
+    startLineNumber?: number
   }) => (
     <div>
       {headerTitle}
-      <pre data-testid="code" data-language={language}>
+      <pre data-testid="code" data-language={language} data-start-line={startLineNumber}>
         {code}
       </pre>
     </div>
@@ -218,5 +220,46 @@ describe("ReadCard", () => {
     fireEvent.click(screen.getByTestId("mcp-read-clamped-show-all"))
     expect(screen.getByTestId("code").textContent).toContain("L199")
     expect(screen.queryByTestId("mcp-read-clamped")).not.toBeInTheDocument()
+  })
+
+  describe("numbered Read output", () => {
+    const catN = (lines: string[], start = 1) =>
+      lines.map((line, i) => `${String(start + i).padStart(6)}\t${line}`).join("\n")
+
+    it("strips the tool's line-number prefixes so the gutter is the only numbering", () => {
+      render(<ReadCard part={readPart({ output: catN(["const a = 1", "export { a }"]) })} />)
+      const code = screen.getByTestId("code")
+      expect(code.textContent).toBe("const a = 1\nexport { a }")
+      expect(code).toHaveAttribute("data-start-line", "1")
+    })
+
+    it("starts the gutter at an offset read's first line", () => {
+      render(
+        <ReadCard
+          part={readPart({
+            input: { file_path: "/tmp/a.ts", offset: 40 },
+            output: catN(["foo()", "bar()"], 40),
+          })}
+        />
+      )
+      expect(screen.getByTestId("code")).toHaveAttribute("data-start-line", "40")
+      expect(screen.getByTestId("code").textContent).toBe("foo()\nbar()")
+    })
+
+    it("moves the paging hint below the block instead of numbering it as code", () => {
+      const output = `${catN(["a", "b"])}\n\n(showing lines 1-2 of 9; continue with offset=3)`
+      render(<ReadCard part={readPart({ output })} />)
+      expect(screen.getByTestId("code").textContent).toBe("a\nb")
+      expect(screen.getByTestId("mcp-read-trailer")).toHaveTextContent(
+        "(showing lines 1-2 of 9; continue with offset=3)"
+      )
+    })
+
+    it("leaves un-numbered content and its gutter alone", () => {
+      render(<ReadCard part={readPart({ output: "plain\ntext" })} />)
+      expect(screen.getByTestId("code").textContent).toBe("plain\ntext")
+      expect(screen.getByTestId("code")).toHaveAttribute("data-start-line", "1")
+      expect(screen.queryByTestId("mcp-read-trailer")).not.toBeInTheDocument()
+    })
   })
 })

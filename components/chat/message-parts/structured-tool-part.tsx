@@ -38,7 +38,11 @@ import {
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
-import { InlineCopyButton, ToolRowShell } from "@/components/chat/message-parts/tool-row"
+import {
+  InlineCopyButton,
+  TOOL_ROW_SCROLL_TEXT_CLASS,
+  ToolRowShell,
+} from "@/components/chat/message-parts/tool-row"
 import { ToolDetailBody } from "@/components/chat/message-parts/tool-detail-body"
 import { parseOutputJson } from "@/components/chat/message-parts/mcp-renderers/common"
 import {
@@ -376,7 +380,15 @@ export const StructuredToolPart = memo(function StructuredToolPart({
       dataKind={name.toLowerCase()}
       lead={
         <span
-          className={cn("shrink-0 text-[11px] font-semibold uppercase tracking-wide", verbClass)}
+          className={cn(
+            "text-[11px] font-semibold uppercase tracking-wide",
+            // An upstream title is free text of any length ("Reading
+            // components/…"); a fixed-width lead would push the row past the
+            // screen edge, so it shrinks and scrolls like the target does.
+            providedTitle ? TOOL_ROW_SCROLL_TEXT_CLASS : "shrink-0",
+            verbClass
+          )}
+          data-testid="structured-tool-lead"
         >
           {verbLabel}
         </span>
@@ -384,11 +396,17 @@ export const StructuredToolPart = memo(function StructuredToolPart({
       icon={<SpecIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
       target={
         running && target ? (
-          <Shimmer as="span" className="min-w-0 flex-1 truncate font-mono text-xs" duration={1.6}>
+          <Shimmer
+            as="span"
+            className={cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1 font-mono text-xs")}
+            duration={1.6}
+          >
             {target}
           </Shimmer>
         ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+          <span
+            className={cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1 font-mono text-xs text-foreground")}
+          >
             {target ?? verbLabel}
           </span>
         )

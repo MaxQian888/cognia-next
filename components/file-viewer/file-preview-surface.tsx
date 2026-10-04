@@ -5,9 +5,8 @@ import dynamic from "next/dynamic"
 import { useTranslations } from "next-intl"
 import { loggers } from "@cognia/logging"
 import { Button } from "@/components/ui/button"
-import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
-import { readWorkspaceFile, statWorkspaceFile } from "@/lib/files/workspace-fs"
 import { BUILTIN_TEXT_VIEWER_ID } from "@/lib/file-viewer/builtins"
+import { loadWorkspaceText } from "@/lib/file-viewer/load-workspace-text"
 import {
   MAX_VIEWER_BYTES,
   exceedsUtf8Limit,
@@ -39,14 +38,6 @@ function lazyViewer(contribution: FileViewerContribution): ComponentType<FileVie
   const loaded = dynamic(contribution.load, { ssr: false })
   lazyViewers.set(contribution.id, loaded)
   return loaded
-}
-
-/** Maps a rejected transport call onto the taxonomy the surface renders. */
-function classifyReadError(error: unknown): FileViewerErrorCode {
-  const message = error instanceof Error ? error.message : String(error)
-  // The Rust side canonicalises both the root and the target and rejects an
-  // escape with this phrase; anything else is an ordinary IO failure.
-  return message.includes("escapes workspace") ? "outside-workspace" : "read-failed"
 }
 
 type LoadState =
@@ -88,31 +79,12 @@ export function FilePreviewSurface({ request }: { request: FileViewerRequest | n
           ? { requestId: id, phase: "error", code: "too-large" }
           : { requestId: id, phase: "ready", text: request.providedText }
       }
-      if (!request.root) return { requestId: id, phase: "error", code: "no-root" }
-      if (!hasWorkspaceFsBackend()) {
-        return { requestId: id, phase: "error", code: "no-backend" }
-      }
-      try {
-        const stat = await statWorkspaceFile(request.root, request.relPath)
-        if (!stat.exists) return { requestId: id, phase: "error", code: "not-found" }
-        if (stat.isDir) return { requestId: id, phase: "error", code: "is-directory" }
-        // Refuse before reading, so an oversized file costs one stat rather
-        // than a multi-megabyte transfer.
-        if (stat.size > MAX_VIEWER_BYTES) {
-          return { requestId: id, phase: "error", code: "too-large" }
-        }
-        // `MAX + 1`: the Rust side truncates only above the limit it is given
-        // and appends a marker when it does, so asking for one byte more turns
-        // a file that grew between the stat and the read into a detectable
-        // overflow instead of a silently shortened document.
-        const text = await readWorkspaceFile(request.root, request.relPath, MAX_VIEWER_BYTES + 1)
-        if (exceedsUtf8Limit(text)) {
-          return { requestId: id, phase: "error", code: "too-large" }
-        }
-        return { requestId: id, phase: "ready", text }
-      } catch (error) {
-        return { requestId: id, phase: "error", code: classifyReadError(error) }
-      }
+      // Stat, bound and read through the Host transport — shared with the
+      // mobile workspace preview so both classify failures identically.
+      const loaded = await loadWorkspaceText(request.root, request.relPath)
+      return loaded.ok
+        ? { requestId: id, phase: "ready", text: loaded.text }
+        : { requestId: id, phase: "error", code: loaded.code }
     }
 
     void load().then((next) => {

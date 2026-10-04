@@ -17,6 +17,9 @@ import type {
 const isSessionOpen = jest.fn(() => true)
 const sessionStatusOf = jest.fn(() => "idle")
 const listBackgroundTaskRecords = jest.fn(async (): Promise<unknown[]> => [])
+const reserveBackgroundTaskDelivery = jest.fn(
+  async (_sessionId: string, runIds: string[], deliveryId: string) => ({ runIds, deliveryId })
+)
 const updateBackgroundTaskRecord = jest.fn(async () => undefined)
 const getSession = jest.fn(async (): Promise<unknown> => ({ id: "chat-1" }))
 const notify = jest.fn(async () => "n1")
@@ -28,6 +31,8 @@ jest.mock("./steer-runtime", () => ({
 jest.mock("@/lib/db/background-tasks", () => ({
   listBackgroundTaskRecords: (...args: unknown[]) => listBackgroundTaskRecords(...(args as [])),
   updateBackgroundTaskRecord: (...args: unknown[]) => updateBackgroundTaskRecord(...(args as [])),
+  reserveBackgroundTaskDelivery: (...args: Parameters<typeof reserveBackgroundTaskDelivery>) =>
+    reserveBackgroundTaskDelivery(...args),
 }))
 jest.mock("@/lib/db/sessions", () => ({
   getSession: (...args: unknown[]) => getSession(...(args as [])),
@@ -66,7 +71,7 @@ beforeEach(() => {
 
 describe("onBackgroundRunSettled", () => {
   it("injects a framed turn into an open idle parent and marks the row delivered", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
 
     onBackgroundRunSettled("run-1", meta(), settle())
@@ -104,7 +109,7 @@ describe("onBackgroundRunSettled", () => {
   })
 
   it("uses the error level for failed runs and frames the cut-off text", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
 
     onBackgroundRunSettled(
@@ -122,16 +127,16 @@ describe("onBackgroundRunSettled", () => {
   })
 
   it("stays pending while the parent is streaming, then drains at settle", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
     sessionStatusOf.mockReturnValue("streaming")
 
     onBackgroundRunSettled("run-1", meta(), settle())
     await flush()
     expect(send).not.toHaveBeenCalled()
-    expect(updateBackgroundTaskRecord).toHaveBeenCalledWith(
+    expect(updateBackgroundTaskRecord).not.toHaveBeenCalledWith(
       "run-1",
-      expect.objectContaining({ deliveryState: "pending" })
+      expect.objectContaining({ deliveryState: "delivered" })
     )
 
     sessionStatusOf.mockReturnValue("idle")
@@ -141,7 +146,7 @@ describe("onBackgroundRunSettled", () => {
   })
 
   it("stays pending while the pane is closed, then drains on open", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
     isSessionOpen.mockReturnValue(false)
 
@@ -156,7 +161,7 @@ describe("onBackgroundRunSettled", () => {
   })
 
   it("marks entries orphaned (notification only) when the parent session is gone", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
     getSession.mockResolvedValue(undefined)
 
@@ -172,7 +177,7 @@ describe("onBackgroundRunSettled", () => {
   })
 
   it("batches racing completions into ONE framed turn ordered by settledAt", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
     sessionStatusOf.mockReturnValue("streaming") // hold both pending
 
@@ -198,7 +203,7 @@ describe("onBackgroundRunSettled", () => {
   })
 
   it("ignores non-subagent kinds and non-terminal settles", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
 
     onBackgroundRunSettled("p1", meta({ kind: "plugin-agent" }), settle())
@@ -212,9 +217,9 @@ describe("onBackgroundRunSettled", () => {
     onBackgroundRunSettled("run-1", meta(), settle())
     await flush()
 
-    expect(updateBackgroundTaskRecord).toHaveBeenCalledWith(
+    expect(updateBackgroundTaskRecord).not.toHaveBeenCalledWith(
       "run-1",
-      expect.objectContaining({ deliveryState: "pending" })
+      expect.objectContaining({ deliveryState: "delivered" })
     )
     expect(updateBackgroundTaskRecord).not.toHaveBeenCalledWith(
       "run-1",
@@ -225,7 +230,7 @@ describe("onBackgroundRunSettled", () => {
 
 describe("relaunch drain from journaled pending rows", () => {
   it("delivers journal rows with deliveryState pending when the session opens idle", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
     listBackgroundTaskRecords.mockResolvedValue([
       {
@@ -281,7 +286,7 @@ describe("relaunch drain from journaled pending rows", () => {
   })
 
   it("no-ops for empty session ids and when nothing is pending", async () => {
-    const send = jest.fn()
+    const send = jest.fn().mockResolvedValue(true)
     registerBackgroundReplaySend(send)
 
     await attemptBackgroundResultDelivery("")
@@ -289,4 +294,66 @@ describe("relaunch drain from journaled pending rows", () => {
 
     expect(send).not.toHaveBeenCalled()
   })
+})
+
+it("keeps a result pending when the registered send refuses durable acceptance", async () => {
+  const send = jest.fn(async () => false)
+  registerBackgroundReplaySend(send)
+  onBackgroundRunSettled("declined", meta(), settle())
+  await flush()
+  expect(updateBackgroundTaskRecord).not.toHaveBeenCalledWith(
+    "declined",
+    expect.objectContaining({ deliveryState: "delivered" })
+  )
+  send.mockResolvedValue(true)
+  await attemptBackgroundResultDelivery("chat-1")
+  expect(send).toHaveBeenCalledTimes(2)
+})
+
+it("does not lose a new completion that arrives while an older batch awaits acceptance", async () => {
+  let accept!: (value: boolean) => void
+  const send = jest
+    .fn()
+    .mockResolvedValue(true)
+    .mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          accept = resolve
+        })
+    )
+    .mockResolvedValue(true)
+  registerBackgroundReplaySend(send)
+  onBackgroundRunSettled("first", meta(), settle())
+  await flush()
+  onBackgroundRunSettled("second", meta(), settle({ settledAt: 5000 }))
+  accept(true)
+  await flush()
+  await attemptBackgroundResultDelivery("chat-1")
+  expect(send).toHaveBeenCalledTimes(2)
+  expect(send.mock.calls[1][0]).toContain("runId second")
+})
+
+it("ignores a late settle listener after the journal batch was already delivered", async () => {
+  const send = jest.fn().mockResolvedValue(true)
+  registerBackgroundReplaySend(send)
+  listBackgroundTaskRecords.mockResolvedValue([
+    { ...meta(), runId: "already", ...settle(), deliveryState: "delivered" },
+  ])
+  onBackgroundRunSettled("already", meta(), settle())
+  await flush()
+  expect(send).not.toHaveBeenCalled()
+  expect(updateBackgroundTaskRecord).not.toHaveBeenCalled()
+})
+
+it("keeps the reserved identity when the receipt write fails after acceptance", async () => {
+  const send = jest.fn().mockResolvedValue(true)
+  registerBackgroundReplaySend(send)
+  listBackgroundTaskRecords.mockResolvedValue([
+    { ...meta(), runId: "saved", ...settle(), deliveryState: "pending" },
+  ])
+  updateBackgroundTaskRecord.mockRejectedValueOnce(new Error("journal busy"))
+  await attemptBackgroundResultDelivery("chat-1")
+  await attemptBackgroundResultDelivery("chat-1")
+  expect(send).toHaveBeenCalledTimes(2)
+  expect(send.mock.calls[0][2]).toEqual(send.mock.calls[1][2])
 })

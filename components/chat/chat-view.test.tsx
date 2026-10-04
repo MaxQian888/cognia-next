@@ -84,6 +84,18 @@ jest.mock("@/components/project-coordinator/project-paused-banner", () => ({
     <div data-testid="project-paused-banner-stub">{projectId}</div>
   ),
 }))
+jest.mock("./archived-conversation-banner", () => ({
+  ArchivedConversationBanner: ({ session }: { session: { id: string } }) => (
+    <div data-testid="archived-banner-stub">{session.id}</div>
+  ),
+}))
+// The routed archive writes are the archive hook's own concern; the pane only
+// decides when a turn restores the conversation.
+jest.mock("@/hooks/chat/use-session-archive-actions", () => {
+  const unarchive = jest.fn(async () => true)
+  const archive = jest.fn(async () => true)
+  return { useSessionArchiveActions: () => ({ archive, unarchive }), __unarchive: unarchive }
+})
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
 jest.mock("@/components/error/diagnostic-card", () => ({
   InlineError: jest.fn(() => null),
@@ -284,6 +296,10 @@ import {
 import { EmptyChatState } from "./empty-state"
 import { useSettingsStore } from "@/stores/settings"
 
+const { __unarchive: unarchiveMock } = jest.requireMock(
+  "@/hooks/chat/use-session-archive-actions"
+) as { __unarchive: jest.Mock }
+
 const settingsState = useSettingsStore.getState() as unknown as {
   settings: {
     welcomeHidden?: { tryPrompt?: boolean }
@@ -349,7 +365,9 @@ describe("ChatPane shared blocking capabilities", () => {
     render(<ChatPane {...makeProps()} sessionId="embedded" showHeader={false} />)
     expect(screen.getByTestId("session-decisions")).toHaveAttribute("data-session", "embedded")
     expect(screen.getByTestId("plan-decision")).toBeInTheDocument()
-    expect(mockPlanDockProps.at(-1)?.onResume).toBe(mockPaneRuntime.resumePlan)
+    const onResume = mockPlanDockProps.at(-1)?.onResume as (p: string, m: string) => unknown
+    void onResume("go", "acceptEdits")
+    expect(mockPaneRuntime.resumePlan).toHaveBeenCalledWith("go", "acceptEdits")
   })
   it("reviews a plan in the slot above the composer, not at the top of the pane", () => {
     mockPaneRuntime.ownsDecisions = true
@@ -466,6 +484,40 @@ describe("ChatPane", () => {
     )
     expect(screen.getByRole("status")).toHaveTextContent("Reconnect to host")
     expect(MessageList).toHaveBeenCalled()
+  })
+
+  // With history the strip replaces the card: the report rides the
+  // composer's top edge instead of pushing the transcript down.
+  it("docks the runtime strip on the composer instead of the card above history", () => {
+    render(
+      <ChatPane
+        {...makeProps()}
+        composerDisabled
+        composerDisabledPlaceholder="Sends resume when the host is back"
+        runtimeNotice={<div role="status">Reconnect to host</div>}
+        runtimeStrip={<div data-testid="strip">Reconnecting</div>}
+      />
+    )
+    expect(screen.queryByText("Reconnect to host")).not.toBeInTheDocument()
+    const props = mockComposerProps.at(-1)!
+    render(<>{props.runStatus as React.ReactNode}</>)
+    expect(screen.getByTestId("strip")).toHaveTextContent("Reconnecting")
+    expect(props.disabled).toBe(true)
+    expect(props.disabledPlaceholder).toBe("Sends resume when the host is back")
+  })
+
+  it("keeps the centred card for an empty conversation even when a strip is offered", () => {
+    storeState.messages = []
+    render(
+      <ChatPane
+        {...makeProps()}
+        composerDisabled
+        runtimeNotice={<div role="status">Reconnect to host</div>}
+        runtimeStrip={<div data-testid="strip">Reconnecting</div>}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnect to host")
+    expect(screen.queryByTestId("strip")).not.toBeInTheDocument()
   })
 
   it("mounts live Computer Use activity inside the real chat pane", async () => {
@@ -748,7 +800,19 @@ describe("ChatPane", () => {
     )
   })
 
-  it("mounts the Router + Fusion progress card above the run status for this pane's session", () => {
+  it("docks the run strip into the Composer, bound to this pane's session, with no interrupt of its own", () => {
+    render(<ChatPane {...makeProps()} />)
+    const runStatus = mockComposerProps.at(-1)?.runStatus as React.ReactElement<
+      Record<string, unknown>
+    >
+    expect(runStatus).toBeTruthy()
+    expect(runStatus.props.sessionId).toBe("s1")
+    // Interrupting is the Composer's own Stop button.
+    expect(runStatus.props).not.toHaveProperty("onStop")
+    expect(mockComposerProps.at(-1)?.onStop).toEqual(expect.any(Function))
+  })
+
+  it("mounts the Router + Fusion progress card above the composer for this pane's session", () => {
     render(<ChatPane {...makeProps()} />)
     expect(screen.getByTestId("router-fusion-progress-card")).toHaveAttribute("data-session", "s1")
   })
@@ -1539,5 +1603,159 @@ describe("ChatPane — welcome personalization reaches the welcome page", () => 
 
   it("omits the hero composer when the shell cannot create a session", () => {
     expect(renderWelcome().composerSlot).toBeUndefined()
+  })
+})
+
+describe("ChatPane — a user turn restores an archived conversation (ADR-0213 D2)", () => {
+  const archived = { ...mockSession, archivedAt: 1_700_000_000_000 } as ChatSession
+
+  beforeEach(() => {
+    unarchiveMock.mockReset().mockResolvedValue(true)
+    peekPendingChatPromptMock.mockReset().mockReturnValue(null)
+    readOnboardingRequestMock.mockReset().mockReturnValue(null)
+    mockPaneRuntime.ownsDecisions = true
+    mockPlanDockProps.length = 0
+    storeState.messages = [{ id: "m1", role: "user", parts: [] }]
+    storeState.messagesLoading = false
+    storeState.messagesLoadError = null
+    storeState.status = "idle"
+  })
+
+  function composerSend() {
+    return mockComposerProps.at(-1)?.onSend as (content: SendContent) => Promise<void>
+  }
+
+  it("restores an archived conversation when the user sends into it", async () => {
+    const props = makeProps()
+    render(<ChatPane {...props} activeSession={archived} />)
+    await act(async () => {
+      await composerSend()("hello")
+    })
+    expect(unarchiveMock).toHaveBeenCalledWith([archived], { reason: "send" })
+    expect(props.onSend).toHaveBeenCalledWith("hello", undefined, undefined, undefined)
+  })
+
+  it("leaves an active conversation alone", async () => {
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+    await act(async () => {
+      await composerSend()("hello")
+    })
+    expect(unarchiveMock).not.toHaveBeenCalled()
+    expect(props.onSend).toHaveBeenCalled()
+  })
+
+  it("still sends when the restore fails, and does not wait for it", async () => {
+    let settle: (landed: boolean) => void = () => {}
+    unarchiveMock.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settle = resolve
+        })
+    )
+    const props = makeProps()
+    render(<ChatPane {...props} activeSession={archived} />)
+    await act(async () => {
+      await composerSend()("hello")
+    })
+    // The restore is still pending; the send went out regardless.
+    expect(props.onSend).toHaveBeenCalledTimes(1)
+    await act(async () => settle(false))
+    expect(props.onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not restore the pane's row when it is bound to another session", async () => {
+    const props = makeProps()
+    render(<ChatPane {...props} activeSession={archived} sessionId="other" />)
+    await act(async () => {
+      await composerSend()("hello")
+    })
+    expect(unarchiveMock).not.toHaveBeenCalled()
+  })
+
+  it("treats regenerate, edit-and-resend and the error retry as user turns", async () => {
+    const MockList = MessageList as jest.Mock
+    MockList.mockClear()
+    const props = makeProps()
+    render(<ChatPane {...props} activeSession={archived} />)
+    const listProps = MockList.mock.calls.at(-1)?.[0] as {
+      onRegenerate: () => void
+      onEditResend: (id: string, text: string) => void
+    }
+    act(() => listProps.onRegenerate())
+    expect(unarchiveMock).toHaveBeenCalledTimes(1)
+    expect(props.onRegenerate).toHaveBeenCalledTimes(1)
+    // Same archive stamp: the hook restores it once, but every turn still runs.
+    act(() => listProps.onEditResend("m1", "edited"))
+    expect(props.onEditResend).toHaveBeenCalledWith("m1", "edited")
+    expect(unarchiveMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("restores from the error card's retry", async () => {
+    unarchiveMock.mockResolvedValue(false)
+    const MockInline = InlineError as jest.Mock
+    MockInline.mockClear()
+    storeState.errorMessage = "boom"
+    try {
+      const props = makeProps()
+      render(<ChatPane {...props} activeSession={archived} />)
+      const onRetry = MockInline.mock.calls.at(-1)?.[0]?.onRetry as () => Promise<void>
+      await act(async () => {
+        await onRetry()
+      })
+      expect(unarchiveMock).toHaveBeenCalledWith([archived], { reason: "send" })
+      expect(props.onRegenerate).toHaveBeenCalled()
+    } finally {
+      storeState.errorMessage = null
+    }
+  })
+
+  it("treats plan feedback and a plan approval as user turns", async () => {
+    unarchiveMock.mockResolvedValue(false)
+    const props = makeProps()
+    render(<ChatPane {...props} activeSession={archived} />)
+    const dock = mockPlanDockProps.at(-1) as {
+      onResume: (prompt: string, mode: string) => Promise<void>
+      onSendPlanFeedback: (feedback: string) => Promise<void>
+    }
+    await act(async () => {
+      await dock.onSendPlanFeedback("tighten step 2")
+    })
+    expect(props.onSend).toHaveBeenCalledWith("tighten step 2")
+    expect(unarchiveMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await dock.onResume("approved", "acceptEdits")
+    })
+    expect(mockPaneRuntime.resumePlan).toHaveBeenCalledWith("approved", "acceptEdits")
+    expect(unarchiveMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("sends plan feedback through the host's own channel when it has one", async () => {
+    const onSendPlanFeedback = jest.fn(async (_feedback: string) => {})
+    render(
+      <ChatPane {...makeProps()} activeSession={archived} onSendPlanFeedback={onSendPlanFeedback} />
+    )
+    const dock = mockPlanDockProps.at(-1) as {
+      onSendPlanFeedback: (feedback: string) => Promise<void>
+    }
+    await act(async () => {
+      await dock.onSendPlanFeedback("more detail")
+    })
+    expect(onSendPlanFeedback).toHaveBeenCalledWith("more detail")
+    expect(unarchiveMock).toHaveBeenCalledWith([archived], { reason: "send" })
+  })
+
+  it("shows the archived banner for an archived conversation only", () => {
+    const { rerender } = render(<ChatPane {...makeProps()} />)
+    expect(screen.queryByTestId("archived-banner-stub")).not.toBeInTheDocument()
+    rerender(<ChatPane {...makeProps()} activeSession={archived} />)
+    expect(screen.getByTestId("archived-banner-stub")).toHaveTextContent("s1")
+  })
+
+  it("shows no banner on an imported subagent transcript", () => {
+    render(
+      <ChatPane {...makeProps()} activeSession={{ ...archived, kind: "subagent" } as ChatSession} />
+    )
+    expect(screen.queryByTestId("archived-banner-stub")).not.toBeInTheDocument()
   })
 })

@@ -66,10 +66,15 @@ import {
   isSessionAttached,
 } from "@/lib/companion/remote-attach-registry"
 import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
-import { listMessages, persistMessages } from "@/lib/db/messages"
+import { listMessages, persistMessages, type MessagePersistOptions } from "@/lib/db/messages"
 import { driveInSessionPlanAfterTurn } from "./plan-turn-settle"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import { getSession, setSdkSessionId } from "@/lib/db/sessions"
+import {
+  acknowledgeTranscriptRuntime,
+  withTranscriptRuntimeLock,
+  type TranscriptRuntimeFence,
+} from "@/lib/chat/transcript/revision-events"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
@@ -132,24 +137,37 @@ import {
   scheduleLoopContinuation,
 } from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
+import { closeOpenToolParts, hasOpenToolParts } from "@/lib/chat/phantom-run"
 
 async function settleChatTranscript(
   sessionId: string,
-  messages: UIMessage[] | undefined,
+  terminalMessages: UIMessage[] | undefined,
   outcome: "completed" | "failed",
-  errorCode?: string
+  errorCode?: string,
+  options?: MessagePersistOptions
 ): Promise<void> {
+  if (options?.shouldPersist?.() === false) return
+  // A failed turn delivers no further tool results: a call it left open would
+  // render as "running" forever, across every reload. Close those as
+  // interrupted in the slice and in the transcript written below.
+  let messages = terminalMessages
+  if (outcome === "failed" && messages && hasOpenToolParts(messages)) {
+    messages = closeOpenToolParts(messages).messages
+    if (useChatStore.getState().sessions[sessionId]) {
+      useChatStore.getState().replaceSessionMessages(sessionId, messages)
+    }
+  }
   const settled = await settleChatTurnForSession(sessionId, {
     outcome,
     ...(errorCode ? { errorCode } : {}),
     ...(messages
       ? {
-          writeTranscript: () => persistMessages(sessionId, messages),
+          writeTranscript: () => persistMessages(sessionId, messages, options),
         }
       : {}),
   })
   if (!settled && messages) {
-    await persistMessages(sessionId, messages)
+    await persistMessages(sessionId, messages, options)
   }
 }
 
@@ -170,6 +188,7 @@ export interface StreamCoalescing {
   messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
   registry: SessionCoalescingRegistry
   getExecutionHandle: (sessionId: string) => AgentExecutionHandle | undefined
+  transcriptFence?: TranscriptRuntimeFence
 }
 
 /**
@@ -343,6 +362,34 @@ export async function handleEvent(
   // a local pane is open. Other event observers and transcript ingestion stay live.
   if (hasCaptureResponder(evt)) return
   const { messagesMirrorRef, registry, getExecutionHandle } = coalescing
+  const frame = evt as ClaudeEvent & {
+    sessionId?: string
+    turnId?: string
+    transcriptInvalidationId?: string
+  }
+  const fenceTranscript = [
+    "event",
+    "sdk_session_id",
+    "session_ended",
+    "permission_request",
+    "permission_interrupted",
+    "tool_result_review",
+  ].includes(evt.type)
+  const capturedWriteOptions =
+    fenceTranscript && frame.sessionId && coalescing.transcriptFence
+      ? await coalescing.transcriptFence.capture(frame.sessionId, frame.transcriptInvalidationId)
+      : undefined
+  const isCurrentEvent = () => {
+    if (capturedWriteOptions?.shouldPersist?.() === false) return false
+    const currentTurn = frame.sessionId
+      ? useChatStore.getState().lastSendBySession[frame.sessionId]?.options.turnId
+      : undefined
+    return !frame.turnId || !currentTurn || frame.turnId === currentTurn
+  }
+  const writeOptions = capturedWriteOptions
+    ? { ...capturedWriteOptions, shouldPersist: isCurrentEvent }
+    : undefined
+  if (fenceTranscript && !isCurrentEvent()) return
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
     (evt.type === "event" ||
@@ -409,6 +456,11 @@ export async function handleEvent(
       const chat = useChatStore.getState()
       for (const [sid, slice] of Object.entries(chat.sessions)) {
         if (slice.status !== "streaming" && slice.status !== "awaiting_approval") continue
+        const terminalWriteOptions = await coalescing.transcriptFence?.capture(
+          sid,
+          chat.lastSendBySession[sid]?.options.transcriptInvalidationId
+        )
+        if (terminalWriteOptions?.shouldPersist?.() === false) continue
         const terminalMessages = messagesMirrorRef.current.get(sid) ?? slice.messages
         useInFlightStore.getState().settle(sid)
         clearApprovalBackstops(sid)
@@ -459,7 +511,13 @@ export async function handleEvent(
         }
         chat.clearLastSend(sid)
         await finishDirectChatExecutionRun(sid, "failed", Date.now(), "Sidecar exited")
-        await settleChatTranscript(sid, terminalMessages, "failed", "sidecar_exit")
+        await settleChatTranscript(
+          sid,
+          terminalMessages,
+          "failed",
+          "sidecar_exit",
+          terminalWriteOptions
+        )
       }
       return
     }
@@ -469,6 +527,27 @@ export async function handleEvent(
       await setSdkSessionId(evt.sessionId, evt.sdkSessionId).catch((err) => {
         console.error("setSdkSessionId failed", err)
       })
+      if (!isCurrentEvent()) return
+      const options = useChatStore.getState().lastSendBySession[evt.sessionId]?.options
+      const turnId = (evt as typeof evt & { turnId?: string }).turnId
+      const runtime =
+        evt.runtimeAdapter ??
+        options?.execution?.runtimeAdapter ??
+        (options?.provider && options.provider !== "anthropic" ? "ai-sdk" : "claude-agent-sdk")
+      const initializedGeneration =
+        evt.runtimeAdapter === "ai-sdk" ? frame.transcriptInvalidationId : undefined
+      if (
+        runtime === "ai-sdk" &&
+        (initializedGeneration ||
+          (options?.transcriptInvalidationId &&
+            typeof turnId === "string" &&
+            turnId === options.turnId))
+      ) {
+        await acknowledgeTranscriptRuntime(
+          evt.sessionId,
+          initializedGeneration ?? options!.transcriptInvalidationId!
+        )
+      }
       return
     }
     case "session_ended": {
@@ -614,7 +693,13 @@ export async function handleEvent(
             }
             useChatStore.getState().clearLastSend(evt.sessionId)
             await finishDirectChatExecutionRun(evt.sessionId, "failed", Date.now(), evt.error)
-            await settleChatTranscript(evt.sessionId, terminalMessages, "failed", "turn_error")
+            await settleChatTranscript(
+              evt.sessionId,
+              terminalMessages,
+              "failed",
+              "turn_error",
+              writeOptions
+            )
           }
         } else {
           // Clean end without a content-bearing result event (e.g. tool-only
@@ -634,7 +719,13 @@ export async function handleEvent(
           }
           useChatStore.getState().clearLastSend(evt.sessionId)
           await finishDirectChatExecutionRun(evt.sessionId, "completed")
-          await settleChatTranscript(evt.sessionId, terminalMessages, "completed")
+          await settleChatTranscript(
+            evt.sessionId,
+            terminalMessages,
+            "completed",
+            undefined,
+            writeOptions
+          )
         }
         // Turn settled — replay any steer the user queued mid-run. A clean end
         // always drains; an errored end drains only when an explicit
@@ -671,7 +762,8 @@ export async function handleEvent(
           evt.sessionId,
           terminalMessages,
           evt.error ? "failed" : "completed",
-          evt.error ? "turn_error" : undefined
+          evt.error ? "turn_error" : undefined,
+          writeOptions
         )
       }
       return
@@ -922,6 +1014,7 @@ export async function handleEvent(
       const env = evt as SDKEventEnvelope
       const sessionId = env.sessionId
       await projectDirectChatSdkMessage(sessionId, env.event)
+      if (!isCurrentEvent()) return
       // Router + Fusion (ADR-0188): a ledgered Claude Agent SDK turn books its
       // model calls from the stream. Undefined — no await — for any other turn.
       const observingRouterFusion = observeRouterFusionTurnMessage(sessionId, env.event)
@@ -950,6 +1043,7 @@ export async function handleEvent(
       const current = isOpen
         ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
         : (messagesMirrorRef.current.get(sessionId) ?? (await listMessages(sessionId)))
+      if (!isCurrentEvent()) return
 
       // Track assistant tool_use blocks so the post-tool hook can correlate
       // `tool_result_review` events with the call's name + input.
@@ -993,12 +1087,25 @@ export async function handleEvent(
               (message.parts[0] as { type?: string } | undefined)?.type === "compact-boundary"
           )
         if (boundary) {
-          const checkpoint = await captureCompactionCheckpoint({
-            boundaryId: boundary.id,
-            sessionId,
-            metadata: systemEvent.compact_metadata ?? {},
-            options: useChatStore.getState().lastSendBySession[sessionId]?.options,
+          const checkpoint = await withTranscriptRuntimeLock(sessionId, async () => {
+            if (!isCurrentEvent()) return undefined
+            // The checkpoint can contain the full pre-compaction transcript.
+            // Read the authority while holding the mutation lock, including
+            // edits from another window whose notification is still in flight.
+            const session = await getSession(sessionId)
+            if (
+              !isCurrentEvent() ||
+              session?.runtimeTranscriptGeneration !== frame.transcriptInvalidationId
+            )
+              return undefined
+            return captureCompactionCheckpoint({
+              boundaryId: boundary.id,
+              sessionId,
+              metadata: systemEvent.compact_metadata ?? {},
+              options: useChatStore.getState().lastSendBySession[sessionId]?.options,
+            })
           })
+          if (!checkpoint || !isCurrentEvent()) return
           nextMessages = attachCheckpointCapture(nextMessages, checkpoint)
           if (checkpoint.state === "stored") {
             // The `compact` event says the context was compacted; this says
@@ -1011,6 +1118,7 @@ export async function handleEvent(
           }
         }
       }
+      if (!isCurrentEvent()) return
       const pendingTag = pendingBranchTagRef.current.get(sessionId)
       if (pendingTag && appliedMessages !== current && appliedMessages.length > current.length) {
         const lastIdx = appliedMessages.length - 1
@@ -1209,6 +1317,7 @@ export async function handleEvent(
         nextMessages = attachInteractiveGrounding(nextMessages, last?.options)
       }
 
+      if (!isCurrentEvent()) return
       if (nextMessages !== current) {
         const currentAssistant = [...current]
           .reverse()
@@ -1257,12 +1366,19 @@ export async function handleEvent(
             coalesce.commit.cancel()
             coalesce.persist.cancel()
             useChatStore.getState().replaceSessionMessages(sessionId, nextMessages)
-            await settleChatTranscript(sessionId, nextMessages, "completed")
+            await settleChatTranscript(
+              sessionId,
+              nextMessages,
+              "completed",
+              undefined,
+              writeOptions
+            )
+            if (!isCurrentEvent()) return
           } else {
             // Mid-stream: coalesce the React commit to ≤1/frame and debounce
             // the Dexie write. The mirror keeps the read path correct.
-            coalesce.commit.call(nextMessages)
-            coalesce.persist.call(nextMessages)
+            coalesce.commit.call(nextMessages, writeOptions)
+            coalesce.persist.call(nextMessages, writeOptions)
           }
         } else {
           // No open pane — no live slice to feed, but the Dexie write is still
@@ -1275,12 +1391,18 @@ export async function handleEvent(
           if (turnComplete) {
             coalesce.persist.cancel()
             chatTurnPerformance.beginFinalPersistence(sessionId)
-            await settleChatTranscript(sessionId, nextMessages, "completed")
+            await settleChatTranscript(
+              sessionId,
+              nextMessages,
+              "completed",
+              undefined,
+              writeOptions
+            )
             chatTurnPerformance.endFinalPersistence(sessionId)
             messagesMirrorRef.current.delete(sessionId)
             registry.release(sessionId)
           } else {
-            coalesce.persist.call(nextMessages)
+            coalesce.persist.call(nextMessages, writeOptions)
           }
         }
         // A reply landing for any *non-focused* session (open background pane
@@ -1411,6 +1533,7 @@ export async function handleEvent(
       }
 
       if (turnComplete && isOpen) {
+        if (!isCurrentEvent()) return
         // Streaming sealed. Commit the last visual frame, cancel the
         // fire-and-forget debounced writer, and await one canonical durable
         // snapshot before exposing the idle state. A result envelope commonly
@@ -1421,7 +1544,7 @@ export async function handleEvent(
         registry.get(sessionId).commit.flush()
         registry.get(sessionId).persist.cancel()
         chatTurnPerformance.beginFinalPersistence(sessionId)
-        await settleChatTranscript(sessionId, nextMessages, "completed")
+        await settleChatTranscript(sessionId, nextMessages, "completed", undefined, writeOptions)
         chatTurnPerformance.endFinalPersistence(sessionId)
         registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
@@ -1469,6 +1592,7 @@ export async function handleEvent(
                     role: "assistant",
                     content,
                   })
+                  if (!isCurrentEvent()) return
                   if (typeof piped?.content !== "string" || piped.content === content) return
                   const base = useChatStore.getState().sessions[sessionId]?.messages ?? []
                   const rewritten = base.map((m) =>
@@ -1482,7 +1606,7 @@ export async function handleEvent(
                       : m
                   )
                   useChatStore.getState().setSessionMessages(sessionId, rewritten)
-                  await persistMessages(sessionId, rewritten)
+                  await persistMessages(sessionId, rewritten, writeOptions)
                 } catch {
                   // Pipeline rewrite is best-effort — never break the seal.
                 }
@@ -1679,6 +1803,7 @@ export async function handleEvent(
               } finally {
                 unregister()
               }
+              if (!isCurrentEvent()) return
               if (outcome.kind === "exit") {
                 useChatStore.getState().appendMessage({
                   id: `sys-loop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1690,7 +1815,11 @@ export async function handleEvent(
                     },
                   ],
                 })
-                await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+                await persistMessages(
+                  sessionId,
+                  useChatStore.getState().messages,
+                  writeOptions
+                ).catch(() => {})
               } else if (outcome.kind === "continue") {
                 selfDrivenContinuation = true
                 scheduleLoopContinuation(
@@ -1708,9 +1837,11 @@ export async function handleEvent(
           }
           try {
             const goal = await getGoalRuntime().getActiveGoalForSession(sessionId)
+            if (!isCurrentEvent()) return
             if (goal) {
               const appSettings = useSettingsStore.getState().settings
               const goalSession = await getSession(sessionId).catch(() => undefined)
+              if (!isCurrentEvent()) return
               const judgeClient = buildGoalJudgeClient(goalSession, appSettings, {
                 // Per-goal judge model/provider (ADR-0019 Phase 2); undefined
                 // → falls back to the session/app-default provider.
@@ -1733,7 +1864,11 @@ export async function handleEvent(
                     ],
                   })
                   await getGoalRuntime().pauseGoal(goal.id)
-                  await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+                  await persistMessages(
+                    sessionId,
+                    useChatStore.getState().messages,
+                    writeOptions
+                  ).catch(() => {})
                 }
               } else {
                 const lastAssistant = [...nextMessages]
@@ -1769,6 +1904,7 @@ export async function handleEvent(
                 } finally {
                   unregister()
                 }
+                if (!isCurrentEvent()) return
                 if (outcome.kind === "exit") {
                   useChatStore.getState().appendMessage({
                     id: `sys-goal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1780,7 +1916,11 @@ export async function handleEvent(
                       },
                     ],
                   })
-                  await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+                  await persistMessages(
+                    sessionId,
+                    useChatStore.getState().messages,
+                    writeOptions
+                  ).catch(() => {})
                 } else if (outcome.kind === "continue") {
                   // Pacing gate (ADR-0019 Phase 2): dispatch now / hold for a
                   // manual "Continue" / defer past quiet-hours or the interval.

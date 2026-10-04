@@ -49,18 +49,16 @@ import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
 import { useOptionalChatScope } from "@/components/chat/chat-scope-provider"
 import { ContextDetailPanel } from "@/components/chat/context-detail-panel"
 import {
-  buildEstimateContextBreakdown,
-  buildSdkContextBreakdown,
   resolveAutoCompaction,
+  resolveContextBreakdown,
   type AutoCompactionPolicy,
 } from "@/lib/claude/context-breakdown"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import {
   AUTO_COMPACT_FRACTION,
-  computeContextWindowUsage,
-  contextLevel,
   getLatestRunProviderId,
   getLatestUsage,
+  resolveContextWindowUsage,
   sumSessionUsage,
   type ContextLevel,
   type SessionUsageTotals,
@@ -158,26 +156,10 @@ export function ContextUsageIndicator({
     [modelId, providerId, providerSettings, customProviders]
   )
   const effectiveMax = maxTokens ?? catalogWindow
-  const win = useMemo(() => {
-    // SDK-authoritative path: the live query reports the TRUE window size and
-    // occupancy (incl. system prompt, tools, memory the estimate can't see).
-    if (sdkUsage && sdkUsage.maxTokens > 0) {
-      const max = sdkUsage.maxTokens
-      const used = sdkUsage.totalTokens
-      const fraction = Math.min(1, Math.max(0, used / max))
-      return {
-        used,
-        max,
-        fraction,
-        remaining: Math.max(0, max - used),
-        level: contextLevel(fraction),
-        compactThresholdTokens: Math.round(max * AUTO_COMPACT_FRACTION),
-        reported: true,
-        windowSource: "agent" as const,
-      }
-    }
-    return computeContextWindowUsage(usage, modelId, effectiveMax)
-  }, [sdkUsage, usage, modelId, effectiveMax])
+  const win = useMemo(
+    () => resolveContextWindowUsage(sdkUsage, usage, modelId, effectiveMax),
+    [sdkUsage, usage, modelId, effectiveMax]
+  )
   // O(n) over the whole history — recomputed only when the usage signature
   // above moves (a few times per turn), never per streamed token. Reading the
   // array via getState() is safe here: the signature deps pin when it re-runs.
@@ -193,10 +175,7 @@ export function ContextUsageIndicator({
         // reports `context-management: unsupported`, so an external turn's
         // compaction is the agent's business, not the sidecar's.
         agentOwned: getLatestRunProviderId(msgs) === "external",
-        breakdown:
-          sdkUsage && sdkUsage.maxTokens > 0
-            ? buildSdkContextBreakdown(sdkUsage)
-            : buildEstimateContextBreakdown(msgs, win.used, win.max),
+        breakdown: resolveContextBreakdown(sdkUsage, msgs, win.used, win.max),
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- messageCount/usage ARE the recompute signal for the store read above

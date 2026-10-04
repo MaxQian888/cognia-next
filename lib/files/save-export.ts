@@ -31,6 +31,8 @@ import { encodeBase64 } from "@/lib/share/encoding"
 export type ExportData = string | Uint8Array | Blob
 
 export interface SaveExportOptions {
+  /** Reject stale operations after a native dialog or another asynchronous step. */
+  shouldContinue?: () => boolean
   /** Suggested filename incl. extension (e.g. "cognia-chat-2026-06-17.md"). */
   filename: string
   data: ExportData
@@ -57,6 +59,7 @@ export type SaveExportOutcome =
 /** Save a file to disk on whichever platform we're running, returning where it went. */
 export async function saveExport(opts: SaveExportOptions): Promise<SaveExportOutcome> {
   try {
+    if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
     if (isTauri()) return await saveViaTauri(opts)
     if (isCapacitor()) {
       const outcome = await saveViaCapacitor(opts)
@@ -80,6 +83,7 @@ async function saveViaTauri(opts: SaveExportOptions): Promise<SaveExportOutcome>
   const fs = await import("@tauri-apps/plugin-fs")
   const ext = extOf(opts.filename)
   const filters = opts.filters ?? [{ name: ext.toUpperCase(), extensions: [ext] }]
+  if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
   const path = await save({
     defaultPath: opts.defaultDirectory
       ? `${opts.defaultDirectory.replace(/\/+$/, "")}/${opts.filename}`
@@ -87,13 +91,17 @@ async function saveViaTauri(opts: SaveExportOptions): Promise<SaveExportOutcome>
     filters,
   })
   if (!path) return { kind: "cancelled" }
+  if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
   // Bless the dialog-chosen directory so the Rust FS allowed-roots gate treats
   // this user-picked path as in-bounds (shadow-mode containment).
   await registerDialogPathInRust(path)
   if (typeof opts.data === "string") {
+    if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
     await fs.writeTextFile(path, opts.data)
   } else {
-    await fs.writeFile(path, await toBytes(opts.data))
+    const bytes = await toBytes(opts.data)
+    if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
+    await fs.writeFile(path, bytes)
   }
   return { kind: "saved", platform: "tauri", location: path, filename: opts.filename }
 }
@@ -104,6 +112,7 @@ async function saveViaCapacitor(opts: SaveExportOptions): Promise<CapacitorSaveO
   const subdir = opts.mobileSubdir ?? "cognia/exports"
   const path = `${subdir}/${opts.filename}`
   const base64 = await toBase64(opts.data)
+  if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
   const out = await capacitorWriteFile({
     path,
     data: base64,
@@ -129,6 +138,7 @@ function saveViaWeb(opts: SaveExportOptions): SaveExportOutcome {
     opts.data instanceof Blob
       ? opts.data
       : new Blob([opts.data as BlobPart], { type: opts.mimeType })
+  if (opts.shouldContinue?.() === false) return { kind: "cancelled" }
   void downloadBlob(blob, opts.filename)
   return { kind: "saved", platform: "web", location: "downloads", filename: opts.filename }
 }

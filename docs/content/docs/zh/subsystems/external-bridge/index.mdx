@@ -9,9 +9,9 @@ description: 一个默认拒绝的 MCP 服务器，把 Cognia 自身的知识（
 
 <TLDR>
   External Bridge 反转了 Cognia 的集成方向：不再由 Cognia 把 Claude Code / Cursor 当子代理来驱动，而是让
-  *那些*代理通过 **Model Context Protocol** 读取 Cognia 的一扇窗。其表面分两层——一个**只读知识面**
+  *那些*代理通过 **Model Context Protocol** 读取 Cognia 数据。其表面分两层——一个**只读知识面**
   （生成的代码 wiki、段落级 RAG、运行时实体清单、URI 资源）和一个**受控动作面**（`computer_use` 桌面驱动、
-  六个收件箱连接器工具）。每次 tool/resource 调用都先经过 `permission-gate.ts:checkScope`，对照一张按 scope 的白名单
+  六个收件箱连接器工具）。每次 tool/resource 调用都先经过 `permission-gate.ts:checkScope`，对照一张按 scope 划分的白名单
   做校验，且**默认拒绝**——全新安装只开启 `wiki:cognia` + `rag:cognia`——并向 `mcpAuditLog`（上限 5000）写入一行。
   MCP 服务器骨架（`mcp-server/server.ts:buildMcpServer`）与传输无关：一个 Node sidecar 通过 **stdio** 运行它，
   而 Tauri Rust 侧（`src-tauri/src/mcp_server/`，axum）以 **HTTP** + bearer 鉴权对外提供同一个 sidecar。
@@ -30,16 +30,13 @@ description: 一个默认拒绝的 MCP 服务器，把 Cognia 自身的知识（
 
 ## 它弥合的不对称
 
-在这座桥之前，Cognia 与 LLM 编码代理生态有三条不对称的边
-（[ADR-0008](../../adr/0008-external-bridge)）：
+在这座桥之前，Cognia 与 LLM 编码代理生态有三条不对称的边（[ADR-0008](../../adr/0008-external-bridge)）：
 
-1. **出站** —— 完整的 ACP / OpenCode / Anthropic-SDK 客户端覆盖，使 Cognia 能把 Claude Code、Cursor、Codex
-   当子代理驱动。
+1. **出站** —— 完整的 ACP / OpenCode / Anthropic-SDK 客户端覆盖，使 Cognia 能把 Claude Code、Cursor、Codex 当子代理驱动。
 2. **进程内插件** —— 丰富的 `lib/plugin/` 系统（工具 / 模式 / 钩子 / 市场）。
 3. **入站** —— *空白*。用户日常的 Claude Code 会话对 Cognia 已为其蒸馏的一切都一无所知。
 
-External Bridge 就是第 3 条边。它暴露一扇只读窗（以及在显式选择启用后的一扇狭窄动作窗），让用户在 Cognia
-*之外*运行的代理能查询 Cognia 所知的内容。
+External Bridge 就是第 3 条边。它暴露一扇只读窗（以及在显式选择启用后的一扇狭窄动作窗），让用户在 Cognia *之外*运行的代理能查询 Cognia 所知的内容。
 
 ## 两个面
 
@@ -89,9 +86,7 @@ flowchart TB
   class Store store
 ```
 
-**知识面**回答"Cognia 怎么工作 / 它知道什么"——以生成的 wiki 和数字孪生为依据。**动作面**回答"替我做点什么"——
-驱动桌面，或通过完整的 AI 回路回复一条收件箱会话。两者在 scope 层面被切开，因此运维者可以授予深度自省，
-却不必启用任何自动化副作用。
+**知识面**回答"Cognia 怎么工作 / 它知道什么"——以生成的 wiki 和数字孪生为依据。**动作面**回答"替我做点什么"——驱动桌面，或通过完整的 AI 回路回复一条收件箱会话。两者在 scope 层面被切开，因此运维者可以授予深度自省，却不必启用任何自动化副作用。
 
 ## 代码位置
 

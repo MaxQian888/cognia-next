@@ -1,26 +1,25 @@
 ---
 title: Manifest linter
-description: cognia plugin lint —— 针对 plugin.json 的诊断码目录、硬编码的 70 权限 / 63 能力 / 5 类型 / 47 字段白名单、带版本号的 JSON 报告，以及让四份 Rust 列表与 TypeScript host 锁死的 Jest 对等测试。
+description: cognia plugin lint —— 针对 plugin.json 的诊断码目录、硬编码的 70 权限 / 63 能力 / 5 类型 / 47 字段白名单、带版本号的 JSON 报告，以及让四份 Rust 列表与 TypeScript 宿主保持一致的 Jest 对等测试。
 ---
 
 # Manifest linter —— `cognia plugin lint`
 
 <TLDR>
   `cmd_lint.rs`（CLI 中最大的模块）针对 `plugin.json` 运行 **60+ 个独立诊断码**，
-  并输出经过样式化的散文或一份 `schemaVersion: 2` 的 JSON 报告。严重度分三级：**errors**
+  并输出带格式的文本或一份 `schemaVersion: 2` 的 JSON 报告。严重度分三级：**errors**
   会让运行失败（`exit 1`，并通过 `cmd_build::build_inner` 阻断 `build`）；**warnings**
   默认不阻断，除非传入 `-W` / `--warnings-as-errors`；**notices** 永不阻断。四份白名单硬编码在
   Rust 里 —— 70 个权限（`VALID_PERMISSIONS`）、63 个能力（`VALID_CAPABILITIES`）、5 种插件类型
   （`VALID_PLUGIN_TYPES`）、以及 47 项的 `CAPABILITY_FIELDS` 映射 —— 而一个 Jest 测试
   （`lib/plugin/contracts/rust-capability-parity.test.ts`）用正则从 Rust
-  源码里提取全部四份，并断言与 host 规范化的 TS 源集合相等，于是 CLI 永远不会
-  与桌面端实际接受的内容悄然漂移。
+  源码里提取全部四份，并断言与 host 规范化的 TS 源集合相等，从而保证 CLI
+  与桌面端实际接受的内容保持一致。
 </TLDR>
 
 ## 调用方式与报告形态
 
-`cognia plugin lint [--path .] [--json]`。manifest 由 `read_plugin_manifest`
-（位于 `main.rs`）定位 —— 根目录下的 `plugin.json`，回退到 `manifest/plugin.json`。
+`cognia plugin lint [--path .] [--json]`。manifest 由 `read_plugin_manifest`（位于 `main.rs`）定位 —— 根目录下的 `plugin.json`，回退到 `manifest/plugin.json`。
 
 ```rust
 // crates/cognia-cli/src/cmd_lint.rs (abridged)
@@ -48,16 +47,12 @@ pub struct LintReport {
 `valid` 计算为 `!diagnostics.iter().any(|d| d.severity == Severity::Error)` 并保存在 `LintReport`
 里；`ok` 是门禁结果（等于 `valid`，除非 `--warnings-as-errors` 把一个 warning 升级为失败）。两种消费模式：
 
-- **CLI**（`cmd_lint::run`）：经 `print_human` 输出人类可读内容 ——
-  `[ERROR] field: message`、以 `→ try:` 为前缀的 hint、汇总行 `N error(s), M warning(s)` ——
-  若 invalid 则 `exit(1)`。
-- **Library**（`cmd_lint::validate_at`）：返回报告；这正是 `build`
-  在做任何事之前所调用的。
+- **CLI**（`cmd_lint::run`）：经 `print_human` 输出人类可读内容 ——`[ERROR] field: message`、以 `→ try:` 为前缀的 hint、汇总行 `N error(s), M warning(s)` ——若 invalid 则 `exit(1)`。
+- **Library**（`cmd_lint::validate_at`）：返回报告；这正是 `build` 在做任何事之前所调用的。
 
 ## 规则目录
 
-所有规则都在一趟 `validate_manifest()` 中执行，外加针对
-`wasm`、`dexie` 与 `cliTools[]` 块的专门子校验器。
+所有规则都在一趟 `validate_manifest()` 中执行，外加针对 `wasm`、`dexie` 与 `cliTools[]` 块的专门子校验器。
 
 ### 身份标识与必填字段
 
@@ -72,8 +67,7 @@ pub struct LintReport {
 
 ### 类型与入口点
 
-`type` 必须是 `frontend · python · hybrid · wasm · vscode-extension` 之一
-（`manifest.type.invalid`），且每种类型都要求其入口字段：
+`type` 必须是 `frontend · python · hybrid · wasm · vscode-extension` 之一（`manifest.type.invalid`），且每种类型都要求其入口字段：
 
 | Type | 必填字段 | 附加 |
 | --- | --- | --- |
@@ -93,11 +87,7 @@ pub struct LintReport {
 
 ### 能力 ↔ 贡献对等
 
-除了须在 63 项白名单中（`manifest.capabilities.invalid`，error），linter 还会用 47 项
-`CAPABILITY_FIELDS` 映射（`cmd_lint.rs`）将声明与内容交叉核对 ——
-例如 `"a2ui" → ["a2uiComponents", "a2uiTemplates"]`、
-`"scheduler" → ["scheduledTasks"]`、`"workflow-trigger" → ["workflows"]`，以及
-`"cli-tools" → ["cliTools"]`：
+除了须在 63 项白名单中（`manifest.capabilities.invalid`，error），linter 还会用 47 项 `CAPABILITY_FIELDS` 映射（`cmd_lint.rs`）将声明与内容交叉核对 ——例如 `"a2ui" → ["a2uiComponents", "a2uiTemplates"]`、`"scheduler" → ["scheduledTasks"]`、`"workflow-trigger" → ["workflows"]`，以及 `"cli-tools" → ["cliTools"]`：
 
 ```rust
 // cmd_lint.rs — declared but empty → warning
@@ -108,9 +98,7 @@ for (cap, fields) in CAPABILITY_FIELDS {
 }
 ```
 
-反向（`manifest.capability.field_undeclared`）则在某个贡献数组有条目、
-但其映射的能力一个都没声明时告警。两个方向都是 warning —— host 仍会加载这类插件，
-只是该贡献成了多余负担或被悄然忽略。
+反向（`manifest.capability.field_undeclared`）则在某个贡献数组有条目、但其映射的能力一个都没声明时告警。两个方向都是 warning —— host 仍会加载这类插件，只是该贡献成了多余负担或被悄然忽略。
 
 ### 贡献数组、权限、杂项
 
@@ -145,13 +133,7 @@ flowchart LR
   T[rust-capability-parity.test.ts<br/>regex-extracts Rust array literals] --- RS[cmd_lint.rs<br/>four whitelists]
 ```
 
-`rust-capability-parity.test.ts` 以文本方式读取 `cmd_lint.rs`（以及 `validation.ts` 和
-`plugin-capabilities.ts`），用匹配引号字符串的正则提取每份 Rust 列表，并断言其与 TS 规范化源
-**集合相等**：`VALID_PERMISSIONS`、`VALID_CAPABILITIES`、`VALID_PLUGIN_TYPES`，以及
-`CAPABILITY_FIELDS` 映射 —— 最后一份从 `PLUGIN_CAPABILITY_CONTRACTS[].manifestFields` 推导（去掉
-`python` 的入口点字段），与 host 自身的交叉核对一致。在任一侧添加一个权限或一个能力字段而不同步
-另一侧，`pnpm test` 就会失败。每次源文件读取都做了路径守卫，因此文件被移动时测试会 *大声* 失败，
-而不是悄然失效 —— 这正是 2026-07-13（ADR-0067 迁移 `api_bridge.rs`）到守卫被重新指向期间发生的事。
+`rust-capability-parity.test.ts` 以文本方式读取 `cmd_lint.rs`（以及 `validation.ts` 和 `plugin-capabilities.ts`），用匹配引号字符串的正则提取每份 Rust 列表，并断言其与 TS 规范化源**集合相等**：`VALID_PERMISSIONS`、`VALID_CAPABILITIES`、`VALID_PLUGIN_TYPES`，以及 `CAPABILITY_FIELDS` 映射 —— 最后一份从 `PLUGIN_CAPABILITY_CONTRACTS[].manifestFields` 推导（去掉 `python` 的入口点字段），与 host 自身的交叉核对一致。在任一侧添加一个权限或一个能力字段而不同步另一侧，`pnpm test` 就会失败。每次源文件读取都做了路径守卫，因此文件被移动时测试会 *大声* 失败，而不是悄然失效 —— 这正是 2026-07-13（ADR-0067 迁移 `api_bridge.rs`）到守卫被重新指向期间发生的事。
 
 <Callout type="info" title="为什么未知权限只告警、而未知能力却报错？">
   一个能力标签会改变 host 接线插件的方式（registries、loaders、slots）—— 未知的能力
@@ -179,10 +161,6 @@ flowchart LR
 }
 ```
 
-`valid` 表示「无 error」；`ok` 表示「通过门禁」（二者仅在 `-W` 下背离：warning 会把 `ok` 翻为
-`false`，而 `valid` 仍为 `true`）。输入失败载荷共用这一形状 —— 相同的 `schemaVersion` /
-`stage` / `manifestPath` 键，`stage` 为 `"input"`。
+`valid` 表示「无 error」；`ok` 表示「通过门禁」（二者仅在 `-W` 下背离：warning 会把 `ok` 翻为 `false`，而 `valid` 仍为 `true`）。输入失败载荷共用这一形状 —— 相同的 `schemaVersion` /`stage` / `manifestPath` 键，`stage` 为 `"input"`。
 
-文件内的单元测试（`cmd_lint.rs`）钉住最小可用 manifest、每条格式规则、两个对等方向、
-`cliTools[]`、lazy-factory 的 `entry` 路径安全检查、`--warnings-as-errors` 门禁、dexie 约束
-以及 JSON 序列化。
+文件内的单元测试（`cmd_lint.rs`）钉住最小可用 manifest、每条格式规则、两个对等方向、`cliTools[]`、lazy-factory 的 `entry` 路径安全检查、`--warnings-as-errors` 门禁、dexie 约束以及 JSON 序列化。

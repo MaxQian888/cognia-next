@@ -180,6 +180,13 @@ jest.mock("@/components/context-workbench/session-sources-panel", () => ({
   ),
 }))
 
+jest.mock("@/components/context-workbench/session-usage/session-usage-panel", () => ({
+  SESSION_USAGE_PANEL_ID: "session-usage",
+  SessionUsagePanel: ({ session, messages }: { session: { id: string }; messages: unknown[] }) => (
+    <div data-testid="usage" data-session={session.id} data-count={messages.length} />
+  ),
+}))
+
 jest.mock("@/components/browser/browser-preview-pane", () => ({
   BrowserPreviewPane: ({
     sessionId,
@@ -691,7 +698,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the sixteen session-surface panels, in a stable order", () => {
+  it("offers exactly the seventeen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
       ["new-tab", "preview-run", 0],
@@ -705,6 +712,7 @@ describe("useSessionSurfacePanels", () => {
       ["comments", "comments", 40],
       ["run-context", "inspect", 44],
       ["session-sources", "inspect", 45],
+      ["session-usage", "inspect", 47],
       ["metadata", "inspect", 50],
       ["memory", "inspect", 55],
       ["logs", "inspect", 60],
@@ -942,6 +950,19 @@ describe("useSessionSurfacePanels", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     renderPanel(panelById(panels, "session-sources"), SESSION_RESOURCE)
     expect(screen.getByTestId("sources")).toHaveAttribute("data-count", "1")
+  })
+
+  it("draws the conversation's usage and context from the dock's live transcript", () => {
+    const panels = collect(useSessionSurfacePanels, sessionInput())
+    renderPanel(panelById(panels, "session-usage"), SESSION_RESOURCE)
+    expect(screen.getByTestId("usage")).toHaveAttribute("data-session", "s1")
+    expect(screen.getByTestId("usage")).toHaveAttribute("data-count", "1")
+  })
+
+  it("renders no usage panel without a session", () => {
+    const panels = collect(useSessionSurfacePanels, sessionInput({ session: null }))
+    renderPanel(panelById(panels, "session-usage"), SESSION_RESOURCE)
+    expect(screen.queryByTestId("usage")).not.toBeInTheDocument()
   })
 
   it("opens the session run context and badges pending learning proposals", () => {

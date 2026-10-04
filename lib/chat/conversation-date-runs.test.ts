@@ -124,6 +124,39 @@ describe("sliceGroupRows", () => {
     expect(ids(sliced.sessions)).toEqual(["a", "b"])
     expect(sliced.dateRuns).toBeUndefined()
   })
+
+  it("keeps a named row past the cut in its own place and its own run", () => {
+    const group = splitGroup("t1", [
+      ["today", ["a", "b"]],
+      ["yesterday", ["c", "d"]],
+      ["older", ["e", "f"]],
+    ])
+    const sliced = sliceGroupRows(group, 2, "e")
+    expect(ids(sliced.sessions)).toEqual(["a", "b", "e"])
+    // The kept row brings its own date header; the runs between stay out.
+    expect(sliced.dateRuns!.map((r) => [r.bucket, ids(r.sessions)])).toEqual([
+      ["today", ["a", "b"]],
+      ["older", ["e"]],
+    ])
+  })
+
+  it("keeps a named row past the cut of an unsplit group", () => {
+    const group: ConversationGroupSection = {
+      kind: "group",
+      axis: "team",
+      group: { id: "t1", name: "t1" },
+      collapsed: false,
+      sessions: ["a", "b", "c", "d"].map(row),
+    }
+    expect(ids(sliceGroupRows(group, 2, "d").sessions)).toEqual(["a", "b", "d"])
+  })
+
+  it("cuts normally when the named row is inside the preview or not in the group", () => {
+    const group = splitGroup("t1", [["today", ["a", "b", "c"]]])
+    expect(ids(sliceGroupRows(group, 2, "a").sessions)).toEqual(["a", "b"])
+    expect(ids(sliceGroupRows(group, 2, "zz").sessions)).toEqual(["a", "b"])
+    expect(ids(sliceGroupRows(group, 2, null).sessions)).toEqual(["a", "b"])
+  })
 })
 
 describe("flattenDateRuns / nestDateRuns", () => {

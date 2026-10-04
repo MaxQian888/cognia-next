@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { useState } from "react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
@@ -35,7 +36,13 @@ jest.mock("@/components/ui/popover", () => ({
 
 import { useRoomTargetStore } from "@/stores/chat/room-target-store"
 import { ComposerSessionProvider } from "./composer-session-context"
-import { RoomTargetChip, RoomTargetPicker, roomReplyHint } from "./room-target-picker"
+import { ComposerMenuPanelsProvider, type ComposerMenuPanels } from "./composer-menu-context"
+import {
+  ROOM_TARGET_MENU_PANEL_ID,
+  RoomTargetChip,
+  RoomTargetPicker,
+  roomReplyHint,
+} from "./room-target-picker"
 
 beforeEach(() => {
   useRoomTargetStore.setState({ targets: {} })
@@ -129,5 +136,83 @@ describe("RoomTargetChip", () => {
     session = { id: "s1", kind: "direct" } as ChatSession
     renderChip()
     expect(screen.queryByTestId("composer-room-hint")).toBeNull()
+  })
+})
+
+/** A minimal drill-in host standing in for the mobile `+` sheet. */
+function SheetHost({
+  children,
+  registerPanel = () => () => {},
+}: {
+  children: React.ReactNode
+  registerPanel?: (id: string) => () => void
+}) {
+  const [active, setActive] = useState<{ id: string; title: string } | null>(null)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const panels: ComposerMenuPanels = {
+    activePanelId: active?.id ?? null,
+    slot,
+    openPanel: (id, title) => setActive({ id, title }),
+    closePanel: () => setActive(null),
+    registerPanel,
+  }
+  return (
+    <ComposerMenuPanelsProvider value={panels}>
+      {children}
+      <p data-testid="sheet-title">{active?.title ?? ""}</p>
+      <div data-testid="sheet-slot" ref={setSlot} />
+    </ComposerMenuPanelsProvider>
+  )
+}
+
+describe("RoomTargetPicker inside the mobile sheet", () => {
+  it("drills the sheet in to the member list instead of floating a popover", () => {
+    render(
+      <SheetHost>
+        <RoomTargetPicker session={session} />
+      </SheetHost>
+    )
+    expect(screen.queryByTestId("composer-room-target-panel")).toBeNull()
+    fireEvent.click(screen.getByTestId("composer-room-target-trigger"))
+    expect(screen.queryByTestId("composer-room-target-menu")).toBeNull()
+    const slot = screen.getByTestId("sheet-slot")
+    expect(within(slot).getByTestId("composer-room-target-panel")).toBeInTheDocument()
+    // The sheet's header carries the title; the panel draws no heading of its own.
+    expect(screen.getByTestId("sheet-title")).toHaveTextContent("t:title")
+    expect(within(slot).queryByText("t:title")).toBeNull()
+    expect(screen.getByTestId("composer-room-target-trigger")).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+  })
+
+  it("ticks members with thumb-sized rows and clears, writing the same store", () => {
+    render(
+      <SheetHost>
+        <RoomTargetPicker session={session} />
+      </SheetHost>
+    )
+    fireEvent.click(screen.getByTestId("composer-room-target-trigger"))
+    const row = screen.getByTestId("composer-room-target-ava")
+    expect(row.className).toContain("touch-target")
+    fireEvent.click(row)
+    expect(useRoomTargetStore.getState().targets.s1).toEqual(["ava"])
+    expect(row).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("composer-room-target-clear").className).toContain("touch-target")
+    fireEvent.click(screen.getByTestId("composer-room-target-clear"))
+    expect(useRoomTargetStore.getState().targets.s1).toBeUndefined()
+  })
+
+  it("offers no panel while the room is asleep", () => {
+    session = { ...session!, roomSettings: { replyMode: "asleep" } } as ChatSession
+    const registerPanel = jest.fn(() => () => {})
+    render(
+      <SheetHost registerPanel={registerPanel}>
+        <RoomTargetPicker session={session} />
+      </SheetHost>
+    )
+    expect(screen.getByTestId("composer-room-target-trigger")).toBeDisabled()
+    expect(registerPanel).not.toHaveBeenCalled()
+    expect(ROOM_TARGET_MENU_PANEL_ID).toBe("room-targets")
   })
 })

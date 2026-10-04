@@ -28,6 +28,7 @@ import {
   ActivityIcon,
   BotIcon,
   BrainIcon,
+  ChartPieIcon,
   GitBranchIcon,
   History,
   LibraryIcon,
@@ -65,6 +66,10 @@ import { useContextWorkbenchStore } from "@/stores/context-workbench/context-wor
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
 import { SessionOverviewPanelHost } from "@/components/context-workbench/session-overview-panel"
+import {
+  SESSION_USAGE_PANEL_ID,
+  SessionUsagePanel,
+} from "@/components/context-workbench/session-usage/session-usage-panel"
 import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { ContextCapabilityUnavailable } from "@/components/context-workbench/context-capability-unavailable"
@@ -754,6 +759,12 @@ function SessionPlanRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   return activeSessionId ? <PlanPanel sessionId={activeSessionId} /> : null
 }
 
+function SessionUsageRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const session = usePanelInput(inputs, (input) => input.session)
+  const sessionMessages = usePanelInput(inputs, (input) => input.sessionMessages)
+  return session ? <SessionUsagePanel session={session} messages={sessionMessages} /> : null
+}
+
 function SessionSquadRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
   return <SquadContextPanel sessionId={activeSessionId} />
@@ -822,6 +833,7 @@ export function useSessionSurfacePanels({
       runContext: () => <DockRunContextPanel key={key} inputs={inputs} />,
       plan: () => <SessionPlanRenderer key={key} inputs={inputs} />,
       sources: () => <SessionSourcesRenderer key={key} inputs={inputs} />,
+      usage: () => <SessionUsageRenderer key={key} inputs={inputs} />,
       memory: () => <DockMemoryPanel key={key} inputs={inputs} />,
       logs: () => <LogsWorkbenchPanel key={key} />,
       squad: () => <SessionSquadRenderer key={key} inputs={inputs} />,
@@ -981,6 +993,21 @@ export function useSessionSurfacePanels({
         retention: "stateful",
         getBadge: () => sourceCount,
         renderer: renderers.sources,
+      },
+      {
+        // What this conversation spends and what fills its window, drawn: the
+        // window's composition and growth, cost per turn, token mix, tool
+        // calls, models and efficiency. Before it, the window lived only in the
+        // composer's hover card and the spend only in a popover.
+        id: SESSION_USAGE_PANEL_ID,
+        activity: "inspect",
+        labelKey: "contextWorkbench.sessionUsage.title",
+        icon: ChartPieIcon,
+        order: 47,
+        appliesTo: (resource) => resource.kind === "session",
+        retention: "stateful",
+        scope: "session",
+        renderer: renderers.usage,
       },
       {
         // Fills the `inspect` rail slot, which stood empty on this surface while

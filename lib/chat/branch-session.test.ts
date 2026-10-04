@@ -7,7 +7,8 @@ import {
 } from "./branch-session"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
-import { listMessages } from "@/lib/db/messages"
+import { listMessages, persistMessages, rowToUIMessage } from "@/lib/db/messages"
+import { emptyWorkingSet, mutateSessionWorkingSet } from "./working-set"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
@@ -58,6 +59,181 @@ const visible = (): UIMessage[] => [
 ]
 
 afterAll(dbFixture.dispose)
+
+describe("branch working set policy", () => {
+  it("inherits historical state without future mutations and keeps child mutations independent", async () => {
+    await seedSource()
+    const messages = visible()
+    await persistMessages("src1", messages.slice(0, 2))
+    const historical = await mutateSessionWorkingSet({
+      sessionId: "src1",
+      expectedRevision: 0,
+      action: "upsert",
+      entry: { id: "choice", kind: "decision", summary: "First choice", origin: "user" },
+    })
+    await persistMessages("src1", messages)
+    await mutateSessionWorkingSet({
+      sessionId: "src1",
+      expectedRevision: 1,
+      action: "remove",
+      entryId: "choice",
+    })
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: messages,
+      messageId: "a1",
+      mode: "direct",
+    })
+    expect(child.workingSet).toEqual(historical)
+    await mutateSessionWorkingSet({
+      sessionId: child.id,
+      expectedRevision: 1,
+      action: "remove",
+      entryId: "choice",
+    })
+    expect((await getDb().messages.get("a1"))?.workingSetSnapshot).toEqual(historical)
+    const current = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: messages,
+      messageId: "a1",
+      mode: "summary",
+      summaryText: "Summary",
+      workingSetPolicy: "current",
+    })
+    expect(current.workingSet?.revision).toBe(2)
+    expect(current.workingSet?.entries).toEqual([])
+    const fresh = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: messages,
+      messageId: "a1",
+      mode: "direct",
+      workingSetPolicy: "initial",
+    })
+    expect(fresh.workingSet?.revision).toBe(0)
+  })
+
+  it("rejects unavailable historical state rather than silently copying current state", async () => {
+    await seedSource()
+    await mutateSessionWorkingSet({
+      sessionId: "src1",
+      expectedRevision: 0,
+      action: "upsert",
+      entry: { kind: "fact", summary: "Legacy state", origin: "user" },
+    })
+    await expect(
+      branchSessionAtMessage({
+        sourceId: "src1",
+        visibleMessages: visible(),
+        messageId: "a1",
+        mode: "direct",
+      })
+    ).rejects.toThrow(/historical working set/i)
+    expect(await getDb().sessions.count()).toBe(1)
+  })
+
+  it("uses the last selected historical boundary and preserves earlier snapshots in a branch of a branch", async () => {
+    await seedSource()
+    const messages = visible()
+    await persistMessages("src1", messages.slice(0, 2))
+    const first = await mutateSessionWorkingSet({
+      sessionId: "src1",
+      expectedRevision: 0,
+      action: "upsert",
+      entry: { id: "choice", kind: "decision", summary: "First decision", origin: "user" },
+    })
+    await persistMessages("src1", messages)
+    await mutateSessionWorkingSet({
+      sessionId: "src1",
+      expectedRevision: 1,
+      action: "remove",
+      entryId: "choice",
+    })
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: messages,
+      messageId: "a2",
+      pickedMessageIds: ["u1", "a1"],
+      mode: "direct",
+    })
+    expect(child.workingSet).toEqual(first)
+    const copied = await listMessages(child.id)
+    expect((await getDb().messages.get(copied[0].id))?.workingSetSnapshot?.revision).toBe(0)
+    await persistMessages(
+      child.id,
+      copied.map((message) => ({ ...message }))
+    )
+    const grandchild = await branchSessionAtMessage({
+      sourceId: child.id,
+      visibleMessages: copied,
+      messageId: copied[0].id,
+      mode: "direct",
+    })
+    expect(grandchild.workingSet?.revision).toBe(0)
+    expect(grandchild.workingSet?.entries).toEqual([])
+  })
+
+  it.each(["current", "initial"] as const)(
+    "records the %s policy at a summary branch's new boundary",
+    async (workingSetPolicy) => {
+      await seedSource()
+      const messages = visible()
+      await persistMessages("src1", messages)
+      const state = await mutateSessionWorkingSet({
+        sessionId: "src1",
+        expectedRevision: 0,
+        action: "upsert",
+        entry: { kind: "fact", summary: "Current state", origin: "user" },
+      })
+      const child = await branchSessionAtMessage({
+        sourceId: "src1",
+        visibleMessages: messages,
+        messageId: "a1",
+        mode: "summary",
+        summaryText: "A summary",
+        workingSetPolicy,
+      })
+      const copied = await listMessages(child.id)
+      const expectedRevision = workingSetPolicy === "current" ? state.revision : 0
+      expect(child.workingSet?.revision).toBe(expectedRevision)
+      expect((await getDb().messages.get(copied[0].id))?.workingSetSnapshot).toEqual(
+        child.workingSet
+      )
+      const grandchild = await branchSessionAtMessage({
+        sourceId: child.id,
+        visibleMessages: copied,
+        messageId: copied[0].id,
+        mode: "direct",
+      })
+      expect(grandchild.workingSet).toEqual(child.workingSet)
+    }
+  )
+
+  it("removes the child and copied transcript if restoring its historical snapshots fails", async () => {
+    await seedSource()
+    const messages = visible()
+    await persistMessages("src1", messages)
+    const update = jest
+      .spyOn(getDb().messages, "update")
+      .mockRejectedValueOnce(new Error("snapshot write failed"))
+    try {
+      await expect(
+        branchSessionAtMessage({
+          sourceId: "src1",
+          visibleMessages: messages,
+          messageId: "a1",
+          mode: "direct",
+        })
+      ).rejects.toThrow("snapshot write failed")
+    } finally {
+      update.mockRestore()
+    }
+    expect((await getDb().sessions.toArray()).map((session) => session.id)).toEqual(["src1"])
+    expect(
+      (await getDb().messages.toArray()).every((message) => message.sessionId === "src1")
+    ).toBe(true)
+    expect(await listMessages("src1")).toHaveLength(4)
+  })
+})
 
 describe("renderTranscript", () => {
   it("labels roles and skips empty turns", () => {
@@ -311,6 +487,33 @@ describe("branchSessionAtMessage — direct", () => {
     expect(child.sandboxEnabled).toBe(true)
   })
 
+  it("keeps each agent's model choice but never the parent's gateway tasks", async () => {
+    // A task's native history belongs to one conversation: two rows resuming
+    // it would interleave two threads, and deleting either would delete both.
+    const externalAgentModels = {
+      kimi: {
+        kind: "cognia" as const,
+        binding: { providerId: "plugin:kimi:subscription", modelId: "kimi-k3" },
+      },
+      codex: { kind: "native" as const, modelId: "gpt-5.5" },
+    }
+    const link = { agentId: "kimi", sessionId: "cognia-gateway:task-1:native" }
+    await seedSource({
+      externalAgentModels,
+      externalAgentSession: link,
+      externalAgentGatewaySessions: [link],
+    })
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: visible(),
+      messageId: "a1",
+      mode: "direct",
+    })
+    expect(child.externalAgentModels).toEqual(externalAgentModels)
+    expect(child.externalAgentSession).toBeUndefined()
+    expect(child.externalAgentGatewaySessions).toBeUndefined()
+  })
+
   it("mid-conversation branch stores a transcript seed and does not SDK-fork", async () => {
     await seedSource({ sdkSessionId: "sdk-1" })
     const child = await branchSessionAtMessage({
@@ -353,11 +556,54 @@ describe("branchSessionAtMessage — direct", () => {
     expect(child.branchSeed?.kind).toBe("transcript")
   })
 
+  it("does not fork retained SDK history after a destructive transcript mutation", async () => {
+    await seedSource({ sdkSessionId: "stale-sdk", runtimeTranscriptInvalidated: "changed" })
+    const messages = visible()
+    await persistMessages("src1", messages)
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: messages,
+      messageId: "a2",
+      mode: "direct",
+    })
+    expect(child.forkedFromSdkSessionId).toBeUndefined()
+    expect(child.branchSeed?.content).toContain("second answer")
+    expect(child.runtimeTranscriptInvalidated).toBeUndefined()
+  })
+
+  it("rebuilds the selected sibling instead of forking the runtime's later alternative", async () => {
+    await seedSource({ sdkSessionId: "latest-sdk", activeBranchByGroup: { answer: "selected" } })
+    const question = uiMsg("question", "user", "Question")
+    const selected = uiMsg("selected", "assistant", "Selected answer", {
+      branchGroupId: "answer",
+      branchIndex: 0,
+    })
+    const later = uiMsg("later", "assistant", "Hidden later answer", {
+      branchGroupId: "answer",
+      branchIndex: 1,
+    })
+    await persistMessages("src1", [question, selected, later])
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: [question, selected],
+      messageId: "selected",
+      mode: "direct",
+    })
+    expect(child.forkedFromSdkSessionId).toBeUndefined()
+    expect(child.branchSeed?.content).toContain("Selected answer")
+    expect(child.branchSeed?.content).not.toContain("Hidden later answer")
+  })
+
   it("strips regeneration-branch metadata from the copied messages", async () => {
     await seedSource()
     const withBranch: UIMessage[] = [
       uiMsg("u1", "user", "q"),
-      uiMsg("a1", "assistant", "ans", { branchGroupId: "g", branchIndex: 1, senderId: "c1" }),
+      uiMsg("a1", "assistant", "ans", {
+        branchGroupId: "g",
+        branchIndex: 1,
+        branchOwnerId: "u1",
+        senderId: "c1",
+      }),
     ]
     const child = await branchSessionAtMessage({
       sourceId: "src1",
@@ -369,6 +615,7 @@ describe("branchSessionAtMessage — direct", () => {
     const meta = msgs[1].metadata as Record<string, unknown> | undefined
     expect(meta?.branchGroupId).toBeUndefined()
     expect(meta?.branchIndex).toBeUndefined()
+    expect(meta?.branchOwnerId).toBeUndefined()
     // senderId is preserved (round-trips via the messages column).
     expect(meta?.senderId).toBe("c1")
   })
@@ -467,5 +714,62 @@ describe("branchSessionAtMessage — cherry-pick", () => {
       mode: "direct",
     })
     expect(await listMessages(child.id)).toHaveLength(2)
+  })
+})
+
+describe("complete host branch snapshots", () => {
+  it("copies authoritative domain state and each historical boundary without changing the mirror", async () => {
+    const mirror = await seedSource()
+    await persistMessages(mirror.id, [uiMsg("a2", "assistant", "mirror tail")])
+    const originalMirror = await getDb().sessions.get(mirror.id)
+    const first = { ...emptyWorkingSet(), revision: 1, updatedAt: 1 }
+    const current = { ...emptyWorkingSet(), revision: 2, updatedAt: 2 }
+    const messages = visible().map((message, index) => ({
+      id: message.id,
+      sessionId: mirror.id,
+      role: message.role,
+      parts: message.parts,
+      createdAt: index + 1,
+      workingSetSnapshot: first,
+    }))
+    const session = {
+      ...mirror,
+      sdkSessionId: "host-sdk",
+      workingSet: current,
+      title: "Host title",
+    }
+    const sourceSnapshot = { session, messages, assertCurrent: jest.fn() }
+    const child = await branchSessionAtMessage({
+      sourceId: mirror.id,
+      visibleMessages: messages.map(rowToUIMessage),
+      messageId: "a2",
+      mode: "direct",
+      workingSetPolicy: "current",
+      sourceSnapshot,
+    })
+    expect(child.workingSet).toEqual(current)
+    expect(child.title).toBe("Host title (branch)")
+    expect(child.forkedFromSdkSessionId).toBeUndefined()
+    const copied = await getDb().messages.where("sessionId").equals(child.id).sortBy("createdAt")
+    expect(copied).toHaveLength(4)
+    expect(copied[0].workingSetSnapshot).toEqual(first)
+    expect(copied[3].workingSetSnapshot).toEqual(current)
+    expect(await getDb().sessions.get(mirror.id)).toEqual(originalMirror)
+    expect(await listMessages(mirror.id)).toHaveLength(1)
+  })
+
+  it("rejects a source snapshot that does not include the requested visible rows", async () => {
+    const source = await seedSource()
+    await expect(
+      branchSessionAtMessage({
+        sourceId: source.id,
+        visibleMessages: visible(),
+        messageId: "a2",
+        mode: "direct",
+        workingSetPolicy: "current",
+        sourceSnapshot: { session: source, messages: [], assertCurrent: jest.fn() },
+      })
+    ).rejects.toThrow("incomplete source snapshot")
+    expect(await getDb().sessions.count()).toBe(1)
   })
 })

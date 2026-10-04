@@ -457,6 +457,16 @@ describe("AttachmentPreview — container modes", () => {
     expect(screen.getByText(".pdf")).toBeInTheDocument()
   })
 
+  // The composer's context row hides itself on `[data-chip-flow]:empty`. With
+  // nothing staged, dnd-kit's screen-reader nodes were the flow's only
+  // children, so the row never hid and every composer had a dead band on top.
+  it("bare mode with nothing staged leaves no element children in the parent flow", () => {
+    stage([])
+    const { container } = renderPreview(<AttachmentPreview bare videoRoute={ROUTE} />)
+    expect(container.querySelector("[id^='DndDescribedBy'], [id^='DndLiveRegion']")).toBeNull()
+    expect(document.body.querySelector("[id^='DndLiveRegion']")).not.toBeNull()
+  })
+
   it("falls back to a generic label for a file with no filename", () => {
     stage([{ id: "e" }])
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)

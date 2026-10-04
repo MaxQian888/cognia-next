@@ -203,6 +203,8 @@ const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
   ...overrides,
 })
 
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
+
 describe("ChatHeader", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
@@ -229,6 +231,29 @@ describe("ChatHeader", () => {
 
     fireEvent.click(toggle)
     expect(toggleSidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves collapsing to the rail's footer once the footer carries the button", () => {
+    useShellColumnsStore.setState({ sidebarHostsCollapse: true, sidebarCollapseHostCount: 1 })
+    try {
+      const Wrapper = withAdapter(makeAdapter())
+      const { rerender } = render(
+        <Wrapper>
+          <ChatHeader session={mkSession()} />
+        </Wrapper>
+      )
+      expect(screen.queryByTestId("chat-sidebar-toggle")).toBeNull()
+      // Folded, the footer is gone with the rail — the header is the way back.
+      sidebarCollapsed = true
+      rerender(
+        <Wrapper>
+          <ChatHeader session={mkSession({ title: "again" })} />
+        </Wrapper>
+      )
+      expect(screen.getByRole("button", { name: "Expand conversation list" })).toBeInTheDocument()
+    } finally {
+      useShellColumnsStore.setState({ sidebarHostsCollapse: false, sidebarCollapseHostCount: 0 })
+    }
   })
 
   it("offers the same first-position control to expand a collapsed conversation list", () => {

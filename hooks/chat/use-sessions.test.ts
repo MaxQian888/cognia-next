@@ -10,9 +10,11 @@ jest.mock("dexie-react-hooks", () => ({
 
 const listMessagesMock = jest.fn()
 const persistMessagesMock = jest.fn()
+const commitMessageDeltaMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/messages", () => ({
   listMessages: (id: string) => listMessagesMock(id),
   persistMessages: (id: string, msgs: unknown) => persistMessagesMock(id, msgs),
+  commitMessageDelta: (id: string, delta: unknown) => commitMessageDeltaMock(id, delta),
 }))
 
 const createSessionMock = jest.fn()
@@ -482,6 +484,72 @@ describe("useSessions", () => {
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
     expect(chatStoreState.hydrateSessionActiveBranches).toHaveBeenCalledWith("s1", {})
+  })
+
+  it("closes tool calls a failed turn left running, and writes only those rows back", async () => {
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: chatStoreState.messages }
+    commitMessageDeltaMock.mockClear()
+    const failedUser = {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "go" }],
+      metadata: {
+        turnAdmission: {
+          state: "failed",
+          code: "external_agent_error",
+          detail: "Request timeout: session/prompt",
+          at: 1,
+        },
+      },
+    }
+    const openTool = {
+      type: "dynamic-tool",
+      toolName: "Read",
+      toolCallId: "t1",
+      state: "input-available",
+      input: { path: "permission-modes.ts" },
+    }
+    listMessagesMock.mockResolvedValueOnce([
+      failedUser,
+      { id: "a1", role: "assistant", parts: [openTool] },
+    ])
+    renderHook(() => useSessions())
+    const closedTool = {
+      type: "dynamic-tool",
+      toolName: "Read",
+      toolCallId: "t1",
+      state: "output-error",
+      input: { path: "permission-modes.ts" },
+      errorText: expect.stringContaining("Request timeout: session/prompt"),
+    }
+    await waitFor(() =>
+      expect(chatStoreState.setMessages).toHaveBeenCalledWith([
+        failedUser,
+        { id: "a1", role: "assistant", parts: [closedTool] },
+      ])
+    )
+    expect(commitMessageDeltaMock).toHaveBeenCalledWith("s1", {
+      upserts: [{ id: "a1", role: "assistant", parts: [closedTool] }],
+    })
+  })
+
+  it("leaves a running trailing turn alone on hydration", async () => {
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: chatStoreState.messages }
+    commitMessageDeltaMock.mockClear()
+    const open = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "tool-Read", toolCallId: "t1", state: "input-available", input: {} }],
+      },
+    ]
+    listMessagesMock.mockResolvedValueOnce(open)
+    renderHook(() => useSessions())
+    await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith(open))
+    expect(commitMessageDeltaMock).not.toHaveBeenCalled()
   })
 
   it("refreshes the visible shared transcript when its applied cursor advances", async () => {

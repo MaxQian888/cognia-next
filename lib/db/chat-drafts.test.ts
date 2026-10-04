@@ -199,7 +199,20 @@ describe("chat-drafts", () => {
     // for the Host to authorize against its own current state.
     await getDb().syncTombstones.put({ table: "sessions", id: sessionId, deletedAt: 2 })
     await setDraft(sessionId, "awaiting host decision")
-    expect(await getDb().mobileOutboundQueue.count()).toBe(2)
+    // Queued, and it replaces the earlier draft no Host has seen yet: a
+    // `draft.replace` carries the whole draft, so only the latest one is sent.
+    const queued = await getDb().mobileOutboundQueue.toArray()
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.payload).toMatchObject({
+      actions: [
+        expect.objectContaining({
+          action: expect.objectContaining({
+            kind: "draft.replace",
+            text: "awaiting host decision",
+          }),
+        }),
+      ],
+    })
     expect(await getDraft(sessionId)).toBeNull()
   })
 

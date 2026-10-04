@@ -15,6 +15,7 @@ import { useUIStore } from "@/stores/ui"
 import type {
   Character,
   ChatSession,
+  ConversationFilters,
   ConversationSidebarSettings,
 } from "@cognia/agent-config-types"
 
@@ -192,6 +193,63 @@ describe("useConversationFilterController", () => {
     expect(result.current.activeFilters).toBe(5)
     act(() => result.current.actions.reset())
     expect(result.current.filters).toEqual(EMPTY_CONVERSATION_FILTERS)
+  })
+
+  describe("filterState", () => {
+    // A page with its own narrowing (the conversation manager) hands the
+    // controller its own state owner; the sidebar's store stays untouched.
+    function setupOwned() {
+      let filters: ConversationFilters = EMPTY_CONVERSATION_FILTERS
+      let activeViewId: string | null = null
+      const owner = {
+        setFilters: jest.fn((next: ConversationFilters) => {
+          filters = next
+        }),
+        reset: jest.fn(() => {
+          filters = EMPTY_CONVERSATION_FILTERS
+        }),
+        setActiveViewId: jest.fn((id: string | null) => {
+          activeViewId = id
+        }),
+      }
+      const hook = renderHook(() =>
+        useConversationFilterController({
+          sessions,
+          workspaces: [{ id: "w1", name: "Alpha" }],
+          folders: [],
+          characters,
+          teams: [{ id: "t1", name: "Squad" }],
+          sidebarSettings: {},
+          saveSidebarSettings: jest.fn(),
+          filterState: { ...owner, filters, activeViewId },
+        })
+      )
+      return { ...hook, owner }
+    }
+
+    it("reads and writes filters through the owner, never the UI store", () => {
+      useUIStore.getState().setConversationFilters({ pinned: true })
+      const { result, owner } = setupOwned()
+      // The owner's filters are what the page sees, not the sidebar's.
+      expect(result.current.filters).toEqual(EMPTY_CONVERSATION_FILTERS)
+      act(() => result.current.actions.toggle("unread", true))
+      expect(owner.setFilters).toHaveBeenCalledWith({ ...EMPTY_CONVERSATION_FILTERS, unread: true })
+      expect(useUIStore.getState().conversationFilters).toEqual({
+        ...EMPTY_CONVERSATION_FILTERS,
+        pinned: true,
+      })
+      act(() => result.current.actions.reset())
+      expect(owner.reset).toHaveBeenCalled()
+      expect(useUIStore.getState().conversationFilters.pinned).toBe(true)
+    })
+
+    it("tracks the active view through the owner", () => {
+      const before = useUIStore.getState().activeConversationViewId
+      const { result, owner } = setupOwned()
+      act(() => result.current.actions.applyView(BUILT_IN_VIEW_IDS.unread))
+      expect(owner.setActiveViewId).toHaveBeenCalledWith(BUILT_IN_VIEW_IDS.unread)
+      expect(useUIStore.getState().activeConversationViewId).toBe(before)
+    })
   })
 
   describe("scopeOwnsKind", () => {

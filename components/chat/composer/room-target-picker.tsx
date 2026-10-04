@@ -6,9 +6,10 @@
  * Two surfaces over one store (`stores/chat/room-target-store.ts`):
  *
  * - `RoomTargetPicker` is the row in the composer's `+` menu capability
- *   group. It opens a list of the room's members to tick. A `manual` team has
- *   no other way to get a reply. Every other team gets a way to override its
- *   routing for a turn without typing an `@`.
+ *   group. It opens a list of the room's members to tick — a flyout from the
+ *   desktop attach menu, a drilled-in panel of the mobile `+` sheet. A
+ *   `manual` team has no other way to get a reply. Every other team gets a way
+ *   to override its routing for a turn without typing an `@`.
  * - `RoomTargetChip` sits in the context row with the attachments and the
  *   reply target: it names the standing pick and clears it, and when there is
  *   no pick it says why the room may stay quiet (asleep, mention only, or a
@@ -36,8 +37,9 @@ import { getTeam } from "@/lib/db/teams"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useRoomTargetStore, useRoomTargets } from "@/stores/chat/room-target-store"
-import type { ChatSession, Team, TeamOrchestration } from "@cognia/agent-config-types"
+import type { Character, ChatSession, Team, TeamOrchestration } from "@cognia/agent-config-types"
 import { useComposerSessionId } from "./composer-session-context"
+import { ComposerMenuPanel, useComposerMenuPanels } from "./composer-menu-context"
 import { CapabilityRow } from "./capability-row"
 
 /** Why the next send may get no reply, or `null` when somebody will answer. */
@@ -91,94 +93,175 @@ export interface RoomTargetPickerProps {
   disabled?: boolean
 }
 
+/** The id the member picker goes by in a host sheet (`ComposerMenuPanel`). */
+export const ROOM_TARGET_MENU_PANEL_ID = "room-targets"
+
 export function RoomTargetPicker({ session, disabled = false }: RoomTargetPickerProps) {
   const t = useTranslations("chat.composer.roomTargets")
   const { isTeamRoom, members, roles, settings, targets } = useRoomTargetContext(session)
-  const toggleTarget = useRoomTargetStore((state) => state.toggleTarget)
-  const setTargets = useRoomTargetStore((state) => state.setTargets)
+  const panels = useComposerMenuPanels()
   if (!isTeamRoom || !session) return null
   const asleep = settings.replyMode === "asleep"
-  const sessionId = session.id
+  const panelOpen = panels?.activePanelId === ROOM_TARGET_MENU_PANEL_ID
+  const list = (variant: "popover" | "sheet") => (
+    <RoomTargetList
+      variant={variant}
+      sessionId={session.id}
+      members={members}
+      roles={roles}
+      mutedMemberIds={settings.mutedMemberIds}
+      targets={targets}
+    />
+  )
+
+  const row = (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <CapabilityRow
+      icon={<UsersIcon className="size-4" />}
+      label={t("trigger")}
+      chevron
+      active={targets.length > 0}
+      disabled={disabled || asleep}
+      aria-label={t("trigger")}
+      hint={asleep ? t("asleepDisabled") : undefined}
+      title={asleep ? t("asleepDisabled") : t("trigger")}
+      data-testid="composer-room-target-trigger"
+      data-picked={targets.length > 0 ? targets.length : undefined}
+      {...props}
+    />
+  )
+
+  // The mobile `+` sheet drills in to the list instead of floating a popover
+  // over itself (see `ComposerMenuPanel`).
+  if (panels) {
+    return (
+      <>
+        {row({
+          "aria-haspopup": "dialog",
+          "aria-expanded": panelOpen,
+          onClick: () => panels.openPanel(ROOM_TARGET_MENU_PANEL_ID, t("title")),
+        })}
+        {/* Asleep disables the row, and a room that falls asleep while the
+            list is showing takes the list away with it: a pick does not beat
+            asleep, so there is nothing left to choose. */}
+        {asleep ? null : (
+          <ComposerMenuPanel id={ROOM_TARGET_MENU_PANEL_ID}>{list("sheet")}</ComposerMenuPanel>
+        )}
+      </>
+    )
+  }
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <CapabilityRow
-          icon={<UsersIcon className="size-4" />}
-          label={t("trigger")}
-          chevron
-          active={targets.length > 0}
-          disabled={disabled || asleep}
-          aria-label={t("trigger")}
-          hint={asleep ? t("asleepDisabled") : undefined}
-          title={asleep ? t("asleepDisabled") : t("trigger")}
-          data-testid="composer-room-target-trigger"
-          data-picked={targets.length > 0 ? targets.length : undefined}
-        />
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{row({})}</PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-2" data-testid="composer-room-target-menu">
         <p className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">{t("title")}</p>
-        <ul className="flex flex-col gap-0.5" role="group" aria-label={t("title")}>
-          {members.map((member) => {
-            const picked = targets.includes(member.id)
-            const muted = settings.mutedMemberIds.includes(member.id)
-            const role = roles.get(member.id)
-            return (
-              <li key={member.id}>
-                <button
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={picked}
-                  onClick={() => toggleTarget(sessionId, member.id)}
-                  data-testid={`composer-room-target-${member.id}`}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-accent",
-                    picked && "bg-accent/60"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "flex size-4 shrink-0 items-center justify-center rounded-sm border",
-                      picked ? "border-primary bg-primary text-primary-foreground" : "border-border"
-                    )}
-                    aria-hidden
-                  >
-                    {picked ? <CheckIcon className="size-3" /> : null}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate" style={{ color: avatarColor(member) }}>
-                    {member.name}
-                  </span>
-                  {role ? (
-                    <span className="shrink-0 truncate text-[10px] text-muted-foreground">
-                      {role}
-                    </span>
-                  ) : null}
-                  {muted ? (
-                    <span
-                      className="shrink-0 rounded-sm bg-muted px-1 text-[10px] text-muted-foreground"
-                      data-testid={`composer-room-target-muted-${member.id}`}
-                    >
-                      {t("muted")}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={targets.length === 0}
-          onClick={() => setTargets(sessionId, [])}
-          className="mt-1 h-7 w-full justify-start px-2 text-xs"
-          data-testid="composer-room-target-clear"
-        >
-          {t("clear")}
-        </Button>
+        {list("popover")}
       </PopoverContent>
     </Popover>
+  )
+}
+
+/**
+ * The members to tick, plus "clear". `popover` is the desktop flyout's dense
+ * list; `sheet` is the mobile `+` sheet's drilled-in panel, whose header
+ * already carries the title — so it draws thumb-sized rows and no heading.
+ */
+function RoomTargetList({
+  variant,
+  sessionId,
+  members,
+  roles,
+  mutedMemberIds,
+  targets,
+}: {
+  variant: "popover" | "sheet"
+  sessionId: string
+  members: readonly Character[]
+  roles: ReadonlyMap<string, string>
+  mutedMemberIds: readonly string[]
+  targets: readonly string[]
+}) {
+  const t = useTranslations("chat.composer.roomTargets")
+  const toggleTarget = useRoomTargetStore((state) => state.toggleTarget)
+  const setTargets = useRoomTargetStore((state) => state.setTargets)
+  const sheet = variant === "sheet"
+  return (
+    <div data-testid={sheet ? "composer-room-target-panel" : undefined}>
+      <ul className="flex flex-col gap-0.5" role="group" aria-label={t("title")}>
+        {members.map((member) => {
+          const picked = targets.includes(member.id)
+          const muted = mutedMemberIds.includes(member.id)
+          const role = roles.get(member.id)
+          return (
+            <li key={member.id}>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={picked}
+                onClick={() => toggleTarget(sessionId, member.id)}
+                data-testid={`composer-room-target-${member.id}`}
+                className={cn(
+                  "flex w-full items-center text-left",
+                  sheet
+                    ? "touch-target gap-3 rounded-control px-2 text-sm active:bg-muted/60"
+                    : "gap-2 rounded-md px-2 py-1 text-xs hover:bg-accent",
+                  picked && !sheet && "bg-accent/60"
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex shrink-0 items-center justify-center rounded-sm border",
+                    sheet ? "size-5" : "size-4",
+                    picked ? "border-primary bg-primary text-primary-foreground" : "border-border"
+                  )}
+                  aria-hidden
+                >
+                  {picked ? <CheckIcon className={sheet ? "size-3.5" : "size-3"} /> : null}
+                </span>
+                <span className="min-w-0 flex-1 truncate" style={{ color: avatarColor(member) }}>
+                  {member.name}
+                </span>
+                {role ? (
+                  <span
+                    className={cn(
+                      "shrink-0 truncate text-muted-foreground",
+                      sheet ? "text-xs" : "text-[10px]"
+                    )}
+                  >
+                    {role}
+                  </span>
+                ) : null}
+                {muted ? (
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-sm bg-muted px-1 text-muted-foreground",
+                      sheet ? "text-xs" : "text-[10px]"
+                    )}
+                    data-testid={`composer-room-target-muted-${member.id}`}
+                  >
+                    {t("muted")}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={targets.length === 0}
+        onClick={() => setTargets(sessionId, [])}
+        className={cn(
+          "mt-1 w-full justify-start px-2",
+          sheet ? "touch-target text-sm" : "h-7 text-xs"
+        )}
+        data-testid="composer-room-target-clear"
+      >
+        {t("clear")}
+      </Button>
+    </div>
   )
 }
 

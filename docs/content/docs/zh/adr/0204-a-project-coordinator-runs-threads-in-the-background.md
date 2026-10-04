@@ -1,13 +1,11 @@
 ---
 title: "0204 — 项目协调者在后台运行线程"
-description: "工作区可以开启项目协调：一个长期运行的协调者对话把工作拆成在后台运行的线程对话；在 git 根目录中，每个线程拥有自己的 worktree 和分支，回合结束时向协调者汇报，并连同拉取请求一起显示在线程看板上。协调者和线程是普通直接会话上的角色；后台持有让没有窗格的会话也能运行；汇报以生命周期关联的会话间消息传递；PR 监视复用智能体团队的观察器；项目拥有自己的预算、用量页、暂停、通知规则和设置。"
+description: "工作区可开启项目协调。长期协调者对话将工作交给后台线程对话；在 git 根内，每个线程有独立 worktree 和分支，回合结束后汇报，并与 PR 一起列在线程看板。协调者和线程是普通直接会话的角色。后台持有支持无窗格运行，汇报通过生命周期关联消息传递，PR 监视复用 Agent Team 观察器。项目有独立预算、用量页、暂停、通知规则与设置。"
 ---
 
 # ADR 0204 — 项目协调者在后台运行线程
 
-**状态：** 已接受
-**日期：** 2026-09-29
-**相关：** [ADR-0144](./0144-workspace-as-the-unit-of-work)（工作区）、[ADR-0022](./0022-agent-team-runtime-hardening)（PR 反馈循环）、[ADR-0042](./0042-unified-notification-center)（通知）、[ADR-0188](./0188-a-routed-turn-spends-only-what-its-ledger-reserved)（花费）、[ADR-0059](./0059-cloud-deployment-headless-brain) 与 [ADR-0182](./0182-a-project-names-the-image-it-runs-in)（云端执行的来源）
+**状态：** 已接受**日期：** 2026-09-29 **相关：** [ADR-0144](./0144-workspace-as-the-unit-of-work)（工作区）、[ADR-0022](./0022-agent-team-runtime-hardening)（PR 反馈循环）、[ADR-0042](./0042-unified-notification-center)（通知）、[ADR-0188](./0188-a-routed-turn-spends-only-what-its-ledger-reserved)（花费）、[ADR-0059](./0059-cloud-deployment-headless-brain) 与 [ADR-0182](./0182-a-project-names-the-image-it-runs-in)（云端执行的来源）
 
 ## 背景
 
@@ -65,7 +63,7 @@ Cognia 已经具备其中大部分零件：
 
 内置工具沿用现有插件工具模式（手写 schema 的清单、从不抛异常的执行器、一个 IPC 分支、在 `resolveSendOptions` 中门控）：协调者有 `spawn_thread`、`propose_threads`、`start_thread`、`message_thread`、`list_threads`、`read_thread_report`、`stop_thread`、`resolve_thread`、`remember_project_note`、`set_project_preference`，线程有 `report_to_coordinator`。除 `set_project_preference` 需要询问外，其余全部放行。
 
-提示词布局保持缓存稳定：项目目标是位于工作区指令之后、经过 PII 闸门的段落；角色协议在会话内保持不变；项目状态摘要（偏好、根目录、最多 12 个最近线程及其状态、分支、PR 和最近结果，上限 6000 字符）放在动态尾部。新项目的协调者第一回合，动态尾部还会带上一次性的设置建议——每个根目录一个探索线程，以及工作区已有的计划任务——要求以 `propose_threads` 给出，并记录到 `setupOfferedAt`。
+提示词布局保持缓存稳定：项目目标是位于工作区指令之后、经过 PII 闸门的段落；角色协议在会话内保持不变。项目状态摘要（偏好、根目录、最多 12 个最近线程及其状态、分支、PR 和最近结果，上限 6000 字符）放在动态尾部。新项目的协调者第一回合，动态尾部还会带上一次性的设置建议——每个根目录一个探索线程，以及工作区已有的计划任务——要求以 `propose_threads` 给出，并记录到 `setupOfferedAt`。
 
 ### 7. 线程看板
 

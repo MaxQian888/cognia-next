@@ -235,6 +235,15 @@ interface Props {
   isStreaming?: boolean
   /** True when this is the most recent assistant message in the list. */
   isLastAssistant?: boolean
+  /**
+   * The host opens a long-press action sheet for this row (the phone shell's
+   * `MessageActionSheet`), which carries every action the inline bar does.
+   * In the hover-revealed modes there is no hover on touch, so the bar would
+   * otherwise sit under every message permanently; with a sheet it keeps only
+   * the latest settled reply's bar, the way phone chat apps do, and every
+   * other row reaches its actions by long-press.
+   */
+  actionSheetHost?: boolean
   /** Lookup table for resolving senderId → Character (team sessions). */
   characterById?: Map<string, Character>
   /**
@@ -283,6 +292,7 @@ function MessageRendererInner({
   message,
   isStreaming = false,
   isLastAssistant = false,
+  actionSheetHost = false,
   characterById,
   directCharacter,
   onCopy,
@@ -304,6 +314,11 @@ function MessageRendererInner({
   // Agent invocation-flow display mode (simplified / standard / detailed).
   const fallbackMessageDisplay = useMessageDisplay()
   const display = messageDisplay ?? fallbackMessageDisplay
+  // `all` is an explicit choice to see every bar, so a sheet does not thin it.
+  const inlineActionBar =
+    !actionSheetHost ||
+    display.actions === "all" ||
+    (message.role === "assistant" && isLastAssistant && !isStreaming)
   const agentFlowMode: AgentFlowMode = display.agentFlowMode
   // Read-aloud is gated on the global TTS toggle; the selector keeps this
   // re-render rare (settings change), not on every playback progress tick.
@@ -1086,7 +1101,10 @@ function MessageRendererInner({
           {!editing && !isToolOnlyTurn && display.actions !== "all" && (
             <div
               className={cn(
-                "flex min-w-0 items-center gap-2",
+                // `empty:hidden`: with the bar handed to the long-press sheet
+                // and no reactions or meta to show, the line has no children
+                // and must not keep a row of gap under the bubble.
+                "flex min-w-0 items-center gap-2 empty:hidden",
                 message.role === "user" && "justify-end"
               )}
               data-testid="message-action-line"
@@ -1110,222 +1128,224 @@ function MessageRendererInner({
               <MessageReactionPills message={message} sessionId={branchSessionId} />
               {/* Marked so selection mode can set the row's own controls aside
                   (`message-list.tsx`); the reactions beside them stay. */}
-              <MessageActions
-                data-message-actions=""
-                className={cn(
-                  "text-xs text-muted-foreground transition-opacity",
-                  // `focus-within` and `pointer-coarse` are not decoration: hover
-                  // is the ONLY reveal a bare `group-hover` offers, so without
-                  // them this whole bar (copy / edit / retry / branch / plugin
-                  // actions) is permanently invisible on touch — where the app
-                  // ships through Capacitor — and a keyboard user lands focus on
-                  // a control they cannot see. The shared constant also keeps
-                  // the bar up while the "…" overflow's portal is open — both
-                  // hover and focus-within sit inside that portal then.
-                  display.actions === "hover" && HOVER_REVEAL_CLASS,
-                  message.role === "user" ? "w-fit" : ""
-                )}
-              >
-                <MessageAction
-                  tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
-                  label={t("copyLabel")}
-                  onClick={handleCopy}
+              {inlineActionBar ? (
+                <MessageActions
+                  data-message-actions=""
+                  className={cn(
+                    "text-xs text-muted-foreground transition-opacity",
+                    // `focus-within` and `pointer-coarse` are not decoration: hover
+                    // is the ONLY reveal a bare `group-hover` offers, so without
+                    // them this whole bar (copy / edit / retry / branch / plugin
+                    // actions) is permanently invisible on touch — where the app
+                    // ships through Capacitor — and a keyboard user lands focus on
+                    // a control they cannot see. The shared constant also keeps
+                    // the bar up while the "…" overflow's portal is open — both
+                    // hover and focus-within sit inside that portal then.
+                    display.actions === "hover" && HOVER_REVEAL_CLASS,
+                    message.role === "user" ? "w-fit" : ""
+                  )}
                 >
-                  <CopyFeedbackIcon copied={copied || richCopied} size={14} />
-                </MessageAction>
-
-                {hasActionCommand("edit") && onEditResend && (
                   <MessageAction
-                    tooltip={t("editTooltip")}
-                    label={t("editLabel")}
-                    onClick={startEdit}
-                    disabled={actionCommand("edit")?.disabled}
+                    tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
+                    label={t("copyLabel")}
+                    onClick={handleCopy}
                   >
-                    <PencilIcon className="size-3.5" />
+                    <CopyFeedbackIcon copied={copied || richCopied} size={14} />
                   </MessageAction>
-                )}
 
-                {hasActionCommand("resend") && onEditResend && (
-                  <MessageAction
-                    tooltip={t("resendTooltip")}
-                    label={t("resendLabel")}
-                    onClick={() => void onEditResend(message.id, extractText(message))}
-                    disabled={actionCommand("resend")?.disabled}
-                    data-testid="message-resend"
-                  >
-                    <SendHorizontalIcon className="size-3.5" />
-                  </MessageAction>
-                )}
+                  {hasActionCommand("edit") && onEditResend && (
+                    <MessageAction
+                      tooltip={t("editTooltip")}
+                      label={t("editLabel")}
+                      onClick={startEdit}
+                      disabled={actionCommand("edit")?.disabled}
+                    >
+                      <PencilIcon className="size-3.5" />
+                    </MessageAction>
+                  )}
 
-                {hasActionCommand("reply") && (
-                  <MessageAction
-                    tooltip={t("replyTooltip")}
-                    label={t("replyLabel")}
-                    onClick={handleReply}
-                    data-testid="message-reply"
-                  >
-                    <ReplyIcon className="size-3.5" />
-                  </MessageAction>
-                )}
+                  {hasActionCommand("resend") && onEditResend && (
+                    <MessageAction
+                      tooltip={t("resendTooltip")}
+                      label={t("resendLabel")}
+                      onClick={() => void onEditResend(message.id, extractText(message))}
+                      disabled={actionCommand("resend")?.disabled}
+                      data-testid="message-resend"
+                    >
+                      <SendHorizontalIcon className="size-3.5" />
+                    </MessageAction>
+                  )}
 
-                {hasActionCommand("rerunTemplate") && templateRun && branchSessionId && (
-                  <MessageAction
-                    tooltip={t("rerunTemplateTooltip")}
-                    label={t("rerunTemplateLabel")}
-                    onClick={() =>
-                      requestTemplateRerun({ sessionId: branchSessionId, run: templateRun })
-                    }
-                    disabled={actionCommand("rerunTemplate")?.disabled}
-                  >
-                    <Repeat2Icon className="size-3.5" />
-                  </MessageAction>
-                )}
+                  {hasActionCommand("reply") && (
+                    <MessageAction
+                      tooltip={t("replyTooltip")}
+                      label={t("replyLabel")}
+                      onClick={handleReply}
+                      data-testid="message-reply"
+                    >
+                      <ReplyIcon className="size-3.5" />
+                    </MessageAction>
+                  )}
 
-                {hasActionCommand("saveAsMemory") && (
-                  <MessageAction
-                    tooltip={t("saveAsMemoryTooltip")}
-                    label={t("saveAsMemoryLabel")}
-                    onClick={() => void handleSaveAsMemory()}
-                    disabled={actionCommand("saveAsMemory")?.disabled}
-                  >
-                    <BrainIcon className="size-3.5" />
-                  </MessageAction>
-                )}
+                  {hasActionCommand("rerunTemplate") && templateRun && branchSessionId && (
+                    <MessageAction
+                      tooltip={t("rerunTemplateTooltip")}
+                      label={t("rerunTemplateLabel")}
+                      onClick={() =>
+                        requestTemplateRerun({ sessionId: branchSessionId, run: templateRun })
+                      }
+                      disabled={actionCommand("rerunTemplate")?.disabled}
+                    >
+                      <Repeat2Icon className="size-3.5" />
+                    </MessageAction>
+                  )}
 
-                {hasActionCommand("saveAsIssue") && (
-                  <MessageAction
-                    tooltip={t("saveAsIssueTooltip")}
-                    label={t("saveAsIssueLabel")}
-                    onClick={() => void handleSaveAsIssue()}
-                    disabled={actionCommand("saveAsIssue")?.disabled}
-                    data-testid="message-save-as-issue"
-                  >
-                    <CircleDotIcon className="size-3.5" />
-                  </MessageAction>
-                )}
+                  {hasActionCommand("saveAsMemory") && (
+                    <MessageAction
+                      tooltip={t("saveAsMemoryTooltip")}
+                      label={t("saveAsMemoryLabel")}
+                      onClick={() => void handleSaveAsMemory()}
+                      disabled={actionCommand("saveAsMemory")?.disabled}
+                    >
+                      <BrainIcon className="size-3.5" />
+                    </MessageAction>
+                  )}
 
-                {hasActionCommand("regenerate") && onRegenerate && (
-                  <MessageAction
-                    tooltip={t("regenerateTooltip")}
-                    label={t("regenerateLabel")}
-                    onClick={() => void onRegenerate()}
-                    disabled={actionCommand("regenerate")?.disabled}
-                  >
-                    <RefreshCcwIcon className="size-3.5" />
-                  </MessageAction>
-                )}
+                  {hasActionCommand("saveAsIssue") && (
+                    <MessageAction
+                      tooltip={t("saveAsIssueTooltip")}
+                      label={t("saveAsIssueLabel")}
+                      onClick={() => void handleSaveAsIssue()}
+                      disabled={actionCommand("saveAsIssue")?.disabled}
+                      data-testid="message-save-as-issue"
+                    >
+                      <CircleDotIcon className="size-3.5" />
+                    </MessageAction>
+                  )}
 
-                {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
+                  {hasActionCommand("regenerate") && onRegenerate && (
+                    <MessageAction
+                      tooltip={t("regenerateTooltip")}
+                      label={t("regenerateLabel")}
+                      onClick={() => void onRegenerate()}
+                      disabled={actionCommand("regenerate")?.disabled}
+                    >
+                      <RefreshCcwIcon className="size-3.5" />
+                    </MessageAction>
+                  )}
+
+                  {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
                 stay reachable under every preset, not only `inspector` — the
                 `all` branch below is the only place it used to render. */}
-                {hasActionCommand("readAloud") && (
-                  <ReadAloudButton
-                    messageId={message.id}
-                    text={extractText(message)}
-                    character={speaker ?? directCharacter ?? null}
-                  />
-                )}
+                  {hasActionCommand("readAloud") && (
+                    <ReadAloudButton
+                      messageId={message.id}
+                      text={extractText(message)}
+                      character={speaker ?? directCharacter ?? null}
+                    />
+                  )}
 
-                {/* IM cross-links: forward this text to an IM conversation, or
+                  {/* IM cross-links: forward this text to an IM conversation, or
                   lift an inbound IM message into a fresh main chat. Self-hide
                   when they do not apply. */}
-                <MessageReactionAdd message={message} sessionId={branchSessionId} />
-                <MessageImActions
-                  message={message}
-                  text={messageText}
-                  sessionId={branchSessionId}
-                />
+                  <MessageReactionAdd message={message} sessionId={branchSessionId} />
+                  <MessageImActions
+                    message={message}
+                    text={messageText}
+                    sessionId={branchSessionId}
+                  />
 
-                {/* Overflow LAST. Everything above is a single-purpose button;
+                  {/* Overflow LAST. Everything above is a single-purpose button;
                   this one is the drawer the rest of the actions live in, and a
                   drawer sitting mid-row reads as just another action while
                   pushing the real ones past it. */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-8"
-                      aria-label={t("moreLabel")}
-                    >
-                      <MoreHorizontalIcon className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align={message.role === "user" ? "end" : "start"}>
-                    <DropdownMenuItem onSelect={() => void handleShare()}>
-                      <Share2Icon className="size-4" />
-                      {t("shareLabel")}
-                    </DropdownMenuItem>
-                    {hasActionCommand("quote") && branchSessionId && (
-                      <DropdownMenuItem onSelect={handleQuote}>
-                        <QuoteIcon className="size-4" />
-                        {t("quoteLabel")}
-                      </DropdownMenuItem>
-                    )}
-                    {hasActionCommand("reply") && (
-                      <DropdownMenuItem onSelect={handleReply} data-testid="message-reply-menu">
-                        <ReplyIcon className="size-4" />
-                        {t("replyLabel")}
-                      </DropdownMenuItem>
-                    )}
-                    {hasActionCommand("copyLink") && branchSessionId && (
-                      <DropdownMenuItem onSelect={() => void handleCopyLink()}>
-                        <LinkIcon className="size-4" />
-                        {t("copyLinkLabel")}
-                      </DropdownMenuItem>
-                    )}
-                    {hasActionCommand("shareCard") && (
-                      <DropdownMenuItem onSelect={() => setCardOpen(true)}>
-                        <ImageIcon className="size-4" />
-                        {t("shareCardLabel")}
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem onSelect={() => toggleBookmark(message.id)}>
-                      <AnimatedBookmarkIcon className="size-4" />
-                      {isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
-                    </DropdownMenuItem>
-                    {hasActionCommand("select") && selectionHost && (
-                      <DropdownMenuItem
-                        onSelect={() => selectionHost.start(message.id)}
-                        data-testid="message-select-menu"
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={t("moreLabel")}
                       >
-                        <ListChecksIcon className="size-4" />
-                        {t("selectLabel")}
+                        <MoreHorizontalIcon className="size-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align={message.role === "user" ? "end" : "start"}>
+                      <DropdownMenuItem onSelect={() => void handleShare()}>
+                        <Share2Icon className="size-4" />
+                        {t("shareLabel")}
                       </DropdownMenuItem>
-                    )}
-                    {hasActionCommand("branch") && branchSessionId && (
-                      <DropdownMenuItem
-                        disabled={actionCommand("branch")?.disabled}
-                        onSelect={() => setBranchOpen(true)}
-                      >
-                        <GitBranchIcon className="size-4" />
-                        {t("branchLabel")}
+                      {hasActionCommand("quote") && branchSessionId && (
+                        <DropdownMenuItem onSelect={handleQuote}>
+                          <QuoteIcon className="size-4" />
+                          {t("quoteLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      {hasActionCommand("reply") && (
+                        <DropdownMenuItem onSelect={handleReply} data-testid="message-reply-menu">
+                          <ReplyIcon className="size-4" />
+                          {t("replyLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      {hasActionCommand("copyLink") && branchSessionId && (
+                        <DropdownMenuItem onSelect={() => void handleCopyLink()}>
+                          <LinkIcon className="size-4" />
+                          {t("copyLinkLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      {hasActionCommand("shareCard") && (
+                        <DropdownMenuItem onSelect={() => setCardOpen(true)}>
+                          <ImageIcon className="size-4" />
+                          {t("shareCardLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onSelect={() => toggleBookmark(message.id)}>
+                        <AnimatedBookmarkIcon className="size-4" />
+                        {isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
                       </DropdownMenuItem>
-                    )}
-                    {hasActionCommand("truncate") && branchSessionId && (
-                      <DropdownMenuItem
-                        disabled={actionCommand("truncate")?.disabled}
-                        onSelect={() => setTruncateOpen(true)}
-                      >
-                        <ScissorsIcon className="size-4" />
-                        {t("truncateFromLabel")}
-                      </DropdownMenuItem>
-                    )}
-                    {hasActionCommand("bringBack") && handBackTargetId && (
-                      <DropdownMenuItem onSelect={handleBringBack}>
-                        <CornerUpLeftIcon className="size-4" />
-                        {t("bringBackLabel")}
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      {hasActionCommand("select") && selectionHost && (
+                        <DropdownMenuItem
+                          onSelect={() => selectionHost.start(message.id)}
+                          data-testid="message-select-menu"
+                        >
+                          <ListChecksIcon className="size-4" />
+                          {t("selectLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      {hasActionCommand("branch") && branchSessionId && (
+                        <DropdownMenuItem
+                          disabled={actionCommand("branch")?.disabled}
+                          onSelect={() => setBranchOpen(true)}
+                        >
+                          <GitBranchIcon className="size-4" />
+                          {t("branchLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      {hasActionCommand("truncate") && branchSessionId && (
+                        <DropdownMenuItem
+                          disabled={actionCommand("truncate")?.disabled}
+                          onSelect={() => setTruncateOpen(true)}
+                        >
+                          <ScissorsIcon className="size-4" />
+                          {t("truncateFromLabel")}
+                        </DropdownMenuItem>
+                      )}
+                      {hasActionCommand("bringBack") && handBackTargetId && (
+                        <DropdownMenuItem onSelect={handleBringBack}>
+                          <CornerUpLeftIcon className="size-4" />
+                          {t("bringBackLabel")}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
-                <BranchNavigator message={message} className="mx-1" />
-                {branchSessionId && (
-                  <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
-                )}
-              </MessageActions>
+                  <BranchNavigator message={message} className="mx-1" />
+                  {branchSessionId && (
+                    <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+                  )}
+                </MessageActions>
+              ) : null}
               {/* Footer meta: the run summary line on the row's right end.
                   Click opens the per-field popover — no inline expansion, so
                   the transcript below never shifts. */}
@@ -1689,7 +1709,8 @@ export const MessageRenderer = memo(
     prev.onEditResend === next.onEditResend &&
     prev.onRewindFiles === next.onRewindFiles &&
     prev.projectRoot === next.projectRoot &&
-    prev.messageDisplay === next.messageDisplay
+    prev.messageDisplay === next.messageDisplay &&
+    prev.actionSheetHost === next.actionSheetHost
 )
 
 MessageRenderer.displayName = "MessageRenderer"

@@ -116,7 +116,10 @@ export function ConversationJumpPill({
 
   if (reduce) {
     return (
-      <div className={cn(pillShellClass, className)}>
+      <div
+        className={cn(pillShellClass, mode && pillBandClass, className)}
+        data-slot="jump-pill-band"
+      >
         {button}
         {live}
       </div>
@@ -124,7 +127,10 @@ export function ConversationJumpPill({
   }
 
   return (
-    <div className={cn(pillShellClass, className)}>
+    <div
+      className={cn(pillShellClass, mode && pillBandClass, className)}
+      data-slot="jump-pill-band"
+    >
       <AnimatePresence initial={false} mode="wait">
         {mode ? (
           <motion.div
@@ -151,7 +157,20 @@ export function ConversationJumpPill({
 }
 
 /**
- * Pinned to the bottom of the *pane*, and inert to pointers so the strip of
- * message above the composer stays selectable when no offer is showing.
+ * Pinned to the bottom of the *pane* — the foot of the message lane, so it sits
+ * just above the run strip and composer, which live below the lane and can
+ * never be under it — and inert to pointers so the strip of message above the
+ * composer stays selectable when no offer is showing.
+ *
+ * The shell spans the lane's foot rather than hugging the pill: while an offer
+ * is up it carries the composer's own scrim, so whatever transcript lies
+ * beneath (a message's action row, most often) dissolves into the background
+ * instead of showing through and around the button. It is only ever up when
+ * the reader is away from the foot — at the foot the list hides it — so it
+ * never sits over the newest message's actions.
  */
-const pillShellClass = "pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center"
+const pillShellClass =
+  "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-3 pt-6"
+
+/** The fade behind an active offer — the same scrim the composer rises out of. */
+const pillBandClass = "composer-scrim"

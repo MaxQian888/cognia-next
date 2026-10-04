@@ -1269,6 +1269,12 @@ export interface ConversationSearchScopeControlProps {
   side?: "right" | "left" | "top" | "bottom"
   triggerClassName?: string
   testId?: string
+  /**
+   * The view the list is showing. `includeArchived` lifts the archive split in
+   * both directions (`buildConversationSections`), so inside the Archived view
+   * the same switch brings the *active* conversations in — and is labelled so.
+   */
+  view?: "active" | "archived"
 }
 
 /**
@@ -1290,6 +1296,7 @@ export function ConversationSearchScopeControl({
   side = "right",
   triggerClassName,
   testId = "conversation-search-scope",
+  view = "active",
 }: ConversationSearchScopeControlProps) {
   const t = useTranslations("conversationFilters")
   const { search, actions } = model
@@ -1353,7 +1360,7 @@ export function ConversationSearchScopeControl({
           onCheckedChange={(checked) => actions.setSearchOptions({ includeArchived: checked })}
           data-testid={`${testId}-archived`}
         >
-          {t("searchScope.includeArchived")}
+          {view === "archived" ? t("searchScope.includeActive") : t("searchScope.includeArchived")}
         </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem
           checked={search.content}

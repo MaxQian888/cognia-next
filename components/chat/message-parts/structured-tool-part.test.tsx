@@ -160,6 +160,33 @@ describe("StructuredToolPart", () => {
     )
     expect(screen.getByTestId("structured-tool-part").textContent).toContain("Provided Label")
   })
+
+  it("lets a provider title shrink and scroll rather than push the row off-screen", () => {
+    render(
+      <StructuredToolPart
+        part={part("tool-mcp__srv__custom", {
+          title: "Reading components/mobile/external-agents/agent-preset-picker.tsx",
+          output: JSON.stringify({ ok: true }),
+        } as Partial<ToolUIPart>)}
+      />
+    )
+    const lead = screen.getByTestId("structured-tool-lead")
+    expect(lead.className).not.toContain("shrink-0")
+    expect(lead.className).toContain("min-w-0")
+    expect(lead.className).toContain("pointer-coarse:overflow-x-auto")
+  })
+
+  it("keeps a spec verb lead fixed-width", () => {
+    render(
+      <StructuredToolPart
+        part={part("tool-WebFetch", {
+          input: { url: "https://example.com" },
+          output: JSON.stringify({ status: 200 }),
+        } as Partial<ToolUIPart>)}
+      />
+    )
+    expect(screen.getByTestId("structured-tool-lead").className).toContain("shrink-0")
+  })
 })
 
 it("honors controlled disclosure and keeps its row mounted", () => {

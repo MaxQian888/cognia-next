@@ -4,10 +4,25 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import DOMPurify from "dompurify"
-import { DownloadIcon, Loader2Icon, LockKeyholeIcon, UploadIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  Loader2Icon,
+  LockKeyholeIcon,
+  MoreHorizontalIcon,
+  PinIcon,
+  PinOffIcon,
+  Undo2Icon,
+  UploadIcon,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getCodeAdoptionTurnByTaskWorkspaceRun } from "@/lib/code-adoption/persist"
 import type { CodeAdoptionTurnRow } from "@/lib/code-adoption/types"
@@ -473,131 +488,244 @@ export function TaskResourcesPanel({
     )
   }
 
+  const mobile = layout === "mobile"
+  // Touch-sized, and width-bounded on a phone: a native <select> sizes itself
+  // to its longest option, so an unbounded run picker ("eac_43616f… ·
+  // cancelled") pushed the whole sheet sideways.
+  const selectClass = cn(
+    "rounded-md border bg-background px-2",
+    mobile ? "h-9 w-full min-w-0 truncate text-sm" : "h-8 text-xs"
+  )
+  const togglePin = () =>
+    void pinTaskWorkspace(active.taskId, !pinned)
+      .then((task) => setPinned(task.pinned))
+      .catch((reason: unknown) => setError(String(reason)))
+  const viewTabs = (
+    <Tabs
+      value={view}
+      onValueChange={(value) => setView(value as ResourceView)}
+      className={mobile ? "min-w-0" : undefined}
+    >
+      <TabsList>
+        <TabsTrigger value="ledger">{t("ledger")}</TabsTrigger>
+        <TabsTrigger value="timeline">{t("timeline")}</TabsTrigger>
+      </TabsList>
+    </Tabs>
+  )
+  const runSelect = (
+    <select
+      aria-label={t("runFilter")}
+      value={selectedRunId}
+      onChange={(event) => setSelectedRunId(event.target.value)}
+      className={cn(selectClass, mobile && "flex-1")}
+    >
+      {runs.map((run) => (
+        <option key={run.runId} value={run.runId}>
+          {run.agentId} · {run.state}
+        </option>
+      ))}
+    </select>
+  )
+  const filterSelects = (
+    <>
+      <select
+        aria-label={t("originFilter")}
+        value={origin}
+        onChange={(event) => setOrigin(event.target.value)}
+        className={selectClass}
+      >
+        <option value="all">{t("allOrigins")}</option>
+        <option value="agent">{t("agent")}</option>
+        <option value="user">{t("user")}</option>
+        <option value="unknown">{t("unknown")}</option>
+      </select>
+      <select
+        aria-label={t("statusFilter")}
+        value={status}
+        onChange={(event) => setStatus(event.target.value)}
+        className={selectClass}
+      >
+        <option value="all">{t("allStatuses")}</option>
+        <option value="created">{t("created")}</option>
+        <option value="modified">{t("modified")}</option>
+        <option value="deleted">{t("deleted")}</option>
+        <option value="renamed">{t("renamed")}</option>
+      </select>
+      <select
+        aria-label={t("captureFilter")}
+        value={captureClass}
+        onChange={(event) => setCaptureClass(event.target.value)}
+        className={selectClass}
+      >
+        <option value="all">{t("allCaptureClasses")}</option>
+        <option value="source">{t("sourceFiles")}</option>
+        <option value="generated">{t("generatedFiles")}</option>
+      </select>
+      {view === "timeline" && (
+        <select
+          aria-label={t("timeFilter")}
+          value={timeRange}
+          onChange={(event) => {
+            setTimeRange(event.target.value)
+            setTimeFilterNow(Date.now())
+          }}
+          className={selectClass}
+        >
+          <option value="all">{t("allTime")}</option>
+          <option value="5m">{t("lastFiveMinutes")}</option>
+          <option value="1h">{t("lastHour")}</option>
+          <option value="24h">{t("lastDay")}</option>
+        </select>
+      )}
+    </>
+  )
+  const stateLabel = (
+    <span className="shrink-0 text-xs text-muted-foreground" data-testid="task-resources-state">
+      {provisional ? t("provisional") : t("authoritative")}
+    </span>
+  )
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      className="hidden"
+      onChange={(event) => {
+        const file = event.target.files?.[0]
+        if (file) void upload(file)
+      }}
+    />
+  )
+
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="task-resources-panel">
-      <div className="flex flex-wrap items-center gap-2 border-b p-2">
-        <Tabs value={view} onValueChange={(value) => setView(value as ResourceView)}>
-          <TabsList>
-            <TabsTrigger value="ledger">{t("ledger")}</TabsTrigger>
-            <TabsTrigger value="timeline">{t("timeline")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <select
-          aria-label={t("runFilter")}
-          value={selectedRunId}
-          onChange={(event) => setSelectedRunId(event.target.value)}
-          className="h-8 rounded-md border bg-background px-2 text-xs"
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden"
+      data-testid="task-resources-panel"
+    >
+      {mobile ? (
+        // A phone gets three stacked rows instead of one wrapping strip: the
+        // view switch with the run state and an overflow menu, the run picker
+        // with the primary action, then the filters on a two-column grid. The
+        // secondary actions (upload, undo, pin, export) live behind ⋯ so no
+        // button is ever pushed past the sheet's edge.
+        <div
+          className="flex min-w-0 flex-col gap-2 border-b p-2"
+          data-testid="task-resources-toolbar"
         >
-          {runs.map((run) => (
-            <option key={run.runId} value={run.runId}>
-              {run.agentId} · {run.state}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={t("originFilter")}
-          value={origin}
-          onChange={(event) => setOrigin(event.target.value)}
-          className="h-8 rounded-md border bg-background px-2 text-xs"
-        >
-          <option value="all">{t("allOrigins")}</option>
-          <option value="agent">{t("agent")}</option>
-          <option value="user">{t("user")}</option>
-          <option value="unknown">{t("unknown")}</option>
-        </select>
-        <select
-          aria-label={t("statusFilter")}
-          value={status}
-          onChange={(event) => setStatus(event.target.value)}
-          className="h-8 rounded-md border bg-background px-2 text-xs"
-        >
-          <option value="all">{t("allStatuses")}</option>
-          <option value="created">{t("created")}</option>
-          <option value="modified">{t("modified")}</option>
-          <option value="deleted">{t("deleted")}</option>
-          <option value="renamed">{t("renamed")}</option>
-        </select>
-        <select
-          aria-label={t("captureFilter")}
-          value={captureClass}
-          onChange={(event) => setCaptureClass(event.target.value)}
-          className="h-8 rounded-md border bg-background px-2 text-xs"
-        >
-          <option value="all">{t("allCaptureClasses")}</option>
-          <option value="source">{t("sourceFiles")}</option>
-          <option value="generated">{t("generatedFiles")}</option>
-        </select>
-        {view === "timeline" && (
-          <select
-            aria-label={t("timeFilter")}
-            value={timeRange}
-            onChange={(event) => {
-              setTimeRange(event.target.value)
-              setTimeFilterNow(Date.now())
-            }}
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-          >
-            <option value="all">{t("allTime")}</option>
-            <option value="5m">{t("lastFiveMinutes")}</option>
-            <option value="1h">{t("lastHour")}</option>
-            <option value="24h">{t("lastDay")}</option>
-          </select>
-        )}
-        <span className="text-xs text-muted-foreground">
-          {provisional ? t("provisional") : t("authoritative")}
-        </span>
-        <div className="ml-auto flex gap-1">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void upload(file)
-            }}
-          />
-          {view === "ledger" && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
-                <UploadIcon className="size-3.5" />
-                {t("upload")}
+          <div className="flex min-w-0 items-center gap-2">
+            {viewTabs}
+            <div className="ml-auto flex min-w-0 items-center gap-2">
+              {stateLabel}
+              {fileInput}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    className="size-9 shrink-0"
+                    aria-label={t("moreActions")}
+                    data-testid="task-resources-more"
+                  >
+                    <MoreHorizontalIcon aria-hidden className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48">
+                  {view === "ledger" && (
+                    <>
+                      <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                        <UploadIcon aria-hidden className="size-4" />
+                        {t("upload")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={patchSet?.reversible === false}
+                        onSelect={() => void undo()}
+                        className="items-start"
+                      >
+                        <Undo2Icon aria-hidden className="mt-0.5 size-4" />
+                        <span className="flex min-w-0 flex-col">
+                          {t("undo")}
+                          {patchSet?.reversible === false && (
+                            <span className="text-xs text-muted-foreground">
+                              {t("undoUnavailableIrreversible")}
+                            </span>
+                          )}
+                        </span>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  <DropdownMenuItem onSelect={togglePin}>
+                    {pinned ? (
+                      <PinOffIcon aria-hidden className="size-4" />
+                    ) : (
+                      <PinIcon aria-hidden className="size-4" />
+                    )}
+                    {pinned ? t("unpin") : t("pin")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void exportManifest()}>
+                    <DownloadIcon aria-hidden className="size-4" />
+                    {t("exportManifest")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          <div className="flex min-w-0 items-center gap-2">
+            {runSelect}
+            {view === "ledger" && (
+              <Button size="sm" className="h-9 shrink-0" onClick={() => void apply()}>
+                {t("applyAll")}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={patchSet?.reversible === false}
-                title={
-                  patchSet?.reversible === false ? t("undoUnavailableIrreversible") : undefined
-                }
-                onClick={() => void undo()}
-              >
-                {t("undo")}
-              </Button>
-            </>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            aria-pressed={pinned}
-            onClick={() =>
-              void pinTaskWorkspace(active.taskId, !pinned)
-                .then((task) => setPinned(task.pinned))
-                .catch((reason: unknown) => setError(String(reason)))
-            }
-          >
-            {pinned ? t("unpin") : t("pin")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => void exportManifest()}>
-            <DownloadIcon className="size-3.5" />
-            {t("exportManifest")}
-          </Button>
-          {view === "ledger" && (
-            <Button size="sm" onClick={() => void apply()}>
-              {t("applyAll")}
-            </Button>
-          )}
+            )}
+          </div>
+          <div className="grid min-w-0 grid-cols-2 gap-2" data-testid="task-resources-filters">
+            {filterSelects}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div
+          className="flex flex-wrap items-center gap-2 border-b p-2"
+          data-testid="task-resources-toolbar"
+        >
+          {viewTabs}
+          {runSelect}
+          {filterSelects}
+          {stateLabel}
+          <div className="ml-auto flex gap-1">
+            {fileInput}
+            {view === "ledger" && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                  <UploadIcon className="size-3.5" />
+                  {t("upload")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={patchSet?.reversible === false}
+                  title={
+                    patchSet?.reversible === false ? t("undoUnavailableIrreversible") : undefined
+                  }
+                  onClick={() => void undo()}
+                >
+                  {t("undo")}
+                </Button>
+              </>
+            )}
+            <Button size="sm" variant="outline" aria-pressed={pinned} onClick={togglePin}>
+              {pinned ? t("unpin") : t("pin")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void exportManifest()}>
+              <DownloadIcon className="size-3.5" />
+              {t("exportManifest")}
+            </Button>
+            {view === "ledger" && (
+              <Button size="sm" onClick={() => void apply()}>
+                {t("applyAll")}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       {adoption && <AdoptionSummary row={adoption} />}
       {view === "timeline" ? (
         <div className="min-h-0 flex-1 overflow-auto">
@@ -662,14 +790,15 @@ export function TaskResourcesPanel({
               : "grid-cols-[minmax(12rem,32%)_1fr]"
           )}
         >
-          <div className="min-h-0 overflow-auto border-r">
+          <div className={cn("min-h-0 overflow-auto", mobile ? "border-b" : "border-r")}>
             {visibleResources.map((resource) => (
               <button
                 key={`${resource.revision}:${resource.path}`}
                 type="button"
                 onClick={() => setSelectedPath(resource.path)}
                 className={cn(
-                  "flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs",
+                  "flex w-full min-w-0 items-center gap-2 border-b px-3 text-left",
+                  mobile ? "min-h-11 py-2 text-sm" : "py-2 text-xs",
                   selectedPath === resource.path && "bg-accent"
                 )}
               >
@@ -677,14 +806,19 @@ export function TaskResourcesPanel({
                   <LockKeyholeIcon className="size-3.5" aria-label={t("sensitive")} />
                 )}
                 <span className="min-w-0 flex-1 truncate">{resource.path}</span>
-                <span className="text-muted-foreground">{t(resource.kind)}</span>
+                <span className="shrink-0 text-muted-foreground">{t(resource.kind)}</span>
               </button>
             ))}
           </div>
-          <div className="flex min-h-0 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-col">
             {selected ? (
               <>
-                <div className="flex items-center gap-2 border-b p-2">
+                <div
+                  className={cn(
+                    "flex min-w-0 items-center gap-2 border-b p-2",
+                    mobile && "flex-wrap"
+                  )}
+                >
                   <Tabs value={tab} onValueChange={(value) => setTab(value as ResourceTab)}>
                     <TabsList>
                       <TabsTrigger value="source">{t("source")}</TabsTrigger>
@@ -796,12 +930,12 @@ export function TaskResourcesPanel({
                           ))}
                         </div>
                       )}
-                      <pre className="whitespace-pre-wrap font-mono text-xs">
+                      <pre className="whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]">
                         {diff || t("diffUnavailable")}
                       </pre>
                     </div>
                   ) : tab === "source" ? (
-                    <pre className="whitespace-pre-wrap font-mono text-xs">
+                    <pre className="whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]">
                       {content ?? t("binarySource")}
                     </pre>
                   ) : (
@@ -813,8 +947,8 @@ export function TaskResourcesPanel({
                     />
                   )}
                 </div>
-                <div className="flex items-center gap-3 border-t px-3 py-1.5 text-xs text-muted-foreground">
-                  <span>{selected.mediaType}</span>
+                <div className="flex min-w-0 items-center gap-3 border-t px-3 py-1.5 text-xs text-muted-foreground">
+                  <span className="min-w-0 truncate">{selected.mediaType}</span>
                   <span>{t("bytes", { count: selected.size })}</span>
                   {selected.insertions !== null && (
                     <span>
@@ -871,7 +1005,7 @@ function AdoptionSummary({ row }: { row: CodeAdoptionTurnRow }) {
   }
   return (
     <div
-      className="flex items-center gap-2 border-b bg-muted/20 px-3 py-1.5 text-xs"
+      className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-b bg-muted/20 px-3 py-1.5 text-xs"
       data-testid="code-adoption-summary"
     >
       <span className="font-medium">{t("adoptionTitle")}</span>
@@ -925,7 +1059,11 @@ function ResourcePreview({
     try {
       formatted = JSON.stringify(JSON.parse(content), null, 2)
     } catch {}
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{formatted}</pre>
+    return (
+      <pre className="whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]">
+        {formatted}
+      </pre>
+    )
   }
   if (resource.mediaType.startsWith("image/") && blobUrl)
     return (
@@ -945,6 +1083,10 @@ function ResourcePreview({
       />
     )
   if (content !== null)
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{content}</pre>
+    return (
+      <pre className="whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]">
+        {content}
+      </pre>
+    )
   return <p className="text-sm text-muted-foreground">{t("previewUnavailable")}</p>
 }

@@ -60,6 +60,8 @@ interface TextInputApi {
 }
 
 export interface AcceptFilesOptions {
+  /** Prevent async preparation from staging files after the destination leaves. */
+  isCurrent?: () => boolean
   /**
    * Citations carried by particular files: a picked remote document cites the
    * document it was fetched from. Keyed by the `File` handed in, so only a file
@@ -133,6 +135,7 @@ export function useAttachmentIntake({
    */
   const acceptFiles = useCallback(
     async (files: FileList | File[], options: AcceptFilesOptions = {}): Promise<File[]> => {
+      if (options.isCurrent && !options.isCurrent()) return []
       const list = [...files]
       const imageCount = list.filter((f) => (f.type ?? "").startsWith("image/")).length
       attachmentPrepareCountRef.current += 1
@@ -144,6 +147,7 @@ export function useAttachmentIntake({
           audio: acceptMotion,
           ...(acceptMotion ? { motion: { maxSourceBytes: COMPOSER_VIDEO_SOURCE_MAX_BYTES } } : {}),
         })
+        if (options.isCurrent && !options.isCurrent()) return []
         if (prepared.unsupportedCount > 0) {
           toast.warning(tAttach("unsupported", { count: prepared.unsupportedCount }))
         }

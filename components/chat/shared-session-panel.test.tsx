@@ -454,3 +454,38 @@ it("preserves editable controls while a background metadata refresh is pending",
   expect(input).toHaveValue("unfinished invite")
   await act(async () => finish({ policyRevision: 1, revision: 1 }))
 })
+
+describe("opened from outside", () => {
+  it("draws no inline trigger when the caller owns the way in, and loads when it opens", async () => {
+    const client = configured()
+    const onOpenChange = jest.fn()
+    const { rerender } = render(
+      <SharedSessionPanel
+        session={session()}
+        trigger="none"
+        open={false}
+        onOpenChange={onOpenChange}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "openPrivateSession" })).toBeNull()
+    expect(resolveContext).not.toHaveBeenCalled()
+    rerender(
+      <SharedSessionPanel session={session()} trigger="none" open onOpenChange={onOpenChange} />
+    )
+    // The sheet opens on the caller's word and fetches like the inline trigger does.
+    expect(await screen.findByLabelText("inviteToken")).toBeInTheDocument()
+    expect(resolveContext).toHaveBeenCalledTimes(1)
+    expect(client).toBeDefined()
+  })
+
+  it("reports a close back to the caller", async () => {
+    configured()
+    const onOpenChange = jest.fn()
+    render(
+      <SharedSessionPanel session={session()} trigger="none" open onOpenChange={onOpenChange} />
+    )
+    await screen.findByLabelText("inviteToken")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+})

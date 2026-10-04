@@ -25,6 +25,8 @@ jest.mock("@/lib/ai/generation/agent-backed-client", () => ({
 jest.mock("@/lib/db/sessions", () => ({
   __esModule: true,
   getSession: jest.fn(async () => ({ id: "src1", title: "Original" })),
+  updateSession: jest.fn(async () => {}),
+  deleteSession: jest.fn(async () => {}),
 }))
 jest.mock("@/stores/settings", () => ({
   __esModule: true,
@@ -47,6 +49,7 @@ import { summarizeMaterial } from "@/lib/ai/generation/summarize-material"
 import { toast } from "sonner"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { usePlatform } from "@/hooks/use-platform"
+import { updateSession, deleteSession } from "@/lib/db/sessions"
 
 const mockBranch = branchSessionAtMessage as jest.Mock
 const mockSummarize = summarizeMaterial as jest.Mock
@@ -64,6 +67,13 @@ const messages = {
       createError: "Failed to create branch",
       summaryEmpty: "Add a summary before branching",
       summaryError: "Failed to generate summary",
+      workingSet: {
+        label: "Working state",
+        historical: "At the branch point",
+        current: "Current state",
+        initial: "Start fresh",
+        unavailable: "Historical state is unavailable. Choose current state or start fresh.",
+      },
       pick: {
         open: "Choose which messages to carry…",
         label: "Carry {count} selected",
@@ -161,6 +171,46 @@ describe("BranchDialog — reads the branched session's own thread", () => {
 })
 
 describe("BranchDialog", () => {
+  it("removes the new child if converting it into an aside fails", async () => {
+    jest.mocked(updateSession).mockRejectedValueOnce(new Error("binding write failed"))
+    const onOpenChange = jest.fn()
+    renderDialog(onOpenChange)
+    fireEvent.click(screen.getByRole("radio", { name: /A new aside on this conversation/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(messages.chat.branch.createError)
+    )
+    expect(deleteSession).toHaveBeenCalledWith("child1")
+    expect(deleteSession).not.toHaveBeenCalledWith("src1")
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("passes an explicit working state policy through the existing branch action", async () => {
+    renderDialog()
+    fireEvent.change(screen.getByRole("combobox", { name: "Working state" }), {
+      target: { value: "initial" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
+    await waitFor(() =>
+      expect(mockBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ workingSetPolicy: "initial" })
+      )
+    )
+  })
+
+  it("explains unavailable history and keeps the dialog open for a different choice", async () => {
+    mockBranch.mockRejectedValueOnce(
+      Object.assign(new Error("missing"), { name: "BranchWorkingSetHistoryUnavailableError" })
+    )
+    const onOpenChange = jest.fn()
+    renderDialog(onOpenChange)
+    fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(messages.chat.branch.workingSet.unavailable)
+    )
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
   it("creates a direct branch and opens it beside its parent", async () => {
     const onOpenChange = jest.fn()
     renderDialog(onOpenChange)

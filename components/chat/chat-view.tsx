@@ -30,6 +30,8 @@ import { ChatColumn } from "./chat-column"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import { WorkSubmissionNotice } from "./work-submission-notice"
 import { ProjectPausedBanner } from "@/components/project-coordinator/project-paused-banner"
+import { ArchivedConversationBanner } from "./archived-conversation-banner"
+import { useUnarchiveOnUserTurn } from "@/hooks/chat/use-unarchive-on-user-turn"
 import {
   EmptyChatState,
   type WelcomeStyle,
@@ -306,6 +308,14 @@ interface ChatPaneProps {
   /** One recovery surface, centered without history and compact beside cached messages. */
   runtimeNotice?: ReactNode
   /**
+   * The same report at strip density, docked on the composer's top edge in
+   * place of `runtimeNotice` once the conversation has history. Hosts that
+   * pass one also pass `runtimeNotice` for the empty conversation.
+   */
+  runtimeStrip?: ReactNode
+  /** Composer placeholder while `composerDisabled` (why sends are off). */
+  composerDisabledPlaceholder?: string
+  /**
    * Workflow-editor copilot wiring — forwarded to the `<Composer>` so `@`
    * opens a workflow node/edge picker. Only the workflow chat tab passes this.
    */
@@ -387,6 +397,8 @@ export function ChatPane({
   composerRef,
   composerDisabled,
   runtimeNotice,
+  runtimeStrip,
+  composerDisabledPlaceholder,
   onResumeAfterPlanApproval,
   onSendPlanFeedback,
   onSplitView,
@@ -513,12 +525,38 @@ export function ChatPane({
     toast.success(tCopy("success"))
   })
 
+  // ADR-0213 (D2): a turn the user starts here brings an archived
+  // conversation back to the list. Every user-initiated turn this pane hands
+  // its host counts, not only the composer: edit-and-resend, regenerate, the
+  // error card's retry, plan feedback and a plan approval that resumes the run
+  // are all the user writing into this conversation. Background writers (bots,
+  // scheduler, connectors, workflow nodes) dispatch without the pane, so their
+  // writes leave it archived. Only the row this pane is bound to qualifies: a
+  // pane whose `activeSession` is some other row must not restore it.
+  const restoreIfArchived = useUnarchiveOnUserTurn(
+    activeSession && activeSession.id === boundId ? activeSession : null
+  )
+
   const handleRegenerate = useStableCallback(() => {
+    restoreIfArchived()
     void onRegenerate()
   })
 
   const handleEditResend = useStableCallback((id: string, newText: string) => {
+    restoreIfArchived()
     void onEditResend(id, newText)
+  })
+
+  const handleResumeAfterPlanApproval = useStableCallback(
+    (...args: Parameters<typeof resumeAfterPlanApproval>) => {
+      restoreIfArchived()
+      return resumeAfterPlanApproval(...args)
+    }
+  )
+
+  const handleSendPlanFeedback = useStableCallback((feedback: string) => {
+    restoreIfArchived()
+    return (onSendPlanFeedback ?? onSend)(feedback)
   })
 
   const handleSend = useCallback(
@@ -537,6 +575,9 @@ export function ChatPane({
       }
       // Sending here means what came before has been read (ADR-0177 batch 2).
       if (boundId) dropUnreadMarker(boundId)
+      // Started, not awaited: the send never waits on (or fails with) the
+      // restore, whose failure the archive hook toasts on its own.
+      restoreIfArchived()
       try {
         await onSend(content, manifest, templateRun, turnMetadata)
       } catch (error) {
@@ -551,7 +592,7 @@ export function ChatPane({
         throw error
       }
     },
-    [boundId, onSend]
+    [boundId, onSend, restoreIfArchived]
   )
 
   const pendingDispatchRef = useRef<string | null>(null)
@@ -620,8 +661,9 @@ export function ChatPane({
 
   const handleRetry = useCallback(async () => {
     if (boundId) useChatStore.getState().setSessionError(boundId, null)
+    restoreIfArchived()
     await onRegenerate()
-  }, [onRegenerate, boundId])
+  }, [onRegenerate, boundId, restoreIfArchived])
 
   // Re-trigger the Dexie history load after a load failure.
   const handleRetryLoad = useCallback(() => {
@@ -772,6 +814,18 @@ export function ChatPane({
   //
   // `subagent` sessions (ADR-0062) are read-only imported inner transcripts —
   // no composer at all (they have no continuation path).
+  // The live run strip (timer / tool count / steer queue). Docked onto the
+  // composer's top edge by the composer itself so it reads as part of the input
+  // card; interrupting is the composer's own Stop button (and Esc), not a tap
+  // on the strip. Self-hides when idle with no queue and nothing to replay.
+  const runStatusBar = (
+    <RunStatusBar
+      sessionId={boundId}
+      onSteerNow={steerNow ? () => void steerNow() : undefined}
+      onSteerFlush={steerFlush ? () => void steerFlush() : undefined}
+    />
+  )
+
   const composerEl =
     activeSession?.kind === "subagent" ? null : (
       <Composer
@@ -789,21 +843,26 @@ export function ChatPane({
         // "don't use that tool, do it another way", and `send` already routes a
         // message in that state into the steer queue rather than a new turn.
         disabled={(atCapacity && !activeSession.platformBinding) || composerDisabled}
+        disabledPlaceholder={composerDisabled ? composerDisabledPlaceholder : undefined}
         workflowMention={workflowMention}
+        runStatus={
+          runtimeStrip ? (
+            <>
+              {runtimeStrip}
+              {runStatusBar}
+            </>
+          ) : (
+            runStatusBar
+          )
+        }
       />
     )
 
-  // Transient run-status layer (timer / interrupt / live tools / steer queue),
-  // pinned directly above the composer. Self-hides when idle with no queue.
+  // Router + Fusion progress, pinned directly above the composer. Self-hides
+  // when no fusion turn is running.
   const runStatusEl = (
     <ChatColumn>
       <RouterFusionProgressCard sessionId={boundId} />
-      <RunStatusBar
-        sessionId={boundId}
-        onStop={() => void onStop()}
-        onSteerNow={steerNow ? () => void steerNow() : undefined}
-        onSteerFlush={steerFlush ? () => void steerFlush() : undefined}
-      />
     </ChatColumn>
   )
   const supportPanel = isSupportAgentId(activeSession.characterId) ? (
@@ -902,7 +961,7 @@ export function ChatPane({
       {activeSession?.platformBinding && (
         <PlatformConversationContext session={activeSession} showHeader={!showHeader} />
       )}
-      {runtimeNotice && <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>}
+      {runtimeNotice && !runtimeStrip && <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders
           nothing when the character resolves or the id is a plain Dexie
@@ -924,6 +983,14 @@ export function ChatPane({
       {activeSession.projectRole && activeSession.projectId ? (
         <ChatColumn className="mt-2">
           <ProjectPausedBanner projectId={activeSession.projectId} />
+        </ChatColumn>
+      ) : null}
+      {/* ADR-0213 — an open archived conversation says so and offers
+          Unarchive. Not for an imported subagent transcript (ADR-0062): it is
+          a read-only inner transcript, not a conversation in the list. */}
+      {activeSession.archivedAt != null && activeSession.kind !== "subagent" ? (
+        <ChatColumn className="mt-2">
+          <ArchivedConversationBanner session={activeSession} />
         </ChatColumn>
       ) : null}
       <ExternalAgentSessionPanel sessionId={activeSession.id} />
@@ -1062,8 +1129,8 @@ export function ChatPane({
                   <PlanApprovalDock
                     sessionId={boundId}
                     session={activeSession}
-                    onResume={resumeAfterPlanApproval}
-                    onSendPlanFeedback={onSendPlanFeedback ?? onSend}
+                    onResume={handleResumeAfterPlanApproval}
+                    onSendPlanFeedback={handleSendPlanFeedback}
                   />
                 </ChatColumn>
               )}

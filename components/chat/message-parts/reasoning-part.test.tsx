@@ -49,14 +49,25 @@ function renderRow({
 }
 
 describe("ReasoningToolRow", () => {
-  it("renders thinking as one activity-stream row with the THINK verb", () => {
+  it("renders thinking as one activity-stream row led by its own label", () => {
     renderRow()
     const row = screen.getByTestId("reasoning-row")
     expect(row).toHaveAttribute("data-kind", "reasoning")
-    // Done thinking → settled green dot, same as a finished tool call.
+    // Done thinking → settled, same as a finished tool call.
     expect(row).toHaveAttribute("data-status", "output-available")
-    expect(row).toHaveTextContent("verb.think")
     expect(row).toHaveTextContent("reasoning.completed")
+  })
+
+  it("draws no THINK verb or status dot before the label", () => {
+    // "Thought for N seconds" already says what the row is; a coloured THINK
+    // in front of it only repeated the word.
+    renderRow()
+    const row = screen.getByTestId("reasoning-row")
+    expect(row).not.toHaveTextContent("verb.think")
+    expect(row.querySelector("span.rounded-full")).toBeNull()
+    const toggle = screen.getByTestId("reasoning-row-toggle")
+    expect(toggle.firstElementChild?.tagName.toLowerCase()).toBe("svg")
+    expect(toggle.textContent).toBe("reasoning.completed")
   })
 
   it("expands and collapses like every other tool row", () => {
@@ -85,17 +96,23 @@ describe("ReasoningToolRow", () => {
 
   it("reports the settled duration once the wrapper has timed the turn", () => {
     // Streaming stops → the wrapper records a duration and the label switches
-    // to the pluralised "thought for N seconds" message.
+    // to the pluralised "thought for N seconds" message. The clock is pinned:
+    // with real time both renders can land in the same millisecond, which
+    // rounds to a 0s duration and keeps the streaming label (a flaky failure).
+    let now = 1_000_000
+    const clock = jest.spyOn(Date, "now").mockImplementation(() => now)
     const { rerender } = render(
       <Reasoning isStreaming defaultOpen closeOnFinish={false}>
         <ReasoningToolRow text="t" streamdownProps={{}} />
       </Reasoning>
     )
+    now += 3_000
     rerender(
       <Reasoning isStreaming={false} defaultOpen closeOnFinish={false}>
         <ReasoningToolRow text="t" streamdownProps={{}} />
       </Reasoning>
     )
+    clock.mockRestore()
     expect(screen.getByTestId("reasoning-row")).toHaveTextContent(
       /reasoning\.completedSeconds|reasoning\.completed/
     )

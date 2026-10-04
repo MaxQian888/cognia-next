@@ -31,6 +31,7 @@ import { PlatformConversationHeader } from "@/components/inbox/platform-conversa
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -297,11 +298,19 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
  * its own `primarySidebarToggle` segment there and the two would sit a few
  * pixels apart driving the same `sidebarCollapsed` field. The bar's copy wins
  * because it is the one that is always present, on every route.
+ *
+ * Only the expand half while the expanded rail's footer carries the collapse
+ * button (`useSidebarCollapseHost`): folding the column is done from the
+ * column, and once it is folded the footer is gone with it, so the way back is
+ * here.
  */
 function ConversationListToggle() {
   const tChannelList = useTranslations("desktop.channelList")
   const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
+  const footerCollapses = useShellColumnsStore((state) => state.sidebarHostsCollapse)
+
+  if (!sidebarCollapsed && footerCollapses) return null
 
   return (
     <Button

@@ -32,13 +32,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
-import {
-  Confirmation,
-  ConfirmationAction,
-  ConfirmationActions,
-  ConfirmationRequest,
-  ConfirmationTitle,
-} from "@/components/ai-elements/confirmation"
+import { cn } from "@/lib/utils"
 import { ToolDecisionContent } from "./tool-decision-content"
 import {
   ElicitationForm,
@@ -169,57 +163,114 @@ function ApprovalDecisionBody({
           </Button>
         </div>
       ) : actionable ? (
-        <Confirmation
-          approval={{ id: approval.requestId }}
-          className="w-full border-0 p-0"
-          state="approval-requested"
-        >
-          <ConfirmationRequest>
-            <ConfirmationTitle className="sr-only">{t("actionsTitle")}</ConfirmationTitle>
-            <ConfirmationActions className="w-full">
-              {approval.origin === "subagent" && approval.subagentRunId && onCancelRun && (
-                <ConfirmationAction
-                  variant="ghost"
-                  className="mr-auto text-destructive"
-                  onClick={() => onCancelRun(approval.subagentRunId!)}
-                >
-                  {t("cancelRun")}
-                </ConfirmationAction>
-              )}
-              {/* Deny only this tool call; the subagent run remains alive. */}
-              <ConfirmationAction
-                variant="ghost"
-                disabled={responding}
-                onClick={() => void respond("deny")}
-                autoFocus={approval.defaultToNo === true}
-                data-testid="decision-deny"
-              >
-                {t("deny")}
-              </ConfirmationAction>
-              {/* A per-call tool (ADR-0201) or a withheld grant never offers a
-                  standing rule. */}
-              {!approval.suppressAlwaysAllowRule && !approval.requiresPerCallApproval && (
-                <ConfirmationAction
-                  variant="secondary"
-                  disabled={responding}
-                  onClick={() => void respond("allow_always")}
-                  data-testid="decision-allow-always"
-                >
-                  {t("allowAlways")}
-                </ConfirmationAction>
-              )}
-              <ConfirmationAction
-                disabled={responding}
-                onClick={() => void respond("allow")}
-                data-testid="decision-allow"
-              >
-                {t("allowOnce")}
-              </ConfirmationAction>
-            </ConfirmationActions>
-          </ConfirmationRequest>
-        </Confirmation>
+        <ApprovalActions
+          approval={approval}
+          responding={responding}
+          onAllowOnce={() => void respond("allow")}
+          onAllowAlways={() => void respond("allow_always")}
+          onDeny={() => void respond("deny")}
+          onCancelRun={onCancelRun}
+        />
       ) : null}
     </>
+  )
+}
+
+/**
+ * Allow once / Allow always / Deny as one action group.
+ *
+ * These used to be three `ConfirmationAction`s in a single non-wrapping row
+ * with three different variants (ghost / secondary / default) and a caller
+ * `className` that replaced the shared height. On a ~376 px phone the
+ * translated labels did not fit and "始终允许" drew over "拒绝".
+ *
+ * Narrow widths stack: the primary answer full width, then the two secondary
+ * answers side by side in equal columns. From `sm` up it is one right-aligned
+ * row — Deny, Allow always, Allow once — with Cancel run pushed to the left.
+ * Every button shares the default height and radius; the hierarchy is carried
+ * by the variant alone: `default` for the primary answer, `outline` for both
+ * secondary ones, with Deny in the destructive tone.
+ *
+ * DOM order is primary-first (and that is the tab order); the visual order on
+ * wide screens comes from `flex-row-reverse`.
+ */
+function ApprovalActions({
+  approval,
+  responding,
+  onAllowOnce,
+  onAllowAlways,
+  onDeny,
+  onCancelRun,
+}: {
+  approval: PendingApproval
+  responding: boolean
+  onAllowOnce: () => void
+  onAllowAlways: () => void
+  onDeny: () => void
+  onCancelRun?: (runId: string) => void
+}) {
+  const t = useTranslations("chat.toolApproval")
+  // A per-call tool (ADR-0201) or a withheld grant never offers a standing rule.
+  const offerAlways = !approval.suppressAlwaysAllowRule && !approval.requiresPerCallApproval
+  const cancellableRunId =
+    approval.origin === "subagent" && onCancelRun ? approval.subagentRunId : undefined
+
+  return (
+    <div
+      role="group"
+      aria-label={t("actionsTitle")}
+      data-testid="decision-actions"
+      className="flex flex-col gap-2 sm:flex-row-reverse sm:flex-wrap sm:items-center"
+    >
+      <Button
+        disabled={responding}
+        onClick={onAllowOnce}
+        data-testid="decision-allow"
+        className="w-full sm:w-auto"
+      >
+        {t("allowOnce")}
+      </Button>
+      <div
+        data-testid="decision-secondary-actions"
+        className={cn(
+          "grid gap-2 sm:flex sm:flex-row-reverse",
+          offerAlways ? "grid-cols-2" : "grid-cols-1"
+        )}
+      >
+        {offerAlways && (
+          <Button
+            variant="outline"
+            disabled={responding}
+            onClick={onAllowAlways}
+            data-testid="decision-allow-always"
+            className="min-w-0 sm:w-auto"
+          >
+            <span className="min-w-0 truncate">{t("allowAlways")}</span>
+          </Button>
+        )}
+        {/* Deny only this tool call; the subagent run remains alive. */}
+        <Button
+          variant="outline"
+          disabled={responding}
+          onClick={onDeny}
+          autoFocus={approval.defaultToNo === true}
+          data-testid="decision-deny"
+          className="min-w-0 text-destructive hover:text-destructive sm:w-auto"
+        >
+          <span className="min-w-0 truncate">{t("deny")}</span>
+        </Button>
+      </div>
+      {cancellableRunId && (
+        <Button
+          variant="ghost"
+          onClick={() => onCancelRun?.(cancellableRunId)}
+          data-testid="decision-cancel-run"
+          className="w-full text-destructive hover:text-destructive sm:mr-auto sm:w-auto"
+        >
+          {t("cancelRun")}
+        </Button>
+      )}
+    </div>
   )
 }
 

@@ -200,6 +200,14 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
       onDragStart={(e) => setActiveDragId(String(e.active.id))}
       onDragCancel={() => setActiveDragId(null)}
       onDragEnd={onDragEnd}
+      // dnd-kit's screen-reader nodes (`DndDescribedBy`, `DndLiveRegion`) are
+      // the one part of `DndContext` that is NOT DOM-free: rendered inline they
+      // land in the bare chip flow, so its `:empty` never matched and every
+      // composer carried a dead padded row above the input. Portaling them to
+      // `body` keeps the flow honest; they mount only after hydration anyway.
+      accessibility={{
+        container: typeof document === "undefined" ? undefined : document.body,
+      }}
     >
       <SortableContext items={ordered.map((f) => f.id)} strategy={rectSortingStrategy}>
         <AnimatePresence initial={false}>

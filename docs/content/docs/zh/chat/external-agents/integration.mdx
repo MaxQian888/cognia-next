@@ -1,6 +1,6 @@
 ---
 title: 集成接缝
-description: 外部 Agent 运行时与 Cognia 其余部分的连接处—— 挑选内置 vs 外部的聊天路由咽喉点、插件 ctx.agent.runExternalAgent API 及其 agent:dispatch-external 权限、设置 UI、Rust 进程桥（spawn_external_agent + run_agent_hook），以及 localStorage 持久化 + 启动重水化。
+description: 外部 Agent 运行时与 Cognia 的集成方式，包括聊天路由、插件 ctx.agent.runExternalAgent API 及其 agent:dispatch-external 权限、设置 UI、Rust 进程桥（spawn_external_agent + run_agent_hook），以及 localStorage 持久化和启动时状态恢复。
 ---
 
 # 集成接缝
@@ -73,48 +73,28 @@ flowchart TB
 ## 1 · 聊天路由
 
 运行时由一个小 store `useAgentRuntimeStore` 选择，它持有 `runtime`（`"claude-sdk" | "external"`）与
-`externalAgentId`。UI 选择器是 `components/agent/mode/runtime-selector.tsx`（`AgentRuntimeSelector`）——
-同一个单选组里既有内置的 `claude-sdk` 运行时，也为每个已配置的外部 Agent 各出一行：选运行时与选
-Agent 记录是同一次点击。`getExternalAgentExecutionBlockReason(...)` 非空的行以禁用态渲染并给出原因；
-若恢复出来的选择已无法解析为可运行的 Agent，则回落到 `claude-sdk`，而不是把输入框停在一个没有可派发对象的
-外部运行时上。
+`externalAgentId`。UI 选择器是 `components/agent/mode/runtime-selector.tsx`（`AgentRuntimeSelector`）——同一个单选组里既有内置的 `claude-sdk` 运行时，也为每个已配置的外部 Agent 各出一行：选运行时与选 Agent 记录是同一次点击。`getExternalAgentExecutionBlockReason(...)` 非空的行以禁用态渲染并给出原因；若恢复出来的选择已无法解析为可运行的 Agent，则回落到 `claude-sdk`，而不是把输入框停在一个没有可派发对象的外部运行时上。
 
-每一行还会带上"上一次真正接触该 Agent 时的结果"，取自 `agentValidity[id]`（由 `useExternalAgent` 在
-连接 / 健康检查 / 执行时写入）：启动失败原样展示运行时给出的 `blockingReason`，待登录与健康探测异常则给出
-本地化提示。它们是历史而非判决——一小时前找不到的二进制现在可能已经装上了——所以与配置级阻断不同，它们只警告、
-不禁用该行。
+每一行还会带上"上一次真正接触该 Agent 时的结果"，取自 `agentValidity[id]`（由 `useExternalAgent` 在连接 / 健康检查 / 执行时写入）：启动失败原样展示运行时给出的 `blockingReason`，待登录与健康探测异常则给出本地化提示。它们是历史而非判决——一小时前找不到的二进制现在可能已经装上了——所以与配置级阻断不同，它们只警告、不禁用该行。
 
-**"当前是哪个 Agent"存在两个 store，且互不派生**：聊天派发读 `useAgentRuntimeStore.externalAgentId`，
-而管理器、`useExternalAgent`、Agent Team 工作区读 `useExternalAgentStore.activeAgentId`。所有写入都经过
-`lib/agent/external-agent-selection.ts`（`selectExternalAgent` / `clearExternalAgentSelectionIfActive`），
-两者因此不可能不一致——在此之前，在管理器里选一个 Agent 对聊天实际派发到哪里毫无影响。选择 Agent **不会**
-切换运行时车道，只有输入框上的运行时 chip 会。
+**"当前是哪个 Agent"存在两个 store，且互不派生**：聊天派发读 `useAgentRuntimeStore.externalAgentId`，而管理器、`useExternalAgent`、Agent Team 工作区读 `useExternalAgentStore.activeAgentId`。所有写入都经过 `lib/agent/external-agent-selection.ts`（`selectExternalAgent` / `clearExternalAgentSelectionIfActive`），两者因此不可能不一致——在此之前，在管理器里选一个 Agent 对聊天实际派发到哪里毫无影响。选择 Agent **不会**切换运行时车道，只有输入框上的运行时 chip 会。
 
 真正的派发在 `hooks/chat/use-claude-chat.ts`——**而非** `use-team-chat.ts`：
 
 1. `const agentRuntime = useAgentRuntimeStore.getState().runtime`（`:744`）。
 2. `if (agentRuntime === "external")`（`:745`）→ 读 `externalAgentId`（`:746`）。
 3. 动态导入 `executeOnExternalAgent`（`:762`）与 `applyExternalAgentEventToParts`（`:763`）。
-4. `await executeOnExternalAgent(effectiveText, { agentId, onEvent })`（`:782`）——事件经 `onEvent`（`:784`）
-   流式写入一条预分配的 assistant 消息，每个都被 [翻译层](./translation) 折叠进 parts。
+4. `await executeOnExternalAgent(effectiveText, { agentId, onEvent })`（`:782`）——事件经 `onEvent`（`:784`）流式写入一条预分配的 assistant 消息，每个都被 [翻译层](./translation) 折叠进 parts。
 
-`chat-view.tsx` 只挂载 `<ExternalAgentSessionPanel />`（`:239`），它自门控于 `runtime === "external"`。
-`components/agent/external-agent/` 文件夹持有管理 UI（`manager.tsx`）、ACP 专用的 `tool-approval-dialog.tsx`、
-`selector.tsx`、`session-panel.tsx`，以及 `commands`/`config-options`/`plan`/状态徽章。React 胶水住在
-`hooks/agent/use-external-agent.ts`——`execute`（`:995`）→ `manager.execute`（`:1039`）、`executeStreaming`
-（`:1088`）→ `manager.executeStreaming`（`:1117`）。
+`chat-view.tsx` 只挂载 `<ExternalAgentSessionPanel />`（`:239`），它自门控于 `runtime === "external"`。`components/agent/external-agent/` 文件夹持有管理 UI（`manager.tsx`）、ACP 专用的 `tool-approval-dialog.tsx`、`selector.tsx`、`session-panel.tsx`，以及 `commands`/`config-options`/`plan`/状态徽章。React 胶水住在 `hooks/agent/use-external-agent.ts`——`execute`（`:995`）→ `manager.execute`（`:1039`）、`executeStreaming`（`:1088`）→ `manager.executeStreaming`（`:1117`）。
 
 ### Agent Team 派发
 
-Team 对话走另一条路：`app/agent-teams/workspace/page.tsx` 从 `useExternalAgent()`（`:97`）解构出
-`executeStreaming` 并喂进 `createCompositeStreamer({ external: … })`（`:137`），按 `@提及` 经
-`dispatchTeamMention`（`:154`）派发。这就是外部 Agent 成为 team 成员的方式——其结果由
-[translators](./translation) 转成一个 `SubAgentResult`。
+Team 对话走另一条路：`app/agent-teams/workspace/page.tsx` 从 `useExternalAgent()`（`:97`）解构出 `executeStreaming` 并喂进 `createCompositeStreamer({ external: … })`（`:137`），按 `@提及` 经 `dispatchTeamMention`（`:154`）派发。这就是外部 Agent 成为 team 成员的方式——其结果由 [translators](./translation) 转成一个 `SubAgentResult`。
 
 ## 2 · 插件 API
 
-插件经 `ctx.agent.runExternalAgent` 派发到外部 Agent——仅桌面，定义在 `lib/plugin/core/context.ts`
-（`:662`）：
+插件经 `ctx.agent.runExternalAgent` 派发到外部 Agent——仅桌面，定义在 `lib/plugin/core/context.ts`（`:662`）：
 
 ```mermaid
 flowchart LR
@@ -144,62 +124,35 @@ flowchart LR
 | 类型面（`PluginAgentAPI.runExternalAgent`） | `types/plugin/plugin.ts` | 1825 |
 | Rust 对等（lint 镜像） | `crates/cognia-cli/src/cmd_lint.rs` | 43 |
 
-插件也能经 `externalAgentPresets` manifest 字段（`types/plugin/plugin.ts:564`）/
-`ctx.registerExternalAgentPreset`（`:1845`）**贡献预设**，由 `"external-agent-preset"` 叠加能力桥接
-（`lib/plugin/contracts/capability-bridge-map.ts:210`）。见 [生态与预设](./ecosystem-presets)。
+插件也能经 `externalAgentPresets` manifest 字段（`types/plugin/plugin.ts:564`）/`ctx.registerExternalAgentPreset`（`:1845`）**贡献预设**，由 `"external-agent-preset"` 叠加能力桥接（`lib/plugin/contracts/capability-bridge-map.ts:210`）。见 [生态与预设](./ecosystem-presets)。
 
 ### 贡献新协议（`external-agent-adapter` 能力）
 
-预设只配置**如何启动**一个说四种内置协议（`acp` / `codex-app-server` / `opencode` / `a2a`）之一的
-Agent。要接入说**全新协议**的 Agent，插件需贡献一个*协议适配器*——预设的「针对性行为」孪生：
+预设只配置**如何启动**一个说四种内置协议（`acp` / `codex-app-server` / `opencode` / `a2a`）之一的 Agent。要接入说**全新协议**的 Agent，插件需贡献一个*协议适配器*——预设的「针对性行为」孪生：
 
-- 在 manifest 声明 `externalAgentAdapters: [{ id, label, entry, export }]`（或在 activate 时调用
-  `ctx.agent.registerExternalAgentAdapter(id, factory)`）。`entry`/`export` 指向一个导出
-  `() => ProtocolAdapter` 工厂的渲染端模块。
-- 启用时，**external-agent-adapters 桥**（`lib/plugin/bridge/external-agent-adapters-bridge.ts`）懒导入
-  该工厂并以命名空间协议 `${pluginId}:${id}` 注册进外部 Agent 的 `protocolAdapterRegistry`——故永不与内置或其他
-  插件冲突；禁用时移除。
-- 配套预设引用该命名空间协议，于是贡献的 Agent 出现在快速开始画廊，连接方式与内置完全一致
-  （`addAgent` → `protocolAdapterRegistry.create` 不区分来源）。`getExternalAgentExecutionBlock` 感知注册表，
-  故仅在提供它的插件启用时该 Agent 可执行，否则给出清晰的「请启用插件」原因。
+- 在 manifest 声明 `externalAgentAdapters: [{ id, label, entry, export }]`（或在 activate 时调用 `ctx.agent.registerExternalAgentAdapter(id, factory)`）。`entry`/`export` 指向一个导出 `() => ProtocolAdapter` 工厂的渲染端模块。
+- 启用时，**external-agent-adapters 桥**（`lib/plugin/bridge/external-agent-adapters-bridge.ts`）懒导入该工厂并以命名空间协议 `${pluginId}:${id}` 注册进外部 Agent 的 `protocolAdapterRegistry`——故永不与内置或其他插件冲突；禁用时移除。
+- 配套预设引用该命名空间协议，于是贡献的 Agent 出现在快速开始画廊，连接方式与内置完全一致（`addAgent` → `protocolAdapterRegistry.create` 不区分来源）。`getExternalAgentExecutionBlock` 感知注册表，故仅在提供它的插件启用时该 Agent 可执行，否则给出清晰的「请启用插件」原因。
 - 通用且已加固的 **Rust 进程层**仍负责子进程拉起（见 §4）；贡献的适配器只驱动渲染端协议/会话逻辑——绝不直接拉起进程。
 
-参考插件：`plugins/external-agent-adapter-example/`（适配器 + 配套预设，端到端）。
-见 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
+参考插件：`plugins/external-agent-adapter-example/`（适配器 + 配套预设，端到端）。见 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
 
 ## 3 · 设置 UI
 
-设置导航定义区段 id `"agents"`（`settings-nav-config.ts:158`），搜索关键词 `external`、`external agent`
-（`:557`）。`settings-shell.tsx` 惰性加载 `ExternalAgentSettings`（`:123`），并为 `case "agents"`（`:330`）
-渲染它；相关的 `agent-runtime` 区段（`:333`）承载运行时选择器。卡片组件是
-`components/settings/agent/external-agent-settings.tsx`。
+设置导航定义区段 id `"agents"`（`settings-nav-config.ts:158`），搜索关键词 `external`、`external agent`（`:557`）。`settings-shell.tsx` 惰性加载 `ExternalAgentSettings`（`:123`），并为 `case "agents"`（`:330`）渲染它；相关的 `agent-runtime` 区段（`:333`）承载运行时选择器。卡片组件是 `components/settings/agent/external-agent-settings.tsx`。
 
 ## 4 · Rust 进程桥
 
 外部 Agent 仅在 Tauri 桌面壳执行。有**两个** Rust 面：
 
-- **进程桥** —— `src-tauri/src/external_agent/`（`mod` 在 `lib.rs:14`），一个不解析任何东西的纯 stdio
-  透传。`spawn_external_agent`（`commands.rs`）启动 CLI；`send_to_external_agent`、`kill_external_agent`
-  驱动它。stdout/stderr/exit 经 `ExternalAgentEventSink` **事件驱动**转发（每进程 reader + supervisor 任务
-  发出 `external-agent://{stdout,stderr,exit,state-change}`——没有轮询循环，也没有 `receive_*` 拉取命令）。
-  spawn 先把程序名按 PATH × `PATHEXT` 解析（`command_resolver.rs`），使以 Windows `.cmd`/`.bat` 垫片形式
-  存在的裸预设命令（`npx`、`opencode`、`cursor-agent`）真正能启动——且 `check_command_exists`（就绪探针）
-  共用该解析器，故被判 `executable` 的预设必然能 spawn。ACP 终端子协议（`acp_terminal_create`、`_output`、
-  `_kill`、`_write`…）支撑 [ACP 客户端的终端处理器](./acp-client)。app 退出时两个管理器的 `kill_all()` 在
-  `RunEvent::Exit` 处理器（`lib.rs`）中运行，使自动拉起的服务器与终端不会变成孤儿。
-- **Hook 运行时** —— `crates/cognia-hooks/src/commands.rs`：`run_agent_hook`（`:55`，登记于 `lib.rs:308`）为一个
-  外部 Agent 生命周期事件运行一个 settings.json hook（工具或会话作用域），`set_trusted_workspaces`（`:102`）
-  是 project/local 信任闸门。TS 调用方是 [`agent-hooks.ts:54`](./observability-hooks)。
+- **进程桥** —— `src-tauri/src/external_agent/`（`mod` 在 `lib.rs:14`），一个不解析任何东西的纯 stdio 透传。`spawn_external_agent`（`commands.rs`）启动 CLI；`send_to_external_agent`、`kill_external_agent` 驱动它。stdout/stderr/exit 经 `ExternalAgentEventSink` **事件驱动**转发（每进程 reader + supervisor 任务发出 `external-agent://{stdout,stderr,exit,state-change}`——没有轮询循环，也没有 `receive_*` 拉取命令）。spawn 先把程序名按 PATH × `PATHEXT` 解析（`command_resolver.rs`），使以 Windows `.cmd`/`.bat` 垫片形式存在的裸预设命令（`npx`、`opencode`、`cursor-agent`）真正能启动——且 `check_command_exists`（就绪探针）共用该解析器，故被判 `executable` 的预设必然能 spawn。ACP 终端子协议（`acp_terminal_create`、`_output`、`_kill`、`_write`…）支撑 [ACP 客户端的终端处理器](./acp-client)。app 退出时两个管理器的 `kill_all()` 在 `RunEvent::Exit` 处理器（`lib.rs`）中运行，使自动拉起的服务器与终端不会变成孤儿。
+- **Hook 运行时** —— `crates/cognia-hooks/src/commands.rs`：`run_agent_hook`（`:55`，登记于 `lib.rs:308`）为一个外部 Agent 生命周期事件运行一个 settings.json hook（工具或会话作用域），`set_trusted_workspaces`（`:102`）是 project/local 信任闸门。TS 调用方是 [`agent-hooks.ts:54`](./observability-hooks)。
 
-这种分工是有意的：因为 `external_agent` 仅 stdio 且不解析任何协议，**TypeScript 拥有全部 ACP/OpenCode 解析**
-——Rust 只搬字节（`commands.rs:5` 的注释）。
+这种分工是有意的：因为 `external_agent` 仅 stdio 且不解析任何协议，**TypeScript 拥有全部 ACP/OpenCode 解析**——Rust 只搬字节（`commands.rs:5` 的注释）。
 
 ## 5 · 持久化
 
-配置持久化到 **`localStorage`，而非 Dexie**——Zustand store `stores/agent/external-agent-store/store.ts`
-用 `persist`（`:84`），键 `cognia-external-agents`（`:90`），带一个 `migrate` 函数（`:93`）。启动时，
-`components/providers/initializers/external-agent-initializer.tsx` 读 `store.getAllAgents()`（`:25`）并把
-每个重新加入运行时 Manager（`:24`），遵循 `autoConnectOnStartup`（`:68`）。
+配置持久化到 **`localStorage`，而非 Dexie**——Zustand store `stores/agent/external-agent-store/store.ts` 用 `persist`（`:84`），键 `cognia-external-agents`（`:90`），带一个 `migrate` 函数（`:93`）。启动时，`components/providers/initializers/external-agent-initializer.tsx` 读 `store.getAllAgents()`（`:25`）并把每个重新加入运行时 Manager（`:24`），遵循 `autoConnectOnStartup`（`:68`）。
 
 **会话不被持久化**——它们在内存中住在 `instance.sessions`，而 ACP `session/list|fork|resume` 是回到活进程
 的扩展 RPC，而非本地存储。这就是为什么重启会重新拉起 Agent，而非恢复一份记录。

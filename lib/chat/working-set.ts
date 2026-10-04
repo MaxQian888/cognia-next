@@ -60,7 +60,7 @@ export type WorkingSetMutation =
       now?: number
     }
 
-function emptyWorkingSet(): SessionWorkingSetV1 {
+export function emptyWorkingSet(): SessionWorkingSetV1 {
   return {
     contractVersion: SESSION_WORKING_SET_CONTRACT_VERSION,
     revision: 0,
@@ -133,9 +133,11 @@ export async function readSessionWorkingSet(sessionId: string): Promise<SessionW
 export async function mutateSessionWorkingSet(
   mutation: WorkingSetMutation
 ): Promise<SessionWorkingSetV1> {
+  // Load the existing pure branch selector before entering the IDB transaction.
+  const { selectVisibleMessages } = await import("@/stores/chat/chat-store")
   return withDbReopenRetry(async () => {
     const db = getDb()
-    return db.transaction("rw", db.sessions, async () => {
+    return db.transaction("rw", db.sessions, db.messages, async () => {
       const session = await db.sessions.get(mutation.sessionId)
       if (!session) throw new Error(`Unknown chat session: ${mutation.sessionId}`)
       assertSessionWritable(session, "metadata")
@@ -188,6 +190,20 @@ export async function mutateSessionWorkingSet(
       assertBounded(next)
       assertSafeWorkingSet(next)
       await db.sessions.update(mutation.sessionId, { workingSet: next, updatedAt: now })
+      const history = db.messages
+        .where("[sessionId+createdAt]")
+        .between([mutation.sessionId, 0], [mutation.sessionId, Number.MAX_SAFE_INTEGER])
+      const latest = await history.clone().last()
+      // An unowned, ungrouped tail is always visible. Only branched tails need
+      // the complete ancestry walk; ordinary tool updates read one message.
+      const needsBranchSelection =
+        latest &&
+        (typeof latest.metadata?.branchGroupId === "string" ||
+          typeof latest.metadata?.branchOwnerId === "string")
+      const boundary = needsBranchSelection
+        ? selectVisibleMessages(await history.toArray(), session.activeBranchByGroup ?? {}).at(-1)
+        : latest
+      if (boundary) await db.messages.update(boundary.id, { workingSetSnapshot: next })
       return next
     })
   })

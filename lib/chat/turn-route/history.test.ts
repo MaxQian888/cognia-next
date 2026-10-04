@@ -1,8 +1,10 @@
 import type { UIMessage } from "ai"
 import type { SendContent } from "@cognia/agent-config-types"
 import {
+  externalLaneMemory,
   foreignTurnsHandoffText,
   laneMemoryOf,
+  sameLaneMemory,
   prefixForeignTurnsContext,
   unseenForeignTurns,
   withForeignTurnsContext,
@@ -17,6 +19,14 @@ function reply(id: string, providerId?: string): UIMessage {
     role: "assistant",
     parts: [{ type: "text", text: id }],
     ...(providerId ? { metadata: { run: { providerId } } } : {}),
+  }
+}
+function routed(id: string, agentId: string, route: string): UIMessage {
+  return {
+    id,
+    role: "assistant",
+    parts: [{ type: "text", text: id }],
+    metadata: { run: { providerId: "external", externalAgent: { agentId, route } } },
   }
 }
 const system: UIMessage = { id: "sys", role: "system", parts: [{ type: "text", text: "s" }] }
@@ -172,6 +182,21 @@ describe("foreignTurnsHandoffText", () => {
     expect(handoff.prepare).toHaveBeenCalledWith([user("u")], { client: llm, signal })
   })
 
+  it("carries imported task state into the projection and the summary", async () => {
+    handoff.build.mockReturnValue({
+      text: "HEAD+TAIL",
+      losses: [{ kind: "budget", messageId: "u", detail: "" }],
+      omittedMessageIds: ["u"],
+    })
+    handoff.prepare.mockRejectedValue(new Error("handoff_context_summary_unavailable:no-client"))
+    const state = { tasks: [{ id: "t1" }] }
+    await expect(
+      foreignTurnsHandoffText([user("u")], { client: async () => null, state })
+    ).resolves.toBe("HEAD+TAIL")
+    expect(handoff.build).toHaveBeenCalledWith([user("u")], { state })
+    expect(handoff.prepare).toHaveBeenCalledWith([user("u")], { state, client: null })
+  })
+
   it.each(["no-client", "no-output"])(
     "keeps the honest head/tail projection when the summary is unavailable (%s)",
     async (reason) => {
@@ -209,5 +234,55 @@ describe("foreignTurnsHandoffText", () => {
     await expect(
       foreignTurnsHandoffText([user("u")], { client: async () => ({}) as never })
     ).rejects.toThrow("upstream 500")
+  })
+})
+
+describe("per-route external memory", () => {
+  const native = externalLaneMemory("kimi", "native")
+  const task = externalLaneMemory("kimi", "cognia:task-1")
+
+  it("reads an agent and route off a stamped reply", () => {
+    expect(laneMemoryOf(routed("a", "kimi", "native"))).toBe(native)
+    expect(laneMemoryOf(routed("a", "kimi", "cognia:task-1"))).toBe(task)
+  })
+
+  it("treats an unstamped external reply as seen by any external lane, never builtin", () => {
+    expect(sameLaneMemory("external", task)).toBe(true)
+    expect(sameLaneMemory(native, "external")).toBe(true)
+    expect(sameLaneMemory(native, task)).toBe(false)
+    expect(sameLaneMemory("external", "builtin")).toBe(false)
+    expect(sameLaneMemory("builtin", "builtin")).toBe(true)
+  })
+
+  it("hands a native session resumed after Cognia turns what the Cognia task said", () => {
+    const history = [
+      user("u1"),
+      routed("a1", "kimi", "native"),
+      user("u2"),
+      routed("a2", "kimi", "cognia:task-1"),
+    ]
+    expect(unseenForeignTurns(history, native).map((m) => m.id)).toEqual(["u2", "a2"])
+    expect(unseenForeignTurns(history, task)).toEqual([])
+  })
+
+  it("hands a resumed Cognia task what the native session and other agents said", () => {
+    const history = [
+      user("u1"),
+      routed("a1", "kimi", "cognia:task-1"),
+      user("u2"),
+      routed("a2", "kimi", "native"),
+      user("u3"),
+      routed("a3", "codex", "native"),
+      user("u4"),
+      reply("a4", "anthropic"),
+    ]
+    expect(unseenForeignTurns(history, task).map((m) => m.id)).toEqual([
+      "u2",
+      "a2",
+      "u3",
+      "a3",
+      "u4",
+      "a4",
+    ])
   })
 })

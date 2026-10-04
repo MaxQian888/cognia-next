@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { render as rtlRender, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { createRef } from "react"
 
@@ -104,7 +105,7 @@ function props(overrides: Partial<ComposerBoxProps> = {}): ComposerBoxProps {
     onDragOver: jest.fn(),
     onDragLeave: jest.fn(),
     onDrop: jest.fn(),
-    sendButton: { mode: "send", disabled: false, variant: "default", queues: false },
+    sendButton: { mode: "send", disabled: false, variant: "default", followUp: null },
     sendIconTransition: { duration: 0 },
     isPreparingAttachments: false,
     submit: jest.fn(),
@@ -134,6 +135,15 @@ describe("ComposerBox — arrangement", () => {
     render(<ComposerBox {...props({ disabled: true, placeholder: "Ask anything" })} />)
     const ta = screen.getByPlaceholderText("placeholderDisabled")
     expect(ta).toBeDisabled()
+  })
+
+  it("names why sends are off when the host gives a disabled placeholder", () => {
+    render(
+      <ComposerBox
+        {...props({ disabled: true, disabledPlaceholder: "Sends resume when the host is back" })}
+      />
+    )
+    expect(screen.getByPlaceholderText("Sends resume when the host is back")).toBeDisabled()
   })
 
   it("marks the layout so the stacked and single-row forms are distinguishable", () => {
@@ -234,7 +244,7 @@ describe("ComposerBox — send button", () => {
           submit,
           onReviewDrafts,
           pendingDraftCount: 2,
-          sendButton: { mode: "draft", disabled: false, variant: "secondary", queues: false },
+          sendButton: { mode: "draft", disabled: false, variant: "secondary", followUp: null },
         })}
       />
     )
@@ -251,7 +261,7 @@ describe("ComposerBox — send button", () => {
     render(
       <ComposerBox
         {...props({
-          sendButton: { mode: "draft", disabled: false, variant: "secondary", queues: false },
+          sendButton: { mode: "draft", disabled: false, variant: "secondary", followUp: null },
         })}
       />
     )
@@ -266,7 +276,7 @@ describe("ComposerBox — send button", () => {
         {...props({
           submit,
           onStop,
-          sendButton: { mode: "stop", disabled: false, variant: "default", queues: false },
+          sendButton: { mode: "stop", disabled: false, variant: "default", followUp: null },
         })}
       />
     )
@@ -275,12 +285,93 @@ describe("ComposerBox — send button", () => {
     expect(submit).not.toHaveBeenCalled()
   })
 
+  it("keeps Stop in the primary slot and offers a typed follow-up beside it", () => {
+    const submit = jest.fn()
+    const onStop = jest.fn()
+    render(
+      <ComposerBox
+        {...props({
+          submit,
+          onStop,
+          sendButton: {
+            mode: "stop",
+            disabled: false,
+            variant: "default",
+            followUp: { disabled: false, busy: false },
+          },
+        })}
+      />
+    )
+    const stop = screen.getByTestId("composer-stop")
+    const followUp = screen.getByTestId("composer-send-follow-up")
+    expect(stop).toHaveAccessibleName("ariaStop")
+    expect(followUp).toHaveAccessibleName("ariaSendSteer")
+    // Same footprint as the button it stands beside, so the pair reads as one
+    // cluster rather than a primary and a stray chip.
+    for (const shape of ["size-9", "rounded-full"]) {
+      expect(stop).toHaveClass(shape)
+      expect(followUp).toHaveClass(shape)
+    }
+    // Follow-up first, Stop last: Stop keeps the place Send occupies.
+    expect(stop.compareDocumentPosition(followUp) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+
+    followUp.click()
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(onStop).not.toHaveBeenCalled()
+    stop.click()
+    expect(onStop).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows the follow-up as busy, never Stop, while it is being dispatched", () => {
+    render(
+      <ComposerBox
+        {...props({
+          sendButton: {
+            mode: "stop",
+            disabled: false,
+            variant: "default",
+            followUp: { disabled: true, busy: true },
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("composer-send-follow-up")).toBeDisabled()
+    expect(screen.getByTestId("composer-send-follow-up")).toHaveAccessibleName("ariaSending")
+    expect(screen.getByTestId("composer-stop")).toBeEnabled()
+  })
+
+  it.each([
+    [false, "stopTooltipKeyboard"],
+    [true, "stopTooltip"],
+  ])(
+    "names the Esc key on the Stop tooltip only with a keyboard (touch: %s)",
+    async (touchInput, key) => {
+      const user = userEvent.setup()
+      render(
+        <ComposerBox
+          {...props({
+            touchInput,
+            sendButton: { mode: "stop", disabled: false, variant: "default", followUp: null },
+          })}
+        />
+      )
+      await user.hover(screen.getByTestId("composer-stop"))
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(key)
+    }
+  )
+
+  it("offers no follow-up control while idle", () => {
+    render(<ComposerBox {...props()} />)
+    expect(screen.queryByTestId("composer-send-follow-up")).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-send")).toHaveAccessibleName("ariaSend")
+  })
+
   it("announces attachment preparation rather than a generic busy state", () => {
     render(
       <ComposerBox
         {...props({
           isPreparingAttachments: true,
-          sendButton: { mode: "busy", disabled: true, variant: "default", queues: false },
+          sendButton: { mode: "busy", disabled: true, variant: "default", followUp: null },
         })}
       />
     )
@@ -292,7 +383,7 @@ describe("ComposerBox — send button", () => {
       <ComposerBox
         {...props({
           onReviewDrafts: jest.fn(),
-          sendButton: { mode: "draft", disabled: false, variant: "default", queues: false },
+          sendButton: { mode: "draft", disabled: false, variant: "default", followUp: null },
         })}
       />
     )

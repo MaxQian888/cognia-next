@@ -14,8 +14,16 @@ import type { WorkspaceEntry } from "@/lib/files/types"
 import { useEntityMentionSearch } from "@/hooks/chat/use-entity-mention-search"
 import { buildRouteTargets } from "@/lib/agent-team/runtime-targets"
 import type { RouteOption } from "@/hooks/chat/use-route-targets"
+import { resolveComposerPopoverBoundary } from "./composer/composer-popover-boundary"
 
 jest.mock("@/hooks/chat/use-entity-mention-search", () => ({ useEntityMentionSearch: jest.fn() }))
+jest.mock("./composer/composer-popover-boundary", () => {
+  const actual = jest.requireActual("./composer/composer-popover-boundary")
+  return {
+    ...actual,
+    resolveComposerPopoverBoundary: jest.fn(actual.resolveComposerPopoverBoundary),
+  }
+})
 
 jest.mock("@/lib/files/workspace-search", () => ({
   isWorkspaceSearchReachable: jest.fn(() => false),
@@ -506,6 +514,29 @@ describe("ComposerPopover — slash fuzzy ranking", () => {
     const content = screen.getByRole("dialog")
     expect(content.className).toContain("var(--radix-popper-anchor-width)")
     expect(content.className).not.toContain("max-w-[480px]")
+  })
+
+  it("caps itself to the room Radix measured above the composer and scrolls the list inside", () => {
+    // With the keyboard open the space above the composer is short; the panel
+    // used to keep its natural height and run over the header.
+    setup(slashTrigger(""))
+    const content = screen.getByRole("dialog")
+    expect(content.className).toContain("max-h-[var(--radix-popover-content-available-height)]")
+    expect(content.className).toContain("flex-col")
+    const list = screen.getAllByRole("listitem")[0].closest("ul") as HTMLElement
+    expect(list.className).toContain("overflow-y-auto")
+    expect(list.className).toContain("min-h-14")
+    // The multi-command tip collapses whole when the cap gets short.
+    const tip = content.querySelector("[data-slot='composer-popover-tip']") as HTMLElement
+    expect(tip.className).toContain("max-h-[calc((var(--radix-popover-content-available-height")
+    expect(tip.className).toContain("overflow-hidden")
+  })
+
+  it("bounds itself by the composer's clipping ancestor, resolved from the anchor", () => {
+    const resolve = resolveComposerPopoverBoundary as jest.Mock
+    resolve.mockClear()
+    setup(slashTrigger(""))
+    expect(resolve).toHaveBeenCalledWith(expect.any(HTMLElement))
   })
 
   it("offers a dedicated search that matches command descriptions", async () => {

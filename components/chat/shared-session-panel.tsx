@@ -69,6 +69,20 @@ const ROLES: SessionRole[] = ["viewer", "member", "maintainer", "owner"]
 
 interface Props {
   session: ChatSession
+  /**
+   * Open the sheet from outside (controlled). With `open` given, the panel's
+   * own state steps aside and `onOpenChange` hears every change — the phone's
+   * ⋮ menu opens it that way, so a private conversation does not need a row of
+   * chrome for one lock button.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /**
+   * `inline` (default): the status badge, Request AI and the lock / users
+   * trigger render where the panel is mounted. `none`: only the sheet — the
+   * caller owns the way in.
+   */
+  trigger?: "inline" | "none"
 }
 
 interface HistorySummary {
@@ -76,11 +90,25 @@ interface HistorySummary {
   attachments: number
 }
 
-export function SharedSessionPanel({ session }: Props) {
+export function SharedSessionPanel({
+  session,
+  open: openProp,
+  onOpenChange,
+  trigger = "inline",
+}: Props) {
   const t = useTranslations("chatCollaboration")
   const [loadedAt, setLoadedAt] = useState(0)
   const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine)
-  const [open, setOpen] = useState(false)
+  const [innerOpen, setInnerOpen] = useState(false)
+  const open = openProp ?? innerOpen
+  const onOpenChangeRef = useRef(onOpenChange)
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange
+  })
+  const setOpen = useCallback((next: boolean) => {
+    setInnerOpen(next)
+    onOpenChangeRef.current?.(next)
+  }, [])
   const [loading, setLoading] = useState(false)
   const [context, setContext] = useState<CurrentCollabContext | null>(null)
   const [remote, setRemote] = useState<SharedSession | null>(null)
@@ -483,16 +511,24 @@ export function SharedSessionPanel({ session }: Props) {
 
   const isShared = Boolean(session.collaboration)
   const featureEnabled = useSharedChatEnabled()
+  // Every opening loads, whoever opened it — the inline trigger, or a caller
+  // holding `open` (the phone's ⋮ menu), whose change never passes through the
+  // Sheet's own `onOpenChange`.
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    const opened = open && featureEnabled && !wasOpenRef.current
+    wasOpenRef.current = open && featureEnabled
+    if (opened) void loadRef.current()
+  }, [open, featureEnabled])
   return (
     <Sheet
-      open={open}
+      open={open && featureEnabled}
       onOpenChange={(nextOpen) => {
         if (!featureEnabled) return
         setOpen(nextOpen)
-        if (nextOpen) void load()
       }}
     >
-      {isShared && featureEnabled ? (
+      {trigger === "inline" && isShared && featureEnabled ? (
         <>
           <Badge variant={online && syncState?.connected ? "secondary" : "outline"} role="status">
             {online && syncState?.connected ? t("connected") : t("connectionStale")}
@@ -507,8 +543,9 @@ export function SharedSessionPanel({ session }: Props) {
           </Button>
         </>
       ) : null}
-      <SheetTrigger asChild>
-        {/* Icon-only. This trigger sits in the conversation header, which on
+      {trigger === "inline" ? (
+        <SheetTrigger asChild>
+          {/* Icon-only. This trigger sits in the conversation header, which on
             desktop is projected into the title bar next to the workspace pill
             and the route history — and it was the one control there carrying a
             permanent text label. In the default state that label is the word
@@ -517,23 +554,24 @@ export function SharedSessionPanel({ session }: Props) {
             of chrome was also its least informative. The lock / users icon
             already carries the state; the words moved to `title`, which is
             where every other control in that row keeps them. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 shrink-0 text-muted-foreground"
-          disabled={!featureEnabled}
-          title={featureEnabled ? (isShared ? t("shared") : t("private")) : t("featureDisabled")}
-          aria-label={
-            featureEnabled
-              ? isShared
-                ? t("openSharedSession")
-                : t("openPrivateSession")
-              : t("featureDisabled")
-          }
-        >
-          {isShared ? <UsersIcon className="size-3.5" /> : <LockIcon className="size-3.5" />}
-        </Button>
-      </SheetTrigger>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0 text-muted-foreground"
+            disabled={!featureEnabled}
+            title={featureEnabled ? (isShared ? t("shared") : t("private")) : t("featureDisabled")}
+            aria-label={
+              featureEnabled
+                ? isShared
+                  ? t("openSharedSession")
+                  : t("openPrivateSession")
+                : t("featureDisabled")
+            }
+          >
+            {isShared ? <UsersIcon className="size-3.5" /> : <LockIcon className="size-3.5" />}
+          </Button>
+        </SheetTrigger>
+      ) : null}
       <SheetContent className="sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{isShared ? t("sharedTitle") : t("privateTitle")}</SheetTitle>

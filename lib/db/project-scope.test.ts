@@ -120,6 +120,33 @@ describe("project-scope helper", () => {
   })
 
   describe("deleteProjectCascade", () => {
+    it("cleans the gateway tasks a conversation retained across model switches", async () => {
+      const db = getDb()
+      mockDeleteExternalSession.mockClear()
+      await db.sessions.put({
+        id: "switched-chat",
+        projectId: "A",
+        title: "Switched",
+        createdAt: 1,
+        updatedAt: 1,
+        externalAgentSession: { agentId: "agent", sessionId: "cognia-gateway:task-b:native" },
+        externalAgentGatewaySessions: [
+          { agentId: "agent", sessionId: "cognia-gateway:task-a:native" },
+          { agentId: "agent", sessionId: "cognia-gateway:task-b:native" },
+        ],
+      } as never)
+      await deleteProjectCascade("A")
+      expect(mockDeleteExternalSession).toHaveBeenCalledWith(
+        "agent",
+        "cognia-gateway:task-a:native"
+      )
+      expect(mockDeleteExternalSession).toHaveBeenCalledWith(
+        "agent",
+        "cognia-gateway:task-b:native"
+      )
+      expect(await db.sessions.get("switched-chat")).toBeUndefined()
+    })
+
     it("cleans chat and Squad gateway histories first and retains workspace data on failure", async () => {
       const db = getDb()
       await db.sessions.put({

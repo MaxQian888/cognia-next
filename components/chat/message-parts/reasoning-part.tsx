@@ -1,8 +1,8 @@
 "use client"
 
 /**
- * The thinking block rendered as one activity-stream row (`● THINK … ▸`), not
- * a standalone section — in an agent transcript a thought is the same kind of
+ * The thinking block rendered as one activity-stream row (`🧠 Thought for 3s ▸`),
+ * not a standalone section — in an agent transcript a thought is the same kind of
  * record as a tool call (Claude Code's `Thought for Ns` marker, Cursor's
  * collapsible Thinking row). The `Reasoning` wrapper above it still owns the
  * state — duration tracking, stream-aware auto-open, the `display.reasoning`
@@ -25,7 +25,6 @@ export function ReasoningToolRow({
   streamdownProps: Omit<StreamdownProps, "children">
 }) {
   const t = useTranslations("chat.message")
-  const tRow = useTranslations("chat.toolRow")
   const { isOpen, setIsOpen, isStreaming, duration } = useReasoning()
 
   const label =
@@ -37,21 +36,19 @@ export function ReasoningToolRow({
 
   return (
     <ToolRowShell
-      // The dot follows the thought's own lifecycle: breathing blue while the
-      // model is still thinking, green once this block is done even if the
-      // rest of the turn is still streaming.
+      // `data-status` still follows the thought's own lifecycle — in flight
+      // while the model is thinking, settled once this block is done even if
+      // the rest of the turn is still streaming — but no dot or verb label is
+      // drawn: "Thought for 3 seconds" (shimmering while live) already says
+      // both, and a coloured THINK before it only repeated the word.
       status={isStreaming ? "input-available" : "output-available"}
+      showDot={false}
       open={isOpen}
       onToggle={() => setIsOpen(!isOpen)}
       ariaLabel={label}
       testId="reasoning-row"
       dataKind="reasoning"
-      lead={
-        <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
-          {tRow("verb.think")}
-        </span>
-      }
-      icon={<BrainIcon className="size-3.5 text-muted-foreground" aria-hidden />}
+      icon={<BrainIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
       target={
         isStreaming ? (
           <Shimmer duration={1} className="font-mono text-xs">

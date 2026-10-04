@@ -40,6 +40,7 @@ import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { TaskResourcesPanel } from "./task-resources-panel"
+import { WorkspaceFilePreview } from "./workspace-file-preview"
 
 interface DockWorkspaceProps {
   activeSessionId: string | null
@@ -192,8 +193,27 @@ function WorkspaceEditorBody({
   const [surface, setSurface] = useState<"file" | "review">("file")
   const [scope, setScope] = useState<"task" | "workspace">("task")
   const [mobileReviewPane, setMobileReviewPane] = useState<"changes" | "diff">("changes")
+  /**
+   * The file a reveal asked a phone to show. Mobile only: the desktop dock
+   * opens the editable editor directly, while a phone gets the focused
+   * read-only preview (`WorkspaceFilePreview`) over the workspace surfaces,
+   * with "Edit" one tap away.
+   */
+  const [mobilePreview, setMobilePreview] = useState<{
+    root: string
+    relPath: string
+    line?: number
+    column?: number
+  } | null>(null)
   const processedRequest = useRef<string | null>(null)
-  const showFileSurface = useCallback(() => setSurface("file"), [])
+  // Any editor open has to land on a surface the user can see. Task scope
+  // replaces the editor with the task ledger, so an open that only flipped the
+  // Editor/Review switch — a chat file link, a terminal path, a search hit —
+  // loaded the file into an editor hidden behind the ledger and showed nothing.
+  const showFileSurface = useCallback(() => {
+    setSurface("file")
+    setScope("workspace")
+  }, [])
   const scopeKey = `session:${sessionId}`
 
   // Pro IDE (code-server) is a native child webview pinned over this pane, so it
@@ -358,7 +378,31 @@ function WorkspaceEditorBody({
       // the file surface. Deferred to a microtask so we don't setState
       // synchronously inside the effect body.
       queueMicrotask(() => {
-        if (processedRequest.current === request.id) setSurface("review")
+        if (processedRequest.current === request.id) {
+          setSurface("review")
+          // The review surface lives under workspace scope; left on the task
+          // ledger the reveal would select a file in a pane nobody can see.
+          setScope("workspace")
+        }
+        clearRequest(request.id)
+      })
+      return
+    }
+    // A phone gets the read-only preview rather than the editor: one Host read,
+    // a full-height text view with its own loading/error/empty states, and no
+    // virtual keyboard. "Edit" from there runs the desktop path below.
+    if (layout === "mobile") {
+      const preview = {
+        root: rootPath,
+        relPath: request.relPath,
+        line: request.line,
+        column: request.column,
+      }
+      queueMicrotask(() => {
+        if (processedRequest.current === request.id) {
+          setScope("workspace")
+          setMobilePreview(preview)
+        }
         clearRequest(request.id)
       })
       return
@@ -386,6 +430,7 @@ function WorkspaceEditorBody({
     roots,
     rootKey,
     rootPath,
+    layout,
     engine,
     selectRoot,
     selectFile,
@@ -440,24 +485,55 @@ function WorkspaceEditorBody({
   )
 
   const touch = layout === "mobile"
+  const openPreviewInEditor = useCallback(() => {
+    if (!mobilePreview) return
+    gotoLine(mobilePreview.relPath, mobilePreview.line, mobilePreview.column)
+    setMobilePreview(null)
+  }, [gotoLine, mobilePreview])
   const zen = workbench.zenMode && !touch && engine === "monaco" && visibleSurface === "file"
   // One visual language for every switch on the toolbar row — the engine
   // toggle beside them is the same outline ToggleGroup.
-  const toggleItemClass = cn("gap-1 text-xs", touch ? "h-9 px-3 text-sm" : "h-7 px-2")
+  const toggleItemClass = cn(
+    "gap-1 text-xs",
+    touch ? "h-9 min-w-0 flex-1 px-3 text-sm" : "h-7 px-2"
+  )
+  // A phone stretches each switch across the sheet so its labels never clip;
+  // two switches share a row while each keeps 10rem, and stack below that.
+  const toggleGroupClass = touch ? "min-w-[10rem] flex-1" : undefined
+  const touchLabelClass = touch ? "truncate" : undefined
   // The dock runs from its 480px floor to ~900px, and one row has to hold the
   // root controls and up to three switches. Rather than wrap onto a second row
   // (a band of chrome the editor pays for in height), the switches drop their
   // words for their icons as the dock narrows — the scope and engine switches
   // first, the Editor/Review switch last. Touch keeps its labels: the phone
   // sheet wraps instead, and icon-only targets are guesswork on a phone.
-  const scopeLabelClass = touch ? undefined : "hidden @3xl/dock-ws:inline"
-  const surfaceLabelClass = touch ? undefined : "hidden @2xl/dock-ws:inline"
+  const scopeLabelClass = touch ? touchLabelClass : "hidden @3xl/dock-ws:inline"
+  const surfaceLabelClass = touch ? touchLabelClass : "hidden @2xl/dock-ws:inline"
+  const showSurfaceSwitch = visibleScope === "workspace" && hasReview
+  const showEngineToggle = proIdeAllowed && visibleScope === "workspace"
+  const hasSwitches = showSurfaceSwitch || showEngineToggle || hasTaskScope
 
   return (
     <div
-      className="@container/dock-ws flex h-full w-full min-h-0 min-w-0 max-w-full flex-col overflow-x-hidden"
+      className="@container/dock-ws relative flex h-full w-full min-h-0 min-w-0 max-w-full flex-col overflow-x-hidden"
       data-testid="dock-workspace"
     >
+      {touch && mobilePreview ? (
+        // An overlay rather than a swap: the editor workbench underneath keeps
+        // its open tabs and its registered project opener while the preview
+        // is up, so "Edit" and Back both return to a live editor.
+        <div className="absolute inset-0 z-20 bg-background" data-testid="workspace-preview-layer">
+          <WorkspaceFilePreview
+            key={`${mobilePreview.root}:${mobilePreview.relPath}:${mobilePreview.line ?? ""}`}
+            root={mobilePreview.root}
+            relPath={mobilePreview.relPath}
+            line={mobilePreview.line}
+            column={mobilePreview.column}
+            onBack={() => setMobilePreview(null)}
+            onOpenInEditor={openPreviewInEditor}
+          />
+        </div>
+      ) : null}
       <div
         className={cn(
           "flex min-w-0 shrink-0 items-center gap-x-2 gap-y-1 border-b bg-muted/20 px-2 py-1",
@@ -486,111 +562,118 @@ function WorkspaceEditorBody({
           }
           className="min-w-0"
         />
-        <div
-          className={cn(
-            "ml-auto flex min-w-0 items-center justify-end gap-1.5",
-            touch ? "flex-wrap" : "shrink-0 flex-nowrap"
-          )}
-        >
-          {visibleScope === "workspace" && hasReview ? (
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              value={visibleSurface}
-              // Radix lets the pressed item deselect itself, which would leave
-              // the dock showing nothing — an empty value is ignored instead.
-              onValueChange={(next) => {
-                if (next === "file" || next === "review") setSurface(next)
-              }}
-              aria-label={t("surfaceLabel")}
-              data-testid="workspace-surface-switch"
-            >
-              <ToggleGroupItem
-                value="file"
-                className={toggleItemClass}
-                data-testid="workspace-surface-file"
-                aria-label={editorLabels("editorTab")}
-                title={touch ? undefined : editorLabels("editorTab")}
+        {hasSwitches ? (
+          <div
+            className={cn(
+              "flex min-w-0 items-center gap-1.5",
+              // A phone gives the switches a full row of their own, stretched,
+              // instead of squeezing them beside the root chip.
+              touch ? "w-full flex-wrap" : "ml-auto shrink-0 flex-nowrap justify-end"
+            )}
+            data-testid="dock-workspace-switches"
+          >
+            {showSurfaceSwitch ? (
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={visibleSurface}
+                // Radix lets the pressed item deselect itself, which would leave
+                // the dock showing nothing — an empty value is ignored instead.
+                onValueChange={(next) => {
+                  if (next === "file" || next === "review") setSurface(next)
+                }}
+                aria-label={t("surfaceLabel")}
+                className={toggleGroupClass}
+                data-testid="workspace-surface-switch"
               >
-                <FileCodeIcon className="size-3.5" />
-                <span className={surfaceLabelClass}>{editorLabels("editorTab")}</span>
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="review"
-                className={toggleItemClass}
-                data-testid="workspace-surface-review"
-                aria-label={
-                  changeCount > 0 ? t("reviewWithCount", { count: changeCount }) : t("review")
-                }
-                title={
-                  touch
-                    ? undefined
-                    : changeCount > 0
-                      ? t("reviewWithCount", { count: changeCount })
-                      : t("review")
-                }
+                <ToggleGroupItem
+                  value="file"
+                  className={toggleItemClass}
+                  data-testid="workspace-surface-file"
+                  aria-label={editorLabels("editorTab")}
+                  title={touch ? undefined : editorLabels("editorTab")}
+                >
+                  <FileCodeIcon className="size-3.5" />
+                  <span className={surfaceLabelClass}>{editorLabels("editorTab")}</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="review"
+                  className={toggleItemClass}
+                  data-testid="workspace-surface-review"
+                  aria-label={
+                    changeCount > 0 ? t("reviewWithCount", { count: changeCount }) : t("review")
+                  }
+                  title={
+                    touch
+                      ? undefined
+                      : changeCount > 0
+                        ? t("reviewWithCount", { count: changeCount })
+                        : t("review")
+                  }
+                >
+                  <GitCompareArrowsIcon className="size-3.5" />
+                  <span className={surfaceLabelClass}>{t("review")}</span>
+                  {changeCount > 0 ? (
+                    <span
+                      className="min-w-4 rounded-pill bg-primary/15 px-1 text-[10px] font-semibold leading-4 text-primary tabular-nums"
+                      data-testid="workspace-review-count"
+                      aria-hidden
+                    >
+                      {changeCount > 99 ? "99+" : changeCount}
+                    </span>
+                  ) : null}
+                </ToggleGroupItem>
+              </ToggleGroup>
+            ) : null}
+            {showEngineToggle ? (
+              <EditorEngineToggle
+                value={engine}
+                onChange={setEngine}
+                proIdeSupport={proIdeSupport}
+                projectRoot={rootPath}
+                proIdeProfile={proIdeProfile}
+                onProIdeProfileChange={setProIdeProfile}
+                labelClassName={scopeLabelClass}
+              />
+            ) : null}
+            {hasTaskScope ? (
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={visibleScope}
+                onValueChange={(next) => {
+                  if (next === "task" || next === "workspace") setScope(next)
+                }}
+                aria-label={t("scopeLabel")}
+                className={toggleGroupClass}
+                data-testid="workspace-scope-switch"
               >
-                <GitCompareArrowsIcon className="size-3.5" />
-                <span className={surfaceLabelClass}>{t("review")}</span>
-                {changeCount > 0 ? (
-                  <span
-                    className="min-w-4 rounded-pill bg-primary/15 px-1 text-[10px] font-semibold leading-4 text-primary tabular-nums"
-                    data-testid="workspace-review-count"
-                    aria-hidden
-                  >
-                    {changeCount > 99 ? "99+" : changeCount}
-                  </span>
-                ) : null}
-              </ToggleGroupItem>
-            </ToggleGroup>
-          ) : null}
-          {proIdeAllowed && visibleScope === "workspace" ? (
-            <EditorEngineToggle
-              value={engine}
-              onChange={setEngine}
-              proIdeSupport={proIdeSupport}
-              projectRoot={rootPath}
-              proIdeProfile={proIdeProfile}
-              onProIdeProfileChange={setProIdeProfile}
-              labelClassName={scopeLabelClass}
-            />
-          ) : null}
-          {hasTaskScope ? (
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              value={visibleScope}
-              onValueChange={(next) => {
-                if (next === "task" || next === "workspace") setScope(next)
-              }}
-              aria-label={t("scopeLabel")}
-              data-testid="workspace-scope-switch"
-            >
-              <ToggleGroupItem
-                value="task"
-                className={toggleItemClass}
-                data-testid="workspace-scope-task"
-                aria-label={t("currentTask")}
-                title={touch ? undefined : t("currentTask")}
-              >
-                <ListChecksIcon className="size-3.5" />
-                <span className={scopeLabelClass}>{t("currentTask")}</span>
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="workspace"
-                className={toggleItemClass}
-                data-testid="workspace-scope-all"
-                aria-label={t("allWorkspace")}
-                title={touch ? undefined : t("allWorkspace")}
-              >
-                <FolderTreeIcon className="size-3.5" />
-                <span className={scopeLabelClass}>{t("allWorkspace")}</span>
-              </ToggleGroupItem>
-            </ToggleGroup>
-          ) : null}
-        </div>
+                <ToggleGroupItem
+                  value="task"
+                  className={toggleItemClass}
+                  data-testid="workspace-scope-task"
+                  aria-label={t("currentTask")}
+                  title={touch ? undefined : t("currentTask")}
+                >
+                  <ListChecksIcon className="size-3.5" />
+                  <span className={scopeLabelClass}>{t("currentTask")}</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem
+                  value="workspace"
+                  className={toggleItemClass}
+                  data-testid="workspace-scope-all"
+                  aria-label={t("allWorkspace")}
+                  title={touch ? undefined : t("allWorkspace")}
+                >
+                  <FolderTreeIcon className="size-3.5" />
+                  <span className={scopeLabelClass}>{t("allWorkspace")}</span>
+                </ToggleGroupItem>
+              </ToggleGroup>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {visibleScope === "task" ? (
         <div className="min-h-0 flex-1">

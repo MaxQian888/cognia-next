@@ -77,11 +77,32 @@ export function withDateRuns(
 /**
  * The first `limit` rows of a group, its runs cut at the same row — the
  * preview a "Show more" group draws.
+ *
+ * `keepId` names one row that must survive the cut wherever it sits — the
+ * conversation open in the chat pane. It keeps its own place in the order (and
+ * its own date run), so the preview reads as the head of the group plus the
+ * one row the reader is in, never as a reordered list.
  */
 export function sliceGroupRows(
   section: ConversationGroupSection,
-  limit: number
+  limit: number,
+  keepId?: string | null
 ): ConversationGroupSection {
+  const keepIndex = keepId ? section.sessions.findIndex((s) => s.id === keepId) : -1
+  if (keepIndex >= limit) {
+    const kept = new Set(section.sessions.slice(0, limit).map((s) => s.id))
+    kept.add(keepId!)
+    if (!section.dateRuns) {
+      return { ...section, sessions: section.sessions.filter((s) => kept.has(s.id)) }
+    }
+    return withDateRuns(
+      section,
+      section.dateRuns.map((run) => ({
+        ...run,
+        sessions: run.sessions.filter((s) => kept.has(s.id)),
+      }))
+    )
+  }
   if (!section.dateRuns) return { ...section, sessions: section.sessions.slice(0, limit) }
   const dateRuns: ConversationDateSection[] = []
   let left = limit

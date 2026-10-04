@@ -22,6 +22,7 @@
 import {
   ActivityIcon,
   BrainIcon,
+  ChartPieIcon,
   FileSearchIcon,
   FolderKanbanIcon,
   GitBranchIcon,
@@ -78,6 +79,7 @@ export const DOCK_SESSION_PANEL_META: Readonly<Record<string, DockPanelMeta>> = 
   comments: { labelKey: "contextWorkbench.comments", icon: MessageSquareIcon },
   "run-context": { labelKey: "contextWorkbench.runContext.title", icon: ListChecksIcon },
   "session-sources": { labelKey: "contextWorkbench.sessionSources.title", icon: FileSearchIcon },
+  "session-usage": { labelKey: "contextWorkbench.sessionUsage.title", icon: ChartPieIcon },
   metadata: { labelKey: "contextWorkbench.metadata.sessionTitle", icon: InfoIcon },
   memory: { labelKey: "contextWorkbench.memoryPanel.title", icon: BrainIcon },
   logs: { labelKey: "contextWorkbench.logsPanel.title", icon: ActivityIcon },

@@ -1,8 +1,13 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { useState } from "react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { ComposerMenuCloseProvider } from "./composer-menu-context"
-import { WebSearchToggle } from "./web-search-toggle"
+import {
+  ComposerMenuCloseProvider,
+  ComposerMenuPanelsProvider,
+  type ComposerMenuPanels,
+} from "./composer-menu-context"
+import { WEB_SEARCH_SETUP_MENU_PANEL_ID, WebSearchToggle } from "./web-search-toggle"
 
 function renderWithTooltip(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -237,5 +242,67 @@ describe("WebSearchToggle", () => {
     expect(["top", "bottom"]).toContain(
       screen.getByTestId("web-search-setup-flyout").getAttribute("data-side")
     )
+  })
+})
+
+/** A minimal drill-in host standing in for the mobile `+` sheet. */
+function SheetHost({
+  children,
+  registerPanel = () => () => {},
+}: {
+  children: React.ReactNode
+  registerPanel?: (id: string) => () => void
+}) {
+  const [active, setActive] = useState<{ id: string; title: string } | null>(null)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const panels: ComposerMenuPanels = {
+    activePanelId: active?.id ?? null,
+    slot,
+    openPanel: (id, title) => setActive({ id, title }),
+    closePanel: () => setActive(null),
+    registerPanel,
+  }
+  return (
+    <ComposerMenuPanelsProvider value={panels}>
+      {children}
+      <p data-testid="sheet-title">{active?.title ?? ""}</p>
+      <div data-testid="sheet-slot" ref={setSlot} />
+    </ComposerMenuPanelsProvider>
+  )
+}
+
+describe("WebSearchToggle inside the mobile sheet", () => {
+  function renderInSheet(registerPanel?: (id: string) => () => void) {
+    return renderWithTooltip(
+      <ComposerMenuCloseProvider value={closeMenuMock}>
+        <SheetHost {...(registerPanel ? { registerPanel } : {})}>
+          <WebSearchToggle onOpenSettings={openSettingsMock} />
+        </SheetHost>
+      </ComposerMenuCloseProvider>
+    )
+  }
+
+  it("drills in to the setup card instead of floating it over the sheet", async () => {
+    settingsState = { searchEnabled: false, searchProviders: configuredProvider }
+    const user = userEvent.setup()
+    renderInSheet()
+    await user.click(screen.getByRole("button", { name: "ariaToggleWebSearch" }))
+    expect(screen.queryByTestId("web-search-setup-flyout")).toBeNull()
+    const slot = screen.getByTestId("sheet-slot")
+    expect(within(slot).getByTestId("web-search-setup-panel")).toHaveTextContent("setupSwitchOff")
+    expect(screen.getByTestId("sheet-title")).toHaveTextContent("webLabel")
+    await user.click(within(slot).getByRole("button", { name: "goToSettings" }))
+    expect(openSettingsMock).toHaveBeenCalledWith("search")
+    expect(closeMenuMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays a plain toggle with no panel once search is configured", () => {
+    settingsState = { searchEnabled: true, searchProviders: configuredProvider }
+    const registerPanel = jest.fn(() => () => {})
+    renderInSheet(registerPanel)
+    fireEvent.click(screen.getByRole("button", { name: "ariaToggleWebSearch" }))
+    expect(setOnMock).toHaveBeenCalledWith(true, undefined)
+    expect(registerPanel).not.toHaveBeenCalled()
+    expect(WEB_SEARCH_SETUP_MENU_PANEL_ID).toBe("web-search-setup")
   })
 })

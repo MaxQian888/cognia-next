@@ -131,6 +131,14 @@ describe("describeToolResult", () => {
     expect(describeToolResult(tool("tool-Bash", { output: "one line" }))?.kind).toBe("lines")
   })
 
+  it("counts a numbered Read listing's file lines, not its paging hint", () => {
+    const output = "     1\tconst a = 1\n     2\tconst b = 2\n\n(showing lines 1-2 of 90)"
+    expect(describeToolResult(tool("tool-Read", { output }))).toMatchObject({
+      kind: "lines",
+      count: 2,
+    })
+  })
+
   it("summarizes diff tools from the input once completed", () => {
     expect(
       describeToolResult(tool("tool-Edit", { input: { old_string: "a", new_string: "b\nc" } }))

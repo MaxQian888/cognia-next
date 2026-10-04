@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { encodeBase64 } from "@/lib/share/encoding"
+import { waitFor } from "@testing-library/react"
 
 const isTauriMock = jest.fn().mockReturnValue(false)
 const isCapacitorMock = jest.fn().mockReturnValue(false)
@@ -110,6 +111,50 @@ describe("saveExport — Tauri", () => {
     const res = await saveExport({ filename: "out.md", data: "x", mimeType: "text/markdown" })
     expect(res).toEqual({ kind: "cancelled" })
     expect(fsWriteTextFileMock).not.toHaveBeenCalled()
+  })
+
+  it("does not grant a path or write when the target changes while the save dialog is open", async () => {
+    let choose!: (path: string) => void
+    let current = true
+    saveDialogMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        choose = resolve
+      })
+    )
+    const result = saveExport({
+      filename: "x.bin",
+      data: new Uint8Array([255]),
+      mimeType: "application/octet-stream",
+      shouldContinue: () => current,
+    })
+    await waitFor(() => expect(saveDialogMock).toHaveBeenCalled())
+    current = false
+    choose("/picked/x.bin")
+    expect(await result).toEqual({ kind: "cancelled" })
+    expect(registerDialogPathInRustMock).not.toHaveBeenCalled()
+    expect(fsWriteFileMock).not.toHaveBeenCalled()
+  })
+
+  it("rechecks target validity after path registration before writing", async () => {
+    let complete!: () => void
+    let current = true
+    saveDialogMock.mockResolvedValueOnce("/picked/x.bin")
+    registerDialogPathInRustMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        complete = resolve
+      })
+    )
+    const result = saveExport({
+      filename: "x.bin",
+      data: new Uint8Array([255]),
+      mimeType: "application/octet-stream",
+      shouldContinue: () => current,
+    })
+    await waitFor(() => expect(registerDialogPathInRustMock).toHaveBeenCalled())
+    current = false
+    complete()
+    expect(await result).toEqual({ kind: "cancelled" })
+    expect(fsWriteFileMock).not.toHaveBeenCalled()
   })
 
   it("derives the dialog filter from the extension when none given", async () => {

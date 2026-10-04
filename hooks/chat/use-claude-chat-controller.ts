@@ -12,6 +12,7 @@ import { persistMessageSessionAssets } from "@/lib/db/session-assets"
 import { makeUserMessage } from "@/lib/claude/adapter"
 import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { toast } from "sonner"
+import { closeOpenToolParts } from "@/lib/chat/phantom-run"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { enforceVideoDeliveryForRoute } from "@/lib/chat/attachments/video/route-guard"
 import { videoRouteFacts } from "@/lib/chat/attachments/video/route-facts"
@@ -28,8 +29,10 @@ import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/squad/resolve-turn-squad"
 import {
-  resolveExternalAgentModelAxis,
-  resolveExternalAgentCogniaModelAxis,
+  externalAgentRouteKey,
+  isGatewaySessionLink,
+  rememberGatewaySession,
+  resolveExternalAgentModelSelection,
 } from "@/lib/ai/agent/external/session/session-models"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
@@ -193,6 +196,7 @@ import {
 import { buildRouteStamp, resolveRouteLane, routeCharacter } from "@/lib/chat/turn-route/resolve"
 import { parseLeadingRoute, stripLeadingRouteToken } from "@/lib/chat/turn-route/parse"
 import {
+  externalLaneMemory,
   foreignTurnsHandoffText,
   prefixForeignTurnsContext,
   unseenForeignTurns,
@@ -247,6 +251,7 @@ import {
 } from "@/lib/chat/turn-admission"
 import {
   classifyExternalTurnFailure,
+  piPackageTurnFailure,
   planHaltCauseForCode,
 } from "@/lib/ai/agent/external/turn-failure"
 import { driveInSessionPlanAfterTurn, haltInSessionPlanOnTurnFailure } from "./plan-turn-settle"
@@ -261,7 +266,6 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useExternalAgentStore } from "@/stores/agent"
 import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
-import { isSameRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
@@ -286,7 +290,12 @@ import {
   extractAssistantText,
 } from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
-import { buildSendOptions } from "./claude-chat-send-options"
+import { prepareTranscriptRuntimeSend, buildSendOptions } from "./claude-chat-send-options"
+import {
+  createTranscriptRuntimeFence,
+  type TranscriptRuntimeFence,
+  withTranscriptRuntimeLock,
+} from "@/lib/chat/transcript/revision-events"
 import { hostStateSendEligible } from "./host-state-send-eligibility"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 import { drainSteerVia, handleEvent, tryAutoModeDecision } from "./claude-chat-events"
@@ -451,6 +460,7 @@ export function useClaudeChat() {
   const tRouting = useTranslations("providers.routingView")
   const tInlineErr = useTranslations("chat.inlineError")
   const tDiagnostics = useTranslations("diagnostics")
+  const tPiPackages = useTranslations("plugins.piPackages")
   const tVideo = useTranslations("chat.composer.attachments.video")
   const tAttachments = useTranslations("chat.composer.attachments")
   const tCollab = useTranslations("chatCollaboration")
@@ -719,13 +729,29 @@ export function useClaudeChat() {
           // Run Panel can show per-tool elapsed (no-op when nothing transitioned).
           useChatStore.getState().syncToolTimestamps?.(sid, msgs)
         },
-        onPersist: (sid, msgs) =>
-          void persistStreamingMessages(sid, msgs).catch((err) =>
+        onPersist: (sid, msgs, options) =>
+          void persistStreamingMessages(sid, msgs, options).catch((err) =>
             console.error("debounced persistStreamingMessages failed", err)
           ),
         persistDelayMs: PERSIST_DEBOUNCE_MS,
       })
   )
+  const handleTranscriptInvalidated = useCallback(
+    (sessionId: string) => {
+      registry.release(sessionId)
+      messagesMirrorRef.current.delete(sessionId)
+    },
+    [registry]
+  )
+  const transcriptFenceRef = useRef<TranscriptRuntimeFence | null>(null)
+  useEffect(() => {
+    const fence = createTranscriptRuntimeFence(handleTranscriptInvalidated)
+    transcriptFenceRef.current = fence
+    return () => {
+      fence.dispose()
+      if (transcriptFenceRef.current === fence) transcriptFenceRef.current = null
+    }
+  }, [handleTranscriptInvalidated])
 
   // Best-effort flush of every session's pending streaming write on unmount so
   // the last partial isn't lost when the hook tears down mid-turn.
@@ -877,6 +903,7 @@ export function useClaudeChat() {
             {
               messagesMirrorRef,
               registry,
+              transcriptFence: transcriptFenceRef.current ?? undefined,
               getExecutionHandle,
             }
           )
@@ -945,6 +972,8 @@ export function useClaudeChat() {
          *  don't duplicate the user turn when re-issuing the SDK request. */
         sharedRequest?: { messageId: string; queueItemId: string; takeover?: boolean }
         skipUserAppend?: boolean
+        /** Stable journal batch identity, reserved before automatic result delivery. */
+        backgroundDelivery?: { id: string; onAccepted: () => void }
         /** Let approval continuations retain a retry action when dispatch is refused. */
         throwOnError?: boolean
         /** Skip Thread-B delegation routing. Set on the built-in fallback
@@ -1132,6 +1161,34 @@ export function useClaudeChat() {
       ) {
         rejectSend("empty_chat_turn")
         return
+      }
+
+      if (callOptions?.backgroundDelivery) {
+        const { getDb } = await import("@/lib/db/schema")
+        const db = getDb()
+        const id = callOptions.backgroundDelivery.id
+        const { currentFusionStore } = await import("@/lib/router-fusion/chat/store-provider")
+        const [accepted, queued, squad, fusion] = await Promise.all([
+          db.workSubmissions.get(chatSubmissionId(id)),
+          db.mobileOutboundQueue.get(id),
+          db.executionRuns.get(`execution:team:${id}`),
+          currentFusionStore().then((fusionStore) => fusionStore.getRun(id)),
+        ])
+        const queuedHere =
+          queued?.protocol === "host-state" &&
+          Array.isArray(queued.payload.actions) &&
+          queued.payload.actions.some(
+            (action) => action?.sessionId === sessionId && action?.actionId === id
+          )
+        if (
+          (accepted?.sessionId === sessionId && accepted.runId === id) ||
+          queuedHere ||
+          (squad?.sessionId === sessionId && squad.sourceId === id) ||
+          (fusion?.sessionId === sessionId && fusion.runId === id)
+        ) {
+          callOptions.backgroundDelivery.onAccepted()
+          return
+        }
       }
 
       const persistAttachments = async (message: UIMessage): Promise<UIMessage | null> => {
@@ -1508,10 +1565,6 @@ export function useClaudeChat() {
         routeLane = lane
       }
       const turnLane: AgentRuntimeRef = routeLane?.runtimeRef ?? sessionLane
-      // The session's model pick belongs to the session's own lane. A turn
-      // addressed to a DIFFERENT lane must not carry it there — a builtin
-      // conversation's Claude model is not a choice made for Codex.
-      const laneOwnsSessionModel = !routeLane || isSameRuntimeRef(turnLane, sessionLane)
       // Claim imported history before summary generation or editor writes, so a
       // concurrent source watcher cannot replace the snapshot being continued.
       if (sessionId.startsWith("import:") && session?.importOwnership !== "native-bound") {
@@ -1598,7 +1651,8 @@ export function useClaudeChat() {
       }
       const identityMessages = store.getState().sessions[sessionId]?.messages ?? []
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
-      const executionRunId = runIdForTurn(sessionId, chatRunId)
+      const executionRunId =
+        callOptions?.backgroundDelivery?.id ?? runIdForTurn(sessionId, chatRunId)
       const turnIdentity = resolveChatTurnAttemptIdentity({
         sessionId,
         runId: executionRunId,
@@ -1606,7 +1660,7 @@ export function useClaudeChat() {
         reuseLastUserTurn: Boolean(callOptions?.skipUserAppend || callOptions?.steerDrain),
         attempts: skillAttemptByTurnRef.current,
       })
-      const frozenTurnId = turnIdentity.turnId
+      const frozenTurnId = callOptions?.backgroundDelivery?.id ?? turnIdentity.turnId
       const frozenAttemptId = turnIdentity.attemptId
 
       // ADR-0019 — a fresh user message while a goal is self-driving is
@@ -1727,6 +1781,9 @@ export function useClaudeChat() {
               runId: executionRunId,
               turnId: frozenTurnId,
               attemptId: frozenAttemptId,
+              ...(callOptions?.backgroundDelivery
+                ? { backgroundDeliveryId: callOptions.backgroundDelivery.id }
+                : {}),
             },
             routingAttachmentKinds?.length
               ? { attachmentKinds: routingAttachmentKinds }
@@ -2143,7 +2200,14 @@ export function useClaudeChat() {
       const persistedUserMessage = await persistAttachments(userMsg)
       if (!persistedUserMessage) return
       userMsg = persistedUserMessage
-      const next = skipAppend ? previousMessages : [...previousMessages, userMsg]
+      const next = skipAppend
+        ? previousMessages
+        : [
+            ...(callOptions?.backgroundDelivery
+              ? previousMessages.filter((message) => message.id !== userMsg.id)
+              : previousMessages),
+            userMsg,
+          ]
       const displayContent = effectiveContent
       // The addressed runtime reads the question without the `@handle` that
       // addressed it; the transcript row above keeps what the user typed.
@@ -2274,6 +2338,9 @@ export function useClaudeChat() {
         try {
           const queued = await enqueueHostStateIntentIfAvailable({
             sessionId,
+            ...(callOptions?.backgroundDelivery
+              ? { actionId: callOptions.backgroundDelivery.id }
+              : {}),
             action: {
               kind: "message.enqueue",
               messageId: userMsg.id,
@@ -2287,6 +2354,7 @@ export function useClaudeChat() {
             },
           })
           if (queued) {
+            callOptions?.backgroundDelivery?.onAccepted()
             // The outbox transaction completed before this optimistic write.
             // Runtime dispatch, transcript persistence and authoritative title
             // updates now belong to HostStateService on every attached surface.
@@ -2478,6 +2546,9 @@ export function useClaudeChat() {
           ])
           const result = await startSquadRun({
             squadId,
+            ...(callOptions?.backgroundDelivery
+              ? { runId: callOptions.backgroundDelivery.id }
+              : {}),
             // The goal is all the Squad is handed, so the whole turn: the
             // attached files' text, then the question.
             goal: externalTurn.prompt,
@@ -2519,6 +2590,7 @@ export function useClaudeChat() {
             rejectSend(result.reason || "squad_dispatch_failed")
             return
           }
+          callOptions?.backgroundDelivery?.onAccepted()
           // The goal is one string: images, a native video and fetched pages
           // did not reach the Squad. Said once the run takes it, and not for a
           // run that already existed, whose goal this turn did not set.
@@ -2597,7 +2669,19 @@ export function useClaudeChat() {
       // here, and only while Router + Fusion chat is on.
       const fusionRun = sendOptions.routerFusionRun
       if (fusionRun) {
-        void runFusionChatTurn({
+        let receiptResolve: () => void = () => {}
+        const receipt = new Promise<void>((resolve) => {
+          receiptResolve = resolve
+        })
+        const fusionTurn = runFusionChatTurn({
+          ...(callOptions?.backgroundDelivery
+            ? {
+                onAccepted: () => {
+                  callOptions.backgroundDelivery!.onAccepted()
+                  receiptResolve()
+                },
+              }
+            : {}),
           sessionId,
           stamp: fusionRun,
           messages: providerPayload.messages,
@@ -2631,6 +2715,7 @@ export function useClaudeChat() {
             }
           },
         })
+        if (callOptions?.backgroundDelivery) await Promise.race([receipt, fusionTurn])
         return
       }
 
@@ -2774,7 +2859,15 @@ export function useClaudeChat() {
       // the managed workspace cannot be materialized there, and nothing would
       // have opened it. The durable `managed` identity is left untouched, so a
       // desktop that later receives the conversation materializes it as usual.
-      const turnUsesWorkingCopy = !hasNoToolSurface && !standaloneEngineTurn
+      //
+      // A turn for an agent the paired Host owns runs on the Host, which picks
+      // its own working directory: `external_agent_run_turn` carries none. A
+      // working copy here would have no consumer either, and on a phone the
+      // managed one cannot be materialized at all, so every rootless chat with
+      // a Host agent was refused before it reached the Host.
+      const hostOwnedExternalTurn = manualExternal && turnRuntimeRef?.kind === "host"
+      const turnUsesWorkingCopy =
+        !hasNoToolSurface && !standaloneEngineTurn && !hostOwnedExternalTurn
       if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
       }
@@ -2860,6 +2953,7 @@ export function useClaudeChat() {
             console.error("acceptChatTurn failed", error)
             return null
           })
+      if (durableReceipt) callOptions?.backgroundDelivery?.onAccepted()
       let dispatchClaim: Awaited<ReturnType<typeof claimChatTurnForDispatch>> = "legacy"
       let stopAssemblyHeartbeat = () => {}
       let durableLeaseLost = false
@@ -2952,6 +3046,16 @@ export function useClaudeChat() {
         rejectSend(input.diagnostic.message || input.errorCode)
       }
       let abortStaleLocalRuntime = () => {}
+      if (callOptions?.backgroundDelivery && !durableReceipt) {
+        await refuseTurn({
+          diagnostic: toDiagnostic(
+            new Error("background_delivery_durable_acceptance_unavailable"),
+            { source: "chat", meta: { sessionId } }
+          ),
+          errorCode: "background_delivery_durable_acceptance_unavailable",
+        })
+        return
+      }
       if (durableReceipt) {
         dispatchClaim = await claimChatTurnForDispatch(executionRunId)
         if (dispatchClaim === "owned_elsewhere") return
@@ -3373,6 +3477,30 @@ export function useClaudeChat() {
         // `sessionExternalLane`). Cleared when the turn settles, in
         // `maybeDrainSteer`.
         setSessionExternalLane(sessionId, extAgentId)
+        // Which models this agent runs this turn on: its own, or a Cognia
+        // provider/model through the gateway. The conversation's explicit
+        // per-agent choice (`externalAgentModels`), never the built-in lane's
+        // `model` / `providerOverride` / `accountId`. Reading those as a
+        // binding is what sent a Kimi turn through a Claude model left over
+        // from a built-in turn. Resolved once, for both executors.
+        //
+        // The configuration's own default is known only for a LOCAL agent; a
+        // Host-owned configuration's default is the Host's to apply, which an
+        // omitted `cogniaModel` asks it to do.
+        const modelSelection = resolveExternalAgentModelSelection({
+          agentId: extAgentId,
+          session,
+          ...(hostSelection
+            ? {}
+            : { agentDefault: useExternalAgentStore.getState().agents[extAgentId]?.cogniaModel }),
+          appDefaults: useSettingsStore.getState().settings,
+        })
+        const cogniaModel = modelSelection.cogniaModel
+        const managedGatewayTask = !!cogniaModel || modelSelection.gatewayLink !== undefined
+        // The agent's own models, on its own session. A Cognia route resumes
+        // only the gateway task its binding names; a native one resumes the
+        // agent's own session and never a gateway link.
+        const nativeRoute = !managedGatewayTask
         // A session remembers its lane across reloads; the manager does not.
         // Registering the config with the manager happens when the user picks
         // the agent, so a restored session sent without touching the picker
@@ -3382,18 +3510,6 @@ export function useClaudeChat() {
         // Local lanes only. A host lane names a configuration the Host owns and
         // runs; there is no local adapter to register, and asking the local
         // store for it would answer `unknown-agent` for a perfectly good agent.
-        const cogniaModel = resolveExternalAgentCogniaModelAxis({
-          agentId: extAgentId,
-          sessionModel: laneOwnsSessionModel ? session?.model : undefined,
-          sessionProviderOverride: laneOwnsSessionModel ? session?.providerOverride : undefined,
-          accountId: session?.accountId ?? undefined,
-        })
-        const managedGatewayTask =
-          !!(cogniaModel === undefined
-            ? useExternalAgentStore.getState().agents[extAgentId]?.cogniaModel
-            : cogniaModel) ||
-          (session?.externalAgentSession?.agentId === extAgentId &&
-            session.externalAgentSession.sessionId.startsWith("cognia-gateway:"))
         if (turnRuntimeRef?.kind === "external") {
           const { ensureExternalAgentReady } =
             await import("@/lib/agent/ensure-external-agent-ready")
@@ -3564,10 +3680,16 @@ export function useClaudeChat() {
           // says what happened and what to do; the runtime's English sentence
           // moves to `detail`. Anything untyped keeps the text classifier.
           const typedCode = error ? classifyExternalTurnFailure(error) : null
+          // A refused plugin Pi package says WHICH refusal in the user's
+          // language (ADR-0210); the adapter's English stays in `detail`.
+          const piPackageFailure =
+            typedCode === "piPackageUnavailable" && error ? piPackageTurnFailure(error) : null
           const diagnostic = typedCode
             ? createDiagnostic(typedCode, {
                 source: "external-agent",
-                message: tDiagnostics(`code.${typedCode}.hint`),
+                message: piPackageFailure
+                  ? tPiPackages(`errors.${piPackageFailure.messageKey}`, piPackageFailure.params)
+                  : tDiagnostics(`code.${typedCode}.hint`),
                 detail: message,
                 meta: { sessionId, agentId: extAgentId },
               })
@@ -3581,8 +3703,12 @@ export function useClaudeChat() {
           // unmarked after a reload — and Retry regenerated the PREVIOUS turn,
           // because the failed one was no longer the last user message.
           const failedTurn = turnMessageId(next, skipAppend ? null : userMsg.id)
+          // A failed turn's tool calls never get results (a timed-out ACP
+          // prompt drops its tool state), so close them here — left open they
+          // read as a turn still running after every reload.
           const failedList = markTurnAdmission(
-            store.getState().sessions[sessionId]?.messages ?? next,
+            closeOpenToolParts(store.getState().sessions[sessionId]?.messages ?? next, message)
+              .messages,
             failedTurn,
             {
               state: "failed",
@@ -3720,23 +3846,55 @@ export function useClaudeChat() {
            * ones the local lane uses.
            */
           let persistedExternalSessionId = session?.externalAgentSession?.sessionId
+          // The links as this turn last wrote them, so a second write in the
+          // same turn builds on the first rather than on the stale row.
+          let persistedLinks = {
+            externalAgentSession: session?.externalAgentSession,
+            externalAgentGatewaySessions: session?.externalAgentGatewaySessions,
+          }
           let externalSessionWrite = Promise.resolve()
           let externalSessionWriteError: unknown
           const persistExternalSession = (nativeId?: string) => {
             const hosted = externalToolHostsRef.current.get(sessionId)
-            if (hosted?.agentId === extAgentId && nativeId) hosted.nativeSessionId = nativeId
-            if (!nativeId?.startsWith("cognia-gateway:") || nativeId === persistedExternalSessionId)
-              return
+            // The tool host remembers the agent's OWN session only. A gateway
+            // link is resumed from the row, and only when its binding is the
+            // one selected; remembering it here as well let a later native
+            // turn resume a Cognia task.
+            if (hosted?.agentId === extAgentId && nativeId && !isGatewaySessionLink(nativeId))
+              hosted.nativeSessionId = nativeId
+            if (!isGatewaySessionLink(nativeId) || nativeId === persistedExternalSessionId) return
             persistedExternalSessionId = nativeId
+            const link = { agentId: extAgentId, sessionId: nativeId }
+            // The task this conversation used before stays retained, so a
+            // switch back to its binding resumes it rather than starting over.
+            const { sessions: retained, evicted } = rememberGatewaySession(persistedLinks, link)
+            persistedLinks = { externalAgentSession: link, externalAgentGatewaySessions: retained }
             externalSessionWrite = externalSessionWrite
               .then(async () => {
                 await updateSession(sessionId, {
-                  externalAgentSession: { agentId: extAgentId, sessionId: nativeId },
+                  externalAgentSession: link,
+                  externalAgentGatewaySessions: retained,
                 })
               })
               .catch((error: unknown) => {
                 externalSessionWriteError = error
               })
+            // A task that fell off the bounded list is named by nothing any
+            // more, so its retained native history would outlive every way to
+            // reach or delete it. Deleted here, best effort, where the local
+            // manager owns it. A Host's tasks are the Host's to clean up.
+            if (evicted.length > 0 && !hostSelection) {
+              void (async () => {
+                const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+                for (const stale of evicted) {
+                  await getExternalAgentManager()
+                    .deleteSession(stale.agentId, stale.sessionId)
+                    .catch((error: unknown) =>
+                      console.warn("Retired gateway task cleanup failed", error)
+                    )
+                }
+              })()
+            }
           }
           let hostedServerNames: string[] = []
           const handleExternalEvent = (
@@ -3862,10 +4020,10 @@ export function useClaudeChat() {
           // first turn has no session to write to, and every later turn opens
           // against an agent that was never told. The row was being written
           // and never read back, so the chip showed a model the turn did not
-          // run on. `resolveExternalAgentModelAxis` owns both places the choice
-          // can live and the marker guard that keeps a built-in lane's model
-          // out of an agent's mouth. `extAgentId` is the configuration id on
-          // the host lane, which is also the id the picker stamps, so one call
+          // run on. `resolveExternalAgentModelSelection` owns every place the
+          // choice can live, and never reads the built-in lane's model as the
+          // agent's. `extAgentId` is the configuration id on the host lane,
+          // which is also the id the picker keys the choice by, so one call
           // covers both lanes.
           //
           // The thinking level reached only the built-in runtime before this.
@@ -3887,17 +4045,11 @@ export function useClaudeChat() {
           // configuration ran on the agent's own default however loudly the
           // chip promised otherwise.
           //
-          // `createSession` inherits the marked app default onto new rows, so
-          // the app-wide half read here is the backstop for rows created
-          // before that and for a default changed mid-conversation.
+          // The native model is part of the same selection as the Cognia
+          // binding (`resolveExternalAgentModelSelection` above), so the two
+          // can never both be sent: a Cognia route carries no native model.
           const appSettings = useSettingsStore.getState().settings
-          const externalModel = resolveExternalAgentModelAxis({
-            agentId: extAgentId,
-            sessionModel: session?.model,
-            sessionProviderOverride: session?.providerOverride,
-            defaultModel: appSettings?.defaultModel,
-            defaultProvider: appSettings?.defaultProvider,
-          })
+          const externalModel = modelSelection.model
           const externalModelAxes = {
             ...(cogniaModel !== undefined ? { cogniaModel } : {}),
             ...(externalModel ? { model: externalModel } : {}),
@@ -3911,8 +4063,18 @@ export function useClaudeChat() {
           const externalMcpServers = resolvedMcpServerMapToAcpConfigs(sendOptions.mcpServers)
           let sandboxToolHostLeaseIds: string[] | undefined
           let externalContinuationContext: string | undefined
-          let resetExternalSession = false
+          // A Cognia binding no retained task serves starts a new task, and
+          // the conversation's previous session on this agent (native, or a
+          // task bound to another model) must not be resumed into it.
+          // A Host lane cannot rebind a task to another model, so there the
+          // switch starts a new task and hands the transcript over instead.
+          let resetExternalSession =
+            modelSelection.resetExternalSession === true ||
+            (modelSelection.rebind === true && Boolean(hostSelection))
           let verifiedNativeResume = false
+          // The agent's own session for this conversation, as its manager
+          // knows it: what a native turn resumes. Never a gateway link.
+          let nativeConversationSessionId: string | undefined
           // A stale tool host belongs to the previous runtime, including when
           // the new target cannot host MCP and would otherwise skip cleanup.
           const previousHost = externalToolHostsRef.current.get(sessionId)
@@ -3924,7 +4086,13 @@ export function useClaudeChat() {
             const manager = getExternalAgentManager()
             const agentConfig = manager.getAgent(extAgentId)?.config
             const composition = compositionForSession(sessionId)
+            if (nativeRoute) {
+              const resolved = manager.resolveConversationSessionId(extAgentId, sessionId)
+              nativeConversationSessionId =
+                resolved && !isGatewaySessionLink(resolved) ? resolved : undefined
+            }
             verifiedNativeResume = Boolean(
+              nativeRoute &&
               sessionId.startsWith("import:") &&
               composition.verifiedNativeResume &&
               composition.verifiedNativeResumeAgentId === extAgentId &&
@@ -3943,7 +4111,7 @@ export function useClaudeChat() {
             if (
               agentConfig?.protocol === "dsh-sdk" &&
               managedGatewayTask &&
-              session?.externalAgentSession
+              modelSelection.gatewayLink
             ) {
               const { renderTranscript } = await import("@/lib/chat/branch-session")
               externalContinuationContext = renderTranscript(
@@ -4061,18 +4229,29 @@ export function useClaudeChat() {
           }
           const hostedSession = externalToolHostsRef.current.get(sessionId)
           const matchingHostedNativeSessionId =
-            hostedSession?.agentId === extAgentId ? hostedSession.nativeSessionId : undefined
+            nativeRoute && hostedSession?.agentId === extAgentId
+              ? hostedSession.nativeSessionId
+              : undefined
+          // A session on THIS route: the gateway task the selection names, or
+          // the agent's own session on a native turn. A session on the other
+          // route is not one, however recently it ran: switching between the
+          // agent's models and Cognia's hands the transcript over instead.
           const hasMatchingExternalSession =
-            session?.externalAgentSession?.agentId === extAgentId ||
-            !!matchingHostedNativeSessionId ||
-            verifiedNativeResume
+            modelSelection.gatewayLink !== undefined ||
+            (nativeRoute &&
+              (!!matchingHostedNativeSessionId ||
+                !!nativeConversationSessionId ||
+                verifiedNativeResume))
+          // The memory this route keeps, for the unseen-turns handoff below.
+          const externalLane = externalLaneMemory(
+            extAgentId,
+            externalAgentRouteKey({ sessionId: modelSelection.gatewayLink, cogniaModel })
+          )
           if (
             resetExternalSession ||
             externalContinuationContext !== undefined ||
             !hasMatchingExternalSession
           ) {
-            const { buildHandoffContext, prepareHandoffContext } =
-              await import("@/lib/chat/handoff-context")
             const history = (await listMessages(sessionId)).filter(
               (message) => message.id !== userMsg.id
             )
@@ -4086,36 +4265,37 @@ export function useClaudeChat() {
                   interAgentMessages: imported.interAgentMessages,
                 }
               : undefined
-            const projected = buildHandoffContext(history, { state })
-            if (projected.losses.some((loss) => loss.kind === "budget")) {
-              const { buildAgentBackedLlmClient } =
-                await import("@/lib/ai/generation/agent-backed-client")
-              externalContinuationContext = (
-                await prepareHandoffContext(history, {
-                  state,
-                  client: await buildAgentBackedLlmClient({
+            // Same projection, summary and fallback as the unseen-turns handoff
+            // below. A shell with no model of its own (a phone driving its
+            // Host's agent) hands over the marked excerpt instead of failing
+            // the first turn on the new route with `no-client`.
+            externalContinuationContext =
+              (await foreignTurnsHandoffText(history, {
+                ...(state ? { state } : {}),
+                client: async () => {
+                  const { buildAgentBackedLlmClient } =
+                    await import("@/lib/ai/generation/agent-backed-client")
+                  return buildAgentBackedLlmClient({
                     session,
                     appSettings,
                     featureId: "handoff",
                     label: "Summarize task handoff",
-                  }),
-                  signal: gatewayController?.signal,
-                })
-              ).text
-            } else {
-              externalContinuationContext = projected.text || undefined
-            }
+                  })
+                },
+                ...(gatewayController ? { signal: gatewayController.signal } : {}),
+              })) || undefined
           } else if (!verifiedNativeResume) {
-            // The agent resumes its own session, which never saw what the
-            // builtin lane answered since this agent last did — an `@claude`
-            // turn, or a stretch of the conversation on its own lane between
-            // two `@codex` turns. Only that part of the thread is handed over.
+            // The agent resumes a session on this route, which never saw what
+            // any other memory answered since it last did — an `@claude` turn,
+            // a stretch on the conversation's own lane between two `@codex`
+            // turns, or this same agent on its other route (its own models vs
+            // a Cognia task). Only that part of the thread is handed over.
             const unseen = unseenForeignTurns(
               selectVisibleMessages(
                 (await listMessages(sessionId)).filter((message) => message.id !== userMsg.id),
                 store.getState().sessions[sessionId]?.activeBranchByGroup ?? {}
               ),
-              "external"
+              externalLane
             )
             if (unseen.length > 0) {
               externalContinuationContext =
@@ -4162,8 +4342,10 @@ export function useClaudeChat() {
                     lifecycleGeneration: hostSelection.lifecycleGeneration,
                   },
                   chatSessionId: sessionId,
-                  ...(session?.externalAgentSession?.agentId === extAgentId
-                    ? { externalSessionId: session.externalAgentSession.sessionId }
+                  // Only the gateway task the selection names. A native turn
+                  // after a Cognia one must not hand the Host that task.
+                  ...(modelSelection.gatewayLink && !modelSelection.rebind
+                    ? { externalSessionId: modelSelection.gatewayLink }
                     : {}),
                   newRunId: () => remoteRunId,
                   ...externalModelAxes,
@@ -4175,12 +4357,19 @@ export function useClaudeChat() {
               : await executeOnExternalAgent(externalExecutionPrompt, {
                   agentId: extAgentId,
                   ...(gatewayController ? { signal: gatewayController.signal } : {}),
-                  ...(!resetExternalSession && session?.externalAgentSession?.agentId === extAgentId
-                    ? { sessionId: session.externalAgentSession.sessionId }
+                  ...(!resetExternalSession && modelSelection.gatewayLink
+                    ? { sessionId: modelSelection.gatewayLink }
                     : {}),
+                  // Cognia model A → B on the same task: the agent resumes its
+                  // own history on the new model (manager checks account,
+                  // device and runtime are unchanged).
+                  ...(!resetExternalSession && modelSelection.rebind ? { rebind: true } : {}),
                   ...(!resetExternalSession && matchingHostedNativeSessionId
                     ? { sessionId: matchingHostedNativeSessionId }
                     : {}),
+                  // Tells the manager not to fall back on the conversation's
+                  // previous session either: this turn starts a new task.
+                  ...(resetExternalSession ? { resetExternalSession: true } : {}),
                   // Resume the agent's own native session, but only for an
                   // import whose binding has been verified. The id comes from
                   // the session row, which is where it has always lived. The
@@ -4255,6 +4444,9 @@ export function useClaudeChat() {
           // Persist this session's final list. The slice already holds the
           // live writes (keyed by session), so read it back; fall back to a
           // locally-assembled list if the slice was somehow cleared.
+          const externalAgentName =
+            useExternalAgentStore.getState().agents[extAgentId]?.name ??
+            (turnRuntimeRef?.kind === "host" ? turnRuntimeRef.name : undefined)
           const finalAssistant: UIMessage = {
             id: assistantId,
             role: "assistant",
@@ -4274,8 +4466,19 @@ export function useClaudeChat() {
               completedAt,
               reportedDurationMs: result.duration,
               routing: buildRoutingRunMetadata(sendOptions),
-              agent: turnAgentStamp(sessionId),
+              // The agent that answered, not the conversation's agent mode: the
+              // reply header named every Kimi Code turn "Standard".
+              agent: externalAgentName ? { name: externalAgentName } : turnAgentStamp(sessionId),
               ...(routeStamp ? { route: routeStamp } : {}),
+              // Which of the agent's memories answered, so the route resumed
+              // next can be told what this one said.
+              externalAgent: {
+                agentId: extAgentId,
+                route: externalAgentRouteKey({
+                  sessionId: result.sessionId ?? modelSelection.gatewayLink,
+                  cogniaModel,
+                }),
+              },
             })
           )
           // The agent's own token accounting — including the context occupancy
@@ -4541,80 +4744,96 @@ export function useClaudeChat() {
             }
           }
         }
-        await bindChatTurnContext({
-          runId: executionRunId,
-          context: {
-            ...(sendOptions.cwd ? { cwd: sendOptions.cwd } : {}),
-            ...(session?.projectId ? { projectId: session.projectId } : {}),
-            ...(boundWorkspaceRoot ? { workspaceBindingRef: executionRunId } : {}),
-            sendOptions,
-          },
-        })
-        // Anything `project_history_search` deposited before this point belongs
-        // to a turn that never landed (aborted, errored, or interrupted) — its
-        // fold never ran to drain it. Clearing here rather than on the turn's
-        // way out avoids racing the fold, and states the rule plainly: a turn
-        // cites only what THIS turn read.
-        clearProjectHistoryEvidence(sessionId)
-        // Cache finalized options before dispatch. A host can settle the turn
-        // inside the awaited dispatch, and turnComplete reads this exact row to
-        // persist pre-search sources on the assistant reply.
-        useChatStore.getState().setLastSend(sessionId, {
-          content: effectiveContent,
-          options: sendOptions,
-          attemptIndex: 0,
-          routingCommitted: false,
-          ...(routeStamp ? { routeStamp } : {}),
-        })
-        // Armed BEFORE the dispatch, not after it. `sendPrompt` is awaited, and
-        // a turn can settle inside that await (the host rejects the prompt, an
-        // error or `sidecar_exited` frame is processed). The store subscription
-        // that disarms only walks `watchdog.armed()`, so arming afterwards meant
-        // the settle found nothing to disarm and the clock then ran against an
-        // already-idle session — surfacing "the turn has gone silent" 90 seconds
-        // later on a conversation that had finished. Arming first puts the
-        // session in `armed()` before any frame can arrive.
-        silenceWatchdogRef.current?.arm(sessionId)
-        if (standaloneEngineTurn) {
-          // Standalone (BYOK): run the turn in-renderer against the user's own
-          // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
-          // store via the same event queue; the engine emits `session_ended`.
-          const controller = new AbortController()
-          abortStaleLocalRuntime = () => controller.abort()
-          standaloneAbortRef.current.set(sessionId, controller)
-          chatTurnPerformance.markDispatched(sessionId)
-          void runStandaloneTurn({
-            sessionId,
-            messages: providerPayload.messages,
-            sendOptions,
-            emit: enqueueClaudeEvent,
-            signal: controller.signal,
-          }).finally(() => {
-            if (standaloneAbortRef.current.get(sessionId) === controller) {
-              standaloneAbortRef.current.delete(sessionId)
-            }
+        await withTranscriptRuntimeLock(sessionId, async () => {
+          sendOptions = await prepareTranscriptRuntimeSend(sessionId, sendOptions, {
+            currentMessageId:
+              callOptions?.regenerateBranch?.anchorId ??
+              (skipAppend ? turnMessageId(previousMessages) : userMsg.id),
+            replacesHistory: Boolean(callOptions?.branchTag || callOptions?.regenerateBranch),
+            skipHydration: standaloneEngineTurn || Boolean(callOptions?.sharedRequest),
+            activeBranchByGroup:
+              useChatStore.getState().sessions[sessionId]?.activeBranchByGroup ??
+              session?.activeBranchByGroup,
           })
-        } else {
-          if (
-            (sendOptions.execution?.runtimeAdapter ??
-              (sendOptions.provider === "anthropic" || !sendOptions.provider
-                ? "claude-agent-sdk"
-                : "ai-sdk")) === "claude-agent-sdk"
-          ) {
-            const { sdkSessionStorageFromOptions } = await import("@/lib/claude/claude-sdk-rollout")
-            await updateSession(sessionId, {
-              sdkSessionStorage: sdkSessionStorageFromOptions(sendOptions),
-            })
-          }
-          chatTurnPerformance.markDispatched(sessionId)
-          if (dispatchClaim === "claimed") {
-            await sendPrompt(sessionId, effectiveContent, sendOptions, {
-              commandId: chatSubmissionId(executionRunId),
+          await bindChatTurnContext({
+            runId: executionRunId,
+            context: {
+              ...(sendOptions.cwd ? { cwd: sendOptions.cwd } : {}),
+              ...(session?.projectId ? { projectId: session.projectId } : {}),
+              ...(boundWorkspaceRoot ? { workspaceBindingRef: executionRunId } : {}),
+              sendOptions,
+            },
+          })
+          // Anything `project_history_search` deposited before this point belongs
+          // to a turn that never landed (aborted, errored, or interrupted) — its
+          // fold never ran to drain it. Clearing here rather than on the turn's
+          // way out avoids racing the fold, and states the rule plainly: a turn
+          // cites only what THIS turn read.
+          clearProjectHistoryEvidence(sessionId)
+          // Cache finalized options before dispatch. A host can settle the turn
+          // inside the awaited dispatch, and turnComplete reads this exact row to
+          // persist pre-search sources on the assistant reply.
+          useChatStore.getState().setLastSend(sessionId, {
+            content: effectiveContent,
+            options: sendOptions,
+            attemptIndex: 0,
+            routingCommitted: false,
+            ...(routeStamp ? { routeStamp } : {}),
+          })
+          // Armed BEFORE the dispatch, not after it. `sendPrompt` is awaited, and
+          // a turn can settle inside that await (the host rejects the prompt, an
+          // error or `sidecar_exited` frame is processed). The store subscription
+          // that disarms only walks `watchdog.armed()`, so arming afterwards meant
+          // the settle found nothing to disarm and the clock then ran against an
+          // already-idle session — surfacing "the turn has gone silent" 90 seconds
+          // later on a conversation that had finished. Arming first puts the
+          // session in `armed()` before any frame can arrive.
+          silenceWatchdogRef.current?.arm(sessionId)
+          if (standaloneEngineTurn) {
+            // Standalone (BYOK): run the turn in-renderer against the user's own
+            // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
+            // store via the same event queue; the engine emits `session_ended`.
+            const controller = new AbortController()
+            abortStaleLocalRuntime = () => controller.abort()
+            standaloneAbortRef.current.set(sessionId, controller)
+            chatTurnPerformance.markDispatched(sessionId)
+            void runStandaloneTurn({
+              sessionId,
+              messages: providerPayload.messages,
+              sendOptions,
+              emit: enqueueClaudeEvent,
+              signal: controller.signal,
+            }).finally(() => {
+              if (standaloneAbortRef.current.get(sessionId) === controller) {
+                standaloneAbortRef.current.delete(sessionId)
+              }
             })
           } else {
-            await sendPrompt(sessionId, effectiveContent, sendOptions)
+            if (
+              (sendOptions.execution?.runtimeAdapter ??
+                (sendOptions.provider === "anthropic" || !sendOptions.provider
+                  ? "claude-agent-sdk"
+                  : "ai-sdk")) === "claude-agent-sdk"
+            ) {
+              const { sdkSessionStorageFromOptions } =
+                await import("@/lib/claude/claude-sdk-rollout")
+              await updateSession(sessionId, {
+                sdkSessionStorage: sdkSessionStorageFromOptions(sendOptions),
+              })
+            }
+            chatTurnPerformance.markDispatched(sessionId)
+            if (dispatchClaim === "claimed") {
+              await sendPrompt(sessionId, effectiveContent, sendOptions, {
+                commandId: chatSubmissionId(executionRunId),
+                transcriptRuntime: "prepared",
+              })
+            } else {
+              await sendPrompt(sessionId, effectiveContent, sendOptions, {
+                transcriptRuntime: "prepared",
+              })
+            }
           }
-        }
+        })
         // The host owns the turn now; its `session_ended` seals the run.
         routerFusionAwaitingDispatch = false
         if (durableLeaseLost) return
@@ -4698,6 +4917,7 @@ export function useClaudeChat() {
       tRouting,
       tInlineErr,
       tDiagnostics,
+      tPiPackages,
       tVideo,
       tCollab,
       warnTextOnlyOmissions,
@@ -4859,8 +5079,24 @@ export function useClaudeChat() {
   // channel, and drain pending results whenever a session (re)opens idle —
   // covers relaunches (journaled pending rows) and panes closed at settle.
   useEffect(() => {
-    return registerBackgroundReplaySend((framedText, sessionId) => {
-      void sendRef.current?.(framedText, undefined, { sessionId })
+    return registerBackgroundReplaySend(async (framedText, sessionId, deliveryId) => {
+      let accepted = false
+      try {
+        await sendRef.current?.(framedText, undefined, {
+          sessionId,
+          throwOnError: true,
+          backgroundDelivery: {
+            id: deliveryId,
+            onAccepted: () => {
+              accepted = true
+            },
+          },
+        })
+      } catch {
+        // Durable acceptance owns retries once committed, even if dispatch
+        // subsequently fails. Before acceptance the journal remains pending.
+      }
+      return accepted
     })
   }, [])
 

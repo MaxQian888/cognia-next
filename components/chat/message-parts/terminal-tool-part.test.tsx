@@ -164,6 +164,18 @@ describe("TerminalToolPart", () => {
     expect(screen.getByTestId("reading-collapse")).toBeInTheDocument()
   })
 
+  it("keeps a long command inside the row, scrolling sideways on touch", () => {
+    render(
+      <TerminalToolPart
+        part={bashPart("output-available", { output: "done" } as Partial<ToolUIPart>)}
+      />
+    )
+    const target = screen.getByText("ls -la")
+    expect(target.className).toContain("min-w-0")
+    expect(target.className).toContain("pointer-coarse:overflow-x-auto")
+    expect(target.className).toContain("[&::-webkit-scrollbar]:hidden")
+  })
+
   it("lets the caller seed the open default (expand-all / detailed mode)", () => {
     const { unmount } = render(<TerminalToolPart part={bashPart("output-available")} defaultOpen />)
     expect(screen.getByRole("button", { name: /ls -la/ })).toHaveAttribute("aria-expanded", "true")

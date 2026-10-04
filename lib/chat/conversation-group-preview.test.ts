@@ -89,6 +89,29 @@ describe("applyTeamGroupPreviewCaps", () => {
     expect(capped.previewHidden).toBe(8 - SQUAD_GROUP_PREVIEW_LIMIT)
   })
 
+  it("never caps away the open conversation, and counts one row fewer behind the expander", () => {
+    const chats = teamGroup(UNGROUPED_ID, 10)
+    const open = chats.sessions[8]!
+    const [section] = applyTeamGroupPreviewCaps([chats], EMPTY, open.id)
+    if (section.kind !== "group") throw new Error("expected group")
+    expect(section.sessions.map((s) => s.id)).toEqual([
+      ...chats.sessions.slice(0, CHATS_GROUP_PREVIEW_LIMIT).map((s) => s.id),
+      open.id,
+    ])
+    expect(section.previewHidden).toBe(10 - CHATS_GROUP_PREVIEW_LIMIT - 1)
+  })
+
+  it("caps as usual when the open conversation is already in the preview or elsewhere", () => {
+    const squad = teamGroup("t-1", 8)
+    const [inside] = applyTeamGroupPreviewCaps([squad], EMPTY, squad.sessions[0]!.id)
+    const [elsewhere] = applyTeamGroupPreviewCaps([squad], EMPTY, "not-in-this-group")
+    for (const section of [inside, elsewhere]) {
+      if (section.kind !== "group") throw new Error("expected group")
+      expect(section.sessions).toHaveLength(SQUAD_GROUP_PREVIEW_LIMIT)
+      expect(section.previewHidden).toBe(8 - SQUAD_GROUP_PREVIEW_LIMIT)
+    }
+  })
+
   it("leaves non-team groups and non-group sections alone", () => {
     const otherAxis: ConversationSection = {
       kind: "group",

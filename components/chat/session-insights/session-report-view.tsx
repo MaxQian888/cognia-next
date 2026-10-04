@@ -2,16 +2,20 @@
 
 /**
  * Presentational layout for a {@link SessionReport}: KPI tiles, per-turn
- * averages, per-model usage (incl. throughput), the seven health assessments,
- * and a friction/thinking signals panel. Pure props in — the data + memoized
- * analysis come from `useSessionReport`.
+ * averages, the per-turn cost timeline (with the priciest turns and this
+ * conversation's rank among recent ones), per-model usage (incl. throughput),
+ * cache savings and per-turn percentiles, the seven health assessments, and a
+ * friction/thinking signals panel. Pure props in — the data + memoized
+ * analysis come from `useSessionReport`, the rank from `useSessionCostRank`.
+ *
+ * Costs go through `formatBucketCost`, so a session holding turns nobody could
+ * price reads as a lower bound here exactly as it does on the Usage dashboard.
  */
 
 import { useTranslations } from "next-intl"
 
 import {
   cacheHitRate,
-  formatCostInCurrency,
   formatDuration,
   formatPercent,
   formatTokens,
@@ -19,7 +23,11 @@ import {
   tokensPerSecond,
 } from "@/types/system/usage"
 import type { SessionReport } from "@/lib/analysis/session-report"
+import { formatBucketCost } from "@/lib/usage/session-analytics"
+import type { SessionCostRank } from "@/lib/usage/session-cost-profile"
 import { AssessmentCard } from "@/components/chat/session-insights/assessment-card"
+import { SessionCostTimeline } from "@/components/chat/session-insights/session-cost-timeline"
+import { UsageEfficiencyPanel } from "@/components/usage/usage-efficiency-panel"
 import { SkillSuggestionCard } from "@/components/chat/skill-suggestion-card"
 import {
   TestResults,
@@ -29,7 +37,8 @@ import {
   TestSuiteStats,
 } from "@/components/ai-elements/test-results"
 
-function Kpi({ label, value }: { label: string; value: string | number }) {
+/** One labelled figure. Shared with the Usage & context dock panel. */
+export function Kpi({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-md border p-2">
       <p className="text-[10px] uppercase text-muted-foreground">{label}</p>
@@ -41,9 +50,15 @@ function Kpi({ label, value }: { label: string; value: string | number }) {
 export function SessionReportView({
   report,
   sessionId,
+  rank = null,
+  onJumpToMessage,
 }: {
   report: SessionReport
   sessionId?: string
+  /** This session's cost rank among recent ones, when there are enough peers. */
+  rank?: SessionCostRank | null
+  /** Jump back to a turn in the transcript; the priciest-turns list uses it. */
+  onJumpToMessage?: (messageId: string) => void
 }) {
   const t = useTranslations("sessionInsights")
   const totalTokens =
@@ -67,7 +82,8 @@ export function SessionReportView({
 
   const turns = report.turns
   const avgTokens = turns > 0 ? formatTokens(Math.round(totalTokens / turns)) : "—"
-  const avgCost = turns > 0 ? formatCostInCurrency(report.totalCostUsd / turns) : "—"
+  const avgCost =
+    turns > 0 ? formatBucketCost(report.totalCostUsd / turns, report.unpricedTurns, turns) : "—"
   const avgDuration =
     turns > 0 && report.totalDurationMs > 0 ? formatDuration(report.totalDurationMs / turns) : "—"
   const passedTests = report.testSnapshots.reduce((sum, snapshot) => sum + snapshot.passed, 0)
@@ -94,7 +110,10 @@ export function SessionReportView({
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Kpi label={t("kpi.turns")} value={report.turns} />
         <Kpi label={t("kpi.tokens")} value={formatTokens(totalTokens)} />
-        <Kpi label={t("kpi.cost")} value={formatCostInCurrency(report.totalCostUsd)} />
+        <Kpi
+          label={t("kpi.cost")}
+          value={formatBucketCost(report.totalCostUsd, report.unpricedTurns, report.turns)}
+        />
         <Kpi label={t("kpi.speed")} value={speedLabel} />
         <Kpi label={t("kpi.duration")} value={durationLabel} />
         <Kpi label={t("kpi.reasoning")} value={reasoningLabel} />
@@ -118,6 +137,8 @@ export function SessionReportView({
         </section>
       )}
 
+      <SessionCostTimeline points={report.timeline} rank={rank} onJump={onJumpToMessage} />
+
       {/* Per-model usage */}
       {report.models.length > 0 && (
         <section className="space-y-1.5">
@@ -133,7 +154,7 @@ export function SessionReportView({
                 <span className="truncate">{m.model}</span>
                 <span className="shrink-0 font-mono text-muted-foreground">
                   {formatTokens(m.inputTokens + m.outputTokens + m.cacheReadTokens)} ·{" "}
-                  {formatCostInCurrency(m.costUsd)}
+                  {formatBucketCost(m.costUsd, m.unpricedTurns, m.turns)}
                   {modelSpeed != null && (
                     <> · {t("units.tokPerSec", { value: formatTokensPerSec(modelSpeed) })}</>
                   )}
@@ -141,6 +162,17 @@ export function SessionReportView({
               </div>
             )
           })}
+        </section>
+      )}
+
+      {turns > 0 && (
+        <section className="space-y-1.5">
+          <p className="text-[10px] uppercase text-muted-foreground">{t("efficiency.title")}</p>
+          <UsageEfficiencyPanel
+            savings={report.cacheSavings}
+            distribution={report.turnDistribution}
+            testid="session-efficiency"
+          />
         </section>
       )}
 

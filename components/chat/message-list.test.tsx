@@ -294,6 +294,12 @@ const userMsg = (id: string, text: string): UIMessage => ({
   parts: [{ type: "text", text }],
 })
 
+const assistantMsg = (id: string, text: string): UIMessage => ({
+  id,
+  role: "assistant",
+  parts: [{ type: "text", text }],
+})
+
 // More than VIRTUALIZE_THRESHOLD messages forces the virtualized render path.
 const manyMsgs = (n: number): UIMessage[] =>
   Array.from({ length: n }, (_, i) => userMsg(`vm-${i}`, `Msg ${i}`))
@@ -1903,7 +1909,8 @@ describe("MessageList — the floating jump offer", () => {
     })
     expect(mode()).toBe("toBottom")
 
-    const grown = [...initial, userMsg("vm-new-1", "one"), userMsg("vm-new-2", "two")]
+    // Replies, not sends: a new message of the reader's own snaps to the foot.
+    const grown = [...initial, assistantMsg("vm-new-1", "one"), assistantMsg("vm-new-2", "two")]
     await act(async () => {
       rerender(
         <Wrapper>
@@ -1939,6 +1946,185 @@ describe("MessageList — the floating jump offer", () => {
       fireEvent.scroll(scrollEl)
     })
     expect(mode()).toBe("toBottom")
+  })
+})
+
+describe("MessageList — following the conversation", () => {
+  /** Measurable geometry plus a scrollTop that records every write. */
+  function primeScroller(el: Element) {
+    let height = 1000
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => height })
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 200 })
+    const box = { top: 0 }
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => box.top,
+      set: (v: number) => {
+        box.top = v
+      },
+    })
+    const scrollTo = jest.fn((arg: { top: number }) => {
+      box.top = arg.top
+    })
+    ;(el as HTMLElement).scrollTo = scrollTo as unknown as HTMLElement["scrollTo"]
+    return {
+      box,
+      scrollTo,
+      grow: (next: number) => {
+        height = next
+      },
+    }
+  }
+
+  const pill = () => screen.queryByTestId("conversation-jump-pill")
+
+  function renderList(messages: UIMessage[], status: "idle" | "streaming" = "idle") {
+    const Wrapper = withAdapter(makeAdapter())
+    const view = render(
+      <Wrapper>
+        <MessageList messages={messages} status={status} />
+      </Wrapper>
+    )
+    const rerenderList = (next: UIMessage[], nextStatus: "idle" | "streaming" = status) =>
+      view.rerender(
+        <Wrapper>
+          <MessageList messages={next} status={nextStatus} />
+        </Wrapper>
+      )
+    const scrollEl = view.container.querySelector('[role="log"]')!
+    return { ...view, rerenderList, scrollEl }
+  }
+
+  it("snaps to the foot and re-arms following when the reader sends a message", async () => {
+    const initial = [userMsg("u1", "hi"), assistantMsg("a1", "hello")]
+    const { rerenderList, scrollEl } = renderList(initial)
+    const scroll = primeScroller(scrollEl)
+    // Reading further up: following is off and the pill is on offer.
+    scroll.box.top = 900
+    await act(async () => fireEvent.scroll(scrollEl))
+    scroll.box.top = 100
+    await act(async () => fireEvent.scroll(scrollEl))
+    expect(pill()).toBeInTheDocument()
+
+    scroll.grow(1300)
+    await act(async () => rerenderList([...initial, userMsg("u2", "next question")]))
+    expect(scroll.box.top).toBe(1300)
+    expect(pill()).toBeNull()
+
+    // The reply that follows is followed as it streams in.
+    scroll.grow(1700)
+    await act(async () =>
+      rerenderList(
+        [...initial, userMsg("u2", "next question"), assistantMsg("a2", "streaming…")],
+        "streaming"
+      )
+    )
+    expect(scroll.box.top).toBe(1700)
+  })
+
+  it("does not snap when the newest user message changes because one was deleted", async () => {
+    const initial = [userMsg("u1", "hi"), assistantMsg("a1", "hello"), userMsg("u2", "bye")]
+    const { rerenderList, scrollEl } = renderList(initial)
+    const scroll = primeScroller(scrollEl)
+    scroll.box.top = 900
+    await act(async () => fireEvent.scroll(scrollEl))
+    scroll.box.top = 100
+    await act(async () => fireEvent.scroll(scrollEl))
+
+    await act(async () => rerenderList(initial.slice(0, 2)))
+    expect(scroll.box.top).toBe(100)
+  })
+
+  it("stops following while streaming once the reader scrolls up", async () => {
+    const { rerenderList, scrollEl } = renderList(
+      [userMsg("u1", "hi"), assistantMsg("a1", "one")],
+      "streaming"
+    )
+    const scroll = primeScroller(scrollEl)
+    scroll.box.top = 800
+    await act(async () => fireEvent.scroll(scrollEl))
+    scroll.box.top = 300
+    await act(async () => fireEvent.scroll(scrollEl))
+    expect(pill()).toHaveAttribute("data-mode", "toBottom")
+
+    scroll.grow(1400)
+    await act(async () => rerenderList([userMsg("u1", "hi"), assistantMsg("a1", "one two")]))
+    expect(scroll.box.top).toBe(300)
+  })
+
+  it("keeps following when content grew before the pin's scroll event arrived", async () => {
+    // The scroll event a pin causes is delivered a frame later. If a fence or an
+    // image grew the transcript in between, that event reads "far from the foot"
+    // — but the reader did not move, so following must survive it.
+    const { rerenderList, scrollEl } = renderList(
+      [userMsg("u1", "hi"), assistantMsg("a1", "one")],
+      "streaming"
+    )
+    const scroll = primeScroller(scrollEl)
+    scroll.box.top = 800
+    await act(async () => fireEvent.scroll(scrollEl))
+    scroll.grow(1500)
+    await act(async () => fireEvent.scroll(scrollEl))
+    expect(pill()).toBeNull()
+
+    scroll.grow(1600)
+    await act(async () => rerenderList([userMsg("u1", "hi"), assistantMsg("a1", "one two")]))
+    expect(scroll.box.top).toBe(1600)
+  })
+
+  it("stops following on an upward wheel even inside the at-bottom threshold", async () => {
+    const { rerenderList, scrollEl } = renderList(
+      [userMsg("u1", "hi"), assistantMsg("a1", "one")],
+      "streaming"
+    )
+    const scroll = primeScroller(scrollEl)
+    scroll.box.top = 800
+    await act(async () => fireEvent.scroll(scrollEl))
+    await act(async () => fireEvent.wheel(scrollEl, { deltaY: -20 }))
+    scroll.box.top = 790
+    await act(async () => fireEvent.scroll(scrollEl))
+
+    scroll.grow(1400)
+    await act(async () => rerenderList([userMsg("u1", "hi"), assistantMsg("a1", "one two")]))
+    expect(scroll.box.top).toBe(790)
+  })
+
+  it("resumes following from the jump pill, and hides it at once", async () => {
+    const { rerenderList, scrollEl } = renderList(
+      [userMsg("u1", "hi"), assistantMsg("a1", "one")],
+      "streaming"
+    )
+    const scroll = primeScroller(scrollEl)
+    scroll.box.top = 800
+    await act(async () => fireEvent.scroll(scrollEl))
+    scroll.box.top = 200
+    await act(async () => fireEvent.scroll(scrollEl))
+
+    fireEvent.click(screen.getByTestId("conversation-jump-pill"))
+    expect(scroll.scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" })
+    expect(pill()).toBeNull()
+
+    // The stream keeps growing while the smooth scroll runs: it is followed.
+    scroll.grow(1500)
+    await act(async () => rerenderList([userMsg("u1", "hi"), assistantMsg("a1", "one two")]))
+    expect(scroll.box.top).toBe(1500)
+  })
+
+  it("hides the pill while the reader sits at the foot, even after opening a disclosure", async () => {
+    const { container, scrollEl } = renderList([userMsg("u1", "hi"), assistantMsg("a1", "one")])
+    const scroll = primeScroller(scrollEl)
+    scroll.box.top = 800
+    await act(async () => fireEvent.scroll(scrollEl))
+    expect(pill()).toBeNull()
+
+    // A disclosure stops following (the reader is reading it in place) but
+    // they are still at the bottom, so there is nothing to jump back to.
+    const content = container.querySelector('[data-slot="conversation-reading-column"]')!
+    const disclosure = document.createElement("button")
+    disclosure.setAttribute("aria-expanded", "false")
+    content.append(disclosure)
+    await act(async () => fireEvent.click(disclosure))
+    expect(pill()).toBeNull()
   })
 })
 

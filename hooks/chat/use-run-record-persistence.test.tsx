@@ -128,4 +128,32 @@ describe("useRunRecordPersistence", () => {
     expect(rows[0]!.status).toBe("done")
     expect(typeof rows[0]!.settledAt).toBe("number")
   })
+
+  it("keeps the turn's real start when the clock has already reset at settle", async () => {
+    const startedAt = Date.now() - 5 * 60_000
+    const { rerender } = renderHook(({ id }) => useRunRecordPersistence(id), {
+      initialProps: { id: SID },
+    })
+    seed({
+      status: "streaming",
+      runId: 1,
+      runTiming: { startedAt, pausedAt: null, pausedAccumMs: 0 },
+      messages: [assistantWithTool("input-available")],
+    })
+    rerender({ id: SID })
+    // The turn ends and the store resets its clock to idle in the same commit.
+    seed({
+      status: "idle",
+      runId: 1,
+      runTiming: { startedAt: null, pausedAt: null, pausedAccumMs: 0 },
+      messages: [assistantWithTool("output-available")],
+    })
+    await act(async () => {
+      rerender({ id: SID })
+      await wait(50)
+    })
+    const rows = await listRunRecords(SID)
+    expect(rows[0]!.startedAt).toBe(startedAt)
+    expect(rows[0]!.settledAt! - rows[0]!.startedAt).toBeGreaterThanOrEqual(5 * 60_000)
+  })
 })

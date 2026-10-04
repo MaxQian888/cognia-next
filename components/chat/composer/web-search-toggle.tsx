@@ -11,7 +11,12 @@
 // clicking it opens a small card that names the blocker and offers a button
 // to the settings section that can fix it (the host menu closes behind the
 // jump). The jump is a choice, not a surprise — same convention as the
-// external-services row, but with the "why" said first.
+// external-services row, but with the "why" said first. From the desktop
+// attach menu the card is a flyout; the mobile `+` sheet drills in to it
+// instead of floating it over itself (see `ComposerMenuPanel`).
+
+/** The id the setup card goes by in a host sheet. */
+export const WEB_SEARCH_SETUP_MENU_PANEL_ID = "web-search-setup"
 
 import { useTranslations } from "next-intl"
 import { GlobeIcon } from "lucide-react"
@@ -23,7 +28,11 @@ import type { SettingsTab } from "@/lib/slash-commands/builtin"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useComposerSessionId } from "./composer-session-context"
-import { useComposerMenuClose } from "./composer-menu-context"
+import {
+  ComposerMenuPanel,
+  useComposerMenuClose,
+  useComposerMenuPanels,
+} from "./composer-menu-context"
 import { CapabilityRow } from "./capability-row"
 import { useFlyoutPlacement } from "./use-flyout-placement"
 import { cn } from "@/lib/utils"
@@ -54,6 +63,7 @@ export function WebSearchToggle({
   // popover/drawer stays open otherwise.
   const closeMenu = useComposerMenuClose()
   const { className: flyoutClassName, ...placement } = useFlyoutPlacement()
+  const panels = useComposerMenuPanels()
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -112,7 +122,7 @@ export function WebSearchToggle({
         ? t("tooltipOn", { provider: SEARCH_PROVIDERS[activeProvider]?.name ?? activeProvider })
         : t("tooltipOff")
 
-  const row = (
+  const row = (props: React.ButtonHTMLAttributes<HTMLButtonElement> = {}) => (
     <CapabilityRow
       icon={<GlobeIcon className="size-4" />}
       label={tComposer("webLabel")}
@@ -125,31 +135,49 @@ export function WebSearchToggle({
       disabled={disabled}
       // No hover on touch — the mobile sheet reads the reason off the row.
       hint={setupTab !== null ? t(setupKey) : undefined}
-      // In setup state the PopoverTrigger owns the click.
+      // In setup state the PopoverTrigger (or the sheet's drill-in) owns the click.
       onClick={setupTab === null ? () => setOn(!on, composerSessionId) : undefined}
       tooltip={tooltip}
+      {...props}
     />
   )
-  if (setupTab === null) return row
+  if (setupTab === null) return row()
+
+  const goToSettings = () => {
+    closeMenu()
+    onOpenSettings?.(setupTab)
+  }
+
+  if (panels) {
+    return (
+      <>
+        {row({
+          "aria-haspopup": "dialog",
+          "aria-expanded": panels.activePanelId === WEB_SEARCH_SETUP_MENU_PANEL_ID,
+          onClick: () => panels.openPanel(WEB_SEARCH_SETUP_MENU_PANEL_ID, tComposer("webLabel")),
+        })}
+        <ComposerMenuPanel id={WEB_SEARCH_SETUP_MENU_PANEL_ID}>
+          <div className="px-2 py-2" data-testid="web-search-setup-panel">
+            <p className="text-sm text-muted-foreground">{t(setupKey)}</p>
+            <Button type="button" className="touch-target mt-3 w-full" onClick={goToSettings}>
+              {t("goToSettings")}
+            </Button>
+          </div>
+        </ComposerMenuPanel>
+      </>
+    )
+  }
 
   return (
     <Popover>
-      <PopoverTrigger asChild>{row}</PopoverTrigger>
+      <PopoverTrigger asChild>{row()}</PopoverTrigger>
       <PopoverContent
         {...placement}
         className={cn("w-64 p-3", flyoutClassName)}
         data-testid="web-search-setup-flyout"
       >
         <p className="text-sm text-muted-foreground">{t(setupKey)}</p>
-        <Button
-          type="button"
-          size="sm"
-          className="mt-2 w-full"
-          onClick={() => {
-            closeMenu()
-            onOpenSettings?.(setupTab)
-          }}
-        >
+        <Button type="button" size="sm" className="mt-2 w-full" onClick={goToSettings}>
           {t("goToSettings")}
         </Button>
       </PopoverContent>

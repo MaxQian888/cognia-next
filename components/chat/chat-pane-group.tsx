@@ -75,6 +75,10 @@ export interface ChatPaneGroupProps {
   /** Disable every pane composer without hiding cached conversation data. */
   composerDisabled?: boolean
   runtimeNotice?: ReactNode
+  /** See `ChatView`'s `runtimeStrip`. */
+  runtimeStrip?: ReactNode
+  /** See `ChatView`'s `composerDisabledPlaceholder`. */
+  composerDisabledPlaceholder?: string
   /** Per-session plan-approval resume (switch mode + send the resume turn). */
   onResumeAfterPlanApproval?: (
     prompt: string,
@@ -109,6 +113,8 @@ export function ChatPaneGroup({
   composerRef,
   composerDisabled,
   runtimeNotice,
+  runtimeStrip,
+  composerDisabledPlaceholder,
   onResumeAfterPlanApproval,
 }: ChatPaneGroupProps) {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -184,6 +190,8 @@ export function ChatPaneGroup({
         composerRef={withComposerRef ? composerRef : undefined}
         composerDisabled={composerDisabled}
         runtimeNotice={runtimeNotice}
+        runtimeStrip={runtimeStrip}
+        composerDisabledPlaceholder={composerDisabledPlaceholder}
         onResumeAfterPlanApproval={
           onResumeAfterPlanApproval && sessionId
             ? (prompt, mode) => onResumeAfterPlanApproval(prompt, mode, sessionId)

@@ -4,6 +4,7 @@ import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createSession } from "@/lib/db/sessions"
+import { persistMessages } from "@/lib/db/messages"
 import {
   mutateSessionWorkingSet,
   readSessionWorkingSet,
@@ -15,6 +16,68 @@ describe("session working set", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("records mutations on the visible branch even when a newer alternative is hidden", async () => {
+    const session = await createSession({ title: "Selected branch" })
+    await persistMessages(session.id, [
+      {
+        id: "older-answer",
+        role: "assistant",
+        parts: [{ type: "text", text: "Original" }],
+        metadata: { branchGroupId: "answer", branchIndex: 0 },
+      },
+      {
+        id: "newer-answer",
+        role: "assistant",
+        parts: [{ type: "text", text: "Alternative" }],
+        metadata: { branchGroupId: "answer", branchIndex: 1 },
+      },
+    ])
+    await getDb().sessions.update(session.id, { activeBranchByGroup: { answer: "older-answer" } })
+    const state = await mutateSessionWorkingSet({
+      sessionId: session.id,
+      expectedRevision: 0,
+      action: "upsert",
+      entry: { kind: "decision", summary: "Use the original answer", origin: "user" },
+    })
+    expect((await getDb().messages.get("older-answer"))?.workingSetSnapshot).toEqual(state)
+    expect((await getDb().messages.get("newer-answer"))?.workingSetSnapshot?.revision).toBe(0)
+  })
+
+  it("records state at message boundaries and preserves it through streaming writes", async () => {
+    const session = await createSession({ title: "History" })
+    const first = {
+      id: "first",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: "Start" }],
+    }
+    await persistMessages(session.id, [first])
+    expect((await getDb().messages.get(first.id))?.workingSetSnapshot?.entries).toEqual([])
+    const state = await mutateSessionWorkingSet({
+      sessionId: session.id,
+      expectedRevision: 0,
+      action: "upsert",
+      entry: { id: "decision", kind: "decision", summary: "Reuse the runtime", origin: "agent" },
+    })
+    const next = {
+      id: "next",
+      role: "assistant" as const,
+      parts: [{ type: "text" as const, text: "Working" }],
+    }
+    await persistMessages(session.id, [first, next])
+    await mutateSessionWorkingSet({
+      sessionId: session.id,
+      expectedRevision: 1,
+      action: "remove",
+      entryId: "decision",
+    })
+    await persistMessages(session.id, [
+      first,
+      { ...next, parts: [{ type: "text", text: "Finished" }] },
+    ])
+    expect((await getDb().messages.get(first.id))?.workingSetSnapshot).toEqual(state)
+    expect((await getDb().messages.get(next.id))?.workingSetSnapshot?.entries).toEqual([])
   })
 
   it("redacts and CAS-updates bounded entries through one mutation seam", async () => {

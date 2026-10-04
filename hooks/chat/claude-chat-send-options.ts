@@ -20,14 +20,16 @@ import { resolveWorkspaceTrustForSend } from "@/lib/workspace/trust-gate"
 import { decideSessionTierPin } from "@/lib/sandbox/pin-session-tier"
 import { resolveSandboxEnabled } from "@/lib/sandbox/binding"
 import { resolveCharacterById } from "@/lib/db/characters"
-import { updateSession } from "@/lib/db/sessions"
+import { getSession, updateSession } from "@/lib/db/sessions"
+import { listMessages } from "@/lib/db/messages"
+import { getDb } from "@/lib/db/schema"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { Character, ChatSession, SendOptions } from "@cognia/agent-config-types"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
-import { selectComposerEphemeralSkillIds, useChatStore } from "@/stores/chat"
+import { selectComposerEphemeralSkillIds, selectVisibleMessages, useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { isTauri } from "@/lib/tauri"
@@ -36,8 +38,133 @@ import { loadCapturedCompactionCheckpoint } from "@/lib/rag/compaction-runtime"
 import { renderCompactionCheckpointForRecovery } from "@/lib/rag/compaction-checkpoint"
 import { inferBuiltInSkillIntents } from "@/lib/skills/intent-resolver"
 import { readOnboardingRequest } from "@/lib/onboarding/request"
+import { convertToModelMessages, type UIMessage } from "ai"
+import { materializeMessageMedia } from "@/lib/chat/media/normalize-message-media"
+import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
+import { withReplyContextLines } from "@/lib/chat/reply-to"
+import { invalidateTranscriptRuntime } from "@/lib/chat/transcript/revision-events"
+import { sessionControl } from "@/lib/claude/ipc"
+import type { RuntimeSessionStatus } from "@cognia/agent-config-types"
+
+/** Rehydrate a replaced AI-SDK session from surviving canonical message parts. */
+export async function buildAiSdkInitialConversation(
+  messages: UIMessage[],
+  currentMessageId: string | null
+): Promise<NonNullable<SendOptions["initialConversation"]>> {
+  const currentIndex = messages.findIndex((message) => message.id === currentMessageId)
+  const history = currentIndex < 0 ? messages : messages.slice(0, currentIndex)
+  const materialized = await Promise.all(history.map(materializeMessageMedia))
+  // Reuse the existing recursive provider gate for historical tool inputs and
+  // outputs as well as prose. The IPC gate checks the converted result again.
+  const gated = gateWorkbenchProviderPayload({
+    content: "",
+    messages: materialized,
+    sendOptions: {},
+  })
+  return await convertToModelMessages(gated.messages, { ignoreIncompleteToolCalls: true })
+}
+
+/** Caller must hold withTranscriptRuntimeLock through preparation and dispatch. */
+export async function prepareTranscriptRuntimeSend(
+  sessionId: string,
+  options: SendOptions,
+  preparation: {
+    currentMessageId?: string | null
+    replacesHistory?: boolean
+    skipHydration?: boolean
+    activeBranchByGroup?: ChatSession["activeBranchByGroup"]
+  } = {}
+): Promise<SendOptions> {
+  const databaseName = getDb().name
+  const assertDatabaseCurrent = () => {
+    if (getDb().name !== databaseName) throw new Error("transcript_database_changed")
+  }
+  let session = await getSession(sessionId)
+  assertDatabaseCurrent()
+  const usesAiSdk =
+    (options.execution?.runtimeAdapter ??
+      (options.provider === "anthropic" || !options.provider ? "claude-agent-sdk" : "ai-sdk")) ===
+    "ai-sdk"
+  let prepared = options
+  let lostRetainedContext = false
+  if (
+    usesAiSdk &&
+    !preparation.skipHydration &&
+    session?.sdkSessionId &&
+    !session.runtimeTranscriptInvalidated &&
+    !preparation.replacesHistory
+  ) {
+    // A persisted SDK id is not evidence that its in-memory loop survived a
+    // restart. Probe the existing control channel without reading full history.
+    const runtime = await sessionControl<RuntimeSessionStatus>(sessionId, "runtimeStatus")
+    assertDatabaseCurrent()
+    if (
+      runtime?.retained === true &&
+      runtime.runtimeAdapter === "ai-sdk" &&
+      runtime.sdkSessionId === session.sdkSessionId &&
+      runtime.provider === options.provider &&
+      runtime.cwd === options.cwd &&
+      runtime.transcriptInvalidationId === session.runtimeTranscriptGeneration &&
+      runtime.active === false
+    ) {
+      return {
+        ...options,
+        initialConversation: undefined,
+        expectedRuntimeSessionId: runtime.sdkSessionId,
+        transcriptInvalidationId: session.runtimeTranscriptGeneration,
+      }
+    }
+    lostRetainedContext = true
+  }
+  if (
+    usesAiSdk &&
+    !preparation.skipHydration &&
+    (!session?.sdkSessionId ||
+      session.runtimeTranscriptInvalidated ||
+      preparation.replacesHistory ||
+      lostRetainedContext)
+  ) {
+    if (preparation.replacesHistory) {
+      await invalidateTranscriptRuntime(sessionId)
+      assertDatabaseCurrent()
+      session = await getSession(sessionId)
+      assertDatabaseCurrent()
+    }
+    if (
+      options.initialConversation === undefined ||
+      session?.runtimeTranscriptInvalidated ||
+      preparation.replacesHistory ||
+      lostRetainedContext
+    ) {
+      const canonical = await listMessages(sessionId)
+      assertDatabaseCurrent()
+      const visible = withReplyContextLines(
+        selectVisibleMessages(
+          canonical,
+          preparation.activeBranchByGroup ?? session?.activeBranchByGroup ?? {}
+        )
+      )
+      prepared = {
+        ...options,
+        initialConversation: await buildAiSdkInitialConversation(
+          visible,
+          preparation.currentMessageId === undefined
+            ? (options.turnId ?? null)
+            : preparation.currentMessageId
+        ),
+      }
+    }
+  }
+  assertDatabaseCurrent()
+  return {
+    ...prepared,
+    expectedRuntimeSessionId: undefined,
+    transcriptInvalidationId: session?.runtimeTranscriptGeneration,
+  }
+}
 
 export interface ChatTurnSkillIdentity {
+  backgroundDeliveryId?: string
   runId: string
   turnId: string
   attemptId: string
@@ -483,6 +610,7 @@ export async function buildSendOptions(
     emitTrace: true,
     traceSurface: "chat",
     turnId: turnIdentity?.turnId,
+    backgroundDeliveryId: turnIdentity?.backgroundDeliveryId,
     executionIdentity: turnIdentity
       ? {
           sessionId: session?.id ?? "",

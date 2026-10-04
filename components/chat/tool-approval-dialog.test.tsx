@@ -42,7 +42,67 @@ describe("ToolApprovalDialog — input previews", () => {
     const preview = screen.getByTestId("approval-bash-preview")
     expect(preview).toHaveTextContent("git status")
     expect(preview).toHaveTextContent("show status")
-    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "bash")
+    // A wrapping monospace block, not a JSON dump or a sideways-scrolling line.
+    const command = screen.getByTestId("approval-bash-command")
+    expect(command).toHaveTextContent("git status")
+    expect(command).toHaveClass("font-mono", "whitespace-pre-wrap")
+    expect(screen.queryByTestId("code-block")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The reported phone dialog: Kimi Code asked to run Bash and the card read
+   * `Tool "Bash" requires permission / 工具 Bash / 输入 {}`. With the adapter's
+   * recovered preview it now shows the command and Kimi's own description.
+   */
+  it("renders a Kimi Code Bash request as its command", () => {
+    render(
+      <ToolApprovalDialog
+        approval={approval({
+          toolName: "Bash",
+          displayName: "Bash",
+          title: "Bash",
+          description: "Requesting approval to Running: echo hi",
+          input: { command: "echo hi" },
+        })}
+        onRespond={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("approval-bash-command")).toHaveTextContent("echo hi")
+    expect(screen.getByText("Requesting approval to Running: echo hi")).toBeInTheDocument()
+    expect(screen.queryByText("{}")).not.toBeInTheDocument()
+  })
+
+  it("names the call instead of showing a bare {} when no arguments arrived", () => {
+    render(
+      <ToolApprovalDialog
+        approval={approval({ toolName: "Bash", title: "Running: echo hi", input: {} })}
+        onRespond={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("approval-input-fallback")).toHaveTextContent("Running: echo hi")
+    expect(screen.getByTestId("approval-input-fallback")).toHaveTextContent("noInputDetails")
+    expect(screen.queryByTestId("code-block")).not.toBeInTheDocument()
+  })
+
+  it("lays the three answers out as one consistent action group", () => {
+    render(
+      <ToolApprovalDialog
+        approval={approval({ toolName: "bash", input: { command: "ls" } })}
+        onRespond={jest.fn()}
+      />
+    )
+    const group = screen.getByRole("group", { name: "actionsTitle" })
+    // Stacked on a phone, one right-aligned row from `sm` up.
+    expect(group).toHaveClass("flex-col", "sm:flex-row-reverse")
+    const buttons = [
+      screen.getByTestId("decision-allow"),
+      screen.getByTestId("decision-allow-always"),
+      screen.getByTestId("decision-deny"),
+    ]
+    for (const button of buttons) {
+      expect(button).toHaveAttribute("data-size", "default")
+      expect(group).toContainElement(button)
+    }
   })
 
   it("renders a diff preview for edit payloads", () => {

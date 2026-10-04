@@ -690,4 +690,87 @@ describe("TaskResourcesPanel", () => {
     delete (URL as Partial<typeof URL>).revokeObjectURL
     anchorClick.mockRestore()
   })
+  describe("on a phone", () => {
+    it("stacks the toolbar and folds secondary actions behind an overflow menu", async () => {
+      const user = userEvent.setup()
+      listRuns.mockResolvedValue([
+        {
+          runId: "run-1",
+          agentId: "eac_43616f0a9d3b4c1e8f7a2b6c5d4e3f21",
+          state: "cancelled",
+          baselineRevision: 0,
+        },
+      ])
+      render(<TaskResourcesPanel sessionId="session-1" layout="mobile" />)
+      await screen.findByText("src/result.md")
+
+      expect(screen.getByTestId("task-resources-panel")).toHaveClass("min-w-0", "overflow-x-hidden")
+      // Nothing secondary sits on the toolbar itself any more…
+      for (const name of ["upload", "undo", "pin", "exportManifest"]) {
+        expect(screen.queryByRole("button", { name })).not.toBeInTheDocument()
+      }
+      // …the primary action stays one tap away beside the run picker…
+      expect(screen.getByRole("button", { name: "applyAll" })).toHaveClass("shrink-0")
+      // …and every picker is bounded to the sheet, so a long run id truncates.
+      const runPicker = screen.getByRole("combobox", { name: "runFilter" })
+      expect(runPicker).toHaveClass("w-full", "min-w-0", "truncate", "flex-1")
+      for (const name of ["originFilter", "statusFilter", "captureFilter"]) {
+        expect(screen.getByRole("combobox", { name })).toHaveClass("w-full", "min-w-0")
+      }
+      expect(screen.getByTestId("task-resources-filters")).toHaveClass("grid", "grid-cols-2")
+
+      await user.click(screen.getByRole("button", { name: "moreActions" }))
+      const items = await screen.findAllByRole("menuitem")
+      expect(items.map((item) => item.textContent)).toEqual([
+        "upload",
+        "undo",
+        "pin",
+        "exportManifest",
+      ])
+      await user.click(screen.getByRole("menuitem", { name: "pin" }))
+      await waitFor(() => expect(pinTaskWorkspace).toHaveBeenCalledWith("task-1", true))
+      await user.click(screen.getByRole("button", { name: "moreActions" }))
+      expect(await screen.findByRole("menuitem", { name: "unpin" })).toBeInTheDocument()
+    })
+
+    it("runs undo and the manifest export from the overflow menu", async () => {
+      const user = userEvent.setup()
+      const anchorClick = jest
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {})
+      render(<TaskResourcesPanel sessionId="session-1" layout="mobile" />)
+      await screen.findByText("src/result.md")
+
+      await user.click(screen.getByRole("button", { name: "moreActions" }))
+      await user.click(await screen.findByRole("menuitem", { name: "undo" }))
+      await waitFor(() => expect(undoTaskWorkspace).toHaveBeenCalledWith("run-1"))
+
+      await user.click(screen.getByRole("button", { name: "moreActions" }))
+      await user.click(await screen.findByRole("menuitem", { name: /exportManifest/ }))
+      await waitFor(() => expect(exportManifest).toHaveBeenCalledWith("task-1", "run-1"))
+      anchorClick.mockRestore()
+    })
+
+    it("explains an unavailable undo inside the menu", async () => {
+      const user = userEvent.setup()
+      jest.mocked(getTaskPatchSet).mockResolvedValue({ reversible: false, files: [] } as never)
+      render(<TaskResourcesPanel sessionId="session-1" layout="mobile" />)
+      await screen.findByText("src/result.md")
+      await waitFor(() => expect(getTaskPatchSet).toHaveBeenCalled())
+
+      await user.click(screen.getByRole("button", { name: "moreActions" }))
+      const undo = await screen.findByRole("menuitem", { name: /undo/ })
+      expect(undo).toHaveAttribute("data-disabled")
+      expect(undo).toHaveTextContent("undoUnavailableIrreversible")
+    })
+
+    it("keeps every action inline on the desktop dock", async () => {
+      render(<TaskResourcesPanel sessionId="session-1" layout="desktop" />)
+      await screen.findByText("src/result.md")
+      expect(screen.queryByRole("button", { name: "moreActions" })).not.toBeInTheDocument()
+      for (const name of ["upload", "undo", "pin", "exportManifest", "applyAll"]) {
+        expect(screen.getByRole("button", { name })).toBeInTheDocument()
+      }
+    })
+  })
 })

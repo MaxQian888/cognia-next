@@ -202,6 +202,8 @@ export function MessageList({
     handleContentClick,
     pinNow,
     resetToBottom,
+    scrollToBottom,
+    release: releaseFollow,
   } = useStickToBottom({
     scrollRef: scrollParentRef,
     contentRef,
@@ -219,6 +221,16 @@ export function MessageList({
     () => firstUnreadMessageId(messages, unreadMarker),
     [messages, unreadMarker]
   )
+
+  // The newest message the reader wrote. Sending is the one moment the list
+  // always goes to the foot, wherever the reader had scrolled to: they want to
+  // watch the reply they asked for arrive.
+  const lastUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") return messages[i].id
+    }
+    return null
+  }, [messages])
 
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -473,6 +485,20 @@ export function MessageList({
     resetToBottom()
   }, [sessionId, hasMessages, rowVirtualizer, resetToBottom])
 
+  // A new user message at the tail is a send (from the composer, a queued
+  // follow-up, a resend): snap to the foot and re-arm following, in the layout
+  // phase so the sent bubble is never painted off-screen first. A delete or a
+  // rewind also changes the newest user message, but shrinks the list — the
+  // reader is tidying, not asking, so they stay where they are.
+  const sendWatchRef = useRef({ id: lastUserMessageId, length: messages.length })
+  useIsomorphicLayoutEffect(() => {
+    const previous = sendWatchRef.current
+    sendWatchRef.current = { id: lastUserMessageId, length: messages.length }
+    if (lastUserMessageId === null || lastUserMessageId === previous.id) return
+    if (messages.length < previous.length) return
+    resetToBottom()
+  }, [lastUserMessageId, messages.length, resetToBottom])
+
   // Layout and disclosure changes can alter every row's geometry at once.
   // Drop cached measurements without moving a reader who is inspecting older
   // content; the existing resize-follow logic only re-pins when already at the
@@ -530,11 +556,9 @@ export function MessageList({
     setNewSinceScrollUp((prev) => (prev === next ? prev : next))
   }, [isAtBottom, messages.length])
 
-  const scrollToBottom = useCallback(() => {
-    const el = scrollParentRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
-  }, [])
+  // The pill's "back to the latest" re-arms following as it scrolls, so a
+  // stream that keeps growing during the smooth scroll is followed to its foot.
+  const jumpToLatest = useCallback(() => scrollToBottom("smooth"), [scrollToBottom])
 
   const returnToPreviousPosition = useCallback(() => {
     const offset = takeReturn()
@@ -569,6 +593,9 @@ export function MessageList({
       // those as the user choosing a new place and drops the return offer we
       // are about to make, so suppress that for the settle window.
       const arriveFrom = () => {
+        // A jump is a reader choosing a place: stop following first, or the
+        // next streamed pin would drag the view back before it lands.
+        releaseFollow()
         programmaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_MS
         rememberReturn(from)
         flash(messageId)
@@ -593,7 +620,7 @@ export function MessageList({
       node.scrollIntoView({ behavior: "smooth", block: align })
       return true
     },
-    [messages, virtualize, virtualCount, rowVirtualizer, flash, rememberReturn]
+    [messages, virtualize, virtualCount, rowVirtualizer, flash, rememberReturn, releaseFollow]
   )
 
   // Only the primary list publishes: the dock hosts its own per-resource chat
@@ -674,6 +701,7 @@ export function MessageList({
           directCharacter={directCharacter}
           isStreaming={isStreaming}
           isLastAssistant={m.id === lastAssistantId}
+          actionSheetHost
           onCopy={onCopy}
           onRegenerate={onRegenerate}
           onEditResend={onEditResend}
@@ -743,7 +771,13 @@ export function MessageList({
                 ref={contentRef}
                 onClickCapture={handleContentClick}
                 className={cn(
-                  "mx-auto w-full max-w-[52rem] py-[calc(1.25rem*var(--density-spacing,1))] sm:py-[calc(1.75rem*var(--density-spacing,1))]",
+                  "mx-auto w-full max-w-[52rem] pt-[calc(1.25rem*var(--density-spacing,1))] sm:pt-[calc(1.75rem*var(--density-spacing,1))]",
+                  // Tight at the foot: the last row's own rhythm padding and the
+                  // composer's top padding already separate the newest message
+                  // from the input. The 20-28px this used to add on top read as
+                  // an empty band between the reply and the composer. The jump
+                  // pill needs no room here — it is hidden at the foot.
+                  "pb-[calc(0.25rem*var(--density-spacing,1))] sm:pb-[calc(0.5rem*var(--density-spacing,1))]",
                   // Room under the last message for the floating bar, which is
                   // a card in a narrow pane and a pill in a wide one.
                   selecting && "pb-36 sm:pb-36 @xl/message-list:pb-20 @xl/message-list:sm:pb-20"
@@ -860,7 +894,7 @@ export function MessageList({
               }
               newMessageCount={newSinceScrollUp}
               onReturn={returnToPreviousPosition}
-              onToBottom={scrollToBottom}
+              onToBottom={jumpToLatest}
             />
           </div>
           {/* Renders nothing — it exists to absorb the per-frame scroll sync

@@ -121,6 +121,11 @@ import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-tar
 
 import type { ShellCompletion } from "@/lib/shell-intelligence/types"
 import { ShellCompletionRow } from "./composer/shell-completion-row"
+import {
+  COMPOSER_POPOVER_COLLISION_PADDING,
+  COMPOSER_POPOVER_FIT_CLASS,
+  resolveComposerPopoverBoundary,
+} from "./composer/composer-popover-boundary"
 
 import type { ComposerTrigger, MentionableWorkflowElement, TriggerKind } from "./composer-trigger"
 import type { OfferedChatTemplate } from "@/lib/chat/template/template"
@@ -911,6 +916,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     [displayList.items]
   )
 
+  const collisionBoundary = useMemo(() => resolveComposerPopoverBoundary(anchor), [anchor])
+
   return (
     <Popover open={open} onOpenChange={(v) => (!v ? onDismiss() : undefined)}>
       {anchor ? <PopoverAnchor virtualRef={{ current: anchor }} /> : null}
@@ -918,9 +925,22 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         side="top"
         align="start"
         sideOffset={8}
+        // Bounded by the conversation area, not the whole viewport: with the
+        // keyboard open the space above the composer is short, and the panel
+        // used to run over the app header and behind the status bar. Radix
+        // measures what fits between the composer and that boundary (floating-ui
+        // also clips to the visual viewport) and publishes it as
+        // `--radix-popover-content-available-height`; the panel caps itself
+        // there and the list scrolls inside. See `composer-popover-boundary.ts`.
+        collisionBoundary={collisionBoundary ?? undefined}
+        collisionPadding={COMPOSER_POPOVER_COLLISION_PADDING}
+        data-testid="composer-popover"
         // The command surface is a visual extension of the composer, so both
         // share the exact anchor width at every reading-column/container size.
-        className="w-[var(--radix-popper-anchor-width)] overflow-hidden rounded-xl border-border/70 bg-popover/95 p-0 shadow-xl backdrop-blur-xl duration-200 ease-out motion-reduce:animate-none motion-reduce:duration-0"
+        className={cn(
+          "w-[var(--radix-popper-anchor-width)] overflow-hidden rounded-xl border-border/70 bg-popover/95 p-0 shadow-xl backdrop-blur-xl duration-200 ease-out motion-reduce:animate-none motion-reduce:duration-0",
+          COMPOSER_POPOVER_FIT_CLASS
+        )}
         // Don't steal focus from the textarea.
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
@@ -1007,7 +1027,10 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         ) : (
           <ul
             ref={listRef}
-            className="max-h-80 scroll-py-2 overflow-y-auto overscroll-contain p-1.5"
+            // The list is the row that gives way when the panel is capped to
+            // the space above the composer (a scroll container's automatic
+            // minimum is 0), but never below one row.
+            className="max-h-80 min-h-14 scroll-py-2 overflow-y-auto overscroll-contain p-1.5"
           >
             {displayList.items.map((item, idx) => {
               // Section headers are non-selectable (no `data-index`, absent from
@@ -1096,13 +1119,23 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           </div>
         ) : null}
         {trigger?.kind === "slash" || trigger?.kind === "skill" ? (
-          <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
-            {trigger.kind === "slash" ? (
-              <ListPlusIcon className="size-3.5 shrink-0" />
-            ) : (
-              <SparklesIcon className="size-3.5 shrink-0" />
-            )}
-            <span>{t(trigger.kind === "slash" ? "multiCommandHint" : "multiSkillHint")}</span>
+          // A tip, not a control: when the panel is capped short (keyboard
+          // open) it steps aside and leaves its height to the list. The cap
+          // switches it whole rather than clipping it to half a line: below
+          // 18rem of room the `calc` goes negative and `max-height` clamps
+          // to 0; above it the multiplier makes the cap effectively unbounded.
+          <div
+            data-slot="composer-popover-tip"
+            className="shrink-0 overflow-hidden max-h-[calc((var(--radix-popover-content-available-height,100vh)-18rem)*100)]"
+          >
+            <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+              {trigger.kind === "slash" ? (
+                <ListPlusIcon className="size-3.5 shrink-0" />
+              ) : (
+                <SparklesIcon className="size-3.5 shrink-0" />
+              )}
+              <span>{t(trigger.kind === "slash" ? "multiCommandHint" : "multiSkillHint")}</span>
+            </div>
           </div>
         ) : null}
       </PopoverContent>

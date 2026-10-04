@@ -15,6 +15,7 @@ import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { hasMcpContent } from "@/lib/claude/parts-extensions"
 import { basenameOf } from "@/lib/files/file-type-icon"
 import { WorkbenchFileLink } from "./workbench-file-link"
+import { stripReadLineNumbers } from "@/lib/chat/read-line-numbers"
 
 interface ReadInput {
   path?: string
@@ -53,13 +54,24 @@ export function ReadCard({ part, sessionId }: { part: ToolUIPart; sessionId?: st
   }, [part])
   // Joining a multi-line `lines[]` payload back into a single string can be
   // expensive for large files; recompute only when the parsed/raw output moves.
-  const code = useMemo(
+  const rawCode = useMemo(
     () =>
       parsed?.content ??
       (Array.isArray(parsed?.lines) ? parsed!.lines.join("\n") : undefined) ??
       (typeof part.output === "string" ? part.output : ""),
     [parsed, part.output]
   )
+  // Read tools number their output for the model (`     1\t…` / `     1→…`).
+  // The code block's gutter numbers lines itself, so the prefixes are lifted
+  // out — otherwise every number shows twice — and the gutter starts at the
+  // listing's own first number. A paging hint after the listing moves below
+  // the block instead of being numbered as code.
+  const listing = useMemo(
+    () => stripReadLineNumbers(rawCode, input.offset),
+    [rawCode, input.offset]
+  )
+  const code = listing?.code ?? rawCode
+  const startLine = listing?.startLine ?? parsed?.startLine ?? 1
   // A large read clamps to the first TOOL_PREVIEW_MAX_LINES lines — Shiki only
   // highlights the preview, and Show-all hands the full payload to CodeBlock
   // whose own line cap still bounds the extreme case.
@@ -125,6 +137,7 @@ export function ReadCard({ part, sessionId }: { part: ToolUIPart; sessionId?: st
               filename={basenameOf(path)}
               headerTitle={headerTitle}
               showLineNumbers
+              startLineNumber={startLine}
               compact
             />
             {clamp.hidden > 0 && (
@@ -135,6 +148,14 @@ export function ReadCard({ part, sessionId }: { part: ToolUIPart; sessionId?: st
                 testId="mcp-read-clamped"
               />
             )}
+            {listing?.trailer ? (
+              <p
+                className="mt-0.5 font-mono text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
+                data-testid="mcp-read-trailer"
+              >
+                {listing.trailer}
+              </p>
+            ) : null}
           </div>
         )
       )}

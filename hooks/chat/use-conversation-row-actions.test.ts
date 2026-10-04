@@ -50,6 +50,12 @@ jest.mock("@/lib/telemetry/conversation-list-events", () => ({
   trackConversationRowAction: jest.fn(() => Promise.resolve(true)),
 }))
 
+const setSessionsArchived = jest.fn(async (_ids: readonly string[], _archived: boolean) => {})
+jest.mock("@/lib/chat/session-archive-writes", () => ({
+  setSessionsArchived: (ids: readonly string[], archived: boolean) =>
+    setSessionsArchived(ids, archived),
+}))
+
 const trackRowAction = jest.mocked(trackConversationRowAction)
 
 function row(id: string, over: Partial<ChatSession> = {}): ChatSession {
@@ -255,6 +261,66 @@ describe("useConversationRowActions", () => {
       await waitFor(() => expect(handlers.onUnarchive).toHaveBeenCalledWith("one"))
     })
 
+    it("reopens the conversation an archive moved the user off when it is undone", async () => {
+      const handlers = callbacks()
+      const onSelect = jest.fn()
+      const { result } = renderHook(() =>
+        useConversationRowActions({
+          ...handlers,
+          activeSessionId: "b",
+          getRenderedOrder: () => ["a", "b", "c"],
+          onSelect,
+        })
+      )
+      await act(async () => {
+        await result.current.rowActions.onArchive?.("b")
+      })
+      expect(onSelect).toHaveBeenLastCalledWith("c")
+      const undo = (toastSuccess.mock.calls[0]![1] as { action: { onClick: () => void } }).action
+      await act(async () => {
+        undo.onClick()
+      })
+      await waitFor(() => expect(onSelect).toHaveBeenLastCalledWith("b"))
+      expect(handlers.onUnarchive).toHaveBeenCalledWith("b")
+    })
+
+    it("leaves the selection alone when an undone archive did not include the open one", async () => {
+      const handlers = callbacks()
+      const onSelect = jest.fn()
+      const { result } = renderHook(() =>
+        useConversationRowActions({ ...handlers, activeSessionId: "z", onSelect })
+      )
+      await act(async () => {
+        await result.current.rowActions.onBulkArchive?.(["a", "b"])
+      })
+      const undo = (toastSuccess.mock.calls[0]![1] as { action: { onClick: () => void } }).action
+      await act(async () => {
+        undo.onClick()
+      })
+      await waitFor(() => expect(handlers.onBulkUnarchive).toHaveBeenCalledWith(["a", "b"]))
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+
+    it("offers an undo on unarchive that archives again without closing the chat", async () => {
+      const handlers = callbacks()
+      const { result } = renderHook(() => useConversationRowActions({ ...handlers }))
+      await act(async () => {
+        await result.current.rowActions.onUnarchive?.("one")
+        await result.current.rowActions.onBulkUnarchive?.(["two", "three"])
+      })
+      expect(toastSuccess.mock.calls[0]![0]).toBe('unarchiveSuccess:{"count":1}')
+      const single = (toastSuccess.mock.calls[0]![1] as { action: { onClick: () => void } }).action
+      const bulk = (toastSuccess.mock.calls[1]![1] as { action: { onClick: () => void } }).action
+      await act(async () => {
+        single.onClick()
+        bulk.onClick()
+      })
+      await waitFor(() => expect(setSessionsArchived).toHaveBeenCalledWith(["one"], true))
+      expect(setSessionsArchived).toHaveBeenCalledWith(["two", "three"], true)
+      expect(handlers.onArchive).not.toHaveBeenCalled()
+      expect(handlers.onBulkArchive).not.toHaveBeenCalled()
+    })
+
     it("opens the next row when the open conversation is deleted or archived", async () => {
       const handlers = callbacks()
       const onSelect = jest.fn()
@@ -377,6 +443,17 @@ describe("useConversationRowActions", () => {
       })
       expect(markSessionRead.mock.calls.map(([id]) => id)).toEqual(["one", "two"])
       expect(trackRowAction).toHaveBeenCalledWith("mark-read", 2)
+    })
+
+    it("marks a selection unread in one action", async () => {
+      const { result } = renderHook(() => useConversationRowActions({ ...callbacks() }))
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.rowActions.onBulkMarkUnread(["one", "two"])
+      })
+      expect(ok).toBe(true)
+      expect(markSessionUnread.mock.calls.map(([id]) => id)).toEqual(["one", "two"])
+      expect(trackRowAction).toHaveBeenCalledWith("mark-unread", 2)
     })
 
     it("branches a conversation, opens the branch and says so", async () => {

@@ -52,6 +52,22 @@ export interface MessageRunMetadata {
    * to its own runtime. Absent on every unaddressed turn.
    */
   route?: MessageRunRouteStamp
+  /**
+   * Which external agent answered, and on which of its memories: its own
+   * native session (`native`) or a Cognia gateway task (`cognia:<taskId>`,
+   * see `externalAgentRouteKey`). Read by `lib/chat/turn-route/history.ts` so
+   * a route resumed after another one spoke is told what it missed. Absent on
+   * built-in turns and on external replies sealed before it existed.
+   */
+  externalAgent?: MessageRunExternalAgentStamp
+}
+
+/** The external agent and route a turn ran on. */
+export interface MessageRunExternalAgentStamp {
+  /** The local agent id, or the Host configuration id on a host lane. */
+  agentId: string
+  /** `native`, or `cognia:<taskId | binding key>`. */
+  route: string
 }
 
 /** The route a turn ran on, as the transcript remembers it. */
@@ -116,6 +132,7 @@ export interface CompletedRunMetadataInput {
   routerFusion?: RouterFusionRunMetadata
   agent?: MessageRunMetadata["agent"]
   route?: MessageRunRouteStamp
+  externalAgent?: MessageRunExternalAgentStamp
 }
 
 /**
@@ -196,6 +213,7 @@ export function buildCompletedRunMetadata({
   routerFusion,
   agent,
   route,
+  externalAgent,
 }: CompletedRunMetadataInput): MessageRunMetadata {
   return {
     providerId,
@@ -213,6 +231,7 @@ export function buildCompletedRunMetadata({
     ...(routerFusion ? { routerFusion } : {}),
     ...(agent ? { agent } : {}),
     ...(route ? { route: { ...route } } : {}),
+    ...(externalAgent ? { externalAgent: { ...externalAgent } } : {}),
   }
 }
 

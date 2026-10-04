@@ -35,7 +35,7 @@ import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
 import { ToolDetailBody } from "@/components/chat/message-parts/tool-detail-body"
-import { ToolRowShell } from "@/components/chat/message-parts/tool-row"
+import { TOOL_ROW_SCROLL_TEXT_CLASS, ToolRowShell } from "@/components/chat/message-parts/tool-row"
 import {
   humanizeToolName,
   resolveProvidedToolTitle,
@@ -131,14 +131,33 @@ export const ToolCallRow = memo(function ToolCallRow({
       onToggle={handleToggle}
       ariaLabel={t("rowAria", { name: displayName, status: statusLabel })}
       testId={`tool-call-row-${summary.name}`}
-      lead={<span className="shrink-0 text-xs font-medium text-foreground/80">{displayName}</span>}
+      title={providedTitle || summary.target || undefined}
+      lead={
+        <span
+          className={cn(
+            "text-xs font-medium text-foreground/80",
+            // An upstream title ("Reading components/mobile/…") is the whole
+            // row label and can be any length: it takes the target's place
+            // and shrinks / scrolls inside the row instead of overflowing it.
+            providedTitle ? cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1") : "shrink-0"
+          )}
+          data-testid="tool-call-row-lead"
+        >
+          {displayName}
+        </span>
+      }
       icon={<Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
       target={
         !providedTitle && summary.target ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+          <span
+            className={cn(
+              TOOL_ROW_SCROLL_TEXT_CLASS,
+              "flex-1 font-mono text-xs text-muted-foreground"
+            )}
+          >
             {summary.target}
           </span>
-        ) : (
+        ) : providedTitle ? undefined : (
           <span className="flex-1" />
         )
       }

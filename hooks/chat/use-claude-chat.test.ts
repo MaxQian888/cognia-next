@@ -20,6 +20,11 @@ import type {
   ArmVerificationResult,
 } from "@/lib/agent/composition/verified-fresh-agent"
 
+jest.mock("@/lib/chat/transcript/revision-events", () => {
+  const actual = jest.requireActual("@/lib/chat/transcript/revision-events")
+  return { ...actual, createTranscriptRuntimeFence: jest.fn(actual.createTranscriptRuntimeFence) }
+})
+
 const recordExternalAgentUsageMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/session-usage", () => ({
   ...jest.requireActual("@/lib/db/session-usage"),
@@ -52,6 +57,12 @@ jest.mock("@/lib/db/session-assets", () => ({
     persistSessionAssetsMock(...args),
 }))
 
+const fusionDeliveryReceiptMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/router-fusion/chat/store-provider", () => ({
+  currentFusionStore: async () => ({
+    getRun: (...args: unknown[]) => fusionDeliveryReceiptMock(...args),
+  }),
+}))
 const backgroundDrainMock = jest.fn()
 const peerDrainMock = jest.fn(async () => undefined)
 jest.mock("./background-result-runtime", () => ({
@@ -119,6 +130,7 @@ const onClaudeMessageMock = jest.fn(async (cb: (evt: unknown) => void) => {
   return onClaudeUnsub
 })
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
+const sessionControlMock = jest.fn().mockResolvedValue({ retained: false })
 const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
 const hostStateSessionIntentAvailableMock = jest.fn().mockResolvedValue(false)
 const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
@@ -143,6 +155,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   interruptSession: (id: string) => interruptSessionMock(id),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
+  sessionControl: (...a: unknown[]) => sessionControlMock(...a),
   steerSession: (...a: unknown[]) => steerSessionMock(...a),
 }))
 
@@ -425,6 +438,9 @@ const createRendererToolHostMock = jest.fn((..._args: unknown[]) => ({
   close: rendererToolHostCloseMock,
 }))
 const closeExternalSessionMock = jest.fn(async (..._args: unknown[]) => {})
+/** The agent's own session for a conversation, as the manager knows it. */
+const resolveConversationSessionIdMock = jest.fn((..._args: unknown[]): string | null => null)
+const deleteExternalSessionMock = jest.fn(async (..._args: unknown[]) => {})
 const setSessionHostFactsMock = jest.fn()
 const respondExternalPermissionMock = jest.fn(async (..._args: unknown[]) => {})
 const externalProtocolMock = { value: "acp" }
@@ -474,6 +490,8 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
       },
     }),
     closeSession: (...args: unknown[]) => closeExternalSessionMock(...args),
+    resolveConversationSessionId: (...args: unknown[]) => resolveConversationSessionIdMock(...args),
+    deleteSession: (...args: unknown[]) => deleteExternalSessionMock(...args),
     setSessionHostFacts: (...args: unknown[]) => setSessionHostFactsMock(...args),
     respondToPermission: (...args: unknown[]) => respondExternalPermissionMock(...args),
     getAgent: () => ({
@@ -998,6 +1016,7 @@ beforeEach(() => {
   onClaudeMessageMock.mockClear()
   onClaudeUnsub.mockClear()
   sendPromptMock.mockReset().mockResolvedValue(undefined)
+  sessionControlMock.mockReset().mockResolvedValue({ retained: false })
   prepareRouterFusionSendMock
     .mockReset()
     .mockImplementation(async (input) => ({ kind: "send", options: input.options }))
@@ -1149,6 +1168,8 @@ beforeEach(() => {
   rendererToolHostCloseMock.mockClear()
   createRendererToolHostMock.mockClear()
   closeExternalSessionMock.mockClear()
+  resolveConversationSessionIdMock.mockReset().mockReturnValue(null)
+  deleteExternalSessionMock.mockClear()
   setSessionHostFactsMock.mockClear()
   externalProtocolMock.value = "acp"
   externalPresetMock.value = ""
@@ -1254,6 +1275,7 @@ describe("useClaudeChat — actions", () => {
     )
     expect(claimChatTurnForDispatchMock).toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "durable", expect.any(Object), {
+      transcriptRuntime: "prepared",
       commandId: expect.stringMatching(/^work:/),
     })
     expect(updateSessionMock).toHaveBeenCalledWith("sess-1", {
@@ -1404,7 +1426,9 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("legacy")
     })
 
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "legacy", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "legacy", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
     expect(consoleError).toHaveBeenCalledWith("acceptChatTurn failed", expect.any(Error))
     consoleError.mockRestore()
   })
@@ -1480,7 +1504,8 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({
         cwd: "/managed/sess-1",
         additionalDirectories: ["/managed/docs"],
-      })
+      }),
+      { transcriptRuntime: "prepared" }
     )
     expect(updateSessionMock).toHaveBeenCalledWith(
       "sess-1",
@@ -1542,7 +1567,8 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({
         cwd: "/managed/sess-1",
         trustedWorkspaceRoots: ["/managed/sess-1"],
-      })
+      }),
+      { transcriptRuntime: "prepared" }
     )
   })
 
@@ -1583,7 +1609,8 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({
         cwd: "/isolated/legacy",
         trustedWorkspaceRoots: ["/isolated/legacy"],
-      })
+      }),
+      { transcriptRuntime: "prepared" }
     )
   })
 
@@ -1782,6 +1809,47 @@ describe("useClaudeChat — actions", () => {
       expect(ensureSessionExecutionBundleMock).toHaveBeenCalled()
       expect(runStandaloneTurnMock).not.toHaveBeenCalled()
       expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    })
+
+    it("sends a rootless chat to a Host-owned agent, which picks its own directory", async () => {
+      // A paired phone's first turn with the Host's Kimi: the Host runs it in
+      // a directory of its choosing, so the managed workspace this phone can
+      // never materialize must not refuse it.
+      useAgentRuntimeStore.setState({
+        runtimeRef: {
+          kind: "host",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+          name: "Kimi Code",
+        },
+      })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "New chat",
+        model: "sonnet",
+        projectId: "project-1",
+        executionContext: { ...unmaterializedManagedContext, environmentId: "env-1" },
+      })
+
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+
+      expect(ensureSessionExecutionBundleMock).not.toHaveBeenCalled()
+      expect(openWorkspaceBundleTurnLeaseMock).not.toHaveBeenCalled()
+      expect(getProjectEnvironmentMock).not.toHaveBeenCalled()
+      expect(executeOnRemoteHostAgentMock).toHaveBeenCalledWith(
+        "hello",
+        expect.objectContaining({ chatSessionId: "sess-1" })
+      )
+      const codes = chatState.setSessionDiagnostic.mock.calls.map(
+        (call) => (call[1] as { code?: string } | null)?.code
+      )
+      expect(codes).not.toContain("workspaceBundleFailed")
+      expect(codes).not.toContain("workspaceUnavailable")
     })
   })
 
@@ -2036,7 +2104,8 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(
       "sess-1",
       expect.stringContaining("private@example.com"),
-      expect.any(Object)
+      expect.any(Object),
+      { transcriptRuntime: "prepared" }
     )
     const persistedMessages = persistMessagesMock.mock.calls.at(-1)?.[1]
     expect(JSON.stringify(persistedMessages)).toContain("fix this")
@@ -2282,6 +2351,42 @@ describe("useClaudeChat — actions", () => {
     expect(persisted.filter((message) => message.role === "user").at(-1)?.metadata).toMatchObject({
       turnAdmission: { state: "failed" },
     })
+  })
+
+  it("closes the tool calls a failed external turn left open, so a reload never shows them running", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockImplementation(async () => {
+      // The agent had started a tool call when the prompt timed out; ACP drops
+      // its tool state on the timeout, so no result ever arrives for it.
+      chatState.messages = [
+        ...chatState.messages,
+        {
+          id: "assistant-open",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-Read",
+              toolCallId: "call-1",
+              state: "input-available",
+              input: { path: "a.ts" },
+            },
+          ],
+        },
+      ]
+      throw new Error("Request timeout: session/prompt")
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+      id: string
+      parts?: Array<{ state?: string; errorText?: string }>
+    }>
+    const tool = persisted.find((message) => message.id === "assistant-open")?.parts?.[0]
+    expect(tool?.state).toBe("output-error")
+    expect(tool?.errorText).toContain("Request timeout: session/prompt")
   })
 
   it("completes an in-session plan step that ran on an external agent", async () => {
@@ -2680,7 +2785,8 @@ describe("useClaudeChat — actions", () => {
       "continue",
       expect.objectContaining({
         appendSystemPrompt: expect.stringContaining("Keep the full task requirements"),
-      })
+      }),
+      { transcriptRuntime: "prepared" }
     )
     expect(sendPromptMock.mock.calls[0][2]).not.toHaveProperty("resumeSessionId")
     expect(updateSessionMock).toHaveBeenCalledWith(
@@ -2725,7 +2831,8 @@ describe("useClaudeChat — actions", () => {
         "continue",
         expect.objectContaining({
           appendSystemPrompt: expect.stringContaining("Full original requirements"),
-        })
+        }),
+        { transcriptRuntime: "prepared" }
       )
       expect(sendPromptMock.mock.calls[0][2].appendSystemPrompt).toContain("Never deploy")
       expect(clearBranchSeedMock).toHaveBeenCalledWith(id)
@@ -2996,9 +3103,19 @@ describe("useClaudeChat — actions", () => {
     getSessionMock.mockResolvedValue({
       id: "sess-1",
       title: "Gateway task",
-      model: "kimi-for-coding",
-      providerOverride: "plugin:kimi:subscription",
-      accountId: "account-a",
+      // The built-in lane's pick stays where it is and plays no part.
+      model: "claude-opus-5",
+      providerOverride: "anthropic",
+      externalAgentModels: {
+        "ext-1": {
+          kind: "cognia",
+          binding: {
+            providerId: "plugin:kimi:subscription",
+            modelId: "kimi-for-coding",
+            accountId: "account-a",
+          },
+        },
+      },
     })
     executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
     rendererToolHostStartMock.mockResolvedValueOnce({
@@ -3065,8 +3182,9 @@ describe("useClaudeChat — actions", () => {
     getSessionMock.mockResolvedValue({
       id: "sess-1",
       title: "Task",
-      model: "coder",
-      providerOverride: "gateway",
+      externalAgentModels: {
+        "ext-1": { kind: "cognia", binding: { providerId: "gateway", modelId: "coder" } },
+      },
     })
     let taskSignal: AbortSignal | undefined
     executeOnExternalAgentMock.mockImplementation(
@@ -3104,8 +3222,9 @@ describe("useClaudeChat — actions", () => {
     getSessionMock.mockResolvedValue({
       id: "sess-1",
       title: "New task",
-      model: "coder",
-      providerOverride: "gateway",
+      externalAgentModels: {
+        "ext-1": { kind: "cognia", binding: { providerId: "gateway", modelId: "coder" } },
+      },
     })
     executeOnExternalAgentMock.mockResolvedValue({
       success: true,
@@ -3119,6 +3238,340 @@ describe("useClaudeChat — actions", () => {
     })
     expect(updateSessionMock).toHaveBeenCalledWith("sess-1", {
       externalAgentSession: { agentId: "ext-1", sessionId: nativeId },
+      externalAgentGatewaySessions: [{ agentId: "ext-1", sessionId: nativeId }],
+    })
+  })
+
+  describe("explicit per-agent model selection", () => {
+    const kimi = { providerId: "plugin:kimi:subscription", modelId: "kimi-k3" }
+    const claude = { providerId: "anthropic", modelId: "claude-opus-5" }
+    const linkFor = (task: string, binding: { providerId: string; modelId: string }) =>
+      `cognia-gateway:${task}:native-${task}:${encodeURIComponent(JSON.stringify(binding))}`
+    const history = [
+      { id: "u0", role: "user", parts: [{ type: "text", text: "Never edit production" }] },
+      {
+        id: "a0",
+        role: "assistant",
+        parts: [{ type: "text", text: "Understood, read-only." }],
+        metadata: {
+          run: { providerId: "external", externalAgent: { agentId: "ext-1", route: "native" } },
+        },
+      },
+    ]
+
+    async function sendOnce(text = "hi") {
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send(text, undefined, { sessionId: "sess-1" })
+      })
+    }
+
+    beforeEach(() => {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      chatState.activeSessionId = "sess-1"
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    })
+
+    it("does not route a built-in provider pick through the gateway on an external lane", async () => {
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        model: "claude-opus-5",
+        providerOverride: "anthropic",
+        accountId: "account-a",
+      })
+      await sendOnce()
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        "hi",
+        expect.not.objectContaining({ cogniaModel: expect.anything() })
+      )
+      expect(executeOnExternalAgentMock.mock.calls[0][1]).not.toHaveProperty("cogniaModel")
+      expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith("ext-1", { deferConnect: false })
+    })
+
+    it("replays a native pick and runs native explicitly", async () => {
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        model: "claude-opus-5",
+        providerOverride: "anthropic",
+        externalAgentModels: { "ext-1": { kind: "native", modelId: "kimi-k2" } },
+      })
+      await sendOnce()
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ cogniaModel: null, model: "kimi-k2" })
+      )
+      // The built-in pick is never rewritten by an external turn.
+      for (const [, patch] of updateSessionMock.mock.calls) {
+        expect(patch).not.toHaveProperty("model")
+        expect(patch).not.toHaveProperty("providerOverride")
+      }
+    })
+
+    it("starts a new task with a handoff when switching from native to Cognia", async () => {
+      resolveConversationSessionIdMock.mockReturnValue("native-thread")
+      listMessagesMock.mockResolvedValue(history)
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentModels: { "ext-1": { kind: "cognia", binding: kimi } },
+      })
+      await sendOnce("continue")
+      const [prompt, options] = executeOnExternalAgentMock.mock.calls[0]
+      expect(options).toMatchObject({ cogniaModel: kimi, resetExternalSession: true })
+      expect(options).not.toHaveProperty("sessionId")
+      expect(prompt).toContain("Never edit production")
+      expect(prompt).toContain("Current user request:\ncontinue")
+    })
+
+    it("hands over the marked excerpt when no model can summarize an over-budget history", async () => {
+      // A phone switching its Host's agent to a Cognia model: the history is
+      // over the handoff budget and the phone has no model of its own, so the
+      // summary is `no-client`. The turn runs with the head/tail excerpt and its
+      // omission notice instead of failing.
+      const long = (id: string, role: "user" | "assistant") => ({
+        id,
+        role,
+        parts: [{ type: "text", text: `${id} ${"x".repeat(9_000)}` }],
+      })
+      resolveConversationSessionIdMock.mockReturnValue("native-thread")
+      listMessagesMock.mockResolvedValue([
+        ...history,
+        long("u1", "user"),
+        long("a1", "assistant"),
+        long("u2", "user"),
+        long("a2", "assistant"),
+      ])
+      mockHandoffClient.mockReset().mockResolvedValue(null)
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentModels: { "ext-1": { kind: "cognia", binding: kimi } },
+      })
+      await sendOnce("continue")
+      expect(mockHandoffClient).toHaveBeenCalled()
+      const [prompt, options] = executeOnExternalAgentMock.mock.calls[0]
+      expect(options).toMatchObject({ cogniaModel: kimi, resetExternalSession: true })
+      expect(prompt).toContain("History omitted to fit context")
+      expect(prompt).toContain("Never edit production")
+      expect(prompt).toContain("Current user request:\ncontinue")
+    })
+
+    it("does not hand a native turn the gateway task it ran on before", async () => {
+      const kimiLink = linkFor("task-k", kimi)
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentSession: { agentId: "ext-1", sessionId: kimiLink },
+        externalAgentModels: { "ext-1": { kind: "native" } },
+      })
+      await sendOnce()
+      const [, options] = executeOnExternalAgentMock.mock.calls[0]
+      expect(options.cogniaModel).toBeNull()
+      expect(options.sessionId).not.toBe(kimiLink)
+      expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith("ext-1", { deferConnect: false })
+    })
+
+    it("hands a resumed native session only the Cognia turns it missed", async () => {
+      resolveConversationSessionIdMock.mockReturnValue("native-thread")
+      listMessagesMock.mockResolvedValue([
+        ...history,
+        { id: "u1", role: "user", parts: [{ type: "text", text: "use the gateway" }] },
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Gateway answer about parser" }],
+          metadata: {
+            run: {
+              providerId: "external",
+              externalAgent: { agentId: "ext-1", route: "cognia:task-k" },
+            },
+          },
+        },
+      ])
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentModels: { "ext-1": { kind: "native" } },
+      })
+      await sendOnce("back to native")
+      const [prompt] = executeOnExternalAgentMock.mock.calls[0]
+      expect(prompt).toContain("Gateway answer about parser")
+      expect(prompt).not.toContain("Never edit production")
+    })
+
+    it("rebinds the agent's task on a binding change and keeps the old link retained", async () => {
+      const kimiLink = linkFor("task-k", kimi)
+      const claudeLink = linkFor("task-c", claude)
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentSession: { agentId: "ext-1", sessionId: kimiLink },
+        externalAgentModels: { "ext-1": { kind: "cognia", binding: claude } },
+      })
+      executeOnExternalAgentMock.mockResolvedValue({
+        success: true,
+        finalResponse: "ok",
+        sessionId: claudeLink,
+      })
+      await sendOnce()
+      const [, options] = executeOnExternalAgentMock.mock.calls[0]
+      // The agent keeps its own history on the new model: the old task is
+      // rebound rather than replaced by a new one plus a summary.
+      expect(options).toMatchObject({ cogniaModel: claude, sessionId: kimiLink, rebind: true })
+      expect(options).not.toHaveProperty("resetExternalSession")
+      expect(updateSessionMock).toHaveBeenCalledWith("sess-1", {
+        externalAgentSession: { agentId: "ext-1", sessionId: claudeLink },
+        externalAgentGatewaySessions: [
+          { agentId: "ext-1", sessionId: kimiLink },
+          { agentId: "ext-1", sessionId: claudeLink },
+        ],
+      })
+    })
+
+    it("resumes the retained task when switching back to its binding", async () => {
+      const kimiLink = linkFor("task-k", kimi)
+      const claudeLink = linkFor("task-c", claude)
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentSession: { agentId: "ext-1", sessionId: claudeLink },
+        externalAgentGatewaySessions: [
+          { agentId: "ext-1", sessionId: kimiLink },
+          { agentId: "ext-1", sessionId: claudeLink },
+        ],
+        externalAgentModels: { "ext-1": { kind: "cognia", binding: kimi } },
+      })
+      await sendOnce()
+      const [, options] = executeOnExternalAgentMock.mock.calls[0]
+      expect(options).toMatchObject({ cogniaModel: kimi, sessionId: kimiLink })
+      expect(options).not.toHaveProperty("resetExternalSession")
+    })
+
+    it("stamps the reply with the agent and the route it ran on", async () => {
+      const kimiLink = linkFor("task-k", kimi)
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentModels: { "ext-1": { kind: "cognia", binding: kimi } },
+      })
+      executeOnExternalAgentMock.mockResolvedValue({
+        success: true,
+        finalResponse: "ok",
+        sessionId: kimiLink,
+      })
+      await sendOnce()
+      const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+        role: string
+        metadata?: { run?: { externalAgent?: unknown } }
+      }>
+      expect(persisted.at(-1)?.metadata?.run?.externalAgent).toEqual({
+        agentId: "ext-1",
+        route: "cognia:task-k",
+      })
+    })
+
+    it("names the agent that answered in the reply header, not the conversation's mode", async () => {
+      useExternalAgentStore.setState((state) => ({
+        agents: { ...state.agents, "ext-1": { id: "ext-1", name: "Kimi Code" } as never },
+      }))
+      getSessionMock.mockResolvedValue({ id: "sess-1", title: "Kimi" })
+      await sendOnce()
+      const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+        metadata?: { run?: { agent?: unknown } }
+      }>
+      expect(persisted.at(-1)?.metadata?.run?.agent).toEqual({ name: "Kimi Code" })
+    })
+
+    it("names a Host-owned agent by its configuration's name", async () => {
+      useAgentRuntimeStore.setState({
+        runtimeRef: {
+          kind: "host",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+          name: "Kimi Code",
+        },
+      })
+      executeOnRemoteHostAgentMock.mockResolvedValueOnce({ success: true, finalResponse: "ok" })
+      getSessionMock.mockResolvedValue({ id: "sess-1", title: "Kimi" })
+      await sendOnce()
+      const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+        metadata?: { run?: { agent?: unknown } }
+      }>
+      expect(persisted.at(-1)?.metadata?.run?.agent).toEqual({ name: "Kimi Code" })
+    })
+
+    it("forwards the conversation's choice to a Host-owned agent", async () => {
+      useAgentRuntimeStore.setState({
+        runtimeRef: {
+          kind: "host",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+          name: "Kimi",
+        },
+      })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        model: "claude-opus-5",
+        providerOverride: "anthropic",
+        externalAgentModels: { eac_1: { kind: "cognia", binding: kimi } },
+      })
+      await sendOnce()
+      expect(executeOnRemoteHostAgentMock).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ cogniaModel: kimi })
+      )
+      expect(executeOnRemoteHostAgentMock.mock.calls[0][1]).not.toHaveProperty("externalSessionId")
+    })
+
+    it("does not hand the Host the old task when switching Cognia models — it cannot rebind", async () => {
+      useAgentRuntimeStore.setState({
+        runtimeRef: {
+          kind: "host",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+          name: "Kimi",
+        },
+      })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        externalAgentSession: { agentId: "eac_1", sessionId: linkFor("task-k", kimi) },
+        externalAgentModels: { eac_1: { kind: "cognia", binding: claude } },
+      })
+      await sendOnce()
+      const [, options] = executeOnRemoteHostAgentMock.mock.calls[0]
+      expect(options).toMatchObject({ cogniaModel: claude })
+      // A Host-run task bound to Kimi would be refused for Claude; the switch
+      // starts a new task there and the transcript rides along instead.
+      expect(options).not.toHaveProperty("externalSessionId")
+      expect(options).not.toHaveProperty("rebind")
+    })
+
+    it("leaves a Host-owned agent on the Host's default when nothing was chosen", async () => {
+      useAgentRuntimeStore.setState({
+        runtimeRef: {
+          kind: "host",
+          configId: "eac_1",
+          revision: "eacr_1",
+          lifecycleGeneration: 2,
+          name: "Kimi",
+        },
+      })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Kimi",
+        model: "claude-opus-5",
+        providerOverride: "anthropic",
+      })
+      await sendOnce()
+      expect(executeOnRemoteHostAgentMock.mock.calls[0][1]).not.toHaveProperty("cogniaModel")
     })
   })
 
@@ -3638,7 +4091,9 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("original")
     })
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "rewritten", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "rewritten", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
   })
 
   it("send() folds plugin additionalContext into appendSystemPrompt", async () => {
@@ -3654,7 +4109,8 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(
       "sess-1",
       "hello",
-      expect.objectContaining({ appendSystemPrompt: "extra system note" })
+      expect.objectContaining({ appendSystemPrompt: "extra system note" }),
+      { transcriptRuntime: "prepared" }
     )
   })
 
@@ -4058,6 +4514,149 @@ describe("useClaudeChat — actions", () => {
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "deny")
   })
+
+  it("rehydrates AI-SDK sends from canonical history without restarting ordinary appends", async () => {
+    resolveSendOptionsMock.mockResolvedValue({ provider: "openai", model: "gpt-5" })
+    listMessagesMock.mockResolvedValue([
+      { id: "old-u", role: "user", parts: [{ type: "text", text: "surviving history" }] },
+      { id: "old-a", role: "assistant", parts: [{ type: "text", text: "surviving answer" }] },
+    ])
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("next")
+    })
+    const options = sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions
+    expect(JSON.stringify(options.initialConversation)).toContain("surviving history")
+    expect(JSON.stringify(options.initialConversation)).toContain("surviving answer")
+    expect(closeSessionIpcMock).not.toHaveBeenCalled()
+  })
+
+  it("closes AI-SDK context before an admitted edit and refuses dispatch when close fails", async () => {
+    resolveSendOptionsMock.mockResolvedValue({ provider: "openai", model: "gpt-5" })
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "original" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "reply" }] },
+    ]
+    closeSessionIpcMock.mockRejectedValueOnce(new Error("host close refused"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.editAndResend("u-1", "edited")
+    })
+    expect(closeSessionIpcMock).toHaveBeenCalledWith("sess-1")
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["openai", "anthropic"])(
+    "keeps an initialized %s loop and stamps its generation without reading full history",
+    async (provider) => {
+      sessionControlMock.mockResolvedValue({
+        retained: true,
+        runtimeAdapter: "ai-sdk",
+        sdkSessionId: "ready-sdk",
+        provider,
+        transcriptInvalidationId: "retained-1",
+        active: false,
+      })
+      resolveSendOptionsMock.mockResolvedValue({ provider, model: "gpt-5" })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Ready",
+        sdkSessionId: "ready-sdk",
+        runtimeTranscriptGeneration: "retained-1",
+      })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      listMessagesMock.mockClear()
+      await act(async () => {
+        await result.current.send("next")
+      })
+      expect(sendPromptMock).toHaveBeenCalled()
+      expect(sendPromptMock.mock.calls.at(-1)?.[2].initialConversation).toBeUndefined()
+      expect(sendPromptMock.mock.calls.at(-1)?.[2].transcriptInvalidationId).toBe("retained-1")
+      expect(listMessagesMock).not.toHaveBeenCalled()
+      expect(closeSessionIpcMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("cancels the session coalescers when its transcript runtime is invalidated", async () => {
+    const events = await import("@/lib/chat/transcript/revision-events")
+    const { SessionCoalescingRegistry } = await import("./stream-coalescing")
+    let notify!: (sessionId: string) => void
+    const dispose = jest.fn()
+    const persistGuard = { shouldPersist: () => true, runtimeGeneration: { value: "event-1" } }
+    const factory = jest
+      .mocked(events.createTranscriptRuntimeFence)
+      .mockImplementation((callback) => {
+        notify = callback
+        return { capture: async () => persistGuard, dispose }
+      })
+    const release = jest.spyOn(SessionCoalescingRegistry.prototype, "release")
+    try {
+      const { unmount } = renderHook(() => useClaudeChat())
+      await flush()
+      const messages = [
+        { id: "streamed", role: "assistant", parts: [{ type: "text", text: "partial" }] },
+      ]
+      jest
+        .requireMock("@/lib/claude/adapter")
+        .applySdkEvent.mockReturnValueOnce({ messages, turnComplete: false })
+      await act(async () => {
+        _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "assistant" } })
+      })
+      await flush()
+      expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", messages, {
+        shouldPersist: expect.any(Function),
+        runtimeGeneration: persistGuard.runtimeGeneration,
+      })
+      act(() => notify("sess-1"))
+      expect(release).toHaveBeenCalledWith("sess-1")
+      unmount()
+      expect(dispose).toHaveBeenCalled()
+    } finally {
+      factory.mockImplementation(
+        jest.requireActual("@/lib/chat/transcript/revision-events").createTranscriptRuntimeFence
+      )
+      release.mockRestore()
+    }
+  })
+
+  it.each([undefined, [{ role: "user", content: "obsolete recovery snapshot" }]])(
+    "rebuilds invalidated AI-SDK context without consuming its generation on enqueue (%j)",
+    async (initialConversation) => {
+      resolveSendOptionsMock.mockResolvedValue({
+        provider: "openai",
+        model: "gpt-5",
+        initialConversation,
+      })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Reset",
+        sdkSessionId: "old-sdk",
+        runtimeTranscriptInvalidated: "mutation-1",
+        runtimeTranscriptGeneration: "mutation-1",
+      })
+      listMessagesMock.mockResolvedValue([
+        { id: "kept", role: "user", parts: [{ type: "text", text: "canonical survivor" }] },
+      ])
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("next")
+      })
+      const options = sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions
+      expect(options.transcriptInvalidationId).toBe("mutation-1")
+      expect(JSON.stringify(options.initialConversation)).toContain("canonical survivor")
+      expect(JSON.stringify(options.initialConversation)).not.toContain(
+        "obsolete recovery snapshot"
+      )
+      expect(updateSessionMock).not.toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ runtimeTranscriptInvalidated: undefined })
+      )
+    }
+  )
 
   it("editAndResend keeps the original as a sibling instead of deleting its tail", async () => {
     // This used to `truncateAfter(..., { inclusive: true })`: rewording a
@@ -5420,7 +6019,9 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
       expect.objectContaining({ goalId: "g1", capturedGenerationId: "gen1" })
     )
     // The continuation routes back through send → sendPrompt with the text.
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "go on", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "go on", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
     // Plugin bus: the SDK turn sealed → MESSAGE_RECEIVED + AGENT_COMPLETED.
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.MESSAGE_RECEIVED, { sessionId: "sess-1" })
     expect(busEmitMock).toHaveBeenCalledWith(BusEvents.AGENT_COMPLETED, { sessionId: "sess-1" })
@@ -5524,7 +6125,9 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
       expect.objectContaining({ loopId: "lp1", capturedGenerationId: "lgen1" })
     )
     // gateLoopContinuation has no baseline (lastIterationAt undefined) → send.
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "loop iteration 2", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "loop iteration 2", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
   })
 
   it("turnComplete + loop exit appends the loop card and stops", async () => {
@@ -5562,7 +6165,8 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(
       "sess-1",
       expect.stringContaining("[Loop iteration 1 of 100]"),
-      expect.any(Object)
+      expect.any(Object),
+      { transcriptRuntime: "prepared" }
     )
   })
 
@@ -5710,7 +6314,10 @@ describe("useClaudeChat — concurrent sessions", () => {
     })
     await flush()
 
-    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", [])
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", [], {
+      shouldPersist: expect.any(Function),
+      runtimeGeneration: { value: undefined },
+    })
     expect(chatState.setSessionStatus).not.toHaveBeenCalledWith("sess-1", "idle")
 
     releasePersist?.()
@@ -5793,7 +6400,10 @@ describe("useClaudeChat — concurrent sessions", () => {
     })
     await flush()
     expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
-    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array), {
+      shouldPersist: expect.any(Function),
+      runtimeGeneration: { value: undefined },
+    })
   })
 
   // ADR-0127 §1: a closed pane keeps an in-flight mirror like an open one, so
@@ -5868,6 +6478,12 @@ describe("useClaudeChat — concurrent sessions", () => {
     renderHook(() => useClaudeChat())
     await flush()
     subscribers.forEach((sub) => sub(chatState))
+    // The first lifecycle frame seeds the generation fence from session
+    // metadata. Subsequent token frames must reuse it without database reads.
+    await act(async () => {
+      _messageCallback?.({ type: "sdk_session_id", sessionId: "sess-1", sdkSessionId: "ready-sdk" })
+    })
+    await flush()
     applySdkSubagentBridgeMock.mockClear()
     getSessionMock.mockClear()
     adapterMock.applySdkEvent.mockReturnValueOnce({
@@ -5922,7 +6538,9 @@ describe("useClaudeChat — concurrent sessions", () => {
     await act(async () => {
       await result.current.send("to-bg", undefined, { sessionId: "sess-1" })
     })
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", expect.anything(), expect.anything())
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", expect.anything(), expect.anything(), {
+      transcriptRuntime: "prepared",
+    })
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "streaming")
   })
 
@@ -6833,7 +7451,8 @@ describe("embedded runtime reachability", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(
       "aside",
       expect.stringContaining("continue aside"),
-      expect.any(Object)
+      expect.any(Object),
+      { transcriptRuntime: "prepared" }
     )
     expect(chatState.activeSessionId).toBe("sess-1")
   })
@@ -7287,7 +7906,9 @@ describe("useClaudeChat — @agent turn routing", () => {
     // ...and the dispatch took that same lane.
     expect(ensureExternalAgentReadyMock).not.toHaveBeenCalled()
     expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "explain", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "explain", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
     // The reply is sealed as the builtin engine's answer to `@claude`.
     expect((chatState.lastSendBySession["sess-1"] as { routeStamp?: unknown }).routeStamp).toEqual({
       handle: "claude",
@@ -7633,7 +8254,8 @@ describe("useClaudeChat — @agent turn routing", () => {
       expect(sendPromptMock).toHaveBeenCalledWith(
         "sess-1",
         "what happens next?",
-        expect.any(Object)
+        expect.any(Object),
+        { transcriptRuntime: "prepared" }
       )
     })
 
@@ -7818,7 +8440,9 @@ describe("useClaudeChat — @agent turn routing", () => {
       await result.current.send("@claude hi", undefined, { turnRoute: CLAUDE })
     })
     expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "hi", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "hi", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
     expect(writtenUserRows().at(-1)!.metadata?.turnRoute).toEqual(CLAUDE)
   })
 
@@ -7908,7 +8532,9 @@ describe("useClaudeChat — @agent turn routing", () => {
     expect(startSquadRunMock).not.toHaveBeenCalled()
     expect(checkDelegationMock).not.toHaveBeenCalled()
     expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "quick question", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "quick question", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
   })
 
   it("answers a member route as that member, with the member's model for the turn", async () => {
@@ -7944,7 +8570,9 @@ describe("useClaudeChat — @agent turn routing", () => {
       characterId: "__teammate__:tm-critic",
       modelOverride: "critic-model",
     })
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "review this", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "review this", expect.any(Object), {
+      transcriptRuntime: "prepared",
+    })
     expect((chatState.lastSendBySession["sess-1"] as { routeStamp?: unknown }).routeStamp).toEqual(
       expect.objectContaining({
         handle: "critic",
@@ -8708,6 +9336,186 @@ describe("paused project (ADR-0204)", () => {
       )
     ).toBe(true)
     expect(persistSessionAssetsMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("durable background result admission", () => {
+  let receiptRead: jest.SpyInstance
+  let queueRead: jest.SpyInstance
+  let squadRead: jest.SpyInstance
+  beforeEach(async () => {
+    const { getDb } = await import("@/lib/db/schema")
+    receiptRead = jest.spyOn(getDb().workSubmissions, "get").mockResolvedValue(undefined)
+    queueRead = jest.spyOn(getDb().mobileOutboundQueue, "get").mockResolvedValue(undefined)
+    squadRead = jest.spyOn(getDb().executionRuns, "get").mockResolvedValue(undefined)
+    fusionDeliveryReceiptMock.mockReset().mockResolvedValue(undefined)
+  })
+  afterEach(() => {
+    receiptRead.mockRestore()
+    queueRead.mockRestore()
+    squadRead.mockRestore()
+  })
+  it("keeps the reserved message and run identity when the delivery is accepted", async () => {
+    acceptChatTurnMock.mockResolvedValueOnce({ submissionId: "work:background-delivery-test" })
+    const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
+      makeUserMessage: jest.Mock
+    }
+    makeUserMessage.mockImplementationOnce((content: string, id: string) => ({
+      id,
+      role: "user",
+      parts: [{ type: "text", text: content }],
+    }))
+    const onAccepted = jest.fn()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("background output", undefined, {
+        backgroundDelivery: { id: "background-delivery-test", onAccepted },
+        throwOnError: true,
+      })
+    })
+    expect(acceptChatTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "background-delivery-test",
+        messageId: "background-delivery-test",
+      })
+    )
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+    expect(sendPromptMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not send an automatic delivery when durable admission is unavailable", async () => {
+    const onAccepted = jest.fn()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send("background output", undefined, {
+          backgroundDelivery: { id: "background-delivery-unavailable", onAccepted },
+          throwOnError: true,
+        })
+      ).rejects.toThrow("background_delivery_durable_acceptance_unavailable")
+    })
+    expect(onAccepted).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("acknowledges an already accepted batch after reload without another send", async () => {
+    receiptRead.mockResolvedValue({
+      id: "work:background-delivery-existing",
+      runId: "background-delivery-existing",
+      sessionId: "sess-1",
+    })
+    const onAccepted = jest.fn()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("background output", undefined, {
+        backgroundDelivery: { id: "background-delivery-existing", onAccepted },
+        throwOnError: true,
+      })
+    })
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(acceptChatTurnMock).not.toHaveBeenCalled()
+  })
+  it("recognizes a Fusion ledger receipt on redelivery without starting another run", async () => {
+    fusionDeliveryReceiptMock.mockResolvedValue({ sessionId: "sess-1", runId: "background-fusion" })
+    const onAccepted = jest.fn()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("output", undefined, {
+        backgroundDelivery: { id: "background-fusion", onAccepted },
+        throwOnError: true,
+      })
+    })
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+    expect(runFusionChatTurnMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+  it("uses the Squad's existing idempotent run acceptance", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Squad",
+      model: "sonnet",
+      squadId: "squad-1",
+    })
+    startSquadRunMock.mockResolvedValueOnce({
+      started: true,
+      runId: "background-squad",
+      duplicate: true,
+    })
+    const onAccepted = jest.fn()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("output", undefined, {
+        backgroundDelivery: { id: "background-squad", onAccepted },
+        throwOnError: true,
+      })
+    })
+    expect(startSquadRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "background-squad" })
+    )
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("acknowledges a Fusion turn once its existing ledger commits acceptance", async () => {
+    const onAccepted = jest.fn()
+    const stamp = {
+      runId: "background-fusion-new",
+      decisionId: "d1",
+      actionId: "panel_review",
+      mode: "panel",
+      ruleId: "R1_explicit_mode",
+      requested: "panel",
+      roles: { judge: "openai::gpt-5" },
+      budgetMode: "tracked",
+      capMicrousd: 2000000,
+      acceptanceProfile: "evidence_review",
+    } as NonNullable<SendOptions["routerFusionRun"]>
+    resolveSendOptionsMock.mockResolvedValue({
+      provider: "openai",
+      model: "gpt-5",
+      routerFusionRun: stamp,
+    })
+    runFusionChatTurnMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const input = args[0] as { onAccepted?: () => void }
+      input.onAccepted?.()
+      return "completed"
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("output", undefined, {
+        backgroundDelivery: { id: "background-fusion-new", onAccepted },
+        throwOnError: true,
+      })
+    })
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ backgroundDeliveryId: "background-fusion-new" })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("does not accept a colliding receipt belonging to another session", async () => {
+    receiptRead.mockResolvedValue({ sessionId: "other", runId: "background-mismatch" })
+    const onAccepted = jest.fn()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send("output", undefined, {
+          backgroundDelivery: { id: "background-mismatch", onAccepted },
+          throwOnError: true,
+        })
+      ).rejects.toThrow("background_delivery_durable_acceptance_unavailable")
+    })
+    expect(onAccepted).not.toHaveBeenCalled()
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })

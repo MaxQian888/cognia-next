@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import { CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP } from "@/types/context-workbench"
 import { RadarIcon } from "lucide-react"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
@@ -596,6 +597,42 @@ describe("ContextWorkbench", () => {
       )
       expect(screen.getByTestId("context-workbench-mobile-sheet").getAttribute("style")).toContain(
         "padding-bottom: calc(45dvh + env(safe-area-inset-bottom))"
+      )
+    })
+
+    it("is a near-full-height, internally clipped sheet with a real drag handle", () => {
+      // The tallest snap is where a workspace reveal lands (the dock-layout
+      // store raises it), so a file tapped in chat fills the phone instead of
+      // sitting in its bottom half under the conversation.
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ContextWorkbenchMobileDrawer
+            open
+            onOpenChange={jest.fn()}
+            snapPoint={CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP}
+            onSnapPointChange={jest.fn()}
+            workbenchInstanceId="mobile-sizing"
+            resource={resource}
+            panels={[]}
+          />
+        </NextIntlClientProvider>
+      )
+      const sheet = screen.getByTestId("context-workbench-mobile-sheet")
+      expect(CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP).toBe(0.92)
+      expect(sheet).toHaveClass(
+        "overflow-hidden",
+        "data-[vaul-drawer-direction=bottom]:max-h-[92dvh]",
+        "data-[vaul-drawer-direction=bottom]:rounded-t-2xl"
+      )
+      const style = sheet.getAttribute("style") ?? ""
+      expect(style).toContain("height: 92dvh")
+      expect(style).toContain("padding-bottom: calc(8dvh + env(safe-area-inset-bottom))")
+      expect(screen.getByTestId("context-workbench-drawer-handle")).toBeInTheDocument()
+      expect(screen.getByTestId("context-workbench")).toHaveClass(
+        "w-full",
+        "min-w-0",
+        "max-w-full",
+        "overflow-hidden"
       )
     })
   })

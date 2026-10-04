@@ -30,7 +30,11 @@ import { TerminalSquareIcon } from "lucide-react"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Button } from "@/components/ui/button"
 import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
-import { InlineCopyButton, ToolRowShell } from "@/components/chat/message-parts/tool-row"
+import {
+  InlineCopyButton,
+  TOOL_ROW_SCROLL_TEXT_CLASS,
+  ToolRowShell,
+} from "@/components/chat/message-parts/tool-row"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import {
   TerminalTabPicker,
@@ -317,11 +321,17 @@ export const TerminalToolPart = memo(function TerminalToolPart({
       }
       target={
         running && firstLine ? (
-          <Shimmer as="span" className="min-w-0 flex-1 truncate font-mono text-xs" duration={1.6}>
+          <Shimmer
+            as="span"
+            className={cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1 font-mono text-xs")}
+            duration={1.6}
+          >
             {firstLine}
           </Shimmer>
         ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+          <span
+            className={cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1 font-mono text-xs text-foreground")}
+          >
             {firstLine || displayTitle}
           </span>
         )

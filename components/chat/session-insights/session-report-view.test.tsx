@@ -11,6 +11,22 @@ jest.mock("next-intl", () => ({
     params ? `${key}:${JSON.stringify(params)}` : key,
 }))
 
+// Both have their own suites; here only the hand-off of report data matters.
+const timelineProps: Array<Record<string, unknown>> = []
+jest.mock("@/components/chat/session-insights/session-cost-timeline", () => ({
+  SessionCostTimeline: (props: Record<string, unknown>) => {
+    timelineProps.push(props)
+    return <div data-testid="timeline-stub" />
+  },
+}))
+const efficiencyProps: Array<Record<string, unknown>> = []
+jest.mock("@/components/usage/usage-efficiency-panel", () => ({
+  UsageEfficiencyPanel: (props: Record<string, unknown>) => {
+    efficiencyProps.push(props)
+    return <div data-testid="efficiency-stub" />
+  },
+}))
+
 function report(over: Partial<SessionReport> = {}): SessionReport {
   return {
     title: "T",
@@ -21,8 +37,12 @@ function report(over: Partial<SessionReport> = {}): SessionReport {
     totalCacheReadTokens: 0,
     totalCacheCreationTokens: 0,
     totalCostUsd: 0.25,
+    unpricedTurns: 0,
     totalDurationMs: 10_000,
     totalReasoningTokens: 120,
+    timeline: [],
+    cacheSavings: { savedUsd: 0, pricedReadTokens: 0, unpricedReadTokens: 0, savingsRate: null },
+    turnDistribution: { costPerTurn: null, latencyMs: null, outputTokensPerSec: null },
     models: [
       {
         model: "claude-x",
@@ -166,5 +186,32 @@ describe("SessionReportView", () => {
   it("notes the degraded conversation tree", () => {
     render(<SessionReportView report={report()} />)
     expect(screen.getByText("degradedTree")).toBeInTheDocument()
+  })
+
+  it("hands the timeline, rank and jump handler to the cost timeline", () => {
+    timelineProps.length = 0
+    const onJump = jest.fn()
+    const rank = { percentile: 70, peers: 8, medianUsd: 0.1 }
+    const r = report()
+    render(<SessionReportView report={r} rank={rank} onJumpToMessage={onJump} />)
+    expect(screen.getByTestId("timeline-stub")).toBeInTheDocument()
+    expect(timelineProps.at(-1)).toEqual({ points: r.timeline, rank, onJump })
+  })
+
+  it("mounts the shared efficiency panel over the session's own figures", () => {
+    efficiencyProps.length = 0
+    const r = report()
+    render(<SessionReportView report={r} />)
+    expect(efficiencyProps.at(-1)).toMatchObject({
+      savings: r.cacheSavings,
+      distribution: r.turnDistribution,
+    })
+    render(<SessionReportView report={report({ turns: 0, models: [] })} />)
+    expect(screen.getAllByTestId("efficiency-stub")).toHaveLength(1)
+  })
+
+  it("renders a lower-bound cost when turns could not be priced", () => {
+    render(<SessionReportView report={report({ unpricedTurns: 1 })} />)
+    expect(screen.getByTestId("session-report-view")).toHaveTextContent("≥ $0.25")
   })
 })

@@ -7,7 +7,7 @@
 // (with an editable preview before the branch is created). The original
 // session is never mutated. See `lib/chat/branch-session.ts`.
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -22,15 +22,20 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Loader2Icon } from "lucide-react"
 import { useChatStore, selectVisibleMessages } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
-import { getSession, updateSession } from "@/lib/db/sessions"
+import { deleteSession, getSession, updateSession } from "@/lib/db/sessions"
 import { buildAgentBackedLlmClient } from "@/lib/ai/generation/agent-backed-client"
 import { renderConversationSegments, structuralSummary } from "@/lib/ai/generation/summarizer"
 import { summarizeMaterial, type SummaryOutcome } from "@/lib/ai/generation/summarize-material"
-import { branchSessionAtMessage, type BranchMode } from "@/lib/chat/branch-session"
+import {
+  branchSessionAtMessage,
+  type BranchMode,
+  type BranchWorkingSetPolicy,
+} from "@/lib/chat/branch-session"
 import { surfaceBindingKey } from "@/lib/context-workbench/resource-session"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import { getContextResourceKey } from "@/types/context-workbench"
@@ -72,6 +77,8 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
   const locale = useLocale()
   const isMobile = usePlatform() === "mobile"
   const [mode, setMode] = useState<BranchMode>("direct")
+  const [workingSetPolicy, setWorkingSetPolicy] = useState<BranchWorkingSetPolicy>("as-of")
+  const workingSetSelectId = useId()
   // Where the branch lands. "session" (default) keeps the existing behaviour;
   // "aside" is the lighter destination for an exploration you expect to fold
   // back, and is desktop-only because the mobile shell mounts no workbench.
@@ -91,6 +98,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       setMode("direct")
+      setWorkingSetPolicy("as-of")
       setTarget("session")
       setPicked(null)
       setSummaryText("")
@@ -196,14 +204,20 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
       mode,
       summaryText: mode === "summary" ? summaryText : undefined,
       pickedMessageIds: picked ? [...picked] : undefined,
+      workingSetPolicy,
     })
     const binding: SessionSurfaceBinding = { kind: "session", sessionId }
-    await updateSession(child.id, {
-      kind: "resource-workbench",
-      visibility: "embedded",
-      surfaceBinding: binding,
-      surfaceBindingKey: surfaceBindingKey(binding),
-    })
+    try {
+      await updateSession(child.id, {
+        kind: "resource-workbench",
+        visibility: "embedded",
+        surfaceBinding: binding,
+        surfaceBindingKey: surfaceBindingKey(binding),
+      })
+    } catch (error) {
+      await deleteSession(child.id)
+      throw error
+    }
     // Point the workbench at the new aside and bring the dock forward, or the
     // branch lands somewhere the user has to go hunting for.
     useContextWorkbenchStore
@@ -239,6 +253,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
         mode,
         summaryText: mode === "summary" ? summaryText : undefined,
         pickedMessageIds: picked ? [...picked] : undefined,
+        workingSetPolicy,
       })
       // Link to the active workspace — mirrors the "new conversation" flow
       // (`hooks/chat/use-sessions.ts:create`).
@@ -263,7 +278,13 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
       handleOpenChange(false)
     } catch (err) {
       log.error("branch-create-failed", { sessionId, messageId, mode, error: String(err) })
-      toast.error(t("createError"))
+      toast.error(
+        t(
+          err instanceof Error && err.name === "BranchWorkingSetHistoryUnavailableError"
+            ? "workingSet.unavailable"
+            : "createError"
+        )
+      )
     } finally {
       setCreating(false)
     }
@@ -327,6 +348,25 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
               </span>
             </label>
           </RadioGroup>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={workingSetSelectId} className="text-xs">
+              {t("workingSet.label")}
+            </Label>
+            <NativeSelect
+              id={workingSetSelectId}
+              value={workingSetPolicy}
+              onChange={(event) =>
+                setWorkingSetPolicy(event.target.value as BranchWorkingSetPolicy)
+              }
+              disabled={creating}
+              wrapperClassName="w-full"
+            >
+              <NativeSelectOption value="as-of">{t("workingSet.historical")}</NativeSelectOption>
+              <NativeSelectOption value="current">{t("workingSet.current")}</NativeSelectOption>
+              <NativeSelectOption value="initial">{t("workingSet.initial")}</NativeSelectOption>
+            </NativeSelect>
+          </div>
 
           {mode === "direct" &&
             (picked ? (

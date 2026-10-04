@@ -125,6 +125,23 @@ describe("FileToolPart row", () => {
     expect(screen.queryByTestId("mcp-read-card")).toBeNull()
   })
 
+  it("counts a numbered read's file lines, not the tool's paging hint", () => {
+    const output = "     1\ta\n     2\tb\n\n(showing lines 1-2 of 9; continue with offset=3)"
+    render(<FileToolPart part={part("tool-Read", { input: { file_path: "/a.ts" }, output })} />)
+    expect(screen.getByTestId("file-tool-meta").textContent).toContain('result.lines:{"count":2}')
+  })
+
+  it("keeps a long path inside the row, scrolling sideways on touch", () => {
+    const path = "components/mobile/external-agents/agent-preset-picker.tsx"
+    render(<FileToolPart part={part("tool-Read", { input: { file_path: path }, output: "x" })} />)
+    // The muted dirname span sits inside the target box with the basename.
+    const target = screen.getByText("components/mobile/external-agents/").parentElement!
+    expect(target).toHaveTextContent(path)
+    expect(target.className).toContain("min-w-0")
+    expect(target.className).toContain("pointer-coarse:overflow-x-auto")
+    expect(target.className).toContain("[scrollbar-width:none]")
+  })
+
   it("expands into the read body on click", () => {
     render(
       <FileToolPart

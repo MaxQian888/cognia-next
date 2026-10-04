@@ -13,20 +13,14 @@ description: cognia 插件构建 —— 强制 lint、工具链预检、按 mani
   打包成 zip；**frontend** → 解析 TS 入口 → 以 13 个固定参数调用 `npx --no-install esbuild`
   （`build_ts.rs:116-132`）→ 打包成 zip；**python / hybrid / vscode-extension** → 通过
   `pack_existing_entry_bundle()`（`packaging.rs:278-294`）打包 manifest 声明的现有入口文件
-  （`pythonMain`、`main`、`vscodeMain`、可选 `styles`）以及 `bundle_include[]`。所有 bundle 都落在
-  `target/cognia/<id>-<version>.zip`，基础布局相同：先是漂亮打印的 `plugin.json`，然后是运行时产物条目，
+  （`pythonMain`、`main`、`vscodeMain`、可选 `styles`）以及 `bundle_include[]`。所有 bundle 都保存到
+  `target/cognia/<id>-<version>.zip`，基础布局相同：先是格式化后的 `plugin.json`，然后是运行时产物条目，
   再是去重后的 `bundle_include[]` 附加文件，全部经 Deflate 压缩。
 </TLDR>
 
 ## Flags
 
-`cognia plugin build [--path .] [--out <zip>] [--skip-build] [--json]` —— 对有编译/打包步骤的运行时
-（`wasm`、`frontend`），`--skip-build` 会跳过该步骤，直接把磁盘上已有的内容重新打包。
-从 CLI 视角看，Python、hybrid 和 VS Code-extension 插件始终是 build-free：声明的入口文件必须在打包前已经存在。
-`--json` 模式下，缺失或不可读取的插件根目录 / manifest 使用 `stage: "input"` 并带上 `{path, error}`；
-lint 失败使用 `stage: "lint"` 并嵌入 lint 报告；工具链、构建、嵌入和打包失败则输出
-结构化的 `{ok:false, action:"build", stage, pluginId, version, pluginType, bundle, error}` payload，
-所有 JSON 失败都会保持 stderr 为空。
+`cognia plugin build [--path .] [--out <zip>] [--skip-build] [--json]` —— 对有编译/打包步骤的运行时（`wasm`、`frontend`），`--skip-build` 会跳过该步骤，直接把磁盘上已有的内容重新打包。从 CLI 视角看，Python、hybrid 和 VS Code-extension 插件始终是 build-free：声明的入口文件必须在打包前已经存在。`--json` 模式下，缺失或不可读取的插件根目录 / manifest 使用 `stage: "input"` 并带上 `{path, error}`；lint 失败使用 `stage: "lint"` 并嵌入 lint 报告；工具链、构建、嵌入和打包失败则输出结构化的 `{ok:false, action:"build", stage, pluginId, version, pluginType, bundle, error}` payload，所有 JSON 失败都会保持 stderr 为空。
 
 ## 端到端流程
 
@@ -75,14 +69,11 @@ Add it with:
 then re-run `cognia plugin build`.
 ```
 
-target 检查运行 `rustup target list --installed` 并寻找完全匹配的行；当
-rustup 本身缺失时（例如发行版打包的 Rust），该检查会被跳过而非失败。
+target 检查运行 `rustup target list --installed` 并寻找完全匹配的行；当 rustup 本身缺失时（例如发行版打包的 Rust），该检查会被跳过而非失败。
 
 ### `cognia:api-version` 自定义段
 
-host 通过读取一个名为 `cognia:api-version` 的自定义段，把 WASM bundle 路由到匹配的 WIT linker，
-其载荷是来自 `manifest.wasm.apiVersion` 的原样版本字符串。嵌入用的是一个从零写起的编码器
-—— 不依赖 `wasm-encoder`：
+host 通过读取一个名为 `cognia:api-version` 的自定义段，把 WASM bundle 路由到匹配的 WIT linker，其载荷是来自 `manifest.wasm.apiVersion` 的原样版本字符串。嵌入用的是一个从零写起的编码器—— 不依赖 `wasm-encoder`：
 
 ```rust
 // crates/cognia-cli/src/packaging.rs:30-50
@@ -105,10 +96,7 @@ pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
 }
 ```
 
-`strip_section`（`packaging.rs:67-106`）用 `wasmparser` 丢弃任何已存在的副本，因此
-重新构建和手动重新嵌入都是幂等的。独立的应急出口是
-`cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]`，它用 `looks_like_semver`
-校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。JSON 模式下失败会用
+`strip_section`（`packaging.rs:67-106`）用 `wasmparser` 丢弃任何已存在的副本，因此重新构建和手动重新嵌入都是幂等的。独立的应急出口是 `cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]`，它用 `looks_like_semver` 校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。JSON 模式下失败会用
 `stage: "input" | "read" | "embed" | "write"` 标明失败阶段。
 
 <Callout type="info" title="一句话说清契约版本管理">
@@ -119,9 +107,7 @@ pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
 
 ## Frontend 路径
 
-`resolve_ts_entry`（`build_ts.rs:70-93`）优先采用 `manifest.tsEntry`（若它指向不存在的
-文件则报错），然后依次尝试 `src/index.ts`、`src/index.tsx`、`src/main.ts`。打包器调用
-被完全固定：
+`resolve_ts_entry`（`build_ts.rs:70-93`）优先采用 `manifest.tsEntry`（若它指向不存在的文件则报错），然后依次尝试 `src/index.ts`、`src/index.tsx`、`src/main.ts`。打包器调用被完全固定：
 
 ```rust
 // crates/cognia-cli/src/build_ts.rs:111-132
@@ -144,12 +130,9 @@ cmd.current_dir(crate_root)
 
 两个有意为之的选择：
 
-- **`--no-install`** —— CLI 拒绝背着作者全局安装 esbuild；以插件自己 `package.json`
-  里的版本为准。失败提示会指明正确方向：
-  `esbuild failed for <entry>. If npx says "could not determine executable", run pnpm install in
+- **`--no-install`** —— CLI 拒绝背着作者全局安装 esbuild；以插件自己 `package.json` 里的版本为准。失败提示会指明正确方向：`esbuild failed for <entry>. If npx says "could not determine executable", run pnpm install in
   <crate_root> first.`（`build_ts.rs:134-138`）
-- **host 模块用 `--external`** —— `@/types/plugin/index`、`@/lib/*`、`react`、`react-dom` 由
-  host 在加载时提供；把它们打进去会重复打包 React 并破坏 shim。
+- **host 模块用 `--external`** —— `@/types/plugin/index`、`@/lib/*`、`react`、`react-dom` 由 host 在加载时提供；把它们打进去会重复打包 React 并破坏 shim。
 
 ## Build-free 运行时路径
 
@@ -160,9 +143,7 @@ cmd.current_dir(crate_root)
 - `vscodeMain` 会作为扩展入口脚本传给 VS Code sidecar。
 - `styles` 存在时会随这些入口一起复制。
 
-`pack_existing_entry_bundle()`（`packaging.rs:278-294`）会确认每个声明入口都是插件目录内的相对文件，
-拒绝缺失文件，然后写入 `plugin.json`、去重后的入口文件和 `bundle_include[]` 附加文件。这匹配 host 的
-build-free 本地安装契约，而不是猜测 Python 打包、hybrid frontend 构建或 VSIX 编译方式。
+`pack_existing_entry_bundle()`（`packaging.rs:278-294`）会确认每个声明入口都是插件目录内的相对文件，拒绝缺失文件，然后写入 `plugin.json`、去重后的入口文件和 `bundle_include[]` 附加文件。这匹配 host 的 build-free 本地安装契约，而不是猜测 Python 打包、hybrid frontend 构建或 VSIX 编译方式。
 
 ## Bundle 布局（所有类型）
 
@@ -172,9 +153,7 @@ build-free 本地安装契约，而不是猜测 Python 打包、hybrid frontend 
 | 2 | 运行时产物条目 | wasm：`manifest.wasmMain`；frontend：`manifest.main`；python：`manifest.pythonMain`；hybrid：声明的 `main` / `pythonMain` / `styles`；VS Code extension：`manifest.vscodeMain` / `styles` |
 | 3… | `bundle_include[]` 附加文件 | 相对于 crate 根的路径，去重，缺失文件 = 硬错误 |
 
-各处压缩一律为 `zip::CompressionMethod::Deflated`（`packaging.rs:217`、
-`build_ts.rs:156`）。输出约定 `target/cognia/<id>-<version>.zip` 也正是
-[`dev`](./bridge-client) 在每次重建后计算出来、用以找到应当热重载的 bundle 的路径。
+各处压缩一律为 `zip::CompressionMethod::Deflated`（`packaging.rs:217`、`build_ts.rs:156`）。输出约定 `target/cognia/<id>-<version>.zip` 也正是 [`dev`](./bridge-client) 在每次重建后计算出来、用以找到应当热重载的 bundle 的路径。
 
 <Callout type="warn" title="近似确定，但非逐字节可复现">
   写入器注释（`packaging.rs:12-14`）指出，bundle 字节只在 `bundle_include[]` 的

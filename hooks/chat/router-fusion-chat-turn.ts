@@ -85,6 +85,7 @@ export function fusionTranscriptOf(messages: readonly UIMessage[]): FusionMessag
 }
 
 export interface FusionChatTurnInput {
+  onAccepted?: () => void
   sessionId: string
   stamp: RouterFusionRunStamp
   /** The conversation the provider reads, the new message last. */
@@ -243,6 +244,7 @@ export async function runFusionChatTurn(
         settings: input.settings,
         signal: turn.controller.signal,
         onProgress: (summary) => useFusionProgressStore.getState().update(sessionId, summary),
+        ...(input.onAccepted ? { onAccepted: input.onAccepted } : {}),
       })
     } catch (error) {
       return settle("failed", await failureDiagnostic(error, sessionId, deps))

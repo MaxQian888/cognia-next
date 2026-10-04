@@ -1,6 +1,11 @@
 import type { UIMessage } from "ai"
 
-import { analyzeSession, buildAssessments } from "@/lib/analysis/session-report"
+import {
+  OTHER_TOOLS_KEY,
+  analyzeSession,
+  buildAssessments,
+  rankToolCounts,
+} from "@/lib/analysis/session-report"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 
@@ -67,6 +72,32 @@ describe("analyzeSession", () => {
     const r = analyzeSession({ messages: [], usageRows: rows }, { resolve })
     expect(r.totalDurationMs).toBe(10_000)
     expect(r.totalReasoningTokens).toBe(120) // undefined reasoning counts as 0
+  })
+
+  it("carries the per-turn timeline, cache savings and turn distribution", () => {
+    const rows = [
+      row({ messageId: "b", at: 2000, inputTokens: 2_000_000, cacheReadTokens: 1_000_000 }),
+      row({ messageId: "a", at: 1000, inputTokens: 1_000_000, durationMs: 1000, outputTokens: 50 }),
+    ]
+    const r = analyzeSession({ messages: [], usageRows: rows }, { resolve })
+    expect(r.timeline.map((p) => [p.messageId, p.cumulativeCostUsd])).toEqual([
+      ["a", 1.00005],
+      ["b", expect.closeTo(3.10005, 6)],
+    ])
+    // 1M cache reads at $1 base with the default 0.1× cached multiplier.
+    expect(r.cacheSavings.savedUsd).toBeCloseTo(0.9)
+    expect(r.turnDistribution.costPerTurn?.count).toBe(2)
+    expect(r.turnDistribution.latencyMs?.count).toBe(1)
+    expect(r.unpricedTurns).toBe(0)
+  })
+
+  it("counts turns no pricing layer knew, so the total reads as a lower bound", () => {
+    const r = analyzeSession(
+      { messages: [], usageRows: [row({ messageId: "x", inputTokens: 10 })] },
+      { resolve: () => null }
+    )
+    expect(r.unpricedTurns).toBe(1)
+    expect(r.timeline[0].costKnown).toBe(false)
   })
 
   it("counts tool calls, errors, denials, thinking, friction, commits, tests", () => {
@@ -220,5 +251,16 @@ describe("buildAssessments", () => {
     expect(find("context", { ...base, maxContextFraction: 0.9 }).reasoningKey).toBe(
       "context.critical"
     )
+  })
+})
+
+describe("rankToolCounts", () => {
+  it("orders tools by count and folds the tail into other", () => {
+    expect(rankToolCounts({ Read: 5, Bash: 9, Edit: 5, Grep: 0, Glob: 1 }, 2)).toEqual([
+      { tool: "Bash", count: 9 },
+      { tool: "Edit", count: 5 },
+      { tool: OTHER_TOOLS_KEY, count: 6 },
+    ])
+    expect(rankToolCounts({ Read: 1 })).toEqual([{ tool: "Read", count: 1 }])
   })
 })

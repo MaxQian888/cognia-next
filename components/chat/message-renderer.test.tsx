@@ -1679,6 +1679,64 @@ describe("select action", () => {
   })
 })
 
+// ── long-press sheet hosts (phone) ────────────────────────────────────────────
+
+describe("action bar with a long-press sheet host", () => {
+  // The shipped presets (`hover` / `core`); `all` is the explicit opt-in that
+  // keeps every bar and is pinned separately below.
+  beforeEach(() => {
+    useChatStore.setState({ activeSessionId: "sess-1" })
+    mockActions = "hover"
+  })
+  afterEach(() => {
+    mockActions = "all"
+  })
+
+  it("keeps every bar under the inspector's explicit `all`", () => {
+    mockActions = "all"
+    render(<MessageRenderer message={userMsg("ash0")} actionSheetHost />)
+    expect(screen.queryAllByLabelText("copyTooltip").length).toBeGreaterThan(0)
+  })
+
+  it("thins the always-on `core` bar the same way", () => {
+    mockActions = "core"
+    render(<MessageRenderer message={userMsg("ash7")} actionSheetHost />)
+    expect(screen.queryAllByLabelText("copyTooltip")).toHaveLength(0)
+  })
+
+  it("keeps the bar under the latest settled reply", () => {
+    render(<MessageRenderer message={assistantMsg("ash1")} isLastAssistant actionSheetHost />)
+    expect(screen.queryAllByLabelText("copyTooltip").length).toBeGreaterThan(0)
+  })
+
+  it("drops the bar from older replies and from user messages", () => {
+    const older = render(
+      <MessageRenderer message={assistantMsg("ash2")} isLastAssistant={false} actionSheetHost />
+    )
+    expect(screen.queryAllByLabelText("copyTooltip")).toHaveLength(0)
+    older.unmount()
+    render(<MessageRenderer message={userMsg("ash3")} actionSheetHost />)
+    expect(screen.queryAllByLabelText("copyTooltip")).toHaveLength(0)
+  })
+
+  it("drops the bar from the latest reply while it is still streaming", () => {
+    render(
+      <MessageRenderer message={assistantMsg("ash4")} isLastAssistant isStreaming actionSheetHost />
+    )
+    expect(screen.queryAllByLabelText("copyTooltip")).toHaveLength(0)
+  })
+
+  it("keeps every bar without a sheet host", () => {
+    render(<MessageRenderer message={userMsg("ash5")} />)
+    expect(screen.queryAllByLabelText("copyTooltip").length).toBeGreaterThan(0)
+  })
+
+  it("collapses the emptied action line instead of leaving a gap", () => {
+    render(<MessageRenderer message={userMsg("ash6")} actionSheetHost />)
+    expect(screen.getByTestId("message-action-line")).toHaveClass("empty:hidden")
+  })
+})
+
 // ── edit flow ─────────────────────────────────────────────────────────────────
 
 describe("edit flow", () => {

@@ -30,12 +30,22 @@ import type { UIMessage } from "ai"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
-import { getSession } from "@/lib/db/sessions"
+import { deleteSession, getSession } from "@/lib/db/sessions"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { persistMessages, invalidatePersistSnapshot } from "@/lib/db/messages"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { emptyWorkingSet } from "@/lib/chat/working-set"
+import type { CompleteSessionHistory } from "@/lib/sync/session-history"
 
 export type BranchMode = "direct" | "summary"
+export type BranchWorkingSetPolicy = "as-of" | "current" | "initial"
+
+export class BranchWorkingSetHistoryUnavailableError extends Error {
+  constructor() {
+    super("Historical working set unavailable; choose current or fresh state")
+    this.name = "BranchWorkingSetHistoryUnavailableError"
+  }
+}
 
 /**
  * Character budget for a direct branch's one-shot transcript seed.
@@ -84,6 +94,10 @@ export interface BranchSessionParams {
    * including `messageId`.
    */
   pickedMessageIds?: readonly string[]
+  /** Historical state at the last selected message by default. */
+  workingSetPolicy?: BranchWorkingSetPolicy
+  /** Explicit complete host export; never substitute a recent local mirror. */
+  sourceSnapshot?: CompleteSessionHistory
 }
 
 function newMessageId(): string {
@@ -156,7 +170,7 @@ export function renderBranchSeed(
 
 /**
  * Clone the kept messages for the new session: fresh ids, and the
- * regeneration-branch bookkeeping (`branchGroupId` / `branchIndex`) plus the
+ * regeneration-branch bookkeeping (`branchGroupId` / `branchIndex` / `branchOwnerId`) plus the
  * transient `sessionId` mirror dropped so the copy reads as a clean linear
  * thread. `senderId` / `senderKind` are preserved (team sessions hoist them
  * back into columns via `persistMessages`).
@@ -166,6 +180,7 @@ function cloneMessages(kept: UIMessage[]): UIMessage[] {
     const meta = { ...((m.metadata as Record<string, unknown> | undefined) ?? {}) }
     delete meta.branchGroupId
     delete meta.branchIndex
+    delete meta.branchOwnerId
     delete meta.sessionId
     return {
       id: newMessageId(),
@@ -249,6 +264,12 @@ function buildChildRow(
     model: parent.model,
     providerOverride: parent.providerOverride,
     accountId: parent.accountId,
+    // Which models each external agent runs on is configuration, so a branch
+    // keeps it. The gateway task links (`externalAgentSession`,
+    // `externalAgentGatewaySessions`) are NOT copied: a task's native history
+    // belongs to one conversation, and two rows resuming it would interleave
+    // two threads in one memory, and deleting either would delete the other's.
+    externalAgentModels: parent.externalAgentModels,
     sandboxEnabled: parent.sandboxEnabled,
     computerUseTarget: parent.computerUseTarget,
     // The third sandbox column, and the one that kept being missed. Without it
@@ -287,7 +308,10 @@ function buildChildRow(
 export async function branchSessionAtMessage(params: BranchSessionParams): Promise<ChatSession> {
   const { sourceId, visibleMessages, messageId, mode } = params
 
-  const source = await getSession(sourceId)
+  params.sourceSnapshot?.assertCurrent()
+  const source = params.sourceSnapshot?.session ?? (await getSession(sourceId))
+  if (source && source.id !== sourceId)
+    throw new Error("Cannot branch: source snapshot session mismatch")
   if (!source) throw new Error(`Cannot branch: session ${sourceId} not found`)
   assertSessionWritable(source, "branch")
 
@@ -309,6 +333,30 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
   // backfill can be missing one, in which case fall back to the active scope.
   const projectId = source.projectId ?? (await resolveScopeProjectId())
   const child = buildChildRow(source, messageId, mode, projectId)
+  const policy = params.workingSetPolicy ?? "as-of"
+  const snapshotRows = params.sourceSnapshot
+    ? new Map(params.sourceSnapshot.messages.map((row) => [row.id, row]))
+    : undefined
+  const sourceRows = snapshotRows
+    ? kept.map((message) => snapshotRows.get(message.id))
+    : await getDb().messages.bulkGet(kept.map((message) => message.id))
+  if (snapshotRows && sourceRows.some((row) => !row || row.sessionId !== sourceId)) {
+    throw new Error("Cannot branch: incomplete source snapshot")
+  }
+  const historicalStates = sourceRows.map((row) =>
+    row?.sessionId === sourceId ? row.workingSetSnapshot : undefined
+  )
+  const boundaryState = historicalStates.at(-1)
+  if (policy === "as-of" && !boundaryState && (source.workingSet?.revision ?? 0) > 0) {
+    throw new BranchWorkingSetHistoryUnavailableError()
+  }
+  child.workingSet = structuredClone(
+    policy === "current"
+      ? (source.workingSet ?? emptyWorkingSet())
+      : policy === "initial"
+        ? emptyWorkingSet()
+        : (boundaryState ?? emptyWorkingSet())
+  )
 
   let seededMessages: UIMessage[]
 
@@ -334,7 +382,22 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
     // was asked for — the child would show three messages while the model
     // silently remembered all forty.
     const isTail = cutIdx === visibleMessages.length - 1 && !picked
-    if (isTail && source.sdkSessionId) {
+    // The provider's retained history may still contain the removed transcript
+    // or a different regeneration sibling. Only an unchanged linear tail can
+    // establish that its SDK context matches what the child visibly inherits.
+    const hasBranchSelection = kept.some((message) => {
+      const metadata = message.metadata as Record<string, unknown> | undefined
+      return (
+        typeof metadata?.branchGroupId === "string" || typeof metadata?.branchOwnerId === "string"
+      )
+    })
+    if (
+      isTail &&
+      source.sdkSessionId &&
+      !params.sourceSnapshot &&
+      !source.runtimeTranscriptInvalidated &&
+      !hasBranchSelection
+    ) {
       // The SDK fork reproduces the parent's full context, which — at the tail —
       // is exactly the pre-branch context. Cheapest correct option.
       child.forkedFromSdkSessionId = source.sdkSessionId
@@ -347,10 +410,26 @@ export async function branchSessionAtMessage(params: BranchSessionParams): Promi
     }
   }
 
+  params.sourceSnapshot?.assertCurrent()
   await getDb().sessions.put(child)
   // Fresh row — make sure no stale persist snapshot lingers under a recycled id.
   invalidatePersistSnapshot(child.id)
-  await persistMessages(child.id, seededMessages)
+  try {
+    await persistMessages(child.id, seededMessages)
+    // Keep copied message history usable for a branch of this branch. The
+    // chosen policy takes effect at the new branch's final message boundary.
+    await getDb().transaction("rw", getDb().messages, async () => {
+      for (let i = 0; i < seededMessages.length; i++) {
+        await getDb().messages.update(seededMessages[i].id, {
+          workingSetSnapshot:
+            i === seededMessages.length - 1 ? child.workingSet : historicalStates[i],
+        })
+      }
+    })
+  } catch (error) {
+    await deleteSession(child.id)
+    throw error
+  }
 
   return child
 }

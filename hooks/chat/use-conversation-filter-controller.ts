@@ -4,7 +4,8 @@ import { nanoid } from "nanoid"
 import { useCallback, useMemo } from "react"
 
 import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
-import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
+import { resolveSessionModelIdentity } from "@/lib/chat/session-model-identity"
+import { recordedRuntimeRef, useSessionModelLanes } from "@/hooks/chat/use-session-model-lanes"
 import {
   buildConversationFilterOptions,
   type ConversationFilterOptions,
@@ -109,6 +110,23 @@ export interface UseConversationFilterControllerInput {
    * list has no guild rows and `kind` is the only way to separate the two there.
    */
   scopeOwnsKind?: boolean
+  /**
+   * Where the active filters and the selected saved view live. Defaults to
+   * the UI store, which the desktop sidebar and the phone drawer share on one
+   * device. A surface with its own scope — the conversation manager page —
+   * keeps its own, so narrowing a management table never narrows the sidebar
+   * behind it. Saved view *definitions* still come from `sidebarSettings`.
+   */
+  filterState?: ConversationFilterStateOwner
+}
+
+/** An owner for the filter state `useConversationFilterController` edits. */
+export interface ConversationFilterStateOwner {
+  filters: ConversationFilters | undefined
+  setFilters: (next: ConversationFilters) => void
+  reset: () => void
+  activeViewId: string | null
+  setActiveViewId: (id: string | null) => void
 }
 
 export interface ConversationFilterActions {
@@ -188,13 +206,6 @@ const EMPTY_SESSIONS: readonly ChatSession[] = []
 const EMPTY_DRIFT: ConversationViewDimension[] = []
 const EMPTY_IDS: string[] = []
 const EMPTY_VIEWS: ConversationView[] = []
-/**
- * Built-in defaults when neither the profile nor the character names one — the
- * same constants the row metadata falls back to (`channel-list.tsx`), so a
- * model filter matches exactly the rows whose detail line names that model.
- */
-const FALLBACK_MODEL = ANTHROPIC_DEFAULT_MODEL
-const FALLBACK_PROVIDER = "anthropic"
 
 export function useConversationFilterController({
   sessions,
@@ -205,10 +216,14 @@ export function useConversationFilterController({
   sidebarSettings,
   saveSidebarSettings,
   scopeOwnsKind = false,
+  filterState,
 }: UseConversationFilterControllerInput): ConversationFilterController {
-  const persistedFilters = useUIStore((s) => s.conversationFilters)
-  const setConversationFilters = useUIStore((s) => s.setConversationFilters)
-  const resetConversationFilters = useUIStore((s) => s.resetConversationFilters)
+  const storeFilters = useUIStore((s) => s.conversationFilters)
+  const storeSetFilters = useUIStore((s) => s.setConversationFilters)
+  const storeResetFilters = useUIStore((s) => s.resetConversationFilters)
+  const persistedFilters = filterState ? filterState.filters : storeFilters
+  const setConversationFilters = filterState ? filterState.setFilters : storeSetFilters
+  const resetConversationFilters = filterState ? filterState.reset : storeResetFilters
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
 
@@ -247,8 +262,10 @@ export function useConversationFilterController({
     const raw = sidebarSettings?.hiddenViewIds
     return Array.isArray(raw) ? raw : EMPTY_IDS
   }, [sidebarSettings?.hiddenViewIds])
-  const activeViewId = useUIStore((s) => s.activeConversationViewId)
-  const setActiveViewId = useUIStore((s) => s.setActiveConversationViewId)
+  const storeActiveViewId = useUIStore((s) => s.activeConversationViewId)
+  const storeSetActiveViewId = useUIStore((s) => s.setActiveConversationViewId)
+  const activeViewId = filterState ? filterState.activeViewId : storeActiveViewId
+  const setActiveViewId = filterState ? filterState.setActiveViewId : storeSetActiveViewId
   // A view the user deleted on another device leaves a dangling id here; the
   // chip must then show nothing rather than a name it cannot resolve.
   const activeView = useMemo(
@@ -274,25 +291,34 @@ export function useConversationFilterController({
     return map
   }, [characters])
 
-  // Same fallback chain the row metadata renders (`session → character →
-  // profile default → built-in default`, see `components/desktop/channel-list.tsx`
-  // `metadataBySessionId`), so a "Claude" filter matches exactly the rows
-  // whose metadata line says Claude.
-  const filterContext = useMemo<Pick<ConversationFilterContext, "modelOf" | "providerOf">>(
-    () => ({
-      modelOf: (session) => {
-        const character = session.characterId ? characterById.get(session.characterId) : undefined
-        return session.model ?? character?.model ?? defaultModel ?? FALLBACK_MODEL
-      },
-      providerOf: (session) => {
-        const character = session.characterId ? characterById.get(session.characterId) : undefined
-        return (
-          session.providerOverride ?? character?.providerId ?? defaultProvider ?? FALLBACK_PROVIDER
-        )
-      },
-    }),
-    [characterById, defaultModel, defaultProvider]
-  )
+  // The resolver the row metadata renders (`lib/chat/session-model-identity.ts`,
+  // used by both the desktop rail and the phone drawer), so a "Claude" filter
+  // matches exactly the rows whose metadata line says Claude — and a
+  // conversation an external agent runs is filed under the agent's model, not
+  // the built-in default.
+  const { sessionRuntimeRefs, defaultRuntimeRef, agentNameOf } = useSessionModelLanes()
+  const filterContext = useMemo<Pick<ConversationFilterContext, "modelOf" | "providerOf">>(() => {
+    const identityOf = (session: ChatSession) =>
+      resolveSessionModelIdentity(session, {
+        character: session.characterId ? characterById.get(session.characterId) : undefined,
+        sessionRuntimeRef: recordedRuntimeRef(sessionRuntimeRefs, session.id),
+        defaultRuntimeRef,
+        defaultModel,
+        defaultProvider,
+        agentNameOf,
+      })
+    return {
+      modelOf: (session) => identityOf(session).modelId,
+      providerOf: (session) => identityOf(session).providerId,
+    }
+  }, [
+    characterById,
+    defaultModel,
+    defaultProvider,
+    sessionRuntimeRefs,
+    defaultRuntimeRef,
+    agentNameOf,
+  ])
 
   const agents = useMemo<NamedEntity[]>(
     () => (characters ?? []).map((c) => ({ id: c.id, name: c.name })),

@@ -1278,6 +1278,57 @@ describe("ArtifactWorkspaceDock", () => {
     expect(useArtifactDockLayoutStore.getState().unreadArtifact).toBe(false)
   })
 
+  it("mobile: a launch restoring a session with a parked artifact keeps the Sheet shut", () => {
+    useBreakpointMock.mockReturnValue("mobile")
+    // App launch: the shell mounts before the last conversation is restored,
+    // and that conversation's parked artifact is already hydrated from disk.
+    act(() => {
+      useChatStore.setState({ activeSessionId: null })
+      useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-parked" } })
+    })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useChatStore.setState({ activeSessionId: SESSION }))
+
+    const dock = useArtifactDockLayoutStore.getState()
+    expect(dock.mobileSheetOpen).toBe(false)
+    expect(dock.unreadArtifact).toBe(false)
+
+    // A genuinely new artifact in that conversation still raises it.
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-new" } }))
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(true)
+  })
+
+  it("mobile: switching to a conversation with a parked artifact does not throw the Sheet", () => {
+    useBreakpointMock.mockReturnValue("mobile")
+    act(() => useArtifactStore.setState({ activeArtifactIdBySession: { other: "a-other" } }))
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useChatStore.setState({ activeSessionId: "other" }))
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
+  })
+
+  it("desktop: still follows the conversation and raises the dock for its parked artifact", () => {
+    act(() => {
+      useChatStore.setState({ activeSessionId: null })
+      useArtifactStore.setState({ activeArtifactIdBySession: { [SESSION]: "a-parked" } })
+    })
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(true)
+    act(() => useChatStore.setState({ activeSessionId: SESSION }))
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+
   it("raises the dock for an AI revision proposal, on desktop too", () => {
     render(
       <ArtifactWorkspaceDock>

@@ -11,8 +11,8 @@
  * rule: parent streaming ⇒ stay queued, drain when the turn settles; parent
  * closed ⇒ drain when it next opens idle; parent deleted ⇒ notification only.
  *
- * Durable state lives on the journal row (`deliveryState`); the in-memory
- * queue seeded from the settle payload avoids racing the async journal write.
+ * Durable state and reserved batch identity live on the journal row. Delivery
+ * completes only after the chat's existing work ledger acknowledges acceptance.
  * Module-scope (mirrors `steer-runtime.ts`) so lib code and both chat hooks
  * share one registration.
  */
@@ -28,10 +28,15 @@ import {
   frameBackgroundResults,
   type BackgroundResultDeliveryEntry,
 } from "@/lib/background-tasks/completion-delivery"
+import { computeStableDigest } from "@/lib/ai/agent/execution/fingerprint"
 import { isSessionOpen, sessionStatusOf } from "./steer-runtime"
 
 /** Hook-bound send used to inject the framed turn into a session. */
-export type BackgroundReplaySend = (framedText: string, sessionId: string) => void
+export type BackgroundReplaySend = (
+  framedText: string,
+  sessionId: string,
+  deliveryId: string
+) => Promise<boolean>
 
 /** Localized notification copy, supplied by the registering component. */
 export interface BackgroundResultNotifyStrings {
@@ -72,8 +77,8 @@ export function __resetBackgroundResultRuntimeForTesting(): void {
 
 /**
  * Settle listener for the renderer background registry (wired by the boot
- * initializer via `setRendererBackgroundSettleListener`). Fires the completion
- * notification, marks the journal row `pending`, and attempts delivery.
+ * initializer via `setRendererBackgroundSettleListener`). Terminal journal
+ * settlement already marked the result pending; notify and attempt delivery.
  */
 export function onBackgroundRunSettled(
   runId: string,
@@ -97,9 +102,6 @@ export function onBackgroundRunSettled(
     pendingBySession.set(meta.sessionId, bucket)
   }
   bucket.set(runId, entry)
-  // Durable mirror for relaunch (best-effort; the in-memory entry drives the
-  // live path so this never races the async settle write).
-  void markDeliveryState([runId], "pending")
   void fireCompletionNotification(runId, meta, entry)
   void attemptBackgroundResultDelivery(meta.sessionId)
 }
@@ -140,12 +142,33 @@ export async function attemptBackgroundResultDelivery(sessionId: string): Promis
     if (!send) return
     if (!isSessionOpen(sessionId) || sessionStatusOf(sessionId) !== "idle") return
 
-    send(frameBackgroundResults(entries), sessionId)
-    pendingBySession.delete(sessionId)
-    await markDeliveryState(
-      entries.map((e) => e.runId),
-      "delivered"
+    const { reserveBackgroundTaskDelivery } = await import("@/lib/db/background-tasks")
+    const proposedId = computeStableDigest("background-result-delivery-v1", {
+      sessionId,
+      runIds: entries.map((entry) => entry.runId).sort(),
+    })
+    const batch = await reserveBackgroundTaskDelivery(
+      sessionId,
+      entries.map((entry) => entry.runId),
+      proposedId
     )
+    if (!batch) return
+    const runIds = new Set(batch.runIds)
+    const accepted = await send(
+      frameBackgroundResults(entries.filter((entry) => runIds.has(entry.runId))),
+      sessionId,
+      batch.deliveryId
+    )
+    if (!accepted) return
+    // Only remove the batch acknowledged by this receipt; another completion
+    // may have arrived while the controller prepared and accepted the turn.
+    const pending = pendingBySession.get(sessionId)
+    for (const runId of runIds) pending?.delete(runId)
+    if (pending?.size === 0) pendingBySession.delete(sessionId)
+    await markDeliveryState(batch.runIds, "delivered")
+  } catch {
+    // Refusal or storage failure leaves the durable batch pending for a later
+    // drain with the same identity. No provider acceptance is inferred.
   } finally {
     deliveryLocks.delete(sessionId)
   }
@@ -154,17 +177,24 @@ export async function attemptBackgroundResultDelivery(sessionId: string): Promis
 /** Union of the in-memory queue and journal `pending` rows (in-memory wins). */
 async function collectDeliverable(sessionId: string): Promise<BackgroundResultDeliveryEntry[]> {
   const byRunId = new Map<string, BackgroundResultDeliveryEntry>()
-  for (const record of await readPendingJournalRows(sessionId)) {
-    const entry = deliveryEntryFromJournal(record)
+  const rows = await readJournalRows(sessionId)
+  const completed = new Set(
+    rows
+      .filter((row) => row.deliveryState && row.deliveryState !== "pending")
+      .map((row) => row.runId)
+  )
+  for (const record of rows) {
+    const entry = record.deliveryState === "pending" ? deliveryEntryFromJournal(record) : null
     if (entry) byRunId.set(record.runId, entry)
   }
   for (const [runId, entry] of pendingBySession.get(sessionId) ?? []) {
-    byRunId.set(runId, entry)
+    if (completed.has(runId)) pendingBySession.get(sessionId)?.delete(runId)
+    else byRunId.set(runId, entry)
   }
   return [...byRunId.values()]
 }
 
-async function readPendingJournalRows(sessionId: string): Promise<BackgroundTaskJournalRecord[]> {
+async function readJournalRows(sessionId: string): Promise<BackgroundTaskJournalRecord[]> {
   try {
     const { listBackgroundTaskRecords } = await import("@/lib/db/background-tasks")
     const rows = await listBackgroundTaskRecords({ host: "renderer" })
@@ -172,7 +202,6 @@ async function readPendingJournalRows(sessionId: string): Promise<BackgroundTask
       (row) =>
         row.sessionId === sessionId &&
         row.kind === "subagent" &&
-        row.deliveryState === "pending" &&
         (row.status === "done" || row.status === "error")
     )
   } catch {

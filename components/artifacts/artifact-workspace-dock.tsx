@@ -51,7 +51,7 @@ import {
 } from "@/components/shell/title-bar-outlets"
 import { useBreakpoint } from "@/hooks/ui"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useActiveArtifactId } from "@/hooks/artifacts/use-session-artifacts"
+import { useActiveArtifactId, useArtifactSessionId } from "@/hooks/artifacts/use-session-artifacts"
 import {
   ARTIFACT_DOCK_BOUNDS,
   CHAT_MIN_PERCENT,
@@ -225,23 +225,43 @@ const CAP_EPSILON_PERCENT = 0.5
  * `notifyNewArtifact` is the one place that decides, and when the user has
  * dismissed the dock it only flags the toggle unread.
  */
-function useDockAttentionSignal(): void {
+function useDockAttentionSignal({
+  raiseOnConversationChange,
+}: {
+  raiseOnConversationChange: boolean
+}): void {
   const notifyNewArtifact = useArtifactDockLayoutStore((s) => s.notifyNewArtifact)
   // Scoped to the conversation on screen: an artifact landing in a *background*
   // session must not raise the dock over the one the user is reading.
+  const sessionId = useArtifactSessionId()
   const activeArtifactId = useActiveArtifactId()
   const pendingReviewCount = useArtifactStore((s) => Object.keys(s.pendingReviews).length)
-  const previousRef = useRef({ activeArtifactId, pendingReviewCount })
+  const previousRef = useRef({ sessionId, activeArtifactId, pendingReviewCount })
 
   useEffect(() => {
     const previous = previousRef.current
-    previousRef.current = { activeArtifactId, pendingReviewCount }
+    previousRef.current = { sessionId, activeArtifactId, pendingReviewCount }
+    // A different conversation coming on screen is not a new artifact: its
+    // parked one (`activeArtifactIdBySession` is persisted) merely became
+    // visible. That includes app launch, where the restored session moves
+    // `activeSessionId` off `null` after this host has mounted — on a phone
+    // that read as "fresh artifact" and threw the Sheet over the conversation
+    // on every single launch. The desktop dock keeps its long-standing
+    // behaviour of following the conversation; its open state is a persisted
+    // preference there, where the Sheet's is deliberately runtime-only.
+    if (sessionId !== previous.sessionId && !raiseOnConversationChange) return
     // Keyed on the id so it only reacts to a *new* artifact, not every render.
     const freshArtifact =
       Boolean(activeArtifactId) && activeArtifactId !== previous.activeArtifactId
     const freshReview = pendingReviewCount > previous.pendingReviewCount
     if (freshArtifact || freshReview) notifyNewArtifact()
-  }, [activeArtifactId, notifyNewArtifact, pendingReviewCount])
+  }, [
+    activeArtifactId,
+    notifyNewArtifact,
+    pendingReviewCount,
+    raiseOnConversationChange,
+    sessionId,
+  ])
 }
 
 /**
@@ -343,7 +363,7 @@ function useSideBrowserReveal({ pageTabs }: { pageTabs: boolean }): void {
 export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   const breakpoint = useBreakpoint()
   useArtifactDockShortcuts()
-  useDockAttentionSignal()
+  useDockAttentionSignal({ raiseOnConversationChange: breakpoint === "desktop" })
   useSideBrowserReveal({ pageTabs: breakpoint === "desktop" })
 
   // Tablet takes the Sheet, not a side-by-side dock, and that is deliberate

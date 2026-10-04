@@ -9,6 +9,12 @@
  * messages so the indicator updates as soon as a turn streams in — the
  * popover then enriches it with the persistent per-model split (tokens, cost,
  * throughput, generation time, reasoning tokens, and cache-hit rate).
+ *
+ * The persisted half goes through the shared `summarizeSpend` /
+ * `aggregateByModel` accumulators, so a turn the SDK reported at $0 but whose
+ * model has a known price is priced here exactly as on the Usage dashboard, and
+ * a turn nobody can price turns the figure into a lower bound ("≥") instead of
+ * silently reading as free.
  */
 
 import { useMemo } from "react"
@@ -21,6 +27,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { listUsageForSession, type SessionUsageRow } from "@/lib/db/session-usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import { UNKNOWN_COST, aggregateByModel } from "@/lib/usage/session-analytics"
+import { summarizeSpend } from "@/lib/usage/usage-report"
 import {
   cacheHitRate,
   formatDuration,
@@ -185,7 +193,9 @@ export function SessionCostBadge({
             </>
           )}
           <dt className="text-muted-foreground">{t("cost")}</dt>
-          <dd className="text-right font-mono">${breakdown.costUsd.toFixed(4)}</dd>
+          <dd className="text-right font-mono" data-testid="cost-popover-cost">
+            {preciseCost(breakdown.costUsd, breakdown.unpricedTurns, breakdown.turns)}
+          </dd>
         </dl>
         {breakdown.byModel.length === 0 ? (
           <p
@@ -207,7 +217,7 @@ export function SessionCostBadge({
                       {m.model}
                     </span>
                     <span className="ml-2 shrink-0 font-mono">
-                      {formatTokens(m.tokens)} · ${m.costUsd.toFixed(4)}
+                      {formatTokens(m.tokens)} · {preciseCost(m.costUsd, m.unpricedTurns, m.turns)}
                       {modelSpeed != null && (
                         <> · {t("tokPerSec", { value: formatTokensPerSec(modelSpeed) })}</>
                       )}
@@ -230,6 +240,8 @@ interface Breakdown {
   cacheReadTokens: number
   cacheCreationTokens: number
   costUsd: number
+  /** Persisted turns no pricing layer knew; `costUsd` is then a lower bound. */
+  unpricedTurns: number
   /** Summed active generation time (ms) — pairs with output for throughput. */
   durationMs: number
   /** Summed reasoning / "thinking" tokens (subset of output). */
@@ -241,6 +253,7 @@ interface Breakdown {
     durationMs: number
     costUsd: number
     turns: number
+    unpricedTurns: number
   }>
 }
 
@@ -251,6 +264,7 @@ const EMPTY: Breakdown = {
   cacheReadTokens: 0,
   cacheCreationTokens: 0,
   costUsd: 0,
+  unpricedTurns: 0,
   durationMs: 0,
   reasoningTokens: 0,
   byModel: [],
@@ -258,48 +272,39 @@ const EMPTY: Breakdown = {
 
 function buildBreakdown(rows: SessionUsageRow[]): Breakdown {
   if (rows.length === 0) return { ...EMPTY, byModel: [] }
-  const out: Breakdown = {
-    turns: rows.length,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheCreationTokens: 0,
-    costUsd: 0,
-    durationMs: 0,
-    reasoningTokens: 0,
-    byModel: [],
+  const totals = summarizeSpend(rows)
+  return {
+    turns: totals.turns,
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    cacheReadTokens: totals.cacheReadTokens,
+    cacheCreationTokens: totals.cacheCreationTokens,
+    costUsd: totals.costUsd,
+    unpricedTurns: totals.unpricedTurns,
+    durationMs: totals.durationMs,
+    reasoningTokens: totals.reasoningTokens,
+    byModel: aggregateByModel(rows).map((m) => ({
+      model: m.model,
+      tokens: m.inputTokens + m.outputTokens + m.cacheReadTokens,
+      outputTokens: m.outputTokens,
+      durationMs: m.durationMs,
+      costUsd: m.costUsd,
+      turns: m.turns,
+      unpricedTurns: m.unpricedTurns,
+    })),
   }
-  const byModel = new Map<
-    string,
-    { tokens: number; outputTokens: number; durationMs: number; costUsd: number; turns: number }
-  >()
-  for (const r of rows) {
-    out.inputTokens += r.inputTokens
-    out.outputTokens += r.outputTokens
-    out.cacheReadTokens += r.cacheReadTokens
-    out.cacheCreationTokens += r.cacheCreationTokens
-    out.costUsd += r.costUsd
-    out.durationMs += r.durationMs
-    out.reasoningTokens += r.reasoningTokens ?? 0
-    const model = r.model && r.model.trim() ? r.model : "(unknown)"
-    const slot = byModel.get(model) ?? {
-      tokens: 0,
-      outputTokens: 0,
-      durationMs: 0,
-      costUsd: 0,
-      turns: 0,
-    }
-    slot.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens
-    slot.outputTokens += r.outputTokens
-    slot.durationMs += r.durationMs
-    slot.costUsd += r.costUsd
-    slot.turns += 1
-    byModel.set(model, slot)
-  }
-  out.byModel = [...byModel.entries()]
-    .map(([model, v]) => ({ model, ...v }))
-    .sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens || a.model.localeCompare(b.model))
-  return out
+}
+
+/**
+ * Four-decimal money, honest about provenance — the per-session popover keeps
+ * sub-cent precision that the dashboard's `formatBucketCost` rounds away, but
+ * follows the same rules: "≥" over a partially priced bucket, a dash over an
+ * entirely unpriced one.
+ */
+function preciseCost(costUsd: number, unpricedTurns: number, turns: number): string {
+  if (turns > 0 && unpricedTurns >= turns) return UNKNOWN_COST
+  const base = `$${costUsd.toFixed(4)}`
+  return unpricedTurns > 0 ? `≥ ${base}` : base
 }
 
 function formatTokens(n: number): string {

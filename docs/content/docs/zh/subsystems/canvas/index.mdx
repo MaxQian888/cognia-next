@@ -1,6 +1,6 @@
 ---
 title: Canvas
-description: 基于 Monaco 的协作式文档工作区 —— AI 操作工具栏、版本历史、行级锚定评论、CRDT 多人协同编辑，以及由 Rust 拉起的 Python 沙箱。文档存放在 useArtifactStore，并通过 Dexie 写穿镜像持久化。
+description: 基于 Monaco 的协作式文档工作区 —— AI 操作工具栏、版本历史、行级锚定评论、CRDT 多人协同编辑，以及由 Rust 启动的 Python 沙箱。文档存放在 useArtifactStore，并通过 Dexie 写穿镜像持久化。
 ---
 
 # Canvas
@@ -13,7 +13,7 @@ description: 基于 Monaco 的协作式文档工作区 —— AI 操作工具栏
   右侧五标签面板（建议 · 历史 · 评论 · 协作 · 执行）。文档由**单一 store** 拥有 ——
   `useArtifactStore.canvasDocuments`（`stores/artifact/artifact-store.ts:361`），持久化到
   `localStorage["cognia-artifacts"]`，并由 `startCanvasDexieBridge`（`lib/canvas/dexie-bridge.ts:267`）
-  **写穿镜像**到四张 Dexie 表。实时协同是可选的 CRDT + WebSocket 层；Python 通过在 Rust 侧拉起真实
+  **写穿镜像**到四张 Dexie 表。实时协同是可选的 CRDT + WebSocket 层；Python 通过在 Rust 侧启动真实
   解释器执行（`canvas_run_python`，`src-tauri/src/canvas/python_exec.rs:34`）。
 </TLDR>
 
@@ -28,8 +28,7 @@ description: 基于 Monaco 的协作式文档工作区 —— AI 操作工具栏
 
 ## 它是什么
 
-Canvas 是 Cognia 对「工作区」体验的实现。用户在聊天中生成一段代码或文档块，点击 **Open in Canvas**，
-工作区面板里就会打开一个 Monaco 编辑器。从这里开始：
+Canvas 是 Cognia 对「工作区」体验的实现。用户在聊天中生成一段代码或文档块，点击 **Open in Canvas**，工作区面板里就会打开一个 Monaco 编辑器。从这里开始：
 
 - AI 可以**持续改写**文档 —— 每个操作落地前都会产出可审阅的 diff。
 - 文档拥有**版本历史** —— 任何 AI 改动、手动保存或自动保存都会生成一个 `CanvasDocumentVersion` 快照。
@@ -42,11 +41,7 @@ Canvas 与 [Artifacts](../artifacts-sandbox) 是两条共享存储的不同路�
 - **Artifact** —— 一次性生成内容，渲染在沙箱化的 iframe 中。
 - **Canvas** —— 面向持续编辑的文档，Monaco 直接挂载在主 React 树里。
 
-将 artifact「升级」进工作区的入口是 `revealArtifactInWorkspace`（`lib/artifacts/reveal.ts:5`），由聊天
-artifact 部件上的 `handleOpenInCanvas` 触发（`components/chat/message-parts/artifact-part.tsx:48`）。
-它的孪生函数 `revealCanvasDocument`（`reveal.ts:44`）对已存在的 canvas 文档做同一件事——激活文档并把
-外壳切到 Canvas guild。**不存在 `/canvas/<id>` 路由**：本应用是静态导出、没有任何动态段，所以行内
-canvas 卡片过去渲染的那个锚点每次点击都是 404。
+将 artifact「升级」进工作区的入口是 `revealArtifactInWorkspace`（`lib/artifacts/reveal.ts:5`），由聊天 artifact 部件上的 `handleOpenInCanvas` 触发（`components/chat/message-parts/artifact-part.tsx:48`）。它的孪生函数 `revealCanvasDocument`（`reveal.ts:44`）对已存在的 canvas 文档做同一件事——激活文档并把外壳切到 Canvas guild。**不存在 `/canvas/<id>` 路由**：本应用是静态导出、没有任何动态段，所以行内 canvas 卡片过去渲染的那个锚点每次点击都是 404。
 
 ## 模块地图
 
@@ -133,8 +128,7 @@ flowchart TB
 
 ## 组件组合树
 
-`CanvasShell` 选择桌面端（可调整的三栏）或移动端（Sheet）布局，再挂载三个界面。编辑器本身包裹在错误边界
-里，并根据是否存在文档做门控。
+`CanvasShell` 选择桌面端（可调整的三栏）或移动端（Sheet）布局，再挂载三个界面。编辑器本身包裹在错误边界里，并根据是否存在文档做门控。
 
 ```mermaid
 flowchart TB
@@ -161,9 +155,7 @@ flowchart TB
   PANEL --> TOOL & SLOT & MON
 ```
 
-`CanvasDocumentList`（`canvas-document-list.tsx:83`）和 `CanvasDocumentTabs`
-（`canvas-document-tabs.tsx:37`）是独立的、由 props 驱动的界面 —— 不在上面的 shell 树内，shell 用的是
-`CanvasDocumentRail` 加 `CanvasToolbar` 里内联的标签条。
+`CanvasDocumentList`（`canvas-document-list.tsx:83`）和 `CanvasDocumentTabs`（`canvas-document-tabs.tsx:37`）是独立的、由 props 驱动的界面 —— 不在上面的 shell 树内，shell 用的是 `CanvasDocumentRail` 加 `CanvasToolbar` 里内联的标签条。
 
 ## 相对旧文档的变化
 
@@ -183,14 +175,9 @@ flowchart TB
 
 ## 沙箱与信任边界
 
-- **Python 执行**会拉起真实的操作系统解释器（Windows 上为 `python`，其余为 `python3`），使用管道 stdio
-  与 `kill_on_drop(true)` —— **没有** firejail/Docker 隔离。Canvas 假设运行在可信的本地机器上，唯一硬边界
-  是 30 秒超时。见 [执行与评论](./execution-comments)。
-- **协作**从不自动连接：即便 `canvas.collaboration.v1` 开启（默认），WebSocket 客户端也只在用户已在设置中
-  配置了服务器 URL 时才连接。
-- **Web 模式**（无 Tauri）没有 Python 通道。JS/TS/JSX/HTML/CSS 仍然是真的在跑，跑在
-  `sandbox="allow-scripts"` 的 srcdoc iframe 里（`lib/native/code-execution-strategy.ts:135`）——
-  那是真正的沙箱，不是模拟。只有 Python 是桌面独占，而这是对的。
+- **Python 执行**会拉起真实的操作系统解释器（Windows 上为 `python`，其余为 `python3`），使用管道 stdio 与 `kill_on_drop(true)` —— **没有** firejail/Docker 隔离。Canvas 假设运行在可信的本地机器上，唯一硬边界是 30 秒超时。见 [执行与评论](./execution-comments)。
+- **协作**从不自动连接：即便 `canvas.collaboration.v1` 开启（默认），WebSocket 客户端也只在用户已在设置中配置了服务器 URL 时才连接。
+- **Web 模式**（无 Tauri）没有 Python 通道。JS/TS/JSX/HTML/CSS 仍然是真的在跑，跑在 `sandbox="allow-scripts"` 的 srcdoc iframe 里（`lib/native/code-execution-strategy.ts:135`）——那是真正的沙箱，不是模拟。只有 Python 是桌面独占，而这是对的。
 
 ## 下一步
 

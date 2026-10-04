@@ -1,4 +1,28 @@
 /** @jest-environment jsdom */
+const mockAcknowledgeTranscriptRuntime = jest.fn(async (..._args: unknown[]) => {})
+const mockProjectSdkMessage = jest.fn(async (..._args: unknown[]) => {})
+const mockReadSession = jest.fn((...args: unknown[]) =>
+  jest.requireActual("@/lib/db/sessions").getSession(...args)
+)
+const mockCaptureCompactionCheckpoint = jest.fn()
+jest.mock("@/lib/rag/compaction-runtime", () => ({
+  ...jest.requireActual("@/lib/rag/compaction-runtime"),
+  captureCompactionCheckpoint: (...args: unknown[]) => mockCaptureCompactionCheckpoint(...args),
+}))
+jest.mock("@/lib/execution/direct-chat-run", () => ({
+  ...jest.requireActual("@/lib/execution/direct-chat-run"),
+  projectDirectChatSdkMessage: (...args: unknown[]) => mockProjectSdkMessage(...args),
+}))
+jest.mock("@/lib/chat/transcript/revision-events", () => ({
+  ...jest.requireActual("@/lib/chat/transcript/revision-events"),
+  acknowledgeTranscriptRuntime: (...args: unknown[]) => mockAcknowledgeTranscriptRuntime(...args),
+  withTranscriptRuntimeLock: (_sessionId: string, action: () => Promise<unknown>) => action(),
+}))
+jest.mock("@/lib/db/sessions", () => ({
+  ...jest.requireActual("@/lib/db/sessions"),
+  setSdkSessionId: jest.fn(async () => {}),
+  getSession: (...args: unknown[]) => mockReadSession(...args),
+}))
 jest.mock("@/lib/claude/permissions/auto-mode-runner", () => ({ runAutoModeForTool: jest.fn() }))
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: jest.fn(() => null),
@@ -89,6 +113,285 @@ import {
 } from "@/lib/claude/project-history-evidence-registry"
 
 describe("Claude chat event seam", () => {
+  it("acknowledges an initialized headless AI runtime without a controller send cache", async () => {
+    useChatStore.setState({ lastSendBySession: {} })
+    mockAcknowledgeTranscriptRuntime.mockClear()
+    await handleEvent(
+      {
+        type: "sdk_session_id",
+        sessionId: "headless",
+        sdkSessionId: "ready",
+        runtimeAdapter: "ai-sdk",
+        transcriptInvalidationId: "headless-generation",
+      } as never,
+      { current: null },
+      { current: [] },
+      { current: new Map() },
+      { current: new Map() },
+      { current: null },
+      {
+        messagesMirrorRef: { current: new Map() },
+        registry: {},
+        getExecutionHandle: () => undefined,
+        transcriptFence: {
+          capture: async () => ({
+            shouldPersist: () => true,
+            runtimeGeneration: { value: "headless-generation" },
+          }),
+        },
+      } as never
+    )
+    expect(mockAcknowledgeTranscriptRuntime).toHaveBeenCalledWith("headless", "headless-generation")
+  })
+  it.each(["session_ended", "permission_request", "tool_result_review"])(
+    "leaves the replacement untouched for a late %s with the same turn id",
+    async (type) => {
+      const sessionId = "same-turn-replacement"
+      useChatStore.setState({
+        sessions: { [sessionId]: { messages: [], status: "streaming", pendingApprovals: [] } },
+        lastSendBySession: { [sessionId]: { options: { turnId: "regenerated" } } },
+      } as never)
+      mockPersistMessages.mockClear()
+      await handleEvent(
+        { type, sessionId, turnId: "regenerated", error: "old provider error" } as never,
+        { current: sessionId },
+        { current: [] },
+        { current: new Map() },
+        { current: new Map() },
+        { current: null },
+        {
+          messagesMirrorRef: { current: new Map() },
+          registry: new SessionCoalescingRegistry({
+            onCommit: jest.fn(),
+            onPersist: jest.fn(),
+            persistDelayMs: 0,
+          }),
+          getExecutionHandle: () => undefined,
+          transcriptFence: {
+            capture: async () => ({
+              shouldPersist: () => false,
+              runtimeGeneration: { value: "old" },
+            }),
+          },
+        } as never
+      )
+      expect(useChatStore.getState().sessions[sessionId]?.status).toBe("streaming")
+      expect(useChatStore.getState().sessions[sessionId]?.pendingApprovals).toEqual([])
+      expect(mockPersistMessages).not.toHaveBeenCalled()
+    }
+  )
+  it("does not save a checkpoint when another window changed the authoritative generation", async () => {
+    const sessionId = "remote-edited"
+    useChatStore.setState({
+      sessions: { [sessionId]: { messages: [], status: "streaming", pendingApprovals: [] } },
+      lastSendBySession: {},
+      openSessionIds: [sessionId],
+    } as never)
+    applySdkEventMock.mockReturnValueOnce({
+      messages: [{ id: "stale-boundary", role: "system", parts: [{ type: "compact-boundary" }] }],
+      turnComplete: false,
+    })
+    mockCaptureCompactionCheckpoint.mockClear()
+    mockReadSession.mockResolvedValueOnce({ runtimeTranscriptGeneration: "edited" })
+    try {
+      await handleEvent(
+        {
+          type: "event",
+          sessionId,
+          transcriptInvalidationId: "old",
+          event: { type: "system", subtype: "compact_boundary" },
+        } as never,
+        { current: sessionId },
+        { current: [] },
+        { current: new Map() },
+        { current: new Map() },
+        { current: null },
+        {
+          messagesMirrorRef: { current: new Map() },
+          registry: new SessionCoalescingRegistry({
+            onCommit: jest.fn(),
+            onPersist: jest.fn(),
+            persistDelayMs: 0,
+          }),
+          getExecutionHandle: () => undefined,
+          transcriptFence: {
+            capture: async () => ({
+              shouldPersist: () => true,
+              runtimeGeneration: { value: "old" },
+            }),
+          },
+        } as never
+      )
+      expect(mockCaptureCompactionCheckpoint).not.toHaveBeenCalled()
+    } finally {
+      mockReadSession.mockClear()
+    }
+  })
+  it("drops an event invalidated while its earlier projection was awaiting", async () => {
+    let finish!: () => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    mockProjectSdkMessage.mockImplementationOnce(async () => {
+      entered()
+      await new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    })
+    let current = true
+    applySdkEventMock.mockClear()
+    const pending = handleEvent(
+      { type: "event", sessionId: "delayed", event: { type: "stream_event" } } as never,
+      { current: "delayed" },
+      { current: [] },
+      { current: new Map() },
+      { current: new Map() },
+      { current: null },
+      {
+        messagesMirrorRef: { current: new Map() },
+        registry: new SessionCoalescingRegistry({
+          onCommit: jest.fn(),
+          onPersist: jest.fn(),
+          persistDelayMs: 0,
+        }),
+        getExecutionHandle: () => undefined,
+        transcriptFence: {
+          capture: async () => ({
+            shouldPersist: () => current,
+            runtimeGeneration: { value: "old" },
+          }),
+        },
+      } as never
+    )
+    await started
+    current = false
+    finish()
+    await pending
+    expect(applySdkEventMock).not.toHaveBeenCalled()
+  })
+
+  it("persists a replacement event with its captured generation", async () => {
+    const sessionId = "replacement"
+    useChatStore.setState({
+      sessions: { [sessionId]: { messages: [], status: "streaming", pendingApprovals: [] } },
+      lastSendBySession: {},
+      openSessionIds: [sessionId],
+    } as never)
+    const messages = [
+      { id: "replacement-reply", role: "assistant", parts: [{ type: "text", text: "new" }] },
+    ]
+    applySdkEventMock.mockReturnValueOnce({ messages, turnComplete: false })
+    const onPersist = jest.fn()
+    await handleEvent(
+      {
+        type: "event",
+        sessionId,
+        transcriptInvalidationId: "new",
+        event: { type: "stream_event" },
+      } as never,
+      { current: sessionId },
+      { current: [] },
+      { current: new Map() },
+      { current: new Map() },
+      { current: null },
+      {
+        messagesMirrorRef: { current: new Map() },
+        registry: new SessionCoalescingRegistry({
+          onCommit: jest.fn(),
+          onPersist,
+          persistDelayMs: 0,
+        }),
+        getExecutionHandle: () => undefined,
+        transcriptFence: {
+          capture: async () => ({ shouldPersist: () => true, runtimeGeneration: { value: "new" } }),
+        },
+      } as never
+    )
+    expect(onPersist).toHaveBeenCalledWith(
+      sessionId,
+      messages,
+      expect.objectContaining({ runtimeGeneration: { value: "new" } })
+    )
+  })
+  it.each(["compact_boundary", "compact_undo"])(
+    "rejects an invalidated %s before transcript or checkpoint work",
+    async (subtype) => {
+      applySdkEventMock.mockClear()
+      mockPersistMessages.mockClear()
+      await handleEvent(
+        {
+          type: "event",
+          sessionId: "stale",
+          turnId: "same-turn",
+          event: { type: "system", subtype },
+        } as never,
+        { current: "stale" },
+        { current: [] },
+        { current: new Map() },
+        { current: new Map() },
+        { current: null },
+        {
+          messagesMirrorRef: { current: new Map() },
+          registry: new SessionCoalescingRegistry({
+            onCommit: jest.fn(),
+            onPersist: jest.fn(),
+            persistDelayMs: 0,
+          }),
+          getExecutionHandle: () => undefined,
+          transcriptFence: {
+            capture: async () => ({
+              shouldPersist: () => false,
+              runtimeGeneration: { value: undefined },
+            }),
+          },
+        } as never
+      )
+      expect(applySdkEventMock).not.toHaveBeenCalled()
+      expect(mockPersistMessages).not.toHaveBeenCalled()
+    }
+  )
+  it.each([
+    { turnId: "new-turn", provider: "openai", acknowledged: true },
+    { turnId: "old-turn", provider: "openai", acknowledged: false },
+    { turnId: "new-turn", provider: "anthropic", acknowledged: false },
+  ])(
+    "acknowledges only a matching AI-SDK initialization: %j",
+    async ({ turnId, provider, acknowledged }) => {
+      mockAcknowledgeTranscriptRuntime.mockClear()
+      useChatStore.setState({
+        lastSendBySession: {
+          reconstructed: {
+            content: "next",
+            options: { provider, turnId: "new-turn", transcriptInvalidationId: "generation" },
+            attemptIndex: 0,
+          },
+        },
+      } as never)
+      await handleEvent(
+        {
+          type: "sdk_session_id",
+          sessionId: "reconstructed",
+          sdkSessionId: "fresh-runtime",
+          turnId,
+        } as never,
+        { current: null },
+        { current: [] },
+        { current: new Map() },
+        { current: new Map() },
+        { current: null },
+        {
+          messagesMirrorRef: { current: new Map() },
+          registry: {},
+          getExecutionHandle: () => undefined,
+        } as never
+      )
+      if (acknowledged)
+        expect(mockAcknowledgeTranscriptRuntime).toHaveBeenCalledWith("reconstructed", "generation")
+      else expect(mockAcknowledgeTranscriptRuntime).not.toHaveBeenCalled()
+    }
+  )
+
   it("leaves capture-owned response events to their registered responder", async () => {
     const release = registerCaptureResponder("captured", "turn", true)
     try {
@@ -871,6 +1174,30 @@ describe("Router + Fusion turn wiring (ADR-0188)", () => {
     expect(useChatStore.getState().sessions.rf?.errorDiagnostic?.code).not.toBe(
       "routerFusionRefused"
     )
+  })
+
+  it("closes tool calls a failed turn left open, in the slice and the written transcript", async () => {
+    seed({ provider: "anthropic", model: "sonnet" })
+    useChatStore.getState().replaceSessionMessages("rf", [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "q" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "tool-Read", toolCallId: "t1", state: "input-available", input: {} }],
+      },
+    ] as never)
+    mockPersistMessages.mockClear()
+    await dispatch({ type: "session_ended", sessionId: "rf", error: "overloaded" })
+    const part = useChatStore.getState().sessions.rf?.messages[1]?.parts[0] as {
+      state: string
+      errorText?: string
+    }
+    expect(part.state).toBe("output-error")
+    expect(part.errorText).toMatch(/^Interrupted/)
+    const written = mockPersistMessages.mock.calls.at(-1)?.[1] as Array<{
+      parts: Array<{ state?: string }>
+    }>
+    expect(written[1].parts[0].state).toBe("output-error")
   })
 
   it("seals every ledgered turn when the sidecar exits", async () => {

@@ -64,12 +64,23 @@ export function createCompanionProjectionDeps(base: RoomRunnerDeps): RoomRunnerD
 export class CompanionRoomProjector {
   private readonly active = new Map<string, Set<string>>()
   private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Rooms whose send the host accepted and whose first member has not started yet. */
+  private readonly awaitingFirstMember = new Set<string>()
 
   constructor(
     readonly runner: RoomRunner,
     private readonly sinks: Pick<RoomRunnerSinks, "status">,
     private readonly graceMs: number = COMPANION_IDLE_GRACE_MS
   ) {}
+
+  /** Whether member events for `roomId` are being projected right now. */
+  isRoomActive(roomId: string): boolean {
+    return (
+      (this.active.get(roomId)?.size ?? 0) > 0 ||
+      this.idleTimers.has(roomId) ||
+      this.awaitingFirstMember.has(roomId)
+    )
+  }
 
   handleEvent(evt: ClaudeEvent): void {
     const sessionId = (evt as { sessionId?: unknown }).sessionId
@@ -86,6 +97,11 @@ export class CompanionRoomProjector {
 
   /** The host accepted a send, so the room is busy until its members finish. */
   markSending(roomId: string): void {
+    if ((this.active.get(roomId)?.size ?? 0) === 0) this.awaitingFirstMember.add(roomId)
+    this.markBusy(roomId)
+  }
+
+  private markBusy(roomId: string): void {
     const timer = this.idleTimers.get(roomId)
     if (timer) clearTimeout(timer)
     this.idleTimers.delete(roomId)
@@ -96,7 +112,8 @@ export class CompanionRoomProjector {
     const subs = this.active.get(roomId) ?? new Set<string>()
     subs.add(sub)
     this.active.set(roomId, subs)
-    this.markSending(roomId)
+    this.awaitingFirstMember.delete(roomId)
+    this.markBusy(roomId)
   }
 
   private close(roomId: string, sub: string): void {
@@ -120,6 +137,7 @@ export class CompanionRoomProjector {
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
     this.active.clear()
+    this.awaitingFirstMember.clear()
     this.runner.dispose()
   }
 }
@@ -133,6 +151,14 @@ export function getCompanionRoomProjector(): CompanionRoomProjector {
     )
   }
   return companionProjector
+}
+
+/**
+ * Whether the companion projector is currently streaming a room's members.
+ * Never constructs the projector: a realm that has none projects nothing.
+ */
+export function isCompanionRoomActive(roomId: string): boolean {
+  return companionProjector?.isRoomActive(roomId) ?? false
 }
 
 export function __resetRoomRunnersForTests(): void {

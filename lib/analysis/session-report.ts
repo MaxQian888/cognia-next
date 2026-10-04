@@ -4,7 +4,10 @@
  * agent-orchestration app's session analyzer and adapted to cognia's data model:
  *
  *  • token / cost / per-model stats reuse {@link aggregateByModel} +
- *    {@link effectiveCostUsd} (no duplicated pricing math);
+ *    {@link effectiveCostUsdDetailed} (no duplicated pricing math);
+ *  • the per-turn cost timeline, cache savings and per-turn percentiles reuse
+ *    `lib/usage/session-cost-profile` and `lib/usage/usage-insights`, the same
+ *    helpers the Usage dashboard draws from;
  *  • behavioural signals (friction, thrashing, thinking, tests) come from
  *    {@link import("./session-signals")};
  *  • context pressure reuses {@link getModelContextWindow}.
@@ -19,10 +22,17 @@ import type { SessionUsageRow } from "@/lib/db/session-usage"
 import { getModelContextWindow } from "@/lib/claude/usage"
 import {
   aggregateByModel,
-  effectiveCostUsd,
+  effectiveCostUsdDetailed,
   type ModelUsageRow,
   type PricingResolver,
 } from "@/lib/usage/session-analytics"
+import { buildTurnTimeline, type TurnCostPoint } from "@/lib/usage/session-cost-profile"
+import {
+  estimateCacheSavings,
+  summarizeTurnDistribution,
+  type CacheSavings,
+  type TurnDistribution,
+} from "@/lib/usage/usage-insights"
 import { resolveModelPricingUsd } from "@/lib/usage/pricing"
 import {
   BASH_THRASH_THRESHOLD,
@@ -92,11 +102,19 @@ export interface SessionReport {
   totalCacheReadTokens: number
   totalCacheCreationTokens: number
   totalCostUsd: number
+  /** Billed turns no pricing layer knew; `totalCostUsd` is then a lower bound. */
+  unpricedTurns: number
   /** Sum of SDK-reported active generation time across billed turns (ms). */
   totalDurationMs: number
   /** Sum of reasoning / "thinking" tokens across billed turns (subset of output). */
   totalReasoningTokens: number
   models: ModelUsageRow[]
+  /** Every billed turn in order, with its cost and running total. */
+  timeline: TurnCostPoint[]
+  /** What prompt caching kept off this session's bill (estimated). */
+  cacheSavings: CacheSavings
+  /** p50 / p90 / p99 of the per-turn cost, latency and output speed. */
+  turnDistribution: TurnDistribution
   /** Tool name → call count. */
   toolCounts: Record<string, number>
   toolCallTotal: number
@@ -275,6 +293,7 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
   let totalCacheReadTokens = 0
   let totalCacheCreationTokens = 0
   let totalCostUsd = 0
+  let unpricedTurns = 0
   let totalDurationMs = 0
   let totalReasoningTokens = 0
   let maxContextFraction = 0
@@ -288,7 +307,9 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
     totalOutputTokens += row.outputTokens
     totalCacheReadTokens += row.cacheReadTokens
     totalCacheCreationTokens += row.cacheCreationTokens
-    totalCostUsd += effectiveCostUsd(row, resolve)
+    const cost = effectiveCostUsdDetailed(row, resolve)
+    totalCostUsd += cost.cost
+    if (!cost.known) unpricedTurns += 1
     totalDurationMs += row.durationMs
     totalReasoningTokens += row.reasoningTokens ?? 0
 
@@ -335,9 +356,13 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
     totalCacheReadTokens,
     totalCacheCreationTokens,
     totalCostUsd,
+    unpricedTurns,
     totalDurationMs,
     totalReasoningTokens,
     models,
+    timeline: buildTurnTimeline(ordered, resolve),
+    cacheSavings: estimateCacheSavings(ordered, resolve),
+    turnDistribution: summarizeTurnDistribution(ordered, resolve),
     toolCounts: toRecord(toolCounts),
     toolCallTotal,
     errorCount,
@@ -354,6 +379,30 @@ export function analyzeSession(input: AnalyzeInput, opts: AnalyzeOpts = {}): Ses
     degraded: true,
     assessments,
   }
+}
+
+/** One bar of a tool-usage chart. */
+export interface ToolCountRow {
+  tool: string
+  count: number
+}
+
+/** Key for the bar that collects every tool past the top `limit`. */
+export const OTHER_TOOLS_KEY = "__other__"
+
+/**
+ * {@link SessionReport.toolCounts} as chart rows, busiest first (ties by name),
+ * with everything past `limit` folded into one {@link OTHER_TOOLS_KEY} row so a
+ * session that touched forty MCP tools still draws a legible chart.
+ */
+export function rankToolCounts(counts: Record<string, number>, limit = 8): ToolCountRow[] {
+  const rows = Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .map(([tool, count]) => ({ tool, count }))
+    .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
+  if (rows.length <= limit) return rows
+  const rest = rows.slice(limit).reduce((sum, row) => sum + row.count, 0)
+  return [...rows.slice(0, limit), { tool: OTHER_TOOLS_KEY, count: rest }]
 }
 
 interface AssessmentInputs {

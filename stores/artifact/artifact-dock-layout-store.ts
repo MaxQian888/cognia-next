@@ -518,6 +518,10 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
+          // A revealed file needs the room: at the half-open snap the
+          // phone showed it in the bottom half of the screen under the chat,
+          // with the body cut off. The user can still drag it back down.
+          mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP,
           workspaceContext: { kind: "file", ...request },
           workspaceRevealRequest: {
             id: nextRevealId(),
@@ -536,6 +540,10 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
+          // A revealed diff needs the room: at the half-open snap the
+          // phone showed it in the bottom half of the screen under the chat,
+          // with the body cut off. The user can still drag it back down.
+          mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP,
           workspaceContext: { kind: "review", ...request },
           workspaceRevealRequest: {
             id: nextRevealId(),

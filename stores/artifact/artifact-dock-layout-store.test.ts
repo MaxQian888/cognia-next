@@ -523,6 +523,37 @@ describe("useArtifactDockLayoutStore", () => {
       expect(result.current.workspaceContext).toBeNull()
     })
 
+    it("restores an open desktop dock and the snap height, but never an open Sheet", async () => {
+      // One store drives both shells. A launch must give the desktop its dock
+      // back where the user left it while the phone starts with the Sheet shut.
+      // (Raised first: any write persists, and would overwrite the fixture.)
+      act(() => useArtifactDockLayoutStore.getState().setMobileSheetOpen(true))
+      window.localStorage.setItem(
+        PERSIST_NAME,
+        JSON.stringify({
+          state: {
+            dockSize: 40,
+            dockCollapsed: false,
+            dockProfile: "workspace",
+            layoutVersion: 1,
+            mobileSnapPoint: CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0],
+            mobileSheetOpen: true,
+          },
+          version: 3,
+        })
+      )
+
+      await act(async () => {
+        await useArtifactDockLayoutStore.persist.rehydrate()
+      })
+
+      const state = useArtifactDockLayoutStore.getState()
+      expect(state.dockCollapsed).toBe(false)
+      expect(state.dockSize).toBe(40)
+      expect(state.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0])
+      expect(state.mobileSheetOpen).toBe(false)
+    })
+
     it("is excluded from the persisted snapshot", () => {
       jest.useFakeTimers()
       const { result } = renderHook(() => useArtifactDockLayoutStore())
@@ -588,6 +619,28 @@ describe("useArtifactDockLayoutStore", () => {
       act(() => result.current.setMobileSnapPoint(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0]))
       expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0])
       expect(readPersisted()?.state.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0])
+    })
+
+    it("raises a half-open drawer to the tallest snap for a workspace reveal", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+      const half = CONTEXT_WORKBENCH_DRAWER_SNAP_POINTS[0]
+
+      // A file tapped in a chat tool row opened in the bottom half of the phone
+      // under the conversation, with its body cut off.
+      act(() => result.current.setMobileSnapPoint(half))
+      act(() =>
+        result.current.revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      )
+      expect(result.current.mobileSheetOpen).toBe(true)
+      expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP)
+
+      act(() => result.current.setMobileSnapPoint(half))
+      act(() => result.current.revealWorkspaceReview({ sessionId: "session-1", rootPath: "/repo" }))
+      expect(result.current.mobileSnapPoint).toBe(CONTEXT_WORKBENCH_DRAWER_DEFAULT_SNAP)
     })
 
     it("rejects a snap that is not in the shipped set", () => {

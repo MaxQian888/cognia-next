@@ -43,6 +43,26 @@ const STATUS_DOT: Record<ToolDotStatus, { className: string; breathe?: boolean }
   info: { className: "bg-blue-500" },
 }
 
+/**
+ * Classes for a row's long single-line text — the mono target (a path, a
+ * command, a pattern) and an upstream-provided title such as an external
+ * agent's "Reading components/…/agent-preset-picker.tsx".
+ *
+ * Fine pointers keep the ellipsis (the row's `title` carries the full text on
+ * hover). Touch has no hover, so on coarse pointers the text scrolls sideways
+ * inside its own box instead — scrollbar hidden in every engine (Firefox's
+ * `scrollbar-width`, WebKit/Blink's pseudo-element), with a short fade at the
+ * end edge as the "there is more" hint and matching end padding so the last
+ * characters can scroll clear of it. `min-w-0` is what lets the flex row
+ * shrink the box at all; without it a long title pushes the row off-screen.
+ */
+export const TOOL_ROW_SCROLL_TEXT_CLASS = cn(
+  "min-w-0 truncate",
+  "pointer-coarse:overflow-x-auto pointer-coarse:overflow-y-hidden pointer-coarse:text-clip pointer-coarse:overscroll-x-contain pointer-coarse:pe-4",
+  "pointer-coarse:[mask-image:linear-gradient(to_right,#000_calc(100%-1rem),transparent)]",
+  "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+)
+
 /** The breathing status dot every tool row leads with. */
 export const ToolStatusDot = memo(function ToolStatusDot({
   status,
@@ -116,6 +136,7 @@ export function ToolRowShell({
   dataStatus,
   className,
   lead,
+  showDot = true,
   icon,
   target,
   badges,
@@ -138,8 +159,17 @@ export function ToolRowShell({
   dataStatus?: string
   /** Extra classes on the outermost wrapper (stream spacing like `my-2`). */
   className?: string
-  /** The element right after the dot: `$` prompt or coloured verb label. */
-  lead: ReactNode
+  /**
+   * The element right after the dot: `$` prompt or coloured verb label.
+   * Omitted when the target already says what the row is (the reasoning row's
+   * "Thought for 3 seconds" would otherwise repeat a THINK verb before it).
+   */
+  lead?: ReactNode
+  /**
+   * The status dot before the lead. Defaults on; the reasoning row turns it off
+   * because its shimmering label already carries the live/settled state.
+   */
+  showDot?: boolean
   /** Icon between the lead and the target (file-type glyph, globe, …). */
   icon?: ReactNode
   /** The mono target; may wrap a `Shimmer` while the call runs. */
@@ -164,7 +194,7 @@ export function ToolRowShell({
           // nothing, and no button semantics the click could never satisfy.
           const inner = (
             <>
-              <ToolStatusDot status={status} />
+              {showDot ? <ToolStatusDot status={status} /> : null}
               {lead}
               {icon}
               {target}

@@ -8,6 +8,31 @@ import {
 const msg = (id: string): UIMessage =>
   ({ id, role: "assistant", parts: [] }) as unknown as UIMessage
 
+it("drops a queued stream snapshot invalidated before its timer drains", () => {
+  jest.useFakeTimers()
+  try {
+    let current = true
+    const onPersist = jest.fn()
+    const registry = new SessionCoalescingRegistry({
+      onCommit: jest.fn(),
+      onPersist,
+      persistDelayMs: 250,
+    })
+    const options = { shouldPersist: () => current, runtimeGeneration: { value: "old" } }
+    registry.get("s1").persist.call([msg("old-summary")], options)
+    current = false
+    jest.advanceTimersByTime(250)
+    expect(onPersist).not.toHaveBeenCalled()
+    const replacement = { shouldPersist: () => true, runtimeGeneration: { value: "new" } }
+    registry.get("s1").persist.call([msg("new-reply")], replacement)
+    jest.advanceTimersByTime(250)
+    expect(onPersist).toHaveBeenCalledWith("s1", [msg("new-reply")], replacement)
+    registry.clear()
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
 describe("createRafThrottle", () => {
   let rafQueue: FrameRequestCallback[]
   let realRaf: typeof requestAnimationFrame

@@ -38,6 +38,10 @@ import {
   type ResourceOption,
 } from "@/lib/chat/template/resource-kinds"
 import type { TemplateResourceSearch } from "@/hooks/chat/use-template-resource-search"
+import {
+  COMPOSER_POPOVER_COLLISION_PADDING,
+  resolveComposerPopoverBoundary,
+} from "./composer-popover-boundary"
 
 /**
  * Arrow-key walk for an option list: ↓/↑ move focus between the listbox's
@@ -108,6 +112,8 @@ export function TemplateParamPopover({
     [onClose]
   )
 
+  const collisionBoundary = useMemo(() => resolveComposerPopoverBoundary(anchor), [anchor])
+
   return (
     <Popover open={open} onOpenChange={(next) => (!next ? onClose() : undefined)}>
       {anchor ? <PopoverAnchor virtualRef={{ current: anchor }} /> : null}
@@ -115,8 +121,13 @@ export function TemplateParamPopover({
         align="start"
         side="top"
         sideOffset={8}
+        // Same bound as the completion panel: the conversation area above the
+        // composer, never the app header or the status bar, and scrolling
+        // inside once the keyboard leaves it too little room.
+        collisionBoundary={collisionBoundary ?? undefined}
+        collisionPadding={COMPOSER_POPOVER_COLLISION_PADDING}
         data-testid="template-param-popover"
-        className="w-[var(--radix-popper-anchor-width)] rounded-xl border-border/70 bg-popover/95 p-3 shadow-xl backdrop-blur-xl"
+        className="max-h-[var(--radix-popover-content-available-height)] w-[var(--radix-popper-anchor-width)] overflow-y-auto overscroll-contain rounded-xl border-border/70 bg-popover/95 p-3 shadow-xl backdrop-blur-xl"
         // Focus stays in the textarea: the user is mid-sentence, and stealing
         // the caret to a panel they did not ask for is worse than no panel.
         onOpenAutoFocus={(event) => event.preventDefault()}

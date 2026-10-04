@@ -80,6 +80,27 @@ const MOBILE_CHAR_COUNTER_FROM = 1_000
 /** Verbatim from the pre-skin composer. Pinned by the parity test. */
 const CLASSIC_BOX = "gap-2 rounded-2xl border-input/60 bg-background/70 px-2 py-2"
 
+/**
+ * The classic skin's stacked (phone / compact-setting) card. Its corner is
+ * {@link COMPACT_CLASSIC_RADIUS_PX}; keep the two in step.
+ */
+const COMPACT_CLASSIC_BOX =
+  "gap-1.5 rounded-[1.75rem] border-border/70 bg-background/85 px-3 py-2.5 shadow-md"
+const COMPACT_CLASSIC_RADIUS_PX = 28
+
+/**
+ * The corner radius the card actually draws. The skin's `radiusPx` is not it
+ * for the classic skin in the stacked layout, which rounds further — anything
+ * docked onto the card's edge (the run-status strip) has to inset by this one
+ * or its sides end on the curve and leave a gap above the card.
+ */
+export function composerCardRadiusPx(
+  skin: Pick<ResolvedComposerSkin, "isClassic" | "radiusPx">,
+  compactLayout: boolean
+): number {
+  return skin.isClassic && compactLayout ? COMPACT_CLASSIC_RADIUS_PX : skin.radiusPx
+}
+
 /** Every other skin drives its geometry from the inline custom properties. */
 const SKIN_BOX =
   "gap-[var(--composer-gap)] rounded-[var(--composer-radius)] border-input/60 bg-background/70 px-[var(--composer-pad-x)] py-[var(--composer-pad-y)]"
@@ -113,6 +134,8 @@ export interface ComposerBoxProps {
    *  Null before the session's mode has hydrated. */
   permissionMode: PermissionMode | null
   placeholder?: string
+  /** Shown instead of the generic disabled copy while `disabled`. */
+  disabledPlaceholder?: string
   /**
    * Rotating example prompts painted as an overlay while the input is empty
    * (the welcome hero's hint carousel). When provided AND visible, the
@@ -278,6 +301,7 @@ export function ComposerBox({
   disabled,
   permissionMode,
   placeholder,
+  disabledPlaceholder,
   placeholderHints,
   onActiveHintChange,
   textInput,
@@ -336,6 +360,24 @@ export function ComposerBox({
   t,
   tAttach,
 }: ComposerBoxProps) {
+  // Shape of the send / stop button and of the follow-up button beside it
+  // during a live turn, so the pair reads as one cluster. Classic keeps its
+  // literals; every other skin sizes and shapes the button from its own
+  // resolved tokens (already floored to the touch minimum on mobile by the
+  // resolver).
+  const actionButtonClass = cn(
+    "transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
+    skin.isClassic
+      ? isMobile
+        ? // Painted at 40px so it sits in proportion with the toolbar row it
+          // shares on a phone; `touch-hit` keeps the 44px tap floor without
+          // growing the circle.
+          "size-10 rounded-full touch-hit"
+        : "size-9 rounded-full"
+      : "size-[var(--composer-send-size)] rounded-[var(--composer-inner-radius)]",
+    // Mobile: 44px minimum tap target (primary send/stop action).
+    isMobile && !skin.isClassic && "touch-target"
+  )
   // Re-sync the overlays' scroll mirror to whatever the textarea's scrollTop is
   // NOW, every time the value changes.
   //
@@ -413,9 +455,7 @@ export function ComposerBox({
         // composer is unchanged" true by construction rather than by anyone
         // getting a rem→px conversion right. See `composer-skin.ts`.
         skin.isClassic ? CLASSIC_BOX : SKIN_BOX,
-        skin.isClassic &&
-          compactLayout &&
-          "gap-1.5 rounded-[1.75rem] border-border/70 bg-background/85 px-3 py-2.5 shadow-md",
+        skin.isClassic && compactLayout && COMPACT_CLASSIC_BOX,
         // Plan mode: amber tint on the input surface (with the banner above)
         // so the read-only state is unmistakable (Claude Code parity).
         permissionMode === "plan" &&
@@ -686,7 +726,7 @@ export function ComposerBox({
           onSelect={onSelect}
           placeholder={
             disabled
-              ? t("placeholderDisabled")
+              ? (disabledPlaceholder ?? t("placeholderDisabled"))
               : showHintCarousel
                 ? ""
                 : (placeholder ?? t("placeholder"))
@@ -771,11 +811,43 @@ export function ComposerBox({
 
       <div
         className={cn(
-          "order-3 ms-auto flex shrink-0 items-center",
+          "order-3 ms-auto flex shrink-0 items-center gap-1.5",
           compactLayout && "self-center",
           !isMobile && !compactLayout && "@sm/composer:order-none @sm/composer:ms-0"
         )}
       >
+        {/* A typed follow-up while the turn runs. Stop keeps the primary slot
+            (same size and place as Send), so this sits beside it as the
+            quieter of the two; Enter queues the same message. */}
+        {sendButton.followUp ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={
+                  !sendButton.followUp.busy
+                    ? t("ariaSendSteer")
+                    : isPreparingAttachments
+                      ? tAttach("preparing")
+                      : t("ariaSending")
+                }
+                className={actionButtonClass}
+                data-testid="composer-send-follow-up"
+                disabled={sendButton.followUp.disabled}
+                onClick={() => void submit()}
+                size="icon"
+                type="button"
+                variant="secondary"
+              >
+                {sendButton.followUp.busy ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <ArrowUpIcon className="size-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sendSteerTooltip")}</TooltipContent>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger asChild>
             {sendButton.mode === "draft" ? (
@@ -809,26 +881,10 @@ export function ComposerBox({
                       ? isPreparingAttachments
                         ? tAttach("preparing")
                         : t("ariaSending")
-                      : sendButton.queues
-                        ? t("ariaSendSteer")
-                        : t("ariaSend")
+                      : t("ariaSend")
                 }
-                className={cn(
-                  "transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
-                  // Classic keeps its literals; every other skin sizes and
-                  // shapes the button from its own resolved tokens (already
-                  // floored to the touch minimum on mobile by the resolver).
-                  skin.isClassic
-                    ? isMobile
-                      ? // Painted at 40px so it sits in proportion with the
-                        // toolbar row it shares on a phone; `touch-hit` keeps
-                        // the 44px tap floor without growing the circle.
-                        "size-10 rounded-full touch-hit"
-                      : "size-9 rounded-full"
-                    : "size-[var(--composer-send-size)] rounded-[var(--composer-inner-radius)]",
-                  // Mobile: 44px minimum tap target (primary send/stop action).
-                  isMobile && !skin.isClassic && "touch-target"
-                )}
+                className={actionButtonClass}
+                data-testid={sendButton.mode === "stop" ? "composer-stop" : "composer-send"}
                 disabled={sendButton.disabled}
                 onClick={() => (sendButton.mode === "stop" ? void onStop() : void submit())}
                 size="icon"
@@ -838,10 +894,10 @@ export function ComposerBox({
                 {/* Icon swap genuinely cross-fades + zooms on each state
                     change (send → running → stop): AnimatePresence keeps the
                     outgoing icon mounted through its exit while the incoming
-                    one fades in, keyed by state. `queues` deliberately does
-                    NOT enter the key — a follow-up still sends with an arrow,
-                    so typing mid-turn must not re-run the zoom. Honors
-                    reduced motion. */}
+                    one fades in, keyed by state. A live turn stays `stop`
+                    whatever is typed (the follow-up has its own control), so
+                    typing mid-turn never re-runs the zoom. Honors reduced
+                    motion. */}
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={sendButton.mode}
@@ -852,7 +908,7 @@ export function ComposerBox({
                     transition={sendIconTransition}
                   >
                     {sendButton.mode === "stop" ? (
-                      <SquareIcon className="size-4" />
+                      <SquareIcon className="size-3.5 fill-current" />
                     ) : sendButton.mode === "busy" ? (
                       <Spinner className="size-4" />
                     ) : (
@@ -867,10 +923,12 @@ export function ComposerBox({
             {sendButton.mode === "draft"
               ? t("reviewDraftsTooltip")
               : sendButton.mode === "stop"
-                ? t("stopTooltip")
-                : sendButton.queues
-                  ? t("sendSteerTooltip")
-                  : t("sendTooltip")}
+                ? // Esc on the textarea interrupts too; name the key only
+                  // where there is one to press.
+                  touchInput
+                  ? t("stopTooltip")
+                  : t("stopTooltipKeyboard")
+                : t("sendTooltip")}
           </TooltipContent>
         </Tooltip>
       </div>

@@ -133,6 +133,17 @@ describe("assistant run metadata", () => {
     // An unaddressed turn carries no route at all.
     expect("route" in buildCompletedRunMetadata({ completedAt: 500 })).toBe(false)
   })
+
+  it("seals which external agent and route answered, as a copy", () => {
+    const externalAgent = { agentId: "kimi", route: "cognia:task-1" }
+    const sealed = buildCompletedRunMetadata({ completedAt: 500, externalAgent })
+    expect(sealed.externalAgent).toEqual(externalAgent)
+    expect(sealed.externalAgent).not.toBe(externalAgent)
+    expect(
+      runMetadataOf(attachRunMetadataToLastAssistant(messages(), sealed)[1])?.externalAgent
+    ).toEqual(externalAgent)
+    expect("externalAgent" in buildCompletedRunMetadata({ completedAt: 500 })).toBe(false)
+  })
 })
 
 describe("buildRouterFusionRunMetadata", () => {

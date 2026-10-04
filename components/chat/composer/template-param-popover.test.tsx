@@ -55,6 +55,21 @@ describe("TemplateParamPopover", () => {
     expect(screen.getByRole("textbox")).toHaveValue("login")
   })
 
+  it("caps itself to the room above the composer and scrolls inside", () => {
+    render(
+      <TemplateParamPopover
+        paramId="module"
+        value={undefined}
+        anchor={anchorEl()}
+        onChange={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    const content = screen.getByTestId("template-param-popover")
+    expect(content.className).toContain("max-h-[var(--radix-popover-content-available-height)]")
+    expect(content.className).toContain("overflow-y-auto")
+  })
+
   it("reports every keystroke as a text value", () => {
     const onChange = jest.fn()
     render(

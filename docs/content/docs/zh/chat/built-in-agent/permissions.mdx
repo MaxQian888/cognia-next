@@ -5,7 +5,7 @@ description: ADR-0041 双层安全门——sidecar canUseTool 短路（A 层）�
 
 # 权限与 Auto-mode
 
-当模型要运行工具——尤其是 shell 命令——时，Cognia 通过两个独立的层决定 **allow / ask / deny**。两层都 **fail-open**（出 bug 降级为“总是提示”，绝不“静默运行”），ADR-0041 的核心不变量是**没有 `*: allow` 通配**能绕过一切审批。
+模型准备运行工具时，尤其是执行 shell 命令时，Cognia 通过两个独立层决定 **allow / ask / deny**。两层都采用 **fail-open** 策略：发生错误时降级为「总是提示」，绝不「静默运行」。ADR-0041 的核心不变量是：**任何 `*: allow` 通配规则都不能绕过全部审批**。
 
 <TLDR>
   **A 层**在 sidecar 里：SDK 的 `canUseTool` 回调（`anthropic.mjs:263`）查阅 build-options 序列化出的静态

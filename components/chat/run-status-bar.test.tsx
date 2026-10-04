@@ -24,11 +24,6 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "web"),
 }))
 
-let mockShowKeyboardHints = true
-jest.mock("@/hooks/ui/use-pointer", () => ({
-  useShowKeyboardHints: () => mockShowKeyboardHints,
-}))
-
 const SID = "s1"
 
 function seed(slice: Partial<SessionChatSlice>) {
@@ -184,24 +179,15 @@ describe("RunStatusBar", () => {
     expect(useChatStore.getState().sessions[SID]?.steerQueue).toEqual([])
   })
 
-  it("interrupt hint triggers onStop", () => {
-    const onStop = jest.fn()
-    seed({ status: "streaming" })
-    render(<RunStatusBar sessionId={SID} onStop={onStop} />)
-    fireEvent.click(screen.getByText("interruptHint"))
-    expect(onStop).toHaveBeenCalledTimes(1)
-  })
-
-  it("uses touch-appropriate interrupt copy without a hover-capable pointer", () => {
-    mockShowKeyboardHints = false
-    try {
-      seed({ status: "streaming" })
-      render(<RunStatusBar sessionId={SID} onStop={jest.fn()} />)
-      expect(screen.getByText("interruptHintTouch")).toBeInTheDocument()
-      expect(screen.queryByText("interruptHint")).not.toBeInTheDocument()
-    } finally {
-      mockShowKeyboardHints = true
-    }
+  it("never interrupts from a tap on the strip, and shows no interrupt hint", () => {
+    seed({ status: "streaming", messages: [assistantWithRunningTool()] })
+    render(<RunStatusBar sessionId={SID} />)
+    expect(screen.queryByText(/interruptHint/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("run-status-bar"))
+    fireEvent.click(screen.getByText("working"))
+    expect(useChatStore.getState().sessions[SID]?.status).toBe("streaming")
+    // The tap opened the run details instead.
+    expect(screen.getByTestId("run-panel-body")).toBeInTheDocument()
   })
 
   it("asks before the first interrupt-and-send, then fires it", async () => {

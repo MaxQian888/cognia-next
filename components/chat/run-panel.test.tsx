@@ -7,16 +7,12 @@ import type { UIMessage } from "ai"
 import { RunPanel } from "./run-panel"
 import { useChatStore, makeSessionSlice, type SessionChatSlice } from "@/stores/chat"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import { useSettingsStore } from "@/stores/settings"
 
 // Identity i18n with var echo.
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
-}))
-
-let mockShowKeyboardHints = true
-jest.mock("@/hooks/ui/use-pointer", () => ({
-  useShowKeyboardHints: () => mockShowKeyboardHints,
 }))
 
 // Stub the heavy reused renderers — they have their own suites.
@@ -138,6 +134,71 @@ describe("RunPanel — idle replay", () => {
     expect(screen.getByTestId("run-panel-body")).toBeInTheDocument()
   })
 
+  it("reports a reloaded turn's duration from its persisted timestamps, never 0s", () => {
+    // After a reload the live clock is idle and was never persisted; the
+    // turn's own run stamp is what still knows it took minutes.
+    seed({
+      status: "idle",
+      messages: [
+        { id: "u1", role: "user", parts: [], metadata: { createdAt: 1_000 } },
+        {
+          ...assistant(
+            Array.from({ length: 11 }, (_, i) => toolPart(`t${i}`, "Read", "output-available"))
+          ),
+          metadata: { createdAt: 2_000, run: { startedAt: 1_000, completedAt: 185_000 } },
+        },
+      ] as unknown as UIMessage[],
+    })
+    render(<RunPanel sessionId={SID} />)
+    const summary = screen.getByTestId("run-panel-replay-summary")
+    expect(summary).toHaveTextContent('lastRunSummary:{"count":11,"elapsed":"3m 04s"}')
+    expect(summary).not.toHaveTextContent('"0s"')
+  })
+
+  it("omits the duration when nothing recorded how long the turn took", () => {
+    seed({
+      status: "idle",
+      messages: [assistant([toolPart("t1", "Read", "output-available", { file_path: "/a" })])],
+    })
+    render(<RunPanel sessionId={SID} />)
+    const summary = screen.getByTestId("run-panel-replay-summary")
+    expect(summary).toHaveTextContent('summaryTools:{"count":1}')
+    expect(summary).not.toHaveTextContent("lastRunSummary")
+    expect(summary).not.toHaveTextContent("0s")
+  })
+
+  it("banks the live clock when the turn settles, so the summary matches the ticker", () => {
+    const messages = [assistant([toolPart("t1", "Bash", "output-available")])]
+    seed({
+      status: "streaming",
+      runId: 4,
+      messages,
+      runTiming: { startedAt: 10_000, pausedAt: null, pausedAccumMs: 5_000 },
+    })
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(135_000)
+    try {
+      render(<RunPanel sessionId={SID} />)
+      // The turn settles: the store resets the clock to idle in the same write.
+      act(() => {
+        useChatStore.setState((state) => ({
+          sessions: {
+            [SID]: {
+              ...state.sessions[SID]!,
+              status: "idle",
+              runTiming: { startedAt: null, pausedAt: null, pausedAccumMs: 0 },
+            },
+          },
+        }))
+      })
+      // 135s − 10s − 5s of approval wait = 2m 00s of active work.
+      expect(screen.getByTestId("run-panel-replay-summary")).toHaveTextContent(
+        'lastRunSummary:{"count":1,"elapsed":"2m 00s"}'
+      )
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
+
   it("renders nothing when idle with no work and no queue", () => {
     seed({ status: "idle", messages: [] })
     const { container } = render(<RunPanel sessionId={SID} />)
@@ -203,61 +264,118 @@ describe("RunPanel — metric strip", () => {
     expect(screen.getByTestId("run-bar-metrics")).toHaveTextContent('metricTokens:{"value":"800"}')
   })
 
-  it("hides usage-derived chips when no turn carries usage", () => {
+  it("hides the usage row entirely when no turn carries usage", () => {
     seed({
       status: "streaming",
       messages: [assistant([toolPart("t1", "Bash", "input-available")])],
     })
     render(<RunPanel sessionId={SID} />)
-    // Only the tools chip may show (busy + default showTools); no tokens/speed.
-    const strip = screen.queryByTestId("run-bar-metrics")
-    if (strip) {
-      expect(strip).not.toHaveTextContent("metricTokens")
-      expect(strip).not.toHaveTextContent("metricSpeed")
-    }
+    // The tool count rides the summary line now, so with no usage there is no
+    // second row at all.
+    expect(screen.queryByTestId("run-bar-metrics")).not.toBeInTheDocument()
   })
 })
 
 describe("RunPanel — accessibility", () => {
-  it("sets aria-atomic false and labels the interrupt + toggle controls", () => {
+  it("sets aria-atomic false and makes the summary line a labelled disclosure", () => {
     seed({
       status: "streaming",
       messages: [assistant([toolPart("t1", "Bash", "input-available")])],
     })
     render(<RunPanel sessionId={SID} />)
     expect(screen.getByTestId("run-status-bar")).toHaveAttribute("aria-atomic", "false")
-    expect(screen.getByLabelText("ariaInterrupt")).toBeInTheDocument()
     const toggle = screen.getByTestId("run-panel-toggle")
     expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(toggle).toHaveAttribute("aria-controls", "run-panel-body")
+    expect(toggle).toHaveTextContent("expand")
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-expanded", "true")
+    expect(toggle).toHaveTextContent("collapse")
   })
 })
 
-describe("RunPanel — interrupt hint", () => {
-  const streaming = () =>
+describe("RunPanel — summary line", () => {
+  it("shows state, elapsed time, tool count and the newest running tool on one line", () => {
+    seed({
+      status: "streaming",
+      runTiming: { startedAt: Date.now() - 60_000, pausedAt: null, pausedAccumMs: 0 },
+      messages: [
+        assistant([
+          toolPart("t1", "Read", "output-available", { file_path: "/a" }),
+          toolPart("t2", "Bash", "input-available", { command: "ls" }),
+        ]),
+      ],
+    })
+    render(<RunPanel sessionId={SID} />)
+    const line = screen.getByTestId("run-panel-toggle")
+    expect(line).toHaveTextContent("working")
+    expect(line).toContainElement(screen.getByTestId("run-status-elapsed"))
+    expect(screen.getByTestId("run-status-elapsed").textContent).toMatch(/1m/)
+    expect(screen.getByTestId("run-status-tools")).toHaveTextContent('summaryTools:{"count":2}')
+    expect(screen.getByTestId("run-status-current-tool")).toHaveTextContent("Bash: ls")
+  })
+
+  it("collapses parallel running tools to the newest plus a count", () => {
+    seed({
+      status: "streaming",
+      messages: [
+        assistant([
+          toolPart("t1", "Bash", "input-available", { command: "a" }),
+          toolPart("t2", "Bash", "input-available", { command: "b" }),
+          toolPart("t3", "Bash", "input-available", { command: "c" }),
+        ]),
+      ],
+    })
+    render(<RunPanel sessionId={SID} />)
+    expect(screen.getByTestId("run-status-current-tool")).toHaveTextContent("Bash: c")
+    expect(screen.getByTestId("run-panel-toggle")).toHaveTextContent("+2")
+  })
+
+  it("leaves the tool count out when the setting turns it off", () => {
+    useSettingsStore.setState({ settings: { runStatusBar: { showTools: false } } as never })
     seed({
       status: "streaming",
       messages: [assistant([toolPart("t1", "Bash", "input-available")])],
     })
+    const { unmount } = render(<RunPanel sessionId={SID} />)
+    expect(screen.queryByTestId("run-status-tools")).not.toBeInTheDocument()
+    unmount()
+    useSettingsStore.setState({ settings: undefined as never })
+  })
+})
 
-  it("names the Esc key where there is a keyboard", () => {
-    streaming()
+describe("RunPanel — no interrupt affordance", () => {
+  // Interrupting moved to the composer's Stop button (and Esc in the
+  // textarea). A tap on the strip — the whole of it — only opens the details.
+  it("offers no interrupt control or hint on the strip", () => {
+    seed({
+      status: "streaming",
+      messages: [assistant([toolPart("t1", "Bash", "input-available")])],
+    })
     render(<RunPanel sessionId={SID} />)
-    expect(screen.getByLabelText("ariaInterrupt")).toHaveTextContent("interruptHint")
-    expect(screen.getByLabelText("ariaInterrupt")).not.toHaveTextContent("interruptHintTouch")
+    const strip = screen.getByTestId("run-status-bar")
+    expect(strip).not.toHaveTextContent(/interrupt/i)
+    expect(screen.queryByLabelText(/interrupt/i)).not.toBeInTheDocument()
+    // Every button on a busy strip with no queue is the disclosure.
+    expect(screen.getAllByRole("button")).toEqual([screen.getByTestId("run-panel-toggle")])
   })
 
-  it("says tap instead of Esc on a device without a keyboard, whatever the runtime", () => {
-    // A phone read "Esc to interrupt": the old gate asked whether the runtime
-    // was the Capacitor shell, not whether an Esc key exists.
-    mockShowKeyboardHints = false
-    try {
-      streaming()
-      render(<RunPanel sessionId={SID} />)
-      expect(screen.getByLabelText("ariaInterrupt")).toHaveTextContent("interruptHintTouch")
-    } finally {
-      mockShowKeyboardHints = true
-    }
+  it("expands instead of interrupting when the summary line is tapped", () => {
+    seed({
+      status: "streaming",
+      messages: [assistant([toolPart("t1", "Bash", "input-available")])],
+    })
+    render(<RunPanel sessionId={SID} />)
+    fireEvent.click(screen.getByText("working"))
+    expect(screen.getByTestId("run-panel-body")).toBeInTheDocument()
+    // Still running: nothing the tap did ended the turn.
+    expect(useChatStore.getState().sessions[SID]?.status).toBe("streaming")
+  })
+
+  it("renders a busy strip with no tools as plain text, nothing to tap", () => {
+    seed({ status: "streaming", messages: [] })
+    render(<RunPanel sessionId={SID} />)
+    expect(screen.getByTestId("run-status-bar")).toHaveTextContent("working")
+    expect(screen.queryAllByRole("button")).toHaveLength(0)
   })
 })

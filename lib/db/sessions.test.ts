@@ -34,6 +34,7 @@ import {
   setSessionOrder,
   setSessionRanks,
   forkSessionFromParent,
+  clearSessionSdkLink,
 } from "./sessions"
 import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
@@ -97,6 +98,21 @@ it("removes retained external gateway state before deleting a conversation", asy
   await deleteSession(row.id)
   expect(deleteExternalSessionMock).toHaveBeenCalledWith(link.agentId, link.sessionId)
   expect(await getSession(row.id)).toBeUndefined()
+})
+
+it("removes every retained gateway task a conversation still names", async () => {
+  deleteExternalSessionMock.mockClear()
+  const current = { agentId: "pi", sessionId: "cognia-gateway:task-3:native-3" }
+  const retained = { agentId: "pi", sessionId: "cognia-gateway:task-4:native-4" }
+  const row = await createSession({
+    title: "Switched models",
+    externalAgentSession: current,
+    externalAgentGatewaySessions: [retained, current],
+  })
+  await deleteSession(row.id)
+  expect(deleteExternalSessionMock).toHaveBeenCalledTimes(2)
+  expect(deleteExternalSessionMock).toHaveBeenCalledWith(retained.agentId, retained.sessionId)
+  expect(deleteExternalSessionMock).toHaveBeenCalledWith(current.agentId, current.sessionId)
 })
 
 it("deletes fresh original assets and temporary sources with their owning session", async () => {
@@ -319,56 +335,74 @@ describe("createSession — default thinking level", () => {
 describe("createSession — external-agent default model", () => {
   const AGENT_MARKER = "cognia:external-agent:pi-local"
 
-  it("inherits a model picked from an agent's own list before this chat existed", async () => {
-    // The composer offers an external agent's catalog on a brand-new chat,
+  it("inherits per-agent choices made before this chat existed, in their own column", async () => {
+    // The composer offers an external agent's models on a brand-new chat,
     // where the picker has no row to write to and records the choice as the
-    // app default instead. Nothing carried it onto the row, and the external
-    // send path reads the row, so the first turn ran on whatever model the
-    // agent boots with while every surface said otherwise.
+    // app default instead. The external send path reads the row, so without
+    // this the first turn ran on whatever the agent boots with.
+    const choices = {
+      "pi-local": { kind: "native" as const, modelId: "commandcode/claude-opus-5" },
+      kimi: {
+        kind: "cognia" as const,
+        binding: { providerId: "plugin:kimi:subscription", modelId: "kimi-k3" },
+      },
+    }
+    await saveSettings({ externalAgentModelDefaults: choices })
+    const session = await createSession({ title: "t" })
+    expect(session.externalAgentModels).toEqual(choices)
+    // Never the built-in lane's columns.
+    expect(session.model).toBeUndefined()
+    expect(session.providerOverride).toBeUndefined()
+    expect((await getSession(session.id))?.externalAgentModels).toEqual(choices)
+  })
+
+  it("carries a legacy app-default marker over as that agent's native pick", async () => {
     await saveSettings({
       defaultModel: "commandcode/claude-opus-5",
       defaultProvider: AGENT_MARKER,
     })
     const session = await createSession({ title: "t" })
-    expect(session.model).toBe("commandcode/claude-opus-5")
-    expect(session.providerOverride).toBe(AGENT_MARKER)
-    const stored = await getSession(session.id)
-    expect(stored?.model).toBe("commandcode/claude-opus-5")
-    expect(stored?.providerOverride).toBe(AGENT_MARKER)
+    expect(session.externalAgentModels).toEqual({
+      "pi-local": { kind: "native", modelId: "commandcode/claude-opus-5" },
+    })
+    expect(session.model).toBeUndefined()
+    expect(session.providerOverride).toBeUndefined()
+  })
+
+  it("lets the explicit default win over the legacy marker for the same agent", async () => {
+    await saveSettings({
+      defaultModel: "old/model",
+      defaultProvider: AGENT_MARKER,
+      externalAgentModelDefaults: { "pi-local": { kind: "native", modelId: "new/model" } },
+    })
+    const session = await createSession({ title: "t" })
+    expect(session.externalAgentModels).toEqual({
+      "pi-local": { kind: "native", modelId: "new/model" },
+    })
   })
 
   it("leaves an ordinary provider default to keep following the app setting", async () => {
     // A different contract. Freezing every new row onto the app's provider
     // model would make changing the default stop reaching conversations that
-    // never chose anything, which is not what this inheritance is for.
+    // never chose anything.
     await saveSettings({ defaultModel: "claude-sonnet-5", defaultProvider: "anthropic" })
     const session = await createSession({ title: "t" })
     expect(session.model).toBeUndefined()
     expect(session.providerOverride).toBeUndefined()
+    expect(session.externalAgentModels).toBeUndefined()
   })
 
-  it("lets an explicit model on the call win, marker and all", async () => {
+  it("lets explicit choices on the call win", async () => {
     await saveSettings({
-      defaultModel: "commandcode/claude-opus-5",
-      defaultProvider: AGENT_MARKER,
+      externalAgentModelDefaults: { "pi-local": { kind: "native", modelId: "a/one" } },
     })
-    const session = await createSession({ title: "t", model: "a/one" })
-    expect(session.model).toBe("a/one")
-    expect(session.providerOverride).toBeUndefined()
-  })
-
-  it("never stamps the marker beside a model that came from a preset", async () => {
-    // The pair is inherited together or not at all. A marker naming an agent
-    // next to a preset's model would ask that agent for an id it never offered.
-    const preset = await createPreset({ name: "p", content: "sys", model: "preset/model" })
-    await setDefaultPreset(preset.id)
-    await saveSettings({
-      defaultModel: "commandcode/claude-opus-5",
-      defaultProvider: AGENT_MARKER,
+    const session = await createSession({
+      title: "t",
+      model: "claude-opus-5",
+      externalAgentModels: { kimi: { kind: "native" } },
     })
-    const session = await createSession({ title: "t" })
-    expect(session.model).toBe("preset/model")
-    expect(session.providerOverride).toBeUndefined()
+    expect(session.model).toBe("claude-opus-5")
+    expect(session.externalAgentModels).toEqual({ kimi: { kind: "native" } })
   })
 })
 
@@ -1620,6 +1654,23 @@ describe("countWorkspaceConversations", () => {
 
     sub.unsubscribe()
     expect(emissions.at(-1)).toEqual({ conversations: 2, messages: 6 })
+  })
+})
+
+describe("clearSessionSdkLink", () => {
+  it("drops the SDK conversation, its fork source and the backend it lived in", async () => {
+    const s = await createSession({ title: "bound" })
+    await updateSession(s.id, {
+      sdkSessionId: "sdk-1",
+      forkedFromSdkSessionId: "sdk-0",
+      sdkSessionStorage: { backend: "host-sqlite" } as ChatSession["sdkSessionStorage"],
+    })
+    await clearSessionSdkLink(s.id)
+    const after = await getSession(s.id)
+    expect(after?.sdkSessionId).toBeUndefined()
+    expect(after?.forkedFromSdkSessionId).toBeUndefined()
+    expect(after?.sdkSessionStorage).toBeUndefined()
+    expect(after?.title).toBe("bound")
   })
 })
 

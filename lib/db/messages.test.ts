@@ -33,7 +33,11 @@ import * as revisionEvents from "@/lib/chat/transcript/revision-events"
 
 jest.mock("@/lib/chat/transcript/revision-events", () => {
   const actual = jest.requireActual("@/lib/chat/transcript/revision-events")
-  return { ...actual, publishTranscriptRevision: jest.fn(actual.publishTranscriptRevision) }
+  return {
+    ...actual,
+    publishTranscriptRevision: jest.fn(actual.publishTranscriptRevision),
+    invalidateTranscriptRuntime: jest.fn(async () => {}),
+  }
 })
 
 jest.mock("./session-assets", () => {
@@ -73,6 +77,110 @@ beforeEach(async () => {
   await getDb().messages.clear()
 })
 afterAll(dbFixture.dispose)
+
+it.each([persistMessages, persistStreamingMessages])(
+  "does not restore an obsolete runtime transcript after asynchronous media preparation",
+  async (persist) => {
+    await putSession("generation-fence")
+    const message = {
+      id: "generation-message",
+      role: "assistant",
+      parts: [{ type: "text", text: "Old context" }],
+    } as UIMessage
+    await persistMessages("generation-fence", [message])
+    let release!: () => void
+    let entered!: () => void
+    const preparing = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    jest.mocked(persistMessageSessionAssets).mockImplementationOnce(async (_sessionId, value) => {
+      entered()
+      await gate
+      return value
+    })
+    const pending = persist(
+      "generation-fence",
+      [{ ...message, parts: [{ type: "text", text: "Late old result" }] }],
+      {
+        shouldPersist: () => true,
+        runtimeGeneration: { value: undefined },
+      }
+    )
+    await preparing
+    // Another renderer commits a destructive change while this write is still
+    // preparing media. Its durable generation must fence the queued writer.
+    await getDb().transaction("rw", getDb().sessions, getDb().messages, async () => {
+      await getDb().sessions.update("generation-fence", {
+        runtimeTranscriptGeneration: "replacement",
+      })
+      await getDb().messages.delete(message.id)
+    })
+    release()
+    await pending
+    expect(await getDb().messages.get(message.id)).toBeUndefined()
+    await persist(
+      "generation-fence",
+      [{ ...message, parts: [{ type: "text", text: "Replacement result" }] }],
+      {
+        runtimeGeneration: { value: "replacement" },
+      }
+    )
+    expect((await getDb().messages.get(message.id))?.parts).toEqual([
+      { type: "text", text: "Replacement result" },
+    ])
+  }
+)
+
+it("refuses destructive transcript changes when the live runtime cannot be invalidated", async () => {
+  await putSession("runtime-fence")
+  const message = {
+    id: "fence-message",
+    role: "user",
+    parts: [{ type: "text", text: "Keep until cancellation succeeds" }],
+  } as UIMessage
+  await persistMessages("runtime-fence", [message])
+  for (const remove of [
+    () => clearMessages("runtime-fence"),
+    () => deleteStoredMessage(message.id),
+    () => truncateAfter("runtime-fence", message.id, { inclusive: true }),
+  ]) {
+    jest
+      .mocked(revisionEvents.invalidateTranscriptRuntime)
+      .mockRejectedValueOnce(new Error("Runtime unavailable"))
+    await expect(remove()).rejects.toThrow("Runtime unavailable")
+    expect(await getDb().messages.get(message.id)).toBeDefined()
+  }
+})
+
+it("keeps WorkingSet history across delta upserts and ignores renderer metadata as its source", async () => {
+  await putSession("working-set-delta")
+  const first = {
+    id: "ws-first",
+    role: "user",
+    parts: [{ type: "text", text: "Start" }],
+  } as UIMessage
+  await commitMessageDelta("working-set-delta", { upserts: [first] })
+  const recorded = (await getDb().messages.get(first.id))?.workingSetSnapshot
+  expect(recorded).toMatchObject({ revision: 0, entries: [] })
+  await getDb().sessions.update("working-set-delta", {
+    workingSet: { contractVersion: 1, revision: 7, entries: [], updatedAt: 50 },
+  })
+  await commitMessageDelta("working-set-delta", {
+    upserts: [
+      {
+        ...first,
+        parts: [{ type: "text", text: "Edited" }],
+        metadata: { workingSetSnapshot: { revision: 99 } },
+      },
+    ],
+  })
+  expect((await getDb().messages.get(first.id))?.workingSetSnapshot).toEqual(recorded)
+  await commitMessageDelta("working-set-delta", { upserts: [{ ...first, id: "ws-next" }] })
+  expect((await getDb().messages.get("ws-next"))?.workingSetSnapshot?.revision).toBe(7)
+})
 
 function msg(
   id: string,

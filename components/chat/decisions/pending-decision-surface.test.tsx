@@ -50,6 +50,94 @@ describe("<PendingDecisionSurface /> — tool approval", () => {
   })
 
   /**
+   * The reported defect: three differently styled buttons in one non-wrapping
+   * row, where "始终允许" drew over "拒绝" on a ~376 px phone. The answers are
+   * now one group — primary full width, the two secondary answers side by side
+   * in equal columns — that becomes a single row from `sm` up.
+   */
+  it("lays the answers out as a stacked group with a clear hierarchy", () => {
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval }}
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    const group = screen.getByRole("group", { name: "actionsTitle" })
+    expect(group).toHaveClass("flex", "flex-col", "gap-2", "sm:flex-row-reverse", "sm:flex-wrap")
+
+    const allow = screen.getByTestId("decision-allow")
+    const always = screen.getByTestId("decision-allow-always")
+    const deny = screen.getByTestId("decision-deny")
+    // Primary first in the DOM (tab order), full width on a phone.
+    expect(group.firstElementChild).toBe(allow)
+    expect(allow).toHaveClass("w-full", "sm:w-auto")
+    expect(allow).toHaveAttribute("data-variant", "default")
+    // Both secondary answers share one variant; deny carries the destructive tone.
+    expect(always).toHaveAttribute("data-variant", "outline")
+    expect(deny).toHaveAttribute("data-variant", "outline")
+    expect(deny).toHaveClass("text-destructive")
+    // One height for all three — no caller class overriding the size.
+    for (const button of [allow, always, deny]) {
+      expect(button).toHaveAttribute("data-size", "default")
+      expect(button).not.toHaveClass("h-8")
+    }
+
+    const secondary = screen.getByTestId("decision-secondary-actions")
+    expect(secondary).toHaveClass("grid", "grid-cols-2", "sm:flex", "sm:flex-row-reverse")
+    expect(Array.from(secondary.children)).toEqual([always, deny])
+    // Labels truncate inside their column instead of overflowing a neighbour.
+    expect(always).toHaveClass("min-w-0")
+    expect(always.firstElementChild).toHaveClass("min-w-0", "truncate")
+  })
+
+  it("gives deny the full row when no standing grant is offered", () => {
+    render(
+      <PendingDecisionSurface
+        decision={{
+          kind: "tool-approval",
+          approval: { ...approval, requiresPerCallApproval: true },
+        }}
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("decision-allow-always")).not.toBeInTheDocument()
+    expect(screen.getByTestId("decision-secondary-actions")).toHaveClass("grid-cols-1")
+  })
+
+  it("puts Cancel run last and pushes it left on wide screens", async () => {
+    const onCancelRun = jest.fn()
+    render(
+      <PendingDecisionSurface
+        decision={{
+          kind: "tool-approval",
+          approval: { ...approval, origin: "subagent", subagentRunId: "run-9" },
+        }}
+        onApprovalRespond={jest.fn()}
+        onCancelRun={onCancelRun}
+      />
+    )
+    const group = screen.getByRole("group", { name: "actionsTitle" })
+    const cancel = screen.getByTestId("decision-cancel-run")
+    expect(group.lastElementChild).toBe(cancel)
+    expect(cancel).toHaveClass("w-full", "sm:mr-auto", "sm:w-auto", "text-destructive")
+    await userEvent.setup().click(cancel)
+    expect(onCancelRun).toHaveBeenCalledWith("run-9")
+  })
+
+  it("does not offer Cancel run without a handler", () => {
+    render(
+      <PendingDecisionSurface
+        decision={{
+          kind: "tool-approval",
+          approval: { ...approval, origin: "subagent", subagentRunId: "run-9" },
+        }}
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("decision-cancel-run")).not.toBeInTheDocument()
+  })
+
+  /**
    * The rule this surface exists to hold. `resolved`, `expired` and
    * `interrupted` all mean the runtime stopped waiting, so Allow and Deny would
    * be lies about something that can still happen.

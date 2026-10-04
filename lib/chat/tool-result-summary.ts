@@ -12,6 +12,7 @@
  * the web `ToolUIPart` shape (string output, MCP content-block arrays, objects).
  */
 
+import { stripReadLineNumbers } from "./read-line-numbers"
 import { normalizeToolName, type ToolPartLike } from "./tool-summary"
 
 /** Structured result summary; the component resolves `kind` to an i18n label. */
@@ -155,7 +156,13 @@ export function describeToolResult(part: ToolPartLike): ToolResultDescriptor | n
   if (name === "ls" || name === "list") {
     return { kind: "entries", count: countNonBlankLines(text), tone: "neutral" }
   }
-  if (name === "read" || name === "bash" || name === "shell") {
+  if (name === "read") {
+    // Count the file's lines, not the tool's paging hint appended after a
+    // numbered listing — the card under this chip renders exactly that code.
+    const listing = stripReadLineNumbers(text)
+    return { kind: "lines", count: countLines(listing ? listing.code : text), tone: "neutral" }
+  }
+  if (name === "bash" || name === "shell") {
     return { kind: "lines", count: countLines(text), tone: "neutral" }
   }
 

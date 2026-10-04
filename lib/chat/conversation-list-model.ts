@@ -255,6 +255,14 @@ export interface BuildSectionsOptions {
    * the plain substring rank, which is what the pure model's own tests use.
    */
   scoreTitle?: ConversationTitleScorer
+  /**
+   * Browse as one flat, sorted list: no Pinned section, no folders, no group
+   * or date headers, and no hand-dragged order — `sortBy` alone decides. For
+   * the conversation manager's table, which sorts by column and shows pin and
+   * folder as row facts instead of as places. Search mode is flat already and
+   * unaffected.
+   */
+  flat?: boolean
 }
 
 /**
@@ -320,6 +328,18 @@ const EMPTY_ID_SET: ReadonlySet<string> = new Set<string>()
  * chats.
  */
 function activityAt(session: ChatSession): number {
+  return conversationLastActivityAt(session)
+}
+
+/**
+ * When a conversation was last active: its last message, else its last
+ * write. The one reading every conversation surface sorts, buckets and
+ * reports activity by — the lists, the conversation manager, Settings →
+ * Sessions and the auto-archive policy (ADR-0213).
+ */
+export function conversationLastActivityAt(
+  session: Pick<ChatSession, "lastMessageAt" | "updatedAt">
+): number {
   return session.lastMessageAt ?? session.updatedAt ?? 0
 }
 
@@ -860,6 +880,7 @@ export function buildConversationSections(
     runningIds,
     filterContext,
     scoreTitle,
+    flat = false,
   } = opts
   const needle = query.trim().toLowerCase()
   // Which timestamp everything downstream reads: the buckets, their headers,
@@ -934,18 +955,37 @@ export function buildConversationSections(
     }
   }
 
+  if (flat) {
+    const ordered = [...candidates].sort(comparatorFor(sortBy, unreadIds))
+    return {
+      sections: ordered.length ? [{ kind: "recent", sessions: ordered }] : [],
+      total,
+      filteredCount: ordered.length,
+      visibleCount: ordered.length,
+      orderedIds: ordered.map((s) => s.id),
+      activeFilterCount,
+      contentOnlyIds: EMPTY_ID_SET,
+    }
+  }
+
   const sections: ConversationSection[] = []
   const orderIn = (list: ChatSession[], key: string) =>
     orderSectionSessions(list, key, sortBy, unreadIds)
 
-  // 1. Pinned float to the top (regardless of folder).
-  const pinned = orderIn(
-    candidates.filter((s) => s.pinned),
-    "pinned"
-  )
+  // 1. Pinned float to the top (regardless of folder) — in the active view
+  // only. Archiving keeps `pinned` so a restored row returns to Pinned, but the
+  // pin is frozen while the row is archived: the archive is not a place to
+  // keep things at hand, so its pinned rows sort with the rest (ADR-0213).
+  const pinned =
+    view === "archived"
+      ? []
+      : orderIn(
+          candidates.filter((s) => s.pinned),
+          "pinned"
+        )
   if (pinned.length) sections.push({ kind: "pinned", sessions: pinned })
 
-  const rest = candidates.filter((s) => !s.pinned)
+  const rest = view === "archived" ? candidates : candidates.filter((s) => !s.pinned)
 
   // 2. Folders (always shown, ordered) for non-pinned foldered sessions.
   const folderById = new Map(folders.map((f) => [f.id, f]))

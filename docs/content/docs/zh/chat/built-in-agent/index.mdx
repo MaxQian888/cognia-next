@@ -5,7 +5,7 @@ description: 应用内 Claude Agent 运行时——一次对话如何从输入�
 
 # 内置 Agent
 
-**内置 Agent** 是运行在 Cognia *内部* 的那个 Claude——也就是你在聊天面板里对话的那个。它不同于 [Agent Teams](./agent-teams)（多角色小队）或外部 CLI Agent（Codex / Cursor / Claude Code，以子进程方式拉起）：内置 Agent 是一个长驻的单会话，由打包在 Node **sidecar** 中的官方 [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 驱动。
+**内置 Agent** 是在 Cognia *内部*运行、供用户在聊天面板中对话的 Claude。它使用常驻单会话，由打包在 Node **sidecar** 中的官方 [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 驱动。[Agent Teams](./agent-teams) 是多角色小队；外部 CLI Agent（Codex / Cursor / Claude Code）则以子进程启动。
 
 <TLDR>
   一次对话就是一条管线：输入框调用 `hooks/chat/use-claude-chat.ts:596` 的 `send`，它调用
@@ -29,7 +29,7 @@ description: 应用内 Claude Agent 运行时——一次对话如何从输入�
 
 ## 它是什么
 
-内置 Agent 不是单个文件，而是一条**主链**（chat → 装配 → IPC → 进程 → SDK），外加挂在固定接缝上的**能力模块**。这套架构同时满足三条约束：
+内置 Agent 由一条**主链**（chat → 装配 → IPC → 进程 → SDK）和接入固定扩展点的**能力模块**组成。这套架构满足以下三条约束：
 
 1. **Agent SDK 只能跑在 Node。** 它的文件系统 / `child_process` / 原生依赖无法在 webview 内运行，所以它独立成一个进程。为何用 sidecar 见 [Sidecar 与 Claude Agent SDK](../core/sidecar-and-claude-sdk)。
 2. **静态导出没有服务端。** `next.config.ts` 强制 `output: "export"`，运行时没有 `app/api/`。任何需要长驻进程的东西（sidecar、Hooks、权限拦截）都活在 Rust，而非 Next.js 路由。

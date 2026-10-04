@@ -5,84 +5,38 @@ description: 本地/配对托管、事务更新、迁移、Dev Mode 与恢复。
 
 # 运维、更新与排障
 
-本地运行留在 Tauri。配对主机上的 code-server、profile、插件、权限、secret、
-proxy 与协议进程全部属于远程 Cognia host；桌面端不会升级该二进制。桌面端通过
-本地临时 relay 访问远端 workbench：先固定配对证书 SPKI fingerprint，再把现有
-device JWT 放进 `Authorization` header。真实远端端口和凭据始终仅限 loopback。
+本地运行留在 Tauri。配对主机上的 code-server、profile、插件、权限、secret、proxy 与协议进程全部属于远程 Cognia host；桌面端不会升级该二进制。桌面端通过本地临时 relay 访问远端 workbench：先固定配对证书 SPKI fingerprint，再把现有 device JWT 放进 `Authorization` header。真实远端端口和凭据始终仅限 loopback。
 
-relay 挂载在 companion 前门的 `/ide/relay/<opaque-id>/`
-（`protocol/companion-api-routes.json`），位于 `require_device_access` 之后，
-因此它转发的凭据就是普通的 device access token——与其他设备请求所用的一致。
-该 token 有效期五分钟，而只有渲染端持有签发所需的设备私钥，所以
-`lib/codeserver/remote-relay.ts` 会在过期前重新签发并重新 `ensure` relay。
-对同一 host、path 与 fingerprint 的重复 ensure 会**原地**替换 token 并保留已绑定
-端口：重新绑定会给 webview 一个新 URL 并重启 workbench，正好丢掉 pane 要保护的会话。
+relay 挂载在 companion 入口的 `/ide/relay/<opaque-id>/`（`protocol/companion-api-routes.json`），位于 `require_device_access` 之后，因此它转发的凭据就是普通的 device access token——与其他设备请求所用的一致。该 token 有效期五分钟，而只有渲染端持有签发所需的设备私钥，所以 `lib/codeserver/remote-relay.ts` 会在过期前重新签发并重新 `ensure` relay。对同一 host、path 与 fingerprint 的重复 ensure 会**原地**替换 token 并保留已绑定端口：重新绑定会给 webview 一个新 URL 并重启 workbench，导致 pane 要保留的会话丢失。
 
-配对主机既可以是 headless 服务器，也可以是另一台 Cognia 桌面。桌面通过同一个
-`/ide/relay/` 入口提供工作台，但它的 code-server 以 `--auth none` 运行且为所有者
-提供完整终端，因此仅有设备的 Remote Control 能力并不够。设备第一次在那里打开某个
-项目时，桌面会向所有者弹出提示，写明设备与文件夹；在所有者允许之前，该设备的请求
-会以 `CODESERVER_RELAY_GRANT_REQUIRED` 失败。批准按设备、按项目生效，持久保存在
-code-server 根目录下的 `relay-grants.json`（权限 `0600`），并可在 设置 → Pro IDE
-中查看和撤销。撤销批准、取消配对或收回 Remote Control，都会在两秒内关闭已打开的
-会话。relay id 绑定到单个 code-server 进程：工作台重启后，设备重新调用 `ensure`
-获得新的 id。本机上的浏览器不经过中继，它通过 loopback 平面访问工作台，并直接在
-`codeserver_ensure` 的响应中拿到端口。
+配对主机既可以是 headless 服务器，也可以是另一台 Cognia 桌面。桌面通过同一个 `/ide/relay/` 入口提供工作台，但它的 code-server 以 `--auth none` 运行且为所有者提供完整终端，因此仅有设备的 Remote Control 能力并不够。设备第一次在那里打开某个项目时，桌面会向所有者弹出提示，写明设备与文件夹；在所有者允许之前，该设备的请求会以 `CODESERVER_RELAY_GRANT_REQUIRED` 失败。批准按设备、按项目生效，持久保存在 code-server 根目录下的 `relay-grants.json`（权限 `0600`），并可在 设置 → Pro IDE 中查看和撤销。撤销批准、取消配对或收回 Remote Control，都会在两秒内关闭已打开的会话。relay id 绑定到单个 code-server 进程：工作台重启后，设备重新调用 `ensure` 获得新的 id。本机上的浏览器不经过中继，它通过 loopback 平面访问工作台，并直接在 `codeserver_ensure` 的响应中拿到端口。
 
 插件更新使用持久事务：
 
-1. `plugin_stage_version` 下载并校验 checksum/signature，在 host-owned transaction
-   storage 解包并校验 manifest/资源，不触碰工作版本。
+1. `plugin_stage_version` 下载并校验 checksum/signature，在 host-owned transaction storage 解包并校验 manifest/资源，不触碰工作版本。
 2. Renderer 检查权限扩张与声明式 migration plan，并 stage 确定性 proxy。
-3. Host snapshot 旧 package 与 `.host-state`，包括 Managed IDE SQLite state 和
-   secret index。
-4. 旧 runtime 被 disable/unload，`plugin_commit_staged_update` 用同文件系统
-   rename 原子提交 staged package。
-5. 激活精确 staged proxy。code-server host 先尝试 live activation，仅在需要时
-   restart extension host；handshake 失败则恢复旧 proxy。
+3. Host snapshot 旧 package 与 `.host-state`，包括 Managed IDE SQLite state 和 secret index。
+4. 旧 runtime 被 disable/unload，`plugin_commit_staged_update` 用同文件系统 rename 原子提交 staged package。
+5. 激活精确 staged proxy。code-server host 先尝试 live activation，仅在需要时 restart extension host；handshake 失败则恢复旧 proxy。
 6. Runtime verification 成功后才 finalize transaction。
 
-提交后任一步失败都会恢复 package 与 host state、重新扫描 runtime，并重新 enable
-旧版本。只有确认旧 package/state 已恢复但旧 runtime 仍无法激活时，才建议完整 Pro
-IDE restart。未提交 artifact 没有 activation marker，code-server 重启时会忽略。
+提交后任一步失败都会恢复 package 与 host state、重新扫描 runtime，并重新 enable 旧版本。只有确认旧 package/state 已恢复但旧 runtime 仍无法激活时，才建议完整 Pro IDE restart。未提交 artifact 没有 activation marker，code-server 重启时会忽略。
 
-首次 profile 迁移会把 native Open VSX 安装移入隔离 native profile，旧 shim 仅在
-一个 major 内保留导出能力。只同步过滤后的 settings、keybinding 与 theme；扩展
-state、secret、trust decision 与 ticket 不复制。
+首次 profile 迁移会把 native Open VSX 安装移入隔离 native profile，旧 shim 仅在一个 major 内保留导出能力。只同步过滤后的 settings、keybinding 与 theme；扩展 state、secret、trust decision 与 ticket 不复制。
 
-该同步是**一次性播种**，由迁移 marker 旁边独立的 `.portable-preferences-v1`
-把关，并且是**增量的**——只写 allowlist 内的键，managed profile 里的其余内容原样
-保留。播种之后，managed 的 `settings.json` 归渲染端的主题同步与你在 VS Code 内的
-设置所有，`keybindings.json` 完全归你。每次启动都重跑，会让 native profile 对两个
-allowlist 共有的键拥有最终发言权，并抹掉其余内容。
+该同步是**一次性播种**，由迁移 marker 旁边独立的 `.portable-preferences-v1` 把关，并且是**增量的**——只写 allowlist 内的键，managed profile 里的其余内容原样保留。播种之后，managed 的 `settings.json` 归渲染端的主题同步与你在 VS Code 内的设置所有，`keybindings.json` 完全归你。每次启动都重跑，会让 native profile 对两个 allowlist 共有的键拥有最终发言权，并抹掉其余内容。
 
 ## Dev Mode
 
-Dev Mode 位于桌面端的插件 DevTools → 托管 IDE 开发模式。开关由宿主持有
-（`plugin_managed_ide_dev_mode_set`）：默认关闭、从不保存，退出应用即失效。它复用
-常规运行时的 catalog 与授权路径，并增加：
+Dev Mode 位于桌面端的插件 DevTools → 托管 IDE 开发模式。开关由宿主持有（`plugin_managed_ide_dev_mode_set`）：默认关闭、从不保存，退出应用即失效。它复用常规运行时的 catalog 与授权路径，并增加：
 
-- **RPC inspection。** agent channel 把与编辑器交换的每一帧记录在 2,000 条的环形
-  缓冲中：方向、类型、方法、id、generation、插件、大小、往返耗时与错误码。载荷默认
-  只保留结构（键、长度、叶子类型）；选择保留内容后，面板在显示前用 `@cognia/redact`
-  脱敏。Dev Mode 关闭时不记录任何内容，关闭开关会清空记录。
-- **Permission simulation。** 在本次会话中为某个插件决定某项权限：“允许”和“拒绝”
-  直接作答，“询问”总是弹出确认。broker 授权路径只在 Dev Mode 打开时参考它。存在模拟
-  的插件会在插件列表与通信记录中带有标记。
-- **Schema diagnostics。** 每个已登记的插件文件夹都会显示其 `manifest.ide` 的问题
-  （来自锁定的 JSON Schema 与 normalization），文件夹内文件变化时重新检查。
-- **资源监听与临时 proxy rebuild。** 打开“监视插件文件夹”后，已登记文件夹中的修改
-  会从该文件夹重新安装插件并重新加载。Dev Mode 期间，本地插件的 proxy 以临时构建激活：
-  不写 activation marker，因此重启仍使用已提交的 proxy；关闭 Dev Mode 时恢复已提交的
-  proxy（从未提交过的插件则移除其 proxy）。
-- **本地开发签名。** 不存在开发密钥。从面板中登记的文件夹安装的插件会获得
-  `local-dev` 校验回执，宿主只在 Dev Mode 打开且文件夹已登记时签发。签名校验在接受它
-  之前会先向宿主确认 Dev Mode 仍然打开，前端信任确认照常生效；proxy 仍由宿主的
-  `managed-signing.key` 签名，且宿主只为持有回执的插件签名。关闭 Dev Mode 会忘记这些
-  文件夹，宿主不再承认 `local-dev` 回执，并停用以此方式受信任的插件。
+- **RPC inspection。** agent channel 把与编辑器交换的每一帧记录在 2,000 条的环形缓冲中：方向、类型、方法、id、generation、插件、大小、往返耗时与错误码。载荷默认只保留结构（键、长度、叶子类型）；选择保留内容后，面板在显示前用 `@cognia/redact` 脱敏。Dev Mode 关闭时不记录任何内容，关闭开关会清空记录。
+- **Permission simulation。** 在本次会话中为某个插件决定某项权限：“允许”和“拒绝”直接作答，“询问”总是弹出确认。broker 授权路径只在 Dev Mode 打开时参考它。存在模拟的插件会在插件列表与通信记录中带有标记。
+- **Schema diagnostics。** 每个已登记的插件文件夹都会显示其 `manifest.ide` 的问题（来自锁定的 JSON Schema 与 normalization），文件夹内文件变化时重新检查。
+- **资源监听与临时 proxy rebuild。** 打开“监视插件文件夹”后，已登记文件夹中的修改会从该文件夹重新安装插件并重新加载。Dev Mode 期间，本地插件的 proxy 以临时构建激活：不写 activation marker，因此重启仍使用已提交的 proxy；关闭 Dev Mode 时恢复已提交的 proxy（从未提交过的插件则移除其 proxy）。
+- **本地开发签名。** 不存在开发密钥。从面板中登记的文件夹安装的插件会获得 `local-dev` 校验回执，宿主只在 Dev Mode 打开且文件夹已登记时签发。签名校验在接受它之前会先向宿主确认 Dev Mode 仍然打开，前端信任确认照常生效；proxy 仍由宿主的 `managed-signing.key` 签名，且宿主只为持有回执的插件签名。关闭 Dev Mode 会忘记这些文件夹，宿主不再承认 `local-dev` 回执，并停用以此方式受信任的插件。
 
-任何安装都不能自带回执：每个安装器在写入自身校验所得的回执前，都会丢弃所复制内容中的
-`.cognia-verification.json`。
+任何安装都不能自带回执：每个安装器在写入自身校验所得的回执前，都会丢弃所复制内容中的 `.cognia-verification.json`。
 
 Contribution 不可用时：
 

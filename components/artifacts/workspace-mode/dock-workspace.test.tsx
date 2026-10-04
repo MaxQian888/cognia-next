@@ -97,6 +97,28 @@ jest.mock("@/components/editor/project/editor-engine-toggle", () => ({
 jest.mock("./task-resources-panel", () => ({
   TaskResourcesPanel: () => <div data-testid="task-resources-panel" />,
 }))
+// The phone preview's own reads and states are covered beside it; here only
+// the hand-off (what it is asked to show, Back, Edit) is under test.
+jest.mock("./workspace-file-preview", () => ({
+  WorkspaceFilePreview: ({
+    root,
+    relPath,
+    line,
+    onBack,
+    onOpenInEditor,
+  }: {
+    root: string
+    relPath: string
+    line?: number
+    onBack: () => void
+    onOpenInEditor: () => void
+  }) => (
+    <div data-testid="mock-file-preview" data-root={root} data-rel={relPath} data-line={line}>
+      <button data-testid="mock-preview-back" onClick={onBack} />
+      <button data-testid="mock-preview-edit" onClick={onOpenInEditor} />
+    </div>
+  ),
+}))
 jest.mock("@/components/editor/project/code-server-pane", () => ({
   CodeServerPane: ({
     root,
@@ -584,6 +606,156 @@ describe("DockWorkspace", () => {
       const task = screen.getByTestId("workspace-scope-task")
       expect(task).not.toHaveAttribute("title")
       expect(within(task).getByText("currentTask")).not.toHaveClass("hidden")
+    })
+  })
+
+  describe("reveals while a task is in scope", () => {
+    const activateTask = () =>
+      act(() =>
+        useTaskWorkspaceStore.setState({
+          activeBySession: {
+            "session-1": {
+              taskId: "task-1",
+              runId: "run-1",
+              sessionId: "session-1",
+              workspaceRoot: "/repo",
+              executionRoot: "/repo",
+              state: "running",
+            },
+          },
+        })
+      )
+
+    it("leaves the task ledger so a revealed file is actually visible", async () => {
+      activateTask()
+      act(() => {
+        useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      })
+
+      render(<DockWorkspace activeSessionId="session-1" />)
+
+      await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
+      // Before: the file loaded into an editor hidden behind the task ledger.
+      await waitFor(() =>
+        expect(screen.queryByTestId("task-resources-panel")).not.toBeInTheDocument()
+      )
+      expect(screen.getByTestId("workspace-scope-all")).toHaveAttribute("data-state", "on")
+      expect(screen.getByTestId("workspace-file-layout")).toBeVisible()
+    })
+
+    it("leaves the task ledger for a review reveal too", async () => {
+      activateTask()
+      act(() => {
+        useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+          sessionId: "session-1",
+          rootPath: "/repo",
+        })
+      })
+
+      render(<DockWorkspace activeSessionId="session-1" />)
+
+      expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
+      expect(screen.queryByTestId("task-resources-panel")).not.toBeInTheDocument()
+    })
+  })
+
+  describe("on a phone", () => {
+    it("opens a revealed file in the read-only preview, not the editor", async () => {
+      useTaskWorkspaceStore.setState({
+        activeBySession: {
+          "session-1": {
+            taskId: "task-1",
+            runId: "run-1",
+            sessionId: "session-1",
+            workspaceRoot: "/repo",
+            executionRoot: "/repo",
+            state: "running",
+          },
+        },
+      })
+      act(() => {
+        useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "components/mobile/form.tsx",
+          line: 12,
+        })
+      })
+
+      render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
+
+      const preview = await screen.findByTestId("mock-file-preview")
+      expect(preview).toHaveAttribute("data-root", "/repo")
+      expect(preview).toHaveAttribute("data-rel", "components/mobile/form.tsx")
+      expect(preview).toHaveAttribute("data-line", "12")
+      expect(screen.getByTestId("workspace-preview-layer")).toHaveClass("absolute", "inset-0")
+      // One Host read — the preview's — and the reveal is consumed.
+      expect(openFile).not.toHaveBeenCalled()
+      expect(clearReveal).toHaveBeenCalledWith(expect.stringMatching(/^workspace-reveal-/))
+      expect(screen.queryByTestId("task-resources-panel")).not.toBeInTheDocument()
+
+      // Edit hands the same location to the editor and drops the preview.
+      fireEvent.click(screen.getByTestId("mock-preview-edit"))
+      await waitFor(() => expect(openFile).toHaveBeenCalledWith("components/mobile/form.tsx"))
+      expect(screen.queryByTestId("mock-file-preview")).not.toBeInTheDocument()
+    })
+
+    it("returns to the workspace on Back", async () => {
+      act(() => {
+        useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      })
+      render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
+
+      fireEvent.click(await screen.findByTestId("mock-preview-back"))
+      expect(screen.queryByTestId("mock-file-preview")).not.toBeInTheDocument()
+      expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
+      expect(openFile).not.toHaveBeenCalled()
+    })
+
+    it("keeps the desktop dock on the editor path", async () => {
+      act(() => {
+        useArtifactDockLayoutStore.getState().revealWorkspaceFile({
+          sessionId: "session-1",
+          rootPath: "/repo",
+          relPath: "src/a.ts",
+        })
+      })
+      render(<DockWorkspace activeSessionId="session-1" />)
+      await waitFor(() => expect(openFile).toHaveBeenCalledWith("src/a.ts"))
+      expect(screen.queryByTestId("mock-file-preview")).not.toBeInTheDocument()
+    })
+
+    it("gives the switches a stretched row of their own", () => {
+      useTaskWorkspaceStore.setState({
+        activeBySession: {
+          "session-1": {
+            taskId: "task-1",
+            runId: "run-1",
+            sessionId: "session-1",
+            workspaceRoot: "/repo",
+            executionRoot: "/repo",
+            state: "running",
+          },
+        },
+      })
+      render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
+
+      expect(screen.getByTestId("dock-workspace-switches")).toHaveClass("w-full")
+      expect(screen.getByTestId("dock-workspace-switches")).not.toHaveClass("ml-auto")
+      expect(screen.getByTestId("dock-workspace-switches")).toHaveClass("flex-wrap")
+      expect(screen.getByTestId("workspace-scope-switch")).toHaveClass("min-w-[10rem]", "flex-1")
+      expect(screen.getByTestId("workspace-scope-task")).toHaveClass("min-w-0", "flex-1")
+      expect(
+        within(screen.getByTestId("workspace-scope-task")).getByText("currentTask")
+      ).toHaveClass("truncate")
     })
   })
 

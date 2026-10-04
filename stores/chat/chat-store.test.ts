@@ -1698,6 +1698,35 @@ describe("steer queue + run timing", () => {
     expect(result.current.pausedAt).toBeNull()
   })
 
+  it("back-dates a fresh run clock to a restored turn's real start", () => {
+    const startedAt = Date.now() - 60_000
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming", { startedAt }))
+    expect(useChatStore.getState().sessions["s1"]?.runTiming.startedAt).toBe(startedAt)
+  })
+
+  it("never back-dates a clock that is already running, and clamps a future start", () => {
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming"))
+    const running = useChatStore.getState().sessions["s1"]!.runTiming.startedAt
+    act(() => useChatStore.getState().setSessionStatus("s1", "streaming", { startedAt: 1 }))
+    expect(useChatStore.getState().sessions["s1"]?.runTiming.startedAt).toBe(running)
+    act(() =>
+      useChatStore
+        .getState()
+        .setSessionStatus("s2", "streaming", { startedAt: Date.now() + 60_000 })
+    )
+    expect(useChatStore.getState().sessions["s2"]!.runTiming.startedAt!).toBeLessThanOrEqual(
+      Date.now()
+    )
+  })
+
+  it("starts a restored approval pause now, keeping the turn's real start", () => {
+    const startedAt = Date.now() - 60_000
+    act(() => useChatStore.getState().setSessionStatus("s1", "awaiting_approval", { startedAt }))
+    const timing = useChatStore.getState().sessions["s1"]!.runTiming
+    expect(timing.startedAt).toBe(startedAt)
+    expect(timing.pausedAt!).toBeGreaterThan(startedAt)
+  })
+
   it("setError clears the run clock on the active session", () => {
     act(() => {
       useChatStore.getState().setActiveSession("s1")

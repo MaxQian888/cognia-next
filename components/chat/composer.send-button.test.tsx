@@ -73,8 +73,8 @@ const session: ChatSession = {
   updatedAt: 0,
 }
 
-function renderComposer() {
-  const onSend = jest.fn(async () => undefined)
+function renderComposer(onSendImpl: (...args: unknown[]) => Promise<void> = async () => undefined) {
+  const onSend = jest.fn(onSendImpl)
   const onStop = jest.fn(async () => undefined)
   render(
     <Wrapper>
@@ -139,34 +139,38 @@ describe("composer primary button", () => {
     expect(onStop).toHaveBeenCalled()
   })
 
-  it("switches back to Send while streaming as soon as a follow-up is typed", async () => {
+  it("keeps Stop as the primary button once a follow-up is typed, and queues it from beside it", async () => {
     const { ta, onSend, onStop } = renderComposer()
     setStatus("streaming")
     await screen.findByRole("button", { name: "Stop" })
 
     fireEvent.change(ta, { target: { value: "also check the tests" } })
 
-    const send = await screen.findByRole("button", { name: "Send as a follow-up" })
-    expect(send).toBeEnabled()
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
+    const followUp = await screen.findByRole("button", { name: "Send as a follow-up" })
+    expect(followUp).toBeEnabled()
+    // Stop never gives up its slot to the typed text.
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
 
-    fireEvent.click(send)
+    fireEvent.click(followUp)
     // Third argument is the template run this turn was written from — `null`
     // for a hand-typed turn with no parameterized template behind it.
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("also check the tests", [], null))
     expect(onStop).not.toHaveBeenCalled()
   })
 
-  it("returns to Stop once the queued follow-up clears the box", async () => {
+  it("drops the follow-up control once the queued follow-up clears the box", async () => {
     const { ta } = renderComposer()
     setStatus("streaming")
 
     fireEvent.change(ta, { target: { value: "queued" } })
-    const send = await screen.findByRole("button", { name: "Send as a follow-up" })
-    fireEvent.click(send)
+    fireEvent.click(await screen.findByRole("button", { name: "Send as a follow-up" }))
 
     await waitFor(() => expect(ta.value).toBe(""))
-    await screen.findByRole("button", { name: "Stop" })
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Send as a follow-up" })).toBeNull()
+    )
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled()
   })
 
   it("keeps Stop reachable while streaming when the box holds only whitespace", async () => {
@@ -176,5 +180,72 @@ describe("composer primary button", () => {
     fireEvent.change(ta, { target: { value: "   " } })
     const stop = await screen.findByRole("button", { name: "Stop" })
     expect(stop).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Send as a follow-up" })).toBeNull()
+  })
+
+  // An external agent's send stays pending for the WHOLE run. The single
+  // in-flight flag used to hold the button on a spinner until the run ended:
+  // no Stop at all, and every follow-up rejected by the re-entrancy guard.
+  describe("when the dispatch stays pending for the whole run", () => {
+    function renderLongRun() {
+      let calls = 0
+      let finishRun: () => void = () => undefined
+      // The first send is the run; any later one is a follow-up, which the
+      // controller queues and settles straight away.
+      const view = renderComposer(
+        () =>
+          new Promise<void>((resolve) => {
+            calls += 1
+            if (calls === 1) finishRun = resolve
+            else resolve()
+          })
+      )
+      return { ...view, finishRun: () => finishRun() }
+    }
+
+    it("turns Send into Stop as soon as the run is live, interrupts on click, and sends again after", async () => {
+      const { ta, onSend, onStop, finishRun } = renderLongRun()
+
+      fireEvent.change(ta, { target: { value: "run the migration" } })
+      fireEvent.click(await screen.findByRole("button", { name: "Send" }))
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+      // Dispatched, not yet live: the non-interactive spinner.
+      expect(await screen.findByRole("button", { name: "Sending…" })).toBeDisabled()
+
+      setStatus("streaming")
+      const stop = await screen.findByRole("button", { name: "Stop" })
+      expect(stop).toBeEnabled()
+      fireEvent.click(stop)
+      expect(onStop).toHaveBeenCalledTimes(1)
+
+      // The run settles: the store goes idle and the dispatch resolves.
+      setStatus("idle")
+      await act(async () => {
+        finishRun()
+        await Promise.resolve()
+      })
+
+      fireEvent.change(ta, { target: { value: "next question" } })
+      const send = await screen.findByRole("button", { name: "Send" })
+      await waitFor(() => expect(send).toBeEnabled())
+      fireEvent.click(send)
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2))
+      expect(onSend).toHaveBeenLastCalledWith("next question", [], null)
+    })
+
+    it("accepts a follow-up while the run's own dispatch is still pending", async () => {
+      const { ta, onSend } = renderLongRun()
+
+      fireEvent.change(ta, { target: { value: "run the migration" } })
+      fireEvent.click(await screen.findByRole("button", { name: "Send" }))
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+      setStatus("streaming")
+      await screen.findByRole("button", { name: "Stop" })
+
+      fireEvent.change(ta, { target: { value: "skip the seed step" } })
+      fireEvent.click(await screen.findByRole("button", { name: "Send as a follow-up" }))
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2))
+      expect(onSend).toHaveBeenLastCalledWith("skip the seed step", [], null)
+    })
   })
 })

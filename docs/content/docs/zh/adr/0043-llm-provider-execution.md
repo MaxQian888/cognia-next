@@ -1,6 +1,6 @@
 ---
 title: ADR-0043 — LLM 提供商执行与本地提供商支持
-description: "弥合Cognia庞大LLM-provider配置接口与实际发送路径之间的差距。确立提供商解析器作为协议的唯一权威AI SDK为内置本地引擎（Ollama、LM Studio、llama.cpp、vLLM等）提供一个可用的OpenAI-compatible默认端点，并将每个提供商配置的推理参数通过sidecar的 ai-sdk 调度器线程处理，而非丢弃它们。记录了工具调用对等性、多键旋转、实布线遥测和局部嵌入的分阶段路线图。"
+description: "弥合 Cognia 的 LLM-provider 配置接口与实际发送路径之间的差距。确立提供商解析器为协议解析的唯一权威。AI SDK 为内置本地引擎（Ollama、LM Studio、llama.cpp、vLLM等）提供一个可用的OpenAI-compatible默认端点，并将每个提供商配置的推理参数交由 sidecar 的 ai-sdk 调度器处理，避免参数被丢弃。记录了工具调用对等性、多键旋转、实际接入的遥测与本地嵌入的分阶段路线图。"
 ---
 
 # ADR-0043 — LLM 提供商执行与本地提供商支持
@@ -39,7 +39,7 @@ Cognia 拥有**异常完整的提供商配置 接口：丰富的类型系统（`
 
 ### 第二阶段 — Tool/MCP non-Anthropic 提供商（已接受，已实现）
 
-`sidecar/dispatch/ai-sdk-tools.mjs`（新版）将内置工具的定义（通过新`collectCogniaToolDefs`导出与Anthropic路径共享）和渲染代理插件工具转换为原生AI SDK工具;`ai-sdk.mjs`将它们传递给`streamText`，并设置了`stopWhen`步上限（多步代理循环），并暴露`pendingPluginToolCalls`使插件工具能通过与Anthropic路径相同的`plugin_tool_response`通道往返。事件适配器还针对AI SDK v6字段名（`text` / `output` / `tool-error`）进行了修正——这是一个潜在的漏洞，曾在真实（非假事件）路径上返回空助理文本。工具执行受与Anthropic路径相同的`permission_request`来封禁——`createToolPermissionGate`镜像`canUseTool`（抑制列表+静态规则集短路，尊重`bypassPermissions`，否则通过会话`pendingApprovals`解决渲染器批准），因此本地模型无法静默运行shell/process工具。A2UI仍仅限Anthropic。
+`sidecar/dispatch/ai-sdk-tools.mjs`（新版）将内置工具定义（通过新导出的 `collectCogniaToolDefs` 与 Anthropic 路径共享）和渲染器代理的插件工具转换为原生 AI SDK 工具。`ai-sdk.mjs` 将这些工具传给 `streamText`，设置 `stopWhen` 步数上限（多步代理循环），并公开 `pendingPluginToolCalls`，使插件工具通过与 Anthropic 路径相同的 `plugin_tool_response` 通道完成请求与响应。事件适配器还针对AI SDK v6字段名（`text` / `output` / `tool-error`）进行了修正——这是一个潜在的漏洞，曾在真实（非假事件）路径上返回空助理文本。工具执行受与 Anthropic 路径相同的 `permission_request` 审批门禁控制。`createToolPermissionGate` 复用 `canUseTool` 的行为（抑制列表与静态规则集可提前返回，遵守 `bypassPermissions`，否则通过会话的 `pendingApprovals` 等待渲染器批准）。因此，本地模型无法静默运行 shell/process 工具。A2UI 仍仅限 Anthropic。
 
 ### 第三阶段——Multi-API-key旋转（已接受，已实施）
 
@@ -93,36 +93,14 @@ Gateway 请求现在由 Rust `RoutePlanner` 基于经过校验且带版本的策
 
 ### 阶段 10 —— 难度信号与第二意见判官（已接受，已实现）
 
-Auto 路由只从 prompt 文本推算难度。它需要的其他信号早就挂在请求上，却从未被读
-取：`attachmentKinds` 在 task hints 上、`messageCount` 在路由上下文上、工具可用性
-在一行之外被算出来当作硬能力过滤器、而用户显式选择的 effort 档位被整个丢弃。一张
-截图加二十轮的线程，被当成同一句话冷启动来打分。
+Auto 路由只从 prompt 文本推算难度。它需要的其他信号早就挂在请求上，却从未被读取：`attachmentKinds` 在 task hints 上、`messageCount` 在路由上下文上、工具可用性在一行之外被算出来当作硬能力过滤器、而用户显式选择的 effort 档位被整个丢弃。一张截图加二十轮的线程，被当成同一句话冷启动来打分。
 
-`deterministicDifficulty` 把它们全部读进来，并分项报告每一项的贡献，于是阈值可以
-按证据调，而不是凭感觉。仅文本的 `scoreDifficulty` 保持不变且精确 —— 有四个调用者
-依赖它，一条测试把两者钉在同一个数上。Effort 是**下限**而不是加项：选了 `max` 的
-人已经回答了"这有多难"，下限尊重那个回答，同时不封顶指向更高的证据。
+`deterministicDifficulty` 把它们全部读进来，并分项报告每一项的贡献，于是阈值可以按证据调，而不是凭感觉。仅文本的 `scoreDifficulty` 保持不变且精确 —— 有四个调用者依赖它，一条测试把两者钉在同一个数上。Effort 是**下限**而不是加项：选了 `max` 的人已经回答了"这有多难"，下限尊重那个回答，同时不封顶指向更高的证据。
 
-之上是一个可选的判官，而有意思的地方在于它**不**被咨询的时候。确定性那一遍永远
-跑，永远给出一个可用的档位；只有当分数落在某个切点的 `uncertaintyBand` 之内时才问
-判官。不含糊的 prompt 永远到不了它，所以中位请求增加 0 ms —— 这正是 LLM 路由的两
-个公开延迟数字（判官约 400ms、常开分类器几十毫秒）并不矛盾的原因：它们描述的是两
-个不同的层。
+之上是一个可选的判官，而有意思的地方在于它**不**被咨询的时候。确定性那一遍永远跑，永远给出一个可用的档位；只有当分数落在某个切点的 `uncertaintyBand` 之内时才问判官。不含糊的 prompt 永远到不了它，所以中位请求增加 0 ms —— 这正是 LLM 路由的两个公开延迟数字（判官约 400ms、常开分类器几十毫秒）并不矛盾的原因：它们描述的是两个不同的层。
 
-它只在唯一重要的方向上 fail-open。超时、PII 拒绝、畸形答案、判官抛错 —— 全都让确
-定性档位原地不动，所以这一层只可能改善一个路由器本来就不确定的决策。它永不发送脱
-敏门反对的 prompt（一条路由提示不值一次泄露），也永不缓存超时（那会把一个慢瞬间
-变成五分钟的判官停摆）。移动了档位的裁决会连带移动分数，因为别名阶梯是按分数选
-的 —— 记录一个裁决然后忽略它，比不问更糟。
+它只在唯一重要的方向上 fail-open。超时、PII 拒绝、畸形答案、判官抛错 —— 全都让确定性档位原地不动，所以这一层只可能改善一个路由器本来就不确定的决策。它永不发送脱敏门反对的 prompt（一条路由提示不值一次泄露），也永不缓存超时（那会把一个慢瞬间变成五分钟的判官停摆）。移动了档位的裁决会连带移动分数，因为别名阶梯是按分数选的 —— 记录一个裁决然后忽略它，比不问更糟。
 
-包本身与任何 LLM 依赖无关：`judgeDifficulty` 经由与定价、能力相同的运行时接缝注
-入，而在请求没有自带开关时，门从运行时适配器读取 —— 于是一个从没听说过这个特性的
-调用方，依然会尊重用户的开关。默认两重关闭：`autoRouting.judge.enabled` 在
-`autoRouting.enabled` 也打开之前什么都不做，影子模式仍是既定的上线通道。
+包本身与任何 LLM 依赖无关：`judgeDifficulty` 经由与定价、能力相同的运行时接缝注入，而在请求没有自带开关时，门从运行时适配器读取 —— 于是一个从没听说过这个特性的调用方，依然会尊重用户的开关。默认两重关闭：`autoRouting.judge.enabled` 在 `autoRouting.enabled` 也打开之前什么都不做，影子模式仍是既定的上线通道。
 
-`routing.plan` 的属性现在只在一个地方构建。两个发射点各自手写，而且早已漂移 ——
-teammate 派发器完全省略了 classification，于是每一次 teammate 轮次都贡献一个没有
-分数的 decision id，被校准计成缺失。只有数值和枚举：校准管道读决策、从不读内容，
-而携带 prompt 文本的 trace 属性会在一条对每次路由轮次都执行的路径上打破这一点。
-`analyzeRoutingCalibration` 现在也报告判官的实际行为 —— 咨询次数、同意、推翻、平均
-延迟 —— 因为第二意见层是否值回成本是一个经验问题，不是架构问题。
+`routing.plan` 的属性现在只在一个地方构建。两个发射点各自手写，而且早已漂移 ——teammate 派发器完全省略了 classification，于是每一次 teammate 轮次都贡献一个没有分数的 decision id，被校准计成缺失。只有数值和枚举：校准管道读决策、从不读内容，而携带 prompt 文本的 trace 属性会在一条对每次路由轮次都执行的路径上打破这一点。`analyzeRoutingCalibration` 现在也报告判官的实际行为 —— 咨询次数、同意、推翻、平均延迟 —— 因为第二意见层是否值回成本是一个经验问题，不是架构问题。

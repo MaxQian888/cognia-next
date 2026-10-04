@@ -58,6 +58,11 @@ export function useRunRecordPersistence(sessionId: string | null): void {
 
     let timer: ReturnType<typeof setTimeout> | null = null
     let wasBusy = false
+    // The turn's start, remembered while it runs. The clock resets to idle the
+    // moment a turn settles, so the settle-time write saw `startedAt: null` and
+    // `runRecordRowFromView` stamped `now` — overwriting the start it had saved
+    // earlier and leaving every record with `startedAt ≈ settledAt`.
+    let knownStart: { runId: number; startedAt: number } | null = null
 
     // Derive + gate + write from the CURRENT store state. Running this at
     // debounce-fire time (rather than per store change) means the walk over
@@ -66,7 +71,7 @@ export function useRunRecordPersistence(sessionId: string | null): void {
     const write = () => {
       timer = null
       const s = pickRelevant(sessionId)
-      const view = deriveRunRecord({
+      const derived = deriveRunRecord({
         sessionId,
         runId: s.runId,
         messages: s.messages ?? [],
@@ -74,6 +79,10 @@ export function useRunRecordPersistence(sessionId: string | null): void {
         status: toRunStatus(s.status),
         toolTimestamps: s.toolTimestamps,
       })
+      const view =
+        derived.timing.startedAt == null && knownStart && knownStart.runId === derived.runId
+          ? { ...derived, timing: { ...derived.timing, startedAt: knownStart.startedAt } }
+          : derived
       const hasWork =
         view.tools.length > 0 || view.todos.length > 0 || view.subagentParts.length > 0
       // Only persist a real turn (runId >= 1 — a fresh slice / post-reload
@@ -88,6 +97,9 @@ export function useRunRecordPersistence(sessionId: string | null): void {
     }
 
     const evaluate = (next: Relevant) => {
+      if (next.runTiming?.startedAt != null) {
+        knownStart = { runId: next.runId, startedAt: next.runTiming.startedAt }
+      }
       const busy = next.status === "streaming" || next.status === "awaiting_approval"
       const settled = wasBusy && !busy
       wasBusy = busy

@@ -1,12 +1,19 @@
 "use client"
 
 /**
- * `<RunPanel>` — the durable "second clock" pinned above the composer. It is
- * the web analogue of the CLI's `BottomStatus`, upgraded from a 3-line status
- * bar into a collapsible panel:
+ * `<RunPanel>` — the durable "second clock" docked onto the composer's top edge.
+ * It is the web analogue of the CLI's `BottomStatus`, upgraded from a status
+ * bar into a collapsible strip:
  *
- *   collapsed: ⟳ Working · 47s · Esc to interrupt    ← parity with the old bar
- *   expanded:  ▸ Plan / Tools / Sub-agents / Summary ← the whole turn's timeline
+ *   collapsed: ▸ ⟳ Working · 47s · 2 tools · Bash: npm test
+ *   expanded:  Queue / Plan / Tools / Sub-agents / Summary — the whole turn
+ *
+ * It only REPORTS. Interrupting is the composer's job: while a turn runs its
+ * send button is a Stop button (and Esc in the textarea interrupts), so the
+ * strip carries no interrupt affordance of its own and a tap on it only opens
+ * the run details. The composer mounts it through its `runStatus` slot, which
+ * insets it by the card's corner radius; the strip's own top corners read the
+ * `--run-strip-radius` that slot sets.
  *
  * Mounts while the bound session is busy OR has a queued steer, and ALSO when
  * idle if the last turn left a replayable record (a one-line "Last run" bar
@@ -21,19 +28,16 @@
  * Reordering, rewriting, removing, and the interrupt-and-send escalation all
  * live in this panel; the bubble keeps the light-weight edit/remove shortcuts.
  *
- * Exported as `RunStatusBar` from `./run-status-bar` for an unchanged mount
- * contract in `chat-view.tsx`.
+ * Exported as `RunStatusBar` from `./run-status-bar`, which `chat-view.tsx`
+ * hands to the composer.
  */
 import { memo, useEffect, useMemo, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
-import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import {
   BotIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
-  CornerDownRightIcon,
   GripVerticalIcon,
   Loader2,
   MessageSquareIcon,
@@ -88,6 +92,7 @@ import {
   type SteerEntry,
 } from "@/stores/chat"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
+import { useLastTurnElapsedMs } from "@/hooks/chat/use-last-turn-elapsed"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   activeElapsedMs,
@@ -121,8 +126,6 @@ const PANEL_BODY_ID = "run-panel-body"
 export interface RunStatusBarProps {
   /** Session this panel reports on (the bound pane's id). */
   sessionId: string | null
-  /** Interrupt the running turn (same target as the composer's Stop). */
-  onStop?: () => Promise<void> | void
   /** Interrupt and immediately replay the queued steer ("Send now"). */
   onSteerNow?: () => Promise<void> | void
   /** Replay the queued steer now with no turn boundary (errored/idle queue). */
@@ -457,25 +460,20 @@ function SteerQueueRow({
 }
 
 /**
- * The configurable metric strip on the run bar's collapsed face. Renders only
- * the metrics the user enabled in Settings → Conversation → Run status bar.
- * Usage-derived chips (tokens, speed, cost, context%) stay hidden until the
- * bound session has at least one turn carrying usage; the tools chip shows only
- * while busy (the idle "Last run" line already carries a tool count).
+ * The usage half of the configurable metrics (Settings → Conversation → Run
+ * status bar): output tokens, speed, cost and context%. Each chip stays hidden
+ * until the bound session has at least one turn carrying usage, and the row
+ * itself only renders when a chip does. The tools metric is not here: it sits
+ * on the strip's summary line, next to the state and the clock.
  */
 function RunBarMetrics({
   totals,
   cfg,
-  toolsCount,
-  busy,
 }: {
   totals: RunBarUsageTotals
   cfg: Required<RunStatusBarSettings>
-  toolsCount: number
-  busy: boolean
 }) {
   const t = useTranslations("chat.runStatus")
-  const tp = useTranslations("chat.runPanel")
   const usageReady = totals.turns > 0
   const chips: React.ReactNode[] = []
 
@@ -498,34 +496,30 @@ function RunBarMetrics({
       <span key="ctx">{t("metricContext", { pct: Math.round(totals.contextFraction * 100) })}</span>
     )
   }
-  if (cfg.showTools && busy && toolsCount > 0) {
-    chips.push(<span key="tools">{tp("summaryTools", { count: toolsCount })}</span>)
-  }
 
   if (chips.length === 0) return null
   return (
     <div
       data-testid="run-bar-metrics"
-      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-[11px] tabular-nums text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] tabular-nums text-muted-foreground/80"
     >
       {chips}
     </div>
   )
 }
 
-function RunPanelImpl({
-  sessionId,
-  onStop,
-  onSteerNow,
-  onSteerFlush,
-  className,
-}: RunStatusBarProps) {
+/** The ` · ` between the summary line's segments; decorative to assistive tech. */
+function Dot() {
+  return (
+    <span aria-hidden className="text-muted-foreground/50">
+      ·
+    </span>
+  )
+}
+
+function RunPanelImpl({ sessionId, onSteerNow, onSteerFlush, className }: RunStatusBarProps) {
   const t = useTranslations("chat.runStatus")
   const tp = useTranslations("chat.runPanel")
-  // Capacitor native shell has no hardware Esc; show a touch-appropriate label.
-  // "Esc to interrupt" only where there is an Esc key. Keyed on the input
-  // hardware, not the runtime: a phone browser has no Esc either.
-  const showKeyboardHints = useShowKeyboardHints()
   const status = useSessionStatus(sessionId)
   const timing = useSessionRunTiming(sessionId)
   const steerQueue = useSessionSteerQueue(sessionId)
@@ -566,6 +560,10 @@ function RunPanelImpl({
       }),
     [sessionId, runId, messages, timing, status, toolTimestamps]
   )
+  // The live clock above is reset the instant a turn settles, so the replay
+  // summary reads the finished turn's duration from here instead — `null`
+  // when nothing recorded it, and then the summary simply omits it.
+  const lastTurnMs = useLastTurnElapsedMs({ sessionId, runId, messages, toolTimestamps })
 
   // Live usage aggregate for the metric strip — only computed when at least one
   // usage-derived chip (tokens / speed / cost / context%) is enabled. The
@@ -616,15 +614,87 @@ function RunPanelImpl({
   // Nothing live, nothing queued, and no replayable record → render nothing.
   if (!busy && steerQueue.length === 0 && !replay) return null
 
-  const elapsedMs = activeElapsedMs(timing, toRunStatus(status), now)
+  const elapsedMs = activeElapsedMs(timing, toRunStatus(status), now) ?? (busy ? null : lastTurnMs)
   const elapsed = elapsedMs != null ? formatRunElapsed(elapsedMs) : null
-  const toolLines = busy ? selectActiveToolLines(messages, 3) : []
+  // The newest running tool rides the summary line; the expanded body lists
+  // them all. Parallel calls collapse to the newest plus a count.
+  const activeTools = busy ? selectActiveToolLines(messages, Number.MAX_SAFE_INTEGER) : []
+  const currentTool = activeTools.length > 0 ? activeTools[activeTools.length - 1] : null
   const subagentChip = busy ? selectRunningSubagentChip(subAgents) : null
-  const verb = status === "awaiting_approval" ? t("waitingApproval") : t("working")
+  const awaitingApproval = status === "awaiting_approval"
+  const verb = awaitingApproval ? t("waitingApproval") : t("working")
+  const toggle = () => setExpanded((v) => !v)
+
+  // The summary line. One line at every width: the state and the clock never
+  // wrap, the running tool takes whatever is left and truncates.
+  const summary = busy ? (
+    <>
+      <Loader2
+        className={cn(
+          "size-3 shrink-0 animate-spin",
+          awaitingApproval ? "text-amber-500" : "text-muted-foreground"
+        )}
+        aria-hidden
+      />
+      <span className="shrink-0 font-medium text-foreground/85">{verb}</span>
+      {resolvedBar.showElapsed && elapsed && (
+        <>
+          <Dot />
+          <span
+            className="shrink-0 tabular-nums text-muted-foreground"
+            data-testid="run-status-elapsed"
+          >
+            {elapsed}
+          </span>
+        </>
+      )}
+      {resolvedBar.showTools && record.counts.tools > 0 && (
+        <>
+          <Dot />
+          <span
+            className="shrink-0 tabular-nums text-muted-foreground"
+            data-testid="run-status-tools"
+          >
+            {tp("summaryTools", { count: record.counts.tools })}
+          </span>
+        </>
+      )}
+      {currentTool && (
+        <>
+          <Dot />
+          <span
+            className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/80"
+            title={currentTool.label}
+            data-testid="run-status-current-tool"
+          >
+            {currentTool.label}
+          </span>
+          {activeTools.length > 1 && (
+            <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground/70">
+              {`+${activeTools.length - 1}`}
+            </span>
+          )}
+        </>
+      )}
+    </>
+  ) : replay ? (
+    <>
+      <span className="shrink-0 font-medium text-muted-foreground">{tp("lastRun")}</span>
+      <Dot />
+      <span
+        className="truncate tabular-nums text-muted-foreground"
+        data-testid="run-panel-replay-summary"
+      >
+        {elapsed
+          ? tp("lastRunSummary", { count: record.counts.tools, elapsed })
+          : tp("summaryTools", { count: record.counts.tools })}
+      </span>
+    </>
+  ) : null
 
   return (
-    // Grows in rather than popping: this bar appears directly above the
-    // composer, and an instant appearance shoves the whole transcript up while
+    // Grows in rather than popping: this strip appears directly above the
+    // input card, and an instant appearance shoves the whole transcript up while
     // the user is still reading it. Safe to animate height here — the panel
     // sits outside the virtualized message list.
     <motion.div
@@ -636,140 +706,100 @@ function RunPanelImpl({
       aria-live="polite"
       aria-atomic="false"
       data-testid="run-status-bar"
+      // A tab on the card's top edge rather than a floating band: open at the
+      // bottom so it meets the card's border, top corners following the card
+      // (`--run-strip-radius`, set by the composer's slot), quieter fill than
+      // the card itself.
       className={cn(
-        "@container/runpanel flex flex-col gap-1 border-t border-border/50 bg-background/60 py-1.5 text-xs",
+        "@container/runpanel flex flex-col gap-1 rounded-t-[var(--run-strip-radius,0.625rem)] border border-b-0 border-border/60 bg-muted/45 px-2.5 py-1 text-xs backdrop-blur-sm",
         className
       )}
     >
-      <div className="flex items-center gap-2">
-        {expandable && (
+      {summary &&
+        (expandable ? (
+          // The whole summary line is the disclosure: a big target on a phone,
+          // and nothing on the strip that a stray tap could turn into an
+          // interrupt.
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={toggle}
             aria-expanded={expanded}
             aria-controls={PANEL_BODY_ID}
-            aria-label={expanded ? tp("collapse") : tp("expand")}
             data-testid="run-panel-toggle"
-            className="shrink-0 text-muted-foreground hover:text-foreground"
+            className="-mx-1 flex min-h-6 min-w-0 items-center gap-1.5 rounded px-1 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           >
-            {expanded ? (
-              <ChevronDownIcon className="size-3.5" aria-hidden />
-            ) : (
-              <ChevronRightIcon className="size-3.5" aria-hidden />
-            )}
+            <ChevronRightIcon
+              className={cn(
+                "size-3 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none",
+                expanded && "rotate-90"
+              )}
+              aria-hidden
+            />
+            <span className="sr-only">{expanded ? tp("collapse") : tp("expand")}</span>
+            {summary}
           </button>
-        )}
-
-        {busy ? (
-          <div className="flex flex-1 items-center gap-2 text-foreground/80">
-            <Loader2 className="size-3.5 shrink-0 animate-spin text-amber-500" aria-hidden />
-            <span className="font-medium">{verb}</span>
-            {resolvedBar.showElapsed && elapsed && (
-              <span className="tabular-nums text-muted-foreground" data-testid="run-status-elapsed">
-                · {elapsed}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => void onStop?.()}
-              aria-label={tp("ariaInterrupt")}
-              className="ml-auto text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              {showKeyboardHints ? t("interruptHint") : t("interruptHintTouch")}
-            </button>
-          </div>
-        ) : replay ? (
-          <div className="flex flex-1 items-center gap-2 text-muted-foreground">
-            <span className="font-medium">{tp("lastRun")}</span>
-            <span className="tabular-nums" data-testid="run-panel-replay-summary">
-              ·{" "}
-              {tp("lastRunSummary", {
-                count: record.counts.tools,
-                elapsed: elapsed ?? formatRunElapsed(0),
-              })}
-            </span>
-          </div>
         ) : (
-          // Not busy, not replayable, but a queue lingers — the turn ended
-          // (errored/interrupted) without draining. No settle event is coming,
-          // so surface an explicit flush/discard rather than letting the queue
-          // sit stuck.
-          queueDepth > 0 && (
-            <div
-              className="flex flex-1 items-center gap-2 text-muted-foreground"
-              data-testid="run-panel-stuck-queue"
-            >
-              <span className="font-medium text-foreground/80">
-                {tp("runFailedQueued", { count: queueDepth })}
-              </span>
-              <div className="ml-auto flex items-center gap-1">
-                {onSteerFlush && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-5 px-2 text-[11px]"
-                    aria-label={t("ariaSteerNow")}
-                    onClick={() => void onSteerFlush()}
-                  >
-                    {t("steerNow")}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-5 px-2 text-[11px]"
-                  aria-label={tp("ariaDiscardQueue")}
-                  // Per-entry rather than `clearSteerQueue`: each queued entry
-                  // also has a bubble in the transcript, and emptying only the
-                  // queue would leave those behind reading "Not delivered" —
-                  // which is not what "Discard" promises.
-                  onClick={() => {
-                    if (!sessionId) return
-                    for (const entry of steerQueue) discardPendingSteer(sessionId, entry.id)
-                  }}
-                >
-                  {tp("discardQueue")}
-                </Button>
-              </div>
-            </div>
-          )
-        )}
-      </div>
+          <div className="flex min-h-6 min-w-0 items-center gap-1.5">{summary}</div>
+        ))}
 
-      <RunBarMetrics
-        totals={usageTotals}
-        cfg={resolvedBar}
-        toolsCount={record.counts.tools}
-        busy={busy}
-      />
-
-      {toolLines.map((line) => (
+      {!busy && !replay && queueDepth > 0 && (
+        // Not busy, not replayable, but a queue lingers — the turn ended
+        // (errored/interrupted) without draining. No settle event is coming, so
+        // surface an explicit flush/discard rather than letting the queue sit
+        // stuck.
         <div
-          key={line.id}
-          className="flex items-center gap-1 truncate pl-5 font-mono text-[11px] text-muted-foreground"
-          title={line.label}
+          className="flex min-h-6 items-center gap-2 text-muted-foreground"
+          data-testid="run-panel-stuck-queue"
         >
-          <CornerDownRightIcon className="size-3 shrink-0" aria-hidden />
-          <span className="truncate">{line.label}</span>
+          <span className="truncate font-medium text-foreground/80">
+            {tp("runFailedQueued", { count: queueDepth })}
+          </span>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {onSteerFlush && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-5 px-2 text-[11px]"
+                aria-label={t("ariaSteerNow")}
+                onClick={() => void onSteerFlush()}
+              >
+                {t("steerNow")}
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-5 px-2 text-[11px]"
+              aria-label={tp("ariaDiscardQueue")}
+              // Per-entry rather than `clearSteerQueue`: each queued entry
+              // also has a bubble in the transcript, and emptying only the
+              // queue would leave those behind reading "Not delivered" —
+              // which is not what "Discard" promises.
+              onClick={() => {
+                if (!sessionId) return
+                for (const entry of steerQueue) discardPendingSteer(sessionId, entry.id)
+              }}
+            >
+              {tp("discardQueue")}
+            </Button>
+          </div>
         </div>
-      ))}
+      )}
+
+      <RunBarMetrics totals={usageTotals} cfg={resolvedBar} />
 
       {(queueDepth > 0 || subagentChip) && (
-        <div className="flex flex-wrap items-center gap-2 pl-5 text-[11px]">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
           {queueDepth > 0 && (
-            <SteerQueueChip
-              count={queueDepth}
-              expanded={expanded}
-              onToggle={() => setExpanded((v) => !v)}
-            />
+            <SteerQueueChip count={queueDepth} expanded={expanded} onToggle={toggle} />
           )}
           {subagentChip && (
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <BotIcon className="size-3" aria-hidden />
+            <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
+              <BotIcon className="size-3 shrink-0" aria-hidden />
               <span className="sr-only">{tp("ariaSubagent")}</span>
-              {subagentChip.name}
+              <span className="truncate">{subagentChip.name}</span>
               {subagentChip.count > 1 ? `×${subagentChip.count}` : ""}
             </span>
           )}
@@ -778,7 +808,7 @@ function RunPanelImpl({
               type="button"
               size="sm"
               variant="ghost"
-              className="h-5 gap-1 px-2 text-[11px] text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-500 dark:hover:text-amber-400"
+              className="ml-auto h-5 gap-1 px-2 text-[11px] text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-500 dark:hover:text-amber-400"
               aria-label={t("ariaSteerNow")}
               title={t("steerNowHint")}
               onClick={requestSteerNow}
@@ -795,7 +825,7 @@ function RunPanelImpl({
         <div
           id={PANEL_BODY_ID}
           data-testid="run-panel-body"
-          className="mt-1 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border/40 pt-2"
+          className="mb-1 flex max-h-[min(40vh,24rem)] flex-col gap-2 overflow-y-auto overscroll-contain border-t border-border/40 pt-2"
         >
           {sessionId && queueDepth > 0 && (
             <SteerQueueSection

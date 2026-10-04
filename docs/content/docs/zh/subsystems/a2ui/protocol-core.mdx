@@ -11,8 +11,8 @@ description: Schema v0.9、统一解析管线、带计算字段的 RFC 6901 JSON
   协议内核是 `lib/a2ui` 中与运行时无关的那一层 —— 不涉及 React、不涉及 store、不涉及 MCP。它由四个协作模块组成：
   `parser.ts` 把原始的智能体输出（字符串、代码块、工具结果）转成有类型的 `A2UIServerMessage[]`；
   `data-model.ts` 通过 RFC 6901 JSON Pointer 把组件属性绑定到数据模型，并解析计算字段；
-  `events.ts` 是进程内总线，把用户操作扇出并格式化成下一轮智能体上下文；再加上一组叶子工具
-  （`constants.ts`、`format.ts`、`list-utils.ts`）和 `index.ts` barrel。所有内容都对齐到同一份 schema ——
+  `events.ts` 是进程内总线，把用户操作扇出并格式化成下一轮智能体上下文；其余部分是一组基础工具
+  （`constants.ts`、`format.ts`、`list-utils.ts`）和 `index.ts` barrel。所有内容都遵循同一份 schema ——
   `types/a2ui/schema.ts`，文件头标注 "Based on A2UI Protocol v0.9"。
 </TLDR>
 
@@ -25,11 +25,9 @@ description: Schema v0.9、统一解析管线、带计算字段的 RFC 6901 JSON
 
 ## Schema-v0.9 契约
 
-集群中的每个模块都按 `types/a2ui/schema.ts` 进行类型约束。文件头（`:3`）写着
-"Based on A2UI Protocol v0.9"，`version` 字段位于 `schema.ts:910`。Schema 仍然是 v0.9 —— 协议内核尚未升级。
+集群中的每个模块都按 `types/a2ui/schema.ts` 进行类型约束。文件头（`:3`）写着 "Based on A2UI Protocol v0.9"，`version` 字段位于 `schema.ts:910`。Schema 仍然是 v0.9 —— 协议内核尚未升级。
 
-契约是**五**种服务端消息类型。解析器通过专门的类型守卫校验每一种，而它产出的联合类型
-（`A2UIServerMessage[]`）是下游消费者唯一能看到的东西。
+契约是**五**种服务端消息类型。解析器通过专门的类型守卫校验每一种，而它产出的联合类型（`A2UIServerMessage[]`）是下游消费者唯一能看到的东西。
 
 | 消息 `type` 字面量 | 守卫（`parser.ts`） | 行号 | 作用 |
 | --- | --- | --- | --- |
@@ -39,14 +37,11 @@ description: Schema v0.9、统一解析管线、带计算字段的 RFC 6901 JSON
 | `deleteSurface` | `isDeleteSurfaceMessage` | 59 | 拆除一个 surface |
 | `surfaceReady` | `isSurfaceReadyMessage` | 63 | 通知 surface 可以被揭示 |
 
-五个类型字面量大致发出于 `parser.ts:82, 96, 106, 117, 126`。默认 `surfaceType` `"inline"` 出现在
-`:90`、`:311`、`:631`；新生成的 surface id 是 `surface-${Date.now()}`（`:310`），回退值为
-`"default"`（`:566`）。
+五个类型字面量大致发出于 `parser.ts:82, 96, 106, 117, 126`。默认 `surfaceType` `"inline"` 出现在 `:90`、`:311`、`:631`；新生成的 surface id 是 `surface-${Date.now()}`（`:310`），回退值为 `"default"`（`:566`）。
 
 ### 简化简写
 
-智能体很少手写四消息序列。一个紧凑的 `{ surface, components, dataModel }` 对象会被
-`parseSimplifiedA2UI`（`parser.ts:301`）展开成规范序列：
+智能体很少手写四消息序列。一个紧凑的 `{ surface, components, dataModel }` 对象会被 `parseSimplifiedA2UI`（`parser.ts:301`）展开成规范序列：
 
 ```text
 { surface, components, dataModel }
@@ -61,9 +56,7 @@ description: Schema v0.9、统一解析管线、带计算字段的 RFC 6901 JSON
 
 ## 解析器管线
 
-`parser.ts`（656 行）是漏斗：任意智能体输出进，有类型的 `A2UIServerMessage[]` 出。唯一的统一入口是
-`parseA2UIInput`（`:413`）。它只从 `@/types/a2ui/schema` 导入 `type` 声明（`:6-16`）—— 没有其他
-`lib/a2ui` 模块、没有外部库。
+`parser.ts`（656 行）是漏斗：任意智能体输出进，有类型的 `A2UIServerMessage[]` 出。唯一的统一入口是 `parseA2UIInput`（`:413`）。它只从 `@/types/a2ui/schema` 导入 `type` 声明（`:6-16`）—— 没有其他 `lib/a2ui` 模块、没有外部库。
 
 ### 公开接口
 
@@ -93,12 +86,7 @@ description: Schema v0.9、统一解析管线、带计算字段的 RFC 6901 JSON
 
 ### 流程
 
-`parseA2UIInput`（`:413`）按输入形态分派。**字符串**被路由到 `extractA2UIFromResponse`（`:522`），
-它遍历每个 ` ```a2ui ` / ` ```json ` 围栏代码块（正则在 `:524` / `:534`），逐个通过
-`tryParseA2UIContent`（`:559`）尝试，并回退到裸 JSON。裸载荷由 `detectA2UIContent`（`:244`）门控，
-若仍嵌在散文中，则由 `extractJsonFromText`（`:582`）经括号深度扫描切出。**对象**直接进入
-`parseA2UIObject`（`:346`）。`parseA2UIInput` 还会在嵌套的 `messages` 数组上递归（`:471`），并通过
-`collectA2UITextPayloads`（`:478` → `:372`）解包工具结果信封。
+`parseA2UIInput`（`:413`）按输入形态分派。**字符串**被路由到 `extractA2UIFromResponse`（`:522`），它遍历每个 ` ```a2ui ` / ` ```json ` 围栏代码块（正则在 `:524` / `:534`），逐个通过 `tryParseA2UIContent`（`:559`）尝试，并回退到裸 JSON。裸载荷由 `detectA2UIContent`（`:244`）门控，若仍嵌在散文中，则由 `extractJsonFromText`（`:582`）经括号深度扫描切出。**对象**直接进入 `parseA2UIObject`（`:346`）。`parseA2UIInput` 还会在嵌套的 `messages` 数组上递归（`:471`），并通过 `collectA2UITextPayloads`（`:478` → `:372`）解包工具结果信封。
 
 ```mermaid
 flowchart TB
@@ -141,9 +129,7 @@ flowchart TB
 
 ## 数据模型 —— JSON Pointer 绑定
 
-`data-model.ts`（528 行）实现绑定层：RFC 6901 JSON Pointer、不可变 get/set、让任意属性既可为字面量
-又可为指针的 `*OrPath` 解析器，以及计算字段。它只从 `@/types/a2ui/schema` 导入 `type` 声明（`:6-12`）——
-`A2UIPathValue`、`A2UIStringOrPath`、`A2UINumberOrPath`、`A2UIBooleanOrPath`、`A2UIArrayOrPath`。无其他依赖。
+`data-model.ts`（528 行）实现绑定层：RFC 6901 JSON Pointer、不可变 get/set、让任意属性既可为字面量又可为指针的 `*OrPath` 解析器，以及计算字段。它只从 `@/types/a2ui/schema` 导入 `type` 声明（`:6-12`）——`A2UIPathValue`、`A2UIStringOrPath`、`A2UINumberOrPath`、`A2UIBooleanOrPath`、`A2UIArrayOrPath`。无其他依赖。
 
 ### 指针原语
 
@@ -158,13 +144,11 @@ flowchart TB
 | `deepClone` | 197 | 结构化克隆 |
 | `deepMerge` | 218 | 递归合并 —— **数组是被替换，而非合并** |
 
-`setValueByPath`（`:104`）是承重的写入器：它调用 `parseJsonPointer`（`:18`）和 `deepClone`（`:197`），
-然后通过测试*下一个*段是否为数字（`:124`）来决定每个缺失的中间节点应是数组 `[]` 还是对象 `{}`。
+`setValueByPath`（`:104`）是承重的写入器：它调用 `parseJsonPointer`（`:18`）和 `deepClone`（`:197`），然后通过测试*下一个*段是否为数字（`:124`）来决定每个缺失的中间节点应是数组 `[]` 还是对象 `{}`。
 
 ### 解析器 —— 字面量或指针
 
-任意组件属性既可为字面量，又可为 `{ path }` 引用。`resolve*OrPath` 家族通过探测 `isPathValue`
-（`:253` 守卫）并经 `getValueByPath` 读取，来折叠这个联合类型。
+任意组件属性既可为字面量，又可为 `{ path }` 引用。`resolve*OrPath` 家族通过探测 `isPathValue`（`:253` 守卫）并经 `getValueByPath` 读取，来折叠这个联合类型。
 
 | 解析器 | 行号 | 读取 |
 | --- | --- | --- |
@@ -177,10 +161,7 @@ flowchart TB
 
 ### 计算字段
 
-`resolveComputedFields`（`:431`）遍历一个 `ComputedFieldRegistry`（`:425`）：对每个字段，经
-`getValueByPath`（`:439`）读取其依赖，运行 `field.compute`，再用 `setValueByPath`（`:447`）写回结果。
-失败会被**静默跳过** —— 整个 `compute` 被包在 `try/catch`（`:450`）里，所以一个坏字段绝不会污染整个模型。
-`computedHelpers`（`:461`）是一组常见归约的工厂：
+`resolveComputedFields`（`:431`）遍历一个 `ComputedFieldRegistry`（`:425`）：对每个字段，经 `getValueByPath`（`:439`）读取其依赖，运行 `field.compute`，再用 `setValueByPath`（`:447`）写回结果。失败会被**静默跳过** —— 整个 `compute` 被包在 `try/catch`（`:450`）里，所以一个坏字段绝不会污染整个模型。`computedHelpers`（`:461`）是一组常见归约的工厂：
 
 | Helper | 行为 | 备注 |
 | --- | --- | --- |
@@ -193,10 +174,7 @@ flowchart TB
 
 ### 监听路径
 
-`watchPaths`（`:366`）接入响应式监听器：每次模型变更时，它经 `getValueByPath`（`:372` / `:373`）
-重新读取每个被监听路径，用内部的 `isEqual`（`:384`）与上一个值比较，仅在真正变化时触发
-`watcher.callback`。`extractReferencedPaths`（`:506`）递归遍历组件树（`:509`），把每个 `.path`（`:512`）
-收集进一个 `Set` —— 用于计算一个 surface 的最小监听集。
+`watchPaths`（`:366`）接入响应式监听器：每次模型变更时，它经 `getValueByPath`（`:372` / `:373`）重新读取每个被监听路径，用内部的 `isEqual`（`:384`）与上一个值比较，仅在真正变化时触发 `watcher.callback`。`extractReferencedPaths`（`:506`）递归遍历组件树（`:509`），把每个 `.path`（`:512`）收集进一个 `Set` —— 用于计算一个 surface 的最小监听集。
 
 ```mermaid
 flowchart LR
@@ -236,10 +214,7 @@ flowchart LR
 
 ## 事件总线
 
-`events.ts`（399 行）是进程内出口：渲染器中的用户交互流入 `A2UIEventEmitter`，并以可供下一轮智能体使用的
-格式流出。它持有集群中唯一的模块内代码导入：从 `@/lib/a2ui/data-model`（`:12`）导入 `getValueByPath` 和
-`parseJsonPointer`。它还从 `@/lib/logging`（`:13`）导入 `loggers`，别名为 `log = loggers.ui`（`:15`），
-并从 schema 导入 `type` 声明（`:6-11`）。
+`events.ts`（399 行）是进程内出口：渲染器中的用户交互流入 `A2UIEventEmitter`，并以可供下一轮智能体使用的格式流出。它持有集群中唯一的模块内代码导入：从 `@/lib/a2ui/data-model`（`:12`）导入 `getValueByPath` 和 `parseJsonPointer`。它还从 `@/lib/logging`（`:13`）导入 `loggers`，别名为 `log = loggers.ui`（`:15`），并从 schema 导入 `type` 声明（`:6-11`）。
 
 ### Emitter API
 
@@ -258,11 +233,7 @@ flowchart LR
 | `clear` | 129 | 清空所有 handler |
 | `globalEventEmitter` | 139 | 进程单例 |
 
-`emitAction`（`:89`）先迭代 `actionHandlers` 再迭代 `allHandlers`，每个 handler 都包在各自的
-`try/catch` → `log.error`（`:94` / `:101`）里，因此一个抛错的订阅者无法破坏整个扇出。
-`emitDataChange`（`:109`）同理（`:114` / `:121`）。各 `on*` 订阅（`:62` / `:71` / `:80`）都会调用
-`checkListenerLeak`（`:39`）→ `listenerCount`（`:55`），超过 `maxListeners` 时（仅开发态）告警；
-每个都返回一个取消订阅闭包。
+`emitAction`（`:89`）先迭代 `actionHandlers` 再迭代 `allHandlers`，每个 handler 都包在各自的 `try/catch` → `log.error`（`:94` / `:101`）里，因此一个抛错的订阅者无法破坏整个扇出。`emitDataChange`（`:109`）同理（`:114` / `:121`）。各 `on*` 订阅（`:62` / `:71` / `:80`）都会调用 `checkListenerLeak`（`:39`）→ `listenerCount`（`:55`），超过 `maxListeners` 时（仅开发态）告警；每个都返回一个取消订阅闭包。
 
 ### Action → AI 格式化
 
@@ -279,10 +250,7 @@ flowchart LR
 | `collectFormData` | 326 | 收集一个表单的值 |
 | `validateFormData` / `ValidationResult` | 353 / 348 | 表单校验 |
 
-`batchEventsForAI`（`:300`）经 `formatActionForAI`（`:273`） / `formatDataChangeForAI`（`:293`）路由：
-零事件 → `""`，一个 → 单行格式化文本，N 个 → 带项目符号的 `"Multiple form interactions:"` 头部。
-批处理是**基于数量，而非基于时间** —— 本模块没有 batch-window-ms，也没有历史上限。`collectFormData`
-（`:326`）复用数据模型原语：`parseJsonPointer`（`:333`） + `getValueByPath`（`:335`）。
+`batchEventsForAI`（`:300`）经 `formatActionForAI`（`:273`） / `formatDataChangeForAI`（`:293`）路由：零事件 → `""`，一个 → 单行格式化文本，N 个 → 带项目符号的 `"Multiple form interactions:"` 头部。批处理是**基于数量，而非基于时间** —— 本模块没有 batch-window-ms，也没有历史上限。`collectFormData`（`:326`）复用数据模型原语：`parseJsonPointer`（`:333`） + `getValueByPath`（`:335`）。
 
 ```mermaid
 sequenceDiagram
@@ -318,20 +286,11 @@ sequenceDiagram
 | `list-utils.ts` | 27 | `getItemKey` (9), `getItemDisplayText` (19) | key = `item.id` 否则索引；display = string/number/bool 直通，object → `label`\|`text`\|`name`\|`title` 否则 `JSON.stringify`；无导入 |
 | `constants.ts` | 93 | `CATEGORY_KEYS` (12), `surfaceStyles` (29), `ANALYSIS_TYPE_VALUES` (80) | 纯数据 |
 
-`constants.ts` 承载共享 UI 数据：`CATEGORY_KEYS`（`:12`，
-`["productivity","data","form","utility","social"]`）、`CATEGORY_I18N_MAP`（`:14`）、按 `surfaceType`
-划分的容器 CSS `surfaceStyles`（`:29`，inline / dialog / panel / fullscreen）与 `contentStyles`
-（`:39`）、`ANALYSIS_TYPE_ICONS`（`:50`）、`ANALYSIS_TYPE_I18N_KEYS`（`:65`）以及
-`ANALYSIS_TYPE_VALUES`（`:80`，12 条）。它唯一的依赖是从 `@/types/academic`（`:6`）`type` 导入的
-`PaperAnalysisType`。
+`constants.ts` 承载共享 UI 数据：`CATEGORY_KEYS`（`:12`，`["productivity","data","form","utility","social"]`）、`CATEGORY_I18N_MAP`（`:14`）、按 `surfaceType` 划分的容器 CSS `surfaceStyles`（`:29`，inline / dialog / panel / fullscreen）与 `contentStyles`（`:39`）、`ANALYSIS_TYPE_ICONS`（`:50`）、`ANALYSIS_TYPE_I18N_KEYS`（`:65`）以及 `ANALYSIS_TYPE_VALUES`（`:80`，12 条）。它唯一的依赖是从 `@/types/academic`（`:6`）`type` 导入的 `PaperAnalysisType`。
 
 ## Barrel
 
-`index.ts`（203 行）重新导出整个 `lib/a2ui`，让消费者从一处导入。核心模块出现在：`parser`（`:7`）、
-`data-model`（`:27`）、`events`（`:74`）、`format`（`:147`）、`constants`（`:156`）、`list-utils`
-（`:167`）。其余重导出覆盖在别处记录的渲染与投影层：`catalog`（`:53`）、`templates`（`:93`）、
-`app-generator`（`:118`）、`thumbnail`（`:131`）、`animation`（`:150`）、`chart-constants`（`:153`）、
-`academic-templates`（`:170`）、`output-profiles`（`:181`）、`rich-output-fixtures`（`:198`）。
+`index.ts`（203 行）重新导出整个 `lib/a2ui`，让消费者从一处导入。核心模块出现在：`parser`（`:7`）、`data-model`（`:27`）、`events`（`:74`）、`format`（`:147`）、`constants`（`:156`）、`list-utils`（`:167`）。其余重导出覆盖在别处记录的渲染与投影层：`catalog`（`:53`）、`templates`（`:93`）、`app-generator`（`:118`）、`thumbnail`（`:131`）、`animation`（`:150`）、`chart-constants`（`:153`）、`academic-templates`（`:170`）、`output-profiles`（`:181`）、`rich-output-fixtures`（`:198`）。
 
 ## 集群文件
 

@@ -4,7 +4,12 @@
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 
-import { ContextDetailPanel, GROUP_LABEL_KEY } from "./context-detail-panel"
+import {
+  ContextDetailPanel,
+  GROUP_COLOR,
+  GROUP_LABEL_KEY,
+  GROUP_STROKE,
+} from "./context-detail-panel"
 import type { ContextBreakdown } from "@/lib/claude/context-breakdown"
 import enChat from "@/i18n/messages/en/chat.json"
 import zhChat from "@/i18n/messages/zh-CN/chat.json"
@@ -273,5 +278,11 @@ describe("group label catalogue", () => {
   it.each(Object.entries(GROUP_LABEL_KEY))("%s → %s exists in both locales", (_id, key) => {
     expect(toolbar(enChat as never)[key]).toBeTruthy()
     expect(toolbar(zhChat as never)[key]).toBeTruthy()
+  })
+})
+
+describe("GROUP_STROKE", () => {
+  it.each(Object.entries(GROUP_COLOR))("%s strokes with the same token as its fill", (id, fill) => {
+    expect(GROUP_STROKE[id as keyof typeof GROUP_STROKE]).toBe(fill.replace(/^bg-/, "stroke-"))
   })
 })

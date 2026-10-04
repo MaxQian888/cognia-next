@@ -119,6 +119,22 @@ describe("ConversationJumpPill", () => {
     expect(screen.getByTestId("conversation-jump-pill").className).toContain("pointer-events-auto")
   })
 
+  it("sits at the foot of the lane, raised clear of the run strip and composer below it", () => {
+    const { container } = render(<ConversationJumpPill mode="toBottom" {...handlers()} />)
+    const shell = container.firstElementChild as HTMLElement
+    expect(shell).toHaveAttribute("data-slot", "jump-pill-band")
+    expect(shell).toHaveClass("absolute", "bottom-0", "inset-x-0", "z-20", "justify-center", "pb-3")
+  })
+
+  it("fades the transcript under an offer so a message's actions never show through it", () => {
+    const { container, rerender } = render(<ConversationJumpPill mode="toBottom" {...handlers()} />)
+    const shell = () => container.firstElementChild as HTMLElement
+    expect(shell()).toHaveClass("composer-scrim")
+    // No offer — nothing may veil the newest message at the foot.
+    rerender(<ConversationJumpPill mode={null} {...handlers()} />)
+    expect(shell()).not.toHaveClass("composer-scrim")
+  })
+
   it("still renders the offer when motion is reduced", () => {
     useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
     const h = handlers()

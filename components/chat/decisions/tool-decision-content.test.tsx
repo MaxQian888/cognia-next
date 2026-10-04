@@ -3,7 +3,7 @@
  */
 import { render, screen } from "@testing-library/react"
 
-import { ToolDecisionContent, bareToolName } from "./tool-decision-content"
+import { ToolDecisionContent, bareToolName, shellCommandOf } from "./tool-decision-content"
 import type { PendingApproval } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
@@ -142,5 +142,116 @@ describe("<ToolDecisionContent /> · schedule writes", () => {
       "data-tool",
       "scheduler_create_task"
     )
+  })
+})
+
+describe("shellCommandOf", () => {
+  it("reads a command from a shell-named tool regardless of its other keys", () => {
+    expect(shellCommandOf("Bash", { command: "ls", timeout: 5, anything: true })).toBe("ls")
+    expect(shellCommandOf("run_shell_command", { command: "pwd" })).toBe("pwd")
+  })
+
+  it("reads a command from any tool whose arguments are only shell arguments", () => {
+    // An ACP agent titles the call freely ("Running: echo hi").
+    expect(shellCommandOf("Running: echo hi", { command: "echo hi", cwd: "/w" })).toBe("echo hi")
+  })
+
+  it("joins an argv array, quoting only where needed", () => {
+    expect(shellCommandOf("exec_command", { command: ["bash", "-lc", "echo hi"] })).toBe(
+      "bash -lc 'echo hi'"
+    )
+    expect(shellCommandOf("exec_command", { cmd: ["echo", "it's"] })).toBe(`echo 'it'\\''s'`)
+  })
+
+  it("does not claim a non-shell tool that happens to carry a `command` key", () => {
+    expect(shellCommandOf("slash_runner", { command: "deploy", target: "prod" })).toBeUndefined()
+    expect(shellCommandOf("Bash", { command: "  " })).toBeUndefined()
+    expect(shellCommandOf("Bash", { command: 42 })).toBeUndefined()
+  })
+})
+
+describe("<ToolDecisionContent /> · external agent payloads", () => {
+  it("renders Kimi Code's recovered Bash arguments as a command block", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({
+          toolName: "Bash",
+          title: "Bash",
+          description: "Requesting approval to Running: echo hi",
+          input: { command: "echo hi" },
+        })}
+      />
+    )
+    const command = screen.getByTestId("approval-bash-command")
+    expect(command).toHaveTextContent("echo hi")
+    expect(command).toHaveClass("font-mono", "whitespace-pre-wrap", "break-all")
+    expect(screen.getByText("Requesting approval to Running: echo hi")).toBeInTheDocument()
+  })
+
+  it("lists the shell arguments the command block does not show", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({ toolName: "Bash", input: { command: "make", timeout: 600000 } })}
+      />
+    )
+    expect(screen.getByTestId("approval-bash-extra")).toHaveTextContent("600000")
+  })
+
+  it("falls back to the call's title — never a bare {} — when no arguments arrived", () => {
+    const { container } = render(
+      <ToolDecisionContent approval={approval({ toolName: "Bash", title: "Bash", input: {} })} />
+    )
+    const fallback = screen.getByTestId("approval-input-fallback")
+    expect(fallback).toHaveTextContent("Bash")
+    expect(fallback).toHaveTextContent("noInputDetails")
+    expect(container.textContent).not.toContain("{}")
+  })
+
+  it("falls back to the tool name when there is no title either", () => {
+    render(<ToolDecisionContent approval={approval({ toolName: "mystery", input: {} })} />)
+    expect(screen.getByTestId("approval-input-fallback")).toHaveTextContent("mystery")
+  })
+
+  it("renders an ACP diff (mapped to the Edit shape) as a diff whatever the tool is called", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({
+          toolName: "Edit /w/a.ts",
+          input: { file_path: "/w/a.ts", old_string: "a", new_string: "b" },
+        })}
+      />
+    )
+    expect(screen.getByTestId("approval-edit-preview")).toHaveTextContent("/w/a.ts")
+  })
+
+  it("renders several ACP diffs across files with each file named", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({
+          toolName: "Apply patch",
+          input: {
+            edits: [
+              { file_path: "/w/a.ts", old_string: "a", new_string: "b" },
+              { file_path: "/w/b.ts", old_string: "c", new_string: "d" },
+            ],
+          },
+        })}
+      />
+    )
+    const preview = screen.getByTestId("approval-multi-edit-preview")
+    expect(preview).toHaveTextContent("/w/a.ts")
+    expect(preview).toHaveTextContent("/w/b.ts")
+  })
+
+  it("keeps the JSON dump for an edit-like payload that carries other arguments", () => {
+    render(
+      <ToolDecisionContent
+        approval={approval({
+          toolName: "custom",
+          input: { old_string: "a", new_string: "b", dangerous: true },
+        })}
+      />
+    )
+    expect(screen.queryByTestId("approval-edit-preview")).not.toBeInTheDocument()
   })
 })

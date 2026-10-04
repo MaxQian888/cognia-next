@@ -250,6 +250,8 @@ export type SendFn = (
   callOptions?: {
     sharedRequest?: { messageId: string; queueItemId: string; takeover?: boolean }
     skipUserAppend?: boolean
+    throwOnError?: boolean
+    backgroundDelivery?: { id: string; onAccepted: () => void }
     bypassDelegation?: boolean
     sessionId?: string
     steerDrain?: boolean

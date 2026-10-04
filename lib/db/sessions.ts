@@ -13,7 +13,10 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
-import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
+import {
+  externalAgentIdFromProviderId,
+  managedGatewayLinksOf,
+} from "@/lib/ai/agent/external/session/session-models"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
 import { revokeClaimsForDeletedSession } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
@@ -284,42 +287,37 @@ export async function createSession(
     }
   }
 
-  // A model picked from an external agent's own list, before this conversation
-  // existed to hold it.
+  // The per-agent model choices made before this conversation existed.
   //
-  // The composer offers that list on a brand-new chat, because the runtime
-  // lane is resolved from the app-wide selection when there is no row to ask.
-  // With no row, the picker's only place to record the choice is
-  // `AppSettings.defaultModel` plus the reserved provider marker. Nothing then
-  // carried it onto the row this function creates, and the external send path
-  // reads the ROW, so the very first turn ran on whatever model the agent
-  // happens to boot with. Silently: no surface claimed otherwise, because the
-  // agent's live model is the truth every surface shows.
+  // The composer offers an agent's models (its own, and Cognia's through the
+  // gateway) on a brand-new chat, because the runtime lane is resolved from
+  // the app-wide selection when there is no row to ask. With no row, the
+  // picker records the choice in `AppSettings.externalAgentModelDefaults`, and
+  // this is where it lands on the row the external send path reads. Without
+  // it the very first turn ran on whatever the agent happens to boot with.
   //
-  // Only the marked pair is inherited. An ordinary provider default must keep
-  // following the app setting rather than freezing onto every new row, which
-  // is a different contract and not one this fix is entitled to change.
+  // Stored in its own column, never in `model` / `providerOverride`: those
+  // belong to the built-in lane, and a value meant for an agent there is
+  // either replayed at a provider that never offered it or read as a Cognia
+  // binding the user never chose.
   //
-  // Stamping it on a conversation that then runs on the built-in lane is
-  // harmless by construction: `resolveSendOptions` drops both columns when the
-  // marker names an agent this turn is not on, which is the whole reason the
-  // marker exists rather than a bare model id.
-  // The two halves are inherited together or not at all: a marker stamped
-  // beside a model that came from a preset would name an agent that never
-  // offered it.
-  let agentDefault: { model: string; providerOverride: string } | undefined
-  if (
-    partial?.model === undefined &&
-    partial?.providerOverride === undefined &&
-    autoApplied.model === undefined
-  ) {
+  // An install that still holds the legacy app-default marker
+  // (`defaultProvider` = `cognia:external-agent:<id>`) has it carried over as
+  // that agent's native pick, so the default it chose keeps applying without
+  // ever being written into `model` / `providerOverride` again.
+  let agentModels: ChatSession["externalAgentModels"] | undefined
+  if (partial?.externalAgentModels === undefined) {
     try {
       const settings = await getSettings()
-      const model = settings?.defaultModel?.trim()
-      const provider = settings?.defaultProvider
-      if (model && provider && isExternalAgentProviderId(provider)) {
-        agentDefault = { model, providerOverride: provider }
+      const legacyModel = settings?.defaultModel?.trim()
+      const legacyAgentId = externalAgentIdFromProviderId(settings?.defaultProvider)
+      const inherited: NonNullable<ChatSession["externalAgentModels"]> = {
+        ...(legacyModel && legacyAgentId
+          ? { [legacyAgentId]: { kind: "native" as const, modelId: legacyModel } }
+          : {}),
+        ...(settings?.externalAgentModelDefaults ?? {}),
       }
+      if (Object.keys(inherited).length > 0) agentModels = inherited
     } catch (err) {
       console.warn("createSession: external-agent default model lookup failed", err)
     }
@@ -345,8 +343,8 @@ export async function createSession(
     projectId,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
-    model: partial?.model ?? autoApplied.model ?? agentDefault?.model,
-    ...(agentDefault ? { providerOverride: agentDefault.providerOverride } : {}),
+    model: partial?.model ?? autoApplied.model,
+    ...(agentModels ? { externalAgentModels: agentModels } : {}),
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,
     workingDir: partial?.workingDir ?? autoApplied.workingDir,
     permissionMode: partial?.permissionMode ?? autoApplied.permissionMode,
@@ -461,6 +459,9 @@ export async function clearSessionSdkLink(id: string): Promise<void> {
     .modify((s) => {
       delete s.sdkSessionId
       delete s.forkedFromSdkSessionId
+      // The backend the cleared SDK conversation lived in describes nothing
+      // any more; the next turn records the new one's (`setSdkSessionId`).
+      delete s.sdkSessionStorage
       s.updatedAt = Date.now()
     })
 }
@@ -923,14 +924,19 @@ async function releaseSandboxSessionWithRetry(sessionId: string): Promise<void> 
   throw lastError
 }
 
-/** Remove external gateway history while its durable session link is still available. */
+/**
+ * Remove external gateway history while its durable session links are still
+ * available: the current one and every retained one a switch back could
+ * resume.
+ */
 export async function cleanupManagedExternalAgentSessions(
-  rows: readonly (Pick<ChatSession, "externalAgentSession"> | undefined)[]
+  rows: readonly (
+    Pick<ChatSession, "externalAgentSession" | "externalAgentGatewaySessions"> | undefined
+  )[]
 ): Promise<void> {
   const links = new Map<string, NonNullable<ChatSession["externalAgentSession"]>>()
   for (const row of rows) {
-    const link = row?.externalAgentSession
-    if (link?.sessionId.startsWith("cognia-gateway:"))
+    for (const link of managedGatewayLinksOf(row))
       links.set(`${link.agentId}:${link.sessionId}`, link)
   }
   if (links.size === 0) return

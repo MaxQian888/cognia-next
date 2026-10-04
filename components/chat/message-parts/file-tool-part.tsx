@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button"
 import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
 import {
   InlineCopyButton,
+  TOOL_ROW_SCROLL_TEXT_CLASS,
   ToolRowBlock,
   ToolRowShell,
 } from "@/components/chat/message-parts/tool-row"
@@ -44,6 +45,7 @@ import {
 } from "@/lib/files/edit-review-bridge"
 import { parseOutputJson } from "@/components/chat/message-parts/mcp-renderers/common"
 import { ReadCard } from "@/components/chat/message-parts/mcp-renderers/read-card"
+import { stripReadLineNumbers } from "@/lib/chat/read-line-numbers"
 import { WriteCard } from "@/components/chat/message-parts/mcp-renderers/write-card"
 import { EditCard } from "@/components/chat/message-parts/mcp-renderers/edit-card"
 import { GrepCard } from "@/components/chat/message-parts/mcp-renderers/grep-card"
@@ -156,7 +158,14 @@ function fileToolResultMeta(
   switch (kind) {
     case "read": {
       const content = asString(parsed?.content) ?? (typeof output === "string" ? output : "")
-      const n = Array.isArray(parsed?.lines) ? parsed.lines.length : outputLines(content)
+      // A numbered listing may carry a paging hint after it; count only the
+      // file's lines, the same ones the expanded body shows.
+      const listing = stripReadLineNumbers(content)
+      const n = Array.isArray(parsed?.lines)
+        ? parsed.lines.length
+        : listing
+          ? listing.code.split("\n").filter(Boolean).length
+          : outputLines(content)
       return n > 0 ? t("result.lines", { count: n }) : null
     }
     case "write": {
@@ -381,11 +390,17 @@ export const FileToolPart = memo(function FileToolPart({
       }
       target={
         running && info.target ? (
-          <Shimmer as="span" className="min-w-0 flex-1 truncate font-mono text-xs" duration={1.6}>
+          <Shimmer
+            as="span"
+            className={cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1 font-mono text-xs")}
+            duration={1.6}
+          >
             {info.target}
           </Shimmer>
         ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+          <span
+            className={cn(TOOL_ROW_SCROLL_TEXT_CLASS, "flex-1 font-mono text-xs text-foreground")}
+          >
             {info.path ? <PathTarget path={info.path} /> : (info.target ?? verbLabel)}
           </span>
         )

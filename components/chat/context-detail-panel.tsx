@@ -51,7 +51,7 @@ export const GROUP_LABEL_KEY: Record<Exclude<ContextGroupId, "other">, string> =
  * Legend colour per group. Theme chart tokens only — the palette has to hold up
  * in both light and dark, which hard-coded Tailwind hues do not.
  */
-const GROUP_COLOR: Record<ContextGroupId, string> = {
+export const GROUP_COLOR: Record<ContextGroupId, string> = {
   messages: "bg-chart-1",
   systemPrompt: "bg-chart-2",
   systemTools: "bg-chart-3",
@@ -67,6 +67,30 @@ const GROUP_COLOR: Record<ContextGroupId, string> = {
   taskCoordination: "bg-chart-5",
   other: "bg-muted-foreground/40",
   free: "bg-muted-foreground/20",
+}
+
+/**
+ * The same palette as {@link GROUP_COLOR}, as SVG strokes, for the
+ * composition donut in the conversation's Usage & context panel. Spelled out
+ * (not derived by string replace) so Tailwind sees every class; the parity
+ * test next door holds the two tables to the same tokens.
+ */
+export const GROUP_STROKE: Record<ContextGroupId, string> = {
+  messages: "stroke-chart-1",
+  systemPrompt: "stroke-chart-2",
+  systemTools: "stroke-chart-3",
+  mcp: "stroke-chart-4",
+  memory: "stroke-chart-5",
+  agents: "stroke-chart-1/60",
+  commands: "stroke-chart-2/60",
+  skills: "stroke-chart-3/60",
+  userMessages: "stroke-chart-1",
+  mentionedFiles: "stroke-chart-2",
+  toolOutputs: "stroke-chart-3",
+  thinking: "stroke-chart-4",
+  taskCoordination: "stroke-chart-5",
+  other: "stroke-muted-foreground/40",
+  free: "stroke-muted-foreground/20",
 }
 
 /** Sub-percent slices still deserve a number rather than a rounded-away "0%". */

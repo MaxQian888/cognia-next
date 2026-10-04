@@ -35,6 +35,7 @@ import {
   FolderIcon,
   FolderInputIcon,
   FolderKanbanIcon,
+  FolderPlusIcon,
   GitBranchPlusIcon,
   LinkIcon,
   ListChecksIcon,
@@ -52,6 +53,7 @@ import {
 
 import type { MenuKit } from "@/components/shared/menu-kit"
 import { Spinner } from "@/components/ui/spinner"
+import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 
 export type CogniaAgentStatus = "unknown" | "checking" | "available" | "missing"
@@ -80,6 +82,13 @@ export interface SessionRowMenuItemsProps {
   /** Folders this conversation may be filed in (workspace-matched already). */
   assignableFolders: readonly SessionFolder[]
   onAssignToFolder?: (folderId: string | null) => void
+  /**
+   * Make a new folder and file this conversation into it ("Move to folder →
+   * New folder…"). Offered only where the new folder could hold the row (it
+   * is created in the active workspace); absent, the submenu lists existing
+   * folders alone — and with none, filing has nowhere to start from.
+   */
+  onNewFolder?: () => void
   /** Non-archived workspaces; the current one is shown checked and inert. */
   workspaceTargets: readonly { id: string; name: string }[]
   canMoveWorkspace: boolean
@@ -116,6 +125,7 @@ export function SessionRowMenuItems({
   onUnarchive,
   assignableFolders,
   onAssignToFolder,
+  onNewFolder,
   workspaceTargets,
   canMoveWorkspace,
   movingWorkspace,
@@ -130,7 +140,11 @@ export function SessionRowMenuItems({
   const locked = Boolean(session.handoffLock)
   const isArchived = session.archivedAt != null
   const testId = (name: string) => `session-row-${surface}-${name}-${session.id}`
-  const readStateAction = unread ? onMarkRead : onMarkUnread
+  // An archived row is frozen (ADR-0213): it keeps its pin and folder so a
+  // restore puts it back where it was, but neither can change inside the
+  // archive, and it carries no unread state (`isBadgeableUnread`) to flip.
+  const readStateAction = isArchived ? undefined : unread ? onMarkRead : onMarkUnread
+  const archiveShortcut = useAppShortcutLabel("shell.conversation.toggleArchive").label
 
   return (
     <>
@@ -154,7 +168,7 @@ export function SessionRowMenuItems({
         {t("rename")}
         <Shortcut>F2</Shortcut>
       </Item>
-      {onTogglePinned ? (
+      {onTogglePinned && !isArchived ? (
         <Item onSelect={onTogglePinned} disabled={locked} data-testid={testId("pin")}>
           {session.pinned ? (
             <PinOffIcon className="mr-2 size-4" />
@@ -204,15 +218,19 @@ export function SessionRowMenuItems({
         <Item onSelect={onUnarchive} disabled={locked} data-testid={testId("unarchive")}>
           <ArchiveRestoreIcon className="mr-2 size-4" />
           {t("unarchive")}
+          {archiveShortcut ? <Shortcut>{archiveShortcut}</Shortcut> : null}
         </Item>
       ) : null}
       {!isArchived && onArchive ? (
         <Item onSelect={onArchive} disabled={locked} data-testid={testId("archive")}>
           <ArchiveIcon className="mr-2 size-4" />
           {t("archive")}
+          {archiveShortcut ? <Shortcut>{archiveShortcut}</Shortcut> : null}
         </Item>
       ) : null}
-      {onAssignToFolder && (assignableFolders.length > 0 || session.folderId) ? (
+      {onAssignToFolder &&
+      !isArchived &&
+      (assignableFolders.length > 0 || session.folderId || onNewFolder) ? (
         <Sub>
           <SubTrigger disabled={locked} data-testid={testId("move-folder")}>
             <FolderInputIcon className="mr-2 size-4" />
@@ -234,6 +252,15 @@ export function SessionRowMenuItems({
                 <span className="truncate">{folder.name}</span>
               </Item>
             ))}
+            {onNewFolder ? (
+              <>
+                {assignableFolders.length > 0 ? <Separator /> : null}
+                <Item onSelect={onNewFolder} data-testid={testId("folder-new")}>
+                  <FolderPlusIcon className="mr-2 size-4" />
+                  {t("newFolder")}
+                </Item>
+              </>
+            ) : null}
             {session.folderId ? (
               <>
                 <Separator />

@@ -397,6 +397,41 @@ describe("SessionCostBadge — popover with persisted rows", () => {
     expect(screen.queryByTestId("cost-popover-by-model")).toBeNull()
   })
 
+  it("marks a partly unpriced session as a lower bound and an unpriced one as unknown", async () => {
+    const base = {
+      sessionId: "s1",
+      at: 0,
+      model: "mystery",
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      durationMs: 0,
+    }
+    liveQueryReturn = [
+      { ...base, messageId: "m1", costUsd: 0.25, costSource: "sdk", costKnown: true },
+      { ...base, messageId: "m2", costUsd: 0, costSource: "unknown", costKnown: false },
+    ]
+    const user = userEvent.setup()
+    const { unmount } = renderUI(
+      <SessionCostBadge
+        sessionId="s1"
+        inMemoryUsage={{ totalCostUsd: 0.25 }}
+        tokensLabel={tokens}
+      />
+    )
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(await screen.findByTestId("cost-popover-cost")).toHaveTextContent("≥ $0.2500")
+    unmount()
+
+    liveQueryReturn = [
+      { ...base, messageId: "m3", costUsd: 0, costSource: "unknown", costKnown: false },
+    ]
+    renderUI(<SessionCostBadge sessionId="s1" inMemoryUsage={{}} tokensLabel={tokens} />)
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(await screen.findByTestId("cost-popover-cost")).toHaveTextContent("—")
+  })
+
   it("formats large token counts (k / M)", async () => {
     liveQueryReturn = [
       {

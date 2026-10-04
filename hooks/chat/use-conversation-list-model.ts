@@ -109,6 +109,8 @@ export interface UseConversationListModelParams {
    * Pass `null` to fall back to the model's plain substring rank.
    */
   scoreTitle?: ConversationTitleScorer | null
+  /** One flat sorted list for a table (`BuildSectionsOptions.flat`). */
+  flat?: boolean
 }
 
 /**
@@ -141,6 +143,7 @@ export function useConversationListModel({
   now,
   timeZone,
   scoreTitle = scoreConversationTitle,
+  flat = false,
 }: UseConversationListModelParams): ConversationListModel {
   return useMemo(
     () =>
@@ -166,6 +169,7 @@ export function useConversationListModel({
         runningIds,
         filterContext,
         scoreTitle: scoreTitle ?? undefined,
+        flat,
       }),
     [
       sessions,
@@ -191,6 +195,7 @@ export function useConversationListModel({
       now,
       timeZone,
       scoreTitle,
+      flat,
     ]
   )
 }

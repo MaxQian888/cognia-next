@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import type { ReactNode } from "react"
 import { fn } from "storybook/test"
 
+import type { UIMessage } from "ai"
+
 import { Composer } from "./composer"
+import { RunStatusBar } from "./run-status-bar"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
@@ -125,4 +128,45 @@ export const SkinCustomised: Story = {
       },
     } as never)
   },
+}
+
+// ── A live turn ────────────────────────────────────────────────────────────
+//
+// The run strip docked onto the card's top edge, and the send button turned
+// into Stop. Mirrors `chat-view.tsx`, which hands the strip to the composer.
+const runningMessages = (): UIMessage[] =>
+  [
+    {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "c1",
+          state: "output-available",
+          input: { file_path: "app/page.tsx" },
+          output: "export default function Home() {}",
+        },
+        {
+          type: "tool-Bash",
+          toolCallId: "c2",
+          state: "input-available",
+          input: { command: "pnpm test -- components/chat" },
+        },
+      ],
+    },
+  ] as unknown as UIMessage[]
+
+function running() {
+  resetStore(useChatStore)
+  const store = useChatStore.getState()
+  store.setActiveSession("demo-session")
+  store.replaceSessionMessages("demo-session", runningMessages())
+  store.setSessionStatus("demo-session", "streaming")
+}
+
+/** A turn running: the strip sits on the card, Stop holds the send slot. */
+export const Running: Story = {
+  args: { status: "streaming", runStatus: <RunStatusBar sessionId="demo-session" /> },
+  beforeEach: running,
 }

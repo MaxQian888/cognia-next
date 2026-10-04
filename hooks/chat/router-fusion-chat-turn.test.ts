@@ -208,6 +208,7 @@ describe("routerFusionSendDiagnostic", () => {
 describe("runFusionChatTurn", () => {
   it("saves the message, runs the turn with progress, shows the answer and settles", async () => {
     const onSettled = jest.fn()
+    const onAccepted = jest.fn()
     const d = deps({
       runTurn: jest.fn(async (input) => {
         expect(fusionChatTurnActive(SESSION)).toBe(true)
@@ -217,6 +218,7 @@ describe("runFusionChatTurn", () => {
           startedAt: 100,
           capMicrousd: 2_000_000,
         })
+        input.onAccepted?.()
         input.onProgress?.(summary)
         expect(useFusionProgressStore.getState().bySession[SESSION]?.summary).toBe(summary)
         return { kind: "succeeded" as const, answer, summary }
@@ -232,10 +234,12 @@ describe("runFusionChatTurn", () => {
         workspaceRoot: "/work",
         settings: { id: "singleton" } as never,
         onSettled,
+        onAccepted,
       },
       d
     )
     expect(result).toBe("completed")
+    expect(onAccepted).toHaveBeenCalledTimes(1)
     expect(d.commitUserMessage).toHaveBeenCalledWith(SESSION, message)
     expect(d.runTurn).toHaveBeenCalledWith(
       expect.objectContaining({

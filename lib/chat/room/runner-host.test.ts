@@ -49,6 +49,7 @@ import {
   createCompanionProjectionDeps,
   getCompanionRoomProjector,
   getHostRoomRunner,
+  isCompanionRoomActive,
 } from "./runner-host"
 import type { RoomRunner } from "./runner"
 import type { RoomRunnerDeps } from "./runner-deps"
@@ -189,6 +190,35 @@ describe("CompanionRoomProjector", () => {
     jest.advanceTimersByTime(100)
     expect(statusBySession.get("room-1")).toBe("streaming")
     expect(runner.dispose).toHaveBeenCalled()
+  })
+})
+
+describe("isCompanionRoomActive", () => {
+  it("is false while no projector exists, and never constructs one", () => {
+    expect(isCompanionRoomActive("room-1")).toBe(false)
+    expect(runnerInstances).toHaveLength(0)
+  })
+
+  it("follows the projector from the first member event through the idle grace", () => {
+    const p = getCompanionRoomProjector()
+    expect(isCompanionRoomActive("room-1")).toBe(false)
+    p.handleEvent(evt("event", SUB_A))
+    expect(isCompanionRoomActive("room-1")).toBe(true)
+    p.handleEvent(evt("session_ended", SUB_A))
+    // Still projecting while the next member may start.
+    expect(isCompanionRoomActive("room-1")).toBe(true)
+    jest.advanceTimersByTime(COMPANION_IDLE_GRACE_MS)
+    expect(isCompanionRoomActive("room-1")).toBe(false)
+  })
+
+  it("counts a send the host accepted as active before its first member starts", () => {
+    const p = getCompanionRoomProjector()
+    p.markSending("room-1")
+    expect(isCompanionRoomActive("room-1")).toBe(true)
+    p.handleEvent(evt("event", SUB_A))
+    p.handleEvent(evt("session_ended", SUB_A))
+    jest.advanceTimersByTime(COMPANION_IDLE_GRACE_MS)
+    expect(isCompanionRoomActive("room-1")).toBe(false)
   })
 })
 

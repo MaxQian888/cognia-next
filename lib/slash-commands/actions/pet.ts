@@ -99,6 +99,17 @@ function refusalMessage(refusal: PetRefusal): string {
     case "unknown-item":
     case "item-not-owned":
       return `Your pet doesn't have \`${refusal.itemId}\`.`
+    case "item-kind-mismatch":
+      return `\`${refusal.itemId}\` isn't for that.`
+    // The gate leaves a user subject's cooldown and hatch state to the
+    // controller (whose bubble answers), so /pet never sees these three. They
+    // still read sensibly if that ever changes.
+    case "uninitialized":
+      return "No pet yet — the pet hatches once the widget is enabled (Settings → Pet)."
+    case "not-hatched":
+      return "Your pet is still an egg — hatch it in the pet panel first."
+    case "cooling-down":
+      return `Your pet is still recovering — try again in ${Math.ceil(refusal.retryAfterMs / 1000)}s.`
   }
 }
 

@@ -1047,6 +1047,78 @@ describe("buildConversationSections", () => {
     expect(archived.total).toBe(1)
   })
 
+  it("freezes pins inside the archive: no Pinned section, pinned rows sort with the rest", () => {
+    const sessions = [
+      session("pinnedArchived", { pinned: true, archivedAt: NOW, updatedAt: NOW - 3 * DAY }),
+      session("plainArchived", { archivedAt: NOW, updatedAt: NOW }),
+    ]
+    const archived = buildConversationSections(sessions, [], opts({ view: "archived" }))
+    expect(archived.sections.some((section) => section.kind === "pinned")).toBe(false)
+    expect(archived.orderedIds).toEqual(["plainArchived", "pinnedArchived"])
+  })
+
+  it("keeps the Pinned section in the active view", () => {
+    const sessions = [
+      session("pinned1", { pinned: true, updatedAt: NOW - 3 * DAY }),
+      session("plain1", { updatedAt: NOW }),
+    ]
+    const active = buildConversationSections(sessions, [], opts({ view: "active" }))
+    expect(active.sections[0]).toMatchObject({ kind: "pinned" })
+    expect(active.orderedIds).toEqual(["pinned1", "plain1"])
+  })
+
+  describe("flat browse", () => {
+    const f = folder("f1", { order: 1 })
+    const sessions = [
+      session("pinned1", { pinned: true, title: "Beta", updatedAt: NOW - 2 * DAY }),
+      session("foldered1", { folderId: "f1", title: "Alpha", updatedAt: NOW - DAY }),
+      session("recent1", { title: "Gamma", updatedAt: NOW }),
+      session("archived1", { archivedAt: NOW, updatedAt: NOW }),
+    ]
+
+    it("emits one recent section with no pin float, folders or buckets", () => {
+      const model = buildConversationSections(
+        sessions,
+        [f],
+        opts({ flat: true, groupBy: "workspace" })
+      )
+      expect(model.sections).toHaveLength(1)
+      expect(model.sections[0]).toMatchObject({ kind: "recent" })
+      expect(model.orderedIds).toEqual(["recent1", "foldered1", "pinned1"])
+      expect(model.total).toBe(3)
+      expect(model.filteredCount).toBe(3)
+      expect(model.visibleCount).toBe(3)
+    })
+
+    it("follows sortBy and ignores a hand-dragged order", () => {
+      const ranked = sessions.map((s) =>
+        s.id === "pinned1" ? { ...s, manualOrder: 0, manualOrderSection: "recent" } : s
+      ) as ChatSession[]
+      const byTitle = buildConversationSections(ranked, [f], opts({ flat: true, sortBy: "title" }))
+      expect(byTitle.orderedIds).toEqual(["foldered1", "pinned1", "recent1"])
+      const recent = buildConversationSections(ranked, [f], opts({ flat: true }))
+      expect(recent.orderedIds).toEqual(["recent1", "foldered1", "pinned1"])
+    })
+
+    it("lists the archive flat too, and keeps the empty case empty", () => {
+      const archived = buildConversationSections(
+        sessions,
+        [f],
+        opts({ flat: true, view: "archived" })
+      )
+      expect(archived.orderedIds).toEqual(["archived1"])
+      const none = buildConversationSections([], [f], opts({ flat: true }))
+      expect(none.sections).toEqual([])
+      expect(none.total).toBe(0)
+    })
+
+    it("leaves search mode as it is", () => {
+      const model = buildConversationSections(sessions, [f], opts({ flat: true, query: "alp" }))
+      expect(model.sections[0]).toMatchObject({ kind: "search" })
+      expect(model.orderedIds).toEqual(["foldered1"])
+    })
+  })
+
   it("flattens orderedIds in render order across all section kinds", () => {
     const f = folder("f1", { order: 1 })
     const sessions = [

@@ -1,6 +1,6 @@
 ---
 title: "0016 — 插件系统补完"
-description: "弥补了ADR 0006 留下的桌面运行时空白。审计接口 82个plugin_*调用命令但没有Rust 处理器（而非ADR 0006估计的31个），38个已编写的hook调度员缺少的主机呼叫站点，以及8个绕过诊断存储的静默捕获。"
+description: "补全 ADR 0006 遗留的桌面运行时功能。审计发现 82 个 plugin_* 调用命令没有 Rust 处理器（ADR 0006 估计为 31 个）、38 个已实现 hook 调度器缺少宿主调用点，以及 8 处绕过诊断存储的静默异常捕获。"
 ---
 
 # ADR 0016 — 插件系统补完
@@ -16,17 +16,9 @@ Plugin Media TypeScript 接口现已具备 concatenate、effect、transition 与
 
 P1-7 的 devtools 线已退役。它底下的文件监听器留了下来，围绕它建起来的东西没有。
 
-`plugin_dev_server_start` 与 `plugin_dev_server_stop` 已删除。它们只是把内存里的
-`running` 置为 `true` 然后返回：没有绑定端口，也不存在服务器，而渲染端却在其上建了
-`getUrl()`、`getWebSocketUrl()` 与 `connectedClients`。`plugin_reload` 也一并删除，因为它发出的
-`plugin-hot-reload:<id>` 事件只有一个监听者，而那个模块已经没了。三者都已从
-`protocol/companion-commands.json`、`protocol/headless-command-dispositions.json` 以及生成的
-`all-app-commands.toml` 中移除。
+`plugin_dev_server_start` 与 `plugin_dev_server_stop` 已删除。它们只是把内存里的 `running` 置为 `true` 然后返回：没有绑定端口，也不存在服务器，而渲染端却在其上建了 `getUrl()`、`getWebSocketUrl()` 与 `connectedClients`。`plugin_reload` 也一并删除，因为它发出的 `plugin-hot-reload:<id>` 事件只有一个监听者，而那个模块已经没了。三者都已从 `protocol/companion-commands.json`、`protocol/headless-command-dispositions.json` 以及生成的 `all-app-commands.toml` 中移除。
 
-TypeScript 一侧，`dev-server.ts`、`profiler.ts`、`console-tap.ts`、`dev-tools.ts`、
-`dev-extension-controller.ts`、`managed-ide-dev-mode.ts`、`hot-reload.ts`，以及那个让它们看起来
-被引用的 barrel，全部删除；连同它们唯一的预期消费者、且没有生产挂载点的九标签页
-`PluginDevtoolsPanel`。因此下表中 `hot-reload.ts:372-376` 那一行静默 catch 指向的文件已不存在。
+TypeScript 一侧，`dev-server.ts`、`profiler.ts`、`console-tap.ts`、`dev-tools.ts`、`dev-extension-controller.ts`、`managed-ide-dev-mode.ts`、`hot-reload.ts`，以及那个让它们看起来被引用的 barrel，全部删除；连同它们唯一的预期消费者、且没有生产挂载点的九标签页 `PluginDevtoolsPanel`。因此下表中 `hot-reload.ts:372-376` 那一行静默 catch 指向的文件已不存在。
 
 `plugin_watch_start` / `plugin_watch_stop` 持有真实的 `notify` 监听器，予以保留。它们现在由
 `lib/plugin/devtools/file-watch.ts` 驱动，走已验证的 cli-bridge 路径重载，而不是发一个事件然后
@@ -59,7 +51,7 @@ ADR 0006 中 51-命令 的漏计是部分抽样的结果。新发现命令的类
 
 ### B. hook调度覆盖缺口（108投38中）
 
-`lib/plugin/contracts/plugin-points.ts:167-276`声明108 `CANONICAL_HOOK_POINTS`。调度器类在`lib/plugin/messaging/hooks-system.ts`（`PluginLifecycleHooks`行574-1067和`PluginEventHooks`行1104-1821）**已经实现了所有调度方法**，包括`dispatchThemeModeChange`、`dispatchProjectCreate`、`dispatchCanvasContentChange`、`dispatchWorkflowStart`、`dispatchExternalAgent*`、`dispatchMCP*`。缺少的是**主机调用站点**：主题存储从不调用`dispatchThemeModeChange`，画布存储从不调用`dispatchCanvasContentChange`，依此类推。`lib/plugin/contracts/runtime-proof-audit.ts`的校样审计将这些标记为“已验证”，因为绑定元数据存在;但运行时在实际中是沉默的。
+`lib/plugin/contracts/plugin-points.ts:167-276` 声明 108 个 `CANONICAL_HOOK_POINTS`。`lib/plugin/messaging/hooks-system.ts` 中的调度器类（`PluginLifecycleHooks` 行 574-1067 和 `PluginEventHooks` 行 1104-1821）**已经实现了所有调度方法**，包括 `dispatchThemeModeChange`、`dispatchProjectCreate`、`dispatchCanvasContentChange`、`dispatchWorkflowStart`、`dispatchExternalAgent*`、`dispatchMCP*`。缺少的是**宿主调用点**：主题存储从不调用 `dispatchThemeModeChange`，画布存储从不调用 `dispatchCanvasContentChange`，其他方法也存在类似情况。由于绑定元数据存在，`lib/plugin/contracts/runtime-proof-audit.ts` 的证明审计将这些方法标记为「已验证」。但运行时并未触发这些调用。
 
 目前无主机布线的类别：
 

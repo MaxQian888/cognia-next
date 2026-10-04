@@ -393,4 +393,93 @@ describe("CodeBlock", () => {
       )
     })
   })
+
+  describe("gutter numbering", () => {
+    beforeEach(() => {
+      clearHighlightCache()
+    })
+
+    it("starts the fallback table gutter at startLineNumber", () => {
+      const { container } = renderInProvider(
+        <CodeBlock code={"a\nb"} language="ts" isStreaming startLineNumber={40} />
+      )
+      const gutter = Array.from(container.querySelectorAll("td[aria-hidden='true']")).map(
+        (td) => td.textContent
+      )
+      expect(gutter).toEqual(["40", "41"])
+    })
+
+    it("offsets the Shiki line counter for a window that does not start at 1", async () => {
+      await highlightCached("const w = 1", "ts")
+      const { container } = renderInProvider(
+        <CodeBlock code="const w = 1" language="ts" startLineNumber={40} />
+      )
+      const surface = container.querySelector(".code-line-numbers") as HTMLElement
+      expect(surface.style.getPropertyValue("--code-line-offset")).toBe("39")
+      expect(surface.className).toContain("counter-reset:shiki-line_var(--code-line-offset)")
+    })
+
+    it("leaves the Shiki counter alone for a block that starts at 1", async () => {
+      await highlightCached("const v = 1", "ts")
+      const { container } = renderInProvider(<CodeBlock code="const v = 1" language="ts" />)
+      const surface = container.querySelector(".code-line-numbers") as HTMLElement
+      expect(surface.style.getPropertyValue("--code-line-offset")).toBe("")
+    })
+  })
+
+  describe("surface", () => {
+    beforeEach(() => {
+      clearHighlightCache()
+    })
+
+    it("paints the theme-token surface over Shiki's own theme background", async () => {
+      await highlightCached("const s = 1", "ts")
+      const { container } = renderInProvider(<CodeBlock code="const s = 1" language="ts" />)
+      const surface = container.querySelector('[role="code"]') as HTMLElement
+      expect(surface.className).toContain("bg-muted/40")
+      // The `<pre>` is nested in the per-theme wrapper, so only a descendant
+      // selector reaches it; `[&>pre]` never matched.
+      expect(surface.className).toContain("[&_pre]:bg-transparent!")
+      expect(surface.className).not.toContain("[&>pre]")
+    })
+
+    it("uses the same surface on the plain fallback", () => {
+      const { container } = renderInProvider(<CodeBlock code="x" language="ts" isStreaming />)
+      expect(container.querySelector("pre")?.className).toContain("bg-muted/40")
+    })
+  })
+
+  describe("fullscreen", () => {
+    it("opens a viewer with the filename, language badge and the block's stats", () => {
+      const { getByRole, getByTestId } = renderInProvider(
+        <CodeBlock code={"a\nbb\nccc"} language="javascript" filename="count.mjs" isStreaming />
+      )
+      fireEvent.click(getByRole("button", { name: "View fullscreen" }))
+      expect(getByTestId("code-fullscreen-header")).toHaveTextContent("count.mjs")
+      expect(getByTestId("code-fullscreen-language")).toHaveTextContent("javascript")
+      expect(getByTestId("code-fullscreen-stats")).toHaveTextContent("3 lines • 8 characters")
+      expect(getByTestId("code-fullscreen-body")).toHaveTextContent("ccc")
+    })
+
+    it("counts every line in the stats, not just the rendered slice", () => {
+      const huge = Array.from({ length: CODE_AUTO_RENDER_MAX_LINES + 5 }, () => "x").join("\n")
+      const { getByRole, getByTestId } = renderInProvider(
+        <CodeBlock code={huge} isStreaming showLineNumbers={false} />
+      )
+      fireEvent.click(getByRole("button", { name: "View fullscreen" }))
+      // ICU may group the thousands; the count is what matters.
+      expect(getByTestId("code-fullscreen-stats").textContent?.replace(/,/g, "")).toContain(
+        `${CODE_AUTO_RENDER_MAX_LINES + 5} lines`
+      )
+    })
+
+    it("closes from the header's own close button", async () => {
+      const { getByRole, getByTestId, queryByTestId } = renderInProvider(
+        <CodeBlock code="a" language="ts" isStreaming />
+      )
+      fireEvent.click(getByRole("button", { name: "View fullscreen" }))
+      fireEvent.click(getByTestId("code-fullscreen-close"))
+      await waitFor(() => expect(queryByTestId("code-fullscreen")).not.toBeInTheDocument())
+    })
+  })
 })

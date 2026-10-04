@@ -26,7 +26,7 @@ jest.mock("@/lib/db/skills", () => ({
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { Command } from "@/components/ui/command"
-import { SkillPickerContent } from "./skill-picker"
+import { SkillPickerContent, SkillPickerPanel } from "./skill-picker"
 
 function renderPicker(active: boolean, value: string[] = [], onChange = jest.fn()) {
   return render(
@@ -148,5 +148,66 @@ describe("SkillPickerContent — plugin skills", () => {
     )
     renderPicker(true)
     expect(screen.queryByText("Persona only")).toBeNull()
+  })
+})
+
+describe("SkillPickerPanel (the mobile sheet's drilled-in list)", () => {
+  function renderPanel(value: string[] = [], onChange = jest.fn()) {
+    return render(<SkillPickerPanel active value={value} onChange={onChange} />)
+  }
+
+  it("offers the search field without focusing it, so the keyboard stays down", () => {
+    skillsRef.current = [makeSkill({ id: "s1", name: "Alpha" })]
+    renderPanel()
+    const search = screen.getByPlaceholderText("Search skills…")
+    expect(search).not.toHaveFocus()
+    expect(search).not.toHaveAttribute("autofocus")
+    // 16px, so iOS does not zoom the page when the user does tap in.
+    expect(search.className).toContain("text-base")
+  })
+
+  it("draws thumb-sized rows with no resting highlight on the first match", () => {
+    skillsRef.current = [
+      makeSkill({ id: "s1", name: "Alpha" }),
+      makeSkill({ id: "s3", name: "Built", isBuiltIn: true }),
+    ]
+    renderPanel()
+    const row = screen.getByText("Alpha").closest("[cmdk-item]")!
+    expect(row.className).toContain("touch-target")
+    // cmdk's keyboard target is only painted while the search field has focus.
+    expect(row.className).toContain("data-[selected=true]:bg-transparent")
+    expect(row.className).toContain(
+      "group-focus-within/skill-sheet:data-[selected=true]:bg-accent!"
+    )
+  })
+
+  it("sizes itself so the list scrolls inside the sheet", () => {
+    skillsRef.current = [makeSkill({ id: "s1", name: "Alpha" })]
+    renderPanel()
+    expect(screen.getByTestId("skill-picker-panel").className).toContain("h-[min(26rem,60dvh)]")
+    const list = document.querySelector("[cmdk-list]")!
+    expect(list.className).toContain("flex-1")
+    expect(list.className).not.toContain("max-h-[300px]")
+  })
+
+  it("marks the picked skills and toggles like the flyout does", () => {
+    skillsRef.current = [
+      makeSkill({ id: "s1", name: "Alpha" }),
+      makeSkill({ id: "s2", name: "Gamma" }),
+    ]
+    const onChange = jest.fn()
+    renderPanel(["s1"], onChange)
+    expect(screen.getByText("Alpha").closest("[cmdk-item]")).toHaveAttribute("data-picked", "true")
+    expect(screen.getByText("Gamma").closest("[cmdk-item]")).not.toHaveAttribute("data-picked")
+    fireEvent.click(screen.getByText("Gamma"))
+    expect(onChange).toHaveBeenCalledWith(["s1", "s2"])
+  })
+
+  it("leaves the desktop flyout's dense rows alone", () => {
+    skillsRef.current = [makeSkill({ id: "s1", name: "Alpha" })]
+    renderPicker(true)
+    expect(screen.getByText("Alpha").closest("[cmdk-item]")!.className).not.toContain(
+      "touch-target"
+    )
   })
 })

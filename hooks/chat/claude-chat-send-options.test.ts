@@ -1,8 +1,38 @@
-import { buildSendOptions, buildWorkingSetPostCompaction } from "./claude-chat-send-options"
+import {
+  buildAiSdkInitialConversation,
+  buildSendOptions,
+  buildWorkingSetPostCompaction,
+  prepareTranscriptRuntimeSend,
+} from "./claude-chat-send-options"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { createOnboardingRequest } from "@/lib/onboarding/request"
+import { getSession } from "@/lib/db/sessions"
+import { listMessages } from "@/lib/db/messages"
+import { invalidateTranscriptRuntime } from "@/lib/chat/transcript/revision-events"
+import { getDb } from "@/lib/db/schema"
+import { sessionControl } from "@/lib/claude/ipc"
+
+jest.mock("@/lib/claude/ipc", () => ({ sessionControl: jest.fn() }))
+
+jest.mock("@/lib/db/schema", () => {
+  const actual = jest.requireActual("@/lib/db/schema")
+  return { ...actual, getDb: jest.fn(actual.getDb) }
+})
+
+jest.mock("@/lib/db/sessions", () => ({
+  ...jest.requireActual("@/lib/db/sessions"),
+  getSession: jest.fn(),
+}))
+jest.mock("@/lib/db/messages", () => ({
+  ...jest.requireActual("@/lib/db/messages"),
+  listMessages: jest.fn(),
+}))
+jest.mock("@/lib/chat/transcript/revision-events", () => ({
+  ...jest.requireActual("@/lib/chat/transcript/revision-events"),
+  invalidateTranscriptRuntime: jest.fn(),
+}))
 
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({})),
@@ -14,6 +44,7 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => ({ settings: {} }) },
 }))
 jest.mock("@/stores/chat", () => ({
+  selectVisibleMessages: jest.requireActual("@/stores/chat/chat-store").selectVisibleMessages,
   useChatStore: {
     getState: () => ({
       referencedPaths: [],
@@ -68,6 +99,233 @@ const PROJECT_B = {
   name: "B",
   roots: [{ id: "rb", path: "/repos/b", isPrimary: true }],
 }
+
+describe("prepareTranscriptRuntimeSend", () => {
+  beforeEach(() => {
+    jest
+      .mocked(getSession)
+      .mockReset()
+      .mockResolvedValue({
+        id: "s1",
+        sdkSessionId: "sdk",
+        runtimeTranscriptGeneration: "g1",
+      } as never)
+    jest.mocked(listMessages).mockReset().mockResolvedValue([])
+    jest.mocked(invalidateTranscriptRuntime).mockReset().mockResolvedValue(undefined)
+    jest.mocked(sessionControl).mockReset().mockResolvedValue({
+      retained: true,
+      runtimeAdapter: "ai-sdk",
+      sdkSessionId: "sdk",
+      provider: "openai",
+      transcriptInvalidationId: "g1",
+      active: false,
+    })
+  })
+
+  it("restores persisted history after the sidecar loses a previously initialized runtime", async () => {
+    jest.mocked(sessionControl).mockResolvedValue({ retained: false })
+    jest.mocked(listMessages).mockResolvedValue([
+      { id: "prior", role: "user", parts: [{ type: "text", text: "Remember the migration" }] },
+      { id: "current", role: "user", parts: [{ type: "text", text: "Continue" }] },
+    ])
+    const prepared = await prepareTranscriptRuntimeSend("s1", {
+      provider: "openai",
+      turnId: "current",
+    })
+    expect(sessionControl).toHaveBeenCalledWith("s1", "runtimeStatus")
+    expect(JSON.stringify(prepared.initialConversation)).toContain("Remember the migration")
+    expect(JSON.stringify(prepared.initialConversation)).not.toContain("Continue")
+    expect(prepared.expectedRuntimeSessionId).toBeUndefined()
+  })
+
+  it("pins verified live context and removes obsolete initialization history", async () => {
+    const prepared = await prepareTranscriptRuntimeSend("s1", {
+      provider: "openai",
+      initialConversation: [{ role: "user", content: "old seed" }],
+    })
+    expect(prepared.expectedRuntimeSessionId).toBe("sdk")
+    expect(prepared.initialConversation).toBeUndefined()
+    expect(listMessages).not.toHaveBeenCalled()
+  })
+
+  it("refuses a failed runtime probe instead of assuming that context is retained", async () => {
+    jest.mocked(sessionControl).mockRejectedValue(new Error("sidecar exited"))
+    await expect(prepareTranscriptRuntimeSend("s1", { provider: "openai" })).rejects.toThrow(
+      "sidecar exited"
+    )
+    expect(listMessages).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { sdkSessionId: "different" },
+    { provider: "other-provider" },
+    { cwd: "/different-workspace" },
+    { transcriptInvalidationId: "different-generation" },
+    { active: true },
+  ])("reconstructs instead of reusing incompatible runtime %j", async (mismatch) => {
+    const status = await sessionControl("s1", "runtimeStatus")
+    jest.mocked(sessionControl).mockResolvedValue({ ...(status as object), ...mismatch })
+    const prepared = await prepareTranscriptRuntimeSend("s1", { provider: "openai" })
+    expect(listMessages).toHaveBeenCalledWith("s1")
+    expect(prepared.initialConversation).toEqual([])
+    expect(prepared.expectedRuntimeSessionId).toBeUndefined()
+  })
+
+  it.each(["openai", "anthropic"])(
+    "stamps the retained generation without scanning %s history",
+    async (provider) => {
+      const prepared = await prepareTranscriptRuntimeSend("s1", { provider })
+      expect(prepared.transcriptInvalidationId).toBe("g1")
+      expect(prepared.initialConversation).toBeUndefined()
+      expect(listMessages).not.toHaveBeenCalled()
+      expect(invalidateTranscriptRuntime).not.toHaveBeenCalled()
+    }
+  )
+
+  it("reconstructs invalidated supplied history from persisted visible branches before the current prompt", async () => {
+    jest.mocked(getSession).mockResolvedValue({
+      id: "s1",
+      sdkSessionId: "sdk",
+      runtimeTranscriptGeneration: "g1",
+      runtimeTranscriptInvalidated: "g1",
+      activeBranchByGroup: { group: "picked" },
+    } as never)
+    jest.mocked(listMessages).mockResolvedValue([
+      { id: "old-user", role: "user", parts: [{ type: "text", text: "kept question" }] },
+      {
+        id: "picked",
+        role: "assistant",
+        parts: [{ type: "text", text: "selected answer" }],
+        metadata: { branchGroupId: "group", branchIndex: 0 },
+      },
+      {
+        id: "hidden",
+        role: "assistant",
+        parts: [{ type: "text", text: "hidden answer" }],
+        metadata: { branchGroupId: "group", branchIndex: 1 },
+      },
+      { id: "current", role: "user", parts: [{ type: "text", text: "new prompt" }] },
+    ])
+    const prepared = await prepareTranscriptRuntimeSend("s1", {
+      provider: "openai",
+      turnId: "current",
+      initialConversation: [{ role: "user", content: "obsolete snapshot" }],
+    })
+    const history = JSON.stringify(prepared.initialConversation)
+    expect(history).toContain("selected answer")
+    expect(history).not.toContain("hidden answer")
+    expect(history).not.toContain("new prompt")
+    expect(history).not.toContain("obsolete snapshot")
+    expect(prepared.transcriptInvalidationId).toBe("g1")
+  })
+
+  it("rereads the generation after closing an edited runtime and propagates close failures", async () => {
+    jest.mocked(getSession).mockResolvedValueOnce({ id: "s1", sdkSessionId: "sdk" } as never)
+    const prepared = await prepareTranscriptRuntimeSend(
+      "s1",
+      { provider: "openai" },
+      { replacesHistory: true }
+    )
+    expect(invalidateTranscriptRuntime).toHaveBeenCalledWith("s1")
+    expect(prepared.transcriptInvalidationId).toBe("g1")
+    jest.mocked(listMessages).mockClear()
+    jest.mocked(invalidateTranscriptRuntime).mockRejectedValueOnce(new Error("close refused"))
+    await expect(
+      prepareTranscriptRuntimeSend("s1", { provider: "openai" }, { replacesHistory: true })
+    ).rejects.toThrow("close refused")
+    expect(listMessages).not.toHaveBeenCalled()
+  })
+
+  it("keeps separately owned standalone or shared history while still stamping generation", async () => {
+    const initialConversation = [{ role: "user" as const, content: "owned history" }]
+    const prepared = await prepareTranscriptRuntimeSend(
+      "s1",
+      { provider: "openai", initialConversation },
+      { replacesHistory: true, skipHydration: true }
+    )
+    expect(prepared.initialConversation).toBe(initialConversation)
+    expect(prepared.transcriptInvalidationId).toBe("g1")
+    expect(invalidateTranscriptRuntime).not.toHaveBeenCalled()
+    expect(listMessages).not.toHaveBeenCalled()
+  })
+
+  it("refuses reconstruction when the account database changes during the history read", async () => {
+    jest.mocked(getDb).mockReturnValue({ name: "first-account" } as never)
+    jest.mocked(getSession).mockResolvedValue({ id: "s1" } as never)
+    jest.mocked(listMessages).mockImplementationOnce(async () => {
+      jest.mocked(getDb).mockReturnValue({ name: "second-account" } as never)
+      return []
+    })
+    try {
+      await expect(prepareTranscriptRuntimeSend("s1", { provider: "openai" })).rejects.toThrow(
+        "transcript_database_changed"
+      )
+    } finally {
+      jest.mocked(getDb).mockImplementation(jest.requireActual("@/lib/db/schema").getDb)
+    }
+  })
+})
+
+describe("buildAiSdkInitialConversation", () => {
+  it("preserves completed tool call/result pairs and excludes the current prompt and replaced tail", async () => {
+    const messages = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "Read the file" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-Read",
+            toolCallId: "call-1",
+            state: "output-available",
+            input: { path: "notes.md" },
+            output: { text: "kept" },
+          },
+          { type: "text", text: "File read" },
+        ],
+      },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "Edit this turn" }] },
+      { id: "a2", role: "assistant", parts: [{ type: "text", text: "replaced answer" }] },
+    ] as import("ai").UIMessage[]
+    const history = await buildAiSdkInitialConversation(messages, "u2")
+    expect(history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: "tool-call",
+              toolCallId: "call-1",
+              toolName: "Read",
+              input: { path: "notes.md" },
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          role: "tool",
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: "tool-result",
+              toolCallId: "call-1",
+              output: { type: "json", value: { text: "kept" } },
+            }),
+          ]),
+        }),
+      ])
+    )
+    expect(JSON.stringify(history)).not.toContain("Edit this turn")
+    expect(JSON.stringify(history)).not.toContain("replaced answer")
+  })
+
+  it("returns an empty history after clearing and keeps surviving history when the prompt is not yet stored", async () => {
+    expect(await buildAiSdkInitialConversation([], "next")).toEqual([])
+    const history = await buildAiSdkInitialConversation(
+      [{ id: "u1", role: "user", parts: [{ type: "text", text: "survives deletion" }] }],
+      "next"
+    )
+    expect(JSON.stringify(history)).toContain("survives deletion")
+  })
+})
 
 describe("Claude chat send-option seam", () => {
   beforeEach(() => {
@@ -173,11 +431,13 @@ describe("Claude chat send-option seam", () => {
       runId: "r1",
       turnId: "t1",
       attemptId: "a2",
+      backgroundDeliveryId: "delivery-1",
     })
     expect(jest.mocked(resolveSendOptions)).toHaveBeenCalledWith(
       expect.objectContaining({
         skillIntents: ["chart"],
         turnId: "t1",
+        backgroundDeliveryId: "delivery-1",
         executionIdentity: expect.objectContaining({ runId: "r1", turnId: "t1", attemptId: "a2" }),
       })
     )
