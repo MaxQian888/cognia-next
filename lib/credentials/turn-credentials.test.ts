@@ -240,11 +240,33 @@ describe("resolveTurnServerCredentials", () => {
 })
 
 describe("CapacitorSecureStore package name", () => {
+  it("surfaces native read and removal failures instead of dropping TURN credentials", async () => {
+    const realCap = (window as { Capacitor?: unknown }).Capacitor
+    const failure = new Error("Secure storage read failed")
+    try {
+      __setTurnCredentialBackend(null)
+      ;(window as { Capacitor?: unknown }).Capacitor = {
+        isNativePlatform: () => true,
+        Plugins: {
+          SecureStoragePlugin: {
+            get: jest.fn().mockRejectedValue(failure),
+            remove: jest.fn().mockRejectedValue(failure),
+          },
+        },
+      }
+      await expect(loadTurnCredential("synthetic")).rejects.toBe(failure)
+      await expect(deleteTurnCredential("synthetic")).rejects.toBe(failure)
+    } finally {
+      if (realCap === undefined) delete (window as { Capacitor?: unknown }).Capacitor
+      else (window as { Capacitor?: unknown }).Capacitor = realCap
+      __setTurnCredentialBackend(null)
+    }
+  })
+
   // Regression gate for the wrong-name bug
   // (`@capacitor-community/secure-storage-plugin`). The dynamic import in
-  // `loadSecureStorage()` is wrapped in try/catch, so a MODULE_NOT_FOUND
-  // surfaces silently as "TURN credentials never persist on mobile". The
-  // audit caught this once; this assertion keeps it from coming back.
+  // A MODULE_NOT_FOUND here prevents TURN credentials from persisting on
+  // mobile. The audit caught this once; this assertion keeps it from coming back.
   //
   // The package name MUST match `mobile/package.json`'s installed entry
   // because Capacitor builds resolve modules through the mobile workspace.
@@ -288,7 +310,7 @@ describe("CapacitorSecureStore package name", () => {
               return { value: true }
             },
             async get(opts: { key: string }) {
-              if (!secureStore.has(opts.key)) throw new Error(`absent: ${opts.key}`)
+              if (!secureStore.has(opts.key)) throw new Error("Item with given key does not exist")
               return { value: secureStore.get(opts.key)! }
             },
             async remove(opts: { key: string }) {

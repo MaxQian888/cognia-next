@@ -5,12 +5,17 @@
 import "fake-indexeddb/auto"
 
 import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/account-types"
+import type { QuickUnlockEnrollment } from "@/lib/accounts/quick-unlock/types"
+import type { EnrollArgs, VerifyArgs, QuickUnlockOutcome } from "@/lib/accounts/quick-unlock/client"
 
 import type { ProfileCloudIdentityCleanup } from "@/lib/identity/forget-profile-identity"
 
 import type { AccountStoreDependencies } from "./account-store"
 
 let mockDesktopLocalEnabled = false
+// Null follows `mockDesktopLocalEnabled`; the native mobile app sets it apart,
+// because there a remembered profile works without the desktop workspace.
+let mockDeviceUnlockSupported: boolean | null = null
 const mockDesktopLocalPassword = jest.fn<Promise<string | null>, [boolean?]>()
 const mockSaveDesktopRecovery = jest.fn<Promise<void>, [string]>()
 const mockReadDesktopRecovery = jest.fn<Promise<string | null>, []>()
@@ -22,7 +27,7 @@ const mockClearDeviceUnlockSecret = jest.fn<Promise<void>, [string]>()
 jest.mock("@/lib/accounts/desktop-local-account", () => ({
   DESKTOP_LOCAL_ACCOUNT_ID: "acct_desktop_local_workspace",
   isDesktopLocalAccountEnabled: () => mockDesktopLocalEnabled,
-  isDeviceUnlockSupported: () => mockDesktopLocalEnabled,
+  isDeviceUnlockSupported: () => mockDeviceUnlockSupported ?? mockDesktopLocalEnabled,
   isDeviceManagedAccount: (record: LocalAccountRecord | null | undefined) =>
     record?.id === "acct_desktop_local_workspace" && record.protection === "device",
   isRememberedOnDevice: (record: LocalAccountRecord | null | undefined) =>
@@ -63,6 +68,24 @@ const mockSetActiveAccountId = jest.fn<Promise<void>, [string]>()
 const mockDeleteRegistryAccount = jest.fn<Promise<void>, [string, unknown?]>()
 const mockUpdateAvatarRegistry = jest.fn<Promise<LocalAccountRecord>, [string, string | null]>()
 const mockUpdateRememberOnDevice = jest.fn<Promise<LocalAccountRecord>, [string, boolean]>()
+const mockUpdateQuickUnlock = jest.fn()
+const mockEnrollQuickUnlock = jest.fn<Promise<QuickUnlockEnrollment>, [EnrollArgs]>()
+const mockVerifyQuickUnlock = jest.fn<Promise<QuickUnlockOutcome>, [VerifyArgs]>()
+const mockRemoveQuickUnlock = jest.fn<Promise<void>, [string, string, Record<string, unknown>?]>(
+  async () => {}
+)
+const mockRemoveNativeBiometricSecret = jest.fn<Promise<void>, [string, string]>(async () => {})
+jest.mock("@/lib/accounts/quick-unlock/client", () => ({
+  enrollQuickUnlock: (args: EnrollArgs) => mockEnrollQuickUnlock(args),
+  removeQuickUnlock: (...args: [string, string, Record<string, unknown>?]) =>
+    mockRemoveQuickUnlock(...args),
+  clearQuickUnlockDeviceMaterial: jest.fn(async () => {}),
+  verifyQuickUnlock: (args: VerifyArgs) => mockVerifyQuickUnlock(args),
+}))
+jest.mock("@/lib/accounts/quick-unlock/native-biometric", () => ({
+  removeNativeBiometricSecret: (...args: [string, string]) =>
+    mockRemoveNativeBiometricSecret(...args),
+}))
 
 jest.mock("@/lib/accounts/account-db", () => ({
   LocalAccountRegistry: jest.fn().mockImplementation(() => ({
@@ -73,6 +96,7 @@ jest.mock("@/lib/accounts/account-db", () => ({
     updatePasswordVerifier: mockUpdatePasswordVerifier,
     updateAvatar: mockUpdateAvatarRegistry,
     updateRememberOnDevice: mockUpdateRememberOnDevice,
+    updateQuickUnlock: mockUpdateQuickUnlock,
     setActiveAccountId: mockSetActiveAccountId,
     deleteAccount: mockDeleteRegistryAccount,
   })),
@@ -250,9 +274,359 @@ function makeStore() {
   return createAccountStore(dependencies)
 }
 
+describe("native biometric enrollment persistence", () => {
+  const previous: QuickUnlockEnrollment = {
+    method: "biometric",
+    verifier: { nativeKeyId: "old-key" },
+    createdAt: 1,
+    failedAttempts: 0,
+  }
+  const enrollmentArgs = {
+    accountId: "acct_alpha",
+    method: "biometric" as const,
+    canonicalSecret: `biometric:${"a".repeat(64)}`,
+    password: "pw",
+    verifier: { nativeKeyId: "new-key" },
+  }
+
+  function prepare(previousEnrollment = true) {
+    let current = {
+      ...account("acct_alpha", "Alpha"),
+      quickUnlock: previousEnrollment ? [previous] : [],
+    }
+    const store = makeStore()
+    store.setState({
+      accounts: [current],
+      activeAccountId: current.id,
+      unlockedAccountId: current.id,
+      locked: false,
+    })
+    mockListAccounts.mockImplementation(async () => [current])
+    mockUpdateQuickUnlock.mockImplementation(async (_id, next, _now, expected) => {
+      if (expected && JSON.stringify(current.quickUnlock) !== JSON.stringify(expected))
+        throw new Error("changed concurrently")
+      current = { ...current, quickUnlock: next }
+      return current
+    })
+    return {
+      store,
+      getCurrent: () => current,
+      setCurrent: (next: QuickUnlockEnrollment[]) => {
+        current = { ...current, quickUnlock: next }
+      },
+    }
+  }
+
+  it("keeps the old key and enrollment when registry persistence fails", async () => {
+    const { store } = prepare()
+    mockUpdateQuickUnlock.mockRejectedValueOnce(new Error("registry unavailable"))
+    await expect(store.getState().enrollQuickUnlockMethod(enrollmentArgs)).rejects.toThrow(
+      "registry unavailable"
+    )
+    expect(store.getState().accounts[0].quickUnlock).toEqual([previous])
+    expect(mockRemoveNativeBiometricSecret).not.toHaveBeenCalled()
+  })
+
+  it("restores registry metadata after a vault commit fails following persistence", async () => {
+    const { store, getCurrent } = prepare()
+    mockEnrollQuickUnlock.mockImplementationOnce(async (args) => {
+      await args.persist?.({ ...previous, verifier: { storage: "browser-vault" }, createdAt: 2 })
+      throw new Error("vault transaction aborted")
+    })
+    await expect(store.getState().enrollQuickUnlockMethod(enrollmentArgs)).rejects.toThrow(
+      "vault transaction aborted"
+    )
+    expect(getCurrent().quickUnlock).toEqual([previous])
+    expect(store.getState().accounts[0].quickUnlock).toEqual([previous])
+    expect(mockRemoveNativeBiometricSecret).not.toHaveBeenCalled()
+  })
+
+  it("removes failed first-enrollment metadata after a vault commit failure", async () => {
+    const { store, getCurrent } = prepare(false)
+    mockEnrollQuickUnlock.mockImplementationOnce(async (args) => {
+      await args.persist?.({ ...previous, verifier: {}, createdAt: 2 })
+      throw new Error("vault transaction aborted")
+    })
+    await expect(store.getState().enrollQuickUnlockMethod(enrollmentArgs)).rejects.toThrow(
+      "vault transaction aborted"
+    )
+    expect(getCurrent().quickUnlock).toEqual([])
+  })
+
+  it("does not overwrite a concurrent replacement during compensation", async () => {
+    const { store, getCurrent, setCurrent } = prepare()
+    const concurrent = { ...previous, verifier: { nativeKeyId: "concurrent-key" }, createdAt: 3 }
+    mockEnrollQuickUnlock.mockImplementationOnce(async (args) => {
+      await args.persist?.({ ...previous, verifier: {}, createdAt: 2 })
+      setCurrent([concurrent])
+      throw new Error("vault transaction aborted")
+    })
+    await expect(store.getState().enrollQuickUnlockMethod(enrollmentArgs)).rejects.toThrow(
+      "vault transaction aborted"
+    )
+    expect(getCurrent().quickUnlock).toEqual([concurrent])
+    expect(mockUpdateQuickUnlock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not commit an enrollment if the account locks during derivation", async () => {
+    const { store } = prepare()
+    mockEnrollQuickUnlock.mockImplementationOnce(async (args) => {
+      store.setState({ unlockedAccountId: null, locked: true, accountRevision: 1 })
+      await args.persist?.({ ...previous, verifier: {}, createdAt: 2 })
+      return previous
+    })
+    await expect(store.getState().enrollQuickUnlockMethod(enrollmentArgs)).rejects.toThrow(
+      "Account locked or changed"
+    )
+    expect(mockUpdateQuickUnlock).not.toHaveBeenCalled()
+    expect(mockRemoveNativeBiometricSecret).not.toHaveBeenCalled()
+  })
+
+  it("cleans the old native key only after successful replacement", async () => {
+    const { store, getCurrent } = prepare()
+    await store.getState().enrollQuickUnlockMethod(enrollmentArgs)
+    expect(getCurrent().quickUnlock[0].verifier.nativeKeyId).toBe("new-key")
+    expect(mockRemoveNativeBiometricSecret).toHaveBeenCalledWith("acct_alpha", "old-key")
+    expect(mockUpdateQuickUnlock.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRemoveNativeBiometricSecret.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("does not enroll when the settings caller aborts during derivation", async () => {
+    const { store } = prepare()
+    const controller = new AbortController()
+    mockEnrollQuickUnlock.mockImplementationOnce(async (args) => {
+      controller.abort()
+      await args.persist?.({ ...previous, verifier: {}, createdAt: 2 })
+      return previous
+    })
+    await expect(
+      store.getState().enrollQuickUnlockMethod({
+        ...enrollmentArgs,
+        signal: controller.signal,
+      })
+    ).rejects.toThrow("Account locked or changed")
+    expect(mockUpdateQuickUnlock).not.toHaveBeenCalled()
+    expect(mockRemoveNativeBiometricSecret).not.toHaveBeenCalled()
+  })
+
+  it.each(["account switch", "caller abort"])("rejects a late unlock after %s", async (change) => {
+    const { store } = prepare()
+    store.setState({ unlockedAccountId: null, locked: true })
+    const controller = new AbortController()
+    mockVerifyQuickUnlock.mockImplementationOnce(async (args) => {
+      expect(args.isCurrent?.()).toBe(true)
+      if (change === "caller abort") controller.abort()
+      else store.setState({ activeAccountId: "acct_beta", accountRevision: 1 })
+      expect(args.isCurrent?.()).toBe(false)
+      return { ok: true, enrollment: previous }
+    })
+    await expect(
+      store
+        .getState()
+        .unlockAccountWithQuickMethod(
+          "acct_alpha",
+          "biometric",
+          enrollmentArgs.canonicalSecret,
+          controller.signal
+        )
+    ).rejects.toThrow("Account changed")
+    expect(mockUpdateQuickUnlock).not.toHaveBeenCalled()
+    expect(mockActivateAccountLocalState).not.toHaveBeenCalled()
+    expect(store.getState().locked).toBe(true)
+  })
+
+  it.each(["abort", "failure"])(
+    "revokes a candidate session after registry %s",
+    async (failure) => {
+      const { store } = prepare()
+      store.setState({ unlockedAccountId: null, locked: true })
+      const controller = new AbortController()
+      const revoke = jest.fn()
+      mockVerifyQuickUnlock.mockImplementationOnce(async (args) => {
+        args.onSessionOpened?.(revoke)
+        return { ok: true, enrollment: previous }
+      })
+      mockUpdateQuickUnlock.mockImplementationOnce(async () => {
+        if (failure === "abort") controller.abort()
+        throw new Error("registry interrupted")
+      })
+      await expect(
+        store
+          .getState()
+          .unlockAccountWithQuickMethod(
+            "acct_alpha",
+            "biometric",
+            enrollmentArgs.canonicalSecret,
+            controller.signal
+          )
+      ).rejects.toThrow("registry interrupted")
+      expect(revoke).toHaveBeenCalled()
+      expect(store.getState().locked).toBe(true)
+      expect(mockActivateAccountLocalState).not.toHaveBeenCalled()
+    }
+  )
+
+  it("cannot activate an old account after cancellation while opening its database", async () => {
+    const { store } = prepare()
+    store.setState({ unlockedAccountId: null, locked: true })
+    const controller = new AbortController()
+    const revoke = jest.fn()
+    mockVerifyQuickUnlock.mockImplementationOnce(async (args) => {
+      args.onSessionOpened?.(revoke)
+      return { ok: true, enrollment: previous }
+    })
+    mockPrepareDatabase.mockImplementationOnce(async () => {
+      controller.abort()
+    })
+    await expect(
+      store
+        .getState()
+        .unlockAccountWithQuickMethod(
+          "acct_alpha",
+          "biometric",
+          enrollmentArgs.canonicalSecret,
+          controller.signal
+        )
+    ).rejects.toThrow("Account changed")
+    expect(revoke).toHaveBeenCalled()
+    expect(store.getState().locked).toBe(true)
+    expect(mockActivateAccountLocalState).not.toHaveBeenCalled()
+  })
+
+  it("does not restore an obsolete enrollment when a replacement wins during unlock", async () => {
+    const { store, setCurrent, getCurrent } = prepare()
+    store.setState({ unlockedAccountId: null, locked: true })
+    const revoke = jest.fn()
+    const replacement = { ...previous, verifier: { nativeKeyId: "replacement-key" }, createdAt: 3 }
+    mockVerifyQuickUnlock.mockImplementationOnce(async (args) => {
+      args.onSessionOpened?.(revoke)
+      setCurrent([replacement])
+      return { ok: true, enrollment: previous }
+    })
+    await expect(
+      store
+        .getState()
+        .unlockAccountWithQuickMethod("acct_alpha", "biometric", enrollmentArgs.canonicalSecret)
+    ).rejects.toThrow("changed concurrently")
+    expect(revoke).toHaveBeenCalled()
+    expect(getCurrent().quickUnlock).toEqual([replacement])
+    expect(mockActivateAccountLocalState).not.toHaveBeenCalled()
+  })
+
+  it("transfers session ownership before success unmount aborts the unlock caller", async () => {
+    const { store } = prepare()
+    store.setState({ unlockedAccountId: null, locked: true })
+    const controller = new AbortController()
+    const revoke = jest.fn()
+    mockVerifyQuickUnlock.mockImplementationOnce(async (args) => {
+      args.onSessionOpened?.(revoke)
+      return { ok: true, enrollment: previous }
+    })
+    const unsubscribe = store.subscribe((state) => {
+      if (!state.locked && state.unlockedAccountId === "acct_alpha") controller.abort()
+    })
+    try {
+      await expect(
+        store
+          .getState()
+          .unlockAccountWithQuickMethod(
+            "acct_alpha",
+            "biometric",
+            enrollmentArgs.canonicalSecret,
+            controller.signal
+          )
+      ).resolves.toMatchObject({ ok: true })
+      expect(controller.signal.aborted).toBe(true)
+      expect(revoke).not.toHaveBeenCalled()
+      expect(store.getState().locked).toBe(false)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it("invalidates pending native proof as soon as lock starts, before teardown resolves", async () => {
+    const { store } = prepare()
+    let releaseTeardown!: () => void
+    const teardown = new Promise<void>((resolve) => {
+      releaseTeardown = resolve
+    })
+    mockStopRuntimeSubscriptions.mockReturnValueOnce(teardown)
+    let locking: Promise<void> | undefined
+    const revision = store.getState().accountRevision
+    mockVerifyQuickUnlock.mockImplementationOnce(async (args) => {
+      expect(args.isCurrent?.()).toBe(true)
+      locking = store.getState().lock()
+      expect(args.isCurrent?.()).toBe(false)
+      return { ok: true, enrollment: previous }
+    })
+    try {
+      await expect(
+        store
+          .getState()
+          .unlockAccountWithQuickMethod("acct_alpha", "biometric", enrollmentArgs.canonicalSecret)
+      ).rejects.toThrow("Account changed")
+      expect(mockUpdateQuickUnlock).not.toHaveBeenCalled()
+      expect(store.getState().accountRevision).toBe(revision + 1)
+    } finally {
+      releaseTeardown()
+      await locking
+    }
+    expect(store.getState().locked).toBe(true)
+    expect(store.getState().accountRevision).toBe(revision + 1)
+  })
+
+  it("passes native key metadata to method removal", async () => {
+    const { store } = prepare()
+    await store.getState().removeQuickUnlockMethod("acct_alpha", "biometric")
+    expect(mockRemoveQuickUnlock).toHaveBeenCalledWith("acct_alpha", "biometric", previous.verifier)
+  })
+
+  it("cleans an account's native key only after the registry accepts deletion", async () => {
+    const { store } = prepare()
+    const beta = account("acct_beta", "Beta")
+    store.setState({
+      accounts: [...store.getState().accounts, beta],
+      activeAccountId: beta.id,
+      unlockedAccountId: beta.id,
+    })
+    mockDeleteRegistryAccount.mockRejectedValueOnce(new Error("delete refused"))
+    await expect(store.getState().deleteAccount("acct_alpha")).rejects.toThrow("delete refused")
+    expect(mockRemoveNativeBiometricSecret).not.toHaveBeenCalled()
+    mockDeleteRegistryAccount.mockResolvedValueOnce(undefined)
+    await store.getState().deleteAccount("acct_alpha")
+    expect(mockRemoveNativeBiometricSecret).toHaveBeenCalledWith("acct_alpha", "old-key")
+  })
+
+  it("restores metadata when the account locks while the registry write is pending", async () => {
+    const { store, getCurrent, setCurrent } = prepare()
+    mockUpdateQuickUnlock.mockImplementationOnce(async (_id, next) => {
+      setCurrent(next)
+      store.setState({ unlockedAccountId: null, locked: true, accountRevision: 1 })
+      return getCurrent()
+    })
+    await expect(store.getState().enrollQuickUnlockMethod(enrollmentArgs)).rejects.toThrow(
+      "Account locked or changed"
+    )
+    expect(getCurrent().quickUnlock).toEqual([previous])
+    expect(mockRemoveNativeBiometricSecret).not.toHaveBeenCalled()
+  })
+})
+
 beforeEach(() => {
   jest.clearAllMocks()
+  mockEnrollQuickUnlock.mockImplementation(async (args) => {
+    const enrollment = {
+      method: args.method,
+      verifier: { storage: "browser-vault", createdAt: 2 },
+      createdAt: 2,
+      failedAttempts: 0,
+    }
+    await args.persist?.(enrollment)
+    return enrollment
+  })
   mockDesktopLocalEnabled = false
+  mockDeviceUnlockSupported = null
   mockSaveDesktopRecovery.mockResolvedValue()
   mockReadDesktopRecovery.mockResolvedValue("preserved-recovery-key")
   mockClearDesktopRecovery.mockResolvedValue()
@@ -2007,6 +2381,22 @@ describe("unlock automatically on this device", () => {
         autoUnlockFailure: null,
         error: null,
       })
+    })
+
+    it("opens a remembered profile on native mobile, where the desktop workspace does not exist", async () => {
+      mockDesktopLocalEnabled = false
+      mockDeviceUnlockSupported = true
+      mockIsTauri = false
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+      const store = makeStore()
+
+      await store.getState().load()
+
+      expect(mockDesktopLocalPassword).not.toHaveBeenCalled()
+      expect(mockReadDeviceUnlockSecret).toHaveBeenCalledWith(id)
+      expect(store.getState()).toMatchObject({ unlockedAccountId: id, locked: false })
     })
 
     it("falls back to the lock screen when the secret store cannot be read, keeping the secret", async () => {

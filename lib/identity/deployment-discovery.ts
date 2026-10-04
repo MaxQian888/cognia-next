@@ -26,6 +26,23 @@
  * A single-user deployment, or no host at all, is the ordinary case for most
  * installs and is reported as `none` with the reason, so the gate can let the
  * person straight through instead of treating an absent server as a fault.
+ *
+ * # A paired Host this build can only reach over the relay
+ *
+ * A LAN Host presents a self-signed certificate that the pairing pinned by
+ * SPKI. A native HTTP stack that cannot attest pin enforcement refuses the
+ * direct request before it leaves the device (`native_spki_pinning_unavailable`),
+ * and every companion RPC goes over the relay data lane instead, which the
+ * pairing's room keys authenticate end to end (ADR-0170). `/api/auth/config`
+ * is plain HTTP with no relay equivalent, so asking it directly can never
+ * succeed on such a build. That used to surface as `unavailable`, a full-screen
+ * "cannot sign in" in front of a phone whose Host link worked.
+ *
+ * When the paired Host (not a deployment the profile chose) is that Host and
+ * the pairing carries a relay room, this reports `none` / `host-link-only`:
+ * there is nothing this device can ask, and the link it does have is the
+ * device-key-authenticated one, which needs no cloud session. A pairing with
+ * no relay room has no route to the Host at all, and stays `unavailable`.
  */
 
 import {
@@ -37,6 +54,7 @@ import {
 } from "@/lib/tauri/companion-auth"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
+import { NATIVE_SPKI_PINNING_UNAVAILABLE } from "@/lib/tauri/pinned-fetch"
 import { loadCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import { loadDeploymentSource, type DeploymentSource } from "./deployment-source"
 
@@ -60,7 +78,15 @@ export const KNOWN_SOCIAL_PROVIDERS: ReadonlySet<string> = new Set([
 ])
 
 export type DeploymentDiscovery =
-  | { status: "none"; reason: "no-host" | "single-user" | "server-stopped" }
+  | {
+      status: "none"
+      /**
+       * `host-link-only`: the paired Host can only be reached over the relay
+       * data lane, which carries RPCs but not its plain-HTTP auth config (see
+       * the module docs). The gate passes; nothing about the Host link changes.
+       */
+      reason: "no-host" | "single-user" | "server-stopped" | "host-link-only"
+    }
   | {
       status: "unavailable"
       reason: "unreachable" | "malformed"
@@ -122,43 +148,85 @@ function sameOriginHost(): string | null {
 export async function resolveDiscoverySource(
   deps: DiscoverDeploymentDeps = {}
 ): Promise<DiscoverySource | { none: "no-host" | "server-stopped" }> {
+  const resolved = await resolveSourceWithOrigin(deps)
+  return "none" in resolved ? resolved : resolved.source
+}
+
+/**
+ * {@link resolveDiscoverySource}, plus the pairing the source was read from
+ * when it is the paired Host rather than a deployment the profile chose.
+ */
+async function resolveSourceWithOrigin(
+  deps: DiscoverDeploymentDeps
+): Promise<
+  | { source: DiscoverySource; pairing: CompanionConfig | null }
+  | { none: "no-host" | "server-stopped" }
+> {
   const profile = deps.profile ?? detectHostProfile()
   if (profile === "headless") return { none: "no-host" }
   const chosen = (
     deps.deploymentSource ?? (() => loadDeploymentSource(deps.localAccountId ?? null))
   )()
   if (chosen) {
-    return chosen.fingerprint
-      ? { baseUrl: chosen.baseUrl, fingerprint: chosen.fingerprint }
-      : { baseUrl: chosen.baseUrl }
+    return {
+      source: chosen.fingerprint
+        ? { baseUrl: chosen.baseUrl, fingerprint: chosen.fingerprint }
+        : { baseUrl: chosen.baseUrl },
+      pairing: null,
+    }
   }
   switch (profile) {
     case "desktop": {
       const status = await (deps.serverStatus ?? desktopServerStatus)()
       if (status.running && status.boundPort) {
-        return { baseUrl: `http://127.0.0.1:${status.boundPort}` }
+        return { source: { baseUrl: `http://127.0.0.1:${status.boundPort}` }, pairing: null }
       }
       const built = (deps.buildTimeUrl ?? buildTimeServerUrl)()
-      return built ? { baseUrl: built } : { none: "server-stopped" }
+      return built ? { source: { baseUrl: built }, pairing: null } : { none: "server-stopped" }
     }
     case "cloud-companion":
     case "mobile-companion": {
       const config = (deps.companionConfig ?? loadCompanionConfig)()
       if (config?.baseUrl) {
-        return config.serverFingerprint
-          ? { baseUrl: config.baseUrl, fingerprint: config.serverFingerprint }
-          : { baseUrl: config.baseUrl }
+        return {
+          source: config.serverFingerprint
+            ? { baseUrl: config.baseUrl, fingerprint: config.serverFingerprint }
+            : { baseUrl: config.baseUrl },
+          pairing: config,
+        }
       }
       const built = (deps.buildTimeUrl ?? buildTimeServerUrl)()
-      return built ? { baseUrl: built } : { none: "no-host" }
+      return built ? { source: { baseUrl: built }, pairing: null } : { none: "no-host" }
     }
     case "web-standalone": {
       const built = (deps.buildTimeUrl ?? buildTimeServerUrl)()
-      if (built) return { baseUrl: built }
+      if (built) return { source: { baseUrl: built }, pairing: null }
       const own = (deps.sameOrigin ?? sameOriginHost)()
-      return own ? { baseUrl: own } : { none: "no-host" }
+      return own ? { source: { baseUrl: own }, pairing: null } : { none: "no-host" }
     }
   }
+}
+
+/**
+ * Whether a pairing has the relay room the companion transport falls back to
+ * when the direct pinned route is refused — the same three facts
+ * `CompanionTransport.awaitRelayRoute` requires, with the private key in either
+ * the runtime or the persisted form.
+ */
+function pairingHasRelayRoom(pairing: CompanionConfig): boolean {
+  return Boolean(
+    pairing.rendezvousId &&
+    pairing.signalingRoomDescriptor &&
+    (pairing.signalingPrivateKey || pairing.signalingPrivateKeyJwk)
+  )
+}
+
+function isPinningUnavailable(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === NATIVE_SPKI_PINNING_UNAVAILABLE
+  )
 }
 
 /** Ask the host what it offers. Never throws: every failure is a state. */
@@ -167,11 +235,21 @@ export async function discoverDeployment(
 ): Promise<DeploymentDiscovery> {
   let source: DiscoverySource | undefined
   try {
-    const resolved = await resolveDiscoverySource(deps)
+    const resolved = await resolveSourceWithOrigin(deps)
     if ("none" in resolved) return { status: "none", reason: resolved.none }
-    source = resolved
+    source = resolved.source
+    const { pairing } = resolved
     const fetchConfig = deps.fetchConfig ?? fetchCompanionAuthConfig
-    const config = await fetchConfig(source.baseUrl, source.fingerprint)
+    let config: CompanionAuthConfig
+    try {
+      config = await fetchConfig(source.baseUrl, source.fingerprint)
+    } catch (error) {
+      // See "A paired Host this build can only reach over the relay" above.
+      if (pairing && isPinningUnavailable(error) && pairingHasRelayRoom(pairing)) {
+        return { status: "none", reason: "host-link-only" }
+      }
+      throw error
+    }
     if (config.deploymentMode !== "multi-tenant" || !config.oidc) {
       return { status: "none", reason: "single-user" }
     }

@@ -21,8 +21,9 @@
  *
  * Off (the shipped default, `DEFAULT_BIOMETRIC_GUARD.revealSecrets === false`)
  * the reveal runs synchronously in the same tick — adopting this hook changes
- * nothing until the user turns the row on. On a platform with no biometric
- * enrolled the underlying guard falls through, so desktop and web keep working.
+ * nothing until the user turns the row on. A required mobile gate blocks when
+ * no biometric is enrolled; unsupported desktop and web retain their explicit
+ * exception. Temporary hardware failures and lockout never authorize disclosure.
  */
 
 import { useCallback } from "react"
@@ -31,10 +32,11 @@ import { useTranslations } from "next-intl"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
+import { isMobile } from "@/lib/capacitor/_shared"
 
 export type SecretRevealOutcome = "revealed" | "blocked"
 
-export type SecretRevealGate = (reveal: () => void) => Promise<SecretRevealOutcome>
+export type SecretRevealGate = (reveal: () => void | Promise<void>) => Promise<SecretRevealOutcome>
 
 export function useSecretReveal(): SecretRevealGate {
   const guard = useBiometricGuard()
@@ -44,9 +46,9 @@ export function useSecretReveal(): SecretRevealGate {
     DEFAULT_BIOMETRIC_GUARD.revealSecrets
 
   return useCallback(
-    async (reveal: () => void) => {
+    async (reveal: () => void | Promise<void>) => {
       if (!required) {
-        reveal()
+        await reveal()
         return "revealed"
       }
       const outcome = await guard(
@@ -54,9 +56,10 @@ export function useSecretReveal(): SecretRevealGate {
           reason: t("reason"),
           title: t("title"),
           description: t("description"),
+          fallthroughWhenUnavailable: !isMobile(),
         },
         async () => {
-          reveal()
+          await reveal()
         }
       )
       return outcome.kind === "ok" ? "revealed" : "blocked"

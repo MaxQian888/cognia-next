@@ -8,6 +8,8 @@ let guardResult: { kind: "ok"; value: undefined } | { kind: "blocked"; reason: s
   value: undefined,
 }
 const guardCalls: unknown[] = []
+let mobile = true
+jest.mock("@/lib/capacitor/_shared", () => ({ isMobile: () => mobile }))
 
 jest.mock("@/hooks/use-biometric-guard", () => ({
   useBiometricGuard: () => async (prompt: unknown, action: () => Promise<void>) => {
@@ -33,6 +35,7 @@ beforeEach(() => {
   guardCalls.length = 0
   guardResult = { kind: "ok", value: undefined }
   policy.value = undefined
+  mobile = true
 })
 
 function gate() {
@@ -60,6 +63,31 @@ describe("useSecretReveal", () => {
     await expect(gate()(reveal)).resolves.toBe("revealed")
     expect(guardCalls).toHaveLength(1)
     expect(reveal).toHaveBeenCalledTimes(1)
+    expect(guardCalls[0]).toMatchObject({ fallthroughWhenUnavailable: false })
+  })
+
+  it("keeps the explicit unsupported-platform exception on desktop and web", async () => {
+    mobile = false
+    policy.value = { revealSecrets: true }
+    await gate()(jest.fn())
+    expect(guardCalls[0]).toMatchObject({ fallthroughWhenUnavailable: true })
+  })
+
+  it("does not reveal on mobile without enrolled biometrics when required", async () => {
+    policy.value = { revealSecrets: true }
+    guardResult = { kind: "blocked", reason: "unavailable" }
+    const reveal = jest.fn()
+    await expect(gate()(reveal)).resolves.toBe("blocked")
+    expect(guardCalls[0]).toMatchObject({ fallthroughWhenUnavailable: false })
+    expect(reveal).not.toHaveBeenCalled()
+  })
+
+  it("waits for asynchronous disclosure and propagates clipboard failures", async () => {
+    policy.value = { revealSecrets: true }
+    const copy = jest.fn(async () => {
+      throw new Error("clipboard failed")
+    })
+    await expect(gate()(copy)).rejects.toThrow("clipboard failed")
   })
 
   it("leaves the secret masked when the prompt is refused", async () => {
@@ -75,7 +103,9 @@ describe("useSecretReveal", () => {
     // otherwise flicker for every user who never turns the row on.
     const seen: string[] = []
     const g = gate()
-    const promise = g(() => seen.push("revealed"))
+    const promise = g(() => {
+      seen.push("revealed")
+    })
     seen.push("after-call")
     await promise
     expect(seen).toEqual(["revealed", "after-call"])
@@ -98,6 +128,7 @@ describe("every stored-secret reveal routes through the gate", () => {
   const LIVE_INPUT_FIELDS = [
     "components/data/shared/passphrase-input.tsx",
     "components/account/account-lock-screen.tsx",
+    "components/browser/vault/browser-credential-form-dialog.tsx",
   ]
 
   function walk(dir: string, acc: string[] = []): string[] {

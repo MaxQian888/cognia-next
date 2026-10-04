@@ -15,6 +15,15 @@ jest.mock("next-intl", () => ({
 }))
 
 let passkeySupported = true
+let mockMobile = false
+const mockNativeEnrollment = jest.fn()
+jest.mock("@/lib/capacitor/_shared", () => ({
+  ...jest.requireActual("@/lib/capacitor/_shared"),
+  isMobile: () => mockMobile,
+}))
+jest.mock("@/lib/accounts/quick-unlock/native-biometric", () => ({
+  enrollNativeBiometric: (...args: unknown[]) => mockNativeEnrollment(...args),
+}))
 const enrollPasskey = jest.fn()
 jest.mock("@/lib/accounts/quick-unlock/passkey", () => ({
   isPasskeySupported: () => passkeySupported,
@@ -70,9 +79,218 @@ async function flush(): Promise<void> {
 beforeEach(() => {
   jest.clearAllMocks()
   passkeySupported = true
+  mockMobile = false
+  mockNativeEnrollment.mockReset()
 })
 
 describe("QuickUnlockSettings", () => {
+  it("offers native biometrics only on mobile and does not offer passkeys there", () => {
+    mockMobile = true
+    renderSettings()
+    expect(screen.getByTestId("quick-unlock-add-biometric")).toBeDisabled()
+    expect(screen.queryByTestId("quick-unlock-add-passkey")).not.toBeInTheDocument()
+    typePassword()
+    expect(screen.getByTestId("quick-unlock-add-biometric")).toBeEnabled()
+  })
+
+  it("does not offer native biometrics on desktop or web", () => {
+    renderSettings()
+    expect(screen.queryByTestId("quick-unlock-add-biometric")).not.toBeInTheDocument()
+    expect(screen.getByTestId("quick-unlock-add-passkey")).toBeInTheDocument()
+  })
+
+  it("passes protected native key material and metadata to password-validated enrollment", async () => {
+    mockMobile = true
+    mockNativeEnrollment.mockImplementation(async ({ commit }) => {
+      await commit("biometric:protected-secret", "account-scoped-key-id")
+      return { ok: true }
+    })
+    const { onEnroll } = renderSettings()
+    typePassword("account-password")
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+    await flush()
+    expect(mockNativeEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "acct-001",
+        prompt: expect.objectContaining({
+          title: expect.any(String),
+          reason: expect.any(String),
+          negativeButtonText: expect.any(String),
+        }),
+      })
+    )
+    expect(onEnroll).toHaveBeenCalledWith({
+      accountId: "acct-001",
+      method: "biometric",
+      canonicalSecret: "biometric:protected-secret",
+      password: "account-password",
+      verifier: { nativeKeyId: "account-scoped-key-id" },
+      signal: mockNativeEnrollment.mock.calls[0][0].signal,
+    })
+    expect(screen.getByTestId("quick-unlock-password")).toHaveValue("")
+    expect(screen.queryByTestId("quick-unlock-draft")).not.toBeInTheDocument()
+  })
+
+  it.each(["cancelled", "failed", "lockout", "unavailable"])(
+    "does not enroll when native biometric setup is %s",
+    async (reason) => {
+      mockMobile = true
+      mockNativeEnrollment.mockResolvedValue({ ok: false, reason })
+      const { onEnroll } = renderSettings()
+      typePassword()
+      fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+      fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+      await flush()
+      expect(onEnroll).not.toHaveBeenCalled()
+      expect(screen.getByRole("alert")).toHaveTextContent(`biometricFailure.${reason}`)
+      expect(screen.getByTestId("quick-unlock-cancel")).toBeEnabled()
+    }
+  )
+
+  it("reports an unexpected native rejection and releases the setup controls", async () => {
+    mockMobile = true
+    mockNativeEnrollment.mockRejectedValue(new Error("native rejected"))
+    renderSettings()
+    typePassword()
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+    await flush()
+    expect(screen.getByRole("alert")).toHaveTextContent("enrollFailed")
+    expect(screen.getByTestId("quick-unlock-enroll-biometric")).toBeEnabled()
+  })
+
+  it("does not commit a native candidate after switching accounts", async () => {
+    mockMobile = true
+    let commit!: (secret: string, keyId: string) => Promise<void>
+    let finish!: (value: unknown) => void
+    mockNativeEnrollment.mockImplementation((args) => {
+      commit = args.commit
+      return new Promise((resolve) => {
+        finish = resolve
+      })
+    })
+    const onEnroll = jest.fn(async () => {})
+    const props = { account: account(), onEnroll, onRemove: jest.fn(), onClearLockout: jest.fn() }
+    const { rerender } = render(<QuickUnlockSettings {...props} />)
+    typePassword()
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+    rerender(<QuickUnlockSettings {...props} account={{ ...account(), id: "acct-002" }} />)
+    await expect(commit("protected-secret", "candidate-key")).rejects.toThrow()
+    await act(async () => {
+      finish({ ok: false, reason: "failed" })
+    })
+    expect(onEnroll).not.toHaveBeenCalled()
+    expect(screen.getByTestId("quick-unlock-password")).toHaveValue("")
+  })
+
+  it("aborts backend enrollment verification when its account UI unmounts", async () => {
+    mockMobile = true
+    mockNativeEnrollment.mockImplementation(async ({ commit }) => {
+      await commit("protected-secret", "candidate-key")
+      return { ok: true }
+    })
+    let finish!: () => void
+    const onEnroll = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const { unmount } = render(
+      <QuickUnlockSettings
+        account={account()}
+        onEnroll={onEnroll}
+        onRemove={jest.fn()}
+        onClearLockout={jest.fn()}
+      />
+    )
+    typePassword()
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+    await flush()
+    const signal = mockNativeEnrollment.mock.calls[0][0].signal as AbortSignal
+    expect(onEnroll).toHaveBeenCalledWith(expect.objectContaining({ signal }))
+    expect(signal.aborted).toBe(false)
+    unmount()
+    expect(signal.aborted).toBe(true)
+    await act(async () => {
+      finish()
+    })
+  })
+
+  it("requires the account password even after opening the native enrollment draft", () => {
+    mockMobile = true
+    renderSettings()
+    typePassword()
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    typePassword("")
+    expect(screen.getByTestId("quick-unlock-enroll-biometric")).toBeDisabled()
+    expect(mockNativeEnrollment).not.toHaveBeenCalled()
+  })
+
+  it("does not complete enrollment when backend password verification fails", async () => {
+    mockMobile = true
+    mockNativeEnrollment.mockImplementation(async ({ commit }) => {
+      try {
+        await commit("protected-secret", "candidate-key")
+        return { ok: true }
+      } catch {
+        return { ok: false, reason: "failed" }
+      }
+    })
+    const onEnroll = jest.fn(async () => {
+      throw new Error("Invalid password")
+    })
+    render(
+      <QuickUnlockSettings
+        account={account()}
+        onEnroll={onEnroll}
+        onRemove={jest.fn()}
+        onClearLockout={jest.fn()}
+      />
+    )
+    typePassword("wrong-password")
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+    await flush()
+    expect(onEnroll).toHaveBeenCalledWith(expect.objectContaining({ password: "wrong-password" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("biometricFailure.failed")
+    expect(screen.getByTestId("quick-unlock-draft")).toBeInTheDocument()
+  })
+
+  it("aborts native enrollment on unmount so a late candidate cannot be committed", async () => {
+    mockMobile = true
+    let request!: { signal: AbortSignal; commit: (secret: string, key: string) => Promise<void> }
+    let finish!: (value: unknown) => void
+    mockNativeEnrollment.mockImplementation((args) => {
+      request = args
+      return new Promise((resolve) => {
+        finish = resolve
+      })
+    })
+    const onEnroll = jest.fn()
+    const { unmount } = render(
+      <QuickUnlockSettings
+        account={account()}
+        onEnroll={onEnroll}
+        onRemove={jest.fn()}
+        onClearLockout={jest.fn()}
+      />
+    )
+    typePassword()
+    fireEvent.click(screen.getByTestId("quick-unlock-add-biometric"))
+    fireEvent.click(screen.getByTestId("quick-unlock-enroll-biometric"))
+    unmount()
+    expect(request.signal.aborted).toBe(true)
+    await expect(request.commit("secret", "candidate-key")).rejects.toThrow("cancelled")
+    await act(async () => {
+      finish({ ok: false, reason: "cancelled" })
+    })
+    expect(onEnroll).not.toHaveBeenCalled()
+  })
+
   it("says when nothing is set up", () => {
     renderSettings()
     expect(screen.getByText(/settings.none/)).toBeInTheDocument()

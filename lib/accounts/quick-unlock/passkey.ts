@@ -29,6 +29,8 @@
  * than offering a button that leads nowhere.
  */
 
+import { isMobile } from "@/lib/capacitor/_shared"
+
 /** The relying-party id. Derived from the origin, never hardcoded. */
 function relyingPartyId(): string {
   if (typeof window === "undefined") return "localhost"
@@ -69,6 +71,9 @@ export type PasskeyResult<T> = { ok: true; value: T } | { ok: false; reason: Pas
  */
 export function isPasskeySupported(): boolean {
   return (
+    // Native account unlock uses protected system storage. The local Capacitor
+    // origin has no WebAuthn app/domain association, even if JS APIs exist.
+    !isMobile() &&
     typeof window !== "undefined" &&
     typeof window.PublicKeyCredential === "function" &&
     typeof navigator !== "undefined" &&

@@ -250,6 +250,87 @@ describe("discoverDeployment", () => {
     })
   })
 
+  describe("a paired Host this build can only reach over the relay", () => {
+    const pinningRefused = async (): Promise<CompanionAuthConfig> => {
+      throw Object.assign(
+        new Error(
+          "native_spki_pinning_unavailable: the native HTTP transport cannot attest SPKI enforcement"
+        ),
+        { code: "native_spki_pinning_unavailable" }
+      )
+    }
+    const pairing = (relay: boolean) =>
+      ({
+        baseUrl: "https://192.168.1.4:27890",
+        serverFingerprint: "ab",
+        deviceId: "device-a",
+        serverVersion: "test",
+        ...(relay
+          ? {
+              rendezvousId: "room-a",
+              signalingRoomDescriptor: { roomId: "room-a" },
+              signalingPrivateKeyJwk: { kty: "EC" },
+            }
+          : {}),
+      }) as never
+
+    it("lets the paired phone through instead of blocking it on an unaskable config", async () => {
+      const result = await discoverDeployment({
+        profile: "mobile-companion",
+        deploymentSource: () => null,
+        companionConfig: () => pairing(true),
+        fetchConfig: pinningRefused,
+      })
+      expect(result).toEqual({ status: "none", reason: "host-link-only" })
+    })
+
+    it("still reports a pairing with no relay room as unavailable: it has no route at all", async () => {
+      const result = await discoverDeployment({
+        profile: "mobile-companion",
+        deploymentSource: () => null,
+        companionConfig: () => pairing(false),
+        fetchConfig: pinningRefused,
+      })
+      expect(result).toMatchObject({
+        status: "unavailable",
+        baseUrl: "https://192.168.1.4:27890",
+        message: expect.stringContaining("native_spki_pinning_unavailable"),
+      })
+    })
+
+    it("does not excuse a deployment the profile chose, which is not the paired Host", async () => {
+      const result = await discoverDeployment({
+        profile: "mobile-companion",
+        deploymentSource: () => ({ baseUrl: "https://192.168.1.4:27890", fingerprint: "ab" }),
+        companionConfig: () => pairing(true),
+        fetchConfig: pinningRefused,
+      })
+      expect(result).toMatchObject({ status: "unavailable" })
+    })
+
+    it("does not excuse any other failure to read the paired Host", async () => {
+      const result = await discoverDeployment({
+        profile: "mobile-companion",
+        deploymentSource: () => null,
+        companionConfig: () => pairing(true),
+        fetchConfig: async () => {
+          throw new Error("fetch failed")
+        },
+      })
+      expect(result).toMatchObject({ status: "unavailable", message: "fetch failed" })
+    })
+
+    it("still reads the config when the direct route works", async () => {
+      const result = await discoverDeployment({
+        profile: "mobile-companion",
+        deploymentSource: () => null,
+        companionConfig: () => pairing(true),
+        fetchConfig: async () => MULTI,
+      })
+      expect(result).toMatchObject({ status: "ready", baseUrl: "https://192.168.1.4:27890" })
+    })
+  })
+
   it("passes a stopped desktop server through as none", async () => {
     const fetchConfig = jest.fn()
     expect(

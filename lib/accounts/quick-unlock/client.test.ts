@@ -5,6 +5,12 @@ import { MAX_QUICK_UNLOCK_ATTEMPTS, type QuickUnlockEnrollment } from "./types"
 
 let tauri = false
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => tauri }))
+let mobile = false
+jest.mock("@/lib/capacitor/_shared", () => ({ isMobile: () => mobile }))
+const removeNativeBiometricSecret = jest.fn<Promise<void>, [string, string]>(async () => {})
+jest.mock("./native-biometric", () => ({
+  removeNativeBiometricSecret: (...args: [string, string]) => removeNativeBiometricSecret(...args),
+}))
 
 const invoke = jest.fn()
 // The client reaches Rust through the transport seam, not `@tauri-apps/api`
@@ -14,7 +20,12 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: { call: (...args: Parameters<typeof invoke>) => invoke(...args) },
 }))
 
-const enrollBrowserVaultQuickUnlock = jest.fn(async () => ({ createdAt: 5 }))
+const enrollBrowserVaultQuickUnlock = jest.fn(
+  async (args?: { persist?: (wrap: { createdAt: number }) => Promise<void> }) => {
+    await args?.persist?.({ createdAt: 5 })
+    return { createdAt: 5 }
+  }
+)
 const unlockBrowserVaultWithQuickSecret = jest.fn(async () => {})
 const removeBrowserVaultQuickUnlock = jest.fn(async () => {})
 jest.mock("@/lib/runtime/browser-vault", () => ({
@@ -63,9 +74,46 @@ function enrollment(patch: Partial<QuickUnlockEnrollment> = {}): QuickUnlockEnro
 beforeEach(() => {
   jest.clearAllMocks()
   tauri = false
+  mobile = false
 })
 
 describe("enrollQuickUnlock", () => {
+  it("persists the enrollment within the browser vault callback and propagates rejection", async () => {
+    const persist = jest.fn().mockRejectedValue(new Error("registry write failed"))
+    await expect(
+      enrollQuickUnlock({
+        accountId: "acct-001",
+        method: "pin",
+        canonicalSecret: "pin:428193",
+        password: "pw",
+        passwordVerifier,
+        now: 300,
+        persist,
+      })
+    ).rejects.toThrow("registry write failed")
+    expect(persist).toHaveBeenCalledWith({
+      method: "pin",
+      verifier: { storage: "browser-vault", createdAt: 5 },
+      createdAt: 300,
+      failedAttempts: 0,
+    })
+  })
+
+  it("requires native protected material for biometric enrollment", async () => {
+    const args = {
+      accountId: "acct-001",
+      method: "biometric" as const,
+      canonicalSecret: `biometric:${"a".repeat(64)}`,
+      password: "pw",
+      passwordVerifier,
+    }
+    await expect(enrollQuickUnlock(args)).rejects.toThrow("protected mobile key material")
+    mobile = true
+    await expect(
+      enrollQuickUnlock({ ...args, canonicalSecret: "biometric:short" })
+    ).rejects.toThrow("protected mobile key material")
+    await expect(enrollQuickUnlock(args)).resolves.toMatchObject({ method: "biometric" })
+  })
   it("mints a Rust verifier on the desktop host", async () => {
     tauri = true
     invoke.mockResolvedValue({ algorithm: "argon2id-quick-v1", salt: "s", hash: "h" })
@@ -123,6 +171,25 @@ describe("enrollQuickUnlock", () => {
 })
 
 describe("verifyQuickUnlock", () => {
+  it("forwards cancellation and exact-session revocation through the browser unlock boundary", async () => {
+    const isCurrent = () => true
+    const onSessionOpened = jest.fn()
+    await verifyQuickUnlock({
+      accountId: "acct-001",
+      enrollment: enrollment({ method: "biometric" }),
+      canonicalSecret: "biometric:secret",
+      passwordVerifier,
+      isCurrent,
+      onSessionOpened,
+    })
+    expect(unlockBrowserVaultWithQuickSecret).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isCurrent,
+        onSessionOpened,
+      })
+    )
+  })
+
   it("opens the account on the desktop host", async () => {
     tauri = true
     invoke.mockResolvedValue(true)
@@ -239,6 +306,11 @@ describe("verifyQuickUnlock", () => {
 })
 
 describe("removeQuickUnlock", () => {
+  it("cleans the native biometric key named by the removed enrollment", async () => {
+    await removeQuickUnlock("acct-001", "biometric", { nativeKeyId: "native-old" })
+    expect(removeNativeBiometricSecret).toHaveBeenCalledWith("acct-001", "native-old")
+    expect(removeBrowserVaultQuickUnlock).toHaveBeenCalledWith("acct-001", "biometric")
+  })
   it("drops the browser wrap", async () => {
     await removeQuickUnlock("acct-001", "pin")
     expect(removeBrowserVaultQuickUnlock).toHaveBeenCalledWith("acct-001", "pin")

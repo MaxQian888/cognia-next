@@ -1,5 +1,5 @@
 /**
- * Quick unlock: PIN, pattern and passkey.
+ * Quick unlock: PIN, pattern, passkey and native biometrics.
  *
  * The single most important thing about this module is what these methods are
  * NOT. They are convenience factors layered on top of the account password,
@@ -25,12 +25,20 @@
  * an authenticator via the WebAuthn PRF extension, so it is full-entropy and
  * needs no pepper. It is still enrolled the same way and still cannot replace
  * the password, because an authenticator can be lost.
+ * Native biometrics instead release a random device-local secret from protected
+ * OS storage. The registry holds only its key identifier; OS enrollment
+ * invalidation rules apply, and the password remains the recovery path.
  */
 
 /** The quick-unlock methods a user can enroll. */
-export type QuickUnlockMethod = "pin" | "pattern" | "passkey"
+export type QuickUnlockMethod = "pin" | "pattern" | "passkey" | "biometric"
 
-export const QUICK_UNLOCK_METHODS: readonly QuickUnlockMethod[] = ["pin", "pattern", "passkey"]
+export const QUICK_UNLOCK_METHODS: readonly QuickUnlockMethod[] = [
+  "pin",
+  "pattern",
+  "passkey",
+  "biometric",
+]
 
 /** PIN length bounds. Six is the floor everyone recognises from a phone. */
 export const MIN_PIN_LENGTH = 6

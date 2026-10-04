@@ -58,14 +58,15 @@ export function useBiometricGuard(): BiometricGuard {
     const fallthrough = gate.fallthroughWhenUnavailable ?? true
 
     const avail = await isAvailable()
-    const noEnroll = avail.kind === "ok" && !avail.value.available
-
-    if (noEnroll && fallthrough) {
-      const value = await action()
-      return { kind: "ok", value }
-    }
-    if (noEnroll) {
-      return { kind: "blocked", reason: "unavailable" }
+    if (avail.kind !== "ok") return { kind: "blocked", reason: "error" }
+    if (!avail.value.available) {
+      const reason = avail.value.reason
+      const canSkip = reason === "unsupported" || reason === "not_enrolled"
+      if (canSkip && fallthrough) return { kind: "ok", value: await action() }
+      return {
+        kind: "blocked",
+        reason: reason === "lockout" ? "lockout" : canSkip ? "unavailable" : "error",
+      }
     }
 
     const verifyOutcome = await verify({
@@ -79,10 +80,8 @@ export function useBiometricGuard(): BiometricGuard {
       const value = await action()
       return { kind: "ok", value }
     }
-    if (verifyOutcome.kind === "unavailable" && fallthrough) {
-      const value = await action()
-      return { kind: "ok", value }
-    }
+    // Availability changed after a successful preflight. Never silently
+    // weaken the gate mid-operation, even if enrollment was just removed.
     return { kind: "blocked", reason: verifyOutcome.kind }
   }, [])
 }

@@ -29,6 +29,7 @@ import {
   usesBrowserVault,
 } from "@/stores/account/account-store"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { useLockedShellChrome } from "@/hooks/account/use-locked-shell-chrome"
 import { AccountLockScreen } from "./account-lock-screen"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 
@@ -393,16 +394,22 @@ async function resetRefusedLocalDatabase(): Promise<void> {
 }
 
 function GateShell({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
+  useLockedShellChrome()
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground">
-      {footer ? (
-        <div className="flex w-full flex-col items-center gap-6 py-6">
-          {children}
-          {footer}
-        </div>
-      ) : (
-        children
-      )}
+    <main
+      className="flex min-h-dvh flex-col items-center bg-background px-5 pt-[max(env(safe-area-inset-top),1.5rem)] pb-[max(env(safe-area-inset-bottom),1.5rem)] text-foreground"
+      data-testid="account-gate-shell"
+    >
+      {/* Optical centre, not geometric: the column sits on 2:3 spacers, a
+          little above the middle. Dead-centred, a short header over a tall
+          form read as sinking to the bottom of a phone screen. The spacers
+          shrink first when the soft keyboard takes the lower half. */}
+      <div aria-hidden="true" className="min-h-4 flex-[2]" />
+      <div className="flex w-full flex-col items-center gap-6">
+        {children}
+        {footer}
+      </div>
+      <div aria-hidden="true" className="min-h-4 flex-[3]" />
     </main>
   )
 }

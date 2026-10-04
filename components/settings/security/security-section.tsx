@@ -16,11 +16,15 @@
 import { useTranslations } from "next-intl"
 import { GitBranchIcon, LockKeyholeIcon, ShieldCheckIcon } from "lucide-react"
 import { motion } from "motion/react"
+import { useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
 import { AutoLockControl } from "@/components/settings/security/auto-lock-control"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
+import { useBiometricPolicyUpdate } from "@/hooks/use-biometric-policy-update"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
@@ -39,26 +43,38 @@ export function SecuritySection() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const guard = useBiometricGuard()
+  const blockReason = useBiometricBlockReason()
+  const { updatePolicy, pending } = useBiometricPolicyUpdate(save)
+  const [testing, setTesting] = useState(false)
+  const testBusy = useRef(false)
 
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
   const childVariants = useReducedMotionVariants(STAGGER_CHILD)
 
-  const update = (patch: Partial<BiometricGuardPolicy>) => {
-    void save({
-      biometricRequiredFor: { ...policy, ...patch },
-    })
-  }
-
-  const onTestPrompt = () => {
-    void guard(
-      {
-        reason: t("testReason"),
-        title: t("testTitle"),
-        description: t("testDescription"),
-        fallthroughWhenUnavailable: false,
-      },
-      async () => undefined
-    )
+  const onTestPrompt = async () => {
+    if (testBusy.current || pending) return
+    testBusy.current = true
+    setTesting(true)
+    try {
+      const outcome = await guard(
+        {
+          reason: t("testReason"),
+          title: t("testTitle"),
+          description: t("testDescription"),
+          fallthroughWhenUnavailable: false,
+        },
+        async () => undefined
+      )
+      if (outcome.kind === "ok") toast.success(t("testSuccess"))
+      else if (outcome.reason !== "cancelled") {
+        toast.error(t("testBlocked", { reason: blockReason(outcome.reason) }))
+      }
+    } catch {
+      toast.error(t("testError"))
+    } finally {
+      testBusy.current = false
+      setTesting(false)
+    }
   }
 
   return (
@@ -81,7 +97,8 @@ export function SecuritySection() {
                 label={t(`rows.${row.key}.label`)}
                 description={t(`rows.${row.key}.help`)}
                 checked={policy[row.key] ?? false}
-                onCheckedChange={(v) => update({ [row.key]: v })}
+                onCheckedChange={(v) => void updatePolicy({ [row.key]: v })}
+                disabled={pending || testing}
               />
             </motion.div>
           ))}
@@ -91,10 +108,11 @@ export function SecuritySection() {
           variant="link"
           size="sm"
           className="px-0"
-          onClick={onTestPrompt}
+          onClick={() => void onTestPrompt()}
+          disabled={pending || testing}
           data-testid="biometric-test"
         >
-          {t("testCta")}
+          {t(testing ? "testPending" : "testCta")}
         </Button>
       </SettingsCard>
 

@@ -16,6 +16,15 @@ jest.mock("next-intl", () => ({
 }))
 
 let mockPlatform = "web"
+let mockNativeMobile = false
+const mockReadNative = jest.fn()
+jest.mock("@/lib/capacitor/_shared", () => ({
+  ...jest.requireActual("@/lib/capacitor/_shared"),
+  isMobile: () => mockNativeMobile,
+}))
+jest.mock("@/lib/accounts/quick-unlock/native-biometric", () => ({
+  readNativeBiometricSecret: (...args: unknown[]) => mockReadNative(...args),
+}))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
 
 const mockCopy = jest.fn()
@@ -65,9 +74,52 @@ function renderScreen(overrides: Partial<React.ComponentProps<typeof AccountLock
 beforeEach(() => {
   jest.clearAllMocks()
   window.localStorage.clear()
+  mockNativeMobile = false
+  mockReadNative.mockReset()
 })
 
 describe("idle state", () => {
+  it("forwards native unlock cancellation when switching the selected account during backend work", async () => {
+    mockNativeMobile = true
+    mockReadNative.mockResolvedValue({ ok: true, value: "biometric:synthetic-proof" })
+    const pending = deferred<{ ok: boolean }>()
+    const onQuickUnlock = jest.fn(() => pending.promise)
+    const quickUnlock = [
+      {
+        method: "biometric" as const,
+        verifier: { nativeKeyId: "synthetic-key" },
+        createdAt: 0,
+        failedAttempts: 0,
+      },
+    ]
+    renderScreen({
+      accounts: [
+        { ...ALPHA, quickUnlock },
+        { ...BETA, quickUnlock },
+      ],
+      onQuickUnlock,
+    })
+    fireEvent.click(screen.getByTestId("quick-unlock-biometric"))
+    await waitFor(() => expect(onQuickUnlock).toHaveBeenCalledTimes(1))
+    const signal = mockReadNative.mock.calls[0][0].signal as AbortSignal
+    expect(onQuickUnlock).toHaveBeenCalledWith(
+      "acct_alpha",
+      "biometric",
+      "biometric:synthetic-proof",
+      signal
+    )
+    expect(signal.aborted).toBe(false)
+    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
+      target: { value: "acct_beta" },
+    })
+    expect(signal.aborted).toBe(true)
+    await act(async () => {
+      pending.resolve({ ok: false })
+    })
+    expect(screen.getByText("unlockTitle:Beta")).toBeInTheDocument()
+    expect(onQuickUnlock).toHaveBeenCalledTimes(1)
+  })
+
   it("focuses the password field so keystrokes land somewhere", () => {
     renderScreen()
     expect(screen.getByLabelText("passwordLabel")).toHaveFocus()
@@ -103,6 +155,26 @@ describe("idle state", () => {
     fireEvent.change(field, { target: { value: "abc123456" } })
     fireEvent.blur(field)
     expect(field).toHaveValue("abc123456")
+  })
+
+  it("unlocks with what the field shows when an IME committed it without a change event", async () => {
+    // FINDINGS #4: the first attempt reported "Enter your password" because
+    // state only held what React had seen, not what the keyboard committed.
+    const { props } = renderScreen()
+    const field = screen.getByLabelText("passwordLabel") as HTMLInputElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+    setValue.call(field, "abc123456")
+    fireEvent.click(screen.getByTestId("account-lock-screen-submit"))
+    await waitFor(() => expect(props.onUnlock).toHaveBeenCalledWith("acct_alpha", "abc123456"))
+  })
+
+  it("shows the whole display name, wrapping instead of cutting it off", () => {
+    const longName = "Maxqian888 的个人工作区（测试设备）"
+    renderScreen({ accounts: [account("acct_alpha", longName)] })
+    const heading = screen.getByTestId("account-lock-screen-name")
+    expect(heading).toHaveTextContent(longName)
+    expect(heading).toHaveAttribute("title", longName)
+    expect(heading).toHaveAccessibleName(`unlockTitle:${longName}`)
   })
 
   it("toggles the password between masked and readable", () => {

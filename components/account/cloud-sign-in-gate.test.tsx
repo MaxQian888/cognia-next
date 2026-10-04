@@ -199,6 +199,22 @@ describe("CloudSignInGate", () => {
     expect(await screen.findByTestId("app")).toBeInTheDocument()
   })
 
+  it("lets a paired phone through when its Host is reachable only over the relay", async () => {
+    // The paired Host's auth config cannot be read directly on a build whose
+    // native HTTP stack cannot enforce the pin; the relay link the phone does
+    // have needs no cloud session, so there is nothing to block on.
+    renderGate(
+      deps({
+        discover: jest.fn(async () => ({
+          status: "none" as const,
+          reason: "host-link-only" as const,
+        })),
+      })
+    )
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(screen.queryByTestId("cloud-sign-in")).not.toBeInTheDocument()
+  })
+
   it("passes while the profile is locked and on the ungated paths", () => {
     mockStore = { ...mockStore, locked: true }
     renderGate(deps())

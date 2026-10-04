@@ -80,6 +80,7 @@ describe("loginToLogto", () => {
     const scope = authUrl.searchParams.get("scope") ?? ""
     expect(scope).toContain("openid")
     expect(scope).toContain("offline_access")
+    expect(authUrl.searchParams.get("prompt")).toBe("consent")
     expect(scope).toContain("brain:rpc")
 
     // Token exchange carries resource + organization_id (so `aud` = resource

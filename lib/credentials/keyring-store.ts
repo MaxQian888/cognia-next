@@ -22,6 +22,10 @@
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+import {
+  isMissingSecureStorageItem,
+  ignoreMissingSecureStorageItem,
+} from "@/lib/capacitor/secure-storage"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 
 export interface KeyringStore {
@@ -76,24 +80,25 @@ interface SecureStoragePluginShape {
 
 /** Resolve the SecureStorage plugin via the canonical loader. The
  *  package-name literal MUST stay in lockstep with `mobile/package.json`
- *  (see the `turn-credentials.ts` regression test). Errors collapse to
- *  `null` so the caller can fall back to the in-memory store. */
-async function loadSecureStorage(): Promise<SecureStoragePluginShape | null> {
-  try {
-    return await makeDefaultLoader<SecureStoragePluginShape>(
-      "capacitor-secure-storage-plugin",
-      "SecureStoragePlugin"
-    )()
-  } catch {
-    return null
-  }
+ *  (see the `turn-credentials.ts` regression test). Initialization errors stay
+ *  observable and are retried on the next operation. */
+async function loadSecureStorage(): Promise<SecureStoragePluginShape> {
+  return makeDefaultLoader<SecureStoragePluginShape>(
+    "capacitor-secure-storage-plugin",
+    "SecureStoragePlugin"
+  )()
 }
 
 class CapacitorSecureStore implements KeyringStore {
   constructor(private readonly namespace: string) {}
-  private cache: Promise<SecureStoragePluginShape | null> | null = null
-  private get plugin(): Promise<SecureStoragePluginShape | null> {
-    if (!this.cache) this.cache = loadSecureStorage()
+  private cache: Promise<SecureStoragePluginShape> | null = null
+  private get plugin(): Promise<SecureStoragePluginShape> {
+    if (!this.cache) {
+      this.cache = loadSecureStorage().catch((error) => {
+        this.cache = null
+        throw error
+      })
+    }
     return this.cache
   }
   private prefixed(keyId: string): string {
@@ -101,26 +106,24 @@ class CapacitorSecureStore implements KeyringStore {
   }
   async save(keyId: string, value: string): Promise<void> {
     const plugin = await this.plugin
-    if (!plugin) throw new Error("SecureStoragePlugin unavailable")
     await plugin.set({ key: this.prefixed(keyId), value })
   }
   async load(keyId: string): Promise<string | null> {
     const plugin = await this.plugin
-    if (!plugin) return null
     try {
       const got = await plugin.get({ key: this.prefixed(keyId) })
       return typeof got.value === "string" ? got.value : null
-    } catch {
-      return null
+    } catch (error) {
+      if (isMissingSecureStorageItem(error)) return null
+      throw error
     }
   }
   async delete(keyId: string): Promise<void> {
     const plugin = await this.plugin
-    if (!plugin) return
     try {
       await plugin.remove({ key: this.prefixed(keyId) })
-    } catch {
-      // Missing keys are fine; the plugin throws on absence.
+    } catch (error) {
+      ignoreMissingSecureStorageItem(error)
     }
   }
   isPersistent(): boolean {

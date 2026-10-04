@@ -46,8 +46,14 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <main className="flex min-h-[520px] items-center justify-center bg-background px-4 text-foreground">
-        <Story />
+      // Mirrors `GateShell` in account-gate.tsx: the column sits on 2:3
+      // spacers, a little above the geometric middle.
+      <main className="flex min-h-dvh flex-col items-center bg-background px-5 py-6 text-foreground">
+        <div aria-hidden="true" className="min-h-4 flex-[2]" />
+        <div className="flex w-full flex-col items-center gap-6">
+          <Story />
+        </div>
+        <div aria-hidden="true" className="min-h-4 flex-[3]" />
       </main>
     ),
   ],
@@ -58,6 +64,15 @@ type Story = StoryObj<typeof meta>
 
 /** Desktop host at rest: keychain badge, no recovery entry point. */
 export const Idle: Story = {}
+
+/** The phone: remember-password offered, and a long name wraps instead of clipping. */
+export const MobileRememberPassword: Story = {
+  args: {
+    accounts: [{ ...ALPHA, displayName: "Maxqian888 的个人工作区" }],
+    supportsRememberOnDevice: true,
+  },
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+}
 
 /** Browser Vault runtime: recovery key is redeemable here. */
 export const BrowserVault: Story = {

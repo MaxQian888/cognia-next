@@ -55,6 +55,18 @@ describe("AccountProfileTab", () => {
     await waitFor(() => expect(renameMock).toHaveBeenCalledWith("acct_a", "Renamed"))
   })
 
+  it("saves the whole name an IME committed without a change event", async () => {
+    render(<AccountProfileTab account={account} />)
+    const input = screen.getByLabelText("editDisplayNameLabel") as HTMLInputElement
+    // The first character arrives as a change; the IME then commits the rest
+    // straight into the field, which is what used to persist names as "M".
+    fireEvent.change(input, { target: { value: "M" } })
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+    setValue.call(input, "Maxqian")
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
+    await waitFor(() => expect(renameMock).toHaveBeenCalledWith("acct_a", "Maxqian"))
+  })
+
   it("does not rename when the name is unchanged", () => {
     render(<AccountProfileTab account={account} />)
     fireEvent.click(screen.getByRole("button", { name: "save" }))

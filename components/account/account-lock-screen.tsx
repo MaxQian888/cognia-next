@@ -37,6 +37,7 @@ import {
   KeyRoundIcon,
   LockKeyholeIcon,
   RefreshCwIcon,
+  ShieldCheckIcon,
   TriangleAlertIcon,
 } from "lucide-react"
 
@@ -155,7 +156,8 @@ export interface AccountLockScreenProps {
   onQuickUnlock?: (
     localAccountId: string,
     method: QuickUnlockMethod,
-    canonicalSecret: string
+    canonicalSecret: string,
+    signal?: AbortSignal
   ) => Promise<{ ok: boolean; reason?: QuickUnlockFailure }>
   /**
    * Lock-screen appearance. Absent falls back to the historical plain look,
@@ -236,6 +238,7 @@ export function AccountLockScreen({
     [accounts, selectedId]
   )
   const localAccountId = account?.id ?? null
+  const displayName = account?.displayName ?? t("unknownAccount")
   // The device-managed workspace has no password anyone typed: the secret
   // store opens it, so the form asks for nothing and just opens it.
   const deviceManaged = isDeviceManagedAccount(account)
@@ -337,6 +340,11 @@ export function AccountLockScreen({
   const handlePasswordSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!localAccountId || submitting || blocked) return
+    // Read the field the user actually sees. An Android IME can commit text
+    // without a React change event, so state alone lost what was typed (the
+    // "first attempt says Enter your password" report) until the next keystroke.
+    const submittedPassword = readField(event.currentTarget, "password", password)
+    setPassword(submittedPassword)
     // Only a CHANGED choice is sent. Re-sending an unchanged "on" would
     // rewrite the stored secret on every unlock, and after a boot that could
     // not read the store it would fail an unlock the password alone passes.
@@ -345,8 +353,8 @@ export function AccountLockScreen({
     void run(
       () =>
         rememberChanged
-          ? onUnlock(localAccountId, password, { rememberOnDevice })
-          : onUnlock(localAccountId, password),
+          ? onUnlock(localAccountId, submittedPassword, { rememberOnDevice })
+          : onUnlock(localAccountId, submittedPassword),
       localAccountId
     )
   }
@@ -354,15 +362,22 @@ export function AccountLockScreen({
   const handleRecoverySubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!localAccountId || submitting) return
-    if (newPassword.length < PASSWORD_MIN_LENGTH) {
+    const form = event.currentTarget
+    const submittedKey = readField(form, "recoveryKey", recoveryKey)
+    const submittedNew = readField(form, "newPassword", newPassword)
+    const submittedConfirm = readField(form, "confirmPassword", confirmPassword)
+    setRecoveryKey(submittedKey)
+    setNewPassword(submittedNew)
+    setConfirmPassword(submittedConfirm)
+    if (submittedNew.length < PASSWORD_MIN_LENGTH) {
       setLocalError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
       return
     }
-    if (newPassword !== confirmPassword) {
+    if (submittedNew !== submittedConfirm) {
       setLocalError(t("passwordMismatch"))
       return
     }
-    void run(() => onRecoveryUnlock(localAccountId, recoveryKey, newPassword), localAccountId)
+    void run(() => onRecoveryUnlock(localAccountId, submittedKey, submittedNew), localAccountId)
   }
 
   const abandon = () => {
@@ -396,33 +411,46 @@ export function AccountLockScreen({
     <section
       aria-label={mode === "recovery" ? t("recoveryUnlockForm") : t("unlockForm")}
       data-testid="account-lock-screen"
-      className="flex w-full max-w-sm flex-col gap-4"
+      className="flex w-full max-w-sm flex-col gap-6"
     >
       <LockScreenBackdrop settings={lockAppearance} activeWallpaperId={activeWallpaperId} />
 
-      <header className="flex flex-col items-center gap-2 text-center">
+      <header className="flex flex-col items-center gap-4 text-center">
         {lockAppearance.showAvatar && (
           <div className="relative">
             <AvatarBadge
-              subject={{
-                name: account?.displayName ?? t("unknownAccount"),
-                avatarImageUrl: account?.avatarDataUrl,
-              }}
-              size={52}
-              textClassName="text-base font-medium"
+              subject={{ name: displayName, avatarImageUrl: account?.avatarDataUrl }}
+              size={80}
+              className="shadow-(--elevation-2) ring-4 ring-background"
+              textClassName="text-3xl font-semibold"
             />
             <Surface
               aria-hidden="true"
-              className="absolute -right-0.5 -bottom-0.5 flex size-5 items-center justify-center rounded-full border"
+              className="absolute -right-1 -bottom-1 flex size-7 items-center justify-center rounded-full border"
             >
-              <LockKeyholeIcon className="size-3 text-muted-foreground" />
+              <LockKeyholeIcon className="size-3.5 text-muted-foreground" />
             </Surface>
           </div>
         )}
-        <h1 className="text-lg font-semibold">
-          {t("unlockTitle", { name: account?.displayName ?? t("unknownAccount") })}
-        </h1>
-        <p className="text-xs text-muted-foreground">{t(runtimeBadgeKey)}</p>
+        <div className="flex w-full min-w-0 flex-col items-center gap-1">
+          <p className="text-sm text-muted-foreground">{t("welcomeBack")}</p>
+          {/* The visible heading is the name alone, at a size that reads as the
+              point of the screen; the full "Unlock <name>" sentence stays the
+              accessible name. Long names wrap (two lines, then ellipsis) and
+              keep the whole name in the tooltip instead of being cut off. */}
+          <h1
+            className="line-clamp-2 w-full text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
+            title={displayName}
+            data-testid="account-lock-screen-name"
+          >
+            <span className="sr-only">{t("unlockTitle", { name: displayName })}</span>
+            <span aria-hidden="true">{displayName}</span>
+          </h1>
+        </div>
+        <p className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/70 bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+          <ShieldCheckIcon aria-hidden="true" className="size-3.5 shrink-0" />
+          <span className="truncate">{t(runtimeBadgeKey)}</span>
+        </p>
       </header>
 
       {accounts.length > 1 && (
@@ -432,6 +460,7 @@ export function AccountLockScreen({
             id={accountPickerId}
             value={localAccountId ?? ""}
             disabled={submitting}
+            className="h-11 rounded-xl"
             data-testid="account-lock-screen-picker"
             onChange={(event) => setSelectedId(event.target.value)}
           >
@@ -466,8 +495,10 @@ export function AccountLockScreen({
             accounts.find((candidate) => candidate.id === localAccountId)?.quickUnlock ?? []
           }
           disabled={submitting}
-          onQuickUnlock={(method, canonicalSecret) =>
-            onQuickUnlock(localAccountId, method, canonicalSecret)
+          onQuickUnlock={(method, canonicalSecret, signal) =>
+            signal
+              ? onQuickUnlock(localAccountId, method, canonicalSecret, signal)
+              : onQuickUnlock(localAccountId, method, canonicalSecret)
           }
           onUsePassword={() => setMode("password")}
         />
@@ -478,21 +509,27 @@ export function AccountLockScreen({
           onSubmit={handlePasswordSubmit}
         >
           <FieldBlock hidden={deviceManaged}>
-            <Label htmlFor={passwordId}>{t("passwordLabel")}</Label>
+            {/* The placeholder already says "Password"; a visible label above
+                it only repeated the word. Kept for assistive tech. */}
+            <Label htmlFor={passwordId} className="sr-only">
+              {t("passwordLabel")}
+            </Label>
             <div className="relative">
               <Input
                 id={passwordId}
                 ref={passwordRef}
+                name="password"
                 value={password}
                 placeholder={t("passwordPlaceholder")}
                 type={reveal ? "text" : "password"}
                 autoComplete="current-password"
                 autoFocus
                 disabled={submitting}
-                className="pe-10"
+                className={cn(LARGE_FIELD_CLASS, "pe-12")}
                 onKeyDown={trackCapsLock}
                 onKeyUp={trackCapsLock}
                 onBlur={() => setCapsLock(false)}
+                onInput={(event) => setPassword(event.currentTarget.value)}
                 onChange={(event) => setPassword(event.target.value)}
               />
               <RevealToggle
@@ -516,17 +553,22 @@ export function AccountLockScreen({
           )}
 
           {offerRemember && (
-            <div className="flex items-start gap-2">
+            <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3">
               <Checkbox
                 id={rememberId}
                 checked={rememberOnDevice}
                 disabled={submitting}
+                className="mt-0.5"
                 data-testid="account-lock-screen-remember"
                 onCheckedChange={(checked) => setRememberOnDevice(checked === true)}
               />
-              <div className="grid gap-1 leading-none">
-                <Label htmlFor={rememberId}>{t("rememberOnDeviceLabel")}</Label>
-                <p className="text-xs text-muted-foreground">{t("rememberOnDeviceHelp")}</p>
+              <div className="grid min-w-0 gap-1">
+                <Label htmlFor={rememberId} className="leading-snug">
+                  {t("rememberOnDeviceLabel")}
+                </Label>
+                <p className="text-xs leading-snug text-muted-foreground">
+                  {t("rememberOnDeviceHelp")}
+                </p>
               </div>
             </div>
           )}
@@ -559,6 +601,7 @@ export function AccountLockScreen({
             type="submit"
             aria-busy={submitting}
             disabled={submitting || blocked || !account}
+            className={LARGE_BUTTON_CLASS}
             data-testid="account-lock-screen-submit"
           >
             {submitting ? (
@@ -583,12 +626,14 @@ export function AccountLockScreen({
             <Input
               id={recoveryKeyId}
               ref={passwordRef}
+              name="recoveryKey"
               value={recoveryKey}
               placeholder={t("recoveryKeyPlaceholder")}
               autoComplete="off"
               spellCheck={false}
               disabled={submitting}
-              className="font-mono"
+              className={cn(LARGE_FIELD_CLASS, "font-mono")}
+              onInput={(event) => setRecoveryKey(event.currentTarget.value)}
               onChange={(event) => setRecoveryKey(event.target.value)}
             />
           </FieldBlock>
@@ -596,11 +641,14 @@ export function AccountLockScreen({
             <Label htmlFor={newPasswordId}>{t("newPasswordLabel")}</Label>
             <Input
               id={newPasswordId}
+              name="newPassword"
               value={newPassword}
               placeholder={t("newPasswordPlaceholder")}
               type="password"
               autoComplete="new-password"
               disabled={submitting}
+              className={LARGE_FIELD_CLASS}
+              onInput={(event) => setNewPassword(event.currentTarget.value)}
               onChange={(event) => setNewPassword(event.target.value)}
             />
             <PasswordStrengthMeter password={newPassword} />
@@ -609,11 +657,14 @@ export function AccountLockScreen({
             <Label htmlFor={confirmPasswordId}>{t("confirmPasswordLabel")}</Label>
             <Input
               id={confirmPasswordId}
+              name="confirmPassword"
               value={confirmPassword}
               placeholder={t("confirmPasswordPlaceholder")}
               type="password"
               autoComplete="new-password"
               disabled={submitting}
+              className={LARGE_FIELD_CLASS}
+              onInput={(event) => setConfirmPassword(event.currentTarget.value)}
               onChange={(event) => setConfirmPassword(event.target.value)}
             />
           </FieldBlock>
@@ -622,6 +673,7 @@ export function AccountLockScreen({
             type="submit"
             aria-busy={submitting}
             disabled={submitting || !account}
+            className={LARGE_BUTTON_CLASS}
             data-testid="account-lock-screen-recovery-submit"
           >
             {submitting ? (
@@ -640,7 +692,7 @@ export function AccountLockScreen({
         <ol
           data-testid="account-lock-screen-stages"
           aria-live="polite"
-          className="flex flex-col gap-1 rounded-md border p-3 text-xs"
+          className="flex flex-col gap-1.5 rounded-xl border border-border/60 bg-muted/20 p-3.5 text-xs"
         >
           {stages.map((entry, index) => {
             const done = stageIndex > index
@@ -752,7 +804,7 @@ export function AccountLockScreen({
           type="button"
           variant="ghost"
           size="sm"
-          className="self-center"
+          className="self-center text-muted-foreground"
           data-testid="account-lock-screen-recovery-toggle"
           onClick={() => {
             setMode((current) => (current === "password" ? "recovery" : "password"))
@@ -775,6 +827,20 @@ export function AccountLockScreen({
       )}
     </section>
   )
+}
+
+/**
+ * Touch-sized controls: 48px tall, 16px text on phones. Below 16px iOS zooms
+ * the page into a focused field, and a 36px target is easy to miss with a
+ * thumb. From `md` up the type steps back down to the app's control size.
+ */
+const LARGE_FIELD_CLASS = "h-12 rounded-xl px-4 text-base md:text-sm"
+const LARGE_BUTTON_CLASS = "h-12 w-full rounded-xl text-base font-medium md:text-sm"
+
+/** The value the form control shows, falling back to state outside a real form. */
+function readField(form: HTMLFormElement, name: string, fallback: string): string {
+  const value = new FormData(form).get(name)
+  return typeof value === "string" ? value : fallback
 }
 
 const EMPTY_THROTTLE: UnlockThrottleStatus = {
@@ -815,7 +881,7 @@ function RevealToggle({
       aria-label={label}
       aria-pressed={revealed}
       disabled={disabled}
-      className="absolute end-1 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
+      className="absolute end-1.5 top-1/2 size-9 -translate-y-1/2 rounded-lg text-muted-foreground"
       onClick={onToggle}
     >
       {revealed ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}

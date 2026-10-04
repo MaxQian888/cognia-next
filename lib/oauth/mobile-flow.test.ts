@@ -1,7 +1,17 @@
 /**
  * @jest-environment jsdom
  */
-import { awaitCallback } from "./mobile-flow"
+import { awaitCallback, runOAuth } from "./mobile-flow"
+
+jest.mock("@/lib/capacitor/browser", () => ({
+  open: jest.fn(),
+  close: jest.fn(),
+  onClose: jest.fn(),
+}))
+jest.mock("@/lib/capacitor/deeplink", () => ({
+  ...jest.requireActual("@/lib/capacitor/deeplink"),
+  subscribe: jest.fn(),
+}))
 
 describe("awaitCallback", () => {
   it("resolves via deeplink when matching route arrives", async () => {
@@ -145,4 +155,197 @@ describe("awaitCallback", () => {
     })
     expect(out).toEqual({ kind: "timeout" })
   })
+})
+
+describe("runOAuth native browser lifecycle", () => {
+  const browser = jest.requireMock("@/lib/capacitor/browser")
+  const deeplink = jest.requireMock("@/lib/capacitor/deeplink")
+  let dismiss: () => void
+  let callback: (route: unknown) => void
+  const removeClose = jest.fn()
+  const removeLink = jest.fn()
+  beforeEach(() => {
+    jest.clearAllMocks()
+    browser.open.mockResolvedValue({ kind: "ok" })
+    browser.close.mockResolvedValue({ kind: "ok" })
+    browser.onClose.mockImplementation(async (handler: () => void) => {
+      dismiss = handler
+      return removeClose
+    })
+    deeplink.subscribe.mockImplementation(async (handler: (route: unknown) => void) => {
+      callback = handler
+      return removeLink
+    })
+  })
+  it("returns the launch error and cleans listeners without waiting for timeout", async () => {
+    browser.open.mockResolvedValue({ kind: "error", message: "Unable to display URL" })
+    expect(await runOAuth({ provider: "logto", authorizeUrl: "https://login.example" })).toEqual({
+      kind: "error",
+      error: "Unable to display URL",
+    })
+    expect(removeClose).toHaveBeenCalledTimes(1)
+    expect(removeLink).toHaveBeenCalledTimes(1)
+    expect(browser.close).toHaveBeenCalledTimes(1)
+  })
+  it("cancels immediately when the user dismisses the browser", async () => {
+    browser.open.mockImplementation(async () => {
+      dismiss()
+      return { kind: "ok" }
+    })
+    expect(await runOAuth({ provider: "logto", authorizeUrl: "https://login.example" })).toEqual({
+      kind: "cancelled",
+    })
+    expect(removeLink).toHaveBeenCalledTimes(1)
+    expect(removeClose).toHaveBeenCalledTimes(1)
+  })
+  it("captures a callback fired while open is resolving", async () => {
+    browser.open.mockImplementation(async () => {
+      callback({ kind: "oauth_callback", provider: "logto", code: "code", state: "state" })
+      return { kind: "ok" }
+    })
+    expect(
+      await runOAuth({ provider: "logto", authorizeUrl: "https://login.example" })
+    ).toMatchObject({ kind: "ok", result: { code: "code" } })
+    expect(browser.close).toHaveBeenCalledTimes(1)
+    expect(removeLink).toHaveBeenCalledTimes(1)
+  })
+  it("does not open for a pre-aborted request", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    expect(
+      await runOAuth({
+        provider: "logto",
+        authorizeUrl: "https://login.example",
+        signal: controller.signal,
+      })
+    ).toEqual({ kind: "cancelled" })
+    expect(browser.open).not.toHaveBeenCalled()
+  })
+  it("cleans a listener that finishes registering after cancellation", async () => {
+    const controller = new AbortController()
+    let complete!: (remove: () => void) => void
+    deeplink.subscribe.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve
+        })
+    )
+    const result = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      signal: controller.signal,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    controller.abort()
+    complete(removeLink)
+    expect(await result).toEqual({ kind: "cancelled" })
+    expect(removeLink).toHaveBeenCalledTimes(1)
+    expect(browser.open).not.toHaveBeenCalled()
+  })
+
+  it("cancels while browser open is pending and closes a late-opened browser", async () => {
+    let finish!: (result: unknown) => void
+    browser.open.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const controller = new AbortController()
+    const result = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      signal: controller.signal,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    controller.abort()
+    expect(await result).toEqual({ kind: "cancelled" })
+    expect(removeLink).toHaveBeenCalledTimes(1)
+    expect(browser.close).toHaveBeenCalledTimes(1)
+    finish({ kind: "ok" })
+    await Promise.resolve()
+    expect(browser.close).toHaveBeenCalledTimes(2)
+  })
+  it("keeps manual paste active when the user leaves the browser", async () => {
+    let paste!: (result: { code: string; state: null }) => void
+    browser.open.mockImplementationOnce(async () => {
+      dismiss()
+      return { kind: "ok" }
+    })
+    const result = runOAuth({
+      provider: "claude",
+      authorizeUrl: "https://login.example",
+      manualPaste: () =>
+        new Promise((resolve) => {
+          paste = resolve
+        }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    paste({ code: "copied", state: null })
+    expect(await result).toMatchObject({ kind: "ok", result: { code: "copied", via: "manual" } })
+  })
+  it("does not close a newer browser when an aborted older open finishes", async () => {
+    let finish!: (result: unknown) => void
+    browser.open.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const old = new AbortController()
+    const first = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      signal: old.signal,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    old.abort()
+    await first
+    const current = new AbortController()
+    const second = runOAuth({
+      provider: "logto",
+      authorizeUrl: "https://login.example",
+      signal: current.signal,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    browser.close.mockClear()
+    finish({ kind: "ok" })
+    await Promise.resolve()
+    expect(browser.close).not.toHaveBeenCalled()
+    current.abort()
+    await second
+  })
+  it("handles manual input rejection as cancellation", async () => {
+    expect(
+      await awaitCallback({
+        provider: "logto",
+        manualPaste: async () => {
+          throw new Error("dismissed")
+        },
+        subscribe: async () => removeLink,
+      })
+    ).toEqual({ kind: "cancelled" })
+  })
+})
+
+it("times out even if native listener registration never resolves", async () => {
+  const browser = jest.requireMock("@/lib/capacitor/browser")
+  const deeplink = jest.requireMock("@/lib/capacitor/deeplink")
+  browser.open.mockClear()
+  let finishClose!: (remove: () => void) => void
+  const remove = jest.fn()
+  browser.onClose.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishClose = resolve
+      })
+  )
+  deeplink.subscribe.mockImplementationOnce(() => new Promise(() => {}))
+  expect(
+    await runOAuth({ provider: "logto", authorizeUrl: "https://login.example", timeoutMs: 10 })
+  ).toEqual({ kind: "timeout" })
+  finishClose(remove)
+  await Promise.resolve()
+  expect(remove).toHaveBeenCalledTimes(1)
+  expect(browser.open).not.toHaveBeenCalled()
 })

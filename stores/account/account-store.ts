@@ -61,6 +61,7 @@ import {
 } from "@/lib/accounts/quick-unlock/client"
 import { withLockoutCleared } from "@/lib/accounts/quick-unlock/types"
 import type { QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
+import { removeNativeBiometricSecret } from "@/lib/accounts/quick-unlock/native-biometric"
 import { withFusionDatabase } from "@/lib/router-fusion/gate/database-name"
 import { purgeAccountAppData } from "@/lib/tauri/account-app-data"
 import { AccountUnlockError, asUnlockError } from "@/lib/accounts/account-unlock-error"
@@ -212,7 +213,8 @@ export interface AccountStoreState {
   unlockAccountWithQuickMethod: (
     localAccountId: string,
     method: QuickUnlockMethod,
-    canonicalSecret: string
+    canonicalSecret: string,
+    signal?: AbortSignal
   ) => Promise<QuickUnlockOutcome>
   /** Add a quick-unlock method. Requires the account password. */
   enrollQuickUnlockMethod: (args: {
@@ -221,6 +223,7 @@ export interface AccountStoreState {
     canonicalSecret: string
     password: string
     verifier?: Record<string, unknown>
+    signal?: AbortSignal
   }) => Promise<void>
   /** Remove one method. The password and every other method are untouched. */
   removeQuickUnlockMethod: (localAccountId: string, method: QuickUnlockMethod) => Promise<void>
@@ -447,31 +450,40 @@ export function createAccountStore(
      */
     const activateUnlockedAccount = async (
       localAccountId: string,
-      rememberSecret?: string
+      rememberSecret?: string,
+      assertCurrent?: () => void,
+      commitSession?: () => void
     ): Promise<void> => {
+      assertCurrent?.()
       const previousUnlockedAccountId = get().unlockedAccountId
       if (previousUnlockedAccountId && previousUnlockedAccountId !== localAccountId) {
         await dependencies.teardownPluginRuntime(previousUnlockedAccountId)
+        assertCurrent?.()
         await dependencies.clearSubscriptionRuntime(previousUnlockedAccountId)
+        assertCurrent?.()
         dependencies.clearAccountLocalState()
       }
       await dependencies.registry.setActiveAccountId(localAccountId)
+      assertCurrent?.()
       let target: RuntimeTargetRecord | null = null
       if (shouldUseBrowserVault()) {
         publishUnlockStage(localAccountId, "preparing-runtime")
         target = await dependencies.prepareRuntimeTarget(localAccountId)
+        assertCurrent?.()
       }
       // The long pole. `lock()` closed the cached Dexie connection, so this
       // re-opens the schema, re-adopts plugin tables and re-seeds — seconds of
       // work that the lock screen has to be able to name.
       publishUnlockStage(localAccountId, "opening-database")
       await prepareSelectedDatabase(localAccountId, target?.id)
+      assertCurrent?.()
       publishUnlockStage(localAccountId, "activating")
       setActiveRuntimeTargetContext(
         localAccountId,
         target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
       )
       await dependencies.activateAccountLocalState(localAccountId)
+      assertCurrent?.()
       const record = get().accounts.find((account) => account.id === localAccountId)
       const pendingDesktopRecovery =
         isTauri() &&
@@ -479,6 +491,10 @@ export function createAccountStore(
         record?.protection === "password"
           ? await readDesktopLocalAccountRecoveryKey().catch(() => null)
           : null
+      assertCurrent?.()
+      // Ownership transfers before publishing unlocked state: that update
+      // unmounts the unlock view and aborts its now-completed request.
+      commitSession?.()
       set((state) => ({
         activeAccountId: localAccountId,
         unlockedAccountId: localAccountId,
@@ -572,7 +588,7 @@ export function createAccountStore(
       if (!isDeviceUnlockSupported()) {
         throw new AccountUnlockError(
           "secret-store-unavailable",
-          "Automatic unlock is only available in the desktop app."
+          "Automatic unlock needs this device's secure credential store, which this runtime does not have."
         )
       }
       assertPasswordProvided(password)
@@ -781,7 +797,7 @@ export function createAccountStore(
           // ordinary lock screen with `autoUnlockFailure` explaining it, never
           // on a failed boot.
           let rememberedAccountId: string | null = null
-          if (!desktopLocalAccountId && isDesktopLocalAccountEnabled()) {
+          if (!desktopLocalAccountId && isDeviceUnlockSupported()) {
             const selected = accounts.find((record) => record.id === registryState.activeAccountId)
             if (isRememberedOnDevice(selected)) {
               rememberedAccountId = await openRememberedAccount(selected)
@@ -1121,9 +1137,25 @@ export function createAccountStore(
         }
       },
 
-      unlockAccountWithQuickMethod: async (localAccountId, method, canonicalSecret) => {
+      unlockAccountWithQuickMethod: async (localAccountId, method, canonicalSecret, signal) => {
         set({ error: null })
+        const start = get()
+        let revokeSession: (() => void) | undefined
+        const revokePendingSession = () => revokeSession?.()
+        const isCurrent = () =>
+          method !== "biometric" ||
+          (!signal?.aborted &&
+            get().accountRevision === start.accountRevision &&
+            get().activeAccountId === start.activeAccountId &&
+            get().unlockedAccountId === start.unlockedAccountId)
+        const assertCurrent = () => {
+          if (!isCurrent()) {
+            revokeSession?.()
+            throw new Error("Account changed during biometric unlock")
+          }
+        }
         const account = await findAccount(localAccountId)
+        assertCurrent()
         const enrollment = (account.quickUnlock ?? []).find((entry) => entry.method === method)
         if (!enrollment) {
           throw setFailure(
@@ -1132,34 +1164,62 @@ export function createAccountStore(
         }
 
         publishUnlockStage(account.id, "verifying")
-        const outcome = await verifyQuickUnlock({
-          accountId: account.id,
-          enrollment,
-          canonicalSecret,
-          passwordVerifier: account.passwordVerifier,
-        })
-
-        // Persisted BEFORE the success branch runs. The attempt count is the
-        // entire protection for a 20-bit secret, so it must survive even if
-        // activation then fails.
-        const nextEnrollments = (account.quickUnlock ?? []).map((entry) =>
-          entry.method === method ? outcome.enrollment : entry
-        )
-        const stored = await dependencies.registry.updateQuickUnlock(account.id, nextEnrollments)
-        set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
-
-        if (!outcome.ok) {
-          publishUnlockStage(account.id, "failed")
-          return outcome
-        }
-
         try {
-          await activateUnlockedAccount(account.id)
+          const outcome = await verifyQuickUnlock({
+            accountId: account.id,
+            enrollment,
+            canonicalSecret,
+            passwordVerifier: account.passwordVerifier,
+            ...(method === "biometric"
+              ? {
+                  isCurrent,
+                  onSessionOpened: (revoke: () => void) => {
+                    revokeSession = revoke
+                    signal?.addEventListener("abort", revokePendingSession, { once: true })
+                    if (!isCurrent()) revoke()
+                  },
+                }
+              : {}),
+          })
+          assertCurrent()
+
+          // Persisted BEFORE the success branch runs. The attempt count is the
+          // entire protection for a 20-bit secret, so it must survive even if
+          // activation then fails.
+          const nextEnrollments = (account.quickUnlock ?? []).map((entry) =>
+            entry.method === method ? outcome.enrollment : entry
+          )
+          const stored = await dependencies.registry.updateQuickUnlock(
+            account.id,
+            nextEnrollments,
+            Date.now(),
+            method === "biometric" ? (account.quickUnlock ?? []) : undefined
+          )
+          assertCurrent()
+          set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
+
+          if (!outcome.ok) {
+            publishUnlockStage(account.id, "failed")
+            return outcome
+          }
+
+          await activateUnlockedAccount(
+            account.id,
+            undefined,
+            method === "biometric" ? assertCurrent : undefined,
+            () => {
+              signal?.removeEventListener("abort", revokePendingSession)
+              revokeSession = undefined
+            }
+          )
+          return outcome
         } catch (error) {
+          revokeSession?.()
           publishUnlockStage(account.id, "failed")
           throw setFailure(asUnlockError(error))
+        } finally {
+          signal?.removeEventListener("abort", revokePendingSession)
         }
-        return outcome
       },
 
       enrollQuickUnlockMethod: async ({
@@ -1168,33 +1228,114 @@ export function createAccountStore(
         canonicalSecret,
         password,
         verifier,
+        signal,
       }) => {
         set({ error: null })
+        const enrollmentRevision = get().accountRevision
         const account = await findAccount(localAccountId)
-        const enrollment = await enrollQuickUnlock({
-          accountId: account.id,
-          method,
-          canonicalSecret,
-          password,
-          passwordVerifier: account.passwordVerifier,
-        })
-        // A passkey carries its credential id, which the enrolling caller
-        // obtained from the authenticator and this layer never sees.
-        const merged = verifier
-          ? { ...enrollment, verifier: { ...enrollment.verifier, ...verifier } }
-          : enrollment
-        const others = (account.quickUnlock ?? []).filter((entry) => entry.method !== method)
-        const stored = await dependencies.registry.updateQuickUnlock(account.id, [
-          ...others,
-          merged,
-        ])
-        set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
+        const assertEnrollmentScope = () => {
+          if (
+            method === "biometric" &&
+            (signal?.aborted ||
+              get().activeAccountId !== account.id ||
+              get().unlockedAccountId !== account.id ||
+              get().locked ||
+              get().accountRevision !== enrollmentRevision)
+          ) {
+            throw new Error("Account locked or changed during biometric enrollment")
+          }
+        }
+        assertEnrollmentScope()
+        let stored: LocalAccountRecord | undefined
+        try {
+          await enrollQuickUnlock({
+            accountId: account.id,
+            method,
+            canonicalSecret,
+            password,
+            passwordVerifier: account.passwordVerifier,
+            persist: async (enrollment) => {
+              assertEnrollmentScope()
+              // Native key ids and passkey credential ids come from the
+              // authenticator, while the client owns the vault-wrap metadata.
+              const merged = verifier
+                ? { ...enrollment, verifier: { ...enrollment.verifier, ...verifier } }
+                : enrollment
+              const others = (account.quickUnlock ?? []).filter((entry) => entry.method !== method)
+              stored = await dependencies.registry.updateQuickUnlock(
+                account.id,
+                [...others, merged],
+                Date.now(),
+                account.quickUnlock ?? []
+              )
+              assertEnrollmentScope()
+            },
+          })
+        } catch (error) {
+          if (stored) {
+            // Registry and vault live in separate databases. If the vault
+            // transaction fails after registry persistence, restore only our
+            // candidate; CAS protects a replacement committed by another tab.
+            try {
+              const current = (await dependencies.registry.listAccounts()).find(
+                (entry) => entry.id === account.id
+              )
+              const candidate = stored.quickUnlock?.find((entry) => entry.method === method)
+              const currentEntry = current?.quickUnlock?.find((entry) => entry.method === method)
+              if (
+                current &&
+                candidate &&
+                JSON.stringify(currentEntry) === JSON.stringify(candidate)
+              ) {
+                const previous = account.quickUnlock?.find((entry) => entry.method === method)
+                const restored = await dependencies.registry.updateQuickUnlock(
+                  account.id,
+                  [
+                    ...(current.quickUnlock ?? []).filter((entry) => entry.method !== method),
+                    ...(previous ? [previous] : []),
+                  ],
+                  Date.now(),
+                  current.quickUnlock ?? []
+                )
+                set((state) => ({ accounts: upsertAccount(state.accounts, restored) }))
+              } else if (current) {
+                set((state) => ({ accounts: upsertAccount(state.accounts, current) }))
+              }
+            } catch (rollbackError) {
+              throw new AggregateError(
+                [error, rollbackError],
+                "Quick unlock enrollment failed and its registry rollback could not complete"
+              )
+            }
+          }
+          throw error
+        }
+        if (!stored) throw new Error("Quick unlock enrollment was not persisted")
+        const persistedAccount = stored
+        set((state) => ({ accounts: upsertAccount(state.accounts, persistedAccount) }))
+        const previousBiometric = account.quickUnlock?.find((entry) => entry.method === "biometric")
+        const currentBiometric = stored.quickUnlock?.find((entry) => entry.method === "biometric")
+        if (
+          method === "biometric" &&
+          typeof previousBiometric?.verifier.nativeKeyId === "string" &&
+          previousBiometric.verifier.nativeKeyId !== currentBiometric?.verifier.nativeKeyId
+        ) {
+          // The replacement is already durable; stale-key cleanup cannot undo it.
+          await removeNativeBiometricSecret(
+            account.id,
+            previousBiometric.verifier.nativeKeyId
+          ).catch(() => undefined)
+        }
       },
 
       removeQuickUnlockMethod: async (localAccountId, method) => {
         set({ error: null })
         const account = await findAccount(localAccountId)
-        await removeQuickUnlock(account.id, method)
+        await removeQuickUnlock(
+          account.id,
+          method,
+          account.quickUnlock?.find((entry) => entry.method === method)?.verifier
+        )
         const remaining = (account.quickUnlock ?? []).filter((entry) => entry.method !== method)
         const stored = await dependencies.registry.updateQuickUnlock(account.id, remaining)
         set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
@@ -1291,7 +1432,7 @@ export function createAccountStore(
                 "The local workspace's device credential is missing from this device's credential store."
               )
             }
-          } else if (!password && isDesktopLocalAccountEnabled() && isRememberedOnDevice(account)) {
+          } else if (!password && isDeviceUnlockSupported() && isRememberedOnDevice(account)) {
             password = (await readDeviceUnlockSecret(account.id).catch(() => null)) ?? undefined
             credentialFromDevice = password !== undefined
           }
@@ -1508,7 +1649,7 @@ export function createAccountStore(
           // copy follows the new password. If the store refuses, the old copy
           // would be rejected at the next launch; turning the option off now
           // says so plainly instead of surprising the owner then.
-          if (isDesktopLocalAccountEnabled() && isRememberedOnDevice(account)) {
+          if (isDeviceUnlockSupported() && isRememberedOnDevice(account)) {
             try {
               await saveDeviceUnlockSecret(localAccountId, newPassword)
             } catch (storeError) {
@@ -1550,12 +1691,18 @@ export function createAccountStore(
           const wasActive = get().activeAccountId === localAccountId
           const replacementAccountId = options.replacementAccountId
           const wasUnlocked = get().unlockedAccountId === localAccountId
+          const biometricKeyId = get()
+            .accounts.find((account) => account.id === localAccountId)
+            ?.quickUnlock?.find((entry) => entry.method === "biometric")?.verifier.nativeKeyId
           // The registry delete carries every refusal (last account, missing
           // replacement), so it runs before anything irreversible. The cloud
           // identity goes next, while the profile is still the host's bound
           // namespace: `lock()` unbinds the host, and after that the host
           // can no longer be told whose person to forget.
           await dependencies.registry.deleteAccount(localAccountId, { replacementAccountId })
+          if (typeof biometricKeyId === "string") {
+            await removeNativeBiometricSecret(localAccountId, biometricKeyId).catch(() => undefined)
+          }
           const cloudIdentity = await dependencies.forgetCloudIdentity(localAccountId, {
             hostBound: wasUnlocked,
           })
@@ -1649,6 +1796,8 @@ export function createAccountStore(
        */
       lock: async () => {
         const unlockedAccountId = get().unlockedAccountId
+        // Invalidate pending native enrollment/unlock before teardown yields.
+        set((state) => ({ accountRevision: state.accountRevision + 1 }))
         if (unlockedAccountId) {
           bumpPerformanceSecurityGeneration(unlockedAccountId, "account-locked")
         }
@@ -1683,7 +1832,6 @@ export function createAccountStore(
           unlockedAccountId: null,
           locked: computeLocked(state.accounts, state.activeAccountId, null),
           error: null,
-          accountRevision: state.accountRevision + 1,
         }))
 
         if (failures.length > 0) {

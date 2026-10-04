@@ -16,6 +16,18 @@ const mockIsAvailable = isAvailable as jest.MockedFunction<typeof isAvailable>
 const mockVerify = verify as jest.MockedFunction<typeof verify>
 
 describe("useBiometricGuard", () => {
+  it("blocks a failed availability check without starting another prompt", async () => {
+    mockIsAvailable.mockResolvedValue({ kind: "error", message: "bridge unavailable" })
+    mockVerify.mockResolvedValue({ kind: "verified" })
+    const action = jest.fn()
+    const { result } = renderHook(() => useBiometricGuard())
+    expect(await result.current({ reason: "x" }, action)).toEqual({
+      kind: "blocked",
+      reason: "error",
+    })
+    expect(action).not.toHaveBeenCalled()
+    expect(mockVerify).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     mockIsAvailable.mockReset()
     mockVerify.mockReset()
@@ -24,7 +36,7 @@ describe("useBiometricGuard", () => {
   it("runs action immediately when biometric not enrolled and fallthrough=true", async () => {
     mockIsAvailable.mockResolvedValue({
       kind: "ok",
-      value: { available: false, biometryType: "NONE" },
+      value: { available: false, biometryType: "NONE", reason: "not_enrolled" },
     })
     const action = jest.fn().mockResolvedValue("done")
     const { result } = renderHook(() => useBiometricGuard())
@@ -37,7 +49,7 @@ describe("useBiometricGuard", () => {
   it("blocks when biometric not enrolled and fallthrough=false", async () => {
     mockIsAvailable.mockResolvedValue({
       kind: "ok",
-      value: { available: false, biometryType: "NONE" },
+      value: { available: false, biometryType: "NONE", reason: "not_enrolled" },
     })
     const action = jest.fn().mockResolvedValue("done")
     const { result } = renderHook(() => useBiometricGuard())
@@ -83,7 +95,7 @@ describe("useBiometricGuard", () => {
     expect(out).toEqual({ kind: "blocked", reason: "lockout" })
   })
 
-  it("falls through if verify reports unavailable mid-flight", async () => {
+  it("blocks if verify reports unavailable mid-flight", async () => {
     mockIsAvailable.mockResolvedValue({
       kind: "ok",
       value: { available: true, biometryType: "FACE_ID" },
@@ -91,6 +103,21 @@ describe("useBiometricGuard", () => {
     mockVerify.mockResolvedValue({ kind: "unavailable" })
     const { result } = renderHook(() => useBiometricGuard())
     const out = await result.current({ reason: "x" }, async () => "ok")
-    expect(out).toEqual({ kind: "ok", value: "ok" })
+    expect(out).toEqual({ kind: "blocked", reason: "unavailable" })
   })
+
+  it.each(["lockout", "temporarily_unavailable", "error", undefined] as const)(
+    "blocks availability reason %s even with fallthrough enabled",
+    async (reason) => {
+      mockIsAvailable.mockResolvedValue({ kind: "ok", value: { available: false, reason } })
+      const action = jest.fn()
+      const { result } = renderHook(() => useBiometricGuard())
+      expect(await result.current({ reason: "x" }, action)).toEqual({
+        kind: "blocked",
+        reason: reason === "lockout" ? "lockout" : "error",
+      })
+      expect(mockVerify).not.toHaveBeenCalled()
+      expect(action).not.toHaveBeenCalled()
+    }
+  )
 })

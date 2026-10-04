@@ -207,6 +207,54 @@ describe("createLocalKeyringStore — non-routable Tauri keyring backend", () =>
 })
 
 describe("createKeyringStore — Capacitor SecureStorage backend", () => {
+  it("retries a failed plugin lookup without silently returning absent credentials", async () => {
+    const realCap = (window as { Capacitor?: unknown }).Capacitor
+    const failure = new Error("bridge initializing")
+    const getPlugin = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw failure
+      })
+      .mockReturnValue({ get: async () => ({ value: "synthetic-secret" }) })
+    try {
+      const plugins = {}
+      Object.defineProperty(plugins, "SecureStoragePlugin", { get: getPlugin })
+      ;(window as { Capacitor?: unknown }).Capacitor = {
+        isNativePlatform: () => true,
+        Plugins: plugins,
+      }
+      const store = createKeyringStore("test")
+      await expect(store.load("synthetic")).rejects.toBe(failure)
+      await expect(store.load("synthetic")).resolves.toBe("synthetic-secret")
+      expect(getPlugin).toHaveBeenCalledTimes(2)
+    } finally {
+      if (realCap === undefined) delete (window as { Capacitor?: unknown }).Capacitor
+      else (window as { Capacitor?: unknown }).Capacitor = realCap
+    }
+  })
+
+  it("surfaces native read and removal failures without treating credentials as absent", async () => {
+    const realCap = (window as { Capacitor?: unknown }).Capacitor
+    const failure = new Error("Secure storage read failed")
+    try {
+      ;(window as { Capacitor?: unknown }).Capacitor = {
+        isNativePlatform: () => true,
+        Plugins: {
+          SecureStoragePlugin: {
+            get: jest.fn().mockRejectedValue(failure),
+            remove: jest.fn().mockRejectedValue(failure),
+          },
+        },
+      }
+      const store = createKeyringStore("test")
+      await expect(store.load("synthetic")).rejects.toBe(failure)
+      await expect(store.delete("synthetic")).rejects.toBe(failure)
+    } finally {
+      if (realCap === undefined) delete (window as { Capacitor?: unknown }).Capacitor
+      else (window as { Capacitor?: unknown }).Capacitor = realCap
+    }
+  })
+
   beforeEach(() => {
     mockIsCapacitor.mockReturnValue(true)
   })
@@ -228,7 +276,7 @@ describe("createKeyringStore — Capacitor SecureStorage backend", () => {
               return { value: true }
             },
             async get(opts: { key: string }) {
-              if (!secure.has(opts.key)) throw new Error(`absent: ${opts.key}`)
+              if (!secure.has(opts.key)) throw new Error("Item with given key does not exist")
               return { value: secure.get(opts.key)! }
             },
             async remove(opts: { key: string }) {

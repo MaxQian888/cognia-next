@@ -15,15 +15,19 @@
  *    lock screen, so a secret store that cannot be read degrades to a prompt
  *    rather than to a dead end.
  *
- * Either way the secret never leaves the native store for browser storage,
- * and neither shape exists outside the desktop shell: a browser has no store
- * whose threat model covers it.
+ * Either way the secret never leaves the native store for browser storage.
+ * The device-managed workspace exists only in the desktop shell. A remembered
+ * profile also works in the native mobile app, where the slot lives in the
+ * platform's own secure storage (Android Keystore / iOS Keychain, through
+ * `capacitor-secure-storage-plugin`) instead of the desktop secret store. A
+ * plain browser has no store whose threat model covers it, so it gets neither.
  */
 
 import type { LocalAccountRecord } from "./account-types"
 import { isAccountGateForced, isDevLocalAccountEnabled } from "./dev-auto-unlock"
 import { getSecret, setSecret, clearSecret, type KeyringRef } from "@/lib/keyring"
-import { isTauri } from "@/lib/platform/detect"
+import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+import { isNativeMobile, isTauri } from "@/lib/platform/detect"
 
 export const DESKTOP_LOCAL_ACCOUNT_ID = "acct_desktop_local_workspace"
 const SECRET_NAMESPACE = "desktop-local-account"
@@ -49,9 +53,14 @@ export function isDesktopLocalAccountEnabled(): boolean {
   return isTauri() && !isAccountGateForced()
 }
 
-/** Can a profile opt into "unlock automatically on this device" here at all? */
+/**
+ * Can a profile opt into "unlock automatically on this device" here at all?
+ *
+ * The desktop shell and the native mobile app, both of which have a hardware-
+ * or OS-backed secret store. Never a plain browser.
+ */
 export function isDeviceUnlockSupported(): boolean {
-  return isDesktopLocalAccountEnabled()
+  return (isTauri() || isNativeMobile()) && !isAccountGateForced()
 }
 
 export function isDeviceManagedAccount(
@@ -90,8 +99,68 @@ export function isRememberedOnDevice(
  * nothing from being locked, so offering the button would be theatre.
  */
 export function unlocksWithoutPrompt(account: LocalAccountRecord | null | undefined): boolean {
-  if (!isDesktopLocalAccountEnabled()) return false
-  return isDeviceManagedAccount(account) || isRememberedOnDevice(account)
+  if (isDeviceManagedAccount(account)) return isDesktopLocalAccountEnabled()
+  return isDeviceUnlockSupported() && isRememberedOnDevice(account)
+}
+
+// Minimal slice of capacitor-secure-storage-plugin. Resolved through the
+// shared loader, which reads the proxy `registerNativePlugins()` installs on
+// `window.Capacitor.Plugins` first: the npm package is not in the static
+// export, so a bare dynamic import never resolves inside the WebView.
+interface MobileSecureStorage {
+  get(options: { key: string }): Promise<{ value: string }>
+  set(options: { key: string; value: string }): Promise<{ value: boolean }>
+  remove(options: { key: string }): Promise<{ value: boolean }>
+}
+
+const loadMobileSecureStorage = makeDefaultLoader<MobileSecureStorage>(
+  "capacitor-secure-storage-plugin",
+  "SecureStoragePlugin"
+)
+
+/**
+ * Both native implementations reject a missing key with this exact message
+ * (Android `SecureStoragePluginPlugin.java`, iOS `SecureStoragePlugin.swift`).
+ * It is the only rejection that means "absent"; anything else is a store that
+ * could not be read, and strict callers must see it as such.
+ */
+const MOBILE_MISSING_KEY = /item with given key does not exist/i
+
+function mobileStorageKey(ref: KeyringRef): string {
+  return `cognia.${ref.namespace}.${ref.key}`
+}
+
+function rejectionMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message)
+  }
+  return String(error)
+}
+
+async function readMobileSecret(ref: KeyringRef): Promise<string | null> {
+  const storage = await loadMobileSecureStorage()
+  try {
+    const { value } = await storage.get({ key: mobileStorageKey(ref) })
+    return value || null
+  } catch (error) {
+    if (MOBILE_MISSING_KEY.test(rejectionMessage(error))) return null
+    throw error
+  }
+}
+
+async function writeMobileSecret(ref: KeyringRef, value: string): Promise<void> {
+  const storage = await loadMobileSecureStorage()
+  await storage.set({ key: mobileStorageKey(ref), value })
+}
+
+async function removeMobileSecret(ref: KeyringRef): Promise<void> {
+  const storage = await loadMobileSecureStorage()
+  try {
+    await storage.remove({ key: mobileStorageKey(ref) })
+  } catch (error) {
+    if (!MOBILE_MISSING_KEY.test(rejectionMessage(error))) throw error
+  }
 }
 
 /**
@@ -102,25 +171,31 @@ export function unlocksWithoutPrompt(account: LocalAccountRecord | null | undefi
  * locked store must never be mistaken for permission to replace one.
  */
 export async function readDeviceUnlockSecret(localAccountId: string): Promise<string | null> {
-  if (!isTauri()) return null
-  return getSecret(deviceUnlockSecretRef(localAccountId), { strict: true })
+  const ref = deviceUnlockSecretRef(localAccountId)
+  if (isTauri()) return getSecret(ref, { strict: true })
+  if (isNativeMobile()) return readMobileSecret(ref)
+  return null
 }
 
-/** Store the secret a profile will open with. Desktop only. */
+/** Store the secret a profile will open with. Desktop and native mobile only. */
 export async function saveDeviceUnlockSecret(
   localAccountId: string,
   secret: string
 ): Promise<void> {
-  if (!isTauri()) {
-    throw new Error("Automatic unlock requires the desktop credential store.")
+  if (!isTauri() && !isNativeMobile()) {
+    throw new Error("Automatic unlock requires this device's secure credential store.")
   }
   if (!secret) throw new Error("A device unlock secret cannot be empty.")
-  await setSecret(deviceUnlockSecretRef(localAccountId), secret)
+  const ref = deviceUnlockSecretRef(localAccountId)
+  if (isTauri()) await setSecret(ref, secret)
+  else await writeMobileSecret(ref, secret)
 }
 
 /** Forget a profile's device unlock secret. Idempotent, strict on failure. */
 export async function clearDeviceUnlockSecret(localAccountId: string): Promise<void> {
-  if (isTauri()) await clearSecret(deviceUnlockSecretRef(localAccountId), { strict: true })
+  const ref = deviceUnlockSecretRef(localAccountId)
+  if (isTauri()) await clearSecret(ref, { strict: true })
+  else if (isNativeMobile()) await removeMobileSecret(ref)
 }
 
 /** Only fresh profile provisioning may mint a secret; resume must never replace one. */

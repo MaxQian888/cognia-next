@@ -13,13 +13,15 @@
 // enrolled, enrolled and available, and enrolled but disabled after too many
 // attempts. The user needs to tell those apart.
 
-import { useMemo, useState } from "react"
+import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { FingerprintIcon, GridIcon, KeyRoundIcon, LockKeyholeIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { readNativeBiometricSecret } from "@/lib/accounts/quick-unlock/native-biometric"
+import { isMobile } from "@/lib/capacitor/_shared"
 import { canonicalizePattern, canonicalizePin } from "@/lib/accounts/quick-unlock/secret-policy"
 import {
   canonicalizePasskeySecret,
@@ -42,7 +44,8 @@ export interface QuickUnlockPanelProps {
   /** Resolves to whether the account opened. Never throws on a wrong secret. */
   onQuickUnlock: (
     method: QuickUnlockMethod,
-    canonicalSecret: string
+    canonicalSecret: string,
+    signal?: AbortSignal
   ) => Promise<{ ok: boolean; reason?: QuickUnlockFailure }>
   /** Switches the lock screen back to the password form. */
   onUsePassword: () => void
@@ -53,9 +56,14 @@ const METHOD_ICON: Record<QuickUnlockMethod, typeof KeyRoundIcon> = {
   pin: KeyRoundIcon,
   pattern: GridIcon,
   passkey: FingerprintIcon,
+  biometric: FingerprintIcon,
 }
 
-export function QuickUnlockPanel({
+export function QuickUnlockPanel(props: QuickUnlockPanelProps) {
+  return <AccountQuickUnlockPanel key={props.localAccountId} {...props} />
+}
+
+function AccountQuickUnlockPanel({
   localAccountId,
   enrollments,
   onQuickUnlock,
@@ -63,17 +71,22 @@ export function QuickUnlockPanel({
   disabled = false,
 }: QuickUnlockPanelProps) {
   const t = useTranslations("account.quickUnlock")
+  const mobile = isMobile()
 
   // Ordered so the method most likely to be wanted comes first, and a
   // locked-out one never becomes the default landing surface.
   const ordered = useMemo(
     () =>
-      [...enrollments].sort((a, b) => {
-        const usable = Number(isEnrollmentUsable(b)) - Number(isEnrollmentUsable(a))
-        if (usable !== 0) return usable
-        return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)
-      }),
-    [enrollments]
+      [...enrollments]
+        .filter((entry) =>
+          entry.method === "biometric" ? mobile : entry.method !== "passkey" || !mobile
+        )
+        .sort((a, b) => {
+          const usable = Number(isEnrollmentUsable(b)) - Number(isEnrollmentUsable(a))
+          if (usable !== 0) return usable
+          return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)
+        }),
+    [enrollments, mobile]
   )
 
   const [selected, setSelected] = useState<QuickUnlockMethod | null>(
@@ -81,10 +94,28 @@ export function QuickUnlockPanel({
   )
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const nativeOperation = useRef<AbortController | null>(null)
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      nativeOperation.current?.abort()
+    }
+  }, [])
 
-  const active = ordered.find((entry) => entry.method === selected) ?? null
+  const active =
+    ordered.find((entry) => entry.method === selected) ??
+    ordered.find(isEnrollmentUsable) ??
+    ordered[0] ??
+    null
   const activeUsable = active !== null && isEnrollmentUsable(active)
   const inputsDisabled = disabled || busy || !activeUsable
+  const nativeKeyId = active?.verifier.nativeKeyId
+  useLayoutEffect(
+    () => () => nativeOperation.current?.abort(),
+    [nativeKeyId, activeUsable, disabled]
+  )
 
   const submit = async (method: QuickUnlockMethod, canonicalSecret: string) => {
     setBusy(true)
@@ -130,7 +161,44 @@ export function QuickUnlockPanel({
     }
   }
 
-  if (ordered.length === 0) return null
+  const runBiometric = async () => {
+    if (inputsDisabled || !mobile || nativeOperation.current) return
+    if (!active || typeof active.verifier.nativeKeyId !== "string") {
+      setError(t("failure.not-enrolled"))
+      return
+    }
+    const controller = new AbortController()
+    nativeOperation.current = controller
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await readNativeBiometricSecret({
+        accountId: localAccountId,
+        keyId: active.verifier.nativeKeyId,
+        signal: controller.signal,
+        prompt: {
+          title: t("biometricTitle"),
+          reason: t("biometricReason"),
+          negativeButtonText: t("biometricCancel"),
+        },
+      })
+      if (controller.signal.aborted) return
+      if (!result.ok) {
+        setError(t(`biometricFailure.${result.reason}`))
+        return
+      }
+      const unlocked = await onQuickUnlock("biometric", result.value, controller.signal)
+      if (mounted.current && !unlocked.ok)
+        setError(t(`failure.${unlocked.reason ?? "wrong-secret"}`))
+    } catch {
+      if (!controller.signal.aborted) setError(t("failure.failed"))
+    } finally {
+      if (nativeOperation.current === controller) nativeOperation.current = null
+      if (mounted.current) setBusy(false)
+    }
+  }
+
+  if (enrollments.length === 0) return null
 
   const remaining = active ? attemptsRemaining(active) : 0
   const hint = activeUsable && remaining <= 2 ? t("attemptsLeft", { count: remaining }) : undefined
@@ -151,8 +219,8 @@ export function QuickUnlockPanel({
                 key={entry.method}
                 type="button"
                 role="tab"
-                aria-selected={selected === entry.method}
-                variant={selected === entry.method ? "secondary" : "ghost"}
+                aria-selected={active?.method === entry.method}
+                variant={active?.method === entry.method ? "secondary" : "ghost"}
                 size="sm"
                 disabled={disabled || busy}
                 className={cn("gap-1.5", !usable && "opacity-60")}
@@ -221,6 +289,30 @@ export function QuickUnlockPanel({
           ) : hint ? (
             <p className="text-xs text-muted-foreground">{hint}</p>
           ) : null}
+        </div>
+      )}
+
+      {active?.method === "biometric" && (
+        <div className="flex flex-col items-center gap-3">
+          <Button
+            type="button"
+            size="lg"
+            disabled={inputsDisabled}
+            onClick={() => void runBiometric()}
+            data-testid="quick-unlock-biometric"
+          >
+            {busy ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <FingerprintIcon data-icon="inline-start" />
+            )}
+            {t(busy ? "biometricWaiting" : "biometricAction")}
+          </Button>
+          {error && (
+            <p className="max-w-xs text-center text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
         </div>
       )}
 

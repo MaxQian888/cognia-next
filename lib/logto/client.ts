@@ -193,7 +193,9 @@ export async function loginToLogto(
 
   const extraTokenParams: Record<string, string> = { resource: config.resource }
   if (config.organizationId) extraTokenParams.organization_id = config.organizationId
-  const extraAuthParams: Record<string, string> = { resource: config.resource }
+  // OIDC requires consent for offline_access; without it Logto drops the
+  // scope and Native clients receive no refresh token for organization adoption.
+  const extraAuthParams: Record<string, string> = { resource: config.resource, prompt: "consent" }
   if (config.directSignIn) extraAuthParams.direct_sign_in = config.directSignIn
 
   const result = await runPkceAuthFlow({

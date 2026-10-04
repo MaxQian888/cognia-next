@@ -24,6 +24,10 @@
 
 import { isCapacitor, isTauri, transport } from "@/lib/tauri"
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+import {
+  isMissingSecureStorageItem,
+  ignoreMissingSecureStorageItem,
+} from "@/lib/capacitor/secure-storage"
 
 /** Sentinel prefix used in `RTCIceServer.credential` to indicate the
  *  real credential lives in the OS keyring under a separate key id. */
@@ -99,24 +103,23 @@ interface SecureStoragePluginShape {
  *  import-only loader silently disabled TURN-credential persistence on device.
  *
  *  The package-name literal MUST stay in lockstep with `mobile/package.json`;
- *  `turn-credentials.test.ts:CapacitorSecureStore package name` pins it. Errors
- *  collapse to `null` so the caller can fall back to the in-memory store. */
-async function loadSecureStorage(): Promise<SecureStoragePluginShape | null> {
-  try {
-    return await makeDefaultLoader<SecureStoragePluginShape>(
-      "capacitor-secure-storage-plugin",
-      "SecureStoragePlugin"
-    )()
-  } catch {
-    return null
-  }
+ *  `turn-credentials.test.ts:CapacitorSecureStore package name` pins it.
+ *  Initialization errors stay observable and are retried on the next operation. */
+async function loadSecureStorage(): Promise<SecureStoragePluginShape> {
+  return makeDefaultLoader<SecureStoragePluginShape>(
+    "capacitor-secure-storage-plugin",
+    "SecureStoragePlugin"
+  )()
 }
 
 class CapacitorSecureStore implements TurnCredentialStore {
-  private cache: Promise<SecureStoragePluginShape | null> | null = null
-  private get plugin(): Promise<SecureStoragePluginShape | null> {
+  private cache: Promise<SecureStoragePluginShape> | null = null
+  private get plugin(): Promise<SecureStoragePluginShape> {
     if (!this.cache) {
-      this.cache = loadSecureStorage()
+      this.cache = loadSecureStorage().catch((error) => {
+        this.cache = null
+        throw error
+      })
     }
     return this.cache
   }
@@ -125,12 +128,10 @@ class CapacitorSecureStore implements TurnCredentialStore {
   }
   async save(keyId: string, value: TurnCredentialValue): Promise<void> {
     const plugin = await this.plugin
-    if (!plugin) throw new Error("SecureStoragePlugin unavailable")
     await plugin.set({ key: this.prefixed(keyId), value: JSON.stringify(value) })
   }
   async load(keyId: string): Promise<TurnCredentialValue | null> {
     const plugin = await this.plugin
-    if (!plugin) return null
     try {
       const got = await plugin.get({ key: this.prefixed(keyId) })
       const parsed = JSON.parse(got.value) as Partial<TurnCredentialValue>
@@ -138,17 +139,17 @@ class CapacitorSecureStore implements TurnCredentialStore {
         return { username: parsed.username, credential: parsed.credential }
       }
       return null
-    } catch {
-      return null
+    } catch (error) {
+      if (isMissingSecureStorageItem(error) || error instanceof SyntaxError) return null
+      throw error
     }
   }
   async delete(keyId: string): Promise<void> {
     const plugin = await this.plugin
-    if (!plugin) return
     try {
       await plugin.remove({ key: this.prefixed(keyId) })
-    } catch {
-      // Missing keys are fine; the plugin throws on absence.
+    } catch (error) {
+      ignoreMissingSecureStorageItem(error)
     }
   }
 }

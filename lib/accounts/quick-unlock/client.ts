@@ -22,6 +22,8 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
+import { isMobile } from "@/lib/capacitor/_shared"
+import { removeNativeBiometricSecret } from "./native-biometric"
 import { transport } from "@/lib/tauri/transport-instance"
 import type { PasswordVerifierRecord } from "@/lib/accounts/account-types"
 import {
@@ -66,11 +68,19 @@ export interface EnrollArgs {
   /** The account's password verifier. Desktop binds the host with its digest. */
   passwordVerifier: PasswordVerifierRecord
   now?: number
+  /** Commit enrollment metadata before replacing a browser vault wrap. */
+  persist?: (enrollment: QuickUnlockEnrollment) => Promise<void>
 }
 
 /** Enroll a method, returning the record to store on the account. */
 export async function enrollQuickUnlock(args: EnrollArgs): Promise<QuickUnlockEnrollment> {
   const now = args.now ?? Date.now()
+  if (
+    args.method === "biometric" &&
+    (!isMobile() || !/^biometric:[a-f0-9]{64}$/.test(args.canonicalSecret))
+  ) {
+    throw new Error("Native biometric unlock requires protected mobile key material")
+  }
 
   if (isTauri()) {
     const verifier = await transport.call<Record<string, unknown>>(QUICK_UNLOCK_CREATE_COMMAND, {
@@ -78,10 +88,18 @@ export async function enrollQuickUnlock(args: EnrollArgs): Promise<QuickUnlockEn
       method: args.method,
       secret: args.canonicalSecret,
     })
-    return { method: args.method, verifier, createdAt: now, failedAttempts: 0 }
+    const enrollment = { method: args.method, verifier, createdAt: now, failedAttempts: 0 }
+    await args.persist?.(enrollment)
+    return enrollment
   }
 
   const pepper = await deriveDevicePepper(args.accountId)
+  const enrollmentFor = (createdAt: number): QuickUnlockEnrollment => ({
+    method: args.method,
+    verifier: { storage: "browser-vault", createdAt },
+    createdAt: now,
+    failedAttempts: 0,
+  })
   const wrap = await enrollBrowserVaultQuickUnlock({
     accountId: args.accountId,
     method: args.method,
@@ -89,15 +107,13 @@ export async function enrollQuickUnlock(args: EnrollArgs): Promise<QuickUnlockEn
     canonicalSecret: args.canonicalSecret,
     pepper,
     now,
+    ...(args.persist
+      ? { persist: (entry: { createdAt: number }) => args.persist!(enrollmentFor(entry.createdAt)) }
+      : {}),
   })
   // The wrap already lives in the vault record. What is stored on the account
   // is the bookkeeping: which methods exist, and how many attempts are left.
-  return {
-    method: args.method,
-    verifier: { storage: "browser-vault", createdAt: wrap.createdAt },
-    createdAt: now,
-    failedAttempts: 0,
-  }
+  return enrollmentFor(wrap.createdAt)
 }
 
 export interface VerifyArgs {
@@ -106,6 +122,8 @@ export interface VerifyArgs {
   canonicalSecret: string
   passwordVerifier: PasswordVerifierRecord
   now?: number
+  isCurrent?: () => boolean
+  onSessionOpened?: (revoke: () => void) => void
 }
 
 /**
@@ -163,6 +181,8 @@ async function unlockViaBrowserVault(args: VerifyArgs): Promise<boolean> {
     method: args.enrollment.method,
     canonicalSecret: args.canonicalSecret,
     pepper,
+    ...(args.isCurrent ? { isCurrent: args.isCurrent } : {}),
+    ...(args.onSessionOpened ? { onSessionOpened: args.onSessionOpened } : {}),
   })
   return true
 }
@@ -174,13 +194,17 @@ function isNotEnrolled(error: unknown): boolean {
 /** Forget a method. Every other method and the password are untouched. */
 export async function removeQuickUnlock(
   localAccountId: string,
-  method: QuickUnlockMethod
+  method: QuickUnlockMethod,
+  verifier?: Record<string, unknown>
 ): Promise<void> {
   if (isTauri()) {
     // The desktop pepper is per ACCOUNT, not per method, so it is only dropped
     // when the caller removes the last one. `clearQuickUnlockDeviceMaterial`
     // is that step.
     return
+  }
+  if (method === "biometric" && typeof verifier?.nativeKeyId === "string") {
+    await removeNativeBiometricSecret(localAccountId, verifier.nativeKeyId)
   }
   await removeBrowserVaultQuickUnlock(localAccountId, method)
 }

@@ -304,7 +304,8 @@ export class LocalAccountRegistry {
   async updateQuickUnlock(
     localAccountId: string,
     enrollments: QuickUnlockEnrollment[],
-    now = Date.now()
+    now = Date.now(),
+    expectedEnrollments?: QuickUnlockEnrollment[]
   ): Promise<LocalAccountRecord> {
     assertAccountId(localAccountId)
     let updated: LocalAccountRecord | undefined
@@ -312,6 +313,12 @@ export class LocalAccountRegistry {
     await this.db.transaction("rw", this.db.accounts, async () => {
       const account = await this.db.accounts.get(localAccountId)
       if (!account) throw accountNotFound(localAccountId)
+      if (
+        expectedEnrollments &&
+        JSON.stringify(account.quickUnlock ?? []) !== JSON.stringify(expectedEnrollments)
+      ) {
+        throw new Error("Quick unlock enrollments changed concurrently")
+      }
       const next: LocalAccountRecord = {
         ...account,
         updatedAt: nextTimestamp(now, account.updatedAt),

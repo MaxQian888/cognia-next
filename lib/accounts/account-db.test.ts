@@ -31,6 +31,24 @@ async function freshRegistry(testName: string) {
 }
 
 describe("LocalAccountRegistry", () => {
+  it("uses a transaction-scoped comparison when replacing quick unlock metadata", async () => {
+    const { db, registry } = await freshRegistry("quick-unlock-cas")
+    await registry.createAccount({ id: "acct_cas", displayName: "CAS", passwordVerifier: verifier })
+    const original = {
+      method: "biometric" as const,
+      verifier: { nativeKeyId: "old" },
+      createdAt: 1,
+      failedAttempts: 0,
+    }
+    const replacement = { ...original, verifier: { nativeKeyId: "new" }, createdAt: 2 }
+    await registry.updateQuickUnlock("acct_cas", [original], 1, [])
+    await registry.updateQuickUnlock("acct_cas", [replacement], 2, [original])
+    await expect(registry.updateQuickUnlock("acct_cas", [], 3, [original])).rejects.toThrow(
+      "changed concurrently"
+    )
+    expect((await registry.listAccounts())[0].quickUnlock).toEqual([replacement])
+    db.close()
+  })
   it("v2 opens account-wide performance quota and encrypted budget stores", async () => {
     const { db } = await freshRegistry("performance-account-stores")
     await db.performanceQuotaReservations.put({

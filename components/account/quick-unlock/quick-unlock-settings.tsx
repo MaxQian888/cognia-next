@@ -13,7 +13,7 @@
 // reason: neither is echoed back, so a typo at enrollment would be discovered
 // only at the next lock, by which point the correct value is unknowable.
 
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   CheckIcon,
@@ -31,6 +31,8 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/co
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { isMobile } from "@/lib/capacitor/_shared"
+import { enrollNativeBiometric } from "@/lib/accounts/quick-unlock/native-biometric"
 import {
   canonicalizePattern,
   canonicalizePin,
@@ -60,6 +62,7 @@ export interface QuickUnlockSettingsProps {
     canonicalSecret: string
     password: string
     verifier?: Record<string, unknown>
+    signal?: AbortSignal
   }) => Promise<void>
   onRemove: (localAccountId: string, method: QuickUnlockMethod) => Promise<void>
   onClearLockout: (
@@ -73,6 +76,7 @@ const METHOD_ICON: Record<QuickUnlockMethod, typeof KeyRoundIcon> = {
   pin: KeyRoundIcon,
   pattern: GridIcon,
   passkey: FingerprintIcon,
+  biometric: FingerprintIcon,
 }
 
 type Draft =
@@ -80,8 +84,13 @@ type Draft =
   | { kind: "pin"; first: string | null }
   | { kind: "pattern"; first: number[] | null }
   | { kind: "passkey" }
+  | { kind: "biometric" }
 
-export function QuickUnlockSettings({
+export function QuickUnlockSettings(props: QuickUnlockSettingsProps) {
+  return <AccountQuickUnlockSettings key={props.account.id} {...props} />
+}
+
+function AccountQuickUnlockSettings({
   account,
   onEnroll,
   onRemove,
@@ -96,12 +105,23 @@ export function QuickUnlockSettings({
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const nativeOperation = useRef<AbortController | null>(null)
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      nativeOperation.current?.abort()
+    }
+  }, [])
 
   // Passkey is HIDDEN rather than disabled where the platform has no WebAuthn
   // at all, because there is nothing the user could do to make it appear. A
   // disabled control implies a fix exists.
-  const available = QUICK_UNLOCK_METHODS.filter(
-    (method) => method !== "passkey" || isPasskeySupported()
+  const available = QUICK_UNLOCK_METHODS.filter((method) =>
+    method === "biometric"
+      ? isMobile()
+      : method !== "passkey" || (!isMobile() && isPasskeySupported())
   )
 
   const reset = () => {
@@ -191,6 +211,47 @@ export function QuickUnlockSettings({
 
   const passwordReady = password.length > 0
 
+  const runBiometricEnrollment = async () => {
+    if (busy || !passwordReady || !isMobile() || nativeOperation.current) return
+    const controller = new AbortController()
+    nativeOperation.current = controller
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await enrollNativeBiometric({
+        accountId: account.id,
+        signal: controller.signal,
+        prompt: {
+          title: t("biometricTitle"),
+          reason: t("biometricPrompt"),
+          negativeButtonText: t("cancel"),
+        },
+        commit: async (canonicalSecret, nativeKeyId) => {
+          if (controller.signal.aborted) throw new Error("Biometric enrollment cancelled")
+          await onEnroll({
+            accountId: account.id,
+            method: "biometric",
+            canonicalSecret,
+            password,
+            verifier: { nativeKeyId },
+            signal: controller.signal,
+          })
+        },
+      })
+      if (controller.signal.aborted) return
+      if (!result.ok) setError(t(`biometricFailure.${result.reason}`))
+      else {
+        setPassword("")
+        reset()
+      }
+    } catch {
+      if (!controller.signal.aborted) setError(t("enrollFailed"))
+    } finally {
+      if (nativeOperation.current === controller) nativeOperation.current = null
+      if (mounted.current) setBusy(false)
+    }
+  }
+
   return (
     <section className="space-y-3" data-testid="quick-unlock-settings">
       <div className="space-y-0.5">
@@ -255,7 +316,7 @@ export function QuickUnlockSettings({
                       ? { kind: "pin", first: null }
                       : method === "pattern"
                         ? { kind: "pattern", first: null }
-                        : { kind: "passkey" }
+                        : { kind: method }
                   )
                 }}
                 data-testid={`quick-unlock-add-${method}`}
@@ -275,7 +336,7 @@ export function QuickUnlockSettings({
               ? t(draft.first === null ? "pinEnter" : "pinConfirm")
               : draft.kind === "pattern"
                 ? t(draft.first === null ? "patternDraw" : "patternConfirm")
-                : t("passkeyPrompt")}
+                : t(draft.kind === "biometric" ? "biometricPrompt" : "passkeyPrompt")}
           </p>
 
           {draft.kind === "pin" && (
@@ -312,6 +373,29 @@ export function QuickUnlockSettings({
                   <FingerprintIcon data-icon="inline-start" />
                 )}
                 {t("passkeyAction")}
+              </Button>
+              {error && (
+                <p className="text-xs text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+          )}
+
+          {draft.kind === "biometric" && (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                disabled={busy || !passwordReady}
+                onClick={() => void runBiometricEnrollment()}
+                data-testid="quick-unlock-enroll-biometric"
+              >
+                {busy ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <FingerprintIcon data-icon="inline-start" />
+                )}
+                {t("biometricAction")}
               </Button>
               {error && (
                 <p className="text-xs text-destructive" role="alert">

@@ -2,6 +2,7 @@ import {
   attemptsRemaining,
   isEnrollmentUsable,
   MAX_QUICK_UNLOCK_ATTEMPTS,
+  QUICK_UNLOCK_METHODS,
   withFailedAttempt,
   withLockoutCleared,
   withSuccessfulAttempt,
@@ -19,6 +20,12 @@ function enrollment(patch: Partial<QuickUnlockEnrollment> = {}): QuickUnlockEnro
 }
 
 describe("isEnrollmentUsable", () => {
+  it("tracks native biometrics independently of existing passkey enrollment", () => {
+    expect(QUICK_UNLOCK_METHODS).toContain("biometric")
+    expect(QUICK_UNLOCK_METHODS).toContain("passkey")
+    expect(isEnrollmentUsable(enrollment({ method: "biometric" }))).toBe(true)
+    expect(isEnrollmentUsable(enrollment({ method: "biometric", lockedOutAt: 1 }))).toBe(false)
+  })
   it("is usable while attempts remain", () => {
     expect(isEnrollmentUsable(enrollment())).toBe(true)
     expect(isEnrollmentUsable(enrollment({ failedAttempts: 1 }))).toBe(true)

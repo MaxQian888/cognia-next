@@ -57,9 +57,23 @@ const PRF_BYTES = new Uint8Array(32).fill(9)
 beforeEach(() => {
   jest.clearAllMocks()
   installWebAuthn()
+  delete (globalThis as { Capacitor?: unknown }).Capacitor
 })
 
 describe("isPasskeySupported", () => {
+  it("does not advertise WebAuthn inside a native shell without the app/domain integration", async () => {
+    ;(globalThis as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    }
+    expect(isPasskeySupported()).toBe(false)
+    expect(await enrollPasskey({ localAccountId: "acct", displayName: "Test" })).toEqual({
+      ok: false,
+      reason: "unsupported",
+    })
+    expect(create).not.toHaveBeenCalled()
+    delete (globalThis as { Capacitor?: unknown }).Capacitor
+  })
   it("reports support when the API is present in a secure context", () => {
     expect(isPasskeySupported()).toBe(true)
   })

@@ -8,7 +8,7 @@
  * selection changes (no set-state-in-effect).
  */
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
@@ -33,12 +33,15 @@ export function AccountProfileTab({ account }: AccountProfileTabProps) {
   const [nameDraft, setNameDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
 
   const name = nameDraft ?? account.displayName
 
   const save = async () => {
-    if (nameDraft === null) return
-    const next = nameDraft.trim()
+    // Read the field, not just the draft. An Android IME can commit text
+    // without a React change event, and saving the draft then stored only the
+    // first character: the same defect that created profiles named "M".
+    const next = (nameInputRef.current?.value ?? name).trim()
     if (!next || next === account.displayName) {
       setNameDraft(null)
       return
@@ -83,7 +86,10 @@ export function AccountProfileTab({ account }: AccountProfileTabProps) {
         <div className="flex items-center gap-2">
           <Input
             id="account-edit-display-name"
+            ref={nameInputRef}
             value={name}
+            autoComplete="name"
+            onInput={(event) => setNameDraft(event.currentTarget.value)}
             onChange={(event) => setNameDraft(event.target.value)}
           />
           <Button type="button" size="sm" disabled={submitting} onClick={() => void save()}>

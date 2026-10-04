@@ -1,6 +1,6 @@
 "use client"
 
-import { open as openBrowser, close as closeBrowser } from "@/lib/capacitor/browser"
+import { open as openBrowser, close as closeBrowser, onClose } from "@/lib/capacitor/browser"
 import {
   parseDeeplink,
   subscribe as subscribeDeeplink,
@@ -61,6 +61,7 @@ export interface AwaitCallbackOptions {
    * and pastes back into a form.
    */
   manualPaste?: () => Promise<{ code: string; state: string | null }>
+  signal?: AbortSignal
   /** Override deeplink subscription (for tests). */
   subscribe?: typeof subscribeDeeplink
 }
@@ -84,75 +85,63 @@ export type CallbackOutcome =
  *   - the manualPaste resolver returns (returns kind=ok via=manual)
  *   - the timeout elapses (returns kind=timeout)
  */
-export async function awaitCallback(opts: AwaitCallbackOptions): Promise<CallbackOutcome> {
-  const {
-    provider,
-    timeoutMs = 5 * 60_000,
-    manualPaste,
-    subscribe = subscribeDeeplink,
-    accept = acceptOAuthCallbackFor(provider),
-  } = opts
-
-  return new Promise<CallbackOutcome>((resolve) => {
-    let settled = false
-    const settle = (outcome: CallbackOutcome) => {
-      if (settled) return
-      settled = true
-      resolve(outcome)
-    }
-
-    const finish = (result: CallbackResult) => settle({ kind: "ok", result })
-
-    let unsubDeeplink: (() => void) | null = null
-    void subscribe((route: DeeplinkRoute) => {
-      const verdict = accept(route)
-      if (verdict === null) return
-      if (verdict === "mismatch") {
-        settle({ kind: "mismatch" })
-        return
-      }
-      if ("error" in verdict) {
-        settle({ kind: "error", error: verdict.error })
-        return
-      }
-      finish({ code: verdict.code, state: verdict.state, via: "deeplink" })
-    })
-      .then((u) => {
-        if (settled) {
-          u()
-          return
-        }
-        unsubDeeplink = u
-      })
-      .catch(() => {
-        // No deeplink available; manual is the only path.
-      })
-
-    if (manualPaste) {
-      void manualPaste().then(({ code, state }) => {
-        finish({ code, state, via: "manual" })
-      })
-    }
-
-    const timer = setTimeout(() => {
-      settle({ kind: "timeout" })
-    }, timeoutMs)
-
-    void Promise.resolve().then(() => {
-      // After settle, clean up.
-      const cleanup = () => {
-        clearTimeout(timer)
-        if (unsubDeeplink) unsubDeeplink()
-      }
-      // Trampoline cleanup once `settled` flips.
-      const interval = setInterval(() => {
-        if (settled) {
-          cleanup()
-          clearInterval(interval)
-        }
-      }, 250)
-    })
+function createCallbackWait(opts: AwaitCallbackOptions) {
+  let settled = false
+  let unsubscribe: (() => void) | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let resolve!: (outcome: CallbackOutcome) => void
+  const outcome = new Promise<CallbackOutcome>((done) => {
+    resolve = done
   })
+  const settle = (result: CallbackOutcome) => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    unsubscribe?.()
+    opts.signal?.removeEventListener("abort", cancel)
+    resolve(result)
+  }
+  const cancel = () => settle({ kind: "cancelled" })
+  opts.signal?.addEventListener("abort", cancel, { once: true })
+  if (opts.signal?.aborted) cancel()
+  const accept = opts.accept ?? acceptOAuthCallbackFor(opts.provider)
+  const ready = settled
+    ? Promise.resolve()
+    : Promise.resolve()
+        .then(() =>
+          (opts.subscribe ?? subscribeDeeplink)((route) => {
+            const verdict = accept(route)
+            if (verdict === null) return
+            if (verdict === "mismatch") settle({ kind: "mismatch" })
+            else if ("error" in verdict) settle({ kind: "error", error: verdict.error })
+            else settle({ kind: "ok", result: { ...verdict, via: "deeplink" } })
+          })
+        )
+        .then((remove) => {
+          if (!remove) return
+          if (settled) remove()
+          else unsubscribe = remove
+        })
+        .catch(() => {
+          if (!opts.manualPaste)
+            settle({ kind: "error", error: "OAuth callback listener unavailable" })
+        })
+  if (!settled) {
+    timer = setTimeout(() => settle({ kind: "timeout" }), opts.timeoutMs ?? 5 * 60_000)
+    if (opts.manualPaste) {
+      void Promise.resolve()
+        .then(opts.manualPaste)
+        .then(
+          (result) => settle({ kind: "ok", result: { ...result, via: "manual" } }),
+          () => cancel()
+        )
+    }
+  }
+  return { outcome, ready, settle, isSettled: () => settled }
+}
+
+export async function awaitCallback(opts: AwaitCallbackOptions): Promise<CallbackOutcome> {
+  return createCallbackWait(opts).outcome
 }
 
 export interface RunOAuthOptions {
@@ -169,36 +158,57 @@ export interface RunOAuthOptions {
   /** See `awaitCallback`. */
   manualPaste?: () => Promise<{ code: string; state: string | null }>
   timeoutMs?: number
+  signal?: AbortSignal
 }
 
 /**
  * Open the authorize URL in an in-app browser and return the callback
  * result. Closes the browser when the callback arrives.
  */
-export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> {
-  const browserOutcome = await openBrowser({
-    url: opts.authorizeUrl,
-    toolbarColor: opts.toolbarColor,
-    presentationStyle: "fullscreen",
-  })
-  // If the browser is unsupported (web/desktop), fall back to manual-only.
-  // The caller has presumably surfaced the URL elsewhere already.
-  if (browserOutcome.kind === "unsupported" && !opts.manualPaste) {
-    return { kind: "cancelled" }
-  }
+// The native browser is process-global; an old flow must not close a newer one.
+let activeBrowserOwner: symbol | undefined
 
+export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> {
+  const wait = createCallbackWait(opts)
+  let removeClose: (() => void) | undefined
+  const owner = Symbol("oauth-browser")
+  let openRequested = false
+  let finished = false
+  const closeOwnedBrowser = () => {
+    if (activeBrowserOwner === owner) void closeBrowser()
+  }
   try {
-    const outcome = await awaitCallback({
-      provider: opts.provider,
-      accept: opts.accept,
-      manualPaste: opts.manualPaste,
-      timeoutMs: opts.timeoutMs,
+    // Both listeners must be installed before a fast native redirect can fire.
+    const closeReady = onClose(() => {
+      // Manual-code flows need to leave the browser to paste into the app.
+      if (!opts.manualPaste) wait.settle({ kind: "cancelled" })
+    }).then((remove) => {
+      if (wait.isSettled()) remove()
+      else removeClose = remove
     })
-    return outcome
+    await Promise.race([Promise.all([closeReady, wait.ready]), wait.outcome])
+    if (wait.isSettled()) return await wait.outcome
+    activeBrowserOwner = owner
+    openRequested = true
+    const opening = openBrowser({
+      url: opts.authorizeUrl,
+      toolbarColor: opts.toolbarColor,
+      presentationStyle: "fullscreen",
+    }).then((browserOutcome) => {
+      if (finished && browserOutcome.kind === "ok") closeOwnedBrowser()
+      if (browserOutcome.kind === "error") {
+        wait.settle({ kind: "error", error: browserOutcome.message })
+      } else if (browserOutcome.kind === "unsupported" && !opts.manualPaste) {
+        wait.settle({ kind: "cancelled" })
+      }
+    })
+    await Promise.race([opening, wait.outcome])
+    return await wait.outcome
   } finally {
-    if (browserOutcome.kind === "ok") {
-      void closeBrowser()
-    }
+    finished = true
+    wait.settle({ kind: "cancelled" })
+    removeClose?.()
+    if (openRequested) closeOwnedBrowser()
   }
 }
 

@@ -19,10 +19,15 @@ import {
 } from "./desktop-local-account"
 
 let mockTauri = true
+let mockNativeMobile = false
 const mockGet = jest.fn()
 const mockSet = jest.fn()
 const mockClear = jest.fn()
-jest.mock("@/lib/platform/detect", () => ({ isTauri: () => mockTauri }))
+jest.mock("@/lib/platform/detect", () => ({
+  isTauri: () => mockTauri,
+  isNativeMobile: () => mockNativeMobile,
+  detectPlatform: () => (mockTauri ? "tauri" : mockNativeMobile ? "mobile" : "web"),
+}))
 jest.mock("@/lib/keyring", () => ({
   getSecret: (...args: unknown[]) => mockGet(...args),
   setSecret: (...args: unknown[]) => mockSet(...args),
@@ -38,6 +43,7 @@ function setNodeEnv(value: string | undefined): void {
 beforeEach(() => {
   jest.clearAllMocks()
   mockTauri = true
+  mockNativeMobile = false
   mockGet.mockResolvedValue(null)
   mockSet.mockResolvedValue(undefined)
   delete process.env.NEXT_PUBLIC_ACCOUNT_GATE
@@ -46,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   setNodeEnv(ORIGINAL_NODE_ENV)
   delete (globalThis as { window?: unknown }).window
+  delete (globalThis as { Capacitor?: unknown }).Capacitor
 })
 
 it("only enables the default profile on desktop unless the gate is forced", () => {
@@ -178,10 +185,10 @@ describe("per-profile device unlock", () => {
     expect(mockSet).not.toHaveBeenCalled()
   })
 
-  it("never keeps a secret outside the desktop shell", async () => {
+  it("never keeps a secret in a plain browser", async () => {
     mockTauri = false
     await expect(saveDeviceUnlockSecret("acct_mine", "hunter22")).rejects.toThrow(
-      "desktop credential store"
+      "secure credential store"
     )
     expect(await readDeviceUnlockSecret("acct_mine")).toBeNull()
     await clearDeviceUnlockSecret("acct_mine")
@@ -196,13 +203,22 @@ describe("per-profile device unlock", () => {
     expect(isRememberedOnDevice(null)).toBe(false)
   })
 
-  it("says which profiles open without a prompt, and only on the desktop", () => {
+  it("says which profiles open without a prompt, and never in a plain browser", () => {
     expect(unlocksWithoutPrompt(remembered)).toBe(true)
     expect(unlocksWithoutPrompt(device)).toBe(true)
     expect(unlocksWithoutPrompt({ id: "acct_mine" } as LocalAccountRecord)).toBe(false)
     expect(unlocksWithoutPrompt(undefined)).toBe(false)
     mockTauri = false
     expect(unlocksWithoutPrompt(remembered)).toBe(false)
+    expect(unlocksWithoutPrompt(device)).toBe(false)
+  })
+
+  it("opens remembered profiles on native mobile, but never the desktop workspace", () => {
+    mockTauri = false
+    mockNativeMobile = true
+    expect(isDeviceUnlockSupported()).toBe(true)
+    expect(isDesktopLocalAccountEnabled()).toBe(false)
+    expect(unlocksWithoutPrompt(remembered)).toBe(true)
     expect(unlocksWithoutPrompt(device)).toBe(false)
   })
 
@@ -247,5 +263,63 @@ describe("isDevDesktopWorkspace", () => {
     setNodeEnv("development")
     process.env.NEXT_PUBLIC_ACCOUNT_GATE = "1"
     expect(isDevDesktopWorkspace(DESKTOP_LOCAL_ACCOUNT_ID)).toBe(false)
+  })
+})
+
+describe("device unlock on native mobile", () => {
+  const store = new Map<string, string>()
+  const plugin = {
+    get: jest.fn(async ({ key }: { key: string }) => {
+      if (!store.has(key)) throw new Error("Item with given key does not exist")
+      return { value: store.get(key)! }
+    }),
+    set: jest.fn(async ({ key, value }: { key: string; value: string }) => {
+      store.set(key, value)
+      return { value: true }
+    }),
+    remove: jest.fn(async ({ key }: { key: string }) => {
+      if (!store.delete(key)) throw new Error("Item with given key does not exist")
+      return { value: true }
+    }),
+  }
+
+  beforeEach(() => {
+    store.clear()
+    mockTauri = false
+    mockNativeMobile = true
+    ;(globalThis as { Capacitor?: unknown }).Capacitor = {
+      Plugins: { SecureStoragePlugin: plugin },
+    }
+  })
+
+  it("keeps the secret in the platform secure storage, never the browser keyring", async () => {
+    await saveDeviceUnlockSecret("acct_mine", "hunter22")
+    expect(plugin.set).toHaveBeenCalledWith({
+      key: "cognia.desktop-local-account.acct_mine",
+      value: "hunter22",
+    })
+    expect(await readDeviceUnlockSecret("acct_mine")).toBe("hunter22")
+    await clearDeviceUnlockSecret("acct_mine")
+    expect(await readDeviceUnlockSecret("acct_mine")).toBeNull()
+    expect(mockSet).not.toHaveBeenCalled()
+    expect(mockGet).not.toHaveBeenCalled()
+    expect(mockClear).not.toHaveBeenCalled()
+  })
+
+  it("reads a missing key as absent and clears it idempotently", async () => {
+    expect(await readDeviceUnlockSecret("acct_none")).toBeNull()
+    await expect(clearDeviceUnlockSecret("acct_none")).resolves.toBeUndefined()
+  })
+
+  it("propagates a store that cannot be read instead of reading it as absent", async () => {
+    plugin.get.mockRejectedValueOnce(new Error("Keystore unavailable"))
+    await expect(readDeviceUnlockSecret("acct_mine")).rejects.toThrow("Keystore unavailable")
+    plugin.remove.mockRejectedValueOnce(new Error("Remove failed"))
+    await expect(clearDeviceUnlockSecret("acct_mine")).rejects.toThrow("Remove failed")
+  })
+
+  it("never provisions the desktop workspace credential on mobile", async () => {
+    expect(await desktopLocalAccountPassword(true)).toBeNull()
+    expect(plugin.set).not.toHaveBeenCalled()
   })
 })
