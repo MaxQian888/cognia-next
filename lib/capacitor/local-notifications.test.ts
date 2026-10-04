@@ -132,6 +132,33 @@ describe("notification permission signal", () => {
 })
 
 describe("schedule / cancel / listPending", () => {
+  it("does not ask for exact alarms for ordinary immediate or reminder notifications", async () => {
+    const p = makePlugin()
+    await schedule(
+      [
+        { id: 1, title: "x", body: "y" },
+        { id: 2, title: "reminder", body: "", schedule: { every: "day" } },
+      ],
+      async () => p
+    )
+    expect(
+      p.schedule.mock.calls[0][0].notifications.every(
+        (n: { isExactNotification?: boolean }) => n.isExactNotification === false
+      )
+    ).toBe(true)
+  })
+  it("preserves an explicit exact-alarm opt-in", async () => {
+    const p = makePlugin()
+    await schedule(
+      [{ id: 1, title: "x", body: "y", isExactNotification: true, isExactMandatory: true }],
+      async () => p
+    )
+    expect(p.schedule).toHaveBeenCalledWith({
+      notifications: [
+        expect.objectContaining({ isExactNotification: true, isExactMandatory: true }),
+      ],
+    })
+  })
   it("schedule returns the ids", async () => {
     const p = makePlugin()
     const out = await schedule(
@@ -148,7 +175,9 @@ describe("schedule / cancel / listPending", () => {
     const p = makePlugin()
     await schedule([{ id: 1, title: "x", body: "y" }], async () => p)
     expect(p.schedule).toHaveBeenCalledWith({
-      notifications: [{ id: 1, title: "x", body: "y", channelId: DEFAULT_CHANNEL_ID }],
+      notifications: [
+        { id: 1, title: "x", body: "y", channelId: DEFAULT_CHANNEL_ID, isExactNotification: false },
+      ],
     })
   })
 
@@ -156,7 +185,9 @@ describe("schedule / cancel / listPending", () => {
     const p = makePlugin()
     await schedule([{ id: 1, title: "x", body: "y", channelId: "custom" }], async () => p)
     expect(p.schedule).toHaveBeenCalledWith({
-      notifications: [{ id: 1, title: "x", body: "y", channelId: "custom" }],
+      notifications: [
+        { id: 1, title: "x", body: "y", channelId: "custom", isExactNotification: false },
+      ],
     })
   })
 

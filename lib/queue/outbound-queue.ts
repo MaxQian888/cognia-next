@@ -29,6 +29,7 @@ import {
   listByStatus,
   markHostStateResult,
   markCollabConflict,
+  offerHostStateRow,
   markSent,
   nextQueueWakeAt,
   recordFailure,
@@ -362,8 +363,19 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     }
   }
 
-  async function dispatchOne(row: MobileOutboundJobRow): Promise<void> {
+  async function dispatchOne(claimed: MobileOutboundJobRow): Promise<void> {
+    let row = claimed
+    // Whether a stale-generation refusal of this send proves the row was never
+    // applied anywhere — see `offerHostStateRow`.
+    let firstHostStateOffer = false
     try {
+      if (row.protocol === "host-state") {
+        const offer = await offerHostStateRow(row.id)
+        // Withdrawn or superseded between the claim and now: nothing to send.
+        if (!offer) return
+        row = offer.row
+        firstHostStateOffer = offer.firstOffer
+      }
       let idempotencyKey = row.idempotencyKey
       if (row.command === "bot_delivery_replay" || row.command === "bot_trigger_set_armed") {
         const { normalizeLegacyBotWriteKey } = await import("@/lib/bot/control-writes/remote")
@@ -409,6 +421,28 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
       }
       if (row.protocol === "host-state") {
         const rejectionCode = terminalHostStateErrorCode(err)
+        if (rejectionCode === "stale_host_generation" && firstHostStateOffer) {
+          // The Host refuses a stale stamp before it commits anything to its
+          // ledger, and this was the row's only offer, so no ledger entry for
+          // it exists under any generation. (`session.delete` runs its cascade
+          // before that check; a re-based resend of one is answered
+          // `session_not_found`, never a second delete.) It is this client's
+          // mirror that is behind — a Host restart it has not resynced yet —
+          // not the user's intent that is wrong: forget the offer, catch the
+          // mirror up, and the next attempt is re-based onto the generation
+          // the Host is actually on. Bounded by the ordinary retry budget, so
+          // a Host that keeps refusing ends deadlettered and visible rather
+          // than looping.
+          await recordFailure({
+            id: row.id,
+            error: err,
+            nowMs: now(),
+            random,
+            forgetOffer: true,
+          })
+          await resyncHostState()
+          return
+        }
         if (rejectionCode) {
           await markHostStateResult(row.id, {
             outcome: "rejected",
@@ -506,6 +540,11 @@ async function reconcileTerminalHostState(
   outcome: "applied" | "duplicate" | "rejected" | "conflicted"
 ): Promise<void> {
   if (outcome !== "rejected" && outcome !== "conflicted") return
+  await resyncHostState()
+}
+
+/** Re-cut this client's HostState mirror from the Host, when one is installed. */
+async function resyncHostState(): Promise<void> {
   const { remoteEventResyncCoordinator } = await import("@/lib/tauri/resync-coordinator")
   if (!remoteEventResyncCoordinator.hasResolverForEvent("host-state://action")) return
   await remoteEventResyncCoordinator.resolve(["host-state"]).catch(() => undefined)

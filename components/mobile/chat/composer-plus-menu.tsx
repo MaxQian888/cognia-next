@@ -20,6 +20,17 @@
  *     produces an attachment, the other changes what the turn can do.
  *   - Every row clears the 44pt touch floor (`touch-target`), and the sheet
  *     pads itself past the home indicator.
+ *   - A row with a chevron DRILLS IN: the sheet swaps its body for the list,
+ *     puts the list's title and a back button in its header, and slides
+ *     between the two (Escape and the Android back button step back out
+ *     first). That holds for the sheet's own lists (cloud docs, records) and
+ *     for the ones the composer's injected rows open — skills, room members,
+ *     web search setup — which on desktop are flyout popovers. A second
+ *     floating layer over the sheet overlapped it, and the popover focused its
+ *     search field on open, raising the keyboard before anyone asked to type;
+ *     a drilled-in panel focuses only its back button. The handshake is
+ *     `ComposerMenuPanelsProvider` / `ComposerMenuPanel`
+ *     (`components/chat/composer/composer-menu-context.ts`).
  *
  * What is NOT here, and why: folder references, screen capture and the smart
  * snapshot need a real filesystem/desktop screen, and the skill recorder is
@@ -48,7 +59,7 @@
  * + enqueue an outbound `connector_send` job as appropriate.
  */
 
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AtSignIcon,
@@ -78,7 +89,11 @@ import {
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { useChatStore, useComposerPermissionMode } from "@/stores/chat"
 import { useComposerSessionId } from "@/components/chat/composer/composer-session-context"
-import { ComposerMenuCloseProvider } from "@/components/chat/composer/composer-menu-context"
+import {
+  ComposerMenuCloseProvider,
+  ComposerMenuPanelsProvider,
+  type ComposerMenuPanels,
+} from "@/components/chat/composer/composer-menu-context"
 import { listDocsProviders } from "@/lib/docs-providers/registry"
 import { docsProviderReach } from "@/lib/docs-providers/reach"
 import { useHostProfile } from "@/hooks/use-host-profile"
@@ -150,8 +165,28 @@ export interface ComposerPlusMenuProps {
   className?: string
 }
 
-/** Which panel the sheet is showing. One level of drill-down, in place. */
-type MenuView = "root" | "docs" | "records"
+/**
+ * Which panel the sheet is showing. One level of drill-down, in place: the
+ * sheet's own lists (`docs`, `records`) and the panels an injected capability
+ * row opens through `ComposerMenuPanel` (`panel`, e.g. the skill picker).
+ */
+type MenuView =
+  | { kind: "root" }
+  | { kind: "docs" }
+  | { kind: "records" }
+  | { kind: "panel"; id: string; title: string }
+
+const ROOT_VIEW: MenuView = { kind: "root" }
+
+/**
+ * The drill-in transition: a short shared-axis slide (32px + fade, 200ms), the
+ * incoming view entering from the side it lives on. Reduced motion needs no
+ * variant here: the global guard in `app/globals.css` collapses every
+ * animation to 1ms for the OS `prefers-reduced-motion` setting and for the
+ * in-app one alike.
+ */
+const ENTER_FORWARD = "animate-in fade-in-0 slide-in-from-right-8 duration-200 ease-out"
+const ENTER_BACK = "animate-in fade-in-0 slide-in-from-left-8 duration-200 ease-out"
 
 interface VoiceRecorderShape {
   requestAudioRecordingPermission(): Promise<{ value: boolean }>
@@ -183,7 +218,15 @@ export function ComposerPlusMenu({
   const tEntities = useTranslations("chat.composer.popover.entityKinds")
   const tDocs = useTranslations("docsProviders")
   const [open, setOpen] = useState(false)
-  const [view, setView] = useState<MenuView>("root")
+  const [view, setView] = useState<MenuView>(ROOT_VIEW)
+  // Whether the root has been returned to since the sheet opened — the root
+  // only slides in from the left on a way BACK, never on the sheet's own open
+  // (the drawer already slides up).
+  const [returned, setReturned] = useState(false)
+  // Injected panels whose body is mounted (see `ComposerMenuPanel`).
+  const [registeredPanels, setRegisteredPanels] = useState<ReadonlySet<string>>(() => new Set())
+  const [panelSlot, setPanelSlot] = useState<HTMLElement | null>(null)
+  const backRef = useRef<HTMLButtonElement>(null)
   const [recording, setRecording] = useState(false)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const composerSessionId = useComposerSessionId()
@@ -211,8 +254,57 @@ export function ComposerPlusMenu({
   /** Close, and put the sheet back on the root for the next open. */
   function closeMenu() {
     setOpen(false)
-    setView("root")
+    setView(ROOT_VIEW)
+    setReturned(false)
   }
+
+  function goBack() {
+    setView(ROOT_VIEW)
+    setReturned(true)
+  }
+
+  const registerPanel = useCallback((id: string) => {
+    setRegisteredPanels((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+    return () =>
+      setRegisteredPanels((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+  }, [])
+
+  // A panel whose body stopped rendering while it was showing (its row
+  // unmounted, or no longer offers it) leaves the root showing rather than an
+  // empty body under a stale title.
+  const shown: MenuView =
+    view.kind === "panel" && !registeredPanels.has(view.id) ? ROOT_VIEW : view
+  const atRoot = shown.kind === "root"
+
+  const panels: ComposerMenuPanels = {
+    activePanelId: shown.kind === "panel" ? shown.id : null,
+    slot: panelSlot,
+    openPanel: (id, title) => setView({ kind: "panel", id, title }),
+    closePanel: goBack,
+    registerPanel,
+  }
+
+  // Drilling in hides the row that was tapped, which would drop focus on the
+  // sheet's container. Put it on the header's back button instead: a button,
+  // so the soft keyboard stays down (a panel with a search field leaves that
+  // field for the user to tap), and the way out is where a screen reader lands.
+  useEffect(() => {
+    if (shown.kind !== "root") backRef.current?.focus({ preventScroll: true })
+  }, [shown.kind])
+
+  const viewTitle =
+    shown.kind === "docs"
+      ? tMenu("cloudDocs")
+      : shown.kind === "records"
+        ? tMenu("records")
+        : shown.kind === "panel"
+          ? shown.title
+          : null
 
   const insertAndClose = (text: string) => {
     closeMenu()
@@ -222,7 +314,11 @@ export function ComposerPlusMenu({
   const onCamera = async () => {
     closeMenu()
     void selectionFeedback()
-    const result = await pickPhoto({ source: "camera", resultType: "base64" })
+    const result = await pickPhoto({
+      source: "camera",
+      resultType: "base64",
+      recoveryTarget: composerSessionId ? { kind: "chat", id: composerSessionId } : undefined,
+    })
     if (result.kind === "captured") {
       const mime = `image/${result.format}`
       onAttach({
@@ -246,13 +342,16 @@ export function ComposerPlusMenu({
       onError?.("unsupported", t("unsupported"))
       return
     }
-    onError?.("error", result.message)
+    onError?.("error", t("photoFailed"))
   }
 
   const onAlbum = async () => {
     closeMenu()
     void selectionFeedback()
-    const result = await pickMultiplePhotos({ limit: 9 })
+    const result = await pickMultiplePhotos({
+      limit: 9,
+      recoveryTarget: composerSessionId ? { kind: "chat", id: composerSessionId } : undefined,
+    })
     if (result.kind === "picked") {
       const items = result.photos.map((p) => ({ uri: p.uri, mime: `image/${p.format}` }))
       onAttach({ kind: "photos", items })
@@ -271,7 +370,7 @@ export function ComposerPlusMenu({
       onError?.("unsupported", t("unsupported"))
       return
     }
-    onError?.("error", result.message)
+    onError?.("error", t("photoFailed"))
   }
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -364,30 +463,79 @@ export function ComposerPlusMenu({
         }}
       >
         <DrawerContent
-          role="menu"
+          // The root and the sheet's own lists are menus; an injected panel
+          // (a search field over a list, a setup card) is not, so the sheet
+          // falls back to the dialog role the drawer carries anyway.
+          role={shown.kind === "panel" ? "dialog" : "menu"}
           data-testid="composer-plus-menu"
+          // Stepping back out of a view removes the focused back button, and
+          // Radix then parks focus on this container — a sheet, not a control,
+          // so it draws no ring.
+          className="outline-none"
+          data-view={shown.kind === "panel" ? `panel:${shown.id}` : shown.kind}
           // The sheet's whole job is to hand focus back to the message: a row
           // that types `@issue:` is useless if closing the sheet then yanks
           // focus to the trigger and drops the caret (and, on iOS, the
           // keyboard) the panel needs.
           onCloseAutoFocus={(e) => e.preventDefault()}
+          // Escape — and the Android back button, which the boot provider
+          // turns into one (`dismissTopmostOverlayOnBack`) — steps out of a
+          // drilled-in view before it closes the sheet, like a native stack.
+          onEscapeKeyDown={(e) => {
+            if (atRoot) return
+            e.preventDefault()
+            goBack()
+          }}
         >
           <DrawerHeader className="sr-only">
             <DrawerTitle>{t("toggleAria")}</DrawerTitle>
             <DrawerDescription>{t("sheetDescription")}</DrawerDescription>
           </DrawerHeader>
+          {viewTitle !== null ? (
+            // The drilled-in view's header sits OUTSIDE the scroll area, so the
+            // way back never scrolls away under a long list.
+            <div
+              className={cn(
+                "flex shrink-0 items-center gap-1 border-b border-border px-2 pb-1",
+                ENTER_FORWARD
+              )}
+              data-testid="composer-plus-view-header"
+            >
+              <Button
+                ref={backRef}
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={goBack}
+                aria-label={t("back")}
+                className="touch-target rounded-pill text-muted-foreground"
+                data-testid="composer-plus-back"
+              >
+                <ChevronLeftIcon />
+              </Button>
+              <h3
+                className="min-w-0 flex-1 truncate text-sm font-medium"
+                data-testid="composer-plus-view-title"
+              >
+                {viewTitle}
+              </h3>
+            </div>
+          ) : null}
           {/* `min-h-0` is load-bearing: `DrawerContent` is a flex column capped at
-              85vh, and a flex child defaults to `min-height:auto`, which refuses to
+              80vh, and a flex child defaults to `min-height:auto`, which refuses to
               shrink below its content. Without it the sheet does not scroll — it
-              simply clips the last group off the bottom of the screen.
+              simply clips the last group off the bottom of the screen. It is a
+              flex column itself so a fixed-height panel (the skill picker) can
+              give way when the sheet is shorter — a raised keyboard — and keep
+              its search field in view while its own list scrolls.
 
               The bottom gutter is 24px BEFORE the safe-area inset: the last row
               is a 44pt tap target, and on a phone with no inset to inherit
               (Android, a pre-notch iPhone) a 16px gutter put it inside the
               reach of the OS gesture bar. */}
-          <div className="min-h-0 overflow-y-auto px-2 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
-            {view === "docs" ? (
-              <SubPanel title={tMenu("cloudDocs")} onBack={() => setView("root")}>
+          <div className="flex min-h-0 flex-col overflow-y-auto px-2 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+            {shown.kind === "docs" ? (
+              <div key="docs" role="group" aria-label={viewTitle ?? undefined} className={cn("pt-1", ENTER_FORWARD)}>
                 {docsProviders.map((provider) => {
                   const reach = docsProviderReach(provider, hostProfile)
                   return (
@@ -411,9 +559,9 @@ export function ComposerPlusMenu({
                     />
                   )
                 })}
-              </SubPanel>
-            ) : view === "records" ? (
-              <SubPanel title={tMenu("records")} onBack={() => setView("root")}>
+              </div>
+            ) : shown.kind === "records" ? (
+              <div key="records" role="group" aria-label={viewTitle ?? undefined} className={cn("pt-1", ENTER_FORWARD)}>
                 {entitySources.map((source) => (
                   <PlusRow
                     key={source.entityKind}
@@ -423,9 +571,27 @@ export function ComposerPlusMenu({
                     testId={`composer-plus-record-${source.entityKind}`}
                   />
                 ))}
-              </SubPanel>
-            ) : (
-              <>
+              </div>
+            ) : shown.kind === "panel" ? (
+              // The injected panel's body is portalled in here by its own row
+              // (`ComposerMenuPanel`). Keyed so a different panel remounts —
+              // and replays the slide.
+              <div
+                key={`panel:${shown.id}`}
+                ref={setPanelSlot}
+                className={cn("flex min-h-0 flex-1 flex-col pt-1", ENTER_FORWARD)}
+                data-testid="composer-plus-panel"
+              />
+            ) : null}
+            {/* The root stays MOUNTED while drilled in, only hidden: the rows the
+                composer injects own the panels they open, and a panel's body
+                lives exactly as long as its row does. Coming back also lands on
+                the root as it was left — scroll position included. */}
+            <div
+              hidden={!atRoot}
+              className={cn(returned && ENTER_BACK)}
+              data-testid="composer-plus-root"
+            >
                 <GroupLabel>{tMenu("attachGroup")}</GroupLabel>
                 {/* Four across is the phone idiom and the widest that keeps a
                     one-line label at 320px — but the chat composer hides voice,
@@ -492,7 +658,7 @@ export function ComposerPlusMenu({
                   <PlusRow
                     icon={<CloudIcon className="size-4" />}
                     label={tMenu("cloudDocs")}
-                    onSelect={() => setView("docs")}
+                    onSelect={() => setView({ kind: "docs" })}
                     chevron
                     testId="composer-plus-cloud-docs"
                   />
@@ -501,7 +667,7 @@ export function ComposerPlusMenu({
                   <PlusRow
                     icon={<AtSignIcon className="size-4" />}
                     label={tMenu("records")}
-                    onSelect={() => setView("records")}
+                    onSelect={() => setView({ kind: "records" })}
                     chevron
                     testId="composer-plus-records"
                   />
@@ -535,7 +701,12 @@ export function ComposerPlusMenu({
                     navigates away (unconfigured web search → Settings) closes
                     the sheet behind it. */}
                 <ComposerMenuCloseProvider value={closeMenu}>
-                  {capabilities}
+                  {/* ...and a row that opens a list of its own (skills, the
+                      room's members, web search's setup card) drills the sheet
+                      into it instead of floating a popover over the sheet. */}
+                  <ComposerMenuPanelsProvider value={panels}>
+                    {capabilities}
+                  </ComposerMenuPanelsProvider>
                 </ComposerMenuCloseProvider>
 
                 <GroupLabel className="mt-2 border-t border-border pt-3">
@@ -560,8 +731,7 @@ export function ComposerPlusMenu({
                     testId="composer-plus-services"
                   />
                 ) : null}
-              </>
-            )}
+            </div>
           </div>
         </DrawerContent>
       </Drawer>
@@ -586,36 +756,6 @@ function GroupLabel({ children, className }: { children: React.ReactNode; classN
     >
       {children}
     </p>
-  )
-}
-
-/**
- * A drill-down panel: one back row, then the submenu's own items. The back row
- * is a full-width button so the way out is also the largest target — the same
- * reason the root entries are rows rather than a header with a chevron in it.
- */
-function SubPanel({
-  title,
-  onBack,
-  children,
-}: {
-  title: string
-  onBack: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <>
-      <button
-        type="button"
-        onClick={onBack}
-        className={cn(ROW_CLASS, "font-medium")}
-        data-testid="composer-plus-back"
-      >
-        <ChevronLeftIcon className="size-4 text-muted-foreground" />
-        <span className="flex-1">{title}</span>
-      </button>
-      <div className="mt-1 border-t border-border pt-1">{children}</div>
-    </>
   )
 }
 
@@ -695,4 +835,3 @@ function PlusRow({
     </button>
   )
 }
-

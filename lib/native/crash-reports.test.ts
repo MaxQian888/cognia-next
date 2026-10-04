@@ -62,9 +62,9 @@ describe("under Tauri", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("crash_list_reports")
   })
 
-  it("returns [] when the list invoke rejects", async () => {
+  it("propagates a rejected list invoke instead of reporting an empty directory", async () => {
     mockedInvoke.mockRejectedValueOnce(new Error("boom"))
-    expect(await listCrashReports()).toEqual([])
+    await expect(listCrashReports()).rejects.toThrow("boom")
   })
 
   it("reads a report by stem", async () => {

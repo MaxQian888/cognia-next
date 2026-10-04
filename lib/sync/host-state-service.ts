@@ -224,7 +224,11 @@ export function createAgentRpcHostStateDispatcher(
           if (dependencies.sendMessage) {
             await dependencies.sendMessage(sessionId, action.action.text, action.actionId)
           } else {
-            const [{ getSession }, { buildSendOptions }, { sendPrompt }] = await Promise.all([
+            const [
+              { getSession },
+              { buildSendOptions, prepareTranscriptRuntimeSend },
+              { sendPrompt },
+            ] = await Promise.all([
               import("@/lib/db/sessions"),
               import("@/hooks/chat/claude-chat-send-options"),
               import("@/lib/claude/ipc"),
@@ -244,9 +248,6 @@ export function createAgentRpcHostStateDispatcher(
               throw new Error(`host_state_runtime_not_builtin:${runtimeRef.kind}`)
             }
             const options = await buildSendOptions(session, action.action.text)
-            if (receipt) {
-              await workSubmissionAdapter.bindHostStateChatTurnContext(action, options)
-            }
             // Attachments become content here, not in the intent: the intent
             // carries refs so a 10 MB screenshot never rides the action ledger
             // (or the replay stream, or a queue row that gets retried). This is
@@ -271,7 +272,21 @@ export function createAgentRpcHostStateDispatcher(
               if (existing?.sessionId === sessionId) message.metadata = existing.metadata
               await commitMessageDelta(sessionId, { upserts: [message] })
             }
-            await sendPrompt(sessionId, prompt.content, options, { commandId: action.actionId })
+            const { withTranscriptRuntimeLock } =
+              await import("@/lib/chat/transcript/revision-events")
+            await withTranscriptRuntimeLock(sessionId, async () => {
+              const prepared = await prepareTranscriptRuntimeSend(sessionId, options, {
+                currentMessageId:
+                  action.action.kind === "message.enqueue" ? action.action.messageId : null,
+              })
+              if (receipt) {
+                await workSubmissionAdapter.bindHostStateChatTurnContext(action, prepared)
+              }
+              await sendPrompt(sessionId, prompt.content, prepared, {
+                commandId: action.actionId,
+                transcriptRuntime: "prepared",
+              })
+            })
             // Only now: the runtime has the file, so the staging copy is dead
             // weight and the per-session staging slot should be freed. Before
             // the send it is the only copy that exists.
@@ -816,7 +831,17 @@ async function persistConfirmedState(
   await materializeOptimisticMessages(optimisticState, db)
   const { useChatStore } = await import("@/stores/chat/chat-store")
   assertCurrent()
-  useChatStore.getState().setSessionStatus(state.sessionId, chatStoreStatusForTurn(optimisticState))
+  // A turn the Host has been running since before this client attached keeps
+  // its real start: without it the run clock would count from the moment this
+  // snapshot landed — on a relaunch, from app launch.
+  const activeTurnStartedAt = optimisticState.activeTurn?.startedAt
+  useChatStore
+    .getState()
+    .setSessionStatus(
+      state.sessionId,
+      chatStoreStatusForTurn(optimisticState),
+      typeof activeTurnStartedAt === "number" ? { startedAt: activeTurnStartedAt } : undefined
+    )
   return optimisticState
 }
 

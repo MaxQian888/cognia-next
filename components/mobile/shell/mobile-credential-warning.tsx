@@ -12,6 +12,13 @@
  * pointer, and a long-press hint for a finger, where there is no hover.
  *
  * A tap opens the session sheet whose Account section resolves it.
+ *
+ * Tonal, not solid. A filled red pill was the loudest thing on the bar — louder
+ * than the title it squeezed — while the composer below already wears its own
+ * red key badge for the same fact. As an icon it is one more control of the
+ * action cluster (same ghost button, same 44px box) that happens to be red; with
+ * room it is a quiet tinted chip, painted at the bar's chip height with the
+ * vertical hit-slop the other chips use.
  */
 
 import { useEffect, useState } from "react"
@@ -70,18 +77,20 @@ export function MobileCredentialWarning({
         <TooltipTrigger asChild>
           <Button
             type="button"
-            variant="destructive"
+            variant="ghost"
             size={showLabel ? "sm" : "icon"}
             onClick={onResolve}
             aria-label={hint}
             data-testid="mobile-no-api-key"
             data-compact={showLabel ? undefined : "true"}
             className={cn(
-              "touch-target shrink-0 gap-1.5 rounded-full",
-              showLabel ? "px-3 text-xs" : "size-11"
+              "shrink-0 text-destructive hover:text-destructive",
+              showLabel
+                ? "touch-hit h-8 gap-1.5 rounded-full border border-destructive/25 bg-destructive/10 px-2.5 text-xs font-medium hover:bg-destructive/15"
+                : "touch-target size-11 hover:bg-destructive/10"
             )}
           >
-            <KeyRoundIcon className="size-4" aria-hidden />
+            <KeyRoundIcon className={showLabel ? "size-3.5" : "size-5"} aria-hidden />
             {showLabel ? <span className="whitespace-nowrap">{t("noApiKey")}</span> : null}
           </Button>
         </TooltipTrigger>

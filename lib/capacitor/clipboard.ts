@@ -43,7 +43,7 @@ export async function readText(
 ): Promise<ValueOutcome<string>> {
   return withPlugin(loader, async (c) => {
     const res = await c.read()
-    return { kind: "ok" as const, value: res?.value ?? "" }
+    return { kind: "ok" as const, value: res?.type === "text/plain" ? (res.value ?? "") : "" }
   })
 }
 

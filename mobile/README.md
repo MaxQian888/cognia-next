@@ -1,8 +1,10 @@
 # mobile/ — Capacitor 8 Mobile Shell
 
 Capacitor 8 wraps the Next.js static export (`out/` at the repo root) into a
-native iOS / Android app. The same `out/` directory feeds Tauri (desktop) and
-Capacitor (mobile) — `pnpm build` generates it once.
+native iOS / Android app. Tauri and Capacitor use the same output path, but
+their compile targets differ. Regenerate the correct target before packaging:
+`pnpm build` for web/Tauri, a mobile workflow below for Capacitor. Android
+workflows check mobile provenance before reusing an export.
 
 ## Layout
 
@@ -20,19 +22,110 @@ the copied web bundle, and local IDE state remain gitignored.
 
 Run from the repo root.
 
-| Goal                                        | Command                        |
-| ------------------------------------------- | ------------------------------ |
-| Install / refresh deps                      | `pnpm install`                 |
-| Build static export + sync iOS              | `pnpm mobile:sync:ios`         |
-| Build static export + sync Android          | `pnpm mobile:sync:android`     |
-| Build static export + sync both platforms   | `pnpm mobile:sync`             |
-| Open iOS project in Xcode                   | `pnpm mobile:open:ios`         |
-| Open Android project in Android Studio      | `pnpm mobile:open:android`     |
-| Regenerate a missing iOS platform           | `pnpm -F mobile add:ios`       |
-| Regenerate a missing Android platform       | `pnpm -F mobile add:android`   |
+| Goal                                      | Command                      |
+| ----------------------------------------- | ---------------------------- |
+| Install / refresh deps                    | `pnpm install`               |
+| Build static export + sync iOS            | `pnpm mobile:sync:ios`       |
+| Build static export + sync Android        | `pnpm mobile:sync:android`   |
+| Build static export + sync both platforms | `pnpm mobile:sync`           |
+| Open iOS project in Xcode                 | `pnpm mobile:open:ios`       |
+| Open Android project in Android Studio    | `pnpm mobile:open:android`   |
+| Regenerate a missing iOS platform         | `pnpm -F mobile add:ios`     |
+| Regenerate a missing Android platform     | `pnpm -F mobile add:android` |
 
-The sync commands run `pnpm build` first, copy `out/` into the selected native
-project, and refresh its native dependencies. Prefer the platform-specific
+## Local Android development
+
+Use the cross-platform Node workflow on macOS, Linux, or Windows. It requires
+JDK 21 and an Android SDK; set `JAVA_HOME_21` (or `JAVA_HOME`) and
+`ANDROID_HOME` when they are not discoverable. On macOS, the Homebrew JDK 21
+and `~/Library/Android/sdk` are also detected. No global PowerShell or Ionic
+installation is needed.
+
+| Work                                        | Command                                       | What runs                                                                                                               |
+| ------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| UI and TypeScript development               | `pnpm mobile:dev:android`                     | Prepare browser resources, start a mobile Webpack dev server, sync/install a small native shell once, then Fast Refresh |
+| Experimental Turbopack development          | `pnpm mobile:dev:android --bundler=turbopack` | Same mobile resolution and native shell, with Turbopack                                                                 |
+| Java, Android resources, or Gradle only     | `pnpm mobile:deploy:fast --refresh=none`      | Verify existing mobile assets, Gradle, install, launch                                                                  |
+| Capacitor config changed                    | `pnpm mobile:deploy:fast --refresh=copy`      | Verify existing mobile export, `cap copy android`, Gradle, install, launch                                              |
+| Native plugin dependencies changed          | `pnpm mobile:deploy:fast`                     | Verify existing mobile export, `cap sync android`, Gradle, install, launch                                              |
+| Offline debug APK                           | `pnpm mobile:build:android`                   | Prepare, production mobile Webpack build, provenance stamp, Android sync, verification, Gradle                          |
+| Offline debug APK and install               | `pnpm mobile:deploy`                          | Full offline debug build, install, launch                                                                               |
+| Production web export and Android sync only | `pnpm mobile:sync:android`                    | Prepare, production mobile build, provenance stamp, sync/verification; no JDK or device required                        |
+| Unsigned release APK                        | `pnpm mobile:build:android --release`         | Full offline release build with the release artifact guard                                                              |
+
+Use `--serial=DEVICE` when more than one authorized device is connected.
+Use `pnpm mobile:deploy:fast --no-install` to assemble without changing the
+installed app. A source change invalidates the reusable export: the fast
+workflow refuses stale, modified, incomplete, or non-mobile assets and tells
+you to produce a fresh mobile build. Configuration-only native changes do not
+invalidate Web provenance. Plugin changes that also change JavaScript inputs
+or the workspace lockfile need a fresh mobile Web build.
+
+Live reload defaults to `http://localhost:3002` inside the Android WebView,
+forwarded by device-specific `adb reverse` to a server bound to `127.0.0.1`.
+Its cache is `.next-mobile-dev`; the production build retains Next's default
+`.next` cache and `out/` export. The mobile target selects `.mobile.ts(x)`
+files in both bundlers. An existing desktop server is not silently reused or
+terminated. Choose `--port=3003` if the default port is occupied. First-page
+compilation has a ten-minute readiness limit with progress output; use
+`--timeout-seconds=900` for a slower cold machine.
+
+The generated `mobile/.dev-web/index.html` is a development shell only.
+Live reload does not require a previous production export and does not copy
+the potentially large `out/` tree into its APK. Runtime content comes from
+the mobile dev server. Before assembling the dev shell, the workflow removes
+only the previous final debug APK: incremental packaging can otherwise retain
+empty space from the removed offline assets. Native compilation caches remain
+available. On restart, a content fingerprint validates native sources, dependencies,
+configuration, toolchain and APK bytes. Generated assets are checked when the
+shell is built and sealed; subsequent offline sync output does not invalidate
+that saved artifact. An unchanged shell
+skips Capacitor sync and Gradle. Installation is skipped only when the selected
+device reports the same installed APK SHA-256; missing or unreadable identity
+falls back to installation. Switching back from an offline APK therefore
+installs the saved dev shell again without rebuilding it. Native changes require restarting the workflow
+so the shell is rebuilt; TSX/CSS edits use Fast Refresh while it is running.
+The local manifest lives at `.cache/mobile-dev-shell/manifest.json` and points
+to a separately saved, content-addressed APK in the same directory. Gradle's
+`app-debug.apk` remains available for offline builds. Publication is atomic;
+after a successful replacement, only the current saved development APK is kept.
+A missing manifest or missing/corrupt saved APK safely forces a rebuild.
+Ctrl+C stops owned child processes and removes only a reverse mapping created
+by this session. An existing matching reverse mapping is preserved. A lock at
+`mobile/android/.cognia-build.lock` prevents two workflow commands from writing
+the same native assets. If the process is killed without cleanup, inspect the
+PID recorded in the lock before removing it manually.
+
+Live reload uses the same Android application ID, `com.cognia.mobile`.
+Its HTTP origin has different IndexedDB/localStorage from the offline APK's
+`https://localhost` origin, while native keystore credentials still belong
+to the same app. It is **not** an isolated account or data sandbox. Installing
+uses `adb install -r`; the workflow never uninstalls the app or clears app data.
+Avoid switching origins to test real account migrations; use a dedicated test
+device/profile and synthetic credentials for that work.
+
+After live reload, run the full offline workflow before offline acceptance.
+It removes dev URL flags from the copied configuration and verifies every
+stamped asset. The `capacitor:copy:after` and `capacitor:update:after` hooks
+restore exported `/plugins` route data and plugin mirrors after Capacitor
+clears its Cordova directory;
+conflicting native plugin files are rejected rather than overwritten. This
+hook also runs for direct `cap copy`/`cap sync` and iOS copies.
+Direct Gradle/Android Studio release builds also run
+`verifyOfflineMobileAssets`, which requires Node on `PATH` and rejects live
+reload configuration, missing provenance, or tampered assets. Merely unsetting
+an environment variable does not update an already copied native config.
+The `mobile:sync` command uses the same verified Android export and then
+synchronizes iOS, so both-platform builds also retain Android provenance.
+
+Fast Refresh proves neither static-export routing nor offline startup. Check
+keyboard/back navigation, camera permissions, native listeners after repeated
+refreshes, deep links, and reconnect on the native shell, then verify a built
+offline APK with the dev server stopped. Measure first launch, save-to-visible
+refresh, native incremental deploy, and offline build times separately.
+
+The sync commands build the mobile static export first, copy `out/` into the
+selected native project, and refresh its native dependencies. Prefer the platform-specific
 command during normal development. `mobile:sync:ios` also reapplies the iOS 16
 deployment target, Info.plist permissions, URL scheme, Bonjour declaration,
 launch background, app icon, and splash assets before invoking Capacitor.
@@ -40,6 +133,55 @@ launch background, app icon, and splash assets before invoking Capacitor.
 iOS development requires macOS with Xcode 26+ selected through `xcode-select`.
 The iOS workspace uses CocoaPods because some shipped plugins do not publish
 Swift Package Manager manifests. See [`IOS_BOOTSTRAP.md`](./IOS_BOOTSTRAP.md).
+
+## Incremental preparation and packaging
+
+Browser builtin plugins and the workflow embed use content-based incremental
+preparation. Unchanged inputs and intact outputs skip compilation; missing or
+modified outputs rebuild. Support docs recompute the corpus and skip writing
+when its bytes are unchanged. All three preserve output mtimes on unchanged
+runs. Cache records are local build products, not a substitute for artifact
+integrity checks.
+
+Offline Android exports remove only explicitly identified icon source/QA/contact
+sheets, unused duplicate icon formats, and stale web service-worker files.
+Mobile icons use the 65 existing WebP alternatives; the remaining 16 retain PNG.
+The icon manifest shares this selection between the renderer and export policy.
+Only PNGs with selected, present WebP replacements are excluded; all original
+files remain in `public/`. Runtime mobile icons, avatar WebPs, marketing assets, Monaco, OCR and plugin
+resources remain packaged. This policy changes `out/` only, preserving `public/`
+source material. Full offline builds recreate only the final APK to prevent
+incremental ZIP padding from retaining the space of removed assets. A compiled reference to an excluded path fails the build before
+pruning; policy changes invalidate existing export provenance.
+
+Gradle configuration caching is enabled for the current Gradle/AGP stack. It
+reuses configuration while Gradle continues checking task inputs and the release
+asset guard runs on every release build. Use `--no-configuration-cache` with
+direct Gradle commands to diagnose a newly added incompatible plugin. Native
+compilation and frontend compilation still have separate caches; this does not
+make a cold Next.js production build incremental.
+
+## Mobile compilation boundaries
+
+Mobile builds and Live Reload resolve `.mobile.tsx` / `.mobile.ts` before
+the normal suffixes in both Webpack and Turbopack. Route `page.tsx` files keep
+shared controllers, query parameters, actions, and loading/error handling;
+their extensionless `./route-body` imports select the platform view. Ordinary
+web/Tauri builds keep responsive desktop/mobile selection. Do not add
+`page.mobile.tsx`: it is not a platform route convention in Next.js.
+
+The eight desktop window routes retain their URLs and show a translated return
+link on mobile. Desktop-only root providers use import-free mobile variants.
+`AppRuntime` composes the existing client providers in their original order;
+the server layout still owns locale, metadata, fonts, boot script, and the
+server-rendered route children. This avoids serializing the same large chunk
+reference list for every root provider while preserving SSR.
+
+Run `pnpm scripts:test:mobile` for workflow and artifact checks, and the
+`app/_platform/`, `app/scheduler/route-body.mobile.test.tsx`, and
+`components/runtime/app-runtime.test.tsx` Jest tests for route/provider behavior.
+After adding a mobile seam, verify the emitted compiler trace as well as unit
+tests: lazy imports alone still cause Webpack to compile desktop chunks.
 
 ## Android Release APK
 
@@ -58,11 +200,123 @@ silently fall back to debug signing. Preserve
 `android/app/build/outputs/mapping/release/mapping.txt` alongside each shipped
 APK so optimized crash stack traces can be retraced.
 
+### Tagged Android releases
+
+Android participates in the existing root version and GitHub release flow:
+
+1. Add the app's Changeset and run `pnpm release:version`. This already invokes
+   `pnpm version:sync`; it now updates `mobile/android/version.properties` too.
+   If setting the root `package.json` version directly, run `pnpm version:sync`.
+2. Review and commit the version changes with the release, including the generated
+   properties. `pnpm version:sync:check` rejects name or code drift.
+3. Push the matching `v<version>` tag through the normal release procedure.
+   The workflow rejects a tag that differs from the canonical package version.
+4. The Android job builds the offline Release APK, signs it, and verifies the
+   certificate fingerprint, package ID, native version and ZIP alignment. It
+   uploads `cognia-<version>-android.apk`, its `.sha256`, `.metadata.json`, and
+   the R8 mapping file. The desktop release publication job attaches these
+   artifacts before making the draft public. Android failure blocks publication.
+   Prerelease tags are marked prerelease and do not replace GitHub's latest release.
+
+The canonical version remains the root `package.json`; no CI run counter or
+timestamp changes it. Gradle reads the generated properties for both local and
+CI builds. Android supports `MAJOR.MINOR.PATCH` with optional `-alpha.N`,
+`-beta.N` or `-rc.N`; each numeric version component is 0–99 and N is 0–499.
+The code is `(major * 10000 + minor * 100 + patch) * 2000 + stage`, where stages
+are `1 + N`, `501 + N`, `1001 + N`, and `1999` for stable. Thus prereleases sort
+before stable and the next patch, deterministically. Unsupported suffixes and
+build metadata are rejected instead of sharing an Android version code.
+The current `0.1.0` maps to `201999`, above the previous hard-coded code `1`.
+Rebuilding the same version preserves its code; a new release needs a version bump.
+
+Configure these repository Actions secrets before the first tagged release:
+
+| Secret                        | Purpose                                               |
+| ----------------------------- | ----------------------------------------------------- |
+| `ANDROID_KEYSTORE_BASE64`     | Base64 of the existing distribution keystore          |
+| `ANDROID_KEYSTORE_PASSWORD`   | Keystore password                                     |
+| `ANDROID_KEY_ALIAS`           | Distribution signing key alias                        |
+| `ANDROID_KEY_PASSWORD`        | Signing key password                                  |
+| `ANDROID_SIGNING_CERT_SHA256` | Expected distribution certificate SHA-256 fingerprint |
+
+Use the same distribution identity as previously installed APKs. An existing
+debug-signed installation cannot be covered by a differently signed release;
+plan test-data migration separately. Release secrets are only provided to the
+signing steps. A temporary private keystore is removed in an unconditional
+cleanup step, and debug certificates or missing credentials cause failure.
+The workflow never generates or substitutes a release identity.
+
+These release assets can be mirrored to a domestic HTTPS download service and
+referenced by the existing signed update catalog. This workflow does not deploy
+that service, publish a catalog entry, or upload to vendor stores. The metadata
+JSON is an artifact description, not a signed update catalog. Local
+`pnpm mobile:build:android --release` continues producing an unsigned APK.
+
+Sources: [Android versioning](https://developer.android.com/studio/publish/versioning),
+[app signing](https://developer.android.com/studio/publish/app-signing), and
+[apksigner](https://developer.android.com/tools/apksigner).
+
 Capacitor and ACRA provide their reflection keep rules. App-specific rules
 preserve ACRA's reflective BuildConfig fields and resources looked up by name
 from `capacitor.config.json`. When adding such a resource, update
 `android/app/src/main/res/raw/com_cognia_mobile_keep.xml` and smoke-test the
 optimized Release build, not just Debug.
+
+## Tagged iOS releases
+
+iOS uses the same root `package.json`, `pnpm release:version` and matching
+`v<version>` tag as Android and desktop. `pnpm version:sync` updates both App
+target configurations in the Xcode project; `--check` rejects either field
+drifting. `CFBundleShortVersionString` is the numeric `MAJOR.MINOR.PATCH`, while
+`CFBundleVersion` is the ordered stage within that marketing version:
+`alpha.N` → `1 + N`, `beta.N` → `501 + N`, `rc.N` → `1001 + N`, stable → `1999`.
+For example, `1.2.3-beta.2` becomes marketing version `1.2.3`, build `503`.
+The full source version remains in the app's web bundle and artifact metadata.
+The same numeric bounds and prerelease syntax as Android apply. Rebuilding a
+tag preserves its build number; App Store Connect does not accept a second
+upload of that same version/build. Rerun failed jobs rather than re-uploading an
+already successful iOS job, or create a new source version for a new binary.
+
+The tagged release job runs on a macOS runner with full Xcode. It builds and
+syncs the mobile-only frontend, archives with manual distribution signing,
+exports an App Store IPA, and verifies its bundle ID, versions, certificate,
+provisioning profile, production push entitlement and offline assets. Verified
+IPA, checksum, metadata and dSYMs are retained as the `ios-release` Actions
+artifact. They are not a public sideload download: installation is through
+TestFlight or the App Store.
+
+After verification, `apple-actions/upload-testflight-build` uploads the IPA to
+App Store Connect. Upload failure blocks the GitHub release. The gate confirms
+upload acceptance, not completion of Apple's asynchronous processing. Check the
+exact marketing version/build in App Store Connect before distributing it to
+testers; the action's optional processing poll only matches the build number,
+which repeats across marketing versions. Test information, export compliance,
+tester access, any beta review,
+App Review submission and public App Store release remain manual. The workflow
+does not assert encryption exemptions or automatically submit for review.
+
+Create the `com.cognia.mobile` app record in App Store Connect and configure:
+
+| Setting | Type | Purpose |
+| --- | --- | --- |
+| `IOS_CERTIFICATE_BASE64` | Secret | Base64 Apple Distribution signing certificate and private key (`.p12`) |
+| `IOS_CERTIFICATE_PASSWORD` | Secret | Password of the `.p12` |
+| `IOS_PROVISION_PROFILE_BASE64` | Secret | Base64 App Store distribution profile for `com.cognia.mobile`, with Push Notifications enabled |
+| `IOS_TEAM_ID` | Secret | Signing team's Apple Developer Team ID |
+| `IOS_SIGNING_CERT_SHA256` | Secret | Expected distribution certificate SHA-256 fingerprint |
+| `APPSTORE_ISSUER_ID` | Variable | App Store Connect API issuer ID |
+| `APPSTORE_API_KEY_ID` | Variable | App Store Connect API key ID |
+| `APPSTORE_API_PRIVATE_KEY` | Secret | Contents of the associated `.p8` API key with App Manager access |
+
+Use dedicated iOS credentials, not the desktop Developer ID certificate. Signing
+material is held in a temporary keychain/profile and cleaned up on success or
+failure. Local development signing and the checked-in project are preserved;
+release signing settings apply only to a temporary App target. No certificate,
+profile or Apple account is generated or registered by this workflow.
+
+Sources: [Apple version fields](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion),
+[uploading builds](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/),
+and [TestFlight upload action](https://github.com/Apple-Actions/upload-testflight-build).
 
 ## Talking to a desktop server
 
@@ -86,7 +340,7 @@ For now (M2.8 deferred TLS to M2.9), pairing runs over plain LAN HTTP.
 - Mobile-specific UI components (Sheet shell, safe-area, typography) — M4.
 - `usePlatform()` hook replacing `isTauri()` gates — M4.1 (#45).
 - Push notifications / FCM / APNs registration — M4.6 (#50).
-- TestFlight / signing assets — M5 (#53/#54/#55).
+- Private iOS signing assets and App Store Connect account configuration — supplied through Actions settings, never committed.
 
 The shell is intentionally minimal: native platform projects + the Capacitor
 config that points them at the shared static export. All mobile-specific

@@ -195,6 +195,16 @@ export interface MobileOutboundJobRow {
   protocol?: "legacy-rpc" | "host-state" | "collab-v1"
   channel?: string
   hostGeneration?: number
+  /**
+   * HostState rows only: the generation this row was last handed to a Host
+   * under, while the outcome of that hand-off is still unknown. Absent means
+   * no Host has been offered the row since it was queued (or since the user
+   * explicitly retried it), which is the one state in which re-stamping it
+   * onto a newer Host generation cannot apply it twice: the Host deduplicates
+   * per `(hostGeneration, actionId)`, so an offer it may already hold must keep
+   * the generation it was offered under. See `offerHostStateRow`.
+   */
+  offeredHostGeneration?: number
   clientId?: string
   clientSeq?: number
   actionId?: string

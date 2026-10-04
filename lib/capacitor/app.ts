@@ -16,6 +16,10 @@ import { makeDefaultLoader, withPlugin, type ValueOutcome } from "./_shared"
 
 interface AppPluginShape {
   addListener(
+    event: "appRestoredResult",
+    handler: (event: RestoredAppResult) => void
+  ): Promise<{ remove(): Promise<void> | void }>
+  addListener(
     event: "resume",
     handler: () => void
   ): Promise<{ remove(): Promise<void> } | { remove(): void }>
@@ -32,6 +36,28 @@ export type AppLoader = () => Promise<AppPluginShape>
 const defaultLoader: AppLoader = makeDefaultLoader<AppPluginShape>("@capacitor/app", "App")
 
 export type Unsubscribe = () => void
+
+export interface RestoredAppResult {
+  pluginId: string
+  methodName: string
+  success: boolean
+  data?: unknown
+  error?: { message?: string }
+}
+
+/** Retained Android activity results are delivered when this listener registers. */
+export async function subscribeRestoredResult(
+  handler: (event: RestoredAppResult) => void,
+  loader: AppLoader = defaultLoader
+): Promise<Unsubscribe> {
+  const app = await loader()
+  const listener = await app.addListener("appRestoredResult", handler)
+  return () => {
+    void Promise.resolve()
+      .then(() => listener.remove())
+      .catch(() => undefined)
+  }
+}
 
 /**
  * Subscribe to "app resumed to foreground" events.

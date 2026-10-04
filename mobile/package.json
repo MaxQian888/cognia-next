@@ -4,6 +4,8 @@
   "private": true,
   "description": "Capacitor 8 mobile shell wrapping the Tauri-shared Next.js static export at ../out",
   "scripts": {
+    "capacitor:copy:after": "node scripts/restore-web-plugin-assets.mjs",
+    "capacitor:update:after": "node scripts/restore-web-plugin-assets.mjs",
     "sync": "cap sync",
     "sync:ios": "node scripts/configure-ios-project.mjs && cap sync ios",
     "sync:android": "cap sync android",
@@ -35,7 +37,7 @@
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
     "@capacitor/toast": "^8.0.1",
-    "@capgo/capacitor-native-biometric": "^8.6.11",
+    "@capgo/capacitor-native-biometric": "^8.7.0",
     "@capgo/capacitor-navigation-bar": "^8.2.10",
     "capacitor-native-settings": "^8.2.0",
     "capacitor-secure-storage-plugin": "^0.13.0",

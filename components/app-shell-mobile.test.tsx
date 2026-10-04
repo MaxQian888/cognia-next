@@ -10,8 +10,22 @@ import type { SelectedGuild } from "@/stores/ui"
 const logInfo = jest.fn()
 const logWarn = jest.fn()
 jest.mock("@/components/chat/shared-session-panel", () => ({
-  SharedSessionPanel: ({ session }: { session: { id: string } }) => (
-    <div data-testid="shared-mobile-controls">{session.id}</div>
+  SharedSessionPanel: ({
+    session,
+    trigger = "inline",
+    open,
+  }: {
+    session: { id: string }
+    trigger?: "inline" | "none"
+    open?: boolean
+  }) => (
+    <div
+      data-testid="shared-mobile-controls"
+      data-trigger={trigger}
+      data-open={open === undefined ? undefined : String(open)}
+    >
+      {session.id}
+    </div>
   ),
 }))
 let mockSharedChatEnabled = true
@@ -70,6 +84,10 @@ const archive = jest.fn()
 const unarchive = jest.fn()
 const bulkSetPinned = jest.fn()
 const assignToFolder = jest.fn()
+const bulkRemove = jest.fn()
+const bulkArchive = jest.fn()
+const bulkUnarchive = jest.fn()
+const bulkAssignToFolder = jest.fn()
 const isLoadingSessionsRef = { current: false }
 const directSend = jest.fn().mockResolvedValue(undefined)
 const teamSend = jest.fn().mockResolvedValue(undefined)
@@ -87,6 +105,10 @@ jest.mock("@/hooks/chat", () => ({
     unarchive,
     bulkSetPinned,
     assignToFolder,
+    bulkRemove,
+    bulkArchive,
+    bulkUnarchive,
+    bulkAssignToFolder,
     folders: [],
   }),
   useClaudeChat: () => ({
@@ -274,6 +296,9 @@ jest.mock("@/components/mobile/shell/mobile-credential-warning", () => ({
 
 // Stub heavy children — the shell test verifies structural wiring, not
 // child internals.
+const recentSessionsRef: { current: ReadonlyArray<{ id: string }> | undefined } = {
+  current: undefined,
+}
 const welcomeExtrasRef: {
   current: {
     hideSamples?: boolean
@@ -291,7 +316,9 @@ jest.mock("@/components/chat/chat-view", () => ({
     composerDisabled,
     runtimeNotice,
     heroRouting,
+    recentSessions,
   }: {
+    recentSessions?: ReadonlyArray<{ id: string }>
     heroRouting?: boolean
     composerDisabled?: boolean
     runtimeNotice?: React.ReactNode
@@ -306,6 +333,7 @@ jest.mock("@/components/chat/chat-view", () => ({
     onResumeAfterPlanApproval?: (prompt: string, mode: string) => void | Promise<void>
   }) => {
     welcomeExtrasRef.current = welcomeExtras ?? null
+    recentSessionsRef.current = recentSessions
     return (
       <div
         data-testid="chat-pane"
@@ -426,11 +454,19 @@ jest.mock("@/hooks/chat/use-session-run-status-map", () => ({
 
 const channelListPropsRef: { current: Record<string, unknown> | null } = { current: null }
 jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
-  MobileChannelList: (props: { onSelect: (id: string) => void; onNewDirect: () => void }) => {
+  MobileChannelList: (props: {
+    onSelect: (id: string) => void
+    onSelectInPlace?: (id: string) => void
+    onNewDirect: () => void
+  }) => {
     channelListPropsRef.current = props as unknown as Record<string, unknown>
     return (
-      <div>
+      <div data-testid="channel-list-stub">
         <button data-testid="channel-select-stub" onClick={() => props.onSelect("s-2")} />
+        <button
+          data-testid="channel-select-in-place-stub"
+          onClick={() => props.onSelectInPlace?.("s-2")}
+        />
         <button data-testid="channel-new-direct-stub" onClick={props.onNewDirect} />
         {/* A row owns its horizontal drags (see <SwipeRow>). */}
         <div data-swipe-row="" data-testid="channel-row-stub" />
@@ -556,6 +592,7 @@ beforeEach(() => {
   artifactDockState = { dockCollapsed: true, unreadArtifact: false, toggleDock: toggleArtifactDock }
   inboxUnreadRef.current = 0
   welcomeExtrasRef.current = null
+  recentSessionsRef.current = undefined
   isLoadingSessionsRef.current = false
   requestChatHome.mockReset()
   clearActiveSession.mockReset()
@@ -993,6 +1030,11 @@ describe("<AppShellMobile />", () => {
       expect(props.onUnarchive).toBe(unarchive)
       expect(props.onSetPinned).toBe(bulkSetPinned)
       expect(props.onAssignToFolder).toBe(assignToFolder)
+      // The selection's writers, for the drawer's bulk bar.
+      expect(props.onBulkDelete).toBe(bulkRemove)
+      expect(props.onBulkArchive).toBe(bulkArchive)
+      expect(props.onBulkUnarchive).toBe(bulkUnarchive)
+      expect(props.onBulkAssignToFolder).toBe(bulkAssignToFolder)
       // The live turn state that drives the row glyphs and the running filter.
       expect(props.runStatusById).toBe(runStatusMap)
       // Branch is offered on the phone too, through the shared branch writer.
@@ -1043,6 +1085,61 @@ describe("<AppShellMobile />", () => {
     expect(setSelectedGuild).toHaveBeenCalled()
   })
 
+  it("switches the conversation behind the drawer without closing it, for the list's follow-ups", async () => {
+    // Archiving the open conversation from the drawer opens its neighbour —
+    // the user is still working in the list, so the drawer stays put.
+    sessionsRef.current = [
+      { id: "s-2", title: "next", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
+    ]
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-nav-trigger"))
+    await screen.findByTestId("mobile-nav-sheet")
+    await user.click(screen.getByTestId("channel-select-in-place-stub"))
+    await waitFor(() => expect(select).toHaveBeenCalledWith("s-2"))
+    expect(setSelectedGuild).toHaveBeenCalled()
+    expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument()
+  })
+
+  it("puts the drawer away when a conversation is picked from it", async () => {
+    sessionsRef.current = [
+      { id: "s-2", title: "picked", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
+    ]
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-nav-trigger"))
+    await screen.findByTestId("mobile-nav-sheet")
+    await user.click(screen.getByTestId("channel-select-stub"))
+    await waitFor(() => expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull())
+  })
+
+  it("unmounts the list with the drawer, so a selection made in it ends there", async () => {
+    // The list keeps its selection in component state; closing the drawer
+    // unmounts it, which is what clears the selection on close.
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-nav-trigger"))
+    expect(await screen.findByTestId("channel-list-stub")).toBeInTheDocument()
+    await user.click(await screen.findByTestId("mobile-nav-close"))
+    await waitFor(() => expect(screen.queryByTestId("channel-list-stub")).toBeNull())
+  })
+
+  it("leaves archived conversations out of the welcome's Continue group", () => {
+    sessionsRef.current = [
+      { id: "live", title: "Live", kind: "direct", createdAt: 0, updatedAt: 5 } as ChatSession,
+      {
+        id: "put-away",
+        title: "Archived",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 9,
+        archivedAt: 9,
+      } as ChatSession,
+    ]
+    render(<AppShellMobile />)
+    expect(recentSessionsRef.current?.map((s) => s.id)).toEqual(["live"])
+  })
+
   it("renders the active session title in the top bar", () => {
     sessionsRef.current = [
       {
@@ -1057,6 +1154,54 @@ describe("<AppShellMobile />", () => {
     render(<AppShellMobile />)
     expect(screen.getByTestId("mobile-active-title")).toHaveTextContent("Greetings")
     expect(screen.getByTestId("shared-mobile-controls")).toHaveTextContent("s-1")
+  })
+
+  it("spends no row on a private conversation's sharing — the ⋮ menu opens its sheet", async () => {
+    sessionsRef.current = [
+      { id: "s-1", title: "Greetings", kind: "direct", createdAt: 0, updatedAt: 0 } as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("mobile-shared-session-strip")).not.toBeInTheDocument()
+    const panel = screen.getByTestId("shared-mobile-controls")
+    expect(panel).toHaveAttribute("data-trigger", "none")
+    expect(panel).toHaveAttribute("data-open", "false")
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await user.click(await screen.findByTestId("mobile-action-share-conversation"))
+    await waitFor(() =>
+      expect(screen.getByTestId("shared-mobile-controls")).toHaveAttribute("data-open", "true")
+    )
+  })
+
+  it("gives a shared conversation its live strip, and no second way in from ⋮", async () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "Greetings",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+        collaboration: {
+          orgId: "org",
+          workspaceId: "w",
+          sessionId: "shared",
+          policyRevision: 1,
+          syncCursor: 0,
+        },
+      } as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    const strip = screen.getByTestId("mobile-shared-session-strip")
+    expect(within(strip).getByTestId("shared-mobile-controls")).toHaveAttribute(
+      "data-trigger",
+      "inline"
+    )
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
+    expect(screen.queryByTestId("mobile-action-share-conversation")).not.toBeInTheDocument()
   })
 
   it("spends no row on the sharing control while shared chat is off", () => {
@@ -1292,6 +1437,8 @@ describe("<AppShellMobile />", () => {
     render(<AppShellMobile />)
     const warning = screen.getByTestId("mobile-no-api-key")
     expect(warning).toBeInTheDocument()
+    // It heads the action cluster, not the title half of the bar.
+    expect(screen.getByTestId("mobile-actions-trigger").parentElement).toContainElement(warning)
 
     await user.click(warning)
     await waitFor(() => expect(screen.getByTestId("session-settings-sheet")).toBeInTheDocument())

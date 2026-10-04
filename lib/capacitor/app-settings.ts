@@ -48,7 +48,11 @@ export async function openAppSettings(
   loader: AppSettingsLoader = defaultLoader
 ): Promise<SimpleOutcome> {
   const result = await withPlugin(loader, async (plugin) => {
-    await plugin.open({ optionAndroid: ANDROID_APPLICATION_DETAILS, optionIOS: IOS_APP })
+    const { status } = await plugin.open({
+      optionAndroid: ANDROID_APPLICATION_DETAILS,
+      optionIOS: IOS_APP,
+    })
+    if (!status) return { kind: "error" as const, message: "System settings could not be opened" }
     return { kind: "ok" as const }
   })
   return result as SimpleOutcome

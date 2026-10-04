@@ -19,7 +19,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ReactFlowProvider, type ReactFlowInstance } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { X as CancelIcon, Maximize2 as FitViewIcon, Trash2 as TrashIcon } from "lucide-react"
+import {
+  X as CancelIcon,
+  Maximize2 as FitViewIcon,
+  Search as SearchIcon,
+  Trash2 as TrashIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
@@ -52,6 +57,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
   const tWorkflow = useTranslations("mobile.workflow")
   const tConnection = useTranslations("workflows.editor.connection")
+  const tSpotlight = useTranslations("workflows.editor.spotlight")
   const portrait = usePortraitOrientation()
   const [mode, setMode] = useState<MobileCanvasMode>("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
@@ -62,6 +68,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
   const [canPaste, setCanPaste] = useState(false)
   // Landscape is the editor's default, not a rule imposed on the user.
   const [orientationLocked, setOrientationLocked] = useState(true)
+  const [orientationStatus, setOrientationStatus] = useState<"pending" | "locked" | "unlocked" | "unavailable">("pending")
   const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [rf, setRf] = useState<WorkflowFlowInstance | null>(null)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
@@ -221,9 +228,9 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         mode={mode}
         onToggleMode={onToggleMode}
         onOpenCopilot={() => setCopilotOpen(true)}
-        onOpenSearch={() => setSearchOpen(true)}
         onToggleSelectMode={onToggleSelectMode}
-        orientationLocked={orientationLocked}
+        orientationLocked={orientationStatus === "locked"}
+        orientationStatus={orientationStatus}
         onToggleOrientationLock={() => setOrientationLocked((v) => !v)}
         onOpenWorkbench={() => setWorkbenchOpen(true)}
       />
@@ -237,13 +244,14 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           onPaneTap={onPaneTap}
           onLongPress={onLongPress}
           orientationLocked={orientationLocked}
+          onOrientationStatus={setOrientationStatus}
           onInit={setRf}
         />
         {/* The graph reads badly in a 360-px portrait column. With the lock
             released the OS follows the device, so a phone held upright gets
             the narrow view. This says so, once, and tapping it re-locks. The
             copy existed since the lock shipped and was rendered by nothing. */}
-        {!orientationLocked && portrait ? (
+        {orientationStatus === "unlocked" && portrait ? (
           <Surface asChild layer="overlay" elevation={1}>
             <button
               type="button"
@@ -276,19 +284,43 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             data-testid="mobile-editor-fab"
           />
         ) : null}
+        {/* Map controls: canvas navigation, stacked like a map app's, across
+            from the FAB. Find-node lives here rather than in the top bar: the
+            desktop reaches it with Ctrl/Cmd+F and a phone has no keyboard, but
+            it is a way of moving around the canvas, and a top bar of six 44px
+            targets left the workflow name ~70px. */}
         {!tapConnect.active ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-4 z-20 size-11 rounded-full"
-            data-elevation="3"
-            onClick={() => rf?.fitView({ duration: 240, padding: 0.2 })}
-            aria-label={t("fitView")}
-            data-testid="mobile-editor-recenter"
+          <Surface
+            layer="overlay"
+            radius="pill"
+            elevation={2}
+            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-5 z-20 flex flex-col overflow-hidden border"
+            data-testid="mobile-editor-map-controls"
           >
-            <FitViewIcon className="size-5" aria-hidden="true" />
-          </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-11 rounded-none"
+              onClick={() => setSearchOpen(true)}
+              aria-label={tSpotlight("openShortcut")}
+              data-testid="mobile-editor-search"
+            >
+              <SearchIcon className="size-5" aria-hidden="true" />
+            </Button>
+            <div className="mx-2.5 h-px bg-border" aria-hidden="true" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-11 rounded-none"
+              onClick={() => rf?.fitView({ duration: 240, padding: 0.2 })}
+              aria-label={t("fitView")}
+              data-testid="mobile-editor-recenter"
+            >
+              <FitViewIcon className="size-5" aria-hidden="true" />
+            </Button>
+          </Surface>
         ) : null}
         {tapConnect.active ? (
           <Button

@@ -18,11 +18,18 @@ export interface GeoPosition {
   heading?: number | null
 }
 
+type LocationPermission = "granted" | "denied" | "prompt" | "prompt-with-rationale"
+interface LocationPermissions {
+  location: LocationPermission
+  coarseLocation?: LocationPermission
+}
+
 interface GeolocationShape {
   getCurrentPosition(opts?: {
     enableHighAccuracy?: boolean
     timeout?: number
     maximumAge?: number
+    enableLocationFallback?: boolean
   }): Promise<{
     coords: {
       latitude: number
@@ -34,12 +41,10 @@ interface GeolocationShape {
     }
     timestamp: number
   }>
-  requestPermissions(): Promise<{
-    location: "granted" | "denied" | "prompt" | "prompt-with-rationale"
-  }>
-  checkPermissions(): Promise<{
-    location: "granted" | "denied" | "prompt" | "prompt-with-rationale"
-  }>
+  requestPermissions(opts?: {
+    permissions: Array<"location" | "coarseLocation">
+  }): Promise<LocationPermissions>
+  checkPermissions(): Promise<LocationPermissions>
 }
 
 export type GeolocationLoader = () => Promise<GeolocationShape>
@@ -74,14 +79,19 @@ export async function getCurrentPosition(
   }
   try {
     let perm = await plugin.checkPermissions()
-    if (perm.location !== "granted") {
-      perm = await plugin.requestPermissions()
+    const hasPermission = () => perm.location === "granted" || perm.coarseLocation === "granted"
+    if (!hasPermission()) {
+      perm = await plugin.requestPermissions({
+        permissions: [enableHighAccuracy ? "location" : "coarseLocation"],
+      })
     }
-    if (perm.location !== "granted") {
+    if (!hasPermission()) {
       return { kind: "permission_denied" }
     }
     const r = await plugin.getCurrentPosition({
-      enableHighAccuracy,
+      // High accuracy is a preference; Android supports approximate grants.
+      enableHighAccuracy: enableHighAccuracy && perm.location === "granted",
+      enableLocationFallback: true,
       timeout: timeoutMs,
       maximumAge: maxAgeMs,
     })

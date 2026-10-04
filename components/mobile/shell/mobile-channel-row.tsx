@@ -22,6 +22,12 @@
  *   - long-press (or a right-click / the context-menu key) opens the full
  *     action sheet, which is the one place every action is reachable from,
  *     including by keyboard and screen reader.
+ *
+ * While the list is selecting, a tap toggles the row's check instead of
+ * opening it (the button reports it through `aria-pressed`), a check
+ * affordance leads the row, and the swipe strips are off — a horizontal drag
+ * on a list being picked from is a scroll slip, not a request to archive.
+ * Long-press still opens the sheet, whose first item is Select / Deselect.
  */
 
 import { memo, useMemo } from "react"
@@ -31,6 +37,8 @@ import {
   ArchiveRestoreIcon,
   BotIcon,
   BoxesIcon,
+  CheckCircle2Icon,
+  CircleIcon,
   CpuIcon,
   HashIcon,
   LockKeyholeIcon,
@@ -50,11 +58,13 @@ import { LongPress } from "@/components/interactions/long-press"
 import { SwipeRow, type SwipeAction } from "@/components/interactions/swipe-row"
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
-import { getProviderDisplayName } from "@/lib/ai/icons"
-import { resolveModelDisplayName } from "@/lib/ai/model-options"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { useInlineRename } from "@/hooks/ui/use-inline-rename"
-import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
+import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
+import {
+  resolveSessionModelIdentity,
+  sessionModelLabels,
+} from "@/lib/chat/session-model-identity"
 import {
   CONVERSATION_TIMESTAMP_FORMATS,
   conversationTimestampShape,
@@ -86,6 +96,10 @@ export interface MobileChannelRowSettings {
   metadataFields: readonly ConversationSidebarMetadata[]
   defaultModel?: string
   defaultProvider?: string
+  /** This device's default lane, for a conversation that recorded none here. */
+  defaultRuntimeRef?: AgentRuntimeRef
+  /** A locally configured external agent's name. */
+  agentNameOf?: (agentId: string) => string | undefined
   /**
    * The axis the rows are currently grouped under, or `null` for a flat list
    * (a search, `groupBy: "none"`, date buckets). A metadata field that repeats
@@ -106,7 +120,18 @@ export interface MobileChannelRowProps {
   character?: Character
   team?: Team
   workspaceName?: string
+  /** The lane this device recorded for the conversation, if any. */
+  runtimeRef?: AgentRuntimeRef
   settings: MobileChannelRowSettings
+  /**
+   * The list mixes active and archived conversations (a search reaching past
+   * the archive split): an archived row carries an archive mark then.
+   */
+  markArchived?: boolean
+  /** The list is in selection mode: a tap toggles `selected`. */
+  selecting?: boolean
+  /** Checked in the list's selection. */
+  selected?: boolean
   /** Show the inline rename field instead of the row. */
   renaming: boolean
   /** Id of the shared "long-press for more" hint the row is described by. */
@@ -139,8 +164,10 @@ const METADATA_ICON = {
 
 /**
  * The row's metadata line, in the user's chosen field order. Same field
- * resolution as the desktop sidebar (`channel-list.tsx`): the conversation's
- * own override, then its agent's, then the global default.
+ * resolution as the desktop sidebar (`channel-list.tsx`): the lane the
+ * conversation runs on first (`lib/chat/session-model-identity.ts`), then, on
+ * the built-in lane, the conversation's own override, its agent's, and the
+ * global default.
  */
 export function resolveMobileRowMetadata({
   session,
@@ -150,6 +177,9 @@ export function resolveMobileRowMetadata({
   fields,
   defaultModel,
   defaultProvider,
+  runtimeRef,
+  defaultRuntimeRef,
+  agentNameOf,
   groupAxis,
 }: {
   session: ChatSession
@@ -159,19 +189,25 @@ export function resolveMobileRowMetadata({
   fields: readonly ConversationSidebarMetadata[]
   defaultModel?: string
   defaultProvider?: string
+  runtimeRef?: AgentRuntimeRef
+  defaultRuntimeRef?: AgentRuntimeRef
+  agentNameOf?: (agentId: string) => string | undefined
   groupAxis: ConversationGroupAxis | null
 }): MobileChannelRowMetadataItem[] {
-  const providerId =
-    session.providerOverride ?? character?.providerId ?? defaultProvider ?? "anthropic"
+  const labels = sessionModelLabels(
+    resolveSessionModelIdentity(session, {
+      character,
+      sessionRuntimeRef: runtimeRef,
+      defaultRuntimeRef,
+      defaultModel,
+      defaultProvider,
+      agentNameOf,
+    })
+  )
   const values: Record<ConversationSidebarMetadata, string | undefined> = {
     agent: session.kind === "team" ? team?.name : character?.name,
-    // Catalog-backed, provider-scoped: the alias table alone missed dated ids
-    // such as `claude-haiku-4-5-20251001`, so the row printed the raw id.
-    model: resolveModelDisplayName(
-      providerId,
-      session.model ?? character?.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
-    ),
-    provider: getProviderDisplayName(providerId),
+    model: labels.model,
+    provider: labels.provider,
     workspace: workspaceName,
   }
   return fields.flatMap((kind) => {
@@ -197,7 +233,11 @@ function MobileChannelRowImpl({
   character,
   team,
   workspaceName,
+  runtimeRef,
   settings,
+  markArchived = false,
+  selecting = false,
+  selected = false,
   renaming,
   actionsHintId,
   onSelect,
@@ -233,7 +273,7 @@ function MobileChannelRowImpl({
     // A conversation handed off to another device is read-only; its writes
     // are refused, so none are offered as a gesture. The action sheet still
     // opens and says why.
-    if (locked) return []
+    if (locked || selecting) return []
     return [
       {
         id: "pin",
@@ -242,7 +282,7 @@ function MobileChannelRowImpl({
         onSelect: () => onSwipeAction(session.id, "pin"),
       },
     ]
-  }, [locked, session.pinned, session.id, t, onSwipeAction])
+  }, [locked, selecting, session.pinned, session.id, t, onSwipeAction])
 
   const rightActions = useMemo<SwipeAction[]>(() => {
     const more: SwipeAction = {
@@ -251,6 +291,7 @@ function MobileChannelRowImpl({
       icon: <MoreHorizontalIcon className="size-4" />,
       onSelect: () => onSwipeAction(session.id, "more"),
     }
+    if (selecting) return []
     if (locked) return [more]
     return [
       more,
@@ -272,7 +313,7 @@ function MobileChannelRowImpl({
         onSelect: () => onSwipeAction(session.id, "delete"),
       },
     ]
-  }, [locked, archived, session.id, t, tCommon, onSwipeAction])
+  }, [locked, selecting, archived, session.id, t, tCommon, onSwipeAction])
 
   const metadata = useMemo(
     () =>
@@ -284,9 +325,12 @@ function MobileChannelRowImpl({
         fields: settings.metadataFields,
         defaultModel: settings.defaultModel,
         defaultProvider: settings.defaultProvider,
+        runtimeRef,
+        defaultRuntimeRef: settings.defaultRuntimeRef,
+        agentNameOf: settings.agentNameOf,
         groupAxis: settings.groupAxis,
       }),
-    [session, character, team, workspaceName, settings]
+    [session, character, team, workspaceName, runtimeRef, settings]
   )
 
   if (renaming) {
@@ -324,18 +368,39 @@ function MobileChannelRowImpl({
             onOpenActions(session.id)
           }}
           aria-current={active ? "true" : undefined}
+          aria-pressed={selecting ? selected : undefined}
           aria-describedby={actionsHintId}
           data-testid={`mobile-channel-row-${session.id}`}
           data-active={active ? "true" : "false"}
+          data-selected={selecting ? (selected ? "true" : "false") : undefined}
           className={cn(
             // `select-none` + no touch callout: a held finger is a long-press,
             // not a request to select the title or preview the link.
             "relative flex w-full min-w-0 items-center gap-3 px-3 text-left outline-none select-none [-webkit-touch-callout:none]",
             "transition-colors active:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
             compact ? "min-h-11 py-1.5" : "min-h-14 py-2",
-            active ? "bg-accent" : "pointer-fine:hover:bg-accent/60"
+            selecting && selected
+              ? "bg-primary/10"
+              : active
+                ? "bg-accent"
+                : "pointer-fine:hover:bg-accent/60"
           )}
         >
+          {selecting ? (
+            // Decorative: the button's pressed state is what assistive tech
+            // reads.
+            <span
+              aria-hidden
+              data-testid={`mobile-channel-check-${session.id}`}
+              className="flex size-5 shrink-0 items-center justify-center"
+            >
+              {selected ? (
+                <CheckCircle2Icon className="size-5 fill-primary text-primary-foreground" />
+              ) : (
+                <CircleIcon className="size-5 text-muted-foreground" />
+              )}
+            </span>
+          ) : null}
           {active ? (
             <span
               aria-hidden
@@ -369,6 +434,15 @@ function MobileChannelRowImpl({
                   className="size-3 shrink-0 text-muted-foreground"
                   aria-label={tRow("pinned")}
                 />
+              ) : null}
+              {markArchived && archived ? (
+                <span
+                  className="flex shrink-0 items-center text-muted-foreground"
+                  data-testid={`mobile-channel-archived-${session.id}`}
+                >
+                  <ArchiveIcon className="size-3" aria-hidden />
+                  <span className="sr-only">{tRow("archived")}</span>
+                </span>
               ) : null}
               <SessionRunIndicator
                 status={runStatus}

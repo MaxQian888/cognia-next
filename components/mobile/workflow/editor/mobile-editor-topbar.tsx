@@ -5,6 +5,9 @@
  *   • back to the library
  *   • workflow name + dirty/saved badge
  *   • read/edit mode toggle (drives structural-editing affordances)
+ *
+ * Canvas navigation (find node, fit view) lives in the editor's floating map
+ * controls instead, so the title keeps room on a phone.
  *   • Run — persists locally (if dirty) then enqueues a manual trigger to the
  *     paired desktop via the same outbound path as the mobile TriggerButton
  *   • overflow: Save, Undo, Redo, Auto-layout, Fit view, Snap, Export, Import
@@ -26,7 +29,6 @@ import {
   Pencil as EditIcon,
   Eye as ReadIcon,
   Sparkles as CopilotIcon,
-  Search as SearchIcon,
   PanelRight as WorkbenchIcon,
   Undo2 as UndoIcon,
   Redo2 as RedoIcon,
@@ -43,7 +45,6 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +64,13 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 
 import type { WorkflowFlowInstance } from "./mobile-canvas"
 
+/**
+ * The app's standard 36px icon button (same as the sub-page and list headers),
+ * so the bar reads as one set. Only the radius and size come from `Button`.
+ */
+const BAR_ICON_BUTTON = "shrink-0"
+const ACTIVE_TINT = "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+
 export interface MobileEditorTopbarProps {
   store: EditorStore
   reactFlowInstance: WorkflowFlowInstance | null
@@ -70,12 +78,11 @@ export interface MobileEditorTopbarProps {
   onToggleMode: () => void
   /** Open the AI copilot sheet. */
   onOpenCopilot: () => void
-  /** Open canvas-scoped node search. Ctrl/Cmd+F has no equivalent on a phone. */
-  onOpenSearch: () => void
   /** Open the shared Context Workbench. */
   onOpenWorkbench: () => void
   /** Landscape is the editor's default. This is the way out of it. */
   orientationLocked: boolean
+  orientationStatus?: "pending" | "locked" | "unlocked" | "unavailable"
   onToggleOrientationLock: () => void
   /** Enter / leave marquee-select, a sub-mode of edit. */
   onToggleSelectMode: () => void
@@ -87,16 +94,15 @@ export function MobileEditorTopbar({
   mode,
   onToggleMode,
   onOpenCopilot,
-  onOpenSearch,
   onOpenWorkbench,
   orientationLocked,
+  orientationStatus,
   onToggleOrientationLock,
   onToggleSelectMode,
 }: MobileEditorTopbarProps) {
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
   const tWorkbench = useTranslations("contextWorkbench")
-  const tSpotlight = useTranslations("workflows.editor.spotlight")
 
   const { id, name, dirty, snapToGrid } = store(
     useShallow((s: EditorState) => ({
@@ -223,7 +229,7 @@ export function MobileEditorTopbar({
 
   return (
     <header className="safe-area-pt flex shrink-0 items-center gap-1 border-b bg-background/95 px-2 py-1.5 backdrop-blur">
-      <Button asChild variant="ghost" size="icon" className="size-11 shrink-0">
+      <Button asChild variant="ghost" size="icon" className="shrink-0">
         <Link href="/workflows" aria-label={t("back")}>
           <BackIcon className="size-5" aria-hidden="true" />
         </Link>
@@ -233,39 +239,48 @@ export function MobileEditorTopbar({
           shrink. The badge used to sit beside the name as `shrink-0`: once the
           action row claimed the whole width this column collapsed to 0px, the
           name vanished and the badge overflowed onto the mode toggle. */}
-      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+      {/* The status is a dot and a word rather than a bordered badge: a
+          second outlined shape under the title read as one more button. */}
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 pl-0.5">
         <h1 className="w-full truncate text-sm font-semibold leading-tight" title={name}>
           {name}
         </h1>
-        <Badge
-          variant="outline"
+        <span
           className={cn(
-            "max-w-full truncate px-1.5 py-0 text-[10px]",
+            "flex max-w-full items-center gap-1 truncate text-[11px] leading-none",
             dirty ? "text-amber-600 dark:text-amber-300" : "text-muted-foreground"
           )}
           data-testid="mobile-editor-dirty"
         >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              dirty ? "bg-amber-500" : "bg-emerald-500"
+            )}
+          />
           {dirty ? t("dirty") : t("savedBadge")}
-        </Badge>
+        </span>
       </div>
 
-      {/* Below `sm` (every phone) the row carries up to eight 44px targets,
-          which is wider than the screen. There the mode toggle drops its word
-          (kept for screen readers) and the select-mode and Workbench buttons
-          move into the overflow menu, so the name column always keeps room. */}
+      {/* Below `sm` (every phone) the mode toggle drops its word (kept for
+          screen readers) and the select-mode and Workbench buttons move into
+          the overflow menu, so the name column always keeps room. Every action
+          is the same 36px icon button; Run is the bar's one filled action, and
+          an active mode is a tint so the two never compete. */}
       <Button
         type="button"
-        variant={mode === "edit" ? "default" : "outline"}
-        size="sm"
-        className="min-h-11 shrink-0 max-sm:size-11 max-sm:px-0"
+        variant="ghost"
+        size="icon"
+        className={cn(BAR_ICON_BUTTON, "sm:w-auto sm:gap-1 sm:px-3", mode !== "read" && ACTIVE_TINT)}
         onClick={onToggleMode}
         aria-pressed={mode === "edit"}
         data-testid="mobile-editor-mode-toggle"
       >
         {mode === "edit" ? (
-          <EditIcon className="size-4 sm:mr-1" aria-hidden="true" />
+          <EditIcon className="size-[18px]" aria-hidden="true" />
         ) : (
-          <ReadIcon className="size-4 sm:mr-1" aria-hidden="true" />
+          <ReadIcon className="size-[18px]" aria-hidden="true" />
         )}
         <span className="max-sm:sr-only">{mode === "edit" ? t("modeEdit") : t("modeRead")}</span>
       </Button>
@@ -273,67 +288,52 @@ export function MobileEditorTopbar({
       {mode !== "read" ? (
         <Button
           type="button"
-          variant={mode === "select" ? "default" : "ghost"}
+          variant="ghost"
           size="icon"
-          className="size-11 shrink-0 max-sm:hidden"
+          className={cn(BAR_ICON_BUTTON, "max-sm:hidden", mode === "select" && ACTIVE_TINT)}
           onClick={onToggleSelectMode}
           aria-pressed={mode === "select"}
           aria-label={t("selectMode")}
           data-testid="mobile-editor-select-mode"
         >
-          <SelectIcon className="size-5" aria-hidden="true" />
+          <SelectIcon className="size-[18px]" aria-hidden="true" />
         </Button>
       ) : null}
-      {/* Search is a top-bar control rather than an overflow item because the
-          desktop reaches it with Ctrl/Cmd+F, and a phone has no keyboard to
-          reach anything with. A graph large enough to need it is exactly the
-          graph a phone cannot scan by eye. */}
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-11 shrink-0"
-        onClick={onOpenSearch}
-        aria-label={tSpotlight("openShortcut")}
-        data-testid="mobile-editor-search"
-      >
-        <SearchIcon className="size-5" aria-hidden="true" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-11 shrink-0 max-sm:hidden"
+        className={cn(BAR_ICON_BUTTON, "max-sm:hidden")}
         onClick={onOpenWorkbench}
         aria-label={tWorkbench("mobileTitle")}
         data-testid="mobile-editor-workbench"
       >
-        <WorkbenchIcon className="size-5" aria-hidden="true" />
+        <WorkbenchIcon className="size-[18px]" aria-hidden="true" />
       </Button>
 
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-11 shrink-0"
+        className={BAR_ICON_BUTTON}
         onClick={handleSave}
         disabled={saving || !dirty}
         aria-label={t("save")}
         data-testid="mobile-editor-save"
       >
-        <SaveIcon className="size-5" aria-hidden="true" />
+        <SaveIcon className="size-[18px]" aria-hidden="true" />
       </Button>
 
       <Button
         type="button"
         size="icon"
-        className="size-11 shrink-0"
+        className={BAR_ICON_BUTTON}
         onClick={handleRun}
         disabled={running}
         aria-label={t("run")}
         data-testid="mobile-editor-run"
       >
-        <RunIcon className="size-5" aria-hidden="true" />
+        <RunIcon className="size-4" aria-hidden="true" />
       </Button>
 
       <DropdownMenu>
@@ -342,11 +342,11 @@ export function MobileEditorTopbar({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-11 shrink-0"
+            className={BAR_ICON_BUTTON}
             aria-label={t("menu")}
             data-testid="mobile-editor-menu"
           >
-            <MoreIcon className="size-5" aria-hidden="true" />
+            <MoreIcon className="size-[18px]" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
@@ -403,9 +403,10 @@ export function MobileEditorTopbar({
           <DropdownMenuItem
             onSelect={onToggleOrientationLock}
             data-testid="mobile-editor-orientation"
+            disabled={orientationStatus === "pending" || orientationStatus === "unavailable"}
           >
             <OrientationIcon className="mr-2 size-4" aria-hidden="true" />
-            {orientationLocked ? t("orientationUnlock") : t("orientationLock")}
+            {orientationStatus === "unavailable" ? t("orientationUnavailable") : orientationStatus === "pending" ? t("orientationPending") : orientationLocked ? t("orientationUnlock") : t("orientationLock")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild data-testid="mobile-editor-run-history">

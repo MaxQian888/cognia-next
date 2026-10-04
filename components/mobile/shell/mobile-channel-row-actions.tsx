@@ -8,11 +8,14 @@
  * through the sheet kit (`session-row-sheet-kit.tsx`) — one list, so the phone
  * offers exactly what the desktop "⋯" and right-click menus do, in the same
  * order, disabled the same way on a handed-off conversation, minus only the
- * desktop-only terminal / Codex hand-offs and multi-select:
+ * desktop-only terminal / Codex hand-offs:
  *
- *   Rename · Pin · Mark read/unread · Branch · Copy link · Export & share ·
- *   Archive · Move to folder · Move to workspace · Continue on another device ·
- *   Delete
+ *   Select · Rename · Pin · Mark read/unread · Branch · Copy link ·
+ *   Export & share · Archive · Move to folder · Move to workspace ·
+ *   Continue on another device · Delete
+ *
+ * "Select" starts the list's selection mode with this row checked (or, while
+ * selecting, toggles it) — the phone's way into multi-select.
  *
  * "Move to folder" and "Move to workspace" open a second page of the sheet
  * instead of a flyout. Every write goes through the list's shared boundary
@@ -47,6 +50,10 @@ export interface MobileChannelRowActionsProps {
   session: ChatSession | null
   /** Unread messages in it — decides Mark as read vs. Mark as unread. */
   unread: number
+  /** Checked in the list's selection — decides Select vs. Deselect. */
+  selected?: boolean
+  /** Select / Deselect the row (starts selection mode). Absent → no item. */
+  onToggleSelection?: (session: ChatSession) => void
   folders: readonly SessionFolder[]
   onClose: () => void
   /** Opens the row's inline rename field. */
@@ -113,6 +120,8 @@ export function MobileChannelRowActions(props: MobileChannelRowActionsProps) {
 function ActionsBody({
   session,
   unread,
+  selected = false,
+  onToggleSelection,
   folders,
   onClose,
   onRename,
@@ -145,8 +154,9 @@ function ActionsBody({
           kit={SHEET_MENU_KIT}
           surface="sheet"
           session={session}
-          selected={false}
+          selected={selected}
           unread={unread > 0}
+          onToggleSelection={onToggleSelection ? () => onToggleSelection(session) : undefined}
           onRename={() => onRename(session)}
           onTogglePinned={
             rowActions.onTogglePinned

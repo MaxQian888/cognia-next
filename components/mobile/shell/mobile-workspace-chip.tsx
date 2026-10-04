@@ -62,12 +62,15 @@ export function MobileWorkspaceChip({ className }: { className?: string }) {
             type="button"
             data-testid="mobile-workspace-chip"
             aria-label={t("switchLabel", { name })}
+            // Drawn like the app bar's other ghost icon buttons (44px box, 20px
+            // glyph, hover fill) rather than as a 10px muted pill: beside the
+            // bar's full-size icons the pill read as a stray badge.
             className={cn(
-              "flex items-center gap-1 rounded-pill bg-muted/60 px-2 py-1 text-[10px] text-muted-foreground",
+              "flex h-11 min-w-11 items-center justify-center gap-0.5 rounded-md px-1.5 text-sm transition-colors hover:bg-accent",
               className
             )}
           >
-            <FolderIcon className="size-3 shrink-0" />
+            <FolderIcon className="size-5 shrink-0" />
             {/* Icon-only below 26rem, the same tier the app bar folds its inbox
                 at. At 375px with the credential warning showing, the name was
                 clipped to "D…" while squeezing the conversation title to one
@@ -78,7 +81,7 @@ export function MobileWorkspaceChip({ className }: { className?: string }) {
             >
               {name}
             </span>
-            <ChevronDownIcon className="size-3 shrink-0" />
+            <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
           </button>
         </DrawerTrigger>
         <DrawerContent data-testid="mobile-workspace-drawer">

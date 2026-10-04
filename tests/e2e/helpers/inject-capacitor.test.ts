@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test"
-import { injectCapacitor } from "./inject-capacitor"
+import { injectCapacitor, SECURE_STORAGE_MISSING_ITEM } from "./inject-capacitor"
 
 interface SecureStorage {
   set(input: { key: string; value: string }): Promise<unknown>
@@ -52,17 +52,26 @@ it("preserves paired synthetic credentials across documents when requested", asy
 it("keeps the existing fresh-document behavior by default", async () => {
   const boot = await fixture(false)
   await boot().storage.set({ key: "paired-device", value: "synthetic-private-key" })
-  await expect(boot().storage.get({ key: "paired-device" })).rejects.toThrow("not found")
+  await expect(boot().storage.get({ key: "paired-device" })).rejects.toThrow(
+    SECURE_STORAGE_MISSING_ITEM
+  )
 })
 
 it("persists deletion and clearing without resurrecting initial credentials", async () => {
   const boot = await fixture(true)
   await boot().storage.remove({ key: "initial" })
-  await expect(boot().storage.get({ key: "initial" })).rejects.toThrow("not found")
+  await expect(boot().storage.get({ key: "initial" })).rejects.toThrow(SECURE_STORAGE_MISSING_ITEM)
   await boot().storage.set({ key: "later", value: "value" })
   await boot().storage.clear()
-  await expect(boot().storage.get({ key: "later" })).rejects.toThrow("not found")
+  await expect(boot().storage.get({ key: "later" })).rejects.toThrow(SECURE_STORAGE_MISSING_ITEM)
   await boot().storage.set({ key: "last", value: "value" })
   boot().mock.clearSecureStorage()
-  await expect(boot().storage.get({ key: "last" })).rejects.toThrow("not found")
+  await expect(boot().storage.get({ key: "last" })).rejects.toThrow(SECURE_STORAGE_MISSING_ITEM)
+})
+
+it("rejects removing an absent key, as the real plugin does", async () => {
+  const boot = await fixture(false)
+  await expect(boot().storage.remove({ key: "never-set" })).rejects.toThrow(
+    SECURE_STORAGE_MISSING_ITEM
+  )
 })

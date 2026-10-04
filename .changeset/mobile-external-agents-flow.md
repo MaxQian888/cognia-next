@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Mobile external agents: adding one is now a full-screen flow straight onto the paired Host — pick a preset (agents the Host has installed first, with search), review a short form with advanced settings folded away, and "Add to Host"; the list manages the Host's agents (on/off, permission mode, remove) and keeps desktop-only agents in their own section. The composer's runtime menu opens this flow on a phone. Fixes external agents never connecting from a phone on the WAN tier: the data lane now subscribes to the agent's output channels (they are off by default on the Host), so `initialize` no longer times out and the agent is no longer killed and respawned in a loop. Fixes a phone being unable to join a Host that had been online for more than five minutes ("signaling subscription expired"): a peer's forwarded proof is no longer held to the admission clock window. Support tiers are shown translated, a failed load of the Host's agents reads as a load failure with a retry, and the desktop form no longer asks OpenCode V2 for an endpoint it never uses.

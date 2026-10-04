@@ -64,6 +64,15 @@ export interface LocalNotification {
   schedule?: { at: number }
 }
 
+/**
+ * What `capacitor-secure-storage-plugin` rejects with for a key it does not
+ * hold, on `get` and on `remove` alike (`dist/plugin.cjs.js`; the native
+ * implementations use the same text). The app tells "absent" from "storage
+ * failed" by this exact message (`lib/capacitor/secure-storage.ts`), so a mock
+ * with its own wording turned every absent key into a storage failure.
+ */
+export const SECURE_STORAGE_MISSING_ITEM = "Item with given key does not exist"
+
 export interface InjectCapacitorOptions {
   platform?: CapacitorPlatform
   network?: { connected: boolean; connectionType: string }
@@ -107,6 +116,7 @@ export async function injectCapacitor(
     mdnsResults: options.mdnsResults ?? [],
     secureStorage: options.secureStorage ?? {},
     persistSecureStorage: options.persistSecureStorage ?? false,
+    secureStorageMissingItem: SECURE_STORAGE_MISSING_ITEM,
   }
 
   await page.addInitScript((init) => {
@@ -272,12 +282,14 @@ export async function injectCapacitor(
         },
         get: async ({ key }: { key: string }) => {
           const v = state.secureStore[key]
-          if (typeof v !== "string") {
-            throw new Error(`SecureStorage: key '${key}' not found`)
-          }
+          if (typeof v !== "string") throw new Error(init.secureStorageMissingItem)
           return { value: v }
         },
+        // Removing an absent key rejects too, exactly as the plugin does.
         remove: async ({ key }: { key: string }) => {
+          if (typeof state.secureStore[key] !== "string") {
+            throw new Error(init.secureStorageMissingItem)
+          }
           delete state.secureStore[key]
           persistSecureStore()
           return { value: true }

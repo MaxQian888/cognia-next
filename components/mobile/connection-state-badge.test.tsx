@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ConnectionStateBadge } from "./connection-state-badge"
@@ -53,8 +53,24 @@ jest.mock("@/lib/sync/companion-sync", () => ({
   }),
 }))
 
+let mockTransport: Record<string, unknown> = {
+  reconnectRtc: jest.fn(() => "no-tier" as const),
+}
+const mockSwapHandlers = new Set<() => void>()
 jest.mock("@/lib/tauri", () => ({
-  transport: { reconnectRtc: jest.fn(() => "no-tier" as const) },
+  get transport() {
+    return mockTransport
+  },
+}))
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  onTransportChange: (handler: () => void) => {
+    mockSwapHandlers.add(handler)
+    return () => mockSwapHandlers.delete(handler)
+  },
+}))
+let mockMobile = false
+jest.mock("@/lib/capacitor/_shared", () => ({
+  isMobile: () => mockMobile,
 }))
 
 jest.mock("sonner", () => ({
@@ -83,6 +99,33 @@ const mockedUse = useConnectionState as jest.MockedFunction<typeof useConnection
 describe("ConnectionStateBadge", () => {
   afterEach(() => {
     jest.clearAllMocks()
+    mockMobile = false
+    mockSwapHandlers.clear()
+    mockTransport = { reconnectRtc: jest.fn(() => "no-tier" as const) }
+  })
+
+  it("shows the tier of the transport that replaced the one live at mount", async () => {
+    // Pairing swaps a new CompanionTransport in; a tier subscription taken at
+    // mount would keep reporting the replaced instance.
+    mockMobile = true
+    const tierTransport = (tier: string) => ({
+      reconnectRtc: jest.fn(() => "no-tier" as const),
+      onTierChange: (cb: (next: string) => void) => {
+        cb(tier)
+        return () => {}
+      },
+    })
+    mockTransport = tierTransport("offline")
+    mockedUse.mockReturnValue("connected")
+    const user = userEvent.setup()
+    render(<ConnectionStateBadge />)
+
+    mockTransport = tierTransport("relay")
+    act(() => {
+      for (const handler of mockSwapHandlers) handler()
+    })
+    await user.click(screen.getByTestId("connection-state-badge"))
+    expect(await screen.findByTestId("connection-tier-relay")).toBeInTheDocument()
   })
 
   it("renders nothing when the transport hasn't reported a state", () => {

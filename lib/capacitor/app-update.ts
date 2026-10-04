@@ -24,12 +24,16 @@ export interface AppUpdateInfo {
   availability: AppUpdateAvailability
   currentVersionName?: string
   availableVersionName?: string
+  /** Android exposes the available build code, not a version name. */
+  availableVersionCode?: string
   /** Whether Play allows the background download flow for this update. */
   flexibleAllowed: boolean
   /** Whether Play allows the blocking full-screen flow for this update. */
   immediateAllowed: boolean
   /** Days the update has been available, as reported by Play. */
   clientVersionStalenessDays?: number
+  /** Play's installStatus is DOWNLOADED (11), independent of availability. */
+  downloaded: boolean
 }
 
 /** Raw availability codes from the Play Core `AppUpdateInfo`. */
@@ -45,14 +49,20 @@ interface AppUpdateShape {
     updateAvailability: number
     currentVersionName?: string
     availableVersionName?: string
+    availableVersionCode?: string
     flexibleUpdateAllowed?: boolean
     immediateUpdateAllowed?: boolean
     clientVersionStalenessDays?: number
+    installStatus?: number
   }>
   startFlexibleUpdate(): Promise<{ code: number }>
   completeFlexibleUpdate(): Promise<void>
   performImmediateUpdate(): Promise<{ code: number }>
   openAppStore(): Promise<void>
+  addListener(
+    event: "onFlexibleUpdateStateChange",
+    handler: (state: { installStatus: number }) => void
+  ): Promise<{ remove(): Promise<void> | void }>
 }
 
 export type AppUpdateLoader = () => Promise<AppUpdateShape>
@@ -71,9 +81,11 @@ export async function getAppUpdateInfo(
       availability: AVAILABILITY_BY_CODE[raw.updateAvailability] ?? "unknown",
       currentVersionName: raw.currentVersionName,
       availableVersionName: raw.availableVersionName,
+      availableVersionCode: raw.availableVersionCode,
       flexibleAllowed: raw.flexibleUpdateAllowed === true,
       immediateAllowed: raw.immediateUpdateAllowed === true,
       clientVersionStalenessDays: raw.clientVersionStalenessDays,
+      downloaded: raw.installStatus === 11,
     }
     return { kind: "ok", value: info } as ValueOutcome<AppUpdateInfo>
   })
@@ -85,7 +97,7 @@ export type AppUpdateFlowResult = "started" | "cancelled" | "failed" | "unsuppor
 
 function flowResult(code: number): AppUpdateFlowResult {
   if (code === 0) return "started"
-  if (code === -1) return "cancelled"
+  if (code === 1) return "cancelled"
   return "failed"
 }
 
@@ -97,13 +109,13 @@ export async function startFlexibleUpdate(
     return flowResult(code)
   })
   if (typeof out === "string") return out
-  return "unsupported"
+  return out.kind === "error" ? "failed" : "unsupported"
 }
 
 /**
  * Install a background-flow update that has finished downloading. Called when
- * the user accepts, and again when the app returns to the foreground with a
- * download already complete, which is how an interrupted flow resumes.
+ * the user accepts. Resume/download listeners only offer that action; they
+ * must never restart the app automatically.
  */
 export async function completeFlexibleUpdate(
   loader: AppUpdateLoader = defaultLoader
@@ -123,7 +135,29 @@ export async function performImmediateUpdate(
     return flowResult(code)
   })
   if (typeof out === "string") return out
-  return "unsupported"
+  return out.kind === "error" ? "failed" : "unsupported"
+}
+
+/** Observe download readiness without completing or restarting the app. */
+export async function subscribeFlexibleUpdateDownloaded(
+  handler: () => void,
+  loader: AppUpdateLoader = defaultLoader
+): Promise<() => void> {
+  try {
+    const plugin = await loader()
+    let active = true
+    const listener = await plugin.addListener("onFlexibleUpdateStateChange", (state) => {
+      if (active && state.installStatus === 11) handler()
+    })
+    return () => {
+      active = false
+      void Promise.resolve()
+        .then(() => listener.remove())
+        .catch(() => undefined)
+    }
+  } catch {
+    return () => {}
+  }
 }
 
 export async function openAppStore(loader: AppUpdateLoader = defaultLoader): Promise<boolean> {

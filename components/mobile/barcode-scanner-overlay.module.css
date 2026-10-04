@@ -1,0 +1,61 @@
+/* startScan renders its camera behind the WebView, not in a video element. */
+.nativePreview {
+  background: transparent !important;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+:global(body).nativePreview,
+:global(body).nativePreview * {
+  visibility: hidden !important;
+}
+
+:global(body).nativePreview .scan,
+:global(body).nativePreview .scan * {
+  visibility: visible !important;
+}
+
+.scan {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+    max(1.5rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  background: transparent;
+  color: white;
+  outline: none;
+}
+
+.header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 1rem;
+  background: rgb(0 0 0 / 65%);
+}
+
+.frame {
+  width: min(72vw, 18rem);
+  aspect-ratio: 1;
+  max-height: 45dvh;
+  border: 3px solid white;
+  border-radius: 1.5rem;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 30%);
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgb(0 0 0 / 65%);
+}

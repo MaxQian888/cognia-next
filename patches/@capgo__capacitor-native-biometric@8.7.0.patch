@@ -1,0 +1,63 @@
+diff --git a/android/src/main/java/ee/forgr/biometric/AsymmetricSecureDataHelper.java b/android/src/main/java/ee/forgr/biometric/AsymmetricSecureDataHelper.java
+index c2447ac8b084c43bc3e728e50c7194b9553ad080..a52d3324ae2f5e24f0917560a3ad1575267971b1 100644
+--- a/android/src/main/java/ee/forgr/biometric/AsymmetricSecureDataHelper.java
++++ b/android/src/main/java/ee/forgr/biometric/AsymmetricSecureDataHelper.java
+@@ -161,15 +161,9 @@ final class AsymmetricSecureDataHelper {
+         try {
+             generateKeyPair(alias, invalidatedByEnrollment);
+         } catch (ProviderException e) {
+-            if (invalidatedByEnrollment) {
+-                try {
+-                    generateKeyPair(alias, false);
+-                } catch (ProviderException retryError) {
+-                    throw new GeneralSecurityException("Keystore key generation failed", retryError);
+-                }
+-            } else {
+-                throw new GeneralSecurityException("Keystore key generation failed", e);
+-            }
++            // CurrentSet must fail closed on OEMs that cannot enforce enrollment
++            // invalidation; silently retrying as BiometryAny weakens the policy.
++            throw new GeneralSecurityException("Keystore key generation failed", e);
+         }
+         return requirePrivateKeyEntry(ks, alias);
+     }
+diff --git a/android/src/main/java/ee/forgr/biometric/AuthActivity.java b/android/src/main/java/ee/forgr/biometric/AuthActivity.java
+index 8f02750c956eec58f5a342f3fb8ef5d3992c1675..b999dc5718f54dbae1f148cc88f786aca6aac720 100644
+--- a/android/src/main/java/ee/forgr/biometric/AuthActivity.java
++++ b/android/src/main/java/ee/forgr/biometric/AuthActivity.java
+@@ -420,19 +420,9 @@ public class AuthActivity extends AppCompatActivity {
+         try {
+             key = buildCredentialKey(alias, invalidatedByEnrollment, authValidityDuration);
+         } catch (ProviderException e) {
+-            // Xiaomi/MIUI and Oppo/ColorOS Keymasters may reject setInvalidatedByBiometricEnrollment(true)
+-            // with a generic ProviderException. Retry without it when it was requested.
+-            if (invalidatedByEnrollment) {
+-                try {
+-                    key = buildCredentialKey(alias, false, authValidityDuration);
+-                } catch (ProviderException retryError) {
+-                    throw new GeneralSecurityException("Keystore key generation failed", retryError);
+-                }
+-            } else {
+-                // ProviderException is unchecked; convert it so callers handle it gracefully
+-                // (return null -> error result) instead of crashing AuthActivity.onCreate.
+-                throw new GeneralSecurityException("Keystore key generation failed", e);
+-            }
++            // Preserve CurrentSet even when an OEM rejects enrollment invalidation.
++            // Convert the unchecked failure into the existing recoverable error path.
++            throw new GeneralSecurityException("Keystore key generation failed", e);
+         }
+         storeAuthValidityDuration(server, authValidityDuration);
+         storeCredentialAuthScheme(server, BiometricAuthenticatorConfig.KEY_AUTH_TYPES_SCHEME_VERSION);
+diff --git a/android/src/main/java/ee/forgr/biometric/NativeBiometric.java b/android/src/main/java/ee/forgr/biometric/NativeBiometric.java
+index 6f53b22d6b95149912cac742490fb86c9aa4064f..9b8ea173154cd16fb3846a7b4c4ca8c5260e4a72 100644
+--- a/android/src/main/java/ee/forgr/biometric/NativeBiometric.java
++++ b/android/src/main/java/ee/forgr/biometric/NativeBiometric.java
+@@ -724,6 +724,8 @@ public class NativeBiometric extends Plugin {
+         intent.putExtra("mode", "getSecureData");
+         intent.putExtra("server", storageKey);
+         intent.putExtra("title", call.getString("title", "Authenticate"));
++        // Keep a misplaced finger retryable; the default is a one-attempt prompt.
++        intent.putExtra("maxAttempts", 5);
+ 
+         String subtitle = call.getString("subtitle");
+         if (subtitle != null) intent.putExtra("subtitle", subtitle);

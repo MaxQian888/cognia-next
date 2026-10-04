@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { getOrientation, lock, unlock } from "./screen-orientation"
+import { getLockSupport, getOrientation, lock, unlock } from "./screen-orientation"
 
 function makeSo() {
   return {
@@ -36,4 +36,31 @@ describe("screen-orientation", () => {
     })
     expect(out).toEqual({ kind: "unsupported" })
   })
+})
+
+it.each([
+  ["iPad14,1", false],
+  ["iPhone15,2", true],
+])("detects current iOS lock capability for %s", async (model, value) => {
+  expect(
+    await getLockSupport(async () => ({ kind: "ok", value: { platform: "ios", model } }))
+  ).toEqual({ kind: "ok", value })
+})
+it("honors Android native large-screen restrictions", async () => {
+  expect(
+    await getLockSupport(
+      async () => ({ kind: "ok", value: { platform: "android" } }),
+      async () => ({ getOrientationLockSupport: async () => ({ supported: false }) })
+    )
+  ).toEqual({ kind: "ok", value: false })
+})
+it("does not assume support when Android capability query fails", async () => {
+  expect(
+    await getLockSupport(
+      async () => ({ kind: "ok", value: { platform: "android" } }),
+      async () => {
+        throw new Error("not registered")
+      }
+    )
+  ).toEqual({ kind: "unsupported" })
 })

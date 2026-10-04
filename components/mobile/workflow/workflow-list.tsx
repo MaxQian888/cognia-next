@@ -160,12 +160,15 @@ export function WorkflowList({ className }: WorkflowListProps) {
     <main
       className={cn(
         COMPACT_PAGE_MIN_H,
-        "flex flex-col gap-4 bg-background pt-3 safe-area-pt",
+        "flex w-full min-w-0 flex-col gap-4 bg-background pb-6 safe-area-pt",
         className
       )}
       data-testid="mobile-workflow-list"
     >
-      <header className="px-4">
+      {/* `pt-3` lives here, not on `<main>`: `.safe-area-pt` is declared after
+          Tailwind's spacing utilities and overrode it, so on a phone with no
+          top inset the title sat flush under the shell's banner. */}
+      <header className="px-4 pt-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
       </header>
 

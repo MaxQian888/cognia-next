@@ -5,6 +5,11 @@ import { isTauri } from "@/lib/tauri"
  * Thin wrappers over the Rust `crash::commands` surface. All are no-ops off the
  * desktop runtime (web / mobile) — the crash-report subsystem only exists under
  * Tauri. Mirrors the invoke-wrapper style of `native-logging.ts`.
+ *
+ * One exception to "swallow and default": `listCrashReports` rethrows a failed
+ * invoke. It used to answer `[]`, which the `/logs` Crash reports channel then
+ * rendered as "no crash reports" — indistinguishable from a healthy machine —
+ * when the truth was that the crash directory could not be read at all.
  */
 
 /** One report on disk, grouped by stem (shared by its `.txt` / `.json` / `.dmp`). */
@@ -39,13 +44,14 @@ export interface CrashLoggingDiagnostics {
   lastPruneRemaining?: number
 }
 
+/**
+ * Every report on disk. `[]` off the desktop runtime, where there is nothing
+ * to list; a rejected invoke on the desktop propagates so the caller can say
+ * "could not read" instead of "nothing crashed".
+ */
 export async function listCrashReports(): Promise<CrashReportSummary[]> {
   if (!isTauri()) return []
-  try {
-    return await invoke<CrashReportSummary[]>("crash_list_reports")
-  } catch {
-    return []
-  }
+  return invoke<CrashReportSummary[]>("crash_list_reports")
 }
 
 export async function readCrashReport(stem: string): Promise<string | null> {

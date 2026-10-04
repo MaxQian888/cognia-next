@@ -65,12 +65,11 @@ import type { TerminalProfile } from "@/lib/terminal/profiles"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { detachFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
 import { TerminalShellPicker } from "@/components/terminal/terminal-shell-picker"
-import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
-import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
+import { useSshConnect } from "@/hooks/terminal/use-ssh-connect"
+import { sshHostSettingsHref, terminalSettingsHref } from "@/lib/terminal/terminal-settings-link"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { useProjectStore } from "@/stores/project/project-store"
-import { toast } from "sonner"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
@@ -157,35 +156,25 @@ export function MobileTerminalScreen() {
    * only thing that was missing was somewhere to press.
    */
   const sshHosts = useSettingsStore(selectSavedSshHosts)
-  const hostKeyGuard = useSshHostKeyChange()
+  /**
+   * The shared launcher, without revealing a dock: this screen IS the
+   * terminal. It also brings the bastion check, the translated "not on this
+   * host" refusal and the retry after a re-trusted host key, none of which
+   * this screen's own copy had.
+   */
+  const sshConnect = useSshConnect({ revealDock: false })
+  const { connect: connectSsh } = sshConnect
 
   const handleNewSshHost = useCallback(
     async (hostId: string) => {
-      const launch = resolveSshHostLaunch(hostId, sshHosts)
-      if (launch.kind !== "ready") {
-        toast.error(
-          launch.kind === "credentialRequired"
-            ? t("sshCredentialRequired", { name: launch.name })
-            : t("sshUnknownHost")
-        )
-        return
-      }
-      const result = await connectSshFromDock({
-        profile: launch.profile,
-        // A jump host is stored as a profile id, so the whole set travels or a
-        // bastion-backed host connects direct.
-        allProfiles: sshHosts ?? [],
+      await connectSsh({
+        hostId,
         rows: 28,
         cols: 80,
         projectId: activeProjectId ?? undefined,
-        store: useTerminalStore.getState(),
       })
-      if (result.kind === "error") {
-        if (hostKeyGuard.capture(result.message)) return
-        toast.error(t("sshConnectFailed"), { description: result.message })
-      }
     },
-    [activeProjectId, hostKeyGuard, sshHosts, t]
+    [activeProjectId, connectSsh]
   )
 
   const handleNew = useCallback(async (shell?: string): Promise<string | null> => {
@@ -328,13 +317,14 @@ export function MobileTerminalScreen() {
           onNewSshHost={(hostId) => {
             void handleNewSshHost(hostId)
           }}
+          onManageSshHosts={() => router.push(sshHostSettingsHref())}
           onAttachTmuxSession={(sessionName) => {
             void handleAttachTmuxSession(sessionName)
           }}
         />
       </header>
 
-      {hostKeyGuard.dialog}
+      {sshConnect.dialog}
       <div
         className="min-h-0 flex-1"
         data-testid={showTabletWorkbench ? "tablet-terminal-split" : "phone-terminal-surface"}
@@ -374,7 +364,7 @@ export function MobileTerminalScreen() {
                     rehydrateTerminals()
                   )
                 }}
-                onOpenSettings={() => router.push("/settings?section=terminal")}
+                onOpenSettings={() => router.push(terminalSettingsHref("host"))}
               />
               <TerminalTabStrip
                 tabs={tabs}

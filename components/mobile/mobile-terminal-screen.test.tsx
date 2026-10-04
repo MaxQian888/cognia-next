@@ -41,6 +41,7 @@ jest.mock("@/lib/terminal/rehydrate", () => ({
 jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
   spawnFromDock: (...args: Parameters<typeof mockSpawnFromDock>) => mockSpawnFromDock(...args),
   detachFromDock: (...args: unknown[]) => mockDetachFromDock(...(args as [])),
+  killFromDock: jest.fn(async () => undefined),
 }))
 
 // Skip the heavy xterm path — the instance is mounted but the wrapper

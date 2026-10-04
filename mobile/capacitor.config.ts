@@ -1,5 +1,32 @@
 import type { CapacitorConfig } from "@capacitor/cli"
 
+if (![undefined, "", "0", "1"].includes(process.env.COGNIA_MOBILE_DEV)) {
+  throw new Error("COGNIA_MOBILE_DEV must be 0 or 1")
+}
+const isMobileDev = process.env.COGNIA_MOBILE_DEV === "1"
+const mobileDevUrl = process.env.COGNIA_MOBILE_DEV_URL || "http://localhost:3002"
+if (process.env.COGNIA_MOBILE_DEV_URL && !isMobileDev) {
+  throw new Error("COGNIA_MOBILE_DEV_URL requires COGNIA_MOBILE_DEV=1")
+}
+if (isMobileDev) {
+  const url = new URL(mobileDevUrl)
+  if (
+    url.protocol !== "http:" ||
+    url.hostname !== "localhost" ||
+    !url.port ||
+    Number(url.port) < 1024 ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "Mobile live reload requires http://localhost:<port> with a port from 1024 to 65535"
+    )
+  }
+}
+
 /**
  * Capacitor 8 mobile shell configuration.
  *
@@ -14,22 +41,18 @@ import type { CapacitorConfig } from "@capacitor/cli"
 const config: CapacitorConfig = {
   appId: "com.cognia.mobile",
   appName: "Cognia",
-  webDir: "../out",
+  webDir: isMobileDev ? ".dev-web" : "../out",
   server: {
     androidScheme: "https",
     // DEV-ONLY live reload.
     //
-    // The Next.js dev server is reached at http://localhost:3000 from inside
-    // the emulator by way of `adb reverse tcp:3000 tcp:3000` (run once per
-    // emulator session). Using the same hostname as the page keeps Next.js
-    // lazy chunks on the current origin, so desktop and mobile can share one
-    // dev server.
-    //
-    // Comment out (or unset COGNIA_MOBILE_DEV) and re-run `cap sync` before
-    // building a release / pushing this file.
-    ...(process.env.COGNIA_MOBILE_DEV
+    // android.mjs owns the dedicated mobile dev server and adb reverse.
+    // Keeping one loopback origin preserves HMR/chunk URLs without exposing
+    // the development server to the LAN. Offline workflows explicitly unset
+    // this URL and verify the copied native config before assembling an APK.
+    ...(isMobileDev
       ? {
-          url: "http://localhost:3000",
+          url: mobileDevUrl,
           cleartext: true,
         }
       : {}),
@@ -45,7 +68,7 @@ const config: CapacitorConfig = {
       // well before this ceiling — the timeout only fires if that call never
       // lands. The web <AppSplash> overlay shares the #01061e backdrop, so the
       // native→web handoff shows no flash of unstyled content either way.
-      launchShowDuration: process.env.COGNIA_MOBILE_DEV ? 1500 : 3000,
+      launchShowDuration: isMobileDev ? 1500 : 3000,
       launchAutoHide: true,
       // Android 12+ routes the splash through the system SplashScreen API,
       // which ignores `hide({ fadeOutDuration })` — this is the only knob that
@@ -128,7 +151,7 @@ const config: CapacitorConfig = {
     captureInput: true,
     // DEV: expose the WebView to `chrome://inspect/#devices` so we can
     // open DevTools against the emulator. Release builds keep this off.
-    webContentsDebuggingEnabled: Boolean(process.env.COGNIA_MOBILE_DEV),
+    webContentsDebuggingEnabled: isMobileDev,
   },
 }
 

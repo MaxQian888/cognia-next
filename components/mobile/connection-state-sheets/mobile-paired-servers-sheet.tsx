@@ -31,6 +31,8 @@ import {
 } from "@/lib/companion/credential-book"
 import { removeCompanionHost } from "@/lib/companion/host-removal"
 import { switchCompanionHost } from "@/lib/companion/host-orchestration"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
+import { useSettingsStore } from "@/stores/settings"
 
 export interface MobilePairedServersSheetProps {
   open: boolean
@@ -64,6 +66,9 @@ export function MobilePairedServersSheet({ open, onOpenChange }: MobilePairedSer
   const t = useTranslations("mobile.connectionState.switch")
   const router = useRouter()
   const guard = useBiometricGuard()
+  const biometricRequired =
+    useSettingsStore((state) => state.settings?.biometricRequiredFor?.deletePairing) ??
+    DEFAULT_BIOMETRIC_GUARD.deletePairing
   const blockReason = useBiometricBlockReason()
   useBackDismiss(open, () => onOpenChange(false))
   const [hosts, setHosts] = useState<CompanionHostRecord[]>([])
@@ -134,20 +139,20 @@ export function MobilePairedServersSheet({ open, onOpenChange }: MobilePairedSer
     setPendingHostId(removeCandidate.hostId)
     setError(null)
     try {
-      const outcome = await guard(
+      const remove = () => removeCompanionHost({
+        accountId: DEFAULT_LOCAL_ACCOUNT_ID,
+        hostId: removeCandidate.hostId,
+        fallbackHostId: fallbackHostId || undefined,
+        platform: "mobile",
+      })
+      const outcome = biometricRequired ? await guard(
         {
           reason: t("removeReason"),
           title: t("removeTitle", { name: removeCandidate.label }),
           description: t("removeDescription"),
         },
-        () =>
-          removeCompanionHost({
-            accountId: DEFAULT_LOCAL_ACCOUNT_ID,
-            hostId: removeCandidate.hostId,
-            fallbackHostId: fallbackHostId || undefined,
-            platform: "mobile",
-          })
-      )
+        remove
+      ) : { kind: "ok" as const, value: await remove() }
       if (outcome.kind === "blocked") {
         if (outcome.reason !== "cancelled") setError(t("biometricFailed", { reason: blockReason(outcome.reason) }))
         return

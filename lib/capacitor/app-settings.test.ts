@@ -30,3 +30,10 @@ describe("openAppSettings", () => {
     expect(out).toEqual({ kind: "error", message: "system denied" })
   })
 })
+
+it("reports a native settings launch refusal", async () => {
+  expect(await openAppSettings(async () => ({ open: async () => ({ status: false }) }))).toEqual({
+    kind: "error",
+    message: "System settings could not be opened",
+  })
+})

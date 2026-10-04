@@ -85,12 +85,9 @@ export async function selection(
   })
 }
 
-/** Convenience: light impact + selection-changed for tab/menu transitions. */
+/** One-shot feedback for tab/menu transitions; no selection session required. */
 export async function selectionFeedback(
   loader: HapticsLoader = defaultLoader
 ): Promise<SimpleOutcome> {
-  return withPlugin(loader, async (haptics) => {
-    await haptics.selectionChanged()
-    return { kind: "ok" as const }
-  })
+  return impact("light", loader)
 }

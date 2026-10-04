@@ -84,6 +84,11 @@ jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
   useKeyboardInsets: () => keyboardRef.value,
 }))
 
+const pinMock = jest.fn()
+jest.mock("@/hooks/ui/use-keyboard-viewport-pin", () => ({
+  useKeyboardViewportPin: (enabled: boolean) => pinMock(enabled),
+}))
+
 // The shared unread read reaches Dexie, and `useMobileUnread` is stubbed above
 // so it never actually runs. The stub only stops the real schema module loading.
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
@@ -116,6 +121,7 @@ describe("<MobileShellWrapper />", () => {
     pathnameMock.mockReset().mockReturnValue("/")
     unreadRef.value = { chat: 0, inbox: 0 }
     keyboardRef.value = { keyboardHeight: 0, isVisible: false }
+    pinMock.mockReset()
     replaceMock.mockReset()
     wrapperStoreState.settings = { lastInboxViewedAt: 0 }
     wrapperStoreState.loaded = true
@@ -429,7 +435,7 @@ describe("<MobileShellWrapper />", () => {
     // The inner body container is the definite-height flex column the ReactFlow
     // canvas needs — a bare min-h-[100dvh] collapses the canvas to 0.
     const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
-    expect(inner?.className).toContain("h-[100dvh]")
+    expect(inner?.className).toContain("h-[var(--visual-viewport-height,100dvh)]")
     expect(inner?.className).not.toContain("min-h-[100dvh]")
   })
 
@@ -446,6 +452,23 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
 
+  it.each([
+    ["/me/external-agents/new", "false"],
+    ["/me/external-agents/new/configure", "false"],
+    ["/me/external-agents", "true"],
+  ])("tab bar on %s is visible=%s (the add flow is full screen)", (path, visible) => {
+    pathnameMock.mockReturnValue(path)
+    render(
+      <MobileShellWrapper>
+        <div>page</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute(
+      "data-tab-bar-visible",
+      visible
+    )
+  })
+
   it("gives the A2UI mini-apps route a definite full-viewport height while keeping the tab bar", () => {
     pathnameMock.mockReturnValue("/a2ui")
     const { container } = render(
@@ -457,7 +480,7 @@ describe("<MobileShellWrapper />", () => {
     // The hub wraps its body in a ScrollArea h-full + the workspace stacks a
     // flex-1 region — both need the definite-height column, not min-h-[100dvh].
     const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
-    expect(inner?.className).toContain("h-[100dvh]")
+    expect(inner?.className).toContain("h-[var(--visual-viewport-height,100dvh)]")
     expect(inner?.className).not.toContain("min-h-[100dvh]")
     // Unlike the workflow editor, the A2UI hub is a top-level destination, so
     // the tab bar stays mounted (content is padded above it).
@@ -477,7 +500,7 @@ describe("<MobileShellWrapper />", () => {
     // `StepShell` is `h-full` (it fills the desktop chrome's content slot);
     // on mobile that chain only resolves against a definite-height column.
     const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
-    expect(inner?.className).toContain("h-[100dvh]")
+    expect(inner?.className).toContain("h-[var(--visual-viewport-height,100dvh)]")
     expect(inner?.className).not.toContain("min-h-[100dvh]")
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
@@ -499,7 +522,7 @@ describe("<MobileShellWrapper />", () => {
         "true"
       )
       const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
-      expect(inner?.className).toContain("h-[100dvh]")
+      expect(inner?.className).toContain("h-[var(--visual-viewport-height,100dvh)]")
       expect(inner?.className).not.toContain("min-h-[100dvh]")
       expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
     }
@@ -537,8 +560,9 @@ describe("<MobileShellWrapper />", () => {
     expect(inner?.className).not.toContain("pb-[calc(theme(spacing.14)")
   })
 
-  it("lifts the content by the keyboard overlap when the frame did not resize", () => {
+  it("lifts a document-scrolling route by the keyboard overlap when the frame did not resize", () => {
     // Native-resize failed (iOS quirk / plugin missing): overlap is real.
+    pathnameMock.mockReturnValue("/me")
     keyboardRef.value = { keyboardHeight: 260, isVisible: true }
     const { container } = render(
       <MobileShellWrapper>
@@ -549,6 +573,55 @@ describe("<MobileShellWrapper />", () => {
       "[data-testid='mobile-shell-wrapper'] > div"
     ) as HTMLElement
     expect(inner.style.paddingBottom).toBe("260px")
+  })
+
+  it("sizes a viewport-owning route to the visible height instead of padding it", () => {
+    // The chat shell (`/`) owns the viewport. It follows the measured visible
+    // height (`--visual-viewport-height`), so padding it by the overlap too
+    // would lift the composer twice and push its toolbar under the keyboard.
+    pathnameMock.mockReturnValue("/")
+    keyboardRef.value = { keyboardHeight: 260, isVisible: true }
+    const { container } = render(
+      <MobileShellWrapper>
+        <div>typing</div>
+      </MobileShellWrapper>
+    )
+    const inner = container.querySelector(
+      "[data-testid='mobile-shell-wrapper'] > div"
+    ) as HTMLElement
+    expect(inner.className).toContain("h-[var(--visual-viewport-height,100dvh)]")
+    expect(inner.style.paddingBottom).toBe("")
+  })
+
+  it("pins the scroll position only for viewport-owning routes", () => {
+    pathnameMock.mockReturnValue("/")
+    const { unmount } = render(
+      <MobileShellWrapper>
+        <div>chat</div>
+      </MobileShellWrapper>
+    )
+    expect(pinMock).toHaveBeenLastCalledWith(true)
+    unmount()
+
+    pathnameMock.mockReturnValue("/me")
+    render(
+      <MobileShellWrapper>
+        <div>me</div>
+      </MobileShellWrapper>
+    )
+    expect(pinMock).toHaveBeenLastCalledWith(false)
+  })
+
+  it("never pins in the desktop pass-through", () => {
+    platformMock.mockReturnValue("web")
+    compactMock.mockReturnValue(false)
+    pathnameMock.mockReturnValue("/")
+    render(
+      <MobileShellWrapper>
+        <div>desktop</div>
+      </MobileShellWrapper>
+    )
+    expect(pinMock).toHaveBeenLastCalledWith(false)
   })
 
   it("adds no overlap padding when native resize already handled the keyboard", () => {

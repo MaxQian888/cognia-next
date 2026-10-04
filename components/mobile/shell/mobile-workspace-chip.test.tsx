@@ -84,6 +84,19 @@ it("drops the visible name on the narrowest phones but keeps it in the label", (
   )
 })
 
+it("draws as one of the app bar's 44px ghost icon buttons, not a muted pill", () => {
+  act(() => {
+    useProjectStore.setState({
+      projects: [{ id: "p1", name: "Backend", roots: [] } as never],
+      activeProjectId: "p1",
+    })
+  })
+  render(<MobileWorkspaceChip />)
+  const chip = screen.getByTestId("mobile-workspace-chip")
+  expect(chip).toHaveClass("h-11", "min-w-11", "hover:bg-accent")
+  expect(chip).not.toHaveClass("bg-muted/60", "text-[10px]")
+})
+
 function activateWorkspace() {
   act(() => {
     useProjectStore.setState({

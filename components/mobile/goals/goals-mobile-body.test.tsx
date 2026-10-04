@@ -73,6 +73,15 @@ describe("<GoalsMobileBody />", () => {
     expect(screen.getByText("ship the thing")).toBeInTheDocument()
   })
 
+  it("fills the width and keeps the title off the shell's banner", () => {
+    liveQuery.mockReturnValue([])
+    render(<GoalsMobileBody />)
+    const main = screen.getByTestId("mobile-goals-body")
+    expect(main).toHaveClass("w-full", "min-w-0", "pb-6", "safe-area-pt")
+    expect(main).not.toHaveClass("pt-3")
+    expect(main.querySelector("header")).toHaveClass("pt-3")
+  })
+
   it("joins the goal rows into one surface instead of a frame each", () => {
     // A card per goal turned a status list into a stack of boxes. The rail
     // each row draws on its own left edge now runs into the surface edge.

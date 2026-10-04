@@ -15,6 +15,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import {
   __resetHydratedSessionHistoryForTests,
   hydrateSessionHistory,
+  readCompleteSessionHistory,
   invalidateSessionHistory,
   getSessionHistoryMode,
 } from "./session-history"
@@ -438,5 +439,99 @@ describe("hydrateSessionHistory", () => {
       /invalid session history row/
     )
     expect(await getDb().messages.count()).toBe(0)
+  })
+})
+
+describe("readCompleteSessionHistory", () => {
+  beforeEach(async () => {
+    __resetHydratedSessionHistoryForTests()
+    clearActiveRuntimeTargetContext()
+    await getDb().messages.clear()
+  })
+
+  const session = { id: "s1", title: "Host", createdAt: 1, updatedAt: 2, transcriptRevision: 3 }
+  const row = (id: string) => ({
+    id,
+    sessionId: "s1",
+    role: "user",
+    parts: [],
+    createdAt: 1,
+    workingSetSnapshot: { contractVersion: 1, revision: 1, entries: [], updatedAt: 1 },
+  })
+
+  it("reads all opaque-token pages without hydrating the local mirror", async () => {
+    const call = jest.fn(async (method: string, args?: Record<string, unknown>) => {
+      if (method === "session_list") return { items: [session] }
+      return args?.pageToken === undefined
+        ? { items: [row("older")], total: 2, nextPageToken: "opaque-next" }
+        : { items: [row("tail")], total: 2 }
+    })
+    const result = await readCompleteSessionHistory(createTransport(call), "s1")
+    expect(result?.messages.map((message) => message.id)).toEqual(["older", "tail"])
+    expect(result?.messages[0].workingSetSnapshot?.revision).toBe(1)
+    expect(call).toHaveBeenCalledWith(
+      "message_get_by_session",
+      expect.objectContaining({ pageToken: "opaque-next" })
+    )
+    expect(await getDb().messages.count()).toBe(0)
+  })
+
+  it.each([
+    { items: [row("tail")], total: 2 },
+    { items: [row("same"), row("same")], total: 2 },
+    { items: [{ ...row("wrong"), sessionId: "other" }], total: 1 },
+  ])("refuses incomplete or untrusted history pages %#", async (page) => {
+    const call = jest.fn(async (method: string) =>
+      method === "session_list" ? { items: [session] } : page
+    )
+    await expect(readCompleteSessionHistory(createTransport(call), "s1")).rejects.toThrow()
+    expect(await getDb().messages.count()).toBe(0)
+  })
+
+  it("refuses a changing transcript instead of constructing a mixed snapshot", async () => {
+    let reads = 0
+    const call = jest.fn(async (method: string) =>
+      method === "session_list"
+        ? { items: [{ ...session, transcriptRevision: ++reads }] }
+        : { items: [row("m")], total: 1 }
+    )
+    await expect(readCompleteSessionHistory(createTransport(call), "s1")).rejects.toThrow("changed")
+  })
+
+  it("returns null only when the authoritative session list has no matching session", async () => {
+    const call = jest.fn(async () => ({ items: [] }))
+    await expect(readCompleteSessionHistory(createTransport(call), "local")).resolves.toBeNull()
+    expect(call).toHaveBeenCalledTimes(1)
+  })
+
+  it("propagates host failure instead of treating it as an absent local session", async () => {
+    await expect(
+      readCompleteSessionHistory(
+        createTransport(jest.fn().mockRejectedValue(new Error("offline"))),
+        "s1"
+      )
+    ).rejects.toThrow("offline")
+  })
+
+  it("rejects a target switch during paging", async () => {
+    const call = jest.fn(async (method: string) => {
+      if (method === "session_list") return { items: [session] }
+      setActiveRuntimeTargetContext("other-account", "host", 2)
+      return { items: [row("m")], total: 1 }
+    })
+    await expect(readCompleteSessionHistory(createTransport(call), "s1")).rejects.toThrow(
+      "scope_changed"
+    )
+  })
+
+  it("fails explicitly when a complete export exceeds its page bound", async () => {
+    const call = jest.fn(async (method: string) =>
+      method === "session_list"
+        ? { items: [session] }
+        : { items: [row("m")], nextPageToken: "more" }
+    )
+    await expect(
+      readCompleteSessionHistory(createTransport(call), "s1", { maxPages: 1 })
+    ).rejects.toThrow("page limit")
   })
 })

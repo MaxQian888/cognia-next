@@ -12,20 +12,24 @@ import {
   enqueueHostStateAction,
   enqueueHostStateIntentIfAvailable,
   enqueueUnlessQueued,
+  hostOwnsSessionState,
   hostStateSessionIntentAvailable,
   isAbandonedClaim,
   listByStatus,
   markHostStateResult,
   markCollabConflict,
   nextQueueWakeAt,
+  offerHostStateRow,
   recordFailure,
   releaseClaim,
   releaseStaleClaims,
   rebaseCollabConflict,
   renewClaim,
   retryDeadletter,
+  supersededHostStateDraftIds,
   withdrawQueuedAction,
 } from "./mobile-outbound-queue"
+import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
 import {
   __resetRuntimeSnapshotForTesting,
@@ -550,6 +554,53 @@ describe("mobile outbound queue target isolation", () => {
     expect(row?.targetId).toBe(scope.targetId)
   })
 
+  it("keeps one queued draft per conversation while the Host has seen none of them", async () => {
+    const channel = sessionStateChannel(scope.targetId, "s-drafts")
+    await getDb().hostStateChannels.put({
+      channel,
+      hostId: "host-authority",
+      hostGeneration: 4,
+      hostSeq: 0,
+      revision: 0,
+      digest: "digest",
+      state: createEmptyHostStateSession(scope.targetId, "s-drafts"),
+      updatedAt: 100,
+    })
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "mobile", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+    const draft = (actionId: string, text: string) =>
+      enqueueHostStateIntentIfAvailable({
+        sessionId: "s-drafts",
+        actionId,
+        clientId: "client-a",
+        nowMs: 300,
+        action: { kind: "draft.replace", text, attachments: [] },
+      })
+
+    await draft("draft-1", "h")
+    await enqueueHostStateIntentIfAvailable({
+      sessionId: "s-drafts",
+      actionId: "send",
+      clientId: "client-a",
+      nowMs: 300,
+      action: { kind: "message.enqueue", messageId: "m1", text: "hi", attachments: [] },
+    })
+    await draft("draft-2", "he")
+    await draft("draft-3", "hello")
+
+    const rows = await getDb().mobileOutboundQueue.toArray()
+    // The send is never collapsed; of the drafts only the last survives, and
+    // it still sorts after the send.
+    expect(rows.map((row) => [row.actionId, row.clientSeq]).sort()).toEqual([
+      ["draft-3", 4],
+      ["send", 2],
+    ])
+  })
+
   it("falls back to the local scope when the Host declares none", async () => {
     const channel = sessionStateChannel(scope.targetId, "s2")
     await getDb().hostStateChannels.put({
@@ -608,6 +659,45 @@ describe("mobile outbound queue target isolation", () => {
     await expect(hostStateSessionIntentAvailable("s-avail")).resolves.toBe(true)
     await expect(hostStateSessionIntentAvailable("")).resolves.toBe(false)
     await expect(getDb().mobileOutboundQueue.count()).resolves.toBe(0)
+  })
+
+  it("says the Host owns the session rows exactly when a target negotiated HostState submit", () => {
+    const host = (operations: string[]) => ({ compatible: true, operations, grants: [] })
+    const companion = {
+      id: scope.targetId,
+      kind: "companion" as const,
+      platform: "web" as const,
+      hostKind: "desktop" as const,
+    }
+    const base = { vaultState: "unlocked" as const, connectionState: "online" as const }
+
+    expect(
+      hostOwnsSessionState({ ...base, target: companion, host: host(["host_state_submit"]) })
+    ).toBe(true)
+    // A native host (no client target) that advertises the operation also routes.
+    expect(hostOwnsSessionState({ ...base, target: null, host: host(["host_state_submit"]) })).toBe(
+      true
+    )
+    expect(hostOwnsSessionState({ ...base, target: companion, host: host([]) })).toBe(false)
+    expect(
+      hostOwnsSessionState({
+        ...base,
+        target: companion,
+        host: { ...host(["host_state_submit"]), compatible: false },
+      })
+    ).toBe(false)
+    expect(hostOwnsSessionState({ ...base, target: companion })).toBe(false)
+    expect(
+      hostOwnsSessionState({
+        ...base,
+        target: { ...companion, kind: "standalone" as const },
+        host: host(["host_state_submit"]),
+      })
+    ).toBe(false)
+    // No active runtime target context: nothing routes to a Host.
+    expect(
+      hostOwnsSessionState({ ...base, target: companion, host: host(["host_state_submit"]) }, null)
+    ).toBe(false)
   })
 
   it("keeps legacy writes when HostState was not negotiated or has no confirmed snapshot", async () => {
@@ -907,5 +997,192 @@ describe("per-channel dispatch order", () => {
     const row = await getDb().mobileOutboundQueue.get("refused")
     expect(row?.rejectionCode).toBeUndefined()
     expect(row?.currentRevision).toBeUndefined()
+  })
+})
+
+describe("HostState rows across Host restarts and draft bursts", () => {
+  const channel = sessionStateChannel(scope.targetId, "s-restart")
+
+  beforeEach(async () => {
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    await getDb().delete()
+    __resetDbForTesting()
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  function hostStateRow(
+    id: string,
+    clientSeq: number,
+    overrides: Partial<MobileOutboundJobRow> & { kind?: "draft.replace" | "turn.abort" } = {}
+  ): MobileOutboundJobRow {
+    const { kind = "turn.abort", ...rest } = overrides
+    const action = {
+      channel: rest.channel ?? channel,
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: "host-authority",
+      hostGeneration: 3,
+      sessionId: "s-restart",
+      clientId: rest.clientId ?? "client-a",
+      clientSeq,
+      actionId: id,
+      ...(kind === "draft.replace" ? { baseRevision: 0 } : {}),
+      createdAt: 1,
+      action:
+        kind === "draft.replace"
+          ? { kind: "draft.replace" as const, text: id, attachments: [] }
+          : { kind: "turn.abort" as const },
+    }
+    return {
+      id,
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+      command: "host_state_submit",
+      payload: { accountId: scope.accountId, runtimeTargetId: scope.targetId, actions: [action] },
+      status: "pending",
+      attempts: 0,
+      createdAt: clientSeq,
+      nextAttemptAt: 0,
+      idempotencyKey: id,
+      protocol: "host-state",
+      channel: action.channel,
+      hostGeneration: 3,
+      clientId: action.clientId,
+      clientSeq,
+      actionId: id,
+      ...rest,
+    }
+  }
+
+  async function confirm(hostGeneration: number, hostId = "host-authority") {
+    await getDb().hostStateChannels.put({
+      channel,
+      hostId,
+      hostGeneration,
+      hostSeq: 0,
+      revision: 0,
+      digest: "digest",
+      state: createEmptyHostStateSession(scope.targetId, "s-restart"),
+      updatedAt: 1,
+    })
+  }
+
+  const offeredGeneration = (row: MobileOutboundJobRow | undefined) =>
+    (row?.payload as { actions: Array<{ hostGeneration: number }> }).actions[0]!.hostGeneration
+
+  describe("offerHostStateRow", () => {
+    it("re-stamps a never-offered row onto the generation the same Host published", async () => {
+      await getDb().mobileOutboundQueue.put(hostStateRow("a", 1))
+      await confirm(5)
+
+      const offer = await offerHostStateRow("a")
+
+      expect(offer?.firstOffer).toBe(true)
+      expect(offeredGeneration(offer?.row)).toBe(5)
+      const stored = await getDb().mobileOutboundQueue.get("a")
+      expect(stored).toMatchObject({ hostGeneration: 5, offeredHostGeneration: 5 })
+      expect(offeredGeneration(stored)).toBe(5)
+    })
+
+    it("leaves an already-offered row on the generation it was offered under", async () => {
+      await getDb().mobileOutboundQueue.put(hostStateRow("a", 1, { offeredHostGeneration: 3 }))
+      await confirm(5)
+
+      const offer = await offerHostStateRow("a")
+
+      expect(offer?.firstOffer).toBe(false)
+      expect(offeredGeneration(offer?.row)).toBe(3)
+    })
+
+    it("does not re-stamp onto another Host, or backwards", async () => {
+      await getDb().mobileOutboundQueue.put(hostStateRow("a", 1))
+      await confirm(5, "another-host")
+      expect(offeredGeneration((await offerHostStateRow("a"))?.row)).toBe(3)
+
+      await getDb().mobileOutboundQueue.put(hostStateRow("b", 2))
+      await confirm(2)
+      expect(offeredGeneration((await offerHostStateRow("b"))?.row)).toBe(3)
+    })
+
+    it("still records the offer when there is nothing to re-base", async () => {
+      await getDb().mobileOutboundQueue.put(hostStateRow("a", 1))
+
+      const offer = await offerHostStateRow("a")
+
+      expect(offer?.firstOffer).toBe(true)
+      expect(await getDb().mobileOutboundQueue.get("a")).toMatchObject({
+        offeredHostGeneration: 3,
+      })
+    })
+
+    it("answers null for a row that is gone", async () => {
+      await expect(offerHostStateRow("missing")).resolves.toBeNull()
+    })
+  })
+
+  it("forgets the offer on a failure the Host proved unapplied, and on a manual retry", async () => {
+    await getDb().mobileOutboundQueue.put(hostStateRow("a", 1, { offeredHostGeneration: 3 }))
+    await recordFailure({ id: "a", error: new Error("network"), nowMs: 10, random: () => 0 })
+    expect((await getDb().mobileOutboundQueue.get("a"))?.offeredHostGeneration).toBe(3)
+
+    await recordFailure({
+      id: "a",
+      error: new Error("stale_host_generation"),
+      nowMs: 20,
+      random: () => 0,
+      forgetOffer: true,
+    })
+    expect(await getDb().mobileOutboundQueue.get("a")).not.toHaveProperty("offeredHostGeneration")
+
+    await getDb().mobileOutboundQueue.update("a", {
+      status: "rejected",
+      offeredHostGeneration: 3,
+      rejectionCode: "stale_host_generation",
+    })
+    await retryDeadletter("a", 30)
+    expect(await getDb().mobileOutboundQueue.get("a")).not.toHaveProperty("offeredHostGeneration")
+  })
+
+  describe("supersededHostStateDraftIds", () => {
+    it("keeps the latest never-offered draft per conversation and client", () => {
+      const rows = [
+        hostStateRow("d1", 1, { kind: "draft.replace" }),
+        hostStateRow("abort", 2),
+        hostStateRow("d3", 3, { kind: "draft.replace" }),
+        hostStateRow("d4", 4, { kind: "draft.replace" }),
+        hostStateRow("other-client", 1, { kind: "draft.replace", clientId: "client-b" }),
+        hostStateRow("other-channel", 1, {
+          kind: "draft.replace",
+          channel: sessionStateChannel(scope.targetId, "s-elsewhere"),
+        }),
+      ]
+      expect(supersededHostStateDraftIds(rows).sort()).toEqual(["d1", "d3"])
+    })
+
+    it("never collapses a draft a Host may hold or one on the wire", () => {
+      const rows = [
+        hostStateRow("offered", 1, { kind: "draft.replace", offeredHostGeneration: 3 }),
+        hostStateRow("sending", 2, { kind: "draft.replace", status: "sending" }),
+        hostStateRow("latest", 3, { kind: "draft.replace" }),
+      ]
+      expect(supersededHostStateDraftIds(rows)).toEqual([])
+    })
+  })
+
+  it("drops superseded drafts at claim time, for a backlog queued before they were collapsed", async () => {
+    await getDb().mobileOutboundQueue.bulkPut([
+      hostStateRow("d1", 1, { kind: "draft.replace" }),
+      hostStateRow("d2", 2, { kind: "draft.replace" }),
+      hostStateRow("d3", 3, { kind: "draft.replace" }),
+    ])
+
+    await expect(claimNext(1_000, scope)).resolves.toMatchObject({ id: "d3" })
+    expect((await getDb().mobileOutboundQueue.toArray()).map((row) => row.id)).toEqual(["d3"])
   })
 })

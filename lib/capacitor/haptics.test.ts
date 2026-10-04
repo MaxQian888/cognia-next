@@ -50,10 +50,11 @@ describe("haptics wrapper", () => {
     expect(mock.selectionEnd).toHaveBeenCalled()
   })
 
-  it("selectionFeedback fires selectionChanged", async () => {
+  it("selectionFeedback uses a standalone impact without an active selection generator", async () => {
     const mock = makeMockHaptics()
     await selectionFeedback(async () => mock)
-    expect(mock.selectionChanged).toHaveBeenCalled()
+    expect(mock.impact).toHaveBeenCalledWith({ style: "LIGHT" })
+    expect(mock.selectionChanged).not.toHaveBeenCalled()
   })
 
   it("returns unsupported when loader rejects", async () => {

@@ -8,22 +8,31 @@ import type { DeviceRow } from "@/lib/devices/types"
 import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 
 let rows: DeviceRow[] = []
+let needsAttention = 0
+let hostUnreachable = false
 const refresh = jest.fn(async () => {})
 const push = jest.fn()
 let searchParams = new URLSearchParams()
+const replace = jest.fn((href: string, _options?: unknown) => {
+  searchParams = new URLSearchParams(href.split("?")[1] ?? "")
+})
 
 jest.mock("@/hooks/devices/use-device-rows", () => ({
   useDeviceRows: () => ({
     rows,
-    summary: { total: rows.length, online: rows.length, needsAttention: 0 },
+    summary: { total: rows.length, online: rows.length, needsAttention },
     loading: false,
-    hostUnreachable: false,
+    hostUnreachable,
     refresh,
   }),
 }))
 jest.mock("@/hooks/devices/use-device-grant-actions", () => ({ useDeviceGrantActions: () => ({}) }))
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: (...a: unknown[]) => push(...a) }),
+  useRouter: () => ({
+    push: (...a: unknown[]) => push(...a),
+    replace: (href: string, options: unknown) => replace(href, options),
+  }),
+  usePathname: () => "/devices",
   useSearchParams: () => searchParams,
 }))
 jest.mock("@/components/devices/device-detail", () => ({
@@ -70,7 +79,10 @@ beforeEach(() => {
   useDeviceConsoleStore.setState(initial, true)
   rows = [row({ ref: "local", kind: "local", label: "This Mac", isSelf: true }), row()]
   searchParams = new URLSearchParams()
+  needsAttention = 0
+  hostUnreachable = false
   push.mockClear()
+  replace.mockClear()
 })
 
 /**
@@ -104,16 +116,56 @@ it("does not reopen the drawer from a persisted selection", () => {
   expect(screen.queryByTestId("mobile-detail")).toBeNull()
 })
 
-it("adds a host in place and honours the ?addHost deep link", async () => {
+it("adds a host in place from the header's grow menu", async () => {
+  const user = userEvent.setup()
   render(<DevicesMobileBody />)
-  await userEvent.click(screen.getByTestId("mobile-devices-add-host"))
+  await user.click(screen.getByTestId("mobile-devices-add"))
+  await user.click(screen.getByTestId("mobile-devices-add-host"))
   expect(screen.getByTestId("mobile-add-host")).toBeInTheDocument()
   expect(push).not.toHaveBeenCalled()
 })
 
-it("routes pairing to /pair, which exists on a phone", async () => {
-  rows = [row({ ref: "local", kind: "local", label: "This Mac", isSelf: true })]
+it("honours the ?addHost deep link", () => {
+  searchParams = new URLSearchParams("addHost=1")
   render(<DevicesMobileBody />)
-  await userEvent.click(screen.getByTestId("mobile-devices-pair"))
+  expect(screen.getByTestId("mobile-add-host")).toBeInTheDocument()
+})
+
+/**
+ * Pairing used to vanish from this screen once a second device existed, so a
+ * phone with one pairing could not start another from the device console.
+ */
+it("keeps pairing reachable however large the fleet is", async () => {
+  const user = userEvent.setup()
+  rows = [...rows, row({ ref: "device:b", label: "Tablet" })]
+  render(<DevicesMobileBody />)
+  await user.click(screen.getByTestId("mobile-devices-add"))
+  await user.click(screen.getByTestId("mobile-devices-pair"))
   expect(push).toHaveBeenCalledWith("/pair")
+})
+
+/** ⌘K and Settings hand a device over as a link; it used to open a list. */
+it("opens the linked device's drawer from a ?device= link", async () => {
+  searchParams = new URLSearchParams("device=device:a")
+  render(<DevicesMobileBody />)
+  expect(await screen.findByTestId("mobile-detail")).toHaveTextContent("device:a")
+})
+
+it("mirrors a tapped device into the URL", async () => {
+  render(<DevicesMobileBody />)
+  await userEvent.click(screen.getByTestId("device-row-device:a"))
+  expect(replace).toHaveBeenCalledWith("/devices?device=device%3Aa", { scroll: false })
+})
+
+it("states the fleet notices the desktop states", () => {
+  hostUnreachable = true
+  render(<DevicesMobileBody />)
+  expect(screen.getByTestId("device-host-unreachable")).toBeInTheDocument()
+})
+
+it("turns the attention count into the filter for what it counted", async () => {
+  needsAttention = 1
+  render(<DevicesMobileBody />)
+  await userEvent.click(screen.getByTestId("mobile-devices-attention-count"))
+  expect(useDeviceConsoleStore.getState().attentionOnly).toBe(true)
 })

@@ -102,7 +102,7 @@ const UNBRANCHED_ROUTES = [
   "/integrations",
   "/agent-runs",
   "/browser",
-  "/logs?channel=traces&view=dashboard",
+  "/logs?channel=traces&tview=dashboard",
   "/workspace",
   "/skills",
   "/twin",

@@ -89,6 +89,11 @@ export const USAGE_DESCRIPTIONS = [
     zh: "cognia 在工作流的位置触发器里需要当前位置（仅在前台使用）",
   },
   {
+    key: "NSLocationAlwaysAndWhenInUseUsageDescription",
+    en: "Cognia needs your current position for workflow location triggers (foreground only).",
+    zh: "Cognia 在工作流的位置触发器里需要当前位置（仅在前台使用）。",
+  },
+  {
     key: "NSLocalNetworkUsageDescription",
     en: "cognia needs to discover your paired desktop on this local network.",
     zh: "cognia 需要在本地网络中查找已配对的桌面端。",
@@ -109,6 +114,12 @@ function insertBeforeClosingDict(xml, insert) {
 export function patchPlist(xml) {
   let out = xml
   let changed = false
+
+  for (const key of ["UIFileSharingEnabled", "LSSupportsOpeningDocumentsInPlace"]) {
+    if (out.includes(`<key>${key}</key>`)) continue
+    out = insertBeforeClosingDict(out, `\t<key>${key}</key>\n\t<true/>\n`)
+    changed = true
+  }
 
   if (!/NSBonjourServices/.test(out)) {
     const insert = `\t<key>NSBonjourServices</key>\n\t<array>\n\t\t<string>${SERVICE_TYPE}</string>\n\t</array>\n`

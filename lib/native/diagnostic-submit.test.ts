@@ -20,6 +20,7 @@ import {
   DiagnosticSubmitError,
   listSubmissionRecords,
   refreshSubmission,
+  resolveSubmissionRuntime,
   submitCrashReport,
   withdrawSubmission,
   type DiagnosticConnectionInput,
@@ -154,5 +155,46 @@ describe("on the desktop runtime", () => {
       connection,
       stem: "crash-a",
     })
+  })
+})
+
+describe("resolveSubmissionRuntime", () => {
+  it("answers desktop under Tauri without probing the mobile plugin", async () => {
+    const mobileCapabilities = jest.fn(async () => ({ kind: "ok" }))
+    await expect(
+      resolveSubmissionRuntime({ isDesktop: () => true, mobileCapabilities })
+    ).resolves.toBe("desktop")
+    expect(mobileCapabilities).not.toHaveBeenCalled()
+  })
+
+  it("answers mobile only when the crash plugin answers its capability probe", async () => {
+    await expect(
+      resolveSubmissionRuntime({
+        isDesktop: () => false,
+        mobileCapabilities: async () => ({ kind: "ok" }),
+      })
+    ).resolves.toBe("mobile")
+    await expect(
+      resolveSubmissionRuntime({
+        isDesktop: () => false,
+        mobileCapabilities: async () => ({ kind: "unsupported" }),
+      })
+    ).resolves.toBeNull()
+  })
+
+  it("treats a throwing probe as no submission path", async () => {
+    await expect(
+      resolveSubmissionRuntime({
+        isDesktop: () => false,
+        mobileCapabilities: async () => {
+          throw new Error("bridge gone")
+        },
+      })
+    ).resolves.toBeNull()
+  })
+
+  it("defaults to the real platform checks, which refuse in a plain Node runtime", async () => {
+    isTauriValue = false
+    await expect(resolveSubmissionRuntime()).resolves.toBeNull()
   })
 })

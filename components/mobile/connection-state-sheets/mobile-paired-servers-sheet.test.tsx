@@ -27,6 +27,10 @@ jest.mock("@/lib/capacitor/haptics", () => ({ impact: jest.fn() }))
 jest.mock("@/hooks/ui/use-back-dismiss", () => ({ useBackDismiss: jest.fn() }))
 // `null` passes the prompt; a reason makes the guard refuse with that code.
 const guardBlock: { reason: string | null; calls: number } = { reason: null, calls: 0 }
+let mockDeletePairingRequired = true
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (select: (state: unknown) => unknown) => select({ settings: { biometricRequiredFor: { deletePairing: mockDeletePairingRequired } } }),
+}))
 jest.mock("@/hooks/use-biometric-guard", () => ({
   useBiometricGuard: () => async (_request: unknown, action: () => Promise<void>) => {
     guardBlock.calls += 1
@@ -73,6 +77,7 @@ function host(hostId: string, label = hostId): CompanionHostRecord {
 }
 
 beforeEach(() => {
+  mockDeletePairingRequired = true
   records = []
   active = null
   guardBlock.reason = null
@@ -174,4 +179,18 @@ it("says nothing when the person cancels the biometric prompt", async () => {
   await waitFor(() => expect(screen.getByTestId("mobile-paired-row-host-b")).toBeEnabled())
   expect(screen.queryByText(/The Host was not removed/)).not.toBeInTheDocument()
   expect(removeHost).not.toHaveBeenCalled()
+})
+
+it("respects a disabled deletePairing policy after destructive confirmation", async () => {
+  mockDeletePairingRequired = false
+  guardBlock.reason = "cancelled"
+  records = [host("host-a", "A"), host("host-b", "B")]
+  active = records[0]
+  render(<MobilePairedServersSheet open onOpenChange={jest.fn()} />)
+  await screen.findByTestId("mobile-paired-remove-host-a")
+  fireEvent.click(screen.getByTestId("mobile-paired-remove-host-a"))
+  expect(removeHost).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText("confirmRemove"))
+  await waitFor(() => expect(removeHost).toHaveBeenCalledTimes(1))
+  expect(guardBlock.calls).toBe(0)
 })

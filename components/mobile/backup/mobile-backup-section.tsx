@@ -18,7 +18,7 @@
  * Documents to iCloud/Drive automatically.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckCircle2Icon, DownloadIcon } from "lucide-react"
@@ -41,13 +41,15 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
-import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { useBackupExportGuard } from "@/hooks/data/use-backup-export-guard"
 import { saveExport } from "@/lib/files/save-export"
 import { notifyExportOutcome } from "@/lib/files/export-feedback"
 import {
   DEFAULT_CHANNEL_ID,
   ensureChannel,
   schedule as scheduleLocalNotif,
+  cancel as cancelLocalNotif,
+  listPending as listPendingLocalNotifs,
 } from "@/lib/capacitor/local-notifications"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { applyBackupPackage } from "@/lib/data/apply-package"
@@ -58,11 +60,18 @@ import { isEncryptedEnvelope, migrateEnvelope } from "@/lib/data/migrate"
 import type { ImportMergeStrategy } from "@/lib/data/types"
 import { listBackupHistory } from "@/lib/db/backup-history"
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
-import { useSettingsStore } from "@/stores/settings"
 import { WebDavSyncCard } from "@/components/settings/data/webdav-sync-card"
 import { cn } from "@/lib/utils"
 
 const NOTIF_ID_DAILY = 91_001
+// Native scheduling may await a permission prompt. Keep user changes ordered
+// across navigation so a pending enable cannot outlive a later disable.
+let reminderOperations: Promise<void> = Promise.resolve()
+function updateReminder<T>(operation: () => Promise<T>): Promise<T> {
+  const result = reminderOperations.then(operation)
+  reminderOperations = result.then(() => undefined, () => undefined)
+  return result
+}
 const MIN_PASSPHRASE_LENGTH = 8
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -80,10 +89,8 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const tExport = useTranslations("export")
   const tNotif = useTranslations("mobile.offline")
   const isMobile = detectNativePlatform() === "mobile"
-  const guard = useBiometricGuard()
+  const guardExport = useBackupExportGuard()
   const blockReason = useBiometricBlockReason()
-  const biometricRequired =
-    useSettingsStore((s) => s.settings?.biometricRequiredFor?.exportBackup) ?? false
 
   const [exporting, setExporting] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -91,6 +98,8 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const [passphrase, setPassphrase] = useState("")
   const [autoBackup, setAutoBackup] = useState(false)
   const [intervalDays, setIntervalDays] = useState(7)
+  const reminderRevision = useRef(0)
+  const mounted = useRef(true)
 
   const history = useLiveQuery<BackupHistoryRow[]>(() => listBackupHistory(), []) ?? []
   const passphraseValid = passphrase.length >= MIN_PASSPHRASE_LENGTH
@@ -125,20 +134,9 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
     if (!passphraseValid) return
     setExporting(true)
     try {
-      if (biometricRequired) {
-        const outcome = await guard(
-          {
-            reason: t("exportBiometricReason"),
-            title: t("exportBiometricTitle"),
-            fallthroughWhenUnavailable: true,
-          },
-          runExport
-        )
-        if (outcome.kind === "blocked" && outcome.reason !== "cancelled") {
-          toast.error(t("biometricBlocked", { reason: blockReason(outcome.reason) }))
-        }
-      } else {
-        await runExport()
+      const outcome = await guardExport(runExport)
+      if (outcome.kind === "blocked" && outcome.reason !== "cancelled") {
+        toast.error(t("biometricBlocked", { reason: blockReason(outcome.reason) }))
       }
     } catch (err) {
       toast.error(t("exportFailed", { message: err instanceof Error ? err.message : String(err) }))
@@ -147,23 +145,57 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
     }
   }
 
-  // Schedule a daily LocalNotifications reminder when auto-backup flips on.
+  // Hydrate the native reminder instead of showing an existing schedule as off.
   useEffect(() => {
-    if (!autoBackup) return
-    void (async () => {
-      await ensureChannel({ id: DEFAULT_CHANNEL_ID, name: tNotif("notifChannel") })
-      await scheduleLocalNotif([
+    mounted.current = true
+    let cancelled = false
+    const revision = reminderRevision.current
+    if (isMobile) void updateReminder(() => listPendingLocalNotifs()).then((outcome) => {
+      if (cancelled || revision !== reminderRevision.current) return
+      if (outcome.kind !== "ok") return
+      const reminder = outcome.value.find((entry) => entry.id === NOTIF_ID_DAILY)
+      setAutoBackup(!!reminder)
+      if (reminder?.schedule?.every === "day") {
+        setIntervalDays(Math.max(1, Math.min(30, reminder.schedule.count ?? 1)))
+      }
+    }).catch(() => undefined)
+    return () => { cancelled = true; mounted.current = false }
+  }, [isMobile])
+
+  const changeReminder = (enabled: boolean, days: number) => {
+    const revision = ++reminderRevision.current
+    const previous = { enabled: autoBackup, days: intervalDays }
+    setAutoBackup(enabled)
+    setIntervalDays(days)
+    if (!isMobile) return
+    void updateReminder(async () => {
+      if (!enabled) return cancelLocalNotif([NOTIF_ID_DAILY])
+      const channel = await ensureChannel({ id: DEFAULT_CHANNEL_ID, name: tNotif("notifChannel") })
+      if (channel.kind !== "ok") return channel
+      return scheduleLocalNotif([
         {
           id: NOTIF_ID_DAILY,
           title: t("autoBackup"),
           body: t("autoBackupHint"),
-          schedule: { every: "day", count: 1 },
+          schedule: { every: "day", count: days },
           // Tap routing — consumed by the boot provider's onAction listener.
           extra: { route: "/me/backup" },
         },
       ])
-    })()
-  }, [autoBackup, t, tNotif])
+    }).then((outcome) => {
+      if (outcome.kind !== "ok") throw new Error("reminder update failed")
+    }).catch(async () => {
+      if (!mounted.current || revision !== reminderRevision.current) return
+      toast.error(t("reminderFailed"))
+      // A rejected native call can still have changed the OS schedule. Read
+      // its state after queued mutations before restoring the visible toggle.
+      const pending = await updateReminder(() => listPendingLocalNotifs()).catch(() => null)
+      if (!mounted.current || revision !== reminderRevision.current) return
+      const reminder = pending?.kind === "ok" ? pending.value.find((item) => item.id === NOTIF_ID_DAILY) : undefined
+      setAutoBackup(pending?.kind === "ok" ? !!reminder : previous.enabled)
+      setIntervalDays(reminder?.schedule?.every === "day" ? Math.max(1, Math.min(30, reminder.schedule.count ?? 1)) : previous.days)
+    })
+  }
 
   // Fire a real backup at every `intervalDays`-day boundary while the app
   // is alive. The notif above is the fallback for when the app is closed.
@@ -347,7 +379,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
         action={
           <Switch
             checked={autoBackup}
-            onCheckedChange={setAutoBackup}
+            onCheckedChange={(enabled) => changeReminder(enabled, intervalDays)}
             data-testid="backup-auto-toggle"
             aria-label={t("autoBackup")}
           />
@@ -361,7 +393,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
               min={1}
               max={30}
               value={intervalDays}
-              onChange={(e) => setIntervalDays(Number(e.target.value) || 1)}
+              onChange={(e) => changeReminder(autoBackup, Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
               data-testid="backup-auto-interval"
             />
           </Label>

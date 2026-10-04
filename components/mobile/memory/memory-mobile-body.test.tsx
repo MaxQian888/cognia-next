@@ -107,6 +107,15 @@ describe("<MemoryMobileBody />", () => {
     expect(screen.getByTestId("memory-row-m1")).toBeInTheDocument()
   })
 
+  it("fills the width and keeps the title off the shell's banner", () => {
+    liveQuery.mockReturnValue([])
+    render(<MemoryMobileBody />)
+    const main = screen.getByTestId("mobile-memory-body")
+    expect(main).toHaveClass("w-full", "min-w-0", "pb-6", "safe-area-pt")
+    expect(main).not.toHaveClass("pt-3")
+    expect(main.querySelector("header")).toHaveClass("pt-3")
+  })
+
   it("filters memories by the search query", async () => {
     liveQuery.mockReturnValue([
       mem({ id: "m1", text: "remember milk" }),

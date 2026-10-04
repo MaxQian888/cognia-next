@@ -39,6 +39,7 @@ describe("keyboard.subscribeKeyboard", () => {
 
     expect(unsub).not.toBeNull()
     unsub?.()
+    await Promise.resolve()
     expect(remove).toHaveBeenCalledTimes(2)
   })
 
@@ -104,4 +105,39 @@ describe("keyboard.hideKeyboard / showKeyboard", () => {
     )
     expect(out).toEqual({ kind: "error", message: "native boom" })
   })
+})
+
+it("cleans up successful registrations when a later registration fails", async () => {
+  const remove = jest.fn().mockResolvedValue(undefined)
+  const addListener = jest
+    .fn()
+    .mockResolvedValueOnce({ remove })
+    .mockRejectedValueOnce(new Error("bridge lost"))
+  expect(
+    await subscribeKeyboard({ onWillShow: jest.fn(), onDidShow: jest.fn() }, async () =>
+      makeKeyboard({ addListener })
+    )
+  ).toBeNull()
+  expect(remove).toHaveBeenCalledTimes(1)
+})
+
+it("ignores native events after partial registration failure even if removal rejects", async () => {
+  let show!: (info: KeyboardInfo) => void
+  const onWillShow = jest.fn()
+  let registered = false
+  const addListener = jest.fn(async (_event: string, handler: (info: KeyboardInfo) => void) => {
+    if (registered) throw new Error("bridge unavailable")
+    registered = true
+    show = handler
+    return {
+      remove: async () => {
+        throw new Error("bridge unavailable")
+      },
+    }
+  })
+  await subscribeKeyboard({ onWillShow, onDidHide: jest.fn() }, async () =>
+    makeKeyboard({ addListener })
+  )
+  show({ keyboardHeight: 300 })
+  expect(onWillShow).not.toHaveBeenCalled()
 })

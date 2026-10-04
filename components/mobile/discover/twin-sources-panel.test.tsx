@@ -5,6 +5,10 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { TwinSourcesPanel } from "./twin-sources-panel"
+import { useCameraRecovery } from "@/hooks/use-camera-recovery"
+
+jest.mock("@/hooks/use-camera-recovery", () => ({ useCameraRecovery: jest.fn() }))
+const recoveryMock = jest.mocked(useCameraRecovery)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -61,6 +65,7 @@ beforeEach(() => {
   promptMock.mockReset()
   pickPhotoMock.mockReset()
   transportCallMock.mockClear()
+  recoveryMock.mockClear()
 })
 
 describe("<TwinSourcesPanel />", () => {
@@ -95,6 +100,11 @@ describe("<TwinSourcesPanel />", () => {
     render(<TwinSourcesPanel twinId="twin-1" />)
     await user.click(screen.getByTestId("twin-sources-add"))
     await user.click(screen.getByTestId("twin-sources-camera"))
+    expect(pickPhotoMock).toHaveBeenCalledWith({
+      source: "camera",
+      resultType: "base64",
+      recoveryTarget: { kind: "twin", id: "twin-1" },
+    })
     await waitFor(() =>
       expect(enqueueMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -103,6 +113,43 @@ describe("<TwinSourcesPanel />", () => {
         })
       )
     )
+  })
+
+  it("delivers a restored photo through the existing Twin queue", async () => {
+    render(<TwinSourcesPanel twinId="restored-twin" />)
+    const [target, deliver] = recoveryMock.mock.calls.at(-1)!
+    expect(target).toEqual({ kind: "twin", id: "restored-twin" })
+    await expect(deliver({ kind: "photo", photo: { base64: "AAAA", format: "jpeg" } }, () => true))
+      .resolves.toBe(true)
+    expect(enqueueMock).toHaveBeenCalledWith({
+      command: "twin_source_create",
+      payload: { twinId: "restored-twin", kind: "document", format: "image", base64: "AAAA", mime: "image/jpeg" },
+      label: "pickCamera",
+    })
+  })
+
+  it.each([true, false])("queues restored URI bytes only while its destination is current (%s)", async (remainsCurrent) => {
+    let finish!: (response: Response) => void
+    const originalFetch = global.fetch
+    global.fetch = jest.fn(() => new Promise<Response>((resolve) => { finish = resolve }))
+    try {
+      render(<TwinSourcesPanel twinId="old-twin" />)
+      const deliver = recoveryMock.mock.calls.at(-1)![1]
+      let current = true
+      const result = deliver({ kind: "photo", photo: { uri: "file:photo", format: "png" } }, () => current)
+      current = remainsCurrent
+      finish({ ok: true, blob: async () => new Blob(["image"]) } as Response)
+      await expect(result).resolves.toBe(remainsCurrent)
+      if (remainsCurrent) {
+        expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({
+          payload: expect.objectContaining({ twinId: "old-twin", base64: btoa("image") }),
+        }))
+      } else {
+        expect(enqueueMock).not.toHaveBeenCalled()
+      }
+    } finally {
+      global.fetch = originalFetch
+    }
   })
 
   it("enqueues a picked file as base64", async () => {

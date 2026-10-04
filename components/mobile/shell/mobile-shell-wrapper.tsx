@@ -36,6 +36,7 @@ import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
+import { useKeyboardViewportPin } from "@/hooks/ui/use-keyboard-viewport-pin"
 import { usePlatform } from "@/hooks/use-platform"
 import { usesCompactShell } from "@/lib/shell/compact-shell"
 import { needsFullViewport } from "@/lib/shell/full-viewport-routes"
@@ -101,6 +102,11 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
 
   const unreadCounts = useMobileUnread()
 
+  // A viewport-owning route never scrolls as a document; undo the scroll the
+  // browser makes to reveal a focused input while the keyboard is open (see
+  // the hook). Hook order: called before the desktop pass-through return.
+  useKeyboardViewportPin(compactShell && needsFullViewport(pathname))
+
   const showTabBar = useMemo(() => {
     if (!compactShell) return false
     // Workflow detail sub-routes (the full-screen touch editor + run detail)
@@ -111,6 +117,10 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     // resizable project-workbench split. A second fixed tab bar would overlap
     // both the PTY and software keyboard.
     if (pathname === "/me/terminal") return false
+    // Adding an external agent is a full-screen task with its own pinned
+    // "Add to Host" action; a tab bar under it would sit on that button and
+    // offer five ways out of a half-filled form.
+    if (pathname.startsWith("/me/external-agents/new")) return false
     return !TAB_BAR_HIDDEN_PREFIXES.some(
       (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
     )
@@ -157,17 +167,28 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     >
       <div
         className={cn(
-          fullViewport ? "flex h-[100dvh] flex-col overflow-hidden" : "min-h-[100dvh]",
+          // A viewport-owning route is sized to what is VISIBLE while the
+          // keyboard is open: `--visual-viewport-height` is the measured
+          // `visualViewport.height`, published by the keyboard store only
+          // while it is open (`lib/capacitor/keyboard-viewport.ts`). That is
+          // the right height in every keyboard mode — the OS resizing the
+          // WebView (Capacitor), the browser overlaying it (PWA / iOS) — and
+          // unlike `100dvh` it cannot lag a frame resize. Closed, the var is
+          // unset and the column is `100dvh` as before.
+          fullViewport
+            ? "flex h-[var(--visual-viewport-height,100dvh)] flex-col overflow-hidden"
+            : "min-h-[100dvh]",
           showTabBar && !keyboard.isVisible
             ? "pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
             : null
         )}
-        // Keyboard-avoidance fallback. The primary path is Capacitor's
-        // `Keyboard.resize: "native"` (the OS shrinks the WebView, overlap
-        // stays 0 and this is a no-op). When the frame does NOT resize
-        // (iOS ignoring `interactiveWidget`, plugin not registered), the
-        // visualViewport overlap is > 0 and lifting the content by exactly
-        // that amount keeps the composer / focused input above the keyboard.
+        // Keyboard-avoidance for DOCUMENT-scrolling routes only. When the
+        // frame does not resize (a browser overlaying the keyboard), the
+        // visualViewport overlap is > 0 and padding the document by exactly
+        // that amount lets its last row scroll above the keyboard. A
+        // viewport-owning route already shrank to the visible height above;
+        // padding it as well was the double offset that pushed the composer's
+        // toolbar back under the keyboard.
         //
         // Only while the keyboard is actually up (or no tab bar reserves the
         // bottom). An inline `padding-bottom` beats the reserve class, so a
@@ -175,7 +196,9 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         // zoom, a late viewport restore) swapped the 56px + inset reserve for
         // a few pixels and left the last row of every page under the bar.
         style={
-          keyboard.keyboardHeight > 0 && (keyboard.isVisible || !showTabBar)
+          !fullViewport &&
+          keyboard.keyboardHeight > 0 &&
+          (keyboard.isVisible || !showTabBar)
             ? { paddingBottom: keyboard.keyboardHeight }
             : undefined
         }

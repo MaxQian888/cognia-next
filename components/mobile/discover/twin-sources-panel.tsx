@@ -47,10 +47,12 @@ import {
 import { LongPress } from "@/components/interactions/long-press"
 import { RedactReviewSheet } from "@/components/mobile/discover/redact-review-sheet"
 import { pickPhoto } from "@/lib/capacitor/camera"
+import { dataUrlToBase64, readFileAsDataUrl } from "@/lib/capacitor/_shared"
 import { prompt as nativePrompt } from "@/lib/capacitor/dialog"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { transport } from "@/lib/tauri"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { useCameraRecovery } from "@/hooks/use-camera-recovery"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { TwinSource } from "@/types/twin"
 import { cn } from "@/lib/utils"
@@ -175,9 +177,49 @@ export function TwinSourcesPanel({ twinId, className }: TwinSourcesPanelProps) {
     await reload()
   }
 
+  const enqueuePhoto = async (
+    photo: { base64?: string; uri?: string; format: string },
+    isCurrent: () => boolean = () => true
+  ) => {
+    let base64 = photo.base64
+    if (!base64 && photo.uri) {
+      const response = await fetch(photo.uri)
+      if (!response.ok) throw new Error(`Photo read failed: ${response.status}`)
+      base64 = dataUrlToBase64(await readFileAsDataUrl(await response.blob()))
+    }
+    if (!base64 || !isCurrent()) return false
+    await enqueue({
+      command: "twin_source_create",
+      payload: {
+        twinId,
+        kind: "document",
+        format: "image",
+        base64,
+        mime: `image/${photo.format}`,
+      },
+      label: t("pickCamera"),
+    })
+    toast.success(t("queuedToast"))
+    return true
+  }
+
+  useCameraRecovery({ kind: "twin", id: twinId }, async (result, isCurrent) => {
+    if (!isCurrent() || result.kind !== "photo") return false
+    try {
+      return await enqueuePhoto(result.photo, isCurrent)
+    } catch {
+      if (isCurrent()) toast.error(t("cameraError.unknown"))
+      return false
+    }
+  })
+
   const onCamera = async () => {
     setMenuOpen(false)
-    const r = await pickPhoto({ source: "camera", resultType: "base64" })
+    const r = await pickPhoto({
+      source: "camera",
+      resultType: "base64",
+      recoveryTarget: { kind: "twin", id: twinId },
+    })
     if (r.kind !== "captured") {
       if (r.kind === "cancelled") return
       const errorKeyMap: Record<string, string> = {
@@ -189,18 +231,7 @@ export function TwinSourcesPanel({ twinId, className }: TwinSourcesPanelProps) {
       toast.error(t(`cameraError.${errorKey}`))
       return
     }
-    await enqueue({
-      command: "twin_source_create",
-      payload: {
-        twinId,
-        kind: "document",
-        format: "image",
-        base64: r.base64,
-        mime: `image/${r.format}`,
-      },
-      label: t("pickCamera"),
-    })
-    toast.success(t("queuedToast"))
+    await enqueuePhoto(r)
   }
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {

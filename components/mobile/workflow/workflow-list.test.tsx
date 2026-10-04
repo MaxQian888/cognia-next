@@ -223,6 +223,20 @@ describe("<WorkflowList />", () => {
     expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
   })
 
+  /**
+   * Under the read-only boundary the page sat in a flex row and shrank to its
+   * content; `.safe-area-pt` overrode `pt-3` on the same element, so the title
+   * touched the banner; and the last section ended flush on the tab bar.
+   */
+  it("fills the width, pads the title itself and clears the tab bar", () => {
+    pushQueries({})
+    render(<WorkflowList />)
+    const main = screen.getByTestId("mobile-workflow-list")
+    expect(main).toHaveClass("w-full", "min-w-0", "pb-6", "safe-area-pt")
+    expect(main).not.toHaveClass("pt-3")
+    expect(screen.getByRole("heading", { level: 1 }).closest("header")).toHaveClass("pt-3")
+  })
+
   it("renders rows + pinned + recent feed at the root", () => {
     pushQueries({ workflows: [wf("a", "Alpha", "Daily snap"), wf("b", "Beta")] })
     settingsRef.value = { pinnedWorkflowIds: ["a"] }

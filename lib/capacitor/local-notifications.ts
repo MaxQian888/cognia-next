@@ -26,6 +26,9 @@ export interface LocalNotificationSpec {
   smallIcon?: string
   iconColor?: string
   channelId?: string
+  /** Opt in only for user-requested exact alarms; ordinary notices must not open Settings. */
+  isExactNotification?: boolean
+  isExactMandatory?: boolean
   extra?: Record<string, unknown>
 }
 
@@ -156,6 +159,7 @@ export async function schedule(
       notifications: notifications.map((spec) => ({
         channelId: DEFAULT_CHANNEL_ID,
         ...spec,
+        isExactNotification: spec.isExactNotification ?? false,
       })),
     })
     return {

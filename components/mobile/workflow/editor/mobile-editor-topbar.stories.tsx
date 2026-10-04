@@ -21,7 +21,6 @@ const meta = {
     mode: "read",
     onToggleMode: fn(),
     onOpenCopilot: fn(),
-    onOpenSearch: fn(),
     onOpenWorkbench: fn(),
     orientationLocked: true,
     onToggleOrientationLock: fn(),

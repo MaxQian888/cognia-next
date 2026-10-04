@@ -29,6 +29,7 @@ import {
   type RuntimeTargetScope,
 } from "@/lib/runtime/runtime-target-context"
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 
 export interface EnqueueInput {
   command: MobileOutboundCommand
@@ -192,6 +193,11 @@ export async function enqueueHostStateIntentIfAvailable(
       targetId: local.targetId,
     })
     await db.mobileOutboundQueue.add(row)
+    // A new draft makes the drafts still waiting before it moot (see
+    // `supersededHostStateDraftIds`), so the queue holds one per conversation
+    // instead of one per debounced save while the Host is away.
+    const superseded = supersededHostStateDraftIds([...rows, row])
+    if (superseded.length > 0) await db.mobileOutboundQueue.bulkDelete(superseded)
     return row
   })
 }
@@ -450,18 +456,33 @@ async function negotiatedHostStateScope(): Promise<{
   return { accountId: declared.accountId, targetId: declared.runtimeTargetId }
 }
 
-async function hostStateSubmitNegotiated(): Promise<boolean> {
-  const { getRuntimeSnapshot } = await import("@/lib/runtime/runtime-snapshot-store")
-  const snapshot = getRuntimeSnapshot()
-  if (!snapshot.target) {
-    return (
-      snapshot.host?.compatible === true && snapshot.host.operations.includes("host_state_submit")
-    )
-  }
-  if (snapshot.target.kind !== "companion") return false
+function hostStateSubmitNegotiatedIn(snapshot: RuntimeSnapshot): boolean {
+  if (snapshot.target && snapshot.target.kind !== "companion") return false
   return (
     snapshot.host?.compatible === true && snapshot.host.operations.includes("host_state_submit")
   )
+}
+
+async function hostStateSubmitNegotiated(): Promise<boolean> {
+  const { getRuntimeSnapshot } = await import("@/lib/runtime/runtime-snapshot-store")
+  return hostStateSubmitNegotiatedIn(getRuntimeSnapshot())
+}
+
+/**
+ * True when this device is a paired client whose Host owns the session rows:
+ * there is an active runtime target and the Host negotiated HostState submit.
+ * The same two checks {@link enqueueHostStateIntentIfAvailable} makes before
+ * it routes a session write, without the per-session snapshot check, for a
+ * caller deciding about the device rather than one conversation: a session
+ * policy (auto-archive) the Host runs for its own rows, and the setting that
+ * drives it. Synchronous and pure over `snapshot`, so a React subscriber to
+ * the runtime snapshot and the scheduler get the same answer.
+ */
+export function hostOwnsSessionState(
+  snapshot: RuntimeSnapshot,
+  local: RuntimeTargetScope | null = getActiveRuntimeTargetContext()
+): boolean {
+  return local !== null && hostStateSubmitNegotiatedIn(snapshot)
 }
 
 function requiresHostStateBaseRevision(action: AllowedHostStateIntent): boolean {
@@ -534,11 +555,17 @@ export async function claimNext(
     // needs the in-flight rows, and a `.filter()` over the whole table
     // deserializes every `sent` row still waiting on the 24h vacuum on every
     // poll of a draining queue.
-    const outstanding = await db.mobileOutboundQueue
+    const loaded = await db.mobileOutboundQueue
       .where("status")
       .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
       .filter((row) => row.accountId === scope.accountId && row.targetId === scope.targetId)
       .toArray()
+    // Drafts a later draft of the same conversation made moot never go out.
+    // Done here as well as at enqueue so a backlog queued by a build that did
+    // not collapse them still drains as one draft per conversation.
+    const superseded = new Set(supersededHostStateDraftIds(loaded))
+    if (superseded.size > 0) await db.mobileOutboundQueue.bulkDelete([...superseded])
+    const outstanding = loaded.filter((row) => !superseded.has(row.id))
 
     // Lowest outstanding sequence per channel — the only row of that channel
     // anyone may dispatch right now.
@@ -570,6 +597,115 @@ export async function claimNext(
     const claimed: MobileOutboundJobRow = { ...next, status: "sending", claimedAt: nowMs }
     await db.mobileOutboundQueue.put(claimed)
     return claimed
+  })
+}
+
+/** The single HostState action a queued row carries, or null for any other row. */
+function queuedHostStateAction(row: MobileOutboundJobRow): HostStateAction | null {
+  if (row.protocol !== "host-state") return null
+  const actions = (row.payload as { actions?: unknown }).actions
+  const action = Array.isArray(actions) && actions.length === 1 ? actions[0] : undefined
+  return isHostStateAction(action) ? action : null
+}
+
+/**
+ * Queued `draft.replace` rows that a later draft of the same conversation, from
+ * the same client, has made moot.
+ *
+ * `draft.replace` carries the whole draft, so of two drafts no Host has seen
+ * only the later one says anything. Sending both did harm, not just extra
+ * work: every queued draft is stamped with the channel revision confirmed when
+ * it was typed, so the Host applied the first, moved the revision, and refused
+ * each one after it as a revision conflict. A composer typed into while the
+ * queue was stalled came back as one conflict per debounced save, each one a
+ * row the user had to clear by hand.
+ *
+ * Only `pending` rows that were never offered are candidates. A row a Host may
+ * already hold (`offeredHostGeneration`) still owes its receipt, and a
+ * `sending` row is on the wire.
+ */
+export function supersededHostStateDraftIds(rows: readonly MobileOutboundJobRow[]): string[] {
+  const latest = new Map<string, MobileOutboundJobRow>()
+  const candidates: MobileOutboundJobRow[] = []
+  for (const row of rows) {
+    if (
+      row.status !== "pending" ||
+      row.offeredHostGeneration !== undefined ||
+      !row.channel ||
+      typeof row.clientSeq !== "number" ||
+      queuedHostStateAction(row)?.action.kind !== "draft.replace"
+    ) {
+      continue
+    }
+    candidates.push(row)
+    const key = `${row.channel}\u0000${row.clientId ?? ""}`
+    const current = latest.get(key)
+    if (!current || row.clientSeq > (current.clientSeq as number)) latest.set(key, row)
+  }
+  const keep = new Set([...latest.values()].map((row) => row.id))
+  return candidates.filter((row) => !keep.has(row.id)).map((row) => row.id)
+}
+
+/** What {@link offerHostStateRow} handed back for dispatch. */
+export interface HostStateOffer {
+  /** The row as it must be sent, re-based when that was safe. */
+  row: MobileOutboundJobRow
+  /**
+   * True when no earlier offer of this row is outstanding, so a Host refusing
+   * this one as stale proves it was never applied anywhere.
+   */
+  firstOffer: boolean
+}
+
+/**
+ * Record that a HostState row is about to be handed to the Host, re-basing it
+ * onto the Host's current generation first when that is safe.
+ *
+ * A Host bumps its generation every time it restarts, and refuses an action
+ * stamped with an older one (`stale_host_generation`). A row queued before the
+ * restart therefore could never be delivered: it was refused as soon as it was
+ * finally sent, and a manual retry re-sent the same stale stamp. The Host's
+ * ledger deduplicates per `(hostGeneration, actionId)`, so re-stamping is only
+ * safe for a row no Host has been offered yet: that is the row's own
+ * `offeredHostGeneration`, written here, in the same transaction, before any
+ * byte leaves the device. A row already offered keeps the generation it was
+ * offered under, so a Host that did apply it answers `duplicate` instead of
+ * applying it again.
+ *
+ * Re-based only onto the same Host (`hostId`) and only forward, to the
+ * generation of this client's confirmed mirror of the row's channel — the
+ * stamp the Host itself last published. A different `hostId` is a different
+ * Host, and its refusal stands.
+ *
+ * Returns null when the row is gone (withdrawn, superseded or settled).
+ */
+export async function offerHostStateRow(id: string): Promise<HostStateOffer | null> {
+  const db = getDb()
+  return db.transaction("rw", db.mobileOutboundQueue, db.hostStateChannels, async () => {
+    const row = await db.mobileOutboundQueue.get(id)
+    if (!row) return null
+    const action = queuedHostStateAction(row)
+    if (!action) return { row, firstOffer: false }
+    const firstOffer = row.offeredHostGeneration === undefined
+    let offered = action
+    if (firstOffer) {
+      const confirmed = await db.hostStateChannels.get(action.channel)
+      if (
+        confirmed &&
+        confirmed.hostId === action.hostId &&
+        confirmed.hostGeneration > action.hostGeneration
+      ) {
+        offered = { ...action, hostGeneration: confirmed.hostGeneration }
+      }
+    }
+    const next: MobileOutboundJobRow = {
+      ...row,
+      payload: offered === action ? row.payload : { ...row.payload, actions: [offered] },
+      hostGeneration: offered.hostGeneration,
+      offeredHostGeneration: offered.hostGeneration,
+    }
+    await db.mobileOutboundQueue.put(next)
+    return { row: next, firstOffer }
   })
 }
 
@@ -810,6 +946,12 @@ export async function recordFailure(opts: {
   error: unknown
   nowMs?: number
   random?: () => number
+  /**
+   * The Host proved this offer was never applied (it refused it before its
+   * ledger), and no earlier offer is outstanding: forget the offer so the next
+   * one may be re-based (see `offerHostStateRow`).
+   */
+  forgetOffer?: boolean
 }): Promise<MobileOutboundStatus> {
   const db = getDb()
   return db.transaction("rw", db.mobileOutboundQueue, async () => {
@@ -821,13 +963,15 @@ export async function recordFailure(opts: {
       nowMs: opts.nowMs,
       random: opts.random,
     })
-    await db.mobileOutboundQueue.put({
+    const next: MobileOutboundJobRow = {
       ...row,
       status: decision.status,
       attempts: decision.attempts,
       nextAttemptAt: decision.nextAttemptAt,
       lastError: decision.lastError,
-    })
+    }
+    if (opts.forgetOffer) delete next.offeredHostGeneration
+    await db.mobileOutboundQueue.put(next)
     return decision.status
   })
 }
@@ -951,7 +1095,7 @@ export async function retryDeadletter(id: string, nowMs: number = Date.now()): P
       )
     }
     const clientSeq = row.channel ? await nextClientSeqForChannel(row) : row.clientSeq
-    await db.mobileOutboundQueue.put({
+    const next: MobileOutboundJobRow = {
       ...row,
       status: "pending",
       attempts: 0,
@@ -960,7 +1104,13 @@ export async function retryDeadletter(id: string, nowMs: number = Date.now()): P
       rejectionCode: undefined,
       currentRevision: undefined,
       ...(clientSeq === undefined ? {} : { clientSeq }),
-    })
+    }
+    // A retry is the user re-sending on purpose. Forgetting the earlier offer
+    // lets it be re-based onto the Host's current generation; without that a
+    // row refused as `stale_host_generation` was re-sent with the same stale
+    // stamp and refused again, forever.
+    delete next.offeredHostGeneration
+    await db.mobileOutboundQueue.put(next)
   })
 }
 

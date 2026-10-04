@@ -20,6 +20,36 @@ function makeGeo(overrides: Record<string, unknown> = {}) {
 }
 
 describe("getCurrentPosition", () => {
+  it.each([false, true])(
+    "accepts approximate-only permission (high accuracy preference %s)",
+    async (enableHighAccuracy) => {
+      const geo = makeGeo({
+        checkPermissions: jest
+          .fn()
+          .mockResolvedValue({ location: "denied", coarseLocation: "granted" }),
+      })
+      expect((await getCurrentPosition({ enableHighAccuracy, loader: async () => geo })).kind).toBe(
+        "ok"
+      )
+      expect(geo.requestPermissions).not.toHaveBeenCalled()
+      expect(geo.getCurrentPosition).toHaveBeenCalledWith(
+        expect.objectContaining({ enableHighAccuracy: false, enableLocationFallback: true })
+      )
+    }
+  )
+
+  it("accepts approximate permission granted by the prompt", async () => {
+    const geo = makeGeo({
+      checkPermissions: jest
+        .fn()
+        .mockResolvedValue({ location: "prompt", coarseLocation: "prompt" }),
+      requestPermissions: jest
+        .fn()
+        .mockResolvedValue({ location: "denied", coarseLocation: "granted" }),
+    })
+    expect((await getCurrentPosition({ loader: async () => geo })).kind).toBe("ok")
+  })
+
   it("returns coords + timestamp on success", async () => {
     const geo = makeGeo()
     const out = await getCurrentPosition({ loader: async () => geo })

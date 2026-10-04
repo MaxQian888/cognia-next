@@ -2,6 +2,7 @@ import test from "node:test"
 import { strict as assert } from "node:assert"
 import { dirname, isAbsolute, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { readFileSync } from "node:fs"
 
 import {
   patchPlist,
@@ -44,6 +45,29 @@ test("is idempotent — patching a patched plist changes nothing", () => {
   const second = patchPlist(first.out)
   assert.equal(second.changed, false)
   assert.equal(second.out, first.out)
+})
+
+test("exposes Documents exports in Files and declares the linked location API", () => {
+  const { out } = patchPlist(EMPTY_PLIST)
+  assert.match(out, /<key>UIFileSharingEnabled<\/key>\s*<true\/>/)
+  assert.match(out, /<key>LSSupportsOpeningDocumentsInPlace<\/key>\s*<true\/>/)
+  assert.match(out, /<key>NSLocationAlwaysAndWhenInUseUsageDescription<\/key>/)
+  assert.doesNotMatch(out, /<string>location<\/string>/)
+})
+
+test("the shipped target bundles its filesystem privacy reasons and localized usage descriptions", () => {
+  const project = readFileSync(new URL("../ios/App/App.xcodeproj/project.pbxproj", import.meta.url), "utf8")
+  const privacy = readFileSync(new URL("../ios/App/App/PrivacyInfo.xcprivacy", import.meta.url), "utf8")
+  assert.match(privacy, /NSPrivacyAccessedAPICategoryFileTimestamp/)
+  assert.match(privacy, /C617\.1/)
+  const resources = project.slice(project.indexOf("/* Begin PBXResourcesBuildPhase"), project.indexOf("/* End PBXResourcesBuildPhase"))
+  assert.match(resources, /PrivacyInfo\.xcprivacy in Resources/)
+  assert.match(resources, /InfoPlist\.strings in Resources/)
+  for (const language of ["en", "zh-Hans"]) {
+    assert.ok(project.includes(`${language}.lproj/InfoPlist.strings`))
+    const strings = readFileSync(new URL(`../ios/App/App/${language}.lproj/InfoPlist.strings`, import.meta.url), "utf8")
+    assert.match(strings, /"NSLocationAlwaysAndWhenInUseUsageDescription" = ".+";/)
+  }
 })
 
 test("injects the service into an existing NSBonjourServices array", () => {

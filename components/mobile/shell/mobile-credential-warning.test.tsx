@@ -38,6 +38,22 @@ describe("<MobileCredentialWarning />", () => {
     expect(button).not.toHaveAttribute("data-compact")
   })
 
+  it("is tonal, not a filled red pill — the loudest thing on the bar was the warning", () => {
+    const { unmount } = render(<MobileCredentialWarning showLabel onResolve={jest.fn()} />, {
+      wrapper,
+    })
+    const chip = screen.getByTestId("mobile-no-api-key")
+    expect(chip).toHaveAttribute("data-variant", "ghost")
+    expect(chip).toHaveClass("bg-destructive/10", "text-destructive", "h-8", "touch-hit")
+    unmount()
+    render(<MobileCredentialWarning showLabel={false} onResolve={jest.fn()} />, { wrapper })
+    const icon = screen.getByTestId("mobile-no-api-key")
+    // Painted like its neighbours in the action cluster — only the colour differs.
+    expect(icon).toHaveAttribute("data-variant", "ghost")
+    expect(icon).toHaveClass("text-destructive")
+    expect(icon).not.toHaveClass("bg-destructive/10")
+  })
+
   it("opens the fix on tap", async () => {
     const user = userEvent.setup()
     const onResolve = jest.fn()

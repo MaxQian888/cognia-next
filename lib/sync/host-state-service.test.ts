@@ -58,9 +58,11 @@ jest.mock("@/lib/work-submission/lease-heartbeat", () => ({
     startLeaseHeartbeatMock(submissionId, leaseOwner),
 }))
 
+const prepareTranscriptRuntimeSendMock = jest.fn(async (...args: unknown[]) => args[1])
 const buildSendOptionsMock = jest.fn().mockResolvedValue({ model: "sonnet" })
 jest.mock("@/hooks/chat/claude-chat-send-options", () => ({
   buildSendOptions: (...args: unknown[]) => buildSendOptionsMock(...args),
+  prepareTranscriptRuntimeSend: (...args: unknown[]) => prepareTranscriptRuntimeSendMock(...args),
 }))
 
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
@@ -1522,6 +1524,42 @@ describe("HostStateService", () => {
     sync.stop()
   })
 
+  it("restores a running Host turn with the Host's start time, not the snapshot's", async () => {
+    useChatStore.getState().setSessionStatus("session-1", "idle")
+    const startedAt = Date.now() - 90_000
+    const running = {
+      ...createEmptyHostStateSession(channel, "session-1"),
+      turn: "running" as const,
+      activeTurn: { turnId: "turn-1", startedAt },
+    }
+    const snapshot: HostStateSnapshot = {
+      channel,
+      hostId,
+      hostGeneration: 4,
+      cutHostSeq: 8,
+      revision: 0,
+      digest: hostStateDigest(running),
+      state: running,
+    }
+    const transport: Transport = {
+      subscribe: () => () => undefined,
+      call: async (command) =>
+        (command === "host_state_status" ? writableStatus : snapshot) as never,
+    }
+
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [channel],
+    })
+
+    const slice = useChatStore.getState().sessions["session-1"]
+    expect(slice?.status).toBe("streaming")
+    expect(slice?.runTiming.startedAt).toBe(startedAt)
+    sync.stop()
+    useChatStore.getState().setSessionStatus("session-1", "idle")
+  })
+
   it("drops a conversation the Host tombstoned instead of re-creating its draft", async () => {
     await getDb().messages.put({
       id: "m-1",
@@ -2015,6 +2053,11 @@ describe("HostState Agent RPC dispatcher", () => {
     acceptHostStateChatTurnMock.mockResolvedValueOnce({ submissionId: "work:action-1" })
     claimHostStateChatTurnForDispatchMock.mockResolvedValueOnce("claimed")
     bindHostStateChatTurnContextMock.mockResolvedValueOnce(true)
+    prepareTranscriptRuntimeSendMock.mockResolvedValueOnce({
+      model: "sonnet",
+      transcriptInvalidationId: "current-generation",
+      initialConversation: [],
+    })
     const queued = action({
       kind: "message.enqueue",
       messageId: "m-1",
@@ -2024,13 +2067,23 @@ describe("HostState Agent RPC dispatcher", () => {
 
     await createAgentRpcHostStateDispatcher()(queued)
 
-    expect(bindHostStateChatTurnContextMock).toHaveBeenCalledWith(queued, { model: "sonnet" })
+    expect(prepareTranscriptRuntimeSendMock).toHaveBeenCalledWith(
+      "session-1",
+      { model: "sonnet" },
+      { currentMessageId: "m-1" }
+    )
+    expect(bindHostStateChatTurnContextMock).toHaveBeenCalledWith(queued, {
+      model: "sonnet",
+      transcriptInvalidationId: "current-generation",
+      initialConversation: [],
+    })
     expect(sendPromptMock).toHaveBeenCalledWith(
       "session-1",
       "hello",
-      { model: "sonnet" },
+      { model: "sonnet", transcriptInvalidationId: "current-generation", initialConversation: [] },
       {
         commandId: "action-1",
+        transcriptRuntime: "prepared",
       }
     )
     expect(markHostStateChatTurnStartedMock).toHaveBeenCalledWith("action-1")

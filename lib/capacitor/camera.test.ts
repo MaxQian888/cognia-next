@@ -3,6 +3,52 @@
  */
 import { pickMultiplePhotos, pickPhoto } from "./camera"
 
+jest.mock("./app", () => ({ subscribeRestoredResult: jest.fn(async () => () => {}) }))
+jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ name: "camera-test-account" }) }))
+
+describe("recoverable native capture", () => {
+  it("persists destination before native launch and converts URI to requested base64", async () => {
+    const originalFetch = global.fetch
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob(["image"], { type: "image/jpeg" }),
+    })) as unknown as typeof fetch
+    const cam = makeCam({
+      getPhoto: jest.fn(async () => {
+        expect(localStorage.getItem("cognia.camera-recovery.v1")).toContain("origin-chat")
+        return { webPath: "https://localhost/photo.jpg", format: "jpeg" }
+      }),
+    })
+    try {
+      const result = await pickPhoto({
+        source: "camera",
+        resultType: "base64",
+        recoveryTarget: { kind: "chat", id: "origin-chat" },
+        loader: async () => cam,
+      })
+      expect(cam.getPhoto).toHaveBeenCalledWith(expect.objectContaining({ resultType: "uri" }))
+      expect(result).toMatchObject({
+        kind: "captured",
+        base64: btoa("image"),
+        uri: "https://localhost/photo.jpg",
+      })
+      expect(localStorage.getItem("cognia.camera-recovery.v1")).toBeNull()
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it("clears the pending destination after native cancellation", async () => {
+    const result = await pickPhoto({
+      recoveryTarget: { kind: "chat", id: "origin-chat" },
+      loader: async () =>
+        makeCam({ getPhoto: jest.fn().mockRejectedValue(new Error("User cancelled")) }),
+    })
+    expect(result).toEqual({ kind: "cancelled" })
+    expect(localStorage.getItem("cognia.camera-recovery.v1")).toBeNull()
+  })
+})
+
 function makeCam(overrides: Record<string, unknown> = {}) {
   return {
     getPhoto: jest.fn().mockResolvedValue({
@@ -143,6 +189,22 @@ describe("pickPhoto", () => {
     expect(out).toEqual({ kind: "error", message: "picker boom" })
   })
 
+  it("web fallback returns an error outcome when the selected file cannot be read", async () => {
+    const readSpy = jest.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (
+      this: FileReader
+    ) {
+      Object.defineProperty(this, "error", { value: new DOMException("file is unreadable") })
+      queueMicrotask(() => this.dispatchEvent(new ProgressEvent("error")))
+    })
+    try {
+      await expect(
+        pickPhoto({ picker: async () => [new File(["photo"], "photo.png")] })
+      ).resolves.toEqual({ kind: "error", message: "file is unreadable" })
+    } finally {
+      readSpy.mockRestore()
+    }
+  })
+
   it("default DOM picker resolves the chosen file on the change event", async () => {
     const file = new File(["zz"], "c.png", { type: "image/png" })
     const clickSpy = jest.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (
@@ -262,6 +324,65 @@ describe("pickPhoto", () => {
 })
 
 describe("pickMultiplePhotos", () => {
+  it.each([
+    [undefined, 9],
+    [2, 2],
+    [0, 12],
+    [-1, 12],
+  ])(
+    "enforces native selection limit %s even when the system picker ignores it",
+    async (limit, count) => {
+      const photos = Array.from({ length: 12 }, (_, index) => ({
+        webPath: `native:${index}`,
+        format: "jpeg",
+      }))
+      const cam = makeCam({ pickImages: jest.fn().mockResolvedValue({ photos }) })
+      const out = await pickMultiplePhotos({ limit, loader: async () => cam })
+      expect(out).toEqual({
+        kind: "picked",
+        photos: photos
+          .slice(0, count)
+          .map((photo) => ({ uri: photo.webPath, format: photo.format })),
+      })
+    }
+  )
+
+  it.each([
+    [undefined, 9],
+    [2, 2],
+    [0, 12],
+    [-1, 12],
+  ])("enforces web selection limit %s before allocating photo URLs", async (limit, count) => {
+    const original = URL.createObjectURL
+    URL.createObjectURL = jest.fn((file: Blob) => `blob:${(file as File).name}`)
+    const files = Array.from(
+      { length: 12 },
+      (_, index) => new File([String(index)], `${index}.png`, { type: "image/png" })
+    )
+    try {
+      const out = await pickMultiplePhotos({ limit, picker: async () => files })
+      expect(out).toEqual({
+        kind: "picked",
+        photos: files.slice(0, count).map((file) => ({ uri: `blob:${file.name}`, format: "png" })),
+      })
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(count)
+    } finally {
+      URL.createObjectURL = original
+    }
+  })
+
+  it("enforces the web limit after native loading fails", async () => {
+    const out = await pickMultiplePhotos({
+      limit: 1,
+      loader: async () => {
+        throw new Error("missing plugin")
+      },
+      picker: async () => [new File(["a"], "a.png"), new File(["b"], "b.png")],
+    })
+    expect(out.kind).toBe("picked")
+    if (out.kind === "picked") expect(out.photos).toHaveLength(1)
+  })
+
   it("returns picked photos with uri + format", async () => {
     const cam = makeCam()
     const out = await pickMultiplePhotos({ loader: async () => cam })

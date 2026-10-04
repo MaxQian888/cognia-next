@@ -1,4 +1,4 @@
-import type { StoredMessage } from "@cognia/agent-config-types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { collectUnreferencedMessageMedia, messageMediaRefRows } from "@/lib/db/message-media-refs"
@@ -6,6 +6,7 @@ import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { getDb } from "@/lib/db/schema"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import type { Transport } from "@/lib/tauri/transport-types"
+import { collectPages, isPage } from "@/lib/tauri/companion-paging"
 
 const DEFAULT_PAGE_SIZE = 200
 const MAX_PAGE_SIZE = 500
@@ -293,6 +294,92 @@ async function negotiateTimelineOwnership(
     return { applied: 0, total: 0, mode: "local" }
   }
   return { applied: 0, total: 0, mode: "timeline" }
+}
+
+/** An explicit export: complete host rows, without mutating the local timeline mirror. */
+export interface CompleteSessionHistory {
+  session: ChatSession
+  messages: StoredMessage[]
+  /** Recheck before publishing a child into the currently active database. */
+  assertCurrent: () => void
+}
+
+export async function readCompleteSessionHistory(
+  transport: Transport,
+  sessionId: string,
+  options: { maxPages?: number } = {}
+): Promise<CompleteSessionHistory | null> {
+  const scope = currentScope()
+  const assertCurrent = () => {
+    if (scope !== currentScope()) throw supersededError()
+  }
+  const limits = { maxPages: options.maxPages ?? MAX_PAGES, requireComplete: true }
+  const readSession = async () => {
+    const sessions = await collectPages<ChatSession>(async (pageToken) => {
+      const page = await transport.call("session_list", { pageSize: MAX_PAGE_SIZE, pageToken })
+      assertCurrent()
+      if (!isPage(page)) throw new Error("invalid session history metadata page")
+      if (
+        page.items.some(
+          (row) => !row || typeof row !== "object" || typeof (row as ChatSession).id !== "string"
+        )
+      ) {
+        throw new Error("invalid session history metadata row")
+      }
+      const matches = (page.items as ChatSession[]).filter((row) => row.id === sessionId)
+      // This is a keyed lookup, so later session pages cannot add history for
+      // an already located source. The absent case still drains to completion.
+      return {
+        items: matches,
+        ...(matches.length === 0 && page.nextPageToken !== undefined
+          ? { nextPageToken: page.nextPageToken }
+          : {}),
+      }
+    }, limits)
+    return sessions.find((session) => session.id === sessionId)
+  }
+  const session = await readSession()
+  if (!session) return null
+  const ids = new Set<string>()
+  let expectedTotal: number | undefined
+  const messages = await collectPages<StoredMessage>(async (pageToken) => {
+    const page = await transport.call("message_get_by_session", {
+      session_id: sessionId,
+      pageSize: MAX_PAGE_SIZE,
+      pageToken,
+    })
+    assertCurrent()
+    if (!isPage(page)) throw new Error("invalid session history page")
+    const total = (page as { total?: number }).total
+    assertPage({ rows: page.items as StoredMessage[], total }, sessionId, 0)
+    if (total !== undefined) {
+      if (expectedTotal !== undefined && total !== expectedTotal)
+        throw new Error("session history changed during export")
+      expectedTotal = total
+    }
+    for (const row of page.items as StoredMessage[]) {
+      if (typeof row.id !== "string" || ids.has(row.id))
+        throw new Error("invalid or repeated session history message")
+      ids.add(row.id)
+    }
+    return page as { items: StoredMessage[]; nextPageToken?: string }
+  }, limits)
+  if (expectedTotal !== undefined && messages.length !== expectedTotal) {
+    throw new Error("incomplete session history export")
+  }
+  const after = await readSession()
+  // The protocol does not offer an atomic export. Revision-bearing hosts let
+  // us reject concurrent transcript changes; updatedAt also covers domain state.
+  if (
+    !after ||
+    after.transcriptRevision !== session.transcriptRevision ||
+    after.updatedAt !== session.updatedAt ||
+    after.workingSet?.revision !== session.workingSet?.revision
+  ) {
+    throw new Error("session history changed during export")
+  }
+  assertCurrent()
+  return { session, messages, assertCurrent }
 }
 
 async function drainSessionHistory(

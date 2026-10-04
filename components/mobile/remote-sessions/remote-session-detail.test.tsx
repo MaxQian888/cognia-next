@@ -86,9 +86,11 @@ jest.mock("@/lib/router-fusion/api/companion-run-client", () => ({
   companionRunAnswerOf: jest.fn(() => null),
 }))
 
-// OfflineBanner pulls usePlatform + network live queries — out of scope here.
+// The shell's OfflineBanner is the one connection report; the detail view no
+// longer mounts a second copy of it under its own header. Mocked so a
+// regression that re-adds it is caught below.
 jest.mock("@/components/mobile/offline-banner", () => ({
-  OfflineBanner: () => null,
+  OfflineBanner: () => <div data-testid="offline-banner-stub" />,
 }))
 
 const connectionMock = useConnectionState as jest.MockedFunction<typeof useConnectionState>
@@ -169,6 +171,12 @@ describe("<RemoteSessionDetail />", () => {
     const props = timelineSurfaceMock.mock.calls.at(-1)?.[0] as { onPageTurn: (key: string, direction: string) => void }
     props.onPageTurn("turn:u1", "previous")
     expect(transcriptControllerMock().pageTurn).toHaveBeenCalledWith("turn:u1", "previous")
+  })
+
+  it("leaves the connection banner to the shell instead of mounting a second one", () => {
+    streamMock.mockReturnValue(baseStream())
+    render(<RemoteSessionDetail sessionId="s1" />)
+    expect(screen.queryByTestId("offline-banner-stub")).not.toBeInTheDocument()
   })
 
   it("resolves a synced host session override when the remote session row is available", () => {

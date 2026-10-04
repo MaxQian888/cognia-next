@@ -49,6 +49,18 @@ describe("lib/capacitor/clipboard", () => {
   })
 
   describe("readText", () => {
+    it.each(["image/png", "application/octet-stream", "text/html"])(
+      "does not expose %s as plain clipboard text",
+      async (type) => {
+        await expect(
+          readText(
+            makeLoader({
+              read: async () => ({ value: "data:image/png;base64,cGljdHVyZQ==", type }),
+            })
+          )
+        ).resolves.toEqual({ kind: "ok", value: "" })
+      }
+    )
     it("reads the clipboard value", async () => {
       const out = await readText(makeLoader())
       expect(out.kind).toBe("ok")
@@ -119,6 +131,19 @@ describe("installNativeClipboardBridge", () => {
       }),
     })
     await expect(empty.clipboard.readText()).resolves.toBe("")
+  })
+
+  it("returns empty text for native images without falling back to the WebView", async () => {
+    const webRead = jest.fn(async () => "wrong fallback")
+    const nav = fakeNavigator({ readText: webRead })
+    installNativeClipboardBridge({
+      nav,
+      loader: makeLoader({
+        read: async () => ({ type: "image/png", value: "data:image/png;base64,cGljdHVyZQ==" }),
+      }),
+    })
+    await expect(nav.clipboard.readText()).resolves.toBe("")
+    expect(webRead).not.toHaveBeenCalled()
   })
 
   it("bridges the text/plain representation of write(items)", async () => {

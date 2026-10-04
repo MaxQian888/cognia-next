@@ -3,6 +3,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
+import { claimConnectionNotice, claimQueueNotice } from "@/lib/runtime/connection-notice-claim"
 import { OfflineBanner } from "./offline-banner"
 
 const compactMock = jest.fn(() => true)
@@ -93,10 +94,25 @@ jest.mock("@/hooks/data", () => {
   }
 })
 
+let pathname: string | null = "/me"
+jest.mock("next/navigation", () => ({
+  usePathname: () => pathname,
+}))
+
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => "mobile",
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
-      bannerOffline: "Offline mode",
+      stateNetworkOffline: "Offline mode",
+      stateHostOffline: "Host offline",
+      stateReconnecting: "Reconnecting",
+      detailCacheOnly: "cached only",
+      detailHostOffline: "sends wait",
+      detailNetworkOffline: "browse on",
+      connectionSettings: "Connection",
       queuePending: `${(vars?.count as number) ?? 0} queued`,
       queuePendingWithSending: `${(vars?.count as number) ?? 0} queued · ${(vars?.sending as number) ?? 0} sending`,
       queueNeedsAttention: `${(vars?.count as number) ?? 0} need attention`,
@@ -114,6 +130,7 @@ beforeEach(() => {
     .mockReturnValue({ loading: false, status: { connected: true, connectionType: "wifi" } })
   getQueueSummaryMock.mockReset().mockResolvedValue(EMPTY_SUMMARY)
   consentCode = null
+  pathname = "/me"
   useRuntimeSnapshotMock
     .mockReset()
     .mockReturnValue({ target: { kind: "companion" }, connectionState: "online" })
@@ -134,6 +151,7 @@ describe("<OfflineBanner /> queue review", () => {
   })
 
   it("offers nothing to review when only the network is down", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({ target: { kind: "standalone" }, connectionState: "offline" })
     useNetworkStatusMock.mockReturnValue({
       loading: false,
       status: { connected: false, connectionType: "none" },
@@ -158,6 +176,7 @@ describe("<OfflineBanner />", () => {
   })
 
   it("renders in a narrow browser, not only in a native shell", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({ target: { kind: "standalone" }, connectionState: "offline" })
     compactMock.mockReturnValue(true)
     useNetworkStatusMock.mockReturnValue({
       loading: false,
@@ -177,6 +196,7 @@ describe("<OfflineBanner />", () => {
   })
 
   it("shows the offline copy when disconnected", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({ target: { kind: "standalone" }, connectionState: "offline" })
     useNetworkStatusMock.mockReturnValue({
       loading: false,
       status: { connected: false, connectionType: "none" },
@@ -245,6 +265,13 @@ describe("<OfflineBanner />", () => {
     expect(banner).toHaveAttribute("data-host-offline", "true")
   })
 
+  it("does not label an online LAN Host offline when Android has no validated Internet", async () => {
+    useNetworkStatusMock.mockReturnValue({ loading: false, status: { connected: false, connectionType: "wifi" } })
+    useRuntimeSnapshotMock.mockReturnValue({ target: { kind: "companion" }, connectionState: "online" })
+    render(<OfflineBanner />)
+    await waitFor(() => expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument())
+  })
+
   it("shows the reconnecting copy while the transport is re-dialling the Host", async () => {
     useRuntimeSnapshotMock.mockReturnValue({
       target: { kind: "companion" },
@@ -255,6 +282,61 @@ describe("<OfflineBanner />", () => {
     expect(banner).toHaveAttribute("data-offline", "false")
     expect(banner).toHaveAttribute("data-reconnecting", "true")
     expect(banner).toHaveTextContent("Reconnecting")
+  })
+
+  // The chat's runtime strip reports the Host itself while mounted; this
+  // banner must not stack a second "Reconnecting" over it, but the queue is not
+  // a connection report and still shows.
+  it("drops the Host connection line while the chat notice claims it", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "connecting",
+    })
+    const release = claimConnectionNotice()
+    try {
+      render(<OfflineBanner />)
+      await waitFor(() => expect(getQueueSummaryMock).toHaveBeenCalled())
+      expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument()
+    } finally {
+      release()
+    }
+  })
+
+  // The composer strip carries the queue on its own line; the banner must not
+  // repeat it at the top of the screen.
+  it("drops the queue line too while the composer strip claims the queue", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "offline",
+    })
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 2 })
+    const releaseConnection = claimConnectionNotice()
+    const releaseQueue = claimQueueNotice()
+    try {
+      render(<OfflineBanner />)
+      await waitFor(() => expect(getQueueSummaryMock).toHaveBeenCalled())
+      expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument()
+    } finally {
+      releaseQueue()
+      releaseConnection()
+    }
+  })
+
+  it("keeps the queue line while the chat notice claims the connection", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "offline",
+    })
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 2 })
+    const release = claimConnectionNotice()
+    try {
+      render(<OfflineBanner />)
+      const banner = await screen.findByTestId("offline-banner")
+      expect(banner).toHaveAttribute("data-offline", "false")
+      expect(banner).toHaveAttribute("data-reconnecting", "false")
+    } finally {
+      release()
+    }
   })
 
   /**
@@ -314,5 +396,67 @@ describe("<OfflineBanner />", () => {
       await Promise.resolve()
     })
     expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The route boundary used to stack its own "Read-only mode: …" band right
+   * under this one. On the compact shell the banner now says what the state
+   * means for the screen, on the same line.
+   */
+  it("says a read-only route shows cached data, on the same line as the state", async () => {
+    pathname = "/workflows"
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "connecting",
+    })
+    render(<OfflineBanner />)
+    const banner = await screen.findByTestId("offline-banner")
+    expect(banner).toHaveTextContent("Reconnecting · cached only")
+  })
+
+  it("says nothing about a cache on a route that runs locally", async () => {
+    pathname = "/me"
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "connecting",
+    })
+    render(<OfflineBanner />)
+    const banner = await screen.findByTestId("offline-banner")
+    expect(banner).toHaveTextContent(/^Reconnecting/)
+    expect(banner).not.toHaveTextContent("cached only")
+  })
+
+  it("lets the queue outrank the cache note: it says more about what is waiting", async () => {
+    pathname = "/workflows"
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "offline",
+    })
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 2 })
+    render(<OfflineBanner />)
+    expect(await screen.findByText(/2 queued/)).toBeInTheDocument()
+    expect(screen.getByTestId("offline-banner")).toHaveTextContent("Host offline · 2 queued")
+  })
+
+  it("offers the connection settings while the Host is away", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "offline",
+    })
+    render(<OfflineBanner />)
+    const link = await screen.findByTestId("offline-banner-recovery")
+    expect(link).toHaveTextContent("Connection")
+    expect(link).toHaveAttribute("href", "/pair?mode=recover&state=offline")
+  })
+
+  it("offers no connection settings when only the device network is down", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({ target: { kind: "standalone" }, connectionState: "offline" })
+    useNetworkStatusMock.mockReturnValue({
+      loading: false,
+      status: { connected: false, connectionType: "none" },
+    })
+    render(<OfflineBanner />)
+    await screen.findByTestId("offline-banner")
+    expect(screen.queryByTestId("offline-banner-recovery")).not.toBeInTheDocument()
   })
 })

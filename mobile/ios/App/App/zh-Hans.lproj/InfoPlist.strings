@@ -11,3 +11,5 @@
 "NSLocationWhenInUseUsageDescription" = "Cognia 在工作流的位置触发器里需要当前位置（仅在前台使用）";
 
 "NSLocalNetworkUsageDescription" = "Cognia 需要在本地网络中查找已配对的桌面端。";
+
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Cognia 在工作流的位置触发器里需要当前位置（仅在前台使用）。";

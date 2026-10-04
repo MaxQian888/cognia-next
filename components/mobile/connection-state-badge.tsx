@@ -26,6 +26,7 @@ import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import { isMobile } from "@/lib/capacitor/_shared"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
+import { onTransportChange } from "@/lib/tauri/transport-instance"
 import { transportTierTone } from "@/lib/companion/transport-tier-visuals"
 import type { ConnectionState, TransportTier } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
@@ -102,13 +103,25 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
 
   useEffect(() => {
     if (!mobile) return
-    const tx = transport as unknown as {
-      getActiveTier?: () => TransportTier
-      onTierChange?: (h: (t: TransportTier) => void) => () => void
+    let detach: (() => void) | undefined
+    // Re-bind when the singleton is replaced (pairing swaps one in), or the
+    // tier stays pinned to the instance that was live at mount.
+    const bind = () => {
+      detach?.()
+      const tx = transport as unknown as {
+        onTierChange?: (h: (t: TransportTier) => void) => () => void
+      }
+      // CompanionTransport.onTierChange seeds the listener with the current
+      // value on subscribe — no separate getActiveTier call needed here.
+      detach = tx.onTierChange?.((next) => setTier(next))
+      if (!detach) setTier("offline")
     }
-    // CompanionTransport.onTierChange seeds the listener with the current
-    // value on subscribe — no separate getActiveTier call needed here.
-    return tx.onTierChange?.((next) => setTier(next))
+    bind()
+    const unwatch = onTransportChange(bind)
+    return () => {
+      unwatch()
+      detach?.()
+    }
   }, [mobile])
 
   if (!state) return null

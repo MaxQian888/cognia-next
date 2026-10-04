@@ -322,6 +322,72 @@ describe("<MobileChannelRow />", () => {
       expect(props.onCancelRename).toHaveBeenCalledWith("s1")
     })
   })
+
+  describe("archive mark", () => {
+    const archivedSession: ChatSession = { ...baseSession, archivedAt: 5 }
+
+    it("marks an archived row when the list mixes both kinds, named for a screen reader", () => {
+      renderRow({ session: archivedSession, markArchived: true })
+      const mark = screen.getByTestId("mobile-channel-archived-s1")
+      expect(mark).toHaveTextContent("archived")
+      expect(within(mark).getByText("archived")).toHaveClass("sr-only")
+    })
+
+    it("draws no mark when every row is the same kind", () => {
+      renderRow({ session: archivedSession })
+      expect(screen.queryByTestId("mobile-channel-archived-s1")).toBeNull()
+    })
+
+    it("never marks an active row, even in a mixed list", () => {
+      renderRow({ markArchived: true })
+      expect(screen.queryByTestId("mobile-channel-archived-s1")).toBeNull()
+    })
+  })
+
+  describe("selection mode", () => {
+    it("leads with an unchecked affordance and reports the pressed state", () => {
+      renderRow({ selecting: true })
+      const row = screen.getByTestId("mobile-channel-row-s1")
+      expect(row).toHaveAttribute("aria-pressed", "false")
+      expect(row).toHaveAttribute("data-selected", "false")
+      expect(screen.getByTestId("mobile-channel-check-s1")).toHaveAttribute("aria-hidden", "true")
+    })
+
+    it("shows a checked row as pressed", () => {
+      renderRow({ selecting: true, selected: true })
+      const row = screen.getByTestId("mobile-channel-row-s1")
+      expect(row).toHaveAttribute("aria-pressed", "true")
+      expect(row).toHaveClass("bg-primary/10")
+    })
+
+    it("hands a tap to the list, which decides it toggles the check", async () => {
+      const user = userEvent.setup()
+      const { props } = renderRow({ selecting: true })
+      await user.click(screen.getByTestId("mobile-channel-row-s1"))
+      expect(props.onSelect).toHaveBeenCalledWith("s1")
+    })
+
+    it("turns the swipe strips off while selecting", () => {
+      renderRow({ selecting: true })
+      expect(screen.queryByTestId("swipe-action-pin")).toBeNull()
+      expect(screen.queryByTestId("swipe-action-more")).toBeNull()
+      expect(screen.queryByTestId("swipe-action-archive")).toBeNull()
+      expect(screen.queryByTestId("swipe-action-delete")).toBeNull()
+    })
+
+    it("still opens the action sheet on a right-click", () => {
+      const { props } = renderRow({ selecting: true })
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s1"))
+      expect(props.onOpenActions).toHaveBeenCalledWith("s1")
+    })
+
+    it("draws no affordance and no pressed state outside selection mode", () => {
+      renderRow()
+      const row = screen.getByTestId("mobile-channel-row-s1")
+      expect(row).not.toHaveAttribute("aria-pressed")
+      expect(screen.queryByTestId("mobile-channel-check-s1")).toBeNull()
+    })
+  })
 })
 
 describe("resolveMobileRowMetadata", () => {
@@ -364,6 +430,35 @@ describe("resolveMobileRowMetadata", () => {
     expect(item?.kind).toBe("model")
     expect(item?.value).not.toBe("claude-haiku-4-5-20251001")
     expect(item?.value).toMatch(/Haiku 4\.5/)
+  })
+
+  /**
+   * Every agent conversation in the drawer read "Claude Sonnet 5": the row
+   * resolved only the built-in lane and fell through to its default.
+   */
+  it("names the agent a conversation runs on, not the built-in default", () => {
+    const [item] = resolveMobileRowMetadata({
+      session: { ...baseSession, externalAgentSession: { agentId: "kimi", sessionId: "n1" } },
+      fields: ["model"],
+      defaultModel: "claude-sonnet-5",
+      agentNameOf: (id) => (id === "kimi" ? "Kimi Code" : undefined),
+      groupAxis: null,
+    })
+    expect(item).toEqual({ kind: "model", value: "Kimi Code" })
+  })
+
+  it("follows the lane this device recorded for the conversation", () => {
+    const [item] = resolveMobileRowMetadata({
+      session: {
+        ...baseSession,
+        externalAgentModels: { codex: { kind: "native", modelId: "gpt-5.6" } },
+      },
+      fields: ["model"],
+      runtimeRef: { kind: "external", agentId: "codex" },
+      defaultModel: "claude-sonnet-5",
+      groupAxis: null,
+    })
+    expect(item?.value).not.toMatch(/Sonnet/)
   })
 
   it("skips a field with nothing to say", () => {

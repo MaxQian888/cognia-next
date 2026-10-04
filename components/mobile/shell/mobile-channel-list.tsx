@@ -7,12 +7,15 @@
  * Layout (a ~262px column at 375px, ~308px at 430px):
  *
  *   ┌───────────────────────────────┐
- *   │ [🔍 Search chats…      ] [ + ] │  search owns the row; New chat beside it
- *   │ [ Chats | Archived ] [🔭] [⚲] │  view, search reach, filter & sort
+ *   │ [🔍 Search chats… ] [ + ] [⋯] │  search owns the row; New chat and the
+ *   │                               │  list menu (Select, Empty archive…)
+ *   │ [ Chats | Archived · 12 ][🔭][⚲]│  view (archive counted), reach, filter
  *   │ filter chips (only when set)  │
  *   ├───────────────────────────────┤
  *   │ PINNED                      2 │  windowed: headers + rows as one list
  *   │ (◉) Title…            14:32 3 │
+ *   ├───────────────────────────────┤
+ *   │ 2 selected · Archive · Delete │  bulk bar, only while selecting
  *   └───────────────────────────────┘
  *
  * Rendering contract:
@@ -33,20 +36,41 @@
  *     seconds and replayed on every open. Motion that remains (the swipe
  *     snap, chevrons) follows both the OS and the app's Reduce-motion setting
  *     through the global rules in `app/globals.css`.
+ *   - Selection mode (ADR-0213, WP-Mobile): entered from the list menu or a
+ *     row's action sheet. Rows show a check affordance and a tap toggles
+ *     instead of opening; the shared bulk bar (`ChannelListBulkActions`,
+ *     `layout="bar"`) sits at the foot of the drawer. The selection is local
+ *     state of this component, so it ends with the drawer (the closed sheet
+ *     unmounts the list), and it is dropped on a view switch and on Escape.
+ *   - Archive actions from inside the drawer keep the drawer open: the row
+ *     actions' "open what takes its place" goes through `onSelectInPlace`;
+ *     only a branch (a new conversation the user asked to see) navigates
+ *     through `onSelect`, which closes the drawer.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTimeZone, useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import {
   ArchiveIcon,
   ChevronRightIcon,
   FolderIcon,
+  HistoryIcon,
+  ListChecksIcon,
   MessagesSquareIcon,
+  MoreHorizontalIcon,
   PlusIcon,
+  Trash2Icon,
 } from "lucide-react"
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual"
 
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { LoadingRegion } from "@/components/ui/loading-region"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -54,6 +78,13 @@ import {
   ConversationFilterMenu,
   ConversationSearchScopeControl,
 } from "@/components/chat/conversation-filter-controls"
+import {
+  ConversationListEmptyState,
+  ConversationNarrowedEmptyState,
+  type SearchWidening,
+} from "@/components/chat/conversation-list-empty-state"
+import { EmptyArchiveDialog } from "@/components/chat/empty-archive-dialog"
+import { ChannelListBulkActions } from "@/components/desktop/channel-list-bulk-actions"
 import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-handoff-source-dialog"
 import {
   useConversationDayClock,
@@ -78,7 +109,15 @@ import {
   type ConversationGroupAxis,
   type DateBucket,
 } from "@/lib/chat/conversation-list-model"
-import { resolveConversationSearchOptions } from "@/lib/chat/conversation-search-scope"
+import {
+  needsCrossWorkspaceSessions,
+  resolveConversationSearchOptions,
+  type ResolvedConversationSearchOptions,
+} from "@/lib/chat/conversation-search-scope"
+import { paletteQueryForView } from "@/lib/chat/conversation-archive-view"
+import { conversationManagerHref } from "@/lib/conversations/conversation-manager"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
+import { trackConversationViewChanged } from "@/lib/telemetry/conversation-list-events"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { inFlightIdSet } from "@/lib/chat/aggregate-run-state"
 import { useConversationRowActions } from "@/hooks/chat/use-conversation-row-actions"
@@ -86,6 +125,7 @@ import { ConversationExportDialog } from "@/components/chat/conversation-export-
 import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
+import { recordedRuntimeRef, useSessionModelLanes } from "@/hooks/chat/use-session-model-lanes"
 import { useUIStore, type ChannelListView } from "@/stores/ui"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import type {
@@ -126,7 +166,15 @@ export interface MobileChannelListProps {
    */
   isLoadingSessions?: boolean
   activeSessionId: string | null
+  /** Open a conversation the user picked — the shell also puts the drawer away. */
   onSelect: (id: string) => void
+  /**
+   * Switch the open conversation without putting the drawer away: the row
+   * actions' "open what takes its place" after archiving or deleting the open
+   * conversation, and an archive undo reopening it. The user is still working
+   * in the list then. Absent → `onSelect`.
+   */
+  onSelectInPlace?: (id: string) => void
   onNewDirect: () => void
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
@@ -136,6 +184,14 @@ export interface MobileChannelListProps {
   onSetPinned: (ids: readonly string[], pinned: boolean) => void | Promise<void>
   /** `useSessions().assignToFolder`; `null` takes the conversation out of its folder. */
   onAssignToFolder: (sessionId: string, folderId: string | null) => void | Promise<void>
+  /*
+   * The selection's writers (`useSessions().bulk*`). Each verb the bulk bar
+   * offers needs its writer; an absent one leaves the verb off the bar.
+   */
+  onBulkDelete?: (ids: readonly string[]) => void | Promise<void>
+  onBulkArchive?: (ids: readonly string[]) => void | Promise<void>
+  onBulkUnarchive?: (ids: readonly string[]) => void | Promise<void>
+  onBulkAssignToFolder?: (ids: readonly string[], folderId: string | null) => void | Promise<void>
   /** Conversation folders (display, collapse, and "Move to folder"). */
   folders?: readonly SessionFolder[]
   /**
@@ -161,7 +217,14 @@ const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
 }
 
 const NO_FOLDERS: readonly SessionFolder[] = []
+const NO_IDS: ReadonlySet<string> = new Set()
 const SKELETON_ROWS = 6
+
+/** Selection mode: the view it was started in and what is selected. */
+interface ListSelection {
+  view: ChannelListView
+  ids: ReadonlySet<string>
+}
 
 export function MobileChannelList(props: MobileChannelListProps) {
   // The shell provides the source from outside the drawer so it survives the
@@ -181,6 +244,7 @@ function MobileChannelListBody({
   isLoadingSessions = false,
   activeSessionId,
   onSelect,
+  onSelectInPlace,
   onNewDirect,
   onDelete,
   onRename,
@@ -188,14 +252,20 @@ function MobileChannelListBody({
   onUnarchive,
   onSetPinned,
   onAssignToFolder,
+  onBulkDelete,
+  onBulkArchive,
+  onBulkUnarchive,
+  onBulkAssignToFolder,
   folders = NO_FOLDERS,
   runStatusById,
   onBranch,
 }: MobileChannelListProps) {
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
-  // Filter vocabulary shared with the desktop sidebar.
-  const tFilters = useTranslations("conversationFilters")
+  // List vocabulary shared with the desktop sidebar, and the archive's own.
+  const tList = useTranslations("desktop.channelList")
+  const tArchive = useTranslations("conversations.archive.empty")
+  const router = useRouter()
   const {
     characters,
     teams,
@@ -222,6 +292,17 @@ function MobileChannelListBody({
   // stale value back over theirs.
   const view = useUIStore((s) => s.channelListView)
   const setView = useUIStore((s) => s.setChannelListView)
+  // A view switch the user asked for is counted, as on the desktop sidebar.
+  // The reveal ladder below moves the view through the raw setter: bringing a
+  // just-created conversation into sight is not the user choosing a view.
+  const changeView = useCallback(
+    (next: ChannelListView) => {
+      if (next === view) return
+      setView(next)
+      void trackConversationViewChanged(next)
+    },
+    [view, setView]
+  )
   const persistedCollapsed = useUIStore((s) => s.collapsedFolderIds)
   const toggleFolder = useUIStore((s) => s.toggleCollapsedFolder)
   const collapsedFolderIds = useMemo<ReadonlySet<string>>(
@@ -236,6 +317,7 @@ function MobileChannelListBody({
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
+  const { sessionRuntimeRefs, defaultRuntimeRef, agentNameOf } = useSessionModelLanes()
   const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
@@ -327,10 +409,22 @@ function MobileChannelListBody({
       ),
     [exposedSessions, view]
   )
+  // Every archived conversation of the list's scope (the rows `sessions`
+  // holds — the active workspace, or every workspace when the list reaches
+  // across them): the Archived tab's count and what "Empty archive…" deletes.
+  // Counted before search and filters, and not from the rendered rows: a
+  // collapsed group or the window must not make "everything" mean "what is on
+  // screen".
+  const archivedSessions = useMemo(
+    () => exposedSessions.filter((s) => s.archivedAt != null && s.kind !== "subagent"),
+    [exposedSessions]
+  )
   const filterController = useConversationFilterController({
     sessions: viewSessions,
     workspaces: workspaceGroups,
-    folders,
+    // Folders are frozen inside the archive (ADR-0213): the archived view has
+    // no folder sections, so it offers no Folder facet either.
+    folders: view === "archived" ? NO_FOLDERS : folders,
     characters,
     teams: teamGroups,
     sidebarSettings,
@@ -425,6 +519,45 @@ function MobileChannelListBody({
     steps: revealSteps,
   })
 
+  // ---- Narrowed-to-nothing exits ------------------------------------------
+
+  // The words go to the command palette, which searches every conversation's
+  // history. From the archive they stay in the archive (`is:archived`).
+  const searchEverywhere = useCallback(() => {
+    requestCommandPalette({ query: paletteQueryForView(query, view), scope: "chats" })
+  }, [query, view])
+  const widenSearch = useCallback(
+    (patch: Partial<ResolvedConversationSearchOptions>) => {
+      saveSidebarSettings({
+        search: { ...resolveConversationSearchOptions(sidebarSettings), ...patch },
+      })
+    },
+    [saveSidebarSettings, sidebarSettings]
+  )
+  // Each axis the search scope leaves closed, offered as one tap — the same
+  // rule as the desktop sidebar.
+  const searchWidenings = useMemo<SearchWidening[]>(() => {
+    const out: SearchWidening[] = []
+    if (!searchOptions.content) out.push({ key: "content", patch: { content: true } })
+    // The archived view already searches the archive.
+    if (!searchOptions.includeArchived && view === "active") {
+      out.push({ key: "archived", patch: { includeArchived: true } })
+    }
+    if (searchOptions.workspace === "current" && projects.length > 1) {
+      out.push({ key: "workspaces", patch: { workspace: "all" } })
+    }
+    return out
+  }, [searchOptions, view, projects.length])
+  // A search that reaches past the archive split lists both kinds; the
+  // archived rows are marked then.
+  const mixedKinds = searching && searchOptions.includeArchived
+  // The workspace "Empty archive…" is limited to, when the list is limited to
+  // one (the shell loads the same reach through `needsCrossWorkspaceSessions`).
+  const archiveScopeLabel =
+    !needsCrossWorkspaceSessions(groupBy, searchOptions) && activeProjectId
+      ? workspaceNameById.get(activeProjectId)
+      : undefined
+
   const items = useMemo(
     () =>
       buildMobileChannelListItems({
@@ -452,10 +585,114 @@ function MobileChannelListBody({
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [handoffId, setHandoffId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [emptyArchiveOpen, setEmptyArchiveOpen] = useState(false)
   const actionsSession = actionsId ? (sessionsById.get(actionsId) ?? null) : null
   const deleteSession = deleteId ? (sessionsById.get(deleteId) ?? null) : null
   const handoffSession = handoffId ? (sessionsById.get(handoffId) ?? null) : null
   const renaming = renamingId && sessionsById.has(renamingId) ? renamingId : null
+
+  // ---- Selection -------------------------------------------------------------
+
+  // `null` = not selecting. The selection belongs to the view it was started
+  // in: switching views (a tab, the empty archive's way back, the reveal
+  // ladder, another surface) ends it, adjusted during render so no frame shows
+  // one view's selection over the other's rows.
+  const [selection, setSelection] = useState<ListSelection | null>(null)
+  if (selection && selection.view !== view) setSelection(null)
+  const selecting = selection !== null && selection.view === view
+  // What is selected and still listed: a row deleted or moved out of this
+  // list's sessions elsewhere drops out of the count and the writes.
+  const selectedIds = useMemo<ReadonlySet<string>>(() => {
+    if (!selection || selection.view !== view) return NO_IDS
+    const live = [...selection.ids].filter((id) => sessionsById.has(id))
+    return live.length === selection.ids.size ? selection.ids : new Set(live)
+  }, [selection, view, sessionsById])
+  const startSelecting = useCallback(
+    (firstId?: string) =>
+      setSelection({ view, ids: firstId ? new Set([firstId]) : new Set<string>() }),
+    [view]
+  )
+  const toggleSelected = useCallback(
+    (id: string) =>
+      setSelection((current) => {
+        const ids = new Set(current && current.view === view ? current.ids : [])
+        if (ids.has(id)) ids.delete(id)
+        else ids.add(id)
+        return { view, ids }
+      }),
+    [view]
+  )
+  const clearSelection = useCallback(() => setSelection(null), [])
+  // Every row of the view — the model's whole order, not the rows the window
+  // happens to have mounted.
+  const selectAll = useCallback(
+    () => setSelection({ view, ids: new Set(orderedIds) }),
+    [view, orderedIds]
+  )
+  const deselectAll = useCallback(() => setSelection({ view, ids: new Set<string>() }), [view])
+
+  // Escape leaves selection mode — and only that: the drawer stays open. The
+  // listener runs on `window` in the capture phase, ahead of the drawer's own
+  // Escape handling (Radix listens on the document), and marks the event
+  // handled so the drawer does not also close. A key from a dialog opened over
+  // the list (the bulk delete confirm, the row sheet) or from a text field is
+  // left to its owner.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!selecting) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      const target = event.target
+      const root = rootRef.current
+      if (!root || !(target instanceof Node) || !root.contains(target)) return
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")
+      ) {
+        return
+      }
+      event.preventDefault()
+      setSelection(null)
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [selecting])
+
+  // ---- Write boundary ------------------------------------------------------
+
+  // The row actions open a conversation on three paths: the row that takes
+  // the open one's place after it is archived or deleted, the open one again
+  // when an archive is undone, and a fresh branch. The first two happen while
+  // the user is working in the list, so the drawer must stay open
+  // (`onSelectInPlace`); a branch is a new conversation the user asked to see,
+  // so it navigates (`onSelect`, which puts the drawer away). The branch is
+  // told apart by its id: the branch writer below records the row it created,
+  // and the hook opens exactly that id once the write lands.
+  const navigation = useRef({ onSelect, onSelectInPlace })
+  useEffect(() => {
+    navigation.current = { onSelect, onSelectInPlace }
+  })
+  const createdBranchId = useRef<string | null>(null)
+  const branchWriter = useMemo(
+    () =>
+      onBranch
+        ? async (id: string) => {
+            const branch = await onBranch(id)
+            createdBranchId.current = branch?.id ?? null
+            return branch
+          }
+        : undefined,
+    [onBranch]
+  )
+  const openFromRowActions = useCallback((id: string) => {
+    const { onSelect: open, onSelectInPlace: openInPlace } = navigation.current
+    if (createdBranchId.current === id) {
+      createdBranchId.current = null
+      open(id)
+      return
+    }
+    ;(openInPlace ?? open)(id)
+  }, [])
 
   // Every row write goes through the list boundary the desktop sidebar uses
   // (`useConversationRowActions`): the same lock refusal, failure and success
@@ -468,11 +705,16 @@ function MobileChannelListBody({
     onArchive,
     onUnarchive,
     onAssignToFolder,
-    onBranch,
+    onBulkDelete,
+    onBulkSetPinned: (ids, pinned) => onSetPinned(ids, pinned),
+    onBulkArchive,
+    onBulkUnarchive,
+    onBulkAssignToFolder,
+    onBranch: branchWriter,
     resolveSessions: (ids) => ids.flatMap((id) => sessionsById.get(id) ?? []),
     getRenderedOrder: () => orderedIds,
     activeSessionId,
-    onSelect,
+    onSelect: openFromRowActions,
   })
   const exportSession = exportSessionId ? (sessionsById.get(exportSessionId) ?? null) : null
 
@@ -495,11 +737,15 @@ function MobileChannelListBody({
   // ref that is refreshed after every commit. A callback that closed over the
   // session map would change on every session write and re-render every
   // memoized row on screen for a change to one of them.
-  const latest = useRef({ onSelect, sessionsById, rowActions, commitRename })
+  const latest = useRef({ onSelect, sessionsById, rowActions, commitRename, selecting, toggleSelected })
   useEffect(() => {
-    latest.current = { onSelect, sessionsById, rowActions, commitRename }
+    latest.current = { onSelect, sessionsById, rowActions, commitRename, selecting, toggleSelected }
   })
-  const handleRowSelect = useCallback((id: string) => latest.current.onSelect(id), [])
+  // A tap opens the conversation — or, while selecting, flips its check.
+  const handleRowSelect = useCallback((id: string) => {
+    if (latest.current.selecting) latest.current.toggleSelected(id)
+    else latest.current.onSelect(id)
+  }, [])
   const handleOpenActions = useCallback((id: string) => setActionsId(id), [])
   const handleSwipeAction = useCallback((id: string, action: MobileChannelSwipeActionId) => {
     const session = latest.current.sessionsById.get(id)
@@ -534,6 +780,8 @@ function MobileChannelListBody({
       metadataFields,
       defaultModel,
       defaultProvider,
+      defaultRuntimeRef,
+      agentNameOf,
       groupAxis,
     }),
     [
@@ -544,6 +792,8 @@ function MobileChannelListBody({
       metadataFields,
       defaultModel,
       defaultProvider,
+      defaultRuntimeRef,
+      agentNameOf,
       groupAxis,
     ]
   )
@@ -591,29 +841,35 @@ function MobileChannelListBody({
             )
           }
           return (
-            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
-              <p className="text-sm text-muted-foreground" data-testid="mobile-channel-empty">
-                {searching
-                  ? t("emptyFiltered", { query })
-                  : activeFilters > 0
-                    ? // Distinct from "you have no chats": the exit here is
-                      // dropping a filter, not starting a conversation.
-                      t("emptyFilters", { count: activeFilters })
-                    : archived
-                      ? t("emptyArchived")
-                      : t("emptyChats")}
-              </p>
-              {activeFilters > 0 && !searching ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11"
-                  onClick={resetConversationFilters}
-                  data-testid="mobile-channel-clear-filters"
-                >
-                  {tFilters("clearAll")}
-                </Button>
-              ) : null}
+            // The shared empty states (`conversation-list-empty-state.tsx`),
+            // their buttons raised to the 44px touch floor. A view that holds
+            // nothing offers its way out (start a chat, or back from an empty
+            // archive); a view that a search or the filters narrowed to
+            // nothing offers one exit per cause.
+            <div
+              className="[&_button]:min-h-11"
+              data-testid="mobile-channel-empty"
+              data-empty-kind={total === 0 ? "view" : "narrowed"}
+            >
+              {total === 0 ? (
+                <ConversationListEmptyState
+                  archived={archived}
+                  team={false}
+                  onCreate={archived ? undefined : onNewDirect}
+                  onShowActive={archived ? () => changeView("active") : undefined}
+                  className="min-h-0 py-8"
+                />
+              ) : (
+                <ConversationNarrowedEmptyState
+                  query={query.trim()}
+                  activeFilters={activeFilters}
+                  onClearFilters={resetConversationFilters}
+                  onClearSearch={clearSearch}
+                  onSearchEverywhere={searchEverywhere}
+                  widenings={searchWidenings}
+                  onWiden={widenSearch}
+                />
+              )}
             </div>
           )
         case "folder-empty":
@@ -647,7 +903,11 @@ function MobileChannelListBody({
               character={session.characterId ? characterById.get(session.characterId) : undefined}
               team={session.teamId ? teamById.get(session.teamId) : undefined}
               workspaceName={session.projectId ? workspaceNameById.get(session.projectId) : undefined}
+              runtimeRef={recordedRuntimeRef(sessionRuntimeRefs, session.id)}
               settings={rowSettings}
+              markArchived={mixedKinds}
+              selecting={selecting}
+              selected={selectedIds.has(session.id)}
               renaming={renaming === session.id}
               actionsHintId={actionsHintId}
               onSelect={handleRowSelect}
@@ -663,11 +923,19 @@ function MobileChannelListBody({
     },
     [
       t,
-      tFilters,
-      searching,
       query,
+      total,
       activeFilters,
       archived,
+      onNewDirect,
+      changeView,
+      clearSearch,
+      searchEverywhere,
+      searchWidenings,
+      widenSearch,
+      mixedKinds,
+      selecting,
+      selectedIds,
       resetConversationFilters,
       toggleFolder,
       setGroupCollapsed,
@@ -679,6 +947,7 @@ function MobileChannelListBody({
       characterById,
       teamById,
       workspaceNameById,
+      sessionRuntimeRefs,
       rowSettings,
       renaming,
       actionsHintId,
@@ -700,8 +969,10 @@ function MobileChannelListBody({
     <div
       // `min-w-0` + `flex-1`: this column sits in a flex row beside the guild
       // rail and must take the width it is given, not its content's.
+      ref={rootRef}
       className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col"
       data-testid="mobile-channel-list"
+      data-selecting={selecting ? "true" : undefined}
     >
       <div className="flex shrink-0 flex-col gap-1 border-b border-border px-3 pt-2 pb-1">
         <div className="flex min-w-0 items-center gap-2">
@@ -717,15 +988,66 @@ function MobileChannelListBody({
           >
             <PlusIcon className="size-5" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={t("listActions")}
+                data-testid="mobile-channel-list-menu"
+                className="size-11 shrink-0"
+              >
+                <MoreHorizontalIcon className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              {selecting ? null : (
+                <DropdownMenuItem
+                  className="min-h-11"
+                  disabled={isLoadingSessions || orderedIds.length === 0}
+                  onSelect={() => startSelecting()}
+                  data-testid="mobile-channel-select"
+                >
+                  <ListChecksIcon className="size-4" />
+                  {tList("selectConversations")}
+                </DropdownMenuItem>
+              )}
+              {/* The full manager (ADR-0213), on the tab this list shows. */}
+              <DropdownMenuItem
+                className="min-h-11"
+                onSelect={() => router.push(conversationManagerHref(view))}
+                data-testid="mobile-channel-manage"
+              >
+                <HistoryIcon className="size-4" />
+                {tList("manageConversations")}
+              </DropdownMenuItem>
+              {archived ? (
+                <DropdownMenuItem
+                  className="min-h-11"
+                  variant="destructive"
+                  disabled={archivedSessions.length === 0}
+                  // Deferred so the menu can hand focus back before the
+                  // dialog takes it.
+                  onSelect={() => setTimeout(() => setEmptyArchiveOpen(true), 0)}
+                  data-testid="mobile-channel-empty-archive"
+                >
+                  <Trash2Icon className="size-4" />
+                  {tArchive("action")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="flex min-w-0 items-center gap-1">
-          <ViewTabs view={view} onChange={setView} />
+          <ViewTabs view={view} onChange={changeView} archivedCount={archivedSessions.length} />
           {/* Same pair as the desktop sidebar, in the same order: reach, then
               narrowing. */}
           <ConversationSearchScopeControl
             model={filterController}
             triggerClassName="size-11 shrink-0"
             testId="mobile-channel-search-scope"
+            view={view}
           />
           <ConversationFilterMenu
             model={filterController}
@@ -746,7 +1068,7 @@ function MobileChannelListBody({
       />
 
       <p id={actionsHintId} className="sr-only">
-        {t("rowActionsHint")}
+        {selecting ? t("selectionRowHint") : t("rowActionsHint")}
       </p>
 
       <LoadingRegion
@@ -767,9 +1089,45 @@ function MobileChannelListBody({
         )}
       </LoadingRegion>
 
+      {/* The selection's verbs, pinned to the foot of the drawer (which
+          already reserves the home indicator). One labelled row that wraps,
+          every control raised to the 44px touch floor. Each verb acts on the
+          selected rows it applies to; a failed write keeps the selection. */}
+      {selecting ? (
+        <div
+          className="shrink-0 border-t border-border bg-background px-2 py-1.5 [&_button]:min-h-11"
+          data-testid="mobile-channel-bulk-bar"
+        >
+          <ChannelListBulkActions
+            visible
+            layout="bar"
+            selected={selectedIds}
+            orderedIds={orderedIds}
+            sessions={exposedSessions}
+            archived={archived}
+            onDelete={rowActions.onBulkDelete}
+            onSetPinned={rowActions.onBulkSetPinned}
+            onArchive={rowActions.onBulkArchive}
+            onUnarchive={rowActions.onBulkUnarchive}
+            onMarkRead={rowActions.onBulkMarkRead}
+            onMarkUnread={rowActions.onBulkMarkUnread}
+            unreadIds={unreadIds}
+            folders={folders}
+            onMoveToFolder={rowActions.onBulkAssignToFolder}
+            onSelectAll={selectAll}
+            onDeselectAll={deselectAll}
+            onClear={clearSelection}
+          />
+        </div>
+      ) : null}
+
       <MobileChannelRowActions
         session={actionsSession}
         unread={actionsSession ? (unreadCountById.get(actionsSession.id) ?? 0) : 0}
+        selected={actionsSession ? selectedIds.has(actionsSession.id) : false}
+        onToggleSelection={(session) =>
+          selecting ? toggleSelected(session.id) : startSelecting(session.id)
+        }
         folders={folders}
         onClose={() => setActionsId(null)}
         onRename={(session) => setRenamingId(session.id)}
@@ -779,6 +1137,13 @@ function MobileChannelListBody({
         extraActions={extraActions}
       />
       <ConversationExportDialog session={exportSession} onClose={closeExport} />
+      <EmptyArchiveDialog
+        open={emptyArchiveOpen}
+        onOpenChange={setEmptyArchiveOpen}
+        sessions={archivedSessions}
+        scopeLabel={archiveScopeLabel}
+        onEmptied={clearSelection}
+      />
       <ConversationDeleteConfirm
         session={deleteSession}
         onCancel={() => setDeleteId(null)}
@@ -911,9 +1276,12 @@ function SectionHeader({
 function ViewTabs({
   view,
   onChange,
+  archivedCount,
 }: {
   view: ChannelListView
   onChange: (next: ChannelListView) => void
+  /** Archived conversations in the list's scope; counted on the tab once there are any. */
+  archivedCount: number
 }) {
   const t = useTranslations("mobile.home")
   const options: { value: ChannelListView; label: string; hint: string; Icon: typeof ArchiveIcon }[] =
@@ -926,7 +1294,10 @@ function ViewTabs({
       },
       {
         value: "archived",
-        label: t("viewTabArchived"),
+        label:
+          archivedCount > 0
+            ? t("viewTabArchivedCount", { count: archivedCount })
+            : t("viewTabArchived"),
         hint: t("viewArchived"),
         Icon: ArchiveIcon,
       },

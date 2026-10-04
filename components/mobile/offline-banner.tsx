@@ -16,7 +16,8 @@
  * and Desktop callers — so a browser could hold pending rows and show nothing
  * about them.
  *
- * The queue count is read through a Dexie live query, so newly enqueued and
+ * The queue state comes from `useOutboundQueueStatus` (a Dexie live query, shared
+ * with the composer strip), so newly enqueued and
  * drained rows update the banner reactively rather than on a polling timer.
  *
  * On a paired device the network being up says nothing about the Host: the
@@ -26,24 +27,41 @@
  * and the offline copy once it has given up — but only for a companion
  * target: a standalone tab has no Host to be disconnected from, and the
  * empty snapshot reports `offline` by construction.
+ *
+ * On the compact shell this is the ONE connection report: it also carries what
+ * the state means for the route under it ("cached data only" on a read-only
+ * route, which the boundary used to say in a second band right below) and the
+ * way to the connection settings. Drawn with the shared `RuntimeStatusBand`.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { CloudOffIcon, LoaderIcon, TriangleAlertIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
-import { useClientLiveQuery } from "@/hooks/data"
+import {
+  RUNTIME_BAND_ACTION,
+  RuntimeStatusBand,
+  type RuntimeStatusTone,
+} from "@/components/runtime/runtime-status-band"
 import { useNetworkStatus } from "@/hooks/use-network-status"
+import { usePlatform } from "@/hooks/use-platform"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
-import { getQueueSummary, inFlight, needsAttention } from "@/lib/queue/outbound-queue"
+import { useOutboundQueueStatus } from "@/hooks/use-outbound-queue-status"
+import { registerOutboundApprovalReporter } from "@/lib/queue/outbound-approval"
 import {
-  outboundConsentCode,
-  PENDING_NO_CODE,
-  registerOutboundApprovalReporter,
-  subscribeOutboundApproval,
-} from "@/lib/queue/outbound-approval"
+  isConnectionNoticeClaimed,
+  isQueueNoticeClaimed,
+  subscribeConnectionNoticeClaim,
+} from "@/lib/runtime/connection-notice-claim"
+import { resolveRuntimeRecovery } from "@/lib/runtime/recovery-resolver"
+import {
+  getSurfaceContractForRoute,
+  isInternalRouteExempt,
+  resolveSurfaceAvailability,
+} from "@/lib/runtime/surface-contract"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 import { OutboundQueueSheet } from "./outbound-queue-sheet"
@@ -55,127 +73,181 @@ export interface OfflineBannerProps {
 export function OfflineBanner({ className }: OfflineBannerProps) {
   const t = useTranslations("mobile.offline")
   const compact = useCompactLayout()
+  const platform = usePlatform()
+  const pathname = usePathname()
   const { status, loading } = useNetworkStatus()
   const runtime = useRuntimeSnapshot()
-  // `getQueueSummary` reads the `mobileOutboundQueue` table, so wrapping it in
-  // a live query makes the banner react to enqueue/drain writes instead of
-  // re-counting on a fixed 15s interval. The banner only mounts inside the
-  // mobile shell, so this query never runs on web/desktop.
-  // A queue frozen on an interactive approval is not offline, not retrying and
-  // not stuck: the Host is asking a human, and until someone answers, the rows
-  // simply do not move. Reported here because the alternative is a count that
-  // sits at "1 queued" forever with nothing on screen saying why, which is the
-  // silence this whole gate exists to end.
-  const consentCode = useSyncExternalStore(
-    subscribeOutboundApproval,
-    outboundConsentCode,
-    () => null
-  )
-  // Claim the wait for as long as this banner is mounted, so the runner's
-  // fallback toast stays out of the way here and fires on every shell that
-  // does NOT mount this banner, which is all of them but the mobile ones.
+  // Claim the approval wait for as long as this banner is mounted, so the
+  // runner's fallback toast stays out of the way here and fires on every shell
+  // that does NOT mount this banner, which is all of them but the mobile ones.
   useEffect(() => registerOutboundApprovalReporter(), [])
-  const queue = useClientLiveQuery<{ inFlight: number; sending: number; stuck: number }>(
-    async () => {
-      const summary = await getQueueSummary()
-      return {
-        inFlight: inFlight(summary),
-        sending: summary.sending,
-        stuck: needsAttention(summary),
-      }
-    },
-    [],
-    { inFlight: 0, sending: 0, stuck: 0 }
-  )
+  const queue = useOutboundQueueStatus()
   const [reviewOpen, setReviewOpen] = useState(false)
+  // While the chat's runtime notice is mounted it reports the Host connection
+  // itself, with the recovery action (`connection-notice-claim.ts`), and the
+  // composer strip carries the queue on the same line — each half of this
+  // banner stands down for the half that is claimed. A route the boundary
+  // blocks outright for being offline claims the connection the same way: its
+  // page IS the report.
+  const connectionClaimed = useSyncExternalStore(
+    subscribeConnectionNoticeClaim,
+    isConnectionNoticeClaimed,
+    () => false
+  )
+  const queueClaimed = useSyncExternalStore(
+    subscribeConnectionNoticeClaim,
+    isQueueNoticeClaimed,
+    () => false
+  )
 
   if (!compact) return null
   if (loading) return null
 
-  const hostState = runtime.target?.kind === "companion" ? runtime.connectionState : "online"
-  const hostOffline = status.connected && hostState === "offline"
-  const offline = !status.connected || hostOffline
-  const reconnecting = !offline && hostState === "connecting"
-  const pendingCount = queue?.inFlight ?? 0
-  // Of those, the ones on the wire right now. The rows themselves say
-  // "Queued" and "Sending" (the workflow list, the queue sheet); a bare
-  // "2 queued" over a card reading "Sending" looked like two different
-  // accounts of the same action, so the banner names both lanes when both
-  // are occupied.
-  const sendingCount = Math.min(queue?.sending ?? 0, pendingCount)
-  // Rows the Host refused, ran out of retries on, or that lost a race. Nothing
-  // will move them on its own, and they used to be reported by no surface at
-  // all — a refused action looked exactly like one that had gone through.
-  const stuckCount = queue?.stuck ?? 0
-  const visible =
-    offline || reconnecting || pendingCount > 0 || stuckCount > 0 || consentCode !== null
-  // A count was all this banner could say about the queue, with nowhere to
-  // see or take back what it counted. Rows exist → offer the list.
-  const hasRows = pendingCount > 0 || stuckCount > 0
+  const companion = runtime.target?.kind === "companion"
+  const hostState = companion ? runtime.connectionState : "online"
+  const hostOffline = !connectionClaimed && status.connected && hostState === "offline"
+  // A paired Host that is answering proves the network works. Android reports
+  // `connected: false` for Wi-Fi without validated Internet — exactly a LAN
+  // with a desktop on it — so on a companion target an online Host outranks
+  // the device's own verdict. A standalone tab has no such witness.
+  const hostAnswering = companion && hostState === "online"
+  const offline = !connectionClaimed && ((!status.connected && !hostAnswering) || hostOffline)
+  const reconnecting = !connectionClaimed && !offline && hostState === "connecting"
+  const showQueue = !queueClaimed && queue.visible
+  const visible = offline || reconnecting || showQueue
+
+  // What the page under the banner can still do. The route boundary used to
+  // say "Read-only mode: …" in a second band of its own right under this one;
+  // on the compact shell that half of the report rides here instead, so one
+  // line says both what happened and what it means for this screen.
+  const contract =
+    visible && pathname && !isInternalRouteExempt(pathname)
+      ? getSurfaceContractForRoute(pathname)
+      : null
+  // Only the cache fallback: any other read-only reason (a legacy data space,
+  // an operation the Host lacks) is not a connection report, and the boundary
+  // keeps saying it itself.
+  const routeAvailability = contract ? resolveSurfaceAvailability(contract, runtime) : null
+  const routeReadOnly =
+    routeAvailability?.state === "read-only" && routeAvailability.reason === "offline-cache"
+
+  const connectionLine = offline || reconnecting
+  const stuck = showQueue && queue.stuck > 0
+  const tone: RuntimeStatusTone = offline
+    ? "offline"
+    : reconnecting
+      ? "progress"
+      : stuck
+        ? // Not a spinner: nothing is retrying these, and an animation that
+          // says "working on it" is the wrong thing to show for work that has
+          // stopped.
+          "attention"
+        : "progress"
+  const title = offline
+    ? hostOffline
+      ? t("stateHostOffline")
+      : t("stateNetworkOffline")
+    : reconnecting
+      ? t("stateReconnecting")
+      : queue.message
+  // The queue says more than any generic consequence: that sends are waiting,
+  // or that some stopped and need a decision.
+  const detail = !connectionLine
+    ? undefined
+    : showQueue
+      ? queue.message
+      : routeReadOnly
+        ? t("detailCacheOnly")
+        : offline
+          ? hostOffline
+            ? t("detailHostOffline")
+            : t("detailNetworkOffline")
+          : undefined
+  // The way back, on the band itself: the screens behind a dead Host used to
+  // offer none, and the connection settings sat behind an "offline" page.
+  // Only for the Host — a phone with no network has nothing to configure.
+  const recovery =
+    connectionLine && companion && (hostOffline || reconnecting)
+      ? resolveRuntimeRecovery({ state: "offline", reason: "connection-offline" }, platform)
+      : null
+  const recoveryHref = recovery?.kind === "route" ? recovery.href : null
+  // A count was all this banner could say about the queue, with nowhere to see
+  // or take back what it counted. Rows exist → offer the list.
+  const canReview = showQueue && queue.hasRows
 
   return (
     <>
-    <AnimatePresence initial={false}>
-      {visible ? (
-        <BannerBody
-          onReview={hasRows ? () => setReviewOpen(true) : undefined}
-          reviewLabel={t("review")}
+      <AnimatePresence initial={false}>
+        {visible ? (
+        <BannerFrame
+          key="offline-banner"
           offline={offline}
           hostOffline={hostOffline}
           reconnecting={reconnecting}
-          pending={pendingCount}
-          stuck={stuckCount}
-          messageOffline={hostOffline ? t("bannerHostOffline") : t("bannerOffline")}
-          messageReconnecting={t("bannerReconnecting")}
-          messageQueue={
-            consentCode
-              ? consentCode === PENDING_NO_CODE
-                ? t("queueAwaitingApprovalNoCode")
-                : t("queueAwaitingApproval", { code: consentCode })
-              : stuckCount > 0
-                ? t("queueNeedsAttention", { count: stuckCount })
-                : sendingCount > 0
-                  ? t("queuePendingWithSending", { count: pendingCount, sending: sendingCount })
-                  : t("queuePending", { count: pendingCount })
-          }
+          stuck={stuck}
           className={className}
-        />
-      ) : null}
-    </AnimatePresence>
-    <OutboundQueueSheet open={reviewOpen} onOpenChange={setReviewOpen} />
+        >
+          <RuntimeStatusBand
+            tone={tone}
+            title={title}
+            detail={detail}
+            detailAttention={connectionLine && stuck}
+            actions={
+              canReview || recoveryHref ? (
+                <>
+                  {canReview ? (
+                    <button
+                      type="button"
+                      onClick={() => setReviewOpen(true)}
+                      className={RUNTIME_BAND_ACTION}
+                      data-testid="offline-banner-review"
+                    >
+                      {t("review")}
+                    </button>
+                  ) : null}
+                  {recoveryHref ? (
+                    <Link
+                      href={recoveryHref}
+                      className={RUNTIME_BAND_ACTION}
+                      data-testid="offline-banner-recovery"
+                    >
+                      {t("connectionSettings")}
+                    </Link>
+                  ) : null}
+                </>
+              ) : undefined
+            }
+          />
+          {/* `pending` is part of the queue sentence via t("queuePending"); kept
+              as a separate node so the count is trivial to render-test. */}
+          <span className="sr-only">{showQueue ? queue.pending : 0}</span>
+        </BannerFrame>
+        ) : null}
+      </AnimatePresence>
+      <OutboundQueueSheet open={reviewOpen} onOpenChange={setReviewOpen} />
     </>
   )
 }
 
-interface BannerBodyProps {
+interface BannerFrameProps {
   offline: boolean
   /** The device network is up but the paired Host is not answering. */
   hostOffline: boolean
   reconnecting: boolean
-  pending: number
-  stuck: number
-  messageOffline: string
-  messageReconnecting: string
-  messageQueue: string
-  /** Opens the queue list; absent when nothing is queued. */
-  onReview?: () => void
-  reviewLabel?: string
+  stuck: boolean
   className?: string
+  children: React.ReactNode
 }
 
-function BannerBody({
+/** The sticky, animated row the band rides in, with the state as data attributes. */
+function BannerFrame({
   offline,
   hostOffline,
   reconnecting,
-  pending,
   stuck,
-  messageOffline,
-  messageReconnecting,
-  messageQueue,
-  onReview,
-  reviewLabel,
   className,
-}: BannerBodyProps) {
+  children,
+}: BannerFrameProps) {
   const reduce = useReducedMotion()
   return (
     <motion.div
@@ -185,7 +257,7 @@ function BannerBody({
       data-offline={offline ? "true" : "false"}
       data-host-offline={hostOffline ? "true" : "false"}
       data-reconnecting={reconnecting ? "true" : "false"}
-      data-stuck={stuck > 0 ? "true" : "false"}
+      data-stuck={stuck ? "true" : "false"}
       initial={reduce ? false : { opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
@@ -193,44 +265,9 @@ function BannerBody({
         duration: MOBILE_DURATION.fast,
         ease: MOBILE_EASE,
       }}
-      className={cn(
-        "sticky top-0 z-30 flex items-center gap-2 border-b border-border px-3 py-2 text-xs",
-        offline || stuck > 0
-          ? "bg-destructive/10 text-destructive"
-          : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        className
-      )}
+      className={cn("sticky top-0 z-30", className)}
     >
-      {offline ? (
-        <CloudOffIcon className="size-3.5" aria-hidden="true" />
-      ) : reconnecting ? (
-        <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
-      ) : stuck > 0 ? (
-        // Not a spinner: nothing is retrying these, and an animation that says
-        // "working on it" is the wrong thing to show for work that has stopped.
-        <TriangleAlertIcon className="size-3.5" aria-hidden="true" />
-      ) : (
-        <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
-      )}
-      <span className="flex-1">
-        {offline ? messageOffline : reconnecting ? messageReconnecting : messageQueue}
-      </span>
-      {onReview ? (
-        <button
-          type="button"
-          onClick={onReview}
-          // The hit area fills the banner's height (`-my-2` cancels the
-          // banner's own `py-2`) and extends sideways: the bare text-xs word
-          // was a ~16px target at the very top of a phone screen.
-          className="-my-2 -mr-1 shrink-0 self-stretch rounded-sm px-2 py-2 font-medium underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          data-testid="offline-banner-review"
-        >
-          {reviewLabel}
-        </button>
-      ) : null}
-      {/* `pending` is included in the queue message via t("queuePending"); kept
-       *  as a separate prop so this component is trivial to render-test. */}
-      <span className="sr-only">{pending}</span>
+      {children}
     </motion.div>
   )
 }

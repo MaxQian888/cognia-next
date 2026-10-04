@@ -38,7 +38,7 @@ import { LoopContainerNode } from "@/components/workflow/editor/nodes/loop-conta
 import { GroupContainerNode } from "@/components/workflow/editor/nodes/group-container-node"
 import { SmartEdge } from "@/components/workflow/editor/edges/smart-edge"
 import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
-import { lock as lockOrientation, unlock as unlockOrientation } from "@/lib/capacitor/screen-orientation"
+import { getLockSupport, lock as lockOrientation, unlock as unlockOrientation } from "@/lib/capacitor/screen-orientation"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
 import { useLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
@@ -66,6 +66,8 @@ const edgeTypes: EdgeTypes = {
 
 const SNAP_GRID: [number, number] = [16, 16]
 const PRO_OPTIONS = { hideAttribution: true } as const
+// Shared across editor remounts, since the native orientation lock is global.
+let orientationQueue: Promise<void> = Promise.resolve()
 
 export type MobileCanvasMode = "read" | "edit" | "select"
 
@@ -84,6 +86,7 @@ export interface MobileCanvasProps {
   onLongPress: (target: CanvasPressTarget) => void
   /** Keep the shell in landscape. The editor's default, and escapable. */
   orientationLocked: boolean
+  onOrientationStatus?: (status: "pending" | "locked" | "unlocked" | "unavailable") => void
   onInit: (rf: WorkflowFlowInstance) => void
 }
 
@@ -96,6 +99,7 @@ export function MobileCanvas({
   onPaneTap,
   onLongPress,
   orientationLocked,
+  onOrientationStatus,
   onInit,
 }: MobileCanvasProps) {
   const t = useTranslations("mobile.workflow.editor")
@@ -128,24 +132,26 @@ export function MobileCanvas({
     setLastRunByStepId(lastRunByStepId)
   }, [lastRunByStepId, setLastRunByStepId])
 
-  // The 2D node canvas reads far better on the wide axis than in a 360-px
-  // portrait column, so landscape is the default while the editor canvas is
-  // mounted. It is a default, not a rule: the lock used to be unconditional,
-  // which meant a user holding their phone in portrait had the OS rotate the
-  // app out from under them with no way to say no. `orientationLocked` is the
-  // opt-out, and either way the user's own orientation is restored on exit.
-  // No-ops on web / Tauri (the wrapper resolves `unsupported`), so this only
-  // takes effect on the Capacitor shell.
+  // Serialize native changes so a late lock cannot outlive an unlock/unmount.
   useEffect(() => {
-    if (orientationLocked) void lockOrientation("landscape")
-    else void unlockOrientation()
-  }, [orientationLocked])
-  useEffect(
-    () => () => {
-      void unlockOrientation()
-    },
-    []
-  )
+    let active = true
+    onOrientationStatus?.("pending")
+    orientationQueue = orientationQueue.then(async () => {
+      if (!active) return
+      const support = await getLockSupport()
+      if (!active) return
+      if (support.kind !== "ok" || !support.value) {
+        onOrientationStatus?.("unavailable")
+        return
+      }
+      const outcome = orientationLocked ? await lockOrientation("landscape") : await unlockOrientation()
+      if (active) onOrientationStatus?.(outcome.kind === "ok" ? (orientationLocked ? "locked" : "unlocked") : "unavailable")
+    }).catch(() => { if (active) onOrientationStatus?.("unavailable") })
+    return () => {
+      active = false
+      orientationQueue = orientationQueue.then(async () => { await unlockOrientation() })
+    }
+  }, [orientationLocked, onOrientationStatus])
 
   const editable = mode === "edit" || mode === "select"
   // Make's touchscreen mode is the only formally-specified one in this class of

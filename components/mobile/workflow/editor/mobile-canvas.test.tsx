@@ -3,7 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
@@ -90,9 +90,11 @@ jest.mock("@/components/workflow/editor/nodes/workflow-node", () => ({
 jest.mock("@/components/workflow/editor/edges/smart-edge", () => ({ SmartEdge: () => null }))
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 
-const lockMock = jest.fn(async (..._a: unknown[]) => ({ kind: "ok" as const }))
+const lockMock = jest.fn<Promise<{ kind: string }>, unknown[]>(async () => ({ kind: "ok" }))
+const supportMock = jest.fn(async () => ({ kind: "ok", value: true }))
 const unlockMock = jest.fn(async (..._a: unknown[]) => ({ kind: "ok" as const }))
 jest.mock("@/lib/capacitor/screen-orientation", () => ({
+  getLockSupport: () => supportMock(),
   lock: (...a: unknown[]) => lockMock(...a),
   unlock: (...a: unknown[]) => unlockMock(...a),
 }))
@@ -158,12 +160,14 @@ function getMockRf() {
 
 describe("<MobileCanvas />", () => {
   beforeEach(() => {
+    supportMock.mockResolvedValue({ kind: "ok", value: true })
+    lockMock.mockResolvedValue({ kind: "ok" })
     const rf = getMockRf()
     rf.getViewport.mockImplementation(() => ({ x: 0, y: 0, zoom: 1 }))
     rf.setViewport.mockClear()
   })
 
-  it("locks landscape on mount and restores orientation on unmount", () => {
+  it("locks landscape on mount and restores orientation on unmount", async () => {
     lockMock.mockClear()
     unlockMock.mockClear()
     const store = createEditorStore(buildWorkflow())
@@ -180,9 +184,9 @@ describe("<MobileCanvas />", () => {
         onInit={jest.fn()}
       />
     )
-    expect(lockMock).toHaveBeenCalledWith("landscape")
+    await waitFor(() => expect(lockMock).toHaveBeenCalledWith("landscape"))
     unmount()
-    expect(unlockMock).toHaveBeenCalled()
+    await waitFor(() => expect(unlockMock).toHaveBeenCalled())
   })
 
   it("locks structural interaction in read mode", () => {
@@ -228,6 +232,22 @@ describe("<MobileCanvas />", () => {
   it("scopes the touch handle-enlarge CSS via the wf-touch-canvas class", () => {
     renderCanvas("edit")
     expect(screen.getByTestId("mobile-canvas")).toHaveClass("wf-touch-canvas")
+  })
+
+  // The desktop node hover toolbar force-reveals on a coarse pointer, which put
+  // a row of 28px buttons (Delete included, even in read mode) on every node.
+  // The touch canvas hides it by the toolbar's test-id prefix; jsdom cannot
+  // evaluate the stylesheet, so pin the rule and the prefix it keys on.
+  it("hides the desktop node hover toolbar inside the touch canvas", () => {
+    const fs = jest.requireActual<typeof import("node:fs")>("node:fs")
+    const path = jest.requireActual<typeof import("node:path")>("node:path")
+    const read = (rel: string) => fs.readFileSync(path.join(process.cwd(), rel), "utf8")
+    expect(read("app/globals.css")).toMatch(
+      /\.wf-touch-canvas \[data-testid\^="wf-node-toolbar-"\]\s*\{\s*display: none;/
+    )
+    expect(read("components/workflow/editor/nodes/node-floating-toolbar.tsx")).toContain(
+      "data-testid={`wf-node-toolbar-${nodeId}`}"
+    )
   })
 
   // A see-through canvas let an app wallpaper show behind the grid, edges and
@@ -363,11 +383,40 @@ describe("<MobileCanvas />", () => {
     expect(types).toEqual(expect.arrayContaining(["workflowNode", "loopContainer", "groupContainer"]))
   })
 
-  it("leaves the orientation alone once the user opts out of the lock", () => {
+  it("leaves the orientation alone once the user opts out of the lock", async () => {
     lockMock.mockClear()
     unlockMock.mockClear()
     renderCanvas("read", false, false)
     expect(lockMock).not.toHaveBeenCalled()
-    expect(unlockMock).toHaveBeenCalled()
+    await waitFor(() => expect(unlockMock).toHaveBeenCalled())
   })
 })
+
+ it("reports unavailable without requesting a lock on an unsupported tablet", async () => {
+   supportMock.mockResolvedValueOnce({ kind: "ok", value: false })
+   lockMock.mockClear()
+   const status = jest.fn()
+   render(<MobileCanvas store={createEditorStore(buildWorkflow())} mode="read" connectActive={false} onNodeTap={jest.fn()} onEdgeTap={jest.fn()} onPaneTap={jest.fn()} onLongPress={jest.fn()} orientationLocked onOrientationStatus={status} onInit={jest.fn()} />)
+   await waitFor(() => expect(status).toHaveBeenLastCalledWith("unavailable"))
+   expect(lockMock).not.toHaveBeenCalled()
+ })
+ it("does not publish a failed native lock as locked", async () => {
+   supportMock.mockResolvedValue({ kind: "ok", value: true })
+   lockMock.mockResolvedValueOnce({ kind: "error" })
+   const status = jest.fn()
+   render(<MobileCanvas store={createEditorStore(buildWorkflow())} mode="read" connectActive={false} onNodeTap={jest.fn()} onEdgeTap={jest.fn()} onPaneTap={jest.fn()} onLongPress={jest.fn()} orientationLocked onOrientationStatus={status} onInit={jest.fn()} />)
+   await waitFor(() => expect(status).toHaveBeenLastCalledWith("unavailable"))
+   expect(status).not.toHaveBeenCalledWith("locked")
+ })
+ it("unlocks after a pending native lock completes on unmount", async () => {
+   let finish!: () => void
+   lockMock.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve({ kind: "ok" }) }))
+   const status = jest.fn()
+   const { unmount } = render(<MobileCanvas store={createEditorStore(buildWorkflow())} mode="read" connectActive={false} onNodeTap={jest.fn()} onEdgeTap={jest.fn()} onPaneTap={jest.fn()} onLongPress={jest.fn()} orientationLocked onOrientationStatus={status} onInit={jest.fn()} />)
+   await waitFor(() => expect(finish).toBeDefined())
+   unlockMock.mockClear(); unmount()
+   expect(unlockMock).not.toHaveBeenCalled()
+   await act(async () => finish())
+   expect(unlockMock).toHaveBeenCalledTimes(1)
+   expect(status).not.toHaveBeenCalledWith("locked")
+ })

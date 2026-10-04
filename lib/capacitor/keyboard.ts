@@ -6,13 +6,15 @@ import { makeDefaultLoader, withPlugin, type SimpleOutcome } from "./_shared"
  * `@capacitor/keyboard` wrapper.
  *
  * The mobile shell configures `plugins.Keyboard.resize: "native"` in
- * `mobile/capacitor.config.ts`, which resizes the whole WebView frame when
- * the soft keyboard opens. In that mode `window.innerHeight` shrinks along
- * with `visualViewport.height`, so the visualViewport delta that
- * `useKeyboardInsets` computes collapses to 0 — the native
- * `keyboardWillShow` events (which carry `keyboardHeight`) are the only
- * reliable signal. This wrapper exposes those events plus imperative
- * hide/show so UI code never imports the native module directly.
+ * `mobile/capacitor.config.ts` (iOS), and on Android Capacitor 8's core
+ * `SystemBars` plugin pads the decor view by the IME inset; either way the OS
+ * resizes the whole WebView frame when the soft keyboard opens. In that mode
+ * `window.innerHeight` shrinks along with `visualViewport.height`, so the
+ * visualViewport overlap the keyboard store (`keyboard-viewport.ts`) computes
+ * collapses to 0 — the native `keyboardWillShow` events (which carry
+ * `keyboardHeight`) are the only reliable open/closed signal. This wrapper
+ * exposes those events plus imperative hide/show so UI code never imports the
+ * native module directly.
  *
  * On web / Tauri every function is an inert no-op (`unsupported` outcome or
  * inert unsubscribe), matching the other `lib/capacitor/*` wrappers.
@@ -72,24 +74,48 @@ export async function subscribeKeyboard(
   } catch {
     return null
   }
+  let active = true
+  const removers: Array<{ remove: () => void | Promise<void> }> = []
+  const removeAll = () => {
+    active = false
+    for (const listener of removers.splice(0)) {
+      void Promise.resolve()
+        .then(() => listener.remove())
+        .catch(() => {})
+    }
+  }
   try {
-    const removers: Array<{ remove: () => void | Promise<void> }> = []
     if (handlers.onWillShow) {
-      removers.push(await keyboard.addListener("keyboardWillShow", handlers.onWillShow))
+      removers.push(
+        await keyboard.addListener("keyboardWillShow", (info) => {
+          if (active) handlers.onWillShow?.(info)
+        })
+      )
     }
     if (handlers.onDidShow) {
-      removers.push(await keyboard.addListener("keyboardDidShow", handlers.onDidShow))
+      removers.push(
+        await keyboard.addListener("keyboardDidShow", (info) => {
+          if (active) handlers.onDidShow?.(info)
+        })
+      )
     }
     if (handlers.onWillHide) {
-      removers.push(await keyboard.addListener("keyboardWillHide", handlers.onWillHide))
+      removers.push(
+        await keyboard.addListener("keyboardWillHide", () => {
+          if (active) handlers.onWillHide?.()
+        })
+      )
     }
     if (handlers.onDidHide) {
-      removers.push(await keyboard.addListener("keyboardDidHide", handlers.onDidHide))
+      removers.push(
+        await keyboard.addListener("keyboardDidHide", () => {
+          if (active) handlers.onDidHide?.()
+        })
+      )
     }
-    return () => {
-      for (const listener of removers) void listener.remove()
-    }
+    return removeAll
   } catch {
+    removeAll()
     return null
   }
 }

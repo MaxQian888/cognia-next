@@ -1,0 +1,353 @@
+--- a/android/src/main/java/io/trik/capacitor/zeroconf/ZeroConf.java
++++ b/android/src/main/java/io/trik/capacitor/zeroconf/ZeroConf.java
+@@ -47,6 +47,22 @@
+         lock = wifi.createMulticastLock("ZeroConfPluginLock");
+         lock.setReferenceCounted(false);
+ 
++        refreshAddresses();
++
++        Log.d(TAG, "Addresses " + addresses);
++
++        try {
++            hostname = getHostNameFromActivity(activity);
++        } catch (Exception e) {
++            Log.e(TAG, e.getMessage(), e);
++        }
++
++        Log.d(TAG, "Hostname " + hostname);
++
++        Log.v(TAG, "Initialized");
++    }
++
++    private void refreshAddresses() {
+         try {
+             addresses = new CopyOnWriteArrayList<>();
+             ipv6Addresses = new CopyOnWriteArrayList<>();
+@@ -72,17 +88,6 @@
+             Log.e(TAG, e.getMessage(), e);
+         }
+ 
+-        Log.d(TAG, "Addresses " + addresses);
+-
+-        try {
+-            hostname = getHostNameFromActivity(activity);
+-        } catch (Exception e) {
+-            Log.e(TAG, e.getMessage(), e);
+-        }
+-
+-        Log.d(TAG, "Hostname " + hostname);
+-
+-        Log.v(TAG, "Initialized");
+     }
+ 
+     public String getHostname() {
+@@ -133,6 +138,7 @@
+         Log.d(TAG, "Watch " + type + domain);
+ 
+         if (browserManager == null) {
++            refreshAddresses();
+             List<InetAddress> selectedAddresses = addresses;
+             if ("ipv6".equalsIgnoreCase(addressFamily)) {
+                 selectedAddresses = ipv6Addresses;
+@@ -140,14 +146,15 @@
+                 selectedAddresses = ipv4Addresses;
+             }
+             browserManager = new BrowserManager(selectedAddresses, hostname);
+-            browserManager.watch(type, domain, callback);
+-        }
+-    }
+-
+-    public void unwatchService(String type, String domain) {
++        }
++        browserManager.watch(type, domain, callback);
++    }
++
++    public void unwatchService(String type, String domain) throws IOException {
+         Log.d(TAG, "Unwatch " + type + domain);
+         if (browserManager != null) {
+             browserManager.unwatch(type, domain);
++            if (browserManager.calls.isEmpty()) close();
+         }
+     }
+ 
+@@ -219,17 +226,21 @@
+ 
+         private final List<JmDNS> browsers = new ArrayList<>();
+ 
+-        private final Map<String, ZeroConfServiceWatchCallback> calls = new HashMap<>();
++        private final Map<String, ZeroConfServiceWatchCallback> calls = new java.util.concurrent.ConcurrentHashMap<>();
+ 
+         public BrowserManager(List<InetAddress> addresses, String hostname) throws IOException {
+             lock.acquire();
+-
+-            if (addresses == null || addresses.size() == 0) {
+-                browsers.add(JmDNS.create(null, hostname));
+-            } else {
+-                for (InetAddress address : addresses) {
+-                    browsers.add(JmDNS.create(address, hostname));
+-                }
++            try {
++                if (addresses == null || addresses.size() == 0) {
++                    browsers.add(JmDNS.create(null, hostname));
++                } else {
++                    for (InetAddress address : addresses) {
++                        browsers.add(JmDNS.create(address, hostname));
++                    }
++                }
++            } catch (IOException | RuntimeException error) {
++                try { close(); } catch (IOException cleanupError) { error.addSuppressed(cleanupError); }
++                throw error;
+             }
+         }
+ 
+@@ -251,12 +262,18 @@
+ 
+         private void close() throws IOException {
+             lock.release();
+-
+             calls.clear();
+-
++            IOException failure = null;
+             for (JmDNS browser : browsers) {
+-                browser.close();
+-            }
++                try {
++                    browser.close();
++                } catch (IOException error) {
++                    if (failure == null) failure = error;
++                    else failure.addSuppressed(error);
++                }
++            }
++            browsers.clear();
++            if (failure != null) throw failure;
+         }
+ 
+         @Override
+--- a/android/src/main/java/io/trik/capacitor/zeroconf/ZeroConfPlugin.java
++++ b/android/src/main/java/io/trik/capacitor/zeroconf/ZeroConfPlugin.java
+@@ -9,6 +9,8 @@
+ import com.getcapacitor.annotation.CapacitorPlugin;
+ import com.getcapacitor.annotation.Permission;
+ import java.io.IOException;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.Map;
+ import java.net.InetAddress;
+ import java.util.Enumeration;
+ import javax.jmdns.ServiceInfo;
+@@ -29,6 +31,16 @@
+     private static final String TAG = "ZeroConf";
+ 
+     private final ZeroConf implementation = new ZeroConf();
++    private final Map<String, PluginCall> watchCalls = new ConcurrentHashMap<>();
++
++    private void releaseWatch(String key) {
++        PluginCall previous = watchCalls.remove(key);
++        if (previous != null) {
++            previous.setKeepAlive(false);
++            previous.resolve();
++            previous.release(getBridge());
++        }
++    }
+ 
+     @Override
+     public void load() {
+@@ -101,42 +113,47 @@
+         final String type = call.getString("type");
+         final String domain = call.getString("domain");
+         final String addressFamily = call.getString("addressFamily");
+-
+-        getBridge()
+-            .executeOnMainThread(() -> {
+-                try {
+-                    implementation.watchService(
+-                        type,
+-                        domain,
+-                        addressFamily,
+-                        (action, service) -> {
+-                            JSObject status = new JSObject();
+-                            status.put("action", action);
+-                            status.put("service", jsonifyService(service));
+-
+-                            call.setKeepAlive(true);
+-                            call.resolve(status);
+-                        }
+-                    );
+-                } catch (IOException | RuntimeException e) {
+-                    call.reject("Error: " + e.getMessage());
+-                }
+-            });
+-
++        if (type == null || domain == null) {
++            call.reject("Invalid parameters");
++            return;
++        }
+         call.setKeepAlive(true);
+-        call.resolve();
++        getBridge().executeOnMainThread(() -> {
++            final String key = type + domain;
++            releaseWatch(key);
++            watchCalls.put(key, call);
++            try {
++                implementation.watchService(type, domain, addressFamily, (action, service) -> {
++                    if (watchCalls.get(key) != call) return;
++                    JSObject status = new JSObject();
++                    status.put("action", action);
++                    status.put("service", jsonifyService(service));
++                    call.resolve(status);
++                });
++                call.resolve();
++            } catch (IOException | RuntimeException e) {
++                watchCalls.remove(key);
++                call.setKeepAlive(false);
++                call.reject("Error: " + e.getMessage());
++                call.release(getBridge());
++                try { implementation.unwatchService(type, domain); } catch (IOException ignored) {}
++            }
++        });
+     }
+ 
+     @PluginMethod
+     public void unwatch(PluginCall call) {
+         final String type = call.getString("type");
+         final String domain = call.getString("domain");
+-
+-        getBridge()
+-            .executeOnMainThread(() -> {
++        getBridge().executeOnMainThread(() -> {
++            releaseWatch(type + domain);
++            try {
+                 implementation.unwatchService(type, domain);
+                 call.resolve();
+-            });
++            } catch (IOException | RuntimeException e) {
++                call.reject("Error: " + e.getMessage());
++            }
++        });
+     }
+ 
+     @PluginMethod
+@@ -144,6 +161,7 @@
+         getBridge()
+             .executeOnMainThread(() -> {
+                 try {
++                    for (String key : new java.util.ArrayList<>(watchCalls.keySet())) releaseWatch(key);
+                     implementation.close();
+                     call.resolve();
+                 } catch (IOException e) {
+--- a/ios/Plugin/ZeroConfPlugin.swift
++++ b/ios/Plugin/ZeroConfPlugin.swift
+@@ -4,6 +4,14 @@
+ @objc(ZeroConfPlugin)
+ public class ZeroConfPlugin: CAPPlugin {
+     private let implementation = ZeroConf()
++    private var watchCalls: [String: CAPPluginCall] = [:]
++
++    private func releaseWatch(_ key: String) {
++        guard let previous = watchCalls.removeValue(forKey: key) else { return }
++        previous.keepAlive = false
++        previous.resolve()
++        bridge?.releaseCall(previous)
++    }
+ 
+     @objc func getHostname(_ call: CAPPluginCall) {
+         let value = implementation.getHostname()
+@@ -88,16 +96,19 @@
+     }
+ 
+     @objc func watch(_ call: CAPPluginCall) {
++        let typeParam = call.getString("type")
++        let domainParam = call.getString("domain")
++
++        guard let type = typeParam, let domain = domainParam else {
++            call.reject("Invalid parameters")
++            return
++        }
++
+         call.keepAlive = true
+-        let typeParam = call.getString("type")
+-        let domainParam = call.getString("domain")
+-
+-        guard let type = typeParam, let domain = domainParam else {
+-            call.reject("Invalid parameters")
+-            return
+-        }
++        let key = type + domain
+ 
+         func callback(action: ZeroConfPublisherAction, service: NetService?, error: [String: NSNumber]?) {
++            guard self.watchCalls[key] === call else { return }
+             var actionStr = ""
+             switch action {
+             case .added:
+@@ -107,7 +118,10 @@
+             case .resolved:
+                 actionStr = "resolved"
+             case .error:
++                self.watchCalls.removeValue(forKey: key)
++                call.keepAlive = false
+                 call.reject(error?.keys.joined(separator: ", ") ?? "")
++                self.bridge?.releaseCall(call)
+                 return
+             }
+             if let unwrappedService: NetService = service {
+@@ -116,6 +130,8 @@
+         }
+ 
+         DispatchQueue.main.async {
++            self.releaseWatch(key)
++            self.watchCalls[key] = call
+             self.implementation.watch(type: type, domain: domain, callback: callback)
+         }
+     }
+@@ -134,6 +150,7 @@
+         }
+ 
+         DispatchQueue.main.async {
++            self.releaseWatch(type + domain)
+             self.implementation.unwatch(type: type, domain: domain, callback: callback)
+         }
+     }
+--- a/ios/Plugin/ZeroConf.swift
++++ b/ios/Plugin/ZeroConf.swift
+@@ -69,6 +69,7 @@
+         #if DEBUG
+         print("ZeroConf: watch \(type + domain)")
+         #endif
++        browsers[type + domain]?.unwatch(nil)
+         let browser = Browser(withDomain: domain, withType: type)
+         browsers[type + domain] = browser
+         browser.watch(callback)
+@@ -81,7 +82,8 @@
+ 
+         if let browser = browsers[type + domain] {
+             browsers.removeValue(forKey: type + domain)
+-            browser.unwatch(callback)
++            browser.unwatch(nil)
++            callback(nil)
+         } else {
+             callback(nil)
+         }
+@@ -197,12 +199,18 @@
+         }
+ 
+         func unwatch(_ unwatchCallback: ((NetService) -> Void)?) {
+-            self.unwatchCallback = unwatchCallback
+-
+-            if let service = nsb {
+-                service.stop()
+-            }
+-
++            // NetServiceBrowser.stop does not invoke NetServiceDidStop.
++            // Retire all pending resolvers and callbacks synchronously.
++            watchCallback = nil
++            self.unwatchCallback = nil
++            nsb?.delegate = nil
++            nsb?.stop()
++            nsb = nil
++            for service in services.values {
++                service.delegate = nil
++                service.stop()
++            }
++            services.removeAll()
+         }
+ 
+         func destroy() {

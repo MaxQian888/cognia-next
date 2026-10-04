@@ -80,14 +80,18 @@ export async function attachmentToFiles(attachment: ComposerAttachment): Promise
         ? `data:${attachment.mime};base64,${attachment.base64}`
         : attachment.uri
       if (!source) return []
-      const blob = await (await fetch(source)).blob()
+      const response = await fetch(source)
+      if (!response.ok) throw new Error(`Failed to read photo (${response.status})`)
+      const blob = await response.blob()
       const ext = attachment.mime.split("/")[1] ?? "jpeg"
       return [new File([blob], `photo-${Date.now()}.${ext}`, { type: attachment.mime })]
     }
     case "photos": {
       const files = await Promise.all(
         attachment.items.map(async (item, i) => {
-          const blob = await (await fetch(item.uri)).blob()
+          const response = await fetch(item.uri)
+          if (!response.ok) throw new Error(`Failed to read photo (${response.status})`)
+          const blob = await response.blob()
           const ext = item.mime.split("/")[1] ?? "jpeg"
           return new File([blob], `photo-${Date.now()}-${i}.${ext}`, { type: item.mime })
         })

@@ -40,22 +40,22 @@ describe("status-bar", () => {
     expect(sb.setOverlaysWebView).toHaveBeenCalledWith({ overlay: true })
   })
 
-  it("syncWithTheme picks LIGHT bar for dark theme", async () => {
+  it("syncWithTheme picks DARK (light text) for dark theme", async () => {
     const sb = makeSb()
     await syncWithTheme("dark", undefined, async () => sb)
-    expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
+    expect(sb.setStyle).toHaveBeenCalledWith({ style: "DARK" })
   })
 
-  it("syncWithTheme picks DARK bar for light theme", async () => {
+  it("syncWithTheme picks LIGHT (dark text) for light theme", async () => {
     const sb = makeSb()
     await syncWithTheme("light", undefined, async () => sb)
-    expect(sb.setStyle).toHaveBeenCalledWith({ style: "DARK" })
+    expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
   })
 
   it("syncWithTheme also pushes a token-derived backgroundHex when provided", async () => {
     const sb = makeSb()
     await syncWithTheme("dark", "#101820", async () => sb)
-    expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
+    expect(sb.setStyle).toHaveBeenCalledWith({ style: "DARK" })
     expect(sb.setBackgroundColor).toHaveBeenCalledWith({ color: "#101820" })
   })
 
@@ -65,7 +65,7 @@ describe("status-bar", () => {
     expect(sb.setBackgroundColor).not.toHaveBeenCalled()
   })
 
-  it("syncWithTheme skips setBackgroundColor on iOS (Android-only API)", async () => {
+  it("syncWithTheme updates the supported iOS background API", async () => {
     ;(globalThis as { Capacitor?: { getPlatform: () => string } }).Capacitor = {
       getPlatform: () => "ios",
     }
@@ -73,8 +73,8 @@ describe("status-bar", () => {
       const sb = makeSb()
       const out = await syncWithTheme("dark", "#101820", async () => sb)
       expect(out).toEqual({ kind: "ok" })
-      expect(sb.setStyle).toHaveBeenCalledWith({ style: "LIGHT" })
-      expect(sb.setBackgroundColor).not.toHaveBeenCalled()
+      expect(sb.setStyle).toHaveBeenCalledWith({ style: "DARK" })
+      expect(sb.setBackgroundColor).toHaveBeenCalledWith({ color: "#101820" })
     } finally {
       delete (globalThis as { Capacitor?: unknown }).Capacitor
     }

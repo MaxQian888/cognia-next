@@ -1,7 +1,26 @@
 /**
  * @jest-environment jsdom
  */
-import { getAppInfo, minimizeApp, subscribeBackButton, subscribeResume } from "./app"
+import {
+  getAppInfo,
+  minimizeApp,
+  subscribeBackButton,
+  subscribeResume,
+  subscribeRestoredResult,
+} from "./app"
+
+it("subscribes to retained app results and safely removes the listener", async () => {
+  const remove = jest.fn(async () => {
+    throw new Error("bridge closed")
+  })
+  const addListener = jest.fn(async () => ({ remove }))
+  const handler = jest.fn()
+  const unsubscribe = await subscribeRestoredResult(handler, async () => makeApp({ addListener }))
+  expect(addListener).toHaveBeenCalledWith("appRestoredResult", handler)
+  unsubscribe()
+  await Promise.resolve()
+  expect(remove).toHaveBeenCalledTimes(1)
+})
 
 /** Full plugin double — the shape now requires backButton + minimizeApp. */
 function makeApp(overrides: Record<string, unknown> = {}) {

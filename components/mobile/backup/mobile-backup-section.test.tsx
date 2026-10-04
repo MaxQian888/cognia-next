@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // The component now delegates the platform write + feedback to the unified
@@ -77,9 +77,15 @@ jest.mock("@/components/settings/data/webdav-sync-card", () => ({
   WebDavSyncCard: () => <div data-testid="webdav-sync-card" />,
 }))
 
+const mockScheduleReminder = jest.fn(async (..._args: unknown[]) => ({ kind: "ok", value: [91001] }))
+const mockCancelReminder = jest.fn(async (..._args: unknown[]) => ({ kind: "ok" }))
+const mockPendingReminders = jest.fn(async () => ({ kind: "ok", value: [] as Array<{ id: number; schedule?: { every: string; count: number } }> }))
 jest.mock("@/lib/capacitor/local-notifications", () => ({
-  ensureChannel: jest.fn(),
-  schedule: jest.fn(),
+  DEFAULT_CHANNEL_ID: "cognia-default",
+  ensureChannel: jest.fn(async () => ({ kind: "ok" })),
+  schedule: (...args: unknown[]) => mockScheduleReminder(...args),
+  cancel: (...args: unknown[]) => mockCancelReminder(...args),
+  listPending: () => mockPendingReminders(),
 }))
 
 jest.mock("@/lib/capacitor/_shared", () => ({
@@ -200,6 +206,10 @@ describe("<MobileBackupSection />", () => {
   })
 
   beforeEach(() => {
+    mockPendingReminders.mockResolvedValue({ kind: "ok", value: [] })
+    mockScheduleReminder.mockResolvedValue({ kind: "ok", value: [91001] })
+    mockCancelReminder.mockResolvedValue({ kind: "ok" })
+
     jest.clearAllMocks()
     mockBuildBackupPackage.mockResolvedValue({ manifest: { version: "test" } })
     mockAttachPortableRetrievalKeys.mockImplementation(async (pkg: unknown) => pkg)
@@ -299,6 +309,7 @@ describe("<MobileBackupSection />", () => {
         expect.any(Object),
         "password123"
       )
+      expect(useBiometricGuardMock.mock.results.at(-1)?.value).not.toHaveBeenCalled()
     })
 
     it("still notifies (web download path) when saveExport falls back to web", async () => {
@@ -513,7 +524,7 @@ describe("<MobileBackupSection />", () => {
       expect(mockToastError.mock.calls[0][0]).not.toMatch(/\bunavailable\b/)
     })
 
-    it("passes through biometric guard when cancelled", async () => {
+    it("does not build or save a backup when the required biometric prompt is cancelled", async () => {
       useSettingsStoreMock.mockImplementation((selector: (s: unknown) => unknown) =>
         selector({
           settings: {
@@ -541,6 +552,8 @@ describe("<MobileBackupSection />", () => {
       expect(mockToastError).not.toHaveBeenCalled()
       // runExport should NOT have been called
       expect(mockSaveExport).not.toHaveBeenCalled()
+      expect(mockBuildBackupPackage).not.toHaveBeenCalled()
+      expect(mockAttachPortableRetrievalKeys).not.toHaveBeenCalled()
     })
   })
 
@@ -787,5 +800,58 @@ describe("<MobileBackupSection />", () => {
       const { unmount } = render(<MobileBackupSection />)
       expect(() => unmount()).not.toThrow()
     })
+  })
+})
+
+
+describe("native backup reminder lifecycle", () => {
+  beforeEach(() => {
+    mockScheduleReminder.mockReset().mockResolvedValue({ kind: "ok", value: [91001] })
+    mockCancelReminder.mockReset().mockResolvedValue({ kind: "ok" })
+    mockPendingReminders.mockReset().mockResolvedValue({ kind: "ok", value: [] })
+    detectNativePlatformMock.mockReturnValue("mobile")
+    mockToastError.mockClear()
+  })
+
+  it("reconciles the toggle with the OS after notification scheduling is denied", async () => {
+    mockScheduleReminder.mockResolvedValueOnce({ kind: "error", value: [] })
+    render(<MobileBackupSection />)
+    fireEvent.click(screen.getByTestId("backup-auto-toggle"))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("reminderFailed"))
+    await waitFor(() => expect(screen.getByTestId("backup-auto-toggle")).toHaveAttribute("aria-checked", "false"))
+    expect(mockPendingReminders).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the enabled toggle when cancelling the persisted reminder fails", async () => {
+    mockPendingReminders.mockResolvedValue({ kind: "ok", value: [{ id: 91001, schedule: { every: "day", count: 2 } }] })
+    mockCancelReminder.mockResolvedValueOnce({ kind: "error" })
+    render(<MobileBackupSection />)
+    await waitFor(() => expect(screen.getByTestId("backup-auto-toggle")).toHaveAttribute("aria-checked", "true"))
+    fireEvent.click(screen.getByTestId("backup-auto-toggle"))
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("reminderFailed"))
+    await waitFor(() => expect(screen.getByTestId("backup-auto-toggle")).toHaveAttribute("aria-checked", "true"))
+  })
+
+  it("restores an existing reminder and its interval without scheduling again", async () => {
+    mockPendingReminders.mockResolvedValueOnce({ kind: "ok", value: [{ id: 91001, schedule: { every: "day", count: 3 } }] })
+    const before = mockScheduleReminder.mock.calls.length
+    render(<MobileBackupSection />)
+    await waitFor(() => expect(screen.getByTestId("backup-auto-toggle")).toHaveAttribute("aria-checked", "true"))
+    expect(screen.getByTestId("backup-auto-interval")).toHaveValue(3)
+    expect(mockScheduleReminder.mock.calls.length).toBe(before)
+  })
+
+  it("cancels a pending native schedule after the user switches the reminder off", async () => {
+    let finish!: (outcome: { kind: string; value: number[] }) => void
+    mockScheduleReminder.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    render(<MobileBackupSection />)
+    fireEvent.click(screen.getByTestId("backup-auto-toggle"))
+    await waitFor(() => expect(finish).toBeDefined())
+    fireEvent.click(screen.getByTestId("backup-auto-toggle"))
+    const before = mockCancelReminder.mock.calls.length
+    await act(async () => { finish({ kind: "ok", value: [91001] }) })
+    await waitFor(() => expect(mockCancelReminder.mock.calls.length).toBeGreaterThan(before))
+    expect(mockCancelReminder).toHaveBeenLastCalledWith([91001])
+    expect(screen.getByTestId("backup-auto-toggle")).toHaveAttribute("aria-checked", "false")
   })
 })

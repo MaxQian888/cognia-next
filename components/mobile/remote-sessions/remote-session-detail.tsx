@@ -25,7 +25,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRemoteSessionStream } from "@/hooks/data/use-remote-session-stream"
 import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import { RemoteSessionComposer } from "./remote-session-composer"
-import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { CONNECTION_STATE_META } from "@/components/mobile/connection-state-badge"
 import { cn } from "@/lib/utils"
 import { ApprovalCard } from "./approval-card"
@@ -140,8 +139,6 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
           ) : null}
         </div>
       </div>
-
-      <OfflineBanner />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {notFound ? (

@@ -57,7 +57,10 @@ import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
 import { MobileChannelListSourceProvider } from "@/components/mobile/shell/mobile-channel-list-source"
-import { MobileChatRuntimeNotice } from "@/components/mobile/shell/mobile-chat-runtime-notice"
+import {
+  MobileChatRuntimeNotice,
+  MobileChatRuntimeStrip,
+} from "@/components/mobile/shell/mobile-chat-runtime-notice"
 import { MobileCredentialWarning } from "@/components/mobile/shell/mobile-credential-warning"
 import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
 import { useMediaQuery } from "@/hooks/ui/use-media-query"
@@ -162,6 +165,7 @@ const NAV_DRAWER_GESTURE_SURFACE = '[data-mobile-nav-sheet], [data-slot="sheet-o
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
+  const tChatRuntime = useTranslations("desktop.chatRuntime")
   const tRail = useTranslations("desktop.guildRail")
   const router = useRouter()
   // Same reach contract as the desktop sidebar: grouping by workspace, or a
@@ -179,8 +183,12 @@ export function AppShellMobile() {
     rename,
     archive,
     unarchive,
+    bulkRemove,
     bulkSetPinned,
+    bulkArchive,
+    bulkUnarchive,
     assignToFolder,
+    bulkAssignToFolder,
     folders,
   } = useSessions({
     crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
@@ -353,6 +361,8 @@ export function AppShellMobile() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const [exportOpen, setExportOpen] = useState(false)
+  // The private conversation's share sheet, opened from the ⋮ menu.
+  const [sharePanelOpen, setSharePanelOpen] = useState(false)
 
   // The drawer's second way in and out. The hamburger stays where it is, but a
   // phone reaches the leading edge far more easily than the top-left corner of
@@ -523,7 +533,7 @@ export function AppShellMobile() {
 
   const handleCreateTeam = () => openSettings("teams")
 
-  const handleSwitchToSession = (id: string) => {
+  const switchToSession = (id: string, { closeNav }: { closeNav: boolean }) => {
     const target = sessions.find((s) => s.id === id)
     // Follow the conversation into its workspace before focusing it — see the
     // desktop counterpart in `desktop-chat-workspace.tsx`.
@@ -534,15 +544,24 @@ export function AppShellMobile() {
     select(id)
     if (!target) return
     setSelectedGuild(guildFromSession(target))
-    setNavOpen(false)
+    if (closeNav) setNavOpen(false)
   }
+  // Picking a conversation (a row, the palette, the welcome's Continue)
+  // shows it: the drawer gets out of the way.
+  const handleSwitchToSession = (id: string) => switchToSession(id, { closeNav: true })
+  // The drawer's own follow-ups — the row that takes the open conversation's
+  // place after it is archived or deleted there, an archive undo reopening it
+  // — switch the pane behind the drawer and leave the drawer where the user is
+  // working.
+  const handleSwitchInDrawer = (id: string) => switchToSession(id, { closeNav: false })
 
   // Recent sessions for the welcome-page "Continue" group (newest first,
-  // excluding the one already open).
+  // excluding the one already open). Archived conversations were put away on
+  // purpose; offering them to continue would undo that.
   const recentSessions = useMemo(
     () =>
       [...sessions]
-        .filter((s) => s.id !== activeSessionId)
+        .filter((s) => s.id !== activeSessionId && s.archivedAt == null)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 4)
         .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt })),
@@ -575,7 +594,10 @@ export function AppShellMobile() {
         // reach new chat / settings / export / delete — sat off-screen, and the
         // document gained a horizontal scroll that dragged every `position:
         // fixed` layer (the tab bar included) out of alignment with it.
-        className="flex h-14 shrink-0 items-center gap-2 overflow-hidden border-b border-border px-2"
+        // `gap-1`, not `gap-2`: every control on this row is already a 44px
+        // touch box whose glyph sits 12px inside it, so a wider gap only
+        // spread the action cluster and took width from the title.
+        className="flex h-14 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1"
         data-app-chrome
       >
         {/* The list's long-lived state (characters, teams, unread, search,
@@ -660,6 +682,7 @@ export function AppShellMobile() {
                       isLoadingSessions={isLoadingSessions}
                       activeSessionId={activeSessionId}
                       onSelect={handleSwitchToSession}
+                      onSelectInPlace={handleSwitchInDrawer}
                       onNewDirect={() => {
                         setNavOpen(false)
                         handleNewDirect()
@@ -670,6 +693,10 @@ export function AppShellMobile() {
                       onUnarchive={unarchive}
                       onSetPinned={bulkSetPinned}
                       onAssignToFolder={assignToFolder}
+                      onBulkDelete={bulkRemove}
+                      onBulkArchive={bulkArchive}
+                      onBulkUnarchive={bulkUnarchive}
+                      onBulkAssignToFolder={bulkAssignToFolder}
                       folders={folders}
                       runStatusById={runStatusById}
                       onBranch={branchWholeConversation}
@@ -692,8 +719,8 @@ export function AppShellMobile() {
           streaming={chatStatus === "streaming"}
         />
 
-        {/* No `ml-2`: the header's own `gap-2` already spaces it, and the
-            doubled 16px came straight out of the title's width. */}
+        {/* No `ml-2`: the header's own gap already spaces it, and the
+            doubled margin came straight out of the title's width. */}
         <MobileWorkspaceChip className="min-w-0 shrink" />
 
         {/* A phone shows one conversation, so turns started and navigated away
@@ -706,22 +733,22 @@ export function AppShellMobile() {
           }}
         />
 
-        {/* Missing-credential warning stays visible (blocking issue): a tap
-            opens the session sheet whose Account section resolves it. Never
-            buried in the overflow menu, and never shrunk — it is a fixed
-            icon button that grows a label only when the bar has room. */}
-        {keyOk === false && activeSession ? (
-          <MobileCredentialWarning
-            showLabel={keyLabelInBar}
-            onResolve={() => {
-              setSessionSettingsFocus("account")
-              setSessionSettingsOpen(true)
-            }}
-            className="ml-1"
-          />
-        ) : null}
-
-        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-0 sm:gap-1">
+          {/* Missing-credential warning stays visible (blocking issue): a tap
+              opens the session sheet whose Account section resolves it. Never
+              buried in the overflow menu, and never shrunk. It heads the
+              action cluster rather than sitting between the title and the
+              chips: there it split the bar's identity half in two and took its
+              width out of the title. */}
+          {keyOk === false && activeSession ? (
+            <MobileCredentialWarning
+              showLabel={keyLabelInBar}
+              onResolve={() => {
+                setSessionSettingsFocus("account")
+                setSessionSettingsOpen(true)
+              }}
+            />
+          ) : null}
           {/* The artifact dock's only standing affordance on a phone. The copy
               in `chat-header` never mounts here (the chat pane below is given
               `showHeader={false}`), so without this the Sheet could only be
@@ -882,6 +909,18 @@ export function AppShellMobile() {
                   <span>{tShell("sessionSettings")}</span>
                 </DropdownMenuItem>
               ) : null}
+              {activeSession && sharedChatEnabled && !activeSession.collaboration ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    // Defer so the menu can close before the sheet grabs focus.
+                    setTimeout(() => setSharePanelOpen(true), 0)
+                  }}
+                  data-testid="mobile-action-share-conversation"
+                >
+                  <UsersIcon className="size-4" />
+                  <span>{tShell("shareConversation")}</span>
+                </DropdownMenuItem>
+              ) : null}
               {activeSession ? (
                 <DropdownMenuItem
                   onSelect={() => {
@@ -913,16 +952,27 @@ export function AppShellMobile() {
           </DropdownMenu>
         </div>
       </header>
-      {/* Only while sharing is on. With it off the panel is one disabled lock
-          icon, and on a phone that spent a whole bordered row of the chat's
-          height on a control that cannot be pressed. */}
+      {/* A row of its own only for a conversation that IS shared — then it
+          carries something live (the sync state, Request AI, the members
+          trigger). A private one used to get the same bordered row for a
+          single lock button; its way in is the ⋮ menu's "Share conversation…"
+          now, which drives the same sheet. */}
       {activeSession && sharedChatEnabled ? (
-        <div
-          className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1"
-          data-testid="mobile-shared-session-strip"
-        >
-          <SharedSessionPanel session={activeSession} />
-        </div>
+        activeSession.collaboration ? (
+          <div
+            className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1"
+            data-testid="mobile-shared-session-strip"
+          >
+            <SharedSessionPanel session={activeSession} />
+          </div>
+        ) : (
+          <SharedSessionPanel
+            session={activeSession}
+            trigger="none"
+            open={sharePanelOpen}
+            onOpenChange={setSharePanelOpen}
+          />
+        )
       ) : null}
 
       <PerfCaptureShellStatus className="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-destructive/5 px-3 text-xs" />
@@ -1005,6 +1055,18 @@ export function AppShellMobile() {
                   />
                 ) : null
               }
+              // With history the card would push the transcript down; the
+              // same report rides the composer's top edge as one line instead.
+              runtimeStrip={
+                chatRuntime.composerDisabled ? (
+                  <MobileChatRuntimeStrip
+                    gate={chatRuntime}
+                    onNavigate={(href) => router.push(href)}
+                    onOpenSettings={openSettings}
+                  />
+                ) : null
+              }
+              composerDisabledPlaceholder={tChatRuntime("strip.placeholder")}
               composerDisabled={chatRuntime.composerDisabled}
               // Same guard as the desktop: only offered when the workspace has
               // a directory, because "Local" means nothing without one.

@@ -11,3 +11,5 @@
 "NSLocationWhenInUseUsageDescription" = "Cognia needs your current position for workflow location triggers (foreground only).";
 
 "NSLocalNetworkUsageDescription" = "Cognia needs to discover your paired desktop on this local network.";
+
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Cognia needs your current position for workflow location triggers (foreground only).";

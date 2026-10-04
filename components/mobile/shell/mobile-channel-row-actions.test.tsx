@@ -104,12 +104,28 @@ describe("<MobileChannelRowActions />", () => {
     ]) {
       expect(screen.getByTestId(item(action))).toBeEnabled()
     }
-    // No desktop-only hand-offs, no multi-select, no key hints on a phone.
+    // No desktop-only hand-offs and no key hints on a phone; Select only when
+    // the list hands the sheet its selection toggle.
     expect(screen.queryByTestId(item("terminal"))).toBeNull()
     expect(screen.queryByTestId(item("select"))).toBeNull()
     expect(screen.queryByText("F2")).toBeNull()
     // No folders to file into.
     expect(screen.queryByTestId(item("move-folder"))).toBeNull()
+  })
+
+  it("offers Select first and hands the row to the list's selection toggle", async () => {
+    const onToggleSelection = jest.fn()
+    const { props } = renderActions({ onToggleSelection })
+    const select = await screen.findByTestId(item("select"))
+    expect(select).toHaveTextContent("select")
+    fireEvent.click(select)
+    await waitFor(() => expect(onToggleSelection).toHaveBeenCalledWith(session))
+    expect(props.onClose).toHaveBeenCalled()
+  })
+
+  it("offers Deselect for a row already in the selection", async () => {
+    renderActions({ onToggleSelection: jest.fn(), selected: true })
+    expect(await screen.findByTestId(item("select"))).toHaveTextContent("deselect")
   })
 
   it.each([
@@ -141,9 +157,21 @@ describe("<MobileChannelRowActions />", () => {
   })
 
   it("names each toggle for the row's current state", async () => {
-    renderActions({ session: { ...session, pinned: true, archivedAt: 3 } })
+    renderActions({ session: { ...session, pinned: true } })
     expect(await screen.findByTestId(item("pin"))).toHaveTextContent("unpin")
-    expect(screen.getByTestId(item("unarchive"))).toHaveTextContent("unarchive")
+    expect(screen.getByTestId(item("archive"))).toHaveTextContent("archive")
+  })
+
+  it("freezes an archived row's pin, folder and read state (ADR-0213)", async () => {
+    renderActions({
+      session: { ...session, pinned: true, archivedAt: 3 },
+      unread: 2,
+      folders: [folder("mine", "w1")],
+    })
+    expect(await screen.findByTestId(item("unarchive"))).toHaveTextContent("unarchive")
+    expect(screen.queryByTestId(item("pin"))).toBeNull()
+    expect(screen.queryByTestId(item("mark-read"))).toBeNull()
+    expect(screen.queryByTestId(item("move-folder"))).toBeNull()
   })
 
   it("offers Mark as read while something is unread, Mark as unread otherwise", async () => {

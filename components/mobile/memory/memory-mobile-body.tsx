@@ -130,11 +130,11 @@ export function MemoryMobileBody({ initialSelectedId, projectId }: MemoryMobileB
     <main
       className={cn(
         COMPACT_PAGE_MIN_H,
-        "flex flex-col gap-4 bg-background pt-3 safe-area-pt"
+        "flex w-full min-w-0 flex-col gap-4 bg-background pb-6 safe-area-pt"
       )}
       data-testid="mobile-memory-body"
     >
-      <header className="flex flex-col gap-3 px-4">
+      <header className="flex flex-col gap-3 px-4 pt-3">
         <div className="flex items-center gap-1">
           <MobileBackButton />
           <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>

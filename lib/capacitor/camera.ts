@@ -1,6 +1,7 @@
 "use client"
 
 import { dataUrlToBase64, makeDefaultLoader, readFileAsDataUrl } from "./_shared"
+import { beginCameraRecovery, type CameraRecoveryTarget } from "./camera-recovery"
 
 /**
  * `@capacitor/camera` wrapper. Inbox composer + Twin source ingest call this
@@ -127,6 +128,7 @@ function formatOf(file: File): string {
 }
 
 export interface PickPhotoOptions {
+  recoveryTarget?: CameraRecoveryTarget
   source?: CameraSource
   quality?: number
   allowEditing?: boolean
@@ -176,6 +178,7 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
     return webPickPhoto(source, resultType, picker)
   }
 
+  let finishRecovery: (() => void) | undefined
   try {
     let perms = await plugin.checkPermissions()
     const usable = (state: string) => state === "granted" || state === "limited"
@@ -203,6 +206,7 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
     if (source === "photos" && !photosOk) return { kind: "permission_denied" }
     if (source === "prompt" && !cameraOk && !photosOk) return { kind: "permission_denied" }
 
+    finishRecovery = await beginCameraRecovery(opts.recoveryTarget, "getPhoto")
     const result = await plugin.getPhoto({
       quality,
       allowEditing,
@@ -210,8 +214,18 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
       height,
       saveToGallery,
       source: SOURCE_MAP[source],
-      resultType,
+      // A URI survives process recreation without storing megabytes of base64
+      // in the routing receipt. Preserve the caller's requested output below.
+      resultType: opts.recoveryTarget ? "uri" : resultType,
     })
+    if (opts.recoveryTarget && resultType !== "uri") {
+      if (!result.webPath) throw new Error("Unable to read the captured photo")
+      const response = await fetch(result.webPath)
+      if (!response.ok) throw new Error("Unable to read the captured photo")
+      const dataUrl = await readFileAsDataUrl(await response.blob())
+      if (resultType === "base64") result.base64String = dataUrlToBase64(dataUrl)
+      else result.dataUrl = dataUrl
+    }
     return {
       kind: "captured",
       base64: result.base64String,
@@ -223,6 +237,8 @@ export async function pickPhoto(opts: PickPhotoOptions = {}): Promise<PhotoOutco
     const msg = err instanceof Error ? err.message : String(err)
     if (/cancel/i.test(msg)) return { kind: "cancelled" }
     return { kind: "error", message: msg }
+  } finally {
+    finishRecovery?.()
   }
 }
 
@@ -232,30 +248,31 @@ async function webPickPhoto(
   picker: WebFilePicker
 ): Promise<PhotoOutcome> {
   if (typeof document === "undefined") return { kind: "unsupported" }
-  let files: File[]
   try {
-    files = await picker({
+    const files = await picker({
       accept: "image/*",
       capture: source === "camera" ? "environment" : undefined,
       multiple: false,
     })
+    const file = files[0]
+    if (!file) return { kind: "cancelled" }
+    const dataUrl = await readFileAsDataUrl(file)
+    return {
+      kind: "captured",
+      base64: dataUrlToBase64(dataUrl),
+      dataUrl: resultType === "dataUrl" ? dataUrl : undefined,
+      uri: objectUrlFor(file),
+      format: formatOf(file),
+    }
   } catch (err: unknown) {
     return { kind: "error", message: err instanceof Error ? err.message : String(err) }
-  }
-  const file = files[0]
-  if (!file) return { kind: "cancelled" }
-  const dataUrl = await readFileAsDataUrl(file)
-  return {
-    kind: "captured",
-    base64: dataUrlToBase64(dataUrl),
-    dataUrl: resultType === "dataUrl" ? dataUrl : undefined,
-    uri: objectUrlFor(file),
-    format: formatOf(file),
   }
 }
 
 export interface PickMultipleOptions {
+  recoveryTarget?: CameraRecoveryTarget
   quality?: number
+  /** Maximum photos returned, default 9. Non-positive values allow all selected photos. */
   limit?: number
   loader?: CameraLoader
   /** Override the web `<input type="file" multiple>` fallback (tests). */
@@ -275,31 +292,39 @@ export async function pickMultiplePhotos(
 
   // Same activation-preserving fast path as pickPhoto (see hasNativeCamera).
   if (loader === defaultLoader && !hasNativeCamera()) {
-    return webPickMultiple(picker)
+    return webPickMultiple(picker, limit)
   }
 
   let plugin: CameraShape
   try {
     plugin = await loader()
   } catch {
-    return webPickMultiple(picker)
+    return webPickMultiple(picker, limit)
   }
 
+  let finishRecovery: (() => void) | undefined
   try {
+    finishRecovery = await beginCameraRecovery(opts.recoveryTarget, "pickImages", limit)
     const r = await plugin.pickImages({ quality, limit })
     if (r.photos.length === 0) return { kind: "cancelled" }
     return {
       kind: "picked",
-      photos: r.photos.map((p) => ({ uri: p.webPath, format: p.format })),
+      // Older native system pickers can ignore the requested selection cap.
+      photos: (limit > 0 ? r.photos.slice(0, limit) : r.photos).map((p) => ({
+        uri: p.webPath,
+        format: p.format,
+      })),
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     if (/cancel/i.test(msg)) return { kind: "cancelled" }
     return { kind: "error", message: msg }
+  } finally {
+    finishRecovery?.()
   }
 }
 
-async function webPickMultiple(picker: WebFilePicker): Promise<PickMultipleOutcome> {
+async function webPickMultiple(picker: WebFilePicker, limit: number): Promise<PickMultipleOutcome> {
   if (typeof document === "undefined") return { kind: "unsupported" }
   let files: File[]
   try {
@@ -310,6 +335,9 @@ async function webPickMultiple(picker: WebFilePicker): Promise<PickMultipleOutco
   if (files.length === 0) return { kind: "cancelled" }
   return {
     kind: "picked",
-    photos: files.map((f) => ({ uri: objectUrlFor(f) ?? "", format: formatOf(f) })),
+    photos: (limit > 0 ? files.slice(0, limit) : files).map((f) => ({
+      uri: objectUrlFor(f) ?? "",
+      format: formatOf(f),
+    })),
   }
 }

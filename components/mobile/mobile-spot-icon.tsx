@@ -1,6 +1,10 @@
 import Image from "next/image"
 
 import { cn } from "@/lib/utils"
+import iconManifest from "@/public/icons/cognia-mobile-spots/icon-manifest.json"
+
+const { runtimeFormats } = iconManifest
+const WEBP_ICON_NAMES = new Set<string>(runtimeFormats.webp)
 
 export const MOBILE_SPOT_ICON_NAMES = [
   "chat",
@@ -96,9 +100,10 @@ export interface MobileSpotIconProps {
 
 /** Decorative Cognia companion illustration for spacious mobile feature surfaces. */
 export function MobileSpotIcon({ name, size = 64, className }: MobileSpotIconProps) {
+  const format = WEBP_ICON_NAMES.has(name) ? "webp" : runtimeFormats.default
   return (
     <Image
-      src={`/icons/cognia-mobile-spots/png/${name}.png`}
+      src={`/icons/cognia-mobile-spots/${format}/${name}.${format}`}
       alt=""
       aria-hidden="true"
       width={size}

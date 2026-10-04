@@ -25,6 +25,7 @@ jest.mock("./mobile-canvas", () => ({
     const onInit = props.onInit as (rf: unknown) => void
     return (
       <div data-testid="canvas" data-mode={String(props.mode)} data-connect={String(props.connectActive)}>
+        <button data-testid="orientation-unavailable" onClick={() => (props.onOrientationStatus as (status: string) => void)("unavailable")}>orientation</button>
         <button data-testid="tap-n1" onClick={() => onNodeTap("n1")}>n1</button>
         <button data-testid="tap-n2" onClick={() => onNodeTap("n2")}>n2</button>
         <button
@@ -53,7 +54,7 @@ jest.mock("./mobile-canvas", () => ({
 
 jest.mock("./mobile-editor-topbar", () => ({
   MobileEditorTopbar: (props: ChildProps) => (
-    <div data-testid="topbar" data-mode={String(props.mode)}>
+    <div data-testid="topbar" data-mode={String(props.mode)} data-orientation={String(props.orientationStatus)} data-locked={String(props.orientationLocked)}>
       <button data-testid="toggle-mode" onClick={props.onToggleMode as () => void}>
         toggle
       </button>
@@ -62,9 +63,6 @@ jest.mock("./mobile-editor-topbar", () => ({
       </button>
       <button data-testid="open-workbench" onClick={props.onOpenWorkbench as () => void}>
         workbench
-      </button>
-      <button data-testid="open-search" onClick={props.onOpenSearch as () => void}>
-        search
       </button>
       {props.mode !== "read" ? (
         <button
@@ -239,13 +237,17 @@ describe("<MobileWorkflowEditor />", () => {
 
   /**
    * Canvas search existed on desktop behind Ctrl/Cmd+F, a shortcut a phone
-   * cannot press. Both reachable entry points are pinned here: the topbar
-   * control, and the pane long-press action sheet.
+   * cannot press. Both reachable entry points are pinned here: the canvas map
+   * controls (beside fit view, so the top bar keeps room for the name), and
+   * the pane long-press action sheet.
    */
-  it("opens node search from the topbar", () => {
+  it("opens node search from the map controls (available in read mode)", () => {
     renderEditor()
     expect(screen.queryByTestId("mobile-node-search")).toBeNull()
-    fireEvent.click(screen.getByTestId("open-search"))
+    expect(screen.getByTestId("mobile-editor-map-controls")).toContainElement(
+      screen.getByTestId("mobile-editor-search")
+    )
+    fireEvent.click(screen.getByTestId("mobile-editor-search"))
     expect(screen.getByTestId("mobile-node-search")).toBeInTheDocument()
   })
 
@@ -290,7 +292,9 @@ describe("<MobileWorkflowEditor />", () => {
   it("recenters the canvas via the fit-view button (available in read mode)", () => {
     renderEditor()
     // Recenter is available without entering edit mode.
-    expect(screen.getByTestId("mobile-editor-recenter")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-editor-map-controls")).toContainElement(
+      screen.getByTestId("mobile-editor-recenter")
+    )
     fireEvent.click(screen.getByTestId("do-init"))
     fireEvent.click(screen.getByTestId("mobile-editor-recenter"))
     expect(fitViewMock).toHaveBeenCalled()
@@ -406,4 +410,13 @@ describe("<MobileWorkflowEditor />", () => {
     fireEvent.click(screen.getByTestId("toggle-mode"))
     expect(capturedStore?.getState().selectedNodeIds).toEqual([])
   })
+})
+
+it("never presents requested orientation as locked before native confirmation", () => {
+  renderEditor()
+  expect(screen.getByTestId("topbar")).toHaveAttribute("data-orientation", "pending")
+  expect(screen.getByTestId("topbar")).toHaveAttribute("data-locked", "false")
+  fireEvent.click(screen.getByTestId("orientation-unavailable"))
+  expect(screen.getByTestId("topbar")).toHaveAttribute("data-orientation", "unavailable")
+  expect(screen.getByTestId("topbar")).toHaveAttribute("data-locked", "false")
 })

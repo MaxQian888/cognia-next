@@ -1,10 +1,15 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ComposerPlusMenu } from "./composer-plus-menu"
+import { ComposerSessionProvider } from "@/components/chat/composer/composer-session-context"
+import {
+  ComposerMenuPanel,
+  useComposerMenuPanels,
+} from "@/components/chat/composer/composer-menu-context"
 import { useChatStore } from "@/stores/chat"
 
 // Jest 30 + TS strict: jest.fn() with an explicit impl widens its type
@@ -56,14 +61,27 @@ jest.mock("@/lib/external-services/catalog", () => ({
 jest.mock("@/components/ui/drawer", () => ({
   Drawer: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
     open ? <>{children}</> : null,
+  // Escape is routed the way Radix's DismissableLayer routes it: to
+  // `onEscapeKeyDown` first, and a `preventDefault()` there keeps the layer.
   DrawerContent: ({
     children,
     onCloseAutoFocus: _onCloseAutoFocus,
+    onEscapeKeyDown,
     ...rest
   }: {
     children: React.ReactNode
     onCloseAutoFocus?: (e: Event) => void
-  } & React.HTMLAttributes<HTMLDivElement>) => <div {...rest}>{children}</div>,
+    onEscapeKeyDown?: (e: KeyboardEvent) => void
+  } & React.HTMLAttributes<HTMLDivElement>) => (
+    <div
+      {...rest}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onEscapeKeyDown?.(e.nativeEvent)
+      }}
+    >
+      {children}
+    </div>
+  ),
   DrawerHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DrawerTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   DrawerDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
@@ -98,7 +116,9 @@ jest.mock("next-intl", () => ({
       unsupported: "Unsupported.",
       permissionDeniedCamera: "Camera permission required.",
       permissionDeniedMic: "Mic permission required.",
+      photoFailed: "Could not load the photo. Please try again.",
       sheetDescription: "Sheet description",
+      back: "Back",
       // Shared with the desktop menu (`chat.composer.attachMenu`). The mock is
       // namespace-agnostic, so one flat map covers both `useTranslations` calls.
       attachGroup: "Attach",
@@ -128,6 +148,30 @@ beforeEach(() => {
 })
 
 describe("<ComposerPlusMenu />", () => {
+  it("records the owning chat for camera and album recovery", async () => {
+    pickPhotoMock.mockResolvedValue({ kind: "cancelled" })
+    pickMultipleMock.mockResolvedValue({ kind: "cancelled" })
+    const user = userEvent.setup()
+    render(
+      <ComposerSessionProvider value="recovery-chat">
+        <ComposerPlusMenu onAttach={jest.fn()} />
+      </ComposerSessionProvider>
+    )
+    await user.click(screen.getByRole("button", { name: "Attachments" }))
+    await user.click(screen.getByRole("menuitem", { name: "Camera" }))
+    expect(pickPhotoMock).toHaveBeenCalledWith({
+      source: "camera",
+      resultType: "base64",
+      recoveryTarget: { kind: "chat", id: "recovery-chat" },
+    })
+    await user.click(screen.getByRole("button", { name: "Attachments" }))
+    await user.click(screen.getByRole("menuitem", { name: "Album" }))
+    expect(pickMultipleMock).toHaveBeenCalledWith({
+      limit: 9,
+      recoveryTarget: { kind: "chat", id: "recovery-chat" },
+    })
+  })
+
   it("toggles open / closed", async () => {
     const user = userEvent.setup()
     render(<ComposerPlusMenu onAttach={jest.fn()} />)
@@ -169,6 +213,21 @@ describe("<ComposerPlusMenu />", () => {
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith("permission", "Camera permission required.")
     )
+  })
+
+  it.each(["Camera", "Album"])("localizes %s failures without exposing native error details", async (action) => {
+    const mock = action === "Camera" ? pickPhotoMock : pickMultipleMock
+    mock.mockResolvedValue({ kind: "error", message: "Native camera recovery is unavailable" })
+    const onError = jest.fn()
+    const onAttach = jest.fn()
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={onAttach} onError={onError} />)
+    await user.click(screen.getByRole("button", { name: "Attachments" }))
+    await user.click(screen.getByRole("menuitem", { name: action }))
+    await waitFor(() =>
+      expect(onError).toHaveBeenCalledWith("error", "Could not load the photo. Please try again.")
+    )
+    expect(onAttach).not.toHaveBeenCalled()
   })
 
   it("forwards picked photos array via onAttach", async () => {
@@ -414,10 +473,12 @@ describe("<ComposerPlusMenu /> groups", () => {
     const user = await openMenu({ onInsert })
     await user.click(screen.getByTestId("composer-plus-records"))
     expect(screen.getByTestId("composer-plus-record-issue")).toBeInTheDocument()
-    // The grid is gone while drilled in — one panel at a time.
-    expect(screen.queryByTestId("composer-plus-camera")).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-plus-view-title")).toHaveTextContent("Reference a record")
+    // The grid is hidden while drilled in — one panel at a time.
+    expect(screen.getByTestId("composer-plus-camera")).not.toBeVisible()
     await user.click(screen.getByTestId("composer-plus-back"))
-    expect(screen.getByTestId("composer-plus-camera")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-plus-camera")).toBeVisible()
+    expect(screen.queryByTestId("composer-plus-view-header")).not.toBeInTheDocument()
     await user.click(screen.getByTestId("composer-plus-records"))
     await user.click(screen.getByTestId("composer-plus-record-issue"))
     expect(onInsert).toHaveBeenCalledWith("@issue:")
@@ -428,7 +489,8 @@ describe("<ComposerPlusMenu /> groups", () => {
     await user.click(screen.getByTestId("composer-plus-records"))
     await user.click(screen.getByTestId("composer-plus-toggle"))
     await user.click(screen.getByTestId("composer-plus-toggle"))
-    expect(screen.getByTestId("composer-plus-camera")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-plus-camera")).toBeVisible()
+    expect(screen.queryByTestId("composer-plus-view-header")).not.toBeInTheDocument()
   })
 
   it("toggles the session permission mode from the plan-mode row", async () => {
@@ -460,5 +522,126 @@ describe("<ComposerPlusMenu /> groups", () => {
     await user.click(screen.getByTestId("composer-plus-services"))
     expect(onOpenExternalServices).toHaveBeenCalled()
     expect(screen.queryByTestId("composer-plus-menu")).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * A stand-in for an injected capability row with a list of its own (the real
+ * ones: skills, room members, web-search setup), wired the way they are.
+ */
+function PanelRow({ withPanel = true }: { withPanel?: boolean }) {
+  const panels = useComposerMenuPanels()
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="panel-row"
+        onClick={() => panels?.openPanel("skills", "Attach skill")}
+      >
+        {panels ? "sheet" : "flyout"}
+      </button>
+      {withPanel ? (
+        <ComposerMenuPanel id="skills">
+          <input data-testid="panel-search" />
+          <p data-testid="panel-body">Skill list</p>
+        </ComposerMenuPanel>
+      ) : null}
+    </>
+  )
+}
+
+describe("<ComposerPlusMenu /> injected panels", () => {
+  async function openWithPanelRow(capabilities: React.ReactNode = <PanelRow />) {
+    const user = userEvent.setup()
+    const utils = render(
+      <ComposerPlusMenu onAttach={jest.fn()} showVoice={false} capabilities={capabilities} />
+    )
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    return { user, ...utils }
+  }
+
+  it("offers in-place navigation to the rows it hosts", async () => {
+    await openWithPanelRow()
+    expect(screen.getByTestId("panel-row")).toHaveTextContent("sheet")
+  })
+
+  it("drills in to a row's panel inside the sheet, with its title and a back button", async () => {
+    const { user } = await openWithPanelRow()
+    expect(screen.queryByTestId("panel-body")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("panel-row"))
+    const panel = screen.getByTestId("composer-plus-panel")
+    // The body lands in the sheet's own slot — no second floating layer.
+    expect(panel).toContainElement(screen.getByTestId("panel-body"))
+    expect(screen.getByTestId("composer-plus-menu")).toContainElement(panel)
+    expect(screen.getByTestId("composer-plus-view-title")).toHaveTextContent("Attach skill")
+    expect(screen.getByTestId("composer-plus-root")).not.toBeVisible()
+    // The row stays mounted (hidden) — it owns the panel it opened.
+    expect(screen.getByTestId("panel-row")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-plus-menu")).toHaveAttribute("data-view", "panel:skills")
+    expect(screen.getByTestId("composer-plus-menu")).toHaveAttribute("role", "dialog")
+  })
+
+  it("focuses the back button, never the panel's field, so the keyboard stays down", async () => {
+    const { user } = await openWithPanelRow()
+    await user.click(screen.getByTestId("panel-row"))
+    expect(screen.getByTestId("composer-plus-back")).toHaveFocus()
+    expect(screen.getByTestId("panel-search")).not.toHaveFocus()
+    expect(screen.getByTestId("composer-plus-back")).toHaveAccessibleName("Back")
+  })
+
+  it("slides between views, and only slides the root in on the way back", async () => {
+    const { user } = await openWithPanelRow()
+    // The sheet's own open is the drawer's slide; the root adds none of its own.
+    expect(screen.getByTestId("composer-plus-root").className).not.toContain("slide-in")
+    await user.click(screen.getByTestId("panel-row"))
+    expect(screen.getByTestId("composer-plus-panel").className).toContain(
+      "slide-in-from-right-8"
+    )
+    await user.click(screen.getByTestId("composer-plus-back"))
+    expect(screen.queryByTestId("composer-plus-panel")).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-plus-root")).toBeVisible()
+    expect(screen.getByTestId("composer-plus-root").className).toContain("slide-in-from-left-8")
+  })
+
+  it("steps back out on Escape (and the Android back button) before closing", async () => {
+    const { user } = await openWithPanelRow()
+    await user.click(screen.getByTestId("panel-row"))
+    // `fireEvent` returns false when the handler called preventDefault — the
+    // drawer keeps the press instead of dismissing.
+    expect(fireEvent.keyDown(screen.getByTestId("composer-plus-menu"), { key: "Escape" })).toBe(
+      false
+    )
+    expect(screen.getByTestId("composer-plus-root")).toBeVisible()
+    expect(screen.getByTestId("composer-plus-menu")).toBeInTheDocument()
+    // At the root, Escape is the drawer's own: not taken.
+    expect(fireEvent.keyDown(screen.getByTestId("composer-plus-menu"), { key: "Escape" })).toBe(
+      true
+    )
+  })
+
+  it("falls back to the root when the showing panel stops rendering", async () => {
+    const { user, rerender } = await openWithPanelRow()
+    await user.click(screen.getByTestId("panel-row"))
+    expect(screen.getByTestId("panel-body")).toBeInTheDocument()
+    act(() => {
+      rerender(
+        <ComposerPlusMenu
+          onAttach={jest.fn()}
+          showVoice={false}
+          capabilities={<PanelRow withPanel={false} />}
+        />
+      )
+    })
+    expect(screen.queryByTestId("composer-plus-view-header")).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-plus-root")).toBeVisible()
+  })
+
+  it("reopens on the root after closing from inside a panel", async () => {
+    const { user } = await openWithPanelRow()
+    await user.click(screen.getByTestId("panel-row"))
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    expect(screen.getByTestId("composer-plus-root")).toBeVisible()
+    expect(screen.queryByTestId("panel-body")).not.toBeInTheDocument()
   })
 })

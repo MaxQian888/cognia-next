@@ -12,11 +12,50 @@ import { MobileChannelListSourceProvider } from "./mobile-channel-list-source"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
+import { requestCommandPalette } from "@/lib/shell/command-palette-request"
+import { trackConversationViewChanged } from "@/lib/telemetry/conversation-list-events"
+import { deleteSessionsRouted } from "@/lib/chat/session-archive-writes"
+import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
+
+const requestCommandPaletteMock = requestCommandPalette as jest.Mock
+const trackViewChangedMock = trackConversationViewChanged as jest.Mock
+const deleteSessionsRoutedMock = deleteSessionsRouted as jest.Mock
+const filterControllerMock = useConversationFilterController as jest.Mock
 
 const listSessionBranches = jest.fn(async (_id: string) => [] as unknown[])
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 jest.mock("@/lib/db/sessions", () => ({
   listSessionBranches: (id: string) => listSessionBranches(id),
 }))
+
+jest.mock("@/lib/shell/command-palette-request", () => ({
+  requestCommandPalette: jest.fn(),
+}))
+jest.mock("@/lib/telemetry/conversation-list-events", () => ({
+  ...jest.requireActual("@/lib/telemetry/conversation-list-events"),
+  trackConversationViewChanged: jest.fn(() => Promise.resolve(true)),
+}))
+jest.mock("@/lib/chat/session-archive-writes", () => ({
+  ...jest.requireActual("@/lib/chat/session-archive-writes"),
+  deleteSessionsRouted: jest.fn(async () => undefined),
+}))
+// A pass-through spy: the archived view must not hand the controller the
+// folders (no Folder facet inside the archive).
+jest.mock("@/hooks/chat/use-conversation-filter-controller", () => {
+  const actual = jest.requireActual("@/hooks/chat/use-conversation-filter-controller")
+  return {
+    ...actual,
+    useConversationFilterController: jest.fn((opts: unknown) =>
+      actual.useConversationFilterController(opts)
+    ),
+  }
+})
 
 const charactersRef: {
   value: Array<{ id: string; name: string; avatarColor?: string; avatarEmoji?: string }>
@@ -76,9 +115,18 @@ jest.mock("next-intl", () => ({
       bucketPrev30: "Previous 30 Days",
       bucketOlder: "Older",
       renameAria: "Rename",
-      emptyChats: "Empty",
-      emptyFiltered: `No "${vars?.query ?? ""}"`,
-      emptyFilters: `No match for ${vars?.count ?? 0} filters`,
+      // Shared `desktop.channelList` empty-state vocabulary.
+      emptySearch: `No "${vars?.query ?? ""}"`,
+      emptyFiltered: `No match for ${vars?.count ?? 0} filters`,
+      emptyArchivedTitle: "Nothing archived",
+      backToConversations: "Back to chats",
+      newChat: "New chat",
+      globalSearch: "Search everywhere",
+      selectConversations: "Select conversations",
+      // Shared bulk bar (`desktop.channelList.bulk`).
+      selectedCount: `${vars?.count ?? 0} selected`,
+      selectAll: `Select all ${vars?.count ?? 0}`,
+      viewTabArchivedCount: `Archived · ${vars?.count ?? 0}`,
       folderEmpty: "Empty folder",
       sectionCount: `${vars?.count ?? 0} conversations`,
       // Shared `conversationFilters` namespace (the filter menu + chips).
@@ -95,7 +143,6 @@ jest.mock("next-intl", () => ({
       viewArchived: "Show archived",
       viewTabActive: "Chats",
       viewTabArchived: "Archived",
-      emptyArchived: "No archived",
       searchTruncated: "Some results hidden",
       searchContentFailed: "Content search failed",
       unreadCount: `${vars?.count ?? 0} unread`,
@@ -350,6 +397,10 @@ describe("<MobileChannelList />", () => {
     }
     useChatHistorySearch.mockReset()
     useChatHistorySearch.mockImplementation(() => historySearchState)
+    requestCommandPaletteMock.mockClear()
+    trackViewChangedMock.mockClear()
+    deleteSessionsRoutedMock.mockClear()
+    filterControllerMock.mockClear()
   })
 
   describe("layout", () => {
@@ -780,7 +831,11 @@ describe("<MobileChannelList />", () => {
       expect(screen.getByTestId("mobile-channel-row-a1")).toBeInTheDocument()
       await user.click(screen.getByTestId("swipe-action-archive"))
       await waitFor(() => expect(onUnarchive).toHaveBeenCalledWith("a1"))
-      expect(toastSuccess).toHaveBeenCalledWith("Restored", undefined)
+      // A restore can be undone, as an archive can.
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Restored",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) })
+      )
     })
 
     it("moves between views with the arrow keys, as a radio group", () => {
@@ -983,9 +1038,29 @@ describe("<MobileChannelList />", () => {
   })
 
   describe("empty and loading states", () => {
-    it("renders the global empty copy when no sessions exist", () => {
-      renderList({ sessions: [] })
-      expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent("Empty")
+    it("offers to start a chat when there are no conversations at all", async () => {
+      const user = userEvent.setup()
+      const { props } = renderList({ sessions: [] })
+      expect(screen.getByTestId("mobile-channel-empty")).toHaveAttribute("data-empty-kind", "view")
+      expect(screen.getByTestId("channel-list-empty-state")).toBeInTheDocument()
+      // The shared state's buttons are raised to the touch floor here.
+      expect(screen.getByTestId("mobile-channel-empty")).toHaveClass("[&_button]:min-h-11")
+      await user.click(within(screen.getByTestId("channel-list-empty-state")).getByRole("button", { name: /New chat/ }))
+      expect(props.onNewDirect).toHaveBeenCalled()
+    })
+
+    it("gives an empty archive its way back to the chats, and counts the switch", async () => {
+      channelListView = "archived"
+      const user = userEvent.setup()
+      renderList()
+      expect(screen.getByTestId("channel-list-empty-state")).toHaveTextContent("Nothing archived")
+      // No "New chat" from inside the archive.
+      expect(
+        within(screen.getByTestId("channel-list-empty-state")).queryByRole("button", { name: /New chat/ })
+      ).toBeNull()
+      await user.click(screen.getByTestId("channel-list-empty-show-active"))
+      expect(setChannelListView).toHaveBeenCalledWith("active")
+      expect(trackViewChangedMock).toHaveBeenCalledWith("active")
     })
 
     it("does not flash the empty state while the session query is still loading", async () => {
@@ -1040,12 +1115,18 @@ describe("<MobileChannelList />", () => {
       conversationFilters = { unread: true, pinned: false, branched: false, kind: "all" }
       const user = userEvent.setup()
       renderList()
+      expect(screen.getByTestId("mobile-channel-empty")).toHaveAttribute(
+        "data-empty-kind",
+        "narrowed"
+      )
       expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent("No match for 1 filters")
-      await user.click(screen.getByTestId("mobile-channel-clear-filters"))
+      // Nothing to search away from: no search exits.
+      expect(screen.queryByTestId("channel-list-empty-search-everywhere")).toBeNull()
+      await user.click(screen.getByTestId("channel-list-empty-clear-filters"))
       expect(resetConversationFilters).toHaveBeenCalled()
     })
 
-    it("keeps the search empty state when a query is what emptied the list", async () => {
+    it("names the query when a search emptied a filtered list, and offers both exits", async () => {
       conversationFilters = { unread: true, pinned: false, branched: false, kind: "all" }
       const user = userEvent.setup()
       renderList()
@@ -1053,7 +1134,362 @@ describe("<MobileChannelList />", () => {
       await waitFor(() =>
         expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent('No "zzz"')
       )
-      expect(screen.queryByTestId("mobile-channel-clear-filters")).toBeNull()
+      expect(screen.getByTestId("channel-list-empty-clear-filters")).toBeInTheDocument()
+      await user.click(screen.getByTestId("channel-list-empty-clear-search"))
+      expect(screen.getByTestId("mobile-channel-search")).toHaveValue("")
+    })
+  })
+
+  describe("narrowed search exits", () => {
+    it("takes the words to the command palette's Chats scope", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+      await user.click(await screen.findByTestId("channel-list-empty-search-everywhere"))
+      expect(requestCommandPaletteMock).toHaveBeenCalledWith({ query: "zzz", scope: "chats" })
+    })
+
+    it("keeps a search from the archive inside the archive", async () => {
+      channelListView = "archived"
+      const user = userEvent.setup()
+      renderList({
+        sessions: [baseSession("a1", { title: "Old plan", archivedAt: 5, updatedAt: 10 })],
+      })
+      await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+      await user.click(await screen.findByTestId("channel-list-empty-search-everywhere"))
+      expect(requestCommandPaletteMock).toHaveBeenCalledWith({
+        query: "is:archived zzz",
+        scope: "chats",
+      })
+    })
+
+    it("opens a closed axis of the search scope in one tap", async () => {
+      conversationSidebar = { search: { content: false } }
+      const user = userEvent.setup()
+      renderList()
+      await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+      await user.click(await screen.findByTestId("channel-list-empty-widen-content"))
+      expect(saveSettings).toHaveBeenCalledWith({
+        conversationSidebar: {
+          search: expect.objectContaining({ content: true }),
+        },
+      })
+    })
+
+    it("offers the archive as a widening from the active view only", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+      expect(await screen.findByTestId("channel-list-empty-widen-archived")).toBeInTheDocument()
+    })
+  })
+
+  describe("archive view", () => {
+    const withArchived = [
+      ...sessions,
+      baseSession("a1", { title: "Archived one", archivedAt: 5, updatedAt: 10 }),
+      baseSession("a2", { title: "Archived two", archivedAt: 6, updatedAt: 11 }),
+    ]
+
+    it("counts the archive on its tab, and drops the count when it is empty", () => {
+      const { rerender, props } = renderList({ sessions: withArchived })
+      expect(screen.getByTestId("mobile-channel-view-archived")).toHaveTextContent("Archived · 2")
+      rerender(<MobileChannelList {...props} sessions={sessions} />)
+      expect(screen.getByTestId("mobile-channel-view-archived")).toHaveTextContent(/^Archived$/)
+    })
+
+    it("counts a view switch from the tabs", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await user.click(screen.getByTestId("mobile-channel-view-archived"))
+      expect(trackViewChangedMock).toHaveBeenCalledWith("archived")
+      // Tapping the view already shown is not a switch.
+      trackViewChangedMock.mockClear()
+      await user.click(screen.getByTestId("mobile-channel-view-archived"))
+      expect(trackViewChangedMock).not.toHaveBeenCalled()
+    })
+
+    it("offers no Folder facet inside the archive", () => {
+      const folders = [{ id: "f1", name: "Work", order: 0, createdAt: 0, updatedAt: 0 }] as SessionFolder[]
+      const { rerender, props } = renderList({ sessions: withArchived, folders })
+      expect(filterControllerMock).toHaveBeenLastCalledWith(expect.objectContaining({ folders }))
+      act(() => {
+        channelListView = "archived"
+        emitUiChange()
+      })
+      rerender(<MobileChannelList {...props} />)
+      expect(filterControllerMock).toHaveBeenLastCalledWith(expect.objectContaining({ folders: [] }))
+    })
+
+    it("empties the archive of every archived conversation the list holds", async () => {
+      channelListView = "archived"
+      conversationSidebar = { groupBy: "date" }
+      const user = userEvent.setup()
+      renderList({ sessions: withArchived })
+      await user.click(screen.getByTestId("mobile-channel-list-menu"))
+      fireEvent.click(await screen.findByTestId("mobile-channel-empty-archive"))
+      const dialog = await screen.findByTestId("empty-archive-dialog")
+      expect(within(dialog).getByTestId("empty-archive-titles")).toHaveTextContent("Archived one")
+      expect(within(dialog).getByTestId("empty-archive-titles")).toHaveTextContent("Archived two")
+      await user.click(within(dialog).getByTestId("empty-archive-confirm"))
+      await waitFor(() => expect(deleteSessionsRoutedMock).toHaveBeenCalled())
+      expect([...(deleteSessionsRoutedMock.mock.calls[0]![0] as string[])].sort()).toEqual([
+        "a1",
+        "a2",
+      ])
+    })
+
+    it("opens the conversation manager on the tab the list shows", async () => {
+      const user = userEvent.setup()
+      const { unmount } = renderList({ sessions: withArchived })
+      await user.click(screen.getByTestId("mobile-channel-list-menu"))
+      await user.click(await screen.findByTestId("mobile-channel-manage"))
+      expect(mockRouterPush).toHaveBeenLastCalledWith("/conversations")
+      unmount()
+      channelListView = "archived"
+      renderList({ sessions: withArchived })
+      await user.click(screen.getByTestId("mobile-channel-list-menu"))
+      await user.click(await screen.findByTestId("mobile-channel-manage"))
+      expect(mockRouterPush).toHaveBeenLastCalledWith("/conversations?tab=archived")
+    })
+
+    it("offers Empty archive only in the archive, and not when it is already empty", async () => {
+      const user = userEvent.setup()
+      const { unmount } = renderList({ sessions: withArchived })
+      await user.click(screen.getByTestId("mobile-channel-list-menu"))
+      expect(await screen.findByTestId("mobile-channel-select")).toBeInTheDocument()
+      expect(screen.queryByTestId("mobile-channel-empty-archive")).toBeNull()
+      unmount()
+      channelListView = "archived"
+      renderList({ sessions })
+      await user.click(screen.getByTestId("mobile-channel-list-menu"))
+      expect(await screen.findByTestId("mobile-channel-empty-archive")).toHaveAttribute(
+        "data-disabled"
+      )
+    })
+
+    it("marks archived rows only when a search mixes both kinds", async () => {
+      conversationSidebar = { search: { includeArchived: true } }
+      const user = userEvent.setup()
+      renderList({ sessions: withArchived })
+      await user.type(screen.getByTestId("mobile-channel-search"), "o")
+      await waitFor(() => expect(screen.getByTestId("mobile-channel-row-a1")).toBeInTheDocument())
+      expect(screen.getByTestId("mobile-channel-archived-a1")).toBeInTheDocument()
+      expect(screen.queryByTestId("mobile-channel-archived-s2")).toBeNull()
+    })
+
+    it("does not mark rows in the plain archive", () => {
+      channelListView = "archived"
+      renderList({ sessions: withArchived })
+      expect(screen.getByTestId("mobile-channel-row-a1")).toBeInTheDocument()
+      expect(screen.queryByTestId("mobile-channel-archived-a1")).toBeNull()
+    })
+  })
+
+  describe("selection", () => {
+    async function startSelectingFromMenu(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByTestId("mobile-channel-list-menu"))
+      fireEvent.click(await screen.findByTestId("mobile-channel-select"))
+      await screen.findByTestId("mobile-channel-bulk-bar")
+    }
+
+    it("starts from the list menu; a tap then toggles a row instead of opening it", async () => {
+      const user = userEvent.setup()
+      const { props } = renderList()
+      expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull()
+      await startSelectingFromMenu(user)
+      expect(screen.getByTestId("mobile-channel-list")).toHaveAttribute("data-selecting", "true")
+      const row = screen.getByTestId("mobile-channel-row-s2")
+      expect(row).toHaveAttribute("aria-pressed", "false")
+      await user.click(row)
+      expect(props.onSelect).not.toHaveBeenCalled()
+      expect(screen.getByTestId("mobile-channel-row-s2")).toHaveAttribute("aria-pressed", "true")
+      expect(screen.getByTestId("channel-list-bulk-count")).toHaveTextContent("1 selected")
+      await user.click(screen.getByTestId("mobile-channel-row-s2"))
+      expect(screen.getByTestId("mobile-channel-row-s2")).toHaveAttribute("aria-pressed", "false")
+    })
+
+    it("pins the labelled bulk bar to the foot of the drawer at the touch floor", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await startSelectingFromMenu(user)
+      const bar = screen.getByTestId("mobile-channel-bulk-bar")
+      expect(bar).toHaveClass("shrink-0", "[&_button]:min-h-11")
+      expect(within(bar).getByTestId("channel-list-bulk-toolbar")).toHaveAttribute(
+        "data-layout",
+        "bar"
+      )
+      // After the scroll area: the bar sits below the rows, not over them.
+      const scroll = screen.getByTestId("mobile-channel-scroll")
+      expect(scroll.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it("starts from a row's action sheet with that row selected", async () => {
+      renderList()
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s3"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-select-s3"))
+      expect(await screen.findByTestId("mobile-channel-bulk-bar")).toBeInTheDocument()
+      expect(screen.getByTestId("mobile-channel-row-s3")).toHaveAttribute("aria-pressed", "true")
+    })
+
+    it("selects every row of the view, not only the rows the window mounted", async () => {
+      conversationSidebar = { groupBy: "none" }
+      const many = Array.from({ length: 60 }, (_, i) =>
+        baseSession(`m${i}`, { title: `Chat ${i}`, updatedAt: 1000 - i })
+      )
+      const user = userEvent.setup()
+      renderList({ sessions: many })
+      expect(screen.getAllByTestId(/^mobile-channel-row-/).length).toBeLessThan(60)
+      await startSelectingFromMenu(user)
+      await user.click(screen.getByTestId("channel-list-bulk-select-all"))
+      expect(screen.getByTestId("channel-list-bulk-count")).toHaveTextContent("60 selected")
+    })
+
+    it("archives the selection through the shared bulk writer, then leaves selection mode", async () => {
+      const onBulkArchive = jest.fn(async () => undefined)
+      const onBulkUnarchive = jest.fn(async () => undefined)
+      const user = userEvent.setup()
+      renderList({ onBulkArchive, onBulkUnarchive })
+      await startSelectingFromMenu(user)
+      await user.click(screen.getByTestId("mobile-channel-row-s2"))
+      await user.click(screen.getByTestId("mobile-channel-row-s3"))
+      await user.click(screen.getByTestId("channel-list-bulk-archive"))
+      await waitFor(() => expect(onBulkArchive).toHaveBeenCalledWith(["s2", "s3"]))
+      await waitFor(() => expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull())
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Archived",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) })
+      )
+    })
+
+    it("keeps the selection when the bulk write fails", async () => {
+      const onBulkArchive = jest.fn(async () => {
+        throw new Error("disk full")
+      })
+      const user = userEvent.setup()
+      renderList({ onBulkArchive })
+      await startSelectingFromMenu(user)
+      await user.click(screen.getByTestId("mobile-channel-row-s2"))
+      await user.click(screen.getByTestId("channel-list-bulk-archive"))
+      await waitFor(() => expect(toastError).toHaveBeenCalled())
+      expect(screen.getByTestId("mobile-channel-bulk-bar")).toBeInTheDocument()
+      expect(screen.getByTestId("channel-list-bulk-count")).toHaveTextContent("1 selected")
+    })
+
+    it("restores an archived selection from the archive", async () => {
+      channelListView = "archived"
+      const onBulkUnarchive = jest.fn(async () => undefined)
+      const user = userEvent.setup()
+      renderList({
+        sessions: [
+          baseSession("a1", { title: "Archived one", archivedAt: 5, updatedAt: 10 }),
+          baseSession("a2", { title: "Archived two", archivedAt: 6, updatedAt: 11 }),
+        ],
+        onBulkUnarchive,
+      })
+      await startSelectingFromMenu(user)
+      await user.click(screen.getByTestId("channel-list-bulk-select-all"))
+      // Frozen inside the archive: no Archive, no Pin, no Move.
+      expect(screen.queryByTestId("channel-list-bulk-archive")).toBeNull()
+      expect(screen.queryByTestId("channel-list-bulk-move-to-folder")).toBeNull()
+      await user.click(screen.getByTestId("channel-list-bulk-unarchive"))
+      await waitFor(() => expect(onBulkUnarchive).toHaveBeenCalledWith(["a2", "a1"]))
+    })
+
+    it("leaves selection mode on Done", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await startSelectingFromMenu(user)
+      await user.click(screen.getByTestId("channel-list-bulk-done"))
+      expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull()
+      expect(screen.getByTestId("mobile-channel-row-s2")).not.toHaveAttribute("aria-pressed")
+    })
+
+    it("leaves selection mode on Escape, and claims the key so the drawer stays open", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await startSelectingFromMenu(user)
+      const row = screen.getByTestId("mobile-channel-row-s2")
+      const notCancelled = fireEvent.keyDown(row, { key: "Escape" })
+      expect(notCancelled).toBe(false)
+      expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull()
+      // Outside selection mode Escape is left alone (the drawer closes on it).
+      expect(fireEvent.keyDown(screen.getByTestId("mobile-channel-row-s2"), { key: "Escape" })).toBe(
+        true
+      )
+    })
+
+    it("ends the selection when the view switches", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await startSelectingFromMenu(user)
+      await user.click(screen.getByTestId("mobile-channel-row-s2"))
+      await user.click(screen.getByTestId("mobile-channel-view-archived"))
+      expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull()
+      await user.click(screen.getByTestId("mobile-channel-view-active"))
+      expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull()
+      expect(screen.getByTestId("mobile-channel-row-s2")).not.toHaveAttribute("aria-pressed")
+    })
+
+    it("ends with the list: a remount (the drawer reopening) starts unselected", async () => {
+      const user = userEvent.setup()
+      const { unmount } = renderList()
+      await startSelectingFromMenu(user)
+      unmount()
+      renderList()
+      expect(screen.queryByTestId("mobile-channel-bulk-bar")).toBeNull()
+    })
+
+    it("describes rows by the selection hint while selecting", async () => {
+      const user = userEvent.setup()
+      renderList()
+      const hintId = screen.getByTestId("mobile-channel-row-s2").getAttribute("aria-describedby")!
+      expect(document.getElementById(hintId)).toHaveTextContent("rowActionsHint")
+      await startSelectingFromMenu(user)
+      expect(document.getElementById(hintId)).toHaveTextContent("selectionRowHint")
+    })
+  })
+
+  describe("the drawer stays open while working in it", () => {
+    it("archiving the open conversation switches to its neighbour in place", async () => {
+      const onSelectInPlace = jest.fn()
+      const onUnarchive = jest.fn()
+      const user = userEvent.setup()
+      const { props } = renderList({ activeSessionId: "s2", onSelectInPlace, onUnarchive })
+      const row = screen.getByTestId("mobile-channel-row-s2").closest("[data-swipe-row]") as HTMLElement
+      await user.click(within(row).getByTestId("swipe-action-archive"))
+      await waitFor(() => expect(onSelectInPlace).toHaveBeenCalled())
+      expect(onSelectInPlace).not.toHaveBeenCalledWith("s2")
+      expect(props.onSelect).not.toHaveBeenCalled()
+      // Undo reopens the archived conversation — still in place.
+      const [, options] = toastSuccess.mock.calls[0] as [
+        string,
+        { action: { onClick: () => void } },
+      ]
+      act(() => options.action.onClick())
+      await waitFor(() => expect(onSelectInPlace).toHaveBeenLastCalledWith("s2"))
+      expect(props.onSelect).not.toHaveBeenCalled()
+    })
+
+    it("deleting the open conversation switches in place too", async () => {
+      const onSelectInPlace = jest.fn()
+      const user = userEvent.setup()
+      const { props } = renderList({ activeSessionId: "s2", onSelectInPlace })
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-delete-s2"))
+      await user.click(await screen.findByTestId("conversation-delete-confirm-action"))
+      await waitFor(() => expect(onSelectInPlace).toHaveBeenCalled())
+      expect(props.onSelect).not.toHaveBeenCalled()
+    })
+
+    it("a branch still navigates to the new conversation", async () => {
+      const onSelectInPlace = jest.fn()
+      const onBranch = jest.fn(async () => baseSession("b1", { title: "Branch" }))
+      const { props } = renderList({ onBranch, onSelectInPlace })
+      fireEvent.contextMenu(screen.getByTestId("mobile-channel-row-s2"))
+      fireEvent.click(await screen.findByTestId("session-row-sheet-branch-s2"))
+      await waitFor(() => expect(props.onSelect).toHaveBeenCalledWith("b1"))
+      expect(onSelectInPlace).not.toHaveBeenCalled()
     })
   })
 })

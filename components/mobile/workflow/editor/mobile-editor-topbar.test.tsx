@@ -82,11 +82,10 @@ function buildWorkflow(): VisualWorkflow {
   }
 }
 
-function renderTopbar(mode: "read" | "edit" = "read") {
+function renderTopbar(mode: "read" | "edit" = "read", orientationStatus?: "unavailable" | "pending") {
   const store: EditorStore = createEditorStore(buildWorkflow())
   const onToggleMode = jest.fn()
   const onOpenCopilot = jest.fn()
-  const onOpenSearch = jest.fn()
   const onOpenWorkbench = jest.fn()
   render(
     <MobileEditorTopbar
@@ -95,14 +94,14 @@ function renderTopbar(mode: "read" | "edit" = "read") {
       mode={mode}
       onToggleMode={onToggleMode}
       onOpenCopilot={onOpenCopilot}
-      onOpenSearch={onOpenSearch}
       onOpenWorkbench={onOpenWorkbench}
       orientationLocked={true}
+      orientationStatus={orientationStatus}
       onToggleOrientationLock={jest.fn()}
       onToggleSelectMode={jest.fn()}
     />
   )
-  return { store, onToggleMode, onOpenCopilot, onOpenSearch, onOpenWorkbench }
+  return { store, onToggleMode, onOpenCopilot, onOpenWorkbench }
 }
 
 // Run hands the workflow to the paired desktop through the outbound queue, and
@@ -155,20 +154,52 @@ describe("<MobileEditorTopbar />", () => {
     expect(onOpenWorkbench).toHaveBeenCalledTimes(1)
   })
 
-  // Ctrl/Cmd+F is how the desktop reaches canvas search, and a phone has no
-  // keyboard to press it with, so the control is in the bar rather than buried
-  // in the overflow menu.
-  it("opens canvas node search from the top bar in either mode", async () => {
-    const user = userEvent.setup()
-    const { onOpenSearch } = renderTopbar("read")
-    await user.click(screen.getByTestId("mobile-editor-search"))
-    expect(onOpenSearch).toHaveBeenCalledTimes(1)
+  // Find-node moved to the editor's map controls so the title keeps room on a
+  // phone; the bar must not grow a second copy of it back.
+  it("leaves canvas node search to the editor's map controls", () => {
+    renderTopbar("read")
+    expect(screen.queryByTestId("mobile-editor-search")).not.toBeInTheDocument()
   })
 
-  // A phone-width bar holds more 44px targets than the screen is wide. The name
-  // column is the only thing that may shrink, so the status badge lives inside
-  // it (a `shrink-0` sibling overflowed onto the mode toggle once the column
-  // hit 0px), and the lower-priority buttons hand over to the overflow menu.
+  // Every action is the app's standard icon button (as on the sub-page and
+  // list headers), so the bar reads as one set. Run is its only filled action;
+  // an active mode is a tint so the two never compete.
+  describe("action buttons", () => {
+    it("uses the same icon-button shape for every action", () => {
+      renderTopbar("read")
+      for (const id of [
+        "mobile-editor-mode-toggle",
+        "mobile-editor-save",
+        "mobile-editor-run",
+        "mobile-editor-menu",
+      ]) {
+        expect(screen.getByTestId(id)).toHaveAttribute("data-size", "icon")
+      }
+    })
+
+    it("fills only Run", () => {
+      renderTopbar("read")
+      expect(screen.getByTestId("mobile-editor-run")).toHaveAttribute("data-variant", "default")
+      for (const id of ["mobile-editor-mode-toggle", "mobile-editor-save", "mobile-editor-menu"]) {
+        expect(screen.getByTestId(id)).toHaveAttribute("data-variant", "ghost")
+      }
+    })
+
+    it("tints the mode toggle while editing", () => {
+      renderTopbar("edit")
+      const toggle = screen.getByTestId("mobile-editor-mode-toggle")
+      expect(toggle).toHaveAttribute("aria-pressed", "true")
+      expect(toggle).toHaveClass("bg-primary/10", "text-primary")
+    })
+
+    it("leaves the mode toggle untinted while reading", () => {
+      renderTopbar("read")
+      const toggle = screen.getByTestId("mobile-editor-mode-toggle")
+      expect(toggle).toHaveAttribute("aria-pressed", "false")
+      expect(toggle).not.toHaveClass("bg-primary/10")
+    })
+  })
+
   describe("phone-width layout", () => {
     it("keeps the status badge inside the shrinkable name column", () => {
       renderTopbar()
@@ -181,7 +212,7 @@ describe("<MobileEditorTopbar />", () => {
     it("collapses the mode toggle to an icon but keeps its accessible name", () => {
       renderTopbar("edit")
       const toggle = screen.getByTestId("mobile-editor-mode-toggle")
-      expect(toggle).toHaveClass("max-sm:size-11")
+      expect(toggle).toHaveAttribute("data-size", "icon")
       expect(screen.getByText("modeEdit")).toHaveClass("max-sm:sr-only")
       expect(toggle).toHaveAccessibleName("modeEdit")
     })
@@ -204,7 +235,6 @@ describe("<MobileEditorTopbar />", () => {
           mode="select"
           onToggleMode={jest.fn()}
           onOpenCopilot={jest.fn()}
-          onOpenSearch={jest.fn()}
           onOpenWorkbench={onOpenWorkbench}
           orientationLocked={true}
           onToggleOrientationLock={jest.fn()}
@@ -334,4 +364,13 @@ describe("<MobileEditorTopbar />", () => {
     await user.click(await screen.findByText("autoLayout"))
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("autoLayoutFailed"))
   })
+})
+
+it.each(["pending", "unavailable"] as const)("disables orientation control while %s", async (status) => {
+  renderTopbar("read", status)
+  const user = userEvent.setup()
+  await user.click(screen.getByTestId("mobile-editor-menu"))
+  const option = await screen.findByTestId("mobile-editor-orientation")
+  expect(option).toHaveAttribute("data-disabled")
+  expect(option).toHaveTextContent(status === "pending" ? "orientationPending" : "orientationUnavailable")
 })

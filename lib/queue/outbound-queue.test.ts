@@ -272,32 +272,179 @@ describe("createOutboundRunner", () => {
     await runner.stop()
   })
 
-  it("retains a stale Host generation as a visible terminal rejection", async () => {
-    const call = jest.fn().mockRejectedValue(new Error("stale_host_generation"))
-    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
-    await enqueueHostStateAction({
-      channel: "cognia://target/desktop-studio/sessions/s1",
+  describe("a Host that restarted since the row was queued", () => {
+    const channel = "cognia://target/desktop-studio/sessions/s1"
+    const staleAction = (actionId: string, overrides: Record<string, unknown> = {}) => ({
+      channel,
+      accountId: scope.accountId,
+      runtimeTargetId: scope.targetId,
+      hostId: scope.targetId,
+      hostGeneration: 3,
+      sessionId: "s1",
+      clientId: "client-a",
+      clientSeq: 1,
+      actionId,
+      createdAt: Date.now(),
+      action: { kind: "turn.abort" as const },
+      ...overrides,
+    })
+    const confirmChannel = (hostGeneration: number, hostId: string = scope.targetId) =>
+      getDb().hostStateChannels.put({
+        channel,
+        hostId,
+        hostGeneration,
+        hostSeq: 0,
+        revision: 0,
+        digest: "hs-test",
+        state: {} as never,
+        updatedAt: Date.now(),
+      })
+    const appliedReceipt = (actionId: string, hostGeneration: number) => ({
+      results: [{ actionId, outcome: "applied", hostGeneration, hostSeq: 1 }],
+    })
+
+    beforeEach(async () => {
+      await getDb().hostStateChannels.clear()
+    })
+
+    it("re-bases a row no Host was ever offered onto the generation the Host published", async () => {
+      await confirmChannel(5)
+      const call = jest.fn().mockResolvedValue(appliedReceipt("queued-before-restart", 5))
+      const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+      await enqueueHostStateAction(staleAction("queued-before-restart"))
+
+      await runner.kick()
+
+      expect(call).toHaveBeenCalledTimes(1)
+      const sent = call.mock.calls[0]![1] as { actions: Array<{ hostGeneration: number }> }
+      expect(sent.actions[0]!.hostGeneration).toBe(5)
+      expect(await listByStatus("sent")).toEqual([
+        expect.objectContaining({
+          actionId: "queued-before-restart",
+          hostGeneration: 5,
+          offeredHostGeneration: 5,
+        }),
+      ])
+      await runner.stop()
+    })
+
+    it("never re-bases onto a different Host's generation", async () => {
+      await confirmChannel(5, "some-other-host")
+      const call = jest.fn().mockResolvedValue(appliedReceipt("other-host", 3))
+      const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+      await enqueueHostStateAction(staleAction("other-host"))
+
+      await runner.kick()
+
+      const sent = call.mock.calls[0]![1] as { actions: Array<{ hostGeneration: number }> }
+      expect(sent.actions[0]!.hostGeneration).toBe(3)
+      await runner.stop()
+    })
+
+    it("keeps a row that may already be applied on the generation it was offered under", async () => {
+      await confirmChannel(5)
+      const call = jest.fn().mockRejectedValue(new Error("stale_host_generation"))
+      const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+      const row = await enqueueHostStateAction(staleAction("offered-before-restart"))
+      // An earlier offer under generation 3 whose answer never came back.
+      await getDb().mobileOutboundQueue.update(row.id, { offeredHostGeneration: 3 })
+
+      await runner.kick()
+
+      const sent = call.mock.calls[0]![1] as { actions: Array<{ hostGeneration: number }> }
+      expect(sent.actions[0]!.hostGeneration).toBe(3)
+      // The Host may hold the earlier offer, so its refusal stands, visibly.
+      expect(await listByStatus("rejected")).toEqual([
+        expect.objectContaining({
+          actionId: "offered-before-restart",
+          rejectionCode: "stale_host_generation",
+        }),
+      ])
+      await runner.stop()
+    })
+
+    it("returns a first offer refused as stale to the queue and re-bases it once the mirror catches up", async () => {
+      let clock = Date.now()
+      const call = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("stale_host_generation"))
+        .mockResolvedValueOnce(appliedReceipt("raced-the-resync", 4))
+      const runner = createOutboundRunner({
+        dispatcher: { call },
+        enforceMobile: false,
+        scope,
+        now: () => clock,
+        random: () => 0,
+      })
+      // Stamped from the runner's frozen clock: a `Date.now()` taken after it
+      // can land a few ms later under load, which makes the row not yet due
+      // (`nextAttemptAt` is its `createdAt`) and leaves it unclaimed.
+      await enqueueHostStateAction(staleAction("raced-the-resync", { createdAt: clock }))
+
+      await runner.kick()
+
+      // Nothing was applied anywhere: not a rejection, a retry with the offer
+      // forgotten.
+      expect(await listByStatus("rejected")).toHaveLength(0)
+      const [pending] = await listByStatus("pending")
+      expect(pending).toMatchObject({ actionId: "raced-the-resync", attempts: 1 })
+      expect(pending).not.toHaveProperty("offeredHostGeneration")
+
+      await confirmChannel(4)
+      clock += 60_000
+      await runner.kick()
+
+      expect(call).toHaveBeenCalledTimes(2)
+      const resent = call.mock.calls[1]![1] as { actions: Array<{ hostGeneration: number }> }
+      expect(resent.actions[0]!.hostGeneration).toBe(4)
+      expect(await listByStatus("sent")).toEqual([
+        expect.objectContaining({ actionId: "raced-the-resync" }),
+      ])
+      await runner.stop()
+    })
+  })
+
+  it("sends only the latest of several drafts no Host has seen", async () => {
+    const channel = "cognia://target/desktop-studio/sessions/s1"
+    const draft = (actionId: string, clientSeq: number, text: string) => ({
+      channel,
       accountId: scope.accountId,
       runtimeTargetId: scope.targetId,
       hostId: scope.targetId,
       hostGeneration: 1,
       sessionId: "s1",
       clientId: "client-a",
-      clientSeq: 1,
-      actionId: "stale-action",
-      createdAt: Date.now(),
-      action: { kind: "turn.abort" },
+      clientSeq,
+      actionId,
+      baseRevision: 0,
+      createdAt: Date.now() - 1_000 + clientSeq,
+      action: { kind: "draft.replace" as const, text, attachments: [] },
     })
+    const call = jest.fn(async (_command: string, payload: Record<string, unknown>) => {
+      const [action] = payload.actions as Array<{ actionId: string }>
+      return {
+        results: [
+          { actionId: action!.actionId, outcome: "applied", hostGeneration: 1, hostSeq: 1 },
+        ],
+      }
+    })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await enqueueHostStateAction(draft("draft-1", 1, "h"))
+    await enqueueHostStateAction(draft("draft-2", 2, "he"))
+    await enqueueHostStateAction({
+      ...draft("abort", 3, ""),
+      action: { kind: "turn.abort" },
+      baseRevision: undefined,
+    })
+    await enqueueHostStateAction(draft("draft-4", 4, "hello"))
 
     await runner.kick()
 
-    expect(await listByStatus("rejected")).toEqual([
-      expect.objectContaining({
-        actionId: "stale-action",
-        rejectionCode: "stale_host_generation",
-      }),
-    ])
-    expect(call).toHaveBeenCalledTimes(1)
+    const sentIds = call.mock.calls.map(
+      ([, payload]) => (payload.actions as Array<{ actionId: string }>)[0]!.actionId
+    )
+    expect(sentIds).toEqual(["abort", "draft-4"])
+    expect((await listAll()).map((row) => row.actionId).sort()).toEqual(["abort", "draft-4"])
     await runner.stop()
   })
 

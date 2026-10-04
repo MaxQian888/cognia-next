@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 
+import { getMobileCrashCapabilities } from "@/lib/capacitor/crash-diagnostics"
 import { isTauri } from "@/lib/tauri"
 
 /**
@@ -10,9 +11,10 @@ import { isTauri } from "@/lib/tauri"
  * request to a user-configured host anyway. The renderer decides *whether* to
  * send and *what* to include; this is how it says so.
  *
- * Every function is a no-op off the desktop runtime, mirroring the style of
- * `crash-reports.ts` next door. The mobile shell has its own path through the
- * Capacitor crash plugin.
+ * Every native function refuses off the desktop runtime, mirroring the style
+ * of `crash-reports.ts` next door. The mobile shell has its own path through
+ * the Capacitor crash plugin (`lib/diagnostic-service/mobile-submit.ts`);
+ * `resolveSubmissionRuntime` is what tells a caller which of the two exists.
  */
 
 /** Connection facts the native side needs. Resolved by the renderer. */
@@ -87,9 +89,49 @@ function toSubmitError(cause: unknown): DiagnosticSubmitError {
   return new DiagnosticSubmitError("submission_failed")
 }
 
-/** Whether this shell can submit at all. */
+/**
+ * Whether this shell can package and submit *natively* — the desktop path.
+ *
+ * Synchronous on purpose, and deliberately not the whole answer: the mobile
+ * shell submits too, through the Capacitor crash plugin and the ordinary
+ * client, but whether that plugin is present can only be learned
+ * asynchronously. Surfaces that ask "can this device submit at all?" use
+ * `resolveSubmissionRuntime` (or `useDiagnosticSubmissionSupport`); using this
+ * alone is what left every phone showing "available in the desktop app".
+ */
 export function canSubmitDiagnostics(): boolean {
   return isTauri()
+}
+
+/** Which submission path this shell has, if any. */
+export type DiagnosticSubmissionRuntime = "desktop" | "mobile"
+
+/** Seams for the tests; production passes nothing. */
+export interface SubmissionRuntimeDeps {
+  isDesktop?: () => boolean
+  mobileCapabilities?: () => Promise<{ kind: string }>
+}
+
+/**
+ * Resolve the submission path this shell actually has.
+ *
+ * - `desktop` under Tauri (native packaging, `crash::submit`).
+ * - `mobile` when the Capacitor crash plugin answers its capability probe —
+ *   the same probe `getMobileCrashCapabilities` already runs, so a WebView
+ *   without the plugin (or the plain browser, where the loader refuses) never
+ *   claims it can submit.
+ * - `null` otherwise. Never rejects: a probe that throws means "no path".
+ */
+export async function resolveSubmissionRuntime(
+  deps: SubmissionRuntimeDeps = {}
+): Promise<DiagnosticSubmissionRuntime | null> {
+  if ((deps.isDesktop ?? isTauri)()) return "desktop"
+  try {
+    const outcome = await (deps.mobileCapabilities ?? (() => getMobileCrashCapabilities()))()
+    return outcome.kind === "ok" ? "mobile" : null
+  } catch {
+    return null
+  }
 }
 
 export async function submitCrashReport(

@@ -1,0 +1,306 @@
+diff --git a/android/src/main/java/com/whitestein/securestorage/PasswordStorageHelper.java b/android/src/main/java/com/whitestein/securestorage/PasswordStorageHelper.java
+--- a/android/src/main/java/com/whitestein/securestorage/PasswordStorageHelper.java
++++ b/android/src/main/java/com/whitestein/securestorage/PasswordStorageHelper.java
+@@ -48,23 +48,10 @@
+     private PasswordStorageImpl passwordStorage = null;
+ 
+     public PasswordStorageHelper(Context context) {
+-        if (android.os.Build.VERSION.SDK_INT < 18) {
+-            passwordStorage = new PasswordStorageHelper_SDK16();
+-        } else {
+-            passwordStorage = new PasswordStorageHelper_SDK18();
+-        }
+-
+-        boolean isInitialized = false;
+-
+-        try {
+-            isInitialized = passwordStorage.init(context);
+-        } catch (Exception ex) {
+-            Log.e(LOG_TAG, "PasswordStorage initialisation error:" + ex.getMessage(), ex);
+-        }
+-
+-        if (!isInitialized && passwordStorage instanceof PasswordStorageHelper_SDK18) {
+-            passwordStorage = new PasswordStorageHelper_SDK16();
+-            passwordStorage.init(context);
++        // Never downgrade a failed Keystore to reversible Base64 storage.
++        passwordStorage = new PasswordStorageHelper_SDK18();
++        if (!passwordStorage.init(context)) {
++            throw new IllegalStateException("Secure storage Keystore initialization failed");
+         }
+     }
+ 
+@@ -98,53 +85,6 @@
+         void remove(String key);
+ 
+         void clear();
+-    }
+-
+-    private static class PasswordStorageHelper_SDK16 implements PasswordStorageImpl {
+-        private SharedPreferences preferences;
+-
+-        @Override
+-        public boolean init(Context context) {
+-            preferences = context.getSharedPreferences(PREFERENCES_FILE, Context.MODE_PRIVATE);
+-            return true;
+-        }
+-
+-        @Override
+-        public void setData(String key, byte[] data) {
+-            if (data == null)
+-                return;
+-            Editor editor = preferences.edit();
+-            editor.putString(key, Base64.encodeToString(data, Base64.DEFAULT));
+-            editor.commit();
+-        }
+-
+-        @Override
+-        public byte[] getData(String key) {
+-            String res = preferences.getString(key, null);
+-            if (res == null)
+-                return null;
+-            return Base64.decode(res, Base64.DEFAULT);
+-        }
+-
+-        @Override
+-        public String[] keys() {
+-            Set<String> keySet = preferences.getAll().keySet();
+-            return keySet.toArray(new String[keySet.size()]);
+-        }
+-
+-        @Override
+-        public void remove(String key) {
+-            Editor editor = preferences.edit();
+-            editor.remove(key);
+-            editor.commit();
+-        }
+-
+-        @Override
+-        public void clear() {
+-            Editor editor = preferences.edit();
+-            editor.clear();
+-            editor.commit();
+-        }
+     }
+ 
+     private static class PasswordStorageHelper_SDK18 implements PasswordStorageImpl {
+@@ -181,8 +121,15 @@
+                         return true;
+                     }
+                 }
++                // Existing entries must never be overwritten by a replacement key.
++                if (ks.containsAlias(alias)) {
++                    throw new IllegalStateException("Secure storage key is unavailable");
++                }
++                if (!preferences.getAll().isEmpty()) {
++                    throw new IllegalStateException("Secure storage key is missing for existing data");
++                }
+             } catch (Exception ex) {
+-                return false;
++                throw new IllegalStateException("Secure storage Keystore initialization failed", ex);
+             }
+ 
+             // Create a start and end time, for the validity range of the key pair that's about to be
+@@ -220,7 +167,7 @@
+                 // Generate private/public keys
+                 kpGenerator.generateKeyPair();
+             } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException | NoSuchProviderException e) {
+-                e.printStackTrace();
++                throw new IllegalStateException("Secure storage key generation failed", e);
+             }
+ 
+             // Check if device support Hardware-backed keystore
+@@ -249,24 +196,27 @@
+                 ks = KeyStore.getInstance(KEYSTORE_PROVIDER_ANDROID_KEYSTORE);
+ 
+                 ks.load(null);
+-                if (ks.getCertificate(alias) == null) return;
++                if (ks.getCertificate(alias) == null) {
++                    throw new IllegalStateException("Secure storage certificate is unavailable");
++                }
+ 
+                 PublicKey publicKey = ks.getCertificate(alias).getPublicKey();
+ 
+                 if (publicKey == null) {
+-                    Log.d(LOG_TAG, "Error: Public key was not found in Keystore");
+-                    return;
++                    throw new IllegalStateException("Secure storage public key is unavailable");
+                 }
+ 
+                 String value = encrypt(publicKey, data);
+ 
+                 Editor editor = preferences.edit();
+                 editor.putString(key, value);
+-                editor.commit();
++                if (!editor.commit()) {
++                    throw new IllegalStateException("Secure storage write commit failed");
++                }
+             } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException
+                     | IllegalBlockSizeException | BadPaddingException | NoSuchProviderException
+                     | InvalidKeySpecException | KeyStoreException | CertificateException | IOException e) {
+-                e.printStackTrace();
++                throw new IllegalStateException("Secure storage write failed", e);
+             }
+         }
+ 
+@@ -281,9 +231,8 @@
+             } catch (KeyStoreException | NoSuchAlgorithmException | CertificateException | IOException
+                     | UnrecoverableEntryException | InvalidKeyException | NoSuchPaddingException
+                     | IllegalBlockSizeException | BadPaddingException | NoSuchProviderException e) {
+-               e.printStackTrace();
+-            }
+-            return null;
++                throw new IllegalStateException("Secure storage read failed", e);
++            }
+         }
+ 
+         @Override
+@@ -296,14 +245,18 @@
+         public void remove(String key) {
+             Editor editor = preferences.edit();
+             editor.remove(key);
+-            editor.commit();
++            if (!editor.commit()) {
++                throw new IllegalStateException("Secure storage delete commit failed");
++            }
+         }
+ 
+         @Override
+         public void clear() {
+             Editor editor = preferences.edit();
+             editor.clear();
+-            editor.commit();
++            if (!editor.commit()) {
++                throw new IllegalStateException("Secure storage delete commit failed");
++            }
+         }
+ 
+         private static int KEY_LENGTH = 2048;
+@@ -328,11 +281,7 @@
+                     if (data.length - position < limit)
+                         limit = data.length - position;
+                     byte[] tmpData = cipher.doFinal(data, position, limit);
+-                    try {
+-                        byteArrayOutputStream.write(tmpData);
+-                    } catch (IOException e) {
+-                        e.printStackTrace();
+-                    }
++                    byteArrayOutputStream.write(tmpData, 0, tmpData.length);
+                     position += limit;
+                 }
+ 
+@@ -361,11 +310,7 @@
+                     if (encryptedBuffer.length - position < limit)
+                         limit = encryptedBuffer.length - position;
+                     byte[] tmpData = cipher.doFinal(encryptedBuffer, position, limit);
+-                    try {
+-                        byteArrayOutputStream.write(tmpData);
+-                    } catch (IOException e) {
+-                        e.printStackTrace();
+-                    }
++                    byteArrayOutputStream.write(tmpData, 0, tmpData.length);
+                     position += limit;
+                 }
+ 
+diff --git a/android/src/main/java/com/whitestein/securestorage/SecureStoragePluginPlugin.java b/android/src/main/java/com/whitestein/securestorage/SecureStoragePluginPlugin.java
+--- a/android/src/main/java/com/whitestein/securestorage/SecureStoragePluginPlugin.java
++++ b/android/src/main/java/com/whitestein/securestorage/SecureStoragePluginPlugin.java
+@@ -15,15 +15,33 @@
+ public class SecureStoragePluginPlugin extends Plugin {
+ 
+     private PasswordStorageHelper passwordStorageHelper;
++    private Exception initializationError;
++
++    private void initializeStorage(Context context) {
++        try {
++            this.passwordStorageHelper = new PasswordStorageHelper(context);
++            this.initializationError = null;
++        } catch (Exception error) {
++            this.passwordStorageHelper = null;
++            this.initializationError = error;
++        }
++    }
++
++    private PasswordStorageHelper requireStorage() {
++        if (passwordStorageHelper == null) {
++            throw new IllegalStateException("Secure storage is unavailable", initializationError);
++        }
++        return passwordStorageHelper;
++    }
+ 
+     @Override
+     public void load() {
+         super.load();
+-        this.passwordStorageHelper = new PasswordStorageHelper(getContext());
++        initializeStorage(getContext());
+     }
+ 
+     public void loadTextContext(Context context) {
+-        this.passwordStorageHelper = new PasswordStorageHelper(context);
++        initializeStorage(context);
+     }
+ 
+     @PluginMethod
+@@ -53,7 +71,11 @@
+ 
+     @PluginMethod
+     public void keys(PluginCall call) {
+-        call.resolve(this._keys());
++        try {
++            call.resolve(this._keys());
++        } catch (Exception exception) {
++            call.reject(exception.getMessage(), exception);
++        }
+     }
+ 
+     @PluginMethod
+@@ -86,14 +108,14 @@
+     }
+ 
+     public JSObject _set(String key, String value) {
+-        this.passwordStorageHelper.setData(key, value.getBytes(Charset.forName("UTF-8")));
++        requireStorage().setData(key, value.getBytes(Charset.forName("UTF-8")));
+         JSObject ret = new JSObject();
+         ret.put("value", true);
+         return ret;
+     }
+ 
+     public boolean has(String key) throws Exception {
+-        byte[] buffer = this.passwordStorageHelper.getData(key);
++        byte[] buffer = requireStorage().getData(key);
+         if (buffer != null) {
+             return true;
+         } else {
+@@ -102,7 +124,7 @@
+     }
+ 
+     public JSObject _get(String key) throws Exception {
+-        byte[] buffer = this.passwordStorageHelper.getData(key);
++        byte[] buffer = requireStorage().getData(key);
+         if (buffer != null) {
+             String value = new String(buffer, Charset.forName("UTF-8"));
+             JSObject ret = new JSObject();
+@@ -114,21 +136,21 @@
+     }
+ 
+     public JSObject _keys() {
+-        String[] keys = this.passwordStorageHelper.keys();
++        String[] keys = requireStorage().keys();
+         JSObject ret = new JSObject();
+         ret.put("value", JSArray.from(keys));
+         return ret;
+     }
+ 
+     public JSObject _remove(String key) {
+-        this.passwordStorageHelper.remove(key);
++        requireStorage().remove(key);
+         JSObject ret = new JSObject();
+         ret.put("value", true);
+         return ret;
+     }
+ 
+     public JSObject _clear() {
+-        this.passwordStorageHelper.clear();
++        requireStorage().clear();
+         JSObject ret = new JSObject();
+         ret.put("value", true);
+         return ret;
