@@ -11,6 +11,7 @@ import { ComposerBehaviorCard } from "./composer-behavior-card"
 import { ComposerSkinCard } from "./composer-skin-card"
 import { EffortPreferencesCard } from "./effort-preferences-card"
 import { ConversationSidebarCard } from "./conversation-sidebar-card"
+import { ConversationArchiveCard } from "./conversation-archive-card"
 import { RunStatusBarCard } from "./run-status-bar-card"
 import { SessionPowerCard } from "./session-power-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
@@ -170,6 +171,10 @@ export function ConversationSection() {
       </SettingsCard>
 
       <ConversationSidebarCard />
+
+      {/* When a row leaves the active list (auto-archive), right after how a
+          row looks. */}
+      <ConversationArchiveCard />
 
       <RunStatusBarCard />
 

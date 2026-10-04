@@ -22,6 +22,10 @@ jest.mock("./conversation-sidebar-card", () => ({
   ConversationSidebarCard: () => <div data-testid="conversation-sidebar-stub" />,
 }))
 
+jest.mock("./conversation-archive-card", () => ({
+  ConversationArchiveCard: () => <div data-testid="conversation-archive-stub" />,
+}))
+
 let mockSettings: Record<string, unknown> | null
 const mockSave = jest.fn()
 jest.mock("@/stores/settings", () => ({
@@ -54,6 +58,14 @@ describe("ConversationSection", () => {
   it("renders the conversation-sidebar card", () => {
     render(<ConversationSection />)
     expect(screen.getByTestId("conversation-sidebar-stub")).toBeInTheDocument()
+  })
+
+  it("renders the archive card right after the conversation-sidebar card", () => {
+    render(<ConversationSection />)
+    const sidebar = screen.getByTestId("conversation-sidebar-stub")
+    const archive = screen.getByTestId("conversation-archive-stub")
+    expect(sidebar.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(sidebar.nextElementSibling).toBe(archive)
   })
 
   it("renders the input-&-send card with the behavior card alongside assistance", () => {
