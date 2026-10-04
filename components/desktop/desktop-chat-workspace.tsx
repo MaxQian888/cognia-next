@@ -272,11 +272,12 @@ export function DesktopChatWorkspace() {
   }, [errorMessage, lastErrorShown, chatPaneHidden])
 
   // Recent sessions for the welcome-page "Continue" group (newest first,
-  // excluding the one already open).
+  // excluding the one already open and anything archived: "Continue" offers
+  // the conversations still in the list, ADR-0213).
   const recentSessions = useMemo(
     () =>
       [...sessions]
-        .filter((s) => s.id !== activeSessionId)
+        .filter((s) => s.id !== activeSessionId && s.archivedAt == null)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 4)
         .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt })),

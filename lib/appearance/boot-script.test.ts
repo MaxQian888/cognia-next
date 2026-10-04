@@ -177,6 +177,29 @@ describe("BOOT_SCRIPT", () => {
     }
   )
 
+  it.each([runBootScript, () => eval(BOOT_SCRIPT)])(
+    "restores the full palette only under a matching variant (%#)",
+    (run) => {
+      document.documentElement.className = "dark"
+      const snapshot = (colorScheme: string) =>
+        JSON.stringify({
+          colorScheme,
+          "--background": "#101014",
+          palette: { "--muted": "#222226", "--input": "#333337", "not-a-var": "red" },
+        })
+      window.localStorage.setItem(BOOT_MIRROR_STORAGE_KEY, snapshot("light"))
+      run()
+      expect(document.documentElement.style.getPropertyValue("--muted")).toBe("")
+      expect(document.documentElement.style.getPropertyValue("--input")).toBe("")
+
+      window.localStorage.setItem(BOOT_MIRROR_STORAGE_KEY, snapshot("dark"))
+      run()
+      expect(document.documentElement.style.getPropertyValue("--muted")).toBe("#222226")
+      expect(document.documentElement.style.getPropertyValue("--input")).toBe("#333337")
+      expect(document.documentElement.style.getPropertyValue("not-a-var")).toBe("")
+    }
+  )
+
   it("does NOT toggle the dark class — next-themes owns that", () => {
     document.documentElement.classList.remove("dark")
     window.localStorage.setItem(
@@ -231,4 +254,36 @@ describe("writeBootMirror / clearBootMirror", () => {
     setItemSpy.mockRestore()
     consoleSpy.mockRestore()
   })
+})
+
+describe("pet overlay routes", () => {
+  const navigate = (path: string) => window.history.replaceState(null, "", path)
+
+  afterEach(() => {
+    document.documentElement.removeAttribute("data-pet-overlay")
+    navigate("/")
+  })
+
+  it.each([runBootScript, () => eval(BOOT_SCRIPT)])(
+    "marks the sprite and popup routes transparent before any React runs, with no mirror (%#)",
+    (run) => {
+      for (const path of ["/pet-overlay", "/pet-overlay/", "/pet-popup", "/pet-popup/index.html"]) {
+        document.documentElement.removeAttribute("data-pet-overlay")
+        navigate(path)
+        run()
+        expect(document.documentElement.getAttribute("data-pet-overlay")).toBe("1")
+      }
+    }
+  )
+
+  it.each([runBootScript, () => eval(BOOT_SCRIPT)])(
+    "leaves every other route alone, including the /pet console (%#)",
+    (run) => {
+      for (const path of ["/", "/pet", "/pet?tab=shop", "/pet-overlayed", "/settings"]) {
+        navigate(path)
+        run()
+        expect(document.documentElement.hasAttribute("data-pet-overlay")).toBe(false)
+      }
+    }
+  )
 })

@@ -450,6 +450,22 @@ export function buildLocalHostFeatureManifest({
         "external_agent_run_turn",
         "external_agent_cancel_run",
         "external_agent_resolve_decision",
+        // Host-lane Cognia models (ADR-0090, 2026-10-02): the catalog read,
+        // and a capability marker — not a command — saying that
+        // `external_agent_run_turn` accepts `cogniaModel`. The run-turn request
+        // schema is closed, so a client has to know before it sends the field;
+        // an older Host lacks the marker and the client asks for an update
+        // instead of collecting a 422.
+        //
+        // Both Hosts. The desktop answers from its renderer's provider
+        // settings and vault and runs the task through
+        // `prepareExternalAgentGatewayRoute`'s local branch. The headless
+        // brain answers from `cognia-server`'s Provider Profile Store and
+        // gateway snapshot, and its task route is
+        // `agent_gateway_host_task_prepare`, which leases one of the server's
+        // own providers without the credential ever leaving Rust.
+        "external_agent_cognia_models",
+        "external_agent_run_turn_cognia_model",
       ],
     }
     // Starting the process. Named per operation like its neighbours: a host
@@ -853,25 +869,32 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
     ) {
       return null
     }
-    const declaredOperations = new Map<string, { feature: string; version: number }>()
+    // One operation can belong to several features: `agent_tool_host_control`
+    // is both the plugin tool host (`external-agent.process-plane`) and the
+    // sandbox tool host (`external-agent.sandbox-tools`), and each is gated on
+    // its own feature. The operation list carries it once, attributed to one of
+    // them, so any declaring feature is a valid attribution. Picking a single
+    // "owner" by iteration order instead depended on key order, which the
+    // Host's JSON serialization does not preserve, and rejected every manifest
+    // that carried such an operation.
+    const declaredOperations = new Map<string, Map<string, number>>()
     for (const [feature, descriptor] of Object.entries(v2.features ?? {})) {
       for (const operation of descriptor?.operations ?? []) {
-        declaredOperations.set(operation, {
-          feature,
-          version: descriptor!.version,
-        })
+        const owners = declaredOperations.get(operation) ?? new Map<string, number>()
+        owners.set(feature, descriptor!.version)
+        declaredOperations.set(operation, owners)
       }
     }
     if (
       v2.operations.length !== declaredOperations.size ||
       v2.operations.some((operation) => {
         if (!operation || typeof operation !== "object") return true
-        const declared = declaredOperations.get(operation.name)
+        const owners = declaredOperations.get(operation.name)
         return (
           typeof operation.name !== "string" ||
-          !declared ||
-          operation.feature !== declared.feature ||
-          operation.featureVersion !== declared.version ||
+          !owners ||
+          !owners.has(operation.feature) ||
+          operation.featureVersion !== owners.get(operation.feature) ||
           typeof operation.healthy !== "boolean" ||
           (operation.reason !== undefined &&
             (typeof operation.reason !== "string" || operation.reason.length === 0))

@@ -108,36 +108,28 @@ describe("StatusBarPerf", () => {
     expect(screen.getByTestId("status-perf")).toHaveTextContent("12%")
   })
 
-  it("shows CPU and Memory tiles in the popover and links to /performance", () => {
+  it("shows CPU and Memory tiles that deep-link to their overview metric", () => {
     render(<StatusBarPerf />)
     expect(screen.getByTestId("status-perf-cpu")).toHaveTextContent("perfCpu:12%")
     // 340 MB, 0 fraction digits.
     expect(screen.getByTestId("status-perf-mem")).toHaveTextContent("perfMem:340 MB")
     fireEvent.click(screen.getByTestId("status-perf-cpu"))
+    expect(mockPush).toHaveBeenLastCalledWith("/performance?metric=host.main.cpu-pct")
     fireEvent.click(screen.getByTestId("status-perf-mem"))
-    expect(mockPush).toHaveBeenCalledTimes(2)
-    expect(mockPush).toHaveBeenCalledWith("/performance")
+    expect(mockPush).toHaveBeenLastCalledWith("/performance?metric=host.main.memory-bytes")
   })
 
-  it("falls back to runtime busyPct / system memory when there is no main process", () => {
+  it("reads unmeasured rather than zero before a host frame with a main process arrives", () => {
+    // Renderer frames carry no processes; their Tokio and memory fields are
+    // structural zeros, which used to surface here as "47%" / "50 B".
     const s = sample(0, 0)
     s.processes = []
     s.runtime.busyPct = 47
     s.systemMemory = { totalBytes: 100, usedBytes: 50 }
     mockStream = { history: [s], latest: s, available: true }
     render(<StatusBarPerf />)
-    expect(screen.getByTestId("status-perf")).toHaveTextContent("47%")
-    // memSeries/memBytes resolved from systemMemory.usedBytes.
-    expect(screen.getByTestId("status-perf-mem")).toHaveTextContent("perfMem:50 B")
-  })
-
-  it("uses 0 memory when neither a main process nor system memory is present", () => {
-    const s = sample(0, 0)
-    s.processes = []
-    s.runtime.busyPct = 5
-    s.systemMemory = null
-    mockStream = { history: [s], latest: s, available: true }
-    render(<StatusBarPerf />)
-    expect(screen.getByTestId("status-perf-mem")).toHaveTextContent("perfMem:0 B")
+    expect(screen.getByTestId("status-perf")).toHaveTextContent("—")
+    expect(screen.getByTestId("status-perf-cpu")).toHaveTextContent("perfCpu:—")
+    expect(screen.getByTestId("status-perf-mem")).toHaveTextContent("perfMem:—")
   })
 })

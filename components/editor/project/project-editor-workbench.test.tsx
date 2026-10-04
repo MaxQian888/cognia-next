@@ -19,6 +19,12 @@ jest.mock("@/lib/files/project-editor-bridge", () => ({
   registerProjectEditorOpener: (args: unknown) => registerOpener(args),
   notifyActiveEditorChanged: () => notifyActiveEditorChanged(),
 }))
+// A keyboard by default; the touch tests flip it. Mocked rather than driven
+// through matchMedia so the gate under test is the one the workbench reads.
+let mockShowKeyboardHints = true
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useShowKeyboardHints: () => mockShowKeyboardHints,
+}))
 jest.mock("@/stores/canvas/keybinding-store", () => ({
   useKeybindingStore: (selector: (state: { bindings: Record<string, string> }) => unknown) =>
     selector({ bindings: {} }),
@@ -344,6 +350,7 @@ function MobileHarness() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockShowKeyboardHints = true
   registerOpener.mockReturnValue(disposeOpener)
   projectContextWorkbenchProps.mockClear()
   useProjectEditorSessionStore.setState({ sessions: {} })
@@ -612,6 +619,30 @@ it("empty-state shortcut rows drive quick open, search, and reopen", () => {
     screen.getByTestId("project-editor-sidebar-content").querySelector('[data-testid="search"]')
   ).not.toBeNull()
 
+  fireEvent.click(screen.getByTestId("editor-empty-reopen"))
+  expect(editor.reopenClosedFile).toHaveBeenCalled()
+})
+
+it("shows the chord badges where there is a keyboard", () => {
+  editor.activeFile = null
+  editor.activePath = null
+  render(<Harness />)
+  expect(screen.getByTestId("editor-empty-quick-open")).toHaveTextContent("⌘P")
+  expect(screen.getByTestId("editor-empty-reopen")).toHaveTextContent("⇧⌘T")
+})
+
+it("drops the chord badges on a touch device but keeps the rows working", () => {
+  mockShowKeyboardHints = false
+  editor.activeFile = null
+  editor.activePath = null
+  render(<Harness />)
+
+  const empty = screen.getByTestId("editor-empty")
+  expect(empty.querySelector("kbd")).toBeNull()
+  expect(empty).not.toHaveTextContent("⌘")
+
+  fireEvent.click(screen.getByTestId("editor-empty-quick-open"))
+  expect(screen.getByTestId("quick-open")).toBeInTheDocument()
   fireEvent.click(screen.getByTestId("editor-empty-reopen"))
   expect(editor.reopenClosedFile).toHaveBeenCalled()
 })
@@ -2054,6 +2085,57 @@ describe("mobile layout parity", () => {
     render(<MobileHarness />)
     expect(screen.getByTestId("editor-empty-quick-open")).toBeInTheDocument()
     expect(screen.queryByTestId("editor-empty-sidebar")).toBeNull()
+  })
+
+  it("gives the phone a touch empty state: no chords, browse files first", () => {
+    // Even where the device reports a keyboard, the pane flow has no chords
+    // to advertise and no tree beside the editor to "open a file from".
+    editor.activeFile = null
+    editor.activePath = null
+    render(<MobileHarness />)
+    fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+
+    const empty = screen.getByTestId("editor-empty")
+    expect(empty).toHaveTextContent("emptyEditorMobile")
+    expect(empty.querySelector("kbd")).toBeNull()
+    expect(empty).not.toHaveTextContent("⌘")
+    // Desktop-only rows: the palette is a pane-header button here and reopen
+    // lives in the tab menu, so neither is repeated as a dead-end row.
+    expect(screen.queryByTestId("editor-empty-palette")).toBeNull()
+    expect(screen.queryByTestId("editor-empty-reopen")).toBeNull()
+
+    const buttons = within(empty).getAllByRole("button")
+    expect(buttons[0]).toHaveAttribute("data-testid", "editor-empty-browse-files")
+  })
+
+  it("routes the phone empty-state actions to the files pane, Go to File and search", () => {
+    editor.activeFile = null
+    editor.activePath = null
+    render(<MobileHarness />)
+    fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+    expect(screen.getByTestId("project-editor-mobile-editor")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("editor-empty-browse-files"))
+    expect(screen.getByTestId("project-editor-mobile-files")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+    fireEvent.click(screen.getByTestId("editor-empty-search"))
+    expect(screen.getByTestId("project-editor-mobile-search")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+
+    fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+    fireEvent.click(screen.getByTestId("editor-empty-quick-open"))
+    expect(quickOpenProps.mock.calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ open: true, seedQuery: { text: "" } })
+    )
   })
 })
 

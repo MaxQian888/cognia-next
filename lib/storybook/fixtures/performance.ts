@@ -2,12 +2,16 @@
 // (`components/performance/**`). These mirror the serde structs the live
 // `usePerfStream` sampler emits; the components take them as plain props, so a
 // realistic in-memory history is all a story needs. Dependency-free (types).
-import type {
-  PerfSample,
-  ProcessSample,
-  RuntimeSample,
-  SpanSnapshot,
-  SystemMemory,
+import {
+  PERF_WIRE_VERSION,
+  type PerfFrame,
+  type PerfSample,
+  type PerfSourceDescriptor,
+  type PerfSourceKind,
+  type ProcessSample,
+  type RuntimeSample,
+  type SpanSnapshot,
+  type SystemMemory,
 } from "@/lib/perf/backend/types"
 
 const MB = 1024 * 1024
@@ -130,4 +134,82 @@ function makeSample(i: number): PerfSample {
 /** A rolling window of composed frames (oldest → newest). */
 export function makeHistory(n = 40): PerfSample[] {
   return Array.from({ length: n }, (_, i) => makeSample(i))
+}
+
+const HOST_CAPABILITIES = [
+  "host.processes",
+  "host.system-memory-utilization",
+  "runtime.tokio",
+  "runtime.dial9",
+  "host.managed-processes",
+  "host.traces",
+]
+const RENDERER_CAPABILITIES = [
+  "renderer.fps",
+  "renderer.long-task",
+  "renderer.user-timing",
+  "renderer.chat-latency",
+  "renderer.js-heap",
+]
+
+/** A source descriptor as `usePerfStream().sources` lists it. */
+export function makeSource(kind: PerfSourceKind, capabilities?: string[]): PerfSourceDescriptor {
+  return {
+    wireVersion: PERF_WIRE_VERSION,
+    sourceId: `${kind}:story`,
+    kind,
+    hostInstanceId: `${kind}-story`,
+    runtimeKind: kind === "host" ? "tauri-rust" : "browser",
+    build: { version: "0.0.0-story", commit: null, profile: "development" },
+    metricSchemaVersion: 1,
+    capabilities: capabilities ?? (kind === "host" ? HOST_CAPABILITIES : RENDERER_CAPABILITIES),
+    clock: { kind: "performance-time-origin", originWallMs: 0 },
+    connection: { state: "live", changedAtMs: 0, detail: null },
+  }
+}
+
+/** Versioned frames for a source, built on {@link makeHistory}. */
+export function makeFrames(kind: PerfSourceKind, n = 40): PerfFrame[] {
+  const fps = wave(n, 48, 12)
+  const blocked = wave(n, 2, 18)
+  return makeHistory(n).map((sample, index) => {
+    const wallEndMs = 1_700_000_000_000 + index * 1000
+    const base = {
+      ...sample,
+      wireVersion: PERF_WIRE_VERSION,
+      sourceId: `${kind}:story`,
+      targetId: "story",
+      routingGeneration: 0,
+      hostInstanceId: `${kind}-story`,
+      samplingSessionId: "story-session",
+      sequence: index + 1,
+      requestedIntervalMs: 1000,
+      actualIntervalMs: 1000,
+      monotonicElapsedMs: 1000,
+      wallStartMs: wallEndMs - 1000,
+      wallEndMs,
+      collectionDurationMs: 2,
+      missedTicks: 0,
+      flags: {
+        reset: index === 0,
+        discontinuity: false,
+        counterReset: false,
+        sourceRestarted: false,
+      },
+    }
+    if (kind === "host") return base
+    return {
+      ...base,
+      processes: [],
+      topSpans: [],
+      systemMemory: null,
+      managed: [],
+      observations: {
+        "renderer.fps": fps[index],
+        "renderer.main-thread-blocked.pct": blocked[index],
+        "renderer.long-task.count": Math.round(blocked[index] / 5),
+        "renderer.js-heap.used.bytes": (80 + (index % 10)) * MB,
+      },
+    }
+  })
 }

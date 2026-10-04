@@ -675,6 +675,80 @@ test("Move to folder submenu is hidden without folders or a current folder", asy
   expect(screen.queryByText("moveToFolder")).toBeNull()
 })
 
+test("Move to folder offers New folder… to a loose row even before any folder exists", async () => {
+  const user = userEvent.setup()
+  const onNewFolderWith = jest.fn()
+  setup({ folders: [], onAssignToFolder: jest.fn(), onNewFolderWith, newFolderProjectId: "p" })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.hover(await screen.findByText("moveToFolder"))
+  expect(await screen.findByText("newFolder")).toBeInTheDocument()
+  // Loose row: nothing to be removed from.
+  expect(screen.queryByText("removeFromFolder")).toBeNull()
+})
+
+test("New folder… hands the row's own id to the list", async () => {
+  const user = userEvent.setup()
+  const onNewFolderWith = jest.fn()
+  setup({ folders: [], onAssignToFolder: jest.fn(), onNewFolderWith, newFolderProjectId: "p" })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  fireEvent.keyDown(screen.getByTestId("session-row-dropdown-move-folder-s-1"), {
+    key: "ArrowRight",
+  })
+  await user.click(await screen.findByTestId("session-row-dropdown-folder-new-s-1"))
+  expect(onNewFolderWith).toHaveBeenCalledWith("s-1")
+})
+
+test("New folder… is not offered to a row the new folder could not hold", async () => {
+  // The folder is made in the active workspace ("p"); a row from another
+  // workspace would be filed into something not loaded where it lives.
+  const user = userEvent.setup()
+  setup({
+    session: { ...baseSession, projectId: "other" },
+    folders: [],
+    onAssignToFolder: jest.fn(),
+    onNewFolderWith: jest.fn(),
+    newFolderProjectId: "p",
+  })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  expect(screen.queryByText("moveToFolder")).toBeNull()
+})
+
+describe("selection mode", () => {
+  it("swaps the leading glyph for a checkbox and reports the pressed state", () => {
+    const { rerender } = setup({ selectable: true, selected: false })
+    const button = screen.getByRole("button", { name: /Hello/ })
+    expect(button).toHaveAttribute("aria-pressed", "false")
+    const checkbox = screen.getByTestId("session-row-checkbox")
+    expect(checkbox).not.toHaveAttribute("data-checked")
+    rerender(
+      <ul>
+        <SessionRow
+          session={baseSession}
+          active={false}
+          selectable
+          selected
+          onSelect={jest.fn()}
+          onDelete={jest.fn()}
+          onRename={jest.fn()}
+        />
+      </ul>
+    )
+    expect(screen.getByTestId("session-row-checkbox")).toHaveAttribute("data-checked", "true")
+    expect(screen.getByRole("button", { name: /Hello/ })).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("draws no checkbox and no pressed state outside a selection", () => {
+    setup()
+    expect(screen.queryByTestId("session-row-checkbox")).toBeNull()
+    expect(screen.getByRole("button", { name: /Hello/ })).not.toHaveAttribute("aria-pressed")
+  })
+})
+
+test("drops the pin glyph where the section already says Pinned", () => {
+  setup({ session: { ...baseSession, pinned: true }, showPinGlyph: false })
+  expect(screen.queryByLabelText("pinned")).toBeNull()
+})
+
 test("branched session shows a lineage chip that jumps to the parent", async () => {
   const user = userEvent.setup()
   const onJumpToParent = jest.fn()

@@ -6,6 +6,7 @@ import {
   clearActiveRuntimeTargetContext,
   getActiveRuntimeTargetContext,
 } from "@/lib/runtime/runtime-target-context"
+import { updateRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { CompanionOutboundRunnerProvider } from "./companion-outbound-runner-provider"
 
 const unsubscribe = jest.fn()
@@ -139,7 +140,7 @@ jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: jest.fn(),
 }))
 
-let runtimeTarget: { id: string } | null = null
+let runtimeTarget: { id: string; kind?: "companion" | "standalone" } | null = null
 jest.mock("@/hooks/use-runtime-snapshot", () => ({
   useRuntimeSnapshot: () => ({ target: runtimeTarget }),
 }))
@@ -175,9 +176,11 @@ jest.mock("@/stores/account/account-store", () => ({
     selector(accountProfile),
 }))
 
+let mockMobileRuntimeMode: "paired" | "standalone" | undefined = "paired"
 jest.mock("@/stores/settings/settings-store", () => ({
-  useSettingsStore: (selector: (state: { settings: { mobileRuntimeMode: string } }) => unknown) =>
-    selector({ settings: { mobileRuntimeMode: "paired" } }),
+  useSettingsStore: (
+    selector: (state: { settings: { mobileRuntimeMode?: "paired" | "standalone" } }) => unknown
+  ) => selector({ settings: { mobileRuntimeMode: mockMobileRuntimeMode } }),
 }))
 
 const dispatcher: OutboundDispatcher = {
@@ -200,6 +203,7 @@ beforeEach(() => {
   mockHasReporter = false
   approvalListeners.clear()
   runtimeTarget = null
+  mockMobileRuntimeMode = "paired"
   activeRemoteTransport = null
   remoteTransportListeners.clear()
   transitionParticipant = null
@@ -245,6 +249,75 @@ it("runs on native mobile and drains pending rows", () => {
   // The runner's own release of a gate-refused row is what fires this
   // subscription; lifting the hold here would re-arm the claim/release loop.
   expect(runner.kick).toHaveBeenLastCalledWith(undefined)
+})
+
+describe("which paired phones drain the queue", () => {
+  // The boot provider links the Host for any pairing whose mode is not
+  // "standalone", and the queue fills from that moment on. A runner gated on
+  // the literal "paired" left every row pending with zero attempts.
+  it("drains for a live pairing whose runtime mode was never recorded", () => {
+    mockMobileRuntimeMode = undefined
+    runtimeTarget = { id: "host-mobile-a", kind: "companion" }
+
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="mobile"
+        webCompanionOverride={false}
+      />
+    )
+
+    expect(createRunner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { accountId: "acct-web", targetId: "host-mobile-a", routingGeneration: 0 },
+      })
+    )
+    expect(runner.kick).toHaveBeenCalled()
+  })
+
+  it("stays off for an unrecorded mode with no paired Host behind it", () => {
+    mockMobileRuntimeMode = undefined
+    runtimeTarget = { id: "mobile-standalone", kind: "standalone" }
+
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="mobile"
+        webCompanionOverride={false}
+      />
+    )
+
+    expect(createRunner).not.toHaveBeenCalled()
+  })
+
+  it("stays off when the phone was explicitly put in standalone mode", () => {
+    mockMobileRuntimeMode = "standalone"
+    runtimeTarget = { id: "host-mobile-a", kind: "companion" }
+
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="mobile"
+        webCompanionOverride={false}
+      />
+    )
+
+    expect(createRunner).not.toHaveBeenCalled()
+  })
+
+  it("drains when the phone recorded the paired mode", () => {
+    runtimeTarget = { id: "host-mobile-a", kind: "companion" }
+
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="mobile"
+        webCompanionOverride={false}
+      />
+    )
+
+    expect(createRunner).toHaveBeenCalledTimes(1)
+  })
 })
 
 it("uses the stable Host id and default Mobile account on a fresh install", () => {
@@ -576,11 +649,18 @@ it("installs HostState synchronization when Tauri switches to a remote host and 
       })
     )
   )
+  expect(updateRuntimeSnapshot).toHaveBeenCalledWith({
+    host: expect.objectContaining({ operations: ["host_state_submit"] }),
+  })
+  jest.mocked(updateRuntimeSnapshot).mockClear()
   act(() => {
     activeRemoteTransport = null
     remoteTransportListeners.forEach((listener) => listener())
   })
   expect(stopHostStateSync).toHaveBeenCalledTimes(1)
+  // Returning to local must not leave the remote host's manifest behind as the
+  // answer for the desktop: a local Tauri shell publishes no `host` at all.
+  expect(updateRuntimeSnapshot).toHaveBeenCalledWith({ host: undefined })
   unmount()
   expect(stopHostStateSync).toHaveBeenCalledTimes(1)
   expect(unregisterResync).toHaveBeenCalledTimes(1)

@@ -1325,6 +1325,21 @@ it("leaves platform read capture to the shared pane and retains local session re
   await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("local"))
 })
 
+test("the welcome Continue group offers neither the open conversation nor an archived one", async () => {
+  activeSessionId = "open"
+  sessionsRef.current = [
+    { id: "open", title: "Open", kind: "direct", createdAt: 0, updatedAt: 40 },
+    { id: "live", title: "Live", kind: "direct", createdAt: 0, updatedAt: 10 },
+    { id: "gone", title: "Gone", kind: "direct", createdAt: 0, updatedAt: 30, archivedAt: 35 },
+    { id: "newer", title: "Newer", kind: "direct", createdAt: 0, updatedAt: 20 },
+  ] as ChatSession[]
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const recent = paneGroupPropsLog.at(-1)?.recentSessions as Array<{ id: string }>
+  expect(recent.map((entry) => entry.id)).toEqual(["newer", "live"])
+})
+
 test.each([false, true])(
   "hero team send normalizes an absent template for existing=%s",
   async (existing) => {

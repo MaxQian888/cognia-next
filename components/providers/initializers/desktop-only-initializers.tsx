@@ -97,10 +97,6 @@ const LocalCharacterPackInitializer = dynamic(
   () => import("./local-character-pack-initializer").then((m) => m.LocalCharacterPackInitializer),
   { ssr: false }
 )
-const PetWindowInitializer = dynamic(
-  () => import("./pet-window-initializer").then((m) => m.PetWindowInitializer),
-  { ssr: false }
-)
 const FleetHistorySinkInitializer = dynamic(
   () => import("./fleet-history-sink-initializer").then((m) => m.FleetHistorySinkInitializer),
   { ssr: false }
@@ -182,6 +178,13 @@ const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
 )
+// Opt-in automatic crash-report submission (Settings → Diagnostics, ADR-0102):
+// one pass per launch, a toast per receipt. Main window only, like the rest.
+const DiagnosticAutoSubmitInitializer = dynamic(
+  () =>
+    import("./diagnostic-auto-submit-initializer").then((m) => m.DiagnosticAutoSubmitInitializer),
+  { ssr: false }
+)
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
   useSyncExternalStore(
@@ -220,7 +223,6 @@ export function DesktopOnlyInitializers() {
       <EditorLspRuntimeInitializer />
       <ManagedIdeBrokerInitializer />
       <LocalCharacterPackInitializer />
-      <PetWindowInitializer />
       <FleetHistorySinkInitializer />
       <WorkerRuntimeInitializer />
       <ExitLeaseReleaseInitializer />
@@ -228,6 +230,7 @@ export function DesktopOnlyInitializers() {
       <ConsentOverlay />
       <CliBridgeEventsBridge />
       <CrashReportDialog />
+      <DiagnosticAutoSubmitInitializer />
       <SelectionToolbarInitializer />
       <TrayPanelInitializer />
       <UsageDockInitializer />

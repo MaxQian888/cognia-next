@@ -16,6 +16,7 @@ import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
 import { ensurePlanStepRecovery } from "@/lib/agent/plan/step-recovery"
 import { recoverStaleDirectChatExecutionRuns } from "@/lib/execution/direct-chat-run"
+import { installDefaultPhantomRunGuard } from "@/lib/chat/phantom-run-runtime"
 import { startRendererWorkOutbox } from "@/lib/work-submission/bootstrap"
 
 /**
@@ -45,9 +46,18 @@ export function DeferredBootInitializersImpl() {
     // once a chat surface happens to mount the tracker dock. Once-per-load and
     // non-rejecting, so the dock's own call is a no-op after this one.
     void ensurePlanStepRecovery()
+    // A session must never present as running when nothing runs it: every
+    // session that turns busy without a live run handle in this realm, or a
+    // Host that confirms its turn, is settled idle with its open tool calls
+    // closed as interrupted (a relaunch, a restarted Host, a replayed frame).
+    const stopPhantomRunGuard = installDefaultPhantomRunGuard()
     // Work stranded by a crash is picked up here (ADR-0123). A no-op while the
     // feature flag is off, so mounting it is safe ahead of the rollout.
-    return startRendererWorkOutbox()
+    const stopWorkOutbox = startRendererWorkOutbox()
+    return () => {
+      stopPhantomRunGuard()
+      stopWorkOutbox()
+    }
   }, [])
 
   return (

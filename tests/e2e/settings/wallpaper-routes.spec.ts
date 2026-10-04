@@ -31,6 +31,7 @@ const ROUTES = [
   "/workflows",
   "/memory",
   "/files",
+  "/conversations",
   "/projects",
   "/skills",
   "/plugins",

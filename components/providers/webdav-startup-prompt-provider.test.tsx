@@ -10,7 +10,7 @@ jest.mock("@/lib/webdav/remote-newer-notify", () => ({
 
 // Capture the resume / network handlers so the test can fire them manually.
 let resumeHandler: (() => void) | null = null
-let networkHandler: ((s: { connected: boolean }) => void) | null = null
+let networkHandler: ((s: { connected: boolean; connectionType?: string }) => void) | null = null
 const resumeUnsub = jest.fn()
 const networkUnsub = jest.fn()
 
@@ -21,7 +21,7 @@ jest.mock("@/lib/capacitor/app", () => ({
   },
 }))
 jest.mock("@/lib/capacitor/network", () => ({
-  subscribe: async (h: (s: { connected: boolean }) => void) => {
+  subscribe: async (h: (s: { connected: boolean; connectionType?: string }) => void) => {
     networkHandler = h
     return networkUnsub
   },
@@ -85,7 +85,7 @@ describe("WebDavStartupPromptProvider", () => {
 
     // Burst: resume + online within the debounce window → ONE check.
     resumeHandler!()
-    networkHandler!({ connected: true })
+    networkHandler!({ connected: false, connectionType: "wifi" })
     jest.advanceTimersByTime(5_000)
     expect(notifyIfRemoteNewerMock).toHaveBeenCalledTimes(1)
 
@@ -94,6 +94,22 @@ describe("WebDavStartupPromptProvider", () => {
     networkHandler!({ connected: false })
     jest.advanceTimersByTime(10_000)
     expect(notifyIfRemoteNewerMock).not.toHaveBeenCalled()
+  })
+
+  it("probes LAN WebDAV when Wi-Fi lacks validated Internet", async () => {
+    setNodeEnv("development")
+
+    render(
+      <WebDavStartupPromptProvider>
+        <span>child</span>
+      </WebDavStartupPromptProvider>
+    )
+    await waitFor(() => expect(networkHandler).not.toBeNull())
+    jest.advanceTimersByTime(5_000)
+    notifyIfRemoteNewerMock.mockClear()
+    networkHandler!({ connected: false, connectionType: "wifi" })
+    jest.advanceTimersByTime(5_000)
+    expect(notifyIfRemoteNewerMock).toHaveBeenCalledTimes(1)
   })
 
   it("unsubscribes listeners on unmount", async () => {

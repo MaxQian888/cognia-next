@@ -24,12 +24,21 @@
  *
  * A range toggle (7d / 30d / 90d) filters every section; CSV/JSON export dumps
  * the raw billable rows. Cost over time draws the same daily aggregates either
- * as a calendar heatmap (default) or as the original bar chart.
+ * as a calendar heatmap (default), the original bar chart, or a bar stacked by
+ * model / surface / provider.
+ *
+ * The second-order read-outs (period-over-period deltas on the headline tiles,
+ * the month-end forecast in the budget card, cache savings and per-turn
+ * percentiles, the weekday × hour punch card, spend spikes) all come from
+ * `lib/usage/usage-insights.ts` and are drawn by shared `components/usage/*`
+ * panels, so the Session Insights sheet and Settings → Usage & cost mount the
+ * same pieces over their own rows.
  */
 
 import { useEffect, useMemo, useState } from "react"
 import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   Area,
@@ -45,8 +54,10 @@ import {
   YAxis,
 } from "recharts"
 import {
+  ActivityIcon,
   BarChart3Icon,
   CalendarRangeIcon,
+  ChartColumnStackedIcon,
   ChevronDownIcon,
   CoinsIcon,
   DatabaseZapIcon,
@@ -57,6 +68,7 @@ import {
   LayersIcon,
   LightbulbIcon,
   MessagesSquareIcon,
+  PiggyBankIcon,
   TableIcon,
   TrendingUpIcon,
   RefreshCwIcon,
@@ -90,6 +102,12 @@ import { StatCard } from "@/components/scheduler/stat-card"
 import { UsageHeatmap } from "@/components/usage/usage-heatmap"
 import { UsageAttributionRow } from "@/components/usage/usage-attribution-row"
 import { UsageBudgetMeters } from "@/components/usage/usage-budget-meters"
+import { UsageDelta } from "@/components/usage/usage-delta"
+import { UsageForecastPanel } from "@/components/usage/usage-forecast-panel"
+import { UsageStackedCostChart } from "@/components/usage/usage-stacked-cost-chart"
+import { UsageActivityMatrix } from "@/components/usage/usage-activity-matrix"
+import { UsageEfficiencyPanel } from "@/components/usage/usage-efficiency-panel"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useCostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
 import { cn } from "@/lib/utils"
 
@@ -101,6 +119,7 @@ import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
 import { downloadBlob } from "@/lib/files/download"
 import {
+  formatCost,
   formatCostInCurrency,
   formatTokens,
   formatTokensPerSec,
@@ -125,20 +144,34 @@ import { resolveUsageWindows } from "@/lib/subscription/anthropic/overview-windo
 import { surfaceLabelKey } from "@/lib/usage/usage-surface-labels"
 import { useProviderLimits } from "@/lib/subscription/limits/hooks"
 import {
+  NO_PROJECT_KEY,
+  UNKNOWN_PROVIDER_KEY,
   aggregateByDay,
   aggregateByModel,
+  aggregateByProject,
+  aggregateByProvider,
   aggregateBySession,
   aggregateBySurface,
   analyzeUsageContributors,
   buildUsageFilename,
   filterByRange,
+  filterPreviousRange,
   formatBucketCost,
+  parseLocalDay,
   toUsageCsv,
   toUsageJson,
   type ModelUsageRow,
-  type SurfaceUsageRow,
   type UsageContributors,
 } from "@/lib/usage/session-analytics"
+import {
+  buildActivityMatrix,
+  buildDailyStack,
+  compareSpend,
+  detectSpendSpikes,
+  estimateCacheSavings,
+  summarizeTurnDistribution,
+  type SpendChange,
+} from "@/lib/usage/usage-insights"
 import {
   shareOfCost,
   shareOfTokens,
@@ -148,7 +181,7 @@ import {
 import { USAGE_SURFACES, type SessionUsageRow, type UsageSurface } from "@/lib/db/session-usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { useChatStore } from "@/stores/chat"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 
 const DAY_MS = 86_400_000
 
@@ -178,11 +211,27 @@ type RangeKey = (typeof RANGES)[number]["key"]
 type SurfaceFilter = "all" | UsageSurface
 
 /** How the cost-over-time section draws the same daily aggregates. */
-const COST_VIEWS = ["heatmap", "bar"] as const
+const COST_VIEWS = ["heatmap", "bar", "stacked"] as const
 type CostView = (typeof COST_VIEWS)[number]
 
 function isCostView(value: string): value is CostView {
   return (COST_VIEWS as readonly string[]).includes(value)
+}
+
+/** Axes the stacked cost chart can split a day by. */
+const STACK_AXES = ["model", "surface", "provider"] as const
+type StackAxis = (typeof STACK_AXES)[number]
+
+function isStackAxis(value: string): value is StackAxis {
+  return (STACK_AXES as readonly string[]).includes(value)
+}
+
+/** Axes the spend breakdown can rank by. */
+const BREAKDOWN_AXES = ["surface", "provider", "project"] as const
+type BreakdownAxis = (typeof BREAKDOWN_AXES)[number]
+
+function isBreakdownAxis(value: string): value is BreakdownAxis {
+  return (BREAKDOWN_AXES as readonly string[]).includes(value)
 }
 
 /** Keep rows whose producing surface matches the active filter. */
@@ -205,6 +254,8 @@ const SECTION_IDS = [
   "surfaces",
   "insights",
   "cost",
+  "efficiency",
+  "activity",
   "sessions",
   "raw",
 ] as const
@@ -301,6 +352,20 @@ export function SubscriptionUsageTab() {
     () => analyzeUsageContributors(filteredSessionRows),
     [filteredSessionRows]
   )
+  // The equal-length window just before the selected one, through the same
+  // surface filter, so each headline tile can say whether it moved. A 90-day
+  // range has nothing before it (`sessionUsage` is pruned at 90 days) and its
+  // tiles honestly render "no baseline".
+  const change = useMemo<SpendChange>(
+    () =>
+      compareSpend(
+        totals,
+        summarizeSpend(
+          filterBySurface(filterPreviousRange(sessionRows, rangeDays, now), effectiveSurface)
+        )
+      ),
+    [totals, sessionRows, rangeDays, now, effectiveSurface]
+  )
 
   if (!tabReady) {
     return (
@@ -345,7 +410,7 @@ export function SubscriptionUsageTab() {
       </MotionReveal>
       {totals.turns > 0 && (
         <MotionReveal index={1}>
-          <UsageStatGrid totals={totals} />
+          <UsageStatGrid totals={totals} change={change} />
         </MotionReveal>
       )}
       <MotionReveal index={2}>
@@ -380,7 +445,8 @@ export function SubscriptionUsageTab() {
           as one "where did it go" band instead of two more full-width slabs. */}
       <div className="grid gap-4 xl:grid-cols-2">
         <MotionReveal index={6}>
-          <SurfaceBreakdownCard
+          <BreakdownCard
+            rows={filteredSessionRows}
             surfaces={surfaces}
             totals={totals}
             mode={mode}
@@ -391,6 +457,7 @@ export function SubscriptionUsageTab() {
         <MotionReveal index={7}>
           <InsightsCard
             contributors={contributors}
+            rows={filteredSessionRows}
             open={isOpen("insights")}
             onToggle={() => toggleSection("insights")}
           />
@@ -405,7 +472,25 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("cost")}
         />
       </MotionReveal>
-      <MotionReveal index={9}>
+      {/* Shape of the spend rather than its size: what caching saved and how
+          long the per-turn tail is, beside when in the week the turns ran. */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <MotionReveal index={9}>
+          <EfficiencyCard
+            rows={filteredSessionRows}
+            open={isOpen("efficiency")}
+            onToggle={() => toggleSection("efficiency")}
+          />
+        </MotionReveal>
+        <MotionReveal index={10}>
+          <ActivityCard
+            rows={filteredSessionRows}
+            open={isOpen("activity")}
+            onToggle={() => toggleSection("activity")}
+          />
+        </MotionReveal>
+      </div>
+      <MotionReveal index={11}>
         <TopSessionsCard
           rows={filteredSessionRows}
           mode={mode}
@@ -413,7 +498,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("sessions")}
         />
       </MotionReveal>
-      <MotionReveal index={10}>
+      <MotionReveal index={12}>
         <RawSamplesCard
           rows={snapshotRows}
           rangeDays={rangeDays}
@@ -661,6 +746,7 @@ function UsageStatCard({
   accentGradient,
   iconBgClassName,
   testid,
+  footer,
 }: {
   label: string
   value: number
@@ -670,6 +756,8 @@ function UsageStatCard({
   accentGradient: string
   iconBgClassName: string
   testid: string
+  /** Period-over-period chip under the value. */
+  footer?: React.ReactNode
 }) {
   const { reduce } = useFlowMotion()
   const shown = useCountUp(value, { disabled: reduce })
@@ -683,6 +771,7 @@ function UsageStatCard({
       iconBgClassName={iconBgClassName}
       size="sm"
       testid={testid}
+      footer={footer}
     />
   )
 }
@@ -695,8 +784,12 @@ function UsageStatCard({
  * version summed only input + output + cache-read (dropping cache writes) and
  * had no notion of a turn nobody could price, so an unpriced run showed a
  * settled dollar figure that was really a floor.
+ *
+ * Each tile carries its change against the previous equal-length window. The
+ * chip's colour follows what "better" means for that figure (cheaper, more
+ * cache hits, faster) and stays neutral for volume, which is neither.
  */
-function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
+function UsageStatGrid({ totals, change }: { totals: UsageSpendTotals; change: SpendChange }) {
   const t = useTranslations("subscription.usage.models")
   const tokens =
     totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheCreationTokens
@@ -719,6 +812,7 @@ function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
           accentGradient="from-blue-500 to-sky-400"
           iconBgClassName="bg-blue-500/10"
           testid="usage-model-stat-tokens"
+          footer={<UsageDelta change={change.tokens} testid="usage-delta-tokens" />}
         />
         <UsageStatCard
           label={t("totalCost")}
@@ -731,6 +825,9 @@ function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
           accentGradient="from-violet-500 to-purple-400"
           iconBgClassName="bg-violet-500/10"
           testid="usage-model-stat-cost"
+          footer={
+            <UsageDelta change={change.cost} polarity="lower-is-better" testid="usage-delta-cost" />
+          }
         />
         <UsageStatCard
           label={t("totalTurns")}
@@ -741,6 +838,7 @@ function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
           accentGradient="from-emerald-500 to-green-400"
           iconBgClassName="bg-emerald-500/10"
           testid="usage-model-stat-turns"
+          footer={<UsageDelta change={change.turns} testid="usage-delta-turns" />}
         />
         <UsageStatCard
           label={t("cacheHitRate")}
@@ -751,6 +849,14 @@ function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
           accentGradient="from-amber-500 to-yellow-400"
           iconBgClassName="bg-amber-500/10"
           testid="usage-model-stat-cache-hit-rate"
+          footer={
+            <UsageDelta
+              change={change.cacheHitPoints}
+              unit="points"
+              polarity="higher-is-better"
+              testid="usage-delta-cache"
+            />
+          }
         />
         <UsageStatCard
           label={t("speed")}
@@ -761,6 +867,13 @@ function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
           accentGradient="from-cyan-500 to-sky-400"
           iconBgClassName="bg-cyan-500/10"
           testid="usage-model-stat-speed"
+          footer={
+            <UsageDelta
+              change={change.speed}
+              polarity="higher-is-better"
+              testid="usage-delta-speed"
+            />
+          }
         />
       </div>
       {totals.unpricedTurns > 0 && (
@@ -782,6 +895,9 @@ function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
  * already explains where the money went, so it is where "and how much of the
  * limit is left" belongs. The rows come from the shared `UsageBudgetMeters`,
  * so the editor and this card can never show two different numbers.
+ *
+ * The month-end forecast leads the card: a meter says how close the ceiling is
+ * now, the forecast says where the month lands at the current pace.
  */
 function BudgetCard({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const t = useTranslations("subscription.usage.budget")
@@ -806,7 +922,10 @@ function BudgetCard({ open, onToggle }: { open: boolean; onToggle: () => void })
         ) : null
       }
     >
-      <UsageBudgetMeters emptyHint={t("empty")} />
+      <UsageForecastPanel />
+      <div className="border-t pt-4">
+        <UsageBudgetMeters emptyHint={t("empty")} />
+      </div>
     </UsageSection>
   )
 }
@@ -1218,29 +1337,31 @@ function ModelBreakdownCard({
   )
 }
 
-/* ── Per-surface attribution ───────────────────────────────────────────── */
+/* ── Spend breakdown ───────────────────────────────────────────────────── */
 
 /**
- * Where the quota actually went, by producing surface.
+ * Where the quota actually went, ranked on one of three axes.
  *
- * `aggregateBySurface` calls this "the honest answer to what is using my
- * quota", and it was already computed for the `/usage` transcript card and for
- * the CLI. The dashboard, which is the surface people open to ask exactly that
- * question, only had a filter: it could hide the other surfaces but never rank
- * them. Chat, an agent team, a scheduled workflow and a connector auto-reply
- * all draw on the same plan, and this axis is the only one that separates them.
- *
- * Rows are the shared `UsageAttributionRow`, so they rank and render exactly as
- * they do in the transcript card.
+ * `aggregateBySurface` calls the surface axis "the honest answer to what is
+ * using my quota": chat, an agent team, a scheduled workflow and a connector
+ * auto-reply all draw on the same plan. Two more questions need their own
+ * axis. Provider answers "which bill is this on", and is the key the
+ * per-provider ceilings use. Project answers "which piece of work", and is the
+ * key the per-workspace ceilings use (ADR-0204). All three share one ranking
+ * (`rankBucketsBy`) and the shared `UsageAttributionRow`, so they rank and
+ * render exactly as the transcript card does.
  */
-function SurfaceBreakdownCard({
+function BreakdownCard({
+  rows,
   surfaces,
   totals,
   mode,
   open,
   onToggle,
 }: {
-  surfaces: SurfaceUsageRow[]
+  rows: SessionUsageRow[]
+  /** Already computed by the root for the surface filter; reused here. */
+  surfaces: ReturnType<typeof aggregateBySurface>
   totals: UsageSpendTotals
   mode: UsageDisplayMode
   open: boolean
@@ -1249,6 +1370,32 @@ function SurfaceBreakdownCard({
   const t = useTranslations("subscription.usage.bySurface")
   const tSurface = useTranslations("subscription.usage.surface")
   const { reduce } = useFlowMotion()
+  const projects = useProjectStore((s) => s.projects)
+  // Page-local like the cost view: a way of looking, not a preference.
+  const [axis, setAxis] = useState<BreakdownAxis>("surface")
+
+  const buckets = useMemo(() => {
+    if (axis === "surface") {
+      return surfaces.map((row) => ({
+        id: row.surface,
+        label: tSurface(surfaceLabelKey(row.surface)),
+        bucket: row,
+      }))
+    }
+    if (axis === "provider") {
+      return aggregateByProvider(rows).map((row) => ({
+        id: row.key,
+        label: row.key === UNKNOWN_PROVIDER_KEY ? t("unknownProvider") : row.key,
+        bucket: row,
+      }))
+    }
+    const names = new Map(projects.map((project) => [project.id, project.name]))
+    return aggregateByProject(rows).map((row) => ({
+      id: row.key,
+      label: row.key === NO_PROJECT_KEY ? t("noProject") : (names.get(row.key) ?? row.key),
+      bucket: row,
+    }))
+  }, [axis, surfaces, rows, projects, t, tSurface])
 
   return (
     <UsageSection
@@ -1259,38 +1406,60 @@ function SurfaceBreakdownCard({
       testid="usage-surfaces-section"
       icon={<LayersIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
-      {surfaces.length === 0 ? (
+      <ToggleGroup
+        type="single"
+        size="sm"
+        variant="outline"
+        value={axis}
+        onValueChange={(value) => {
+          if (isBreakdownAxis(value)) setAxis(value)
+        }}
+        aria-label={t("axis.label")}
+        data-testid="usage-breakdown-axis"
+      >
+        {BREAKDOWN_AXES.map((id) => (
+          <ToggleGroupItem
+            key={id}
+            value={id}
+            className="px-2.5 text-xs"
+            data-testid={`usage-breakdown-axis-${id}`}
+          >
+            {t(`axis.${id}`)}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      {buckets.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-surfaces-empty">
           {t("empty")}
         </p>
       ) : (
-        <ul className="space-y-2.5" data-testid="usage-surfaces-list">
-          {surfaces.map((row) => {
+        <ul className="space-y-2.5" data-testid="usage-surfaces-list" data-axis={axis}>
+          {buckets.map(({ id, label, bucket }) => {
             // Rank by cost where cost is known, else by tokens. A local or free
             // model can dominate the token budget at $0, and a 0% row would
-            // bury exactly the surface worth looking at.
-            const share = shareOfCost(row, totals) ?? shareOfTokens(row, totals)
+            // bury exactly the bucket worth looking at.
+            const share = shareOfCost(bucket, totals) ?? shareOfTokens(bucket, totals)
             return (
               <UsageAttributionRow
-                key={row.surface}
-                id={row.surface}
+                key={`${axis}:${id}`}
+                id={axis === "surface" ? id : `${axis}-${id}`}
                 testidPrefix="usage-surface-row"
-                label={tSurface(surfaceLabelKey(row.surface))}
+                label={label}
                 pct={share == null ? null : Math.round(share * 100)}
-                costUsd={row.costUsd}
-                unpricedTurns={row.unpricedTurns}
-                turns={row.turns}
+                costUsd={bucket.costUsd}
+                unpricedTurns={bucket.unpricedTurns}
+                turns={bucket.turns}
                 reduce={reduce}
                 detail={
                   mode === "simplified"
                     ? undefined
                     : t("rowDetail", {
-                        turns: row.turns,
+                        turns: bucket.turns,
                         tokens: formatTokens(
-                          row.inputTokens +
-                            row.outputTokens +
-                            row.cacheReadTokens +
-                            row.cacheCreationTokens
+                          bucket.inputTokens +
+                            bucket.outputTokens +
+                            bucket.cacheReadTokens +
+                            bucket.cacheCreationTokens
                         ),
                       })
                 }
@@ -1310,18 +1479,27 @@ function SurfaceBreakdownCard({
  * the in-range usage (long-context turns, automated-surface cost share). Each is
  * an independent characteristic, not a breakdown that sums to 100%, and is shown
  * only when it applies; when none do, an empty hint keeps the section honest.
+ *
+ * Spend spikes join them: days that cost far more than the range's typical
+ * active day, measured against the median so the spike cannot inflate its own
+ * baseline. They are deterministic (`detectSpendSpikes`), like every other
+ * finding on this tab, and need a week of active days before they speak.
  */
 function InsightsCard({
   contributors,
+  rows,
   open,
   onToggle,
 }: {
   contributors: UsageContributors
+  rows: SessionUsageRow[]
   open: boolean
   onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage.insights")
+  const format = useFormatter()
   const items = contributors.contributors
+  const spikes = useMemo(() => detectSpendSpikes(aggregateByDay(rows)), [rows])
   return (
     <UsageSection
       title={t("title")}
@@ -1331,7 +1509,7 @@ function InsightsCard({
       testid="usage-insights-section"
       icon={<LightbulbIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
-      {items.length === 0 ? (
+      {items.length === 0 && spikes.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-insights-empty">
           {t("empty")}
         </p>
@@ -1351,6 +1529,31 @@ function InsightsCard({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {t(`${item.id === "high-context" ? "highContext" : "automatedSurface"}.advice`)}
+                </p>
+              </div>
+            </li>
+          ))}
+          {spikes.map((spike) => (
+            <li
+              key={spike.date}
+              className="flex gap-2.5"
+              data-testid={`usage-insight-spike-${spike.date}`}
+            >
+              <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-sm font-medium">
+                  {t("spike.headline", {
+                    date: format.dateTime(parseLocalDay(spike.date), {
+                      month: "short",
+                      day: "numeric",
+                      weekday: "short",
+                    }),
+                    cost: formatCost(spike.costUsd),
+                    ratio: spike.ratio >= 10 ? Math.round(spike.ratio) : spike.ratio.toFixed(1),
+                  })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("spike.advice", { median: formatCost(spike.medianUsd) })}
                 </p>
               </div>
             </li>
@@ -1377,12 +1580,26 @@ function CostOverTimeCard({
   onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage.costOverTime")
+  const tSurface = useTranslations("subscription.usage.surface")
+  const tStack = useTranslations("usageInsights.stack")
   const colors = useThemeColors()
   const { reduce } = useFlowMotion()
   const daily = useMemo(() => aggregateByDay(rows), [rows])
   // View choice is page-local on purpose: it is a way of looking at the same
   // numbers, not a preference worth persisting into settings.
   const [view, setView] = useState<CostView>("heatmap")
+  const [stackAxis, setStackAxis] = useState<StackAxis>("model")
+  const stack = useMemo(
+    () =>
+      view === "stacked"
+        ? buildDailyStack(rows, (r) => stackKeyOf(r, stackAxis), rangeDays, now)
+        : null,
+    [view, rows, stackAxis, rangeDays, now]
+  )
+  const stackLabel = (key: string): string => {
+    if (stackAxis === "surface") return tSurface(surfaceLabelKey(key as UsageSurface))
+    return key === UNKNOWN_PROVIDER_KEY ? tStack("unknown") : key
+  }
 
   return (
     <UsageSection
@@ -1413,13 +1630,51 @@ function CostOverTimeCard({
         <ToggleGroupItem value="bar" aria-label={t("view.bar")} data-testid="usage-cost-view-bar">
           <BarChart3Icon className="size-3.5" />
         </ToggleGroupItem>
+        <ToggleGroupItem
+          value="stacked"
+          aria-label={t("view.stacked")}
+          data-testid="usage-cost-view-stacked"
+        >
+          <ChartColumnStackedIcon className="size-3.5" />
+        </ToggleGroupItem>
       </ToggleGroup>
+      {view === "stacked" && daily.length > 0 ? (
+        <ToggleGroup
+          type="single"
+          size="sm"
+          variant="outline"
+          value={stackAxis}
+          onValueChange={(value) => {
+            if (isStackAxis(value)) setStackAxis(value)
+          }}
+          aria-label={t("stackBy.label")}
+          data-testid="usage-cost-stack-axis"
+        >
+          {STACK_AXES.map((id) => (
+            <ToggleGroupItem
+              key={id}
+              value={id}
+              className="px-2.5 text-xs"
+              data-testid={`usage-cost-stack-axis-${id}`}
+            >
+              {t(`stackBy.${id}`)}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      ) : null}
       {daily.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-cost-empty">
           {t("empty")}
         </p>
       ) : view === "heatmap" ? (
         <UsageHeatmap daily={daily} rangeDays={rangeDays} now={now} />
+      ) : view === "stacked" && stack ? (
+        <UsageStackedCostChart
+          stack={stack}
+          labelFor={stackLabel}
+          reduce={reduce}
+          testid="usage-cost-stacked"
+        />
       ) : (
         <div className="h-48" data-testid="usage-cost-chart">
           <ResponsiveContainer
@@ -1456,6 +1711,73 @@ function CostOverTimeCard({
   )
 }
 
+/** Series key of one row on a stacked-chart axis. */
+function stackKeyOf(row: SessionUsageRow, axis: StackAxis): string {
+  if (axis === "surface") return row.surface ?? "chat"
+  if (axis === "provider") return row.providerId?.trim() || UNKNOWN_PROVIDER_KEY
+  return row.model ?? "(unknown)"
+}
+
+/* ── Efficiency ────────────────────────────────────────────────────────── */
+
+/**
+ * Cache savings and the per-turn tail for the selected rows. The panel is the
+ * shared `UsageEfficiencyPanel`; the Session Insights sheet mounts it over one
+ * conversation.
+ */
+function EfficiencyCard({
+  rows,
+  open,
+  onToggle,
+}: {
+  rows: SessionUsageRow[]
+  open: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslations("subscription.usage.efficiency")
+  const savings = useMemo(() => estimateCacheSavings(rows), [rows])
+  const distribution = useMemo(() => summarizeTurnDistribution(rows), [rows])
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-efficiency-section"
+      icon={<PiggyBankIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+    >
+      <UsageEfficiencyPanel savings={savings} distribution={distribution} />
+    </UsageSection>
+  )
+}
+
+/* ── Activity pattern ──────────────────────────────────────────────────── */
+
+function ActivityCard({
+  rows,
+  open,
+  onToggle,
+}: {
+  rows: SessionUsageRow[]
+  open: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslations("subscription.usage.activity")
+  const matrix = useMemo(() => buildActivityMatrix(rows), [rows])
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-activity-section"
+      icon={<ActivityIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+    >
+      <UsageActivityMatrix matrix={matrix} />
+    </UsageSection>
+  )
+}
+
 /* ── Top sessions ──────────────────────────────────────────────────────── */
 
 function TopSessionsCard({
@@ -1470,7 +1792,7 @@ function TopSessionsCard({
   onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage.topSessions")
-  const setActiveSession = useChatStore((s) => s.setActiveSession)
+  const router = useRouter()
   const [titles, setTitles] = useState<Map<string, ChatSession>>(new Map())
   const showSplit = mode === "detailed"
 
@@ -1562,7 +1884,10 @@ function TopSessionsCard({
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => setActiveSession(s.sessionId)}
+                      // Through the session link, not the store: `/` switches to
+                      // the conversation's workspace and focuses it, while a
+                      // store-only switch left the user on Settings.
+                      onClick={() => router.push(`/${buildSessionHref(s.sessionId)}`)}
                       disabled={!session}
                       data-testid={`top-session-resume-${s.sessionId}`}
                     >

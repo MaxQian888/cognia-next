@@ -71,7 +71,9 @@ describe("DesktopOnlyInitializers", () => {
     // silently dropping one when the list changes. (WindowShowInitializer,
     // WebviewHeartbeatInitializer and ExitConfirmationDialog moved up to
     // WindowLivenessInitializers. UpdateCheckInitializer moved out entirely:
-    // the Update Center sweep covers every host, not just the desktop.)
+    // the Update Center sweep covers every host, not just the desktop.
+    // PetWindowInitializer was removed: PetMount owns the overlay's cold-start
+    // open, and the two together opened the window twice at boot.)
     expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(25)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })

@@ -58,13 +58,8 @@ export function CustomThemeApplier(): null {
       // The plugin theme's palette is what shows; no high-contrast override
       // is painted under it, so file icons use its light/dark sets.
       setIconThemeHighContrast(false)
-      if (lastApplied.current) {
-        for (const cssVar of CSS_VAR_KEYS) root.style.removeProperty(cssVar)
-        lastApplied.current = false
-      }
-      for (const key of BOOT_MIRROR_KEYS) {
-        if (root.style.getPropertyValue(key)) root.style.removeProperty(key)
-      }
+      clearInlinePalette(root)
+      lastApplied.current = false
       // Clear the cloned-theme extra CSS vars too (see cssVarsApplied ref).
       if (cssVarsApplied.current.length > 0) {
         removeCssVars(root, cssVarsApplied.current)
@@ -118,25 +113,21 @@ export function CustomThemeApplier(): null {
     const usingExtras = colorblind !== "off"
 
     if (usingDefaultBase && !usingExtras) {
-      if (lastApplied.current) {
-        for (const cssVar of CSS_VAR_KEYS) root.style.removeProperty(cssVar)
-        lastApplied.current = false
-      }
-      // The pre-hydration boot script (lib/appearance/boot-script.ts) paints a
-      // 4-var shell snapshot (--background/--foreground/--primary/--accent)
-      // inline on <html> to avoid a cold-boot flash. That snapshot reflects the
-      // boot-time variant and is never refreshed on a runtime theme switch, so
-      // for the default preset — already governed by the globals.css :root/.dark
-      // rules — we must drop it. Otherwise the stale inline values keep
-      // overriding the stylesheet after a switch (e.g. the dark shell background
-      // bleeding into light mode); and because an inline var beats a class
-      // toggle, the theme only "catches up" a frame later via this effect — the
-      // flicker users report. React never wrote these (the boot script did), so
-      // the `lastApplied` guard above doesn't cover them. Clearing them lets the
-      // class toggle alone repaint the default theme synchronously, flicker-free.
-      for (const key of BOOT_MIRROR_KEYS) {
-        if (root.style.getPropertyValue(key)) root.style.removeProperty(key)
-      }
+      // The pre-hydration boot script (lib/appearance/boot-script.ts) paints the
+      // mirrored palette inline on <html> to avoid a cold-boot flash (and so the
+      // lock screen, which renders before this applier mounts, matches the app).
+      // That snapshot reflects the boot-time variant and is never refreshed on a
+      // runtime theme switch, so for the default preset — already governed by
+      // the globals.css :root/.dark rules — we must drop it. Otherwise the stale
+      // inline values keep overriding the stylesheet after a switch (e.g. the
+      // dark shell background bleeding into light mode); and because an inline
+      // var beats a class toggle, the theme only "catches up" a frame later via
+      // this effect — the flicker users report. React never wrote these (the
+      // boot script did), so this is unconditional rather than gated on
+      // `lastApplied`. Clearing them lets the class toggle alone repaint the
+      // default theme synchronously, flicker-free.
+      clearInlinePalette(root)
+      lastApplied.current = false
       if (cssVarsApplied.current.length > 0) {
         removeCssVars(root, cssVarsApplied.current)
         cssVarsApplied.current = []
@@ -177,6 +168,21 @@ export function CustomThemeApplier(): null {
   ])
 
   return null
+}
+
+/**
+ * Drop every theme token written inline on `<html>`, whoever wrote it: this
+ * applier on an earlier pass, or the pre-hydration boot script replaying the
+ * mirror (the four shell keys plus, since the lock screen needed it, the whole
+ * palette). React never saw the boot script's writes, so no ref can track them.
+ */
+function clearInlinePalette(root: HTMLElement): void {
+  for (const cssVar of CSS_VAR_KEYS) {
+    if (root.style.getPropertyValue(cssVar)) root.style.removeProperty(cssVar)
+  }
+  for (const key of BOOT_MIRROR_KEYS) {
+    if (root.style.getPropertyValue(key)) root.style.removeProperty(key)
+  }
 }
 
 /**

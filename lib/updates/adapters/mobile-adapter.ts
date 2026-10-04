@@ -34,6 +34,8 @@ export interface MobileAdapterDeps {
   osFamily?: () => OsFamily
   isNativeMobile?: () => boolean
   appVersion?: string
+  /** Silent device capability check; absent only in injected/test adapters. */
+  playAvailable?: () => Promise<boolean>
   openExternal?: (url: string) => Promise<void>
   playCore?: {
     getAppUpdateInfo: typeof import("@/lib/capacitor/app-update").getAppUpdateInfo
@@ -46,10 +48,7 @@ export interface MobileAdapterDeps {
   storeUrls?: { ios?: string; android?: string }
 }
 
-const DEFAULT_STORE_URLS = {
-  ios: "https://apps.apple.com/app/cognia/id0000000000",
-  android: "https://play.google.com/store/apps/details?id=cn.cognia.app",
-}
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.cognia.mobile"
 
 export function createMobileAdapter(
   kind: "mobile-ios" | "mobile-android",
@@ -59,10 +58,7 @@ export function createMobileAdapter(
   const native = () => deps.isNativeMobile?.() ?? isNativeMobile()
   const appVersion = deps.appVersion ?? APP_VERSION
   const executor: UpdateExecutor = kind === "mobile-ios" ? "app-store" : "google-play"
-  const storeUrl = () =>
-    kind === "mobile-ios"
-      ? (deps.storeUrls?.ios ?? DEFAULT_STORE_URLS.ios)
-      : (deps.storeUrls?.android ?? DEFAULT_STORE_URLS.android)
+  const storeUrl = () => (kind === "mobile-ios" ? deps.storeUrls?.ios : deps.storeUrls?.android)
 
   const adapter: UpdateAdapter = {
     kind: kind as UpdateAssetKind,
@@ -72,9 +68,12 @@ export function createMobileAdapter(
     async check(context: UpdateCheckContext): Promise<UpdateCandidate[]> {
       // Play is authoritative about what the device can actually install.
       // The catalog only supplies criticality and notes on top of it.
-      if (kind === "mobile-android" && deps.playCore) {
+      if (kind === "mobile-android" && deps.playCore && ((await deps.playAvailable?.()) ?? true)) {
         const info = await deps.playCore.getAppUpdateInfo()
-        if (info.kind === "ok" && info.value.availability === "available") {
+        if (
+          info.kind === "ok" &&
+          (info.value.availability === "available" || info.value.downloaded)
+        ) {
           const catalogEntry = bestCandidate(context.catalog, {
             kind,
             assetId: MOBILE_ASSET_ID,
@@ -88,7 +87,12 @@ export function createMobileAdapter(
               kind,
               executor,
               currentVersion: info.value.currentVersionName ?? appVersion,
-              targetVersion: info.value.availableVersionName ?? catalogEntry?.targetVersion ?? "",
+              targetVersion:
+                info.value.availableVersionName ??
+                catalogEntry?.targetVersion ??
+                info.value.availableVersionCode ??
+                "",
+              ...(info.value.downloaded ? { action: "install-in-app" as const } : {}),
               channel: context.channel,
               criticality: catalogEntry?.criticality ?? "routine",
               compatibility: catalogEntry?.compatibility,
@@ -96,7 +100,7 @@ export function createMobileAdapter(
               rollout: catalogEntry?.rollout,
               source: "store",
               provenance: "verified",
-              externalUrl: storeUrl(),
+              externalUrl: PLAY_STORE_URL,
             },
           ]
         }
@@ -121,46 +125,85 @@ export function createMobileAdapter(
       candidate: UpdateCandidate,
       context: UpdateApplyContext
     ): Promise<UpdateApplyResult> {
-      if (kind === "mobile-android" && deps.playCore) {
-        const blocking =
-          context.consented &&
-          (candidate.criticality === "critical" || candidate.compatibility?.breaking === true)
-        const result = blocking
-          ? await deps.playCore.performImmediateUpdate()
-          : await deps.playCore.startFlexibleUpdate()
-        if (result === "started") return { state: "awaiting-store", externalUrl: storeUrl() }
-        if (result === "cancelled") return { state: "cancelled" }
-        if (result === "failed") {
-          return {
-            state: "failed",
-            failure: { kind: "store", code: "play_flow_failed", recoveryActionKey: "openStore" },
+      if (context.signal?.aborted) return { state: "cancelled" }
+      const usePlay =
+        kind === "mobile-android" &&
+        candidate.source === "store" &&
+        ((await deps.playAvailable?.()) ?? true)
+      if (context.signal?.aborted) return { state: "cancelled" }
+      if (usePlay && deps.playCore) {
+        const info = await deps.playCore.getAppUpdateInfo()
+        if (context.signal?.aborted) return { state: "cancelled" }
+        if (info.kind === "error") {
+          return { state: "failed", failure: { kind: "store", code: "play_info_failed" } }
+        }
+        if (info.kind === "ok") {
+          if (info.value.downloaded) {
+            if (!context.consented) return { state: "awaiting-consent" }
+            const completed = await deps.playCore.completeFlexibleUpdate()
+            return completed
+              ? { state: "awaiting-restart", externalUrl: PLAY_STORE_URL }
+              : {
+                  state: "failed",
+                  failure: {
+                    kind: "store",
+                    code: "play_completion_failed",
+                    recoveryActionKey: "openStore",
+                  },
+                }
+          }
+          const blocking =
+            context.consented &&
+            info.value.immediateAllowed &&
+            (candidate.criticality === "critical" || candidate.compatibility?.breaking === true)
+          const available = info.value.availability === "available"
+          const resumeImmediate = info.value.availability === "in-progress" && blocking
+          const flow =
+            blocking && (available || resumeImmediate)
+              ? deps.playCore.performImmediateUpdate
+              : available && info.value.flexibleAllowed
+                ? deps.playCore.startFlexibleUpdate
+                : undefined
+          if (flow) {
+            const result = await flow()
+            if (result === "started")
+              return { state: "awaiting-store", externalUrl: PLAY_STORE_URL }
+            if (result === "cancelled") return { state: "cancelled" }
+            if (result === "failed") {
+              return {
+                state: "failed",
+                failure: {
+                  kind: "store",
+                  code: "play_flow_failed",
+                  recoveryActionKey: "openStore",
+                },
+              }
+            }
+          } else if (info.value.availability === "in-progress") {
+            return { state: "awaiting-store", externalUrl: PLAY_STORE_URL }
           }
         }
         // `unsupported` means the native module is not in this build. Open the
         // store page rather than silently reporting nothing happened.
       }
 
+      if (context.signal?.aborted) return { state: "cancelled" }
       const url = candidate.externalUrl ?? storeUrl()
-      if (kind === "mobile-android" && deps.playCore) {
+      if (!url) {
+        return { state: "failed", failure: { kind: "store", code: "store_url_missing" } }
+      }
+      // Catalog URLs can point to a non-Play distribution for no-GMS builds.
+      // Only a candidate discovered through Play may launch its store plugin.
+      if (usePlay && deps.playCore) {
         const opened = await deps.playCore.openAppStore()
         if (opened) return { state: "awaiting-store", externalUrl: url }
       }
       const open = deps.openExternal ?? (await import("@/lib/tauri/opener")).openExternal
+      if (context.signal?.aborted) return { state: "cancelled" }
       await open(url)
       return { state: "awaiting-store", externalUrl: url }
     },
   }
 
   return adapter
-}
-
-/**
- * Resume an interrupted Play download. Wired to the app's resume event so a
- * download that finished while the app was backgrounded is not stranded.
- */
-export async function resumePlayUpdateOnResume(deps: MobileAdapterDeps): Promise<boolean> {
-  if (!deps.playCore) return false
-  const info = await deps.playCore.getAppUpdateInfo()
-  if (info.kind !== "ok" || info.value.availability !== "in-progress") return false
-  return deps.playCore.completeFlexibleUpdate()
 }

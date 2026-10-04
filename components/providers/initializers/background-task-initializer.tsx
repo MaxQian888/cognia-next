@@ -3,29 +3,28 @@
 import { useEffect } from "react"
 import { useTranslations } from "next-intl"
 
-import {
-  interruptRendererBackgroundTasksOnBoot,
-  setRendererBackgroundSettleListener,
-} from "@/lib/background-tasks/renderer-subagent-registry"
+import { setRendererBackgroundSettleListener } from "@/lib/background-tasks/renderer-subagent-registry"
 import {
   onBackgroundRunSettled,
   registerBackgroundResultNotifyStrings,
 } from "@/hooks/chat/background-result-runtime"
-import {
-  redispatchBackgroundRun,
-  DEFAULT_MAX_AUTO_RESUME_ATTEMPTS,
-} from "@/lib/background-tasks/redispatch"
+import { startBackgroundTaskRecovery } from "@/lib/background-tasks/redispatch"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { useAccountStore } from "@/stores/account/account-store"
 
 /**
- * Boot lifecycle for background subagent runs:
+ * Account-scoped lifecycle for background subagent runs:
  *  1. wire the settle listener (completion re-injection + notifications) and
  *     its localized copy,
- *  2. reconcile orphaned `running` journal rows to `interrupted`,
+ *  2. periodically reconcile expired execution owners to `interrupted`,
  *  3. prune stale settled history (age + cap),
- *  4. opt-in: auto-resume THIS boot's interrupted runs (attempt-capped).
+ *  4. opt-in: recover safe interrupted runs through the shared dispatch path.
  */
 export function BackgroundTaskInitializer() {
   const t = useTranslations("desktop.jobCenter.notify")
+  const accountRevision = useAccountStore((state) => state.accountRevision)
+  const { target, vaultState } = useRuntimeSnapshot()
+  const targetId = target?.id
 
   useEffect(() => {
     setRendererBackgroundSettleListener(onBackgroundRunSettled)
@@ -44,56 +43,26 @@ export function BackgroundTaskInitializer() {
   }, [t])
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const { recoverStaleDirectChatExecutionRuns } =
-          await import("@/lib/execution/direct-chat-run")
-        await recoverStaleDirectChatExecutionRuns()
-      } catch {
-        // Recovery projection is best-effort; boot must remain available.
-      }
-      const interrupted = await interruptRendererBackgroundTasksOnBoot()
-
-      try {
-        const { pruneBackgroundTaskRecords } = await import("@/lib/db/background-tasks")
-        await pruneBackgroundTaskRecords({ now: Date.now(), host: "renderer" })
-      } catch {
-        // Retention is best-effort.
-      }
-
-      if (interrupted.length === 0) return
-      try {
-        const { getSettings } = await import("@/lib/db/settings")
-        const settings = await getSettings()
-        const bg = settings?.backgroundTasks
-        if (!bg?.autoResumeInterrupted) return
-        const cap = bg.maxAutoResumeAttempts ?? DEFAULT_MAX_AUTO_RESUME_ATTEMPTS
-        let resumed = 0
-        for (const record of interrupted) {
-          if (record.kind !== "subagent" || record.mode !== "background") continue
-          const outcome = await redispatchBackgroundRun(record, {
-            kind: "auto",
-            maxAutoResumeAttempts: cap,
-          })
-          if (outcome.ok) resumed += 1
-        }
-        if (resumed > 0) {
-          const { notify } = await import("@/lib/notifications/runtime")
-          await notify({
-            source: "session",
-            level: "info",
-            title: t("autoResumed", { count: resumed }),
-            channels: ["center", "toast"],
-            dedupeKey: "background-auto-resume",
-          })
-        }
-      } catch {
-        // Auto-resume is opt-in convenience; boot must never fail on it.
-      }
-    })()
-    // Boot-once semantics; `t` only affects the summary copy.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (vaultState !== "unlocked" || !targetId) return
+    let disposed = false
+    const stop = startBackgroundTaskRecovery({
+      onResumed: async (count) => {
+        const { notify } = await import("@/lib/notifications/runtime")
+        if (disposed) return
+        await notify({
+          source: "session",
+          level: "info",
+          title: t("autoResumed", { count }),
+          channels: ["center", "toast"],
+          dedupeKey: "background-auto-resume",
+        })
+      },
+    })
+    return () => {
+      disposed = true
+      stop()
+    }
+  }, [accountRevision, targetId, vaultState, t])
 
   return null
 }

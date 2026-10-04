@@ -68,6 +68,38 @@ export function useChannelListActions(options: UseChannelListActionsOptions) {
     setRenamingFolderId((current) => (current === id ? null : current))
   }, [])
 
+  // "Move to folder → New folder…": the folder is made for these rows, so it is
+  // created, they are filed into it, and only then does its name open for
+  // editing — the same in-place rename a folder made from the ⋯ menu gets. One
+  // trip instead of three (make a folder, name it, come back and file the
+  // rows). Resolves `false` when either write was refused or failed, so a bulk
+  // selection survives for a retry.
+  const { onBulkAssignToFolder } = rowBundle.rowActions
+  const canCreateFolder = Boolean(options.onCreateFolder)
+  const handleNewFolderWith = useMemo(
+    () =>
+      canCreateFolder && onBulkAssignToFolder
+        ? async (ids: readonly string[]): Promise<boolean> => {
+            const { onCreateFolder } = latest.current.options
+            if (!onCreateFolder || ids.length === 0) return false
+            let created: unknown
+            const ok = await runWrite("folderCreate", [], async () => {
+              created = await onCreateFolder(latest.current.options.newFolderName)
+            })
+            const id = ok ? (created as SessionFolder | undefined)?.id : undefined
+            if (!id) return false
+            log.info("channel-list new folder from rows", { count: ids.length })
+            // Asked to be named as soon as it exists — and either way: a folder
+            // left under its placeholder name is exactly what this path exists
+            // to avoid. The rows file in while the name is being typed.
+            setRenamingFolderId(id)
+            const moved = await onBulkAssignToFolder([...ids], id)
+            return moved !== false
+          }
+        : undefined,
+    [canCreateFolder, onBulkAssignToFolder, runWrite]
+  )
+
   const orderedFolderIds = useMemo(() => folders.map((folder) => folder.id), [folders])
   const hasReorderFolders = Boolean(options.onReorderFolders)
   const handleMoveFolder = useMemo(
@@ -92,6 +124,7 @@ export function useChannelListActions(options: UseChannelListActionsOptions) {
     ...rowBundle,
     renamingFolderId,
     handleNewFolder,
+    handleNewFolderWith,
     handleFolderRenameSettled,
     handleMoveFolder,
   }

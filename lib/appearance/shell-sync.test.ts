@@ -4,7 +4,7 @@
 import { DEFAULT_A11Y } from "@/types/appearance"
 import type { CustomTheme } from "@/types/plugin/plugin"
 import { HIGH_CONTRAST_DARK, HIGH_CONTRAST_LIGHT } from "./high-contrast-presets"
-import { getShellColors } from "./shell-sync"
+import { getShellColors, readPaintedShellColors } from "./shell-sync"
 
 describe("getShellColors", () => {
   it("passes through hex values from the default preset on light theme", () => {
@@ -210,5 +210,40 @@ describe("getShellColors", () => {
       "dark"
     )
     expect(result.backgroundHex.toLowerCase()).toBe("#123456")
+  })
+})
+
+describe("readPaintedShellColors", () => {
+  const root = {} as HTMLElement
+  const paint = (vars: Record<string, string>) => {
+    ;(globalThis as { getComputedStyle?: unknown }).getComputedStyle = () => ({
+      getPropertyValue: (name: string) => vars[name] ?? "",
+    })
+  }
+
+  afterEach(() => {
+    delete (globalThis as { getComputedStyle?: unknown }).getComputedStyle
+  })
+
+  it("reads the colors the document is painting, converting to hex", () => {
+    paint({ "--background": " #1c1c1f", "--foreground": "oklch(0.985 0 0)" })
+    const colors = readPaintedShellColors("dark", root)
+    expect(colors.backgroundHex).toBe("#1c1c1f")
+    expect(colors.foregroundHex).toMatch(/^#[0-9a-f]{6}$/)
+    expect(colors.isDark).toBe(true)
+  })
+
+  it("falls back to the variant's safe defaults when nothing is painted", () => {
+    paint({})
+    expect(readPaintedShellColors("light", root)).toEqual({
+      backgroundHex: "#ffffff",
+      foregroundHex: "#0f172a",
+      isDark: false,
+    })
+  })
+
+  it("falls back without a document at all", () => {
+    expect(readPaintedShellColors("dark", null).backgroundHex).toBe("#0b1220")
+    expect(readPaintedShellColors("dark", root).backgroundHex).toBe("#0b1220")
   })
 })

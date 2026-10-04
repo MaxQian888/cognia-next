@@ -22,20 +22,19 @@ function sources(overrides: Partial<RowDecorationSources> = {}): RowDecorationSo
     metadataFields: ["agent", "model", "provider", "workspace"],
     showCustomIcons: true,
     merged: false,
-    defaultModel: undefined,
-    defaultProvider: undefined,
-    fallbackModel: "built-in-model",
-    fallbackProvider: "built-in-provider",
-    labelModel: (id) => `Model ${id}`,
-    labelProvider: (id) => `Provider ${id}`,
+    // A stand-in for the lane-aware resolver: session → character → built-in.
+    modelLabelsOf: (row, character) => ({
+      model: `Model ${row.model ?? character?.model ?? "built-in-model"}`,
+      provider: `Provider ${row.providerOverride ?? character?.providerId ?? "profile-p"}`,
+    }),
     ...overrides,
   }
 }
 
 describe("createRowDecorations", () => {
   describe("metadataFor", () => {
-    it("resolves each field through the session → character → profile → built-in chain", () => {
-      const { metadataFor } = createRowDecorations(sources({ defaultProvider: "profile-p" }))
+    it("resolves each field through the injected model labels", () => {
+      const { metadataFor } = createRowDecorations(sources())
       expect(metadataFor(session("s1", { characterId: "c1", projectId: "w1" }))).toEqual([
         { kind: "agent", value: "Alice" },
         { kind: "model", value: "Model claude-a" },
@@ -156,5 +155,27 @@ describe("createRowDecorations", () => {
         )
       ).toBe("#123456")
     })
+  })
+
+  it("asks for the model labels once per row, and not at all without a model field", () => {
+    const modelLabelsOf = jest.fn(() => ({ model: "M", provider: "P" }))
+    const withFields = createRowDecorations(sources({ modelLabelsOf }))
+    expect(withFields.metadataFor(session("s1"))).toEqual([
+      { kind: "model", value: "M" },
+      { kind: "provider", value: "P" },
+    ])
+    expect(modelLabelsOf).toHaveBeenCalledTimes(1)
+
+    modelLabelsOf.mockClear()
+    const without = createRowDecorations(sources({ modelLabelsOf, metadataFields: ["agent"] }))
+    without.metadataFor(session("s2", { characterId: "c1" }))
+    expect(modelLabelsOf).not.toHaveBeenCalled()
+  })
+
+  it("omits a model the resolver cannot name instead of inventing one", () => {
+    const { metadataFor } = createRowDecorations(
+      sources({ modelLabelsOf: () => ({}), metadataFields: ["model", "provider"] })
+    )
+    expect(metadataFor(session("s1"))).toEqual([])
   })
 })

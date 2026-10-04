@@ -28,6 +28,11 @@ const recoverPlanSteps = jest.fn().mockResolvedValue(0)
 jest.mock("@/lib/agent/plan/step-recovery", () => ({
   ensurePlanStepRecovery: () => recoverPlanSteps(),
 }))
+const mockStopPhantomGuard = jest.fn()
+const mockInstallPhantomGuard = jest.fn(() => mockStopPhantomGuard)
+jest.mock("@/lib/chat/phantom-run-runtime", () => ({
+  installDefaultPhantomRunGuard: () => mockInstallPhantomGuard(),
+}))
 const mockMarkReady = jest.fn()
 jest.mock("@/lib/boot/capabilities", () => ({
   markBootCapabilityReady: (...args: unknown[]) => mockMarkReady(...args),
@@ -59,6 +64,16 @@ describe("DeferredBootInitializersImpl", () => {
     ])
     expect(mockMarkReady).toHaveBeenCalledWith("core-chat")
     expect(recoverDirectRuns).toHaveBeenCalledTimes(1)
+  })
+
+  it("guards against phantom running sessions for as long as the chunk is mounted", () => {
+    mockInstallPhantomGuard.mockClear()
+    mockStopPhantomGuard.mockClear()
+    const { unmount } = render(<DeferredBootInitializersImpl />)
+    expect(mockInstallPhantomGuard).toHaveBeenCalledTimes(1)
+    expect(mockStopPhantomGuard).not.toHaveBeenCalled()
+    unmount()
+    expect(mockStopPhantomGuard).toHaveBeenCalledTimes(1)
   })
 
   it("sweeps orphaned in-session plan steps at boot, not only when a chat surface mounts", () => {

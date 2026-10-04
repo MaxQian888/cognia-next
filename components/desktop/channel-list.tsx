@@ -1,6 +1,5 @@
 "use client"
 
-import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -39,16 +38,21 @@ import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { CONTEXT_MENU_KIT, DROPDOWN_MENU_KIT, type MenuKit } from "@/components/shared/menu-kit"
 import { SessionListLoading } from "@/components/ui/loading-states"
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
+import {
+  ConversationListEmptyState,
+  ConversationNarrowedEmptyState,
+  type SearchWidening,
+} from "@/components/chat/conversation-list-empty-state"
+import { EmptyArchiveDialog } from "@/components/chat/empty-archive-dialog"
+import {
+  collapseKeyForView,
+  collapseOverridesForView,
+  paletteQueryForView,
+} from "@/lib/chat/conversation-archive-view"
+import { conversationManagerHref } from "@/lib/conversations/conversation-manager"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { useIsNarrow, useMediaQuery, useRangeSelection, useEdgeResize } from "@/hooks/ui"
 import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
@@ -214,7 +218,8 @@ import {
   ConversationSearchScopeControl,
 } from "@/components/chat/conversation-filter-controls"
 import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
-import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
+import { resolveSessionModelIdentity, sessionModelLabels } from "@/lib/chat/session-model-identity"
+import { recordedRuntimeRef, useSessionModelLanes } from "@/hooks/chat/use-session-model-lanes"
 import type { Character, ChatSession, SessionFolder, Team } from "@cognia/agent-config-types"
 import { filterExposedSessions, isSessionExposed } from "@/lib/chat/session-exposure"
 import {
@@ -226,6 +231,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   LayoutListIcon,
+  ListChecksIcon,
   ListTreeIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -836,7 +842,12 @@ export function ChannelList(props: Props) {
             <SheetHeader className="px-3 pt-3 pb-1">
               <SheetTitle className="text-sm">{t("conversationsTitle")}</SheetTitle>
             </SheetHeader>
-            <ChannelListBody {...props} onSelect={handleSelect} surface="sheet" />
+            <ChannelListBody
+              {...props}
+              onSelect={handleSelect}
+              onSelectInPlace={props.onSelect}
+              surface="sheet"
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -1017,6 +1028,7 @@ function ChannelListBodyImpl({
   loading,
   activeSessionId,
   onSelect,
+  onSelectInPlace,
   onNewDirect,
   onNewTeamConversation,
   onDelete,
@@ -1040,6 +1052,14 @@ function ChannelListBodyImpl({
   onBranch,
   runStatusById,
 }: Props & {
+  /**
+   * Open a conversation without closing the drawer. The narrow-window Sheet
+   * closes itself on `onSelect` — right for a row the reader tapped, wrong for
+   * the row an archive or delete opens in its place: triage happens inside the
+   * drawer, and slamming it shut after each archive interrupted it. Absent
+   * (the rail, which never closes), `onSelect` serves both.
+   */
+  onSelectInPlace?: (id: string) => void
   /**
    * Title-bar outlet for the header, or `null` to draw it inline. Only the
    * desktop rail passes one; the mobile Sheet keeps its header where it is.
@@ -1071,9 +1091,6 @@ function ChannelListBodyImpl({
   surface?: "rail" | "sheet"
 }) {
   const t = useTranslations("desktop.channelList")
-  // Filter vocabulary is shared with the mobile list — see
-  // `components/chat/conversation-filter-controls.tsx`.
-  const tFilters = useTranslations("conversationFilters")
   const selectedGuild = useUIStore((s) => s.selectedGuild)
 
   // Behavior preferences (Settings → Conversation). Absent settings fall back
@@ -1085,6 +1102,7 @@ function ChannelListBodyImpl({
   const appearanceDensity = useSettingsStore((s) => s.settings?.density)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
+  const { sessionRuntimeRefs, defaultRuntimeRef, agentNameOf } = useSessionModelLanes()
   const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
@@ -1357,14 +1375,22 @@ function ChannelListBodyImpl({
     () => (teams ?? []).map((item) => ({ id: item.id, name: item.name })),
     [teams]
   )
-  const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
+  const storedCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
   const setGroupCollapsedInStore = useUIStore((s) => s.setGroupCollapsed)
+  // The archive keeps its own fold state. Section keys do not say which view
+  // they were folded in, so folding a squad while browsing the archive used to
+  // fold it in the active list too; the archive's choices are stored under a
+  // prefix and read back without it.
+  const groupCollapseOverrides = useMemo(
+    () => collapseOverridesForView(storedCollapseOverrides, view),
+    [storedCollapseOverrides, view]
+  )
   const setGroupCollapsed = useCallback(
     (key: string, collapsed: boolean) => {
-      setGroupCollapsedInStore(key, collapsed)
+      setGroupCollapsedInStore(collapseKeyForView(key, view), collapsed)
       void trackConversationSectionToggled(key, collapsed)
     },
-    [setGroupCollapsedInStore]
+    [setGroupCollapsedInStore, view]
   )
 
   // Filters, sort, saved presets and the per-facet option candidates all come
@@ -1458,10 +1484,19 @@ function ChannelListBodyImpl({
   // Capping happens *before* the freeze / pending-reorder chain below so every
   // downstream consumer — drop targets, the selection order, the reveal ladder
   // — reasons about the rows actually on screen, not the ones behind "Show
-  // more". On the compact surfaces the capped set is just the model's.
+  // more". On the compact surfaces the capped set is just the model's. The
+  // open conversation survives every cut: reached from search, a link or ⌘K it
+  // is usually older than a group's newest few, and capped away it left the
+  // rail with no row saying where the reader is.
+  //
+  // Not in the archive: browsing it is the reason it was opened, and a cap
+  // there made "Select all" quietly mean "the first few of each group".
   const cappedSections = useMemo(
-    () => (merged ? applyTeamGroupPreviewCaps(sections, expandedGroupPreviews) : sections),
-    [merged, sections, expandedGroupPreviews]
+    () =>
+      merged && view === "active"
+        ? applyTeamGroupPreviewCaps(sections, expandedGroupPreviews, activeSessionId)
+        : sections,
+    [merged, view, sections, expandedGroupPreviews, activeSessionId]
   )
   // The model's `orderedIds` describes the *uncapped* list. What keyboard
   // navigation, range selection and the reveal ladder must agree with is the
@@ -1494,26 +1529,12 @@ function ChannelListBodyImpl({
   )
   const revealSteps = useCallback(
     (id: string): ConversationRevealStep[] => {
-      // Second-to-last rung: the row is in a section the user folded away.
+      // Last rung: the row is in a section the user folded away.
       const holder = sections.find(
         (section) =>
           (section.kind === "folder" || section.kind === "group") &&
           section.collapsed &&
           section.sessions.some((session) => session.id === id)
-      )
-      // Last rung: the row sits past its group header's "Show more" cut — it
-      // belongs to a visible section but beyond the preview slice, so the fix
-      // is lifting that cap, not unfolding anything.
-      const cappedHolder = cappedSections.find(
-        (section) =>
-          section.kind === "group" &&
-          (section.previewHidden ?? 0) > 0 &&
-          !section.sessions.some((session) => session.id === id) &&
-          sections.some(
-            (full) =>
-              conversationSectionKey(full) === conversationSectionKey(section) &&
-              full.sessions.some((session) => session.id === id)
-          )
       )
       return [
         { active: view !== "active", undo: () => setView("active") },
@@ -1533,23 +1554,18 @@ function ChannelListBodyImpl({
               setGroupCollapsed(conversationSectionKey(holder), false)
           },
         },
-        {
-          active: cappedHolder != null,
-          undo: () => {
-            if (!cappedHolder) return
-            const key = conversationSectionKey(cappedHolder)
-            setExpandedGroupPreviews((current) => new Set(current).add(key))
-          },
-        },
+        // No rung for a "Show more" cut: the cap never hides the open
+        // conversation (`applyTeamGroupPreviewCaps`), and the row being
+        // revealed is always the open one.
       ]
     },
     [
       sections,
-      cappedSections,
       view,
       setView,
       query,
       setQuery,
+      setSearchResetToken,
       activeFilterCount,
       resetConversationFilters,
       toggleFolderCollapsed,
@@ -1606,14 +1622,19 @@ function ChannelListBodyImpl({
         // section header, which carries the squad's avatar and name —
         // printing the name again on the row's detail line is noise.
         merged,
-        defaultModel,
-        defaultProvider,
-        // The same last resorts the filter controller's model / provider
-        // facets use, so a filter matches exactly the rows naming it.
-        fallbackModel: ANTHROPIC_DEFAULT_MODEL,
-        fallbackProvider: "anthropic",
-        labelModel: getModelDisplayName,
-        labelProvider: getProviderDisplayName,
+        // Lane-aware, and the same resolver the filter controller's model /
+        // provider facets use, so a filter matches exactly the rows naming it.
+        modelLabelsOf: (session, character) =>
+          sessionModelLabels(
+            resolveSessionModelIdentity(session, {
+              character,
+              sessionRuntimeRef: recordedRuntimeRef(sessionRuntimeRefs, session.id),
+              defaultRuntimeRef,
+              defaultModel,
+              defaultProvider,
+              agentNameOf,
+            })
+          ),
       }),
     [
       characterById,
@@ -1624,12 +1645,78 @@ function ChannelListBodyImpl({
       merged,
       defaultModel,
       defaultProvider,
+      sessionRuntimeRefs,
+      defaultRuntimeRef,
+      agentNameOf,
     ]
   )
 
   const selection = useRangeSelection(renderedOrderedIds)
-  const { selected, handleClick, selectAll, clear, isSelected, lastInteractionWasModified } =
-    selection
+  const {
+    selected,
+    handleClick,
+    selectAll,
+    selectIds,
+    clear,
+    isSelected,
+    lastInteractionWasModified,
+  } = selection
+
+  // Explicit selection mode — "Select conversations" in the ⋯ menu, a row
+  // menu's "Select", Space on a row. A modifier-built selection is a
+  // file-manager gesture and stays one (a plain click opens a row and drops
+  // it); a selection entered on purpose is a mode, so there a plain click
+  // toggles the row instead of throwing the selection away, and the bar stays
+  // up with nothing selected until "Done" or Escape. Read through a ref by the
+  // click handler, which every memoized row holds.
+  const [selectionMode, setSelectionMode] = useState(false)
+  const selectionModeRef = useRef(false)
+  useEffect(() => {
+    selectionModeRef.current = selectionMode
+  }, [selectionMode])
+  const enterSelection = useCallback(() => setSelectionMode(true), [])
+  const exitSelection = useCallback(() => {
+    clear()
+    setSelectionMode(false)
+  }, [clear])
+  // "Deselect all" empties the selection without leaving it — the bar a
+  // modifier selection raised would otherwise vanish with its last row.
+  const deselectAll = useCallback(() => {
+    setSelectionMode(true)
+    clear()
+  }, [clear])
+
+  // "Select conversations here" on a folder or scope header: selection mode,
+  // pre-filled with every row of that section. A row has to be on screen to
+  // stay selected (`useRangeSelection` reads through the rendered order), so
+  // the section is opened first — unfolded, and past its "Show more" cut.
+  // The model's sections are read through a ref: the handler rides in the
+  // memoized scope-tree config and must not change with every session write.
+  const sectionsRef = useRef(sections)
+  useEffect(() => {
+    sectionsRef.current = sections
+  }, [sections])
+  const selectSection = useCallback(
+    (sectionKey: string) => {
+      const section = sectionsRef.current.find(
+        (candidate) =>
+          (candidate.kind === "folder" || candidate.kind === "group") &&
+          conversationSectionKey(candidate) === sectionKey
+      )
+      if (!section || section.sessions.length === 0) return
+      if (section.kind === "folder" && section.collapsed) toggleFolderCollapsed(section.folder.id)
+      if (section.kind === "group") {
+        if (section.collapsed) setGroupCollapsed(sectionKey, false)
+        setExpandedGroupPreviews((current) =>
+          current.has(sectionKey) ? current : new Set(current).add(sectionKey)
+        )
+      }
+      log.info("channel-list select section", { count: section.sessions.length })
+      setSelectionMode(true)
+      selectIds(section.sessions.map((session) => session.id))
+    },
+    [toggleFolderCollapsed, setGroupCollapsed, selectIds]
+  )
 
   // Keyboard-navigation focus ring (independent of the multi-selection).
   const [focusedId, setFocusedId] = useState<string | null>(null)
@@ -1642,6 +1729,7 @@ function ChannelListBodyImpl({
     clear()
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFocusedId(null)
+    setSelectionMode(false)
   }, [chatGuild, view, clear])
 
   // What the action boundary reads at call time: the rows (a handoff lock is
@@ -1673,6 +1761,7 @@ function ChannelListBodyImpl({
     closeExport,
     renamingFolderId,
     handleNewFolder,
+    handleNewFolderWith,
     handleFolderRenameSettled,
     handleMoveFolder,
   } = useChannelListActions({
@@ -1681,7 +1770,7 @@ function ChannelListBodyImpl({
     resolveSessions,
     getRenderedOrder,
     activeSessionId,
-    onSelect,
+    onSelect: onSelectInPlace ?? onSelect,
     onNewDirect,
     onNewTeamConversation,
     onDelete,
@@ -1703,6 +1792,15 @@ function ChannelListBodyImpl({
     onBranch,
     onFolderDeleted: forgetFolderCollapse,
   })
+  // A row's "Move to folder → New folder…". Archived rows stay in date
+  // buckets (folders only group the active view), so it is not offered there.
+  const handleRowNewFolder = useMemo(
+    () =>
+      handleNewFolderWith && view === "active"
+        ? (sessionId: string) => void handleNewFolderWith([sessionId])
+        : undefined,
+    [handleNewFolderWith, view]
+  )
   // The export / share-link dialog's row, resolved while it is open.
   const exportSession = exportSessionId
     ? (sessions.find((session) => session.id === exportSessionId) ?? null)
@@ -1711,6 +1809,12 @@ function ChannelListBodyImpl({
   const handleSessionSelect = useCallback(
     (id: string, e: ReactMouseEvent) => {
       const modified = e.ctrlKey || e.metaKey || e.shiftKey
+      if (selectionModeRef.current && !modified) {
+        // In selection mode a plain click is the checkbox: it toggles the row
+        // and opens nothing. Shift still extends a range from the anchor.
+        handleClick(id, { ctrlKey: true, metaKey: false, shiftKey: false })
+        return
+      }
       handleClick(id, e)
       // Plain click activates the session in the chat panel; modifier-bearing
       // clicks only mutate the selection. This mirrors Explorer / Finder.
@@ -1721,8 +1825,11 @@ function ChannelListBodyImpl({
     },
     [handleClick, onSelect]
   )
+  // The row menu's "Select" and Space on a row: a deliberate selection, so it
+  // enters the mode as well as toggling the row.
   const handleToggleSelection = useCallback(
     (id: string) => {
+      setSelectionMode(true)
       handleClick(id, { ctrlKey: true, metaKey: false, shiftKey: false })
     },
     [handleClick]
@@ -1774,9 +1881,14 @@ function ChannelListBodyImpl({
         target.closest('[role="menu"],[role="dialog"]') != null
 
       if (e.key === "Escape") {
-        if (selected.size > 0) {
+        // An Escape that closes a menu or a dialog is spent on that: their
+        // content is portaled out of this element in the DOM but not in React's
+        // tree, so the key still bubbles here — and used to drop the whole
+        // selection along with the ⋯ menu or the delete confirm it closed.
+        if (target.closest('[role="menu"],[role="dialog"],[role="alertdialog"]') != null) return
+        if (selected.size > 0 || selectionMode) {
           e.preventDefault()
-          clear()
+          exitSelection()
         } else if (focusedId) {
           e.preventDefault()
           setFocusedId(null)
@@ -1840,7 +1952,8 @@ function ChannelListBodyImpl({
       }
     },
     [
-      clear,
+      exitSelection,
+      selectionMode,
       renderedOrderedIds,
       selectAll,
       selected.size,
@@ -1907,12 +2020,37 @@ function ChannelListBodyImpl({
     allowInEditable: true,
     preventDefault: true,
   })
+  // ⌘⇧⌫ archives — or, on an archived conversation, restores — the row the
+  // keyboard is on, else the open conversation. Routed through the same row
+  // actions as the menu, so it gets the same lock gate, toast, Undo and "open
+  // the next row" (ADR-0213). Not live in text fields: it must never eat an
+  // edit chord, and the composer is where the open conversation is read.
+  const toggleArchiveByKeyboard = useCallback(() => {
+    const focused =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+            .closest("[data-session-row-select]")
+            ?.getAttribute("data-session-row-select")
+        : null
+    const id = focused ?? activeSessionId
+    if (!id) return
+    const [row] = resolveSessions([id])
+    if (!row) return
+    log.info("channel-list toggle archive by keyboard", { archived: row.archivedAt != null })
+    if (row.archivedAt != null) void rowActions.onUnarchive?.(id)
+    else void rowActions.onArchive?.(id)
+  }, [activeSessionId, resolveSessions, rowActions])
+  useAppShortcut("shell.conversation.toggleArchive", toggleArchiveByKeyboard, {
+    preventDefault: true,
+  })
 
   // Drag-and-drop: reorder any conversation section or drop a conversation onto
   // a folder. Only under the default recency sort — every other mode derives its
   // order from session data, so a persisted manual order would be ignored and
   // the grip would be promising something the list cannot keep.
-  const reorderable = sortSupportsManualOrder(sortBy)
+  // Never inside the archive: its order is recency, and a rank written there
+  // lands under the same section keys the active list reads.
+  const reorderable = sortSupportsManualOrder(sortBy) && view === "active"
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -2119,12 +2257,13 @@ function ChannelListBodyImpl({
     [sectionIdsBySession, cappedSections, rowActions, flashSettled, teamIds, reorderTeams]
   )
 
-  // Toolbar visibility: show when ≥2 are selected OR when a single row was
-  // selected via a modifier (so the user can still pin/unpin/delete just
-  // that one row without round-tripping through the per-row menu). Plain
-  // single click — the normal "open this conversation" gesture — never
-  // pops the toolbar so it stays out of the way.
-  const toolbarVisible = selected.size >= 2 || (selected.size === 1 && lastInteractionWasModified)
+  // Toolbar visibility: always in selection mode; otherwise when ≥2 are
+  // selected OR when a single row was selected via a modifier (so the user
+  // can still pin/unpin/delete just that one row without round-tripping
+  // through the per-row menu). Plain single click — the normal "open this
+  // conversation" gesture — never pops the toolbar so it stays out of the way.
+  const toolbarVisible =
+    selectionMode || selected.size >= 2 || (selected.size === 1 && lastInteractionWasModified)
   // The rows wear the selection ring only while a selection is actually in
   // play — the same predicate as the toolbar. A plain click also records the
   // row as the range anchor (`useRangeSelection`), and ringing it then put a
@@ -2191,6 +2330,7 @@ function ChannelListBodyImpl({
             onNewConversation: handleGuildNewConversation,
             onMoveTeam: moveTeam,
             unreadScope: listUnreadScope,
+            onSelectSection: selectSection,
           }
         : undefined,
     [
@@ -2205,6 +2345,7 @@ function ChannelListBodyImpl({
       handleGuildNewConversation,
       moveTeam,
       listUnreadScope,
+      selectSection,
     ]
   )
   // Rows are placed at this height before they measure themselves (windowed
@@ -2220,6 +2361,54 @@ function ChannelListBodyImpl({
     if (target.dataset.slot !== "scroll-area-viewport") return
     setListScrolled(target.scrollTop > 0)
   }, [])
+
+  // The exits a search that found nothing offers. Clearing reaches into the
+  // field the same way the reveal ladder does (a remount drops its own
+  // value); "search everywhere" hands the words to the command palette, as the
+  // field's own button does; and each axis the search scope leaves closed is
+  // offered as one click — the scope control is folded away under a held
+  // query, which is exactly when a reader needs it.
+  const clearSearchFromList = useCallback(() => {
+    setQuery("")
+    setSearchResetToken((token) => token + 1)
+  }, [setQuery, setSearchResetToken])
+  const searchEverywhere = useCallback(() => {
+    requestCommandPalette({ query: paletteQueryForView(query, view), scope: "chats" })
+  }, [query, view])
+  // Merged against the optimistic settings, not the rendered ones: two
+  // widenings clicked before the store echoes the first must both stick.
+  const widenSearch = useCallback(
+    (patch: Partial<ResolvedConversationSearchOptions>) => {
+      saveSidebarSettings({
+        search: { ...resolveConversationSearchOptions(sidebarSettingsRef.current), ...patch },
+      })
+    },
+    [saveSidebarSettings]
+  )
+  const markArchivedRows =
+    view === "active" || (query.trim().length > 0 && searchOptions.includeArchived)
+  // Every archived conversation in the list's scope — not the rendered ones:
+  // the count on the way in and "Empty archive" both mean all of it.
+  const archivedInScope = useMemo(() => filtered.filter((s) => s.archivedAt != null), [filtered])
+  const [emptyArchiveOpen, setEmptyArchiveOpen] = useState(false)
+  const tArchiveScope = useTranslations("conversations.archive")
+  const router = useRouter()
+  const openConversationManager = useCallback(() => {
+    log.info("channel-list open conversation manager", { view })
+    router.push(conversationManagerHref(view))
+  }, [router, view])
+  const searchWidenings = useMemo<SearchWidening[]>(() => {
+    const out: SearchWidening[] = []
+    if (!searchOptions.content) out.push({ key: "content", patch: { content: true } })
+    // The archived view already searches the archive.
+    if (!searchOptions.includeArchived && view === "active") {
+      out.push({ key: "archived", patch: { includeArchived: true } })
+    }
+    if (searchOptions.workspace === "current" && projects.length > 1) {
+      out.push({ key: "workspaces", patch: { workspace: "all" } })
+    }
+    return out
+  }, [searchOptions, view, projects.length])
 
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
@@ -2252,7 +2441,13 @@ function ChannelListBodyImpl({
     titleMotion,
     onUpdateDisplay: saveSidebarSettings,
     onToggleView: () => setView(view === "active" ? "archived" : "active"),
+    archivedCount: archivedInScope.length,
+    onManageConversations: openConversationManager,
+    onEmptyArchive: archivedInScope.length > 0 ? () => setEmptyArchiveOpen(true) : undefined,
     onNewFolder: view === "active" && onCreateFolder ? handleNewFolder : undefined,
+    onSelectConversations: enterSelection,
+    // Nothing on screen to select, or a selection already in play.
+    selectConversationsDisabled: renderedOrderedIds.length === 0 || toolbarVisible,
     onNewDirect: handleNewDirect,
     onNewTeamConversation: handleNewTeamConversation,
   }
@@ -2272,6 +2467,7 @@ function ChannelListBodyImpl({
       onQueryChange={setQuery}
       onExpandedChange={setSearchExpanded}
       compact={merged}
+      view={view}
       onRequestClose={merged ? closeSearch : undefined}
     />
   )
@@ -2304,6 +2500,7 @@ function ChannelListBodyImpl({
           side="right"
           triggerClassName="size-8 rounded-md"
           testId="channel-list-search-scope"
+          view={view}
         />
         <ConversationFilterMenu
           model={filterController}
@@ -2347,6 +2544,7 @@ function ChannelListBodyImpl({
           side="bottom"
           triggerClassName="size-8 rounded-md"
           testId="channel-list-search-scope"
+          view={view}
         />
         <ConversationFilterMenu
           model={filterController}
@@ -2370,7 +2568,9 @@ function ChannelListBodyImpl({
           <button
             type="button"
             onClick={() => setView("active")}
-            aria-label={t("viewActive")}
+            // The name starts with what the chip shows ("Archived") and then
+            // says what pressing it does.
+            aria-label={t("archivedChipAria")}
             title={t("viewActive")}
             data-testid="channel-list-archived-chip"
             className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 pr-1.5 pl-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -2402,9 +2602,15 @@ function ChannelListBodyImpl({
         onArchive={rowActions.onBulkArchive}
         onUnarchive={rowActions.onBulkUnarchive}
         onMarkRead={rowActions.onBulkMarkRead}
+        onMarkUnread={rowActions.onBulkMarkUnread}
+        unreadIds={unreadIds}
         folders={modelFolders}
         onMoveToFolder={view === "active" ? rowActions.onBulkAssignToFolder : undefined}
-        onClear={clear}
+        onNewFolder={view === "active" ? handleNewFolderWith : undefined}
+        newFolderProjectId={activeProjectId}
+        onSelectAll={selectAll}
+        onDeselectAll={deselectAll}
+        onClear={exitSelection}
       />
       {contentBelowMinQuery ? (
         <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
@@ -2551,6 +2757,7 @@ function ChannelListBodyImpl({
                     ? () => handleNewTeamConversation(chatGuild.teamId)
                     : handleNewDirect
               }
+              onShowActive={view === "archived" ? () => setView("active") : undefined}
             />
           ) : filteredCount === 0 && contentPending ? (
             // Message hits land a beat after the title hits, so until the index
@@ -2572,23 +2779,15 @@ function ChannelListBodyImpl({
             // unnarrowed zero means the account simply has no conversations —
             // the scope tree below draws that itself (a quiet hint row under
             // each header), which is also how the squads stay reachable.
-            <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
-              <p className="text-xs text-muted-foreground">
-                {query.trim()
-                  ? t("emptySearch", { query: query.trim() })
-                  : t("emptyFiltered", { count: activeFilters })}
-              </p>
-              {activeFilters > 0 ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={resetConversationFilters}
-                  data-testid="channel-list-empty-clear-filters"
-                >
-                  {tFilters("clearAll")}
-                </Button>
-              ) : null}
-            </div>
+            <ConversationNarrowedEmptyState
+              query={query.trim()}
+              activeFilters={activeFilters}
+              onClearFilters={resetConversationFilters}
+              onClearSearch={clearSearchFromList}
+              onSearchEverywhere={searchEverywhere}
+              widenings={searchWidenings}
+              onWiden={widenSearch}
+            />
           ) : (
             <DndContext
               sensors={dndSensors}
@@ -2617,8 +2816,13 @@ function ChannelListBodyImpl({
                 metadataFor={decorations.metadataFor}
                 titleMotion={titleMotion}
                 unreadById={unreadById}
+                markArchivedRows={markArchivedRows}
+                archivedView={view === "archived"}
                 isSelected={isSelectionShown}
+                selectable={toolbarVisible}
                 onToggleSelection={handleToggleSelection}
+                onNewFolderWith={handleRowNewFolder}
+                newFolderProjectId={activeProjectId}
                 accentFor={decorations.accentFor}
                 iconFor={decorations.iconFor}
                 folders={folders ?? EMPTY_FOLDERS}
@@ -2642,6 +2846,7 @@ function ChannelListBodyImpl({
                 unreadIds={unreadIds}
                 tabStopId={tabStopId}
                 onRowFocus={handleRowFocus}
+                onSelectSection={selectSection}
               />
             </DndContext>
           )}
@@ -2691,8 +2896,24 @@ function ChannelListBodyImpl({
             </SortableContext>
           </DndContext>
         ) : null}
-        {merged ? <SidebarFooter /> : null}
+        {/* No title bar above the rail (the web shell's default): nothing
+            else up there folds it, so the footer carries the collapse button
+            — at the bottom of the column it acts on, beside the rail's other
+            utilities. With a bar, its own toggle segment does the job. */}
+        {merged ? <SidebarFooter collapseToggle={headerOutlet === null} /> : null}
         <ConversationExportDialog session={exportSession} onClose={closeExport} />
+        <EmptyArchiveDialog
+          open={emptyArchiveOpen}
+          onOpenChange={setEmptyArchiveOpen}
+          sessions={archivedInScope}
+          scopeLabel={
+            crossWorkspaceReach
+              ? tArchiveScope("scopeAllWorkspaces")
+              : activeProjectId
+                ? workspaceById.get(activeProjectId)
+                : undefined
+          }
+        />
       </div>
     </PerfBoundary>
   )
@@ -2733,6 +2954,7 @@ function ChannelListSearch({
   onExpandedChange,
   onRequestClose,
   compact = false,
+  view = "active",
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>
   onQueryChange: (query: string) => void
@@ -2758,6 +2980,8 @@ function ChannelListSearch({
    * shrinking its text would walk into the iOS auto-zoom rule below.
    */
   compact?: boolean
+  /** The view the field narrows — the global search it hands off to looks there too. */
+  view?: ChannelListView
 }) {
   const t = useTranslations("desktop.channelList")
   const [value, setValue] = useState("")
@@ -2775,8 +2999,8 @@ function ChannelListSearch({
   const openGlobalSearch = useCallback(() => {
     // Land on the *Chats* tab: the words came from a conversation search, so
     // that is the scope they were meant for (ADR-0129).
-    requestCommandPalette({ query: value.trim() || undefined, scope: "chats" })
-  }, [value])
+    requestCommandPalette({ query: paletteQueryForView(value, view), scope: "chats" })
+  }, [value, view])
   const { call: debouncedQueryChange, cancel: cancelQueryChange } = useDebouncedCallback(
     onQueryChange,
     150
@@ -2918,42 +3142,6 @@ function ChannelListSearch({
         </InputGroupAddon>
       </InputGroup>
     </div>
-  )
-}
-
-function ConversationListEmptyState({
-  archived,
-  team,
-  onCreate,
-}: {
-  archived: boolean
-  team: boolean
-  onCreate?: () => void
-}) {
-  const t = useTranslations("desktop.channelList")
-  const title = archived ? t("conversationsTitle") : team ? t("newConversation") : t("newChat")
-  const description = archived ? t("emptyArchived") : team ? t("emptyTeam") : t("emptyDm")
-  const actionLabel = team ? t("newConversation") : t("newChat")
-  const Icon = archived ? ArchiveIcon : team ? UsersIcon : MessagesSquareIcon
-
-  return (
-    <Empty className="min-h-48 gap-4 rounded-none border-0 px-5 py-10">
-      <EmptyHeader>
-        <EmptyMedia variant="icon" className="rounded-xl bg-muted/70 text-muted-foreground">
-          <Icon className="size-5" />
-        </EmptyMedia>
-        <EmptyTitle className="text-sm">{title}</EmptyTitle>
-        <EmptyDescription className="text-xs">{description}</EmptyDescription>
-      </EmptyHeader>
-      {onCreate ? (
-        <EmptyContent>
-          <Button size="sm" onClick={onCreate}>
-            <PlusIcon className="size-4" />
-            {actionLabel}
-          </Button>
-        </EmptyContent>
-      ) : null}
-    </Empty>
   )
 }
 
@@ -3118,7 +3306,23 @@ interface HeaderActionsProps {
   titleMotion: ConversationSidebarTitleMotion
   onUpdateDisplay: (patch: Partial<ConversationSidebarSettings>) => void
   onToggleView: () => void
+  /**
+   * Archived conversations in the list's scope — said on the way in, so the
+   * archive is not a door with no hint of what is behind it.
+   */
+  archivedCount: number
+  /** Open the conversation manager (`/conversations`) on the view in use. */
+  onManageConversations: () => void
+  /** Offered inside a non-empty archive: delete everything in it, after a confirm. */
+  onEmptyArchive?: () => void
   onNewFolder?: () => void
+  /**
+   * Enter selection mode — the discoverable way into managing several
+   * conversations at once, for a reader who does not know the ⌘/Shift-click
+   * gesture.
+   */
+  onSelectConversations?: () => void
+  selectConversationsDisabled?: boolean
   onNewDirect: () => void
   onNewTeamConversation: (teamId: string) => void
 }
@@ -3142,15 +3346,28 @@ function HeaderActions({
   titleMotion,
   onUpdateDisplay,
   onToggleView,
+  archivedCount,
+  onManageConversations,
+  onEmptyArchive,
   onNewFolder,
+  onSelectConversations,
+  selectConversationsDisabled = false,
   onNewDirect,
   onNewTeamConversation,
 }: HeaderActionsProps) {
   const t = useTranslations("desktop.channelList")
   const isTeam = selectedGuild.kind === "team"
   const ctaLabel = isTeam ? t("newConversation") : t("newChat")
+  const tArchive = useTranslations("conversations.archive.empty")
   const isArchived = view === "archived"
-  const viewLabel = isArchived ? t("viewActive") : t("viewArchived")
+  // What the switch does next. The menu item and the tooltip say it; the
+  // inline toggle button keeps one stable name (`archivedToggle`) and reports
+  // its state through `aria-pressed`, as a toggle button must.
+  const viewLabel = isArchived
+    ? t("viewActive")
+    : archivedCount > 0
+      ? t("viewArchivedCount", { count: archivedCount })
+      : t("viewArchived")
   const compact = layout === "compact"
   // One table for the row's six switches: they differ only in which key they
   // write, and a checkbox block per switch is how the submenu would drift from
@@ -3235,20 +3452,44 @@ function HeaderActions({
         className="w-60"
       >
         {compact ? (
-          <>
-            <DropdownMenuItem onSelect={onToggleView} data-testid="channel-list-toggle-view">
-              <ArchiveIcon className="size-4" />
-              {viewLabel}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
+          <DropdownMenuItem onSelect={onToggleView} data-testid="channel-list-toggle-view">
+            <ArchiveIcon className="size-4" />
+            {viewLabel}
+          </DropdownMenuItem>
         ) : null}
-        {onNewFolder ? (
+        <DropdownMenuItem onSelect={onManageConversations} data-testid="channel-list-manage">
+          <LayoutListIcon className="size-4" />
+          {t("manageConversations")}
+        </DropdownMenuItem>
+        {isArchived && onEmptyArchive ? (
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={onEmptyArchive}
+            data-testid="channel-list-empty-archive"
+          >
+            <Trash2Icon className="size-4" />
+            {tArchive("action")}
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        {onSelectConversations || onNewFolder ? (
           <>
-            <DropdownMenuItem onSelect={onNewFolder}>
-              <FolderPlusIcon className="size-4" />
-              {t("newFolder")}
-            </DropdownMenuItem>
+            {onSelectConversations ? (
+              <DropdownMenuItem
+                onSelect={onSelectConversations}
+                disabled={selectConversationsDisabled}
+                data-testid="channel-list-select-mode"
+              >
+                <ListChecksIcon className="size-4" />
+                {t("selectConversations")}
+              </DropdownMenuItem>
+            ) : null}
+            {onNewFolder ? (
+              <DropdownMenuItem onSelect={onNewFolder}>
+                <FolderPlusIcon className="size-4" />
+                {t("newFolder")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
           </>
         ) : null}
@@ -3440,9 +3681,10 @@ function HeaderActions({
             variant="ghost"
             className={cn("size-7", isArchived && "text-primary")}
             onClick={onToggleView}
-            aria-label={viewLabel}
+            aria-label={t("archivedToggle")}
             aria-pressed={isArchived}
             title={viewLabel}
+            data-testid="channel-list-archived-toggle"
           >
             <ArchiveIcon className="size-4" />
           </Button>
@@ -3490,6 +3732,8 @@ interface ScopeTreeConfig {
    * read" clears, so it never touches a workspace the tree is not showing.
    */
   unreadScope: GuildUnreadScope
+  /** "Select conversations here" on a scope header. */
+  onSelectSection: (sectionKey: string) => void
 }
 
 function ConversationSectionsImpl({
@@ -3511,8 +3755,13 @@ function ConversationSectionsImpl({
   metadataFor,
   titleMotion,
   unreadById,
+  markArchivedRows,
+  archivedView,
   isSelected,
+  selectable,
   onToggleSelection,
+  onNewFolderWith,
+  newFolderProjectId,
   accentFor,
   iconFor,
   folders,
@@ -3536,6 +3785,7 @@ function ConversationSectionsImpl({
   unreadIds,
   tabStopId,
   onRowFocus,
+  onSelectSection,
 }: {
   sections: readonly import("@/lib/chat/conversation-list-model").ConversationSection[]
   /**
@@ -3567,8 +3817,28 @@ function ConversationSectionsImpl({
   metadataFor: (session: ChatSession) => SessionRowMetadataItem[]
   titleMotion: ConversationSidebarTitleMotion
   unreadById: Map<string, number>
+  /**
+   * Draw the archived marker on archived rows: true wherever active and
+   * archived rows can share the list (the active view, which only shows an
+   * archived row through a search that reaches the archive, or the archive
+   * under a search that reaches the active list).
+   */
+  markArchivedRows: boolean
+  /**
+   * The list is the Archived view, on any surface — the scope tree's own
+   * `archived` flag exists only in the merged rail, and the compact surfaces
+   * (the narrow-window drawer, the collapsed rail's peek) browse the archive
+   * too.
+   */
+  archivedView: boolean
   isSelected: (id: string) => boolean
+  /** A selection is in play: rows draw their checkbox. */
+  selectable: boolean
   onToggleSelection: (id: string) => void
+  /** A row's "Move to folder → New folder…"; absent where it is not offered. */
+  onNewFolderWith?: (sessionId: string) => void
+  /** The workspace a folder made from a row lands in (the active one). */
+  newFolderProjectId: string | null
   accentFor: (session: ChatSession) => string | undefined
   iconFor: (session: ChatSession) => AvatarSubject | undefined
   folders: SessionFolder[]
@@ -3604,6 +3874,11 @@ function ConversationSectionsImpl({
   tabStopId: string | null
   /** A row's button took focus — the list moves its focus ring there. */
   onRowFocus?: (id: string) => void
+  /**
+   * Select every row of one section (`conversationSectionKey`) — "Select
+   * conversations here" on a folder or scope header.
+   */
+  onSelectSection?: (sectionKey: string) => void
 }) {
   const t = useTranslations("desktop.channelList")
 
@@ -3626,10 +3901,24 @@ function ConversationSectionsImpl({
     return ids
   }, [scopeTreeOn, sections])
 
+  // Rows inside the Pinned section drop their pin glyph — the header above
+  // them already says it. A pinned row anywhere else (search results) keeps it.
+  const pinnedSectionIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const section of sections) {
+      if (section.kind === "pinned") for (const session of section.sessions) ids.add(session.id)
+    }
+    return ids
+  }, [sections])
+
   const rowProps = (s: ChatSession): ComponentProps<typeof SessionRow> => ({
     session: s,
     active: s.id === activeSessionId,
     selected: isSelected(s.id),
+    selectable,
+    showPinGlyph: !pinnedSectionIds.has(s.id),
+    onNewFolderWith,
+    newFolderProjectId,
     focused: s.id === focusedId,
     density,
     showPreview,
@@ -3641,7 +3930,10 @@ function ConversationSectionsImpl({
     titleMotion,
     accentColor: accentFor(s),
     iconSubject: s.kind === "team" && squadScopedIds?.has(s.id) ? undefined : iconFor(s),
-    unread: unreadById.get(s.id),
+    // An archived row carries no unread state (`isBadgeableUnread`): the
+    // archive is where things go to stop asking for attention.
+    unread: s.archivedAt != null ? undefined : unreadById.get(s.id),
+    archivedMarker: s.archivedAt != null && markArchivedRows,
     settleFlash:
       settled?.id === s.id ? { nonce: settled.nonce, holdMs: settled.holdMs } : undefined,
     folders,
@@ -3656,7 +3948,7 @@ function ConversationSectionsImpl({
     onJumpToParent,
     extraActions,
     runStatus: runStatusById?.get(s.id),
-    isUnread: unreadIds.has(s.id),
+    isUnread: s.archivedAt == null && unreadIds.has(s.id),
     tabbable: s.id === tabStopId,
     onRowFocus,
   })
@@ -3716,7 +4008,8 @@ function ConversationSectionsImpl({
 
   // Dragging an unpinned row while nothing is pinned: there is no Pinned
   // header to drop on yet, so the list offers one for the length of the drag.
-  const pinDropEnabled = Boolean(onTogglePinned) && !searching && !scopeTree?.archived
+  // Never in the archive: an archived row's pin is frozen (ADR-0213).
+  const pinDropEnabled = Boolean(onTogglePinned) && !searching && !archivedView
   const showPinDropZone =
     pinDropEnabled &&
     activeDragSession !== null &&
@@ -3743,6 +4036,9 @@ function ConversationSectionsImpl({
               last={folderIds[folderIds.length - 1] === folder.id}
               autoRename={renamingFolderId === folder.id}
               onRenameSettled={onFolderRenameSettled}
+              onSelectConversations={
+                onSelectSection ? () => onSelectSection(`folder:${folder.id}`) : undefined
+              }
               sortable={reorderable}
               renderRow={renderSortableRow}
               rowsProps={rowsProps}
@@ -3780,10 +4076,13 @@ function ConversationSectionsImpl({
                 dateRuns={section.dateRuns}
                 previewHidden={section.previewHidden ?? 0}
                 previewExpanded={teamGroupPreviewExpanded(section, scopeTree.previewExpanded)}
+                archived={scopeTree.archived}
                 unreadCount={
-                  chatsGroup
-                    ? scopeTree.unreadDm
-                    : (scopeTree.unreadTeams.get(section.group.id) ?? 0)
+                  scopeTree.archived
+                    ? 0
+                    : chatsGroup
+                      ? scopeTree.unreadDm
+                      : (scopeTree.unreadTeams.get(section.group.id) ?? 0)
                 }
                 onToggle={() => onToggleGroup(key, !section.collapsed)}
                 onTogglePreview={() => scopeTree.onTogglePreview(key)}
@@ -3794,6 +4093,7 @@ function ConversationSectionsImpl({
                 }
                 muted={!chatsGroup && scopeTree.mutedTeamIds.has(section.group.id)}
                 unreadScope={scopeTree.unreadScope}
+                onSelectConversations={() => scopeTree.onSelectSection(key)}
                 sortable={reorderable}
                 renderRow={renderSortableRow}
                 rowsProps={rowsProps}
@@ -4271,6 +4571,7 @@ function ScopeTreeGroupSection({
   dateRuns,
   previewHidden,
   previewExpanded,
+  archived = false,
   unreadCount,
   onToggle,
   onTogglePreview,
@@ -4279,6 +4580,7 @@ function ScopeTreeGroupSection({
   teamPosition,
   muted = false,
   unreadScope,
+  onSelectConversations,
   sortable,
   renderRow,
   rowsProps,
@@ -4300,6 +4602,12 @@ function ScopeTreeGroupSection({
   previewHidden: number
   /** The cap was lifted AND the group is long enough that it matters. */
   previewExpanded: boolean
+  /**
+   * The list is browsing the archive: the header neither starts a
+   * conversation (a new one would land in the active list, out of sight) nor
+   * offers to mark anything read (archived rows carry no unread state).
+   */
+  archived?: boolean
   unreadCount: number
   onToggle: () => void
   onTogglePreview: () => void
@@ -4310,6 +4618,8 @@ function ScopeTreeGroupSection({
   /** The squad is muted: its unread pill gives way to the muted glyph. */
   muted?: boolean
   unreadScope: GuildUnreadScope
+  /** Select every conversation in the group, past its "Show more" cut too. */
+  onSelectConversations: () => void
   sortable: boolean
   renderRow: (s: ChatSession) => ReactNode
   rowsProps: SectionRowsProps
@@ -4445,8 +4755,11 @@ function ScopeTreeGroupSection({
             <GuildScopeMenuItems
               teamId={null}
               unreadCount={unreadCount}
-              onNewConversation={onNewConversation}
+              onNewConversation={archived ? undefined : onNewConversation}
+              showMarkRead={!archived}
               unreadScope={unreadScope}
+              onSelectConversations={onSelectConversations}
+              selectConversationsDisabled={total === 0}
             />
           </ContextMenuContent>
         </ContextMenu>
@@ -4500,28 +4813,30 @@ function ScopeTreeGroupSection({
                   </span>
                 </Button>
               </CollapsibleTrigger>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                // The header is the drag handle — without this, pressing "+"
-                // would arm a group drag.
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onNewConversation(scopeTeamId)
-                }}
-                aria-label={newLabel}
-                title={newLabel}
-                data-testid={`sidebar-scope-new-${scopeKey}`}
-                className={cn(
-                  "size-5 shrink-0 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground",
-                  HOVER_REVEAL_CONTROL_BASE_CLASS,
-                  "group-hover/scope-head:opacity-100"
-                )}
-              >
-                <PlusIcon className="size-3.5" />
-              </Button>
+              {archived ? null : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  // The header is the drag handle — without this, pressing "+"
+                  // would arm a group drag.
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onNewConversation(scopeTeamId)
+                  }}
+                  aria-label={newLabel}
+                  title={newLabel}
+                  data-testid={`sidebar-scope-new-${scopeKey}`}
+                  className={cn(
+                    "size-5 shrink-0 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground",
+                    HOVER_REVEAL_CONTROL_BASE_CLASS,
+                    "group-hover/scope-head:opacity-100"
+                  )}
+                >
+                  <PlusIcon className="size-3.5" />
+                </Button>
+              )}
               {muted ? (
                 <GuildMutedGlyph testId={`sidebar-scope-muted-${scopeKey}`} />
               ) : (
@@ -4553,10 +4868,13 @@ function ScopeTreeGroupSection({
             <GuildScopeMenuItems
               teamId={scopeTeamId}
               unreadCount={unreadCount}
-              onNewConversation={onNewConversation}
+              onNewConversation={archived ? undefined : onNewConversation}
+              showMarkRead={!archived}
               onMoveTeam={onMoveTeam}
               teamPosition={teamPosition}
               unreadScope={unreadScope}
+              onSelectConversations={onSelectConversations}
+              selectConversationsDisabled={total === 0}
             />
           </ContextMenuContent>
         </ContextMenu>
@@ -4585,6 +4903,7 @@ function FolderSection({
   last,
   autoRename,
   onRenameSettled,
+  onSelectConversations,
   sortable,
   renderRow,
   rowsProps,
@@ -4602,6 +4921,8 @@ function FolderSection({
   /** Open the name for editing right away (a folder just created here). */
   autoRename?: boolean
   onRenameSettled?: (id: string) => void
+  /** Select every conversation in the folder (selection mode). */
+  onSelectConversations?: () => void
   sortable: boolean
   renderRow: (s: ChatSession) => ReactNode
   rowsProps: SectionRowsProps
@@ -4634,6 +4955,7 @@ function FolderSection({
           last={last}
           autoRename={autoRename}
           onRenameSettled={onRenameSettled}
+          onSelectConversations={onSelectConversations}
         />
         <CollapsibleContent className="overflow-hidden pt-0.5 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
           <SectionRows
@@ -4665,6 +4987,7 @@ function FolderSectionHeader({
   last = false,
   autoRename = false,
   onRenameSettled,
+  onSelectConversations,
 }: {
   /** The folder's drop target (`useDroppable`) — this header is it. */
   nodeRef?: (el: HTMLElement | null) => void
@@ -4680,12 +5003,23 @@ function FolderSectionHeader({
   last?: boolean
   autoRename?: boolean
   onRenameSettled?: (id: string) => void
+  /** Select every conversation in the folder (selection mode). */
+  onSelectConversations?: () => void
 }) {
   const t = useTranslations("desktop.channelList")
   // A just-created folder mounts straight into its editor, with the
   // placeholder name selected so typing replaces it.
   const [editing, setEditing] = useState(autoRename)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // …or opens it once asked, if it mounted first: the live query can deliver
+  // the new folder's row before the request to name it lands (a folder made
+  // for a selection is filed into before it is named), and reading the flag
+  // at mount alone left that folder sitting under its placeholder name.
+  const [prevAutoRename, setPrevAutoRename] = useState(autoRename)
+  if (autoRename !== prevAutoRename) {
+    setPrevAutoRename(autoRename)
+    if (autoRename) setEditing(true)
+  }
 
   const settle = () => {
     setEditing(false)
@@ -4701,123 +5035,210 @@ function FolderSectionHeader({
     onCancel: settle,
   })
 
-  return (
-    <div
-      ref={nodeRef}
-      className={cn(
-        "group/folder flex h-7 items-center gap-0.5 rounded-md px-1 pb-0.5",
-        STICKY_SECTION_HEADER,
-        dropActive && HEADER_DROP_CUE
-      )}
-      data-drop-active={dropActive || undefined}
-    >
-      {editing ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 text-muted-foreground">
-          <SectionChevron collapsed={collapsed} />
-          <FolderIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
-          <Input
-            // Focused with the name selected, so the first keystroke replaces
-            // a new folder's placeholder (`useInlineRename`).
-            {...rename.inputProps}
-            className="h-5 px-1 py-0 text-[11px]"
-            aria-label={t("renameFolder")}
-          />
-        </div>
-      ) : (
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className={SECTION_TRIGGER_CLASS}
-            aria-label={folder.name}
-          >
-            <SectionChevron collapsed={collapsed} />
-            <FolderIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
-            <span className={SECTION_LABEL_CLASS}>{folder.name}</span>
-            {count > 0 ? <span className={SECTION_COUNT_CLASS}>{count}</span> : null}
-          </Button>
-        </CollapsibleTrigger>
-      )}
-      {(onRename || onDelete || onMove) && !editing ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "size-6 shrink-0 text-muted-foreground",
-                HOVER_REVEAL_CONTROL_BASE_CLASS,
-                "group-hover/folder:opacity-100"
-              )}
-              aria-label={t("folderActions")}
-            >
-              <MoreHorizontalIcon className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {onMove ? (
-              <>
-                <DropdownMenuItem
-                  disabled={first}
-                  onSelect={() => onMove(folder.id, -1)}
-                  data-testid={`folder-move-up-${folder.id}`}
-                >
-                  <ArrowUpIcon className="mr-2 size-4" />
-                  {t("moveFolderUp")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={last}
-                  onSelect={() => onMove(folder.id, 1)}
-                  data-testid={`folder-move-down-${folder.id}`}
-                >
-                  <ArrowDownIcon className="mr-2 size-4" />
-                  {t("moveFolderDown")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            {onRename ? (
-              <DropdownMenuItem onSelect={() => setEditing(true)}>
-                <PencilIcon className="mr-2 size-4" />
-                {t("renameFolder")}
-              </DropdownMenuItem>
-            ) : null}
-            {onDelete ? (
-              <DropdownMenuItem
-                onSelect={() => setConfirmOpen(true)}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2Icon className="mr-2 size-4" />
-                {t("deleteFolder")}
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+  const hasMenu = Boolean(onRename || onDelete || onMove || onSelectConversations)
+  // One item list for the ⋯ button and the right-click menu, as the rows and
+  // the squad headers have — a folder header was the one section header a
+  // right-click did nothing on.
+  const menuItemsProps: Omit<FolderMenuItemsProps, "kit" | "surface"> = {
+    folderId: folder.id,
+    count,
+    first,
+    last,
+    onSelectConversations,
+    onMove,
+    // Opened once the menu has closed. A context menu traps focus while it is
+    // up and hands it back to its trigger — this header, which stays mounted —
+    // as it goes; a field focused before that was blurred straight away, and a
+    // blur commits, so the rename ended the moment it began.
+    onRename: onRename ? () => setTimeout(() => setEditing(true), 0) : undefined,
+    onDelete: onDelete ? () => setConfirmOpen(true) : undefined,
+  }
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("deleteFolderConfirmTitle", { name: folder.name })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>{t("deleteFolderConfirmBody")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
-            <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              className={buttonVariants({ variant: "destructive", className: "w-full sm:w-auto" })}
-              onClick={() => {
-                setConfirmOpen(false)
-                void onDelete?.(folder.id)
-              }}
-            >
-              {t("deleteFolder")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={editing || !hasMenu}>
+        <div
+          ref={nodeRef}
+          className={cn(
+            "group/folder flex h-7 items-center gap-0.5 rounded-md px-1 pb-0.5",
+            STICKY_SECTION_HEADER,
+            dropActive && HEADER_DROP_CUE
+          )}
+          data-drop-active={dropActive || undefined}
+          data-testid={`folder-header-${folder.id}`}
+        >
+          {editing ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 text-muted-foreground">
+              <SectionChevron collapsed={collapsed} />
+              <FolderIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+              <Input
+                // Focused with the name selected, so the first keystroke replaces
+                // a new folder's placeholder (`useInlineRename`).
+                {...rename.inputProps}
+                className="h-5 px-1 py-0 text-[11px]"
+                aria-label={t("renameFolder")}
+              />
+            </div>
+          ) : (
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className={SECTION_TRIGGER_CLASS}
+                aria-label={folder.name}
+              >
+                <SectionChevron collapsed={collapsed} />
+                <FolderIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+                <span className={SECTION_LABEL_CLASS}>{folder.name}</span>
+                {count > 0 ? <span className={SECTION_COUNT_CLASS}>{count}</span> : null}
+              </Button>
+            </CollapsibleTrigger>
+          )}
+          {hasMenu && !editing ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "size-6 shrink-0 text-muted-foreground",
+                    HOVER_REVEAL_CONTROL_BASE_CLASS,
+                    "group-hover/folder:opacity-100"
+                  )}
+                  aria-label={t("folderActions")}
+                >
+                  <MoreHorizontalIcon className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <FolderMenuItems kit={DROPDOWN_MENU_KIT} surface="dropdown" {...menuItemsProps} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {t("deleteFolderConfirmTitle", { name: folder.name })}
+                </AlertDialogTitle>
+                <AlertDialogDescription>{t("deleteFolderConfirmBody")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
+                <AlertDialogCancel className="w-full sm:w-auto">{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction
+                  className={buttonVariants({
+                    variant: "destructive",
+                    className: "w-full sm:w-auto",
+                  })}
+                  onClick={() => {
+                    setConfirmOpen(false)
+                    void onDelete?.(folder.id)
+                  }}
+                >
+                  {t("deleteFolder")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52" data-testid={`folder-context-menu-${folder.id}`}>
+        <FolderMenuItems kit={CONTEXT_MENU_KIT} surface="context" {...menuItemsProps} />
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+interface FolderMenuItemsProps {
+  kit: MenuKit
+  /** Keeps the two renders' test ids apart. */
+  surface: "dropdown" | "context"
+  folderId: string
+  /** Conversations in the folder — nothing to select in an empty one. */
+  count: number
+  first: boolean
+  last: boolean
+  onSelectConversations?: () => void
+  onMove?: (id: string, delta: -1 | 1) => void
+  onRename?: () => void
+  onDelete?: () => void
+}
+
+/**
+ * A folder header's actions, in the order every surface offers them: act on
+ * what is inside it, then where it sits, then the folder itself.
+ */
+function FolderMenuItems({
+  kit,
+  surface,
+  folderId,
+  count,
+  first,
+  last,
+  onSelectConversations,
+  onMove,
+  onRename,
+  onDelete,
+}: FolderMenuItemsProps) {
+  const t = useTranslations("desktop.channelList")
+  const { Item, Separator } = kit
+  // The dropdown keeps the ids it always had; the context menu gets its own.
+  const testId = (name: string) =>
+    surface === "dropdown" ? `folder-${name}-${folderId}` : `folder-context-${name}-${folderId}`
+  return (
+    <>
+      {onSelectConversations ? (
+        <>
+          <Item
+            disabled={count === 0}
+            onSelect={onSelectConversations}
+            data-testid={testId("select")}
+          >
+            <ListChecksIcon className="mr-2 size-4" />
+            {t("selectConversationsHere")}
+          </Item>
+          {onMove || onRename || onDelete ? <Separator /> : null}
+        </>
+      ) : null}
+      {onMove ? (
+        <>
+          <Item
+            disabled={first}
+            onSelect={() => onMove(folderId, -1)}
+            data-testid={testId("move-up")}
+          >
+            <ArrowUpIcon className="mr-2 size-4" />
+            {t("moveFolderUp")}
+          </Item>
+          <Item
+            disabled={last}
+            onSelect={() => onMove(folderId, 1)}
+            data-testid={testId("move-down")}
+          >
+            <ArrowDownIcon className="mr-2 size-4" />
+            {t("moveFolderDown")}
+          </Item>
+          {onRename || onDelete ? <Separator /> : null}
+        </>
+      ) : null}
+      {onRename ? (
+        <Item onSelect={onRename} data-testid={testId("rename")}>
+          <PencilIcon className="mr-2 size-4" />
+          {t("renameFolder")}
+        </Item>
+      ) : null}
+      {onDelete ? (
+        <Item
+          onSelect={onDelete}
+          className="text-destructive focus:text-destructive"
+          data-testid={testId("delete")}
+        >
+          <Trash2Icon className="mr-2 size-4" />
+          {t("deleteFolder")}
+        </Item>
+      ) : null}
+    </>
   )
 }

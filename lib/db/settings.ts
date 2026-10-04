@@ -271,6 +271,9 @@ export const DEFAULTS: AppSettings = {
     titleMotion: "hover",
     filterPresets: [],
   },
+  // Auto-archive is off until the user picks a period (ADR-0213). Named here
+  // so `changed-settings` and the section reset see the key, not an absence.
+  conversationArchive: { autoArchiveAfterDays: null },
   // Token-level streaming for interactive chat — on by default.
   streamPartialMessages: true,
   // Appearance slice (ADR-0029 / ADR-0114 / ADR-0127). `DEFAULT_APPEARANCE_SLICE`

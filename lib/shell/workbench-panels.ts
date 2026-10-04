@@ -72,6 +72,7 @@ export const WORKBENCH_PANEL_CATALOG: readonly WorkbenchPanelCatalogItem[] = [
   { id: "memory", activity: "inspect", labelKey: "contextWorkbench.memoryPanel.title" },
   { id: "run-context", activity: "inspect", labelKey: "contextWorkbench.runContext.title" },
   { id: "session-sources", activity: "inspect", labelKey: "contextWorkbench.sessionSources.title" },
+  { id: "session-usage", activity: "inspect", labelKey: "contextWorkbench.sessionUsage.title" },
   { id: "logs", activity: "inspect", labelKey: "contextWorkbench.logsPanel.title" },
 ] as const
 

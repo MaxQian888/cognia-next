@@ -22,6 +22,11 @@ import { openUpdateCenter } from "@/lib/updates/open-update-center"
 import { getUpdateCoordinator, readUpdateCenterSettings } from "@/lib/updates/runtime"
 import { resolveUpdateSettings } from "@/lib/tauri/updater"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { isNativeMobile } from "@/lib/platform/detect"
+import { detectOsFamily } from "@/lib/platform/os"
+import { subscribeResume } from "@/lib/capacitor/app"
+import { getAppUpdateInfo, subscribeFlexibleUpdateDownloaded } from "@/lib/capacitor/app-update"
+import { getGooglePlayServicesStatus } from "@/lib/capacitor/google-play-services"
 
 /**
  * Squash the boot storm. Settings hydration, locale load and StrictMode's
@@ -45,6 +50,76 @@ export function UpdateCenterInitializer() {
   useEffect(() => {
     tRef.current = t
   }, [t])
+
+  useEffect(() => {
+    if (!isNativeMobile() || detectOsFamily() !== "android") return
+    let cancelled = false
+    let checking = false
+    let checkPending = false
+    let readyVersion: string | null = null
+    const subscriptions: (() => void)[] = []
+    const retain = (remove: () => void) => {
+      if (cancelled) remove()
+      else subscriptions.push(remove)
+    }
+    const refreshDownloaded = async () => {
+      if (cancelled) return
+      if (checking) {
+        checkPending = true
+        return
+      }
+      checking = true
+      try {
+        if (!(await getGooglePlayServicesStatus()).available || cancelled) return
+        const info = await getAppUpdateInfo()
+        if (cancelled || info.kind !== "ok") return
+        if (!info.value.downloaded) {
+          readyVersion = null
+          return
+        }
+        // Reuse the coordinator and its consented Install action. This path
+        // only discovers readiness; neither resume nor a native event installs.
+        const rows = await getUpdateCoordinator().check({ kind: "mobile-android", manual: false })
+        if (cancelled) return
+        const ready = rows.find(
+          (row) =>
+            row.kind === "mobile-android" &&
+            row.candidate?.source === "store" &&
+            row.candidate.action === "install-in-app"
+        )
+        if (!ready?.candidate || readyVersion === ready.candidate.targetVersion) return
+        readyVersion = ready.candidate.targetVersion
+        toast.success(tRef.current("state.awaiting-restart"), {
+          action: {
+            label: tRef.current("toast.open"),
+            onClick: () => openUpdateCenter({ focusKey: ready.key }),
+          },
+        })
+      } catch (error) {
+        loggers.app.debug("updates.resumeCheckFailed", { error: String(error) })
+      } finally {
+        checking = false
+        if (checkPending) {
+          checkPending = false
+          void refreshDownloaded()
+        }
+      }
+    }
+    void (async () => {
+      if (!(await getGooglePlayServicesStatus()).available || cancelled) return
+      await Promise.all([
+        subscribeResume(() => void refreshDownloaded()).then(retain),
+        subscribeFlexibleUpdateDownloaded(() => void refreshDownloaded()).then(retain),
+      ])
+      await refreshDownloaded()
+    })().catch((error) =>
+      loggers.app.debug("updates.resumeListenerFailed", { error: String(error) })
+    )
+    return () => {
+      cancelled = true
+      for (const remove of subscriptions) remove()
+    }
+  }, [])
 
   useEffect(() => {
     if (process.env.NODE_ENV === "development") return

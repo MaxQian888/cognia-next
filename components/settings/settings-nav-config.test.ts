@@ -128,6 +128,13 @@ describe("settings-nav-config", () => {
     it("finds the SSH host editor under the terminal section", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "terminal")!
       expect(isSearchMatch(item, "ssh", t)).toBe(true)
+      expect(isSearchMatch(item, "bastion", t)).toBe(true)
+      expect(isSearchMatch(item, "端口转发", t)).toBe(true)
+    })
+
+    it("does not offer Connectivity for SSH, which it has no settings for", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "connectivity")!
+      expect(isSearchMatch(item, "ssh", t)).toBe(false)
     })
 
     it("matches webhook keywords without advertising the deleted inbound listener", () => {

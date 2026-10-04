@@ -19,33 +19,31 @@ import { PerfMetricTile } from "@/components/performance/perf-metric-tile"
 import { PerfSparkline } from "@/components/performance/perf-sparkline"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
 import { formatBytes } from "@/lib/perf/backend/format"
+import { perfDashboardHref } from "@/lib/perf/dashboard-url"
 
 export function StatusBarPerf() {
   const t = useTranslations("desktop.statusBar")
   const router = useRouter()
   const { history, latest, available } = usePerfStream()
 
+  // Until the host lease delivers its first frame the stream falls back to
+  // Renderer frames, which carry no processes. Their Tokio/memory fields are
+  // structural zeros, so an unmeasured interval is a gap and the readout is
+  // "—" rather than a confident "0%".
   const cpuSeries = useMemo(
-    () =>
-      history.map((s) => s.processes.find((p) => p.role === "main")?.cpuPct ?? s.runtime.busyPct),
+    () => history.map((s) => s.processes.find((p) => p.role === "main")?.cpuPct ?? null),
     [history]
   )
   const memSeries = useMemo(
-    () =>
-      history.map(
-        (s) =>
-          s.processes.find((p) => p.role === "main")?.memBytes ?? s.systemMemory?.usedBytes ?? 0
-      ),
+    () => history.map((s) => s.processes.find((p) => p.role === "main")?.memBytes ?? null),
     [history]
   )
 
   if (!available) return null
 
   const main = latest?.processes.find((p) => p.role === "main") ?? null
-  const cpuPct = main ? main.cpuPct : (latest?.runtime.busyPct ?? 0)
-  const memBytes = main ? main.memBytes : (latest?.systemMemory?.usedBytes ?? 0)
-  const cpuText = `${Math.round(cpuPct)}%`
-  const memText = formatBytes(memBytes, 0)
+  const cpuText = main ? `${Math.round(main.cpuPct)}%` : "—"
+  const memText = main ? formatBytes(main.memBytes, 0) : "—"
 
   return (
     <Popover>
@@ -68,7 +66,9 @@ export function StatusBarPerf() {
           points={cpuSeries}
           color="currentColor"
           active={false}
-          onSelect={() => router.push("/performance")}
+          onSelect={() =>
+            router.push(perfDashboardHref({ tab: "overview", metric: "host.main.cpu-pct" }))
+          }
           data-testid="status-perf-cpu"
         />
         <PerfMetricTile
@@ -77,7 +77,9 @@ export function StatusBarPerf() {
           points={memSeries}
           color="currentColor"
           active={false}
-          onSelect={() => router.push("/performance")}
+          onSelect={() =>
+            router.push(perfDashboardHref({ tab: "overview", metric: "host.main.memory-bytes" }))
+          }
           data-testid="status-perf-mem"
         />
       </PopoverContent>

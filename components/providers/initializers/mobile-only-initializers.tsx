@@ -6,6 +6,7 @@ import { useEffect, useSyncExternalStore } from "react"
 import { isMobile } from "@/lib/capacitor/_shared"
 import { registerNativePlugins } from "@/lib/capacitor/register-plugins"
 import { hide } from "@/lib/capacitor/splash-screen"
+import { startCameraRecovery } from "@/lib/capacitor/camera-recovery"
 
 /**
  * Mounted above AccountGate: a loading, locked, recovery or onboarding screen
@@ -14,17 +15,21 @@ import { hide } from "@/lib/capacitor/splash-screen"
  * as a fallback if this early attempt cannot reach the native bridge.
  */
 export function MobileNativeSplashInitializer() {
+  const isClient = useIsClient()
   useEffect(() => {
     if (!isMobile()) return
     let cancelled = false
     void registerNativePlugins().then((result) => {
-      if (!cancelled && result.kind === "registered") void hide(180)
+      if (!cancelled && result.kind === "registered") {
+        void startCameraRecovery().catch(() => undefined)
+        void hide(180)
+      }
     })
     return () => {
       cancelled = true
     }
   }, [])
-  return null
+  return isClient && isMobile() ? <BarcodeScannerOverlay /> : null
 }
 
 /**
@@ -63,11 +68,29 @@ const AppSplash = dynamic(
   { ssr: false }
 )
 
+const BarcodeScannerOverlay = dynamic(
+  () => import("@/components/mobile/barcode-scanner-overlay").then((m) => m.BarcodeScannerOverlay),
+  { ssr: false }
+)
+
+// Opt-in automatic crash-report submission (ADR-0102): the phone has a
+// submission path through the crash plugin, so the switch works here too.
+const DiagnosticAutoSubmitInitializer = dynamic(
+  () =>
+    import("./diagnostic-auto-submit-initializer").then((m) => m.DiagnosticAutoSubmitInitializer),
+  { ssr: false }
+)
+
 export function MobileOnlyInitializers() {
   const isClient = useIsClient()
   if (!isClient || !isMobile()) return null
 
-  return <AppSplash />
+  return (
+    <>
+      <AppSplash />
+      <DiagnosticAutoSubmitInitializer />
+    </>
+  )
 }
 
 export default MobileOnlyInitializers

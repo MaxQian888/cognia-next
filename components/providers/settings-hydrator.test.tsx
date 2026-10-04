@@ -86,6 +86,42 @@ describe("SettingsHydrator", () => {
     expect(typeof mirror["--accent"]).toBe("string")
   })
 
+  it("mirrors the full palette, so the account gate screens match the themed app", async () => {
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "ocean",
+      activeCustomThemeId: null,
+    })
+    render(<SettingsHydrator />)
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).not.toBeNull()
+    })
+    const mirror = JSON.parse(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY) ?? "{}") as {
+      palette?: Record<string, string>
+    }
+    for (const cssVar of ["--card", "--muted", "--muted-foreground", "--input", "--border"]) {
+      expect(typeof mirror.palette?.[cssVar]).toBe("string")
+    }
+  })
+
+  it("mirrors the palette for an a11y override even on the default preset", async () => {
+    useSettingsStore.setState({
+      settings: { id: "singleton", a11y: { highContrast: "dark" } } as never,
+      loaded: true,
+      colorTheme: "default",
+      activeCustomThemeId: null,
+    })
+    render(<SettingsHydrator />)
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).not.toBeNull()
+    })
+    const mirror = JSON.parse(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY) ?? "{}") as {
+      palette?: Record<string, string>
+    }
+    expect(typeof mirror.palette?.["--background"]).toBe("string")
+  })
+
   it("does not write the mirror for the default preset, and clears any stale one", async () => {
     // Seed a stale mirror as if a custom theme had previously been active.
     window.localStorage.setItem(

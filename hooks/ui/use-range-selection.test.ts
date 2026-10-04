@@ -82,6 +82,38 @@ describe("useRangeSelection", () => {
     expect(result.current.lastInteractionWasModified).toBe(true)
   })
 
+  it("selectIds replaces the selection and parks the anchor on the last id", () => {
+    const { result } = renderHook(() => useRangeSelection(["a", "b", "c", "d"]))
+    act(() => result.current.handleClick("a", CTRL))
+    act(() => result.current.selectIds(["c", "d"]))
+    expect(ids(result.current.selected)).toEqual(["c", "d"])
+    expect(result.current.anchorId).toBe("d")
+    expect(result.current.lastInteractionWasModified).toBe(true)
+    // A Shift-click extends from that anchor.
+    act(() => result.current.handleClick("b", SHIFT))
+    expect(ids(result.current.selected)).toEqual(["b", "c", "d"])
+  })
+
+  it("selectIds keeps rows that are not on screen yet, and shows them once they are", () => {
+    // A folded section's rows: picked while folded, shown once it unfolds.
+    const { result, rerender } = renderHook(({ orderedIds }) => useRangeSelection(orderedIds), {
+      initialProps: { orderedIds: ["a"] as readonly string[] },
+    })
+    act(() => result.current.selectIds(["b", "c"]))
+    expect(ids(result.current.selected)).toEqual([])
+    rerender({ orderedIds: ["a", "b", "c"] })
+    expect(ids(result.current.selected)).toEqual(["b", "c"])
+    expect(result.current.anchorId).toBe("c")
+  })
+
+  it("selectIds with nothing empties the selection and the anchor", () => {
+    const { result } = renderHook(() => useRangeSelection(["a", "b"]))
+    act(() => result.current.selectIds(["a"]))
+    act(() => result.current.selectIds([]))
+    expect(ids(result.current.selected)).toEqual([])
+    expect(result.current.anchorId).toBeNull()
+  })
+
   it("clear empties the selection and resets the anchor", () => {
     const { result } = renderHook(() => useRangeSelection(["a", "b", "c"]))
     act(() => result.current.handleClick("a", CTRL))

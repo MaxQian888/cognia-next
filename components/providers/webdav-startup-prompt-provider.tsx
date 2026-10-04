@@ -53,7 +53,7 @@ export function WebDavStartupPromptProvider({ children }: { children: React.Reac
       else unsubs.push(u)
     })
     void subscribeNetwork((status) => {
-      if (status.connected) debouncedCheck()
+      if (status.connected || status.connectionType === "wifi") debouncedCheck()
     }).then((u) => {
       if (disposed) u()
       else unsubs.push(u)

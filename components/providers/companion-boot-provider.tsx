@@ -66,6 +66,8 @@ import {
 } from "@/lib/companion/capability-reporter"
 import { installRemoteStepServer } from "@/lib/companion/remote-step-server"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import type { ConnectionState, TransportTier } from "@/lib/tauri/transport-companion"
+import { createWakeableSleep, waitForHostManifest } from "@/lib/companion/host-manifest-retry"
 import { getSettings } from "@/lib/db/settings"
 import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { installHostStateSyncForTarget } from "@/lib/sync/host-state-service"
@@ -347,6 +349,8 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         targetId: config.targetId,
       })
       if (isStale()) return
+      // Local only (Dexie upsert + a digest), so unlike the manifest below
+      // there is no link to wait for here.
       if (!registeredTarget) {
         endMobileBootStage("host", { status: "failed", detail: "offline" })
         skipMobileBootStagesAfter("host")
@@ -356,20 +360,35 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       }
       addHostCleanup(registerRuntimeTargetSubscriptionStopper(stopHostBindings))
 
-      try {
+      // The splash waits for the host outcome, never for the retry loop below:
+      // the first failed manifest settles the boot as offline exactly once, and
+      // the retries keep running behind it.
+      let hostStageSettled = false
+      const settleHostStageOffline = () => {
+        if (hostStageSettled) return
+        hostStageSettled = true
+        endMobileBootStage("host", { status: "failed", detail: "offline" })
+        skipMobileBootStagesAfter("host")
+        markMobileBootSettled()
+      }
+
+      const loadManifest = async (): Promise<boolean> => {
         const manifestValue = await transport.call("host_feature_manifest", {})
-        if (isStale()) return
+        if (isStale()) return false
         const manifest = parseHostFeatureManifest(manifestValue)
         const host = runtimeHostSnapshotFromManifest(manifestValue, {
           hostStateWriteEnabled: false,
         })
         updateRuntimeSnapshot({ host })
         if (!host.compatible) {
+          // Also replaces an earlier `offline` outcome: a Host that answered
+          // and needs an update is the more useful thing to show.
+          hostStageSettled = true
           endMobileBootStage("host", { status: "failed", detail: "incompatible" })
           skipMobileBootStagesAfter("host")
           markMobileBootSettled()
           updateRuntimeSnapshot({ connectionState: "offline" })
-          return
+          return false
         }
         if (manifest?.features["session.state-sync"]?.version === 1) {
           // See the web provider: the Host owns the host-state namespace and
@@ -382,7 +401,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
           })
           if (isStale()) {
             hostStateSync.stop()
-            return
+            return false
           }
           addHostCleanup(() => hostStateSync.stop())
           updateRuntimeSnapshot({ host: runtimeHostSnapshotFromManifest(manifestValue) })
@@ -390,68 +409,154 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
             remoteEventResyncCoordinator.register("host-state", () => hostStateSync.resync())
           )
         }
-      } catch (error) {
-        if (!isStale()) {
-          endMobileBootStage("host", { status: "failed", detail: "offline" })
-          skipMobileBootStagesAfter("host")
-          markMobileBootSettled()
-          updateRuntimeSnapshot({ connectionState: "offline", host: undefined })
-          log.warn("companion: host manifest unavailable", {
+        return true
+      }
+
+      // A phone that opens without network fails its first manifest call
+      // because no carrier (relay, WebRTC, WS) is up yet. Giving up there left
+      // the snapshot "offline" for the rest of the session even after the link
+      // came back, since only a pairing change restarts these bindings. Retry
+      // on the shared schedule instead, and cut a wait short the moment the
+      // transport reports a usable link — the later backoff steps are long.
+      const retrySleep = createWakeableSleep()
+      const linkWatchers: Array<() => void> = []
+      const stopRetryWait = () => {
+        retrySleep.dispose()
+        for (const detach of linkWatchers.splice(0)) dispose(detach)
+      }
+      addHostCleanup(stopRetryWait)
+      const linkTransport = transport as Partial<LinkObservableTransport>
+      if (typeof linkTransport.onTierChange === "function") {
+        // Seeded with the current tier, so only a real offline → link
+        // transition wakes the wait.
+        let previousTier: TransportTier | null = null
+        linkWatchers.push(
+          linkTransport.onTierChange((tier) => {
+            if (previousTier === "offline" && tier !== "offline") retrySleep.wake()
+            previousTier = tier
+          })
+        )
+      }
+      if (
+        typeof linkTransport.onConnectionStateChange === "function" &&
+        typeof linkTransport.getConnectionState === "function"
+      ) {
+        let previousState = linkTransport.getConnectionState()
+        linkWatchers.push(
+          linkTransport.onConnectionStateChange((state) => {
+            if (state === "connected" && previousState !== "connected") retrySleep.wake()
+            previousState = state
+          })
+        )
+      }
+
+      // `start()` must not hold for the whole retry loop:
+      // `restartMobileHostBindings` shares one in-flight restart, so a pairing
+      // change during the wait would join this run instead of replacing it.
+      // Resolve once the first attempt has failed and keep linking behind it.
+      let reportFirstFailure: () => void = () => undefined
+      const firstFailure = new Promise<"retrying">((resolve) => {
+        reportFirstFailure = () => resolve("retrying")
+      })
+      const linkHost = async () => {
+        const outcome = await waitForHostManifest({
+          load: loadManifest,
+          isCancelled: isStale,
+          onRetry: ({ error, attempt, delayMs }) => {
+            reportFirstFailure()
+            settleHostStageOffline()
+            // "connecting", not "offline": the banner reads "reconnecting" while
+            // the retries run instead of declaring the Host gone.
+            updateRuntimeSnapshot({ connectionState: "connecting", host: undefined })
+            log.warn("companion: host manifest unavailable", {
+              error: error instanceof Error ? error.message : String(error),
+              attempt,
+              retryInMs: delayMs,
+            })
+          },
+          sleep: (ms) => retrySleep.sleep(ms),
+        })
+        stopRetryWait()
+        if (isStale()) return
+        if (outcome.kind === "refused") {
+          settleHostStageOffline()
+          updateRuntimeSnapshot({
+            connectionState: "offline",
+            host: { compatible: false, operations: [], grants: [] },
+          })
+          log.warn("companion: host refused the manifest", {
+            code: outcome.refusal.code,
+            error: outcome.refusal.message,
+          })
+          return
+        }
+        if (outcome.kind !== "loaded" || !outcome.value) return
+
+        addHostCleanup(
+          remoteEventResyncCoordinator.register("*", async () => {
+            await runSyncDown({ signal: syncAbort.signal })
+          })
+        )
+        // The host is linked: that is the outcome the splash waits for. The
+        // first sync is shown live but never holds the overlay — see `AppSplash`.
+        endMobileBootStage("host", { detail: "linked" })
+        markMobileBootSettled()
+        beginMobileBootStage("sync")
+        // After a recovered manifest the sync stage was already skipped, and
+        // reopening it un-settles the boot; the outcome is still known.
+        markMobileBootSettled()
+        try {
+          // The stage ends — and the phone goes online — once the `critical`
+          // tables have landed: preferences, characters, the chat list and its
+          // per-conversation state. Everything else keeps draining behind
+          // `whenComplete`, each stage after an idle wait, so a deep message
+          // history or a large memory store no longer holds the first screen.
+          await runStagedSyncDown({ signal: syncAbort.signal }).critical
+          if (isStale()) return
+          updateRuntimeSnapshot({ connectionState: "online" })
+          endMobileBootStage("sync", { detail: "synced" })
+        } catch (error) {
+          if (isStale()) return
+          endMobileBootStage("sync", { status: "failed", detail: "syncFailed" })
+          log.warn("companion: initial sync-down failed", {
             error: error instanceof Error ? error.message : String(error),
           })
         }
-        return
-      }
-
-      addHostCleanup(
-        remoteEventResyncCoordinator.register("*", async () => {
-          await runSyncDown({ signal: syncAbort.signal })
-        })
-      )
-      // The host is linked: that is the outcome the splash waits for. The
-      // first sync is shown live but never holds the overlay — see `AppSplash`.
-      endMobileBootStage("host", { detail: "linked" })
-      markMobileBootSettled()
-      beginMobileBootStage("sync")
-      try {
-        // The stage ends — and the phone goes online — once the `critical`
-        // tables have landed: preferences, characters, the chat list and its
-        // per-conversation state. Everything else keeps draining behind
-        // `whenComplete`, each stage after an idle wait, so a deep message
-        // history or a large memory store no longer holds the first screen.
-        await runStagedSyncDown({ signal: syncAbort.signal }).critical
         if (isStale()) return
-        updateRuntimeSnapshot({ connectionState: "online" })
-        endMobileBootStage("sync", { detail: "synced" })
-      } catch (error) {
-        if (isStale()) return
-        endMobileBootStage("sync", { status: "failed", detail: "syncFailed" })
-        log.warn("companion: initial sync-down failed", {
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-      if (isStale()) return
-      addHostCleanup(installForegroundSync())
-      addHostCleanup(installEventDrivenSync())
-      addHostCleanup(installWorkflowRunStatusSync())
-      addHostCleanup(await installNetworkSync())
-      addHostCleanup(await installResumeSync())
+        addHostCleanup(installForegroundSync())
+        addHostCleanup(installEventDrivenSync())
+        addHostCleanup(installWorkflowRunStatusSync())
+        addHostCleanup(await installNetworkSync())
+        addHostCleanup(await installResumeSync())
 
-      const reporterTransport = transport as Partial<CapabilityReporterTransport>
-      if (
-        typeof reporterTransport.call === "function" &&
-        typeof reporterTransport.getConnectionState === "function" &&
-        typeof reporterTransport.onConnectionStateChange === "function"
-      ) {
-        addHostCleanup(installCapabilityReporter(reporterTransport as CapabilityReporterTransport))
+        const reporterTransport = transport as Partial<CapabilityReporterTransport>
+        if (
+          typeof reporterTransport.call === "function" &&
+          typeof reporterTransport.getConnectionState === "function" &&
+          typeof reporterTransport.onConnectionStateChange === "function"
+        ) {
+          addHostCleanup(
+            installCapabilityReporter(reporterTransport as CapabilityReporterTransport)
+          )
+        }
+        addHostCleanup(
+          installRemoteStepServer({
+            transport,
+            getDeviceId: () => loadCompanionConfig()?.deviceId,
+          })
+        )
+        await registerAndReportPush()
       }
-      addHostCleanup(
-        installRemoteStepServer({
-          transport,
-          getDeviceId: () => loadCompanionConfig()?.deviceId,
+      const linking = linkHost()
+      const first = await Promise.race([linking.then(() => "linked" as const), firstFailure])
+      if (first === "retrying") {
+        linking.catch((error) => {
+          if (isStale()) return
+          log.warn("companion: Host bindings failed after the Host came back", {
+            error: error instanceof Error ? error.message : String(error),
+          })
         })
-      )
-      await registerAndReportPush()
+      }
     }
 
     const unregisterController = registerMobileHostBindingController({
@@ -590,4 +695,11 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   }, [platform])
 
   return <>{children}</>
+}
+
+/** The link observers of `CompanionTransport`; absent on other transports. */
+interface LinkObservableTransport {
+  onTierChange(handler: (tier: TransportTier) => void): () => void
+  getConnectionState(): ConnectionState
+  onConnectionStateChange(handler: (state: ConnectionState) => void): () => void
 }

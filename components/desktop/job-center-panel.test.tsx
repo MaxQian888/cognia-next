@@ -12,10 +12,10 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 const collectRendererBackgroundResult = jest.fn()
-const cancelRendererBackgroundRun = jest.fn()
+const cancelRendererBackgroundRunAndWait = jest.fn()
 jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
   collectRendererBackgroundResult: (runId: string) => collectRendererBackgroundResult(runId),
-  cancelRendererBackgroundRun: (runId: string) => cancelRendererBackgroundRun(runId),
+  cancelRendererBackgroundRunAndWait: (runId: string) => cancelRendererBackgroundRunAndWait(runId),
 }))
 
 const clearSettledBackgroundTasks = jest.fn()
@@ -107,7 +107,7 @@ beforeEach(() => {
   pushMock.mockReset()
   useClientLiveQuery.mockReset()
   collectRendererBackgroundResult.mockReset()
-  cancelRendererBackgroundRun.mockReset()
+  cancelRendererBackgroundRunAndWait.mockReset()
   clearSettledBackgroundTasks.mockReset()
   toastSuccess.mockReset()
   toastError.mockReset()
@@ -134,11 +134,12 @@ beforeEach(() => {
     toolsAvailable: false,
     runId: "run-done",
   })
-  cancelRendererBackgroundRun.mockReturnValue(true)
+  cancelRendererBackgroundRunAndWait.mockReturnValue(true)
   clearSettledBackgroundTasks.mockResolvedValue(undefined)
   redispatchBackgroundRun.mockReset()
   redispatchBackgroundRun.mockResolvedValue({ ok: true, runId: "new-run" })
   cancelSubagentRun.mockReset()
+  cancelSubagentRun.mockResolvedValue(true)
   managerCancelAgent.mockReset()
   managerCancelAgent.mockReturnValue(true)
   liveSubAgent = undefined
@@ -178,6 +179,18 @@ it("opens from the trigger and separates active runs from history", async () => 
   expect(screen.getByText("qa")).toBeInTheDocument()
 })
 
+// Compact sits among the mobile app bar's ghost icon buttons, so it takes their
+// tone and box; only the status-bar trigger stays muted.
+it("compact trigger matches the app bar's icon buttons", () => {
+  const { unmount } = render(<JobCenterPanel compact />)
+  const compact = screen.getByTestId("status-job-center")
+  expect(compact).toHaveClass("touch-target", "justify-center")
+  expect(compact).not.toHaveClass("text-muted-foreground")
+  unmount()
+  render(<JobCenterPanel />)
+  expect(screen.getByTestId("status-job-center")).toHaveClass("text-muted-foreground")
+})
+
 // On a phone the panel is a side sheet in the app bar: no swipe-to-dismiss, so
 // its close button, Escape and the Android back button are the ways out.
 it("closes from its close button, from Escape and from the Android back button", async () => {
@@ -207,7 +220,7 @@ it("collects, cancels, and clears settled renderer tasks", async () => {
 
   await user.click(screen.getByTestId("status-job-center"))
   await user.click(screen.getByTestId("job-cancel-run-live"))
-  expect(cancelRendererBackgroundRun).toHaveBeenCalledWith("run-live")
+  expect(cancelRendererBackgroundRunAndWait).toHaveBeenCalledWith("run-live")
   expect(toastSuccess).toHaveBeenCalled()
 
   await user.click(screen.getByRole("tab", { name: /History/ }))
@@ -242,7 +255,7 @@ it("surfaces collect and cancel failure states", async () => {
     row({ runId: "run-error", subagentId: "qa", status: "error", error: "stored error" }),
     row({ runId: "run-throw", subagentId: "ops", status: "done", resultText: "throws" }),
   ])
-  cancelRendererBackgroundRun.mockReturnValueOnce(false)
+  cancelRendererBackgroundRunAndWait.mockReturnValueOnce(false)
   collectRendererBackgroundResult
     .mockResolvedValueOnce(undefined)
     .mockResolvedValueOnce({
@@ -429,7 +442,7 @@ it("routes cancellation by kind and mode", async () => {
 
   await user.click(screen.getByTestId("job-cancel-run-fg"))
   expect(cancelSubagentRun).toHaveBeenCalledWith("run-fg")
-  expect(cancelRendererBackgroundRun).not.toHaveBeenCalled()
+  expect(cancelRendererBackgroundRunAndWait).not.toHaveBeenCalled()
 
   await user.click(screen.getByTestId("job-cancel-run-plugin"))
   expect(managerCancelAgent).toHaveBeenCalledWith("run-plugin")
@@ -565,4 +578,23 @@ describe("polling is scoped to the sheet", () => {
     })
     expect(listBackgroundJobs.mock.calls.length).toBeGreaterThanOrEqual(afterOpen + 2)
   })
+})
+
+it("waits for durable cancellation before showing a success toast", async () => {
+  let resolve!: (value: boolean) => void
+  cancelRendererBackgroundRunAndWait.mockReturnValueOnce(
+    new Promise<boolean>((done) => {
+      resolve = done
+    })
+  )
+  const user = userEvent.setup()
+  render(<JobCenterPanel />)
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByTestId("job-cancel-run-live"))
+  expect(toastSuccess).not.toHaveBeenCalled()
+  await act(async () => {
+    resolve(false)
+  })
+  expect(toastSuccess).not.toHaveBeenCalled()
+  expect(toastError).toHaveBeenCalled()
 })

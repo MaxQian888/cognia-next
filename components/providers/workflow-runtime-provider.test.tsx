@@ -299,6 +299,7 @@ describe("WorkflowRuntimeProvider", () => {
  */
 describe("WorkflowRuntimeProvider — root layout wiring", () => {
   const layoutSource = readFileSync(resolve(__dirname, "../../app/layout.tsx"), "utf8")
+  const runtimeSource = readFileSync(resolve(__dirname, "../runtime/app-runtime.tsx"), "utf8")
   const deferredSource = readFileSync(
     resolve(__dirname, "initializers/deferred-boot-initializers.tsx"),
     "utf8"
@@ -317,7 +318,9 @@ describe("WorkflowRuntimeProvider — root layout wiring", () => {
   it("is mounted exactly once through the root layout's deferred boot bundle", () => {
     expect(automationSource.match(/<WorkflowRuntimeProvider\b/g)).toHaveLength(1)
     expect(deferredSource).toMatch(/<WorkflowAutomationBootInitializers\b/)
-    expect(layoutSource).toMatch(/<DeferredBootInitializers\b/)
+    expect(layoutSource).toMatch(/<AppRuntime\b/)
+    expect(runtimeSource).toMatch(/<DeferredBootInitializers\b/)
+    expect(runtimeSource).not.toMatch(/<WorkflowRuntimeProvider\b/)
     expect(layoutSource).not.toMatch(/<WorkflowRuntimeProvider\b/)
   })
 })

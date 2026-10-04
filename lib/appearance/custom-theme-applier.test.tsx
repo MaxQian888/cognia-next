@@ -125,6 +125,23 @@ describe("CustomThemeApplier", () => {
     expect(html.style.getPropertyValue("--accent")).toBe("")
   })
 
+  it("clears a boot-mirrored full palette for the default theme, even on first run", async () => {
+    const html = document.documentElement
+    // The mirror now replays every token so the lock screen matches the app.
+    // A stale one must not outlive the first pass that resolves to default.
+    html.style.setProperty("--muted", "#222226")
+    html.style.setProperty("--input", "#333337")
+    html.style.setProperty("--card", "#111115")
+    await act(async () => {
+      render(<CustomThemeApplier />)
+    })
+    await waitFor(() => {
+      expect(html.style.getPropertyValue("--muted")).toBe("")
+    })
+    expect(html.style.getPropertyValue("--input")).toBe("")
+    expect(html.style.getPropertyValue("--card")).toBe("")
+  })
+
   it("writes every theme CSS variable on <html> with matching values when a custom theme is active", async () => {
     const theme = makeCustomTheme()
     useSettingsStore.setState({

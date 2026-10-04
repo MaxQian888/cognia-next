@@ -1,7 +1,32 @@
 /**
  * @jest-environment jsdom
  */
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
+
+const nativeMobile = jest.fn(() => false)
+const osFamily = jest.fn(() => "android")
+const playStatus = jest.fn(async () => ({ available: true }))
+const updateInfo = jest.fn(async () => ({ kind: "ok", value: { downloaded: false } }))
+const unsubscribeResume = jest.fn()
+const unsubscribeDownloaded = jest.fn()
+const resumeListener = jest.fn(
+  async (_handler: () => void): Promise<() => void> => unsubscribeResume
+)
+const downloadedListener = jest.fn(
+  async (_handler: () => void): Promise<() => void> => unsubscribeDownloaded
+)
+jest.mock("@/lib/platform/detect", () => ({ isNativeMobile: () => nativeMobile() }))
+jest.mock("@/lib/platform/os", () => ({ detectOsFamily: () => osFamily() }))
+jest.mock("@/lib/capacitor/google-play-services", () => ({
+  getGooglePlayServicesStatus: () => playStatus(),
+}))
+jest.mock("@/lib/capacitor/app", () => ({
+  subscribeResume: (handler: () => void) => resumeListener(handler),
+}))
+jest.mock("@/lib/capacitor/app-update", () => ({
+  getAppUpdateInfo: () => updateInfo(),
+  subscribeFlexibleUpdateDownloaded: (handler: () => void) => downloadedListener(handler),
+}))
 
 const toastSuccess = jest.fn()
 const toastWarning = jest.fn()
@@ -52,6 +77,14 @@ function row(criticality: "routine" | "critical", key = "desktop:app") {
 }
 
 beforeEach(() => {
+  nativeMobile.mockReturnValue(false)
+  osFamily.mockReturnValue("android")
+  playStatus.mockReset().mockResolvedValue({ available: true })
+  updateInfo.mockReset().mockResolvedValue({ kind: "ok", value: { downloaded: false } })
+  resumeListener.mockReset().mockResolvedValue(unsubscribeResume)
+  downloadedListener.mockReset().mockResolvedValue(unsubscribeDownloaded)
+  unsubscribeResume.mockClear()
+  unsubscribeDownloaded.mockClear()
   __resetUpdateSweepThrottle()
   coordinator.restore.mockClear()
   coordinator.check.mockClear()
@@ -69,6 +102,108 @@ afterAll(() => {
 })
 
 describe("UpdateCenterInitializer", () => {
+  it("rechecks downloaded updates on resume and native completion without installing", async () => {
+    nativeMobile.mockReturnValue(true)
+    updateSettings.autoCheck = false
+    center.notifyCritical = false
+    const ready = {
+      ...row("routine", "mobile-android:app"),
+      kind: "mobile-android",
+      candidate: {
+        targetVersion: "200",
+        action: "install-in-app",
+        source: "store",
+        criticality: "routine",
+      },
+    }
+    coordinator.check.mockResolvedValue([ready])
+    const { unmount } = render(<UpdateCenterInitializer />)
+    await waitFor(() => expect(updateInfo).toHaveBeenCalled())
+    expect(coordinator.check).not.toHaveBeenCalled()
+    updateInfo.mockResolvedValue({ kind: "ok", value: { downloaded: true } })
+    await act(async () => {
+      resumeListener.mock.calls[0][0]()
+    })
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith("Restart to finish", expect.any(Object))
+    )
+    expect(coordinator.check).toHaveBeenCalledWith({ kind: "mobile-android", manual: false })
+    const options = toastSuccess.mock.calls[0][1] as { action: { onClick: () => void } }
+    options.action.onClick()
+    expect(openUpdateCenter).toHaveBeenCalledWith({ focusKey: "mobile-android:app" })
+    await act(async () => {
+      downloadedListener.mock.calls[0][0]()
+    })
+    expect(toastSuccess).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(unsubscribeResume).toHaveBeenCalledTimes(1)
+    expect(unsubscribeDownloaded).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips native update probes and listeners without GMS", async () => {
+    nativeMobile.mockReturnValue(true)
+    playStatus.mockResolvedValue({ available: false })
+    render(<UpdateCenterInitializer />)
+    await waitFor(() => expect(playStatus).toHaveBeenCalled())
+    expect(updateInfo).not.toHaveBeenCalled()
+    expect(resumeListener).not.toHaveBeenCalled()
+    expect(downloadedListener).not.toHaveBeenCalled()
+  })
+
+  it("rechecks a completion event received while an older readiness probe is pending", async () => {
+    nativeMobile.mockReturnValue(true)
+    updateSettings.autoCheck = false
+    center.notifyCritical = false
+    let finish: ((value: { kind: string; value: { downloaded: boolean } }) => void) | undefined
+    updateInfo.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    updateInfo.mockResolvedValue({ kind: "ok", value: { downloaded: true } })
+    coordinator.check.mockResolvedValue([
+      {
+        key: "mobile-android:app",
+        kind: "mobile-android",
+        state: "available",
+        candidate: { source: "store", action: "install-in-app", targetVersion: "200" },
+      },
+    ])
+    render(<UpdateCenterInitializer />)
+    await waitFor(() => expect(updateInfo).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      downloadedListener.mock.calls[0][0]()
+      finish?.({ kind: "ok", value: { downloaded: false } })
+    })
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1))
+    expect(updateInfo).toHaveBeenCalledTimes(2)
+  })
+
+  it("cleans up listeners that resolve after unmount and ignores later callbacks", async () => {
+    nativeMobile.mockReturnValue(true)
+    let finish: ((remove: () => void) => void) | undefined
+    downloadedListener.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const { unmount } = render(<UpdateCenterInitializer />)
+    await waitFor(() => expect(downloadedListener).toHaveBeenCalled())
+    unmount()
+    await act(async () => {
+      finish?.(unsubscribeDownloaded)
+    })
+    expect(unsubscribeResume).toHaveBeenCalledTimes(1)
+    expect(unsubscribeDownloaded).toHaveBeenCalledTimes(1)
+    const reads = updateInfo.mock.calls.length
+    await act(async () => {
+      downloadedListener.mock.calls[0][0]()
+    })
+    expect(updateInfo).toHaveBeenCalledTimes(reads)
+  })
+
   it("renders nothing", () => {
     const { container } = render(<UpdateCenterInitializer />)
     expect(container.firstChild).toBeNull()

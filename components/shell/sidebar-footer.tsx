@@ -25,7 +25,14 @@ import { useCallback, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { MoonIcon, SettingsIcon, SlidersHorizontalIcon, SunIcon, SunMoonIcon } from "lucide-react"
+import {
+  MoonIcon,
+  PanelLeftCloseIcon,
+  SettingsIcon,
+  SlidersHorizontalIcon,
+  SunIcon,
+  SunMoonIcon,
+} from "lucide-react"
 
 import type { AppTheme } from "@cognia/agent-config-types"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -38,6 +45,8 @@ import {
 } from "@/components/ui/context-menu"
 import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
 import { useSettingsStore } from "@/stores/settings"
+import { useUIStore } from "@/stores/ui"
+import { useSidebarCollapseHost } from "@/hooks/shell/use-sidebar-collapse-host"
 import { cn } from "@/lib/utils"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { SidebarUserCard } from "./sidebar-user-card"
@@ -47,11 +56,29 @@ import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 // dark) so the two surfaces never disagree about what "next" means.
 const THEME_CYCLE: AppTheme[] = ["system", "light", "dark"]
 
-export function SidebarFooter({ className }: { className?: string }) {
+export function SidebarFooter({
+  className,
+  collapseToggle = false,
+}: {
+  className?: string
+  /**
+   * Carry the sidebar's collapse button at the row's end. Set where nothing
+   * above the rail already does — the bar-less web shell, whose chat header
+   * used to hold it beside the conversation title, far from the column it
+   * folds. While shown it claims the job (`useSidebarCollapseHost`), and the
+   * header keeps only the expand half, for when this footer has gone with the
+   * rail.
+   */
+  collapseToggle?: boolean
+}) {
   const t = useTranslations("desktop.sidebarUser")
   const railT = useTranslations("desktop.guildRail")
+  const listT = useTranslations("desktop.channelList")
   const router = useRouter()
   const settingsShortcut = useAppShortcutLabel("shell.settings.open")
+  const sidebarShortcut = useAppShortcutLabel("shell.sidebar.toggle")
+  const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed)
+  useSidebarCollapseHost(collapseToggle)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const { theme, setTheme } = useTheme()
   const save = useSettingsStore((s) => s.save)
@@ -131,6 +158,29 @@ export function SidebarFooter({ className }: { className?: string }) {
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
+        {collapseToggle ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={() => setSidebarCollapsed(true)}
+            aria-label={listT("collapseSidebar")}
+            aria-controls="conversation-sidebar"
+            aria-expanded
+            title={
+              sidebarShortcut.label
+                ? railT("shortcutHint", {
+                    label: listT("collapseSidebar"),
+                    shortcut: sidebarShortcut.label,
+                  })
+                : listT("collapseSidebar")
+            }
+            aria-keyshortcuts={sidebarShortcut.aria}
+            data-testid="sidebar-footer-collapse"
+          >
+            <PanelLeftCloseIcon className="size-4" aria-hidden />
+          </Button>
+        ) : null}
       </div>
       <SharedSessionJoin />
       <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="sidebar" />

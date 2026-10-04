@@ -5,6 +5,10 @@ import "fake-indexeddb/auto"
 const push = jest.fn()
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+let mockRunActive = false
+jest.mock("@/lib/devices/execution-host-guard", () => ({
+  anyRunActive: () => Promise.resolve(mockRunActive),
+}))
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -15,6 +19,15 @@ import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote
 import { WorkflowHandoffPanel, findHostByIdentity } from "./handoff-panel"
 
 const messages = {
+  devices: {
+    executionHost: {
+      local: "This machine",
+      confirmTitle: "Switch execution host while work is running?",
+      confirmBody: "A turn is in flight. Switching to {label} repoints calls at once.",
+      confirmCancel: "Stay here",
+      confirmSwitch: "Switch anyway",
+    },
+  },
   workflows: {
     runs: {
       handoff: {
@@ -122,6 +135,49 @@ describe("WorkflowHandoffPanel", () => {
     expect(await screen.findByTestId("workflow-handoff-target")).toHaveTextContent("Cloud box")
     await user.click(screen.getByTestId("workflow-handoff-open"))
     expect(onOpenTarget).toHaveBeenCalledWith(expect.objectContaining({ id: "local-row-1" }))
+  })
+
+  /**
+   * Opening the target IS switching to it. Under a running turn that asks
+   * first, and the run page is only opened once the switch happened: landing
+   * there after the user chose to stay would show this machine's history
+   * under the other host's heading.
+   */
+  it("switches through the in-flight guard before opening the target's runs", async () => {
+    const user = userEvent.setup()
+    const activateHost = jest.fn()
+    const realActivate = useRemoteHostStore.getState().activateHost
+    mockRunActive = true
+    useRemoteHostStore.setState({ hosts: [host()], activeHostId: null, activateHost })
+    await seed({
+      accountId: "acct",
+      domain: "schedule-handoff",
+      targetRef: "identity-a",
+      kind: "workflow.trigger",
+      payload: {},
+      idempotencyKey: "h-guard",
+      label: "wf-1",
+      now: NOW,
+    })
+    try {
+      renderPanel()
+      await user.click(await screen.findByTestId("workflow-handoff-open"))
+      expect(await screen.findByText("Switch anyway")).toBeInTheDocument()
+      expect(activateHost).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+
+      await user.click(screen.getByText("Stay here"))
+      expect(activateHost).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+
+      await user.click(screen.getByTestId("workflow-handoff-open"))
+      await user.click(await screen.findByText("Switch anyway"))
+      expect(activateHost).toHaveBeenCalledWith("local-row-1")
+      expect(push).toHaveBeenCalledWith("/workflows/runs?id=wf-1")
+    } finally {
+      mockRunActive = false
+      useRemoteHostStore.setState({ activateHost: realActivate })
+    }
   })
 
   it("falls back to the raw identity when the target is not paired here", async () => {

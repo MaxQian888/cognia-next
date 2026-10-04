@@ -86,7 +86,9 @@ jest.mock("@/components/desktop/avatar-badge", () => ({
   ),
 }))
 
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
+  GuildScopeMenuItems,
   SidebarCreateTeamRow,
   SidebarGuildSectionRows,
   activeGuildKey,
@@ -405,5 +407,38 @@ describe("SidebarCreateTeamRow", () => {
     fireEvent.click(screen.getByTestId("sidebar-guild-create-team"))
     expect(routerPush).toHaveBeenCalledWith("/settings?section=teams")
     expect(logInfo).toHaveBeenCalledWith("guild create team click")
+  })
+})
+
+describe("GuildScopeMenuItems — selecting a scope's conversations", () => {
+  function renderMenu(props: Partial<Parameters<typeof GuildScopeMenuItems>[0]>) {
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger>
+          <div data-testid="scope-target">scope</div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <GuildScopeMenuItems teamId="t-1" unreadCount={0} {...props} />
+        </ContextMenuContent>
+      </ContextMenu>
+    )
+    fireEvent.contextMenu(screen.getByTestId("scope-target"))
+  }
+
+  it("offers the item only where the surface can select the rows", () => {
+    renderMenu({})
+    expect(screen.queryByTestId("sidebar-guild-menu-select-t-1")).toBeNull()
+  })
+
+  it("hands the selection to the surface", () => {
+    const onSelectConversations = jest.fn()
+    renderMenu({ onSelectConversations })
+    fireEvent.click(screen.getByTestId("sidebar-guild-menu-select-t-1"))
+    expect(onSelectConversations).toHaveBeenCalledTimes(1)
+  })
+
+  it("greys the item out for a scope with nothing in it", () => {
+    renderMenu({ onSelectConversations: jest.fn(), selectConversationsDisabled: true })
+    expect(screen.getByTestId("sidebar-guild-menu-select-t-1")).toHaveAttribute("data-disabled")
   })
 })

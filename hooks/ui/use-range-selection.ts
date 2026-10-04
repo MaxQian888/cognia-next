@@ -16,6 +16,13 @@ export interface UseRangeSelectionResult {
   /** Modifier-aware click handler. The caller decides whether to also fire its own onSelect. */
   handleClick: (id: string, e: RangeSelectionMouseEvent) => void
   selectAll: () => void
+  /**
+   * Replace the selection with `ids` — a whole section picked at once ("Select
+   * conversations here"). Ids not in `orderedIds` yet are kept in the raw state
+   * and surface once their rows are (a folder unfolding in the same tick);
+   * the anchor parks on the last one, so a Shift-click extends from there.
+   */
+  selectIds: (ids: readonly string[]) => void
   clear: () => void
   isSelected: (id: string) => boolean
 }
@@ -156,6 +163,12 @@ export function useRangeSelection(orderedIds: readonly string[]): UseRangeSelect
     setLastInteractionWasModified((prev) => (prev === true ? prev : true))
   }, [])
 
+  const selectIds = useCallback((ids: readonly string[]) => {
+    setRawSelected(new Set(ids))
+    setRawAnchor(ids.length > 0 ? ids[ids.length - 1]! : null)
+    setLastInteractionWasModified(true)
+  }, [])
+
   // Guarded with previous-value setters so a caller that invokes `clear()`
   // when state is already empty (e.g. the channel-list's mount-time effect)
   // does NOT trigger a redundant re-render.
@@ -173,6 +186,7 @@ export function useRangeSelection(orderedIds: readonly string[]): UseRangeSelect
     lastInteractionWasModified,
     handleClick,
     selectAll,
+    selectIds,
     clear,
     isSelected,
   }

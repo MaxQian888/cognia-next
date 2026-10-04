@@ -26,6 +26,7 @@ import { ExternalLinkIcon, RadioTowerIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useExecutionHostSwitch } from "@/hooks/devices/use-execution-host-switch"
 import { cancelHostDispatch } from "@/lib/db/host-dispatch-queue"
 import { getDb } from "@/lib/db/schema"
 import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
@@ -69,7 +70,7 @@ export function WorkflowHandoffPanel({ workflowId, onOpenTarget }: WorkflowHando
   const t = useTranslations("workflows.runs.handoff")
   const router = useRouter()
   const hosts = useRemoteHostStore((state) => state.hosts)
-  const activateHost = useRemoteHostStore((state) => state.activateHost)
+  const { requestSwitch, dialog } = useExecutionHostSwitch()
 
   const rows = useLiveQuery(
     async () => {
@@ -91,8 +92,13 @@ export function WorkflowHandoffPanel({ workflowId, onOpenTarget }: WorkflowHando
       onOpenTarget(host)
       return
     }
-    activateHost(host.id)
-    router.push(`/workflows/runs?id=${encodeURIComponent(workflowId)}`)
+    // Opening the target IS switching to it, so it takes the shared in-flight
+    // guard. The navigation waits for the switch: landing on the target's run
+    // page after the user chose to stay would show this machine's empty history
+    // under a heading that promises the other one.
+    void requestSwitch(host.id, {
+      onSwitched: () => router.push(`/workflows/runs?id=${encodeURIComponent(workflowId)}`),
+    })
   }
 
   const cancel = async (row: HostDispatchJobRow) => {
@@ -178,6 +184,7 @@ export function WorkflowHandoffPanel({ workflowId, onOpenTarget }: WorkflowHando
           )
         })}
       </ul>
+      {dialog}
     </section>
   )
 }

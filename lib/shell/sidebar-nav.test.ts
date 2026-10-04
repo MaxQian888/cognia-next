@@ -67,7 +67,6 @@ describe("getSidebarCatalog", () => {
   it("drops desktop-only items on mobile", () => {
     const cat = getSidebarCatalog("mobile")
     const ids = cat.map((c) => c.id)
-    expect(ids).not.toContain("performance")
     expect(ids).not.toContain("source-control")
     expect(ids).toContain("workflows")
     // Derived, not hard-coded — the browser pane addition broke a literal "-2".
@@ -93,7 +92,6 @@ describe("getSidebarCatalog", () => {
 
     const ids = getSidebarCatalog("mobile", runtime).map((item) => item.id)
 
-    expect(ids).not.toContain("performance")
     expect(ids).not.toContain("source-control")
     expect(ids).not.toContain("browser")
   })
@@ -101,11 +99,22 @@ describe("getSidebarCatalog", () => {
   it("drops desktop-only items on web too (ADR-0059 F5 — no dead ends in a browser)", () => {
     const cat = getSidebarCatalog("web")
     const ids = cat.map((c) => c.id)
-    expect(ids).not.toContain("performance")
     expect(ids).not.toContain("source-control")
     expect(ids).not.toContain("browser")
     expect(ids).not.toContain("pet")
     expect(ids).toContain("workflows")
+  })
+
+  it("offers Performance on every shell: each one measures its own Renderer (ADR-0035)", () => {
+    for (const platform of ["tauri", "web", "mobile"] as const) {
+      expect(getSidebarCatalog(platform).map((item) => item.id)).toContain("performance")
+    }
+    const standalone: RuntimeSnapshot = {
+      target: { id: "local", kind: "standalone", platform: "web" },
+      vaultState: "unlocked",
+      connectionState: "online",
+    } as RuntimeSnapshot
+    expect(getSidebarCatalog("web", standalone).map((item) => item.id)).toContain("performance")
   })
 
   it("keeps the desktop pet on the desktop rail", () => {

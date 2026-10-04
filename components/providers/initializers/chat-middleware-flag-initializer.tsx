@@ -14,7 +14,7 @@ import { setChatMiddlewareExecutionEnabled } from "@/lib/claude/chat-middleware/
  * kept in sync on every settings change. The settings store hydrates
  * asynchronously, so this applies the current snapshot then subscribes — the
  * setter is idempotent, so re-applying the same value is cheap. Mirrors the
- * `PetWindowInitializer` shape so the `app/layout.tsx` initializer block stays
+ * `OcrRuntimeInitializer` shape so the desktop initializer block stays
  * homogeneous.
  */
 export function ChatMiddlewareFlagInitializer() {

@@ -130,7 +130,20 @@ export function CompanionOutboundRunnerProvider({
   const mobileRuntimeMode = useSettingsStore((state) => state.settings?.mobileRuntimeMode)
   const platform = platformOverride ?? detectedPlatform
   const hasWebTarget = webCompanionOverride ?? hasWebCompanionTarget()
-  const mobilePaired = mobilePairedOverride ?? mobileRuntimeMode === "paired"
+  // The same rule `CompanionBootProvider` links the Host by: an explicit
+  // "paired", or a mode nobody recorded while a pairing is live (the boot
+  // provider only publishes a `companion` target for an active pairing). The
+  // mode is a device-local row in whichever database was active when it was
+  // written: `/pair` never writes it and each paired Host has its own
+  // database, so a working pairing routinely reads `undefined` here. Requiring
+  // the literal "paired" left the boot side negotiating HostState and queueing
+  // every draft and send while no runner existed to drain them: rows sat
+  // `pending` with zero attempts behind a live Host link. Only an explicit
+  // "standalone" turns the queue off.
+  const mobilePaired =
+    mobilePairedOverride ??
+    (mobileRuntimeMode === "paired" ||
+      (mobileRuntimeMode === undefined && runtimeTarget?.kind === "companion"))
   const enabled =
     platform === "tauri" ||
     (platform === "mobile" && mobilePaired) ||
@@ -341,6 +354,16 @@ export function CompanionOutboundRunnerProvider({
       cancelled = true
       unregisterResync()
       stopSync()
+      // The manifest published above describes THIS remote host. Leaving it in
+      // the snapshot after the host is deactivated (or replaced by another)
+      // kept the old host's operations and grants as the answer for whatever
+      // runs next: the status bar counted a host that was no longer being
+      // driven, and `canDispatch` below kept treating `host_state_submit` as
+      // available against the local desktop, which never advertised it. A
+      // local desktop's baseline is no `host` at all (nothing else publishes
+      // one on Tauri), so clearing restores exactly that; the next remote
+      // host's manifest repopulates it when its own effect run resolves.
+      updateRuntimeSnapshot({ host: undefined })
     }
   }, [platform, remoteTransport, scope])
 

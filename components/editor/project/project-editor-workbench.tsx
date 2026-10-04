@@ -113,6 +113,7 @@ import {
 } from "@/stores/context-workbench/context-workbench-store"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { useElementWidth } from "@/hooks/use-element-width"
+import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 import { useChatStore } from "@/stores/chat"
 import type { FileSelectionRef } from "@/types/artifact/artifact"
@@ -1236,6 +1237,7 @@ export function ProjectEditorFileWorkbench({
   onSendToChat,
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
+  const showKeyboardHints = useShowKeyboardHints()
   const [mobileWorkbenchOpen, setMobileWorkbenchOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [cursor, setCursor] = useState<{
@@ -2629,57 +2631,104 @@ export function ProjectEditorFileWorkbench({
     </AlertDialog>
   )
 
-  const emptyPane = (
-    <div
-      className="flex h-full flex-1 flex-col items-center justify-center gap-5 p-6"
-      data-testid="editor-empty"
-    >
-      <div className="flex size-14 items-center justify-center rounded-stage bg-muted/60">
-        <FileIcon className="size-6 text-muted-foreground" />
+  // The phone pane flow gets its own empty state rather than the desktop list
+  // with the chords hidden: a finger needs full-width targets, "from the tree"
+  // points at a pane that is not on screen, and the palette and reopen rows are
+  // a header button and a tab-menu item there, already. Browse is primary
+  // because the Files tab is the one way in a phone has without a keyboard.
+  const emptyPane =
+    layout === "mobile" ? (
+      <div
+        className="flex h-full flex-1 flex-col items-center justify-center gap-5 p-6"
+        data-testid="editor-empty"
+      >
+        <div className="flex size-14 items-center justify-center rounded-stage bg-muted/60">
+          <FileIcon className="size-6 text-muted-foreground" />
+        </div>
+        <p className="text-center text-sm text-muted-foreground">{t("emptyEditorMobile")}</p>
+        <div className="flex w-full max-w-xs flex-col gap-2">
+          <Button
+            className="h-11 w-full"
+            onClick={() => {
+              setSideTab("files")
+              setMobilePane("files")
+            }}
+            data-testid="editor-empty-browse-files"
+          >
+            <FilesIcon className="size-4" />
+            {t("emptyBrowseFiles")}
+          </Button>
+          <Button
+            variant="outline"
+            className="h-11 w-full"
+            onClick={() => openQuickOpen("")}
+            data-testid="editor-empty-quick-open"
+          >
+            <FolderSearchIcon className="size-4" />
+            {t("quickOpen.hint")}
+          </Button>
+          <Button
+            variant="outline"
+            className="h-11 w-full"
+            onClick={openSearchPane}
+            data-testid="editor-empty-search"
+          >
+            <SearchIcon className="size-4" />
+            {t("sidebar.search")}
+          </Button>
+        </div>
       </div>
-      <p className="text-center text-sm text-muted-foreground">{t("emptyEditor")}</p>
-      <div className="flex flex-col gap-0.5">
-        <EmptyShortcut
-          icon={<FolderSearchIcon className="size-3.5" />}
-          label={t("quickOpen.hint")}
-          keys="⌘P"
-          onClick={() => openQuickOpen("")}
-          testId="editor-empty-quick-open"
-        />
-        <EmptyShortcut
-          icon={<SearchIcon className="size-3.5" />}
-          label={t("sidebar.search")}
-          keys="⇧⌘F"
-          onClick={openSearchPane}
-          testId="editor-empty-search"
-        />
-        <EmptyShortcut
-          icon={<TerminalIcon className="size-3.5" />}
-          label={t("command.palette")}
-          keys="⇧⌘P"
-          onClick={() => openQuickOpen(">")}
-          testId="editor-empty-palette"
-        />
-        <EmptyShortcut
-          icon={<RotateCcwIcon className="size-3.5" />}
-          label={t("tabs.reopenClosed")}
-          keys="⇧⌘T"
-          onClick={reopenClosedFile}
-          testId="editor-empty-reopen"
-        />
-        {/* The phone pane flow has no sidebar to toggle. */}
-        {layout === "mobile" ? null : (
+    ) : (
+      <div
+        className="flex h-full flex-1 flex-col items-center justify-center gap-5 p-6"
+        data-testid="editor-empty"
+      >
+        <div className="flex size-14 items-center justify-center rounded-stage bg-muted/60">
+          <FileIcon className="size-6 text-muted-foreground" />
+        </div>
+        <p className="text-center text-sm text-muted-foreground">{t("emptyEditor")}</p>
+        <div className="flex flex-col gap-0.5">
+          {/* A touch-only device (a tablet wide enough for the split layout)
+              has no keyboard to press these on, so the badges go and the rows
+              stay as plain buttons. */}
+          <EmptyShortcut
+            icon={<FolderSearchIcon className="size-3.5" />}
+            label={t("quickOpen.hint")}
+            keys={showKeyboardHints ? "⌘P" : undefined}
+            onClick={() => openQuickOpen("")}
+            testId="editor-empty-quick-open"
+          />
+          <EmptyShortcut
+            icon={<SearchIcon className="size-3.5" />}
+            label={t("sidebar.search")}
+            keys={showKeyboardHints ? "⇧⌘F" : undefined}
+            onClick={openSearchPane}
+            testId="editor-empty-search"
+          />
+          <EmptyShortcut
+            icon={<TerminalIcon className="size-3.5" />}
+            label={t("command.palette")}
+            keys={showKeyboardHints ? "⇧⌘P" : undefined}
+            onClick={() => openQuickOpen(">")}
+            testId="editor-empty-palette"
+          />
+          <EmptyShortcut
+            icon={<RotateCcwIcon className="size-3.5" />}
+            label={t("tabs.reopenClosed")}
+            keys={showKeyboardHints ? "⇧⌘T" : undefined}
+            onClick={reopenClosedFile}
+            testId="editor-empty-reopen"
+          />
           <EmptyShortcut
             icon={<PanelLeftIcon className="size-3.5" />}
             label={t("command.toggleSidebar")}
-            keys="⌘B"
+            keys={showKeyboardHints ? "⌘B" : undefined}
             onClick={toggleSidebar}
             testId="editor-empty-sidebar"
           />
-        )}
+        </div>
       </div>
-    </div>
-  )
+    )
 
   // The file context workbench (AI, comments, inspect, outline, proposal
   // review) acts on the shown file's text — a blocked binary/oversized file
@@ -3508,7 +3557,8 @@ function EmptyShortcut({
 }: {
   icon: ReactNode
   label: string
-  keys: string
+  /** The chord badge; omitted where there is no keyboard to press it on. */
+  keys?: string
   onClick: () => void
   testId: string
 }) {
@@ -3521,9 +3571,11 @@ function EmptyShortcut({
     >
       {icon}
       <span className="flex-1 text-left">{label}</span>
-      <kbd className="rounded border bg-muted/60 px-1 py-px font-mono text-[10px] leading-tight">
-        {keys}
-      </kbd>
+      {keys ? (
+        <kbd className="rounded border bg-muted/60 px-1 py-px font-mono text-[10px] leading-tight">
+          {keys}
+        </kbd>
+      ) : null}
     </button>
   )
 }

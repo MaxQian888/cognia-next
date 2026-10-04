@@ -6,6 +6,7 @@ import { act, render, waitFor } from "@testing-library/react"
 
 import { CompanionBootProvider } from "./companion-boot-provider"
 import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import { updateRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import {
   __resetMobileBootForTesting,
   getMobileBootSnapshot,
@@ -1406,5 +1407,175 @@ describe("<CompanionBootProvider /> — host bindings detail", () => {
     pushObserver!({ data: {}, foreground: false })
     pushObserver!({ data: { sessionId: "s-1" }, foreground: true })
     expect(pushMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("<CompanionBootProvider /> — manifest retry after a boot without network", () => {
+  const updateSnapshotMock = jest.mocked(updateRuntimeSnapshot)
+  const manifestCalls = () =>
+    transportCallMock.mock.calls.filter(([method]) => method === "host_feature_manifest").length
+  const stages = () => {
+    const snap = getMobileBootSnapshot()
+    return {
+      settled: snap.settled,
+      host: `${snap.stages.host.status}:${snap.stages.host.detail}`,
+      sync: `${snap.stages.sync.status}:${snap.stages.sync.detail}`,
+    }
+  }
+
+  function mount() {
+    return render(
+      <CompanionBootProvider>
+        <div>child</div>
+      </CompanionBootProvider>
+    )
+  }
+
+  beforeEach(() => {
+    updateSnapshotMock.mockClear()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    delete mockTransport.onTierChange
+  })
+
+  it("keeps retrying after the first failure and goes online once the Host answers", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockRejectedValueOnce(new Error("no network"))
+    mount()
+
+    // The splash is released on the first failure, with the snapshot left
+    // "connecting" rather than "offline".
+    await waitFor(() => expect(stages().host).toBe("failed:offline"))
+    expect(stages()).toMatchObject({ settled: true, sync: "skipped:notNeeded" })
+    expect(updateSnapshotMock).toHaveBeenCalledWith({
+      connectionState: "connecting",
+      host: undefined,
+    })
+    expect(updateSnapshotMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ connectionState: "offline" })
+    )
+
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalled())
+    expect(manifestCalls()).toBe(2)
+    await waitFor(() =>
+      expect(updateSnapshotMock).toHaveBeenLastCalledWith({ connectionState: "online" })
+    )
+    expect(stages()).toEqual({ settled: true, host: "done:linked", sync: "done:synced" })
+    expect(installForegroundSyncMock).toHaveBeenCalled()
+    expect(installEventDrivenSyncMock).toHaveBeenCalled()
+  })
+
+  it("wakes the wait early when the transport tier leaves offline", async () => {
+    jest.useFakeTimers()
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    let tierHandler: ((tier: string) => void) | null = null
+    const detachTier = jest.fn()
+    mockTransport.onTierChange = jest.fn((handler: (tier: string) => void) => {
+      tierHandler = handler
+      handler("offline")
+      return detachTier
+    })
+    // A long Host-named wait: only the tier change can end it inside this test.
+    transportCallMock.mockRejectedValueOnce(
+      Object.assign(new Error("carrier down"), {
+        code: "unavailable",
+        retryable: true,
+        retryAfterMs: 60_000,
+      })
+    )
+    mount()
+
+    await waitFor(() => expect(stages().host).toBe("failed:offline"))
+    expect(manifestCalls()).toBe(1)
+    // Same tier again is not a transition.
+    act(() => tierHandler?.("offline"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(manifestCalls()).toBe(1)
+
+    act(() => tierHandler?.("rtc-direct"))
+    await waitFor(() => expect(manifestCalls()).toBe(2))
+    await waitFor(() =>
+      expect(updateSnapshotMock).toHaveBeenLastCalledWith({ connectionState: "online" })
+    )
+    // The wait is over: the tier subscription is released.
+    expect(detachTier).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops retrying on a non-retryable refusal and reports the Host as offline", async () => {
+    jest.useFakeTimers()
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockRejectedValue(
+      Object.assign(new Error("grant revoked"), { code: "grant_revoked", retryable: false })
+    )
+    mount()
+
+    await waitFor(() =>
+      expect(updateSnapshotMock).toHaveBeenCalledWith({
+        connectionState: "offline",
+        host: { compatible: false, operations: [], grants: [] },
+      })
+    )
+    expect(stages()).toMatchObject({ settled: true, host: "failed:offline" })
+    expect(logWarn).toHaveBeenCalledWith(
+      "companion: host refused the manifest",
+      expect.objectContaining({ code: "grant_revoked", error: "grant revoked" })
+    )
+    await act(async () => {
+      jest.advanceTimersByTime(120_000)
+    })
+    expect(manifestCalls()).toBe(1)
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("stops the loop on unmount: no further calls and no listener left behind", async () => {
+    jest.useFakeTimers()
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    const detachTier = jest.fn()
+    mockTransport.onTierChange = jest.fn((handler: (tier: string) => void) => {
+      handler("offline")
+      return detachTier
+    })
+    transportCallMock.mockRejectedValue(new Error("no network"))
+    const view = mount()
+
+    await waitFor(() => expect(manifestCalls()).toBeGreaterThanOrEqual(1))
+    const callsAtUnmount = manifestCalls()
+    view.unmount()
+    expect(detachTier).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      jest.advanceTimersByTime(300_000)
+    })
+    expect(manifestCalls()).toBe(callsAtUnmount)
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("lets a pairing change restart the bindings while the retries run", async () => {
+    jest.useFakeTimers()
+    setMobile()
+    hydrateMock.mockResolvedValue(pairedConfig)
+    transportCallMock.mockRejectedValueOnce(
+      Object.assign(new Error("carrier down"), {
+        code: "unavailable",
+        retryable: true,
+        retryAfterMs: 60_000,
+      })
+    )
+    mount()
+    await waitFor(() => expect(stages().host).toBe("failed:offline"))
+    expect(hydrateMock).toHaveBeenCalledTimes(1)
+
+    // The restart is not swallowed by a still-pending first start.
+    window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(1))
+    expect(manifestCalls()).toBe(2)
   })
 })

@@ -80,7 +80,43 @@ jest.mock("@/stores/ui/ui-store", () => ({
     selector({ requestOpenSettings: mockRequestOpenSettings }),
 }))
 
-import { StatusBarConnectivity } from "./status-bar-connectivity"
+let mockRunActive = false
+jest.mock("@/lib/devices/execution-host-guard", () => ({
+  anyRunActive: () => Promise.resolve(mockRunActive),
+}))
+
+import { act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+
+import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
+
+import { REMOTE_HOSTS_SETTINGS_HREF, StatusBarConnectivity } from "./status-bar-connectivity"
+
+const initialHostStore = useRemoteHostStore.getState()
+const mockDeactivate = jest.fn()
+function drivenHost(overrides: Partial<RemoteHost> = {}): RemoteHost {
+  return {
+    id: "box",
+    label: "Build box",
+    credentialRef: "ref",
+    addedAt: 1,
+    connectionState: "ready",
+    config: { baseUrl: "https://box.example:27890", serverVersion: "2.1.0" },
+    ...overrides,
+  } as RemoteHost
+}
+function driveHost(host: RemoteHost | null) {
+  useRemoteHostStore.setState(
+    {
+      ...initialHostStore,
+      hosts: host ? [host] : [],
+      activeHostId: host?.id ?? null,
+      deactivate: mockDeactivate,
+    },
+    true
+  )
+}
+afterAll(() => useRemoteHostStore.setState(initialHostStore, true))
 
 beforeEach(() => {
   mockNetwork.status = { connected: true, connectionType: "unknown" }
@@ -96,6 +132,9 @@ beforeEach(() => {
   mockReconnectWs.mockClear()
   mockReconnectRtc.mockClear()
   mockGetHost.mockReset().mockResolvedValue(null)
+  mockRunActive = false
+  mockDeactivate.mockClear()
+  driveHost(null)
 })
 
 describe("StatusBarConnectivity", () => {
@@ -269,5 +308,93 @@ describe("StatusBarConnectivity", () => {
     render(<StatusBarConnectivity />)
     fireEvent.click(screen.getByTestId("status-connectivity"))
     expect(screen.getByTestId("runtime-target-menu")).toBeInTheDocument()
+  })
+})
+
+/**
+ * A Tauri desktop's runtime target stays `null` while the remote-host store
+ * drives another machine, so a segment that read remoteness from the target
+ * said "Local runtime / This desktop" beside the switcher naming the remote.
+ */
+describe("a desktop driving a remote host", () => {
+  beforeEach(() => {
+    mockPlatform = "tauri"
+    mockTarget = null
+  })
+
+  it("names the driven host on the trigger instead of the local runtime", () => {
+    driveHost(drivenHost({ connectionState: "degraded" }))
+    render(<StatusBarConnectivity />)
+    const trigger = screen.getByTestId("status-connectivity")
+    expect(trigger).toHaveAttribute("data-driven-host", "box")
+    expect(trigger).toHaveAttribute("data-tone", "warning")
+    expect(trigger).toHaveAttribute("aria-label", "connectionCenter.drivenAria")
+    expect(trigger).toHaveTextContent("Build box")
+  })
+
+  it("describes the host in the popover, error included", () => {
+    driveHost(drivenHost({ connectionError: "certificate fingerprint changed" }))
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+    expect(screen.getByTestId("connection-status-badge")).toHaveTextContent("ready")
+    expect(screen.getByText("https://box.example:27890")).toBeInTheDocument()
+    expect(screen.getByText("2.1.0")).toBeInTheDocument()
+    expect(screen.queryByText("connectionCenter.thisDesktop")).not.toBeInTheDocument()
+    expect(screen.queryByText("connectionCenter.localRuntime")).not.toBeInTheDocument()
+    // No manifest published yet: "checking", never a count of zero.
+    expect(screen.getByText("connectionCenter.protocolStatus.checking")).toBeInTheDocument()
+    expect(screen.getByTestId("driven-host-error")).toHaveTextContent(
+      "certificate fingerprint changed"
+    )
+  })
+
+  it("returns to local through the in-flight guard", async () => {
+    driveHost(drivenHost())
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+    await userEvent.click(screen.getByTestId("driven-host-return-local"))
+    expect(mockDeactivate).toHaveBeenCalledTimes(1)
+  })
+
+  it("asks before returning to local while a turn is in flight", async () => {
+    mockRunActive = true
+    driveHost(drivenHost())
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+    await userEvent.click(screen.getByTestId("driven-host-return-local"))
+    expect(mockDeactivate).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByTestId("execution-host-confirm"))
+    expect(mockDeactivate).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens the Remote hosts panel to manage hosts", () => {
+    driveHost(drivenHost())
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+    fireEvent.click(screen.getByTestId("driven-host-manage"))
+    expect(mockPush).toHaveBeenCalledWith(REMOTE_HOSTS_SETTINGS_HREF)
+    expect(REMOTE_HOSTS_SETTINGS_HREF).toContain("section=connectivity")
+    expect(REMOTE_HOSTS_SETTINGS_HREF).toContain("connectivityPanel=remote-hosts")
+  })
+
+  it("goes back to the local summary the moment the host is deactivated", () => {
+    driveHost(drivenHost())
+    render(<StatusBarConnectivity />)
+    expect(screen.getByTestId("status-connectivity")).toHaveAttribute("data-driven-host", "box")
+    act(() => driveHost(null))
+    expect(screen.getByTestId("status-connectivity")).not.toHaveAttribute("data-driven-host")
+    expect(screen.getByTestId("status-connectivity")).toHaveAttribute(
+      "aria-label",
+      "connectionCenter.localRuntime"
+    )
+  })
+
+  /** Only a desktop drives through this store; a browser keeps its own target. */
+  it("ignores the store on a shell that is not the desktop", () => {
+    mockPlatform = "web"
+    mockTarget = { id: "host-a", kind: "companion", platform: "web", hostKind: "cloud" }
+    driveHost(drivenHost())
+    render(<StatusBarConnectivity />)
+    expect(screen.getByTestId("status-connectivity")).not.toHaveAttribute("data-driven-host")
   })
 })

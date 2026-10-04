@@ -33,6 +33,7 @@ import {
   BellOffIcon,
   CheckCheckIcon,
   ChevronDownIcon,
+  ListChecksIcon,
   MessagesSquareIcon,
   PencilIcon,
   PlusIcon,
@@ -131,6 +132,9 @@ export function GuildScopeMenuItems({
   teamPosition,
   unreadScope,
   testIdPrefix = "sidebar-guild-menu",
+  onSelectConversations,
+  selectConversationsDisabled = false,
+  showMarkRead = true,
 }: {
   teamId: string | null
   unreadCount: number
@@ -151,6 +155,21 @@ export function GuildScopeMenuItems({
   unreadScope?: GuildUnreadScope
   /** `data-testid` prefix — each surface keeps its own stable ids. */
   testIdPrefix?: string
+  /**
+   * Select this scope's conversations — selection mode, pre-filled with the
+   * scope's rows, so a whole squad's history can be archived or filed in one
+   * go. Only the surface that draws those rows can offer it (the merged
+   * rail's scope tree); absent, the item is not shown.
+   */
+  onSelectConversations?: () => void
+  /** The scope holds no conversation to select. */
+  selectConversationsDisabled?: boolean
+  /**
+   * Offer "Mark all read". Off where the rows on screen carry no unread state —
+   * the conversation list's Archived view, whose header would otherwise clear
+   * the active conversations it is not showing (ADR-0213).
+   */
+  showMarkRead?: boolean
 }) {
   const t = useTranslations("desktop.channelList")
   const railT = useTranslations("desktop.guildRail")
@@ -199,14 +218,26 @@ export function GuildScopeMenuItems({
           {teamId ? t("newConversation") : t("newChat")}
         </ContextMenuItem>
       ) : null}
-      <ContextMenuItem
-        disabled={unreadCount === 0}
-        onSelect={markRead}
-        data-testid={`${testIdPrefix}-mark-read-${key}`}
-      >
-        <CheckCheckIcon className="size-4" />
-        {railT("markAllRead")}
-      </ContextMenuItem>
+      {showMarkRead ? (
+        <ContextMenuItem
+          disabled={unreadCount === 0}
+          onSelect={markRead}
+          data-testid={`${testIdPrefix}-mark-read-${key}`}
+        >
+          <CheckCheckIcon className="size-4" />
+          {railT("markAllRead")}
+        </ContextMenuItem>
+      ) : null}
+      {onSelectConversations ? (
+        <ContextMenuItem
+          disabled={selectConversationsDisabled}
+          onSelect={onSelectConversations}
+          data-testid={`${testIdPrefix}-select-${key}`}
+        >
+          <ListChecksIcon className="size-4" />
+          {t("selectConversationsHere")}
+        </ContextMenuItem>
+      ) : null}
       {teamId ? (
         <>
           <ContextMenuItem onSelect={toggleMute} data-testid={`${testIdPrefix}-mute-${key}`}>

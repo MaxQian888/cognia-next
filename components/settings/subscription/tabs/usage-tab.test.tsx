@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { SubscriptionUsageRow } from "@/types/subscription"
@@ -42,10 +42,11 @@ jest.mock("@/lib/files/download", () => ({
   downloadBlob: (...args: unknown[]) => downloadBlobMock(...args),
 }))
 
-const setActiveSessionMock = jest.fn()
-jest.mock("@/stores/chat", () => ({
-  useChatStore: (selector: (s: { setActiveSession: unknown }) => unknown) =>
-    selector({ setActiveSession: setActiveSessionMock }),
+const routerPushMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPushMock, replace: jest.fn(), prefetch: jest.fn() }),
+  usePathname: () => "/settings",
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 const refreshLimitsMock = jest.fn()
@@ -88,6 +89,7 @@ jest.mock("@/hooks/usage/use-usage-display-mode", () => ({
 }))
 
 import { SubscriptionUsageTab } from "./usage-tab"
+import { listSessions } from "@/lib/db/sessions"
 
 const NOW = Date.now()
 
@@ -150,6 +152,31 @@ beforeEach(() => {
 })
 
 describe("SubscriptionUsageTab", () => {
+  describe("top sessions", () => {
+    it("opens a session through the session link so `/` switches workspace and focuses it", async () => {
+      ;(listSessions as jest.Mock).mockResolvedValueOnce([
+        { id: "s1", title: "Billing deep dive", createdAt: 0, updatedAt: 0 },
+      ])
+      setup()
+      const user = userEvent.setup()
+      render(<SubscriptionUsageTab />)
+      const resume = screen.getByTestId("top-session-resume-s1")
+      await waitFor(() => expect(resume).toBeEnabled())
+      expect(screen.getByTestId("top-session-s1")).toHaveTextContent("Billing deep dive")
+      await user.click(resume)
+      expect(routerPushMock).toHaveBeenCalledWith("/?session=s1")
+    })
+
+    it("keeps the action disabled for a session that no longer exists", async () => {
+      setup()
+      render(<SubscriptionUsageTab />)
+      const resume = screen.getByTestId("top-session-resume-s1")
+      await waitFor(() => expect(listSessions).toHaveBeenCalled())
+      expect(resume).toBeDisabled()
+      expect(routerPushMock).not.toHaveBeenCalled()
+    })
+  })
+
   it("shows the web-mode banner outside Tauri", () => {
     ;(isTauri as jest.Mock).mockReturnValue(false)
     setup()
@@ -680,5 +707,115 @@ describe("SubscriptionUsageTab", () => {
     // 7d window absent → no-data gauge; 5h reset is in the past → expired label.
     expect(screen.getByTestId("usage-window-7d")).toHaveTextContent("not reported")
     expect(screen.getByTestId("usage-window-5h")).toHaveTextContent("Resetting now")
+  })
+})
+
+describe("SubscriptionUsageTab — second-order insights", () => {
+  const DAY = 86_400_000
+  const priced = (o: Partial<SessionUsageRow> = {}) =>
+    usageRow({ costSource: "sdk", costKnown: true, ...o })
+
+  it("puts a period-over-period change under each headline tile", () => {
+    setup({
+      sessionRows: [
+        priced({ messageId: "now-1", costUsd: 3 }),
+        priced({ messageId: "now-2", costUsd: 3 }),
+        // Inside the previous 7-day window (8–13 days back).
+        priced({ messageId: "prev-1", at: NOW - 9 * DAY, costUsd: 2 }),
+        priced({ messageId: "prev-2", at: NOW - 10 * DAY, costUsd: 2 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-delta-cost")).toHaveTextContent("+50%")
+    expect(screen.getByTestId("usage-delta-cost")).toHaveAttribute("data-direction", "up")
+    expect(screen.getByTestId("usage-delta-turns")).toHaveAttribute("data-direction", "flat")
+    expect(screen.getByTestId("usage-delta-speed")).toBeInTheDocument()
+  })
+
+  it("renders no-baseline chips when the previous window is empty", () => {
+    setup()
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-delta-cost")).toHaveAttribute("data-direction", "none")
+    expect(screen.getByTestId("usage-delta-tokens")).toHaveAttribute("data-direction", "none")
+  })
+
+  it("leads the budget card with the month-end forecast", () => {
+    setup()
+    render(<SubscriptionUsageTab />)
+    const budget = screen.getByTestId("usage-budget-section")
+    expect(budget).toContainElement(screen.getByTestId("usage-forecast"))
+  })
+
+  it("re-ranks the spend breakdown by provider and by workspace", async () => {
+    const user = userEvent.setup()
+    setup({
+      sessionRows: [
+        priced({ messageId: "a", providerId: "anthropic", costUsd: 2 }),
+        priced({ messageId: "b", providerId: "openai", costUsd: 1, projectId: "proj-1" }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-surfaces-list")).toHaveAttribute("data-axis", "surface")
+    expect(screen.getByTestId("usage-surface-row-chat")).toBeInTheDocument()
+
+    await user.click(screen.getByTestId("usage-breakdown-axis-provider"))
+    expect(screen.getByTestId("usage-surfaces-list")).toHaveAttribute("data-axis", "provider")
+    const providers = screen.getByTestId("usage-surfaces-list").querySelectorAll("li")
+    expect(providers[0]).toHaveTextContent("anthropic")
+    expect(providers[1]).toHaveTextContent("openai")
+
+    await user.click(screen.getByTestId("usage-breakdown-axis-project"))
+    expect(screen.getByTestId("usage-surface-row-project-(none)")).toHaveTextContent("No workspace")
+    // A workspace the store does not know falls back to its id.
+    expect(screen.getByTestId("usage-surface-row-project-proj-1")).toHaveTextContent("proj-1")
+  })
+
+  it("switches cost over time to a stacked chart split by the chosen axis", async () => {
+    const user = userEvent.setup()
+    setup({
+      sessionRows: [
+        priced({ messageId: "a", model: "claude-opus", costUsd: 2 }),
+        priced({ messageId: "b", model: "gpt-4.1", surface: "workflow", costUsd: 1 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.queryByTestId("usage-cost-stack-axis")).toBeNull()
+    await user.click(screen.getByTestId("usage-cost-view-stacked"))
+    const legend = screen.getByTestId("usage-cost-stacked-legend")
+    expect(legend).toHaveTextContent("claude-opus")
+    expect(legend).toHaveTextContent("gpt-4.1")
+
+    await user.click(screen.getByTestId("usage-cost-stack-axis-surface"))
+    expect(screen.getByTestId("usage-cost-stacked-legend")).toHaveTextContent("Chat")
+    expect(screen.getByTestId("usage-cost-stacked-legend")).toHaveTextContent("Workflow")
+  })
+
+  it("shows cache savings, per-turn percentiles and the weekly activity pattern", () => {
+    setup({
+      sessionRows: [
+        priced({ messageId: "a", model: "claude-sonnet-4-6", cacheReadTokens: 1_000_000 }),
+        priced({ messageId: "b", costUsd: 0.75 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-efficiency-section")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-efficiency-cache-value")).toHaveTextContent("≈ $")
+    expect(screen.getByTestId("usage-efficiency-row-cost")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-activity-section")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-activity-matrix-peak")).toHaveTextContent("(2 turns)")
+  })
+
+  it("flags a day that cost far more than a typical active day", () => {
+    const days = [1, 2, 3, 4, 5, 6, 7].map((d) =>
+      priced({ messageId: `d${d}`, at: NOW - d * DAY, costUsd: 1 })
+    )
+    setup({ sessionRows: [...days, priced({ messageId: "spike", costUsd: 9 })] })
+    render(<SubscriptionUsageTab />)
+    const today = new Date(NOW)
+    const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+      today.getDate()
+    ).padStart(2, "0")}`
+    expect(screen.getByTestId(`usage-insight-spike-${key}`)).toHaveTextContent("9.0× a typical day")
+    expect(screen.queryByTestId("usage-insights-empty")).toBeNull()
   })
 })

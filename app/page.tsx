@@ -10,26 +10,12 @@ import { useShellNav } from "@/components/shell/use-shell-nav"
 import { useMessagePermalink } from "@/hooks/chat/use-message-permalink"
 import { useSessionLink } from "@/hooks/chat/use-session-link"
 import { PERMALINK_SESSION_PARAM } from "@/lib/chat/message-permalink"
-import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import RouteBody from "./route-body"
 import {
   readTargetedInviteLink,
   withoutTargetedInviteParams,
 } from "@/lib/collab/targeted-invite-link"
 
-// Platform shells are mutually exclusive at runtime but static imports made
-// Turbopack compile both multi-thousand-module graphs for `/`. Keep the
-// hydration snapshot lightweight, then request only the active shell.
-const AppShellMobile = dynamic(
-  () => import("@/components/app-shell-mobile").then((module) => module.AppShellMobile),
-  { ssr: false }
-)
-const DesktopChatWorkspace = dynamic(
-  () =>
-    import("@/components/desktop/desktop-chat-workspace").then(
-      (module) => module.DesktopChatWorkspace
-    ),
-  { ssr: false }
-)
 // Loaded only when a `chat.invited` notification link is actually in the URL:
 // it pulls in the collaboration client and the shared-chat mirror, which the
 // root route otherwise has no reason to hydrate.
@@ -114,10 +100,6 @@ function TargetedInviteConsumer() {
 }
 
 export default function Home() {
-  // Layout, not runtime: a 375px browser window needs the phone shell too,
-  // and it used to get the three-pane desktop workspace with no navigation
-  // (`GuildRail` is `hidden md:flex`).
-  const compact = useCompactLayout()
   return (
     <>
       {/* Static-export idiom (mirrors `/memory?id=`): `useSearchParams` throws
@@ -127,7 +109,7 @@ export default function Home() {
         <SessionLinkConsumer />
         <TargetedInviteConsumer />
       </Suspense>
-      {compact ? <AppShellMobile /> : <DesktopChatWorkspace />}
+      <RouteBody />
     </>
   )
 }

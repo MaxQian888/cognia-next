@@ -56,6 +56,16 @@ export interface ShellColumnsState {
   sidebarNavHostCount: number
   /** Claim the navigation for a sidebar; returns the release. */
   registerSidebarNavHost: () => () => void
+  /**
+   * True while the expanded sidebar's footer carries the collapse button. The
+   * chat header then draws only the *expand* half of its toggle (the footer is
+   * gone once the rail is) — one button for one job, not two a few hundred
+   * pixels apart. Counted for the same reason `sidebarNavHostCount` is.
+   */
+  sidebarHostsCollapse: boolean
+  sidebarCollapseHostCount: number
+  /** Claim the collapse control for a sidebar footer; returns the release. */
+  registerSidebarCollapseHost: () => () => void
 }
 
 export const useShellColumnsStore = create<ShellColumnsState>()((set) => ({
@@ -87,6 +97,23 @@ export const useShellColumnsStore = create<ShellColumnsState>()((set) => ({
       set((state) => {
         const count = Math.max(0, state.sidebarNavHostCount - 1)
         return { sidebarNavHostCount: count, sidebarHostsNav: count > 0 }
+      })
+    }
+  },
+  sidebarHostsCollapse: false,
+  sidebarCollapseHostCount: 0,
+  registerSidebarCollapseHost: () => {
+    let released = false
+    set((state) => ({
+      sidebarCollapseHostCount: state.sidebarCollapseHostCount + 1,
+      sidebarHostsCollapse: true,
+    }))
+    return () => {
+      if (released) return
+      released = true
+      set((state) => {
+        const count = Math.max(0, state.sidebarCollapseHostCount - 1)
+        return { sidebarCollapseHostCount: count, sidebarHostsCollapse: count > 0 }
       })
     }
   },

@@ -17,7 +17,7 @@ jest.mock("@/components/connectivity/pair/pair-helpers", () => ({
 }))
 
 let resumeHandler: (() => void) | null = null
-let networkHandler: ((s: { connected: boolean }) => void) | null = null
+let networkHandler: ((s: { connected: boolean; connectionType?: string }) => void) | null = null
 const resumeUnsub = jest.fn()
 const networkUnsub = jest.fn()
 
@@ -28,7 +28,7 @@ jest.mock("@/lib/capacitor/app", () => ({
   },
 }))
 jest.mock("@/lib/capacitor/network", () => ({
-  subscribe: async (h: (s: { connected: boolean }) => void) => {
+  subscribe: async (h: (s: { connected: boolean; connectionType?: string }) => void) => {
     networkHandler = h
     return networkUnsub
   },
@@ -108,7 +108,7 @@ describe("WebDavMobileAutosyncProvider", () => {
     maybeAutoUploadNowMock.mockClear()
 
     resumeHandler!()
-    networkHandler!({ connected: true })
+    networkHandler!({ connected: false, connectionType: "wifi" })
     resumeHandler!()
     jest.advanceTimersByTime(5_000)
     expect(maybeAutoUploadNowMock).toHaveBeenCalledTimes(1)
@@ -118,6 +118,22 @@ describe("WebDavMobileAutosyncProvider", () => {
     networkHandler!({ connected: false })
     jest.advanceTimersByTime(10_000)
     expect(maybeAutoUploadNowMock).not.toHaveBeenCalled()
+  })
+
+  it("probes LAN WebDAV when Wi-Fi lacks validated Internet", async () => {
+    setNodeEnv("development")
+    platformValue = "android"
+    render(
+      <WebDavMobileAutosyncProvider>
+        <span>child</span>
+      </WebDavMobileAutosyncProvider>
+    )
+    await waitFor(() => expect(networkHandler).not.toBeNull())
+    jest.advanceTimersByTime(5_000)
+    maybeAutoUploadNowMock.mockClear()
+    networkHandler!({ connected: false, connectionType: "wifi" })
+    jest.advanceTimersByTime(5_000)
+    expect(maybeAutoUploadNowMock).toHaveBeenCalledTimes(1)
   })
 
   it("unsubscribes on unmount", async () => {

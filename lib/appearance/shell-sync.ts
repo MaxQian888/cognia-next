@@ -105,3 +105,29 @@ export function getShellColors(
     isDark: variant === "dark",
   }
 }
+
+/**
+ * The shell colors the document is painting RIGHT NOW, read back from the
+ * computed `--background` / `--foreground` on `<html>`.
+ *
+ * For surfaces that render before the settings row is readable — the lock
+ * screen and the other account-gate screens. There is no appearance state to
+ * hand {@link getShellColors} there, but the boot script has already replayed
+ * the mirrored palette (or the stylesheet defaults govern), so the computed
+ * variables are exactly what the page shows and the native bars should match.
+ */
+export function readPaintedShellColors(
+  resolvedTheme: "light" | "dark" | string | undefined,
+  root: HTMLElement | null = typeof document === "undefined" ? null : document.documentElement
+): ShellColors {
+  const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
+  const fallback = variant === "dark" ? FALLBACK_DARK : FALLBACK_LIGHT
+  if (!root || typeof getComputedStyle !== "function") return fallback
+  const computed = getComputedStyle(root)
+  const read = (name: string) => computed.getPropertyValue(name).trim() || undefined
+  return {
+    backgroundHex: toHexOrNull(read("--background")) ?? fallback.backgroundHex,
+    foregroundHex: toHexOrNull(read("--foreground")) ?? fallback.foregroundHex,
+    isDark: variant === "dark",
+  }
+}

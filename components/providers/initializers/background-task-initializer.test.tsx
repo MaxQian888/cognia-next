@@ -1,99 +1,72 @@
 import { render, waitFor } from "@testing-library/react"
 
-const interruptRendererBackgroundTasksOnBoot = jest.fn(async (): Promise<unknown[]> => [])
 const setRendererBackgroundSettleListener = jest.fn()
 const registerBackgroundResultNotifyStrings = jest.fn((_strings: unknown) => jest.fn())
 const onBackgroundRunSettled = jest.fn()
-const redispatchBackgroundRun = jest.fn(async (): Promise<unknown> => ({
-  ok: true,
-  runId: "new-1",
-}))
-const pruneBackgroundTaskRecords = jest.fn(async () => 0)
-const getSettings = jest.fn(async (): Promise<Record<string, unknown>> => ({}))
+const stopRecovery = jest.fn()
+const startBackgroundTaskRecovery = jest.fn(
+  (_options: { onResumed: (count: number) => Promise<void> }) => stopRecovery
+)
 const notify = jest.fn(async () => "n1")
-const recoverStaleDirectChatExecutionRuns = jest.fn(async () => 0)
+let accountRevision = 1
+let targetId: string | undefined = "local"
+let vaultState = "unlocked"
+const translate = (key: string, values?: Record<string, unknown>) =>
+  `${key}${values ? `:${JSON.stringify(values)}` : ""}`
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
-    `${key}${values ? `:${JSON.stringify(values)}` : ""}`,
+jest.mock("next-intl", () => ({ useTranslations: () => translate }))
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (select: (state: { accountRevision: number }) => unknown) =>
+    select({ accountRevision }),
+}))
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => ({ target: targetId ? { id: targetId } : undefined, vaultState }),
 }))
 jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
-  interruptRendererBackgroundTasksOnBoot: (...args: unknown[]) =>
-    interruptRendererBackgroundTasksOnBoot(...(args as [])),
   setRendererBackgroundSettleListener: (...args: unknown[]) =>
-    setRendererBackgroundSettleListener(...(args as [])),
+    setRendererBackgroundSettleListener(...args),
 }))
 jest.mock("@/hooks/chat/background-result-runtime", () => ({
-  onBackgroundRunSettled: (...args: unknown[]) => onBackgroundRunSettled(...(args as [])),
+  onBackgroundRunSettled: (...args: unknown[]) => onBackgroundRunSettled(...args),
   registerBackgroundResultNotifyStrings: (strings: unknown) =>
     registerBackgroundResultNotifyStrings(strings),
 }))
 jest.mock("@/lib/background-tasks/redispatch", () => ({
-  DEFAULT_MAX_AUTO_RESUME_ATTEMPTS: 2,
-  redispatchBackgroundRun: (...args: unknown[]) => redispatchBackgroundRun(...(args as [])),
-}))
-jest.mock("@/lib/db/background-tasks", () => ({
-  pruneBackgroundTaskRecords: (...args: unknown[]) => pruneBackgroundTaskRecords(...(args as [])),
-}))
-jest.mock("@/lib/db/settings", () => ({
-  getSettings: (...args: unknown[]) => getSettings(...(args as [])),
+  startBackgroundTaskRecovery: (options: { onResumed: (count: number) => Promise<void> }) =>
+    startBackgroundTaskRecovery(options),
 }))
 jest.mock("@/lib/notifications/runtime", () => ({
   notify: (...args: unknown[]) => notify(...(args as [])),
 }))
-jest.mock("@/lib/execution/direct-chat-run", () => ({
-  recoverStaleDirectChatExecutionRuns: (...args: unknown[]) =>
-    recoverStaleDirectChatExecutionRuns(...(args as [])),
-}))
 
 import { BackgroundTaskInitializer } from "./background-task-initializer"
 
-const interruptedRow = (over: Record<string, unknown> = {}) => ({
-  runId: "stale-1",
-  kind: "subagent",
-  subagentId: "explore",
-  prompt: "look around",
-  sessionId: "chat-1",
-  host: "renderer",
-  status: "interrupted",
-  startedAt: 1000,
-  settledAt: 2000,
-  mode: "background",
-  ...over,
-})
-
 beforeEach(() => {
   jest.clearAllMocks()
-  interruptRendererBackgroundTasksOnBoot.mockResolvedValue([])
-  getSettings.mockResolvedValue({})
-  redispatchBackgroundRun.mockResolvedValue({ ok: true, runId: "new-1" })
+  accountRevision = 1
+  targetId = "local"
+  vaultState = "unlocked"
 })
 
-it("reconciles renderer background tasks and prunes history on client boot", async () => {
-  const { container } = render(<BackgroundTaskInitializer />)
-
+it("starts shared recovery and stops on unmount", () => {
+  const { container, unmount } = render(<BackgroundTaskInitializer />)
   expect(container).toBeEmptyDOMElement()
-  await waitFor(() => expect(interruptRendererBackgroundTasksOnBoot).toHaveBeenCalledTimes(1))
-  expect(recoverStaleDirectChatExecutionRuns).toHaveBeenCalledTimes(1)
-  await waitFor(() => expect(pruneBackgroundTaskRecords).toHaveBeenCalledTimes(1))
+  expect(startBackgroundTaskRecovery).toHaveBeenCalledTimes(1)
+  unmount()
+  expect(stopRecovery).toHaveBeenCalledTimes(1)
 })
 
-it("wires the settle listener + localized notify copy, and unwires on unmount", async () => {
+it("wires localized settlement copy and unwires on unmount", () => {
   const { unmount } = render(<BackgroundTaskInitializer />)
-
-  // The registered listener is the mocked module's wrapper — assert it
-  // forwards to onBackgroundRunSettled rather than comparing identities.
   const listener = setRendererBackgroundSettleListener.mock.calls[0][0] as (
     ...args: unknown[]
   ) => void
-  expect(typeof listener).toBe("function")
   listener("r1", { kind: "subagent" }, { status: "done" })
   expect(onBackgroundRunSettled).toHaveBeenCalledWith(
     "r1",
     { kind: "subagent" },
     { status: "done" }
   )
-  expect(registerBackgroundResultNotifyStrings).toHaveBeenCalledTimes(1)
   const strings = registerBackgroundResultNotifyStrings.mock.calls[0]![0] as {
     title: (p: { subagentId: string; status: string; elapsed: string }) => string
     body: (p: { runId: string }) => string
@@ -105,51 +78,53 @@ it("wires the settle listener + localized notify copy, and unwires on unmount", 
     "failedTitle"
   )
   expect(strings.body({ runId: "r1" })).toContain("body")
-
   unmount()
   expect(setRendererBackgroundSettleListener).toHaveBeenLastCalledWith(undefined)
 })
 
-it("does not auto-resume when the setting is off (default)", async () => {
-  interruptRendererBackgroundTasksOnBoot.mockResolvedValue([interruptedRow()])
-  render(<BackgroundTaskInitializer />)
-
-  await waitFor(() => expect(interruptRendererBackgroundTasksOnBoot).toHaveBeenCalled())
-  await new Promise((r) => setTimeout(r, 0))
-  expect(redispatchBackgroundRun).not.toHaveBeenCalled()
+it("rebinds after account and runtime target changes and stops when locked", () => {
+  const { rerender } = render(<BackgroundTaskInitializer />)
+  accountRevision += 1
+  rerender(<BackgroundTaskInitializer />)
+  expect(stopRecovery).toHaveBeenCalledTimes(1)
+  expect(startBackgroundTaskRecovery).toHaveBeenCalledTimes(2)
+  targetId = "companion"
+  rerender(<BackgroundTaskInitializer />)
+  expect(stopRecovery).toHaveBeenCalledTimes(2)
+  expect(startBackgroundTaskRecovery).toHaveBeenCalledTimes(3)
+  vaultState = "locked"
+  rerender(<BackgroundTaskInitializer />)
+  expect(stopRecovery).toHaveBeenCalledTimes(3)
+  expect(startBackgroundTaskRecovery).toHaveBeenCalledTimes(3)
 })
 
-it("auto-resumes this boot's interrupted background subagent runs when opted in", async () => {
-  interruptRendererBackgroundTasksOnBoot.mockResolvedValue([
-    interruptedRow(),
-    interruptedRow({ runId: "fg-1", mode: "foreground" }), // foreground rows never auto-resume
-    interruptedRow({ runId: "plugin-1", kind: "plugin-agent" }), // non-subagent kinds skipped
-  ])
-  getSettings.mockResolvedValue({
-    backgroundTasks: { autoResumeInterrupted: true, maxAutoResumeAttempts: 3 },
-  })
+it("does not access the recovery database before an unlocked target exists", () => {
+  targetId = undefined
+  const { rerender } = render(<BackgroundTaskInitializer />)
+  expect(startBackgroundTaskRecovery).not.toHaveBeenCalled()
+  targetId = "local"
+  vaultState = "locked"
+  rerender(<BackgroundTaskInitializer />)
+  expect(startBackgroundTaskRecovery).not.toHaveBeenCalled()
+})
 
+it("uses the existing translated summary notification", async () => {
   render(<BackgroundTaskInitializer />)
-
-  await waitFor(() => expect(redispatchBackgroundRun).toHaveBeenCalledTimes(1))
-  expect(redispatchBackgroundRun).toHaveBeenCalledWith(
-    expect.objectContaining({ runId: "stale-1" }),
-    { kind: "auto", maxAutoResumeAttempts: 3 }
-  )
-  await waitFor(() => expect(notify).toHaveBeenCalledTimes(1))
-  expect(notify).toHaveBeenCalledWith(
-    expect.objectContaining({ dedupeKey: "background-auto-resume" })
+  await startBackgroundTaskRecovery.mock.calls[0][0].onResumed(2)
+  await waitFor(() =>
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'autoResumed:{"count":2}',
+        dedupeKey: "background-auto-resume",
+      })
+    )
   )
 })
 
-it("skips the summary notification when nothing was resumed", async () => {
-  interruptRendererBackgroundTasksOnBoot.mockResolvedValue([interruptedRow()])
-  getSettings.mockResolvedValue({ backgroundTasks: { autoResumeInterrupted: true } })
-  redispatchBackgroundRun.mockResolvedValue({ ok: false, reason: "attempt-cap", message: "capped" })
-
-  render(<BackgroundTaskInitializer />)
-
-  await waitFor(() => expect(redispatchBackgroundRun).toHaveBeenCalled())
-  await new Promise((r) => setTimeout(r, 0))
+it("does not notify after the lifecycle has stopped", async () => {
+  const { unmount } = render(<BackgroundTaskInitializer />)
+  const callback = startBackgroundTaskRecovery.mock.calls[0][0].onResumed
+  unmount()
+  await callback(1)
   expect(notify).not.toHaveBeenCalled()
 })

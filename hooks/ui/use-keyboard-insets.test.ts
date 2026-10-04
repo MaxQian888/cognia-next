@@ -3,16 +3,26 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-import { useKeyboardInsets } from "./use-keyboard-insets"
+import { useKeyboardInsets, useKeyboardViewport } from "./use-keyboard-insets"
 
 jest.mock("@/hooks/use-platform", () => ({
   __esModule: true,
   usePlatform: jest.fn(),
 }))
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: jest.fn(() => false),
+}))
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  useCoarsePointer: jest.fn(() => false),
+}))
 
 import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 
 const mockUsePlatform = usePlatform as jest.Mock
+const mockCompact = useCompactLayout as jest.Mock
+const mockCoarse = useCoarsePointer as jest.Mock
 
 interface FakeVV {
   height: number
@@ -106,6 +116,8 @@ function installNativeKeyboard() {
 describe("useKeyboardInsets", () => {
   beforeEach(() => {
     mockUsePlatform.mockReset()
+    mockCompact.mockReset().mockReturnValue(false)
+    mockCoarse.mockReset().mockReturnValue(false)
     delete (window as unknown as { Capacitor?: unknown }).Capacitor
   })
 
@@ -210,12 +222,73 @@ describe("useKeyboardInsets", () => {
 
     const { unmount } = renderHook(() => useKeyboardInsets())
     await act(async () => {})
-    expect(native.plugin.addListener).toHaveBeenCalledTimes(3)
+    expect(native.plugin.addListener).toHaveBeenCalledTimes(4)
 
     unmount()
     expect(native.removed).toEqual(
-      expect.arrayContaining(["keyboardWillShow", "keyboardDidShow", "keyboardWillHide"])
+      expect.arrayContaining([
+        "keyboardWillShow",
+        "keyboardDidShow",
+        "keyboardWillHide",
+        "keyboardDidHide",
+      ])
     )
+  })
+
+  it("shares one native subscription across every consumer", async () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    installVisualViewport({ height: 800, innerHeight: 800 })
+    const native = installNativeKeyboard()
+
+    const a = renderHook(() => useKeyboardInsets())
+    const b = renderHook(() => useKeyboardViewport())
+    await act(async () => {})
+    expect(native.plugin.addListener).toHaveBeenCalledTimes(4)
+
+    act(() => native.fire("keyboardWillShow", { keyboardHeight: 300 }))
+    expect(a.result.current.isVisible).toBe(true)
+    expect(b.result.current).toMatchObject({ open: true, nativeHeight: 300 })
+    a.unmount()
+    b.unmount()
+  })
+
+  it("publishes the visible height on <html> while open and clears it on unmount", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    const { setSize } = installVisualViewport({ height: 800, innerHeight: 800 })
+    const { unmount } = renderHook(() => useKeyboardInsets())
+    act(() => setSize({ height: 450, innerHeight: 800 }))
+    const html = document.documentElement
+    expect(html.style.getPropertyValue("--visual-viewport-height")).toBe("450px")
+    expect(html.getAttribute("data-keyboard")).toBe("open")
+    unmount()
+    expect(html.style.getPropertyValue("--visual-viewport-height")).toBe("")
+    expect(html.hasAttribute("data-keyboard")).toBe(false)
+  })
+
+  it("tracks a phone browser (compact layout + finger) as a soft-keyboard device", () => {
+    mockUsePlatform.mockReturnValue("web")
+    mockCompact.mockReturnValue(true)
+    mockCoarse.mockReturnValue(true)
+    const { setSize } = installVisualViewport({ height: 800, innerHeight: 800 })
+    const { result } = renderHook(() => useKeyboardInsets())
+    act(() => setSize({ height: 500, innerHeight: 800 }))
+    expect(result.current).toEqual({ keyboardHeight: 300, isVisible: true })
+  })
+
+  it("ignores a narrow desktop window (compact layout, fine pointer)", () => {
+    mockUsePlatform.mockReturnValue("web")
+    mockCompact.mockReturnValue(true)
+    mockCoarse.mockReturnValue(false)
+    installVisualViewport({ height: 500, innerHeight: 800 })
+    const { result } = renderHook(() => useKeyboardInsets())
+    expect(result.current).toEqual({ keyboardHeight: 0, isVisible: false })
+  })
+
+  it("stays closed when the caller disables it", () => {
+    mockUsePlatform.mockReturnValue("mobile")
+    installVisualViewport({ height: 500, innerHeight: 800 })
+    const { result } = renderHook(() => useKeyboardViewport(false))
+    expect(result.current.open).toBe(false)
   })
 
   it("falls back to visualViewport when the native plugin never registers", () => {

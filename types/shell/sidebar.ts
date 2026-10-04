@@ -170,6 +170,17 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     aliasKey: "files",
     mobileHidden: true,
   },
+  // The conversation manager (ADR-0213): every conversation in every
+  // workspace, active and archived, in one table. The chat sidebar stays where
+  // conversations are used; this is where their history is looked after.
+  {
+    id: "conversations",
+    route: "/conversations",
+    i18nKey: "conversations",
+    group: "auxiliary",
+    category: "spaces",
+    aliasKey: "conversations",
+  },
   { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary", category: "spaces" },
   { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary", category: "insights" },
   // No "observability" entry: the tracing dashboard is a sub-view of `/logs`
@@ -204,13 +215,15 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // something needs deciding, not one you live in.
   { id: "bots", route: "/bots", i18nKey: "bots", group: "auxiliary", category: "agents" },
   { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary", category: "insights" },
+  // Not `desktopOnly` (ADR-0035, 2026-08-13): every shell measures its own
+  // Renderer and records captures, and the mobile safe-area capture chip's
+  // "Open" lands here. Host sections appear only when a host is attached.
   {
     id: "performance",
     route: "/performance",
     i18nKey: "performance",
     group: "auxiliary",
     category: "insights",
-    desktopOnly: true,
   },
   // The tracing dashboard folded into this route's Traces channel, taking its
   // own rail entry with it — so "observability" has to resolve here in ⌘K.

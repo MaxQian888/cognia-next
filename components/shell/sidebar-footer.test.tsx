@@ -47,6 +47,8 @@ jest.mock("./shell-layout-dialog", () => ({
 
 import { SidebarFooter } from "./sidebar-footer"
 import { toAriaKeyShortcuts } from "@/lib/shortcuts/utils"
+import { useUIStore } from "@/stores/ui"
+import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 
 beforeEach(() => {
   routerPush.mockClear()
@@ -108,5 +110,34 @@ describe("SidebarFooter", () => {
     fireEvent.click(screen.getByTestId("sidebar-footer-settings-menu-customize"))
     expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
     expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  describe("collapse button", () => {
+    beforeEach(() => {
+      useUIStore.setState({ sidebarCollapsed: false })
+      useShellColumnsStore.setState({ sidebarHostsCollapse: false, sidebarCollapseHostCount: 0 })
+    })
+
+    it("is not drawn unless the rail asks for it, and claims nothing then", () => {
+      render(<SidebarFooter />)
+      expect(screen.queryByTestId("sidebar-footer-collapse")).toBeNull()
+      expect(useShellColumnsStore.getState().sidebarHostsCollapse).toBe(false)
+    })
+
+    it("folds the rail, names the chord, and takes the job off the chat header", () => {
+      const { unmount } = render(<SidebarFooter collapseToggle />)
+      const button = screen.getByTestId("sidebar-footer-collapse")
+      expect(button).toHaveAccessibleName("collapseSidebar")
+      expect(button).toHaveAttribute("aria-keyshortcuts", toAriaKeyShortcuts("ctrl+b"))
+      expect(button).toHaveAttribute("aria-controls", "conversation-sidebar")
+      // The last control on the row — it acts on the whole column.
+      expect(button.parentElement!.lastElementChild).toBe(button)
+      expect(useShellColumnsStore.getState().sidebarHostsCollapse).toBe(true)
+      fireEvent.click(button)
+      expect(useUIStore.getState().sidebarCollapsed).toBe(true)
+      // Gone with the rail: the header's expand button is the way back.
+      unmount()
+      expect(useShellColumnsStore.getState().sidebarHostsCollapse).toBe(false)
+    })
   })
 })

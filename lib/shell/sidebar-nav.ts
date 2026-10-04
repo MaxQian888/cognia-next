@@ -36,6 +36,7 @@ import {
   Users2Icon,
   WorkflowIcon,
   FolderOpenIcon,
+  HistoryIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { arrayMove } from "@dnd-kit/sortable"
@@ -77,6 +78,8 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   "agent-runs": ListChecksIcon,
   sites: PanelsTopLeftIcon,
   files: FolderOpenIcon,
+  // Not `MessagesSquareIcon`: that one is the Go menu's Chats entry.
+  conversations: HistoryIcon,
   a2ui: LayoutGridIcon,
   memory: BrainIcon,
   servers: ServerCogIcon,

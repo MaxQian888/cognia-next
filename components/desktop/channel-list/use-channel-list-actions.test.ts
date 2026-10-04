@@ -150,6 +150,100 @@ describe("useChannelListActions", () => {
     expect(result.current.renamingFolderId).toBeNull()
   })
 
+  it("creates a folder for the given rows, files them, then opens its name", async () => {
+    const handlers = callbacks()
+    handlers.onCreateFolder.mockResolvedValue(folder("made"))
+    const { result } = renderHook(() =>
+      useChannelListActions({
+        ...handlers,
+        folders: [],
+        newFolderName: "New folder",
+      })
+    )
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.handleNewFolderWith?.(["one", "two"])
+    })
+    expect(ok).toBe(true)
+    expect(handlers.onCreateFolder).toHaveBeenCalledWith("New folder")
+    // No batch writer here: the boundary files the rows one by one, in order.
+    expect(handlers.onAssignToFolder.mock.calls).toEqual([
+      ["one", "made"],
+      ["two", "made"],
+    ])
+    expect(result.current.renamingFolderId).toBe("made")
+    expect(toastSuccess).toHaveBeenCalledWith('moveSuccess:{"count":2}', undefined)
+  })
+
+  it("files nothing and opens no editor when the folder could not be made", async () => {
+    const handlers = callbacks()
+    handlers.onCreateFolder.mockRejectedValue(new Error("create failed"))
+    const { result } = renderHook(() =>
+      useChannelListActions({ ...handlers, folders: [], newFolderName: "New folder" })
+    )
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.handleNewFolderWith?.(["one"])
+    })
+    expect(ok).toBe(false)
+    expect(handlers.onAssignToFolder).not.toHaveBeenCalled()
+    expect(result.current.renamingFolderId).toBeNull()
+  })
+
+  it("reports a failed filing but still opens the new folder's name", async () => {
+    const handlers = callbacks()
+    handlers.onCreateFolder.mockResolvedValue(folder("made"))
+    handlers.onAssignToFolder.mockRejectedValue(new Error("move failed"))
+    const { result } = renderHook(() =>
+      useChannelListActions({ ...handlers, folders: [], newFolderName: "New folder" })
+    )
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.handleNewFolderWith?.(["one"])
+    })
+    expect(ok).toBe(false)
+    expect(result.current.renamingFolderId).toBe("made")
+  })
+
+  it("makes nothing for an empty set of rows", async () => {
+    const handlers = callbacks()
+    const { result } = renderHook(() =>
+      useChannelListActions({ ...handlers, folders: [], newFolderName: "New folder" })
+    )
+    let ok: boolean | undefined
+    await act(async () => {
+      ok = await result.current.handleNewFolderWith?.([])
+    })
+    expect(ok).toBe(false)
+    expect(handlers.onCreateFolder).not.toHaveBeenCalled()
+  })
+
+  it("offers no new-folder-with path without a way to file rows", () => {
+    const handlers = callbacks()
+    const { result } = renderHook(() =>
+      useChannelListActions({
+        ...handlers,
+        onAssignToFolder: undefined,
+        folders: [],
+        newFolderName: "New folder",
+      })
+    )
+    expect(result.current.handleNewFolderWith).toBeUndefined()
+  })
+
+  it("offers no new-folder-with path without a folder creator", () => {
+    const handlers = callbacks()
+    const { result } = renderHook(() =>
+      useChannelListActions({
+        ...handlers,
+        onCreateFolder: undefined,
+        folders: [],
+        newFolderName: "New folder",
+      })
+    )
+    expect(result.current.handleNewFolderWith).toBeUndefined()
+  })
+
   it("reorders folders within bounds and logs persistence failures", async () => {
     const handlers = callbacks()
     handlers.onReorderFolders.mockRejectedValue(new Error("write failed"))

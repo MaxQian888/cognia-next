@@ -72,6 +72,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 }
 
 import { renderToStaticMarkup } from "react-dom/server"
+import { AppRuntime } from "@/components/runtime/app-runtime"
 import RootLayout, { metadata } from "./layout"
 
 describe("RootLayout", () => {
@@ -94,6 +95,15 @@ describe("RootLayout", () => {
       title: "Cognia",
       description: "Local-first AI companion — chat, workflows, twin, and connectors.",
     })
+  })
+
+  it("serializes one runtime boundary while retaining the route as a server slot", async () => {
+    const page = <main>content</main>
+    const tree = await RootLayout({ children: page })
+    const body = tree.props.children[1]
+    expect(body.type).toBe("body")
+    expect(body.props.children.type).toBe(AppRuntime)
+    expect(body.props.children.props.children).toBe(page)
   })
 
   it("renders html/body with font variables and children", async () => {

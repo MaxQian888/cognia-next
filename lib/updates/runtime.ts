@@ -54,6 +54,10 @@ export function productionAdapters(): UpdateAdapter[] {
     createDesktopAdapter(),
     createMobileAdapter("mobile-ios", { playCore: undefined }),
     createMobileAdapter("mobile-android", {
+      playAvailable: async () => {
+        const { getGooglePlayServicesStatus } = await import("@/lib/capacitor/google-play-services")
+        return (await getGooglePlayServicesStatus()).available
+      },
       playCore: {
         getAppUpdateInfo: (...args) =>
           import("@/lib/capacitor/app-update").then((m) => m.getAppUpdateInfo(...args)),

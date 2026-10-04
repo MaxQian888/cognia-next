@@ -17,12 +17,13 @@ import { SessionRunIndicator } from "@/components/chat/session-run-indicator"
 import { ConversationDeleteConfirm } from "@/components/chat/conversation-delete-confirm"
 import {
   SessionRowMenuItems,
-  type CogniaAgentStatus,
   type SessionRowMenuItemsProps,
 } from "@/components/chat/session-row-menu-items"
+import { useSessionDesktopHandoffs } from "@/hooks/chat/use-session-desktop-handoffs"
 import { CONTEXT_MENU_KIT, DROPDOWN_MENU_KIT } from "@/components/shared/menu-kit"
 import type { ChatStatus } from "@/stores/chat/chat-store"
 import { useInlineRename } from "@/hooks/ui/use-inline-rename"
+import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
 import type { ConversationRowExtraActions } from "@/hooks/chat/use-conversation-row-actions"
 import { sessionDisplayTitle } from "@/lib/chat/placeholder-title"
 import { cn } from "@/lib/utils"
@@ -32,12 +33,11 @@ import {
   CONVERSATION_TIMESTAMP_FORMATS,
   conversationTimestampShape,
 } from "@/lib/chat/conversation-timestamp"
-import { assignableFolders } from "@/lib/chat/conversation-list-model"
+import { assignableFolders, folderAcceptsSession } from "@/lib/chat/conversation-list-model"
 import { useSessionWorkspaceMoveMenu } from "@/hooks/workspace/use-move-session-workspace"
 import { useContinueAsProjectMenu } from "@/hooks/project-coordinator/use-continue-as-project-menu"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import { loggers } from "@cognia/logging"
-import { isTauri } from "@/lib/tauri"
 import type {
   ChatSession,
   ConversationSidebarMetadata,
@@ -46,6 +46,7 @@ import type {
 import {
   BotIcon,
   BoxesIcon,
+  CheckIcon,
   GitBranchIcon,
   GripVerticalIcon,
   HashIcon,
@@ -57,8 +58,8 @@ import {
   PinIcon,
   UsersIcon,
   WaypointsIcon,
+  ArchiveIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 import { useFormatter, useNow, useTimeZone, useTranslations } from "next-intl"
 import {
   memo,
@@ -135,6 +136,33 @@ interface SessionRowProps {
   onSelect: (id: string, e: ReactMouseEvent) => void
   /** Toggle this row in the channel-list multi-selection (menu/touch entry point). */
   onToggleSelection?: (id: string) => void
+  /**
+   * A selection is in play on the list: the leading slot shows a checkbox (so
+   * which rows are in it reads at a glance, not only from a tint) and the row's
+   * button reports its pressed state. Whether a click toggles or opens is the
+   * list's call (`onSelect`), not the row's.
+   */
+  selectable?: boolean
+  /**
+   * Draw the trailing pin glyph on a pinned row. The list turns it off inside
+   * the Pinned section, whose header already says it; search results and the
+   * other surfaces keep it.
+   */
+  showPinGlyph?: boolean
+  /**
+   * Mark the row as archived — an archive glyph with the word for screen
+   * readers. The list sets it only where both kinds can sit side by side (a
+   * search that reaches past the archive split); inside the Archived view
+   * every row is archived and the marker would say nothing.
+   */
+  archivedMarker?: boolean
+  /**
+   * "Move to folder → New folder…": make a folder for this row and file it
+   * there. Offered only when that folder — created in `newFolderProjectId`,
+   * the active workspace — could hold the row.
+   */
+  onNewFolderWith?: (sessionId: string) => void
+  newFolderProjectId?: string | null
   onDelete: (id: string) => void | Promise<unknown>
   onRename: (id: string, title: string) => void | Promise<unknown>
   /** Toggle the pinned state for this row. */
@@ -252,6 +280,11 @@ function SessionRowImpl({
   selected = false,
   onSelect,
   onToggleSelection,
+  selectable = false,
+  showPinGlyph = true,
+  archivedMarker = false,
+  onNewFolderWith,
+  newFolderProjectId,
   onDelete,
   onRename,
   onTogglePinned,
@@ -296,8 +329,6 @@ function SessionRowImpl({
   const [editing, setEditing] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [handoffDialogOpen, setHandoffDialogOpen] = useState(false)
-  const [cogniaAgentStatus, setCogniaAgentStatus] = useState<CogniaAgentStatus>("unknown")
-  const [codexDispatching, setCodexDispatching] = useState(false)
   const liRef = useRef<HTMLLIElement>(null)
   const selectButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -350,6 +381,9 @@ function SessionRowImpl({
     },
   })
 
+  // The list's archive chord acts on the focused row (`channel-list.tsx`), so
+  // the row announces it beside its own keys.
+  const archiveShortcutAria = useAppShortcutLabel("shell.conversation.toggleArchive").aria
   const locked = Boolean(session.handoffLock)
   const startRename = () => {
     // Renaming a handed-off conversation would only fail at commit time.
@@ -426,6 +460,11 @@ function SessionRowImpl({
     () => assignableFolders({ projectId: sessionProjectId }, folders ?? []),
     [folders, sessionProjectId]
   )
+  // The same rule for a folder that does not exist yet: it will be made in the
+  // active workspace, so a row from another one cannot be filed there.
+  const canFileInNewFolder =
+    Boolean(onNewFolderWith) &&
+    folderAcceptsSession({ projectId: newFolderProjectId ?? undefined }, session)
 
   // Attribution is correctable from where a misplaced conversation is noticed:
   // the list (shared with the mobile action sheet).
@@ -441,107 +480,12 @@ function SessionRowImpl({
     void onUnarchive?.(session.id)
   }
 
-  const handleActionsOpenChange = (open: boolean) => {
-    // The terminal hand-off is Tauri-only (its item is not rendered anywhere
-    // else), so the CLI probe has nothing to answer on the web.
-    if (!open || !isTauri()) return
-    if (cogniaAgentStatus === "checking" || cogniaAgentStatus === "available") return
-    setCogniaAgentStatus("checking")
-    void import("@/lib/cli-bridge/detect-cli")
-      .then(({ detectCli }) => detectCli("cognia-agent"))
-      .then((result) => setCogniaAgentStatus(result.available ? "available" : "missing"))
-      .catch(() => setCogniaAgentStatus("missing"))
-  }
-
-  /**
-   * Hand this session BACK to the standalone CLI: write its transcript to
-   * `~/.cognia/handoff/<id>.jsonl`, then launch `cognia-agent resume <id>` in
-   * a fresh dock tab. Desktop only; heavy collaborators stay lazy-loaded.
-   */
-  const handleOpenInTerminal = () => {
-    void (async () => {
-      try {
-        const [
-          { listMessages },
-          { exportHandoffToCli },
-          { launchCogniaAgent },
-          { useTerminalStore },
-          { homeDir },
-        ] = await Promise.all([
-          import("@/lib/db/messages"),
-          import("@/lib/chat/export-handoff-to-cli"),
-          import("@/lib/terminal/run-cognia"),
-          import("@/stores/terminal/terminal-store"),
-          import("@tauri-apps/api/path"),
-        ])
-        const messages = await listMessages(session.id)
-        await exportHandoffToCli({ sessionId: session.id, messages })
-        const cwd = session.workingDir?.trim() || (await homeDir())
-        const outcome = await launchCogniaAgent({
-          handoffSessionId: session.id,
-          cwd,
-          store: useTerminalStore.getState(),
-        })
-        if (outcome.kind !== "launched") {
-          throw new Error(outcome.kind === "error" ? outcome.message : outcome.reason || "denied")
-        }
-        log.info("session open-in-terminal", { sessionId: session.id })
-        toast.success(t("openedInTerminal", { command: `cognia-agent resume ${session.id}` }))
-      } catch (err) {
-        toast.error(t("openInTerminalFailed"))
-        log.warn("session open-in-terminal failed", { error: String(err) })
-      }
-    })()
-  }
-
-  const handleOpenInCodexApp = () => {
-    setCodexDispatching(true)
-    void import("@/lib/chat/dispatch-to-codex-app")
-      .then(({ dispatchSessionToCodexApp }) => dispatchSessionToCodexApp(session))
-      .then(() => {
-        log.info("session open-in-codex-app", { sessionId: session.id })
-        toast.success(t("openedInCodexApp"))
-      })
-      .catch((error) => {
-        log.warn("session open-in-codex-app failed", { error: String(error) })
-        const code = (error as { code?: string } | null)?.code
-        const detail = String(error)
-        toast.error(
-          t(
-            code === "PII_BLOCKED"
-              ? "codexHandoffPiiBlocked"
-              : code === "UNTRANSFERABLE_CONTENT"
-                ? "codexHandoffUnsupported"
-                : detail.includes("uncertain outcome") ||
-                    detail.includes("timed out") ||
-                    detail.includes("not yet discoverable") ||
-                    detail.includes("recovery scan limit")
-                  ? "codexHandoffPending"
-                  : "openInCodexAppFailed"
-          ),
-          { description: detail }
-        )
-      })
-      .finally(() => setCodexDispatching(false))
-  }
-
-  const handleReturnFromCodexApp = (event: ReactMouseEvent) => {
-    setCodexDispatching(true)
-    void import("@/lib/chat/dispatch-to-codex-app")
-      .then(({ returnSessionFromCodexApp }) => returnSessionFromCodexApp(session))
-      .then((sessionId) => {
-        onSelect(sessionId, event)
-        toast.success(t("returnedFromCodexApp"))
-      })
-      .catch((error) => {
-        const code = (error as { code?: string } | null)?.code
-        toast.error(
-          t(code === "TARGET_NOT_FOUND" ? "codexHandoffTargetMissing" : "returnFromCodexAppFailed"),
-          { description: String(error) }
-        )
-      })
-      .finally(() => setCodexDispatching(false))
-  }
+  // The desktop hand-offs (terminal, Codex) and the CLI probe their menu items
+  // need — shared with the conversation manager's rows.
+  const desktopHandoffs = useSessionDesktopHandoffs(session, (sessionId, event) =>
+    onSelect(sessionId, event)
+  )
+  const handleActionsOpenChange = desktopHandoffs.onActionsOpenChange
 
   const Icon =
     session.kind === "team" ? UsersIcon : session.characterId ? HashIcon : MessageSquareIcon
@@ -574,18 +518,12 @@ function SessionRowImpl({
     onAssignToFolder: onAssignToFolder
       ? (folderId) => void onAssignToFolder(session.id, folderId)
       : undefined,
+    onNewFolder:
+      onAssignToFolder && canFileInNewFolder ? () => onNewFolderWith!(session.id) : undefined,
     ...workspaceMove,
     ...continueAsProjectMenu,
     onHandoff: () => setHandoffDialogOpen(true),
-    desktop: isTauri()
-      ? {
-          codexDispatching,
-          onOpenInCodexApp: handleOpenInCodexApp,
-          onReturnFromCodexApp: session.codexHandoff ? handleReturnFromCodexApp : undefined,
-          cogniaAgentStatus,
-          onOpenInTerminal: handleOpenInTerminal,
-        }
-      : undefined,
+    desktop: desktopHandoffs.desktop,
     onDelete: () => setDeleteConfirmOpen(true),
   }
   // `null` when the session has never been stamped — the column is dropped
@@ -701,7 +639,10 @@ function SessionRowImpl({
               // on the actions trigger or a drag handle inside the same row.
               data-session-row-select={session.id}
               aria-current={active ? "page" : undefined}
-              aria-keyshortcuts="F2 Delete"
+              aria-pressed={selectable ? selected : undefined}
+              aria-keyshortcuts={
+                archiveShortcutAria ? `F2 Delete ${archiveShortcutAria}` : "F2 Delete"
+              }
               className={cn(
                 "flex min-w-0 flex-1 items-center gap-2 rounded-lg pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                 rowPadding
@@ -715,7 +656,25 @@ function SessionRowImpl({
                 className="flex size-5 shrink-0 items-center justify-center"
                 data-testid="session-row-leading"
               >
-                {session.platformBinding ? (
+                {selectable ? (
+                  // The selection's own mark: a checkbox in the slot the
+                  // avatar left, so a selected row reads as selected even
+                  // where the tint is faint (a wallpaper, high contrast).
+                  // Decorative — the button's pressed state carries it.
+                  <span
+                    aria-hidden
+                    data-testid="session-row-checkbox"
+                    data-checked={selected || undefined}
+                    className={cn(
+                      "flex size-4 items-center justify-center rounded-[4px] border transition-colors",
+                      selected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-muted-foreground/45 bg-background/70"
+                    )}
+                  >
+                    {selected ? <CheckIcon className="size-3" strokeWidth={3} /> : null}
+                  </span>
+                ) : session.platformBinding ? (
                   <span className="relative flex">
                     <AvatarBadge
                       subject={{ name: session.title || session.platformBinding.conversationKey }}
@@ -762,10 +721,17 @@ function SessionRowImpl({
                     motion={titleMotion}
                     highlight={searchQuery}
                   />
-                  {session.pinned ? (
+                  {session.pinned && showPinGlyph ? (
                     <PinIcon
                       className="size-3 shrink-0 text-muted-foreground"
                       aria-label={t("pinned")}
+                    />
+                  ) : null}
+                  {archivedMarker ? (
+                    <ArchiveIcon
+                      className="size-3 shrink-0 text-muted-foreground"
+                      aria-label={t("archived")}
+                      data-testid="session-row-archived"
                     />
                   ) : null}
                   {session.handoffLock ? (

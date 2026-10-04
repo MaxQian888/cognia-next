@@ -27,6 +27,16 @@ export type BootMirrorKey = (typeof BOOT_MIRROR_KEYS)[number]
 export const BOOT_MIRROR_STORAGE_KEY = "cognia.appearance.mirror"
 
 /**
+ * Routes rendered inside a transparent desktop-pet window (the sprite and its
+ * click popup). The boot script marks `<html data-pet-overlay>` on them before
+ * the first paint, so the page is transparent even when no React ever runs:
+ * the native safety net force-reveals a sprite window whose renderer never
+ * signalled its first frame, and the views set the same attribute only from
+ * an effect, after hydration — without this that reveal showed an opaque box.
+ */
+export const PET_OVERLAY_ROUTE_PATTERN = /^\/pet-(?:overlay|popup)(?:\/|$)/
+
+/**
  * Mirror payload. The four flat color keys are the original FOUC-critical
  * shell colors (kept flat for backward compatibility). The nested `vars` /
  * `attrs` extend anti-flicker coverage to the other `<html>`-level knobs the
@@ -39,6 +49,18 @@ export const BOOT_MIRROR_STORAGE_KEY = "cognia.appearance.mirror"
 export type BootMirrorPayload = Partial<Record<BootMirrorKey, string>> & {
   /** Resolved variant that produced the cached colors. Legacy colors are ignored. */
   colorScheme?: "light" | "dark"
+  /**
+   * The rest of the resolved color palette (`--card`, `--muted`, `--input`,
+   * `--border`, …), keyed by CSS custom property. Guarded by `colorScheme`
+   * exactly like the four flat keys, because these are per-variant values.
+   *
+   * The four flat keys were enough for a first-paint flash, but not for the
+   * surfaces that render BEFORE `CustomThemeApplier` mounts: the lock screen
+   * and the other account-gate screens sit outside the authenticated tree, so
+   * with only those four they painted a custom theme's background under the
+   * default palette's inputs, borders and muted text.
+   */
+  palette?: Record<string, string>
   /** Extra CSS custom properties (`--*`) to set on `<html>`. */
   vars?: Record<string, string>
   /** data-* attributes to set on `<html>` (e.g. `data-density`). */
@@ -56,6 +78,9 @@ export type BootMirrorPayload = Partial<Record<BootMirrorKey, string>> & {
  */
 export function runBootScript(): void {
   try {
+    if (PET_OVERLAY_ROUTE_PATTERN.test(window.location.pathname)) {
+      document.documentElement.setAttribute("data-pet-overlay", "1")
+    }
     const raw = window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)
     if (!raw) return
     const mirror = JSON.parse(raw) as Record<string, unknown> | null
@@ -64,11 +89,22 @@ export function runBootScript(): void {
     // next-themes has already resolved the class before this queued script runs.
     // A system-theme change between launches must not replay the old palette.
     const colorScheme = root.classList.contains("dark") ? "dark" : "light"
-    const colorKeys = mirror.colorScheme === colorScheme ? BOOT_MIRROR_KEYS : []
+    const schemeMatches = mirror.colorScheme === colorScheme
+    const colorKeys = schemeMatches ? BOOT_MIRROR_KEYS : []
     for (const key of colorKeys) {
       const value = mirror[key]
       if (typeof value === "string" && value.length > 0) {
         root.style.setProperty(key, value)
+      }
+    }
+    // Full palette, under the same variant guard as the flat keys above.
+    const palette = schemeMatches ? mirror.palette : null
+    if (palette && typeof palette === "object") {
+      for (const name of Object.keys(palette as Record<string, unknown>)) {
+        const value = (palette as Record<string, unknown>)[name]
+        if (name.indexOf("--") === 0 && typeof value === "string" && value.length > 0) {
+          root.style.setProperty(name, value)
+        }
       }
     }
     // Extended vars (radius / typography). Guard to `--*` names so a corrupt
@@ -106,18 +142,33 @@ export function runBootScript(): void {
 export const BOOT_SCRIPT = [
   "(function () {",
   "  try {",
+  `    if (${PET_OVERLAY_ROUTE_PATTERN.toString()}.test(window.location.pathname)) {`,
+  "      document.documentElement.setAttribute('data-pet-overlay', '1');",
+  "    }",
   `    var raw = window.localStorage.getItem(${JSON.stringify(BOOT_MIRROR_STORAGE_KEY)});`,
   "    if (!raw) return;",
   "    var mirror = JSON.parse(raw);",
   "    if (!mirror || typeof mirror !== 'object') return;",
   "    var root = document.documentElement;",
   '    var colorScheme = root.classList.contains("dark") ? "dark" : "light";',
-  `    var keys = mirror.colorScheme === colorScheme ? ${JSON.stringify(BOOT_MIRROR_KEYS)} : [];`,
+  "    var schemeMatches = mirror.colorScheme === colorScheme;",
+  `    var keys = schemeMatches ? ${JSON.stringify(BOOT_MIRROR_KEYS)} : [];`,
   "    for (var i = 0; i < keys.length; i++) {",
   "      var key = keys[i];",
   "      var value = mirror[key];",
   "      if (typeof value === 'string' && value.length > 0) {",
   "        root.style.setProperty(key, value);",
+  "      }",
+  "    }",
+  "    var palette = schemeMatches ? mirror.palette : null;",
+  "    if (palette && typeof palette === 'object') {",
+  "      var pkeys = Object.keys(palette);",
+  "      for (var p = 0; p < pkeys.length; p++) {",
+  "        var pn = pkeys[p];",
+  "        var pv = palette[pn];",
+  "        if (pn.indexOf('--') === 0 && typeof pv === 'string' && pv.length > 0) {",
+  "          root.style.setProperty(pn, pv);",
+  "        }",
   "      }",
   "    }",
   "    var vars = mirror.vars;",

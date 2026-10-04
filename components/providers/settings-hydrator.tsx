@@ -9,6 +9,8 @@ import {
   type BootMirrorPayload,
 } from "@/lib/appearance/boot-script"
 import { getShellColors } from "@/lib/appearance/shell-sync"
+import { resolveAppPalette } from "@/lib/appearance/resolve-app-palette"
+import { THEME_TOKEN_CATALOG } from "@/lib/appearance/theme-token-catalog"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import { resolveRadiusVar, stylePackRadiusBase } from "@/lib/appearance/radius-applier"
 import { stylePackDensity } from "@/lib/appearance/density-applier"
@@ -46,6 +48,7 @@ export function SettingsHydrator(): null {
   const activePluginThemeId = useSettingsStore((s) => s.activePluginThemeId)
   const accentColor = useSettingsStore((s) => s.accentColor)
   const customThemes = useSettingsStore((s) => s.customThemes)
+  const a11y = useSettingsStore((s) => s.settings?.a11y)
   const radius = useSettingsStore((s) => s.settings?.radius)
   const typography = useSettingsStore((s) => s.settings?.typographyExt)
   const density = useSettingsStore((s) => s.settings?.density)
@@ -90,9 +93,23 @@ export function SettingsHydrator(): null {
     // plugin theme is painted from a <style> block whose colors this pure
     // helper can't resolve — so we skip both and let CustomThemeApplier /
     // PluginThemeApplier settle them a frame later without a stale bleed.
+    //
+    // The palette is resolved exactly as `CustomThemeApplier` resolves it
+    // (a11y layers included), because the screens that read the mirrored
+    // palette — the lock screen and the other account-gate screens — render
+    // before that applier mounts and must look like the app it guards.
+    const palette = resolveAppPalette({
+      colorTheme,
+      resolvedTheme: variant,
+      activeCustomThemeId,
+      customThemes,
+      accentColor,
+      a11y,
+    })
+    const usesA11yPalette = palette.highContrast || (a11y?.colorblindMode ?? "off") !== "off"
     const skipColors =
       activePluginThemeId != null ||
-      (colorTheme === "default" && !activeCustomThemeId && !accentColor)
+      (colorTheme === "default" && !activeCustomThemeId && !accentColor && !usesA11yPalette)
     if (!skipColors) {
       const shellColors = getShellColors(
         { colorTheme, activeCustomThemeId, customThemes, accentColor },
@@ -110,6 +127,12 @@ export function SettingsHydrator(): null {
       payload["--foreground"] = shellColors.foregroundHex
       payload["--primary"] = resolved.colors.primary
       payload["--accent"] = resolved.colors.accent
+      const paletteVars: Record<string, string> = {}
+      for (const def of THEME_TOKEN_CATALOG) {
+        const value = palette.colors[def.key]
+        if (value) paletteVars[def.cssVar] = value
+      }
+      payload.palette = paletteVars
     }
 
     // Corner radius — only when non-default (resolver returns null at default).
@@ -163,6 +186,7 @@ export function SettingsHydrator(): null {
     activePluginThemeId,
     accentColor,
     customThemes,
+    a11y,
     radius,
     typography,
     density,

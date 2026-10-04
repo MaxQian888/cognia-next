@@ -466,8 +466,32 @@ describe("external-agent.host-configs", () => {
       "external_agent_run_turn",
       "external_agent_cancel_run",
       "external_agent_resolve_decision",
+      "external_agent_cognia_models",
+      "external_agent_run_turn_cognia_model",
     ])
   })
+
+  // Host-lane Cognia models: the catalog read and the marker that
+  // `external_agent_run_turn` accepts `cogniaModel`. An older Host lacks the
+  // marker, which is how the client knows to ask for an update. Both Hosts
+  // advertise it: the headless brain answers from cognia-server's profile
+  // store and leases its task route through `agent_gateway_host_task_prepare`.
+  it.each(["tauri", "headless"] as const)(
+    "advertises Cognia model turns on the %s Host",
+    (platform) => {
+      const parsed = parseHostFeatureManifest(
+        JSON.parse(JSON.stringify(buildLocalHostFeatureManifest({ platform })))
+      )
+      for (const operation of [
+        "external_agent_cognia_models",
+        "external_agent_run_turn_cognia_model",
+      ]) {
+        expect(supportsHostFeatureOperation(parsed, "external-agent.host-configs", operation)).toBe(
+          true
+        )
+      }
+    }
+  )
 
   // Admission and the run plane ride the same feature id. A host advertising
   // the store without them would look runnable to a client and refuse every
@@ -545,6 +569,49 @@ describe("external-agent.process-plane", () => {
       )
     }
   )
+
+  it.each(["tauri", "headless"] as const)(
+    "survives a key-sorting serializer with the tool host shared by two features on %s",
+    (platform) => {
+      // The Host's JSON passes through a serializer that sorts object keys, so
+      // `external-agent.process-plane` and `external-agent.sandbox-tools` reach
+      // the client in the opposite order to the one they were built in.
+      const sortKeys = (value: unknown): unknown =>
+        Array.isArray(value)
+          ? value.map(sortKeys)
+          : value && typeof value === "object"
+            ? Object.fromEntries(
+                Object.entries(value as Record<string, unknown>)
+                  .sort(([left], [right]) => left.localeCompare(right))
+                  .map(([key, entry]) => [key, sortKeys(entry)])
+              )
+            : value
+      const parsed = parseHostFeatureManifest(
+        sortKeys(JSON.parse(JSON.stringify(buildLocalHostFeatureManifest({ platform }))))
+      )
+      expect(parsed).not.toBeNull()
+      for (const feature of [
+        "external-agent.process-plane",
+        "external-agent.sandbox-tools",
+      ] as const) {
+        expect(supportsHostFeatureOperation(parsed, feature, "agent_tool_host_control")).toBe(true)
+      }
+    }
+  )
+
+  it("rejects an operation attributed to a feature that does not declare it", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+    const tampered = {
+      ...manifest,
+      operations: manifest.operations.map((operation) =>
+        operation.name === "agent_tool_host_control"
+          ? { ...operation, feature: "external-agent.host-configs" }
+          : operation
+      ),
+    }
+    expect(parseHostFeatureManifest(manifest)).not.toBeNull()
+    expect(parseHostFeatureManifest(tampered)).toBeNull()
+  })
 
   it("advertises remote plugin tool hosting only on the native RPC Host", () => {
     for (const platform of ["tauri", "headless", "web"] as const) {

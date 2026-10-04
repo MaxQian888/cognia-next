@@ -2900,6 +2900,13 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
     inset: -14px;
     border-radius: 9999px;
   }
+  /* The desktop node hover toolbar reveals itself on any coarse pointer
+     (`pointer-coarse:opacity-100`), so on a phone every node wore a row of
+     28px buttons — Delete included, even in read mode. The touch editor
+     reaches the same actions through the long-press sheet and the inspector. */
+  .wf-touch-canvas [data-testid^="wf-node-toolbar-"] {
+    display: none;
+  }
   /* Line numbers for Shiki-highlighted code blocks. Shiki wraps every source
      line in `<span class="line">`, so a CSS counter lets syntax colour and
      line numbers co-exist — the finalized `CodeBlock` (which defaults to

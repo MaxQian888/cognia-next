@@ -246,6 +246,9 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "compaction",
     "streamPartialMessages",
     "conversationSidebar",
+    // ADR-0213: auto-archive is edited in the Conversation section
+    // (`conversation-archive-card`).
+    "conversationArchive",
     // ADR-0127: run-status-bar metrics and composer behavior/assistance are
     // edited in the Conversation section (`run-status-bar-card`,
     // `composer-behavior-card`, `composer-assistance-card`).

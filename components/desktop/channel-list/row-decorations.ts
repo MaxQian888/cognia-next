@@ -43,17 +43,15 @@ export interface RowDecorationSources {
    * header, so its `agent` field (the squad's name) is dropped.
    */
   merged: boolean
-  /** Profile default model, before the built-in default. */
-  defaultModel: string | undefined
-  /** Profile default provider, before the built-in default. */
-  defaultProvider: string | undefined
-  /** The last-resort model when neither session, character nor profile names one. */
-  fallbackModel: string
-  /** The last-resort provider, same rule. */
-  fallbackProvider: string
-  /** Display names for model / provider ids. */
-  labelModel: (id: string) => string
-  labelProvider: (id: string) => string
+  /**
+   * The row's model and provider labels. Lane-aware
+   * (`lib/chat/session-model-identity.ts`): a conversation an external agent
+   * runs names the agent's model, not the built-in default.
+   */
+  modelLabelsOf: (
+    session: ChatSession,
+    character: Character | undefined
+  ) => { model?: string; provider?: string }
 }
 
 export interface RowDecorations {
@@ -118,6 +116,9 @@ export function createRowDecorations(sources: RowDecorationSources): RowDecorati
     const character = session.characterId
       ? sources.characterById.get(session.characterId)
       : undefined
+    // Once per row, and only when a model or provider field asks for it.
+    let labels: { model?: string; provider?: string } | undefined
+    const modelLabels = () => (labels ??= sources.modelLabelsOf(session, character))
     const valueOf = (kind: ConversationSidebarMetadata): string | undefined => {
       switch (kind) {
         case "agent":
@@ -127,16 +128,9 @@ export function createRowDecorations(sources: RowDecorationSources): RowDecorati
               : undefined
             : character?.name
         case "model":
-          return sources.labelModel(
-            session.model ?? character?.model ?? sources.defaultModel ?? sources.fallbackModel
-          )
+          return modelLabels().model
         case "provider":
-          return sources.labelProvider(
-            session.providerOverride ??
-              character?.providerId ??
-              sources.defaultProvider ??
-              sources.fallbackProvider
-          )
+          return modelLabels().provider
         case "workspace":
           return session.projectId ? sources.workspaceNameById.get(session.projectId) : undefined
       }

@@ -119,6 +119,18 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     category: "app.navigation",
     defaultChord: "ctrl+alt+]",
   },
+  // Archive the conversation with keyboard focus in the list — else the open
+  // one — or restore it when it is already archived (ADR-0213). ⌘⇧⌫ reads as
+  // "take this out of the list" beside the row's own ⌘⌫ (delete), without a
+  // letter key: Ctrl+Alt+<letter> is AltGr on Windows layouts that type with
+  // it. Not live inside text fields, so it never eats an edit chord.
+  {
+    id: "shell.conversation.toggleArchive",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.conversationToggleArchive",
+    category: "app.navigation",
+    defaultChord: "ctrl+shift+backspace",
+  },
   {
     id: "terminal.toggle",
     scope: "app",
@@ -485,6 +497,16 @@ export const APP_SHORTCUT_CATALOG: ShortcutDescriptor[] = [
     labelKey: "settings.shortcuts.catalog.observabilityOpenSettings",
     category: "app.observability",
     defaultChord: "s",
+  },
+  {
+    // Flips the `/logs` Traces channel between Explore and Dashboard. Only
+    // registered while the channel is mounted (`useObservabilityHotkeys`), so
+    // a bare `v` types normally everywhere else.
+    id: "observability.toggleSubView",
+    scope: "app",
+    labelKey: "settings.shortcuts.catalog.observabilityToggleSubView",
+    category: "app.observability",
+    defaultChord: "v",
   },
   {
     id: "a2ui.undo",

@@ -18,7 +18,7 @@ import type {
   BackgroundTaskStatus,
 } from "@/lib/background-tasks/registry-core"
 import {
-  cancelRendererBackgroundRun,
+  cancelRendererBackgroundRunAndWait,
   collectRendererBackgroundResult,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import { redispatchBackgroundRun } from "@/lib/background-tasks/redispatch"
@@ -182,9 +182,15 @@ export function JobCenterPanel({ compact = false }: { compact?: boolean }) {
           type="button"
           data-testid="status-job-center"
           aria-label={t("open")}
+          // Compact is the mobile app bar, where it sits among ghost icon
+          // buttons (search, ⋮): same 44px box, same full-strength glyph. The
+          // muted tone and extra padding it used to carry read as a different
+          // control and widened the gap to its neighbours.
           className={cn(
-            "flex shrink-0 items-center gap-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-            compact ? "touch-target h-9 rounded-md px-2" : "h-6 px-2"
+            "flex shrink-0 items-center transition-colors hover:bg-accent hover:text-foreground",
+            compact
+              ? "touch-target justify-center gap-1 rounded-md px-1.5"
+              : "h-6 gap-1.5 px-2 text-muted-foreground"
           )}
         >
           <BriefcaseBusinessIcon aria-hidden className={compact ? "size-5" : "size-3"} />
@@ -612,10 +618,9 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
       // registry; plugin-agent / team-delegation rows through the manager.
       let cancelled = false
       if (isSubagent && isForeground) {
-        cancelSubagentRun(record.runId)
-        cancelled = true
+        cancelled = await cancelSubagentRun(record.runId)
       } else if (isSubagent) {
-        cancelled = cancelRendererBackgroundRun(record.runId)
+        cancelled = await cancelRendererBackgroundRunAndWait(record.runId)
       } else {
         cancelled = getBackgroundAgentManager().cancelAgent(record.runId)
       }

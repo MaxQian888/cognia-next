@@ -56,7 +56,7 @@ export function WebDavMobileAutosyncProvider({ children }: { children: React.Rea
       else unsubs.push(u)
     })
     void subscribeNetwork((status) => {
-      if (status.connected) trigger()
+      if (status.connected || status.connectionType === "wifi") trigger()
     }).then((u) => {
       if (disposed) u()
       else unsubs.push(u)

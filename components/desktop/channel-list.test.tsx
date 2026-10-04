@@ -89,6 +89,18 @@ jest.mock("@/lib/telemetry/conversation-list-events", () => ({
   trackConversationViewChanged: jest.fn(() => Promise.resolve(true)),
 }))
 
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+    replace: jest.fn(),
+    prefetch: jest.fn(),
+    back: jest.fn(),
+  }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -346,7 +358,9 @@ jest.mock("@/components/shell/sidebar-guild-sections", () => {
   }
 })
 jest.mock("@/components/shell/sidebar-footer", () => ({
-  SidebarFooter: () => <div data-testid="sidebar-footer" />,
+  SidebarFooter: ({ collapseToggle }: { collapseToggle?: boolean }) => (
+    <div data-testid="sidebar-footer" data-collapse-toggle={String(Boolean(collapseToggle))} />
+  ),
 }))
 jest.mock("@/components/shell/workspace-switcher", () => ({
   WorkspaceSwitcher: ({ variant }: { variant?: string }) => (
@@ -1897,7 +1911,7 @@ test("archive view toggle switches between active and archived sessions", async 
   expect(screen.getByText("Active one")).toBeInTheDocument()
   expect(screen.queryByText("Archived one")).toBeNull()
   // Toggle into the archived view.
-  await user.click(screen.getByRole("button", { name: "viewArchived" }))
+  await user.click(screen.getByRole("button", { name: "archivedToggle" }))
   expect(await screen.findByText("Archived one")).toBeInTheDocument()
   expect(screen.queryByText("Active one")).toBeNull()
 })
@@ -1996,7 +2010,7 @@ describe("revealing a freshly created conversation", () => {
   })
 })
 
-test("an empty archived view shows the archived empty state", async () => {
+test("an empty archived view says what is missing and offers the way back", async () => {
   callQueue.push(characters, [], undefined)
   const user = userEvent.setup()
   render(
@@ -2012,8 +2026,13 @@ test("an empty archived view shows the archived empty state", async () => {
       onUnarchive={jest.fn()}
     />
   )
-  await user.click(screen.getByRole("button", { name: "viewArchived" }))
-  expect(await screen.findByText("emptyArchived")).toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "archivedToggle" }))
+  expect(await screen.findByText("emptyArchivedTitle")).toBeInTheDocument()
+  expect(screen.getByText("emptyArchivedHint")).toBeInTheDocument()
+  // Nothing to create in the archive — the body's own exit goes back instead.
+  await user.click(screen.getByTestId("channel-list-empty-show-active"))
+  expect(await screen.findByText("Active one")).toBeInTheDocument()
+  expect(screen.queryByTestId("channel-list-empty-state")).toBeNull()
 })
 
 test("per-row Archive action fires onArchive", async () => {
@@ -3510,6 +3529,11 @@ describe("title-bar projection", () => {
     expect(setSidebarWidth).toHaveBeenCalledWith(306)
   })
 
+  it("leaves collapsing to the title bar's own toggle when there is a bar", () => {
+    renderProjected()
+    expect(screen.getByTestId("sidebar-footer")).toHaveAttribute("data-collapse-toggle", "false")
+  })
+
   it("heads the bar's start outlet with the workspace switcher and hosts the shell navigation", () => {
     renderProjected()
     const outlet = screen.getByTestId("start-outlet")
@@ -4187,7 +4211,8 @@ describe("title-bar projection", () => {
     // neither a heading row nor the toggle itself is on screen to do that.
     const chip = await screen.findByTestId("channel-list-archived-chip")
     expect(chip).toHaveTextContent("archivedTitleSuffix")
-    expect(chip).toHaveAccessibleName("viewActive")
+    // The spoken name starts with what the chip shows, then says what it does.
+    expect(chip).toHaveAccessibleName("archivedChipAria")
     await user.click(chip)
     expect(screen.queryByTestId("channel-list-archived-chip")).toBeNull()
   })
@@ -4236,6 +4261,11 @@ describe("web shell without the title bar", () => {
     expect(screen.getByTestId("sidebar-nav")).toBeInTheDocument()
     expect(screen.getByTestId("sidebar-footer")).toBeInTheDocument()
     expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(true)
+  })
+
+  it("has the footer carry the collapse button — no bar above has one", () => {
+    renderBarlessWeb()
+    expect(screen.getByTestId("sidebar-footer")).toHaveAttribute("data-collapse-toggle", "true")
   })
 
   it("draws the workspace header inline — the switcher, nothing else", () => {
@@ -4434,6 +4464,94 @@ describe("scope tree (merged rail)", () => {
     expect(within(chats).queryByText("DM 0")).toBeNull()
     expect(within(chats).getByTestId("sidebar-scope-more-chats")).toHaveTextContent(
       'groupShowAll:{"count":9}'
+    )
+  })
+
+  describe("inside the archive (ADR-0213)", () => {
+    beforeEach(() => {
+      channelListView = "archived"
+      setGroupCollapsed.mockClear()
+    })
+
+    it("lists the whole archive — no preview caps, so Select all means all of it", () => {
+      const rows = Array.from({ length: 9 }, (_, i) =>
+        baseSession(`s-dm${i}`, { title: `DM ${i}`, updatedAt: i, archivedAt: 1 })
+      )
+      renderMerged(rows)
+      const chats = screen.getByTestId("sidebar-scope-chats")
+      expect(within(chats).queryByTestId("sidebar-scope-more-chats")).toBeNull()
+      expect(within(chats).getByText("DM 0")).toBeInTheDocument()
+      expect(within(chats).getByText("DM 8")).toBeInTheDocument()
+    })
+
+    it("draws no new-conversation control on a squad header", () => {
+      renderMerged([
+        baseSession("s-t", { kind: "team", teamId: "t-1", title: "Team", archivedAt: 1 }),
+      ])
+      const squad = screen.getByTestId("sidebar-scope-t-1")
+      expect(within(squad).queryByTestId("sidebar-scope-new-t-1")).toBeNull()
+    })
+
+    it("stores a fold made in the archive apart from the active list's", async () => {
+      const user = userEvent.setup()
+      renderMerged([
+        baseSession("s-t", { kind: "team", teamId: "t-1", title: "Team", archivedAt: 1 }),
+      ])
+      await user.click(screen.getByTestId("sidebar-scope-toggle-t-1"))
+      expect(setGroupCollapsed).toHaveBeenCalledWith("archived:team:t-1", expect.any(Boolean))
+    })
+  })
+
+  it("never caps away the open conversation — it keeps a row under its group", async () => {
+    const rows = Array.from({ length: 9 }, (_, i) =>
+      baseSession(`s-dm${i}`, { title: `DM ${i}`, updatedAt: i })
+    )
+    const user = userEvent.setup()
+    // DM 1 is old: well past the four newest the Chats preview shows. Opened
+    // from search, a link or ⌘K, it used to have no row anywhere.
+    renderMerged(rows, { activeSessionId: "s-dm1" })
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    const open = within(chats).getByText("DM 1").closest("li")!
+    expect(within(open).getByTestId("session-row-active-bar")).toBeInTheDocument()
+    // Still behind the cut: everything else that is older.
+    expect(within(chats).queryByText("DM 0")).toBeNull()
+    expect(within(chats).queryByText("DM 2")).toBeNull()
+    // The expander still names the whole group.
+    expect(within(chats).getByTestId("sidebar-scope-more-chats")).toHaveTextContent(
+      'groupShowAll:{"count":9}'
+    )
+    // Arrow keys walk what is on screen — the kept row included.
+    const titles = within(chats)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("data-session-row-select"))
+      .filter(Boolean)
+    expect(titles).toEqual(["s-dm8", "s-dm7", "s-dm6", "s-dm5", "s-dm1"])
+    await user.click(within(chats).getByTestId("sidebar-scope-more-chats"))
+    expect(within(chats).getByText("DM 0")).toBeInTheDocument()
+  })
+
+  it("selects a whole group from its header, rows past the Show-more cut included", async () => {
+    const rows = Array.from({ length: 9 }, (_, i) =>
+      baseSession(`s-dm${i}`, { title: `DM ${i}`, updatedAt: i })
+    )
+    renderMerged(rows)
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    expect(within(chats).queryByText("DM 0")).toBeNull()
+    fireEvent.contextMenu(screen.getByTestId("sidebar-scope-label-chats"))
+    fireEvent.click(await screen.findByTestId("sidebar-guild-menu-select-dm"))
+    // The cap lifts so every selected row is on screen to be acted on.
+    expect(await within(chats).findByText("DM 0")).toBeInTheDocument()
+    expect(screen.getByTestId("channel-list-bulk-count")).toHaveTextContent(
+      'selectedCount:{"count":9}'
+    )
+  })
+
+  it("greys out selecting an empty squad", async () => {
+    renderMerged([dmSession])
+    fireEvent.contextMenu(screen.getByTestId("sidebar-scope-toggle-t-1"))
+    const menu = await screen.findByTestId("sidebar-scope-menu-t-1")
+    expect(within(menu).getByTestId("sidebar-guild-menu-select-t-1")).toHaveAttribute(
+      "data-disabled"
     )
   })
 
@@ -4953,7 +5071,7 @@ describe("drop animation, settle mark and list telemetry", () => {
       "workspace:w2",
       false
     )
-    await user.click(screen.getByRole("button", { name: "viewArchived" }))
+    await user.click(screen.getByRole("button", { name: "archivedToggle" }))
     expect(listTelemetry.trackConversationViewChanged).toHaveBeenCalledWith("archived")
     await user.click(screen.getAllByRole("button", { name: "newChat" })[0])
     expect(listTelemetry.trackConversationCreated).toHaveBeenCalledWith("direct")
@@ -5207,5 +5325,671 @@ describe("sidebar audit: render cost and wiring", () => {
     expect(onBulkAssignToFolder).toHaveBeenCalledTimes(1)
     expect(onBulkAssignToFolder).toHaveBeenCalledWith(["s-a", "s-b"], "f1")
     expect(onAssignToFolder).not.toHaveBeenCalled()
+  })
+})
+
+describe("managing conversations", () => {
+  const alpha = baseSession("s-a", { title: "Alpha", updatedAt: 30 })
+  const bravo = baseSession("s-b", { title: "Bravo", updatedAt: 20 })
+  const charlie = baseSession("s-c", { title: "Charlie", updatedAt: 10 })
+
+  function renderList(extra: Partial<React.ComponentProps<typeof ChannelList>> = {}) {
+    callQueue.push(characters, [], undefined)
+    const onSelect = jest.fn()
+    const utils = render(
+      <ChannelList
+        sessions={[alpha, bravo, charlie]}
+        activeSessionId={null}
+        onSelect={onSelect}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        {...extra}
+      />
+    )
+    return { ...utils, onSelect }
+  }
+
+  const count = () => screen.getByTestId("channel-list-bulk-count").textContent
+
+  it("enters a selection mode from ⋯ where a click selects instead of opening", async () => {
+    const user = userEvent.setup()
+    const { onSelect } = renderList()
+    expect(screen.queryAllByTestId("session-row-checkbox")).toHaveLength(0)
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-select-mode"))
+
+    // The bar is up before anything is selected, saying how to start.
+    expect(await screen.findByRole("toolbar")).toBeInTheDocument()
+    expect(count()).toBe("selectHint")
+    expect(screen.getAllByTestId("session-row-checkbox")).toHaveLength(3)
+
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    await user.click(screen.getByRole("button", { name: /Bravo/ }))
+    expect(count()).toBe('selectedCount:{"count":2}')
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    expect(count()).toBe('selectedCount:{"count":1}')
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: /Bravo/ })).toHaveAttribute("aria-pressed", "true")
+
+    // While a selection is in play the ⋯ entry has nothing left to do — and
+    // the Escape that closes the menu is spent on the menu, not the selection.
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    expect(await screen.findByTestId("channel-list-select-mode")).toHaveAttribute("data-disabled")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByTestId("channel-list-select-mode")).toBeNull())
+    expect(count()).toBe('selectedCount:{"count":1}')
+
+    await user.click(screen.getByTestId("channel-list-bulk-done"))
+    expect(screen.queryByRole("toolbar")).toBeNull()
+    expect(screen.queryAllByTestId("session-row-checkbox")).toHaveLength(0)
+    // Out of the mode a click opens again.
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    expect(onSelect).toHaveBeenCalledWith("s-a")
+  })
+
+  it("leaves the mode on Escape even with nothing selected", async () => {
+    const user = userEvent.setup()
+    renderList()
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-select-mode"))
+    expect(await screen.findByRole("toolbar")).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByTestId("channel-list-keyboard-root"), { key: "Escape" })
+    expect(screen.queryByRole("toolbar")).toBeNull()
+  })
+
+  it("treats a row menu's Select as entering the mode, so the next click adds a row", async () => {
+    const user = userEvent.setup()
+    const { onSelect } = renderList()
+    await user.click(screen.getAllByRole("button", { name: "actionsMenu" })[0]!)
+    await user.click(await screen.findByText("select"))
+    await user.click(screen.getByRole("button", { name: /Charlie/ }))
+    expect(count()).toBe('selectedCount:{"count":2}')
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("keeps a modifier selection a gesture: a plain click still opens and drops it", async () => {
+    const user = userEvent.setup()
+    const { onSelect } = renderList()
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    expect(screen.getAllByTestId("session-row-checkbox")).toHaveLength(3)
+    await user.click(screen.getByRole("button", { name: /Charlie/ }))
+    expect(onSelect).toHaveBeenCalledWith("s-c")
+    expect(screen.queryByRole("toolbar")).toBeNull()
+  })
+
+  it("selects every row on screen, and deselecting all keeps the bar", async () => {
+    const user = userEvent.setup()
+    renderList()
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    await user.click(screen.getByTestId("channel-list-bulk-select-all"))
+    expect(count()).toBe('selectedCount:{"count":3}')
+    await user.click(screen.getByTestId("channel-list-bulk-deselect-all"))
+    // Emptied, not dismissed: a modifier selection would otherwise vanish with
+    // its last row.
+    expect(screen.getByRole("toolbar")).toBeInTheDocument()
+    expect(count()).toBe("selectHint")
+  })
+
+  it("offers Unpin only to a selection that is all pinned", () => {
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={[{ ...alpha, pinned: true }, { ...bravo, pinned: true }, charlie]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onBulkSetPinned={jest.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    expect(screen.getByRole("button", { name: "unpin" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "pin" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Charlie/ }), { ctrlKey: true })
+    expect(screen.getByRole("button", { name: "pin" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "unpin" })).toBeNull()
+  })
+
+  it("makes a folder for a selection, files it there, and opens the name", async () => {
+    const user = userEvent.setup()
+    const made = { id: "f-new", name: "newFolderName", order: 0, createdAt: 0, updatedAt: 0 }
+    const onCreateFolder = jest.fn(async () => made)
+    const onBulkAssignToFolder = jest.fn(async () => {})
+    const handlers = {
+      activeSessionId: null,
+      onSelect: jest.fn(),
+      onNewDirect: jest.fn(),
+      onNewTeamConversation: jest.fn(),
+      onDelete: jest.fn(),
+      onRename: jest.fn(),
+      onCreateFolder,
+      onAssignToFolder: jest.fn(),
+      onBulkAssignToFolder,
+      onRenameFolder: jest.fn(),
+    }
+    callQueue.push(characters, [], undefined)
+    const { rerender } = render(
+      <ChannelList sessions={[alpha, bravo, charlie]} folders={[]} {...handlers} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+    await user.click(await screen.findByTestId("channel-list-bulk-folder-new"))
+    await waitFor(() => expect(onBulkAssignToFolder).toHaveBeenCalledWith(["s-a", "s-b"], "f-new"))
+    expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
+    // The live query brings the folder and its rows back; its name opens for
+    // editing so it does not sit under the placeholder.
+    rerender(
+      <ChannelList
+        sessions={[{ ...alpha, folderId: "f-new" }, { ...bravo, folderId: "f-new" }, charlie]}
+        folders={[made as never]}
+        {...handlers}
+      />
+    )
+    expect(await screen.findByLabelText("renameFolder")).toHaveFocus()
+    expect(screen.queryByRole("toolbar")).toBeNull()
+  })
+
+  it("opens the name of a new folder whose row arrived before the request to name it", async () => {
+    // The live query can hand the folder over while the create call is still
+    // settling; the header has to arm itself late, not only at mount.
+    const user = userEvent.setup()
+    const made = { id: "f-new", name: "newFolderName", order: 0, createdAt: 0, updatedAt: 0 }
+    let resolveCreate: (folder: typeof made) => void = () => {}
+    const onCreateFolder = jest.fn(
+      () => new Promise<typeof made>((resolve) => (resolveCreate = resolve))
+    )
+    const handlers = {
+      activeSessionId: null,
+      onSelect: jest.fn(),
+      onNewDirect: jest.fn(),
+      onNewTeamConversation: jest.fn(),
+      onDelete: jest.fn(),
+      onRename: jest.fn(),
+      onCreateFolder,
+      onAssignToFolder: jest.fn(),
+      onBulkAssignToFolder: jest.fn(async () => {}),
+      onRenameFolder: jest.fn(),
+    }
+    callQueue.push(characters, [], undefined)
+    const { rerender } = render(
+      <ChannelList sessions={[alpha, bravo, charlie]} folders={[]} {...handlers} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+    await user.click(await screen.findByTestId("channel-list-bulk-folder-new"))
+    rerender(
+      <ChannelList sessions={[alpha, bravo, charlie]} folders={[made as never]} {...handlers} />
+    )
+    // Mounted, not yet asked: a plain header.
+    expect(screen.queryByLabelText("renameFolder")).toBeNull()
+    await act(async () => resolveCreate(made))
+    expect(await screen.findByLabelText("renameFolder")).toHaveFocus()
+  })
+
+  it("drops the pin glyph inside Pinned and keeps it in search results", async () => {
+    renderList({ sessions: [{ ...alpha, pinned: true }, bravo] })
+    const pinnedRow = screen.getByText("Alpha").closest("li")!
+    expect(within(pinnedRow).queryByLabelText("pinned")).toBeNull()
+    fireEvent.change(screen.getByLabelText("searchAria"), { target: { value: "Alp" } })
+    await waitFor(() => expect(screen.queryByText("Bravo")).toBeNull())
+    const hit = screen.getByRole("button", { name: /Alp/ }).closest("li")!
+    expect(within(hit).getByLabelText("pinned")).toBeInTheDocument()
+  })
+
+  it("spends an Escape that closes the delete confirm on the dialog, not the selection", async () => {
+    const user = userEvent.setup()
+    renderList({ onBulkDelete: jest.fn() })
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    await user.click(screen.getByRole("button", { name: "delete" }))
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(count()).toBe('selectedCount:{"count":2}')
+  })
+
+  it("leaves selection mode when the view changes under it", async () => {
+    const user = userEvent.setup()
+    renderList({ onArchive: jest.fn(), onUnarchive: jest.fn() })
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-select-mode"))
+    expect(await screen.findByRole("toolbar")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "archivedToggle" }))
+    expect(screen.queryByRole("toolbar")).toBeNull()
+  })
+
+  it("still extends a range with Shift in selection mode", async () => {
+    const user = userEvent.setup()
+    const { onSelect } = renderList()
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-select-mode"))
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Charlie/ }), { shiftKey: true })
+    expect(count()).toBe('selectedCount:{"count":3}')
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("offers nothing to select in an empty list", async () => {
+    const user = userEvent.setup()
+    renderList({ sessions: [] })
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    expect(await screen.findByTestId("channel-list-select-mode")).toHaveAttribute("data-disabled")
+  })
+
+  it("makes a folder for one row from its own menu", async () => {
+    const user = userEvent.setup()
+    const made = { id: "f-row", name: "newFolderName", order: 0, createdAt: 0, updatedAt: 0 }
+    const onCreateFolder = jest.fn(async () => made)
+    const onBulkAssignToFolder = jest.fn(async () => {})
+    renderList({ folders: [], onCreateFolder, onAssignToFolder: jest.fn(), onBulkAssignToFolder })
+    await user.click(screen.getAllByRole("button", { name: "actionsMenu" })[1]!)
+    fireEvent.keyDown(await screen.findByTestId("session-row-dropdown-move-folder-s-b"), {
+      key: "ArrowRight",
+    })
+    await user.click(await screen.findByTestId("session-row-dropdown-folder-new-s-b"))
+    await waitFor(() => expect(onBulkAssignToFolder).toHaveBeenCalledWith(["s-b"], "f-row"))
+    expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
+  })
+
+  it("keeps folder-making out of the archived view, for a row and for a selection", async () => {
+    const user = userEvent.setup()
+    channelListView = "archived"
+    const archived = [alpha, bravo].map((row) => ({ ...row, archivedAt: 5 }))
+    renderList({
+      sessions: archived,
+      folders: [],
+      onCreateFolder: jest.fn(),
+      onAssignToFolder: jest.fn(),
+      onBulkAssignToFolder: jest.fn(),
+      onUnarchive: jest.fn(),
+    })
+    await user.click(screen.getAllByRole("button", { name: "actionsMenu" })[0]!)
+    expect(screen.queryByTestId("session-row-dropdown-move-folder-s-a")).toBeNull()
+    await user.keyboard("{Escape}")
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    expect(screen.getByRole("toolbar")).toBeInTheDocument()
+    expect(screen.queryByTestId("channel-list-bulk-move-to-folder")).toBeNull()
+  })
+
+  it("hands the bar the unread state, so a read selection is offered Mark as unread", () => {
+    // The stub serves one value per read: keep the unread row in every render
+    // the clicks below cause.
+    for (let i = 0; i < 12; i++) {
+      callQueue.push(characters, [{ sessionId: "s-c", unreadCount: 2 }], undefined)
+    }
+    render(
+      <ChannelList
+        sessions={[alpha, bravo, charlie]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Bravo/ }), { ctrlKey: true })
+    expect(screen.getByTestId("channel-list-bulk-mark-unread")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Charlie/ }), { ctrlKey: true })
+    expect(screen.getByTestId("channel-list-bulk-mark-read")).toBeInTheDocument()
+  })
+
+  describe("selecting a section's conversations", () => {
+    const work = { id: "f-work", name: "Work", order: 0, createdAt: 0, updatedAt: 0 } as never
+    const filed = [
+      { ...alpha, folderId: "f-work" },
+      { ...bravo, folderId: "f-work" },
+      charlie,
+    ] as ChatSession[]
+
+    it("serves the folder's actions on right-click too", async () => {
+      renderList({
+        sessions: filed,
+        folders: [work],
+        onRenameFolder: jest.fn(),
+        onDeleteFolder: jest.fn(),
+        onReorderFolders: jest.fn(),
+      })
+      fireEvent.contextMenu(screen.getByTestId("folder-header-f-work"))
+      const menu = await screen.findByTestId("folder-context-menu-f-work")
+      for (const item of ["select", "rename", "delete"]) {
+        expect(within(menu).getByTestId(`folder-context-${item}-f-work`)).toBeInTheDocument()
+      }
+      // One folder: nowhere to move it, so no move items are offered.
+      expect(within(menu).queryByTestId("folder-context-move-up-f-work")).toBeNull()
+      await userEvent.setup().click(within(menu).getByTestId("folder-context-rename-f-work"))
+      // The menu closing must not take the focus back from the field it opened.
+      expect(await screen.findByLabelText("renameFolder")).toHaveFocus()
+    })
+
+    it("selects every conversation in a folder, unfolding it first", async () => {
+      collapsedFolderIds = ["f-work"]
+      const { onSelect } = renderList({ sessions: filed, folders: [work] })
+      expect(screen.queryByText("Alpha")).toBeNull()
+      fireEvent.contextMenu(screen.getByTestId("folder-header-f-work"))
+      fireEvent.click(await screen.findByTestId("folder-context-select-f-work"))
+      await waitFor(() => expect(count()).toBe('selectedCount:{"count":2}'))
+      expect(collapsedFolderIds).toEqual([])
+      expect(screen.getByRole("button", { name: /Alpha/ })).toHaveAttribute("aria-pressed", "true")
+      expect(screen.getByRole("button", { name: /Charlie/ })).toHaveAttribute(
+        "aria-pressed",
+        "false"
+      )
+      // It is selection mode: the next click adds a row rather than opening it.
+      fireEvent.click(screen.getByRole("button", { name: /Charlie/ }))
+      expect(count()).toBe('selectedCount:{"count":3}')
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+
+    it("greys the item out on an empty folder", async () => {
+      renderList({ folders: [work] })
+      fireEvent.contextMenu(screen.getByTestId("folder-header-f-work"))
+      expect(await screen.findByTestId("folder-context-select-f-work")).toHaveAttribute(
+        "data-disabled"
+      )
+    })
+  })
+
+  describe("a search that found nothing", () => {
+    async function searchFor(query: string) {
+      fireEvent.change(screen.getByLabelText("searchAria"), { target: { value: query } })
+      await screen.findByTestId("channel-list-empty-narrowed")
+    }
+
+    it("offers to widen each closed axis of the search scope", async () => {
+      const user = userEvent.setup()
+      const before = useProjectStore.getState().projects
+      // One workspace: nothing to widen there.
+      useProjectStore.setState({ projects: [{ id: "p1", name: "One" } as Project] })
+      try {
+        renderList()
+        await searchFor("zzz")
+        expect(screen.getByText('emptySearch:{"query":"zzz"}')).toBeInTheDocument()
+        expect(screen.queryByTestId("channel-list-empty-widen-workspaces")).toBeNull()
+        await user.click(screen.getByTestId("channel-list-empty-widen-content"))
+        await waitFor(() =>
+          expect(saveSettings).toHaveBeenLastCalledWith({
+            conversationSidebar: {
+              search: { workspace: "current", includeArchived: false, content: true },
+            },
+          })
+        )
+        // The second widening keeps the first — it merges against what was
+        // just written, not the snapshot the list rendered with.
+        await user.click(screen.getByTestId("channel-list-empty-widen-archived"))
+        await waitFor(() =>
+          expect(saveSettings).toHaveBeenLastCalledWith({
+            conversationSidebar: {
+              search: { workspace: "current", includeArchived: true, content: true },
+            },
+          })
+        )
+      } finally {
+        useProjectStore.setState({ projects: before })
+      }
+    })
+
+    it("offers only the axes still closed, and all workspaces when there are several", async () => {
+      conversationSidebar = {
+        search: { workspace: "current", includeArchived: true, content: true },
+      }
+      const before = useProjectStore.getState().projects
+      useProjectStore.setState({
+        projects: [{ id: "p1", name: "One" } as Project, { id: "p2", name: "Two" } as Project],
+      })
+      try {
+        renderList()
+        await searchFor("zzz")
+        expect(screen.queryByTestId("channel-list-empty-widen-content")).toBeNull()
+        expect(screen.queryByTestId("channel-list-empty-widen-archived")).toBeNull()
+        fireEvent.click(screen.getByTestId("channel-list-empty-widen-workspaces"))
+        await waitFor(() =>
+          expect(saveSettings).toHaveBeenLastCalledWith({
+            conversationSidebar: {
+              search: { workspace: "all", includeArchived: true, content: true },
+            },
+          })
+        )
+      } finally {
+        useProjectStore.setState({ projects: before })
+      }
+    })
+
+    it("does not offer the archive from the archived view, which already searches it", async () => {
+      channelListView = "archived"
+      renderList({ sessions: [{ ...alpha, archivedAt: 5 }] })
+      await searchFor("zzz")
+      expect(screen.queryByTestId("channel-list-empty-widen-archived")).toBeNull()
+      expect(screen.getByTestId("channel-list-empty-widen-content")).toBeInTheDocument()
+    })
+
+    it("clears the search from the empty state, field included", async () => {
+      const user = userEvent.setup()
+      renderList()
+      await searchFor("zzz")
+      await user.click(screen.getByTestId("channel-list-empty-clear-search"))
+      expect(await screen.findByText("Alpha")).toBeInTheDocument()
+      expect(screen.getByLabelText("searchAria")).toHaveValue("")
+    })
+
+    it("from the archive, asks the palette to look in the archive too", async () => {
+      const requests: unknown[] = []
+      const onRequest = (event: Event) => requests.push((event as CustomEvent).detail)
+      window.addEventListener("cognia:command-palette:request", onRequest)
+      try {
+        channelListView = "archived"
+        renderList({ sessions: [{ ...alpha, archivedAt: 5 }] })
+        await searchFor("zzz")
+        fireEvent.click(screen.getByTestId("channel-list-empty-search-everywhere"))
+        expect(requests).toEqual([{ query: "is:archived zzz", scope: "chats" }])
+      } finally {
+        window.removeEventListener("cognia:command-palette:request", onRequest)
+      }
+    })
+
+    it("takes the words to every conversation's history", async () => {
+      const requests: unknown[] = []
+      const onRequest = (event: Event) => requests.push((event as CustomEvent).detail)
+      window.addEventListener("cognia:command-palette:request", onRequest)
+      try {
+        renderList()
+        await searchFor("zzz")
+        fireEvent.click(screen.getByTestId("channel-list-empty-search-everywhere"))
+        expect(requests).toEqual([{ query: "zzz", scope: "chats" }])
+      } finally {
+        window.removeEventListener("cognia:command-palette:request", onRequest)
+      }
+    })
+  })
+})
+
+describe("archive view entry points and archived rows (ADR-0213)", () => {
+  const active = baseSession("s-act", { title: "Active one", updatedAt: 100 })
+  const archivedA = baseSession("s-arc1", { title: "Archived A", archivedAt: 50, updatedAt: 90 })
+  const archivedB = baseSession("s-arc2", { title: "Archived B", archivedAt: 40, updatedAt: 80 })
+
+  function renderList(overrides: Partial<Parameters<typeof ChannelList>[0]> = {}) {
+    for (let i = 0; i < 4; i++) callQueue.push(characters, [], undefined)
+    return render(
+      <ChannelList
+        sessions={[active, archivedA, archivedB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+        {...overrides}
+      />
+    )
+  }
+
+  beforeEach(() => mockRouterPush.mockClear())
+
+  it("keeps one name on the toggle, reports its state, and counts the archive", async () => {
+    const user = userEvent.setup()
+    renderList()
+    const toggle = screen.getByTestId("channel-list-archived-toggle")
+    expect(toggle).toHaveAccessibleName("archivedToggle")
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(toggle).toHaveAttribute("title", 'viewArchivedCount:{"count":2}')
+    await user.click(toggle)
+    expect(screen.getByTestId("channel-list-archived-toggle")).toHaveAccessibleName(
+      "archivedToggle"
+    )
+    expect(screen.getByTestId("channel-list-archived-toggle")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("channel-list-archived-toggle")).toHaveAttribute(
+      "title",
+      "viewActive"
+    )
+  })
+
+  it("opens the conversation manager on the view in use", async () => {
+    const user = userEvent.setup()
+    renderList()
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-manage"))
+    expect(mockRouterPush).toHaveBeenLastCalledWith("/conversations")
+    await user.click(screen.getByTestId("channel-list-archived-toggle"))
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-manage"))
+    expect(mockRouterPush).toHaveBeenLastCalledWith("/conversations?tab=archived")
+  })
+
+  it("offers Empty archive only inside a non-empty archive, for all of it", async () => {
+    const user = userEvent.setup()
+    renderList()
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    expect(screen.queryByTestId("channel-list-empty-archive")).toBeNull()
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByTestId("channel-list-archived-toggle"))
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    await user.click(await screen.findByTestId("channel-list-empty-archive"))
+    const dialog = await screen.findByTestId("empty-archive-dialog")
+    expect(within(dialog).getByText('title:{"count":2}')).toBeInTheDocument()
+    expect(within(dialog).getByTestId("empty-archive-titles")).toHaveTextContent("Archived A")
+  })
+
+  it("leaves an empty archive without Empty archive", async () => {
+    const user = userEvent.setup()
+    channelListView = "archived"
+    renderList({ sessions: [active] })
+    await user.click(screen.getByTestId("channel-list-actions-menu"))
+    expect(await screen.findByTestId("channel-list-manage")).toBeInTheDocument()
+    expect(screen.queryByTestId("channel-list-empty-archive")).toBeNull()
+  })
+
+  it("marks archived rows a search brings into the active view, without unread badges", async () => {
+    conversationSidebar = { search: { includeArchived: true } }
+    for (let i = 0; i < 6; i++) {
+      callQueue.push(
+        characters,
+        [
+          { sessionId: "s-arc1", unreadCount: 3 },
+          { sessionId: "s-act", unreadCount: 2 },
+        ],
+        undefined
+      )
+    }
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[active, archivedA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.type(screen.getByLabelText("searchAria"), "ive")
+    const archivedRow = await waitFor(() => {
+      const row = screen
+        .queryAllByRole("listitem")
+        .find((li) => (li.textContent ?? "").includes("Archived"))
+      expect(row).toBeDefined()
+      return row!
+    })
+    expect(within(archivedRow).getByTestId("session-row-archived")).toBeInTheDocument()
+    expect(archivedRow.textContent).not.toContain("3")
+    const activeRow = screen
+      .queryAllByRole("listitem")
+      .find((li) => (li.textContent ?? "").includes("Active one"))!
+    expect(within(activeRow).queryByTestId("session-row-archived")).toBeNull()
+  })
+
+  it("archives the open conversation with the archive shortcut, and restores an archived one", () => {
+    const onArchive = jest.fn()
+    const onUnarchive = jest.fn()
+    const { rerender } = renderList({ activeSessionId: "s-act", onArchive, onUnarchive })
+    const registration = getAppRegistration("shell.conversation.toggleArchive")
+    expect(registration).toBeDefined()
+    // Never inside a text field: it must not eat an edit chord.
+    expect(registration?.allowInEditable).not.toBe(true)
+    act(() =>
+      registration!.handler(
+        new KeyboardEvent("keydown", { key: "Backspace", ctrlKey: true, shiftKey: true })
+      )
+    )
+    return waitFor(() => expect(onArchive).toHaveBeenCalledWith("s-act")).then(() => {
+      rerender(
+        <ChannelList
+          sessions={[active, archivedA, archivedB]}
+          activeSessionId="s-arc1"
+          onSelect={jest.fn()}
+          onNewDirect={jest.fn()}
+          onNewTeamConversation={jest.fn()}
+          onDelete={jest.fn()}
+          onRename={jest.fn()}
+          onArchive={onArchive}
+          onUnarchive={onUnarchive}
+        />
+      )
+      act(() =>
+        getAppRegistration("shell.conversation.toggleArchive")!.handler(
+          new KeyboardEvent("keydown", { key: "Backspace", ctrlKey: true, shiftKey: true })
+        )
+      )
+      return waitFor(() => expect(onUnarchive).toHaveBeenCalledWith("s-arc1"))
+    })
+  })
+
+  it("keeps the narrow drawer open when an archive opens the next conversation", async () => {
+    isNarrow = true
+    const onSelect = jest.fn()
+    const onArchive = jest.fn()
+    const user = userEvent.setup()
+    renderList({
+      sessions: [active, baseSession("s-next", { title: "Next one", updatedAt: 60 })],
+      activeSessionId: "s-act",
+      onSelect,
+      onArchive,
+    })
+    await user.click(screen.getByLabelText("openSessions"))
+    const dialog = await screen.findByRole("dialog", { name: "conversationsTitle" })
+    const row = within(dialog)
+      .getAllByRole("listitem")
+      .find((li) => (li.textContent ?? "").includes("Active one"))!
+    await user.click(within(row).getByRole("button", { name: "actionsMenu" }))
+    await user.click(await screen.findByTestId("session-row-dropdown-archive-s-act"))
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith("s-next"))
+    expect(screen.getByRole("dialog", { name: "conversationsTitle" })).toBeInTheDocument()
   })
 })
