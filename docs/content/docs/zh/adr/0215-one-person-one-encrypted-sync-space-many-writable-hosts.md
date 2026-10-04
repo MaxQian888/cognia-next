@@ -41,10 +41,13 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 ### 2. 身份服务跑在 Workers 上，只讲 OIDC
 
 - 官方签发方是 **Better Auth on Workers + D1**（`id.cognia.cn`），启用 OAuth 2.1 Provider 和 JWT 插件，显式配置 JWKS 轮换，使用 Workers 付费套餐。其 `sub` 就是 `usr_` ID。
-- Cognia 各端都是公开的 PKCE 客户端。回调统一为 `cognia://auth/callback`（桌面、手机）、回环地址（CLI）和 SPA 路由（网页）。
-- **客户端不绑定签发方。** `lib/identity/deployment-discovery.ts` 内置官方签发方作为默认值，不再等主机宣告多租户模式。自托管可以覆盖为任意 OIDC 签发方；自托管 Logto 仍是参考实现，开发时用它证明客户端不绑定签发方。
+- Cognia 各端都是公开的 PKCE 客户端。原生回调使用 RFC 8252 的私有 URI `cn.cognia.app:/auth/callback`（桌面、手机）：反向域名形式的 scheme，不带 authority，因为 Better Auth 拒绝 `cognia://…` 回调（见下文 spike）。回环地址（CLI）和 SPA 路由（网页）不变。过渡期内，自托管 Logto 上仍保留现有的 `cognia://logto/callback`。
+- **客户端不绑定签发方。** `lib/identity/deployment-discovery.ts` 内置官方签发方作为默认值，不再等主机宣告多租户模式。自托管可以覆盖为任意 OIDC 签发方；自托管 Logto 仍是参考实现，开发时用它证明客户端不绑定签发方。只对 Logto 签发方发送 Logto 专有参数（为拿到刷新令牌而加的 `prompt=consent`、`direct_sign_in`、组织 scope）；Better Auth 收到 `prompt=consent` 时，即使是第一方客户端也会跳到授权确认页。
 - Rust 校验器统一到 `cognia-tenant-auth::oidc`；伴随网关自己的 JWKS 缓存和诊断服务器的静态 PEM 改为调用它。Workers 使用一个 TypeScript 移植版，用 `crates/cognia-tenant-auth/fixtures/grant-wire-vector.json` 校验一致性。
-- 第三方登录：飞书/Lark 走 `genericOAuth`（授权 `accounts.feishu.cn/open-apis/authen/v1/authorize`，令牌 **v2** `open.feishu.cn/open-apis/authen/v2/oauth/token`，用户信息从 `data` 中取出），以 `(feishu|lark, tenant_key, union_id)` 为键，绝不用 `open_id`；GitHub 和 Google 用内置实现；Apple 每次登录签一个 ES256 客户端密钥并修复 `form_post` 的 Cookie 问题；微信用 `unionid`。邮箱可选。登录只申请最小权限。
+- 第三方登录：飞书/Lark 走 `genericOAuth`（授权 `accounts.feishu.cn/open-apis/authen/v1/authorize`，令牌 **v2** `open.feishu.cn/open-apis/authen/v2/oauth/token`，用户信息从 `data` 中取出），以 `(feishu|lark, tenant_key, union_id)` 为键，绝不用 `open_id`；GitHub 和 Google 用内置实现；Apple 每次登录签一个 ES256 客户端密钥并修复 `form_post` 的 Cookie 问题；微信用 `unionid`。邮箱可选；提供方不返回邮箱时使用一个不可路由的占位地址，且永远不标记为已验证。登录只申请最小权限。
+- **签发方不保存第三方令牌。** 第三方登录只用来一次性证明 `(provider, tenant, subject)`；否则 Better Auth 会把第三方的访问令牌和刷新令牌明文存进 D1，所以用 `databaseHooks.account` 的 before 钩子在每次写入前丢弃它们。飞书用户授权是另一项由客户端持有的授权（§9）。
+- **签发方以声明的形式公布此人关联的第三方身份**，客户端不依赖协作服务器就能关联 `lark:<tenant_key>:<union_id>`（目前这一步由协作服务器读取 Logto 管理 API 完成）。
+- 客户端和资源的管理接口关闭：`clientPrivileges` 和 `resourcePrivileges` 拒绝普通用户；Cognia 客户端和同步 API 资源由配置写入（`resourceSeedMode: "overwrite"`），客户端与资源显式关联。
 - 否决：OpenAuth（停滞、只有 OAuth、没有 `id_token`）、`@cloudflare/workers-oauth-provider`（不透明令牌，Rust 校验器无法验证）、Auth.js 和 Lucia（不是签发方，或已弃用）、以 Logto 作为官方签发方（需要 Postgres 和 Redis，跑不了 Workers）。
 
 ### 3. 密钥离开设备时一定是密封的
@@ -172,14 +175,25 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
   6. 网页和 Capacitor 上的 keyring 密钥放在 `localStorage` 里，存在那里的令牌只是被混淆而非受保护；Capacitor 应改用安全存储。
   7. ADR-0010 的复审已指出 Claude 订阅 OAuth 的问题，但添加账号对话框里仍可进入。
   8. 诊断服务器的匿名授权用同一请求中提供的公钥做校验，租户是否存在的检查需要确认。
+  9. `crates/cognia-collab-server/src/logto_management.rs` 中的 `identities_from_user` 读取 `details.unionId`/`details.tenantKey`，但 Logto 的飞书连接器把 `union_id` 和 `tenant_key` 存在 `details.rawData` 下，且 `userId` 用的是 `open_id`；于是关联写入的是不带租户的 open id，登录永远对不上此人的飞书主体。
 - 后续的云端认证统一：分享的创建和所有者操作接受人的令牌，并配置 `SHARE_GRANT_KEY`；状态页管理端补齐 Access 配置；信令保持只认设备密钥，已登录设备用设备目录代替二维码配对。
 
 ## 风险
 
 - **中国大陆可达性。** Cloudflare 标准网络在大陆没有节点；`*.workers.dev` 基本不可用，自定义域名可用但延迟较高。接受此风险：同步在后台进行、能容忍延迟，服务使用 `*.cognia.cn` 自定义域名，WebSocket 失败退回长轮询。登录跳转对延迟最敏感，自托管是兜底方案。
 - **飞书覆盖范围。** 在商店应用上线之前，只有登录应用所在的租户能用飞书登录。
-- **未经验证的假设**，各自在对应阶段之前做 spike：Better Auth 签发的访问令牌 `aud` 为同步 API，且其 `sub` 能被 Rust 校验器接受；`workerd` 能在本地磁盘上运行基于 SQLite 的 Durable Object，以支撑自托管；HPKE over P-256 在支持的最旧 Android WebView 的 WebCrypto 上性能可接受。
+- **未经验证的假设**，各自在对应阶段之前做 spike：`workerd` 能在本地磁盘上运行基于 SQLite 的 Durable Object，以支撑自托管；HPKE over P-256 在支持的最旧 Android WebView 的 WebCrypto 上性能可接受。（身份相关的假设已验证，见下文。）
 - **丢失恢复密钥无法挽回。** 只能靠强制确认和设备批准来缓解。
+
+## 身份 spike（2026-10-04）
+
+在第 1 阶段之前，用 `services/identity-server/` 中的原型（better-auth 1.7.7、wrangler 4.141、本地 D1，结果见其 README）验证了身份相关的假设：
+
+- Better Auth on Workers + D1 在 `<issuer>/.well-known/openid-configuration` 提供 OIDC 发现。带上 `resource=https://sync.cognia.cn` 时，它签发 ES256 的 `at+jwt` 访问令牌：带 `kid`，`aud` 是包含同步 API 的数组，`sub` 是由 `advanced.database.generateId` 生成的 `usr_` ID。打包体积 3.0 MiB，gzip 后 510 KiB。
+- 生产使用的校验器 `cognia-tenant-auth::oidc::OidcAuthenticator` 接受该令牌，`UserId` 校验主体格式通过；错误的受众、错误的签发方和被篡改的载荷都会被拒绝。
+- 飞书登录在浏览器中端到端跑通：经 `genericOAuth`，并自定义 v2 令牌交换；账号以 `<tenant_key>:<union_id>` 为键。
+- 应用现有的 PKCE 客户端（`lib/logto/client.ts`）在不发送 `prompt=consent` 的前提下，能对 Better Auth 完成登录、带轮换的刷新、吊销，并把吊销后的刷新正确归类为 `invalid_grant`。
+- 本 ADR 据此修改的内容：原生回调 scheme、Logto 专有参数、丢弃第三方令牌、签发方公布身份声明、关闭客户端管理接口（均在 §2）。spike 还发现了下面的第 9 项缺陷。
 
 ## 路线图
 

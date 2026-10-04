@@ -1,0 +1,21 @@
+{
+  "name": "cognia-identity-worker",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "description": "SPIKE (ADR-0215 phase 1): Better Auth OIDC issuer on Cloudflare Workers + D1.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.7",
+    "better-auth": "1.7.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260927.1",
+    "typescript": "^7.0.2",
+    "wrangler": "4.141.0"
+  }
+}

@@ -41,10 +41,13 @@ On one device a Person binds to at most one LocalProfile, and a LocalProfile to 
 ### 2. Identity runs on Workers and speaks only OIDC
 
 - The official issuer is **Better Auth on Workers + D1** (`id.cognia.cn`) with the OAuth 2.1 Provider and JWT plugins, explicit JWKS rotation, on Workers Paid. Its `sub` is the `usr_` id.
-- Cognia apps are public PKCE clients. The callback generalizes to `cognia://auth/callback` (desktop, phone), loopback (CLI) and the SPA route (web).
-- **Clients are issuer-agnostic.** `lib/identity/deployment-discovery.ts` gains the official issuer as its built-in default instead of waiting for a Host to announce multi-tenant mode. A self-host override points at any OIDC issuer; self-hosted Logto remains the reference implementation and is used in development to prove the client is issuer-agnostic.
+- Cognia apps are public PKCE clients. The native callback is the RFC 8252 private-use URI `cn.cognia.app:/auth/callback` (desktop, phone): a reverse-domain scheme with no authority, because Better Auth refuses `cognia://…` callbacks (spike below). Loopback (CLI) and the SPA route (web) stay. Today's `cognia://logto/callback` stays registered on self-hosted Logto during the transition.
+- **Clients are issuer-agnostic.** `lib/identity/deployment-discovery.ts` gains the official issuer as its built-in default instead of waiting for a Host to announce multi-tenant mode. A self-host override points at any OIDC issuer; self-hosted Logto remains the reference implementation and is used in development to prove the client is issuer-agnostic. Logto-only parameters (`prompt=consent` to obtain a refresh token, `direct_sign_in`, the organizations scope) are sent only to a Logto issuer; Better Auth answers `prompt=consent` with a consent page even for the first-party client.
 - Rust verifiers converge on `cognia-tenant-auth::oidc`; the companion gateway's own JWKS cache and the diagnostic server's static PEM become its consumers. A TypeScript port, checked against `crates/cognia-tenant-auth/fixtures/grant-wire-vector.json`, serves Workers.
-- Social providers: Feishu/Lark through `genericOAuth` (authorize `accounts.feishu.cn/open-apis/authen/v1/authorize`, token **v2** `open.feishu.cn/open-apis/authen/v2/oauth/token`, userinfo unwrapped from `data`), keyed on `(feishu|lark, tenant_key, union_id)`, never `open_id`; GitHub and Google built in; Apple with a per-login ES256 client secret and the `form_post` cookie fix; WeChat on `unionid`. Email is optional. Login requests minimal scopes.
+- Social providers: Feishu/Lark through `genericOAuth` (authorize `accounts.feishu.cn/open-apis/authen/v1/authorize`, token **v2** `open.feishu.cn/open-apis/authen/v2/oauth/token`, userinfo unwrapped from `data`), keyed on `(feishu|lark, tenant_key, union_id)`, never `open_id`; GitHub and Google built in; Apple with a per-login ES256 client secret and the `form_post` cookie fix; WeChat on `unionid`. Email is optional; a provider that returns none gets a non-routable placeholder that is never marked verified. Login requests minimal scopes.
+- **The issuer keeps no provider tokens.** A social login proves `(provider, tenant, subject)` once; Better Auth would otherwise store the provider's access and refresh tokens in D1 in clear, so a `databaseHooks.account` before-hook discards them on every write. Feishu user authorization is a separate, client-held grant (§9).
+- **The issuer publishes the person's linked social identities** as a claim, so the client links `lark:<tenant_key>:<union_id>` without a collaboration server (today that join reads the Logto Management API through the collab server).
+- Client and resource management is closed: `clientPrivileges` and `resourcePrivileges` refuse ordinary users, the Cognia client and the sync API resource are seeded from configuration (`resourceSeedMode: "overwrite"`), and the client is linked to the resource explicitly.
 - Rejected: OpenAuth (stalled, OAuth-only, no `id_token`), `@cloudflare/workers-oauth-provider` (opaque tokens no Rust verifier can check), Auth.js and Lucia (not issuers, or deprecated), Logto as the official issuer (needs Postgres and Redis, cannot run on Workers).
 
 ### 3. Keys never leave devices unsealed
@@ -172,14 +175,25 @@ New ids are UUIDv7 or CSPRNG nanoid. Human issue numbers come from a counter in 
   6. On web and Capacitor the keyring key sits in `localStorage`, so tokens stored there are obfuscated, not protected; Capacitor should use secure storage.
   7. Claude subscription OAuth stays reachable from the add-account dialog although ADR-0010's review flags it.
   8. The diagnostic server's anonymous grant verifies against a key supplied in the same request; the tenant existence check needs confirming.
+  9. `identities_from_user` in `crates/cognia-collab-server/src/logto_management.rs` reads `details.unionId`/`details.tenantKey`, but Logto's Feishu connector stores `union_id` and `tenant_key` under `details.rawData` and keys `userId` on `open_id`; the join files an untenanted open id, so a sign-in never meets the person's Feishu principals.
 - Follow-up cloud auth convergence: share create and owner actions accept Person tokens and `SHARE_GRANT_KEY` gets set; status admin gets its Access configuration; signaling stays key-bound, with the device directory replacing QR pairing for signed-in devices.
 
 ## Risks
 
 - **Mainland China reachability.** Cloudflare's standard network has no mainland presence; `*.workers.dev` is mostly unreachable and custom domains work with higher latency. Accepted: sync is background and latency-tolerant, the services use `*.cognia.cn` custom domains, and sockets fall back to long-polling. Login redirects are the most latency-sensitive step; self-hosting is the escape hatch.
 - **Feishu reach.** Until a marketplace app exists, only the login app's own tenant can sign in with Feishu.
-- **Unverified assumptions, each a spike before its phase:** Better Auth issues access tokens whose `aud` is the sync API and whose `sub` the Rust verifiers accept; `workerd` runs SQLite-backed Durable Objects on local disk for self-host; HPKE over P-256 performs acceptably in WebCrypto on the oldest supported Android WebView.
+- **Unverified assumptions, each a spike before its phase:** `workerd` runs SQLite-backed Durable Objects on local disk for self-host; HPKE over P-256 performs acceptably in WebCrypto on the oldest supported Android WebView. (The identity assumption was verified; see below.)
 - **Recovery-key loss is unrecoverable.** Mitigated only by the mandatory confirmation and by device approval.
+
+## Identity spike (2026-10-04)
+
+A prototype in `services/identity-server/` (better-auth 1.7.7, wrangler 4.141, local D1; results in its README) checked the identity assumptions before phase 1:
+
+- Better Auth on Workers + D1 serves OIDC discovery at `<issuer>/.well-known/openid-configuration`. With `resource=https://sync.cognia.cn` it issues an ES256 `at+jwt` access token with a `kid`, an `aud` array containing the sync API, and a `usr_` `sub` minted by `advanced.database.generateId`. The bundle is 3.0 MiB, 510 KiB gzipped.
+- The production verifier, `cognia-tenant-auth::oidc::OidcAuthenticator`, accepts that token, `UserId` validates the subject, and a wrong audience, a wrong issuer and a tampered payload are rejected.
+- Feishu sign-in worked end to end in a browser through `genericOAuth` with a custom v2 token exchange; the account is keyed `<tenant_key>:<union_id>`.
+- The app's existing PKCE client (`lib/logto/client.ts`) logs in, refreshes with rotation, revokes, and classifies a refresh after revocation as `invalid_grant` against Better Auth, once `prompt=consent` is not sent.
+- What changed in this ADR as a result: the native callback scheme, the Logto-only parameters, discarding provider tokens, the issuer-published identities claim, and closed client management (all in §2). The spike also found defect 9 below.
 
 ## Roadmap
 

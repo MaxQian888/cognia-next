@@ -1,0 +1,16 @@
+# SPIKE (ADR-0215 phase 1): Better Auth OIDC issuer on Workers + D1.
+# Dev: pnpm dev (local D1). Secrets for dev live in .dev.vars (gitignored).
+name = "cognia-identity-spike"
+main = "src/index.ts"
+compatibility_date = "2026-08-20"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[vars]
+BASE_URL = "http://localhost:8787"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cognia-identity-spike"
+database_id = "00000000-0000-0000-0000-000000000000"

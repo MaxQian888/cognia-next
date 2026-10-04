@@ -106,6 +106,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "3031", "--directory", "tmp/session-summary-redesign"],
       "port": 3031
+    },
+    {
+      "name": "identity-spike",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "services/identity-server", "dev"],
+      "port": 8787
     }
   ]
 }
