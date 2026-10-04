@@ -1,0 +1,149 @@
+name: Feishu Notifications
+
+# Keep notification secrets independent of builds and CI report generation.
+# Only default-branch code executes; source-run data is treated as untrusted.
+on:
+  workflow_run:
+    workflows:
+      - CI/CD Pipeline
+      - Code Quality
+      - Test Suite
+      - CI Report
+      - Build Tauri
+      - Release
+      - Deploy
+      - Nightly
+      - Compose E2E
+      - Images
+      - Share Server
+      - Signaling Server
+      - Standalone bootstrap scripts
+      - Sync model catalog
+      - Refresh website evidence
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Source workflow run ID; leave empty for the previous UTC day's digest
+        required: false
+        type: string
+      dry_run:
+        description: Generate a preview without sending to Feishu
+        required: false
+        type: boolean
+        default: true
+      resend_unknown:
+        description: Resend an uncertain previous delivery after checking the destination group
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 1 * * *"
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+# Separate sources never replace one another in GitHub's pending-run queue.
+concurrency:
+  group: feishu-${{ github.event.workflow_run.id || inputs.run_id || 'digest' }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Publish Feishu notification
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
+      (vars.FEISHU_ENABLED == 'true' &&
+      (github.event_name != 'schedule' || vars.FEISHU_DAILY_DIGEST == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FEISHU_ENABLED: ${{ vars.FEISHU_ENABLED }}
+      FEISHU_MODE: ${{ vars.FEISHU_MODE || 'changes' }}
+      FEISHU_DAILY_DIGEST: ${{ vars.FEISHU_DAILY_DIGEST }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      RESEND_UNKNOWN: ${{ github.event_name == 'workflow_dispatch' && inputs.resend_unknown || false }}
+      SOURCE_RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 26.x
+          package-manager-cache: false
+
+      - name: Prepare notification and preview
+        id: prepare
+        env:
+          FEISHU_OUTPUT_DIR: ${{ runner.temp }}/feishu
+          GITHUB_TOKEN: ${{ github.token }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_SIGNING_SECRET: ${{ secrets.FEISHU_SIGNING_SECRET }}
+          FEISHU_CI_WEBHOOK_URL: ${{ secrets.FEISHU_CI_WEBHOOK_URL }}
+          FEISHU_CI_SIGNING_SECRET: ${{ secrets.FEISHU_CI_SIGNING_SECRET }}
+          FEISHU_RELEASE_WEBHOOK_URL: ${{ secrets.FEISHU_RELEASE_WEBHOOK_URL }}
+          FEISHU_RELEASE_SIGNING_SECRET: ${{ secrets.FEISHU_RELEASE_SIGNING_SECRET }}
+          FEISHU_OPS_WEBHOOK_URL: ${{ secrets.FEISHU_OPS_WEBHOOK_URL }}
+          FEISHU_OPS_SIGNING_SECRET: ${{ secrets.FEISHU_OPS_SIGNING_SECRET }}
+        run: node scripts/ci/feishu/notify.mjs prepare
+
+      # A durable claim precedes the external POST. A lost response is never
+      # automatically retried because the group may already contain the card.
+      - name: Persist delivery claim
+        id: claim
+        if: steps.prepare.outputs.prepared == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.prepare.outputs.claim_name }}
+          path: ${{ runner.temp }}/feishu/claim.json
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Deliver notification
+        id: deliver
+        if: steps.prepare.outputs.prepared == 'true'
+        env:
+          CLAIM_ARTIFACT_ID: ${{ steps.claim.outputs.artifact-id }}
+          FEISHU_OUTPUT_DIR: ${{ runner.temp }}/feishu
+          GITHUB_TOKEN: ${{ github.token }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_SIGNING_SECRET: ${{ secrets.FEISHU_SIGNING_SECRET }}
+          FEISHU_CI_WEBHOOK_URL: ${{ secrets.FEISHU_CI_WEBHOOK_URL }}
+          FEISHU_CI_SIGNING_SECRET: ${{ secrets.FEISHU_CI_SIGNING_SECRET }}
+          FEISHU_RELEASE_WEBHOOK_URL: ${{ secrets.FEISHU_RELEASE_WEBHOOK_URL }}
+          FEISHU_RELEASE_SIGNING_SECRET: ${{ secrets.FEISHU_RELEASE_SIGNING_SECRET }}
+          FEISHU_OPS_WEBHOOK_URL: ${{ secrets.FEISHU_OPS_WEBHOOK_URL }}
+          FEISHU_OPS_SIGNING_SECRET: ${{ secrets.FEISHU_OPS_SIGNING_SECRET }}
+        run: node scripts/ci/feishu/notify.mjs deliver
+
+      - name: Preserve delivery receipt
+        id: receipt
+        if: always() && steps.deliver.outputs.receipt_name != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.deliver.outputs.receipt_name }}
+          path: ${{ runner.temp }}/feishu/receipt.json
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Preserve preview and diagnostics
+        id: diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: feishu-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/feishu/preview.json
+            ${{ runner.temp }}/feishu/preview.html
+            ${{ runner.temp }}/feishu/diagnostic.json
+          retention-days: 14
+          if-no-files-found: warn
