@@ -23,6 +23,11 @@ import {
   checkSealedNames,
   ecdsaVerify,
   enrollRequestSigningBytes,
+  importEcdsaPublicKey,
+  parseOp,
+  verifyOpSignature,
+  MAX_OPS_PER_PUSH,
+  type Op,
   expectedRecipients,
   fromBase64Url,
   matchesSasCommit,
@@ -70,10 +75,19 @@ interface FakeRequest {
 class Refusal extends Error {
   constructor(
     readonly status: number,
-    readonly code: string
+    readonly code: string,
+    readonly details?: Record<string, unknown>
   ) {
     super(code)
   }
+}
+
+/** One stored push (protocol §7.3). */
+export interface FakeOpBatch {
+  firstSeq: number
+  lastSeq: number
+  deviceId: string
+  ops: Op[]
 }
 
 export interface FakeSyncServerOptions {
@@ -95,6 +109,12 @@ export interface FakeSyncServer {
   state(): RegistryState | null
   /** Calls answered so far, as `METHOD path`. */
   readonly calls: string[]
+  /** The op log, in order. Tests may append to play a malicious server. */
+  readonly batches: FakeOpBatch[]
+  /** Socket tickets issued, by ticket. */
+  readonly tickets: Map<string, string>
+  /** Resolves the next time ops are stored. */
+  nextPush(): Promise<void>
 }
 
 export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncServer {
@@ -104,8 +124,15 @@ export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncSe
   const envelopes = new Map<string, EpochEnvelope>()
   const requests = new Map<string, FakeRequest>()
   const calls: string[] = []
+  const batches: FakeOpBatch[] = []
+  const deviceSeqs = new Map<string, number>()
+  const tickets = new Map<string, string>()
+  let pushWaiters: (() => void)[] = []
   let state: RegistryState | null = null
 
+  function lastServerSeq(): number {
+    return batches.at(-1)?.lastSeq ?? 0
+  }
   function expire(): void {
     for (const request of requests.values()) {
       if (OPEN.includes(request.state) && request.expiresAt <= now()) request.state = "expired"
@@ -440,6 +467,68 @@ export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncSe
         return { state: reason }
       }
     }
+    if (method === "POST" && path === "/v1/ops") {
+      const current = ready()
+      const deviceId = await active(request, body)
+      const raw = json().ops
+      if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_OPS_PER_PUSH)
+        throw new Refusal(400, "bad_request")
+      let ops: Op[]
+      try {
+        ops = raw.map(parseOp)
+      } catch {
+        throw new Refusal(400, "bad_request")
+      }
+      const last = deviceSeqs.get(deviceId) ?? 0
+      for (let i = 0; i < ops.length; i++) {
+        if (ops[i]!.deviceId !== deviceId) throw new Refusal(400, "bad_request")
+        if (i > 0 && ops[i]!.deviceSeq !== ops[i - 1]!.deviceSeq + 1)
+          throw new Refusal(400, "bad_request")
+      }
+      const fresh = ops.filter((op) => op.deviceSeq > last)
+      if (fresh.length === 0) return { deviceSeq: last, firstSeq: null, lastSeq: null }
+      if (fresh[0]!.deviceSeq !== last + 1)
+        throw new Refusal(409, "seq_gap", { expected: last + 1 })
+      if (fresh.some((op) => op.epoch !== current.epoch))
+        throw new Refusal(409, "epoch_stale", { epoch: current.epoch })
+      const key = await importEcdsaPublicKey(fromBase64Url(current.devices[deviceId]!.signPub))
+      for (const op of fresh)
+        if (!(await verifyOpSignature(key, spaceId, op))) throw new Refusal(400, "bad_request")
+      const firstSeq = lastServerSeq() + 1
+      const batch = { firstSeq, lastSeq: firstSeq + fresh.length - 1, deviceId, ops: fresh }
+      batches.push(batch)
+      deviceSeqs.set(deviceId, fresh.at(-1)!.deviceSeq)
+      const waiting = pushWaiters
+      pushWaiters = []
+      for (const wake of waiting) wake()
+      return { deviceSeq: fresh.at(-1)!.deviceSeq, firstSeq, lastSeq: batch.lastSeq }
+    }
+    if (method === "GET" && path === "/v1/ops") {
+      await active(request, body)
+      const after = Number(url.searchParams.get("after") ?? "0")
+      const wait = Number(url.searchParams.get("wait") ?? "0")
+      if (wait > 0 && lastServerSeq() <= after) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, wait * 1000)
+          pushWaiters.push(() => {
+            clearTimeout(timer)
+            resolve()
+          })
+        })
+      }
+      return {
+        batches: batches.filter((batch) => batch.lastSeq > after),
+        more: false,
+        lastSeq: lastServerSeq(),
+        registryHead: state?.head ?? null,
+      }
+    }
+    if (method === "POST" && path === "/v1/socket/ticket") {
+      const deviceId = await active(request, body)
+      const ticket = `ticket-${tickets.size + 1}`
+      tickets.set(ticket, deviceId)
+      return { ticket, expiresAt: now() + 60_000 }
+    }
     throw new Refusal(404, "not_found")
   }
 
@@ -451,7 +540,7 @@ export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncSe
       return new Response(JSON.stringify(await route(request)), { status: 200, headers })
     } catch (error) {
       if (error instanceof Refusal)
-        return new Response(JSON.stringify({ error: error.code }), {
+        return new Response(JSON.stringify({ ...error.details, error: error.code }), {
           status: error.status,
           headers,
         })
@@ -465,6 +554,9 @@ export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncSe
     envelopes,
     requests,
     calls,
+    batches,
+    tickets,
     state: () => state,
+    nextPush: () => new Promise<void>((resolve) => pushWaiters.push(resolve)),
   }
 }

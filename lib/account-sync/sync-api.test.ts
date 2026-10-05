@@ -128,4 +128,51 @@ describe("SyncApi", () => {
       status: 409,
     })
   })
+
+  it("asks for ops after a cursor, waits only when told, and refuses a malformed answer", async () => {
+    const seen: string[] = []
+    let answer: unknown = { batches: [], more: false, lastSeq: 0, registryHead: null }
+    const api = new SyncApi({
+      baseUrl: "https://sync.test",
+      spaceId: SPACE,
+      accessToken: async () => "t",
+      fetchImpl: (async (url: string) => {
+        seen.push(new URL(url).search)
+        return Response.json(answer)
+      }) as unknown as typeof fetch,
+    })
+    const device = await makeDevice()
+    await api.pullOps(device, 7)
+    await api.pullOps(device, 7, 25)
+    expect(seen).toEqual(["?after=7", "?after=7&wait=25"])
+    answer = { more: false }
+    expect(await errorOf(api.pullOps(device, 0))).toMatchObject({ code: "server" })
+  })
+
+  it("keeps a refusal's details", async () => {
+    const api = new SyncApi({
+      baseUrl: "https://sync.test",
+      spaceId: SPACE,
+      accessToken: async () => "t",
+      fetchImpl: (async () =>
+        Response.json(
+          { error: "seq_gap", message: "gap", expected: 4 },
+          { status: 409 }
+        )) as unknown as typeof fetch,
+    })
+    const error = await errorOf(api.pushOps(await makeDevice(), []))
+    expect(error).toMatchObject({ code: "seq_gap", status: 409, message: "gap" })
+    expect(error.details).toEqual({ expected: 4 })
+  })
+
+  it("addresses the live socket over ws or wss with the space and ticket", () => {
+    const at = (baseUrl: string) =>
+      new SyncApi({ baseUrl, spaceId: SPACE, accessToken: async () => "t", fetchImpl: fetch })
+    expect(at("https://sync.test").socketUrl("tk")).toBe(
+      `wss://sync.test/v1/socket?space=${SPACE}&ticket=tk`
+    )
+    expect(at("http://localhost:8788").socketUrl("tk")).toBe(
+      `ws://localhost:8788/v1/socket?space=${SPACE}&ticket=tk`
+    )
+  })
 })

@@ -15,6 +15,7 @@ import {
   SERVER_TIME_HEADER,
   utf8,
   type EpochEnvelope,
+  type Op,
   type SealedName,
   type SignedEntry,
   type SyncErrorCode,
@@ -29,11 +30,35 @@ export class SyncApiError extends Error {
   constructor(
     readonly code: SyncApiErrorCode,
     readonly status: number,
-    message: string
+    message: string,
+    /** The error body's other fields, e.g. `expected` for `seq_gap` or `epoch` for `epoch_stale`. */
+    readonly details: Record<string, unknown> = {}
   ) {
     super(message)
     this.name = "SyncApiError"
   }
+}
+
+/** One stored push, as a pull returns it (protocol §7.5). */
+export interface OpBatchView {
+  firstSeq: number
+  lastSeq: number
+  deviceId: string
+  /** Unchecked: the applier parses and verifies each op. */
+  ops: unknown[]
+}
+
+export interface PullView {
+  batches: OpBatchView[]
+  more: boolean
+  lastSeq: number
+  registryHead: { seq: number; hash: string } | null
+}
+
+export interface PushView {
+  deviceSeq: number
+  firstSeq: number | null
+  lastSeq: number | null
 }
 
 export interface SpaceInfo {
@@ -172,7 +197,10 @@ export class SyncApi {
       typeof payload?.message === "string" ? payload.message : `HTTP ${response.status}`
     if (code === "clock_skew" && init.device && !retried)
       return this.send<T>(method, path, init, true)
-    if (code) throw new SyncApiError(code, response.status, message)
+    if (code) {
+      const { error: _error, message: _message, ...details } = payload ?? {}
+      throw new SyncApiError(code, response.status, message, details)
+    }
     throw new SyncApiError(
       response.status >= 500 ? "server" : "bad_request",
       response.status,
@@ -260,5 +288,31 @@ export class SyncApi {
     reason: "denied" | "mismatch"
   ): Promise<{ state: RequestState }> {
     return this.send("POST", `/v1/enroll/requests/${requestId}/deny`, { body: { reason }, device })
+  }
+
+  pushOps(device: Signer, ops: Op[]): Promise<PushView> {
+    return this.send("POST", "/v1/ops", { body: { ops }, device })
+  }
+
+  /** Batches after `after`; with `waitS`, the server holds the answer until ops arrive or time runs out. */
+  async pullOps(device: Signer, after: number, waitS = 0): Promise<PullView> {
+    const query = waitS > 0 ? `?after=${after}&wait=${waitS}` : `?after=${after}`
+    const view = await this.send<PullView>("GET", `/v1/ops${query}`, { device })
+    if (!Array.isArray(view?.batches))
+      throw new SyncApiError("server", 200, "the op log answer is malformed")
+    return view
+  }
+
+  socketTicket(device: Signer): Promise<{ ticket: string; expiresAt: number }> {
+    return this.send("POST", "/v1/socket/ticket", { device })
+  }
+
+  /** The live socket's address for a ticket (protocol §6). */
+  socketUrl(ticket: string): string {
+    const url = new URL("/v1/socket", this.options.baseUrl)
+    url.protocol = url.protocol === "http:" ? "ws:" : "wss:"
+    url.searchParams.set("space", this.options.spaceId)
+    url.searchParams.set("ticket", ticket)
+    return url.href
   }
 }
