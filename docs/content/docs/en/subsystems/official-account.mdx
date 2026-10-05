@@ -87,8 +87,9 @@ Settings → Account → **Delete account** explains what goes (the account and 
 and what stays (everything on the device), offers a backup, and asks the person to sign in again
 (`prompt=login&max_age=0`). The request is sent only when that fresh sign-in is the same person,
 with its ID token as proof; the profile keeps its own session. A pending deletion shows its purge
-date and can be cancelled until then. After 7 days the Worker's hourly cron removes tokens,
-consents, sessions, linked accounts and the user.
+date and can be cancelled until then. After 7 days the Worker's hourly cron deletes the person's
+sync space (through the sync Worker's `SyncAdmin`, see [Account sync enrollment](./account-sync-enrollment)),
+then removes tokens, consents, sessions, linked accounts and the user.
 
 ## Known limits
 

@@ -33,6 +33,7 @@
     "network-proxy",
     "companion-api",
     "official-account",
+    "account-sync-enrollment",
     "observability",
     "performance",
     "misc-subsystems",

@@ -5,7 +5,7 @@ description: "Cognia 运营一个可选的官方账号，跑在 Cloudflare Worke
 
 # ADR 0215 — 一个人、一个加密同步空间、多台可写主机
 
-**状态：** 已接受（第 1 阶段“身份”已实现；第 2–7 阶段尚未开始）
+**状态：** 已接受（第 1 阶段“身份”已实现；第 2 阶段“密钥与设备登记”已实现，受构建开关控制；第 3–7 阶段尚未开始）
 **日期：** 2026-10-04
 **修订：** [ADR-0054](./0054-local-multi-account-isolation)（账号同步纳入范围；静态加密已存在）、[ADR-0097](./0097-cross-device-settings-contract-and-companion-reach) D5（同步表采用按字段时钟）、[ADR-0103](./0103-cross-host-session-handoff)（"单一可写副本"只约束进行中的回合，不约束数据）、[ADR-0116](./0116-host-authoritative-session-state)（权威方是租约持有者）、[ADR-0136](./0136-cross-device-placement)（主机间租约从此存在）、[ADR-0149](./0149-a-person-is-not-a-device) §6（其拒绝端到端加密的前提已过时；个人同步是端到端加密的）
 **相关：** [ADR-0001](./0001-backup-schema-v3)（备份包）、[ADR-0021](./0021-webrtc-datachannel-wan-transport) 与 [ADR-0170](./0170-cognia-relay-and-connectivity-center)（配对保留）、[ADR-0027](./0027-mobile-offline-and-discovery)（未登录的配对继续用伴随同步）、[ADR-0059](./0059-cloud-deployment-headless-brain)（无头主机）、[ADR-0091](./0091-lark-unified-identity-dual-entry)（飞书主体）、[ADR-0167](./0167-the-schedule-belongs-to-the-account)（定时任务）、[ADR-0209](./0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs)（插件意图）
@@ -234,10 +234,55 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 - 在应用市场版应用就绪前，只有自建飞书应用所在租户能登录。
 - Google 和 Apple 身份已列出，但本地身份词汇表中尚无对应项。
 
+## 实现（第 2 阶段）
+
+第 2 阶段交付密钥与设备登记：设备密钥、同步恢复密钥、用六位代码批准新设备、用恢复密钥恢复、撤销与 纪元轮换。不同步任何数据。线上格式见[协议](../data/account-sync-protocol)第 2–5 节。其中第 4、5 节取代了初稿：
+
+- 设备列表是只追加、带签名的哈希链；
+- 每个 纪元密钥都在其中有承诺；
+- 恢复密钥既能解密也能签名；
+- 批准代码采用先承诺后揭示。
+
+**共享规则。** `packages/sync-protocol` 没有依赖，只用 WebCrypto。它的 `validateAppend`、`foldRegistry` 和回滚固定点，就是 Worker 强制执行、每个客户端重新检查的规则。`fixtures/v1.json` 中冻结的向量固定了线上格式。它们在 Node 中运行，也通过 Worker 的测试在 workerd 中运行。
+
+**服务端**是 `services/sync-server/`，Worker 名为 `cognia-sync`，域名 `sync.cognia.cn`（预发布 `sync-staging.cognia.cn`）。每个空间一个 SQLite Durable Object，以 `spaceId` 命名。
+
+- 它接受身份 Worker 签发的同步访问令牌，通过 `IDENTITY` 服务绑定读取 JWKS。
+- 每个设备操作都检查设备证明，被撤销的设备在读取任何内容之前就被拒绝。
+- 它强制要求完整的信封集合、原子的恢复批次，以及批准请求的状态、转录和批准者。
+- `SyncAdmin.purgeSpace` 删除一个空间。身份 Worker 清除账号时通过 `SYNC_ADMIN` 绑定调用它：预发布环境已绑定，生产环境在 `cognia-sync` 部署后绑定。
+- 运维指南见其 README，事故处理见 `docs/runbooks/sync-worker.md`。
+
+**客户端。**
+
+- `lib/account-sync/crypto`：HPKE 用 `@hpke/core`，恢复密钥的 RFC 9180 `DeriveKeyPair` 用 `@noble/curves`。
+- `lib/account-sync/enrollment`：各个流程。
+- `lib/account-sync/vault-store.ts`：密钥存放在配置文件的密钥存储中，按配置文件和空间隔离。在重启后无法保留时拒绝写入。
+
+设备只信任已验证列表承诺过的 纪元密钥。只有列表中存在针对自身的有效签名撤销条目时，才删除自己的密钥。比已固定列表更短或不同的列表属于完整性错误，不删除任何内容。同一空间的变更在多个标签页之间串行执行。子系统说明见[账号同步设备登记](../subsystems/account-sync-enrollment)。
+
+**界面。**
+
+- *设置 → 账号 → 同步设备*提供设置、加入、恢复和设备列表，并标注“暂不同步数据”。
+- 应用根部的宿主在应用可见时每 20 秒轮询一次。它通过仅限本机的通知（通知中心、toast、系统通知）提示等待中的设备，点击后打开批准对话框。设备控制台显示同样的提示。
+
+**由构建开关保持休眠。** 只有 `NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC` 打开时才启用：预发布构建会设置它，`next dev` 默认打开。
+
+- 开关关闭时，不挂载、不轮询、不连接同步服务。
+- 账号概览会注明此版本未提供该功能。
+- 两者都有测试固定。
+
+**第 2 阶段遗留问题。**
+
+- 无界面宿主还不能登记：它们还没有配置文件保险库（第 3 阶段）。
+- 加入时合并设备已有的本地数据（协议第 5.4 节）随首批同步表一起实现（第 3 阶段）。
+- 服务端向不同设备展示不同列表的情况，通过比较列表指纹来发现，但无法阻止（协议第 4.2 节）。
+- Android 和 iOS 外壳上的 WebView 加密验证，以及预发布环境的端到端测试，尚待完成。
+
 ## 路线图
 
 1. **身份。** Better Auth Worker 和 D1；飞书（自建应用）、GitHub、Google、Apple；带官方默认值、不绑定签发方的客户端；档案与人的绑定；修复上面的飞书缺陷。
-2. **密钥与加入。** 设备密钥、恢复密钥及确认、6 位校验码批准、恢复、吊销、纪元轮换。
+2. **密钥与加入**（已实现，受构建开关控制）。设备密钥、恢复密钥及确认、6 位校验码批准、恢复、吊销、纪元轮换。
 3. **同步核心。** 账号对象、操作日志、HLC、待发送中间件、快照、模式版本差异处理、ID 与计数器。首批表：会话、消息、角色、技能、记忆、设置（拆分后）。
 4. **执行租约。** 连接器、定时任务、进行中的回合；对 0103、0116、0136 的修订在此生效。
 5. **密钥与飞书用户授权。** 密钥类别、刷新租约、BYOK 密钥移出 `settings`。

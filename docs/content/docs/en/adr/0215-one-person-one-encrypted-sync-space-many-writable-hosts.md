@@ -5,7 +5,7 @@ description: "Cognia operates an official, optional account on Cloudflare Worker
 
 # ADR 0215 — One person, one encrypted sync space, many writable hosts
 
-**Status:** Accepted (phase 1, identity, implemented; phases 2–7 not started)
+**Status:** Accepted (phase 1, identity, implemented; phase 2, keys and enrollment, implemented behind a build flag; phases 3–7 not started)
 **Date:** 2026-10-04
 **Amends:** [ADR-0054](./0054-local-multi-account-isolation) (account sync in scope; at-rest encryption exists), [ADR-0097](./0097-cross-device-settings-contract-and-companion-reach) D5 (per-field clocks adopted for synced tables), [ADR-0103](./0103-cross-host-session-handoff) (single writable copy applies to a live turn, not to data), [ADR-0116](./0116-host-authoritative-session-state) (authority is the lease holder), [ADR-0136](./0136-cross-device-placement) (inter-host leases now exist), [ADR-0149](./0149-a-person-is-not-a-device) §6 (its premise for rejecting E2E is stale; personal sync is E2E)
 **Related:** [ADR-0001](./0001-backup-schema-v3) (backup package), [ADR-0021](./0021-webrtc-datachannel-wan-transport) and [ADR-0170](./0170-cognia-relay-and-connectivity-center) (pairing stays), [ADR-0027](./0027-mobile-offline-and-discovery) (companion sync stays for unsigned pairs), [ADR-0059](./0059-cloud-deployment-headless-brain) (headless host), [ADR-0091](./0091-lark-unified-identity-dual-entry) (Feishu principals), [ADR-0167](./0167-the-schedule-belongs-to-the-account) (schedules), [ADR-0209](./0209-a-cogpack-pins-plugins-and-a-cogset-owns-what-runs) (plugin intent)
@@ -234,10 +234,55 @@ A token's unverified `iss` only picks among those anchors.
 - Only the self-built Feishu app's tenant can sign in until the marketplace app exists.
 - Google and Apple identities are listed but have no word in the local identity vocabulary yet.
 
+## Implementation (phase 2)
+
+Phase 2 ships keys and enrollment: device keys, the sync recovery key, approving a new device with a six-digit code, recovering with the key, revocation and epoch rotation. No data syncs. The wire format is the [protocol](../data/account-sync-protocol) §2–5. Its §4 and §5 replace the first draft:
+
+- the device list is an append-only, signed hash chain;
+- every epoch key is committed in it;
+- the recovery key signs as well as decrypts;
+- the approval code is commit-then-reveal.
+
+**Shared rules.** `packages/sync-protocol` has no dependencies and uses WebCrypto only. Its `validateAppend`, `foldRegistry` and rollback pin are the rules the Worker enforces and every client re-checks. Frozen vectors in `fixtures/v1.json` pin the wire format. They run in Node and, through the Worker suite, in workerd.
+
+**The server** is `services/sync-server/`, a Worker named `cognia-sync` on `sync.cognia.cn` (staging `sync-staging.cognia.cn`). It runs one SQLite Durable Object per space, named by `spaceId`.
+
+- It accepts the identity Worker's sync access tokens, reading the JWKS through the `IDENTITY` service binding.
+- It checks a device proof on every device action, and refuses a revoked device before reading anything.
+- It enforces complete envelope sets, the atomic recovery batch and the approval's request state, transcript and approver.
+- `SyncAdmin.purgeSpace` deletes a space. The identity Worker calls it through its `SYNC_ADMIN` binding when it purges an account: bound on staging, and on production once `cognia-sync` is deployed.
+- Operator guide: its README. Incidents: `docs/runbooks/sync-worker.md`.
+
+**The client.**
+
+- `lib/account-sync/crypto`: HPKE via `@hpke/core`, and the recovery key's RFC 9180 `DeriveKeyPair` via `@noble/curves`.
+- `lib/account-sync/enrollment`: the flows.
+- `lib/account-sync/vault-store.ts`: secrets in the profile's secret store, scoped per profile and space. It refuses to write while they would not survive a restart.
+
+A device trusts an epoch key only when the verified list commits to it. It deletes its keys only on a validly signed revoke entry for itself. A shorter or different list than the one it pinned is an integrity error, and deletes nothing. Changes are serialized per space across tabs. Subsystem guide: [Account sync enrollment](../subsystems/account-sync-enrollment).
+
+**The UI.**
+
+- *Settings → Account → Sync devices* has setup, join, recovery and the device list, labelled "nothing syncs yet".
+- An app-root host polls every 20 s while the app is visible. It announces waiting devices through local-only notifications (center, toast, OS), whose action opens the approval dialog. The devices console shows the same notice.
+
+**Dormant by build flag.** The feature is off unless `NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC` is on: staging builds set it, `next dev` defaults it on.
+
+- With the flag off nothing mounts, polls or contacts the sync host.
+- The account overview says the feature is not in this build.
+- Tests pin both.
+
+**Still open from phase 2.**
+
+- Headless hosts cannot enroll: they have no profile vault yet (phase 3).
+- Merging a device's existing local data on join (protocol §5.4) comes with the first synced tables (phase 3).
+- A server showing different devices different lists is detected by comparing the list fingerprint, not prevented (protocol §4.2).
+- The WebView crypto spikes on the Android and iOS shells, and the staging end-to-end run, are pending.
+
 ## Roadmap
 
 1. **Identity.** Better Auth Worker and D1; Feishu (self-built), GitHub, Google, Apple; issuer-agnostic client with the official default; profile-to-Person binding; the Feishu defects above.
-2. **Keys and enrollment.** Device keys, recovery key and confirmation, approval with the six-digit code, recovery, revocation, epoch rotation.
+2. **Keys and enrollment** (implemented, behind a build flag). Device keys, recovery key and confirmation, approval with the six-digit code, recovery, revocation, epoch rotation.
 3. **Sync core.** Account object, op log, HLC, outbox middleware, snapshots, schema-skew handling, ids and counters. First tables: sessions, messages, characters, skills, memories, settings (split).
 4. **Execution leases.** Connectors, scheduler, live turns; the amendments to 0103, 0116 and 0136 take effect.
 5. **Secrets and Feishu user authorization.** Secrets class, refresh leases, BYOK keys out of `settings`.

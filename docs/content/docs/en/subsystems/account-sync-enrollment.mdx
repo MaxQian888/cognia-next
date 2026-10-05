@@ -1,0 +1,99 @@
+---
+title: Account Sync Enrollment
+description: Phase 2 of account sync — device keys, the sync recovery key, approving a new device with a six-digit code, recovery, revocation and key rotation, verified on every device against a signed device list. No data syncs yet.
+---
+
+# Account Sync Enrollment
+
+<Status variant="beta">Phase 2 · keys and devices · ADR-0215 · behind a build flag</Status>
+
+<TLDR>
+  A person signed in to the official account gets one sync space. Each device that joins it holds
+  its own keys, and the space's key for the current epoch is sealed to every device and to the
+  sync recovery key. The server stores a signed, append-only device list and sealed keys; it can
+  refuse service but cannot add a device, read a key or hide a removal without the devices
+  noticing. This phase enrolls devices only: nothing syncs until phase 3.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Approval code" value="6 digits" hint="commit-then-reveal, bound to both devices' keys" />
+  <Stat label="Request lifetime" value="15 min" hint="≤ 3 waiting, ≤ 10 an hour per space" />
+  <Stat label="Poll" value="20 s" hint="only while the app is visible" />
+  <Stat label="Devices" value="≤ 32" hint="active at once" />
+</StatGrid>
+
+## Where each part lives
+
+| Part | Lives in |
+| --- | --- |
+| Wire format | [Account Sync Protocol v1](../data/account-sync-protocol) §2–5 |
+| Shared rules and vectors | `packages/sync-protocol/` (`validateAppend`, `foldRegistry`, pin, `fixtures/v1.json`) |
+| Server (Worker + SQLite DO) | `services/sync-server/` (operator guide in its README) |
+| Client keys and HPKE | `lib/account-sync/crypto/` |
+| Flows | `lib/account-sync/enrollment/` (first device, join, approve, recover, manage, revoked) |
+| API client, vault, verification | `lib/account-sync/sync-api.ts`, `vault-store.ts`, `registry-sync.ts` |
+| Build flag | `lib/account-sync/feature-flag.ts` (`NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC`) |
+| Poller and notifications | `hooks/account-sync/use-account-sync-poller.ts`, `lib/account-sync/approval-notifications.ts` |
+| UI | `components/account/sync/` (section, approval dialog, host) |
+| Incidents | `docs/runbooks/sync-worker.md` |
+
+## The first device
+
+Settings → Account → **Sync devices**, on a profile signed in to the official account, offers
+**Set up sync** when the person has no space yet. The device makes its keys, a sync recovery key
+and the first epoch key, and signs the genesis entry with both its own key and the recovery key.
+Nothing uploads until the person proves they kept the recovery key: by retyping four characters
+at random positions, or by downloading the recovery kit and saying they stored it. Only after the
+server accepts the genesis does the device keep its keys. If another device won the race, it asks
+that device for approval instead.
+
+The **sync recovery key** is not the profile recovery key: the first adds a device to the sync
+space, the second unlocks a local profile. The UI always names it in full.
+
+## Adding a device
+
+<Steps>
+  <Step>The new device asks: it posts a commitment to a random nonce, its keys, and its name sealed to each enrolled device.</Step>
+  <Step>An enrolled device shows "a new device wants to sync" (notification, account page, devices console). The person opens it and continues: that device posts its own nonce.</Step>
+  <Step>The new device reveals its nonce; the approver checks it against the commitment.</Step>
+  <Step>Both show a six-digit code computed from both nonces and everything the approval binds. The person compares them and taps **The codes match**.</Step>
+  <Step>The approver appends the device to the list with the transcript's hash and seals the current key to it; the new device accepts only what the verified list proves.</Step>
+</Steps>
+
+The server sees both nonces only after each side is fixed, so it cannot pick keys or nonces to
+make the codes agree; a forged device list changes the code too.
+
+**Without another device**, **Use the sync recovery key** adds this device and rotates the key
+in one atomic batch, then offers to replace the recovery key.
+
+## Managing devices
+
+The device list shows each device's name (decrypted on the device), how it joined, and the list's
+**fingerprint**. Two devices showing different fingerprints means the server shows them different
+lists. From there a device can **remove** another one, **rotate keys**, or **replace the sync
+recovery key**. Each starts a new epoch whose key the removed device or the old recovery key never
+receives.
+
+A removed device deletes its keys only after it finds a validly signed removal of itself in the
+verified list. It keeps the record of when and by which device, and says so; its local data is
+untouched. A bare refusal from the server deletes nothing.
+
+## What a device refuses
+
+- An epoch key the signed list does not commit to.
+- A device list shorter than, or different from, the one it verified before. It reports an integrity problem and changes nothing.
+- An approval whose transcript or approver does not match what it asked for.
+
+## Build flag
+
+The feature ships dormant. It is on when `NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC=1` (staging builds)
+and under `next dev`, unless that variable is `0`. With it off, nothing mounts, polls or contacts
+the sync host, and the account overview says "Account sync: not in this build". The sync host is
+`NEXT_PUBLIC_COGNIA_SYNC_URL` (default `https://sync.cognia.cn`; staging
+`https://sync-staging.cognia.cn`).
+
+## Known limits
+
+- Headless hosts cannot enroll yet: they have no profile vault (phase 3).
+- A request lives in memory on the new device; reloading abandons it until it expires.
+- Merging a device's existing local data on join comes with the first synced tables (phase 3).
