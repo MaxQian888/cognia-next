@@ -1,9 +1,8 @@
 // git_repo_inspect + git_changes — repo snapshot (read-only).
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { runGit } from "../../../platform/process/git.ts"
 import { assertRepo } from "./run.ts"

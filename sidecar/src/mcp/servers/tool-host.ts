@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net"
 import type { ToolSessionContext, ToolSessionSendOptions } from "../../tools/session.ts"
 import type { AiSdkToolSendOptions } from "../../tools/adapters/ai-sdk.ts"
 import type { PendingApproval } from "../../policy/permission/approval.ts"
-import type { PluginToolResponse } from "../../tools/plugin/server.ts"
+import type { PluginToolResponse } from "../../tools/plugin/proxy.ts"
 import type { HostRpcCaller } from "../../tools/state/host-background-shells.ts"
 
 interface HostResponse extends PluginToolResponse {
@@ -104,7 +104,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { buildAiSdkTools } from "../../tools/adapters/ai-sdk.ts"
 import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
-import { awaitPluginToolResponse } from "../../tools/plugin/server.ts"
+import { awaitPluginToolResponse } from "../../tools/plugin/proxy.ts"
 
 const SERVERS = ["cognia-tools", "cognia-plugin-tools"] as const
 const MAX_BODY = 2 * 1024 * 1024

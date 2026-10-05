@@ -16,8 +16,7 @@ import type { DispatchParams } from "./types.ts"
 // same `permission_request` round-trip (`pendingApprovals`). Plugin tools
 // round-trip through `pendingPluginToolCalls`. A2UI remains Anthropic-only.
 
-import { dispatchAnthropic } from "./claude-agent-sdk/index.ts"
-import { dispatchAiSdk } from "./ai-sdk/index.ts"
+import { requireEngine } from "./engines.ts"
 import { resolveRuntimeAdapter } from "./registry.ts"
 
 // Legacy-dispatch counter (Phase 9 retirement evidence). Read by the host's
@@ -48,7 +47,12 @@ export function dispatch(params: DispatchParams) {
   dispatchTelemetry.legacyDispatchCount += 1
   const provider = params.sendOptions.provider ?? "anthropic"
   if (provider === "anthropic") {
-    return dispatchAnthropic(params as Parameters<typeof dispatchAnthropic>[0])
+    const engine = requireEngine("claude-agent-sdk")
+    return engine.dispatch(params as Parameters<typeof engine.dispatch>[0])
   }
-  return dispatchAiSdk({ ...params, provider, hostRpc: params.hostRpc ?? undefined })
+  return requireEngine("ai-sdk").dispatch({
+    ...params,
+    provider,
+    hostRpc: params.hostRpc ?? undefined,
+  })
 }

@@ -9,9 +9,8 @@
 // navigation) — this is pattern search + structural rewrite.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { CLI_LANGUAGES } from "./languages.ts"
 import { runSg } from "./run.ts"

@@ -1,7 +1,7 @@
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { DispatchParams, RuntimeDeps } from "./runtime-types.ts"
 import type { PendingApproval } from "../../policy/permission/approval.ts"
-import type { PendingPluginToolCalls } from "../../tools/plugin/server.ts"
+import type { PendingPluginToolCalls } from "../../tools/plugin/proxy.ts"
 import type { PendingPluginHooks } from "../../hooks/kernel/types.ts"
 
 import { createToolSessionContext } from "../../tools/session.ts"
@@ -55,7 +55,7 @@ export function dispatchAnthropic(
   /**
    * Plugin tool calls awaiting a `plugin_tool_response` from the renderer.
    * Keyed by `toolUseId`. Drained by `claude-host.mjs` when a response
-   * arrives over stdin. See `sidecar/src/tools/plugin/server.ts`.
+   * arrives over stdin. See `sidecar/src/tools/plugin/proxy.ts`.
    */
   const pendingPluginToolCalls: PendingPluginToolCalls = new Map()
   // `{ type: "plugin" }` lifecycle-hook handlers round-trip through the renderer

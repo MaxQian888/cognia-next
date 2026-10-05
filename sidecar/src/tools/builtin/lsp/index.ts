@@ -11,7 +11,7 @@
 // 0-based positions internally. Mirrors OpenCode's `lsp` tool surface
 // minus completion/formatting (irrelevant to an agent).
 
-import { tool } from "@anthropic-ai/claude-agent-sdk"
+import { tool } from "../../kernel/define.ts"
 import { z } from "zod"
 import { fileURLToPath } from "node:url"
 import type { LazyLspResolver } from "../../../services/lsp/lazy-resolver.ts"

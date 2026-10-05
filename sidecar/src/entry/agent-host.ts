@@ -1,7 +1,7 @@
 import "../platform/net/install-fetch-interceptor.ts"
 import { pathToFileURL } from "node:url"
 import { initializeTelemetry, shutdownTelemetry } from "../platform/telemetry/index.ts"
-import { createAgentHost } from "../host/index.ts"
+import { createAgentHost, loadConfiguredEngines } from "../host/index.ts"
 export * from "../host/index.ts"
 
 let host: ReturnType<typeof createAgentHost> | undefined
@@ -34,9 +34,16 @@ export function emitForTests(payload: unknown) {
   observeHost().emitForTests(payload)
 }
 export function startAgentHost() {
-  observeHost().startAgentHost()
+  void loadConfiguredEngines().then(
+    () => observeHost().startAgentHost(),
+    (error: unknown) => {
+      console.error(error)
+      process.exit(1)
+    }
+  )
 }
-export function smoke() {
+export async function smoke() {
+  await loadConfiguredEngines()
   return observeHost().smoke()
 }
 export function runAgentHostEntry(url: string) {

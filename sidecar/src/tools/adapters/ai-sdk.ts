@@ -27,7 +27,7 @@ import {
   toolBudgetMessage,
 } from "../middleware/read-only-timeout.ts"
 
-import { awaitPluginToolResponse } from "../plugin/server.ts"
+import { awaitPluginToolResponse } from "../plugin/proxy.ts"
 import { createToolPermissionGate } from "../../policy/permission/ai-sdk-gate.ts"
 import { createDoomLoopGuard } from "../../policy/doom-loop.ts"
 import { assertModelSafeToolOutput } from "../../policy/pii/tool-output.ts"
@@ -38,7 +38,7 @@ import type { ToolDefinition } from "../kernel/define.ts"
 import type { ReadTracker } from "../state/read-tracker.ts"
 import type { SessionTaskStore } from "../state/tasks.ts"
 import type { HostRpcCaller, SessionBgShellRegistry } from "../state/host-background-shells.ts"
-import type { PendingPluginToolCalls, PluginToolManifestEntry } from "../plugin/server.ts"
+import type { PendingPluginToolCalls, PluginToolManifestEntry } from "../plugin/proxy.ts"
 import type { ToolPermissionGate } from "../../policy/permission/ai-sdk-gate.ts"
 import type { PendingApproval } from "../../policy/permission/approval.ts"
 import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
@@ -431,7 +431,7 @@ export function buildAiSdkTools({
       builtinDefToAiSdkTool(def, gate, builtinToolTimeoutMs, reviewToolOutput),
       {
         serverName: SERVER_NAME,
-        alwaysLoad: def._meta?.["anthropic/alwaysLoad"] === true,
+        alwaysLoad: def.alwaysLoad === true,
       }
     )
   }

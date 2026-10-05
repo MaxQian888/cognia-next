@@ -1,11 +1,10 @@
-import { awaitPending } from "../../shared/pending.ts"
-// Synthetic `cognia-plugin-tools` in-process MCP server (M2).
+// Plugin tools proxied to the renderer (M2), engine-neutral (ADR-0217).
 //
-// Mirrors the shape of the cognia-tools builtin server but instead of running
-// tools locally, every call here proxies back to the
-// renderer process over the parent stdio protocol. The dispatcher builds
-// one of these servers per session when the renderer has surfaced a
-// non-empty `pluginTools` manifest in SendOptions.
+// Every call runs in the renderer, not here: a tool's handler sends the call
+// over the parent stdio protocol and waits for the answer. The Claude Agent
+// SDK rail registers these definitions as the synthetic `cognia-plugin-tools`
+// MCP server (`tools/adapters/sdk-mcp-plugin.ts`); the AI SDK rail builds its
+// own tools over the same round trip (`tools/adapters/ai-sdk.ts`).
 //
 // Wire protocol — sidecar → parent:
 //   { type: "plugin_tool_exec", sessionId, turnId?, attemptId?, toolUseId, name, args }
@@ -18,14 +17,14 @@ import { awaitPending } from "../../shared/pending.ts"
 
 import { randomUUID } from "node:crypto"
 
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk/core"
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import { permissionDecisionHasUnprovenRewrite } from "../../policy/permission/delegated-approval.ts"
 import { planPluginToolNames } from "../../policy/tool-catalog/plugin-aliases.ts"
 import { PLUGIN_TOOLS_SERVER_NAME } from "../../policy/tool-catalog/names.ts"
+import { awaitPending } from "../../shared/pending.ts"
+import { tool, type ToolDefinition } from "../kernel/define.ts"
 import { toolError, toolText } from "../kernel/result.ts"
 import { jsonSchemaToZodShape } from "./json-schema-zod.ts"
 
@@ -131,14 +130,14 @@ export interface PluginToolsServerOptions {
    */
   pendingPluginToolCalls: PendingPluginToolCalls
   /**
-   * Server-level always-load — when true every plugin tool stays resident
-   * (never deferred behind tool search). Mirrors `createSdkMcpServer({ alwaysLoad })`.
+   * Server-level always-load: when true every plugin tool stays resident
+   * (never deferred behind tool search).
    */
   alwaysLoad?: boolean | undefined
   /**
    * Per-tool always-load allowlist (bare names). Tools whose name is in this
-   * set are pinned resident even when the server defers the rest — applied via
-   * `tool({ alwaysLoad })`, which the SDK OR's with the server-level flag.
+   * set are pinned resident even when the server defers the rest; OR'd with
+   * the server-level flag.
    */
   alwaysLoadToolNames?: ReadonlySet<string> | Iterable<string> | null | undefined
   remoteExecutionContext?: unknown
@@ -149,17 +148,19 @@ export interface PluginToolsServerOptions {
    * the bundled Claude Code would rewrite for the API (`ocr.extract` registers
    * as `ocr_extract`). The renderer, the permission lists and the
    * `plugin_tool_exec` round-trip keep the original name, so the dispatcher
-   * uses this table to translate at the SDK boundary.
+   * uses this table to translate at the engine boundary.
    */
   toolNameAliases?: Map<string, string> | null | undefined
   permissionPromptToolName?: string | undefined
 }
 
 /**
- * Build an in-process MCP server that proxies tool calls back to the
- * renderer process via the existing claude-host stdio protocol.
+ * The plugin tools as kernel definitions whose handlers proxy each call back
+ * to the renderer, answering in MCP `CallToolResult` form; `null` when the
+ * manifest is empty. `alwaysLoad` marks every tool resident, as does the
+ * per-tool allowlist.
  */
-export function buildPluginToolsServer({
+export function buildPluginToolDefinitions({
   tools,
   emit,
   sessionId,
@@ -172,7 +173,7 @@ export function buildPluginToolsServer({
   attemptId,
   toolNameAliases,
   permissionPromptToolName,
-}: PluginToolsServerOptions): McpSdkServerConfigWithInstance | null {
+}: PluginToolsServerOptions): ToolDefinition[] | null {
   if (!Array.isArray(tools) || tools.length === 0) return null
   if (!hasNoLeakingPiiDeep(tools)) throw new Error("Plugin tool metadata blocked by the PII gate")
 
@@ -181,15 +182,14 @@ export function buildPluginToolsServer({
 
   // Register the model-facing name ourselves, with the same replacement Claude
   // Code applies, so the alias table is exact rather than a guess about what
-  // the SDK will do to the name downstream.
+  // an engine will do to the name downstream.
   const { modelNameOf, aliases } = planPluginToolNames(tools)
   if (toolNameAliases instanceof Map) {
     for (const [model, original] of aliases) toolNameAliases.set(model, original)
   }
 
-  const wrappedTools = tools.map((t) => {
+  return tools.map((t) => {
     const zodShape = jsonSchemaToZodShape(t.jsonSchema)
-    const toolExtras = perToolAlways.has(t.name) ? { alwaysLoad: true } : undefined
     return tool(
       modelNameOf.get(t.name) ?? t.name,
       t.description ?? "",
@@ -235,14 +235,7 @@ export function buildPluginToolsServer({
         // passes through untouched; everything else keeps the JSON-text shape.
         return isCallToolResult(result) ? result : toolText(result)
       },
-      toolExtras
+      { alwaysLoad: alwaysLoad === true || perToolAlways.has(t.name) }
     )
-  })
-
-  return createSdkMcpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
-    tools: wrappedTools,
-    ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }

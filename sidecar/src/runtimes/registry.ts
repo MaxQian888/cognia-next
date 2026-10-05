@@ -2,15 +2,13 @@
 //
 // The dispatch decision stops being a provider-id branch: a frozen execution
 // spec names its `runtimeAdapter`, and this registry maps that id onto the
-// EXISTING dispatchers (thin wrappers — no logic moves out of anthropic.mjs /
-// ai-sdk.mjs). Each adapter declares a capability table so unsupported
-// commands surface as typed `capability_error` events instead of silent
-// no-ops.
-
-import { dispatchAnthropic } from "./claude-agent-sdk/index.ts"
-import { dispatchAiSdk } from "./ai-sdk/index.ts"
+// EXISTING dispatchers (thin wrappers). Each adapter declares a capability
+// table so unsupported commands surface as typed `capability_error` events
+// instead of silent no-ops. The tables are static; the dispatchers belong to
+// engines loaded by `./engines.ts`, so the registry imports neither SDK.
 
 import { ADAPTER_CAPABILITIES } from "./capabilities.ts"
+import { requireEngine } from "./engines.ts"
 import type { DispatchParams } from "./types.ts"
 export {
   ADAPTER_CAPABILITIES,
@@ -24,8 +22,10 @@ export const RUNTIME_ADAPTERS = {
   "claude-agent-sdk": {
     id: "claude-agent-sdk",
     capabilities: ADAPTER_CAPABILITIES["claude-agent-sdk"],
-    dispatch: (params: DispatchParams) =>
-      dispatchAnthropic(params as Parameters<typeof dispatchAnthropic>[0]),
+    dispatch: (params: DispatchParams) => {
+      const engine = requireEngine("claude-agent-sdk")
+      return engine.dispatch(params as Parameters<typeof engine.dispatch>[0])
+    },
   },
   "ai-sdk": {
     id: "ai-sdk",
@@ -33,7 +33,7 @@ export const RUNTIME_ADAPTERS = {
     // The ai-sdk dispatcher derives its provider from sendOptions.provider,
     // exactly as the legacy branch did.
     dispatch: (params: DispatchParams) =>
-      dispatchAiSdk({
+      requireEngine("ai-sdk").dispatch({
         ...params,
         provider: params.sendOptions.provider!,
         hostRpc: params.hostRpc ?? undefined,

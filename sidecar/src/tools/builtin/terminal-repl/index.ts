@@ -34,11 +34,10 @@ import path from "node:path"
 import { createRequire } from "node:module"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import type { ToolResult } from "../../kernel/result.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 const OUTPUT_RING_BYTES = 256 * 1024
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000

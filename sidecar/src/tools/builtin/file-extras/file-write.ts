@@ -3,12 +3,11 @@
 import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { statOrNull } from "../../../platform/fs/stat.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 // ---- file_append ----------------------------------------------------------
 

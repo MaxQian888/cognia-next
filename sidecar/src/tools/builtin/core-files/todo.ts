@@ -11,10 +11,9 @@
 // just acknowledges so the model sees a stable, cheap result.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolText } from "../../kernel/result.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 export const TODO_WRITE_NAME = "TodoWrite"
 

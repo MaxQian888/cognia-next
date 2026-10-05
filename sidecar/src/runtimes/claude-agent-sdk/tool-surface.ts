@@ -9,8 +9,9 @@ import {
   namesForDisabledCategories,
 } from "../../policy/tool-catalog/catalog.ts"
 import { PLUGIN_TOOLS_SERVER_NAME } from "../../policy/tool-catalog/names.ts"
-import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../../tools/a2ui/server.ts"
-import { buildPluginToolsServer } from "../../tools/plugin/server.ts"
+import { SERVER_NAME as A2UI_SERVER_NAME } from "../../tools/a2ui/tools.ts"
+import { buildA2UIBridgeServer } from "../../tools/adapters/sdk-mcp-a2ui.ts"
+import { buildPluginToolsServer } from "../../tools/adapters/sdk-mcp-plugin.ts"
 import { modelPluginToolNameList } from "../../policy/tool-catalog/plugin-aliases.ts"
 
 import {

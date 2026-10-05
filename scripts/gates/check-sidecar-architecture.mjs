@@ -31,6 +31,11 @@
  *      imports only the modules listed as `public`, or a launcher.
  *   9. No directory-level import cycle among production modules.
  *  10. Once `legacyMjsAllowed` is off, launchers are the only `.mjs` files.
+ *  11. Vendor isolation (ADR-0217): the runtime import closure of each listed
+ *      entry never reaches the listed package. Type-only imports are erased
+ *      and dynamic imports load on demand, so neither counts; a static value
+ *      import anywhere in the closure does. This is what keeps the host and
+ *      the AI SDK engine runnable without the Claude Agent SDK.
  *
  * Findings are ratcheted against `sidecar-architecture-baseline.json`, the
  * violations the legacy tree had when the gate landed: a new finding fails, and
@@ -117,7 +122,11 @@ export function moduleReferences(fileName, source) {
         callee.expression.text === "jest" &&
         ["mock", "doMock", "unmock", "requireActual", "requireMock"].includes(callee.name.text)
       if (isDynamicImport || isJestPath)
-        refs.push({ specifier: node.arguments[0].text, typeOnly: false })
+        refs.push({
+          specifier: node.arguments[0].text,
+          typeOnly: false,
+          ...(isDynamicImport ? { dynamic: true } : {}),
+        })
     }
     ts.forEachChild(node, visit)
   }
@@ -343,6 +352,18 @@ export function analyze({ sidecarFiles, externalFiles, exists, config }) {
 
   for (const edge of cycleEdges(dirEdges)) findings.add(`cycle: ${edge}`)
 
+  for (const rule of config.vendorIsolation ?? []) {
+    for (const entry of rule.entries) {
+      if (!sidecarFiles.has(entry)) {
+        hard.push(`config vendorIsolation names ${entry}, which does not exist`)
+        continue
+      }
+      for (const chain of vendorChains(entry, rule.package, sidecarFiles, exists)) {
+        findings.add(`vendor: ${entry} reaches ${rule.package} at runtime: ${chain}`)
+      }
+    }
+  }
+
   const publicSet = new Set(config.public)
   for (const [file, source] of externalFiles) {
     for (const { specifier } of moduleReferences(file, source)) {
@@ -359,6 +380,38 @@ export function analyze({ sidecarFiles, externalFiles, exists, config }) {
   }
 
   return { findings: [...findings].sort(), hard }
+}
+
+/**
+ * Every runtime import path from `entry` to `pkg` (a bare specifier or one of
+ * its subpaths), as `a -> b -> pkg`, one per importing module. Pure.
+ */
+export function vendorChains(entry, pkg, sources, exists) {
+  const via = new Map([[entry, null]])
+  const queue = [entry]
+  const chains = []
+  const pathTo = (file) => {
+    const steps = []
+    for (let at = file; at; at = via.get(at)) steps.unshift(at)
+    return steps.join(" -> ")
+  }
+  while (queue.length > 0) {
+    const file = queue.shift()
+    for (const ref of moduleReferences(file, sources.get(file) ?? "")) {
+      if (ref.typeOnly || ref.dynamic) continue
+      if (ref.specifier === pkg || ref.specifier.startsWith(`${pkg}/`)) {
+        chains.push(`${pathTo(file)} -> ${ref.specifier}`)
+        continue
+      }
+      if (!ref.specifier.startsWith(".")) continue
+      const target = resolveRelative(file, ref.specifier, exists)
+      if (target && sources.has(target) && !via.has(target)) {
+        via.set(target, file)
+        queue.push(target)
+      }
+    }
+  }
+  return chains
 }
 
 /** Compare current findings with the baseline. Pure. */

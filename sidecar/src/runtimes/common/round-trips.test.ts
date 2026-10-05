@@ -28,7 +28,7 @@ test("drainPendingRoundTrips resolves pending plugin tool calls with an error en
   const pendingPluginToolCalls = new Map([["t1", { resolve: (r: unknown) => results.push(r) }]])
   drainPendingRoundTrips({ pendingPluginToolCalls }, "session closed")
   assert.equal(pendingPluginToolCalls.size, 0)
-  // The `{ error }` shape is what `src/tools/plugin/server.ts` surfaces as a tool error.
+  // The `{ error }` shape is what `src/tools/plugin/proxy.ts` surfaces as a tool error.
   assert.deepEqual(results, [{ error: "session closed" }])
 })
 

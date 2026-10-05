@@ -8,7 +8,7 @@
 // that need to manage a non-trivial plan over several tool steps.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
+import { tool } from "../../kernel/define.ts"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { createSessionTaskStore } from "../../state/tasks.ts"

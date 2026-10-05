@@ -3,7 +3,8 @@ import assert from "node:assert/strict"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 
-import { buildCogniaToolsServer, wrapNativeToolResults } from "./sdk-mcp.ts"
+import { buildCogniaToolsServer, toSdkMcpToolDefinition, wrapNativeToolResults } from "./sdk-mcp.ts"
+import { tool } from "../kernel/define.ts"
 import type { CallableTool } from "../../../test-support/tool-result.ts"
 
 test("real MCP discovery preserves record-valued schemas and rejects invalid values", async () => {
@@ -26,6 +27,50 @@ test("real MCP discovery preserves record-valued schemas and rejects invalid val
       arguments: { agentId: "test", shell: "node", cwd: process.cwd(), env: { INVALID: 123 } },
     })
     assert.equal(result.isError, true)
+  } finally {
+    await client.close()
+    await server.instance.close()
+  }
+})
+
+test("the SDK form writes tool-search presentation as anthropic metadata", async () => {
+  const handler = async () => ({ content: [] })
+  const def = toSdkMcpToolDefinition(
+    tool("file_info", "Stat a path", {}, handler, {
+      alwaysLoad: true,
+      searchHint: "metadata",
+      annotations: { readOnlyHint: true },
+    })
+  )
+  assert.equal(def.name, "file_info")
+  assert.equal(def.description, "Stat a path")
+  assert.deepEqual(def.annotations, { readOnlyHint: true })
+  assert.deepEqual(def._meta, {
+    "anthropic/alwaysLoad": true,
+    "anthropic/searchHint": "metadata",
+  })
+  assert.equal("alwaysLoad" in def, false)
+  assert.equal("searchHint" in def, false)
+  assert.equal(def.handler, handler)
+  assert.equal(toSdkMcpToolDefinition(tool("plain", "Plain", {}, handler))._meta, undefined)
+  // Existing protocol metadata passes through alongside.
+  assert.deepEqual(
+    toSdkMcpToolDefinition({ ...tool("kept", "Kept", {}, handler), _meta: { "x/y": 1 } })._meta,
+    { "x/y": 1 }
+  )
+})
+
+test("MCP discovery reports an always-load built-in as resident", async () => {
+  const server = buildCogniaToolsServer({ enabled: { fileExtras: true, git: true } })!
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: "always-load-test", version: "1" })
+  await server.instance.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const tools = (await client.listTools()).tools
+    const meta = (name: string) => tools.find((entry) => entry.name === name)?._meta
+    assert.equal(meta("file_info")?.["anthropic/alwaysLoad"], true)
+    assert.equal(meta("git_diff")?.["anthropic/alwaysLoad"], undefined)
   } finally {
     await client.close()
     await server.instance.close()

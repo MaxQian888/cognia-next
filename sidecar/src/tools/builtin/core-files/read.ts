@@ -8,10 +8,9 @@
 import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 import type { Stats } from "node:fs"
 
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText, toolImage } from "../../kernel/result.ts"
 import { looksBinary } from "./js-search.ts"
 import { decodeText } from "./text-io.ts"

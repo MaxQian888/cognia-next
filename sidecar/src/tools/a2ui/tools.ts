@@ -1,15 +1,16 @@
-// In-process A2UI bridge MCP server.
+// The A2UI bridge tools, engine-neutral (ADR-0217).
 //
-// Exposes the four A2UI protocol primitives as MCP tools so Claude Agent SDK
-// sessions can paint interactive surfaces without writing fenced ```a2ui```
-// blocks. Each tool dispatches an `a2ui_dispatch` event back to Tauri (which
-// forwards to the renderer), then returns ok:true to the SDK.
+// Exposes the A2UI protocol primitives as tools so agent sessions can paint
+// interactive surfaces without writing fenced ```a2ui``` blocks. Each tool
+// dispatches an `a2ui_dispatch` event back to Tauri (which forwards to the
+// renderer), then returns ok:true. The Claude Agent SDK rail registers them
+// as an in-process MCP server (`tools/adapters/sdk-mcp-a2ui.ts`).
 //
 // External agents (Claude Code CLI, Cursor, Codex, …) talk to this same set
 // of tools through a separate stdio bridge — see `sidecar/a2ui-mcp.mjs`.
 
 import { z } from "zod"
-import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk/core"
+import { tool, type ToolDefinition } from "../kernel/define.ts"
 import { toolText, toolError } from "../kernel/result.ts"
 import {
   SERVER_NAME as DEFS_SERVER_NAME,
@@ -26,9 +27,9 @@ import {
 } from "./tool-defs.ts"
 
 // Names, descriptions, enums, and the args→dispatch mapping come from the
-// shared tool-defs module so this SDK server and the stand-alone stdio server
-// (sidecar/a2ui-mcp.mjs) cannot drift. Only the Zod *shapes* are local —
-// the SDK's tool() requires a ZodRawShape, which can't be shared with the
+// shared tool-defs module so these tools and the stand-alone stdio server
+// (sidecar/a2ui-mcp.mjs) cannot drift. Only the Zod *shapes* are local: the
+// kernel's tool() takes a ZodRawShape, which can't be shared with the
 // raw-JSON-Schema stdio transport.
 export const SERVER_NAME = DEFS_SERVER_NAME
 export const SERVER_VERSION = DEFS_SERVER_VERSION
@@ -53,19 +54,12 @@ const widgetSchema = z
   .passthrough()
 
 /**
- * Build the in-process A2UI bridge MCP server.
+ * The A2UI bridge tools for one session.
  *
- * @param {object} options
- * @param {string} options.sessionId  Session id used to scope dispatches.
- * @param {(payload: unknown) => void} options.emit  sidecar->parent stdout writer.
- * @param {boolean} [options.alwaysLoad]
- *        When true (the default for this server — interactive A2UI surfaces
- *        must never be deferred behind tool search), the four bridge tools
- *        stay resident in the prompt. Mirrors
- *        `createSdkMcpServer({ alwaysLoad })`.
- * @returns {ReturnType<typeof createSdkMcpServer>}
+ * `alwaysLoad` (default true: interactive A2UI surfaces must never be
+ * deferred behind tool search) keeps every tool resident in the prompt.
  */
-export function buildA2UIBridgeServer({
+export function buildA2UIToolDefinitions({
   sessionId,
   emit,
   alwaysLoad = true,
@@ -73,7 +67,7 @@ export function buildA2UIBridgeServer({
   sessionId: string
   emit: (payload: unknown) => void
   alwaysLoad?: boolean
-}) {
+}): ToolDefinition[] {
   const dispatch = (message: unknown) => {
     emit({ type: "a2ui_dispatch", sessionId, message })
   }
@@ -217,12 +211,7 @@ export function buildA2UIBridgeServer({
     ),
   ]
 
-  return createSdkMcpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
-    tools,
-    ...(alwaysLoad ? { alwaysLoad: true } : {}),
-  })
+  return alwaysLoad ? tools.map((definition) => ({ ...definition, alwaysLoad: true })) : tools
 }
 
 export const A2UI_TOOL_NAMES = TOOL_NAMES

@@ -12,11 +12,10 @@
 // the plan overlay decides.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolText } from "../../kernel/result.ts"
 import { EXIT_PLAN_TOOL_NAME } from "../../../policy/tool-catalog/names.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 /** Bare tool name (namespaced as `mcp__cognia-tools__exit_plan_mode`). */
 export { EXIT_PLAN_TOOL_NAME }

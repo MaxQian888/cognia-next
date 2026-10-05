@@ -11,12 +11,11 @@
 import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { applyPatch, parsePatch } from "diff"
 import type { StructuredPatch, StructuredPatchHunk } from "diff"
 import type { Stats } from "node:fs"
 
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { assertNotSecretEscape } from "../../../policy/confinement/enforce.ts"
 import { canonicalKey } from "../../state/read-tracker.ts"

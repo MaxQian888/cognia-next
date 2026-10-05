@@ -9,7 +9,7 @@ import type { ProtocolExecChannel } from "../../providers/protocol-adapters/code
 import type { ConversationMessage } from "../../context/compaction.ts"
 import type { CallLedgerGate, CallReport } from "../common/call-ledger-gate.ts"
 import type { PendingApproval } from "../../policy/permission/approval.ts"
-import type { PendingPluginToolCalls } from "../../tools/plugin/server.ts"
+import type { PendingPluginToolCalls } from "../../tools/plugin/proxy.ts"
 import type { PendingPluginHooks } from "../../hooks/kernel/types.ts"
 import type { McpToolsOptions } from "../../mcp/client/types.ts"
 import type { createAiSdkToolSearchController } from "../../tools/adapters/ai-sdk-tool-search.ts"

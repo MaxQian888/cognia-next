@@ -1,7 +1,9 @@
 // The shape of a built-in tool definition: what the registry assembles, the
 // middleware wraps, and each rail's adapter turns into its own tool format.
-// It is the Claude Agent SDK's `SdkMcpToolDefinition` shape, which the Claude
-// Agent SDK rail registers as is.
+// It belongs to no engine (ADR-0217): the Claude Agent SDK rail translates it
+// into an SDK MCP tool (`tools/adapters/sdk-mcp.ts`) and the AI SDK rail into
+// an AI SDK tool (`tools/adapters/ai-sdk.ts`), so either rail runs without the
+// other's SDK.
 
 import type { z } from "zod"
 
@@ -21,12 +23,57 @@ export interface ToolDefinition {
   /** A zod raw shape (or a zod object); every rail derives its schema from it. */
   inputSchema?: unknown
   annotations?: Record<string, unknown> | undefined
+  /** Keep the tool resident in the prompt instead of deferring it behind tool search. */
+  alwaysLoad?: boolean | undefined
+  /** Extra words tool search matches the tool by. */
+  searchHint?: string | undefined
+  /** Protocol metadata passed through unchanged (e.g. MCP `_meta`). */
   _meta?: Record<string, unknown> | undefined
   /**
    * Runs the call and resolves to an MCP `CallToolResult`. A method, so a
    * handler typed for its own parsed arguments still fits the registry.
    */
   handler(args: unknown, extra?: ToolHandlerExtra): unknown
+}
+
+/** Optional presentation settings of {@link tool}. */
+export interface ToolOptions {
+  annotations?: Record<string, unknown> | undefined
+  searchHint?: string | undefined
+  alwaysLoad?: boolean | undefined
+}
+
+/** A definition built by {@link tool}: its handler is typed for its own arguments. */
+export interface BuiltinToolDefinition<
+  S extends z.ZodRawShape,
+  R = unknown,
+> extends ToolDefinition {
+  description: string
+  inputSchema: S
+  handler(args: ToolArgs<S>, extra?: ToolHandlerExtra): Promise<R>
+}
+
+/**
+ * Define a built-in tool: a name, a description the model reads, a zod raw
+ * shape for its arguments and the handler that runs a call. Engine-neutral;
+ * see the module comment for how each rail registers it.
+ */
+export function tool<S extends z.ZodRawShape, R>(
+  name: string,
+  description: string,
+  inputSchema: S,
+  handler: (args: ToolArgs<S>, extra?: ToolHandlerExtra) => Promise<R>,
+  options: ToolOptions = {}
+): BuiltinToolDefinition<S, R> {
+  return {
+    name,
+    description,
+    inputSchema,
+    handler,
+    ...(options.annotations ? { annotations: options.annotations } : {}),
+    ...(options.alwaysLoad ? { alwaysLoad: true } : {}),
+    ...(options.searchHint ? { searchHint: options.searchHint } : {}),
+  }
 }
 
 /**

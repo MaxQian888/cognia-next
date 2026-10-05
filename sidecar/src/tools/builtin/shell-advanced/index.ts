@@ -12,10 +12,9 @@
 
 import fs from "node:fs"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { validateShellCommand } from "../../../policy/shell/validate.ts"
 import {

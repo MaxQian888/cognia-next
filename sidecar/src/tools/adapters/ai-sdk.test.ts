@@ -4,6 +4,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { buildAiSdkTools, __testing__ } from "./ai-sdk.ts"
+import { createAiSdkToolSearchController } from "./ai-sdk-tool-search.ts"
 import { createSessionTaskStore } from "../state/tasks.ts"
 import type { ReadTracker } from "../state/read-tracker.ts"
 
@@ -42,6 +43,22 @@ test("buildAiSdkTools registers built-in tools for enabled categories only", () 
   assert.ok(tools.git_status, "git_status present when git enabled")
   // process category disabled → its tools absent.
   assert.equal(tools.process_list ?? tools.list_processes, undefined)
+})
+
+test("buildAiSdkTools keeps always-load built-ins resident under tool search", () => {
+  const tools = buildAiSdkTools({
+    sendOptions: { builtinTools: { fileExtras: true, git: true } },
+    emit: () => {},
+    sessionId: "s1",
+  })
+  const controller = createAiSdkToolSearchController({
+    tools,
+    sendOptions: { toolSearchEnabled: true },
+  })!
+  const active = controller.prepareStep().activeTools
+  // file_info is defined with `alwaysLoad`; git_diff is not.
+  assert.ok(active.includes("file_info"))
+  assert.ok(!active.includes("git_diff"))
 })
 
 test("buildAiSdkTools returns no built-in tools when builtinTools is absent", () => {

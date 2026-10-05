@@ -2,13 +2,12 @@
 
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 import { createPatch } from "diff"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { ensureExists } from "../../../platform/fs/stat.ts"
 import { headTruncate } from "../../../shared/text/truncate.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 const MAX_DIFF_BYTES = 5 * 1024 * 1024 // 5 MB per side; bigger files refuse the diff
 // Two near-5 MB files can produce a multi-MB patch; cap the model-facing text

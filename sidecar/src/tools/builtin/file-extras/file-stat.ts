@@ -1,12 +1,11 @@
 // file_info + file_exists — path metadata (read-only).
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { statOrNull } from "../../../platform/fs/stat.ts"
 import { mimeForPath } from "../../../shared/mime.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 // ---- file_info ------------------------------------------------------------
 

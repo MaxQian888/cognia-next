@@ -1,9 +1,8 @@
 // git_diff — working-tree or staged diff (read-only).
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { runGit } from "../../../platform/process/git.ts"
 import { assertRepo, trimTail } from "./run.ts"

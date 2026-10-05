@@ -26,6 +26,7 @@ import {
   resolveSettings,
   tagSession,
 } from "@anthropic-ai/claude-agent-sdk"
+import { buildSessionApiResponse } from "../../shared/wire/session-api.ts"
 
 /**
  * Allowlisted methods, mapped to how each one is called.
@@ -187,27 +188,7 @@ export async function callSessionApi({
 }
 
 /** Shape the response frame. Mirrors `buildControlResponse`. */
-export function buildSessionApiResponse({
-  requestId,
-  method,
-  ok,
-  result,
-  error,
-}: {
-  requestId?: unknown
-  method?: unknown
-  ok: boolean
-  result?: unknown
-  error?: unknown
-}) {
-  const msg: Record<string, unknown> = { type: "session_api_response", requestId, method, ok }
-  if (ok) {
-    if (result !== undefined) msg.result = result
-  } else {
-    msg.error = error ?? "error"
-  }
-  return msg
-}
+export { buildSessionApiResponse }
 
 /**
  * Handle one inbound `session_api` frame. Never throws — like the control

@@ -2,11 +2,10 @@
 
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { resolveToolPath } from "../../../platform/fs/paths.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import type { CoreFileToolContext } from "./context.ts"
 
 export const MAX_ENTRIES = 500

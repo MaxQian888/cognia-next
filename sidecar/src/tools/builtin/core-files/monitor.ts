@@ -13,9 +13,8 @@
 // its own, so a bad guess costs neither a stalled turn nor a wasted round-trip.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { resolveShellInvocation } from "./bash.ts"
 import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../../platform/host-rpc.ts"

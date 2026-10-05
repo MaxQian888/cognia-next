@@ -2,13 +2,12 @@
 
 import path from "node:path"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 import fastGlob from "fast-glob"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { statOrNull } from "../../../platform/fs/stat.ts"
 import { loadIgnoreGlobs } from "../../../platform/fs/gitignore.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 const MAX_LIST_ITEMS = 5000
 

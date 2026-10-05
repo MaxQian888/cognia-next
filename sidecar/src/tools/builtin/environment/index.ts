@@ -17,7 +17,6 @@ import process from "node:process"
 import { constants as fsConstants, fstatSync } from "node:fs"
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import {
   BUILTIN_SERVER_NAME,
@@ -25,7 +24,7 @@ import {
 } from "../../../policy/tool-catalog/catalog.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { runCapped } from "../../../platform/process/exec.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 const TOOLS_STARTED_AT = new Date().toISOString()
 const RUNTIME_FINGERPRINT = `${BUILTIN_SERVER_NAME}@${BUILTIN_SERVER_VERSION}:${process.pid}:${TOOLS_STARTED_AT}`

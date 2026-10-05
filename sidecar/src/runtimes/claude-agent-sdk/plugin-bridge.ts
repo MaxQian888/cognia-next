@@ -1,4 +1,4 @@
-import type { PluginToolsServerOptions } from "../../tools/plugin/server.ts"
+import type { PluginToolsServerOptions } from "../../tools/plugin/proxy.ts"
 /**
  * Keep the host-only sandbox binding on the plugin-tool bridge envelope.
  * Exported as a pure wiring seam so dispatch tests can prove the field is not

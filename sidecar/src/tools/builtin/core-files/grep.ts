@@ -8,9 +8,8 @@
 import path from "node:path"
 import fsp from "node:fs/promises"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
-import type { ToolArgs, ToolHandlerExtra } from "../../kernel/define.ts"
+import { tool, type ToolArgs, type ToolHandlerExtra } from "../../kernel/define.ts"
 import { toolError, toolText } from "../../kernel/result.ts"
 import { detectRipgrep, runRipgrep } from "./rg.ts"
 import { jsGrep } from "./js-search.ts"

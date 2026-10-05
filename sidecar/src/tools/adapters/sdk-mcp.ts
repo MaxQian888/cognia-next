@@ -64,11 +64,32 @@ export function buildCogniaToolsServer(options: BuildToolsServerOptions) {
   return createSdkMcpServer({
     name: BUILTIN_SERVER_NAME,
     version: BUILTIN_SERVER_VERSION,
-    // The definitions are the SDK's own shape (see kernel/define.ts); only the
-    // handler signature was widened by the middleware.
-    tools: wrapNativeToolResults(capped) as unknown as SdkMcpToolDefinition[],
+    tools: wrapNativeToolResults(capped).map(toSdkMcpToolDefinition),
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
+}
+
+/**
+ * The SDK MCP form of a kernel definition. Tool-search presentation is
+ * neutral in the kernel and becomes the SDK's `anthropic/` metadata here,
+ * the only place that vocabulary is written.
+ */
+export function toSdkMcpToolDefinition(definition: ToolDefinition): SdkMcpToolDefinition {
+  const { alwaysLoad, searchHint, _meta, ...rest } = definition
+  const meta: Record<string, unknown> = {
+    ..._meta,
+    ...(searchHint ? { "anthropic/searchHint": searchHint } : {}),
+    ...(alwaysLoad ? { "anthropic/alwaysLoad": true } : {}),
+  }
+  return {
+    ...rest,
+    description: definition.description ?? "",
+    // The kernel's schema is the zod raw shape the SDK expects; the handler's
+    // argument type was widened by the middleware.
+    inputSchema: (definition.inputSchema ?? {}) as SdkMcpToolDefinition["inputSchema"],
+    handler: definition.handler as SdkMcpToolDefinition["handler"],
+    ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
+  }
 }
 
 /** Native MCP results cross the same PII gate as AI SDK results. */

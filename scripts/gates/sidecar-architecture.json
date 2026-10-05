@@ -127,5 +127,18 @@
     "tests/",
     "types/"
   ],
-  "legacyMjsAllowed": true
+  "legacyMjsAllowed": true,
+  "vendorIsolation": [
+    {
+      "package": "@anthropic-ai/claude-agent-sdk",
+      "entries": [
+        "sidecar/src/entry/agent-host.ts",
+        "sidecar/src/runtimes/ai-sdk/engine.ts",
+        "sidecar/src/tools/kernel/define.ts",
+        "sidecar/src/tools/plugin/proxy.ts",
+        "sidecar/src/tools/a2ui/tools.ts"
+      ],
+      "why": "the host, the AI SDK engine and the engine-neutral tools run without the Claude Agent SDK; it loads only with the claude-agent-sdk engine (src/runtimes/engines.ts)"
+    }
+  ]
 }

@@ -13,6 +13,7 @@ import {
   loadInput,
   moduleReferences,
   resolveRelative,
+  vendorChains,
 } from "./check-sidecar-architecture.mjs"
 
 const realConfig = JSON.parse(readFileSync(CONFIG_FILE, "utf8"))
@@ -223,6 +224,58 @@ test("a file under src/ in no declared layer, and a stale config entry, are repo
     "unmapped: sidecar/src/misc/x.ts is under sidecar/src/ but in no declared layer",
   ])
   assert.ok(hard.some((line) => line.includes("public names sidecar/src/providers/gone.ts")))
+})
+
+test("vendor isolation: a static import anywhere in an entry's closure is a finding", () => {
+  const vendorIsolation = [
+    { package: "vendor-sdk", entries: ["sidecar/src/runtimes/rail/engine.ts"], why: "fixture" },
+  ]
+  const clean = run(
+    {
+      "sidecar/src/runtimes/rail/engine.ts":
+        'import { run } from "./run.ts"\nexport const engine = run\n',
+      "sidecar/src/runtimes/rail/run.ts": [
+        'import type { Options } from "vendor-sdk"',
+        'export const run = async (options: Options) => (await import("vendor-sdk/core")).go(options)',
+        "",
+      ].join("\n"),
+    },
+    { overrides: { vendorIsolation } }
+  )
+  assert.deepEqual(clean.findings, [], "type-only and dynamic imports do not load the package")
+
+  const leaky = run(
+    {
+      "sidecar/src/runtimes/rail/engine.ts":
+        'import { run } from "./run.ts"\nexport const engine = run\n',
+      "sidecar/src/runtimes/rail/run.ts":
+        'import { helper } from "../../tools/kernel/helper.ts"\nexport const run = helper\n',
+      "sidecar/src/tools/kernel/helper.ts":
+        'import { tool } from "vendor-sdk"\nexport const helper = tool\n',
+    },
+    { overrides: { vendorIsolation } }
+  )
+  assert.deepEqual(leaky.findings, [
+    "vendor: sidecar/src/runtimes/rail/engine.ts reaches vendor-sdk at runtime: sidecar/src/runtimes/rail/engine.ts -> sidecar/src/runtimes/rail/run.ts -> sidecar/src/tools/kernel/helper.ts -> vendor-sdk",
+  ])
+
+  const missing = run({}, { overrides: { vendorIsolation } })
+  assert.deepEqual(
+    missing.hard.filter((problem) => problem.includes("vendorIsolation")),
+    ["config vendorIsolation names sidecar/src/runtimes/rail/engine.ts, which does not exist"]
+  )
+})
+
+test("vendorChains reports one chain per importing module, subpaths included", () => {
+  const sources = new Map([
+    ["a.ts", 'import "./b.ts"\nimport "./c.ts"\n'],
+    ["b.ts", 'export { x } from "pkg/sub"\n'],
+    ["c.ts", 'import { y } from "pkg"\nimport { z } from "pkg-other"\n'],
+  ])
+  assert.deepEqual(
+    vendorChains("a.ts", "pkg", sources, (file) => sources.has(file)),
+    ["a.ts -> b.ts -> pkg/sub", "a.ts -> c.ts -> pkg"]
+  )
 })
 
 test("helpers: classification, resolution, references", () => {

@@ -1,11 +1,10 @@
 // Process-manager status + allowlist checks (read-only).
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { listAllProcesses, formatProcess, isProgramAllowed, trackedPids } from "./inventory.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 // ---- check_program_allowed -----------------------------------------------
 

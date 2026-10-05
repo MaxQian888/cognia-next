@@ -3,11 +3,10 @@
 import fs from "node:fs"
 import crypto from "node:crypto"
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { ensureExists } from "../../../platform/fs/stat.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 const MAX_READ_BYTES = 100 * 1024 * 1024 // 100 MB hard cap (matches Cognia)
 

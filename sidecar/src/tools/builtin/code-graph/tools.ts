@@ -9,7 +9,7 @@
 // call) and prepends the ⚠️ staleness banner when files changed on disk are
 // pending re-index — mirroring codegraph's connect-time reconciliation.
 
-import { tool } from "@anthropic-ai/claude-agent-sdk"
+import { tool } from "../../kernel/define.ts"
 import { z } from "zod"
 
 import { toolError, toolText } from "../../kernel/result.ts"

@@ -1,6 +1,6 @@
 import { drainPending } from "../../shared/pending.ts"
 import type { ApprovalAnswer } from "../../policy/permission/approval.ts"
-import type { PluginToolResponse } from "../../tools/plugin/server.ts"
+import type { PluginToolResponse } from "../../tools/plugin/proxy.ts"
 
 /** Settle host round trips when their session can no longer answer. */
 export function drainPendingRoundTrips(

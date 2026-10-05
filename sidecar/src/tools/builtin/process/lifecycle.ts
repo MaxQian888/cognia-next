@@ -13,7 +13,6 @@
 // bounded by the app's lifetime.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import {
@@ -23,7 +22,7 @@ import {
 } from "../../../platform/process/exec.ts"
 import { headTruncate } from "../../../shared/text/truncate.ts"
 import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import type { SessionBgShellRegistry } from "../../state/host-background-shells.ts"
 import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.ts"
 

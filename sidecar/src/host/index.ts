@@ -37,8 +37,8 @@ import { readVersionInfo } from "./version-info.ts"
 import { dispatch } from "../runtimes/index.ts"
 import { capabilityError } from "../runtimes/registry.ts"
 import { createEnvelopeEmitter } from "./events/envelope.ts"
-import { sessionStoreFromSendOptions } from "../runtimes/claude-agent-sdk/session-store.ts"
-import { handleSessionApi } from "../runtimes/claude-agent-sdk/session-api.ts"
+import { enginesFromEnv, loadEngines, loadedEngine } from "../runtimes/engines.ts"
+import { buildSessionApiResponse } from "../shared/wire/session-api.ts"
 import { resetWarmPool } from "../runtimes/claude-agent-sdk/warm-pool.ts"
 import { controlArgs, buildControlResponse } from "./control/control.ts"
 import { createFeatureCallHandler } from "./feature-call/index.ts"
@@ -83,6 +83,15 @@ export {
   smokeObserveFrame,
   smokeOutcome,
 } from "./smoke.ts"
+/**
+ * Load the execution engines this process serves (ADR-0217): every engine
+ * unless `COGNIA_SIDECAR_ENGINES` names some. Must finish before the host
+ * reads its first frame; dispatch to an engine not loaded fails closed.
+ */
+export function loadConfiguredEngines(env: Record<string, string | undefined> = process.env) {
+  return loadEngines(enginesFromEnv(env))
+}
+
 export function createAgentHost({
   shutdownHostTelemetry = async () => {},
 }: { shutdownHostTelemetry?: () => Promise<unknown> } = {}) {
@@ -507,14 +516,31 @@ export function createAgentHost({
           restore: handleRestore,
           set_mode: handleSetMode,
           control: handleControl,
-          session_api: (m) =>
+          session_api: (m) => {
             // Session-level reads and mutations that need no live session (list,
             // rename, fork, import, …). Separate from `control` because those
             // resolve a running query by id and these deliberately do not.
-            handleSessionApi(m as HostMessage, {
+            // They are the Claude Agent SDK's session store, so a host that did
+            // not load that engine answers each one with a refusal.
+            const engine = loadedEngine("claude-agent-sdk")
+            if (!engine) {
+              const request = m as HostMessage
+              emit(
+                buildSessionApiResponse({
+                  requestId: request.requestId,
+                  method: request.method,
+                  ok: false,
+                  error:
+                    'session API requires the "claude-agent-sdk" engine, which this host did not load',
+                })
+              )
+              return
+            }
+            return engine.handleSessionApi(m as HostMessage, {
               emit,
-              store: sessionStoreFromSendOptions(m?.sendOptions ?? {}, { hostRpc, log }),
-            }),
+              store: engine.sessionStoreFromSendOptions(m?.sendOptions ?? {}, { hostRpc, log }),
+            })
+          },
           feature_call: (m) => featureCalls.call(m as unknown as FeatureCallMessage),
           feature_call_abort: (m) => featureCalls.abort((m as HostMessage).requestId),
           permission_response: handlePermissionResponse,

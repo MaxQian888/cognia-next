@@ -19,10 +19,9 @@
 // imports — the sidecar cannot import renderer code.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolText } from "../../kernel/result.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 /** Bare tool names (namespaced as `mcp__cognia-tools__<name>`). */
 export const CREATE_PLAN_TOOL_NAME = "create_plan"

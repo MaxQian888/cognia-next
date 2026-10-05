@@ -2,7 +2,8 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
-import { buildA2UIBridgeServer, A2UI_TOOL_NAMES } from "./server.ts"
+import { A2UI_TOOL_NAMES } from "../a2ui/tools.ts"
+import { buildA2UIBridgeServer } from "./sdk-mcp-a2ui.ts"
 
 test("the real SDK server validates and dispatches model and connector objects", async () => {
   const events: unknown[] = []
@@ -43,4 +44,28 @@ test("the real SDK server validates and dispatches model and connector objects",
     await client.close()
     await server.instance.close()
   }
+})
+
+test("the A2UI server keeps its tools resident unless told otherwise", async () => {
+  const residency = async (alwaysLoad?: boolean) => {
+    const server = buildA2UIBridgeServer({
+      sessionId: "a2ui-resident",
+      emit: () => {},
+      ...(alwaysLoad === undefined ? {} : { alwaysLoad }),
+    })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: "a2ui-resident", version: "1" })
+    await server.instance.connect(serverTransport)
+    await client.connect(clientTransport)
+    try {
+      return (await client.listTools()).tools.map(
+        (entry) => entry._meta?.["anthropic/alwaysLoad"] === true
+      )
+    } finally {
+      await client.close()
+      await server.instance.close()
+    }
+  }
+  assert.ok((await residency()).every(Boolean))
+  assert.ok((await residency(false)).every((resident) => !resident))
 })

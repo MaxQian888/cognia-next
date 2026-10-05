@@ -8,10 +8,9 @@
 // module is the thin SDK-tool surface over it. See sidecar/webclone/VENDOR.md.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 import { snapshotSite, CODEGEN_FRAMEWORKS, FRAMEWORK_HINTS, SNAPSHOT_MODES } from "./run.ts"
 import type { EngineDeps } from "./run.ts"
 

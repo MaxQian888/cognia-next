@@ -1,11 +1,10 @@
 // Read-only process queries: list / get / search / top_memory.
 
 import { z } from "zod"
-import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../../kernel/result.ts"
 import { getProcessSnapshot, formatProcess, compareBy } from "./inventory.ts"
-import type { ToolArgs } from "../../kernel/define.ts"
+import { tool, type ToolArgs } from "../../kernel/define.ts"
 
 const cappedNote = (limit: number, detail: string): string =>
   `result capped at ${limit} processes - more exist; ${detail}`
