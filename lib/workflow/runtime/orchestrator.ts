@@ -379,8 +379,15 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // Lease heartbeat (ADR 0061 P4): keeps the claim fresh and observes
   // cross-executor cancel requests (`cancelRequestedAt` stamped by a
   // surface whose local abort couldn't reach this process).
+  // A lost lease means another executor took the run over (this one stalled
+  // past the TTL): stop driving it at once and leave its row to the new owner.
+  let leaseLost = false
   startLeaseHeartbeat(runId, {
     onCancelRequested: () => ac.abort(new Error("Workflow run cancelled by another device")),
+    onLeaseLost: () => {
+      leaseLost = true
+      ac.abort(new Error("Workflow run lease was taken over by another executor"))
+    },
   })
   const externalAbort = () => ac.abort(new Error("Workflow run aborted"))
   if (input.signal) {
@@ -986,6 +993,17 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   // Drain any still-pending tasks so we don't leak unresolved promises.
   if (inflight.size > 0) {
     await Promise.allSettled(inflight.values())
+  }
+
+  // Fenced: the run belongs to the executor that took the lease. Writing a
+  // terminal status, firing completion fan-out or running catch handlers here
+  // would overwrite its progress, so release only this process's resources
+  // and report the run as still running (elsewhere).
+  if (leaseLost) {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    if (input.signal) input.signal.removeEventListener("abort", externalAbort)
+    await releaseRunResources(runId)
+    return { runId, status: "running" }
   }
 
   if (firstFailure) {

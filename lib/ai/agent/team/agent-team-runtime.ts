@@ -22,6 +22,9 @@ import {
   refreshAllInstanceCapabilityWarnings,
 } from "@/lib/ai/agent/team/capability-audit"
 import { runWorkflow, type RunWorkflowResult } from "@/lib/workflow/runtime/orchestrator"
+import { installTeamWorkflowNodeRuntime } from "./workflow-nodes/install"
+// Re-exported for existing importers; the parser itself is a leaf (no runtime).
+export { parseProposedPlan } from "./plan-parse"
 import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
@@ -252,23 +255,6 @@ async function settleDurableRunStatus(
     if (updated) return status
     // A control decision or usage update raced us. Read its result before
     // choosing the canonical journal event; never publish our stale status.
-  }
-}
-
-/** Strict JSON-fenced-block parser preserved from the legacy runtime. */
-export function parseProposedPlan(
-  text: string
-): { ok: true; plan: unknown } | { ok: false; reason: string } {
-  if (typeof text !== "string" || text.trim().length === 0) {
-    return { ok: false, reason: "empty plan text" }
-  }
-  const fenceMatch = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/i)
-  const candidate = fenceMatch ? fenceMatch[1] : text.trim()
-  try {
-    const parsed: unknown = JSON.parse(candidate ?? "")
-    return { ok: true, plan: parsed }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
   }
 }
 
@@ -1145,6 +1131,10 @@ export async function runTeamLifecycle(
     // Run one synthesized workflow with the stable runId + trigger binding.
     // Reused per-wave by the adaptive path so every wave overwrites the same
     // run row (single-run view); the IM-origin binding flows onto each call.
+    // The synthesized workflow is made of team nodes, which the workflow engine
+    // runs through its port: make sure this host has the implementations
+    // installed even when no composition root ran (tests, scripts).
+    installTeamWorkflowNodeRuntime()
     const runOneWorkflow = (wf: VisualWorkflow, signal: AbortSignal = ac.signal) =>
       runWorkflow({
         workflow: wf,

@@ -30,8 +30,12 @@ jest.mock("@/stores/agent/agent-team-store", () => {
   return { useAgentTeamStore: { getState: () => state } }
 })
 
-import "../built-ins"
-import { getExecutor } from "../registry"
+import "@/lib/workflow/nodes/built-ins"
+import { getExecutor } from "@/lib/workflow/nodes/registry"
+import { installTeamWorkflowNodeRuntime } from "./install"
+
+// The workflow engine reaches these nodes through its port (ADR-0217).
+installTeamWorkflowNodeRuntime()
 import type {
   StepExecutionContext,
   TriggerEvent,

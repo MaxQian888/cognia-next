@@ -9,6 +9,11 @@
  *
  * In web mode the Rust call is a no-op stub, so `reloadInFlightRuns()`
  * returns `[]` and the controller exits quickly.
+ *
+ * Runs another runtime synthesized and recovers itself (Agent Team runs,
+ * `__team__:` workflow ids) are left to that runtime: it registers a
+ * {@link RunRecoveryOwner}, and replaying its run here would execute team
+ * nodes without the team run context they need (ADR-0217).
  */
 
 import { runWorkflow } from "./orchestrator"
@@ -20,6 +25,29 @@ export interface ResumeResult {
   succeeded: number
   failed: number
   skipped: number
+  /** Rows a registered recovery owner recovers itself; not replayed here. */
+  delegated: number
+}
+
+/** A runtime that recovers the workflow runs it synthesized on its own. */
+export interface RunRecoveryOwner {
+  id: string
+  owns(row: InFlightRunRow): boolean
+}
+
+const recoveryOwners = new Map<string, RunRecoveryOwner>()
+
+/** Register (or replace, by id) a recovery owner. Returns its unregister. */
+export function registerRunRecoveryOwner(owner: RunRecoveryOwner): () => void {
+  recoveryOwners.set(owner.id, owner)
+  return () => {
+    if (recoveryOwners.get(owner.id) === owner) recoveryOwners.delete(owner.id)
+  }
+}
+
+function recoveryOwnerOf(row: InFlightRunRow): RunRecoveryOwner | undefined {
+  for (const owner of recoveryOwners.values()) if (owner.owns(row)) return owner
+  return undefined
 }
 
 /**
@@ -33,8 +61,13 @@ export async function resumeInFlightRuns(): Promise<ResumeResult> {
     succeeded: 0,
     failed: 0,
     skipped: 0,
+    delegated: 0,
   }
   for (const row of rows) {
+    if (recoveryOwnerOf(row)) {
+      result.delegated += 1
+      continue
+    }
     try {
       const outcome = await replayRow(row)
       if (outcome === "succeeded") result.succeeded += 1

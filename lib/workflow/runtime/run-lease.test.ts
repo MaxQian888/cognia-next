@@ -118,6 +118,28 @@ describe("lease heartbeat", () => {
     stopLeaseHeartbeat("run_lease")
   })
 
+  it("reports a lost lease once and stops renewing when another executor holds it", async () => {
+    await claimRunLease("run_lease")
+    const onLeaseLost = jest.fn()
+    startLeaseHeartbeat("run_lease", { ttlMs: 3_000, onLeaseLost })
+    // Another executor took the run over (this one stalled past the TTL).
+    await getDb().workflowRuns.update("run_lease", {
+      lease: { ownerId: "exec-other", claimedAt: Date.now(), expiresAt: Date.now() + 30_000 },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 2_300))
+    expect(onLeaseLost).toHaveBeenCalledTimes(1)
+    expect((await getDb().workflowRuns.get("run_lease"))?.lease?.ownerId).toBe("exec-other")
+  })
+
+  it("does not treat a healthy renewal as a loss", async () => {
+    await claimRunLease("run_lease")
+    const onLeaseLost = jest.fn()
+    startLeaseHeartbeat("run_lease", { ttlMs: 3_000, onLeaseLost })
+    await new Promise((resolve) => setTimeout(resolve, 1_300))
+    expect(onLeaseLost).not.toHaveBeenCalled()
+    stopLeaseHeartbeat("run_lease")
+  })
+
   it("stop is idempotent and replaces a prior heartbeat for the run", async () => {
     await claimRunLease("run_lease")
     const stop = startLeaseHeartbeat("run_lease", { ttlMs: 3_000 })

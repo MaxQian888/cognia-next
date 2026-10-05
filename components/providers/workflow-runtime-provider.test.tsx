@@ -56,6 +56,12 @@ jest.mock("@/lib/workflow/runtime/resume-controller", () => ({
   resumeInFlightRuns: (...args: unknown[]) => resumeInFlightRunsMock(...args),
 }))
 
+const installTeamWorkflowNodeRuntimeMock = jest.fn()
+jest.mock("@/lib/ai/agent/team/workflow-nodes/install", () => ({
+  __esModule: true,
+  installTeamWorkflowNodeRuntime: () => installTeamWorkflowNodeRuntimeMock(),
+}))
+
 jest.mock("@/lib/workflow/triggers/lifecycle", () => ({
   initPluginTriggerLifecycle: () => initPluginTriggerLifecycleMock(),
   disposePluginTriggerLifecycle: () => disposePluginTriggerLifecycleMock(),
@@ -175,6 +181,11 @@ describe("WorkflowRuntimeProvider", () => {
     )
 
     await waitFor(() => expect(resumeInFlightRunsMock).toHaveBeenCalledTimes(1))
+    // The Agent Team's workflow nodes (and its run-recovery ownership) are
+    // installed before anything can resume a run (ADR-0217).
+    expect(installTeamWorkflowNodeRuntimeMock.mock.invocationCallOrder[0]).toBeLessThan(
+      resumeInFlightRunsMock.mock.invocationCallOrder[0]
+    )
     // Resume must run after the initial trigger sync so a replayed run sees a
     // fully wired runtime.
     expect(listWorkflowsMock.mock.invocationCallOrder[0]).toBeLessThan(

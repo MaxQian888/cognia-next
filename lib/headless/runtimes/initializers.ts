@@ -58,6 +58,11 @@ registerHeadlessRuntime({
   name: "workflow-runtime",
   hosts: ["brain"],
   start: async (ctx) => {
+    // Composition root for the brain: install the Agent Team's workflow node
+    // implementations before any trigger or resumed run (ADR-0217).
+    const { installTeamWorkflowNodeRuntime } =
+      await import("@/lib/ai/agent/team/workflow-nodes/install")
+    installTeamWorkflowNodeRuntime()
     const [
       { initTriggerSubscriptions, disposeTriggerSubscriptions },
       { initPetEventTrigger, disposePetEventTrigger },
@@ -164,17 +169,25 @@ registerHeadlessRuntime({
   },
 })
 
-// ── A9: agent team runtime deps ─────────────────────────────────────────────
+// ── A9: agent team runtime (squad bootstrap) ────────────────────────────────
+// The same bootstrap the desktop mounts: store hydration, runtime adapters,
+// legacy history import, interrupt + durable-run recovery and recovery arming.
+// The brain used to install only the adapters, so a team run interrupted by a
+// brain restart was never recovered (and workflow resume now leaves `__team__:`
+// runs to this coordinator).
 
 registerHeadlessRuntime({
   name: "agent-team-runtime",
   hosts: ["brain"],
-  start: async () => {
-    const [{ configureAgentTeamRuntime }, { buildAgentTeamRuntimeDeps }] = await Promise.all([
-      import("@/lib/ai/agent/team/agent-team"),
-      import("@/lib/ai/agent/team/agent-team-runtime-deps"),
-    ])
-    configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
+  start: async (ctx) => {
+    const { runSquadBootstrap } = await import("@/lib/agent-team/bootstrap")
+    const handle = runSquadBootstrap()
+    void handle.done.then((outcome) => {
+      if (!outcome.ok) {
+        ctx.log("warn", `agent team bootstrap failed at ${outcome.failedStage ?? "unknown stage"}`)
+      }
+    })
+    return () => handle.dispose()
   },
 })
 

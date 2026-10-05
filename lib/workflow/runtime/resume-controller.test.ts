@@ -1,4 +1,4 @@
-import { resumeInFlightRuns } from "./resume-controller"
+import { registerRunRecoveryOwner, resumeInFlightRuns } from "./resume-controller"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { VisualWorkflow } from "@/types/workflow/visual"
@@ -34,7 +34,7 @@ describe("resumeInFlightRuns", () => {
   it("returns an all-zero summary when there are no in-flight rows", async () => {
     mockedReload.mockResolvedValueOnce([])
     const r = await resumeInFlightRuns()
-    expect(r).toEqual({ attempted: 0, succeeded: 0, failed: 0, skipped: 0 })
+    expect(r).toEqual({ attempted: 0, succeeded: 0, failed: 0, skipped: 0, delegated: 0 })
   })
 
   it("skips rows whose snapshot is missing or malformed", async () => {
@@ -141,5 +141,27 @@ describe("resumeInFlightRuns", () => {
     expect(r.attempted).toBe(1)
     expect(r.failed).toBe(1)
     expect(r.succeeded).toBe(0)
+  })
+
+  it("leaves runs a recovery owner claims to that owner instead of replaying them", async () => {
+    const unregister = registerRunRecoveryOwner({
+      id: "test-owner",
+      owns: (row) => row.workflowId.startsWith("__owned__:"),
+    })
+    try {
+      mockedReload.mockResolvedValueOnce([
+        {
+          runId: "run_owned",
+          workflowId: "__owned__:x",
+          startedAt: 0,
+          snapshot: { id: "__owned__:x" } as unknown as VisualWorkflow,
+        },
+      ])
+      const r = await resumeInFlightRuns()
+      expect(r).toEqual({ attempted: 1, succeeded: 0, failed: 0, skipped: 0, delegated: 1 })
+      expect(await getDb().workflowRuns.get("run_owned")).toBeUndefined()
+    } finally {
+      unregister()
+    }
   })
 })

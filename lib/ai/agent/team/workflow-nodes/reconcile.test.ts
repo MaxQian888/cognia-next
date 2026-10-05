@@ -16,8 +16,12 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   executeAgent: jest.fn(async () => ({ text: "" })),
 }))
 
-import "../built-ins"
-import { getExecutor } from "../registry"
+import "@/lib/workflow/nodes/built-ins"
+import { getExecutor } from "@/lib/workflow/nodes/registry"
+import { installTeamWorkflowNodeRuntime } from "./install"
+
+// The workflow engine reaches these nodes through its port (ADR-0217).
+installTeamWorkflowNodeRuntime()
 import type { StepExecutionContext, TriggerEvent, WorkflowNodeKind } from "@/types/workflow/visual"
 
 const trigger: TriggerEvent = { workflowId: "wf", kind: "trigger.manual", payload: {}, originAt: 1 }

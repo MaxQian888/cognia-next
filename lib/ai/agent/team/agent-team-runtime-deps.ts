@@ -20,7 +20,7 @@ import {
   type AgentHookContext,
   type LifecycleHookFirer,
 } from "@/lib/claude/hooks/lifecycle-firer"
-import { parseProposedPlan } from "./agent-team-runtime"
+import { parseProposedPlan } from "./plan-parse"
 import {
   buildLeadReviewPrompt,
   leadReviewVerdictSchema,

@@ -6,6 +6,11 @@ import { markSent } from "@/lib/db/outbound-jobs"
 // Importing built-ins triggers their side-effecting registrations.
 import "."
 import { getExecutor } from "../registry"
+// Production hosts install the Agent Team node implementations from their
+// composition root (ADR-0217); this suite exercises them through the registry.
+import { installTeamWorkflowNodeRuntime } from "@/lib/ai/agent/team/workflow-nodes/install"
+
+installTeamWorkflowNodeRuntime()
 import { registerSkill, __resetSkillsForTesting } from "@/lib/plugin/registries/skill-registry"
 import type { Skill } from "@cognia/agent-config-types"
 import type {

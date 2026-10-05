@@ -90,6 +90,14 @@ describe("initializer batch headless smoke", () => {
     for (const name of EXPECTED) {
       expect(result.started).toContain(name)
     }
+    // The brain runs the full squad bootstrap (recovery included), not just the
+    // runtime adapters, and installs the team's workflow nodes (ADR-0217).
+    const { awaitSquadRuntimeReady, getSquadRuntimeState } =
+      await import("@/lib/agent-team/bootstrap")
+    await expect(awaitSquadRuntimeReady()).resolves.toBe(true)
+    expect(getSquadRuntimeState()).toBe("ready")
+    const { hasTeamWorkflowNodes } = await import("@/lib/workflow/nodes/teams/team-runtime-port")
+    expect(hasTeamWorkflowNodes()).toBe(true)
     const workflow = await createWorkflow({
       name: "Headless plugin trigger",
       nodes: [

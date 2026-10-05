@@ -21,7 +21,7 @@
 
 import type { z } from "zod"
 import { dispatchTeammate, type DispatchTeammateArgs } from "./dispatch-teammate"
-import { parseProposedPlan } from "../agent-team-runtime"
+import { parseProposedPlan } from "../plan-parse"
 import type { TeamRunContext } from "../team-run-context"
 
 const JSON_INSTRUCTION =

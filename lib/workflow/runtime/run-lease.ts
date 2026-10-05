@@ -139,6 +139,12 @@ export function startLeaseHeartbeat(
     ownerId?: string
     ttlMs?: number
     onCancelRequested?: () => void
+    /**
+     * Called once when a renewal finds the lease held by someone else (or
+     * gone): another executor took the run over, so this one must stop
+     * driving it. The heartbeat stops itself before calling.
+     */
+    onLeaseLost?: () => void
   } = {}
 ): () => void {
   const ownerId = opts.ownerId ?? getExecutorId()
@@ -152,9 +158,14 @@ export function startLeaseHeartbeat(
           if (row?.cancelRequestedAt !== undefined) {
             opts.onCancelRequested?.()
           }
-          await renewRunLease(runId, { ownerId, ttlMs })
+          const renewed = await renewRunLease(runId, { ownerId, ttlMs })
+          if (!renewed && heartbeats.get(runId) === handle) {
+            stopLeaseHeartbeat(runId)
+            opts.onLeaseLost?.()
+          }
         } catch {
-          // Best-effort — a missed beat just shortens the lease.
+          // Best-effort — a missed beat (I/O error) just shortens the lease;
+          // only a renewal that positively finds another owner is a loss.
         }
       })()
     },

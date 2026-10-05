@@ -40,6 +40,7 @@ import {
   initPluginTriggerLifecycle,
 } from "@/lib/workflow/triggers/lifecycle"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
+import { installTeamWorkflowNodeRuntime } from "@/lib/ai/agent/team/workflow-nodes/install"
 import { loggers } from "@cognia/logging"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { installHostDispatchRuntime } from "@/lib/placement/host-dispatch-runtime"
@@ -77,6 +78,11 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
     let cancelled = false
     const startupController = new AbortController()
     const disposers: Disposer[] = []
+
+    // Composition root: the workflow engine runs Agent Team nodes through a
+    // port, and this host is where the team implementations are installed
+    // (ADR-0217). Before any trigger, deployment or resumed run can start.
+    installTeamWorkflowNodeRuntime()
 
     try {
       const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
