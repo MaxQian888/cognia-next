@@ -7,12 +7,19 @@ jest.mock("@/lib/account-sync/feature-flag", () => ({ accountSyncEnabled: jest.f
 jest.mock("@/hooks/account-sync/use-account-sync-poller", () => ({
   useAccountSyncPoller: jest.fn(),
 }))
+jest.mock("@/hooks/account-sync/use-account-sync-engine", () => ({
+  useAccountSyncEngine: jest.fn(),
+}))
 jest.mock("./approve-device-dialog", () => ({
   ApproveDeviceDialog: () => <div data-testid="stub-approve-dialog" />,
+}))
+jest.mock("./join-choice-dialog", () => ({
+  JoinChoiceDialog: () => <div data-testid="stub-join-dialog" />,
 }))
 
 import { render, screen } from "@testing-library/react"
 
+import { useAccountSyncEngine } from "@/hooks/account-sync/use-account-sync-engine"
 import { useAccountSyncPoller } from "@/hooks/account-sync/use-account-sync-poller"
 import { OPEN_APPROVAL_COMMAND } from "@/lib/account-sync/approval-notifications"
 import type { IncomingRequest } from "@/lib/account-sync/enrollment/approve"
@@ -32,13 +39,16 @@ describe("AccountSyncHost", () => {
     const { container } = render(<AccountSyncHost />)
     expect(container).toBeEmptyDOMElement()
     expect(useAccountSyncPoller).not.toHaveBeenCalled()
+    expect(useAccountSyncEngine).not.toHaveBeenCalled()
     expect(hasNotificationCommand(OPEN_APPROVAL_COMMAND)).toBe(false)
   })
 
-  it("runs the poller, opens approvals from notifications and mounts the dialog", async () => {
+  it("runs the poller and the engine, opens approvals from notifications and mounts the dialogs", async () => {
     jest.mocked(accountSyncEnabled).mockReturnValue(true)
     const { unmount } = render(<AccountSyncHost />)
     expect(screen.getByTestId("stub-approve-dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-join-dialog")).toBeInTheDocument()
+    expect(jest.mocked(useAccountSyncEngine).mock.calls[0]![0]).toEqual({ enabled: true })
     const options = jest.mocked(useAccountSyncPoller).mock.calls[0]![0]
     expect(options.enabled).toBe(true)
     expect(

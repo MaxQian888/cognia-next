@@ -17,6 +17,9 @@ jest.mock("./recovery-key-form", () => ({
     </button>
   ),
 }))
+jest.mock("./account-sync-data-panel", () => ({
+  AccountSyncDataPanel: () => <div data-testid="stub-data-panel" />,
+}))
 jest.mock("./sync-device-list", () => ({
   SyncDeviceList: () => <div data-testid="stub-device-list" />,
 }))
@@ -50,7 +53,7 @@ describe("AccountSyncSection", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("labels the preview: nothing syncs yet", () => {
+  it("labels the feature as a preview", () => {
     show({ kind: "idle" })
     expect(screen.getByTestId("account-sync-preview-badge")).toHaveTextContent("section.preview")
     expect(screen.getByRole("status")).toHaveTextContent("section.loading")
@@ -89,11 +92,12 @@ describe("AccountSyncSection", () => {
     expect(screen.getByTestId("account-sync-join-choose")).toBeInTheDocument()
   })
 
-  it("shows the device list and the waiting devices for an enrolled device", () => {
+  it("shows the data panel, the device list and the waiting devices for an enrolled device", () => {
     show(
       { kind: "enrolled", device: {} as never, registry: {} as never },
       { incoming: [{ requestId: "req_9" }] as IncomingRequest[] }
     )
+    expect(screen.getByTestId("stub-data-panel")).toBeInTheDocument()
     expect(screen.getByTestId("stub-device-list")).toBeInTheDocument()
     expect(screen.getByTestId("account-sync-waiting")).toHaveTextContent("devices.waiting(1)")
     fireEvent.click(screen.getByTestId("account-sync-review"))

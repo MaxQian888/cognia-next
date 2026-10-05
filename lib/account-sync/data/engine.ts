@@ -87,6 +87,8 @@ export interface EngineSyncState {
   /** Rows too large to sync as one change. */
   tooLarge: string[]
   error: string | null
+  /** What this device syncs. */
+  classes: SyncClasses
 }
 
 export type EngineStatus =
@@ -113,8 +115,6 @@ export interface AccountSyncEngineDeps {
   device: DeviceKeys
   /** The profile's own database (never a companion mirror). */
   db: CogniaDB
-  /** Takes a backup before a join choice changes local data. */
-  backup: () => Promise<void>
   /** Web Locks; `null` leads without an election. Defaults to `navigator.locks`. */
   locks?: LockManagerLike | null
   /** WebSocket factory; `null` long-polls only. Defaults to the global WebSocket. */
@@ -129,8 +129,12 @@ export interface AccountSyncEngineDeps {
 
 export interface AccountSyncEngine {
   status(): EngineStatus
-  /** The person's choice when both this device and the account hold data. */
-  join(choice: JoinChoice): Promise<void>
+  /**
+   * The person's choice when both this device and the account hold data.
+   * `backup` runs first; if it fails (or is cancelled) nothing changes and the
+   * choice stays open.
+   */
+  join(choice: JoinChoice, backup: () => Promise<void>): Promise<void>
   /** Turns classes on or off; a class turned on is seeded and pulled again. */
   setClasses(classes: SyncClasses): Promise<void>
   /** Push and pull now. */
@@ -195,6 +199,7 @@ export function startAccountSyncEngine(deps: AccountSyncEngineDeps): AccountSync
     lastSyncedAt: null,
     tooLarge: [],
     error: null,
+    classes: { content: true, settings: true },
   }
   let choose: ((choice: JoinChoice) => void) | null = null
   let outboxWatch: Subscription | null = null
@@ -229,8 +234,12 @@ export function startAccountSyncEngine(deps: AccountSyncEngineDeps): AccountSync
   }
 
   async function refreshCounts(): Promise<void> {
-    const [pending, parked] = await Promise.all([db.accountSyncOutbox.count(), parkedCounts(db)])
-    publish({ pending, parked })
+    const [pending, parked, capture] = await Promise.all([
+      db.accountSyncOutbox.count(),
+      parkedCounts(db),
+      db.accountSyncState.get("capture") as Promise<AccountSyncCaptureState | undefined>,
+    ])
+    publish({ pending, parked, ...(capture ? { classes: capture.classes } : {}) })
   }
 
   /** Believes a removal only through the verified list; then disarms and stops. */
@@ -482,7 +491,8 @@ export function startAccountSyncEngine(deps: AccountSyncEngineDeps): AccountSync
       if (stopped()) return
       setStatus({ kind: "seeding", progress: null })
       await joinWithChoice(target, choice, {
-        backup: deps.backup,
+        // `join` took the backup before handing the choice over.
+        backup: async () => undefined,
         onProgress: (progress) => setStatus({ kind: "seeding", progress }),
       })
     }
@@ -502,7 +512,7 @@ export function startAccountSyncEngine(deps: AccountSyncEngineDeps): AccountSync
       if (stopped()) return
       await failed(error)
       if (current.kind === "removed" || stopped()) return
-      // Joining failed (offline, a failed backup): try again later.
+      // Joining failed (offline): try again later.
       setStatus({ kind: "running", ...sync, error: messageOf(error) })
       await new Promise<void>((resolve) => later(delays.retryMs(1), resolve))
       if (!stopped()) await leadSafely()
@@ -537,7 +547,9 @@ export function startAccountSyncEngine(deps: AccountSyncEngineDeps): AccountSync
 
   return {
     status: () => current,
-    async join(choice) {
+    async join(choice, backup) {
+      if (!choose) throw new Error("no join choice is pending")
+      await backup()
       if (!choose) throw new Error("no join choice is pending")
       choose(choice)
     },
@@ -551,6 +563,7 @@ export function startAccountSyncEngine(deps: AccountSyncEngineDeps): AccountSync
           (cls) => classes[cls] && !state.classes[cls]
         )
       })
+      if (current.kind === "running") await refreshCounts()
       if (turnedOn.length === 0) return
       for (const cls of turnedOn) await seedClass(target, cls)
       // Pull the account again: ops of the class were passed over while it was off.

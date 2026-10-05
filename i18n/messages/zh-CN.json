@@ -2051,6 +2051,36 @@
       "unknownName": "一台设备",
       "waitingReveal": "正在等待新设备…"
     },
+    "data": {
+      "choicePending": "此设备和你的账号都有数据。请先选择如何合并，然后开始同步。",
+      "choose": "选择…",
+      "classes": {
+        "content": "聊天、角色、技能和记忆",
+        "contentHint": "内置角色和技能，以及属于某个项目的记忆，会留在此设备上。",
+        "failed": "无法更改同步内容：{message}",
+        "settings": "共享设置",
+        "settingsHint": "适用于所有设备的偏好，例如你的个人资料。设备专属设置和 API 密钥会留在这里。",
+        "title": "同步内容"
+      },
+      "error": "同步遇到问题：{message}",
+      "follower": "正在另一个 Cognia 窗口中同步。",
+      "lastSynced": "上次同步于 {time}",
+      "live": {
+        "connecting": "正在连接…",
+        "poll": "已是最新。每隔几秒检查一次变更。",
+        "socket": "已是最新。变更会实时到达。"
+      },
+      "notHere": "数据在持有它的设备上同步。此窗口显示的是另一台主机的数据，因此不会从这里同步。",
+      "parkedKey": "{count, plural, other {# 项变更}}正在等待此设备尚未持有的密钥，将在下次设备列表更新后应用。",
+      "parkedSchema": "来自你其他设备的 {count, plural, other {# 项变更}}需要更新版本的 Cognia。更新 Cognia 后即可看到。",
+      "pending": "{count, plural, other {# 项变更}}等待上传",
+      "seeding": "正在为同步准备你的数据…",
+      "seedingProgress": "正在为同步准备你的数据…{done} / {total}",
+      "starting": "正在启动同步…",
+      "syncNow": "立即同步",
+      "title": "你的数据",
+      "tooLarge": "{count, plural, other {# 个项目}}过大，无法同步，将保留在此设备上。"
+    },
     "devices": {
       "addedVia": {
         "approval": "由 {name} 批准",
@@ -2111,6 +2141,27 @@
       "useRecoveryKey": "使用同步恢复密钥",
       "waiting": "等待批准中。请在已同步的设备上打开 Cognia。"
     },
+    "joinChoice": {
+      "backingUp": "正在备份…",
+      "canceled": "没有任何更改：备份已取消。",
+      "continue": "备份并继续",
+      "counts": {
+        "characters": "{count, plural, other {# 个角色}}",
+        "memories": "{count, plural, other {# 条记忆}}",
+        "messages": "{count, plural, other {# 条消息}}",
+        "sessions": "{count, plural, other {# 个聊天}}",
+        "skills": "{count, plural, other {# 个技能}}"
+      },
+      "description": "你的账号已经保存了来自其他设备的数据，而此设备也有自己的数据。请选择合并方式。系统会先保存此设备的备份，必要时可以恢复。",
+      "failed": "没有任何更改：{message}",
+      "later": "稍后",
+      "merge": "合并",
+      "mergeHint": "两边都保留。同一项目在两边都被修改时，以较新的修改为准。",
+      "onDevice": "此设备上",
+      "replace": "使用账号中的数据",
+      "replaceHint": "删除此设备上的聊天、角色、技能和记忆，然后下载账号中的数据。内置项目会保留。",
+      "title": "要将此设备的数据与你的账号合并吗？"
+    },
     "notification": {
       "body": "{name}（{platform}）正在等待你的批准。",
       "open": "查看",
@@ -2165,8 +2216,8 @@
       "loading": "正在检查同步…",
       "locked": "请先解锁此配置文件再使用同步。",
       "pollError": "无法连接同步服务：{message}",
-      "preview": "预览 — 暂不同步数据",
-      "previewHint": "此版本可以设置同步密钥并批准你的设备。你的数据还不会同步。",
+      "preview": "预览",
+      "previewHint": "同步处于预览阶段。聊天、角色、技能、记忆和共享设置会在你的设备之间端到端加密同步。API 密钥和设备专属设置会留在各自的设备上。",
       "retry": "重试",
       "signedOut": "登录你的 Cognia 账号后才能使用同步。",
       "title": "同步设备",

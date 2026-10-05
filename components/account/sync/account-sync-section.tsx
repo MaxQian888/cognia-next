@@ -6,8 +6,8 @@
  *
  * It reads the poller's view of the space and offers what this device can do
  * from where it stands: set up the first device, join by approval or with the
- * sync recovery key, or manage the device list. A "nothing syncs yet" badge
- * says what phase 2 is: keys and devices, no data.
+ * sync recovery key, or see its data sync and manage the device list. A
+ * "Preview" badge says the feature is in preview (ADR-0215 phase 3a).
  */
 
 import { useCallback, useState } from "react"
@@ -20,6 +20,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { accountSyncEnabled } from "@/lib/account-sync/feature-flag"
 import { useAccountSyncStore } from "@/stores/account-sync/account-sync-store"
 
+import { AccountSyncDataPanel } from "./account-sync-data-panel"
 import { FirstDeviceSetup } from "./first-device-setup"
 import { JoinRequestPanel } from "./join-request-panel"
 import { RecoveryKeyForm } from "./recovery-key-form"
@@ -151,6 +152,7 @@ export function AccountSyncSection({ account }: AccountSyncSectionProps) {
               </AlertDescription>
             </Alert>
           ) : null}
+          <AccountSyncDataPanel />
           <SyncDeviceList
             context={context}
             device={view.device}

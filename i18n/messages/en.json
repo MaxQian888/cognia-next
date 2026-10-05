@@ -2051,6 +2051,36 @@
       "unknownName": "A device",
       "waitingReveal": "Waiting for the new device…"
     },
+    "data": {
+      "choicePending": "This device and your account both hold data. Choose how to combine them before sync starts.",
+      "choose": "Choose…",
+      "classes": {
+        "content": "Chats, characters, skills and memories",
+        "contentHint": "Built-in characters and skills, and memories that belong to a project, stay on this device.",
+        "failed": "Could not change what syncs: {message}",
+        "settings": "Shared settings",
+        "settingsHint": "Preferences meant for every device, such as your profile. Device-specific settings and API keys stay here.",
+        "title": "What syncs"
+      },
+      "error": "Sync is having trouble: {message}",
+      "follower": "Syncing in another Cognia window.",
+      "lastSynced": "Last synced at {time}",
+      "live": {
+        "connecting": "Connecting…",
+        "poll": "Up to date. Checking for changes every few seconds.",
+        "socket": "Up to date. Changes arrive as they happen."
+      },
+      "notHere": "Data syncs on the device that holds it. This window shows another host's data, so it does not sync from here.",
+      "parkedKey": "{count, plural, one {# change is} other {# changes are}} waiting for a key this device does not have yet. They apply after the next device list update.",
+      "parkedSchema": "{count, plural, one {# change} other {# changes}} from your other devices need a newer version of Cognia. Update Cognia to see them.",
+      "pending": "{count, plural, one {# change} other {# changes}} waiting to upload",
+      "seeding": "Preparing your data for sync…",
+      "seedingProgress": "Preparing your data for sync… {done} of {total}",
+      "starting": "Starting sync…",
+      "syncNow": "Sync now",
+      "title": "Your data",
+      "tooLarge": "{count, plural, one {# item is} other {# items are}} too large to sync and stay on this device."
+    },
     "devices": {
       "addedVia": {
         "approval": "Approved by {name}",
@@ -2111,6 +2141,27 @@
       "useRecoveryKey": "Use the sync recovery key",
       "waiting": "Waiting for approval. Open Cognia on a device that already syncs."
     },
+    "joinChoice": {
+      "backingUp": "Backing up…",
+      "canceled": "Nothing changed: the backup was canceled.",
+      "continue": "Back up and continue",
+      "counts": {
+        "characters": "{count, plural, one {# character} other {# characters}}",
+        "memories": "{count, plural, one {# memory} other {# memories}}",
+        "messages": "{count, plural, one {# message} other {# messages}}",
+        "sessions": "{count, plural, one {# chat} other {# chats}}",
+        "skills": "{count, plural, one {# skill} other {# skills}}"
+      },
+      "description": "Your account already holds data from your other devices, and this device has its own. Choose how to combine them. A backup of this device is saved first, so you can restore it if needed.",
+      "failed": "Nothing changed: {message}",
+      "later": "Later",
+      "merge": "Merge",
+      "mergeHint": "Keep both. Where the same item was changed on both sides, the newer change wins.",
+      "onDevice": "On this device",
+      "replace": "Use the account's data",
+      "replaceHint": "Remove this device's chats, characters, skills and memories, then download the account's. Built-ins stay.",
+      "title": "Combine this device's data with your account?"
+    },
     "notification": {
       "body": "{name} ({platform}) is waiting for your approval.",
       "open": "Review",
@@ -2165,8 +2216,8 @@
       "loading": "Checking sync…",
       "locked": "Unlock this profile to use sync.",
       "pollError": "Could not reach the sync service: {message}",
-      "preview": "Preview — nothing syncs yet",
-      "previewHint": "This build can set up sync keys and approve your devices. Your data does not sync yet.",
+      "preview": "Preview",
+      "previewHint": "Sync is in preview. Chats, characters, skills, memories and shared settings sync between your devices, end-to-end encrypted. API keys and device-specific settings stay on each device.",
       "retry": "Try again",
       "signedOut": "Sign in to your Cognia account to use sync.",
       "title": "Sync devices",

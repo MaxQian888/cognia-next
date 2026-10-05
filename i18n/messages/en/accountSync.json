@@ -1,8 +1,8 @@
 {
   "section": {
     "title": "Sync devices",
-    "preview": "Preview — nothing syncs yet",
-    "previewHint": "This build can set up sync keys and approve your devices. Your data does not sync yet.",
+    "preview": "Preview",
+    "previewHint": "Sync is in preview. Chats, characters, skills, memories and shared settings sync between your devices, end-to-end encrypted. API keys and device-specific settings stay on each device.",
     "loading": "Checking sync…",
     "locked": "Unlock this profile to use sync.",
     "signedOut": "Sign in to your Cognia account to use sync.",
@@ -147,5 +147,56 @@
     "signedOut": "Sign in to your Cognia account first.",
     "network": "The sync service could not be reached.",
     "integrity": "The device list could not be verified, so nothing was changed."
+  },
+  "data": {
+    "title": "Your data",
+    "notHere": "Data syncs on the device that holds it. This window shows another host's data, so it does not sync from here.",
+    "starting": "Starting sync…",
+    "follower": "Syncing in another Cognia window.",
+    "seeding": "Preparing your data for sync…",
+    "seedingProgress": "Preparing your data for sync… {done} of {total}",
+    "choicePending": "This device and your account both hold data. Choose how to combine them before sync starts.",
+    "choose": "Choose…",
+    "live": {
+      "connecting": "Connecting…",
+      "socket": "Up to date. Changes arrive as they happen.",
+      "poll": "Up to date. Checking for changes every few seconds."
+    },
+    "pending": "{count, plural, one {# change} other {# changes}} waiting to upload",
+    "lastSynced": "Last synced at {time}",
+    "error": "Sync is having trouble: {message}",
+    "syncNow": "Sync now",
+    "parkedSchema": "{count, plural, one {# change} other {# changes}} from your other devices need a newer version of Cognia. Update Cognia to see them.",
+    "parkedKey": "{count, plural, one {# change is} other {# changes are}} waiting for a key this device does not have yet. They apply after the next device list update.",
+    "tooLarge": "{count, plural, one {# item is} other {# items are}} too large to sync and stay on this device.",
+    "classes": {
+      "title": "What syncs",
+      "content": "Chats, characters, skills and memories",
+      "contentHint": "Built-in characters and skills, and memories that belong to a project, stay on this device.",
+      "settings": "Shared settings",
+      "settingsHint": "Preferences meant for every device, such as your profile. Device-specific settings and API keys stay here.",
+      "failed": "Could not change what syncs: {message}"
+    }
+  },
+  "joinChoice": {
+    "title": "Combine this device's data with your account?",
+    "description": "Your account already holds data from your other devices, and this device has its own. Choose how to combine them. A backup of this device is saved first, so you can restore it if needed.",
+    "onDevice": "On this device",
+    "counts": {
+      "sessions": "{count, plural, one {# chat} other {# chats}}",
+      "messages": "{count, plural, one {# message} other {# messages}}",
+      "characters": "{count, plural, one {# character} other {# characters}}",
+      "skills": "{count, plural, one {# skill} other {# skills}}",
+      "memories": "{count, plural, one {# memory} other {# memories}}"
+    },
+    "merge": "Merge",
+    "mergeHint": "Keep both. Where the same item was changed on both sides, the newer change wins.",
+    "replace": "Use the account's data",
+    "replaceHint": "Remove this device's chats, characters, skills and memories, then download the account's. Built-ins stay.",
+    "continue": "Back up and continue",
+    "backingUp": "Backing up…",
+    "later": "Later",
+    "canceled": "Nothing changed: the backup was canceled.",
+    "failed": "Nothing changed: {message}"
   }
 }

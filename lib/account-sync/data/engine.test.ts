@@ -129,7 +129,6 @@ async function engineFor(
     context: device.context,
     device: await device.keys(),
     db: device.db,
-    backup: async () => undefined,
     locks: null,
     openSocket: null,
     delays: FAST,
@@ -245,12 +244,21 @@ describe("startAccountSyncEngine", () => {
     await disarm(b.db)
     await b.db.sessions.put(session("from-b"))
     const backup = jest.fn(async () => undefined)
-    const { engine, statuses } = await engineFor(b, { backup })
+    const { engine, statuses } = await engineFor(b)
     await until(() => engine.status().kind === "join-choice")
     expect(engine.status()).toMatchObject({ local: { total: 1 }, remoteSeq: 1 })
     expect(backup).not.toHaveBeenCalled()
 
-    await engine.join("merge")
+    // A cancelled backup changes nothing and leaves the choice open.
+    await expect(
+      engine.join("merge", async () => {
+        throw new Error("cancelled")
+      })
+    ).rejects.toThrow("cancelled")
+    expect(engine.status().kind).toBe("join-choice")
+    expect(await b.db.accountSyncState.get("capture")).toBeUndefined()
+
+    await engine.join("merge", backup)
     await until(() => running(engine))
     expect(backup).toHaveBeenCalledTimes(1)
     expect(statuses.some((status) => status.kind === "seeding")).toBe(true)
@@ -259,7 +267,7 @@ describe("startAccountSyncEngine", () => {
       async () => (await a.round()).applied > 0 || (await a.db.sessions.get("from-b")) !== undefined
     )
     expect(await a.db.sessions.get("from-b")).toBeDefined()
-    await expect(engine.join("merge")).rejects.toThrow("no join choice is pending")
+    await expect(engine.join("merge", backup)).rejects.toThrow("no join choice is pending")
     engine.stop()
     closeAll(devices)
   })
@@ -284,6 +292,7 @@ describe("startAccountSyncEngine", () => {
     await until(() => running(first.engine) && running(second.engine))
 
     await second.engine.setClasses({ content: false, settings: true })
+    expect(second.engine.status()).toMatchObject({ classes: { content: false, settings: true } })
     await a.db.sessions.put(session("while-off"))
     await b.db.sessions.put(session("b-while-off"))
     await until(async () => (await a.db.accountSyncOutbox.count()) === 0)
