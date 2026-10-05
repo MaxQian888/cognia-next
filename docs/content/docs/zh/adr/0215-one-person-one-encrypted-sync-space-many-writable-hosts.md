@@ -172,7 +172,7 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
   3. 飞书主体上的 `logtoSubject` 文档说登录时会填写，实际从未写入。
   4. `skills/built-in/lark/auth-bridge.ts` 读取 `settings.appId`，但 `appId` 只存在密钥存储里。
   5. ADR-0091 说 `larkPrincipalRegistry` 默认关闭；`lib/connectors/feature-flags.ts` 实际默认开启。
-  6. 网页和 Capacitor 上的 keyring 密钥放在 `localStorage` 里，存在那里的令牌只是被混淆而非受保护；Capacitor 应改用安全存储。
+  6. 网页和 Capacitor 上的 keyring 密钥放在 `localStorage` 里，存在那里的令牌只是被混淆而非受保护；Capacitor 应改用安全存储。（Capacitor 部分已于 2026-10-05 修复：`lib/keyring` 在手机上改用 Keychain / Keystore，并迁移旧条目；浏览器在第 6 阶段之前仍用原回退方式。）
   7. ADR-0010 的复审已指出 Claude 订阅 OAuth 的问题，但添加账号对话框里仍可进入。
   8. 诊断服务器的匿名授权用同一请求中提供的公钥做校验，租户是否存在的检查需要确认。
   9. `crates/cognia-collab-server/src/logto_management.rs` 中的 `identities_from_user` 读取 `details.unionId`/`details.tenantKey`，但 Logto 的飞书连接器把 `union_id` 和 `tenant_key` 存在 `details.rawData` 下，且 `userId` 用的是 `open_id`；于是关联写入的是不带租户的 open id，登录永远对不上此人的飞书主体。
@@ -232,7 +232,6 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 **第 1 阶段遗留问题。**
 
 - 在应用市场版应用就绪前，只有自建飞书应用所在租户能登录。
-- Capacitor 仍把令牌放在 `localStorage`（缺陷 6）。
 - Google 和 Apple 身份已列出，但本地身份词汇表中尚无对应项。
 
 ## 路线图

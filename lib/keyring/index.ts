@@ -9,7 +9,14 @@
  *     (see `src-tauri/src/keyring_secrets.rs`). The Rust side encrypts values
  *     in Cognia's shared secret store; only its master key uses the OS keyring.
  *
- * Web (browser / Capacitor):
+ * Phone (Capacitor):
+ *   - The iOS Keychain / Android Keystore through `capacitor-secure-storage-plugin`
+ *     (ADR-0215 defect 6). Entries the IndexedDB fallback below held before
+ *     are moved there the first time they are read, then deleted: the
+ *     fallback's key sits in `localStorage`, so it obfuscates rather than
+ *     protects.
+ *
+ * Browser:
  *   - Falls back to an AES-GCM-encrypted blob in IndexedDB. The encryption
  *     key is derived from `WebKeyringConfig.passphrase` (provided by the
  *     caller — typically the user's backup passphrase via `getDefaultBackupPassphrase`).
@@ -19,8 +26,9 @@
  * runtime — they just `await getSecret("demo-delivery", "account:primary")`.
  */
 
-import { isTauri } from "@/lib/tauri"
+import { isCapacitor, isTauri } from "@/lib/tauri"
 import { invoke } from "@tauri-apps/api/core"
+import { createCapacitorSecureStore, type KeyringStore } from "@/lib/credentials/keyring-store"
 
 const WEB_FALLBACK_TABLE = "secretsFallback"
 
@@ -70,6 +78,18 @@ export async function getSecret(
     })
     return value ?? null
   }
+  if (onPhone()) {
+    try {
+      return await readPhone(ref)
+    } catch (err) {
+      if (options.strict) throw err
+      console.warn("keyring secure storage read failed", {
+        namespace: ref.namespace,
+        error: err instanceof Error ? err.message : err,
+      })
+      return null
+    }
+  }
   return readWebFallback(ref)
 }
 
@@ -80,6 +100,12 @@ export async function setSecret(ref: KeyringRef, value: string): Promise<void> {
     await safeInvokeThrowing<void>("secret_store_set", {
       input: { namespace: ref.namespace, key: ref.key, value } satisfies IpcInput,
     })
+    return
+  }
+  if (onPhone()) {
+    await phoneStore(ref.namespace).save(ref.key, value)
+    // A copy left by the old fallback would otherwise come back after a clear.
+    await deleteWebFallback(ref)
     return
   }
   await writeWebFallback(ref, value)
@@ -97,7 +123,65 @@ export async function clearSecret(
     })
     return
   }
+  if (onPhone()) {
+    try {
+      await phoneStore(ref.namespace).delete(ref.key)
+    } catch (err) {
+      if (options.strict) throw err
+      console.warn("keyring secure storage delete failed", {
+        namespace: ref.namespace,
+        error: err instanceof Error ? err.message : err,
+      })
+    }
+    await deleteWebFallback(ref)
+    return
+  }
   await deleteWebFallback(ref)
+}
+
+// ── Phone (Keychain / Keystore) ──────────────────────────────────────────────
+
+/**
+ * Some tests mock `@/lib/tauri` with `isTauri` only; a missing `isCapacitor`
+ * means "not a phone", the same seam `createKeyringStore` keeps.
+ */
+function onPhone(): boolean {
+  return typeof isCapacitor === "function" && isCapacitor()
+}
+
+// Prefixed so these entries never meet `createKeyringStore` callers that
+// happen to use the same namespace.
+const PHONE_NAMESPACE_PREFIX = "keyring:"
+const phoneStores = new Map<string, KeyringStore>()
+
+function phoneStore(namespace: string): KeyringStore {
+  let store = phoneStores.get(namespace)
+  if (!store) {
+    store = createCapacitorSecureStore(`${PHONE_NAMESPACE_PREFIX}${namespace}`)
+    phoneStores.set(namespace, store)
+  }
+  return store
+}
+
+/** Test-only: drop the cached per-namespace stores. */
+export function __resetPhoneKeyringForTests(): void {
+  phoneStores.clear()
+}
+
+/**
+ * Read from secure storage, moving an entry the IndexedDB fallback still
+ * holds. The fallback copy is deleted only after the secure write succeeded,
+ * so a failure leaves the secret where it was.
+ */
+async function readPhone(ref: KeyringRef): Promise<string | null> {
+  const store = phoneStore(ref.namespace)
+  const value = await store.load(ref.key)
+  if (value !== null) return value
+  const legacy = await readWebFallback(ref)
+  if (legacy === null) return null
+  await store.save(ref.key, legacy)
+  await deleteWebFallback(ref)
+  return legacy
 }
 
 // ── Web-mode fallback ────────────────────────────────────────────────────────

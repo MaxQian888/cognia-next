@@ -1,12 +1,12 @@
 /**
  * Persistence for the active Logto session (ADR-0059 cloud/headless — Logto).
  *
- * Tokens are kept in the OS keyring (desktop) / AES-GCM IndexedDB fallback
- * (phone and browser) via `lib/keyring`, off the plaintext Dexie store — the
- * same vault used for connector / subscription credentials. One JSON blob per
- * active session.
+ * Tokens are kept in the desktop secret store, the phone's Keychain /
+ * Keystore, or an AES-GCM IndexedDB fallback (browser) via `lib/keyring`, off
+ * the plaintext Dexie store — the same vault used for connector / subscription
+ * credentials. One JSON blob per active session.
  *
- * The non-desktop fallback needs an encryption passphrase injected before it
+ * The browser fallback needs an encryption passphrase injected before it
  * will accept a write; without one, reads return null and writes throw. Nothing
  * injected it for Logto, so signing in anywhere but the desktop would have
  * failed at the moment the token was persisted — after a successful browser
@@ -84,7 +84,9 @@ export function logtoReauthKeyringFor(localAccountId = getActiveAccountId()): Ke
 let webPassphraseProvisioned = false
 
 /**
- * Give the encrypted-IndexedDB fallback its key, once, off the desktop.
+ * Give the encrypted-IndexedDB fallback its key, once, off the desktop. On a
+ * phone it is needed only to read a session the fallback held before secure
+ * storage, so `lib/keyring` can move it.
  *
  * Deliberately not fatal when no passphrase is available: the caller should get
  * the keyring's own error at the point of the read or write, which names the

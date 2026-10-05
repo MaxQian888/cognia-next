@@ -81,5 +81,5 @@ release 构建绝不从运行环境读取官方签发方。
 ## 已知限制
 
 - 在飞书应用市场版应用就绪前，只有自建应用所在租户能用飞书登录。
-- Capacitor 仍把令牌放在 `localStorage`。
+- 浏览器把令牌放在 IndexedDB 回退存储里，其密钥在 `localStorage` 中；手机使用 Keychain / Keystore。
 - 签发方会关联 Google 和 Apple 身份，但本地身份词汇表会跳过它们。

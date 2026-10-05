@@ -93,5 +93,5 @@ consents, sessions, linked accounts and the user.
 ## Known limits
 
 - Until the Feishu marketplace app exists, only the self-built app's own tenant can sign in with Feishu.
-- Capacitor keeps tokens in `localStorage`.
+- The browser keeps tokens in an IndexedDB fallback whose key sits in `localStorage`; phones use the Keychain / Keystore.
 - Google and Apple identities are linked by the issuer but skipped by the local identity vocabulary.

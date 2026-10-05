@@ -172,7 +172,7 @@ New ids are UUIDv7 or CSPRNG nanoid. Human issue numbers come from a counter in 
   3. `logtoSubject` on Feishu principals is documented as filled on login but never written.
   4. `skills/built-in/lark/auth-bridge.ts` reads `settings.appId`, but `appId` lives only in the secret store.
   5. ADR-0091 says `larkPrincipalRegistry` defaults off; `lib/connectors/feature-flags.ts` has it on.
-  6. On web and Capacitor the keyring key sits in `localStorage`, so tokens stored there are obfuscated, not protected; Capacitor should use secure storage.
+  6. On web and Capacitor the keyring key sits in `localStorage`, so tokens stored there are obfuscated, not protected; Capacitor should use secure storage. (Fixed for Capacitor on 2026-10-05: `lib/keyring` uses the Keychain / Keystore there and moves old entries; the browser keeps its fallback until phase 6.)
   7. Claude subscription OAuth stays reachable from the add-account dialog although ADR-0010's review flags it.
   8. The diagnostic server's anonymous grant verifies against a key supplied in the same request; the tenant existence check needs confirming.
   9. `identities_from_user` in `crates/cognia-collab-server/src/logto_management.rs` reads `details.unionId`/`details.tenantKey`, but Logto's Feishu connector stores `union_id` and `tenant_key` under `details.rawData` and keys `userId` on `open_id`; the join files an untenanted open id, so a sign-in never meets the person's Feishu principals.
@@ -232,7 +232,6 @@ A token's unverified `iss` only picks among those anchors.
 **Still open from phase 1.**
 
 - Only the self-built Feishu app's tenant can sign in until the marketplace app exists.
-- Capacitor keeps tokens in `localStorage` (defect 6).
 - Google and Apple identities are listed but have no word in the local identity vocabulary yet.
 
 ## Roadmap

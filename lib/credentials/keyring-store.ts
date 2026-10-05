@@ -215,6 +215,14 @@ class BrowserVaultStore implements KeyringStore {
 }
 
 /**
+ * The Keychain / Keystore store on its own, for `lib/keyring`, which picks its
+ * backend per platform itself and only needs this one.
+ */
+export function createCapacitorSecureStore(namespace: string): KeyringStore {
+  return new CapacitorSecureStore(namespace)
+}
+
+/**
  * Build a keyring store for the given namespace. The namespace surfaces in
  * OS keyring UIs (e.g. `com.cognia.<namespace>/v1`) and prefixes the
  * Capacitor SecureStorage key, so distinct callers never collide.
