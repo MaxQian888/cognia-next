@@ -7,7 +7,8 @@
 import { labelled, type Label } from "./labels"
 
 function subtle(): SubtleCrypto {
-  const value = globalThis.crypto?.subtle
+  // The bare global: Workers declare `crypto` as a const, not on `globalThis`.
+  const value = typeof crypto === "undefined" ? undefined : crypto.subtle
   if (!value) throw new Error("WebCrypto is unavailable")
   return value
 }
@@ -109,7 +110,7 @@ export async function assertEcdhPublicKey(raw: Uint8Array): Promise<void> {
 }
 
 export async function exportRawPublicKey(key: CryptoKey): Promise<Uint8Array> {
-  return new Uint8Array(await subtle().exportKey("raw", key))
+  return new Uint8Array((await subtle().exportKey("raw", key)) as ArrayBuffer)
 }
 
 export async function ecdsaSign(privateKey: CryptoKey, data: Uint8Array): Promise<Uint8Array> {

@@ -1,0 +1,29 @@
+{
+  "name": "cognia-sync-worker",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "description": "Cloudflare Worker for Cognia account sync (ADR-0215 phase 2): the device registry, epoch-key envelopes and device enrollment, one SQLite Durable Object per space.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env dev --port 8788",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cognia/sync-protocol": "link:../../packages/sync-protocol",
+    "jose": "6.2.12"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@cloudflare/workers-types": "5.20260927.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "4.1.11",
+    "wrangler": "4.141.0"
+  }
+}

@@ -81,6 +81,9 @@ const eslintConfig = defineConfig([
     // ADR-0215 identity spike: wrangler dev cache and dry-run bundle.
     "services/identity-server/.wrangler/**",
     "services/identity-server/dist/**",
+    // Account sync's Worker (ADR-0215 phase 2): wrangler dev cache and dry-run bundle.
+    "services/sync-server/.wrangler/**",
+    "services/sync-server/dist/**",
     // Standalone Cloudflare worker (workers-rs / Rust) with its own toolchain.
     // Its build/ and .wrangler/ dirs are minified JS bundles emitted by wrangler,
     // never authored here (same rationale as services/share-server/**).

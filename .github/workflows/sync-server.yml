@@ -1,0 +1,67 @@
+name: Sync Server
+
+# ============================================================================
+# sync-server — account sync's device registry and enrollment (ADR-0215 phase 2)
+# ============================================================================
+# A standalone TypeScript Cloudflare Worker (SQLite Durable Objects) with its
+# own lockfile, outside the pnpm workspace like the other service Workers. It
+# links packages/sync-protocol, so a protocol change runs this suite too. Its
+# specs run inside workerd via @cloudflare/vitest-pool-workers, including the
+# frozen protocol vectors. Never part of the root Jest suite.
+# ============================================================================
+
+on:
+  push:
+    branches: [master, dev]
+    paths:
+      - "services/sync-server/**"
+      - "packages/sync-protocol/**"
+      - ".github/workflows/sync-server.yml"
+  pull_request:
+    paths:
+      - "services/sync-server/**"
+      - "packages/sync-protocol/**"
+      - ".github/workflows/sync-server.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker:
+    name: Worker (typecheck + vitest + bundle)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: services/sync-server
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: services/sync-server/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (vitest / workerd)
+        run: pnpm test
+
+      - name: Bundle
+        run: pnpm build

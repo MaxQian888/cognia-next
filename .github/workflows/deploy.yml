@@ -4,7 +4,8 @@ name: Deploy
 # Real, opt-in deployments for the cloud services (ADR-0059 P0.1):
 #   - Cloudflare Workers: cognia-signaling (Rust/wasm), cognia-share (TS),
 #     cognia-status (TS + D1 + the status-only static export),
-#     cognia-identity (TS + D1, the official account's OIDC issuer, ADR-0215)
+#     cognia-identity (TS + D1, the official account's OIDC issuer, ADR-0215),
+#     cognia-sync (TS + SQLite Durable Objects, account sync, ADR-0215 phase 2)
 #   - Fly.io axum twins:  signaling-server, share-server
 #
 # Safety model (forks stay green with zero configuration):
@@ -47,6 +48,7 @@ on:
           - share-worker
           - status-worker
           - identity-worker
+          - sync-worker
           - signaling-fly
           - share-fly
           - docs
@@ -257,15 +259,59 @@ jobs:
             deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
             --var BUILD_SHA:${{ github.sha }}
 
+  deploy-sync-worker:
+    name: Worker — sync
+    needs: gate
+    # Account sync (ADR-0215 phase 2): the device registry and enrollment, one
+    # SQLite Durable Object per space. No secrets; it reads the identity
+    # Worker's JWKS through its IDENTITY service binding, so cognia-identity
+    # must exist first (it does from phase 1). The identity job waits for this
+    # one because its SYNC_ADMIN binding needs this Worker to exist.
+    # The protocol package is linked from packages/sync-protocol.
+    if: >
+      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["all","workers","sync-worker"]'), inputs.target)
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: services/sync-server/pnpm-lock.yaml
+
+      - name: Install and test the sync Worker
+        working-directory: services/sync-server
+        run: |
+          pnpm install --frozen-lockfile --prefer-offline
+          pnpm typecheck
+          pnpm test
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: services/sync-server
+          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
+
   deploy-identity-worker:
     name: Worker — identity
-    needs: gate
+    needs: [gate, deploy-sync-worker]
     # The official account (ADR-0215 §2). Tests run first; migrations are
     # applied before the deploy so new code never meets an old schema.
     # Secrets (BETTER_AUTH_SECRETS, provider credentials) are set once per
     # environment with `wrangler secret put`; see services/identity-server/README.md.
+    # Runs after the sync Worker when both deploy (its SYNC_ADMIN binding), and
+    # on its own when only the identity Worker is selected.
     if: >
+      always() &&
       needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
+      contains(fromJSON('["success","skipped"]'), needs.deploy-sync-worker.result) &&
       contains(fromJSON('["all","workers","identity-worker"]'), inputs.target)
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -513,6 +559,7 @@ jobs:
         deploy-share-worker,
         deploy-status-worker,
         deploy-identity-worker,
+        deploy-sync-worker,
         deploy-signaling-fly,
         deploy-share-fly,
         deploy-docs,
@@ -532,6 +579,7 @@ jobs:
             echo "| Worker — share | ${{ needs.deploy-share-worker.result }} |"
             echo "| Worker — status | ${{ needs.deploy-status-worker.result }} |"
             echo "| Worker — identity | ${{ needs.deploy-identity-worker.result }} |"
+            echo "| Worker — sync | ${{ needs.deploy-sync-worker.result }} |"
             echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
             echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
             echo "| Pages — docs | ${{ needs.deploy-docs.result }} |"

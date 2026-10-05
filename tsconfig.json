@@ -184,6 +184,7 @@
     "mobile",
     "sidecar",
     "services/share-server",
+    "services/sync-server",
     "services/status-server",
     "out",
     ".next",

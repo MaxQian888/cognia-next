@@ -147,6 +147,8 @@ const baseTestPathIgnorePatterns = [
   // The official account's identity Worker (ADR-0215) is a standalone Vitest
   // package (workerd + D1) with its own lockfile.
   "/services/identity-server/",
+  // Account sync's Worker (ADR-0215 phase 2): standalone Vitest (workerd) with its own lockfile.
+  "/services/sync-server/",
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",

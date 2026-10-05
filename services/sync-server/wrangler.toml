@@ -1,0 +1,85 @@
+# Cloudflare Worker for Cognia account sync (ADR-0215 phase 2): the device
+# registry, epoch-key envelopes and device enrollment, one SQLite Durable
+# Object per account space. Operator guide: ./README.md.
+#
+# Dev:     pnpm dev                 (local DO; JWKS from the dev identity Worker over HTTP)
+# Test:    pnpm test                (workerd via vitest-pool-workers)
+# Build:   pnpm build               (dry-run bundle into dist/)
+# Deploy:  pnpm deploy:staging      (staging)
+#          pnpm deploy              (production)
+#
+# Top level is production (sync.cognia.cn). No secrets: the Worker trusts
+# access tokens signed by this environment's identity Worker, whose JWKS it
+# reads through the IDENTITY service binding.
+name = "cognia-sync"
+main = "src/index.ts"
+compatibility_date = "2026-08-20"
+workers_dev = false
+preview_urls = false
+
+routes = [{ pattern = "sync.cognia.cn", custom_domain = true }]
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "SYNC_SPACE"
+class_name = "SyncSpace"
+
+# Keep every migration tag forever.
+[[migrations]]
+tag = "sync-space-v1"
+new_sqlite_classes = ["SyncSpace"]
+
+[[services]]
+binding = "IDENTITY"
+service = "cognia-identity"
+
+[vars]
+SERVICE_ENV = "production"
+ISSUER = "https://id.cognia.cn/api/auth"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "https://app.cognia.cn"
+
+[env.staging]
+name = "cognia-sync-staging"
+routes = [{ pattern = "sync-staging.cognia.cn", custom_domain = true }]
+[[env.staging.durable_objects.bindings]]
+name = "SYNC_SPACE"
+class_name = "SyncSpace"
+[[env.staging.services]]
+binding = "IDENTITY"
+service = "cognia-identity-staging"
+[env.staging.vars]
+SERVICE_ENV = "staging"
+ISSUER = "https://id-staging.cognia.cn/api/auth"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "https://app-staging.cognia.cn,http://localhost:3000"
+
+[env.dev]
+name = "cognia-sync-dev"
+routes = []
+[[env.dev.durable_objects.bindings]]
+name = "SYNC_SPACE"
+class_name = "SyncSpace"
+[env.dev.vars]
+SERVICE_ENV = "dev"
+ISSUER = "http://localhost:8787/api/auth"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "http://localhost:3000"
+
+# Used only by vitest (vitest.config.ts), which serves the IDENTITY binding.
+[env.test]
+name = "cognia-sync-test"
+routes = []
+[[env.test.durable_objects.bindings]]
+name = "SYNC_SPACE"
+class_name = "SyncSpace"
+[[env.test.services]]
+binding = "IDENTITY"
+service = "cognia-identity-test"
+[env.test.vars]
+SERVICE_ENV = "test"
+ISSUER = "https://id.test/api/auth"
+SYNC_AUDIENCE = "https://sync.cognia.cn"
+WEB_ORIGINS = "https://app.test"

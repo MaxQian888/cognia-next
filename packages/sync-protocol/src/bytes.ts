@@ -1,7 +1,8 @@
 /** Byte helpers shared by every protocol module. */
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder("utf-8", { fatal: true })
+// `ignoreBOM` spelled out: the Workers type definitions require it.
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false })
 
 export function utf8(value: string): Uint8Array {
   return encoder.encode(value)
@@ -90,5 +91,5 @@ export function fromBase64UrlExact(value: unknown, length: number, what: string)
 }
 
 export function randomBytes(length: number): Uint8Array {
-  return globalThis.crypto.getRandomValues(new Uint8Array(length))
+  return crypto.getRandomValues(new Uint8Array(length))
 }
