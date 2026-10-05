@@ -1358,6 +1358,8 @@ importers:
 
   packages/security-findings: {}
 
+  packages/sync-protocol: {}
+
   packages/time: {}
 
   packages/transformers-runtime:

@@ -206,6 +206,7 @@ const projectCommon: Config = {
     "^@cognia/agent-trace(.*)$": "<rootDir>/packages/agent-trace/src$1",
     "^@cognia/primitives(.*)$": "<rootDir>/packages/primitives/src$1",
     "^@cognia/time(.*)$": "<rootDir>/packages/time/src$1",
+    "^@cognia/sync-protocol(.*)$": "<rootDir>/packages/sync-protocol/src$1",
     "^@cognia/latex(.*)$": "<rootDir>/packages/latex/src$1",
     "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
     "^@cognia/plugin-sdk$": "<rootDir>/packages/plugin-sdk/src/index.ts",

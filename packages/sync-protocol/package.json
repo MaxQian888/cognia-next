@@ -1,0 +1,25 @@
+{
+  "name": "@cognia/sync-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Account Sync Protocol v1 (ADR-0215): the encoding, ids, registry rules, approval code and device proof that the Cognia client and the sync Worker share. Dependency-free; WebCrypto only.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

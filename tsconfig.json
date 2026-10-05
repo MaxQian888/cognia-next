@@ -55,6 +55,8 @@
       "@cognia/primitives/*": ["./packages/primitives/src/*"],
       "@cognia/time": ["./packages/time/src/index.ts"],
       "@cognia/time/*": ["./packages/time/src/*"],
+      "@cognia/sync-protocol": ["./packages/sync-protocol/src/index.ts"],
+      "@cognia/sync-protocol/*": ["./packages/sync-protocol/src/*"],
       "@cognia/latex": ["./packages/latex/src/index.ts"],
       "@cognia/latex/*": ["./packages/latex/src/*"],
       "@cognia/mermaid": ["./packages/mermaid/src/index.ts"],
