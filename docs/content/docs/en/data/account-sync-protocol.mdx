@@ -45,110 +45,245 @@ the repo already uses (`p256`, `hkdf`, `aes-gcm`).
 
 | Id | Form |
 | -- | ---- |
-| `accountKey` | `base64url(SHA-256(iss ‖ 0x00 ‖ sub))`. The DO is `idFromName(accountKey)`. IdP-agnostic: official IdP and self-hosted Logto both work. |
-| `deviceId` | `dev_` + 26-char UUIDv7 (Crockford base32) |
+| `spaceId` | `base64url(SHA-256(label(space) ‖ 0x00 ‖ iss ‖ 0x00 ‖ sub))`. The DO is `idFromName(spaceId)`. Bound to the issuer, so staging, production and a self-hosted issuer never share a space. |
+| `deviceId` | `dev_` + 26 Crockford-base32 characters of 16 CSPRNG bytes (`^dev_[0-9A-HJKMNP-TV-Z]{26}$`) |
+| `requestId` | `req_` + the same 26-character form |
 | `epoch` | unsigned integer, starts at 1 |
-| `serverSeq` | unsigned 53-bit integer, assigned by the DO, gapless per account |
-| `deviceSeq` | unsigned integer, per device, starts at 1, gapless |
-| `opId` | `(deviceId, deviceSeq)` |
-| Row ids (inside ciphertext) | UUIDv7 for new rows; existing ids kept verbatim |
+| `entryHash` | `SHA-256(label(entry-hash) ‖ 0x00 ‖ JCS(entry))`, over the entry **without** its signatures (an ECDSA signature can be re-written as `(r, n−s)` without the key, so it must never feed a hash) |
+| `genesisHash` | `entryHash` of registry entry 0 |
+| `serverSeq` | unsigned 53-bit integer, assigned by the DO, gapless per account (phase 3) |
+| `deviceSeq` | unsigned integer, per device, starts at 1, gapless (phase 3) |
+| `opId` | `(deviceId, deviceSeq)` (phase 3) |
+| Row ids (inside ciphertext) | UUIDv7 for new rows; existing ids kept verbatim (phase 3) |
+
+Canonical encoding everywhere a hash or signature covers structured data is
+RFC 8785 JCS. Binary values inside JCS are base64url without padding; numbers
+are integers below 2^53. Every hash, signature and HKDF `info` below is over
+`utf8(label) ‖ 0x00 ‖ bytes`.
 
 ## 3. Keys
 
 ### 3.1 Device keys
 
-Each device generates, non-extractable where the shell allows:
+Each device generates:
 
 - `signKey`: ECDSA P-256.
 - `encKey`: ECDH P-256 (HPKE recipient key).
 
-They are distinct from the companion P-256 ES256 key (ADR-0021/0059) so that
-revoking sync access never breaks pairing and vice versa.
+Public keys travel as raw uncompressed points (65 bytes, base64url), the form
+HPKE serializes. They are distinct from the companion P-256 ES256 key
+(ADR-0021/0059) so that revoking sync access never breaks pairing and vice
+versa. Locally both private keys are a JWK in the LocalProfile vault
+(`lib/runtime/browser-vault.ts`) and are used through non-extractable
+re-imports.
 
 ### 3.2 Recovery key
 
-- 128 random bits, displayed as 26 Crockford-base32 characters in groups of
-  four (`XXXX-XXXX-…-XX`), matching the existing recovery-key display.
-- `recoverySeed = HKDF(ikm = recoveryKey, salt = accountKey, info = label(recovery))`, 32 bytes.
-- `recoveryEncKey` = the P-256 private scalar derived from `recoverySeed` by
-  RFC 9180 `DeriveKeyPair`. Only `recoveryEncPub` is ever uploaded.
-- Because sealing uses the public key, any device can wrap a new epoch key for
-  recovery without knowing the recovery key.
+- `rk`: 128 random bits, displayed as 26 Crockford-base32 characters,
+  `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX` (the last character carries two zero
+  bits). Parsing ignores case and hyphens/spaces and maps `I`/`L` → `1`, `O` → `0`.
+- `seed = HKDF-SHA256(ikm = rk, salt = utf8(spaceId), info = label(recovery), L = 32)`.
+- `encIkm = HKDF-Expand(seed, label(recovery-enc), 32)`,
+  `signIkm = HKDF-Expand(seed, label(recovery-sign), 32)`.
+- Each becomes a P-256 key pair by RFC 9180 §7.1.3 `DeriveKeyPair`
+  (DHKEM(P-256), bitmask `0xff`, candidate counter): `recoveryEnc` (ECDH, the
+  HPKE recipient) and `recoverySign` (ECDSA). Only the public halves are ever
+  uploaded.
+- Any device can seal a new epoch key to `recoveryEncPub` without knowing `rk`.
+  `recoverySign` lets the recovery-key holder add a device when no other
+  device is at hand, and countersigns every change of the recovery keys, so
+  nobody else (the server included) can set them.
 
 ### 3.3 Epoch keys
 
 - `SK_e`: random 256-bit sync key for epoch `e`.
-- Stored on the server only sealed: one HPKE envelope per active device
-  (`encPub`) and one for `recoveryEncPub`. `info = label(epoch) ‖ accountKey ‖ e`.
-- Key chain: when epoch `e+1` starts, `SK_e` is AES-GCM-wrapped under
-  `SK_{e+1}` (`AAD = label(chain) ‖ accountKey ‖ e`) and stored. Holding the
-  current key therefore unlocks all history.
-- Subkeys: `HKDF(SK_e, info = label(<purpose>))` for `op`, `snap`, `blob-id`,
-  `res-id`, `name` (device display names).
-- Locally, a device keeps the key chain wrapped under its LocalProfile vault
-  master key (`lib/runtime/browser-vault.ts`) as a vault secret.
+- Subkeys: `HKDF(SK_e, salt = utf8(spaceId), info = label(<purpose>))`:
+  - `commit` → `keyCommit_e = HMAC-SHA256(commitKey, JCS({spaceId, epoch: e}))`,
+    published in the signed registry entry that starts the epoch;
+  - `chain` → `prevWrap_e = AES-256-GCM(chainKey, nonce, SK_{e-1}, AAD = label(chain) ‖ 0x00 ‖ JCS({spaceId, epoch: e-1}))`,
+    published in the same entry, so the current key opens all history;
+  - `name` → device display names (`nameCt`, §4);
+  - phase 3 adds `op`, `snap`, `blob-id`, `res-id`.
+- Stored on the server only sealed: one HPKE base-mode envelope per active
+  device and one for `recoveryEncPub`, `info = label(epoch-envelope)`,
+  `AAD = JCS({v: 1, spaceId, epoch, recipient, recipientEncPub})`.
+- A device uses an envelope only for the chain's **current** epoch and only if
+  the opened key matches that epoch's signed `keyCommit`. Base-mode HPKE does
+  not authenticate the sealer; the commitment does.
+- Locally, a device keeps the key chain as a vault secret.
 
 ### 3.4 Epoch rotation triggers
 
-- A device is revoked.
-- The recovery key is regenerated (old `recoveryEncPub` envelope deleted).
+- A device is revoked (the revoke entry starts the new epoch).
+- The recovery key is used to add a device.
+- The recovery key is regenerated (old recovery envelope deleted).
 - Explicit "rotate keys" by the user.
+
+Each rotation deletes the previous epoch's envelopes; history stays reachable
+through the signed `prevWrap` chain.
 
 ## 4. Device registry
 
-Each entry is a signed record:
+An append-only hash chain. Each element is `{entry, sigs: [{signer, sig}]}`,
+where `signer` is a `deviceId` or `"recovery"` and `sig` is ECDSA over
+`label(entry) ‖ 0x00 ‖ JCS(entry)`.
 
 ```
-DeviceRecord {
-  deviceId, signPub, encPub,           // SPKI DER, base64url
-  platform: "desktop"|"mobile"|"web"|"headless",
-  nameCt,                              // display name, AES-GCM under name subkey
-  status: "active"|"revoked",
-  addedAt, addedBy,                    // addedBy = approving deviceId, or "self" for the genesis device, or "recovery"
-  revokedAt?, revokedBy?, wipe?: bool,
-  sig                                  // by addedBy (or revokedBy) over canonical(record minus sig)
-}
+entry = { v: 1, spaceId, seq, prev, type, at, ... }     // prev = null at seq 0, else the previous entryHash
+DeviceDescriptor = { deviceId, platform: "desktop"|"mobile"|"web", signPub, encPub, nameCt: { epoch, nonce, ct } }
+EpochBlock       = { epoch, keyCommit, prevWrap?: { nonce, ct } }   // prevWrap required when epoch > 1
+RecoveryKeys     = { signPub, encPub }
 ```
 
-- Genesis: the first device signs its own record. Clients pin the genesis
-  `signPub` at enrollment (shown as a fingerprint in the device console).
-- A client accepts a record only if its signer is an accepted active device
-  at the time of signing, or it is the pinned genesis, or `addedBy = recovery`
-  and the record carries a recovery proof (§5.3). The server cannot inject a
-  device.
+| type | Fields | Signed by | Effect |
+| ---- | ------ | --------- | ------ |
+| `genesis` (seq 0) | `device`, `recovery`, `epoch` (1) | the device **and** `recovery` | first device; pins the recovery keys |
+| `add-device` | `device`, `via: "approval"`, `requestId`, `transcriptHash` | the approving active device | adds a device in the current epoch |
+| `add-device` | `device`, `via: "recovery"` | `recovery` **and** the new device | adds a device; must be followed in the same batch by an `epoch-rotate` from it |
+| `revoke-device` | `deviceId`, `epoch` (n+1) | an active device other than the target | revokes; new epoch |
+| `recovery-rotate` | `recovery` (new), `epoch` (n+1) | an active device **and** the new `recovery` | replaces the recovery keys; new epoch |
+| `epoch-rotate` | `epoch` (n+1) | an active device | new epoch |
+
+`platform: "headless"` is reserved; phase 2 refuses it (a headless host has no
+vault yet).
+
+`validateAppend` (shared by the client and the Worker): `seq` = head + 1,
+`prev` = head hash; every signer active in the state before the entry; a
+`deviceId`, `signPub` or `encPub` is never reused (revoked ones included); no
+self-revoke; the last active device cannot be revoked; at most 32 active
+devices; an entry is at most 8 KiB; an epoch block's `epoch` = current + 1.
+
+`nameCt` is the display name under the `name` subkey of `nameCt.epoch`:
+`AES-256-GCM(nameKey, nonce, pad64(utf8(name)), AAD = JCS({spaceId, deviceId, epoch}))`.
+
+### 4.1 Client verification (`foldRegistry`)
+
+1. Entry 0 is a `genesis` whose two signatures verify. A device that already
+   has a pin requires `genesisHash` = the pinned one. A device without a pin
+   trusts it only through the approval transcript (§5.2) or a recovery-key
+   match (§5.3).
+2. Every later entry passes `validateAppend`.
+3. **Rollback and fork:** the vault pin is `{genesisHash, seq, hash, epoch}`. A
+   fetched chain must contain `entries[pin.seq]` with `hash = pin.hash`. A
+   shorter chain, or another hash there, is the error "the server returned an
+   older or different device list": nothing is written or deleted. The pin
+   only moves forward.
+4. **Epochs:** open the own envelope only for the current epoch, check
+   `keyCommit`; walk `prevWrap` back to the oldest epoch not yet held, checking
+   each unwrapped key against its own `keyCommit`.
+5. Every public key a device seals to or trusts comes from the folded chain,
+   never from another server response.
+
+### 4.2 Residual risk
+
+The server could show different, individually valid chains to different
+devices (equivocation). The device list shows a "device list fingerprint"
+(the head hash) that a person can compare across devices; phase 3 ops carry
+the signer's head.
 
 ## 5. Enrollment
 
+Requests that act as a device carry
+`Cognia-Device-Proof: b64url(JCS({v: 1, spaceId, deviceId, method, path, bodySha256, iat})) "." b64url(sig)`,
+signed by the device's `signKey` (`label(device-proof)`), accepted for
+`|iat − now| ≤ 120 s`. Every response carries `Cognia-Server-Time` so a client
+can correct its clock.
+
 ### 5.1 Genesis (first device)
 
-1. Generate device keys, recovery key, `SK_1`.
-2. Recovery confirmation gate (ADR Q13): the user retypes four positions or
-   downloads the recovery kit; upload is blocked until done.
-3. `POST /v1/enroll/genesis` with the genesis record, sealed `SK_1` envelopes
-   (self + recovery), `recoveryEncPub`. Rejected if the account already has a
-   genesis.
-4. Initial data: the device writes a snapshot at `serverSeq = 0` (§8) rather
-   than one op per existing row.
+1. `GET /v1/space` answers `empty`.
+2. Generate device keys, `rk`, `SK_1`.
+3. Recovery confirmation gate: the user retypes four randomly chosen
+   characters, or downloads the recovery kit and confirms storing it. Nothing
+   uploads before.
+4. `POST /v1/space/genesis` with the genesis entry (two signatures) and two
+   envelopes (self, recovery). `409 space_exists` means another device won the
+   race; the client switches to §5.2.
+5. Only after the server confirms does the device store its keys, the key
+   chain and the pin.
 
 ### 5.2 Approval by an existing device
 
-1. New device: `POST /v1/enroll/requests` `{deviceId, signPub, encPub, platform, nonce}` → `{requestId, expiresAt}` (15 min).
-2. The DO notifies active devices over their sockets.
-3. Both sides display `SAS = decimal(HKDF(SHA-256(requestId ‖ signPub ‖ encPub ‖ nonce), info = label(sas)))[0..6]`.
-4. The approver, after the user confirms the SAS matches, posts the signed
-   `DeviceRecord` and an HPKE envelope of the current `SK_e` to the new
-   `encPub`.
-5. Expired or denied requests are deleted.
+Commit-then-reveal, so the server cannot grind the six-digit code against
+substituted keys.
+
+1. New device R fetches and folds the registry; its `genesisHash` (`G_R`) is
+   so far unverified.
+2. R generates keys and `nonceR` (32 bytes),
+   `commit = SHA-256(label(sas-commit) ‖ 0x00 ‖ nonceR)`, and seals its display
+   name to each active device (`info = label(request-name)`,
+   `AAD = JCS({spaceId, deviceId, recipient})`).
+3. `POST /v1/enroll/requests` `{deviceId, platform, signPub, encPub, commit, names, pop}`
+   (`pop` = signature by `signKey` over the body, `label(enroll-request)`)
+   → `{requestId, expiresAt}` (15 min).
+4. Active devices see it in their poll (§5.6) and raise a notification.
+5. The approver A, when the person opens it, generates `nonceA`, keeps it in
+   memory and posts it. The server accepts one approver per request.
+6. R sees `nonceA` and posts `nonceR`; the server checks it against `commit`.
+7. Both compute, each from its own values,
+   `T = JCS({v: 1, spaceId, genesisHash, requestId, deviceId, platform, signPub, encPub, commit, approverDeviceId})`,
+   `code = uint64be(HKDF-SHA256(ikm = nonceR ‖ nonceA, salt = SHA-256(label(sas) ‖ 0x00 ‖ T), info = label(sas-digits), L = 8)) mod 10^6`,
+   shown as `123 456`. A never re-reads `nonceA` from the server; R shows no
+   code before its reveal was accepted.
+8. When the person confirms the codes match, A appends
+   `add-device {via: "approval", requestId, transcriptHash: SHA-256(T)}` and an
+   envelope of `SK_e` for R.
+9. R fetches the chain and requires `genesisHash = G_R`, its own entry signed
+   by the active `approverDeviceId`, and `transcriptHash = SHA-256(T)`; then it
+   opens its envelope, checks `keyCommit` and stores everything.
+
+The server fixes the keys it shows A before A picks `nonceA`, and the nonce it
+shows R before R reveals `nonceR`; a substitution succeeds with probability
+10^-6 per visible attempt. A forged chain shown to R changes `genesisHash` and
+so the code.
 
 ### 5.3 Recovery
 
-1. New device derives `recoveryEncKey` from the typed recovery key, fetches the
-   recovery envelope, opens `SK_e`.
-2. Recovery proof: `HMAC(HKDF(SK_e, info = label(recovery-proof)), canonical(record))`.
-3. Posts its own record with `addedBy = "recovery"` plus the proof; clients
-   verify it with `SK_e`.
-4. Then rotates the epoch (a recovery use implies the recovery key was exposed
-   on a new device) and offers to regenerate the recovery key.
+1. Fold the chain; derive the recovery keys from the typed key; they must equal
+   the chain's current `recovery` keys ("this recovery key does not match this
+   account" otherwise).
+2. `GET /v1/envelopes/recovery`, open it, check `keyCommit`.
+3. Generate device keys and post one atomic batch: `add-device {via: "recovery"}`
+   (signed by `recovery` and the new device) followed by `epoch-rotate`
+   (signed by the new device) with envelopes for every active device, itself
+   and recovery.
+4. Offer to regenerate the recovery key (default yes). Other devices show
+   "a device joined with your recovery key".
+
+### 5.5 Revocation, regeneration, rotation
+
+- **Revoke:** `revoke-device` with the new epoch and envelopes for `(active − target) ∪ {recovery}`. The revoked device learns of it from `403 device_revoked`
+  and acts only after finding a validly signed revoke entry for its own id:
+  it deletes its device keys and key chain, keeps the pin, and records when and
+  by which device it was removed. An unverifiable 403 deletes nothing. (Locking
+  the profile and deleting synced secrets come with the secrets class, phase 5.)
+- **Regenerate the recovery key:** a new `rk` passes the confirmation gate,
+  then `recovery-rotate`; the server deletes the old recovery envelope.
+- **Rotate:** `epoch-rotate`.
+
+### 5.6 Phase-2 server API
+
+| Route | Auth | Purpose |
+| ----- | ---- | ------- |
+| `GET /v1/space` | bearer | `{state: empty \| ready, genesisHash?, head, epoch, protocolVersion}` |
+| `GET /v1/registry?after=N` | bearer | entries |
+| `POST /v1/space/genesis` | bearer | genesis; `409 space_exists` |
+| `GET /v1/envelopes/recovery` | bearer | current recovery envelope |
+| `POST /v1/enroll/requests` | bearer + `pop` | create (≤ 3 pending, ≤ 10 per hour) |
+| `GET /v1/enroll/requests/:id` | pending-device proof | state, approver nonce |
+| `POST /v1/enroll/requests/:id/reveal` | pending-device proof | `nonceR` |
+| `DELETE /v1/enroll/requests/:id` | pending-device proof | cancel |
+| `GET /v1/enroll/requests` | active-device proof | the poll (every 20 s while foregrounded) |
+| `POST /v1/enroll/requests/:id/nonce` | active-device proof | `nonceA`, once |
+| `POST /v1/enroll/requests/:id/deny` | active-device proof | `denied` or `mismatch` |
+| `GET /v1/envelopes/self` | active-device proof | current envelope |
+| `POST /v1/registry` | signing-device proof | atomic append of 1–2 entries + envelopes; `409 head_moved` |
+
+The server enforces `validateAppend`, complete envelope sets (exactly the
+active devices after the entry plus recovery, each `recipientEncPub` equal to
+the registry's key), request state and expiry, and refuses a revoked device on
+every proof route before reading anything. Bearer = the issuer's access token
+(`aud` = the sync API, `typ` = `at+jwt`, ES256, first-party client).
 
 ### 5.4 Joining with existing local data (ADR Q5)
 
@@ -161,6 +296,9 @@ user's choice:
 - **discard**: the local database is replaced from the latest snapshot + ops.
 
 ## 6. Sessions
+
+Phase 3. Phase 2 authenticates each request with the device proof of §5
+instead.
 
 1. `POST /v1/session` with `Authorization: Bearer <OIDC access token>` (aud =
    sync API) → `{challenge}`.
@@ -183,7 +321,7 @@ Op {
   nonce, ct,                 // ct padded to the next bucket (§7.4)
   sig
 }
-AAD    = label(op) ‖ accountKey ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
+AAD    = label(op) ‖ spaceId ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
 sigIn  = canonical(Op minus sig)
 ```
 
@@ -228,7 +366,7 @@ than the compaction floor → `410 {snapshot: <manifestId>}`.
 - Only the holder of the `compaction` lease (§11) writes snapshots.
 - Content: the materialized state at `upToSeq` (rows plus per-field clocks),
   chunked at 4 MiB, each chunk AES-GCM under the `snap` subkey with
-  `AAD = label(snap) ‖ accountKey ‖ snapshotId ‖ chunkIndex ‖ chunkCount`.
+  `AAD = label(snap) ‖ spaceId ‖ snapshotId ‖ chunkIndex ‖ chunkCount`.
 - `PUT /v1/snapshots/{snapshotId}/chunks/{i}` streams to the blob store under
   a random key; `POST /v1/snapshots/{snapshotId}` registers
   `{upToSeq, epoch, schemaVer, chunks: [{key, size, sha256}], sig}`.
@@ -296,7 +434,7 @@ POST /v1/leases/{resId}/release  {generation}
 | ------ | -------- | ------ |
 | Revoke device | `POST /v1/devices/{id}/revoke {wipe}` (signed record) | sockets closed; requests refused; revoker rotates the epoch |
 | Remove this device | self-revoke with `wipe: true`, then local deletion | |
-| Sign out | none (local) | outbox kept; resumes only for the same `accountKey` |
+| Sign out | none (local) | outbox kept; resumes only for the same `spaceId` |
 | Delete account | `POST /v1/account/deletion` → `{purgeAt: now + 7 d}`; `DELETE` cancels | DO alarm at `purgeAt` deletes DO storage, the blob prefix, and the IdP user; devices are told to unbind and keep local data as a plain local profile |
 
 ## 14. Quotas
@@ -315,7 +453,9 @@ the Phase 3 spike before relying on them.
 
 ## 16. Error codes
 
-`device_revoked`, `device_pending`, `seq_gap`, `epoch_stale` (client must fetch
+`device_revoked`, `device_pending`, `space_exists`, `space_empty`,
+`head_moved`, `invalid_entry`, `envelopes_incomplete`, `request_state`,
+`request_expired`, `too_many_requests`, `clock_skew`, `seq_gap`, `epoch_stale` (client must fetch
 the new epoch envelope), `client_too_old`, `snapshot_required`, `quota_blob`,
 `quota_readonly`, `lease_held`, `lease_lost`, `account_pending_deletion`.
 

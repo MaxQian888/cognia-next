@@ -36,90 +36,159 @@ ADR 记录"为什么"，本页记录"具体字节"。只要 §0 的不变量成�
 
 ## 2. 标识符
 
-| ID | 形式 |
-| -- | ---- |
-| `accountKey` | `base64url(SHA-256(iss ‖ 0x00 ‖ sub))`。Durable Object 为 `idFromName(accountKey)`。不绑定签发方：官方签发方和自托管 Logto 都适用。 |
-| `deviceId` | `dev_` + 26 字符的 UUIDv7（Crockford base32） |
+| 标识 | 形式 |
+| ---- | ---- |
+| `spaceId` | `base64url(SHA-256(label(space) ‖ 0x00 ‖ iss ‖ 0x00 ‖ sub))`。Durable Object 为 `idFromName(spaceId)`。与签发方绑定，所以 staging、生产和自托管签发方永远不会共用一个空间。 |
+| `deviceId` | `dev_` + 16 个 CSPRNG 字节的 26 位 Crockford base32（`^dev_[0-9A-HJKMNP-TV-Z]{26}$`） |
+| `requestId` | `req_` + 同样的 26 位形式 |
 | `epoch` | 无符号整数，从 1 开始 |
-| `serverSeq` | 无符号 53 位整数，由 DO 分配，每个账号内无间断 |
-| `deviceSeq` | 无符号整数，每台设备独立，从 1 开始，无间断 |
-| `opId` | `(deviceId, deviceSeq)` |
-| 行 ID（在密文内） | 新行用 UUIDv7；已有 ID 原样保留 |
+| `entryHash` | `SHA-256(label(entry-hash) ‖ 0x00 ‖ JCS(entry))`，对**不含**签名的条目计算（ECDSA 签名不需要私钥就能改写成 `(r, n−s)`，所以绝不能参与哈希） |
+| `genesisHash` | 登记表第 0 条的 `entryHash` |
+| `serverSeq` | 无符号 53 位整数，由 DO 分配，每个账号内无间隙（第 3 阶段） |
+| `deviceSeq` | 无符号整数，每台设备从 1 开始，无间隙（第 3 阶段） |
+| `opId` | `(deviceId, deviceSeq)`（第 3 阶段） |
+| 行 id（在密文内） | 新行用 UUIDv7；已有 id 原样保留（第 3 阶段） |
+
+凡是哈希或签名覆盖结构化数据的地方，规范编码都是 RFC 8785 JCS。JCS 里的二进制值用不带填充的 base64url；数字是小于 2^53 的整数。下文的每个哈希、签名和 HKDF `info` 都作用于 `utf8(label) ‖ 0x00 ‖ bytes`。
 
 ## 3. 密钥
 
 ### 3.1 设备密钥
 
-每台设备生成以下密钥（壳支持时设为不可导出）：
+每台设备生成：
 
 - `signKey`：ECDSA P-256。
 - `encKey`：ECDH P-256（HPKE 接收方密钥）。
 
-它们与伴随配对用的 P-256 ES256 密钥（ADR-0021/0059）分开，因此吊销同步权限不会影响配对，反之亦然。
+公钥以原始非压缩点（65 字节，base64url）传输，即 HPKE 的序列化形式。它们与配对用的 P-256 ES256 密钥（ADR-0021/0059）分开，吊销同步权限不会破坏配对，反之亦然。在本地，两把私钥以 JWK 形式存在本地配置文件的保险库里（`lib/runtime/browser-vault.ts`），使用时重新导入为不可导出的密钥。
 
 ### 3.2 恢复密钥
 
-- 128 位随机数，显示为 26 个 Crockford base32 字符，四个一组（`XXXX-XXXX-…-XX`），与现有恢复密钥的显示方式一致。
-- `recoverySeed = HKDF(ikm = recoveryKey, salt = accountKey, info = label(recovery))`，32 字节。
-- `recoveryEncKey` 是通过 RFC 9180 `DeriveKeyPair` 从 `recoverySeed` 派生的 P-256 私钥。只上传 `recoveryEncPub`。
-- 由于密封使用公钥，任何设备不需要知道恢复密钥就能把新纪元密钥封装给恢复公钥。
+- `rk`：128 个随机位，显示为 26 个 Crockford base32 字符，`XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX`（最后一个字符含两个零位）。解析时忽略大小写、连字符和空格，并把 `I`/`L` 视为 `1`、`O` 视为 `0`。
+- `seed = HKDF-SHA256(ikm = rk, salt = utf8(spaceId), info = label(recovery), L = 32)`。
+- `encIkm = HKDF-Expand(seed, label(recovery-enc), 32)`，`signIkm = HKDF-Expand(seed, label(recovery-sign), 32)`。
+- 两者分别按 RFC 9180 §7.1.3 `DeriveKeyPair`（DHKEM(P-256)，掩码 `0xff`，候选计数器）得到 P-256 密钥对：`recoveryEnc`（ECDH，HPKE 接收方）和 `recoverySign`（ECDSA）。只有公钥部分会上传。
+- 任何设备都能把新纪元密钥密封给 `recoveryEncPub`，无需知道 `rk`。`recoverySign` 让持有恢复密钥的人在手边没有其它设备时也能加入设备，并为恢复密钥的每次更换会签，所以除此之外没有人（包括服务器）能设置它们。
 
 ### 3.3 纪元密钥
 
 - `SK_e`：纪元 `e` 的随机 256 位同步密钥。
-- 服务器上只存密封后的形式：每台活跃设备（`encPub`）一个 HPKE 信封，`recoveryEncPub` 一个。`info = label(epoch) ‖ accountKey ‖ e`。
-- 密钥链：纪元 `e+1` 开始时，`SK_e` 用 `SK_{e+1}` 做 AES-GCM 包裹（`AAD = label(chain) ‖ accountKey ‖ e`）后存储。因此持有当前密钥即可解开全部历史。
-- 子密钥：`HKDF(SK_e, info = label(<用途>))`，用途包括 `op`、`snap`、`blob-id`、`res-id`、`name`（设备显示名）。
-- 在本地，设备把密钥链用其本地档案保险库主密钥（`lib/runtime/browser-vault.ts`）包裹后作为保险库机密保存。
+- 子密钥：`HKDF(SK_e, salt = utf8(spaceId), info = label(<用途>))`：
+  - `commit` → `keyCommit_e = HMAC-SHA256(commitKey, JCS({spaceId, epoch: e}))`，写在开启该纪元的签名条目里；
+  - `chain` → `prevWrap_e = AES-256-GCM(chainKey, nonce, SK_{e-1}, AAD = label(chain) ‖ 0x00 ‖ JCS({spaceId, epoch: e-1}))`，写在同一条目里，所以当前密钥能打开全部历史；
+  - `name` → 设备显示名（`nameCt`，见 §4）；
+  - 第 3 阶段再加 `op`、`snap`、`blob-id`、`res-id`。
+- 服务器上只存密封后的形式：每台活跃设备一个 HPKE base 模式信封，再加一个给 `recoveryEncPub` 的，`info = label(epoch-envelope)`，`AAD = JCS({v: 1, spaceId, epoch, recipient, recipientEncPub})`。
+- 设备只对登记表**当前**纪元使用信封，而且打开后的密钥必须与该纪元已签名的 `keyCommit` 一致。base 模式 HPKE 不认证封装者，认证靠这个承诺。
+- 在本地，设备把密钥链作为保险库机密保存。
 
 ### 3.4 纪元轮换的触发条件
 
-- 吊销一台设备。
-- 重新生成恢复密钥（删除旧的 `recoveryEncPub` 信封）。
-- 用户手动"轮换密钥"。
+- 吊销一台设备（吊销条目开启新纪元）。
+- 用恢复密钥加入设备。
+- 重新生成恢复密钥（旧的恢复信封被删除）。
+- 用户主动“轮换密钥”。
+
+每次轮换都删除上一纪元的信封；历史仍可通过已签名的 `prevWrap` 链访问。
 
 ## 4. 设备登记表
 
-每条记录都带签名：
+只增不改的哈希链。每个元素是 `{entry, sigs: [{signer, sig}]}`，`signer` 是一个 `deviceId` 或 `"recovery"`，`sig` 是对 `label(entry) ‖ 0x00 ‖ JCS(entry)` 的 ECDSA 签名。
 
 ```
-DeviceRecord {
-  deviceId, signPub, encPub,           // SPKI DER, base64url
-  platform: "desktop"|"mobile"|"web"|"headless",
-  nameCt,                              // display name, AES-GCM under name subkey
-  status: "active"|"revoked",
-  addedAt, addedBy,                    // addedBy = approving deviceId, or "self" for the genesis device, or "recovery"
-  revokedAt?, revokedBy?, wipe?: bool,
-  sig                                  // by addedBy (or revokedBy) over canonical(record minus sig)
-}
+entry = { v: 1, spaceId, seq, prev, type, at, ... }     // seq 0 时 prev = null，否则为上一条的 entryHash
+DeviceDescriptor = { deviceId, platform: "desktop"|"mobile"|"web", signPub, encPub, nameCt: { epoch, nonce, ct } }
+EpochBlock       = { epoch, keyCommit, prevWrap?: { nonce, ct } }   // epoch > 1 时必须有 prevWrap
+RecoveryKeys     = { signPub, encPub }
 ```
 
-- 创世：第一台设备为自己的记录签名。客户端在加入时固定创世设备的 `signPub`（在设备控制台显示为指纹）。
-- 客户端只接受满足以下任一条件的记录：签名者在签名时是已接受的活跃设备；签名者是固定的创世设备；`addedBy = recovery` 且附带恢复证明（§5.3）。服务器无法塞入设备。
+| 类型 | 字段 | 签名者 | 效果 |
+| ---- | ---- | ------ | ---- |
+| `genesis`（seq 0） | `device`、`recovery`、`epoch`（1） | 设备本身**和** `recovery` | 第一台设备；固定恢复密钥 |
+| `add-device` | `device`、`via: "approval"`、`requestId`、`transcriptHash` | 批准的活跃设备 | 在当前纪元加入设备 |
+| `add-device` | `device`、`via: "recovery"` | `recovery` **和**新设备 | 加入设备；同一批次中必须紧跟它发出的 `epoch-rotate` |
+| `revoke-device` | `deviceId`、`epoch`（n+1） | 目标以外的活跃设备 | 吊销；新纪元 |
+| `recovery-rotate` | `recovery`（新）、`epoch`（n+1） | 活跃设备**和**新的 `recovery` | 更换恢复密钥；新纪元 |
+| `epoch-rotate` | `epoch`（n+1） | 活跃设备 | 新纪元 |
+
+`platform: "headless"` 已保留；第 2 阶段拒绝它（无头主机还没有保险库）。
+
+`validateAppend`（客户端与 Worker 共用）：`seq` = 头部 + 1，`prev` = 头部哈希；每个签名者在该条目之前处于活跃状态；`deviceId`、`signPub`、`encPub` 永不复用（含已吊销的）；不能吊销自己；不能吊销最后一台活跃设备；最多 32 台活跃设备；每条最多 8 KiB；纪元块的 `epoch` = 当前 + 1。
+
+`nameCt` 是用 `nameCt.epoch` 的 `name` 子密钥加密的显示名：`AES-256-GCM(nameKey, nonce, pad64(utf8(name)), AAD = JCS({spaceId, deviceId, epoch}))`。
+
+### 4.1 客户端校验（`foldRegistry`）
+
+1. 第 0 条是两个签名都通过的 `genesis`。已有固定值的设备要求 `genesisHash` 等于固定值。没有固定值的设备只通过批准记录（§5.2）或恢复密钥匹配（§5.3）信任它。
+2. 之后每一条都通过 `validateAppend`。
+3. **回滚与分叉：**保险库里的固定值是 `{genesisHash, seq, hash, epoch}`。取回的链必须包含 `entries[pin.seq]` 且其 `hash = pin.hash`。更短的链，或该位置哈希不同，即报错“服务器返回了更旧或不同的设备列表”：不写入、不删除任何东西。固定值只会前移。
+4. **纪元：**只对当前纪元打开自己的信封并核对 `keyCommit`；沿 `prevWrap` 回溯到尚未持有的最早纪元，每个解包出的密钥都与它自己的 `keyCommit` 核对。
+5. 设备密封所用或信任的每把公钥都来自折叠后的登记表，绝不来自服务器的其它响应。
+
+### 4.2 剩余风险
+
+服务器可能向不同设备展示不同但各自有效的链（分裂视图）。设备列表显示“设备列表指纹”（头部哈希），用户可在设备之间比对；第 3 阶段的操作会携带签名者的头部。
 
 ## 5. 加入
 
+以设备身份发出的请求携带 `Cognia-Device-Proof: b64url(JCS({v: 1, spaceId, deviceId, method, path, bodySha256, iat})) "." b64url(sig)`，由设备的 `signKey` 签名（`label(device-proof)`），在 `|iat − now| ≤ 120 s` 内有效。每个响应都带 `Cognia-Server-Time`，客户端据此校正时钟。
+
 ### 5.1 创世（第一台设备）
 
-1. 生成设备密钥、恢复密钥和 `SK_1`。
-2. 恢复确认门（ADR Q13）：用户重新输入其中 4 个位置，或下载恢复工具包；完成前禁止上传。
-3. `POST /v1/enroll/genesis`，携带创世记录、密封的 `SK_1` 信封（本机 + 恢复）和 `recoveryEncPub`。账号已有创世设备时拒绝。
-4. 初始数据：设备在 `serverSeq = 0` 处写一个快照（§8），而不是为每一行写一个操作。
+1. `GET /v1/space` 返回 `empty`。
+2. 生成设备密钥、`rk`、`SK_1`。
+3. 恢复确认关卡：用户重新输入随机挑选的四个字符，或下载恢复包并确认已保存。完成之前什么都不上传。
+4. `POST /v1/space/genesis`，带创世条目（两个签名）和两个信封（自己、恢复）。`409 space_exists` 表示另一台设备抢先了；客户端改走 §5.2。
+5. 服务器确认之后，设备才保存自己的密钥、密钥链和固定值。
 
 ### 5.2 由已有设备批准
 
-1. 新设备：`POST /v1/enroll/requests` `{deviceId, signPub, encPub, platform, nonce}` → `{requestId, expiresAt}`（15 分钟）。
-2. DO 通过连接通知所有活跃设备。
-3. 双方都显示 `SAS = decimal(HKDF(SHA-256(requestId ‖ signPub ‖ encPub ‖ nonce), info = label(sas)))[0..6]`。
-4. 用户确认 SAS 一致后，批准方提交签名的 `DeviceRecord`，以及一个把当前 `SK_e` 密封给新 `encPub` 的 HPKE 信封。
-5. 过期或被拒绝的请求会被删除。
+先承诺后揭示，服务器无法针对替换的密钥穷举六位码。
+
+1. 新设备 R 获取并折叠登记表；它的 `genesisHash`（`G_R`）此时尚未验证。
+2. R 生成密钥和 `nonceR`（32 字节），`commit = SHA-256(label(sas-commit) ‖ 0x00 ‖ nonceR)`，并把显示名密封给每台活跃设备（`info = label(request-name)`，`AAD = JCS({spaceId, deviceId, recipient})`）。
+3. `POST /v1/enroll/requests` `{deviceId, platform, signPub, encPub, commit, names, pop}`（`pop` = `signKey` 对请求体的签名，`label(enroll-request)`）→ `{requestId, expiresAt}`（15 分钟）。
+4. 活跃设备在轮询（§5.6）中看到请求并发出通知。
+5. 用户在批准方 A 上打开请求时，A 生成 `nonceA`，只保存在内存中并提交。服务器每个请求只接受一个批准方。
+6. R 看到 `nonceA` 后提交 `nonceR`；服务器用 `commit` 核对。
+7. 双方各自用自己的值计算 `T = JCS({v: 1, spaceId, genesisHash, requestId, deviceId, platform, signPub, encPub, commit, approverDeviceId})`，`code = uint64be(HKDF-SHA256(ikm = nonceR ‖ nonceA, salt = SHA-256(label(sas) ‖ 0x00 ‖ T), info = label(sas-digits), L = 8)) mod 10^6`，显示为 `123 456`。A 绝不从服务器重新读取 `nonceA`；R 在揭示被接受之前不显示码。
+8. 用户确认两边的码一致后，A 追加 `add-device {via: "approval", requestId, transcriptHash: SHA-256(T)}`，并为 R 附上 `SK_e` 的信封。
+9. R 获取登记表，要求 `genesisHash = G_R`、自己的条目由活跃的 `approverDeviceId` 签名、`transcriptHash = SHA-256(T)`；然后打开信封、核对 `keyCommit` 并保存。
+
+服务器必须在 A 选定 `nonceA` 之前确定给 A 看的密钥，在 R 揭示 `nonceR` 之前确定给 R 看的随机数；每次可见的尝试替换成功的概率为 10^-6。给 R 看伪造的链会改变 `genesisHash`，从而改变码。
 
 ### 5.3 恢复
 
-1. 新设备从输入的恢复密钥派生 `recoveryEncKey`，取回恢复信封，打开 `SK_e`。
-2. 恢复证明：`HMAC(HKDF(SK_e, info = label(recovery-proof)), canonical(record))`。
-3. 提交自己的记录，`addedBy = "recovery"`，并附上证明；客户端用 `SK_e` 校验。
-4. 随后轮换纪元（使用恢复密钥意味着恢复密钥已暴露在新设备上），并提示重新生成恢复密钥。
+1. 折叠登记表；从输入的恢复密钥派生恢复密钥对，必须与登记表当前的 `recovery` 一致（否则提示“这个恢复密钥与此账号不匹配”）。
+2. `GET /v1/envelopes/recovery`，打开并核对 `keyCommit`。
+3. 生成设备密钥并提交一个原子批次：`add-device {via: "recovery"}`（由 `recovery` 和新设备签名），紧跟 `epoch-rotate`（由新设备签名），附上给每台活跃设备、自己和恢复的信封。
+4. 提议重新生成恢复密钥（默认是）。其它设备显示“有设备用你的恢复密钥加入了”。
+
+### 5.5 吊销、重新生成、轮换
+
+- **吊销：**`revoke-device` 带新纪元，信封给`(active − target) ∪ {recovery}`。被吊销的设备从 `403 device_revoked` 得知，但只有在找到针对自己 id 的有效签名吊销条目之后才行动：删除设备密钥和密钥链，保留固定值，并记录何时被哪台设备移除。无法验证的 403 不删除任何东西。（锁定配置文件和删除已同步的机密随机密类在第 5 阶段到来。）
+- **重新生成恢复密钥：**新的 `rk` 通过确认关卡后，追加 `recovery-rotate`；服务器删除旧的恢复信封。
+- **轮换：**`epoch-rotate`。
+
+### 5.6 第 2 阶段服务器 API
+
+| 路由 | 认证 | 用途 |
+| ---- | ---- | ---- |
+| `GET /v1/space` | bearer | `{state: empty \| ready, genesisHash?, head, epoch, protocolVersion}` |
+| `GET /v1/registry?after=N` | bearer | 条目 |
+| `POST /v1/space/genesis` | bearer | 创世；`409 space_exists` |
+| `GET /v1/envelopes/recovery` | bearer | 当前恢复信封 |
+| `POST /v1/enroll/requests` | bearer + `pop` | 创建（待处理 ≤ 3，每小时 ≤ 10） |
+| `GET /v1/enroll/requests/:id` | 待加入设备证明 | 状态、批准方随机数 |
+| `POST /v1/enroll/requests/:id/reveal` | 待加入设备证明 | `nonceR` |
+| `DELETE /v1/enroll/requests/:id` | 待加入设备证明 | 取消 |
+| `GET /v1/enroll/requests` | 活跃设备证明 | 轮询（前台时每 20 秒） |
+| `POST /v1/enroll/requests/:id/nonce` | 活跃设备证明 | `nonceA`，只一次 |
+| `POST /v1/enroll/requests/:id/deny` | 活跃设备证明 | `denied` 或 `mismatch` |
+| `GET /v1/envelopes/self` | 活跃设备证明 | 当前信封 |
+| `POST /v1/registry` | 签名设备证明 | 原子追加 1–2 条及信封；`409 head_moved` |
+
+服务器强制执行 `validateAppend`、完整的信封集合（恰好是该条目之后的活跃设备加恢复，每个 `recipientEncPub` 与登记表中的密钥一致）、请求状态与过期，并在每条证明路由上先拒绝已吊销设备，再读取任何内容。Bearer 是签发方的访问令牌（`aud` = 同步 API，`typ` = `at+jwt`，ES256，第一方客户端）。
 
 ### 5.4 带着本地数据加入（ADR Q5）
 
@@ -129,6 +198,8 @@ DeviceRecord {
 - **丢弃**：用最新快照加后续操作替换本地数据库。
 
 ## 6. 会话
+
+第 3 阶段。第 2 阶段改用 §5 的设备证明逐个认证请求。
 
 1. `POST /v1/session`，带 `Authorization: Bearer <OIDC access token>`（aud = 同步 API）→ `{challenge}`。
 2. `POST /v1/session` `{deviceId, challenge, sig}` → `{sessionToken, expiresIn: 900}`。已吊销设备 → `403 {code: "device_revoked", wipe}`。
@@ -147,7 +218,7 @@ Op {
   nonce, ct,                 // ct padded to the next bucket (§7.4)
   sig
 }
-AAD    = label(op) ‖ accountKey ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
+AAD    = label(op) ‖ spaceId ‖ cls ‖ schemaVer ‖ epoch ‖ deviceId ‖ deviceSeq
 sigIn  = canonical(Op minus sig)
 ```
 
@@ -185,7 +256,7 @@ sigIn  = canonical(Op minus sig)
 ## 8. 快照
 
 - 只有持有 `compaction` 租约（§11）的设备写快照。
-- 内容：`upToSeq` 处的物化状态（行加每字段时钟），按 4 MiB 分块，每块用 `snap` 子密钥做 AES-GCM，`AAD = label(snap) ‖ accountKey ‖ snapshotId ‖ chunkIndex ‖ chunkCount`。
+- 内容：`upToSeq` 处的物化状态（行加每字段时钟），按 4 MiB 分块，每块用 `snap` 子密钥做 AES-GCM，`AAD = label(snap) ‖ spaceId ‖ snapshotId ‖ chunkIndex ‖ chunkCount`。
 - `PUT /v1/snapshots/{snapshotId}/chunks/{i}` 以随机键流式写入大文件存储；`POST /v1/snapshots/{snapshotId}` 登记 `{upToSeq, epoch, schemaVer, chunks: [{key, size, sha256}], sig}`。
 - DO 保留最新两个快照，并删除 `lastSeq < upToSeq − 10 000` 的操作批次。
 - 只有当所有活跃设备确认的 `serverSeq` 都越过墓碑（`isDeleted` 行）后，快照才会丢弃它们。90 天未出现的设备标记为 `stale`，必须从快照重新开始。
@@ -229,7 +300,7 @@ POST /v1/leases/{resId}/release  {generation}
 | ---- | ---- | ---- |
 | 吊销设备 | `POST /v1/devices/{id}/revoke {wipe}`（签名记录） | 关闭连接；拒绝请求；吊销方轮换纪元 |
 | 移除本设备 | 以 `wipe: true` 自我吊销，然后在本地删除 | |
-| 退出登录 | 无（本地操作） | 保留待发送队列；只在同一个 `accountKey` 下恢复 |
+| 退出登录 | 无（本地操作） | 保留待发送队列；只在同一个 `spaceId` 下恢复 |
 | 注销账号 | `POST /v1/account/deletion` → `{purgeAt: now + 7 d}`；`DELETE` 撤销 | `purgeAt` 时 DO 闹钟删除 DO 存储、大文件前缀和身份服务中的用户；通知各设备解绑，本地数据保留为普通本地档案 |
 
 ## 14. 配额
@@ -242,7 +313,7 @@ POST /v1/leases/{resId}/release  {generation}
 
 ## 16. 错误码
 
-`device_revoked`、`device_pending`、`seq_gap`、`epoch_stale`（客户端需获取新纪元信封）、`client_too_old`、`snapshot_required`、`quota_blob`、`quota_readonly`、`lease_held`、`lease_lost`、`account_pending_deletion`。
+`device_revoked`、`device_pending`、`space_exists`、`space_empty`、`head_moved`、`invalid_entry`、`envelopes_incomplete`、`request_state`、`request_expired`、`too_many_requests`、`clock_skew`、`seq_gap`、`epoch_stale`（客户端需获取新纪元信封）、`client_too_old`、`snapshot_required`、`quota_blob`、`quota_readonly`、`lease_held`、`lease_lost`、`account_pending_deletion`。
 
 ## 17. 测试向量
 
