@@ -1057,11 +1057,55 @@ importers:
         specifier: 0.1.0
         version: link:../agent-host-win32-x64
 
+  packages/agent-codex:
+    dependencies:
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@cognia/agent-runtime-kit':
+        specifier: workspace:*
+        version: link:../agent-runtime-kit
+    devDependencies:
+      '@cognia/redact':
+        specifier: workspace:*
+        version: link:../redact
+
+  packages/agent-contracts:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.5.0
+        version: 1.5.0(zod@4.6.5)
+
+  packages/agent-dsh:
+    dependencies:
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@cognia/agent-runtime-kit':
+        specifier: workspace:*
+        version: link:../agent-runtime-kit
+      zod:
+        specifier: ^4.0.0
+        version: 4.6.5
+    devDependencies:
+      '@cognia/redact':
+        specifier: workspace:*
+        version: link:../redact
+
+  packages/agent-runtime-kit:
+    dependencies:
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+
   packages/agent-config-types:
     dependencies:
       '@cognia/agent':
         specifier: workspace:*
         version: link:../agent
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
       ai:
         specifier: 7.0.116
         version: 7.0.116(zod@4.6.5)

@@ -12,7 +12,7 @@
  * branch on `resource` instead of re-matching text.
  */
 
-import { isExternalAgentAlreadyRunningError } from "@/lib/ai/agent/external/policy/spawn-reclaim"
+import { isExternalAgentAlreadyRunningError } from "@cognia/agent-runtime-kit/spawn-reclaim"
 
 /** The exclusive resources a turn can find already held. */
 export type LeaseConflictResource =

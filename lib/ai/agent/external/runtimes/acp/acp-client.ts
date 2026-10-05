@@ -36,10 +36,14 @@ import {
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
 import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
-import { JsonRpcPeer, JsonRpcMethodError, type JsonRpcRequestDeadline } from "../../json-rpc-peer"
+import {
+  JsonRpcPeer,
+  JsonRpcMethodError,
+  type JsonRpcRequestDeadline,
+} from "@cognia/agent-runtime-kit/json-rpc-peer"
 import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./acp-wire-codec"
 import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
-import { spawnReclaimingOrphan } from "../../policy/spawn-reclaim"
+import { spawnReclaimingOrphan } from "@cognia/agent-runtime-kit/spawn-reclaim"
 import { buildAgentEnv } from "../../config/env-builder"
 import {
   resolveAcpFeatureProfile,
@@ -50,10 +54,10 @@ import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
   isExternalAgentSessionExtensionUnsupportedForMethod,
-} from "../../session/session-extension-errors"
+} from "@cognia/agent-runtime-kit/session-extension-errors"
 import { configuredApprovalPolicy, isToolPreApproved } from "../../policy/tool-preapproval"
 import { deriveAcpPermissionInput } from "./acp-permission-input"
-import type { ExternalAgentCompactionOptions } from "../../capability/session-capabilities"
+import type { ExternalAgentCompactionOptions } from "@cognia/agent-contracts/session-operations"
 import type {
   InitializeRequest as SdkInitializeRequest,
   InitializeResponse as SdkInitializeResponse,

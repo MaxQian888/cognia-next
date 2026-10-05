@@ -1,7 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { CodexAppServerStatus } from "@/lib/ai/agent/external/runtimes/codex/codex-app-server-client"
+import {
+  codexAppServerExtension,
+  type CodexAppServerStatus,
+} from "@cognia/agent-codex/app-server-client"
 
 const EMPTY_STATUS: CodexAppServerStatus = { mcpServers: [], skills: [] }
 
@@ -32,7 +35,7 @@ export function useCodexAppServerStatus(
     const requestGeneration = generation.current
     const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
     if (generation.current !== requestGeneration) return
-    const adapter = getExternalAgentManager().getCodexAppServerAdapter(agentId)
+    const adapter = getExternalAgentManager().getAdapterExtension(agentId, codexAppServerExtension)
     if (!adapter) return
     setLoading(true)
     try {
@@ -62,7 +65,10 @@ export function useCodexAppServerStatus(
       if (!connected) {
         return
       }
-      const adapter = getExternalAgentManager().getCodexAppServerAdapter(agentId)
+      const adapter = getExternalAgentManager().getAdapterExtension(
+        agentId,
+        codexAppServerExtension
+      )
       if (!adapter || !active) return
       setAvailable(true)
       setStatus(adapter.getStatus())

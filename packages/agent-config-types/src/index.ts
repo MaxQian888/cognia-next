@@ -5,6 +5,7 @@
 // SDKMessage; we re-declare a *narrow* subset here so the UI layer doesn't take
 // a hard dependency on a Node-only package.
 
+import type { ExternalAgentCogniaModelBinding } from "@cognia/agent-contracts/model-binding"
 import type { UIMessage } from "ai"
 import type { UpdateCenterSettings } from "./updates"
 
@@ -2370,20 +2371,8 @@ export type SessionOrigin =
    */
   | { kind: "scheduled-task"; taskId: string; taskName: string; runId?: string }
 
-/**
- * A Cognia provider/model an external agent runs on through the local gateway
- * (ADR-0090, 2026-09-11 amendment). Nonsecret: the upstream credential stays
- * in Cognia and reaches the task through its gateway lease.
- *
- * `accountId` omitted means the provider default at task start; a concrete id
- * pins the task to that subscription account; `null` selects the manual API
- * settings.
- */
-export interface ExternalAgentCogniaModelBinding {
-  providerId: string
-  modelId: string
-  accountId?: string | null
-}
+// Owned by `@cognia/agent-contracts` (ADR-0217); re-exported for existing importers.
+export type { ExternalAgentCogniaModelBinding }
 
 /**
  * The model one external agent runs on in one conversation.

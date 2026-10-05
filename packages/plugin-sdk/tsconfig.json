@@ -50,6 +50,10 @@
       "@cognia/web-search/*": ["../../packages/web-search/src/*"],
       "@cognia/logging": ["../logging/src/index.ts"],
       "@cognia/logging/*": ["../../packages/logging/src/*"],
+      // Reached through `@/types/agent/external-agent`, now a shim over the
+      // contracts package (ADR-0217); inlined into the bundled declarations.
+      "@cognia/agent-contracts": ["../agent-contracts/src/index.ts"],
+      "@cognia/agent-contracts/*": ["../../packages/agent-contracts/src/*"],
       "@cognia/agent-config-types": ["../agent-config-types/src/index.ts"],
       "@cognia/agent-config-types/*": ["../../packages/agent-config-types/src/*"],
       "@cognia/tts": ["../tts/src/index.ts"],

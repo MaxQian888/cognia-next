@@ -67,7 +67,7 @@ jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
 }))
 
 const isUnsupportedForMethodMock = jest.fn().mockReturnValue(false)
-jest.mock("@/lib/ai/agent/external/session/session-extension-errors", () => ({
+jest.mock("@cognia/agent-runtime-kit/session-extension-errors", () => ({
   isExternalAgentSessionExtensionUnsupportedForMethod: (...a: unknown[]) =>
     isUnsupportedForMethodMock(...a),
 }))

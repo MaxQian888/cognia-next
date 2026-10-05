@@ -4,7 +4,7 @@
  * arrives. The broad manager behaviour lives in `manager.test.ts`.
  */
 
-jest.mock("./runtimes/dsh/dsh-managed-launch", () => ({
+jest.mock("@cognia/agent-dsh/managed-launch", () => ({
   prepareDshManagedLaunch: async (config: unknown) => config,
 }))
 jest.mock("@/lib/native/external-agent", () => ({

@@ -27,7 +27,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cognia/agent": "workspace:*"
+    "@cognia/agent": "workspace:*",
+    "@cognia/agent-contracts": "workspace:*"
   },
   "peerDependencies": {
     "ai": "*"

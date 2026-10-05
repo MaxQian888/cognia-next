@@ -28,7 +28,10 @@ import { resolveLimitsSources } from "@/lib/subscription/limits/registry"
 import { runCustomLimitsSources } from "@/lib/subscription/limits/custom/runner"
 import { balanceMeter, windowMeter } from "@/lib/subscription/limits/meters"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
-import type { CodexAppServerStatus } from "@/lib/ai/agent/external/runtimes/codex/codex-app-server-client"
+import {
+  codexAppServerExtension,
+  type CodexAppServerStatus,
+} from "@cognia/agent-codex/app-server-client"
 
 import type { LimitsSourceContext, ProviderId, ProviderLimits } from "@/types/subscription"
 import type { ResolvedConfig } from "../../config/schema"
@@ -220,8 +223,9 @@ export async function loadCodexLimits(
   locale?: CliLocale
 ): Promise<ProviderLimits[]> {
   const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-  const adapter = getExternalAgentManager({ healthCheckInterval: 0 }).getCodexAppServerAdapter(
-    agentId
+  const adapter = getExternalAgentManager({ healthCheckInterval: 0 }).getAdapterExtension(
+    agentId,
+    codexAppServerExtension
   )
   if (!adapter?.isConnected())
     throw new Error(createCliTranslator(locale, "cliUiCommon")("codexLimits.notConnected"))

@@ -61,7 +61,7 @@ import {
 } from "@/lib/ai/agent/external/config/config-normalizer"
 
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
-import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session/session-extension-errors"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@cognia/agent-runtime-kit/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
 import { describeExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import {
@@ -76,7 +76,7 @@ import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
-} from "@/lib/ai/agent/external/capability/session-capabilities"
+} from "@cognia/agent-contracts/session-operations"
 import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
 
 interface ResumedInteractions {

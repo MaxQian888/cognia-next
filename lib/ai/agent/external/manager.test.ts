@@ -3,7 +3,7 @@
 let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
 const mockGatewayMint = jest.fn()
 const mockGatewayRevoke = jest.fn().mockResolvedValue(true)
-jest.mock("./runtimes/dsh/dsh-managed-launch", () => ({
+jest.mock("@cognia/agent-dsh/managed-launch", () => ({
   prepareDshManagedLaunch: async (config: unknown) => config,
 }))
 jest.mock("@/lib/gateway/mint-session-ticket", () => ({
@@ -2622,6 +2622,57 @@ describe("execute / cancel", () => {
   it("cancel is a no-op for missing agents", async () => {
     const m = freshManager()
     await expect(m.cancel("ghost", "s_1")).resolves.toBeUndefined()
+  })
+
+  it("drops a session whose process-scoped cancel retired it, so the next turn opens a new one", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const adapter = currentMock as MockAdapter & { semantics?: unknown }
+    // DeepSeek Harness shape: no wire cancel, the session's own process is retired.
+    adapter.semantics = {
+      cancel: { scope: "process", reconnectsAfterCancel: true },
+      resume: "unsupported",
+      fork: "unsupported",
+      approvals: "profile-fixed",
+      processModel: "per-session",
+    }
+    const first = await m.createSession("agent-1")
+    adapter.cancelImpl.mockImplementation(async (id: string) => {
+      adapter.sessions.delete(id)
+    })
+    await m.cancel("agent-1", first.id)
+    expect(m.getAgent("agent-1")?.sessions.has(first.id)).toBe(false)
+
+    const createSession = jest.spyOn(adapter, "createSession")
+    const result = await m.execute("agent-1", "next", { sessionId: first.id })
+    expect(result.success).toBe(true)
+    // The retired session was not reused: a fresh one was opened for the turn.
+    expect(createSession).toHaveBeenCalledTimes(1)
+    expect(adapter.sessions.get(result.sessionId)).not.toBe(first)
+  })
+
+  it("keeps a session across a turn-scoped cancel", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const adapter = currentMock as MockAdapter & { semantics?: unknown }
+    adapter.semantics = {
+      cancel: { scope: "turn", reconnectsAfterCancel: false },
+      resume: "native",
+      fork: "native",
+      approvals: "per-tool-call",
+      processModel: "shared",
+    }
+    const session = await m.createSession("agent-1")
+    await m.cancel("agent-1", session.id)
+    expect(m.getAgent("agent-1")?.sessions.has(session.id)).toBe(true)
+  })
+
+  it("never drops a session the adapter still reports, even without declared semantics", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const session = await m.createSession("agent-1")
+    await m.cancel("agent-1", session.id)
+    expect(m.getAgent("agent-1")?.sessions.has(session.id)).toBe(true)
   })
 })
 

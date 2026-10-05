@@ -7,7 +7,6 @@ import {
   publishSessionMcpStatus,
   readSessionMcpStatus,
   registerSessionMcpStatus,
-  type AgentMcpEvidence,
 } from "./tool-host/mcp-status"
 import { buildDeclaredCapabilityProfile } from "@/lib/ai/agent/external/capability/capability-profile"
 import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
@@ -68,6 +67,8 @@ import {
 import type { McpServer } from "@cognia/agent-config-types"
 import type { AcpMcpServerConfig } from "@/types/agent/external-agent"
 import type { SessionCreateOptions } from "@/lib/ai/agent/external/protocol-adapter"
+import type { AdapterExtension } from "@cognia/agent-contracts/adapter-extension"
+import { codexAppServerExtension } from "@cognia/agent-codex/app-server-client"
 
 import { resolveHome } from "../config/load"
 import { piMetadataForPreset, resolveBackendModel } from "../config/active-model"
@@ -216,16 +217,8 @@ export function classifyExternalFailure(
 }
 
 export interface ExternalAgentSessionManager {
-  getCodexAppServerAdapter?: (agentId: string) => {
-    refreshMcpServers: (strict?: boolean, threadId?: string) => Promise<AgentMcpEvidence[]>
-    getModelCatalog?: () => Array<{
-      id: string
-      model?: string
-      isDefault?: boolean
-      defaultReasoningEffort?: string
-    }>
-    listModels?: () => Promise<Array<{ id: string; name?: string }>>
-  } | null
+  /** Typed vendor extensions on the live adapter (ADR-0217), e.g. Codex's app-server controls. */
+  getAdapterExtension?: <T>(agentId: string, extension: AdapterExtension<T>) => T | null
   getAgentCapabilities?: (
     agentId: string
   ) => import("@/types/agent/external-agent").AcpCapabilities | undefined
@@ -977,7 +970,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const refreshMcp = async () => {
     const snapshot = readSessionMcpStatus(sessionId)
     if (!snapshot || closed) return snapshot
-    const adapter = manager.getCodexAppServerAdapter?.(agentId)
+    const adapter = manager.getAdapterExtension?.(agentId, codexAppServerExtension)
     if (!adapter) return snapshot
     try {
       const evidence = await adapter.refreshMcpServers(true, snapshot.externalSessionId)
@@ -1120,7 +1113,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           if (params.config.thinkingLevel === "off") {
             // The controller keeps the agent alive across /effort changes. An
             // omitted value would restore its stale connect-time default.
-            const adapter = manager.getCodexAppServerAdapter?.(agentId)
+            const adapter = manager.getAdapterExtension?.(agentId, codexAppServerExtension)
             let models = adapter?.getModelCatalog?.() ?? []
             if (models.length === 0) {
               await adapter?.listModels?.()
@@ -1570,7 +1563,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       if (resolvedPresetId === "codex-app-server") {
         // Native model/list is process-scoped. Opening the picker must not
         // create a thread and start its MCP servers just to discover models.
-        return (await manager.getCodexAppServerAdapter?.(agentId)?.listModels?.()) ?? []
+        return (
+          (await manager.getAdapterExtension?.(agentId, codexAppServerExtension)?.listModels?.()) ??
+          []
+        )
       }
       if (externalSessionId) return readLiveModelOptions(manager, agentId, externalSessionId)
       if (!manager.createSession) return []

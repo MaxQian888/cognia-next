@@ -18,7 +18,7 @@ import type {
   ExternalAgentCapabilityCell,
 } from "@cognia/agent-config-types/external-agent-capability"
 
-import { resolveCommandCompactionCapability } from "./session-capabilities"
+import { resolveCommandCompactionCapability } from "@cognia/agent-contracts/session-operations"
 
 const yes = (reasonKey: string): ExternalAgentCapabilityCell => ({
   level: "native",

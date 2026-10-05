@@ -103,7 +103,7 @@ import {
 } from "@/lib/ai/agent/external/config/config-normalizer"
 import type { ExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import { isEnvironmentScopedVerdict } from "@/lib/ai/agent/external/canonical-contract"
-import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session/session-extension-errors"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@cognia/agent-runtime-kit/session-extension-errors"
 import { approvalInput } from "@/lib/ai/agent/external/session/chat-decision-bridge"
 import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 import { PROCESS_PLANE_COMMANDS } from "@/lib/ai/agent/external/capability/process-plane"

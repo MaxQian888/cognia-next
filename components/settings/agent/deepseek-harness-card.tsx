@@ -7,12 +7,12 @@ import { AlertTriangle, CheckCircle2, Download, RefreshCw, Trash2, XCircle } fro
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useDshRuntime } from "@/hooks/agent/use-dsh-runtime"
-import type { DshDoctorFinding } from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
+import type { DshDoctorFinding } from "@cognia/agent-dsh/install"
 import {
   dshCapabilitiesForTransport,
   profileTransport,
   type DshProfileId,
-} from "@/types/agent/dsh-runtime-channel"
+} from "@cognia/agent-dsh/channel"
 
 /**
  * Manage the Cognia-owned DeepSeek Harness runtime.

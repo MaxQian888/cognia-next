@@ -10,7 +10,7 @@ import {
   removeDshRuntime,
   runtimeHomeFor,
 } from "../runtime/external/dsh-installer"
-import type { DshProfileId } from "@/types/agent/dsh-runtime-channel"
+import type { DshProfileId } from "@cognia/agent-dsh/channel"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 
 /**

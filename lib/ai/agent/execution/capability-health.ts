@@ -7,7 +7,7 @@
 // circuit. The overlay is UNSIGNED by design and can only DOWN-rank.
 
 import type { CapabilityHealthEntry } from "./certification-store"
-import { isExplicitlyUnsupportedCapabilityError } from "../external/capability/session-capabilities"
+import { isExplicitlyUnsupportedCapabilityError } from "@cognia/agent-contracts/session-operations"
 
 export const CIRCUIT_OPEN_THRESHOLD = 3
 export const CIRCUIT_OPEN_MS = 10 * 60 * 1000

@@ -9,6 +9,9 @@
  * hang `sessionSourceIds` on.
  */
 
+import { codexManifest } from "@cognia/agent-codex/manifest"
+import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
+
 import type { AgentEcosystemEntry } from "./types"
 
 export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
@@ -16,6 +19,19 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     // Native session management is negotiated over ACP; no portable importer is claimed.
     id: "kimi",
     runtimeIds: ["kimi"],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  },
+  {
+    // Launch-only over ACP: no portable session format or config to import.
+    id: "goose",
+    runtimeIds: ["goose"],
     sessionSourceIds: [],
     migrationVendor: null,
     vendorRootKeys: [],
@@ -61,21 +77,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     subagentSourceId: "claude-code",
     memoryAgentId: "claude-code",
   },
-  {
-    // ACP first: `VENDOR_RUNTIME` resolved codex to the `codex` preset, which
-    // the ACP adapter owns. Listing the app-server first would silently change
-    // which connection the post-migration offer creates.
-    id: "codex",
-    runtimeIds: ["codex-acp", "codex-app-server"],
-    sessionSourceIds: ["codex"],
-    migrationVendor: "codex",
-    vendorRootKeys: ["codexHome"],
-    configRootKey: "codexHome",
-    probeRootKeys: ["codexHome"],
-    pluginEcosystem: "codex",
-    subagentSourceId: "codex-cli",
-    memoryAgentId: "codex",
-  },
+  codexManifest.ecosystem,
   {
     id: "opencode",
     runtimeIds: ["opencode-v2-service", "opencode-acp", "opencode", "opencode-remote"],
@@ -215,18 +217,8 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     subagentSourceId: null,
     memoryAgentId: null,
   },
-  {
-    id: "deepseek-harness",
-    runtimeIds: ["deepseek-harness"],
-    sessionSourceIds: [],
-    migrationVendor: null,
-    vendorRootKeys: [],
-    configRootKey: null,
-    probeRootKeys: [],
-    pluginEcosystem: null,
-    subagentSourceId: null,
-    memoryAgentId: null,
-  },
+  // Integration packages own their rows (ADR-0217); this table lists them.
+  deepseekHarnessManifest.ecosystem,
 ]
 
 export function findEcosystemById(id: string): AgentEcosystemEntry | undefined {

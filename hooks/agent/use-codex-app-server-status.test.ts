@@ -24,7 +24,7 @@ let adapterForAgent: typeof fakeAdapter | null = fakeAdapter
 
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({
-    getCodexAppServerAdapter: () => adapterForAgent,
+    getAdapterExtension: () => adapterForAgent,
   }),
 }))
 

@@ -325,6 +325,8 @@ const REGISTRY = [
   // The plugin SDK's cross-language contract surface.
   { script: "sdk:ts:build", group: "plugin-sdk", resource: "package-build" },
   { script: "sdk:ts:pack:test", group: "plugin-sdk" },
+  // ADR-0217: every agent package installs from its tarball and loads its entries.
+  { script: "agent:packages:pack-test", group: "plugin-sdk" },
   { script: "sdk:scaffold:test", group: "plugin-sdk" },
   { script: "sdk:python:test", group: "plugin-sdk", runtime: "python" },
   { script: "plugin:repowiki:test", group: "plugin-sdk", runtime: "python" },

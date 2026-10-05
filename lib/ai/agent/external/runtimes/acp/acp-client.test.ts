@@ -59,7 +59,7 @@ jest.mock("@/lib/utils", () => ({
   isTauri: jest.fn(() => false),
 }))
 
-import { JsonRpcPeer } from "../../json-rpc-peer"
+import { JsonRpcPeer } from "@cognia/agent-runtime-kit/json-rpc-peer"
 import { isTauri } from "@/lib/utils"
 import {
   acpTerminalCreate,

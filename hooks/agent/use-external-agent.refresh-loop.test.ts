@@ -59,7 +59,7 @@ jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentExecutionBlock: () => null,
 }))
 
-jest.mock("@/lib/ai/agent/external/session/session-extension-errors", () => ({
+jest.mock("@cognia/agent-runtime-kit/session-extension-errors", () => ({
   isExternalAgentSessionExtensionUnsupportedForMethod: () => false,
 }))
 

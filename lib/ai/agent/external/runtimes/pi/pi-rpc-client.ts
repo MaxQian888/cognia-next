@@ -21,7 +21,7 @@
  *   frames the bytes itself (see `pi-rpc-peer.ts`).
  */
 
-import type { ExternalAgentCompactionCapability } from "../../capability/session-capabilities"
+import type { ExternalAgentCompactionCapability } from "@cognia/agent-contracts/session-operations"
 import type {
   AcpConfigOption,
   AcpElicitationResponse,
@@ -57,7 +57,7 @@ import {
 } from "./pi-permission"
 import { configuredApprovalPolicy } from "../../policy/tool-preapproval"
 import { PiRpcPeer, type PiFrameError } from "./pi-rpc-peer"
-import { spawnReclaimingOrphan } from "../../policy/spawn-reclaim"
+import { spawnReclaimingOrphan } from "@cognia/agent-runtime-kit/spawn-reclaim"
 import { agentProcessConflictFrom } from "@/lib/execution/lease-conflict"
 import {
   BaseProtocolAdapter,

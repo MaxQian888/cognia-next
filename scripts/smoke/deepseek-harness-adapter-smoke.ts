@@ -7,18 +7,17 @@ import { pathToFileURL } from "node:url"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { NodeExternalAgentBackend } from "@/cli/src/runtime/external/node-backend"
-import { DshSdkClientAdapter } from "@/lib/ai/agent/external/runtimes/dsh/dsh-sdk-client"
+import { DshSdkClientAdapter } from "@cognia/agent-dsh/sdk-client"
+import { createProcessPlaneHost } from "@/lib/ai/agent/external/host/process-host"
 import { OpenCodeV2ClientAdapter } from "@/lib/ai/agent/external/runtimes/opencode/opencode-v2-client"
 import { launchOpenCodeV2Service } from "@/lib/ai/agent/external/runtimes/opencode/opencode-v2-launcher"
 import { buildGatewayTaskConfig } from "@/lib/ai/agent/external/config/gateway-task"
 import { prepareGatewayTask } from "@/cli/src/runtime/external/gateway-task"
 import { PiRpcClientAdapter } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
 import { verifyPiExtension } from "@/cli/src/agent/tool-host/pi-extension"
-import {
-  createDshRuntimeTransport,
-  resolveDshLaunchFromConfig,
-} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-transport"
-import { buildDshLaunchSpec } from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
+import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "@cognia/agent-dsh/transport"
+import { buildDshLaunchSpec } from "@cognia/agent-dsh/install"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { ExternalAgentConfig, ExternalAgentEvent } from "@/types/agent/external-agent"
 import { startToolHostBroker } from "@/cli/src/agent/tool-host/broker"
 import { buildToolHostMcpServers } from "@/cli/src/agent/tool-host/spawn"
@@ -169,6 +168,7 @@ async function main() {
     apiKey: "cognia-smoke-placeholder",
     parentEnv: { PATH: process.env.PATH },
     nodePath: process.execPath,
+    outboundGate: hasNoLeakingPiiDeep,
   })
   const config = {
     id: "dsh-adapter-smoke",
@@ -295,10 +295,18 @@ async function main() {
           })
         : new DshSdkClientAdapter({
             createTransport: (config) =>
-              createDshRuntimeTransport(config, resolveDshLaunchFromConfig, true, {
-                invoke: (name, args) => host.invoke(name, args),
-                listen: async (name, callback) => host.listen(name, callback),
-              }),
+              createDshRuntimeTransport(
+                config,
+                resolveDshLaunchFromConfig,
+                createProcessPlaneHost(
+                  {
+                    invoke: (name, args) => host.invoke(name, args),
+                    listen: async (name, callback) => host.listen(name, callback),
+                  },
+                  () => true
+                ),
+                hasNoLeakingPiiDeep
+              ),
           })
   if (pi && process.env.COGNIA_PI_SMOKE_DEBUG)
     host.listen("external-agent://stderr", (payload) =>

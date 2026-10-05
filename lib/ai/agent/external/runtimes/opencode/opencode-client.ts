@@ -32,14 +32,14 @@ import { isTauri } from "@/lib/utils"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
 import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
-import { isExternalAgentAlreadyRunningError } from "../../policy/spawn-reclaim"
+import { isExternalAgentAlreadyRunningError } from "@cognia/agent-runtime-kit/spawn-reclaim"
 import {
   isExplicitlyUnsupportedCapabilityError,
   resolveCommandCompactionCapability,
   type ExternalAgentCompactionCapability,
   type ExternalAgentCompactionOptions,
   type ExternalAgentCommandCompactionRoute,
-} from "../../capability/session-capabilities"
+} from "@cognia/agent-contracts/session-operations"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,

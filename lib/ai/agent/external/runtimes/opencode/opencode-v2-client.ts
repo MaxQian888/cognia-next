@@ -45,7 +45,7 @@ import {
 import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
-} from "../../capability/session-capabilities"
+} from "@cognia/agent-contracts/session-operations"
 
 const NO_VARIANT = "#none"
 const CURRENT_VERSION = /^2\.\d+\.\d+(?:\+[\w.-]+)?$/

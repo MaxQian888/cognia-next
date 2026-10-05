@@ -4,16 +4,13 @@ import os from "node:os"
 import path from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
-import type {
-  DshDoctorReport,
-  DshInstalledRuntimeFacts,
-} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
+import type { DshDoctorReport, DshInstalledRuntimeFacts } from "@cognia/agent-dsh/install"
 import {
   buildDshChannelManifest,
   doctorDshRuntime,
   dshPlatformKey,
-} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
-import type { DshProfileId, DshRuntimeChannel } from "@/types/agent/dsh-runtime-channel"
+} from "@cognia/agent-dsh/install"
+import type { DshProfileId, DshRuntimeChannel } from "@cognia/agent-dsh/channel"
 
 import { createRuntimeHasher, hashHex } from "../crypto-hasher"
 
@@ -52,7 +49,7 @@ export {
   DSH_UPSTREAM_VERSION as UPSTREAM_VERSION,
   DSH_NODE_MAJOR_REQUIRED as NODE_MAJOR_REQUIRED,
   DSH_CONFORMANCE_SUITE_VERSION as CONFORMANCE_SUITE_VERSION,
-} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
+} from "@cognia/agent-dsh/install"
 
 export interface DshInstallPaths {
   /** Cognia data root, e.g. `~/.cognia`. */

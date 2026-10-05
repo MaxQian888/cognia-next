@@ -1,0 +1,3044 @@
+/**
+ * External Agent Type Definitions
+ * Defines types for integrating external agents via ACP (Agent Client Protocol) and other protocols.
+ *
+ * Owned by `@cognia/agent-contracts` (ADR-0217); `@/types/agent/external-agent`
+ * re-exports this module for existing app importers.
+ *
+ * @see https://github.com/anthropics/agent-client-protocol
+ * @see https://github.com/zed-industries/claude-code-acp
+ */
+
+// ============================================================================
+// Protocol Types
+// ============================================================================
+
+import type {
+  ExternalAgentCapabilityId,
+  ExternalAgentCapabilityLevel,
+  ExternalAgentCapabilityProfileV1,
+} from "./external-agent-capability"
+import type { ExternalAgentCogniaModelBinding } from "./model-binding"
+import type {
+  AgentCapabilities as SdkAcpAgentCapabilities,
+  Annotations as SdkAcpAnnotations,
+  AuthMethodAgent as SdkAcpAuthMethodAgent,
+  AuthMethodTerminal as SdkAcpAuthMethodTerminal,
+  ClientCapabilities as SdkAcpClientCapabilities,
+  CompactionStatus as SdkAcpCompactionStatus,
+  CompactionSummaryChunk as SdkAcpCompactionSummaryChunk,
+  CompactionUpdate as SdkAcpCompactionUpdate,
+  ConnectMcpRequest as SdkAcpConnectMcpRequest,
+  ConnectMcpResponse as SdkAcpConnectMcpResponse,
+  CloseNesRequest as SdkAcpCloseNesRequest,
+  CloseNesResponse as SdkAcpCloseNesResponse,
+  DisableProviderRequest as SdkAcpDisableProviderRequest,
+  DisableProviderResponse as SdkAcpDisableProviderResponse,
+  ContentBlock as SdkAcpContentBlock,
+  DidChangeDocumentNotification as SdkAcpDidChangeDocumentNotification,
+  DidCloseDocumentNotification as SdkAcpDidCloseDocumentNotification,
+  DidFocusDocumentNotification as SdkAcpDidFocusDocumentNotification,
+  DidOpenDocumentNotification as SdkAcpDidOpenDocumentNotification,
+  DidSaveDocumentNotification as SdkAcpDidSaveDocumentNotification,
+  DisconnectMcpRequest as SdkAcpDisconnectMcpRequest,
+  DisconnectMcpResponse as SdkAcpDisconnectMcpResponse,
+  ListProvidersResponse as SdkAcpListProvidersResponse,
+  MessageMcpNotification as SdkAcpMessageMcpNotification,
+  MessageMcpRequest as SdkAcpMessageMcpRequest,
+  MessageMcpResponse as SdkAcpMessageMcpResponse,
+  McpServerAcp as SdkAcpMcpServerAcp,
+  NesSuggestion as SdkAcpNesSuggestion,
+  ProviderInfo as SdkAcpProviderInfo,
+  SetProviderRequest as SdkAcpSetProviderRequest,
+  SetProviderResponse as SdkAcpSetProviderResponse,
+  StartNesRequest as SdkAcpStartNesRequest,
+  StartNesResponse as SdkAcpStartNesResponse,
+  SuggestNesRequest as SdkAcpSuggestNesRequest,
+  SuggestNesResponse as SdkAcpSuggestNesResponse,
+  ToolKind as SdkAcpToolKind,
+} from "@agentclientprotocol/sdk"
+
+/**
+ * Supported external agent protocols
+ */
+export type ExternalAgentProtocol =
+  | "acp" // Agent Client Protocol (Claude Code, etc.)
+  | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
+  | "dsh-sdk" // DeepSeek Harness stdio JSON-RPC SDK runtime (observation-rich, no mid-turn approval)
+  | "pi-rpc" // Pi native `pi --mode rpc` JSONL command/event protocol (NOT JSON-RPC, NOT ACP)
+  | "aider-cli" // Official one-shot CLI; Cognia-owned history, no per-tool approval wire
+  | "opencode" // Retired OpenCode V1 value retained for saved configurations
+  | "opencode-v2" // Current OpenCode V2 native API
+  | "a2a" // Agent-to-Agent Protocol (Google)
+  | "http" // HTTP/REST API
+  | "websocket" // WebSocket
+  | "custom" // Custom protocol via plugin
+
+/**
+ * External agent transport mechanism
+ */
+export type ExternalAgentTransport =
+  | "stdio" // Standard input/output (local process)
+  | "http" // HTTP REST
+  | "websocket" // WebSocket connection
+  | "sse" // Server-Sent Events
+
+/**
+ * Canonical runtime branch/block reason codes for external-agent routing and diagnostics.
+ */
+export type ExternalAgentBranchReasonCode =
+  | "ok"
+  | "agent_not_found"
+  | "configuration_missing"
+  | "agent_disabled"
+  | "protocol_unsupported"
+  | "transport_blocked"
+  | "ecosystem_prerequisite_missing"
+  | "ecosystem_documented_only"
+  | "initialization_failed"
+  | "health_check_failed"
+  | "external_unavailable"
+  | "extension_unknown"
+  | "extension_unsupported"
+  | "session_resolution_failed"
+  | "permission_denied"
+  | "execution_failed"
+  | "strict_failure"
+  | "fallback_to_builtin"
+  // The external runtime is present but its version is below the supported
+  // floor. Distinct from `external_unavailable` (binary missing entirely) so
+  // the UI can say "upgrade Pi" instead of "install Pi".
+  | "runtime_version_unsupported"
+  // The mandatory strict sandbox could not be resolved (launcher missing, or
+  // an unsupported platform). Per ADR-0077 this is terminal: Cognia never
+  // falls back to an unsandboxed external-agent process.
+  | "sandbox_unavailable"
+  // A bundled first-party agent extension failed to complete its versioned
+  // ready handshake, so the permission interception it owns is not proven
+  // live. Fail closed rather than run the agent ungated.
+  | "extension_handshake_failed"
+  // A plugin-shipped Pi package the agent opted into cannot be loaded
+  // (ADR-0210): plugin disabled, not prepared, double load, version floor.
+  // The session is refused rather than started without it.
+  | "pi_package_unavailable"
+  // A frame on the runtime's stdout violated the wire contract (unparseable,
+  // or past the frame/buffer ceiling). The stream cannot be resynchronised.
+  | "protocol_frame_invalid"
+  // A per-host runtime budget (concurrent process cap) is exhausted and no
+  // idle process could be reclaimed.
+  | "resource_limit"
+  // The LOCAL runtime's own managed/enterprise configuration forbids the
+  // sandbox mode, approval policy or permission profile the request carries.
+  // Distinct from `permission_denied`, which is a per-tool decision made by the
+  // user during a turn; this one is an administrator's standing limit and no
+  // amount of in-turn approval will lift it. Detected before the request is
+  // sent, because Codex has no typed refusal error to recognise afterwards.
+  | "managed_policy_refused"
+  // The configuration asks for a private state root (ADR-0216) but its
+  // runtime has no documented home variable to move into one. Refused rather
+  // than launched against the shared home the user chose not to use.
+  | "state_isolation_unsupported"
+
+/**
+ * Canonical branch outcome for external-agent orchestration.
+ */
+export type ExternalAgentBranchOutcome =
+  "external" | "fallback" | "strict_failure" | "builtin" | "blocked"
+
+/**
+ * Lifecycle completeness stages used by manager/store/UI diagnostics.
+ */
+export type ExternalAgentLifecycleCompletenessStage =
+  "config" | "connect" | "session_extensions" | "execution" | "fallback" | "recovery"
+
+/**
+ * Canonical execution eligibility state.
+ */
+export type ExternalAgentExecutionEligibility = "eligible" | "blocked"
+
+/**
+ * Support tier for a product-level external-agent ecosystem surface.
+ */
+export type ExternalAgentEcosystemSupportTier = "executable" | "guided" | "documented-only"
+
+/**
+ * Execution mode for a product-level external-agent ecosystem surface.
+ */
+export type ExternalAgentEcosystemExecutionMode = "direct" | "guided" | "external"
+
+/**
+ * Status of an individual ecosystem prerequisite.
+ */
+export type ExternalAgentEcosystemPrerequisiteState =
+  "satisfied" | "missing" | "unknown" | "not-applicable"
+
+/**
+ * Aggregated prerequisite status projected for UI/runtime consumers.
+ */
+export type ExternalAgentEcosystemPrerequisiteStatus =
+  "ready" | "action-required" | "unknown" | "not-applicable"
+
+export interface ExternalAgentEcosystemPrerequisite {
+  id: string
+  label: string
+  status: ExternalAgentEcosystemPrerequisiteState
+  detail?: string
+}
+
+/**
+ * Ecosystem-aware readiness facts projected from adapter/surface metadata.
+ */
+export interface ExternalAgentEcosystemReadinessSnapshot {
+  adapterId?: string
+  adapterName?: string
+  surfaceId?: string
+  surfaceName?: string
+  supportTier?: ExternalAgentEcosystemSupportTier
+  executionMode?: ExternalAgentEcosystemExecutionMode
+  docsUrl?: string
+  limitationNote?: string
+  prerequisiteStatus?: ExternalAgentEcosystemPrerequisiteStatus
+  prerequisites?: ExternalAgentEcosystemPrerequisite[]
+  recommendedActions?: ExternalAgentRecommendedAction[]
+}
+
+/**
+ * One line of "what to do about it" under an agent's readiness panel.
+ *
+ * Two shapes, because this array is persisted. Entries this app generates are
+ * `{ id }` references into `externalAgent.manager.diagnostics.recommendedAction.*`
+ * and are rendered in the reader's language; a bare string is either a value
+ * persisted before that existed or prose supplied by a third-party preset,
+ * and is rendered as-is because there is no key to look up.
+ *
+ * Mirrors how `recoveryHints` already carries key ids rather than prose — see
+ * `resolveRecoveryHints` in `canonical-contract.ts`.
+ */
+export type ExternalAgentRecommendedAction =
+  | string
+  | {
+      /** Key under `externalAgent.manager.diagnostics.recommendedAction`. */
+      id: string
+      /** ICU interpolation values for that message. */
+      params?: Record<string, string>
+    }
+
+/**
+ * Correlation metadata shared across manager/hook/router diagnostics.
+ */
+export interface ExternalAgentCorrelationMetadata {
+  sessionId?: string
+  turnId?: string
+  traceId?: string
+  source?: "manager" | "hook" | "router"
+  observedAt: Date
+}
+
+export interface ExternalAgentLastRunSnapshot {
+  terminalOutcome: "ok" | "error"
+  branchReasonCode: ExternalAgentBranchReasonCode
+  branchOutcome: ExternalAgentBranchOutcome
+  timestamp: Date
+  linkedSessionId?: string
+  linkedTraceId?: string
+  diagnosticText?: string
+}
+
+/**
+ * Handshake evidence, projected as canonical runtime facts.
+ *
+ * NOT a capability authority — that is
+ * {@link ExternalAgentCapabilityProfileV1} (ADR-0090 external SSOT), which
+ * merges this handshake with the protocol manifest, the adapter's real methods
+ * and the host's ceilings. What survives here is the raw negotiation record:
+ * which protocol answered, whether it demanded auth, and which unstable session
+ * extensions it admitted. Reading `hasAgentCapabilities` as "this agent can do
+ * things" is exactly the kind of half-answer the profile replaced.
+ */
+export interface ExternalAgentCapabilitySnapshot {
+  protocol: ExternalAgentProtocol
+  authRequired?: boolean
+  authMethods?: string[]
+  hasAgentCapabilities?: boolean
+  sessionExtensions: ExternalAgentSessionExtensionSupport
+}
+
+/**
+ * Benchmark gap grades for external-agent adaptation.
+ *
+ * The benchmark map records ADAPTATION WORK — what a reference implementation
+ * does, what Cognia does instead, and whether a difference was accepted on
+ * purpose. It is not a capability source: `ExternalAgentCapabilityProfileV1`
+ * (ADR-0090 external SSOT) answers "can this agent do X?", and an
+ * `intentional-deviation` here is a review record, not a verdict a surface may
+ * gate on.
+ */
+export type ExternalAgentBenchmarkGapGrade = "blocking" | "major" | "minor"
+
+/**
+ * Adaptation status for benchmark capabilities.
+ */
+export type ExternalAgentBenchmarkAdaptationStatus =
+  "not-started" | "in-progress" | "validated" | "intentional-deviation"
+
+/**
+ * Evidence kinds accepted for benchmark adaptation validation.
+ */
+export type ExternalAgentBenchmarkEvidenceKind = "test" | "diagnostic" | "script"
+
+export interface ExternalAgentBenchmarkEvidence {
+  id: string
+  kind: ExternalAgentBenchmarkEvidenceKind
+  summary: string
+  reference: string
+  recordedAt: Date
+}
+
+export interface ExternalAgentIntentionalDeviationReview {
+  reviewedBy: string
+  reviewedAt: Date
+  reviewLink?: string
+}
+
+export interface ExternalAgentIntentionalDeviationRecord {
+  rationale: string
+  tradeOff: string
+  userImpact: string
+  review: ExternalAgentIntentionalDeviationReview
+}
+
+/**
+ * Benchmark capability map entry used for adaptation tracking.
+ */
+export interface ExternalAgentBenchmarkCapabilityEntry {
+  id: string
+  title: string
+  referenceBehavior: string
+  cogniaBehavior: string
+  adaptationTarget: string
+  gapGrade: ExternalAgentBenchmarkGapGrade
+  status: ExternalAgentBenchmarkAdaptationStatus
+  owner?: string
+  evidence: ExternalAgentBenchmarkEvidence[]
+  deviation?: ExternalAgentIntentionalDeviationRecord
+  updatedAt: Date
+}
+
+/**
+ * Support state for optional/unstable ACP extension methods.
+ */
+export type ExternalAgentSupportState = "unknown" | "supported" | "unsupported"
+
+/**
+ * ACP session extension methods tracked for support probing.
+ */
+export type ExternalAgentSessionExtensionMethod = "session/list" | "session/fork" | "session/resume"
+
+/**
+ * Support record for a specific extension method.
+ */
+export interface ExternalAgentExtensionSupportStatus {
+  state: ExternalAgentSupportState
+  reasonCode?: ExternalAgentBranchReasonCode
+  reason?: string
+  lastCheckedAt?: Date
+}
+
+/**
+ * Support map for tracked ACP session extension methods.
+ */
+export interface ExternalAgentSessionExtensionSupport {
+  "session/list": ExternalAgentExtensionSupportStatus
+  "session/fork": ExternalAgentExtensionSupportStatus
+  "session/resume": ExternalAgentExtensionSupportStatus
+}
+
+/**
+ * Runtime validity snapshot for an external agent.
+ */
+export interface ExternalAgentValiditySnapshot {
+  /** Canonical projection version for compatibility-safe consumers */
+  contractVersion?: number
+  /** Lifecycle completeness stage projected from runtime facts */
+  lifecycleStage?: ExternalAgentLifecycleCompletenessStage
+  /** Stage that is currently blocked (if any) */
+  blockedStage?: ExternalAgentLifecycleCompletenessStage
+  /** Canonical execution eligibility */
+  executionEligibility?: ExternalAgentExecutionEligibility
+  executable: boolean
+  checkedAt: Date
+  source: "config" | "connect" | "health" | "execution"
+  blockingReasonCode?: ExternalAgentBranchReasonCode
+  blockingReason?: string
+  healthStatus?: "unknown" | "healthy" | "unhealthy"
+  lastHealthCheckAt?: Date
+  sessionExtensions: ExternalAgentSessionExtensionSupport
+  negotiation?: {
+    protocol: ExternalAgentProtocol
+    protocolVersion?: number
+    agentInfo?: AcpImplementationInfo
+    authMethods?: AcpAuthMethod[]
+    authRequired?: boolean
+    agentCapabilities?: AcpAgentCapabilities
+  }
+  capabilitySnapshot?: ExternalAgentCapabilitySnapshot
+  ecosystem?: ExternalAgentEcosystemReadinessSnapshot
+  canonicalReasonCode?: ExternalAgentBranchReasonCode
+  canonicalReason?: string
+  branchOutcome?: ExternalAgentBranchOutcome
+  correlation?: ExternalAgentCorrelationMetadata
+  /**
+   * Remediation advice as i18n key ids, resolved by the renderer against
+   * `diagnostics.recoveryHint.*`. NOT display text — these cross into `lib/`,
+   * which must stay locale-free.
+   */
+  recoveryHints?: string[]
+  lastBranchReasonCode?: ExternalAgentBranchReasonCode
+  lastBranchReason?: string
+  lastBranchAt?: Date
+}
+
+/**
+ * Connection status for external agents
+ */
+export type ExternalAgentConnectionStatus =
+  "disconnected" | "connecting" | "connected" | "reconnecting" | "error"
+
+/**
+ * External agent execution status
+ */
+export type ExternalAgentStatus =
+  | "idle"
+  | "initializing"
+  | "ready"
+  | "executing"
+  | "waiting_permission"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timeout"
+
+// ============================================================================
+// ACP-Specific Types (Agent Client Protocol)
+// ============================================================================
+
+/**
+ * ACP Permission modes for tool execution
+ * @see claude-code-acp PermissionMode
+ */
+export type AcpPermissionMode =
+  | "default" // Normal permission flow
+  | "acceptEdits" // Auto-accept file edits
+  | "bypassPermissions" // Skip all permission checks
+  | "plan" // Planning mode (no execution)
+  | "dontAsk" // Don't prompt for permissions, deny if not pre-approved
+
+/**
+ * ACP Stop reasons for prompt turn completion
+ * @see https://agentclientprotocol.com/protocol/prompt-turn#stop-reasons
+ */
+export type AcpStopReason =
+  | "end_turn" // Language model finishes responding without requesting more tools
+  | "max_tokens" // Maximum token limit reached
+  | "max_turn_requests" // Maximum number of model requests in a single turn exceeded
+  | "refusal" // Agent refuses to continue
+  | "cancelled" // Client cancels the turn
+
+/**
+ * ACP Plan entry for agent planning
+ * @see https://agentclientprotocol.com/protocol/agent-plan
+ */
+export interface AcpPlanEntry {
+  /** Plan step content/description */
+  content: string
+  /** Priority level */
+  priority: "high" | "medium" | "low"
+  /** Current status */
+  status: "pending" | "in_progress" | "completed" | "skipped"
+}
+
+/**
+ * ACP Available command (slash command)
+ * @see https://agentclientprotocol.com/protocol/slash-commands
+ */
+export interface AcpAvailableCommand {
+  /** Runtime confirms this command can execute while a turn is streaming. */
+  supportsDuringExecution?: boolean
+  /** Command name (e.g., "compact", "clear") */
+  name: string
+  /** Command description */
+  description: string
+  /** Input hint if command accepts arguments */
+  input?: { hint: string } | null
+}
+
+/**
+ * ACP Session model state
+ * @see claude-code-acp SessionModelState
+ */
+export interface AcpSessionModelState {
+  /** Available models */
+  availableModels: Array<{
+    modelId: string
+    name: string
+    description?: string
+  }>
+  /** Currently selected model ID */
+  currentModelId: string
+}
+
+/**
+ * ACP Session modes state
+ */
+export interface AcpSessionModesState {
+  /** Current mode ID */
+  currentModeId: AcpPermissionMode
+  /** Available modes */
+  availableModes: Array<{
+    id: AcpPermissionMode
+    name: string
+    description?: string
+  }>
+}
+
+/**
+ * ACP MCP Server configuration - stdio transport
+ */
+export interface AcpMcpServerStdio {
+  /** Server name */
+  name: string
+  /** Command to execute */
+  command: string
+  /** Command arguments */
+  args: string[]
+  /** Environment variables */
+  env?: Array<{ name: string; value: string }>
+}
+
+/**
+ * ACP MCP Server configuration - HTTP transport
+ */
+export interface AcpMcpServerHttp {
+  /** Transport type */
+  type: "http"
+  /** Server name */
+  name: string
+  /** Server URL */
+  url: string
+  /** HTTP headers */
+  headers?: Array<{ name: string; value: string }>
+}
+
+/**
+ * ACP MCP Server configuration - SSE transport (deprecated)
+ */
+export interface AcpMcpServerSse {
+  /** Transport type */
+  type: "sse"
+  /** Server name */
+  name: string
+  /** SSE endpoint URL */
+  url: string
+  /** HTTP headers */
+  headers?: Array<{ name: string; value: string }>
+}
+
+/**
+ * Preview ACP-channel MCP transport. The host must attach a dynamic MCP
+ * controller and explicitly enable the feature before this configuration can
+ * cross the wire.
+ */
+export type AcpMcpServerAcp = SdkAcpMcpServerAcp
+
+/**
+ * Union of all MCP server configurations
+ */
+export type AcpMcpServerConfig =
+  AcpMcpServerStdio | AcpMcpServerHttp | AcpMcpServerSse | AcpMcpServerAcp
+
+/**
+ * ACP Client capabilities for initialization
+ * @see https://agentclientprotocol.com/protocol/initialization#client-capabilities
+ */
+export type AcpClientCapabilities = SdkAcpClientCapabilities
+
+/**
+ * ACP Agent capabilities from initialization response
+ * @see https://agentclientprotocol.com/protocol/initialization#agent-capabilities
+ */
+export type AcpAgentCapabilities = SdkAcpAgentCapabilities
+
+/**
+ * ACP Client/Agent info for initialization
+ */
+export interface AcpImplementationInfo {
+  /** Implementation name (programmatic) */
+  name: string
+  /** Display title (human-readable) */
+  title?: string
+  /** Version string */
+  version: string
+}
+
+/**
+ * ACP Authentication method
+ */
+export type AcpAgentAuthMethod = SdkAcpAuthMethodAgent & { type: "agent" }
+export type AcpTerminalAuthMethod = SdkAcpAuthMethodTerminal & { type: "terminal" }
+export type AcpAuthMethod = AcpAgentAuthMethod | AcpTerminalAuthMethod
+
+export interface AcpTerminalAuthState {
+  methodId: string
+  terminalId?: string
+  status: "starting" | "running" | "reconnecting" | "completed" | "failed" | "cancelled"
+  exitCode?: number | null
+  error?: string
+}
+
+// Preview wire contracts stay SDK-owned. Runtime advertisement is controlled
+// independently by AcpFeatureProfile; importing a type never enables a feature.
+export type AcpProviderInfo = SdkAcpProviderInfo
+export type AcpListProvidersResponse = SdkAcpListProvidersResponse
+export type AcpSetProviderRequest = SdkAcpSetProviderRequest
+export type AcpSetProviderResponse = SdkAcpSetProviderResponse
+export type AcpDisableProviderRequest = SdkAcpDisableProviderRequest
+export type AcpDisableProviderResponse = SdkAcpDisableProviderResponse
+export type AcpConnectMcpRequest = SdkAcpConnectMcpRequest
+export type AcpConnectMcpResponse = SdkAcpConnectMcpResponse
+export type AcpDisconnectMcpRequest = SdkAcpDisconnectMcpRequest
+export type AcpDisconnectMcpResponse = SdkAcpDisconnectMcpResponse
+export type AcpMessageMcpRequest = SdkAcpMessageMcpRequest
+export type AcpMessageMcpResponse = SdkAcpMessageMcpResponse
+export type AcpMessageMcpNotification = SdkAcpMessageMcpNotification
+export interface AcpDynamicMcpConnectionState {
+  connectionId: string
+  serverId: string
+  sessionId?: string
+  status: "connecting" | "connected" | "disconnecting" | "closed" | "failed"
+  error?: string
+}
+export interface AcpDynamicMcpHostController {
+  connect(
+    request: AcpConnectMcpRequest,
+    context: {
+      sessionId: string
+      signal: AbortSignal
+      notify: (notification: AcpMessageMcpNotification) => void
+    }
+  ): Promise<AcpConnectMcpResponse>
+  message(
+    request: AcpMessageMcpRequest | AcpMessageMcpNotification,
+    context: { sessionId: string; signal?: AbortSignal; notification: boolean }
+  ): Promise<AcpMessageMcpResponse | void>
+  disconnect(
+    request: AcpDisconnectMcpRequest,
+    context: { sessionId: string; signal?: AbortSignal }
+  ): Promise<AcpDisconnectMcpResponse | void>
+}
+export type AcpStartNesRequest = SdkAcpStartNesRequest
+export type AcpStartNesResponse = SdkAcpStartNesResponse
+export type AcpSuggestNesRequest = SdkAcpSuggestNesRequest
+export type AcpSuggestNesResponse = SdkAcpSuggestNesResponse
+export type AcpCloseNesRequest = SdkAcpCloseNesRequest
+export type AcpCloseNesResponse = SdkAcpCloseNesResponse
+export type AcpNesSuggestion = SdkAcpNesSuggestion
+export type AcpDidOpenDocumentNotification = SdkAcpDidOpenDocumentNotification
+export type AcpDidChangeDocumentNotification = SdkAcpDidChangeDocumentNotification
+export type AcpDidCloseDocumentNotification = SdkAcpDidCloseDocumentNotification
+export type AcpDidSaveDocumentNotification = SdkAcpDidSaveDocumentNotification
+export type AcpDidFocusDocumentNotification = SdkAcpDidFocusDocumentNotification
+export type AcpCompactionStatus = SdkAcpCompactionStatus
+
+/**
+ * ACP Capability flags (legacy, for backward compatibility)
+ * @deprecated Use AcpAgentCapabilities for new code
+ */
+export interface AcpCapabilities {
+  /** Agent supports streaming responses */
+  streaming?: boolean
+  /** Agent can execute tools */
+  toolExecution?: boolean
+  /** Agent supports file operations */
+  fileOperations?: boolean
+  /** Agent supports code execution */
+  codeExecution?: boolean
+  /** Agent supports MCP tools */
+  mcpTools?: boolean
+  /** Agent supports multi-turn conversations */
+  multiTurn?: boolean
+  /** Agent supports context sharing */
+  contextSharing?: boolean
+  /** Agent supports thinking/chain-of-thought */
+  thinking?: boolean
+  /** Supported permission modes */
+  permissionModes?: AcpPermissionMode[]
+  /** Maximum context tokens */
+  maxContextTokens?: number
+  /** Supported file types */
+  supportedFileTypes?: string[]
+  /** Custom capabilities */
+  custom?: Record<string, unknown>
+}
+
+// ============================================================================
+// ACP Session Update Types (Notifications from Agent)
+// ============================================================================
+
+/**
+ * ACP session update type discriminator
+ * @see https://agentclientprotocol.com/protocol/prompt-turn
+ */
+export type AcpSessionUpdateType =
+  | "agent_message_chunk"
+  | "user_message_chunk"
+  // Canonical ACP v1 reasoning-chunk discriminator.
+  | "agent_thought_chunk"
+  // Legacy/vendor alias retained for tolerance (some adapters emit this).
+  | "thought_message_chunk"
+  | "tool_call"
+  | "tool_call_update"
+  | "plan"
+  | "plan_update"
+  | "plan_removed"
+  | "available_commands_update"
+  | "mode_change"
+  | "current_mode_update"
+  // Canonical ACP v1 config-option discriminator (singular).
+  | "config_option_update"
+  // Legacy/vendor alias retained for tolerance (plural).
+  | "config_options_update"
+  // Context-window + cost reporting (ACP v1 UsageUpdate).
+  | "usage_update"
+  // Session metadata (title/updatedAt) update (ACP v1 SessionInfoUpdate).
+  | "session_info_update"
+  | "notice"
+  | "compaction_update"
+  | "compaction_summary_chunk"
+
+/**
+ * ACP Tool call status
+ */
+export type AcpToolCallStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "failed"
+  // Receive-only compatibility values; stable ACP never emits these.
+  | "cancelled"
+  | "error"
+
+/**
+ * ACP Tool call kind
+ */
+export type AcpStableToolCallKind = SdkAcpToolKind
+export type AcpToolCallKind =
+  | AcpStableToolCallKind
+  // Receive-only compatibility values used by older/vendor adapters.
+  | "file_read"
+  | "file_write"
+  | "write"
+  | "terminal"
+  | "browser"
+  | "mcp"
+
+/**
+ * ACP Content block for session updates
+ */
+export type AcpContentBlock = SdkAcpContentBlock
+
+/**
+ * ACP Agent message chunk update
+ */
+export interface AcpAgentMessageChunkUpdate {
+  sessionUpdate: "agent_message_chunk"
+  content: AcpContentBlock
+  messageId?: string | null
+  _meta?: Record<string, unknown> | null
+}
+
+/**
+ * ACP User message chunk update
+ */
+export interface AcpUserMessageChunkUpdate {
+  sessionUpdate: "user_message_chunk"
+  content: AcpContentBlock
+  messageId?: string | null
+  _meta?: Record<string, unknown> | null
+}
+
+/**
+ * ACP Thought message chunk update.
+ *
+ * The canonical ACP v1 discriminator is `agent_thought_chunk`; the
+ * `thought_message_chunk` value is retained as a tolerated alias so adapters
+ * emitting the older string still surface reasoning.
+ */
+export interface AcpThoughtMessageChunkUpdate {
+  sessionUpdate: "agent_thought_chunk" | "thought_message_chunk"
+  content: AcpContentBlock
+  messageId?: string | null
+  _meta?: Record<string, unknown> | null
+}
+
+/**
+ * ACP Usage update — context window occupancy + cumulative session cost.
+ * @see https://agentclientprotocol.com/protocol/prompt-turn
+ */
+export interface AcpUsageUpdate {
+  sessionUpdate: "usage_update"
+  /** Tokens currently in context. */
+  used: number
+  /** Total context window size in tokens. */
+  size: number
+  /** Cumulative session cost (optional). */
+  cost?: { amount: number; currency: string } | null
+  /**
+   * Vendor metadata. Devin reports cumulative session token counters under
+   * `cognition.ai/inputTokens` / `cognition.ai/outputTokens` /
+   * `cognition.ai/cachedReadTokens` / `cognition.ai/cachedWriteTokens` here.
+   */
+  _meta?: Record<string, unknown> | null
+}
+
+/**
+ * ACP Session info update — session metadata (title / last-activity).
+ */
+export interface AcpSessionInfoUpdate {
+  sessionUpdate: "session_info_update"
+  title?: string | null
+  updatedAt?: string | null
+  _meta?: Record<string, unknown> | null
+}
+
+/** Preview advisory presentation; never history, authorization, or turn failure. */
+export interface AcpNoticeUpdate {
+  sessionUpdate: "notice"
+  severity: string
+  title: string
+  description?: string | null
+  _meta?: Record<string, unknown> | null
+}
+
+/**
+ * ACP Tool call update (initial)
+ */
+export interface AcpToolCallUpdate {
+  sessionUpdate: "tool_call"
+  toolCallId: string
+  title: string
+  /** Preview programmatic tool name; ignored unless negotiated. */
+  name?: string | null
+  kind: AcpToolCallKind
+  status: AcpToolCallStatus
+  /** Content produced by the tool call */
+  content?: AcpToolCallContent[]
+  /** File locations affected by this tool call */
+  locations?: AcpToolCallLocation[]
+  /** Raw input parameters sent to the tool */
+  rawInput?: Record<string, unknown>
+  /** Raw output returned by the tool */
+  rawOutput?: Record<string, unknown>
+}
+
+/**
+ * ACP Tool call status update
+ */
+export interface AcpToolCallStatusUpdate {
+  sessionUpdate: "tool_call_update"
+  toolCallId: string
+  status?: AcpToolCallStatus
+  title?: string
+  /** Preview programmatic tool name; ignored unless negotiated. */
+  name?: string | null
+  kind?: AcpToolCallKind
+  content?: AcpToolCallContent[]
+  /** File locations affected by this tool call */
+  locations?: AcpToolCallLocation[]
+  /** Raw input parameters sent to the tool */
+  rawInput?: Record<string, unknown>
+  /** Raw output returned by the tool */
+  rawOutput?: Record<string, unknown>
+}
+
+/**
+ * ACP Plan update
+ */
+export interface AcpPlanUpdate {
+  sessionUpdate: "plan"
+  entries: AcpPlanEntry[]
+}
+
+/** Identified plan content used by the current ACP SDK extension. */
+export type AcpPlanUpdateContent =
+  | { type: "items"; planId: string; entries: AcpPlanEntry[] }
+  | { type: "file"; planId: string; uri: string }
+  | { type: "markdown"; planId: string; content: string }
+
+/** Current ACP identified-plan update notification. */
+export interface AcpPlanContentUpdate {
+  sessionUpdate: "plan_update"
+  plan: AcpPlanUpdateContent
+}
+
+/** Current ACP identified-plan removal notification. */
+export interface AcpPlanRemovedUpdate {
+  sessionUpdate: "plan_removed"
+  planId: string
+}
+
+export type AcpCompactionUpdate = SdkAcpCompactionUpdate & {
+  sessionUpdate: "compaction_update"
+}
+
+export type AcpCompactionSummaryChunk = SdkAcpCompactionSummaryChunk & {
+  sessionUpdate: "compaction_summary_chunk"
+}
+
+/**
+ * ACP Available commands update
+ */
+export interface AcpAvailableCommandsUpdate {
+  sessionUpdate: "available_commands_update"
+  availableCommands: AcpAvailableCommand[]
+}
+
+/**
+ * ACP Mode change update
+ * @deprecated Use config_options_update with category 'mode' instead
+ */
+export interface AcpModeChangeUpdate {
+  sessionUpdate: "mode_change"
+  modeId: AcpPermissionMode
+}
+
+/**
+ * ACP Current mode update (agent-initiated mode change)
+ * @see https://agentclientprotocol.com/protocol/session-modes
+ */
+export interface AcpCurrentModeUpdate {
+  sessionUpdate: "current_mode_update"
+  currentModeId: string
+}
+
+// ============================================================================
+// ACP Session Config Options
+// @see https://agentclientprotocol.com/protocol/session-config-options
+// ============================================================================
+
+/**
+ * Config option category for semantic UX hints
+ * Categories starting with '_' are for custom use
+ */
+export type AcpConfigOptionCategory = "mode" | "model" | "model_config" | "thought_level" | string
+
+/**
+ * Config option type supported by ACP v1.
+ */
+export type AcpConfigOptionType = "select" | "boolean"
+
+/**
+ * A single value within a config option
+ */
+export interface AcpConfigOptionValue {
+  /** The value identifier used when setting this option */
+  value: string
+  /** Human-readable name to display */
+  name: string
+  /** Optional description of what this value does */
+  description?: string
+}
+
+/** A named group of select values. */
+export interface AcpConfigOptionGroup {
+  group: string
+  name: string
+  options: AcpConfigOptionValue[]
+}
+
+/**
+ * A configuration option for a session
+ * @see https://agentclientprotocol.com/protocol/session-config-options
+ */
+interface AcpConfigOptionBase {
+  /** Unique identifier for this configuration option */
+  id: string
+  /** Human-readable label for the option */
+  name: string
+  /** Optional description */
+  description?: string
+  /** Semantic category for UX hints */
+  category?: AcpConfigOptionCategory
+}
+
+export type AcpConfigOption = AcpConfigOptionBase &
+  (
+    | {
+        type: "select"
+        currentValue: string
+        options: AcpConfigOptionValue[] | AcpConfigOptionGroup[]
+      }
+    | {
+        type: "boolean"
+        currentValue: boolean
+      }
+  )
+
+/**
+ * ACP Config options update (session notification)
+ * @see https://agentclientprotocol.com/protocol/session-config-options
+ */
+export interface AcpConfigOptionsUpdate {
+  // Canonical ACP v1 uses the singular `config_option_update`; the plural is a
+  // tolerated alias. Both carry the full `configOptions` set.
+  sessionUpdate: "config_option_update" | "config_options_update"
+  configOptions: AcpConfigOption[]
+}
+
+// ============================================================================
+// ACP Tool Call Content Types
+// @see https://agentclientprotocol.com/protocol/tool-calls
+// ============================================================================
+
+/**
+ * Diff content produced by tool calls
+ */
+export interface AcpToolCallDiffContent {
+  type: "diff"
+  /** Absolute file path being modified */
+  path: string
+  /** Original content (null for new files) */
+  oldText: string | null
+  /** New content after modification */
+  newText: string
+}
+
+/**
+ * Terminal content embedded in tool calls
+ */
+export interface AcpToolCallTerminalContent {
+  type: "terminal"
+  /** ID of a terminal created with terminal/create */
+  terminalId: string
+}
+
+/**
+ * Regular content embedded in tool calls
+ */
+export interface AcpToolCallRegularContent {
+  type: "content"
+  content: AcpContentBlock
+}
+
+/**
+ * Union of all tool call content types
+ */
+export type AcpToolCallContent =
+  AcpToolCallRegularContent | AcpToolCallDiffContent | AcpToolCallTerminalContent
+
+/**
+ * File location affected by a tool call (for follow-along features)
+ */
+export interface AcpToolCallLocation {
+  /** Absolute file path being accessed or modified */
+  path: string
+  /** Optional line number within the file */
+  line?: number
+}
+
+/**
+ * ACP fs/read_text_file params
+ * @see https://agentclientprotocol.com/protocol/file-system
+ */
+export interface AcpReadTextFileParams {
+  /** Session whose workspace roots authorize this request */
+  sessionId: string
+  /** Absolute file path */
+  path: string
+  /** 1-based line number to start from */
+  line?: number
+  /** Maximum number of lines to return */
+  limit?: number
+  /** Optional metadata */
+  _meta?: Record<string, unknown>
+}
+
+/** ACP fs/write_text_file params. */
+export interface AcpWriteTextFileParams {
+  sessionId: string
+  path: string
+  content: string
+  _meta?: Record<string, unknown>
+}
+
+/**
+ * ACP terminal/create params
+ * @see https://agentclientprotocol.com/protocol/terminals
+ */
+export interface AcpTerminalCreateParams {
+  sessionId: string
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Array<{ name: string; value: string }>
+  outputByteLimit?: number
+  _meta?: Record<string, unknown>
+}
+
+/**
+ * ACP terminal/output params
+ * @see https://agentclientprotocol.com/protocol/terminals
+ */
+export interface AcpTerminalOutputParams {
+  sessionId: string
+  terminalId: string
+  _meta?: Record<string, unknown>
+}
+
+/**
+ * Permission option kind
+ * @see https://agentclientprotocol.com/protocol/tool-calls
+ */
+export type AcpPermissionOptionKind =
+  "allow_once" | "allow_always" | "reject_once" | "reject_always"
+
+/**
+ * Permission option presented to the user
+ */
+export interface AcpPermissionOption {
+  /** Unique identifier for this option */
+  optionId: string
+  /** Human-readable label */
+  name: string
+  /** Kind hint for UI treatment */
+  kind: AcpPermissionOptionKind
+  /** Optional description */
+  description?: string
+  /** Whether this is the default option */
+  isDefault?: boolean
+  /** Optional metadata */
+  _meta?: Record<string, unknown>
+}
+
+/**
+ * Permission request outcome
+ */
+export interface AcpPermissionOutcome {
+  outcome: "selected" | "cancelled"
+  optionId?: string
+}
+
+// ============================================================================
+// ACP Content Annotations
+// @see https://agentclientprotocol.com/protocol/content
+// ============================================================================
+
+/**
+ * Annotations on content blocks
+ */
+export type AcpContentAnnotations = SdkAcpAnnotations
+
+/**
+ * Audio content block
+ * @see https://agentclientprotocol.com/protocol/content
+ */
+export interface AcpAudioContentBlock {
+  type: "audio"
+  /** Base64-encoded audio data */
+  data: string
+  /** MIME type of the audio (e.g., "audio/wav", "audio/mp3") */
+  mimeType: string
+  /** Optional annotations */
+  annotations?: AcpContentAnnotations
+}
+
+/**
+ * Terminal exit status
+ * @see https://agentclientprotocol.com/protocol/terminals
+ */
+export interface AcpTerminalExitStatus {
+  /** Process exit code (may be null if terminated by signal) */
+  exitCode: number | null
+  /** Signal that terminated the process (may be null if exited normally) */
+  signal: string | null
+}
+
+/**
+ * ACP terminal/output result
+ * @see https://agentclientprotocol.com/protocol/terminals
+ */
+export interface AcpTerminalOutputResult {
+  output: string
+  truncated: boolean
+  exitStatus: AcpTerminalExitStatus
+  /** Backward-compatible field */
+  exitCode?: number | null
+}
+
+/**
+ * Union of all ACP session update types
+ */
+export type AcpSessionUpdate =
+  | AcpNoticeUpdate
+  | AcpAgentMessageChunkUpdate
+  | AcpUserMessageChunkUpdate
+  | AcpThoughtMessageChunkUpdate
+  | AcpToolCallUpdate
+  | AcpToolCallStatusUpdate
+  | AcpPlanUpdate
+  | AcpPlanContentUpdate
+  | AcpPlanRemovedUpdate
+  | AcpAvailableCommandsUpdate
+  | AcpModeChangeUpdate
+  | AcpCurrentModeUpdate
+  | AcpConfigOptionsUpdate
+  | AcpUsageUpdate
+  | AcpSessionInfoUpdate
+  | AcpCompactionUpdate
+  | AcpCompactionSummaryChunk
+
+/**
+ * ACP session/update notification params
+ */
+export interface AcpSessionUpdateNotification {
+  sessionId: string
+  update: AcpSessionUpdate
+}
+
+/**
+ * ACP Tool information from agent
+ */
+export interface AcpToolInfo {
+  id: string
+  name: string
+  description?: string
+  parameters?: Record<string, unknown>
+  requiresPermission?: boolean
+  category?: string
+  mcpServer?: {
+    id: string
+    name: string
+  }
+}
+
+/**
+ * ACP Permission request from agent
+ */
+export interface AcpPermissionRequest {
+  id: string
+  requestId?: string
+  sessionId?: string
+  toolCallId?: string
+  title?: string
+  kind?: AcpToolCallKind
+  toolInfo: AcpToolInfo
+  options?: AcpPermissionOption[]
+  /** Arguments exactly as the agent sent them. The only input policy reads. */
+  rawInput?: Record<string, unknown>
+  /**
+   * Display-only arguments recovered when the agent omitted `rawInput` (from
+   * JSON text content, diff content or locations — see
+   * `runtimes/acp/acp-permission-input.ts`). Absent when `rawInput` was sent
+   * or nothing could be recovered. Never feeds a permission decision.
+   */
+  inputPreview?: Record<string, unknown>
+  locations?: AcpToolCallLocation[]
+  reason?: string
+  riskLevel?: "low" | "medium" | "high" | "critical"
+  autoApproveTimeout?: number
+  metadata?: Record<string, unknown>
+  _meta?: Record<string, unknown>
+}
+
+/**
+ * ACP Permission response
+ */
+export interface AcpPermissionResponse {
+  requestId: string
+  granted: boolean
+  reason?: string
+  rememberChoice?: boolean
+  scope?: "once" | "session" | "always"
+  /** Option ID selected from ACP permission options */
+  optionId?: string
+  /**
+   * Per-question answers for interactive user-input requests (Codex
+   * `item/tool/requestUserInput`): question id → selected/typed answers.
+   * Absent for plain approval decisions.
+   */
+  answers?: Record<string, string[]>
+}
+
+export type AcpElicitationValue = string | number | boolean | string[]
+
+export interface AcpElicitationPropertySchema {
+  type: "string" | "integer" | "number" | "boolean" | "array"
+  title?: string
+  description?: string
+  format?: string
+  enum?: string[]
+  oneOf?: Array<{ const: string; title?: string; group?: string }>
+  /**
+   * Element schema for an `array` property (a multi-select). `oneOf` carries a
+   * label per choice; `enum` is the bare-values spelling. Both are accepted for
+   * the same reason the property level accepts both — an agent may send either.
+   */
+  items?: {
+    type: "string"
+    enum?: string[]
+    oneOf?: Array<{ const: string; title?: string }>
+  }
+  default?: AcpElicitationValue
+  writeOnly?: boolean
+  [key: string]: unknown
+}
+
+export interface AcpElicitationSchema {
+  type?: "object"
+  title?: string | null
+  description?: string | null
+  properties: Record<string, AcpElicitationPropertySchema>
+  required?: string[] | null
+  _meta?: Record<string, unknown> | null
+}
+
+/** Feature-gated ACP v1 elicitation request (schema 1.20.0 unstable surface). */
+export interface AcpElicitationRequest {
+  /** Local response correlation id derived from the JSON-RPC request id. */
+  id: string
+  mode: "form" | "url"
+  message: string
+  sessionId?: string
+  requestId?: number | string
+  toolCallId?: string | null
+  requestedSchema?: AcpElicitationSchema
+  elicitationId?: string
+  url?: string
+  origin?: string
+  hasPunycodeWarning?: boolean
+  _meta?: Record<string, unknown> | null
+  /** Opaque original payload for storage/proxying; never interpreted as known behavior. */
+  raw: Record<string, unknown>
+}
+
+export interface AcpElicitationResponse {
+  requestId: string
+  action: "accept" | "decline" | "cancel"
+  content?: Record<string, AcpElicitationValue> | null
+  _meta?: Record<string, unknown> | null
+}
+
+// ============================================================================
+// External Agent Configuration
+// ============================================================================
+
+/**
+ * Process spawn configuration for local agents
+ */
+export interface ExternalAgentProcessConfig {
+  /** Command to execute */
+  command: string
+  /** Command arguments */
+  args?: string[]
+  /** Environment variables */
+  env?: Record<string, string>
+  /** Working directory */
+  cwd?: string
+  /** Shell to use (Windows) */
+  shell?: boolean | string
+  /** Timeout for process startup (ms) */
+  startupTimeout?: number
+  /** Keep process alive on disconnect */
+  keepAlive?: boolean
+  /** Restart on crash */
+  restartOnCrash?: boolean
+  /** Maximum restart attempts */
+  maxRestarts?: number
+  /**
+   * Convenience: append `--bare` to `args` at spawn time so the agent skips
+   * on-disk auto-discovery (hooks, skills, plugins, MCP, CLAUDE.md). Useful
+   * for the Claude Code preset; ignored if `args` already contains `--bare`.
+   */
+  bare?: boolean
+  /**
+   * Convenience: append `--debug` to `args` at spawn time so the agent emits
+   * verbose stderr logs. Ignored if `args` already contains `--debug`.
+   */
+  debug?: boolean
+}
+
+/**
+ * Network configuration for remote agents
+ */
+export interface ExternalAgentNetworkConfig {
+  /** Endpoint URL */
+  endpoint: string
+  /** Optional JSON-RPC endpoint (defaults to `${endpoint}/message`) */
+  rpcEndpoint?: string
+  /** Optional events endpoint for SSE (defaults to `${endpoint}/events`) */
+  eventsEndpoint?: string
+  /** Authentication method */
+  authMethod?: "none" | "bearer" | "api-key" | "oauth2" | "custom"
+  /** API key or token */
+  apiKey?: string
+  /** Bearer token */
+  bearerToken?: string
+  /** Custom headers */
+  headers?: Record<string, string>
+  /** Request timeout (ms) */
+  timeout?: number
+  /** Enable SSL/TLS verification */
+  verifySsl?: boolean
+  /** Proxy configuration */
+  proxy?: {
+    host: string
+    port: number
+    auth?: { username: string; password: string }
+  }
+}
+
+/**
+ * Retry configuration
+ */
+export interface ExternalAgentRetryConfig {
+  /** Maximum retry attempts */
+  maxRetries: number
+  /** Initial retry delay (ms) */
+  retryDelay: number
+  /** Use exponential backoff */
+  exponentialBackoff: boolean
+  /** Maximum retry delay (ms) */
+  maxRetryDelay?: number
+  /** Retry on specific error codes */
+  retryOnErrors?: string[]
+}
+
+/**
+ * A host-resolved model binding. Upstream credentials never enter agent configuration.
+ *
+ * Declared in `@cognia/agent-config-types` beside `ChatSession.externalAgentModels`,
+ * which stores it per conversation; re-exported here for the external-agent code
+ * that has always imported it from this module.
+ */
+export type { ExternalAgentCogniaModelBinding }
+
+export function normalizeCogniaModelBinding(
+  value: unknown
+): ExternalAgentCogniaModelBinding | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid Cognia model binding")
+  const binding = value as Record<string, unknown>
+  if (
+    Object.keys(binding).some((key) => !["providerId", "modelId", "accountId"].includes(key)) ||
+    typeof binding.providerId !== "string" ||
+    !binding.providerId.trim() ||
+    typeof binding.modelId !== "string" ||
+    !binding.modelId.trim() ||
+    (binding.accountId !== undefined &&
+      binding.accountId !== null &&
+      (typeof binding.accountId !== "string" || !binding.accountId.trim()))
+  ) {
+    throw new Error("Invalid Cognia model binding")
+  }
+  return {
+    providerId: binding.providerId.trim(),
+    modelId: binding.modelId.trim(),
+    ...(binding.accountId !== undefined ? { accountId: binding.accountId as string | null } : {}),
+  }
+}
+
+/**
+ * Where a configuration keeps the runtime's own on-disk state (login, the CLI's
+ * config file, its MCP config, its session history).
+ *
+ * - `shared`: the runtime's default home (`~/.codex`, `~/.claude`, …), the one
+ *   the user's own CLI uses. Every configuration of the runtime that is
+ *   `shared` sees the same login and history. A configuration persisted before
+ *   this field existed has no value and means `shared`.
+ * - `isolated`: a directory owned by this configuration alone
+ *   (`<data_dir>/cognia/external-agents/<configId>/`). The spawn backend maps
+ *   the runtime's home variables into it and, under the sandbox, denies the
+ *   shared home. Only runtimes with an `agentStateIsolation` rule in
+ *   `protocol/external-agent-security-policy.json` can be isolated.
+ *
+ * New configurations and duplicates default to `isolated` (ADR-0216).
+ */
+export type ExternalAgentStateIsolation = "shared" | "isolated"
+
+/**
+ * Complete external agent configuration
+ */
+export interface ExternalAgentConfig {
+  /** Unique identifier */
+  id: string
+  /** Human-readable name */
+  name: string
+  /** Description */
+  description?: string
+  /** Protocol type */
+  protocol: ExternalAgentProtocol
+  /** Transport mechanism */
+  transport: ExternalAgentTransport
+  /** Whether agent is enabled */
+  enabled: boolean
+  /** Use task-scoped Cognia gateway access instead of the runtime's own provider settings. */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /** @see ExternalAgentStateIsolation. Absent means `shared`. */
+  stateIsolation?: ExternalAgentStateIsolation
+  /**
+   * The subscription account this configuration launches with (Codex family).
+   * Absent or `null` follows the globally active account, which is what every
+   * configuration did before accounts could be bound per configuration.
+   */
+  subscriptionAccountId?: string | null
+  /**
+   * The configuration this one was duplicated from. Lineage only: it groups
+   * siblings in the UI and never feeds admission, readiness or credentials.
+   * The source may since have been deleted.
+   */
+  duplicatedFromAgentId?: string
+
+  /** Process configuration (for stdio transport) */
+  process?: ExternalAgentProcessConfig
+  /** Network configuration (for http/websocket/sse transport) */
+  network?: ExternalAgentNetworkConfig
+
+  /** Agent capabilities (discovered or configured) */
+  capabilities?: AcpCapabilities
+
+  /** Default permission mode */
+  defaultPermissionMode?: AcpPermissionMode
+  /** Auto-approve tools matching patterns */
+  autoApprovePatterns?: string[]
+  /** Tools requiring manual approval */
+  requireApprovalFor?: string[]
+
+  /** Codex app-server specific defaults (sandbox / reasoning options) */
+  codexOptions?: CodexAgentOptions
+
+  /** Execution timeout (ms) */
+  timeout?: number
+  /** Retry configuration */
+  retryConfig?: ExternalAgentRetryConfig
+
+  /**
+   * Maximum native sessions this configuration keeps open at once. Opening
+   * one more first closes the least recently active idle sessions; only when
+   * every open session is mid-turn is the new one refused
+   * (`session_limit_reached`). Reusing an open session never counts. Absent
+   * means no limit, which is what every configuration had before the field
+   * was enforced.
+   */
+  maxConcurrentSessions?: number
+  /** Stream idle timeout (ms): how long a running turn may go without output. */
+  sessionIdleTimeout?: number
+
+  /** Tags for categorization */
+  tags?: string[]
+  /** Custom metadata */
+  metadata?: Record<string, unknown>
+  /** Optional immutable provenance for an ACP Registry installation. */
+  registryProvenance?: {
+    registryId: string
+    version: string
+    checksum?: string
+    sourceUrl: string
+    installedAt: Date
+  }
+  /** Last known runtime validity snapshot (best-effort projection) */
+  validitySnapshot?: ExternalAgentValiditySnapshot
+
+  /**
+   * What the USER says their own build of this agent can do — merge layer
+   * `user-declared` (`@cognia/agent-config-types/external-agent-capability`).
+   *
+   * Levels only; the profile builder stamps the evidence grade. It exists
+   * because some capabilities are properties of the binary someone installed,
+   * not of the wire protocol: whether a Codex build has web search switched on
+   * is in their `config.toml` and their plan, and no checked-in manifest row
+   * can honestly answer it. Every such row ships `unknown`, and this is how it
+   * stops being unknown without Cognia guessing.
+   *
+   * A declaration fills an `unknown` and may tighten; it cannot widen a
+   * protocol-level `unsupported` back to `native` (see `layerMayWiden`). A
+   * live handshake or observation outranks it.
+   */
+  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
+
+  /** Creation timestamp */
+  createdAt?: Date
+  /** Last updated timestamp */
+  updatedAt?: Date
+}
+
+/**
+ * Input for creating external agent configuration
+ */
+export interface CreateExternalAgentInput {
+  name: string
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /** Defaults to `isolated` for a new configuration. */
+  stateIsolation?: ExternalAgentStateIsolation
+  subscriptionAccountId?: string | null
+  /** Set by duplicate only. */
+  duplicatedFromAgentId?: string
+  /** Create the configuration disabled (default enabled). */
+  enabled?: boolean
+  maxConcurrentSessions?: number
+  sessionIdleTimeout?: number
+  description?: string
+  protocol: ExternalAgentProtocol
+  transport: ExternalAgentTransport
+  process?: ExternalAgentProcessConfig
+  network?: ExternalAgentNetworkConfig
+  defaultPermissionMode?: AcpPermissionMode
+  autoApprovePatterns?: string[]
+  requireApprovalFor?: string[]
+  codexOptions?: CodexAgentOptions
+  timeout?: number
+  retryConfig?: Partial<ExternalAgentRetryConfig>
+  tags?: string[]
+  metadata?: Record<string, unknown>
+  validitySnapshot?: ExternalAgentValiditySnapshot
+  /** @see ExternalAgentConfig.declaredCapabilities */
+  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
+}
+
+/**
+ * Input for updating external agent configuration
+ */
+export interface UpdateExternalAgentInput {
+  name?: string
+  /** Null clears the configured binding; omission preserves it. */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
+  stateIsolation?: ExternalAgentStateIsolation
+  /** Null clears the binding (follow the active account); omission preserves it. */
+  subscriptionAccountId?: string | null
+  /** Null clears the limit (unlimited); omission preserves it. */
+  maxConcurrentSessions?: number | null
+  /** Null clears it (fall back to the execution timeout); omission preserves it. */
+  sessionIdleTimeout?: number | null
+  description?: string
+  enabled?: boolean
+  process?: Partial<ExternalAgentProcessConfig>
+  network?: Partial<ExternalAgentNetworkConfig>
+  defaultPermissionMode?: AcpPermissionMode
+  autoApprovePatterns?: string[]
+  requireApprovalFor?: string[]
+  codexOptions?: CodexAgentOptions
+  timeout?: number
+  retryConfig?: Partial<ExternalAgentRetryConfig>
+  tags?: string[]
+  metadata?: Record<string, unknown>
+  validitySnapshot?: ExternalAgentValiditySnapshot
+  /** @see ExternalAgentConfig.declaredCapabilities */
+  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
+}
+
+/**
+ * Codex app-server per-agent option defaults. Applied at session creation
+ * (thread/start `sandbox`, turn/start `sandboxPolicy` / `effort` / `summary`)
+ * and adjustable per session via synthesized config options.
+ */
+export interface CodexAgentOptions {
+  /** Sandbox mode for command execution (`SandboxPolicy` tag). */
+  sandboxMode?: "readOnly" | "workspaceWrite" | "dangerFullAccess"
+  /** Allow network access inside the sandbox (readOnly/workspaceWrite). */
+  networkAccess?: boolean
+  /** Extra writable roots for workspaceWrite. */
+  writableRoots?: string[]
+  /**
+   * Absolute folder paths registered as extra Codex skill roots via the
+   * `skills/extraRoots/set` app-server RPC. Codex discovers every `SKILL.md`
+   * under these directories in addition to the default `.agents/skills`
+   * locations. Re-applied on every connect (the server never persists them).
+   */
+  extraSkillRoots?: string[]
+  /** Default reasoning effort (model-specific values, e.g. "low"…"xhigh"). */
+  defaultReasoningEffort?: string
+  /** Reasoning summary verbosity: "auto" | "concise" | "detailed" | "none". */
+  reasoningSummary?: "auto" | "concise" | "detailed" | "none"
+  /**
+   * Sticky service tier for the thread (`serviceTier` on `thread/start`,
+   * `thread/resume`, `thread/fork`, `turn/start`; e.g. "fast" / "flex").
+   * Requires Codex CLI ≥ 0.151 — older servers omit the field.
+   */
+  serviceTier?: string
+  /**
+   * Client-supplied analytics source classification (`threadSource` on
+   * `thread/start` / `thread/fork`). Requires Codex CLI ≥ 0.151.
+   */
+  threadSource?: string
+}
+
+// ============================================================================
+// External Agent Session
+// ============================================================================
+
+/**
+ * Session status
+ */
+export type ExternalAgentSessionStatus =
+  "creating" | "active" | "idle" | "executing" | "waiting" | "error" | "closing" | "closed"
+
+/**
+ * External agent session
+ */
+export interface ExternalAgentSession {
+  /** Session ID */
+  id: string
+  /** Parent agent ID */
+  agentId: string
+  /** Session status */
+  status: ExternalAgentSessionStatus
+  /** Permission mode for this session */
+  permissionMode?: AcpPermissionMode
+  /**
+   * Pre-approved tool allow-list for `dontAsk` mode. A tool matching an entry
+   * is silently approved; everything else is denied without a UI prompt.
+   */
+  allowedTools?: string[]
+  /** Discovered capabilities */
+  capabilities?: AcpCapabilities
+  /** Available tools in this session */
+  tools?: AcpToolInfo[]
+
+  /** Context passed to agent */
+  context?: ExternalAgentContext
+  /** Conversation history */
+  messages?: ExternalAgentMessage[]
+
+  /** Token usage in this session */
+  tokenUsage?: ExternalAgentTokenUsage
+
+  /** Creation timestamp */
+  createdAt: Date
+  /** Last activity timestamp */
+  lastActivityAt: Date
+  /** Expiry timestamp */
+  expiresAt?: Date
+
+  /** Error message if status is 'error' */
+  error?: string
+  /** Custom metadata */
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Context for external agent session
+ */
+export interface ExternalAgentContext {
+  /** Parent task description */
+  parentTask?: string
+  /** Parent agent ID (if sub-agent) */
+  parentAgentId?: string
+  /** Shared context from parent */
+  sharedContext?: Record<string, unknown>
+  /** Working directory */
+  workingDirectory?: string
+  /** Available files */
+  files?: string[]
+  /** Environment info */
+  environment?: {
+    os?: string
+    shell?: string
+    editor?: string
+    language?: string
+  }
+  /** Custom context data */
+  custom?: Record<string, unknown>
+}
+
+/**
+ * Token usage tracking
+ */
+export interface ExternalAgentTokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  /** Reasoning tokens reported separately by the external agent. */
+  reasoningTokens?: number
+  /** Tokens currently occupying the agent's live context, when reported. */
+  contextTokens?: number
+  /** The live model's authoritative context-window size, when reported. */
+  modelContextWindow?: number
+  /**
+   * Cost the PROVIDER reported for this turn.
+   *
+   * Carried verbatim and never derived. OpenCode returns a bare number with no
+   * currency, so `currency` stays absent rather than being guessed as USD — a
+   * fabricated unit is worse than a missing one in anything that later sums or
+   * displays it. Cognia does not price external turns itself; this is the
+   * agent's own figure, and callers should present it as such.
+   */
+  providerCost?: {
+    amount: number
+    /** Only when the provider named one. Absent means "unit unknown". */
+    currency?: string
+  }
+}
+
+// ============================================================================
+// External Agent Messages
+// ============================================================================
+
+/**
+ * Message role
+ */
+export type ExternalAgentMessageRole = "user" | "assistant" | "system" | "tool"
+
+/**
+ * Content block types
+ */
+export type ExternalAgentContentType =
+  | "text"
+  | "image"
+  | "audio"
+  | "resource"
+  | "resource_link"
+  | "file"
+  | "tool_use"
+  | "tool_result"
+  | "thinking"
+  | "commentary"
+  | "error"
+
+/**
+ * Text content block
+ */
+export interface ExternalAgentTextContent {
+  type: "text"
+  text: string
+  annotations?: AcpContentAnnotations | null
+}
+
+/**
+ * Image content block
+ */
+export interface ExternalAgentImageContent {
+  type: "image"
+  source: {
+    type: "base64" | "url"
+    data?: string
+    url?: string
+    mediaType: string
+  }
+  alt?: string
+  annotations?: AcpContentAnnotations | null
+}
+
+export interface ExternalAgentAudioContent {
+  type: "audio"
+  data: string
+  mimeType: string
+  annotations?: AcpContentAnnotations | null
+}
+
+export interface ExternalAgentResourceContent {
+  type: "resource"
+  resource: {
+    uri: string
+    mimeType?: string | null
+    text?: string
+    blob?: string
+  }
+  annotations?: AcpContentAnnotations | null
+}
+
+export interface ExternalAgentResourceLinkContent {
+  type: "resource_link"
+  uri: string
+  name: string
+  title?: string | null
+  description?: string | null
+  mimeType?: string | null
+  size?: number | null
+  annotations?: AcpContentAnnotations | null
+}
+
+/**
+ * File content block
+ */
+export interface ExternalAgentFileContent {
+  type: "file"
+  path: string
+  content?: string
+  encoding?: "utf-8" | "base64"
+  mimeType?: string
+}
+
+/**
+ * Tool use content block
+ */
+export interface ExternalAgentToolUseContent {
+  type: "tool_use"
+  id: string
+  name: string
+  input: Record<string, unknown>
+  status?: "pending" | "running" | "completed" | "error"
+}
+
+/**
+ * Tool result content block
+ */
+export interface ExternalAgentToolResultContent {
+  type: "tool_result"
+  toolUseId: string
+  content: string | Record<string, unknown>
+  isError?: boolean
+}
+
+/**
+ * Thinking content block (for chain-of-thought)
+ */
+export interface ExternalAgentThinkingContent {
+  type: "thinking"
+  thinking: string
+}
+
+/** User-visible mid-turn narration retained when hydrating session history. */
+export interface ExternalAgentCommentaryContent {
+  type: "commentary"
+  text: string
+  source?: "codex"
+}
+
+/**
+ * Error content block
+ */
+export interface ExternalAgentErrorContent {
+  type: "error"
+  error: string
+  code?: string
+  details?: Record<string, unknown>
+}
+
+/**
+ * Union of all content block types
+ */
+export type ExternalAgentContent =
+  | ExternalAgentTextContent
+  | ExternalAgentImageContent
+  | ExternalAgentAudioContent
+  | ExternalAgentResourceContent
+  | ExternalAgentResourceLinkContent
+  | ExternalAgentFileContent
+  | ExternalAgentToolUseContent
+  | ExternalAgentToolResultContent
+  | ExternalAgentThinkingContent
+  | ExternalAgentCommentaryContent
+  | ExternalAgentErrorContent
+
+/**
+ * External agent message
+ */
+export interface ExternalAgentMessage {
+  /** Message ID */
+  id: string
+  /** Message role */
+  role: ExternalAgentMessageRole
+  /** Content blocks */
+  content: ExternalAgentContent[]
+  /** Timestamp */
+  timestamp: Date
+  /** Token usage for this message */
+  tokenUsage?: ExternalAgentTokenUsage
+  /** Custom metadata */
+  metadata?: Record<string, unknown>
+}
+
+// ============================================================================
+// External Agent Events (Streaming)
+// ============================================================================
+
+/**
+ * Event types for streaming responses
+ */
+export type ExternalAgentEventType =
+  | "session_start"
+  | "session_end"
+  | "message_start"
+  | "message_delta"
+  | "message_end"
+  | "content_block_start"
+  | "content_block_delta"
+  | "content_block_end"
+  | "artifact_update"
+  | "tool_use_start"
+  | "tool_use_delta"
+  | "tool_use_end"
+  | "tool_result"
+  | "tool_call_update"
+  | "permission_request"
+  | "permission_response"
+  | "elicitation_request"
+  | "elicitation_complete"
+  | "commentary_delta"
+  | "async_questions"
+  | "thinking"
+  | "plan_update"
+  | "commands_update"
+  | "config_options_update"
+  | "mode_update"
+  | "usage_update"
+  | "session_info_update"
+  | "extension_ui_update"
+  | "input_queue_cleared"
+  | "compaction_update"
+  | "compaction_summary_chunk"
+  | "nes_suggestion"
+  | "nes_closed"
+  | "progress"
+  | "error"
+  | "done"
+  | "hook_fire"
+
+/**
+ * Base event interface
+ */
+export interface ExternalAgentEventBase {
+  type: ExternalAgentEventType
+  sessionId?: string
+  timestamp: Date
+  /** Emitted by an autonomous runtime channel outside an owned prompt iterator. */
+  delivery?: "out_of_band"
+}
+
+/**
+ * Session start event
+ */
+export interface ExternalAgentSessionStartEvent extends ExternalAgentEventBase {
+  type: "session_start"
+  capabilities?: AcpCapabilities
+  tools?: AcpToolInfo[]
+}
+
+/**
+ * Session end event
+ */
+export interface ExternalAgentSessionEndEvent extends ExternalAgentEventBase {
+  type: "session_end"
+  reason?: "completed" | "cancelled" | "error" | "timeout"
+  error?: string
+}
+
+/**
+ * Message start event
+ */
+export interface ExternalAgentMessageStartEvent extends ExternalAgentEventBase {
+  type: "message_start"
+  messageId?: string
+  role?: ExternalAgentMessageRole
+}
+
+/**
+ * Message delta event
+ */
+export interface ExternalAgentMessageDeltaEvent extends ExternalAgentEventBase {
+  type: "message_delta"
+  messageId?: string
+  delta: {
+    type: "text" | "thinking"
+    text: string
+  }
+  content?: AcpContentBlock
+}
+
+/**
+ * Message end event
+ */
+export interface ExternalAgentMessageEndEvent extends ExternalAgentEventBase {
+  type: "message_end"
+  messageId?: string
+  tokenUsage?: ExternalAgentTokenUsage
+}
+
+export interface ExternalAgentContentBlockStartEvent extends ExternalAgentEventBase {
+  type: "content_block_start"
+  messageId?: string
+  block: AcpContentBlock
+  role?: "user" | "assistant"
+  channel?: "message" | "thought"
+}
+
+export interface ExternalAgentContentBlockDeltaEvent extends ExternalAgentEventBase {
+  type: "content_block_delta"
+  messageId?: string
+  block: AcpContentBlock
+  role?: "user" | "assistant"
+  channel?: "message" | "thought"
+}
+
+export interface ExternalAgentContentBlockEndEvent extends ExternalAgentEventBase {
+  type: "content_block_end"
+  messageId?: string
+  block?: AcpContentBlock
+}
+
+/** A complete artifact snapshot; later updates replace the same identity. */
+export interface ExternalAgentArtifactUpdateEvent extends ExternalAgentEventBase {
+  type: "artifact_update"
+  artifactId: string
+  name?: string
+  blocks: AcpContentBlock[]
+  complete: boolean
+}
+
+/**
+ * Tool use start event
+ */
+export interface ExternalAgentToolUseStartEvent extends ExternalAgentEventBase {
+  type: "tool_use_start"
+  toolUseId: string
+  toolName: string
+  /** Human-readable per-call title. Kept separate from the stable tool identity. */
+  title?: string
+  kind?: AcpToolCallKind
+  rawInput?: Record<string, unknown>
+  locations?: AcpToolCallLocation[]
+  toolMetadata?: ExternalAgentToolMetadata
+}
+
+/** Presentation and safety metadata shared by external-agent tool adapters. */
+export interface ExternalAgentToolMetadata {
+  kind?: AcpToolCallKind
+  readOnlyHint?: boolean | null
+  locations?: AcpToolCallLocation[]
+  appContext?: {
+    appName?: string | null
+    actionName?: string | null
+    connectorId?: string
+    linkId?: string
+  }
+}
+
+/**
+ * Tool use delta event
+ */
+export interface ExternalAgentToolUseDeltaEvent extends ExternalAgentEventBase {
+  type: "tool_use_delta"
+  toolUseId: string
+  delta: string
+}
+
+/**
+ * Tool use end event
+ */
+export interface ExternalAgentToolUseEndEvent extends ExternalAgentEventBase {
+  type: "tool_use_end"
+  toolUseId: string
+  input: Record<string, unknown>
+}
+
+/**
+ * Tool result event
+ */
+export interface ExternalAgentToolResultEvent extends ExternalAgentEventBase {
+  type: "tool_result"
+  toolUseId: string
+  result: string | Record<string, unknown>
+  isError?: boolean
+  toolName?: string
+  title?: string
+  toolMetadata?: ExternalAgentToolMetadata
+  kind?: AcpToolCallKind
+  rawInput?: Record<string, unknown>
+  rawOutput?: Record<string, unknown>
+  locations?: AcpToolCallLocation[]
+  status?: AcpToolCallStatus
+}
+
+/**
+ * Permission request event
+ */
+export interface ExternalAgentPermissionRequestEvent extends ExternalAgentEventBase {
+  type: "permission_request"
+  request: AcpPermissionRequest
+}
+
+/**
+ * Permission response event
+ */
+export interface ExternalAgentPermissionResponseEvent extends ExternalAgentEventBase {
+  type: "permission_response"
+  response: AcpPermissionResponse
+}
+
+export interface ExternalAgentElicitationRequestEvent extends ExternalAgentEventBase {
+  type: "elicitation_request"
+  request: AcpElicitationRequest
+}
+
+export interface ExternalAgentElicitationCompleteEvent extends ExternalAgentEventBase {
+  type: "elicitation_complete"
+  elicitationId: string
+  _meta?: Record<string, unknown> | null
+}
+
+/**
+ * Thinking event
+ */
+export interface ExternalAgentThinkingEvent extends ExternalAgentEventBase {
+  type: "thinking"
+  thinking: string
+  messageId?: string
+  content?: AcpContentBlock
+}
+
+/**
+ * User-visible mid-turn narration. This is intentionally separate from
+ * `thinking`: commentary may be rendered as progress, while reasoning remains
+ * governed by the reasoning disclosure policy.
+ */
+export interface ExternalAgentCommentaryDeltaEvent extends ExternalAgentEventBase {
+  type: "commentary_delta"
+  messageId?: string
+  text: string
+  done?: boolean
+  source?: "codex"
+}
+
+/**
+ * One non-blocking question an agent asked mid-turn (Codex
+ * `AsyncUserInputQuestion`: a `title` plus optional suggested `options`).
+ */
+export interface ExternalAgentAsyncQuestion {
+  /**
+   * Wire question id. Present only when the question backs a pending server
+   * request (`requestId` on the event) — it keys the answers map the RPC
+   * reply expects.
+   */
+  id?: string
+  title: string
+  options?: string[]
+  /** The answer is sensitive: mask it in the UI and never persist it. */
+  secret?: boolean
+}
+
+/**
+ * Non-blocking questions delivered on an agent message (Codex `delivery:
+ * "async"` items) or a `requestUserInput` server request flagged
+ * `isBlocking: false`. Unlike `elicitation_request` nothing blocks the turn —
+ * the user answers later. `text` carries the item's prose when it never
+ * streamed as deltas. `requestId`, when set, means the answer must resolve
+ * that pending request (structured `{answers}` reply) rather than arrive as
+ * an ordinary user message.
+ */
+export interface ExternalAgentAsyncQuestionsEvent extends ExternalAgentEventBase {
+  type: "async_questions"
+  messageId?: string
+  text?: string
+  questions: ExternalAgentAsyncQuestion[]
+  /** Pending server request these questions resolve — the adapter's waiter key. */
+  requestId?: string
+}
+
+/**
+ * Plan update event
+ */
+export interface ExternalAgentPlanUpdateEvent extends ExternalAgentEventBase {
+  type: "plan_update"
+  entries: AcpPlanEntry[]
+  progress: number
+  step: number
+  totalSteps: number
+  /** Stable plan identifier for ACP's identified-plan extension. */
+  planId?: string
+  /** Identified plan representation. Legacy `plan` updates use `items`. */
+  kind?: "items" | "file" | "markdown"
+  /** File URI when `kind` is `file`. */
+  uri?: string
+  /** Raw markdown when `kind` is `markdown`. */
+  content?: string
+  /** True when the identified plan was removed. */
+  removed?: boolean
+}
+
+/** Active non-item plan representation exposed by ACP identified plans. */
+export interface ExternalAgentPlanDocument {
+  planId: string
+  kind: "file" | "markdown"
+  uri?: string
+  content?: string
+}
+
+/**
+ * Available commands update event
+ */
+export interface ExternalAgentCommandsUpdateEvent extends ExternalAgentEventBase {
+  type: "commands_update"
+  commands: AcpAvailableCommand[]
+}
+
+/**
+ * Config options update event
+ * @see https://agentclientprotocol.com/protocol/session-config-options
+ */
+export interface ExternalAgentConfigOptionsUpdateEvent extends ExternalAgentEventBase {
+  type: "config_options_update"
+  configOptions: AcpConfigOption[]
+}
+
+/**
+ * Mode update event (agent-initiated mode change)
+ * @see https://agentclientprotocol.com/protocol/session-modes
+ */
+export interface ExternalAgentModeUpdateEvent extends ExternalAgentEventBase {
+  type: "mode_update"
+  modeId: string
+}
+
+export interface ExternalAgentUsageUpdateEvent extends ExternalAgentEventBase {
+  type: "usage_update"
+  used: number
+  size: number
+  cost?: { amount: number; currency: string } | null
+  /**
+   * Per-turn-so-far prompt/completion accounting, when the agent reports
+   * cumulative token counters (Devin's `cognition.ai/*` usage meta). The
+   * adapter converts the wire's "across all turns" figures into turn-relative
+   * deltas before attaching them here, so consumers never see raw session
+   * totals. Absent when the agent exposes no token accounting.
+   */
+  tokenUsage?: ExternalAgentTokenUsage
+}
+
+export interface ExternalAgentSessionInfoUpdateEvent extends ExternalAgentEventBase {
+  type: "session_info_update"
+  title?: string | null
+  updatedAt?: string | null
+  /** Agent-owned session metadata patch; null clears it. */
+  metadata?: Record<string, unknown> | null
+  /** Authoritative ephemeral presentation after a session is resumed or replaced. */
+  extensionUi?: ExternalAgentUiState
+}
+
+/** Presentation requests from extensions, independent of a runtime or frontend. */
+export type ExternalAgentUiUpdate = import("./extension-ui").AgentExtensionUiUpdate
+
+export interface ExternalAgentUiUpdateEvent extends ExternalAgentEventBase {
+  type: "extension_ui_update"
+  /** Stable request identifier for one-time effects such as editor replacement. */
+  id: string
+  update: ExternalAgentUiUpdate
+}
+
+export interface ExternalAgentInputQueueClearedEvent extends ExternalAgentEventBase {
+  type: "input_queue_cleared"
+  queue: import("./session-operations").ExternalAgentSessionInputQueue
+}
+
+export interface ExternalAgentUiState {
+  statuses: Record<string, string>
+  widgets: Record<string, { lines: string[]; placement: "aboveEditor" | "belowEditor" }>
+  /** Ephemeral presentation title, distinct from the persisted session name. */
+  title?: string
+  editor?: { id: string; text: string }
+  notifications: Array<{ id: string; level: "info" | "warning" | "error"; message: string }>
+}
+
+export interface ExternalAgentCompactionUpdateEvent extends ExternalAgentEventBase {
+  type: "compaction_update"
+  compaction: AcpCompactionUpdate
+}
+
+export interface ExternalAgentCompactionSummaryChunkEvent extends ExternalAgentEventBase {
+  type: "compaction_summary_chunk"
+  compactionId: string
+  content: AcpContentBlock
+}
+
+export interface ExternalAgentNesSuggestionEvent extends ExternalAgentEventBase {
+  type: "nes_suggestion"
+  nesSessionId: string
+  suggestion: AcpNesSuggestion
+}
+
+export interface ExternalAgentNesClosedEvent extends ExternalAgentEventBase {
+  type: "nes_closed"
+  nesSessionId: string
+  reason?: string
+}
+
+/**
+ * Tool call update event (enhanced with diff, locations, etc.)
+ * @see https://agentclientprotocol.com/protocol/tool-calls
+ */
+export interface ExternalAgentToolCallUpdateEvent extends ExternalAgentEventBase {
+  type: "tool_call_update"
+  toolCallId: string
+  status?: AcpToolCallStatus
+  title?: string
+  kind?: AcpToolCallKind
+  content?: AcpToolCallContent[]
+  locations?: AcpToolCallLocation[]
+  rawInput?: Record<string, unknown>
+  rawOutput?: Record<string, unknown>
+}
+
+/**
+ * Progress event
+ */
+export interface ExternalAgentProgressEvent extends ExternalAgentEventBase {
+  type: "progress"
+  progress: number
+  message?: string
+  step?: number
+  totalSteps?: number
+}
+
+/**
+ * Error event
+ */
+export interface ExternalAgentErrorEvent extends ExternalAgentEventBase {
+  type: "error"
+  error: string
+  code?: string
+  recoverable?: boolean
+}
+
+/**
+ * Done event
+ */
+export interface ExternalAgentDoneEvent extends ExternalAgentEventBase {
+  type: "done"
+  success: boolean
+  tokenUsage?: ExternalAgentTokenUsage
+  /**
+   * Adapter-measured wall-clock time for the turn, when the transport gives
+   * the adapter a request/response pair to time (e.g. ACP `session/prompt`).
+   * Feeds the output-tokens-per-second readout; absent when unmeasured.
+   */
+  durationMs?: number
+  stopReason?: AcpStopReason
+}
+
+/**
+ * Hook-fire event — a synthetic event the manager emits when a consequential
+ * settings.json/plugin lifecycle hook fired for this external-agent turn
+ * (blocked a tool, injected context, or warned). Mirrors the built-in agent's
+ * Rust `hook_fire` system event; `event-to-parts` projects it into a
+ * `hook-notice` part rendered inline by the chat. No-op fires are never emitted.
+ */
+export interface ExternalAgentHookFireEvent extends ExternalAgentEventBase {
+  type: "hook_fire"
+  /** Lifecycle event name, e.g. "PreToolUse" / "PostToolUse". */
+  event: string
+  toolName?: string
+  /** Derived status, by precedence block > context > warning. */
+  outcome: "blocked" | "context" | "warning"
+  block?: string
+  additionalContext?: string
+  warnings: string[]
+}
+
+/**
+ * Union of all event types
+ */
+export type ExternalAgentEvent =
+  | ExternalAgentSessionStartEvent
+  | ExternalAgentSessionEndEvent
+  | ExternalAgentMessageStartEvent
+  | ExternalAgentMessageDeltaEvent
+  | ExternalAgentMessageEndEvent
+  | ExternalAgentContentBlockStartEvent
+  | ExternalAgentContentBlockDeltaEvent
+  | ExternalAgentContentBlockEndEvent
+  | ExternalAgentArtifactUpdateEvent
+  | ExternalAgentToolUseStartEvent
+  | ExternalAgentToolUseDeltaEvent
+  | ExternalAgentToolUseEndEvent
+  | ExternalAgentToolResultEvent
+  | ExternalAgentToolCallUpdateEvent
+  | ExternalAgentPermissionRequestEvent
+  | ExternalAgentPermissionResponseEvent
+  | ExternalAgentElicitationRequestEvent
+  | ExternalAgentElicitationCompleteEvent
+  | ExternalAgentCommentaryDeltaEvent
+  | ExternalAgentAsyncQuestionsEvent
+  | ExternalAgentThinkingEvent
+  | ExternalAgentPlanUpdateEvent
+  | ExternalAgentCommandsUpdateEvent
+  | ExternalAgentConfigOptionsUpdateEvent
+  | ExternalAgentModeUpdateEvent
+  | ExternalAgentUsageUpdateEvent
+  | ExternalAgentSessionInfoUpdateEvent
+  | ExternalAgentUiUpdateEvent
+  | ExternalAgentInputQueueClearedEvent
+  | ExternalAgentCompactionUpdateEvent
+  | ExternalAgentCompactionSummaryChunkEvent
+  | ExternalAgentNesSuggestionEvent
+  | ExternalAgentNesClosedEvent
+  | ExternalAgentProgressEvent
+  | ExternalAgentErrorEvent
+  | ExternalAgentDoneEvent
+  | ExternalAgentHookFireEvent
+
+// ============================================================================
+// External Agent Execution
+// ============================================================================
+
+/**
+ * Execution step
+ */
+export interface ExternalAgentStep {
+  id: string
+  stepNumber: number
+  type: "thinking" | "message" | "tool_call" | "tool_result" | "error"
+  status: "pending" | "running" | "completed" | "failed" | "skipped"
+  content?: ExternalAgentContent[]
+  toolCall?: {
+    id: string
+    name: string
+    input: Record<string, unknown>
+  }
+  toolResult?: {
+    toolCallId: string
+    result: string | Record<string, unknown>
+    isError?: boolean
+  }
+  startedAt?: Date
+  completedAt?: Date
+  duration?: number
+  error?: string
+}
+
+/**
+ * Execution result
+ */
+export interface ExternalAgentResult {
+  /** Whether execution was successful */
+  success: boolean
+  /** Session ID used */
+  sessionId: string
+  /** Final response text */
+  finalResponse: string
+  /** All messages in conversation */
+  messages: ExternalAgentMessage[]
+  /** Execution steps */
+  steps: ExternalAgentStep[]
+  /** Tool calls made */
+  toolCalls: Array<{
+    id: string
+    name: string
+    input: Record<string, unknown>
+    result?: string | Record<string, unknown>
+    status: "pending" | "completed" | "error"
+    error?: string
+  }>
+  /** Total duration (ms) */
+  duration: number
+  /** Token usage */
+  tokenUsage?: ExternalAgentTokenUsage
+  /** Structured output */
+  output?: Record<string, unknown>
+  /** Error message if failed */
+  error?: string
+  /** Error code */
+  errorCode?: string
+}
+
+/**
+ * Execution options
+ */
+export interface ExternalAgentExecutionOptions {
+  /** Task-specific Cognia model binding. Omit to inherit the configured binding. */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /** Reuse an existing external agent session */
+  sessionId?: string
+  /**
+   * Start this turn in a new external session, ignoring every session hint
+   * (`sessionId`, `context.custom.sessionId`, the conversation's earlier
+   * session). Used when the turn moves between the native lane and a Cognia
+   * model, or between Cognia models whose task cannot be rebound; the caller
+   * hands the conversation over as `context.custom.conversationHistory`.
+   */
+  resetExternalSession?: boolean
+  /**
+   * Continue the named Cognia gateway task on a different Cognia model,
+   * keeping its native history. Honoured only when the task's owner account,
+   * origin device and runtime are unchanged; refused otherwise.
+   */
+  rebind?: boolean
+  /**
+   * Model id the external agent should run this execution on.
+   *
+   * Bridged to the adapter as `metadata.selectedModel` — the same channel the
+   * interactive model picker writes — so a new session starts on it and a
+   * reused session is switched onto it via `setSessionModel`. Best-effort:
+   * adapters with no model concept ignore it, and the id is passed through
+   * unvalidated (the agent rejects one it doesn't know).
+   *
+   * Omit to inherit whatever the agent's own configuration selects.
+   */
+  model?: string
+  /**
+   * Reasoning effort ("thinking level") for this execution, as the app names it
+   * (`low`…`max`; the composite `ultracode` tier arrives already mapped to
+   * `xhigh`).
+   *
+   * Bridged to the adapter as `metadata.reasoningEffort`, which takes
+   * precedence over the per-agent `codexOptions.defaultReasoningEffort` — the
+   * same per-session-beats-per-agent layering `model` uses. Before this existed
+   * the composer's thinking level was silently a no-op on the external runtime:
+   * `ChatSession.effort` never reached the adapter at all.
+   *
+   * Best-effort: adapters with no reasoning concept ignore it, and one whose
+   * model advertises a narrower ladder folds it (see the Codex client's
+   * `supportedReasoningEfforts` clamp). Omit to inherit the agent's own default.
+   */
+  reasoningEffort?: string
+  /** System prompt override */
+  systemPrompt?: string
+  /** Permission mode override */
+  permissionMode?: AcpPermissionMode
+  /**
+   * Pre-approved tool allow-list. Under the `dontAsk` permission mode the ACP
+   * client silently approves a tool whose name matches an entry here and
+   * rejects everything else (no UI prompt). Ignored by other modes. Entries are
+   * bare tool names or `Tool(specifier)` patterns (the Claude Agent SDK
+   * `allowedTools` format); see `deriveExternalSessionPermission`.
+   */
+  allowedTools?: string[]
+  /**
+   * Cognia-specific brief-output mode. When true, the ACP client prepends a
+   * concise-output snippet to the resolved `systemPrompt` for `session/new`.
+   * No-op if the spawned agent doesn't honour `systemPrompt` (we ship a
+   * best-effort fallback rather than fail the connect).
+   */
+  briefMode?: boolean
+  /** Execution timeout (ms) */
+  timeout?: number
+  /** Maximum steps */
+  maxSteps?: number
+  /** Context to pass to agent */
+  context?: ExternalAgentContext
+  /** Explicit working directory for ACP session creation */
+  workingDirectory?: string
+  /** Structured instruction payload for protocol-specific metadata bridging */
+  instructionEnvelope?: {
+    hash: string
+    developerInstructions: string
+    customInstructions?: string
+    skillsSummary?: string
+    sourceFlags?: Record<string, boolean>
+    projectContextSummary?: string
+  }
+  /** Files to include */
+  files?: Array<{ path: string; content?: string }>
+  /** Callback for events */
+  onEvent?: (event: ExternalAgentEvent) => void
+  /** Callback for permission requests */
+  onPermissionRequest?: (request: AcpPermissionRequest) => Promise<AcpPermissionResponse>
+  /** Callback for ACP form/URL elicitation requests. */
+  onElicitationRequest?: (request: AcpElicitationRequest) => Promise<AcpElicitationResponse>
+  /** Callback for progress */
+  onProgress?: (progress: number, message?: string) => void
+  /** Abort signal */
+  signal?: AbortSignal
+  /**
+   * One-turn service tier override (Codex `serviceTierForTurn` on `turn/start`;
+   * SDK `turn_service_tier`). Applies only when this request starts a new turn
+   * and never changes the thread's sticky tier. Requires Codex CLI ≥ 0.151 —
+   * older servers omit the field.
+   */
+  serviceTier?: string
+  /**
+   * Source classification for the caller starting this turn (Codex
+   * `turnTrigger`; ignored when the request steers an active turn). Requires
+   * Codex CLI ≥ 0.151.
+   */
+  turnTrigger?: string
+  /**
+   * Ephemeral context fragments keyed by an opaque source id (Codex
+   * `additionalContext` on `turn/start` / `turn/steer`). The map is the
+   * complete current set — omitted keys are dropped server-side. Entries are
+   * injected as hidden context items, never as visible user messages.
+   * `untrusted` rides the user role, `application` the developer role.
+   * Requires Codex CLI ≥ 0.151.
+   */
+  additionalContext?: Record<string, { kind: "untrusted" | "application"; value: string }>
+  /** Agent trace context for event correlation */
+  traceContext?: {
+    sessionId?: string
+    turnId?: string
+    traceId?: string
+    spanId?: string
+    parentSpanId?: string
+    tracestate?: string
+    tags?: string[]
+    metadata?: Record<string, unknown>
+  }
+}
+
+// ============================================================================
+// External Agent Instance (Runtime)
+// ============================================================================
+
+/**
+ * Runtime instance of an external agent
+ */
+export interface ExternalAgentInstance {
+  /** Configuration */
+  config: ExternalAgentConfig
+  /** Connection status */
+  connectionStatus: ExternalAgentConnectionStatus
+  /** Agent status */
+  status: ExternalAgentStatus
+  /** Active sessions */
+  sessions: Map<string, ExternalAgentSession>
+  /** Discovered capabilities */
+  capabilities?: AcpCapabilities
+  /**
+   * The merged capability answer for this agent (ADR-0090 external SSOT).
+   *
+   * Distinct from {@link capabilities}, which is only the raw ACP handshake
+   * block. The profile is the protocol manifest row, the preset/plugin
+   * refinement, the adapter's real methods, this handshake and the host's
+   * ceilings, merged in fixed precedence — the single artifact the CLI, the
+   * TUI, the desktop panel and the execution resolver all read, instead of
+   * each keeping its own table.
+   *
+   * Absent until the agent has connected. A profile whose `negotiated` is
+   * false must never freeze an execution spec.
+   */
+  capabilityProfile?: ExternalAgentCapabilityProfileV1
+  /** Available tools */
+  tools?: AcpToolInfo[]
+  /** Runtime validity snapshot used for gating/projection */
+  validity?: ExternalAgentValiditySnapshot
+  /** Durable execution snapshot independent of transient error banners */
+  lastRunSnapshot?: ExternalAgentLastRunSnapshot
+  /** Process ID (for stdio transport) */
+  processId?: number
+  /** Last error */
+  lastError?: string
+  /** Connection attempts */
+  connectionAttempts: number
+  /** Last connection attempt timestamp */
+  lastConnectionAttempt?: Date
+  /** Statistics */
+  stats: {
+    totalExecutions: number
+    successfulExecutions: number
+    failedExecutions: number
+    totalTokensUsed: number
+    averageResponseTime: number
+  }
+}
+
+// ============================================================================
+// Delegation & Routing
+// ============================================================================
+
+/**
+ * Delegation rule for routing tasks to external agents
+ */
+export interface ExternalAgentDelegationRule {
+  /** Rule ID */
+  id: string
+  /** Rule name */
+  name: string
+  /** Condition type */
+  condition: "task-type" | "capability" | "keyword" | "tool-needed" | "always" | "custom"
+  /** Matcher pattern or function serialized as string */
+  matcher: string
+  /** Target external agent ID */
+  targetAgentId: string
+  /** Rule priority (higher = checked first) */
+  priority: number
+  /** Whether rule is enabled */
+  enabled: boolean
+  /** Optional description */
+  description?: string
+}
+
+/**
+ * Result of checking delegation rules
+ */
+export interface ExternalAgentDelegationResult {
+  /** Whether task should be delegated */
+  shouldDelegate: boolean
+  /** Target agent ID if delegating */
+  targetAgentId?: string
+  /** Matched rule if any */
+  matchedRule?: ExternalAgentDelegationRule
+  /** Reason for decision */
+  reason?: string
+  /** Machine-readable branch reason code */
+  reasonCode?: ExternalAgentBranchReasonCode
+}
+
+// ============================================================================
+// Defaults & Constants
+// ============================================================================
+
+/**
+ * Default retry configuration
+ */
+export const DEFAULT_EXTERNAL_AGENT_RETRY_CONFIG: ExternalAgentRetryConfig = {
+  maxRetries: 3,
+  retryDelay: 1000,
+  exponentialBackoff: true,
+  maxRetryDelay: 30000,
+}
+
+/**
+ * Default external agent configuration
+ */
+export const DEFAULT_EXTERNAL_AGENT_CONFIG: Partial<ExternalAgentConfig> = {
+  enabled: true,
+  protocol: "acp",
+  transport: "stdio",
+  defaultPermissionMode: "default",
+  timeout: 300000, // 5 minutes
+  retryConfig: DEFAULT_EXTERNAL_AGENT_RETRY_CONFIG,
+  // Documentation defaults for an editor to suggest, not runtime fallbacks:
+  // an absent `maxConcurrentSessions` is unlimited and an absent
+  // `sessionIdleTimeout` falls back to the execution timeout.
+  maxConcurrentSessions: 3,
+  sessionIdleTimeout: 600000, // 10 minutes
+}
+
+/**
+ * Status display configuration
+ */
+export const EXTERNAL_AGENT_STATUS_CONFIG: Record<
+  ExternalAgentStatus,
+  {
+    label: string
+    color: string
+    icon: string
+    animate?: boolean
+  }
+> = {
+  idle: { label: "Idle", color: "text-muted-foreground", icon: "Circle" },
+  initializing: { label: "Initializing", color: "text-blue-500", icon: "Loader2", animate: true },
+  ready: { label: "Ready", color: "text-green-500", icon: "CheckCircle" },
+  executing: { label: "Executing", color: "text-primary", icon: "Loader2", animate: true },
+  waiting_permission: { label: "Waiting", color: "text-orange-500", icon: "AlertCircle" },
+  paused: { label: "Paused", color: "text-yellow-500", icon: "Pause" },
+  completed: { label: "Completed", color: "text-green-500", icon: "CheckCircle" },
+  failed: { label: "Failed", color: "text-destructive", icon: "XCircle" },
+  cancelled: { label: "Cancelled", color: "text-orange-500", icon: "Ban" },
+  timeout: { label: "Timeout", color: "text-red-500", icon: "AlertTriangle" },
+}
+
+/**
+ * Connection status display configuration
+ */
+export const EXTERNAL_AGENT_CONNECTION_STATUS_CONFIG: Record<
+  ExternalAgentConnectionStatus,
+  {
+    label: string
+    color: string
+    icon: string
+    animate?: boolean
+  }
+> = {
+  disconnected: { label: "Disconnected", color: "text-muted-foreground", icon: "CircleOff" },
+  connecting: { label: "Connecting", color: "text-blue-500", icon: "Loader2", animate: true },
+  connected: { label: "Connected", color: "text-green-500", icon: "CheckCircle" },
+  reconnecting: {
+    label: "Reconnecting",
+    color: "text-yellow-500",
+    icon: "RefreshCw",
+    animate: true,
+  },
+  error: { label: "Error", color: "text-destructive", icon: "AlertTriangle" },
+}
+
+// ============================================================================
+// Serialization Helpers
+// ============================================================================
+
+/**
+ * Serialize external agent config for storage
+ */
+export function serializeExternalAgentConfig(config: ExternalAgentConfig): string {
+  return JSON.stringify({
+    ...config,
+    createdAt: config.createdAt?.toISOString(),
+    updatedAt: config.updatedAt?.toISOString(),
+  })
+}
+
+/**
+ * Deserialize external agent config from storage
+ */
+export function deserializeExternalAgentConfig(data: string): ExternalAgentConfig {
+  const parsed = JSON.parse(data)
+  return {
+    ...parsed,
+    createdAt: parsed.createdAt ? new Date(parsed.createdAt) : undefined,
+    updatedAt: parsed.updatedAt ? new Date(parsed.updatedAt) : undefined,
+  }
+}
+
+/**
+ * Serialize external agent session for storage
+ */
+export function serializeExternalAgentSession(session: ExternalAgentSession): string {
+  return JSON.stringify({
+    ...session,
+    createdAt: session.createdAt.toISOString(),
+    lastActivityAt: session.lastActivityAt.toISOString(),
+    expiresAt: session.expiresAt?.toISOString(),
+    messages: (session.messages ?? []).map((m) => ({
+      ...m,
+      timestamp: m.timestamp.toISOString(),
+    })),
+  })
+}
+
+/**
+ * Deserialize external agent session from storage
+ */
+export function deserializeExternalAgentSession(data: string): ExternalAgentSession {
+  const parsed = JSON.parse(data)
+  return {
+    ...parsed,
+    createdAt: new Date(parsed.createdAt),
+    lastActivityAt: new Date(parsed.lastActivityAt),
+    expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : undefined,
+    messages: parsed.messages.map((m: Record<string, unknown>) => ({
+      ...m,
+      timestamp: new Date(m.timestamp as string),
+    })),
+  }
+}
+
+/**
+ * Serialize external agent result for storage
+ */
+export function serializeExternalAgentResult(result: ExternalAgentResult): string {
+  return JSON.stringify({
+    ...result,
+    messages: result.messages.map((m) => ({
+      ...m,
+      timestamp: m.timestamp.toISOString(),
+    })),
+    steps: result.steps.map((s) => ({
+      ...s,
+      startedAt: s.startedAt?.toISOString(),
+      completedAt: s.completedAt?.toISOString(),
+    })),
+  })
+}
+
+/**
+ * Deserialize external agent result from storage
+ */
+export function deserializeExternalAgentResult(data: string): ExternalAgentResult {
+  const parsed = JSON.parse(data)
+  return {
+    ...parsed,
+    messages: parsed.messages.map((m: Record<string, unknown>) => ({
+      ...m,
+      timestamp: new Date(m.timestamp as string),
+    })),
+    steps: parsed.steps.map((s: Record<string, unknown>) => ({
+      ...s,
+      startedAt: s.startedAt ? new Date(s.startedAt as string) : undefined,
+      completedAt: s.completedAt ? new Date(s.completedAt as string) : undefined,
+    })),
+  }
+}
+
+// ============================================================================
+// Type Guards
+// ============================================================================
+
+/**
+ * Check if content is text
+ */
+export function isTextContent(content: ExternalAgentContent): content is ExternalAgentTextContent {
+  return content.type === "text"
+}
+
+/**
+ * Check if content is image
+ */
+export function isImageContent(
+  content: ExternalAgentContent
+): content is ExternalAgentImageContent {
+  return content.type === "image"
+}
+
+/**
+ * Check if content is file
+ */
+export function isFileContent(content: ExternalAgentContent): content is ExternalAgentFileContent {
+  return content.type === "file"
+}
+
+/**
+ * Check if content is tool use
+ */
+export function isToolUseContent(
+  content: ExternalAgentContent
+): content is ExternalAgentToolUseContent {
+  return content.type === "tool_use"
+}
+
+/**
+ * Check if content is tool result
+ */
+export function isToolResultContent(
+  content: ExternalAgentContent
+): content is ExternalAgentToolResultContent {
+  return content.type === "tool_result"
+}
+
+/**
+ * Check if content is thinking
+ */
+export function isThinkingContent(
+  content: ExternalAgentContent
+): content is ExternalAgentThinkingContent {
+  return content.type === "thinking"
+}
+
+/**
+ * Check if content is error
+ */
+export function isErrorContent(
+  content: ExternalAgentContent
+): content is ExternalAgentErrorContent {
+  return content.type === "error"
+}
+
+/**
+ * Check if event is a streaming text event
+ */
+export function isStreamingTextEvent(
+  event: ExternalAgentEvent
+): event is ExternalAgentMessageDeltaEvent {
+  return event.type === "message_delta" && event.delta.type === "text"
+}
+
+/**
+ * Check if event is a tool use event
+ */
+export function isToolUseEvent(
+  event: ExternalAgentEvent
+): event is
+  ExternalAgentToolUseStartEvent | ExternalAgentToolUseDeltaEvent | ExternalAgentToolUseEndEvent {
+  return (
+    event.type === "tool_use_start" ||
+    event.type === "tool_use_delta" ||
+    event.type === "tool_use_end"
+  )
+}
+
+/**
+ * Check if event is a permission event
+ */
+export function isPermissionEvent(
+  event: ExternalAgentEvent
+): event is ExternalAgentPermissionRequestEvent | ExternalAgentPermissionResponseEvent {
+  return event.type === "permission_request" || event.type === "permission_response"
+}

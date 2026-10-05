@@ -1,11 +1,11 @@
 /**
  * @jest-environment node
  */
-const getCodexAppServerAdapter = jest.fn()
+const getAdapterExtension = jest.fn()
 const fetchAgentModelCatalog = jest.fn()
 
 jest.mock("@/lib/ai/agent/external/manager", () => ({
-  getExternalAgentManager: () => ({ getCodexAppServerAdapter, fetchAgentModelCatalog }),
+  getExternalAgentManager: () => ({ getAdapterExtension, fetchAgentModelCatalog }),
 }))
 
 /** What `fetchAgentModelCatalog` answers for an agent with no such catalog. */
@@ -31,13 +31,13 @@ describe("formatExternalModelLabel", () => {
 
 describe("defaultBackendModelHost", () => {
   beforeEach(() => {
-    getCodexAppServerAdapter.mockReset()
+    getAdapterExtension.mockReset()
     fetchAgentModelCatalog.mockReset()
     fetchAgentModelCatalog.mockResolvedValue(UNSUPPORTED)
   })
 
   it("returns the models the connected agent reports for itself", async () => {
-    getCodexAppServerAdapter.mockReturnValue({
+    getAdapterExtension.mockReturnValue({
       listModels: async () => [{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol" }, { id: "gpt-5.2-codex" }],
     })
     await expect(defaultBackendModelHost().listExternalModels("a1")).resolves.toEqual([
@@ -50,7 +50,7 @@ describe("defaultBackendModelHost", () => {
     // An agent with neither a sessionless catalog nor `model/list` lands here:
     // the picker reports "no models offered" rather than falling back to the
     // built-in catalog, which that agent cannot run.
-    getCodexAppServerAdapter.mockReturnValue(null)
+    getAdapterExtension.mockReturnValue(null)
     await expect(defaultBackendModelHost().listExternalModels("a1")).resolves.toEqual([])
   })
 
@@ -58,7 +58,7 @@ describe("defaultBackendModelHost", () => {
     // The regression: Pi answers `get_available_models` through the manager's
     // catalog, not through the Codex adapter, so asking only the Codex adapter
     // reported "did not report any models" for an agent that has dozens.
-    getCodexAppServerAdapter.mockReturnValue(null)
+    getAdapterExtension.mockReturnValue(null)
     fetchAgentModelCatalog.mockResolvedValue({
       status: "ok",
       data: {
@@ -78,7 +78,7 @@ describe("defaultBackendModelHost", () => {
       // The agent named it after its own id, so the label carries no duplicate.
       { id: "gpt-5.3-codex" },
     ])
-    expect(getCodexAppServerAdapter).not.toHaveBeenCalled()
+    expect(getAdapterExtension).not.toHaveBeenCalled()
   })
 
   it("still asks Codex when the catalog answers with an empty list", async () => {
@@ -91,7 +91,7 @@ describe("defaultBackendModelHost", () => {
         thinking: { levels: [], currentLevel: null, write: { kind: "none" } },
       },
     })
-    getCodexAppServerAdapter.mockReturnValue({
+    getAdapterExtension.mockReturnValue({
       listModels: async () => [{ id: "gpt-5.2-codex" }],
     })
     await expect(defaultBackendModelHost().listExternalModels("a1")).resolves.toEqual([
@@ -101,7 +101,7 @@ describe("defaultBackendModelHost", () => {
 
   it("falls through to Codex when the catalog itself throws", async () => {
     fetchAgentModelCatalog.mockRejectedValue(new Error("pi is wedged"))
-    getCodexAppServerAdapter.mockReturnValue({
+    getAdapterExtension.mockReturnValue({
       listModels: async () => [{ id: "gpt-5.2-codex" }],
     })
     await expect(defaultBackendModelHost().listExternalModels("a1")).resolves.toEqual([
@@ -110,7 +110,7 @@ describe("defaultBackendModelHost", () => {
   })
 
   it("survives a wedged agent instead of taking the picker down", async () => {
-    getCodexAppServerAdapter.mockReturnValue({
+    getAdapterExtension.mockReturnValue({
       listModels: async () => {
         throw new Error("Request timeout: model/list")
       },

@@ -20,6 +20,7 @@
  * picker costs nothing. Doing it at connect instead would put a round-trip on
  * every startup for a menu most sessions never open.
  */
+import { codexAppServerExtension } from "@cognia/agent-codex/app-server-client"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 
 /** One selectable model as the picker renders it. */
@@ -61,7 +62,7 @@ export function defaultBackendModelHost(): BackendModelHost {
         // two are independent sources, and one being wedged says nothing about
         // the other.
       }
-      const adapter = manager.getCodexAppServerAdapter(agentId)
+      const adapter = manager.getAdapterExtension(agentId, codexAppServerExtension)
       if (!adapter) return []
       try {
         const models = await adapter.listModels()

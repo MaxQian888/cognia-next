@@ -10,8 +10,8 @@ import {
   buildDshChannelManifest,
   doctorDshRuntime,
   type DshDoctorReport,
-} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
-import type { DshProfileId } from "@/types/agent/dsh-runtime-channel"
+} from "@cognia/agent-dsh/install"
+import type { DshProfileId } from "@cognia/agent-dsh/channel"
 
 /**
  * Lifecycle for the Cognia-managed DeepSeek Harness runtime.

@@ -66,6 +66,12 @@ import {
 } from "./config/gateway-task"
 import { loggers } from "@cognia/logging"
 import {
+  executionSemanticsOf,
+  requiresReconnectAfterCancel,
+} from "@cognia/agent-contracts/semantics"
+import { supportsModelCatalog } from "@cognia/agent-contracts/adapter"
+import type { AdapterExtension } from "@cognia/agent-contracts/adapter-extension"
+import {
   type ProtocolAdapter,
   ProtocolAdapterRegistry,
   protocolAdapterRegistry,
@@ -74,13 +80,13 @@ import {
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./runtimes/acp/acp-client"
 import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
-import { CodexAppServerAdapter } from "./runtimes/codex/codex-app-server-client"
+import { createCodexAppServerAdapterFactory } from "./integrations/codex"
 import { OpenCodeClientAdapter } from "./runtimes/opencode/opencode-client"
 import { OpenCodeV2ClientAdapter } from "./runtimes/opencode/opencode-v2-client"
 import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
 import { isHeadlessHost } from "@/lib/platform/detect"
-import { DshSdkClientAdapter } from "./runtimes/dsh/dsh-sdk-client"
-import { prepareDshManagedLaunch } from "./runtimes/dsh/dsh-managed-launch"
+import { prepareDshManagedLaunch } from "@cognia/agent-dsh/managed-launch"
+import { createDshSdkAdapterFactory, dshManagedLaunchHost } from "./integrations/dsh"
 import { clampThinkingLevel, PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
 import { AiderCliClientAdapter } from "./runtimes/aider/aider-cli-client"
 import {
@@ -97,12 +103,7 @@ import {
   loadAgentModelSurface,
   type ExternalAgentSessionSurface,
 } from "./capability/model-surface-cache"
-import {
-  createDshRuntimeTransport,
-  resolveDshLaunchFromConfig,
-} from "./runtimes/dsh/dsh-runtime-transport"
 import { canProjectOpenCodeV2Mcp } from "./runtimes/opencode/opencode-v2-launcher"
-import { runsExternalAgentProcessesLocally } from "./agent-transport"
 import {
   assertRunEnvironmentPlaced,
   RunEnvironmentRefusedError,
@@ -133,7 +134,7 @@ import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
   isExternalAgentSessionExtensionUnsupportedForMethod,
-} from "./session/session-extension-errors"
+} from "@cognia/agent-runtime-kit/session-extension-errors"
 import {
   createUnknownSessionExtensionSupport,
   normalizeExternalAgentValiditySnapshot,
@@ -157,7 +158,7 @@ import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
-} from "./capability/session-capabilities"
+} from "@cognia/agent-contracts/session-operations"
 import type { AcpAvailableCommand } from "@/types/agent/external-agent"
 import {
   canonicalEventFromExternalEvent,
@@ -339,23 +340,12 @@ export interface ExternalAgentLifecycleEvent {
  */
 export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistry): void {
   registry.register("acp", () => new AcpClientAdapter())
-  registry.register("codex-app-server", () => new CodexAppServerAdapter())
+  registry.register("codex-app-server", createCodexAppServerAdapterFactory())
   registry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
   registry.register("a2a", () => new A2aClientAdapter())
-  registry.register(
-    "dsh-sdk",
-    () =>
-      new DshSdkClientAdapter({
-        createTransport: (config) =>
-          createDshRuntimeTransport(
-            config,
-            resolveDshLaunchFromConfig,
-            // Managed install/facts are local-host commands. Process I/O uses
-            // the shared host bridge; paired remote installation is not exposed.
-            runsExternalAgentProcessesLocally()
-          ),
-      })
-  )
+  // Managed install/facts are local-host commands; the integration wiring
+  // hands DSH the local process host (paired remote installation is not exposed).
+  registry.register("dsh-sdk", createDshSdkAdapterFactory())
   // Pi's own RPC protocol, not ACP (ADR-0119).
   registry.register("pi-rpc", () => new PiRpcClientAdapter())
   registry.register("aider-cli", () => new AiderCliClientAdapter())
@@ -894,8 +884,10 @@ export class ExternalAgentManager {
     instance.sessions.clear()
     // The adapter keeps its own copy, and `disconnect()` is not on this path,
     // so without this the reconnect leaves ids from the dead process visible
-    // to `liveSessions` and reuses one instead of opening a session.
-    adapter.forgetSessions()
+    // to `liveSessions` and reuses one instead of opening a session. Adapters
+    // without a session registry (plugin adapters predating ADR-0217) keep
+    // nothing the manager reads after `instance.sessions` is cleared.
+    adapter.forgetSessions?.()
 
     if (!this.config.autoReconnect || !instance.config.enabled) {
       return
@@ -1016,14 +1008,15 @@ export class ExternalAgentManager {
   }
 
   /**
-   * Return the live Codex `app-server` adapter for an agent, or null when the
-   * agent isn't connected through the native app-server protocol. Lets UI
-   * surfaces read MCP-server / skills status (and the native methods) without
-   * widening the generic {@link ProtocolAdapter} contract.
+   * Resolve a typed vendor extension (ADR-0217) on an agent's live adapter, or
+   * null when the agent has no adapter or its adapter does not answer it. The
+   * integration package defines what the extension is (for example
+   * `codexAppServerExtension` for Codex's MCP / skills / account status), so
+   * the manager never imports a vendor class to reach vendor controls.
    */
-  getCodexAppServerAdapter(agentId: string): CodexAppServerAdapter | null {
+  getAdapterExtension<T>(agentId: string, extension: AdapterExtension<T>): T | null {
     const adapter = this.adapters.get(agentId)
-    return adapter instanceof CodexAppServerAdapter ? adapter : null
+    return adapter ? (extension.resolve(adapter) ?? null) : null
   }
 
   /**
@@ -1032,7 +1025,7 @@ export class ExternalAgentManager {
    * (share links, session diff/todos, PTY, TUI driving, dynamic MCP, workspace
    * find/*, VCS/project info) live on the adapter rather than the generic
    * {@link ProtocolAdapter} contract — this is the sanctioned way for UI code
-   * to reach them (mirrors {@link getCodexAppServerAdapter}).
+   * to reach them (mirrors {@link getAdapterExtension}).
    */
   getOpenCodeAdapter(agentId: string): OpenCodeClientAdapter | null {
     const adapter = this.adapters.get(agentId)
@@ -1052,7 +1045,7 @@ export class ExternalAgentManager {
    * Pi's credential diagnostic lives on the adapter rather than the generic
    * {@link ProtocolAdapter} contract because it is not a protocol call at all —
    * it shells `pi auth check`, which only Pi has. Mirrors
-   * {@link getCodexAppServerAdapter} and {@link getOpenCodeAdapter}.
+   * {@link getAdapterExtension} and {@link getOpenCodeAdapter}.
    */
   getPiRpcAdapter(agentId: string): PiRpcClientAdapter | null {
     const adapter = this.adapters.get(agentId)
@@ -1221,9 +1214,10 @@ export class ExternalAgentManager {
           data: { models: catalogModelSurface(listing.models), thinking: EMPTY_THINKING_SURFACE },
         }
       }
-      const codex = this.getCodexAppServerAdapter(agentId)
-      if (codex) {
-        const models = await codex.listModels()
+      if (supportsModelCatalog(adapter)) {
+        // A runtime-owned catalog (Codex `model/list`): no discovery session,
+        // so opening the picker never starts a thread or its MCP servers.
+        const models = await adapter.listCatalogModels()
         return {
           status: "ok",
           data: {
@@ -2649,7 +2643,7 @@ export class ExternalAgentManager {
         // do less than the project asked for, so the connect stops here
         // rather than starting an unsandboxed agent.
         await assertRunEnvironmentPlaced(agentId)
-        const launchConfig = await prepareDshManagedLaunch(instance.config)
+        const launchConfig = await prepareDshManagedLaunch(instance.config, dshManagedLaunchHost)
         const connectTimeout = this.resolveExecutionTimeoutMs(instance)
         if (instance.config.protocol === "codex-app-server") {
           // Native connect times out its handshake and tears down the child
@@ -3672,7 +3666,7 @@ export class ExternalAgentManager {
           `External agent stream idle timeout after ${idleTimeoutMs}ms`,
           async () => {
             try {
-              await adapter.cancel(session.id)
+              await this.cancelAdapterSession(agentId, session.id, adapter)
             } catch (cancelError) {
               externalAgentManagerLogger.warn("Cancellation failed during stream timeout", {
                 agentId,
@@ -3821,6 +3815,24 @@ export class ExternalAgentManager {
     }
   }
 
+  private async cancelAdapterSession(
+    agentId: string,
+    sessionId: string,
+    adapter: ProtocolAdapter
+  ): Promise<void> {
+    await adapter.cancel(sessionId)
+    // A cancel that retires the session (DeepSeek Harness has no wire
+    // cancel and closes the session's process) must not leave the session
+    // cached: the next turn would be routed to a runtime that no longer
+    // exists. Turn-scoped cancels keep the session for the next turn.
+    if (
+      requiresReconnectAfterCancel(executionSemanticsOf(adapter)) &&
+      !adapter.getSession(sessionId)
+    ) {
+      this.instances.get(agentId)?.sessions.delete(sessionId)
+    }
+  }
+
   /**
    * Ask the agent to stop the current turn, never throwing.
    *
@@ -3836,7 +3848,7 @@ export class ExternalAgentManager {
     const adapter = this.adapters.get(agentId)
     if (!adapter) return
     try {
-      await adapter.cancel(sessionId)
+      await this.cancelAdapterSession(agentId, sessionId, adapter)
     } catch (error) {
       externalAgentManagerLogger.warn("Cancellation failed", {
         agentId,
@@ -4270,7 +4282,7 @@ export class ExternalAgentManager {
     }
     const adapter = this.adapters.get(agentId)
     if (adapter) {
-      await adapter.cancel(sessionId)
+      await this.cancelAdapterSession(agentId, sessionId, adapter)
     }
 
     const instance = this.instances.get(agentId)

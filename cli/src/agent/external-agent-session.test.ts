@@ -149,6 +149,15 @@ function fakeManager(result?: Partial<ExternalAgentResult>) {
   return { manager, getExecuteOptions: () => executeOptions }
 }
 
+/** Answer the Codex app-server extension (ADR-0217) with a partial stub. */
+function stubCodexExtension(
+  manager: { getAdapterExtension?: unknown },
+  stub: () => Record<string, unknown>
+): void {
+  manager.getAdapterExtension = (_agentId: string, extension: { id: string }) =>
+    extension.id === "codex.app-server" ? stub() : null
+}
+
 describe("external-agent permission adaptation", () => {
   const request: AcpPermissionRequest = {
     id: "permission-1",
@@ -1799,11 +1808,11 @@ describe("external-agent turn bounds", () => {
         catalog = [{ id: "native-model", isDefault: true, defaultReasoningEffort: "medium" }]
         return catalog.map(({ id }) => ({ id }))
       })
-      manager.getCodexAppServerAdapter = () => ({
+      stubCodexExtension(manager, () => ({
         refreshMcpServers: async () => [],
         getModelCatalog: () => catalog,
         listModels,
-      })
+      }))
       manager.createSession = jest.fn(async () => ({ id: "precreated-codex" }))
       const session = createExternalAgentSession({
         disableToolHost: true,
@@ -1828,7 +1837,7 @@ describe("external-agent turn bounds", () => {
     const { manager } = fakeManager()
     const models = [{ id: "native-model", name: "Native model" }]
     const listModels = jest.fn(async () => models)
-    manager.getCodexAppServerAdapter = () => ({ refreshMcpServers: async () => [], listModels })
+    stubCodexExtension(manager, () => ({ refreshMcpServers: async () => [], listModels }))
     manager.createSession = jest.fn(async () => ({ id: "unexpected-thread" }))
     const startToolHost = jest.fn()
     const session = createExternalAgentSession({
@@ -1980,7 +1989,7 @@ describe("external-agent turn bounds", () => {
       .fn()
       .mockResolvedValueOnce([{ name: "native", tools: { read: {} } }])
       .mockRejectedValueOnce(new Error("offline"))
-    manager.getCodexAppServerAdapter = () => ({ refreshMcpServers: refresh })
+    stubCodexExtension(manager, () => ({ refreshMcpServers: refresh }))
     const session = createExternalAgentSession({
       disableToolHost: true,
       config: baseConfig,
@@ -2462,7 +2471,7 @@ it("keeps stale native rows unknown and reports failed inventory refresh", async
     .fn()
     .mockResolvedValueOnce([{ name: "native", status: "ready", tools: { read: {} } }])
     .mockRejectedValueOnce(new Error("inventory unavailable"))
-  manager.getCodexAppServerAdapter = () => ({ refreshMcpServers })
+  stubCodexExtension(manager, () => ({ refreshMcpServers }))
   const session = createExternalAgentSession({
     disableToolHost: true,
     config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },

@@ -1,6 +1,7 @@
 /**
  * @jest-environment node
  */
+import { codexAppServerExtension } from "@cognia/agent-codex/app-server-client"
 import { probeOnce } from "@/lib/subscription/anthropic/usage-probe"
 import {
   agentStatusLimits,
@@ -170,11 +171,11 @@ describe("native Codex limits", () => {
     const getAdapter = jest.fn(() => adapter)
     jest
       .mocked(getExternalAgentManager)
-      .mockReturnValue({ getCodexAppServerAdapter: getAdapter } as never)
+      .mockReturnValue({ getAdapterExtension: getAdapter } as never)
     expect(await loadCodexLimits("live-agent", NOW)).toEqual([
       expect.objectContaining({ provider: "codex", meters: [] }),
     ])
-    expect(getAdapter).toHaveBeenCalledWith("live-agent")
+    expect(getAdapter).toHaveBeenCalledWith("live-agent", codexAppServerExtension)
     expect(adapter.refreshAccount).toHaveBeenCalledTimes(1)
     getAdapter.mockReturnValue(null as never)
     await expect(loadCodexLimits("gone-agent", NOW)).rejects.toThrow("not connected")

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import { buildDshChannelManifest } from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
+import { buildDshChannelManifest } from "@cognia/agent-dsh/install"
 
 const agentInvoke = jest.fn()
 const runsLocally = jest.fn(() => true)
