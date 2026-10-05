@@ -172,6 +172,11 @@ describe("AccountOverviewSection", () => {
     expect(stub).toHaveAttribute("data-show-email", "false")
   })
 
+  it("names account sync as not in this build (the flag is off under test)", () => {
+    render(<AccountOverviewSection />)
+    expect(screen.getByTestId("account-sync-not-in-build")).toBeInTheDocument()
+  })
+
   it("lays the groups out as a flat stack with no card chrome", () => {
     const { container } = render(<AccountOverviewSection />)
     expect(screen.getByTestId("account-session-block")).toBeInTheDocument()

@@ -23,6 +23,9 @@ import { toast } from "sonner"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { Button } from "@/components/ui/button"
+import { SyncApprovalFleetNotice } from "@/components/account/sync/sync-approval-fleet-notice"
+import { accountSyncEnabled } from "@/lib/account-sync/feature-flag"
+import { useAccountSyncStore } from "@/stores/account-sync/account-sync-store"
 import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useDeviceRows } from "@/hooks/devices/use-device-rows"
@@ -92,13 +95,17 @@ export function DeviceConsole() {
     setAttentionOnly(true)
   }, [setAttentionOnly, setKindFilter])
 
+  // ADR-0215 phase 2: a new device waits for a sync approval (only in builds with account sync).
+  const syncApprovalWaiting =
+    useAccountSyncStore((state) => state.incoming.length > 0) && accountSyncEnabled()
   const notices =
-    hostUnreachable || missingDeepLink ? (
+    hostUnreachable || missingDeepLink || syncApprovalWaiting ? (
       <>
         {missingDeepLink ? (
           <MissingDeviceLinkNotice deviceRef={missingDeepLink} onDismiss={dismissMissingDeepLink} />
         ) : null}
         {hostUnreachable ? <HostUnreachableNotice /> : null}
+        {syncApprovalWaiting ? <SyncApprovalFleetNotice /> : null}
       </>
     ) : null
 

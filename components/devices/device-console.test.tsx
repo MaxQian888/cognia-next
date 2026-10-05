@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 
 import type { DeviceRow } from "@/lib/devices/types"
 import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
+import { accountSyncEnabled } from "@/lib/account-sync/feature-flag"
+import { useAccountSyncStore } from "@/stores/account-sync/account-sync-store"
 
 import { DeviceConsole } from "./device-console"
 
@@ -15,6 +17,7 @@ let loading = false
 let hostUnreachable = false
 const refresh = jest.fn(async () => {})
 
+jest.mock("@/lib/account-sync/feature-flag", () => ({ accountSyncEnabled: jest.fn(() => false) }))
 jest.mock("@/hooks/devices/use-device-rows", () => ({
   useDeviceRows: () => ({
     rows,
@@ -381,4 +384,16 @@ it("labels the browser's execution Host and opens its capability detail", async 
   expect(
     screen.queryByRole("button", { name: "Execution host: This machine" })
   ).not.toBeInTheDocument()
+})
+
+it("shows the sync approval notice only when the build has account sync and a device waits", () => {
+  useAccountSyncStore.setState({ incoming: [{ requestId: "req_1" }] as never })
+  const { unmount } = renderConsole()
+  expect(screen.queryByTestId("sync-approval-fleet-notice")).not.toBeInTheDocument()
+  unmount()
+  jest.mocked(accountSyncEnabled).mockReturnValue(true)
+  renderConsole()
+  expect(screen.getByTestId("sync-approval-fleet-notice")).toBeInTheDocument()
+  useAccountSyncStore.getState().reset()
+  jest.mocked(accountSyncEnabled).mockReturnValue(false)
 })

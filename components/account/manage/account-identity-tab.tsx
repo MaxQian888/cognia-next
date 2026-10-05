@@ -41,6 +41,7 @@ import { createPlatformFetch } from "@/lib/network/platform-fetch"
 import { forgetOfflineChoice } from "@/components/account/cloud-sign-in-gate"
 import { CloudDeploymentCard } from "@/components/settings/companion/cloud-deployment-card"
 import { OfficialAccountDeletion } from "@/components/account/manage/official-account-deletion"
+import { AccountSyncSection } from "@/components/account/sync/account-sync-section"
 import { useAccountStore } from "@/stores/account/account-store"
 
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
@@ -343,6 +344,12 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
           </Button>
         ) : null}
       </div>
+
+      {official && officialSession && state.status === "active" ? (
+        <AccountSyncSection
+          account={state.identity.email ?? state.identity.displayName ?? state.identity.userId}
+        />
+      ) : null}
 
       {official && officialSession ? (
         <OfficialAccountDeletion deployment={official} session={officialSession} />

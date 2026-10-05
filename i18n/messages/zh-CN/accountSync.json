@@ -1,0 +1,151 @@
+{
+  "section": {
+    "title": "同步设备",
+    "preview": "预览 — 暂不同步数据",
+    "previewHint": "此版本可以设置同步密钥并批准你的设备。你的数据还不会同步。",
+    "loading": "正在检查同步…",
+    "locked": "请先解锁此档案再使用同步。",
+    "signedOut": "登录你的 Cognia 账号后才能使用同步。",
+    "integrityTitle": "无法验证设备列表",
+    "integrity": "同步服务向此设备展示的设备列表比它之前验证过的更旧或不同。没有删除任何内容。请稍后重试，如持续出现请联系支持。",
+    "pollError": "无法连接同步服务：{message}",
+    "retry": "重试",
+    "working": "处理中…"
+  },
+  "setup": {
+    "title": "在此设备上设置同步",
+    "description": "这是你账号的第一台设备。它会创建你的同步密钥和同步恢复密钥。",
+    "nameLabel": "设备名称",
+    "start": "设置同步",
+    "spaceExists": "另一台设备已先设置了同步。请让它批准这台设备。",
+    "done": "此设备已设置同步。"
+  },
+  "join": {
+    "title": "添加此设备",
+    "description": "你的账号已有同步设备。请在另一台设备上批准这台设备，或使用你的同步恢复密钥。",
+    "askApproval": "请求另一台设备批准",
+    "useRecoveryKey": "使用同步恢复密钥",
+    "waiting": "等待批准中。请在已同步的设备上打开 Cognia。",
+    "code": "请确认另一台设备显示的是这个代码",
+    "expiresIn": "{minutes} 分钟后过期",
+    "approved": "已批准，正在完成…",
+    "done": "此设备现在已加入同步。",
+    "ended": {
+      "denied": "请求被拒绝。",
+      "mismatch": "代码不一致，没有添加任何设备。",
+      "cancelled": "请求已取消。",
+      "expired": "请求已过期。"
+    },
+    "tryAgain": "再次请求",
+    "cancel": "取消"
+  },
+  "recover": {
+    "title": "使用你的同步恢复密钥",
+    "label": "同步恢复密钥",
+    "placeholder": "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX",
+    "submit": "添加此设备",
+    "back": "返回",
+    "mismatch": "此同步恢复密钥不属于这个账号。",
+    "invalid": "这不是有效的同步恢复密钥。",
+    "done": "已使用同步恢复密钥添加此设备。你的其他设备会看到它。",
+    "replacePrompt": "现在更换同步恢复密钥吗？见过旧密钥的人仍可能使用它。",
+    "replaceNow": "立即更换",
+    "later": "稍后"
+  },
+  "recoveryKey": {
+    "title": "你的同步恢复密钥",
+    "description": "在手边没有其他设备时，它可以添加设备。Cognia 无法为你找回它。它不是你的档案恢复密钥。",
+    "copy": "复制",
+    "copied": "已复制",
+    "download": "下载恢复套件",
+    "confirmTitle": "确认你已保存",
+    "confirmPositions": "请输入密钥的第 {positions} 个字符。",
+    "characterLabel": "第 {position} 个字符",
+    "orDownloaded": "我已下载恢复套件并妥善保存",
+    "downloadFirst": "下载套件后才能使用此选项。",
+    "continue": "继续",
+    "cancel": "取消",
+    "wrong": "这些字符与密钥不符。",
+    "kit": {
+      "title": "Cognia 同步恢复密钥",
+      "intro": "在手边没有其他设备时，此密钥可以将设备添加到你的 Cognia 同步。任何持有它的人都能向你的账号添加设备。",
+      "keyLabel": "同步恢复密钥",
+      "accountLabel": "账号",
+      "createdLabel": "创建时间",
+      "step1": "将此文件存放在只有你能访问的地方，或打印后删除文件。",
+      "step2": "切勿分享。Cognia 支持人员绝不会向你索要它。",
+      "step3": "它不是你的档案恢复密钥，两者都要保存。"
+    }
+  },
+  "devices": {
+    "title": "设备",
+    "thisDevice": "此设备",
+    "unnamed": "未命名设备",
+    "platform": {
+      "desktop": "桌面",
+      "mobile": "手机",
+      "web": "网页"
+    },
+    "addedVia": {
+      "genesis": "第一台设备",
+      "approval": "由 {name} 批准",
+      "recovery": "使用同步恢复密钥添加"
+    },
+    "remove": "移除",
+    "removeConfirm": "要将 {name} 从同步中移除吗？它会在下次连接时删除自己的同步密钥。",
+    "removeConfirmAction": "移除设备",
+    "removed": "已将 {name} 从同步中移除。",
+    "fingerprint": "设备列表指纹",
+    "fingerprintHint": "与另一台设备比较。如果不同，说明同步服务向它们展示了不同的列表。",
+    "rotate": "轮换密钥",
+    "rotated": "密钥已轮换。",
+    "replaceRecovery": "更换同步恢复密钥",
+    "replaced": "同步恢复密钥已更换。",
+    "waiting": "{count} 台设备正在等待批准",
+    "review": "查看",
+    "keysUnavailable": "此设备暂时无法打开它的同步密钥。"
+  },
+  "removed": {
+    "title": "此设备已从同步中移除",
+    "body": "于 {date} 被另一台设备移除。它的同步密钥已删除，本地数据不受影响。",
+    "rejoin": "重新添加此设备"
+  },
+  "approve": {
+    "title": "批准新设备",
+    "description": "{name}（{platform}）想要加入你的同步设备。",
+    "unknownName": "一台设备",
+    "continue": "继续",
+    "deny": "拒绝",
+    "waitingReveal": "正在等待新设备…",
+    "codePrompt": "新设备显示的是这个代码吗？",
+    "match": "代码一致，添加它",
+    "mismatch": "不一致",
+    "added": "已添加 {name}。",
+    "notFound": "此请求已不再等待。",
+    "commitMismatch": "新设备发送的代码与它承诺的不符，已拒绝。",
+    "expiresIn": "{minutes} 分钟后过期",
+    "close": "关闭"
+  },
+  "notification": {
+    "title": "有新设备想要同步",
+    "body": "{name}（{platform}）正在等待你的批准。",
+    "open": "查看"
+  },
+  "summary": {
+    "notInBuild": "账号同步：此版本未提供",
+    "notInBuildHint": "设备密钥和批准功能是预览功能，仅在测试版中提供。"
+  },
+  "fleet": {
+    "waitingTitle": "需要批准同步",
+    "waitingBody": "{count} 台设备正在等待加入你的同步设备。",
+    "review": "查看"
+  },
+  "errors": {
+    "generic": "出了点问题：{message}",
+    "busy": "设备列表一直在变化，请重试。",
+    "locked": "请先解锁此档案。",
+    "signedOut": "请先登录你的 Cognia 账号。",
+    "network": "无法连接同步服务。",
+    "integrity": "无法验证设备列表，因此没有做任何更改。"
+  }
+}

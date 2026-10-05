@@ -44,6 +44,7 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { AccountSyncSummary } from "@/components/account/sync/account-sync-summary"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import {
@@ -310,6 +311,7 @@ export function AccountOverviewSection() {
               </span>
             )}
           </div>
+          <AccountSyncSummary />
           {fiveHour || sevenDay ? (
             <div className="flex flex-col gap-2 border-t border-border/50 pt-3">
               <UsageRow

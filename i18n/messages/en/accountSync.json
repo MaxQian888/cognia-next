@@ -1,0 +1,151 @@
+{
+  "section": {
+    "title": "Sync devices",
+    "preview": "Preview — nothing syncs yet",
+    "previewHint": "This build can set up sync keys and approve your devices. Your data does not sync yet.",
+    "loading": "Checking sync…",
+    "locked": "Unlock this profile to use sync.",
+    "signedOut": "Sign in to your Cognia account to use sync.",
+    "integrityTitle": "The device list could not be verified",
+    "integrity": "The sync service showed this device an older or different device list than the one it verified before. Nothing was deleted. Try again later, and contact support if this persists.",
+    "pollError": "Could not reach the sync service: {message}",
+    "retry": "Try again",
+    "working": "Working…"
+  },
+  "setup": {
+    "title": "Set up sync on this device",
+    "description": "This is the first device of your account. It creates your sync keys and a sync recovery key.",
+    "nameLabel": "Device name",
+    "start": "Set up sync",
+    "spaceExists": "Another device set up sync first. Ask it to approve this one.",
+    "done": "Sync is set up on this device."
+  },
+  "join": {
+    "title": "Add this device",
+    "description": "Your account already has sync devices. Approve this one from another device, or use your sync recovery key.",
+    "askApproval": "Ask another device",
+    "useRecoveryKey": "Use the sync recovery key",
+    "waiting": "Waiting for approval. Open Cognia on a device that already syncs.",
+    "code": "Check that your other device shows this code",
+    "expiresIn": "Expires in {minutes, plural, one {# minute} other {# minutes}}",
+    "approved": "Approved. Finishing…",
+    "done": "This device now syncs.",
+    "ended": {
+      "denied": "The request was turned down.",
+      "mismatch": "The codes did not match. Nothing was added.",
+      "cancelled": "Request cancelled.",
+      "expired": "The request expired."
+    },
+    "tryAgain": "Ask again",
+    "cancel": "Cancel"
+  },
+  "recover": {
+    "title": "Use your sync recovery key",
+    "label": "Sync recovery key",
+    "placeholder": "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XX",
+    "submit": "Add this device",
+    "back": "Back",
+    "mismatch": "This sync recovery key does not belong to this account.",
+    "invalid": "That is not a valid sync recovery key.",
+    "done": "This device was added with your sync recovery key. Your other devices will see it.",
+    "replacePrompt": "Replace your sync recovery key now? Anyone who saw the old one could still use it.",
+    "replaceNow": "Replace it",
+    "later": "Later"
+  },
+  "recoveryKey": {
+    "title": "Your sync recovery key",
+    "description": "It adds a device when no other device is at hand. Cognia cannot recover it for you. It is not your profile recovery key.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "download": "Download recovery kit",
+    "confirmTitle": "Confirm you kept it",
+    "confirmPositions": "Type characters {positions} of the key.",
+    "characterLabel": "Character {position}",
+    "orDownloaded": "I downloaded the recovery kit and stored it safely",
+    "downloadFirst": "Download the kit to use this option.",
+    "continue": "Continue",
+    "cancel": "Cancel",
+    "wrong": "Those characters do not match the key.",
+    "kit": {
+      "title": "Cognia sync recovery key",
+      "intro": "This key adds a device to your Cognia sync when no other device is at hand. Anyone with it can add a device to your account.",
+      "keyLabel": "Sync recovery key",
+      "accountLabel": "Account",
+      "createdLabel": "Created",
+      "step1": "Store this file somewhere only you can reach, or print it and delete the file.",
+      "step2": "Never share it. Cognia support will never ask for it.",
+      "step3": "It is not your profile recovery key; keep both."
+    }
+  },
+  "devices": {
+    "title": "Devices",
+    "thisDevice": "This device",
+    "unnamed": "Unnamed device",
+    "platform": {
+      "desktop": "Desktop",
+      "mobile": "Phone",
+      "web": "Web"
+    },
+    "addedVia": {
+      "genesis": "First device",
+      "approval": "Approved by {name}",
+      "recovery": "Added with the sync recovery key"
+    },
+    "remove": "Remove",
+    "removeConfirm": "Remove {name} from sync? It deletes its sync keys the next time it connects.",
+    "removeConfirmAction": "Remove device",
+    "removed": "{name} was removed from sync.",
+    "fingerprint": "Device list fingerprint",
+    "fingerprintHint": "Compare it with another device. If they differ, the sync service is showing them different lists.",
+    "rotate": "Rotate keys",
+    "rotated": "Keys rotated.",
+    "replaceRecovery": "Replace sync recovery key",
+    "replaced": "Sync recovery key replaced.",
+    "waiting": "{count, plural, one {# device is} other {# devices are}} waiting for approval",
+    "review": "Review",
+    "keysUnavailable": "This device could not open its sync keys yet."
+  },
+  "removed": {
+    "title": "This device was removed from sync",
+    "body": "Removed on {date} by another device. Its sync keys were deleted; your local data is untouched.",
+    "rejoin": "Add this device again"
+  },
+  "approve": {
+    "title": "Approve a new device",
+    "description": "{name} ({platform}) wants to join your sync devices.",
+    "unknownName": "A device",
+    "continue": "Continue",
+    "deny": "Turn down",
+    "waitingReveal": "Waiting for the new device…",
+    "codePrompt": "Does the new device show this code?",
+    "match": "The codes match — add it",
+    "mismatch": "They differ",
+    "added": "{name} was added.",
+    "notFound": "This request is no longer waiting.",
+    "commitMismatch": "The new device sent a code that does not match what it promised. It was turned down.",
+    "expiresIn": "Expires in {minutes, plural, one {# minute} other {# minutes}}",
+    "close": "Close"
+  },
+  "notification": {
+    "title": "A new device wants to sync",
+    "body": "{name} ({platform}) is waiting for your approval.",
+    "open": "Review"
+  },
+  "summary": {
+    "notInBuild": "Account sync: not in this build",
+    "notInBuildHint": "Device keys and approvals are a preview available in staging builds."
+  },
+  "fleet": {
+    "waitingTitle": "Sync approval needed",
+    "waitingBody": "{count, plural, one {# device is} other {# devices are}} waiting to join your sync devices.",
+    "review": "Review"
+  },
+  "errors": {
+    "generic": "Something went wrong: {message}",
+    "busy": "The device list kept changing. Try again.",
+    "locked": "Unlock this profile first.",
+    "signedOut": "Sign in to your Cognia account first.",
+    "network": "The sync service could not be reached.",
+    "integrity": "The device list could not be verified, so nothing was changed."
+  }
+}

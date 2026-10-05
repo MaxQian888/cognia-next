@@ -34,6 +34,11 @@ jest.mock("@/stores/account/account-store", () => ({
     selector: (state: { unlockedAccountId: string | null; activeAccountId: string }) => unknown
   ) => selector({ unlockedAccountId: mockServed, activeAccountId: mockServed }),
 }))
+jest.mock("@/components/account/sync/account-sync-section", () => ({
+  AccountSyncSection: (props: { account: string }) => (
+    <div data-testid="stub-account-sync" data-account={props.account} />
+  ),
+}))
 jest.mock("@/components/account/manage/official-account-deletion", () => ({
   OfficialAccountDeletion: (props: { session: { accessToken: string } }) => (
     <div data-testid="stub-official-deletion" data-token={props.session.accessToken} />
@@ -202,6 +207,8 @@ describe("AccountIdentityTab", () => {
       expect(screen.queryByText("memberships")).not.toBeInTheDocument()
       expect(d.listMemberships).not.toHaveBeenCalled()
       expect(screen.getByTestId("stub-official-deletion")).toHaveAttribute("data-token", "at")
+      // Account sync's section (null itself when the build lacks the feature).
+      expect(screen.getByTestId("stub-account-sync")).toHaveAttribute("data-account", "Ada")
       // A self-hosted gateway can still replace the official account.
       expect(screen.getByText("selfHosted")).toBeInTheDocument()
       expect(screen.getByTestId("stub-deployment-card")).toBeInTheDocument()
@@ -235,6 +242,7 @@ describe("AccountIdentityTab", () => {
       expect(await screen.findByTestId("account-identity-person")).toHaveTextContent("Ada")
       expect(screen.queryByTestId("account-identity-linked")).not.toBeInTheDocument()
       expect(screen.queryByTestId("stub-official-deletion")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("stub-account-sync")).not.toBeInTheDocument()
       expect(screen.getByTestId("account-identity-sign-out")).toBeInTheDocument()
     })
 

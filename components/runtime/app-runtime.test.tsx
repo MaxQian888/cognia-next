@@ -46,6 +46,9 @@ jest.mock("@/components/plugins/plugin-permission-request-host", () => ({
 jest.mock("@/components/plugins/plugin-enable-failure-toaster", () => ({
   PluginEnableFailureToaster: () => <span data-testid="plugin-enable-failure-toaster" />,
 }))
+jest.mock("@/components/account/sync/account-sync-host", () => ({
+  AccountSyncHost: () => <span data-testid="account-sync-host" />,
+}))
 jest.mock("@/components/providers/recovery-boot-gate", () => ({
   RecoveryBootGate: ({ children }: { children: React.ReactNode }) =>
     mockRecovery ? <span data-testid="recovery" /> : <>{children}</>,
@@ -162,5 +165,11 @@ describe("AppRuntime boot boundaries", () => {
   it.each(pluginHosts)("mounts %s exactly once in the unlocked production runtime", (host) => {
     const markup = renderRuntime()
     expect(markup.split(`data-testid="${host}"`)).toHaveLength(2)
+  })
+
+  it("mounts the account sync host once, and only in the unlocked runtime", () => {
+    expect(renderRuntime().split('data-testid="account-sync-host"')).toHaveLength(2)
+    mockAccount = "locked"
+    expect(renderRuntime()).not.toContain('data-testid="account-sync-host"')
   })
 })
