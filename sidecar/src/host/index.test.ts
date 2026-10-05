@@ -274,3 +274,12 @@ test("creating hosts installs no process handlers and isolates observers", async
   assert.equal(process.listenerCount("beforeExit"), beforeExit)
   assert.equal(process.listenerCount("uncaughtException"), uncaught)
 })
+
+test("loadConfiguredEngines rejects an unknown engine list instead of throwing", async () => {
+  const { loadConfiguredEngines } = await import("./index.ts")
+  let pending: Promise<void> | undefined
+  assert.doesNotThrow(() => {
+    pending = loadConfiguredEngines({ COGNIA_SIDECAR_ENGINES: "ai-sdk,bogus" })
+  })
+  await assert.rejects(pending!, /unknown engines: bogus/)
+})

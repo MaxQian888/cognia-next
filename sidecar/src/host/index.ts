@@ -88,8 +88,12 @@ export {
  * unless `COGNIA_SIDECAR_ENGINES` names some. Must finish before the host
  * reads its first frame; dispatch to an engine not loaded fails closed.
  */
-export function loadConfiguredEngines(env: Record<string, string | undefined> = process.env) {
-  return loadEngines(enginesFromEnv(env))
+export async function loadConfiguredEngines(
+  env: Record<string, string | undefined> = process.env
+): Promise<void> {
+  // Async so a bad engine list rejects like a failed load, and the entry's
+  // rejection handler reports both the same way.
+  await loadEngines(enginesFromEnv(env))
 }
 
 export function createAgentHost({
