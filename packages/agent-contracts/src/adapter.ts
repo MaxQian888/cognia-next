@@ -557,3 +557,40 @@ export function missingAdapterCoreMethods(candidate: object): string[] {
   const record = candidate as Record<string, unknown>
   return EXTERNAL_AGENT_ADAPTER_CORE_METHODS.filter((name) => typeof record[name] !== "function")
 }
+
+/**
+ * An adapter cannot be used because it lacks a member the host needs and
+ * cannot stand in for (for example a plugin adapter without `connect`).
+ * Raised when the adapter is created, never later in the middle of a turn.
+ */
+export class ExternalAgentAdapterContractError extends Error {
+  readonly code = "adapter_contract_violation" as const
+  constructor(
+    readonly protocol: string,
+    readonly missing: readonly string[]
+  ) {
+    super(`External-agent adapter "${protocol}" does not implement: ${missing.join(", ")}`)
+    this.name = "ExternalAgentAdapterContractError"
+  }
+}
+
+/**
+ * The adapter does not support an operation the host asked for. Thrown
+ * instead of pretending the operation succeeded.
+ */
+export class ExternalAgentUnsupportedOperationError extends Error {
+  readonly code = "operation_unsupported" as const
+  constructor(
+    readonly protocol: string,
+    readonly operation: string
+  ) {
+    super(`External-agent adapter "${protocol}" does not support ${operation}`)
+    this.name = "ExternalAgentUnsupportedOperationError"
+  }
+}
+
+export function isExternalAgentUnsupportedOperationError(
+  error: unknown
+): error is ExternalAgentUnsupportedOperationError {
+  return error instanceof ExternalAgentUnsupportedOperationError
+}

@@ -9,6 +9,7 @@ import {
   listPluginProtocolAdapters,
   onProtocolAdapterRegistryChange,
   __resetPluginProtocolAdaptersForTesting,
+  type ProtocolAdapter,
   type ProtocolAdapterRegistryChange,
   type SessionCreateOptions,
 } from "./protocol-adapter"
@@ -123,7 +124,10 @@ describe("plugin-contributed protocol adapter overlay", () => {
     const ok = registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
     expect(ok).toBe(true)
     expect(protocolAdapterRegistry.has("p1:demo")).toBe(true)
-    expect(protocolAdapterRegistry.create("p1:demo")).toBeInstanceOf(TestAdapter)
+    // Created through the core-completing wrapper, under the registered protocol.
+    const created = protocolAdapterRegistry.create("p1:demo")
+    expect(created?.protocol).toBe("p1:demo")
+    expect(created?.isConnected()).toBe(false)
     expect(getPluginProtocolAdapterOwner("p1:demo")).toBe("p1")
     expect(listPluginProtocolAdapters()).toEqual([{ protocol: "p1:demo", pluginId: "p1" }])
   })
@@ -222,5 +226,39 @@ describe("plugin overlay — per-plugin protocols + change events", () => {
     ).not.toThrow()
     expect(protocolAdapterRegistry.has("p1:a")).toBe(true)
     unsubscribe()
+  })
+})
+
+describe("plugin adapters are read against the adapter core", () => {
+  afterEach(() => {
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("fails creation when a plugin adapter lacks a member the host cannot supply", () => {
+    registerPluginProtocolAdapter(
+      "p1:broken",
+      () => ({ connect: async () => {} }) as unknown as ProtocolAdapter,
+      { pluginId: "p1" }
+    )
+    expect(() => protocolAdapterRegistry.create("p1:broken")).toThrow(/does not implement/)
+  })
+
+  it("supplies the session registry a Python-style proxy does not forward", async () => {
+    registerPluginProtocolAdapter(
+      "p1:py",
+      () =>
+        ({
+          connect: async () => {},
+          disconnect: async () => {},
+          createSession: async () => ({ id: "s1", agentId: "a", status: "ready" }),
+          closeSession: async () => {},
+          prompt: async function* () {},
+        }) as unknown as ProtocolAdapter,
+      { pluginId: "p1" }
+    )
+    const adapter = protocolAdapterRegistry.create("p1:py")!
+    await adapter.createSession()
+    expect(adapter.getSessions().map((session) => session.id)).toEqual(["s1"])
+    await expect(adapter.cancel("s1")).rejects.toThrow(/does not support cancel/)
   })
 })

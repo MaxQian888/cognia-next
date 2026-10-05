@@ -94,6 +94,7 @@ const SPECS = {
       "./lf-frame-decoder",
       "./spawn-reclaim",
       "./history",
+      "./plugin-compat",
     ],
     dataOnly: ["./history"],
     runtimeModules: ["base-adapter", "json-rpc-peer", "lf-frame-decoder", "spawn-reclaim"],
@@ -110,6 +111,10 @@ const SPECS = {
       import { boundedDiagnostic, importedSessionId } from "@cognia/agent-runtime-kit/history"
       if (importedSessionId("codex", "a") !== "import:codex:a") throw new Error("history ids")
       if (boundedDiagnostic({ api_key: "k" }, { redactText: (t) => t }).api_key !== "[redacted]") throw new Error("diagnostic")
+      import { adaptPluginProtocolAdapter } from "@cognia/agent-runtime-kit/plugin-compat"
+      let contract = false
+      try { adaptPluginProtocolAdapter({}, "p:x") } catch (error) { contract = error.code === "adapter_contract_violation" }
+      if (!contract) throw new Error("plugin compat")
     `,
     types: `
       import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"

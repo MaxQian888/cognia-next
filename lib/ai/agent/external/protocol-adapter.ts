@@ -9,6 +9,7 @@
  */
 
 import type { ProtocolAdapter, ProtocolAdapterFactory } from "@cognia/agent-contracts/adapter"
+import { adaptPluginProtocolAdapter } from "@cognia/agent-runtime-kit/plugin-compat"
 import type { ExternalAgentCapabilityMatrix } from "@cognia/agent-contracts/external-agent-capability"
 
 export type {
@@ -192,7 +193,10 @@ export function registerPluginProtocolAdapter(
   if (protocolAdapterRegistry.has(protocol) && existingOwner !== opts.pluginId) {
     return false
   }
-  protocolAdapterRegistry.register(protocol, factory)
+  // Plugin adapters are untyped at runtime (JavaScript factories, Python
+  // proxies). Read each one against the adapter core when it is created, so a
+  // missing member fails the agent's creation instead of a later turn.
+  protocolAdapterRegistry.register(protocol, () => adaptPluginProtocolAdapter(factory(), protocol))
   pluginAdapterOwners.set(protocol, opts.pluginId)
   pluginAdapterMetadata.set(protocol, {
     pluginId: opts.pluginId,

@@ -352,7 +352,11 @@ describe("external-agent-adapters-bridge", () => {
     expect(result).toEqual({ registered: 1, errors: [] })
     expect(importer).toHaveBeenCalledWith("/plugins/wire-plugin/src/demo.js")
     expect(protocolAdapterRegistry.has("wire-plugin:demo")).toBe(true)
-    expect(protocolAdapterRegistry.create("wire-plugin:demo")).toBeInstanceOf(StubAdapter)
+    // The registry hands out the plugin's adapter read against the adapter core.
+    const created = protocolAdapterRegistry.create("wire-plugin:demo")
+    expect(created?.protocol).toBe("wire-plugin:demo")
+    await created?.connect({ id: "c" } as ExternalAgentConfig)
+    expect(created?.connectionStatus).toBe("connected")
   })
 
   it("collects validation errors without blocking other adapters", async () => {
