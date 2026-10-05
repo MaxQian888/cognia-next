@@ -278,6 +278,22 @@ export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnap
   })
 }
 
+/**
+ * One named account's env projection, without touching the active pointer.
+ * An external-agent configuration bound to its own account (ADR-0216) launches
+ * with this; it rejects when the vault no longer holds the account.
+ */
+export async function getAccountEnv(
+  provider: ProviderId,
+  providerAccountId: string
+): Promise<ActiveSnapshot> {
+  return await transport.call<ActiveSnapshot>("subscription_get_account_env", {
+    provider,
+    ...subscriptionScope(),
+    accountId: providerAccountId,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Provider preset
 // ---------------------------------------------------------------------------

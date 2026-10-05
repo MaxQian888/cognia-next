@@ -324,6 +324,29 @@ impl ExternalAgentProcessManager {
             }
         }
 
+        // A private state root (ADR-0216) is honoured by every route that
+        // reaches this process table. The desktop sandbox wrapper normally
+        // resolves it first (and removes the key); an unwrapped local spawn —
+        // the headless host's local-process backend — resolves it here, so the
+        // env mapping holds even without the sandbox. Applying is idempotent:
+        // a resolved config no longer carries the key.
+        if config
+            .env
+            .contains_key(crate::state_isolation::AGENT_STATE_KEY_ENV)
+        {
+            let home = crate::state_isolation::host_home()
+                .ok_or("State isolation requires a host home directory")?;
+            crate::state_isolation::apply_state_isolation(
+                &mut config,
+                crate::state_isolation::host_agent_state_data_dir().as_deref(),
+                &home,
+            )
+            .map_err(|error| {
+                log::error!("Refusing external agent {id}: {error}");
+                error
+            })?;
+        }
+
         log::info!(
             "Spawning external agent: id={}, command={}, args={:?}",
             id,
@@ -408,6 +431,9 @@ impl ExternalAgentProcessManager {
         }
         cmd.env_remove(crate::devin_mcp_config::PAYLOAD_ENV);
         cmd.env_remove(crate::devin_mcp_config::WRAPPED_ENV);
+        // The state key is a request to this host, never child input — not
+        // even when the host process itself happens to carry one.
+        cmd.env_remove(crate::state_isolation::AGENT_STATE_KEY_ENV);
         if managed_gateway {
             cmd.env_clear()
                 .envs(crate::gateway_task::runtime_environment());
@@ -931,6 +957,37 @@ mod tests {
             framing: Default::default(),
             sandbox: None,
         }
+    }
+
+    /// The process table refuses a state key it cannot honour instead of
+    /// launching the agent on the user's own login. Both refusals happen
+    /// before any directory is created or any child starts.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unresolvable_state_key_refuses_the_local_spawn() {
+        let manager = ExternalAgentProcessManager::new();
+        let mut unsupported = echo_config("isolated-cat");
+        unsupported.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "cfg".into(),
+        );
+        let error = manager
+            .spawn(unsupported, Arc::new(CollectorSink::default()))
+            .await
+            .unwrap_err();
+        assert_eq!(error, "state isolation unsupported for cat");
+
+        let mut invalid = echo_config("isolated-bad-key");
+        invalid.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "../escape".into(),
+        );
+        let error = manager
+            .spawn(invalid, Arc::new(CollectorSink::default()))
+            .await
+            .unwrap_err();
+        assert!(error.contains("invalid"), "{error}");
+        assert!(manager.list().await.is_empty());
     }
 
     #[cfg(unix)]

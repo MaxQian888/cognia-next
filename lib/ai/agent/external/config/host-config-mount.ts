@@ -20,9 +20,18 @@
  * The agent id IS the configuration id. That is what makes the mount shared,
  * and it is also what lets a model chosen for a host-owned agent be persisted
  * under the same `externalAgentProviderId` marker the local lane uses.
+ *
+ * Secrets: a stored host configuration holds `credentialRefs` only. The mount
+ * hands them to `manager.addAgent`, whose launch preparer
+ * (`lifecycle/launch-preparation.ts`) resolves them from the host keyring
+ * immediately before the spawn — so a host configuration launches with its OWN
+ * credentials (G8), and only refs naming its own slots are passed on: a
+ * legacy row pointing at another configuration's slot launches without that
+ * secret rather than with someone else's.
  */
 
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { ExternalAgentCredentialRefs } from "@/types/agent/external-agent-lifecycle"
 
 import { externalAgentProcessPlane } from "../capability/process-plane"
 import { getRemoteHostConfig } from "../runtimes/remote/remote-host-configs"
@@ -32,6 +41,43 @@ export interface HostConfigMountManager {
   getAgent(agentId: string): unknown | undefined
   addAgent(config: ExternalAgentConfig, options?: { connect?: boolean }): Promise<unknown>
   removeAgent(agentId: string): Promise<void>
+}
+
+/**
+ * The refs that name `configId`'s own keyring slots (`<configId>:<slot>`).
+ * Shared with `host-config-service`, which refuses the others on write.
+ */
+export function ownCredentialRefs(
+  refs: ExternalAgentCredentialRefs | undefined | null,
+  configId: string
+): ExternalAgentCredentialRefs {
+  const own: ExternalAgentCredentialRefs = {}
+  for (const [slot, keyId] of Object.entries(refs ?? {})) {
+    if (typeof keyId === "string" && keyId.startsWith(`${configId}:`)) {
+      own[slot as keyof ExternalAgentCredentialRefs] = keyId
+    }
+  }
+  return own
+}
+
+/**
+ * What the manager is handed: the stored config under the configuration id,
+ * with only its own credential refs. The refs stay refs here; resolving them
+ * is the launch preparer's job, inside `addAgent`.
+ */
+export function hostConfigLaunchConfig(
+  configId: string,
+  config: ExternalAgentConfig
+): ExternalAgentConfig {
+  const { credentialRefs, ...rest } = config as ExternalAgentConfig & {
+    credentialRefs?: ExternalAgentCredentialRefs
+  }
+  const own = ownCredentialRefs(credentialRefs, configId)
+  return {
+    ...rest,
+    id: configId,
+    ...(Object.keys(own).length > 0 ? { credentialRefs: own } : {}),
+  } as ExternalAgentConfig
 }
 
 /** configId to the revision currently mounted on the manager. */
@@ -80,7 +126,7 @@ async function mountExclusive(
     await manager.removeAgent(agentId)
     mounted.delete(configId)
   }
-  await manager.addAgent({ ...config, id: agentId }, { connect: true })
+  await manager.addAgent(hostConfigLaunchConfig(agentId, config), { connect: true })
   mounted.set(configId, revision)
   return agentId
 }

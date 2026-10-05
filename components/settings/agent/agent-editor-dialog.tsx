@@ -7,13 +7,21 @@
  * rail + overview + inspector layout: the inspector covers quick inline
  * edits, and this dialog stays the deep editor — preset seeding, protocol
  * selection, and every protocol-specific option (Codex sandbox, OpenCode
- * server auth, Pi extension policy, managed DeepSeek Harness).
+ * server auth, Pi extension policy, managed DeepSeek Harness), plus the
+ * per-configuration choices that let several configurations of one runtime
+ * coexist (ADR-0216): state isolation, subscription account, session limits
+ * and approval rules.
+ *
+ * Rendered through `ResponsiveFormDialog`: a Dialog on desktop, a bottom
+ * Drawer on a phone. All form state lives in this component, above the shell,
+ * so a resize across the breakpoint (which swaps the shell) loses nothing.
  */
 
 import { Surface } from "@/components/surface/surface"
 import { KvEditor } from "@/components/settings/mcp/kv-editor"
 import { kvRowsToObject, objectToKvRows } from "@/components/settings/mcp/mcp-server-utils"
-import { useState, useCallback } from "react"
+import { ChipInput } from "@/components/settings/gateway/shared/chip-input"
+import { useState, useCallback, useId } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { ChevronDown, FolderPlus, Globe, PackageIcon, Terminal } from "lucide-react"
@@ -24,15 +32,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Spinner } from "@/components/ui/spinner"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -40,14 +41,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ResponsiveFormDialog } from "@/components/shared/responsive-form-dialog"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
+import {
+  StateIsolationField,
+  defaultStateIsolationFor,
+  stateIsolationSupported,
+} from "@/components/agent/external-agent/add-agent/state-isolation-field"
+import {
+  presetDescription,
+  presetEnvironmentLabel,
+  presetName,
+  presetSetupHint,
+} from "@/components/agent/external-agent/add-agent/preset-copy"
 import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
+import { useAccounts } from "@/lib/subscription/core/hooks"
+import { isTauri } from "@/lib/platform/detect"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
 import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
+import { CODEX_PRESET_FAMILY } from "@/lib/ai/agent/external/config/agent-binding"
+import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
 import {
   adaptPermissionMode,
   supportedPermissionModes,
@@ -67,8 +84,10 @@ import type {
   AcpPermissionMode,
   CreateExternalAgentInput,
   ExternalAgentProtocol,
+  ExternalAgentStateIsolation,
   ExternalAgentTransport,
 } from "@/types/agent/external-agent"
+import type { ExternalAgentCredentialSlot } from "@/types/agent/external-agent-lifecycle"
 
 /** i18n label key (under `externalAgent.settings`) for each permission mode. */
 export const PERMISSION_MODE_LABEL_KEY: Record<AcpPermissionMode, string> = {
@@ -83,6 +102,22 @@ export const PERMISSION_MODE_LABEL_KEY: Record<AcpPermissionMode, string> = {
 // Types
 // =============================================================================
 
+/**
+ * What the editor hands its parent on save.
+ *
+ * A create input, except that the two session-limit fields may be `null`: on
+ * an EDIT, `null` clears a limit the configuration had saved (back to "no
+ * limit" / "use the execution timeout"), which an omitted key cannot express
+ * because an update leaves omitted keys alone. A create never carries `null`.
+ */
+export type AgentEditorSaveInput = Omit<
+  CreateExternalAgentInput,
+  "maxConcurrentSessions" | "sessionIdleTimeout"
+> & {
+  maxConcurrentSessions?: number | null
+  sessionIdleTimeout?: number | null
+}
+
 interface AgentFormData {
   cogniaModel?: CreateExternalAgentInput["cogniaModel"]
   name: string
@@ -95,6 +130,10 @@ interface AgentFormData {
   processEnv?: Record<string, string>
   // Network config (for http/websocket)
   networkEndpoint: string
+  /**
+   * A NEW API key. A saved one is a keyring credential the editor cannot read
+   * back; empty means "keep whatever is saved".
+   */
   networkApiKey: string
   // Settings
   defaultPermissionMode: AcpPermissionMode
@@ -107,6 +146,24 @@ interface AgentFormData {
   retryExponentialBackoff: boolean
   retryMaxDelayMs: string
   retryOnErrors: string
+  // Instances (ADR-0216)
+  /** The choice as made; `effectiveStateIsolation` clamps it to what the runtime allows. */
+  stateIsolation: ExternalAgentStateIsolation
+  /** `null` follows the globally active account. Codex family only. */
+  subscriptionAccountId: string | null
+  /** Empty string = no limit. */
+  maxConcurrentSessions: string
+  /** Empty string = fall back to the execution timeout. */
+  sessionIdleTimeoutMs: string
+  requireApprovalFor: string[]
+  autoApprovePatterns: string[]
+  /**
+   * Secrets the user asked to remove. They live in the keyring, not in the
+   * config, so an empty input cannot clear them: the removal runs through the
+   * lifecycle service after the save succeeds.
+   */
+  clearServerPassword: boolean
+  clearApiKey: boolean
   // Codex app-server options (shown only for protocol === "codex-app-server")
   codexSandboxMode: "readOnly" | "workspaceWrite" | "dangerFullAccess"
   codexNetworkAccess: boolean
@@ -122,6 +179,10 @@ interface AgentFormData {
   opencodePort: string
   /** Empty string = 127.0.0.1 */
   opencodeHostname: string
+  /**
+   * A NEW server password. The saved one is a keyring credential the editor
+   * cannot read back; empty means "keep whatever is saved".
+   */
   opencodeServerPassword: string
   /** Empty string = "opencode" (the server's Basic-Auth default user) */
   opencodeServerUsername: string
@@ -154,10 +215,39 @@ function parseSkillRootLines(value: string): string[] {
   return out
 }
 
+/**
+ * Is `value` a well-formed approval entry? The `allowedTools` syntax the
+ * runtime matches with (`configuredApprovalPolicy`): a tool name, or
+ * `Tool(specifier)` with the closing parenthesis. An entry without one is
+ * accepted by the matcher but silently reads to the end of the string, which
+ * is never what was meant.
+ */
+export function isApprovalEntryValid(value: string): boolean {
+  const open = value.indexOf("(")
+  const base = (open >= 0 ? value.slice(0, open) : value).trim()
+  if (!base || base.includes(")")) return false
+  return open < 0 || value.trimEnd().endsWith(")")
+}
+
+/**
+ * Parse an optional positive-integer field. `""` → `undefined` (unset);
+ * anything that is not a whole number above zero → `null` (invalid).
+ */
+function parseOptionalPositiveInteger(value: string): number | undefined | null {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  if (!/^\d+$/.test(trimmed)) return null
+  const parsed = Number.parseInt(trimmed, 10)
+  return parsed > 0 ? parsed : null
+}
+
 const DEFAULT_TIMEOUT_MS = "300000"
 const DEFAULT_RETRY_MAX_RETRIES = "3"
 const DEFAULT_RETRY_DELAY_MS = "1000"
 const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
+
+/** Select value standing for "follow the active account" (`null`). */
+const FOLLOW_ACTIVE_ACCOUNT = "__follow-active__"
 
 /**
  * Read the stored declaration back into the tri-state. Only `native` and
@@ -189,6 +279,16 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   retryExponentialBackoff: true,
   retryMaxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
   retryOnErrors: "",
+  // A new configuration gets its own state where the runtime allows it; the
+  // editor clamps this to "shared" for a runtime that cannot be isolated.
+  stateIsolation: "isolated",
+  subscriptionAccountId: null,
+  maxConcurrentSessions: "",
+  sessionIdleTimeoutMs: "",
+  requireApprovalFor: [],
+  autoApprovePatterns: [],
+  clearServerPassword: false,
+  clearApiKey: false,
   codexSandboxMode: "workspaceWrite",
   codexNetworkAccess: false,
   codexDefaultEffort: "",
@@ -217,7 +317,12 @@ function piExtensionPolicyFromMetadata(
   return resolvePiExtensionPolicy(metadata?.piExtensionPolicy)
 }
 
-/** Pull the OpenCode form fields out of an agent/preset `metadata` bag. */
+/**
+ * Pull the OpenCode form fields out of an agent/preset `metadata` bag.
+ *
+ * The server password is not among them: it is a keyring credential, scrubbed
+ * from the stored metadata, so there is nothing to read back.
+ */
 function opencodeFieldsFromMetadata(
   metadata: Record<string, unknown> | undefined
 ): Pick<
@@ -225,7 +330,6 @@ function opencodeFieldsFromMetadata(
   | "opencodeAutoSpawn"
   | "opencodePort"
   | "opencodeHostname"
-  | "opencodeServerPassword"
   | "opencodeServerUsername"
   | "opencodeModel"
 > {
@@ -233,8 +337,6 @@ function opencodeFieldsFromMetadata(
     opencodeAutoSpawn: metadata?.autoSpawnServer === true,
     opencodePort: typeof metadata?.port === "number" ? String(metadata.port) : "",
     opencodeHostname: typeof metadata?.hostname === "string" ? metadata.hostname : "",
-    opencodeServerPassword:
-      typeof metadata?.serverPassword === "string" ? metadata.serverPassword : "",
     opencodeServerUsername:
       typeof metadata?.serverUsername === "string" ? metadata.serverUsername : "",
     opencodeModel: typeof metadata?.model === "string" ? metadata.model : "",
@@ -245,8 +347,17 @@ function opencodeFieldsFromMetadata(
  * list is session-level (from `model/list` supportedReasoningEfforts). */
 const CODEX_EFFORT_CHOICES = ["minimal", "low", "medium", "high", "xhigh"] as const
 
+/** Does this configuration run the Codex runtime (and so sign in with a Codex account)? */
+function isCodexFamily(presetId: string, protocol: ExternalAgentProtocol): boolean {
+  return CODEX_PRESET_FAMILY.includes(presetId) || protocol === "codex-app-server"
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 // =============================================================================
-// Connection Status Components
+// Field helpers
 // =============================================================================
 
 /**
@@ -269,7 +380,7 @@ function FormSection({
 }) {
   return (
     <Collapsible defaultOpen={defaultOpen} className="rounded-lg border" data-testid={dataTestId}>
-      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left">
+      <CollapsibleTrigger className="group flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 text-left">
         <span className="text-sm font-medium">{title}</span>
         <span className="flex min-w-0 items-center gap-2">
           {summary && <span className="truncate text-xs text-muted-foreground">{summary}</span>}
@@ -278,6 +389,145 @@ function FormSection({
       </CollapsibleTrigger>
       <CollapsibleContent className="grid gap-3 border-t px-3 py-3">{children}</CollapsibleContent>
     </Collapsible>
+  )
+}
+
+/**
+ * The state of a secret the editor cannot read back (it lives in the keyring),
+ * with the one action an empty input cannot express: removing it. Only shown
+ * when editing a saved configuration.
+ */
+function SavedSecretState({
+  saved,
+  pendingRemoval,
+  onPendingRemovalChange,
+  testid,
+}: {
+  saved: boolean
+  pendingRemoval: boolean
+  onPendingRemovalChange: (next: boolean) => void
+  testid: string
+}) {
+  const t = useTranslations("externalAgentManage.editor")
+  if (!saved) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid={`${testid}-not-saved`}>
+        {t("secretNotSaved")}
+      </p>
+    )
+  }
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
+      data-testid={`${testid}-saved`}
+    >
+      <span className="min-w-0">{pendingRemoval ? t("secretWillRemove") : t("secretSaved")}</span>
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="touch-hit h-auto px-0 text-xs"
+        onClick={() => onPendingRemovalChange(!pendingRemoval)}
+      >
+        {pendingRemoval ? t("secretKeep") : t("secretRemove")}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Which Codex account this configuration signs in with. Accounts are read
+ * from the subscription vault, which only the desktop app can open; anywhere
+ * else the field explains that the configuration follows the active account
+ * and offers nothing to change.
+ */
+function SubscriptionAccountField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string | null
+  onChange: (next: string | null) => void
+}) {
+  const t = useTranslations("externalAgentManage.editor")
+  return (
+    <div className="grid gap-2" data-testid="subscription-account-field">
+      {isTauri() ? (
+        <>
+          <Label htmlFor={id}>{t("account")}</Label>
+          <SubscriptionAccountSelect id={id} value={value} onChange={onChange} />
+        </>
+      ) : (
+        <>
+          {/* No control to label: the explanation stands in for it. */}
+          <span className="text-sm font-medium">{t("account")}</span>
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="subscription-account-unavailable"
+          >
+            {t("accountUnavailableWeb")}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SubscriptionAccountSelect({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string | null
+  onChange: (next: string | null) => void
+}) {
+  const t = useTranslations("externalAgentManage.editor")
+  const { accounts, loading, error } = useAccounts("codex")
+  if (error) {
+    return (
+      <p
+        className="text-xs text-amber-700 dark:text-amber-400"
+        data-testid="subscription-account-error"
+      >
+        {t("accountLoadFailed", { error })}
+      </p>
+    )
+  }
+  const bound = value ? accounts.find((account) => account.id === value) : undefined
+  return (
+    <>
+      <Select
+        value={value ?? FOLLOW_ACTIVE_ACCOUNT}
+        onValueChange={(next) => onChange(next === FOLLOW_ACTIVE_ACCOUNT ? null : next)}
+        disabled={loading}
+      >
+        <SelectTrigger id={id} data-testid="subscription-account-select">
+          <SelectValue placeholder={loading ? t("accountLoading") : undefined} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={FOLLOW_ACTIVE_ACCOUNT}>{t("accountFollowActive")}</SelectItem>
+          {accounts.map((account) => (
+            <SelectItem key={account.id} value={account.id}>
+              {account.label || account.email || account.id}
+            </SelectItem>
+          ))}
+          {/* A binding to an account that has since been removed stays
+              visible as what it is, rather than the Select going blank. */}
+          {value && !bound && !loading ? (
+            <SelectItem value={value}>{t("accountMissing", { id: value })}</SelectItem>
+          ) : null}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        {loading
+          ? t("accountLoading")
+          : accounts.length === 0
+            ? t("accountNone")
+            : t("accountHint")}
+      </p>
+    </>
   )
 }
 
@@ -294,7 +544,21 @@ interface AgentEditorDialogProps {
    * quick-start gallery. Empty string means "manual configuration".
    */
   initialPreset?: string
-  onSave: (data: CreateExternalAgentInput) => void
+  /**
+   * Persist the configuration. AWAITED: the dialog shows a saving state and
+   * keeps every control disabled until it settles.
+   *
+   * Resolve `true` once it is saved: the dialog then runs any secret removal
+   * the user asked for (`clearCredentialSlot`, edit only) and closes itself —
+   * the parent does not need to close it. Resolve `false` when it was not
+   * saved, after telling the user why (a toast): the dialog stays open with
+   * the user's input intact so they can fix it and try again. A rejection is
+   * treated like `false`, with a generic "could not save" toast.
+   *
+   * On create the input never carries `null`; on edit a `null` session limit
+   * clears a saved one (see {@link AgentEditorSaveInput}).
+   */
+  onSave: (data: AgentEditorSaveInput) => Promise<boolean>
 }
 
 export function AgentEditorDialog({
@@ -306,17 +570,24 @@ export function AgentEditorDialog({
 }: AgentEditorDialogProps) {
   const t = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
+  const tManage = useTranslations("externalAgentManage.editor")
   const tCommon = useTranslations("common")
   const tGateway = useTranslations("externalAgent.cogniaModel")
   const { getAgent } = useExternalAgentStore()
+  const editingAgent = editingAgentId ? getAgent(editingAgentId) : undefined
+
+  // Control ids are scoped to this dialog instance. Global ids ("name",
+  // "command") collided with every other form on the page that used the same
+  // word, and a `<Label htmlFor>` then pointed at the wrong input.
+  const uid = useId()
+  const fid = (name: string) => `${uid}-${name}`
 
   // Quick-start preset selector — mirrors the chat-side AddAgentDialog pattern
-  // in `components/agent/external-agent-manager.tsx`. Picking a preset fills
+  // in `components/agent/external-agent/manager.tsx`. Picking a preset fills
   // the form fields and stamps `metadata.preset` on save so `isFromPreset()`
   // can later badge the row.
   const [selectedPreset, setSelectedPreset] = useState<string>(
-    initialPreset ||
-      (editingAgentId ? String(getAgent(editingAgentId)?.metadata?.preset ?? "") : "")
+    initialPreset || (editingAgent ? String(editingAgent.metadata?.preset ?? "") : "")
   )
   // A native picker only resolves paths on this device, never on a remote Host.
   // Subscribed rather than read once: a desktop can attach to (or detach from)
@@ -334,7 +605,7 @@ export function AgentEditorDialog({
       if (preset) {
         return {
           ...DEFAULT_FORM_DATA,
-          name: initialPreset === "opencode-v2-service" ? t("opencodeV2PresetName") : preset.name,
+          name: presetName(t, initialPreset, preset),
           protocol: preset.protocol,
           transport: preset.transport,
           processCommand: preset.process?.command ?? "",
@@ -342,22 +613,8 @@ export function AgentEditorDialog({
           processEnv: preset.process?.env,
           networkEndpoint: preset.network?.endpoint ?? "",
           defaultPermissionMode: preset.defaultPermissionMode,
-          description:
-            initialPreset === "opencode-v2-service"
-              ? t("opencodeV2PresetDescription")
-              : initialPreset === "devin"
-                ? t("devinPresetDescription")
-                : initialPreset === "aider"
-                  ? t("aiderPresetDescription")
-                  : initialPreset === "qoder"
-                    ? t("qoderPresetDescription")
-                    : initialPreset === "kimi"
-                      ? t("kimiPresetDescription")
-                      : initialPreset === "cline"
-                        ? t("clinePresetDescription")
-                        : initialPreset === "goose"
-                          ? t("goosePresetDescription")
-                          : preset.description,
+          description: presetDescription(t, initialPreset, preset),
+          stateIsolation: defaultStateIsolationFor(preset.process?.command, preset.process?.args),
           ...opencodeFieldsFromMetadata(preset.metadata),
         }
       }
@@ -372,6 +629,7 @@ export function AgentEditorDialog({
     }
 
     return {
+      ...DEFAULT_FORM_DATA,
       name: agent.name,
       cogniaModel: agent.cogniaModel,
       protocol: agent.protocol,
@@ -391,6 +649,13 @@ export function AgentEditorDialog({
       retryExponentialBackoff: agent.retryConfig?.exponentialBackoff ?? true,
       retryMaxDelayMs: String(agent.retryConfig?.maxRetryDelay ?? DEFAULT_RETRY_MAX_DELAY_MS),
       retryOnErrors: agent.retryConfig?.retryOnErrors?.join(", ") || "",
+      // Absent is `shared`: every configuration saved before ADR-0216.
+      stateIsolation: agent.stateIsolation ?? "shared",
+      subscriptionAccountId: agent.subscriptionAccountId ?? null,
+      maxConcurrentSessions: agent.maxConcurrentSessions ? String(agent.maxConcurrentSessions) : "",
+      sessionIdleTimeoutMs: agent.sessionIdleTimeout ? String(agent.sessionIdleTimeout) : "",
+      requireApprovalFor: agent.requireApprovalFor ?? [],
+      autoApprovePatterns: agent.autoApprovePatterns ?? [],
       codexSandboxMode: agent.codexOptions?.sandboxMode ?? "workspaceWrite",
       codexNetworkAccess: agent.codexOptions?.networkAccess ?? false,
       codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
@@ -404,8 +669,48 @@ export function AgentEditorDialog({
 
   const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
   const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows(formData.processEnv))
+  const [submitting, setSubmitting] = useState(false)
 
-  const handleSave = useCallback(() => {
+  // The launch target the state-isolation rule is decided on. A managed or
+  // network agent has no local command, and the field says so.
+  const launchesProcess =
+    formData.transport === "stdio" ||
+    (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+  const isolationCommand =
+    managedDsh || !launchesProcess
+      ? undefined
+      : formData.processCommand.trim() || (formData.protocol === "opencode" ? "opencode" : "")
+  const isolationArgs = tokenizeShellCommand(formData.processArgs) ?? []
+  // A runtime with no home variable cannot be given its own state: whatever was
+  // chosen, it runs on the shared one, and the saved value must say so.
+  const effectiveStateIsolation: ExternalAgentStateIsolation =
+    isolationCommand && !stateIsolationSupported(isolationCommand, isolationArgs)
+      ? "shared"
+      : formData.stateIsolation
+  const movingToOwnState = Boolean(editingAgent) && editingAgent?.stateIsolation !== "isolated"
+
+  const serverPasswordSaved = Boolean(editingAgent?.credentialRefs?.serverPassword)
+  const apiKeySaved = Boolean(editingAgent?.credentialRefs?.apiKey)
+
+  const presetConfig =
+    selectedPreset && selectedPreset !== "custom" ? getPresetConfig(selectedPreset) : undefined
+  const setupHint = presetConfig
+    ? presetSetupHint(tManager, selectedPreset, presetConfig, t)
+    : undefined
+  const environmentLabel = presetEnvironmentLabel(t, selectedPreset, formData.protocol)
+  const codexFamily = isCodexFamily(selectedPreset, formData.protocol)
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      // A save in flight owns the dialog: closing it would drop the input the
+      // save may hand back on failure.
+      if (!next && submitting) return
+      onOpenChange(next)
+    },
+    [submitting, onOpenChange]
+  )
+
+  const handleSave = useCallback(async () => {
     const usesProcess =
       formData.transport === "stdio" ||
       (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
@@ -444,13 +749,28 @@ export function AgentEditorDialog({
       return
     }
 
-    const input: CreateExternalAgentInput = {
+    const maxConcurrentSessions = parseOptionalPositiveInteger(formData.maxConcurrentSessions)
+    if (maxConcurrentSessions === null) {
+      toast.error(tManage("invalidMaxSessions"))
+      return
+    }
+    const sessionIdleTimeout = parseOptionalPositiveInteger(formData.sessionIdleTimeoutMs)
+    if (sessionIdleTimeout === null) {
+      toast.error(tManage("invalidIdleTimeout"))
+      return
+    }
+
+    const input: AgentEditorSaveInput = {
       name: formData.name.trim(),
       cogniaModel: formData.cogniaModel ?? null,
       protocol: formData.protocol,
       transport: formData.transport,
-      description: formData.description,
+      description: formData.description.trim(),
       defaultPermissionMode: formData.defaultPermissionMode,
+      stateIsolation: effectiveStateIsolation,
+      // Complete lists every time: an emptied list is the clear.
+      requireApprovalFor: formData.requireApprovalFor,
+      autoApprovePatterns: formData.autoApprovePatterns,
       timeout: toNonNegativeInteger(formData.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
       retryConfig: {
         maxRetries: toNonNegativeInteger(
@@ -468,6 +788,29 @@ export function AgentEditorDialog({
         ),
         retryOnErrors,
       },
+    }
+
+    // Session limits: a value sets it; an emptied field clears a saved one on
+    // edit (`null`); on create, empty simply leaves it unset (no limit).
+    if (maxConcurrentSessions !== undefined) {
+      input.maxConcurrentSessions = maxConcurrentSessions
+    } else if (editingAgent?.maxConcurrentSessions) {
+      input.maxConcurrentSessions = null
+    }
+    if (sessionIdleTimeout !== undefined) {
+      input.sessionIdleTimeout = sessionIdleTimeout
+    } else if (editingAgent?.sessionIdleTimeout) {
+      input.sessionIdleTimeout = null
+    }
+
+    // The account binding only means something to the Codex runtime. On edit
+    // `null` is the clear (follow the active account); on create it is unset.
+    if (codexFamily) {
+      if (formData.subscriptionAccountId) {
+        input.subscriptionAccountId = formData.subscriptionAccountId
+      } else if (editingAgent) {
+        input.subscriptionAccountId = null
+      }
     }
 
     const selectedPresetConfig =
@@ -594,6 +937,8 @@ export function AgentEditorDialog({
       if (formData.opencodeHostname.trim()) {
         opencodeMetadata.hostname = formData.opencodeHostname.trim()
       } else delete opencodeMetadata.hostname
+      // A typed password goes to the keyring (the lifecycle service lifts it
+      // out of the metadata); an empty input keeps the saved one.
       if (formData.opencodeServerPassword) {
         opencodeMetadata.serverPassword = formData.opencodeServerPassword
       } else delete opencodeMetadata.serverPassword
@@ -607,10 +952,14 @@ export function AgentEditorDialog({
     }
 
     if (formData.protocol === "opencode-v2") {
-      // Metadata updates merge with saved values; null explicitly clears auth.
+      // Metadata updates merge with saved values; null explicitly clears the
+      // username. The password is a keyring credential: a typed one replaces
+      // it, and removing it is the explicit action below.
       input.metadata = {
         ...(input.metadata ?? {}),
-        serverPassword: formData.opencodeServerPassword || null,
+        ...(formData.opencodeServerPassword
+          ? { serverPassword: formData.opencodeServerPassword }
+          : {}),
         serverUsername: formData.opencodeServerUsername.trim() || null,
       }
     }
@@ -628,16 +977,73 @@ export function AgentEditorDialog({
 
     if (
       input.cogniaModel &&
-      (!input.cogniaModel.providerId || !input.cogniaModel.modelId || !canUseCogniaModels(input))
+      (!input.cogniaModel.providerId ||
+        !input.cogniaModel.modelId ||
+        !canUseCogniaModels(input as CreateExternalAgentInput))
     ) {
       toast.error(tGateway("invalid"))
       return
     }
-    onSave(input)
+
+    // Secret removals the user asked for, minus any slot a new value replaces.
+    const usesServerPassword =
+      formData.protocol === "opencode" || formData.protocol === "opencode-v2"
+    const usesApiKey = formData.protocol === "opencode-v2" || (!launchesProcess && !managedDsh)
+    const removals: ExternalAgentCredentialSlot[] = []
+    if (
+      editingAgentId &&
+      usesServerPassword &&
+      formData.clearServerPassword &&
+      !formData.opencodeServerPassword
+    ) {
+      removals.push("serverPassword")
+    }
+    if (editingAgentId && usesApiKey && formData.clearApiKey && !formData.networkApiKey) {
+      removals.push("apiKey")
+    }
+
+    setSubmitting(true)
+    let saved = false
+    try {
+      saved = await onSave(input)
+    } catch (error) {
+      toast.error(tManage("saveFailed", { error: errorText(error) }))
+    }
+    if (!saved) {
+      // Keep the dialog, and everything typed into it, for another try.
+      setSubmitting(false)
+      return
+    }
+
+    if (editingAgentId && removals.length > 0) {
+      try {
+        const lifecycle = await getExternalAgentLifecycleService()
+        for (const slot of removals) await lifecycle.clearCredentialSlot(editingAgentId, slot)
+      } catch (error) {
+        toast.error(tManage("secretClearFailed", { error: errorText(error) }))
+      }
+    }
+
+    setSubmitting(false)
     onOpenChange(false)
     setFormData(DEFAULT_FORM_DATA)
     setSelectedPreset("")
-  }, [formData, processEnvRows, selectedPreset, managedDsh, onSave, onOpenChange, t, tGateway])
+  }, [
+    formData,
+    processEnvRows,
+    selectedPreset,
+    managedDsh,
+    launchesProcess,
+    effectiveStateIsolation,
+    codexFamily,
+    editingAgent,
+    editingAgentId,
+    onSave,
+    onOpenChange,
+    t,
+    tManage,
+    tGateway,
+  ])
 
   // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
   // pattern. When a real preset is chosen, prefill the form fields so the user
@@ -650,900 +1056,1084 @@ export function AgentEditorDialog({
       const preset = getPresetConfig(presetId)
       if (!preset) return
       if (preset.process?.env) setProcessEnvRows(objectToKvRows(preset.process.env))
-      setFormData((current) => ({
-        ...current,
-        name: presetId === "opencode-v2-service" ? t("opencodeV2PresetName") : preset.name,
-        protocol: preset.protocol,
-        transport: preset.transport,
-        processCommand: preset.process?.command || current.processCommand,
-        processArgs: preset.process?.args?.map(shellQuote).join(" ") || current.processArgs,
-        networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
-        defaultPermissionMode: preset.defaultPermissionMode,
-        description:
-          presetId === "opencode-v2-service"
-            ? t("opencodeV2PresetDescription")
-            : presetId === "devin"
-              ? t("devinPresetDescription")
-              : presetId === "aider"
-                ? t("aiderPresetDescription")
-                : presetId === "qoder"
-                  ? t("qoderPresetDescription")
-                  : presetId === "kimi"
-                    ? t("kimiPresetDescription")
-                    : presetId === "cline"
-                      ? t("clinePresetDescription")
-                      : presetId === "goose"
-                        ? t("goosePresetDescription")
-                        : preset.description,
-        ...opencodeFieldsFromMetadata(preset.metadata),
-      }))
+      setFormData((current) => {
+        const processCommand = preset.process?.command || current.processCommand
+        const processArgs = preset.process?.args?.map(shellQuote).join(" ") || current.processArgs
+        return {
+          ...current,
+          name: presetName(t, presetId, preset),
+          protocol: preset.protocol,
+          transport: preset.transport,
+          processCommand,
+          processArgs,
+          networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
+          defaultPermissionMode: preset.defaultPermissionMode,
+          description: presetDescription(t, presetId, preset),
+          stateIsolation: defaultStateIsolationFor(
+            processCommand,
+            tokenizeShellCommand(processArgs) ?? []
+          ),
+          // An account picked for one runtime means nothing to another.
+          subscriptionAccountId: null,
+          ...opencodeFieldsFromMetadata(preset.metadata),
+        }
+      })
     },
     [setFormData, t]
   )
 
+  const maxSessionsValue = parseOptionalPositiveInteger(formData.maxConcurrentSessions)
+  const approvalsSummary =
+    formData.requireApprovalFor.length + formData.autoApprovePatterns.length === 0
+      ? tManage("approvalsSummaryNone")
+      : tManage("approvalsSummary", {
+          ask: formData.requireApprovalFor.length,
+          auto: formData.autoApprovePatterns.length,
+        })
+  const validateApproval = (value: string) =>
+    isApprovalEntryValid(value) ? null : tManage("approvalInvalid")
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>{editingAgentId ? t("editAgent") : t("addAgent")}</DialogTitle>
-          <DialogDescription>{t("agentConfigDescription")}</DialogDescription>
-        </DialogHeader>
-
-        <div className="-mx-1 grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-1 py-3">
-          {(selectedPreset === "goose" ||
-            selectedPreset === "aider" ||
-            selectedPreset === "qoder" ||
-            selectedPreset === "cline" ||
-            selectedPreset === "kimi") && (
-            <p className="rounded-md border p-3 text-xs text-muted-foreground">
-              {tManager(
-                selectedPreset === "qoder"
-                  ? "qoderSetupHint"
-                  : selectedPreset === "kimi"
-                    ? "kimiSetupHint"
-                    : selectedPreset === "cline"
-                      ? "clineSetupHint"
-                      : selectedPreset === "aider"
-                        ? "aiderSetupHint"
-                        : "gooseSetupHint"
-              )}
-            </p>
-          )}
-          {/* Quick start preset — only shown when creating, not when editing,
-              to avoid silently overwriting hand-tuned fields. */}
-          {!editingAgentId && (
-            <div className="grid gap-2" data-testid="preset-picker">
-              <Label>{t("quickStartPreset")}</Label>
-              <Select value={selectedPreset || "custom"} onValueChange={handlePresetChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t("selectPresetOrCustom")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {getRunnablePresets().map((presetId) => {
-                    const preset = getPresetConfig(presetId)
-                    if (!preset) return null
-                    return (
-                      <SelectItem key={presetId} value={presetId}>
-                        <div className="flex items-center gap-2">
-                          <span>
-                            {presetId === "opencode-v2-service"
-                              ? t("opencodeV2PresetName")
-                              : preset.name}
+    <ResponsiveFormDialog
+      open={open}
+      onOpenChange={handleOpenChange}
+      title={editingAgentId ? t("editAgent") : t("addAgent")}
+      description={t("agentConfigDescription")}
+      testid="agent-editor"
+      footer={
+        <>
+          <Button variant="outline" disabled={submitting} onClick={() => handleOpenChange(false)}>
+            {tCommon("cancel")}
+          </Button>
+          <Button disabled={submitting} aria-busy={submitting} onClick={() => void handleSave()}>
+            {submitting ? (
+              <>
+                <Spinner className="size-4" />
+                {tManage("saving")}
+              </>
+            ) : editingAgentId ? (
+              tCommon("save")
+            ) : (
+              tCommon("add")
+            )}
+          </Button>
+        </>
+      }
+    >
+      {/* One disabled fieldset freezes every control (inputs, selects,
+          switches, section toggles) while the save is in flight. */}
+      <fieldset
+        disabled={submitting}
+        className="m-0 grid min-w-0 content-start gap-3 border-0 p-0"
+        data-testid="agent-editor-fields"
+      >
+        {setupHint && (
+          <p
+            className="rounded-md border p-3 text-xs text-muted-foreground"
+            data-testid="preset-setup-hint"
+          >
+            {setupHint}
+          </p>
+        )}
+        {/* Quick start preset — only shown when creating, not when editing,
+            to avoid silently overwriting hand-tuned fields. */}
+        {!editingAgentId && (
+          <div className="grid gap-2" data-testid="preset-picker">
+            <Label htmlFor={fid("preset")}>{t("quickStartPreset")}</Label>
+            <Select value={selectedPreset || "custom"} onValueChange={handlePresetChange}>
+              <SelectTrigger id={fid("preset")}>
+                <SelectValue placeholder={t("selectPresetOrCustom")} />
+              </SelectTrigger>
+              <SelectContent>
+                {getRunnablePresets().map((presetId) => {
+                  const preset = getPresetConfig(presetId)
+                  if (!preset) return null
+                  return (
+                    <SelectItem key={presetId} value={presetId}>
+                      <div className="flex items-center gap-2">
+                        <span>{presetName(t, presetId, preset)}</span>
+                        {(preset.tags?.length ?? 0) > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            ({preset.tags!.slice(0, 3).join(", ")})
                           </span>
-                          {(preset.tags?.length ?? 0) > 0 && (
-                            <span className="text-xs text-muted-foreground">
-                              ({preset.tags!.slice(0, 3).join(", ")})
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    )
-                  })}
-                  <SelectItem value="custom">{t("customConfiguration")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Name */}
-          <div className="grid gap-2">
-            <Label htmlFor="name">{t("agentName")}</Label>
-            <Input
-              id="name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder={t("agentNamePlaceholder")}
-            />
-          </div>
-
-          {/* Protocol + transport share a row — they are one decision in
-              practice, and pairing them halves the dialog's vertical budget.
-              OpenCode owns its transport (HTTP+SSE), so the picker is hidden
-              there instead of offering a choice the adapter ignores. */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>{t("protocol")}</Label>
-              <Select
-                value={formData.protocol}
-                onValueChange={(v) => {
-                  const protocol = v as AgentFormData["protocol"]
-                  setFormData({
-                    ...formData,
-                    protocol,
-                    // The Codex app-server is a locally spawned JSON-RPC process;
-                    // it has no network transport to fall back on.
-                    transport:
-                      protocol === "codex-app-server"
-                        ? "stdio"
-                        : protocol === "opencode" || protocol === "opencode-v2"
-                          ? "sse"
-                          : formData.transport,
-                  })
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {externalProtocolOptions(formData.protocol).map((option) => (
-                    <SelectItem
-                      key={option.value}
-                      value={option.value}
-                      disabled={!option.selectable}
-                    >
-                      {option.value === "opencode-v2" ? t("opencodeV2Protocol") : option.label}
-                      {option.reasonKey ? ` — ${tManager(option.reasonKey)}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
-              <div className="grid gap-2">
-                <Label>{t("transport")}</Label>
-                <Select
-                  value={formData.transport}
-                  onValueChange={(v) =>
-                    setFormData({ ...formData, transport: v as AgentFormData["transport"] })
-                  }
-                  disabled={managedDsh || formData.protocol === "codex-app-server"}
-                >
-                  <SelectTrigger data-testid="transport-select">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stdio">
-                      <div className="flex items-center gap-2">
-                        <Terminal className="h-4 w-4" />
-                        <span>{t("transportStdioLabel")}</span>
+                        )}
                       </div>
                     </SelectItem>
-                    <SelectItem value="http">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4" />
-                        <span>{t("transportHttpLabel")}</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+                  )
+                })}
+                <SelectItem value="custom">{t("customConfiguration")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+        )}
 
-          {/* OpenCode server config — auto-spawn vs remote endpoint, plus the
-              auth/model metadata the adapter reads (resolveBaseUrl /
-              buildAuthHeaders / resolveModel). Mirrors the chat-side dialog in
-              components/agent/external-agent/manager.tsx. */}
-          {formData.protocol === "opencode" && (
-            <FormSection
-              title={t("sectionOpencodeServer")}
-              defaultOpen
-              dataTestId="opencode-options-section"
-            >
-              <Surface className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="opencode-auto-spawn" className="cursor-pointer text-sm">
-                    {tManager("autoSpawnServer")}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">{tManager("autoSpawnServerHint")}</p>
-                </div>
-                <Switch
-                  id="opencode-auto-spawn"
-                  checked={formData.opencodeAutoSpawn}
-                  onCheckedChange={(v) => setFormData({ ...formData, opencodeAutoSpawn: v })}
-                  aria-label={tManager("autoSpawnServer")}
-                />
-              </Surface>
-              {formData.opencodeAutoSpawn ? (
-                <>
-                  <div className="grid gap-2">
-                    <Label htmlFor="opencode-command">{t("command")}</Label>
-                    <Input
-                      id="opencode-command"
-                      value={formData.processCommand}
-                      onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
-                      // i18n-exempt: example CLI command, not UI prose
-                      placeholder="opencode"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="opencode-port">{tManager("serverPort")}</Label>
-                      <Input
-                        id="opencode-port"
-                        type="number"
-                        min={0}
-                        value={formData.opencodePort}
-                        onChange={(e) => setFormData({ ...formData, opencodePort: e.target.value })}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="opencode-hostname">{tManager("serverHostname")}</Label>
-                      <Input
-                        id="opencode-hostname"
-                        value={formData.opencodeHostname}
-                        onChange={(e) =>
-                          setFormData({ ...formData, opencodeHostname: e.target.value })
-                        }
-                        // i18n-exempt: example hostname, not UI prose
-                        placeholder="127.0.0.1"
-                      />
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="grid gap-2">
-                  <Label htmlFor="opencode-endpoint">{t("endpoint")}</Label>
-                  <Input
-                    id="opencode-endpoint"
-                    value={formData.networkEndpoint}
-                    onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
-                    // i18n-exempt: example URL, not UI prose
-                    placeholder="http://127.0.0.1:4096"
-                  />
-                </div>
-              )}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="opencode-server-password">{tManager("serverPassword")}</Label>
-                  <Input
-                    id="opencode-server-password"
-                    type="password"
-                    value={formData.opencodeServerPassword}
-                    onChange={(e) =>
-                      setFormData({ ...formData, opencodeServerPassword: e.target.value })
-                    }
-                    placeholder="••••••••"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="opencode-server-username">{tManager("serverUsername")}</Label>
-                  <Input
-                    id="opencode-server-username"
-                    value={formData.opencodeServerUsername}
-                    onChange={(e) =>
-                      setFormData({ ...formData, opencodeServerUsername: e.target.value })
-                    }
-                    // i18n-exempt: the server's documented default Basic-Auth user
-                    placeholder="opencode"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
-              <div className="grid gap-2">
-                <Label htmlFor="opencode-model">{tManager("defaultModel")}</Label>
-                <Input
-                  id="opencode-model"
-                  value={formData.opencodeModel}
-                  onChange={(e) => setFormData({ ...formData, opencodeModel: e.target.value })}
-                  // i18n-exempt: example provider/model id, not UI prose
-                  placeholder="anthropic/claude-sonnet-4-5"
-                />
-                <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
-              </div>
-            </FormSection>
-          )}
-
-          {formData.protocol === "opencode-v2" && (
-            <FormSection
-              title={t("sectionConnection")}
-              defaultOpen
-              dataTestId="opencode-v2-options-section"
-            >
-              <p className="text-xs text-muted-foreground">{t("opencodeV2PresetSetupHint")}</p>
-              <div className="grid gap-2">
-                <Label htmlFor="opencode-v2-endpoint">{t("endpoint")}</Label>
-                <Input
-                  id="opencode-v2-endpoint"
-                  value={formData.networkEndpoint}
-                  onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
-                  placeholder={t("opencodeV2EndpointPlaceholder")}
-                />
-                <p className="text-xs text-muted-foreground">{t("opencodeV2EndpointHint")}</p>
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="opencode-v2-server-password">{tManager("serverPassword")}</Label>
-                  <Input
-                    id="opencode-v2-server-password"
-                    type="password"
-                    value={formData.opencodeServerPassword}
-                    onChange={(e) =>
-                      setFormData({ ...formData, opencodeServerPassword: e.target.value })
-                    }
-                    placeholder="••••••••"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="opencode-v2-server-username">{tManager("serverUsername")}</Label>
-                  <Input
-                    id="opencode-v2-server-username"
-                    value={formData.opencodeServerUsername}
-                    onChange={(e) =>
-                      setFormData({ ...formData, opencodeServerUsername: e.target.value })
-                    }
-                    // i18n-exempt: the native service's default Basic-Auth username
-                    placeholder="opencode"
-                  />
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="opencode-v2-api-key">{t("apiKey")}</Label>
-                <Input
-                  id="opencode-v2-api-key"
-                  type="password"
-                  value={formData.networkApiKey}
-                  onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
-                  placeholder={t("apiKeyPlaceholder")}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="opencode-v2-cwd">{t("workingDirectory")}</Label>
-                <Input
-                  id="opencode-v2-cwd"
-                  value={formData.processCwd}
-                  onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
-                  placeholder={t("cwdPlaceholder")}
-                />
-              </div>
-            </FormSection>
-          )}
-
-          {/* Connection — stdio process args or the network endpoint, whichever
-              the chosen transport actually uses. */}
-          {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
-            <FormSection
-              title={t("sectionConnection")}
-              defaultOpen
-              dataTestId="connection-section"
-              summary={
-                formData.transport === "stdio"
-                  ? formData.processCommand || undefined
-                  : formData.networkEndpoint || undefined
-              }
-            >
-              {formData.transport === "stdio" ? (
-                <>
-                  {managedDsh && (
-                    <div className="grid gap-2">
-                      <p className="text-xs text-muted-foreground">
-                        {t("deepseekHarness.managedLaunchNotice")}
-                      </p>
-                      <Label htmlFor="dsh-api-key">{t("apiKey")}</Label>
-                      <Input
-                        id="dsh-api-key"
-                        type="password"
-                        autoComplete="new-password"
-                        value={formData.networkApiKey}
-                        onChange={(event) =>
-                          setFormData({ ...formData, networkApiKey: event.target.value })
-                        }
-                        placeholder={t("apiKeyPlaceholder")}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        {t("deepseekHarness.credentialNotice")}
-                      </p>
-                    </div>
-                  )}
-                  <div className="grid gap-2">
-                    <Label htmlFor="command">{t("command")}</Label>
-                    <Input
-                      id="command"
-                      disabled={managedDsh}
-                      value={formData.processCommand}
-                      onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
-                      // i18n-exempt: example CLI command, not UI prose
-                      placeholder="npx @anthropics/claude-code"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="args">{t("arguments")}</Label>
-                    <Input
-                      id="args"
-                      disabled={managedDsh}
-                      value={formData.processArgs}
-                      onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
-                      // i18n-exempt: example CLI arguments, not UI prose
-                      placeholder="--stdio --model claude-sonnet"
-                    />
-                    <p className="text-xs text-muted-foreground">{t("argumentsHint")}</p>
-                  </div>
-                  {(formData.protocol === "aider-cli" ||
-                    selectedPreset === "qoder" ||
-                    selectedPreset === "cline" ||
-                    selectedPreset === "kimi") && (
-                    <KvEditor
-                      label={t(
-                        selectedPreset === "qoder"
-                          ? "qoderEnvironment"
-                          : selectedPreset === "kimi"
-                            ? "kimiEnvironment"
-                            : selectedPreset === "cline"
-                              ? "clineEnvironment"
-                              : "aiderEnvironment"
-                      )}
-                      maskValues
-                      rows={processEnvRows}
-                      onChange={setProcessEnvRows}
-                      keyPlaceholder={t("aiderEnvironmentKey")}
-                      valuePlaceholder={t("aiderEnvironmentValue")}
-                    />
-                  )}
-                  <div className="grid gap-2">
-                    <Label htmlFor="cwd">{t("workingDirectory")}</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="cwd"
-                        value={formData.processCwd}
-                        onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
-                        placeholder={t("cwdPlaceholder")}
-                      />
-                      {/* The path is this device's: an external agent spawns
-                          through a local process, so there is nothing to
-                          browse without a native picker and the input is the
-                          control. The button used to render regardless and do
-                          nothing at all when clicked. */}
-                      {localPaths && directoryPicker.available && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          aria-label={t("codexSkillRootsBrowse")}
-                          data-testid="cwd-browse"
-                          disabled={directoryPicker.busy}
-                          onClick={async () => {
-                            const dir = await directoryPicker.browse()
-                            if (dir) setFormData((prev) => ({ ...prev, processCwd: dir }))
-                          }}
-                        >
-                          <FolderPlus className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="grid gap-2">
-                    <Label htmlFor="endpoint">{t("endpoint")}</Label>
-                    <Input
-                      id="endpoint"
-                      value={formData.networkEndpoint}
-                      onChange={(e) =>
-                        setFormData({ ...formData, networkEndpoint: e.target.value })
-                      }
-                      placeholder="https://api.example.com/agent"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="apiKey">{t("apiKey")}</Label>
-                    <Input
-                      id="apiKey"
-                      type="password"
-                      value={formData.networkApiKey}
-                      onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
-                      placeholder={t("apiKeyPlaceholder")}
-                    />
-                  </div>
-                </>
-              )}
-            </FormSection>
-          )}
-
-          {(formData.transport === "stdio" ||
-            (formData.protocol === "opencode" && formData.opencodeAutoSpawn)) &&
-            formData.protocol !== "aider-cli" &&
-            selectedPreset !== "qoder" &&
-            selectedPreset !== "cline" &&
-            selectedPreset !== "kimi" && (
-              <FormSection title={t("processEnvironment")} dataTestId="process-environment-section">
-                <p className="text-xs text-muted-foreground">{t("processEnvironmentHint")}</p>
-                <KvEditor
-                  label={t("processEnvironment")}
-                  maskValues
-                  rows={processEnvRows}
-                  onChange={setProcessEnvRows}
-                  keyPlaceholder={t("aiderEnvironmentKey")}
-                  valuePlaceholder={t("aiderEnvironmentValue")}
-                />
-              </FormSection>
-            )}
-
-          <CogniaModelPicker
-            config={{
-              protocol: formData.protocol,
-              transport: formData.transport,
-              process: {
-                command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
-                args: tokenizeShellCommand(formData.processArgs) ?? [],
-              },
-              network:
-                formData.transport !== "stdio" && !formData.opencodeAutoSpawn
-                  ? { endpoint: formData.networkEndpoint }
-                  : undefined,
-              metadata: {
-                ...(selectedPreset
-                  ? getPresetConfig(selectedPreset)?.metadata
-                  : editingAgentId
-                    ? getAgent(editingAgentId)?.metadata
-                    : {}),
-                preset: selectedPreset || undefined,
-                autoSpawnServer: formData.opencodeAutoSpawn,
-              },
-            }}
-            value={formData.cogniaModel}
-            onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+        {/* Name */}
+        <div className="grid gap-2">
+          <Label htmlFor={fid("name")}>{t("agentName")}</Label>
+          <Input
+            id={fid("name")}
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder={t("agentNamePlaceholder")}
           />
+        </div>
 
-          {/* Permission Mode — narrowed to the modes the chosen backend can
-              enforce, and clamped for display so switching protocol never shows
-              a mode the backend would silently downgrade. */}
-          <div className="grid gap-2">
-            <Label>{t("defaultPermissionMode")}</Label>
+        {/* Description — what tells two configurations of one runtime apart
+            when the user reads the list, so it is a first-class field. */}
+        <div className="grid gap-2">
+          <Label htmlFor={fid("description")}>{tManage("description")}</Label>
+          <Textarea
+            id={fid("description")}
+            rows={2}
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            placeholder={tManage("descriptionPlaceholder")}
+          />
+        </div>
+
+        {/* Protocol + transport share a row — they are one decision in
+            practice, and pairing them halves the dialog's vertical budget.
+            OpenCode owns its transport (HTTP+SSE), so the picker is hidden
+            there instead of offering a choice the adapter ignores. The row
+            wraps by its own width (the dialog, or a phone's drawer). */}
+        <div className="flex flex-wrap gap-3">
+          <div className="grid min-w-[12rem] flex-1 gap-2">
+            <Label htmlFor={fid("protocol")}>{t("protocol")}</Label>
             <Select
-              value={adaptPermissionMode(formData.defaultPermissionMode, formData.protocol).mode}
-              onValueChange={(v) =>
-                setFormData({ ...formData, defaultPermissionMode: v as AcpPermissionMode })
-              }
+              value={formData.protocol}
+              onValueChange={(v) => {
+                const protocol = v as AgentFormData["protocol"]
+                setFormData({
+                  ...formData,
+                  protocol,
+                  // The Codex app-server is a locally spawned JSON-RPC process;
+                  // it has no network transport to fall back on.
+                  transport:
+                    protocol === "codex-app-server"
+                      ? "stdio"
+                      : protocol === "opencode" || protocol === "opencode-v2"
+                        ? "sse"
+                        : formData.transport,
+                })
+              }}
             >
-              <SelectTrigger>
+              <SelectTrigger id={fid("protocol")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {supportedPermissionModes(formData.protocol).map((mode) => (
-                  <SelectItem key={mode} value={mode}>
-                    {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                {externalProtocolOptions(formData.protocol).map((option) => (
+                  <SelectItem key={option.value} value={option.value} disabled={!option.selectable}>
+                    {option.value === "opencode-v2" ? t("opencodeV2Protocol") : option.label}
+                    {option.reasonKey ? ` — ${tManager(option.reasonKey)}` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Does this build reach the web on its own?
-              Nothing in the wire protocol answers it — it is a property of the
-              binary and plan the user installed — so every manifest row ships
-              `unknown` and this is where it stops being unknown. It decides
-              whether Cognia supplies `web_search` for the turn
-              (`lib/chat/web-access.ts`). */}
-          <div className="grid gap-2">
-            <Label>{t("declaredWebSearch")}</Label>
-            <p className="text-sm text-muted-foreground">{t("declaredWebSearchDesc")}</p>
-            <Select
-              value={formData.declaredWebSearch || "auto"}
-              onValueChange={(v) =>
-                setFormData({
-                  ...formData,
-                  declaredWebSearch: v === "auto" ? "" : (v as "native" | "unsupported"),
-                })
-              }
-            >
-              <SelectTrigger data-testid="declared-web-search">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">{t("declaredWebSearchAuto")}</SelectItem>
-                <SelectItem value="native">{t("declaredWebSearchNative")}</SelectItem>
-                <SelectItem value="unsupported">{t("declaredWebSearchNone")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Codex app-server options — sandbox + reasoning defaults applied at
-              thread/start (sandbox) and turn/start (sandboxPolicy/effort/summary).
-              Session-level overrides remain available via config options. */}
-          {formData.protocol === "codex-app-server" && (
-            <FormSection
-              title={t("sectionCodexOptions")}
-              defaultOpen
-              dataTestId="codex-options-section"
-            >
-              <div className="grid gap-2">
-                <Label>{t("codexSandboxMode")}</Label>
-                <p className="text-sm text-muted-foreground">{t("codexSandboxModeDesc")}</p>
-                <Select
-                  value={formData.codexSandboxMode}
-                  onValueChange={(v) =>
-                    setFormData({
-                      ...formData,
-                      codexSandboxMode: v as AgentFormData["codexSandboxMode"],
-                    })
-                  }
-                >
-                  <SelectTrigger data-testid="codex-sandbox-mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="readOnly">{t("codexSandboxReadOnly")}</SelectItem>
-                    <SelectItem value="workspaceWrite">
-                      {t("codexSandboxWorkspaceWrite")}
-                    </SelectItem>
-                    <SelectItem value="dangerFullAccess">
-                      {t("codexSandboxDangerFullAccess")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {formData.codexSandboxMode !== "dangerFullAccess" && (
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="codexNetworkAccess">{t("codexNetworkAccess")}</Label>
-                    <p className="text-sm text-muted-foreground">{t("codexNetworkAccessDesc")}</p>
-                  </div>
-                  <Switch
-                    id="codexNetworkAccess"
-                    checked={formData.codexNetworkAccess}
-                    onCheckedChange={(checked) =>
-                      setFormData({ ...formData, codexNetworkAccess: checked })
-                    }
-                  />
-                </div>
-              )}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>{t("codexDefaultEffort")}</Label>
-                  <Select
-                    value={formData.codexDefaultEffort || "model-default"}
-                    onValueChange={(v) =>
-                      setFormData({
-                        ...formData,
-                        codexDefaultEffort: v === "model-default" ? "" : v,
-                      })
-                    }
-                  >
-                    <SelectTrigger data-testid="codex-default-effort">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="model-default">{t("codexModelDefault")}</SelectItem>
-                      {CODEX_EFFORT_CHOICES.map((effort) => (
-                        <SelectItem key={effort} value={effort}>
-                          {effort}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>{t("codexReasoningSummary")}</Label>
-                  <Select
-                    value={formData.codexReasoningSummary || "server-default"}
-                    onValueChange={(v) =>
-                      setFormData({
-                        ...formData,
-                        codexReasoningSummary: (v === "server-default"
-                          ? ""
-                          : v) as AgentFormData["codexReasoningSummary"],
-                      })
-                    }
-                  >
-                    <SelectTrigger data-testid="codex-reasoning-summary">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="server-default">{t("codexServerDefault")}</SelectItem>
-                      <SelectItem value="auto">{t("codexSummaryAuto")}</SelectItem>
-                      <SelectItem value="concise">{t("codexSummaryConcise")}</SelectItem>
-                      <SelectItem value="detailed">{t("codexSummaryDetailed")}</SelectItem>
-                      <SelectItem value="none">{t("codexSummaryNone")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="codexExtraSkillRoots">{t("codexExtraSkillRoots")}</Label>
-                  {/* Same reasoning as the working-directory button above: the
-                      textarea beside it is the control on a shell with no
-                      picker, and this used to render inert. */}
-                  {localPaths && directoryPicker.available && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      data-testid="codex-skill-roots-browse"
-                      disabled={directoryPicker.busy}
-                      onClick={async () => {
-                        const dir = await directoryPicker.browse()
-                        if (!dir) return
-                        setFormData((prev) => {
-                          const roots = parseSkillRootLines(prev.codexExtraSkillRoots)
-                          if (roots.includes(dir)) return prev
-                          return { ...prev, codexExtraSkillRoots: [...roots, dir].join("\n") }
-                        })
-                      }}
-                    >
-                      <FolderPlus className="h-4 w-4" />
-                      {t("codexSkillRootsBrowse")}
-                    </Button>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">{t("codexExtraSkillRootsDesc")}</p>
-                <Textarea
-                  id="codexExtraSkillRoots"
-                  data-testid="codex-skill-roots"
-                  value={formData.codexExtraSkillRoots}
-                  onChange={(e) =>
-                    setFormData({ ...formData, codexExtraSkillRoots: e.target.value })
-                  }
-                  placeholder={t("codexExtraSkillRootsPlaceholder")}
-                  rows={3}
-                  className="font-mono text-xs"
-                />
-              </div>
-            </FormSection>
-          )}
-
-          {formData.protocol === "pi-rpc" && (
-            <FormSection title={t("piSectionTitle")} defaultOpen dataTestId="pi-options-section">
-              <div className="space-y-2">
-                <Label htmlFor="pi-extension-policy">{t("piExtensionPolicyLabel")}</Label>
-                <Select
-                  value={formData.piExtensionPolicy}
-                  onValueChange={(v) =>
-                    setFormData({
-                      ...formData,
-                      piExtensionPolicy: v as PiExtensionPolicy,
-                    })
-                  }
-                >
-                  <SelectTrigger id="pi-extension-policy" data-testid="pi-extension-policy">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="isolated">{t("piExtensionPolicyIsolated")}</SelectItem>
-                    <SelectItem value="global">{t("piExtensionPolicyGlobal")}</SelectItem>
-                    <SelectItem value="trusted-project">
-                      {t("piExtensionPolicyTrustedProject")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  {formData.piExtensionPolicy === "trusted-project"
-                    ? t("piExtensionPolicyTrustedProjectWarning")
-                    : t("piExtensionPolicyHint")}
-                </p>
-                {/* The exact flags, so the isolation claim is inspectable
-                    rather than something the user has to take on trust. */}
-                <p className="text-muted-foreground font-mono text-[11px]">
-                  {extensionPolicyArgs(formData.piExtensionPolicy).join(" ")}
-                </p>
-              </div>
-              <p className="text-muted-foreground text-xs">{t("piSandboxNote")}</p>
-              <PiPluginPackagesField
-                value={formData.piPackages}
-                onChange={(piPackages) => setFormData({ ...formData, piPackages })}
-              />
-              {/* The policy above decides how much of the user's Pi extension
-                  stack loads; this is where they can see and change what that
-                  stack actually contains, and what it costs per turn. */}
-              <Button asChild variant="outline" size="sm" className="w-fit">
-                <Link href={piPackagesHref()} data-testid="pi-packages-link">
-                  <PackageIcon className="size-3.5" />
-                  {t("piManagePackages")}
-                </Link>
-              </Button>
-            </FormSection>
-          )}
-
-          {/* Timeout & retry — tuning knobs almost nobody changes, so they stay
-              folded away behind a summary of the values currently in effect. */}
-          <FormSection
-            title={t("sectionRetry")}
-            dataTestId="retry-section"
-            summary={t("sectionRetrySummary", {
-              timeout: Math.round((Number.parseInt(formData.timeoutMs, 10) || 0) / 1000),
-              retries: Number.parseInt(formData.retryMaxRetries, 10) || 0,
-            })}
-          >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="timeoutMs">{t("executionTimeoutMs")}</Label>
-                <Input
-                  id="timeoutMs"
-                  type="number"
-                  min={1000}
-                  step={1000}
-                  value={formData.timeoutMs}
-                  onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
-                  placeholder={DEFAULT_TIMEOUT_MS}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="retryMaxRetries">{t("maxRetries")}</Label>
-                <Input
-                  id="retryMaxRetries"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={formData.retryMaxRetries}
-                  onChange={(e) => setFormData({ ...formData, retryMaxRetries: e.target.value })}
-                  placeholder={DEFAULT_RETRY_MAX_RETRIES}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="retryDelayMs">{t("retryDelayMs")}</Label>
-                <Input
-                  id="retryDelayMs"
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={formData.retryDelayMs}
-                  onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
-                  placeholder={DEFAULT_RETRY_DELAY_MS}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="retryMaxDelayMs">{t("maxRetryDelayMs")}</Label>
-                <Input
-                  id="retryMaxDelayMs"
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={formData.retryMaxDelayMs}
-                  onChange={(e) => setFormData({ ...formData, retryMaxDelayMs: e.target.value })}
-                  placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="retryExponentialBackoff">{t("backoffStrategy")}</Label>
+          {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
+            <div className="grid min-w-[12rem] flex-1 gap-2">
+              <Label htmlFor={fid("transport")}>{t("transport")}</Label>
               <Select
-                value={formData.retryExponentialBackoff ? "true" : "false"}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, retryExponentialBackoff: value === "true" })
+                value={formData.transport}
+                onValueChange={(v) =>
+                  setFormData({ ...formData, transport: v as AgentFormData["transport"] })
                 }
+                disabled={managedDsh || formData.protocol === "codex-app-server"}
               >
-                <SelectTrigger id="retryExponentialBackoff">
+                <SelectTrigger id={fid("transport")} data-testid="transport-select">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="true">{t("backoffExponential")}</SelectItem>
-                  <SelectItem value="false">{t("backoffFixedDelay")}</SelectItem>
+                  <SelectItem value="stdio">
+                    <div className="flex items-center gap-2">
+                      <Terminal className="h-4 w-4" />
+                      <span>{t("transportStdioLabel")}</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="http">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4" />
+                      <span>{t("transportHttpLabel")}</span>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
+          )}
+        </div>
+
+        {/* OpenCode server config — auto-spawn vs remote endpoint, plus the
+            auth/model metadata the adapter reads (resolveBaseUrl /
+            buildAuthHeaders / resolveModel). Mirrors the chat-side dialog in
+            components/agent/external-agent/manager.tsx. */}
+        {formData.protocol === "opencode" && (
+          <FormSection
+            title={t("sectionOpencodeServer")}
+            defaultOpen
+            dataTestId="opencode-options-section"
+          >
+            <Surface className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+              <div className="min-w-0 space-y-0.5">
+                <Label htmlFor={fid("opencode-auto-spawn")} className="cursor-pointer text-sm">
+                  {tManager("autoSpawnServer")}
+                </Label>
+                <p className="text-xs text-muted-foreground">{tManager("autoSpawnServerHint")}</p>
+              </div>
+              <Switch
+                id={fid("opencode-auto-spawn")}
+                checked={formData.opencodeAutoSpawn}
+                onCheckedChange={(v) => setFormData({ ...formData, opencodeAutoSpawn: v })}
+              />
+            </Surface>
+            {formData.opencodeAutoSpawn ? (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor={fid("opencode-command")}>{t("command")}</Label>
+                  <Input
+                    id={fid("opencode-command")}
+                    value={formData.processCommand}
+                    onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
+                    // i18n-exempt: example CLI command, not UI prose
+                    placeholder="opencode"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  <div className="grid min-w-[10rem] flex-1 gap-2">
+                    <Label htmlFor={fid("opencode-port")}>{tManager("serverPort")}</Label>
+                    <Input
+                      id={fid("opencode-port")}
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={formData.opencodePort}
+                      onChange={(e) => setFormData({ ...formData, opencodePort: e.target.value })}
+                      // i18n-exempt: example port number, not UI prose
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="grid min-w-[10rem] flex-1 gap-2">
+                    <Label htmlFor={fid("opencode-hostname")}>{tManager("serverHostname")}</Label>
+                    <Input
+                      id={fid("opencode-hostname")}
+                      value={formData.opencodeHostname}
+                      onChange={(e) =>
+                        setFormData({ ...formData, opencodeHostname: e.target.value })
+                      }
+                      // i18n-exempt: example hostname, not UI prose
+                      placeholder="127.0.0.1"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="grid gap-2">
+                <Label htmlFor={fid("opencode-endpoint")}>{t("endpoint")}</Label>
+                <Input
+                  id={fid("opencode-endpoint")}
+                  value={formData.networkEndpoint}
+                  onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
+                  // i18n-exempt: example URL, not UI prose
+                  placeholder="http://127.0.0.1:4096"
+                />
+              </div>
+            )}
+            <div className="flex flex-wrap gap-4">
+              <div className="grid min-w-[10rem] flex-1 gap-2">
+                <Label htmlFor={fid("opencode-server-password")}>
+                  {tManager("serverPassword")}
+                </Label>
+                <Input
+                  id={fid("opencode-server-password")}
+                  type="password"
+                  autoComplete="new-password"
+                  value={formData.opencodeServerPassword}
+                  onChange={(e) =>
+                    setFormData({ ...formData, opencodeServerPassword: e.target.value })
+                  }
+                  // i18n-exempt: masked-value glyphs, not UI prose
+                  placeholder="••••••••"
+                />
+                {editingAgentId ? (
+                  <SavedSecretState
+                    saved={serverPasswordSaved}
+                    pendingRemoval={formData.clearServerPassword}
+                    onPendingRemovalChange={(next) =>
+                      setFormData((current) => ({ ...current, clearServerPassword: next }))
+                    }
+                    testid="opencode-server-password"
+                  />
+                ) : null}
+              </div>
+              <div className="grid min-w-[10rem] flex-1 gap-2">
+                <Label htmlFor={fid("opencode-server-username")}>
+                  {tManager("serverUsername")}
+                </Label>
+                <Input
+                  id={fid("opencode-server-username")}
+                  value={formData.opencodeServerUsername}
+                  onChange={(e) =>
+                    setFormData({ ...formData, opencodeServerUsername: e.target.value })
+                  }
+                  // i18n-exempt: the server's documented default Basic-Auth user
+                  placeholder="opencode"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{tManager("serverPasswordHint")}</p>
             <div className="grid gap-2">
-              <Label htmlFor="retryOnErrors">{t("retryErrorPatterns")}</Label>
-              <Textarea
-                id="retryOnErrors"
-                rows={2}
-                value={formData.retryOnErrors}
-                onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
-                placeholder={t("retryErrorPatternsPlaceholder")}
+              <Label htmlFor={fid("opencode-model")}>{tManager("defaultModel")}</Label>
+              <Input
+                id={fid("opencode-model")}
+                value={formData.opencodeModel}
+                onChange={(e) => setFormData({ ...formData, opencodeModel: e.target.value })}
+                // i18n-exempt: example provider/model id, not UI prose
+                placeholder="anthropic/claude-sonnet-4-5"
+              />
+              <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
+            </div>
+          </FormSection>
+        )}
+
+        {formData.protocol === "opencode-v2" && (
+          <FormSection
+            title={t("sectionConnection")}
+            defaultOpen
+            dataTestId="opencode-v2-options-section"
+          >
+            {/* The preset's own setup hint already sits at the top. */}
+            {!setupHint && (
+              <p className="text-xs text-muted-foreground">{t("opencodeV2PresetSetupHint")}</p>
+            )}
+            <div className="grid gap-2">
+              <Label htmlFor={fid("opencode-v2-endpoint")}>{t("endpoint")}</Label>
+              <Input
+                id={fid("opencode-v2-endpoint")}
+                value={formData.networkEndpoint}
+                onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
+                placeholder={t("opencodeV2EndpointPlaceholder")}
+              />
+              <p className="text-xs text-muted-foreground">{t("opencodeV2EndpointHint")}</p>
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <div className="grid min-w-[10rem] flex-1 gap-2">
+                <Label htmlFor={fid("opencode-v2-server-password")}>
+                  {tManager("serverPassword")}
+                </Label>
+                <Input
+                  id={fid("opencode-v2-server-password")}
+                  type="password"
+                  autoComplete="new-password"
+                  value={formData.opencodeServerPassword}
+                  onChange={(e) =>
+                    setFormData({ ...formData, opencodeServerPassword: e.target.value })
+                  }
+                  // i18n-exempt: masked-value glyphs, not UI prose
+                  placeholder="••••••••"
+                />
+                {editingAgentId ? (
+                  <SavedSecretState
+                    saved={serverPasswordSaved}
+                    pendingRemoval={formData.clearServerPassword}
+                    onPendingRemovalChange={(next) =>
+                      setFormData((current) => ({ ...current, clearServerPassword: next }))
+                    }
+                    testid="opencode-v2-server-password"
+                  />
+                ) : null}
+              </div>
+              <div className="grid min-w-[10rem] flex-1 gap-2">
+                <Label htmlFor={fid("opencode-v2-server-username")}>
+                  {tManager("serverUsername")}
+                </Label>
+                <Input
+                  id={fid("opencode-v2-server-username")}
+                  value={formData.opencodeServerUsername}
+                  onChange={(e) =>
+                    setFormData({ ...formData, opencodeServerUsername: e.target.value })
+                  }
+                  // i18n-exempt: the native service's default Basic-Auth username
+                  placeholder="opencode"
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor={fid("opencode-v2-api-key")}>{t("apiKey")}</Label>
+              <Input
+                id={fid("opencode-v2-api-key")}
+                type="password"
+                autoComplete="new-password"
+                value={formData.networkApiKey}
+                onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
+                placeholder={t("apiKeyPlaceholder")}
+              />
+              {editingAgentId ? (
+                <SavedSecretState
+                  saved={apiKeySaved}
+                  pendingRemoval={formData.clearApiKey}
+                  onPendingRemovalChange={(next) =>
+                    setFormData((current) => ({ ...current, clearApiKey: next }))
+                  }
+                  testid="opencode-v2-api-key"
+                />
+              ) : null}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor={fid("opencode-v2-cwd")}>{t("workingDirectory")}</Label>
+              <Input
+                id={fid("opencode-v2-cwd")}
+                value={formData.processCwd}
+                onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
+                placeholder={t("cwdPlaceholder")}
               />
             </div>
           </FormSection>
+        )}
+
+        {/* Connection — stdio process args or the network endpoint, whichever
+            the chosen transport actually uses. */}
+        {formData.protocol !== "opencode" && formData.protocol !== "opencode-v2" && (
+          <FormSection
+            title={t("sectionConnection")}
+            defaultOpen
+            dataTestId="connection-section"
+            summary={
+              formData.transport === "stdio"
+                ? formData.processCommand || undefined
+                : formData.networkEndpoint || undefined
+            }
+          >
+            {formData.transport === "stdio" ? (
+              <>
+                {managedDsh && (
+                  <div className="grid gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {t("deepseekHarness.managedLaunchNotice")}
+                    </p>
+                    <Label htmlFor={fid("dsh-api-key")}>{t("apiKey")}</Label>
+                    <Input
+                      id={fid("dsh-api-key")}
+                      type="password"
+                      autoComplete="new-password"
+                      value={formData.networkApiKey}
+                      onChange={(event) =>
+                        setFormData({ ...formData, networkApiKey: event.target.value })
+                      }
+                      placeholder={t("apiKeyPlaceholder")}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {t("deepseekHarness.credentialNotice")}
+                    </p>
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label htmlFor={fid("command")}>{t("command")}</Label>
+                  <Input
+                    id={fid("command")}
+                    disabled={managedDsh}
+                    value={formData.processCommand}
+                    onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
+                    // i18n-exempt: example CLI command, not UI prose
+                    placeholder="npx @anthropics/claude-code"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor={fid("args")}>{t("arguments")}</Label>
+                  <Input
+                    id={fid("args")}
+                    disabled={managedDsh}
+                    value={formData.processArgs}
+                    onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
+                    // i18n-exempt: example CLI arguments, not UI prose
+                    placeholder="--stdio --model claude-sonnet"
+                  />
+                  <p className="text-xs text-muted-foreground">{t("argumentsHint")}</p>
+                </div>
+                {environmentLabel && (
+                  <KvEditor
+                    label={environmentLabel}
+                    maskValues
+                    rows={processEnvRows}
+                    onChange={setProcessEnvRows}
+                    keyPlaceholder={t("aiderEnvironmentKey")}
+                    valuePlaceholder={t("aiderEnvironmentValue")}
+                  />
+                )}
+                <div className="grid gap-2">
+                  <Label htmlFor={fid("cwd")}>{t("workingDirectory")}</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id={fid("cwd")}
+                      value={formData.processCwd}
+                      onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
+                      placeholder={t("cwdPlaceholder")}
+                    />
+                    {/* The path is this device's: an external agent spawns
+                        through a local process, so there is nothing to
+                        browse without a native picker and the input is the
+                        control. The button used to render regardless and do
+                        nothing at all when clicked. */}
+                    {localPaths && directoryPicker.available && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="touch-hit shrink-0"
+                        aria-label={t("codexSkillRootsBrowse")}
+                        data-testid="cwd-browse"
+                        disabled={directoryPicker.busy}
+                        onClick={async () => {
+                          const dir = await directoryPicker.browse()
+                          if (dir) setFormData((prev) => ({ ...prev, processCwd: dir }))
+                        }}
+                      >
+                        <FolderPlus className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor={fid("endpoint")}>{t("endpoint")}</Label>
+                  <Input
+                    id={fid("endpoint")}
+                    value={formData.networkEndpoint}
+                    onChange={(e) => setFormData({ ...formData, networkEndpoint: e.target.value })}
+                    // i18n-exempt: example URL, not UI prose
+                    placeholder="https://api.example.com/agent"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor={fid("api-key")}>{t("apiKey")}</Label>
+                  <Input
+                    id={fid("api-key")}
+                    type="password"
+                    autoComplete="new-password"
+                    value={formData.networkApiKey}
+                    onChange={(e) => setFormData({ ...formData, networkApiKey: e.target.value })}
+                    placeholder={t("apiKeyPlaceholder")}
+                  />
+                  {editingAgentId ? (
+                    <SavedSecretState
+                      saved={apiKeySaved}
+                      pendingRemoval={formData.clearApiKey}
+                      onPendingRemovalChange={(next) =>
+                        setFormData((current) => ({ ...current, clearApiKey: next }))
+                      }
+                      testid="api-key"
+                    />
+                  ) : null}
+                </div>
+              </>
+            )}
+          </FormSection>
+        )}
+
+        {launchesProcess && !environmentLabel && (
+          <FormSection title={t("processEnvironment")} dataTestId="process-environment-section">
+            <p className="text-xs text-muted-foreground">{t("processEnvironmentHint")}</p>
+            <KvEditor
+              label={t("processEnvironment")}
+              maskValues
+              rows={processEnvRows}
+              onChange={setProcessEnvRows}
+              keyPlaceholder={t("aiderEnvironmentKey")}
+              valuePlaceholder={t("aiderEnvironmentValue")}
+            />
+          </FormSection>
+        )}
+
+        {/* Where this configuration keeps its runtime state (ADR-0216). The
+            field disables "own state" with the reason for a runtime that has
+            no home variable, and says there is nothing to isolate for an agent
+            that runs elsewhere. */}
+        <StateIsolationField
+          value={effectiveStateIsolation}
+          onChange={(stateIsolation) => setFormData((current) => ({ ...current, stateIsolation }))}
+          command={isolationCommand}
+          args={isolationArgs}
+          disabled={submitting}
+          showSignInWarning={movingToOwnState}
+        />
+
+        {codexFamily && (
+          <SubscriptionAccountField
+            id={fid("subscription-account")}
+            value={formData.subscriptionAccountId}
+            onChange={(subscriptionAccountId) =>
+              setFormData((current) => ({ ...current, subscriptionAccountId }))
+            }
+          />
+        )}
+
+        <CogniaModelPicker
+          config={{
+            protocol: formData.protocol,
+            transport: formData.transport,
+            process: {
+              command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
+              args: tokenizeShellCommand(formData.processArgs) ?? [],
+            },
+            network:
+              formData.transport !== "stdio" && !formData.opencodeAutoSpawn
+                ? { endpoint: formData.networkEndpoint }
+                : undefined,
+            metadata: {
+              ...(selectedPreset
+                ? getPresetConfig(selectedPreset)?.metadata
+                : editingAgent
+                  ? editingAgent.metadata
+                  : {}),
+              preset: selectedPreset || undefined,
+              autoSpawnServer: formData.opencodeAutoSpawn,
+            },
+          }}
+          value={formData.cogniaModel}
+          onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+        />
+
+        {/* Permission Mode — narrowed to the modes the chosen backend can
+            enforce, and clamped for display so switching protocol never shows
+            a mode the backend would silently downgrade. */}
+        <div className="grid gap-2">
+          <Label htmlFor={fid("permission-mode")}>{t("defaultPermissionMode")}</Label>
+          <Select
+            value={adaptPermissionMode(formData.defaultPermissionMode, formData.protocol).mode}
+            onValueChange={(v) =>
+              setFormData({ ...formData, defaultPermissionMode: v as AcpPermissionMode })
+            }
+          >
+            <SelectTrigger id={fid("permission-mode")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {supportedPermissionModes(formData.protocol).map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        <DialogFooter className="shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {tCommon("cancel")}
-          </Button>
-          <Button onClick={handleSave}>{editingAgentId ? tCommon("save") : tCommon("add")}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {/* Approval rules — enforced on every permission request the agent
+            sends to Cognia (`configuredApprovalPolicy`). */}
+        <FormSection
+          title={tManage("sectionApprovals")}
+          summary={approvalsSummary}
+          dataTestId="approvals-section"
+        >
+          <p className="text-xs text-muted-foreground">{tManage("approvalsIntro")}</p>
+          <p className="text-xs text-muted-foreground" data-testid="approval-syntax">
+            {tManage("approvalSyntax")}
+          </p>
+          {adaptPermissionMode(formData.defaultPermissionMode, formData.protocol).mode ===
+            "bypassPermissions" && (
+            <p
+              role="status"
+              className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+              data-testid="approval-bypass-note"
+            >
+              {tManage("approvalBypassNote")}
+            </p>
+          )}
+          <div className="grid gap-2" data-testid="require-approval-field">
+            <span className="text-sm font-medium">{tManage("requireApprovalFor")}</span>
+            <p className="text-xs text-muted-foreground">{tManage("requireApprovalForHint")}</p>
+            <ChipInput
+              values={formData.requireApprovalFor}
+              onCommit={(requireApprovalFor) =>
+                setFormData((current) => ({ ...current, requireApprovalFor }))
+              }
+              placeholder={tManage("approvalPlaceholder")}
+              ariaLabel={tManage("requireApprovalFor")}
+              addLabel={tManage("approvalAdd")}
+              removeLabel={tManage("approvalRemove")}
+              validate={validateApproval}
+            />
+          </div>
+          <div className="grid gap-2" data-testid="auto-approve-field">
+            <span className="text-sm font-medium">{tManage("autoApprove")}</span>
+            <p className="text-xs text-muted-foreground">{tManage("autoApproveHint")}</p>
+            <ChipInput
+              values={formData.autoApprovePatterns}
+              onCommit={(autoApprovePatterns) =>
+                setFormData((current) => ({ ...current, autoApprovePatterns }))
+              }
+              placeholder={tManage("approvalPlaceholder")}
+              ariaLabel={tManage("autoApprove")}
+              addLabel={tManage("approvalAdd")}
+              removeLabel={tManage("approvalRemove")}
+              validate={validateApproval}
+            />
+          </div>
+        </FormSection>
+
+        {/* Does this build reach the web on its own?
+            Nothing in the wire protocol answers it — it is a property of the
+            binary and plan the user installed — so every manifest row ships
+            `unknown` and this is where it stops being unknown. It decides
+            whether Cognia supplies `web_search` for the turn
+            (`lib/chat/web-access.ts`). */}
+        <div className="grid gap-2">
+          <Label htmlFor={fid("declared-web-search")}>{t("declaredWebSearch")}</Label>
+          <p className="text-sm text-muted-foreground">{t("declaredWebSearchDesc")}</p>
+          <Select
+            value={formData.declaredWebSearch || "auto"}
+            onValueChange={(v) =>
+              setFormData({
+                ...formData,
+                declaredWebSearch: v === "auto" ? "" : (v as "native" | "unsupported"),
+              })
+            }
+          >
+            <SelectTrigger id={fid("declared-web-search")} data-testid="declared-web-search">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">{t("declaredWebSearchAuto")}</SelectItem>
+              <SelectItem value="native">{t("declaredWebSearchNative")}</SelectItem>
+              <SelectItem value="unsupported">{t("declaredWebSearchNone")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Codex app-server options — sandbox + reasoning defaults applied at
+            thread/start (sandbox) and turn/start (sandboxPolicy/effort/summary).
+            Session-level overrides remain available via config options. */}
+        {formData.protocol === "codex-app-server" && (
+          <FormSection
+            title={t("sectionCodexOptions")}
+            defaultOpen
+            dataTestId="codex-options-section"
+          >
+            <div className="grid gap-2">
+              <Label htmlFor={fid("codex-sandbox-mode")}>{t("codexSandboxMode")}</Label>
+              <p className="text-sm text-muted-foreground">{t("codexSandboxModeDesc")}</p>
+              <Select
+                value={formData.codexSandboxMode}
+                onValueChange={(v) =>
+                  setFormData({
+                    ...formData,
+                    codexSandboxMode: v as AgentFormData["codexSandboxMode"],
+                  })
+                }
+              >
+                <SelectTrigger id={fid("codex-sandbox-mode")} data-testid="codex-sandbox-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="readOnly">{t("codexSandboxReadOnly")}</SelectItem>
+                  <SelectItem value="workspaceWrite">{t("codexSandboxWorkspaceWrite")}</SelectItem>
+                  <SelectItem value="dangerFullAccess">
+                    {t("codexSandboxDangerFullAccess")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {formData.codexSandboxMode !== "dangerFullAccess" && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <Label htmlFor={fid("codex-network-access")}>{t("codexNetworkAccess")}</Label>
+                  <p className="text-sm text-muted-foreground">{t("codexNetworkAccessDesc")}</p>
+                </div>
+                <Switch
+                  id={fid("codex-network-access")}
+                  checked={formData.codexNetworkAccess}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, codexNetworkAccess: checked })
+                  }
+                />
+              </div>
+            )}
+            <div className="flex flex-wrap gap-4">
+              <div className="grid min-w-[10rem] flex-1 gap-2">
+                <Label htmlFor={fid("codex-default-effort")}>{t("codexDefaultEffort")}</Label>
+                <Select
+                  value={formData.codexDefaultEffort || "model-default"}
+                  onValueChange={(v) =>
+                    setFormData({
+                      ...formData,
+                      codexDefaultEffort: v === "model-default" ? "" : v,
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    id={fid("codex-default-effort")}
+                    data-testid="codex-default-effort"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="model-default">{t("codexModelDefault")}</SelectItem>
+                    {CODEX_EFFORT_CHOICES.map((effort) => (
+                      <SelectItem key={effort} value={effort}>
+                        {effort}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid min-w-[10rem] flex-1 gap-2">
+                <Label htmlFor={fid("codex-reasoning-summary")}>{t("codexReasoningSummary")}</Label>
+                <Select
+                  value={formData.codexReasoningSummary || "server-default"}
+                  onValueChange={(v) =>
+                    setFormData({
+                      ...formData,
+                      codexReasoningSummary: (v === "server-default"
+                        ? ""
+                        : v) as AgentFormData["codexReasoningSummary"],
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    id={fid("codex-reasoning-summary")}
+                    data-testid="codex-reasoning-summary"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="server-default">{t("codexServerDefault")}</SelectItem>
+                    <SelectItem value="auto">{t("codexSummaryAuto")}</SelectItem>
+                    <SelectItem value="concise">{t("codexSummaryConcise")}</SelectItem>
+                    <SelectItem value="detailed">{t("codexSummaryDetailed")}</SelectItem>
+                    <SelectItem value="none">{t("codexSummaryNone")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label htmlFor={fid("codex-extra-skill-roots")}>{t("codexExtraSkillRoots")}</Label>
+                {/* Same reasoning as the working-directory button above: the
+                    textarea beside it is the control on a shell with no
+                    picker, and this used to render inert. */}
+                {localPaths && directoryPicker.available && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="touch-hit"
+                    data-testid="codex-skill-roots-browse"
+                    disabled={directoryPicker.busy}
+                    onClick={async () => {
+                      const dir = await directoryPicker.browse()
+                      if (!dir) return
+                      setFormData((prev) => {
+                        const roots = parseSkillRootLines(prev.codexExtraSkillRoots)
+                        if (roots.includes(dir)) return prev
+                        return { ...prev, codexExtraSkillRoots: [...roots, dir].join("\n") }
+                      })
+                    }}
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    {t("codexSkillRootsBrowse")}
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">{t("codexExtraSkillRootsDesc")}</p>
+              <Textarea
+                id={fid("codex-extra-skill-roots")}
+                data-testid="codex-skill-roots"
+                value={formData.codexExtraSkillRoots}
+                onChange={(e) => setFormData({ ...formData, codexExtraSkillRoots: e.target.value })}
+                placeholder={t("codexExtraSkillRootsPlaceholder")}
+                rows={3}
+                className="font-mono text-xs"
+              />
+            </div>
+          </FormSection>
+        )}
+
+        {formData.protocol === "pi-rpc" && (
+          <FormSection title={t("piSectionTitle")} defaultOpen dataTestId="pi-options-section">
+            <div className="space-y-2">
+              <Label htmlFor={fid("pi-extension-policy")}>{t("piExtensionPolicyLabel")}</Label>
+              <Select
+                value={formData.piExtensionPolicy}
+                onValueChange={(v) =>
+                  setFormData({
+                    ...formData,
+                    piExtensionPolicy: v as PiExtensionPolicy,
+                  })
+                }
+              >
+                <SelectTrigger id={fid("pi-extension-policy")} data-testid="pi-extension-policy">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="isolated">{t("piExtensionPolicyIsolated")}</SelectItem>
+                  <SelectItem value="global">{t("piExtensionPolicyGlobal")}</SelectItem>
+                  <SelectItem value="trusted-project">
+                    {t("piExtensionPolicyTrustedProject")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                {formData.piExtensionPolicy === "trusted-project"
+                  ? t("piExtensionPolicyTrustedProjectWarning")
+                  : t("piExtensionPolicyHint")}
+              </p>
+              {/* The exact flags, so the isolation claim is inspectable
+                  rather than something the user has to take on trust. */}
+              <p className="text-muted-foreground font-mono text-[11px]">
+                {extensionPolicyArgs(formData.piExtensionPolicy).join(" ")}
+              </p>
+            </div>
+            <p className="text-muted-foreground text-xs">{t("piSandboxNote")}</p>
+            <PiPluginPackagesField
+              value={formData.piPackages}
+              onChange={(piPackages) => setFormData({ ...formData, piPackages })}
+            />
+            {/* The policy above decides how much of the user's Pi extension
+                stack loads; this is where they can see and change what that
+                stack actually contains, and what it costs per turn. */}
+            <Button asChild variant="outline" size="sm" className="w-fit">
+              <Link href={piPackagesHref()} data-testid="pi-packages-link">
+                <PackageIcon className="size-3.5" />
+                {t("piManagePackages")}
+              </Link>
+            </Button>
+          </FormSection>
+        )}
+
+        {/* Session limits (ADR-0216): how many sessions stay open, and how
+            long a running turn may sit silent. Both empty by default. */}
+        <FormSection
+          title={tManage("sectionSessions")}
+          dataTestId="sessions-section"
+          summary={
+            typeof maxSessionsValue === "number"
+              ? tManage("sessionsSummaryLimited", { count: maxSessionsValue })
+              : tManage("sessionsSummaryUnlimited")
+          }
+        >
+          <div className="grid gap-2">
+            <Label htmlFor={fid("max-sessions")}>{tManage("maxSessions")}</Label>
+            <Input
+              id={fid("max-sessions")}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={formData.maxConcurrentSessions}
+              onChange={(e) => setFormData({ ...formData, maxConcurrentSessions: e.target.value })}
+              placeholder={tManage("maxSessionsPlaceholder")}
+            />
+            <p className="text-xs text-muted-foreground">{tManage("maxSessionsHint")}</p>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={fid("idle-timeout")}>{tManage("idleTimeout")}</Label>
+            <Input
+              id={fid("idle-timeout")}
+              type="number"
+              inputMode="numeric"
+              min={1000}
+              step={1000}
+              value={formData.sessionIdleTimeoutMs}
+              onChange={(e) => setFormData({ ...formData, sessionIdleTimeoutMs: e.target.value })}
+              placeholder={tManage("idleTimeoutPlaceholder")}
+            />
+            <p className="text-xs text-muted-foreground">{tManage("idleTimeoutHint")}</p>
+          </div>
+        </FormSection>
+
+        {/* Timeout & retry — tuning knobs almost nobody changes, so they stay
+            folded away behind a summary of the values currently in effect. */}
+        <FormSection
+          title={t("sectionRetry")}
+          dataTestId="retry-section"
+          summary={t("sectionRetrySummary", {
+            timeout: Math.round((Number.parseInt(formData.timeoutMs, 10) || 0) / 1000),
+            retries: Number.parseInt(formData.retryMaxRetries, 10) || 0,
+          })}
+        >
+          <div className="flex flex-wrap gap-3">
+            <div className="grid min-w-[10rem] flex-1 gap-2">
+              <Label htmlFor={fid("timeout-ms")}>{t("executionTimeoutMs")}</Label>
+              <Input
+                id={fid("timeout-ms")}
+                type="number"
+                inputMode="numeric"
+                min={1000}
+                step={1000}
+                value={formData.timeoutMs}
+                onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
+                placeholder={DEFAULT_TIMEOUT_MS}
+              />
+            </div>
+            <div className="grid min-w-[10rem] flex-1 gap-2">
+              <Label htmlFor={fid("retry-max-retries")}>{t("maxRetries")}</Label>
+              <Input
+                id={fid("retry-max-retries")}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                value={formData.retryMaxRetries}
+                onChange={(e) => setFormData({ ...formData, retryMaxRetries: e.target.value })}
+                placeholder={DEFAULT_RETRY_MAX_RETRIES}
+              />
+            </div>
+            <div className="grid min-w-[10rem] flex-1 gap-2">
+              <Label htmlFor={fid("retry-delay-ms")}>{t("retryDelayMs")}</Label>
+              <Input
+                id={fid("retry-delay-ms")}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={100}
+                value={formData.retryDelayMs}
+                onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
+                placeholder={DEFAULT_RETRY_DELAY_MS}
+              />
+            </div>
+            <div className="grid min-w-[10rem] flex-1 gap-2">
+              <Label htmlFor={fid("retry-max-delay-ms")}>{t("maxRetryDelayMs")}</Label>
+              <Input
+                id={fid("retry-max-delay-ms")}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={100}
+                value={formData.retryMaxDelayMs}
+                onChange={(e) => setFormData({ ...formData, retryMaxDelayMs: e.target.value })}
+                placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
+              />
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={fid("retry-backoff")}>{t("backoffStrategy")}</Label>
+            <Select
+              value={formData.retryExponentialBackoff ? "true" : "false"}
+              onValueChange={(value) =>
+                setFormData({ ...formData, retryExponentialBackoff: value === "true" })
+              }
+            >
+              <SelectTrigger id={fid("retry-backoff")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">{t("backoffExponential")}</SelectItem>
+                <SelectItem value="false">{t("backoffFixedDelay")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={fid("retry-on-errors")}>{t("retryErrorPatterns")}</Label>
+            <Textarea
+              id={fid("retry-on-errors")}
+              rows={2}
+              value={formData.retryOnErrors}
+              onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
+              placeholder={t("retryErrorPatternsPlaceholder")}
+            />
+          </div>
+        </FormSection>
+      </fieldset>
+    </ResponsiveFormDialog>
   )
 }

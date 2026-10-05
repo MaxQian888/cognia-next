@@ -91,9 +91,36 @@ describe("DesktopLocalAgents", () => {
   it("surfaces a load failure", async () => {
     callMock.mockRejectedValue(new Error("offline"))
     render(<DesktopLocalAgents />)
-    expect(await screen.findByTestId("desktop-local-agents-error")).toHaveTextContent(
-      "Could not load external agents: offline"
+    const failure = await screen.findByTestId("desktop-local-agents-error")
+    expect(failure).toHaveTextContent("Couldn't load desktop-only agents")
+    expect(failure).toHaveTextContent("Could not load external agents: offline")
+  })
+
+  it("shows a placeholder while the list is loading, not an empty page", async () => {
+    let resolve: (value: unknown) => void = () => {}
+    callMock.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
     )
+    render(<DesktopLocalAgents />)
+    const loading = screen.getByTestId("desktop-local-agents-loading")
+    expect(loading).toHaveAttribute("aria-busy", "true")
+    expect(loading).toHaveAccessibleName("Loading external agents…")
+    await act(async () => resolve({ agents: AGENTS }))
+    expect(screen.queryByTestId("desktop-local-agents-loading")).toBeNull()
+    expect(screen.getByTestId("external-agent-row-a1")).toBeInTheDocument()
+  })
+
+  it("retries a failed load", async () => {
+    const user = userEvent.setup()
+    callMock.mockRejectedValueOnce(new Error("offline"))
+    render(<DesktopLocalAgents />)
+    await user.click(await screen.findByTestId("desktop-local-agents-retry"))
+    expect(await screen.findByTestId("external-agent-row-a1")).toBeInTheDocument()
+    expect(screen.queryByTestId("desktop-local-agents-error")).toBeNull()
+    expect(callMock.mock.calls.filter(([command]) => command === "external_agent_list")).toHaveLength(2)
   })
 
   it("sends an enable/disable toggle with a fresh approval lease", async () => {

@@ -19,6 +19,7 @@ import {
   addAgentFormShape,
   validateAddAgentForm,
   type AddAgentFormProblem,
+  type AddAgentFormSeed,
   type AddAgentFormShape,
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import type { AddAgentFormData } from "@/types/agent/component-types"
@@ -45,12 +46,18 @@ export interface AddAgentFormState {
   reset: () => void
 }
 
-export function useAddAgentForm(initialPresetId = ""): AddAgentFormState {
-  const seeded = useMemo(
-    () => addAgentFormForPreset(DEFAULT_ADD_AGENT_FORM_DATA, initialPresetId),
-    [initialPresetId]
+/**
+ * @param initialPresetId the preset an "add" form starts from.
+ * @param seed an existing configuration's fields (`addAgentFormFromConfig`),
+ *   for a screen that edits a configuration with the same form. Read once, on
+ *   mount: remount (a `key`) to start over from a different configuration.
+ */
+export function useAddAgentForm(initialPresetId = "", seed?: AddAgentFormSeed): AddAgentFormState {
+  // Read once: both the fields and the rows below are initial state.
+  const [seeded] = useState(
+    () => seed ?? addAgentFormForPreset(DEFAULT_ADD_AGENT_FORM_DATA, initialPresetId)
   )
-  const [presetId, setPresetId] = useState(initialPresetId)
+  const [presetId, setPresetId] = useState(seed?.presetId ?? initialPresetId)
   const [data, setData] = useState<AddAgentFormData>(
     () => seeded?.data ?? DEFAULT_ADD_AGENT_FORM_DATA
   )

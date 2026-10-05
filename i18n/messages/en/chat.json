@@ -1672,15 +1672,17 @@
     "unknownSource": "another agent",
     "canonicalState": "{count, plural, one {# preserved task, plan, history, or Agent event} other {# preserved tasks, plans, history items, and Agent events}}",
     "resume": "Resume",
+    "resumeChooseAgent": "Resume with which agent?",
     "resumeErrors": {
-      "runtime-ambiguous": "Multiple connected agents match this source. Disconnect other instances before resuming.",
+      "runtime-ambiguous": "Several connected agents match this source. Choose which one resumes it.",
       "binding-missing": "The source did not provide a native session ID.",
       "cwd-missing": "The original working directory no longer exists.",
       "handshake-failed": "The original agent could not resume this session.",
       "preset-missing": "The import did not record a compatible runtime preset.",
       "preset-not-configured": "Configure the matching external Agent preset first.",
       "resume-unverified": "The connected Agent has not verified session/resume support.",
-      "runtime-unavailable": "The matching external Agent is not connected or executable."
+      "runtime-unavailable": "The matching external Agent is not connected or executable.",
+      "runtime-isolated": "Every matching agent keeps its own runtime state, so none of them can see this session. Resume it with an agent that shares the runtime's state."
     },
     "resumeNative": "Verify the original Agent and resume this exact native session",
     "resumeReady": "Native session resumed. The external Agent is selected for the next turn."

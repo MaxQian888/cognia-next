@@ -556,7 +556,8 @@
         "session": {},
         "turn": {},
         "gateway_task": {},
-        "cognia_catalog": {}
+        "cognia_catalog": {},
+        "state_root": {}
       }
     },
     "external_bridge": {
@@ -1087,6 +1088,7 @@
     "subscription": {
       "children": {
         "account": {},
+        "account_env": {},
         "account_credential": {},
         "account_detail": {},
         "active": {},

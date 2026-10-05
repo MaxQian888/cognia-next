@@ -220,6 +220,49 @@ describe("create / update / remove outcomes", () => {
     expect(result.current.busy).toBe(false)
   })
 
+  it("duplicate asks the Host to copy the row and resolves the copy", async () => {
+    const copy = record({ configId: "eac_copy", config: { name: "Pi (copy)" } as never })
+    setup({}, (command) =>
+      command === HOST_CONFIG_COMMANDS.list ? { configs: [record(), copy] } : { config: copy }
+    )
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let outcome: Awaited<ReturnType<typeof result.current.duplicate>> | undefined
+    await act(async () => {
+      outcome = await result.current.duplicate(record(), {
+        name: "Pi (copy)",
+        stateIsolation: "isolated",
+        enabled: false,
+      })
+    })
+    expect(outcome).toEqual({ ok: true, record: copy })
+    expect(calls.find((c) => c.command === HOST_CONFIG_COMMANDS.duplicate)?.payload).toEqual({
+      configId: "eac_1",
+      name: "Pi (copy)",
+      stateIsolation: "isolated",
+      enabled: false,
+    })
+    // The list is re-read so the copy appears without a manual refresh.
+    expect(result.current.configs).toHaveLength(2)
+  })
+
+  it("duplicate resolves the Host's refusal and keeps it in error", async () => {
+    setup({}, (command) => {
+      if (command === HOST_CONFIG_COMMANDS.list) return { configs: [record()] }
+      throw new Error("credential_missing")
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let outcome: Awaited<ReturnType<typeof result.current.duplicate>> | undefined
+    await act(async () => {
+      outcome = await result.current.duplicate(record())
+    })
+    expect(outcome).toEqual({ ok: false, error: "credential_missing" })
+    expect(result.current.error).toBe("credential_missing")
+  })
+
   it("update sends the shallow patch at the read revision and reports whether it landed", async () => {
     let refuse = false
     setup({}, (command) => {

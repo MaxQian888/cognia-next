@@ -1275,49 +1275,64 @@
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onExternalAgentDisconnect",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onExternalAgentExecutionStart",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onExternalAgentExecutionComplete",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onExternalAgentPermissionRequest",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onExternalAgentToolCall",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onExternalAgentError",
       "kind": "hook",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.1.0"
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
+    },
+    {
+      "id": "onExternalAgentConfigChange",
+      "kind": "hook",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.1.0",
+      "permission": "agent:external:read"
     },
     {
       "id": "onCodeExecutionStart",

@@ -80,6 +80,7 @@ function setHost(over: Partial<HostExternalAgentConfigsState> = {}) {
         record: { configId: "eac_new" } as ExternalAgentConfigRecord,
       })
     ),
+    duplicate: jest.fn(),
     ...over,
   }
 }
@@ -167,7 +168,7 @@ describe("AddExternalAgentForm", () => {
     fireEvent.submit(screen.getByTestId("add-external-agent-form"))
 
     expect(await screen.findByTestId("add-agent-problem")).toHaveTextContent(
-      "Agent name is required"
+      "Give the agent a name."
     )
     expect(hostState.current.create).not.toHaveBeenCalled()
     expect(mockReplace).not.toHaveBeenCalled()
@@ -211,5 +212,64 @@ describe("AddExternalAgentForm", () => {
     setHost({ loading: true })
     renderForm("claude-code")
     expect(screen.getByTestId("add-agent-submit")).toBeDisabled()
+  })
+
+  // ADR-0216: a new configuration owns its state unless the user says otherwise.
+  it("creates the agent with its own state by default", async () => {
+    renderForm("claude-code")
+    expect(screen.getByRole("radio", { name: /Own state/ })).toBeChecked()
+    fireEvent.submit(screen.getByTestId("add-external-agent-form"))
+    const create = hostState.current.create as jest.Mock
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    expect(create.mock.calls[0][0]).toMatchObject({ stateIsolation: "isolated" })
+  })
+
+  it("sends shared state when the user picks it", async () => {
+    const user = userEvent.setup()
+    renderForm("claude-code")
+    await user.click(screen.getByRole("radio", { name: /Shared state/ }))
+    fireEvent.submit(screen.getByTestId("add-external-agent-form"))
+    const create = hostState.current.create as jest.Mock
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    expect(create.mock.calls[0][0]).toMatchObject({ stateIsolation: "shared" })
+  })
+
+  it("uses shared state for a runtime that cannot be isolated", async () => {
+    const user = userEvent.setup()
+    renderForm("custom")
+    await user.type(screen.getByTestId("add-agent-name"), "Mine")
+    await user.type(screen.getByLabelText(/^Command/), "some-unknown-cli")
+    expect(screen.getByRole("radio", { name: /Own state/ })).toBeDisabled()
+    expect(screen.getByRole("radio", { name: /Shared state/ })).toBeChecked()
+    fireEvent.submit(screen.getByTestId("add-external-agent-form"))
+    const create = hostState.current.create as jest.Mock
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    expect(create.mock.calls[0][0]).toMatchObject({ stateIsolation: "shared" })
+  })
+
+  it("warns, without refusing, when the Host already has an agent of that name", async () => {
+    setHost({
+      configs: [
+        { configId: "eac_1", config: { name: " claude code " } } as unknown as ExternalAgentConfigRecord,
+      ],
+    })
+    renderForm("claude-code")
+    expect(screen.getByTestId("add-agent-name-taken")).toHaveTextContent(
+      "Your Host already has an agent named Claude Code."
+    )
+    expect(screen.getByTestId("add-agent-name")).toHaveAttribute(
+      "aria-describedby",
+      "add-agent-name-taken"
+    )
+    fireEvent.submit(screen.getByTestId("add-external-agent-form"))
+    await waitFor(() => expect(hostState.current.create).toHaveBeenCalledTimes(1))
+  })
+
+  it("says nothing about the name when it is free", () => {
+    setHost({
+      configs: [{ configId: "eac_1", config: { name: "Codex" } } as unknown as ExternalAgentConfigRecord],
+    })
+    renderForm("claude-code")
+    expect(screen.queryByTestId("add-agent-name-taken")).toBeNull()
   })
 })

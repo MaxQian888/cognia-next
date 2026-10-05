@@ -1672,15 +1672,17 @@
     "unknownSource": "其他助手",
     "canonicalState": "已保留 {count} 项任务、计划、历史或 Agent 事件",
     "resume": "原生恢复",
+    "resumeChooseAgent": "使用哪个 Agent 恢复？",
     "resumeErrors": {
-      "runtime-ambiguous": "有多个已连接的 Agent 与此来源匹配。请断开其他实例后再恢复。",
+      "runtime-ambiguous": "有多个已连接的 Agent 与此来源匹配。请选择用哪一个恢复。",
       "binding-missing": "来源未提供原生会话 ID。",
       "cwd-missing": "原始工作目录已不存在。",
       "handshake-failed": "原 Agent 无法恢复此会话。",
       "preset-missing": "导入记录中没有兼容的运行时预设。",
       "preset-not-configured": "请先配置匹配的外部 Agent 预设。",
       "resume-unverified": "已连接的 Agent 尚未验证 session/resume 能力。",
-      "runtime-unavailable": "匹配的外部 Agent 未连接或当前不可执行。"
+      "runtime-unavailable": "匹配的外部 Agent 未连接或当前不可执行。",
+      "runtime-isolated": "所有匹配的 Agent 都使用独立的运行时状态，无法读取此会话。请使用与运行时共享状态的 Agent 恢复。"
     },
     "resumeNative": "验证原 Agent，并恢复这一原生会话",
     "resumeReady": "原生会话已恢复；下一轮将使用该外部 Agent。"

@@ -150,6 +150,73 @@ const baseHookValue = () => ({
 })
 
 describe("ExternalAgentManager", () => {
+  it("opens the External Agents settings section from the header", async () => {
+    const { useUIStore } = jest.requireActual<typeof import("@/stores/ui")>("@/stores/ui")
+    useUIStore.setState({ pendingSettingsRequest: null })
+    mockUseExternalAgent.mockReturnValue(baseHookValue())
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgentManage.manager.manageInSettings })
+    )
+    expect(useUIStore.getState().pendingSettingsRequest).toEqual(
+      expect.objectContaining({ tab: "agents" })
+    )
+  })
+
+  describe("shared session history (ADR-0216)", () => {
+    const stored = (id: string, name: string, stateIsolation?: "shared" | "isolated") => ({
+      id,
+      name,
+      protocol: "acp",
+      transport: "stdio",
+      enabled: true,
+      process: { command: "codex", args: [] },
+      stateIsolation,
+    })
+    afterEach(() => useExternalAgentStore.setState({ agents: {} }))
+
+    it("names the configurations a shared configuration shares its history with", async () => {
+      useExternalAgentStore.setState({
+        agents: {
+          "agent-1": stored("agent-1", "Codex"),
+          "agent-2": stored("agent-2", "Codex review"),
+          "agent-3": stored("agent-3", "Codex sandbox", "isolated"),
+        } as never,
+      })
+      const agent = makeAgent({ process: { command: "codex", args: [] } })
+      mockUseExternalAgent.mockReturnValue({
+        ...baseHookValue(),
+        agents: [agent],
+        activeAgentId: "agent-1",
+      })
+      await act(async () => {
+        render(wrap(<ExternalAgentManager />))
+      })
+      const notice = screen.getByTestId("external-agent-shared-history-notice")
+      expect(notice).toHaveTextContent("Codex review")
+      // An isolated configuration keeps its own history.
+      expect(notice).not.toHaveTextContent("Codex sandbox")
+    })
+
+    it("says nothing when the active configuration keeps its own state", async () => {
+      useExternalAgentStore.setState({
+        agents: {
+          "agent-1": stored("agent-1", "Codex", "isolated"),
+          "agent-2": stored("agent-2", "Codex review"),
+        } as never,
+      })
+      mockUseExternalAgent.mockReturnValue({
+        ...baseHookValue(),
+        agents: [makeAgent({ process: { command: "codex", args: [] } })],
+        activeAgentId: "agent-1",
+      })
+      await act(async () => {
+        render(wrap(<ExternalAgentManager />))
+      })
+      expect(screen.queryByTestId("external-agent-shared-history-notice")).toBeNull()
+    })
+  })
+
   it("does not relist sessions when an unchanged runtime is projected into a new array", async () => {
     const agent = makeAgent({
       protocol: "acp",

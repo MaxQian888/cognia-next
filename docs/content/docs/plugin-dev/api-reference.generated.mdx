@@ -39,6 +39,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.events` | 17 | None | frontend, hybrid | internal |
 | `ctx.export` | 8 | `export:session`, `export:project` | frontend, hybrid | internal |
 | `ctx.extensions` | 3 | `extension:ui` | frontend, hybrid | internal |
+| `ctx.externalAgents` | 21 | `agent:external:read`, `agent:external:manage` | frontend, hybrid, python | sensitive |
 | `ctx.fs` | 18 | `filesystem:write`, `filesystem:read` | frontend, hybrid, python | sensitive |
 | `ctx.git` | 33 | `git:read`, `git:write` | frontend, hybrid, python | internal |
 | `ctx.goals` | 17 | `goal:write`, `goal:read` | frontend, hybrid | internal |
@@ -561,6 +562,32 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `extensions.getExtensions` | `extension:ui` | medium | Yes |
 | `extensions.hasExtensions` | `extension:ui` | medium | Yes |
 | `extensions.registerExtension` | `extension:ui` | medium | No |
+
+## `ctx.externalAgents`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `externalAgents.list` | `agent:external:read` | medium | Yes |
+| `externalAgents.get` | `agent:external:read` | medium | Yes |
+| `externalAgents.getReadiness` | `agent:external:read` | medium | Yes |
+| `externalAgents.listPresets` | `agent:external:read` | low | Yes |
+| `externalAgents.listRuntimes` | `agent:external:read` | medium | Yes |
+| `externalAgents.getSettings` | `agent:external:read` | low | Yes |
+| `externalAgents.listDelegationRules` | `agent:external:read` | medium | Yes |
+| `externalAgents.onChange` | `agent:external:read` | medium | No |
+| `externalAgents.create` | `agent:external:manage` | high | No |
+| `externalAgents.createFromPreset` | `agent:external:manage` | high | No |
+| `externalAgents.update` | `agent:external:manage` | high | Yes |
+| `externalAgents.duplicate` | `agent:external:manage` | high | No |
+| `externalAgents.remove` | `agent:external:manage` | high | No |
+| `externalAgents.setEnabled` | `agent:external:manage` | high | Yes |
+| `externalAgents.connect` | `agent:external:manage` | high | No |
+| `externalAgents.disconnect` | `agent:external:manage` | medium | Yes |
+| `externalAgents.addDelegationRule` | `agent:external:manage` | high | No |
+| `externalAgents.updateDelegationRule` | `agent:external:manage` | high | Yes |
+| `externalAgents.removeDelegationRule` | `agent:external:manage` | high | No |
+| `externalAgents.reorderDelegationRules` | `agent:external:manage` | high | Yes |
+| `externalAgents.updateSettings` | `agent:external:manage` | high | Yes |
 
 ## `ctx.fs`
 

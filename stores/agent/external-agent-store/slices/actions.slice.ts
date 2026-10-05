@@ -13,7 +13,10 @@ import {
   createAgentFromPreset,
   type ExternalAgentPresetId,
 } from "@/lib/ai/agent/external/config/presets"
-import { normalizeExternalAgentConfigInput } from "@/lib/ai/agent/external/config/config-normalizer"
+import {
+  normalizeExternalAgentConfigInput,
+  positiveInteger,
+} from "@/lib/ai/agent/external/config/config-normalizer"
 import {
   createExternalAgentBenchmarkBaseline,
   normalizeExternalAgentValiditySnapshot,
@@ -173,6 +176,10 @@ export const createExternalAgentActionsSlice = (
         tags: presetConfig.tags,
         metadata: presetConfig.metadata,
         validitySnapshot: presetConfig.validitySnapshot,
+        stateIsolation: overrides?.stateIsolation,
+        subscriptionAccountId: overrides?.subscriptionAccountId,
+        maxConcurrentSessions: overrides?.maxConcurrentSessions,
+        sessionIdleTimeout: overrides?.sessionIdleTimeout,
       },
       {
         id: presetConfig.id,
@@ -232,6 +239,21 @@ export const createExternalAgentActionsSlice = (
         requireApprovalFor: updates.requireApprovalFor ?? agent.requireApprovalFor,
         codexOptions: updates.codexOptions ?? agent.codexOptions,
         cogniaModel: updates.cogniaModel === undefined ? agent.cogniaModel : updates.cogniaModel,
+        stateIsolation: updates.stateIsolation ?? agent.stateIsolation,
+        // `null` is the clear (follow the active account), like `cogniaModel`.
+        subscriptionAccountId:
+          updates.subscriptionAccountId === undefined
+            ? agent.subscriptionAccountId
+            : updates.subscriptionAccountId || undefined,
+        // `null` clears; anything that is not a positive whole number is ignored.
+        maxConcurrentSessions:
+          updates.maxConcurrentSessions === null
+            ? undefined
+            : (positiveInteger(updates.maxConcurrentSessions) ?? agent.maxConcurrentSessions),
+        sessionIdleTimeout:
+          updates.sessionIdleTimeout === null
+            ? undefined
+            : (positiveInteger(updates.sessionIdleTimeout) ?? agent.sessionIdleTimeout),
         timeout: updates.timeout ?? agent.timeout,
         retryConfig: updates.retryConfig
           ? ({
@@ -547,6 +569,10 @@ export const createExternalAgentActionsSlice = (
 
   setOverviewBannerCollapsed: (collapsed: boolean): void => {
     set({ overviewBannerCollapsed: collapsed })
+  },
+
+  setRailGroupBy: (groupBy): void => {
+    set({ railGroupBy: groupBy })
   },
 
   // ========================================

@@ -281,6 +281,10 @@
       "hint": "此主机已达到智能体进程数上限——请结束或关闭一个后重试。",
       "label": "智能体会话过多"
     },
+    "stateIsolationUnsupported": {
+      "hint": "该 Agent 被设置为使用独立的运行时状态，但它的运行时没有可指定状态位置的设置。请将其切换为与运行时共享状态。",
+      "label": "运行时无法隔离状态"
+    },
     "routerFusionBypassed": {
       "hint": "Router + Fusion 未能为一次后台模型调用预留额度，该调用已按原路径执行，其费用未计入账本。连续失败会暂停该入口；请检查「设置 → AI 连接 → 路由」。",
       "label": "模型调用未记账"
@@ -464,7 +468,8 @@
     "startOnAProcessCapableRuntime": "在能启动进程的地方运行这个 agent：桌面端应用，或一台已配对的 Host。",
     "grantAgentControlOnTheHost": "如果已配对 Host，请在该 Host 上为这台设备授予 Agent Control。",
     "useOfficialWorkflow": "请使用该产品自身的官方流程。",
-    "useSupportedOperations": "请仅使用该端点支持的操作。"
+    "useSupportedOperations": "请仅使用该端点支持的操作。",
+    "shareRuntimeState": "将该 Agent 切换为与运行时共享状态后重新连接。"
   },
   "severity": {
     "error": "错误",

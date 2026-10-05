@@ -44,6 +44,10 @@ import { buildAgentEnv } from "../../config/env-builder"
 import { spawnReclaimingOrphan } from "../../policy/spawn-reclaim"
 import { MODE_RANK } from "../../policy/permission-cascade"
 import {
+  configuredApprovalPolicy,
+  type ConfiguredApprovalPolicy,
+} from "../../policy/tool-preapproval"
+import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
 } from "../../session/session-extension-errors"
@@ -2956,7 +2960,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
 
     const mode = session?.permissionMode ?? "default"
-    const auto = this.autoDecision(mode, kind)
+    const auto = this.autoDecision(mode, kind, configuredApprovalPolicy(this._config, request))
     if (auto) return { decision: auto }
 
     // Surface to the UI and await `respondToPermission`.
@@ -3016,7 +3020,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       requestedPermissions,
     }
     const mode = session?.permissionMode ?? "default"
-    if (mode === "bypassPermissions") {
+    const configured = configuredApprovalPolicy(this._config, request)
+    if (configured === "ask" && MODE_RANK[mode] <= MODE_RANK.dontAsk) {
+      return this.permissionProfileResponse(pendingBase, { requestId: itemId, granted: false })
+    }
+    if (
+      configured !== "ask" &&
+      (mode === "bypassPermissions" || (configured === "approve" && mode !== "plan"))
+    ) {
       return this.permissionProfileResponse(pendingBase, {
         requestId: itemId,
         granted: true,
@@ -3075,7 +3086,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     const auto = this.autoDecision(
       session?.permissionMode ?? "default",
-      isCommand ? "command" : "fileChange"
+      isCommand ? "command" : "fileChange",
+      configuredApprovalPolicy(this._config, request)
     )
     if (auto) return Promise.resolve({ decision: auto === "accept" ? "approved" : "denied" })
 
@@ -3157,11 +3169,19 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * - `acceptEdits` → prompt for exceptions; native workspace edits need none
    * - `plan` / `dontAsk` → decline side effects (no pre-approval registry)
    * - `default` → prompt
+   *
+   * The configuration's own lists (`configuredApprovalPolicy`) come first:
+   * `plan` still declines, then "approve" accepts and "ask" always prompts
+   * (declining where the mode shows no UI).
    */
   private autoDecision(
     mode: AcpPermissionMode,
-    _kind: "command" | "fileChange"
+    _kind: "command" | "fileChange",
+    configured: ConfiguredApprovalPolicy = null
   ): CodexCommandDecision | CodexFileChangeDecision | undefined {
+    if (mode === "plan") return "decline"
+    if (configured === "approve") return "accept"
+    if (configured === "ask") return MODE_RANK[mode] <= MODE_RANK.dontAsk ? "decline" : undefined
     if (mode === "bypassPermissions") return "accept"
     // Workspace edits already run without approval in acceptEdits. A callback
     // means Codex needs an exception (for example outside/protected paths),

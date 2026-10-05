@@ -98,6 +98,67 @@ describe("resumeImportedSessionNative", () => {
     expect(bind).not.toHaveBeenCalled()
   })
 
+  it("hands an ambiguous caller the choices, then resumes on the one chosen", async () => {
+    const manager = {
+      getAllAgents: () => [
+        agent({ config: { id: "agent-1", name: "Codex", metadata: { preset: "codex" } } }),
+        agent({ config: { id: "agent-2", name: "Codex work", metadata: { preset: "codex" } } }),
+      ],
+      resumeSession,
+    }
+    const ambiguous = await resumeImportedSessionNative(imported(), {
+      manager,
+      fs: { exists },
+      bind,
+    })
+    expect(ambiguous).toEqual({
+      ok: false,
+      code: "runtime-ambiguous",
+      choices: [
+        { agentId: "agent-1", name: "Codex" },
+        { agentId: "agent-2", name: "Codex work" },
+      ],
+    })
+
+    const chosen = await resumeImportedSessionNative(
+      imported(),
+      { manager, fs: { exists }, bind },
+      { agentId: "agent-2" }
+    )
+    expect(chosen).toEqual({ ok: true, agentId: "agent-2", nativeSessionId: "thread-1" })
+    expect(resumeSession).toHaveBeenCalledWith("agent-2", "thread-1", { cwd: "/workspace" })
+  })
+
+  it("refuses a chosen configuration that is not a connected candidate", async () => {
+    const result = await resumeImportedSessionNative(
+      imported(),
+      { manager: { getAllAgents: () => [agent()], resumeSession }, fs: { exists }, bind },
+      { agentId: "someone-else" }
+    )
+    expect(result).toEqual({ ok: false, code: "runtime-unavailable" })
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+
+  it("never resumes an imported session on a configuration with its own state root", async () => {
+    const isolated = agent({
+      config: { id: "agent-1", metadata: { preset: "codex" }, stateIsolation: "isolated" },
+    })
+    const result = await resumeImportedSessionNative(imported(), {
+      manager: { getAllAgents: () => [isolated], resumeSession },
+      fs: { exists },
+      bind,
+    })
+    expect(result).toEqual({ ok: false, code: "runtime-isolated", detail: "codex" })
+
+    const shared = agent({ config: { id: "agent-shared", metadata: { preset: "codex" } } })
+    const withShared = await resumeImportedSessionNative(imported(), {
+      manager: { getAllAgents: () => [isolated, shared], resumeSession },
+      fs: { exists },
+      bind,
+    })
+    expect(withShared).toMatchObject({ ok: true, agentId: "agent-shared" })
+  })
+
   it("refuses a missing working directory", async () => {
     exists.mockResolvedValue(false)
     const result = await resumeImportedSessionNative(imported(), {

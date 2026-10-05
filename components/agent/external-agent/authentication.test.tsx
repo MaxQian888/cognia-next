@@ -146,6 +146,20 @@ describe("ExternalAgentAuthentication", () => {
     expect(props.logout).toHaveBeenCalledTimes(1)
   })
 
+  it("names the other configurations a sign-out also signs out", () => {
+    setup({ sharedStateAgentNames: ["Kimi work", "Kimi review"] })
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }))
+    expect(screen.getByTestId("logout-shared-state-warning")).toHaveTextContent(
+      "It also signs out Kimi work, Kimi review, which share this CLI's login."
+    )
+  })
+
+  it("adds no shared-state warning when nothing shares the login", () => {
+    setup({ sharedStateAgentNames: [] })
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }))
+    expect(screen.queryByTestId("logout-shared-state-warning")).not.toBeInTheDocument()
+  })
+
   it("shows a readable error when the login terminal cannot be read", async () => {
     jest.useFakeTimers()
     jest.mocked(acpTerminalOutput).mockRejectedValue(new Error("terminal unavailable"))

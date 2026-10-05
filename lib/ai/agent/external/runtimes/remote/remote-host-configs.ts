@@ -37,6 +37,7 @@ import type {
   ExternalAgentConfigStamp,
 } from "@/types/agent/external-agent-config-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
+import type { ExternalAgentStateIsolation } from "@/types/agent/external-agent"
 import type { RunAdmissionRefusal } from "../../policy/run-admission"
 import {
   isCogniaGatewayModelCatalog,
@@ -52,6 +53,10 @@ export const HOST_CONFIG_COMMANDS = Object.freeze({
   create: "external_agent_config_create",
   update: "external_agent_config_update",
   delete: "external_agent_config_delete",
+  // Copy a configuration on the Host, keyring secrets included (ADR-0216).
+  // A command of its own rather than read + create on the client: the copy's
+  // secrets are the source's keyring entries, which never leave the Host.
+  duplicate: "external_agent_config_duplicate",
   reconcile: "external_agent_config_reconcile",
   admit: "external_agent_admit_run",
   release: "external_agent_release_run",
@@ -348,6 +353,36 @@ export async function deleteRemoteHostConfig(configId: string): Promise<External
   const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.delete,
     { configId }
+  )
+  return result.config
+}
+
+/** What the person duplicating chose. Omitted fields take the Host's defaults. */
+export interface RemoteHostConfigDuplicateOptions {
+  name?: string
+  stateIsolation?: ExternalAgentStateIsolation
+  enabled?: boolean
+}
+
+/**
+ * Copy a Host configuration into a new one on the same Host.
+ *
+ * The Host builds the copy and moves the source's secrets into the copy's own
+ * keyring slots; this client only names the source and the choices. The copy
+ * is never connected — it runs when a turn is admitted against it.
+ */
+export async function duplicateRemoteHostConfig(
+  configId: string,
+  options: RemoteHostConfigDuplicateOptions = {}
+): Promise<ExternalAgentConfigRecord> {
+  const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
+    HOST_CONFIG_COMMANDS.duplicate,
+    {
+      configId,
+      ...(options.name !== undefined ? { name: options.name } : {}),
+      ...(options.stateIsolation !== undefined ? { stateIsolation: options.stateIsolation } : {}),
+      ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
+    }
   )
   return result.config
 }

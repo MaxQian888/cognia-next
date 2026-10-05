@@ -14,6 +14,7 @@ export const initialState: ExternalAgentState = {
   showConnectionNotifications: true,
   chatFailurePolicy: "fallback",
   overviewBannerCollapsed: false,
+  railGroupBy: "readiness",
   // Runtime state
   runningAgents: {},
   runningAgentIds: [],

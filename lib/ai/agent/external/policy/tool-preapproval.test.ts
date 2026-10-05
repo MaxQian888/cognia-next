@@ -1,4 +1,4 @@
-import { isToolPreApproved } from "./tool-preapproval"
+import { configuredApprovalPolicy, isToolPreApproved } from "./tool-preapproval"
 
 describe("isToolPreApproved", () => {
   it("returns false when the allow-list is empty or the tool name is missing", () => {
@@ -57,5 +57,41 @@ describe("projected Cognia tool identity", () => {
     expect(isCogniaProjectedTool("mcp__cognia-tools-evil__read", ["cognia-tools"])).toBe(false)
     expect(isCogniaProjectedTool("mcp__cognia-tools__read", [])).toBe(false)
     expect(isCogniaProjectedTool("Read", ["cognia-tools"])).toBe(false)
+  })
+})
+
+describe("configuredApprovalPolicy", () => {
+  const lists = { autoApprovePatterns: ["Read", "Bash(git status*)"], requireApprovalFor: ["edit"] }
+
+  it("leaves the decision to the mode without lists", () => {
+    expect(configuredApprovalPolicy(undefined, { title: "Read" })).toBeNull()
+    expect(configuredApprovalPolicy({}, { title: "Read" })).toBeNull()
+  })
+
+  it("approves a request an auto-approval entry matches", () => {
+    expect(configuredApprovalPolicy(lists, { title: "Read" })).toBe("approve")
+    expect(
+      configuredApprovalPolicy(lists, {
+        toolInfo: { name: "Bash" },
+        rawInput: { command: "git status -s" },
+      })
+    ).toBe("approve")
+    // A specifier that cannot be satisfied fails closed.
+    expect(
+      configuredApprovalPolicy(lists, {
+        toolInfo: { name: "Bash" },
+        rawInput: { command: "rm -rf /" },
+      })
+    ).toBeNull()
+  })
+
+  it("lets always-ask win, matching the kind as well as the name", () => {
+    expect(configuredApprovalPolicy(lists, { title: "Apply patch", kind: "edit" })).toBe("ask")
+    expect(
+      configuredApprovalPolicy(
+        { autoApprovePatterns: ["*"], requireApprovalFor: ["Write"] },
+        { title: "Write" }
+      )
+    ).toBe("ask")
   })
 })

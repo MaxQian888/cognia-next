@@ -160,6 +160,7 @@ The canonical type is the `PluginPermission` union at `types/plugin/plugin.ts:26
 | goal / connectors | `goal:write`, `connectors:send`, `connectors:manage` |
 | share / backup | `share:create`, `backup:write` |
 | automation / companion | `automation:*`, `companion:control` |
+| externalAgents | `agent:external:read`, `agent:external:manage` (ADR-0216; `ctx.externalAgents`, and `agent:external:read` gates delivery of every `onExternalAgent*` hook) |
 | misc | `notification`, `secrets:read`/`secrets:write`, `agent:control`, `agent:dispatch-external`, `python:execute`, `sandbox:web-execute`, `subscription:read`, `perf:read` |
 
 ### Dangerous permissions
@@ -175,7 +176,9 @@ The canonical type is the `PluginPermission` union at `types/plugin/plugin.ts:26
 | `git:write` | `connectors:send` |
 | `connectors:manage` | `share:create` |
 | `backup:write` | all six `automation:*` |
-| `companion:control` | — |
+| `companion:control` | `agent:external:manage` |
+
+`agent:external:manage` is dangerous because it can point an agent at another command, widen its permission mode, delete it or switch the subsystem off. Neither external-agent permission reaches a credential: projections are secret-free and inputs refuse inline credentials; credential entry and unsandboxed-launch consent stay in the host UI.
 
 Note: `companion:goal-control` is **not** dangerous — it is a subset of `goal:write` (`:218-219`).
 

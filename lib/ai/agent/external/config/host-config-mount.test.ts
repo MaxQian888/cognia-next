@@ -3,7 +3,9 @@ import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import {
   __setHostConfigMountDepsForTests,
   hostConfigCatalogMountIsLocal,
+  hostConfigLaunchConfig,
   mountHostConfigAgent,
+  ownCredentialRefs,
   mountHostConfigForCatalog,
   resetHostConfigMountsForTests,
   type HostConfigMountManager,
@@ -12,17 +14,20 @@ import {
 function fakeManager() {
   const agents = new Set<string>()
   const added: string[] = []
+  const addedConfigs: ExternalAgentConfig[] = []
   const removed: string[] = []
   let addDelay: Promise<void> | null = null
   let failNextAdd = false
 
   const manager: HostConfigMountManager & {
     added: string[]
+    addedConfigs: ExternalAgentConfig[]
     removed: string[]
     holdAdd: () => () => void
     failNextAdd: () => void
   } = {
     added,
+    addedConfigs,
     removed,
     getAgent: (id) => (agents.has(id) ? {} : undefined),
     addAgent: async (config) => {
@@ -33,6 +38,7 @@ function fakeManager() {
       }
       agents.add(config.id)
       added.push(config.id)
+      addedConfigs.push(config)
       return {}
     },
     removeAgent: async (id) => {
@@ -112,6 +118,44 @@ describe("mountHostConfigAgent", () => {
       "no adapter"
     )
     await expect(mountHostConfigAgent(manager, "eac_1", "eacr_1", CONFIG)).resolves.toBe("eac_1")
+  })
+})
+
+// G8: a host config's secrets are resolved by the manager's launch preparer
+// from the refs the mount hands it, so the refs must arrive intact — and only
+// the config's own.
+describe("credential refs on a mount", () => {
+  it("hands the manager the config's own refs, unresolved", async () => {
+    const manager = fakeManager()
+    const config = {
+      ...CONFIG,
+      credentialRefs: { apiKey: "eac_1:apiKey", processEnv: "eac_1:processEnv" },
+    } as unknown as ExternalAgentConfig
+    await mountHostConfigAgent(manager, "eac_1", "eacr_1", config)
+    expect(manager.addedConfigs[0]).toMatchObject({
+      id: "eac_1",
+      credentialRefs: { apiKey: "eac_1:apiKey", processEnv: "eac_1:processEnv" },
+    })
+  })
+
+  it("drops a legacy ref that names another config's slot", () => {
+    const launched = hostConfigLaunchConfig("eac_1", {
+      ...CONFIG,
+      credentialRefs: { apiKey: "eac_2:apiKey", bearerToken: "eac_1:bearerToken" },
+    } as unknown as ExternalAgentConfig) as ExternalAgentConfig & { credentialRefs?: unknown }
+    expect(launched.credentialRefs).toEqual({ bearerToken: "eac_1:bearerToken" })
+    const none = hostConfigLaunchConfig("eac_1", {
+      ...CONFIG,
+      credentialRefs: { apiKey: "eac_10:apiKey" },
+    } as unknown as ExternalAgentConfig) as ExternalAgentConfig & { credentialRefs?: unknown }
+    expect(none).not.toHaveProperty("credentialRefs")
+  })
+
+  it("matches the id up to the slot separator only", () => {
+    expect(
+      ownCredentialRefs({ apiKey: "eac_1x:apiKey", headers: "eac_1:headers" }, "eac_1")
+    ).toEqual({ headers: "eac_1:headers" })
+    expect(ownCredentialRefs(undefined, "eac_1")).toEqual({})
   })
 })
 

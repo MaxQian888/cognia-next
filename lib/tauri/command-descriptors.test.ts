@@ -33,6 +33,7 @@ describe("companion command descriptors", () => {
     for (const name of [
       "external_agent_config_create",
       "external_agent_config_delete",
+      "external_agent_config_duplicate",
       "external_agent_config_reconcile",
       "external_agent_config_update",
       "external_agent_update",

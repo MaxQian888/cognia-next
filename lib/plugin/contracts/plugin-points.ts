@@ -697,6 +697,11 @@ export const CANONICAL_HOOK_POINTS = [
   "onExternalAgentPermissionRequest",
   "onExternalAgentToolCall",
   "onExternalAgentError",
+  // ADR-0216: a configuration was added / updated / removed, a connection or
+  // the global settings or delegation rules changed. Fired from one store
+  // subscription (`lib/plugin/messaging/external-agent-config-hook-source.ts`);
+  // the Python twin of `ctx.externalAgents.onChange`.
+  "onExternalAgentConfigChange",
   "onCodeExecutionStart",
   "onCodeExecutionComplete",
   "onCodeExecutionError",
@@ -995,6 +1000,18 @@ export const HOOK_POINT_PERMISSIONS: Readonly<
   onPetEvolved: "pet:read",
   onPetAchievementUnlocked: "pet:read",
   onPetUnwell: "pet:read",
+  // External-agent hooks carry agent ids, names, prompts, tool calls and
+  // responses — what `ctx.externalAgents` reads guard with
+  // `agent:external:read` (ADR-0216). Behind the `hooks` capability alone,
+  // any plugin could watch every external coding agent run.
+  onExternalAgentConnect: "agent:external:read",
+  onExternalAgentDisconnect: "agent:external:read",
+  onExternalAgentExecutionStart: "agent:external:read",
+  onExternalAgentExecutionComplete: "agent:external:read",
+  onExternalAgentPermissionRequest: "agent:external:read",
+  onExternalAgentToolCall: "agent:external:read",
+  onExternalAgentError: "agent:external:read",
+  onExternalAgentConfigChange: "agent:external:read",
 }
 
 /** The permission a hook's delivery requires, if any. */

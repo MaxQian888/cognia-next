@@ -729,6 +729,8 @@ export async function dispatchCommand(
       return externalAgentConfigUpdate(payload)
     case "external_agent_config_delete":
       return externalAgentConfigDelete(payload)
+    case "external_agent_config_duplicate":
+      return externalAgentConfigDuplicate(payload)
     case "external_agent_config_reconcile":
       return externalAgentConfigReconcile()
     case "external_agent_cognia_models":
@@ -3300,9 +3302,51 @@ async function externalAgentConfigDelete(
   const { deleteHostExternalAgentConfig } =
     await import("@/lib/ai/agent/external/config/host-config-service")
   // No `hostConfigDeps()`: a tombstone assesses nothing, and resolving the
-  // readiness assessor here would boot the keyring, the manager and the
-  // adapter registry for a write that only needs the clock.
+  // readiness assessor here would boot the manager and the adapter registry
+  // for a write that only needs the clock, the keyring slots it clears and
+  // the state root it removes (both resolved by the service itself).
   return { config: toConfigWire(await deleteHostExternalAgentConfig(configId)) }
+}
+
+/**
+ * Copy a configuration on this host, keyring secrets included (ADR-0216).
+ *
+ * A command of its own because the copy's credentials are the source's keyring
+ * entries, which never leave the host: a client doing read + create would have
+ * no secrets to send. The service builds the copy (lineage, isolation, the
+ * state-dir env and instance-only metadata cut) and writes the secrets into
+ * the copy's own slots before it is runnable. Nothing is connected.
+ */
+async function externalAgentConfigDuplicate(
+  payload: Record<string, unknown>
+): Promise<{ config: ExternalAgentConfigWire }> {
+  const configId = payload.configId
+  if (typeof configId !== "string" || !configId) {
+    throw new Error("external_agent_config_duplicate.configId is required")
+  }
+  const name = payload.name
+  if (name !== undefined && typeof name !== "string") {
+    throw new Error("external_agent_config_duplicate.name must be a string")
+  }
+  const stateIsolation = payload.stateIsolation
+  if (
+    stateIsolation !== undefined &&
+    stateIsolation !== "shared" &&
+    stateIsolation !== "isolated"
+  ) {
+    throw new Error('external_agent_config_duplicate.stateIsolation must be "shared" or "isolated"')
+  }
+  const enabled = payload.enabled
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    throw new Error("external_agent_config_duplicate.enabled must be a boolean")
+  }
+  const { duplicateHostExternalAgentConfig } =
+    await import("@/lib/ai/agent/external/config/host-config-service")
+  const record = await duplicateHostExternalAgentConfig(
+    { configId, name, stateIsolation, enabled },
+    await hostConfigDeps()
+  )
+  return { config: toConfigWire(record) }
 }
 
 /**

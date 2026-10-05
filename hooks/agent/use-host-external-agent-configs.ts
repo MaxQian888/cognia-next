@@ -21,11 +21,13 @@ import {
   HostConfigsUnsupportedError,
   createRemoteHostConfig,
   deleteRemoteHostConfig,
+  duplicateRemoteHostConfig,
   hostConfigsAvailability,
   listRemoteHostConfigs,
   reconcileRemoteHostConfigs,
   updateRemoteHostConfig,
   type HostConfigsUnavailableReason,
+  type RemoteHostConfigDuplicateOptions,
 } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
@@ -71,6 +73,15 @@ export interface HostExternalAgentConfigsState {
    */
   create: (
     config: Partial<StoredExternalAgentConfig>
+  ) => Promise<{ ok: true; record: ExternalAgentConfigRecord } | { ok: false; error: string }>
+  /**
+   * Copy a Host configuration into a new one on the Host (ADR-0216). The Host
+   * copies the source's keyring secrets into the copy's own slots; nothing is
+   * connected. Resolves the created row, or the Host's reason for refusing.
+   */
+  duplicate: (
+    record: ExternalAgentConfigRecord,
+    options?: RemoteHostConfigDuplicateOptions
   ) => Promise<{ ok: true; record: ExternalAgentConfigRecord } | { ok: false; error: string }>
   /** True while any write is in flight; the panel disables its controls. */
   busy: boolean
@@ -198,6 +209,16 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
     [mutate]
   )
 
+  const duplicate = useCallback(
+    async (record: ExternalAgentConfigRecord, options: RemoteHostConfigDuplicateOptions = {}) => {
+      const outcome = await mutate(() => duplicateRemoteHostConfig(record.configId, options))
+      return outcome.ok
+        ? { ok: true as const, record: outcome.value }
+        : { ok: false as const, error: outcome.error }
+    },
+    [mutate]
+  )
+
   return useMemo(
     () => ({
       configs,
@@ -211,6 +232,7 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       remove,
       copyLocal,
       create,
+      duplicate,
       busy,
     }),
     [
@@ -225,6 +247,7 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       remove,
       copyLocal,
       create,
+      duplicate,
       busy,
     ]
   )

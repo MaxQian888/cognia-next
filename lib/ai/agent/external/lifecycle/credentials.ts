@@ -61,6 +61,8 @@ export interface ExternalAgentSecrets {
   proxyAuth?: { username: string; password: string }
   /** Only the process env entries whose NAME marks them as a credential. */
   processEnv?: Record<string, string>
+  /** OpenCode's server password, carried on `metadata.serverPassword`. */
+  serverPassword?: string
 }
 
 function pickSecretEntries(source: Record<string, string> | undefined): {
@@ -102,6 +104,11 @@ export function extractInlineCredentials(config: ExternalAgentConfig): ExternalA
 
   const env = pickSecretEntries(config.process?.env).secret
   if (hasEntries(env)) secrets.processEnv = env
+
+  const serverPassword = config.metadata?.serverPassword
+  if (typeof serverPassword === "string" && serverPassword.length > 0) {
+    secrets.serverPassword = serverPassword
+  }
 
   return secrets
 }
@@ -145,6 +152,12 @@ export function scrubInlineCredentials<T extends ExternalAgentConfig>(config: T)
       process.env = pickSecretEntries(config.process.env).plain
     }
     next.process = process
+  }
+
+  if (config.metadata && Object.hasOwn(config.metadata, "serverPassword")) {
+    const metadata = { ...config.metadata }
+    delete metadata.serverPassword
+    next.metadata = metadata
   }
 
   return next
@@ -230,7 +243,7 @@ function deserializeSlot(
   slot: ExternalAgentCredentialSlot,
   raw: string
 ): ExternalAgentSecrets[ExternalAgentCredentialSlot] {
-  if (slot === "apiKey" || slot === "bearerToken") return raw
+  if (slot === "apiKey" || slot === "bearerToken" || slot === "serverPassword") return raw
   return JSON.parse(raw) as Record<string, string>
 }
 
@@ -330,6 +343,10 @@ export function applyResolvedCredentials<T extends ExternalAgentConfig>(
       ...(config.process ?? { command: "" }),
       env: { ...(config.process?.env ?? {}), ...secrets.processEnv },
     }
+  }
+
+  if (secrets.serverPassword !== undefined) {
+    next.metadata = { ...config.metadata, serverPassword: secrets.serverPassword }
   }
 
   return next

@@ -46,6 +46,7 @@ export const REASON_CODE_TO_DIAGNOSTIC: Readonly<
   pi_package_unavailable: "piPackageUnavailable",
   protocol_frame_invalid: "protocolFrameInvalid",
   resource_limit: "resourceLimit",
+  state_isolation_unsupported: "stateIsolationUnsupported",
 }
 
 /**

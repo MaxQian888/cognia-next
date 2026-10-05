@@ -122,10 +122,13 @@ import {
   getExternalAgentExecutionBlock,
   getExternalAgentEcosystemReadiness,
   getUnsupportedProtocolReason,
+  positiveInteger,
   probeExternalAgentEcosystemReadiness,
   projectExternalAgentReadinessMetadata,
 } from "./config/config-normalizer"
 import { adaptPermissionMode } from "./policy/permission-modes"
+import { ExternalAgentLifecycleError } from "@/types/agent/external-agent-lifecycle"
+import { configuredApprovalPolicy } from "./policy/tool-preapproval"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
@@ -434,6 +437,23 @@ export class ExternalAgentManager {
     { parentId: string; taskId: string; release: () => Promise<void> }
   >()
   private gatewayPreparing = new Set<string>()
+  /**
+   * Every config goes through this before an adapter sees it: the config's own
+   * keyring secrets and its private state root (ADR-0216). One preparer for
+   * every route into `addAgent`, which is what made startup rehydration and the
+   * Connect button stop launching without the config's credentials.
+   */
+  private launchPreparer: (config: ExternalAgentConfig) => Promise<ExternalAgentConfig> = (
+    config
+  ) =>
+    import("./lifecycle/launch-preparation").then(({ prepareExternalAgentLaunchWithDefaults }) =>
+      prepareExternalAgentLaunchWithDefaults(config)
+    )
+
+  /** Replace the launch preparer. Tests and hosts with their own keyring. */
+  setLaunchPreparer(preparer: (config: ExternalAgentConfig) => Promise<ExternalAgentConfig>): void {
+    this.launchPreparer = preparer
+  }
 
   private async bindSandboxToolHostLeases(
     agentId: string,
@@ -1452,6 +1472,7 @@ export class ExternalAgentManager {
     }
 
     try {
+      await this.ensureSessionCapacity(agentId)
       const forked = await adapter.forkSession(sessionId, options)
       instance.sessions.set(forked.id, forked)
       this.setSessionExtensionSupport(agentId, instance, "session/fork", "supported", "ok")
@@ -2298,7 +2319,9 @@ export class ExternalAgentManager {
       throw new Error(`Maximum connections reached: ${this.config.maxConnections}`)
     }
 
-    const hydratedConfig = await this.enrichConfigWithDynamicReadiness(config)
+    const hydratedConfig = await this.enrichConfigWithDynamicReadiness(
+      await this.launchPreparer(config)
+    )
 
     // Create adapter for the protocol
     const adapter = createConfiguredProtocolAdapter(hydratedConfig)
@@ -3040,6 +3063,7 @@ export class ExternalAgentManager {
           "The isolated gateway task could not resume its saved session; no new session was created"
         )
       }
+      await this.ensureSessionCapacity(instance.config.id)
       session = await adapter.createSession(sessionOptions)
       if (preferredSessionId) {
         const latestReasonCode = instance.validity?.lastBranchReasonCode
@@ -3353,10 +3377,76 @@ export class ExternalAgentManager {
       throw new Error(`Agent not connected: ${agentId}`)
     }
 
+    await this.ensureSessionCapacity(agentId)
     const session = await adapter.createSession(options)
     instance.sessions.set(session.id, session)
 
     return session
+  }
+
+  /**
+   * Answer a permission request the configuration's `autoApprovePatterns`
+   * cover (and its `requireApprovalFor` does not). Resolves `true` when it was
+   * answered and must not reach the user.
+   */
+  private async applyConfiguredAutoApproval(
+    agentId: string,
+    sessionId: string,
+    event: Extract<ExternalAgentEvent, { type: "permission_request" }>
+  ): Promise<boolean> {
+    const config = this.instances.get(agentId)?.config
+    if (configuredApprovalPolicy(config, event.request) !== "approve") return false
+    await this.respondToPermission(agentId, sessionId, {
+      requestId: event.request.requestId ?? event.request.id,
+      granted: true,
+      reason: "approved by this agent's auto-approval list",
+    })
+    return true
+  }
+
+  /**
+   * Make room for one more native session under the configuration's
+   * `maxConcurrentSessions`.
+   *
+   * A connected agent keeps one native session per conversation for as long as
+   * it stays connected, so a hard refusal at the limit would break the next
+   * conversation for good. Instead the least recently active IDLE sessions are
+   * closed; a conversation whose session was closed continues through
+   * `session/resume` where the agent supports it and in a new session where it
+   * does not, exactly as after a reconnect. Only when every open session is
+   * mid-turn is the new one refused. No limit configured means no limit.
+   *
+   * Gateway task sessions are not native sessions of this process and do not
+   * count.
+   */
+  private async ensureSessionCapacity(agentId: string): Promise<void> {
+    const instance = this.instances.get(agentId)
+    const limit = positiveInteger(instance?.config.maxConcurrentSessions)
+    if (!instance || limit === undefined) return
+
+    const open = this.liveSessions(agentId).filter(
+      (session) => !session.id.startsWith("cognia-gateway:")
+    )
+    const excess = open.length - limit + 1
+    if (excess <= 0) return
+
+    const activity = (session: ExternalAgentSession): number => {
+      const time = session.lastActivityAt ? new Date(session.lastActivityAt).getTime() : NaN
+      return Number.isFinite(time) ? time : -Infinity
+    }
+    const idle = open
+      .filter((session) => session.status !== "executing")
+      .sort((left, right) => activity(left) - activity(right))
+    if (idle.length < excess) {
+      throw new ExternalAgentLifecycleError(
+        "session_limit_reached",
+        `agent ${agentId} already has ${open.length} sessions open (limit ${limit}) and none is idle`,
+        { agentId, limit }
+      )
+    }
+    for (const session of idle.slice(0, excess)) {
+      await this.closeSession(agentId, session.id)
+    }
   }
 
   /**
@@ -3643,6 +3733,11 @@ export class ExternalAgentManager {
             emitHookNotice
           )
           if (blocked) continue
+          // The configuration's own auto-approval list, for runtimes that
+          // decide permissions in their own process and only send Cognia the
+          // prompt (OpenCode, plugin adapters). ACP, Codex and Pi apply it
+          // before a request is ever emitted.
+          if (await this.applyConfiguredAutoApproval(agentId, session.id, event)) continue
         } else {
           void observeExternalAgentEvent(hookCtx, event, emitHookNotice)
         }
@@ -3962,6 +4057,8 @@ export class ExternalAgentManager {
                       reason: `hook denied: ${reason}`,
                     }),
                   emitHookNotice
+                ).then((blocked) =>
+                  blocked ? false : this.applyConfiguredAutoApproval(agentId, session.id, event)
                 )
               } else {
                 void observeExternalAgentEvent(hookCtx, event, emitHookNotice)

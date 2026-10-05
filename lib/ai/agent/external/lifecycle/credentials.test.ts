@@ -337,3 +337,43 @@ describe("migrateInlineCredentials", () => {
     expect(result.failure?.reason).not.toContain(SECRET)
   })
 })
+
+describe("OpenCode server password slot", () => {
+  const opencode = {
+    id: "oc",
+    name: "OpenCode",
+    protocol: "opencode",
+    transport: "stdio",
+    enabled: true,
+    process: { command: "opencode", args: ["serve"] },
+    metadata: { preset: "opencode", serverPassword: "pw", port: 4096 },
+  } as unknown as ExternalAgentConfig
+
+  it("treats the password as a credential, never as configuration", () => {
+    expect(extractInlineCredentials(opencode)).toEqual({ serverPassword: "pw" })
+    expect(scrubInlineCredentials(opencode).metadata).toEqual({ preset: "opencode", port: 4096 })
+    // The source object is not mutated.
+    expect(opencode.metadata?.serverPassword).toBe("pw")
+  })
+
+  it("puts the resolved password back for one launch", () => {
+    const scrubbed = scrubInlineCredentials(opencode)
+    expect(applyResolvedCredentials(scrubbed, { serverPassword: "pw" }).metadata).toEqual({
+      preset: "opencode",
+      port: 4096,
+      serverPassword: "pw",
+    })
+  })
+
+  it("round-trips through the keyring as a plain string", async () => {
+    const entries = new Map<string, string>()
+    const store = {
+      save: async (k: string, v: string) => void entries.set(k, v),
+      load: async (k: string) => entries.get(k) ?? null,
+      delete: async (k: string) => void entries.delete(k),
+    } as unknown as KeyringStore
+    const refs = await persistCredentials("oc", { serverPassword: "pw" }, store)
+    expect(entries.get("oc:serverPassword")).toBe("pw")
+    expect(await resolveCredentials(refs, store)).toEqual({ serverPassword: "pw" })
+  })
+})

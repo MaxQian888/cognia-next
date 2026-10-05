@@ -2664,6 +2664,13 @@ export interface PluginHostContextAPI {
   /** Issue tracker (spec 2026-09-06 D9): read, write, subscribe, register a sync source. */
   issues: import("@/lib/plugin/api/issues-api").PluginIssuesAPI
   memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
+  /**
+   * External-agent configurations (ADR-0216): read projections, readiness,
+   * presets, runtimes, settings and delegation rules (`agent:external:read`);
+   * create / update / duplicate / remove / connect them through the lifecycle
+   * service (`agent:external:manage`, dangerous). Never carries a credential.
+   */
+  externalAgents: import("@/lib/plugin/api/external-agents-api").PluginExternalAgentsAPI
   team: import("@/lib/plugin/api/team-api").PluginTeamAPI
   subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI
   terminal: import("@/lib/plugin/api/terminal-api").PluginTerminalAPI
@@ -5485,6 +5492,8 @@ export type PluginAPIPermission =
   | "agent:control"
   | "builtin-skills:invoke"
   | "agent:dispatch-external"
+  | "agent:external:read"
+  | "agent:external:manage"
   | "agent:dispatch"
   | "agent:shared-memory:read"
   | "twin:read"

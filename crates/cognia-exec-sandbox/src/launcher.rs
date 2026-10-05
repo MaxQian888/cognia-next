@@ -127,6 +127,7 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope, empty_dir: &Path) -> Vec<S
     // left secrets readable and never looked at the readable roots — the bug
     // this closes). A later bwrap bind wins.
     push_protected_binds(&mut args, &writable, &scope.readable, empty_dir);
+    reopen_roots_under_shadowed_secrets(&mut args, &writable, &scope.readable);
     for denied in &scope.denied_readable {
         if Path::new(denied).exists() {
             let kind = if Path::new(denied).is_file() {
@@ -382,6 +383,44 @@ fn push_protected_binds(
     }
 }
 
+/// Re-open a declared root that sits INSIDE a secret store the binds above
+/// just shadowed.
+///
+/// Cognia's own app-data dir is a secret store, and it is also where the
+/// Host keeps roots an agent is meant to use: managed execution workspaces
+/// and each isolated configuration's private state root (ADR-0216,
+/// `cognia/external-agents/<id>`). With `$HOME` readable, the empty bind over
+/// the store lands after the writable binds and shadows the agent's own root,
+/// so the agent could neither find its cwd nor its login. Bound again here,
+/// after the shadow (a later bwrap bind wins), exactly the declared roots come
+/// back and every sibling stays hidden — the same carve-out `render_sbpl` makes
+/// on macOS and the `denied_readable` loop below makes for a denied subtree.
+fn reopen_roots_under_shadowed_secrets(
+    args: &mut Vec<String>,
+    writable: &[String],
+    readable: &[String],
+) {
+    let shadowed: Vec<PathBuf> = writable
+        .iter()
+        .chain(readable.iter())
+        .flat_map(|root| protected_entries_under(Path::new(root)))
+        .filter(|(_, kind, secret)| *secret && *kind == ProtKind::Dir)
+        .map(|(path, _, _)| path)
+        .collect();
+    let nested = |root: &String| {
+        let root = Path::new(root);
+        shadowed
+            .iter()
+            .any(|store| root.starts_with(store) && root != store.as_path())
+    };
+    for root in readable.iter().filter(|root| nested(root)) {
+        args.extend(["--ro-bind-try".into(), root.clone(), root.clone()]);
+    }
+    for root in writable.iter().filter(|root| nested(root)) {
+        args.extend(["--bind".into(), root.clone(), root.clone()]);
+    }
+}
+
 /// Emit SBPL deny rules for every protected path under each writable root —
 /// mirrors `MacOsSandboxBackend::push_protected_denies`. ALL protected paths get
 /// write + unlink denies; SECRET stores additionally get read denies.
@@ -443,6 +482,34 @@ mod tests {
         assert!(args
             .windows(3)
             .any(|w| w == ["--bind", own.to_str().unwrap(), own.to_str().unwrap()]));
+    }
+
+    #[test]
+    fn a_root_inside_the_shadowed_app_store_is_reopened_after_the_shadow() {
+        // `$HOME` readable shadows `.local/share/cognia`; an isolated agent's
+        // state root lives inside it and must come back, siblings must not.
+        let mut isolated = scope();
+        let own = "/home/u/.local/share/cognia/external-agents/agent_1".to_string();
+        isolated.writable.push(own.clone());
+        let args = bwrap_prefix("/usr/bin/bwrap", &isolated, Path::new("/run/cognia-empty"));
+        let shadow_at = args
+            .windows(3)
+            .position(|w| {
+                w == [
+                    "--ro-bind",
+                    "/run/cognia-empty",
+                    "/home/u/.local/share/cognia",
+                ]
+            })
+            .expect("the app store is shadowed");
+        let reopen_at = args
+            .windows(3)
+            .rposition(|w| w == ["--bind", own.as_str(), own.as_str()])
+            .expect("the agent's own root is bound again");
+        assert!(reopen_at > shadow_at, "{args:?}");
+        assert!(!args
+            .windows(3)
+            .any(|w| w[0] == "--bind" && w[1] == "/home/u/.local/share/cognia/external-agents"));
     }
 
     use std::path::PathBuf;

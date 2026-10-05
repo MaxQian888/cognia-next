@@ -178,4 +178,37 @@ describe("ImportedOriginChip", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(setSessionRuntimeRef).not.toHaveBeenCalled()
   })
+
+  it("lets the user choose among several connected agents instead of failing", async () => {
+    resumeNative
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "runtime-ambiguous",
+        choices: [
+          { agentId: "agent-1", name: "Codex" },
+          { agentId: "agent-2", name: "Codex work" },
+        ],
+      })
+      .mockResolvedValueOnce({ ok: true, agentId: "agent-2", nativeSessionId: "native-1" })
+    const imported = session({
+      importOwnership: "source-mirror",
+      importRuntimeBinding: { nativeSessionId: "native-1", presetId: "codex" },
+    })
+    render(<ImportedOriginChip session={imported} />)
+    fireEvent.click(screen.getByTestId("imported-native-resume"))
+    const choice = await screen.findByTestId("imported-resume-choice-agent-2")
+    expect(toastError).not.toHaveBeenCalled()
+    expect(screen.getByText("chat.imported.resumeChooseAgent")).toBeInTheDocument()
+
+    await userEvent.click(choice)
+    await waitFor(() =>
+      expect(resumeNative).toHaveBeenLastCalledWith(imported, {}, { agentId: "agent-2" })
+    )
+    await waitFor(() =>
+      expect(setSessionRuntimeRef).toHaveBeenCalledWith(imported.id, {
+        kind: "external",
+        agentId: "agent-2",
+      })
+    )
+  })
 })

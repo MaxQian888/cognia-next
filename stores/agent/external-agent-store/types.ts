@@ -87,6 +87,11 @@ export interface ExternalAgentState {
   chatFailurePolicy: "fallback" | "strict"
   /** Whether the fleet summary banner on the "All agents" overview is collapsed */
   overviewBannerCollapsed: boolean
+  /**
+   * How the settings rail groups agents: by what needs attention, or by
+   * runtime so several configurations of one runtime sit together (ADR-0216).
+   */
+  railGroupBy: "readiness" | "runtime"
 
   // Runtime state (spawned processes)
   /** Running agent instances */
@@ -173,6 +178,7 @@ export interface ExternalAgentActions {
   setShowConnectionNotifications: (enabled: boolean) => void
   setChatFailurePolicy: (policy: ExternalAgentState["chatFailurePolicy"]) => void
   setOverviewBannerCollapsed: (collapsed: boolean) => void
+  setRailGroupBy: (groupBy: ExternalAgentState["railGroupBy"]) => void
 
   // Bulk operations
   importAgents: (agents: ExternalAgentConfig[]) => void

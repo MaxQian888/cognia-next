@@ -4,29 +4,43 @@
  * ExternalAgentSettings — list/detail layout on `SettingsListDetail`.
  *
  * Landing view is the "All agents" board (fleet rollup + per-agent next
- * action) rather than the preset store. The left rail is a searchable,
- * readiness-grouped list of agents — problems sort to the top — followed by
- * the CONFIGURE destinations (global settings, delegation, quick start,
- * runtimes, host). Selecting an agent opens the inspector in the bordered
- * detail pane: header actions, the full readiness strip, and tabs with
- * inline editing for the common fields. The editor dialog remains the deep
- * editor for protocol-specific options.
+ * action) rather than the preset store. The left rail is a searchable list of
+ * agents grouped by readiness (problems sort to the top) or by runtime, so the
+ * several configurations a user keeps of one runtime sit together and each row
+ * says what sets it apart (ADR-0216). It is followed by the CONFIGURE
+ * destinations (global settings, delegation, quick start, runtimes, host).
+ * Selecting an agent opens the inspector in the bordered detail pane: header
+ * actions, the full readiness strip, and tabs with inline editing for the
+ * common fields. The editor dialog remains the deep editor for
+ * protocol-specific options.
+ *
+ * At the stacked pane tier the list and the detail take turns owning the pane
+ * (`ExternalAgentRail` renders the back bar); the detail pane below steps
+ * aside while the list is on screen.
  */
 
-import { useState, useCallback, useMemo } from "react"
+import Link from "next/link"
+import { useState, useCallback, useMemo, useId } from "react"
 import { useTranslations } from "next-intl"
-import { ExternalLink, Plus } from "lucide-react"
+import { ExternalLink, Plus, Smartphone } from "lucide-react"
 
 import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-messages"
 import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
 import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/policy/security-policy"
 import { computeAgentReadiness } from "@/lib/ai/agent/external/agent-readiness"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config/config-normalizer"
+import {
+  distinguishingTraits,
+  runtimeSiblings,
+} from "@/lib/ai/agent/external/config/instance-family"
 import { PROCESS_PLANE_COMMANDS } from "@/lib/ai/agent/external/capability/process-plane"
 import { useExternalAgentProcessPlane } from "@/hooks/agent/use-external-agent-process-plane"
 import { RuntimeGovernancePanel } from "@/components/agent/external-agent/runtime-governance-panel"
+import type { InstanceTrait } from "@/components/agent/external-agent/instance-traits"
+import { EXTERNAL_AGENTS_ROUTE } from "@/components/mobile/external-agents/routes"
 import { HostExternalAgentConfigs } from "./host-external-agent-configs"
 import { isTauri } from "@/lib/tauri"
+import { isNativeMobile } from "@/lib/platform/detect"
 import { platform as tauriPlatform } from "@tauri-apps/plugin-os"
 import { toast } from "@/components/ui/sonner"
 import { Button } from "@/components/ui/button"
@@ -54,20 +68,79 @@ import {
 import { useExternalAgentStore, selectDelegationRules } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
-import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SettingsListDetail,
+  useSettingsListDensity,
+} from "@/components/settings/common/settings-master-detail"
 import { DeepSeekHarnessCard } from "./deepseek-harness-card"
-import { AgentEditorDialog } from "./agent-editor-dialog"
+import { AgentEditorDialog, type AgentEditorSaveInput } from "./agent-editor-dialog"
 import { PresetGalleryCard } from "./preset-gallery-card"
-import { ExternalAgentRail, type AgentSettingsView } from "./external-agent-rail"
+import {
+  ExternalAgentRail,
+  type AgentRailStackedView,
+  type AgentSettingsView,
+} from "./external-agent-rail"
 import { AgentOverviewBoard } from "./agent-overview-board"
 import { AgentInspector } from "./agent-inspector"
+import { DuplicateAgentDialog } from "./duplicate-agent-dialog"
 import type { AgentReadinessAction } from "@/lib/ai/agent/external/agent-readiness"
 import type { CreateExternalAgentInput } from "@/types/agent/external-agent"
+import type { ExternalAgentDuplicateOptions } from "@/lib/ai/agent/external/config/duplicate-config"
+
+/**
+ * The detail half of the list/detail frame. At the stacked tier it steps
+ * aside while the list owns the pane; the density is only readable inside
+ * `SettingsListDetail`, which is why this is its own component.
+ */
+function AgentDetailSlot({
+  stackedView,
+  children,
+}: {
+  stackedView: AgentRailStackedView
+  children: React.ReactNode
+}) {
+  const density = useSettingsListDensity()
+  if (density === "stacked" && stackedView === "list") return null
+  return (
+    <section
+      className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+      data-testid="agent-detail-slot"
+    >
+      {children}
+    </section>
+  )
+}
+
+/** One labelled control row of the global settings card; stacks when narrow. */
+function SettingRow({
+  id,
+  label,
+  description,
+  children,
+}: {
+  id: string
+  label: string
+  description: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="min-w-0 flex-1 basis-56 space-y-0.5">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-sm text-muted-foreground" id={`${id}-description`}>
+          {description}
+        </p>
+      </div>
+      {children}
+    </div>
+  )
+}
 
 export function ExternalAgentSettings() {
   const t = useTranslations("externalAgent.settings")
   const tCommon = useTranslations("common")
   const tErrors = useTranslations("externalAgent.lifecycleErrors")
+  const controlId = useId()
 
   // Store — the full subscription is deliberate: connection status and the
   // runtime validity snapshots change without touching the agent records, and
@@ -89,6 +162,8 @@ export function ExternalAgentSettings() {
     setChatFailurePolicy,
     overviewBannerCollapsed,
     setOverviewBannerCollapsed,
+    railGroupBy,
+    setRailGroupBy,
   } = useExternalAgentStore()
   const delegationRules = useExternalAgentStore(selectDelegationRules)
 
@@ -113,6 +188,9 @@ export function ExternalAgentSettings() {
       return true
     }
   }, [])
+  // A phone runs nothing itself: its agents are the paired Host's, managed on
+  // their own screen. This page edits only what the phone's own store holds.
+  const onNativeMobile = useMemo(() => isNativeMobile(), [])
 
   // Check if a specific agent is connecting
   const isConnecting = useCallback(
@@ -127,9 +205,19 @@ export function ExternalAgentSettings() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [duplicateSourceId, setDuplicateSourceId] = useState<string | null>(null)
   // Master/detail selection. The fleet overview is the landing view.
   const [view, setView] = useState<AgentSettingsView>({ kind: "overview" })
+  // At the stacked tier the list shows first; choosing anything hands the
+  // pane to its detail. Ignored at the split tier.
+  const [stackedView, setStackedView] = useState<AgentRailStackedView>("list")
   const selectedAgentId = view.kind === "agent" ? view.id : null
+  // Navigate somewhere from inside a detail (an overview row, a sibling link):
+  // at the stacked tier the destination is a detail too.
+  const openView = useCallback((next: AgentSettingsView) => {
+    setView(next)
+    setStackedView("detail")
+  }, [])
   // Preset id seeded into the AgentEditorDialog when opening from the
   // quick-start gallery. Empty when the user opens the manual "Add agent"
   // button.
@@ -160,6 +248,18 @@ export function ExternalAgentSettings() {
     ])
   )
 
+  // What sets each agent apart from the other configurations of its runtime.
+  // Empty for an agent alone in its runtime: there is nothing to tell apart.
+  const traitsById = new Map<string, InstanceTrait[]>(
+    agents.map((agent) => [agent.id, distinguishingTraits(agent, runtimeSiblings(agent, agents))])
+  )
+
+  const openEditorForNew = useCallback((presetId = "") => {
+    setEditingAgentId(null)
+    setSelectedPresetForNew(presetId)
+    setEditorOpen(true)
+  }, [])
+
   // Handlers
   //
   // Every mutation goes through the lifecycle service rather than the store.
@@ -167,17 +267,31 @@ export function ExternalAgentSettings() {
   // manager holding the old state: an agent added here was not registered
   // until the next app restart, an edit left the previous configuration
   // connected, and a delete could leave the child process running.
+  //
+  // The editor awaits these and stays open (with the user's input) on `false`.
   const handleAddAgent = useCallback(
-    async (data: CreateExternalAgentInput) => {
+    async (data: AgentEditorSaveInput): Promise<boolean> => {
+      // `null` means "clear the saved value", which only an edit can mean; a
+      // new configuration simply has no limit.
+      const { maxConcurrentSessions, sessionIdleTimeout, ...rest } = data
+      const input: CreateExternalAgentInput = {
+        ...rest,
+        maxConcurrentSessions: maxConcurrentSessions ?? undefined,
+        sessionIdleTimeout: sessionIdleTimeout ?? undefined,
+      }
       try {
         const lifecycle = await getExternalAgentLifecycleService()
-        await lifecycle.createConfig(data)
+        const id = await lifecycle.createConfig(input)
         toast.success(t("agentAdded"))
+        // Land on what was just made, not wherever the list happened to be.
+        openView({ kind: "agent", id })
+        return true
       } catch (error) {
         toast.error(lifecycleErrorMessage(error, tErrors))
+        return false
       }
     },
-    [t, tErrors]
+    [openView, t, tErrors]
   )
 
   const handleEditAgent = useCallback((agentId: string) => {
@@ -186,38 +300,36 @@ export function ExternalAgentSettings() {
   }, [])
 
   const handleUpdateAgent = useCallback(
-    async (data: CreateExternalAgentInput) => {
+    async (data: AgentEditorSaveInput): Promise<boolean> => {
       const agentId = editingAgentId
-      if (!agentId) return
+      if (!agentId) return false
       try {
         const lifecycle = await getExternalAgentLifecycleService()
         await lifecycle.updateConfig(agentId, data)
         toast.success(t("agentUpdated"))
-        setEditorOpen(false)
+        return true
       } catch (error) {
         toast.error(lifecycleErrorMessage(error, tErrors))
+        return false
       }
     },
     [editingAgentId, t, tErrors]
   )
 
   const handleDuplicateAgent = useCallback(
-    async (agentId: string) => {
-      const source = getAgent(agentId)
-      if (!source) return
+    async (agentId: string, options: ExternalAgentDuplicateOptions): Promise<boolean> => {
       try {
         const lifecycle = await getExternalAgentLifecycleService()
-        const copyId = await lifecycle.duplicateConfig(
-          agentId,
-          t("duplicateName", { name: source.name })
-        )
+        const copyId = await lifecycle.duplicateConfig(agentId, options)
         toast.success(t("agentDuplicated"))
-        setView({ kind: "agent", id: copyId })
+        openView({ kind: "agent", id: copyId })
+        return true
       } catch (error) {
         toast.error(lifecycleErrorMessage(error, tErrors))
+        return false
       }
     },
-    [getAgent, t, tErrors]
+    [openView, t, tErrors]
   )
 
   const handleDeleteAgent = useCallback(async () => {
@@ -241,7 +353,7 @@ export function ExternalAgentSettings() {
       try {
         const agent = getAgent(agentId)
         if (!agent) {
-          throw new Error("Agent not found")
+          throw new Error(t("agentNotFound"))
         }
         const runtimeValidity = getAgentValidity(agentId)
         const blockedReason =
@@ -273,6 +385,19 @@ export function ExternalAgentSettings() {
     [disconnect, t]
   )
 
+  const setAgentEnabled = useCallback(
+    async (agentId: string, next: boolean) => {
+      try {
+        const lifecycle = await getExternalAgentLifecycleService()
+        await lifecycle.updateConfig(agentId, { enabled: next })
+        toast.success(t("agentUpdated"))
+      } catch (error) {
+        toast.error(lifecycleErrorMessage(error, tErrors))
+      }
+    },
+    [t, tErrors]
+  )
+
   // The readiness model's one suggested step, run from the overview row or the
   // inspector strip: enable → lifecycle update, inspect → editor dialog,
   // retry/connect → connect, add-rule → the delegation panel.
@@ -280,13 +405,7 @@ export function ExternalAgentSettings() {
     async (agentId: string, action: AgentReadinessAction) => {
       switch (action) {
         case "enable":
-          try {
-            const lifecycle = await getExternalAgentLifecycleService()
-            await lifecycle.updateConfig(agentId, { enabled: true })
-            toast.success(t("agentUpdated"))
-          } catch (error) {
-            toast.error(lifecycleErrorMessage(error, tErrors))
-          }
+          await setAgentEnabled(agentId, true)
           break
         case "inspect":
           handleEditAgent(agentId)
@@ -297,11 +416,11 @@ export function ExternalAgentSettings() {
           break
         case "add-rule":
           setDelegationSeed({ agentId })
-          setView({ kind: "delegation" })
+          openView({ kind: "delegation" })
           break
       }
     },
-    [handleConnect, handleEditAgent, t, tErrors]
+    [handleConnect, handleEditAgent, openView, setAgentEnabled]
   )
 
   // The delete handler already routes back to the overview; this lookup only
@@ -310,6 +429,8 @@ export function ExternalAgentSettings() {
   const selectedAgent = selectedAgentId
     ? agents.find((agent) => agent.id === selectedAgentId)
     : undefined
+  const deleteTarget = deleteConfirmId ? getAgent(deleteConfirmId) : undefined
+  const duplicateSource = duplicateSourceId ? getAgent(duplicateSourceId) : undefined
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -317,14 +438,14 @@ export function ExternalAgentSettings() {
           use (small muted icon, tracking-tight title, one-line description);
           the master switch and add action sit on the right. */}
       <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2.5">
+        <div className="flex min-w-0 flex-1 basis-64 items-start gap-2.5">
           <ExternalLink aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 space-y-0.5">
             <h2 className="text-base font-semibold tracking-tight">{t("title")}</h2>
             <p className="text-xs text-pretty text-muted-foreground">{t("description")}</p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <div className="flex items-center gap-2">
             <Switch
               id="external-agents-enabled"
@@ -339,11 +460,7 @@ export function ExternalAgentSettings() {
           <Button
             size="sm"
             data-testid="add-agent-button"
-            onClick={() => {
-              setEditingAgentId(null)
-              setSelectedPresetForNew("")
-              setEditorOpen(true)
-            }}
+            onClick={() => openEditorForNew()}
             disabled={!enabled}
           >
             <Plus className="mr-1 h-4 w-4" />
@@ -351,6 +468,19 @@ export function ExternalAgentSettings() {
           </Button>
         </div>
       </div>
+
+      {onNativeMobile ? (
+        <div
+          className="mt-3 flex shrink-0 flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs"
+          data-testid="external-agent-mobile-notice"
+        >
+          <Smartphone aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 basis-48">{t("mobileHostNotice")}</span>
+          <Button asChild size="sm" variant="outline" className="touch-target">
+            <Link href={EXTERNAL_AGENTS_ROUTE}>{t("mobileHostNoticeAction")}</Link>
+          </Button>
+        </div>
+      ) : null}
 
       {/* Mandatory-sandbox notice: only shown on a desktop shell whose OS has
           no spawn sandbox (Windows today). Browser shells have no spawn path
@@ -364,69 +494,71 @@ export function ExternalAgentSettings() {
         </p>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col pt-4 @container/agents-pane">
+      <div className="flex min-h-0 flex-1 flex-col pt-4">
         <SettingsListDetail
-          listWidth={280}
+          listWidth={300}
           className="min-h-0 flex-1"
           data-testid="agents-list-detail"
         >
           <ExternalAgentRail
             agents={agents}
             readinessById={readinessById}
+            traitsById={traitsById}
             view={view}
             enabled={enabled}
+            groupBy={railGroupBy}
+            onGroupByChange={setRailGroupBy}
+            stackedView={stackedView}
+            onStackedViewChange={setStackedView}
             onViewChange={setView}
-            onNewAgent={() => {
-              setEditingAgentId(null)
-              setSelectedPresetForNew("")
-              setEditorOpen(true)
-            }}
+            onNewAgent={() => openEditorForNew()}
             onConnect={(id) => void handleConnect(id)}
             onDisconnect={(id) => void handleDisconnect(id)}
             isConnecting={isConnecting}
           />
 
           {/* Detail pane — the agent inspector gets the bordered frame; the
-              card-based destinations carry their own chrome. */}
-          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+              card-based destinations carry their own chrome. The container
+              is the DETAIL column, so the inspector's layout follows the room
+              it actually has, not the rail and detail together. */}
+          <AgentDetailSlot stackedView={stackedView}>
             {view.kind === "agent" && selectedAgent ? (
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card">
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="@container/agent-detail flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3 @md/agent-detail:p-4">
                   <AgentInspector
                     key={selectedAgent.id}
                     agent={selectedAgent}
+                    allAgents={agents}
                     readiness={readinessById.get(selectedAgent.id)!}
                     isConnecting={isConnecting(selectedAgent.id)}
                     onConnect={() => handleConnect(selectedAgent.id)}
                     onDisconnect={() => handleDisconnect(selectedAgent.id)}
                     onEdit={() => handleEditAgent(selectedAgent.id)}
-                    onDuplicate={() => void handleDuplicateAgent(selectedAgent.id)}
+                    onDuplicate={() => setDuplicateSourceId(selectedAgent.id)}
                     onDelete={() => setDeleteConfirmId(selectedAgent.id)}
+                    onOpenAgent={(id) => openView({ kind: "agent", id })}
                     onAddRule={() => {
                       setDelegationSeed({ agentId: selectedAgent.id })
-                      setView({ kind: "delegation" })
+                      openView({ kind: "delegation" })
                     }}
                   />
                 </div>
               </div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+              <div className="@container/agent-detail min-h-0 flex-1 overflow-y-auto pr-0.5">
                 {view.kind === "overview" && (
                   <AgentOverviewBoard
                     entries={agents.map((agent) => ({
                       agent,
                       readiness: readinessById.get(agent.id)!,
+                      traits: traitsById.get(agent.id) ?? [],
                     }))}
                     enabled={enabled}
                     bannerCollapsed={overviewBannerCollapsed}
                     onBannerCollapsedChange={setOverviewBannerCollapsed}
-                    onOpenAgent={(id) => setView({ kind: "agent", id })}
+                    onOpenAgent={(id) => openView({ kind: "agent", id })}
                     onAction={(id, action) => void runReadinessAction(id, action)}
-                    onNewAgent={() => {
-                      setEditingAgentId(null)
-                      setSelectedPresetForNew("")
-                      setEditorOpen(true)
-                    }}
+                    onNewAgent={() => openEditorForNew()}
                   />
                 )}
 
@@ -445,11 +577,7 @@ export function ExternalAgentSettings() {
                   <div className="space-y-4">
                     <PresetGalleryCard
                       disabled={!enabled}
-                      onPick={(presetId) => {
-                        setSelectedPresetForNew(presetId)
-                        setEditingAgentId(null)
-                        setEditorOpen(true)
-                      }}
+                      onPick={(presetId) => openEditorForNew(presetId)}
                     />
                     {/* Managed DeepSeek Harness installation and certification. */}
                     <DeepSeekHarnessCard />
@@ -463,44 +591,41 @@ export function ExternalAgentSettings() {
                       <CardDescription>{t("globalSettingsDesc")}</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {/* Auto Connect */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label>{t("autoConnect")}</Label>
-                          <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
-                        </div>
+                      <SettingRow
+                        id={`${controlId}-auto-connect`}
+                        label={t("autoConnect")}
+                        description={t("autoConnectDesc")}
+                      >
                         <Switch
+                          id={`${controlId}-auto-connect`}
+                          aria-describedby={`${controlId}-auto-connect-description`}
                           checked={autoConnectOnStartup}
                           onCheckedChange={setAutoConnectOnStartup}
                           disabled={!enabled}
                         />
-                      </div>
+                      </SettingRow>
 
-                      {/* Notifications */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label>{t("showNotifications")}</Label>
-                          <p className="text-sm text-muted-foreground">
-                            {t("showNotificationsDesc")}
-                          </p>
-                        </div>
+                      <SettingRow
+                        id={`${controlId}-notifications`}
+                        label={t("showNotifications")}
+                        description={t("showNotificationsDesc")}
+                      >
                         <Switch
+                          id={`${controlId}-notifications`}
+                          aria-describedby={`${controlId}-notifications-description`}
                           checked={showConnectionNotifications}
                           onCheckedChange={setShowConnectionNotifications}
                           disabled={!enabled}
                         />
-                      </div>
+                      </SettingRow>
 
                       <Separator />
 
-                      {/* Default Permission Mode */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label>{t("defaultPermissionMode")}</Label>
-                          <p className="text-sm text-muted-foreground">
-                            {t("defaultPermissionModeDesc")}
-                          </p>
-                        </div>
+                      <SettingRow
+                        id={`${controlId}-permission`}
+                        label={t("defaultPermissionMode")}
+                        description={t("defaultPermissionModeDesc")}
+                      >
                         <Select
                           value={defaultPermissionMode}
                           onValueChange={(v) =>
@@ -510,7 +635,11 @@ export function ExternalAgentSettings() {
                           }
                           disabled={!enabled}
                         >
-                          <SelectTrigger className="w-full sm:w-[180px]">
+                          <SelectTrigger
+                            id={`${controlId}-permission`}
+                            aria-describedby={`${controlId}-permission-description`}
+                            className="w-full @md/agent-detail:w-[200px]"
+                          >
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -524,18 +653,15 @@ export function ExternalAgentSettings() {
                             <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
                           </SelectContent>
                         </Select>
-                      </div>
+                      </SettingRow>
 
                       <Separator />
 
-                      {/* External Failure Policy */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label>{t("chatFailurePolicy")}</Label>
-                          <p className="text-sm text-muted-foreground">
-                            {t("chatFailurePolicyDesc")}
-                          </p>
-                        </div>
+                      <SettingRow
+                        id={`${controlId}-failure-policy`}
+                        label={t("chatFailurePolicy")}
+                        description={t("chatFailurePolicyDesc")}
+                      >
                         <Select
                           value={chatFailurePolicy}
                           onValueChange={(value) =>
@@ -543,7 +669,11 @@ export function ExternalAgentSettings() {
                           }
                           disabled={!enabled}
                         >
-                          <SelectTrigger className="w-full sm:w-[220px]">
+                          <SelectTrigger
+                            id={`${controlId}-failure-policy`}
+                            aria-describedby={`${controlId}-failure-policy-description`}
+                            className="w-full @md/agent-detail:w-[240px]"
+                          >
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -553,13 +683,13 @@ export function ExternalAgentSettings() {
                             <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
                           </SelectContent>
                         </Select>
-                      </div>
+                      </SettingRow>
                     </CardContent>
                   </Card>
                 )}
               </div>
             )}
-          </section>
+          </AgentDetailSlot>
         </SettingsListDetail>
       </div>
 
@@ -576,6 +706,23 @@ export function ExternalAgentSettings() {
         onSave={editingAgentId ? handleUpdateAgent : handleAddAgent}
       />
 
+      {duplicateSource ? (
+        <DuplicateAgentDialog
+          key={duplicateSource.id}
+          open
+          source={duplicateSource}
+          existingNames={agents.map((agent) => agent.name)}
+          onOpenChange={(open) => {
+            if (!open) setDuplicateSourceId(null)
+          }}
+          onDuplicate={async (options) => {
+            const ok = await handleDuplicateAgent(duplicateSource.id, options)
+            if (ok) setDuplicateSourceId(null)
+            return ok
+          }}
+        />
+      ) : null}
+
       {/* Delete Confirmation */}
       <AlertDialog
         open={!!deleteConfirmId}
@@ -583,8 +730,15 @@ export function ExternalAgentSettings() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteAgent")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteTarget ? t("deleteAgentNamed", { name: deleteTarget.name }) : t("deleteAgent")}
+            </AlertDialogTitle>
             <AlertDialogDescription>{t("deleteAgentConfirm")}</AlertDialogDescription>
+            {deleteTarget?.stateIsolation === "isolated" && deleteTarget.transport === "stdio" ? (
+              <p className="text-sm text-muted-foreground" data-testid="delete-agent-state-note">
+                {t("deleteAgentStateNote")}
+              </p>
+            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>

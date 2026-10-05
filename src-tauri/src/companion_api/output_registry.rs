@@ -388,6 +388,7 @@ mod tests {
         ("external_agent_cognia_models", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_create", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_delete", OutputShape::Declared(RootType::Object)),
+        ("external_agent_config_duplicate", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_get", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_list", OutputShape::Declared(RootType::Object)),
         ("external_agent_config_reconcile", OutputShape::Declared(RootType::Object)),

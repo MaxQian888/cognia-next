@@ -2145,6 +2145,7 @@
               "searchEnabled": {},
               "searchFallbackEnabled": {},
               "searchMaxResults": {},
+              "sessionSummaryCard": {},
               "sidebarLayout": {},
               "streamPartialMessages": {},
               "sttLanguage": {},
@@ -19042,6 +19043,113 @@
         "properties": {
           "configId": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration",
+              "seq",
+              "enabled",
+              "lifecycleStatus",
+              "createdAt",
+              "updatedAt",
+              "config"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lifecycleStatus": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "needs-credentials",
+                  "needs-consent",
+                  "needs-runtime",
+                  "blocked"
+                ]
+              },
+              "tombstonedAt": {
+                "type": "number"
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "config": {
+                "type": "object",
+                "additionalProperties": true,
+                "x-cognia-opaque-reason": "The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this plane owns the head/revision envelope around it, which is typed above."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_config_duplicate",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "write",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "external_agent_config_duplicate (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "configId"
+        ],
+        "properties": {
+          "configId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "stateIsolation": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "isolated"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -65302,5 +65410,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "38a28c69fedd6e8ba14b62b56b34552cfc3483d1084df77ad6786bfa5e04ce98"
+  "catalogHash": "36f99f01b3f1df9dfc2aa034c0ae8ac82429210f996409bb4d3dba42f7c8abb8"
 }

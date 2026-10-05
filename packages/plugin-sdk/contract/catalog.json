@@ -73,6 +73,8 @@
     "agent:control",
     "builtin-skills:invoke",
     "agent:dispatch-external",
+    "agent:external:read",
+    "agent:external:manage",
     "agent:dispatch",
     "agent:shared-memory:read",
     "twin:read",
@@ -1744,7 +1746,7 @@
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
-            "kind": "returned-disposer"
+            "kind": "host-owned"
           }
         },
         {
@@ -1756,7 +1758,7 @@
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
-            "kind": "returned-disposer"
+            "kind": "host-owned"
           }
         },
         {
@@ -5821,6 +5823,277 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "returned-disposer"
+          }
+        }
+      ]
+    },
+    {
+      "id": "externalAgents",
+      "authorPath": "ctx.externalAgents",
+      "type": "PluginExternalAgentsAPI",
+      "stability": "stable",
+      "introducedIn": "0.4.0",
+      "runtimes": ["frontend", "hybrid", "python"],
+      "platforms": ["desktop"],
+      "transport": "direct",
+      "factory": "context.externalAgents",
+      "enforcement": "shadow",
+      "dataClassification": "sensitive",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "externalAgents.list",
+          "name": "list",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.get",
+          "name": "get",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.getReadiness",
+          "name": "getReadiness",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.listPresets",
+          "name": "listPresets",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.listRuntimes",
+          "name": "listRuntimes",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.getSettings",
+          "name": "getSettings",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.listDelegationRules",
+          "name": "listDelegationRules",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.onChange",
+          "name": "onChange",
+          "requiredPermissions": ["agent:external:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "externalAgents.create",
+          "name": "create",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.createFromPreset",
+          "name": "createFromPreset",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.update",
+          "name": "update",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.duplicate",
+          "name": "duplicate",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.remove",
+          "name": "remove",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.setEnabled",
+          "name": "setEnabled",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.connect",
+          "name": "connect",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.disconnect",
+          "name": "disconnect",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.addDelegationRule",
+          "name": "addDelegationRule",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.updateDelegationRule",
+          "name": "updateDelegationRule",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.removeDelegationRule",
+          "name": "removeDelegationRule",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.reorderDelegationRules",
+          "name": "reorderDelegationRules",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "externalAgents.updateSettings",
+          "name": "updateSettings",
+          "requiredPermissions": ["agent:external:manage"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
           }
         }
       ]

@@ -98,6 +98,34 @@ pub async fn spawn_external_agent(
     exec_backend::spawn_with_events(state.backend().as_ref(), emitter, sandboxed).await
 }
 
+/// Where an isolated configuration's private state root lives on this host,
+/// and how much it holds (ADR-0216). `key` is the configuration id; a key that
+/// is not `^[A-Za-z0-9_-]{1,128}$` is refused.
+#[tauri::command]
+pub async fn external_agent_state_root_info(
+    key: String,
+) -> Result<crate::state_isolation::AgentStateRootInfo, String> {
+    let data_dir = host_state_data_dir()?;
+    tokio::task::spawn_blocking(move || crate::state_isolation::state_root_info(&data_dir, &key))
+        .await
+        .map_err(|error| format!("state root inspection failed: {error}"))?
+}
+
+/// Delete an isolated configuration's private state root (its logins,
+/// sessions and settings). Removing a root that does not exist succeeds.
+#[tauri::command]
+pub async fn external_agent_state_root_remove(key: String) -> Result<(), String> {
+    let data_dir = host_state_data_dir()?;
+    tokio::task::spawn_blocking(move || crate::state_isolation::remove_state_root(&data_dir, &key))
+        .await
+        .map_err(|error| format!("state root removal failed: {error}"))?
+}
+
+fn host_state_data_dir() -> Result<std::path::PathBuf, String> {
+    crate::state_isolation::host_agent_state_data_dir()
+        .ok_or_else(|| "this host's per-user data directory could not be determined".to_string())
+}
+
 /// Send a message to an external agent process
 #[tauri::command]
 pub async fn send_to_external_agent(

@@ -15,6 +15,7 @@
  * the contributed adapter only drives renderer-side protocol/session logic.
  */
 
+import { nanoid } from "nanoid"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginExternalAgentAdapterDef } from "@/types/plugin/plugin-external-agent-adapter"
 import { sanitizePluginCapabilityMatrix } from "@cognia/agent-config-types/external-agent-capability"
@@ -22,7 +23,9 @@ import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   createPythonBackedProxy,
+  createPythonContributionReleaser,
   isPythonBackedContribution,
+  type PythonCallTransport,
 } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 import {
   getPluginProtocolAdapterProtocols,
@@ -45,6 +48,12 @@ export interface ExternalAgentAdaptersBridgeResult {
 
 export interface ExternalAgentAdaptersBridgeOptions {
   importer?: (entry: string) => Promise<Record<string, unknown>>
+  /** Transport into the plugin's Python subprocess for python-backed
+   *  adapters. Defaults to `plugin_python_call`; tests inject a fake. */
+  pythonCall?: PythonCallTransport
+  /** Per-wrapper instance-id factory for python-backed adapters. Defaults to
+   *  `nanoid`; tests inject a deterministic one. */
+  newInstanceId?: () => string
 }
 
 const DEFAULT_IMPORTER: NonNullable<ExternalAgentAdaptersBridgeOptions["importer"]> = (entry) =>
@@ -65,6 +74,8 @@ function validateDef(
   return null
 }
 
+const PYTHON_ADAPTER_LABEL = "external-agent adapter"
+
 /**
  * A `ProtocolAdapter` whose behaviour lives in the plugin's Python subprocess.
  *
@@ -74,13 +85,29 @@ function validateDef(
  * which an IPC round-trip cannot satisfy, so the wrapper tracks the flag
  * locally around `connect`/`disconnect` — the one piece of state the host is
  * entitled to answer without crossing the process boundary.
+ *
+ * Per-configuration isolation: the protocol factory runs once per external-
+ * agent configuration, so one wrapper == one configuration. Each wrapper mints
+ * its own instance id and every call carries it, which makes the Python host
+ * route to an object owned by this wrapper alone (when the author decorated a
+ * class) — configuration B's `connect` can no longer overwrite A's state, and
+ * A's `disconnect` can no longer tear B down. After a successful `disconnect`
+ * the wrapper releases its instance so the Python object does not outlive it;
+ * a later `connect` on the same wrapper simply gets a fresh object.
  */
-function createPythonProtocolAdapter(pluginId: string, contributionId: string): ProtocolAdapter {
+function createPythonProtocolAdapter(
+  pluginId: string,
+  contributionId: string,
+  instanceId: string,
+  call: PythonCallTransport | undefined
+): ProtocolAdapter {
   const proxy = createPythonBackedProxy<
     Omit<ProtocolAdapter, "isConnected" | "setSessionMode" | "setSessionModel" | "getSessionModels">
   >({
     pluginId,
     contributionId,
+    instanceId,
+    ...(call ? { call } : {}),
     methods: [
       "connect",
       "disconnect",
@@ -91,7 +118,14 @@ function createPythonProtocolAdapter(pluginId: string, contributionId: string): 
       "respondToPermission",
     ],
     streamingMethods: ["prompt"],
-    label: "external-agent adapter",
+    label: PYTHON_ADAPTER_LABEL,
+  })
+  const release = createPythonContributionReleaser({
+    pluginId,
+    contributionId,
+    instanceId,
+    label: PYTHON_ADAPTER_LABEL,
+    ...(call ? { call } : {}),
   })
   let connected = false
   return {
@@ -101,8 +135,22 @@ function createPythonProtocolAdapter(pluginId: string, contributionId: string): 
       connected = true
     },
     disconnect: async () => {
+      // A failed disconnect leaves the Python object (and `connected`) as they
+      // were, so the instance is only released once the plugin confirmed it.
       await proxy.disconnect()
       connected = false
+      try {
+        await release()
+      } catch (err) {
+        // The agent IS disconnected; a failed release only means the Python
+        // object lingers until the plugin's runtime restarts (a stopped
+        // runtime took it down already). Not worth failing the disconnect.
+        loggers.manager.warn(
+          `[external-agent-adapters-bridge] failed to release ${pluginId}:${contributionId} instance ${instanceId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        )
+      }
     },
     isConnected: () => connected,
   }
@@ -125,6 +173,7 @@ export async function registerExternalAgentAdaptersForPlugin(
   unregisterPluginProtocolAdaptersByPlugin(pluginId)
 
   const importer = options.importer ?? DEFAULT_IMPORTER
+  const newInstanceId = options.newInstanceId ?? nanoid
   const errors: ExternalAgentAdaptersBridgeError[] = []
   const registeredProtocols: string[] = []
   let registered = 0
@@ -143,7 +192,9 @@ export async function registerExternalAgentAdaptersForPlugin(
     try {
       let factory: ProtocolAdapterFactory
       if (isPythonBackedContribution(def, manifest.type)) {
-        factory = () => createPythonProtocolAdapter(pluginId, def.id)
+        const contributionId = def.id
+        factory = () =>
+          createPythonProtocolAdapter(pluginId, contributionId, newInstanceId(), options.pythonCall)
       } else {
         const resolved = resolvePluginPath(installRoot, def.entry!)
         const mod = await importer(resolved)

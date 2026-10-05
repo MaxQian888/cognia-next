@@ -258,6 +258,26 @@ jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   registerPreset: jest.fn(),
   createAgentFromPreset: jest.fn(),
 }))
+// `runExternalAgent` admission reads the master switch / the target config
+// from the store and the readiness verdict from the lifecycle (ADR-0216).
+const mockExternalAgentStoreState = {
+  enabled: true,
+  defaultPermissionMode: "default",
+  getAgent: jest.fn((_id: string): unknown => undefined),
+}
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: {
+    getState: () => mockExternalAgentStoreState,
+    subscribe: () => () => {},
+  },
+}))
+const mockExternalAgentLifecycle = {
+  assessReadiness: jest.fn(async () => ({ status: "ready" })),
+  connect: jest.fn(async () => undefined),
+}
+jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
+  getExternalAgentLifecycleService: async () => mockExternalAgentLifecycle,
+}))
 
 const mockManifest: PluginManifest = {
   id: "test-plugin",
@@ -2873,10 +2893,18 @@ describe("agent imperative API", () => {
         finalResponse: "done",
         tokenUsage: { input: 1, output: 2 },
       }))
-      const addAgent = jest.fn(async () => ({ config: { id: "ext-1" } }))
+      const live = new Set<string>()
+      const addAgent = jest.fn(async () => {
+        live.add("ext-1")
+        return { config: { id: "ext-1" } }
+      })
+      const removeAgent = jest.fn(async (id: string) => {
+        live.delete(id)
+      })
       mockGetExternalManager.mockReturnValue({
-        getAgent: jest.fn(() => undefined),
+        getAgent: jest.fn((id: string) => (live.has(id) ? { config: { id } } : undefined)),
         addAgent,
+        removeAgent,
         execute,
       } as unknown as ReturnType<typeof getExternalAgentManager>)
       mockCreateAgentFromPreset.mockReturnValue({ id: "ext-1", name: "Codex" } as never)
@@ -2886,7 +2914,9 @@ describe("agent imperative API", () => {
 
       expect(mockCreateAgentFromPreset).toHaveBeenCalledWith("codex")
       expect(addAgent).toHaveBeenCalled()
-      expect(execute).toHaveBeenCalledWith("ext-1", "do it", {})
+      // Clamped to the global default; the transient instance ends with the run.
+      expect(execute).toHaveBeenCalledWith("ext-1", "do it", { permissionMode: "default" })
+      expect(removeAgent).toHaveBeenCalledWith("ext-1")
       // The raw manager result is normalized to the SDK's run shape.
       expect(result).toMatchObject({
         agentId: "ext-1",
@@ -2896,8 +2926,11 @@ describe("agent imperative API", () => {
       })
     })
 
-    it("executes directly against a live instance id without re-adding", async () => {
+    it("executes directly against a configured, live instance without re-adding", async () => {
       initializePluginPermissions(PLUGIN_ID, ["agent:dispatch-external"])
+      mockExternalAgentStoreState.getAgent.mockImplementation((id: string) =>
+        id === "live-1" ? { id, enabled: true } : undefined
+      )
       const execute = jest.fn(async () => ({ output: "live" }))
       const addAgent = jest.fn()
       mockGetExternalManager.mockReturnValue({
@@ -2910,7 +2943,8 @@ describe("agent imperative API", () => {
       await ctx.agent.runExternalAgent("live-1", "ping")
 
       expect(addAgent).not.toHaveBeenCalled()
-      expect(execute).toHaveBeenCalledWith("live-1", "ping", {})
+      expect(execute).toHaveBeenCalledWith("live-1", "ping", { permissionMode: "default" })
+      mockExternalAgentStoreState.getAgent.mockImplementation(() => undefined)
     })
 
     it("throws when neither a live agent nor a preset matches", async () => {
@@ -2924,8 +2958,33 @@ describe("agent imperative API", () => {
 
       const ctx = createPluginContext(createMockPlugin(), mockManager)
       await expect(ctx.agent.runExternalAgent("unknown", "x")).rejects.toThrow(
-        /no live agent or preset/
+        /no configured agent or preset/
       )
+    })
+  })
+
+  describe("dispatchSubagent to an external agent", () => {
+    it("also requires agent:dispatch-external for an inline external def", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:dispatch"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(
+        ctx.agent.dispatchSubagent(
+          { id: "test-plugin:reviewer", prompt: "review", externalPresetId: "codex" } as never,
+          "go"
+        )
+      ).rejects.toThrow(/agent:dispatch-external/)
+    })
+
+    it("also requires agent:dispatch-external when options name an external agent", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:dispatch"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(
+        ctx.agent.dispatchSubagent(
+          { id: "test-plugin:reviewer", prompt: "review" } as never,
+          "go",
+          { externalAgentId: "codex" }
+        )
+      ).rejects.toThrow(/agent:dispatch-external/)
     })
   })
 
@@ -3093,6 +3152,9 @@ describe("python host-call parity (ADR-0145)", () => {
         // decisions through the same guarded ctx.decisions.
         "decisions",
         "editor",
+        // ADR-0216: python plugins manage external-agent configurations through
+        // the same guarded, secret-free ctx.externalAgents.
+        "externalAgents",
         "fs",
         "git",
         "i18n",

@@ -19,10 +19,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { MonitorIcon } from "lucide-react"
+import { CloudOffIcon, MonitorIcon, RotateCwIcon } from "lucide-react"
 
 import { MeSection } from "@/components/mobile/me/me-section"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -58,6 +61,8 @@ export function DesktopLocalAgents() {
   const t = useTranslations("mobile.externalAgents")
   const [agents, setAgents] = useState<DesktopLocalAgentSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Bumped by Retry; the load below re-runs on it.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -74,7 +79,13 @@ export function DesktopLocalAgents() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [attempt])
+
+  const retry = () => {
+    setError(null)
+    setAgents(null)
+    setAttempt((current) => current + 1)
+  }
 
   // Optimistically patch local state, then perform the approved write while
   // this direct user action is still in flight. The short-lived lease must not
@@ -109,14 +120,45 @@ export function DesktopLocalAgents() {
 
   if (error) {
     return (
-      <p className="px-1 text-xs text-destructive" data-testid="desktop-local-agents-error">
-        {t("loadFailed", { message: error })}
-      </p>
+      <Empty className="rounded-xl border" data-testid="desktop-local-agents-error">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <CloudOffIcon />
+          </EmptyMedia>
+          <EmptyTitle>{t("desktopLocalLoadFailedTitle")}</EmptyTitle>
+          <EmptyDescription className="break-words">
+            {t("loadFailed", { message: error })}
+          </EmptyDescription>
+        </EmptyHeader>
+        <Button
+          variant="outline"
+          className="h-11"
+          onClick={retry}
+          data-testid="desktop-local-agents-retry"
+        >
+          <RotateCwIcon className="size-4" />
+          {t("retry")}
+        </Button>
+      </Empty>
+    )
+  }
+  if (agents === null) {
+    return (
+      <div
+        role="status"
+        className="flex flex-col gap-2"
+        aria-busy="true"
+        aria-label={t("loading")}
+        data-testid="desktop-local-agents-loading"
+      >
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-14 w-full rounded-xl" />
+      </div>
     )
   }
   // Nothing configured on the desktop itself: the section would only explain
   // an empty list that has nothing to do with the phone.
-  if (!agents || agents.length === 0) return null
+  if (agents.length === 0) return null
 
   return (
     <MeSection
@@ -151,7 +193,7 @@ export function DesktopLocalAgents() {
                 }
               >
                 <SelectTrigger
-                  className="h-8 w-28 text-xs"
+                  className="h-11 w-28 text-xs"
                   aria-label={t("permissionModeAria", { name: agent.name })}
                   data-testid={`external-agent-mode-${agent.id}`}
                 >
@@ -169,6 +211,7 @@ export function DesktopLocalAgents() {
                 checked={agent.enabled}
                 onCheckedChange={(next) => void writeUpdate(agent, { enabled: next })}
                 aria-label={t("enabledAria", { name: agent.name })}
+                className="touch-hit"
                 data-testid={`external-agent-switch-${agent.id}`}
               />
             </ItemActions>

@@ -357,3 +357,72 @@ def test_bot_publication_references_survive_serialized_host_response(fresh_runti
     result = asyncio.run(cognia.ctx.bots.getInstallation(runId="monitor-run"))
     assert result["publications"] == [reference]
     assert seen == [("bots.getInstallation", {"runId": "monitor-run"})]
+
+
+def test_external_agents_namespace_is_open_to_python():
+    """ADR-0216: ``ctx.externalAgents`` reads and manages external-agent
+    configurations through the host's guarded, secret-free API."""
+    methods = PYTHON_HOST_NAMESPACES["externalAgents"]
+    for name in (
+        "list",
+        "get",
+        "getReadiness",
+        "listPresets",
+        "listRuntimes",
+        "getSettings",
+        "listDelegationRules",
+        "create",
+        "createFromPreset",
+        "update",
+        "duplicate",
+        "remove",
+        "setEnabled",
+        "connect",
+        "disconnect",
+        "addDelegationRule",
+        "updateDelegationRule",
+        "removeDelegationRule",
+        "reorderDelegationRules",
+        "updateSettings",
+    ):
+        assert name in methods, name
+
+
+def test_external_agents_on_change_is_named_but_refused_as_a_callback():
+    """A change listener cannot cross stdio; Python declares the
+    ``onExternalAgentConfigChange`` hook instead."""
+    assert "onChange" in CALLBACK_HOST_METHODS["externalAgents"]
+    with pytest.raises(AttributeError, match="host-side callback"):
+        cognia.ctx.externalAgents.onChange
+    assert cognia.PluginHook.ON_EXTERNAL_AGENT_CONFIG_CHANGE.value == "onExternalAgentConfigChange"
+
+
+def test_external_agents_call_shapes_reach_the_host(fresh_runtime):
+    seen = _record_calls(fresh_runtime, result={"id": "cfg-2"})
+
+    asyncio.run(cognia.ctx.externalAgents.list())
+    asyncio.run(cognia.ctx.externalAgents.get("cfg-1"))
+    asyncio.run(
+        cognia.ctx.externalAgents.createFromPreset("claude-code", {"name": "Work Claude"})
+    )
+    asyncio.run(
+        cognia.ctx.externalAgents.update("cfg-1", {"defaultPermissionMode": "plan"})
+    )
+    asyncio.run(cognia.ctx.externalAgents.duplicate("cfg-1", {"stateIsolation": "isolated"}))
+    asyncio.run(cognia.ctx.externalAgents.create({"name": "X", "protocol": "acp"}))
+    asyncio.run(cognia.ctx.externalAgents.setEnabled("cfg-1", False))
+
+    assert seen == [
+        ("externalAgents.list", {}),
+        ("externalAgents.get", {"args": ["cfg-1"]}),
+        (
+            "externalAgents.createFromPreset",
+            {"args": ["claude-code", {"name": "Work Claude"}]},
+        ),
+        ("externalAgents.update", {"args": ["cfg-1", {"defaultPermissionMode": "plan"}]}),
+        ("externalAgents.duplicate", {"args": ["cfg-1", {"stateIsolation": "isolated"}]}),
+        # A lone mapping is the params object itself; the host unpacks it as
+        # the single `input` argument.
+        ("externalAgents.create", {"name": "X", "protocol": "acp"}),
+        ("externalAgents.setEnabled", {"args": ["cfg-1", False]}),
+    ]

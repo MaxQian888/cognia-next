@@ -20,7 +20,11 @@ import {
   getPresetConfig,
   type ExternalAgentPresetConfig,
 } from "@/lib/ai/agent/external/config/presets"
-import type { AcpPermissionMode, CreateExternalAgentInput } from "@/types/agent/external-agent"
+import type {
+  AcpPermissionMode,
+  CreateExternalAgentInput,
+  ExternalAgentConfig,
+} from "@/types/agent/external-agent"
 import type { AddAgentFormData } from "@/types/agent/component-types"
 
 export const DEFAULT_TIMEOUT_MS = "300000"
@@ -341,4 +345,151 @@ export function buildCreateExternalAgentInput(
   }
 
   return config
+}
+
+// ============================================================================
+// Editing an existing configuration with the same form
+// ============================================================================
+
+/** What the form starts from when it edits a configuration instead of adding one. */
+export interface AddAgentFormSeed {
+  /** The preset the configuration was made from, `""` when none is recorded. */
+  presetId: string
+  data: AddAgentFormData
+  /** The process environment as editable rows start from it. */
+  processEnv: Record<string, string>
+}
+
+/**
+ * The configuration's own metadata keys the form edits. Everything else in
+ * `metadata` (provenance, the preset's own flags, plugin markers) is carried
+ * through an edit untouched.
+ */
+const FORM_OWNED_METADATA_KEYS = [
+  "autoSpawnServer",
+  "port",
+  "hostname",
+  "serverUsername",
+  "model",
+  "preview",
+  "localServiceDiscovery",
+] as const
+
+/**
+ * Seed the add form from a saved configuration, so the phone's detail screen
+ * edits with exactly the fields (and the validation) the add flow uses.
+ *
+ * Secrets never come back into the form: a stored configuration holds keyring
+ * references, not values, so the OpenCode password and the DeepSeek key start
+ * empty and an empty field means "keep what the keyring has". Only a value the
+ * user types is sent, inline, for the Host to move into the keyring.
+ */
+export function addAgentFormFromConfig(config: ExternalAgentConfig): AddAgentFormSeed {
+  const metadata = config.metadata ?? {}
+  const preset = typeof metadata.preset === "string" ? metadata.preset : ""
+  const managedRuntime = metadata.requiresManagedRuntime === true
+  const process = config.process
+  const retry = config.retryConfig
+  const port = metadata.port
+  const processEnv = { ...(process?.env ?? {}) }
+  return {
+    presetId: preset,
+    processEnv,
+    data: {
+      ...DEFAULT_ADD_AGENT_FORM_DATA,
+      preset: preset || undefined,
+      name: config.name ?? "",
+      protocol: config.protocol,
+      transport: config.transport,
+      cogniaModel: config.cogniaModel ?? null,
+      command: managedRuntime ? "" : (process?.command ?? ""),
+      args: managedRuntime ? "" : (process?.args ?? []).map(shellQuote).join(" "),
+      bare: process?.bare === true,
+      debug: process?.debug === true,
+      processCwd: managedRuntime ? undefined : process?.cwd,
+      processEnv,
+      dshWorkspace: managedRuntime ? process?.cwd : undefined,
+      endpoint: config.network?.endpoint ?? "",
+      autoSpawnServer: metadata.autoSpawnServer === true,
+      port: typeof port === "number" ? String(port) : "",
+      hostname: typeof metadata.hostname === "string" ? metadata.hostname : "",
+      serverPassword: "",
+      serverUsername: typeof metadata.serverUsername === "string" ? metadata.serverUsername : "",
+      model: typeof metadata.model === "string" ? metadata.model : "",
+      timeoutMs: config.timeout !== undefined ? String(config.timeout) : DEFAULT_TIMEOUT_MS,
+      retryMaxRetries:
+        retry?.maxRetries !== undefined ? String(retry.maxRetries) : DEFAULT_RETRY_MAX_RETRIES,
+      retryDelayMs:
+        retry?.retryDelay !== undefined ? String(retry.retryDelay) : DEFAULT_RETRY_DELAY_MS,
+      retryExponentialBackoff: retry?.exponentialBackoff ?? true,
+      retryMaxDelayMs:
+        retry?.maxRetryDelay !== undefined
+          ? String(retry.maxRetryDelay)
+          : DEFAULT_RETRY_MAX_DELAY_MS,
+      retryOnErrors: (retry?.retryOnErrors ?? []).join("\n"),
+    },
+  }
+}
+
+/**
+ * The shallow patch that applies a prepared form to an existing configuration.
+ *
+ * Built with {@link buildCreateExternalAgentInput}, so an edit stores exactly
+ * what an add with the same fields would, then laid over the configuration's
+ * own `process`, `network` and `metadata` so what the form does not show
+ * (startup timeouts, extra headers, provenance, plugin markers) survives the
+ * edit. A field that belongs to a connection kind the form no longer uses (the
+ * process of an agent switched to HTTP) is left as it was rather than cleared:
+ * the transport decides which one is read.
+ *
+ * `defaultPermissionMode` is not part of the patch; each screen owns that
+ * control itself.
+ */
+export function addAgentFormPatch(
+  config: ExternalAgentConfig,
+  data: AddAgentFormData
+): Partial<ExternalAgentConfig> {
+  const built = buildCreateExternalAgentInput(data)
+  const metadata: Record<string, unknown> = { ...config.metadata }
+  for (const key of FORM_OWNED_METADATA_KEYS) delete metadata[key]
+  Object.assign(metadata, built.metadata)
+
+  const patch: Partial<ExternalAgentConfig> = {
+    name: built.name,
+    protocol: built.protocol,
+    transport: built.transport,
+    cogniaModel: built.cogniaModel ?? null,
+    timeout: built.timeout,
+    // `buildCreateExternalAgentInput` fills every retry field from the form.
+    retryConfig: built.retryConfig as ExternalAgentConfig["retryConfig"],
+    metadata,
+  }
+  if (built.process) {
+    patch.process = { ...config.process, ...built.process }
+    if (!built.process.bare) delete patch.process.bare
+    if (!built.process.debug) delete patch.process.debug
+    if (built.process.cwd === undefined) delete patch.process.cwd
+  }
+  if (built.network) {
+    patch.network = { ...config.network, ...built.network }
+  }
+  return patch
+}
+
+/**
+ * What the form's agent will launch, as the state-isolation rule reads it:
+ * the command (OpenCode's auto-spawned server defaults to `opencode`, as the
+ * stored config does) and its arguments, or an empty command for an agent
+ * that spawns nothing here.
+ */
+export function addAgentFormLaunchTarget(data: AddAgentFormData): {
+  command: string
+  args: string[]
+} {
+  const spawns = data.transport === "stdio" || data.autoSpawnServer
+  if (!spawns) return { command: "", args: [] }
+  return {
+    command: data.command.trim() || (data.autoSpawnServer ? "opencode" : ""),
+    args: tokenizeShellCommand(data.args) ?? [],
+  }
 }

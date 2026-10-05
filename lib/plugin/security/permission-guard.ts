@@ -108,6 +108,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   plan: ["plan:read", "plan:write"],
   issue: ["issue:read", "issue:write"],
   memory: ["memory:read", "memory:write"],
+  externalAgents: ["agent:external:read", "agent:external:manage"],
   decisions: ["decisions:run", "decisions:provide"],
   team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
@@ -199,6 +200,10 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "builtin-skills:invoke":
     "Invoke manifest-allowlisted built-in skills through the host policy gate",
   "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
+  "agent:external:read":
+    "See your external coding agents' configurations, readiness, presets, installed runtimes and routing rules (never their credentials)",
+  "agent:external:manage":
+    "Create, change, duplicate, delete, enable, connect and route your external coding agents, and change their global settings",
   "agent:dispatch": "Dispatch built-in subagents and agent teams",
   "agent:shared-memory:read": "Read team shared-memory entries",
   "twin:read": "Query the employee twin's memory",
@@ -333,6 +338,11 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   // Dispatching an external coding agent spawns an outside process that can
   // read/edit files and run commands — same risk tier as `process:spawn`.
   "agent:dispatch-external",
+  // Managing external-agent configurations can point an agent at another
+  // command, widen its permission mode, delete it or switch the whole
+  // subsystem off — config-destructive, and it changes what a later dispatch
+  // spawns. Credentials stay host-UI-only either way.
+  "agent:external:manage",
   "terminal:spawn",
   // Wave 3 — writing to an existing terminal session is equivalent to
   // executing arbitrary shell commands in that shell, so it sits in

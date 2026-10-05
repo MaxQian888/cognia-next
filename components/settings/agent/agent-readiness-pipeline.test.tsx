@@ -48,10 +48,21 @@ describe("AgentReadinessPipeline", () => {
     expect(screen.getByText("Runnable")).toBeInTheDocument()
   })
 
-  it("compact mode drops labels but keeps the step markers", () => {
+  it("compact mode drops visible labels but keeps the step markers", () => {
     render(<AgentReadinessPipeline readiness={fullyReady} compact />)
-    expect(screen.queryByText("Connected")).not.toBeInTheDocument()
     expect(screen.getAllByTestId(/^step-.*-done$/)).toHaveLength(4)
+    // Every visible label is gone; what remains is screen-reader-only text.
+    for (const node of screen.getAllByText(/^Connected:/)) {
+      expect(node).toHaveClass("sr-only")
+    }
+  })
+
+  it("compact mode still names each step and its state to a screen reader", () => {
+    render(<AgentReadinessPipeline readiness={blocked} compact />)
+    const items = screen.getAllByRole("listitem").map((item) => item.textContent)
+    expect(items).toHaveLength(4)
+    expect(items[1]).toContain("Runnable")
+    expect(items.every((text) => Boolean(text?.trim()))).toBe(true)
   })
 })
 

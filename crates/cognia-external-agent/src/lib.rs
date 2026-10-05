@@ -19,6 +19,7 @@ pub mod process;
 pub mod sandbox;
 pub mod sandbox_routing_backend;
 pub mod spawn_authority;
+pub mod state_isolation;
 pub mod terminal;
 pub mod version_probe;
 pub mod workspace_runtime_backend;

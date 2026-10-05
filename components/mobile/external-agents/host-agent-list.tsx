@@ -6,35 +6,39 @@
  * These are the Host's own configurations — the same rows the chat composer's
  * runtime menu offers on this phone — so adding, switching, retuning and
  * removing here changes what the phone can actually run. One card per agent:
- * its mark, name and connection on the first line with the on/off switch, and
- * the permission mode and the overflow menu on the second, so neither control
- * has to squeeze into the width the name needs.
+ * its mark, name, connection and the facts that tell it from a sibling
+ * configuration (own or shared state, "copy of …") on the first line, which
+ * opens the agent's detail screen; the on/off switch beside it; and the
+ * permission mode and the overflow menu (edit, duplicate, remove) on the
+ * second, so no control has to squeeze into the width the name needs.
+ *
+ * Several configurations of one runtime (ADR-0216) are drawn under one header
+ * naming the runtime, so two cards with the same mark read as two setups of
+ * one thing rather than as a duplicate row.
+ *
+ * The card's link covers only the identity block, and the switch, select and
+ * menu sit outside it: an interactive control nested in a link is announced
+ * twice and its taps also navigate.
  */
 
 import { useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   BotIcon,
+  ChevronRightIcon,
   CloudOffIcon,
+  CopyIcon,
   MoreHorizontalIcon,
+  PencilIcon,
   PlusIcon,
   RotateCwIcon,
   ServerCogIcon,
   Trash2Icon,
 } from "lucide-react"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -63,30 +67,36 @@ import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-con
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 
 import { HOST_UNAVAILABLE_KEY } from "./add-external-agent-form"
+import { DuplicateHostAgentSheet } from "./duplicate-host-agent-sheet"
+import { HostAgentIsolationChip, useRuntimeName } from "./host-agent-chips"
+import {
+  groupHostConfigsByRuntime,
+  hostAgentName,
+  lineageSourceOf,
+  presetOf,
+} from "./host-agent-family"
 import {
   PERMISSION_MODE_LABEL_KEY,
   effectivePermissionMode,
   permissionModesFor,
 } from "./permission-modes"
-import { ADD_EXTERNAL_AGENT_ROUTE } from "./routes"
-
-function presetOf(record: ExternalAgentConfigRecord): string | null {
-  const preset = record.config.metadata?.preset
-  return typeof preset === "string" && preset !== "custom" ? preset : null
-}
+import { RemoveHostAgentDialog } from "./remove-host-agent-dialog"
+import { ADD_EXTERNAL_AGENT_ROUTE, externalAgentDetailHref } from "./routes"
 
 function HostAgentCard({
   record,
   host,
+  onDuplicate,
   onRemove,
 }: {
   record: ExternalAgentConfigRecord
   host: HostExternalAgentConfigsState
+  onDuplicate: (record: ExternalAgentConfigRecord) => void
   onRemove: (record: ExternalAgentConfigRecord) => void
 }) {
   const t = useTranslations("mobile.externalAgents")
   const config = record.config
-  const name = config.name ?? record.configId
+  const name = hostAgentName(record)
   const preset = presetOf(record)
   const protocol = config.protocol
   const mode = effectivePermissionMode(config.defaultPermissionMode, protocol)
@@ -94,6 +104,8 @@ function HostAgentCard({
   // would refuse the write, and offering the control implies a choice the
   // user does not have. The notice below says why.
   const notReady = record.lifecycleStatus !== "ready"
+  const source = lineageSourceOf(record, host.configs)
+  const href = externalAgentDetailHref(record.configId)
 
   const write = async (patch: { enabled?: boolean; defaultPermissionMode?: AcpPermissionMode }) => {
     const ok = await host.update(record, patch)
@@ -106,24 +118,44 @@ function HostAgentCard({
       data-testid={`host-agent-${record.configId}`}
     >
       <div className="flex items-center gap-3">
-        {preset ? (
-          <BrandIcon id={preset} size={32} label={name} />
-        ) : (
-          <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
-            <BotIcon className="size-4 text-muted-foreground" aria-hidden />
+        <Link
+          href={href}
+          className="-m-1 flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg p-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 active:bg-muted/60"
+          aria-label={t("openDetailsAria", { name })}
+          data-testid={`host-agent-open-${record.configId}`}
+        >
+          {preset ? (
+            <BrandIcon id={preset} size={32} label={name} />
+          ) : (
+            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+              <BotIcon className="size-4 text-muted-foreground" aria-hidden />
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{name}</span>
+            <span className="block truncate font-mono text-[11px] text-muted-foreground">
+              {protocol} · {config.transport}
+            </span>
+            <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+              <HostAgentIsolationChip record={record} />
+              {source && source !== "removed" ? (
+                <span
+                  className="truncate text-[11px] text-muted-foreground"
+                  data-testid={`host-agent-lineage-${record.configId}`}
+                >
+                  {t("copyOf", { name: hostAgentName(source) })}
+                </span>
+              ) : null}
+            </span>
           </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{name}</p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {protocol} · {config.transport}
-          </p>
-        </div>
+          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </Link>
         <Switch
           checked={record.enabled}
           disabled={host.busy || notReady}
           onCheckedChange={(enabled) => void write({ enabled })}
           aria-label={t("enabledAria", { name })}
+          className="touch-hit"
           data-testid={`host-agent-switch-${record.configId}`}
         />
       </div>
@@ -142,7 +174,7 @@ function HostAgentCard({
           onValueChange={(value) => void write({ defaultPermissionMode: value as AcpPermissionMode })}
         >
           <SelectTrigger
-            className="h-9 min-w-0 flex-1 text-xs"
+            className="h-11 min-w-0 flex-1 text-xs"
             aria-label={t("permissionModeAria", { name })}
             data-testid={`host-agent-mode-${record.configId}`}
           >
@@ -162,7 +194,7 @@ function HostAgentCard({
             <Button
               variant="ghost"
               size="icon"
-              className="size-9"
+              className="size-11"
               disabled={host.busy}
               aria-label={t("moreActionsAria", { name })}
               data-testid={`host-agent-menu-${record.configId}`}
@@ -171,9 +203,30 @@ function HostAgentCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild className="min-h-11">
+              <Link
+                href={href}
+                aria-label={t("editAria", { name })}
+                data-testid={`host-agent-edit-${record.configId}`}
+              >
+                <PencilIcon className="size-4" />
+                {t("edit")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="min-h-11"
+              onSelect={() => onDuplicate(record)}
+              aria-label={t("duplicateAria", { name })}
+              data-testid={`host-agent-duplicate-${record.configId}`}
+            >
+              <CopyIcon className="size-4" />
+              {t("duplicate")}
+            </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
+              className="min-h-11"
               onSelect={() => onRemove(record)}
+              aria-label={t("removeAria", { name })}
               data-testid={`host-agent-remove-${record.configId}`}
             >
               <Trash2Icon className="size-4" />
@@ -183,6 +236,62 @@ function HostAgentCard({
         </DropdownMenu>
       </div>
     </div>
+  )
+}
+
+/**
+ * The cards, under a runtime header wherever a runtime has two or more
+ * configurations. A lone configuration needs no header: its card already
+ * carries the runtime's mark.
+ */
+function HostAgentCards({
+  host,
+  onDuplicate,
+  onRemove,
+}: {
+  host: HostExternalAgentConfigsState
+  onDuplicate: (record: ExternalAgentConfigRecord) => void
+  onRemove: (record: ExternalAgentConfigRecord) => void
+}) {
+  const t = useTranslations("mobile.externalAgents")
+  const runtimeName = useRuntimeName()
+  return (
+    <>
+      {groupHostConfigsByRuntime(host.configs).map((group) => {
+        const cards = group.records.map((record) => (
+          <HostAgentCard
+            key={record.configId}
+            record={record}
+            host={host}
+            onDuplicate={onDuplicate}
+            onRemove={onRemove}
+          />
+        ))
+        if (group.records.length < 2) return cards
+        const label = runtimeName(group.runtime, hostAgentName(group.records[0]))
+        const headingId = `host-agent-group-${group.runtime.key}`
+        return (
+          <div
+            key={group.runtime.key}
+            role="group"
+            aria-labelledby={headingId}
+            className="flex flex-col gap-2"
+            data-testid={`host-agent-group-${group.runtime.key}`}
+          >
+            <p
+              id={headingId}
+              className="flex items-baseline justify-between gap-2 px-1 pt-1 text-xs font-medium"
+            >
+              <span className="truncate">{label}</span>
+              <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
+                {t("groupCount", { count: group.records.length })}
+              </span>
+            </p>
+            {cards}
+          </div>
+        )
+      })}
+    </>
   )
 }
 
@@ -198,16 +307,16 @@ function LoadingCards() {
 export function HostAgentList() {
   const t = useTranslations("mobile.externalAgents")
   const tHost = useTranslations("externalAgent.hostConfigs")
+  const router = useRouter()
   const host = useHostExternalAgentConfigs()
   const [pendingRemoval, setPendingRemoval] = useState<ExternalAgentConfigRecord | null>(null)
+  const [duplicating, setDuplicating] = useState<ExternalAgentConfigRecord | null>(null)
 
-  const confirmRemoval = async () => {
-    const record = pendingRemoval
-    if (!record) return
+  const confirmRemoval = async (record: ExternalAgentConfigRecord) => {
     setPendingRemoval(null)
     // A refusal is already on screen through `host.error`; only success toasts.
     if (await host.remove(record)) {
-      toast.success(t("removed", { name: record.config.name ?? record.configId }))
+      toast.success(t("removed", { name: hostAgentName(record) }))
     }
   }
 
@@ -256,6 +365,7 @@ export function HostAgentList() {
           </EmptyHeader>
           <Button
             variant="outline"
+            className="h-11"
             onClick={() => void host.refresh()}
             data-testid="host-agents-retry"
           >
@@ -274,7 +384,7 @@ export function HostAgentList() {
             <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
             <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
           </EmptyHeader>
-          <Button asChild data-testid="host-agents-empty-add">
+          <Button asChild className="h-11" data-testid="host-agents-empty-add">
             <Link href={ADD_EXTERNAL_AGENT_ROUTE}>
               <PlusIcon className="size-4" />
               {t("add")}
@@ -283,14 +393,7 @@ export function HostAgentList() {
         </Empty>
       ) : (
         <div className="flex flex-col gap-2">
-          {host.configs.map((record) => (
-            <HostAgentCard
-              key={record.configId}
-              record={record}
-              host={host}
-              onRemove={setPendingRemoval}
-            />
-          ))}
+          <HostAgentCards host={host} onDuplicate={setDuplicating} onRemove={setPendingRemoval} />
           <Button
             asChild
             variant="outline"
@@ -305,36 +408,21 @@ export function HostAgentList() {
         </div>
       )}
 
-      <AlertDialog
-        open={pendingRemoval !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingRemoval(null)
+      <RemoveHostAgentDialog
+        record={pendingRemoval}
+        onCancel={() => setPendingRemoval(null)}
+        onConfirm={(record) => void confirmRemoval(record)}
+      />
+      <DuplicateHostAgentSheet
+        record={duplicating}
+        records={host.configs}
+        duplicate={host.duplicate}
+        onClose={() => setDuplicating(null)}
+        onDuplicated={(created) => {
+          setDuplicating(null)
+          router.push(externalAgentDetailHref(created.configId))
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("deleteConfirmTitle", {
-                name: pendingRemoval?.config.name ?? pendingRemoval?.configId ?? "",
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("deleteConfirmBody", {
-                name: pendingRemoval?.config.name ?? pendingRemoval?.configId ?? "",
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("deleteCancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void confirmRemoval()}
-              data-testid="host-agent-remove-confirm"
-            >
-              {t("deleteConfirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </section>
   )
 }

@@ -167,6 +167,7 @@ import { createHooksAPI } from "../api/hooks-api"
 import { createPlanAPI } from "../api/plan-api"
 import { createIssuesAPI } from "../api/issues-api"
 import { createMemoryAPI } from "../api/memory-api"
+import { createExternalAgentsAPI } from "../api/external-agents-api"
 import { createTeamAPI } from "../api/team-api"
 import { createSubscriptionAPI } from "../api/subscription-api"
 import { createTerminalAPI } from "../api/terminal-api"
@@ -220,6 +221,7 @@ import {
   runPluginAgent,
   runPluginAgentStreamed,
   dispatchSubagent,
+  resolveSubagentExternalTarget,
   runTeam,
   createPluginAgentSession,
   resumePluginAgentSession,
@@ -448,6 +450,7 @@ export function createFullPluginContext(
     plans: createPlanAPI(pluginId),
     issues: createIssuesAPI(pluginId),
     memory: createMemoryAPI(pluginId),
+    externalAgents: createExternalAgentsAPI(pluginId),
     team: createTeamAPI(pluginId),
     subscription: createSubscriptionAPI(pluginId),
     terminal: createTerminalAPI(pluginId),
@@ -1128,6 +1131,16 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       if (!pluginHasApiPermission(pluginId, "agent:dispatch")) {
         throw new Error(
           'agent.dispatchSubagent requires the "agent:dispatch" permission — declare it in the plugin manifest.'
+        )
+      }
+      // A subagent that runs on an external agent spawns an outside coding
+      // process, exactly what `runExternalAgent` gates (ADR-0216 decision 3).
+      if (
+        (await resolveSubagentExternalTarget(idOrDef, options)) &&
+        !pluginHasApiPermission(pluginId, "agent:dispatch-external")
+      ) {
+        throw new Error(
+          'agent.dispatchSubagent to an external agent also requires the "agent:dispatch-external" permission — declare it in the plugin manifest.'
         )
       }
       return dispatchSubagent(idOrDef, prompt, options)

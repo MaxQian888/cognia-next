@@ -891,6 +891,15 @@ export interface PluginHooksAll extends PluginHooks {
     args: Record<string, unknown>
   ) => void
   onExternalAgentError?: (agentId: string, error: string) => void
+  /**
+   * An external-agent configuration, its connection, the global external-agent
+   * settings or the delegation rules changed (ADR-0216). Carries only the kind
+   * and the agent id; read the new state through `ctx.externalAgents`.
+   * Delivered only to plugins granted `agent:external:read`.
+   */
+  onExternalAgentConfigChange?: (
+    event: import("@/lib/plugin/api/external-agents-changes").ExternalAgentChangeEvent
+  ) => void | Promise<void>
 
   // Code Execution / Sandbox hooks
   onCodeExecutionStart?: (language: string, code: string, sandboxId?: string) => void

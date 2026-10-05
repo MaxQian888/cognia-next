@@ -1,7 +1,9 @@
 import {
   PYTHON_CONTRIBUTION_DISPATCH,
+  PYTHON_CONTRIBUTION_RELEASE,
   createDescribedPythonContribution,
   createPythonBackedProxy,
+  createPythonContributionReleaser,
   isPythonBackedContribution,
   subscribePythonContributionPush,
   type PythonCallTransport,
@@ -224,6 +226,125 @@ describe("createPythonBackedProxy", () => {
   })
 })
 
+describe("createPythonBackedProxy — per-instance routing", () => {
+  it("appends the instance id as the 5th envelope element of a plain call", async () => {
+    const call = jest.fn<ReturnType<PythonCallTransport>, Parameters<PythonCallTransport>>(
+      async () => "ok"
+    )
+    const proxy = createPythonBackedProxy<OcrLike>({
+      pluginId: "py-agent",
+      contributionId: "agent",
+      methods: ["extract"],
+      instanceId: "inst-a",
+      call,
+    })
+
+    await proxy.extract("a.png")
+    expect(call).toHaveBeenCalledWith("py-agent", PYTHON_CONTRIBUTION_DISPATCH, [
+      "agent",
+      "extract",
+      ["a.png"],
+      null,
+      "inst-a",
+    ])
+  })
+
+  it("appends the instance id after the stream id of a streaming call", async () => {
+    const harness = createEventHarness()
+    const call = jest.fn<ReturnType<PythonCallTransport>, Parameters<PythonCallTransport>>(
+      async () => "done"
+    )
+    const proxy = createPythonBackedProxy<{
+      prompt(text: string): AsyncGenerator<unknown, unknown, void>
+    }>({
+      pluginId: "py-agent",
+      contributionId: "agent",
+      methods: ["prompt"],
+      streamingMethods: ["prompt"],
+      instanceId: "inst-b",
+      call,
+      subscribe: harness.subscribe,
+      newStreamId: () => "stream-9",
+    })
+
+    expect(await proxy.prompt("hi").next()).toEqual({ value: "done", done: true })
+    expect(call).toHaveBeenCalledWith("py-agent", PYTHON_CONTRIBUTION_DISPATCH, [
+      "agent",
+      "prompt",
+      ["hi"],
+      "stream-9",
+      "inst-b",
+    ])
+  })
+
+  it("keeps the 4-element envelope when no instance id is set", async () => {
+    const harness = createEventHarness()
+    const seen: unknown[][] = []
+    const proxy = createPythonBackedProxy<{
+      extract(image: string): Promise<unknown>
+      run(): AsyncGenerator<unknown, unknown, void>
+    }>({
+      pluginId: "p",
+      contributionId: "c",
+      methods: ["extract", "run"],
+      streamingMethods: ["run"],
+      call: async (_pluginId, _fn, args) => {
+        seen.push([...args])
+        return "ok"
+      },
+      subscribe: harness.subscribe,
+      newStreamId: () => "s",
+    })
+
+    await proxy.extract("a.png")
+    await proxy.run().next()
+    expect(seen).toEqual([
+      ["c", "extract", ["a.png"], null],
+      ["c", "run", [], "s"],
+    ])
+  })
+})
+
+describe("createPythonContributionReleaser", () => {
+  it("sends the reserved release method with the instance id", async () => {
+    const call = jest.fn<ReturnType<PythonCallTransport>, Parameters<PythonCallTransport>>(
+      async () => null
+    )
+    const release = createPythonContributionReleaser({
+      pluginId: "py-agent",
+      contributionId: "agent",
+      instanceId: "inst-a",
+      call,
+    })
+
+    await expect(release()).resolves.toBeUndefined()
+    expect(PYTHON_CONTRIBUTION_RELEASE).toBe("__release__")
+    expect(call).toHaveBeenCalledWith("py-agent", PYTHON_CONTRIBUTION_DISPATCH, [
+      "agent",
+      PYTHON_CONTRIBUTION_RELEASE,
+      [],
+      null,
+      "inst-a",
+    ])
+  })
+
+  it("wraps a release failure with plugin, contribution and method context", async () => {
+    const release = createPythonContributionReleaser({
+      pluginId: "py-agent",
+      contributionId: "agent",
+      instanceId: "inst-a",
+      label: "external-agent adapter",
+      call: async () => {
+        throw new Error("host gone")
+      },
+    })
+
+    await expect(release()).rejects.toThrow(
+      'python-backed external-agent adapter "py-agent:agent".__release__ failed: host gone'
+    )
+  })
+})
+
 describe("isPythonBackedContribution", () => {
   it("honours an explicit per-entry backend above everything else", () => {
     expect(isPythonBackedContribution({ backend: "python", entry: "dist/x.js" }, "frontend")).toBe(
@@ -340,6 +461,25 @@ describe("default transport and stream ids", () => {
       args: ["c", "extract", ["a.png"], null],
     })
     expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("binds the releaser to the generation captured at construction", async () => {
+    const release = createPythonContributionReleaser({
+      pluginId: "p",
+      contributionId: "c",
+      instanceId: "inst-1",
+    })
+    // A restarted runtime must not receive the old instance's release: the
+    // host rejects the stale generation instead.
+    bindPythonRuntimeGeneration("p", "generation-2")
+
+    await release()
+    expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call", {
+      pluginId: "p",
+      generation: "generation-1",
+      functionName: PYTHON_CONTRIBUTION_DISPATCH,
+      args: ["c", PYTHON_CONTRIBUTION_RELEASE, [], null, "inst-1"],
+    })
   })
 
   it("generates a distinct stream id per streaming call by default", async () => {

@@ -11,6 +11,8 @@
     "agent:control": "控制智能体的执行",
     "agent:dispatch": "派发内置子智能体和智能体团队",
     "agent:dispatch-external": "派发外部编程智能体（Claude Code / Codex / …）",
+    "agent:external:manage": "创建、修改、复制、删除、启用、连接和路由你的外部编程智能体，并修改它们的全局设置",
+    "agent:external:read": "查看你的外部编程智能体的配置、就绪状态、预设、已安装运行时和路由规则（绝不包括凭据）",
     "agent:shared-memory:read": "读取团队共享记忆条目",
     "ai:chat": "使用你的账户向语言模型发送提示词（消耗你的额度）",
     "ai:embed": "使用你的账户生成向量嵌入（消耗你的额度）",

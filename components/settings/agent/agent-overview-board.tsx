@@ -5,9 +5,10 @@
  *
  * A collapsible fleet banner (connected / total) over one row per agent:
  * brand icon, name, state pill, the compact readiness pipeline, the block
- * reason when there is one, and a single next-action button — the thing the
+ * reason when there is one, what sets it apart from the other configurations
+ * of its runtime (ADR-0216), and a single next-action button — the thing the
  * model says would most move this agent toward ready. Clicking the row opens
- * the agent's inspector.
+ * the agent's inspector. Rows wrap instead of squeezing on a narrow pane.
  */
 
 import { Surface } from "@/components/surface/surface"
@@ -24,11 +25,17 @@ import { cn } from "@/lib/utils"
 import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
 import type { AgentReadiness, AgentReadinessAction } from "@/lib/ai/agent/external/agent-readiness"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
+import {
+  InstanceTraitChips,
+  type InstanceTrait,
+} from "@/components/agent/external-agent/instance-traits"
 import { AgentReadinessPipeline, AgentStatePill } from "./agent-readiness-pipeline"
 
 export interface OverviewAgentEntry {
   agent: LifecycleExternalAgentConfig
   readiness: AgentReadiness
+  /** What sets it apart from the other configurations of its runtime. */
+  traits?: readonly InstanceTrait[]
 }
 
 const ACTION_LABEL_KEY: Record<AgentReadinessAction, string> = {
@@ -84,7 +91,7 @@ export function AgentOverviewBoard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className="touch-hit h-7 w-7"
               aria-label={t("fleetShowSummary")}
               data-testid="fleet-banner-expand"
               onClick={() => onBannerCollapsedChange(false)}
@@ -110,7 +117,7 @@ export function AgentOverviewBoard({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 shrink-0"
+                className="touch-hit h-7 w-7 shrink-0"
                 aria-label={t("fleetHideSummary")}
                 data-testid="fleet-banner-collapse"
                 onClick={() => onBannerCollapsedChange(true)}
@@ -143,28 +150,29 @@ export function AgentOverviewBoard({
       {/* One row per agent: name, pill, pipeline, block reason, next action. */}
       {entries.length > 0 ? (
         <div className="divide-y rounded-lg border" data-testid="overview-rows">
-          {entries.map(({ agent, readiness }) => {
+          {entries.map(({ agent, readiness, traits = [] }) => {
             const presetId = isFromPreset(agent)
             const action = readiness.nextAction
             return (
               <div
                 key={agent.id}
-                className="flex items-center gap-3 px-3 py-2.5"
+                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5"
                 data-testid={`overview-row-${agent.id}`}
               >
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-auto min-w-0 flex-1 justify-start gap-3 whitespace-normal rounded-md px-1 py-1 text-left font-normal hover:bg-transparent"
+                  className="h-auto min-w-0 flex-1 basis-56 justify-start gap-3 whitespace-normal rounded-md px-1 py-1 text-left font-normal hover:bg-transparent"
                   onClick={() => onOpenAgent(agent.id)}
                   data-testid={`overview-open-${agent.id}`}
                 >
                   <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
+                    <span className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-medium">{agent.name}</span>
                       <AgentStatePill readiness={readiness} />
                     </span>
+                    <InstanceTraitChips traits={traits} className="mt-1" />
                     <span className="mt-1 flex items-center gap-2">
                       <AgentReadinessPipeline readiness={readiness} compact />
                       {readiness.blockReason ? (
@@ -190,7 +198,7 @@ export function AgentOverviewBoard({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="shrink-0"
+                    className="ml-auto shrink-0"
                     data-testid={`overview-action-${agent.id}`}
                     disabled={!enabled && (action === "connect" || action === "retry")}
                     onClick={() => onAction(agent.id, action)}

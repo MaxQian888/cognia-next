@@ -312,6 +312,7 @@ describe("persist.partialize", () => {
         "enabled",
         "lastRunSnapshots",
         "overviewBannerCollapsed",
+        "railGroupBy",
         "showConnectionNotifications",
       ].sort()
     )

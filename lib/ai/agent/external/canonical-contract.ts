@@ -178,6 +178,8 @@ function resolveRecoveryHints(reasonCode: ExternalAgentBranchReasonCode): string
       return ["useAllowedSandboxOrApproval", "contactAdministrator"]
     case "execution_failed":
       return ["checkDiagnosticsAndRetry"]
+    case "state_isolation_unsupported":
+      return ["shareRuntimeState"]
     default:
       return []
   }

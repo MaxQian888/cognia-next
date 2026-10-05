@@ -1,6 +1,7 @@
 import cogniaPiExtension from "../../../../../../sidecar/pi-extension/cognia-pi-extension"
 import {
   PI_BUILTIN_TOOLS,
+  applyConfiguredApprovalToPiPolicy,
   PI_PERMISSION_MARKER,
   PI_TOOL_POLICY_ENV,
   decidePiTool,
@@ -447,5 +448,41 @@ describe("bundled native tool approval blocking", () => {
     await expect(first).resolves.toMatchObject({ block: true })
     await expect(queued).resolves.toMatchObject({ block: true })
     expect(confirm).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("applyConfiguredApprovalToPiPolicy", () => {
+  it("returns the mode's table untouched without lists", () => {
+    const policy = resolvePiToolPolicy("default")
+    expect(applyConfiguredApprovalToPiPolicy(policy, {})).toBe(policy)
+  })
+
+  it("escalates an always-ask tool and relaxes a bare auto-approval", () => {
+    const policy = applyConfiguredApprovalToPiPolicy(resolvePiToolPolicy("acceptEdits"), {
+      requireApprovalFor: ["write"],
+      autoApprovePatterns: ["bash", "edit(src/*)"],
+    })
+    expect(policy.decisions.write).toBe("ask")
+    expect(policy.decisions.bash).toBe("allow")
+    // A specifier-qualified approval is judged per call, never in the table.
+    expect(policy.decisions.edit).toBe("allow")
+  })
+
+  it("keeps a no-prompt mode free of prompts and never relaxes a deny", () => {
+    const plan = applyConfiguredApprovalToPiPolicy(resolvePiToolPolicy("plan"), {
+      requireApprovalFor: ["read"],
+      autoApprovePatterns: ["bash"],
+    })
+    expect(plan.decisions.read).toBe("deny")
+    expect(plan.decisions.bash).toBe("deny")
+  })
+
+  it("covers plugin package tools it is told about", () => {
+    const policy = applyConfiguredApprovalToPiPolicy(
+      resolvePiToolPolicy("default"),
+      { autoApprovePatterns: ["latex_*"] },
+      ["latex_build"]
+    )
+    expect(policy.decisions.latex_build).toBe("allow")
   })
 })

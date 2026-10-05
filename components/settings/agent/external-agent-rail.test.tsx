@@ -1,17 +1,24 @@
 /**
  * ExternalAgentRail — props-driven rail: overview entry, agent rows grouped
  * by readiness with mini dots + quick connect, search, and the configure
- * destinations. The stacked pane tier collapses it into a Select picker.
+ * destinations, runtime grouping and instance trait chips. The stacked pane
+ * tier pushes list → detail with a back bar instead of squeezing both.
  */
 
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { ExternalAgentRail, type AgentSettingsView } from "./external-agent-rail"
+import {
+  ExternalAgentRail,
+  type AgentRailGroupBy,
+  type AgentRailStackedView,
+  type AgentSettingsView,
+} from "./external-agent-rail"
 import type { AgentReadiness } from "@/lib/ai/agent/external/agent-readiness"
+import type { InstanceTrait } from "@/components/agent/external-agent/instance-traits"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 
 // The rail reads the list density off `SettingsListDetail`; standalone tests
-// get the "split" tier by default, and the picker tests flip it to stacked.
+// get the "split" tier by default, and the push tests flip it to stacked.
 const mockDensity = jest.fn<"split" | "stacked", []>(() => "split")
 jest.mock("@/components/settings/common/settings-master-detail", () => {
   const actual = jest.requireActual("@/components/settings/common/settings-master-detail")
@@ -21,14 +28,14 @@ jest.mock("@/components/settings/common/settings-master-detail", () => {
   }
 })
 
-const agent = (id: string, name: string) =>
+const agent = (id: string, name: string, command = "npx", args = ["agent"]) =>
   ({
     id,
     name,
     protocol: "acp",
     transport: "stdio",
     enabled: true,
-    process: { command: "npx", args: ["agent"] },
+    process: { command, args },
     createdAt: new Date(0),
     updatedAt: new Date(0),
   }) as unknown as LifecycleExternalAgentConfig
@@ -72,18 +79,31 @@ function renderRail(
   fixture: {
     agents: LifecycleExternalAgentConfig[]
     readinessById: Map<string, AgentReadiness>
-  } = defaultFixture()
+    traitsById?: Map<string, InstanceTrait[]>
+  } = defaultFixture(),
+  options: {
+    groupBy?: AgentRailGroupBy
+    stackedView?: AgentRailStackedView
+    enabled?: boolean
+  } = {}
 ) {
   const onViewChange = jest.fn()
   const onNewAgent = jest.fn()
   const onConnect = jest.fn()
   const onDisconnect = jest.fn()
+  const onGroupByChange = jest.fn()
+  const onStackedViewChange = jest.fn()
   render(
     <ExternalAgentRail
       agents={fixture.agents}
       readinessById={fixture.readinessById}
+      traitsById={fixture.traitsById ?? new Map()}
       view={view}
-      enabled
+      enabled={options.enabled ?? true}
+      groupBy={options.groupBy ?? "readiness"}
+      onGroupByChange={onGroupByChange}
+      stackedView={options.stackedView ?? "list"}
+      onStackedViewChange={onStackedViewChange}
       onViewChange={onViewChange}
       onNewAgent={onNewAgent}
       onConnect={onConnect}
@@ -91,7 +111,14 @@ function renderRail(
       isConnecting={() => false}
     />
   )
-  return { onViewChange, onNewAgent, onConnect, onDisconnect }
+  return {
+    onViewChange,
+    onNewAgent,
+    onConnect,
+    onDisconnect,
+    onGroupByChange,
+    onStackedViewChange,
+  }
 }
 
 describe("ExternalAgentRail", () => {
@@ -125,10 +152,76 @@ describe("ExternalAgentRail", () => {
     expect(onViewChange).toHaveBeenCalledWith({ kind: "delegation" })
   })
 
-  it("marks the selected agent row and pressed overview", () => {
+  it("marks the selected agent row as the current page, and only it", () => {
     renderRail({ kind: "agent", id: "a1" })
-    expect(screen.getByTestId("agent-row-a1")).toHaveAttribute("aria-pressed", "true")
-    expect(screen.getByTestId("nav-all-agents")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("agent-row-a1")).toHaveAttribute("aria-current", "page")
+    expect(screen.getByTestId("agent-row-a2")).not.toHaveAttribute("aria-current")
+    expect(screen.getByTestId("nav-all-agents")).not.toHaveAttribute("aria-current")
+  })
+
+  it("leaves the power button off for a disabled master switch but keeps rows selectable", async () => {
+    const user = userEvent.setup()
+    const { onViewChange } = renderRail(undefined, defaultFixture(), { enabled: false })
+    expect(screen.getByTestId("agent-power-a1")).toBeDisabled()
+    expect(screen.getByTestId("nav-new-agent")).toBeDisabled()
+    await user.click(screen.getByTestId("agent-row-a2"))
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "agent", id: "a2" })
+  })
+
+  it("gives keyboard and screen-reader users the block reason, not just a hover title", () => {
+    renderRail(undefined, {
+      agents: [agent("a3", "Gamma")],
+      readinessById: new Map([["a3", blocked]]),
+    })
+    const row = screen.getByTestId("agent-row-a3")
+    const describedBy = row.getAttribute("aria-describedby")
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy!)).toHaveTextContent("command not found")
+    // A blocked agent cannot take a connection, so its power button is off.
+    expect(screen.getByTestId("agent-power-a3")).toBeDisabled()
+  })
+
+  it("shows what sets each instance apart under its name", () => {
+    renderRail(undefined, {
+      ...defaultFixture(),
+      traitsById: new Map<string, InstanceTrait[]>([
+        [
+          "a1",
+          [
+            { key: "stateIsolation", value: "isolated" },
+            { key: "permissionMode", value: "plan" },
+          ],
+        ],
+      ]),
+    })
+    const row = screen.getByTestId("agent-row-a1")
+    expect(row).toHaveTextContent("Own state")
+    expect(row).toHaveTextContent("Plan")
+    expect(screen.getByTestId("agent-row-a2")).not.toHaveTextContent("Own state")
+  })
+
+  it("groups configurations of one runtime together when asked", async () => {
+    const user = userEvent.setup()
+    const fixture = {
+      agents: [
+        agent("c1", "Codex work", "codex", ["app-server"]),
+        agent("q1", "Qwen", "qwen", []),
+        agent("c2", "Codex personal", "codex", ["app-server"]),
+      ],
+      readinessById: new Map<string, AgentReadiness>([
+        ["c1", ready],
+        ["q1", ready],
+        ["c2", off],
+      ]),
+    }
+    const { onGroupByChange } = renderRail(undefined, fixture, { groupBy: "runtime" })
+    const groups = screen.getAllByRole("group")
+    // Both Codex configurations land in one family, whatever their readiness.
+    const codex = groups.find((group) => group.contains(screen.getByTestId("agent-row-c1")))!
+    expect(codex).toContainElement(screen.getByTestId("agent-row-c2"))
+    expect(codex).not.toContainElement(screen.getByTestId("agent-row-q1"))
+    await user.click(screen.getByRole("radio", { name: "By status" }))
+    expect(onGroupByChange).toHaveBeenCalledWith("readiness")
   })
 
   it("quick-connects a disconnected row and disconnects a connected one", async () => {
@@ -185,19 +278,46 @@ describe("ExternalAgentRail", () => {
     expect(screen.getByTestId("nav-new-agent")).toBeInTheDocument()
   })
 
-  it("collapses to a picker at the stacked tier and routes selections", async () => {
+  it("pushes from the list to the detail at the stacked tier", async () => {
     mockDensity.mockReturnValue("stacked")
     const user = userEvent.setup()
-    const { onViewChange } = renderRail({ kind: "agent", id: "a1" })
-    // The scrolling list is gone; every destination lives in the Select.
-    expect(screen.queryByTestId("agent-row-a1")).not.toBeInTheDocument()
-    const picker = screen.getByTestId("nav-picker")
-    expect(picker).toHaveTextContent("Alpha")
-    await user.click(picker)
-    await user.click(await screen.findByRole("option", { name: "Beta" }))
+    const { onViewChange, onStackedViewChange } = renderRail(
+      { kind: "overview" },
+      defaultFixture(),
+      { stackedView: "list" }
+    )
+    // The whole list is on screen, with the same rows as the split tier.
+    expect(screen.getByTestId("external-agent-rail")).toHaveAttribute("data-stacked-view", "list")
+    await user.click(screen.getByTestId("agent-row-a2"))
     expect(onViewChange).toHaveBeenCalledWith({ kind: "agent", id: "a2" })
-    await user.click(picker)
-    await user.click(await screen.findByRole("option", { name: "Delegation Rules" }))
+    expect(onStackedViewChange).toHaveBeenCalledWith("detail")
+    await user.click(screen.getByTestId("nav-delegation"))
     expect(onViewChange).toHaveBeenCalledWith({ kind: "delegation" })
+  })
+
+  it("shows a back bar naming the open destination while the detail is up", async () => {
+    mockDensity.mockReturnValue("stacked")
+    const user = userEvent.setup()
+    const { onStackedViewChange } = renderRail({ kind: "agent", id: "a1" }, defaultFixture(), {
+      stackedView: "detail",
+    })
+    expect(screen.queryByTestId("agent-row-a1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("external-agent-rail-bar")).toHaveTextContent("Alpha")
+    await user.click(screen.getByTestId("external-agent-rail-back"))
+    expect(onStackedViewChange).toHaveBeenCalledWith("list")
+  })
+
+  it("names a configure destination in the back bar", () => {
+    mockDensity.mockReturnValue("stacked")
+    renderRail({ kind: "delegation" }, defaultFixture(), { stackedView: "detail" })
+    expect(screen.getByTestId("external-agent-rail-bar")).toHaveTextContent("Delegation Rules")
+  })
+
+  it("never pushes at the split tier", async () => {
+    const user = userEvent.setup()
+    const { onStackedViewChange } = renderRail()
+    await user.click(screen.getByTestId("agent-row-a1"))
+    expect(onStackedViewChange).not.toHaveBeenCalled()
+    expect(screen.getByTestId("external-agent-rail")).not.toHaveAttribute("data-stacked-view")
   })
 })

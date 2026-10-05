@@ -1,5 +1,6 @@
 jest.mock("@/lib/subscription/core/transport", () => ({
   getActiveAccount: jest.fn(),
+  getAccountEnv: jest.fn(),
   getAccount: jest.fn(),
   setActiveAccount: jest.fn(),
   codexOauthDiscover: jest.fn(),
@@ -18,6 +19,7 @@ import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import { buildAgentEnv } from "./env-builder"
 
 const mGetActive = transportMod.getActiveAccount as jest.Mock
+const mGetAccountEnv = transportMod.getAccountEnv as jest.Mock
 const mGetAccount = transportMod.getAccount as jest.Mock
 const mSetActive = transportMod.setActiveAccount as jest.Mock
 const mDiscover = transportMod.codexOauthDiscover as jest.Mock
@@ -217,9 +219,9 @@ describe("buildAgentEnv — codex credentials require explicit adoption", () => 
 })
 
 describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
-  function codexAccount(expiresAtMs: number, refreshToken = "r1"): Account {
+  function codexAccount(expiresAtMs: number, refreshToken = "r1", id = "a1"): Account {
     return {
-      id: "a1",
+      id,
       credential: {
         provider: "codex",
         accessToken: "stale",
@@ -256,6 +258,54 @@ describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
     expect(mRefresh).toHaveBeenCalledWith("a1")
     expect(mSetActive).toHaveBeenCalledWith("codex", "a1")
     expect(env).toEqual({ CODEX_ACCESS_TOKEN: "new" })
+  })
+
+  it("launches a bound configuration as its own account, never the active one", async () => {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+    })
+    mGetAccount.mockResolvedValue(codexAccount(Date.now() + 3_600_000, "r1", "work-account"))
+    mGetAccountEnv.mockResolvedValue(snapshot([["CODEX_ACCESS_TOKEN", "work"]], undefined))
+    mGetActive.mockResolvedValue(snapshot([["CODEX_ACCESS_TOKEN", "personal"]], "a1"))
+
+    const env = await buildAgentEnv(codexConfig({ subscriptionAccountId: "work-account" }))
+
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "work" })
+    expect(mGetAccountEnv).toHaveBeenCalledWith("codex", "work-account")
+    expect(mGetActive).not.toHaveBeenCalled()
+    expect(mSetActive).not.toHaveBeenCalled()
+  })
+
+  it("refreshes a bound account without making it the active one", async () => {
+    mGetSettings.mockResolvedValue({
+      codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+    })
+    mGetAccount.mockResolvedValue(codexAccount(Date.now() - 1000, "r1", "work-account"))
+    mRefresh.mockResolvedValueOnce({
+      accessToken: "new",
+      refreshToken: "r2",
+      idTokenRaw: "",
+      expiresAtMs: Date.now() + 3_600_000,
+      authMode: "chatgpt",
+      storedAtMs: Date.now(),
+    })
+    mGetAccountEnv.mockResolvedValue(snapshot([["CODEX_ACCESS_TOKEN", "new"]], undefined))
+
+    const env = await buildAgentEnv(codexConfig({ subscriptionAccountId: "work-account" }))
+
+    expect(mRefresh).toHaveBeenCalledWith("work-account")
+    expect(mSetActive).not.toHaveBeenCalled()
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "new" })
+  })
+
+  it("refuses to launch when the bound account is gone, instead of using the active one", async () => {
+    mGetAccount.mockResolvedValue(undefined)
+    mGetActive.mockResolvedValue(snapshot([["CODEX_ACCESS_TOKEN", "personal"]], "a1"))
+
+    await expect(
+      buildAgentEnv(codexConfig({ subscriptionAccountId: "deleted" }))
+    ).rejects.toMatchObject({ code: "credential_missing" })
+    expect(mGetActive).not.toHaveBeenCalled()
   })
 
   it("does not refresh a still-fresh credential", async () => {

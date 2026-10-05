@@ -31,10 +31,20 @@ import { toast } from "sonner"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { FidelityReport } from "@/components/session-import/fidelity-report"
 import { Badge } from "@/components/ui/badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { acknowledgeImportDivergence } from "@/lib/db/sessions"
-import { resumeImportedSessionNative } from "@/lib/session-import/native-resume"
+import {
+  resumeImportedSessionNative,
+  type NativeResumeChoice,
+} from "@/lib/session-import/native-resume"
 import { compositionForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { cn } from "@/lib/utils"
 
@@ -48,6 +58,9 @@ export function ImportedOriginChip({
   const t = useTranslations("chat.imported")
   const tSources = useTranslations("sessionImport.sources")
   const [resuming, setResuming] = useState(false)
+  // Several connected configurations of the source's runtime (ADR-0216): the
+  // user picks which one resumes, instead of being told to disconnect the rest.
+  const [choices, setChoices] = useState<NativeResumeChoice[] | null>(null)
 
   // `importSource` is stamped by `importSessions`; the id prefix is the
   // fallback for rows written before the field existed.
@@ -148,7 +161,8 @@ export function ImportedOriginChip({
     Boolean(binding?.nativeSessionId && binding.presetId)
   if (!canAttemptNativeResume) return origin
 
-  const resume = async () => {
+  const resume = async (agentId?: string) => {
+    setChoices(null)
     setResuming(true)
     let result: Awaited<ReturnType<typeof resumeImportedSessionNative>>
     try {
@@ -158,7 +172,9 @@ export function ImportedOriginChip({
       // offline or against a stale deployment). Without this the `finally`
       // never ran, `void resume()` swallowed the rejection with no toast, and
       // the chip was left spinning on a disabled button until a remount.
-      result = await resumeImportedSessionNative(session)
+      result = agentId
+        ? await resumeImportedSessionNative(session, {}, { agentId })
+        : await resumeImportedSessionNative(session)
     } catch (error) {
       toast.error(t("resumeErrors.handshake-failed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -166,6 +182,10 @@ export function ImportedOriginChip({
       return
     } finally {
       setResuming(false)
+    }
+    if (!result.ok && result.code === "runtime-ambiguous" && result.choices?.length) {
+      setChoices(result.choices)
+      return
     }
     if (!result.ok) {
       toast.error(t(`resumeErrors.${result.code}`), {
@@ -189,23 +209,53 @@ export function ImportedOriginChip({
   return (
     <span className="inline-flex items-center gap-1">
       {origin}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => void resume()}
-            disabled={resuming}
-            aria-label={t("resumeNative")}
-            data-testid="imported-native-resume"
-          >
-            <Badge variant="outline" className="h-5 shrink-0 gap-1 px-1.5 text-[10px] font-normal">
-              {resuming ? <Spinner className="size-3" /> : <RotateCcwIcon className="size-3" />}
-              {t("resume")}
-            </Badge>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">{t("resumeNative")}</TooltipContent>
-      </Tooltip>
+      <DropdownMenu
+        open={choices !== null}
+        onOpenChange={(open) => {
+          if (!open) setChoices(null)
+        }}
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                onClick={(event) => {
+                  // The menu opens only from an ambiguous answer, never from a
+                  // click: the click starts the resume.
+                  event.preventDefault()
+                  void resume()
+                }}
+                onPointerDown={(event) => event.preventDefault()}
+                disabled={resuming}
+                aria-label={t("resumeNative")}
+                data-testid="imported-native-resume"
+              >
+                <Badge
+                  variant="outline"
+                  className="h-5 shrink-0 gap-1 px-1.5 text-[10px] font-normal"
+                >
+                  {resuming ? <Spinner className="size-3" /> : <RotateCcwIcon className="size-3" />}
+                  {t("resume")}
+                </Badge>
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">{t("resumeNative")}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" data-testid="imported-resume-choices">
+          <DropdownMenuLabel className="text-xs">{t("resumeChooseAgent")}</DropdownMenuLabel>
+          {(choices ?? []).map((choice) => (
+            <DropdownMenuItem
+              key={choice.agentId}
+              onSelect={() => void resume(choice.agentId)}
+              data-testid={`imported-resume-choice-${choice.agentId}`}
+            >
+              {choice.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </span>
   )
 }

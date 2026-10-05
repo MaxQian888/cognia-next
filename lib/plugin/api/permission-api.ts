@@ -62,6 +62,11 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "agent:control": ["agent:control"],
   "builtin-skills:invoke": ["builtin-skills:invoke"],
   "agent:dispatch-external": ["agent:dispatch-external"],
+  // External-agent configurations (`ctx.externalAgents`, ADR-0216). The
+  // namespace is guard-enforced; the identity mappings keep
+  // `ctx.permissions.hasPermission` agreeing with that enforcement.
+  "agent:external:read": ["agent:external:read"],
+  "agent:external:manage": ["agent:external:manage"],
   // Subagent dispatch + shared-memory/twin introspection. Identity mappings —
   // without these the manifest declarations are silently dropped and
   // `ctx.agent.dispatchSubagent`/`runTeam` and

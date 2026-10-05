@@ -70,16 +70,44 @@ describe("pairRuntimeConfigs", () => {
     expect(result.hostOnly).toEqual([host])
   })
 
-  it("gives one host record to at most one local agent", () => {
+  it("does not guess between two local agents that share a name", () => {
     // The store mints a fresh id per add and checks no name, so two local
-    // agents can genuinely share one. Pairing both would render the same host
-    // row twice.
+    // agents can genuinely share one. Neither is provably the host's copy, so
+    // neither pairs on the name: a wrong guess shows one agent's details on a
+    // row that runs the other.
     const first = { id: "local_1", name: "Pi" }
     const second = { id: "local_2", name: "Pi" }
     const host = hostRecord("eac_1", "Pi")
     const result = pairRuntimeConfigs([first, second], [host])
+    expect(result.paired).toEqual([])
+    expect(result.localOnly).toEqual([first, second])
+    expect(result.hostOnly).toEqual([host])
+  })
+
+  it("gives one host record to at most one local agent through provenance", () => {
+    const first = { id: "local_1", name: "Pi" }
+    const second = { id: "local_2", name: "Pi (copy)" }
+    const host = hostRecord("eac_1", "Pi", { [IMPORTED_FROM_AGENT_ID]: "local_1" })
+    const result = pairRuntimeConfigs([first, second], [host])
     expect(result.paired).toEqual([{ local: first, host }])
     expect(result.localOnly).toEqual([second])
+  })
+
+  it("does not guess between two host records that share a name", () => {
+    const local = { id: "local_1", name: "Codex" }
+    const a = hostRecord("eac_a", "Codex")
+    const b = hostRecord("eac_b", "codex ")
+    const result = pairRuntimeConfigs([local], [a, b])
+    expect(result.paired).toEqual([])
+    expect(result.hostOnly).toEqual([a, b])
+  })
+
+  it("never claims a record by name when it names a different origin", () => {
+    const local = { id: "local_1", name: "Pi" }
+    const elsewhere = hostRecord("eac_1", "Pi", { [IMPORTED_FROM_AGENT_ID]: "local_9" })
+    const result = pairRuntimeConfigs([local], [elsewhere])
+    expect(result.paired).toEqual([])
+    expect(result.localOnly).toEqual([local])
   })
 
   it("prefers provenance over the name when the two disagree", () => {

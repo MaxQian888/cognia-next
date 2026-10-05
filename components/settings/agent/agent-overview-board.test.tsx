@@ -137,4 +137,27 @@ describe("AgentOverviewBoard", () => {
     await user.click(screen.getByTestId("overview-add-agent"))
     expect(onNewAgent).toHaveBeenCalled()
   })
+
+  it("tells configurations of one runtime apart by their traits", () => {
+    renderBoard({
+      entries: [
+        {
+          agent: agent("w", "Codex work"),
+          readiness: readiness({}),
+          traits: [
+            { key: "stateIsolation", value: "isolated" },
+            { key: "permissionMode", value: "plan" },
+          ],
+        },
+        { agent: agent("p", "Codex personal"), readiness: readiness({}), traits: [] },
+      ],
+    })
+    const work = screen.getByTestId("overview-row-w")
+    expect(within(work).getByTestId("instance-trait-chips")).toHaveTextContent("Own state")
+    expect(within(work).getByTestId("instance-trait-chips")).toHaveTextContent("Plan")
+    // Nothing to tell apart, nothing rendered.
+    expect(
+      within(screen.getByTestId("overview-row-p")).queryByTestId("instance-trait-chips")
+    ).not.toBeInTheDocument()
+  })
 })

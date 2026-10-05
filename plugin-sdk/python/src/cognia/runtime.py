@@ -21,7 +21,7 @@ import asyncio
 import collections.abc
 import inspect
 import sys
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ._generated_contract import CONTRACT_VERSION, PROTOCOL_VERSION, SDK_VERSION
 
@@ -45,6 +45,27 @@ HostCallHandler = Callable[[str, Dict[str, Any]], Any]
 
 class HostCallError(RuntimeError):
     """A ``cognia.ctx.*`` call the host refused, or that had no host at all."""
+
+
+#: Reserved contribution method that drops one per-instance object. Mirrors
+#: ``CONTRIBUTION_RELEASE`` in the embedded host (``host.py``).
+CONTRIBUTION_RELEASE = "__release__"
+
+
+def _collect_contribution_methods(
+    contribution_id: str, instance: Any
+) -> Dict[str, Callable[..., Any]]:
+    """Every public callable attribute of ``instance``, keyed by name."""
+    methods: Dict[str, Callable[..., Any]] = {}
+    for name in dir(instance):
+        if name.startswith("_"):
+            continue
+        attr = getattr(instance, name, None)
+        if callable(attr):
+            methods[name] = attr
+    if not methods:
+        raise ValueError(f"contribution '{contribution_id}' exposes no public methods")
+    return methods
 
 
 async def _drive(awaitable: Any) -> Any:
@@ -76,6 +97,16 @@ class Runtime:
         # host.py`) so a python-owned module-bridge contribution can be
         # registered, introspected and unit-tested offline.
         self._contributions: Dict[str, Dict[str, Callable[..., Any]]] = {}
+        # contribution_id -> decorated class (a per-instance factory), or None
+        # when the author registered an already-built object. Mirrors
+        # `_CONTRIBUTION_FACTORIES` in host.py.
+        self._contribution_factories: Dict[str, Optional[type]] = {}
+        # (contribution_id, instance_id) -> method table of a class-based
+        # contribution's per-instance object, built on first dispatch.
+        self._contribution_instances: Dict[Tuple[str, str], Dict[str, Callable[..., Any]]] = {}
+        # contribution_id -> the instance id bound to an object-based
+        # contribution (a shared object serves one instance at a time).
+        self._contribution_shared_owner: Dict[str, str] = {}
 
     # -- registration -------------------------------------------------------
 
@@ -85,33 +116,88 @@ class Runtime:
         `target` is a class (instantiated here) or a ready object; every public
         callable attribute becomes a method the host can dispatch through
         ``__cognia_dispatch_contribution__``.
+
+        A class is also kept as a factory: every host-side instance id (one
+        external-agent configuration, say) gets its own object built from it,
+        so instances never share state. A ready object is shared and serves at
+        most one instance id at a time.
         """
         if not isinstance(contribution_id, str) or not contribution_id:
             raise ValueError("contribution id must be a non-empty string")
-        instance = target() if inspect.isclass(target) else target
-        methods: Dict[str, Callable[..., Any]] = {}
-        for name in dir(instance):
-            if name.startswith("_"):
-                continue
-            attr = getattr(instance, name, None)
-            if callable(attr):
-                methods[name] = attr
-        if not methods:
-            raise ValueError(f"contribution '{contribution_id}' exposes no public methods")
+        is_class = inspect.isclass(target)
+        instance = target() if is_class else target
+        methods = _collect_contribution_methods(contribution_id, instance)
+        # Re-registering an id replaces it wholesale, per-instance objects too.
+        for key in [k for k in self._contribution_instances if k[0] == contribution_id]:
+            del self._contribution_instances[key]
+        self._contribution_shared_owner.pop(contribution_id, None)
         self._contributions[contribution_id] = methods
+        self._contribution_factories[contribution_id] = target if is_class else None
         return target
+
+    def _contribution_instance_methods(
+        self, contribution_id: str, instance_id: str
+    ) -> Dict[str, Callable[..., Any]]:
+        factory = self._contribution_factories.get(contribution_id)
+        if factory is None:
+            owner = self._contribution_shared_owner.get(contribution_id)
+            if owner is None:
+                self._contribution_shared_owner[contribution_id] = instance_id
+            elif owner != instance_id:
+                raise RuntimeError(
+                    f"contribution '{contribution_id}' is a single shared object and "
+                    "cannot serve a second instance; decorate a class with "
+                    "@cognia.contribution so each instance gets its own object"
+                )
+            return self._contributions[contribution_id]
+        key = (contribution_id, instance_id)
+        methods = self._contribution_instances.get(key)
+        if methods is None:
+            methods = _collect_contribution_methods(contribution_id, factory())
+            self._contribution_instances[key] = methods
+        return methods
+
+    def release_contribution_instance(self, contribution_id: str, instance_id: str) -> None:
+        """Drop one per-instance object — the offline twin of the host's
+        reserved ``__release__`` method. Unknown instances are a no-op."""
+        if contribution_id not in self._contributions:
+            raise RuntimeError(f"unknown contribution: {contribution_id}")
+        if not isinstance(instance_id, str) or not instance_id:
+            raise RuntimeError(
+                f"contribution '{contribution_id}': {CONTRIBUTION_RELEASE} requires an instance id"
+            )
+        if self._contribution_factories.get(contribution_id) is None:
+            if self._contribution_shared_owner.get(contribution_id) == instance_id:
+                del self._contribution_shared_owner[contribution_id]
+            return
+        self._contribution_instances.pop((contribution_id, instance_id), None)
 
     def dispatch_contribution(
         self,
         contribution_id: str,
         method: str,
         args: Optional[List[Any]] = None,
+        instance_id: Optional[str] = None,
     ) -> Any:
         """Invoke one contribution method — the offline twin of the host's
-        dispatcher, so plugin tests can drive a contribution directly."""
-        entry = self._contributions.get(contribution_id)
-        if entry is None:
+        dispatcher, so plugin tests can drive a contribution directly.
+
+        ``instance_id`` routes the call to one instance's object (built on its
+        first call for a decorated class); ``method="__release__"`` drops that
+        instance, as the host's reserved method does."""
+        if contribution_id not in self._contributions:
             raise RuntimeError(f"unknown contribution: {contribution_id}")
+        if instance_id is not None and (not isinstance(instance_id, str) or not instance_id):
+            raise RuntimeError(
+                f"contribution '{contribution_id}': instance id must be a non-empty string"
+            )
+        if method == CONTRIBUTION_RELEASE:
+            self.release_contribution_instance(contribution_id, instance_id)  # type: ignore[arg-type]
+            return None
+        if instance_id is None:
+            entry = self._contributions[contribution_id]
+        else:
+            entry = self._contribution_instance_methods(contribution_id, instance_id)
         from .bot import BOT_LIFECYCLE_PY_METHODS, is_bot_contribution
 
         fn = entry.get(method)
@@ -430,6 +516,13 @@ def contribution(contribution_id: str) -> Callable[[Any], Any]:
     ``describe()`` supplies the plain-data descriptor a JS factory would have
     returned inline; every other method is behaviour. Returning an iterator
     from a method the host called with a stream id turns it into chunk frames.
+
+    Instances: when the host addresses the contribution per instance (one
+    external-agent configuration per instance, for example), a decorated
+    **class** gives each instance its own object, built on its first call and
+    dropped when the host releases it. A decorated **object** is shared, so it
+    serves one instance at a time and a second is refused — decorate a class
+    whenever the contribution keeps per-instance state.
     """
 
     def decorate(target: Any) -> Any:

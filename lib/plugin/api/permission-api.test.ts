@@ -435,6 +435,8 @@ describe("Permission API", () => {
       "agent:control",
       "builtin-skills:invoke",
       "agent:dispatch-external",
+      "agent:external:read",
+      "agent:external:manage",
       "agent:dispatch",
       "agent:shared-memory:read",
       "twin:read",

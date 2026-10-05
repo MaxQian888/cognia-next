@@ -14,10 +14,13 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import {
+  HostConfigCleanupError,
+  HostConfigForeignCredentialRefError,
   applyVerdict,
   createHostExternalAgentConfig,
   defaultHostCogniaModelCatalogDeps,
   deleteHostExternalAgentConfig,
+  duplicateHostExternalAgentConfig,
   getHostCogniaModelCatalog,
   getHostExternalAgentConfig,
   importedConfigCredentialGaps,
@@ -25,8 +28,14 @@ import {
   reconcileHostExternalAgentConfigs,
   updateHostExternalAgentConfig,
   type HostCogniaModelCatalogDeps,
+  type HostConfigDeleteDeps,
   type HostConfigServiceDeps,
 } from "./host-config-service"
+import type { KeyringStore } from "@/lib/credentials/keyring-store"
+import { ExternalAgentConfigConflictError } from "@/lib/db/external-agent-configs"
+import { prepareExternalAgentLaunch } from "../lifecycle/launch-preparation"
+import { hostConfigLaunchConfig } from "./host-config-mount"
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 function config(overrides: Partial<StoredExternalAgentConfig> = {}): StoredExternalAgentConfig {
   return {
@@ -41,17 +50,44 @@ function config(overrides: Partial<StoredExternalAgentConfig> = {}): StoredExter
   } as StoredExternalAgentConfig
 }
 
-const ready: HostConfigServiceDeps = { assessReadiness: async () => ({ status: "ready" }) }
+function memoryKeyring(): KeyringStore & { entries: Map<string, string> } {
+  const entries = new Map<string, string>()
+  return {
+    entries,
+    save: async (keyId, value) => {
+      entries.set(keyId, value)
+    },
+    load: async (keyId) => entries.get(keyId) ?? null,
+    delete: async (keyId) => {
+      entries.delete(keyId)
+    },
+  }
+}
+
+let keyring = memoryKeyring()
+const removedStateRoots: string[] = []
+let ready: HostConfigServiceDeps
+let deleteDeps: HostConfigDeleteDeps
 const notReady = (
   status: "needs-credentials" | "needs-runtime" | "needs-consent" | "blocked",
   reason = "why"
 ): HostConfigServiceDeps => ({
+  keyring,
   assessReadiness: async () => ({ status, reasonCode: "credential_missing", reason }),
 })
 
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
+  keyring = memoryKeyring()
+  removedStateRoots.length = 0
+  ready = { keyring, assessReadiness: async () => ({ status: "ready" }) }
+  deleteDeps = {
+    keyring,
+    removeStateRoot: async (configId) => {
+      removedStateRoots.push(configId)
+    },
+  }
 })
 
 describe("applyVerdict", () => {
@@ -148,12 +184,121 @@ describe("create", () => {
     expect(hostConfigOriginAgentId(record)).toBeNull()
   })
 
-  it("keeps a normal create's refs — only imports are distrusted", async () => {
+  // A new configuration owns no slot yet, so any ref it carries names someone
+  // else's — config X must never launch with config Y's secret (G8).
+  it("refuses credential refs on an ordinary create", async () => {
+    await expect(
+      createHostExternalAgentConfig(
+        { config: config({ credentialRefs: { apiKey: "eac_other:apiKey" } }) },
+        ready
+      )
+    ).rejects.toBeInstanceOf(HostConfigForeignCredentialRefError)
+    expect(await listHostExternalAgentConfigs()).toEqual([])
+  })
+
+  // The old behavior scrubbed an inline key and threw it away, storing a
+  // config that looked configured and authenticated as nobody.
+  it("persists inline secrets into the new config's own keyring slots", async () => {
     const record = await createHostExternalAgentConfig(
-      { config: config({ credentialRefs: { apiKey: "local-key" } }) },
+      {
+        config: config({
+          transport: "http",
+          network: {
+            endpoint: "https://example.invalid",
+            apiKey: "sk-inline",
+            headers: { Authorization: "Bearer sk-header", Accept: "json" },
+          },
+        }),
+      },
       ready
     )
-    expect(record.config.credentialRefs).toEqual({ apiKey: "local-key" })
+    expect(record.config.credentialRefs).toEqual({
+      apiKey: `${record.configId}:apiKey`,
+      headers: `${record.configId}:headers`,
+    })
+    expect(keyring.entries.get(`${record.configId}:apiKey`)).toBe("sk-inline")
+    expect(JSON.parse(keyring.entries.get(`${record.configId}:headers`)!)).toEqual({
+      Authorization: "Bearer sk-header",
+    })
+    expect(record.config.network).toEqual({
+      endpoint: "https://example.invalid",
+      headers: { Accept: "json" },
+    })
+    expect(record.enabled).toBe(true)
+    expect(record.lifecycleStatus).toBe("ready")
+    // Neither revision — the placeholder nor the real one — holds the secret.
+    const revisions = await getDb().externalAgentConfigRevisions.toArray()
+    expect(JSON.stringify(revisions)).not.toMatch(/sk-inline|sk-header/)
+  })
+
+  it("assesses the stored refs, not the inline secret", async () => {
+    const seen: string[] = []
+    await createHostExternalAgentConfig(
+      { config: config({ metadata: { serverPassword: "pw-1" } }) },
+      {
+        keyring,
+        assessReadiness: async (c) => {
+          seen.push(JSON.stringify(c))
+          return { status: "ready" }
+        },
+      }
+    )
+    expect(seen.join()).not.toContain("pw-1")
+    expect(seen.at(-1)).toContain(":serverPassword")
+  })
+
+  it("deletes the half-made config and its slots when the keyring refuses", async () => {
+    const failing = memoryKeyring()
+    failing.save = async () => {
+      throw new Error("keyring locked")
+    }
+    await expect(
+      createHostExternalAgentConfig(
+        { config: config({ network: { endpoint: "https://x.invalid", apiKey: "k" } }) },
+        { ...ready, keyring: failing }
+      )
+    ).rejects.toThrow("keyring locked")
+    expect(await listHostExternalAgentConfigs()).toEqual([])
+  })
+
+  it("defaults a new config to its own state when the runtime can be isolated", async () => {
+    const record = await createHostExternalAgentConfig(
+      { config: config({ protocol: "acp", process: { command: "codex-acp" } } as never) },
+      ready
+    )
+    expect(record.config.stateIsolation).toBe("isolated")
+  })
+
+  it("defaults to shared state when the runtime has no home to isolate", async () => {
+    const record = await createHostExternalAgentConfig(
+      { config: config({ process: { command: "some-unknown-cli" } } as never) },
+      ready
+    )
+    expect(record.config.stateIsolation).toBe("shared")
+    expect(record.lifecycleStatus).toBe("ready")
+  })
+
+  it("blocks an explicitly isolated config its runtime cannot isolate", async () => {
+    const record = await createHostExternalAgentConfig(
+      {
+        config: config({
+          stateIsolation: "isolated",
+          process: { command: "some-unknown-cli" },
+        } as never),
+      },
+      ready
+    )
+    expect(record.lifecycleStatus).toBe("blocked")
+    expect(record.config.lifecycleReasonCode).toBe("state_isolation_unsupported")
+    expect(record.enabled).toBe(false)
+  })
+
+  it("keeps an import's isolation as it was sent", async () => {
+    const record = await createHostExternalAgentConfig(
+      { fromImport: true, config: config({ process: { command: "codex-acp" } } as never) },
+      ready
+    )
+    expect(record.config.stateIsolation).toBeUndefined()
   })
 
   // Assessing before scrubbing would let an inline secret satisfy the
@@ -172,6 +317,7 @@ describe("create", () => {
         }),
       },
       {
+        keyring,
         assessReadiness: async (c) => {
           seen.push(JSON.stringify(c))
           return { status: "ready" }
@@ -247,14 +393,261 @@ describe("update", () => {
       )
     ).rejects.toBeInstanceOf(ExternalAgentConfigNotFoundError)
   })
+
+  it("moves a new inline secret into the config's own slot, keeping the others", async () => {
+    const created = await createHostExternalAgentConfig(
+      {
+        config: config({
+          process: { command: "pi", env: { PI_API_KEY: "old-env", PLAIN: "1" } },
+          metadata: { serverPassword: "pw" },
+        } as never),
+      },
+      ready
+    )
+    const updated = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: created.revision,
+        patch: {
+          process: { command: "pi", env: { OTHER_TOKEN: "new-env", PLAIN: "2" } },
+        },
+      },
+      ready
+    )
+    expect(updated.config.process?.env).toEqual({ PLAIN: "2" })
+    expect(updated.config.credentialRefs).toEqual({
+      processEnv: `${created.configId}:processEnv`,
+      serverPassword: `${created.configId}:serverPassword`,
+    })
+    expect(JSON.parse(keyring.entries.get(`${created.configId}:processEnv`)!)).toEqual({
+      PI_API_KEY: "old-env",
+      OTHER_TOKEN: "new-env",
+    })
+    expect(keyring.entries.get(`${created.configId}:serverPassword`)).toBe("pw")
+    const revisions = await getDb().externalAgentConfigRevisions.toArray()
+    expect(JSON.stringify(revisions)).not.toMatch(/old-env|new-env|"pw"/)
+  })
+
+  // JSON cannot carry `undefined`, so `null` is how an editor clears a limit.
+  it("clears an optional limit sent as null", async () => {
+    const created = await createHostExternalAgentConfig(
+      { config: config({ maxConcurrentSessions: 2, description: "d" }) },
+      ready
+    )
+    const updated = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: created.revision,
+        patch: { maxConcurrentSessions: null, description: null } as never,
+      },
+      ready
+    )
+    expect(updated.config).not.toHaveProperty("maxConcurrentSessions")
+    expect(updated.config).not.toHaveProperty("description")
+  })
+
+  it("refuses a ref to another config's keyring slot", async () => {
+    const created = await createHostExternalAgentConfig({ config: config() }, ready)
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { credentialRefs: { apiKey: "eac_victim:apiKey" } },
+        },
+        ready
+      )
+    ).rejects.toBeInstanceOf(HostConfigForeignCredentialRefError)
+    // A prefix that merely starts with the id is not the config's own slot.
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { credentialRefs: { apiKey: `${created.configId}x:apiKey` } },
+        },
+        ready
+      )
+    ).rejects.toBeInstanceOf(HostConfigForeignCredentialRefError)
+  })
+
+  it("accepts a ref to the config's own slot", async () => {
+    const created = await createHostExternalAgentConfig({ config: config() }, ready)
+    const updated = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: created.revision,
+        patch: { credentialRefs: { apiKey: `${created.configId}:apiKey` } },
+      },
+      ready
+    )
+    expect(updated.config.credentialRefs).toEqual({ apiKey: `${created.configId}:apiKey` })
+  })
+
+  // The slot ids are deterministic, so writing the keyring IS the edit: a
+  // stale writer must lose before it touches the credential.
+  it("refuses a stale revision before writing a secret", async () => {
+    const created = await createHostExternalAgentConfig(
+      { config: config({ network: { endpoint: "https://x.invalid", apiKey: "first" } }) },
+      ready
+    )
+    await updateHostExternalAgentConfig(
+      { configId: created.configId, expectedRevision: created.revision, patch: { name: "B" } },
+      ready
+    )
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { network: { endpoint: "https://x.invalid", apiKey: "second" } },
+        },
+        ready
+      )
+    ).rejects.toBeInstanceOf(ExternalAgentConfigConflictError)
+    expect(keyring.entries.get(`${created.configId}:apiKey`)).toBe("first")
+  })
 })
 
 describe("delete", () => {
   it("tombstones and hides the config", async () => {
     const created = await createHostExternalAgentConfig({ config: config() }, ready)
-    await deleteHostExternalAgentConfig(created.configId, ready)
+    await deleteHostExternalAgentConfig(created.configId, deleteDeps)
     expect(await listHostExternalAgentConfigs()).toEqual([])
     expect((await getHostExternalAgentConfig(created.configId))?.tombstonedAt).toBeDefined()
+  })
+
+  it("clears the config's keyring slots and removes its state root", async () => {
+    const created = await createHostExternalAgentConfig(
+      { config: config({ network: { endpoint: "https://x.invalid", apiKey: "k" } }) },
+      ready
+    )
+    keyring.entries.set("eac_other:apiKey", "untouched")
+    await deleteHostExternalAgentConfig(created.configId, deleteDeps)
+    expect([...keyring.entries.keys()]).toEqual(["eac_other:apiKey"])
+    expect(removedStateRoots).toEqual([created.configId])
+  })
+
+  it("reports a failed cleanup after the tombstone stands", async () => {
+    const created = await createHostExternalAgentConfig({ config: config() }, ready)
+    await expect(
+      deleteHostExternalAgentConfig(created.configId, {
+        ...deleteDeps,
+        removeStateRoot: async () => {
+          throw new Error("busy")
+        },
+      })
+    ).rejects.toBeInstanceOf(HostConfigCleanupError)
+    expect(await listHostExternalAgentConfigs()).toEqual([])
+  })
+})
+
+describe("duplicate", () => {
+  async function source(overrides: Partial<StoredExternalAgentConfig> = {}) {
+    return createHostExternalAgentConfig(
+      {
+        config: config({
+          name: "Codex",
+          protocol: "acp",
+          process: {
+            command: "codex-acp",
+            env: { CODEX_HOME: "/Users/me/.codex", OPENAI_API_KEY: "sk-env", PLAIN: "1" },
+          },
+          defaultPermissionMode: "plan",
+          maxConcurrentSessions: 2,
+          metadata: { preset: "codex", port: 4096, importedFromAgentId: "local_codex" },
+          ...overrides,
+        } as never),
+      },
+      ready
+    )
+  }
+
+  it("copies the config into a new row with its own secrets and lineage", async () => {
+    const original = await source()
+    const copy = await duplicateHostExternalAgentConfig({ configId: original.configId }, ready)
+    expect(copy.configId).not.toBe(original.configId)
+    expect(copy.config.name).toBe("Codex (copy)")
+    expect(copy.config.duplicatedFromAgentId).toBe(original.configId)
+    expect(copy.config.stateIsolation).toBe("isolated")
+    expect(copy.config.defaultPermissionMode).toBe("plan")
+    expect(copy.config.maxConcurrentSessions).toBe(2)
+    // The isolation rule owns CODEX_HOME; the instance-only port and the
+    // source's import provenance stay behind.
+    expect(copy.config.process?.env).toEqual({ PLAIN: "1" })
+    expect(copy.config.metadata).toEqual({ preset: "codex" })
+    expect(copy.config.credentialRefs).toEqual({ processEnv: `${copy.configId}:processEnv` })
+    expect(JSON.parse(keyring.entries.get(`${copy.configId}:processEnv`)!)).toEqual({
+      OPENAI_API_KEY: "sk-env",
+    })
+    // The source's slot is untouched and still its own.
+    expect(keyring.entries.get(`${original.configId}:processEnv`)).toBeDefined()
+  })
+
+  it("uses the caller's name, isolation and enabled choice", async () => {
+    const original = await source()
+    const copy = await duplicateHostExternalAgentConfig(
+      { configId: original.configId, name: "Codex RO", stateIsolation: "shared", enabled: false },
+      ready
+    )
+    expect(copy.config.name).toBe("Codex RO")
+    expect(copy.config.stateIsolation).toBe("shared")
+    expect(copy.enabled).toBe(false)
+  })
+
+  it("picks the next free copy name", async () => {
+    const original = await source()
+    await duplicateHostExternalAgentConfig({ configId: original.configId }, ready)
+    const second = await duplicateHostExternalAgentConfig({ configId: original.configId }, ready)
+    expect(second.config.name).toBe("Codex (copy 2)")
+  })
+
+  it("survives the source's deletion", async () => {
+    const original = await source()
+    const copy = await duplicateHostExternalAgentConfig({ configId: original.configId }, ready)
+    await deleteHostExternalAgentConfig(original.configId, deleteDeps)
+    expect(keyring.entries.get(`${copy.configId}:processEnv`)).toBeDefined()
+  })
+
+  it("refuses a source whose keyring entry is gone", async () => {
+    const original = await source()
+    keyring.entries.delete(`${original.configId}:processEnv`)
+    await expect(
+      duplicateHostExternalAgentConfig({ configId: original.configId }, ready)
+    ).rejects.toMatchObject({ code: "credential_missing" })
+    expect(await listHostExternalAgentConfigs()).toHaveLength(1)
+  })
+
+  it("refuses an unknown or deleted source", async () => {
+    await expect(
+      duplicateHostExternalAgentConfig({ configId: "eac_missing" }, ready)
+    ).rejects.toBeInstanceOf(ExternalAgentConfigNotFoundError)
+    const original = await source()
+    await deleteHostExternalAgentConfig(original.configId, deleteDeps)
+    await expect(
+      duplicateHostExternalAgentConfig({ configId: original.configId }, ready)
+    ).rejects.toBeInstanceOf(ExternalAgentConfigNotFoundError)
+  })
+})
+
+// G8: a host config launches with its OWN secrets. The mount hands the stored
+// refs to the manager, whose launch preparer resolves them from this keyring.
+describe("launching a host config", () => {
+  it("resolves the secrets the create persisted", async () => {
+    const record = await createHostExternalAgentConfig(
+      {
+        config: config({
+          stateIsolation: "shared",
+          process: { command: "pi", env: { PI_API_KEY: "sk-own" } },
+        } as never),
+      },
+      ready
+    )
+    const launched = await prepareExternalAgentLaunch(
+      hostConfigLaunchConfig(record.configId, record.config as unknown as ExternalAgentConfig),
+      { keyring }
+    )
+    expect(launched.process?.env?.PI_API_KEY).toBe("sk-own")
   })
 })
 
@@ -294,7 +687,7 @@ describe("reconcile", () => {
 
   it("skips tombstoned configs", async () => {
     const created = await createHostExternalAgentConfig({ config: config() }, ready)
-    await deleteHostExternalAgentConfig(created.configId, ready)
+    await deleteHostExternalAgentConfig(created.configId, deleteDeps)
     expect(await reconcileHostExternalAgentConfigs(notReady("blocked"))).toEqual([])
   })
 })

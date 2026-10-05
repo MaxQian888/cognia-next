@@ -33,6 +33,12 @@ jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
   installPackWarningRefreshWiring: () => mockInstallPackWarningRefreshWiring(),
 }))
 
+const mockExternalAgentHookTeardown = jest.fn()
+const mockInstallExternalAgentConfigHookSource = jest.fn(() => mockExternalAgentHookTeardown)
+jest.mock("@/lib/plugin/messaging/external-agent-config-hook-source", () => ({
+  installExternalAgentConfigHookSource: () => mockInstallExternalAgentConfigHookSource(),
+}))
+
 const mockMarkBootCapabilityReady = jest.fn()
 const mockMarkBootCapabilityFailed = jest.fn()
 let mockPluginRuntimeRequested = true
@@ -193,6 +199,22 @@ describe("PluginRuntimeInitializer", () => {
     expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(1)
     unmount()
     expect(warningRefreshTeardown).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires the external-agent config hook from one store feed for the runtime's lifetime", () => {
+    const { unmount } = render(<PluginRuntimeInitializer />)
+
+    expect(mockInstallExternalAgentConfigHookSource).toHaveBeenCalledTimes(1)
+    expect(mockExternalAgentHookTeardown).not.toHaveBeenCalled()
+    unmount()
+    expect(mockExternalAgentHookTeardown).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not install the external-agent config hook feed when the runtime is not requested", () => {
+    mockPluginRuntimeRequested = false
+    render(<PluginRuntimeInitializer />)
+
+    expect(mockInstallExternalAgentConfigHookSource).not.toHaveBeenCalled()
   })
 
   it("reinstalls character-pack warning refresh wiring after a StrictMode replay", () => {

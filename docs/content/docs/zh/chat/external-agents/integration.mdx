@@ -131,11 +131,18 @@ flowchart LR
 预设只配置**如何启动**一个说四种内置协议（`acp` / `codex-app-server` / `opencode` / `a2a`）之一的 Agent。要接入说**全新协议**的 Agent，插件需贡献一个*协议适配器*——预设的「针对性行为」孪生：
 
 - 在 manifest 声明 `externalAgentAdapters: [{ id, label, entry, export }]`（或在 activate 时调用 `ctx.agent.registerExternalAgentAdapter(id, factory)`）。`entry`/`export` 指向一个导出 `() => ProtocolAdapter` 工厂的渲染端模块。
+- **Python 承载**的适配器（`python` 插件中不带 `entry`/`export` 的条目，或声明 `backend: "python"` 的条目）改由插件 Python 代码中的 `@cognia.contribution("<id>")` 实现。桥为每个外部 Agent **配置**各建一个渲染端包装器，该包装器发出的每次调用都携带自己的实例 id（`__cognia_dispatch_contribution__` 信封的第 5 个元素）。装饰一个**类**时，每个配置得到自己的 Python 对象：在该配置首次调用时构建，`disconnect` 后释放，因此同一适配器背后的两个配置永不共享状态。装饰一个**现成对象**则只有一个共享实例：它同一时间只服务一个配置，宿主会以报错拒绝第二个配置，并提示作者改为装饰类。
 - 启用时，**external-agent-adapters 桥**（`lib/plugin/bridge/external-agent-adapters-bridge.ts`）懒导入该工厂并以命名空间协议 `${pluginId}:${id}` 注册进外部 Agent 的 `protocolAdapterRegistry`——故永不与内置或其他插件冲突；禁用时移除。
 - 配套预设引用该命名空间协议，于是贡献的 Agent 出现在快速开始画廊，连接方式与内置完全一致（`addAgent` → `protocolAdapterRegistry.create` 不区分来源）。`getExternalAgentExecutionBlock` 感知注册表，故仅在提供它的插件启用时该 Agent 可执行，否则给出清晰的「请启用插件」原因。
 - 通用且已加固的 **Rust 进程层**仍负责子进程拉起（见 §4）；贡献的适配器只驱动渲染端协议/会话逻辑——绝不直接拉起进程。
 
 参考插件：`plugins/external-agent-adapter-example/`（适配器 + 配套预设，端到端）。见 [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type)。
+
+### 准入与配置管理（ADR-0216）
+
+Bot 运行之外的 `runExternalAgent` 不再只检查权限，而是走准入：全局总开关生效；已配置的 Agent 必须已启用并通过 `lifecycle.assessReadiness`（并经 `lifecycle.connect` 注册，从而以它自己的 keyring 凭据启动）；请求的权限模式被收敛到目标自身的默认值（临时预设实例取全局默认）；临时预设实例在运行结束时被移除。运行在外部 Agent 上的 `dispatchSubagent` 除 `agent:dispatch` 外还需要 `agent:dispatch-external`。七个 `onExternalAgent*` 钩子只投递给获得 `agent:external:read` 的插件。
+
+插件通过 **`ctx.externalAgents`** 查看和管理配置本身 —— `agent:external:read` 提供无密钥投影、就绪状态、预设、已安装运行时、全局设置、委派规则和 `onChange` 变更流；`agent:external:manage`（危险权限）提供创建、从预设创建、更新、复制、删除、启用、连接/断开、规则编辑与设置修改。所有配置写入都经过生命周期服务；输入拒绝内联凭据，凭据录入与非沙箱同意只留在本设置 UI 中。Python 插件调用同一命名空间，并通过 `onExternalAgentConfigChange` 钩子观察变更。完整方法表见 [Context API → `ctx.externalAgents`](../../subsystems/plugin-system/context-api)。
 
 ## 3 · 设置 UI
 

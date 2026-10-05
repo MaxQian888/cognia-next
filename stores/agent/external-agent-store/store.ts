@@ -38,6 +38,7 @@ type PersistedExternalAgentState = Partial<
     | "showConnectionNotifications"
     | "chatFailurePolicy"
     | "overviewBannerCollapsed"
+    | "railGroupBy"
   >
 >
 
@@ -155,6 +156,7 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
         showConnectionNotifications: state.showConnectionNotifications,
         chatFailurePolicy: state.chatFailurePolicy,
         overviewBannerCollapsed: state.overviewBannerCollapsed,
+        railGroupBy: state.railGroupBy,
       }),
     }
   )

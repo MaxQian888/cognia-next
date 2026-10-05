@@ -789,6 +789,62 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
   })
 
+  describe("External-agent dispatchers (agent:external:read)", () => {
+    function withHooks(hooks: Record<string, unknown>, permissions: string[]) {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("ext-plugin", permissions as never)
+      seedPlugins({
+        plugins: { "ext-plugin": { status: "enabled", hooks } },
+      })
+    }
+
+    function allHooks() {
+      return {
+        onExternalAgentConnect: jest.fn(),
+        onExternalAgentDisconnect: jest.fn(),
+        onExternalAgentExecutionStart: jest.fn(),
+        onExternalAgentExecutionComplete: jest.fn(),
+        onExternalAgentPermissionRequest: jest.fn(),
+        onExternalAgentToolCall: jest.fn(),
+        onExternalAgentError: jest.fn(),
+        onExternalAgentConfigChange: jest.fn(),
+      }
+    }
+
+    async function fireAll() {
+      eventHooks.dispatchExternalAgentConnect("a", "Agent A")
+      eventHooks.dispatchExternalAgentDisconnect("a")
+      eventHooks.dispatchExternalAgentExecutionStart("a", "s", "prompt")
+      eventHooks.dispatchExternalAgentExecutionComplete("a", "s", true, "done")
+      eventHooks.dispatchExternalAgentPermissionRequest("a", "s", "shell", "why")
+      eventHooks.dispatchExternalAgentToolCall("a", "s", "shell", { command: "ls" })
+      eventHooks.dispatchExternalAgentError("a", "boom")
+      await eventHooks.dispatchExternalAgentConfigChange({ type: "config-added", agentId: "a" })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    it("delivers all eight hooks to a plugin granted agent:external:read", async () => {
+      const hooks = allHooks()
+      withHooks(hooks, ["agent:external:read"])
+      await fireAll()
+      for (const hook of Object.values(hooks)) expect(hook).toHaveBeenCalledTimes(1)
+      expect(hooks.onExternalAgentConfigChange).toHaveBeenCalledWith({
+        type: "config-added",
+        agentId: "a",
+      })
+      expect(hooks.onExternalAgentToolCall).toHaveBeenCalledWith("a", "s", "shell", {
+        command: "ls",
+      })
+    })
+
+    it("withholds every external-agent hook without agent:external:read", async () => {
+      const hooks = allHooks()
+      withHooks(hooks, ["agent:dispatch-external"])
+      await fireAll()
+      for (const hook of Object.values(hooks)) expect(hook).not.toHaveBeenCalled()
+    })
+  })
+
   describe("Pet dispatchers", () => {
     function withHooks(hooks: Record<string, unknown>, permissions: string[] = ["pet:read"]) {
       resetPermissionGuard()

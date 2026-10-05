@@ -281,6 +281,10 @@
       "hint": "This host is already running the maximum number of agent processes — finish or close one, then try again.",
       "label": "Too many agent sessions"
     },
+    "stateIsolationUnsupported": {
+      "hint": "This agent is set to keep its own runtime state, but its runtime has no setting for where that state lives. Switch the agent to share the runtime's own state.",
+      "label": "Runtime can't keep separate state"
+    },
     "routerFusionBypassed": {
       "hint": "Router + Fusion could not reserve a background model call, so it ran on the original path and its cost is not in the ledger. Repeated failures pause the surface; check Settings → AI connections → Routing.",
       "label": "Model call not ledgered"
@@ -464,7 +468,8 @@
     "startOnAProcessCapableRuntime": "Run this agent where a process can start: the desktop app, or a paired Host.",
     "grantAgentControlOnTheHost": "If a Host is paired, grant this device Agent Control on it.",
     "useOfficialWorkflow": "Use this product's own official workflow for this surface.",
-    "useSupportedOperations": "Stick to the operations this endpoint supports."
+    "useSupportedOperations": "Stick to the operations this endpoint supports.",
+    "shareRuntimeState": "Switch the agent to share the runtime's own state, then reconnect."
   },
   "severity": {
     "error": "Error",

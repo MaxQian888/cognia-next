@@ -22,7 +22,13 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { AlertCircleIcon, ChevronDownIcon, ServerIcon, ServerCogIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  ChevronDownIcon,
+  InfoIcon,
+  ServerIcon,
+  ServerCogIcon,
+} from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -39,6 +45,10 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { BrandIcon } from "@/components/icons/brand-icon"
+import {
+  StateIsolationField,
+  effectiveStateIsolation,
+} from "@/components/agent/external-agent/add-agent/state-isolation-field"
 import { ConnectionFields } from "@/components/agent/external-agent/add-agent/connection-fields"
 import {
   AddAgentCogniaModelField,
@@ -60,12 +70,13 @@ import { useInstalledAgentRuntimes } from "@/hooks/agent/use-installed-agent-run
 import { PROCESS_PLANE_COMMANDS } from "@/lib/ai/agent/external/capability/process-plane"
 import {
   CONNECTION_PROBLEMS,
+  addAgentFormLaunchTarget,
   buildCreateExternalAgentInput,
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
-import type { AcpPermissionMode } from "@/types/agent/external-agent"
+import type { AcpPermissionMode, ExternalAgentStateIsolation } from "@/types/agent/external-agent"
 
 import {
   PERMISSION_MODE_LABEL_KEY,
@@ -132,6 +143,20 @@ function AddExternalAgentFormBody({ presetId }: { presetId: string }) {
     preset?.defaultPermissionMode
   )
   const permissionMode = effectivePermissionMode(requestedMode, form.data.protocol)
+  const { command: launchCommand, args: launchArgs } = addAgentFormLaunchTarget(form.data)
+  // A new configuration owns its state (ADR-0216) unless the user chose
+  // otherwise — and never asks for its own state on a runtime that cannot
+  // have one, because the Host would only refuse to launch it.
+  const [requestedIsolation, setRequestedIsolation] = useState<
+    ExternalAgentStateIsolation | undefined
+  >(undefined)
+  const stateIsolation = effectiveStateIsolation(requestedIsolation, launchCommand, launchArgs)
+  // Two agents with one name are legal but hard to tell apart in the runtime
+  // menu; said before submit, never refused.
+  const typedName = form.data.name.trim().toLowerCase()
+  const nameTaken =
+    typedName.length > 0 &&
+    host.configs.some((record) => (record.config.name ?? "").trim().toLowerCase() === typedName)
   const [advancedOpen, setAdvancedOpen] = useState(presetId === "custom")
   const [problem, setProblem] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -175,6 +200,7 @@ function AddExternalAgentFormBody({ presetId }: { presetId: string }) {
     })
     const created = await host.create({
       ...(input as Partial<StoredExternalAgentConfig>),
+      stateIsolation,
       enabled: true,
     })
     setSubmitting(false)
@@ -231,10 +257,22 @@ function AddExternalAgentFormBody({ presetId }: { presetId: string }) {
             onChange={(event) => form.setField("name", event.target.value)}
             // i18n-exempt: example agent name (brand), not UI prose
             placeholder="Claude Code"
-            className="h-10"
+            className="h-11"
             required
+            aria-describedby={nameTaken ? "add-agent-name-taken" : undefined}
             data-testid="add-agent-name"
           />
+          {nameTaken ? (
+            <p
+              id="add-agent-name-taken"
+              role="status"
+              className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300"
+              data-testid="add-agent-name-taken"
+            >
+              <InfoIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              {t("nameTaken", { name: form.data.name.trim() })}
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-2">
           <Label htmlFor="permission-mode">{t("permissionLabel")}</Label>
@@ -244,7 +282,7 @@ function AddExternalAgentFormBody({ presetId }: { presetId: string }) {
           >
             <SelectTrigger
               id="permission-mode"
-              className="h-10 w-full"
+              className="h-11 w-full"
               data-testid="add-agent-permission"
             >
               <SelectValue />
@@ -259,6 +297,13 @@ function AddExternalAgentFormBody({ presetId }: { presetId: string }) {
           </Select>
           <p className="text-xs text-muted-foreground">{t("permissionHint")}</p>
         </div>
+        <StateIsolationField
+          value={stateIsolation}
+          onChange={setRequestedIsolation}
+          command={launchCommand}
+          args={launchArgs}
+          disabled={submitting}
+        />
       </div>
 
       <Collapsible
@@ -269,7 +314,7 @@ function AddExternalAgentFormBody({ presetId }: { presetId: string }) {
       >
         <div ref={advancedRef} className="scroll-mt-16">
           <CollapsibleTrigger
-            className="group flex w-full items-center justify-between gap-3 px-3 py-3 text-left"
+            className="group flex min-h-11 w-full items-center justify-between gap-3 px-3 py-3 text-left"
             data-testid="add-agent-advanced-trigger"
           >
             <span className="min-w-0">

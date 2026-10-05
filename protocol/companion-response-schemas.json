@@ -10334,6 +10334,16 @@
       },
       "additionalProperties": false
     },
+    "external_agent_config_duplicate": {
+      "type": "object",
+      "required": ["config"],
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/ExternalAgentConfigRecord"
+        }
+      },
+      "additionalProperties": false
+    },
     "external_agent_config_get": {
       "type": "object",
       "required": ["config"],

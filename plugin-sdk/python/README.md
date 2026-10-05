@@ -74,6 +74,34 @@ class Greeter(Plugin):
         return f"{self.context.config.get('greeting', 'Hello')}, {who}!"
 ```
 
+## Python-backed contributions
+
+`@cognia.contribution("<id>")` owns a module-bridge contribution (OCR provider,
+AI provider, connector, external-agent adapter, …) whose behaviour runs in
+Python; the renderer reaches it through `__cognia_dispatch_contribution__`.
+
+```python
+import cognia
+
+@cognia.contribution("my-agent")
+class MyAgent:
+    def __init__(self):
+        self.process = None  # per-instance state
+
+    def connect(self, config): ...
+    def disconnect(self): ...
+```
+
+Decorate a **class** whenever the contribution keeps state. The host may
+address a contribution per instance (each external-agent configuration is one
+instance), and a class gives every instance its own object, built on the
+instance's first call and dropped when the host releases it. A decorated
+**object** is shared, so it serves one instance at a time and the host refuses
+a second. Calls that carry no instance id use the object built at decoration
+time. `Runtime.dispatch_contribution(id, method, args, instance_id=...)` and
+`Runtime.release_contribution_instance(id, instance_id)` drive the same rules
+offline in tests.
+
 ## Running tests
 
 From this directory:

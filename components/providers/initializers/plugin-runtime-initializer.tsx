@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { detectPlatform } from "@/lib/platform/detect"
 import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
 import { installPluginRuntimeLogBridge } from "@/lib/plugin/devtools/plugin-log-bridge"
+import { installExternalAgentConfigHookSource } from "@/lib/plugin/messaging/external-agent-config-hook-source"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
@@ -102,6 +103,14 @@ export function PluginRuntimeInitializer({
   useEffect(() => {
     if (!shouldRun) return
     return installPluginRuntimeLogBridge()
+  }, [shouldRun])
+
+  // `onExternalAgentConfigChange` is fired from one store subscription rather
+  // than from every writer (Settings, the phone, the CLI, `ctx.externalAgents`),
+  // so a writer can never forget to fire it (ADR-0216).
+  useEffect(() => {
+    if (!shouldRun) return
+    return installExternalAgentConfigHookSource()
   }, [shouldRun])
 
   useEffect(() => {

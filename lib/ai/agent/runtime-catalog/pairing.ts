@@ -17,7 +17,12 @@
  *      pairing survives a rename on either side. This is the durable answer.
  *   2. **Name.** The fallback, and the only key available for configurations
  *      copied before provenance was recorded. It is what the copy menu always
- *      used, kept for exactly that reason.
+ *      used, kept for exactly that reason, and kept NARROW: it only joins a
+ *      host record that records no provenance of its own, and only when the
+ *      name is unique on both sides. Several configurations of one runtime
+ *      (ADR-0216) routinely share a name stem, and a collision used to merge
+ *      two different agents into one row that showed one's details and ran
+ *      the other.
  *
  * Id is deliberately NOT a key: the host mints its own `eac_*` on import, so a
  * copied agent never carries the local id back in `config.id`.
@@ -77,12 +82,22 @@ export function pairRuntimeConfigs<L extends PairableLocalAgent>(
   hostConfigs: readonly ExternalAgentConfigRecord[]
 ): RuntimePairing<L> {
   const byOrigin = new Map<string, ExternalAgentConfigRecord>()
-  const byName = new Map<string, ExternalAgentConfigRecord>()
+  // Name candidates: only records with no provenance (a record that says where
+  // it came from is joined by that or not at all), only unambiguous names.
+  const byName = new Map<string, ExternalAgentConfigRecord | null>()
   for (const record of hostConfigs) {
     const origin = hostConfigOriginAgentId(record)
-    if (origin && !byOrigin.has(origin)) byOrigin.set(origin, record)
+    if (origin) {
+      if (!byOrigin.has(origin)) byOrigin.set(origin, record)
+      continue
+    }
     const key = nameKey(record.config.name)
-    if (key && !byName.has(key)) byName.set(key, record)
+    if (key) byName.set(key, byName.has(key) ? null : record)
+  }
+  const localNameCount = new Map<string, number>()
+  for (const local of localAgents) {
+    const key = nameKey(local.name)
+    if (key) localNameCount.set(key, (localNameCount.get(key) ?? 0) + 1)
   }
 
   const claimed = new Set<string>()
@@ -91,7 +106,11 @@ export function pairRuntimeConfigs<L extends PairableLocalAgent>(
 
   for (const local of localAgents) {
     const key = nameKey(local.name)
-    const match = byOrigin.get(local.id) ?? (key ? byName.get(key) : undefined)
+    const nameMatch =
+      key && localNameCount.get(key) === 1 && !byOrigin.has(local.id)
+        ? (byName.get(key) ?? undefined)
+        : undefined
+    const match = byOrigin.get(local.id) ?? nameMatch
     if (match && !claimed.has(match.configId)) {
       claimed.add(match.configId)
       paired.push({ local, host: match })

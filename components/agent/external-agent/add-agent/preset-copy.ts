@@ -46,15 +46,59 @@ const NAME_KEYS: Readonly<Record<string, string>> = {
   "opencode-v2-service": "opencodeV2PresetName",
 }
 
-/** Setup hint. `tManager` is `externalAgent.manager`. */
+/**
+ * Setup hints whose translation lives under `externalAgent.settings` rather
+ * than `externalAgent.manager`: the presets only the settings editor offers.
+ */
+const SETTINGS_SETUP_HINT_KEYS: Readonly<Record<string, string>> = {
+  "opencode-v2-service": "opencodeV2PresetSetupHint",
+}
+
+/**
+ * The label (under `externalAgent.settings`) of the dedicated, masked
+ * environment editor a preset's sign-in needs, keyed by preset id.
+ */
+const ENVIRONMENT_LABEL_KEYS: Readonly<Record<string, string>> = {
+  aider: "aiderEnvironment",
+  qoder: "qoderEnvironment",
+  kimi: "kimiEnvironment",
+  cline: "clineEnvironment",
+}
+
+/**
+ * Setup hint. `tManager` is `externalAgent.manager`; `tSettings`
+ * (`externalAgent.settings`) is needed only by a surface that offers the
+ * settings-only presets, which otherwise fall back to the preset's prose.
+ */
 export function presetSetupHint(
   tManager: Translate,
   presetId: string,
-  preset: ExternalAgentPresetConfig
+  preset: ExternalAgentPresetConfig,
+  tSettings?: Translate
 ): string | undefined {
   if (!preset.setupHint) return undefined
+  const settingsKey = SETTINGS_SETUP_HINT_KEYS[presetId]
+  if (settingsKey && tSettings) return tSettings(settingsKey)
   const key = SETUP_HINT_KEYS[presetId]
   return key ? tManager(key) : preset.setupHint
+}
+
+/**
+ * The label of the environment editor that carries a runtime's own sign-in
+ * (a PAT, an API key, a config root), or `undefined` when the generic
+ * "process environment" editor is the right one. Aider is recognised by its
+ * protocol too: a hand-configured `aider-cli` agent needs the same provider
+ * keys as the preset. `tSettings` is `externalAgent.settings`.
+ */
+export function presetEnvironmentLabel(
+  tSettings: Translate,
+  presetId: string | undefined,
+  protocol: string
+): string | undefined {
+  const key =
+    (presetId ? ENVIRONMENT_LABEL_KEYS[presetId] : undefined) ??
+    (protocol === "aider-cli" ? ENVIRONMENT_LABEL_KEYS.aider : undefined)
+  return key ? tSettings(key) : undefined
 }
 
 /** Environment-variable note. `tManager` is `externalAgent.manager`. */

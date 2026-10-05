@@ -18,7 +18,19 @@
  * ```
  * plugin_python_call(pluginId, "__cognia_dispatch_contribution__",
  *                    [contributionId, method, args, streamId | null])
+ * plugin_python_call(pluginId, "__cognia_dispatch_contribution__",
+ *                    [contributionId, method, args, streamId | null, instanceId])
  * ```
+ *
+ * The 5th element is optional. Without it the call targets the contribution's
+ * single default object (the 4-element envelope every module bridge has always
+ * sent). With it, a contribution whose Python author decorated a **class**
+ * gets one lazily-built object per `instanceId`, so two host-side wrappers of
+ * the same contribution (two external-agent configurations backed by one
+ * adapter) never share Python state. A contribution decorated as an
+ * already-built object can serve one instance id at a time and refuses a
+ * second. The reserved method `__release__` (see
+ * {@link createPythonContributionReleaser}) drops one instance.
  *
  * Plugin → host reuses the existing `plugin:python` event channel
  * (`crates/cognia-plugin-runtime/src/python/events.rs`), fanned out by
@@ -41,6 +53,15 @@ import { capturePythonRuntimeGeneration } from "@/lib/plugin/python/runtime-gene
 
 /** Python symbol the SDK registers to route contribution method calls. */
 export const PYTHON_CONTRIBUTION_DISPATCH = "__cognia_dispatch_contribution__"
+
+/**
+ * Reserved contribution method that drops one per-instance object on the
+ * Python side. Host-owned, like {@link PYTHON_CONTRIBUTION_DISPATCH}: plugin
+ * authors cannot define it (underscore names are never exposed as methods).
+ * Mirrors `CONTRIBUTION_RELEASE` in
+ * `crates/cognia-plugin-runtime/src/python/host.py`.
+ */
+export const PYTHON_CONTRIBUTION_RELEASE = "__release__"
 
 /** How the seam reaches the Python subprocess. Tests inject a fake. */
 export type PythonCallTransport = (
@@ -69,6 +90,14 @@ export interface PythonBackedProxyOptions {
   subscribe?: PythonEventSubscribe
   /** Stream-id factory — deterministic in tests. */
   newStreamId?: () => string
+  /**
+   * Per-instance routing key. When set, every call (plain and streaming)
+   * carries it as the 5th dispatch-envelope element so the Python host routes
+   * to the object owned by this instance instead of the contribution's shared
+   * default. Release it with {@link createPythonContributionReleaser} once the
+   * wrapper is done. Omit it to keep the 4-element envelope.
+   */
+  instanceId?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -99,6 +128,44 @@ function describe(options: PythonBackedProxyOptions, method: string): string {
   return `${what}"${options.pluginId}:${options.contributionId}".${method}`
 }
 
+/**
+ * Build the `__cognia_dispatch_contribution__` argument list. The instance id
+ * is appended only when present so bridges that never set one keep sending
+ * the exact 4-element envelope older hosts understand.
+ */
+function dispatchEnvelope(
+  contributionId: string,
+  method: string,
+  args: readonly unknown[],
+  streamId: string | null,
+  instanceId: string | undefined
+): unknown[] {
+  const envelope: unknown[] = [contributionId, method, args, streamId]
+  if (instanceId !== undefined) envelope.push(instanceId)
+  return envelope
+}
+
+/**
+ * Resolve the transport once, binding the default one to the plugin's Python
+ * runtime generation captured *now*: a stale wrapper must keep targeting the
+ * subprocess that holds its state, and the host rejects it once that
+ * subprocess is gone rather than attaching it to a replacement.
+ */
+function bindTransport(
+  pluginId: string,
+  call: PythonCallTransport | undefined
+): {
+  call: PythonCallTransport
+  generation: string | null
+} {
+  if (call) return { call, generation: null }
+  const generation = capturePythonRuntimeGeneration(pluginId)
+  return {
+    call: (id, functionName, args) => defaultCall(id, generation, functionName, args),
+    generation,
+  }
+}
+
 function wrapFailure(options: PythonBackedProxyOptions, method: string, error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error)
   const wrapped = new Error(`python-backed ${describe(options, method)} failed: ${message}`)
@@ -113,10 +180,7 @@ function wrapFailure(options: PythonBackedProxyOptions, method: string, error: u
  * the final value.
  */
 export function createPythonBackedProxy<T extends object>(options: PythonBackedProxyOptions): T {
-  const generation = options.call ? null : capturePythonRuntimeGeneration(options.pluginId)
-  const call =
-    options.call ??
-    ((pluginId, functionName, args) => defaultCall(pluginId, generation!, functionName, args))
+  const { call, generation } = bindTransport(options.pluginId, options.call)
   const subscribe = options.subscribe ?? subscribePythonPluginEvents
   const newStreamId = options.newStreamId ?? defaultNewStreamId
   const streaming = new Set(options.streamingMethods ?? [])
@@ -126,12 +190,11 @@ export function createPythonBackedProxy<T extends object>(options: PythonBackedP
     if (!streaming.has(method)) {
       proxy[method] = async (...args: unknown[]): Promise<unknown> => {
         try {
-          return await call(options.pluginId, PYTHON_CONTRIBUTION_DISPATCH, [
-            options.contributionId,
-            method,
-            args,
-            null,
-          ])
+          return await call(
+            options.pluginId,
+            PYTHON_CONTRIBUTION_DISPATCH,
+            dispatchEnvelope(options.contributionId, method, args, null, options.instanceId)
+          )
         } catch (error) {
           throw wrapFailure(options, method, error)
         }
@@ -180,12 +243,11 @@ async function* streamMethod(
 
   let result: unknown
   let failure: unknown
-  const settled = call(options.pluginId, PYTHON_CONTRIBUTION_DISPATCH, [
-    options.contributionId,
-    method,
-    args,
-    streamId,
-  ]).then(
+  const settled = call(
+    options.pluginId,
+    PYTHON_CONTRIBUTION_DISPATCH,
+    dispatchEnvelope(options.contributionId, method, args, streamId, options.instanceId)
+  ).then(
     (value) => {
       result = value
       finished = true
@@ -220,6 +282,56 @@ async function* streamMethod(
     return result
   } finally {
     unsubscribe()
+  }
+}
+
+export interface PythonContributionReleaserOptions {
+  pluginId: string
+  contributionId: string
+  /** The instance to drop — the same id the proxy was built with. */
+  instanceId: string
+  /** Human-readable capability label used in error messages. */
+  label?: string
+  call?: PythonCallTransport
+}
+
+/**
+ * Build the releaser for one per-instance contribution object.
+ *
+ * Create it **alongside** the instance's proxy: both capture the plugin's
+ * Python runtime generation at construction, so the release reaches the same
+ * subprocess that holds the instance (a restarted runtime never had it, and
+ * the host rejects the stale generation instead of no-op'ing on the new one).
+ * The returned function sends the reserved `__release__` method through the
+ * dispatcher with the instance id as the 5th envelope element; releasing an
+ * instance the host does not know is a no-op on the Python side.
+ */
+export function createPythonContributionReleaser(
+  options: PythonContributionReleaserOptions
+): () => Promise<void> {
+  const { call } = bindTransport(options.pluginId, options.call)
+  const describeOptions: PythonBackedProxyOptions = {
+    pluginId: options.pluginId,
+    contributionId: options.contributionId,
+    methods: [],
+    ...(options.label ? { label: options.label } : {}),
+  }
+  return async () => {
+    try {
+      await call(
+        options.pluginId,
+        PYTHON_CONTRIBUTION_DISPATCH,
+        dispatchEnvelope(
+          options.contributionId,
+          PYTHON_CONTRIBUTION_RELEASE,
+          [],
+          null,
+          options.instanceId
+        )
+      )
+    } catch (error) {
+      throw wrapFailure(describeOptions, PYTHON_CONTRIBUTION_RELEASE, error)
+    }
   }
 }
 

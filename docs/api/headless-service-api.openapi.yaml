@@ -4565,6 +4565,7 @@ paths:
                     searchEnabled: {}
                     searchFallbackEnabled: {}
                     searchMaxResults: {}
+                    sessionSummaryCard: {}
                     sidebarLayout: {}
                     streamPartialMessages: {}
                     sttLanguage: {}
@@ -47701,6 +47702,231 @@ paths:
               properties:
                 configId:
                   type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - config
+                properties:
+                  config:
+                    type: object
+                    required:
+                      - configId
+                      - revision
+                      - lifecycleGeneration
+                      - seq
+                      - enabled
+                      - lifecycleStatus
+                      - createdAt
+                      - updatedAt
+                      - config
+                    properties:
+                      configId:
+                        type: string
+                      revision:
+                        type: string
+                      lifecycleGeneration:
+                        type: integer
+                      seq:
+                        type: integer
+                      enabled:
+                        type: boolean
+                      lifecycleStatus:
+                        type: string
+                        enum:
+                          - ready
+                          - needs-credentials
+                          - needs-consent
+                          - needs-runtime
+                          - blocked
+                      tombstonedAt:
+                        type: number
+                      createdAt:
+                        type: number
+                      updatedAt:
+                        type: number
+                      config:
+                        type: object
+                        additionalProperties: true
+                        x-cognia-opaque-reason: The stored ExternalAgentConfig is owned by the external-agent domain and versioned with it; this
+                          plane owns the head/revision envelope around it, which is typed above.
+                    additionalProperties: false
+                additionalProperties: false
+                x-cognia-schema-owner: external-agents
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/external_agent_config_duplicate:
+    post:
+      operationId: internalRpcExternalAgentConfigDuplicate
+      tags:
+        - headless-rpc
+      summary: external_agent_config_duplicate (process.spawn)
+      description: "Loopback service-token command. Target: execution; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - configId
+              properties:
+                configId:
+                  type: string
+                name:
+                  type: string
+                stateIsolation:
+                  type: string
+                  enum:
+                    - shared
+                    - isolated
+                enabled:
+                  type: boolean
               additionalProperties: false
       responses:
         "200":
@@ -155481,6 +155707,7 @@ components:
           - external_agent_cognia_models
           - external_agent_config_create
           - external_agent_config_delete
+          - external_agent_config_duplicate
           - external_agent_config_get
           - external_agent_config_list
           - external_agent_config_reconcile
@@ -156252,10 +156479,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 739
-  generatedRequestSchemaCount: 739
+  internalCommandCount: 740
+  generatedRequestSchemaCount: 740
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 739
+  contractRequestSchemaCount: 740
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 739
+  generatedResponseSchemaCount: 740
   loopbackOnly: true

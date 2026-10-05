@@ -741,20 +741,46 @@ impl DispatchHost {
     /// that looks like a bundle problem and is really a double-wrap. The
     /// container is the stronger confinement of the two, so it wins and the
     /// desktop wrapper stands down.
+    ///
+    /// # Per-configuration state roots (ADR-0216)
+    ///
+    /// `COGNIA_AGENT_STATE_KEY` names a private state root on THIS host. The
+    /// desktop wrapper resolves it; a headless local-process spawn leaves it
+    /// for the process table, which resolves it unsandboxed. A launch confined
+    /// anywhere else (a runtime-environment container, a container or
+    /// Kubernetes exec backend) cannot see the host's login roots and could
+    /// not reach a host path in its env, so the key is dropped there.
     pub fn harden_spawn_config(
         &self,
-        config: crate::external_agent::process::ExternalAgentSpawnConfig,
+        mut config: crate::external_agent::process::ExternalAgentSpawnConfig,
     ) -> Result<crate::external_agent::process::ExternalAgentSpawnConfig, String> {
         match self {
-            Self::Tauri(_) if !desktop_wrapper_applies(&config) => Ok(config),
+            Self::Tauri(_) if !desktop_wrapper_applies(&config) => {
+                cognia_external_agent::state_isolation::strip_state_key(&mut config);
+                Ok(config)
+            }
             Self::Tauri(_) => crate::external_agent::sandbox::wrap_with_sandbox(
                 config,
                 &crate::external_agent::sandbox::DesktopSandboxHost,
             )
             .map_err(|error| error.to_string()),
-            Self::Headless(_) => Ok(config),
+            Self::Headless(_) => {
+                if !state_key_reaches_host_process_table(&config, self.exec_backend().kind()) {
+                    cognia_external_agent::state_isolation::strip_state_key(&mut config);
+                }
+                Ok(config)
+            }
         }
     }
+}
+
+/// Whether a headless spawn runs in this host's own process table, where a
+/// private state root can be resolved (by `ExternalAgentProcessManager`).
+fn state_key_reaches_host_process_table(
+    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
+    backend_kind: &str,
+) -> bool {
+    config.sandbox.is_none() && backend_kind == "local-process"
 }
 
 /// Whether the desktop's OS sandbox wrapper applies to `config`.
@@ -813,6 +839,40 @@ mod tests {
     fn the_desktop_wrapper_stands_down_for_a_spawn_that_runs_in_a_container() {
         assert!(!desktop_wrapper_applies(&spawn_config(true)));
         assert!(desktop_wrapper_applies(&spawn_config(false)));
+    }
+
+    /// ADR-0216. A state key only means something where this host's process
+    /// table runs the child; a container never sees the host's login roots.
+    #[test]
+    fn a_state_key_reaches_only_a_local_process_table() {
+        assert!(state_key_reaches_host_process_table(
+            &spawn_config(false),
+            "local-process"
+        ));
+        assert!(!state_key_reaches_host_process_table(
+            &spawn_config(true),
+            "local-process"
+        ));
+        for kind in ["container", "workspace-runtime", "workspace-routing"] {
+            assert!(!state_key_reaches_host_process_table(
+                &spawn_config(false),
+                kind
+            ));
+        }
+    }
+
+    #[test]
+    fn a_headless_host_drops_a_state_key_it_cannot_honour() {
+        let host = headless_host();
+        let mut config = spawn_config(true);
+        config.env.insert(
+            cognia_external_agent::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "cfg".into(),
+        );
+        let hardened = host.harden_spawn_config(config).expect("nothing to wrap");
+        assert!(!hardened
+            .env
+            .contains_key(cognia_external_agent::state_isolation::AGENT_STATE_KEY_ENV));
     }
 
     /// The headless host confines through its `ExecBackend`, so a placed spawn

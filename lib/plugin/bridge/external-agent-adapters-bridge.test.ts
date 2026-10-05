@@ -21,6 +21,12 @@ import {
   bindPythonRuntimeGeneration,
   __resetPythonRuntimeGenerationsForTesting,
 } from "@/lib/plugin/python/runtime-generation"
+import {
+  PYTHON_CONTRIBUTION_DISPATCH,
+  PYTHON_CONTRIBUTION_RELEASE,
+  type PythonCallTransport,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
+import { loggers } from "@/lib/plugin/core/logger"
 
 class StubAdapter extends BaseProtocolAdapter {
   readonly protocol = "stub"
@@ -94,6 +100,191 @@ describe("external-agent-adapters-bridge python backend", () => {
     expect(adapter.isConnected()).toBe(false)
     expect(typeof adapter.prompt).toBe("function")
     expect(typeof adapter.execute).toBe("function")
+  })
+
+  const PY_MANIFEST = {
+    ...MANIFEST,
+    type: "python",
+    pythonMain: "main.py",
+    externalAgentAdapters: [{ id: "py-agent", label: "Py agent" }],
+  } as unknown as PluginManifest
+
+  const CONFIG_A = { id: "agent-a", name: "A" } as unknown as ExternalAgentConfig
+  const CONFIG_B = { id: "agent-b", name: "B" } as unknown as ExternalAgentConfig
+
+  function recordingCall(
+    respond: (args: unknown[]) => unknown = () => null
+  ): jest.Mock<ReturnType<PythonCallTransport>, Parameters<PythonCallTransport>> {
+    return jest.fn<ReturnType<PythonCallTransport>, Parameters<PythonCallTransport>>(
+      async (_pluginId, _fn, args) => respond([...args])
+    )
+  }
+
+  function sequentialIds(): () => string {
+    let n = 0
+    return () => `inst-${++n}`
+  }
+
+  it("gives every wrapper its own instance id on every call", async () => {
+    const pythonCall = recordingCall()
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", {
+      pythonCall,
+      newInstanceId: sequentialIds(),
+    })
+
+    // One wrapper per external-agent configuration.
+    const adapterA = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    const adapterB = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    await adapterA.connect(CONFIG_A)
+    await adapterB.connect(CONFIG_B)
+    await adapterA.closeSession("s-a")
+
+    expect(pythonCall.mock.calls).toEqual([
+      [
+        "wire-plugin",
+        PYTHON_CONTRIBUTION_DISPATCH,
+        ["py-agent", "connect", [CONFIG_A], null, "inst-1"],
+      ],
+      [
+        "wire-plugin",
+        PYTHON_CONTRIBUTION_DISPATCH,
+        ["py-agent", "connect", [CONFIG_B], null, "inst-2"],
+      ],
+      [
+        "wire-plugin",
+        PYTHON_CONTRIBUTION_DISPATCH,
+        ["py-agent", "closeSession", ["s-a"], null, "inst-1"],
+      ],
+    ])
+    expect(adapterA.isConnected()).toBe(true)
+    expect(adapterB.isConnected()).toBe(true)
+  })
+
+  it("mints distinct instance ids by default", async () => {
+    const pythonCall = recordingCall()
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", { pythonCall })
+
+    await protocolAdapterRegistry.create("wire-plugin:py-agent")!.connect(CONFIG_A)
+    await protocolAdapterRegistry.create("wire-plugin:py-agent")!.connect(CONFIG_B)
+
+    const ids = pythonCall.mock.calls.map(([, , args]) => (args as unknown[])[4])
+    expect(ids).toHaveLength(2)
+    for (const id of ids) {
+      expect(typeof id).toBe("string")
+      expect(id as string).not.toHaveLength(0)
+    }
+    expect(ids[0]).not.toEqual(ids[1])
+  })
+
+  it("streams prompt through the wrapper's own instance", async () => {
+    const pythonCall = recordingCall()
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", {
+      pythonCall,
+      newInstanceId: sequentialIds(),
+    })
+    const adapter = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+
+    const iterator = adapter
+      .prompt("s-1", { role: "user", content: "hi" } as never)
+      [Symbol.asyncIterator]()
+    expect(await iterator.next()).toEqual({ value: null, done: true })
+
+    const [, fn, args] = pythonCall.mock.calls[0]!
+    expect(fn).toBe(PYTHON_CONTRIBUTION_DISPATCH)
+    const envelope = args as unknown[]
+    expect(envelope.slice(0, 2)).toEqual(["py-agent", "prompt"])
+    expect(typeof envelope[3]).toBe("string")
+    expect(envelope[4]).toBe("inst-1")
+  })
+
+  it("disconnect releases only the wrapper's own instance", async () => {
+    const pythonCall = recordingCall()
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", {
+      pythonCall,
+      newInstanceId: sequentialIds(),
+    })
+    const adapterA = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    const adapterB = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    await adapterA.connect(CONFIG_A)
+    await adapterB.connect(CONFIG_B)
+    pythonCall.mockClear()
+
+    await adapterA.disconnect()
+
+    expect(pythonCall.mock.calls).toEqual([
+      ["wire-plugin", PYTHON_CONTRIBUTION_DISPATCH, ["py-agent", "disconnect", [], null, "inst-1"]],
+      [
+        "wire-plugin",
+        PYTHON_CONTRIBUTION_DISPATCH,
+        ["py-agent", PYTHON_CONTRIBUTION_RELEASE, [], null, "inst-1"],
+      ],
+    ])
+    expect(adapterA.isConnected()).toBe(false)
+    expect(adapterB.isConnected()).toBe(true)
+  })
+
+  it("a failed disconnect neither releases nor flips isConnected", async () => {
+    const pythonCall = recordingCall((args) => {
+      if (args[1] === "disconnect") throw new Error("still busy")
+      return null
+    })
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", {
+      pythonCall,
+      newInstanceId: sequentialIds(),
+    })
+    const adapter = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    await adapter.connect(CONFIG_A)
+
+    await expect(adapter.disconnect()).rejects.toThrow("still busy")
+
+    expect(adapter.isConnected()).toBe(true)
+    expect(
+      pythonCall.mock.calls.some(
+        ([, , args]) => (args as unknown[])[1] === PYTHON_CONTRIBUTION_RELEASE
+      )
+    ).toBe(false)
+  })
+
+  it("a failed release is logged but the disconnect still succeeds", async () => {
+    const warn = jest.spyOn(loggers.manager, "warn").mockImplementation(() => {})
+    const pythonCall = recordingCall((args) => {
+      if (args[1] === PYTHON_CONTRIBUTION_RELEASE) throw new Error("runtime stopped")
+      return null
+    })
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", {
+      pythonCall,
+      newInstanceId: sequentialIds(),
+    })
+    const adapter = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    await adapter.connect(CONFIG_A)
+
+    await expect(adapter.disconnect()).resolves.toBeUndefined()
+
+    expect(adapter.isConnected()).toBe(false)
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("failed to release wire-plugin:py-agent instance inst-1")
+    )
+    warn.mockRestore()
+  })
+
+  it("reconnecting after a release keeps addressing the same instance id", async () => {
+    const pythonCall = recordingCall()
+    await registerExternalAgentAdaptersForPlugin(PY_MANIFEST, "/p", {
+      pythonCall,
+      newInstanceId: sequentialIds(),
+    })
+    const adapter = protocolAdapterRegistry.create("wire-plugin:py-agent")!
+    await adapter.connect(CONFIG_A)
+    await adapter.disconnect()
+    await adapter.connect(CONFIG_A)
+
+    expect(adapter.isConnected()).toBe(true)
+    expect(pythonCall.mock.calls.map(([, , args]) => (args as unknown[])[4])).toEqual([
+      "inst-1",
+      "inst-1",
+      "inst-1",
+      "inst-1",
+    ])
   })
 
   it("sanitises a manifest's capability declaration before it becomes layer 2", async () => {

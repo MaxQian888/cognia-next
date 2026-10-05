@@ -51,7 +51,7 @@ import {
   isExternalAgentMethodNotFoundError,
   isExternalAgentSessionExtensionUnsupportedForMethod,
 } from "../../session/session-extension-errors"
-import { isToolPreApproved } from "../../policy/tool-preapproval"
+import { configuredApprovalPolicy, isToolPreApproved } from "../../policy/tool-preapproval"
 import { deriveAcpPermissionInput } from "./acp-permission-input"
 import type { ExternalAgentCompactionOptions } from "../../capability/session-capabilities"
 import type {
@@ -4060,11 +4060,26 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return { outcome: { outcome: "cancelled" } }
     }
 
+    // The configuration's own lists come next (ADR-0216: two configurations of
+    // one runtime can differ exactly here). "ask" forces the prompt below past
+    // every auto-approval; "approve" approves without one.
+    const configured = configuredApprovalPolicy(this._config ?? undefined, request)
+    if (configured === "approve" && allowOption) {
+      return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
+    }
+    if (configured === "ask" && session?.permissionMode === "dontAsk") {
+      const rejectOption = this.pickRejectPermissionOption(request.options)
+      if (rejectOption) {
+        return { outcome: { outcome: "selected", optionId: rejectOption.optionId } }
+      }
+      return { outcome: { outcome: "cancelled" } }
+    }
+
     // "dontAsk" mode never surfaces UI: it silently *approves* a tool matching
     // the session's pre-approval allow-list and *denies* everything else. This
     // is the distinction from "plan" (which always denies) — a pre-approved
     // tool runs without a prompt.
-    if (session?.permissionMode === "dontAsk") {
+    if (configured !== "ask" && session?.permissionMode === "dontAsk") {
       const preApproved =
         !!allowOption &&
         isToolPreApproved(
@@ -4083,7 +4098,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     // Check if permission mode allows auto-approval
-    if (session?.permissionMode === "bypassPermissions") {
+    if (configured !== "ask" && session?.permissionMode === "bypassPermissions") {
       if (!allowOption) {
         return { outcome: { outcome: "cancelled" } }
       }
@@ -4100,7 +4115,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       kind === "edit" ||
       kind === "file_read" ||
       kind === "read"
-    if (session?.permissionMode === "acceptEdits" && isAutoApprovableEdit && allowOption) {
+    if (
+      configured !== "ask" &&
+      session?.permissionMode === "acceptEdits" &&
+      isAutoApprovableEdit &&
+      allowOption
+    ) {
       return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
     }
 

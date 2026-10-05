@@ -50,12 +50,20 @@ pub enum SandboxError {
     InvalidQoderConfigDir,
     InvalidClineConfigDir,
     InvalidKimiConfigDir,
+    /// The configuration asked for a private state root
+    /// ([`crate::state_isolation`]) and it could not be provided. Refusing is
+    /// the only safe answer: launching anyway would hand the agent the user's
+    /// own login.
+    StateIsolation(String),
 }
 
 impl SandboxError {
     /// Stable reason code for the renderer, matching the one ADR-0119 names.
     pub fn reason_code(&self) -> &'static str {
-        "sandbox_unavailable"
+        match self {
+            Self::StateIsolation(_) => "state_isolation_failed",
+            _ => "sandbox_unavailable",
+        }
     }
 }
 
@@ -86,6 +94,11 @@ impl std::fmt::Display for SandboxError {
                 f,
                 "The external-agent sandbox could not determine this user's home directory."
             ),
+            Self::StateIsolation(reason) => write!(
+                f,
+                "This agent configuration uses its own isolated state, which could not be \
+                 prepared: {reason}"
+            ),
         }
     }
 }
@@ -111,7 +124,7 @@ pub fn launcher_file_name(os: &str) -> &'static str {
 
 /// Strip a Windows executable suffix and lower-case, matching the CLI's
 /// `command.toLowerCase().replace(/\.(?:exe|cmd|bat)$/i, "")`.
-fn base_command(command: &str) -> String {
+pub(crate) fn base_command(command: &str) -> String {
     let lower = command.trim().to_ascii_lowercase();
     for suffix in [".exe", ".cmd", ".bat"] {
         if let Some(stripped) = lower.strip_suffix(suffix) {
@@ -345,14 +358,11 @@ pub fn desktop_plugin_install_root(
     home: Option<&Path>,
     xdg_data_home: Option<&Path>,
 ) -> Option<PathBuf> {
-    let data_dir = match os {
-        "macos" => home?.join("Library").join("Application Support"),
-        "linux" => match xdg_data_home.filter(|path| path.is_absolute()) {
-            Some(xdg) => xdg.to_path_buf(),
-            None => home?.join(".local").join("share"),
-        },
-        _ => return None,
-    };
+    // Only the sandboxed platforms mount plugin packages at all.
+    if !sandbox_supports_os(os) {
+        return None;
+    }
+    let data_dir = crate::state_isolation::agent_state_data_dir(os, home, xdg_data_home, None)?;
     Some(data_dir.join("cognia").join("plugins"))
 }
 
@@ -527,6 +537,12 @@ pub trait SandboxHost {
     fn plugin_install_root(&self) -> Option<PathBuf> {
         None
     }
+    /// The per-user data directory configuration state roots live under
+    /// (see [`crate::state_isolation::agent_state_data_dir`]); `None` when
+    /// unknown, which refuses every isolated launch.
+    fn agent_state_data_dir(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// The real desktop host.
@@ -560,6 +576,20 @@ impl SandboxHost for DesktopSandboxHost {
 
     fn temp_dir(&self) -> PathBuf {
         std::env::temp_dir()
+    }
+
+    fn agent_state_data_dir(&self) -> Option<PathBuf> {
+        let env_path = |name: &str| {
+            std::env::var_os(name)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        };
+        crate::state_isolation::agent_state_data_dir(
+            self.os(),
+            self.home().as_deref(),
+            env_path("XDG_DATA_HOME").as_deref(),
+            env_path("APPDATA").as_deref(),
+        )
     }
 
     fn plugin_install_root(&self) -> Option<PathBuf> {
@@ -847,12 +877,30 @@ fn kimi_config_root(
     Ok(Some(normalized))
 }
 
+/// Remove every `--writable <root>` pair naming exactly `root`.
+fn drop_writable(args: &mut Vec<String>, root: &Path) {
+    let root = root.to_string_lossy();
+    while let Some(index) = args
+        .windows(2)
+        .position(|pair| pair[0] == "--writable" && pair[1] == root)
+    {
+        args.drain(index..index + 2);
+    }
+}
+
 /// Rewrite a validated spawn config so the agent runs under the launcher.
 ///
 /// Call this **after** the command allowlist has run: the allowlist requires a
 /// bare binary name, and this replaces `command` with the launcher's absolute
 /// path. Doing it the other way round would either reject the launcher or
 /// admit an arbitrary path as the agent binary.
+///
+/// A configuration with a private state root (`COGNIA_AGENT_STATE_KEY`, see
+/// [`crate::state_isolation`]) is resolved here too, before the Kimi / Cline /
+/// Qoder roots are read: the isolated home lands in their env variables, so
+/// those rebasings scope the launch to it. The root is granted writable, the
+/// runtime's shared default roots leave the writable set and are denied
+/// reading.
 pub fn wrap_with_sandbox(
     config: ExternalAgentSpawnConfig,
     host: &dyn SandboxHost,
@@ -872,6 +920,14 @@ pub fn wrap_with_sandbox(
         .filter(|value| !value.trim().is_empty())
         .ok_or(SandboxError::MissingCwd)?;
 
+    let mut config = config;
+    let isolation = crate::state_isolation::apply_state_isolation(
+        &mut config,
+        host.agent_state_data_dir().as_deref(),
+        &host_home,
+    )
+    .map_err(SandboxError::StateIsolation)?;
+
     let kimi_root = kimi_config_root(&config, &home)?;
     let cline_root = cline_config_root(&config, &home)?;
     let qoder_root = qoder_config_root(&config, &home)?;
@@ -883,6 +939,13 @@ pub fn wrap_with_sandbox(
         .map(|root| vec![root])
         .unwrap_or_else(|| agent_state_writable_roots(&config.command, &config.args, &home))
     {
+        // An isolated launch must not (re)create the user's own login roots.
+        if isolation
+            .as_ref()
+            .is_some_and(|plan| plan.shared_roots.contains(&root))
+        {
+            continue;
+        }
         if is_state_file_root(&root) {
             host.ensure_file(&root);
         } else {
@@ -997,6 +1060,31 @@ pub fn wrap_with_sandbox(
                 [
                     "--deny-readable".to_string(),
                     host_home.join(relative).to_string_lossy().into_owned(),
+                ],
+            );
+        }
+    }
+
+    // A private state root replaces the runtime's shared default roots. Bot
+    // and gateway launches never get here with a plan: both own a private
+    // home already and `apply_state_isolation` ignores the key for them.
+    if let Some(plan) = &isolation {
+        for shared in &plan.shared_roots {
+            drop_writable(&mut args, shared);
+        }
+        args.splice(
+            0..0,
+            [
+                "--writable".to_string(),
+                plan.root.to_string_lossy().into_owned(),
+            ],
+        );
+        for denied in &plan.deny_readable {
+            args.splice(
+                0..0,
+                [
+                    "--deny-readable".to_string(),
+                    denied.to_string_lossy().into_owned(),
                 ],
             );
         }
@@ -1162,6 +1250,7 @@ mod tests {
         dirs: RefCell<Vec<PathBuf>>,
         files: RefCell<Vec<PathBuf>>,
         plugin_root: Option<PathBuf>,
+        state_data_dir: Option<PathBuf>,
     }
 
     impl FakeHost {
@@ -1203,6 +1292,9 @@ mod tests {
         }
         fn plugin_install_root(&self) -> Option<PathBuf> {
             self.plugin_root.clone()
+        }
+        fn agent_state_data_dir(&self) -> Option<PathBuf> {
+            self.state_data_dir.clone()
         }
     }
 
@@ -2192,5 +2284,248 @@ mod tests {
             find_sandbox_launcher(&host),
             Some(PathBuf::from("/opt/launcher"))
         );
+    }
+
+    // ── Per-configuration state roots (ADR-0216) ────────────────────────────
+
+    fn isolated_host(data: &Path) -> FakeHost {
+        FakeHost {
+            state_data_dir: Some(data.to_path_buf()),
+            ..FakeHost::new("macos")
+        }
+    }
+
+    fn pairs<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+        args.windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1].as_str())
+            .collect()
+    }
+
+    #[test]
+    fn isolated_codex_writes_only_its_own_root_and_cannot_read_the_shared_login() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut original = config(
+            "npx",
+            &["-y", "@zed-industries/codex-acp"],
+            Some("/work/project"),
+        );
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "cfg-1".into(),
+        );
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        let root = data.path().join("cognia/external-agents/cfg-1");
+        let writable = pairs(&wrapped.args, "--writable");
+        assert!(writable.contains(&root.to_str().unwrap()), "{writable:?}");
+        assert!(!writable.contains(&"/home/dev/.codex"), "{writable:?}");
+        // npx's own cache is not a login root and stays writable.
+        assert!(writable.contains(&"/home/dev/.npm"));
+        assert!(pairs(&wrapped.args, "--deny-readable").contains(&"/home/dev/.codex"));
+        assert_eq!(
+            wrapped.env["CODEX_HOME"],
+            root.join("codex").to_string_lossy()
+        );
+        assert!(!wrapped
+            .env
+            .contains_key(crate::state_isolation::AGENT_STATE_KEY_ENV));
+        // The shared login root is never pre-created for an isolated launch.
+        assert!(!host
+            .dirs
+            .borrow()
+            .contains(&PathBuf::from("/home/dev/.codex")));
+        let separator = wrapped.args.iter().position(|arg| arg == "--").unwrap();
+        assert_eq!(wrapped.args[separator + 1], "npx");
+    }
+
+    #[test]
+    fn isolated_claude_never_creates_or_writes_the_shared_json_files() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut original = config("claude-agent-acp", &[], Some("/work/project"));
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "c".into(),
+        );
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        let writable = pairs(&wrapped.args, "--writable");
+        let denied = pairs(&wrapped.args, "--deny-readable");
+        for shared in [
+            "/home/dev/.claude",
+            "/home/dev/.claude.json",
+            "/home/dev/.claude.json.backup",
+        ] {
+            assert!(!writable.contains(&shared), "{shared}");
+            assert!(denied.contains(&shared), "{shared}");
+        }
+        assert!(host.files.borrow().is_empty());
+        assert!(wrapped.env["CLAUDE_CONFIG_DIR"].ends_with("external-agents/c/claude"));
+    }
+
+    #[test]
+    fn isolated_kimi_cline_and_qoder_rebase_onto_the_private_root() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        for (command, env_key, shared, sub) in [
+            ("kimi", "KIMI_CODE_HOME", "/home/dev/.kimi-code", "kimi"),
+            ("cline", "CLINE_DIR", "/home/dev/.cline", "cline"),
+            ("qoder", "QODER_CONFIG_DIR", "/home/dev/.qoder", "qoder"),
+        ] {
+            let mut original = config(command, &["--acp"], Some("/work/project"));
+            original.env.insert(
+                crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+                format!("{command}-cfg"),
+            );
+            // A caller value for the owned key never wins.
+            original
+                .env
+                .insert(env_key.into(), "/somewhere/else".into());
+            let wrapped = wrap_with_sandbox(original, &host).unwrap();
+            let own = data
+                .path()
+                .join("cognia/external-agents")
+                .join(format!("{command}-cfg"))
+                .join(sub);
+            assert_eq!(wrapped.env[env_key], own.to_string_lossy(), "{command}");
+            let writable = pairs(&wrapped.args, "--writable");
+            assert!(!writable.contains(&shared), "{command}: {writable:?}");
+            assert!(!writable.contains(&"/somewhere/else"), "{command}");
+            // Temp lands inside the isolated home too.
+            assert!(
+                wrapped.env["TMPDIR"].starts_with(own.to_str().unwrap()),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn isolated_qoder_keeps_its_login_root_readable() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut original = config("qoder", &["--acp"], Some("/work/project"));
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "q".into(),
+        );
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        assert!(!pairs(&wrapped.args, "--deny-readable").contains(&"/home/dev/.qoder"));
+    }
+
+    #[test]
+    fn isolated_opencode_maps_xdg_homes_into_the_root() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut original = config("opencode", &["acp"], Some("/work/project"));
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "oc".into(),
+        );
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        let root = data.path().join("cognia/external-agents/oc");
+        assert_eq!(
+            wrapped.env["XDG_DATA_HOME"],
+            root.join("data").to_string_lossy()
+        );
+        assert_eq!(
+            wrapped.env["XDG_STATE_HOME"],
+            root.join("state").to_string_lossy()
+        );
+        assert_eq!(
+            wrapped.env["XDG_CACHE_HOME"],
+            root.join("cache").to_string_lossy()
+        );
+        let writable = pairs(&wrapped.args, "--writable");
+        for shared in [
+            "/home/dev/.config/opencode",
+            "/home/dev/.local/share/opencode",
+        ] {
+            assert!(!writable.contains(&shared));
+            assert!(pairs(&wrapped.args, "--deny-readable").contains(&shared));
+        }
+    }
+
+    #[test]
+    fn isolated_launch_refuses_unsupported_runtimes_bad_keys_and_unknown_data_dirs() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut gemini = config("gemini", &["--acp"], Some("/work/project"));
+        gemini.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "g".into(),
+        );
+        let error = wrap_with_sandbox(gemini, &host).unwrap_err();
+        assert_eq!(
+            error,
+            SandboxError::StateIsolation("state isolation unsupported for gemini".into())
+        );
+        assert_eq!(error.reason_code(), "state_isolation_failed");
+
+        let mut bad = config("codex", &[], Some("/work/project"));
+        bad.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "../../etc".into(),
+        );
+        assert!(matches!(
+            wrap_with_sandbox(bad, &host),
+            Err(SandboxError::StateIsolation(_))
+        ));
+
+        let no_data = FakeHost::new("macos");
+        let mut codex = config("codex", &[], Some("/work/project"));
+        codex.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "c".into(),
+        );
+        assert!(matches!(
+            wrap_with_sandbox(codex, &no_data),
+            Err(SandboxError::StateIsolation(_))
+        ));
+    }
+
+    #[test]
+    fn bot_isolation_wins_over_a_state_key() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut original = config("codex", &[], Some("/work/project"));
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "cfg".into(),
+        );
+        original
+            .env
+            .insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        original
+            .env
+            .insert("COGNIA_BOT_STATE_DIR".into(), "/work/state".into());
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        assert!(!wrapped
+            .env
+            .contains_key(crate::state_isolation::AGENT_STATE_KEY_ENV));
+        assert!(!wrapped.env.contains_key("CODEX_HOME"));
+        assert!(pairs(&wrapped.args, "--writable").contains(&"/work/state"));
+        assert!(!data.path().join("cognia").exists());
+    }
+
+    #[test]
+    fn gateway_task_wins_over_a_state_key() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        let mut original = config("codex", &[], Some("/work/project"));
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "cfg".into(),
+        );
+        original.env.insert(
+            crate::gateway_task::PAYLOAD_ENV.into(),
+            serde_json::json!({"taskId":"t1","runtime":"codex","binding":{},"files":{}})
+                .to_string(),
+        );
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        assert!(!wrapped
+            .env
+            .contains_key(crate::state_isolation::AGENT_STATE_KEY_ENV));
+        assert!(!wrapped.env.contains_key("CODEX_HOME"));
+        assert!(!data.path().join("cognia").exists());
     }
 }

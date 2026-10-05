@@ -93,6 +93,7 @@ const COMMAND_KINDS = [
   // Host-owned external-agent configurations.
   "external_agent_config_create",
   "external_agent_config_delete",
+  "external_agent_config_duplicate",
   "external_agent_config_reconcile",
   "external_agent_config_update",
   // NOTE: `host_state_submit` (HostStateProtocol) is intentionally absent —

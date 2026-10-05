@@ -14,7 +14,28 @@ describe("plugin interface catalog", () => {
   it("indexes the canonical ctx method surface", () => {
     // A canary, not a fact worth memorising: any catalog edit lands here so
     // the method surface cannot grow or shrink without someone noticing.
-    expect(listPluginApiMethodContracts()).toHaveLength(855)
+    expect(listPluginApiMethodContracts()).toHaveLength(876)
+    // ADR-0216: external-agent configurations — reads gated by read, every
+    // write by the dangerous manage permission, the feed a scope-owned disposer.
+    expect(getPluginApiMethodContract("externalAgents.list")).toMatchObject({
+      requiredPermissions: ["agent:external:read"],
+      namespace: { runtimes: ["frontend", "hybrid", "python"] },
+    })
+    expect(getPluginApiMethodContract("externalAgents.onChange")).toMatchObject({
+      requiredPermissions: ["agent:external:read"],
+      resourceEffect: { kind: "returned-disposer" },
+    })
+    expect(getPluginApiMethodContract("externalAgents.update")).toMatchObject({
+      requiredPermissions: ["agent:external:manage"],
+      risk: "high",
+    })
+    // These return void; the host releases what they registered on disable.
+    expect(getPluginApiMethodContract("agent.registerExternalAgentPreset")).toMatchObject({
+      resourceEffect: { kind: "host-owned" },
+    })
+    expect(getPluginApiMethodContract("agent.registerExternalAgentAdapter")).toMatchObject({
+      resourceEffect: { kind: "host-owned" },
+    })
     // The scheduler surfaces: plugin-owned tasks are capability-gated, the
     // user's schedule is permission-gated and reachable from python.
     expect(getPluginApiMethodContract("scheduler.onExecution")).toMatchObject({

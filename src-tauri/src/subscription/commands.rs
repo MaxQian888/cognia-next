@@ -700,6 +700,38 @@ pub async fn subscription_get_active(
     Ok(snapshot)
 }
 
+/// The env projection for ONE named account, whatever the active pointer says.
+///
+/// `None` when the vault does not hold that account. Pure so it is testable
+/// without a keyring; [`subscription_get_account_env`] is its command shell.
+fn account_env_projection(
+    id: ProviderId,
+    vault: Option<&ProviderVault>,
+    provider_account_id: &str,
+) -> Option<ActiveSnapshot> {
+    build_active_projection(id, vault?, provider_account_id).map(|(snapshot, _)| snapshot)
+}
+
+/// Read one account's sidecar env without touching the active pointer.
+///
+/// An external-agent configuration bound to its own account (ADR-0216:
+/// "Codex personal" next to "Codex work") launches with this. Before it, every
+/// configuration of a runtime launched as whichever account was active, and
+/// switching the active account silently moved both. Unlike
+/// [`subscription_set_active`] this changes nothing: no vault write, no
+/// active-state push, no sidecar restart.
+#[tauri::command]
+pub async fn subscription_get_account_env(
+    provider: String,
+    local_account_id: String,
+    account_id: String,
+) -> Result<ActiveSnapshot, String> {
+    let id = ProviderId::parse(&provider)?;
+    let vault = vault::load_for_account(&local_account_id, id.clone())?;
+    account_env_projection(id, vault.as_ref(), &account_id)
+        .ok_or_else(|| format!("no account {account_id:?} in {provider} vault"))
+}
+
 // ---------------------------------------------------------------------------
 // Provider preset — v3 multi-preset CRUD
 // ---------------------------------------------------------------------------
@@ -1087,6 +1119,22 @@ mod tests {
 
     fn keyring_available() -> bool {
         std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
+    }
+
+    #[test]
+    fn account_env_projection_reads_a_named_account_without_the_active_pointer() {
+        let account = sample_anthropic_account();
+        let mut vault = ProviderVault::empty();
+        vault.accounts.push(account.clone());
+        // Deliberately no active account: the projection must not depend on it.
+        assert!(vault.active_account_id.is_none());
+        let named = account_env_projection(ProviderId::Anthropic, Some(&vault), &account.id)
+            .expect("the named account projects");
+        let (expected, _) =
+            build_active_projection(ProviderId::Anthropic, &vault, &account.id).unwrap();
+        assert_eq!(named.env, expected.env);
+        assert!(account_env_projection(ProviderId::Anthropic, Some(&vault), "missing").is_none());
+        assert!(account_env_projection(ProviderId::Anthropic, None, &account.id).is_none());
     }
 
     #[test]

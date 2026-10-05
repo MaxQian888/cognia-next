@@ -38,6 +38,10 @@ workspace 可写，home 会挂载为可读，network access 开启。共享 prot
 
 这些例外构成 native-login trust boundary：所选外部 CLI 可以读写自己的 auth state，但不能直接读取 Cognia credential file。launcher 层提供 filesystem 与 network confinement；不同于 one-shot sandbox tool，它不增加 seccomp 或 rlimit。
 
+### 隔离配置
+
+state 为 `isolated` 的配置不共享上述路径。启动时设置 `COGNIA_AGENT_STATE_KEY=<configId>`，spawn backend（桌面端 Rust 或本 Node backend）解析私有 root `<data dir>/cognia/external-agents/<configId>`（macOS 为 `~/Library/Application Support`，Linux 为 `$XDG_DATA_HOME` 或 `~/.local/share`，Windows 为 `%APPDATA%`），以仅属主可访问的权限创建，并把运行时的 home 变量指向其中（`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`QWEN_HOME`、`PI_CODING_AGENT_DIR`、`KIMI_CODE_HOME`、`CLINE_DIR`、`QODER_CONFIG_DIR`、`COPILOT_HOME`，以及 OpenCode 的 config 与 XDG home）。在 sandbox 中该 root 取代上表的共享可写路径，而这些共享路径改为 `--deny-readable`，CLI 因此无法回退到你自己的登录。规则表是 `protocol/external-agent-security-policy.json` 中的 `agentStateIsolation`，`pnpm audit:agent-capabilities` 保证 Rust 副本与之一致。没有对应规则的运行时无法隔离，其隔离启动会被拒绝。Bot 隔离与 gateway task 启动已有私有 home，会忽略该 key。删除配置时会删除该 root（`external_agent_state_root_remove`）。
+
 若 launcher 缺失，运行：
 
 ```bash

@@ -57,11 +57,24 @@ jest.mock("@/lib/db/bot-run-steps", () => ({
 jest.mock("@/lib/ai/agent/external/manager", () => ({ getExternalAgentManager: () => mockManager }))
 jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   createAgentFromPreset: (id: string) =>
-    id === "missing"
+    id === "missing" || id.startsWith("bot-")
       ? undefined
       : { id: "preset-id", protocol: "acp", process: { command: "devin", args: ["acp"] } },
 }))
 jest.mock("@/lib/bot/runtime/run", () => ({ getLiveBotRunSignal: jest.fn() }))
+const mockStoreAgents = new Map<string, Record<string, unknown>>()
+const mockStoreState = {
+  enabled: true,
+  defaultPermissionMode: "default" as string,
+  getAgent: (id: string) => mockStoreAgents.get(id),
+}
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: { getState: () => mockStoreState },
+}))
+const mockLifecycle = { assessReadiness: jest.fn(), connect: jest.fn() }
+jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
+  getExternalAgentLifecycleService: async () => mockLifecycle,
+}))
 const workspace: PluginWorkspaceHandle = {
   id: "workspace",
   runId: "run",
@@ -76,6 +89,13 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockSteps.clear()
   mockAgents.clear()
+  mockStoreAgents.clear()
+  mockStoreState.enabled = true
+  mockStoreState.defaultPermissionMode = "default"
+  mockLifecycle.assessReadiness.mockResolvedValue({ status: "ready" })
+  mockLifecycle.connect.mockImplementation(async (id: string) => {
+    mockAgents.set(id, { config: { id } })
+  })
   jest.mocked(pluginHasApiPermission).mockReturnValue(true)
   jest.mocked(assertOwnedBotWorkspace).mockResolvedValue({
     binding: { installation: { id: "installation", monitor: { lastSuccessAt: 1 } } },
@@ -189,10 +209,12 @@ it("releases more than ten sequential transient agents only after checkpointing 
   expect(mockSteps.size).toBeGreaterThanOrEqual(36)
 })
 
-it("does not remove a legacy shared agent or an agent whose workspace ownership changed", async () => {
+it("releases a non-Bot transient preset instance but never an agent whose workspace ownership changed", async () => {
   mockManager.execute.mockResolvedValueOnce({ success: true, finalResponse: "legacy" })
   await runPluginExternalAgent("plugin", "devin", "legacy")
-  expect(mockManager.removeAgent).not.toHaveBeenCalled()
+  // ADR-0216 decision 3: a preset-spawned instance ends with its run.
+  expect(mockManager.removeAgent).toHaveBeenCalledWith("preset-id")
+  mockManager.removeAgent.mockClear()
   mockManager.execute.mockImplementationOnce(async (id) => {
     mockAgents.set(id, { config: { id, process: { cwd: "/another-run" } } } as never)
     return {
@@ -670,7 +692,12 @@ it("keeps existing non-Bot dispatch callers working", async () => {
     duration: 1,
   })
   expect((await runPluginExternalAgent("plugin", "devin", "legacy")).text).toBe("legacy")
-  expect(mockManager.execute).toHaveBeenCalledWith("preset-id", "legacy", {})
+  expect(mockManager.execute).toHaveBeenCalledWith("preset-id", "legacy", {
+    permissionMode: "default",
+  })
+  // The transient preset instance does not outlive its run.
+  expect(mockManager.removeAgent).toHaveBeenCalledWith("preset-id")
+  expect(mockAgents.has("preset-id")).toBe(false)
 })
 
 it("continues an owned session in an explicitly named later repair turn", async () => {
@@ -763,8 +790,9 @@ it("validates legacy caller input and preserves failed or cancelled legacy resul
     "requires a Bot"
   )
   await expect(runPluginExternalAgent("plugin", "missing", "prompt")).rejects.toThrow(
-    "no live agent"
+    "no configured agent or preset"
   )
+  mockStoreAgents.set("live", { id: "live", enabled: true, defaultPermissionMode: "acceptEdits" })
   mockManager.getAgent.mockReturnValue({ id: "live" })
   mockManager.execute.mockResolvedValue({
     success: false,
@@ -885,4 +913,109 @@ it("preserves transient model-discovery errors without disabling an otherwise co
   )
   expect(updateBotInstallation).not.toHaveBeenCalled()
   expect(mockManager.execute).not.toHaveBeenCalled()
+})
+
+describe("non-Bot admission (ADR-0216 decision 3)", () => {
+  const legacyResult = {
+    success: true,
+    finalResponse: "ok",
+    sessionId: "s",
+    messages: [],
+    steps: [],
+    toolCalls: [],
+    duration: 1,
+  }
+  beforeEach(() => mockManager.execute.mockResolvedValue(legacyResult))
+
+  it("refuses every non-Bot run while the master switch is off", async () => {
+    mockStoreState.enabled = false
+    await expect(runPluginExternalAgent("plugin", "devin", "go")).rejects.toThrow(
+      "turned off in Settings"
+    )
+    expect(mockManager.addAgent).not.toHaveBeenCalled()
+    expect(mockManager.execute).not.toHaveBeenCalled()
+  })
+
+  it("leaves the Bot path to its own installation policy", async () => {
+    mockStoreState.enabled = false
+    await runPluginExternalAgent("plugin", "devin", "fix", options)
+    expect(mockManager.execute).toHaveBeenCalled()
+    expect(mockLifecycle.assessReadiness).not.toHaveBeenCalled()
+  })
+
+  it("refuses a disabled or unready configured agent with the verdict", async () => {
+    mockStoreAgents.set("cfg", { id: "cfg", enabled: false })
+    await expect(runPluginExternalAgent("plugin", "cfg", "go")).rejects.toThrow("disabled")
+    mockStoreAgents.set("cfg", { id: "cfg", enabled: true })
+    mockLifecycle.assessReadiness.mockResolvedValueOnce({
+      status: "needs-credentials",
+      reasonCode: "credential_missing",
+      reason: 'no keyring entry for credential slot "apiKey"',
+    })
+    await expect(runPluginExternalAgent("plugin", "cfg", "go")).rejects.toThrow(
+      /credential_missing.*apiKey/
+    )
+    expect(mockLifecycle.connect).not.toHaveBeenCalled()
+    expect(mockManager.execute).not.toHaveBeenCalled()
+  })
+
+  it("connects a configured agent through the lifecycle and clamps the mode to its default", async () => {
+    mockStoreAgents.set("cfg", { id: "cfg", enabled: true, defaultPermissionMode: "acceptEdits" })
+    await runPluginExternalAgent("plugin", "cfg", "go", { permissionMode: "bypassPermissions" })
+    expect(mockLifecycle.connect).toHaveBeenCalledWith("cfg")
+    expect(mockManager.addAgent).not.toHaveBeenCalled()
+    expect(mockManager.execute).toHaveBeenLastCalledWith("cfg", "go", {
+      permissionMode: "acceptEdits",
+    })
+
+    await runPluginExternalAgent("plugin", "cfg", "go", { permissionMode: "plan" })
+    expect(mockLifecycle.connect).toHaveBeenCalledTimes(1)
+    expect(mockManager.execute).toHaveBeenLastCalledWith("cfg", "go", { permissionMode: "plan" })
+
+    await runPluginExternalAgent("plugin", "cfg", "go")
+    expect(mockManager.execute).toHaveBeenLastCalledWith("cfg", "go", {
+      permissionMode: "acceptEdits",
+    })
+    // A configured agent belongs to the user; a run never removes it.
+    expect(mockManager.removeAgent).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the global default when a config names none", async () => {
+    mockStoreState.defaultPermissionMode = "plan"
+    mockStoreAgents.set("cfg", { id: "cfg", enabled: true })
+    await runPluginExternalAgent("plugin", "cfg", "go", { permissionMode: "acceptEdits" })
+    expect(mockManager.execute).toHaveBeenLastCalledWith("cfg", "go", { permissionMode: "plan" })
+  })
+
+  it("clamps a transient preset instance to the global default and releases it even on failure", async () => {
+    mockStoreState.defaultPermissionMode = "plan"
+    mockManager.execute.mockRejectedValueOnce(new Error("agent crashed"))
+    await expect(
+      runPluginExternalAgent("plugin", "devin", "go", { permissionMode: "bypassPermissions" })
+    ).rejects.toThrow("agent crashed")
+    expect(mockManager.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "preset-id", defaultPermissionMode: "plan", enabled: true })
+    )
+    expect(mockManager.execute).toHaveBeenCalledWith("preset-id", "go", { permissionMode: "plan" })
+    expect(mockManager.removeAgent).toHaveBeenCalledWith("preset-id")
+    expect(mockAgents.has("preset-id")).toBe(false)
+  })
+
+  it("refuses an unready transient preset before spawning it", async () => {
+    mockLifecycle.assessReadiness.mockResolvedValueOnce({
+      status: "blocked",
+      reasonCode: "adapter_unavailable",
+    })
+    await expect(runPluginExternalAgent("plugin", "devin", "go")).rejects.toThrow(
+      "adapter_unavailable"
+    )
+    expect(mockManager.addAgent).not.toHaveBeenCalled()
+  })
+
+  it("does not target a live instance that is not a configured agent", async () => {
+    mockAgents.set("bot-other", { config: { id: "bot-other" } })
+    await expect(runPluginExternalAgent("plugin", "bot-other", "go")).rejects.toThrow(
+      "no configured agent or preset"
+    )
+  })
 })

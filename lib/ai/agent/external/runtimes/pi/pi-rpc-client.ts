@@ -48,7 +48,14 @@ import {
 import { parsePiModelListing, type PiModelListing } from "./pi-auth"
 import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./pi-rpc-events"
 import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
-import { PI_TOOL_POLICY_ENV, encodePiToolPolicy, resolvePiToolPolicy } from "./pi-permission"
+import {
+  PI_BUILTIN_TOOLS,
+  PI_TOOL_POLICY_ENV,
+  applyConfiguredApprovalToPiPolicy,
+  encodePiToolPolicy,
+  resolvePiToolPolicy,
+} from "./pi-permission"
+import { configuredApprovalPolicy } from "../../policy/tool-preapproval"
 import { PiRpcPeer, type PiFrameError } from "./pi-rpc-peer"
 import { spawnReclaimingOrphan } from "../../policy/spawn-reclaim"
 import { agentProcessConflictFrom } from "@/lib/execution/lease-conflict"
@@ -956,7 +963,11 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
             // The extension owns no policy: it applies this table. Computing it
             // here keeps the matrix in tested app code (`pi-permission.ts`).
             [PI_TOOL_POLICY_ENV]: encodePiToolPolicy(
-              resolvePiToolPolicy(options.permissionMode, options.allowedTools, packages.tools)
+              applyConfiguredApprovalToPiPolicy(
+                resolvePiToolPolicy(options.permissionMode, options.allowedTools, packages.tools),
+                this._config,
+                [...PI_BUILTIN_TOOLS, ...packages.tools]
+              )
             ),
             ...(systemPrompt ? { [PI_SYSTEM_PROMPT_ENV]: systemPrompt } : {}),
           },
@@ -1367,6 +1378,19 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         })
         if (record.cancelling || record.exited) {
           this.cancelPendingDialogs(sessionId, record)
+          continue
+        }
+        // A specifier-qualified auto-approval can only be judged per call
+        // (`applyConfiguredApprovalToPiPolicy`): answer it here, unseen.
+        if (
+          canonical.type === "permission_request" &&
+          configuredApprovalPolicy(this._config ?? undefined, canonical.request) === "approve"
+        ) {
+          void this.respondToPermission(sessionId, {
+            // The dialog id, the key `pendingDialogs` was filed under above.
+            requestId: canonical.request.id,
+            granted: true,
+          }).catch(() => undefined)
           continue
         }
       }

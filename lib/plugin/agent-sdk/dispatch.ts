@@ -60,6 +60,56 @@ function rejectionResult(
   }
 }
 
+/** The external agent a dispatch runs on, when it runs on one. */
+export interface SubagentExternalTarget {
+  /** The preset (`options.externalAgentId` wins over `def.externalPresetId`). */
+  presetId: string
+  /** The def's exact-config pin, when the dispatch runs the def's own preset. */
+  configId?: string
+}
+
+function externalTargetOf(
+  def: PluginSubagentDef,
+  options: Pick<PluginDispatchSubagentOptions, "externalAgentId">
+): SubagentExternalTarget | undefined {
+  const presetId = options.externalAgentId ?? def.externalPresetId
+  if (!presetId) return undefined
+  // The def's exact-config pin rides along only while the dispatch runs the
+  // def's own preset: a caller overriding the preset has asked for a different
+  // runtime, and the pin names a config of the old one.
+  const configId =
+    def.externalPresetId && presetId === def.externalPresetId
+      ? def.externalAgentConfigId
+      : undefined
+  return { presetId, ...(configId ? { configId } : {}) }
+}
+
+/**
+ * Where a dispatch of `idOrDef` would run: an external agent, or `undefined`
+ * for an in-process subagent (or an id that names no registered subagent —
+ * `dispatchSubagent` itself reports that).
+ *
+ * The same resolution `dispatchSubagent` routes by, exported so a plugin
+ * caller can be held to `agent:dispatch-external` before an external process
+ * starts (ADR-0216 decision 3): spawning an outside coding agent through a
+ * subagent def must not be a way around the permission that gates
+ * `ctx.agent.runExternalAgent`.
+ */
+export async function resolveSubagentExternalTarget(
+  idOrDef: string | PluginSubagentDef,
+  options: Pick<PluginDispatchSubagentOptions, "externalAgentId"> = {}
+): Promise<SubagentExternalTarget | undefined> {
+  let def: PluginSubagentDef | undefined
+  if (typeof idOrDef === "string") {
+    const { getSubagent } = await import("@/lib/plugin/registries/subagent-registry")
+    def = getSubagent(idOrDef)
+  } else {
+    def = idOrDef
+  }
+  if (!def) return options.externalAgentId ? { presetId: options.externalAgentId } : undefined
+  return externalTargetOf(def, options)
+}
+
 /**
  * Dispatch a built-in/plugin subagent on a prompt. `idOrDef` resolves a
  * registered subagent by id, or accepts an inline definition.
@@ -146,14 +196,9 @@ export async function dispatchSubagent(
   // Thread A2: route to an external CLI agent when the def (or options) names a
   // preset. External agents run their own loop and do not nest back in, so the
   // depth/budget threading stops here.
-  const externalPresetId = options.externalAgentId ?? def.externalPresetId
-  // The def's exact-config pin rides along only while the dispatch runs the
-  // def's own preset: a caller overriding the preset has asked for a different
-  // runtime, and the pin names a config of the old one.
-  const externalAgentConfigId =
-    def.externalPresetId && externalPresetId === def.externalPresetId
-      ? def.externalAgentConfigId
-      : undefined
+  const externalTarget = externalTargetOf(def, options)
+  const externalPresetId = externalTarget?.presetId
+  const externalAgentConfigId = externalTarget?.configId
   const cogniaModel = normalizeCogniaModelBinding(
     options.cogniaModel === undefined ? def.cogniaModel : options.cogniaModel
   )

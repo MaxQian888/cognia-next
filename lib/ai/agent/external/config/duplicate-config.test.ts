@@ -1,6 +1,10 @@
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
-import { externalAgentDuplicateInput } from "./duplicate-config"
+import {
+  duplicateDroppedEnvKeys,
+  externalAgentDuplicateInput,
+  uniqueDuplicateName,
+} from "./duplicate-config"
 
 const source: ExternalAgentConfig = {
   id: "agent-1",
@@ -37,6 +41,11 @@ describe("externalAgentDuplicateInput", () => {
   it("copies every configured setting under the new name", () => {
     expect(externalAgentDuplicateInput(source, "Codex (read-only) copy")).toEqual({
       name: "Codex (read-only) copy",
+      // A copy keeps its own runtime state and starts as switched off as its
+      // source was; it records where it came from.
+      stateIsolation: "isolated",
+      enabled: false,
+      duplicatedFromAgentId: "agent-1",
       description: "Reviews without writing",
       protocol: "acp",
       transport: "stdio",
@@ -58,7 +67,6 @@ describe("externalAgentDuplicateInput", () => {
     const input = externalAgentDuplicateInput(source, "copy") as unknown as Record<string, unknown>
     for (const key of [
       "id",
-      "enabled",
       "capabilities",
       "validitySnapshot",
       "registryProvenance",
@@ -89,6 +97,66 @@ describe("externalAgentDuplicateInput", () => {
       name: "n copy",
       protocol: "acp",
       transport: "stdio",
+      stateIsolation: "isolated",
+      enabled: true,
+      duplicatedFromAgentId: "a",
     })
+  })
+
+  it("honours the chosen isolation and enabled state", () => {
+    expect(
+      externalAgentDuplicateInput(source, { name: "c", stateIsolation: "shared", enabled: true })
+    ).toMatchObject({ name: "c", stateIsolation: "shared", enabled: true })
+  })
+
+  it("carries the session settings and the account binding", () => {
+    const input = externalAgentDuplicateInput(
+      {
+        ...source,
+        maxConcurrentSessions: 2,
+        sessionIdleTimeout: 5000,
+        subscriptionAccountId: "acct-1",
+      } as ExternalAgentConfig,
+      "c"
+    )
+    expect(input).toMatchObject({
+      maxConcurrentSessions: 2,
+      sessionIdleTimeout: 5000,
+      subscriptionAccountId: "acct-1",
+    })
+  })
+
+  it("cuts what would make the copy share with its source", () => {
+    const opencode = {
+      ...source,
+      process: {
+        command: "opencode",
+        args: ["serve"],
+        env: { OPENCODE_CONFIG_DIR: "/a", XDG_DATA_HOME: "/b", LOG: "1" },
+      },
+      metadata: { preset: "opencode", port: 4096, serverPassword: "pw", createdByPluginId: "p" },
+    } as unknown as ExternalAgentConfig
+    const input = externalAgentDuplicateInput(opencode, "c")
+    expect(input.process?.env).toEqual({ LOG: "1" })
+    expect(input.metadata).toEqual({ preset: "opencode" })
+    // The source is untouched.
+    expect(opencode.process?.env?.OPENCODE_CONFIG_DIR).toBe("/a")
+    expect(opencode.metadata?.port).toBe(4096)
+    expect(duplicateDroppedEnvKeys(opencode)).toEqual(["OPENCODE_CONFIG_DIR", "XDG_DATA_HOME"])
+    expect(duplicateDroppedEnvKeys(source)).toEqual([])
+  })
+})
+
+describe("uniqueDuplicateName", () => {
+  const label = (index: number) => (index === 1 ? "Codex (copy)" : `Codex (copy ${index})`)
+
+  it("takes the bare copy name when it is free", () => {
+    expect(uniqueDuplicateName(["Codex"], label)).toBe("Codex (copy)")
+  })
+
+  it("counts past names already taken, ignoring case and spacing", () => {
+    expect(uniqueDuplicateName(["Codex", " codex (COPY) ", "Codex (copy 2)"], label)).toBe(
+      "Codex (copy 3)"
+    )
   })
 })

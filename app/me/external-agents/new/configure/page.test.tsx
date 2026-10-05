@@ -8,12 +8,19 @@ import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 
 jest.mock("@/hooks/companion/use-companion-config")
 
-const searchParams: { current: URLSearchParams } = { current: new URLSearchParams() }
+const searchParams: { current: URLSearchParams; pending: Promise<void> | null } = {
+  current: new URLSearchParams(),
+  pending: null,
+}
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
   usePathname: () => "/me/external-agents/new/configure",
-  useSearchParams: () => searchParams.current,
+  // Suspends like the static export does until the client has the URL.
+  useSearchParams: () => {
+    if (searchParams.pending) throw searchParams.pending
+    return searchParams.current
+  },
 }))
 
 jest.mock("@/components/mobile/external-agents/add-external-agent-form", () => ({
@@ -25,6 +32,7 @@ jest.mock("@/components/mobile/external-agents/add-external-agent-form", () => (
 beforeEach(() => {
   jest.clearAllMocks()
   searchParams.current = new URLSearchParams()
+  searchParams.pending = null
   ;(useCompanionConfig as jest.Mock).mockReturnValue({
     config: null,
     paired: true,
@@ -73,5 +81,15 @@ describe("MobileConfigureExternalAgentPage", () => {
       "no-such-preset"
     )
     expect(screen.getByText("Custom agent")).toBeInTheDocument()
+  })
+
+  it("shows a skeleton of the screen, not a blank one, while the URL resolves", () => {
+    searchParams.pending = new Promise(() => {})
+    render(<MobileConfigureExternalAgentPage />)
+    expect(screen.getByTestId("mobile-configure-external-agent-loading")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
+    expect(screen.queryByTestId("add-external-agent-form-stub")).toBeNull()
   })
 })

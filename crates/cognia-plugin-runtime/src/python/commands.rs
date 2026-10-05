@@ -2260,6 +2260,294 @@ class Tesseract:
         unload_inner(&state, "contrib").await.unwrap();
     }
 
+    /// One `__cognia_dispatch_contribution__` round-trip, optionally carrying
+    /// the 5th (instance id) envelope element.
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch_contribution(
+        state: &PythonRuntimeState,
+        plugins: &PluginRuntimeState,
+        plugin_id: &str,
+        contribution: &str,
+        method: &str,
+        args: Value,
+        stream_id: Option<&str>,
+        instance_id: Option<&str>,
+    ) -> Result<Value> {
+        let mut envelope = vec![
+            json!(contribution),
+            json!(method),
+            args,
+            stream_id.map_or(Value::Null, |id| json!(id)),
+        ];
+        if let Some(instance) = instance_id {
+            envelope.push(json!(instance));
+        }
+        call_inner(
+            state,
+            plugins,
+            plugin_id.into(),
+            CONTRIBUTION_DISPATCH.into(),
+            envelope,
+        )
+        .await
+    }
+
+    /// Per-instance contributions (external-agent configurations): a decorated
+    /// class gets one object per instance id, `__release__` drops one, a
+    /// decorated object serves a single instance at a time, the 4-element
+    /// envelope keeps reaching the default object, and streaming / bot
+    /// lifecycle aliasing work through an instance.
+    #[tokio::test]
+    async fn python_backed_contribution_instances_with_real_python() {
+        let Some(interp) = super::super::discover::discover_interpreter(None) else {
+            eprintln!("skipping contribution instance test: no python interpreter found");
+            return;
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let state = py_state(&tmp);
+        let plugins = plugins_state(&tmp);
+        grant_execute(&plugins, "inst");
+        apply_initialize(&state, Some(interp)).unwrap();
+
+        let collected: std::sync::Arc<parking_lot::Mutex<Vec<super::super::events::PythonEvent>>> =
+            std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let sink_target = std::sync::Arc::clone(&collected);
+        *state.event_sink.write() = Some(std::sync::Arc::new(move |event| {
+            sink_target.lock().push(event)
+        }));
+
+        let plugin_dir = tmp.path().join("inst-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("main.py"),
+            r#"
+import time
+import cognia
+
+BUILT = []
+
+@cognia.contribution("agent")
+class Agent:
+    def __init__(self):
+        self.config = None
+        BUILT.append(self)
+
+    def connect(self, config):
+        self.config = config
+
+    def current(self):
+        return self.config
+
+    def built(self):
+        return len(BUILT)
+
+    def stream(self, n):
+        for i in range(n):
+            yield "%s:%d" % (self.config, i)
+
+    def on_install(self):
+        self.config = "installed"
+        return "ok"
+
+SLOW_BUILT = []
+
+@cognia.contribution("slow")
+class Slow:
+    def __init__(self):
+        time.sleep(0.2)
+        SLOW_BUILT.append(self)
+
+    def count(self):
+        return len(SLOW_BUILT)
+
+class Shared:
+    def ping(self):
+        return "pong"
+
+cognia.contribution("shared")(Shared())
+"#,
+        )
+        .unwrap();
+
+        load_inner(
+            &state,
+            &plugins,
+            "inst".into(),
+            plugin_dir.to_string_lossy().into_owned(),
+            "main.py".into(),
+            None,
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap();
+
+        let d = |contribution: &'static str,
+                 method: &'static str,
+                 args: Value,
+                 stream: Option<&'static str>,
+                 instance: Option<&'static str>| {
+            dispatch_contribution(
+                &state,
+                &plugins,
+                "inst",
+                contribution,
+                method,
+                args,
+                stream,
+                instance,
+            )
+        };
+
+        // Two instances get two distinct objects: B never overwrites A.
+        d("agent", "connect", json!(["A"]), None, Some("i-a"))
+            .await
+            .unwrap();
+        d("agent", "connect", json!(["B"]), None, Some("i-b"))
+            .await
+            .unwrap();
+        assert_eq!(
+            d("agent", "current", json!([]), None, Some("i-a"))
+                .await
+                .unwrap(),
+            json!("A")
+        );
+        assert_eq!(
+            d("agent", "current", json!([]), None, Some("i-b"))
+                .await
+                .unwrap(),
+            json!("B")
+        );
+        // Default object + one object per instance.
+        assert_eq!(
+            d("agent", "built", json!([]), None, None).await.unwrap(),
+            json!(3)
+        );
+
+        // Back-compat: the 4-element envelope reaches the default object,
+        // untouched by either instance.
+        assert_eq!(
+            d("agent", "current", json!([]), None, None).await.unwrap(),
+            Value::Null
+        );
+        d("agent", "connect", json!(["D"]), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            d("agent", "current", json!([]), None, None).await.unwrap(),
+            json!("D")
+        );
+        assert_eq!(
+            d("agent", "current", json!([]), None, Some("i-a"))
+                .await
+                .unwrap(),
+            json!("A")
+        );
+
+        // Streaming through an instance: chunk frames carry the streamId and
+        // the instance's own state.
+        let streamed = d("agent", "stream", json!([2]), Some("s-inst"), Some("i-b"))
+            .await
+            .unwrap();
+        assert_eq!(streamed, json!("B:0B:1"));
+        {
+            let events = collected.lock();
+            let chunks: Vec<_> = events
+                .iter()
+                .filter(|e| e.kind == "chunk" && e.data["streamId"] == "s-inst")
+                .collect();
+            assert_eq!(chunks.len(), 2);
+            assert_eq!(chunks[0].data["value"], json!("B:0"));
+            assert!(events
+                .iter()
+                .any(|e| e.kind == "chunk_end" && e.data["streamId"] == "s-inst"));
+        }
+
+        // Bot lifecycle aliasing (camelCase -> snake_case) through an instance.
+        assert_eq!(
+            d("agent", "onInstall", json!([]), None, Some("i-c"))
+                .await
+                .unwrap(),
+            json!("ok")
+        );
+        assert_eq!(
+            d("agent", "current", json!([]), None, Some("i-c"))
+                .await
+                .unwrap(),
+            json!("installed")
+        );
+
+        // Release drops only that instance's state; the next call builds anew.
+        assert_eq!(
+            d("agent", "__release__", json!([]), None, Some("i-a"))
+                .await
+                .unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            d("agent", "current", json!([]), None, Some("i-a"))
+                .await
+                .unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            d("agent", "current", json!([]), None, Some("i-b"))
+                .await
+                .unwrap(),
+            json!("B")
+        );
+        // Releasing an unknown instance is a no-op; releasing without an
+        // instance id is an honest error.
+        d("agent", "__release__", json!([]), None, Some("never"))
+            .await
+            .unwrap();
+        assert!(d("agent", "__release__", json!([]), None, None)
+            .await
+            .is_err());
+
+        // Concurrent first calls on one instance share one object.
+        let (first, second) = tokio::join!(
+            d("slow", "count", json!([]), None, Some("i-x")),
+            d("slow", "count", json!([]), None, Some("i-x")),
+        );
+        assert_eq!(first.unwrap(), json!(2));
+        assert_eq!(second.unwrap(), json!(2));
+
+        // An object-based contribution serves one instance at a time.
+        assert_eq!(
+            d("shared", "ping", json!([]), None, Some("i-a"))
+                .await
+                .unwrap(),
+            json!("pong")
+        );
+        let refused = d("shared", "ping", json!([]), None, Some("i-b"))
+            .await
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("single shared object"),
+            "{refused}"
+        );
+        // Releasing the active instance frees the slot for another one.
+        d("shared", "__release__", json!([]), None, Some("i-a"))
+            .await
+            .unwrap();
+        assert_eq!(
+            d("shared", "ping", json!([]), None, Some("i-b"))
+                .await
+                .unwrap(),
+            json!("pong")
+        );
+
+        // A plugin cannot reach the reserved method as a regular one, nor an
+        // unknown contribution through it.
+        assert!(d("missing", "__release__", json!([]), None, Some("i-a"))
+            .await
+            .is_err());
+
+        unload_inner(&state, "inst").await.unwrap();
+    }
+
     /// P1.2 surface: streaming generator tools, hook dispatch round-trip,
     /// lifecycle conventions (on_startup / on_config_updated / on_shutdown)
     /// and config delivery — all against a real interpreter.

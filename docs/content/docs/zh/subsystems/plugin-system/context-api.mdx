@@ -95,6 +95,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 | `ctx.backup` | `backup-api.ts:64` | buildExportEnvelope / importEnvelope | `backup:read` / `backup:write`（绝不含 API key） | `create:66`、`restore:75`、`listHistory:82` |
 | `ctx.automation` | `automation-api.ts:101` | lib/automation/client（Computer Use） | `automation:read`/...（全部 DANGEROUS） | `capabilities:53`、`getFocus:54`、`readTree:56` |
 | `ctx.userScheduler` | `scheduler-tasks.ts`（`createUserSchedulerAPI(pluginId)`） | scheduler store + `getSchedulerDataSource()`（遵循配对主机绑定） | `database:read` / `database:write`（创建 / 运行 / 取消另需 `settings:read`、`agent:control`）；每次写入都经过 `assertTaskWriteAllowed`，归属于插件或代理，绝不归属于用户 | `getPolicy`、`listTasks`、`getTask`、`createTask`、`updateTask`、`pauseTask`、`resumeTask`、`deleteTask`、`runTaskNow`、`listExecutions`、`getExecution`、`cancelExecution`、`getUpcoming` |
+| `ctx.externalAgents` | `external-agents-api.ts`（`createExternalAgentsAPI(pluginId)`） | `useExternalAgentStore` 读取 + `ExternalAgentLifecycleService` 写入（ADR-0216） | `agent:external:read` / `agent:external:manage`（manage 为 DANGEROUS） | `list`、`get`、`getReadiness`、`listPresets`、`listRuntimes`、`getSettings`、`listDelegationRules`、`onChange`；`create`、`createFromPreset`、`update`、`duplicate`、`remove`、`setEnabled`、`connect`、`disconnect`、`addDelegationRule`、`updateDelegationRule`、`removeDelegationRule`、`reorderDelegationRules`、`updateSettings` |
 | `ctx.companion` | `companion-api.ts:85` | 配对设备 + goal 运行时 | `companion:read`/`control`/`goal-control` | `listDevices:90`、`setRemoteControl:96`、`pauseGoal:114` |
 
 辅助文件（非 `ctx.X`）：`crypto-helpers.ts`（AES-GCM `deriveKey:17`，被 Storage API 使用）；`message-part-renderers.ts`（`ctx.messagePart` 的底层注册表）。
@@ -122,6 +123,25 @@ return createGuardedAPI(pluginId, api, {
 - `ctx.connectors`（`connectors-api.ts:14-24`）：`connectors:read` 返回无凭据的 `PluginConnectorAdapterInfo`（`:82`）；绝不返回活动的 `PlatformAdapter` 或 `credentialsRef`。
 - `ctx.backup`（`backup-api.ts:71,:80`）：create 与 restore 上 `includeApiKey` 均硬置为 `false`。
 - `ctx.vector`（`vector-api.ts:53-58`）：云 provider 仅按 `configId` 引用；密钥留在操作系统 keyring 中。
+- `ctx.externalAgents`（`external-agents-api.ts`）：每个配置先经过 `redactConfigForLogging`（`lib/ai/agent/external/lifecycle/credentials.ts`），再经过白名单（`projectExternalAgentConfig`）。进程 env、headers、代理设置、metadata、keyring 引用和非沙箱启动同意永不投影；疑似凭据的参数值（`--api-key …`、`--token=…`、`OPENAI_API_KEY=…`）以及 URL 中的 userinfo / 密钥类查询参数值读回为 `[redacted]`；`credentialSlots` 只列出已填充槽位的**名称**。输入中的内联凭据会被直接拒绝（`PluginExternalAgentInputError`，code 为 `inline_credentials`），而不是悄悄丢弃 —— 凭据与 Windows 非沙箱启动同意只能由用户在设置中填写。
+
+### `ctx.externalAgents`（ADR-0216）
+
+一个受保护的 API，覆盖用户的外部智能体配置。读取（`agent:external:read`）投影 store；写入（`agent:external:manage`，危险权限，当守卫将其标为 `confirm` 时逐次征求同意）一律经过 `getExternalAgentLifecycleService()` —— 从不直接写 store —— 只有全局设置和委派规则例外，因为它们没有运行时那一半。
+
+| 方法 | 权限 | 说明 |
+| --- | --- | --- |
+| `list()` · `get(id)` | read | 无密钥的 `PluginExternalAgentSummary`：id、name、protocol/transport、enabled、`presetId`、`stateIsolation`（缺省 = `shared`）、`duplicatedFromAgentId`、`createdByPluginId`、`defaultPermissionMode`、`process {command,args,cwd}`、`network {endpoint}`、`cogniaModel`、`subscriptionAccountId`、`maxConcurrentSessions`、`sessionIdleTimeout`、`timeout`、`tags`、`connectionStatus`、`readiness {state,nextAction,blockReason}`、`lifecycleStatus`/`lifecycleReasonCode`、`credentialSlots`、ISO 格式的 `createdAt`/`updatedAt` |
+| `getReadiness(id)` | read | `computeAgentReadiness`（设置页行模型）加上即时运行的 `lifecycle.assessReadiness` |
+| `listPresets()` · `listRuntimes({refresh})` | read | 带 `runnable` 的预设；`detectInstalledRuntimes` → `{ available, runtimes }`（无可询问的宿主时 `available: false`） |
+| `getSettings()` · `listDelegationRules()` | read | 总开关、全局默认模式、自动连接、通知、聊天失败策略 |
+| `onChange(listener)` | read | `{ type: "config-added" \| "config-updated" \| "config-removed" \| "connection-changed" \| "settings-changed" \| "delegation-changed", agentId? }`；返回 disposer，插件停用时作用域也会释放它。仅 TypeScript —— Python 声明 `onExternalAgentConfigChange` 钩子 |
+| `create(input)` · `createFromPreset(presetId, overrides)` | manage | 由添加智能体表单自身的规则校验与构建（`lib/ai/agent/external/config/add-agent-form.ts`）；`stateIsolation` 默认 `isolated`；写入 `metadata.createdByPluginId`；权限模式按协议适配 |
+| `update(id, patch)` | manage | 无密钥的编辑面：name、description、enabled、`defaultPermissionMode`（经 `adaptPermissionMode` 收敛）、`process {command,args,cwd}`（不含 env）、`network {endpoint}`、timeout、retry、`codexOptions`、`cogniaModel`、`stateIsolation`、`subscriptionAccountId`、`maxConcurrentSessions`、`sessionIdleTimeout`、tags、`declaredCapabilities` |
+| `duplicate(id, {name, stateIsolation, enabled})` | manage | `lifecycle.duplicateConfig`；默认名称为第一个空闲的本地化「X（副本）」/「X（副本 2）」（`uniqueDuplicateName`） |
+| `remove` · `setEnabled` · `connect` · `disconnect` | manage | 经生命周期服务；总开关关闭时 `connect` 拒绝 |
+| `add/update/remove/reorderDelegationRules` | manage | 目标必须是已配置的智能体；`keyword` 匹配器必须能编译；重排序必须恰好列出每条规则一次 |
+| `updateSettings(patch)` | manage | 先完整校验，再写入任何字段 |
 
 ## 5. 代码片段
 

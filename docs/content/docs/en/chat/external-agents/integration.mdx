@@ -167,6 +167,15 @@ of a preset:
 - Declare `externalAgentAdapters: [{ id, label, entry, export }]` in the manifest (or call
   `ctx.agent.registerExternalAgentAdapter(id, factory)` at activate-time). `entry`/`export` point at a
   renderer-side module exporting a `() => ProtocolAdapter` factory.
+- A **python-backed** adapter (a `python` plugin entry without `entry`/`export`, or one with
+  `backend: "python"`) implements the adapter as a `@cognia.contribution("<id>")` in the plugin's
+  Python code instead. The bridge builds one renderer-side wrapper per external-agent
+  **configuration**, and every call that wrapper makes carries its own instance id (the 5th element of
+  the `__cognia_dispatch_contribution__` envelope). Decorate a **class** and each configuration gets
+  its own Python object, built on its first call and released after its `disconnect`, so two
+  configurations backed by the same adapter never share state. A decorated **object** is a single
+  shared instance: it serves one configuration at a time and the host refuses a second with an error
+  telling the author to decorate a class.
 - On enable, the **external-agent-adapters bridge** (`lib/plugin/bridge/external-agent-adapters-bridge.ts`)
   lazy-imports the factory and registers it into the external-agent `protocolAdapterRegistry` under the
   namespaced protocol `${pluginId}:${id}` — so it can never collide with a built-in or another plugin.
@@ -180,6 +189,25 @@ of a preset:
 
 Reference plugin: `plugins/external-agent-adapter-example/` (adapter + matching preset, end-to-end).
 See [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type).
+
+### Admission and managing configurations (ADR-0216)
+
+`runExternalAgent` outside a Bot run is admitted, not just permission-checked: the global master
+switch applies, a configured agent must be enabled and pass `lifecycle.assessReadiness` (and is
+registered through `lifecycle.connect`, so it launches with its own keyring credentials), the requested
+permission mode is clamped to the target's own default (a transient preset instance uses the global
+default), and a transient preset instance is removed when its run ends. A `dispatchSubagent` that runs
+on an external agent needs `agent:dispatch-external` as well as `agent:dispatch`. The seven
+`onExternalAgent*` hooks are delivered only to plugins granted `agent:external:read`.
+
+Plugins see and manage the configurations themselves through **`ctx.externalAgents`** —
+`agent:external:read` for secret-free projections, readiness, presets, installed runtimes, global
+settings, delegation rules and an `onChange` feed; `agent:external:manage` (dangerous) for create,
+create-from-preset, update, duplicate, remove, enable, connect/disconnect, rule edits and settings.
+Every config write goes through the lifecycle service; inputs refuse inline credentials, and credential
+entry and unsandboxed consent stay in this Settings UI. Python plugins call the same namespace and
+observe changes through the `onExternalAgentConfigChange` hook. Full method table:
+[Context API → `ctx.externalAgents`](../../subsystems/plugin-system/context-api).
 
 ## 3 · Settings UI
 

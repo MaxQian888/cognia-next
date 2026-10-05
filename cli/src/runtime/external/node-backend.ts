@@ -5,6 +5,13 @@ import path from "node:path"
 import readline from "node:readline"
 import { deleteGatewayTask, gatewayRuntimeEnvironment, prepareGatewayTask } from "./gateway-task"
 import { devinOwnedConfigRoot, prepareDevinMcpConfig } from "./devin-mcp-config"
+import {
+  applyStateIsolation,
+  defaultStateIsolationHost,
+  type StateIsolationHost,
+  type StateIsolationPlan,
+} from "./state-isolation"
+import { AGENT_STATE_KEY_ENV } from "@/lib/ai/agent/external/policy/security-policy"
 
 import {
   agentSearchDirs,
@@ -48,14 +55,27 @@ export interface ExternalAgentLaunch {
   env?: Record<string, string>
 }
 
+/** Host-resolved launch facts a resolver may need beyond the config itself. */
+export interface ExternalAgentLaunchContext {
+  /**
+   * The configuration's private state root (ADR-0216), resolved by the
+   * backend from `COGNIA_AGENT_STATE_KEY`. Never read from the request: a
+   * caller must not be able to name its own sandbox roots.
+   */
+  stateIsolation?: StateIsolationPlan | null
+}
+
 export type ExternalAgentLaunchResolver = (
-  config: NodeExternalAgentSpawnConfig
+  config: NodeExternalAgentSpawnConfig,
+  context?: ExternalAgentLaunchContext
 ) => Promise<ExternalAgentLaunch>
 
 export interface NodeExternalAgentBackendOptions {
   workspacesRoot?: string
   allowSmokeAgent?: boolean
   resolveLaunch?: ExternalAgentLaunchResolver
+  /** Where per-configuration state roots resolve (ADR-0216). Defaults to this process's host. */
+  stateIsolationHost?: StateIsolationHost
 }
 
 const CHANNEL = {
@@ -443,10 +463,11 @@ export function buildExternalAgentChildEnv(
 }
 
 async function defaultResolveLaunch(
-  config: NodeExternalAgentSpawnConfig
+  config: NodeExternalAgentSpawnConfig,
+  context?: ExternalAgentLaunchContext
 ): Promise<ExternalAgentLaunch> {
   const { resolveSandboxedExternalAgentLaunch } = await import("./sandbox-launcher")
-  return resolveSandboxedExternalAgentLaunch(config)
+  return resolveSandboxedExternalAgentLaunch(config, undefined, context?.stateIsolation ?? null)
 }
 
 export class NodeExternalAgentBackend {
@@ -457,6 +478,7 @@ export class NodeExternalAgentBackend {
   private selectedWorkspaceRoot?: string
   private readonly allowSmokeAgent: boolean
   private readonly resolveLaunch: ExternalAgentLaunchResolver
+  private readonly stateIsolationHost: StateIsolationHost
 
   constructor(options: NodeExternalAgentBackendOptions = {}) {
     this.fixedWorkspaceBoundary =
@@ -466,6 +488,7 @@ export class NodeExternalAgentBackend {
     )
     this.allowSmokeAgent = options.allowSmokeAgent ?? process.env.COGNIA_SMOKE_AGENT === "1"
     this.resolveLaunch = options.resolveLaunch ?? defaultResolveLaunch
+    this.stateIsolationHost = options.stateIsolationHost ?? defaultStateIsolationHost()
   }
 
   /** Local UI authority only; intentionally not exposed through agentInvoke. */
@@ -554,6 +577,18 @@ export class NodeExternalAgentBackend {
         finalizeDshInstall(defaultDataRoot(), String(args.manifestJson))
         return undefined as T
       }
+      // Per-configuration state roots (ADR-0216). Local-only, like the
+      // desktop's `external_agent_state_root_*` Tauri commands: the root is on
+      // this machine's disk.
+      case "external_agent_state_root_info": {
+        const { stateRootInfo } = await import("./state-isolation")
+        return stateRootInfo(String(args.key), this.stateIsolationHost) as T
+      }
+      case "external_agent_state_root_remove": {
+        const { removeStateRoot } = await import("./state-isolation")
+        removeStateRoot(String(args.key), this.stateIsolationHost)
+        return undefined as T
+      }
       case "dsh_runtime_remove": {
         const { defaultDataRoot, removeDshRuntime } = await import("./dsh-installer")
         removeDshRuntime({
@@ -592,9 +627,13 @@ export class NodeExternalAgentBackend {
       gateway.cleanup()
     }
     config = prepared.config
+    let stateIsolation: StateIsolationPlan | null
     let launch: ExternalAgentLaunch
     try {
-      launch = await this.resolveLaunch(config)
+      // Resolved before the launcher so the Kimi / Cline / Qoder rebasing
+      // reads the isolated home from the config env.
+      ;({ config, plan: stateIsolation } = applyStateIsolation(config, this.stateIsolationHost))
+      launch = await this.resolveLaunch(config, { stateIsolation })
     } catch (error) {
       cleanup()
       throw error
@@ -609,6 +648,12 @@ export class NodeExternalAgentBackend {
       config.command === "kimi",
       baseCommand(config.command) === "pi"
     )
+    // The isolated homes are host-resolved, so they are applied after the
+    // user-input filter (which drops e.g. XDG_DATA_HOME from the request).
+    if (stateIsolation) Object.assign(env, stateIsolation.env)
+    // The key is a request to this host, never child input — not even when
+    // this process inherited one.
+    delete env[AGENT_STATE_KEY_ENV]
     Object.assign(env, launch.env)
     const devinConfigRoot = devinOwnedConfigRoot(config)
     if (devinConfigRoot) env.XDG_CONFIG_HOME = devinConfigRoot

@@ -38,6 +38,53 @@ export function isToolPreApproved(
   return false
 }
 
+/** What a configuration's own approval lists say about one permission request. */
+export type ConfiguredApprovalPolicy = "ask" | "approve" | null
+
+/** The fields of a permission request the approval lists can match. */
+export interface ApprovalPolicyRequest {
+  title?: string
+  kind?: string
+  toolInfo?: { name?: string }
+  rawInput?: Record<string, unknown>
+}
+
+/**
+ * Apply a configuration's `requireApprovalFor` / `autoApprovePatterns` to one
+ * permission request the agent sent to Cognia.
+ *
+ * Entries use the `allowedTools` syntax above (`Tool` or `Tool(specifier)`,
+ * `*`/`?` globs) and match the request's title, its tool name or its kind
+ * (`execute`, `edit`, `read`, …), because runtimes name the same call
+ * differently: ACP sends a title, Codex the command line, every runtime a
+ * kind. `requireApprovalFor` wins: a request it matches is always shown to the
+ * user, even in a mode that would otherwise approve it (`acceptEdits`,
+ * `bypassPermissions`), and it is denied in a mode that never shows UI
+ * (`dontAsk`). Otherwise `autoApprovePatterns` approves it without a prompt.
+ * `null` leaves the decision to the permission mode.
+ *
+ * Only requests that reach Cognia can be governed: a runtime running with its
+ * own approvals switched off (Codex in `bypassPermissions`) sends none.
+ */
+export function configuredApprovalPolicy(
+  config: { autoApprovePatterns?: string[]; requireApprovalFor?: string[] } | undefined,
+  request: ApprovalPolicyRequest
+): ConfiguredApprovalPolicy {
+  if (!config) return null
+  const names = Array.from(
+    new Set(
+      [request.title, request.toolInfo?.name, request.kind].filter(
+        (name): name is string => typeof name === "string" && name.length > 0
+      )
+    )
+  )
+  const matches = (list: string[] | undefined) =>
+    names.some((name) => isToolPreApproved(name, request.rawInput, list))
+  if (matches(config.requireApprovalFor)) return "ask"
+  if (matches(config.autoApprovePatterns)) return "approve"
+  return null
+}
+
 /**
  * Best-effort extraction of the glob target from a tool call's raw input. Reads
  * the conventional input keys used across the built-in tools (shell command,

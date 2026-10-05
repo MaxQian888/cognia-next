@@ -32,7 +32,8 @@ import {
   normalizeCodexLifecycleError,
   refreshCodexAccountIfStale,
 } from "@/lib/subscription/codex/refresh"
-import { getAccount, getActiveAccount } from "@/lib/subscription/core/transport"
+import { getAccount, getAccountEnv, getActiveAccount } from "@/lib/subscription/core/transport"
+import { ExternalAgentLifecycleError } from "@/types/agent/external-agent-lifecycle"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
@@ -89,6 +90,13 @@ async function codexEnvOverlay(
 
   const settings = await loadCodexSettings()
 
+  // A configuration bound to its own account (ADR-0216) launches as that
+  // account, never as whichever one is active: "Codex work" must not become
+  // "Codex personal" because the user switched the active account for chat.
+  if (config.subscriptionAccountId) {
+    return boundAccountOverlay(config.subscriptionAccountId, settings)
+  }
+
   let snapshot: ActiveSnapshot
   try {
     snapshot = await getActiveAccount("codex")
@@ -118,6 +126,37 @@ async function codexEnvOverlay(
   // discovered credential is adopted explicitly, never injected behind the
   // user's back.
   return null
+}
+
+/**
+ * The env of the account a configuration is bound to. Unlike the active-account
+ * path, a failure here refuses the launch: silently falling back to the active
+ * account is exactly the identity mix-up the binding exists to rule out.
+ */
+async function boundAccountOverlay(
+  accountId: string,
+  settings: CodexSubscriptionSettings
+): Promise<Record<string, string>> {
+  const account = await getAccount("codex", accountId)
+  if (!account) {
+    throw new ExternalAgentLifecycleError(
+      "credential_missing",
+      `the Codex account this agent is bound to (${accountId}) no longer exists`,
+      { slot: "subscriptionAccount" }
+    )
+  }
+  assertCodexAccountLifecycleReady(account)
+  if (settings.autoRefreshNearExpiry) {
+    try {
+      await refreshCodexAccountIfStale(accountId)
+    } catch (err) {
+      const lifecycleError = normalizeCodexLifecycleError(err)
+      if (lifecycleError instanceof CodexReauthenticationRequiredError) throw lifecycleError
+      console.warn("env-builder: codex auto-refresh failed:", err)
+    }
+  }
+  const snapshot = await getAccountEnv("codex", accountId)
+  return pairsToRecord(snapshot.env)
 }
 
 async function loadCodexSettings(): Promise<CodexSubscriptionSettings> {

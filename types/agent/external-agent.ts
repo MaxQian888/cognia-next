@@ -131,6 +131,10 @@ export type ExternalAgentBranchReasonCode =
   // amount of in-turn approval will lift it. Detected before the request is
   // sent, because Codex has no typed refusal error to recognise afterwards.
   | "managed_policy_refused"
+  // The configuration asks for a private state root (ADR-0216) but its
+  // runtime has no documented home variable to move into one. Refused rather
+  // than launched against the shared home the user chose not to use.
+  | "state_isolation_unsupported"
 
 /**
  * Canonical branch outcome for external-agent orchestration.
@@ -1428,6 +1432,24 @@ export function normalizeCogniaModelBinding(
 }
 
 /**
+ * Where a configuration keeps the runtime's own on-disk state (login, the CLI's
+ * config file, its MCP config, its session history).
+ *
+ * - `shared`: the runtime's default home (`~/.codex`, `~/.claude`, …), the one
+ *   the user's own CLI uses. Every configuration of the runtime that is
+ *   `shared` sees the same login and history. A configuration persisted before
+ *   this field existed has no value and means `shared`.
+ * - `isolated`: a directory owned by this configuration alone
+ *   (`<data_dir>/cognia/external-agents/<configId>/`). The spawn backend maps
+ *   the runtime's home variables into it and, under the sandbox, denies the
+ *   shared home. Only runtimes with an `agentStateIsolation` rule in
+ *   `protocol/external-agent-security-policy.json` can be isolated.
+ *
+ * New configurations and duplicates default to `isolated` (ADR-0216).
+ */
+export type ExternalAgentStateIsolation = "shared" | "isolated"
+
+/**
  * Complete external agent configuration
  */
 export interface ExternalAgentConfig {
@@ -1445,6 +1467,20 @@ export interface ExternalAgentConfig {
   enabled: boolean
   /** Use task-scoped Cognia gateway access instead of the runtime's own provider settings. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /** @see ExternalAgentStateIsolation. Absent means `shared`. */
+  stateIsolation?: ExternalAgentStateIsolation
+  /**
+   * The subscription account this configuration launches with (Codex family).
+   * Absent or `null` follows the globally active account, which is what every
+   * configuration did before accounts could be bound per configuration.
+   */
+  subscriptionAccountId?: string | null
+  /**
+   * The configuration this one was duplicated from. Lineage only: it groups
+   * siblings in the UI and never feeds admission, readiness or credentials.
+   * The source may since have been deleted.
+   */
+  duplicatedFromAgentId?: string
 
   /** Process configuration (for stdio transport) */
   process?: ExternalAgentProcessConfig
@@ -1469,9 +1505,16 @@ export interface ExternalAgentConfig {
   /** Retry configuration */
   retryConfig?: ExternalAgentRetryConfig
 
-  /** Maximum concurrent sessions */
+  /**
+   * Maximum native sessions this configuration keeps open at once. Opening
+   * one more first closes the least recently active idle sessions; only when
+   * every open session is mid-turn is the new one refused
+   * (`session_limit_reached`). Reusing an open session never counts. Absent
+   * means no limit, which is what every configuration had before the field
+   * was enforced.
+   */
   maxConcurrentSessions?: number
-  /** Session idle timeout (ms) */
+  /** Stream idle timeout (ms): how long a running turn may go without output. */
   sessionIdleTimeout?: number
 
   /** Tags for categorization */
@@ -1518,6 +1561,15 @@ export interface ExternalAgentConfig {
 export interface CreateExternalAgentInput {
   name: string
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /** Defaults to `isolated` for a new configuration. */
+  stateIsolation?: ExternalAgentStateIsolation
+  subscriptionAccountId?: string | null
+  /** Set by duplicate only. */
+  duplicatedFromAgentId?: string
+  /** Create the configuration disabled (default enabled). */
+  enabled?: boolean
+  maxConcurrentSessions?: number
+  sessionIdleTimeout?: number
   description?: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport
@@ -1543,6 +1595,13 @@ export interface UpdateExternalAgentInput {
   name?: string
   /** Null clears the configured binding; omission preserves it. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  stateIsolation?: ExternalAgentStateIsolation
+  /** Null clears the binding (follow the active account); omission preserves it. */
+  subscriptionAccountId?: string | null
+  /** Null clears the limit (unlimited); omission preserves it. */
+  maxConcurrentSessions?: number | null
+  /** Null clears it (fall back to the execution timeout); omission preserves it. */
+  sessionIdleTimeout?: number | null
   description?: string
   enabled?: boolean
   process?: Partial<ExternalAgentProcessConfig>
@@ -2675,6 +2734,9 @@ export const DEFAULT_EXTERNAL_AGENT_CONFIG: Partial<ExternalAgentConfig> = {
   defaultPermissionMode: "default",
   timeout: 300000, // 5 minutes
   retryConfig: DEFAULT_EXTERNAL_AGENT_RETRY_CONFIG,
+  // Documentation defaults for an editor to suggest, not runtime fallbacks:
+  // an absent `maxConcurrentSessions` is unlimited and an absent
+  // `sessionIdleTimeout` falls back to the execution timeout.
   maxConcurrentSessions: 3,
   sessionIdleTimeout: 600000, // 10 minutes
 }

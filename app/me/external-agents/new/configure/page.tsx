@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { PairedOnly } from "@/components/mobile/me/paired-only"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { AddExternalAgentForm } from "@/components/mobile/external-agents/add-external-agent-form"
+import { ExternalAgentScreenSkeleton } from "@/components/mobile/external-agents/external-agent-screen-skeleton"
 import { ADD_EXTERNAL_AGENT_ROUTE } from "@/components/mobile/external-agents/routes"
 import { presetName } from "@/components/agent/external-agent/add-agent/preset-copy"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
@@ -42,9 +43,12 @@ function ConfigureScreen() {
 
 export default function MobileConfigureExternalAgentPage() {
   // `useSearchParams` needs a Suspense boundary above it in a static export,
-  // and the title depends on it too, so the whole screen sits inside one.
+  // and the title depends on it too, so the whole screen sits inside one —
+  // with a skeleton of the screen rather than a blank one while it resolves.
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={<ExternalAgentScreenSkeleton testid="mobile-configure-external-agent-loading" />}
+    >
       <ConfigureScreen />
     </Suspense>
   )

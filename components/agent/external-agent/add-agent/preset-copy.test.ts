@@ -5,6 +5,7 @@ import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/config/p
 import {
   SUPPORT_TIER_LABEL_KEYS,
   presetDescription,
+  presetEnvironmentLabel,
   presetEnvVarHint,
   presetName,
   presetSetupHint,
@@ -43,6 +44,17 @@ describe("presetSetupHint", () => {
     expect(presetSetupHint(t, "claude-code", preset())).toBe("Preset prose setup")
   })
 
+  it("uses the settings catalogue for a settings-only preset when given that namespace", () => {
+    const tSettings = (key: string) => `s:${key}`
+    expect(presetSetupHint(t, "opencode-v2-service", preset(), tSettings)).toBe(
+      "s:opencodeV2PresetSetupHint"
+    )
+    // Without the settings namespace the preset's own prose is the fallback.
+    expect(presetSetupHint(t, "opencode-v2-service", preset())).toBe("Preset prose setup")
+    // A manager-catalogued preset ignores the settings namespace.
+    expect(presetSetupHint(t, "kimi", preset(), tSettings)).toBe("t:kimiSetupHint")
+  })
+
   it("returns undefined when the preset has no setup hint, even for a catalogued id", () => {
     expect(presetSetupHint(t, "devin", preset({ setupHint: undefined }))).toBeUndefined()
     expect(presetSetupHint(t, "claude-code", preset({ setupHint: undefined }))).toBeUndefined()
@@ -68,6 +80,27 @@ describe("presetEnvVarHint", () => {
   it("returns undefined when the preset has no env var hint", () => {
     expect(presetEnvVarHint(t, "aider", preset({ envVarHint: undefined }))).toBeUndefined()
     expect(presetEnvVarHint(t, "codex", preset({ envVarHint: undefined }))).toBeUndefined()
+  })
+})
+
+describe("presetEnvironmentLabel", () => {
+  it.each([
+    ["aider", "aiderEnvironment"],
+    ["qoder", "qoderEnvironment"],
+    ["kimi", "kimiEnvironment"],
+    ["cline", "clineEnvironment"],
+  ])("labels the dedicated environment editor for %s", (id, key) => {
+    expect(presetEnvironmentLabel(t, id, "acp")).toBe(`t:${key}`)
+  })
+
+  it("recognises a hand-configured Aider by its protocol", () => {
+    expect(presetEnvironmentLabel(t, undefined, "aider-cli")).toBe("t:aiderEnvironment")
+    expect(presetEnvironmentLabel(t, "custom", "aider-cli")).toBe("t:aiderEnvironment")
+  })
+
+  it("returns undefined where the generic process environment applies", () => {
+    expect(presetEnvironmentLabel(t, "codex", "acp")).toBeUndefined()
+    expect(presetEnvironmentLabel(t, undefined, "acp")).toBeUndefined()
   })
 })
 
@@ -126,6 +159,8 @@ describe("catalogue keys exist", () => {
     }
     for (const id of ids) {
       presetSetupHint(manager, id, preset())
+      presetSetupHint(manager, id, preset(), settings)
+      presetEnvironmentLabel(settings, id, "acp")
       presetEnvVarHint(manager, id, preset())
       presetDescription(settings, id, preset())
       presetName(settings, id, preset())

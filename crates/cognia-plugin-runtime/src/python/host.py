@@ -77,16 +77,37 @@ _WRITE_LOCK = threading.Lock()
 
 _TOOLS = {}  # name -> {"fn": callable, "definition": {name, description, parameters}}
 _HOOKS = []  # (event, callable)
-# contribution_id -> {method_name: callable}. Backs python-owned module-bridge
+# contribution_id -> {method_name: callable} of the contribution's DEFAULT
+# object (the one built at decoration time). Backs python-owned module-bridge
 # contributions (ocr providers, ai providers, connectors, …) that the renderer
 # reaches through `__cognia_dispatch_contribution__`. See
 # `lib/plugin/bridge/_shared/python-backed-proxy.ts` for the host-side seam.
 _CONTRIBUTIONS = {}
+#: contribution_id -> the decorated class, or None when the author decorated an
+#: already-built object. A class is a factory: every renderer-side instance id
+#: gets its own object built from it.
+_CONTRIBUTION_FACTORIES = {}
+#: (contribution_id, instance_id) -> {method_name: callable} for class-based
+#: contributions, built lazily on the instance's first call.
+_CONTRIBUTION_INSTANCES = {}
+#: (contribution_id, instance_id) -> Task building that instance, so two
+#: concurrent first calls share one object instead of racing to build two.
+_CONTRIBUTION_BUILDING = {}
+#: contribution_id -> the one instance id currently bound to an object-based
+#: contribution. A single shared object cannot isolate two instances' state, so
+#: it serves at most one at a time.
+_CONTRIBUTION_SHARED_OWNER = {}
 
 #: Reserved dispatcher name. The renderer calls it via the `call` RPC; it is
 #: exempt from the private-name guard below because it is host-owned, not a
 #: plugin symbol.
 CONTRIBUTION_DISPATCH = "__cognia_dispatch_contribution__"
+#: Reserved contribution method that drops one per-instance object. Host-owned
+#: like CONTRIBUTION_DISPATCH: it is intercepted before method lookup, and a
+#: plugin can never shadow it because underscore names are never collected as
+#: contribution methods. Mirrors `PYTHON_CONTRIBUTION_RELEASE` in
+#: `lib/plugin/bridge/_shared/python-backed-proxy.ts`.
+CONTRIBUTION_RELEASE = "__release__"
 
 # camelCase manifest hook name -> snake_case Python method. Mirrors
 # `BOT_LIFECYCLE_PY_METHODS` in plugin-sdk/python/src/cognia/bot.py — the SDK
@@ -275,6 +296,29 @@ def _on_config_changed(fn):
     return fn
 
 
+def _collect_contribution_methods(contribution_id, instance):
+    """Every public callable attribute of `instance`, keyed by name."""
+    methods = {}
+    for name in dir(instance):
+        if name.startswith("_"):
+            continue
+        attr = getattr(instance, name, None)
+        if callable(attr):
+            methods[name] = attr
+    if not methods:
+        raise ValueError(f"contribution '{contribution_id}' exposes no public methods")
+    return methods
+
+
+def _forget_contribution_instances(contribution_id):
+    """Drop every per-instance object of one contribution id."""
+    for key in [k for k in _CONTRIBUTION_INSTANCES if k[0] == contribution_id]:
+        del _CONTRIBUTION_INSTANCES[key]
+    for key in [k for k in _CONTRIBUTION_BUILDING if k[0] == contribution_id]:
+        del _CONTRIBUTION_BUILDING[key]
+    _CONTRIBUTION_SHARED_OWNER.pop(contribution_id, None)
+
+
 def _contribution(contribution_id):
     """`@cognia.contribution("<id>")` — own a module-bridge contribution.
 
@@ -292,22 +336,26 @@ def _contribution(contribution_id):
 
     `describe()` supplies the plain-data fields a JS factory would have
     returned inline; the rest are behaviour.
+
+    Instances: the renderer may address a contribution per *instance id* (one
+    external-agent configuration, say). A decorated **class** is kept as a
+    factory and every instance id gets its own object, built on that
+    instance's first call, so instances never share state. Calls without an
+    instance id use the object built here. A decorated **object** is shared, so
+    it serves at most one instance id at a time.
     """
     if not isinstance(contribution_id, str) or not contribution_id:
         raise ValueError("cognia.contribution(id) requires a non-empty string id")
 
     def decorate(target):
-        instance = target() if inspect.isclass(target) else target
-        methods = {}
-        for name in dir(instance):
-            if name.startswith("_"):
-                continue
-            attr = getattr(instance, name, None)
-            if callable(attr):
-                methods[name] = attr
-        if not methods:
-            raise ValueError(f"contribution '{contribution_id}' exposes no public methods")
+        is_class = inspect.isclass(target)
+        instance = target() if is_class else target
+        methods = _collect_contribution_methods(contribution_id, instance)
+        # Re-decorating an id replaces it wholesale: objects built from the old
+        # target must not keep answering for the new one.
+        _forget_contribution_instances(contribution_id)
         _CONTRIBUTIONS[contribution_id] = methods
+        _CONTRIBUTION_FACTORIES[contribution_id] = target if is_class else None
         return target
 
     return decorate
@@ -656,21 +704,102 @@ async def _handle_call_tool(params):
     return _ensure_serializable(result, f"tool '{name}'")
 
 
+def _shared_object_refusal(contribution_id):
+    return RuntimeError(
+        f"contribution '{contribution_id}' is a single shared object and cannot "
+        "serve a second instance; decorate a class with @cognia.contribution so "
+        "each instance gets its own object"
+    )
+
+
+async def _build_contribution_instance(contribution_id, factory):
+    # The constructor is arbitrary plugin code; build it off the loop like
+    # every other sync plugin call.
+    instance = await _to_worker(factory)
+    return _collect_contribution_methods(contribution_id, instance)
+
+
+async def _instance_methods(contribution_id, instance_id):
+    """Resolve the method table serving `instance_id` of one contribution."""
+    factory = _CONTRIBUTION_FACTORIES.get(contribution_id)
+    if factory is None:
+        # Object-based: the one shared object, bound to one instance at a time.
+        owner = _CONTRIBUTION_SHARED_OWNER.get(contribution_id)
+        if owner is None:
+            _CONTRIBUTION_SHARED_OWNER[contribution_id] = instance_id
+        elif owner != instance_id:
+            raise _shared_object_refusal(contribution_id)
+        return _CONTRIBUTIONS[contribution_id]
+
+    key = (contribution_id, instance_id)
+    methods = _CONTRIBUTION_INSTANCES.get(key)
+    if methods is not None:
+        return methods
+    building = _CONTRIBUTION_BUILDING.get(key)
+    if building is None:
+        building = asyncio.ensure_future(_build_contribution_instance(contribution_id, factory))
+        _CONTRIBUTION_BUILDING[key] = building
+        try:
+            # Shielded: one caller being cancelled must not cancel the build
+            # other concurrent first calls are waiting on.
+            methods = await asyncio.shield(building)
+        finally:
+            # Only the build still registered may be published: a release (or a
+            # re-decoration) that landed mid-build dropped it, and must not be
+            # undone by a stale object appearing afterwards.
+            if _CONTRIBUTION_BUILDING.get(key) is building:
+                del _CONTRIBUTION_BUILDING[key]
+                if building.done() and not building.cancelled() and building.exception() is None:
+                    _CONTRIBUTION_INSTANCES[key] = building.result()
+        return methods
+    return await asyncio.shield(building)
+
+
+def _release_contribution_instance(contribution_id, instance_id):
+    """Drop one instance. Releasing an unknown instance is a no-op."""
+    if instance_id is None:
+        raise RuntimeError(
+            f"contribution '{contribution_id}': {CONTRIBUTION_RELEASE} requires an instance id"
+        )
+    if _CONTRIBUTION_FACTORIES.get(contribution_id) is None:
+        if _CONTRIBUTION_SHARED_OWNER.get(contribution_id) == instance_id:
+            del _CONTRIBUTION_SHARED_OWNER[contribution_id]
+        return None
+    key = (contribution_id, instance_id)
+    _CONTRIBUTION_INSTANCES.pop(key, None)
+    _CONTRIBUTION_BUILDING.pop(key, None)
+    return None
+
+
 async def _dispatch_contribution(args):
-    """Route `__cognia_dispatch_contribution__(id, method, args, streamId)`.
+    """Route `__cognia_dispatch_contribution__(id, method, args, streamId[, instanceId])`.
 
     Mirrors `createPythonBackedProxy` on the renderer side. When `stream_id` is
     present and the handler returns an iterator, each item goes out as a
     `chunk` frame tagged with that id (the protocol's own `call_id` never
     reaches the renderer, so the seam correlates on `streamId` instead) and the
     stream is closed with `chunk_end`.
+
+    The optional 5th element routes the call to one instance of the
+    contribution (see `_contribution`); without it the default object answers,
+    exactly as the 4-element envelope always has. The reserved method
+    `__release__` drops that instance.
     """
     _require_loaded()
-    padded = list(args or []) + [None, None, None, None]
-    contribution_id, method, call_args, stream_id = padded[:4]
-    entry = _CONTRIBUTIONS.get(contribution_id)
-    if entry is None:
+    padded = list(args or []) + [None, None, None, None, None]
+    contribution_id, method, call_args, stream_id, instance_id = padded[:5]
+    if contribution_id not in _CONTRIBUTIONS:
         raise RuntimeError(f"unknown contribution: {contribution_id}")
+    if instance_id is not None and (not isinstance(instance_id, str) or not instance_id):
+        raise RuntimeError(
+            f"contribution '{contribution_id}': instance id must be a non-empty string"
+        )
+    if method == CONTRIBUTION_RELEASE:
+        return _release_contribution_instance(contribution_id, instance_id)
+    if instance_id is None:
+        entry = _CONTRIBUTIONS[contribution_id]
+    else:
+        entry = await _instance_methods(contribution_id, instance_id)
     fn = entry.get(method)
     if fn is None and method in _BOT_LIFECYCLE_METHODS:
         # Bot lifecycle hooks: the manifest declares camelCase names, the

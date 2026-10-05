@@ -258,6 +258,28 @@ export type {
   PluginMemoryStoreInput,
 } from "@/lib/plugin/api/memory-api"
 export type {
+  PluginExternalAgentChangeEvent,
+  PluginExternalAgentChangeType,
+  PluginExternalAgentCreateInput,
+  PluginExternalAgentDelegationRule,
+  PluginExternalAgentDelegationRuleInput,
+  PluginExternalAgentDuplicateOptions,
+  PluginExternalAgentInputErrorCode,
+  PluginExternalAgentMetadataInput,
+  PluginExternalAgentPreset,
+  PluginExternalAgentPresetOverrides,
+  PluginExternalAgentProcessInput,
+  PluginExternalAgentReadiness,
+  PluginExternalAgentReadinessSummary,
+  PluginExternalAgentRuntime,
+  PluginExternalAgentRuntimeReport,
+  PluginExternalAgentSettings,
+  PluginExternalAgentSettingsPatch,
+  PluginExternalAgentSummary,
+  PluginExternalAgentUpdatePatch,
+  PluginExternalAgentsAPI,
+} from "@/lib/plugin/api/external-agents-api"
+export type {
   PluginEmittablePetEventKind,
   PluginPetAPI,
   PluginPetAvailability,

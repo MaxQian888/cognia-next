@@ -52,6 +52,7 @@ import {
 import { loggers } from "../core/logger"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { getHookPointPermission } from "@/lib/plugin/contracts/plugin-points"
+import type { ExternalAgentChangeEvent } from "@/lib/plugin/api/external-agents-changes"
 import type {
   PluginHooksAll,
   HookSandboxExecutionResult,
@@ -1856,6 +1857,17 @@ export class PluginEventHooks {
           onExternalAgentError?: (agentId: string, error: string) => void
         }
       ).onExternalAgentError?.(agentId, error)
+    )
+  }
+
+  /**
+   * ADR-0216 change feed. Fired only by
+   * `lib/plugin/messaging/external-agent-config-hook-source.ts`; delivered
+   * only to plugins granted `agent:external:read` (HOOK_POINT_PERMISSIONS).
+   */
+  async dispatchExternalAgentConfigChange(event: ExternalAgentChangeEvent) {
+    return this.executeHook("onExternalAgentConfigChange", (hooks) =>
+      hooks.onExternalAgentConfigChange?.({ ...event })
     )
   }
 

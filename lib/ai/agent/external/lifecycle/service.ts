@@ -31,6 +31,7 @@ import type {
 import {
   ExternalAgentLifecycleError,
   type ExternalAgentCredentialRefs,
+  type ExternalAgentCredentialSlot,
   type ExternalAgentLifecycleErrorCode,
   type ExternalAgentLifecycleFields,
   type ExternalAgentLifecycleStatus,
@@ -58,7 +59,10 @@ import {
 // pay for a listing most users never open.
 import type { RegistryDiscoveryResult } from "./registry-discovery"
 import { externalAgentSandboxSupportsPlatform } from "../policy/security-policy"
-import { externalAgentDuplicateInput } from "../config/duplicate-config"
+import {
+  externalAgentDuplicateInput,
+  type ExternalAgentDuplicateOptions,
+} from "../config/duplicate-config"
 import {
   EXTERNAL_AGENT_KEYRING_NAMESPACE,
   applyResolvedCredentials,
@@ -93,7 +97,7 @@ export interface LifecycleConfigStore {
 
 /** The live-runtime face. Implemented by `ExternalAgentManager`. */
 export interface LifecycleRuntimeManager {
-  addAgent(config: ExternalAgentConfig): Promise<unknown>
+  addAgent(config: ExternalAgentConfig, options?: { connect?: boolean }): Promise<unknown>
   removeAgent(id: string): Promise<void>
   connect(id: string): Promise<void>
   disconnect(id: string): Promise<void>
@@ -125,11 +129,21 @@ export interface LifecycleRuntimeHost {
   uninstall(runtimeId: string): Promise<void>
 }
 
+/**
+ * A configuration's private state root (ADR-0216), on the machine that runs
+ * it. Absent on a host that owns none (browser, phone).
+ */
+export interface LifecycleStateRoots {
+  /** Delete one configuration's root; a missing root is not an error. */
+  remove(configId: string): Promise<unknown>
+}
+
 export interface LifecycleDependencies {
   store: LifecycleConfigStore
   manager: LifecycleRuntimeManager
   adapters: LifecycleAdapterRegistry
   keyring: KeyringStore
+  stateRoots?: LifecycleStateRoots
   runtimeHost?: LifecycleRuntimeHost
   /** Node-style platform id of this host. */
   platform: string
@@ -165,6 +179,13 @@ const RUNTIME_AFFECTING_KEYS = [
   "codexOptions",
   "timeout",
   "retryConfig",
+  // Both change the spawn env: the state root the runtime's home variables
+  // point into, and the subscription account's credential overlay (ADR-0216).
+  "stateIsolation",
+  "subscriptionAccountId",
+  // The manager reads these from the live instance's config.
+  "maxConcurrentSessions",
+  "sessionIdleTimeout",
 ] as const satisfies readonly (keyof UpdateExternalAgentInput)[]
 
 export function isRuntimeAffectingUpdate(updates: UpdateExternalAgentInput): boolean {
@@ -217,7 +238,8 @@ export class ExternalAgentLifecycleService {
    */
   private async createWithSecrets(
     input: CreateExternalAgentInput & Partial<ExternalAgentLifecycleFields>,
-    carried: ExternalAgentSecrets
+    carried: ExternalAgentSecrets,
+    options: { connect?: boolean } = {}
   ): Promise<string> {
     const secrets = { ...carried, ...extractInlineCredentials(input as ExternalAgentConfig) }
     const sanitized = scrubInlineCredentials(input as ExternalAgentConfig)
@@ -242,7 +264,7 @@ export class ExternalAgentLifecycleService {
 
     const config = this.deps.store.getAgent(id)
     if (config?.enabled) {
-      await this.register(config)
+      await this.register(config, options)
     } else if (config) {
       this.markVerdict(id, await this.assessReadiness(config))
     }
@@ -251,7 +273,7 @@ export class ExternalAgentLifecycleService {
   }
 
   /**
-   * Create a copy of an existing configuration named `name`.
+   * Create a copy of an existing configuration.
    *
    * The copy's credentials are the source's secrets written into the copy's
    * own keyring slots before it registers, so
@@ -259,10 +281,21 @@ export class ExternalAgentLifecycleService {
    * is not copied: it covers one agent. See `externalAgentDuplicateInput` for
    * what else is left behind.
    */
-  async duplicateConfig(id: string, name: string): Promise<string> {
+  async duplicateConfig(
+    id: string,
+    options: ExternalAgentDuplicateOptions | string
+  ): Promise<string> {
     const source = this.requireConfig(id)
-    const secrets = await this.readSecrets(source)
-    return this.createWithSecrets(externalAgentDuplicateInput(source, name), secrets)
+    // A secret still inline on the source (a config saved before its slot
+    // existed, like an OpenCode server password) travels too; the copy input
+    // strips it from the config, so this is the only way it reaches the copy.
+    const secrets = { ...extractInlineCredentials(source), ...(await this.readSecrets(source)) }
+    // Registered (so it is runnable and shows its readiness) but never
+    // connected: starting a second process is the user's decision, and an
+    // isolated copy has no login of its own yet.
+    return this.createWithSecrets(externalAgentDuplicateInput(source, options), secrets, {
+      connect: false,
+    })
   }
 
   /**
@@ -341,6 +374,17 @@ export class ExternalAgentLifecycleService {
 
     this.deps.store.removeAgent(id)
     await clearCredentials(id, this.deps.keyring)
+
+    // Its login, CLI settings and history go with it. Attempted for a shared
+    // configuration too: one switched from isolated to shared still owns the
+    // root it used before. The configuration is already gone, so a failure
+    // here is reported rather than thrown — refusing now would leave the user
+    // with neither the agent nor an accurate error.
+    try {
+      await this.deps.stateRoots?.remove(id)
+    } catch (error) {
+      console.warn(`external agent ${id}: could not delete its state folder`, error)
+    }
   }
 
   // --------------------------------------------------------------------
@@ -514,6 +558,28 @@ export class ExternalAgentLifecycleService {
   async clearCredentials(id: string): Promise<void> {
     await clearCredentials(id, this.deps.keyring)
     this.deps.store.patchLifecycle(id, { credentialRefs: {} })
+  }
+
+  /**
+   * Remove one secret, keeping the others.
+   *
+   * An edit can only ADD a secret: the editor never sees a stored value, so an
+   * empty field means "unchanged", not "delete". This is the explicit delete,
+   * and like any credential change it rebuilds a registered runtime so the
+   * live process stops holding the old value.
+   */
+  async clearCredentialSlot(id: string, slot: ExternalAgentCredentialSlot): Promise<void> {
+    const config = this.requireConfig(id)
+    const secrets = await this.readSecrets(config)
+    if (secrets[slot] === undefined) return
+    const next = { ...secrets }
+    delete next[slot]
+
+    const wasRegistered = Boolean(this.deps.manager.getAgent(id))
+    if (wasRegistered) await this.unregister(id)
+    await this.setCredentials(id, next)
+    const after = this.deps.store.getAgent(id)
+    if (after?.enabled && wasRegistered) await this.register(after)
   }
 
   /** Resolve an Agent's secrets for one launch. Never persisted or logged. */
@@ -753,7 +819,10 @@ export class ExternalAgentLifecycleService {
   }
 
   /** Register with the manager, recording a structured reason on failure. */
-  private async register(config: LifecycleAgentConfig): Promise<void> {
+  private async register(
+    config: LifecycleAgentConfig,
+    options: { connect?: boolean } = {}
+  ): Promise<void> {
     const verdict = await this.assessReadiness(config)
     if (verdict.status !== "ready") {
       this.markVerdict(config.id, verdict)
@@ -764,7 +833,7 @@ export class ExternalAgentLifecycleService {
     try {
       const secrets = await this.readSecrets(config)
       const launchConfig = applyResolvedCredentials(config, secrets)
-      await this.deps.manager.addAgent(launchConfig)
+      await this.deps.manager.addAgent(launchConfig, options)
       this.markVerdict(config.id, READY)
     } catch (error) {
       const code = error instanceof ExternalAgentLifecycleError ? error.code : "adapter_unavailable"
@@ -997,6 +1066,7 @@ export async function createDefaultLifecycleDependencies(): Promise<LifecycleDep
   const { getDeviceId } = await import("@/lib/device/device-identity")
   const { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } = await import("../policy/security-policy")
   const { createHostRuntimeHost } = await import("./native-runtime-host")
+  const { removeExternalAgentStateRoot } = await import("./state-root")
 
   const state = () => useExternalAgentStore.getState()
 
@@ -1016,6 +1086,7 @@ export async function createDefaultLifecycleDependencies(): Promise<LifecycleDep
       isProtocolAvailable: (protocol) => protocolAdapterRegistry.has(protocol),
     },
     keyring: createKeyringStore(EXTERNAL_AGENT_KEYRING_NAMESPACE),
+    stateRoots: { remove: removeExternalAgentStateRoot },
     // Absent on a host with no processes (browser, Capacitor). The service
     // then refuses every runtime operation with `platform_unsupported`, which
     // is the truth: such a host cannot see what is installed, let alone

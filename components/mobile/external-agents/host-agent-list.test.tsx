@@ -11,6 +11,11 @@ import { HostAgentList } from "./host-agent-list"
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: jest.fn(), back: jest.fn() }),
+}))
+
 const hostState: { current: HostExternalAgentConfigsState } = {
   current: {} as HostExternalAgentConfigsState,
 }
@@ -74,6 +79,7 @@ function setHost(over: Partial<HostExternalAgentConfigsState> = {}) {
     remove: jest.fn(async () => true),
     copyLocal: jest.fn(async () => {}),
     create: jest.fn(),
+    duplicate: jest.fn(),
     ...over,
   } as HostExternalAgentConfigsState
 }
@@ -300,5 +306,107 @@ describe("HostAgentList", () => {
     expect(screen.getByTestId("host-agents-loading")).toBeInTheDocument()
     expect(screen.queryByTestId("host-agents-load-failed")).toBeNull()
     expect(screen.queryByTestId("host-agents-error")).toBeNull()
+  })
+
+  it("opens the detail screen from the card body, with the controls outside the link", () => {
+    setHost({ configs: [record()] })
+    render(<HostAgentList />)
+    const link = screen.getByRole("link", { name: "Open Claude Code" })
+    expect(link).toHaveAttribute("href", "/me/external-agents/detail?id=eac_1")
+    // No interactive control nested inside the link.
+    expect(within(link).queryByRole("switch")).toBeNull()
+    expect(within(link).queryByRole("combobox")).toBeNull()
+    expect(within(link).queryByRole("button")).toBeNull()
+  })
+
+  it("says where each agent keeps its state and which one it was copied from", () => {
+    setHost({
+      configs: [
+        record({ config: { name: "Codex", protocol: "acp", transport: "stdio" } }),
+        record({
+          configId: "eac_2",
+          config: {
+            name: "Codex RO",
+            protocol: "acp",
+            transport: "stdio",
+            stateIsolation: "isolated",
+            duplicatedFromAgentId: "eac_1",
+          },
+        }),
+      ],
+    })
+    render(<HostAgentList />)
+    expect(screen.getByTestId("host-agent-isolation-eac_1")).toHaveTextContent("Shared state")
+    expect(screen.getByTestId("host-agent-isolation-eac_2")).toHaveTextContent("Own state")
+    expect(screen.getByTestId("host-agent-lineage-eac_2")).toHaveTextContent("Copy of Codex")
+    expect(screen.queryByTestId("host-agent-lineage-eac_1")).toBeNull()
+  })
+
+  it("groups two configurations of one runtime under the runtime's name", () => {
+    setHost({
+      configs: [
+        record({
+          config: {
+            name: "Codex RO",
+            protocol: "acp",
+            transport: "stdio",
+            metadata: { preset: "codex" },
+          },
+        }),
+        record({
+          configId: "eac_2",
+          config: { name: "Mine", protocol: "a2a", transport: "http", metadata: {} },
+        }),
+        record({
+          configId: "eac_3",
+          config: {
+            name: "Codex RW",
+            protocol: "acp",
+            transport: "stdio",
+            metadata: { preset: "codex" },
+          },
+        }),
+      ],
+    })
+    render(<HostAgentList />)
+    const group = screen.getByRole("group", { name: /Codex/ })
+    expect(group).toHaveTextContent("2 configurations")
+    expect(within(group).getByTestId("host-agent-eac_1")).toBeInTheDocument()
+    expect(within(group).getByTestId("host-agent-eac_3")).toBeInTheDocument()
+    // A runtime with one configuration gets no header of its own.
+    expect(within(group).queryByTestId("host-agent-eac_2")).toBeNull()
+    expect(screen.getAllByRole("group")).toHaveLength(1)
+  })
+
+  it("offers edit, duplicate and remove in the overflow menu", async () => {
+    const user = userEvent.setup()
+    setHost({ configs: [record()] })
+    render(<HostAgentList />)
+    await user.click(screen.getByTestId("host-agent-menu-eac_1"))
+    expect(await screen.findByTestId("host-agent-edit-eac_1")).toHaveAttribute(
+      "href",
+      "/me/external-agents/detail?id=eac_1"
+    )
+    expect(screen.getByRole("menuitem", { name: "Duplicate Claude Code" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Remove Claude Code" })).toBeInTheDocument()
+  })
+
+  it("duplicates through the sheet and opens the copy", async () => {
+    const user = userEvent.setup()
+    const row = record()
+    const copy = record({ configId: "eac_copy", config: { name: "Claude Code (copy)" } })
+    const duplicate = jest.fn(async () => ({ ok: true as const, record: copy }))
+    setHost({ configs: [row], duplicate })
+    render(<HostAgentList />)
+
+    await user.click(screen.getByTestId("host-agent-menu-eac_1"))
+    await user.click(await screen.findByTestId("host-agent-duplicate-eac_1"))
+    expect(await screen.findByTestId("duplicate-name")).toHaveValue("Claude Code (copy)")
+    await user.click(screen.getByTestId("duplicate-submit"))
+
+    await waitFor(() =>
+      expect(duplicate).toHaveBeenCalledWith(row, expect.objectContaining({ name: "Claude Code (copy)" }))
+    )
+    expect(mockPush).toHaveBeenCalledWith("/me/external-agents/detail?id=eac_copy")
   })
 })

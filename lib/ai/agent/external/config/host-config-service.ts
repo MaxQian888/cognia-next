@@ -3,19 +3,34 @@
  *
  * The Dexie module underneath (`lib/db/external-agent-configs.ts`) knows about
  * heads, revisions and compare-and-swap. It deliberately knows nothing about
- * credentials or readiness. This layer adds the two governance steps that must
+ * credentials or readiness. This layer adds the governance steps that must
  * happen on every write, and would otherwise be re-implemented (differently) by
  * each caller:
  *
- *   1. **Scrub inline secrets.** `scrubInlineCredentials` moves an inline key
- *      into `credentialRefs`. It matters more here than on the desktop store
- *      because revisions are *retained*: a secret written into a revision would
- *      outlive the edit that removed it.
- *   2. **Assess readiness.** `ExternalAgentLifecycleService.assessReadiness`
+ *   1. **Move inline secrets into the keyring.** An inline key, token, secret
+ *      header, secret env value or OpenCode server password is written to the
+ *      host keyring under THIS configuration's own slots
+ *      (`credentialKeyId(configId, slot)`), `credentialRefs` is pointed at
+ *      them, and the value is scrubbed from the stored config. The scrub
+ *      matters more here than on the desktop store because revisions are
+ *      *retained*: a secret written into a revision would outlive the edit
+ *      that removed it. The keyring write matters because a scrub alone
+ *      silently throws the user's credential away.
+ *   2. **Refuse borrowed credentials.** Outside an import (which drops refs
+ *      wholesale), a `credentialRefs` entry must name one of the
+ *      configuration's own slots. A ref to another configuration's slot would
+ *      let config X launch with config Y's secret, which is the sharing two
+ *      configurations of one runtime exist to avoid (ADR-0216).
+ *   3. **Assess readiness.** `ExternalAgentLifecycleService.assessReadiness`
  *      already decides `needs-credentials` / `needs-consent` / `needs-runtime`
  *      / `blocked`, consulting the runtime catalog, the keyring and the
  *      platform sandbox rules. Re-deriving any of that here would be a second
  *      opinion on a question that has an owner.
+ *
+ * Launching never reads secrets from here: the run service mounts the stored
+ * config (refs only) through `ExternalAgentManager.addAgent`, whose launch
+ * preparer (`lifecycle/launch-preparation.ts`) resolves the refs from the same
+ * keyring namespace immediately before the spawn.
  *
  * Nothing here installs anything. An import that names a runtime this host does
  * not have is stored **disabled with a reason**, not silently repaired: pulling
@@ -24,6 +39,8 @@
  */
 
 import {
+  ExternalAgentConfigConflictError,
+  ExternalAgentConfigNotFoundError,
   collectExternalAgentConfigRevisions,
   createExternalAgentConfig,
   deleteExternalAgentConfig,
@@ -31,14 +48,17 @@ import {
   listExternalAgentConfigs,
   updateExternalAgentConfig,
 } from "@/lib/db/external-agent-configs"
+import type { KeyringStore } from "@/lib/credentials/keyring-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
-import type {
-  ExternalAgentCredentialSlot,
-  ExternalAgentLifecycleStatus,
+import {
+  ExternalAgentLifecycleError,
+  type ExternalAgentCredentialRefs,
+  type ExternalAgentCredentialSlot,
+  type ExternalAgentLifecycleStatus,
 } from "@/types/agent/external-agent-lifecycle"
 
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { ExternalAgentConfig, ExternalAgentStateIsolation } from "@/types/agent/external-agent"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 
@@ -49,9 +69,23 @@ import type {
   HostGatewayCapabilities,
   HostProfileStoreDocs,
 } from "./cognia-model-options"
-import { credentialsRequiredByImport, scrubInlineCredentials } from "../lifecycle/credentials"
+import {
+  EXTERNAL_AGENT_KEYRING_NAMESPACE,
+  clearCredentials,
+  credentialsRequiredByImport,
+  extractInlineCredentials,
+  occupiedSlots,
+  persistCredentials,
+  resolveCredentials,
+  scrubInlineCredentials,
+  type ExternalAgentSecrets,
+} from "../lifecycle/credentials"
 import type { LifecycleAgentConfig } from "../lifecycle/credentials"
+import { stateIsolationBlockReason } from "../lifecycle/launch-preparation"
 import type { ReadinessVerdict } from "../lifecycle/service"
+import { AGENT_STATE_KEY_PATTERN } from "../policy/security-policy"
+import { externalAgentDuplicateInput, uniqueDuplicateName } from "./duplicate-config"
+import { ownCredentialRefs } from "./host-config-mount"
 
 /** The one host fact this layer needs. Injected so it is testable without a keyring. */
 export type ReadinessAssessor = (config: LifecycleAgentConfig) => Promise<ReadinessVerdict>
@@ -59,18 +93,176 @@ export type ReadinessAssessor = (config: LifecycleAgentConfig) => Promise<Readin
 export interface HostConfigServiceDeps {
   assessReadiness: ReadinessAssessor
   now?: () => number
+  /**
+   * The host keyring, `external-agent` namespace: the one the launch preparer
+   * and the lifecycle service resolve `credentialRefs` from. Created lazily
+   * when absent, and only by a write that actually carries a secret.
+   */
+  keyring?: KeyringStore
 }
 
 /**
- * What a delete needs, which is only the clock.
+ * What a delete needs: the clock, and the two cleanups a deleted
+ * configuration owes the host.
  *
  * Separate from {@link HostConfigServiceDeps} on purpose: a tombstone write
  * assesses nothing, and requiring the assessor would make every delete resolve
- * `lifecycle/service` — the keyring, the manager and the adapter registry —
- * turning a locked keyring into a failed delete.
+ * `lifecycle/service` — the keyring, the manager and the adapter registry. The
+ * keyring here is the bare store, resolved after the tombstone is written, so
+ * a locked keyring can no longer turn into a delete that did not happen.
  */
 export interface HostConfigDeleteDeps {
   now?: () => number
+  keyring?: KeyringStore
+  /** Remove the configuration's private state root (ADR-0216). */
+  removeStateRoot?: (configId: string) => Promise<void>
+}
+
+/** Thrown when a write names a keyring slot the configuration does not own. */
+export class HostConfigForeignCredentialRefError extends Error {
+  readonly code = "external_agent_config_foreign_credential_ref"
+
+  constructor(
+    readonly slot: string,
+    readonly configId: string | null
+  ) {
+    super(
+      configId
+        ? `credentialRefs.${slot} must name one of configuration ${configId}'s own keyring slots`
+        : `credentialRefs.${slot} cannot be set on create: a new configuration has no keyring slots yet; send the secret inline and the host stores it`
+    )
+    this.name = "HostConfigForeignCredentialRefError"
+  }
+}
+
+/**
+ * The configuration was deleted, but what it left on the host could not all be
+ * removed. Thrown after the tombstone is written, so the caller learns the
+ * delete stands and what to clean up by hand.
+ */
+export class HostConfigCleanupError extends Error {
+  readonly code = "external_agent_config_cleanup_failed"
+
+  constructor(
+    readonly configId: string,
+    readonly failures: string[]
+  ) {
+    super(
+      `configuration ${configId} was deleted, but its host data could not all be removed: ${failures.join("; ")}`
+    )
+    this.name = "HostConfigCleanupError"
+  }
+}
+
+let defaultKeyring: Promise<KeyringStore> | null = null
+
+/** The deps' keyring, or the host's `external-agent` namespace (created once). */
+async function keyringOf(deps: { keyring?: KeyringStore }): Promise<KeyringStore> {
+  if (deps.keyring) return deps.keyring
+  defaultKeyring ??= import("@/lib/credentials/keyring-store").then(({ createKeyringStore }) =>
+    createKeyringStore(EXTERNAL_AGENT_KEYRING_NAMESPACE)
+  )
+  return defaultKeyring
+}
+
+/** Test seam. Forgets the lazily created default keyring. */
+export function __resetHostConfigKeyringForTests(): void {
+  defaultKeyring = null
+}
+
+/** Whether a keyring key id is one of `configId`'s own slots. */
+function ownsCredentialKey(configId: string, keyId: unknown): boolean {
+  return typeof keyId === "string" && keyId.startsWith(`${configId}:`)
+}
+
+/**
+ * Refuse a `credentialRefs` map that names a slot this configuration does not
+ * own. `configId` is `null` on a create, where no slot can be owned yet.
+ */
+export function assertOwnCredentialRefs(
+  refs: ExternalAgentCredentialRefs | undefined | null,
+  configId: string | null
+): void {
+  if (!refs) return
+  for (const [slot, keyId] of Object.entries(refs)) {
+    if (keyId === undefined) continue
+    if (configId === null || !ownsCredentialKey(configId, keyId)) {
+      throw new HostConfigForeignCredentialRefError(slot, configId)
+    }
+  }
+}
+
+/** Only the refs that name `configId`'s own slots (shared with the mount). */
+const ownRefs = ownCredentialRefs
+
+/**
+ * Layer `next` over `base`. The two map slots (secret headers, secret env
+ * values) merge by name, so adding one env secret does not drop the others the
+ * keyring already holds; every other slot is replaced.
+ */
+function mergeSecrets(
+  base: ExternalAgentSecrets,
+  next: ExternalAgentSecrets
+): ExternalAgentSecrets {
+  const merged: ExternalAgentSecrets = { ...base, ...next }
+  if (base.headers || next.headers) merged.headers = { ...base.headers, ...next.headers }
+  if (base.processEnv || next.processEnv) {
+    merged.processEnv = { ...base.processEnv, ...next.processEnv }
+  }
+  return merged
+}
+
+/**
+ * The secrets this configuration's own slots hold, best effort: a slot whose
+ * entry is gone is skipped rather than failing an edit that is about to write
+ * the slots again anyway.
+ */
+async function readOwnSecretsLenient(
+  config: StoredExternalAgentConfig,
+  configId: string,
+  keyring: KeyringStore
+): Promise<ExternalAgentSecrets> {
+  const refs = ownRefs(config.credentialRefs, configId)
+  const secrets: ExternalAgentSecrets = {}
+  for (const slot of Object.keys(refs) as ExternalAgentCredentialSlot[]) {
+    try {
+      Object.assign(secrets, await resolveCredentials({ [slot]: refs[slot] }, keyring))
+    } catch (error) {
+      if (!(error instanceof ExternalAgentLifecycleError)) throw error
+    }
+  }
+  return secrets
+}
+
+/**
+ * The state isolation a new configuration gets when the caller did not choose
+ * one: `isolated` (ADR-0216), unless its runtime has no documented home to
+ * isolate, in which case `isolated` could never launch and `shared` is the
+ * only setting that runs.
+ */
+function defaultStateIsolation(config: StoredExternalAgentConfig): ExternalAgentStateIsolation {
+  const probe = {
+    ...(config as unknown as ExternalAgentConfig),
+    id: "eac_probe",
+    stateIsolation: "isolated" as const,
+  }
+  return stateIsolationBlockReason(probe) === null ? "isolated" : "shared"
+}
+
+/**
+ * An `isolated` configuration its runtime cannot isolate is blocked, said at
+ * write time rather than discovered as a failed mount when a run is admitted.
+ */
+function isolationVerdict(config: StoredExternalAgentConfig): ReadinessVerdict | null {
+  const id =
+    typeof config.id === "string" && AGENT_STATE_KEY_PATTERN.test(config.id)
+      ? config.id
+      : "eac_probe"
+  const reason = stateIsolationBlockReason({
+    ...(config as unknown as ExternalAgentConfig),
+    id,
+  })
+  return reason ? { status: "blocked", reasonCode: "state_isolation_unsupported", reason } : null
 }
 
 /**
@@ -121,8 +313,66 @@ async function prepare(
   deps: HostConfigServiceDeps
 ): Promise<StoredExternalAgentConfig> {
   const scrubbed = scrubInlineCredentials(config as unknown as LifecycleAgentConfig)
-  const verdict = await deps.assessReadiness(scrubbed)
+  const assessed = await deps.assessReadiness(scrubbed)
+  const verdict =
+    assessed.status === "ready"
+      ? (isolationVerdict(scrubbed as unknown as StoredExternalAgentConfig) ?? assessed)
+      : assessed
   return applyVerdict(scrubbed as unknown as StoredExternalAgentConfig, verdict)
+}
+
+/** What a configuration looks like while its secrets are being written. */
+const STORING_CREDENTIALS: ReadinessVerdict = {
+  status: "needs-credentials",
+  reasonCode: "credential_missing",
+  reason: "credentials are being stored on this host",
+}
+
+/**
+ * Create a configuration and move `secrets` into its own keyring slots.
+ *
+ * The store mints the id, so the slots cannot be named before the row exists.
+ * The create is therefore two writes: a first revision that is scrubbed,
+ * disabled and marked `needs-credentials` (never runnable, and honest if the
+ * second write never happens), then — once the secrets are in the keyring —
+ * the real revision with `credentialRefs` pointing at them, assessed and
+ * enabled as asked. A failure in between deletes the row and its slots rather
+ * than leaving a half-made configuration behind.
+ */
+async function createWithSecrets(
+  config: StoredExternalAgentConfig,
+  secrets: ExternalAgentSecrets,
+  deps: HostConfigServiceDeps
+): Promise<ExternalAgentConfigRecord> {
+  const scrubbed = scrubInlineCredentials(config as unknown as LifecycleAgentConfig)
+  delete scrubbed.credentialRefs
+  const base = scrubbed as unknown as StoredExternalAgentConfig
+  if (occupiedSlots(secrets).length === 0) {
+    return createExternalAgentConfig({ config: await prepare(base, deps), now: deps.now?.() })
+  }
+
+  const created = await createExternalAgentConfig({
+    config: applyVerdict({ ...base, enabled: false }, STORING_CREDENTIALS),
+    now: deps.now?.(),
+  })
+  const keyring = await keyringOf(deps)
+  try {
+    const credentialRefs = await persistCredentials(created.configId, secrets, keyring)
+    const final = await prepare({ ...base, id: created.configId, credentialRefs }, deps)
+    return await updateExternalAgentConfig({
+      configId: created.configId,
+      expectedRevision: created.revision,
+      mutate: () => final,
+      now: deps.now?.(),
+    })
+  } catch (error) {
+    try {
+      await clearCredentials(created.configId, keyring)
+    } finally {
+      await deleteExternalAgentConfig(created.configId, deps.now?.() ?? Date.now())
+    }
+    throw error
+  }
 }
 
 export async function listHostExternalAgentConfigs(): Promise<ExternalAgentConfigRecord[]> {
@@ -330,17 +580,38 @@ export async function createHostExternalAgentConfig(
         ? { metadata: { ...incoming.metadata, importedFromAgentId: incoming.id } }
         : {}),
     }
+  } else {
+    // An ordinary create has no id yet, so no slot it could own.
+    assertOwnCredentialRefs(incoming.credentialRefs, null)
+    if (incoming.stateIsolation === undefined) {
+      incoming = { ...incoming, stateIsolation: defaultStateIsolation(incoming) }
+    }
   }
-  const prepared = await prepare(incoming, deps)
-  return createExternalAgentConfig({ config: prepared, now: deps.now?.() })
+  return createWithSecrets(
+    incoming,
+    extractInlineCredentials(incoming as unknown as ExternalAgentConfig),
+    deps
+  )
 }
 
 export interface UpdateHostConfigInput {
   configId: string
   expectedRevision: string
-  /** A shallow patch. `id` is ignored — the store owns it. */
+  /**
+   * A shallow patch. `id` is ignored — the store owns it. A patch crosses the
+   * wire as JSON, which cannot carry `undefined`, so `null` is how a caller
+   * clears one of {@link CLEARABLE_FIELDS}.
+   */
   patch: Partial<StoredExternalAgentConfig>
 }
+
+/**
+ * Optional fields an edit may clear by sending `null`; the stored config then
+ * has no value at all, which is what "unset" means to every reader
+ * (`maxConcurrentSessions` absent = no limit). `cogniaModel` and
+ * `subscriptionAccountId` are not here: `null` is a stored value for them.
+ */
+const CLEARABLE_FIELDS = ["description", "maxConcurrentSessions", "sessionIdleTimeout"] as const
 
 export async function updateHostExternalAgentConfig(
   input: UpdateHostConfigInput,
@@ -356,8 +627,36 @@ export async function updateHostExternalAgentConfig(
     const { ExternalAgentConfigNotFoundError } = await import("@/lib/db/external-agent-configs")
     throw new ExternalAgentConfigNotFoundError(input.configId)
   }
+  if (current.tombstonedAt !== undefined) {
+    throw new ExternalAgentConfigNotFoundError(input.configId)
+  }
   const { id: _ignoredId, ...patch } = input.patch
-  const merged = await prepare({ ...current.config, ...patch }, deps)
+  if (patch.credentialRefs !== undefined) {
+    assertOwnCredentialRefs(patch.credentialRefs, input.configId)
+  }
+  const raw: StoredExternalAgentConfig = { ...current.config, ...patch, id: input.configId }
+  for (const field of CLEARABLE_FIELDS) {
+    if ((raw as unknown as Record<string, unknown>)[field] === null) delete raw[field]
+  }
+
+  const inline = extractInlineCredentials(raw as unknown as ExternalAgentConfig)
+  if (occupiedSlots(inline).length > 0) {
+    // The slots are deterministic per configuration, so writing one IS the
+    // edit. Refuse a stale revision before touching the keyring, or a write
+    // that then loses the compare-and-swap would still have changed the
+    // credential the current revision launches with.
+    if (current.revision !== input.expectedRevision) {
+      throw new ExternalAgentConfigConflictError(current, input.expectedRevision)
+    }
+    const keyring = await keyringOf(deps)
+    const existing = await readOwnSecretsLenient(current.config, input.configId, keyring)
+    raw.credentialRefs = await persistCredentials(
+      input.configId,
+      mergeSecrets(existing, inline),
+      keyring
+    )
+  }
+  const merged = await prepare(raw, deps)
 
   const next = await updateExternalAgentConfig({
     configId: input.configId,
@@ -405,6 +704,21 @@ async function applyRevocation(
   }
 }
 
+/** The default state-root removal: the host command behind `state-root.ts`. */
+async function defaultRemoveStateRoot(configId: string): Promise<void> {
+  const { removeExternalAgentStateRoot } = await import("../lifecycle/state-root")
+  await removeExternalAgentStateRoot(configId)
+}
+
+/**
+ * Tombstone a configuration, then remove what it owned on this host.
+ *
+ * Order is load-bearing: the tombstone first, so no new run can be admitted;
+ * the revocation next, which cancels the runs already streaming; and only then
+ * its keyring slots and its private state root, which nothing is using any
+ * more. Both cleanups are attempted even when one fails, and a failure is
+ * reported AFTER the tombstone stands ({@link HostConfigCleanupError}).
+ */
 export async function deleteHostExternalAgentConfig(
   configId: string,
   deps: HostConfigDeleteDeps = {}
@@ -412,7 +726,103 @@ export async function deleteHostExternalAgentConfig(
   const before = await getExternalAgentConfig(configId)
   const after = await deleteExternalAgentConfig(configId, deps.now?.() ?? Date.now())
   if (before) await applyRevocation(before, after)
+
+  const failures: string[] = []
+  try {
+    await clearCredentials(configId, await keyringOf(deps))
+  } catch (error) {
+    failures.push(`keyring: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  try {
+    await (deps.removeStateRoot ?? defaultRemoveStateRoot)(configId)
+  } catch (error) {
+    failures.push(`state root: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (failures.length > 0) throw new HostConfigCleanupError(configId, failures)
   return after
+}
+
+export interface DuplicateHostConfigInput {
+  /** The configuration to copy. */
+  configId: string
+  /** Defaults to the first free "<name> (copy)" among the host's configurations. */
+  name?: string
+  /** Defaults to `isolated`: a copy is a separate configuration (ADR-0216). */
+  stateIsolation?: ExternalAgentStateIsolation
+  /** Defaults to the source's state. A copy is never connected or run here. */
+  enabled?: boolean
+}
+
+/** The host's own copy name when the caller sent none. The UI sends a localized one. */
+function defaultCopyName(sourceName: string, index: number): string {
+  return index === 1 ? `${sourceName} (copy)` : `${sourceName} (copy ${index})`
+}
+
+/**
+ * Copy a host configuration, secrets included, into a new one.
+ *
+ * The copy is built by `externalAgentDuplicateInput` (the same rules the
+ * desktop applies: lineage recorded, state-dir env and the OpenCode port and
+ * password cut, isolation defaulting to `isolated`). The source's secrets —
+ * resolved from its OWN slots, plus anything still inline from before slots
+ * existed — are written into the copy's own slots before the copy's runnable
+ * revision exists, so neither configuration ever reads the other's keyring
+ * entry and removing one never breaks the other. Nothing is connected: the
+ * host only spawns an agent when a run is admitted against it.
+ *
+ * A source ref whose keyring entry is gone fails the duplicate with
+ * `credential_missing` rather than producing a copy that looks configured and
+ * authenticates as nobody.
+ */
+export async function duplicateHostExternalAgentConfig(
+  input: DuplicateHostConfigInput,
+  deps: HostConfigServiceDeps
+): Promise<ExternalAgentConfigRecord> {
+  const record = await getExternalAgentConfig(input.configId)
+  if (!record || record.tombstonedAt !== undefined) {
+    throw new ExternalAgentConfigNotFoundError(input.configId)
+  }
+  const source = {
+    ...(record.config as unknown as ExternalAgentConfig),
+    id: record.configId,
+  }
+  const sourceName = source.name?.trim() || record.configId
+  const name =
+    input.name?.trim() ||
+    uniqueDuplicateName(
+      (await listExternalAgentConfigs()).map((row) => row.config.name ?? ""),
+      (index) => defaultCopyName(sourceName, index)
+    )
+
+  const refs = ownRefs(record.config.credentialRefs, record.configId)
+  const secrets = mergeSecrets(
+    extractInlineCredentials(source),
+    Object.keys(refs).length > 0 ? await resolveCredentials(refs, await keyringOf(deps)) : {}
+  )
+
+  const copyInput = externalAgentDuplicateInput(source, {
+    name,
+    stateIsolation: input.stateIsolation,
+    enabled: input.enabled,
+  })
+  const metadata = copyInput.metadata ? { ...copyInput.metadata } : undefined
+  // Provenance of the SOURCE: carried over, it would pair the copy with the
+  // local agent the source was imported from, and that agent would appear to
+  // run on two host rows.
+  if (metadata) delete metadata.importedFromAgentId
+  const now = new Date(deps.now?.() ?? Date.now()).toISOString()
+  const copy: StoredExternalAgentConfig = {
+    ...(copyInput as unknown as StoredExternalAgentConfig),
+    id: record.configId,
+    enabled: copyInput.enabled ?? record.enabled,
+    ...(metadata ? { metadata } : {}),
+    // The runtime the source is bound to is the runtime the copy runs; it is
+    // identity, not instance state.
+    ...(record.config.runtimeBinding ? { runtimeBinding: record.config.runtimeBinding } : {}),
+    createdAt: now,
+    updatedAt: now,
+  }
+  return createWithSecrets(copy, secrets, deps)
 }
 
 /** What one configuration's reconciliation did. */

@@ -106,6 +106,7 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   // own localStorage configs; these are the ones a paired browser runs against.
   "external_agent_config_create",
   "external_agent_config_delete",
+  "external_agent_config_duplicate",
   "external_agent_config_reconcile",
   "external_agent_config_update",
   // HostStateProtocol — the same durable queue now carries attached-client

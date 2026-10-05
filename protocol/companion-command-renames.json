@@ -1333,6 +1333,9 @@
     "external_agent_config_delete": {
       "to": "external_agent.config.delete"
     },
+    "external_agent_config_duplicate": {
+      "to": "external_agent.config.copy"
+    },
     "external_agent_config_get": {
       "to": "external_agent.config.get"
     },
@@ -1362,6 +1365,12 @@
     },
     "external_agent_sessions_read": {
       "to": "external_agent.session.read"
+    },
+    "external_agent_state_root_info": {
+      "to": "external_agent.state_root.get"
+    },
+    "external_agent_state_root_remove": {
+      "to": "external_agent.state_root.delete"
     },
     "external_agent_update": {
       "to": "external_agent.update"
@@ -3268,6 +3277,9 @@
     },
     "subscription_get_active": {
       "to": "subscription.active.get"
+    },
+    "subscription_get_account_env": {
+      "to": "subscription.account_env.get"
     },
     "subscription_get_preset": {
       "to": "subscription.preset.get"

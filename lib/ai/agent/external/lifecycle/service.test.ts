@@ -307,6 +307,98 @@ describe("duplicateConfig", () => {
     const { service } = build()
     await expect(service.duplicateConfig("missing", "x")).rejects.toThrow()
   })
+
+  it("registers the copy without connecting it, with the chosen options", async () => {
+    const { service, store, manager } = build({}, [stdioConfig({ id: "source" })])
+
+    const copyId = await service.duplicateConfig("source", {
+      name: "Codex work",
+      stateIsolation: "shared",
+    })
+
+    expect(manager.addAgent).toHaveBeenLastCalledWith(expect.objectContaining({ id: copyId }), {
+      connect: false,
+    })
+    expect(store.getAgent(copyId)).toMatchObject({
+      name: "Codex work",
+      stateIsolation: "shared",
+      duplicatedFromAgentId: "source",
+    })
+  })
+
+  it("keeps a switched-off source's copy switched off and unregistered", async () => {
+    const { service, store, manager } = build({}, [stdioConfig({ id: "source", enabled: false })])
+
+    const copyId = await service.duplicateConfig("source", "Copy")
+
+    expect(store.getAgent(copyId)?.enabled).toBe(false)
+    expect(manager.getAgent(copyId)).toBeUndefined()
+  })
+
+  it("moves a legacy plaintext server password into the copy's own slot", async () => {
+    const { service, store, keyring } = build({}, [
+      stdioConfig({
+        id: "source",
+        process: { command: "opencode", args: ["serve"] },
+        metadata: { preset: "opencode", serverPassword: "pw", port: 4096 },
+      }),
+    ])
+
+    const copyId = await service.duplicateConfig("source", "Copy")
+
+    expect(store.getAgent(copyId)?.metadata).toEqual({ preset: "opencode" })
+    expect(store.getAgent(copyId)?.credentialRefs).toEqual({
+      serverPassword: `${copyId}:serverPassword`,
+    })
+    expect(keyring.entries.get(`${copyId}:serverPassword`)).toBe("pw")
+  })
+})
+
+describe("removeConfig and the state root", () => {
+  it("deletes the configuration's private state folder with it", async () => {
+    const remove = jest.fn(async () => true)
+    const { service } = build({ stateRoots: { remove } }, [
+      stdioConfig({ stateIsolation: "isolated" }),
+    ])
+    await service.removeConfig("agent-1")
+    expect(remove).toHaveBeenCalledWith("agent-1")
+  })
+
+  it("still removes the configuration when the folder cannot be deleted", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const remove = jest.fn(async () => {
+      throw new Error("busy")
+    })
+    const { service, store } = build({ stateRoots: { remove } }, [stdioConfig()])
+    await expect(service.removeConfig("agent-1")).resolves.toBeUndefined()
+    expect(store.getAgent("agent-1")).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})
+
+describe("clearCredentialSlot", () => {
+  it("removes one secret, keeps the rest, and rebuilds a registered runtime", async () => {
+    const { service, store, manager, keyring } = build({}, [stdioConfig()])
+    await service.setCredentials("agent-1", { apiKey: "sk", serverPassword: "pw" })
+    await service.connect("agent-1")
+    manager.calls.length = 0
+
+    await service.clearCredentialSlot("agent-1", "serverPassword")
+
+    expect(keyring.entries.has("agent-1:serverPassword")).toBe(false)
+    expect(keyring.entries.get("agent-1:apiKey")).toBe("sk")
+    expect(store.getAgent("agent-1")?.credentialRefs).toEqual({ apiKey: "agent-1:apiKey" })
+    expect(manager.calls).toEqual(["removeAgent:agent-1", "addAgent:agent-1"])
+  })
+
+  it("does nothing for a slot that holds nothing", async () => {
+    const { service, manager } = build({}, [stdioConfig()])
+    await service.connect("agent-1")
+    manager.calls.length = 0
+    await service.clearCredentialSlot("agent-1", "bearerToken")
+    expect(manager.calls).toEqual([])
+  })
 })
 
 describe("updateConfig", () => {

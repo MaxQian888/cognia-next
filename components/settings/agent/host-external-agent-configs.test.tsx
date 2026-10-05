@@ -1,9 +1,19 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { HostExternalAgentConfigs } from "./host-external-agent-configs"
+import { TooltipProvider } from "@/components/ui/tooltip"
+
+/** The app mounts `TooltipProvider` in its layout; the badges need it. */
+function renderInShell() {
+  return render(
+    <TooltipProvider>
+      <HostExternalAgentConfigs />
+    </TooltipProvider>
+  )
+}
 import type { HostExternalAgentConfigsState } from "@/hooks/agent/use-host-external-agent-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 
@@ -15,7 +25,17 @@ jest.mock("@/hooks/agent/use-host-external-agent-configs", () => ({
   useHostExternalAgentConfigs: () => state.current,
 }))
 
-const localAgents: { current: Record<string, { id: string; name: string }> } = { current: {} }
+const localAgents: {
+  current: Record<string, Record<string, unknown> & { id: string; name: string }>
+} = { current: {} }
+
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => false }))
+
+jest.mock("@/components/ui/sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn() },
+}))
+
+import { toast } from "@/components/ui/sonner"
 
 jest.mock("@/stores/agent/external-agent-store", () => ({
   useExternalAgentStore: (selector: (state: unknown) => unknown) =>
@@ -51,6 +71,7 @@ function setState(over: Partial<HostExternalAgentConfigsState> = {}) {
     remove: jest.fn(async () => true),
     copyLocal: jest.fn(async () => {}),
     create: jest.fn(async () => ({ ok: false as const, error: "not used" })),
+    duplicate: jest.fn(async () => ({ ok: false as const, error: "not used" })),
     ...over,
   }
 }
@@ -141,12 +162,27 @@ describe("HostExternalAgentConfigs", () => {
     expect(screen.getByText("Pi")).toBeInTheDocument()
   })
 
-  it("deletes through the host", async () => {
+  it("asks before deleting, naming the configuration, then deletes through the host", async () => {
     const remove = jest.fn(async () => true)
     setState({ configs: [record()], remove })
     render(<HostExternalAgentConfigs />)
     await userEvent.click(screen.getByRole("button", { name: /Delete Pi/i }))
-    await waitFor(() => expect(remove).toHaveBeenCalled())
+    expect(remove).not.toHaveBeenCalled()
+    const confirm = screen.getByRole("alertdialog")
+    expect(confirm).toHaveTextContent('Delete "Pi" from the host?')
+    await userEvent.click(within(confirm).getByRole("button", { name: /^Delete$/ }))
+    await waitFor(() =>
+      expect(remove).toHaveBeenCalledWith(expect.objectContaining({ configId: "eac_1" }))
+    )
+  })
+
+  it("keeps the configuration when the deletion is cancelled", async () => {
+    const remove = jest.fn(async () => true)
+    setState({ configs: [record()], remove })
+    render(<HostExternalAgentConfigs />)
+    await userEvent.click(screen.getByRole("button", { name: /Delete Pi/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^Cancel$/ }))
+    expect(remove).not.toHaveBeenCalled()
   })
 
   it("asks the host to re-check readiness", async () => {
@@ -203,5 +239,123 @@ describe("copying a local agent to the host", () => {
     render(<HostExternalAgentConfigs />)
 
     expect(screen.getByRole("button", { name: /Copy from this device/i })).toBeDisabled()
+  })
+})
+
+describe("instances on the host (ADR-0216)", () => {
+  const codex = (over: Record<string, unknown>) =>
+    ({
+      name: "Codex",
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "codex", args: [] },
+      metadata: { preset: "codex" },
+      ...over,
+    }) as never
+
+  it("shows each row's state isolation, lineage and what sets it apart", () => {
+    setState({
+      configs: [
+        record({ configId: "eac_src", config: codex({ defaultPermissionMode: "plan" }) }),
+        record({
+          configId: "eac_copy",
+          config: codex({
+            name: "Codex (copy)",
+            stateIsolation: "isolated",
+            defaultPermissionMode: "bypassPermissions",
+            duplicatedFromAgentId: "eac_src",
+          }),
+        }),
+      ],
+    })
+    renderInShell()
+    const source = screen.getByTestId("host-config-eac_src")
+    const copy = screen.getByTestId("host-config-eac_copy")
+    expect(within(source).getByTestId("state-isolation-badge")).toHaveTextContent("Shared state")
+    expect(within(copy).getByTestId("state-isolation-badge")).toHaveTextContent("Own state")
+    expect(within(copy).getByTestId("duplicated-from-hint")).toHaveTextContent("Copy of Codex")
+    expect(within(source).queryByTestId("duplicated-from-hint")).toBeNull()
+    expect(within(source).getByTestId("instance-trait-chips")).toHaveTextContent("Plan")
+    expect(within(copy).getByTestId("instance-trait-chips")).toHaveTextContent("Bypass")
+  })
+
+  it("says nothing about lineage when the source has been deleted", () => {
+    setState({
+      configs: [record({ config: codex({ duplicatedFromAgentId: "gone" }) })],
+    })
+    renderInShell()
+    expect(screen.queryByTestId("duplicated-from-hint")).toBeNull()
+  })
+
+  it("duplicates on the host with the chosen name, state and enablement", async () => {
+    const duplicate = jest.fn(async () => ({
+      ok: true as const,
+      record: record({ configId: "eac_2", config: codex({ name: "Codex review" }) }),
+    }))
+    setState({ configs: [record({ config: codex({}) })], duplicate })
+    renderInShell()
+    await userEvent.click(screen.getByRole("button", { name: "Duplicate Codex" }))
+    const name = screen.getByTestId("duplicate-agent-name")
+    expect(name).toHaveValue("Codex (copy)")
+    await userEvent.clear(name)
+    await userEvent.type(name, "Codex review")
+    // Codex can be isolated, so a copy starts with its own state.
+    expect(screen.getByTestId("state-isolation-isolated")).toHaveAttribute("data-state", "checked")
+    await userEvent.click(screen.getByTestId("state-isolation-shared"))
+    await userEvent.click(screen.getByTestId("duplicate-agent-enabled"))
+    await userEvent.click(screen.getByTestId("duplicate-agent-submit"))
+    await waitFor(() =>
+      expect(duplicate).toHaveBeenCalledWith(expect.objectContaining({ configId: "eac_1" }), {
+        name: "Codex review",
+        stateIsolation: "shared",
+        enabled: false,
+      })
+    )
+    await waitFor(() =>
+      expect(screen.queryByTestId("duplicate-agent-name")).not.toBeInTheDocument()
+    )
+    expect(toast.success).toHaveBeenCalledWith('Duplicated as "Codex review"')
+  })
+
+  it("keeps the duplicate dialog open and says why when the host refuses", async () => {
+    const duplicate = jest.fn(async () => ({ ok: false as const, error: "keyring locked" }))
+    setState({ configs: [record({ config: codex({}) })], duplicate })
+    renderInShell()
+    await userEvent.click(screen.getByRole("button", { name: "Duplicate Codex" }))
+    await userEvent.click(screen.getByTestId("duplicate-agent-submit"))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("keyring locked"))
+    )
+    expect(screen.getByTestId("duplicate-agent-name")).toBeInTheDocument()
+  })
+
+  it("suggests a free name when the default copy name is taken on the host", async () => {
+    setState({
+      configs: [
+        record({ config: codex({}) }),
+        record({ configId: "eac_2", config: codex({ name: "Codex (copy)" }) }),
+      ],
+    })
+    renderInShell()
+    await userEvent.click(screen.getByRole("button", { name: "Duplicate Codex" }))
+    expect(screen.getByTestId("duplicate-agent-name")).not.toHaveValue("Codex (copy)")
+  })
+
+  it("tells two local configurations of one runtime apart in the copy menu", async () => {
+    const base = {
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "codex", args: [] },
+      metadata: { preset: "codex" },
+    }
+    localAgents.current = {
+      "local-1": { ...base, id: "local-1", name: "Codex", defaultPermissionMode: "plan" },
+      "local-2": { ...base, id: "local-2", name: "Codex", defaultPermissionMode: "acceptEdits" },
+    }
+    setState({ configs: [] })
+    renderInShell()
+    await userEvent.click(screen.getByRole("button", { name: /Copy from this device/i }))
+    expect(screen.getByTestId("copy-local-traits-local-1")).toHaveTextContent("Plan")
+    expect(screen.getByTestId("copy-local-traits-local-2")).toHaveTextContent("Accept edits")
   })
 })

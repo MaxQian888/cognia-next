@@ -1,4 +1,4 @@
-import { dispatchSubagent, runTeam } from "./dispatch"
+import { dispatchSubagent, resolveSubagentExternalTarget, runTeam } from "./dispatch"
 import { runCompletionRail } from "@/lib/ai/agent/agent-executor"
 import { getSubagent } from "@/lib/plugin/registries/subagent-registry"
 import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
@@ -798,4 +798,41 @@ it("threads a host-owned persistent child session and exact execution identity",
       identity: { runId: "run-owned", sessionId: "child-owned" },
     }
   )
+})
+
+describe("resolveSubagentExternalTarget", () => {
+  const def = (extra: Partial<PluginSubagentDef> = {}) =>
+    ({ id: "p:reviewer", name: "Reviewer", prompt: "review", ...extra }) as PluginSubagentDef
+
+  it("is undefined for an in-process subagent", async () => {
+    expect(await resolveSubagentExternalTarget(def())).toBeUndefined()
+  })
+
+  it("names the def's preset and its exact-config pin", async () => {
+    expect(
+      await resolveSubagentExternalTarget(
+        def({ externalPresetId: "codex", externalAgentConfigId: "cfg-1" })
+      )
+    ).toEqual({ presetId: "codex", configId: "cfg-1" })
+  })
+
+  it("lets options override the preset and drops the old preset's pin", async () => {
+    expect(
+      await resolveSubagentExternalTarget(
+        def({ externalPresetId: "codex", externalAgentConfigId: "cfg-1" }),
+        { externalAgentId: "claude-code" }
+      )
+    ).toEqual({ presetId: "claude-code" })
+  })
+
+  it("resolves a registered id, and still reports an option-named agent for an unknown one", async () => {
+    mockGetSubagent.mockReturnValueOnce(def({ externalPresetId: "gemini-cli" }))
+    expect(await resolveSubagentExternalTarget("reviewer")).toEqual({ presetId: "gemini-cli" })
+    mockGetSubagent.mockReturnValueOnce(undefined)
+    expect(await resolveSubagentExternalTarget("ghost")).toBeUndefined()
+    mockGetSubagent.mockReturnValueOnce(undefined)
+    expect(await resolveSubagentExternalTarget("ghost", { externalAgentId: "codex" })).toEqual({
+      presetId: "codex",
+    })
+  })
 })

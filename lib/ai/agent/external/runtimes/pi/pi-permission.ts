@@ -18,6 +18,8 @@
  *      which holds even if the extension never loads.
  */
 
+import { matchGlob } from "@/lib/claude/permissions/ruleset"
+
 /** Pi's built-in tools, as reported by `pi --help` and `tool-policy.ts`. */
 export const PI_BUILTIN_TOOLS = ["read", "grep", "find", "ls", "edit", "write", "bash"] as const
 export type PiBuiltinTool = (typeof PI_BUILTIN_TOOLS)[number]
@@ -117,6 +119,45 @@ export function resolvePiToolPolicy(
       decisions.bash = "ask"
       return { mode: "default", decisions, fallback: "ask" }
   }
+}
+
+/**
+ * Lay a configuration's own approval lists over the mode's table (ADR-0216).
+ *
+ * The table is decided before the session starts, per tool NAME, so only what
+ * a name can answer applies here: a `requireApprovalFor` entry whose tool part
+ * matches escalates that tool to `ask` even when its specifier could only be
+ * judged per call (asking more is the safe reading), and a bare
+ * `autoApprovePatterns` entry relaxes `ask` to `allow`. A specifier-qualified
+ * auto-approval is applied per call instead, when Pi's prompt reaches Cognia
+ * (`configuredApprovalPolicy` in `pi-rpc-client`). Modes whose promise is "no
+ * prompts" keep it: under `plan` and `dontAsk` an `ask` becomes `deny`, and
+ * nothing here ever relaxes a `deny`.
+ */
+export function applyConfiguredApprovalToPiPolicy(
+  policy: PiToolPolicy,
+  lists: { autoApprovePatterns?: string[]; requireApprovalFor?: string[] } | undefined,
+  tools: readonly string[] = PI_BUILTIN_TOOLS
+): PiToolPolicy {
+  if (!lists?.autoApprovePatterns?.length && !lists?.requireApprovalFor?.length) return policy
+  const silent = policy.mode === "plan" || policy.mode === "dontAsk"
+  const toolPart = (entry: string) => {
+    const open = entry.indexOf("(")
+    return (open >= 0 ? entry.slice(0, open) : entry).trim()
+  }
+  const decisions = { ...policy.decisions }
+  for (const tool of new Set([...tools, ...Object.keys(policy.decisions)])) {
+    const current = decisions[tool] ?? policy.fallback
+    if ((lists.requireApprovalFor ?? []).some((entry) => matchGlob(toolPart(entry), tool))) {
+      if (current !== "deny") decisions[tool] = silent ? "deny" : "ask"
+      continue
+    }
+    const bareApproval = (lists.autoApprovePatterns ?? []).some(
+      (entry) => !entry.includes("(") && matchGlob(entry.trim(), tool)
+    )
+    if (bareApproval && current === "ask") decisions[tool] = "allow"
+  }
+  return { ...policy, decisions }
 }
 
 /** Look up one tool's decision, falling back for unknown/extension tools. */

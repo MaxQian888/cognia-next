@@ -60,6 +60,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "agent:control",
   "builtin-skills:invoke",
   "agent:dispatch-external",
+  "agent:external:read",
+  "agent:external:manage",
   "agent:dispatch",
   "agent:shared-memory:read",
   "twin:read",
@@ -206,10 +208,10 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.agent.registerExternalAgentAdapter": {
-    kind: "returned-disposer",
+    kind: "host-owned",
   },
   "ctx.agent.registerExternalAgentPreset": {
-    kind: "returned-disposer",
+    kind: "host-owned",
   },
   "ctx.agent.registerMcpServerPreset": {
     kind: "returned-disposer",
@@ -1103,6 +1105,69 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   },
   "ctx.extensions.registerExtension": {
     kind: "returned-disposer",
+  },
+  "ctx.externalAgents.list": {
+    kind: "none",
+  },
+  "ctx.externalAgents.get": {
+    kind: "none",
+  },
+  "ctx.externalAgents.getReadiness": {
+    kind: "none",
+  },
+  "ctx.externalAgents.listPresets": {
+    kind: "none",
+  },
+  "ctx.externalAgents.listRuntimes": {
+    kind: "none",
+  },
+  "ctx.externalAgents.getSettings": {
+    kind: "none",
+  },
+  "ctx.externalAgents.listDelegationRules": {
+    kind: "none",
+  },
+  "ctx.externalAgents.onChange": {
+    kind: "returned-disposer",
+  },
+  "ctx.externalAgents.create": {
+    kind: "none",
+  },
+  "ctx.externalAgents.createFromPreset": {
+    kind: "none",
+  },
+  "ctx.externalAgents.update": {
+    kind: "none",
+  },
+  "ctx.externalAgents.duplicate": {
+    kind: "none",
+  },
+  "ctx.externalAgents.remove": {
+    kind: "none",
+  },
+  "ctx.externalAgents.setEnabled": {
+    kind: "none",
+  },
+  "ctx.externalAgents.connect": {
+    kind: "none",
+  },
+  "ctx.externalAgents.disconnect": {
+    kind: "none",
+  },
+  "ctx.externalAgents.addDelegationRule": {
+    kind: "none",
+  },
+  "ctx.externalAgents.updateDelegationRule": {
+    kind: "none",
+  },
+  "ctx.externalAgents.removeDelegationRule": {
+    kind: "none",
+  },
+  "ctx.externalAgents.reorderDelegationRules": {
+    kind: "none",
+  },
+  "ctx.externalAgents.updateSettings": {
+    kind: "none",
   },
   "ctx.fs.appendText": {
     kind: "none",

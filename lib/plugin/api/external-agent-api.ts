@@ -1,8 +1,11 @@
 /** Plugin dispatch through the existing external manager, with durable Bot ownership. */
 import type {
+  AcpPermissionMode,
+  ExternalAgentConfig,
   ExternalAgentExecutionOptions,
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
+import type { LifecycleAgentConfig } from "@/lib/ai/agent/external/lifecycle/credentials"
 import type { PluginWorkspaceHandle } from "../workspace/acquire"
 import { assertOwnedBotWorkspace, digestBotArtifact } from "../workspace/bot-run"
 import { getBotRunStep, completeBotRunStep } from "@/lib/db/bot-run-steps"
@@ -41,6 +44,105 @@ interface AgentCheckpoint {
   promptHash: string
   /** Older checkpoints were always acceptEdits. */
   permissionMode?: PluginBotExternalAgentPermissionMode
+}
+
+type ExternalAgentManagerInstance = ReturnType<
+  typeof import("@/lib/ai/agent/external/manager").getExternalAgentManager
+>
+
+/**
+ * Admit one plugin-requested, non-Bot external run (ADR-0216 decision 3).
+ *
+ * A plugin holding `agent:dispatch-external` used to be able to start any
+ * preset or live agent in any permission mode, with the master switch off and
+ * past a config the lifecycle service would refuse to connect. Now:
+ *
+ *  - the global master switch applies, as it does to every other surface;
+ *  - a configured agent must be enabled and pass the lifecycle readiness
+ *    verdict, and is registered through the lifecycle service so the launch
+ *    carries that config's own keyring credentials;
+ *  - the requested permission mode is clamped to the target's own default
+ *    (`deriveExternalSessionPermission`, the one ceiling rule): a config's
+ *    `defaultPermissionMode`, or for a preset-spawned transient instance the
+ *    store's global default. A plugin can ask for less, never for more;
+ *  - a transient preset instance is released by the caller's cleanup when
+ *    the run ends, whatever its outcome;
+ *  - a live manager instance that is not a configured agent (another run's
+ *    transient, a Bot's isolated agent) is not a target.
+ */
+async function admitPluginExternalRun(
+  presetOrAgentId: string,
+  requested: AcpPermissionMode | undefined,
+  deps: {
+    manager: ExternalAgentManagerInstance
+    createAgentFromPreset: (id: string) => ExternalAgentConfig | null
+    registerCleanup: (release: () => Promise<void>) => void
+  }
+): Promise<{ agentId: string; permissionMode: AcpPermissionMode }> {
+  const [
+    { useExternalAgentStore },
+    { getExternalAgentLifecycleService },
+    { deriveExternalSessionPermission },
+  ] = await Promise.all([
+    import("@/stores/agent/external-agent-store"),
+    import("@/lib/ai/agent/external/lifecycle/service"),
+    import("@/lib/ai/agent/external/policy/permission-cascade"),
+  ])
+  const state = useExternalAgentStore.getState()
+  if (!state.enabled)
+    throw new Error("agent.runExternalAgent: external agents are turned off in Settings")
+  const lifecycle = await getExternalAgentLifecycleService()
+  const clamp = (ceiling: AcpPermissionMode): AcpPermissionMode =>
+    deriveExternalSessionPermission(
+      { permissionMode: ceiling },
+      { permissionMode: requested ?? ceiling }
+    ).permissionMode ?? ceiling
+  const refuseUnready = (verdict: { status: string; reasonCode?: string; reason?: string }) => {
+    if (verdict.status === "ready") return
+    throw new Error(
+      `agent.runExternalAgent: external agent "${presetOrAgentId}" is not ready (${
+        verdict.reasonCode ?? verdict.status
+      })${verdict.reason ? `: ${verdict.reason}` : ""}`
+    )
+  }
+
+  const configured = state.getAgent(presetOrAgentId) as LifecycleAgentConfig | undefined
+  if (configured) {
+    if (!configured.enabled)
+      throw new Error(
+        `agent.runExternalAgent: external agent "${presetOrAgentId}" is disabled in Settings`
+      )
+    refuseUnready(await lifecycle.assessReadiness(configured))
+    // `lifecycle.connect` registers with the config's resolved credentials;
+    // `manager.addAgent` with the store copy would launch with none.
+    if (!deps.manager.getAgent(configured.id)) await lifecycle.connect(configured.id)
+    return {
+      agentId: configured.id,
+      permissionMode: clamp(configured.defaultPermissionMode ?? state.defaultPermissionMode),
+    }
+  }
+
+  const preset = deps.createAgentFromPreset(presetOrAgentId)
+  if (!preset)
+    throw new Error(
+      `agent.runExternalAgent: no configured agent or preset "${presetOrAgentId}" found`
+    )
+  const permissionMode = clamp(state.defaultPermissionMode)
+  // The instance's own default is the clamped mode too, so a session the
+  // manager opens without an explicit mode cannot fall back to the preset's
+  // (possibly wider) default.
+  const transient: ExternalAgentConfig = {
+    ...preset,
+    enabled: true,
+    defaultPermissionMode: permissionMode,
+  }
+  refuseUnready(await lifecycle.assessReadiness(transient as LifecycleAgentConfig))
+  // Registered before the add so an add that fails half-way is still released.
+  deps.registerCleanup(async () => {
+    if (deps.manager.getAgent(transient.id)) await deps.manager.removeAgent(transient.id)
+  })
+  const agentId = (await deps.manager.addAgent(transient)).config.id
+  return { agentId, permissionMode }
 }
 
 export async function runPluginExternalAgent(
@@ -105,16 +207,12 @@ async function dispatchPluginExternalAgent(
   const manager = getExternalAgentManager()
   if (!options.runId) {
     if (options.workspace) throw new Error("A workspace requires a Bot run")
-    let agentId = presetOrAgentId
-    if (!manager.getAgent(agentId)) {
-      const config = createAgentFromPreset(presetOrAgentId)
-      if (!config)
-        throw new Error(
-          `agent.runExternalAgent: no live agent or preset "${presetOrAgentId}" found`
-        )
-      agentId = (await manager.addAgent(config)).config.id
-    }
-    const result = await manager.execute(agentId, prompt, options)
+    const { agentId, permissionMode } = await admitPluginExternalRun(
+      presetOrAgentId,
+      options.permissionMode,
+      { manager, createAgentFromPreset, registerCleanup }
+    )
+    const result = await manager.execute(agentId, prompt, { ...options, permissionMode })
     return {
       ...result,
       agentId,

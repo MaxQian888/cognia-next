@@ -14,10 +14,22 @@
 
 import { isTauri } from "@/lib/tauri"
 import React from "react"
-import { render, screen, within, act, fireEvent, waitFor } from "@testing-library/react"
+import {
+  render as rtlRender,
+  screen,
+  within,
+  act,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ExternalAgentSettings } from "./external-agent-settings"
 import type { CreateExternalAgentInput, ExternalAgentConfig } from "@/types/agent/external-agent"
+
+// The app mounts one TooltipProvider at the root; the badges and trait chips
+// in the rail and inspector rely on it.
+const render = (ui: React.ReactElement) => rtlRender(ui, { wrapper: TooltipProvider })
 
 // ---- Mocks -----------------------------------------------------------------
 
@@ -96,6 +108,7 @@ const createConfigMock = jest.fn(async (_input: CreateExternalAgentInput) => "ag
 const updateConfigMock = jest.fn(async () => {})
 const removeConfigMock = jest.fn(async () => {})
 const duplicateConfigMock = jest.fn(async (_id: string, _name: string) => "agent-copy")
+const clearCredentialSlotMock = jest.fn(async (_id: string, _slot: string) => {})
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 jest.mock("sonner", () => ({
@@ -126,6 +139,7 @@ jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
     createConfig: createConfigMock,
     updateConfig: updateConfigMock,
     removeConfig: removeConfigMock,
+    clearCredentialSlot: clearCredentialSlotMock,
     duplicateConfig: duplicateConfigMock,
   }),
 }))
@@ -196,6 +210,8 @@ const externalStoreState = {
   setChatFailurePolicy: jest.fn(),
   overviewBannerCollapsed: false,
   setOverviewBannerCollapsed: jest.fn(),
+  railGroupBy: "readiness" as "readiness" | "runtime",
+  setRailGroupBy: jest.fn(),
   // Delegation-rules section (Thread B): empty rules + no enabled agents map.
   delegationRules: [] as unknown[],
   agents: {} as Record<string, unknown>,
@@ -692,8 +708,11 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     Object.assign(mockAgentManual, {
       protocol: "opencode-v2",
       network: { endpoint: "https://opencode.example.test" },
-      metadata: { retained: true, serverPassword: "old-password", serverUsername: "old-user" },
+      metadata: { retained: true, serverUsername: "old-user" },
+      // The password lives in the keychain; the editor can only say it is saved.
+      credentialRefs: { serverPassword: "agent-2:serverPassword" },
     })
+    clearCredentialSlotMock.mockClear()
     try {
       const user = userEvent.setup()
       render(<ExternalAgentSettings />)
@@ -701,20 +720,27 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       const detail = await screen.findByTestId("agent-detail-agent-2")
       await user.click(within(detail).getByRole("button", { name: /edit/i }))
       const section = await screen.findByTestId("opencode-v2-options-section")
-      expect(within(section).getByLabelText("Server password")).toHaveValue("old-password")
+      expect(within(section).getByLabelText("Server password")).toHaveValue("")
+      expect(within(section).getByTestId("opencode-v2-server-password-saved")).toBeInTheDocument()
       expect(within(section).getByLabelText("Server username")).toHaveValue("old-user")
-      await user.clear(within(section).getByLabelText("Server password"))
+      await user.click(within(section).getByRole("button", { name: "Remove saved value" }))
       await user.clear(within(section).getByLabelText("Server username"))
+      // Nothing is removed until the save lands.
+      expect(clearCredentialSlotMock).not.toHaveBeenCalled()
       await user.click(screen.getByRole("button", { name: /^save$/i }))
       expect(updateConfigMock).toHaveBeenCalledWith(
         "agent-2",
         expect.objectContaining({
-          metadata: { serverPassword: null, serverUsername: null },
+          metadata: expect.objectContaining({ serverUsername: null }),
         })
+      )
+      await waitFor(() =>
+        expect(clearCredentialSlotMock).toHaveBeenCalledWith("agent-2", "serverPassword")
       )
     } finally {
       Object.assign(mockAgentManual, previous)
       if (!previous.network) delete mockAgentManual.network
+      delete (mockAgentManual as { credentialRefs?: unknown }).credentialRefs
     }
   })
 
@@ -845,7 +871,9 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(within(detail).getByText("Claude Surface")).toBeInTheDocument()
     expect(within(detail).getByText("Beta surface")).toBeInTheDocument()
     expect(within(detail).getByText("https://api.example.com/agent")).toBeInTheDocument()
-    expect(within(detail).getByText(/Install CLI \| Authenticate/)).toBeInTheDocument()
+    // Recommended actions are a list, one step per item.
+    expect(within(detail).getByText("Install CLI").tagName).toBe("LI")
+    expect(within(detail).getByText("Authenticate").tagName).toBe("LI")
     // Selecting the gallery's slot is replaced by the detail pane.
     expect(screen.queryByTestId("preset-gallery-card")).not.toBeInTheDocument()
     // Connected agent → a Disconnect button that calls the hook.
@@ -1025,7 +1053,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
   })
 
-  it("duplicates the selected agent through the lifecycle service", async () => {
+  it("duplicates the selected agent through a dialog that names the copy and its state", async () => {
     duplicateConfigMock.mockClear()
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
@@ -1034,15 +1062,47 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     const detail = await screen.findByTestId("agent-detail-agent-1")
     await act(async () => {
-      await user.click(within(detail).getByRole("button", { name: /^duplicate$/i }))
+      await user.click(within(detail).getByRole("button", { name: "Duplicate My Codex" }))
+    })
+    // Nothing is copied until the user confirms the choices.
+    const dialog = await screen.findByTestId("duplicate-agent-dialog")
+    expect(duplicateConfigMock).not.toHaveBeenCalled()
+    expect(within(dialog).getByTestId("duplicate-agent-name")).toHaveValue("My Codex (copy)")
+    await act(async () => {
+      await user.click(within(dialog).getByTestId("duplicate-agent-submit"))
     })
     await waitFor(() =>
       expect(duplicateConfigMock).toHaveBeenCalledWith(
         "agent-1",
-        expect.stringMatching(/\(copy\)$/)
+        expect.objectContaining({ name: "My Codex (copy)", enabled: true })
       )
     )
-    expect(toastSuccess).toHaveBeenCalled()
+    expect(toastSuccess).toHaveBeenCalledWith("Agent duplicated")
+    // The copy is selected and the dialog is gone.
+    await waitFor(() =>
+      expect(screen.queryByTestId("duplicate-agent-dialog")).not.toBeInTheDocument()
+    )
+  })
+
+  it("keeps the duplicate dialog open and says why when the copy is refused", async () => {
+    duplicateConfigMock.mockClear()
+    duplicateConfigMock.mockRejectedValueOnce(new Error("store locked"))
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-1")
+    await act(async () => {
+      await user.click(within(detail).getByRole("button", { name: "Duplicate My Codex" }))
+    })
+    const dialog = await screen.findByTestId("duplicate-agent-dialog")
+    await act(async () => {
+      await user.click(within(dialog).getByTestId("duplicate-agent-submit"))
+    })
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(screen.getByTestId("duplicate-agent-dialog")).toBeInTheDocument()
+    expect(toastSuccess).not.toHaveBeenCalledWith("Agent duplicated")
   })
 
   it("confirms the deletion and lands back on the overview", async () => {
@@ -1164,7 +1224,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith(
         "Connection failed",
-        expect.objectContaining({ description: "Agent not found" })
+        expect.objectContaining({ description: "This agent no longer exists." })
       )
     )
 

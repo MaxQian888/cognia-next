@@ -153,6 +153,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "external_agent_cognia_models",
     "external_agent_config_create",
     "external_agent_config_delete",
+    "external_agent_config_duplicate",
     "external_agent_config_get",
     "external_agent_config_list",
     "external_agent_config_reconcile",
@@ -905,6 +906,7 @@ pub(super) async fn dispatch(
         // authority is there and this only carries the call.
         | "external_agent_config_create"
         | "external_agent_config_delete"
+        | "external_agent_config_duplicate"
         | "external_agent_config_get"
         | "external_agent_config_list"
         | "external_agent_config_reconcile"

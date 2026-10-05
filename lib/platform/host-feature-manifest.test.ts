@@ -460,6 +460,7 @@ describe("external-agent.host-configs", () => {
       "external_agent_config_create",
       "external_agent_config_update",
       "external_agent_config_delete",
+      "external_agent_config_duplicate",
       "external_agent_config_reconcile",
       "external_agent_admit_run",
       "external_agent_release_run",

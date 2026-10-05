@@ -12,7 +12,12 @@ export {
   createPiiOutputGuardrail,
   PluginGuardrailTripwireError,
 } from "./guardrails"
-export { dispatchSubagent, runTeam } from "./dispatch"
+export {
+  dispatchSubagent,
+  runTeam,
+  resolveSubagentExternalTarget,
+  type SubagentExternalTarget,
+} from "./dispatch"
 export { createPluginAgentSession, resumePluginAgentSession } from "./session"
 export { resolveContextContributions, readSharedMemory, queryTwinMemory } from "./context-providers"
 export {

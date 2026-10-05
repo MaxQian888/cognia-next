@@ -34,6 +34,7 @@ const ALL_REASON_CODES: ExternalAgentBranchReasonCode[] = [
   "pi_package_unavailable",
   "protocol_frame_invalid",
   "resource_limit",
+  "state_isolation_unsupported",
 ]
 
 describe("REASON_CODE_TO_DIAGNOSTIC", () => {

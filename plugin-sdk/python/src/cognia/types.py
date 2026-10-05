@@ -816,6 +816,11 @@ class PluginHook(Enum):
     ON_EXTERNAL_AGENT_PERMISSION_REQUEST = "onExternalAgentPermissionRequest"
     ON_EXTERNAL_AGENT_TOOL_CALL = "onExternalAgentToolCall"
     ON_EXTERNAL_AGENT_ERROR = "onExternalAgentError"
+    # ADR-0216: payload {"type": "config-added" | "config-updated" |
+    # "config-removed" | "connection-changed" | "settings-changed" |
+    # "delegation-changed", "agentId"?: str}. Read the new state back with
+    # ``ctx.externalAgents``. Needs the ``agent:external:read`` permission.
+    ON_EXTERNAL_AGENT_CONFIG_CHANGE = "onExternalAgentConfigChange"
     ON_CODE_EXECUTION_START = "onCodeExecutionStart"
     ON_CODE_EXECUTION_COMPLETE = "onCodeExecutionComplete"
     ON_CODE_EXECUTION_ERROR = "onCodeExecutionError"

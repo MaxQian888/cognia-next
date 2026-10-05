@@ -436,6 +436,7 @@ export function buildLocalHostFeatureManifest({
         "external_agent_config_create",
         "external_agent_config_update",
         "external_agent_config_delete",
+        "external_agent_config_duplicate",
         "external_agent_config_reconcile",
         // Admission is part of the same feature rather than its own: a host
         // that stores configurations but cannot admit a run against one is not

@@ -24,7 +24,9 @@
  *   3. capability manifest ⇄ the protocols `manager.ts` actually registers;
  *   4. security policy ⇄ Rust `BINARY_ALLOWLIST` / `NPX_PACKAGE_ALLOWLIST`;
  *   5. security policy ⇄ Rust `agent_state_writable_roots`;
- *   6. every allowlisted binary is reachable from a shipped preset.
+ *   6. security policy `agentStateIsolation` ⇄ Rust
+ *      `AGENT_STATE_ISOLATION_RULES` (row for row, ADR-0216);
+ *   7. every allowlisted binary is reachable from a shipped preset.
  *
  * What is NOT checked, and why: plugin lifecycle (registration on enable,
  * teardown on disable) is RUNTIME behaviour. A regex claiming to have proven it
@@ -51,6 +53,7 @@ const EXECUTION_TS = "packages/agent-config-types/src/agent-execution.ts"
 const MANAGER_TS = "lib/ai/agent/external/manager.ts"
 const RUST_PRESETS = "crates/cognia-external-agent/src/presets.rs"
 const RUST_SANDBOX = "crates/cognia-external-agent/src/sandbox.rs"
+const RUST_STATE_ISOLATION = "crates/cognia-external-agent/src/state_isolation.rs"
 const ECOSYSTEM_TS = "lib/ai/agent/external/ecosystem-adapters.ts"
 const PRESETS_TS = "lib/ai/agent/external/config/presets.ts"
 
@@ -131,6 +134,81 @@ export function rustStateRoots(source) {
     roots.add(parts.join("/"))
   }
   return roots
+}
+
+/**
+ * The Rust `AGENT_STATE_ISOLATION_RULES` table, in the policy file's shape:
+ * `{ match, values, env, sharedRoots, denyReadable }` per row, in order.
+ */
+export function rustIsolationRules(source) {
+  const body = source.match(
+    /pub const AGENT_STATE_ISOLATION_RULES: &\[AgentStateIsolationRule\] = &\[([\s\S]*?)\n\];/
+  )?.[1]
+  if (body === undefined) throw new Error("AGENT_STATE_ISOLATION_RULES not found")
+  const clean = stripComments(body)
+  const list = (block, field) => {
+    const inner = block.match(new RegExp(`${field}:\\s*&\\[([\\s\\S]*?)\\]`))?.[1]
+    if (inner === undefined) throw new Error(`AGENT_STATE_ISOLATION_RULES row without ${field}`)
+    return inner
+  }
+  return clean
+    .split(/AgentStateIsolationRule\s*\{/)
+    .slice(1)
+    .map((block) => {
+      const kind = block.match(/match_kind:\s*IsolationMatch::(\w+)/)?.[1]
+      if (!kind) throw new Error("AGENT_STATE_ISOLATION_RULES row without match_kind")
+      return {
+        match: kind.toLowerCase(),
+        values: stringsIn(list(block, "values")),
+        env: Object.fromEntries(
+          [...list(block, "env").matchAll(/\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g)].map((m) => [
+            m[1],
+            m[2],
+          ])
+        ),
+        sharedRoots: stringsIn(list(block, "shared_roots")),
+        denyReadable: stringsIn(list(block, "deny_readable")),
+      }
+    })
+}
+
+/** Canonical JSON for one isolation row: env keys sorted, every field kept. */
+function isolationRowKey(row) {
+  const env = Object.fromEntries(
+    Object.entries(row.env ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  )
+  return JSON.stringify({
+    match: row.match,
+    values: row.values,
+    env,
+    sharedRoots: row.sharedRoots,
+    denyReadable: row.denyReadable,
+  })
+}
+
+/** @returns {string[]} errors */
+export function checkIsolationParity(policy, rustIsolationSource) {
+  const errors = []
+  const json = policy.agentStateIsolation?.rules
+  if (!Array.isArray(json)) {
+    return [`agentStateIsolation: ${SECURITY_POLICY} has no rules array`]
+  }
+  const rust = rustIsolationRules(rustIsolationSource)
+  if (json.length !== rust.length) {
+    errors.push(
+      `agentStateIsolation: ${SECURITY_POLICY} has ${json.length} rule(s), Rust has ${rust.length}`
+    )
+  }
+  for (let index = 0; index < Math.max(json.length, rust.length); index++) {
+    const fromJson = json[index] ? isolationRowKey(json[index]) : "<missing>"
+    const fromRust = rust[index] ? isolationRowKey(rust[index]) : "<missing>"
+    if (fromJson !== fromRust) {
+      errors.push(
+        `agentStateIsolation rule ${index}: ${SECURITY_POLICY} has ${fromJson}, Rust has ${fromRust}`
+      )
+    }
+  }
+  return errors
 }
 
 /** Bare commands every shipped preset can spawn. */
@@ -323,6 +401,7 @@ export function runChecks() {
       presetCommands(read(ECOSYSTEM_TS), read(PRESETS_TS))
     )
   )
+  errors.push(...checkIsolationParity(policy, read(RUST_STATE_ISOLATION)))
 
   return errors
 }

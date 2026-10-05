@@ -21,9 +21,14 @@
  *  2. **A bare preset picks deterministically.** Legacy bindings (and every
  *     binding that leaves the pin empty) take the best candidate built from
  *     exactly that preset, ordered by {@link compareExternalAgentCandidates}:
- *     enabled first, then connected, then the earliest `createdAt`, then the
- *     id. Object-insertion order used to decide, which made "which Codex did
- *     the teammate run on" depend on the order configs were loaded. A config
+ *     enabled first, then the earliest `createdAt`, then the id.
+ *     Object-insertion order used to decide, which made "which Codex did the
+ *     teammate run on" depend on the order configs were loaded. Whether a
+ *     config happened to be connected used to decide too, and that is the same
+ *     defect: with a read-only Codex and its workspace-write duplicate, the
+ *     teammate ran on whichever one the user last clicked Connect on
+ *     (ADR-0216). A bare preset now always lands on the same config; pin one
+ *     to choose a different one. A config
  *     that carries its own Cognia gateway binding is never chosen by preset
  *     alone: its account belongs to that config, not to every dispatch that
  *     happens to name the same executable.
@@ -72,7 +77,10 @@ export interface ExternalAgentCandidate {
   /** `metadata.preset` of the config, when it has one. */
   presetId: string | undefined
   enabled: boolean
-  /** A live, connected process right now. */
+  /**
+   * A live, connected process right now. Shown by pickers; deliberately NOT
+   * part of the selection order (see the module header).
+   */
   connected: boolean
   /** Creation time. Stored configs carry ISO strings, live ones `Date`s. */
   createdAt?: Date | string | number
@@ -120,15 +128,14 @@ function createdAtMs(value: ExternalAgentCandidate["createdAt"]): number {
 }
 
 /**
- * The documented preset-fallback order: enabled before disabled, connected
- * before not, earlier `createdAt` before later (undated last), then id.
+ * The documented preset-fallback order: enabled before disabled, earlier
+ * `createdAt` before later (undated last), then id. Stable across connects.
  */
 export function compareExternalAgentCandidates(
   a: ExternalAgentCandidate,
   b: ExternalAgentCandidate
 ): number {
   if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
-  if (a.connected !== b.connected) return a.connected ? -1 : 1
   const at = createdAtMs(a.createdAt)
   const bt = createdAtMs(b.createdAt)
   if (at !== bt) return at < bt ? -1 : 1
@@ -149,6 +156,22 @@ export function pickExternalAgentForPreset(
   return candidates
     .filter((c) => c.presetId === presetId && !c.gatewayBound)
     .sort(compareExternalAgentCandidates)[0]
+}
+
+/**
+ * Whether a bare preset binding has more than one config it could mean.
+ *
+ * Selection is deterministic either way; this is for the binding UI, which
+ * should invite a pin when the user keeps several configurations of one
+ * runtime, so "which one runs" is a choice rather than a creation date.
+ */
+export function isPresetBindingAmbiguous(
+  candidates: readonly ExternalAgentCandidate[],
+  presetId: string
+): boolean {
+  return (
+    candidates.filter((c) => c.presetId === presetId && c.enabled && !c.gatewayBound).length > 1
+  )
 }
 
 /**

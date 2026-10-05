@@ -18,6 +18,7 @@ import {
   type NodeExternalAgentSpawnConfig,
 } from "./node-backend"
 import { devinOwnedConfigRoot, devinOriginalConfigRoot } from "./devin-mcp-config"
+import type { StateIsolationPlan } from "./state-isolation"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 import {
   SANDBOX_SUPPORTED_PLATFORMS,
@@ -127,9 +128,19 @@ export function sandboxSupportsPlatform(platform: NodeJS.Platform = process.plat
   return (SANDBOX_SUPPORTED_PLATFORMS as readonly string[]).includes(platform)
 }
 
+/**
+ * The launcher argv for one spawn.
+ *
+ * `isolation` is the configuration's private state root (ADR-0216), resolved
+ * by the backend. When present the root is writable, the runtime's shared
+ * default roots leave the writable set and every `denyReadable` root is
+ * hidden, so the CLI cannot fall back to the user's own login. Bot and
+ * gateway launches never carry one: both already own a private home.
+ */
 export function buildSandboxLauncherArgs(
   config: NodeExternalAgentSpawnConfig,
-  homedir: string
+  homedir: string,
+  isolation: StateIsolationPlan | null = null
 ): string[] {
   if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
   qoderConfigRoot(config, homedir)
@@ -147,7 +158,8 @@ export function buildSandboxLauncherArgs(
       ? [botState!]
       : taskHome
         ? [taskHome]
-        : agentStateWritableRoots(config, homedir)),
+        : agentStateWritableRoots(config, homedir, isolation)),
+    ...(isolation && !botIsolation && !taskHome ? [isolation.root] : []),
     toolHostRuntimeDir(),
   ]
   const devinConfigRoot = devinOwnedConfigRoot(config)
@@ -155,6 +167,9 @@ export function buildSandboxLauncherArgs(
   return [
     ...(config.command === "aider"
       ? aiderImplicitConfigPaths(config.cwd, homedir).flatMap((file) => ["--deny-readable", file])
+      : []),
+    ...(isolation && !botIsolation && !taskHome
+      ? isolation.denyReadable.flatMap((root) => ["--deny-readable", root])
       : []),
     ...(config.env?.COGNIA_BOT_ISOLATION === "1"
       ? [
@@ -354,24 +369,42 @@ export function kimiConfigRoot(
  * places it lacked an OpenCode rule on both sides, so `opencode serve` could
  * not persist a session inside the sandbox and resume started over every time.
  */
-function agentStateWritableRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
+function agentStateWritableRoots(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string,
+  isolation: StateIsolationPlan | null = null
+): string[] {
   const kimiRoot = kimiConfigRoot(config, homedir)
   if (kimiRoot) return [kimiRoot]
   const clineRoot = clineConfigRoot(config, homedir)
   if (clineRoot) return [clineRoot]
   const qoderRoot = qoderConfigRoot(config, homedir)
   if (qoderRoot) return [qoderRoot]
-  return policyAgentStateWritableRoots(config.command, config.args ?? []).map((root) =>
-    path.join(homedir, ...root.split("/"))
+  // An isolated launch writes its own root instead of the shared login roots.
+  const shared = new Set(isolation?.sharedRoots ?? [])
+  return policyAgentStateWritableRoots(config.command, config.args ?? [])
+    .map((root) => path.join(homedir, ...root.split("/")))
+    .filter((root) => !shared.has(root))
+}
+
+function agentStateDirectoryRoots(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string,
+  isolation: StateIsolationPlan | null
+): string[] {
+  return agentStateWritableRoots(config, homedir, isolation).filter(
+    (root) => !isAgentStateFileRoot(root)
   )
 }
 
-function agentStateDirectoryRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
-  return agentStateWritableRoots(config, homedir).filter((root) => !isAgentStateFileRoot(root))
-}
-
-function agentStateFileRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
-  return agentStateWritableRoots(config, homedir).filter((root) => isAgentStateFileRoot(root))
+function agentStateFileRoots(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string,
+  isolation: StateIsolationPlan | null
+): string[] {
+  return agentStateWritableRoots(config, homedir, isolation).filter((root) =>
+    isAgentStateFileRoot(root)
+  )
 }
 
 /** The real host runtime. Exported so its fs shims are directly testable — as an
@@ -391,7 +424,8 @@ export function defaultSandboxRuntime(): SandboxLauncherRuntime {
 
 export async function resolveSandboxedExternalAgentLaunch(
   config: NodeExternalAgentSpawnConfig,
-  runtime: SandboxLauncherRuntime = defaultSandboxRuntime()
+  runtime: SandboxLauncherRuntime = defaultSandboxRuntime(),
+  isolation: StateIsolationPlan | null = null
 ): Promise<ExternalAgentLaunch> {
   if (!sandboxSupportsPlatform(runtime.platform)) {
     throw new Error(
@@ -414,7 +448,8 @@ export async function resolveSandboxedExternalAgentLaunch(
         "Rebuild or reinstall the external-agent launcher and set COGNIA_EXTERNAL_AGENT_LAUNCHER to that executable."
     )
   }
-  for (const root of agentStateDirectoryRoots(config, runtime.homedir)) runtime.ensureDir?.(root)
+  for (const root of agentStateDirectoryRoots(config, runtime.homedir, isolation))
+    runtime.ensureDir?.(root)
   const botRuntime = botRuntimeEnvironment(config.env)
   if (config.env?.COGNIA_BOT_ISOLATION === "1") {
     runtime.ensureDir?.(config.env.COGNIA_BOT_STATE_DIR)
@@ -462,10 +497,11 @@ export async function resolveSandboxedExternalAgentLaunch(
     env = { TMPDIR: temp, TMP: temp, TEMP: temp }
   }
   runtime.ensureDir?.(toolHostRuntimeDir())
-  for (const root of agentStateFileRoots(config, runtime.homedir)) runtime.ensureFile?.(root)
+  for (const root of agentStateFileRoots(config, runtime.homedir, isolation))
+    runtime.ensureFile?.(root)
   return {
     command: launcher,
-    args: buildSandboxLauncherArgs(config, runtime.homedir),
+    args: buildSandboxLauncherArgs(config, runtime.homedir, isolation),
     ...(env ? { env } : {}),
   }
 }

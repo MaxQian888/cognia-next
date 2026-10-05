@@ -8,12 +8,46 @@ Two related contributions for the external-agent subsystem:
   ``externalAgentPresets`` array and mirrored into the host's
   ``EXTERNAL_AGENT_PRESETS`` registry.
 * An external-agent **adapter** (``external-agent-adapter`` capability)
-  contributes the *protocol behaviour itself* — a ``() -> ProtocolAdapter``
-  factory shipped as renderer-side JS and lazy-imported on enable. A pure-Python
-  plugin cannot ship that JS factory directly, so ``define_external_agent_adapter``
-  is a manifest-authoring helper for HYBRID plugins (a Python backend bundled
-  with a frontend JS ``entry``); the host registers it into the external-agent
-  ``protocolAdapterRegistry`` under ``{plugin_id}:{id}``.
+  contributes the *protocol behaviour itself*. Either a ``() -> ProtocolAdapter``
+  factory shipped as renderer-side JS and lazy-imported on enable (HYBRID
+  plugins; ``define_external_agent_adapter`` authors that manifest entry), or a
+  **python-backed** adapter: a manifest entry without ``entry``/``export`` on a
+  ``python`` plugin (or with ``backend: "python"``) whose behaviour is a
+  ``@cognia.contribution("<id>")`` in the plugin's Python code. Either way the
+  host registers it into the external-agent ``protocolAdapterRegistry`` under
+  ``{plugin_id}:{id}``.
+
+Python-backed adapters and configurations
+-----------------------------------------
+
+The host builds one adapter per external-agent *configuration*, and every call
+that adapter makes carries its own instance id. Decorate a **class** and each
+configuration gets its own object, built on that configuration's first call
+and released after its ``disconnect``::
+
+    import cognia
+
+    @cognia.contribution("my-agent")
+    class MyAgent:
+        def __init__(self):
+            self.process = None  # per-configuration state lives on self
+
+        def connect(self, config): ...
+        def disconnect(self): ...
+        def createSession(self, options=None): ...
+        def closeSession(self, session_id): ...
+        def prompt(self, session_id, message, options=None):
+            yield {"type": "message_delta", "delta": {"type": "text", "text": "hi"}}
+        def execute(self, session_id, message, options=None): ...
+        def respondToPermission(self, session_id, response): ...
+
+Two configurations backed by ``MyAgent`` therefore never share state:
+connecting the second cannot overwrite the first, and disconnecting one cannot
+tear down the other. Decorating an already-built **object** instead gives every
+configuration the same object, so the host lets it serve one configuration at
+a time and refuses a second with an error that points back here. Plain
+module-bridge calls that carry no instance id (``describe`` and most other
+python-backed contributions) still go to the object built at decoration time.
 
 Both mirror their TypeScript ``Plugin*Def`` shapes and build the camelCase dict
 the host consumes. The ``register_*`` helpers are thin pass-throughs: the host

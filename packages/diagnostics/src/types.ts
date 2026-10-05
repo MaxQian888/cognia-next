@@ -269,6 +269,8 @@ export type DiagnosticCode =
   | "piPackageUnavailable"
   | "protocolFrameInvalid"
   | "resourceLimit"
+  /** An isolated configuration's runtime cannot keep its state apart (ADR-0216). */
+  | "stateIsolationUnsupported"
   // --- Route boundaries ---
   | "chunkLoad"
   | "offline"

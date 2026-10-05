@@ -5,7 +5,9 @@ import { act, renderHook } from "@testing-library/react"
 import {
   DEFAULT_ADD_AGENT_FORM_DATA,
   addAgentFormForPreset,
+  addAgentFormFromConfig,
 } from "@/lib/ai/agent/external/config/add-agent-form"
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 
 import { useAddAgentForm } from "./use-add-agent-form"
@@ -31,6 +33,28 @@ describe("useAddAgentForm", () => {
         value: String(value),
       }))
     )
+  })
+
+  // The phone's detail screen edits a saved configuration with this same form.
+  it("starts from an existing configuration's fields when seeded", () => {
+    const seed = addAgentFormFromConfig({
+      id: "eac_1",
+      name: "Codex RO",
+      protocol: "acp",
+      transport: "stdio",
+      enabled: true,
+      process: { command: "codex-acp", args: ["--x"], env: { PLAIN: "1" } },
+      metadata: { preset: "codex" },
+    } as unknown as ExternalAgentConfig)
+    const { result, rerender } = renderHook(() => useAddAgentForm("", seed))
+    expect(result.current.presetId).toBe("codex")
+    expect(result.current.data.name).toBe("Codex RO")
+    expect(result.current.data.args).toBe("--x")
+    expect(result.current.processEnvRows).toEqual([{ key: "PLAIN", value: "1" }])
+    // The seed is initial state: an edit is not overwritten by a re-render.
+    act(() => result.current.setField("name", "Edited"))
+    rerender()
+    expect(result.current.data.name).toBe("Edited")
   })
 
   it("updates one field without touching the rest", () => {

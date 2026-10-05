@@ -425,6 +425,16 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     ],
     icon: "plug",
   },
+  stateIsolationUnsupported: {
+    // ADR-0216. The configuration is set to keep its own runtime state, and
+    // this runtime has no home variable to move. Nothing changes on retry; the
+    // configuration has to share the runtime's state instead.
+    severity: "error",
+    retryable: false,
+    persistent: true,
+    actions: [{ kind: "open-settings", section: "external-bridge" }, { kind: "view-logs" }],
+    icon: "settings",
+  },
   extensionHandshakeFailed: {
     // The permission interception this agent depends on never proved itself
     // live, so the session was refused rather than run ungated. A fresh

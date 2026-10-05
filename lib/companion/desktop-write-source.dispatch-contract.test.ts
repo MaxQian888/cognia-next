@@ -69,6 +69,21 @@ jest.mock("@/lib/chat/mentions/host-reference-rpc", () => ({
   sessionReferenceSnapshot: jest.fn(async () => ({ records: [] })),
 }))
 
+jest.mock("@/lib/ai/agent/external/config/host-config-service", () => ({
+  defaultReadinessAssessor: jest.fn(async () => async () => ({ status: "ready" })),
+  duplicateHostExternalAgentConfig: jest.fn(async (input: { configId: string }) => ({
+    configId: "eac_copy",
+    revision: "eacr_1",
+    lifecycleGeneration: 1,
+    seq: 2,
+    enabled: false,
+    lifecycleStatus: "ready",
+    createdAt: 1,
+    updatedAt: 1,
+    config: { name: "Pi (copy)", duplicatedFromAgentId: input.configId },
+  })),
+}))
+
 import { dispatchCommand } from "./desktop-write-source"
 
 const workflows = jest.requireMock("@/lib/db/workflows") as Record<string, jest.Mock>
@@ -89,6 +104,54 @@ const references = jest.requireMock("@/lib/chat/mentions/host-reference-rpc") as
 >
 
 beforeEach(() => jest.clearAllMocks())
+
+describe("dispatchCommand: external_agent_config_duplicate", () => {
+  const hostConfigs = jest.requireMock(
+    "@/lib/ai/agent/external/config/host-config-service"
+  ) as Record<string, jest.Mock>
+
+  it("hands the source and the choices to the host service and returns the wire row", async () => {
+    const res = (await dispatchCommand("external_agent_config_duplicate", {
+      configId: "eac_1",
+      name: "Pi (copy)",
+      stateIsolation: "isolated",
+      enabled: false,
+    })) as { config: { configId: string; config: Record<string, unknown> } }
+    expect(hostConfigs.duplicateHostExternalAgentConfig).toHaveBeenCalledWith(
+      { configId: "eac_1", name: "Pi (copy)", stateIsolation: "isolated", enabled: false },
+      expect.objectContaining({ assessReadiness: expect.any(Function) })
+    )
+    expect(res.config.configId).toBe("eac_copy")
+    expect(res.config.config.duplicatedFromAgentId).toBe("eac_1")
+  })
+
+  it("leaves the optional choices to the host's defaults", async () => {
+    await dispatchCommand("external_agent_config_duplicate", { configId: "eac_1" })
+    expect(hostConfigs.duplicateHostExternalAgentConfig).toHaveBeenCalledWith(
+      { configId: "eac_1", name: undefined, stateIsolation: undefined, enabled: undefined },
+      expect.anything()
+    )
+  })
+
+  it("refuses a malformed request before touching the store", async () => {
+    await expect(dispatchCommand("external_agent_config_duplicate", {})).rejects.toThrow(
+      /configId is required/
+    )
+    await expect(
+      dispatchCommand("external_agent_config_duplicate", { configId: "eac_1", name: 3 })
+    ).rejects.toThrow(/name must be a string/)
+    await expect(
+      dispatchCommand("external_agent_config_duplicate", {
+        configId: "eac_1",
+        stateIsolation: "private",
+      })
+    ).rejects.toThrow(/stateIsolation must be/)
+    await expect(
+      dispatchCommand("external_agent_config_duplicate", { configId: "eac_1", enabled: "yes" })
+    ).rejects.toThrow(/enabled must be a boolean/)
+    expect(hostConfigs.duplicateHostExternalAgentConfig).not.toHaveBeenCalled()
+  })
+})
 
 describe("dispatchCommand: workflow CRUD", () => {
   it("workflow_create returns the created row", async () => {

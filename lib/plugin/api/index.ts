@@ -95,6 +95,7 @@ export { createGoalAPI, NoJudgeModelError } from "./goal-api"
 export { createHooksAPI } from "./hooks-api"
 export { createPlanAPI, NoPlannerModelError } from "./plan-api"
 export { createMemoryAPI } from "./memory-api"
+export { createExternalAgentsAPI, PluginExternalAgentInputError } from "./external-agents-api"
 export { createTeamAPI } from "./team-api"
 export { createSubscriptionAPI } from "./subscription-api"
 export { createTerminalAPI, TerminalAccessError } from "./terminal-api"
@@ -181,6 +182,26 @@ export type {
   PluginMemorySearchOptions,
   PluginMemoryStoreInput,
 } from "./memory-api"
+export type {
+  PluginExternalAgentChangeEvent,
+  PluginExternalAgentChangeType,
+  PluginExternalAgentCreateInput,
+  PluginExternalAgentDelegationRule,
+  PluginExternalAgentDelegationRuleInput,
+  PluginExternalAgentDuplicateOptions,
+  PluginExternalAgentInputErrorCode,
+  PluginExternalAgentPreset,
+  PluginExternalAgentPresetOverrides,
+  PluginExternalAgentReadiness,
+  PluginExternalAgentReadinessSummary,
+  PluginExternalAgentRuntime,
+  PluginExternalAgentRuntimeReport,
+  PluginExternalAgentSettings,
+  PluginExternalAgentSettingsPatch,
+  PluginExternalAgentSummary,
+  PluginExternalAgentUpdatePatch,
+  PluginExternalAgentsAPI,
+} from "./external-agents-api"
 export type {
   PluginTeamAPI,
   PluginTeamMoveResult,

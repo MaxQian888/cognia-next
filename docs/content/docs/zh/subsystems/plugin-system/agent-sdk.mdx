@@ -138,7 +138,19 @@ const team = await ctx.agent.runTeam("team-id", { ultracode: true })
 - **`dispatchSubagent(idOrDef, prompt, opts)`** 解析已注册 subagent（或内联定义），将其作为一次性工具运行回合执行 —— subagent 的 `{prompt, model, tools, maxTurns}` 映射到执行器。（subagent 在宿主无直接调用入口，这是忠实的"运行该 subagent"路径。）
 - **`runTeam(teamOrConfig, opts)`** 以既有 id 或临时 config 无头运行 Agent Team，复用 `agentTeamManager.start`（实时 store 绑定、已配置运行时依赖、每团队 inflight 守卫）。
 
-二者均需 **`agent:dispatch`** 权限（非危险）。无 sidecar 时降级为纯文本子运行 / 队员。
+二者均需 **`agent:dispatch`** 权限（非危险）。无 sidecar 时降级为纯文本子运行 / 队员。运行在外部智能体上的 `dispatchSubagent` —— 即 `opts.externalAgentId`，或带有 `externalPresetId` / `externalAgentConfigId` 的定义（由 `lib/plugin/agent-sdk/dispatch.ts` 中的 `resolveSubagentExternalTarget` 解析）—— 还需要 **`agent:dispatch-external`**，也就是控制 `runExternalAgent` 的那个权限（ADR-0216）。
+
+### `runExternalAgent` 准入（ADR-0216）
+
+在 Bot 运行之外（无 `runId`），`runExternalAgent(presetOrAgentId, prompt, opts)`：
+
+- 外部智能体总开关关闭时拒绝；
+- 对**已配置**的智能体：拒绝已禁用的配置，或 `lifecycle.assessReadiness` 结论不是 `ready` 的配置（错误中给出原因代码），并通过 `lifecycle.connect` 注册，使启动携带该配置自己的 keyring 凭据；
+- 对**预设**：创建临时实例，先检查其就绪状态，运行结束时（无论成功失败）用 `manager.removeAgent` 移除；
+- 通过 `deriveExternalSessionPermission` 将 `opts.permissionMode` 收敛到目标自身的默认值 —— 配置的 `defaultPermissionMode`（未设置时取全局默认），临时预设实例取全局默认。插件只能要得更少，不能更多；
+- 不再以「存在于 manager 中但并非已配置智能体」的实例为目标（其他运行的临时实例、Bot 的隔离智能体）。
+
+Bot 路径（`opts.runId`）保留其原有的安装授权策略不变。
 
 ## 会话（Package D）
 
@@ -193,7 +205,8 @@ await ctx.agent.run("...", {
 | `toolsEnabled` 运行 · `invokeTool` | `agent:control` |
 | 钩子 · 守卫 · fallback/budget/trace | `agent:control`（搭乘既有运行） |
 | `runExternalAgent` | `agent:dispatch-external` |
-| `dispatchSubagent` · `runTeam` | `agent:dispatch` |
+| `dispatchSubagent` · `runTeam` | `agent:dispatch`（子智能体运行在外部智能体上时另需 `agent:dispatch-external`） |
+| `ctx.externalAgents` 读取 / 写入 | `agent:external:read` / `agent:external:manage` |
 | `sessions.create` / `sessions.resume` | `session:write` / `session:read` |
 | `context.readSharedMemory` | `agent:shared-memory:read` |
 | `context.queryTwinMemory` | `twin:read` |

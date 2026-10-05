@@ -8,6 +8,7 @@ import {
   admitRemoteExternalRun,
   createRemoteHostConfig,
   deleteRemoteHostConfig,
+  duplicateRemoteHostConfig,
   getRemoteHostConfig,
   hostConfigsAvailability,
   hostOwnsExternalAgentConfigs,
@@ -214,6 +215,46 @@ describe("commands", () => {
       command: HOST_CONFIG_COMMANDS.delete,
       payload: { configId: "eac_1" },
     })
+  })
+
+  it("duplicates by naming the source and only the choices made", async () => {
+    setup({ hasLocalAuthority: () => true }, { config: { configId: "eac_2" } })
+    await expect(duplicateRemoteHostConfig("eac_1")).resolves.toEqual({ configId: "eac_2" })
+    expect(calls[0]).toEqual({
+      command: HOST_CONFIG_COMMANDS.duplicate,
+      payload: { configId: "eac_1" },
+    })
+    await duplicateRemoteHostConfig("eac_1", {
+      name: "Codex (copy)",
+      stateIsolation: "isolated",
+      enabled: false,
+    })
+    expect(calls[1].payload).toEqual({
+      configId: "eac_1",
+      name: "Codex (copy)",
+      stateIsolation: "isolated",
+      enabled: false,
+    })
+  })
+
+  // The duplicate copies keyring secrets on the Host, so it is a write the
+  // user approves like any other.
+  it("leases a remote duplicate and refuses a host that cannot duplicate", async () => {
+    setup({}, { config: { configId: "eac_2" } })
+    await duplicateRemoteHostConfig("eac_1")
+    expect(leaseOperations).toEqual([[HOST_CONFIG_COMMANDS.duplicate]])
+    expect(calls[0].payload).toMatchObject({ adminLease: "lease-1" })
+
+    setup({
+      getRuntimeSnapshot: snapshot({
+        compatible: true,
+        operations: ALL_OPS.filter((op) => op !== HOST_CONFIG_COMMANDS.duplicate),
+      }),
+    })
+    await expect(duplicateRemoteHostConfig("eac_1")).rejects.toBeInstanceOf(
+      HostConfigsUnsupportedError
+    )
+    expect(calls).toEqual([])
   })
 
   it("uses a fresh approval lease for a remote write", async () => {

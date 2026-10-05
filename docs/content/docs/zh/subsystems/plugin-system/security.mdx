@@ -160,6 +160,7 @@ check(pluginId: string, operation: string): void {
 | goal / connectors | `goal:write`、`connectors:send`、`connectors:manage` |
 | share / backup | `share:create`、`backup:write` |
 | automation / companion | `automation:*`、`companion:control` |
+| externalAgents | `agent:external:read`、`agent:external:manage`（ADR-0216；`ctx.externalAgents`，且 `agent:external:read` 控制所有 `onExternalAgent*` 钩子的投递） |
 | 其他 | `notification`、`secrets:read`/`secrets:write`、`agent:control`、`agent:dispatch-external`、`python:execute`、`sandbox:web-execute`、`subscription:read`、`perf:read` |
 
 ### 危险权限
@@ -175,7 +176,9 @@ check(pluginId: string, operation: string): void {
 | `git:write` | `connectors:send` |
 | `connectors:manage` | `share:create` |
 | `backup:write` | 全部六个 `automation:*` |
-| `companion:control` | — |
+| `companion:control` | `agent:external:manage` |
+
+`agent:external:manage` 之所以危险，是因为它可以把智能体指向另一个命令、放宽其权限模式、删除它或关闭整个子系统。两个外部智能体权限都触及不到凭据：投影不含密钥，输入拒绝内联凭据；凭据录入与非沙箱启动同意只留在宿主 UI 中。
 
 注意：`companion:goal-control` **不**危险 —— 它是 `goal:write` 的子集（`:218-219`）。
 

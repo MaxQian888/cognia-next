@@ -11,6 +11,8 @@
     "agent:control": "Control agent execution",
     "agent:dispatch": "Dispatch built-in subagents and agent teams",
     "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
+    "agent:external:manage": "Create, change, duplicate, delete, enable, connect and route your external coding agents, and change their global settings",
+    "agent:external:read": "See your external coding agents' configurations, readiness, presets, installed runtimes and routing rules (never their credentials)",
     "agent:shared-memory:read": "Read team shared-memory entries",
     "ai:chat": "Send prompts to a language model on your account (consumes your quota)",
     "ai:embed": "Generate embeddings on your account (consumes your quota)",

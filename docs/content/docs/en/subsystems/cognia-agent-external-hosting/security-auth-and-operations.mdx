@@ -46,6 +46,22 @@ its own auth state. It cannot read Cognia's credential file directly. The launch
 filesystem and network confinement; unlike one-shot sandbox tools, it does not add seccomp or
 rlimits.
 
+### Isolated configurations
+
+A configuration whose state is `isolated` does not share these roots. The launch sets
+`COGNIA_AGENT_STATE_KEY=<configId>` and the spawn backend (desktop Rust or this Node backend)
+resolves a private root `<data dir>/cognia/external-agents/<configId>` (macOS
+`~/Library/Application Support`, Linux `$XDG_DATA_HOME` or `~/.local/share`, Windows `%APPDATA%`),
+creates it owner-only, and points the runtime's home variables into it (`CODEX_HOME`,
+`CLAUDE_CONFIG_DIR`, `QWEN_HOME`, `PI_CODING_AGENT_DIR`, `KIMI_CODE_HOME`, `CLINE_DIR`,
+`QODER_CONFIG_DIR`, `COPILOT_HOME`, OpenCode's config and XDG homes). Under the sandbox the root
+replaces the shared writable paths above, and those paths become `--deny-readable`, so the CLI
+cannot fall back to your own login. The table is `agentStateIsolation` in
+`protocol/external-agent-security-policy.json`; `pnpm audit:agent-capabilities` keeps the Rust
+copy identical. A runtime without a row cannot be isolated and its isolated launch is refused.
+Bot-isolated and gateway-task launches already own a private home and ignore the key. Deleting the
+configuration deletes the root (`external_agent_state_root_remove`).
+
 If the launcher is absent, build it with:
 
 ```bash

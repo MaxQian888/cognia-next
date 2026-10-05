@@ -3,12 +3,14 @@ import { test } from "node:test"
 
 import {
   checkCapabilityManifest,
+  checkIsolationParity,
   checkSecurityPolicyParity,
   declaredExecutableProtocols,
   externalOnlyCapabilityIds,
   presetCommands,
   registeredProtocols,
   runChecks,
+  rustIsolationRules,
   rustStateRoots,
   rustStrArray,
   specCapabilityIds,
@@ -244,4 +246,98 @@ test("presetCommands reads command literals from both preset sources", () => {
   // The DSH presets carry an EMPTY command until the installer fills it in;
   // treating "" as a preset command would demand an allowlist entry for it.
   assert.ok(!commands.has(""))
+})
+
+const RUST_ISOLATION = `
+pub const AGENT_STATE_ISOLATION_RULES: &[AgentStateIsolationRule] = &[
+    // A comment quoting "notarule" is never part of a row.
+    AgentStateIsolationRule {
+        match_kind: IsolationMatch::Contains,
+        values: &["codex"],
+        env: &[("CODEX_HOME", "codex")],
+        shared_roots: &[".codex"],
+        deny_readable: &[".codex"],
+    },
+    AgentStateIsolationRule {
+        match_kind: IsolationMatch::Base,
+        values: &["qoder"],
+        env: &[("QODER_CONFIG_DIR", "qoder"), ("XDG_DATA_HOME", "data")],
+        shared_roots: &[".qoder"],
+        deny_readable: &[],
+    },
+];
+`
+
+function isolationPolicy(rules) {
+  return {
+    agentStateIsolation: {
+      rules: rules ?? [
+        {
+          match: "contains",
+          values: ["codex"],
+          env: { CODEX_HOME: "codex" },
+          sharedRoots: [".codex"],
+          denyReadable: [".codex"],
+        },
+        {
+          match: "base",
+          values: ["qoder"],
+          // Key order in the JSON object does not matter.
+          env: { XDG_DATA_HOME: "data", QODER_CONFIG_DIR: "qoder" },
+          sharedRoots: [".qoder"],
+          denyReadable: [],
+        },
+      ],
+    },
+  }
+}
+
+test("rustIsolationRules reads every row in the policy file's shape", () => {
+  assert.deepEqual(rustIsolationRules(RUST_ISOLATION), [
+    {
+      match: "contains",
+      values: ["codex"],
+      env: { CODEX_HOME: "codex" },
+      sharedRoots: [".codex"],
+      denyReadable: [".codex"],
+    },
+    {
+      match: "base",
+      values: ["qoder"],
+      env: { QODER_CONFIG_DIR: "qoder", XDG_DATA_HOME: "data" },
+      sharedRoots: [".qoder"],
+      denyReadable: [],
+    },
+  ])
+})
+
+test("isolation parity passes when the two languages agree", () => {
+  assert.deepEqual(checkIsolationParity(isolationPolicy(), RUST_ISOLATION), [])
+})
+
+test("an isolation env mapping only one language has is caught", () => {
+  const rows = isolationPolicy().agentStateIsolation.rules
+  rows[0] = { ...rows[0], env: { CODEX_HOME: "codex-elsewhere" } }
+  const errors = checkIsolationParity(isolationPolicy(rows), RUST_ISOLATION)
+  assert.ok(errors.some((e) => /agentStateIsolation rule 0/.test(e)))
+})
+
+test("a deny-readable root only one language hides is caught", () => {
+  const rows = isolationPolicy().agentStateIsolation.rules
+  rows[1] = { ...rows[1], denyReadable: [".qoder"] }
+  const errors = checkIsolationParity(isolationPolicy(rows), RUST_ISOLATION)
+  assert.ok(errors.some((e) => /agentStateIsolation rule 1/.test(e)))
+})
+
+test("a missing isolation row is caught", () => {
+  const rows = isolationPolicy().agentStateIsolation.rules.slice(0, 1)
+  const errors = checkIsolationParity(isolationPolicy(rows), RUST_ISOLATION)
+  assert.ok(errors.some((e) => /has 1 rule\(s\), Rust has 2/.test(e)))
+})
+
+test("a policy without an isolation table fails rather than passing vacuously", () => {
+  assert.deepEqual(checkIsolationParity({}, RUST_ISOLATION), [
+    "agentStateIsolation: protocol/external-agent-security-policy.json has no rules array",
+  ])
+  assert.throws(() => rustIsolationRules("const NOTHING: u8 = 0;"), /not found/)
 })

@@ -1977,6 +1977,39 @@
         "additionalProperties": false
       }
     },
+    "external_agent_config_duplicate": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "configId",
+          "adminLease"
+        ],
+        "properties": {
+          "configId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "stateIsolation": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "isolated"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "external_agent_config_reconcile": {
       "inputSchemaSource": "contract",
       "inputSchema": {

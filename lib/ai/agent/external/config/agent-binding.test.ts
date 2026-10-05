@@ -3,6 +3,7 @@ import {
   ExternalAgentBindingError,
   checkPinnedExternalAgent,
   compareExternalAgentCandidates,
+  isPresetBindingAmbiguous,
   listPinnableExternalAgents,
   normalizePinnedConfigId,
   pickExternalAgentForPreset,
@@ -71,7 +72,7 @@ describe("toExternalAgentCandidate", () => {
 })
 
 describe("compareExternalAgentCandidates / pickExternalAgentForPreset", () => {
-  it("orders enabled, then connected, then earliest createdAt, then id", () => {
+  it("orders enabled, then earliest createdAt, then id — never by connection", () => {
     const sorted = [
       candidate({ id: "disabled-old", enabled: false, createdAt: "2020-01-01T00:00:00Z" }),
       candidate({ id: "undated" }),
@@ -84,14 +85,34 @@ describe("compareExternalAgentCandidates / pickExternalAgentForPreset", () => {
       .sort(compareExternalAgentCandidates)
       .map((c) => c.id)
     expect(sorted).toEqual([
-      "new-connected",
       "old",
       "a-same",
       "b-same",
+      "new-connected",
       "bad-date",
       "undated",
       "disabled-old",
     ])
+  })
+
+  it("does not move a bare preset onto whichever duplicate is connected", () => {
+    const original = candidate({ id: "read-only", createdAt: "2025-01-01T00:00:00Z" })
+    const copy = candidate({
+      id: "workspace-write",
+      createdAt: "2025-03-01T00:00:00Z",
+      connected: true,
+    })
+    expect(pickExternalAgentForPreset([copy, original], "codex")?.id).toBe("read-only")
+  })
+
+  it("reports a bare preset as ambiguous only with several enabled candidates", () => {
+    const one = candidate({ id: "one" })
+    const two = candidate({ id: "two" })
+    const off = candidate({ id: "off", enabled: false })
+    const bound = candidate({ id: "bound", gatewayBound: true })
+    expect(isPresetBindingAmbiguous([one, off, bound], "codex")).toBe(false)
+    expect(isPresetBindingAmbiguous([one, two], "codex")).toBe(true)
+    expect(isPresetBindingAmbiguous([one, two], "gemini-cli")).toBe(false)
   })
 
   it("does not depend on insertion order", () => {
@@ -155,7 +176,7 @@ describe("normalizePinnedConfigId", () => {
 
 describe("resolveExternalAgentBinding", () => {
   const live = [
-    candidate({ id: "lenient", connected: true, createdAt: "2026-01-01T00:00:00Z" }),
+    candidate({ id: "lenient", connected: true, createdAt: "2024-01-01T00:00:00Z" }),
     candidate({ id: "strict", createdAt: "2025-01-01T00:00:00Z" }),
   ]
 

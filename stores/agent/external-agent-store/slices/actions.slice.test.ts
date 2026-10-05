@@ -72,6 +72,74 @@ describe("useExternalAgentStore CRUD", () => {
     expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toBeNull()
   })
 
+  it("gives a new configuration its own state root and keeps lineage and limits", () => {
+    const id = useExternalAgentStore.getState().addAgent({
+      name: "Codex copy",
+      protocol: "codex-app-server",
+      transport: "stdio",
+      process: { command: "codex", args: ["app-server"] },
+      enabled: false,
+      duplicatedFromAgentId: "source-1",
+      subscriptionAccountId: "acct-work",
+      maxConcurrentSessions: 2,
+      sessionIdleTimeout: 0,
+    })
+    const stored = useExternalAgentStore.getState().getAgent(id)!
+    expect(stored).toMatchObject({
+      enabled: false,
+      stateIsolation: "isolated",
+      duplicatedFromAgentId: "source-1",
+      subscriptionAccountId: "acct-work",
+      maxConcurrentSessions: 2,
+    })
+    // Not a positive whole number: not a limit.
+    expect(stored.sessionIdleTimeout).toBeUndefined()
+
+    const shared = useExternalAgentStore.getState().addAgent({
+      name: "Codex shared",
+      protocol: "codex-app-server",
+      transport: "stdio",
+      process: { command: "codex" },
+      stateIsolation: "shared",
+    })
+    expect(useExternalAgentStore.getState().getAgent(shared)!.stateIsolation).toBe("shared")
+  })
+
+  it("edits isolation, account binding and limits, with null clearing the account", () => {
+    const id = useExternalAgentStore.getState().addAgent({
+      name: "Pi",
+      protocol: "pi-rpc",
+      transport: "stdio",
+      process: { command: "pi" },
+      subscriptionAccountId: "acct-a",
+    })
+    const { updateAgent, getAgent } = useExternalAgentStore.getState()
+    updateAgent(id, {
+      stateIsolation: "shared",
+      maxConcurrentSessions: 4,
+      sessionIdleTimeout: 9000,
+    })
+    expect(getAgent(id)).toMatchObject({
+      stateIsolation: "shared",
+      subscriptionAccountId: "acct-a",
+      maxConcurrentSessions: 4,
+      sessionIdleTimeout: 9000,
+    })
+    updateAgent(id, { maxConcurrentSessions: -1 })
+    expect(getAgent(id)!.maxConcurrentSessions).toBe(4)
+    updateAgent(id, { subscriptionAccountId: null })
+    expect(getAgent(id)!.subscriptionAccountId).toBeUndefined()
+    updateAgent(id, { maxConcurrentSessions: null, sessionIdleTimeout: null })
+    expect(getAgent(id)!.maxConcurrentSessions).toBeUndefined()
+    expect(getAgent(id)!.sessionIdleTimeout).toBeUndefined()
+  })
+
+  it("remembers how the settings rail groups agents", () => {
+    expect(useExternalAgentStore.getState().railGroupBy).toBe("readiness")
+    useExternalAgentStore.getState().setRailGroupBy("runtime")
+    expect(useExternalAgentStore.getState().railGroupBy).toBe("runtime")
+  })
+
   it("removeAgent removes the agent and clears active state if matched", () => {
     const id = useExternalAgentStore.getState().addAgent({
       name: "Doomed",

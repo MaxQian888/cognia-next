@@ -23,6 +23,11 @@ export interface ExternalAgentAuthenticationProps {
   connected: boolean
   busy?: boolean
   supportsLogout?: boolean
+  /**
+   * Other configurations that share this one's runtime state (ADR-0216): the
+   * same CLI login, so signing out here signs them out too.
+   */
+  sharedStateAgentNames?: readonly string[]
   onBusyChange?: (busy: boolean) => void
   authenticate: (methodId: string) => Promise<void>
   getTerminalAuthState: () => AcpTerminalAuthState | undefined
@@ -207,6 +212,17 @@ function AuthenticationSession(props: ExternalAgentAuthenticationProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("logoutTitle")}</AlertDialogTitle>
             <AlertDialogDescription>{t("logoutDescription")}</AlertDialogDescription>
+            {props.sharedStateAgentNames?.length ? (
+              <p
+                className="text-sm text-amber-600 dark:text-amber-400"
+                data-testid="logout-shared-state-warning"
+              >
+                {t("logoutSharedWith", {
+                  count: props.sharedStateAgentNames.length,
+                  names: props.sharedStateAgentNames.join(", "),
+                })}
+              </p>
+            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("keepAccount")}</AlertDialogCancel>

@@ -2,6 +2,9 @@ import {
   CONNECTION_PROBLEMS,
   DEFAULT_ADD_AGENT_FORM_DATA,
   addAgentFormForPreset,
+  addAgentFormFromConfig,
+  addAgentFormLaunchTarget,
+  addAgentFormPatch,
   addAgentFormShape,
   buildCreateExternalAgentInput,
   transportForProtocol,
@@ -11,6 +14,7 @@ import {
 import { getPresetConfig } from "./presets"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
 import type { AddAgentFormData } from "@/types/agent/component-types"
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 const NO_ENV = { names: [], values: {} }
 
@@ -223,5 +227,157 @@ describe("buildCreateExternalAgentInput", () => {
       buildCreateExternalAgentInput(form({ name: "A", command: "aider", protocol: "aider-cli" }))
         .defaultPermissionMode
     ).toBe("plan")
+  })
+})
+
+describe("addAgentFormFromConfig / addAgentFormPatch", () => {
+  function saved(patch: Partial<ExternalAgentConfig> = {}): ExternalAgentConfig {
+    return {
+      id: "eac_1",
+      name: "Codex RO",
+      protocol: "acp",
+      transport: "stdio",
+      enabled: true,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      timeout: 120000,
+      retryConfig: {
+        maxRetries: 5,
+        retryDelay: 250,
+        exponentialBackoff: false,
+        maxRetryDelay: 9000,
+        retryOnErrors: ["ECONNRESET", "timeout"],
+      },
+      process: {
+        command: "codex-acp",
+        args: ["--model", "gpt 5"],
+        cwd: "/work",
+        env: { PLAIN: "1" },
+        startupTimeout: 4000,
+      },
+      metadata: { preset: "codex", importedFromAgentId: "local_1" },
+      ...patch,
+    } as ExternalAgentConfig
+  }
+
+  it("seeds every field the form shows from the saved configuration", () => {
+    const seed = addAgentFormFromConfig(saved())
+    expect(seed.presetId).toBe("codex")
+    expect(seed.processEnv).toEqual({ PLAIN: "1" })
+    expect(seed.data).toMatchObject({
+      name: "Codex RO",
+      protocol: "acp",
+      transport: "stdio",
+      command: "codex-acp",
+      args: "--model 'gpt 5'",
+      processCwd: "/work",
+      timeoutMs: "120000",
+      retryMaxRetries: "5",
+      retryDelayMs: "250",
+      retryExponentialBackoff: false,
+      retryMaxDelayMs: "9000",
+      retryOnErrors: "ECONNRESET\ntimeout",
+      preset: "codex",
+    })
+  })
+
+  // A stored config holds keyring refs, never the value; an empty field means
+  // "keep what the keyring has".
+  it("never seeds a secret into the form", () => {
+    const seed = addAgentFormFromConfig(
+      saved({
+        protocol: "opencode",
+        transport: "sse",
+        metadata: { autoSpawnServer: true, port: 4100, serverUsername: "me", serverPassword: "x" },
+      })
+    )
+    expect(seed.data.serverPassword).toBe("")
+    expect(seed.data.serverUsername).toBe("me")
+    expect(seed.data.port).toBe("4100")
+    expect(seed.data.autoSpawnServer).toBe(true)
+  })
+
+  it("round-trips an unchanged form without losing what the form does not show", () => {
+    const config = saved()
+    const seed = addAgentFormFromConfig(config)
+    const patch = addAgentFormPatch(config, { ...seed.data, processEnv: seed.processEnv })
+    expect(patch.process).toEqual({
+      command: "codex-acp",
+      args: ["--model", "gpt 5"],
+      cwd: "/work",
+      env: { PLAIN: "1" },
+      startupTimeout: 4000,
+    })
+    expect(patch.metadata).toEqual({
+      ...getPresetConfig("codex")?.metadata,
+      preset: "codex",
+      importedFromAgentId: "local_1",
+    })
+    expect(patch.timeout).toBe(120000)
+    expect(patch.retryConfig).toEqual(config.retryConfig)
+    expect(patch).not.toHaveProperty("defaultPermissionMode")
+  })
+
+  it("applies an edit and drops form-owned metadata the form cleared", () => {
+    const config = saved({
+      protocol: "opencode",
+      transport: "sse",
+      process: { command: "opencode", args: [] },
+      metadata: { autoSpawnServer: true, port: 4100, model: "a/b", custom: 1 },
+    })
+    const seed = addAgentFormFromConfig(config)
+    const patch = addAgentFormPatch(config, {
+      ...seed.data,
+      port: "",
+      model: "",
+      serverPassword: "typed-now",
+    })
+    expect(patch.metadata).toEqual({
+      autoSpawnServer: true,
+      custom: 1,
+      serverPassword: "typed-now",
+    })
+  })
+
+  it("keeps the network config's other fields when the endpoint changes", () => {
+    const config = saved({
+      protocol: "a2a",
+      transport: "http",
+      process: undefined,
+      network: { endpoint: "https://old.invalid", rpcEndpoint: "https://old.invalid/rpc" },
+      metadata: {},
+    })
+    const seed = addAgentFormFromConfig(config)
+    const patch = addAgentFormPatch(config, { ...seed.data, endpoint: "https://new.invalid" })
+    expect(patch.network).toEqual({
+      endpoint: "https://new.invalid",
+      rpcEndpoint: "https://old.invalid/rpc",
+    })
+    expect(patch).not.toHaveProperty("process")
+  })
+})
+
+describe("addAgentFormLaunchTarget", () => {
+  it("is the command and its arguments for a local agent", () => {
+    expect(addAgentFormLaunchTarget(form({ command: " codex-acp ", args: "--a 'b c'" }))).toEqual({
+      command: "codex-acp",
+      args: ["--a", "b c"],
+    })
+  })
+
+  it("defaults an auto-spawned OpenCode server to its command", () => {
+    expect(
+      addAgentFormLaunchTarget(
+        form({ protocol: "opencode", transport: "sse", autoSpawnServer: true })
+      )
+    ).toEqual({ command: "opencode", args: [] })
+  })
+
+  it("is empty for an agent that spawns nothing here", () => {
+    expect(
+      addAgentFormLaunchTarget(
+        form({ transport: "http", command: "ignored", endpoint: "https://x" })
+      )
+    ).toEqual({ command: "", args: [] })
   })
 })

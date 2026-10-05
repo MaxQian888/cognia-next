@@ -95,6 +95,7 @@ From `lib/plugin/api/`.
 | `ctx.backup` | `backup-api.ts:64` | buildExportEnvelope / importEnvelope | `backup:read` / `backup:write` (never API key) | `create:66`, `restore:75`, `listHistory:82` |
 | `ctx.automation` | `automation-api.ts:101` | lib/automation/client (Computer Use) | `automation:read`/... (ALL DANGEROUS) | `capabilities:53`, `getFocus:54`, `readTree:56` |
 | `ctx.userScheduler` | `scheduler-tasks.ts` (`createUserSchedulerAPI(pluginId)`) | scheduler store + `getSchedulerDataSource()` (honours the paired-host binding) | `database:read` / `database:write` (+ `settings:read`, `agent:control` on create / run / cancel); every write passes `assertTaskWriteAllowed`, attributed to the plugin or an agent, never the user | `getPolicy`, `listTasks`, `getTask`, `createTask`, `updateTask`, `pauseTask`, `resumeTask`, `deleteTask`, `runTaskNow`, `listExecutions`, `getExecution`, `cancelExecution`, `getUpcoming` |
+| `ctx.externalAgents` | `external-agents-api.ts` (`createExternalAgentsAPI(pluginId)`) | `useExternalAgentStore` reads + `ExternalAgentLifecycleService` writes (ADR-0216) | `agent:external:read` / `agent:external:manage` (manage DANGEROUS) | `list`, `get`, `getReadiness`, `listPresets`, `listRuntimes`, `getSettings`, `listDelegationRules`, `onChange`; `create`, `createFromPreset`, `update`, `duplicate`, `remove`, `setEnabled`, `connect`, `disconnect`, `addDelegationRule`, `updateDelegationRule`, `removeDelegationRule`, `reorderDelegationRules`, `updateSettings` |
 | `ctx.companion` | `companion-api.ts:85` | paired-device + goal runtime | `companion:read`/`control`/`goal-control` | `listDevices:90`, `setRemoteControl:96`, `pauseGoal:114` |
 
 Helpers (not `ctx.X`): `crypto-helpers.ts` (AES-GCM `deriveKey:17`, used by the Storage API); `message-part-renderers.ts` (the backing registry for `ctx.messagePart`).
@@ -122,6 +123,25 @@ Several namespaces project a sanitized, credential-free view of an internal subs
 - `ctx.connectors` (`connectors-api.ts:14-24`): `connectors:read` returns a credential-free `PluginConnectorAdapterInfo` (`:82`); never the live `PlatformAdapter` or `credentialsRef`.
 - `ctx.backup` (`backup-api.ts:71,:80`): `includeApiKey` is hard-forced `false` on both create and restore.
 - `ctx.vector` (`vector-api.ts:53-58`): cloud providers are referenced by `configId` only; secrets stay in the OS keyring.
+- `ctx.externalAgents` (`external-agents-api.ts`): every config passes through `redactConfigForLogging` (`lib/ai/agent/external/lifecycle/credentials.ts`) and then an allowlist (`projectExternalAgentConfig`). Process env, headers, proxy settings, metadata, keyring refs and unsandboxed consent are never projected; a credential-looking argument value (`--api-key …`, `--token=…`, `OPENAI_API_KEY=…`) and URL userinfo / secret-named query values read back as `[redacted]`; `credentialSlots` lists the populated slot **names**. Inputs refuse inline credentials outright (`PluginExternalAgentInputError` code `inline_credentials`) rather than dropping them — credentials and the Windows unsandboxed-launch consent are entered by the user in Settings only.
+
+### `ctx.externalAgents` (ADR-0216)
+
+One guarded API over the user's external-agent configurations. Reads (`agent:external:read`) project the store; writes (`agent:external:manage`, dangerous, so per-call consent when the guard stamps it `confirm`) go through `getExternalAgentLifecycleService()` — never the store — except the global settings and delegation rules, which have no runtime half.
+
+| Method | Permission | Notes |
+| --- | --- | --- |
+| `list()` · `get(id)` | read | Secret-free `PluginExternalAgentSummary`: id, name, protocol/transport, enabled, `presetId`, `stateIsolation` (absent = `shared`), `duplicatedFromAgentId`, `createdByPluginId`, `defaultPermissionMode`, `process {command,args,cwd}`, `network {endpoint}`, `cogniaModel`, `subscriptionAccountId`, `maxConcurrentSessions`, `sessionIdleTimeout`, `timeout`, `tags`, `connectionStatus`, `readiness {state,nextAction,blockReason}`, `lifecycleStatus`/`lifecycleReasonCode`, `credentialSlots`, ISO `createdAt`/`updatedAt` |
+| `getReadiness(id)` | read | `computeAgentReadiness` (the Settings row model) plus `lifecycle.assessReadiness` run now |
+| `listPresets()` · `listRuntimes({refresh})` | read | Presets with `runnable`; `detectInstalledRuntimes` → `{ available, runtimes }` (`available: false` when no host can be asked) |
+| `getSettings()` · `listDelegationRules()` | read | Master switch, global default mode, auto-connect, notifications, chat failure policy |
+| `onChange(listener)` | read | `{ type: "config-added" \| "config-updated" \| "config-removed" \| "connection-changed" \| "settings-changed" \| "delegation-changed", agentId? }`; returns a disposer the plugin scope also releases on disable. TypeScript only — Python declares the `onExternalAgentConfigChange` hook |
+| `create(input)` · `createFromPreset(presetId, overrides)` | manage | Validated and built by the add-agent form's own rules (`lib/ai/agent/external/config/add-agent-form.ts`); `stateIsolation` defaults to `isolated`; `metadata.createdByPluginId` stamped; mode adapted to the protocol |
+| `update(id, patch)` | manage | Secret-free edit surface: name, description, enabled, `defaultPermissionMode` (clamped by `adaptPermissionMode`), `process {command,args,cwd}` (never env), `network {endpoint}`, timeout, retry, `codexOptions`, `cogniaModel`, `stateIsolation`, `subscriptionAccountId`, `maxConcurrentSessions`, `sessionIdleTimeout`, tags, `declaredCapabilities` |
+| `duplicate(id, {name, stateIsolation, enabled})` | manage | `lifecycle.duplicateConfig`; the default name is the first free localized "X (copy)" / "(copy 2)" (`uniqueDuplicateName`) |
+| `remove` · `setEnabled` · `connect` · `disconnect` | manage | Lifecycle service; `connect` refuses while the master switch is off |
+| `add/update/remove/reorderDelegationRules` | manage | Target must be a configured agent; a `keyword` matcher must compile; a reorder must name every rule exactly once |
+| `updateSettings(patch)` | manage | Validated in full before anything is written |
 
 ## 5. Snippets
 

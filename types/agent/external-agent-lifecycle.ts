@@ -51,6 +51,13 @@ export const EXTERNAL_AGENT_LIFECYCLE_ERROR_CODES = [
   "consent_required",
   /** This platform cannot host the runtime at all. */
   "platform_unsupported",
+  /**
+   * The configuration asks for a private state root (ADR-0216) but its runtime
+   * has no documented home variable to move, so isolating it is impossible.
+   */
+  "state_isolation_unsupported",
+  /** The configuration already has `maxConcurrentSessions` sessions open. */
+  "session_limit_reached",
 ] as const
 
 export type ExternalAgentLifecycleErrorCode = (typeof EXTERNAL_AGENT_LIFECYCLE_ERROR_CODES)[number]
@@ -596,6 +603,10 @@ export const EXTERNAL_AGENT_CREDENTIAL_SLOTS = [
   "headers",
   "proxyAuth",
   "processEnv",
+  // OpenCode's HTTP server password (`metadata.serverPassword`). Its own slot
+  // because it rides metadata, not `network`, and was the one credential that
+  // stayed plaintext in the store, in exports and in a duplicate.
+  "serverPassword",
 ] as const
 
 export type ExternalAgentCredentialSlot = (typeof EXTERNAL_AGENT_CREDENTIAL_SLOTS)[number]

@@ -152,7 +152,13 @@ export function AgentReadinessPipeline({
             <span className={cn("text-xs whitespace-nowrap", STEP_TEXT_CLASS[step.state])}>
               {t(STEP_LABEL_KEY[step.id])}
             </span>
-          ) : null}
+          ) : (
+            // The compact form draws only icons; without this every step was
+            // an empty list item to a screen reader.
+            <span className="sr-only">
+              {t(STEP_LABEL_KEY[step.id])}: {t(`stepStates.${step.state}`)}
+            </span>
+          )}
         </li>
       ))}
     </ol>

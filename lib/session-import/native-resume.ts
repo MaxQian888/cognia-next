@@ -11,13 +11,26 @@ export type NativeResumeFailureCode =
   | "preset-not-configured"
   | "runtime-unavailable"
   | "runtime-ambiguous"
+  | "runtime-isolated"
   | "resume-unverified"
   | "cwd-missing"
   | "handshake-failed"
 
+/** One connected configuration a resume could run on, for the caller to choose. */
+export interface NativeResumeChoice {
+  agentId: string
+  name: string
+}
+
 export type NativeResumeResult =
   | { ok: true; agentId: string; nativeSessionId: string }
-  | { ok: false; code: NativeResumeFailureCode; detail?: string }
+  | {
+      ok: false
+      code: NativeResumeFailureCode
+      detail?: string
+      /** Present with `runtime-ambiguous`: the configurations to choose from. */
+      choices?: NativeResumeChoice[]
+    }
 
 interface NativeResumeManager {
   getAllAgents(): ExternalAgentInstance[]
@@ -41,7 +54,11 @@ interface NativeResumeDeps {
  */
 export async function resumeImportedSessionNative(
   session: ChatSession,
-  deps: NativeResumeDeps = {}
+  deps: NativeResumeDeps = {},
+  options: {
+    /** The configuration the user chose after a `runtime-ambiguous` answer. */
+    agentId?: string
+  } = {}
 ): Promise<NativeResumeResult> {
   const binding = session.importRuntimeBinding
   const nativeSessionId = binding?.nativeSessionId?.trim()
@@ -54,23 +71,42 @@ export async function resumeImportedSessionNative(
     ((
       await import("@/lib/ai/agent/external/manager")
     ).getExternalAgentManager() as NativeResumeManager)
-  const candidates = manager
+  const presetMatches = manager
     .getAllAgents()
     .filter((instance) => externalAgentPresetIdOf(instance.config) === presetId)
-  if (candidates.length === 0) return { ok: false, code: "preset-not-configured", detail: presetId }
+  if (presetMatches.length === 0) {
+    return { ok: false, code: "preset-not-configured", detail: presetId }
+  }
+  // An imported session was read from the runtime's own home (`~/.codex`, …).
+  // A configuration with a private state root (ADR-0216) cannot see it there,
+  // so offering it would only fail the handshake with a less honest reason.
+  const candidates = presetMatches.filter(
+    (instance) => instance.config.stateIsolation !== "isolated"
+  )
+  if (candidates.length === 0) return { ok: false, code: "runtime-isolated", detail: presetId }
 
   const connectedCandidates = candidates.filter(
     (instance) => instance.connectionStatus === "connected"
   )
+  if (options.agentId && !connectedCandidates.some((c) => c.config.id === options.agentId)) {
+    return { ok: false, code: "runtime-unavailable" }
+  }
   // A preset identifies a runtime family, not an account or host. Without a
-  // durable instance binding choosing the first would resume on an arbitrary one.
-  if (connectedCandidates.length > 1) {
+  // durable instance binding choosing the first would resume on an arbitrary
+  // one, so the caller is handed the choice instead.
+  if (!options.agentId && connectedCandidates.length > 1) {
     return {
       ok: false,
       code: "runtime-ambiguous",
+      choices: connectedCandidates.map((instance) => ({
+        agentId: instance.config.id,
+        name: instance.config.name,
+      })),
     }
   }
-  const connected = connectedCandidates[0]
+  const connected = options.agentId
+    ? connectedCandidates.find((c) => c.config.id === options.agentId)
+    : connectedCandidates[0]
   if (!connected) {
     const detail = candidates.find((instance) => instance.validity?.blockingReason)?.validity
       ?.blockingReason

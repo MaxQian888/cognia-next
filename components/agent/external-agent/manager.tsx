@@ -26,7 +26,17 @@ import { ExternalAgentAuthentication } from "./authentication"
 import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronDown, Plus, Power, PowerOff, RefreshCw, Settings, Trash2 } from "lucide-react"
+import {
+  ChevronDown,
+  LayersIcon,
+  Plus,
+  Power,
+  PowerOff,
+  RefreshCw,
+  Settings,
+  SlidersHorizontal,
+  Trash2,
+} from "lucide-react"
 
 import {
   AlertDialog,
@@ -77,6 +87,8 @@ import { ConnectionStatusBadge } from "./connection-status-badge"
 import { AgentFailureNotice } from "./agent-failure-notice"
 import { useAgentConnectionStatus } from "@/hooks/agent/use-agent-connection-status"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { sharedStateSiblings } from "@/lib/ai/agent/external/config/instance-family"
+import { useUIStore } from "@/stores/ui"
 import { AgentCredentialBadge } from "./credential-status-badge"
 
 import type {
@@ -624,6 +636,17 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
   const agentFailures = useExternalAgentStore((state) => state.agentFailures)
   const clearAgentFailure = useExternalAgentStore((state) => state.clearAgentFailure)
   const connectionStatuses = useExternalAgentStore((state) => state.connectionStatus)
+  const requestOpenSettings = useUIStore((state) => state.requestOpenSettings)
+  const tManage = useTranslations("externalAgentManage.manager")
+  const storedAgents = useExternalAgentStore((state) => state.agents)
+  // Configurations that share the active one's CLI login (ADR-0216). Read from
+  // the store, which holds every configuration, connected or not.
+  const sharedStateAgentNames = useMemo(() => {
+    if (!activeAgentId) return []
+    const all = Object.values(storedAgents)
+    const active = all.find((agent) => agent.id === activeAgentId)
+    return active ? sharedStateSiblings(active, all).map((agent) => agent.name) : []
+  }, [activeAgentId, storedAgents])
   // Same subscription the cards take: the session actions below are gated on
   // this verdict, so a Host that finishes handshaking has to reach them too.
   const panelProcessPlane = useExternalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
@@ -1017,7 +1040,18 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
           <h3 className="text-lg font-semibold">{t("externalAgents")}</h3>
           <p className="text-sm text-muted-foreground">{tSettings("configuredAgentsDesc")}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {/* This dialog is the quick view; editing a configuration, its
+              instances and its routing lives in Settings. The shell owns the
+              navigation (desktop route or mobile push), so ask it. */}
+          <Button
+            variant="outline"
+            onClick={() => requestOpenSettings("agents")}
+            data-testid="external-agent-manage-in-settings"
+          >
+            <SlidersHorizontal className="mr-2 h-4 w-4" />
+            {tManage("manageInSettings")}
+          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -1102,6 +1136,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
                   }
                   onBusyChange={setIsAuthenticating}
                   supportsLogout={Boolean(negotiatedCapabilities?.auth?.logout)}
+                  sharedStateAgentNames={sharedStateAgentNames}
                   authenticate={authenticate}
                   getTerminalAuthState={getTerminalAuthState}
                   cancelTerminalAuthentication={cancelTerminalAuthentication}
@@ -1130,6 +1165,20 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
                 </Button>
               </div>
               <CollapsibleContent className="px-3 pb-3">
+                {/* Two shared configurations of one runtime read one history
+                    file (ADR-0216): say so, or the list looks like it holds
+                    another agent's sessions by mistake. */}
+                {sharedStateAgentNames.length > 0 && (
+                  <p
+                    className="mb-2 flex items-start gap-1.5 text-xs text-muted-foreground"
+                    data-testid="external-agent-shared-history-notice"
+                  >
+                    <LayersIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                    {tManage("sharedHistoryNotice", {
+                      names: sharedStateAgentNames.join(", "),
+                    })}
+                  </p>
+                )}
                 {!isActiveAgentExecutable ? (
                   <p className="text-xs text-amber-700 dark:text-amber-400">
                     {activeAgentBlockedReason || tDiag("notExecutable")}

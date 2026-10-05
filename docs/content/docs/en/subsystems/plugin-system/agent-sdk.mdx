@@ -138,7 +138,19 @@ const team = await ctx.agent.runTeam("team-id", { ultracode: true })
 - **`dispatchSubagent(idOrDef, prompt, opts)`** resolves a registered subagent (or an inline def) and runs it as a one-shot tool-enabled turn — subagent `{prompt, model, tools, maxTurns}` map onto the executor. (Subagents have no host direct-invoke entry; this is the faithful "run THIS subagent" path.)
 - **`runTeam(teamOrConfig, opts)`** runs an Agent Team headlessly by existing id or ad-hoc config, reusing `agentTeamManager.start` (live store binding, configured runtime deps, per-team inflight guard).
 
-Both require the **`agent:dispatch`** permission (non-dangerous). They degrade to text-only sub-runs / teammates when the sidecar is absent.
+Both require the **`agent:dispatch`** permission (non-dangerous). They degrade to text-only sub-runs / teammates when the sidecar is absent. A `dispatchSubagent` that runs on an external agent — `opts.externalAgentId`, or a def carrying `externalPresetId` / `externalAgentConfigId` (resolved by `resolveSubagentExternalTarget` in `lib/plugin/agent-sdk/dispatch.ts`) — additionally requires **`agent:dispatch-external`**, the permission that gates `runExternalAgent` (ADR-0216).
+
+### `runExternalAgent` admission (ADR-0216)
+
+Outside a Bot run (no `runId`), `runExternalAgent(presetOrAgentId, prompt, opts)`:
+
+- refuses while the global external-agent master switch is off;
+- for a **configured** agent: refuses a disabled config or one whose `lifecycle.assessReadiness` verdict is not `ready` (the error names the reason code), and registers it through `lifecycle.connect` so the launch carries that config's own keyring credentials;
+- for a **preset**: spawns a transient instance, checks its readiness first, and removes it (`manager.removeAgent`) when the run ends, success or failure;
+- clamps `opts.permissionMode` to the target's own default via `deriveExternalSessionPermission` — the config's `defaultPermissionMode` (or the global default when it names none), or the global default for a transient preset instance. A plugin can ask for less, never more;
+- no longer targets a live manager instance that is not a configured agent (another run's transient, a Bot's isolated agent).
+
+The Bot path (`opts.runId`) keeps its own installation-grant policy unchanged.
 
 ## Sessions (Package D)
 
@@ -193,7 +205,8 @@ await ctx.agent.run("...", {
 | `toolsEnabled` runs · `invokeTool` | `agent:control` |
 | hooks · guardrails · fallback/budget/trace | `agent:control` (ride existing runs) |
 | `runExternalAgent` | `agent:dispatch-external` |
-| `dispatchSubagent` · `runTeam` | `agent:dispatch` |
+| `dispatchSubagent` · `runTeam` | `agent:dispatch` (+ `agent:dispatch-external` when the subagent runs on an external agent) |
+| `ctx.externalAgents` reads / writes | `agent:external:read` / `agent:external:manage` |
 | `sessions.create` / `sessions.resume` | `session:write` / `session:read` |
 | `context.readSharedMemory` | `agent:shared-memory:read` |
 | `context.queryTwinMemory` | `twin:read` |

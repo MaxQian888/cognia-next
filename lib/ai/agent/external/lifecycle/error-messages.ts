@@ -37,6 +37,8 @@ export const LIFECYCLE_ERROR_MESSAGE_KEYS: Record<ExternalAgentLifecycleErrorCod
   runtime_referenced: "runtimeReferenced",
   consent_required: "consentRequired",
   platform_unsupported: "platformUnsupported",
+  state_isolation_unsupported: "stateIsolationUnsupported",
+  session_limit_reached: "sessionLimitReached",
 }
 
 /** Key used when the failure is not a lifecycle error at all. */

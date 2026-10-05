@@ -20,6 +20,7 @@ import { normalizeExternalAgentValiditySnapshot } from "../canonical-contract"
 import { resolveExternalAgentSurfaceFromMetadata } from "../ecosystem-adapters"
 import { adaptPermissionMode } from "../policy/permission-modes"
 import { protocolAdapterRegistry } from "../protocol-adapter"
+import { stateIsolationBlockReason } from "../lifecycle/launch-preparation"
 import { normalizeCogniaModelBinding } from "./gateway-task"
 
 // The protocols with a built-in adapter registered by
@@ -662,6 +663,12 @@ export function getExternalAgentExecutionBlock(
       reason: missingPrerequisite.detail ?? missingPrerequisite.label,
     }
   }
+  // An isolated configuration whose runtime has no home to move (ADR-0216).
+  // Said before connect, not discovered as a launch failure afterwards.
+  const isolationBlock = stateIsolationBlockReason(config)
+  if (isolationBlock) {
+    return { code: "state_isolation_unsupported", reason: isolationBlock }
+  }
   return null
 }
 
@@ -670,6 +677,11 @@ export function isExternalAgentExecutable(
   runtimeIsTauri: ExternalAgentRuntimeReach = defaultReach()
 ): boolean {
   return getExternalAgentExecutionBlockReason(config, runtimeIsTauri) === null
+}
+
+/** A whole number above zero, or `undefined` for anything else. */
+export function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined
 }
 
 export function normalizeExternalAgentConfigInput(
@@ -705,7 +717,19 @@ export function normalizeExternalAgentConfigInput(
     description: input.description,
     protocol,
     transport: input.transport,
-    enabled: options?.enabled ?? true,
+    enabled: options?.enabled ?? input.enabled ?? true,
+    // A configuration created now owns its runtime state unless the caller
+    // says otherwise (ADR-0216). Only creation reaches this normalizer, so a
+    // configuration persisted before the field existed keeps meaning `shared`.
+    stateIsolation: input.stateIsolation ?? "isolated",
+    ...(input.subscriptionAccountId ? { subscriptionAccountId: input.subscriptionAccountId } : {}),
+    ...(input.duplicatedFromAgentId ? { duplicatedFromAgentId: input.duplicatedFromAgentId } : {}),
+    ...(positiveInteger(input.maxConcurrentSessions) !== undefined
+      ? { maxConcurrentSessions: positiveInteger(input.maxConcurrentSessions) }
+      : {}),
+    ...(positiveInteger(input.sessionIdleTimeout) !== undefined
+      ? { sessionIdleTimeout: positiveInteger(input.sessionIdleTimeout) }
+      : {}),
     process: input.process,
     network: input.network,
     // Clamp the stored default to a mode this protocol can actually enforce so
