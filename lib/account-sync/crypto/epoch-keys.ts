@@ -64,6 +64,16 @@ export async function verifiedKeyChain(
   return chain
 }
 
+/** Whether a stored chain holds the list's current epoch key, as the list commits to it. */
+export async function matchesCurrentEpoch(
+  state: RegistryState,
+  chain: EpochKeyChain
+): Promise<boolean> {
+  const key = chain.get(state.epoch)
+  const commit = state.keyCommits[state.epoch]
+  return !!key && !!commit && (await matchesKeyCommitment(key, state.spaceId, state.epoch, commit))
+}
+
 /** The next epoch's block for an entry this device appends, and its new key. */
 export async function nextEpoch(
   state: RegistryState,

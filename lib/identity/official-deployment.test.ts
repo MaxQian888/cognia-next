@@ -2,12 +2,14 @@ import {
   OFFICIAL_AUDIENCE_DEFAULT,
   OFFICIAL_ISSUER_DEFAULT,
   OFFICIAL_NATIVE_CLIENT_ID,
+  OFFICIAL_SYNC_URL_DEFAULT,
   OFFICIAL_WEB_CLIENT_ID,
   isOfficialIssuer,
   isOfficialSocialProvider,
   officialAccountEnabled,
   officialDeployment,
   officialLogtoConfig,
+  officialSyncUrl,
 } from "./official-deployment"
 
 describe("officialDeployment", () => {
@@ -92,5 +94,17 @@ describe("helpers", () => {
     expect(isOfficialIssuer(OFFICIAL_ISSUER_DEFAULT, null)).toBe(false)
     expect(isOfficialSocialProvider("apple")).toBe(true)
     expect(isOfficialSocialProvider("wechat")).toBe(false)
+  })
+})
+
+describe("officialSyncUrl", () => {
+  it("defaults to the official sync Worker and takes a build override", () => {
+    expect(officialSyncUrl(undefined)).toBe(OFFICIAL_SYNC_URL_DEFAULT)
+    expect(officialSyncUrl("")).toBe(OFFICIAL_SYNC_URL_DEFAULT)
+    expect(officialSyncUrl("https://sync-staging.cognia.cn/")).toBe(
+      "https://sync-staging.cognia.cn"
+    )
+    expect(officialSyncUrl("http://localhost:8788")).toBe("http://localhost:8788")
+    expect(officialSyncUrl("ftp://nope")).toBe(OFFICIAL_SYNC_URL_DEFAULT)
   })
 })

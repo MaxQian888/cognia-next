@@ -12,6 +12,9 @@
  *
  * - `NEXT_PUBLIC_COGNIA_ID_ISSUER` / `NEXT_PUBLIC_COGNIA_ID_AUDIENCE` point a
  *   build at staging or at a developer's local identity Worker.
+ * - `NEXT_PUBLIC_COGNIA_SYNC_URL` points account sync at another sync Worker
+ *   (staging's is `https://sync-staging.cognia.cn`; the audience stays
+ *   `https://sync.cognia.cn`, since `iss` tells environments apart).
  * - `NEXT_PUBLIC_COGNIA_OFFICIAL_ACCOUNT=0` switches the official account off
  *   entirely. The self-hosted web image is built that way: its people sign in
  *   to their own deployment or not at all.
@@ -25,6 +28,8 @@ import type { LogtoClientConfig } from "@/lib/logto/client"
 
 export const OFFICIAL_ISSUER_DEFAULT = "https://id.cognia.cn/api/auth"
 export const OFFICIAL_AUDIENCE_DEFAULT = "https://sync.cognia.cn"
+/** The account sync Worker (ADR-0215 phase 2, `services/sync-server`). */
+export const OFFICIAL_SYNC_URL_DEFAULT = "https://sync.cognia.cn"
 /** Desktop, phone and CLI: a public PKCE client with native redirects. */
 export const OFFICIAL_NATIVE_CLIENT_ID = "cognia-app"
 /** The official web app: a public PKCE client on the web origins. */
@@ -95,6 +100,13 @@ export function officialDeployment(
     issuerKind: "oidc",
     social: OFFICIAL_SOCIAL_PROVIDERS,
   }
+}
+
+/** Where account sync talks to: the build's override, or the official sync Worker. */
+export function officialSyncUrl(
+  raw: string | undefined = process.env.NEXT_PUBLIC_COGNIA_SYNC_URL
+): string {
+  return trimmedUrl(raw, OFFICIAL_SYNC_URL_DEFAULT)
 }
 
 export function isOfficialSocialProvider(value: string): value is OfficialSocialProvider {

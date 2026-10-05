@@ -10,6 +10,7 @@ import {
 import { AccountSyncCryptoError } from "./errors"
 import {
   firstEpoch,
+  matchesCurrentEpoch,
   nextEpoch,
   parseKeyChain,
   serializeKeyChain,
@@ -63,6 +64,17 @@ describe("verifiedKeyChain", () => {
       keyCommits: { ...chain.state.keyCommits, 1: chain.state.keyCommits[2]! },
     }
     await expect(verifiedKeyChain(wrongCommit, chain.currentKey())).rejects.toThrow(/epoch 1/)
+  })
+})
+
+describe("matchesCurrentEpoch", () => {
+  it("is true only for a chain holding the committed current key", async () => {
+    const { chain, first } = await chainAtEpoch3()
+    const keys = await verifiedKeyChain(chain.state, chain.currentKey())
+    expect(await matchesCurrentEpoch(chain.state, keys)).toBe(true)
+    await chain.rotateEpoch(first)
+    expect(await matchesCurrentEpoch(chain.state, keys)).toBe(false)
+    expect(await matchesCurrentEpoch(chain.state, new Map([[4, newEpochKey()]]))).toBe(false)
   })
 })
 

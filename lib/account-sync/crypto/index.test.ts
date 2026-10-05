@@ -17,6 +17,7 @@ describe("lib/account-sync/crypto public surface", () => {
       "sealRequestName",
       "openRequestName",
       "verifiedKeyChain",
+      "matchesCurrentEpoch",
       "nextEpoch",
       "firstEpoch",
       "serializeKeyChain",
