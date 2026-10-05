@@ -1,19 +1,9 @@
+import { dexieTeamRunStore } from "@/lib/db/agent-team-runtime"
+import type { TeamRunStore } from "@cognia/agent-orchestration/store"
 import {
-  appendAgentTeamTrajectory,
-  createAgentTeamChildRun,
-  createAgentTeamRun,
-  createAgentTeamSteeringReceipt,
-  getAgentTeamChildRun,
-  getAgentTeamRun,
-  getLatestAgentTeamCheckpoint,
-  listAgentTeamChildRuns,
-  listAgentTeamRecoveryCandidates,
-  listAgentTeamTrajectory,
-  markAgentTeamCheckpoint,
-  updateAgentTeamChildRunIfCurrent,
-  updateAgentTeamRunIfCurrent,
-  updateAgentTeamSteeringReceipt,
-} from "@/lib/db/agent-team-runtime"
+  CHILD_ADMISSION_WAITING_REASON,
+  isChildReplaySafe,
+} from "@cognia/agent-orchestration/replay"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type {
   AgentTeamCheckpoint,
@@ -25,9 +15,12 @@ import type {
   AgentTeamTrajectoryEvent,
   AgentTeamWriteMode,
 } from "@/types/agent/agent-team-runtime"
-import type { AgentTeamResourcePolicy } from "@/types/agent/agent-team-runtime"
+import type {
+  AgentTeamExecutionConstraints,
+  AgentTeamResourcePolicy,
+} from "@/types/agent/agent-team-runtime"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
-import { createFairTeamScheduler } from "../fair-scheduler"
+import { createFairTeamScheduler } from "@cognia/agent-orchestration/fair-scheduler"
 import { createDecisionLedger } from "../ledger/decision-ledger"
 import { createEvidenceBundle } from "../ledger/evidence-bundle"
 import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
@@ -43,6 +36,8 @@ export interface DurableChildControl {
 }
 
 export interface DurableTeamCoordinatorOptions {
+  /** Where run state lives (ADR-0217); the app's Dexie store by default. */
+  store?: TeamRunStore<AgentTeamExecutionConstraints>
   now?: () => number
   globalConcurrency?: number
   agingIntervalMs?: number
@@ -88,32 +83,24 @@ interface ActiveOwnership {
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "terminated"])
-export const CHILD_ADMISSION_WAITING_REASON = "scheduler_admission"
+// The admission marker and the replay rule are owned by the orchestration core.
+export { CHILD_ADMISSION_WAITING_REASON }
 
-/** A checkpoint cannot authorize replay of remote work recorded after it. */
+/**
+ * Whether a child may be replayed from its checkpoint (the rule:
+ * `isChildReplaySafe`). Reads the latest checkpoint and the run's trajectory
+ * from `store` when the caller has not already loaded them.
+ */
 export async function isDurableChildReplaySafe(
   childRunId: string,
   checkpoint?: AgentTeamCheckpoint,
-  trajectory?: readonly AgentTeamTrajectoryEvent[]
+  trajectory?: readonly AgentTeamTrajectoryEvent[],
+  store: TeamRunStore = dexieTeamRunStore
 ): Promise<boolean> {
-  const candidate = checkpoint ?? (await getLatestAgentTeamCheckpoint(childRunId))
-  if (
-    !candidate ||
-    candidate.childRunId !== childRunId ||
-    candidate.replay !== "safe" ||
-    candidate.sideEffects.some(
-      (effect) =>
-        effect.state === "unknown" || (effect.state === "intent" && effect.replay !== "safe")
-    )
-  )
-    return false
-  const events = trajectory ?? (await listAgentTeamTrajectory(candidate.runId))
-  return !events.some(
-    (event) =>
-      event.childRunId === childRunId &&
-      event.kind === "remote_event" &&
-      event.sequence > candidate.trajectorySequence
-  )
+  const candidate = checkpoint ?? (await store.getLatestCheckpoint(childRunId))
+  if (!candidate) return false
+  const events = trajectory ?? (await store.listTrajectory(candidate.runId))
+  return isChildReplaySafe(childRunId, candidate, events)
 }
 
 function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -190,6 +177,7 @@ function overlaps(a: string[], b: string[]): boolean {
  * maps below contain process-local provider handles and writer locks only.
  */
 export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOptions = {}) {
+  const store = options.store ?? dexieTeamRunStore
   const now = options.now ?? Date.now
   const policies = new Map<string, RunPolicy>()
   const controls = new Map<string, DurableChildControl>()
@@ -207,7 +195,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
 
   const assertRunnable = async (childRunId: string, signal?: AbortSignal) => {
     signal?.throwIfAborted()
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     if (TERMINAL_STATUSES.has(child.status)) {
       throw new Error(`Durable child ${childRunId} is terminal: ${child.status}`)
@@ -217,7 +205,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         `Durable child ${childRunId} is not accepting new turns while ${child.status}`
       )
     }
-    const run = await getAgentTeamRun(child.runId)
+    const run = await store.getRun(child.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
     if (TERMINAL_STATUSES.has(run.status) || run.status === "needs_input") {
       throw new Error(
@@ -230,7 +218,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
 
   const assertBudget = async (
     childRunId: string,
-    run: NonNullable<Awaited<ReturnType<typeof getAgentTeamRun>>>
+    run: NonNullable<Awaited<ReturnType<typeof store.getRun>>>
   ) => {
     const resource = policies.get(run.id)?.resourcePolicy
     if (!resource) return
@@ -242,8 +230,8 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       (resource.maxWallTimeMs !== undefined && wallTimeMs >= resource.maxWallTimeMs)
     ) {
       const at = now()
-      const child = await getAgentTeamChildRun(childRunId)
-      const gated = await updateAgentTeamRunIfCurrent(
+      const child = await store.getChild(childRunId)
+      const gated = await store.updateRunIfCurrent(
         run.id,
         { status: run.status, updatedAt: run.updatedAt },
         {
@@ -253,7 +241,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         }
       )
       if (gated && child && !TERMINAL_STATUSES.has(child.status)) {
-        await updateAgentTeamChildRunIfCurrent(childRunId, child, {
+        await store.updateChildIfCurrent(childRunId, child, {
           status: "needs_input",
           error: "Resource budget exhausted",
           updatedAt: at,
@@ -276,9 +264,9 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const repositories = normalizeRepositories(team)
     const at = now()
     const priority = team.config.resourcePolicy?.priority ?? 0
-    const existing = await getAgentTeamRun(runId)
+    const existing = await store.getRun(runId)
     if (!existing) {
-      await createAgentTeamRun({
+      await store.createRun({
         id: runId,
         teamId: team.id,
         ...(team.projectId ? { projectId: team.projectId } : {}),
@@ -303,7 +291,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     } else if (existing.status === "queued") {
       // `startSquadRun` journals the row as `queued` before dispatch
       // (ADR-0169). Admission is what moves it to `running`.
-      const started = await updateAgentTeamRunIfCurrent(runId, existing, {
+      const started = await store.updateRunIfCurrent(runId, existing, {
         status: "running",
         startedAt: at,
         updatedAt: at,
@@ -364,8 +352,11 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     return runId
   }
 
-  const registerChild = async (input: RegisterDurableChildInput): Promise<AgentTeamChildRun> => {
-    const run = await getAgentTeamRun(input.runId)
+  const registerChild = async (
+    input: RegisterDurableChildInput,
+    via: TeamRunStore<AgentTeamExecutionConstraints> = store
+  ): Promise<AgentTeamChildRun> => {
+    const run = await via.getRun(input.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${input.runId}`)
     const policy = policies.get(input.runId)
     if (policy && !policy.repositories.has(input.repositoryId)) {
@@ -398,8 +389,8 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       startedAt: at,
       updatedAt: at,
     }
-    await createAgentTeamChildRun(child)
-    await appendAgentTeamTrajectory({
+    await via.createChild(child)
+    await via.appendTrajectory({
       runId: input.runId,
       childRunId: child.id,
       kind: "child_created",
@@ -527,7 +518,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         priority: run.priority,
         maxConcurrentChildren: 1,
       }
-      const queued = await updateAgentTeamChildRunIfCurrent(
+      const queued = await store.updateChildIfCurrent(
         childRunId,
         { status: child.status, updatedAt: child.updatedAt },
         { status: "queued", waitingReason: CHILD_ADMISSION_WAITING_REASON, updatedAt: now() }
@@ -553,7 +544,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         throw new Error(`Durable AgentTeam run ${run.id} is paused`)
       }
       await assertBudget(childRunId, run)
-      const started = await updateAgentTeamChildRunIfCurrent(
+      const started = await store.updateChildIfCurrent(
         childRunId,
         { status: child.status, updatedAt: child.updatedAt },
         { status: "running", waitingReason: undefined, updatedAt: now() }
@@ -580,7 +571,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   }
 
   const steer = async (childRunId: string, message: string): Promise<AgentTeamSteeringReceipt> => {
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     const at = now()
     const persistedMessage = redactText(message).redacted
@@ -596,8 +587,8 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       createdAt: at,
       updatedAt: at,
     }
-    await createAgentTeamSteeringReceipt(receipt)
-    await appendAgentTeamTrajectory({
+    await store.createSteeringReceipt(receipt)
+    await store.appendTrajectory({
       runId: child.runId,
       childRunId,
       kind: "steering_queued",
@@ -609,8 +600,8 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     try {
       await control.steer(persistedMessage, receipt.id)
       const deliveredAt = now()
-      await updateAgentTeamSteeringReceipt(receipt.id, "delivered", deliveredAt)
-      await appendAgentTeamTrajectory({
+      await store.updateSteeringReceipt(receipt.id, "delivered", deliveredAt)
+      await store.appendTrajectory({
         runId: child.runId,
         childRunId,
         kind: "steering_delivered",
@@ -634,11 +625,11 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       workspaceCommit?: string
     }
   ): Promise<AgentTeamCheckpoint> => {
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
-    const run = await getAgentTeamRun(child.runId)
+    const run = await store.getRun(child.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
-    return markAgentTeamCheckpoint({
+    return store.markCheckpoint({
       runId: child.runId,
       childRunId,
       trajectorySequence: input.trajectorySequence,
@@ -651,25 +642,25 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   }
 
   const recover = async (): Promise<RecoveryOutcome[]> => {
-    const runs = await listAgentTeamRecoveryCandidates()
+    const runs = await store.listRecoveryCandidates()
     const outcomes: RecoveryOutcome[] = []
     for (const run of runs) {
-      const children = (await listAgentTeamChildRuns(run.id)).filter(
+      const children = (await store.listChildren(run.id)).filter(
         (child) => !TERMINAL_STATUSES.has(child.status)
       )
       const checkpoints = await Promise.all(
-        children.map((child) => getLatestAgentTeamCheckpoint(child.id))
+        children.map((child) => store.getLatestCheckpoint(child.id))
       )
-      const trajectory = await listAgentTeamTrajectory(run.id)
+      const trajectory = await store.listTrajectory(run.id)
       const replaySafety = await Promise.all(
         children.map((child, index) =>
-          isDurableChildReplaySafe(child.id, checkpoints[index], trajectory)
+          isDurableChildReplaySafe(child.id, checkpoints[index], trajectory, store)
         )
       )
       const uncertain = replaySafety.some((safe) => !safe)
       const status: RecoveryOutcome["status"] = uncertain ? "needs_input" : "recovering"
       const at = now()
-      const recovered = await updateAgentTeamRunIfCurrent(run.id, run, {
+      const recovered = await store.updateRunIfCurrent(run.id, run, {
         status,
         updatedAt: at,
         recoveryReason: uncertain ? "uncertain_side_effect" : "checkpoint_replay",
@@ -677,7 +668,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       if (!recovered) continue
       await Promise.all(
         children.map((child) =>
-          updateAgentTeamChildRunIfCurrent(
+          store.updateChildIfCurrent(
             child.id,
             { status: child.status, updatedAt: child.updatedAt },
             { status, updatedAt: at }
@@ -693,20 +684,20 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     childRunId: string,
     requestedHostRef?: string
   ): Promise<AgentTeamChildRun> => {
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     if (["completed", "cancelled", "terminated"].includes(child.status)) {
       throw new Error(`Durable child ${childRunId} cannot be retried from ${child.status}`)
     }
-    const run = await getAgentTeamRun(child.runId)
+    const run = await store.getRun(child.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
 
     if (TERMINAL_STATUSES.has(run.status)) {
       throw new Error(`Durable AgentTeam run ${run.id} cannot be retried from ${run.status}`)
     }
 
-    const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
-    const safeToMigrate = await isDurableChildReplaySafe(childRunId, checkpoint)
+    const checkpoint = await store.getLatestCheckpoint(childRunId)
+    const safeToMigrate = await isDurableChildReplaySafe(childRunId, checkpoint, undefined, store)
     const changesHost =
       requestedHostRef !== undefined &&
       child.hostRef !== undefined &&
@@ -720,7 +711,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const retryHostRef =
       requestedHostRef ?? (!safeToMigrate && child.hostRef ? child.hostRef : undefined)
     const at = now()
-    const retried = await updateAgentTeamChildRunIfCurrent(childRunId, child, {
+    const retried = await store.updateChildIfCurrent(childRunId, child, {
       status: "queued",
       error: undefined,
       dispatchLeaseId: undefined,
@@ -729,13 +720,13 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       updatedAt: at,
     })
     if (!retried) throw new Error(`Durable child ${childRunId} changed before retry`)
-    const recovering = await updateAgentTeamRunIfCurrent(run.id, run, {
+    const recovering = await store.updateRunIfCurrent(run.id, run, {
       status: "recovering",
       recoveryReason: retryHostRef ? "operator_retry_host" : "operator_retry_auto",
       updatedAt: at,
     })
     if (!recovering) throw new Error(`Durable AgentTeam run ${run.id} changed before retry`)
-    const updated = await getAgentTeamChildRun(childRunId)
+    const updated = await store.getChild(childRunId)
     if (!updated) throw new Error(`Durable child disappeared during retry: ${childRunId}`)
     return updated
   }
@@ -744,12 +735,12 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     childRunId: string,
     action: "pause" | "resume" | "terminate"
   ): Promise<void> => {
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     const control = controls.get(childRunId)
     if (["completed", "failed", "cancelled", "terminated"].includes(child.status)) return
     if (action === "resume") {
-      const run = await getAgentTeamRun(child.runId)
+      const run = await store.getRun(child.runId)
       if (!run || TERMINAL_STATUSES.has(run.status)) {
         throw new Error(`Durable child ${childRunId} cannot resume after its run stopped`)
       }
@@ -763,13 +754,13 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     // turn reaches its next durable boundary, while new admissions wait.
     if (action === "pause") {
       const pausingAt = now()
-      const admitted = await updateAgentTeamChildRunIfCurrent(
+      const admitted = await store.updateChildIfCurrent(
         childRunId,
         { status: child.status, updatedAt: child.updatedAt },
         { status: "pausing", updatedAt: pausingAt }
       )
       if (!admitted) {
-        const changed = await getAgentTeamChildRun(childRunId)
+        const changed = await store.getChild(childRunId)
         if (
           changed &&
           ["completed", "failed", "cancelled", "terminated"].includes(changed.status)
@@ -782,14 +773,14 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     }
     const pauseSafe = action === "pause" ? await control?.pause?.() : undefined
     if (action === "resume" && child.remoteSessionId) {
-      const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
-      if (!(await isDurableChildReplaySafe(childRunId, checkpoint))) {
+      const checkpoint = await store.getLatestCheckpoint(childRunId)
+      if (!(await isDurableChildReplaySafe(childRunId, checkpoint, undefined, store))) {
         throw new Error("Remote child resume requires a safe checkpoint")
       }
     }
     if (action === "resume" && !child.remoteSessionId) await control?.resume?.()
     if (action === "terminate") await control?.terminate?.()
-    const current = await getAgentTeamChildRun(childRunId)
+    const current = await store.getChild(childRunId)
     if (!current) throw new Error(`Durable child disappeared during ${action}: ${childRunId}`)
     if (["completed", "failed", "cancelled", "terminated"].includes(current.status)) return
     if (action === "pause" && current.status !== "pausing") return
@@ -810,7 +801,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       ...(action === "terminate" ? { completedAt: now() } : {}),
       updatedAt: now(),
     } as const
-    await updateAgentTeamChildRunIfCurrent(
+    await store.updateChildIfCurrent(
       childRunId,
       { status: current.status, updatedAt: current.updatedAt },
       patch
@@ -822,10 +813,10 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   }
 
   const sleepChild = async (childRunId: string): Promise<void> => {
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     if (TERMINAL_STATUSES.has(child.status)) return
-    await updateAgentTeamChildRunIfCurrent(
+    await store.updateChildIfCurrent(
       childRunId,
       { status: child.status, updatedAt: child.updatedAt },
       { status: "sleeping", updatedAt: now() }
@@ -836,7 +827,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const pending = pendingWakes.get(childRunId)
     if (pending) return pending
     const waking = (async () => {
-      const child = await getAgentTeamChildRun(childRunId)
+      const child = await store.getChild(childRunId)
       if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
       if (child.status !== "sleeping") return
       // Reuse resume's remote checkpoint gate and durable control transition.
@@ -850,9 +841,9 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
 
   const beginTakeover = async (childRunId: string): Promise<AgentTeamChildRun> => {
     await setChildControlState(childRunId, "pause")
-    const child = await getAgentTeamChildRun(childRunId)
+    const child = await store.getChild(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
-    await appendAgentTeamTrajectory({
+    await store.appendTrajectory({
       runId: child.runId,
       childRunId,
       kind: "manual_takeover_started",
@@ -869,7 +860,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     diffContent?: string
     workspaceCommit?: string
   }): Promise<void> => {
-    const child = await getAgentTeamChildRun(input.childRunId)
+    const child = await store.getChild(input.childRunId)
     if (!child) throw new Error(`Unknown durable child: ${input.childRunId}`)
     const bundle = createEvidenceBundle({
       runId: child.runId,
@@ -898,7 +889,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         metadata: { sha: input.workspaceCommit, source: "manual_takeover" },
       })
     }
-    const event = await appendAgentTeamTrajectory({
+    const event = await store.appendTrajectory({
       runId: child.runId,
       childRunId: child.id,
       kind: "manual_takeover_completed",
@@ -916,6 +907,8 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   }
 
   return {
+    /** The store this coordinator reads and writes run state through. */
+    store,
     prepareRun,
     registerChild,
     withChildAdmission,

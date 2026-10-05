@@ -13,26 +13,46 @@ import type {
   AgentTeamSteeringStatus,
   AgentTeamTrajectoryEvent,
 } from "@/types/agent/agent-team-runtime"
+import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
+import { contentHash, createContentObject } from "@cognia/agent-orchestration/content"
+import {
+  assertChildBoundary,
+  assertRunBoundary,
+  canAdvanceRemoteEvent,
+  checkpointChildPatch,
+  dispatchLeaseClaimPatch,
+  dispatchLeaseRenewPatch,
+  dispatchLeaseSettlePatch,
+  latestChildFor,
+  matchesControlState,
+  nextTrajectoryEvent,
+  pendingSteering,
+  selectRecoveryCandidates,
+  steeringQueuedChildPatch,
+  steeringReceiptPatch,
+  steeringResolvedChildPatch,
+  trajectoryChildPatch,
+  type AppendTrajectoryInput,
+  type ClaimDispatchLeaseInput,
+  type MarkCheckpointInput,
+} from "@cognia/agent-orchestration/rules"
+import type { TeamRunStore } from "@cognia/agent-orchestration/store"
+import { sumChildUsage } from "@cognia/agent-orchestration/usage"
 import { getDb } from "./schema"
 
-const INTERRUPTED_EXECUTION_STATUSES = new Set<AgentTeamRunStatus>([
-  "running",
-  "pausing",
-  "recovering",
-])
+// The persistence rules (compare-and-set, dispatch lease, monotonic trajectory,
+// checkpoint and steering bookkeeping, recovery order) are defined once in
+// `@cognia/agent-orchestration/rules` (ADR-0217). This module applies them
+// inside Dexie transactions and exposes the result as a `TeamRunStore`.
+export type { AppendTrajectoryInput, MarkCheckpointInput }
+export type ClaimAgentTeamDispatchLeaseInput = ClaimDispatchLeaseInput
+
+/** Content objects are built by the orchestration package (one hash definition). */
+const makeAgentTeamContent = createContentObject
 
 function id(prefix: string): string {
   const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
   return `${prefix}-${suffix}`
-}
-
-function assertRunBoundary(run: AgentTeamRunRecord): void {
-  if (!run.id || !run.teamId || !run.objective.trim()) {
-    throw new Error("Durable AgentTeam run requires id, teamId, and objective")
-  }
-  if (!Number.isInteger(run.decisionVersion) || run.decisionVersion < 0) {
-    throw new Error("Durable AgentTeam run decisionVersion must be a non-negative integer")
-  }
 }
 
 export async function createAgentTeamRun(run: AgentTeamRunRecord): Promise<void> {
@@ -60,9 +80,7 @@ export async function updateAgentTeamRunIfCurrent(
   const db = getDb()
   return db.transaction("rw", db.agentTeamRuns, async () => {
     const run = await db.agentTeamRuns.get(id)
-    if (!run || run.status !== expected.status || run.updatedAt !== expected.updatedAt) {
-      return false
-    }
+    if (!matchesControlState(run, expected)) return false
     return (await db.agentTeamRuns.update(id, patch)) > 0
   })
 }
@@ -75,24 +93,11 @@ export async function listAgentTeamRuns(teamId?: string): Promise<AgentTeamRunRe
 }
 
 export async function listAgentTeamRecoveryCandidates(): Promise<AgentTeamRunRecord[]> {
-  return (
-    (await getDb().agentTeamRuns.toArray())
-      // Queued runs retain their queue position, while pause, sleep, and input
-      // gates are deliberate operator states. Only execution that could have
-      // been interrupted by process loss needs checkpoint recovery.
-      .filter((run) => INTERRUPTED_EXECUTION_STATUSES.has(run.status))
-      .sort(
-        (a, b) =>
-          b.priority - a.priority ||
-          (a.queueEnteredAt ?? a.createdAt) - (b.queueEnteredAt ?? b.createdAt)
-      )
-  )
+  return selectRecoveryCandidates(await getDb().agentTeamRuns.toArray())
 }
 
 export async function createAgentTeamChildRun(child: AgentTeamChildRun): Promise<void> {
-  if (!child.id || !child.runId || !child.teammateId || !child.taskId || !child.repositoryId) {
-    throw new Error("Durable AgentTeam child requires run, teammate, task, and repository")
-  }
+  assertChildBoundary(child)
   await getDb().agentTeamChildRuns.add(child)
 }
 
@@ -111,9 +116,7 @@ export async function findLatestAgentTeamChildRun(
   teammateId: string
 ): Promise<AgentTeamChildRun | undefined> {
   const rows = await getDb().agentTeamChildRuns.where("runId").equals(runId).toArray()
-  return rows
-    .filter((row) => row.taskId === taskId && row.teammateId === teammateId)
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  return latestChildFor(rows, taskId, teammateId)
 }
 
 export async function updateAgentTeamChildRun(
@@ -132,20 +135,9 @@ export async function updateAgentTeamChildRunIfCurrent(
   const db = getDb()
   return db.transaction("rw", db.agentTeamChildRuns, async () => {
     const child = await db.agentTeamChildRuns.get(id)
-    if (!child || child.status !== expected.status || child.updatedAt !== expected.updatedAt) {
-      return false
-    }
+    if (!matchesControlState(child, expected)) return false
     return (await db.agentTeamChildRuns.update(id, patch)) > 0
   })
-}
-
-export interface ClaimAgentTeamDispatchLeaseInput {
-  childRunId: string
-  leaseId: string
-  hostRef: string
-  now: number
-  ttlMs?: number
-  executionFingerprint?: string
 }
 
 /**
@@ -160,19 +152,8 @@ export async function claimAgentTeamDispatchLease(
   return db.transaction("rw", db.agentTeamChildRuns, async () => {
     const child = await db.agentTeamChildRuns.get(input.childRunId)
     if (!child) return undefined
-    const heldByOther =
-      child.dispatchLeaseId !== undefined &&
-      child.dispatchLeaseId !== input.leaseId &&
-      (child.dispatchLeaseExpiresAt ?? 0) > input.now
-    if (heldByOther) return undefined
-    const patch: Partial<AgentTeamChildRun> = {
-      dispatchLeaseId: input.leaseId,
-      dispatchLeaseExpiresAt: input.now + (input.ttlMs ?? 60_000),
-      hostRef: input.hostRef,
-      waitingReason: undefined,
-      ...(input.executionFingerprint ? { executionFingerprint: input.executionFingerprint } : {}),
-      updatedAt: input.now,
-    }
+    const patch = dispatchLeaseClaimPatch(child, input)
+    if (!patch) return undefined
     await db.agentTeamChildRuns.update(child.id, patch)
     return { ...child, ...patch }
   })
@@ -182,18 +163,14 @@ export async function renewAgentTeamDispatchLease(
   childRunId: string,
   expectedLeaseId: string,
   now: number,
-  ttlMs = 60_000
+  ttlMs?: number
 ): Promise<boolean> {
   const db = getDb()
   return db.transaction("rw", db.agentTeamChildRuns, async () => {
     const child = await db.agentTeamChildRuns.get(childRunId)
-    if (!child || child.dispatchLeaseId !== expectedLeaseId) return false
-    return (
-      (await db.agentTeamChildRuns.update(childRunId, {
-        dispatchLeaseExpiresAt: now + ttlMs,
-        updatedAt: now,
-      })) > 0
-    )
+    const patch = dispatchLeaseRenewPatch(child, expectedLeaseId, now, ttlMs)
+    if (!patch) return false
+    return (await db.agentTeamChildRuns.update(childRunId, patch)) > 0
   })
 }
 
@@ -205,14 +182,9 @@ export async function settleAgentTeamDispatchLease(
   const db = getDb()
   return db.transaction("rw", db.agentTeamChildRuns, async () => {
     const child = await db.agentTeamChildRuns.get(childRunId)
-    if (!child || child.dispatchLeaseId !== expectedLeaseId) return false
-    return (
-      (await db.agentTeamChildRuns.update(childRunId, {
-        dispatchLeaseId: undefined,
-        dispatchLeaseExpiresAt: undefined,
-        updatedAt: now,
-      })) > 0
-    )
+    const patch = dispatchLeaseSettlePatch(child, expectedLeaseId, now)
+    if (!patch) return false
+    return (await db.agentTeamChildRuns.update(childRunId, patch)) > 0
   })
 }
 
@@ -233,7 +205,7 @@ export async function advanceAgentTeamRemoteEvent(
     [db.agentTeamChildRuns, db.agentTeamTrajectory, db.agentTeamContentObjects],
     async () => {
       const child = await db.agentTeamChildRuns.get(childRunId)
-      if (!child || child.lastRemoteEventId !== expectedPreviousEventId) return false
+      if (!canAdvanceRemoteEvent(child, expectedPreviousEventId)) return false
       if (envelope && object) {
         if (child.runId !== envelope.runId) throw new Error("Remote event belongs to another run")
         await db.agentTeamContentObjects.put(object)
@@ -256,8 +228,6 @@ export async function advanceAgentTeamRemoteEvent(
   )
 }
 
-export type AppendTrajectoryInput = Omit<AgentTeamTrajectoryEvent, "id" | "sequence">
-
 export async function appendAgentTeamTrajectory(
   input: AppendTrajectoryInput,
   content?: { data: string | Uint8Array; mimeType: string }
@@ -275,19 +245,10 @@ export async function appendAgentTeamTrajectory(
         .where("[runId+sequence]")
         .between([input.runId, -Infinity], [input.runId, Infinity])
         .last()
-      const sequence = (last?.sequence ?? 0) + 1
-      const event: AgentTeamTrajectoryEvent = {
-        ...input,
-        ...(object ? { contentHash: object.hash } : {}),
-        id: `${input.runId}:${sequence}`,
-        sequence,
-      }
+      const event = nextTrajectoryEvent(last?.sequence, input, object?.hash)
       await db.agentTeamTrajectory.add(event)
       if (input.childRunId) {
-        await db.agentTeamChildRuns.update(input.childRunId, {
-          lastTrajectorySequence: sequence,
-          updatedAt: input.createdAt,
-        })
+        await db.agentTeamChildRuns.update(input.childRunId, trajectoryChildPatch(event))
       }
       return event
     }
@@ -304,8 +265,6 @@ export async function listAgentTeamTrajectory(
     .toArray()
 }
 
-export type MarkCheckpointInput = Omit<AgentTeamCheckpoint, "id">
-
 export async function markAgentTeamCheckpoint(
   input: MarkCheckpointInput
 ): Promise<AgentTeamCheckpoint> {
@@ -314,11 +273,7 @@ export async function markAgentTeamCheckpoint(
   await db.transaction("rw", db.agentTeamCheckpoints, db.agentTeamChildRuns, async () => {
     await db.agentTeamCheckpoints.add(checkpoint)
     if (input.childRunId) {
-      await db.agentTeamChildRuns.update(input.childRunId, {
-        lastCheckpointId: checkpoint.id,
-        lastTrajectorySequence: input.trajectorySequence,
-        updatedAt: input.createdAt,
-      })
+      await db.agentTeamChildRuns.update(input.childRunId, checkpointChildPatch(checkpoint))
     }
   })
   return checkpoint
@@ -355,10 +310,7 @@ export async function createAgentTeamSteeringReceipt(
     await db.agentTeamSteeringReceipts.add(receipt)
     const child = await db.agentTeamChildRuns.get(receipt.childRunId)
     if (child) {
-      await db.agentTeamChildRuns.update(child.id, {
-        pendingSteeringCount: (child.pendingSteeringCount ?? 0) + 1,
-        updatedAt: receipt.updatedAt,
-      })
+      await db.agentTeamChildRuns.update(child.id, steeringQueuedChildPatch(child, receipt))
     }
   })
   return receipt
@@ -374,23 +326,10 @@ export async function updateAgentTeamSteeringReceipt(
   return db.transaction("rw", db.agentTeamSteeringReceipts, db.agentTeamChildRuns, async () => {
     const receipt = await db.agentTeamSteeringReceipts.get(receiptId)
     if (!receipt) return false
-    const patch: Partial<AgentTeamSteeringReceipt> = {
-      status,
-      updatedAt: at,
-      ...(reason ? { reason } : {}),
-      ...(status === "delivered" ? { deliveredAt: at } : {}),
-      ...(status === "applied" ? { appliedAt: at } : {}),
-    }
-    await db.agentTeamSteeringReceipts.update(receiptId, patch)
-    if (status === "applied" || status === "rejected") {
-      const child = await db.agentTeamChildRuns.get(receipt.childRunId)
-      if (child) {
-        await db.agentTeamChildRuns.update(child.id, {
-          pendingSteeringCount: Math.max(0, (child.pendingSteeringCount ?? 1) - 1),
-          updatedAt: at,
-        })
-      }
-    }
+    await db.agentTeamSteeringReceipts.update(receiptId, steeringReceiptPatch(status, at, reason))
+    const child = await db.agentTeamChildRuns.get(receipt.childRunId)
+    const childPatch = child ? steeringResolvedChildPatch(child, status, at) : undefined
+    if (child && childPatch) await db.agentTeamChildRuns.update(child.id, childPatch)
     return true
   })
 }
@@ -402,9 +341,7 @@ export async function listPendingAgentTeamSteering(
     .agentTeamSteeringReceipts.where("childRunId")
     .equals(childRunId)
     .toArray()
-  return rows
-    .filter((row) => row.status === "queued" || row.status === "delivered")
-    .sort((a, b) => a.createdAt - b.createdAt)
+  return pendingSteering(rows)
 }
 
 export async function listAgentTeamSteeringReceipts(
@@ -464,7 +401,7 @@ export async function getAgentTeamContent(
   hash: string
 ): Promise<AgentTeamContentObject | undefined> {
   const row = await getDb().agentTeamContentObjects.get(hash)
-  if (!row || row.byteLength !== row.data.byteLength || (await sha256(row.data)) !== hash)
+  if (!row || row.byteLength !== row.data.byteLength || (await contentHash(row.data)) !== hash)
     return undefined
   return row
 }
@@ -511,40 +448,10 @@ export async function aggregateAgentTeamRunUsage(
   const db = getDb()
   return db.transaction("rw", db.agentTeamChildRuns, db.agentTeamRuns, async () => {
     const children = await db.agentTeamChildRuns.where("runId").equals(runId).toArray()
-    const resourceUsage = children.reduce<NonNullable<AgentTeamRunRecord["resourceUsage"]>>(
-      (total, child) => ({
-        promptTokens: total.promptTokens + child.resourceUsage.promptTokens,
-        completionTokens: total.completionTokens + child.resourceUsage.completionTokens,
-        totalTokens: total.totalTokens + child.resourceUsage.totalTokens,
-        ...(total.costUsd !== undefined || child.resourceUsage.costUsd !== undefined
-          ? { costUsd: (total.costUsd ?? 0) + (child.resourceUsage.costUsd ?? 0) }
-          : {}),
-        wallTimeMs: Math.max(total.wallTimeMs, child.resourceUsage.wallTimeMs),
-        toolTimeMs: total.toolTimeMs + child.resourceUsage.toolTimeMs,
-        attempts: total.attempts + child.resourceUsage.attempts,
-        failures: total.failures + child.resourceUsage.failures,
-      }),
-      {
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        wallTimeMs: 0,
-        toolTimeMs: 0,
-        attempts: 0,
-        failures: 0,
-      }
-    )
+    const resourceUsage = sumChildUsage(children)
     await db.agentTeamRuns.update(runId, { resourceUsage, updatedAt })
     return resourceUsage
   })
-}
-
-async function sha256(data: Uint8Array): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error("Web Crypto is required for AgentTeam content")
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", data as BufferSource)
-  return `sha256:${Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")}`
 }
 
 export async function putAgentTeamContent(
@@ -554,24 +461,6 @@ export async function putAgentTeamContent(
 ): Promise<AgentTeamContentObject> {
   const row = await makeAgentTeamContent(content, mimeType, createdAt)
   await getDb().agentTeamContentObjects.put(row)
-  return row
-}
-
-async function makeAgentTeamContent(
-  content: string | Uint8Array,
-  mimeType: string,
-  createdAt: number
-): Promise<AgentTeamContentObject> {
-  const data =
-    typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
-  const hash = await sha256(data)
-  const row: AgentTeamContentObject = {
-    hash,
-    mimeType,
-    byteLength: data.byteLength,
-    data,
-    createdAt,
-  }
   return row
 }
 
@@ -683,4 +572,57 @@ export async function purgeAgentTeam(teamId: string): Promise<void> {
   await purgeManagedChildSessions(children)
   const cleanedSessionLinks = new Set(children.map((child) => child.sessionId))
   for (const runId of runIds) await purgeAgentTeamRunRows(runId, db, cleanedSessionLinks)
+}
+
+/**
+ * Every Dexie table a team run's store operations touch; an atomic block
+ * spans all of them so any combination of operations commits together.
+ */
+function teamRunTables() {
+  const db = getDb()
+  return [
+    db.agentTeamRuns,
+    db.agentTeamChildRuns,
+    db.agentTeamTrajectory,
+    db.agentTeamCheckpoints,
+    db.agentTeamSteeringReceipts,
+    db.agentTeamContentObjects,
+  ]
+}
+
+/**
+ * The app's {@link TeamRunStore} (ADR-0217). Operations called inside
+ * `atomically` join its Dexie transaction (Dexie scopes nested calls to the
+ * active transaction), so `tx` is the store itself. Content hashing awaits
+ * WebCrypto, which an IndexedDB transaction cannot stay open across, so an
+ * atomic block appends trajectory events without content.
+ */
+export const dexieTeamRunStore: TeamRunStore<AgentTeamExecutionConstraints> = {
+  atomically: (operation) =>
+    getDb().transaction("rw", teamRunTables(), () => operation(dexieTeamRunStore)),
+  createRun: createAgentTeamRun,
+  getRun: getAgentTeamRun,
+  updateRun: updateAgentTeamRun,
+  updateRunIfCurrent: updateAgentTeamRunIfCurrent,
+  listRuns: listAgentTeamRuns,
+  listRecoveryCandidates: listAgentTeamRecoveryCandidates,
+  createChild: createAgentTeamChildRun,
+  getChild: getAgentTeamChildRun,
+  listChildren: listAgentTeamChildRuns,
+  findLatestChild: findLatestAgentTeamChildRun,
+  updateChild: updateAgentTeamChildRun,
+  updateChildIfCurrent: updateAgentTeamChildRunIfCurrent,
+  claimDispatchLease: claimAgentTeamDispatchLease,
+  renewDispatchLease: renewAgentTeamDispatchLease,
+  settleDispatchLease: settleAgentTeamDispatchLease,
+  advanceRemoteEvent: advanceAgentTeamRemoteEvent,
+  appendTrajectory: appendAgentTeamTrajectory,
+  listTrajectory: listAgentTeamTrajectory,
+  markCheckpoint: markAgentTeamCheckpoint,
+  getLatestCheckpoint: getLatestAgentTeamCheckpoint,
+  createSteeringReceipt: createAgentTeamSteeringReceipt,
+  updateSteeringReceipt: updateAgentTeamSteeringReceipt,
+  listPendingSteering: listPendingAgentTeamSteering,
+  listSteeringReceipts: listAgentTeamSteeringReceipts,
+  getContent: getAgentTeamContent,
 }

@@ -164,6 +164,8 @@
       "@cognia/agent-dsh/*": ["./packages/agent-dsh/src/*"],
       "@cognia/agent-codex": ["./packages/agent-codex/src/index.ts"],
       "@cognia/agent-codex/*": ["./packages/agent-codex/src/*"],
+      "@cognia/agent-orchestration": ["./packages/agent-orchestration/src/index.ts"],
+      "@cognia/agent-orchestration/*": ["./packages/agent-orchestration/src/*"],
       "@cognia/agent-config-types": ["./packages/agent-config-types/src/index.ts"],
       "@cognia/agent-config-types/*": ["./packages/agent-config-types/src/*"],
       "@cognia/memory": ["./packages/memory/src/index.ts"],

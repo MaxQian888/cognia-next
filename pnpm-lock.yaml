@@ -1116,6 +1116,8 @@ importers:
 
   packages/agent-host-win32-x64: {}
 
+  packages/agent-orchestration: {}
+
   packages/agent-trace: {}
 
   packages/companion-client: {}

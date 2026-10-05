@@ -8,6 +8,8 @@ import { createDurableTeamCoordinator } from "./durable-runtime"
 import { beginDurableDispatch } from "./durable-dispatch"
 import { createDecisionLedger } from "../ledger/decision-ledger"
 import * as runtimeDb from "@/lib/db/agent-team-runtime"
+import { createMemoryTeamRunStore } from "@cognia/agent-orchestration/memory-store"
+import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
 
 jest.mock("@/lib/db/agent-team-runtime", () => ({
   __esModule: true,
@@ -68,6 +70,33 @@ describe("durable dispatch bridge", () => {
     }
     return { coordinator, input, dispatch: await beginDurableDispatch(input) }
   }
+
+  it("persists dispatch through the coordinator's injected run store", async () => {
+    const store = createMemoryTeamRunStore<AgentTeamExecutionConstraints>()
+    const coordinator = createDurableTeamCoordinator({ store })
+    await coordinator.prepareRun(team, "run-injected-store")
+    const input = {
+      coordinator,
+      team,
+      runId: "run-injected-store",
+      teammateId: "mate",
+      taskId: "task",
+      access: "read" as const,
+      repositoryId: "primary",
+    }
+    const dispatch = await beginDurableDispatch(input)
+
+    expect(await store.getChild(dispatch.childRunId)).toMatchObject({
+      status: "running",
+      attempt: 1,
+    })
+    expect((await store.listTrajectory(input.runId)).map((event) => event.kind)).toEqual(
+      expect.arrayContaining(["child_created", "model_turn_started"])
+    )
+    expect(await runtimeDb.getAgentTeamRun(input.runId)).toBeUndefined()
+    expect(await runtimeDb.listAgentTeamChildRuns(input.runId)).toEqual([])
+    await expect(beginDurableDispatch(input)).rejects.toThrow("already has an active dispatch")
+  })
 
   it("admits only one simultaneous begin for the same task and teammate", async () => {
     const coordinator = createDurableTeamCoordinator()
@@ -170,9 +199,9 @@ describe("durable dispatch bridge", () => {
     async (kind) => {
       const coordinator = createDurableTeamCoordinator()
       await coordinator.prepareRun(team, "run-init-failure")
-      const append = runtimeDb.appendAgentTeamTrajectory
+      const append = runtimeDb.dexieTeamRunStore.appendTrajectory
       jest
-        .spyOn(runtimeDb, "appendAgentTeamTrajectory")
+        .spyOn(runtimeDb.dexieTeamRunStore, "appendTrajectory")
         .mockImplementation(async (event, content) => {
           if (event.kind === kind) throw new Error("initial journal unavailable")
           return append(event, content)

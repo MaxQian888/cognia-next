@@ -124,12 +124,14 @@ describe("durable AgentTeam coordinator", () => {
     const coordinator = createDurableTeamCoordinator()
     await coordinator.prepareRun(team(), "run-admission")
     await register(coordinator, "child")
-    const list = runtimeDb.listAgentTeamRecoveryCandidates
-    jest.spyOn(runtimeDb, "listAgentTeamRecoveryCandidates").mockImplementationOnce(async () => {
-      const candidates = await list()
-      await runtimeDb.updateAgentTeamRun("run-admission", { status: "terminated" })
-      return candidates
-    })
+    const list = runtimeDb.dexieTeamRunStore.listRecoveryCandidates
+    jest
+      .spyOn(runtimeDb.dexieTeamRunStore, "listRecoveryCandidates")
+      .mockImplementationOnce(async () => {
+        const candidates = await list()
+        await runtimeDb.updateAgentTeamRun("run-admission", { status: "terminated" })
+        return candidates
+      })
     expect(await coordinator.recover()).toEqual([])
     expect((await runtimeDb.getAgentTeamRun("run-admission"))?.status).toBe("terminated")
     expect((await runtimeDb.getAgentTeamChildRun("child"))?.status).toBe("running")
@@ -146,8 +148,8 @@ describe("durable AgentTeam coordinator", () => {
       "run-admission"
     )
     await register(coordinator, "child")
-    const getRun = runtimeDb.getAgentTeamRun
-    jest.spyOn(runtimeDb, "getAgentTeamRun").mockImplementationOnce(async (id) => {
+    const getRun = runtimeDb.dexieTeamRunStore.getRun
+    jest.spyOn(runtimeDb.dexieTeamRunStore, "getRun").mockImplementationOnce(async (id) => {
       const run = await getRun(id)
       await runtimeDb.updateAgentTeamRun(id, { status: "terminated" })
       return run
@@ -164,8 +166,8 @@ describe("durable AgentTeam coordinator", () => {
     const coordinator = createDurableTeamCoordinator()
     await coordinator.prepareRun(team(), "run-admission")
     await runtimeDb.updateAgentTeamRun("run-admission", { status: "queued" })
-    const getRun = runtimeDb.getAgentTeamRun
-    jest.spyOn(runtimeDb, "getAgentTeamRun").mockImplementationOnce(async (id) => {
+    const getRun = runtimeDb.dexieTeamRunStore.getRun
+    jest.spyOn(runtimeDb.dexieTeamRunStore, "getRun").mockImplementationOnce(async (id) => {
       const run = await getRun(id)
       await runtimeDb.updateAgentTeamRun(id, { status: "cancelled" })
       return run

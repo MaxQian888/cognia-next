@@ -1,29 +1,14 @@
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
-import {
-  aggregateAgentTeamRunUsage,
-  appendAgentTeamTrajectory,
-  findLatestAgentTeamChildRun,
-  getAgentTeamRun,
-  getAgentTeamChildRun,
-  getAgentTeamContent,
-  getLatestAgentTeamCheckpoint,
-  listAgentTeamChildRuns,
-  listAgentTeamTrajectory,
-  listPendingAgentTeamSteering,
-  updateAgentTeamSteeringReceipt,
-  updateAgentTeamChildRun,
-  updateAgentTeamChildRunIfCurrent,
-  updateAgentTeamRunIfCurrent,
-} from "@/lib/db/agent-team-runtime"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
-import { getDb } from "@/lib/db/schema"
+import { ownsDispatchAttempt, planDispatchAttempt } from "@cognia/agent-orchestration/replay"
+import { recordRunUsage } from "@cognia/agent-orchestration/usage"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { AgentTeamSideEffect } from "@/types/agent/agent-team-runtime"
 import { createEvidenceBundle } from "../ledger/evidence-bundle"
 import { createDecisionLedger } from "../ledger/decision-ledger"
 import type { AgentExecutionEnvironment } from "../../execution/local-tauri-environment"
 import type { DurableChildControl, DurableTeamCoordinator } from "./durable-runtime"
-import { CHILD_ADMISSION_WAITING_REASON, isDurableChildReplaySafe } from "./durable-runtime"
+import { isDurableChildReplaySafe } from "./durable-runtime"
 import { tokenize } from "@/lib/terminal/completion/tokenize"
 
 export interface BeginDurableDispatchInput {
@@ -85,61 +70,34 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
   let attempt = 1
   let previousFailures = 0
   const startedAt = now()
+  const store = input.coordinator.store
   try {
-    const db = getDb()
-    await db.transaction(
-      "rw",
-      [db.agentTeamRuns, db.agentTeamChildRuns, db.agentTeamTrajectory, db.agentTeamContentObjects],
-      async () => {
-        const previous = await findLatestAgentTeamChildRun(
-          input.runId,
-          input.taskId,
-          input.teammateId
-        )
-        if (
-          previous &&
-          ["pausing", "paused", "sleeping", "needs_input"].includes(previous.status)
-        ) {
-          throw new DispatchControlConflictError(
-            `Child is not accepting dispatch while ${previous.status}`
-          )
-        }
-        if (
-          previous &&
-          (previous.status === "running" ||
-            (previous.status === "queued" &&
-              previous.waitingReason === CHILD_ADMISSION_WAITING_REASON))
-        ) {
-          throw new DispatchControlConflictError("Child already has an active dispatch")
-        }
-        const resumable =
-          previous && !["completed", "cancelled", "terminated"].includes(previous.status)
-            ? previous
-            : undefined
-        childRunId = resumable?.id ?? childRunId
-        retryTargetHostRef = resumable?.waitingReason?.startsWith("retry_host:")
-          ? resumable.waitingReason.slice("retry_host:".length)
-          : undefined
-        attempt = resumable ? resumable.attempt + 1 : 1
-        previousFailures = resumable?.resourceUsage.failures ?? 0
-        const run = await getAgentTeamRun(input.runId)
-        if (!run || !["running", "queued", "recovering"].includes(run.status)) {
-          throw new DispatchControlConflictError("Run is not accepting dispatch")
-        }
-        if (resumable) {
-          const resumed = await updateAgentTeamChildRunIfCurrent(childRunId, resumable, {
-            status: "running",
-            attempt,
-            decisionVersion: run?.decisionVersion ?? resumable.decisionVersion,
-            error: undefined,
-            waitingReason: undefined,
-            completedAt: undefined,
-            updatedAt: startedAt,
-          })
-          if (!resumed)
-            throw new DispatchControlConflictError("Child control changed before dispatch")
-        } else {
-          await input.coordinator.registerChild({
+    await store.atomically(async (tx) => {
+      const run = await tx.getRun(input.runId)
+      const plan = planDispatchAttempt(
+        await tx.findLatestChild(input.runId, input.taskId, input.teammateId),
+        run
+      )
+      if (plan.kind === "conflict") throw new DispatchControlConflictError(plan.reason)
+      attempt = plan.attempt
+      if (plan.kind === "resume") {
+        childRunId = plan.child.id
+        retryTargetHostRef = plan.retryTargetHostRef
+        previousFailures = plan.previousFailures
+        const resumed = await tx.updateChildIfCurrent(childRunId, plan.child, {
+          status: "running",
+          attempt,
+          decisionVersion: run?.decisionVersion ?? plan.child.decisionVersion,
+          error: undefined,
+          waitingReason: undefined,
+          completedAt: undefined,
+          updatedAt: startedAt,
+        })
+        if (!resumed)
+          throw new DispatchControlConflictError("Child control changed before dispatch")
+      } else {
+        await input.coordinator.registerChild(
+          {
             runId: input.runId,
             childRunId,
             teammateId: input.teammateId,
@@ -148,24 +106,25 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
             access: input.access,
             ...(input.fileOwnership ? { fileOwnership: input.fileOwnership } : {}),
             ...(input.runtime ? { runtime: input.runtime } : {}),
-          })
-        }
-        await appendAgentTeamTrajectory({
-          runId: input.runId,
-          childRunId,
-          kind: "model_turn_started",
-          correlationId: childRunId,
-          createdAt: startedAt,
-        })
+          },
+          tx
+        )
       }
-    )
+      await tx.appendTrajectory({
+        runId: input.runId,
+        childRunId,
+        kind: "model_turn_started",
+        correlationId: childRunId,
+        createdAt: startedAt,
+      })
+    })
   } catch (error) {
     if (error instanceof DispatchControlConflictError) throw error
     const parking = await Promise.allSettled([
       (async () => {
-        const child = await getAgentTeamChildRun(childRunId)
+        const child = await store.getChild(childRunId)
         if (child && ["running", "queued", "recovering"].includes(child.status)) {
-          await updateAgentTeamChildRunIfCurrent(childRunId, child, {
+          await store.updateChildIfCurrent(childRunId, child, {
             status: "needs_input",
             waitingReason: "recovery_required",
             error: "Dispatch initialization could not be persisted",
@@ -174,9 +133,9 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         }
       })(),
       (async () => {
-        const run = await getAgentTeamRun(input.runId)
+        const run = await store.getRun(input.runId)
         if (run && ["running", "queued", "recovering"].includes(run.status)) {
-          await updateAgentTeamRunIfCurrent(input.runId, run, {
+          await store.updateRunIfCurrent(input.runId, run, {
             status: "needs_input",
             recoveryReason: "dispatch_initialization_failed",
             updatedAt: now(),
@@ -226,17 +185,17 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
     if (persistenceAbort.signal.aborted) throw writeError
   }
   const parkRun = async (reason: string, at: number): Promise<void> => {
-    const run = await getAgentTeamRun(input.runId)
+    const run = await store.getRun(input.runId)
     if (!run || ["completed", "failed", "cancelled", "terminated"].includes(run.status)) return
-    await updateAgentTeamRunIfCurrent(input.runId, run, {
+    await store.updateRunIfCurrent(input.runId, run, {
       status: "needs_input",
       recoveryReason: reason,
       updatedAt: at,
     })
   }
   const ownedChild = async () => {
-    const child = await getAgentTeamChildRun(childRunId)
-    if (!child || child.attempt !== attempt) {
+    const child = await store.getChild(childRunId)
+    if (!ownsDispatchAttempt(child, attempt)) {
       const error = new Error("Dispatch no longer owns this child attempt")
       error.name = "AbortError"
       throw error
@@ -254,15 +213,15 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
   }
   const hasUnsafeRemoteHistory = async (): Promise<boolean> => {
     const [checkpoint, trajectory] = await Promise.all([
-      getLatestAgentTeamCheckpoint(childRunId),
-      listAgentTeamTrajectory(input.runId),
+      store.getLatestCheckpoint(childRunId),
+      store.listTrajectory(input.runId),
     ])
     if (
       !trajectory.some((event) => event.childRunId === childRunId && event.kind === "remote_event")
     ) {
       return false
     }
-    return !(await isDurableChildReplaySafe(childRunId, checkpoint, trajectory))
+    return !(await isDurableChildReplaySafe(childRunId, checkpoint, trajectory, store))
   }
 
   const capture = (event: CaptureStreamEvent): void => {
@@ -280,7 +239,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       enqueue(async () => {
         const safeInput = redactedJson(event.input)
         const large = safeInput.length > 8192
-        const trajectory = await appendAgentTeamTrajectory(
+        const trajectory = await store.appendTrajectory(
           {
             runId: input.runId,
             childRunId,
@@ -324,7 +283,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       enqueue(async () => {
         const safeResult = redactedJson({ input: event.input, result: event.result })
         const large = safeResult.length > 8192
-        const trajectory = await appendAgentTeamTrajectory(
+        const trajectory = await store.appendTrajectory(
           {
             runId: input.runId,
             childRunId,
@@ -380,7 +339,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
     sessionId?: string
   ): Promise<() => void> => {
     await ownedChild()
-    if (sessionId) await updateAgentTeamChildRun(childRunId, { sessionId, updatedAt: now() })
+    if (sessionId) await store.updateChild(childRunId, { sessionId, updatedAt: now() })
     providerControl = control
     refreshControl()
     return () => detachControl?.()
@@ -465,7 +424,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
     },
     async setWorkspace(input: { workspacePath: string; branch?: string }): Promise<void> {
       await ownedChild()
-      await updateAgentTeamChildRun(childRunId, {
+      await store.updateChild(childRunId, {
         workspacePath: input.workspacePath,
         ...(input.branch ? { branch: input.branch } : {}),
         updatedAt: now(),
@@ -476,11 +435,11 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       if (turnContextPrepared) return ""
       turnContextPrepared = true
       const [run, checkpoint, trajectory, pending, attempts] = await Promise.all([
-        getAgentTeamRun(input.runId),
-        getLatestAgentTeamCheckpoint(childRunId),
-        listAgentTeamTrajectory(input.runId),
-        listPendingAgentTeamSteering(childRunId),
-        listAgentTeamChildRuns(input.runId),
+        store.getRun(input.runId),
+        store.getLatestCheckpoint(childRunId),
+        store.listTrajectory(input.runId),
+        store.listPendingSteering(childRunId),
+        store.listChildren(input.runId),
       ])
       if (!run) throw new Error(`Unknown durable AgentTeam run: ${input.runId}`)
       const decisionContext = await createDecisionLedger({
@@ -488,7 +447,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         leadId: input.team.leadId,
         now,
       }).context()
-      await updateAgentTeamChildRun(childRunId, {
+      await store.updateChild(childRunId, {
         decisionVersion: run.decisionVersion,
         updatedAt: now(),
       })
@@ -502,7 +461,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
           .slice(-24)
           .map(async (event) => {
             const content = event.contentHash
-              ? await getAgentTeamContent(event.contentHash)
+              ? await store.getContent(event.contentHash)
               : undefined
             return {
               sequence: event.sequence,
@@ -534,15 +493,15 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       const redacted = redactText(raw).redacted
       if (!hasNoLeakingPii(redacted)) {
         for (const receipt of pending) {
-          await updateAgentTeamSteeringReceipt(receipt.id, "rejected", now(), "pii_gate")
+          await store.updateSteeringReceipt(receipt.id, "rejected", now(), "pii_gate")
         }
         throw new Error("Durable AgentTeam recovery context still contains PII after redaction")
       }
       pendingSteeringIds = pending.map((receipt) => receipt.id)
       for (const receipt of pending) {
         const deliveredAt = now()
-        await updateAgentTeamSteeringReceipt(receipt.id, "delivered", deliveredAt)
-        await appendAgentTeamTrajectory({
+        await store.updateSteeringReceipt(receipt.id, "delivered", deliveredAt)
+        await store.appendTrajectory({
           runId: input.runId,
           childRunId,
           kind: "steering_delivered",
@@ -579,7 +538,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       await flush()
       const waitingAt = now()
       try {
-        const changed = await updateAgentTeamChildRunIfCurrent(childRunId, await currentChild(), {
+        const changed = await store.updateChildIfCurrent(childRunId, await currentChild(), {
           status: "queued",
           waitingReason,
           ...(hostRef ? { hostRef } : {}),
@@ -603,7 +562,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
           (effect) =>
             effect.state !== "unknown" && !(effect.state === "intent" && effect.replay !== "safe")
         )
-      const event = await appendAgentTeamTrajectory({
+      const event = await store.appendTrajectory({
         runId: input.runId,
         childRunId,
         kind: "checkpoint",
@@ -644,7 +603,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         )
       ) {
         const reason = "Cannot complete dispatch with an unsettled tool result"
-        const parked = await updateAgentTeamChildRunIfCurrent(childRunId, child, {
+        const parked = await store.updateChildIfCurrent(childRunId, child, {
           status: "needs_input",
           waitingReason: "recovery_required",
           error: reason,
@@ -657,7 +616,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       if (!hasNoLeakingPii(safeText)) {
         throw new Error("Durable AgentTeam outcome still contains PII after redaction")
       }
-      const terminal = await appendAgentTeamTrajectory(
+      const terminal = await store.appendTrajectory(
         {
           runId: input.runId,
           childRunId,
@@ -705,7 +664,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       })
       if (!validation.complete) {
         const reason = `Evidence gate requires: ${validation.missing.join(", ")}`
-        await updateAgentTeamChildRunIfCurrent(childRunId, await currentChild(), {
+        await store.updateChildIfCurrent(childRunId, await currentChild(), {
           status: "needs_input",
           error: reason,
           updatedAt: completedAt,
@@ -713,7 +672,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         await parkRun("evidence_incomplete", completedAt)
         throw new Error(reason)
       }
-      const checkpointEvent = await appendAgentTeamTrajectory({
+      const checkpointEvent = await store.appendTrajectory({
         runId: input.runId,
         childRunId,
         kind: "checkpoint",
@@ -727,7 +686,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         sideEffects: [...sideEffects.values()],
         ...(result.commitSha ? { workspaceCommit: result.commitSha } : {}),
       })
-      const completed = await updateAgentTeamChildRunIfCurrent(childRunId, await currentChild(), {
+      const completed = await store.updateChildIfCurrent(childRunId, await currentChild(), {
         status: "completed",
         waitingReason: undefined,
         completedAt,
@@ -744,9 +703,9 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         },
       })
       if (!completed) throw new Error("Child control changed during completion")
-      await aggregateAgentTeamRunUsage(input.runId, completedAt)
+      await recordRunUsage(store, input.runId, completedAt)
       for (const receiptId of pendingSteeringIds) {
-        await updateAgentTeamSteeringReceipt(receiptId, "applied", completedAt)
+        await store.updateSteeringReceipt(receiptId, "applied", completedAt)
       }
       detachControl?.()
     },
@@ -754,7 +713,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
     async fail(error: unknown): Promise<void> {
       await writes
       try {
-        const current = await getAgentTeamChildRun(childRunId)
+        const current = await store.getChild(childRunId)
         if (
           !current ||
           current.attempt !== attempt ||
@@ -763,7 +722,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
           return
         const failedAt = now()
         const message = redactText(error instanceof Error ? error.message : String(error)).redacted
-        const event = await appendAgentTeamTrajectory({
+        const event = await store.appendTrajectory({
           runId: input.runId,
           childRunId,
           kind: "child_failed",
@@ -783,14 +742,14 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
           replay: needsInput ? "needs_input" : "safe",
           sideEffects: effects,
         })
-        const latest = await getAgentTeamChildRun(childRunId)
+        const latest = await store.getChild(childRunId)
         if (
           !latest ||
           latest.attempt !== attempt ||
           ["completed", "cancelled", "terminated", "paused", "needs_input"].includes(latest.status)
         )
           return
-        await updateAgentTeamChildRunIfCurrent(childRunId, latest, {
+        await store.updateChildIfCurrent(childRunId, latest, {
           status: needsInput ? "needs_input" : "failed",
           waitingReason: needsInput ? "recovery_required" : undefined,
           error: message,
@@ -809,7 +768,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
         if (needsInput) {
           await parkRun("uncertain_side_effect", failedAt)
         }
-        await aggregateAgentTeamRunUsage(input.runId, failedAt)
+        await recordRunUsage(store, input.runId, failedAt)
       } finally {
         detachControl?.()
         detachControl = undefined

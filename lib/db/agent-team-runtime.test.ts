@@ -31,7 +31,12 @@ import {
   updateAgentTeamChildRun,
   updateAgentTeamChildRunIfCurrent,
   updateAgentTeamRunIfCurrent,
+  dexieTeamRunStore,
 } from "./agent-team-runtime"
+import {
+  TEAM_RUN_STORE_CONTRACT,
+  type StoreContractAssert,
+} from "@cognia/agent-orchestration/store-contract"
 
 const mockAgentInvoke = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
@@ -683,4 +688,32 @@ describe("durable AgentTeam runtime persistence", () => {
     await purgeAgentTeam("team-delete")
     expect(await listAgentTeamRuns("team-delete")).toEqual([])
   })
+})
+
+describe("the Dexie TeamRunStore satisfies the orchestration store contract (ADR-0217)", () => {
+  let disableDbRuntime: (() => void) | undefined
+  const assert: StoreContractAssert = {
+    equal: (actual, expected) => expect(actual).toEqual(expected),
+    ok: (value, message) =>
+      expect({ value: Boolean(value), message }).toEqual({ value: true, message }),
+    rejects: async (promise, message) => {
+      await expect(promise).rejects.toThrow(message)
+    },
+  }
+
+  beforeEach(async () => {
+    disableDbRuntime = __enableDbRuntimeForTesting()
+    __resetDbForTesting()
+    await indexedDB.deleteDatabase(LEGACY_COGNIA_DB_NAME)
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    disableDbRuntime?.()
+  })
+
+  for (const contractCase of TEAM_RUN_STORE_CONTRACT) {
+    it(contractCase.name, () => contractCase.run(dexieTeamRunStore, assert))
+  }
 })

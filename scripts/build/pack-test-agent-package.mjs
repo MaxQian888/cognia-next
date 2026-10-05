@@ -211,6 +211,53 @@ const SPECS = {
       export { adapter, status, parsed, summary }
     `,
   },
+  "agent-orchestration": {
+    entries: [
+      ".",
+      "./records",
+      "./rules",
+      "./content",
+      "./replay",
+      "./usage",
+      "./store",
+      "./memory-store",
+      "./store-contract",
+      "./fair-scheduler",
+    ],
+    dataOnly: ["./records", "./store"],
+    runtimeModules: ["rules", "content", "replay", "usage", "memory-store", "fair-scheduler"],
+    smoke: `
+      import { createMemoryTeamRunStore } from "@cognia/agent-orchestration/memory-store"
+      import { TEAM_RUN_STORE_CONTRACT } from "@cognia/agent-orchestration/store-contract"
+      import { planDispatchAttempt } from "@cognia/agent-orchestration/replay"
+      import { recordRunUsage } from "@cognia/agent-orchestration/usage"
+      import strict from "node:assert/strict"
+      const assert = {
+        equal: (actual, expected) => strict.deepStrictEqual(actual, expected),
+        ok: (value, message) => strict.ok(value, message),
+        rejects: (promise, message) => strict.rejects(promise, message),
+      }
+      for (const contractCase of TEAM_RUN_STORE_CONTRACT) {
+        await contractCase.run(createMemoryTeamRunStore(), assert)
+      }
+      if (planDispatchAttempt(undefined, undefined).kind !== "conflict") throw new Error("plan")
+      const store = createMemoryTeamRunStore()
+      if ((await recordRunUsage(store, "missing", 1)).attempts !== 0) throw new Error("usage")
+    `,
+    types: `
+      import type { TeamRunStore } from "@cognia/agent-orchestration/store"
+      import type { AgentTeamRunRecord } from "@cognia/agent-orchestration/records"
+      import { createMemoryTeamRunStore } from "@cognia/agent-orchestration/memory-store"
+      import { planDispatchAttempt, type DispatchAttemptPlan } from "@cognia/agent-orchestration/replay"
+      interface Constraints { permissionMode: "plan" | "default" }
+      const store: TeamRunStore<Constraints> = createMemoryTeamRunStore<Constraints>()
+      declare const run: AgentTeamRunRecord<Constraints>
+      const mode: "plan" | "default" | undefined = run.executionConstraints?.permissionMode
+      const plan: DispatchAttemptPlan = planDispatchAttempt(undefined, run)
+      const committed: Promise<number> = store.atomically(async (tx) => (await tx.listRuns()).length)
+      export { store, mode, plan, committed }
+    `,
+  },
 }
 
 
