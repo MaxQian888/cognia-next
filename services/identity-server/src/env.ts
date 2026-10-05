@@ -1,6 +1,10 @@
+import type { SyncAdminBinding } from "./deletion/purge"
+
 /** Bindings, vars and secrets of the identity Worker (see wrangler.toml). */
 export interface Env {
   DB: D1Database
+  /** The sync Worker's `SyncAdmin` entrypoint; deletes a person's sync space on purge. Optional. */
+  SYNC_ADMIN?: SyncAdminBinding
   SERVICE_ENV: string
   /** Origin of this Worker, e.g. https://id.cognia.cn. The issuer is `${BASE_URL}/api/auth`. */
   BASE_URL: string

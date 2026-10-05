@@ -15,15 +15,31 @@ import { dueDeletions, markPurged } from "./store"
 /**
  * Work that must happen before an identity disappears, keyed to data other
  * services hold for that person.
- *
- * INTENTIONALLY EMPTY in phase 1: the encrypted sync space (ADR-0215 phase 3)
- * is the first data to purge with the account, and it registers its hook
- * then. Until it exists there is nothing outside this database to delete,
- * which `purge.test.ts` pins by asserting the default registry is empty.
  */
 export type AccountPurgeHook = (userId: string) => Promise<void>
 
-export const DEFAULT_PURGE_HOOKS: readonly AccountPurgeHook[] = []
+/** The sync Worker's purge entrypoint (`SyncAdmin` in services/sync-server), over a service binding. */
+export interface SyncAdminBinding {
+  purgeSpace(userId: string): Promise<{ spaceId: string }>
+}
+
+/**
+ * The hooks of this deployment. The encrypted sync space (ADR-0215 phase 2)
+ * is deleted through `SYNC_ADMIN` when that binding exists.
+ *
+ * DORMANT without the binding: a deployment whose sync Worker is not live
+ * (production until `cognia-sync` ships, local dev, self-host without sync)
+ * has no space to delete and runs no hook. `purge.test.ts` pins both cases.
+ */
+export function purgeHooksFor(env: { SYNC_ADMIN?: SyncAdminBinding }): AccountPurgeHook[] {
+  const syncAdmin = env.SYNC_ADMIN
+  if (!syncAdmin) return []
+  return [
+    async (userId) => {
+      await syncAdmin.purgeSpace(userId)
+    },
+  ]
+}
 
 export interface PurgeDeps {
   db: D1Database
@@ -42,7 +58,7 @@ const OAUTH_TABLES = ["oauthAccessToken", "oauthRefreshToken", "oauthConsent"] a
 
 export async function purgeDueDeletions(deps: PurgeDeps): Promise<PurgeReport> {
   const now = deps.now?.() ?? new Date()
-  const hooks = deps.hooks ?? DEFAULT_PURGE_HOOKS
+  const hooks = deps.hooks ?? []
   const report: PurgeReport = { purged: [], failed: [] }
   for (const userId of await dueDeletions(deps.db, now, deps.batchSize ?? 25)) {
     try {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { call, signInAndGetTokens, SYNC_AUDIENCE, testEnv } from "../../test/helpers"
 import { runScheduled } from "../index"
-import { DEFAULT_PURGE_HOOKS, purgeDueDeletions } from "./purge"
+import { purgeDueDeletions, purgeHooksFor } from "./purge"
 import { getDeletion, requestDeletion } from "./store"
 
 async function rowCount(table: string, userId: string): Promise<number> {
@@ -14,8 +14,20 @@ async function rowCount(table: string, userId: string): Promise<number> {
 }
 
 describe("purgeDueDeletions", () => {
-  it("has no purge hooks until the sync space exists (phase 3)", () => {
-    expect(DEFAULT_PURGE_HOOKS).toEqual([])
+  it("has no purge hooks where no sync Worker is bound", () => {
+    expect(purgeHooksFor({})).toEqual([])
+  })
+
+  it("deletes the sync space through SYNC_ADMIN when it is bound", async () => {
+    const purgeSpace = vi.fn(async (userId: string) => ({ spaceId: `space-of-${userId}` }))
+    const hooks = purgeHooksFor({ SYNC_ADMIN: { purgeSpace } })
+    expect(hooks).toHaveLength(1)
+    await hooks[0]!("usr_abc")
+    expect(purgeSpace).toHaveBeenCalledWith("usr_abc")
+    const failing = purgeHooksFor({
+      SYNC_ADMIN: { purgeSpace: async () => Promise.reject(new Error("down")) },
+    })
+    await expect(failing[0]!("usr_abc")).rejects.toThrow("down")
   })
 
   it("runs hooks, then removes tokens, consents, sessions, accounts and the user", async () => {

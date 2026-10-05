@@ -17,7 +17,7 @@ import { createAuth, type Auth } from "./auth"
 import { ConfigError, readConfig, type IdentityConfig } from "./config"
 import { ACCOUNT_DELETION_PATH, isCorsPath, preflightResponse, withCors } from "./cors"
 import { handleDeletionRequest } from "./deletion/routes"
-import { purgeDueDeletions } from "./deletion/purge"
+import { purgeDueDeletions, purgeHooksFor } from "./deletion/purge"
 import type { Env } from "./env"
 import { reconcileWebClient } from "./first-party-clients"
 import { consentPage } from "./pages/consent"
@@ -122,6 +122,7 @@ export async function runScheduled(env: Env, now: Date = new Date()) {
   const report = await purgeDueDeletions({
     db: env.DB,
     deleteUser: (userId) => context.internalAdapter.deleteUser(userId),
+    hooks: purgeHooksFor(env),
     now: () => now,
   })
   if (report.purged.length || report.failed.length) {
