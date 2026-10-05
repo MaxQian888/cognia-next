@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import { getDb } from "@/lib/db/schema"
-import { createDecisionLedger } from "@/lib/ai/agent/team/ledger/decision-ledger"
+import { createDecisionLedger } from "@cognia/agent-orchestration/decision-ledger"
 import { getDurableTeamCoordinator } from "@/lib/ai/agent/team/durable/durable-runtime"
 import { approveAndMergeGithubStack } from "@/lib/ai/agent/team/delivery/github-delivery-adapter"
 import { createLocalTauriExecutionEnvironment } from "@/lib/ai/agent/execution/local-tauri-environment"
@@ -200,10 +200,11 @@ export function DurableOperations({
                     onClick={() =>
                       void invoke(
                         () =>
-                          createDecisionLedger({ runId: data.run.id, leadId: team.leadId! }).accept(
-                            decision.id,
-                            team.leadId!
-                          ),
+                          createDecisionLedger({
+                            store: getDurableTeamCoordinator().store,
+                            runId: data.run.id,
+                            leadId: team.leadId!,
+                          }).accept(decision.id, team.leadId!),
                         t("decisions.accepted")
                       )
                     }
@@ -216,10 +217,11 @@ export function DurableOperations({
                     onClick={() =>
                       void invoke(
                         () =>
-                          createDecisionLedger({ runId: data.run.id, leadId: team.leadId! }).reject(
-                            decision.id,
-                            team.leadId!
-                          ),
+                          createDecisionLedger({
+                            store: getDurableTeamCoordinator().store,
+                            runId: data.run.id,
+                            leadId: team.leadId!,
+                          }).reject(decision.id, team.leadId!),
                         t("decisions.rejected")
                       )
                     }

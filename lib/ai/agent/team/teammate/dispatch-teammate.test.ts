@@ -265,7 +265,7 @@ jest.mock("@/lib/fleet/managed-session-projection", () => ({
 }))
 
 const decisionContextMock = jest.fn(async () => "")
-jest.mock("../ledger/decision-ledger", () => ({
+jest.mock("@cognia/agent-orchestration/decision-ledger", () => ({
   createDecisionLedger: () => ({ context: decisionContextMock }),
 }))
 

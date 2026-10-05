@@ -588,8 +588,15 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
     proposeDecision: async (input) => {
       const team = useAgentTeamStore.getState().teams[input.teamId]
       if (!team) throw new Error(`Unknown Squad: ${input.teamId}`)
-      const { createDecisionLedger } = await import("@/lib/ai/agent/team/ledger/decision-ledger")
-      return createDecisionLedger({ runId: input.runId, leadId: team.leadId }).propose(input)
+      const [{ createDecisionLedger }, { getDurableTeamCoordinator }] = await Promise.all([
+        import("@cognia/agent-orchestration/decision-ledger"),
+        import("@/lib/ai/agent/team/durable/durable-runtime"),
+      ])
+      return createDecisionLedger({
+        store: getDurableTeamCoordinator().store,
+        runId: input.runId,
+        leadId: team.leadId,
+      }).propose(input)
     },
     searchTwinKnowledge: async (input) => {
       const state = useAgentTeamStore.getState()

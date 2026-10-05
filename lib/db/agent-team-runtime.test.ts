@@ -32,6 +32,7 @@ import {
   updateAgentTeamChildRunIfCurrent,
   updateAgentTeamRunIfCurrent,
   dexieTeamRunStore,
+  getAgentTeamContent,
 } from "./agent-team-runtime"
 import {
   TEAM_RUN_STORE_CONTRACT,
@@ -340,6 +341,28 @@ describe("durable AgentTeam runtime persistence", () => {
     expect(await getDb().agentTeamContentObjects.get(event.contentHash!)).toMatchObject({
       byteLength: 6,
     })
+  })
+
+  it("does not return content that disappeared or no longer matches its digest", async () => {
+    const outcome = await putAgentTeamEvidenceContent(
+      {
+        id: "e-outcome",
+        runId: "run",
+        taskId: "task",
+        kind: "outcome",
+        title: "done",
+        createdAt: 1,
+      },
+      "result"
+    )
+    const hash = outcome.contentHash!
+    expect(await getAgentTeamContent(hash)).toMatchObject({ byteLength: 6 })
+    await getDb().agentTeamContentObjects.update(hash, {
+      data: new TextEncoder().encode("forged"),
+    })
+    expect(await getAgentTeamContent(hash)).toBeUndefined()
+    await getDb().agentTeamContentObjects.delete(hash)
+    expect(await getAgentTeamContent(hash)).toBeUndefined()
   })
 
   it("recovers only runs interrupted during active execution", async () => {

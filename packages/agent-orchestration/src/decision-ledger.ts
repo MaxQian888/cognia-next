@@ -1,13 +1,16 @@
-import {
-  appendAgentTeamTrajectory,
-  getAgentTeamRun,
-  listAgentTeamDecisions,
-  putAgentTeamDecision,
-} from "@/lib/db/agent-team-runtime"
-import { getDb } from "@/lib/db/schema"
-import type { AgentTeamDecision } from "@/types/agent/agent-team-runtime"
+/**
+ * The decision ledger of a durable team run (ADR-0217): user constraints,
+ * evidence-backed proposals with conflict classification, and lead-only
+ * acceptance that advances the run's decision version in the same atomic
+ * unit. Teammates read accepted decisions through `context()`.
+ */
 
-export interface DecisionLedgerOptions {
+import type { AgentTeamDecision } from "./records"
+import { sortDecisions } from "./rules"
+import type { TeamRunStore } from "./store"
+
+export interface DecisionLedgerOptions<TConstraints = unknown> {
+  store: TeamRunStore<TConstraints>
   runId: string
   leadId: string
   now?: () => number
@@ -17,11 +20,12 @@ function id(): string {
   return `team-decision-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
 }
 
-export function createDecisionLedger(options: DecisionLedgerOptions) {
+export function createDecisionLedger<TConstraints>(options: DecisionLedgerOptions<TConstraints>) {
+  const { store } = options
   const now = options.now ?? Date.now
 
   const requireRun = async () => {
-    const run = await getAgentTeamRun(options.runId)
+    const run = await store.getRun(options.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${options.runId}`)
     return run
   }
@@ -43,7 +47,7 @@ export function createDecisionLedger(options: DecisionLedgerOptions) {
       immutable: true,
       createdAt: now(),
     }
-    await putAgentTeamDecision(decision)
+    await store.putDecision(decision)
     return decision
   }
 
@@ -59,7 +63,7 @@ export function createDecisionLedger(options: DecisionLedgerOptions) {
     if (input.evidenceIds.length === 0) {
       throw new Error("Decision proposals require durable evidence")
     }
-    const evidence = await getDb().agentTeamEvidence.bulkGet(input.evidenceIds)
+    const evidence = await store.getEvidence(input.evidenceIds)
     if (
       evidence.some((item) => !item || item.runId !== options.runId) ||
       new Set(input.evidenceIds).size !== input.evidenceIds.length
@@ -81,7 +85,7 @@ export function createDecisionLedger(options: DecisionLedgerOptions) {
       immutable: false,
       createdAt: at,
     }
-    const accepted = (await listAgentTeamDecisions(options.runId)).filter(
+    const accepted = (await store.listDecisions(options.runId)).filter(
       (item) => item.status === "constraint" || item.status === "accepted"
     )
     const classifications = accepted.map((item) => ({
@@ -103,8 +107,8 @@ export function createDecisionLedger(options: DecisionLedgerOptions) {
           },
         }
       : baseDecision
-    await putAgentTeamDecision(decision)
-    await appendAgentTeamTrajectory({
+    await store.putDecision(decision)
+    await store.appendTrajectory({
       runId: options.runId,
       kind: "decision_proposed",
       correlationId: decision.id,
@@ -125,36 +129,30 @@ export function createDecisionLedger(options: DecisionLedgerOptions) {
   ): Promise<AgentTeamDecision> => {
     if (actorId !== options.leadId)
       throw new Error("Only the team lead may accept or reject decisions")
-    const db = getDb()
     const at = now()
-    const resolved = await db.transaction(
-      "rw",
-      db.agentTeamRuns,
-      db.agentTeamDecisions,
-      async () => {
-        const run = await db.agentTeamRuns.get(options.runId)
-        if (!run) throw new Error(`Unknown durable AgentTeam run: ${options.runId}`)
-        const proposal = await db.agentTeamDecisions.get(decisionId)
-        if (!proposal || proposal.runId !== options.runId || proposal.status !== "proposed") {
-          throw new Error("Decision proposal is not pending for this run")
-        }
-        const version = status === "accepted" ? run.decisionVersion + 1 : proposal.version
-        const next: AgentTeamDecision = {
-          ...proposal,
-          status,
-          version,
-          immutable: true,
-          resolvedAt: at,
-        }
-        await db.agentTeamDecisions.put(next)
-        if (status === "accepted") {
-          await db.agentTeamRuns.update(run.id, { decisionVersion: version, updatedAt: at })
-        }
-        return next
+    const resolved = await store.atomically(async (tx) => {
+      const run = await tx.getRun(options.runId)
+      if (!run) throw new Error(`Unknown durable AgentTeam run: ${options.runId}`)
+      const proposal = await tx.getDecision(decisionId)
+      if (!proposal || proposal.runId !== options.runId || proposal.status !== "proposed") {
+        throw new Error("Decision proposal is not pending for this run")
       }
-    )
+      const version = status === "accepted" ? run.decisionVersion + 1 : proposal.version
+      const next: AgentTeamDecision = {
+        ...proposal,
+        status,
+        version,
+        immutable: true,
+        resolvedAt: at,
+      }
+      await tx.putDecision(next)
+      if (status === "accepted") {
+        await tx.updateRun(run.id, { decisionVersion: version, updatedAt: at })
+      }
+      return next
+    })
     if (status === "accepted") {
-      await appendAgentTeamTrajectory({
+      await store.appendTrajectory({
         runId: options.runId,
         kind: "decision_accepted",
         correlationId: resolved.id,
@@ -166,11 +164,10 @@ export function createDecisionLedger(options: DecisionLedgerOptions) {
   }
 
   const context = async (): Promise<string> => {
-    const decisions = (await listAgentTeamDecisions(options.runId)).filter(
+    const decisions = (await store.listDecisions(options.runId)).filter(
       (decision) => decision.status === "constraint" || decision.status === "accepted"
     )
-    decisions.sort((a, b) => a.version - b.version || a.createdAt - b.createdAt)
-    return decisions
+    return sortDecisions(decisions)
       .map(
         (decision) =>
           `[${decision.status === "constraint" ? "USER CONSTRAINT" : `DECISION v${decision.version}`}] ${decision.title}\n${decision.detail}`

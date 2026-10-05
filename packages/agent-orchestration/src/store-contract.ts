@@ -7,7 +7,13 @@
  * drift apart.
  */
 
-import type { AgentTeamChildRun, AgentTeamRunRecord, AgentTeamSteeringReceipt } from "./records"
+import type {
+  AgentTeamChildRun,
+  AgentTeamDecision,
+  AgentTeamEvidence,
+  AgentTeamRunRecord,
+  AgentTeamSteeringReceipt,
+} from "./records"
 import type { TeamRunStore } from "./store"
 
 export interface StoreContractAssert {
@@ -67,6 +73,37 @@ export function contractChild(overrides: Partial<AgentTeamChildRun> = {}): Agent
     },
     createdAt: 1,
     updatedAt: 1,
+    ...overrides,
+  }
+}
+
+function evidence(overrides: Partial<AgentTeamEvidence> = {}): AgentTeamEvidence {
+  return {
+    id: "evidence-1",
+    runId: "run-1",
+    childRunId: "child-1",
+    taskId: "task-1",
+    attempt: 1,
+    kind: "test",
+    title: "unit tests",
+    status: "passed",
+    createdAt: 10,
+    ...overrides,
+  }
+}
+
+function decision(overrides: Partial<AgentTeamDecision> = {}): AgentTeamDecision {
+  return {
+    id: "decision-1",
+    runId: "run-1",
+    version: 1,
+    status: "proposed",
+    title: "Use the port",
+    detail: "Reach run state through the store",
+    authorId: "mate-1",
+    evidenceIds: [],
+    immutable: false,
+    createdAt: 10,
     ...overrides,
   }
 }
@@ -367,6 +404,89 @@ export const TEAM_RUN_STORE_CONTRACT: readonly StoreContractCase[] = [
         })
       await Promise.all([bump(), bump(), bump()])
       assert.equal((await store.getRun("run-1"))?.decisionVersion, 3)
+    },
+  },
+  {
+    name: "stores evidence with its content, lists it by scope oldest first",
+    async run(store, assert) {
+      const stored = await store.putEvidence(evidence({ createdAt: 20 }), {
+        data: "PASS 12 tests",
+        mimeType: "text/plain",
+      })
+      assert.ok(stored.contentHash, "stored evidence references its content")
+      const content = await store.getContent(stored.contentHash!)
+      assert.equal(new TextDecoder().decode(content?.data), "PASS 12 tests")
+      await store.putEvidence(evidence({ id: "evidence-0", kind: "activity", createdAt: 15 }))
+      await store.putEvidence(evidence({ id: "evidence-2", attempt: 2, createdAt: 30 }))
+      await store.putEvidence(evidence({ id: "evidence-other-task", taskId: "task-2" }))
+      await store.putEvidence(evidence({ id: "evidence-other-run", runId: "run-2" }))
+      const ids = (rows: AgentTeamEvidence[]) => rows.map((row) => row.id)
+      assert.equal(ids(await store.listEvidence("run-1", { taskId: "task-1" })), [
+        "evidence-0",
+        "evidence-1",
+        "evidence-2",
+      ])
+      assert.equal(ids(await store.listEvidence("run-1", { childRunId: "child-1", attempt: 2 })), [
+        "evidence-2",
+      ])
+      assert.equal(ids(await store.listEvidence("run-1")), [
+        "evidence-other-task",
+        "evidence-0",
+        "evidence-1",
+        "evidence-2",
+      ])
+      assert.equal(
+        (await store.getEvidence(["evidence-2", "missing"])).map((row) => row?.id),
+        ["evidence-2", undefined]
+      )
+    },
+  },
+  {
+    name: "keeps decisions in version order and refuses a mutable user constraint",
+    async run(store, assert) {
+      await store.putDecision(decision({ id: "d-2", version: 2, createdAt: 5 }))
+      await store.putDecision(
+        decision({ id: "d-c", version: 0, status: "constraint", immutable: true })
+      )
+      await store.putDecision(decision({ id: "d-1b", version: 1, createdAt: 9 }))
+      await store.putDecision(decision({ id: "d-1a", version: 1, createdAt: 3 }))
+      await store.putDecision(decision({ id: "d-elsewhere", runId: "run-2" }))
+      assert.equal(
+        (await store.listDecisions("run-1")).map((row) => row.id),
+        ["d-c", "d-1a", "d-1b", "d-2"]
+      )
+      await store.putDecision(decision({ id: "d-2", version: 2, status: "accepted" }))
+      assert.equal((await store.getDecision("d-2"))?.status, "accepted")
+      await assert.rejects(
+        store.putDecision(decision({ id: "d-bad", status: "constraint", immutable: false })),
+        /immutable/
+      )
+      assert.equal(await store.getDecision("d-bad"), undefined)
+    },
+  },
+  {
+    name: "an atomic block spans decisions and evidence with the run",
+    async run(store, assert) {
+      await store.createRun(contractRun())
+      await store.putEvidence(evidence())
+      await assert.rejects(
+        store.atomically(async (tx) => {
+          assert.equal((await tx.getEvidence(["evidence-1"]))[0]?.id, "evidence-1")
+          await tx.putDecision(decision({ status: "accepted", immutable: true }))
+          await tx.updateRun("run-1", { decisionVersion: 1, updatedAt: 2 })
+          throw new Error("abort the acceptance")
+        }),
+        /abort the acceptance/
+      )
+      assert.equal(await store.getDecision("decision-1"), undefined)
+      assert.equal((await store.getRun("run-1"))?.decisionVersion, 0)
+      await store.atomically(async (tx) => {
+        await tx.putDecision(decision({ status: "accepted", immutable: true }))
+        await tx.updateRun("run-1", { decisionVersion: 1, updatedAt: 3 })
+        assert.equal((await tx.listDecisions("run-1")).length, 1)
+      })
+      assert.equal((await store.getDecision("decision-1"))?.status, "accepted")
+      assert.equal((await store.getRun("run-1"))?.decisionVersion, 1)
     },
   },
 ]

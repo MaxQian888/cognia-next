@@ -13,6 +13,8 @@ import type {
   AgentTeamCheckpoint,
   AgentTeamChildRun,
   AgentTeamContentObject,
+  AgentTeamDecision,
+  AgentTeamEvidence,
   AgentTeamRunRecord,
   AgentTeamSteeringReceipt,
   AgentTeamSteeringStatus,
@@ -22,6 +24,7 @@ import type {
   AppendTrajectoryInput,
   ClaimDispatchLeaseInput,
   ControlState,
+  EvidenceScope,
   MarkCheckpointInput,
 } from "./rules"
 
@@ -30,7 +33,7 @@ export type RunPatch<TConstraints = unknown> = Partial<
 >
 export type ChildPatch = Partial<Omit<AgentTeamChildRun, "id" | "runId" | "teamId" | "createdAt">>
 
-/** Bytes to store content-addressed alongside a trajectory event. */
+/** Bytes stored content-addressed alongside a trajectory event or evidence. */
 export interface TrajectoryContent {
   data: string | Uint8Array
   mimeType: string
@@ -42,7 +45,10 @@ export interface TeamRunStore<TConstraints = unknown> {
    * Run `operation` as one atomic unit through `tx`: every call it makes on
    * `tx` commits together or not at all, and no other writer interleaves with
    * it. Calls on the store itself (rather than `tx`) from inside the operation
-   * are outside the unit; implementations may make them wait for it.
+   * are outside the unit; implementations may make them wait for it. Hashing
+   * content is asynchronous work outside the database, so a unit should not
+   * carry content-bearing writes (some databases cannot hold a transaction
+   * open across it).
    */
   atomically<T>(operation: (tx: TeamRunStore<TConstraints>) => Promise<T>): Promise<T>
 
@@ -116,5 +122,22 @@ export interface TeamRunStore<TConstraints = unknown> {
   listPendingSteering(childRunId: string): Promise<AgentTeamSteeringReceipt[]>
   listSteeringReceipts(runId: string): Promise<AgentTeamSteeringReceipt[]>
 
+  /**
+   * Store evidence, committing its content (when given) and the reference to
+   * it together; the stored row carries the content hash.
+   */
+  putEvidence(evidence: AgentTeamEvidence, content?: TrajectoryContent): Promise<AgentTeamEvidence>
+  /** One entry per id, `undefined` where none exists. */
+  getEvidence(ids: readonly string[]): Promise<(AgentTeamEvidence | undefined)[]>
+  /** The run's evidence within `scope`, oldest first. */
+  listEvidence(runId: string, scope?: EvidenceScope): Promise<AgentTeamEvidence[]>
+
+  /** Insert or replace a decision; refuses a mutable user constraint. */
+  putDecision(decision: AgentTeamDecision): Promise<void>
+  getDecision(id: string): Promise<AgentTeamDecision | undefined>
+  /** In version order (`sortDecisions`). */
+  listDecisions(runId: string): Promise<AgentTeamDecision[]>
+
+  /** The content object, or `undefined` when missing or failing its hash. */
   getContent(hash: string): Promise<AgentTeamContentObject | undefined>
 }

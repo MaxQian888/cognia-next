@@ -11,6 +11,8 @@
 import type {
   AgentTeamChildRun,
   AgentTeamCheckpoint,
+  AgentTeamDecision,
+  AgentTeamEvidence,
   AgentTeamRunRecord,
   AgentTeamRunStatus,
   AgentTeamSteeringReceipt,
@@ -220,4 +222,36 @@ export function pendingSteering(
   return receipts
     .filter((row) => row.status === "queued" || row.status === "delivered")
     .sort((a, b) => a.createdAt - b.createdAt)
+}
+
+/** A user constraint is immutable from the moment it is recorded. */
+export function assertDecisionBoundary(decision: AgentTeamDecision): void {
+  if (decision.status === "constraint" && !decision.immutable) {
+    throw new Error("User constraints must be immutable")
+  }
+}
+
+/** Decisions in version order, ties by creation time. */
+export function sortDecisions(decisions: readonly AgentTeamDecision[]): AgentTeamDecision[] {
+  return [...decisions].sort((a, b) => a.version - b.version || a.createdAt - b.createdAt)
+}
+
+/** Narrows an evidence listing; every given field must match. */
+export interface EvidenceScope {
+  childRunId?: string
+  taskId?: string
+  attempt?: number
+}
+
+export function evidenceInScope(
+  item: AgentTeamEvidence,
+  runId: string,
+  scope: EvidenceScope = {}
+): boolean {
+  return (
+    item.runId === runId &&
+    (scope.childRunId === undefined || item.childRunId === scope.childRunId) &&
+    (scope.taskId === undefined || item.taskId === scope.taskId) &&
+    (scope.attempt === undefined || item.attempt === scope.attempt)
+  )
 }

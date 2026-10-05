@@ -21,8 +21,8 @@ import type {
 } from "@/types/agent/agent-team-runtime"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { createFairTeamScheduler } from "@cognia/agent-orchestration/fair-scheduler"
-import { createDecisionLedger } from "../ledger/decision-ledger"
-import { createEvidenceBundle } from "../ledger/evidence-bundle"
+import { createDecisionLedger } from "@cognia/agent-orchestration/decision-ledger"
+import { createEvidenceBundle } from "@cognia/agent-orchestration/evidence"
 import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 import { isPathWithinRoot, normalizeFsPath } from "@/lib/files/permissions"
@@ -282,7 +282,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         startedAt: at,
         updatedAt: at,
       })
-      const ledger = createDecisionLedger({ runId, leadId: team.leadId, now })
+      const ledger = createDecisionLedger({ store, runId, leadId: team.leadId, now })
       for (const constraint of team.config.userConstraints ?? []) {
         await ledger.addUserConstraint(constraint)
       }
@@ -863,6 +863,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const child = await store.getChild(input.childRunId)
     if (!child) throw new Error(`Unknown durable child: ${input.childRunId}`)
     const bundle = createEvidenceBundle({
+      store,
       runId: child.runId,
       childRunId: child.id,
       taskId: child.taskId,

@@ -6,7 +6,7 @@ import type { ProjectEnvironmentVersion } from "@/types/project-environment"
 import { createLocalTauriExecutionEnvironment } from "../../execution/local-tauri-environment"
 import { createDurableTeamCoordinator } from "./durable-runtime"
 import { beginDurableDispatch } from "./durable-dispatch"
-import { createDecisionLedger } from "../ledger/decision-ledger"
+import { createDecisionLedger } from "@cognia/agent-orchestration/decision-ledger"
 import * as runtimeDb from "@/lib/db/agent-team-runtime"
 import { createMemoryTeamRunStore } from "@cognia/agent-orchestration/memory-store"
 import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
@@ -703,7 +703,12 @@ describe("durable dispatch bridge", () => {
       repositoryId: "primary",
       now: () => 39,
     })
-    const ledger = createDecisionLedger({ runId: "run-decisions", leadId: "lead", now: () => 40 })
+    const ledger = createDecisionLedger({
+      store: runtimeDb.dexieTeamRunStore,
+      runId: "run-decisions",
+      leadId: "lead",
+      now: () => 40,
+    })
     await getDb().agentTeamEvidence.put({
       id: "evidence-1",
       runId: "run-decisions",

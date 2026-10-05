@@ -31,3 +31,15 @@ export async function createContentObject(
     createdAt,
   }
 }
+
+/**
+ * `object` when its bytes still match `hash` and its recorded length;
+ * `undefined` for a missing, truncated or corrupted object.
+ */
+export async function verifiedContent(
+  object: AgentTeamContentObject | undefined,
+  hash: string
+): Promise<AgentTeamContentObject | undefined> {
+  if (!object || object.byteLength !== object.data.byteLength) return undefined
+  return (await contentHash(object.data)) === hash ? object : undefined
+}

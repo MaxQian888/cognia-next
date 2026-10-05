@@ -4,8 +4,8 @@ import { ownsDispatchAttempt, planDispatchAttempt } from "@cognia/agent-orchestr
 import { recordRunUsage } from "@cognia/agent-orchestration/usage"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { AgentTeamSideEffect } from "@/types/agent/agent-team-runtime"
-import { createEvidenceBundle } from "../ledger/evidence-bundle"
-import { createDecisionLedger } from "../ledger/decision-ledger"
+import { createEvidenceBundle } from "@cognia/agent-orchestration/evidence"
+import { createDecisionLedger } from "@cognia/agent-orchestration/decision-ledger"
 import type { AgentExecutionEnvironment } from "../../execution/local-tauri-environment"
 import type { DurableChildControl, DurableTeamCoordinator } from "./durable-runtime"
 import { isDurableChildReplaySafe } from "./durable-runtime"
@@ -346,6 +346,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
   }
 
   const evidence = createEvidenceBundle({
+    store,
     runId: input.runId,
     childRunId,
     taskId: input.taskId,
@@ -443,6 +444,7 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       ])
       if (!run) throw new Error(`Unknown durable AgentTeam run: ${input.runId}`)
       const decisionContext = await createDecisionLedger({
+        store,
         runId: input.runId,
         leadId: input.team.leadId,
         now,

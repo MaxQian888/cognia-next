@@ -222,10 +222,21 @@ const SPECS = {
       "./store",
       "./memory-store",
       "./store-contract",
+      "./decision-ledger",
+      "./evidence",
       "./fair-scheduler",
     ],
     dataOnly: ["./records", "./store"],
-    runtimeModules: ["rules", "content", "replay", "usage", "memory-store", "fair-scheduler"],
+    runtimeModules: [
+      "rules",
+      "content",
+      "replay",
+      "usage",
+      "memory-store",
+      "decision-ledger",
+      "evidence",
+      "fair-scheduler",
+    ],
     smoke: `
       import { createMemoryTeamRunStore } from "@cognia/agent-orchestration/memory-store"
       import { TEAM_RUN_STORE_CONTRACT } from "@cognia/agent-orchestration/store-contract"
@@ -243,6 +254,16 @@ const SPECS = {
       if (planDispatchAttempt(undefined, undefined).kind !== "conflict") throw new Error("plan")
       const store = createMemoryTeamRunStore()
       if ((await recordRunUsage(store, "missing", 1)).attempts !== 0) throw new Error("usage")
+      import { createDecisionLedger } from "@cognia/agent-orchestration/decision-ledger"
+      import { createEvidenceBundle } from "@cognia/agent-orchestration/evidence"
+      await store.createRun({ id: "r", teamId: "t", objective: "o", status: "running", priority: 0, decisionVersion: 0, createdAt: 1, updatedAt: 1 })
+      const ledger = createDecisionLedger({ store, runId: "r", leadId: "lead" })
+      await ledger.addUserConstraint({ title: "API", detail: "keep it" })
+      if (!(await ledger.context()).includes("USER CONSTRAINT")) throw new Error("decision ledger")
+      const bundle = createEvidenceBundle({ store, runId: "r", taskId: "task" })
+      await bundle.record({ kind: "activity", title: "ran", content: "log" })
+      const verdict = await bundle.validate({ taskKind: "general", visualSupported: false })
+      if (verdict.missing.join() !== "outcome") throw new Error("evidence")
     `,
     types: `
       import type { TeamRunStore } from "@cognia/agent-orchestration/store"

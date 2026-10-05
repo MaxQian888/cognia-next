@@ -14,26 +14,30 @@ import type {
   AgentTeamTrajectoryEvent,
 } from "@/types/agent/agent-team-runtime"
 import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
-import { contentHash, createContentObject } from "@cognia/agent-orchestration/content"
+import { createContentObject, verifiedContent } from "@cognia/agent-orchestration/content"
 import {
   assertChildBoundary,
+  assertDecisionBoundary,
   assertRunBoundary,
   canAdvanceRemoteEvent,
   checkpointChildPatch,
   dispatchLeaseClaimPatch,
   dispatchLeaseRenewPatch,
   dispatchLeaseSettlePatch,
+  evidenceInScope,
   latestChildFor,
   matchesControlState,
   nextTrajectoryEvent,
   pendingSteering,
   selectRecoveryCandidates,
+  sortDecisions,
   steeringQueuedChildPatch,
   steeringReceiptPatch,
   steeringResolvedChildPatch,
   trajectoryChildPatch,
   type AppendTrajectoryInput,
   type ClaimDispatchLeaseInput,
+  type EvidenceScope,
   type MarkCheckpointInput,
 } from "@cognia/agent-orchestration/rules"
 import type { TeamRunStore } from "@cognia/agent-orchestration/store"
@@ -289,17 +293,21 @@ export async function getLatestAgentTeamCheckpoint(
 }
 
 export async function putAgentTeamDecision(decision: AgentTeamDecision): Promise<void> {
-  if (decision.status === "constraint" && !decision.immutable) {
-    throw new Error("User constraints must be immutable")
-  }
+  assertDecisionBoundary(decision)
   await getDb().agentTeamDecisions.put(decision)
 }
 
+export async function getAgentTeamDecision(id: string): Promise<AgentTeamDecision | undefined> {
+  return getDb().agentTeamDecisions.get(id)
+}
+
 export async function listAgentTeamDecisions(runId: string): Promise<AgentTeamDecision[]> {
-  return getDb()
-    .agentTeamDecisions.where("[runId+version]")
-    .between([runId, -Infinity], [runId, Infinity])
-    .toArray()
+  return sortDecisions(
+    await getDb()
+      .agentTeamDecisions.where("[runId+version]")
+      .between([runId, -Infinity], [runId, Infinity])
+      .toArray()
+  )
 }
 
 export async function createAgentTeamSteeringReceipt(
@@ -376,7 +384,7 @@ export async function putAgentTeamEvidenceContent(
 
 export async function listAgentTeamEvidence(
   runId: string,
-  scope: { childRunId?: string; taskId?: string; attempt?: number } = {}
+  scope: EvidenceScope = {}
 ): Promise<AgentTeamEvidence[]> {
   const table = getDb().agentTeamEvidence
   // Reuse existing indexes so child completion does not scan an entire team's
@@ -387,23 +395,20 @@ export async function listAgentTeamEvidence(
       : scope.taskId !== undefined
         ? table.where("taskId").equals(scope.taskId)
         : table.where("[runId+createdAt]").between([runId, -Infinity], [runId, Infinity])
-  return rows
-    .filter(
-      (item) =>
-        item.runId === runId &&
-        (scope.taskId === undefined || item.taskId === scope.taskId) &&
-        (scope.attempt === undefined || item.attempt === scope.attempt)
-    )
-    .sortBy("createdAt")
+  return rows.filter((item) => evidenceInScope(item, runId, scope)).sortBy("createdAt")
+}
+
+/** One entry per id, `undefined` where none exists. */
+export async function getAgentTeamEvidence(
+  ids: readonly string[]
+): Promise<(AgentTeamEvidence | undefined)[]> {
+  return getDb().agentTeamEvidence.bulkGet([...ids])
 }
 
 export async function getAgentTeamContent(
   hash: string
 ): Promise<AgentTeamContentObject | undefined> {
-  const row = await getDb().agentTeamContentObjects.get(hash)
-  if (!row || row.byteLength !== row.data.byteLength || (await contentHash(row.data)) !== hash)
-    return undefined
-  return row
+  return verifiedContent(await getDb().agentTeamContentObjects.get(hash), hash)
 }
 
 export async function putAgentTeamDeliveryGraph(graph: AgentTeamDeliveryGraph): Promise<void> {
@@ -586,6 +591,8 @@ function teamRunTables() {
     db.agentTeamTrajectory,
     db.agentTeamCheckpoints,
     db.agentTeamSteeringReceipts,
+    db.agentTeamEvidence,
+    db.agentTeamDecisions,
     db.agentTeamContentObjects,
   ]
 }
@@ -624,5 +631,12 @@ export const dexieTeamRunStore: TeamRunStore<AgentTeamExecutionConstraints> = {
   updateSteeringReceipt: updateAgentTeamSteeringReceipt,
   listPendingSteering: listPendingAgentTeamSteering,
   listSteeringReceipts: listAgentTeamSteeringReceipts,
+  putEvidence: (evidence, content) =>
+    putAgentTeamEvidenceContent(evidence, content?.data, content?.mimeType),
+  getEvidence: getAgentTeamEvidence,
+  listEvidence: listAgentTeamEvidence,
+  putDecision: putAgentTeamDecision,
+  getDecision: getAgentTeamDecision,
+  listDecisions: listAgentTeamDecisions,
   getContent: getAgentTeamContent,
 }

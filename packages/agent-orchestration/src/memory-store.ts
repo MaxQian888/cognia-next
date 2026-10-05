@@ -8,28 +8,33 @@
  * snapshot that is restored if the block throws.
  */
 
-import { createContentObject } from "./content"
+import { createContentObject, verifiedContent } from "./content"
 import type {
   AgentTeamCheckpoint,
   AgentTeamChildRun,
   AgentTeamContentObject,
+  AgentTeamDecision,
+  AgentTeamEvidence,
   AgentTeamRunRecord,
   AgentTeamSteeringReceipt,
   AgentTeamTrajectoryEvent,
 } from "./records"
 import {
   assertChildBoundary,
+  assertDecisionBoundary,
   assertRunBoundary,
   canAdvanceRemoteEvent,
   checkpointChildPatch,
   dispatchLeaseClaimPatch,
   dispatchLeaseRenewPatch,
   dispatchLeaseSettlePatch,
+  evidenceInScope,
   latestChildFor,
   matchesControlState,
   nextTrajectoryEvent,
   pendingSteering,
   selectRecoveryCandidates,
+  sortDecisions,
   steeringQueuedChildPatch,
   steeringReceiptPatch,
   steeringResolvedChildPatch,
@@ -43,6 +48,8 @@ interface State<TConstraints> {
   trajectory: Map<string, AgentTeamTrajectoryEvent[]>
   checkpoints: Map<string, AgentTeamCheckpoint[]>
   steering: Map<string, AgentTeamSteeringReceipt>
+  evidence: Map<string, AgentTeamEvidence>
+  decisions: Map<string, AgentTeamDecision>
   content: Map<string, AgentTeamContentObject>
 }
 
@@ -58,6 +65,8 @@ function emptyState<TConstraints>(): State<TConstraints> {
     trajectory: new Map(),
     checkpoints: new Map(),
     steering: new Map(),
+    evidence: new Map(),
+    decisions: new Map(),
     content: new Map(),
   }
 }
@@ -69,6 +78,8 @@ function snapshot<TConstraints>(state: State<TConstraints>): State<TConstraints>
     trajectory: new Map([...state.trajectory].map(([k, v]) => [k, [...v]])),
     checkpoints: new Map([...state.checkpoints].map(([k, v]) => [k, [...v]])),
     steering: new Map([...state.steering].map(([k, v]) => [k, { ...v }])),
+    evidence: new Map([...state.evidence].map(([k, v]) => [k, { ...v }])),
+    decisions: new Map([...state.decisions].map(([k, v]) => [k, { ...v }])),
     content: new Map(state.content),
   }
 }
@@ -279,8 +290,46 @@ export function createMemoryTeamRunStore<TConstraints = unknown>(
         .map((row) => ({ ...row }))
     },
 
+    async putEvidence(evidence, content) {
+      const object = content
+        ? await createContentObject(content.data, content.mimeType, evidence.createdAt)
+        : undefined
+      const row = { ...evidence, ...(object ? { contentHash: object.hash } : {}) }
+      if (object) state.content.set(object.hash, object)
+      state.evidence.set(row.id, row)
+      return { ...row }
+    },
+    async getEvidence(ids) {
+      return ids.map((id) => {
+        const row = state.evidence.get(id)
+        return row ? { ...row } : undefined
+      })
+    },
+    async listEvidence(runId, scope) {
+      return [...state.evidence.values()]
+        .filter((row) => evidenceInScope(row, runId, scope))
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((row) => ({ ...row }))
+    },
+
+    async putDecision(decision) {
+      assertDecisionBoundary(decision)
+      state.decisions.set(decision.id, { ...decision })
+    },
+    async getDecision(id) {
+      const row = state.decisions.get(id)
+      return row ? { ...row } : undefined
+    },
+    async listDecisions(runId) {
+      return sortDecisions([...state.decisions.values()].filter((row) => row.runId === runId)).map(
+        (row) => ({ ...row })
+      )
+    },
+
     async getContent(hash) {
-      return state.content.get(hash)
+      const object = await verifiedContent(state.content.get(hash), hash)
+      // Callers get their own bytes; the stored object stays as written.
+      return object ? { ...object, data: new Uint8Array(object.data) } : undefined
     },
   }
 

@@ -1,4 +1,4 @@
-import { createContentObject } from "./content"
+import { createContentObject, verifiedContent } from "./content"
 
 describe("createContentObject", () => {
   it("addresses content by its SHA-256 and keeps the bytes", async () => {
@@ -10,5 +10,19 @@ describe("createContentObject", () => {
     expect(await createContentObject(new TextEncoder().encode("abc"), "x", 1)).toMatchObject({
       hash: object.hash,
     })
+  })
+})
+
+describe("verifiedContent", () => {
+  it("returns an intact object and refuses missing, truncated or corrupted bytes", async () => {
+    const object = await createContentObject("result", "text/plain", 1)
+    expect(await verifiedContent(object, object.hash)).toBe(object)
+    expect(await verifiedContent(undefined, object.hash)).toBeUndefined()
+    expect(
+      await verifiedContent({ ...object, data: object.data.slice(0, 3) }, object.hash)
+    ).toBeUndefined()
+    expect(
+      await verifiedContent({ ...object, data: new TextEncoder().encode("forged") }, object.hash)
+    ).toBeUndefined()
   })
 })
