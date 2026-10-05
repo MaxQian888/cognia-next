@@ -11,6 +11,9 @@ import { usePathname } from "next/navigation"
  */
 const LIGHTWEIGHT_ROUTE_PREFIXES = [
   "/status",
+  // Web sign-in returns in a fresh popup. It only validates OAuth state and
+  // posts to its opener; account boot, unlock and onboarding must not hold it.
+  "/logto/callback",
   "/pet-overlay",
   "/pet-popup",
   "/island",

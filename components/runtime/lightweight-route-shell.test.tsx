@@ -21,6 +21,20 @@ describe("isLightweightRoute", () => {
     expect(isLightweightRoute("/selection-toolbar")).toBe(true)
   })
 
+  it.each(["/logto/callback", "/logto/callback/", "/logto/callback.html"])(
+    "keeps the web sign-in callback %s outside account boot",
+    (pathname) => {
+      expect(isLightweightRoute(pathname)).toBe(true)
+    }
+  )
+
+  it.each(["/logto", "/logto/callback-settings", "/settings/account", "/invite"])(
+    "keeps %s behind the ordinary runtime gates",
+    (pathname) => {
+      expect(isLightweightRoute(pathname)).toBe(false)
+    }
+  )
+
   it("keeps the tray panel out of the authenticated application runtime", () => {
     expect(isLightweightRoute("/tray-panel")).toBe(true)
   })
@@ -67,6 +81,24 @@ describe("LightweightRouteShell", () => {
 
     expect(screen.getByTestId("lightweight")).toBeInTheDocument()
     expect(screen.queryByTestId("runtime")).toBeNull()
+  })
+
+  it("mounts the callback without starting account initialization or mounting a lock gate", () => {
+    mockPathname = "/logto/callback"
+    const startAccountRuntime = jest.fn()
+    function AccountRuntime() {
+      startAccountRuntime()
+      return <div>Account locked</div>
+    }
+    render(
+      <LightweightRouteShell lightweightShell={<div>Sign-in callback</div>}>
+        <AccountRuntime />
+      </LightweightRouteShell>
+    )
+
+    expect(screen.getByText("Sign-in callback")).toBeInTheDocument()
+    expect(startAccountRuntime).not.toHaveBeenCalled()
+    expect(screen.queryByText("Account locked")).not.toBeInTheDocument()
   })
 
   it("preserves the full runtime tree for ordinary routes", () => {

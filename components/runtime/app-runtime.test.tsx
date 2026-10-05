@@ -11,17 +11,13 @@ jest.mock("@/components/account/cloud-sign-in-gate", () => ({
 jest.mock("@/components/providers/onboarding-gate", () => ({
   OnboardingGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
-let mockLightweight = false
+let mockPathname = "/"
 let mockAccount = "open"
 let mockRecovery = false
-jest.mock("./lightweight-route-shell", () => ({
-  LightweightRouteShell: ({
-    children,
-    lightweightShell,
-  }: {
-    children: React.ReactNode
-    lightweightShell: React.ReactNode
-  }) => <>{mockLightweight ? lightweightShell : children}</>,
+jest.mock("next/navigation", () => ({
+  usePathname: () => mockPathname,
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), prefetch: jest.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }))
 jest.mock("@/components/providers/initializers/window-liveness-initializers", () => ({
   WindowLivenessInitializers: () => <span data-testid="window-liveness" />,
@@ -93,7 +89,7 @@ const renderRuntime = () =>
 
 describe("AppRuntime boot boundaries", () => {
   afterEach(() => {
-    mockLightweight = false
+    mockPathname = "/"
     mockAccount = "open"
     mockRecovery = false
   })
@@ -122,7 +118,7 @@ describe("AppRuntime boot boundaries", () => {
   })
 
   it("lets lightweight routes render without account gating or app initializers", () => {
-    mockLightweight = true
+    mockPathname = "/status"
     mockAccount = "locked"
     const markup = renderRuntime()
     expect(markup).toContain("<main>page content</main>")
@@ -131,6 +127,21 @@ describe("AppRuntime boot boundaries", () => {
     expect(markup).not.toContain('data-testid="plugin-runtime"')
     expectNoPluginHosts(markup)
   })
+
+  it.each(["open", "locked"])(
+    "renders the web callback outside account and recovery gates with account state %s",
+    (account) => {
+      mockPathname = "/logto/callback"
+      mockAccount = account
+      mockRecovery = true
+      const markup = renderRuntime()
+      expect(markup).toContain("<main>page content</main>")
+      expect(markup).not.toContain('data-testid="account-locked"')
+      expect(markup).not.toContain('data-testid="recovery"')
+      expect(markup).not.toContain('data-testid="plugin-runtime"')
+      expectNoPluginHosts(markup)
+    }
+  )
 
   it("renders the anonymous shared page without the authenticated runtime", () => {
     mockAccount = "guest"
