@@ -27,7 +27,6 @@ import { randomUUID } from "node:crypto"
 
 import { extractHttpErrorMeta } from "../../providers/http-error-meta.ts"
 
-import type { HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk"
 export interface LedgerStamp {
   runId: string
   mode: "per_call" | "envelope"
@@ -510,54 +509,6 @@ export async function drainSideCallStream(
     }
   }
   return { value: text, usage, providerRequestId, ...(error ? { error } : {}) }
-}
-
-/**
- * Envelope mode (the Claude Agent SDK loops internally, so calls cannot be
- * reserved one by one): before every tool use the renderer checks that the run
- * may still continue — not frozen, under its call limit, before its deadline,
- * with budget left. A refusal denies the tool and stops the query, so the SDK
- * makes no further model calls on this run.
- *
- * @param {{ gate: ReturnType<typeof createCallLedgerGate>, onRefused: (refusal: { code: string, message?: string }) => void }} options
- */
-export function buildLedgerToolHooks({
-  gate,
-  onRefused,
-}: {
-  gate: CallLedgerGate
-  onRefused(refusal: CallRefusal): void
-}): { PreToolUse: HookCallbackMatcher[] } | undefined {
-  if (!gate.active) return undefined
-  let checks = 0
-  return {
-    PreToolUse: [
-      {
-        hooks: [
-          async (input) => {
-            if (!gate.active) return {}
-            checks += 1
-            const outcome = await gate.reserve({
-              kind: "envelope_check",
-              logicalStepId: `tool:${checks}`,
-              ...("tool_name" in input && typeof input.tool_name === "string"
-                ? { toolName: input.tool_name }
-                : {}),
-            })
-            if (outcome.decision !== "refused") return {}
-            onRefused(outcome)
-            return {
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: `Router + Fusion stopped this run: ${outcome.code}`,
-              },
-            }
-          },
-        ],
-      },
-    ],
-  }
 }
 
 /** The sidecar's `session_ended` payload for a refused turn: explicit, never silent. */

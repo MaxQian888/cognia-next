@@ -4,8 +4,16 @@ import type {
   OpenAiCompatibleVariantSpec,
 } from "./protocol-adapters.ts"
 import type { ConversationMessage } from "./conversation.ts"
-import type { Options } from "@anthropic-ai/claude-agent-sdk"
-import type { ClaudeAgentSdkOptionsV1 } from "@cognia/agent-config-types/claude-agent-sdk-options"
+import type {
+  AgentEffortLevel,
+  AgentPermissionMode,
+  AgentSettingSource,
+} from "@cognia/agent-config-types/agent-modes"
+import type {
+  AgentDefinition,
+  ClaudeAgentSdkOptionsV1,
+  McpServerWireConfig,
+} from "@cognia/agent-config-types/claude-agent-sdk-options"
 
 /** Host-visible fields; rail-owned options remain additive on the wire. */
 export interface SendOptions {
@@ -13,11 +21,11 @@ export interface SendOptions {
   cwd?: string
   provider?: string
   model?: string
-  permissionMode?: Options["permissionMode"]
+  permissionMode?: AgentPermissionMode
   toolSurface?: string
   systemPrompt?: unknown
   appendSystemPrompt?: unknown
-  agents?: Options["agents"]
+  agents?: Record<string, AgentDefinition>
   pluginTools?: readonly {
     name: string
     description?: string
@@ -64,7 +72,7 @@ export interface SendOptions {
   backgroundProcessHost?: string
   codeGraph?: { watch?: boolean }
   lsp?: Record<string, unknown>
-  mcpServers?: Options["mcpServers"]
+  mcpServers?: Record<string, McpServerWireConfig>
   mcpDeclaredBy?: Record<string, string>
   env?: Record<string, string | undefined>
   appendHeaders?: Record<string, string>
@@ -109,11 +117,11 @@ export interface SendOptions {
   alwaysLoadServers?: string[]
   alwaysLoadTools?: string[]
   includePartialMessages?: boolean
-  settingSources?: Options["settingSources"]
+  settingSources?: AgentSettingSource[]
   agent?: string
   forwardSubagentText?: boolean
   strictMcpConfig?: boolean
-  effort?: Options["effort"]
+  effort?: AgentEffortLevel
   bypassPermissionsConfirmed?: boolean
   agentKind?: string
   agentRef?: string

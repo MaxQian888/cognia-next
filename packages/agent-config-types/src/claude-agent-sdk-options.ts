@@ -24,6 +24,8 @@
 //      from trusted managed host config, never from a renderer payload. They
 //      are deliberately absent from this type — absence is the enforcement.
 
+import type { AgentEffortLevel } from "./agent-modes"
+
 /** `plugins` entry. Paths are canonicalised and root-checked host-side. */
 export interface ClaudeAgentSdkPluginRef {
   type: "local"
@@ -712,7 +714,7 @@ export interface AgentDefinition {
    * Reasoning effort dial. The SDK also accepts a raw integer here; the named
    * levels are what every Cognia surface offers, so the union stays named.
    */
-  effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  effort?: AgentEffortLevel
   /**
    * Display colour for this agent's rows and badges, so parallel runs are
    * telling apart at a glance (Claude Code and OpenCode `color:` parity). A

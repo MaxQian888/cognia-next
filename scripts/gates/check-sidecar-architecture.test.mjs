@@ -13,6 +13,7 @@ import {
   loadInput,
   moduleReferences,
   resolveRelative,
+  referencesPackage,
   vendorChains,
 } from "./check-sidecar-architecture.mjs"
 
@@ -266,6 +267,35 @@ test("vendor isolation: a static import anywhere in an entry's closure is a find
   )
 })
 
+test("vendor isolation: allowedIn confines every reference, type-only included", () => {
+  const vendorIsolation = [
+    {
+      package: "vendor-sdk",
+      entries: ["sidecar/src/runtimes/rail/engine.ts"],
+      allowedIn: ["sidecar/src/runtimes/vendor/"],
+      why: "fixture",
+    },
+  ]
+  const { findings } = run(
+    {
+      "sidecar/src/runtimes/rail/engine.ts": "export const engine = 1\n",
+      "sidecar/src/runtimes/vendor/run.ts":
+        'import { go } from "vendor-sdk"\nexport const run = go\n',
+      "sidecar/src/shared/wire/inbound.ts": [
+        'import type { Options } from "vendor-sdk/types"',
+        "export type Mode = Options['mode']",
+        "",
+      ].join("\n"),
+      "sidecar/src/tools/kernel/lazy.ts": 'export const load = () => import("vendor-sdk")\n',
+    },
+    { overrides: { vendorIsolation } }
+  )
+  assert.deepEqual(findings, [
+    "vendor: sidecar/src/shared/wire/inbound.ts references vendor-sdk outside its allowed modules",
+    "vendor: sidecar/src/tools/kernel/lazy.ts references vendor-sdk outside its allowed modules",
+  ])
+})
+
 test("vendorChains reports one chain per importing module, subpaths included", () => {
   const sources = new Map([
     ["a.ts", 'import "./b.ts"\nimport "./c.ts"\n'],
@@ -276,6 +306,13 @@ test("vendorChains reports one chain per importing module, subpaths included", (
     vendorChains("a.ts", "pkg", sources, (file) => sources.has(file)),
     ["a.ts -> b.ts -> pkg/sub", "a.ts -> c.ts -> pkg"]
   )
+})
+
+test("referencesPackage sees static, type-only and dynamic references to a package or subpath", () => {
+  assert.equal(referencesPackage("a.ts", 'import type { X } from "pkg/types"\n', "pkg"), true)
+  assert.equal(referencesPackage("a.ts", 'const m = await import("pkg")\n', "pkg"), true)
+  assert.equal(referencesPackage("a.ts", 'export { y } from "pkg"\n', "pkg"), true)
+  assert.equal(referencesPackage("a.ts", 'import { z } from "pkg-other"\n// pkg\n', "pkg"), false)
 })
 
 test("helpers: classification, resolution, references", () => {

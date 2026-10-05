@@ -35,7 +35,10 @@
  *      entry never reaches the listed package. Type-only imports are erased
  *      and dynamic imports load on demand, so neither counts; a static value
  *      import anywhere in the closure does. This is what keeps the host and
- *      the AI SDK engine runnable without the Claude Agent SDK.
+ *      the AI SDK engine runnable without the Claude Agent SDK. A rule with
+ *      `allowedIn` also confines every reference to the package, type-only
+ *      included, to those path prefixes, so the wire and the shared runtime
+ *      modules type-check without it too.
  *
  * Findings are ratcheted against `sidecar-architecture-baseline.json`, the
  * violations the legacy tree had when the gate landed: a new finding fails, and
@@ -362,6 +365,16 @@ export function analyze({ sidecarFiles, externalFiles, exists, config }) {
         findings.add(`vendor: ${entry} reaches ${rule.package} at runtime: ${chain}`)
       }
     }
+    if (!rule.allowedIn) continue
+    for (const [file, source] of sidecarFiles) {
+      const where = classify(file, config)
+      if (where.kind === "nested" || where.kind === "generated" || where.kind === "outside")
+        continue
+      if (rule.allowedIn.some((prefix) => file.startsWith(prefix))) continue
+      if (referencesPackage(file, source, rule.package)) {
+        findings.add(`vendor: ${file} references ${rule.package} outside its allowed modules`)
+      }
+    }
   }
 
   const publicSet = new Set(config.public)
@@ -380,6 +393,16 @@ export function analyze({ sidecarFiles, externalFiles, exists, config }) {
   }
 
   return { findings: [...findings].sort(), hard }
+}
+
+/**
+ * Whether one file references `pkg` (or a subpath) in any form: static,
+ * type-only or dynamic. Pure.
+ */
+export function referencesPackage(file, source, pkg) {
+  return moduleReferences(file, source).some(
+    (ref) => ref.specifier === pkg || ref.specifier.startsWith(`${pkg}/`)
+  )
 }
 
 /**

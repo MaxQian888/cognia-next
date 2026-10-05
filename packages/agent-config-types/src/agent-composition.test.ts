@@ -21,7 +21,7 @@ import {
   widensAuthority,
 } from "./agent-composition"
 import type { AgentCompositionSelectionV1, ResolvedAgentCompositionV1 } from "./agent-composition"
-import { AGENT_PERMISSION_MODES } from "./index"
+import { AGENT_PERMISSION_MODES } from "./agent-modes"
 
 const DIGEST_A = `sha256:${"a".repeat(64)}`
 const DIGEST_B = `sha256:${"b".repeat(64)}`

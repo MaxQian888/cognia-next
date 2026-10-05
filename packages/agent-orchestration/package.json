@@ -2,7 +2,7 @@
   "name": "@cognia/agent-orchestration",
   "version": "0.0.0",
   "private": true,
-  "description": "Cognia multi-agent orchestration core (ADR-0217): durable Agent Team run records, the TeamRunStore port with a reference in-memory store and its conformance contract, replay-safety and attempt-fencing rules, fair scheduling and the teammate executor port. No host code.",
+  "description": "Cognia multi-agent orchestration core (ADR-0217): durable Agent Team run records, the TeamRunStore port with a reference in-memory store and its conformance contract, the durable coordinator (admission, fair scheduling, leases, steering, pause and recovery) behind run-journal, redaction, path-policy, remote-session and child-control ports, the decision and evidence ledgers, and replay-safety and attempt-fencing rules. No host code.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/index.cjs",

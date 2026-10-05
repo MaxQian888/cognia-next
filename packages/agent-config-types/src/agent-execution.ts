@@ -1,8 +1,6 @@
 import type { ResolvedAgentExecutionSpec as AgentSdkResolvedExecutionSpec } from "@cognia/agent"
 import type { AgentOrchestrationPolicy, ToolPresentationMode } from "./agent-composition"
-// `AgentPermissionMode` lives in `./index` — `agent-composition` imports it from
-// there too, and never re-exported it.
-import type { AgentPermissionMode } from "./index"
+import type { AgentPermissionMode } from "./agent-modes"
 import {
   AGENT_CAPABILITY_IDS,
   isAgentCapabilityId,

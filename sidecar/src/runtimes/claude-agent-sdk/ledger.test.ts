@@ -8,7 +8,8 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { dispatchAnthropic } from "./index.ts"
-import { buildLedgerToolHooks, createCallLedgerGate } from "../common/call-ledger-gate.ts"
+import { createCallLedgerGate } from "../common/call-ledger-gate.ts"
+import { buildLedgerToolHooks } from "./ledger.ts"
 
 const ENVELOPE = {
   runId: "run-1",

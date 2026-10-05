@@ -138,7 +138,14 @@
         "sidecar/src/tools/plugin/proxy.ts",
         "sidecar/src/tools/a2ui/tools.ts"
       ],
-      "why": "the host, the AI SDK engine and the engine-neutral tools run without the Claude Agent SDK; it loads only with the claude-agent-sdk engine (src/runtimes/engines.ts)"
+      "allowedIn": [
+        "sidecar/src/runtimes/claude-agent-sdk/",
+        "sidecar/src/tools/adapters/sdk-mcp",
+        "sidecar/src/hooks/events.",
+        "sidecar/src/hooks/native-executor.",
+        "sidecar/test-support/claude-runtime.ts"
+      ],
+      "why": "the host, the AI SDK engine and the engine-neutral tools run without the Claude Agent SDK; it loads only with the claude-agent-sdk engine (src/runtimes/engines.ts), and only the Claude engine, its MCP adapters and the native hook executor it drives reference it at all"
     }
   ]
 }

@@ -24,7 +24,7 @@
 //     mechanism of its own.
 
 import type { ValidationResult } from "./agent-execution"
-import type { AgentPermissionMode } from "./index"
+import type { AgentPermissionMode } from "./agent-modes"
 
 /** Wire-format version of {@link ResolvedAgentCompositionV1}. */
 export const AGENT_COMPOSITION_SCHEMA_VERSION = 1
@@ -57,9 +57,9 @@ export const AGENT_AUTHORITIES: readonly AgentAuthority[] = [
  * a compile error here rather than a silently unranked value that
  * {@link narrowAuthority} would treat as maximally privileged.
  *
- * Mirrors the order of `AGENT_PERMISSION_MODES` in `./index`; duplicated as a
- * rank map instead of imported because a value import would drag the whole
- * ~750-importer barrel into the sidecar and CLI, which only need this leaf.
+ * Mirrors the order of `AGENT_PERMISSION_MODES` in `./agent-modes` (a test pins
+ * the two together); written out as a total record so that a new mode fails to
+ * compile here instead of being ranked by position.
  */
 export const AUTHORITY_RANK: Record<AgentPermissionMode, number> = {
   plan: 0,

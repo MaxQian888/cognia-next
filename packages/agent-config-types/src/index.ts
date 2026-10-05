@@ -46,6 +46,7 @@ import type {
   McpServerWireConfig,
 } from "./claude-agent-sdk-options"
 import type { OnboardingProfile, OnboardingProgress } from "./onboarding"
+import type { AgentEffortLevel, AgentPermissionMode, AgentSettingSource } from "./agent-modes"
 
 export * from "./transcript"
 export * from "./working-set"
@@ -237,32 +238,12 @@ export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
   webclone: false,
 }
 
-/**
- * Every permission mode the Agent SDK accepts.
- *
- * Declared once because it was previously written out by hand at each use site
- * and the copies disagreed: `SendOptions.permissionMode` listed six values
- * while `AgentExecutionHandle.setPermissionMode` listed four, so `dontAsk` and
- * `auto` could be set when a session STARTED but never switched to mid-session
- * — with nothing in the types saying why.
- *
- * `dontAsk` and `auto` are the autonomous end of the range and belong behind an
- * Advanced affordance in UI; the safety-ordered cycle in
- * `components/chat/permission-mode-indicator.tsx` deliberately does not include
- * them.
- */
-export type AgentPermissionMode =
-  "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
-
-/** Every {@link AgentPermissionMode}, in escalation order. */
-export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = [
-  "plan",
-  "default",
-  "acceptEdits",
-  "dontAsk",
-  "auto",
-  "bypassPermissions",
-]
+export {
+  AGENT_PERMISSION_MODES,
+  type AgentEffortLevel,
+  type AgentPermissionMode,
+  type AgentSettingSource,
+} from "./agent-modes"
 
 export type SendOptions = {
   /** Standalone hosts use the existing session-owned process supervisor. */
@@ -467,7 +448,7 @@ export type SendOptions = {
   /** Forward partial-message stream events (only meaningful in streaming mode). */
   includePartialMessages?: boolean
   /** Which on-disk settings the SDK loads — subset of "user" | "project" | "local". */
-  settingSources?: Array<"user" | "project" | "local">
+  settingSources?: AgentSettingSource[]
   /**
    * Per-send control over telemetry in the Claude Code SUBPROCESS. Whether any
    * telemetry happens at all is decided by the sidecar's own OTLP endpoint —
@@ -505,7 +486,7 @@ export type SendOptions = {
   /** Only use mcpServers from this blob; ignore on-disk discoveries. */
   strictMcpConfig?: boolean
   /** SDK effort level. */
-  effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  effort?: AgentEffortLevel
   /**
    * The thinking level the user actually asked for, BEFORE the
    * `modelSupportsEffort` gate that produces {@link effort}.

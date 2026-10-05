@@ -16,7 +16,7 @@ import {
 
 import { buildLspHooks } from "../../hooks/lsp-diagnostics.ts"
 import { buildAgentHooks, mergeHookMaps } from "../../hooks/agent-hooks.ts"
-import { buildLedgerToolHooks } from "../common/call-ledger-gate.ts"
+import { buildLedgerToolHooks } from "./ledger.ts"
 import { createNativeHookExecutor } from "../../hooks/native-executor.ts"
 
 import { applyEmbeddedClaudeExecutable } from "./executable.ts"

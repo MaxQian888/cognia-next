@@ -22,7 +22,8 @@
 
 import type { ValidationResult } from "./agent-execution"
 import { AUTHORITY_RANK, narrowAuthority } from "./agent-composition"
-import type { AgentPermissionMode, SendOptions } from "./index"
+import type { AgentPermissionMode } from "./agent-modes"
+import type { SendOptions } from "./index"
 
 /** Wire-format version of {@link AgentCapabilityGrantV1}. */
 export const AGENT_CAPABILITY_GRANT_SCHEMA_VERSION = 1
