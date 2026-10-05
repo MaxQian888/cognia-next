@@ -503,6 +503,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       setBusy(false)
       await settle(session)
     } catch (cause) {
+      // The web popup was reserved inside the click; a sign-in that failed
+      // before opening it must not leave a blank window behind.
+      drivers.abandon?.()
       setBusy(false)
       // A cancel is the person's own choice, not a failure to report.
       const message = explain(cause)
@@ -531,6 +534,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       setBusy(false)
       setPhase("pass")
     } catch (cause) {
+      drivers.abandon?.()
       setBusy(false)
       const message = explain(cause)
       setError(message || null)

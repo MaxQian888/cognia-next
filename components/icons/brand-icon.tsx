@@ -35,6 +35,8 @@ const assets = {
   doubao: { src: "/icons/lobe/doubao-color.svg" },
   exa: { src: "/icons/lobe/exa-color.svg" },
   fal: { src: "/icons/lobe/fal-color.svg" },
+  // Not in the LobeHub set: see public/icons/brands/README.md.
+  feishu: { src: "/icons/brands/feishu-color.svg" },
   fireworks: { src: "/icons/lobe/fireworks-color.svg" },
   gemini: { src: "/icons/lobe/gemini-color.svg" },
   geminiCli: { src: "/icons/lobe/geminicli-color.svg" },
@@ -96,6 +98,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   antigravity: assets.antigravity,
   anthropic: assets.anthropic,
   "anthropic-vision": assets.anthropic,
+  apple: assets.apple,
   "apple-vision": assets.apple,
   "aws-textract": assets.aws,
   azure: assets.azure,
@@ -123,6 +126,11 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   doubao: assets.doubao,
   exa: assets.exa,
   fal: assets.fal,
+  // Sign-in providers (`lib/identity/deployment-discovery.ts`). Lark is
+  // Feishu's international name and carries the same mark.
+  feishu: assets.feishu,
+  "feishu-web": assets.feishu,
+  lark: assets.feishu,
   fireworks: assets.fireworks,
   "fireworks-ai": assets.fireworks,
   "gemini-cli": assets.geminiCli,
@@ -147,6 +155,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   "lm-studio": assets.lmStudio,
   minimax: assets.minimax,
   manus: assets.manus,
+  microsoft: assets.microsoft,
   "mistral-ocr": assets.mistral,
   "mlkit-android": assets.google,
   "windows-media-ocr": assets.microsoft,

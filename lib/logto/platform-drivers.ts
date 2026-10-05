@@ -4,7 +4,9 @@
  * - Capacitor: the in-app browser and the native deep link. Asked first: the
  *   WebView cannot pop a window and has no https origin to land on.
  * - A browser (any profile but the desktop): a popup that lands on this
- *   origin's `/logto/callback`, with the web client.
+ *   origin's `/logto/callback`, with the web client. The popup is reserved
+ *   when the drivers are created, so call this inside the click handler,
+ *   before any await, and `abandon()` the drivers if the sign-in never starts.
  * - The desktop: the system browser, and the deep link the OS hands back to
  *   the running app. A caller with a paste box (the sign-in gate) also races
  *   a pasted callback, for a browser that never comes back.
@@ -56,7 +58,8 @@ export function platformSignInDrivers(options: PlatformDriversOptions): Platform
     profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
   if (popupCapable) {
     return {
-      drivers: createLogtoWebPopupDrivers(),
+      // Called from the sign-in button's click handler, before any await.
+      drivers: createLogtoWebPopupDrivers(undefined, { reserveWindow: true }),
       redirectUri: `${window.location.origin}/logto/callback`,
       clientKind: "web",
     }

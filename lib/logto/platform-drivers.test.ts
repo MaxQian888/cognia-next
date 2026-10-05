@@ -1,7 +1,10 @@
 /** @jest-environment jsdom */
 
 jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
-jest.mock("./web-popup", () => ({ createLogtoWebPopupDrivers: () => ({ flavour: "popup" }) }))
+const createPopupDrivers = jest.fn((..._args: unknown[]) => ({ flavour: "popup" }))
+jest.mock("./web-popup", () => ({
+  createLogtoWebPopupDrivers: (...args: unknown[]) => createPopupDrivers(...args),
+}))
 jest.mock("./capacitor-drivers", () => ({
   createLogtoCapacitorDrivers: () => ({ flavour: "capacitor" }),
 }))
@@ -41,6 +44,8 @@ describe("platformSignInDrivers", () => {
       redirectUri: `${window.location.origin}/logto/callback`,
       clientKind: "web",
     })
+    // Reserved now, while the sign-in click still lets the page open a window.
+    expect(createPopupDrivers).toHaveBeenCalledWith(undefined, { reserveWindow: true })
   })
 
   it("opens the system browser on the desktop and resolves from the deep link", async () => {

@@ -75,6 +75,25 @@ describe("CloudSignInScreen", () => {
     expect(screen.queryByTestId("cloud-sign-in-manual")).not.toBeInTheDocument()
   })
 
+  it("marks each provider button with the provider's own logo", () => {
+    render(
+      <CloudSignInScreen
+        view={{ kind: "official", deployment: officialDeployment({})! }}
+        error={null}
+        busy={false}
+        {...handlers()}
+      />
+    )
+    const mark = (provider: string) =>
+      screen.getByTestId(`cloud-sign-in-official-${provider}`).querySelector("img")
+    expect(mark("feishu")).toHaveAttribute("src", "/icons/brands/feishu-color.svg")
+    expect(mark("github")).toHaveAttribute("src", "/icons/lobe/github.svg")
+    expect(mark("google")).toHaveAttribute("src", "/icons/lobe/google-color.svg")
+    expect(mark("apple")).toHaveAttribute("src", "/icons/lobe/apple.svg")
+    // Decorative: the button's own text names the provider.
+    expect(mark("github")).toHaveAttribute("alt", "")
+  })
+
   it("disables the official providers while busy and names an expired session", () => {
     render(
       <CloudSignInScreen
@@ -106,6 +125,13 @@ describe("CloudSignInScreen", () => {
     expect(screen.getByTestId("cloud-sign-in-social-acme-sso")).toHaveTextContent(
       "continueWith(acme-sso)"
     )
+    // A vendored mark for a known provider, the generic arrow for an unknown one.
+    expect(screen.getByTestId("cloud-sign-in-social-github").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/github.svg"
+    )
+    expect(screen.getByTestId("cloud-sign-in-social-acme-sso").querySelector("img")).toBeNull()
+    expect(screen.getByTestId("cloud-sign-in-social-acme-sso").querySelector("svg")).not.toBeNull()
     fireEvent.click(screen.getByTestId("cloud-sign-in-social-github"))
     expect(h.onSocial).toHaveBeenCalledWith({ provider: "github", directSignIn: "social:github" })
     fireEvent.click(screen.getByTestId("cloud-sign-in-logto"))

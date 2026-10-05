@@ -17,8 +17,13 @@ jest.mock("@/lib/pet/window-role", () => ({
   getPetWindowRole: () => "main",
   isSecondaryOverlayRole: () => false,
 }))
+const abandonPopup = jest.fn()
 jest.mock("@/lib/logto/web-popup", () => ({
-  createLogtoWebPopupDrivers: () => ({ openUrl: jest.fn(), waitForCode: jest.fn() }),
+  createLogtoWebPopupDrivers: () => ({
+    openUrl: jest.fn(),
+    waitForCode: jest.fn(),
+    abandon: () => abandonPopup(),
+  }),
 }))
 jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
 jest.mock("@/lib/logto/capacitor-drivers", () => ({
@@ -656,11 +661,14 @@ describe("CloudSignInGate with the official account", () => {
     const signInOfficial = jest.fn(async () => {
       throw new Error("issuer down")
     })
-    renderGate(deps({ discover: discoverOfficial(), signInOfficial }))
+    abandonPopup.mockClear()
+    renderGate(deps({ discover: discoverOfficial(), signInOfficial, profile: "web-standalone" }))
     fireEvent.click(await screen.findByTestId("cloud-sign-in-official-google"))
     expect(await screen.findByTestId("cloud-sign-in-error")).toHaveTextContent("issuer down")
     expect(screen.getByTestId("cloud-sign-in-official")).toBeInTheDocument()
     expect(readOfficialPromptDecision("acct_a")).toBeNull()
+    // The popup reserved by the click is released, not left blank.
+    expect(abandonPopup).toHaveBeenCalled()
   })
 
   const officialSession = { ...session, issuer: official.issuer }

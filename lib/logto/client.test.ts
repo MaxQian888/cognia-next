@@ -105,6 +105,31 @@ describe("loginToLogto", () => {
     expect(tokenBody(fetchImpl).get("organization_id")).toBeNull()
   })
 
+  it("abandons the drivers when the sign-in fails, and only then", async () => {
+    const abandon = jest.fn()
+    const down = jest.fn(
+      async () => new Response("down", { status: 503 })
+    ) as unknown as typeof fetch
+    await expect(
+      loginToLogto(baseConfig(), {
+        openUrl: jest.fn(),
+        waitForCode: jest.fn(),
+        fetchImpl: down,
+        abandon,
+      })
+    ).rejects.toThrow()
+    expect(abandon).toHaveBeenCalledTimes(1)
+
+    abandon.mockClear()
+    await loginToLogto(baseConfig(), {
+      openUrl: jest.fn(),
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+      abandon,
+    })
+    expect(abandon).not.toHaveBeenCalled()
+  })
+
   it("passes direct_sign_in on the authorize request only, when a social provider is chosen", async () => {
     const fetchImpl = routingFetch()
     const openUrl = jest.fn()

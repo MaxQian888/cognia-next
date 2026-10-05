@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react"
 
-import { BrandIcon, hasBrandIcon } from "./brand-icon"
+import { BrandIcon, brandIconAsset, hasBrandIcon } from "./brand-icon"
 import { RUNTIME_OPTIONS } from "@/components/agent/workspace/runtime-options"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 
@@ -166,6 +166,20 @@ describe("BrandIcon", () => {
 
     expect(container.querySelector("span")).toHaveAttribute("aria-hidden", "true")
     expect(container.querySelector("span")).not.toHaveAttribute("aria-label")
+  })
+
+  // The sign-in screen (`components/account/cloud-sign-in-screen.tsx`) marks
+  // each provider button with these.
+  it.each([
+    ["feishu", "/icons/brands/feishu-color.svg"],
+    ["feishu-web", "/icons/brands/feishu-color.svg"],
+    ["lark", "/icons/brands/feishu-color.svg"],
+    ["github", "/icons/lobe/github.svg"],
+    ["google", "/icons/lobe/google-color.svg"],
+    ["apple", "/icons/lobe/apple.svg"],
+    ["microsoft", "/icons/lobe/microsoft-color.svg"],
+  ])("resolves the sign-in provider %s", (provider, src) => {
+    expect(brandIconAsset(provider)).toEqual({ src, mono: !src.includes("-color") })
   })
 
   it("reports whether a normalized id has a brand asset", () => {

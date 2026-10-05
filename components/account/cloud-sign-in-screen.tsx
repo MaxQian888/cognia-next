@@ -10,6 +10,7 @@ import { useId, useState, type FormEvent, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { CloudIcon, LogInIcon, LogOutIcon, UserRoundIcon, WifiOffIcon } from "lucide-react"
 
+import { BrandIcon, hasBrandIcon } from "@/components/icons/brand-icon"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -185,6 +186,16 @@ function Pending({ label }: { label: string }) {
   )
 }
 
+/**
+ * The provider's own mark on its button (`BrandIcon`, the app's vendor-mark
+ * set), so the choice reads at a glance. A provider without a vendored mark
+ * keeps the generic sign-in arrow rather than a letter tile.
+ */
+function ProviderMark({ provider }: { provider: string }) {
+  if (!hasBrandIcon(provider)) return <LogInIcon data-icon="inline-start" />
+  return <BrandIcon id={provider} size={18} />
+}
+
 function OfflineButton({ onClick, hint }: { onClick: () => void; hint?: string }) {
   const t = useTranslations("account.cloud")
   return (
@@ -234,7 +245,7 @@ function SignInBody({
             onClick={() => onSocial(provider)}
             data-testid={`cloud-sign-in-social-${provider.provider}`}
           >
-            <LogInIcon data-icon="inline-start" />
+            <ProviderMark provider={provider.provider} />
             {t("continueWith", {
               provider: KNOWN_SOCIAL_PROVIDERS.has(provider.provider)
                 ? t(`provider.${provider.provider}`)
@@ -303,7 +314,7 @@ function OfficialBody({
             onClick={() => onOfficialProvider(provider)}
             data-testid={`cloud-sign-in-official-${provider}`}
           >
-            <LogInIcon data-icon="inline-start" />
+            <ProviderMark provider={provider} />
             {t("continueWith", { provider: t(`provider.${provider}`) })}
           </Button>
         ))}

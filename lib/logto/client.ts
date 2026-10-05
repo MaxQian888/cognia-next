@@ -119,6 +119,11 @@ export interface LogtoDrivers {
   }) => Promise<{ code: string; state: string }>
   /** Injectable fetch (defaults to global). */
   fetchImpl?: typeof fetch
+  /**
+   * Release whatever the drivers hold for a sign-in that will not reach, or
+   * did not get past, `openUrl` (the web popup's reserved window). Idempotent.
+   */
+  abandon?: () => void
 }
 
 export interface LogtoSession {
@@ -270,6 +275,15 @@ export async function loginToLogto(
   config: LogtoClientConfig,
   drivers: LogtoDrivers
 ): Promise<LogtoSession> {
+  try {
+    return await runLogin(config, drivers)
+  } catch (cause) {
+    drivers.abandon?.()
+    throw cause
+  }
+}
+
+async function runLogin(config: LogtoClientConfig, drivers: LogtoDrivers): Promise<LogtoSession> {
   const fetchImpl = drivers.fetchImpl ?? fetch
   const endpoints = await discoverLogtoEndpoints(config.issuer, fetchImpl)
   const logto = isLogto(config)
