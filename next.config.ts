@@ -287,6 +287,8 @@ const nextConfig: NextConfig = {
   // correct for the static export too, not a test-only concession.
   transpilePackages: [
     "@noble/hashes",
+    // ESM-only; the account sync recovery key derives its P-256 keys with it.
+    "@noble/curves",
     "@babel/parser",
     "@babel/types",
     "@agentclientprotocol/sdk",
