@@ -98,6 +98,25 @@ describe("durable dispatch bridge", () => {
     await expect(beginDurableDispatch(input)).rejects.toThrow("already has an active dispatch")
   })
 
+  it("forgets a provider session that ended under the child", async () => {
+    const { coordinator, dispatch } = await openDispatch("run-released-session")
+    const steer = jest.fn(async () => undefined)
+    await dispatch.attachControl({ steer }, "session-1")
+    expect(await runtimeDb.getAgentTeamChildRun(dispatch.childRunId)).toMatchObject({
+      sessionId: "session-1",
+    })
+
+    await dispatch.releaseSession("session-other")
+    expect((await runtimeDb.getAgentTeamChildRun(dispatch.childRunId))?.sessionId).toBe("session-1")
+    await dispatch.releaseSession("session-1")
+    expect((await runtimeDb.getAgentTeamChildRun(dispatch.childRunId))?.sessionId).toBeUndefined()
+    // Steering no longer reaches the dead session; it waits in the durable queue.
+    const receipt = await coordinator.steer(dispatch.childRunId, "check the tests")
+    expect(receipt.status).toBe("queued")
+    expect(steer).not.toHaveBeenCalled()
+    await dispatch.complete({ text: "done" })
+  })
+
   it("admits only one simultaneous begin for the same task and teammate", async () => {
     const coordinator = createDurableTeamCoordinator()
     await coordinator.prepareRun(team, "run-concurrent-begin")

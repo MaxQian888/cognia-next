@@ -174,6 +174,7 @@ jest.mock("@/lib/ai/agent/execution/resolve-agent-execution-spec", () => {
 const externalExecuteMock = jest.fn()
 const externalSteerMock = jest.fn<Promise<void>, unknown[]>(async () => undefined)
 const externalCancelMock = jest.fn<Promise<void>, unknown[]>(async () => undefined)
+const externalCancelRetiresSessionMock = jest.fn<boolean, unknown[]>(() => false)
 // The capability profile the manager reports for the resolved external agent.
 // `undefined` by default so the existing suites exercise the "no negotiated
 // profile" path; individual tests set it to assert the projection reaches the
@@ -185,6 +186,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     execute: (...a: Parameters<typeof externalExecuteMock>) => externalExecuteMock(...a),
     steerSession: (...args: unknown[]) => externalSteerMock(...args),
     cancel: (...args: unknown[]) => externalCancelMock(...args),
+    cancelRetiresSession: (...args: unknown[]) => externalCancelRetiresSessionMock(...args),
     getAgentCapabilityProfile: () => externalCapabilityProfileMock,
     getAgent: () => ({ config: { protocol: externalProtocolMock } }),
   }),
@@ -393,6 +395,7 @@ function makeCtx(
 beforeEach(() => {
   jest.clearAllMocks()
   externalProtocolMock = "acp"
+  externalCancelRetiresSessionMock.mockReset().mockReturnValue(false)
   resolveSendOptionsMock.mockResolvedValue({})
   isTauriMock.mockReturnValue(false)
   // Task Workspace is GA — a dispatch with a working dir always opens a lease,
@@ -1621,16 +1624,23 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
       controlAttached()
       return release
     })
+    const releaseSession = jest.fn(async (_sessionId: string) => undefined)
+    const checkpointPause = jest.fn(async () => false)
     beginDurableDispatchMock.mockResolvedValue({
       childRunId: "child-gateway",
       capture: jest.fn(),
       attachControl,
+      releaseSession,
+      checkpointPause,
       prepareTurnContext: jest.fn(async () => ""),
       run: (operation: () => Promise<unknown>) => operation(),
       complete: jest.fn(async () => undefined),
       fail: jest.fn(async () => undefined),
     })
     getAgentTeamChildRunMock.mockResolvedValue({ sessionId: publicSession })
+    // Cancelling a gateway session releases its task: the session is retired.
+    externalCancelRetiresSessionMock.mockReturnValue(true)
+    let pauseOutcome: unknown
     externalExecuteMock.mockImplementation(async (_agent, _prompt, options) => {
       expect(options.sessionId).toBe(publicSession)
       expect(options).not.toHaveProperty("cogniaModel")
@@ -1639,14 +1649,14 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
       const [control, sessionId] = attachControl.mock.calls[0] as unknown as [
         {
           steer: (message: string) => Promise<void>
-          pause: () => Promise<void>
+          pause: () => Promise<boolean | void>
           terminate: () => Promise<void>
         },
         string,
       ]
       expect(sessionId).toBe(publicSession)
       await control.steer("continue carefully")
-      await control.pause()
+      pauseOutcome = await control.pause()
       await control.terminate()
       return { success: true, finalResponse: "ok", sessionId: publicSession }
     })
@@ -1655,7 +1665,57 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(attachControl).toHaveBeenCalledTimes(1)
     expect(externalSteerMock).toHaveBeenCalledWith("agent-1", publicSession, "continue carefully")
     expect(externalCancelMock).toHaveBeenCalledWith("agent-1", publicSession)
+    // The retired session is forgotten and the pause answers to the checkpoint,
+    // never reported as a clean pause of a session that no longer exists.
+    expect(externalCancelRetiresSessionMock).toHaveBeenCalledWith("agent-1", publicSession)
+    expect(releaseSession).toHaveBeenCalledWith(publicSession)
+    expect(checkpointPause).toHaveBeenCalledTimes(1)
+    expect(pauseOutcome).toBe(false)
     expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the session of an external teammate whose cancel only ends the turn", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalCancelRetiresSessionMock.mockReturnValue(false)
+    const releaseSession = jest.fn(async (_sessionId: string) => undefined)
+    const checkpointPause = jest.fn(async () => true)
+    let controlAttached!: () => void
+    const attached = new Promise<void>((resolve) => {
+      controlAttached = resolve
+    })
+    const attachControl = jest.fn(async (..._args: unknown[]) => {
+      controlAttached()
+      return () => undefined
+    })
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-turn-cancel",
+      capture: jest.fn(),
+      attachControl,
+      releaseSession,
+      checkpointPause,
+      prepareTurnContext: jest.fn(async () => ""),
+      run: (operation: () => Promise<unknown>) => operation(),
+      complete: jest.fn(async () => undefined),
+      fail: jest.fn(async () => undefined),
+    })
+    getAgentTeamChildRunMock.mockResolvedValue(undefined)
+    let pauseOutcome: unknown = "unset"
+    externalExecuteMock.mockImplementation(async (_agent, _prompt, options) => {
+      options.onEvent({ type: "text_delta", sessionId: "native-1", text: "partial" })
+      await attached
+      const [control] = attachControl.mock.calls[0] as unknown as [
+        { pause: () => Promise<boolean | void> },
+      ]
+      pauseOutcome = await control.pause()
+      return { success: true, finalResponse: "ok", sessionId: "native-1" }
+    })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex-app-server" } }))
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "continue" })
+    expect(externalCancelMock).toHaveBeenCalledWith("agent-1", "native-1")
+    expect(releaseSession).not.toHaveBeenCalled()
+    expect(checkpointPause).not.toHaveBeenCalled()
+    expect(pauseOutcome).toBeUndefined()
   })
 
   it("falls back to the run's model hint when the teammate pins no model", async () => {

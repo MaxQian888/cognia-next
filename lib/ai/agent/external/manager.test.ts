@@ -2667,6 +2667,45 @@ describe("execute / cancel", () => {
     expect(m.getAgent("agent-1")?.sessions.has(session.id)).toBe(true)
   })
 
+  it("reports which cancels retire the session rather than its turn", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const adapter = currentMock as MockAdapter & { semantics?: unknown }
+    const session = await m.createSession("agent-1")
+    adapter.semantics = {
+      cancel: { scope: "turn", reconnectsAfterCancel: false },
+      resume: "native",
+      fork: "native",
+      approvals: "per-tool-call",
+      processModel: "shared",
+    }
+    expect(m.cancelRetiresSession("agent-1", session.id)).toBe(false)
+    adapter.semantics = {
+      cancel: { scope: "process", reconnectsAfterCancel: true },
+      resume: "unsupported",
+      fork: "unsupported",
+      approvals: "profile-fixed",
+      processModel: "per-session",
+    }
+    expect(m.cancelRetiresSession("agent-1", session.id)).toBe(true)
+    // Undeclared semantics are the conservative default: assume the session is lost.
+    delete adapter.semantics
+    expect(m.cancelRetiresSession("agent-1", session.id)).toBe(true)
+    expect(m.cancelRetiresSession("ghost", session.id)).toBe(false)
+
+    const gateway = m as unknown as {
+      gatewayTasks: Map<string, { parentId: string; taskId: string; release: () => Promise<void> }>
+    }
+    gateway.gatewayTasks.set("gateway-task-task-a", {
+      parentId: "agent-1",
+      taskId: "task-a",
+      release: async () => undefined,
+    })
+    expect(m.cancelRetiresSession("agent-1", "cognia-gateway:task-a:native-a")).toBe(true)
+    expect(m.cancelRetiresSession("agent-2", "cognia-gateway:task-a:native-a")).toBe(false)
+    expect(m.cancelRetiresSession("agent-1", "cognia-gateway:task-b:native-b")).toBe(false)
+  })
+
   it("never drops a session the adapter still reports, even without declared semantics", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())

@@ -77,6 +77,7 @@ import {
 } from "../workers/remote-worker-runtime"
 import { requestWorkerWake, shouldAttemptWake } from "../workers/wake-worker"
 import { runMemberFusionTurn } from "./member-fusion-turn"
+import { externalSessionControl, remoteTurnControl, sidecarSessionControl } from "./child-controls"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 
 const DEFAULT_PER_TASK_TIMEOUT_MS = 600_000
@@ -1407,14 +1408,9 @@ export async function dispatchTeammate(
               await projectFleet("working")
             },
             onControl: async (control) => {
-              await activeDispatch.attachControl({
-                steer: (message, sourceMessageId) => control.steer(message, sourceMessageId),
-                pause: async () => {
-                  await control.pause(`${leaseId}:pause`)
-                  return activeDispatch.checkpointPause()
-                },
-                terminate: () => control.terminate(`${leaseId}:terminate`),
-              })
+              await activeDispatch.attachControl(
+                remoteTurnControl(control, leaseId, activeDispatch)
+              )
             },
             onEvent: async (envelope) => {
               const safeEnvelope = redactText(JSON.stringify(envelope)).redacted
@@ -1606,13 +1602,13 @@ export async function dispatchTeammate(
           activeDispatch
             ? async (sessionId) => {
                 const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-                const manager = getExternalAgentManager()
                 return activeDispatch.attachControl(
-                  {
-                    steer: (message) => manager.steerSession(externalAgentId, sessionId, message),
-                    pause: () => manager.cancel(externalAgentId, sessionId),
-                    terminate: () => manager.cancel(externalAgentId, sessionId),
-                  },
+                  externalSessionControl(
+                    getExternalAgentManager(),
+                    externalAgentId,
+                    sessionId,
+                    activeDispatch
+                  ),
                   sessionId
                 )
               }
@@ -1635,20 +1631,19 @@ export async function dispatchTeammate(
           activeDispatch
             ? async (sessionId) =>
                 activeDispatch.attachControl(
-                  {
-                    steer: async (message, sourceMessageId) => {
-                      const { steerSession } = await import("@/lib/claude/ipc")
-                      await steerSession(sessionId, message, sourceMessageId)
+                  sidecarSessionControl(
+                    {
+                      steerSession: async (id, message, sourceMessageId) =>
+                        (await import("@/lib/claude/ipc")).steerSession(
+                          id,
+                          message,
+                          sourceMessageId
+                        ),
+                      interruptSession: async (id) =>
+                        (await import("@/lib/claude/ipc")).interruptSession(id),
                     },
-                    pause: async () => {
-                      const { interruptSession } = await import("@/lib/claude/ipc")
-                      await interruptSession(sessionId)
-                    },
-                    terminate: async () => {
-                      const { interruptSession } = await import("@/lib/claude/ipc")
-                      await interruptSession(sessionId)
-                    },
-                  },
+                    sessionId
+                  ),
                   sessionId
                 )
             : undefined,

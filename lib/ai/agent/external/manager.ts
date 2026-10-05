@@ -4271,6 +4271,20 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Whether `cancel(agentId, sessionId)` ends the session rather than only its
+   * turn: a gateway session's task is released, and a runtime whose cancel
+   * reaches its process retires the session (ADR-0217 execution semantics).
+   * A caller that pauses through cancel must not treat such a session as one
+   * it can resume or steer afterwards.
+   */
+  cancelRetiresSession(agentId: string, sessionId: string): boolean {
+    const parsed = parseGatewaySessionId(sessionId)
+    if (parsed) return this.gatewayTasks.get(`gateway-task-${parsed.taskId}`)?.parentId === agentId
+    const adapter = this.adapters.get(agentId)
+    return adapter ? requiresReconnectAfterCancel(executionSemanticsOf(adapter)) : false
+  }
+
+  /**
    * Cancel an ongoing execution
    */
   async cancel(agentId: string, sessionId: string): Promise<void> {

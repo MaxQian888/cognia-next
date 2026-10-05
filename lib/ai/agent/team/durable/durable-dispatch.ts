@@ -419,6 +419,20 @@ export async function beginDurableDispatch(input: BeginDurableDispatchInput) {
       detachControl = undefined
     },
     attachControl,
+    /**
+     * The provider session ended under the child (a cancel that retires the
+     * session rather than its turn). Forget it, so nothing steers or resumes
+     * a session that no longer exists; later steering waits in the durable
+     * queue for the child's next turn.
+     */
+    async releaseSession(sessionId: string): Promise<void> {
+      const child = await ownedChild()
+      providerControl = undefined
+      refreshControl()
+      if (child.sessionId === sessionId) {
+        await store.updateChild(childRunId, { sessionId: undefined, updatedAt: now() })
+      }
+    },
     attachEnvironment(environment: AgentExecutionEnvironment): void {
       executionEnvironment = environment
       refreshControl()
