@@ -62,7 +62,7 @@ windows = { version = "0.62.2", features = [
     "Win32_System_WindowsProgramming",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-future = "0.3"
+windows-future = "0.100"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "4", features = ["apple-native-keyring-store"] }
