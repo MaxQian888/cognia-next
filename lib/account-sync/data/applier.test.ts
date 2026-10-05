@@ -151,6 +151,29 @@ describe("applyBatches", () => {
     closeAll(devices)
   })
 
+  it("passes over ops of a class this device switched off, moving past them", async () => {
+    const { a, devices, depsFor, at, fromB, batch } = await setup()
+    const capture = (await a.db.accountSyncState.get("capture")) as AccountSyncCaptureState
+    await a.db.accountSyncState.put({ ...capture, classes: { content: false, settings: true } })
+    const result = await applyBatches(await depsFor(), [
+      batch([
+        await fromB({ t: "sessions", id: "s1", k: "upsert", f: { title: ["T", at(1_000)] } }),
+        await fromB({
+          t: "settings",
+          id: "profile",
+          k: "upsert",
+          f: { value: [{ displayName: "Ada" }, at(1_000)] },
+        }),
+      ]),
+    ])
+    expect(result).toEqual({ applied: 1, parked: 0, tables: new Set(["settings"]) })
+    expect(await a.db.sessions.get("s1")).toBeUndefined()
+    expect(((await a.db.accountSyncState.get("cursor")) as AccountSyncCursorState).serverSeq).toBe(
+      2
+    )
+    closeAll(devices)
+  })
+
   it("applies shared settings keys to the settings row and ignores every other key", async () => {
     const { a, devices, depsFor, at, fromB, batch } = await setup()
     await applyBatches(await depsFor(), [

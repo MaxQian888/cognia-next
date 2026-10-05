@@ -34,6 +34,12 @@ export interface SyncFieldClocksRow extends RowClocks {
   unknown?: Record<string, [value: unknown, hlc: string]>
 }
 
+/** The classes a device syncs: chats and other content, and shared settings. */
+export interface SyncClasses {
+  content: boolean
+  settings: boolean
+}
+
 /**
  * `capture`: whether and as which device this database records changes.
  * Read inside every captured write's own transaction, so writes made before
@@ -44,7 +50,7 @@ export interface AccountSyncCaptureState {
   spaceId: string
   deviceId: string
   /** Per class: off stops capture and apply for that class on this device. */
-  classes: { content: boolean; settings: boolean }
+  classes: SyncClasses
   /** The last clock this database issued or adopted. */
   hlc: HlcTime | null
 }

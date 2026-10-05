@@ -345,7 +345,9 @@ const SETTINGS_FIELDS: Readonly<Record<string, FieldPolicy>> = Object.fromEntrie
   Object.keys(SETTINGS_SYNC).map((key) => [key, SYNCED_SETTINGS_KEYS.has(key) ? "sync" : "local"])
 ) satisfies Partial<Record<keyof AppSettings, FieldPolicy>>
 
-const always = () => true
+/** The row filter of tables whose every row syncs (callers may skip reading rows). */
+export const syncsEveryRow = () => true
+const always = syncsEveryRow
 
 export const TABLE_POLICIES: Readonly<Record<SyncedTableName, TablePolicy>> = {
   sessions: {

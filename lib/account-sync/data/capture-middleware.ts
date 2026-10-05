@@ -111,7 +111,8 @@ function changedByDiff(
   return fields.filter((name) => !sameValue(previous[name], next[name]))
 }
 
-function classOn(state: AccountSyncCaptureState, policy: TablePolicy): boolean {
+/** Whether `policy`'s class syncs on this device (both directions). */
+export function classOn(state: AccountSyncCaptureState, policy: TablePolicy): boolean {
   return policy.cls === "settings" ? state.classes.settings : state.classes.content
 }
 

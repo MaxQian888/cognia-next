@@ -107,6 +107,19 @@ describe("runSyncRound", () => {
     closeAll(devices)
   })
 
+  it("only pushes when told to, leaving parked ops and the pull for the other lane", async () => {
+    const { server, devices, a, b } = await pair()
+    await b.db.sessions.put(session("from-b"))
+    await b.round()
+    await a.db.sessions.put(session("from-a"))
+    const pull = jest.spyOn(a.context.api, "pullOps")
+    expect(await a.round({ pushOnly: true })).toMatchObject({ pushed: 1, applied: 0 })
+    expect(pull).not.toHaveBeenCalled()
+    expect(await a.db.sessions.get("from-b")).toBeUndefined()
+    expect(server.batches).toHaveLength(2)
+    closeAll(devices)
+  })
+
   it("names an account that has no sync devices yet", async () => {
     const { devices, a } = await pair()
     const empty = testContext(testServer(), "lonely")

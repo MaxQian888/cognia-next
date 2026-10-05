@@ -33,7 +33,13 @@ import type { PushView } from "@/lib/account-sync/sync-api"
 import type { CogniaDB } from "@/lib/db/schema"
 
 import { SETTINGS_VALUE_FIELD } from "./capture-middleware"
-import { SETTINGS_ROW_ID, SYNC_SCHEMA_VERSION, TABLE_POLICIES, syncedFields } from "./tables"
+import {
+  SETTINGS_ROW_ID,
+  SYNCED_TABLES,
+  SYNC_SCHEMA_VERSION,
+  TABLE_POLICIES,
+  syncedFields,
+} from "./tables"
 import type {
   AccountSyncCursorState,
   AccountSyncOutboxRow,
@@ -108,7 +114,16 @@ function payloadFor(
   return { t: entry.table, id: entry.rowId, k: "upsert", f, ...(u ? { u } : {}) }
 }
 
-async function readOutgoing(
+/**
+ * Rows and their clocks, read in one transaction so an op never pairs a value
+ * with a clock from before or after it (the pull lane may be applying meanwhile).
+ */
+function readOutgoing(db: CogniaDB, entries: AccountSyncOutboxRow[]): Promise<(Outgoing | null)[]> {
+  const stores = [...SYNCED_TABLES.map((table) => db.table(table)), db.syncFieldClocks]
+  return db.transaction("r", stores, () => readOutgoingIn(db, entries))
+}
+
+async function readOutgoingIn(
   db: CogniaDB,
   entries: AccountSyncOutboxRow[]
 ): Promise<(Outgoing | null)[]> {
@@ -177,6 +192,18 @@ async function sealAll(
   return { ops, sent, tooLarge }
 }
 
+/** Moves only the device sequence: the pull lane may have moved `serverSeq` meanwhile. */
+export async function storeDeviceSeq(
+  db: CogniaDB,
+  spaceId: string,
+  deviceSeq: number
+): Promise<void> {
+  await db.transaction("rw", db.accountSyncState, async () => {
+    const cursor = await readCursor(db, spaceId)
+    await db.accountSyncState.put({ ...cursor, deviceSeq })
+  })
+}
+
 /** Removes outbox entries a push covered, unless they changed meanwhile. */
 async function settle(db: CogniaDB, entries: readonly AccountSyncOutboxRow[]): Promise<void> {
   if (entries.length === 0) return
@@ -214,7 +241,7 @@ export async function pushOutbox(deps: PushDeps): Promise<PushResult> {
     // The server stores the tail of the batch past its last sequence number.
     const stored =
       answer.firstSeq === null || answer.lastSeq === null ? 0 : answer.lastSeq - answer.firstSeq + 1
-    await deps.db.accountSyncState.put({ ...cursor, deviceSeq: answer.deviceSeq })
+    await storeDeviceSeq(deps.db, deps.spaceId, answer.deviceSeq)
     await settle(
       deps.db,
       sent.slice(sent.length - stored).map((item) => item.entry)

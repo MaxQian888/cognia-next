@@ -510,6 +510,8 @@ export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncSe
       if (wait > 0 && lastServerSeq() <= after) {
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, wait * 1000)
+          // A waiting pull must not keep a test process alive after its engine stopped.
+          ;(timer as { unref?: () => void }).unref?.()
           pushWaiters.push(() => {
             clearTimeout(timer)
             resolve()

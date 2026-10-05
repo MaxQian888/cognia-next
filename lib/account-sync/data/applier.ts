@@ -11,6 +11,7 @@
  *   hold yet, is parked in the inbox as received and replayed later.
  * - Fields this build does not know are kept with the row's clocks and sent
  *   back untouched on its next write; `local` fields are never applied.
+ * - Ops of a class this device switched off are passed over.
  */
 
 import {
@@ -32,7 +33,7 @@ import {
 import type { EpochKeyChain } from "@/lib/account-sync/crypto"
 import type { CogniaDB } from "@/lib/db/schema"
 
-import { SETTINGS_VALUE_FIELD, markRemoteTransaction } from "./capture-middleware"
+import { SETTINGS_VALUE_FIELD, classOn, markRemoteTransaction } from "./capture-middleware"
 import type { OpOriginChecker } from "./op-origin"
 import {
   SETTINGS_ROW_ID,
@@ -243,6 +244,9 @@ async function write(
         continue
       }
       if (item.kind === "skip") continue
+      // A class switched off on this device is neither sent nor taken; turning
+      // it back on seeds it and pulls the account again (`engine.setClasses`).
+      if (capture && !classOn(capture, TABLE_POLICIES[item.payload.t as SyncedTableName])) continue
       const wrote =
         item.payload.t === "settings"
           ? await applySetting(db, item.payload, now)

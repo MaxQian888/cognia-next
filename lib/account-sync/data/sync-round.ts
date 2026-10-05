@@ -21,7 +21,7 @@ import type { CogniaDB } from "@/lib/db/schema"
 
 import { applyBatches, replayInbox, type ApplyDeps } from "./applier"
 import { createOpOriginChecker, type OpOriginChecker } from "./op-origin"
-import { pushOutbox } from "./pusher"
+import { pushOutbox, storeDeviceSeq } from "./pusher"
 import type { AccountSyncCursorState, SyncedTableName } from "./types"
 
 export class SyncDeviceRemovedError extends Error {
@@ -44,6 +44,11 @@ export interface SyncRoundOptions {
   waitS?: number
   /** Skip pushing (a round started only to pull). */
   pullOnly?: boolean
+  /**
+   * Only push: no replay, no pull. The engine runs pushes and pulls in two
+   * lanes so a change goes up while a long-poll pull is still waiting.
+   */
+  pushOnly?: boolean
 }
 
 export interface SyncRoundResult {
@@ -112,7 +117,7 @@ export async function runSyncRound(
     for (const table of applied.tables) result.tables.add(table)
   }
 
-  absorb(await replayInbox(applyDeps()))
+  if (!options.pushOnly) absorb(await replayInbox(applyDeps()))
 
   if (!options.pullOnly) {
     for (let attempt = 0; ; attempt++) {
@@ -131,11 +136,10 @@ export async function runSyncRound(
       } catch (error) {
         if (!(error instanceof SyncApiError) || attempt > 0) throw error
         if (error.code === "seq_gap" && typeof error.details.expected === "number") {
-          const cursor = await cursorOf(ctx)
-          await ctx.db.accountSyncState.put({ ...cursor, deviceSeq: error.details.expected - 1 })
+          await storeDeviceSeq(ctx.db, ctx.spaceId, error.details.expected - 1)
         } else if (error.code === "epoch_stale") {
           keys = await keysFor(ctx, device)
-          absorb(await replayInbox(applyDeps()))
+          if (!options.pushOnly) absorb(await replayInbox(applyDeps()))
         } else if (error.code === "device_revoked") {
           throw new SyncDeviceRemovedError()
         } else {
@@ -147,6 +151,7 @@ export async function runSyncRound(
 
   let waitS = options.waitS ?? 0
   for (;;) {
+    if (options.pushOnly) break
     const cursor = await cursorOf(ctx)
     let view
     try {

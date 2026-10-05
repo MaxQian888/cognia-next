@@ -7,6 +7,7 @@ import {
   TABLE_POLICIES,
   isSyncedTable,
   syncedFields,
+  syncsEveryRow,
 } from "./tables"
 
 describe("account sync table policies", () => {
@@ -70,6 +71,10 @@ describe("account sync table policies", () => {
     expect(TABLE_POLICIES.memories.syncsRow({ projectId: "p1" })).toBe(false)
     expect(TABLE_POLICIES.memories.syncsRow({ projectId: undefined })).toBe(true)
     expect(TABLE_POLICIES.sessions.syncsRow({})).toBe(true)
+    // Tables with no filter share one marker, so callers may skip reading rows.
+    expect(
+      SYNCED_TABLES.filter((table) => TABLE_POLICIES[table].syncsRow === syncsEveryRow).sort()
+    ).toEqual(["messages", "sessions", "settings"])
   })
 
   it("diff every whole-row write except messages", () => {
