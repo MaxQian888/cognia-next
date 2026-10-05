@@ -8,7 +8,12 @@
  * device proofs and every protocol rule. Responses carry `cognia-server-time`.
  */
 
-import { DEVICE_PROOF_HEADER, PROTOCOL_VERSION, spaceIdFor } from "@cognia/sync-protocol"
+import {
+  DEVICE_PROOF_HEADER,
+  MAX_PUSH_BYTES,
+  PROTOCOL_VERSION,
+  spaceIdFor,
+} from "@cognia/sync-protocol"
 
 import { bearerToken, verifyAccessToken } from "./access-token"
 import { ConfigError, readConfig, type SyncConfig } from "./config"
@@ -16,13 +21,21 @@ import { preflightResponse, withCors } from "./cors"
 import type { Env } from "./env"
 import { SyncHttpError, errorReply, reply, toResponse, type SpaceReply } from "./http"
 import { createJwksCache, jwksFetcher, type JwksCache } from "./jwks"
-import { matchRoute } from "./routes"
+import { SOCKET_PATH, matchRoute, type RouteName } from "./routes"
 
 export { SyncSpace } from "./space"
 export { SyncAdmin } from "./admin"
 
 /** Request bodies are small JSON: two registry entries plus ≤ 33 envelopes fit well within this. */
 export const MAX_BODY_BYTES = 64 * 1024
+
+/** An op push may carry up to 1 MiB (protocol §7.3); everything else is small. */
+function bodyLimit(route: RouteName): number {
+  return route === "ops.push" ? MAX_PUSH_BYTES : MAX_BODY_BYTES
+}
+
+/** A space id: unpadded base64url SHA-256. */
+const SPACE_ID = /^[A-Za-z0-9_-]{43}$/
 
 let jwks: { issuer: string; cache: JwksCache } | null = null
 
@@ -41,12 +54,12 @@ export function resetJwksCache(): void {
   jwks = null
 }
 
-async function readBody(request: Request): Promise<string | null> {
+async function readBody(request: Request, limit: number): Promise<string | null> {
   if (request.method === "GET" || request.method === "HEAD") return null
   const declared = Number(request.headers.get("content-length") ?? "0")
-  if (declared > MAX_BODY_BYTES) throw new SyncHttpError(413, "payload_too_large")
+  if (declared > limit) throw new SyncHttpError(413, "payload_too_large")
   const bytes = new Uint8Array(await request.arrayBuffer())
-  if (bytes.length > MAX_BODY_BYTES) throw new SyncHttpError(413, "payload_too_large")
+  if (bytes.length > limit) throw new SyncHttpError(413, "payload_too_large")
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)
   } catch {
@@ -73,7 +86,7 @@ async function route(
     audience: config.audience,
   })
   const spaceId = await spaceIdFor(config.issuer, userId)
-  const body = await readBody(request)
+  const body = await readBody(request, bodyLimit(matched.name))
   const stub = env.SYNC_SPACE.get(env.SYNC_SPACE.idFromName(spaceId))
   return stub.handle({
     route: matched.name,
@@ -81,6 +94,7 @@ async function route(
     method: request.method.toUpperCase(),
     path: url.pathname + url.search,
     after: url.searchParams.get("after"),
+    wait: url.searchParams.get("wait"),
     body,
     proof: request.headers.get(DEVICE_PROOF_HEADER),
     spaceId,
@@ -101,7 +115,18 @@ export async function handleRequest(
     console.error(`[sync] configuration error: ${error.message}`)
     return toResponse(errorReply(new SyncHttpError(503, "server_misconfigured")), now)
   }
-  const { pathname } = new URL(request.url)
+  const url = new URL(request.url)
+  const { pathname } = url
+  if (pathname === SOCKET_PATH && request.method === "GET") {
+    // No bearer token on a WebSocket: the named space checks the single-use ticket.
+    const spaceId = url.searchParams.get("space") ?? ""
+    if (!SPACE_ID.test(spaceId) || !url.searchParams.get("ticket"))
+      return toResponse(
+        errorReply(new SyncHttpError(401, "bad_ticket", "no such socket ticket")),
+        now
+      )
+    return env.SYNC_SPACE.get(env.SYNC_SPACE.idFromName(spaceId)).fetch(request)
+  }
   if (request.method === "OPTIONS") {
     return pathname.startsWith("/v1/")
       ? preflightResponse(request, config.webOrigins)

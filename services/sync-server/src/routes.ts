@@ -20,6 +20,9 @@ export type RouteName =
   | "requests.nonce"
   | "requests.reveal"
   | "requests.deny"
+  | "ops.push"
+  | "ops.pull"
+  | "socket.ticket"
 
 interface RouteSpec {
   method: "GET" | "POST" | "DELETE"
@@ -42,7 +45,17 @@ export const ROUTES: readonly RouteSpec[] = [
   { method: "POST", path: "/v1/enroll/requests/:id/nonce", name: "requests.nonce" },
   { method: "POST", path: "/v1/enroll/requests/:id/reveal", name: "requests.reveal" },
   { method: "POST", path: "/v1/enroll/requests/:id/deny", name: "requests.deny" },
+  { method: "POST", path: "/v1/ops", name: "ops.push" },
+  { method: "GET", path: "/v1/ops", name: "ops.pull" },
+  { method: "POST", path: "/v1/socket/ticket", name: "socket.ticket" },
 ]
+
+/**
+ * The live socket (protocol §6). Not in {@link ROUTES}: a browser cannot put
+ * a bearer token on a WebSocket, so it presents a single-use ticket instead,
+ * and the space it names checks it.
+ */
+export const SOCKET_PATH = "/v1/socket"
 
 export interface MatchedRoute {
   name: RouteName

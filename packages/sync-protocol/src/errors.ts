@@ -18,6 +18,10 @@ export type SyncErrorCode =
   | "bad_proof"
   | "bad_request"
   | "client_too_old"
+  | "seq_gap"
+  | "epoch_stale"
+  | "quota_readonly"
+  | "bad_ticket"
 
 /** Why a registry (or one appended entry) was refused. */
 export type RegistryErrorCode =

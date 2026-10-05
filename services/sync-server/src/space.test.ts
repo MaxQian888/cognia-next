@@ -12,7 +12,6 @@ import {
   toBase64Url,
   transcriptHash,
   utf8,
-  type SasTranscript,
 } from "@cognia/sync-protocol"
 import {
   ChainBuilder,
@@ -28,73 +27,19 @@ import {
   fakeEnvelope,
   fakeEnvelopes,
   requestToJoin,
+  approve,
   spaceWithGenesis,
   testEnv,
+  transcriptFor,
+  twoDevices,
+  upToReveal,
   type PendingDevice,
-  type Space,
 } from "../test/helpers"
 import { handleRequest } from "./index"
 import type { SyncSpace } from "./space"
 
 function stubFor(spaceId: string): DurableObjectStub<SyncSpace> {
   return testEnv.SYNC_SPACE.get(testEnv.SYNC_SPACE.idFromName(spaceId))
-}
-
-function transcriptFor(
-  space: Space,
-  pending: PendingDevice,
-  approverDeviceId: string
-): SasTranscript {
-  return {
-    spaceId: space.chain.spaceId,
-    genesisHash: space.chain.state.genesisHash,
-    requestId: pending.requestId,
-    deviceId: pending.device.deviceId,
-    platform: pending.device.platform,
-    signPub: pending.device.signPub,
-    encPub: pending.device.encPub,
-    commit: pending.commit,
-    approverDeviceId,
-  }
-}
-
-/** Runs the approval up to the reveal; returns the approver's nonce. */
-async function upToReveal(space: Space, pending: PendingDevice): Promise<Uint8Array> {
-  const nonceA = randomBytes(32)
-  const nonce = await space.person.json("POST", `/v1/enroll/requests/${pending.requestId}/nonce`, {
-    body: { nonceA: toBase64Url(nonceA) },
-    device: space.first,
-  })
-  expect(nonce).toEqual({ status: 200, body: { state: "nonce_set" } })
-  const reveal = await space.person.json(
-    "POST",
-    `/v1/enroll/requests/${pending.requestId}/reveal`,
-    {
-      body: { nonceR: toBase64Url(pending.nonceR) },
-      device: pending.device,
-    }
-  )
-  expect(reveal).toEqual({ status: 200, body: { state: "revealed" } })
-  return nonceA
-}
-
-async function approve(space: Space, pending: PendingDevice) {
-  const signed = await space.chain.addByApproval(space.first, pending.device, {
-    requestId: pending.requestId,
-    transcriptHash: await transcriptHash(transcriptFor(space, pending, space.first.deviceId)),
-  })
-  return space.person.json("POST", "/v1/registry", {
-    body: {
-      entries: [signed],
-      envelopes: [
-        fakeEnvelope(space.chain.epoch, {
-          recipient: pending.device.deviceId,
-          encPub: pending.device.encPub,
-        }),
-      ],
-    },
-    device: space.first,
-  })
 }
 
 describe("the space", () => {
@@ -596,14 +541,6 @@ describe("recovery", () => {
 })
 
 describe("revocation", () => {
-  async function twoDevices() {
-    const space = await spaceWithGenesis()
-    const second = await requestToJoin(space, "Second")
-    await upToReveal(space, second)
-    await approve(space, second)
-    return { space, second }
-  }
-
   it("needs envelopes for every remaining device and recovery", async () => {
     const { space, second } = await twoDevices()
     const fork = space.chain.fork()

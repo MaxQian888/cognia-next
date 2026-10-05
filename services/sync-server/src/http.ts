@@ -9,11 +9,20 @@ export class SyncHttpError extends Error {
   readonly code:
     SyncErrorCode | "not_found" | "payload_too_large" | "server_misconfigured" | "internal_error"
 
-  constructor(status: number, code: SyncHttpError["code"], message?: string) {
+  /** Extra fields of the error body, e.g. `{expected}` for `seq_gap`. */
+  readonly details: Record<string, unknown> | undefined
+
+  constructor(
+    status: number,
+    code: SyncHttpError["code"],
+    message?: string,
+    details?: Record<string, unknown>
+  ) {
     super(message ?? code)
     this.name = "SyncHttpError"
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -28,7 +37,7 @@ export function reply(body: unknown, status = 200): SpaceReply {
 }
 
 export function errorReply(error: SyncHttpError): SpaceReply {
-  const body: { error: string; message?: string } = { error: error.code }
+  const body: Record<string, unknown> = { ...error.details, error: error.code }
   if (error.message !== error.code) body.message = error.message
   return { status: error.status, body }
 }

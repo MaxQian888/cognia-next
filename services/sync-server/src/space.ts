@@ -12,6 +12,8 @@ import { DurableObject } from "cloudflare:workers"
 
 import {
   DeviceProofError,
+  randomBytes,
+  toBase64Url,
   MAX_PENDING_REQUESTS,
   MAX_REQUESTS_PER_HOUR,
   PROTOCOL_VERSION,
@@ -43,6 +45,13 @@ import {
   revealMatchesCommit,
 } from "./enroll"
 import type { Env } from "./env"
+import {
+  OPLOG_READONLY_BYTES,
+  PULL_MAX_BATCHES,
+  PULL_MAX_BYTES,
+  parsePullQuery,
+  planPush,
+} from "./ops"
 import { SyncHttpError, errorReply, reply, type SpaceReply } from "./http"
 import type { RouteName } from "./routes"
 import {
@@ -59,8 +68,10 @@ export interface SpaceCall {
   method: string
   /** Path and query exactly as requested (what a device proof signs). */
   path: string
-  /** `?after=` of a registry read. */
+  /** `?after=` of a registry read or an op pull. */
   after: string | null
+  /** `?wait=` of an op pull, seconds. */
+  wait?: string | null
   body: string | null
   proof: string | null
   spaceId: string
@@ -68,6 +79,10 @@ export interface SpaceCall {
 }
 
 export const REGISTRY_PAGE = 256
+/** A socket ticket is good for one connection, within this long. */
+export const TICKET_TTL_MS = 60 * 1000
+/** Close code sent to a removed device's sockets. */
+export const REVOKED_CLOSE_CODE = 4403
 
 function parseJson(body: string | null): unknown {
   if (body === null || body === "")
@@ -103,10 +118,14 @@ export class SyncSpace extends DurableObject<Env> {
   /** The folded registry; undefined until loaded, null for an empty space. */
   private registryState: RegistryState | null | undefined
   private queue: Promise<unknown> = Promise.resolve()
+  /** Pulls waiting for new ops or a registry change (in memory; a restart ends them early). */
+  private readonly waiters = new Set<() => void>()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.store = new SpaceStore(ctx.storage.sql)
+    // Keepalives are answered without waking a hibernated object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"))
   }
 
   private serial<T>(operation: () => Promise<T>): Promise<T> {
@@ -122,11 +141,17 @@ export class SyncSpace extends DurableObject<Env> {
   }
 
   handle(call: SpaceCall): Promise<SpaceReply> {
+    if (call.route === "ops.pull") return this.pull(call)
+    return this.guarded(call, () => this.dispatch(call))
+  }
+
+  /** One serialized step of a call, with errors turned into replies. */
+  private guarded(call: SpaceCall, step: () => Promise<SpaceReply>): Promise<SpaceReply> {
     return this.serial(async () => {
       try {
         this.ensureSchema()
         this.bindSpace(call.spaceId)
-        return await this.dispatch(call)
+        return await step()
       } catch (error) {
         if (error instanceof SyncHttpError) return errorReply(error)
         console.error("[sync] space call failed", call.route, error)
@@ -135,9 +160,39 @@ export class SyncSpace extends DurableObject<Env> {
     })
   }
 
+  /** Wakes every waiting pull and tells every socket what changed. */
+  private announce(
+    message: { type: "ops"; lastSeq: number } | { type: "registry"; head: unknown }
+  ) {
+    for (const wake of this.waiters) wake()
+    this.waiters.clear()
+    const text = JSON.stringify(message)
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.send(text)
+      } catch {
+        // A socket closing under us is dropped by the runtime.
+      }
+    }
+  }
+
+  private closeSockets(deviceId: string | null, code: number, reason: string): void {
+    const sockets = deviceId === null ? this.ctx.getWebSockets() : this.ctx.getWebSockets(deviceId)
+    for (const socket of sockets) {
+      try {
+        socket.close(code, reason)
+      } catch {
+        // Already closed.
+      }
+    }
+  }
+
   /** Deletes everything this space holds (account deletion, via `SyncAdmin`). */
   purge(): Promise<void> {
     return this.serial(async () => {
+      this.closeSockets(null, 1000, "the account was deleted")
+      for (const wake of this.waiters) wake()
+      this.waiters.clear()
       await this.ctx.storage.deleteAlarm()
       await this.ctx.storage.deleteAll()
       this.migrated = false
@@ -267,6 +322,15 @@ export class SyncSpace extends DurableObject<Env> {
         return this.reveal(call)
       case "requests.deny":
         return this.deny(call)
+      case "ops.push":
+        return this.push(call)
+      case "ops.pull":
+        return this.readOps(
+          call,
+          await this.activeDevice(call, await this.readyState(call.spaceId))
+        )
+      case "socket.ticket":
+        return this.ticket(call)
       case "health":
         return reply({ ok: true, protocolVersion: PROTOCOL_VERSION })
     }
@@ -421,6 +485,16 @@ export class SyncSpace extends DurableObject<Env> {
     })
     this.registryState = plan.state
     if (approvedRow) await this.scheduleAlarm()
+    for (const entry of plan.entries) {
+      const appended = entry.signed.entry
+      if (appended.type === "revoke-device")
+        this.closeSockets(
+          appended.deviceId,
+          REVOKED_CLOSE_CODE,
+          "this device was removed from sync"
+        )
+    }
+    this.announce({ type: "registry", head: plan.state.head })
     return reply({ head: plan.state.head, epoch: plan.state.epoch })
   }
 
@@ -532,5 +606,129 @@ export class SyncSpace extends DurableObject<Env> {
     this.store.updateRequest(row.request_id, { state: reason, finished_at: call.now })
     await this.scheduleAlarm()
     return reply({ state: reason })
+  }
+
+  private async push(call: SpaceCall): Promise<SpaceReply> {
+    const state = await this.readyState(call.spaceId)
+    const deviceId = await this.activeDevice(call, state)
+    if (this.store.oplogBytes() > OPLOG_READONLY_BYTES) {
+      throw new SyncHttpError(413, "quota_readonly", "this account's sync storage is full")
+    }
+    const plan = await planPush({
+      state,
+      spaceId: call.spaceId,
+      deviceId,
+      lastDeviceSeq: this.store.lastDeviceSeq(deviceId),
+      body: parseJson(call.body),
+    })
+    if (plan.ops.length === 0)
+      return reply({ deviceSeq: plan.lastDeviceSeq, firstSeq: null, lastSeq: null })
+    const stored = this.ctx.storage.transactionSync(() =>
+      this.store.appendOps(deviceId, plan.ops, plan.lastDeviceSeq, call.now)
+    )
+    this.announce({ type: "ops", lastSeq: stored.lastSeq })
+    return reply({
+      deviceSeq: plan.lastDeviceSeq,
+      firstSeq: stored.firstSeq,
+      lastSeq: stored.lastSeq,
+    })
+  }
+
+  /**
+   * A pull reads inside the queue, and waits (if asked to and nothing is new)
+   * outside it, so a waiting pull never holds up any other call.
+   */
+  private async pull(call: SpaceCall): Promise<SpaceReply> {
+    let waitS = 0
+    let deviceId = ""
+    const first = await this.guarded(call, async () => {
+      const state = await this.readyState(call.spaceId)
+      deviceId = await this.activeDevice(call, state)
+      waitS = parsePullQuery(call.after, call.wait ?? null).waitS
+      return this.readOps(call, deviceId)
+    })
+    const body = first.body as { batches?: unknown[] }
+    if (first.status !== 200 || waitS === 0 || (body.batches?.length ?? 0) > 0) return first
+    await new Promise<void>((resolve) => {
+      const wake = () => {
+        clearTimeout(timer)
+        this.waiters.delete(wake)
+        resolve()
+      }
+      const timer = setTimeout(wake, waitS * 1000)
+      this.waiters.add(wake)
+    })
+    return this.guarded(call, async () => {
+      const state = await this.readyState(call.spaceId)
+      if (state.devices[deviceId]?.status !== "active")
+        throw new SyncHttpError(403, "device_revoked", "this device was removed from sync")
+      return this.readOps({ ...call, now: Date.now() }, deviceId)
+    })
+  }
+
+  private readOps(call: SpaceCall, deviceId: string): SpaceReply {
+    const { after } = parsePullQuery(call.after, call.wait ?? null)
+    const { batches, more } = this.store.opsAfter(after, PULL_MAX_BYTES, PULL_MAX_BATCHES)
+    this.store.recordAck(deviceId, after, call.now)
+    return reply({
+      batches,
+      more,
+      lastSeq: this.store.lastServerSeq(),
+      registryHead: this.store.head(),
+    })
+  }
+
+  private async ticket(call: SpaceCall): Promise<SpaceReply> {
+    const deviceId = await this.activeDevice(call, await this.readyState(call.spaceId))
+    const ticket = toBase64Url(randomBytes(32))
+    const expiresAt = call.now + TICKET_TTL_MS
+    this.store.issueTicket(ticket, deviceId, expiresAt, call.now)
+    return reply({ ticket, expiresAt }, 201)
+  }
+
+  /** `GET /v1/socket?space=&ticket=` (protocol §6), forwarded by the Worker. */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket")
+      return Response.json(
+        { error: "bad_request", message: "expected a WebSocket" },
+        { status: 426 }
+      )
+    const url = new URL(request.url)
+    const spaceId = url.searchParams.get("space") ?? ""
+    const ticket = url.searchParams.get("ticket") ?? ""
+    const refused = (status: number, error: string, message: string) =>
+      Response.json({ error, message }, { status })
+    return this.serial(async () => {
+      this.ensureSchema()
+      if (this.store.meta("space_id") !== spaceId)
+        return refused(401, "bad_ticket", "no such socket ticket")
+      const deviceId = this.store.takeTicket(ticket, Date.now())
+      if (!deviceId) return refused(401, "bad_ticket", "no such socket ticket")
+      const state = await this.state(spaceId)
+      if (state?.devices[deviceId]?.status !== "active")
+        return refused(403, "device_revoked", "this device was removed from sync")
+      const pair = new WebSocketPair()
+      const [client, server] = [pair[0], pair[1]]
+      this.ctx.acceptWebSocket(server, [deviceId])
+      server.send(
+        JSON.stringify({
+          type: "hello",
+          lastSeq: this.store.lastServerSeq(),
+          registryHead: state.head,
+        })
+      )
+      return new Response(null, { status: 101, webSocket: client })
+    })
+  }
+
+  /** Clients only send keepalives, answered by the auto-response; anything else is ignored. */
+  override webSocketMessage(): void {}
+
+  override webSocketClose(socket: WebSocket, code: number, reason: string): void {
+    try {
+      socket.close(code, reason)
+    } catch {
+      // Already closed.
+    }
   }
 }

@@ -41,7 +41,36 @@ const SCHEMA = [
      finished_at INTEGER
    )`,
   `CREATE INDEX IF NOT EXISTS requests_created ON requests (created_at)`,
+  // The op log (protocol §7): one row per push, ops as their JSON array.
+  `CREATE TABLE IF NOT EXISTS ops (
+     first_seq INTEGER PRIMARY KEY,
+     last_seq INTEGER NOT NULL,
+     device_id TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     size INTEGER NOT NULL,
+     ops TEXT NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS device_seqs (device_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL)`,
+  // How far each device has pulled; 3b drops tombstones only past every device.
+  `CREATE TABLE IF NOT EXISTS acks (
+     device_id TEXT PRIMARY KEY,
+     ack_seq INTEGER NOT NULL,
+     seen_at INTEGER NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS tickets (
+     ticket TEXT PRIMARY KEY,
+     device_id TEXT NOT NULL,
+     expires_at INTEGER NOT NULL
+   )`,
 ]
+
+export interface OpBatch {
+  firstSeq: number
+  lastSeq: number
+  deviceId: string
+  /** The batch's ops, as stored (serverSeq of `ops[i]` is `firstSeq + i`). */
+  ops: unknown[]
+}
 
 export const OPEN_REQUEST_STATES = ["pending", "nonce_set", "revealed"] as const
 export const FINAL_REQUEST_STATES = [
@@ -294,5 +323,124 @@ export class SpaceStore {
       finished === null ? null : finished + FINISHED_REQUEST_RETENTION_MS,
     ].filter((value): value is number => value !== null)
     return candidates.length ? Math.min(...candidates) : null
+  }
+
+  /** The last assigned serverSeq, 0 for an empty log. */
+  lastServerSeq(): number {
+    const rows = this.sql
+      .exec<{ last: number | null }>("SELECT MAX(last_seq) AS last FROM ops")
+      .toArray()
+    return rows[0]?.last ?? 0
+  }
+
+  lastDeviceSeq(deviceId: string): number {
+    const rows = this.sql
+      .exec<{ last_seq: number }>("SELECT last_seq FROM device_seqs WHERE device_id = ?", deviceId)
+      .toArray()
+    return rows[0]?.last_seq ?? 0
+  }
+
+  /** Stores one push as one row and advances the device's sequence. Call inside a transaction. */
+  appendOps(
+    deviceId: string,
+    ops: readonly unknown[],
+    lastDeviceSeq: number,
+    at: number
+  ): { firstSeq: number; lastSeq: number; size: number } {
+    const firstSeq = this.lastServerSeq() + 1
+    const lastSeq = firstSeq + ops.length - 1
+    const json = JSON.stringify(ops)
+    this.sql.exec(
+      "INSERT INTO ops (first_seq, last_seq, device_id, at, size, ops) VALUES (?, ?, ?, ?, ?, ?)",
+      firstSeq,
+      lastSeq,
+      deviceId,
+      at,
+      json.length,
+      json
+    )
+    this.sql.exec(
+      "INSERT INTO device_seqs (device_id, last_seq) VALUES (?, ?) ON CONFLICT(device_id) DO UPDATE SET last_seq = excluded.last_seq",
+      deviceId,
+      lastDeviceSeq
+    )
+    return { firstSeq, lastSeq, size: json.length }
+  }
+
+  /** Whole batches after `after`, up to about `maxBytes` (always at least one). */
+  opsAfter(
+    after: number,
+    maxBytes: number,
+    maxBatches: number
+  ): { batches: OpBatch[]; more: boolean } {
+    const rows = this.sql
+      .exec<{ first_seq: number; last_seq: number; device_id: string; size: number; ops: string }>(
+        "SELECT first_seq, last_seq, device_id, size, ops FROM ops WHERE last_seq > ? ORDER BY first_seq LIMIT ?",
+        after,
+        maxBatches + 1
+      )
+      .toArray()
+    const batches: OpBatch[] = []
+    let bytes = 0
+    for (const row of rows.slice(0, maxBatches)) {
+      if (batches.length > 0 && bytes + row.size > maxBytes) return { batches, more: true }
+      bytes += row.size
+      batches.push({
+        firstSeq: row.first_seq,
+        lastSeq: row.last_seq,
+        deviceId: row.device_id,
+        ops: JSON.parse(row.ops) as unknown[],
+      })
+    }
+    return { batches, more: rows.length > maxBatches }
+  }
+
+  oplogBytes(): number {
+    const rows = this.sql
+      .exec<{ total: number | null }>("SELECT SUM(size) AS total FROM ops")
+      .toArray()
+    return rows[0]?.total ?? 0
+  }
+
+  recordAck(deviceId: string, ackSeq: number, at: number): void {
+    this.sql.exec(
+      "INSERT INTO acks (device_id, ack_seq, seen_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET ack_seq = MAX(acks.ack_seq, excluded.ack_seq), seen_at = excluded.seen_at",
+      deviceId,
+      ackSeq,
+      at
+    )
+  }
+
+  ack(deviceId: string): { ackSeq: number; seenAt: number } | null {
+    const rows = this.sql
+      .exec<{ ack_seq: number; seen_at: number }>(
+        "SELECT ack_seq, seen_at FROM acks WHERE device_id = ?",
+        deviceId
+      )
+      .toArray()
+    return rows[0] ? { ackSeq: rows[0].ack_seq, seenAt: rows[0].seen_at } : null
+  }
+
+  issueTicket(ticket: string, deviceId: string, expiresAt: number, now: number): void {
+    this.sql.exec("DELETE FROM tickets WHERE expires_at <= ?", now)
+    this.sql.exec(
+      "INSERT INTO tickets (ticket, device_id, expires_at) VALUES (?, ?, ?)",
+      ticket,
+      deviceId,
+      expiresAt
+    )
+  }
+
+  /** Consumes a ticket: the device it was issued to, or null if unknown or expired. */
+  takeTicket(ticket: string, now: number): string | null {
+    const rows = this.sql
+      .exec<{ device_id: string; expires_at: number }>(
+        "SELECT device_id, expires_at FROM tickets WHERE ticket = ?",
+        ticket
+      )
+      .toArray()
+    this.sql.exec("DELETE FROM tickets WHERE ticket = ? OR expires_at <= ?", ticket, now)
+    const row = rows[0]
+    return row && row.expires_at > now ? row.device_id : null
   }
 }

@@ -22,12 +22,22 @@ import {
   randomBytes,
   sasCommit,
   spaceIdFor,
+  transcriptHash,
   toBase64Url,
   utf8,
   type EpochEnvelope,
   type Recipient,
   type RegistryState,
   type SealedName,
+  encodeHlc,
+  encryptOpPayload,
+  newEpochKey,
+  opKey,
+  signOp,
+  type Op,
+  type OpHeader,
+  type OpPayload,
+  type SasTranscript,
 } from "@cognia/sync-protocol"
 import {
   ChainBuilder,
@@ -219,4 +229,104 @@ export async function requestToJoin(
   })
   if (response.status !== 201) throw new Error(`request failed: ${JSON.stringify(response.body)}`)
   return { device, nonceR, commit, requestId: response.body.requestId }
+}
+
+export function transcriptFor(
+  space: Space,
+  pending: PendingDevice,
+  approverDeviceId: string
+): SasTranscript {
+  return {
+    spaceId: space.chain.spaceId,
+    genesisHash: space.chain.state.genesisHash,
+    requestId: pending.requestId,
+    deviceId: pending.device.deviceId,
+    platform: pending.device.platform,
+    signPub: pending.device.signPub,
+    encPub: pending.device.encPub,
+    commit: pending.commit,
+    approverDeviceId,
+  }
+}
+
+/** Runs the approval up to the reveal; returns the approver's nonce. */
+export async function upToReveal(space: Space, pending: PendingDevice): Promise<Uint8Array> {
+  const nonceA = randomBytes(32)
+  const nonce = await space.person.json("POST", `/v1/enroll/requests/${pending.requestId}/nonce`, {
+    body: { nonceA: toBase64Url(nonceA) },
+    device: space.first,
+  })
+  if (nonce.status !== 200 || nonce.body.state !== "nonce_set")
+    throw new Error(`nonce failed: ${JSON.stringify(nonce.body)}`)
+  const reveal = await space.person.json(
+    "POST",
+    `/v1/enroll/requests/${pending.requestId}/reveal`,
+    {
+      body: { nonceR: toBase64Url(pending.nonceR) },
+      device: pending.device,
+    }
+  )
+  if (reveal.status !== 200 || reveal.body.state !== "revealed")
+    throw new Error(`reveal failed: ${JSON.stringify(reveal.body)}`)
+  return nonceA
+}
+
+export async function approve(space: Space, pending: PendingDevice) {
+  const signed = await space.chain.addByApproval(space.first, pending.device, {
+    requestId: pending.requestId,
+    transcriptHash: await transcriptHash(transcriptFor(space, pending, space.first.deviceId)),
+  })
+  return space.person.json("POST", "/v1/registry", {
+    body: {
+      entries: [signed],
+      envelopes: [
+        fakeEnvelope(space.chain.epoch, {
+          recipient: pending.device.deviceId,
+          encPub: pending.device.encPub,
+        }),
+      ],
+    },
+    device: space.first,
+  })
+}
+
+/** A space with its first device and a second one joined by approval. */
+export async function twoDevices(): Promise<{ space: Space; second: PendingDevice }> {
+  const space = await spaceWithGenesis()
+  const second = await requestToJoin(space, "Second")
+  await upToReveal(space, second)
+  const approved = await approve(space, second)
+  if (approved.status !== 200) throw new Error(`approval failed: ${JSON.stringify(approved.body)}`)
+  return { space, second }
+}
+
+/** `count` real ops from `device`, sealed under a throwaway epoch key (the server never opens them). */
+export async function sealedOps(
+  spaceId: string,
+  device: TestDevice,
+  options: { from: number; count: number; epoch?: number; cls?: "c" | "s" }
+): Promise<Op[]> {
+  const key = await opKey(newEpochKey(), spaceId)
+  const ops: Op[] = []
+  for (let i = 0; i < options.count; i++) {
+    const deviceSeq = options.from + i
+    const hlc = { ms: 1_790_000_000_000 + deviceSeq, c: 0 }
+    const header: OpHeader = {
+      deviceId: device.deviceId,
+      deviceSeq,
+      hlc,
+      epoch: options.epoch ?? 1,
+      schemaVer: 1,
+      cls: options.cls ?? "c",
+    }
+    const payload: OpPayload = {
+      t: "sessions",
+      id: `ses_${deviceSeq}`,
+      k: "upsert",
+      f: { title: [`Title ${deviceSeq}`, encodeHlc({ ...hlc, deviceId: device.deviceId })] },
+    }
+    const { nonce, ct } = await encryptOpPayload(key, spaceId, header, payload)
+    ops.push(await signOp(device.sign.privateKey, spaceId, { ...header, nonce, ct }))
+  }
+  return ops
 }
