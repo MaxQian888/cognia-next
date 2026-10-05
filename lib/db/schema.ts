@@ -23,6 +23,7 @@ import {
   createMessageSyncRevisionMiddleware,
   type MessageSyncClock,
 } from "./message-sync-revision"
+import { createAccountSyncCaptureMiddleware } from "@/lib/account-sync/data/capture-middleware"
 import type {
   AppSettings,
   Character,
@@ -426,7 +427,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 235
+export const CURRENT_SCHEMA_VERSION = 236
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -950,6 +951,12 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   collabChatApprovals: "&id, sessionId, orgId, runId, status, expiresAt, fetchedAt",
   collabChatSyncStates: "&sessionId, orgId, updatedAt",
   accountContentMigrations: "&id, accountId, status, updatedAt",
+  // v236 — account sync (ADR-0215 phase 3): this device's unpushed changes,
+  // per-field clocks, capture state and cursors, and ops it cannot apply yet.
+  accountSyncOutbox: "&[table+rowId], table",
+  syncFieldClocks: "&[table+rowId]",
+  accountSyncState: "&id",
+  accountSyncInbox: "&serverSeq, reason",
   collabChatAttachments: "&id, sessionId, orgId, status, updatedAt, fetchedAt",
   sftpTransfers:
     "&id, profileId, status, direction, createdAt, [profileId+status], [status+createdAt]",
@@ -1582,6 +1589,8 @@ export class CogniaDB extends Dexie {
       this.use(createEncryptedContentMiddleware(name))
     }
     this.use(createMessageSyncRevisionMiddleware())
+    // Inert until this database is enrolled in account sync (ADR-0215 phase 3).
+    this.use(createAccountSyncCaptureMiddleware())
     this.connectionOwner = connectionOwner
     this.connectionId = `db-${++databaseConnectionSequence}`
     this.connectionCreatedAt = Date.now()
@@ -1605,6 +1614,17 @@ export class CogniaDB extends Dexie {
   // facade, which owns the (de)serialization, rather than directly.
   scheduledTasks!: Table<import("./scheduled-task-types").DBScheduledTask, string>
   scheduledTaskRuns!: Table<import("./scheduled-task-types").DBTaskExecution, string>
+
+  accountSyncOutbox!: Table<
+    import("@/lib/account-sync/data/types").AccountSyncOutboxRow,
+    [string, string]
+  >
+  syncFieldClocks!: Table<
+    import("@/lib/account-sync/data/types").SyncFieldClocksRow,
+    [string, string]
+  >
+  accountSyncState!: Table<import("@/lib/account-sync/data/types").AccountSyncStateRow, string>
+  accountSyncInbox!: Table<import("@/lib/account-sync/data/types").AccountSyncInboxRow, number>
 
   accountContentMigrations!: Table<
     {

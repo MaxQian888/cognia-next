@@ -5,6 +5,14 @@ export type DataSensitivity = "public" | "internal" | "confidential" | "secret"
 export type DataAccountScope = "global" | "account" | "runtime-target" | "plugin"
 export type DataBackupMode = "portable" | "device-local" | "derived" | "ephemeral"
 export type DataSyncMode = "none" | "companion-readonly"
+/**
+ * Account sync (ADR-0215 phase 3): `account-e2e` tables replicate between the
+ * person's enrolled devices through the end-to-end encrypted op log, as one
+ * coarse class. Independent of {@link DataSyncMode}: a table can be both a
+ * companion mirror and account-synced.
+ */
+export type DataAccountSyncMode = "none" | "account-e2e"
+export type DataAccountSyncClass = "content" | "settings"
 export type DataCleanupPolicy = "protected" | "quick" | "deep"
 export type DataExpectedScale = "small" | "medium" | "large" | "very-large"
 export type DataRetentionEnforcement = "central" | "domain" | "explicit-delete"
@@ -29,6 +37,7 @@ export interface DataTableCatalogEntry {
   accountScope: DataAccountScope
   backupPolicy: { mode: DataBackupMode; reason: string; rebuild?: string }
   syncPolicy: { mode: DataSyncMode; reason: string }
+  accountSync: { mode: DataAccountSyncMode; cls?: DataAccountSyncClass; reason: string }
   retentionPolicy: DataRetentionPolicy
   deleteCascade: {
     account: boolean
@@ -51,6 +60,10 @@ export const CORE_TABLE_NAMES = [
   "a2uiTemplates",
   "actionReviewReceipts",
   "accountContentMigrations",
+  "accountSyncInbox",
+  "accountSyncOutbox",
+  "accountSyncState",
+  "syncFieldClocks",
   "adapterInstances",
   "agentCanonicalSessions",
   "agentCompatibilityRecords",
@@ -519,6 +532,23 @@ export const PORTABLE_BACKUP_TABLES = new Set<CoreTableName>(
   Object.keys(PORTABLE_BACKUP_BINDINGS) as CoreTableName[]
 )
 
+/**
+ * Tables replicated by account sync in phase 3 (ADR-0215 §7), with their
+ * class. `lib/account-sync/data/tables.ts` holds the per-field policy and is
+ * pinned to this list by its test.
+ */
+export const ACCOUNT_SYNC_TABLES: ReadonlyMap<CoreTableName, DataAccountSyncClass> = new Map<
+  CoreTableName,
+  DataAccountSyncClass
+>([
+  ["sessions", "content"],
+  ["messages", "content"],
+  ["characters", "content"],
+  ["skills", "content"],
+  ["memories", "content"],
+  ["settings", "settings"],
+])
+
 export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "characters",
   "skills",
@@ -805,6 +835,10 @@ const CACHE_TABLES = new Set<CoreTableName>([
 ])
 
 const PROJECTION_TABLES = new Set<CoreTableName>([
+  // Account sync's per-field clocks (ADR-0215 phase 3): bookkeeping about the
+  // rows they describe, which stay the record. Not rebuildable, but meaningless
+  // without them and never backed up.
+  "syncFieldClocks",
   "agentCanonicalSessions",
   // Browser Companion side-notes (v199). A projection, not a record: the
   // session it points at owns the instruction and the page text, and this row
@@ -954,6 +988,11 @@ QUEUE_TABLES.add("notificationDeliveryIntents")
 QUEUE_TABLES.add("notificationProjectionWork")
 QUEUE_TABLES.add("notificationTimers")
 QUEUE_TABLES.add("notificationAggregateMembers")
+// Account sync (ADR-0215 phase 3): changes waiting to be pushed, pulled ops
+// waiting to be applied, and the capture/cursor state both are replayed from.
+QUEUE_TABLES.add("accountSyncOutbox")
+QUEUE_TABLES.add("accountSyncInbox")
+QUEUE_TABLES.add("accountSyncState")
 
 const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 
@@ -1655,6 +1694,13 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // spelling. Encrypting it would also mean the resume path could not read its
   // own journal without the cipher it is in the middle of installing.
   accountContentMigrations: "metadata-only",
+  // Account sync bookkeeping: table names, row ids, field names, clocks and
+  // cursors. The inbox holds ops already end-to-end encrypted. The clocks
+  // table also keeps field values from a newer schema, so it is encrypted.
+  accountSyncOutbox: "metadata-only",
+  accountSyncInbox: "metadata-only",
+  accountSyncState: "metadata-only",
+  syncFieldClocks: "encrypted-content",
   // A Bot definition carries an agent-turn prompt and a config schema the
   // author wrote, and an installation carries the configuration a user filled
   // in. Neither is metadata.
@@ -1784,6 +1830,13 @@ function createEntry(name: CoreTableName): DataTableCatalogEntry {
     syncPolicy: COMPANION_SYNC_TABLES.has(name)
       ? { mode: "companion-readonly", reason: "Desktop-authoritative offline mirror." }
       : { mode: "none", reason: "Not exposed through the Companion data plane." },
+    accountSync: ACCOUNT_SYNC_TABLES.has(name)
+      ? {
+          mode: "account-e2e",
+          cls: ACCOUNT_SYNC_TABLES.get(name),
+          reason: "Replicated between the person's enrolled devices, end-to-end encrypted.",
+        }
+      : { mode: "none", reason: "Not replicated by account sync yet." },
     retentionPolicy: retentionFor(name, role),
     deleteCascade: {
       account: accountScope !== "global",
@@ -1837,6 +1890,7 @@ export function policyForTable(name: string): DataTableCatalogEntry | undefined 
       mode: "none",
       reason: "Plugin tables are never exposed to Companion sync by default.",
     },
+    accountSync: { mode: "none", reason: "Plugin tables are not replicated by account sync." },
     retentionPolicy: {
       mode: "permanent",
       enforcement: "explicit-delete",

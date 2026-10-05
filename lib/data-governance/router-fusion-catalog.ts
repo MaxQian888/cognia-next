@@ -82,6 +82,7 @@ function entry(
       mode: "none",
       reason: "The fusion database is never exposed through the Companion data plane.",
     },
+    accountSync: { mode: "none", reason: "This device's ledger is never replicated." },
     retentionPolicy: shape.retentionPolicy,
     deleteCascade: {
       account: true,

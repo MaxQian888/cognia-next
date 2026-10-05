@@ -1561,6 +1561,28 @@ describe("getDb", () => {
     expect(await db.sessions.where("folderId").anyOf(["folder-1", "folder-2"]).count()).toBe(2)
   })
 
+  it("v236 adds account sync's outbox, field clocks, state and inbox", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(236)
+    expect(db.accountSyncOutbox.schema.primKey.keyPath).toEqual(["table", "rowId"])
+    expect(db.accountSyncOutbox.schema.indexes.map((index) => index.name)).toEqual(["table"])
+    expect(db.syncFieldClocks.schema.primKey.keyPath).toEqual(["table", "rowId"])
+    expect(db.accountSyncState.schema.primKey.name).toBe("id")
+    expect(db.accountSyncInbox.schema.primKey.name).toBe("serverSeq")
+    expect(db.accountSyncInbox.schema.indexes.map((index) => index.name)).toEqual(["reason"])
+    await db.accountSyncOutbox.put({
+      table: "sessions",
+      rowId: "s1",
+      fields: ["title"],
+      deleted: false,
+      rev: 1,
+      since: 1,
+    })
+    expect(await db.accountSyncOutbox.get(["sessions", "s1"])).toMatchObject({ rev: 1 })
+  })
+
   it("v235 adds cogsets, cogpack installs and plugin install origins", async () => {
     const db = getDb()
     await db.open()
