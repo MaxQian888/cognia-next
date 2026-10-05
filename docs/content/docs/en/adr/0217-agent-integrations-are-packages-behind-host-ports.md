@@ -5,7 +5,7 @@ description: "External-agent integrations, the shared adapter contract and the r
 
 # ADR 0217 — Agent integrations are packages behind host ports
 
-**Status:** Accepted (in progress: contracts, runtime kit, DeepSeek Harness and Codex landed; the remaining integrations, the engines and orchestration follow the phases below)
+**Status:** Accepted (in progress: contracts, runtime kit, DeepSeek Harness, Codex, the engine split and the orchestration core landed; the remaining integrations are blocked, see Implementation status)
 **Date:** 2026-10-05
 **Amends:** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility) (the adapter contract and the canonical event contract move to `@cognia/agent-contracts`), [ADR-0062](./0062-external-agent-session-import) (a runtime's session-store reader lives in its integration package and returns a neutral transcript), [ADR-0216](./0216-each-agent-configuration-keeps-its-own-state) (native resume records and returns to its configuration), [ADR-0051](./0051-external-agent-adapter-plugin-type) (plugin adapters are read against the new core)
 **Related:** [ADR-0068](./0068-frontend-package-extraction-and-compile-speed) (package extraction rules), [ADR-0107](./0107-coding-agent-migration) (migration readers stay in the migration subsystem), [ADR-0142](./0142-agent-sdk-two-layer-product), [ADR-0169](./0169-one-runtime-one-review-one-control-machine), [ADR-0197](./0197-the-sidecar-runs-its-typescript-unbuilt)
@@ -56,7 +56,15 @@ account) a session had been resumed on.
         ▲
 host (app, CLI, headless)    registers integrations, implements the ports, owns policy,
                              PII, sandbox, persistence and the mapping into its own rows
+
+@cognia/agent-orchestration  durable team run records, the TeamRunStore port, the
+                             coordinator behind host ports, ledgers; zero dependencies
+sidecar engines              claude-agent-sdk and ai-sdk, loaded per host process
 ```
+
+How to add an integration, how engines plug into tools and hosts, and how
+orchestration reaches agents are described in the
+[Agent packages](../subsystems/agent-packages) subsystem pages.
 
 Rules:
 
@@ -202,6 +210,85 @@ An imported session records the preset that wrote it:
 ADR-0216's isolation rule still applies: an isolated configuration cannot see the
 runtime's home and is never a candidate.
 
+### Engines and tools
+
+The sidecar's two engines load per host. `COGNIA_SIDECAR_ENGINES` names them
+(unset loads both); the router reaches an engine through `requireEngine`, which
+fails closed for an engine the host did not load. `session_api` requires the
+Claude engine. No retry is added by loading or selecting an engine.
+
+Builtin tools are defined with the sidecar's neutral `tool()`
+(`sidecar/src/tools/kernel/define.ts`) and carry only neutral fields
+(`alwaysLoad`, `searchHint`). Only `tools/adapters/sdk-mcp*` translate them into
+the SDK's `_meta` and MCP servers. The plugin round trip and the A2UI tools are
+neutral modules with SDK server builders beside the adapters.
+
+The wire is SDK-free. The sidecar's `SendOptions` takes `permissionMode`,
+`settingSources`, `effort`, `agents` and `mcpServers` from
+`@cognia/agent-config-types` (`./agent-modes`, `./claude-agent-sdk-options`),
+the same contract the renderer writes, so the Claude engine's hand-off to SDK
+`Options` is a checked assignment.
+
+The vendor-isolation rule in `scripts/gates/sidecar-architecture.json` enforces
+two things. The runtime closures of the host entry, the AI SDK engine and the
+neutral tool modules never reach `@anthropic-ai/claude-agent-sdk`. And, through
+`allowedIn`, nothing outside the Claude engine, its MCP adapters and the native
+hook executor references the SDK, type-only imports included. A spawned host
+with the SDK unresolvable runs an AI SDK turn and refuses Claude-only work
+(`sidecar/src/runtimes/engines.test.ts`).
+
+### Orchestration
+
+`@cognia/agent-orchestration` holds the durable Agent Team core with no
+dependencies. Its parts:
+
+- the run records and the `TeamRunStore` port, with a conformance contract
+  that the memory store and the app's Dexie store both pass;
+- the decision and evidence ledgers;
+- replay-safety and attempt-fencing rules;
+- fair scheduling;
+- `createDurableTeamCoordinator`, which covers admission, workspace leases,
+  steering, pause, takeover and recovery.
+
+The coordinator's ports are the store, a run journal, a required persistence
+redactor, a path policy and remote-session release. Its input is a
+`DurableTeamSpec`; the app maps its `AgentTeam` onto it in one function.
+
+The store is the only authority. The coordinator keeps process-local,
+rebuildable state only (live controls, queues, waiters), and `recover()`
+rebuilds from the store: a run whose children are not all replay-safe is
+parked as `needs_input`, never replayed.
+
+The coordinator reaches a running teammate through `DurableChildControl`.
+`lib/ai/agent/team/teammate/child-controls.ts` builds one per backend. The
+external-agent control asks `cancelRetiresSession` before cancelling; when the
+cancel ends the session, it releases the session and lets the checkpoint
+decide between `paused` and `needs_input`. A session-ending cancel is never
+reported as a pause.
+
+`lib/workflow` runs team nodes through an installable port, so the
+Team↔Workflow import cycle is broken. A boundary test keeps it that way.
+
+### Scope decisions
+
+- **Engines stay in the sidecar.** It is already a separate, independently
+  typechecked and tested Node project that hosts consume as a process (the
+  desktop app spawns it; the Agent SDK ships it as `@cognia/agent-host-*`).
+  The cut that matters, running without the Claude Agent SDK, is made and
+  gated inside it.
+- **No `@cognia/agent-tool-kernel` package.** The kernel's argument parsing
+  and JSON Schema conversion run on schemas built with the sidecar's zod. A
+  linked package resolves a second zod copy in a checkout, and the conversion
+  fails open, so a mismatch would silently strip every tool's schema. Other
+  hosts reuse the tools through the MCP tool bridge.
+- **Team gates, teammate pool, wave runner and synthesized workflow stay in
+  the app.** They are typed against `types/agent/agent-team.ts`, which imports
+  twin, editor, external-preset and PR-observe types, and several reach Dexie,
+  stores or the approval bus. A neutral copy of that model would be a second
+  authority kept in sync by hand. No `TeammateExecutor` port was added: the
+  package controls a running teammate through `DurableChildControl` and does
+  not launch one.
+
 ### Compatibility
 
 - **Old import paths:** each becomes a re-export of its new home:
@@ -210,9 +297,12 @@ runtime's home and is never a candidate.
   - `lib/agent-ecosystem/types.ts`
   - `lib/ai/agent/external/protocol-adapter.ts`
   - `@cognia/agent-config-types/{agent-execution,canonical-session,ref-safety,external-agent-capability}`
+  - `AgentPermissionMode` and `AGENT_PERMISSION_MODES` still export from the
+    `@cognia/agent-config-types` root; they are declared in `./agent-modes`.
 - **Stored data:** configurations, sessions and imported bindings are unchanged.
   `agentConfigId` is optional, and a binding without it resolves as before.
 - **Plugin adapters** still register through the existing overlay.
+- **Hosts that set nothing** load both sidecar engines, as before.
 
 ## Implementation status
 
@@ -220,10 +310,10 @@ runtime's home and is never a candidate.
 | --- | --- | --- |
 | 1 | Baseline, identity model, migration matrix (`docs/plans/2026-10-05-agent-package-architecture.md`) | Done |
 | 2 | `agent-contracts`, `agent-runtime-kit`, `agent-dsh`, `agent-codex` (runtime + history); DSH cancel semantics; native-resume binding | Done |
-| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | Planned |
-| 4 | Neutral tool kernel; the AI SDK engine builds and tests without the Claude SDK | Planned |
-| 5 | Orchestration package behind store/journal/executor ports; the Team↔Workflow import cycle broken by a composition root | Planned |
-| 6 | Docs, gates, CI and final regression | Planned |
+| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | Partial: the plugin compatibility wrapper is done (`c932f3275`). The rest is **blocked**: the ACP, Pi, OpenCode, Aider and remote runtime clients, the manager, the agent transport, the lifecycle service, `protocol/external-agent-runtimes.json` and `cli/src/runtime/external` carry another workstream's uncommitted changes, and moving them would commit or strand that work |
+| 4 | Neutral tools; the AI SDK engine and the host run without the Claude SDK; SDK-free wire; vendor gate | Done (`44d622df7`, `c4ae605bd`); see Scope decisions for the tool-kernel package |
+| 5 | Orchestration package behind store/journal/redaction/path/remote-session ports; ledgers; Team↔Workflow cycle broken; session-ending cancel never reported as pause | Done (`6bf0a830a`, `a4f1dd183`, `3719c8d51`, `ed4ea6611`, `e931feec0`); gates, pool, wave runner and synthesized workflow stay in the app (Scope decisions) |
+| 6 | Docs, gates, CI and final regression | Done for the landed phases; Phase 3 docs follow its migration |
 
 ## Consequences
 

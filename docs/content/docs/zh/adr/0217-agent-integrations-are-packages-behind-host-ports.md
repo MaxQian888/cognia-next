@@ -5,7 +5,7 @@ description: "外部 Agent 集成、共享的适配器契约和运行时构件�
 
 # ADR 0217 — Agent 集成是位于主机端口之后的包
 
-**状态：** 已接受（进行中：契约、运行时工具包、DeepSeek Harness 和 Codex 已落地；其余集成、执行引擎和编排按下文阶段推进）
+**状态：** 已接受（进行中：契约、运行时工具包、DeepSeek Harness、Codex、引擎拆分和编排核心已落地；其余集成被阻塞，见实施状态）
 **日期：** 2026-10-05
 **修订：** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility)（适配器契约和规范事件契约移入 `@cognia/agent-contracts`）、[ADR-0062](./0062-external-agent-session-import)（运行时会话存储的读取器放在其集成包中，返回中立的会话记录）、[ADR-0216](./0216-each-agent-configuration-keeps-its-own-state)（原生恢复记录并回到它的配置）、[ADR-0051](./0051-external-agent-adapter-plugin-type)（插件适配器按新的核心来读取）
 **相关：** [ADR-0068](./0068-frontend-package-extraction-and-compile-speed)（包提取规则）、[ADR-0107](./0107-coding-agent-migration)（迁移读取器留在迁移子系统）、[ADR-0142](./0142-agent-sdk-two-layer-product)、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)、[ADR-0197](./0197-the-sidecar-runs-its-typescript-unbuilt)
@@ -46,7 +46,14 @@ Agent 的身份散布在多套词汇中：
         ▲
 主机（应用、CLI、无界面主机） 注册集成、实现端口，负责策略、PII、沙箱、持久化，
                              以及映射成自己的数据行
+
+@cognia/agent-orchestration  持久化团队运行记录、TeamRunStore 端口、位于主机端口之后的
+                             协调器、账本；零依赖
+sidecar 引擎                 claude-agent-sdk 与 ai-sdk，按主机进程加载
 ```
+
+如何新增集成、引擎如何接入工具与主机、编排如何触达 agent，见
+[Agent 包](../subsystems/agent-packages) 子系统文档。
 
 规则：
 
@@ -150,6 +157,63 @@ DeepSeek Harness 声明进程级取消、每会话一个进程。Codex app-serve
 
 ADR-0216 的隔离规则依然适用：独立状态的配置看不到运行时的主目录，从不作为候选。
 
+### 引擎与工具
+
+sidecar 的两个引擎按主机加载。`COGNIA_SIDECAR_ENGINES` 指定要加载的引擎（未设置则全部加载）；
+路由通过 `requireEngine` 访问引擎，主机未加载的引擎会失败关闭。`session_api` 需要 Claude 引擎。
+加载或选择引擎都不会额外增加重试。
+
+内置工具使用 sidecar 的中立 `tool()`（`sidecar/src/tools/kernel/define.ts`）定义，只携带中立字段
+（`alwaysLoad`、`searchHint`）。只有 `tools/adapters/sdk-mcp*` 会把它们翻译为 SDK 的 `_meta` 和
+MCP 服务器。插件往返与 A2UI 工具是中立模块，SDK 服务器构建器放在适配器旁边。
+
+wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settingSources`、`effort`、
+`agents` 与 `mcpServers` 取自 `@cognia/agent-config-types`（`./agent-modes`、
+`./claude-agent-sdk-options`），也就是渲染端写入的同一份契约，因此 Claude 引擎交给 SDK
+`Options` 的过程是一次受检赋值。
+
+`scripts/gates/sidecar-architecture.json` 中的厂商隔离规则保证两件事：主机入口、AI SDK 引擎与
+中立工具模块的运行时闭包永远到达不了 `@anthropic-ai/claude-agent-sdk`；并且通过 `allowedIn`，
+在 Claude 引擎、其 MCP 适配器与原生 hook 执行器之外，任何文件都不引用该 SDK，仅类型导入也不行。
+在 SDK 无法解析时启动的宿主能跑完一次 AI SDK 回合，并拒绝仅限 Claude 的工作
+（`sidecar/src/runtimes/engines.test.ts`）。
+
+### 编排
+
+`@cognia/agent-orchestration` 承载持久化 Agent Team 的核心，没有任何依赖。它包括：
+
+- 运行记录与 `TeamRunStore` 端口，以及一份一致性契约（内存存储与应用的 Dexie 存储都通过它）；
+- 决策与证据账本；
+- 重放安全与尝试隔离规则；
+- 公平调度；
+- `createDurableTeamCoordinator`，负责准入、工作区租约、转向、暂停、接管与恢复。
+
+协调器的端口是存储、运行日志、必需的持久化脱敏器、路径策略与远程会话释放。它的输入是
+`DurableTeamSpec`，应用在一个函数里把 `AgentTeam` 映射过去。
+
+存储是唯一的权威。协调器只保留进程内、可重建的状态（活动控制、队列、等待者），`recover()`
+从存储重建：若某运行的子运行并非全部可安全重放，则停放为 `needs_input`，绝不重放。
+
+协调器通过 `DurableChildControl` 触达运行中的队友，`lib/ai/agent/team/teammate/child-controls.ts`
+为每种后端构建一个。外部 agent 的控制会在取消前询问 `cancelRetiresSession`；当取消会结束会话时，
+释放该会话，并由检查点决定是 `paused` 还是 `needs_input`。结束会话的取消从不被报告为暂停。
+
+`lib/workflow` 通过可安装端口运行团队节点，因此 Team↔Workflow 导入环已被打破，并有边界测试
+保持这一点。
+
+### 范围决定
+
+- **引擎留在 sidecar 中。** sidecar 已是一个独立做类型检查和测试的 Node 项目，宿主以进程方式
+  使用它（桌面应用启动它；Agent SDK 以 `@cognia/agent-host-*` 发布它）。真正重要的拆分，即无需
+  Claude Agent SDK 运行，已在其中完成并受闸门约束。
+- **不建 `@cognia/agent-tool-kernel` 包。** 内核的参数解析与 JSON Schema 转换作用于用 sidecar
+  的 zod 构建的 schema。链接包在检出目录中会解析到第二份 zod，而转换会失败开放，因此不一致会
+  悄悄抹掉所有工具的 schema。其他宿主通过 MCP 工具桥复用这些工具。
+- **团队闸门、队友池、波次运行器与合成工作流留在应用中。** 它们以 `types/agent/agent-team.ts`
+  为类型，而该文件导入 twin、编辑器、外部预设与 PR 观察等类型；其中若干还会访问 Dexie、store
+  或审批总线。为该模型建一份中立副本会形成需要人工同步的第二个权威来源。也没有新增
+  `TeammateExecutor` 端口：包通过 `DurableChildControl` 控制运行中的队友，但不负责启动队友。
+
 ### 兼容性
 
 - **旧导入路径：**每个都改为重新导出它的新位置：
@@ -158,8 +222,11 @@ ADR-0216 的隔离规则依然适用：独立状态的配置看不到运行时�
   - `lib/agent-ecosystem/types.ts`
   - `lib/ai/agent/external/protocol-adapter.ts`
   - `@cognia/agent-config-types/{agent-execution,canonical-session,ref-safety,external-agent-capability}`
+  - `AgentPermissionMode` 与 `AGENT_PERMISSION_MODES` 仍从 `@cognia/agent-config-types` 根导出，
+    它们声明在 `./agent-modes` 中。
 - **已存储的数据：**配置、会话和导入绑定保持不变。`agentConfigId` 是可选的，没有它的绑定按原来的方式解析。
 - **插件适配器：**仍通过现有的覆盖层注册。
+- **未做任何设置的宿主**仍会加载两个 sidecar 引擎，与以前一致。
 
 ## 实施状态
 
@@ -167,10 +234,10 @@ ADR-0216 的隔离规则依然适用：独立状态的配置看不到运行时�
 | --- | --- | --- |
 | 1 | 基线、身份模型、迁移矩阵（`docs/plans/2026-10-05-agent-package-architecture.md`） | 完成 |
 | 2 | `agent-contracts`、`agent-runtime-kit`、`agent-dsh`、`agent-codex`（运行时 + 历史）；DSH 取消语义；原生恢复绑定 | 完成 |
-| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 计划中 |
-| 4 | 中立的工具内核；AI SDK 引擎在没有 Claude SDK 时也能构建和测试 | 计划中 |
-| 5 | 位于存储/日志/执行器端口之后的编排包；用组合根打破 Team↔Workflow 导入环 | 计划中 |
-| 6 | 文档、闸门、CI 和最终回归 | 计划中 |
+| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 部分完成：插件兼容包装层已完成（`c932f3275`）。其余**被阻塞**：ACP、Pi、OpenCode、Aider 与远程运行时客户端、管理器、agent 传输层、生命周期服务、`protocol/external-agent-runtimes.json` 以及 `cli/src/runtime/external` 都带有另一工作流未提交的修改，迁移它们会提交或丢弃那些工作 |
+| 4 | 中立工具；AI SDK 引擎与宿主无需 Claude SDK 即可运行；不依赖 SDK 的 wire；厂商闸门 | 完成（`44d622df7`、`c4ae605bd`）；工具内核包见范围决定 |
+| 5 | 位于存储/日志/脱敏/路径/远程会话端口之后的编排包；账本；打破 Team↔Workflow 导入环；结束会话的取消从不被报告为暂停 | 完成（`6bf0a830a`、`a4f1dd183`、`3719c8d51`、`ed4ea6611`、`e931feec0`）；闸门、队友池、波次运行器与合成工作流留在应用中（见范围决定） |
+| 6 | 文档、闸门、CI 和最终回归 | 已落地阶段已完成；阶段 3 的文档随其迁移补充 |
 
 ## 后果
 

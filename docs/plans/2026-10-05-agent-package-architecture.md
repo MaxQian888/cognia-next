@@ -95,6 +95,28 @@ read in 3 places, 2 ignore `PI_CODING_AGENT_SESSION_DIR`; OpenCode SQLite read t
 different path lists; headless brain never runs squad bootstrap; workflow lease renew result
 ignored; `resumeInFlightRuns` does not skip `__team__:` rows.
 
+### Status (2026-10-06)
+
+| Row                                                                                               | State                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| codex                                                                                             | Moved: `@cognia/agent-codex` (`./manifest`, `./app-server-client`, `./history`); ecosystem row exported by the manifest; resume binding uses the ecosystem's presets and persists `agentConfigId`. Cfg/Sub/Mem stay in ADR-0107 (scope decision, Phase 2) |
+| deepseek-harness                                                                                  | Moved: `@cognia/agent-dsh`; `process`-scoped cancel honoured by the manager and the team coordinator                                                                                                                                                      |
+| plugin adapters                                                                                   | Done: `adaptPluginProtocolAdapter` (`@cognia/agent-runtime-kit/plugin-compat`) checks the core when a plugin adapter is created                                                                                                                           |
+| claude-code, opencode, pi, aider, a2a / remote, devin, kimi, the ACP-row ecosystems, continue-dev | **Not moved — blocked.** Their runtime clients, `manager.ts`, `agent-transport.ts`, `lifecycle/service.ts`, `protocol/external-agent-runtimes.json` and `cli/src/runtime/external/*` carry another workstream's uncommitted changes                       |
+| External-agent wire/config types, `ProtocolAdapter`, peer/codecs/reclaim                          | Moved to contracts and the runtime kit; app paths re-export                                                                                                                                                                                               |
+| Host indirection                                                                                  | Process host, logger and outbound gate ports implemented for the app (`lib/ai/agent/external/host/`); CLI port injection and deleting the esbuild aliases are blocked with Phase 3                                                                        |
+| ACP client, manager `instanceof` branches                                                         | Not done (Phase 3, blocked); the Codex branch is replaced by `codexAppServerExtension`                                                                                                                                                                    |
+| Neutral tool kernel                                                                               | Neutral in place (`sidecar/src/tools/kernel/`) and gated; not extracted into a package (§3 scope decision)                                                                                                                                                |
+| Claude SDK coupling in the AI SDK rail                                                            | Cut: host, AI SDK engine and neutral tools load without the SDK; wire and shared runtime modules carry no SDK types; `vendorIsolation` + `allowedIn` gate                                                                                                 |
+| Team orchestration                                                                                | Run state, ledgers, coordinator, scheduling and recovery moved to `@cognia/agent-orchestration` behind ports; Team↔Workflow cycle broken; gates, teammate pool, wave runner and synthesized workflow stay in the app (§3 scope decision)                  |
+
+Drift items: fixed — plugin adapters missing core members (wrapper; the Python proxy still
+forwards seven members, and the wrapper now reports or supplies the rest), native resume
+persisting the instance id, headless squad bootstrap, workflow lease-renew result,
+`__team__:` resume skip. Open (Phase 3, blocked) — Goose row, OpenCode V1 dead client, CLI
+spawn allowlist gate and `cline` duplicate, `pluginEcosystem` nulls, Pi session dir readers,
+OpenCode SQLite path lists.
+
 ## 3. Target packages and dependency direction
 
 ```
@@ -117,6 +139,24 @@ CLI host (cli/)                     ── implements the same ports with Node (
                                ports: TeamRunStore (CAS/lease/fencing), ExecutionJournal, TeammateExecutor,
                                WorkflowInvoker, NodeRegistrar, Clock/IdGen, TeamEvents
 ```
+
+Scope decisions (2026-10-06):
+
+- `@cognia/agent-tool-kernel` was not extracted. The kernel's `parseToolArgs` and
+  `toolInputJsonSchema` run `z.object` / `z.toJSONSchema` on schemas built with the sidecar's
+  zod; a `link:` package resolves a second zod copy in a checkout, and the conversion fails
+  open, so a mismatch would silently strip every tool's schema. The kernel stays neutral in
+  `sidecar/src/tools/kernel/`, held by the vendor gate; other hosts reuse tools through the
+  MCP tool bridge.
+- The engines stay in the sidecar, an independently typechecked and tested Node project
+  consumed as a process (desktop spawn, `@cognia/agent-host-*`).
+- Orchestration moved the durable core only. Gates, teammate pool, wave runner, synthesized
+  workflow and budget governor are typed against `types/agent/agent-team.ts` (2,165 lines,
+  importing twin, editor, external-preset and PR-observe types) and several reach Dexie,
+  stores or the approval bus; a neutral copy of that model would be a second authority.
+  `TeammateExecutor` / `WorkflowInvoker` / `NodeRegistrar` were not added as package ports:
+  the coordinator controls running teammates through `DurableChildControl`, and the workflow
+  side uses the app-level installable team-node port.
 
 Rules (enforced by `scripts/gates/check-package-boundaries.mjs` extensions and pack tests):
 
@@ -260,11 +300,16 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
 - Plugin ABI wrapper (§4.3) and Python proxy completeness.
 - Accept: every matrix row has a package home; manager has no `instanceof` vendor classes;
   `lib/agent-ecosystem` derives from manifests (Goose included); CLI allowlist gated.
+- Status: partial. Plugin ABI wrapper done (`c932f3275`). Everything else is blocked by
+  another workstream's uncommitted changes in the files it must move (see §2 status).
 
 ### Phase 4 — tools and engines
 
 - §4.5 cuts; `@cognia/agent-tool-kernel`; sidecar `link:` + `node` condition; vendor gate;
   closure gate; offline ai-sdk suite with the Claude SDK uninstalled.
+- Status: done (`44d622df7`, `c4ae605bd`): neutral `tool()`, plugin/A2UI splits, per-host engine
+  loader, SDK-free wire, `vendorIsolation` with `allowedIn`, spawned-host test with the SDK
+  blocked. The tool-kernel package was dropped (§3 scope decision).
 
 ### Phase 5 — orchestration
 
@@ -272,11 +317,23 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
   import graph test; mixed built-in/external team test; process-level cancel never used as
   session cancel; recovery keeps lease/fencing/replay-safety; fixes for lease-renew result and
   `__team__:` resume filtering.
+- Status: done for the durable core (`6bf0a830a`, `a4f1dd183`, `3719c8d51`, `ed4ea6611`,
+  `e931feec0`); the policy modules stay in the app (§3 scope decision).
 
 ### Phase 6 — closure
 
 - Docs (subsystem pages en/zh, package READMEs, CLAUDE.md map), gates in `check-all.mjs`, CI
   build matrix, final regression, changeset for user-visible fixes.
+- Status (2026-10-06): docs done for the landed phases — subsystem pages
+  `docs/content/docs/{en,zh}/subsystems/agent-packages/` (overview, adding an agent, engines
+  and tools, orchestration), package READMEs, the CLAUDE.md map row, ADR-0217 en/zh. Gates in
+  `check-all`: `agent:packages:pack-test`, `sidecar:typecheck`, `audit:sidecar-architecture`
+  (with `vendorIsolation`); CI runs the sidecar suites. Final regression on the shared tree:
+  pack test 5/5 packages; sidecar 2369 tests, 0 failed, 2 skipped; Jest over the touched
+  scopes 627 suites / 10669 tests with 4 failures, none from this work (3 from another
+  workstream's uncommitted Pi session-source bump, 1 support-matrix aider assertion that
+  already fails before ADR-0217); root tsc 20 errors, all in files this work does not touch;
+  `docs:build` 2060 pages. Phase 3 docs follow its migration.
 
 ## 6. Test inventory and gaps
 

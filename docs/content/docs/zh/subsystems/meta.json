@@ -40,6 +40,7 @@
     "employee-twin",
     "long-term-memory",
     "ocr",
-    "unified-agent-execution"
+    "unified-agent-execution",
+    "agent-packages"
   ]
 }
