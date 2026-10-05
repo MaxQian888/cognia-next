@@ -211,4 +211,37 @@ describe("ImportedOriginChip", () => {
       })
     )
   })
+
+  it("explains an offline bound configuration, then lets the user choose another", async () => {
+    resumeNative
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "bound-runtime-unavailable",
+        detail: "Codex home",
+        choices: [{ agentId: "agent-2", name: "Codex work" }],
+      })
+      .mockResolvedValueOnce({ ok: true, agentId: "agent-2", nativeSessionId: "native-1" })
+    const imported = session({
+      importOwnership: "source-mirror",
+      importRuntimeBinding: {
+        nativeSessionId: "native-1",
+        presetId: "codex",
+        agentConfigId: "agent-1",
+      },
+    })
+    render(<ImportedOriginChip session={imported} />)
+    fireEvent.click(screen.getByTestId("imported-native-resume"))
+    const choice = await screen.findByTestId("imported-resume-choice-agent-2")
+    expect(toastError).toHaveBeenCalledWith(
+      "chat.imported.resumeErrors.bound-runtime-unavailable",
+      {
+        description: "Codex home",
+      }
+    )
+
+    await userEvent.click(choice)
+    await waitFor(() =>
+      expect(resumeNative).toHaveBeenLastCalledWith(imported, {}, { agentId: "agent-2" })
+    )
+  })
 })

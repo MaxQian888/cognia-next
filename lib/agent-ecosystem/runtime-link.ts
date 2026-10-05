@@ -12,9 +12,17 @@
  */
 
 import { isBuiltinExecutableExternalAgentProtocol } from "@cognia/agent-config-types/external-agent-capability"
-import { findRuntimeById } from "@/lib/ai/agent/external/config/install-catalog"
+import {
+  findRuntimeById,
+  findRuntimeByPresetId,
+} from "@/lib/ai/agent/external/config/install-catalog"
 
-import { AGENT_ECOSYSTEMS, findEcosystemById, findEcosystemByMigrationVendor } from "./catalog"
+import {
+  AGENT_ECOSYSTEMS,
+  findEcosystemById,
+  findEcosystemByMigrationVendor,
+  findEcosystemByRuntimeId,
+} from "./catalog"
 
 // Built once. `presetIdsForSessionSource` is called per row when the support
 // matrix renders, and a linear scan per row is the kind of thing that only
@@ -65,6 +73,22 @@ export function presetIdsForMigrationVendor(vendor: string): string[] {
 export function presetIdsForSessionSource(sourceId: string): string[] {
   const ecosystemId = ECOSYSTEM_ID_BY_SOURCE.get(sourceId)
   return ecosystemId ? presetIdsForEcosystem(ecosystemId) : []
+}
+
+/**
+ * Every preset id of the ecosystem that launches `presetId`, primary first,
+ * with `presetId` itself kept when no ecosystem claims it.
+ *
+ * An imported session records the preset that wrote it, but every runtime of
+ * one ecosystem reads the same native session store: Codex's ACP adapter and
+ * its app-server both reattach to a `~/.codex/sessions` thread. Matching the
+ * recorded preset alone hid every other configuration that could resume it.
+ */
+export function presetIdsSharingEcosystem(presetId: string): string[] {
+  const runtime = findRuntimeByPresetId(presetId)
+  const ecosystem = runtime ? findEcosystemByRuntimeId(runtime.runtimeId) : undefined
+  const presets = ecosystem ? presetIdsForEcosystem(ecosystem.id) : []
+  return presets.includes(presetId) ? presets : [presetId, ...presets]
 }
 
 /** The catalog's display name for an ecosystem, via its primary runtime. */

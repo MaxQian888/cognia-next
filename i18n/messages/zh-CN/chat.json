@@ -1682,7 +1682,8 @@
       "preset-not-configured": "请先配置匹配的外部 Agent 预设。",
       "resume-unverified": "已连接的 Agent 尚未验证 session/resume 能力。",
       "runtime-unavailable": "匹配的外部 Agent 未连接或当前不可执行。",
-      "runtime-isolated": "所有匹配的 Agent 都使用独立的运行时状态，无法读取此会话。请使用与运行时共享状态的 Agent 恢复。"
+      "runtime-isolated": "所有匹配的 Agent 都使用独立的运行时状态，无法读取此会话。请使用与运行时共享状态的 Agent 恢复。",
+      "bound-runtime-unavailable": "上次恢复此会话所用的 Agent 未连接。请重新连接它，或选择另一个 Agent，以该 Agent 的账号继续。"
     },
     "resumeNative": "验证原 Agent，并恢复这一原生会话",
     "resumeReady": "原生会话已恢复；下一轮将使用该外部 Agent。"

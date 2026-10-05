@@ -49,6 +49,9 @@ const SPECS = {
       "./ecosystem",
       "./external-agent",
       "./session-operations",
+      "./canonical-event",
+      "./canonical-session",
+      "./history",
     ],
     dataOnly: [],
     runtimeModules: [],
@@ -59,6 +62,10 @@ const SPECS = {
       if (!requiresReconnectAfterCancel(UNDECLARED_EXECUTION_SEMANTICS)) throw new Error("semantics")
       if (missingAdapterCoreMethods({}).length !== 12) throw new Error("core methods")
       if (defineAdapterExtension("vendor.x", () => undefined).id !== "vendor.x") throw new Error("extension")
+      import { isAgentEventEnvelope } from "@cognia/agent-contracts/canonical-event"
+      import { validateCanonicalSession } from "@cognia/agent-contracts/canonical-session"
+      if (isAgentEventEnvelope({ schemaVersion: 1 })) throw new Error("envelope")
+      if (validateCanonicalSession({}).length === 0) throw new Error("canonical session")
     `,
     types: `
       import type { ProtocolAdapter, SessionCreateOptions } from "@cognia/agent-contracts/adapter"
@@ -71,13 +78,25 @@ const SPECS = {
       const scope: "turn" | "session" | "process" = executionSemanticsOf(adapter).cancel.scope
       const spawned: Promise<string> = host.spawn({ id: "a", command: "agent" })
       const event: ExternalAgentEvent["type"] = "done"
-      export { options, scope, spawned, event }
+      import type { ParsedHistorySession, HistoryPart } from "@cognia/agent-contracts/history"
+      import type { CanonicalAgentEvent } from "@cognia/agent-contracts/canonical-event"
+      declare const parsed: ParsedHistorySession
+      const firstPart: HistoryPart | undefined = parsed.messages[0]?.parts[0]
+      const canonical: CanonicalAgentEvent["kind"] = "text-delta"
+      export { options, scope, spawned, event, firstPart, canonical }
     `,
   },
   "agent-runtime-kit": {
-    entries: [".", "./base-adapter", "./json-rpc-peer", "./lf-frame-decoder", "./spawn-reclaim"],
-    dataOnly: [],
-    runtimeModules: [],
+    entries: [
+      ".",
+      "./base-adapter",
+      "./json-rpc-peer",
+      "./lf-frame-decoder",
+      "./spawn-reclaim",
+      "./history",
+    ],
+    dataOnly: ["./history"],
+    runtimeModules: ["base-adapter", "json-rpc-peer", "lf-frame-decoder", "spawn-reclaim"],
     smoke: `
       import { LfFrameDecoder } from "@cognia/agent-runtime-kit/lf-frame-decoder"
       import { JsonRpcPeer } from "@cognia/agent-runtime-kit/json-rpc-peer"
@@ -88,6 +107,9 @@ const SPECS = {
       const reply = peer.sendRequest("ping", {}, 1000)
       peer.ingest(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(sent[0]).id, result: "pong" }))
       if ((await reply) !== "pong") throw new Error("peer")
+      import { boundedDiagnostic, importedSessionId } from "@cognia/agent-runtime-kit/history"
+      if (importedSessionId("codex", "a") !== "import:codex:a") throw new Error("history ids")
+      if (boundedDiagnostic({ api_key: "k" }, { redactText: (t) => t }).api_key !== "[redacted]") throw new Error("diagnostic")
     `,
     types: `
       import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
@@ -128,9 +150,22 @@ const SPECS = {
     `,
   },
   "agent-codex": {
-    entries: [".", "./manifest", "./app-server-client", "./mcp-config", "./config-requirements"],
-    dataOnly: ["./manifest"],
-    runtimeModules: ["app-server-client", "agent-runtime-kit"],
+    entries: [
+      ".",
+      "./manifest",
+      "./history",
+      "./app-server-client",
+      "./mcp-config",
+      "./config-requirements",
+    ],
+    dataOnly: ["./manifest", "./history"],
+    runtimeModules: [
+      "app-server-client",
+      "base-adapter",
+      "json-rpc-peer",
+      "lf-frame-decoder",
+      "spawn-reclaim",
+    ],
     smoke: `
       import { codexManifest, CODEX_APP_SERVER_EXECUTION_SEMANTICS } from "@cognia/agent-codex/manifest"
       import { CodexAppServerAdapter, codexAppServerExtension } from "@cognia/agent-codex/app-server-client"
@@ -144,6 +179,13 @@ const SPECS = {
         await adapter.connect({ id: "c", name: "c", protocol: "codex-app-server", transport: "stdio", process: { command: "codex" } })
       } catch (error) { refused = /process host/.test(String(error)) }
       if (!refused) throw new Error("connect must refuse without a process host")
+      import { parseCodexRollout } from "@cognia/agent-codex/history"
+      const rollout = [
+        JSON.stringify({ type: "session_meta", payload: { id: "s1" } }),
+        JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: "hi" } }),
+      ].join("\\n")
+      const parsed = parseCodexRollout(rollout, "r.jsonl", { redactText: (t) => t })
+      if (parsed.originalSessionId !== "s1" || parsed.messages[0]?.parts[0]?.type !== "text") throw new Error("history")
     `,
     types: `
       import { CodexAppServerAdapter, type CodexAppServerStatus } from "@cognia/agent-codex/app-server-client"
@@ -157,7 +199,11 @@ const SPECS = {
         outboundGate: () => true,
       })
       declare const status: CodexAppServerStatus
-      export { adapter, status }
+      import { parseCodexRollout, summarizeCodexRollout } from "@cognia/agent-codex/history"
+      import type { ParsedHistorySession, HistorySessionSummary } from "@cognia/agent-contracts/history"
+      const parsed: ParsedHistorySession = parseCodexRollout("", "r", { redactText: (t) => t })
+      const summary: HistorySessionSummary | null = summarizeCodexRollout("", "r")
+      export { adapter, status, parsed, summary }
     `,
   },
 }

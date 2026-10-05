@@ -187,6 +187,15 @@ export function ImportedOriginChip({
       setChoices(result.choices)
       return
     }
+    // The configuration this session is bound to is offline. Never move it to
+    // another account silently: explain, then let the user pick one.
+    if (!result.ok && result.code === "bound-runtime-unavailable" && result.choices?.length) {
+      toast.error(t("resumeErrors.bound-runtime-unavailable"), {
+        ...(result.detail ? { description: result.detail } : {}),
+      })
+      setChoices(result.choices)
+      return
+    }
     if (!result.ok) {
       toast.error(t(`resumeErrors.${result.code}`), {
         ...(result.detail ? { description: result.detail } : {}),

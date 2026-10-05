@@ -2,6 +2,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { ExternalAgentInstance } from "@/types/agent/external-agent"
 
 import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
+import { presetIdsSharingEcosystem } from "@/lib/agent-ecosystem/runtime-link"
 import { bindImportedSessionToNativeRuntime } from "@/lib/db/sessions"
 import { realSessionFs } from "./fs"
 
@@ -10,6 +11,7 @@ export type NativeResumeFailureCode =
   | "preset-missing"
   | "preset-not-configured"
   | "runtime-unavailable"
+  | "bound-runtime-unavailable"
   | "runtime-ambiguous"
   | "runtime-isolated"
   | "resume-unverified"
@@ -28,7 +30,10 @@ export type NativeResumeResult =
       ok: false
       code: NativeResumeFailureCode
       detail?: string
-      /** Present with `runtime-ambiguous`: the configurations to choose from. */
+      /**
+       * Present with `runtime-ambiguous`, and with `bound-runtime-unavailable`
+       * when another configuration is connected: the ones to choose from.
+       */
       choices?: NativeResumeChoice[]
     }
 
@@ -71,9 +76,13 @@ export async function resumeImportedSessionNative(
     ((
       await import("@/lib/ai/agent/external/manager")
     ).getExternalAgentManager() as NativeResumeManager)
-  const presetMatches = manager
-    .getAllAgents()
-    .filter((instance) => externalAgentPresetIdOf(instance.config) === presetId)
+  // Every runtime of the recorded preset's ecosystem reads the same native
+  // session store, so all of them are candidates (ADR-0217).
+  const presetIds = presetIdsSharingEcosystem(presetId)
+  const presetMatches = manager.getAllAgents().filter((instance) => {
+    const instancePreset = externalAgentPresetIdOf(instance.config)
+    return instancePreset !== undefined && presetIds.includes(instancePreset)
+  })
   if (presetMatches.length === 0) {
     return { ok: false, code: "preset-not-configured", detail: presetId }
   }
@@ -88,24 +97,41 @@ export async function resumeImportedSessionNative(
   const connectedCandidates = candidates.filter(
     (instance) => instance.connectionStatus === "connected"
   )
+  const choicesOf = (instances: ExternalAgentInstance[]): NativeResumeChoice[] =>
+    instances.map((instance) => ({ agentId: instance.config.id, name: instance.config.name }))
   if (options.agentId && !connectedCandidates.some((c) => c.config.id === options.agentId)) {
     return { ok: false, code: "runtime-unavailable" }
+  }
+  // A verified resume recorded its configuration. Return to it; when it still
+  // exists but is not connected, say so instead of resuming under whichever
+  // other account is connected. A configuration that was deleted (or now
+  // keeps its own state) no longer binds anything.
+  let chosenId = options.agentId
+  const boundId = binding.agentConfigId?.trim()
+  if (!chosenId && boundId) {
+    const bound = candidates.find((instance) => instance.config.id === boundId)
+    if (bound?.connectionStatus === "connected") chosenId = bound.config.id
+    else if (bound) {
+      return {
+        ok: false,
+        code: "bound-runtime-unavailable",
+        detail: bound.config.name,
+        ...(connectedCandidates.length > 0 ? { choices: choicesOf(connectedCandidates) } : {}),
+      }
+    }
   }
   // A preset identifies a runtime family, not an account or host. Without a
   // durable instance binding choosing the first would resume on an arbitrary
   // one, so the caller is handed the choice instead.
-  if (!options.agentId && connectedCandidates.length > 1) {
+  if (!chosenId && connectedCandidates.length > 1) {
     return {
       ok: false,
       code: "runtime-ambiguous",
-      choices: connectedCandidates.map((instance) => ({
-        agentId: instance.config.id,
-        name: instance.config.name,
-      })),
+      choices: choicesOf(connectedCandidates),
     }
   }
-  const connected = options.agentId
-    ? connectedCandidates.find((c) => c.config.id === options.agentId)
+  const connected = chosenId
+    ? connectedCandidates.find((c) => c.config.id === chosenId)
     : connectedCandidates[0]
   if (!connected) {
     const detail = candidates.find((instance) => instance.validity?.blockingReason)?.validity
@@ -132,6 +158,7 @@ export async function resumeImportedSessionNative(
       ...binding,
       nativeSessionId,
       presetId,
+      agentConfigId: connected.config.id,
       resumeMethod: "protocol" as const,
       verifiedAt: (deps.now ?? (() => new Date().toISOString()))(),
     }

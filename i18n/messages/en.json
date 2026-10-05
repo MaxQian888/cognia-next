@@ -8386,6 +8386,7 @@
       "resumeChooseAgent": "Resume with which agent?",
       "resumeErrors": {
         "binding-missing": "The source did not provide a native session ID.",
+        "bound-runtime-unavailable": "The agent this session was last resumed with is not connected. Connect it again, or choose another agent to continue under that agent's account.",
         "cwd-missing": "The original working directory no longer exists.",
         "handshake-failed": "The original agent could not resume this session.",
         "preset-missing": "The import did not record a compatible runtime preset.",

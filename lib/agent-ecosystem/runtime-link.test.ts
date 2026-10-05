@@ -4,6 +4,7 @@ import {
   presetIdsForEcosystem,
   presetIdsForMigrationVendor,
   presetIdsForSessionSource,
+  presetIdsSharingEcosystem,
   primaryPresetIdForEcosystem,
   primaryPresetIdForMigrationVendor,
 } from "./runtime-link"
@@ -37,6 +38,20 @@ describe("preset resolution", () => {
 
   it("returns an empty list for a history-only source rather than throwing", () => {
     expect(presetIdsForSessionSource("continue-dev")).toEqual([])
+  })
+
+  it("widens a recorded preset to every preset of its ecosystem", () => {
+    // An imported Codex rollout recorded `codex`; the app-server reads the same store.
+    expect(presetIdsSharingEcosystem("codex")).toEqual(["codex", "codex-acp", "codex-app-server"])
+    expect(presetIdsSharingEcosystem("codex-app-server")).toEqual([
+      "codex",
+      "codex-acp",
+      "codex-app-server",
+    ])
+  })
+
+  it("keeps a preset no ecosystem claims", () => {
+    expect(presetIdsSharingEcosystem("plugin-only-preset")).toEqual(["plugin-only-preset"])
   })
 
   it("returns an empty list for an unknown source or ecosystem", () => {

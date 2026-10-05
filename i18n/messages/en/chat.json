@@ -1682,7 +1682,8 @@
       "preset-not-configured": "Configure the matching external Agent preset first.",
       "resume-unverified": "The connected Agent has not verified session/resume support.",
       "runtime-unavailable": "The matching external Agent is not connected or executable.",
-      "runtime-isolated": "Every matching agent keeps its own runtime state, so none of them can see this session. Resume it with an agent that shares the runtime's state."
+      "runtime-isolated": "Every matching agent keeps its own runtime state, so none of them can see this session. Resume it with an agent that shares the runtime's state.",
+      "bound-runtime-unavailable": "The agent this session was last resumed with is not connected. Connect it again, or choose another agent to continue under that agent's account."
     },
     "resumeNative": "Verify the original Agent and resume this exact native session",
     "resumeReady": "Native session resumed. The external Agent is selected for the next turn."

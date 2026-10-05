@@ -105,8 +105,9 @@ ignored; `resumeInFlightRuns` does not skip `__team__:` rows.
 @cognia/agent-acp              ACP client over AgentProcessHost; AcpVendorProfile hook
   ▲
 @cognia/agent-codex | -claude-code | -opencode | -pi | -dsh | -aider | -a2a | -ecosystems
-                               each: ./manifest, and only the capabilities it really has:
-                               ./runtime/<protocol>, ./history, ./config, ./subagents, ./memory, ./plugin-convert
+                               each: ./manifest, its runtime client(s), and ./history when the
+                               runtime keeps its own session store (migration readers for settings,
+                               commands, subagents and memory stay in the ADR-0107 subsystem)
   ▲
 app host (lib/, stores, components)  ── registers manifests, implements ports, owns policy/PII/sandbox/persistence
 CLI host (cli/)                     ── implements the same ports with Node (replaces esbuild aliases)
@@ -120,8 +121,8 @@ CLI host (cli/)                     ── implements the same ports with Node (
 Rules (enforced by `scripts/gates/check-package-boundaries.mjs` extensions and pack tests):
 
 1. No package imports `@/…`, React, Tauri, Dexie, zustand.
-2. `history`, `config`, `subagents`, `memory`, `plugin-convert`, `manifest` entry points never
-   transitively import a runtime entry, a process host, or a vendor SDK (closure test).
+2. `manifest` and `history` entry points never transitively import a runtime entry, a process
+   host, or a vendor SDK (closure test in `pack-test-agent-package.mjs`).
 3. Ecosystem packages may depend on contracts, runtime-kit, acp — never on each other.
 4. Capability _declaration_ (manifest) never grants permission; the host's security policy and
    permission guard remain the only authority.
@@ -228,7 +229,7 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
 - New: `@cognia/agent-contracts` (identity, external-agent types moved with app re-export,
   adapter core/capabilities, semantics, host ports), `@cognia/agent-runtime-kit` (subset needed
   by DSH/Codex), `@cognia/agent-dsh` (`./manifest`, `./runtime/sdk`), `@cognia/agent-codex`
-  (`./manifest`, `./runtime/app-server`, `./history`, `./config`).
+  (`./manifest`, `./app-server-client`, `./history`).
 - App: implement ports over the existing transport; manager registers adapters from the
   integration packages; `lib/ai/agent/external/runtimes/{dsh,codex}` become forwarding modules or
   are deleted where all callers moved; CLI provides the Node port implementation for these two.
@@ -238,15 +239,21 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
   fails explicitly when it is missing.
 - Accept: jest suites for moved modules green in their package; app suites for manager/CLI
   green; `pack:test` for the four packages (tarball install, ESM/CJS/tsc NodeNext, no `@/`);
-  closure test proves `@cognia/agent-codex/history` and `/config` do not load runtime/process
-  code; `build:packages` includes them.
+  closure test proves `@cognia/agent-codex/history` (and every `./manifest`) does not load
+  runtime/process code; `build:packages` includes them.
+- Scope decision (2026-10-05): Codex `./config` was dropped. The settings, commands, subagent
+  and memory readers translate vendor files into Cognia's own settings vocabulary across many
+  vendors (some not launchable), so they stay in the migration subsystem (ADR-0107) and keep
+  resolving vendors through the ecosystem rows. A runtime's own session store is the only
+  satellite that moves, because resume, fork and session listing depend on the same knowledge.
+- Status: done (commit `3f319be74` plus the history/resume follow-up).
 
 ### Phase 3 — all other external integrations
 
 - `@cognia/agent-acp` with `AcpVendorProfile`; vendor branches out of `acp-client.ts`/manager into
   `@cognia/agent-ecosystems/<id>`; `agent-pi`, `agent-opencode`, `agent-claude-code`,
-  `agent-aider`, `agent-a2a`; Devin adapter; portable history adapters; satellites (subagent,
-  settings, commands, memory, plugin-convert) per ecosystem.
+  `agent-aider`, `agent-a2a`; Devin adapter; session-store readers (`./history`) for every
+  runtime that has one (Pi, OpenCode, Claude Code, Aider, portable formats).
 - Catalog generation: runtime rows + protocol capability rows authored in packages, aggregated
   into the existing `protocol/*.json` by a generator with `--check` wired into
   `audit:external-agent-runtimes` / `audit:agent-capabilities`; security policy untouched.

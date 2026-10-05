@@ -8,6 +8,7 @@
 import type { UIMessage } from "ai"
 import { buildHandoffContext } from "@/lib/chat/handoff-context"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
+import { importedMessageId, stringifyToolResult } from "@cognia/agent-runtime-kit/history"
 
 type Part = UIMessage["parts"][number]
 
@@ -40,7 +41,7 @@ export function toolPart(opts: {
     state,
     input: opts.input ?? {},
     ...(hasOutput ? { output: opts.isError ? undefined : opts.output } : {}),
-    ...(opts.isError && hasOutput ? { errorText: stringifyResult(opts.output) } : {}),
+    ...(opts.isError && hasOutput ? { errorText: stringifyToolResult(opts.output) } : {}),
   } as unknown as Part
 }
 
@@ -54,36 +55,13 @@ export function filePart(opts: { mediaType: string; url: string; filename?: stri
   } as unknown as Part
 }
 
-function stringifyResult(result: unknown): string {
-  if (typeof result === "string") return result
-  try {
-    return JSON.stringify(result)
-  } catch {
-    return String(result)
-  }
-}
-
-/**
- * Stable, collision-resistant session id derived from the source + upstream id
- * so re-scanning the same on-disk session upserts (via `bulkPut`) instead of
- * creating a duplicate.
- */
-export function importedSessionId(sourceId: string, originalSessionId: string): string {
-  return `import:${sourceId}:${originalSessionId}`
-}
-
-/** Deterministic per-message id under an imported session. */
-export function importedMessageId(sessionId: string, index: number): string {
-  return `${sessionId}:m${index}`
-}
-
-/** First-line, whitespace-collapsed, truncated title. */
-export function deriveTitle(firstUserText: string, fallback: string): string {
-  const cleaned = firstUserText.replace(/\s+/g, " ").trim()
-  if (!cleaned) return fallback
-  return cleaned.length > 80 ? `${cleaned.slice(0, 79)}…` : cleaned
-}
-
+// Imported ids and titles are shared with the history readers in integration
+// packages (ADR-0217), so a session re-read by either path keeps its id.
+export {
+  deriveTitle,
+  importedMessageId,
+  importedSessionId,
+} from "@cognia/agent-runtime-kit/history"
 /** Assemble one StoredMessage. Skips senderKind for system rows. */
 export function buildMessage(opts: {
   id?: string

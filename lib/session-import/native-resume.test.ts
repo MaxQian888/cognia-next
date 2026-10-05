@@ -180,10 +180,104 @@ describe("resumeImportedSessionNative", () => {
     expect(bind).toHaveBeenCalledWith("import:codex:thread-1", {
       nativeSessionId: "thread-1",
       presetId: "codex",
+      agentConfigId: "agent-1",
       cwd: "/workspace",
       resumeMethod: "protocol",
       verifiedAt: "2026-08-29T00:00:00.000Z",
     })
+    expect(result).toEqual({ ok: true, agentId: "agent-1", nativeSessionId: "thread-1" })
+  })
+
+  it("offers every configuration of the recorded preset's ecosystem", async () => {
+    // A rollout recorded by the Codex ACP preset resumes on the app-server too.
+    const appServer = agent({
+      config: {
+        id: "app-server",
+        name: "Codex app-server",
+        metadata: { preset: "codex-app-server" },
+      },
+    })
+    const result = await resumeImportedSessionNative(imported(), {
+      manager: { getAllAgents: () => [appServer], resumeSession },
+      fs: { exists },
+      bind,
+    })
+    expect(result).toEqual({ ok: true, agentId: "app-server", nativeSessionId: "thread-1" })
+  })
+
+  it("returns to the configuration the last verified resume ran on", async () => {
+    const first = agent({ config: { id: "work", name: "Work", metadata: { preset: "codex" } } })
+    const second = agent({ config: { id: "home", name: "Home", metadata: { preset: "codex" } } })
+    const result = await resumeImportedSessionNative(
+      imported({
+        importRuntimeBinding: {
+          nativeSessionId: "thread-1",
+          presetId: "codex",
+          agentConfigId: "home",
+        },
+      }),
+      { manager: { getAllAgents: () => [first, second], resumeSession }, fs: { exists }, bind }
+    )
+    expect(result).toEqual({ ok: true, agentId: "home", nativeSessionId: "thread-1" })
+    expect(resumeSession).toHaveBeenCalledWith("home", "thread-1", {})
+  })
+
+  it("refuses to move a bound session to another account while its configuration is offline", async () => {
+    const bound = agent({
+      config: { id: "home", name: "Home", metadata: { preset: "codex" } },
+      connectionStatus: "disconnected",
+    })
+    const other = agent({ config: { id: "work", name: "Work", metadata: { preset: "codex" } } })
+    const result = await resumeImportedSessionNative(
+      imported({
+        importRuntimeBinding: {
+          nativeSessionId: "thread-1",
+          presetId: "codex",
+          agentConfigId: "home",
+        },
+      }),
+      { manager: { getAllAgents: () => [bound, other], resumeSession }, fs: { exists }, bind }
+    )
+    expect(result).toEqual({
+      ok: false,
+      code: "bound-runtime-unavailable",
+      detail: "Home",
+      choices: [{ agentId: "work", name: "Work" }],
+    })
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+
+  it("still resumes on an explicitly chosen configuration when the bound one is offline", async () => {
+    const bound = agent({
+      config: { id: "home", name: "Home", metadata: { preset: "codex" } },
+      connectionStatus: "disconnected",
+    })
+    const other = agent({ config: { id: "work", name: "Work", metadata: { preset: "codex" } } })
+    const result = await resumeImportedSessionNative(
+      imported({
+        importRuntimeBinding: {
+          nativeSessionId: "thread-1",
+          presetId: "codex",
+          agentConfigId: "home",
+        },
+      }),
+      { manager: { getAllAgents: () => [bound, other], resumeSession }, fs: { exists }, bind },
+      { agentId: "work" }
+    )
+    expect(result).toEqual({ ok: true, agentId: "work", nativeSessionId: "thread-1" })
+  })
+
+  it("ignores a binding to a configuration that no longer exists", async () => {
+    const result = await resumeImportedSessionNative(
+      imported({
+        importRuntimeBinding: {
+          nativeSessionId: "thread-1",
+          presetId: "codex",
+          agentConfigId: "gone",
+        },
+      }),
+      { manager: { getAllAgents: () => [agent()], resumeSession }, fs: { exists }, bind }
+    )
     expect(result).toEqual({ ok: true, agentId: "agent-1", nativeSessionId: "thread-1" })
   })
 

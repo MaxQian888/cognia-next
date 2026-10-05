@@ -211,6 +211,7 @@
     "0213-conversation-history-has-a-manager-and-the-archive-freezes-place",
     "0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task",
     "0215-one-person-one-encrypted-sync-space-many-writable-hosts",
-    "0216-each-agent-configuration-keeps-its-own-state"
+    "0216-each-agent-configuration-keeps-its-own-state",
+    "0217-agent-integrations-are-packages-behind-host-ports"
   ]
 }

@@ -226,6 +226,8 @@ describe("bounded session reads", () => {
           console.log('bounded-before-parse');
         }
       `
+      // Resolve through the root tsconfig, exactly as the shipped CLI bundle does
+      // (`scripts/build/esbuild-shared.mjs`), so workspace packages are bundled.
       execFileSync(
         process.execPath,
         [
@@ -233,7 +235,7 @@ describe("bounded session reads", () => {
           "-e",
           `
         import {build} from 'esbuild';
-        await build({stdin:{contents:${JSON.stringify(contents)},resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',packages:'external',outfile:${JSON.stringify(outfile)},logLevel:'silent'});
+        await build({stdin:{contents:${JSON.stringify(contents)},resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',packages:'external',tsconfig:'tsconfig.json',outfile:${JSON.stringify(outfile)},logLevel:'silent'});
       `,
         ],
         { timeout: 30000 }

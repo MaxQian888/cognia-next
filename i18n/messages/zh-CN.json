@@ -8386,6 +8386,7 @@
       "resumeChooseAgent": "使用哪个 Agent 恢复？",
       "resumeErrors": {
         "binding-missing": "来源未提供原生会话 ID。",
+        "bound-runtime-unavailable": "上次恢复此会话所用的 Agent 未连接。请重新连接它，或选择另一个 Agent，以该 Agent 的账号继续。",
         "cwd-missing": "原始工作目录已不存在。",
         "handshake-failed": "原 Agent 无法恢复此会话。",
         "preset-missing": "导入记录中没有兼容的运行时预设。",
