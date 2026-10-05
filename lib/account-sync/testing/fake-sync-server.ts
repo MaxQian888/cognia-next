@@ -79,6 +79,12 @@ class Refusal extends Error {
 export interface FakeSyncServerOptions {
   spaceId: string
   now?: () => number
+  /**
+   * Accept a request whose names are not sealed to exactly the active
+   * devices, as a malicious server would forward a request built against a
+   * list it forged.
+   */
+  skipNameCheck?: boolean
 }
 
 export interface FakeSyncServer {
@@ -324,7 +330,7 @@ export function createFakeSyncServer(options: FakeSyncServerOptions): FakeSyncSe
       if (current.devices[parsed.deviceId] || current.usedKeys.includes(parsed.signPub))
         throw new Refusal(400, "bad_request")
       try {
-        checkSealedNames(parsed.names, current)
+        if (!options.skipNameCheck) checkSealedNames(parsed.names, current)
       } catch {
         throw new Refusal(400, "bad_request")
       }

@@ -28,6 +28,19 @@ describe("createAccountSyncVault", () => {
     expect(await otherProfile.loadDeviceKeys()).toBeNull()
   })
 
+  it("sees another tab forgetting or replacing the keys", async () => {
+    const store = createMemoryKeyring()
+    const vault = createAccountSyncVault(SCOPE, store)
+    const saved = await vault.saveDeviceKeys(await generateDeviceKeyMaterial())
+    expect(await vault.loadDeviceKeys()).toBe(saved)
+    const otherTab = createAccountSyncVault(SCOPE, store)
+    const replaced = await generateDeviceKeyMaterial()
+    store.values.set(`local_1:${SCOPE.spaceId}:device`, JSON.stringify(replaced))
+    expect((await vault.loadDeviceKeys())!.deviceId).toBe(replaced.deviceId)
+    await otherTab.forgetDevice({ at: 1, seq: 1, by: "dev_X" })
+    expect(await vault.loadDeviceKeys()).toBeNull()
+  })
+
   it("refuses to work, and drops cached keys, while the store is not durable", async () => {
     const store = createMemoryKeyring()
     const vault = createAccountSyncVault(SCOPE, store)
@@ -71,6 +84,9 @@ describe("createAccountSyncVault", () => {
     expect(await vault.loadKeyChain()).toBeNull()
     expect(await vault.loadPin()).not.toBeNull()
     expect(await vault.loadRemoval()).toEqual({ at: 5, seq: 3, by: "dev_X" })
+    // Enrolling again clears the record.
+    await vault.saveDeviceKeys(await generateDeviceKeyMaterial())
+    expect(await vault.loadRemoval()).toBeNull()
   })
 
   it("refuses a corrupt pin", async () => {

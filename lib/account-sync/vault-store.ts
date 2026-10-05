@@ -8,8 +8,9 @@
  *
  * Nothing is written while values would not survive a restart (a locked
  * Browser Vault): a device that forgot its keys would have to enroll again.
- * Imported keys are cached in memory and dropped as soon as the store reports
- * it is no longer persistent (the vault locked).
+ * Imported keys are cached in memory against the stored value, so another tab
+ * forgetting the device is seen at once, and dropped as soon as the store
+ * reports it is no longer persistent (the vault locked).
  */
 
 import type { RegistryPin } from "@cognia/sync-protocol"
@@ -55,6 +56,7 @@ export interface AccountSyncVault {
   /** Throws when secrets would not survive a restart. */
   assertAvailable(): void
   loadDeviceKeys(): Promise<DeviceKeys | null>
+  /** Stores this device's keys; a removal record from an earlier enrollment is cleared. */
   saveDeviceKeys(material: DeviceKeyMaterial): Promise<DeviceKeys>
   loadKeyChain(): Promise<EpochKeyChain | null>
   saveKeyChain(chain: EpochKeyChain): Promise<void>
@@ -66,7 +68,7 @@ export interface AccountSyncVault {
   forgetDevice(removal: RemovalRecord): Promise<void>
 }
 
-const memory = new Map<string, DeviceKeys>()
+const memory = new Map<string, { raw: string; keys: DeviceKeys }>()
 
 /** Test seam. */
 export function __clearAccountSyncKeyCache(): void {
@@ -107,20 +109,25 @@ export function createAccountSyncVault(
 
     async loadDeviceKeys() {
       assertAvailable()
-      const cached = memory.get(cacheKey)
-      if (cached) return cached
       const raw = await store.load(key("device"))
-      if (!raw) return null
+      if (!raw) {
+        memory.delete(cacheKey)
+        return null
+      }
+      const cached = memory.get(cacheKey)
+      if (cached?.raw === raw) return cached.keys
       const keys = await importDeviceKeys(parseDeviceKeyMaterial(JSON.parse(raw)))
-      memory.set(cacheKey, keys)
+      memory.set(cacheKey, { raw, keys })
       return keys
     },
 
     async saveDeviceKeys(material) {
       assertAvailable()
       const keys = await importDeviceKeys(material)
-      await store.save(key("device"), JSON.stringify(material))
-      memory.set(cacheKey, keys)
+      const raw = JSON.stringify(material)
+      await store.save(key("device"), raw)
+      await store.delete(key("removed"))
+      memory.set(cacheKey, { raw, keys })
       return keys
     },
 
