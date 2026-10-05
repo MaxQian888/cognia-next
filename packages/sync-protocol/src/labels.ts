@@ -27,6 +27,8 @@ export type Label =
   | "recovery"
   | "recovery-enc"
   | "recovery-sign"
+  | "op"
+  | "op-sig"
 
 const SEPARATOR = new Uint8Array([0])
 

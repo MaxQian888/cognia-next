@@ -119,6 +119,25 @@ export async function ecdsaSign(privateKey: CryptoKey, data: Uint8Array): Promis
   )
 }
 
+/** Like {@link ecdsaVerify}, for a key imported once and checked many times. */
+export async function ecdsaVerifyWithKey(
+  publicKey: CryptoKey,
+  signature: Uint8Array,
+  data: Uint8Array
+): Promise<boolean> {
+  if (signature.length !== P256_SIGNATURE_BYTES) return false
+  try {
+    return await subtle().verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      publicKey,
+      buffer(signature),
+      buffer(data)
+    )
+  } catch {
+    return false
+  }
+}
+
 /** False for a bad signature or a malformed key; never throws. */
 export async function ecdsaVerify(
   publicKey: Uint8Array,

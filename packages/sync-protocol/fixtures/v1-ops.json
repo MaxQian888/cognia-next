@@ -1,0 +1,362 @@
+{
+  "//": "Account Sync Protocol v1 op-log vectors. Frozen: never regenerate to fix a test (see scripts/generate-op-fixtures.ts).",
+  "hlc": {
+    "ordered": [
+      {
+        "clock": {
+          "ms": 0,
+          "c": 0,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "encoded": "0000000000000000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+      },
+      {
+        "clock": {
+          "ms": 1,
+          "c": 0,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "encoded": "0000000000010000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+      },
+      {
+        "clock": {
+          "ms": 1,
+          "c": 1,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "encoded": "0000000000010001dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+      },
+      {
+        "clock": {
+          "ms": 1,
+          "c": 1,
+          "deviceId": "dev_7ZEWAM8BBBAF70YKNJZCYKARF8"
+        },
+        "encoded": "0000000000010001dev_7ZEWAM8BBBAF70YKNJZCYKARF8"
+      },
+      {
+        "clock": {
+          "ms": 255,
+          "c": 65535,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "encoded": "0000000000ffffffdev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+      },
+      {
+        "clock": {
+          "ms": 281474976710655,
+          "c": 0,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "encoded": "ffffffffffff0000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+      }
+    ],
+    "send": [
+      {
+        "last": null,
+        "now": 500,
+        "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+        "expected": {
+          "ms": 500,
+          "c": 0,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        }
+      },
+      {
+        "last": {
+          "ms": 500,
+          "c": 0
+        },
+        "now": 500,
+        "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+        "expected": {
+          "ms": 500,
+          "c": 1,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        }
+      },
+      {
+        "last": {
+          "ms": 2000,
+          "c": 65535
+        },
+        "now": 500,
+        "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+        "expected": {
+          "ms": 2001,
+          "c": 0,
+          "deviceId": "dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        }
+      }
+    ],
+    "receive": [
+      {
+        "local": {
+          "ms": 100,
+          "c": 0
+        },
+        "remote": {
+          "ms": 200,
+          "c": 3
+        },
+        "now": 150,
+        "expected": {
+          "ms": 200,
+          "c": 3
+        }
+      },
+      {
+        "local": {
+          "ms": 300,
+          "c": 0
+        },
+        "remote": {
+          "ms": 200,
+          "c": 3
+        },
+        "now": 150,
+        "expected": {
+          "ms": 300,
+          "c": 0
+        }
+      },
+      {
+        "local": {
+          "ms": 1000,
+          "c": 1
+        },
+        "remote": {
+          "ms": 301001,
+          "c": 0
+        },
+        "now": 1000,
+        "expected": {
+          "ms": 1000,
+          "c": 1
+        }
+      }
+    ]
+  },
+  "padding": [
+    {
+      "length": 0,
+      "bucket": 0
+    },
+    {
+      "length": 1,
+      "bucket": 1
+    },
+    {
+      "length": 2,
+      "bucket": 2
+    },
+    {
+      "length": 9,
+      "bucket": 10
+    },
+    {
+      "length": 100,
+      "bucket": 104
+    },
+    {
+      "length": 1000,
+      "bucket": 1024
+    },
+    {
+      "length": 1025,
+      "bucket": 1088
+    },
+    {
+      "length": 65537,
+      "bucket": 67584
+    },
+    {
+      "length": 1000000,
+      "bucket": 1015808
+    }
+  ],
+  "canonical": {
+    "values": ["sessions", 42, ""],
+    "hex": "0000000873657373696f6e7300000002343200000000"
+  },
+  "sealed": {
+    "spaceId": "sssssssssssssssssssssssssssssssssssssssssss",
+    "epochKey": "51237bcc334135bd35ba177f59dec1be0f56d3d4fa68ca4f0d3c1cd019f9e72d",
+    "opKey": "cdb16e6b878fda926b4c950c9ca81dc62cf9d6942dbbc3094802226dfe82822e",
+    "signPub": "BHz78qW_n_NBzrq0_rvw6qKYARNTxwuwofBU5Ns9VfWdXVLHvS8iMxQPVGr408zBxGY2bsxb9ZGL16Ia5GTv_Ns",
+    "payload": {
+      "t": "sessions",
+      "id": "ses_01",
+      "k": "upsert",
+      "f": {
+        "title": ["Plan the trip", "01a0c4506c000002dev_M7N6JNCCSXQCAX5BZ7G1JK95XC"],
+        "pinned": [true, "01a0c4506c000002dev_M7N6JNCCSXQCAX5BZ7G1JK95XC"]
+      }
+    },
+    "aad": "636f676e69612d73796e632f76312f6f70000000002b737373737373737373737373737373737373737373737373737373737373737373737373737373737373730000000163000000013100000001330000001e6465765f4d374e364a4e434353585143415835425a3747314a4b393558430000000137",
+    "signingBytes": "636f676e69612d73796e632f76312f6f702d736967000000002b737373737373737373737373737373737373737373737373737373737373737373737373737373737373730000001e6465765f4d374e364a4e434353585143415835425a3747314a4b3935584300000001370000000d313739303030303030303030300000000132000000013300000001310000000163000000105f6b316652386650552d72495274535200000116734531334e69635334655f46426b46565836656d2d4b7a616553726c4a4276384e4d374b5a6f795a436d6831394959756a36696553424a4f336d74656f78476f4f514f71477a583375485761504c45325a644b696c6c536358456269436f7850324439634c517243334955637556395a635a77453931574e65577277526e6e44455f65644b74724b7033424c4a57462d6834774350576c384f2d35797366456571306d4f76564c5f422d71436a4a514a546136486235474b35695662693734335577724a7a344c4f5134515a64664d6275683338596d50624478764a7365484843306570676d685449683967696e325041746c4a596a796e63424b4e347a76704f326a65724370365f6c61554a313636574a6b684d51",
+    "op": {
+      "deviceId": "dev_M7N6JNCCSXQCAX5BZ7G1JK95XC",
+      "deviceSeq": 7,
+      "hlc": {
+        "ms": 1790000000000,
+        "c": 2
+      },
+      "epoch": 3,
+      "schemaVer": 1,
+      "cls": "c",
+      "nonce": "_k1fR8fPU-rIRtSR",
+      "ct": "sE13NicS4e_FBkFVX6em-KzaeSrlJBv8NM7KZoyZCmh19IYuj6ieSBJO3mteoxGoOQOqGzX3uHWaPLE2ZdKillScXEbiCoxP2D9cLQrC3IUcuV9ZcZwE91WNeWrwRnnDE_edKtrKp3BLJWF-h4wCPWl8O-5ysfEeq0mOvVL_B-qCjJQJTa6Hb5GK5iVbi743UwrJz4LOQ4QZdfMbuh38YmPbDxvJseHHC0epgmhTIh9gin2PAtlJYjyncBKN4zvpO2jerCp6_laUJ166WJkhMQ",
+      "sig": "ZnpkCTzSLYXioeXgOF9q2QCFWU-LVMGuLHdx1oh26sbRY6e8AVIR1K3D_AFmlPxoh683W0JWXyUbLJrjsqFLAQ"
+    }
+  },
+  "merge": {
+    "upserts": [
+      {
+        "exists": false,
+        "incoming": {
+          "a": [1, "0000000000010000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"]
+        },
+        "expected": {
+          "kind": "write",
+          "fields": {
+            "a": 1
+          },
+          "created": true,
+          "clocks": {
+            "fields": {
+              "a": "0000000000010000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+            }
+          }
+        }
+      },
+      {
+        "exists": true,
+        "clocks": {
+          "fields": {
+            "a": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+          }
+        },
+        "incoming": {
+          "a": [2, "0000000000040000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"],
+          "b": [3, "0000000000060000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"]
+        },
+        "expected": {
+          "kind": "write",
+          "fields": {
+            "b": 3
+          },
+          "created": false,
+          "clocks": {
+            "fields": {
+              "a": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+              "b": "0000000000060000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+            }
+          }
+        }
+      },
+      {
+        "exists": true,
+        "clocks": {
+          "fields": {
+            "a": "0000000000050000dev_7ZEWAM8BBBAF70YKNJZCYKARF8"
+          }
+        },
+        "incoming": {
+          "a": [2, "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"]
+        },
+        "expected": {
+          "kind": "ignore"
+        }
+      },
+      {
+        "exists": false,
+        "clocks": {
+          "fields": {},
+          "tombstone": "00000000000a0000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "incoming": {
+          "a": [1, "0000000000090000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"]
+        },
+        "expected": {
+          "kind": "ignore"
+        }
+      },
+      {
+        "exists": false,
+        "clocks": {
+          "fields": {},
+          "tombstone": "00000000000a0000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "incoming": {
+          "a": [1, "0000000000030000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"],
+          "b": [2, "00000000000b0000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"]
+        },
+        "expected": {
+          "kind": "write",
+          "fields": {
+            "a": 1,
+            "b": 2
+          },
+          "created": true,
+          "clocks": {
+            "fields": {
+              "a": "0000000000030000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+              "b": "00000000000b0000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+            },
+            "tombstone": "00000000000a0000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+          }
+        }
+      }
+    ],
+    "deletes": [
+      {
+        "exists": true,
+        "clocks": {
+          "fields": {
+            "a": "0000000000010000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+          }
+        },
+        "at": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+        "expected": {
+          "kind": "delete",
+          "clocks": {
+            "fields": {},
+            "tombstone": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+          }
+        }
+      },
+      {
+        "exists": true,
+        "clocks": {
+          "fields": {
+            "a": "0000000000010000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+            "b": "0000000000090000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+          }
+        },
+        "at": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+        "expected": {
+          "kind": "survive",
+          "clocks": {
+            "fields": {
+              "a": "0000000000010000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+              "b": "0000000000090000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+            },
+            "tombstone": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+          }
+        }
+      },
+      {
+        "exists": false,
+        "clocks": {
+          "fields": {},
+          "tombstone": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W"
+        },
+        "at": "0000000000050000dev_0EFX1ZYAQCMYW42HRKG4F15V6W",
+        "expected": {
+          "kind": "ignore"
+        }
+      }
+    ]
+  }
+}

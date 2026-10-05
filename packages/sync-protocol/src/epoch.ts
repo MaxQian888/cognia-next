@@ -12,7 +12,7 @@ import type { NameCiphertext, PrevWrap } from "./registry/types"
 
 export const EPOCH_KEY_BYTES = 32
 
-export type EpochSubkey = Extract<Label, "commit" | "chain" | "name">
+export type EpochSubkey = Extract<Label, "commit" | "chain" | "name" | "op">
 
 export function newEpochKey(): Uint8Array {
   return randomBytes(EPOCH_KEY_BYTES)
