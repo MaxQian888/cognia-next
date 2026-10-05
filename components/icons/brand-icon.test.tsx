@@ -112,10 +112,19 @@ describe("BrandIcon", () => {
     ["amp", "Amp", "/icons/lobe/amp-color.svg"],
     ["antigravity", "Antigravity", "/icons/lobe/antigravity-color.svg"],
     ["manus", "Manus", "/icons/lobe/manus.svg"],
+    ["kimi", "Kimi", "/icons/lobe/kimi-color.svg"],
+    ["qoder", "Qoder", "/icons/lobe/qoder-color.svg"],
   ])("renders the optional coding-agent asset for %s", (id, label, src) => {
     render(<BrandIcon id={id} label={label} decorative={false} />)
 
     expect(screen.getByRole("img", { name: label })).toHaveAttribute("src", src)
+  })
+
+  it.each([
+    ["kimi", "/icons/lobe/kimi-color.svg"],
+    ["qoder", "/icons/lobe/qoder-color.svg"],
+  ])("preserves the colour mark for runtime %s", (runtime, src) => {
+    expect(brandIconAsset(runtime)).toEqual({ src, mono: false })
   })
 
   it.each([
@@ -206,11 +215,22 @@ describe("BrandIcon", () => {
   // Every selectable teammate runtime is rendered through `BrandIcon` by
   // `RuntimeBadge`, the runtime selector, and the mention picker. A runtime with
   // no alias silently degrades to a grey monogram, which is how `pi-rpc` shipped
-  // sitting next to `pi`'s logo. `droid` is the one accepted gap: no Factory
-  // asset is vendored, so the monogram is the honest answer there rather than
-  // borrowing someone else's mark.
+  // sitting next to `pi`'s logo. Document gaps explicitly so missing vendor
+  // marks keep their monograms rather than borrowing someone else's mark.
   describe("teammate runtimes resolve to a brand asset", () => {
-    const NO_VENDORED_ASSET: readonly TeammateRuntime[] = ["droid"]
+    const NO_VENDORED_ASSET: readonly TeammateRuntime[] = [
+      "droid", // No Factory asset is vendored.
+      // LobeHub icons-static-svg@1.95.1 has neither aider.svg nor aider-color.svg
+      // (checked 2026-10-05), so no Aider mark can be vendored from that set.
+      "aider",
+    ]
+
+    it.each(NO_VENDORED_ASSET)("keeps an honest monogram for %s", (runtime) => {
+      expect(hasBrandIcon(runtime)).toBe(false)
+      expect(brandIconAsset(runtime)).toBeNull()
+      render(<BrandIcon id={runtime} label={runtime} decorative={false} />)
+      expect(screen.getByRole("img", { name: runtime })).toHaveTextContent(runtime[0].toUpperCase())
+    })
 
     it.each(RUNTIME_OPTIONS.filter((r) => !NO_VENDORED_ASSET.includes(r)))(
       "%s has a brand alias",

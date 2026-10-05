@@ -70,6 +70,7 @@ const assets = {
   perplexity: { src: "/icons/lobe/perplexity-color.svg" },
   pi: { src: "/icons/lobe/pi.svg" },
   qiniu: { src: "/icons/lobe/qiniu-color.svg" },
+  qoder: { src: "/icons/lobe/qoder-color.svg" },
   qwen: { src: "/icons/lobe/qwen-color.svg" },
   replicate: { src: "/icons/lobe/replicate.svg" },
   replit: { src: "/icons/lobe/replit-color.svg" },
@@ -148,6 +149,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   huggingface: assets.huggingFace,
   internlm: assets.internLm,
   jina: assets.jina,
+  kimi: assets.kimi,
   kiro: assets.kiro,
   lingyi: assets.yi,
   lepton: assets.lepton,
@@ -186,6 +188,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   // right beside it shows the logo.
   "pi-rpc": assets.pi,
   qiniu: assets.qiniu,
+  qoder: assets.qoder,
   qwen: assets.qwen,
   "qwen-code": assets.qwen,
   replicate: assets.replicate,
