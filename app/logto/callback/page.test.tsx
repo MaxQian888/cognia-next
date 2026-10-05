@@ -3,7 +3,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import LogtoCallbackPage from "./page"
 import { LOGTO_CALLBACK_STATE_KEY } from "@/lib/logto/web-popup"
-import { mascotDataUri } from "@/lib/identity/sign-in-mascot"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -33,10 +32,7 @@ it("posts a state-validated callback only to the same-origin opener, then closes
     window.location.origin
   )
   expect(await screen.findByText("doneTitle")).toBeInTheDocument()
-  expect(screen.getByTestId("logto-callback-mascot")).toHaveAttribute("data-mood", "happy")
-  expect(screen.getByTestId("logto-callback-mascot").getAttribute("src")).toBe(
-    mascotDataUri("happy")
-  )
+  expect(screen.getByTestId("mobile-spot-icon-workspace-trust")).toBeInTheDocument()
   expect(close).toHaveBeenCalled()
   // A browser that refused the scripted close still has a way out.
   fireEvent.click(screen.getByRole("button", { name: "close" }))
@@ -49,9 +45,8 @@ it("says a refused sign-in failed instead of claiming it is done, and stays open
   render(<LogtoCallbackPage />)
   expect(await screen.findByText("failedTitle")).toBeInTheDocument()
   expect(screen.getByTestId("logto-callback-reason")).toHaveTextContent("cancelled")
-  expect(screen.getByTestId("logto-callback-mascot")).toHaveAttribute("data-mood", "worried")
   // Decorative: the heading says what happened.
-  expect(screen.getByTestId("logto-callback-mascot")).toHaveAttribute("alt", "")
+  expect(screen.getByTestId("mobile-spot-icon-diagnostics")).toHaveAttribute("alt", "")
   expect(postMessage).toHaveBeenCalledWith(
     expect.objectContaining({ error: "access_denied" }),
     window.location.origin
@@ -76,6 +71,6 @@ it("explains a window with nobody to hand the code to", async () => {
   landOn("?code=code-a&state=state-a", null)
   render(<LogtoCallbackPage />)
   expect(await screen.findByText("orphanedTitle")).toBeInTheDocument()
-  expect(screen.getByTestId("logto-callback-mascot")).toHaveAttribute("data-mood", "worried")
+  expect(screen.getByTestId("mobile-spot-icon-diagnostics")).toBeInTheDocument()
   expect(close).not.toHaveBeenCalled()
 })

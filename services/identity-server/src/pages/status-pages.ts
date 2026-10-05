@@ -35,7 +35,7 @@ export function errorPage(request: Request): Response {
     locale,
     title: t(locale, "error.title"),
     nonce,
-    mascot: "worried",
+    icon: "failed",
     body: `<h1>${escapeHtml(t(locale, "error.title"))}</h1><p>${escapeHtml(t(locale, message))}</p>${codeLine}<footer>${escapeHtml(t(locale, "error.next"))}</footer>`,
   })
   return htmlResponse(html, nonce, 400)
@@ -48,7 +48,7 @@ export function signedOutPage(request: Request): Response {
     locale,
     title: t(locale, "signedOut.title"),
     nonce,
-    mascot: "farewell",
+    icon: "farewell",
     body: `<h1>${escapeHtml(t(locale, "signedOut.title"))}</h1><p>${escapeHtml(t(locale, "signedOut.body"))}</p>`,
   })
   return htmlResponse(html, nonce)

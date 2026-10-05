@@ -12,7 +12,7 @@ describe("returnToAppPage", () => {
     expect(response.headers.get("cache-control")).toBe("no-store")
     expect(response.headers.get("referrer-policy")).toBe("no-referrer")
     const html = await response.text()
-    expect(html).toContain('data-mascot="happy"')
+    expect(html).toContain('data-icon="done"')
     expect(html).toContain("<h1>Signed in</h1>")
     expect(html).toContain(`href="cn.cognia.app:/auth/callback?code=c-1&amp;state=s-1"`)
     expect(html).toContain('"target":"cn.cognia.app:/auth/callback?code=c-1&state=s-1"')
@@ -24,7 +24,7 @@ describe("returnToAppPage", () => {
       new Request("https://id.test/x", { headers: { "accept-language": "zh-CN" } }),
       "cn.cognia.app:/auth/callback?error=access_denied&state=s-1"
     ).text()
-    expect(html).toContain('data-mascot="worried"')
+    expect(html).toContain('data-icon="failed"')
     expect(html).toContain("登录未完成")
     expect(html).toContain("打开 Cognia")
   })

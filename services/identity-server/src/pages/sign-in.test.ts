@@ -26,8 +26,8 @@ describe("sign-in page", () => {
     expect(html).toContain('data-provider="github"')
     expect(html).not.toContain('data-provider="google"')
     expect(pageData(html)).toMatchObject({ autoProvider: null })
-    // The mascot welcomes; wide screens get the tagline beside the card.
-    expect(html).toContain('data-mascot="welcome"')
+    // A welcome icon; wide screens get the tagline beside the card.
+    expect(html).toContain('data-icon="welcome"')
     expect(html).toContain("<h2>Your open workspace for AI agents</h2>")
     expect(html).toContain("<p>Choose how you want to sign in.</p>")
   })
@@ -40,8 +40,8 @@ describe("sign-in page", () => {
     expect(pageData(html)).toMatchObject({ autoProvider: "feishu" })
     // Buttons stay in the page, disabled, in case the redirect fails.
     expect(html).toContain('data-provider="feishu" disabled')
-    // Going straight to the provider is a wait, and the mascot shows it.
-    expect(html).toContain('data-mascot="thinking"')
+    // Going straight to the provider is a wait, and the icon shows it.
+    expect(html).toContain('data-icon="waiting"')
   })
 
   it("ignores a provider this deployment does not offer", async () => {

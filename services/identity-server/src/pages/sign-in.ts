@@ -93,7 +93,7 @@ export function signInPage(request: Request, config: Pick<IdentityConfig, "provi
     title: t(locale, "signIn.title"),
     nonce,
     // Going straight to a provider is a wait; choosing one is a welcome.
-    mascot: autoProvider ? "thinking" : "welcome",
+    icon: autoProvider ? "waiting" : "welcome",
     showcase: { heading: t(locale, "brand.tagline"), text: t(locale, "signIn.subtitle") },
     body,
     ...(fromAuthorize && providers.length > 0 ? { data, script: SCRIPT } : {}),

@@ -10,7 +10,7 @@
  */
 import nodeHttp from "node:http"
 
-import { mascotSvg } from "@/lib/identity/sign-in-mascot"
+import { CALLBACK_ICONS } from "./callback-icons"
 
 export interface CallbackResult {
   code?: string
@@ -70,7 +70,7 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;")
 }
 
-// Cognia's palette, mark and sign-in mascot, as the identity Worker's hosted
+// Cognia's palette, mark and chibi spot icons, as the identity Worker's hosted
 // pages draw them (services/identity-server/src/pages/document.ts; sources of
 // truth web/app/globals.css and web/components/brand-mark.tsx), so the browser
 // tab a sign-in ends on looks like the pages it started on.
@@ -82,12 +82,12 @@ const PAGE_STYLE = `:root{color-scheme:light dark;--paper:#f3f1ec;--surface:#faf
 .stage{flex:1;display:grid;place-items:center;padding:36px 0}
 .card{position:relative;width:min(440px,100%);background:var(--surface);border:1px solid var(--hairline);border-radius:22px;overflow:hidden;text-align:center;box-shadow:0 1px 2px rgb(12 17 21 / 4%),0 28px 64px -32px rgb(12 17 21 / 30%)}
 .card::after{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,transparent,var(--action),transparent);opacity:.75}
-.hero{position:relative;height:176px;display:flex;justify-content:center;align-items:flex-end;border-bottom:1px solid var(--hairline);background:radial-gradient(circle at 50% 118%,var(--glow),transparent 62%),linear-gradient(180deg,var(--band-top),var(--band-bottom))}
-.hero svg{position:relative;width:164px;height:164px;display:block}
+.hero{position:relative;height:184px;display:flex;justify-content:center;align-items:center;border-bottom:1px solid var(--hairline);background:radial-gradient(circle at 50% 118%,var(--glow),transparent 62%),linear-gradient(180deg,var(--band-top),var(--band-bottom))}
+.hero img{position:relative;width:148px;height:148px;display:block;filter:drop-shadow(0 10px 18px rgb(12 17 21 / 14%))}
 .content{padding:28px 36px 32px}h1{font-size:23px;line-height:1.3;margin:0 0 8px;letter-spacing:-.015em}p{margin:0 0 18px;color:var(--muted)}p:last-child{margin:0}
 .code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;padding:8px 10px;border:1px dashed var(--hairline-strong);border-radius:8px;overflow-wrap:anywhere}
 .terminal{display:inline-flex;align-items:center;gap:8px;margin-top:4px;padding:6px 12px;border:1px solid var(--hairline);border-radius:999px;font:12px ui-monospace,SFMono-Regular,monospace;color:var(--muted)}.terminal::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--action)}
-@media (max-width:480px){.content{padding:24px 22px 26px}.hero{height:160px}.hero svg{width:150px;height:150px}h1{font-size:21px}}`
+@media (max-width:480px){.content{padding:24px 22px 26px}.hero{height:164px}.hero img{width:132px;height:132px}h1{font-size:21px}}`
 
 const BRAND_MARK = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="17.5" height="17.5" rx="2.5" stroke="currentColor" stroke-width="1.4" opacity=".55"/><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".9"><path d="M12 1.5v2.4"/><path d="M12 20.1v2.4"/><path d="M1.5 12h2.4"/><path d="M20.1 12h2.4"/></g><path d="M6.9 9.1h3.4a1.6 1.6 0 0 1 1.6 1.6v3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11.9" cy="15.9" r="1.75" fill="var(--action)"/></svg>`
 
@@ -111,7 +111,7 @@ export function resultPage(result: CallbackResult, locale: CallbackPageLocale = 
     `<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">` +
     `<title>${title} · Cognia</title><style>${PAGE_STYLE}</style></head>` +
     `<body><div class="page"><header class="top"><div class="brand">${BRAND_MARK}<span>Cognia</span></div></header>` +
-    `<div class="stage"><main class="card" data-outcome="${ok ? "ok" : "failed"}"><div class="hero">${mascotSvg(ok ? "happy" : "worried")}</div>` +
+    `<div class="stage"><main class="card" data-outcome="${ok ? "ok" : "failed"}"><div class="hero"><img src="${CALLBACK_ICONS[ok ? "done" : "failed"]}" alt="" width="148" height="148"></div>` +
     `<div class="content">${body}</div></main></div></div></body></html>`
   )
 }

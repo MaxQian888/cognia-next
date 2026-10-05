@@ -28,9 +28,9 @@ describe("error page", () => {
     expect(html).not.toContain("Error code:")
   })
 
-  it("says what to do next, with the worried mascot", async () => {
+  it("says what to do next, under the failure icon", async () => {
     const html = await errorPage(new Request("https://id.test/error?error=access_denied")).text()
-    expect(html).toContain('data-mascot="worried"')
+    expect(html).toContain('data-icon="failed"')
     expect(html).toContain("<footer>Close this page and sign in again from Cognia.</footer>")
   })
 

@@ -7,8 +7,8 @@
  * The page validates the state, hands the code to the window that opened it,
  * and closes. It is still a page a person sees: for a moment on success, and
  * for as long as it takes to read when something went wrong. So it says which
- * of these happened, in the card the identity Worker's hosted pages use, with
- * the sign-in mascot's expression (lib/identity/sign-in-mascot.ts) matching:
+ * of these happened, in the card the identity Worker's hosted pages use, under
+ * the same chibi spot icon for the outcome (scripts/build/build-sign-in-icons.mjs):
  *
  * - `done`: the code went back to Cognia; the window closes (a button covers
  *   a browser that refuses to let script close it);
@@ -23,7 +23,7 @@ import { useTranslations } from "next-intl"
 import { LoaderCircleIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { mascotDataUri, type MascotMood } from "@/lib/identity/sign-in-mascot"
+import { MobileSpotIcon, type MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
 import { readValidatedLogtoCallback } from "@/lib/logto/web-popup"
 
 type Outcome =
@@ -46,8 +46,12 @@ export default function LogtoCallbackPage() {
   }, [])
 
   const close = () => window.close()
-  const mood: MascotMood =
-    outcome.kind === "working" ? "thinking" : outcome.kind === "done" ? "happy" : "worried"
+  const icon: MobileSpotIconName =
+    outcome.kind === "working"
+      ? "network"
+      : outcome.kind === "done"
+        ? "workspace-trust"
+        : "diagnostics"
 
   return (
     <main
@@ -60,17 +64,8 @@ export default function LogtoCallbackPage() {
           aria-hidden
           className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-primary/70 to-transparent"
         />
-        <div className="flex h-44 items-end justify-center border-b bg-gradient-to-b from-primary/10 to-transparent">
-          {/* eslint-disable-next-line @next/next/no-img-element -- generated SVG data: URL, nothing for next/image to optimize */}
-          <img
-            src={mascotDataUri(mood)}
-            alt=""
-            width={164}
-            height={164}
-            className="size-40"
-            data-testid="logto-callback-mascot"
-            data-mood={mood}
-          />
+        <div className="flex h-44 items-center justify-center border-b bg-gradient-to-b from-primary/10 to-transparent">
+          <MobileSpotIcon name={icon} size={148} className="drop-shadow-lg" />
         </div>
 
         <div className="flex flex-col items-center gap-3 px-8 pt-7 pb-8">

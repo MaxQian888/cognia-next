@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { escapeHtml, htmlResponse, jsonForScript, newNonce, renderDocument } from "./document"
-import { mascotSvg } from "./mascot"
+import { PAGE_ICONS } from "./page-icons"
 
 describe("page document", () => {
   it("escapes HTML and keeps JSON from closing its script tag", () => {
@@ -20,7 +20,7 @@ describe("page document", () => {
       locale: "zh",
       title: "<T>",
       nonce,
-      mascot: "welcome",
+      icon: "welcome",
       body: "<p>x</p>",
       data: { a: 1 },
       script: "run()",
@@ -47,19 +47,19 @@ describe("page document", () => {
     expect(newNonce()).not.toBe(newNonce())
   })
 
-  it("carries the Cognia mark and the mascot's expression on every page", async () => {
+  it("carries the Cognia mark and the outcome's spot icon on every page", async () => {
     const failed = renderDocument({
       locale: "zh",
       title: "t",
       nonce: "n",
       body: "<h1>t</h1>",
-      mascot: "worried",
+      icon: "failed",
     })
     expect(failed).toContain('class="brand"')
     expect(failed).toContain("<span>Cognia</span><small>账号</small>")
-    expect(failed).toContain('data-mascot="worried"')
-    expect(failed).toContain(mascotSvg("worried"))
-    // The mark and the mascot sit before the page's own heading.
+    expect(failed).toContain('data-icon="failed"')
+    expect(failed).toContain(`<img src="${PAGE_ICONS.failed}" alt=""`)
+    // The mark and the icon sit before the page's own heading.
     expect(failed.indexOf('class="brand"')).toBeLessThan(failed.indexOf("<h1>"))
     expect(failed.indexOf('class="hero"')).toBeLessThan(failed.indexOf("<h1>"))
     expect(failed).not.toContain('class="showcase"')
@@ -71,17 +71,17 @@ describe("page document", () => {
       title: "t",
       nonce: "n",
       body: "<h1>t</h1>",
-      mascot: "welcome",
+      icon: "welcome",
       showcase: { heading: "<Agents>", text: "a & b" },
     })
     expect(html).toContain('class="stage split"')
     expect(html).toContain("<h2>&lt;Agents&gt;</h2><p>a &amp; b</p>")
     // Narrow screens still get the card's own hero.
-    expect(html.match(/<svg xmlns/g)).toHaveLength(2)
+    expect(html.split(PAGE_ICONS.welcome)).toHaveLength(3)
   })
 
   it("styles nothing outside the nonce'd style element", () => {
-    const html = renderDocument({ locale: "en", title: "t", nonce: "n", body: "", mascot: "happy" })
+    const html = renderDocument({ locale: "en", title: "t", nonce: "n", body: "", icon: "done" })
     expect(html).not.toMatch(/\sstyle="/)
     expect(html.match(/<style/g)).toHaveLength(1)
   })

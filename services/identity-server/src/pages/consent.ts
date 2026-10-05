@@ -52,7 +52,7 @@ export async function consentPage(request: Request, db: D1Database): Promise<Res
       locale,
       title: t(locale, "error.title"),
       nonce,
-      mascot: "worried",
+      icon: "failed",
       body: `<h1>${escapeHtml(t(locale, "error.title"))}</h1><p>${escapeHtml(t(locale, "error.expired"))}</p>`,
     })
     return htmlResponse(html, nonce, 400)
@@ -71,7 +71,7 @@ export async function consentPage(request: Request, db: D1Database): Promise<Res
     locale,
     title: t(locale, "consent.title", { client: name }),
     nonce,
-    mascot: "welcome",
+    icon: "consent",
     body,
     data: { failed: t(locale, "consent.failed") },
     script: SCRIPT,

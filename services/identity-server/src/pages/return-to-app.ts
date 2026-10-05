@@ -44,7 +44,7 @@ export function returnToAppPage(request: Request, target: string): Response {
     locale,
     title,
     nonce,
-    mascot: failed ? "worried" : "happy",
+    icon: failed ? "failed" : "done",
     body:
       `<h1>${escapeHtml(title)}</h1>` +
       `<p>${escapeHtml(t(locale, failed ? "return.failedBody" : "return.body"))}</p>` +

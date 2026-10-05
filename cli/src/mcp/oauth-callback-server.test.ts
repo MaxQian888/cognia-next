@@ -9,7 +9,7 @@ import {
   resultPage,
   startCallbackServer,
 } from "./oauth-callback-server"
-import { mascotSvg } from "@/lib/identity/sign-in-mascot"
+import { CALLBACK_ICONS } from "./callback-icons"
 
 describe("parseCallback", () => {
   it("extracts code and state", () => {
@@ -55,16 +55,16 @@ describe("resultPage", () => {
     expect(callbackPageLocale("en-US,zh;q=0.5")).toBe("en")
     expect(callbackPageLocale(undefined)).toBe("en")
   })
-  it("shows the mascot happy on success and worried on failure", () => {
+  it("shows the done icon on success and the failure icon otherwise", () => {
     const ok = resultPage({ code: "abc" })
-    expect(ok).toContain(mascotSvg("happy"))
+    expect(ok).toContain(`<img src="${CALLBACK_ICONS.done}" alt=""`)
     expect(ok).toContain('data-outcome="ok"')
     expect(ok).toContain("cognia-agent is continuing")
     const failed = resultPage({ error: "access_denied" }, "zh")
-    expect(failed).toContain(mascotSvg("worried"))
+    expect(failed).toContain(`<img src="${CALLBACK_ICONS.failed}" alt=""`)
     expect(failed).toContain('data-outcome="failed"')
     expect(failed).toContain("请回到终端，重新运行刚才的命令。")
-    expect(failed).not.toContain(mascotSvg("happy"))
+    expect(failed).not.toContain(CALLBACK_ICONS.done)
   })
 })
 

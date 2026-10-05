@@ -7,7 +7,7 @@
  * every interpolated text is HTML-escaped.
  */
 
-import { mascotSvg, type MascotMood } from "./mascot"
+import { PAGE_ICONS, type PageIcon } from "./page-icons"
 import { t, type Locale } from "./strings"
 
 export function escapeHtml(value: string): string {
@@ -35,8 +35,8 @@ export function newNonce(): string {
 // Cognia's own palette and mark (web/app/globals.css, web/components/brand-mark.tsx):
 // warm paper and ink neutrals, hairlines, and the cyan `action` accent used
 // only as a dot, a line or a glow, never as a text colour. The hero band and
-// the dot grid echo the mark's registration ticks; the mascot is the one
-// playful element (./mascot.ts).
+// the dot grid echo the mark's registration ticks. The one playful element is
+// a chibi spot icon from the app's own set (./page-icons.ts).
 const STYLE = `
 :root{color-scheme:light dark;--paper:#f3f1ec;--surface:#faf9f6;--ink:#0c1115;--muted:#5f666e;--hairline:#d7d8d5;--hairline-strong:#b9bcb8;--action:#35cedd;--success:#2a6f49;--destructive:#b3261e;--glow:rgb(53 206 221 / 16%);--grid:rgb(12 17 21 / 7%);--band-top:#dff4f6;--band-bottom:#f4faf9;--disc:#d9f2f5}
 @media (prefers-color-scheme:dark){:root{--paper:#0c1115;--surface:#151b20;--ink:#f3f1ec;--muted:#8e959b;--hairline:#2a333a;--hairline-strong:#3c464e;--action:#4fdcea;--success:#57c08a;--destructive:#f2837c;--glow:rgb(79 220 234 / 14%);--grid:rgb(243 241 236 / 6%);--band-top:#12292e;--band-bottom:#151b20;--disc:#173238}}
@@ -50,9 +50,9 @@ body{margin:0;min-height:100vh;color:var(--ink);font:15px/1.6 ui-sans-serif,syst
 .stage{flex:1;display:grid;place-items:center;padding:36px 0}
 .card{position:relative;width:min(440px,100%);background:var(--surface);border:1px solid var(--hairline);border-radius:22px;overflow:hidden;text-align:center;box-shadow:0 1px 2px rgb(12 17 21 / 4%),0 28px 64px -32px rgb(12 17 21 / 30%)}
 .card::after{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,transparent,var(--action),transparent);opacity:.75}
-.hero{position:relative;height:176px;display:flex;justify-content:center;align-items:flex-end;border-bottom:1px solid var(--hairline);background:radial-gradient(circle at 50% 118%,var(--glow),transparent 62%),linear-gradient(180deg,var(--band-top),var(--band-bottom))}
+.hero{position:relative;height:184px;display:flex;justify-content:center;align-items:center;border-bottom:1px solid var(--hairline);background:radial-gradient(circle at 50% 118%,var(--glow),transparent 62%),linear-gradient(180deg,var(--band-top),var(--band-bottom))}
 .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(circle,var(--grid) 1px,transparent 1.3px) 0 0/16px 16px;-webkit-mask-image:linear-gradient(180deg,#000,transparent);mask-image:linear-gradient(180deg,#000,transparent)}
-.hero svg{position:relative;width:164px;height:164px;display:block}
+.hero img{position:relative;width:148px;height:148px;display:block;filter:drop-shadow(0 10px 18px rgb(12 17 21 / 14%))}
 .content{padding:28px 36px 32px}
 h1{font-size:23px;line-height:1.3;margin:0 0 8px;letter-spacing:-.015em}
 p{margin:0 0 18px;color:var(--muted)}ul{margin:0 0 22px;padding:0;list-style:none;text-align:left}
@@ -74,12 +74,12 @@ button:disabled{opacity:.55;cursor:default}
 .split .showcase{display:block}
 .split .card .hero{display:none}
 .split .card .content{padding:48px 44px 40px}.split h1{font-size:27px;margin-bottom:10px}.split .card p{margin-bottom:26px}
-.showcase .disc{width:300px;height:300px;border-radius:50%;background:radial-gradient(circle at 50% 35%,var(--band-top),var(--disc));border:1px solid var(--hairline);box-shadow:0 30px 80px -40px rgb(53 206 221 / 60%);display:flex;align-items:flex-end;justify-content:center;overflow:hidden;margin:0 0 32px}
-.showcase .disc svg{width:280px;height:280px;display:block}
+.showcase .disc{width:300px;height:300px;border-radius:50%;background:radial-gradient(circle at 50% 35%,var(--band-top),var(--disc));border:1px solid var(--hairline);box-shadow:0 30px 80px -40px rgb(53 206 221 / 60%);display:flex;align-items:center;justify-content:center;margin:0 0 32px}
+.showcase .disc img{width:244px;height:244px;display:block;filter:drop-shadow(0 16px 28px rgb(12 17 21 / 16%))}
 .showcase h2{font-size:38px;line-height:1.15;letter-spacing:-.025em;margin:0 0 14px;max-width:14em}
 .showcase p{font-size:17px;max-width:26em}
 }
-@media (max-width:480px){.content{padding:24px 22px 26px}.hero{height:160px}.hero svg{width:150px;height:150px}h1{font-size:21px}}
+@media (max-width:480px){.content{padding:24px 22px 26px}.hero{height:164px}.hero img{width:132px;height:132px}h1{font-size:21px}}
 @media (prefers-reduced-motion:reduce){button,a.button{transition:none}button:hover:not(:disabled),a.button:hover{transform:none}}
 `
 
@@ -97,11 +97,11 @@ export interface DocumentInput {
   /** Serialised into `<script id="page-data" type="application/json">`. */
   data?: unknown
   script?: string
-  /** The mascot's expression in the card's hero band; it says how things went. */
-  mascot: MascotMood
+  /** The spot icon in the card's hero band; it says how things went. */
+  icon: PageIcon
   /**
-   * A wide-screen showcase beside the card (the sign-in page): a large
-   * mascot, a heading and a line. Narrow screens keep the card's hero instead.
+   * A wide-screen showcase beside the card (the sign-in page): the icon
+   * large, a heading and a line. Narrow screens keep the card's hero instead.
    */
   showcase?: { heading: string; text: string }
 }
@@ -113,16 +113,17 @@ export function renderDocument(input: DocumentInput): string {
       ? ""
       : `<script id="page-data" type="application/json">${jsonForScript(input.data)}</script>`
   const script = input.script ? `<script nonce="${input.nonce}">${input.script}</script>` : ""
-  const art = mascotSvg(input.mascot)
+  const art = (size: number) =>
+    `<img src="${PAGE_ICONS[input.icon]}" alt="" width="${size}" height="${size}" decoding="async">`
   const showcase = input.showcase
-    ? `<section class="showcase"><div class="disc">${art}</div><h2>${escapeHtml(input.showcase.heading)}</h2><p>${escapeHtml(input.showcase.text)}</p></section>`
+    ? `<section class="showcase"><div class="disc">${art(244)}</div><h2>${escapeHtml(input.showcase.heading)}</h2><p>${escapeHtml(input.showcase.text)}</p></section>`
     : ""
   return `<!doctype html>
 <html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="light dark"><title>${escapeHtml(input.title)}</title>
 <style nonce="${input.nonce}">${STYLE}</style></head>
 <body><div class="page"><header class="top"><a class="brand" href="https://cognia.cn">${BRAND_MARK}<span>Cognia</span><small>${escapeHtml(t(input.locale, "brand.account"))}</small></a></header>
-<div class="stage${showcase ? " split" : ""}">${showcase}<main class="card" data-mascot="${input.mascot}"><div class="hero">${art}</div><div class="content">${input.body}</div></main></div>
+<div class="stage${showcase ? " split" : ""}">${showcase}<main class="card" data-icon="${input.icon}"><div class="hero">${art(148)}</div><div class="content">${input.body}</div></main></div>
 <footer class="foot"><span>&copy; Cognia</span><span aria-hidden="true">&middot;</span><a href="https://cognia.cn">cognia.cn</a></footer></div>${data}${script}</body></html>`
 }
 
