@@ -224,6 +224,7 @@ const SPECS = {
       "./store-contract",
       "./decision-ledger",
       "./evidence",
+      "./coordinator",
       "./fair-scheduler",
     ],
     dataOnly: ["./records", "./store"],
@@ -235,6 +236,7 @@ const SPECS = {
       "memory-store",
       "decision-ledger",
       "evidence",
+      "coordinator",
       "fair-scheduler",
     ],
     smoke: `
@@ -264,6 +266,17 @@ const SPECS = {
       await bundle.record({ kind: "activity", title: "ran", content: "log" })
       const verdict = await bundle.validate({ taskKind: "general", visualSupported: false })
       if (verdict.missing.join() !== "outcome") throw new Error("evidence")
+      import { createDurableTeamCoordinator } from "@cognia/agent-orchestration/coordinator"
+      const prepared = []
+      const coordinator = createDurableTeamCoordinator({
+        store: createMemoryTeamRunStore(),
+        journal: { runPrepared: async (input) => { prepared.push(input.runId) } },
+        redactForPersistence: (text) => text,
+        paths: { normalize: (p) => p, isWithinRoot: (t, r) => t === r || t.startsWith(r + "/") },
+        remoteSessions: { release: async () => {} },
+      })
+      const runId = await coordinator.prepareRun({ id: "team", leadId: "lead", objective: "ship", workingDir: "/w" })
+      if (prepared[0] !== runId) throw new Error("coordinator journal")
     `,
     types: `
       import type { TeamRunStore } from "@cognia/agent-orchestration/store"
@@ -276,7 +289,17 @@ const SPECS = {
       const mode: "plan" | "default" | undefined = run.executionConstraints?.permissionMode
       const plan: DispatchAttemptPlan = planDispatchAttempt(undefined, run)
       const committed: Promise<number> = store.atomically(async (tx) => (await tx.listRuns()).length)
-      export { store, mode, plan, committed }
+      import { createDurableTeamCoordinator, type DurableTeamSpec } from "@cognia/agent-orchestration/coordinator"
+      const teamSpec: DurableTeamSpec = { id: "t", leadId: "l", objective: "o", workingDir: "/w" }
+      const coordinator = createDurableTeamCoordinator<Constraints>({
+        store,
+        journal: { runPrepared: async () => {} },
+        redactForPersistence: (text) => text,
+        paths: { normalize: (p) => p, isWithinRoot: () => true },
+        remoteSessions: { release: async () => {} },
+      })
+      const prepared: Promise<string> = coordinator.prepareRun(teamSpec)
+      export { store, mode, plan, committed, prepared }
     `,
   },
 }
