@@ -185,8 +185,60 @@ describe("PluginSignatureVerifier", () => {
   })
 
   describe("Signing Methods", () => {
-    it("should have signPlugin method", () => {
-      expect(typeof verifier.signPlugin).toBe("function")
+    it("sends the native signing contract and returns its bound identity", async () => {
+      invokeMock.mockResolvedValue({
+        algorithm: "ed25519",
+        signature: "signature-hex",
+        publicKey: "public-key-hex",
+        signedAt: "2026-10-06T00:00:00Z",
+      })
+      const result = await verifier.signPlugin("/bundles/demo.zip", "private-key-hex", {
+        pluginId: "demo",
+        version: "1.2.3",
+      })
+      expect(invokeMock).toHaveBeenCalledWith("plugin_create_signature", {
+        pluginId: "demo",
+        version: "1.2.3",
+        privateKeyHex: "private-key-hex",
+        artifactPath: "/bundles/demo.zip",
+      })
+      expect(result).toEqual({
+        pluginId: "demo",
+        version: "1.2.3",
+        algorithm: "ed25519",
+        signature: "signature-hex",
+        publicKey: "public-key-hex",
+        signedAt: new Date("2026-10-06T00:00:00Z"),
+      })
+    })
+
+    it.each([
+      undefined,
+      { pluginId: "", version: "1" },
+      { pluginId: "demo", version: " " },
+      { pluginId: "demo", version: "1", algorithm: "rsa-sha256" },
+      { pluginId: "demo", version: "1", expiresIn: 3600 },
+    ])("rejects unsupported or incomplete signing options before IPC: %j", async (options) => {
+      await expect(
+        verifier.signPlugin(
+          "/bundles/demo.zip",
+          "private-key-hex",
+          options as Parameters<PluginSignatureVerifier["signPlugin"]>[2]
+        )
+      ).rejects.toThrow()
+      expect(invokeMock).not.toHaveBeenCalled()
+    })
+
+    it("propagates native signing errors without claiming a signature", async () => {
+      const error = new Error("artifact not found")
+      invokeMock.mockRejectedValue(error)
+      await expect(
+        verifier.signPlugin("/missing.zip", "private-key-hex", {
+          pluginId: "demo",
+          version: "1.2.3",
+          algorithm: "ed25519",
+        })
+      ).rejects.toBe(error)
     })
 
     it("should have generateKeyPair method", () => {

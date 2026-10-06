@@ -344,24 +344,46 @@ export class PluginSignatureVerifier {
   // ===========================================================================
 
   async signPlugin(
-    pluginPath: string,
-    privateKey: string,
+    artifactPath: string,
+    privateKeyHex: string,
     options: {
-      algorithm?: "ed25519" | "rsa-sha256"
-      expiresIn?: number
-    } = {}
+      pluginId: string
+      version: string
+      algorithm?: "ed25519"
+    }
   ): Promise<PluginSignature> {
-    const signature = await invoke<PluginSignature>("plugin_create_signature", {
-      pluginPath,
-      privateKey,
-      algorithm: options.algorithm || "ed25519",
-      expiresIn: options.expiresIn,
+    if (
+      !options ||
+      typeof options.pluginId !== "string" ||
+      !options.pluginId.trim() ||
+      typeof options.version !== "string" ||
+      !options.version.trim()
+    ) {
+      throw new TypeError("Signing requires the artifact's pluginId and version")
+    }
+    if (options.algorithm !== undefined && options.algorithm !== "ed25519") {
+      throw new TypeError("Plugin signing supports only Ed25519")
+    }
+    if ("expiresIn" in options && options.expiresIn !== undefined) {
+      throw new TypeError("Plugin signatures do not support expiration")
+    }
+    const signature = await invoke<{
+      algorithm: "ed25519"
+      signature: string
+      publicKey: string
+      signedAt: string
+    }>("plugin_create_signature", {
+      pluginId: options.pluginId,
+      version: options.version,
+      privateKeyHex,
+      artifactPath,
     })
 
     return {
       ...signature,
+      pluginId: options.pluginId,
+      version: options.version,
       signedAt: new Date(signature.signedAt),
-      expiresAt: signature.expiresAt ? new Date(signature.expiresAt) : undefined,
     }
   }
 

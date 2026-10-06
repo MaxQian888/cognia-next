@@ -35,18 +35,31 @@ import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 
 const { publicKey, privateKey } = await getPluginSignatureVerifier().generateKeyPair()
 // 把 `privateKey` 存入密码管理器 / CI 密钥库。
-// `publicKey` 用作 NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY（也是其他用户加入可信发布者列表的 `author.publicKey`）。
+// 两个密钥均为 hex 编码。公钥字节需转为 base64，才能用于
+// NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY 或 author.publicKey。
 ```
 
-## 为插件签名
+## 为绑定元数据的制品签名
 
 ```ts
-const signature = await getPluginSignatureVerifier().signPlugin(pluginPath, privateKey, {
+const signature = await getPluginSignatureVerifier().signPlugin(artifactPath, privateKey, {
+  pluginId: "my-plugin",
+  version: "1.0.0",
   algorithm: "ed25519",
 })
 ```
 
-这会在插件包旁写入分离签名。实际密码学由 Rust 侧（`plugin_create_signature` / `plugin_verify_detached_signature`）完成；往返测试见 `src-tauri/src/plugin_api/signature.rs`。
+传入制品文件路径和 hex 私钥。必填的插件 ID 和版本必须与制品元数据一致。`plugin_create_signature` 对 `pluginId + ":" + version + ":" + artifactBytes` 的 SHA-256 摘要签名，对应校验命令为 `plugin_verify_signature`。返回对象包含插件 ID、版本、hex 签名、hex 公钥和 `Date` 类型的 `signedAt`，不会写入签名文件。仅支持 Ed25519；RSA 和 `expiresIn` 选项会在调用后端前被拒绝。
+
+## 为可安装的插件包签名
+
+安装器使用对插件包原始字节的独立签名。通过 CLI 传入包含 base64 私钥的文件：
+
+```bash
+cognia plugin sign ./my-plugin.zip --key /secure/publisher-private.b64
+```
+
+该命令写入 `my-plugin.zip.sig`，其中的 base64 分离签名由 `plugin_verify_detached_signature` 校验。`signPlugin` 返回的元数据绑定签名不能替代此文件。两种格式的 Rust 往返测试位于 `crates/cognia-plugin-runtime/src/signature.rs`。
 
 ## 添加社区发布者
 

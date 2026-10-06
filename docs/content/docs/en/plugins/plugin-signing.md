@@ -46,22 +46,41 @@ import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 
 const { publicKey, privateKey } = await getPluginSignatureVerifier().generateKeyPair()
 // Store `privateKey` in your password manager / CI secret store.
-// Use `publicKey` as NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY (and as the
-// `author.publicKey` other users add to their trusted-publishers list).
+// Both keys are hex encoded. Convert the public-key bytes to base64 before
+// using them as NEXT_PUBLIC_COGNIA_PLUGIN_PUBKEY or author.publicKey.
 ```
 
-## Sign a plugin
+## Sign a metadata-bound artifact
 
 ```ts
-const signature = await getPluginSignatureVerifier().signPlugin(pluginPath, privateKey, {
+const signature = await getPluginSignatureVerifier().signPlugin(artifactPath, privateKey, {
+  pluginId: "my-plugin",
+  version: "1.0.0",
   algorithm: "ed25519",
 })
 ```
 
-This writes the detached signature alongside the plugin bundle. The Rust side
-(`plugin_create_signature` / `plugin_verify_detached_signature`) performs the
-actual cryptography; round-trip tests live in
-`src-tauri/src/plugin_api/signature.rs`.
+Pass an artifact file path and the hex private key. The required plugin ID and
+version must match the artifact's metadata. `plugin_create_signature` signs the
+SHA-256 digest of `pluginId + ":" + version + ":" + artifactBytes`; its matching
+verifier is `plugin_verify_signature`. The returned object includes the plugin
+ID, version, hex signature, hex public key, and a `Date` in `signedAt`. It does
+not write a signature file. Only Ed25519 is supported; RSA and `expiresIn`
+options are rejected before invoking the backend.
+
+## Sign an installable bundle
+
+The installer uses a separate signature over the raw bundle bytes. Use the CLI
+with a file containing a base64 private key:
+
+```bash
+cognia plugin sign ./my-plugin.zip --key /secure/publisher-private.b64
+```
+
+This writes `my-plugin.zip.sig`, a base64 detached signature checked by
+`plugin_verify_detached_signature`. A metadata-bound signature from
+`signPlugin` cannot replace this file. Rust round-trip tests for both formats
+live in `crates/cognia-plugin-runtime/src/signature.rs`.
 
 ## Adding a community publisher
 
