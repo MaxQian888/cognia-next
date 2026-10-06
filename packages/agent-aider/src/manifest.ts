@@ -4,7 +4,10 @@
  * Pure data: importing it never loads the CLI adapter or the history reader.
  */
 
-import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+import type {
+  AgentCapabilityContribution,
+  AgentIntegrationManifest,
+} from "@cognia/agent-contracts/ecosystem"
 import type { ExternalAgentRuntimeCatalogEntry } from "@cognia/agent-contracts/external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
@@ -78,3 +81,241 @@ export const aiderManifest: AgentIntegrationManifest = Object.freeze({
   protocols: [{ protocol: AIDER_CLI_PROTOCOL, semantics: AIDER_CLI_EXECUTION_SEMANTICS }],
   runtimes: AIDER_RUNTIMES,
 }) as AgentIntegrationManifest
+
+/**
+ * Aider's capability rows. `pnpm gen:agent-capabilities` writes them into
+ * `protocol/agent-capabilities.json`; edit them here, never there.
+ */
+export const AIDER_CAPABILITIES: AgentCapabilityContribution = {
+  protocols: {
+    "aider-cli": {
+      label: "Aider official CLI",
+      note: "One-shot official CLI with Cognia-owned per-session history and read-only/automatic launch modes. Text output only; no structured tool approvals, MCP, native session protocol, cold history discovery or native thinking controls. Resume reopens Cognia history rather than a provider-owned session.",
+      capabilities: {
+        streaming: {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "session.multi-turn": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        "session.resume": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        "tools.ordinary": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "tools.parallel": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "tools.fragmented-json": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "tools.results": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "tools.errors": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        mcp: {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "permissions.interrupt-resume": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "permissions.set-mode": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        "prompt-caching": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        thinking: {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "context-management": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        images: {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "beta-features": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "rate-limit-handling": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "upstream-errors": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "stream-interruption": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        "subagents.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        steer: {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "set-model": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        checkpoint: {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        compaction: {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "output.structured": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "session.store": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        "session.manage": {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "aiderCliBridge",
+        },
+        "permissions.update-rules": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "hooks.lifecycle": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "input.elicitation": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "input.dialog": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "plugins.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "skills.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "mcp.dynamic": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "subagents.manage": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "tasks.background": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "commands.dynamic": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "sandbox.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "observability.child": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "startup.prewarm": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "mcp.logs": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "rate-limit-reporting": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "subagents.model-selection": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "models.list": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+        "web.search": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "noProtocolSlot",
+        },
+      },
+    },
+  },
+}

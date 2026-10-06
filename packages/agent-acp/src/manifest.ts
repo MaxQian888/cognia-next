@@ -7,7 +7,10 @@
  * data: importing it never loads the client.
  */
 
-import type { AgentProtocolIntegration } from "@cognia/agent-contracts/ecosystem"
+import type {
+  AgentCapabilityContribution,
+  AgentProtocolIntegration,
+} from "@cognia/agent-contracts/ecosystem"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
 export const ACP_PROTOCOL = "acp"
@@ -51,3 +54,231 @@ export const acpProtocolIntegration: AgentProtocolIntegration = Object.freeze({
   semantics: ACP_EXECUTION_SEMANTICS,
   presetSemantics: Object.freeze({ [DEVIN_PRESET_ID]: DEVIN_ACP_EXECUTION_SEMANTICS }),
 }) as AgentProtocolIntegration
+
+/**
+ * ACP's capability rows. `pnpm gen:agent-capabilities` writes them into
+ * `protocol/agent-capabilities.json`; edit them here, never there.
+ */
+export const ACP_CAPABILITIES: AgentCapabilityContribution = {
+  protocols: {
+    acp: {
+      label: "Agent Client Protocol (ACP v1)",
+      note: "Rows follow the ACP v1 schema Cognia negotiates in `acp-client.ts`.",
+      capabilities: {
+        streaming: {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "session.multi-turn": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "session.resume": {
+          level: "unknown",
+          evidence: "none",
+          reasonKey: "notNegotiated",
+        },
+        "tools.ordinary": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "tools.parallel": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "tools.fragmented-json": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "tools.results": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "tools.errors": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        mcp: {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "permissions.interrupt-resume": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "permissions.set-mode": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "prompt-caching": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        thinking: {
+          level: "unknown",
+          evidence: "none",
+        },
+        "context-management": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        images: {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "beta-features": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "rate-limit-handling": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "upstream-errors": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "stream-interruption": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "subagents.native": {
+          level: "unknown",
+          evidence: "none",
+        },
+        steer: {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "set-model": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        checkpoint: {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        compaction: {
+          level: "unknown",
+          evidence: "none",
+        },
+        "output.structured": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "session.store": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "session.manage": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "permissions.update-rules": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "hooks.lifecycle": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "input.elicitation": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "input.dialog": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "plugins.native": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        "skills.native": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        "mcp.dynamic": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "subagents.manage": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "tasks.background": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "commands.dynamic": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "sandbox.native": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "observability.child": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "startup.prewarm": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "mcp.logs": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        "rate-limit-reporting": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "subagents.model-selection": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "models.list": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "web.search": {
+          level: "unknown",
+          evidence: "none",
+        },
+      },
+    },
+  },
+  presetRefinements: {
+    devin: {
+      protocol: "acp",
+      note: "`devin acp` publishes only `mode` and `model` session config options; reasoning intensity is encoded in the model ids themselves (`…-low`, `…-high`, `…-xhigh`, `…-max`). DevinAcpAdapter synthesizes a `thought_level` select over the current model family and writes a level back as a model-variant switch, so the axis is `equivalent`, not `native`.",
+      capabilities: {
+        thinking: {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "modelVariantOverlay",
+        },
+      },
+    },
+  },
+}

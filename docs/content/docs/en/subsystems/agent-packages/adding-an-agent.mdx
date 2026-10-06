@@ -171,11 +171,18 @@ migration subsystem (ADR-0107); they are not part of the package.
    to write them into `protocol/external-agent-runtimes.json`.
    `pnpm audit:external-agent-runtimes` fails if the file drifts from the
    manifests, then checks pinning, waivers and launch parity.
-3. **Authorization, separately**: the spawn allowlist and approval defaults in
+3. **Capability rows**: export an `AgentCapabilityContribution` from the
+   manifest (the protocol's complete row in `protocols`, preset refinements in
+   `presetRefinements`), add it to `INTEGRATION_CAPABILITIES` in
+   `lib/agent-ecosystem/capability-catalog.ts`, and run
+   `pnpm gen:agent-capabilities` to write `protocol/agent-capabilities.json`.
+   `pnpm audit:agent-capabilities` fails on drift before checking the
+   manifest itself.
+4. **Authorization, separately**: the spawn allowlist and approval defaults in
    `protocol/external-agent-security-policy.json` and the host's permission
    guard. Registering the package or declaring a need in its manifest
    authorizes nothing.
-4. **The CLI**, if it should run the agent: give it the Node implementation of
+5. **The CLI**, if it should run the agent: give it the Node implementation of
    the same ports.
 
 ## 7. Verify
@@ -190,6 +197,10 @@ node scripts/build/pack-test-agent-package.mjs agent-<id>
 
 ```bash
 pnpm audit:external-agent-runtimes
+```
+
+```bash
+pnpm audit:agent-capabilities
 ```
 
 Add a manager-level test for the semantics you declared, for example that

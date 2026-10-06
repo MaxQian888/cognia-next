@@ -148,10 +148,15 @@ const acme = manager.getAdapterExtension(agentId, acmeControls)
    `pnpm gen:external-agent-runtimes` 写入 `protocol/external-agent-runtimes.json`。
    文件与 manifest 不一致时 `pnpm audit:external-agent-runtimes` 会失败，随后再检查锁定、
    豁免与启动一致性。
-3. **授权单独处理**：spawn 白名单与审批默认值在
+3. **能力行**：从 manifest 导出一个 `AgentCapabilityContribution`（`protocols` 中是协议的
+   完整能力行，`presetRefinements` 中是预设的细化），把它加入
+   `lib/agent-ecosystem/capability-catalog.ts` 的 `INTEGRATION_CAPABILITIES`，再运行
+   `pnpm gen:agent-capabilities` 写入 `protocol/agent-capabilities.json`。文件出现漂移时
+   `pnpm audit:agent-capabilities` 会先失败，然后才检查清单本身。
+4. **授权单独处理**：spawn 白名单与审批默认值在
    `protocol/external-agent-security-policy.json` 和宿主权限守卫中。注册包或在 manifest
    中声明需求都不会授予任何权限。
-4. **CLI**：若 CLI 也要运行该 agent，为它提供同一组端口的 Node 实现。
+5. **CLI**：若 CLI 也要运行该 agent，为它提供同一组端口的 Node 实现。
 
 ## 7. 验证
 
@@ -165,6 +170,10 @@ node scripts/build/pack-test-agent-package.mjs agent-<id>
 
 ```bash
 pnpm audit:external-agent-runtimes
+```
+
+```bash
+pnpm audit:agent-capabilities
 ```
 
 为声明的语义补一个管理器级测试，例如取消一个 `process` 级会话后它会从缓存中移除。

@@ -357,6 +357,15 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
   merges them into `protocol/external-agent-runtimes.json` (merge rules in
   `lib/agent-ecosystem/runtime-catalog.ts`), and `audit:external-agent-runtimes` runs it
   with `--check` first. ACP vendor runtimes without a package stay authored in the file.
+  Capability rows done: every protocol row of `protocol/agent-capabilities.json` and the three
+  preset refinements are `AgentCapabilityContribution`s in the packages' manifests,
+  merged by `lib/agent-ecosystem/capability-catalog.ts` and written by
+  `scripts/build/gen-agent-capabilities.mjs` (shared plumbing in
+  `scripts/build/lib/generated-json.mjs`); `audit:agent-capabilities` runs it with `--check`.
+  Gates broken by the Phase 2 move were repaired by "fix(gates): read the agent contracts where ADR-0217 moved them": `audit:agent-capabilities`,
+  `audit:agent-control-methods`, `audit:adapter-capabilities`, `check:sdk-surface` and the
+  identity wire exceptions parse the contracts now; `check:acp-v1-contract` was repaired with
+  the ACP move.
 
 ### Phase 4 — tools and engines
 

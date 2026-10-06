@@ -13,6 +13,7 @@
  * so adding an ecosystem edits its own package and that one list.
  */
 
+import type { ExternalAgentCapabilityMatrix } from "./external-agent-capability"
 import type { ExternalAgentRuntimeCatalogEntry } from "./external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "./semantics"
 
@@ -105,4 +106,30 @@ export function semanticsForPreset(
   presetId: string | undefined
 ): AgentExecutionSemantics {
   return (presetId && integration.presetSemantics?.[presetId]) || integration.semantics
+}
+
+/** A protocol's complete static capability row (the weakest merge layer). */
+export interface AgentProtocolCapabilityRow {
+  label: string
+  note: string
+  capabilities: ExternalAgentCapabilityMatrix
+}
+
+/** One preset's refinement of its protocol's capability row. */
+export interface AgentPresetCapabilityRefinement {
+  protocol: string
+  note: string
+  capabilities: ExternalAgentCapabilityMatrix
+}
+
+/**
+ * The capability rows an integration package owns: the rows of the protocols
+ * it implements and the refinements of its presets. The host's generator
+ * writes them into its capability manifest (Cognia:
+ * `protocol/agent-capabilities.json`) and fails on drift, so a row is edited
+ * only in its package. A row describes behaviour; it grants nothing.
+ */
+export interface AgentCapabilityContribution {
+  protocols?: Readonly<Record<string, AgentProtocolCapabilityRow>>
+  presetRefinements?: Readonly<Record<string, AgentPresetCapabilityRefinement>>
 }

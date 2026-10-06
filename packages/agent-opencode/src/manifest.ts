@@ -5,7 +5,10 @@
  * launcher or the OpenCode SDKs.
  */
 
-import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+import type {
+  AgentCapabilityContribution,
+  AgentIntegrationManifest,
+} from "@cognia/agent-contracts/ecosystem"
 import type { ExternalAgentRuntimeCatalogEntry } from "@cognia/agent-contracts/external-agent-lifecycle"
 import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
 
@@ -148,3 +151,226 @@ export const opencodeManifest: AgentIntegrationManifest = Object.freeze({
   protocols: [{ protocol: OPENCODE_V2_PROTOCOL, semantics: OPENCODE_V2_EXECUTION_SEMANTICS }],
   runtimes: OPENCODE_RUNTIMES,
 }) as AgentIntegrationManifest
+
+/**
+ * OpenCode's capability rows. `pnpm gen:agent-capabilities` writes them into
+ * `protocol/agent-capabilities.json`; edit them here, never there.
+ */
+export const OPENCODE_CAPABILITIES: AgentCapabilityContribution = {
+  protocols: {
+    "opencode-v2": {
+      label: "OpenCode V2 native API",
+      note: "Current stable @opencode/client 2.0.0 /api contract; no V1 or beta fallback. Native SDK operations are exposed separately from the canonical chat surface.",
+      capabilities: {
+        streaming: {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "session.multi-turn": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "session.resume": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "tools.ordinary": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "tools.parallel": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "tools.fragmented-json": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "tools.results": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "tools.errors": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        mcp: {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "isolatedLocalService",
+        },
+        "permissions.interrupt-resume": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "permissions.set-mode": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "prompt-caching": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        thinking: {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "modelVariantOverlay",
+        },
+        "context-management": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        images: {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "beta-features": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "rate-limit-handling": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "upstream-errors": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "stream-interruption": {
+          level: "native",
+          evidence: "protocol-spec",
+        },
+        "subagents.native": {
+          level: "unknown",
+          evidence: "none",
+        },
+        steer: {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "set-model": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        checkpoint: {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        compaction: {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "nativeSummarizeRoute",
+        },
+        "output.structured": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "session.store": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "session.manage": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "permissions.update-rules": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "hooks.lifecycle": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "input.elicitation": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "input.dialog": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "plugins.native": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        "skills.native": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        "mcp.dynamic": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "subagents.manage": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "tasks.background": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "commands.dynamic": {
+          level: "native",
+          evidence: "adapter-code",
+        },
+        "sandbox.native": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "observability.child": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "startup.prewarm": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "mcp.logs": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "agentOwned",
+        },
+        "rate-limit-reporting": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "sidecarOnly",
+        },
+        "subagents.model-selection": {
+          level: "unknown",
+          evidence: "none",
+        },
+        "models.list": {
+          level: "unsupported",
+          evidence: "protocol-spec",
+          reasonKey: "noProtocolSlot",
+        },
+        "web.search": {
+          level: "unknown",
+          evidence: "none",
+        },
+      },
+    },
+  },
+  presetRefinements: {
+    "opencode-v2-service": {
+      protocol: "opencode-v2",
+      note: "Current local service discovery or explicit remote endpoint; Cognia does not stop a service it does not own.",
+      capabilities: {},
+    },
+  },
+}

@@ -307,6 +307,7 @@ const REGISTRY = [
   // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
   { script: "web:test:scripts", group: "gate-tests" },
   { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
+  { script: "gen:agent-catalogs:test", group: "gate-tests" },
   { script: "audit:agent-host-image:test", group: "gate-tests" },
   { script: "audit:deploy-suite:test", group: "gate-tests" },
   // `node --test` over the live-IM harness (scripts/smoke/im-live/). Pure
