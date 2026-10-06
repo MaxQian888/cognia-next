@@ -56,6 +56,7 @@ import {
 import { COMPANION_CONTRACT_VERSION } from "./command-descriptors"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
 import { RtcCarrierError, TransportRtc } from "./transport-rtc"
+import { CompanionApiError } from "./companion-auth"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -2295,6 +2296,82 @@ describe("subscribe() — subscribe control frames", () => {
 // ---------------------------------------------------------------------------
 
 describe("subscribe() — resync_required", () => {
+  it("backs off repeated resync refusals until stream_ready resets the retry delay", async () => {
+    await setConfig()
+    jest.useFakeTimers()
+    __setBackoffRandomForTests(() => 0.5)
+    const resolver = jest.fn().mockRejectedValue(new Error("host_state_lease_held"))
+    const removeResolver = remoteEventResyncCoordinator.register("*", resolver)
+    try {
+      transport = new CompanionTransport()
+      transport.subscribe("claude://message", jest.fn())
+      for (const delay of [1000, 2000, 4000]) {
+        const socket = MockWebSocket.lastInstance!
+        socket.triggerOpen()
+        socket.triggerMessage(
+          JSON.stringify({ type: "resync_required", domains: ["*"], cursor: 1 })
+        )
+        await jest.advanceTimersByTimeAsync(0)
+        const count = MockWebSocket.instances.length
+        await jest.advanceTimersByTimeAsync(delay - 1)
+        expect(MockWebSocket.instances).toHaveLength(count)
+        await jest.advanceTimersByTimeAsync(1)
+        expect(MockWebSocket.instances).toHaveLength(count + 1)
+      }
+      const recovered = MockWebSocket.lastInstance!
+      recovered.triggerOpen()
+      recovered.triggerMessage(JSON.stringify({ type: "stream_ready", cursor: 1 }))
+      recovered.triggerClose()
+      const count = MockWebSocket.instances.length
+      await jest.advanceTimersByTimeAsync(999)
+      expect(MockWebSocket.instances).toHaveLength(count)
+      await jest.advanceTimersByTimeAsync(1)
+      expect(MockWebSocket.instances).toHaveLength(count + 1)
+    } finally {
+      removeResolver()
+      __setBackoffRandomForTests(null)
+    }
+  })
+
+  it("retries a failed authoritative resync without advancing the previous cursor", async () => {
+    await setConfig()
+    jest.useFakeTimers()
+    __setBackoffRandomForTests(() => 0.5)
+    const resolver = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("host_state_lease_held"))
+      .mockResolvedValue(undefined)
+    const removeResolver = remoteEventResyncCoordinator.register("*", resolver)
+    try {
+      transport = new CompanionTransport()
+      const handler = jest.fn()
+      transport.subscribe("claude://message", handler)
+      const first = MockWebSocket.lastInstance!
+      first.triggerOpen()
+      first.triggerMessage(JSON.stringify({ type: "claude://message", seq: 42, payload: "old" }))
+      first.triggerMessage(JSON.stringify({ type: "resync_required", domains: ["*"], cursor: 1 }))
+      await jest.advanceTimersByTimeAsync(0)
+      expect(transport.getPlaneHealth().events).not.toBe("ready")
+      await jest.advanceTimersByTimeAsync(1000)
+      expect(MockWebSocket.instances).toHaveLength(2)
+      const retry = MockWebSocket.lastInstance!
+      expect(retry.url).toContain("since=42")
+      retry.triggerOpen()
+      retry.triggerMessage(JSON.stringify({ type: "resync_required", domains: ["*"], cursor: 2 }))
+      await jest.advanceTimersByTimeAsync(0)
+      expect(resolver).toHaveBeenCalledTimes(2)
+      expect(MockWebSocket.lastInstance!.url).toContain("since=2")
+      MockWebSocket.lastInstance!.triggerOpen()
+      MockWebSocket.lastInstance!.triggerMessage(
+        JSON.stringify({ type: "stream_ready", cursor: 2 })
+      )
+      expect(transport.getPlaneHealth().events).toBe("ready")
+    } finally {
+      removeResolver()
+      __setBackoffRandomForTests(null)
+    }
+  })
+
   it("runs authoritative resync, advances cursor, and reconnects", async () => {
     const resolver = jest.fn(async () => {})
     const removeResolver = remoteEventResyncCoordinator.register("*", resolver)
@@ -3686,6 +3763,56 @@ describe("relay-only route when the native stack cannot pin", () => {
     // The open tier is reused for the next command.
     await transport.call("claude_sidecar_status")
     expect(connect).toHaveBeenCalledTimes(1)
+  })
+
+  it("activates a freshly paired Host over relay when direct token exchange returns 502", async () => {
+    await setConfig({
+      ...relayConfig,
+      baseUrl: "https://host.example.test",
+      serverFingerprint: undefined,
+    })
+    __setAuthorizationHeadersProviderForTests(async () => {
+      throw new CompanionApiError("HTTP 502", "http_error", 502)
+    })
+    transport = new CompanionTransport()
+
+    await expect(transport.call("host_feature_manifest")).resolves.toEqual({ via: "relay" })
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(rtcCall).toHaveBeenCalledWith("host_feature_manifest", {}, expect.any(Object))
+    expect(transport.getPlaneHealth().rpc).toBe("ready")
+  })
+
+  it.each([401, 403])(
+    "does not route an authentication refusal (%s) around the direct plane",
+    async (status) => {
+      await setConfig({
+        ...relayConfig,
+        baseUrl: "https://host.example.test",
+        serverFingerprint: undefined,
+      })
+      const error = new CompanionApiError("refused", "unauthorized", status)
+      __setAuthorizationHeadersProviderForTests(async () => {
+        throw error
+      })
+      transport = new CompanionTransport()
+      await expect(transport.call("host_feature_manifest")).rejects.toBe(error)
+      expect(connect).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not replay an unclassified mutation over relay after direct failure", async () => {
+    await setConfig({
+      ...relayConfig,
+      baseUrl: "https://host.example.test",
+      serverFingerprint: undefined,
+    })
+    const error = new CompanionApiError("HTTP 502", "http_error", 502)
+    __setAuthorizationHeadersProviderForTests(async () => {
+      throw error
+    })
+    transport = new CompanionTransport()
+    await expect(transport.call("unclassified_mutation")).rejects.toBe(error)
+    expect(connect).not.toHaveBeenCalled()
   })
 
   it("refuses a pairing with no relay room as non-retryable instead of failing closed three times", async () => {

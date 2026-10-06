@@ -40,10 +40,10 @@ describe("MCP_AGENT_ADAPTERS registry", () => {
 
   /**
    * `"pi"` addresses Pi's `settings.json` for the config importers; it is not
-   * an MCP target, because Pi's core has no MCP. Listing it here would make
-   * Cognia offer to sync MCP servers into a file Pi never reads.
+   * an MCP target. Native Pi MCP uses the historical pi-mcp-adapter ID so
+   * MCP sync never writes into settings.json.
    */
-  it("does not treat Pi itself as an MCP target", () => {
+  it("keeps Pi settings separate from its native MCP target", () => {
     expect(MCP_AGENT_ADAPTERS.map((a) => a.id)).not.toContain("pi")
     expect(getAgentAdapter("pi")).toBeUndefined()
   })

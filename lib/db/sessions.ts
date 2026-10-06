@@ -1,3 +1,4 @@
+import { measureOperation } from "@/lib/perf/operation-performance"
 import Dexie from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
@@ -25,6 +26,11 @@ import { assertSessionWritable, type SessionWriteOperation } from "@/lib/chat/se
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { stampOrganizationalWrite } from "./session-row-stamps"
 
+export interface SessionPersistenceScope {
+  db: ReturnType<typeof getDb>
+  assertActive(): void
+}
+
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
@@ -47,7 +53,11 @@ async function assertSessionsWritable(
  * `/sessions`) must use {@link listScopedSessions} instead so a workspace can't
  * see another's chats.
  */
-export async function listSessions(): Promise<ChatSession[]> {
+export function listSessions(): Promise<ChatSession[]> {
+  return measureOperation("storage.sessions.list", () => listSessionsNow())
+}
+
+async function listSessionsNow(): Promise<ChatSession[]> {
   return getDb().sessions.orderBy("updatedAt").reverse().toArray()
 }
 
@@ -86,7 +96,11 @@ export async function listAgentThreadSessions(): Promise<ChatSession[]> {
  * read through here so workspaces stay isolated. Uses the `[projectId+updatedAt]`
  * compound index (Dexie v86).
  */
-export async function listScopedSessions(projectId?: string): Promise<ChatSession[]> {
+export function listScopedSessions(projectId?: string): Promise<ChatSession[]> {
+  return measureOperation("storage.sessions.list", () => listScopedSessionsNow(projectId))
+}
+
+async function listScopedSessionsNow(projectId?: string): Promise<ChatSession[]> {
   // liveQuery zone-safety: when the caller already knows the workspace (the
   // chat sidebar always passes it), the Dexie read below must start *before*
   // any `await` — awaiting a native promise (resolveScopeProjectId is a plain
@@ -120,7 +134,11 @@ export async function listScopedSessions(projectId?: string): Promise<ChatSessio
  * start before the first `await`, for the liveQuery zone-safety reason
  * `listScopedSessions` spells out. Newest-first, like the scoped read.
  */
-export async function listWorkspaceSessions(projectId: string): Promise<ChatSession[]> {
+export function listWorkspaceSessions(projectId: string): Promise<ChatSession[]> {
+  return measureOperation("storage.sessions.list", () => listWorkspaceSessionsNow(projectId))
+}
+
+async function listWorkspaceSessionsNow(projectId: string): Promise<ChatSession[]> {
   const db = getDb()
   const [scoped, unscoped] = await Promise.all([
     db.sessions
@@ -222,8 +240,10 @@ export async function getSessionsByIds(ids: readonly string[]): Promise<ChatSess
  * note on the row literal below for what that cost.
  */
 export async function createSession(
-  partial?: Partial<Omit<ChatSession, "id" | "createdAt" | "updatedAt" | "workingSet">>
+  partial?: Partial<Omit<ChatSession, "id" | "createdAt" | "updatedAt" | "workingSet">>,
+  scope?: SessionPersistenceScope
 ): Promise<ChatSession> {
+  scope?.assertActive()
   if (partial && Object.prototype.hasOwnProperty.call(partial, "workingSet")) {
     throw new Error("Working set changes must use mutateSessionWorkingSet")
   }
@@ -257,12 +277,14 @@ export async function createSession(
       // but production flows continue without a default applied.
       console.warn("createSession: default preset auto-apply failed", err)
     }
+    scope?.assertActive()
   }
 
   // Stamp the owning workspace (Workspace isolation, Dexie v86). An explicit
   // `partial.projectId` wins (e.g. a connector inbound that resolved the
   // conversation's workspace); otherwise the active project — never null.
-  const projectId = await resolveScopeProjectId(partial?.projectId)
+  const projectId = await resolveScopeProjectId(partial?.projectId, scope)
+  scope?.assertActive()
 
   // The app-wide default thinking tier (`AppSettings.defaultThinkingLevel`),
   // stamped onto the row rather than consulted at send time.
@@ -280,11 +302,12 @@ export async function createSession(
   let defaultTier: ReturnType<typeof thinkingLevelPatch> | undefined
   if (partial?.thinkingLevel === undefined && partial?.effort === undefined) {
     try {
-      const level = (await getSettings())?.defaultThinkingLevel
+      const level = (await getSettings(scope))?.defaultThinkingLevel
       if (level) defaultTier = thinkingLevelPatch(level)
     } catch (err) {
       console.warn("createSession: default thinking level lookup failed", err)
     }
+    scope?.assertActive()
   }
 
   // The per-agent model choices made before this conversation existed.
@@ -308,7 +331,7 @@ export async function createSession(
   let agentModels: ChatSession["externalAgentModels"] | undefined
   if (partial?.externalAgentModels === undefined) {
     try {
-      const settings = await getSettings()
+      const settings = await getSettings(scope)
       const legacyModel = settings?.defaultModel?.trim()
       const legacyAgentId = externalAgentIdFromProviderId(settings?.defaultProvider)
       const inherited: NonNullable<ChatSession["externalAgentModels"]> = {
@@ -321,6 +344,7 @@ export async function createSession(
     } catch (err) {
       console.warn("createSession: external-agent default model lookup failed", err)
     }
+    scope?.assertActive()
   }
 
   const session: ChatSession = {
@@ -356,12 +380,15 @@ export async function createSession(
     createdAt: now,
     updatedAt: now,
   }
-  await getDb().sessions.put(session)
+  scope?.assertActive()
+  await (scope?.db ?? getDb()).sessions.put(session)
+  scope?.assertActive()
   if (autoAppliedPresetId) {
     // Wait for the usage bump so the "Recent" filter in the section reflects
     // this session immediately. The cost is one extra Dexie update per
     // creation; it's bounded and not on the chat hot path.
-    await recordPresetUsage(autoAppliedPresetId).catch(() => undefined)
+    await recordPresetUsage(autoAppliedPresetId, scope).catch(() => undefined)
+    scope?.assertActive()
   }
   return session
 }
@@ -838,8 +865,8 @@ export async function countBranchesAtMessage(parentId: string, messageId: string
   return rows.filter((s) => s.branchedFromMessageId === messageId).length
 }
 
-export async function deleteSession(id: string): Promise<void> {
-  await bulkDeleteSessions([id])
+export async function deleteSession(id: string, scope?: SessionPersistenceScope): Promise<void> {
+  await bulkDeleteSessions([id], scope)
 }
 
 /**
@@ -861,7 +888,11 @@ export async function deleteSession(id: string): Promise<void> {
  * (`lib/plugin/api/session-api.ts` via `stores/chat/session-store.ts`), and
  * direct callers — and all three converge on this module.
  */
-async function purgeSessionStoreBuckets(sessionId: string): Promise<void> {
+async function purgeSessionStoreBuckets(
+  sessionId: string,
+  scope?: SessionPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
   let useArtifactStore:
     typeof import("@/stores/artifact/artifact-store").useArtifactStore | undefined
   try {
@@ -871,16 +902,19 @@ async function purgeSessionStoreBuckets(sessionId: string): Promise<void> {
     // Store module absent in SSR/minimal test runtimes — non-fatal.
     return
   }
+  scope?.assertActive()
   // Artifacts and canvas documents the Files page keeps (ADR-0200) outlive
   // their conversation. A failed lookup keeps nothing rather than blocking
   // deletion: the item then goes with its session, as before Files existed.
   let keep: { artifactIds: Set<string>; canvasIds: Set<string> } | undefined
   try {
     const { listKeptSourceIdsForSession } = await import("./files-library-items")
+    scope?.assertActive()
     keep = await listKeptSourceIdsForSession(sessionId)
   } catch (error) {
     loggers.store.warn("files keep lookup failed", { sessionId, error: String(error) })
   }
+  scope?.assertActive()
   try {
     useArtifactStore.getState().clearSessionData?.(sessionId, keep)
   } catch (error) {
@@ -897,11 +931,15 @@ async function purgeSessionStoreBuckets(sessionId: string): Promise<void> {
  * transaction, so this final external cleanup is best-effort. The dynamic
  * import avoids a module cycle (scheduler executors import this module).
  */
-async function cleanupScheduledLoopTasks(taskIds: readonly string[]): Promise<void> {
+async function cleanupScheduledLoopTasks(
+  taskIds: readonly string[],
+  scope?: SessionPersistenceScope
+): Promise<void> {
   if (taskIds.length === 0) return
   try {
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     for (const taskId of taskIds) {
+      scope?.assertActive()
       await getTaskScheduler()
         .deleteTask(taskId)
         .catch(() => {})
@@ -911,10 +949,14 @@ async function cleanupScheduledLoopTasks(taskIds: readonly string[]): Promise<vo
   }
 }
 
-async function releaseSandboxSessionWithRetry(sessionId: string): Promise<void> {
+async function releaseSandboxSessionWithRetry(
+  sessionId: string,
+  scope?: SessionPersistenceScope
+): Promise<void> {
   let lastError: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      scope?.assertActive()
       await sandboxSessionRuntime.releaseSession(sessionId)
       return
     } catch (error) {
@@ -932,7 +974,8 @@ async function releaseSandboxSessionWithRetry(sessionId: string): Promise<void> 
 export async function cleanupManagedExternalAgentSessions(
   rows: readonly (
     Pick<ChatSession, "externalAgentSession" | "externalAgentGatewaySessions"> | undefined
-  )[]
+  )[],
+  scope?: SessionPersistenceScope
 ): Promise<void> {
   const links = new Map<string, NonNullable<ChatSession["externalAgentSession"]>>()
   for (const row of rows) {
@@ -941,8 +984,10 @@ export async function cleanupManagedExternalAgentSessions(
   }
   if (links.size === 0) return
   const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-  for (const link of links.values())
+  for (const link of links.values()) {
+    scope?.assertActive()
     await getExternalAgentManager().deleteSession(link.agentId, link.sessionId)
+  }
 }
 
 /**
@@ -954,17 +999,26 @@ export async function cleanupManagedExternalAgentSessions(
  * skipped. Scheduler tasks and persisted UI stores are external systems and
  * are cleaned up best-effort after the database commit.
  */
-export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> {
+export async function bulkDeleteSessions(
+  ids: readonly string[],
+  scope?: SessionPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
   if (ids.length === 0) return
-  const db = getDb()
+  const db = scope?.db ?? getDb()
   const requestedIds = [...new Set(ids)]
   // Native task state is outside Dexie. Stop/revoke/delete it before dropping
   // the durable link, so a host failure leaves a retryable conversation row.
   const cleanupIds = [
     ...new Set([...requestedIds, ...(await listOwnedAttachedDescendantIds(db, requestedIds))]),
   ]
+  scope?.assertActive()
   await assertSessionsWritable(db, cleanupIds, "delete")
-  await cleanupManagedExternalAgentSessions(await db.sessions.bulkGet(cleanupIds))
+  scope?.assertActive()
+  const cleanupRows = await db.sessions.bulkGet(cleanupIds)
+  scope?.assertActive()
+  await cleanupManagedExternalAgentSessions(cleanupRows, scope)
+  scope?.assertActive()
   let deletedIds: string[] = []
   let scheduledTaskIds: string[] = []
   const orphanCandidates = new Set<string>()
@@ -992,6 +1046,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       db.libraryItems,
     ],
     async () => {
+      scope?.assertActive()
       const at = Date.now()
       deletedIds = (await db.sessions.bulkGet(requestedIds)).flatMap((row) => (row ? [row.id] : []))
       if (deletedIds.length === 0) return
@@ -1079,15 +1134,21 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       // Video jobs a conversation started (ADR-0205); their video is one of
       // the session assets released above.
       await db.mediaGenerationJobs.where("sessionId").anyOf(deletedIds).delete()
+      scope?.assertActive()
       await recordTombstones("sessions", deletedIds, at)
+      scope?.assertActive()
       await recordTombstones("messages", allMessageIds, at)
+      scope?.assertActive()
       await recordTombstones("sessionState", deletedIds, at)
       // Goals are mirrored on their own (`goals`), so the ones this cascade
       // dropped need their own tombstones or they outlive their session on
       // every paired client.
+      scope?.assertActive()
       await recordTombstones("goals", goalIds, at)
+      scope?.assertActive()
     }
   )
+  scope?.assertActive()
   if (orphanCandidates.size > 0) {
     try {
       // Shared media survives the indexed reference re-check; recent uploads
@@ -1100,15 +1161,18 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       })
     }
   }
+  scope?.assertActive()
   clearTemporarySessionAssets(cleanupIds)
-  await cleanupScheduledLoopTasks(scheduledTaskIds)
+  await cleanupScheduledLoopTasks(scheduledTaskIds, scope)
+  scope?.assertActive()
   const sandboxReleaseErrors: unknown[] = []
   for (const id of deletedIds) {
     try {
-      await releaseSandboxSessionWithRetry(id)
+      await releaseSandboxSessionWithRetry(id, scope)
     } catch (error) {
       sandboxReleaseErrors.push(error)
     }
+    scope?.assertActive()
     invalidatePersistSnapshot(id)
     markSessionRemoved(id)
     try {
@@ -1125,8 +1189,10 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
     // captured in this conversation now points at nothing, so the claims that
     // rested on it must stop being injected; the arithmetic that follows runs
     // on the job worker.
-    await revokeClaimsForDeletedSession(id)
-    await purgeSessionStoreBuckets(id)
+    scope?.assertActive()
+    await revokeClaimsForDeletedSession(id, ...(scope ? ([scope] as const) : []))
+    scope?.assertActive()
+    await purgeSessionStoreBuckets(id, scope)
   }
   if (sandboxReleaseErrors.length > 0) {
     // The transaction already committed — the sessions ARE deleted. Rejecting

@@ -1898,6 +1898,9 @@ export interface AgentKnowledgeSourcesContext {
       sourceId: string
       content: string
       vectorDocId: string
+      generationId?: string
+      charStart?: number
+      charEnd?: number
     }
     score: number
   }>
@@ -1907,6 +1910,15 @@ export interface AgentKnowledgeSourcesContext {
     sourceId: string
     sourceTitle: string
     chunkId: string
+    generationId?: string
+    documentVersion?: string
+    sectionId?: string
+    charStart?: number
+    charEnd?: number
+    pageNumber?: number
+    pageEnd?: number
+    lineStart?: number
+    lineEnd?: number
     score: number
   }>
 }
@@ -1962,6 +1974,15 @@ export function mergeAgentKnowledgeSourcesIntoLastAssistant(
         knowledgeBaseId: chunk.knowledgeBaseId,
         sourceId: chunk.sourceId,
         chunkId: chunk.id,
+        generationId: citation?.generationId ?? chunk.generationId,
+        documentVersion: citation?.documentVersion,
+        sectionId: citation?.sectionId,
+        charStart: citation?.charStart ?? chunk.charStart,
+        charEnd: citation?.charEnd ?? chunk.charEnd,
+        pageNumber: citation?.pageNumber,
+        pageEnd: citation?.pageEnd,
+        lineStart: citation?.lineStart,
+        lineEnd: citation?.lineEnd,
       },
     }
   })

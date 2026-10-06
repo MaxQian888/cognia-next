@@ -1,3 +1,7 @@
+import {
+  createOperationPerformanceRecorder,
+  getOperationPerformanceRecorder,
+} from "@/lib/perf/operation-performance"
 // Coverage for session creation, focused on the default-preset auto-apply
 // path added in v12 of the preset feature uplift. The non-preset behaviour
 // of `createSession` was tested implicitly through the broader app; we
@@ -51,6 +55,82 @@ import { loggers } from "@cognia/logging"
 import * as chatDrafts from "./chat-drafts"
 import { commitTranscriptIndexPage } from "./chat-transcript-index"
 import { putSessionAsset, getSessionAsset, listSessionAssets } from "./session-assets"
+
+it("does not create a session after the scope changes while defaults are read", async () => {
+  const db = getDb()
+  let active = true
+  const originalGet = db.settings.get.bind(db.settings)
+  const read = jest.spyOn(db.settings, "get").mockImplementationOnce(() =>
+    originalGet("singleton").then((settings) => {
+      active = false
+      return settings
+    })
+  )
+  const write = jest.spyOn(db.sessions, "put")
+  try {
+    await expect(
+      createSession(
+        { characterId: "eval-character", projectId: "project-1" },
+        {
+          db,
+          assertActive: () => {
+            if (!active) throw new Error("Scope changed")
+          },
+        }
+      )
+    ).rejects.toThrow("Scope changed")
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
+})
+
+it("keeps session rows when scope changes during external cleanup", async () => {
+  const db = getDb()
+  const session = await createSession({
+    externalAgentSession: { agentId: "pi", sessionId: "cognia-gateway:scoped-task:native" },
+  })
+  let active = true
+  deleteExternalSessionMock.mockImplementationOnce(async () => {
+    active = false
+  })
+  await expect(
+    deleteSession(session.id, {
+      db,
+      assertActive: () => {
+        if (!active) throw new Error("Scope changed")
+      },
+    })
+  ).rejects.toThrow("Scope changed")
+  expect(await db.sessions.get(session.id)).toBeDefined()
+})
+
+it("rolls back a scoped cascade when the account changes before tombstones", async () => {
+  const db = getDb()
+  const session = await createSession({ characterId: "eval-character" })
+  let active = true
+  const remove = db.sessions.delete.bind(db.sessions)
+  const deletion = jest.spyOn(db.sessions, "delete").mockImplementationOnce((id) =>
+    remove(id).then(() => {
+      active = false
+    })
+  )
+  try {
+    await expect(
+      deleteSession(session.id, {
+        db,
+        assertActive: () => {
+          if (!active) throw new Error("Scope changed")
+        },
+      })
+    ).rejects.toThrow("Scope changed")
+    expect(await db.sessions.get(session.id)).toBeDefined()
+    expect(await db.syncTombstones.get(["sessions", session.id])).toBeUndefined()
+  } finally {
+    deletion.mockRestore()
+  }
+})
 
 // The /loop cascade tears down backing scheduler tasks via a dynamic
 // import — mock the scheduler singleton so no real timing engine spins up.
@@ -573,6 +653,7 @@ describe("setSessionOrder", () => {
   // Dexie's dependency-tracking zone is lost, and the (non-indexed)
   // `manualOrder` write never re-emits → drag-reorder visually snaps back.
   it("re-emits an explicit-pid liveQuery after a reorder", async () => {
+    enableOperationRecording()
     const a = await createSession({ title: "A" })
     const b = await createSession({ title: "B" })
     const c = await createSession({ title: "C" })
@@ -1988,4 +2069,54 @@ describe("thread handoff write guard", () => {
     })
     expect((await getDb().sessions.get("handoff-locked"))?.title).toBe("Frozen")
   })
+})
+
+it("measures each session listing once without storing workspace or session identifiers", async () => {
+  const recorder = enableOperationRecording()
+  try {
+    const session = await createSession({
+      title: "private performance title",
+      projectId: "private-workspace",
+    })
+    expect((await listSessions()).some((row) => row.id === session.id)).toBe(true)
+    expect((await listScopedSessions("private-workspace")).map((row) => row.id)).toEqual([
+      session.id,
+    ])
+    expect(
+      (await listWorkspaceSessions("private-workspace")).some((row) => row.id === session.id)
+    ).toBe(true)
+    const rows = recorder.getSnapshot().rows
+    expect(rows.find((row) => row.name === "storage.sessions.list")).toMatchObject({ count: 3 })
+    expect(JSON.stringify(rows)).not.toContain("private-workspace")
+    expect(JSON.stringify(rows)).not.toContain("private performance title")
+    expect(JSON.stringify(rows)).not.toContain(session.id)
+  } finally {
+    recorder.updateSettings({ enabled: false })
+    recorder.clear()
+  }
+})
+
+// Use the actual recorder/helper with a browser-capable memory store while
+// keeping Dexie tests in their native Node environment.
+let operationRecordingSpy: jest.SpyInstance | undefined
+function enableOperationRecording() {
+  const storage = new Map<string, string>()
+  const recorder = createOperationPerformanceRecorder({
+    isBrowser: () => true,
+    storage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => {
+        storage.set(key, value)
+      },
+    },
+  })
+  recorder.updateSettings({ enabled: true })
+  operationRecordingSpy = jest
+    .spyOn(getOperationPerformanceRecorder(), "begin")
+    .mockImplementation(recorder.begin)
+  return recorder
+}
+afterEach(() => {
+  operationRecordingSpy?.mockRestore()
+  operationRecordingSpy = undefined
 })

@@ -90,7 +90,15 @@ const sharedModuleLoaders: Record<(typeof PLUGIN_SHARED_MODULES)[number], () => 
     "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
     "@cognia/plugin-sdk": () => import("@cognia/plugin-sdk"),
     "@cognia/plugin-sdk/api/effort-surface": loadEffortSurfaceModule,
-    "@cognia/plugin-ui": () => import("@cognia/plugin-ui"),
+    "@cognia/plugin-ui": async () => {
+      const [ui, assets] = await Promise.all([
+        import("@cognia/plugin-ui"),
+        import("./plugin-asset-resolver"),
+      ])
+      ui.bindPluginImageAssetResolver(assets.resolvePluginImageAsset)
+      const { bindPluginImageAssetResolver: _bindHost, ...publicModule } = ui
+      return publicModule
+    },
     "lucide-react": () =>
       import("@/lib/icons/lucide-require-compat").then((module) => module.lucideRequireCompat),
   }

@@ -33,6 +33,7 @@ import {
 } from "./pinned-fetch"
 import { parseProblem } from "./companion-problem"
 import {
+  CompanionApiError,
   companionAuthorizationHeaders,
   invalidateCompanionAccessToken,
   issueSocketTicket,
@@ -1043,17 +1044,51 @@ export class CompanionTransport implements Transport {
         headers["Idempotency-Key"] = idempotencyKey
       }
 
-      return this.fetchWithRetry<T>(
-        url,
-        config,
-        path,
-        headers,
-        JSON.stringify(args ?? {}),
-        retryable,
-        timeoutMs,
-        deadlineAt,
-        signal
-      )
+      try {
+        return await this.fetchWithRetry<T>(
+          url,
+          config,
+          path,
+          headers,
+          JSON.stringify(args ?? {}),
+          retryable,
+          timeoutMs,
+          deadlineAt,
+          signal
+        )
+      } catch (error) {
+        // Fresh pairing negotiates the Host before its signaling controller
+        // starts. A failed direct route must be able to open the paired relay
+        // here, including failures while acquiring the HTTP access token.
+        const routeUnavailable =
+          (error instanceof CompanionApiError && [502, 503, 504].includes(error.status)) ||
+          (error instanceof CompanionError &&
+            error.retryable &&
+            ["network", "server_error"].includes(error.code))
+        if (
+          !retryable ||
+          !routeUnavailable ||
+          !config.rendezvousId ||
+          !config.signalingRoomDescriptor ||
+          !config.signalingPrivateKey
+        )
+          throw error
+        signal.throwIfAborted()
+        const rtc = await this.awaitRelayRoute(config, deadlineAt, signal)
+        try {
+          const result = await rtc.call<T>(name, args ?? {}, { idempotencyKey, deadlineAt })
+          this.setPlaneHealth({ rpc: "ready" })
+          return result
+        } catch (relayError) {
+          if (!(relayError instanceof RtcCarrierError)) throw relayError
+          this.setPlaneHealth({ rpc: "unavailable" })
+          throw new CompanionError({
+            code: "network",
+            message: relayError.message,
+            retryable: true,
+          })
+        }
+      }
     }
     try {
       return await Promise.race([execute(), expired])
@@ -2089,7 +2124,6 @@ export class CompanionTransport implements Transport {
       // A new socket carries none of the old one's subscriptions.
       this.acknowledgedChannels.clear()
       this.wsState = "connected"
-      this.wsReconnectAttempt = 0
       this.setPlaneHealth({ events: "replaying" })
       this.setConnectionState("connected")
       // Widen the server-side subscription to every channel we handle. The
@@ -2137,6 +2171,9 @@ export class CompanionTransport implements Transport {
     if (type === "stream_ready") {
       const cursor = frame["cursor"]
       if (!Number.isSafeInteger(cursor) || (cursor as number) < 0) return
+      // Opening a socket does not prove recovery: the Host may immediately
+      // require a snapshot that still fails. Reset backoff only after replay.
+      this.wsReconnectAttempt = 0
       for (const event of this.channelHandlers.keys()) {
         this.highestSeq.set(event, Math.max(this.highestSeq.get(event) ?? 0, cursor as number))
       }
@@ -2274,8 +2311,22 @@ export class CompanionTransport implements Transport {
       .catch((error) => {
         console.error("CompanionTransport: authoritative event resync failed", error)
         this.wsState = "idle"
-        this.setPlaneHealth({ events: "idle" })
-        this.setConnectionState("offline")
+        // A restarting Host can answer before the previous writer's lease
+        // expires. Preserve the old cursor and retry the normal handshake;
+        // otherwise a failed snapshot can leave an open but unusable socket
+        // forever, with no close event left to trigger recovery.
+        if (this.ws) {
+          const ws = this.ws
+          this.ws = null
+          this.forgetSocketAcknowledgements()
+          ws.close()
+        }
+        if (!this.wsDestroyed && this.channelHandlers.size > 0) {
+          this.scheduleWsReconnect()
+        } else {
+          this.setPlaneHealth({ events: "idle" })
+          this.setConnectionState("offline")
+        }
       })
       .finally(() => {
         this.wsResyncInFlight = null

@@ -2366,7 +2366,22 @@ export type ExternalAgentModelChoice =
   | { kind: "native"; modelId?: string }
   | { kind: "cognia"; binding: ExternalAgentCogniaModelBinding }
 
+/** Layered, opt-in progressive document reading; original text is always the evidence. */
+export interface KnowledgeReadingSettings {
+  enabled: boolean
+  retrievalStrategy: "vector" | "hybrid" | "keyword"
+  topKPerBase: number
+  ragTokenBudget: number
+  maxCalls: number
+  maxReadChars: number
+  totalReadChars: number
+  maxOutlineNodes: number
+  summaryProviderId?: string
+  summaryMaxChars: number
+}
+
 export interface ChatSession {
+  knowledgeReading?: Partial<KnowledgeReadingSettings>
   /** Durable source/target link for an explicitly exported Codex snapshot. */
   codexHandoff?: {
     threadId: string
@@ -3753,6 +3768,7 @@ export interface RouterFusionRunSummary {
 }
 
 export interface AppSettings {
+  knowledgeReading?: Partial<KnowledgeReadingSettings>
   id: "singleton"
   /** Opt-in local Chromium-cookie import for the embedded desktop browser. */
   browserCookieImportEnabled?: boolean
@@ -6319,17 +6335,13 @@ export type AgentId =
   | "opencode"
   | "cognia"
   /**
-   * Pi is a **config-read target only**, not an MCP sync target: Pi's core
-   * ships no MCP support (`mcpServers` appears nowhere in its distribution),
-   * so it deliberately has no entry in `MCP_AGENT_ADAPTERS`. `spec_for("pi")`
-   * resolves to `<pi agent dir>/settings.json`, which is what the settings
-   * importer and the vendor probe read.
+   * Pi settings.json target, separate from its MCP configuration target below.
+   * The settings importer, vendor probe and package manager use this ID.
    */
   | "pi"
   /**
-   * The third-party `pi-mcp-adapter` package's `<pi agent dir>/mcp.json` —
-   * a separate id from `"pi"` because it is a separate file owned by a
-   * separate project. Only meaningful once that package is installed.
+   * Pi's user-scope mcp.json (native since 0.99, also used by the legacy
+   * pi-mcp-adapter extension). Historical ID retained for saved sync targets.
    */
   | "pi-mcp-adapter"
 
@@ -6608,6 +6620,7 @@ export interface AgentMemoryPolicy {
  * unless the session has explicit overrides for those fields.
  */
 export interface Character {
+  knowledgeReading?: Partial<KnowledgeReadingSettings>
   id: string
   name: string
   description?: string

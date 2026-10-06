@@ -300,12 +300,20 @@ function omitAgentFlowMode(
   return rest
 }
 
-export async function getSettings(): Promise<AppSettings> {
+export async function getSettings(scope?: {
+  db: ReturnType<typeof getDb>
+  assertActive(): void
+}): Promise<AppSettings> {
+  scope?.assertActive()
   // Retried across a connection close: this read is what every window makes at
   // boot, right when the plugin table bridge closes and reopens the shared
   // connection to register plugin stores. Losing it used to strand the whole
   // window on DEFAULTS for the rest of the session (see `withDbReopenRetry`).
-  const row = await withDbReopenRetry(() => getDb().settings.get(SINGLETON_ID))
+  const row = await withDbReopenRetry(() => {
+    scope?.assertActive()
+    return (scope?.db ?? getDb()).settings.get(SINGLETON_ID)
+  })
+  scope?.assertActive()
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
   if (!row) return { ...DEFAULTS, ...resolveLocalePreference() }
@@ -531,7 +539,9 @@ export interface SaveSettingsOptions {
 
 export async function saveSettings(
   patch: Partial<Omit<AppSettings, "id">>,
-  options: SaveSettingsOptions = {}
+  options: SaveSettingsOptions & {
+    scope?: { db: ReturnType<typeof getDb>; assertActive(): void }
+  } = {}
 ): Promise<AppSettings> {
   // Same connection-close exposure as the read, with a worse failure: a patch
   // dropped mid-boot is a setting the user watched themselves change and then
@@ -539,7 +549,9 @@ export async function saveSettings(
   // is what keeps the merge correct on the second pass.
   const next = saveQueue.then(() =>
     withDbReopenRetry(async () => {
-      const current = await getSettings()
+      options.scope?.assertActive()
+      const current = await getSettings(options.scope)
+      options.scope?.assertActive()
       const migratedCurrent: AppSettings = {
         ...current,
         defaultAccountIds: current.defaultAccountIds ? { ...current.defaultAccountIds } : undefined,
@@ -563,7 +575,8 @@ export async function saveSettings(
         updatedAt: Date.now(),
       }
       migrateLegacyDefaultAccount(merged)
-      await getDb().settings.put(merged)
+      await (options.scope?.db ?? getDb()).settings.put(merged)
+      options.scope?.assertActive()
       // ADR-0090 Phase 1: keep the derived Provider Profile Store fresh.
       // Runs inside the serialized queue so derivations observe writes in
       // order; awaited so a caller that immediately reads profiles sees the
@@ -572,6 +585,7 @@ export async function saveSettings(
         try {
           const { syncProviderProfilesFromSettings } =
             await import("@/lib/settings/provider-profile-sync")
+          options.scope?.assertActive()
           await syncProviderProfilesFromSettings(merged)
         } catch {
           // The profile store is a re-derivable projection; a failed sync is
@@ -587,11 +601,13 @@ export async function saveSettings(
       if (options.mirrorToHost !== false) {
         try {
           const { mirrorSettingsPatchToHost } = await import("@/lib/settings/mirror-to-host")
+          options.scope?.assertActive()
           await mirrorSettingsPatchToHost(patch)
         } catch {
           // Non-fatal — see above.
         }
       }
+      options.scope?.assertActive()
       return merged
     })
   )

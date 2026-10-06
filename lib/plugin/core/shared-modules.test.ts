@@ -96,6 +96,7 @@ describe("createPluginRequire", () => {
     const kit = req("@cognia/plugin-ui") as Record<string, unknown>
     expect(typeof kit.Button).toBe("function")
     expect(typeof kit.cn).toBe("function")
+    expect(kit).not.toHaveProperty("bindPluginImageAssetResolver")
   })
 
   it("hands back the host lucide registry", async () => {

@@ -17,6 +17,39 @@ beforeEach(async () => {
 })
 
 describe("getSettings", () => {
+  it("rejects a scoped save when the account changes during its settings read", async () => {
+    const db = getDb()
+    let active = true
+    const originalGet = db.settings.get.bind(db.settings)
+    const read = jest.spyOn(db.settings, "get").mockImplementationOnce(() =>
+      originalGet("singleton").then((row) => {
+        active = false
+        return row
+      })
+    )
+    const put = jest.spyOn(db.settings, "put")
+    try {
+      await expect(
+        saveSettings(
+          { theme: "dark" },
+          {
+            mirrorToHost: false,
+            scope: {
+              db,
+              assertActive: () => {
+                if (!active) throw new Error("Scope changed")
+              },
+            },
+          }
+        )
+      ).rejects.toThrow("Scope changed")
+      expect(put).not.toHaveBeenCalled()
+    } finally {
+      read.mockRestore()
+      put.mockRestore()
+    }
+  })
+
   it("follows the current system on a fresh install and on subsequent reads", async () => {
     const languages = jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-Hans-CN"])
     try {
@@ -40,6 +73,7 @@ describe("getSettings", () => {
         id: "singleton",
         permissionMode: "default",
         alwaysAllowTools: [],
+        builtinTools: { ...DEFAULTS.builtinTools },
         language: "en",
       })
       expect(await getSettings()).toMatchObject({ language: "en", languageMode: "manual" })

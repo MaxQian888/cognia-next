@@ -113,9 +113,7 @@ export const MCP_AGENT_ADAPTERS: McpAgentAdapter[] = [
   ZED_AGENT,
   KIRO_AGENT,
   OPENCODE_AGENT,
-  // Last of the writable adapters: unlike the rest, its file is only read when
-  // a third-party Pi package is installed, so surfaces that offer a sync target
-  // gate it on detection rather than listing it unconditionally.
+  // Native Pi MCP retains its historical ID so saved sync targets remain valid.
   PI_MCP_ADAPTER_AGENT,
   CLINE_AGENT,
   ROO_CODE_AGENT,
