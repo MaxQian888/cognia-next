@@ -15,6 +15,7 @@ import {
   rustStrArray,
   specCapabilityIds,
   stringsIn,
+  checkCliAllowlistSource,
 } from "./check-agent-capabilities.mjs"
 
 test("the repo currently passes its own gate", () => {
@@ -340,4 +341,41 @@ test("a policy without an isolation table fails rather than passing vacuously", 
     "agentStateIsolation: protocol/external-agent-security-policy.json has no rules array",
   ])
   assert.throws(() => rustIsolationRules("const NOTHING: u8 = 0;"), /not found/)
+})
+
+const CLI_DERIVED = `
+import {
+  AGENT_STATE_KEY_ENV,
+  EXTERNAL_AGENT_BINARY_ALLOWLIST,
+  EXTERNAL_AGENT_NPX_ALLOWLIST,
+} from "@/lib/ai/agent/external/policy/security-policy"
+const BINARY_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_BINARY_ALLOWLIST)
+const NPX_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_NPX_ALLOWLIST)
+`
+
+test("the CLI backend passes when it builds its allowlist from the policy", () => {
+  assert.deepEqual(checkCliAllowlistSource(CLI_DERIVED), [])
+})
+
+test("a literal CLI allowlist is caught, as the duplicated `cline` once was", () => {
+  const literal = CLI_DERIVED.replace(
+    "new Set(EXTERNAL_AGENT_BINARY_ALLOWLIST)",
+    'new Set([\n  "codex",\n  "cline",\n  "cline",\n])'
+  )
+  const errors = checkCliAllowlistSource(literal)
+  assert.ok(errors.some((error) => error.includes("BINARY_ALLOWLIST must be")))
+  assert.ok(errors.some((error) => error.includes("a literal allowlist duplicates")))
+})
+
+test("an extra literal allowlist next to the derived one is caught", () => {
+  const extra = `${CLI_DERIVED}\nconst EXTRA_ALLOWLIST = new Set(["sh"])\n`
+  assert.ok(checkCliAllowlistSource(extra).some((error) => error.includes("literal allowlist")))
+})
+
+test("an allowlist that does not come from the policy module is caught", () => {
+  const elsewhere = CLI_DERIVED.replace(
+    '"@/lib/ai/agent/external/policy/security-policy"',
+    '"./my-allowlist"'
+  )
+  assert.ok(checkCliAllowlistSource(elsewhere).some((error) => error.includes("policy module")))
 })

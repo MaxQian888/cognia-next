@@ -118,10 +118,11 @@ ignored; `resumeInFlightRuns` does not skip `__team__:` rows.
 Drift items: fixed — plugin adapters missing core members (wrapper; the Python proxy still
 forwards seven members, and the wrapper now reports or supplies the rest), native resume
 persisting the instance id, headless squad bootstrap, workflow lease-renew result,
-`__team__:` resume skip. Open (Phase 3, in progress) — Goose row, OpenCode V1 dead client (moved
-to the package unregistered; dormancy is labelled by `getUnsupportedProtocolReason`), CLI
-spawn allowlist gate and `cline` duplicate, `pluginEcosystem` nulls, Pi session dir readers,
-OpenCode SQLite path lists.
+`__team__:` resume skip, CLI spawn allowlist and its duplicated `cline` (the CLI now builds
+its allowlist from the security policy and `audit:agent-capabilities` refuses a literal copy).
+Open (Phase 3, in progress) — Goose row, OpenCode V1 dead client (moved to the package
+unregistered; dormancy is labelled by `getUnsupportedProtocolReason`), `pluginEcosystem`
+nulls, Pi session dir readers, OpenCode SQLite path lists.
 
 ## 3. Target packages and dependency direction
 
@@ -369,6 +370,10 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
   the PTY fixture and the smoke harness install the same host), and
   `scripts/build/cli-external-agent-aliases.mjs` plus the three `cli/tsconfig.json` remaps are
   deleted. A second install is refused.
+  CLI spawn allowlist done: `cli/src/runtime/external/node-backend.ts` builds its binary and npx
+  allowlists from `EXTERNAL_AGENT_BINARY_ALLOWLIST` / `EXTERNAL_AGENT_NPX_ALLOWLIST` (the security
+  policy), which drops the duplicated `cline`; `audit:agent-capabilities` fails on a literal list
+  there, so the CLI, the desktop TypeScript and the audited Rust literals share one authority.
   Gates broken by the Phase 2 move were repaired by "fix(gates): read the agent contracts where ADR-0217 moved them": `audit:agent-capabilities`,
   `audit:agent-control-methods`, `audit:adapter-capabilities`, `check:sdk-surface` and the
   identity wire exceptions parse the contracts now; `check:acp-v1-contract` was repaired with

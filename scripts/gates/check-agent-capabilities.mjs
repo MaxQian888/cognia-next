@@ -26,7 +26,9 @@
  *   5. security policy ⇄ Rust `agent_state_writable_roots`;
  *   6. security policy `agentStateIsolation` ⇄ Rust
  *      `AGENT_STATE_ISOLATION_RULES` (row for row, ADR-0216);
- *   7. every allowlisted binary is reachable from a shipped preset.
+ *   7. every allowlisted binary is reachable from a shipped preset;
+ *   8. the standalone CLI's Node backend builds its spawn allowlist from the
+ *      policy constants instead of carrying a literal copy (ADR-0217).
  *
  * What is NOT checked, and why: plugin lifecycle (registration on enable,
  * teardown on disable) is RUNTIME behaviour. A regex claiming to have proven it
@@ -56,6 +58,7 @@ const RUST_SANDBOX = "crates/cognia-external-agent/src/sandbox.rs"
 const RUST_STATE_ISOLATION = "crates/cognia-external-agent/src/state_isolation.rs"
 const ECOSYSTEM_TS = "lib/ai/agent/external/ecosystem-adapters.ts"
 const PRESETS_TS = "lib/ai/agent/external/config/presets.ts"
+const CLI_BACKEND_TS = "cli/src/runtime/external/node-backend.ts"
 
 const LEVELS = new Set(["native", "equivalent", "unsupported", "unknown"])
 
@@ -287,6 +290,37 @@ export function checkCapabilityManifest(manifest, vocabulary, registered) {
   return errors
 }
 
+/**
+ * The CLI admits what the policy admits, read from the policy module. A literal
+ * list is how the CLI once carried `cline` twice with nothing checking it.
+ * @returns {string[]} errors
+ */
+export function checkCliAllowlistSource(source) {
+  const errors = []
+  const code = stripComments(source)
+  const derived = [
+    ["BINARY_ALLOWLIST", "EXTERNAL_AGENT_BINARY_ALLOWLIST"],
+    ["NPX_ALLOWLIST", "EXTERNAL_AGENT_NPX_ALLOWLIST"],
+  ]
+  for (const [local, policyConstant] of derived) {
+    const declaration = new RegExp(
+      `const\\s+${local}\\b[^=]*=\\s*new\\s+Set\\(\\s*${policyConstant}\\s*\\)`
+    )
+    if (!declaration.test(code)) {
+      errors.push(
+        `${CLI_BACKEND_TS}: ${local} must be \`new Set(${policyConstant})\` from the security policy module`
+      )
+    }
+  }
+  if (!/from\s+"@\/lib\/ai\/agent\/external\/policy\/security-policy"/.test(code)) {
+    errors.push(`${CLI_BACKEND_TS}: the spawn allowlist must come from the security policy module`)
+  }
+  if (/ALLOWLIST\b[^=\n]*=\s*new\s+Set\(\s*\[/.test(code)) {
+    errors.push(`${CLI_BACKEND_TS}: a literal allowlist duplicates ${SECURITY_POLICY}`)
+  }
+  return errors
+}
+
 /** @returns {string[]} errors */
 export function checkSecurityPolicyParity(policy, rustPresets, rustSandbox, commands) {
   const errors = []
@@ -402,6 +436,7 @@ export function runChecks() {
     )
   )
   errors.push(...checkIsolationParity(policy, read(RUST_STATE_ISOLATION)))
+  errors.push(...checkCliAllowlistSource(read(CLI_BACKEND_TS)))
 
   return errors
 }

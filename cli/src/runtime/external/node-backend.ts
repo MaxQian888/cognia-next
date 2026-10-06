@@ -11,7 +11,11 @@ import {
   type StateIsolationHost,
   type StateIsolationPlan,
 } from "./state-isolation"
-import { AGENT_STATE_KEY_ENV } from "@/lib/ai/agent/external/policy/security-policy"
+import {
+  AGENT_STATE_KEY_ENV,
+  EXTERNAL_AGENT_BINARY_ALLOWLIST,
+  EXTERNAL_AGENT_NPX_ALLOWLIST,
+} from "@/lib/ai/agent/external/policy/security-policy"
 
 import {
   agentSearchDirs,
@@ -87,38 +91,12 @@ const CHANNEL = {
   spawn: "external-agent://spawn",
 } as const
 
-const BINARY_ALLOWLIST = new Set([
-  "claude",
-  "claude-agent-acp",
-  "claude-code-acp",
-  "codex",
-  "codex-acp",
-  "opencode",
-  "cursor-agent",
-  "cline",
-  "gemini",
-  "copilot",
-  "kiro-cli",
-  "droid",
-  "devin",
-  "cline",
-  "qoder",
-  "kimi",
-  "goose",
-  "aider",
-  // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
-  "pi",
-])
-const NPX_ALLOWLIST = new Set([
-  "@agentclientprotocol/claude-agent-acp",
-  "@zed-industries/claude-code-acp",
-  "@zed-industries/codex-acp",
-  "@agentclientprotocol/codex-acp",
-  "@anthropic-ai/claude-code",
-  "@google/gemini-cli",
-  "@qwen-code/qwen-code",
-  "opencode-ai",
-])
+// What the CLI is willing to launch is the security policy's allowlist
+// (protocol/external-agent-security-policy.json), the one the desktop's
+// TypeScript reads and the Rust literal arrays are audited against
+// (`pnpm audit:agent-capabilities`). No second copy lives here.
+const BINARY_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_BINARY_ALLOWLIST)
+const NPX_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_NPX_ALLOWLIST)
 const CONFIG_ENV_KEYS = new Set([
   "KIMI_CODE_HOME",
   "KIMI_CODE_NO_AUTO_UPDATE",
@@ -271,8 +249,9 @@ function baseCommand(command: string): string {
     .replace(/\.(?:exe|cmd|bat)$/i, "")
 }
 
-function validateCommand(
-  config: NodeExternalAgentSpawnConfig,
+/** Refuse a launch the security policy does not allow; exported for its tests. */
+export function validateCommand(
+  config: Pick<NodeExternalAgentSpawnConfig, "command" | "args">,
   smoke: boolean,
   workspacesRoot: string
 ): void {

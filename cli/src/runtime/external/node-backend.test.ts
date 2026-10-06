@@ -9,7 +9,12 @@ import {
   commandExists,
   isDshLauncherInvocation,
   NodeExternalAgentBackend,
+  validateCommand,
 } from "./node-backend"
+import {
+  EXTERNAL_AGENT_BINARY_ALLOWLIST,
+  EXTERNAL_AGENT_NPX_ALLOWLIST,
+} from "@/lib/ai/agent/external/policy/security-policy"
 
 /**
  * Wait for a real backend event instead of sleeping. Everything the backend
@@ -34,6 +39,48 @@ function nextEvent<T>(
     })
   })
 }
+
+describe("CLI spawn allowlist", () => {
+  const root = os.tmpdir()
+
+  it("admits exactly the security policy's binaries and npx packages", () => {
+    for (const command of EXTERNAL_AGENT_BINARY_ALLOWLIST) {
+      expect(() => validateCommand({ command }, false, root)).not.toThrow()
+      expect(() =>
+        validateCommand({ command: `${command.toUpperCase()}.exe` }, false, root)
+      ).not.toThrow()
+    }
+    for (const pkg of EXTERNAL_AGENT_NPX_ALLOWLIST) {
+      expect(() =>
+        validateCommand({ command: "npx", args: ["-y", pkg] }, false, root)
+      ).not.toThrow()
+    }
+  })
+
+  it("refuses anything the policy does not list", () => {
+    for (const command of ["sh", "bash", "node", "python3", "qwen", "kiro"]) {
+      expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain(command)
+      expect(() => validateCommand({ command }, false, root)).toThrow(
+        /not in the external-agent allowlist/
+      )
+    }
+    expect(() =>
+      validateCommand({ command: "npx", args: ["-y", "left-pad"] }, false, root)
+    ).toThrow(/npx package left-pad is not in the allowlist/)
+    expect(() => validateCommand({ command: "npx", args: ["--yes"] }, false, root)).toThrow(
+      /npx package <missing>/
+    )
+    expect(() => validateCommand({ command: "/usr/bin/codex" }, false, root)).toThrow(
+      /bare allowlisted binary/
+    )
+  })
+
+  it("admits the smoke stub only when smoke agents are enabled", () => {
+    const stub = { command: "node", args: ["/opt/cognia/smoke/stub-acp-agent.mjs"] }
+    expect(() => validateCommand(stub, true, root)).not.toThrow()
+    expect(() => validateCommand(stub, false, root)).toThrow(/not in the external-agent allowlist/)
+  })
+})
 
 describe("NodeExternalAgentBackend", () => {
   it("does not inherit Kimi host model credentials into an isolated Bot", () => {
