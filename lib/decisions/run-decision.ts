@@ -20,6 +20,8 @@ import { loadDecisionSettings } from "@/lib/decisions/config"
 import { getDecisionRegistry } from "@/lib/decisions/host-registry"
 import {
   normalizeDecisionAnswers,
+  normalizeDecisionUsage,
+  normalizeDecisionRounding,
   normalizeDecisionRouting,
   normalizeDecisionTruncation,
 } from "@/lib/decisions/normalize"
@@ -157,24 +159,31 @@ export function redactDecisionRequest(request: DecisionRequest): {
 type Raced = { response: unknown } | { aborted: true } | { timedOut: true } | { threw: unknown }
 
 async function race(
-  work: () => Promise<DecisionProviderResponse>,
+  work: (signal: AbortSignal) => Promise<DecisionProviderResponse>,
   timeoutMs: number,
   signal?: AbortSignal
 ): Promise<Raced> {
   if (signal?.aborted) return { aborted: true }
+  const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   let detach: (() => void) | undefined
   const stop = new Promise<Raced>((resolve) => {
-    timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs)
+    timer = setTimeout(() => {
+      resolve({ timedOut: true })
+      controller.abort()
+    }, timeoutMs)
     if (signal) {
-      const onAbort = () => resolve({ aborted: true })
+      const onAbort = () => {
+        resolve({ aborted: true })
+        controller.abort()
+      }
       signal.addEventListener("abort", onAbort, { once: true })
       detach = () => signal.removeEventListener("abort", onAbort)
     }
   })
   try {
     return await Promise.race([
-      work().then(
+      work(controller.signal).then(
         (response): Raced => ({ response }),
         (threw): Raced => ({ threw })
       ),
@@ -219,7 +228,7 @@ export async function runDecision(
 
   const started = Date.now()
   const raced = await race(
-    () => provider.decide(request, { signal: options.signal }),
+    (signal) => provider.decide(request, { signal }),
     options.timeoutMs ?? DEFAULT_DECISION_TIMEOUT_MS,
     options.signal
   )
@@ -257,6 +266,8 @@ export async function runDecision(
   if (Object.keys(answers).length === 0) {
     return failure("provider_error", "decision provider returned no readable answers", providerId)
   }
+  const usage = normalizeDecisionUsage(response.usage)
+  const rounding = normalizeDecisionRounding(response.rounding)
   const routing = normalizeDecisionRouting(response.routing)
   const truncation = normalizeDecisionTruncation(response.truncation, request.questions)
   const latency = typeof response.latencyMs === "number" ? response.latencyMs : Date.now() - started
@@ -266,6 +277,13 @@ export async function runDecision(
     answers,
     latencyMs: Math.max(0, Math.round(latency)),
     ...(routing ? { routing } : {}),
+    ...(usage ? { usage } : {}),
+    ...(rounding ? { rounding } : {}),
+    ...(response.probabilityKind === "native" ||
+    response.probabilityKind === "estimated" ||
+    response.probabilityKind === "unknown"
+      ? { probabilityKind: response.probabilityKind }
+      : {}),
     ...(truncation ? { truncation } : {}),
     ...(typeof response.stateTrimmed === "number" && response.stateTrimmed > 0
       ? { stateTrimmed: response.stateTrimmed }

@@ -85,3 +85,16 @@ describe("rankCandidates", () => {
     ])
   })
 })
+
+it("keeps incomplete or absent rank distributions unranked", () => {
+  for (const probabilities of [{}, { reply_a: 0.9 }] as Record<string, number>[]) {
+    const ranked = rankCandidates(["first", "second", "third"], {
+      best_reply: { type: "choice", choice: "reply_a", probabilities },
+    })
+    expect(ranked.map(({ text, probability }) => [text, probability])).toEqual([
+      ["first", null],
+      ["second", null],
+      ["third", null],
+    ])
+  }
+})

@@ -1,6 +1,6 @@
 /**
  * System-1 decisions (ADR-0194) — typed questions answered in one pass by a
- * decision model, never by free-text generation.
+ * decision model or an explicitly selected structured LLM adapter.
  *
  * The wire format is the TypeSafe "decisions" protocol (`POST {model, state,
  * questions}` → `{answers}`), which the local laya engine speaks too, so one
@@ -9,7 +9,7 @@
  *
  * Three question types:
  * - `noul`   — yes/no; answer is P(true) in 0..1.
- * - `choice` — pick one criteria key; answer carries a probability per key.
+ * - `choice` — pick one criteria key; native answers carry probabilities per key.
  * - `score`  — ordered levels; answer is the expected level (0 = first).
  */
 
@@ -66,7 +66,7 @@ export interface NoulAnswer {
 export interface ChoiceAnswer {
   type: "choice"
   choice: string
-  confidence: number
+  confidence?: number
   probabilities: Record<string, number>
 }
 
@@ -76,7 +76,7 @@ export interface ScoreAnswer {
   score: number
   /** Number of levels the question offered. */
   levels: number
-  confidence: number
+  confidence?: number
   probabilities?: Record<string, number>
 }
 
@@ -97,12 +97,28 @@ export interface DecisionRouting {
   reason?: string
 }
 
+export type DecisionProbabilityKind = "native" | "estimated" | "unknown"
+
+export interface DecisionUsage {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+}
+
+export interface DecisionRounding {
+  probabilityDecimals?: number
+  scoreDecimals?: number
+}
+
 export interface DecisionSuccess {
   ok: true
   providerId: string
   answers: DecisionAnswers
   latencyMs: number
   routing?: DecisionRouting
+  usage?: DecisionUsage
+  rounding?: DecisionRounding
+  probabilityKind?: DecisionProbabilityKind
   /** Per-question head truncation, only for questions that lost tokens. */
   truncation?: Record<string, DecisionQuestionTruncation>
   /** How many oldest `stateTrim` entries were dropped to fit. */
@@ -167,6 +183,9 @@ export type DecisionProviderResponse =
       answers: Record<string, unknown>
       latencyMs?: number
       routing?: unknown
+      usage?: unknown
+      rounding?: unknown
+      probabilityKind?: DecisionProbabilityKind
       truncation?: unknown
       stateTrimmed?: number
       stateTruncated?: boolean
@@ -253,6 +272,10 @@ export const DECISION_HTTP_PRESET_IDS = [
   "vercel",
   "zen",
   "custom",
+  "openai",
+  "anthropic",
+  "google",
+  "gateway",
 ] as const
 
 export type DecisionHttpPresetId = (typeof DECISION_HTTP_PRESET_IDS)[number]
@@ -264,7 +287,7 @@ export interface DecisionSettings {
   /** Built-in remote endpoint config. The API key lives in the keyring. */
   http?: {
     preset: DecisionHttpPresetId
-    /** Full POST URL; required for `custom`, overrides the preset URL otherwise. */
+    /** Full POST URL for native endpoints; API base URL for LLM/Gateway adapters. */
     url?: string
     /** Model id; falls back to the preset default. */
     model?: string

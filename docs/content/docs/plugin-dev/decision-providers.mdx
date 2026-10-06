@@ -16,12 +16,28 @@ errors in between.
 | `type`   | `criteria`                                   | Answer                                                  |
 | -------- | -------------------------------------------- | ------------------------------------------------------- |
 | `noul`   | optional `{ true?, false? }` descriptions    | `{ type: "noul", noul }` — P(true), 0..1                |
-| `choice` | `{ key: description }`, 2–255 entries        | `{ type: "choice", choice, probabilities, confidence }` |
-| `score`  | `["lowest level", …, "highest level"]`, ≥ 2  | `{ type: "score", score, levels, confidence }`          |
+| `choice` | `{ key: description }`, 2–255 entries        | `{ type: "choice", choice, probabilities, confidence? }` |
+| `score`  | `["lowest level", …, "highest level"]`, ≥ 2  | `{ type: "score", score, levels, confidence? }`          |
 
 Instructions reference `state` fields by name (`` `post` ``, `` `chat` ``).
 The wire format is the TypeSafe decisions protocol, so the same request works
 against the local laya provider and the remote endpoints.
+
+## Remote adapters and result semantics
+
+Native Jev presets (TypeSafe, OpenRouter, Bocha, Vercel TypeSafe proxy, OpenCode
+Zen) use the AI SDK decision API behind the host provider. OpenAI, Anthropic,
+Google and AI Gateway are explicit additional choices; custom HTTP endpoints
+and local laya remain supported. Consumers still call `ctx.decisions.decide`.
+
+`result.probabilityKind` is `native`, `estimated`, or `unknown` when reported.
+LLM decisions can return a choice or score without a distribution: an empty
+choice `probabilities` map means unavailable, not zero probability. Confidence
+is optional and distinct from the winning probability. `result.usage`,
+`result.rounding`, and `result.routing.model` preserve safe SDK accounting and
+the actual resolved model, without exposing raw response bodies or headers.
+Native TypeSafe score questions support 2–10 levels; other providers may have
+different limits. Unvalidated adapters cannot judge or rank the reply copilot.
 
 ## Asking: `ctx.decisions.decide`
 

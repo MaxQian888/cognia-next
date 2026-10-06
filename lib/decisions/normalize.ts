@@ -15,6 +15,8 @@ import type {
   DecisionQuestionTruncation,
   DecisionQuestions,
   DecisionRouting,
+  DecisionUsage,
+  DecisionRounding,
 } from "@/types/decisions"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -67,7 +69,7 @@ function normalizeOne(question: DecisionQuestion, raw: unknown): DecisionAnswer 
       type: "choice",
       choice,
       probabilities,
-      confidence: clamp(confidence ?? probabilities[choice] ?? 0, 0, 1),
+      ...(confidence !== null ? { confidence: clamp(confidence, 0, 1) } : {}),
     }
   }
   const levels = question.criteria.length
@@ -79,7 +81,7 @@ function normalizeOne(question: DecisionQuestion, raw: unknown): DecisionAnswer 
     type: "score",
     score: clamp(score, 0, levels - 1),
     levels,
-    confidence: clamp(confidence ?? 0, 0, 1),
+    ...(confidence !== null ? { confidence: clamp(confidence, 0, 1) } : {}),
     ...(probabilities ? { probabilities } : {}),
   }
 }
@@ -133,4 +135,26 @@ export function normalizeDecisionTruncation(
 /** Expected score level mapped to 0..1 (0 = first level, 1 = last). */
 export function scoreFraction(answer: { score: number; levels: number }): number {
   return answer.levels > 1 ? clamp(answer.score / (answer.levels - 1), 0, 1) : 0
+}
+
+/** Keep only finite, non-negative integral SDK accounting fields. */
+function integerFields<K extends string>(
+  raw: unknown,
+  keys: readonly K[]
+): Partial<Record<K, number>> | undefined {
+  if (!isRecord(raw)) return undefined
+  const fields: Partial<Record<K, number>> = {}
+  for (const key of keys) {
+    const value = raw[key]
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) fields[key] = value
+  }
+  return Object.keys(fields).length ? fields : undefined
+}
+
+export function normalizeDecisionUsage(raw: unknown): DecisionUsage | undefined {
+  return integerFields(raw, ["inputTokens", "outputTokens", "totalTokens"])
+}
+
+export function normalizeDecisionRounding(raw: unknown): DecisionRounding | undefined {
+  return integerFields(raw, ["probabilityDecimals", "scoreDecimals"])
 }

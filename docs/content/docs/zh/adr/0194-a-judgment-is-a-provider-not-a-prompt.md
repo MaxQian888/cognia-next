@@ -37,7 +37,7 @@ description: "System-1 决策通过一次推理返回带校准概率的是非、
 
 `decide()` 返回 `{ok: true, answers, latencyMs, routing?, truncation?, stateTrimmed?}` 或 `{ok: false, error: {kind, message}}`。Python 支撑的提供方要跨 RPC，异常到达时只剩字符串，所以类型化的错误种类必须作为数据传递。未知种类归为 `provider_error`；laya 的 `not_ready` / `invalid_question` / `predict_failed` 分别映射为宿主的 `provider_unavailable` / `invalid_request` / `provider_error`。只有请求会跨 RPC——宿主的 `AbortSignal` 无法序列化，因此由 `runDecision` 同时监听调用、取消信号与截止时间，采用先完成的结果。
 
-### 4. 交付两个后端：本地 laya，远程 TypeSafe 兼容接口
+### 4. 本地 laya 与远程决策适配器共用宿主契约
 
 - **本地**：laya 插件贡献 `laya-local`。`describe()` 公布所路由检查点的 token 预算（`limits`），调用方据此选择精简版问题措辞。`decide` 支持 `stateTrim`——一个列表路径，其中*最旧*的条目可以被丢弃以适配预算——因为否则 laya 会从尾部截断序列化后的 state，对聊天而言就是丢掉最新消息。截断会被报告，而不是隐藏。
 - **远程**：`builtin:decisions-http` 通过 `createPlatformFetch`（网络出口门认可的托管传输）请求 OpenRouter `api/alpha/decisions` 或 `/v1/systemone` 网关（博查、TypeSafe、Vercel、OpenCode Zen、自定义）。除回环地址外拒绝明文 http。密钥按预设存于钥匙串，绝不写入设置。
@@ -70,7 +70,7 @@ description: "System-1 决策通过一次推理返回带校准概率的是非、
 
 ## 被否决的方案
 
-- **用对话 LLM 模拟判断。**成本低，但得到的是模型自报的置信度而非校准概率，且在界面上与真正的判断器看起来一样。改为明确的"无提供方"状态。
+- **隐式用对话 LLM 替代经过验证的判断器。**成本低，但得到的是模型自报的置信度而非校准概率，且在界面上与真正的判断器看起来一样。改为明确的"无提供方"状态。
 - **让副驾直接调用 laya 的工具。**把宿主功能耦合到某个插件的工具名与参数形状，其他调用方也无从接入。
 - **相信 `locality` 从而对本地提供方跳过脱敏。**插件可以声明任何东西；门必须在不相信它的前提下依然成立。
 - **屏幕副驾复用电脑操控的权限。**一份授权将同时覆盖“代理可以操控这个应用”和“我按键时读取我的聊天”；撤销其中之一就会撤销两者。
@@ -81,3 +81,23 @@ description: "System-1 决策通过一次推理返回带校准概率的是非、
 - 契约目录中新增一个能力族（`decision-provider`、`decisionProviders[]`、`ctx.decisions`、两个权限）及其镜像。
 - laya 插件从单一用途的审核钩子变成通用的本地 System-1 后端。
 - 脱敏意味着判断器看到的是 `<PHONE_001>` 而不是号码。对意图与语气这类类型化判断，这是正确的取舍；将来若有问题确实需要原始值，应由别的机制回答，而不是削弱这道门。
+
+
+## AI SDK 适配器扩展（2026-10-06）
+
+保留 `消费者 → runDecision → DecisionProvider → SDK adapter → experimental_decide`
+调用链。TypeSafe、OpenRouter、Bocha、Vercel TypeSafe 代理和 OpenCode Zen
+原生端点使用 `@ai-sdk/typesafe-ai`；适配器在宿主 `noul` 与 SDK `boolean`
+之间转换。原生预设继续使用完整 POST URL，保留 OpenRouter 的 alpha 路径。
+自定义旧式 HTTP 端点和本地 laya 继续使用原有协议。
+
+新增可显式选择的 OpenAI、Anthropic、Google 和 AI Gateway 适配器，配置 API
+base URL 与模型 ID。所有密钥仍按预设保存在 keyring，网络调用仍注入
+`createPlatformFetch`；不依赖环境密钥或全局默认模型。保持单次请求策略
+（`maxRetries: 0`），超时覆盖响应体解析，宿主取消会传递到进程内提供方。
+
+返回值保留实际模型、token 用量、舍入信息与概率语义。原生 confidence 是独立
+统计量；缺失的 confidence 和概率分布不会被补成 0。LLM 适配器明确标注为估计值，
+Gateway 因模型可变标注为未知。回复副驾仅对保持默认 URL 与默认模型的原有 Jev
+预设继承验证结果；覆盖模型、端点或选择通用适配器均不会自动获得该资格。
+切换预设会清除 URL/model 覆盖值与未保存密钥输入。

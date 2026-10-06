@@ -1,3 +1,4 @@
+import { getDecisionProbabilityKind, isDecisionCopilotValidated } from "./presets"
 import { DECISION_HTTP_PRESET_IDS } from "@/types/decisions"
 import { DECISION_HTTP_PRESETS, attributionHeaders, resolveDecisionEndpoint } from "./presets"
 
@@ -68,5 +69,31 @@ describe("attributionHeaders", () => {
     )
     expect(attributionHeaders("https://jev.bocha.cn/v1/systemone")).toEqual({})
     expect(attributionHeaders("::::")).toEqual({})
+  })
+})
+
+describe("decision adapter semantics", () => {
+  it.each(["openai", "anthropic", "google"] as const)(
+    "marks %s estimates as unvalidated",
+    (preset) => {
+      expect(getDecisionProbabilityKind({ preset })).toBe("estimated")
+      expect(isDecisionCopilotValidated({ preset })).toBe(false)
+    }
+  )
+  it("does not transfer Jev validation to overrides, custom or Gateway models", () => {
+    expect(isDecisionCopilotValidated({ preset: "typesafe" })).toBe(true)
+    expect(isDecisionCopilotValidated({ preset: "typesafe", model: "other" })).toBe(false)
+    expect(
+      isDecisionCopilotValidated({ preset: "typesafe", url: "https://other.test/systemone" })
+    ).toBe(false)
+    expect(
+      isDecisionCopilotValidated({
+        preset: "custom",
+        model: "jev-latest",
+        url: "https://other.test/systemone",
+      })
+    ).toBe(false)
+    expect(isDecisionCopilotValidated({ preset: "gateway" })).toBe(false)
+    expect(getDecisionProbabilityKind({ preset: "gateway" })).toBe("unknown")
   })
 })

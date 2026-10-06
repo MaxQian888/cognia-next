@@ -213,3 +213,16 @@ describe("runCopilot", () => {
     ).rejects.toThrow()
   })
 })
+
+it("does not claim ranking when a provider omits choice probabilities", async () => {
+  const { d } = deps({
+    decide: async () =>
+      ok({ best_reply: { type: "choice", choice: "reply_a", probabilities: {} } }),
+  })
+  const result = await runCopilot({ transcript, knowledge, instructions: "", client }, d)
+  expect(result.drafts).toMatchObject({
+    kind: "ok",
+    ranked: false,
+    candidates: [{ probability: null }, { probability: null }, { probability: null }],
+  })
+})

@@ -20,7 +20,8 @@ function setup(
   } = {}
 ) {
   const fetch =
-    options.fetch ?? jest.fn(async () => jsonResponse({ answers: { spam: { noul: 0.1 } } }))
+    options.fetch ??
+    jest.fn(async () => jsonResponse({ answers: { spam: { type: "noul", noul: 0.1 } } }))
   const provider = createDecisionsHttpProvider({
     loadSettings: async () => options.settings ?? { http: { preset: "openrouter" } },
     getKey: async () => (options.key === undefined ? "sk-test" : options.key),
@@ -32,12 +33,33 @@ function setup(
 }
 
 describe("createDecisionsHttpProvider", () => {
+  it("maps native SDK decisions and preserves usage, rounding and the resolved model", async () => {
+    const { provider, fetch } = setup({
+      settings: { http: { preset: "typesafe" } },
+      fetch: jest.fn(async () =>
+        jsonResponse({
+          model: "jev-1.13",
+          answers: { spam: { type: "noul", noul: 0.13 } },
+          usage: { input_tokens: 24, output_tokens: 0 },
+        })
+      ),
+    })
+    await expect(provider.decide(request)).resolves.toMatchObject({
+      ok: true,
+      answers: { spam: { type: "noul", noul: 0.13 } },
+      routing: { model: "jev-1.13" },
+      usage: { inputTokens: 24, outputTokens: 0, totalTokens: 24 },
+      rounding: { probabilityDecimals: 2, scoreDecimals: 2 },
+    })
+    expect(fetch.mock.calls[0][0]).toBe("https://api.typesafe.ai/v1/systemone")
+  })
+
   it("is the built-in remote provider", () => {
     const { provider } = setup()
     expect(provider).toMatchObject({
       id: BUILTIN_HTTP_PROVIDER_ID,
       locality: "remote",
-      calibrated: true,
+      calibrated: false,
     })
     expect(provider.pluginId).toBeUndefined()
   })
@@ -47,7 +69,7 @@ describe("createDecisionsHttpProvider", () => {
     const out = await provider.decide(request)
     expect(out).toMatchObject({
       ok: true,
-      answers: { spam: { noul: 0.1 } },
+      answers: { spam: { type: "noul", noul: 0.1 } },
       routing: { model: "typesafe/jev-1.13" },
     })
     const [url, init] = fetch.mock.calls[0]
@@ -57,11 +79,10 @@ describe("createDecisionsHttpProvider", () => {
       state: request.state,
       questions: request.questions,
     })
-    expect(init.headers).toMatchObject({
-      authorization: "Bearer sk-test",
-      "content-type": "application/json",
-      "X-Title": "Cognia",
-    })
+    const headers = new Headers(init.headers)
+    expect(headers.get("authorization")).toBe("Bearer sk-test")
+    expect(headers.get("content-type")).toBe("application/json")
+    expect(headers.get("x-title")).toBe("Cognia")
   })
 
   it("sends no attribution headers to systemone gateways", async () => {
@@ -143,6 +164,70 @@ describe("createDecisionsHttpProvider", () => {
     await expect(provider.decide(request, { signal: already.signal })).resolves.toMatchObject({
       error: { kind: "aborted" },
     })
+  })
+
+  it("preserves permissive custom HTTP endpoints", async () => {
+    const { provider, fetch } = setup({
+      settings: {
+        http: { preset: "custom", url: "https://judge.test/predict", model: "local-compat" },
+      },
+      fetch: jest.fn(async () => jsonResponse({ answers: { spam: { noul: "0.3" } } })),
+    })
+    await expect(provider.decide(request)).resolves.toMatchObject({
+      ok: true,
+      answers: { spam: { noul: "0.3" } },
+      probabilityKind: "unknown",
+    })
+    expect(fetch.mock.calls[0][0]).toBe("https://judge.test/predict")
+  })
+
+  it("rejects unsupported native rubrics before sending", async () => {
+    const { provider, fetch } = setup()
+    await expect(
+      provider.decide({
+        ...request,
+        questions: {
+          score: {
+            type: "score",
+            instructions: "Rate",
+            criteria: Array.from({ length: 11 }, (_, n) => String(n)),
+          },
+        },
+      })
+    ).resolves.toMatchObject({ error: { kind: "invalid_request" } })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each(["typesafe", "custom"] as const)(
+    "bounds stalled response bodies for %s",
+    async (preset) => {
+      const { provider } = setup({
+        settings: { http: { preset, url: "https://judge.test/systemone", model: "jev" } },
+        fetch: jest.fn(async () => new Response(new ReadableStream({ start() {} }))),
+        timeoutMs: 15,
+      })
+      await expect(provider.decide(request)).resolves.toMatchObject({ error: { kind: "timeout" } })
+    }
+  )
+
+  it("never sends an already cancelled request", async () => {
+    const { provider, fetch } = setup()
+    await expect(provider.decide(request, { signal: AbortSignal.abort() })).resolves.toMatchObject({
+      error: { kind: "aborted" },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("scrubs credentials echoed by native and custom error responses", async () => {
+    for (const preset of ["typesafe", "custom", "gateway"] as const) {
+      const { provider } = setup({
+        settings: { http: { preset, url: "https://judge.test/systemone", model: "jev" } },
+        fetch: jest.fn(async () => jsonResponse({ error: "invalid sk-test" }, 401)),
+      })
+      const result = await provider.decide(request)
+      expect(result).toMatchObject({ error: { kind: "http_status", status: 401 } })
+      expect(JSON.stringify(result)).not.toContain("sk-test")
+    }
   })
 
   it("reports readiness from settings + keyring", async () => {

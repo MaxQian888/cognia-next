@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { DecisionProvider, DecisionResult } from "@/types/decisions"
 
@@ -147,6 +147,87 @@ describe("DecisionProviderCard", () => {
     expect(await screen.findByText("http.keyringUnavailable")).toBeInTheDocument()
   })
 
+  it("clears endpoint overrides and an unsaved key when switching adapters", async () => {
+    const user = userEvent.setup()
+    mockSettings = {
+      decisions: {
+        providerId: "builtin:decisions-http",
+        http: { preset: "typesafe", url: "https://example.com/systemone", model: "old-model" },
+      },
+    }
+    render(<DecisionProviderCard />)
+    await user.type(screen.getByLabelText("http.key"), "old-provider-secret")
+    await user.selectOptions(screen.getByLabelText("http.preset"), "openai")
+    expect(save).toHaveBeenLastCalledWith({
+      decisions: { providerId: "builtin:decisions-http", http: { preset: "openai" } },
+    })
+    expect(screen.getByLabelText("http.key")).toHaveValue("")
+    expect(setDecisionHttpKey).not.toHaveBeenCalled()
+  })
+
+  it.each(["openai", "anthropic", "google"])(
+    "labels %s decisions as estimates with a base URL and no copilot validation",
+    async (preset) => {
+      mockSettings = {
+        decisions: { providerId: "builtin:decisions-http", http: { preset } },
+      }
+      render(<DecisionProviderCard />)
+      expect(screen.getByText("traits.estimated")).toBeInTheDocument()
+      expect(screen.queryByText("traits.calibrated")).not.toBeInTheDocument()
+      expect(screen.getByText("traits.copilotNotValidated")).toBeInTheDocument()
+      expect(screen.getByText("http.baseUrlHint")).toBeInTheDocument()
+      expect(screen.getByText("http.estimatedHint")).toBeInTheDocument()
+      expect(await screen.findByText("status.ready")).toBeInTheDocument()
+    }
+  )
+
+  it("does not display an old connection result after changing configuration", async () => {
+    const user = userEvent.setup()
+    let complete!: (result: DecisionResult) => void
+    runDecision.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve
+        })
+    )
+    mockSettings = {
+      decisions: { providerId: "builtin:decisions-http", http: { preset: "typesafe" } },
+    }
+    render(<DecisionProviderCard />)
+    await user.click(screen.getByText("test.button"))
+    await user.type(screen.getByLabelText("http.model"), "new-model")
+    await act(async () => {
+      complete({ ok: true, providerId: "builtin:decisions-http", answers: {}, latencyMs: 99 })
+    })
+    expect(screen.queryByText('test.ok:{"latencyMs":99}')).not.toBeInTheDocument()
+    expect(screen.getByText("test.button").closest("button")).toBeEnabled()
+  })
+
+  it("does not assume a Gateway model has native probability semantics", async () => {
+    mockSettings = {
+      decisions: { providerId: "builtin:decisions-http", http: { preset: "gateway" } },
+    }
+    render(<DecisionProviderCard />)
+    expect(screen.getByText("traits.unknown")).toBeInTheDocument()
+    expect(screen.getByText("traits.copilotNotValidated")).toBeInTheDocument()
+    expect(screen.getByText("http.baseUrlHint")).toBeInTheDocument()
+    expect(await screen.findByText("status.ready")).toBeInTheDocument()
+  })
+
+  it("does not inherit copilot validation for an overridden native model", async () => {
+    mockSettings = {
+      decisions: {
+        providerId: "builtin:decisions-http",
+        http: { preset: "typesafe", model: "another-model" },
+      },
+    }
+    render(<DecisionProviderCard />)
+    expect(screen.getByText("traits.native")).toBeInTheDocument()
+    expect(screen.getByText("traits.copilotNotValidated")).toBeInTheDocument()
+    expect(screen.getByText("http.endpointUrlHint")).toBeInTheDocument()
+    expect(await screen.findByText("status.ready")).toBeInTheDocument()
+  })
+
   it("shows a saved key without revealing it", async () => {
     hasDecisionHttpKey.mockResolvedValue(true)
     mockSettings = { decisions: { providerId: "builtin:decisions-http", http: { preset: "zen" } } }
@@ -178,5 +259,14 @@ describe("DecisionProviderCard", () => {
     })
     await user.click(screen.getByText("test.button"))
     expect(await screen.findByText("errors.provider_unavailable")).toBeInTheDocument()
+  })
+})
+
+it("persists the displayed default endpoint when first selecting the remote provider", async () => {
+  const user = userEvent.setup()
+  render(<DecisionProviderCard />)
+  await user.selectOptions(screen.getByLabelText("provider.label"), "builtin:decisions-http")
+  expect(save).toHaveBeenCalledWith({
+    decisions: { providerId: "builtin:decisions-http", http: { preset: "openrouter" } },
   })
 })

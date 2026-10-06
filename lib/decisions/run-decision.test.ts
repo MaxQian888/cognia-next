@@ -1,3 +1,4 @@
+import { createDecisionsHttpProvider, BUILTIN_HTTP_PROVIDER_ID } from "./providers/decisions-http"
 jest.mock("@/lib/decisions/host-registry", () => ({ getDecisionRegistry: jest.fn() }))
 jest.mock("@/lib/decisions/config", () => ({ loadDecisionSettings: jest.fn() }))
 
@@ -63,7 +64,6 @@ describe("runDecision", () => {
           type: "choice",
           choice: "ask",
           probabilities: { chat: 0.3, ask: 0.7 },
-          confidence: 0.7,
         },
       },
       latencyMs: 61,
@@ -161,6 +161,41 @@ describe("runDecision", () => {
     }
   })
 
+  it("preserves safe SDK usage, rounding and semantics without copying provider payloads", async () => {
+    const result = await runDecision(
+      request,
+      {},
+      deps(
+        provider(async () => ({
+          ok: true,
+          answers: okAnswers,
+          usage: { inputTokens: 12, outputTokens: 0, totalTokens: 12, raw: "private" },
+          rounding: { probabilityDecimals: 2, scoreDecimals: 2 },
+          probabilityKind: "native",
+        })),
+        "p:laya"
+      )
+    )
+    expect(result).toMatchObject({
+      usage: { inputTokens: 12, outputTokens: 0, totalTokens: 12 },
+      rounding: { probabilityDecimals: 2, scoreDecimals: 2 },
+      probabilityKind: "native",
+    })
+    if (result.ok) expect(result.usage).not.toHaveProperty("raw")
+  })
+
+  it("aborts downstream work when the host deadline expires", async () => {
+    let signal: AbortSignal | undefined
+    const p = provider((_request, options) => {
+      signal = options?.signal
+      return new Promise(() => {})
+    })
+    expect(await runDecision(request, { timeoutMs: 10 }, deps(p, "p:laya"))).toMatchObject({
+      error: { kind: "timeout" },
+    })
+    expect(signal?.aborted).toBe(true)
+  })
+
   it("bounds a provider that never answers", async () => {
     const p = provider(() => new Promise<DecisionProviderResponse>(() => {}))
     const result = await runDecision(request, { timeoutMs: 10 }, deps(p, "p:laya"))
@@ -206,4 +241,42 @@ describe("redactDecisionRequest", () => {
     ])
     expect(redactions).toBe(5)
   })
+})
+
+it("redacts through runDecision, the real SDK, and the injected platform transport", async () => {
+  const fetch = jest.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          answers: {
+            tense: { type: "noul", noul: 0.4 },
+            intent: {
+              type: "choice",
+              choice: "ask",
+              probabilities: { chat: 0.3, ask: 0.7 },
+              confidence: 0.5,
+            },
+          },
+          usage: { input_tokens: 20, output_tokens: 0 },
+        })
+      )
+  )
+  const remote = createDecisionsHttpProvider({
+    loadSettings: async () => ({ http: { preset: "typesafe" } }),
+    getKey: async () => "key-from-keyring",
+    fetch,
+    reachesNonCorsHosts: () => true,
+  })
+  const result = await runDecision(request, {}, deps(remote, BUILTIN_HTTP_PROVIDER_ID))
+  expect(result).toMatchObject({
+    ok: true,
+    redactions: 1,
+    probabilityKind: "native",
+    usage: { totalTokens: 20 },
+    answers: { intent: { confidence: 0.5 } },
+  })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1]
+  expect(init.body).not.toContain("13812345678")
+  expect(init.body).toMatch(/<PHONE_\d{3,}>/)
 })

@@ -49,7 +49,6 @@ describe("normalizeDecisionAnswers", () => {
       type: "score",
       score: 3,
       levels: 4,
-      confidence: 0,
       probabilities: { "0": 0.5 },
     })
   })
@@ -59,7 +58,17 @@ describe("normalizeDecisionAnswers", () => {
       { intent: { choice: "other", probabilities: { chat: 0.2, ask: 0.6 } } },
       questions
     )
-    expect(answers.intent).toMatchObject({ choice: "ask", confidence: 0.6 })
+    expect(answers.intent).toMatchObject({ choice: "ask" })
+    expect(answers.intent).not.toHaveProperty("confidence")
+  })
+
+  it("does not fabricate confidence or distributions for LLM-backed answers", () => {
+    const answers = normalizeDecisionAnswers(
+      { intent: { choice: "chat" }, danger: { score: 1.5 } },
+      questions
+    )
+    expect(answers.intent).toEqual({ type: "choice", choice: "chat", probabilities: {} })
+    expect(answers.danger).toEqual({ type: "score", score: 1.5, levels: 4 })
   })
 
   it("drops unreadable answers instead of inventing a verdict", () => {

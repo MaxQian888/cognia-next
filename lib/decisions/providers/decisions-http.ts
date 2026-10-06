@@ -1,7 +1,6 @@
 /**
  * Built-in remote decision provider (ADR-0194): the TypeSafe decisions
- * protocol over HTTPS — OpenRouter `alpha/decisions` or any `/v1/systemone`
- * gateway, picked in settings.
+ * protocol and AI SDK decision adapters over HTTPS, picked in settings.
  *
  * Egress goes through `createPlatformFetch` (desktop proxy policy on Tauri,
  * CapacitorHttp on mobile) as the network-egress gate requires. The endpoint
@@ -9,13 +8,20 @@
  * (`runDecision`) has already redacted and PII-gated the request.
  */
 
+import { InvalidArgumentError as SdkInvalidArgumentError } from "ai"
+import { APICallError, InvalidArgumentError } from "@ai-sdk/provider"
+import { decideWithSdk } from "./decision-sdk"
 import {
   createPlatformFetch,
   reachesNonCorsHosts,
   type PlatformFetch,
 } from "@/lib/network/platform-fetch"
 import { getDecisionHttpKey, loadDecisionSettings } from "@/lib/decisions/config"
-import { attributionHeaders, resolveDecisionEndpoint } from "@/lib/decisions/presets"
+import {
+  DECISION_HTTP_PRESETS,
+  attributionHeaders,
+  resolveDecisionEndpoint,
+} from "@/lib/decisions/presets"
 import type {
   DecisionHttpPresetId,
   DecisionProvider,
@@ -73,6 +79,7 @@ async function withDeadline<T>(
   timeoutMs: number,
   outer?: AbortSignal
 ): Promise<DeadlineOutcome<T>> {
+  if (outer?.aborted) return { aborted: true }
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   let detach: (() => void) | undefined
@@ -111,7 +118,8 @@ export function createDecisionsHttpProvider(
     id: BUILTIN_HTTP_PROVIDER_ID,
     label: "Remote decisions endpoint",
     locality: "remote",
-    calibrated: true,
+    // This provider also hosts LLM estimates and arbitrary custom endpoints.
+    calibrated: false,
     async status() {
       const { loadSettings, getKey } = resolveDeps()
       const endpoint = resolveDecisionEndpoint((await loadSettings()).http)
@@ -127,73 +135,117 @@ export function createDecisionsHttpProvider(
       if (!endpoint.ok) return fail("not_configured", ENDPOINT_PROBLEMS[endpoint.reason])
       const key = await d.getKey(endpoint.preset)
       if (!key) return fail("not_configured", "the decisions endpoint has no API key")
-      const body = JSON.stringify({
-        model: endpoint.model,
-        state: request.state,
-        questions: request.questions,
-      })
       const started = Date.now()
-      let outcome: DeadlineOutcome<Response>
+      let transportFailed = false
+      const fetch: PlatformFetch = async (url, init) => {
+        try {
+          return await d.fetch(url, init)
+        } catch (error) {
+          transportFailed = true
+          throw error
+        }
+      }
+      let outcome: DeadlineOutcome<DecisionProviderResponse>
       try {
+        // Bound the whole operation, including SDK loading and response parsing.
         outcome = await withDeadline(
-          (signal) =>
-            d.fetch(endpoint.url, {
+          async (signal) => {
+            if (DECISION_HTTP_PRESETS[endpoint.preset].adapter !== "legacy") {
+              return decideWithSdk(request, endpoint, key, fetch, signal)
+            }
+            // Preserve permissive legacy/custom responses and their full POST URL.
+            const response = await fetch(endpoint.url, {
               method: "POST",
               headers: {
                 "content-type": "application/json",
                 authorization: `Bearer ${key}`,
                 ...attributionHeaders(endpoint.url),
               },
-              body,
+              body: JSON.stringify({
+                model: endpoint.model,
+                state: request.state,
+                questions: request.questions,
+              }),
               signal,
-            }),
+            })
+            const text = await response.text()
+            if (!response.ok) {
+              return fail(
+                "http_status",
+                `decisions endpoint returned HTTP ${response.status}: ${text.split(key).join("[REDACTED]").slice(0, MAX_ERROR_BODY_CHARS)}`,
+                response.status
+              )
+            }
+            let parsed: unknown
+            try {
+              parsed = JSON.parse(text)
+            } catch {
+              return fail("provider_error", "decisions endpoint returned non-JSON")
+            }
+            const answers =
+              typeof parsed === "object" && parsed !== null
+                ? (parsed as { answers?: unknown }).answers
+                : undefined
+            if (typeof answers !== "object" || answers === null || Array.isArray(answers)) {
+              return fail("provider_error", "decisions endpoint reply has no answers object")
+            }
+            return {
+              ok: true,
+              answers: answers as Record<string, unknown>,
+              routing: { model: endpoint.model },
+              probabilityKind: "unknown",
+            }
+          },
           d.timeoutMs,
           options.signal
         )
       } catch (error) {
-        if (!d.reachesNonCorsHosts()) {
+        if (options.signal?.aborted) return fail("aborted", "the decision request was cancelled")
+        if (transportFailed) {
+          return d.reachesNonCorsHosts()
+            ? fail("network", "decisions endpoint unreachable")
+            : fail(
+                "cors_unreachable",
+                "the browser shell cannot reach this decisions endpoint; use the desktop or mobile app"
+              )
+        }
+        // Gateway wraps APICallError; retain the originating HTTP status.
+        let apiError: unknown = error
+        for (let depth = 0; depth < 4 && !APICallError.isInstance(apiError); depth++) {
+          if (!(apiError instanceof Error) || !apiError.cause) break
+          apiError = apiError.cause
+        }
+        if (
+          APICallError.isInstance(apiError) &&
+          apiError.statusCode &&
+          apiError.statusCode >= 400
+        ) {
+          const detail = (apiError.responseBody ?? apiError.message)
+            .split(key)
+            .join("[REDACTED]")
+            .slice(0, MAX_ERROR_BODY_CHARS)
           return fail(
-            "cors_unreachable",
-            "the browser shell cannot reach this decisions endpoint; use the desktop or mobile app"
+            "http_status",
+            `decisions endpoint returned HTTP ${apiError.statusCode}: ${detail}`,
+            apiError.statusCode
           )
         }
-        const message = error instanceof Error ? error.message : String(error)
-        return fail("network", `decisions endpoint unreachable: ${message}`)
+        if (InvalidArgumentError.isInstance(error) || SdkInvalidArgumentError.isInstance(error)) {
+          return fail(
+            "invalid_request",
+            "the decision adapter rejected the question or state format"
+          )
+        }
+        // SDK schema errors can embed the full request/response in their message.
+        return fail("provider_error", "the decision adapter could not read the provider reply")
       }
       if ("aborted" in outcome) return fail("aborted", "the decision request was cancelled")
       if ("timedOut" in outcome) {
         return fail("timeout", `the decisions endpoint did not answer within ${d.timeoutMs} ms`)
       }
-      const response = outcome.value
-      const text = await response.text().catch(() => "")
-      if (!response.ok) {
-        return fail(
-          "http_status",
-          `decisions endpoint returned HTTP ${response.status}${
-            text ? `: ${text.slice(0, MAX_ERROR_BODY_CHARS)}` : ""
-          }`,
-          response.status
-        )
-      }
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(text)
-      } catch {
-        return fail("provider_error", "decisions endpoint returned non-JSON")
-      }
-      const answers =
-        typeof parsed === "object" && parsed !== null
-          ? (parsed as { answers?: unknown }).answers
-          : undefined
-      if (typeof answers !== "object" || answers === null || Array.isArray(answers)) {
-        return fail("provider_error", "decisions endpoint reply has no answers object")
-      }
-      return {
-        ok: true,
-        answers: answers as Record<string, unknown>,
-        latencyMs: Date.now() - started,
-        routing: { model: endpoint.model },
-      }
+      return outcome.value.ok
+        ? { ...outcome.value, latencyMs: Date.now() - started }
+        : outcome.value
     },
   }
 }

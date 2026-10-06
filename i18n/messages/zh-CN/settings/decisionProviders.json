@@ -1,7 +1,7 @@
 {
   "title": "决策模型",
-  "description": "System-1 决策模型用一次快速推理回答类型化问题（是非、单选、打分）。IM 回复副驾用它判断对方意图与风险并给候选回复排序；插件通过 ctx.decisions 调用。",
-  "builtinRemote": "远程决策接口",
+  "description": "决策模型回答类型化问题（是非、单选、打分），可选择原生 System-1 模型或 AI SDK 语言模型适配器。IM 回复副驾使用已验证的模型判断对话并给候选回复排序；插件通过 ctx.decisions 调用。",
+  "builtinRemote": "远程决策适配器",
   "provider": {
     "label": "提供方",
     "none": "不使用",
@@ -16,7 +16,10 @@
     "calibrated": "概率已校准",
     "uncalibrated": "概率未校准",
     "copilotValidated": "已通过回复副驾校准",
-    "copilotNotValidated": "未通过回复副驾校准"
+    "copilotNotValidated": "未通过回复副驾校准",
+    "native": "原生决策概率",
+    "estimated": "语言模型估计值",
+    "unknown": "概率含义未知"
   },
   "status": {
     "checking": "检查中…",
@@ -30,9 +33,13 @@
       "openrouter": "OpenRouter（typesafe/jev）",
       "bocha": "博查 Jev",
       "typesafe": "TypeSafe",
-      "vercel": "Vercel AI Gateway",
+      "vercel": "Vercel AI Gateway（Jev）",
       "zen": "OpenCode Zen",
-      "custom": "自定义地址"
+      "custom": "自定义地址",
+      "openai": "OpenAI（语言模型决策）",
+      "anthropic": "Anthropic（语言模型决策）",
+      "google": "Google（语言模型决策）",
+      "gateway": "AI Gateway（决策模型）"
     },
     "url": "地址",
     "urlRequired": "https://…（必填）",
@@ -50,7 +57,10 @@
       "no_url": "自定义接口需要填写地址。",
       "bad_url": "地址必须使用 https（仅 localhost 可用 http）。",
       "no_model": "接口需要填写模型 ID。"
-    }
+    },
+    "baseUrlHint": "填写 API 基础地址，适配器会追加请求路径；留空使用默认地址。",
+    "endpointUrlHint": "填写包含请求路径的完整决策接口地址；留空使用预设默认地址。",
+    "estimatedHint": "语言模型的决策结果是估计值，并非经过校准的原生概率。这些模型尚未通过回复副驾验证；仍可供插件调用和测试连接。"
   },
   "test": {
     "button": "测试连接",

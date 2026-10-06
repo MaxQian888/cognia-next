@@ -1,7 +1,7 @@
 {
   "title": "Decision provider",
-  "description": "A System-1 decision model answers typed questions (yes/no, pick one, score) in one fast pass. The IM reply copilot uses it to read intent and risk and to rank drafted replies; plugins reach it through ctx.decisions.",
-  "builtinRemote": "Remote decisions endpoint",
+  "description": "Decision models answer typed questions (yes/no, pick one, score). Choose a native System-1 model or an AI SDK language-model adapter. The IM reply copilot uses validated models to judge conversations and rank replies; plugins use ctx.decisions.",
+  "builtinRemote": "Remote decision adapter",
   "provider": {
     "label": "Provider",
     "none": "None",
@@ -16,7 +16,10 @@
     "calibrated": "Calibrated probabilities",
     "uncalibrated": "Uncalibrated",
     "copilotValidated": "Validated for the reply copilot",
-    "copilotNotValidated": "Not validated for the reply copilot"
+    "copilotNotValidated": "Not validated for the reply copilot",
+    "native": "Native decision probabilities",
+    "estimated": "Language-model estimates",
+    "unknown": "Probability semantics unknown"
   },
   "status": {
     "checking": "Checking…",
@@ -30,9 +33,13 @@
       "openrouter": "OpenRouter (typesafe/jev)",
       "bocha": "Bocha Jev",
       "typesafe": "TypeSafe",
-      "vercel": "Vercel AI Gateway",
+      "vercel": "Vercel AI Gateway (Jev)",
       "zen": "OpenCode Zen",
-      "custom": "Custom URL"
+      "custom": "Custom URL",
+      "openai": "OpenAI (language-model decisions)",
+      "anthropic": "Anthropic (language-model decisions)",
+      "google": "Google (language-model decisions)",
+      "gateway": "AI Gateway (decision models)"
     },
     "url": "URL",
     "urlRequired": "https://… (required)",
@@ -50,7 +57,10 @@
       "no_url": "The custom endpoint needs a URL.",
       "bad_url": "The URL must use https (plain http only for localhost).",
       "no_model": "The endpoint needs a model id."
-    }
+    },
+    "baseUrlHint": "API base URL. The adapter appends the request path; leave blank to use the default.",
+    "endpointUrlHint": "Full decision endpoint URL, including its request path. Leave blank to use the preset default.",
+    "estimatedHint": "Language-model decisions are estimates, not calibrated native probabilities. They have not been validated for the reply copilot; plugin decisions and connection tests remain available."
   },
   "test": {
     "button": "Test connection",

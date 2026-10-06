@@ -1,3 +1,4 @@
+import { isDecisionCopilotValidated } from "@/lib/decisions/presets"
 /**
  * The reply copilot's orchestration (ADR-0194), in Jarvis's order:
  *
@@ -140,7 +141,7 @@ const defaultDeps: CopilotRunDeps = {
     // set on; a custom URL could be anything.
     const validated =
       id === BUILTIN_HTTP_PROVIDER_ID
-        ? Boolean(settings.http?.preset && settings.http.preset !== "custom")
+        ? isDecisionCopilotValidated(settings.http)
         : (provider.validatedQuestionSets ?? []).includes(COPILOT_QUESTION_SET)
     return { id, validated, ...(provider.limits ? { limits: provider.limits } : {}) }
   },
@@ -261,18 +262,13 @@ export async function runCopilot(
     }
   } else {
     const { result } = await decideWithBackground(rankQuestion(drafted.candidates, variant))
-    drafts = result.ok
-      ? {
-          kind: "ok",
-          candidates: rankCandidates(drafted.candidates, result.answers),
-          ranked: result.answers.best_reply !== undefined,
-        }
-      : {
-          kind: "ok",
-          candidates: rankCandidates(drafted.candidates, null),
-          ranked: false,
-          rankError: result.error.kind,
-        }
+    const candidates = rankCandidates(drafted.candidates, result.ok ? result.answers : null)
+    drafts = {
+      kind: "ok",
+      candidates,
+      ranked: candidates.some((candidate) => candidate.probability !== null),
+      ...(!result.ok ? { rankError: result.error.kind } : {}),
+    }
   }
   return { judge, drafts, variant }
 }

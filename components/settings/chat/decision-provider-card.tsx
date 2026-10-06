@@ -6,7 +6,7 @@
 // writes `AppSettings.decisions`; the endpoint key goes to the keyring through
 // `lib/decisions/config.ts`, never into settings.
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,12 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Spinner } from "@/components/ui/spinner"
 import { useDecisionProvider, useDecisionProviders } from "@/hooks/decisions/use-decision-providers"
 import { hasDecisionHttpKey, setDecisionHttpKey } from "@/lib/decisions/config"
-import { DECISION_HTTP_PRESETS, resolveDecisionEndpoint } from "@/lib/decisions/presets"
+import {
+  DECISION_HTTP_PRESETS,
+  getDecisionProbabilityKind,
+  isDecisionCopilotValidated,
+  resolveDecisionEndpoint,
+} from "@/lib/decisions/presets"
 import { BUILTIN_HTTP_PROVIDER_ID } from "@/lib/decisions/providers/decisions-http"
 import { runDecision } from "@/lib/decisions/run-decision"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
@@ -49,7 +54,7 @@ type StatusState = { kind: "checking" } | { kind: "known"; status: DecisionProvi
 
 function useProviderStatus(
   provider: DecisionProvider | undefined,
-  revision: number
+  revision: string
 ): StatusState | null {
   const [state, setState] = useState<StatusState | null>(null)
   useEffect(() => {
@@ -100,7 +105,8 @@ export function DecisionProviderCard() {
   const [keyError, setKeyError] = useState(false)
   const [revision, setRevision] = useState(0)
   const [test, setTest] = useState<TestState>({ kind: "idle" })
-  const status = useProviderStatus(selected, revision)
+  const configurationRevision = useRef(0)
+  const status = useProviderStatus(selected, JSON.stringify([http, revision]))
 
   useEffect(() => {
     if (!isRemote) return
@@ -119,12 +125,19 @@ export function DecisionProviderCard() {
   }, [isRemote, http.preset, revision])
 
   function update(patch: Partial<DecisionSettings>): void {
+    configurationRevision.current += 1
     setTest({ kind: "idle" })
     void save({ decisions: { ...decisions, ...patch } })
   }
 
   function updateHttp(patch: Partial<NonNullable<DecisionSettings["http"]>>): void {
     update({ http: { ...http, ...patch } })
+  }
+
+  function resetKeyDraft(): void {
+    setKeyDraft("")
+    setKeyPresent(null)
+    setKeyError(false)
   }
 
   function providerLabel(provider: DecisionProvider): string {
@@ -134,20 +147,27 @@ export function DecisionProviderCard() {
   }
 
   async function saveKey(): Promise<void> {
+    const operationRevision = ++configurationRevision.current
+    setTest({ kind: "idle" })
     setKeyError(false)
     try {
       await setDecisionHttpKey(http.preset, keyDraft)
+      if (operationRevision !== configurationRevision.current) return
+      configurationRevision.current += 1
+      setTest({ kind: "idle" })
       setKeyDraft("")
       setRevision((r) => r + 1)
     } catch {
-      setKeyError(true)
+      if (operationRevision === configurationRevision.current) setKeyError(true)
     }
   }
 
   async function runTest(): Promise<void> {
     if (!decisions.providerId) return
+    const operationRevision = configurationRevision.current
     setTest({ kind: "running" })
     const result = await runDecision(DECISION_PROBE_REQUEST, { providerId: decisions.providerId })
+    if (operationRevision !== configurationRevision.current) return
     if (result.ok) {
       setTest({ kind: "ok", latencyMs: result.latencyMs })
     } else {
@@ -157,15 +177,14 @@ export function DecisionProviderCard() {
   }
 
   const endpoint = isRemote ? resolveDecisionEndpoint(http) : null
-  // Calibration on the reply copilot's question set, not just calibrated
-  // probabilities: the built-in presets are the Jev models Jarvis measured; a
-  // plugin has to declare the set it passed (laya does not — it scored near
-  // chance). Mirrors `run-copilot.ts` `selectedProvider`.
+  // Share endpoint/model validation with the copilot's runtime selection.
   const copilotValidated = selected
     ? selected.id === BUILTIN_HTTP_PROVIDER_ID
-      ? http.preset !== "custom"
+      ? isDecisionCopilotValidated(http)
       : (selected.validatedQuestionSets ?? []).includes(COPILOT_QUESTION_SET)
     : false
+  const probabilityKind = getDecisionProbabilityKind(http)
+  const usesBaseUrl = !["typesafe", "legacy"].includes(preset.adapter)
   const missingProvider = Boolean(decisions.providerId) && !selected
 
   return (
@@ -184,7 +203,14 @@ export function DecisionProviderCard() {
           aria-label={t("provider.label")}
           size="sm"
           value={decisions.providerId ?? ""}
-          onChange={(event) => update({ providerId: event.target.value || undefined })}
+          onChange={(event) => {
+            resetKeyDraft()
+            const providerId = event.target.value || undefined
+            update({
+              providerId,
+              ...(providerId === BUILTIN_HTTP_PROVIDER_ID && !decisions.http ? { http } : {}),
+            })
+          }}
         >
           <NativeSelectOption value="">{t("provider.none")}</NativeSelectOption>
           {providers.map((provider) => (
@@ -208,9 +234,15 @@ export function DecisionProviderCard() {
           <Badge variant="secondary">
             {selected.locality === "local" ? t("traits.local") : t("traits.remote")}
           </Badge>
-          <Badge variant={selected.calibrated ? "secondary" : "outline"}>
-            {selected.calibrated ? t("traits.calibrated") : t("traits.uncalibrated")}
-          </Badge>
+          {isRemote ? (
+            <Badge variant={probabilityKind === "native" ? "secondary" : "outline"}>
+              {t(`traits.${probabilityKind}`)}
+            </Badge>
+          ) : (
+            <Badge variant={selected.calibrated ? "secondary" : "outline"}>
+              {selected.calibrated ? t("traits.calibrated") : t("traits.uncalibrated")}
+            </Badge>
+          )}
           <Badge variant={copilotValidated ? "secondary" : "outline"}>
             {copilotValidated ? t("traits.copilotValidated") : t("traits.copilotNotValidated")}
           </Badge>
@@ -248,9 +280,10 @@ export function DecisionProviderCard() {
               aria-label={t("http.preset")}
               size="sm"
               value={http.preset}
-              onChange={(event) =>
-                updateHttp({ preset: event.target.value as DecisionHttpPresetId })
-              }
+              onChange={(event) => {
+                resetKeyDraft()
+                update({ http: { preset: event.target.value as DecisionHttpPresetId } })
+              }}
             >
               {DECISION_HTTP_PRESET_IDS.map((id) => (
                 <NativeSelectOption key={id} value={id}>
@@ -258,6 +291,9 @@ export function DecisionProviderCard() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+            {probabilityKind === "estimated" ? (
+              <p className="text-xs text-muted-foreground">{t("http.estimatedHint")}</p>
+            ) : null}
           </div>
           <div className="space-y-1">
             <Label htmlFor="decision-http-url" className="text-xs">
@@ -271,6 +307,9 @@ export function DecisionProviderCard() {
               value={http.url ?? ""}
               onChange={(event) => updateHttp({ url: event.target.value || undefined })}
             />
+            <p className="text-xs text-muted-foreground">
+              {usesBaseUrl ? t("http.baseUrlHint") : t("http.endpointUrlHint")}
+            </p>
           </div>
           <div className="space-y-1">
             <Label htmlFor="decision-http-model" className="text-xs">

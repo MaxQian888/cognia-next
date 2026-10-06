@@ -74,7 +74,7 @@ kind has to travel as data. Unknown kinds become `provider_error`; laya's
 request crosses the RPC — the host's `AbortSignal` is not serializable, so
 `runDecision` races the call against the signal and a deadline instead.
 
-### 4. Two backends ship: local laya, remote TypeSafe-compatible
+### 4. Local laya and remote decision adapters share the same host contract
 
 - **Local**: the laya plugin contributes `laya-local`. `describe()` advertises
   the routed checkpoint's token budgets (`limits`), which callers use to pick
@@ -92,6 +92,30 @@ request crosses the RPC — the host's `AbortSignal` is not serializable, so
 plugin that exists on one machine only, and the key is in that machine's
 keyring.
 
+#### AI SDK adapter extension (2026-10-06)
+
+The built-in provider now routes native TypeSafe, OpenRouter, Bocha, Vercel
+TypeSafe proxy, and OpenCode Zen presets through `@ai-sdk/typesafe-ai` and
+`experimental_decide`. The path remains consumer → `runDecision` →
+`DecisionProvider` → SDK adapter. The adapter maps host `noul` to SDK
+`boolean` and maps the result back; local laya and custom legacy HTTP
+providers keep their existing protocol. Native presets retain their full POST
+URL, including OpenRouter's alpha path.
+
+Explicit OpenAI, Anthropic, Google and AI Gateway adapters are also selectable.
+These presets accept an API **base URL** and a provider model ID. Keys remain
+per preset in the keyring; every adapter receives `createPlatformFetch`. No
+ambient default provider or environment key is used. The existing one-attempt
+policy is explicit (`maxRetries: 0`); the deadline covers body parsing as well
+as transport, and host cancellation propagates to in-process providers.
+
+Results expose the resolved model, safe token usage, rounding and probability
+semantics. Native confidence remains a separate provider statistic; missing
+confidence and distributions are never fabricated. LLM adapters produce
+estimates; Gateway semantics are unknown because its selected model can vary.
+These choices do not make an unmeasured model eligible for the reply copilot.
+Changing presets clears URL/model overrides and unsaved key input.
+
 ### 5. No provider is a labelled state, not a hidden one
 
 Without a provider, a consumer gets `no_provider`. Features that need a judge
@@ -107,7 +131,8 @@ uses only providers that list it.
 
 The reply copilot's judge + rank set is `jev-judge/v1`. The built-in endpoint
 counts as validated for its Jev presets (the models Jarvis calibrated it on)
-and not for a custom URL. Laya was measured with
+only when the preset URL and default model are unchanged. Custom endpoints,
+model overrides, and the generic SDK adapters do not inherit that validation. Laya was measured with
 `plugins/cognia-laya-guard/tools/calibrate_jev.py` on Jarvis's 30-case labeled
 set and scored near chance (intent 17–23% on six options, danger MAE 2.2,
 against a bar of ≥60% / <1.0), in both the compact and the full wording. It
@@ -171,7 +196,7 @@ shortcut (`chat-copilot.capture`, unbound by default).
 
 ## Alternatives rejected
 
-- **Emulate the judge with the chat LLM.** Cheap to build, but it yields model
+- **Silently replace the validated judge with the chat LLM.** It yields model
   self-reported confidence, not calibrated probabilities, and it would look
   identical to a real judge in the UI. Rejected in favor of an explicit "no
   provider" state.

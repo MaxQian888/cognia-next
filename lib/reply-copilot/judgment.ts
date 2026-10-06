@@ -18,7 +18,7 @@ import {
 
 export interface ChoiceVerdict<K extends string> {
   key: K
-  confidence: number
+  confidence?: number
   probabilities: Partial<Record<K, number>>
 }
 
@@ -27,7 +27,7 @@ export interface CopilotJudgment {
   literal: number | null
   intent: ChoiceVerdict<IntentKey> | null
   /** Expected danger level, 0 (light chat) … 9 (active rupture). */
-  danger: { level: number; levels: number; confidence: number } | null
+  danger: { level: number; levels: number; confidence?: number } | null
   /** P(the next message should carry substance — a fact, fault, time or plan). */
   substanceNow: number | null
   bestAction: ChoiceVerdict<ActionKey> | null
@@ -103,7 +103,11 @@ export function rankCandidates(
   answers: DecisionAnswers | null
 ): RankedCandidate[] {
   const best = answers?.best_reply
-  const probabilities = best?.type === "choice" ? best.probabilities : null
+  const probabilities =
+    best?.type === "choice" &&
+    candidates.every((_, slot) => typeof best.probabilities[RANK_KEYS[slot]] === "number")
+      ? best.probabilities
+      : null
   const ranked = candidates.map((text, slot) => ({
     text,
     slot,
