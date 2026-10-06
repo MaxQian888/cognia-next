@@ -24,18 +24,17 @@ import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import type { MessageMarkdownOptions } from "@/types/appearance"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
-import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
+import {
+  createSharedMarkdownComponents,
+  MarkdownInlineCode,
+} from "@/components/chat/markdown/shared-components"
 import {
   chatMarkdownSanitizeSchema,
   chatMarkdownUrlTransform,
 } from "@/components/chat/markdown/rendering-policy"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 import { ChatLink } from "@/components/chat/markdown/chat-link"
-import { ProjectFileLink } from "@/components/chat/project-file-link"
-import {
-  parseProjectFileReference,
-  type ProjectFileReference,
-} from "@/lib/files/project-file-reference"
+import type { ProjectFileReference } from "@/lib/files/project-file-reference"
 
 // `parseTaskListItem` moved to the shared factory alongside the `li` override
 // that consumes it; re-exported here because it was part of this module's
@@ -392,7 +391,7 @@ function buildComponents(
     // descendant match, so each one is wrapped in `not-typeset` at its mount
     // rather than at its root: these components have two to four return
     // branches each, and the mount is the one place that covers all of them.
-    code({ className: codeClassName, children, ...props }) {
+    code({ className: codeClassName, children }) {
       const match = /(?:^|\s)language-([^\s]+)/.exec(codeClassName || "")
       const language = match ? match[1] : undefined
       const rawCodeContent = String(children)
@@ -426,27 +425,10 @@ function buildComponents(
       }
 
       if (isInline) {
-        const target = parseProjectFileReference(codeContent, projectRoot)
-        if (target) {
-          return (
-            <ProjectFileLink
-              target={target}
-              onOpenFile={onOpenProjectFile}
-              projectRoot={projectRoot}
-            >
-              <code className="rounded bg-muted px-1.5 py-0.5 font-mono" {...props}>
-                {children}
-              </code>
-            </ProjectFileLink>
-          )
-        }
-        // No `text-sm`: typeset sizes inline code at 0.85em, so it tracks
-        // whichever preset the surrounding container carries instead of
-        // pinning 14px into a compact tool card and a full-width README alike.
         return (
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono" {...props}>
+          <MarkdownInlineCode projectRoot={projectRoot} onOpenProjectFile={onOpenProjectFile}>
             {children}
-          </code>
+          </MarkdownInlineCode>
         )
       }
 

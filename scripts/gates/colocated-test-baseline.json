@@ -13,7 +13,6 @@
     "components/canvas/canvas-workspace.tsx",
     "components/chat/composer/drag-overlay.tsx",
     "components/chat/renderers/a2ui-block.tsx",
-    "components/chat/renderers/alert-block.tsx",
     "components/chat/workspace-trust-dialog.tsx",
     "components/data/export/custom-theme-editor.tsx",
     "components/data/import/full-restore-dialog.tsx",

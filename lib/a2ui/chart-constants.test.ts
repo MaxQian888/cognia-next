@@ -41,5 +41,14 @@ describe("CHART_TOOLTIP_STYLE", () => {
   it("should use CSS variable references for theming", () => {
     expect(CHART_TOOLTIP_STYLE.backgroundColor).toContain("var(--popover)")
     expect(CHART_TOOLTIP_STYLE.border).toContain("var(--border)")
+    expect(CHART_TOOLTIP_STYLE.color).toBe("var(--popover-foreground)")
+  })
+
+  it("never wraps the oklch theme tokens in hsl()", () => {
+    // `hsl(var(--popover))` resolves to `hsl(oklch(…))`, which the browser
+    // drops as invalid, leaving an unthemed tooltip.
+    for (const value of Object.values(CHART_TOOLTIP_STYLE)) {
+      expect(value).not.toMatch(/hsl\(var\(/)
+    }
   })
 })

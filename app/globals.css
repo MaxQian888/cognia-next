@@ -48,13 +48,20 @@
  * the user picks a serif family in Settings → Appearance → Typography. */
 @theme {
   --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  /* Sans and mono are deliberately NOT in `@theme inline`. Inline theme vars
+   * are substituted into every utility at build time, so `font-sans`,
+   * `font-mono` and the `html` default font compiled to the literal Geist
+   * stack and ignored the inline `--font-sans` / `--font-mono` that
+   * `lib/appearance/typography-applier.tsx` writes onto <html>. As plain
+   * theme vars the utilities read `var(--font-sans)` at runtime, so the
+   * user's Typography picks reach chat body text and code. */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -204,6 +211,8 @@
      by ThinkingIndicator's "agent" variant and other info-level chrome. */
   --info: oklch(0.6 0.13 220);
   --info-foreground: oklch(0.205 0 0);
+  /* Text highlight (`<mark>`) in rendered markdown; mixed at 40% in app/typeset.css. */
+  --mark: oklch(0.86 0.17 95);
   /* Workflow editor: per-category accent colors and runtime status hues.
      Light-mode values stay within the 0.55–0.7 lightness band so they
      read against the white card background. The .dark block below shifts
@@ -298,6 +307,7 @@
   --warning-foreground: oklch(0.145 0 0);
   --info: oklch(0.7 0.15 220);
   --info-foreground: oklch(0.145 0 0);
+  --mark: oklch(0.72 0.15 90);
   /* Workflow tokens — dark-mode equivalents (kept in the same hue family as
      :root, only lightness/chroma re-tuned so they pop on the dark surface). */
   --wf-trigger: oklch(0.72 0.18 150);

@@ -16,6 +16,12 @@ export const chatMarkdownSanitizeSchema: RehypeSanitizeOptions = {
     "figcaption",
     "sup",
     "sub",
+    // Inline emphasis the default allow-list omits. typeset already styles
+    // all three; without them a model's `<mark>` highlight, `<u>` or
+    // `<abbr title>` was stripped to bare text.
+    "mark",
+    "u",
+    "abbr",
     "math",
     "annotation",
     "semantics",
@@ -58,6 +64,7 @@ export const chatMarkdownSanitizeSchema: RehypeSanitizeOptions = {
     a: [...(defaultSchema.attributes?.a ?? []), "className", "class"],
     img: [...(defaultSchema.attributes?.img ?? []), "className", "class", "loading"],
     ol: [...(defaultSchema.attributes?.ol ?? []), "start"],
+    abbr: [...(defaultSchema.attributes?.abbr ?? []), "title"],
     th: [
       ...(defaultSchema.attributes?.th ?? []),
       "align",

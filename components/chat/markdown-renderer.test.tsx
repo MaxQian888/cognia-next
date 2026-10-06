@@ -90,13 +90,10 @@ jest.mock("@/components/chat/renderers/audio-block", () => ({
 }))
 
 jest.mock("@/components/chat/renderers/alert-block", () => ({
+  ...jest.requireActual("@/components/chat/renderers/alert-block"),
   AlertBlock: ({ children }: { children: React.ReactNode }) => (
     <div data-test="alert-block">{children}</div>
   ),
-  parseAlertFromBlockquote: (content: string) =>
-    content.startsWith("[!WARNING]")
-      ? { type: "warning", content: content.replace("[!WARNING]", "").trim() }
-      : null,
 }))
 
 jest.mock("@/components/chat/renderers/details-block", () => ({

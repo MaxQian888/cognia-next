@@ -109,6 +109,24 @@ describe("StreamingTextPart", () => {
 
   afterEach(() => act(() => clearAllLinkMatchers()))
 
+  it("renders streaming inline code with the finalised branch's span", () => {
+    const InlineCode = createStreamingComponents("/repo").inlineCode as React.ComponentType<{
+      children: ReactNode
+    }>
+    const { container } = render(
+      <p>
+        <InlineCode>npm run dev</InlineCode> then <InlineCode>src/app.ts:9</InlineCode>
+      </p>
+    )
+    const plain = screen.getByText("npm run dev")
+    expect(plain).toHaveAttribute("data-markdown-inline-code")
+    // Streamdown's default pinned `text-sm`; the shared span lets typeset size
+    // it at 0.85em, the same as the finalised branch.
+    expect(plain.className).not.toMatch(/\btext-(xs|sm|base)\b/)
+    expect(container.querySelectorAll("[data-markdown-inline-code]")).toHaveLength(2)
+    expect(screen.getByRole("button", { name: "src/app.ts:9" })).toBeInTheDocument()
+  })
+
   it("updates the streaming anchor after registration and forwards message metadata", () => {
     render(
       <StreamingTextPart

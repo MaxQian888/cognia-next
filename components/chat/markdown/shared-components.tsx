@@ -37,8 +37,14 @@ import { CopyIcon, DownloadIcon, Maximize2Icon, XIcon } from "lucide-react"
 import { tableDataToCSV, tableDataToMarkdown, tableDataToTSV, type TableData } from "streamdown"
 import { toast } from "sonner"
 import { downloadBlob, type DownloadOutcome } from "@/lib/files/download"
+import {
+  parseProjectFileReference,
+  type ProjectFileReference,
+} from "@/lib/files/project-file-reference"
+import { cn } from "@/lib/utils"
 
-import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
+import { ProjectFileLink } from "@/components/chat/project-file-link"
+import { AlertBlock, extractAlertFromChildren } from "@/components/chat/renderers/alert-block"
 import { AudioBlock } from "@/components/chat/renderers/audio-block"
 import { DetailsBlock } from "@/components/chat/renderers/details-block"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
@@ -346,6 +352,45 @@ function MarkdownTable({
   )
 }
 
+/**
+ * Inline code for both markdown branches.
+ *
+ * Streamdown's default inline code carried an absolute `text-sm`, while the
+ * finalised branch let typeset size it at 0.85em, so every inline span shrank
+ * the moment a turn finalised. It also skipped the project-file detection, so
+ * a `src/app.ts` span only became clickable after the stream ended. One
+ * component for both removes both jumps. No size class: typeset owns the
+ * 0.85em so it tracks whichever preset the container carries.
+ */
+export function MarkdownInlineCode({
+  children,
+  projectRoot,
+  onOpenProjectFile,
+  className,
+}: {
+  children?: React.ReactNode
+  projectRoot?: string | null
+  onOpenProjectFile?: (target: ProjectFileReference) => void
+  className?: string
+}) {
+  const code = (
+    <code
+      className={cn("rounded bg-muted px-1.5 py-0.5 font-mono", className)}
+      data-markdown-inline-code
+    >
+      {children}
+    </code>
+  )
+  const text = typeof children === "string" ? children : Children.toArray(children).join("")
+  const target = text ? parseProjectFileReference(text, projectRoot) : null
+  if (!target) return code
+  return (
+    <ProjectFileLink target={target} onOpenFile={onOpenProjectFile} projectRoot={projectRoot}>
+      {code}
+    </ProjectFileLink>
+  )
+}
+
 /** Cell count of a rendered `<tr>`, so the notice spans the whole table. */
 export function countRowCells(row: React.ReactNode): number {
   if (!isValidElement(row)) return 1
@@ -388,10 +433,9 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
     },
     blockquote({ children }: MarkdownElementProps<"blockquote">) {
       if (enableAlerts && children) {
-        const textContent = extractTextContent(children)
-        const alertInfo = parseAlertFromBlockquote(textContent)
+        const alertInfo = extractAlertFromChildren(children)
         if (alertInfo) {
-          return <SafeAlertBlock type={alertInfo.type}>{alertInfo.content}</SafeAlertBlock>
+          return <SafeAlertBlock type={alertInfo.type}>{alertInfo.children}</SafeAlertBlock>
         }
       }
       // The accent rule and the muted italic are Cognia's, so they stay as
@@ -559,19 +603,6 @@ export function parseTaskListItem(
   const checked = Boolean((input.props as { checked?: boolean }).checked)
   const label = childArray.filter((_, i) => i !== inputIdx)
   return { checked, label }
-}
-
-export function extractTextContent(children: React.ReactNode): string {
-  if (typeof children === "string") return children
-  if (typeof children === "number") return String(children)
-  if (Array.isArray(children)) {
-    return children.map(extractTextContent).join("")
-  }
-  if (isValidElement(children)) {
-    const props = children.props as { children?: React.ReactNode }
-    return extractTextContent(props.children)
-  }
-  return ""
 }
 
 export function isVideoUrl(url: string): boolean {

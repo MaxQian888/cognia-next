@@ -22,7 +22,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { Block, parseMarkdownIntoBlocks, type BlockProps } from "streamdown"
 import { MessageResponse, type MessageResponseProps } from "@/components/ai-elements/message"
-import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
+import {
+  createSharedMarkdownComponents,
+  MarkdownInlineCode,
+} from "@/components/chat/markdown/shared-components"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { ChatLink } from "@/components/chat/markdown/chat-link"
 import { cn } from "@/lib/utils"
@@ -228,6 +231,11 @@ export function createStreamingComponents(
     // Raw HTML is parsed by Streamdown and then constrained by the shared
     // chat sanitization policy supplied to `MessageResponse` below.
     ...createSharedMarkdownComponents({ isStreaming }),
+    // Streamdown routes inline code through `inlineCode`, not `code`, so the
+    // shared span can be swapped in without touching the highlighted fences.
+    inlineCode({ children }) {
+      return <MarkdownInlineCode projectRoot={projectRoot}>{children}</MarkdownInlineCode>
+    },
     a({ href, children, node: _node, ...props }) {
       return (
         <ChatLink

@@ -113,9 +113,11 @@ describe("RootLayout", () => {
     const markup = renderToStaticMarkup(tree)
 
     expect(markup).toContain('<html lang="en"')
-    expect(markup).toContain("--font-geist-sans")
-    expect(markup).toContain("--font-geist-mono")
-    expect(markup).toContain("antialiased")
+    // The Geist vars must be declared on <html>, where the typography applier
+    // writes `--font-sans` / `--font-mono` with a `var(--font-geist-*)`
+    // fallback; on <body> that fallback would be invalid at <html>.
+    expect(markup).toMatch(/<html[^>]*class="--font-geist-sans --font-geist-mono"/)
+    expect(markup).toContain('<body class="antialiased"')
     expect(markup).toContain("<main>content</main>")
   })
 

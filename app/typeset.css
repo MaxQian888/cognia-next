@@ -506,4 +506,10 @@
     --typeset-leading: calc(1.625 * var(--leading-multiplier));
     --typeset-flow: 1em;
   }
+
+  /* Highlight colour from the theme (`--mark`, globals.css) rather than
+   * upstream's literal yellow, so dark mode and custom themes can tune it. */
+  .typeset :where(mark) {
+    background-color: color-mix(in oklab, var(--mark) 40%, transparent);
+  }
 }

@@ -27,4 +27,11 @@ describe("shared Markdown rendering policy", () => {
     )
     expect(chatStreamdownRehypePlugins).toHaveLength(2)
   })
+
+  it("keeps inline highlight, underline and abbreviation markup", () => {
+    expect(chatMarkdownSanitizeSchema.tagNames).toEqual(
+      expect.arrayContaining(["mark", "u", "abbr"])
+    )
+    expect(chatMarkdownSanitizeSchema.attributes?.abbr).toContain("title")
+  })
 })

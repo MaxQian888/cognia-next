@@ -63,7 +63,16 @@ export default async function RootLayout({
 }>) {
   const locale = await getLocale()
   return (
-    <html lang={locale} suppressHydrationWarning>
+    // The Geist variable classes sit on <html>, not <body>: the typography
+    // applier writes `--font-sans` / `--font-mono` onto <html> with a
+    // `var(--font-geist-*)` fallback, and a custom property resolves its
+    // `var()` references on the element that declares it. On <body> the Geist
+    // vars were invisible to <html>, so the fallback chain was invalid there.
+    <html
+      lang={locale}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {/* FOUC mitigation — applies a mirrored CSS-var snapshot from
             localStorage before React hydrates so custom themes don't
@@ -75,7 +84,7 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }}
         />
       </head>
-      <body className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}>
+      <body className="antialiased">
         <WebVitalsReporter />
         <AppRuntime>{children}</AppRuntime>
       </body>

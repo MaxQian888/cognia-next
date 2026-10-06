@@ -30,9 +30,9 @@ import {
   countRowCells,
   createSharedMarkdownComponents,
   extractMarkdownTableData,
-  extractTextContent,
   isAudioUrl,
   isVideoUrl,
+  MarkdownInlineCode,
   parseTaskListItem,
 } from "./shared-components"
 
@@ -55,7 +55,7 @@ jest.mock("@/components/chat/renderers/audio-block", () => ({
   ),
 }))
 jest.mock("@/components/chat/renderers/alert-block", () => ({
-  // `parseAlertFromBlockquote` is the real branch predicate under test here,
+  // `extractAlertFromChildren` is the real branch predicate under test here,
   // so only the presentational component is stubbed.
   ...jest.requireActual("@/components/chat/renderers/alert-block"),
   AlertBlock: ({ type, children }: { type: string; children: React.ReactNode }) => (
@@ -177,6 +177,43 @@ describe("createSharedMarkdownComponents — blockquote alerts", () => {
     const alert = screen.getByTestId("alert-block")
     expect(alert).toHaveAttribute("data-type", "warning")
     expect(alert).toHaveTextContent("mind the gap")
+  })
+
+  it("keeps inline formatting, links and lists inside the alert", () => {
+    const { blockquote: Blockquote } = createSharedMarkdownComponents()
+    renderNode(
+      <Blockquote>
+        {"\n"}
+        <p>
+          {"[!NOTE]\nRead "}
+          <strong>this</strong> and <a href="https://example.com">the docs</a>
+        </p>
+        {"\n"}
+        <ul>
+          <li>first</li>
+        </ul>
+      </Blockquote>
+    )
+    const alert = screen.getByTestId("alert-block")
+    expect(alert).toHaveAttribute("data-type", "note")
+    expect(alert).not.toHaveTextContent("[!NOTE]")
+    expect(alert.querySelector("strong")).toHaveTextContent("this")
+    expect(alert.querySelector("a")).toHaveAttribute("href", "https://example.com")
+    expect(alert.querySelector("li")).toHaveTextContent("first")
+  })
+
+  it("drops a marker-only paragraph instead of leaving an empty one", () => {
+    const { blockquote: Blockquote } = createSharedMarkdownComponents()
+    renderNode(
+      <Blockquote>
+        <p>[!TIP]</p>
+        <p>body</p>
+      </Blockquote>
+    )
+    const alert = screen.getByTestId("alert-block")
+    expect(alert).toHaveAttribute("data-type", "tip")
+    expect(alert.querySelectorAll("p")).toHaveLength(1)
+    expect(alert.querySelector("p")).toHaveTextContent("body")
   })
 
   it("leaves an ordinary blockquote alone", () => {
@@ -401,14 +438,6 @@ describe("helpers", () => {
     ])
     expect(parsed?.checked).toBe(false)
     expect(parsed?.label).toHaveLength(1)
-  })
-
-  it("extractTextContent walks strings, numbers, arrays and elements", () => {
-    expect(extractTextContent("a")).toBe("a")
-    expect(extractTextContent(7)).toBe("7")
-    expect(extractTextContent(["a", 1])).toBe("a1")
-    expect(extractTextContent(<span>deep</span>)).toBe("deep")
-    expect(extractTextContent(null)).toBe("")
   })
 
   it("isVideoUrl matches extensions and known hosts, and tolerates junk", () => {
@@ -689,5 +718,31 @@ describe("countRowCells", () => {
     expect(countRowCells("not an element")).toBe(1)
     expect(countRowCells(undefined)).toBe(1)
     expect(countRowCells(<tr />)).toBe(1)
+  })
+})
+
+describe("MarkdownInlineCode", () => {
+  it("renders a plain code span without a pinned text size", () => {
+    render(<MarkdownInlineCode>npm run dev</MarkdownInlineCode>)
+    const code = screen.getByText("npm run dev")
+    expect(code.tagName).toBe("CODE")
+    expect(code).toHaveClass("bg-muted", "font-mono")
+    expect(code.className).not.toMatch(/\btext-(xs|sm|base)\b/)
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  it("turns a project file reference into a navigable link", () => {
+    const onOpenProjectFile = jest.fn()
+    render(
+      <MarkdownInlineCode projectRoot="/repo" onOpenProjectFile={onOpenProjectFile}>
+        {"src/app.ts:9:2"}
+      </MarkdownInlineCode>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "src/app.ts:9:2" }))
+    expect(onOpenProjectFile).toHaveBeenCalledWith({
+      absolutePath: "/repo/src/app.ts",
+      line: 9,
+      column: 2,
+    })
   })
 })
