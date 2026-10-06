@@ -75,11 +75,15 @@ backoff. Only one of those five needs native networking.
 | `device-local` | no | no |
 | `desktop-only` | no | no |
 
-`device-local` and `desktop-only` are both "never crosses the wire" but are not
+`device-local` and `desktop-only` are both excluded from settings sync but are not
 the same claim: the first says every device legitimately holds its own answer,
 the second says the field is not part of the mobile contract at all. The two
 asymmetric categories carry a **mandatory rationale** (enforced by the union
 type), because an unexplained asymmetry is indistinguishable from a bug later.
+
+This classification does not govern chat requests: turns run on a paired host
+include the client's resolved provider credentials for that request, without
+saving them in the host's provider settings.
 
 ### D2 — Completeness by type, drift by gate
 

@@ -32961,7 +32961,7 @@
     "hideApiKey": "Hide API key",
     "host": "Host",
     "hostNotice": {
-      "companionBody": "Keys and endpoints entered here stay on this device and are never sent to the paired host. The host uses its own provider configuration.",
+      "companionBody": "Keys and endpoints entered here are stored only on this device and are not synced to the paired host. Each chat request run on the paired host sends this device's key and endpoint to the host for that request; they are not saved in the host's provider settings.",
       "companionTitle": "Device-local provider settings",
       "dismiss": "Dismiss",
       "mobileLocalBody": "On a phone, \"localhost\" is the phone itself. Point the base URL at a machine on your network that runs the engine, or configure local engines on the paired desktop.",

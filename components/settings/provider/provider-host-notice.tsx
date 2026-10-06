@@ -5,10 +5,9 @@
  * the provider settings on screen (ADR-0056 / ADR-0097 host-mode contract).
  *
  * `companion`: on `cloud-companion` / `mobile-companion` the keys edited here
- * are device-local — provider configuration is `desktop-only` in the settings
- * sync taxonomy, so the paired host keeps its own. Without this the page
- * looked identical to the desktop one and implied the host would pick the
- * keys up.
+ * are stored locally and excluded from settings sync (`desktop-only` in the
+ * sync taxonomy). Chats run on the paired host still forward this device's
+ * credentials per request, without saving them in the host's provider settings.
  *
  * `mobile-local`: on the mobile shell "localhost" is the phone; a local
  * inference engine row is only useful pointed at another machine.
