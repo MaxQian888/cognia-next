@@ -5612,6 +5612,17 @@
       "busyTitle": "预览已在另一个面板中打开",
       "takeOver": "在此接管"
     },
+    "loadError": {
+      "continue": "继续查看页面",
+      "editAddress": "修改地址",
+      "frameHelp": "页面空白或无法打开？",
+      "frameHint": "部分网站不允许嵌入预览。如果页面空白或拒绝连接，可以尝试在外部浏览器中打开。",
+      "hint": "请检查网址和网络连接。如果这是本地网站，请确认对应服务已经启动。",
+      "retry": "重试",
+      "timeoutHint": "请检查网络连接或重试。如果页面实际上已加载完成，也可以选择继续查看。",
+      "timeoutTitle": "页面加载时间过长",
+      "title": "无法打开此页面"
+    },
     "loading": {
       "label": "页面加载中",
       "title": "正在加载 {host}…"
@@ -9366,6 +9377,7 @@
     },
     "sourcesPart": {
       "agentKnowledgeHeader": "Agent 知识库片段（{count}）",
+      "citationExpired": "引用的文档版本已不可用。",
       "citationsLabel": "{count, plural, other {# 个网页来源}}",
       "degradedNotice": "数字分身检索不可用 — 本次回复未使用其资料。",
       "feedbackFailed": "未能记录反馈",
@@ -9391,6 +9403,9 @@
       "projectKnowledgeHeader": "项目知识片段（{count}）",
       "recalledMemoriesHeader": "召回的记忆（{count}）",
       "retrievedChunksHeader": "检索片段（{count}）",
+      "sourceLoadFailed": "无法打开原文，请重试。",
+      "sourceLoading": "正在打开来源…",
+      "sourceUnavailable": "此来源已不可用或访问权限已被撤销。",
       "styleSamplesHeader": "风格样本（{count}）",
       "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
       "viewInChat": "在会话中查看",
@@ -15273,6 +15288,8 @@
           "preferRight": "输出 B 更好",
           "progress": "第 {current} / {total} 个对比",
           "reasoning": "裁决理由",
+          "refreshPending": "评审已保存，推荐结果尚未刷新。",
+          "retryRefresh": "重试刷新推荐结果",
           "reviewer": "评审者身份",
           "right": "输出 B",
           "tie": "平局",
@@ -16331,6 +16348,51 @@
     "selectAgent": "选择代理",
     "selectorComingSoon": "即将推出",
     "selectorPluginUnavailable": "插件未启用",
+    "sessionOperations": {
+      "all": "全部一起处理",
+      "archive": "归档会话",
+      "autoCompaction": "自动压缩上下文",
+      "autoRetry": "自动重试",
+      "cancelled": "已取消",
+      "clone": "克隆会话",
+      "current": "当前分支",
+      "disabled": "关闭",
+      "downloaded": "HTML 已下载",
+      "empty": "暂无会话记录",
+      "enabled": "开启",
+      "excludeContext": "不将输出加入模型上下文",
+      "exitCode": "退出码：{code}",
+      "exportHtml": "导出原生 HTML",
+      "exported": "已导出到执行主机：{path}",
+      "followUp": "后续指令处理方式",
+      "follow_up": "当前任务后执行",
+      "forkHere": "从此处分叉",
+      "handled": "指令已由 Agent 处理",
+      "imageCount": "已添加 {count} 张图片",
+      "images": "添加图片",
+      "invalidImage": "请选择总计不超过 10 MB 的 PNG、JPEG、GIF 或 WebP 图片。",
+      "loadEntries": "查看会话历史",
+      "loadTree": "浏览分支",
+      "loading": "正在读取能力…",
+      "oneAtATime": "逐条处理",
+      "queued": "指令已排队",
+      "queuedInput": "排队指令",
+      "refreshCommands": "刷新命令",
+      "rename": "重命名会话",
+      "restoreQueue": "清空队列并恢复输入",
+      "runShell": "执行命令",
+      "sessionName": "原生会话名称",
+      "shell": "Shell 命令",
+      "steer": "立即调整方向",
+      "steering": "调整指令处理方式",
+      "stopRetry": "停止重试",
+      "stopShell": "停止命令",
+      "title": "会话控制",
+      "truncated": "输出已截断",
+      "unarchive": "恢复已归档会话",
+      "unknown": "运行时未报告",
+      "unsupported": "此运行时没有额外的会话控制。"
+    },
     "setConfigOptionFailed": "更新配置项失败",
     "settings": {
       "acpFeatureSettingsDescription": "稳定版信息征询取决于宿主支持。预览能力默认关闭，需逐项启用，且仅在当前运行时可提供时才会声明。",
@@ -22859,8 +22921,9 @@
         "bundleId": "Bundle ID",
         "clearApns": "清除 APNs",
         "clearFcm": "清除 FCM",
+        "clearHms": "清除华为推送",
         "configured": "已配置",
-        "description": "粘贴 FCM（Android）和 APNs（iOS）凭据，以便在 WebSocket 断开时为已配对手机推送消息。凭据保存在桌面端操作系统的钥匙串中；无头部署使用数据目录下的 JSON 文件。",
+        "description": "配置 FCM（Android）、华为 Push Kit 或 APNs（iOS）凭据，以便在 WebSocket 断开时为已配对手机推送消息。凭据保存在桌面端操作系统的钥匙串中；无头部署使用数据目录下的 JSON 文件。",
         "desktopOnly": "仅在 Tauri 桌面版中可用。",
         "fcmAria": "FCM 服务账号 JSON",
         "fcmClearFailed": "FCM 清除失败：{message}",
@@ -22870,12 +22933,26 @@
         "fcmLabel": "FCM (Android)",
         "fcmPlaceholder": "粘贴从 Google Cloud Console 下载的 '{\"type\":\"service_account\",...}' JSON。",
         "fcmRequired": "请先粘贴 FCM 服务账号 JSON。",
+        "hmsAppId": "华为 App ID（OAuth 客户端 ID）",
+        "hmsAppIdRequired": "请先输入华为 App ID。",
+        "hmsClearFailed": "清除华为推送失败：{message}",
+        "hmsCleared": "已清除华为推送。",
+        "hmsClientSecret": "华为客户端密钥",
+        "hmsClientSecretRequired": "请先输入华为客户端密钥。",
+        "hmsConfigureFailed": "配置华为推送失败：{message}",
+        "hmsConfigured": "已配置华为推送。",
+        "hmsDescription": "使用手机上所安装华为 Android 版本对应的 AppGallery Connect App ID 和客户端密钥，即可在使用 HMS Core 且没有 Google Play 服务的设备上接收通知。",
+        "hmsLabel": "华为 Push Kit（HMS）",
+        "hmsUnsupported": "请先将连接的 Host 更新至支持华为推送的版本，再配置凭据。",
         "keyId": "密钥 ID",
         "productionAria": "APNs 生产环境",
         "productionEnv": "生产环境",
         "saveApns": "保存 APNs",
         "saveFcm": "保存 FCM",
+        "saveHms": "保存华为推送",
         "statusFailed": "推送状态获取失败：{message}",
+        "statusLoadFailed": "无法读取推送配置状态。请重试以确认此 Host 支持的推送服务。",
+        "statusRetry": "重新读取推送状态",
         "teamId": "团队 ID",
         "title": "推送通知"
       },
@@ -23826,7 +23903,7 @@
       "pairingUnpaired": "尚未与桌面配对",
       "pinned": "已置顶到常用",
       "pluginsRow": "插件",
-      "preferencesRow": "字号与默认模型",
+      "preferencesRow": "偏好与安全",
       "presetsBackAria": "返回我的",
       "presetsRow": "系统提示词预设",
       "profile": {
@@ -24318,7 +24395,7 @@
       "errorTitle": "配对失败",
       "failure": {
         "body": {
-          "activateFailed": "设备密钥已保存、配对已生效，但让 Host 上线时失败：{message}。配对本身没有问题，这是连接问题。",
+          "activateFailed": "Host 已注册此设备，但启用连接失败：{message}。本次新配对已回滚。请检查连接，然后使用新的邀请码重新配对。",
           "expired": "配对邀请码有效期为 5 分钟。请在 Host 上重新生成一个并粘贴到这里。",
           "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。",
           "vaultLockedPending": "本地账户已锁定，因此当前浏览器还无法保存设备密钥。请求尚未发出——输入框里的邀请码依然有效。解锁账户后再提交一次即可。"
@@ -24333,7 +24410,6 @@
           "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
           "enableBrowserAccess": "在 Host 上打开 设置 → 连接 → 本机主机 → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
           "freshInvitation": "在 Host 上重新生成邀请码（设置 → 连接 → 配对，或执行 “cognia-server pair”），然后粘贴到这里。",
-          "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。",
           "removeStaleDevice": "在 Host 的设备控制台（设备）中移除这台设备，然后重新配对。",
           "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
           "unlockAccount": "用密码登录本地账户后再配对。",
@@ -24344,7 +24420,7 @@
         "startOver": "粘贴新的邀请码",
         "technicalDetail": "技术细节",
         "title": {
-          "activate_failed": "配对已完成，但 Host 未能上线",
+          "activate_failed": "设备已注册，但连接失败",
           "clipboard_unavailable": "无法读取剪贴板",
           "fingerprint_mismatch": "主机身份不匹配",
           "http": "Host 拒绝了本次配对请求",
@@ -24680,6 +24756,8 @@
       "title": "远程会话"
     },
     "security": {
+      "accountUnlockDescription": "输入一次账号密码，即可为这台手机设置指纹或面部解锁。设置后，锁屏会自动发起生物识别验证。下方的敏感操作保护需单独配置。",
+      "accountUnlockTitle": "账号解锁",
       "deletePairing": {
         "help": "撤销某台设备的配对前先验证生物识别。",
         "label": "撤销已配对设备"
@@ -26538,6 +26616,57 @@
     "title": "Cognia"
   },
   "performance": {
+    "browserDiagnostics": {
+      "collection": {
+        "description": "默认关闭。启用的分组仅在性能面板、录制或 HUD 请求采样时采集。数据保留在本地，此开关不会开启远程上报。",
+        "label": "采集浏览器诊断"
+      },
+      "description": "可选采集资源加载、输入延迟样本、帧间隔和文档导航。按采样区间汇总的数据会显示在现有图表与录制中。",
+      "groups": {
+        "frames": {
+          "description": "帧间隔 p95 与可见状态下超过 50 ms 的帧间隔数。排除窗口隐藏期间的间隔，慢帧按此 50 ms 阈值定义。",
+          "label": "帧间隔"
+        },
+        "interactions": {
+          "description": "采集耗时至少 16 ms 的 Event Timing 条目：数量、输入延迟 p95 和处理耗时 p95。这些样本不等同于 INP，也不代表全部交互次数。",
+          "label": "交互"
+        },
+        "navigation": {
+          "description": "当前文档的加载阶段。客户端路由切换不会产生新的文档导航。",
+          "label": "导航"
+        },
+        "resources": {
+          "description": "资源数量、耗时 p95 与浏览器可见的传输字节数。跨域传输大小可能不完整，不代表网络总用量。",
+          "label": "资源"
+        }
+      },
+      "lifecycleHint": "设置适用于此设备或浏览器。关闭采集或分组后，会停止对应观察器，并清除待处理样本及当前摘要。已有录制会保留。不采集资源 URL、元素详情或输入文本。单个区间超过 500 个有效资源、事件或帧间隔样本时，不显示对应 p95；仍记录数量和可见字节总量。",
+      "milliseconds": "{value} ms",
+      "navigation": {
+        "clear": "清除导航摘要",
+        "description": "DNS、连接、TLS、请求和响应为各阶段耗时；DOM 和加载里程碑为导航开始后的累计时间。缺失值可能尚未产生，或被浏览器隐藏。",
+        "pending": "尚未测得或不可用",
+        "phases": {
+          "connectMs": "连接",
+          "dnsMs": "DNS",
+          "domContentLoadedMs": "DOMContentLoaded",
+          "domInteractiveMs": "DOM 可交互",
+          "loadMs": "加载完成",
+          "requestMs": "请求至首字节",
+          "responseMs": "响应下载",
+          "tlsMs": "TLS"
+        },
+        "title": "文档导航"
+      },
+      "persistenceError": "设置已在当前页面生效，但无法保存到下次访问。关闭采集仍会立即生效。",
+      "status": {
+        "error": "采集不可用",
+        "off": "已关闭",
+        "ready": "采样时启用",
+        "unsupported": "当前运行环境不支持"
+      },
+      "title": "浏览器诊断"
+    },
     "budgets": {
       "aggregation": {
         "median": "中位数",
@@ -26937,30 +27066,141 @@
     "metricDescriptions": {
       "cpu": "主机主进程的 CPU 占用，已按全部核心归一化。",
       "diskIo": "应用进程树的磁盘读写吞吐合计。",
+      "eventCount": "本区间观察到的耗时至少 16 ms 的 Event Timing 条目数，并非每次交互都会产生条目。",
       "eventLoopDelay": "定时器延后触发的程度——事件循环延迟的第 95 百分位。",
       "eventLoopUtilization": "Node 事件循环处于忙碌而非空闲的时间占比。",
+      "eventProcessingP95": "Event Timing 样本（至少 16 ms）处理耗时的第 95 百分位值。",
       "fps": "本窗口每秒绘制的帧数。窗口隐藏时不计量。",
+      "frameGapP95": "本区间可见状态下动画帧间隔的第 95 百分位值，排除窗口隐藏时间。",
+      "heapUtilization": "已用 JavaScript 堆内存占浏览器报告的堆上限的比例，仅在支持的环境可用。",
+      "inputDelayP95": "Event Timing 样本（至少 16 ms）输入延迟的第 95 百分位值，不等同于 INP。",
       "jsHeap": "本窗口正在使用的 JavaScript 堆内存。",
+      "longTaskBlocking": "本区间每个已观察长任务超出 50 ms 部分的时长之和，不等同于 Lighthouse 总阻塞时间。",
+      "longTaskMax": "本采样区间内观察到的最长主线程任务。",
       "longTasks": "每个区间中超过 50 毫秒的主线程任务数。",
       "mainThreadBlocked": "每个区间中耗在长任务（超过 50 毫秒）上的时间占比，长任务会阻塞输入和渲染。",
       "memory": "主机主进程的常驻内存。",
       "nodeHeap": "Node 主机正在使用的 JavaScript 堆内存。",
+      "operationCancelled": "此区间内以 AbortError 结束的已埋点操作数。",
+      "operationCount": "此区间内完成的已埋点操作数，包含失败和取消。嵌套操作分别计数。",
+      "operationDurationP95": "此区间内已完成操作耗时的第 95 百分位。不同分组可能重叠且测量边界不同；可在诊断中查看各操作详情。",
+      "operationErrors": "此区间内失败的已埋点操作数，包含非成功 HTTP 响应。",
+      "operationInFlight": "当前帧采样时仍在进行中的已埋点操作数。",
+      "resourceCount": "本区间观察到的资源计时条目数，不代表所有网络请求次数。",
+      "resourceDurationP95": "本区间观察到的资源计时条目耗时的第 95 百分位值。",
+      "resourceTransfer": "本区间浏览器可见的资源传输字节数之和。跨域大小可能隐藏，不代表网络总用量。",
       "runtimeBusy": "异步运行时工作线程执行任务的时间占比。",
+      "slowFrames": "本区间观察到的可见帧间隔超过 50 ms 的次数。",
       "tasks": "运行时中当前存活的异步任务数。"
     },
     "metrics": {
       "cpu": "应用 CPU",
       "diskIo": "磁盘 I/O",
+      "eventCount": "事件样本数",
       "eventLoopDelay": "事件循环延迟（p95）",
       "eventLoopUtilization": "事件循环利用率",
+      "eventProcessingP95": "事件处理耗时 p95",
       "fps": "帧率",
+      "frameGapP95": "帧间隔 p95",
+      "heapUtilization": "堆内存使用率",
+      "inputDelayP95": "输入延迟样本 p95",
       "jsHeap": "JS 堆内存",
+      "longTaskBlocking": "长任务阻塞时长",
+      "longTaskMax": "最长任务",
       "longTasks": "长任务",
       "mainThreadBlocked": "主线程阻塞",
       "memory": "应用内存",
       "nodeHeap": "堆内存占用",
+      "operationCancelled": "已取消操作",
+      "operationCount": "已完成操作",
+      "operationDurationP95": "操作耗时（p95）",
+      "operationErrors": "操作错误",
+      "operationInFlight": "进行中的操作",
+      "resourceCount": "资源数量",
+      "resourceDurationP95": "资源耗时 p95",
+      "resourceTransfer": "可见资源传输量",
       "runtimeBusy": "运行时繁忙",
+      "slowFrames": "慢帧",
       "tasks": "异步任务"
+    },
+    "operations": {
+      "clear": "清空操作统计",
+      "collection": {
+        "description": "默认关闭。开启后，即使关闭性能面板，所选分组也会在使用应用时持续记录。不会开启远程上报。",
+        "label": "采集应用操作"
+      },
+      "columns": {
+        "cancelled": "已取消",
+        "count": "已完成",
+        "errors": "错误",
+        "inFlight": "进行中",
+        "lastMs": "最近",
+        "maxMs": "最大",
+        "name": "操作",
+        "p50Ms": "p50",
+        "p95Ms": "p95",
+        "samples": "样本数"
+      },
+      "description": "定位启动、存储、主机调用和 HTTP 请求中的耗时。固定操作类型的统计仅保存在当前窗口内存中。",
+      "dropped": "由于达到 256 个并发操作的上限，{count} 次操作未被记录。",
+      "empty": "尚未记录所选操作。使用应用后可返回查看。",
+      "groups": {
+        "network": {
+          "description": "经应用平台请求层发起的请求。浏览器耗时截止响应头到达；原生端包含响应数据缓冲。HTTP 失败计入错误。",
+          "label": "网络"
+        },
+        "startup": {
+          "description": "启动能力探测。开启后重新加载，可测量下一次启动。",
+          "label": "启动"
+        },
+        "storage": {
+          "description": "聊天记录读写和会话列表读取。写入耗时包含队列等待和写入调用，不包含外层事务提交。",
+          "label": "存储"
+        },
+        "transport": {
+          "description": "经路由层发起的本地和远程主机调用，不包含性能采样及遥测调用。",
+          "label": "主机调用"
+        }
+      },
+      "lifecycleHint": "开关适用于当前设备或浏览器。关闭分组会清空该分组数据并立即停止记录；切换账号或主机会清空统计。仅记录固定操作名称、耗时与结果，不采集内容、标识符、URL 或参数。",
+      "names": {
+        "network": {
+          "browser": {
+            "fetch": "浏览器 HTTP 请求"
+          },
+          "capacitor": {
+            "fetch": "移动端 HTTP 请求"
+          },
+          "tauri": {
+            "fetch": "桌面 HTTP 请求"
+          }
+        },
+        "startup": {
+          "capability-probe": "启动能力探测"
+        },
+        "storage": {
+          "messages": {
+            "load": "读取聊天记录",
+            "write": "写入聊天记录"
+          },
+          "sessions": {
+            "list": "读取会话列表"
+          }
+        },
+        "transport": {
+          "local": {
+            "call": "本地主机调用"
+          },
+          "remote": {
+            "call": "远程主机调用"
+          }
+        }
+      },
+      "off": "采集已关闭。",
+      "persistenceError": "选择已立即生效，但无法保存到下次访问。关闭采集仍会立即生效。",
+      "statisticsHint": "完成、错误和取消次数自清空后累计。耗时统计使用每种操作最近 120 次有效完成记录，包含失败和取消。图表次数按采样区间统计，区间超过 500 个有效样本时不提供 p95。嵌套操作可能重叠，耗时不可相加。",
+      "title": "应用操作",
+      "unavailable": "不可用"
     },
     "overview": {
       "groups": {
@@ -27170,6 +27410,62 @@
         "paused": "已暂停",
         "recording": "录制中"
       }
+    },
+    "webVitals": {
+      "clear": "清除 Web Vitals",
+      "collection": {
+        "description": "在当前窗口本地保存所选指标的最新值。采集和上报默认关闭。",
+        "label": "采集 Web Vitals"
+      },
+      "description": "衡量当前窗口的页面加载、交互响应和视觉稳定性。这些是文档级指标，并非每秒采样或模型响应耗时。数值仅保存在当前会话内存中。",
+      "lifecycleHint": "选择适用于此设备或浏览器。指标覆盖整个文档，而非单独路由，可能在交互后或页面隐藏时产生。关闭采集会立即停止记录和上报；Next.js 观察器会保留至重新加载。更改开关或清除数值后，可重新加载以开始新的测量会话。",
+      "loadError": "无法启动 Web Vitals 采集，请重新加载当前窗口后重试。",
+      "metricToggle": "采集 {metric}",
+      "metrics": {
+        "CLS": {
+          "description": "累积布局偏移 · 无单位稳定性分数",
+          "label": "CLS"
+        },
+        "FCP": {
+          "description": "首次内容绘制 · 首次可见内容",
+          "label": "FCP"
+        },
+        "FID": {
+          "description": "首次输入延迟 · 旧指标，默认关闭",
+          "label": "FID"
+        },
+        "INP": {
+          "description": "交互到下一次绘制 · 交互响应",
+          "label": "INP"
+        },
+        "LCP": {
+          "description": "最大内容绘制 · 主要内容加载",
+          "label": "LCP"
+        },
+        "TTFB": {
+          "description": "首字节时间 · 页面文档响应",
+          "label": "TTFB"
+        }
+      },
+      "milliseconds": "{value} 毫秒",
+      "persistenceError": "当前选择已在本页面生效，但未能保存供下次访问使用。关闭采集仍会立即生效。",
+      "ratings": {
+        "good": "良好",
+        "needs-improvement": "需要改进",
+        "poor": "较差"
+      },
+      "reporting": {
+        "description": "允许新指标通过现有遥测管线上报。还需行为遥测授权、应用类别、采样和目标配置允许投递。不会补报之前采集的数值。",
+        "label": "通过遥测上报",
+        "settings": "遥测设置"
+      },
+      "status": {
+        "disabled": "已关闭",
+        "error": "采集不可用",
+        "pending": "等待测量结果",
+        "unsupported": "当前运行环境不支持"
+      },
+      "title": "Web Vitals"
     }
   },
   "pet": {
@@ -30064,6 +30360,7 @@
         "ipc:expose": "公开可供其他插件通过 IPC 调用的 RPC 方法",
         "issue:read": "读取你的问题追踪器：问题及其活动记录、迭代周期和项目",
         "issue:write": "创建、编辑、移动和指派问题，添加标签和评论，并注册外部同步源",
+        "knowledge:read": "读取当前智能体运行已授权知识库中的原文",
         "logs:read": "读取本应用的本地日志、日志统计和传输健康状况",
         "media:image:read": "读取图片素材",
         "media:image:write": "写入图片素材",
@@ -30407,14 +30704,14 @@
         "title": "从 URL 安装"
       },
       "fromUrlPrompt": "插件清单 URL",
-      "fromUrlSigned": "从已签名 URL…",
+      "fromUrlSigned": "从插件包 URL…",
       "fromVsix": "从 .vsix 安装…",
       "fromWasmGit": "从 Git 安装（WASM）…",
       "groupCogpack": "齿轮包",
       "groupGit": "Git",
       "groupLocal": "本地插件",
       "groupManifest": "清单",
-      "groupWasm": "WASM 包",
+      "groupWasm": "插件包",
       "install": "安装",
       "loadUnpacked": "加载本地目录…",
       "syncDone": "注册表已同步 — {count, plural, =0 {暂无可用更新} other {# 个插件有更新}}",
@@ -30661,13 +30958,13 @@
         "unsignedAuthor": "未签名作者"
       },
       "fromLocalButton": {
-        "filePickerTitle": "选择 WASM 插件包",
+        "filePickerTitle": "选择插件包",
         "filterAllFiles": "所有文件",
-        "filterWasmBundle": "WASM 包",
-        "label": "安装本地 WASM 插件",
+        "filterWasmBundle": "插件包",
+        "label": "安装本地插件包",
         "previewIntegrityError": "插件预览未返回完整性校验信息，请重新预览后再安装。",
-        "tauriRequiredError": "安装本地 WASM 插件需要桌面应用。",
-        "zipRequiredError": "请选择包含插件清单和 WASM 组件的 .zip 包。"
+        "tauriRequiredError": "安装本地插件包需要桌面应用。",
+        "zipRequiredError": "请选择包含插件清单及已编译前端入口或 WASM 组件的 .zip 包。"
       },
       "fromUrlDialog": {
         "alreadyTrusted": "你已信任该作者。",
@@ -30675,7 +30972,7 @@
         "bundleUrlLabel": "包 URL",
         "bundleUrlPlaceholder": "https://example.com/plugin.zip",
         "cancel": "取消",
-        "description": "提供已签名 WASM 包的直链。安装前会先获取并验证其清单。",
+        "description": "提供已编译前端或 WASM 插件包的直链。安装前会验证清单及所提供的签名。",
         "fetchingManifest": "正在获取清单…",
         "install": "安装",
         "installing": "安装中…",
@@ -30687,7 +30984,7 @@
         "signatureUrlLabel": "签名 URL（可选）",
         "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
         "signatureVerified": "签名已验证",
-        "title": "安装已签名的 WASM 插件",
+        "title": "从 URL 安装插件",
         "trustAriaLabel": "信任该作者",
         "trustFirstTime": "信任该作者，用于后续安装。",
         "trustRequiredError": "安装前请先信任该作者。",
@@ -40378,6 +40675,28 @@
             "redacting": "脱敏中"
           },
           "progress": "{phase} · {progress}%",
+          "reading": {
+            "description": "所有 Agent 的全局默认设置，可由角色和会话设置覆盖。关闭渐进阅读时，检索设置仍适用于快速 RAG。",
+            "enabled": "启用渐进式文档阅读",
+            "maxCalls": "阅读工具调用次数上限",
+            "maxOutlineNodes": "每次目录返回的章节数",
+            "maxReadChars": "每次读取的字符数",
+            "ragTokenBudget": "快速 RAG Token 预算",
+            "retrievalStrategy": "候选检索策略",
+            "saveFailed": "无法保存知识阅读设置，请重试。",
+            "strategies": {
+              "hybrid": "混合检索（关键词 + 向量）",
+              "keyword": "关键词检索",
+              "vector": "向量检索"
+            },
+            "summaryMaxChars": "导航摘要字符数",
+            "summaryProviderHint": "可填写插件注册的提供方 ID，留空则使用已保存的导航摘要。摘要用于导航，回答依据原文。",
+            "summaryProviderId": "导航摘要提供方",
+            "summaryProviderPlaceholder": "可选的已注册提供方 ID",
+            "title": "Agent 知识阅读默认设置",
+            "topKPerBase": "每个知识库的候选数量",
+            "totalReadChars": "读取字符总预算"
+          },
           "rebuild": "重建索引",
           "rebuildPartial": "索引已清理，但有 {count} 个来源未能重建。",
           "rebuildRequired": "嵌入维度已变化。请使用同一个嵌入模型重建知识库索引。",
@@ -44256,8 +44575,8 @@
       }
     },
     "decisionProviders": {
-      "builtinRemote": "远程决策接口",
-      "description": "System-1 决策模型用一次快速推理回答类型化问题（是非、单选、打分）。IM 回复副驾用它判断对方意图与风险并给候选回复排序；插件通过 ctx.decisions 调用。",
+      "builtinRemote": "远程决策适配器",
+      "description": "决策模型回答类型化问题（是非、单选、打分），可选择原生 System-1 模型或 AI SDK 语言模型适配器。IM 回复副驾使用已验证的模型判断对话并给候选回复排序；插件通过 ctx.decisions 调用。",
       "errors": {
         "aborted": "请求已取消。",
         "cors_unreachable": "浏览器版无法访问该接口，请使用桌面端或移动端。",
@@ -44273,7 +44592,10 @@
         "timeout": "提供方未能按时回答。"
       },
       "http": {
+        "baseUrlHint": "填写 API 基础地址，适配器会追加请求路径；留空使用默认地址。",
         "clearKey": "清除密钥",
+        "endpointUrlHint": "填写包含请求路径的完整决策接口地址；留空使用预设默认地址。",
+        "estimatedHint": "语言模型的决策结果是估计值，并非经过校准的原生概率。这些模型尚未通过回复副驾验证；仍可供插件调用和测试连接。",
         "key": "API 密钥",
         "keyHint": "在 {url} 获取密钥",
         "keyPlaceholder": "粘贴该接口的 API 密钥",
@@ -44283,11 +44605,15 @@
         "modelRequired": "模型 ID（必填）",
         "preset": "接口",
         "presets": {
+          "anthropic": "Anthropic（语言模型决策）",
           "bocha": "博查 Jev",
           "custom": "自定义地址",
+          "gateway": "AI Gateway（决策模型）",
+          "google": "Google（语言模型决策）",
+          "openai": "OpenAI（语言模型决策）",
           "openrouter": "OpenRouter（typesafe/jev）",
           "typesafe": "TypeSafe",
-          "vercel": "Vercel AI Gateway",
+          "vercel": "Vercel AI Gateway（Jev）",
           "zen": "OpenCode Zen"
         },
         "problems": {
@@ -44324,9 +44650,12 @@
         "calibrated": "概率已校准",
         "copilotNotValidated": "未通过回复副驾校准",
         "copilotValidated": "已通过回复副驾校准",
+        "estimated": "语言模型估计值",
         "local": "在本机运行",
+        "native": "原生决策概率",
         "remote": "远程服务",
-        "uncalibrated": "概率未校准"
+        "uncalibrated": "概率未校准",
+        "unknown": "概率含义未知"
       }
     },
     "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
@@ -54785,9 +55114,11 @@
     "sources": {
       "addSource": "添加数据源",
       "cancelAdd": "取消",
+      "characterLocation": "字符 {start}–{end}",
       "chunks": "{count} 个切片",
       "contentHeading": "源文本",
       "contentTruncated": "仅显示前 {count} 个字符。",
+      "contentWindow": "显示引用附近的原文字符 {start}–{end}。",
       "copied": "已复制",
       "copyMarkdown": "复制为 Markdown",
       "delete": "删除",
@@ -54802,9 +55133,12 @@
       "filterEmpty": "没有匹配该筛选条件的数据源。",
       "filterLabel": "按状态筛选数据源",
       "headerCount": "数据源（{count}）",
+      "historicalVersion": "此引用来自文档的旧版本，当前显示引用时的原文。",
       "imported": "导入于 {when}",
+      "lineLocation": "第 {start}–{end} 行",
       "moreRows": "另有 {count} 行",
       "noTables": "该源中未检测到表格。",
+      "pageLocation": "第 {start}–{end} 页",
       "pendingIngestBusy": "排队中…",
       "pendingIngestCta": "开始 ingest",
       "pendingIngestHint": "{count} 个数据源待 ingest",
@@ -62898,7 +63232,7 @@
       "instructionsPlaceholder": "例如：使用 pnpm，提交前先运行测试。",
       "knowledge": {
         "addFile": "上传文件",
-        "backendHint": "检索需要已配置的向量后端和嵌入模型（Twin 设置）。未配置时将跳过入库与检索。",
+        "backendHint": "关键词检索无需嵌入模型。语义与混合检索使用已配置的向量后端和嵌入模型（Twin 设置）。",
         "cancel": "取消",
         "chunkCount": "{count, plural, other {# 个片段}}",
         "confirmRemoveFile": "移除文件",
@@ -62918,11 +63252,15 @@
         "removeFile": "移除文件",
         "removeFileDescription": "“{name}”及其所有已索引的片段将从该工作区的知识库中移除。粘贴的笔记没有其他副本。",
         "removeFileTitle": "移除此文件？",
+        "retrievalStrategy": "检索策略",
         "status": {
           "indexed": "已索引",
           "outdated": "已过期",
           "pending": "待处理"
         },
+        "strategyHybrid": "语义与关键词",
+        "strategyKeyword": "关键词检索",
+        "strategyVector": "语义检索",
         "summary": "{files, plural, other {# 个文件}} · {chunks, plural, other {# 个片段}}",
         "title": "知识库",
         "topK": "每条消息片段数"

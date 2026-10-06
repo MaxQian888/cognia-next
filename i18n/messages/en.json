@@ -5612,6 +5612,17 @@
       "busyTitle": "The preview is open in another panel",
       "takeOver": "Take over here"
     },
+    "loadError": {
+      "continue": "Show page anyway",
+      "editAddress": "Edit address",
+      "frameHelp": "Trouble viewing this page?",
+      "frameHint": "Some websites do not allow embedded previews. If the page is blank or refuses to connect, try opening it in your browser.",
+      "hint": "Check the address and your network connection. If this is a local site, make sure its server is running.",
+      "retry": "Try again",
+      "timeoutHint": "Check your connection or try again. If the page has already loaded, you can choose to show it anyway.",
+      "timeoutTitle": "This page is taking too long to load",
+      "title": "This page could not be opened"
+    },
     "loading": {
       "label": "Loading page",
       "title": "Loading {host}…"
@@ -9366,6 +9377,7 @@
     },
     "sourcesPart": {
       "agentKnowledgeHeader": "Agent Knowledge Base excerpts ({count})",
+      "citationExpired": "The cited document version is no longer available.",
       "citationsLabel": "{count, plural, =1 {1 web source} other {# web sources}}",
       "degradedNotice": "Twin retrieval unavailable — this reply skipped the twin's documents.",
       "feedbackFailed": "Couldn't record that",
@@ -9391,6 +9403,9 @@
       "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
       "recalledMemoriesHeader": "Recalled memories ({count})",
       "retrievedChunksHeader": "Retrieved chunks ({count})",
+      "sourceLoadFailed": "Could not open the original source. Try again.",
+      "sourceLoading": "Opening source…",
+      "sourceUnavailable": "This source is unavailable or access has been revoked.",
       "styleSamplesHeader": "Style samples ({count})",
       "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
       "viewInChat": "View in chat",
@@ -15273,6 +15288,8 @@
           "preferRight": "Prefer output B",
           "progress": "Comparison {current} of {total}",
           "reasoning": "Adjudication reasoning",
+          "refreshPending": "Review saved; recommendation refresh is pending.",
+          "retryRefresh": "Retry recommendation refresh",
           "reviewer": "Reviewer identity",
           "right": "Output B",
           "tie": "Tie",
@@ -16331,6 +16348,51 @@
     "selectAgent": "Select Agent",
     "selectorComingSoon": "Coming soon",
     "selectorPluginUnavailable": "Plugin off",
+    "sessionOperations": {
+      "all": "All together",
+      "archive": "Archive session",
+      "autoCompaction": "Automatic compaction",
+      "autoRetry": "Automatic retries",
+      "cancelled": "Cancelled",
+      "clone": "Clone session",
+      "current": "Current branch",
+      "disabled": "Disabled",
+      "downloaded": "HTML downloaded",
+      "empty": "No session entries",
+      "enabled": "Enabled",
+      "excludeContext": "Exclude output from model context",
+      "exitCode": "Exit code: {code}",
+      "exportHtml": "Export native HTML",
+      "exported": "Exported on the execution host: {path}",
+      "followUp": "Follow-up delivery",
+      "follow_up": "Run after this task",
+      "forkHere": "Fork here",
+      "handled": "Instruction handled by the agent",
+      "imageCount": "{count} images attached",
+      "images": "Attach images",
+      "invalidImage": "Choose PNG, JPEG, GIF or WebP images totaling up to 10 MB.",
+      "loadEntries": "Inspect session history",
+      "loadTree": "Browse branches",
+      "loading": "Loading capabilities…",
+      "oneAtATime": "One at a time",
+      "queued": "Instruction queued",
+      "queuedInput": "Queued instruction",
+      "refreshCommands": "Refresh commands",
+      "rename": "Rename session",
+      "restoreQueue": "Clear queue and restore input",
+      "runShell": "Run command",
+      "sessionName": "Native session name",
+      "shell": "Shell command",
+      "steer": "Change direction now",
+      "steering": "Steering delivery",
+      "stopRetry": "Stop retrying",
+      "stopShell": "Stop command",
+      "title": "Session controls",
+      "truncated": "Output truncated",
+      "unarchive": "Restore archived session",
+      "unknown": "Not reported",
+      "unsupported": "This runtime has no additional session controls."
+    },
     "setConfigOptionFailed": "Failed to update config option",
     "settings": {
       "acpFeatureSettingsDescription": "Stable elicitation follows host support. Preview capabilities remain off until enabled individually and are advertised only when this runtime can provide them.",
@@ -22859,8 +22921,9 @@
         "bundleId": "Bundle ID",
         "clearApns": "Clear APNs",
         "clearFcm": "Clear FCM",
+        "clearHms": "Clear Huawei push",
         "configured": "configured",
-        "description": "Paste FCM (Android) and APNs (iOS) credentials to enable push delivery for paired phones while their WebSocket is disconnected. Secrets are stored in the OS keyring on desktop; headless deployments use a JSON file under the data directory.",
+        "description": "Configure FCM (Android), Huawei Push Kit or APNs (iOS) credentials to enable push delivery for paired phones while their WebSocket is disconnected. Secrets are stored in the OS keyring on desktop; headless deployments use a JSON file under the data directory.",
         "desktopOnly": "Only available in the Tauri desktop build.",
         "fcmAria": "FCM service-account JSON",
         "fcmClearFailed": "FCM clear: {message}",
@@ -22870,12 +22933,26 @@
         "fcmLabel": "FCM (Android)",
         "fcmPlaceholder": "Paste the '{\"type\":\"service_account\",...}' JSON downloaded from Google Cloud Console.",
         "fcmRequired": "Paste the FCM service-account JSON first.",
+        "hmsAppId": "Huawei App ID (OAuth client ID)",
+        "hmsAppIdRequired": "Enter the Huawei App ID first.",
+        "hmsClearFailed": "Huawei push could not be cleared: {message}",
+        "hmsCleared": "Huawei push cleared.",
+        "hmsClientSecret": "Huawei client secret",
+        "hmsClientSecretRequired": "Enter the Huawei client secret first.",
+        "hmsConfigureFailed": "Huawei push could not be configured: {message}",
+        "hmsConfigured": "Huawei push configured.",
+        "hmsDescription": "Use the App ID and client secret from AppGallery Connect for the Huawei Android build installed on your phone. This enables notifications on devices using HMS Core without Google Play services.",
+        "hmsLabel": "Huawei Push Kit (HMS)",
+        "hmsUnsupported": "Update the connected Host to a version with Huawei push support before configuring these credentials.",
         "keyId": "Key ID",
         "productionAria": "APNs production environment",
         "productionEnv": "Production environment",
         "saveApns": "Save APNs",
         "saveFcm": "Save FCM",
+        "saveHms": "Save Huawei push",
         "statusFailed": "Push status failed: {message}",
+        "statusLoadFailed": "Push configuration status could not be loaded. Retry to check which services this Host supports.",
+        "statusRetry": "Retry loading push status",
         "teamId": "Team ID",
         "title": "Push notifications"
       },
@@ -23826,7 +23903,7 @@
       "pairingUnpaired": "Not paired with desktop yet",
       "pinned": "Pinned to favorites",
       "pluginsRow": "Plugins",
-      "preferencesRow": "Font size & default model",
+      "preferencesRow": "Preferences & security",
       "presetsBackAria": "Back to Me",
       "presetsRow": "System prompt presets",
       "profile": {
@@ -24318,7 +24395,7 @@
       "errorTitle": "Pairing failed",
       "failure": {
         "body": {
-          "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one.",
+          "activateFailed": "The Host registered this device, but activation failed: {message}. The new pairing was rolled back. Check the connection, then use a fresh invitation to pair again.",
           "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
           "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help.",
           "vaultLockedPending": "Your local account is locked, so this browser cannot store the device key yet. Nothing has been sent — the invitation in the field is still valid. Unlock your account, then submit it again."
@@ -24333,7 +24410,6 @@
           "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
           "enableBrowserAccess": "On the Host: Settings → Connectivity → Local host → Browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
           "freshInvitation": "Issue a new invitation on the Host — Settings → Connectivity → Pairing, or “cognia-server pair” — and paste it here.",
-          "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
           "removeStaleDevice": "On the Host, remove this device in the device console (Devices) before pairing again.",
           "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
           "unlockAccount": "Sign in to your local account with its password, then pair again.",
@@ -24344,7 +24420,7 @@
         "startOver": "Paste a new invitation",
         "technicalDetail": "Technical detail",
         "title": {
-          "activate_failed": "Paired, but the Host didn't come online",
+          "activate_failed": "Device registered, but connection failed",
           "clipboard_unavailable": "Clipboard unavailable",
           "fingerprint_mismatch": "Host identity mismatch",
           "http": "The Host rejected the pairing request",
@@ -24680,6 +24756,8 @@
       "title": "Remote sessions"
     },
     "security": {
+      "accountUnlockDescription": "Enter your account password once to set up fingerprint or face unlock on this phone. After setup, the lock screen automatically asks for biometrics. Sensitive-action protection below is configured separately.",
+      "accountUnlockTitle": "Account unlock",
       "deletePairing": {
         "help": "Ask for biometric before revoking a device's pairing.",
         "label": "Revoke a paired device"
@@ -26538,6 +26616,57 @@
     "title": "Cognia"
   },
   "performance": {
+    "browserDiagnostics": {
+      "collection": {
+        "description": "Off by default. Enabled groups collect only while the performance panel, capture or HUD requests sampling. Values stay local; this does not enable remote reporting.",
+        "label": "Collect browser diagnostics"
+      },
+      "description": "Optional measurements for resource loading, sampled input latency, frame gaps and document navigation. Interval aggregates appear in the existing charts and captures.",
+      "groups": {
+        "frames": {
+          "description": "Frame gap p95 and visible frame gaps over 50 ms. Hidden-window gaps are excluded; slow frames use this 50 ms threshold.",
+          "label": "Frame gaps"
+        },
+        "interactions": {
+          "description": "Event Timing entries of at least 16 ms: count, input delay p95 and processing p95. This sample is not INP or a count of all interactions.",
+          "label": "Interactions"
+        },
+        "navigation": {
+          "description": "Loading phases for the current document. Client-side route changes do not create a new document navigation.",
+          "label": "Navigation"
+        },
+        "resources": {
+          "description": "Resource count, duration p95 and browser-visible transfer bytes. Transfer sizes are incomplete across origins and are not total network usage.",
+          "label": "Resources"
+        }
+      },
+      "lifecycleHint": "Settings apply to this device or browser. Disabling collection or a group stops its observers and clears pending samples and its current summary. Existing captures remain. No resource URLs, element details or input text are collected. Resource, event and frame-gap p95 values are unavailable when an interval exceeds 500 valid samples; counts and visible byte totals are still recorded.",
+      "milliseconds": "{value} ms",
+      "navigation": {
+        "clear": "Clear navigation summary",
+        "description": "DNS, connection, TLS, request and response are phase durations. DOM and load milestones are elapsed time from navigation start. A missing value may be pending or hidden by the browser.",
+        "pending": "Not yet measured or unavailable",
+        "phases": {
+          "connectMs": "Connection",
+          "dnsMs": "DNS",
+          "domContentLoadedMs": "DOMContentLoaded",
+          "domInteractiveMs": "DOM interactive",
+          "loadMs": "Load complete",
+          "requestMs": "Request → first byte",
+          "responseMs": "Response download",
+          "tlsMs": "TLS"
+        },
+        "title": "Document navigation"
+      },
+      "persistenceError": "Your choices apply now but could not be saved for your next visit. Turning collection off still takes effect immediately.",
+      "status": {
+        "error": "Collection unavailable",
+        "off": "Off",
+        "ready": "Enabled when sampling",
+        "unsupported": "Unsupported in this runtime"
+      },
+      "title": "Browser diagnostics"
+    },
     "budgets": {
       "aggregation": {
         "median": "Median",
@@ -26937,30 +27066,141 @@
     "metricDescriptions": {
       "cpu": "CPU used by the host's main process, normalized across all cores.",
       "diskIo": "Combined disk read and write throughput across the app's process tree.",
+      "eventCount": "Event Timing entries lasting at least 16 ms observed this interval. Not every interaction produces an entry.",
       "eventLoopDelay": "How late timers fired — the 95th percentile event-loop delay.",
       "eventLoopUtilization": "Share of time the Node event loop was busy rather than idle.",
+      "eventProcessingP95": "95th percentile of processing duration among sampled Event Timing entries (at least 16 ms).",
       "fps": "Frames this window painted per second. Unmeasured while the window is hidden.",
+      "frameGapP95": "95th percentile of visible animation-frame gaps in this interval. Hidden-window time is excluded.",
+      "heapUtilization": "Used JavaScript heap divided by the browser-reported heap limit. Available only in supporting runtimes.",
+      "inputDelayP95": "95th percentile of input delay among sampled Event Timing entries (at least 16 ms). This is not INP.",
       "jsHeap": "JavaScript heap in use by this window.",
+      "longTaskBlocking": "Sum of each observed long task’s duration beyond 50 ms in this interval. This is not Lighthouse Total Blocking Time.",
+      "longTaskMax": "Longest main-thread task observed in this sampling interval.",
       "longTasks": "Main-thread tasks longer than 50 ms in each interval.",
       "mainThreadBlocked": "Share of each interval spent in long tasks (over 50 ms) that block input and rendering.",
       "memory": "Resident memory of the host's main process.",
       "nodeHeap": "JavaScript heap in use by the Node host.",
+      "operationCancelled": "Instrumented operations rejected with AbortError in this interval.",
+      "operationCount": "Instrumented operations completed in this interval, including failures and cancellations. Nested operations are counted separately.",
+      "operationDurationP95": "95th percentile of completed operation durations in this interval. Groups may overlap and have different timing boundaries; use Diagnose for per-operation details.",
+      "operationErrors": "Instrumented operations that failed in this interval, including non-successful HTTP responses.",
+      "operationInFlight": "Instrumented operations still in progress when this frame was sampled.",
+      "resourceCount": "Number of resource timing entries observed in this interval; not a count of all network requests.",
+      "resourceDurationP95": "95th percentile of durations of resource timing entries observed in this interval.",
+      "resourceTransfer": "Sum of browser-visible resource transfer bytes this interval. Cross-origin sizes may be hidden; this is not total network usage.",
       "runtimeBusy": "Share of time the async runtime's workers spent running tasks.",
+      "slowFrames": "Number of observed visible frame gaps over 50 ms in this interval.",
       "tasks": "Async tasks currently alive in the runtime."
     },
     "metrics": {
       "cpu": "App CPU",
       "diskIo": "Disk I/O",
+      "eventCount": "Sampled event count",
       "eventLoopDelay": "Event loop delay (p95)",
       "eventLoopUtilization": "Event loop utilization",
+      "eventProcessingP95": "Event processing p95",
       "fps": "Frame rate",
+      "frameGapP95": "Frame gap p95",
+      "heapUtilization": "Heap utilization",
+      "inputDelayP95": "Sampled input delay p95",
       "jsHeap": "JS heap",
+      "longTaskBlocking": "Long-task blocking time",
+      "longTaskMax": "Longest task",
       "longTasks": "Long tasks",
       "mainThreadBlocked": "Main thread blocked",
       "memory": "App memory",
       "nodeHeap": "Heap used",
+      "operationCancelled": "Cancelled operations",
+      "operationCount": "Completed operations",
+      "operationDurationP95": "Operation duration (p95)",
+      "operationErrors": "Operation errors",
+      "operationInFlight": "Operations in progress",
+      "resourceCount": "Resource count",
+      "resourceDurationP95": "Resource duration p95",
+      "resourceTransfer": "Visible resource transfer",
       "runtimeBusy": "Runtime busy",
+      "slowFrames": "Slow frames",
       "tasks": "Async tasks"
+    },
+    "operations": {
+      "clear": "Clear operation statistics",
+      "collection": {
+        "description": "Off by default. Once enabled, selected groups record while you use the app, even with this panel closed. No remote reporting is enabled.",
+        "label": "Collect application operations"
+      },
+      "columns": {
+        "cancelled": "Cancelled",
+        "count": "Completed",
+        "errors": "Errors",
+        "inFlight": "In progress",
+        "lastMs": "Last",
+        "maxMs": "Max",
+        "name": "Operation",
+        "p50Ms": "p50",
+        "p95Ms": "p95",
+        "samples": "Samples"
+      },
+      "description": "Find slow startup, storage, host calls and HTTP requests. These fixed operation summaries stay in this window’s memory.",
+      "dropped": "{count} operations were not recorded because the 256 concurrent-operation limit was reached.",
+      "empty": "No selected operations recorded yet. Use the app, then return to this panel.",
+      "groups": {
+        "network": {
+          "description": "Requests through the app’s platform fetch. Browser duration ends when headers arrive; native duration includes buffered response data. HTTP failures count as errors.",
+          "label": "Network"
+        },
+        "startup": {
+          "description": "Startup capability probe. Enable and reload to measure the next startup.",
+          "label": "Startup"
+        },
+        "storage": {
+          "description": "Chat history reads and writes, and session lists. Write duration includes queue waiting and the write call, not outer transaction commit.",
+          "label": "Storage"
+        },
+        "transport": {
+          "description": "Local and remote routed host calls. Performance sampling and telemetry calls are excluded.",
+          "label": "Host calls"
+        }
+      },
+      "lifecycleHint": "Switches apply to this device or browser. Turning a group off clears its data and stops recording immediately. Account or host changes clear statistics. Only fixed operation names, durations and outcomes are recorded; no content, identifiers, URLs or arguments.",
+      "names": {
+        "network": {
+          "browser": {
+            "fetch": "Browser HTTP request"
+          },
+          "capacitor": {
+            "fetch": "Mobile HTTP request"
+          },
+          "tauri": {
+            "fetch": "Desktop HTTP request"
+          }
+        },
+        "startup": {
+          "capability-probe": "Startup capability probe"
+        },
+        "storage": {
+          "messages": {
+            "load": "Load chat history",
+            "write": "Write chat history"
+          },
+          "sessions": {
+            "list": "List sessions"
+          }
+        },
+        "transport": {
+          "local": {
+            "call": "Local host call"
+          },
+          "remote": {
+            "call": "Remote host call"
+          }
+        }
+      },
+      "off": "Collection is off.",
+      "persistenceError": "Your choices apply now but could not be saved for your next visit. Turning collection off still takes effect immediately.",
+      "statisticsHint": "Completed, error and cancellation counts are cumulative since clear. Duration statistics use the latest 120 valid completions per operation, including failures and cancellations. Chart counts cover each sampling interval; interval p95 is unavailable above 500 valid samples. Nested operations may overlap, so durations must not be added.",
+      "title": "Application operations",
+      "unavailable": "Unavailable"
     },
     "overview": {
       "groups": {
@@ -27170,6 +27410,62 @@
         "paused": "Paused",
         "recording": "Recording"
       }
+    },
+    "webVitals": {
+      "clear": "Clear Web Vitals",
+      "collection": {
+        "description": "Save the latest selected measurements locally in this window. Collection and reporting are off by default.",
+        "label": "Collect Web Vitals"
+      },
+      "description": "Page loading, responsiveness and visual stability for this window. These are document-level measurements, not per-second samples or model response times. Values stay in memory for the current session.",
+      "lifecycleHint": "Choices apply to this device or browser. Metrics cover the whole document, not individual routes, and may arrive after interaction or when hidden. Turning collection off stops recording and reporting immediately; Next.js observers remain until reload. Reload to begin a fresh measurement session after changing switches or clearing values.",
+      "loadError": "Could not start Web Vitals collection. Reload this window to try again.",
+      "metricToggle": "Collect {metric}",
+      "metrics": {
+        "CLS": {
+          "description": "Cumulative Layout Shift · unitless stability score",
+          "label": "CLS"
+        },
+        "FCP": {
+          "description": "First Contentful Paint · first visible content",
+          "label": "FCP"
+        },
+        "FID": {
+          "description": "First Input Delay · legacy metric, off by default",
+          "label": "FID"
+        },
+        "INP": {
+          "description": "Interaction to Next Paint · responsiveness",
+          "label": "INP"
+        },
+        "LCP": {
+          "description": "Largest Contentful Paint · main content loading",
+          "label": "LCP"
+        },
+        "TTFB": {
+          "description": "Time to First Byte · document response",
+          "label": "TTFB"
+        }
+      },
+      "milliseconds": "{value} ms",
+      "persistenceError": "Your choices apply to this page but could not be saved for your next visit. Turning collection off still takes effect immediately.",
+      "ratings": {
+        "good": "Good",
+        "needs-improvement": "Needs improvement",
+        "poor": "Poor"
+      },
+      "reporting": {
+        "description": "Allow new measurements through the existing telemetry pipeline. Behavior telemetry consent, the app category, sampling and destination settings must also allow delivery. Previously collected values are not replayed.",
+        "label": "Report through telemetry",
+        "settings": "Telemetry settings"
+      },
+      "status": {
+        "disabled": "Off",
+        "error": "Collection unavailable",
+        "pending": "Waiting for a measurement",
+        "unsupported": "Unsupported in this runtime"
+      },
+      "title": "Web Vitals"
     }
   },
   "pet": {
@@ -30064,6 +30360,7 @@
         "ipc:expose": "Expose RPC methods that other plugins can invoke over IPC",
         "issue:read": "Read your issue tracker: issues, their activity trail, cycles and projects",
         "issue:write": "Create, edit, move, assign, label and comment on issues, and register an external sync source",
+        "knowledge:read": "Read original documents authorized for the active Agent run",
         "logs:read": "Read this app's local logs, their statistics, and transport health",
         "media:image:read": "Read image media assets",
         "media:image:write": "Write image media assets",
@@ -30407,14 +30704,14 @@
         "title": "Install from URL"
       },
       "fromUrlPrompt": "Plugin manifest URL",
-      "fromUrlSigned": "From signed URL…",
+      "fromUrlSigned": "From bundle URL…",
       "fromVsix": "From .vsix…",
       "fromWasmGit": "From Git (WASM)…",
       "groupCogpack": "Cogpacks",
       "groupGit": "Git",
       "groupLocal": "Local plugin",
       "groupManifest": "Manifest",
-      "groupWasm": "WASM bundle",
+      "groupWasm": "Plugin bundle",
       "install": "Install",
       "loadUnpacked": "Load unpacked…",
       "syncDone": "Registry synced — {count, plural, =0 {no updates available} one {# update available} other {# updates available}}",
@@ -30661,13 +30958,13 @@
         "unsignedAuthor": "Unsigned author"
       },
       "fromLocalButton": {
-        "filePickerTitle": "Select a WASM plugin bundle",
+        "filePickerTitle": "Select a plugin bundle",
         "filterAllFiles": "All files",
-        "filterWasmBundle": "WASM bundle",
-        "label": "Install local WASM plugin",
+        "filterWasmBundle": "Plugin bundle",
+        "label": "Install local plugin bundle",
         "previewIntegrityError": "The bundle preview did not include an integrity check. Preview it again before installing.",
-        "tauriRequiredError": "Installing a local WASM plugin requires the desktop app.",
-        "zipRequiredError": "Select a .zip bundle containing a plugin manifest and WASM component."
+        "tauriRequiredError": "Installing a local plugin bundle requires the desktop app.",
+        "zipRequiredError": "Select a .zip bundle containing a plugin manifest and compiled frontend or WASM entry."
       },
       "fromUrlDialog": {
         "alreadyTrusted": "You already trust this author.",
@@ -30675,7 +30972,7 @@
         "bundleUrlLabel": "Bundle URL",
         "bundleUrlPlaceholder": "https://example.com/plugin.zip",
         "cancel": "Cancel",
-        "description": "Provide a direct link to a signed WASM bundle. The manifest is fetched and verified before anything is installed.",
+        "description": "Provide a direct link to a compiled frontend or WASM plugin bundle. Its manifest and any supplied signature are verified before installation.",
         "fetchingManifest": "Fetching manifest…",
         "install": "Install",
         "installing": "Installing…",
@@ -30687,7 +30984,7 @@
         "signatureUrlLabel": "Signature URL (optional)",
         "signatureUrlPlaceholder": "https://example.com/plugin.zip.sig",
         "signatureVerified": "Signature verified",
-        "title": "Install signed WASM plugin",
+        "title": "Install plugin from URL",
         "trustAriaLabel": "Trust this author",
         "trustFirstTime": "Trust this author for future installs.",
         "trustRequiredError": "Trust this author before installing.",
@@ -40378,6 +40675,28 @@
             "redacting": "Redacting"
           },
           "progress": "{phase} · {progress}%",
+          "reading": {
+            "description": "Global defaults for all Agents. Character and session settings can override these values. Retrieval settings also apply to fast RAG when progressive reading is off.",
+            "enabled": "Enable progressive document reading",
+            "maxCalls": "Maximum reading tool calls",
+            "maxOutlineNodes": "Outline sections per call",
+            "maxReadChars": "Characters per read",
+            "ragTokenBudget": "Fast RAG token budget",
+            "retrievalStrategy": "Candidate retrieval strategy",
+            "saveFailed": "Could not save knowledge reading settings. Try again.",
+            "strategies": {
+              "hybrid": "Hybrid (keyword + vector)",
+              "keyword": "Keyword",
+              "vector": "Vector"
+            },
+            "summaryMaxChars": "Navigation summary characters",
+            "summaryProviderHint": "Optional provider ID registered by a plugin. Leave empty to use stored navigation summaries. Summaries help navigate; answers use original text.",
+            "summaryProviderId": "Navigation summary provider",
+            "summaryProviderPlaceholder": "Optional registered provider ID",
+            "title": "Agent knowledge reading defaults",
+            "topKPerBase": "Candidates per Knowledge Base",
+            "totalReadChars": "Total reading characters"
+          },
           "rebuild": "Rebuild index",
           "rebuildPartial": "The index was cleared, but {count, plural, =1 {# source} other {# sources}} could not be rebuilt.",
           "rebuildRequired": "The embedding dimension changed. Rebuild the Knowledge Base index with one embedding model.",
@@ -44256,8 +44575,8 @@
       }
     },
     "decisionProviders": {
-      "builtinRemote": "Remote decisions endpoint",
-      "description": "A System-1 decision model answers typed questions (yes/no, pick one, score) in one fast pass. The IM reply copilot uses it to read intent and risk and to rank drafted replies; plugins reach it through ctx.decisions.",
+      "builtinRemote": "Remote decision adapter",
+      "description": "Decision models answer typed questions (yes/no, pick one, score). Choose a native System-1 model or an AI SDK language-model adapter. The IM reply copilot uses validated models to judge conversations and rank replies; plugins use ctx.decisions.",
       "errors": {
         "aborted": "The request was cancelled.",
         "cors_unreachable": "The browser version cannot reach this endpoint. Use the desktop or mobile app.",
@@ -44273,7 +44592,10 @@
         "timeout": "The provider did not answer in time."
       },
       "http": {
+        "baseUrlHint": "API base URL. The adapter appends the request path; leave blank to use the default.",
         "clearKey": "Clear key",
+        "endpointUrlHint": "Full decision endpoint URL, including its request path. Leave blank to use the preset default.",
+        "estimatedHint": "Language-model decisions are estimates, not calibrated native probabilities. They have not been validated for the reply copilot; plugin decisions and connection tests remain available.",
         "key": "API key",
         "keyHint": "Get a key at {url}",
         "keyPlaceholder": "Paste the endpoint's API key",
@@ -44283,11 +44605,15 @@
         "modelRequired": "Model id (required)",
         "preset": "Endpoint",
         "presets": {
+          "anthropic": "Anthropic (language-model decisions)",
           "bocha": "Bocha Jev",
           "custom": "Custom URL",
+          "gateway": "AI Gateway (decision models)",
+          "google": "Google (language-model decisions)",
+          "openai": "OpenAI (language-model decisions)",
           "openrouter": "OpenRouter (typesafe/jev)",
           "typesafe": "TypeSafe",
-          "vercel": "Vercel AI Gateway",
+          "vercel": "Vercel AI Gateway (Jev)",
           "zen": "OpenCode Zen"
         },
         "problems": {
@@ -44324,9 +44650,12 @@
         "calibrated": "Calibrated probabilities",
         "copilotNotValidated": "Not validated for the reply copilot",
         "copilotValidated": "Validated for the reply copilot",
+        "estimated": "Language-model estimates",
         "local": "Runs on this device",
+        "native": "Native decision probabilities",
         "remote": "Remote service",
-        "uncalibrated": "Uncalibrated"
+        "uncalibrated": "Uncalibrated",
+        "unknown": "Probability semantics unknown"
       }
     },
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
@@ -54785,9 +55114,11 @@
     "sources": {
       "addSource": "Add source",
       "cancelAdd": "Cancel",
+      "characterLocation": "Characters {start}–{end}",
       "chunks": "{count, plural, =0 {0 chunks} =1 {1 chunk} other {# chunks}}",
       "contentHeading": "Source text",
       "contentTruncated": "Showing the first {count} characters.",
+      "contentWindow": "Showing original characters {start}–{end} around the citation.",
       "copied": "Copied",
       "copyMarkdown": "Copy as Markdown",
       "delete": "Delete",
@@ -54802,9 +55133,12 @@
       "filterEmpty": "No sources match this filter.",
       "filterLabel": "Filter sources by status",
       "headerCount": "Sources ({count})",
+      "historicalVersion": "This citation refers to an earlier document version. The original version is shown.",
       "imported": "imported {when}",
+      "lineLocation": "Lines {start}–{end}",
       "moreRows": "+{count} more rows",
       "noTables": "No tables detected in this source.",
+      "pageLocation": "Pages {start}–{end}",
       "pendingIngestBusy": "Queuing…",
       "pendingIngestCta": "Start ingest",
       "pendingIngestHint": "{count, plural, =1 {1 source waiting to ingest} other {# sources waiting to ingest}}",
@@ -62898,7 +63232,7 @@
       "instructionsPlaceholder": "For example: use pnpm, and run the tests before proposing a commit.",
       "knowledge": {
         "addFile": "Upload files",
-        "backendHint": "Retrieval needs a configured vector backend and embedding model (Twin settings). Without one, ingestion and retrieval are skipped.",
+        "backendHint": "Keyword retrieval is available without an embedding model. Semantic and hybrid retrieval use the configured vector backend and embedding model (Twin settings).",
         "cancel": "Cancel",
         "chunkCount": "{count, plural, one {# chunk} other {# chunks}}",
         "confirmRemoveFile": "Remove file",
@@ -62918,11 +63252,15 @@
         "removeFile": "Remove file",
         "removeFileDescription": "“{name}” and every chunk indexed from it will be removed from this workspace's knowledge base. A pasted note has no other copy.",
         "removeFileTitle": "Remove this file?",
+        "retrievalStrategy": "Retrieval strategy",
         "status": {
           "indexed": "Indexed",
           "outdated": "Outdated",
           "pending": "Pending"
         },
+        "strategyHybrid": "Semantic + keyword",
+        "strategyKeyword": "Keyword",
+        "strategyVector": "Semantic",
         "summary": "{files, plural, one {# file} other {# files}} · {chunks, plural, one {# chunk} other {# chunks}}",
         "title": "Knowledge base",
         "topK": "Chunks per message"
