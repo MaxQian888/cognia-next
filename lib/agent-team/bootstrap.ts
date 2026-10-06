@@ -61,7 +61,9 @@ export interface SquadBootstrapDeps {
   installAdapters?: () => Promise<void> | void
   backfillHistory?: (now: number) => Promise<LegacyRunBackfillOutcome>
   recoverInterrupts?: (now: number) => Promise<void>
-  recoverRuns?: () => Promise<Array<{ runId: string; status: "recovering" | "needs_input" }>>
+  recoverRuns?: (
+    signal: AbortSignal
+  ) => Promise<Array<{ runId: string; status: "recovering" | "needs_input" }>>
   /** Re-raise the `team_recovery` interrupt of every parked run that lacks one. */
   armRecoveries?: () => Promise<{ armed: number; alreadyPending: number }>
   onStage?: (stage: SquadBootstrapStage) => void
@@ -86,6 +88,7 @@ let generation = 0
  * removes the window: the previous bridge is gone before the next one starts.
  */
 let activeBridgeDisposer: (() => void) | undefined
+let activeRecoveryController: AbortController | undefined
 let readySignal: { promise: Promise<boolean>; resolve: (ready: boolean) => void } = signal()
 
 function signal() {
@@ -133,6 +136,8 @@ export function __resetSquadBootstrapForTesting(): void {
   readySignal = signal()
   activeBridgeDisposer?.()
   activeBridgeDisposer = undefined
+  activeRecoveryController?.abort()
+  activeRecoveryController = undefined
 }
 
 async function defaultWhenHydrated(): Promise<void> {
@@ -169,9 +174,9 @@ async function defaultRecoverInterrupts(now: number): Promise<void> {
   await recoverPendingRunInterrupts(now)
 }
 
-async function defaultRecoverRuns() {
+async function defaultRecoverRuns(signal: AbortSignal) {
   const { recoverDurableAgentTeams } = await import("@/lib/ai/agent/team/agent-team")
-  return recoverDurableAgentTeams()
+  return recoverDurableAgentTeams({ signal })
 }
 
 async function defaultArmRecoveries() {
@@ -187,6 +192,9 @@ export function runSquadBootstrap(deps: SquadBootstrapDeps = {}): SquadBootstrap
   const now = deps.now ?? Date.now
   const startedAt = now()
   const myGeneration = ++generation
+  activeRecoveryController?.abort()
+  const recoveryController = new AbortController()
+  activeRecoveryController = recoveryController
   const stale = () => myGeneration !== generation
   state = "starting"
   readySignal = signal()
@@ -232,7 +240,8 @@ export function runSquadBootstrap(deps: SquadBootstrapDeps = {}): SquadBootstrap
       current = "recover"
       stage("recover")
       await (deps.recoverInterrupts ?? defaultRecoverInterrupts)(now())
-      const recovered = await (deps.recoverRuns ?? defaultRecoverRuns)()
+      if (stale()) return finish({ ok: false, failedStage: current, history })
+      const recovered = await (deps.recoverRuns ?? defaultRecoverRuns)(recoveryController.signal)
       if (stale()) return finish({ ok: false, failedStage: current, history, recovered })
       // After the coordinator's own pass, so a run it just parked is included.
       const recoveries = await (deps.armRecoveries ?? defaultArmRecoveries)()
@@ -248,6 +257,8 @@ export function runSquadBootstrap(deps: SquadBootstrapDeps = {}): SquadBootstrap
   return {
     done,
     dispose: () => {
+      recoveryController.abort()
+      if (activeRecoveryController === recoveryController) activeRecoveryController = undefined
       if (activeBridgeDisposer === disposeBridge) activeBridgeDisposer = undefined
       disposeBridge()
       if (!stale()) {

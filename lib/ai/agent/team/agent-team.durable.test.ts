@@ -28,7 +28,7 @@ const controlSquadTeam = jest.fn(async (_teamId: string, _action: string) => ({
 const getAgentTeamRun = jest.fn(async () => ({
   id: "run-1",
   teamId: "team-1",
-  status: "needs_input" as const,
+  status: "recovering",
 }))
 const getAgentTeamChildRun = jest.fn(async () => ({
   id: "child-1",
@@ -38,6 +38,23 @@ const getAgentTeamChildRun = jest.fn(async () => ({
 }))
 const setTeamStatus = jest.fn()
 const updateTask = jest.fn()
+const listPendingSquadReviews = jest.fn(
+  async () =>
+    [] as Array<{
+      id: string
+      reviewKind: string
+    }>
+)
+const openSquadReview = jest.fn()
+jest.mock("./gates/squad-review-gate", () => ({
+  listPendingSquadReviews: () => listPendingSquadReviews(),
+  openSquadReview: (...args: unknown[]) => openSquadReview(...args),
+  squadReviewRequestIdFromInterrupt: () => ({
+    runId: "run-1",
+    kind: "budget_extension",
+    instance: "crossing-1",
+  }),
+}))
 
 const team = { id: "team-1", status: "executing", config: {} } as AgentTeam
 
@@ -80,6 +97,7 @@ jest.mock("./squad/squad-lifecycle-runner", () => ({
 
 jest.mock("./squad/squad-control", () => ({
   controlSquadTeam: (teamId: string, action: string) => controlSquadTeam(teamId, action),
+  controlSquadRun: (runId: string, action: string) => controlSquadTeam(runId, action),
 }))
 
 import { agentTeamManager, recoverDurableAgentTeams } from "./agent-team"
@@ -87,7 +105,114 @@ import { agentTeamManager, recoverDurableAgentTeams } from "./agent-team"
 describe("durable AgentTeam manager", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    listPendingSquadReviews.mockResolvedValue([])
+    getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "team-1", status: "recovering" })
   })
+
+  it("keeps startup ready while a restored review waits, then checks readiness after approval", async () => {
+    recover.mockResolvedValueOnce([{ runId: "run-1", status: "recovering" as never }])
+    listPendingSquadReviews.mockResolvedValueOnce([
+      { id: "review-1", reviewKind: "budget_extension" },
+    ])
+    let approve!: (value: unknown) => void
+    openSquadReview.mockReturnValueOnce(
+      new Promise((resolve) => {
+        approve = resolve
+      })
+    )
+    await recoverDurableAgentTeams()
+    expect(openSquadReview).toHaveBeenCalled()
+    expect(guardSquadResume).not.toHaveBeenCalled()
+    expect(runSquadLifecycle).not.toHaveBeenCalled()
+
+    approve({ kind: "budget_extension", outcome: "approve", extraTokens: 25000 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(guardSquadResume).toHaveBeenCalledWith("team-1", "run-1")
+    expect(runSquadLifecycle).toHaveBeenCalledWith(expect.objectContaining(restoredInput))
+  })
+
+  it("pauses a refused restored review without re-entering work", async () => {
+    recover.mockResolvedValueOnce([{ runId: "run-1", status: "recovering" as never }])
+    listPendingSquadReviews.mockResolvedValueOnce([
+      { id: "review-1", reviewKind: "budget_extension" },
+    ])
+    openSquadReview.mockResolvedValueOnce({ kind: "budget_extension", outcome: "deny" })
+    await recoverDurableAgentTeams()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(controlSquadTeam).toHaveBeenCalledWith("run-1", "pause")
+    expect(guardSquadResume).not.toHaveBeenCalled()
+    expect(runSquadLifecycle).not.toHaveBeenCalled()
+  })
+
+  it("honors a pause during the restored run's readiness check", async () => {
+    recover.mockResolvedValueOnce([{ runId: "run-1", status: "recovering" as never }])
+    listPendingSquadReviews.mockResolvedValueOnce([
+      { id: "review-1", reviewKind: "budget_extension" },
+    ])
+    openSquadReview.mockResolvedValueOnce({ kind: "budget_extension", outcome: "approve" })
+    let finishGuard!: (result: { blocked: boolean; blockers: Array<{ code: string }> }) => void
+    guardSquadResume.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishGuard = resolve
+      })
+    )
+    await recoverDurableAgentTeams()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(guardSquadResume).toHaveBeenCalled()
+    getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "team-1", status: "paused" })
+    finishGuard({ blocked: false, blockers: [] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(runSquadLifecycle).not.toHaveBeenCalled()
+    expect(parkSquadRecovery).not.toHaveBeenCalled()
+  })
+
+  it.each(["review", "guard"])(
+    "parks unexpected %s failures instead of stranding recovery",
+    async (failure) => {
+      recover.mockResolvedValueOnce([{ runId: "run-1", status: "recovering" as never }])
+      listPendingSquadReviews.mockResolvedValueOnce([
+        { id: "review-1", reviewKind: "budget_extension" },
+      ])
+      if (failure === "review")
+        openSquadReview.mockRejectedValueOnce(new Error("review read failed"))
+      else {
+        openSquadReview.mockResolvedValueOnce({ kind: "budget_extension", outcome: "approve" })
+        guardSquadResume.mockRejectedValueOnce(new Error("readiness read failed"))
+      }
+      await recoverDurableAgentTeams()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(parkSquadRecovery).toHaveBeenCalledWith("run-1", "team-1", "reentry_failed")
+      expect(runSquadLifecycle).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["aborted", "cancelled", "paused"])(
+    "does not resume a %s run when its old review settles",
+    async (state) => {
+      recover.mockResolvedValueOnce([{ runId: "run-1", status: "recovering" as never }])
+      listPendingSquadReviews.mockResolvedValueOnce([
+        { id: "review-1", reviewKind: "budget_extension" },
+      ])
+      let approve!: (value: unknown) => void
+      openSquadReview.mockReturnValueOnce(
+        new Promise((resolve) => {
+          approve = resolve
+        })
+      )
+      const controller = new AbortController()
+      await recoverDurableAgentTeams({ signal: controller.signal })
+      expect(openSquadReview).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: controller.signal })
+      )
+      if (state === "aborted") controller.abort()
+      else getAgentTeamRun.mockResolvedValueOnce({ id: "run-1", teamId: "team-1", status: state })
+      approve({ kind: "budget_extension", outcome: "approve", extraTokens: 25000 })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(guardSquadResume).not.toHaveBeenCalled()
+      expect(runSquadLifecycle).not.toHaveBeenCalled()
+      expect(controlSquadTeam).not.toHaveBeenCalled()
+    }
+  )
 
   it("projects uncertain recovery as an operator input gate without replaying work", async () => {
     await expect(recoverDurableAgentTeams()).resolves.toEqual([
@@ -140,6 +265,17 @@ describe("durable AgentTeam manager", () => {
 
     await recoverDurableAgentTeams()
 
+    expect(parkSquadRecovery).toHaveBeenCalledWith("run-1", "team-1", "reentry_failed")
+  })
+
+  it("parks a lifecycle failure after it has claimed the recovering run", async () => {
+    recover.mockResolvedValueOnce([{ runId: "run-1", status: "recovering" as never }])
+    runSquadLifecycle.mockImplementationOnce(async () => {
+      getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "team-1", status: "running" })
+      throw new Error("execution failed")
+    })
+    await recoverDurableAgentTeams()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(parkSquadRecovery).toHaveBeenCalledWith("run-1", "team-1", "reentry_failed")
   })
 

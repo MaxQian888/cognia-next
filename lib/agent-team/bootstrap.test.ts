@@ -173,6 +173,24 @@ describe("runSquadBootstrap", () => {
     expect(first.disposeBridge).toHaveBeenCalledTimes(1)
   })
 
+  it("cancels account-owned recovery waiters on replacement and disposal", async () => {
+    const signals: AbortSignal[] = []
+    const recoverRuns = async (signal: AbortSignal) => {
+      signals.push(signal)
+      return []
+    }
+    const first = runSquadBootstrap(harness({ recoverRuns }).deps)
+    await first.done
+    expect(signals[0].aborted).toBe(false)
+    const second = runSquadBootstrap(harness({ recoverRuns }).deps)
+    await second.done
+    expect(signals[0].aborted).toBe(true)
+    first.dispose()
+    expect(signals[1].aborted).toBe(false)
+    second.dispose()
+    expect(signals[1].aborted).toBe(true)
+  })
+
   it("dispose of a superseded run does not touch the live run's bridge", async () => {
     const first = harness({ whenHydrated: () => new Promise<void>(() => {}) })
     const a = runSquadBootstrap(first.deps)

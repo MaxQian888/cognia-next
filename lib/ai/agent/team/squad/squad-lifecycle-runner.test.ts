@@ -110,6 +110,72 @@ beforeEach(() => {
 })
 
 describe("runSquadLifecycle", () => {
+  it("does not admit automatic recovery when a pause wins during dependency loading", async () => {
+    useAgentTeamStore.getState().upsertTeam(makeTeam({ status: "paused" }))
+    getAgentTeamRun
+      .mockResolvedValueOnce({
+        id: "run-1",
+        teamId: "t1",
+        status: "recovering",
+        executionConstraints: { version: 1, teamConfig: {} },
+      })
+      .mockResolvedValue({ id: "run-1", teamId: "t1", status: "paused" })
+    const run = jest.fn()
+    await expect(
+      runSquadLifecycle({ teamId: "t1", runId: "run-1", recovery: {} }, { run })
+    ).resolves.toMatchObject({
+      reason: "recovery_superseded",
+    })
+    expect(run).not.toHaveBeenCalled()
+    expect(useAgentTeamStore.getState().teams.t1.status).toBe("paused")
+  })
+
+  it("cancels recovery admission when its account is disposed during dependency loading", async () => {
+    useAgentTeamStore.getState().upsertTeam(makeTeam())
+    const controller = new AbortController()
+    const record = {
+      id: "run-1",
+      teamId: "t1",
+      status: "recovering",
+      executionConstraints: { version: 1, teamConfig: {} },
+    }
+    getAgentTeamRun.mockResolvedValueOnce(record).mockImplementationOnce(async () => {
+      controller.abort(new Error("account disposed"))
+      return record
+    })
+    const run = jest.fn()
+    await expect(
+      runSquadLifecycle(
+        { teamId: "t1", runId: "run-1", recovery: { signal: controller.signal } },
+        { run }
+      )
+    ).rejects.toThrow("account disposed")
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it("passes account cancellation into the admitted recovery lifecycle and skips old-account settlement", async () => {
+    useAgentTeamStore.getState().upsertTeam(makeTeam())
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "recovering",
+      executionConstraints: { version: 1, teamConfig: {} },
+    })
+    const controller = new AbortController()
+    const run = jest.fn(
+      async (_teamId: string, _deps: RunTeamLifecycleDeps, signal?: AbortSignal) => {
+        expect(signal).toBe(controller.signal)
+        controller.abort()
+        return { runId: "run-1", status: "cancelled" as const }
+      }
+    )
+    await runSquadLifecycle(
+      { teamId: "t1", runId: "run-1", recovery: { signal: controller.signal } },
+      { run }
+    )
+    expect(settleAgentTeamExecutionRun).not.toHaveBeenCalled()
+  })
+
   it("does not fill absent frozen authority fields from caller overrides", async () => {
     useAgentTeamStore.getState().upsertTeam(makeTeam())
     getAgentTeamRun.mockResolvedValue({

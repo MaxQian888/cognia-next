@@ -13,6 +13,7 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
 }))
 const recover = jest.fn()
 jest.mock("./durable/durable-runtime", () => ({ getDurableTeamCoordinator: () => ({ recover }) }))
+jest.mock("./gates/squad-review-gate", () => ({ listPendingSquadReviews: async () => [] }))
 const recoveryLifecycle = jest.fn()
 const restoreSquadRunInput = jest.fn()
 const parkSquadRecovery = jest.fn(async (..._args: unknown[]) => undefined)
@@ -194,7 +195,7 @@ describe("agentTeamManager.start", () => {
 describe("recoverDurableAgentTeams", () => {
   it("finishes recovery admission without awaiting a long recovered lifecycle", async () => {
     agentTeamManager.create(makeTeam())
-    getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "t1" })
+    getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "t1", status: "recovering" })
     recover.mockResolvedValue([{ runId: "run-1", status: "recovering" }])
     restoreSquadRunInput.mockResolvedValue({
       teamId: "t1",

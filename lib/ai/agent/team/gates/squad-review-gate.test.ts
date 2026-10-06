@@ -8,6 +8,7 @@ import { localConsoleActor, localConsoleOperatorIds } from "@/lib/execution/loca
 import type { ExecutionRunInterrupt, RunControlCommand } from "@/types/execution/run"
 import { createSquadRunRecords } from "../squad/squad-run-records"
 import {
+  armSquadReview,
   listPendingSquadReviews,
   openSquadReview,
   sanitizeDecision,
@@ -122,6 +123,45 @@ describe("squad review gate", () => {
     await notify(id)
     await expect(pending).resolves.toEqual({ kind: "plan", outcome: "approve" })
     expect((await listPendingSquadReviews(RUN)).length).toBe(0)
+  })
+
+  it("preserves a restored budget decision when its waiter opens the next recovery review", async () => {
+    const input = {
+      runId: RUN,
+      teamId: "team-1",
+      kind: "budget_extension" as const,
+      instance: "crossing-1",
+    }
+    const { interruptId } = await armSquadReview(input, deps)
+    // A restarted process reattaches the real durable waiter. Its next gate
+    // must not race the previous gate's resolution projection.
+    const continuation = openSquadReview(input).then(() =>
+      armSquadReview(
+        { runId: RUN, teamId: "team-1", kind: "team_recovery", instance: "missing-binding" },
+        deps
+      )
+    )
+    const run = await getDb().executionRuns.get(EXECUTION)
+    const result = await executeRunControlCommand(
+      controlCommand(
+        interruptId,
+        "approve",
+        { kind: "budget_extension", extraTokens: 25000 },
+        run!.currentRevision
+      ),
+      { operatorIds: [...localConsoleOperatorIds()] }
+    )
+    expect(result.accepted).toBe(true)
+    const recovery = await continuation
+    expect(await getDb().executionRunInterrupts.get(interruptId)).toMatchObject({
+      status: "approved",
+      decision: { kind: "budget_extension", outcome: "approve", extraTokens: 25000 },
+    })
+    expect((await getDb().executionRuns.get(EXECUTION))?.latestSnapshot).toMatchObject({
+      pendingInterrupt: { id: recovery.interruptId, type: "team_recovery" },
+      allowedActions: expect.arrayContaining(["approve", "deny"]),
+    })
+    expect(await getDb().actionReviewReceipts.count()).toBe(1)
   })
 
   it("delivers the typed payload and redacts plan feedback before persisting it", async () => {

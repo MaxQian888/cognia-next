@@ -244,6 +244,8 @@ export async function prepareSquadResume(teamId: string): Promise<{ remaining: n
 }
 
 export interface RunSquadLifecycleInput {
+  /** Automatic restart recovery must still own admission after awaited setup. */
+  recovery?: { signal?: AbortSignal }
   teamId: string
   /** The durable run id. Its records already exist. */
   runId: string
@@ -291,8 +293,11 @@ export async function runSquadLifecycle(
   input: RunSquadLifecycleInput,
   deps: RunSquadLifecycleDeps = {}
 ): Promise<RunTeamLifecycleResult> {
+  input.recovery?.signal?.throwIfAborted()
   const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+  input.recovery?.signal?.throwIfAborted()
   const persisted = await getAgentTeamRun(input.runId)
+  input.recovery?.signal?.throwIfAborted()
   if (persisted && persisted.teamId !== input.teamId)
     throw new Error("Squad run belongs to another team")
   if (persisted && isTerminalSquadRunStatus(persisted.status)) {
@@ -335,9 +340,11 @@ export async function runSquadLifecycle(
       runtimeDeps = await ensureConfiguredSquadRuntimeDeps()
     }
   }
+  input.recovery?.signal?.throwIfAborted()
   const run = deps.run ?? runTeamLifecycle
   const { startSquadRunSpan } = await import("./squad-telemetry")
   const admitted = await getAgentTeamRun(runId)
+  input.recovery?.signal?.throwIfAborted()
   if (admitted && isTerminalSquadRunStatus(admitted.status)) {
     return {
       runId,
@@ -348,6 +355,9 @@ export async function runSquadLifecycle(
     }
   }
   if (persisted && !admitted) return { runId, status: "failed", reason: "run_not_found" }
+  if (input.recovery && admitted?.status !== "recovering") {
+    return { runId, status: "failed", reason: "recovery_superseded" }
+  }
 
   // The store's `status` is a mirror of the durable run, written here and only
   // here (ADR-0169): surfaces read the run record, and the mirror exists so
@@ -365,35 +375,40 @@ export async function runSquadLifecycle(
     ...(input.traceId ? { traceId: input.traceId } : {}),
   })
 
-  const result = await run(teamId, {
-    runId,
-    storeReader: bindSquadStoreReader(persisted?.executionConstraints),
-    storeWriter: bindSquadStoreWriter(),
-    runLeadPlanning: runtimeDeps.runLeadPlanning,
-    ...(runtimeDeps.runLeadReview ? { runLeadReview: runtimeDeps.runLeadReview } : {}),
-    notifierDeps: runtimeDeps.notifierDeps,
-    ...(runtimeDeps.resolveTeamRepo ? { resolveTeamRepo: runtimeDeps.resolveTeamRepo } : {}),
-    ...(runtimeDeps.resolvePrObserveOctokit
-      ? { resolvePrObserveOctokit: runtimeDeps.resolvePrObserveOctokit }
-      : {}),
-    ...(runtimeDeps.runPrReview ? { runPrReview: runtimeDeps.runPrReview } : {}),
-    ...(input.origin ? { origin: input.origin as TeamRunOrigin } : {}),
-    ...(input.triggeredFrom ? { triggeredFrom: input.triggeredFrom } : {}),
-    ...(input.taskFilter ? { taskFilter: input.taskFilter } : {}),
-    ...(input.planApprovalDelegate ? { planApprovalDelegate: input.planApprovalDelegate } : {}),
-    ...(input.requirePlanApprovalFloor ? { requirePlanApprovalFloor: true } : {}),
-    ...(input.permissionCeiling ? { parentPermissionCeiling: input.permissionCeiling } : {}),
-    ...(input.sessionWorkingDir ? { sessionWorkingDir: input.sessionWorkingDir } : {}),
-    traceId: input.traceId ?? rootSpan.traceId,
-    // Manual "Run with ultracode" forces orchestration, an explicit normal run
-    // turns it off, omitted lets the team's autoMode decide.
-    ...(input.ultracode === true
-      ? { ultracodeOverride: "force" as const }
-      : input.ultracode === false
-        ? { ultracodeOverride: "off" as const }
+  const result = await run(
+    teamId,
+    {
+      runId,
+      storeReader: bindSquadStoreReader(persisted?.executionConstraints),
+      storeWriter: bindSquadStoreWriter(),
+      runLeadPlanning: runtimeDeps.runLeadPlanning,
+      ...(runtimeDeps.runLeadReview ? { runLeadReview: runtimeDeps.runLeadReview } : {}),
+      notifierDeps: runtimeDeps.notifierDeps,
+      ...(runtimeDeps.resolveTeamRepo ? { resolveTeamRepo: runtimeDeps.resolveTeamRepo } : {}),
+      ...(runtimeDeps.resolvePrObserveOctokit
+        ? { resolvePrObserveOctokit: runtimeDeps.resolvePrObserveOctokit }
         : {}),
-  })
+      ...(runtimeDeps.runPrReview ? { runPrReview: runtimeDeps.runPrReview } : {}),
+      ...(input.origin ? { origin: input.origin as TeamRunOrigin } : {}),
+      ...(input.triggeredFrom ? { triggeredFrom: input.triggeredFrom } : {}),
+      ...(input.taskFilter ? { taskFilter: input.taskFilter } : {}),
+      ...(input.planApprovalDelegate ? { planApprovalDelegate: input.planApprovalDelegate } : {}),
+      ...(input.requirePlanApprovalFloor ? { requirePlanApprovalFloor: true } : {}),
+      ...(input.permissionCeiling ? { parentPermissionCeiling: input.permissionCeiling } : {}),
+      ...(input.sessionWorkingDir ? { sessionWorkingDir: input.sessionWorkingDir } : {}),
+      traceId: input.traceId ?? rootSpan.traceId,
+      // Manual "Run with ultracode" forces orchestration, an explicit normal run
+      // turns it off, omitted lets the team's autoMode decide.
+      ...(input.ultracode === true
+        ? { ultracodeOverride: "force" as const }
+        : input.ultracode === false
+          ? { ultracodeOverride: "off" as const }
+          : {}),
+    },
+    ...(input.recovery?.signal ? ([input.recovery.signal] as const) : ([] as const))
+  )
 
+  if (input.recovery?.signal?.aborted) return result
   await settleSquadRun(teamId, runId, result, runtimeDeps, persisted?.executionConstraints)
   return result
 }

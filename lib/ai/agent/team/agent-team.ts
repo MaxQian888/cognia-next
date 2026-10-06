@@ -18,6 +18,7 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { loggers } from "@cognia/logging"
 import type { AgentTeam, AgentTeamTask } from "@/types/agent/agent-team"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
 import type { TeamRunOrigin } from "./gates/gate-policy"
@@ -71,18 +72,21 @@ export interface AgentTeamManager {
 }
 
 /** Rebuild durable queues after a restart and replay only safe checkpoints. */
-export async function recoverDurableAgentTeams(): Promise<
-  Array<{ runId: string; status: "recovering" | "needs_input" }>
-> {
+export async function recoverDurableAgentTeams(
+  options: { signal?: AbortSignal } = {}
+): Promise<Array<{ runId: string; status: "recovering" | "needs_input" }>> {
+  if (options.signal?.aborted) return []
   const [{ getDurableTeamCoordinator }, { getAgentTeamRun }] = await Promise.all([
     import("./durable/durable-runtime"),
     import("@/lib/db/agent-team-runtime"),
   ])
+  if (options.signal?.aborted) return []
   const outcomes = await getDurableTeamCoordinator().recover()
+  if (options.signal?.aborted) return outcomes
   await Promise.all(
     outcomes.map(async (outcome) => {
       const run = await getAgentTeamRun(outcome.runId)
-      if (!run) return
+      if (!run || options.signal?.aborted) return
       const team = useAgentTeamStore.getState().getTeam(run.teamId)
       if (!team) return
       if (outcome.status === "needs_input") {
@@ -91,6 +95,9 @@ export async function recoverDurableAgentTeams(): Promise<
         await ensureTeamRecoveryInterrupt(outcome.runId).catch(() => undefined)
         return
       }
+      const { listPendingSquadReviews, openSquadReview, squadReviewRequestIdFromInterrupt } =
+        await import("./gates/squad-review-gate")
+      const pending = await listPendingSquadReviews(outcome.runId)
       const {
         guardSquadResume,
         prepareSquadResume,
@@ -99,24 +106,85 @@ export async function recoverDurableAgentTeams(): Promise<
         restoreSquadRunInput,
         parkSquadRecovery,
       } = await import("./squad/squad-lifecycle-runner")
-      const guard = await guardSquadResume(team.id, outcome.runId)
-      if (guard.blocked) {
-        outcome.status = "needs_input"
+      const stillRecovering = async () => {
+        if (options.signal?.aborted) return false
+        const current = await getAgentTeamRun(outcome.runId)
+        return !options.signal?.aborted && current?.status === "recovering"
+      }
+      const parkFailedRecovery = async (lifecycleStarted = false) => {
+        if (options.signal?.aborted) return
+        try {
+          const current = await getAgentTeamRun(outcome.runId)
+          if (
+            options.signal?.aborted ||
+            !current ||
+            (current.status !== "recovering" && !(lifecycleStarted && current.status === "running"))
+          )
+            return
+          await parkSquadRecovery(outcome.runId, team.id, "reentry_failed")
+          outcome.status = "needs_input"
+        } catch {
+          if (!options.signal?.aborted) {
+            loggers.agent.error("Failed to park interrupted Squad recovery", {
+              runId: outcome.runId,
+            })
+          }
+        }
+      }
+      const reenter = async () => {
+        if (!(await stillRecovering())) return
+        const guard = await guardSquadResume(team.id, outcome.runId)
+        if (guard.blocked) {
+          outcome.status = "needs_input"
+          return
+        }
+        if (!(await stillRecovering())) return
+        const restored = await restoreSquadRunInput(team.id, outcome.runId)
+        if (!restored) {
+          outcome.status = "needs_input"
+          return
+        }
+        if (!(await stillRecovering())) return
+        await prepareSquadResume(team.id)
+        // Readiness and restore can await host state. A Pause/Stop that won
+        // while they were pending owns the run now, not this old continuation.
+        if (!(await stillRecovering())) return
+        void runSquadLifecycle({
+          ...restored,
+          taskFilter: resumeTaskFilter,
+          recovery: { signal: options.signal },
+        }).catch(() => parkFailedRecovery(true))
+      }
+      if (pending.length > 0) {
+        // A persisted human question still owns the next step. Re-entry must
+        // not replace it with a readiness recovery before the person answers.
+        // The bootstrap stays ready while the existing durable gate waits.
+        void (async () => {
+          for (const review of pending) {
+            const target = squadReviewRequestIdFromInterrupt(review)
+            if (!target || target.kind === "team_recovery" || options.signal?.aborted) return
+            const decision = await openSquadReview({
+              ...target,
+              teamId: team.id,
+              signal: options.signal,
+            })
+            if (options.signal?.aborted) return
+            const current = await getAgentTeamRun(outcome.runId)
+            if (!current || current.status !== "recovering") return
+            if (decision.outcome !== "approve") {
+              // No lifecycle survived to handle a refusal. Keep the decision
+              // durable and pause; only a new operator gesture may resume work.
+              const { controlSquadRun } = await import("./squad/squad-control")
+              if (!(await stillRecovering())) return
+              await controlSquadRun(outcome.runId, "pause")
+              return
+            }
+          }
+          await reenter()
+        })().catch(() => parkFailedRecovery())
         return
       }
-      const restored = await restoreSquadRunInput(team.id, outcome.runId)
-      if (!restored) {
-        outcome.status = "needs_input"
-        return
-      }
-      await prepareSquadResume(team.id)
-      // Bootstrap waits for reconciliation, never for recovered work or its gates.
-      void runSquadLifecycle({
-        ...restored,
-        taskFilter: resumeTaskFilter,
-      })
-        .catch(() => parkSquadRecovery(outcome.runId, team.id, "reentry_failed"))
-        .catch(() => undefined)
+      await reenter()
     })
   )
   return outcomes
