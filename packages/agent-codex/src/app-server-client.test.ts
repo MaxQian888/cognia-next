@@ -69,6 +69,7 @@ const processHost: AgentProcessHost = {
   spawn: (spec) => native.spawnExternalAgent(spec),
   send: (processId, message) => native.sendToExternalAgent(processId, message),
   kill: (processId) => native.killExternalAgent(processId),
+  commandExists: async () => true,
   onStdoutLine: (listener) =>
     native.onExternalAgentStdout((e) => listener({ processId: e.agentId, data: e.data })),
   onStdoutRaw: async () => () => {},

@@ -4,9 +4,10 @@ import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
   ExternalAgentMessage,
-} from "@/types/agent/external-agent"
-import { AiderCliClientAdapter } from "./aider-cli-client"
-import { agentInvoke, agentWriteTextFile } from "../../agent-transport"
+} from "@cognia/agent-contracts/external-agent"
+import type { AgentFileHost, AgentProcessHost } from "@cognia/agent-contracts/host"
+import { AiderCliClientAdapter, type AiderCliClientDeps } from "./cli-client"
+import { AIDER_CLI_EXECUTION_SEMANTICS } from "./manifest"
 
 const mockFiles = new Map<string, string>()
 const mockListeners = new Map<string, Set<(payload: unknown) => void>>()
@@ -19,46 +20,70 @@ const mockSpawned: Array<{
 }> = []
 let mockOnSpawn: (config: (typeof mockSpawned)[number]) => Promise<void> | void
 
-jest.mock("../../agent-transport", () => ({
-  supportsExternalAgents: () => true,
-  supportsAgentFs: () => true,
-  agentInvoke: jest.fn(async (name: string, args: Record<string, unknown>) => {
-    if (name === "check_command_exists") return true
-    if (name === "spawn_external_agent") {
-      const config = args.config as (typeof mockSpawned)[number]
-      mockSpawned.push(config)
-      await mockOnSpawn(config)
-      return config.id
-    }
-    if (name === "kill_external_agent") {
-      for (const callback of mockListeners.get("external-agent://exit") ?? [])
-        callback({ agentId: args.agentId, code: -1 })
-      return
-    }
-    throw new Error(`Unexpected command ${name}`)
-  }),
-  agentListen: jest.fn(async (event: string, callback: (payload: unknown) => void) => {
+function subscribe(event: string) {
+  return async (callback: (payload: { processId: string } & Record<string, unknown>) => void) => {
     let listeners = mockListeners.get(event)
     if (!listeners) {
       listeners = new Set()
       mockListeners.set(event, listeners)
     }
-    listeners.add(callback)
-    return () => {
-      listeners!.delete(callback)
+    // Fixtures emit the plane's `{ agentId }` payloads; the port speaks `processId`.
+    const listener = (payload: unknown) => {
+      const { agentId, ...rest } = payload as { agentId: string } & Record<string, unknown>
+      callback({ processId: agentId, ...rest })
     }
+    listeners.add(listener)
+    return () => {
+      listeners!.delete(listener)
+    }
+  }
+}
+
+const processHost = {
+  available: true,
+  commandExists: jest.fn(async () => true),
+  spawn: jest.fn(async (spec: (typeof mockSpawned)[number]) => {
+    mockSpawned.push(spec)
+    await mockOnSpawn(spec)
+    return spec.id
   }),
-  agentReadTextFile: jest.fn(async (file: string) => {
+  send: jest.fn(async () => {
+    throw new Error("Aider never writes to stdin")
+  }),
+  kill: jest.fn(async (processId: string) => {
+    for (const callback of mockListeners.get("external-agent://exit") ?? [])
+      callback({ agentId: processId, code: -1 })
+  }),
+  onStdoutLine: jest.fn(subscribe("external-agent://stdout")),
+  onStdoutRaw: jest.fn(subscribe("external-agent://stdout-raw")),
+  onStderr: jest.fn(subscribe("external-agent://stderr")),
+  onExit: jest.fn(subscribe("external-agent://exit")),
+} as unknown as jest.Mocked<AgentProcessHost>
+
+const fileHost = {
+  available: true,
+  isWithinRoot: (path: string, root: string) => path === root || path.startsWith(`${root}/`),
+  readText: jest.fn(async (file: string) => {
     if (!mockFiles.has(file)) throw new Error("ENOENT")
     return mockFiles.get(file)!
   }),
-  agentWriteTextFile: jest.fn(async (file: string, content: string) => {
+  writeText: jest.fn(async (file: string, content: string) => {
     mockFiles.set(file, content)
   }),
-  agentDeleteTextFile: jest.fn(async (file: string) => {
+  delete: jest.fn(async (file: string) => {
     mockFiles.delete(file)
   }),
-}))
+} as unknown as jest.Mocked<AgentFileHost & Record<string, jest.Mock>>
+
+/** Stands in for the host's PII gate: refuses anything naming an e-mail address. */
+const outboundGate = (payload: unknown) => !/[\w.]+@example\.com/.test(JSON.stringify(payload))
+
+const deps: AiderCliClientDeps = {
+  processHost,
+  fileHost,
+  outboundGate,
+  redactDiagnostic: (text) => text.replace(/sk-[A-Za-z0-9]+/g, "[REDACTED]"),
+}
 
 const cwd = "/workspace/project"
 const config: ExternalAgentConfig = {
@@ -92,7 +117,7 @@ function complete(id: string, text = "Updated", code = 0) {
   emit("external-agent://exit", { agentId: id, code })
 }
 async function connected(settings = config) {
-  const adapter = new AiderCliClientAdapter()
+  const adapter = new AiderCliClientAdapter(deps)
   await adapter.connect(settings)
   return adapter
 }
@@ -138,7 +163,7 @@ it("uses the official one-shot CLI and keeps instructions out of argv and enviro
   )
   expect(JSON.stringify(mockSpawned)).not.toContain("Update the greeting")
   expect([...mockFiles].find(([name]) => name.endsWith(".prompt"))?.[1]).toBe("")
-  expect(agentWriteTextFile).toHaveBeenCalledWith(
+  expect(fileHost.writeText).toHaveBeenCalledWith(
     expect.stringMatching(/\.prompt$/),
     expect.stringContaining("Use descriptive names"),
     [cwd]
@@ -179,7 +204,7 @@ it("preserves semantic context and PII-checks session files after history recove
   })
   expect((await adapter.execute(session.id, message())).success).toBe(true)
   expect(mockSpawned[0].args).toContain(`${cwd}/context.txt`)
-  expect(agentWriteTextFile).toHaveBeenCalledWith(
+  expect(fileHost.writeText).toHaveBeenCalledWith(
     expect.stringMatching(/\.prompt$/),
     expect.stringContaining("Keep the existing API"),
     [cwd]
@@ -239,13 +264,13 @@ it("rejects CLI switches that could replace lifecycle or permission controls", a
     ["--yes"],
     ["--model"],
   ]) {
-    const adapter = new AiderCliClientAdapter()
+    const adapter = new AiderCliClientAdapter(deps)
     await expect(
       adapter.connect({ ...config, process: { ...config.process!, args } })
     ).rejects.toThrow(/Unsupported/)
   }
   await expect(
-    new AiderCliClientAdapter().connect({
+    new AiderCliClientAdapter(deps).connect({
       ...config,
       process: { ...config.process!, env: { AIDER_LOAD: "commands.txt" } },
     })
@@ -256,7 +281,7 @@ it("treats slash commands as model task text rather than local CLI commands", as
   const adapter = await connected()
   const session = await adapter.createSession()
   await adapter.execute(session.id, message("/run touch forbidden.txt"), { permissionMode: "plan" })
-  expect(agentWriteTextFile).toHaveBeenCalledWith(
+  expect(fileHost.writeText).toHaveBeenCalledWith(
     expect.stringMatching(/\.prompt$/),
     "Task request:\n\n/run touch forbidden.txt",
     [cwd]
@@ -342,7 +367,7 @@ it("cancels the process group and retains a reusable session", async () => {
   await waitForSpawn()
   await adapter.cancel(session.id)
   expect((await result).success).toBe(false)
-  expect(agentInvoke).toHaveBeenCalledWith("kill_external_agent", { agentId: mockSpawned[0].id })
+  expect(processHost.kill).toHaveBeenCalledWith(mockSpawned[0].id)
   mockOnSpawn = (spawn) => complete(spawn.id)
   expect((await adapter.execute(session.id, message())).success).toBe(true)
 })
@@ -394,7 +419,7 @@ it("reaps an abandoned streaming iterator", async () => {
   expect((first.value as ExternalAgentEvent).type).toBe("message_start")
   await waitForSpawn()
   await iterator.return?.()
-  expect(agentInvoke).toHaveBeenCalledWith("kill_external_agent", { agentId: mockSpawned[0].id })
+  expect(processHost.kill).toHaveBeenCalledWith(mockSpawned[0].id)
 })
 
 it("refuses a zero exit when Aider logged only a provider error and no assistant reply", async () => {
@@ -412,4 +437,62 @@ it("refuses a zero exit when Aider logged only a provider error and no assistant
   const result = await adapter.execute(session.id, message())
   expect(result.success).toBe(false)
   expect(result.error).toContain("without a completed model response")
+})
+
+describe("host ports", () => {
+  it("declares per-turn execution semantics", () => {
+    expect(new AiderCliClientAdapter(deps).semantics).toBe(AIDER_CLI_EXECUTION_SEMANTICS)
+    expect(AIDER_CLI_EXECUTION_SEMANTICS).toMatchObject({
+      cancel: { scope: "turn", reconnectsAfterCancel: false },
+      resume: "history-replay",
+      processModel: "per-turn",
+      approvals: "none",
+    })
+  })
+
+  it("refuses a host without a process plane or workspace files", async () => {
+    for (const unavailable of [
+      { ...deps, processHost: { ...processHost, available: false } },
+      { ...deps, fileHost: { ...fileHost, available: false } },
+    ]) {
+      const adapter = new AiderCliClientAdapter(unavailable)
+      await expect(adapter.connect(config)).rejects.toThrow(/process host with workspace file/)
+      expect(adapter.connectionStatus).toBe("error")
+    }
+  })
+
+  it("probes the bare command name and refuses a missing CLI", async () => {
+    processHost.commandExists.mockResolvedValueOnce(false)
+    const adapter = new AiderCliClientAdapter(deps)
+    await expect(
+      adapter.connect({ ...config, process: { ...config.process!, command: "/opt/bin/aider" } })
+    ).rejects.toThrow(/not installed/)
+    expect(processHost.commandExists).toHaveBeenCalledWith("aider")
+  })
+
+  it("kills and fails a turn the host registered under another process id", async () => {
+    const adapter = await connected()
+    const session = await adapter.createSession()
+    processHost.spawn.mockImplementationOnce(async (spec) => {
+      mockSpawned.push(spec as (typeof mockSpawned)[number])
+      return "host-renamed"
+    })
+    const result = await adapter.execute(session.id, message())
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("host-renamed")
+    expect(processHost.kill).toHaveBeenCalledWith("host-renamed")
+    expect([...mockListeners.values()].every((listeners) => listeners.size === 0)).toBe(true)
+  })
+
+  it("passes process diagnostics through the host's redactor", async () => {
+    const adapter = await connected()
+    const session = await adapter.createSession()
+    mockOnSpawn = (spawn) => {
+      emit("external-agent://stderr", { agentId: spawn.id, data: "invalid key sk-abc123" })
+      emit("external-agent://exit", { agentId: spawn.id, code: 2 })
+    }
+    const result = await adapter.execute(session.id, message())
+    expect(result.error).toContain("[REDACTED]")
+    expect(JSON.stringify(result)).not.toContain("sk-abc123")
+  })
 })

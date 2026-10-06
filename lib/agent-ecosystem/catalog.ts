@@ -9,6 +9,7 @@
  * hang `sessionSourceIds` on.
  */
 
+import { aiderManifest } from "@cognia/agent-aider/manifest"
 import { codexManifest } from "@cognia/agent-codex/manifest"
 import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
 
@@ -178,19 +179,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     subagentSourceId: null,
     memoryAgentId: null,
   },
-  {
-    // Aider runs through its official CLI; imported histories remain per repo.
-    id: "aider",
-    runtimeIds: ["aider"],
-    sessionSourceIds: ["aider"],
-    migrationVendor: null,
-    vendorRootKeys: [],
-    configRootKey: null,
-    probeRootKeys: [],
-    pluginEcosystem: null,
-    subagentSourceId: null,
-    memoryAgentId: null,
-  },
+  aiderManifest.ecosystem,
   {
     // Launchable, but no public session format to import. ADR-0062 records
     // Kiro, Droid and DeepSeek Harness as deliberately out of import scope.

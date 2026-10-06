@@ -80,6 +80,8 @@ export function createProcessPlaneHost(
     kill: async (processId) => {
       await plane.invoke<unknown>("kill_external_agent", { agentId: processId })
     },
+    commandExists: async (command) =>
+      (await plane.invoke<unknown>("check_command_exists", { command })) === true,
     onStdoutLine: output("external-agent://stdout"),
     onStdoutRaw: output("external-agent://stdout-raw"),
     onStderr: output("external-agent://stderr"),

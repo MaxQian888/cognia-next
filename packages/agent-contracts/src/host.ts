@@ -61,11 +61,45 @@ export interface AgentProcessHost {
   send(processId: string, message: string): Promise<void>
   /** Bounded process-group termination and reaping. */
   kill(processId: string): Promise<void>
+  /**
+   * True when `command` (a bare executable name) resolves on this host. A
+   * probe, not a grant: spawning it still passes the host's allowlist.
+   */
+  commandExists(command: string): Promise<boolean>
   onStdoutLine(listener: (event: AgentProcessOutputEvent) => void): Promise<Unsubscribe>
   onStdoutRaw(listener: (event: AgentProcessOutputEvent) => void): Promise<Unsubscribe>
   onStderr(listener: (event: AgentProcessOutputEvent) => void): Promise<Unsubscribe>
   onExit(listener: (event: AgentProcessExitEvent) => void): Promise<Unsubscribe>
 }
+
+/**
+ * Workspace file plane. Every operation names the roots it may touch; the host
+ * resolves the path against them and refuses traversal and symlink escapes, so
+ * an integration cannot widen its reach by choosing a path. Paths are
+ * absolute, in the host's own separator convention.
+ */
+export interface AgentFileHost {
+  /** False when this host has no workspace file access (web). */
+  readonly available: boolean
+  /**
+   * Lexical containment under the host's path semantics (separators, case
+   * folding). Integrations use it to reject a path before handing it to an
+   * agent process, which would otherwise open it outside this plane.
+   */
+  isWithinRoot(path: string, root: string): boolean
+  readText(path: string, allowedRoots: readonly string[]): Promise<string>
+  /** Creates missing parent directories inside the root. */
+  writeText(path: string, content: string, allowedRoots: readonly string[]): Promise<void>
+  /** Deletes one file. */
+  delete(path: string, allowedRoots: readonly string[]): Promise<void>
+}
+
+/**
+ * The host's credential redactor for text an integration captured from a
+ * process (stderr, error messages) before it is shown or stored. Not the
+ * outbound PII gate: this rewrites diagnostics, the gate refuses sends.
+ */
+export type AgentDiagnosticRedactor = (text: string) => string
 
 /**
  * Resolves the environment one configuration launches with: its own

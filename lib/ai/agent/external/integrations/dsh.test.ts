@@ -39,6 +39,7 @@ describe("DeepSeek Harness host wiring", () => {
       spawn: jest.fn(),
       send: jest.fn(),
       kill: jest.fn(),
+      commandExists: jest.fn(),
       onStdoutLine: jest.fn(),
       onStdoutRaw: jest.fn(),
       onStderr: jest.fn(),

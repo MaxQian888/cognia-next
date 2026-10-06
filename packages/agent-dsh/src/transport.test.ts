@@ -153,6 +153,7 @@ function fixture(envOverrides: Record<string, string> = {}, agentId = "agent-1")
     kill: async (id) => {
       await invoke("kill_external_agent", { agentId: id })
     },
+    commandExists: async () => true,
     onStdoutLine: subscribe("stdout"),
     onStdoutRaw: subscribe("stdout-raw"),
     onStderr: subscribe("stderr"),

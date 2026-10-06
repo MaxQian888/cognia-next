@@ -6,8 +6,8 @@ description: 如何把一个外部 agent 集成做成包——manifest、基于�
 # 新增 Agent
 
 一个集成就是一个了解某个运行时协议与格式的包。它从不直接触碰机器，从不决定策略，
-也从不存储任何东西。`@cognia/agent-dsh` 与 `@cognia/agent-codex` 是参考实现，
-照着它们的布局做即可。
+也从不存储任何东西。`@cognia/agent-dsh`、`@cognia/agent-codex` 与
+`@cognia/agent-aider` 是参考实现，照着它们的布局做即可。
 
 ```mermaid
 flowchart LR
@@ -77,8 +77,8 @@ importer），在根 `tsconfig.json` 中加入 `@cognia/agent-<id>` 的 paths，
 | `processModel` | `shared`、`per-session`、`per-turn` 或 `remote` |
 
 这些不是装饰。若某会话的取消需要重连，管理器会把它从缓存中移除
-（`lib/ai/agent/external/manager.ts:4210`）；Agent Team 也从不把结束会话的取消报告为
-暂停（`ExternalAgentManager.cancelRetiresSession`，`manager.ts:4682`）。什么都不声明的
+（`lib/ai/agent/external/manager.ts` 中的 `cancel`）；Agent Team 也从不把结束会话的取消报告为
+暂停（`ExternalAgentManager.cancelRetiresSession`）。什么都不声明的
 适配器会被视为 `UNDECLARED_EXECUTION_SEMANTICS`：取消可能导致进程退出，不能恢复也
 不能分叉，审批一律询问。
 
@@ -87,11 +87,14 @@ importer），在根 `tsconfig.json` 中加入 `@cognia/agent-<id>` 的 paths，
 继承 `BaseProtocolAdapter`（`packages/agent-runtime-kit/src/base-adapter.ts:123`），
 所有面向机器的依赖都从构造函数传入：
 
-- `AgentProcessHost`（`packages/agent-contracts/src/host.ts:51`）：spawn、写入、终止，
-  以及订阅 stdout、stderr 与退出事件；
-- `AgentOutboundGate`（`host.ts:111`）：**必需**，适配器发出的每个提示或载荷都要经过它；
-- 运行时需要时，再传入 `AgentLaunchEnvironmentResolver`、`AgentApprovalPolicy` 与
-  `AgentLogger`。
+- `AgentProcessHost`（`packages/agent-contracts/src/host.ts:51`）：spawn、写入、终止、
+  探测命令，以及订阅 stdout、stderr 与退出事件；
+- `AgentFileHost`（`host.ts:81`）：运行时把状态放在工作区文件中时使用。每次读、写、删除都
+  要指明允许的根目录；`isWithinRoot` 会在 agent 进程有机会绕过文件平面打开某个路径之前
+  拒绝它（例如 Aider 的聊天文件与上下文文件）；
+- `AgentOutboundGate`（`host.ts:145`）：**必需**，适配器发出的每个提示或载荷都要经过它；
+- 运行时需要时，再传入 `AgentLaunchEnvironmentResolver`、`AgentApprovalPolicy`、
+  `AgentDiagnosticRedactor`（对进程输出做凭证脱敏）与 `AgentLogger`。
 
 实现 `ExternalAgentAdapterCore`。可选能力（恢复、分叉、转向、会话模型、模型目录、认证、
 压缩、会话列表）是带守卫的独立能力（`supportsResume(adapter)` 等），只有运行时确实支持
@@ -125,8 +128,10 @@ const acme = manager.getAdapterExtension(agentId, acmeControls)
 ## 6. 在宿主中注册
 
 1. **适配器工厂**：`lib/ai/agent/external/integrations/<id>.ts`（附测试）用应用的进程
-   宿主（`createAgentTransportProcessHost`）和作为出站闸门的 `hasNoLeakingPiiDeep`
-   构建工厂（参见 `integrations/dsh.ts`）。管理器按协议注册它（`manager.ts:357`–`365`）。
+   宿主（`createAgentTransportProcessHost`）、需要时的文件宿主
+   （`createAgentTransportFileHost`）、作为出站闸门的 `hasNoLeakingPiiDeep` 以及作为诊断
+   脱敏器的 `redactCredentialText` 构建工厂（参见 `integrations/dsh.ts` 与
+   `integrations/aider.ts`）。管理器在 `registerBuiltinProtocolAdapters` 中按协议注册它。
 2. **运行时与预设行**：`protocol/external-agent-runtimes.json`，由
    `pnpm audit:external-agent-runtimes` 检查。
 3. **授权单独处理**：spawn 白名单与审批默认值在

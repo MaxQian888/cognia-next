@@ -85,7 +85,7 @@ import {
   ProtocolAdapterRegistry,
   type SessionCreateOptions,
 } from "./protocol-adapter"
-import { AiderCliClientAdapter } from "./runtimes/aider/aider-cli-client"
+import { AiderCliClientAdapter } from "@cognia/agent-aider/cli-client"
 import { PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
 import { AcpClientAdapter } from "./runtimes/acp/acp-client"
 import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"

@@ -7,7 +7,7 @@ import path from "node:path"
 import os from "node:os"
 import { randomBytes } from "node:crypto"
 import { selectCliAgentWorkspace } from "@/cli/src/runtime/external/host-branch"
-import { AiderCliClientAdapter } from "@/lib/ai/agent/external/runtimes/aider/aider-cli-client"
+import { createAiderCliAdapter } from "@/lib/ai/agent/external/integrations/aider"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 import type { ExternalAgentMessage } from "@/types/agent/external-agent"
 
@@ -60,7 +60,7 @@ async function main() {
     defaultPermissionMode: "bypassPermissions",
     timeout: 120_000,
   })
-  const adapter = new AiderCliClientAdapter()
+  const adapter = createAiderCliAdapter()
   check(config, "The Aider preset is unavailable")
   try {
     selectCliAgentWorkspace(workspace)

@@ -97,23 +97,24 @@ ignored; `resumeInFlightRuns` does not skip `__team__:` rows.
 
 ### Status (2026-10-06)
 
-| Row                                                                                               | State                                                                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| codex                                                                                             | Moved: `@cognia/agent-codex` (`./manifest`, `./app-server-client`, `./history`); ecosystem row exported by the manifest; resume binding uses the ecosystem's presets and persists `agentConfigId`. Cfg/Sub/Mem stay in ADR-0107 (scope decision, Phase 2) |
-| deepseek-harness                                                                                  | Moved: `@cognia/agent-dsh`; `process`-scoped cancel honoured by the manager and the team coordinator                                                                                                                                                      |
-| plugin adapters                                                                                   | Done: `adaptPluginProtocolAdapter` (`@cognia/agent-runtime-kit/plugin-compat`) checks the core when a plugin adapter is created                                                                                                                           |
-| claude-code, opencode, pi, aider, a2a / remote, devin, kimi, the ACP-row ecosystems, continue-dev | **Not moved — blocked.** Their runtime clients, `manager.ts`, `agent-transport.ts`, `lifecycle/service.ts`, `protocol/external-agent-runtimes.json` and `cli/src/runtime/external/*` carry another workstream's uncommitted changes                       |
-| External-agent wire/config types, `ProtocolAdapter`, peer/codecs/reclaim                          | Moved to contracts and the runtime kit; app paths re-export                                                                                                                                                                                               |
-| Host indirection                                                                                  | Process host, logger and outbound gate ports implemented for the app (`lib/ai/agent/external/host/`); CLI port injection and deleting the esbuild aliases are blocked with Phase 3                                                                        |
-| ACP client, manager `instanceof` branches                                                         | Not done (Phase 3, blocked); the Codex branch is replaced by `codexAppServerExtension`                                                                                                                                                                    |
-| Neutral tool kernel                                                                               | Neutral in place (`sidecar/src/tools/kernel/`) and gated; not extracted into a package (§3 scope decision)                                                                                                                                                |
-| Claude SDK coupling in the AI SDK rail                                                            | Cut: host, AI SDK engine and neutral tools load without the SDK; wire and shared runtime modules carry no SDK types; `vendorIsolation` + `allowedIn` gate                                                                                                 |
-| Team orchestration                                                                                | Run state, ledgers, coordinator, scheduling and recovery moved to `@cognia/agent-orchestration` behind ports; Team↔Workflow cycle broken; gates, teammate pool, wave runner and synthesized workflow stay in the app (§3 scope decision)                  |
+| Row                                                                                        | State                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| codex                                                                                      | Moved: `@cognia/agent-codex` (`./manifest`, `./app-server-client`, `./history`); ecosystem row exported by the manifest; resume binding uses the ecosystem's presets and persists `agentConfigId`. Cfg/Sub/Mem stay in ADR-0107 (scope decision, Phase 2) |
+| deepseek-harness                                                                           | Moved: `@cognia/agent-dsh`; `process`-scoped cancel honoured by the manager and the team coordinator                                                                                                                                                      |
+| plugin adapters                                                                            | Done: `adaptPluginProtocolAdapter` (`@cognia/agent-runtime-kit/plugin-compat`) checks the core when a plugin adapter is created                                                                                                                           |
+| aider                                                                                      | Moved: `@cognia/agent-aider` (`./manifest`, `./cli-client`, `./history`); new `AgentFileHost` port and `commandExists` probe; per-turn semantics declared; ecosystem row from the manifest                                                                |
+| claude-code, opencode, pi, a2a / remote, devin, kimi, the ACP-row ecosystems, continue-dev | Not moved yet (Phase 3 in progress). Their files carry another workstream's uncommitted cross-stack changes; those move with the code as uncommitted edits                                                                                                |
+| External-agent wire/config types, `ProtocolAdapter`, peer/codecs/reclaim                   | Moved to contracts and the runtime kit; app paths re-export                                                                                                                                                                                               |
+| Host indirection                                                                           | Process, file, logger, outbound-gate and redactor ports implemented for the app (`lib/ai/agent/external/host/`); CLI port injection and deleting the esbuild aliases follow in Phase 3                                                                    |
+| ACP client, manager `instanceof` branches                                                  | Not done yet (Phase 3); the Codex branch is replaced by `codexAppServerExtension`                                                                                                                                                                         |
+| Neutral tool kernel                                                                        | Neutral in place (`sidecar/src/tools/kernel/`) and gated; not extracted into a package (§3 scope decision)                                                                                                                                                |
+| Claude SDK coupling in the AI SDK rail                                                     | Cut: host, AI SDK engine and neutral tools load without the SDK; wire and shared runtime modules carry no SDK types; `vendorIsolation` + `allowedIn` gate                                                                                                 |
+| Team orchestration                                                                         | Run state, ledgers, coordinator, scheduling and recovery moved to `@cognia/agent-orchestration` behind ports; Team↔Workflow cycle broken; gates, teammate pool, wave runner and synthesized workflow stay in the app (§3 scope decision)                  |
 
 Drift items: fixed — plugin adapters missing core members (wrapper; the Python proxy still
 forwards seven members, and the wrapper now reports or supplies the rest), native resume
 persisting the instance id, headless squad bootstrap, workflow lease-renew result,
-`__team__:` resume skip. Open (Phase 3, blocked) — Goose row, OpenCode V1 dead client, CLI
+`__team__:` resume skip. Open (Phase 3, in progress) — Goose row, OpenCode V1 dead client, CLI
 spawn allowlist gate and `cline` duplicate, `pluginEcosystem` nulls, Pi session dir readers,
 OpenCode SQLite path lists.
 
@@ -201,7 +202,9 @@ Declared by each runtime implementation, refined per preset where the catalog al
 (`presetRefinements`). Verified values: ACP turn/shared; Codex app-server turn/shared,
 fork at turn boundary; DSH **process**/per-session, no resume/fork, profile-fixed approvals;
 OpenCode V2 turn/shared (+owned per session); Pi turn/per-session (max 4), relaunch resume,
-native fork; Aider process/per-turn, history-replay resume, no approvals; A2A turn(task)/remote.
+native fork; Aider turn/per-turn (killing the per-turn process ends exactly that turn and the
+session lives in files, so a `process` scope would wrongly retire it), history-replay resume,
+no approvals; A2A turn(task)/remote.
 Orchestration and UI read `semantics` instead of `instanceof` or protocol strings.
 
 ### 4.3 Plugin ABI compatibility
@@ -300,8 +303,15 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
 - Plugin ABI wrapper (§4.3) and Python proxy completeness.
 - Accept: every matrix row has a package home; manager has no `instanceof` vendor classes;
   `lib/agent-ecosystem` derives from manifests (Goose included); CLI allowlist gated.
-- Status: partial. Plugin ABI wrapper done (`c932f3275`). Everything else is blocked by
-  another workstream's uncommitted changes in the files it must move (see §2 status).
+- Status: in progress. Plugin ABI wrapper done (`c932f3275`). Aider done: `@cognia/agent-aider`
+  over the process host plus a new `AgentFileHost`; the prompt-gate decoding moved to
+  `@cognia/agent-runtime-kit/prompt-gate` (the app's `outbound-prompt-pii` binds it to the PII
+  gate). The remaining files carry another workstream's uncommitted changes that span Rust
+  commands not yet committed (`fs_write_workspace_file` `encoding`,
+  `external_agent_session_query/mutate`); committing the TypeScript half would leave `dev`
+  calling commands it lacks. Those changes are carried to the new package locations as
+  uncommitted edits (backup tag `backup/adr0217-phase3-foreign-20261006`); each package
+  commit is built from the committed content.
 
 ### Phase 4 — tools and engines
 

@@ -1,4 +1,3 @@
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type {
   AcpPermissionMode,
   AcpPermissionResponse,
@@ -7,20 +6,17 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
   ExternalAgentSession,
-} from "@/types/agent/external-agent"
-import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
-import { redactCredentialText } from "@/lib/security/redact-credentials"
-import {
-  agentDeleteTextFile,
-  agentInvoke,
-  agentListen,
-  agentReadTextFile,
-  agentWriteTextFile,
-  supportsAgentFs,
-  supportsExternalAgents,
-} from "../../agent-transport"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
-import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
+} from "@cognia/agent-contracts/external-agent"
+import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
+import type {
+  AgentDiagnosticRedactor,
+  AgentFileHost,
+  AgentOutboundGate,
+  AgentProcessHost,
+} from "@cognia/agent-contracts/host"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
+import { AIDER_CLI_EXECUTION_SEMANTICS, AIDER_CLI_PROTOCOL } from "./manifest"
 
 const SESSION_ID = /^aider-[0-9a-f-]{36}$/
 const VALUE_ARGS = new Set([
@@ -76,22 +72,47 @@ interface SessionState {
   turn?: Turn
 }
 
+/** What the host hands the Aider adapter. Every member is required. */
+export interface AiderCliClientDeps {
+  /** Runs the per-turn CLI process (`raw` framing) and probes its command. */
+  processHost: AgentProcessHost
+  /** Session state files, workspace context and path containment. */
+  fileHost: AgentFileHost
+  /** Every prompt, instruction, file context and restored history passes it. */
+  outboundGate: AgentOutboundGate
+  /** Credential redaction for process output and error text. */
+  redactDiagnostic: AgentDiagnosticRedactor
+}
+
 /**
  * Official one-shot CLI, with a separate Aider history per Cognia session.
  * Aider owns editing and model calls; Cognia owns process lifetime and history
  * identity. CLI output stays text: it is never fabricated into tool approvals.
- * No Node imports enter the renderer; every process and file goes through the
- * existing desktop/headless/CLI host boundary.
+ * Every process and file goes through the host's ports, so the same adapter
+ * runs in the desktop renderer, the CLI and the headless brain.
  */
 export class AiderCliClientAdapter extends BaseProtocolAdapter {
-  readonly protocol = "aider-cli"
+  readonly protocol = AIDER_CLI_PROTOCOL
+  readonly semantics = AIDER_CLI_EXECUTION_SEMANTICS
   private readonly states = new Map<string, SessionState>()
+  private readonly processHost: AgentProcessHost
+  private readonly files: AgentFileHost
+  private readonly outboundGate: AgentOutboundGate
+  private readonly redactDiagnostic: AgentDiagnosticRedactor
+
+  constructor(deps: AiderCliClientDeps) {
+    super()
+    this.processHost = deps.processHost
+    this.files = deps.fileHost
+    this.outboundGate = deps.outboundGate
+    this.redactDiagnostic = deps.redactDiagnostic
+  }
 
   async connect(config: ExternalAgentConfig): Promise<void> {
     await this.disconnect()
     this._connectionStatus = "connecting"
     try {
-      if (!supportsExternalAgents() || !supportsAgentFs())
+      if (!this.processHost.available || !this.files.available)
         throw new Error("Aider requires a process host with workspace file access")
       if (config.transport !== "stdio" || !config.process?.command)
         throw new Error("Aider requires a configured CLI command over stdio")
@@ -100,7 +121,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
         if (key.startsWith("AIDER_") && !MODEL_ENV.has(key))
           throw new Error(`Unsupported Aider environment option: ${key}`)
       const command = config.process.command.split(/[\\/]/).pop()!
-      if (!(await agentInvoke<boolean>("check_command_exists", { command })))
+      if (!(await this.processHost.commandExists(command)))
         throw new Error("Aider CLI is not installed or its command is unavailable")
       this._config = config
       this._capabilities = { streaming: true, mcpTools: false }
@@ -146,22 +167,22 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       session,
       preamble: preamble(options),
       contextFiles: Array.isArray(options.context?.files)
-        ? options.context.files.map((file) => workspaceFile(String(file), cwd))
+        ? options.context.files.map((file) => workspaceFile(this.files, String(file), cwd))
         : [],
       model: textValue(options.metadata?.selectedModel),
     }
-    if (!hasNoLeakingPiiDeep(record.preamble))
+    if (!this.outboundGate(record.preamble))
       throw new Error("Aider instructions blocked by the PII gate")
     const files = stateFiles(cwd, session.id)
     // Initialize with the host's symlink-aware writes before the CLI can open
     // these paths. Never use the repository's shared .aider.chat.history.md.
     try {
-      await agentWriteTextFile(files.chat, "", [cwd])
-      await agentWriteTextFile(files.input, "", [cwd])
-      await agentWriteTextFile(files.prompt, "", [cwd])
+      await this.files.writeText(files.chat, "", [cwd])
+      await this.files.writeText(files.input, "", [cwd])
+      await this.files.writeText(files.prompt, "", [cwd])
       await this.persist(record)
     } catch (error) {
-      await Promise.allSettled(Object.values(files).map((file) => agentDeleteTextFile(file, [cwd])))
+      await Promise.allSettled(Object.values(files).map((file) => this.files.delete(file, [cwd])))
       throw error
     }
     this.states.set(session.id, { record })
@@ -195,15 +216,15 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
     }
     const cwd = this.workspace(options.cwd)
     const files = stateFiles(cwd, sessionId)
-    const raw: unknown = JSON.parse(await agentReadTextFile(files.manifest, [cwd]))
-    if (!isSessionRecord(raw, this._config!.id, cwd, sessionId))
+    const raw: unknown = JSON.parse(await this.files.readText(files.manifest, [cwd]))
+    if (!isSessionRecord(this.files, raw, this._config!.id, cwd, sessionId))
       throw new Error("Aider history does not belong to this agent and workspace")
     // Validate state paths and all restored provider-visible history before a
     // new process is allowed to load it.
-    const history = await agentReadTextFile(files.chat, [cwd])
-    await agentReadTextFile(files.input, [cwd])
-    await agentReadTextFile(files.prompt, [cwd])
-    if (!hasNoLeakingPiiDeep([history, raw.preamble]))
+    const history = await this.files.readText(files.chat, [cwd])
+    await this.files.readText(files.input, [cwd])
+    await this.files.readText(files.prompt, [cwd])
+    if (!this.outboundGate([history, raw.preamble]))
       throw new Error("Aider history blocked by the PII gate")
     raw.session.createdAt = new Date(raw.session.createdAt)
     raw.session.lastActivityAt = new Date(raw.session.lastActivityAt)
@@ -232,9 +253,9 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
     await this.cancel(sessionId)
     // Manifest first: a partially failed deletion can never reopen stale state.
     const files = stateFiles(state.record.cwd, sessionId)
-    await agentDeleteTextFile(files.manifest, [state.record.cwd])
+    await this.files.delete(files.manifest, [state.record.cwd])
     for (const file of [files.chat, files.input, files.prompt])
-      await agentDeleteTextFile(file, [state.record.cwd])
+      await this.files.delete(file, [state.record.cwd])
     this.states.delete(sessionId)
     this._sessions.delete(sessionId)
   }
@@ -261,7 +282,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
     if (!turn) return
     turn.cancelled = true
     await turn.spawnedOrFailed
-    if (turn.spawned && !turn.ended) await agentInvoke("kill_external_agent", { agentId: turn.id })
+    if (turn.spawned && !turn.ended) await this.processHost.kill(turn.id)
     await turn.finished
   }
 
@@ -339,7 +360,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       .filter(([key, value]) => /KEY|TOKEN|SECRET|PASSWORD/i.test(key) && value)
       .map(([, value]) => value)
     const redact = (value: string) =>
-      redactCredentialText(
+      this.redactDiagnostic(
         secrets.reduce((text, secret) => text.split(secret).join("[REDACTED]"), value)
       )
     try {
@@ -349,7 +370,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       for (const block of message.content) {
         if (block.type === "text") texts.push(block.text)
         else if (block.type === "file") {
-          filenames.push(workspaceFile(block.path, record.cwd))
+          filenames.push(workspaceFile(this.files, block.path, record.cwd))
           if (block.content !== undefined) {
             if (block.encoding === "base64")
               throw new Error("Aider CLI does not accept base64 file attachments")
@@ -358,11 +379,11 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
         } else throw new Error(`Aider CLI does not support ${block.type} prompt content`)
       }
       for (const file of options.files ?? []) {
-        filenames.push(workspaceFile(file.path, record.cwd))
+        filenames.push(workspaceFile(this.files, file.path, record.cwd))
         if (file.content !== undefined) texts.push(`File context (${file.path}):\n${file.content}`)
       }
       for (const file of options.context?.files ?? [])
-        filenames.push(workspaceFile(file, record.cwd))
+        filenames.push(workspaceFile(this.files, file, record.cwd))
       const instructions = preamble({
         ...options,
         context: options.context as Record<string, unknown> | undefined,
@@ -370,12 +391,12 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       const payload = [record.preamble, instructions, ...texts].filter(Boolean).join("\n\n")
       if (!payload.trim()) throw new Error("Aider prompt must contain text")
       const existingFiles = await Promise.all(
-        [...new Set(filenames)].map((file) => agentReadTextFile(file, [record.cwd]))
+        [...new Set(filenames)].map((file) => this.files.readText(file, [record.cwd]))
       )
-      const history = await agentReadTextFile(files.chat, [record.cwd])
+      const history = await this.files.readText(files.chat, [record.cwd])
       if (
-        !hasNoLeakingExternalAgentPromptInput(message) ||
-        !hasNoLeakingPiiDeep([payload, filenames, existingFiles, history])
+        !promptInputPassesGate(message, this.outboundGate) ||
+        !this.outboundGate([payload, filenames, existingFiles, history])
       )
         throw new Error("Aider prompt, file context, or history blocked by the PII gate")
       const mode = permissionMode(options.permissionMode ?? record.session.permissionMode)
@@ -421,7 +442,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       ]
       // Aider treats a leading slash as a local command even in --message-file.
       // Route all Cognia input as task text, including requests quoting /run.
-      await agentWriteTextFile(files.prompt, `Task request:\n\n${payload}`, [record.cwd])
+      await this.files.writeText(files.prompt, `Task request:\n\n${payload}`, [record.cwd])
       if (turn.cancelled) return
       const messageId = this.generateMessageId()
       record.session.status = "executing"
@@ -455,30 +476,27 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       // Observe all channels before spawning: a short-lived CLI may finish
       // before spawn's RPC response arrives.
       unlisten.push(
-        await agentListen<{ agentId: string; data: string }>(
-          "external-agent://stdout-raw",
-          (event) => {
-            if (event.agentId !== turn.id) return
-            try {
-              const bytes = Uint8Array.from(atob(event.data), (char) => char.charCodeAt(0))
-              receivedBytes += bytes.length
-              if (receivedBytes > 16 * 1024 * 1024)
-                throw new Error("Aider output exceeded the 16 MiB turn limit")
-              stream(decoder.decode(bytes, { stream: true }))
-            } catch (failure) {
-              rejectExit(failure instanceof Error ? failure : new Error(String(failure)))
-            }
+        await this.processHost.onStdoutRaw((event) => {
+          if (event.processId !== turn.id) return
+          try {
+            const bytes = Uint8Array.from(atob(event.data), (char) => char.charCodeAt(0))
+            receivedBytes += bytes.length
+            if (receivedBytes > 16 * 1024 * 1024)
+              throw new Error("Aider output exceeded the 16 MiB turn limit")
+            stream(decoder.decode(bytes, { stream: true }))
+          } catch (failure) {
+            rejectExit(failure instanceof Error ? failure : new Error(String(failure)))
           }
-        )
-      )
-      unlisten.push(
-        await agentListen<{ agentId: string; data: string }>("external-agent://stderr", (event) => {
-          if (event.agentId === turn.id) stderr = redact(stderr + event.data).slice(-8192)
         })
       )
       unlisten.push(
-        await agentListen<{ agentId: string; code: number }>("external-agent://exit", (event) => {
-          if (event.agentId === turn.id) {
+        await this.processHost.onStderr((event) => {
+          if (event.processId === turn.id) stderr = redact(stderr + event.data).slice(-8192)
+        })
+      )
+      unlisten.push(
+        await this.processHost.onExit((event) => {
+          if (event.processId === turn.id) {
             turn.exited = true
             turn.spawned = false
             resolveExit(event.code)
@@ -488,20 +506,23 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       // Install a rejection handler immediately, even if the spawn RPC is
       // still pending while an output-limit failure arrives.
       void exited.catch(() => {})
-      await agentInvoke("spawn_external_agent", {
-        config: {
-          id: turn.id,
-          command: this._config!.process!.command,
-          args,
-          cwd: record.cwd,
-          env: this._config!.process!.env ?? {},
-          framing: "raw",
-        },
+      const registered = await this.processHost.spawn({
+        id: turn.id,
+        command: this._config!.process!.command,
+        args,
+        cwd: record.cwd,
+        env: this._config!.process!.env ?? {},
+        framing: "raw",
       })
+      // Output listeners filter on the id chosen before spawn: a host that
+      // registered the child under another id would starve them.
+      if (registered !== turn.id) {
+        await this.processHost.kill(registered)
+        throw new Error(`Host registered the Aider process as ${registered}, not ${turn.id}`)
+      }
       turn.spawned = !turn.exited
       turn.settleSpawn()
-      if (turn.cancelled && turn.spawned)
-        await agentInvoke("kill_external_agent", { agentId: turn.id })
+      if (turn.cancelled && turn.spawned) await this.processHost.kill(turn.id)
       timeout = setTimeout(
         () => {
           timedOut = true
@@ -515,7 +536,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       if (!success && !turn.cancelled)
         throw new Error(`Aider CLI exited with code ${code}${stderr ? `: ${stderr}` : ""}`)
       if (success) {
-        const updatedHistory = await agentReadTextFile(files.chat, [record.cwd])
+        const updatedHistory = await this.files.readText(files.chat, [record.cwd])
         // Aider 0.86.2 can catch provider errors and exit zero. Its chat log
         // distinguishes quoted diagnostics from assistant content, so a zero
         // exit without any new assistant reply is a failure, never success.
@@ -537,7 +558,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       if (timeout) clearTimeout(timeout)
       if (turn.spawned) {
         try {
-          await agentInvoke("kill_external_agent", { agentId: turn.id })
+          await this.processHost.kill(turn.id)
         } catch (failure) {
           success = false
           error ??= redact(String(failure))
@@ -545,7 +566,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       }
       for (const off of unlisten) off()
       try {
-        await agentWriteTextFile(files.prompt, "", [record.cwd])
+        await this.files.writeText(files.prompt, "", [record.cwd])
         record.session.lastActivityAt = new Date()
         record.session.status = error ? "error" : "active"
         record.session.error = error
@@ -592,7 +613,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
   }
 
   private persist(record: SessionRecord): Promise<void> {
-    return agentWriteTextFile(
+    return this.files.writeText(
       stateFiles(record.cwd, record.session.id).manifest,
       JSON.stringify(record),
       [record.cwd]
@@ -640,9 +661,9 @@ function permissionMode(mode?: AcpPermissionMode): "plan" | "bypassPermissions" 
   throw new Error(`Aider CLI cannot enforce permission mode ${mode}`)
 }
 
-function workspaceFile(file: string, cwd: string): string {
+function workspaceFile(files: AgentFileHost, file: string, cwd: string): string {
   const absolute = file.startsWith("/") ? file : `${cwd}/${file}`
-  if (file.includes("\0") || !isPathUnderRoot(absolute, cwd))
+  if (file.includes("\0") || !files.isWithinRoot(absolute, cwd))
     throw new Error("Aider file is outside the session workspace")
   return absolute
 }
@@ -693,6 +714,7 @@ function preamble(options: SessionCreateOptions): string {
 }
 
 function isSessionRecord(
+  files: AgentFileHost,
   value: unknown,
   agentId: string,
   cwd: string,
@@ -708,7 +730,7 @@ function isSessionRecord(
     (record.contextFiles === undefined ||
       (Array.isArray(record.contextFiles) &&
         record.contextFiles.every(
-          (file) => typeof file === "string" && isPathUnderRoot(file, cwd)
+          (file) => typeof file === "string" && files.isWithinRoot(file, cwd)
         ))) &&
     record.session?.id === id &&
     record.session.agentId === agentId &&

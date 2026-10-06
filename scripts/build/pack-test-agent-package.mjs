@@ -77,13 +77,17 @@ const SPECS = {
       const options: SessionCreateOptions = { cwd: "/w", permissionMode: "plan" }
       const scope: "turn" | "session" | "process" = executionSemanticsOf(adapter).cancel.scope
       const spawned: Promise<string> = host.spawn({ id: "a", command: "agent" })
+      const probed: Promise<boolean> = host.commandExists("agent")
+      import type { AgentFileHost } from "@cognia/agent-contracts/host"
+      declare const files: AgentFileHost
+      const read: Promise<string> = files.readText("/w/a", ["/w"])
       const event: ExternalAgentEvent["type"] = "done"
       import type { ParsedHistorySession, HistoryPart } from "@cognia/agent-contracts/history"
       import type { CanonicalAgentEvent } from "@cognia/agent-contracts/canonical-event"
       declare const parsed: ParsedHistorySession
       const firstPart: HistoryPart | undefined = parsed.messages[0]?.parts[0]
       const canonical: CanonicalAgentEvent["kind"] = "text-delta"
-      export { options, scope, spawned, event, firstPart, canonical }
+      export { options, scope, spawned, probed, read, event, firstPart, canonical }
     `,
   },
   "agent-runtime-kit": {
@@ -95,6 +99,7 @@ const SPECS = {
       "./spawn-reclaim",
       "./history",
       "./plugin-compat",
+      "./prompt-gate",
     ],
     dataOnly: ["./history"],
     runtimeModules: ["base-adapter", "json-rpc-peer", "lf-frame-decoder", "spawn-reclaim"],
@@ -115,6 +120,11 @@ const SPECS = {
       let contract = false
       try { adaptPluginProtocolAdapter({}, "p:x") } catch (error) { contract = error.code === "adapter_contract_violation" }
       if (!contract) throw new Error("plugin compat")
+      import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
+      const svg = { type: "image", source: { type: "base64", mediaType: "image/svg+xml", data: Buffer.from("secret").toString("base64") } }
+      const seen = []
+      promptInputPassesGate({ id: "m", role: "user", timestamp: new Date(), content: [svg] }, (p) => { seen.push(p); return true })
+      if (seen[0]?.decodedTextContent?.[0] !== "secret") throw new Error("prompt gate")
     `,
     types: `
       import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
@@ -209,6 +219,44 @@ const SPECS = {
       const parsed: ParsedHistorySession = parseCodexRollout("", "r", { redactText: (t) => t })
       const summary: HistorySessionSummary | null = summarizeCodexRollout("", "r")
       export { adapter, status, parsed, summary }
+    `,
+  },
+  "agent-aider": {
+    entries: [".", "./manifest", "./history", "./cli-client"],
+    dataOnly: ["./manifest", "./history"],
+    runtimeModules: ["cli-client", "base-adapter", "prompt-gate"],
+    smoke: `
+      import { aiderManifest, AIDER_CLI_EXECUTION_SEMANTICS } from "@cognia/agent-aider/manifest"
+      import { AiderCliClientAdapter } from "@cognia/agent-aider/cli-client"
+      if (aiderManifest.ecosystem.id !== "aider") throw new Error("manifest")
+      const unavailable = { available: false }
+      const adapter = new AiderCliClientAdapter({ processHost: unavailable, fileHost: unavailable, outboundGate: () => true, redactDiagnostic: (t) => t })
+      if (adapter.semantics !== AIDER_CLI_EXECUTION_SEMANTICS) throw new Error("semantics")
+      let refused = false
+      try {
+        await adapter.connect({ id: "a", name: "a", protocol: "aider-cli", transport: "stdio", process: { command: "aider" } })
+      } catch (error) { refused = /process host/.test(String(error)) }
+      if (!refused) throw new Error("connect must refuse without a process host")
+      import { parseAiderHistory } from "@cognia/agent-aider/history"
+      const parsed = parseAiderHistory("# aider chat started at 2026-01-01 00:00:00\\n#### hi\\nhello", "h.md")
+      if (parsed.messages.length !== 2 || parsed.messages[0]?.parts[0]?.type !== "text") throw new Error("history")
+    `,
+    types: `
+      import { AiderCliClientAdapter } from "@cognia/agent-aider/cli-client"
+      import type { AgentFileHost, AgentProcessHost } from "@cognia/agent-contracts/host"
+      import type { ProtocolAdapter } from "@cognia/agent-contracts/adapter"
+      declare const processHost: AgentProcessHost
+      declare const fileHost: AgentFileHost
+      const adapter: ProtocolAdapter = new AiderCliClientAdapter({
+        processHost,
+        fileHost,
+        outboundGate: () => true,
+        redactDiagnostic: (text) => text,
+      })
+      import { parseAiderHistory } from "@cognia/agent-aider/history"
+      import type { ParsedHistorySession } from "@cognia/agent-contracts/history"
+      const parsed: ParsedHistorySession = parseAiderHistory("", "h.md")
+      export { adapter, parsed }
     `,
   },
   "agent-orchestration": {

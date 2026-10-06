@@ -1057,6 +1057,15 @@ importers:
         specifier: 0.1.0
         version: link:../agent-host-win32-x64
 
+  packages/agent-aider:
+    dependencies:
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@cognia/agent-runtime-kit':
+        specifier: workspace:*
+        version: link:../agent-runtime-kit
+
   packages/agent-codex:
     dependencies:
       '@cognia/agent-contracts':

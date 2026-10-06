@@ -5,7 +5,8 @@ agent identity (`./ecosystem`), the external-agent wire, session and config
 types (`./external-agent`, `./external-agent-lifecycle`), the adapter core and
 its optional capabilities (`./adapter`), typed vendor extensions
 (`./adapter-extension`), execution semantics (`./semantics`), host ports
-(`./host`), the neutral history transcript (`./history`) and the canonical
+(`./host`: process plane, workspace files, launch environment, approval policy,
+outbound gate, diagnostic redactor, logger), the neutral history transcript (`./history`) and the canonical
 event and session contracts.
 
 Types plus a few pure helpers; no runtime dependency (the ACP SDK is a

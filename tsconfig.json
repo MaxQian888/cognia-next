@@ -162,6 +162,8 @@
       "@cognia/agent-runtime-kit/*": ["./packages/agent-runtime-kit/src/*"],
       "@cognia/agent-dsh": ["./packages/agent-dsh/src/index.ts"],
       "@cognia/agent-dsh/*": ["./packages/agent-dsh/src/*"],
+      "@cognia/agent-aider": ["./packages/agent-aider/src/index.ts"],
+      "@cognia/agent-aider/*": ["./packages/agent-aider/src/*"],
       "@cognia/agent-codex": ["./packages/agent-codex/src/index.ts"],
       "@cognia/agent-codex/*": ["./packages/agent-codex/src/*"],
       "@cognia/agent-orchestration": ["./packages/agent-orchestration/src/index.ts"],

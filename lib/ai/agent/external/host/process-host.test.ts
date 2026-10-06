@@ -44,6 +44,16 @@ describe("createProcessPlaneHost", () => {
     ])
   })
 
+  it("probes commands through the plane and reads only a literal true as present", async () => {
+    const { plane, invoke } = recordingPlane()
+    const host = createProcessPlaneHost(plane, () => true)
+    invoke.mockResolvedValueOnce(true as never)
+    await expect(host.commandExists("aider")).resolves.toBe(true)
+    invoke.mockResolvedValueOnce("yes" as never)
+    await expect(host.commandExists("aider")).resolves.toBe(false)
+    expect(invoke).toHaveBeenCalledWith("check_command_exists", { command: "aider" })
+  })
+
   it("resolves with the id the host registered, defaulting to the requested one", async () => {
     const { plane, invoke } = recordingPlane()
     const host = createProcessPlaneHost(plane, () => true)

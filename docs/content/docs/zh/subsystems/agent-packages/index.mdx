@@ -23,7 +23,7 @@ ADR-0217 把这些代码移到契约之后：包拥有协议、格式和编排�
         ▲                      spawn reclaim, content blocks, history builders
 @cognia/agent-<integration>    ./manifest, the runtime client(s), ./history when the
         ▲                      runtime keeps its own session store
-        │                      (today: agent-dsh, agent-codex)
+        │                      (today: agent-dsh, agent-codex, agent-aider)
 host (app, CLI, headless)      registers integrations, implements the ports, owns policy,
                                PII, sandbox, persistence and the mapping into its own rows
 
@@ -42,10 +42,11 @@ flowchart BT
   kit["@cognia/agent-runtime-kit"] --> contracts
   dsh["@cognia/agent-dsh"] --> kit
   codex["@cognia/agent-codex"] --> kit
+  aider["@cognia/agent-aider"] --> kit
   orch["@cognia/agent-orchestration"]
   subgraph host["应用宿主"]
     manager["ExternalAgentManager<br/>lib/ai/agent/external"]
-    ports["端口实现<br/>process host · PII gate · logger"]
+    ports["端口实现<br/>process host · file host · PII gate · logger"]
     team["Agent Team 运行时<br/>lib/ai/agent/team"]
     dexie["dexieTeamRunStore<br/>lib/db/agent-team-runtime.ts"]
   end
@@ -57,6 +58,7 @@ flowchart BT
   end
   manager --> dsh
   manager --> codex
+  manager --> aider
   ports --> contracts
   team --> orch
   dexie --> orch
@@ -69,8 +71,9 @@ flowchart BT
 | 包 | 入口 | 依赖 |
 | --- | --- | --- |
 | `@cognia/agent-contracts` | `./ecosystem`、`./adapter`、`./adapter-extension`、`./semantics`、`./host`、`./history`、`./external-agent`、`./canonical-event`、… | 仅类型依赖 `@agentclientprotocol/sdk` |
-| `@cognia/agent-runtime-kit` | `./base-adapter`、`./json-rpc-peer`、`./history`、`./plugin-compat`、… | contracts |
+| `@cognia/agent-runtime-kit` | `./base-adapter`、`./json-rpc-peer`、`./history`、`./prompt-gate`、`./plugin-compat`、… | contracts |
 | `@cognia/agent-dsh` | `./manifest`、`./sdk-client`、`./transport`、`./managed-launch`、… | contracts、runtime kit |
+| `@cognia/agent-aider` | `./manifest`、`./cli-client`、`./history` | contracts、runtime kit |
 | `@cognia/agent-codex` | `./manifest`、`./app-server-client`、`./history`、`./mcp-config`、… | contracts、runtime kit |
 | `@cognia/agent-orchestration` | `./coordinator`、`./store`、`./memory-store`、`./store-contract`、`./decision-ledger`、`./evidence`、… | 无 |
 
@@ -94,7 +97,7 @@ flowchart BT
 | --- | --- |
 | Agent 身份 | 复用现有来源：`lib/agent-ecosystem`（行由集成 manifest 导出）、`protocol/external-agent-runtimes.json`（运行时与预设）、`ExternalAgentConfig.id`（实例）。没有新增注册表。 |
 | 协议、会话存储格式、执行语义 | 集成包 |
-| 进程平面、凭证、审批策略、PII 闸门、日志 | 宿主，通过 `@cognia/agent-contracts/host` 中的端口 |
+| 进程平面、工作区文件、凭证、审批策略、PII 闸门、诊断脱敏、日志 | 宿主，通过 `@cognia/agent-contracts/host` 中的端口 |
 | 把中立转录映射为存储消息 | 宿主（`lib/session-import/history-to-stored.ts`） |
 | 团队运行状态 | 宿主的 `TeamRunStore`（应用中为 Dexie）；协调器不持有任何跨重启保留的状态 |
 | 引擎选择 | 宿主进程（`COGNIA_SIDECAR_ENGINES`） |
@@ -107,8 +110,9 @@ flowchart BT
 | DeepSeek Harness | 完成：`@cognia/agent-dsh`；管理器与团队协调器都遵守进程级取消 |
 | Codex | 完成：`@cognia/agent-codex`（app-server 适配器、历史读取器）；原生恢复绑定其配置 |
 | 插件适配器 | 完成：创建时即按适配器核心检查（`./plugin-compat`） |
-| ACP、Pi、OpenCode、Claude Code、Aider、A2A、Devin、Kimi 以及 ACP 行生态 | **未迁移。** 被阻塞：它们的运行时客户端、管理器、传输层和运行时目录都带有另一工作流未提交的修改 |
-| 由 manifest 生成目录行、CLI 端口注入、移除管理器 `instanceof` | 未完成（同一阻塞） |
+| Aider | 完成：`@cognia/agent-aider`（基于进程与文件端口的 CLI 适配器、历史读取器）；声明了每回合一个进程的语义，因此取消后的 Aider 会话会被保留而不是被退役 |
+| ACP、Pi、OpenCode、Claude Code、A2A、Devin、Kimi 以及 ACP 行生态 | 尚未迁移（阶段 3 进行中） |
+| 由 manifest 生成目录行、CLI 端口注入、移除管理器 `instanceof` | 尚未完成（阶段 3） |
 | 引擎与工具 | 完成：AI SDK 引擎与宿主无需 Claude Agent SDK 即可运行；wire 与共享运行时模块不再引用它，连类型也不引用 |
 | 编排 | 运行状态、账本、协调器、调度与恢复已完成；团队闸门、队友池、波次运行器与合成工作流仍留在应用中（它们以应用的 `AgentTeam` 模型为类型） |
 

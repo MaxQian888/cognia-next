@@ -1,28 +1,29 @@
 // Aider session-history source (ADR-0062, T3).
 //
-// On disk: `.aider.chat.history.md` — a Markdown transcript aider APPENDS to,
-// per repo (no central location, so picker-only). Format:
-//   `# aider chat started at YYYY-MM-DD HH:MM:SS`  → a session boundary
-//   `#### <text>`                                  → a user turn line
-//   `> <text>`                                     → aider's own notes (skipped)
-//   anything else                                  → assistant prose
-// Aider records no structured tool calls, so fidelity is naturally capped at
-// text turns. One file → one imported (continuous) session.
+// The chat-history format itself is read by `@cognia/agent-aider/history`
+// (ADR-0217): this module owns only what the host decides — that Aider
+// histories are picker-only (Aider appends to `<repo>/.aider.chat.history.md`,
+// so there is no machine-wide location to walk) and how a parsed transcript
+// becomes app rows and an imported session graph.
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import type { StoredMessage } from "@cognia/agent-config-types"
-import { buildMessage, buildSession, deriveTitle, importedSessionId, textPart } from "../to-parts"
+import {
+  AIDER_HISTORY_FORMAT,
+  AIDER_HISTORY_LOSSES,
+  detectAiderHistory,
+  parseAiderHistory as readAiderHistory,
+  summarizeAiderHistory,
+} from "@cognia/agent-aider/history"
+import { buildSession, importedSessionId } from "../to-parts"
 import { buildImportedSessionGraph } from "../graph"
+import { historyMessagesToStored, historySummaryToSessionSummary } from "../history-to-stored"
 import type {
   AgentSessionSourceAdapter,
   PickedSessionFile,
   SessionRef,
   SessionScanInput,
-  SessionSummary,
 } from "../types"
-
-const ACCEPTED = [".md"]
-const STARTED_RE = /^#\s*aider chat started at\s+(.+)$/i
 
 interface ParsedSession {
   originalSessionId: string
@@ -37,115 +38,16 @@ export function parseAiderHistory(
   locatorId: string,
   projectId?: string
 ): ParsedSession {
-  const { messageCount: _count, ...parsed } = readAiderHistory(content, locatorId, projectId, false)
-  return parsed
-}
-
-function readAiderHistory(
-  content: string,
-  locatorId: string,
-  projectId: string | undefined,
-  summaryOnly: boolean
-): ParsedSession & { messageCount: number } {
-  const finalId = importedSessionId("aider", locatorId)
-  const messages: StoredMessage[] = []
-  let counter = 0
-  let firstUserText = ""
-  let createdAt = 0
-  let updatedAt = 0
-
-  let mode: "user" | "assistant" | null = null
-  let userBuf: string[] = []
-  let asstBuf: string[] = []
-
-  const flushUser = () => {
-    const text = userBuf.join("\n").trim()
-    userBuf = []
-    if (!text) return
-    if (!firstUserText) firstUserText = text
-    if (summaryOnly) {
-      counter++
-      return
-    }
-    messages.push(
-      buildMessage({
-        sessionId: finalId,
-        projectId,
-        index: counter++,
-        role: "user",
-        parts: [textPart(text)],
-        createdAt: createdAt || 0,
-      })
-    )
-  }
-  const flushAsst = () => {
-    const text = asstBuf.join("\n").trim()
-    asstBuf = []
-    if (!text) return
-    if (summaryOnly) {
-      counter++
-      return
-    }
-    messages.push(
-      buildMessage({
-        sessionId: finalId,
-        projectId,
-        index: counter++,
-        role: "assistant",
-        parts: [textPart(text)],
-        createdAt: createdAt || 0,
-      })
-    )
-  }
-
-  for (const line of content.split("\n")) {
-    const started = STARTED_RE.exec(line)
-    if (started) {
-      flushUser()
-      flushAsst()
-      mode = null
-      const ms = Date.parse(started[1].trim())
-      if (!Number.isNaN(ms)) {
-        if (!createdAt) createdAt = ms
-        updatedAt = Math.max(updatedAt, ms)
-      }
-      continue
-    }
-    if (line.startsWith("####")) {
-      if (mode === "assistant") flushAsst()
-      mode = "user"
-      userBuf.push(line.replace(/^####\s?/, ""))
-      continue
-    }
-    if (line.startsWith(">")) continue // aider note — skip
-    // Regular prose → assistant.
-    if (mode === "user") flushUser()
-    mode = "assistant"
-    asstBuf.push(line)
-  }
-  flushUser()
-  flushAsst()
-
-  const now = Date.now()
+  const parsed = readAiderHistory(content, locatorId)
   return {
-    originalSessionId: locatorId,
-    title: deriveTitle(firstUserText, "Aider session"),
-    messages,
-    messageCount: counter,
-    createdAt: createdAt || now,
-    updatedAt: updatedAt || now,
-  }
-}
-
-function summarize(
-  parsed: ParsedSession & { messageCount: number },
-  locator: string
-): SessionSummary {
-  return {
-    ref: { sourceId: "aider", originalSessionId: parsed.originalSessionId, locator },
+    originalSessionId: parsed.originalSessionId,
     title: parsed.title,
-    sourceId: "aider",
-    messageCount: parsed.messageCount,
+    messages: historyMessagesToStored(
+      importedSessionId(parsed.sourceId, parsed.originalSessionId),
+      parsed.messages,
+      projectId
+    ),
+    createdAt: parsed.createdAt,
     updatedAt: parsed.updatedAt,
   }
 }
@@ -163,12 +65,12 @@ function toConversation(parsed: ParsedSession): ImportedConversation {
 }
 
 export const aiderSessionSource: AgentSessionSourceAdapter = {
-  id: "aider",
+  id: AIDER_HISTORY_FORMAT.sourceId,
   displayName: "Aider",
   labelKey: "aider",
-  verifiedVersion: "0.86.2",
-  verifiedAt: "2026-08-29",
-  acceptedExtensions: ACCEPTED,
+  verifiedVersion: AIDER_HISTORY_FORMAT.verifiedVersion,
+  verifiedAt: AIDER_HISTORY_FORMAT.verifiedAt,
+  acceptedExtensions: [...AIDER_HISTORY_FORMAT.acceptedExtensions],
 
   // Aider appends to `<repo>/.aider.chat.history.md`: there is no machine-wide
   // location to walk, so this source is picker-only BY DESIGN — declared, not
@@ -179,20 +81,14 @@ export const aiderSessionSource: AgentSessionSourceAdapter = {
   },
 
   detect(files: PickedSessionFile[]) {
-    if (files.length === 0) return "no"
-    const hinted = files.filter((f) => f.name.toLowerCase().includes("aider.chat.history"))
-    if (hinted.length > 0) return hinted.length === files.length ? "match" : "maybe"
-    const looks = files.some(
-      (f) => STARTED_RE.test(f.content.split("\n")[0] ?? "") || /\n####\s/.test(f.content)
-    )
-    return looks ? "maybe" : "no"
+    return detectAiderHistory(files)
   },
 
   async listSessions(input: SessionScanInput) {
     if (!input.pickedFiles?.length) return [] // no scan root
     return input.pickedFiles
       .filter((f) => f.name.toLowerCase().endsWith(".md"))
-      .map((f) => summarize(readAiderHistory(f.content, f.path, undefined, true), f.path))
+      .map((f) => historySummaryToSessionSummary(summarizeAiderHistory(f.content, f.path), f.path))
       .filter((s) => s.messageCount > 0)
   },
 
@@ -213,11 +109,7 @@ export const aiderSessionSource: AgentSessionSourceAdapter = {
       importFidelity: "contextual",
     })
     for (const node of graph.nodes) {
-      node.loss.losses.push({
-        path: "markdown",
-        kind: "summarized",
-        detail: "Aider Markdown history does not carry structured tool, task, or runtime state.",
-      })
+      node.loss.losses.push(...AIDER_HISTORY_LOSSES.map((loss) => ({ ...loss })))
     }
     return graph
   },

@@ -7,8 +7,8 @@ description: How to add an external agent integration as a package — manifest,
 
 An integration is a package that knows one runtime's protocol and formats. It
 never touches the machine itself, never decides policy and never stores
-anything. `@cognia/agent-dsh` and `@cognia/agent-codex` are the reference
-implementations; copy their layout.
+anything. `@cognia/agent-dsh`, `@cognia/agent-codex` and `@cognia/agent-aider`
+are the reference implementations; copy their layout.
 
 ```mermaid
 flowchart LR
@@ -83,9 +83,9 @@ Declare semantics honestly (`packages/agent-contracts/src/semantics.ts`):
 | `processModel` | `shared`, `per-session`, `per-turn` or `remote` |
 
 These are not decoration. The manager drops a cached session whose cancel
-requires a reconnect (`lib/ai/agent/external/manager.ts:4210`), and the Agent
+requires a reconnect (`cancel` in `lib/ai/agent/external/manager.ts`), and the Agent
 Team never reports a session-ending cancel as a pause
-(`ExternalAgentManager.cancelRetiresSession`, `manager.ts:4682`). An adapter
+(`ExternalAgentManager.cancelRetiresSession`). An adapter
 that declares nothing reads as `UNDECLARED_EXECUTION_SEMANTICS`: a cancel may
 take the process down, nothing resumes or forks, and approvals are asked.
 
@@ -95,11 +95,16 @@ Extend `BaseProtocolAdapter` (`packages/agent-runtime-kit/src/base-adapter.ts:12
 and take everything machine-facing from the constructor:
 
 - `AgentProcessHost` (`packages/agent-contracts/src/host.ts:51`) to spawn,
-  write, kill and subscribe to stdout, stderr and exit;
-- `AgentOutboundGate` (`host.ts:111`), **required**, called on every prompt or
+  write, kill, probe a command and subscribe to stdout, stderr and exit;
+- `AgentFileHost` (`host.ts:81`) when the runtime keeps state in workspace
+  files: every read, write and delete names its allowed roots, and
+  `isWithinRoot` rejects a path before an agent process could open it outside
+  the plane (Aider's chat files and context files);
+- `AgentOutboundGate` (`host.ts:145`), **required**, called on every prompt or
   payload the adapter sends;
-- `AgentLaunchEnvironmentResolver`, `AgentApprovalPolicy` and `AgentLogger`
-  when the runtime needs them.
+- `AgentLaunchEnvironmentResolver`, `AgentApprovalPolicy`,
+  `AgentDiagnosticRedactor` (credential redaction for process output) and
+  `AgentLogger` when the runtime needs them.
 
 Implement `ExternalAgentAdapterCore`. Optional abilities (resume, fork,
 steering, session models, model catalog, authentication, compaction, session
@@ -139,9 +144,11 @@ migration subsystem (ADR-0107); they are not part of the package.
 
 1. **Adapter factory**: `lib/ai/agent/external/integrations/<id>.ts` (with a
    test) builds the factory with the app's process host
-   (`createAgentTransportProcessHost`) and `hasNoLeakingPiiDeep` as the
-   outbound gate (see `integrations/dsh.ts`). The manager registers it under
-   its protocol (`manager.ts:357`–`365`).
+   (`createAgentTransportProcessHost`), its file host when needed
+   (`createAgentTransportFileHost`), `hasNoLeakingPiiDeep` as the outbound
+   gate and `redactCredentialText` as the diagnostic redactor (see
+   `integrations/dsh.ts` and `integrations/aider.ts`). The manager registers
+   it under its protocol in `registerBuiltinProtocolAdapters`.
 2. **Runtime and preset rows**: `protocol/external-agent-runtimes.json`,
    checked by `pnpm audit:external-agent-runtimes`.
 3. **Authorization, separately**: the spawn allowlist and approval defaults in

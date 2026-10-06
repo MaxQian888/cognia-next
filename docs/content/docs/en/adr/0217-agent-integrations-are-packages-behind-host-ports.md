@@ -1,11 +1,11 @@
 ---
 title: "0217 — Agent integrations are packages behind host ports"
-description: "External-agent integrations, the shared adapter contract and the runtime building blocks move out of app-private code into workspace packages that build, test and install on their own. The contract splits a required adapter core from named optional capabilities, adds execution semantics (what a cancel reaches, how a session resumes or forks, where approvals are decided, how processes map to sessions), and replaces vendor class checks with typed adapter extensions. Integrations reach the machine only through host ports (process plane, launch environment, approval policy, a required outbound PII gate, logger), so declaring a capability never grants it. History readers return a neutral transcript that the host maps into its own rows, and native resume returns to the configuration it last ran on."
+description: "External-agent integrations, the shared adapter contract and the runtime building blocks move out of app-private code into workspace packages that build, test and install on their own. The contract splits a required adapter core from named optional capabilities, adds execution semantics (what a cancel reaches, how a session resumes or forks, where approvals are decided, how processes map to sessions), and replaces vendor class checks with typed adapter extensions. Integrations reach the machine only through host ports (process plane, workspace files, launch environment, approval policy, a required outbound PII gate, diagnostic redactor, logger), so declaring a capability never grants it. History readers return a neutral transcript that the host maps into its own rows, and native resume returns to the configuration it last ran on."
 ---
 
 # ADR 0217 — Agent integrations are packages behind host ports
 
-**Status:** Accepted (in progress: contracts, runtime kit, DeepSeek Harness, Codex, the engine split and the orchestration core landed; the remaining integrations are blocked, see Implementation status)
+**Status:** Accepted (in progress: contracts, runtime kit, DeepSeek Harness, Codex, Aider, the engine split and the orchestration core landed; the remaining Phase 3 integrations are in progress, see Implementation status)
 **Date:** 2026-10-05
 **Amends:** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility) (the adapter contract and the canonical event contract move to `@cognia/agent-contracts`), [ADR-0062](./0062-external-agent-session-import) (a runtime's session-store reader lives in its integration package and returns a neutral transcript), [ADR-0216](./0216-each-agent-configuration-keeps-its-own-state) (native resume records and returns to its configuration), [ADR-0051](./0051-external-agent-adapter-plugin-type) (plugin adapters are read against the new core)
 **Related:** [ADR-0068](./0068-frontend-package-extraction-and-compile-speed) (package extraction rules), [ADR-0107](./0107-coding-agent-migration) (migration readers stay in the migration subsystem), [ADR-0142](./0142-agent-sdk-two-layer-product), [ADR-0169](./0169-one-runtime-one-review-one-control-machine), [ADR-0197](./0197-the-sidecar-runs-its-typescript-unbuilt)
@@ -153,16 +153,20 @@ Integrations reach the machine only through ports defined in contracts:
 
 | Port | What the host provides |
 | --- | --- |
-| `AgentProcessHost` | spawn, write, bounded kill, and host-wide stdout (line or raw), stderr and exit subscriptions |
+| `AgentProcessHost` | spawn, write, bounded kill, a command-existence probe, and host-wide stdout (line or raw), stderr and exit subscriptions |
+| `AgentFileHost` | workspace file reads, writes and deletes, each confined to the roots it names, plus lexical path containment under the host's path rules |
 | `AgentLaunchEnvironmentResolver` | the configuration's own credentials, state root and bound account (ADR-0216), injected right before spawn |
 | `AgentApprovalPolicy` | what the configuration's approval lists say about one request |
 | `AgentOutboundGate` | the host's PII gate; **required**, called on every prompt or payload an integration sends |
+| `AgentDiagnosticRedactor` | credential redaction for process output and error text before it is shown or stored |
 | `AgentLogger` | structured logging; the host bounds entry size |
 
 The desktop app implements the process plane over its existing transport. That transport
 is the companion or Tauri bridge with `spawn_external_agent`, `send_to_external_agent`,
 `kill_external_agent` and `external-agent://stdout|stdout-raw|stderr|exit`. The app passes
-`hasNoLeakingPiiDeep` as the outbound gate.
+`hasNoLeakingPiiDeep` as the outbound gate. The file plane goes through the session
+workspace file commands (`fs_read_workspace_file`, `fs_write_workspace_file`,
+`fs_delete_workspace_entry`), which refuse traversal and symlink escapes.
 
 **Declaring a need grants nothing.** The host still applies the spawn allowlist, sandbox,
 placement, permission guard and audit, and registering an integration does not authorize
@@ -310,15 +314,15 @@ Team↔Workflow import cycle is broken. A boundary test keeps it that way.
 | --- | --- | --- |
 | 1 | Baseline, identity model, migration matrix (`docs/plans/2026-10-05-agent-package-architecture.md`) | Done |
 | 2 | `agent-contracts`, `agent-runtime-kit`, `agent-dsh`, `agent-codex` (runtime + history); DSH cancel semantics; native-resume binding | Done |
-| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | Partial: the plugin compatibility wrapper is done (`c932f3275`). The rest is **blocked**: the ACP, Pi, OpenCode, Aider and remote runtime clients, the manager, the agent transport, the lifecycle service, `protocol/external-agent-runtimes.json` and `cli/src/runtime/external` carry another workstream's uncommitted changes, and moving them would commit or strand that work |
+| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`) and Aider (`@cognia/agent-aider`, with the file port) are done. ACP, Pi, OpenCode, the remote runtimes, catalog generation, CLI port injection and the `instanceof` removal follow. Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
 | 4 | Neutral tools; the AI SDK engine and the host run without the Claude SDK; SDK-free wire; vendor gate | Done (`44d622df7`, `c4ae605bd`); see Scope decisions for the tool-kernel package |
 | 5 | Orchestration package behind store/journal/redaction/path/remote-session ports; ledgers; Team↔Workflow cycle broken; session-ending cancel never reported as pause | Done (`6bf0a830a`, `a4f1dd183`, `3719c8d51`, `ed4ea6611`, `e931feec0`); gates, pool, wave runner and synthesized workflow stay in the app (Scope decisions) |
 | 6 | Docs, gates, CI and final regression | Done for the landed phases; Phase 3 docs follow its migration |
 
 ## Consequences
 
-- **Reuse:** a host gets an integration by implementing five ports. The DSH and Codex
-  adapters no longer import the app.
+- **Reuse:** a host gets an integration by implementing the ports it uses. The DSH, Codex
+  and Aider adapters no longer import the app.
 - **Contract enforcement:** the integration packages are type-checked and pack-tested in
   isolation. A contract change that breaks an installed consumer fails
   `agent:packages:pack-test`, not a later app build. That test already caught two real

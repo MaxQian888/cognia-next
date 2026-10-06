@@ -80,6 +80,7 @@ import {
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./runtimes/acp/acp-client"
 import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
+import { createAiderCliAdapterFactory } from "./integrations/aider"
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
 import { OpenCodeClientAdapter } from "./runtimes/opencode/opencode-client"
 import { OpenCodeV2ClientAdapter } from "./runtimes/opencode/opencode-v2-client"
@@ -88,7 +89,6 @@ import { isHeadlessHost } from "@/lib/platform/detect"
 import { prepareDshManagedLaunch } from "@cognia/agent-dsh/managed-launch"
 import { createDshSdkAdapterFactory, dshManagedLaunchHost } from "./integrations/dsh"
 import { clampThinkingLevel, PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
-import { AiderCliClientAdapter } from "./runtimes/aider/aider-cli-client"
 import {
   catalogModelSurface,
   EMPTY_THINKING_SURFACE,
@@ -348,7 +348,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   registry.register("dsh-sdk", createDshSdkAdapterFactory())
   // Pi's own RPC protocol, not ACP (ADR-0119).
   registry.register("pi-rpc", () => new PiRpcClientAdapter())
-  registry.register("aider-cli", () => new AiderCliClientAdapter())
+  registry.register("aider-cli", createAiderCliAdapterFactory())
   // Future: registry.register("http", () => new HttpClientAdapter())
 }
 

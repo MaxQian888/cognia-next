@@ -21,6 +21,7 @@ function unavailableHost(): AgentProcessHost {
     spawn: jest.fn(),
     send: jest.fn(),
     kill: jest.fn(),
+    commandExists: jest.fn(),
     onStdoutLine: jest.fn(),
     onStdoutRaw: jest.fn(),
     onStderr: jest.fn(),
