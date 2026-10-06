@@ -394,8 +394,17 @@ const SPECS = {
     `,
   },
   "agent-opencode": {
-    entries: [".", "./manifest", "./v2-client", "./v2-events", "./v2-launcher", "./discovery", "./client"],
-    dataOnly: ["./manifest"],
+    entries: [
+      ".",
+      "./manifest",
+      "./history",
+      "./v2-client",
+      "./v2-events",
+      "./v2-launcher",
+      "./discovery",
+      "./client",
+    ],
+    dataOnly: ["./manifest", "./history"],
     runtimeModules: ["v2-client", "client", "v2-launcher", "base-adapter", "prompt-gate"],
     smoke: `
       import { opencodeManifest, OPENCODE_V2_EXECUTION_SEMANTICS } from "@cognia/agent-opencode/manifest"
@@ -417,6 +426,10 @@ const SPECS = {
       try { await adapter.connect({ id: "x", name: "x", protocol: "opencode-v2", transport: "sse", network: { endpoint: "http://127.0.0.1:1" } }) } catch (error) { refused = /OpenCode ACP/.test(String(error)) }
       if (!refused) throw new Error("a sandboxed configuration must be refused before any request")
       if (validateOpenCodeV2Discovery({ endpoint: "http://127.0.0.1:1/", version: "2.0.0" }).endpoint !== "http://127.0.0.1:1") throw new Error("discovery")
+      import { parseOpencodeExport, readOpencodeSession } from "@cognia/agent-opencode/history"
+      const [shared] = parseOpencodeExport(JSON.stringify({ info: { id: "s1", title: "t", time: { created: 1 } }, messages: [{ info: { role: "user" }, parts: [{ type: "text", text: "hi" }] }] }))
+      const read = readOpencodeSession(shared)
+      if (read.originalSessionId !== "s1" || read.messages[0]?.parts[0]?.type !== "text") throw new Error("history")
     `,
     types: `
       import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
@@ -433,7 +446,11 @@ const SPECS = {
         discoverService: async () => ({ endpoint: "http://127.0.0.1:1", version: "2.0.0", headers: {} }),
         launchService: createOpenCodeV2Launcher(processHost, placement),
       })
-      export { adapter }
+      import { readOpencodeSession, type OpencodeSession } from "@cognia/agent-opencode/history"
+      import type { ParsedHistorySession } from "@cognia/agent-contracts/history"
+      declare const stored: OpencodeSession
+      const parsed: ParsedHistorySession = readOpencodeSession(stored)
+      export { adapter, parsed }
     `,
   },
   "agent-orchestration": {

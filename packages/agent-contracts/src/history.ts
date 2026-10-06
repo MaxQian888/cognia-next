@@ -66,6 +66,8 @@ export interface HistoryUsage {
   cacheReadInputTokens?: number
   cacheCreationInputTokens?: number
   reasoningTokens?: number
+  /** The runtime's own cost estimate for the turn, in US dollars, when it records one. */
+  totalCostUsd?: number
 }
 
 export interface HistoryMessage {

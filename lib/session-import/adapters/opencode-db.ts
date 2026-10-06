@@ -5,73 +5,16 @@
 
 import { isTauri } from "@/lib/tauri"
 
-/** A normalized OpenCode message part (superset of what we render). */
-export interface OpencodePart {
-  id?: string
-  type: string
-  text?: string
-  tool?: string
-  callID?: string
-  state?: {
-    status?: string
-    input?: unknown
-    output?: unknown
-    error?: string
-  }
-  /** OpenCode `FilePart` MIME field (the SDK sends/stores `mime`). */
-  mime?: string
-  /** Legacy/normalized spelling kept for share exports that used it. */
-  mediaType?: string
-  filename?: string
-  url?: string
-  /** Agent-delegation part: the subagent's name. */
-  name?: string
-}
-
-export interface OpencodeBackgroundJob {
-  id: string
-  status?: string
-  description?: string
-  parentId?: string
-  dependencies?: string[]
-  createdAt?: number
-  updatedAt?: number
-  error?: string
-}
-
-/** Normalized per-turn token counts projected by the readers. */
-export interface OpencodeTokens {
-  input?: number
-  output?: number
-  reasoning?: number
-  cacheRead?: number
-  cacheWrite?: number
-}
-
-export interface OpencodeMessage {
-  role: string
-  parts: OpencodePart[]
-  createdAt: number
-  /** Per-message model id (assistant turns). */
-  model?: string
-  /** OpenCode's own USD cost estimate for the turn. */
-  cost?: number
-  /** Token counts for the turn (assistant messages). */
-  tokens?: OpencodeTokens
-}
-
-export interface OpencodeSession {
-  id: string
-  title: string
-  cwd?: string
-  model?: string
-  /** Parent session id when this is a subagent (child) session. */
-  parentId?: string
-  createdAt: number
-  updatedAt: number
-  messages: OpencodeMessage[]
-  jobs?: OpencodeBackgroundJob[]
-}
+// The normalized record shapes are owned by the OpenCode history reader
+// (ADR-0217); both readers produce them and the session source consumes them.
+import type { OpencodeSession } from "@cognia/agent-opencode/history"
+export type {
+  OpencodeBackgroundJob,
+  OpencodeMessage,
+  OpencodePart,
+  OpencodeSession,
+  OpencodeTokens,
+} from "@cognia/agent-opencode/history"
 
 /**
  * Candidate directories that may contain `opencode.db`, most-specific first.

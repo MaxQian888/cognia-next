@@ -126,7 +126,7 @@ flowchart BT
 | 插件适配器 | 完成：创建时即按适配器核心检查（`./plugin-compat`） |
 | Aider | 完成：`@cognia/agent-aider`（基于进程与文件端口的 CLI 适配器、历史读取器）；声明了每回合一个进程的语义，因此取消后的 Aider 会话会被保留而不是被退役 |
 | Pi | 完成：`@cognia/agent-pi`（RPC 适配器、对端、事件映射、工具表、认证探测），基于进程端口与 `PiHostServices`；声明每会话一个进程的语义，取消为回合级的 `abort`。Pi 会话历史读取器仍在 `lib/session-import` |
-| OpenCode | 完成：`@cognia/agent-opencode`（V2 服务适配器、事件、会话自有的启动器、服务发现；以及 Cognia 不注册的旧版 server 适配器），基于 `AgentFetch`、进程端口与放置策略 |
+| OpenCode | 完成：`@cognia/agent-opencode`（V2 服务适配器、事件、会话自有的启动器、服务发现、会话历史读取器；以及 Cognia 不注册的旧版 server 适配器），基于 `AgentFetch`、进程端口与放置策略 |
 | A2A | 完成：`@cognia/agent-a2a`，基于 `AgentFetch`；远程、任务级取消。Cognia 自己的远程宿主运行平面留在应用中（见 ADR-0217 的范围决策） |
 | ACP 与 Devin | 完成：`@cognia/agent-acp`（客户端、wire codec、feature profile、permission input、ACP Registry v1、每个会话独占进程的 Devin 适配器），基于进程、文件、终端、fetch 与 WebSocket 端口；声明了回合级的 `session/cancel`，被取消的 ACP 会话会被保留。厂商特例（Kimi、Cline、Qoder、Goose、Devin、经 ACP 的 OpenCode）是客户端套用的 `AcpVendorProfile` 数据；宿主可以提供自己的 profile |
 | Claude Code 以及其他运行时的会话读取器 | 尚未完成（阶段 3 进行中） |
