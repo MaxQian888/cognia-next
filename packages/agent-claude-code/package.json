@@ -1,0 +1,47 @@
+{
+  "name": "@cognia/agent-claude-code",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Claude Code integration for Cognia agents (ADR-0217): the Claude Code ecosystem row and runtime catalog row, and the session-history reader for ~/.claude/projects transcripts (main thread, sidechain subagents, team artifacts). Claude Code runs over ACP, so the runtime client lives in @cognia/agent-acp.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 tsup",
+    "typecheck": "tsc --noEmit",
+    "pack:test": "node ../../scripts/build/pack-test-agent-package.mjs agent-claude-code"
+  },
+  "dependencies": {
+    "@cognia/agent-contracts": "workspace:*",
+    "@cognia/agent-runtime-kit": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@cognia/redact": "workspace:*"
+  }
+}

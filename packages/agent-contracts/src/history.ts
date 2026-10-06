@@ -68,6 +68,8 @@ export interface HistoryUsage {
   reasoningTokens?: number
   /** The runtime's own cost estimate for the turn, in US dollars, when it records one. */
   totalCostUsd?: number
+  /** Wall-clock duration of the turn in milliseconds, when the runtime records one. */
+  durationMs?: number
 }
 
 export interface HistoryMessage {

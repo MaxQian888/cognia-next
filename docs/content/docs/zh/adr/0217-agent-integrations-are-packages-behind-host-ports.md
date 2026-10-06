@@ -233,6 +233,13 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
 - **ACP 厂商 profile 放在 `@cognia/agent-acp` 中，而不是每个厂商一个包。** profile
   （`./vendors/<id>`）只是几行协议数据与纯函数，没有自己的依赖；每个厂商一个包会多出六个
   只能与 ACP 客户端一起使用的产物。profile 集合是 `AcpClientDeps` 的输入，宿主仍可提供自己的。
+- **只走 ACP 的生态不建包。** Kimi、Goose、Qoder、Kiro、Droid、Copilot CLI、Qwen Code、
+  Cline、Cursor 与 Gemini CLI 都由 ACP 客户端运行，除可移植读取器外没有自己的运行时客户端或
+  会话格式。它们的协议差异是 `AcpVendorProfile`；生态行只在 `lib/agent-ecosystem/catalog.ts`
+  中编写一次，运行时行在 `protocol/external-agent-runtimes.json` 中（生成器不改动没有 manifest
+  拥有的行）；它们的历史读取器与 `continue-dev` 一起留在 `lib/session-import/adapters/` 的共享
+  可移植来源代码上。每行一个包只会装一个数据字面量，也没有可复用的内容。拥有自己转录格式的
+  Claude Code 有 `@cognia/agent-claude-code`。
 
 ### 兼容性
 
@@ -254,7 +261,7 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
 | --- | --- | --- |
 | 1 | 基线、身份模型、迁移矩阵（`docs/plans/2026-10-05-agent-package-architecture.md`） | 完成 |
 | 2 | `agent-contracts`、`agent-runtime-kit`、`agent-dsh`、`agent-codex`（运行时 + 历史）；DSH 取消语义；原生恢复绑定 | 完成 |
-| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成，ACP 厂商分支已抽成 `AcpVendorProfile`；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。CLI 端口注入已完成：CLI 在启动时安装其外部 agent 宿主，esbuild alias 已删除；它的 spawn 白名单从安全策略读取，`audit:agent-capabilities` 拒绝字面量副本。OpenCode 与 Pi 的历史读取器已进入各自的包（共享的转录 DAG 遍历在 `@cognia/agent-runtime-kit/history-dag`）；Claude Code 读取器随后进行；包拥有的运行时目录行与协议能力行已由 manifest 生成；管理器中的厂商 `instanceof` 分支已移除（改用带类型的扩展）。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
+| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成，ACP 厂商分支已抽成 `AcpVendorProfile`；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。CLI 端口注入已完成：CLI 在启动时安装其外部 agent 宿主，esbuild alias 已删除；它的 spawn 白名单从安全策略读取，`audit:agent-capabilities` 拒绝字面量副本。OpenCode 与 Pi 的历史读取器已进入各自的包（共享的转录 DAG 遍历在 `@cognia/agent-runtime-kit/history-dag`），Claude Code 有 `@cognia/agent-claude-code`（manifest 与转录读取器）；只走 ACP 的生态不建包（见范围决策）；包拥有的运行时目录行与协议能力行已由 manifest 生成；管理器中的厂商 `instanceof` 分支已移除（改用带类型的扩展）。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
 | 4 | 中立工具；AI SDK 引擎与宿主无需 Claude SDK 即可运行；不依赖 SDK 的 wire；厂商闸门 | 完成（`44d622df7`、`c4ae605bd`）；工具内核包见范围决定 |
 | 5 | 位于存储/日志/脱敏/路径/远程会话端口之后的编排包；账本；打破 Team↔Workflow 导入环；结束会话的取消从不被报告为暂停 | 完成（`6bf0a830a`、`a4f1dd183`、`3719c8d51`、`ed4ea6611`、`e931feec0`）；闸门、队友池、波次运行器与合成工作流留在应用中（见范围决定） |
 | 6 | 文档、闸门、CI 和最终回归 | 已落地阶段已完成；阶段 3 的文档随其迁移补充 |

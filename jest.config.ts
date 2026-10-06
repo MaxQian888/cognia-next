@@ -248,6 +248,8 @@ const projectCommon: Config = {
     "^@cognia/agent-a2a/(.*)$": "<rootDir>/packages/agent-a2a/src/$1",
     "^@cognia/agent-acp$": "<rootDir>/packages/agent-acp/src/index.ts",
     "^@cognia/agent-acp/(.*)$": "<rootDir>/packages/agent-acp/src/$1",
+    "^@cognia/agent-claude-code$": "<rootDir>/packages/agent-claude-code/src/index.ts",
+    "^@cognia/agent-claude-code/(.*)$": "<rootDir>/packages/agent-claude-code/src/$1",
     "^@cognia/agent-codex$": "<rootDir>/packages/agent-codex/src/index.ts",
     "^@cognia/agent-codex/(.*)$": "<rootDir>/packages/agent-codex/src/$1",
     "^@cognia/agent-orchestration$": "<rootDir>/packages/agent-orchestration/src/index.ts",

@@ -167,6 +167,27 @@ const SPECS = {
       export { adapter }
     `,
   },
+  "agent-claude-code": {
+    entries: [".", "./manifest", "./history"],
+    dataOnly: ["./manifest", "./history"],
+    runtimeModules: ["base-adapter", "json-rpc-peer", "spawn-reclaim", "prompt-gate"],
+    smoke: `
+      import { claudeCodeManifest } from "@cognia/agent-claude-code/manifest"
+      import { readClaudeCodeTranscript } from "@cognia/agent-claude-code/history"
+      if (claudeCodeManifest.ecosystem.id !== "claude-code" || claudeCodeManifest.protocols.length !== 0) throw new Error("manifest")
+      const line = JSON.stringify({ type: "user", uuid: "u", parentUuid: null, sessionId: "s1", message: { content: "hi" } })
+      const read = readClaudeCodeTranscript(line, "s1.jsonl", { redactText: (t) => t })
+      if (read.session.originalSessionId !== "s1" || read.session.messages[0]?.parts[0]?.type !== "text") throw new Error("history")
+    `,
+    types: `
+      import { readClaudeCodeTranscript, type ParsedClaudeCodeTranscript } from "@cognia/agent-claude-code/history"
+      import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+      import { claudeCodeManifest } from "@cognia/agent-claude-code/manifest"
+      const manifest: AgentIntegrationManifest = claudeCodeManifest
+      const read: ParsedClaudeCodeTranscript = readClaudeCodeTranscript("", "x", { redactText: (t) => t })
+      export { manifest, read }
+    `,
+  },
   "agent-codex": {
     entries: [
       ".",

@@ -10,6 +10,7 @@
  */
 
 import { aiderManifest } from "@cognia/agent-aider/manifest"
+import { claudeCodeManifest } from "@cognia/agent-claude-code/manifest"
 import { codexManifest } from "@cognia/agent-codex/manifest"
 import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
 import { opencodeManifest } from "@cognia/agent-opencode/manifest"
@@ -25,6 +26,7 @@ import type { AgentEcosystemEntry } from "./types"
  */
 export const INTEGRATION_MANIFESTS: readonly AgentIntegrationManifest[] = [
   aiderManifest,
+  claudeCodeManifest,
   codexManifest,
   deepseekHarnessManifest,
   opencodeManifest,
@@ -82,18 +84,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     subagentSourceId: null,
     memoryAgentId: null,
   },
-  {
-    id: "claude-code",
-    runtimeIds: ["claude-agent-acp"],
-    sessionSourceIds: ["claude-code"],
-    migrationVendor: "claude-code",
-    vendorRootKeys: ["claudeConfigDir"],
-    configRootKey: "claudeConfigDir",
-    probeRootKeys: ["claudeConfigDir"],
-    pluginEcosystem: "claude-code",
-    subagentSourceId: "claude-code",
-    memoryAgentId: "claude-code",
-  },
+  claudeCodeManifest.ecosystem,
   codexManifest.ecosystem,
   opencodeManifest.ecosystem,
   piManifest.ecosystem,

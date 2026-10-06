@@ -1,8 +1,8 @@
 // Reconstruct an imported Claude Code Task subagent (ADR-0062, T2a-sub).
 //
-// A subagent's `isSidechain` records are extracted + linearized by
-// `@cognia/agent-runtime-kit/history-dag`, then turned into `StoredMessage`s by the shared
-// `recordsToMessages`. THIS module is the pure last step: it derives a
+// A subagent's `isSidechain` records are read into a subagent run by
+// `@cognia/agent-claude-code/history` and mapped to `StoredMessage`s by the
+// adapter. THIS module is the pure last step: it derives a
 // `SubagentPart` snapshot (tool calls / final response / token usage) from those
 // already-built messages — the exact shape a natively-run subagent persists, so
 // the existing `buildSubagentTree` + `SubagentPart` renderer nests it with zero

@@ -129,7 +129,8 @@ flowchart BT
 | OpenCode | 完成：`@cognia/agent-opencode`（V2 服务适配器、事件、会话自有的启动器、服务发现、会话历史读取器；以及 Cognia 不注册的旧版 server 适配器），基于 `AgentFetch`、进程端口与放置策略 |
 | A2A | 完成：`@cognia/agent-a2a`，基于 `AgentFetch`；远程、任务级取消。Cognia 自己的远程宿主运行平面留在应用中（见 ADR-0217 的范围决策） |
 | ACP 与 Devin | 完成：`@cognia/agent-acp`（客户端、wire codec、feature profile、permission input、ACP Registry v1、每个会话独占进程的 Devin 适配器），基于进程、文件、终端、fetch 与 WebSocket 端口；声明了回合级的 `session/cancel`，被取消的 ACP 会话会被保留。厂商特例（Kimi、Cline、Qoder、Goose、Devin、经 ACP 的 OpenCode）是客户端套用的 `AcpVendorProfile` 数据；宿主可以提供自己的 profile |
-| Claude Code 以及其他运行时的会话读取器 | 尚未完成（阶段 3 进行中） |
+| Claude Code | 完成：`@cognia/agent-claude-code`（生态行与运行时行、含 sidechain 子 agent 的转录读取器、转录任务与团队产物）；运行于 ACP 客户端之上 |
+| 只走 ACP 的生态（Kimi、Goose、Qoder、Cline、Gemini CLI 等） | 按决策不建包：厂商差异是 `AcpVendorProfile`，目录行留在 `lib/agent-ecosystem/catalog.ts`，可移植会话读取器留在 `lib/session-import`（见 ADR-0217 范围决策） |
 | 管理器中的厂商分支 | 完成：管理器不导入任何厂商类；厂商控制改为带类型的扩展（`codexAppServerExtension`、`openCodeServerExtension`、`openCodeV2Extension`、`piRpcExtension`、`acpClientExtension`、`devinAcpExtension`），原生 Devin 的隔离放在 `integrations/acp.ts` |
 | 运行时目录行 | 完成：Aider、Codex、DeepSeek Harness、OpenCode 与 Pi 在 `./manifest` 中编写自己的行（及豁免）；`pnpm gen:external-agent-runtimes` 生成 `protocol/external-agent-runtimes.json`，出现漂移时 `audit:external-agent-runtimes` 失败。没有包的运行时仍直接写在文件中 |
 | 协议能力行 | 完成：`protocol/agent-capabilities.json` 的每个协议行以及预设细化（`devin`、`deepseek-harness-acp`、`opencode-v2-service`）都是各包 manifest 中的 `AgentCapabilityContribution`；`pnpm gen:agent-capabilities` 生成该文件，出现漂移时 `audit:agent-capabilities` 失败 |
