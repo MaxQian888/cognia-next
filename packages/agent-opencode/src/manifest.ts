@@ -143,7 +143,7 @@ export const opencodeManifest: AgentIntegrationManifest = Object.freeze({
     // order preserves the original `opencodeDataDir || opencodeConfigDir`.
     configRootKey: "opencodeConfigDir",
     probeRootKeys: ["opencodeDataDir", "opencodeConfigDir"],
-    pluginEcosystem: null,
+    pluginEcosystem: "opencode",
     subagentSourceId: "opencode",
     memoryAgentId: "opencode",
   }),

@@ -21,6 +21,17 @@ describe("lookups", () => {
     })
   })
 
+  it("names the plugin converter ecosystem of every agent with a convertible plugin format", () => {
+    const plugin = (id: string) => findEcosystemById(id)?.pluginEcosystem
+    expect(plugin("cursor")).toBe("cursor")
+    expect(plugin("copilot-cli")).toBe("copilot")
+    expect(plugin("devin")).toBe("devin")
+    expect(plugin("droid")).toBe("factory-droid")
+    expect(plugin("qoder")).toBe("qoder")
+    expect(plugin("opencode")).toBe("opencode")
+    expect(plugin("pi")).toBe("pi")
+  })
+
   it("links Cline execution while preserving existing history and subagent importers", () => {
     expect(findEcosystemByRuntimeId("cline")?.id).toBe("cline")
     expect(findEcosystemById("cline")?.sessionSourceIds).toEqual(["cline"])

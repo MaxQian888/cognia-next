@@ -71,7 +71,7 @@ export const piManifest: AgentIntegrationManifest = Object.freeze({
     vendorRootKeys: ["piAgentDir", "piSessionDir"],
     configRootKey: "piAgentDir",
     probeRootKeys: ["piAgentDir"],
-    pluginEcosystem: null,
+    pluginEcosystem: "pi",
     subagentSourceId: "pi",
     memoryAgentId: "pi",
   }),

@@ -128,11 +128,12 @@ importer); the OpenCode SQLite path lists (the Rust reader in `crates/cognia-age
 the CLI's `node:sqlite` reader probe the same candidates in the same order, and the TS watch
 roots are a superset; two host readers behind `setOpencodeReader` is the design). Labelled, not
 removed: the OpenCode V1 client (moved to the package unregistered; `getUnsupportedProtocolReason`
-explains it). Left as a decision for the plugin-conversion owners: `pluginEcosystem` stays `null`
-for ecosystems that have a converter (Kimi, Cursor, Copilot, Devin, Droid, Qoder, OpenCode, Pi);
-nothing reads the field at runtime, and Kimi's `null` is pinned deliberately
-(`lib/agent-ecosystem/catalog.test.ts`), so filling the others would be a guess. The conformance
-test now reads the converter's own `PLUGIN_ECOSYSTEMS` instead of a stale four-entry copy.
+explains it). `pluginEcosystem` now names the converter ecosystem for Cursor, Copilot, Devin,
+Droid (`factory-droid`), Qoder, OpenCode and Pi (user decision, 2026-10-06; pinned in
+`lib/agent-ecosystem/catalog.test.ts`); Kimi stays `null` as its existing test pins, so its
+subscription provider plugin is not conflated with the native runtime. Nothing reads the field
+at runtime. The conformance test reads the converter's own `PLUGIN_ECOSYSTEMS` instead of a
+stale four-entry copy.
 
 ## 3. Target packages and dependency direction
 
