@@ -166,6 +166,8 @@
       "@cognia/agent-aider/*": ["./packages/agent-aider/src/*"],
       "@cognia/agent-pi": ["./packages/agent-pi/src/index.ts"],
       "@cognia/agent-pi/*": ["./packages/agent-pi/src/*"],
+      "@cognia/agent-opencode": ["./packages/agent-opencode/src/index.ts"],
+      "@cognia/agent-opencode/*": ["./packages/agent-opencode/src/*"],
       "@cognia/agent-codex": ["./packages/agent-codex/src/index.ts"],
       "@cognia/agent-codex/*": ["./packages/agent-codex/src/*"],
       "@cognia/agent-orchestration": ["./packages/agent-orchestration/src/index.ts"],

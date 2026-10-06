@@ -94,6 +94,24 @@ export interface AgentFileHost {
   delete(path: string, allowedRoots: readonly string[]): Promise<void>
 }
 
+/** What the host's agent fetch honours beyond `RequestInit`. */
+export interface AgentFetchInit extends RequestInit {
+  /** Bounds the response head only; a streamed body is unbounded. */
+  connectTimeout?: number
+  /** Maximum silence between body chunks (SSE keep-alive detection). */
+  readTimeout?: number
+  /** Refuse private, loopback and link-local targets. */
+  blockPrivateHosts?: boolean
+}
+
+/**
+ * The host's HTTP client for agents reached over the network (OpenCode
+ * services, A2A peers, remote hosts). It routes through the host's transport,
+ * proxy and network policy and streams response bodies, which a server-sent
+ * event stream needs. Integrations never call a global `fetch`.
+ */
+export type AgentFetch = (input: Request | URL | string, init?: AgentFetchInit) => Promise<Response>
+
 /**
  * The host's credential redactor for text an integration captured from a
  * process (stderr, error messages) before it is shown or stored. Not the

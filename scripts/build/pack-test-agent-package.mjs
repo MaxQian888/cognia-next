@@ -100,6 +100,7 @@ const SPECS = {
       "./history",
       "./plugin-compat",
       "./prompt-gate",
+      "./elicitation",
     ],
     dataOnly: ["./history"],
     runtimeModules: ["base-adapter", "json-rpc-peer", "lf-frame-decoder", "spawn-reclaim"],
@@ -297,6 +298,49 @@ const SPECS = {
         matchToolPattern: (pattern, tool) => pattern === tool,
         isDisabled: () => false,
         resolvePiPackages: async () => [],
+      })
+      export { adapter }
+    `,
+  },
+  "agent-opencode": {
+    entries: [".", "./manifest", "./v2-client", "./v2-events", "./v2-launcher", "./discovery", "./client"],
+    dataOnly: ["./manifest"],
+    runtimeModules: ["v2-client", "client", "v2-launcher", "base-adapter", "prompt-gate"],
+    smoke: `
+      import { opencodeManifest, OPENCODE_V2_EXECUTION_SEMANTICS } from "@cognia/agent-opencode/manifest"
+      import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
+      import { canProjectOpenCodeV2Mcp } from "@cognia/agent-opencode/v2-launcher"
+      import { validateOpenCodeV2Discovery } from "@cognia/agent-opencode/discovery"
+      if (opencodeManifest.ecosystem.id !== "opencode") throw new Error("manifest")
+      const placement = { hasSelectedSandbox: () => true, processesLocal: () => true }
+      const adapter = new OpenCodeV2ClientAdapter({
+        fetch: async () => { throw new Error("no network in the smoke") },
+        outboundGate: () => true,
+        placement,
+        discoverService: async () => { throw new Error("no service") },
+        launchService: async () => { throw new Error("no launcher") },
+      })
+      if (adapter.semantics !== OPENCODE_V2_EXECUTION_SEMANTICS) throw new Error("semantics")
+      if (canProjectOpenCodeV2Mcp({ id: "x", process: { command: "opencode" } }, placement)) throw new Error("placement")
+      let refused = false
+      try { await adapter.connect({ id: "x", name: "x", protocol: "opencode-v2", transport: "sse", network: { endpoint: "http://127.0.0.1:1" } }) } catch (error) { refused = /OpenCode ACP/.test(String(error)) }
+      if (!refused) throw new Error("a sandboxed configuration must be refused before any request")
+      if (validateOpenCodeV2Discovery({ endpoint: "http://127.0.0.1:1/", version: "2.0.0" }).endpoint !== "http://127.0.0.1:1") throw new Error("discovery")
+    `,
+    types: `
+      import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
+      import { createOpenCodeV2Launcher, type OpenCodeV2Placement } from "@cognia/agent-opencode/v2-launcher"
+      import type { AgentFetch, AgentProcessHost } from "@cognia/agent-contracts/host"
+      import type { ProtocolAdapter } from "@cognia/agent-contracts/adapter"
+      declare const fetch: AgentFetch
+      declare const processHost: AgentProcessHost
+      declare const placement: OpenCodeV2Placement
+      const adapter: ProtocolAdapter = new OpenCodeV2ClientAdapter({
+        fetch,
+        outboundGate: () => true,
+        placement,
+        discoverService: async () => ({ endpoint: "http://127.0.0.1:1", version: "2.0.0", headers: {} }),
+        launchService: createOpenCodeV2Launcher(processHost, placement),
       })
       export { adapter }
     `,

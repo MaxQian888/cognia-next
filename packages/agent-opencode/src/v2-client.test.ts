@@ -2,7 +2,7 @@ import type {
   AcpElicitationValue,
   ExternalAgentConfig,
   ExternalAgentEvent,
-} from "@/types/agent/external-agent"
+} from "@cognia/agent-contracts/external-agent"
 
 jest.mock("@opencode/client", () => ({ OpenCode: { make: jest.fn() } }), { virtual: true })
 jest.mock(
@@ -10,23 +10,60 @@ jest.mock(
   () => ({ Service: { discover: jest.fn(), headers: jest.fn() } }),
   { virtual: true }
 )
-jest.mock("@/lib/claude/feature-call", () => ({
-  discoverOpenCodeV2ViaSidecar: jest.fn(),
-  validateOpenCodeV2Discovery: jest.requireActual("@/lib/claude/feature-call")
-    .validateOpenCodeV2Discovery,
-}))
-jest.mock("@/lib/network/platform-streaming-fetch", () => ({ platformStreamingFetch: jest.fn() }))
 import { OpenCode } from "@opencode/client"
 import { Service } from "@opencode/client/service"
-import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
-import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
-import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
+import type { AgentFetch, AgentProcessHost } from "@cognia/agent-contracts/host"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { discoverOpenCodeV2InProcess, validateOpenCodeV2Discovery } from "./discovery"
+import { OpenCodeV2ClientAdapter, type OpenCodeV2ClientDeps } from "./v2-client"
 import {
-  __resetSpawnPlacementsForTests,
-  clearSpawnPlacement,
-  registerSpawnPlacement,
-} from "@/lib/sandbox/spawn-placement-registry"
-import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
+  createOpenCodeV2Launcher,
+  type OpenCodeV2Placement,
+  type OpenCodeV2ServiceLauncher,
+} from "./v2-launcher"
+import { OPENCODE_V2_EXECUTION_SEMANTICS } from "./manifest"
+
+// The host's fetch and its sidecar discovery, as the app supplies them.
+const platformStreamingFetch = jest.fn<ReturnType<AgentFetch>, Parameters<AgentFetch>>()
+const discoverOpenCodeV2ViaSidecar = jest.fn(async (_signal?: AbortSignal) =>
+  validateOpenCodeV2Discovery(undefined)
+)
+
+/** Configurations the fake host has placed in a sandbox. */
+const placed = new Set<string>()
+const placement: OpenCodeV2Placement = {
+  hasSelectedSandbox: (configId) => placed.has(configId),
+  processesLocal: () => false,
+}
+
+/** A process plane the jest host does not have: launching fails as it does off-desktop. */
+const noProcessHost: AgentProcessHost = {
+  available: false,
+  spawn: jest.fn(),
+  send: jest.fn(),
+  kill: jest.fn(),
+  commandExists: jest.fn(),
+  onStdoutLine: jest.fn(),
+  onStdoutRaw: jest.fn(),
+  onStderr: jest.fn(),
+  onExit: jest.fn(),
+}
+
+/** The adapter's ports; discovery follows the host kind the way the app wires it. */
+function v2Deps(
+  launchService: OpenCodeV2ServiceLauncher = createOpenCodeV2Launcher(noProcessHost, placement)
+): OpenCodeV2ClientDeps {
+  return {
+    fetch: (input, init) => platformStreamingFetch(input, init),
+    outboundGate: hasNoLeakingPiiDeep,
+    placement,
+    discoverService: (signal) =>
+      (globalThis as Record<string, unknown>).__COGNIA_CLI__
+        ? discoverOpenCodeV2InProcess((input, init) => platformStreamingFetch(input, init), signal)
+        : discoverOpenCodeV2ViaSidecar(signal),
+    launchService,
+  }
+}
 
 const config = {
   id: "oc",
@@ -153,7 +190,7 @@ describe("current OpenCode V2 adapter", () => {
   let adapter: OpenCodeV2ClientAdapter
   let client: ReturnType<typeof fakeClient>
   beforeEach(() => {
-    __resetSpawnPlacementsForTests()
+    placed.clear()
     jest.clearAllMocks()
     client = fakeClient()
     jest.mocked(OpenCode.make).mockReturnValue(client as never)
@@ -162,19 +199,19 @@ describe("current OpenCode V2 adapter", () => {
       version: "2.0.0",
       headers: { Authorization: "Basic local" },
     })
-    adapter = new OpenCodeV2ClientAdapter()
+    adapter = new OpenCodeV2ClientAdapter(v2Deps())
   })
-  afterEach(() => __resetSpawnPlacementsForTests())
+  afterEach(() => placed.clear())
 
   it.each(["endpoint", "discovery", "gateway"])(
     "refuses selected sandbox before %s connection and clears stale state for retry",
     async (mode) => {
       const launch = jest.fn()
-      adapter = new OpenCodeV2ClientAdapter(launch)
+      adapter = new OpenCodeV2ClientAdapter(v2Deps(launch))
       await adapter.connect(config)
       await adapter.createSession()
       jest.clearAllMocks()
-      registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+      placed.add(config.id)
       const selected = {
         ...config,
         network: mode === "endpoint" ? config.network : undefined,
@@ -188,7 +225,7 @@ describe("current OpenCode V2 adapter", () => {
       expect(discoverOpenCodeV2ViaSidecar).not.toHaveBeenCalled()
       expect(Service.discover).not.toHaveBeenCalled()
       expect(platformStreamingFetch).not.toHaveBeenCalled()
-      clearSpawnPlacement(config.id)
+      placed.delete(config.id)
       await adapter.connect(config)
       expect(adapter.connectionStatus).toBe("connected")
       await adapter.disconnect()
@@ -196,7 +233,7 @@ describe("current OpenCode V2 adapter", () => {
   )
   it("refuses SDK connection when placement changes during discovery", async () => {
     jest.mocked(discoverOpenCodeV2ViaSidecar).mockImplementationOnce(async () => {
-      registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+      placed.add(config.id)
       return { endpoint: "http://localhost:1234", version: "2.0.0", headers: {} }
     })
     await expect(adapter.connect({ ...config, network: undefined })).rejects.toThrow("OpenCode ACP")
@@ -209,7 +246,7 @@ describe("current OpenCode V2 adapter", () => {
     const launch = jest
       .fn()
       .mockResolvedValue({ endpoint: "http://127.0.0.1:1111", headers: {}, close })
-    adapter = new OpenCodeV2ClientAdapter(launch)
+    adapter = new OpenCodeV2ClientAdapter(v2Deps(launch))
     await adapter.connect({
       ...config,
       network: undefined,
@@ -254,7 +291,7 @@ describe("current OpenCode V2 adapter", () => {
         headers: { Authorization: "two" },
         close: closeSecond,
       })
-    adapter = new OpenCodeV2ClientAdapter(launch)
+    adapter = new OpenCodeV2ClientAdapter(v2Deps(launch))
     await adapter.connect(config)
     jest
       .mocked(OpenCode.make)
@@ -326,7 +363,7 @@ describe("current OpenCode V2 adapter", () => {
   it("releases a private service when native session creation fails", async () => {
     const close = jest.fn().mockResolvedValue(undefined)
     adapter = new OpenCodeV2ClientAdapter(
-      jest.fn().mockResolvedValue({ endpoint: "http://127.0.0.1:1111", headers: {}, close })
+      v2Deps(jest.fn().mockResolvedValue({ endpoint: "http://127.0.0.1:1111", headers: {}, close }))
     )
     await adapter.connect(config)
     const owned = fakeClient()
@@ -1688,5 +1725,28 @@ describe("current OpenCode V2 adapter", () => {
     await expect(stream.next()).rejects.toThrow("paused caller aborted")
     expect(client.session.interrupt).toHaveBeenCalledTimes(1)
     expect(adapter.getSession("s1")?.status).toBe("active")
+  })
+})
+
+describe("OpenCodeV2ClientAdapter — host ports", () => {
+  it("declares a turn-scoped cancel on a shared service", () => {
+    expect(new OpenCodeV2ClientAdapter(v2Deps()).semantics).toBe(OPENCODE_V2_EXECUTION_SEMANTICS)
+  })
+
+  it("asks the host to locate the service instead of discovering it itself", async () => {
+    const discoverService = jest.fn(async () => ({
+      endpoint: "http://127.0.0.1:7777",
+      version: "2.0.5",
+      headers: {},
+    }))
+    const client = fakeClient()
+    jest.mocked(OpenCode.make).mockReturnValue(client as never)
+    const adapter = new OpenCodeV2ClientAdapter({ ...v2Deps(), discoverService })
+    await adapter.connect({ ...config, network: undefined })
+    expect(discoverService).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(OpenCode.make).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "http://127.0.0.1:7777" })
+    )
+    await adapter.disconnect()
   })
 })

@@ -1,6 +1,20 @@
-import type { AcpMcpServerConfig, ExternalAgentConfig } from "@/types/agent/external-agent"
-import { spawnPlacementFor } from "@/lib/sandbox/spawn-placement-registry"
-import { agentInvoke, agentListen, runsExternalAgentProcessesLocally } from "../../agent-transport"
+import type {
+  AcpMcpServerConfig,
+  ExternalAgentConfig,
+} from "@cognia/agent-contracts/external-agent"
+import type { AgentProcessHost } from "@cognia/agent-contracts/host"
+
+/**
+ * Where the host will run a configuration's processes. The V2 SDK can only
+ * reach a loopback listener on this machine, so a configuration the host has
+ * placed in a sandbox or container cannot use it yet.
+ */
+export interface OpenCodeV2Placement {
+  /** True when the host routes this configuration into a selected sandbox. */
+  hasSelectedSandbox(configId: string): boolean
+  /** True when this host runs agent processes on this machine. */
+  processesLocal(): boolean
+}
 
 export interface OpenCodeV2OwnedService {
   endpoint: string
@@ -9,8 +23,11 @@ export interface OpenCodeV2OwnedService {
 }
 
 /** The V2 SDK cannot reach a container's private HTTP listener yet. */
-export function assertOpenCodeV2LocalPlacement(config: ExternalAgentConfig): void {
-  if (spawnPlacementFor(config.id)) {
+export function assertOpenCodeV2LocalPlacement(
+  config: ExternalAgentConfig,
+  placement: OpenCodeV2Placement
+): void {
+  if (placement.hasSelectedSandbox(config.id)) {
     throw new Error(
       "OpenCode V2 cannot use the selected container until an authenticated HTTP bridge is available; select OpenCode ACP for this environment"
     )
@@ -19,11 +36,11 @@ export function assertOpenCodeV2LocalPlacement(config: ExternalAgentConfig): voi
 
 export function canProjectOpenCodeV2Mcp(
   config: ExternalAgentConfig,
-  hostAvailable = runsExternalAgentProcessesLocally()
+  placement: OpenCodeV2Placement
 ): boolean {
   return (
-    !spawnPlacementFor(config.id) &&
-    hostAvailable &&
+    !placement.hasSelectedSandbox(config.id) &&
+    placement.processesLocal() &&
     (!config.network?.endpoint?.trim() || Boolean(config.process?.command))
   )
 }
@@ -61,26 +78,34 @@ export function openCodeV2McpConfig(servers: AcpMcpServerConfig[]) {
   return result
 }
 
-interface Host {
-  invoke: typeof agentInvoke
-  listen: typeof agentListen
-  available(): boolean
+/** Starts a session-owned OpenCode service; injectable so tests need no process host. */
+export type OpenCodeV2ServiceLauncher = (
+  config: ExternalAgentConfig,
+  servers: AcpMcpServerConfig[],
+  cwd: string | undefined,
+  signal?: AbortSignal
+) => Promise<OpenCodeV2OwnedService>
+
+/** A launcher over the host's local process plane and placement policy. */
+export function createOpenCodeV2Launcher(
+  processHost: AgentProcessHost,
+  placement: OpenCodeV2Placement
+): OpenCodeV2ServiceLauncher {
+  return (config, servers, cwd, signal) =>
+    launchOpenCodeV2Service(config, servers, cwd, signal, processHost, placement)
 }
 
-/** Start an authenticated loopback child through the existing desktop/CLI process host. */
+/** Start an authenticated loopback child through the host's local process plane. */
 export async function launchOpenCodeV2Service(
   config: ExternalAgentConfig,
   servers: AcpMcpServerConfig[],
   cwd: string | undefined,
-  signal?: AbortSignal,
-  host: Host = {
-    invoke: agentInvoke,
-    listen: agentListen,
-    available: runsExternalAgentProcessesLocally,
-  }
+  signal: AbortSignal | undefined,
+  host: AgentProcessHost,
+  placement: OpenCodeV2Placement
 ): Promise<OpenCodeV2OwnedService> {
-  assertOpenCodeV2LocalPlacement(config)
-  if (!host.available())
+  assertOpenCodeV2LocalPlacement(config, placement)
+  if (!host.available || !placement.processesLocal())
     throw new Error("Cognia MCP projection for OpenCode requires a local process host")
   if (config.network?.endpoint && !config.process?.command)
     throw new Error(
@@ -138,13 +163,13 @@ export async function launchOpenCodeV2Service(
   }
   const close = async () => {
     if (spawned && !exited) {
-      await host.invoke("kill_external_agent", { agentId: id })
+      await host.kill(id)
       exited = true
     }
     cleanup()
   }
-  const output = (stream: keyof typeof buffers) => (event: { agentId: string; data: string }) => {
-    if (event.agentId !== id || finished) return
+  const output = (stream: keyof typeof buffers) => (event: { processId: string; data: string }) => {
+    if (event.processId !== id || finished) return
     buffers[stream] = (buffers[stream] + event.data).slice(-8192)
     const match = buffers[stream].match(/server listening on (http:\/\/127\.0\.0\.1:\d+)/)
     if (match) {
@@ -153,11 +178,11 @@ export async function launchOpenCodeV2Service(
     }
   }
   try {
-    listeners.push(await host.listen("external-agent://stdout", output("stdout")))
-    listeners.push(await host.listen("external-agent://stderr", output("stderr")))
+    listeners.push(await host.onStdoutLine(output("stdout")))
+    listeners.push(await host.onStderr(output("stderr")))
     listeners.push(
-      await host.listen<{ agentId: string }>("external-agent://exit", (event) => {
-        if (event.agentId === id) {
+      await host.onExit((event) => {
+        if (event.processId === id) {
           exited = true
           reject(new Error("OpenCode service exited before becoming ready"))
         }
@@ -165,18 +190,16 @@ export async function launchOpenCodeV2Service(
     )
     signal?.addEventListener("abort", abort, { once: true })
     signal?.throwIfAborted()
-    assertOpenCodeV2LocalPlacement(config)
-    await host.invoke("spawn_external_agent", {
-      config: {
-        id,
-        command: config.process?.command ?? "opencode",
-        args: ["serve", ...(config.process?.args ?? []), "--hostname=127.0.0.1", "--port=0"],
-        cwd,
-        env: {
-          ...config.process?.env,
-          OPENCODE_CONFIG_CONTENT: JSON.stringify(inline),
-          OPENCODE_SERVER_PASSWORD: password,
-        },
+    assertOpenCodeV2LocalPlacement(config, placement)
+    await host.spawn({
+      id,
+      command: config.process?.command ?? "opencode",
+      args: ["serve", ...(config.process?.args ?? []), "--hostname=127.0.0.1", "--port=0"],
+      cwd,
+      env: {
+        ...config.process?.env,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify(inline),
+        OPENCODE_SERVER_PASSWORD: password,
       },
     })
     spawned = true

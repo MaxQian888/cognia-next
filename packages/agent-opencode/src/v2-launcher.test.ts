@@ -1,20 +1,56 @@
-jest.mock("../../agent-transport", () => ({
-  agentInvoke: jest.fn(),
-  agentListen: jest.fn(),
-  runsExternalAgentProcessesLocally: () => true,
-}))
+import type { AgentProcessHost } from "@cognia/agent-contracts/host"
 import {
   canProjectOpenCodeV2Mcp,
   launchOpenCodeV2Service,
   openCodeV2McpConfig,
-} from "./opencode-v2-launcher"
-import type { ExternalAgentConfig, AcpMcpServerConfig } from "@/types/agent/external-agent"
-import {
-  __resetSpawnPlacementsForTests,
-  clearSpawnPlacement,
-  registerSpawnPlacement,
-} from "@/lib/sandbox/spawn-placement-registry"
-import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
+  type OpenCodeV2Placement,
+} from "./v2-launcher"
+import type {
+  ExternalAgentConfig,
+  AcpMcpServerConfig,
+} from "@cognia/agent-contracts/external-agent"
+
+/** Configurations the fake host has placed in a sandbox. */
+const placed = new Set<string>()
+const placementFor = (local: boolean): OpenCodeV2Placement => ({
+  hasSelectedSandbox: (configId) => placed.has(configId),
+  processesLocal: () => local,
+})
+const placement = placementFor(true)
+
+interface FakePlane {
+  invoke(operation: string, args: Record<string, unknown>): Promise<unknown>
+  listen(event: string, callback: (event: never) => void): Promise<() => void>
+  available(): boolean
+}
+
+/** The port over the fake plane, resolved at call time so a test may swap `listen`. */
+function ports(plane: FakePlane): AgentProcessHost {
+  const output =
+    (channel: string) => (listener: (event: { processId: string; data: string }) => void) =>
+      plane.listen(channel, ((event: { agentId: string; data: string }) =>
+        listener({ processId: event.agentId, data: event.data })) as never)
+  return {
+    get available() {
+      return plane.available()
+    },
+    spawn: async (spec) => {
+      await plane.invoke("spawn_external_agent", { config: spec })
+      return spec.id
+    },
+    send: async () => undefined,
+    kill: async (processId) => {
+      await plane.invoke("kill_external_agent", { agentId: processId })
+    },
+    commandExists: async () => true,
+    onStdoutLine: output("external-agent://stdout"),
+    onStdoutRaw: output("external-agent://stdout-raw"),
+    onStderr: output("external-agent://stderr"),
+    onExit: (listener) =>
+      plane.listen("external-agent://exit", ((event: { agentId: string; code?: number }) =>
+        listener({ processId: event.agentId, code: event.code ?? 0 })) as never),
+  }
+}
 
 const config = {
   id: "oc",
@@ -54,20 +90,27 @@ function setup() {
 }
 
 describe("OpenCode V2 session-owned services", () => {
-  beforeEach(() => __resetSpawnPlacementsForTests())
-  afterEach(() => __resetSpawnPlacementsForTests())
+  beforeEach(() => placed.clear())
+  afterEach(() => placed.clear())
 
   it("refuses a selected sandbox before starting a Host service and allows an explicit local retry", async () => {
     const { host, invoke } = setup()
-    registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
-    expect(canProjectOpenCodeV2Mcp(config, true)).toBe(false)
+    placed.add(config.id)
+    expect(canProjectOpenCodeV2Mcp(config, placementFor(true))).toBe(false)
     await expect(
-      launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+      launchOpenCodeV2Service(config, servers, undefined, undefined, ports(host), placement)
     ).rejects.toThrow("OpenCode ACP")
     expect(host.listen).not.toHaveBeenCalled()
     expect(invoke).not.toHaveBeenCalled()
-    clearSpawnPlacement(config.id)
-    const service = await launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+    placed.delete(config.id)
+    const service = await launchOpenCodeV2Service(
+      config,
+      servers,
+      undefined,
+      undefined,
+      ports(host),
+      placement
+    )
     expect(invoke.mock.calls[0][1].config.id).toMatch(/^oc:opencode-v2:/)
     await service.close()
   })
@@ -75,11 +118,11 @@ describe("OpenCode V2 session-owned services", () => {
   it("rechecks placement after asynchronous listener registration before spawning", async () => {
     const { host, invoke, unlisten } = setup()
     host.listen = jest.fn(async () => {
-      registerSpawnPlacement(config.id, { kind: "container" } as SandboxPlacement)
+      placed.add(config.id)
       return unlisten
     }) as never
     await expect(
-      launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+      launchOpenCodeV2Service(config, servers, undefined, undefined, ports(host), placement)
     ).rejects.toThrow("OpenCode ACP")
     expect(invoke).not.toHaveBeenCalled()
     expect(unlisten).toHaveBeenCalledTimes(3)
@@ -133,7 +176,8 @@ describe("OpenCode V2 session-owned services", () => {
       servers,
       "/workspace",
       undefined,
-      host
+      ports(host),
+      placement
     )
     const launched = invoke.mock.calls.find(
       ([operation]) => operation === "spawn_external_agent"
@@ -159,18 +203,25 @@ describe("OpenCode V2 session-owned services", () => {
   })
 
   it("refuses external endpoint mutation and unsupported hosts", async () => {
-    expect(canProjectOpenCodeV2Mcp(config, true)).toBe(true)
-    expect(canProjectOpenCodeV2Mcp(config, false)).toBe(false)
+    expect(canProjectOpenCodeV2Mcp(config, placementFor(true))).toBe(true)
+    expect(canProjectOpenCodeV2Mcp(config, placementFor(false))).toBe(false)
     const remote = { ...config, process: undefined, network: { endpoint: "https://host" } }
-    expect(canProjectOpenCodeV2Mcp(remote, true)).toBe(false)
+    expect(canProjectOpenCodeV2Mcp(remote, placementFor(true))).toBe(false)
     await expect(
-      launchOpenCodeV2Service(remote, servers, undefined, undefined, setup().host)
+      launchOpenCodeV2Service(remote, servers, undefined, undefined, ports(setup().host), placement)
     ).rejects.toThrow("existing")
     await expect(
-      launchOpenCodeV2Service(config, servers, undefined, undefined, {
-        ...setup().host,
-        available: () => false,
-      })
+      launchOpenCodeV2Service(
+        config,
+        servers,
+        undefined,
+        undefined,
+        ports({
+          ...setup().host,
+          available: () => false,
+        }),
+        placement
+      )
     ).rejects.toThrow("local")
   })
 
@@ -181,7 +232,7 @@ describe("OpenCode V2 session-owned services", () => {
       controller.abort()
     })
     await expect(
-      launchOpenCodeV2Service(config, servers, undefined, controller.signal, host)
+      launchOpenCodeV2Service(config, servers, undefined, controller.signal, ports(host), placement)
     ).rejects.toMatchObject({ name: "AbortError" })
     expect(invoke).toHaveBeenCalledWith("kill_external_agent", expect.any(Object))
   })
@@ -196,9 +247,9 @@ describe("OpenCode V2 session-owned services", () => {
       callbacks.get("external-agent://exit")?.({ agentId: "other", data: "" })
       callbacks.get("external-agent://exit")?.({ agentId: args.config.id, data: "" })
     })
-    await expect(launchOpenCodeV2Service(config, [], undefined, undefined, host)).rejects.toThrow(
-      "exited"
-    )
+    await expect(
+      launchOpenCodeV2Service(config, [], undefined, undefined, ports(host), placement)
+    ).rejects.toThrow("exited")
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(unlisten).toHaveBeenCalledTimes(3)
   })
@@ -213,7 +264,8 @@ describe("OpenCode V2 session-owned services", () => {
         [],
         undefined,
         undefined,
-        host
+        ports(host),
+        placement
       )
       const rejected = expect(pending).rejects.toThrow("timed out")
       await jest.advanceTimersByTimeAsync(10)
@@ -250,7 +302,8 @@ describe("OpenCode V2 session-owned services", () => {
       [],
       undefined,
       undefined,
-      host
+      ports(host),
+      placement
     )
     invoke.mockRejectedValueOnce(new Error("kill unavailable"))
     await expect(service.close()).rejects.toThrow("kill unavailable")
@@ -264,7 +317,7 @@ describe("OpenCode V2 session-owned services", () => {
     const { host, invoke, unlisten } = setup()
     invoke.mockRejectedValueOnce(new Error("spawn failed"))
     await expect(
-      launchOpenCodeV2Service(config, servers, undefined, undefined, host)
+      launchOpenCodeV2Service(config, servers, undefined, undefined, ports(host), placement)
     ).rejects.toThrow("spawn failed")
     expect(unlisten).toHaveBeenCalledTimes(3)
   })
@@ -276,7 +329,8 @@ describe("OpenCode V2 session-owned services", () => {
         servers,
         undefined,
         undefined,
-        setup().host
+        ports(setup().host),
+        placement
       )
     ).rejects.toThrow("inline")
   })

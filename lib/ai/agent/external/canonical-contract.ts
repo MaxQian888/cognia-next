@@ -526,7 +526,7 @@ export function createExternalAgentBenchmarkBaseline(
           id: "opencode-extension-support-test",
           kind: "test",
           summary: "OpenCode reports unknown before connect and supported once connected",
-          reference: "lib/ai/agent/external/runtimes/opencode/opencode-client.test.ts",
+          reference: "packages/agent-opencode/src/client.test.ts",
           recordedAt: now,
         },
       ],

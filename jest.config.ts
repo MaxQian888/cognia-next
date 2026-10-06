@@ -242,6 +242,8 @@ const projectCommon: Config = {
     "^@cognia/agent-aider/(.*)$": "<rootDir>/packages/agent-aider/src/$1",
     "^@cognia/agent-pi$": "<rootDir>/packages/agent-pi/src/index.ts",
     "^@cognia/agent-pi/(.*)$": "<rootDir>/packages/agent-pi/src/$1",
+    "^@cognia/agent-opencode$": "<rootDir>/packages/agent-opencode/src/index.ts",
+    "^@cognia/agent-opencode/(.*)$": "<rootDir>/packages/agent-opencode/src/$1",
     "^@cognia/agent-codex$": "<rootDir>/packages/agent-codex/src/index.ts",
     "^@cognia/agent-codex/(.*)$": "<rootDir>/packages/agent-codex/src/$1",
     "^@cognia/agent-orchestration$": "<rootDir>/packages/agent-orchestration/src/index.ts",
@@ -699,7 +701,7 @@ const globalConfig: Config = {
     // `src-tauri/`. Exclude here so they don't drag the lib/** gate down.
     "!lib/ai/agent/external/runtimes/acp/acp-client.ts",
     "!lib/ai/agent/external/manager.ts",
-    "!lib/ai/agent/external/runtimes/opencode/opencode-client.ts",
+    "!packages/agent-opencode/src/client.ts",
     // search-type-router.ts is a 40+ provider dispatch table. Each provider
     // has its own co-located test, but exercising every dispatch leg here
     // would just duplicate those — it's a routing surface with very low

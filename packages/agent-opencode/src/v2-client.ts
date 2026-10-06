@@ -6,14 +6,12 @@ import type {
   SessionMessageInfo,
   PermissionRuleset,
 } from "@opencode/client"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
-import {
-  discoverOpenCodeV2ViaSidecar,
-  validateOpenCodeV2Discovery,
-  type OpenCodeV2Discovery,
-} from "@/lib/claude/feature-call"
-import { isCliHost } from "@/lib/platform/detect"
-import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
+import type { SessionCreateOptions, SessionListOptions } from "@cognia/agent-contracts/adapter"
+import type { AgentFetch, AgentOutboundGate } from "@cognia/agent-contracts/host"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
+import { OPENCODE_V2_CURRENT_VERSION, type OpenCodeV2ServiceDiscovery } from "./discovery"
+import { OPENCODE_V2_EXECUTION_SEMANTICS, OPENCODE_V2_PROTOCOL } from "./manifest"
 import type {
   AcpAvailableCommand,
   AcpConfigOption,
@@ -27,28 +25,23 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
   ExternalAgentSession,
-} from "@/types/agent/external-agent"
-import {
-  BaseProtocolAdapter,
-  type SessionCreateOptions,
-  type SessionListOptions,
-} from "../../protocol-adapter"
-import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
-import { validateAcpElicitationResponse } from "../acp/acp-elicitation"
-import { OpenCodeV2EventMapper, mapOpenCodeV2Messages } from "./opencode-v2-events"
+} from "@cognia/agent-contracts/external-agent"
+import { validateAcpElicitationResponse } from "@cognia/agent-runtime-kit/elicitation"
+import { OpenCodeV2EventMapper, mapOpenCodeV2Messages } from "./v2-events"
 import {
   assertOpenCodeV2LocalPlacement,
   canProjectOpenCodeV2Mcp,
-  launchOpenCodeV2Service,
   type OpenCodeV2OwnedService,
-} from "./opencode-v2-launcher"
+  type OpenCodeV2Placement,
+  type OpenCodeV2ServiceLauncher,
+} from "./v2-launcher"
 import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
 } from "@cognia/agent-contracts/session-operations"
 
 const NO_VARIANT = "#none"
-const CURRENT_VERSION = /^2\.\d+\.\d+(?:\+[\w.-]+)?$/
+const CURRENT_VERSION = OPENCODE_V2_CURRENT_VERSION
 
 // The SDK is lazy-imported for code-splitting, so mirror its
 // isSessionNotFoundError tag check rather than adding a static import.
@@ -108,7 +101,7 @@ function permissionRules(
   }
 }
 
-function assertSafe(value: unknown): void {
+function assertSafe(value: unknown, gate: AgentOutboundGate): void {
   const decoded: string[] = []
   const pending: unknown[] = [value]
   const seen = new Set<object>()
@@ -140,7 +133,7 @@ function assertSafe(value: unknown): void {
       pending.push(...Object.values(item))
     }
   }
-  if (!hasNoLeakingPiiDeep({ value, decoded }))
+  if (!gate({ value, decoded }))
     throw new Error("OpenCode outbound request blocked by the PII gate")
 }
 
@@ -152,9 +145,24 @@ interface ActiveTurn {
   interrupt?: Promise<unknown>
 }
 
+/** What the host hands the OpenCode V2 adapter. */
+export interface OpenCodeV2ClientDeps {
+  /** Every REST call and the event stream go through the host's fetch. */
+  fetch: AgentFetch
+  /** Every outbound body, prompt, instruction and form reply passes it. */
+  outboundGate: AgentOutboundGate
+  /** Where the host runs this configuration's processes. */
+  placement: OpenCodeV2Placement
+  /** Locates the local service when no endpoint is configured. */
+  discoverService: OpenCodeV2ServiceDiscovery
+  /** Starts a session-owned service for gateway tasks and Cognia MCP projection. */
+  launchService: OpenCodeV2ServiceLauncher
+}
+
 /** Current stable OpenCode /api contract. No V1 or beta transport fallback. */
 export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
-  readonly protocol = "opencode-v2"
+  readonly protocol = OPENCODE_V2_PROTOCOL
+  readonly semantics = OPENCODE_V2_EXECUTION_SEMANTICS
   private client?: OpenCodeClient
   private connectionService?: OpenCodeV2OwnedService
   private catalog = new Map<string, ModelInfo[]>()
@@ -166,8 +174,19 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   private owned = new Map<string, OpenCodeV2OwnedService & { client: OpenCodeClient }>()
   private mountedMcp = new Map<string, string[]>()
 
-  constructor(private readonly launchService = launchOpenCodeV2Service) {
+  private readonly fetch: AgentFetch
+  private readonly outboundGate: AgentOutboundGate
+  private readonly placement: OpenCodeV2Placement
+  private readonly discover: OpenCodeV2ServiceDiscovery
+  private readonly launchService: OpenCodeV2ServiceLauncher
+
+  constructor(deps: OpenCodeV2ClientDeps) {
     super()
+    this.fetch = deps.fetch
+    this.outboundGate = deps.outboundGate
+    this.placement = deps.placement
+    this.discover = deps.discoverService
+    this.launchService = deps.launchService
   }
 
   async connect(config: ExternalAgentConfig): Promise<void> {
@@ -176,7 +195,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     this._connectionStatus = "connecting"
     this.connection = new AbortController()
     try {
-      assertOpenCodeV2LocalPlacement(config)
+      assertOpenCodeV2LocalPlacement(config, this.placement)
       const explicitEndpoint = config.network?.endpoint?.trim()
       if (config.metadata?.cogniaGatewayTask) {
         this.connectionService = await this.launchService(
@@ -207,15 +226,15 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         )
       }
       const { OpenCode } = await import("@opencode/client")
-      assertOpenCodeV2LocalPlacement(config)
+      assertOpenCodeV2LocalPlacement(config, this.placement)
       this.client = OpenCode.make({
         baseUrl: endpoint,
         headers: Object.fromEntries(headers.entries()),
         fetch: (input, init) => {
           // Apply the same policy to direct native calls, including imported
           // history, form replies, and instructions that become model context.
-          if (typeof init?.body === "string") assertSafe(JSON.parse(init.body))
-          return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
+          if (typeof init?.body === "string") assertSafe(JSON.parse(init.body), this.outboundGate)
+          return this.fetch(input, { ...init, readTimeout: 90_000 })
         },
       })
       const status = await this.client.server.info({ signal: this.connection.signal })
@@ -233,7 +252,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         toolExecution: true,
         fileOperations: true,
         codeExecution: true,
-        mcpTools: canProjectOpenCodeV2Mcp(config),
+        mcpTools: canProjectOpenCodeV2Mcp(config, this.placement),
         multiTurn: true,
         permissionModes: ["default", "acceptEdits", "bypassPermissions", "plan"],
         custom: { serviceVersion: status.version, nativeApi: "@opencode/client", protocol: "v2" },
@@ -298,54 +317,12 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   }
 
   /**
-   * Locate the local OpenCode V2 service.
-   *
-   * The desktop delegates discovery to its sidecar because the renderer has no
-   * process table; the standalone CLI owns one and has no feature-call bridge,
-   * so it runs the identical `Service.discover` + `/api/info` probe
-   * in-process (the same contract `sidecar/src/host/feature-call/index.ts` serves).
+   * Locate the local OpenCode V2 service through the host: the desktop asks its
+   * sidecar, a host with a process table probes in-process
+   * (`discoverOpenCodeV2InProcess`).
    */
-  private async discoverService(signal: AbortSignal): Promise<OpenCodeV2Discovery> {
-    if (!isCliHost()) return discoverOpenCodeV2ViaSidecar(signal)
-    const { Service } = await import("@opencode/client/service")
-    signal.throwIfAborted()
-    const endpoint = await Service.discover({
-      version: (version) => CURRENT_VERSION.test(version),
-    })
-    signal.throwIfAborted()
-    if (!endpoint)
-      throw new Error(
-        "No compatible OpenCode V2 service was discovered. Start one with `opencode service start`."
-      )
-    const url = new URL(endpoint.url)
-    if (!["http:", "https:"].includes(url.protocol))
-      throw new Error("OpenCode V2 discovery returned a non-HTTP endpoint")
-    const headers = Object.fromEntries(
-      Object.entries(Service.headers(endpoint) ?? {}).filter(
-        ([name, value]) => name.trim() && typeof value === "string"
-      )
-    )
-    const probe = await platformStreamingFetch(new URL("/api/info", url), {
-      headers,
-      signal: AbortSignal.any([signal, AbortSignal.timeout(2_000)]),
-    })
-    const status = (await probe.json().catch(() => undefined)) as
-      { version?: string; pid?: number } | undefined
-    signal.throwIfAborted()
-    if (!probe.ok) throw new Error("OpenCode V2 discovery health probe failed")
-    if (
-      !status?.version ||
-      !CURRENT_VERSION.test(status.version) ||
-      typeof status.pid !== "number" ||
-      !Number.isInteger(status.pid) ||
-      status.pid <= 0
-    )
-      throw new Error("OpenCode V2 discovery returned an incompatible health contract")
-    return validateOpenCodeV2Discovery({
-      endpoint: url.toString().replace(/\/$/, ""),
-      version: status.version,
-      headers,
-    })
+  private discoverService(signal: AbortSignal) {
+    return this.discover(signal)
   }
 
   private sessionMcpServers(options?: SessionCreateOptions) {
@@ -369,8 +346,8 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         baseUrl: service.endpoint,
         headers: service.headers,
         fetch: (input, init) => {
-          if (typeof init?.body === "string") assertSafe(JSON.parse(init.body))
-          return platformStreamingFetch(input, { ...init, readTimeout: 90_000 })
+          if (typeof init?.body === "string") assertSafe(JSON.parse(init.body), this.outboundGate)
+          return this.fetch(input, { ...init, readTimeout: 90_000 })
         },
       })
       const status = await client.server.info({ signal: this.connection.signal })
@@ -463,11 +440,14 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
       throw new Error(
         "OpenCode V2 accepts one session location; additional workspace roots are unsupported"
       )
-    assertSafe({
-      systemPrompt: options?.systemPrompt,
-      instructionEnvelope: options?.instructionEnvelope,
-      context: this.instructionContext(options),
-    })
+    assertSafe(
+      {
+        systemPrompt: options?.systemPrompt,
+        instructionEnvelope: options?.instructionEnvelope,
+        context: this.instructionContext(options),
+      },
+      this.outboundGate
+    )
   }
 
   async createSession(options?: SessionCreateOptions): Promise<ExternalAgentSession> {
@@ -553,7 +533,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     ]
       .filter(Boolean)
       .join("\n\n")
-    assertSafe(instruction)
+    assertSafe(instruction, this.outboundGate)
     if (instruction)
       await this.getSdkClient(sessionId).session.instructions.entry.put({
         sessionID: sessionId,
@@ -718,7 +698,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     this.requireSession(sessionId)
     if (options?.systemPrompt !== undefined || options?.instructionEnvelope || options?.context)
       await this.applyInstructions(sessionId, options)
-    if (!hasNoLeakingExternalAgentPromptInput(message))
+    if (!promptInputPassesGate(message, this.outboundGate))
       throw new Error("OpenCode outbound prompt blocked by the PII gate")
     const text = message.content
       .filter((part) => part.type === "text")
@@ -785,7 +765,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
       ...(files.length ? { files } : {}),
       delivery: "queue" as const,
     }
-    assertSafe(input)
+    assertSafe(input, this.outboundGate)
     const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
     const command =
       match && this.getAvailableCommands(sessionId).some((item) => item.name === match[1])
@@ -932,7 +912,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   async steerTurn(sessionId: string, text: string): Promise<void> {
     if (!this.active.get(sessionId)?.submitted)
       throw new Error("OpenCode session has no active turn")
-    assertSafe(text)
+    assertSafe(text, this.outboundGate)
     await this.getSdkClient(sessionId).session.prompt({
       sessionID: sessionId,
       text,
@@ -942,7 +922,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
 
   async respondToPermission(sessionId: string, response: AcpPermissionResponse): Promise<void> {
     this.requireSession(sessionId)
-    assertSafe(response.reason)
+    assertSafe(response.reason, this.outboundGate)
     await this.getSdkClient(sessionId).permission.reply({
       sessionID: sessionId,
       requestID: response.requestId,
@@ -1012,7 +992,7 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
         }
       }
     }
-    assertSafe(answer.content)
+    assertSafe(answer.content, this.outboundGate)
     const formID =
       string(request.raw.openCodeForm && (request.raw.openCodeForm as { id?: string }).id) ??
       response.requestId

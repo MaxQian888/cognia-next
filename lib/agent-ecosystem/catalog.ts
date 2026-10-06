@@ -12,6 +12,7 @@
 import { aiderManifest } from "@cognia/agent-aider/manifest"
 import { codexManifest } from "@cognia/agent-codex/manifest"
 import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
+import { opencodeManifest } from "@cognia/agent-opencode/manifest"
 import { piManifest } from "@cognia/agent-pi/manifest"
 
 import type { AgentEcosystemEntry } from "./types"
@@ -80,21 +81,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     memoryAgentId: "claude-code",
   },
   codexManifest.ecosystem,
-  {
-    id: "opencode",
-    runtimeIds: ["opencode-v2-service", "opencode-acp", "opencode", "opencode-remote"],
-    sessionSourceIds: ["opencode"],
-    migrationVendor: "opencode",
-    vendorRootKeys: ["opencodeDataDir", "opencodeConfigDir", "opencodePlatformDataDir"],
-    // Config and history live apart. `configRootKey` feeds the subagent and
-    // command scans, `probeRootKeys` feeds install detection, and the probe
-    // order preserves the original `opencodeDataDir || opencodeConfigDir`.
-    configRootKey: "opencodeConfigDir",
-    probeRootKeys: ["opencodeDataDir", "opencodeConfigDir"],
-    pluginEcosystem: null,
-    subagentSourceId: "opencode",
-    memoryAgentId: "opencode",
-  },
+  opencodeManifest.ecosystem,
   piManifest.ecosystem,
   {
     id: "gemini-cli",

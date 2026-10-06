@@ -1,7 +1,6 @@
 import {
   createSidecarFeatureCallClient,
   discoverMcpServerViaSidecar,
-  validateOpenCodeV2Discovery,
   callSidecarToolHost,
 } from "./feature-call"
 import type { ClaudeEvent, McpServer } from "@cognia/agent-config-types"
@@ -173,47 +172,6 @@ describe("sidecar feature-call LanguageModelV3 proxy", () => {
       warnings: [],
     })
   })
-})
-
-describe("OpenCode V2 discovery validation", () => {
-  it("keeps ephemeral string headers and normalizes the endpoint", () => {
-    expect(
-      validateOpenCodeV2Discovery({
-        endpoint: "http://127.0.0.1:4096/",
-        version: "2.0.0-beta.1",
-        headers: {
-          authorization: "Bearer ephemeral",
-          "x-number": 1,
-          "": "ignored",
-        },
-      })
-    ).toEqual({
-      endpoint: "http://127.0.0.1:4096",
-      version: "2.0.0-beta.1",
-      headers: { authorization: "Bearer ephemeral" },
-    })
-  })
-
-  it("rejects missing versions and non-HTTP endpoints", () => {
-    expect(() =>
-      validateOpenCodeV2Discovery({ endpoint: "http://127.0.0.1:4096", headers: {} })
-    ).toThrow("invalid service descriptor")
-    expect(() =>
-      validateOpenCodeV2Discovery({
-        endpoint: "file:///tmp/service.sock",
-        version: "2.0.0-beta.1",
-      })
-    ).toThrow("invalid endpoint")
-  })
-
-  it.each(["1.9.0", "3.0.0", "2.invalid", " "])(
-    "rejects unsupported service version %s",
-    (version) => {
-      expect(() =>
-        validateOpenCodeV2Discovery({ endpoint: "http://127.0.0.1:4096", version })
-      ).toThrow("incompatible service version")
-    }
-  )
 })
 
 describe("sidecar MCP discovery wrapper", () => {

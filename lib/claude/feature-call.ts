@@ -17,6 +17,10 @@ import {
   type ToolHostControl,
 } from "@cognia/agent-config-types"
 
+import {
+  validateOpenCodeV2Discovery,
+  type OpenCodeV2Discovery,
+} from "@cognia/agent-opencode/discovery"
 import { appendMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import { resolveMcpSecrets } from "@/lib/mcp/credentials"
 import { evaluateMcpPolicy } from "@/lib/mcp/policy"
@@ -295,35 +299,6 @@ export async function discoverBedrockModelsViaSidecar(
     abortSignal
   )) as { models?: BedrockDiscoveredModel[] }
   return result.models ?? []
-}
-
-export interface OpenCodeV2Discovery {
-  endpoint: string
-  version: string
-  headers: Record<string, string>
-}
-
-export function validateOpenCodeV2Discovery(result: unknown): OpenCodeV2Discovery {
-  const descriptor =
-    result && typeof result === "object" ? (result as Partial<OpenCodeV2Discovery>) : {}
-  const endpoint = typeof descriptor.endpoint === "string" ? descriptor.endpoint : ""
-  const version = typeof descriptor.version === "string" ? descriptor.version : ""
-  if (!endpoint || !version) {
-    throw new Error("OpenCode V2 discovery returned an invalid service descriptor")
-  }
-  if (!/^2\.\d+\.\d+(?:[-+][\w.+-]+)?$/.test(version)) {
-    throw new Error("OpenCode V2 discovery returned an incompatible service version")
-  }
-  const url = new URL(endpoint)
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("OpenCode V2 discovery returned an invalid endpoint")
-  }
-  const headers = Object.fromEntries(
-    Object.entries(descriptor.headers ?? {}).filter(
-      ([name, value]) => name.trim() && typeof value === "string"
-    )
-  )
-  return { endpoint: url.toString().replace(/\/$/, ""), version, headers }
 }
 
 export async function discoverOpenCodeV2ViaSidecar(

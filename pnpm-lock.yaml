@@ -1125,6 +1125,25 @@ importers:
 
   packages/agent-host-win32-x64: {}
 
+  packages/agent-opencode:
+    dependencies:
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@cognia/agent-runtime-kit':
+        specifier: workspace:*
+        version: link:../agent-runtime-kit
+      '@opencode-ai/sdk':
+        specifier: ^1.18.32
+        version: 1.18.32
+      '@opencode/client':
+        specifier: ^2.0.18
+        version: 2.0.18
+    devDependencies:
+      '@cognia/redact':
+        specifier: workspace:*
+        version: link:../redact
+
   packages/agent-orchestration: {}
 
   packages/agent-pi:

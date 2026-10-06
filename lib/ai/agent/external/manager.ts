@@ -82,8 +82,12 @@ import { AcpClientAdapter } from "./runtimes/acp/acp-client"
 import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
 import { createAiderCliAdapterFactory } from "./integrations/aider"
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
-import { OpenCodeClientAdapter } from "./runtimes/opencode/opencode-client"
-import { OpenCodeV2ClientAdapter } from "./runtimes/opencode/opencode-v2-client"
+import { OpenCodeClientAdapter } from "@cognia/agent-opencode/client"
+import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
+import {
+  canProjectOpenCodeV2McpOnThisHost,
+  createOpenCodeV2AdapterFactory,
+} from "./integrations/opencode"
 import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { prepareDshManagedLaunch } from "@cognia/agent-dsh/managed-launch"
@@ -104,7 +108,6 @@ import {
   loadAgentModelSurface,
   type ExternalAgentSessionSurface,
 } from "./capability/model-surface-cache"
-import { canProjectOpenCodeV2Mcp } from "./runtimes/opencode/opencode-v2-launcher"
 import {
   assertRunEnvironmentPlaced,
   RunEnvironmentRefusedError,
@@ -342,7 +345,7 @@ export interface ExternalAgentLifecycleEvent {
 export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistry): void {
   registry.register("acp", () => new AcpClientAdapter())
   registry.register("codex-app-server", createCodexAppServerAdapterFactory())
-  registry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
+  registry.register("opencode-v2", createOpenCodeV2AdapterFactory())
   registry.register("a2a", () => new A2aClientAdapter())
   // Managed install/facts are local-host commands; the integration wiring
   // hands DSH the local process host (paired remote installation is not exposed).
@@ -4728,7 +4731,7 @@ export class ExternalAgentManager {
           negotiated: {
             ...adapter.capabilities,
             ...(instance.config.protocol === "opencode-v2" &&
-            !canProjectOpenCodeV2Mcp(instance.config)
+            !canProjectOpenCodeV2McpOnThisHost(instance.config)
               ? { mcpTools: false }
               : {}),
           },

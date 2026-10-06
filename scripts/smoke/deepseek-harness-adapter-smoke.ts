@@ -9,8 +9,7 @@ import { createInterface } from "node:readline"
 import { NodeExternalAgentBackend } from "@/cli/src/runtime/external/node-backend"
 import { DshSdkClientAdapter } from "@cognia/agent-dsh/sdk-client"
 import { createProcessPlaneHost } from "@/lib/ai/agent/external/host/process-host"
-import { OpenCodeV2ClientAdapter } from "@/lib/ai/agent/external/runtimes/opencode/opencode-v2-client"
-import { launchOpenCodeV2Service } from "@/lib/ai/agent/external/runtimes/opencode/opencode-v2-launcher"
+import { createOpenCodeV2Adapter } from "@/lib/ai/agent/external/integrations/opencode"
 import { buildGatewayTaskConfig } from "@/lib/ai/agent/external/config/gateway-task"
 import { prepareGatewayTask } from "@/cli/src/runtime/external/gateway-task"
 import { PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
@@ -261,21 +260,24 @@ async function main() {
   }
   const makeAdapter = () =>
     opencode
-      ? new OpenCodeV2ClientAdapter((config, servers, cwd, signal) =>
-          launchOpenCodeV2Service(config, servers, cwd, signal, {
-            available: () => true,
-            listen: async (name, callback) => host.listen(name, callback),
-            invoke: async (name, args) => {
-              if (name === "spawn_external_agent") {
-                const prepared = prepareGatewayTask(
-                  args.config as Parameters<typeof prepareGatewayTask>[0],
-                  dataRoot
-                )
-                return host.invoke(name, { ...args, config: prepared.config })
-              }
-              return host.invoke(name, args)
+      ? createOpenCodeV2Adapter(
+          createProcessPlaneHost(
+            {
+              listen: async (name, callback) => host.listen(name, callback),
+              invoke: async (name, args) => {
+                if (name === "spawn_external_agent") {
+                  const prepared = prepareGatewayTask(
+                    args.config as Parameters<typeof prepareGatewayTask>[0],
+                    dataRoot
+                  )
+                  return host.invoke(name, { ...args, config: prepared.config })
+                }
+                return host.invoke(name, args)
+              },
             },
-          })
+            () => true
+          ),
+          { hasSelectedSandbox: () => false, processesLocal: () => true }
         )
       : pi
         ? createPiRpcAdapter(

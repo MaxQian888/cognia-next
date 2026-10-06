@@ -1,4 +1,4 @@
-import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
+import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./elicitation"
 
 describe("ACP elicitation validation", () => {
   it("normalizes native Kimi multi-select anyOf items and validates selections", () => {

@@ -14,8 +14,8 @@ import type {
   ExternalAgentEvent,
   ExternalAgentMessage,
   ExternalAgentTokenUsage,
-} from "@/types/agent/external-agent"
-import { normalizeAcpElicitationRequest } from "../acp/acp-elicitation"
+} from "@cognia/agent-contracts/external-agent"
+import { normalizeAcpElicitationRequest } from "@cognia/agent-runtime-kit/elicitation"
 
 // Restored forms use the HTTP representation, whose numeric values can include
 // serialized non-finite values; live events are assignable to this wider shape.

@@ -1,9 +1,5 @@
 import type { FormInfo, SessionMessageInfo } from "@opencode/client"
-import {
-  OpenCodeV2EventMapper,
-  mapOpenCodeV2Messages,
-  type OpenCodeEvent,
-} from "./opencode-v2-events"
+import { OpenCodeV2EventMapper, mapOpenCodeV2Messages, type OpenCodeEvent } from "./v2-events"
 
 function event(type: string, data: Record<string, unknown>, created = 1_800_000_000_000) {
   return { id: "evt", type, data, created } as unknown as OpenCodeEvent

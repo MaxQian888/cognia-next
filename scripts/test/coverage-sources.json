@@ -139,7 +139,7 @@
     "!components/editor/diagnostics/types.ts",
     "!lib/ai/agent/external/runtimes/acp/acp-client.ts",
     "!lib/ai/agent/external/manager.ts",
-    "!lib/ai/agent/external/runtimes/opencode/opencode-client.ts",
+    "!packages/agent-opencode/src/client.ts",
     "!packages/web-search/src/search-type-router.ts",
     "!**/*.stories.{js,jsx,ts,tsx}",
     "!lib/storybook/**",

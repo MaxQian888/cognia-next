@@ -100,7 +100,9 @@ and take everything machine-facing from the constructor:
   files: every read, write and delete names its allowed roots, and
   `isWithinRoot` rejects a path before an agent process could open it outside
   the plane (Aider's chat files and context files);
-- `AgentOutboundGate` (`host.ts:145`), **required**, called on every prompt or
+- `AgentFetch` when the runtime is reached over HTTP (OpenCode services, A2A
+  peers): the host's streaming fetch, never the global one;
+- `AgentOutboundGate`, **required**, called on every prompt or
   payload the adapter sends;
 - a runtime-specific services interface for questions only the host can
   answer, typed in the package and implemented by the host (Pi's

@@ -1,0 +1,51 @@
+{
+  "name": "@cognia/agent-opencode",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenCode integration for Cognia agents (ADR-0217): the opencode-v2 adapter over the current OpenCode service API and the opencode server adapter, their event mapping, the session-owned service launcher and service discovery, over host-provided fetch, process and placement ports.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 tsup",
+    "typecheck": "tsc --noEmit",
+    "pack:test": "node ../../scripts/build/pack-test-agent-package.mjs agent-opencode"
+  },
+  "dependencies": {
+    "@cognia/agent-contracts": "workspace:*",
+    "@cognia/agent-runtime-kit": "workspace:*"
+  },
+  "peerDependencies": {
+    "@opencode-ai/sdk": "^1.18.32",
+    "@opencode/client": "^2.0.18"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@cognia/redact": "workspace:*"
+  }
+}

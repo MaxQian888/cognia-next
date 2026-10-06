@@ -42,7 +42,10 @@ import {
   type JsonRpcRequestDeadline,
 } from "@cognia/agent-runtime-kit/json-rpc-peer"
 import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./acp-wire-codec"
-import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
+import {
+  normalizeAcpElicitationRequest,
+  validateAcpElicitationResponse,
+} from "@cognia/agent-runtime-kit/elicitation"
 import { spawnReclaimingOrphan } from "@cognia/agent-runtime-kit/spawn-reclaim"
 import { buildAgentEnv } from "../../config/env-builder"
 import {

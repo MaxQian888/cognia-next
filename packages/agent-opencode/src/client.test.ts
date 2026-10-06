@@ -9,7 +9,7 @@ import type {
   ExternalAgentConfig,
   ExternalAgentMessage,
   AcpPermissionResponse,
-} from "@/types/agent/external-agent"
+} from "@cognia/agent-contracts/external-agent"
 
 // --- Mock the SDK client factory -------------------------------------------
 const mockCreateOpencodeClient = jest.fn()
@@ -19,35 +19,58 @@ jest.mock("@opencode-ai/sdk/client", () => ({
 
 // --- Mock the desktop runtime + native process bridge ----------------------
 const mockIsTauri = jest.fn(() => false)
-jest.mock("@/lib/utils", () => {
-  const actual = jest.requireActual("@/lib/utils")
-  return { ...actual, isTauri: () => mockIsTauri() }
-})
 
 const mockSpawn = jest.fn()
 const mockKill = jest.fn()
 const mockOnStdout = jest.fn()
 const mockOnStderr = jest.fn()
 const mockOnExit = jest.fn()
-jest.mock("@/lib/native/external-agent", () => ({
-  spawnExternalAgent: (...args: unknown[]) => mockSpawn(...args),
-  killExternalAgent: (...args: unknown[]) => mockKill(...args),
-  onExternalAgentStdout: (...args: unknown[]) => mockOnStdout(...args),
-  onExternalAgentStderr: (...args: unknown[]) => mockOnStderr(...args),
-  onExternalAgentExit: (...args: unknown[]) => mockOnExit(...args),
-}))
 
 type StreamingFetchArgs = [RequestInfo | URL, RequestInit?]
 const mockedStreamingFetch = jest.fn(
   async (..._args: StreamingFetchArgs): Promise<Response> => new Response("ok")
 )
-jest.mock("@/lib/network/platform-streaming-fetch", () => ({
+import type { AgentProcessHost } from "@cognia/agent-contracts/host"
+import { SILENT_AGENT_LOGGER } from "@cognia/agent-contracts/host"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { OpenCodeClientAdapter, type OpenCodeClientDeps } from "./client"
+import { OPENCODE_SERVER_EXECUTION_SEMANTICS } from "./manifest"
+
+/** The local process plane, available only where the fake host says it is. */
+const processHost: AgentProcessHost = {
+  get available() {
+    return mockIsTauri()
+  },
+  spawn: async (spec) => {
+    await mockSpawn(spec)
+    return spec.id
+  },
+  send: jest.fn(),
+  kill: (processId) => mockKill(processId),
+  commandExists: jest.fn(),
+  onStdoutLine: (listener) =>
+    mockOnStdout((event: { agentId: string; data: string }) =>
+      listener({ processId: event.agentId, data: event.data })
+    ),
+  onStdoutRaw: jest.fn(),
+  onStderr: (listener) =>
+    mockOnStderr((event: { agentId: string; data: string }) =>
+      listener({ processId: event.agentId, data: event.data })
+    ),
+  onExit: (listener) =>
+    mockOnExit((event: { agentId: string; code: number }) =>
+      listener({ processId: event.agentId, code: event.code })
+    ),
+}
+
+const deps = (): OpenCodeClientDeps => ({
   // Forwarded by rest so arity is preserved: `fetch(request)` and
   // `fetch(request, undefined)` must stay distinguishable in the assertions.
-  platformStreamingFetch: (...args: StreamingFetchArgs) => mockedStreamingFetch(...args),
-}))
-
-import { OpenCodeClientAdapter } from "./opencode-client"
+  fetch: (...args: StreamingFetchArgs) => mockedStreamingFetch(...args),
+  processHost,
+  outboundGate: hasNoLeakingPiiDeep,
+  logger: SILENT_AGENT_LOGGER,
+})
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -200,7 +223,7 @@ beforeEach(() => {
 
 describe("OpenCodeClientAdapter — basic state", () => {
   it("has the expected protocol identifier and starts disconnected", () => {
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     expect(a.protocol).toBe("opencode")
     expect(a.connectionStatus).toBe("disconnected")
     expect(a.isConnected()).toBe(false)
@@ -208,7 +231,7 @@ describe("OpenCodeClientAdapter — basic state", () => {
   })
 
   it("reports extensions as unknown before connect and supported once connected", () => {
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     // Before connect there is no server to exercise — report unknown, not a
     // hardcoded supported.
     const before = a.getSessionExtensionSupport()
@@ -227,7 +250,7 @@ describe("OpenCodeClientAdapter — basic state", () => {
   })
 
   it("exposes canonical init metadata and empty auth methods", () => {
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     expect(a.getAcpInitializationMetadata().agentInfo?.name).toBe("opencode")
     expect(a.isAuthenticationRequired()).toBe(false)
     expect(a.getAuthMethods()).toEqual([])
@@ -244,7 +267,7 @@ describe("OpenCodeClientAdapter — connect", () => {
   it("refuses a managed configuration that replaces the task gateway", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     const expected = {
       model: "cognia/model",
       small_model: "cognia/model",
@@ -264,7 +287,7 @@ describe("OpenCodeClientAdapter — connect", () => {
   it("connects using the explicit endpoint and probes via config.get (not SSE)", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
 
     await a.connect(buildConfig({ network: { endpoint: "http://example:9999/" } }))
 
@@ -280,7 +303,7 @@ describe("OpenCodeClientAdapter — connect", () => {
 
   it("falls back to the default local URL when no endpoint is configured", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ metadata: {} }))
     expect(mockCreateOpencodeClient).toHaveBeenCalledWith(
       expect.objectContaining({ baseUrl: "http://127.0.0.1:4096" })
@@ -292,7 +315,7 @@ describe("OpenCodeClientAdapter — connect", () => {
       config: { get: jest.fn().mockRejectedValue(new Error("ECONNREFUSED")) },
     })
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await expect(a.connect(buildConfig({ network: { endpoint: "http://x" } }))).rejects.toThrow()
     expect(a.connectionStatus).toBe("error")
   })
@@ -300,7 +323,7 @@ describe("OpenCodeClientAdapter — connect", () => {
   it("healthCheck returns true/false based on config.get", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     await expect(a.healthCheck()).resolves.toBe(true)
     client.config.get.mockRejectedValueOnce(new Error("down"))
@@ -315,7 +338,7 @@ describe("OpenCodeClientAdapter — connect", () => {
 describe("OpenCodeClientAdapter — auth fetch", () => {
   async function captureFetch(config: ExternalAgentConfig) {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(config)
     const arg = mockCreateOpencodeClient.mock.calls[0][0] as {
       fetch?: (req: Request) => unknown
@@ -401,7 +424,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
   it("throws when auto-spawn is requested off-desktop", async () => {
     mockIsTauri.mockReturnValue(false)
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await expect(a.connect(buildConfig({ metadata: { autoSpawnServer: true } }))).rejects.toThrow(
       /desktop/i
     )
@@ -425,7 +448,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
       return Promise.resolve(() => {})
     })
 
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(
       buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
     )
@@ -469,7 +492,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
       return Promise.resolve(() => {})
     })
 
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(
       buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
     )
@@ -489,7 +512,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
     mockOnExit.mockResolvedValue(() => {})
     mockOnStdout.mockResolvedValue(() => {})
 
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await expect(
       a.connect(
         buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
@@ -517,7 +540,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
       return Promise.resolve(() => {})
     })
 
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(
       buildConfig({ metadata: { autoSpawnServer: true }, process: { command: "opencode" } })
     )
@@ -538,7 +561,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
       return Promise.resolve(() => {})
     })
 
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await expect(a.connect(buildConfig({ metadata: { autoSpawnServer: true } }))).rejects.toThrow(
       /exited/i
     )
@@ -553,7 +576,7 @@ describe("OpenCodeClientAdapter — auto-spawn", () => {
     mockOnStdout.mockResolvedValue(() => {})
     mockOnExit.mockResolvedValue(() => {})
 
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await expect(
       a.connect(
         buildConfig({
@@ -575,7 +598,7 @@ describe("OpenCodeClientAdapter — streaming prompt", () => {
     const client = makeFakeClient()
     client.event.subscribe = jest.fn().mockResolvedValue(streamOf(events))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     return { a, client }
   }
@@ -659,7 +682,7 @@ describe("OpenCodeClientAdapter — streaming prompt", () => {
 // ---------------------------------------------------------------------------
 
 describe("translateSdkEvent", () => {
-  const a = new OpenCodeClientAdapter()
+  const a = new OpenCodeClientAdapter(deps())
 
   it("maps reasoning parts to thinking", () => {
     const events = a.translateSdkEvent("s1", {
@@ -711,7 +734,7 @@ describe("translateSdkEvent", () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
     mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 200 }))
-    const connected = new OpenCodeClientAdapter()
+    const connected = new OpenCodeClientAdapter(deps())
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
     const events = connected.translateSdkEvent("s1", {
@@ -750,7 +773,7 @@ describe("translateSdkEvent", () => {
   it("maps permission.v2.asked and replies through the session-scoped v2 endpoint", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
     mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 204 }))
-    const connected = new OpenCodeClientAdapter()
+    const connected = new OpenCodeClientAdapter(deps())
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
     const events = connected.translateSdkEvent("s1", {
@@ -787,7 +810,7 @@ describe("translateSdkEvent", () => {
   ])("maps %s and returns ordered answers", async (eventType, expectedPath) => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
     mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 200 }))
-    const connected = new OpenCodeClientAdapter()
+    const connected = new OpenCodeClientAdapter(deps())
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
     const events = connected.translateSdkEvent("s1", {
@@ -846,7 +869,7 @@ describe("translateSdkEvent", () => {
   it("rejects a partially malformed question payload instead of leaving the server blocked", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
     mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 200 }))
-    const connected = new OpenCodeClientAdapter()
+    const connected = new OpenCodeClientAdapter(deps())
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
     const events = connected.translateSdkEvent("s1", {
@@ -870,7 +893,7 @@ describe("translateSdkEvent", () => {
   it("correlates pending v2 interactions by session and request id", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
     mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 204 }))
-    const connected = new OpenCodeClientAdapter()
+    const connected = new OpenCodeClientAdapter(deps())
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
     for (const sessionID of ["s1", "s2"]) {
@@ -1041,7 +1064,7 @@ describe("OpenCodeClientAdapter — multimodal prompt parts", () => {
       .fn()
       .mockResolvedValue(streamOf([{ type: "session.idle", properties: { sessionID: "s1" } }]))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession()
     const msg = {
@@ -1081,7 +1104,7 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
   beforeEach(async () => {
     client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    a = new OpenCodeClientAdapter()
+    a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
   })
 
@@ -1198,7 +1221,7 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
       data: [{ name: "/compact", description: "Compact", args: { focus: "string" } }],
     })
     mockCreateOpencodeClient.mockReturnValue(client)
-    const adapter = new OpenCodeClientAdapter()
+    const adapter = new OpenCodeClientAdapter(deps())
     await adapter.connect(buildConfig())
     const session = await adapter.createSession()
 
@@ -1230,7 +1253,7 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
       data: [{ name: "compress", args: { focus: "string" } }],
     })
     mockCreateOpencodeClient.mockReturnValue(client)
-    const adapter = new OpenCodeClientAdapter()
+    const adapter = new OpenCodeClientAdapter(deps())
     await adapter.connect(buildConfig())
     const session = await adapter.createSession()
 
@@ -1267,7 +1290,7 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
   it("reports compaction unavailable when neither model nor command exists", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    const adapter = new OpenCodeClientAdapter()
+    const adapter = new OpenCodeClientAdapter(deps())
     await adapter.connect(buildConfig())
     const session = await adapter.createSession()
 
@@ -1317,7 +1340,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
   it("discovers providers/agents/commands/tools and builds config options", async () => {
     const client = richClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
 
     expect(a.getAvailableAgents()).toHaveLength(1)
@@ -1345,7 +1368,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     const client = makeFakeClient()
     client.event.subscribe = jest.fn().mockResolvedValue(streamOf([]))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession({ systemPrompt: "be brief" })
     await collect(
@@ -1367,7 +1390,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     const client = makeFakeClient()
     client.event.subscribe = jest.fn().mockResolvedValue(streamOf([]))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(
       buildConfig({ network: { endpoint: "http://x" }, metadata: { model: "anthropic/claude-x" } })
     )
@@ -1384,7 +1407,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     const client = richClient()
     client.event.subscribe = jest.fn().mockResolvedValue(streamOf([]))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession()
     client.config.update.mockClear()
@@ -1419,7 +1442,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
       },
     })
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession()
     const out = await collect(a.prompt(session.id, textMessage("hi")))
@@ -1442,7 +1465,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     const client = makeFakeClient()
     client.event.subscribe = jest.fn().mockResolvedValue(failingStream(new Error("stream lost")))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession()
 
@@ -1461,7 +1484,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
   it("blocks PII-bearing prompts before either OpenCode prompt endpoint is called", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession()
 
@@ -1483,7 +1506,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     async ({ encoding, content }) => {
       const client = makeFakeClient()
       mockCreateOpencodeClient.mockReturnValue(client)
-      const a = new OpenCodeClientAdapter()
+      const a = new OpenCodeClientAdapter(deps())
       await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
       const session = await a.createSession()
       const message = textMessage("inspect the attachment")
@@ -1507,7 +1530,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     client.session.promptAsync = jest.fn().mockRejectedValue(new Error("async fail"))
     client.session.prompt = jest.fn().mockRejectedValue(new Error("sync fail"))
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     const session = await a.createSession()
     const out = await collect(a.prompt(session.id, textMessage("hi")))
@@ -1516,7 +1539,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
   })
 
   it("translateSdkEvent maps session.error to a recoverable error", () => {
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     const events = a.translateSdkEvent("s1", {
       type: "session.error",
       properties: { sessionID: "s1", error: { data: { message: "boom" } } },
@@ -1525,7 +1548,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
   })
 
   it("translateSdkEvent covers text-without-delta, pending tool, and unknown events", () => {
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     // Full text (no incremental delta) falls back to part.text.
     expect(
       a.translateSdkEvent("s1", {
@@ -1586,7 +1609,7 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     const client = makeFakeClient()
     client.vcs.get = jest.fn().mockResolvedValue({ error: { message: "vcs blew up" } })
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
     await expect(a.getVcsInfo()).rejects.toThrow(/vcs blew up/)
   })
@@ -1596,9 +1619,15 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
       config: { get: jest.fn().mockResolvedValue({ error: { message: "not ready" } }) },
     })
     mockCreateOpencodeClient.mockReturnValue(client)
-    const a = new OpenCodeClientAdapter()
+    const a = new OpenCodeClientAdapter(deps())
     await expect(a.connect(buildConfig({ network: { endpoint: "http://x" } }))).rejects.toThrow(
       /not ready/
     )
+  })
+})
+
+describe("OpenCodeClientAdapter — host ports", () => {
+  it("declares a turn-scoped cancel on a shared server", () => {
+    expect(new OpenCodeClientAdapter(deps()).semantics).toBe(OPENCODE_SERVER_EXECUTION_SEMANTICS)
   })
 })

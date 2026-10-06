@@ -35,12 +35,12 @@ jest.mock("./runtimes/acp/acp-client", () => ({
     }
   },
 }))
-jest.mock("./runtimes/opencode/opencode-client", () => ({
+jest.mock("@cognia/agent-opencode/client", () => ({
   OpenCodeClientAdapter: class {
     readonly protocol = "opencode"
   },
 }))
-jest.mock("./runtimes/opencode/opencode-v2-client", () => ({
+jest.mock("@cognia/agent-opencode/v2-client", () => ({
   OpenCodeV2ClientAdapter: class {
     readonly protocol = "opencode-v2"
   },
@@ -4201,7 +4201,7 @@ it("retires only the exited Devin process and resumes stale preferred sessions i
 
 describe("current OpenCode native client access", () => {
   it("returns only the connected current OpenCode adapter", () => {
-    const { OpenCodeV2ClientAdapter } = jest.requireMock("./runtimes/opencode/opencode-v2-client")
+    const { OpenCodeV2ClientAdapter } = jest.requireMock("@cognia/agent-opencode/v2-client")
     const manager = freshManager()
     const adapter = new OpenCodeV2ClientAdapter()
     const adapters = (manager as unknown as { adapters: Map<string, unknown> }).adapters

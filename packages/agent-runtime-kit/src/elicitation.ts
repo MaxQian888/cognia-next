@@ -4,7 +4,7 @@ import type {
   AcpElicitationResponse,
   AcpElicitationSchema,
   AcpElicitationValue,
-} from "@/types/agent/external-agent"
+} from "@cognia/agent-contracts/external-agent"
 
 const MAX_FIELDS = 64
 const SECRET_FIELD =

@@ -10,8 +10,7 @@
  * @see https://opencode.ai/docs/server/
  */
 
-import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client"
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import type { OpencodeClient } from "@opencode-ai/sdk/client"
 import type {
   Session as OcSession,
   Message as OcMessage,
@@ -27,11 +26,16 @@ import type {
   Pty as OcPty,
 } from "@opencode-ai/sdk/client"
 
-import { loggers } from "@cognia/logging"
-import { isTauri } from "@/lib/utils"
-import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "../../protocol-adapter"
-import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
+import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
+import type {
+  AgentFetch,
+  AgentLogger,
+  AgentOutboundGate,
+  AgentProcessHost,
+} from "@cognia/agent-contracts/host"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
+import { OPENCODE_SERVER_EXECUTION_SEMANTICS, OPENCODE_SERVER_PROTOCOL } from "./manifest"
 import { isExternalAgentAlreadyRunningError } from "@cognia/agent-runtime-kit/spawn-reclaim"
 import {
   isExplicitlyUnsupportedCapabilityError,
@@ -58,9 +62,7 @@ import type {
   ExternalAgentExtensionSupportStatus,
   AcpAvailableCommand,
   AcpPlanEntry,
-} from "@/types/agent/external-agent"
-
-const log = loggers.agent.child("opencode-client")
+} from "@cognia/agent-contracts/external-agent"
 
 // ============================================================================
 // Logging helper
@@ -124,9 +126,10 @@ function toBase64(input: string): string {
  */
 export function hasNoLeakingOpenCodePromptInput(
   message: ExternalAgentMessage,
+  gate: AgentOutboundGate,
   metadata?: Record<string, unknown>
 ): boolean {
-  return hasNoLeakingExternalAgentPromptInput(message, metadata)
+  return promptInputPassesGate(message, gate, metadata)
 }
 
 /** Map an OpenCode AssistantMessage `tokens` object to canonical token usage. */
@@ -266,8 +269,32 @@ interface ProviderListData {
  * Supports both local server connection (via `opencode serve`) and
  * direct connection to a running server endpoint.
  */
+/** What the host hands the OpenCode server adapter. */
+export interface OpenCodeClientDeps {
+  /** Every SDK request and the event stream go through the host's fetch. */
+  fetch: AgentFetch
+  /** Auto-spawns `opencode serve` when configured; needs a local process plane. */
+  processHost: AgentProcessHost
+  /** Every prompt and request body passes it. */
+  outboundGate: AgentOutboundGate
+  logger: AgentLogger
+}
+
 export class OpenCodeClientAdapter extends BaseProtocolAdapter {
-  readonly protocol = "opencode"
+  readonly protocol = OPENCODE_SERVER_PROTOCOL
+  readonly semantics = OPENCODE_SERVER_EXECUTION_SEMANTICS
+  private readonly fetch: AgentFetch
+  private readonly processHost: AgentProcessHost
+  private readonly outboundGate: AgentOutboundGate
+  private readonly logger: AgentLogger
+
+  constructor(deps: OpenCodeClientDeps) {
+    super()
+    this.fetch = deps.fetch
+    this.processHost = deps.processHost
+    this.outboundGate = deps.outboundGate
+    this.logger = deps.logger
+  }
 
   private client!: OpencodeClient
   private abortControllers: Map<string, AbortController> = new Map()
@@ -314,6 +341,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       // bearer token / custom headers are configured.
       this.baseUrl = baseUrl
       this.requestFetch = this.buildTransportFetch(config)
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/client")
       this.client = createOpencodeClient({ baseUrl, fetch: this.requestFetch })
 
       // Probe reachability with a cheap, non-SSE call. When we auto-spawned the
@@ -337,7 +365,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         }
       }
 
-      log.info(`Connected to OpenCode server at ${baseUrl}`)
+      this.logger.info(`Connected to OpenCode server at ${baseUrl}`)
 
       // Discover capabilities
       await this.discoverCapabilities()
@@ -357,7 +385,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       this._connectionStatus = "error"
       // Tear down a server we spawned if the connection ultimately failed.
       await this.killSpawnedServer()
-      log.error("Failed to connect to OpenCode server:", error)
+      this.logger.error("Failed to connect to OpenCode server:", toLogContext(error))
       throw error
     }
   }
@@ -375,9 +403,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
     const autoSpawn = config.metadata?.autoSpawnServer === true || Boolean(config.process?.command)
     if (autoSpawn) {
-      if (!isTauri()) {
+      if (!this.processHost.available) {
         throw new Error(
-          "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead."
+          "Auto-spawning an OpenCode server requires a desktop or CLI process host; configure a server endpoint instead."
         )
       }
       return await this.spawnServer(config)
@@ -445,7 +473,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
           request.headers.set(key, value)
         }
       }
-      return platformStreamingFetch(request)
+      return this.fetch(request)
     }
   }
 
@@ -485,8 +513,6 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
    * stdout/exit events) — no new Rust commands.
    */
   private async spawnServer(config: ExternalAgentConfig): Promise<string> {
-    const native = await import("@/lib/native/external-agent")
-
     const id = `opencode-server-${config.id}`
     const command = config.process?.command ?? "opencode"
     const hostname =
@@ -502,7 +528,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     const startupTimeout = config.process?.startupTimeout ?? 10000
 
     const spawnOnce = () =>
-      native.spawnExternalAgent({
+      this.processHost.spawn({
         id,
         command,
         args,
@@ -511,7 +537,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       })
 
     // Register listeners before spawning so we never miss the listening line.
-    let urlPromise = this.waitForServerUrl(native, id, startupTimeout)
+    let urlPromise = this.waitForServerUrl(id, startupTimeout)
 
     try {
       await spawnOnce()
@@ -524,15 +550,15 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       // while every respawn is refused — bricking the agent until the whole app
       // restarts. Reclaim the id. Safe here because `connect()` returns early
       // when already connected, so nothing in this realm consumes that child.
-      log.warn("Reclaiming an orphaned OpenCode server process", { id })
-      await native.killExternalAgent(id)
+      this.logger.warn("Reclaiming an orphaned OpenCode server process", { id })
+      await this.processHost.kill(id)
 
       // Re-arm only AFTER the kill: the orphan's exit event carries this same
       // id, and the wait above would read it as "server exited before becoming
       // ready". The supervisor emits that exit asynchronously, so if it still
       // slips into the fresh wait this connect fails and the manager's retry —
       // which now finds the id free — succeeds.
-      urlPromise = this.waitForServerUrl(native, id, startupTimeout)
+      urlPromise = this.waitForServerUrl(id, startupTimeout)
       try {
         await spawnOnce()
       } catch (retryError) {
@@ -546,16 +572,12 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       this.spawnedServerId = id
       return url.replace(/\/$/, "")
     } catch (error) {
-      await native.killExternalAgent(id).catch(() => {})
+      await this.processHost.kill(id).catch(() => {})
       throw error
     }
   }
 
-  private async waitForServerUrl(
-    native: typeof import("@/lib/native/external-agent"),
-    id: string,
-    timeoutMs: number
-  ): Promise<string> {
+  private async waitForServerUrl(id: string, timeoutMs: number): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       let settled = false
       let unlistenStdout: () => void = () => {}
@@ -589,9 +611,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         }
       }
 
-      void native
-        .onExternalAgentStdout((event) => {
-          if (settled || event.agentId !== id) return
+      void this.processHost
+        .onStdoutLine((event) => {
+          if (settled || event.processId !== id) return
           stdoutBuffer += event.data
           scan(stdoutBuffer)
         })
@@ -602,9 +624,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
 
       // Some runtimes route the startup banner to stderr — scan both streams
       // rather than timing out when stdout stays silent.
-      void native
-        .onExternalAgentStderr((event) => {
-          if (settled || event.agentId !== id) return
+      void this.processHost
+        .onStderr((event) => {
+          if (settled || event.processId !== id) return
           stderrBuffer += event.data
           scan(stderrBuffer)
         })
@@ -613,9 +635,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
           else unlistenStderr = un
         })
 
-      void native
-        .onExternalAgentExit((event) => {
-          if (settled || event.agentId !== id) return
+      void this.processHost
+        .onExit((event) => {
+          if (settled || event.processId !== id) return
           settled = true
           cleanup()
           reject(new Error(`OpenCode server exited before becoming ready (code ${event.code})`))
@@ -632,8 +654,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     const id = this.spawnedServerId
     this.spawnedServerId = null
     try {
-      const native = await import("@/lib/native/external-agent")
-      await native.killExternalAgent(id)
+      await this.processHost.kill(id)
     } catch {
       // Best effort — the process may already be gone.
     }
@@ -661,7 +682,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     this.requestFetch = undefined
     this._connectionStatus = "disconnected"
     this._config = undefined
-    log.info("Disconnected from OpenCode server")
+    this.logger.info("Disconnected from OpenCode server")
   }
 
   async healthCheck(): Promise<boolean> {
@@ -686,7 +707,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         this.providerInfo = resp.data as unknown as ProviderListData
       }
     } catch (error: unknown) {
-      log.warn("Failed to discover providers:", toLogContext(error))
+      this.logger.warn("Failed to discover providers:", toLogContext(error))
     }
 
     // Discover agents
@@ -700,7 +721,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         }>
       }
     } catch (error: unknown) {
-      log.warn("Failed to discover agents:", toLogContext(error))
+      this.logger.warn("Failed to discover agents:", toLogContext(error))
     }
 
     // Discover commands
@@ -714,7 +735,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         }>
       }
     } catch (error: unknown) {
-      log.warn("Failed to discover commands:", toLogContext(error))
+      this.logger.warn("Failed to discover commands:", toLogContext(error))
     }
 
     // Discover tools
@@ -734,7 +755,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         }
       }
     } catch (error: unknown) {
-      log.debug("Tool discovery not available:", toLogContext(error))
+      this.logger.debug("Tool discovery not available:", toLogContext(error))
     }
   }
 
@@ -860,7 +881,9 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     const agent =
       typeof options?.context?.custom?.agent === "string" ? options.context.custom.agent : undefined
 
-    if (!hasNoLeakingOpenCodePromptInput(message, { systemPrompt, model, agent })) {
+    if (
+      !hasNoLeakingOpenCodePromptInput(message, this.outboundGate, { systemPrompt, model, agent })
+    ) {
       throw new Error("OpenCode outbound prompt blocked by the PII gate")
     }
 
@@ -883,7 +906,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       ...(agent ? { agent } : {}),
     }
 
-    if (!hasNoLeakingPiiDeep(promptBody)) {
+    if (!this.outboundGate(promptBody)) {
       throw new Error("OpenCode outbound prompt blocked by the PII gate")
     }
 
@@ -1004,7 +1027,10 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         },
       })
     } catch (error: unknown) {
-      log.warn(`Failed to respond to permission ${response.requestId}:`, toLogContext(error))
+      this.logger.warn(
+        `Failed to respond to permission ${response.requestId}:`,
+        toLogContext(error)
+      )
     }
   }
 
@@ -1053,9 +1079,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     })
     // `requestFetch` is set for the life of a connection; the fallback covers
     // a reply that races `disconnect()` clearing it.
-    const response = await (this.requestFetch
-      ? this.requestFetch(request)
-      : platformStreamingFetch(request))
+    const response = await (this.requestFetch ? this.requestFetch(request) : this.fetch(request))
     if (!response.ok) {
       throw new Error(`OpenCode interaction reply failed with HTTP ${response.status}`)
     }
@@ -1206,7 +1230,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         body: { [configId]: value },
       })
     } catch (error: unknown) {
-      log.warn(`Failed to set config option ${configId}:`, toLogContext(error))
+      this.logger.warn(`Failed to set config option ${configId}:`, toLogContext(error))
     }
 
     await this.refreshSessionConfigOptions(sessionId)
@@ -1221,7 +1245,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   // Auth Methods
   // ============================================================================
 
-  getAuthMethods(): import("@/types/agent/external-agent").AcpAuthMethod[] {
+  getAuthMethods(): import("@cognia/agent-contracts/external-agent").AcpAuthMethod[] {
     if (!this.providerInfo) return []
     return this.providerInfo.connected.map((id) => ({
       type: "agent",
@@ -2166,7 +2190,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       }
 
       default:
-        log.debug(`Unhandled OpenCode event type: ${event.type}`)
+        this.logger.debug(`Unhandled OpenCode event type: ${event.type}`)
     }
 
     return events
@@ -2276,7 +2300,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
           ? `/api/session/${encodedSessionId}/question/${encodedRequestId}/reject`
           : `/question/${encodedRequestId}/reject`
         void this.postInteraction(path).catch((error) => {
-          log.warn(
+          this.logger.warn(
             `Failed to reject malformed OpenCode question ${requestId}:`,
             toLogContext(error)
           )

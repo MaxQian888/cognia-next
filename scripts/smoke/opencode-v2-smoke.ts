@@ -312,7 +312,7 @@ async function main() {
       const adapterModule = join(scratch, "adapter.mjs")
       await symlink(resolve("node_modules"), join(scratch, "node_modules"), "dir")
       await build({
-        entryPoints: [resolve("lib/ai/agent/external/runtimes/opencode/opencode-v2-client.ts")],
+        entryPoints: [resolve("lib/ai/agent/external/integrations/opencode.ts")],
         outfile: adapterModule,
         bundle: true,
         platform: "node",
@@ -320,8 +320,8 @@ async function main() {
         packages: "external",
         logLevel: "silent",
       })
-      const { OpenCodeV2ClientAdapter } = await import(pathToFileURL(adapterModule).href)
-      const adapter = new OpenCodeV2ClientAdapter()
+      const { createOpenCodeV2Adapter } = await import(pathToFileURL(adapterModule).href)
+      const adapter = createOpenCodeV2Adapter()
       try {
         await adapter.connect({
           id: "smoke",

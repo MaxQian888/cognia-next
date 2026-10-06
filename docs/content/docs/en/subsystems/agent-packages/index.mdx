@@ -26,7 +26,8 @@ orchestration rules; the host owns the machine, policy and persistence.
         ▲                      spawn reclaim, content blocks, history builders
 @cognia/agent-<integration>    ./manifest, the runtime client(s), ./history when the
         ▲                      runtime keeps its own session store
-        │                      (today: agent-dsh, agent-codex, agent-aider, agent-pi)
+        │                      (today: agent-dsh, agent-codex, agent-aider,
+        │                      agent-pi, agent-opencode)
 host (app, CLI, headless)      registers integrations, implements the ports, owns policy,
                                PII, sandbox, persistence and the mapping into its own rows
 
@@ -47,6 +48,7 @@ flowchart BT
   codex["@cognia/agent-codex"] --> kit
   aider["@cognia/agent-aider"] --> kit
   pi["@cognia/agent-pi"] --> kit
+  opencode["@cognia/agent-opencode"] --> kit
   orch["@cognia/agent-orchestration"]
   subgraph host["App host"]
     manager["ExternalAgentManager<br/>lib/ai/agent/external"]
@@ -64,6 +66,7 @@ flowchart BT
   manager --> codex
   manager --> aider
   manager --> pi
+  manager --> opencode
   ports --> contracts
   team --> orch
   dexie --> orch
@@ -76,10 +79,11 @@ flowchart BT
 | Package | Entry points | Depends on |
 | --- | --- | --- |
 | `@cognia/agent-contracts` | `./ecosystem`, `./adapter`, `./adapter-extension`, `./semantics`, `./host`, `./history`, `./external-agent`, `./canonical-event`, … | type-only `@agentclientprotocol/sdk` |
-| `@cognia/agent-runtime-kit` | `./base-adapter`, `./json-rpc-peer`, `./history`, `./prompt-gate`, `./plugin-compat`, … | contracts |
+| `@cognia/agent-runtime-kit` | `./base-adapter`, `./json-rpc-peer`, `./history`, `./prompt-gate`, `./elicitation`, `./plugin-compat`, … | contracts |
 | `@cognia/agent-dsh` | `./manifest`, `./sdk-client`, `./transport`, `./managed-launch`, … | contracts, runtime kit |
 | `@cognia/agent-aider` | `./manifest`, `./cli-client`, `./history` | contracts, runtime kit |
 | `@cognia/agent-pi` | `./manifest`, `./rpc-client`, `./rpc-peer`, `./rpc-events`, `./permission`, `./auth` | contracts, runtime kit |
+| `@cognia/agent-opencode` | `./manifest`, `./v2-client`, `./v2-events`, `./v2-launcher`, `./discovery`, `./client` | contracts, runtime kit; peers `@opencode/client`, `@opencode-ai/sdk` |
 | `@cognia/agent-codex` | `./manifest`, `./app-server-client`, `./history`, `./mcp-config`, … | contracts, runtime kit |
 | `@cognia/agent-orchestration` | `./coordinator`, `./store`, `./memory-store`, `./store-contract`, `./decision-ledger`, `./evidence`, … | none |
 
@@ -108,7 +112,7 @@ Rules every package holds:
 | --- | --- |
 | Agent identity | existing sources, reused: `lib/agent-ecosystem` (rows exported by integration manifests), `protocol/external-agent-runtimes.json` (runtimes and presets), `ExternalAgentConfig.id` (instances). No new registry. |
 | Protocol, session store format, execution semantics | the integration package |
-| Process plane, workspace files, credentials, approval policy, PII gate, diagnostic redaction, logging | the host, through ports in `@cognia/agent-contracts/host` |
+| Process plane, workspace files, network fetch, credentials, approval policy, PII gate, diagnostic redaction, logging | the host, through ports in `@cognia/agent-contracts/host` |
 | Mapping a neutral transcript into stored messages | the host (`lib/session-import/history-to-stored.ts`) |
 | Team run state | the host's `TeamRunStore` (Dexie in the app); the coordinator holds no state that survives a restart |
 | Engine selection | the host process (`COGNIA_SIDECAR_ENGINES`) |
@@ -123,7 +127,8 @@ Rules every package holds:
 | Plugin adapters | Done: read against the adapter core when created (`./plugin-compat`) |
 | Aider | Done: `@cognia/agent-aider` (CLI adapter over the process and file ports, history reader); per-turn semantics declared, so a cancelled Aider session is kept rather than retired |
 | Pi | Done: `@cognia/agent-pi` (RPC adapter, peer, event mapping, tool table, auth probes) over the process port plus `PiHostServices`; per-session semantics with a turn-scoped `abort`. The Pi session-history reader is still in `lib/session-import` |
-| ACP, OpenCode, Claude Code, A2A, Devin, Kimi and the ACP-row ecosystems | Not moved yet (Phase 3 in progress) |
+| OpenCode | Done: `@cognia/agent-opencode` (V2 service adapter, events, session-owned launcher, discovery; the legacy server adapter, which Cognia does not register) over `AgentFetch`, the process port and a placement policy |
+| ACP, Claude Code, A2A, Devin, Kimi and the ACP-row ecosystems | Not moved yet (Phase 3 in progress) |
 | Catalog rows generated from manifests, CLI port injection, manager `instanceof` removal | Not done yet (Phase 3) |
 | Engines and tools | Done: the AI SDK engine and the host run without the Claude Agent SDK; the wire and shared runtime modules do not reference it, even for types |
 | Orchestration | Done for run state, ledgers, coordinator, scheduling and recovery; team gates, teammate pool, wave runner and the synthesized workflow stay in the app (they are typed against the app's `AgentTeam` model) |
