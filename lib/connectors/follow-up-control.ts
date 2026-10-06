@@ -10,7 +10,10 @@ import { getDb } from "@/lib/db/schema"
 import { getExecutionRun } from "@/lib/db/execution-runs"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { executeRunControlCommand, type RunControlResult } from "@/lib/execution/run-control"
-import { matchFollowUpItem } from "@/lib/connectors/run-presentation/follow-up-items"
+import {
+  matchFollowUpItem,
+  type FollowUpMatch,
+} from "@/lib/connectors/run-presentation/follow-up-items"
 
 export interface FollowUpControlItem {
   action: RunControlAction | "status"
@@ -161,7 +164,17 @@ export async function maybeHandleRunControlFollowUp(
     ...overrides,
   }
   const now = deps.now()
-  const text = event.plainText.trim()
+  const rawText = event.plainText.trim()
+  const token = /^\[run:([^\]\s]+)\]\s+([\s\S]+)$/.exec(rawText)
+  let selectedRunId: string | undefined
+  if (token) {
+    try {
+      selectedRunId = decodeURIComponent(token[1])
+    } catch {
+      return false
+    }
+  }
+  const text = token?.[2].trim() ?? rawText
   const bindings = (await deps.listBindings(event.conversationKey))
     .filter(
       (binding) =>
@@ -171,18 +184,62 @@ export async function maybeHandleRunControlFollowUp(
     )
     .sort((left, right) => right.updatedAt - left.updatedAt)
 
+  const candidates: Array<{
+    binding: ExecutionRunBinding
+    followUp: FollowUpControlRegistration
+    matched: FollowUpMatch
+  }> = []
   for (const binding of bindings) {
     const followUp = registration(binding)
     if (!followUp || followUp.expiresAt < now) continue
+    if (followUp.runId !== binding.runId) continue
     if (binding.platformMessageId !== followUp.platformMessageId) continue
+    if (selectedRunId && followUp.runId !== selectedRunId) continue
+    if (event.replyTo && event.replyTo.messageId !== followUp.platformMessageId) continue
     const matched = matchFollowUpItem(followUp.items, text)
     if (!matched) continue
+    if (!candidates.some((candidate) => candidate.followUp.runId === followUp.runId)) {
+      candidates.push({ binding, followUp, matched })
+    }
+  }
+  if (candidates.length > 1) {
+    const zh =
+      /[\u4e00-\u9fff]/.test(text) ||
+      candidates.some(({ binding }) => binding.locale?.startsWith("zh"))
+    const choices = await Promise.all(
+      candidates.map(async ({ followUp }) => {
+        const run = await deps.getRun(followUp.runId)
+        return `${run?.title ?? followUp.runId}: [run:${encodeURIComponent(followUp.runId)}] ${text}`
+      })
+    )
+    await reply(
+      deps,
+      event,
+      (zh
+        ? "有多个任务可以接收此操作。请回复对应任务的消息，或发送以下完整指令之一：\n"
+        : "More than one task can receive this control. Reply to its message, or send one complete command below:\n") +
+        choices.join("\n"),
+      "choose-run"
+    )
+    return true
+  }
+  if (selectedRunId && candidates.length === 0) {
+    await reply(
+      deps,
+      event,
+      /[\u4e00-\u9fff]/.test(text)
+        ? "目标任务或操作已失效，请查看最新任务消息。"
+        : "The selected task or control is no longer available. Check its latest message.",
+      "unknown-run"
+    )
+    return true
+  }
+  for (const { binding, followUp, matched } of candidates) {
     const { item, steerMessage } = matched
 
     try {
       // A prefix verb keeps its registration: buttons are one-shot, but a
       // person redirecting work in flight says several things over one run.
-      if (matched.consumes) await deps.consume(binding, now)
       const run = await deps.getRun(followUp.runId)
       if (!run) return true
       const zh =
@@ -195,7 +252,10 @@ export async function maybeHandleRunControlFollowUp(
       }
 
       const snapshot = run.latestSnapshot
-      if (!snapshot?.allowedActions.includes(item.action)) {
+      if (
+        !snapshot?.allowedActions.includes(item.action) ||
+        (item.interruptId && item.interruptId !== snapshot.pendingInterrupt?.id)
+      ) {
         await reply(
           deps,
           event,
@@ -241,6 +301,10 @@ export async function maybeHandleRunControlFollowUp(
             : "The control was not accepted. View the latest status or contact an operator.",
           `rejected:${result.reason ?? "unknown"}`
         )
+      } else if (matched.consumes) {
+        // A failed dispatch or refused actor must not consume another
+        // person's control. Retries reuse the inbound idempotency key.
+        await deps.consume(binding, now)
       }
       return true
     } catch (error) {

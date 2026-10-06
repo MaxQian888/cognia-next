@@ -92,6 +92,72 @@ const adapter = {
 } as unknown as AdapterInstanceRow
 
 describe("Lark follow-up controls", () => {
+  const secondBinding = (): ExecutionRunBinding => ({
+    ...binding,
+    id: "binding-2",
+    runId: "run-2",
+    platformMessageId: "om-second",
+    updatedAt: 600,
+    presentationState: {
+      followUpControl: {
+        ...(binding.presentationState!.followUpControl as object),
+        runId: "run-2",
+        platformMessageId: "om-second",
+      },
+    },
+  })
+
+  it("asks for a task choice instead of stopping whichever task updated last", async () => {
+    const execute = jest.fn()
+    const consume = jest.fn()
+    const enqueue = jest.fn()
+    expect(
+      await maybeHandleRunControlFollowUp(event("Stop"), adapter, {
+        now: () => 500,
+        listBindings: async () => [binding, secondBinding()],
+        getRun: async (id) => ({ ...run, id, title: id }),
+        execute,
+        consume,
+        enqueue,
+      })
+    ).toBe(true)
+    expect(execute).not.toHaveBeenCalled()
+    expect(consume).not.toHaveBeenCalled()
+    expect(enqueue.mock.calls[0][0].request.segments[0].text).toContain("[run:run-1] Stop")
+  })
+
+  it.each(["token", "reply"])("targets the older task using an explicit %s", async (selection) => {
+    const execute = jest.fn(async () => ({ accepted: true }))
+    const selected =
+      selection === "token"
+        ? event("[run:run-1] Stop")
+        : { ...event("Stop"), replyTo: { messageId: "om-progress", snippet: "" } }
+    await maybeHandleRunControlFollowUp(selected, adapter, {
+      now: () => 500,
+      listBindings: async () => [binding, secondBinding()],
+      getRun: async (id) => ({ ...run, id }),
+      execute,
+      consume: jest.fn(),
+      enqueue: jest.fn(),
+    })
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-1" }),
+      expect.anything()
+    )
+  })
+
+  it("does not consume a refused control", async () => {
+    const consume = jest.fn()
+    await maybeHandleRunControlFollowUp(event("Stop"), adapter, {
+      now: () => 500,
+      listBindings: async () => [binding],
+      getRun: async () => run,
+      execute: async () => ({ accepted: false, reason: "unauthorized" }),
+      consume,
+      enqueue: jest.fn(),
+    })
+    expect(consume).not.toHaveBeenCalled()
+  })
   it("authorizes a clicked localized control against the latest run revision", async () => {
     const execute = jest.fn(async () => ({ accepted: true }))
     const consume = jest.fn(async () => undefined)
@@ -199,7 +265,7 @@ describe("Lark follow-up controls", () => {
         now: () => 500,
         listBindings: async () => [binding],
         getRun: async () => run,
-        execute: jest.fn(),
+        execute: jest.fn(async () => ({ accepted: true })),
         consume: async () => {
           throw new Error("storage unavailable")
         },
