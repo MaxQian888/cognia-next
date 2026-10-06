@@ -52,7 +52,7 @@ export async function handleTeamRunStart(
   try {
     // Bound the identifier's size and namespace it by the authenticated device.
     // A refreshed consent lease changes the transport attempt, not the run.
-    const runId = `squad-companion:${await sha256Hex(JSON.stringify([callerDeviceId, launchId.toLowerCase()]))}`
+    const runId = `squad-companion-${await sha256Hex(JSON.stringify([callerDeviceId, launchId.toLowerCase()]))}`
     const { startSquadRun } = await import("@/lib/ai/agent/team/squad/start-squad-run")
     return await startSquadRun({
       squadId: teamId,

@@ -10,6 +10,10 @@ import {
 } from "./agent-team-write-handlers"
 import { startSquadRun } from "@/lib/ai/agent/team/squad/start-squad-run"
 import { resolveGatePolicy } from "@/lib/ai/agent/team/gates/gate-policy"
+import {
+  squadReviewInterruptIdFor,
+  squadReviewRequestIdFromInterrupt,
+} from "@/lib/ai/agent/team/gates/squad-review-gate"
 
 jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
   startSquadRun: jest.fn(),
@@ -227,7 +231,7 @@ describe("handleTeamRunStart", () => {
       squadId: "squad-1",
       goal: "Review release",
       ultracode: true,
-      runId: expect.stringMatching(/^squad-companion:[a-f0-9]{64}$/),
+      runId: expect.stringMatching(/^squad-companion-[a-f0-9]{64}$/),
       origin: "interactive",
       triggeredFrom: { source: "api", deviceId: "phone-1" },
     })
@@ -248,6 +252,18 @@ describe("handleTeamRunStart", () => {
     expect(ids[0]).toBe(ids[1])
     expect(new Set(ids)).toHaveProperty("size", 3)
     expect(start.mock.calls[0][0]).toMatchObject({ goal: "" })
+  })
+
+  it("derives a run identity that round-trips through durable review receipt parsing", async () => {
+    start.mockResolvedValue({ started: true })
+    await handleTeamRunStart(request)
+    const runId = start.mock.calls[0][0].runId!
+    const id = squadReviewInterruptIdFor(runId, "budget_extension", "crossing:1")
+    expect(squadReviewRequestIdFromInterrupt({ id })).toEqual({
+      runId,
+      kind: "budget_extension",
+      instance: "crossing:1",
+    })
   })
 
   it.each([
