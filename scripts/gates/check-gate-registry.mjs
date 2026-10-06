@@ -137,6 +137,12 @@ export const EXEMPTIONS = {
   "test:e2e:workflows:editor": "playwright subset helper — owned by test.yml",
   "test:e2e:workflows:nodes": "playwright subset helper — owned by test.yml",
   "test:e2e:workflows:runs": "playwright subset helper — owned by test.yml",
+  "test:pro-ide:e2e":
+    "real code-server E2E — owned by test.yml's pro-ide-e2e job, which runs the launcher with --perf",
+  "audit:pro-ide-perf":
+    "requires the real code-server measurement artifact; run by test.yml's pro-ide-e2e launcher with --perf",
+  "bootstrap-agent:scripts:test":
+    "real Bash/PowerShell contract tests — owned by bootstrap-scripts.yml's runtime matrix",
   "test:e2e:web-headless":
     "real-service playwright lane — owned by compose-e2e.yml, which brings the server/tls/web-headless-e2e compose profiles up before running it. Needs a live stack, so it can never run inside the fast gate matrix",
   "sidecar:test": "sidecar node --test suites — owned by test.yml via sidecars:test",
@@ -149,6 +155,7 @@ export const EXEMPTIONS = {
   // --- per-script self-tests, all covered by a scripts:test:* aggregate ---
   "check:all:test": "covered by scripts:test:gates",
   "audit:command-parity:test": "covered by scripts:test:gates",
+  "audit:pro-ide-perf:test": "covered by scripts:test:gates and scripts:test:ci",
   "audit:companion-command-manifest:test": "covered by scripts:test:gates",
   "audit:command-grammar:test": "covered by scripts:test:gates",
   "audit:rpc-semantic-parity:test": "covered by scripts:test:gates",

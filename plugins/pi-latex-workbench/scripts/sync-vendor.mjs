@@ -110,7 +110,7 @@ export const PRESERVED_VENDOR_DIRS = Object.freeze([
 /** Plugin-root files the install ZIP carries besides vendor/, skills/ and pi/. */
 export const BUNDLE_DOCS = Object.freeze(["README.md", "README.zh-CN.md", VENDOR_DOC, LOCK_FILE])
 /** Plugin-root directories whose non-test files ship in the install ZIP. */
-export const BUNDLE_DIRS = Object.freeze(["pi", "skills"])
+export const BUNDLE_DIRS = Object.freeze(["assets", "pi", "skills"])
 
 /** Is `path` (posix, upstream-root relative) part of the vendored snapshot? Pure. */
 export function isVendorPath(path) {

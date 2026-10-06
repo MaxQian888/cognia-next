@@ -2201,6 +2201,7 @@
     "README.zh-CN.md",
     "VENDOR.md",
     "vendor-lock.json",
+    "assets/icon.png",
     "pi/cognia-workbench.ts",
     "pi/env-binding.ts",
     "skills/latex-check/SKILL.md",
@@ -2426,8 +2427,7 @@
     "vendor/runtime/presets/local-tectonic-xelatex.json",
     "vendor/runtime/toolchain-lock.json",
     "vendor/tsconfig.base.json",
-    "vendor/tsconfig.json",
-    "assets/icon.png"
+    "vendor/tsconfig.json"
   ],
   "i18n": {
     "locales": {

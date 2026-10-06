@@ -183,6 +183,7 @@ describe("syncVendor against a real git repository", () => {
     write(upstream, "packages/cli/src/untracked.ts", "untracked\n")
 
     write(plugin, "plugin.json", PLUGIN_JSON)
+    write(plugin, "assets/icon.png", "plugin icon\n")
     write(plugin, "pi/glue.ts", "export {}\n")
     write(plugin, "pi/glue.test.ts", "test\n")
     write(plugin, "skills/s/SKILL.md", "# s\n")
@@ -197,6 +198,9 @@ describe("syncVendor against a real git repository", () => {
 
   it("extracts the committed archive, prunes stale files and keeps local-only dirs", () => {
     const result = syncVendor({ pluginRoot: plugin, upstream, ref: "HEAD" })
+    expect(JSON.parse(readFileSync(join(plugin, "plugin.json"), "utf8")).bundle_include).toContain(
+      "assets/icon.png"
+    )
     expect(result).toEqual({
       commit,
       commitDate: "2026-09-25T00:55:12+08:00",
@@ -220,6 +224,7 @@ describe("syncVendor against a real git repository", () => {
     const manifest = JSON.parse(readFileSync(join(plugin, "plugin.json"), "utf8"))
     expect(manifest.bundle_include).toEqual([
       ...BUNDLE_DOCS,
+      "assets/icon.png",
       "pi/glue.ts",
       "skills/s/SKILL.md",
       ...EXPECTED_SELECTION.map((path) => `vendor/${path}`),
