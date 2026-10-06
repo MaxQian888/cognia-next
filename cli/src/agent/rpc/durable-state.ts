@@ -2,8 +2,10 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { isAgentSessionBinding, type AgentSessionBinding } from "@/packages/agent/src/types"
+import { isHandoffEnvelope, type HandoffEnvelope } from "@/packages/agent/src/handoff-envelope"
 
 export interface DurableRpcSessionState {
+  workerHandoff?: HandoffEnvelope
   schemaVersion: 1
   tags: string[]
   commandResults: Record<string, unknown>
@@ -58,7 +60,11 @@ export function createDurableRpcStateStore(
       const parsed = JSON.parse(
         fs.readFileSync(filePath(sessionId), "utf8")
       ) as Partial<DurableRpcSessionState>
+      if (parsed.workerHandoff !== undefined && !isHandoffEnvelope(parsed.workerHandoff)) {
+        throw new Error("Persisted worker handoff is invalid")
+      }
       return {
+        ...(parsed.workerHandoff ? { workerHandoff: parsed.workerHandoff } : {}),
         schemaVersion: 1,
         tags: Array.isArray(parsed.tags)
           ? parsed.tags.filter((tag): tag is string => typeof tag === "string")
@@ -81,7 +87,9 @@ export function createDurableRpcStateStore(
         recoveryRequired: parsed.recoveryRequired === true,
         agentBinding: isAgentSessionBinding(parsed.agentBinding) ? parsed.agentBinding : null,
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "Persisted worker handoff is invalid")
+        throw error
       return emptyState()
     }
   }

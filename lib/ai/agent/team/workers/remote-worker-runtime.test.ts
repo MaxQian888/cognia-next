@@ -65,6 +65,18 @@ function worker(
   }
 }
 
+it("excludes older workers when a policy contract is required", () => {
+  const candidate = worker("device:old")
+  expect(
+    evaluateRemoteWorkerPlacement(candidate, {
+      spec: executionSpec,
+      workspaceBindingRef: "repository:project:repo",
+      requiredSandboxCapabilities: [],
+      requiredPolicyCapability: "worker-policy-v1",
+    })
+  ).toEqual({ ready: false, reason: "capability_mismatch" })
+})
+
 describe("remote AgentTeam worker selection", () => {
   const requirements = {
     spec: executionSpec,

@@ -100,6 +100,13 @@ import {
   type RpcMethodMap,
 } from "@/packages/agent/src/protocol"
 import type { HandoffEnvelope } from "@/packages/agent/src/handoff-envelope"
+import { isHandoffEnvelope } from "@/packages/agent/src/handoff-envelope"
+import {
+  remoteWorkerCeiling,
+  resolveRemoteWorkerOptions,
+  REMOTE_WORKER_POLICY_CAPABILITY,
+} from "@/lib/ai/agent/team/workers/remote-worker-policy"
+import { deriveExternalSessionPermission } from "@/lib/ai/agent/external/policy/permission-cascade"
 import type { AgentSessionBinding, AgentWorkerManifestV1 } from "@/packages/agent/src/types"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import { resolveTurnComposition } from "@/lib/agent/composition/resolve-turn-composition"
@@ -412,6 +419,8 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     const opened = store.open(sessionId, { writable: false, allowForeignWorkspace: true })
     if (!opened.ok) throw structured(opened.error.code, opened.error.message, opened.error)
     const persisted = durableState.read(sessionId)
+    if (persisted.workerHandoff && !options.workerDispatch)
+      throw structured("unsupported_capability", "worker session requires its worker host")
     const agentDefinition = persisted.agentBinding
       ? withDefinitionErrors(() =>
           agentStore.get(persisted.agentBinding!.agentId, persisted.agentBinding!.version)
@@ -463,6 +472,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       currentRunId: null,
       currentAttemptId: null,
       durableState,
+      ...(persisted.workerHandoff ? { workerHandoff: persisted.workerHandoff } : {}),
       ...(persisted.agentBinding ? { agentBinding: persisted.agentBinding } : {}),
       ...(agentDefinition ? { agentDefinition } : {}),
     }
@@ -487,8 +497,20 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
    * that fact (surfaced as a `runtime/diagnostic` when the next turn starts).
    */
   function bindSandboxRuntime(session: HostedSession): Promise<SandboxBindOutcome> {
-    const policy = session.durableState.read(session.id).sandboxPolicy as
+    const storedPolicy = session.durableState.read(session.id).sandboxPolicy as
       SandboxResourcePolicy | null | undefined
+    const workerPolicy = session.workerHandoff?.execution.policy
+    let policy = storedPolicy
+    try {
+      if (workerPolicy)
+        policy = remoteWorkerCeiling(workerPolicy, session.config.cwd, {
+          sandboxPolicy: storedPolicy ?? undefined,
+        }).sandboxPolicy
+    } catch (error) {
+      const failed = Promise.resolve<SandboxBindOutcome>({ ok: false, error })
+      session.sandboxBinding = failed
+      return failed
+    }
     const pending = sandboxSessionRuntime
       .bindSession({
         sessionId: session.id,
@@ -525,13 +547,17 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   ): Promise<void> {
     const outcome = await session.sandboxBinding
     if (!outcome || outcome.ok) return
-    session.sandboxBinding = undefined
+    if (!session.workerHandoff?.execution.policy?.sandboxRequired)
+      session.sandboxBinding = undefined
     await context.emit("runtime/diagnostic", {
       level: "error",
       message: `sandbox ceiling is not in force for session ${session.id}: ${
         outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
       }`,
     })
+    if (session.workerHandoff?.execution.policy?.sandboxRequired) {
+      throw structured("unsupported_capability", "Required worker sandbox could not be bound")
+    }
   }
 
   async function dispatch(
@@ -936,9 +962,18 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         return result(
           await runCommand(session, method, params, async (commandId) => {
             const mode = requireString(params, "mode") as AgentPermissionMode
-            session.config.permissionMode = mode
-            if (session.lease.current) await session.lease.current.setPermissionMode?.(mode)
-            else await setSessionMode(session.id, mode, { commandId }).catch(() => undefined)
+            const ceiling = session.workerHandoff?.execution.policy?.permissionMode
+            const effectiveMode = ceiling
+              ? deriveExternalSessionPermission(
+                  { permissionMode: ceiling },
+                  { permissionMode: mode === "auto" ? "default" : mode }
+                ).permissionMode!
+              : mode
+            session.config.permissionMode = effectiveMode
+            if (session.lease.current)
+              await session.lease.current.setPermissionMode?.(effectiveMode)
+            else
+              await setSessionMode(session.id, effectiveMode, { commandId }).catch(() => undefined)
             return receipt(commandId)
           })
         )
@@ -1589,6 +1624,20 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     commandKey: string
   ): Promise<Record<string, unknown>> {
     const handoff = params.handoff as HandoffEnvelope | undefined
+    if (handoff && !isHandoffEnvelope(handoff))
+      throw structured("usage_error", "Invalid worker handoff")
+    if (
+      handoff?.execution.policy &&
+      (!options.workerDispatch?.manifest.hardCapabilities.includes(
+        REMOTE_WORKER_POLICY_CAPABILITY
+      ) ||
+        options.workerDispatch.manifest.executionProfile?.runtimeAdapter === "external")
+    ) {
+      throw structured(
+        "unsupported_capability",
+        "Worker cannot enforce the requested execution policy"
+      )
+    }
     if (handoff && !options.workerDispatch) {
       throw structured("unsupported_capability", `host does not support ${CAP_WORKER_DISPATCH_V1}`)
     }
@@ -1654,6 +1703,10 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       })
     )
     created.close()
+    if (handoff)
+      durableState.update(id, (state) => {
+        state.workerHandoff = handoff
+      })
     const session: HostedSession = {
       id,
       config,
@@ -1783,6 +1836,16 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         const turnParams: UnifiedTurnParams = {
           config: session.config,
           prompt,
+          ...(session.workerHandoff?.execution.policy
+            ? {
+                resolveOptions: (ctx: import("@/lib/claude/build-options").BuildOptionsContext) =>
+                  resolveRemoteWorkerOptions(
+                    ctx,
+                    session.workerHandoff!.execution.policy!,
+                    session.config.cwd
+                  ),
+              }
+            : {}),
           gate,
           sessionId: session.id,
           persist: true,

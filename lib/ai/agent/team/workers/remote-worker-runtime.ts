@@ -21,6 +21,7 @@ export interface RemoteWorkerDescriptor {
 }
 
 export interface RemoteWorkerRequirements {
+  requiredPolicyCapability?: string
   spec: ResolvedAgentExecutionSpec
   workspaceBindingRef: string
   requiredSandboxCapabilities: readonly string[]
@@ -73,6 +74,12 @@ export function evaluateRemoteWorkerPlacement(
     return { ready: false, reason: "worker_offline" }
   }
   if (!profile) return { ready: false, reason: "execution_profile_missing" }
+  if (
+    requirements.requiredPolicyCapability &&
+    !manifest.hardCapabilities.includes(requirements.requiredPolicyCapability)
+  ) {
+    return { ready: false, reason: "capability_mismatch" }
+  }
   if (profile.runtimeAdapter !== spec.runtimeAdapter) {
     return { ready: false, reason: "runtime_mismatch" }
   }

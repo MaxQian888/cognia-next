@@ -450,6 +450,108 @@ describe("createAgentRuntimeService", () => {
     await restarted.close()
   })
 
+  it("restores remote restrictions after restart and clamps live permission changes", async () => {
+    const handoff = {
+      envelopeVersion: 1 as const,
+      identity: { parentRunId: "parent", childRunId: "child", depth: 1, parentChain: ["parent"] },
+      task: { prompt: "Inspect" },
+      execution: {
+        mode: "orchestrated" as const,
+        policy: {
+          policyVersion: 1 as const,
+          sandboxRequired: false,
+          permissionMode: "plan" as const,
+          allowedTools: ["Read"],
+        },
+      },
+      createdAt: new Date().toISOString(),
+    }
+    const workerDispatch = {
+      manifest: { hardCapabilities: ["worker-policy-v1"] } as never,
+      resolveHandoffWorkspace: async () => home,
+    }
+    const config = { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" }
+    const first = createAgentRuntimeService({
+      config,
+      home,
+      mintSessionId: () => "policy-session",
+      workerDispatch,
+    })
+    await first.handle("session/create", { commandId: "create-policy", handoff }, context as never)
+    await first.close()
+    const runTurn = emittingTurn(0, "policy-session")
+    const restarted = createAgentRuntimeService({ config, home, workerDispatch, runTurn })
+    await restarted.handle(
+      "session/permissionMode/set",
+      { sessionId: "policy-session", commandId: "raise-mode", mode: "bypassPermissions" },
+      context as never
+    )
+    await restarted.handle(
+      "turn/run",
+      { sessionId: "policy-session", commandId: "run-policy", input: "Inspect" },
+      context as never
+    )
+    const params = runTurn.mock.calls[0][0]
+    expect(params.config.permissionMode).toBe("plan")
+    expect(params.resolveOptions).toEqual(expect.any(Function))
+    await restarted.close()
+  })
+
+  it("keeps a failed required worker sandbox binding closed on every attempted turn", async () => {
+    const handoff = {
+      envelopeVersion: 1 as const,
+      identity: { parentRunId: "parent", childRunId: "child", depth: 1, parentChain: ["parent"] },
+      task: { prompt: "Inspect" },
+      execution: {
+        mode: "orchestrated" as const,
+        policy: {
+          policyVersion: 1 as const,
+          sandboxRequired: true,
+          permissionMode: "plan" as const,
+        },
+      },
+      createdAt: new Date().toISOString(),
+    }
+    const workerDispatch = {
+      manifest: {
+        hardCapabilities: ["worker-policy-v1"],
+        executionProfile: { runtimeAdapter: "cli", sandbox: { filesystem: true } },
+      } as never,
+      resolveHandoffWorkspace: async () => home,
+    }
+    const runTurn = emittingTurn(0, "closed-policy-session")
+    const bind = jest
+      .spyOn(sandboxSessionRuntime, "bindSession")
+      .mockRejectedValue(new Error("offline"))
+    const service = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home },
+      home,
+      mintSessionId: () => "closed-policy-session",
+      workerDispatch,
+      runTurn,
+    })
+    try {
+      await service.handle(
+        "session/create",
+        { commandId: "create-closed-policy", handoff },
+        context as never
+      )
+      for (const commandId of ["attempt1", "attempt2"]) {
+        await expect(
+          service.handle(
+            "turn/run",
+            { sessionId: "closed-policy-session", commandId, input: "Inspect" },
+            context as never
+          )
+        ).rejects.toThrow("Required worker sandbox")
+      }
+      expect(runTurn).not.toHaveBeenCalled()
+    } finally {
+      bind.mockRestore()
+      await service.close()
+    }
+  })
+
   it("persists tags and command receipts across host restarts", async () => {
     const config = { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" }
     const first = createAgentRuntimeService({

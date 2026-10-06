@@ -2,10 +2,52 @@
  * Stable, secret-free handoff contract shared by dispatching brains and workers.
  * Ref fields deliberately exclude endpoints, credentials, and host-local paths.
  */
+import * as v from "valibot"
+
+const portablePath = v.pipe(
+  v.string(),
+  v.check(
+    (value) =>
+      value === "." ||
+      (!!value &&
+        !value.startsWith("/") &&
+        !value.includes("\\") &&
+        !value.includes(":") &&
+        value.split("/").every((part) => !!part && part !== ".." && part !== ".")),
+    "path must be relative to the bound workspace"
+  )
+)
+const strings = v.array(v.pipe(v.string(), v.minLength(1)))
+export const handoffPolicyV1Schema = v.strictObject({
+  policyVersion: v.literal(1),
+  permissionMode: v.optional(
+    v.picklist(["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"])
+  ),
+  allowedTools: v.optional(strings),
+  disallowedTools: v.optional(strings),
+  mcpServerNames: v.optional(strings),
+  sandboxRequired: v.boolean(),
+  sandboxPolicy: v.optional(
+    v.strictObject({
+      maxCpuSeconds: v.optional(v.pipe(v.number(), v.finite(), v.minValue(0))),
+      maxMemoryMb: v.optional(v.pipe(v.number(), v.finite(), v.minValue(0))),
+      network: v.optional(v.picklist(["off", "on", "allowlist"])),
+      networkAllowlist: v.optional(strings),
+      writableRoots: v.optional(v.array(portablePath)),
+      readableRoots: v.optional(v.array(portablePath)),
+    })
+  ),
+})
+export type HandoffPolicyV1 = v.InferOutput<typeof handoffPolicyV1Schema>
+export function isHandoffPolicyV1(value: unknown): value is HandoffPolicyV1 {
+  const parsed = v.safeParse(handoffPolicyV1Schema, value)
+  return parsed.success && (!parsed.output.sandboxPolicy || parsed.output.sandboxRequired)
+}
 
 export type HandoffRuntimeAdapterId = "claude-agent-sdk" | "ai-sdk" | "external"
 
 export interface HandoffExecutionBinding {
+  policy?: HandoffPolicyV1
   mode: "native" | "orchestrated"
   executionFingerprint?: string
   runtimeAdapter?: HandoffRuntimeAdapterId
@@ -98,6 +140,8 @@ export function validateHandoffEnvelope(value: unknown): string[] {
   if (!execution || typeof execution !== "object") {
     errors.push("execution is required")
   } else {
+    if (execution.policy !== undefined && !isHandoffPolicyV1(execution.policy))
+      errors.push("execution.policy is not a supported portable policy")
     if (execution.mode !== "native" && execution.mode !== "orchestrated") {
       errors.push('execution.mode must be "native" or "orchestrated"')
     }

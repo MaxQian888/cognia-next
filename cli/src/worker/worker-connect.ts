@@ -4,6 +4,7 @@ import path from "node:path"
 import { PassThrough, Writable } from "node:stream"
 
 import type { AgentWorkerManifestV1, HandoffEnvelope } from "@cognia/agent"
+import { REMOTE_WORKER_POLICY_CAPABILITY } from "@/lib/ai/agent/team/workers/remote-worker-policy"
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import { issueSocketTicket, registerCompanionWorker } from "@/lib/tauri/companion-auth"
 
@@ -241,6 +242,15 @@ export function validateWorkerHandoffExecution(
   if (!profile) return ["execution profile is missing"]
   const execution = handoff.execution
   const errors: string[] = []
+  if (
+    execution.policy &&
+    (!manifest.hardCapabilities.includes(REMOTE_WORKER_POLICY_CAPABILITY) ||
+      profile.runtimeAdapter === "external")
+  ) {
+    errors.push("worker cannot enforce the requested execution policy")
+  }
+  if (execution.policy?.sandboxRequired && !manifest.sandbox.capabilities.includes("filesystem"))
+    errors.push("required sandbox is unavailable")
   if (execution.runtimeAdapter && execution.runtimeAdapter !== profile.runtimeAdapter) {
     errors.push(`runtime adapter ${execution.runtimeAdapter} is unavailable`)
   }
@@ -317,6 +327,7 @@ export function buildWorkerManifest(
       ...resolved.spec.capabilities.effective,
       "worker-dispatch-v1",
       "task-workspace",
+      ...(resolved.profile.runtimeAdapter !== "external" ? [REMOTE_WORKER_POLICY_CAPABILITY] : []),
     ],
     maxActiveTurns,
     credentialProfileRefs,

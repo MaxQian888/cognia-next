@@ -201,6 +201,17 @@ describe("worker connect contract", () => {
       createdAt: "2026-08-12T00:00:00.000Z",
     }
     expect(validateWorkerHandoffExecution(manifest, handoff)).toEqual([])
+    const policyHandoff = {
+      ...handoff,
+      execution: {
+        ...execution,
+        policy: { policyVersion: 1 as const, sandboxRequired: false, allowedTools: [] },
+      },
+    }
+    expect(validateWorkerHandoffExecution(manifest, policyHandoff)).toEqual([])
+    expect(
+      validateWorkerHandoffExecution({ ...manifest, hardCapabilities: [] }, policyHandoff)
+    ).toContain("worker cannot enforce the requested execution policy")
     expect(
       validateWorkerHandoffExecution(manifest, {
         ...handoff,

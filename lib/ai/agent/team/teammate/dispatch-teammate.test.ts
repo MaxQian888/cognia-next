@@ -888,10 +888,11 @@ describe("dispatchTeammate — remote durable worker", () => {
     expect(remoteRunMock).not.toHaveBeenCalled()
   })
 
-  it("refuses remote dispatch when the handoff cannot enforce inherited permissions", async () => {
+  it("waits for a compatible worker when inherited permissions require the new contract", async () => {
     process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
     beginDurableDispatchMock.mockResolvedValue({
       childRunId: "child-remote",
+      wait: jest.fn(async () => undefined),
       capture: jest.fn(),
       prepareTurnContext: async () => "",
       run: (operation: () => Promise<unknown>) => operation(),
@@ -909,9 +910,10 @@ describe("dispatchTeammate — remote durable worker", () => {
       }),
       { defaultPermissionMode: "default" }
     )
+    ;(ctx.team as AgentTeam).projectId = "project1"
     try {
       await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toThrow(
-        "cannot enforce"
+        "No compatible execution worker"
       )
       expect(remoteRunMock).not.toHaveBeenCalled()
       expect(claimDispatchLeaseMock).not.toHaveBeenCalled()
@@ -949,7 +951,10 @@ describe("dispatchTeammate — remote durable worker", () => {
           manifestVersion: 1,
           runtime: "cognia-agent",
           models: ["default"],
-          hardCapabilities: [...new Set(Object.values(RUNTIME_CAPABILITIES).flat())],
+          hardCapabilities: [
+            ...new Set(Object.values(RUNTIME_CAPABILITIES).flat()),
+            "worker-policy-v1",
+          ],
           maxActiveTurns: 1,
           credentialProfileRefs: [],
           workspaceBindingRefs: ["repository:project1:primary"],
@@ -1005,6 +1010,7 @@ describe("dispatchTeammate — remote durable worker", () => {
       }),
       {
         repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
+        defaultPermissionMode: "plan",
       }
     )
     ;(ctx.team as AgentTeam).projectId = "project1"
@@ -1025,6 +1031,7 @@ describe("dispatchTeammate — remote durable worker", () => {
             execution: expect.objectContaining({
               hostRef: "device:worker-a",
               executionFingerprint: expect.any(String),
+              policy: expect.objectContaining({ policyVersion: 1, permissionMode: "plan" }),
             }),
             task: expect.objectContaining({
               prompt: expect.not.stringContaining("alice@example.com"),

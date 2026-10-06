@@ -35,6 +35,21 @@ function validEnvelope(): HandoffEnvelope {
 }
 
 describe("HandoffEnvelope", () => {
+  it("accepts versioned portable restrictions and rejects unknown versions or absolute roots", () => {
+    const envelope = validEnvelope()
+    envelope.execution.policy = {
+      policyVersion: 1,
+      sandboxRequired: true,
+      allowedTools: [],
+      mcpServerNames: [],
+      sandboxPolicy: { writableRoots: [".", "src"] },
+    }
+    expect(isHandoffEnvelope(envelope)).toBe(true)
+    envelope.execution.policy.sandboxPolicy!.writableRoots = ["/host/private"]
+    expect(isHandoffEnvelope(envelope)).toBe(false)
+    envelope.execution.policy = { policyVersion: 2, sandboxRequired: false } as never
+    expect(isHandoffEnvelope(envelope)).toBe(false)
+  })
   it("accepts a stable ref-only worker handoff", () => {
     expect(validateHandoffEnvelope(validEnvelope())).toEqual([])
     expect(isHandoffEnvelope(validEnvelope())).toBe(true)

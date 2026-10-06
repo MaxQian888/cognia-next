@@ -5,6 +5,33 @@ import path from "node:path"
 import { createDurableRpcStateStore } from "./durable-state"
 
 describe("createDurableRpcStateStore", () => {
+  it("restores a worker ceiling and refuses to discard an invalid persisted contract", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "cognia-rpc-policy-"))
+    try {
+      const store = createDurableRpcStateStore(() => root)
+      const workerHandoff = {
+        envelopeVersion: 1 as const,
+        identity: { parentRunId: "p", childRunId: "c", depth: 1, parentChain: ["p"] },
+        task: { prompt: "Work" },
+        execution: {
+          mode: "orchestrated" as const,
+          policy: { policyVersion: 1 as const, sandboxRequired: false, allowedTools: [] },
+        },
+        createdAt: new Date().toISOString(),
+      }
+      store.update("s", (state) => {
+        state.workerHandoff = workerHandoff
+      })
+      expect(createDurableRpcStateStore(() => root).read("s").workerHandoff).toEqual(workerHandoff)
+      writeFileSync(
+        path.join(root, "rpc-state.json"),
+        JSON.stringify({ workerHandoff: { bad: true } })
+      )
+      expect(() => store.read("s")).toThrow("Persisted worker handoff is invalid")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
   it("atomically persists command receipts and unresolved actions", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "cognia-rpc-state-"))
     try {

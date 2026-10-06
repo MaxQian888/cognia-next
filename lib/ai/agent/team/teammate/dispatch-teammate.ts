@@ -35,6 +35,10 @@ import {
   teamPermissionCeiling,
 } from "@/lib/ai/agent/external/policy/permission-cascade"
 import {
+  encodeRemoteWorkerPolicy,
+  REMOTE_WORKER_POLICY_CAPABILITY,
+} from "../workers/remote-worker-policy"
+import {
   adaptPermissionMode,
   PROTOCOL_PERMISSION_MODE_SUPPORT,
 } from "@/lib/ai/agent/external/policy/permission-modes"
@@ -1215,22 +1219,23 @@ export async function dispatchTeammate(
         await assertRemoteDispatchAvailable(Boolean(activeDispatch && frozenExecutionSpec))
       }
       if (activeDispatch && frozenExecutionSpec && executionTarget.mode !== "colocate") {
-        const remoteCeiling = deriveExternalSessionPermission(
+        const inheritedRemoteCeiling = deriveExternalSessionPermission(
           teamCtx.parentPermissionCeiling ?? {},
           teamPermissionCeiling(teamCtx.team.config)
         )
-        if (
-          Object.keys(remoteCeiling).length ||
-          requiresSandbox ||
-          teammate.config?.sandboxEnabled ||
-          teamCtx.team.config.sandboxEnabled ||
-          teammate.config?.sandboxPolicy ||
-          teammate.config?.tools !== undefined
-        ) {
-          throw new Error(
-            "Remote teammate cannot enforce the inherited execution policy with this handoff protocol"
-          )
-        }
+        const remoteCeiling = deriveExternalSessionPermission(inheritedRemoteCeiling, {
+          ...(teammate.config?.tools !== undefined ? { allowedTools: teammate.config.tools } : {}),
+          ...(teammate.config?.sandboxPolicy
+            ? { sandboxPolicy: teammate.config.sandboxPolicy }
+            : {}),
+        })
+        const remotePolicy = encodeRemoteWorkerPolicy(
+          remoteCeiling,
+          Boolean(
+            requiresSandbox || teammate.config?.sandboxEnabled || teamCtx.team.config.sandboxEnabled
+          ),
+          teamCtx.team.config.workingDir
+        )
         const remoteRuntime = getRemoteWorkerRuntime()
         if (!remoteRuntime) throw new RemoteWorkerWaitingError("no_compatible_capacity")
         if (!teamCtx.team.projectId) {
@@ -1245,9 +1250,10 @@ export async function dispatchTeammate(
           ? ({ mode: "pinned", hostRef: activeDispatch.retryTargetHostRef } as const)
           : executionTarget
         const placementRequirements = {
+          ...(remotePolicy ? { requiredPolicyCapability: REMOTE_WORKER_POLICY_CAPABILITY } : {}),
           spec: frozenExecutionSpec,
           workspaceBindingRef: repositoryRef,
-          requiredSandboxCapabilities: teamCtx.team.config?.sandboxPolicy ? ["filesystem"] : [],
+          requiredSandboxCapabilities: remotePolicy?.sandboxRequired ? ["filesystem"] : [],
         }
         let target: RemoteWorkerDescriptor
         try {
@@ -1332,6 +1338,7 @@ export async function dispatchTeammate(
             },
             task: { title: args.taskId, prompt: remotePrompt },
             execution: {
+              ...(remotePolicy ? { policy: remotePolicy } : {}),
               mode: "orchestrated",
               executionFingerprint: remoteExecutionSpec.executionFingerprint,
               runtimeAdapter: remoteExecutionSpec.runtimeAdapter,
@@ -1345,7 +1352,7 @@ export async function dispatchTeammate(
               modelRole: "primary",
               modelBindingRef: remoteExecutionSpec.modelBindings.primary,
               requiredCapabilities: remoteExecutionSpec.capabilities.effective,
-              requiredSandboxCapabilities: teamCtx.team.config?.sandboxPolicy ? ["filesystem"] : [],
+              requiredSandboxCapabilities: remotePolicy?.sandboxRequired ? ["filesystem"] : [],
             },
             ...(teamCtx.team.config.resourcePolicy?.maxTokens
               ? { budget: { maxTokens: teamCtx.team.config.resourcePolicy.maxTokens } }
