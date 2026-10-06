@@ -1849,7 +1849,6 @@ describe("PluginManager", () => {
       )
       expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
         pluginId: "public-rollback",
-        pluginPath: "/plugins/public-rollback",
       })
     })
 
@@ -3174,7 +3173,6 @@ describe("PluginManager", () => {
 
       expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
         pluginId: "to-remove",
-        pluginPath: "/plugins/to-remove",
       })
 
       expect(store.uninstallPlugin).toHaveBeenCalledWith("to-remove", {

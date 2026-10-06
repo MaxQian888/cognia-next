@@ -610,7 +610,6 @@ export const usePluginStore = create<PluginState>()(
           try {
             await invoke("plugin_uninstall", {
               pluginId,
-              pluginPath: plugin.path,
             })
           } catch (error) {
             throw new Error(

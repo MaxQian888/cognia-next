@@ -2025,6 +2025,57 @@ describe("createPluginContext", () => {
       expect(mainWindow.title).toBe("Cognia")
     })
 
+    it.each(["main", "child-window"])(
+      "routes window controls through the plugin bridge for %s",
+      async (windowId) => {
+        const plugin = createMockPlugin()
+        const context = createPluginContext(plugin, mockManager)
+        const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+        const envelope = (data: unknown) => ({
+          success: true,
+          data,
+          requestId: "req-test",
+          runtimeVersion: "2.0.0",
+          compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+        })
+        mockInvoke.mockResolvedValueOnce(envelope(windowId))
+        const win =
+          windowId === "main"
+            ? context.window.getMain()
+            : await context.window.create({ title: "Child", url: "/plugin-window" })
+        // Main is already available and does not issue a create request.
+        mockInvoke.mockReset().mockResolvedValue(envelope(null))
+
+        await win.minimize()
+        await win.maximize()
+        await win.unmaximize()
+        await win.setAlwaysOnTop(true)
+        await win.setAlwaysOnTop(false)
+
+        const operations = [
+          ["minimize", { windowId }],
+          ["maximize", { windowId }],
+          ["unmaximize", { windowId }],
+          ["setAlwaysOnTop", { windowId, flag: true }],
+          ["setAlwaysOnTop", { windowId, flag: false }],
+        ]
+        expect(mockInvoke).toHaveBeenCalledTimes(operations.length)
+        operations.forEach(([op, payload], index) => {
+          expect(mockInvoke).toHaveBeenNthCalledWith(
+            index + 1,
+            "plugin_api_invoke",
+            expect.objectContaining({
+              request: expect.objectContaining({
+                pluginId: plugin.manifest.id,
+                api: `window:${op}`,
+                payload,
+              }),
+            })
+          )
+        })
+      }
+    )
+
     it("getSize queries the real host window instead of returning a placeholder", async () => {
       const context = createPluginContext(createMockPlugin(), mockManager)
       const mockInvoke = invoke as jest.MockedFunction<typeof invoke>

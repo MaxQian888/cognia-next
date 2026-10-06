@@ -1108,25 +1108,12 @@ async fn handle_window(
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
     use super::window_ops;
-    let map = |r: Result<()>| {
-        r.map(|_| Value::Null)
-            .map_err(|e| PluginApiError::internal(e.to_string()))
-    };
     let into_err = |e: PluginError| PluginApiError::internal(e.to_string());
     let window_id = payload
         .get("windowId")
         .and_then(Value::as_str)
         .unwrap_or("main");
     match op {
-        // Legacy main-window controls (the TS PluginWindow.minimize/maximize
-        // call these directly without a windowId).
-        "minimize" => map(window_ops::plugin_window_minimize(app.clone()).await),
-        "maximize" => map(window_ops::plugin_window_maximize(app.clone()).await),
-        "unmaximize" => map(window_ops::plugin_window_unmaximize(app.clone()).await),
-        "setAlwaysOnTop" => {
-            let flag = payload_bool(payload, "flag", true);
-            map(window_ops::plugin_window_set_always_on_top(app.clone(), flag).await)
-        }
         "create" => {
             let options = payload.get("options").cloned().unwrap_or(Value::Null);
             window_ops::plugin_window_create(app, plugin_id, &options)
@@ -1135,11 +1122,10 @@ async fn handle_window(
                 .map_err(into_err)
         }
         "close" | "show" | "hide" | "focus" | "center" | "setTitle" | "setSize" | "setPosition"
-        | "getSize" | "getPosition" | "isMaximized" => {
-            window_ops::plugin_window_op(app, plugin_id, window_id, op, payload)
-                .await
-                .map_err(into_err)
-        }
+        | "getSize" | "getPosition" | "isMaximized" | "minimize" | "maximize" | "unmaximize"
+        | "setAlwaysOnTop" => window_ops::plugin_window_op(app, plugin_id, window_id, op, payload)
+            .await
+            .map_err(into_err),
         _ => Err(PluginApiError::not_supported(&format!("window:{op}"))),
     }
 }
@@ -3060,20 +3046,25 @@ mod tests {
     async fn headless_invoke_reports_ui_only_apis_as_unavailable() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
-        let response = plugin_api_invoke_for_state(
-            &state,
-            PluginApiInvokeRequest {
-                sdk_version: "2.0.0".into(),
-                plugin_id: "demo".into(),
-                request_id: "window".into(),
-                api: "window:minimize".into(),
-                payload: json!({}),
-            },
-        )
-        .await
-        .unwrap();
-        assert!(!response.success);
-        assert_eq!(response.error.unwrap().code, "NOT_SUPPORTED");
+        for op in ["minimize", "maximize", "unmaximize", "setAlwaysOnTop"] {
+            let response = plugin_api_invoke_for_state(
+                &state,
+                PluginApiInvokeRequest {
+                    sdk_version: "2.0.0".into(),
+                    plugin_id: "demo".into(),
+                    request_id: format!("window-{op}"),
+                    api: format!("window:{op}"),
+                    payload: json!({ "windowId": "child", "flag": false }),
+                },
+            )
+            .await
+            .unwrap();
+            assert!(
+                !response.success,
+                "headless window:{op} must be unavailable"
+            );
+            assert_eq!(response.error.unwrap().code, "NOT_SUPPORTED");
+        }
     }
 
     #[test]

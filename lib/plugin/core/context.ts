@@ -2233,9 +2233,9 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
       )
     },
     close: () => invokePluginApi<void>(pluginId, "window:close", { windowId: id }),
-    minimize: () => invoke<void>("plugin_window_minimize", { windowId: id }),
-    maximize: () => invoke<void>("plugin_window_maximize", { windowId: id }),
-    unmaximize: () => invoke<void>("plugin_window_unmaximize", { windowId: id }),
+    minimize: () => invokePluginApi<void>(pluginId, "window:minimize", { windowId: id }),
+    maximize: () => invokePluginApi<void>(pluginId, "window:maximize", { windowId: id }),
+    unmaximize: () => invokePluginApi<void>(pluginId, "window:unmaximize", { windowId: id }),
     isMaximized: () => invokePluginApi<boolean>(pluginId, "window:isMaximized", { windowId: id }),
     setSize: (width: number, height: number) =>
       invokePluginApi<void>(pluginId, "window:setSize", { windowId: id, width, height }),
@@ -2249,7 +2249,7 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
       invokePluginApi<{ x: number; y: number }>(pluginId, "window:getPosition", { windowId: id }),
     center: () => invokePluginApi<void>(pluginId, "window:center", { windowId: id }),
     setAlwaysOnTop: (flag: boolean) =>
-      invoke<void>("plugin_window_set_always_on_top", { windowId: id, flag }),
+      invokePluginApi<void>(pluginId, "window:setAlwaysOnTop", { windowId: id, flag }),
     show: () => invokePluginApi<void>(pluginId, "window:show", { windowId: id }),
     hide: () => invokePluginApi<void>(pluginId, "window:hide", { windowId: id }),
     onClose: (callback: () => void) => {

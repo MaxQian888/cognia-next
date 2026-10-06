@@ -1,8 +1,4 @@
-//! Plugin window operation commands (Batch 3b).
-//!
-//! Acts on the main webview window. The TS side at
-//! `lib/plugin/core/context.ts:1209-1221` wraps these with chained
-//! `.catch(...)` blocks that now record diagnostics on rejection.
+//! Plugin-scoped window operations and legacy host main-window commands.
 
 use serde_json::Value;
 #[cfg(feature = "tauri-host")]
@@ -18,7 +14,11 @@ fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow> {
 /// Tauri label for a plugin-created window. The `"main"` id maps to the host's
 /// own main window so a plugin can drive it (resize / show) the same way.
 fn plugin_window_label(plugin_id: &str, window_id: &str) -> String {
-    format!("plugin:{plugin_id}:{window_id}")
+    if window_id == "main" {
+        "main".to_string()
+    } else {
+        format!("plugin:{plugin_id}:{window_id}")
+    }
 }
 
 fn resolve_window(
@@ -26,11 +26,7 @@ fn resolve_window(
     plugin_id: &str,
     window_id: &str,
 ) -> Result<tauri::WebviewWindow> {
-    let label = if window_id == "main" {
-        "main".to_string()
-    } else {
-        plugin_window_label(plugin_id, window_id)
-    };
+    let label = plugin_window_label(plugin_id, window_id);
     app.get_webview_window(&label)
         .ok_or_else(|| PluginError::Internal(format!("plugin window not found: {label}")))
 }
@@ -163,6 +159,23 @@ pub async fn plugin_window_op(
             let pos = win.outer_position().map_err(err)?;
             Ok(serde_json::json!({ "x": pos.x, "y": pos.y }))
         }
+        "minimize" => {
+            win.minimize().map_err(err)?;
+            Ok(Value::Null)
+        }
+        "maximize" => {
+            win.maximize().map_err(err)?;
+            Ok(Value::Null)
+        }
+        "unmaximize" => {
+            win.unmaximize().map_err(err)?;
+            Ok(Value::Null)
+        }
+        "setAlwaysOnTop" => {
+            let flag = payload.get("flag").and_then(Value::as_bool).unwrap_or(true);
+            win.set_always_on_top(flag).map_err(err)?;
+            Ok(Value::Null)
+        }
         "isMaximized" => Ok(Value::Bool(win.is_maximized().map_err(err)?)),
         other => Err(PluginError::Internal(format!(
             "unsupported window op: {other}"
@@ -206,15 +219,30 @@ pub async fn plugin_window_set_always_on_top(app: AppHandle, flag: bool) -> Resu
 mod tests {
     use super::plugin_window_label;
 
-    // Tauri window operations require a `tauri::test::mock_app()` runtime
-    // which fails on the developer's Windows STATUS_ENTRYPOINT_NOT_FOUND
-    // condition (see ADR 0016 §3.99 verification block). Behavioural tests
-    // run via `pnpm tauri dev` smoke instead.
+    // Native window state still requires a desktop smoke test.
     #[test]
     fn plugin_window_labels_are_namespaced() {
         assert_eq!(
             plugin_window_label("demo", "settings"),
             "plugin:demo:settings"
+        );
+    }
+
+    #[test]
+    fn only_the_explicit_main_id_targets_the_host_window() {
+        assert_eq!(plugin_window_label("demo", "main"), "main");
+        assert_eq!(plugin_window_label("other", "main"), "main");
+        assert_eq!(
+            plugin_window_label("demo", "settings"),
+            "plugin:demo:settings"
+        );
+        assert_eq!(
+            plugin_window_label("other", "settings"),
+            "plugin:other:settings"
+        );
+        assert_eq!(
+            plugin_window_label("demo", "plugin:other:settings"),
+            "plugin:demo:plugin:other:settings"
         );
     }
 }

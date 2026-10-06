@@ -2,6 +2,10 @@
  * @jest-environment jsdom
  */
 
+import { invoke } from "@tauri-apps/api/core"
+
+jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn().mockResolvedValue(undefined) }))
+
 const applyPolicyMock = jest.fn()
 jest.mock("@/lib/plugin/core/policy-runtime", () => ({
   applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicyMock(...args),
@@ -210,6 +214,21 @@ describe("independent plugin identity", () => {
       source: "local",
       manifest: { version: "2.0.0" },
     })
+  })
+
+  it("uninstalls by canonical plugin id without sending the stored path", async () => {
+    const store = usePluginStore.getState()
+    store.discoverPlugin(manifest, "local", "/external/install/location")
+    const mockInvoke = jest.mocked(invoke)
+    mockInvoke.mockClear()
+
+    await store.uninstallPlugin(manifest.id, { viaManager: false })
+
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
+    expect(mockInvoke).toHaveBeenCalledWith("plugin_uninstall", {
+      pluginId: manifest.id,
+    })
+    expect(usePluginStore.getState().plugins[manifest.id]).toBeUndefined()
   })
 
   it("keeps a removed builtin absent across discovery and allows explicit reinstall", async () => {

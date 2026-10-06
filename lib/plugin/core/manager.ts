@@ -3103,7 +3103,6 @@ export class PluginManager {
       try {
         await invoke("plugin_uninstall", {
           pluginId,
-          pluginPath: txn.pluginPath,
         })
       } catch (err) {
         loggers.manager.warn(`[plugin:${pluginId}] rollback: backend uninstall failed`, err)
@@ -4622,7 +4621,6 @@ export class PluginManager {
           }
           await this.invokeNativeHost("plugin_uninstall", {
             pluginId,
-            pluginPath: plugin.path,
           })
         }
 
