@@ -57,6 +57,21 @@ const slideElement = {
     },
     labels: { type: "array", items: { type: "string" }, description: "Chart labels" },
     values: { type: "array", items: { type: "number" }, description: "Chart values" },
+    series: {
+      type: "array",
+      minItems: 1,
+      description:
+        "All clustered-column chart series, sharing labels; first series values must equal values.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "values"],
+        properties: {
+          name: { type: "string" },
+          values: { type: "array", items: { type: "number" } },
+        },
+      },
+    },
     title: { type: "string", description: "Chart title" },
   },
   required: ["id", "type", "x", "y", "width", "height"],

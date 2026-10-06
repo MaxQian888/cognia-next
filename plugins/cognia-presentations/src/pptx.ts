@@ -1,5 +1,7 @@
 import JSZip from "jszip"
 import {
+  chartSeries,
+  assertSlideElements,
   createPresentation,
   normalizeHexColor,
   sniffImageMime,
@@ -10,10 +12,13 @@ import {
 } from "./model"
 
 const EMU = 914400
+type ChartElement = Extract<SlideElement, { type: "chart" }>
 
 export async function exportPptx(deck: PresentationDeck): Promise<Uint8Array> {
+  for (const slide of deck.slides) assertSlideElements(slide.elements, `Slide ${slide.id}`)
   const zip = new JSZip()
   const media: Array<{ path: string; base64: string }> = []
+  const charts: ChartElement[] = []
   zip.file("[Content_Types].xml", contentTypes(deck))
   zip.file("_rels/.rels", rootRelationships())
   zip.file("docProps/core.xml", coreProperties(deck))
@@ -56,7 +61,7 @@ export async function exportPptx(deck: PresentationDeck): Promise<Uint8Array> {
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>`
   )
   deck.slides.forEach((slide, index) => {
-    const rendered = slideXml(slide, deck, index + 1, media)
+    const rendered = slideXml(slide, deck, index + 1, media, charts)
     zip.file(`ppt/slides/slide${index + 1}.xml`, rendered.xml)
     zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`, rendered.rels)
     if (slide.speakerNotes) {
@@ -69,6 +74,16 @@ export async function exportPptx(deck: PresentationDeck): Promise<Uint8Array> {
     }
   })
   for (const item of media) zip.file(item.path, item.base64, { base64: true })
+  for (const [index, chart] of charts.entries()) {
+    const native = await nativeChart(chart, index + 1)
+    zip.file(`ppt/charts/chart${index + 1}.xml`, native.xml)
+    zip.file(`ppt/embeddings/chart${index + 1}.xlsx`, native.workbook)
+    zip.file(
+      `ppt/charts/_rels/chart${index + 1}.xml.rels`,
+      xmlHeader +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/chart${index + 1}.xlsx"/></Relationships>`
+    )
+  }
   return new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }))
 }
 
@@ -132,7 +147,15 @@ export async function importPptx(
     features.add("embedded media")
   if (chartParts.size > importedChartParts.size) features.add("native charts")
   if (partPaths.some((path) => /^ppt\/diagrams\//.test(path))) features.add("SmartArt diagrams")
-  if (partPaths.some((path) => /^ppt\/embeddings\//.test(path))) features.add("embedded objects")
+  const chartWorkbooks = new Set<string>()
+  for (const path of importedChartParts) {
+    const chartRels = await relationships(zip, relsPathFor(path))
+    for (const rel of chartRels.values()) {
+      if (rel.type.endsWith("/package")) chartWorkbooks.add(resolvePart("ppt/charts", rel.target))
+    }
+  }
+  if (partPaths.some((path) => /^ppt\/embeddings\//.test(path) && !chartWorkbooks.has(path)))
+    features.add("embedded objects")
   if (partPaths.some((path) => /^ppt\/comments\//.test(path))) features.add("comments")
   deck.importedFeatures = [...features]
   return deck
@@ -170,9 +193,11 @@ async function importSlide(
         geometry,
         rels,
         nextId(),
-        importedChartParts
+        importedChartParts,
+        features
       )
       if (element) elements.push(element)
+      else features.add("unsupported graphic frames")
     }
   }
   const titled = elements.find(
@@ -279,12 +304,15 @@ async function importGraphicFrame(
   geometry: { x: number; y: number; width: number; height: number },
   rels: Map<string, PackageRelationship>,
   id: string,
-  importedChartParts: Set<string>
+  importedChartParts: Set<string>,
+  features: Set<string>
 ): Promise<SlideElement | null> {
   if (/<a:tbl>[\s\S]*?<\/a:tbl>/.test(block)) {
+    if (/\b(?:gridSpan|rowSpan|hMerge|vMerge)="/.test(block)) features.add("merged table cells")
+    if (/<a:(?:tblStyle|tcPr|tableStyleId)\b/.test(block)) features.add("table formatting")
     const rows = [...block.matchAll(/<a:tr\b[^>]*>([\s\S]*?)<\/a:tr>/g)].map((row) =>
       [...row[1].matchAll(/<a:tc\b[^>]*>([\s\S]*?)<\/a:tc>/g)].map((cell) =>
-        cellTexts(cell[1]).join(" ")
+        blockParagraphs(cell[1], true).join("\n")
       )
     )
     if (rows.length) return { id, type: "table", ...geometry, rows }
@@ -296,31 +324,79 @@ async function importGraphicFrame(
   const chartPath = resolvePart("ppt/slides", chartTarget)
   const chartXml = await zip.file(chartPath)?.async("string")
   if (!chartXml) return null
-  importedChartParts.add(chartPath)
-  return importChart(chartXml, geometry, id)
+  const chart = importChart(chartXml, geometry, id, features)
+  if (chart) importedChartParts.add(chartPath)
+  return chart
 }
 
-/** First `c:ser` of a chart part → a native chart element (categories + values). */
+/** Keep all supported series; never represent a different chart type as columns silently. */
 function importChart(
   xml: string,
   geometry: { x: number; y: number; width: number; height: number },
-  id: string
+  id: string,
+  features: Set<string>
 ): SlideElement | null {
-  const series = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/)?.[0]
-  if (!series) return null
-  const cat = series.match(/<c:cat>[\s\S]*?<\/c:cat>/)?.[0] ?? ""
-  const val = series.match(/<c:val>[\s\S]*?<\/c:val>/)?.[0] ?? ""
-  const labels = cachedPoints(cat).map((point) => point.text)
-  const values = cachedPoints(val).map((point) => Number(point.text))
-  if (!labels.length || labels.length !== values.length || values.some((v) => !Number.isFinite(v)))
+  const chartKinds = [...xml.matchAll(/<c:(\w+Chart)\b/g)].map((match) => match[1])
+  if (
+    chartKinds.length !== 1 ||
+    chartKinds[0] !== "barChart" ||
+    /<c:barDir\b[^>]*val="bar"/.test(xml) ||
+    /<c:grouping\b[^>]*val="(?:stacked|percentStacked)"/.test(xml)
+  ) {
+    features.add("unsupported chart type (editable model supports clustered columns)")
     return null
+  }
+  if (
+    /<c:(?:dLbls|trendline|errBars|dPt|logBase|multiLvlStrRef|pictureOptions|spPr|manualLayout|min|max|majorUnit|minorUnit)\b/.test(
+      xml
+    )
+  )
+    features.add("chart labels, styling or analytical options")
+  if (/<c:externalData\b/.test(xml)) features.add("chart source workbook links/formulas")
+  const parts = [...xml.matchAll(/<c:ser\b[^>]*>[\s\S]*?<\/c:ser>/g)].map((match) => match[0])
+  const parsed = parts.map((part) => {
+    const cat = part.match(/<c:cat>[\s\S]*?<\/c:cat>/)?.[0] ?? ""
+    const val = part.match(/<c:val>[\s\S]*?<\/c:val>/)?.[0] ?? ""
+    const categories = cachedPoints(cat)
+    const points = cachedPoints(val)
+    const labels = categories.map((point) => point.text)
+    const values = points.map((point) => (point.text.trim() ? Number(point.text) : Number.NaN))
+    const nameXml = part.match(/<c:tx>[\s\S]*?<\/c:tx>/)?.[0] ?? ""
+    const name =
+      cachedPoints(nameXml)[0]?.text ??
+      decodeXml(nameXml.match(/<c:v>([\s\S]*?)<\/c:v>/)?.[1] ?? "")
+    const complete =
+      categories.every((point, index) => point.idx === index) &&
+      points.every((point, index) => point.idx === index) &&
+      [cat, val].every((cache) => {
+        const count = cache.match(/<c:ptCount\b[^>]*val="(\d+)"/)?.[1]
+        return count === undefined || Number(count) === labels.length
+      })
+    return { name, labels, values, complete }
+  })
+  const labels = parsed[0]?.labels ?? []
+  if (
+    !labels.length ||
+    parsed.some(
+      (series) =>
+        !series.complete ||
+        series.labels.length !== labels.length ||
+        series.labels.some((label, index) => label !== labels[index]) ||
+        series.values.length !== labels.length ||
+        series.values.some((value) => !Number.isFinite(value))
+    )
+  ) {
+    features.add("chart data unavailable, sparse or inconsistent across series")
+    return null
+  }
   const title = xml.match(/<c:title>[\s\S]*?<\/c:title>/)?.[0]
   return {
     id,
     type: "chart",
     ...geometry,
     labels,
-    values,
+    values: parsed[0].values,
+    series: parsed.map(({ name, values }) => ({ name, values })),
     ...(title ? { title: cellTexts(title).join(" ").trim() || undefined } : {}),
   }
 }
@@ -339,15 +415,15 @@ async function importNotes(zip: JSZip, path: string): Promise<string | undefined
 }
 
 /** `<a:t>` runs grouped per `<a:p>` paragraph. */
-function blockParagraphs(block: string): string[] {
-  const paragraphs = block.match(/<a:p>[\s\S]*?<\/a:p>/g) ?? [block]
+function blockParagraphs(block: string, preserveEmpty = false): string[] {
+  const paragraphs = block.match(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g) ?? [block]
   return paragraphs
     .map((paragraph) => cellTexts(paragraph).join(""))
-    .filter((text) => text.length > 0)
+    .filter((text) => preserveEmpty || text.length > 0)
 }
 
 function cellTexts(xml: string): string[] {
-  return [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((match) => decodeXml(match[1]))
+  return [...xml.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)].map((match) => decodeXml(match[1]))
 }
 
 function spPrOf(block: string): string {
@@ -494,7 +570,8 @@ function slideXml(
   slide: PresentationSlide,
   deck: PresentationDeck,
   slideNumberValue: number,
-  media: Array<{ path: string; base64: string }>
+  media: Array<{ path: string; base64: string }>,
+  charts: ChartElement[]
 ) {
   const relationships = [
     `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`,
@@ -508,7 +585,7 @@ function slideXml(
   const allocId = () => shapeId++
   const elements = slide.elements
     .flatMap((element) =>
-      renderElement(element, allocId, deck, slideNumberValue, relationships, media)
+      renderElement(element, allocId, deck, slideNumberValue, relationships, media, charts)
     )
     .join("")
   const source = slide.sourceNote
@@ -543,65 +620,26 @@ function renderElement(
   deck: PresentationDeck,
   slideNumberValue: number,
   relationships: string[],
-  media: Array<{ path: string; base64: string }>
+  media: Array<{ path: string; base64: string }>,
+  charts: ChartElement[]
 ): string[] {
   if (element.type === "text") return [renderTextShape(element, allocId())]
   if (element.type === "shape") return [renderShape(element, allocId())]
-  if (element.type === "table")
-    return element.rows.flatMap((row, rowIndex) =>
-      row.map((cell, columnIndex) =>
-        renderShape(
-          {
-            id: `${element.id}-${rowIndex}-${columnIndex}`,
-            type: "shape",
-            x: element.x + (columnIndex * element.width) / Math.max(row.length, 1),
-            y: element.y + (rowIndex * element.height) / Math.max(element.rows.length, 1),
-            width: element.width / Math.max(row.length, 1),
-            height: element.height / Math.max(element.rows.length, 1),
-            fill: rowIndex === 0 ? deck.theme.accent : "FFFFFF",
-            line: "CBD5E1",
-            text: cell,
-          },
-          allocId()
-        )
-      )
-    )
+  if (element.type === "table") return [renderTable(element, allocId(), deck)]
   if (element.type === "chart") {
-    const max = Math.max(...element.values.map(Math.abs), 1)
-    const bars = element.values.map((value, index) =>
-      renderShape(
-        {
-          id: `${element.id}-${index}`,
-          type: "shape",
-          x: element.x + (index * element.width) / Math.max(element.values.length, 1),
-          y: element.y + element.height * (1 - Math.abs(value) / max),
-          width: (element.width / Math.max(element.values.length, 1)) * 0.75,
-          height: (element.height * Math.abs(value)) / max,
-          fill: deck.theme.accent,
-          text: element.labels[index],
-        },
-        allocId()
-      )
+    charts.push(element)
+    const relId = `rId${relationships.length + 1}`
+    relationships.push(
+      `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${charts.length}.xml"/>`
     )
-    return element.title
-      ? [
-          renderTextShape(
-            {
-              id: `${element.id}-title`,
-              type: "text",
-              x: element.x,
-              y: Math.max(element.y - 0.4, 0.05),
-              width: element.width,
-              height: 0.35,
-              text: element.title,
-              fontSize: 18,
-              bold: true,
-            },
-            allocId()
-          ),
-          ...bars,
-        ]
-      : bars
+    return [
+      graphicFrame(
+        element,
+        allocId(),
+        "chart",
+        `<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="${relId}"/>`
+      ),
+    ]
   }
   const extension = element.mimeType === "image/png" ? "png" : "jpg"
   const mediaIndex = media.length + 1
@@ -613,6 +651,92 @@ function renderElement(
   return [
     `<p:pic><p:nvPicPr><p:cNvPr id="${allocId()}" name="${escapeXml(element.alt)}" descr="${escapeXml(element.alt)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(element)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`,
   ]
+}
+
+function graphicFrame(
+  element: SlideElement,
+  id: number,
+  kind: "table" | "chart",
+  content: string
+): string {
+  const xfrm = transform(element).replaceAll("a:xfrm", "p:xfrm")
+  return `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="${escapeXml(element.id)}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${xfrm}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/${kind}">${content}</a:graphicData></a:graphic></p:graphicFrame>`
+}
+
+function renderTable(
+  element: Extract<SlideElement, { type: "table" }>,
+  id: number,
+  deck: PresentationDeck
+): string {
+  const columns = Math.max(1, ...element.rows.map((row) => row.length))
+  const grid = Array.from(
+    { length: columns },
+    () => `<a:gridCol w="${Math.round((element.width * EMU) / columns)}"/>`
+  ).join("")
+  const rows = element.rows
+    .map((row, rowIndex) => {
+      const cells = Array.from({ length: columns }, (_, column) => {
+        const paragraphs = (row[column] ?? "")
+          .split("\n")
+          .map(
+            (text) =>
+              `<a:p><a:r><a:rPr sz="1600"><a:solidFill><a:srgbClr val="${rowIndex === 0 ? "FFFFFF" : color(deck.theme.foreground)}"/></a:solidFill></a:rPr><a:t>${escapeXml(text)}</a:t></a:r></a:p>`
+          )
+          .join("")
+        return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>${paragraphs}</a:txBody><a:tcPr><a:solidFill><a:srgbClr val="${rowIndex === 0 ? color(deck.theme.accent) : "FFFFFF"}"/></a:solidFill></a:tcPr></a:tc>`
+      }).join("")
+      return `<a:tr h="${Math.round((element.height * EMU) / element.rows.length)}">${cells}</a:tr>`
+    })
+    .join("")
+  return graphicFrame(
+    element,
+    id,
+    "table",
+    `<a:tbl><a:tblPr firstRow="1" bandRow="0"/><a:tblGrid>${grid}</a:tblGrid>${rows}</a:tbl>`
+  )
+}
+
+/** Native chart parts include both cached values and an editable embedded data workbook. */
+async function nativeChart(
+  element: ChartElement,
+  chartNumber: number
+): Promise<{ xml: string; workbook: Uint8Array }> {
+  if (
+    !element.labels.length ||
+    chartSeries(element).some((entry) => entry.values.length !== element.labels.length)
+  )
+    throw new Error(
+      `Chart ${element.id} requires non-empty labels matching every series before PPTX export.`
+    )
+  const loaded = await import("exceljs")
+  const ExcelJS = loaded.default ?? loaded
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet("Data")
+  const series = chartSeries(element)
+  sheet.addRow(["", ...series.map((entry) => entry.name)])
+  element.labels.forEach((label, index) =>
+    sheet.addRow([label, ...series.map((entry) => entry.values[index])])
+  )
+  const points = (values: Array<string | number>) =>
+    `<c:ptCount val="${values.length}"/>` +
+    values
+      .map((value, index) => `<c:pt idx="${index}"><c:v>${escapeXml(String(value))}</c:v></c:pt>`)
+      .join("")
+  const seriesXml = series
+    .map((entry, index) => {
+      const column = sheet.getColumn(index + 2).letter
+      return `<c:ser><c:idx val="${index}"/><c:order val="${index}"/><c:tx><c:strRef><c:f>Data!$${column}$1</c:f><c:strCache>${points([entry.name])}</c:strCache></c:strRef></c:tx><c:cat><c:strRef><c:f>Data!$A$2:$A$${element.labels.length + 1}</c:f><c:strCache>${points(element.labels)}</c:strCache></c:strRef></c:cat><c:val><c:numRef><c:f>Data!$${column}$2:$${column}$${entry.values.length + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode>${points(entry.values)}</c:numCache></c:numRef></c:val></c:ser>`
+    })
+    .join("")
+  const categoryAxis = chartNumber * 2 + 100
+  const valueAxis = categoryAxis + 1
+  const title = element.title
+    ? `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(element.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`
+    : ""
+  const xml =
+    xmlHeader +
+    `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:chart>${title}<c:plotArea><c:layout/><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${seriesXml}<c:gapWidth val="150"/><c:overlap val="0"/><c:axId val="${categoryAxis}"/><c:axId val="${valueAxis}"/></c:barChart><c:catAx><c:axId val="${categoryAxis}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="${valueAxis}"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx><c:valAx><c:axId val="${valueAxis}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="l"/><c:majorGridlines/><c:numFmt formatCode="General" sourceLinked="1"/><c:tickLblPos val="nextTo"/><c:crossAx val="${categoryAxis}"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart><c:externalData r:id="rId1"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`
+  return { xml, workbook: new Uint8Array(await workbook.xlsx.writeBuffer()) }
 }
 
 function renderTextShape(element: Extract<SlideElement, { type: "text" }>, id: number) {
@@ -643,6 +767,16 @@ function presentationRelationships(deck: PresentationDeck) {
   )
 }
 function contentTypes(deck: PresentationDeck) {
+  const chartCount = deck.slides.reduce(
+    (count, slide) => count + slide.elements.filter((element) => element.type === "chart").length,
+    0
+  )
+  const chartTypes = Array.from(
+    { length: chartCount },
+    (_, index) =>
+      `<Override PartName="/ppt/charts/chart${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`
+  ).join("")
+
   const notesTypes = deck.slides
     .map((slide, index) =>
       slide.speakerNotes
@@ -655,7 +789,7 @@ function contentTypes(deck: PresentationDeck) {
     : ""
   return (
     xmlHeader +
-    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${deck.slides.map((_, i) => `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}${notesTypes}${notesMasterType}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${deck.slides.map((_, i) => `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}${notesTypes}${notesMasterType}${chartTypes}<Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`
   )
 }
 function rootRelationships() {

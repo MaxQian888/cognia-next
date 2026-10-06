@@ -17,6 +17,7 @@
  *  - Runtime API types live in `@cognia/plugin-sdk/context`.
  */
 
+export type { PluginNodeRuntimeDeclaration } from "@/types/plugin/plugin-node-runtime"
 export type {
   PluginManifest,
   PluginManifestDexieBlock,

@@ -10,10 +10,14 @@
   "main": "src/index.ts",
   "icon": "assets/icon.png",
   "keywords": ["xlsx", "excel", "spreadsheet", "workbook", "lark"],
-  "author": { "name": "cognia-next" },
+  "author": {
+    "name": "cognia-next"
+  },
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "permissions": [
     "artifact:read",
     "artifact:write",
@@ -97,7 +101,26 @@
         "edit.saving": "Saving the edit…",
         "edit.failed": "The edit was not applied: {error}",
         "edit.conflict": "The workbook changed while you were editing, so the edit was not applied. Edit the current version again.",
-        "edit.changeDescription": "Edited a cell in the preview"
+        "edit.changeDescription": "Edited a cell in the preview",
+        "engine.title": "Optional Office engine",
+        "engine.check": "Check engine",
+        "engine.install": "Install engine on demand",
+        "engine.probe": "Load and check module",
+        "engine.remove": "Remove engine",
+        "engine.cancel": "Cancel installation",
+        "engine.working": "Working…",
+        "engine.loaded": "Module check passed. Document conversion is not enabled by this check.",
+        "engine.error": "Office engine: {error}",
+        "engine.state.unchecked": "Optional download; never loaded at startup.",
+        "engine.state.missing": "Engine is not installed.",
+        "engine.state.preparing": "Installing pinned engine packages…",
+        "engine.state.prepared": "Installed; module loads only when requested.",
+        "engine.state.failed": "Installation failed. Check the error and retry.",
+        "engine.permission": "Install or check this plugin’s optional Office engine on this host. Downloads about 67 MB for Mac ARM64; other platforms vary.",
+        "engine.permissionDenied": "Permission was not granted; no engine action was started.",
+        "engine.busy": "An engine action is already in progress.",
+        "engine.disposed": "The Office plugin is no longer active or the action was superseded.",
+        "engine.invalidAction": "Unsupported Office engine action."
       },
       "zh-CN": {
         "manifest.name": "Cognia 表格",
@@ -171,21 +194,53 @@
         "edit.saving": "正在保存编辑…",
         "edit.failed": "编辑未生效：{error}",
         "edit.conflict": "编辑期间工作簿已被修改，本次编辑未生效。请在当前版本上重新编辑。",
-        "edit.changeDescription": "在预览中编辑了单元格"
+        "edit.changeDescription": "在预览中编辑了单元格",
+        "engine.title": "可选 Office 引擎",
+        "engine.check": "检查引擎",
+        "engine.install": "按需安装引擎",
+        "engine.probe": "加载并检查模块",
+        "engine.remove": "移除引擎",
+        "engine.cancel": "取消安装",
+        "engine.working": "处理中…",
+        "engine.loaded": "模块检查通过。本次检查不代表文档转换已启用。",
+        "engine.error": "Office 引擎：{error}",
+        "engine.state.unchecked": "可选下载，不会在启动时加载。",
+        "engine.state.missing": "尚未安装引擎。",
+        "engine.state.preparing": "正在安装锁定版本的引擎依赖…",
+        "engine.state.prepared": "已安装，仅在请求时加载模块。",
+        "engine.state.failed": "安装失败，请查看错误后重试。",
+        "engine.permission": "在此宿主安装或检查本插件的可选 Office 引擎。Mac ARM64 约需下载 67 MB，其他平台大小不同。",
+        "engine.permissionDenied": "未授予权限，未启动引擎操作。",
+        "engine.busy": "已有引擎操作正在进行。",
+        "engine.disposed": "Office 插件已停用或操作已被取代。",
+        "engine.invalidAction": "不支持的 Office 引擎操作。"
       }
     }
   },
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
     "headless": {
-      "availability": "blocked",
-      "reason": "Office file open/save requires an interactive browser or Tauri file port."
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Optional engine preparation/status/probing uses the connected host. File pickers and interactive workbook preview require a UI. Module probing does not enable document conversion."
     },
     "mobile": {
       "availability": "supported",
       "entrypoint": "src/index.ts",
       "reason": "Workbook authoring, preview, and Lark sync work on mobile; XLSX import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
     }
-  }
+  },
+  "nodeRuntime": {
+    "directory": "runtime",
+    "entry": "probe.mjs"
+  },
+  "optionalPermissions": ["shell:execute", "network:fetch"],
+  "shellCommands": ["node", "pnpm"]
 }

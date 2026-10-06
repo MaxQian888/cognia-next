@@ -55,6 +55,15 @@ export const DOCX_FEATURE_IDS = [
   "embedded-external-content",
   "merged-table-cells",
   "page-breaks",
+  "inline-formatting",
+  "paragraph-formatting",
+  "table-formatting",
+  "nested-tables",
+  "styles",
+  "custom-numbering",
+  "equations-symbols",
+  "comment-metadata",
+  "comment-anchors",
 ] as const
 export type DocxFeatureId = (typeof DOCX_FEATURE_IDS)[number]
 
@@ -411,13 +420,212 @@ async function detectFeatures(zip: ZipLike, documentXml: string): Promise<DocxFe
     features.push("headers-footers")
   if (/<w:(instrText|fldSimple)\b|<w:fldChar\b/.test(documentXml)) features.push("fields")
   if (/<w:sdt\b/.test(documentXml)) features.push("content-controls")
-  // Every body ends with one sectPr (page setup) — only flag real section
-  // breaks, where layout actually varies across the document.
-  if ((documentXml.match(/<w:sectPr\b/g) ?? []).length > 1) features.push("section-page-setup")
+  // A single section can still carry landscape, custom margins, columns, or
+  // page numbering. Compare with what our writer actually reconstructs.
+  const defaults = await readExportDefaults()
+  const sections = elements(documentXml, "sectPr")
+  if (sections.length > 1 || sections.some((section) => !matchesDefault(section, defaults.section)))
+    features.push("section-page-setup")
   if (/<w:altChunk\b/.test(documentXml)) features.push("embedded-external-content")
   if (/<w:(gridSpan|vMerge)\b/.test(documentXml)) features.push("merged-table-cells")
-  if (/<w:br[^>]*w:type="page"/.test(documentXml)) features.push("page-breaks")
+  if (/<w:br[^>]*w:type="(?:page|column)"|<w:pageBreakBefore\b/.test(documentXml))
+    features.push("page-breaks")
+  if (
+    elements(documentXml, "rPr").some((xml) =>
+      /<w:/.test(
+        xml
+          .replace(/<\/?w:rPr\b[^>]*>/g, "")
+          .replace(/<w:rStyle\b[^>]*w:val="CommentReference"[^>]*\/>/g, "")
+      )
+    )
+  )
+    features.push("inline-formatting")
+  if (
+    elements(documentXml, "pPr").some((xml) =>
+      /<w:/.test(
+        xml
+          .replace(/<\/?w:pPr\b[^>]*>/g, "")
+          .replace(/<w:(pStyle|outlineLvl)\b[^>]*\/>/g, "")
+          .replace(/<w:numPr\b[^>]*>[\s\S]*?<\/w:numPr>/g, "")
+      )
+    )
+  )
+    features.push("paragraph-formatting")
+  if (
+    elements(documentXml, "tblPr").some((xml) => !matchesDefault(xml, defaults.table)) ||
+    /<w:(tcPr|trPr)\b[^>]*>\s*<w:/.test(documentXml) ||
+    [...documentXml.matchAll(/<w:gridCol\b([^>]*)\/>/g)].some(
+      (match) => attr(match[1], "w:w") !== "100"
+    )
+  )
+    features.push("table-formatting")
+  let tableDepth = 0
+  for (const match of documentXml.matchAll(/<\/?w:tbl\b[^>]*>/g)) {
+    if (match[0].startsWith("</")) tableDepth -= 1
+    else if (!match[0].endsWith("/>")) tableDepth += 1
+    if (tableDepth > 1) {
+      features.push("nested-tables")
+      break
+    }
+  }
+  if (await hasChangedStyles(zip, documentXml, defaults.styles)) features.push("styles")
+  if (await hasChangedNumbering(zip, documentXml, defaults.numbering))
+    features.push("custom-numbering")
+  if (/<m:oMath\b|<m:oMathPara\b|<w:sym\b|<w:(?:noBreakHyphen|softHyphen)\b/.test(documentXml))
+    features.push("equations-symbols")
+  const comments = await zip.file("word/comments.xml")?.async("string")
+  const threads = await zip.file("word/commentsExtended.xml")?.async("string")
+  if (
+    comments &&
+    (/\bw:(date|initials)=/.test(comments) ||
+      /<w:(rPr|pPr|tbl|hyperlink|drawing)\b/.test(comments) ||
+      /\bw15:paraIdParent=/.test(threads ?? ""))
+  )
+    features.push("comment-metadata")
+  if (comments && hasChangedCommentAnchors(documentXml, comments)) features.push("comment-anchors")
   return features
+}
+
+interface ExportDefaults {
+  section: string
+  table: string
+  styles: string
+  numbering: string
+}
+let exportDefaults: Promise<ExportDefaults> | undefined
+
+/** Derive defaults from the existing writer, so dependency updates cannot stale a parallel format specification. */
+function readExportDefaults(): Promise<ExportDefaults> {
+  return (exportDefaults ??= (async () => {
+    const model = createDocument("Defaults")
+    model.blocks.push({ id: "b1", type: "table", rows: [[""]] })
+    model.blocks.push({ id: "b2", type: "list-item", ordered: true, text: "" })
+    model.comments.push({ id: "m1", blockId: "b2", author: "Cognia", text: "", resolved: false })
+    const JSZip = (await import("jszip")).default
+    const zip = await JSZip.loadAsync(await exportDocx(model))
+    const xml = await zip.file("word/document.xml")!.async("string")
+    return {
+      section: elements(xml, "sectPr")[0],
+      table: elements(xml, "tblPr")[0],
+      styles: await zip.file("word/styles.xml")!.async("string"),
+      numbering: await zip.file("word/numbering.xml")!.async("string"),
+    }
+  })().catch((error: unknown) => {
+    exportDefaults = undefined
+    throw error
+  }))
+}
+
+function elements(xml: string, tag: string): string[] {
+  return [...xml.matchAll(new RegExp(`<w:${tag}\\b[^>]*(?:/>|>[\\s\\S]*?</w:${tag}>)`, "g"))].map(
+    (match) => match[0]
+  )
+}
+
+function normalizeXml(xml: string): string {
+  return xml
+    .replace(/>\s+</g, "><")
+    .replace(/<([\w:]+)([^<>]*?)>/g, (_, tag: string, attributes: string) => {
+      const attrs = [...attributes.matchAll(/([\w:]+)="([^"]*)"/g)]
+        .filter((match) => !match[1].startsWith("w:rsid"))
+        .map((match) => `${match[1]}="${match[2]}"`)
+        .sort()
+        .join(" ")
+      return `<${tag}${attrs ? ` ${attrs}` : ""}${attributes.endsWith("/") ? "/" : ""}>`
+    })
+    .trim()
+}
+
+function matchesDefault(xml: string, expected: string): boolean {
+  // Empty property containers specify no extra formatting.
+  return /^<w:\w+\s*\/>$/.test(xml) || normalizeXml(xml) === normalizeXml(expected)
+}
+
+async function hasChangedStyles(
+  zip: ZipLike,
+  documentXml: string,
+  defaults: string
+): Promise<boolean> {
+  const source = (await zip.file("word/styles.xml")?.async("string")) ?? ""
+  const styles = new Map(elements(source, "style").map((xml) => [attr(xml, "w:styleId"), xml]))
+  const expected = new Map(elements(defaults, "style").map((xml) => [attr(xml, "w:styleId"), xml]))
+  const docDefaults = elements(source, "docDefaults")[0]
+  if (docDefaults && !matchesDefault(docDefaults, elements(defaults, "docDefaults")[0] ?? ""))
+    return true
+  const used = new Set<string>()
+  for (const id of ["Normal", "DefaultParagraphFont"]) if (styles.has(id)) used.add(id)
+  for (const match of documentXml.matchAll(/<w:(?:pStyle|rStyle|tblStyle)\b([^>]*)\/>/g)) {
+    const id = attr(match[1], "w:val")
+    if (id) used.add(id)
+  }
+  for (const [id, xml] of styles) if (id && attr(xml, "w:default") === "1") used.add(id)
+  for (const id of used) {
+    const xml = styles.get(id)
+    if (!expected.has(id)) {
+      if (!xml && ["Normal", "DefaultParagraphFont"].includes(id)) continue
+      return true
+    }
+    if (xml && normalizeXml(xml) !== normalizeXml(expected.get(id)!)) return true
+  }
+  return false
+}
+
+async function hasChangedNumbering(
+  zip: ZipLike,
+  documentXml: string,
+  defaults: string
+): Promise<boolean> {
+  const used = [...documentXml.matchAll(/<w:numId\b([^>]*)\/>/g)].map((match) =>
+    attr(match[1], "w:val")
+  )
+  if (!used.length) return false
+  const source = (await zip.file("word/numbering.xml")?.async("string")) ?? ""
+  const stripId = (xml: string) => normalizeXml(xml.replace(/\bw:abstractNumId="[^"]*"/g, ""))
+  const expected = new Set(elements(defaults, "abstractNum").map(stripId))
+  const sequences = new Set<string>()
+  for (const id of new Set(used)) {
+    const num = elements(source, "num").find((xml) => attr(xml, "w:numId") === id)
+    const abstractId = num && /<w:abstractNumId\b[^>]*w:val="([^"]*)"/.exec(num)?.[1]
+    const abstract = elements(source, "abstractNum").find(
+      (xml) => attr(xml, "w:abstractNumId") === abstractId
+    )
+    if (!num || !abstract || !expected.has(stripId(abstract))) return true
+    if (sequences.has(stripId(abstract))) return true
+    sequences.add(stripId(abstract))
+    // Restarting later lists is lost even when their abstract format matches.
+    if (
+      elements(num, "lvlOverride").some(
+        (xml) =>
+          !/^<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"\/><\/w:lvlOverride>$/.test(
+            normalizeXml(xml)
+          )
+      )
+    )
+      return true
+  }
+  return new Set(used).size > 2 || /<w:ilvl\b[^>]*w:val="(?:9|\d{2,})"/.test(documentXml)
+}
+
+function hasChangedCommentAnchors(documentXml: string, commentsXml: string): boolean {
+  const paragraphs = elements(documentXml, "p")
+  for (const match of commentsXml.matchAll(/<w:comment\b([^>]*)>/g)) {
+    const id = attr(match[1], "w:id")
+    if (!id || !/^\d+$/.test(id)) return true
+    const paragraph = paragraphs.find((xml) => commentAnchors(xml).includes(Number(id)))
+    if (!paragraph) return true
+    const start = new RegExp(`<w:commentRangeStart\\b[^>]*w:id="${id}"[^>]*/>`).exec(paragraph)
+    const end = new RegExp(`<w:commentRangeEnd\\b[^>]*w:id="${id}"[^>]*/>`).exec(paragraph)
+    if (
+      !start ||
+      !end ||
+      paragraphText(paragraph.slice(0, start.index)).trim() ||
+      paragraphText(paragraph.slice(end.index + end[0].length)).trim()
+    )
+      return true
+    // Table comments cannot retain their cell/range anchor in a string[][] model.
+    for (const table of elements(documentXml, "tbl")) if (table.includes(start[0])) return true
+  }
+  return false
 }
 
 /** Note types Word uses for the separator lines, never for user content. */
@@ -443,25 +651,39 @@ async function hasRealNotes(
 // Import — numbering (ordered vs bullet)
 // ---------------------------------------------------------------------------
 
-type NumberingInfo = Map<string, "ordered" | "bullet">
+type NumberingInfo = Map<string, Map<number, "ordered" | "bullet">>
 
 async function readNumbering(zip: ZipLike): Promise<NumberingInfo> {
   const file = zip.file("word/numbering.xml")
   const info: NumberingInfo = new Map()
   if (!file) return info
   const xml = await file.async("string")
-  const abstractFormat = new Map<string, string>()
+  const abstractFormat = new Map<string, Map<number, "ordered" | "bullet">>()
   for (const match of xml.matchAll(
     /<w:abstractNum\b[^>]*w:abstractNumId="(\d+)"[^>]*>([\s\S]*?)<\/w:abstractNum>/g
   )) {
-    const levelZero = /<w:lvl\b[^>]*w:ilvl="0"[^>]*>([\s\S]*?)<\/w:lvl>/.exec(match[2])
-    const format = /<w:numFmt\b[^>]*w:val="([^"]+)"/.exec(levelZero?.[1] ?? match[2])
-    if (format) abstractFormat.set(match[1], format[1])
+    const levels = new Map<number, "ordered" | "bullet">()
+    for (const level of elements(match[2], "lvl")) {
+      const index = Number(attr(level, "w:ilvl"))
+      const format = /<w:numFmt\b[^>]*w:val="([^"]+)"/.exec(level)?.[1]
+      if (Number.isInteger(index) && format)
+        levels.set(index, format === "bullet" ? "bullet" : "ordered")
+    }
+    abstractFormat.set(match[1], levels)
   }
   for (const match of xml.matchAll(/<w:num\b[^>]*w:numId="(\d+)"[^>]*>([\s\S]*?)<\/w:num>/g)) {
     const abstract = /<w:abstractNumId\b[^>]*w:val="(\d+)"/.exec(match[2])
     const format = abstract ? abstractFormat.get(abstract[1]) : undefined
-    if (format) info.set(match[1], format === "bullet" ? "bullet" : "ordered")
+    if (format) {
+      const levels = new Map(format)
+      for (const override of elements(match[2], "lvlOverride")) {
+        const index = Number(attr(override, "w:ilvl"))
+        const overridden = /<w:numFmt\b[^>]*w:val="([^"]+)"/.exec(override)?.[1]
+        if (Number.isInteger(index) && overridden)
+          levels.set(index, overridden === "bullet" ? "bullet" : "ordered")
+      }
+      info.set(match[1], levels)
+    }
   }
   return info
 }
@@ -633,7 +855,7 @@ function parseParagraph(
     return {
       id,
       type: "list-item",
-      ordered: numId ? numbering.get(numId) !== "bullet" : true,
+      ordered: numId ? numbering.get(numId)?.get(ilvl) !== "bullet" : true,
       ...(level ? { level } : {}),
       text,
     }

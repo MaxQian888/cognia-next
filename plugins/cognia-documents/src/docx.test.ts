@@ -1,12 +1,14 @@
 import JSZip from "jszip"
 import { createDocument, applyDocumentOperations } from "./model"
 import {
+  DOCX_FEATURE_IDS,
   exportDocx,
   exportTranscriptDocx,
   importDocx,
   transcriptModel,
   validateDocxRoundTrip,
 } from "./docx"
+import manifest from "../plugin.json"
 
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -215,14 +217,14 @@ it("flags a real endnote even without a body reference", async () => {
   expect((await importDocx(bytes, "notes.docx")).importedFeatures).toEqual(["endnotes"])
 })
 
-it("round-trips its own export without false losses or a duplicated title", async () => {
+it("round-trips its own content without a duplicated title and reports discarded comment dates", async () => {
   const model = applyDocumentOperations(createDocument("Quarterly brief", "Opening line"), [
     { op: "appendHeading", text: "Details", level: 2 },
     { op: "addComment", blockId: "b1", text: "Check", author: "Jane" },
   ])
   const imported = await importDocx(await exportDocx(model), "brief.docx")
   expect(imported.title).toBe("Quarterly brief")
-  expect(imported.importedFeatures).toEqual([])
+  expect(imported.importedFeatures).toEqual(["comment-metadata"])
   expect(imported.blocks.map((block) => ("text" in block ? block.text : ""))).toEqual([
     "Opening line",
     "Details",
@@ -300,6 +302,174 @@ it("writes the caller's localized labels for empty comments and missing authors"
 
 it("rejects invalid DOCX packages", async () => {
   await expect(importDocx(new Uint8Array([1, 2, 3]), "bad.docx")).rejects.toThrow()
+})
+
+it("localizes every detected loss in both plugin locales", () => {
+  for (const locale of Object.values(manifest.i18n.locales)) {
+    for (const id of DOCX_FEATURE_IDS) expect(locale).toHaveProperty([`feature.${id}`])
+  }
+})
+
+it("reports formatting and objects flattened by the plain-text block model", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(`
+      <w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/></w:pPr>
+        <w:r><w:rPr><w:b/><w:rFonts w:eastAsia="宋体"/><w:color w:val="FF0000"/></w:rPr><w:t>中文</w:t></w:r>
+        <m:oMath><m:r><m:t>x</m:t></m:r></m:oMath><w:r><w:sym w:font="Wingdings" w:char="F0FC"/></w:r>
+      </w:p>
+      <w:tbl><w:tblPr><w:tblW w:type="dxa" w:w="5000"/></w:tblPr><w:tr><w:tc><w:tcPr><w:shd w:fill="FFFF00"/></w:tcPr>
+        <w:p><w:r><w:t>Outer</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Inner</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+      </w:tc></w:tr></w:tbl>`),
+  })
+  const model = await importDocx(bytes)
+  expect(model.importedFeatures).toEqual(
+    expect.arrayContaining([
+      "inline-formatting",
+      "paragraph-formatting",
+      "table-formatting",
+      "nested-tables",
+      "equations-symbols",
+    ])
+  )
+  expect(model.blocks[0]).toMatchObject({ text: "中文" })
+})
+
+it.each([
+  ['<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>'],
+  ['<w:pgMar w:left="720" w:right="720"/>'],
+  ['<w:cols w:num="2"/>'],
+  ['<w:pgNumType w:start="5"/>'],
+])("reports a single custom section: %s", async (properties) => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml("<w:p><w:r><w:t>Body</w:t></w:r></w:p>").replace(
+      "<w:sectPr/>",
+      `<w:sectPr>${properties}</w:sectPr>`
+    ),
+  })
+  expect((await importDocx(bytes)).importedFeatures).toContain("section-page-setup")
+})
+
+it("compares built-in style definitions rather than trusting the style name", async () => {
+  const model = applyDocumentOperations(createDocument("Styled"), [
+    { op: "appendHeading", text: "Heading", level: 2 },
+  ])
+  const zip = await JSZip.loadAsync(await exportDocx(model))
+  const styles = await zip.file("word/styles.xml")!.async("string")
+  zip.file(
+    "word/styles.xml",
+    styles.replace(
+      /(<w:style\b[^>]*w:styleId="Heading2"[^>]*>)/,
+      '$1<w:rPr><w:rFonts w:eastAsia="SimSun"/></w:rPr>'
+    )
+  )
+  expect(
+    (await importDocx(await zip.generateAsync({ type: "uint8array" }))).importedFeatures
+  ).toContain("styles")
+})
+
+it("reports unknown styles and document defaults but ignores unused custom styles", async () => {
+  const source = { "word/document.xml": documentXml("<w:p><w:r><w:t>Body</w:t></w:r></w:p>") }
+  const custom = `<w:style w:type="paragraph" w:styleId="Unused"><w:rPr><w:b/></w:rPr></w:style>`
+  const plain = await fixture({
+    ...source,
+    "word/styles.xml": `<w:styles ${W}>${custom}</w:styles>`,
+  })
+  expect((await importDocx(plain)).importedFeatures).not.toContain("styles")
+  const defaults = await fixture({
+    ...source,
+    "word/styles.xml": `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:eastAsia="SimSun"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>`,
+  })
+  expect((await importDocx(defaults)).importedFeatures).toContain("styles")
+  const used = await fixture({
+    "word/document.xml": documentXml(
+      '<w:p><w:pPr><w:pStyle w:val="Custom"/></w:pPr><w:r><w:t>Body</w:t></w:r></w:p>'
+    ),
+  })
+  expect((await importDocx(used)).importedFeatures).toContain("styles")
+})
+
+it("preserves per-level ordered/bullet semantics while reporting custom numbering", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(
+      [0, 1, 2]
+        .map(
+          (level) =>
+            `<w:p><w:pPr><w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="5"/></w:numPr></w:pPr><w:r><w:t>Level ${level}</w:t></w:r></w:p>`
+        )
+        .join("")
+    ),
+    "word/numbering.xml": `<w:numbering ${W}><w:abstractNum w:abstractNumId="0">
+      <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl>
+      <w:lvl w:ilvl="1"><w:numFmt w:val="bullet"/></w:lvl>
+      <w:lvl w:ilvl="2"><w:numFmt w:val="decimal"/></w:lvl>
+      </w:abstractNum><w:num w:numId="5"><w:abstractNumId w:val="0"/>
+      <w:lvlOverride w:ilvl="2"><w:lvl w:ilvl="2"><w:numFmt w:val="bullet"/></w:lvl></w:lvlOverride></w:num></w:numbering>`,
+  })
+  const imported = await importDocx(bytes)
+  expect(imported.blocks).toEqual([
+    expect.objectContaining({ ordered: true }),
+    expect.objectContaining({ ordered: false, level: 1 }),
+    expect.objectContaining({ ordered: false, level: 2 }),
+  ])
+  expect(imported.importedFeatures).toContain("custom-numbering")
+})
+
+it("reports partial comment anchors and reply metadata", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(
+      '<w:p><w:r><w:t>Before </w:t></w:r><w:commentRangeStart w:id="1"/><w:r><w:t>Selection</w:t></w:r><w:commentRangeEnd w:id="1"/></w:p>'
+    ),
+    "word/comments.xml": `<w:comments ${W}><w:comment w:id="1" w:author="Reviewer" w:date="2026-01-01T00:00:00Z"><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:comment></w:comments>`,
+    "word/commentsExtended.xml":
+      '<w15:commentsEx><w15:commentEx w15:paraId="ABC" w15:paraIdParent="DEF"/></w15:commentsEx>',
+  })
+  const imported = await importDocx(bytes)
+  expect(imported.comments[0]).toMatchObject({ author: "Reviewer", text: "Note" })
+  expect(imported.importedFeatures).toEqual(
+    expect.arrayContaining(["comment-metadata", "comment-anchors"])
+  )
+})
+
+it("reports table-cell comment anchors even when they span a complete paragraph", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(
+      '<w:tbl><w:tr><w:tc><w:p><w:commentRangeStart w:id="1"/><w:r><w:t>Cell</w:t></w:r><w:commentRangeEnd w:id="1"/></w:p></w:tc></w:tr></w:tbl>'
+    ),
+    "word/comments.xml": `<w:comments ${W}><w:comment w:id="1" w:author="Reviewer"><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:comment></w:comments>`,
+  })
+  expect((await importDocx(bytes)).importedFeatures).toContain("comment-anchors")
+})
+
+it("reports custom numbering restarts even with the writer's standard list format", async () => {
+  const model = applyDocumentOperations(createDocument("Restart"), [
+    { op: "appendListItem", text: "Fifth", ordered: true },
+  ])
+  const zip = await JSZip.loadAsync(await exportDocx(model))
+  const numbering = await zip.file("word/numbering.xml")!.async("string")
+  zip.file(
+    "word/numbering.xml",
+    numbering.replaceAll('<w:startOverride w:val="1"/>', '<w:startOverride w:val="5"/>')
+  )
+  expect(
+    (await importDocx(await zip.generateAsync({ type: "uint8array" }))).importedFeatures
+  ).toContain("custom-numbering")
+})
+
+it("does not report reconstructed layout, tables, list definitions, and styles as lost", async () => {
+  const model = applyDocumentOperations(createDocument("Native", "Body"), [
+    {
+      op: "appendTable",
+      rows: [
+        ["甲", "乙"],
+        ["1", "2"],
+      ],
+    },
+    { op: "appendListItem", text: "First", ordered: true },
+    { op: "appendListItem", text: "Nested", ordered: true, level: 1 },
+    { op: "appendListItem", text: "Bullet", ordered: false },
+    { op: "appendMarkdown", markdown: "> Quote\n\n```js\nconst n = 1\n```" },
+  ])
+  expect((await importDocx(await exportDocx(model))).importedFeatures).toEqual([])
 })
 
 it("round-trips deep headings, nested lists, quotes, and multi-line code", async () => {

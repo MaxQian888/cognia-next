@@ -4,9 +4,42 @@ import { tmpdir } from "node:os"
 import { dirname, resolve } from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
+import ts from "typescript"
 import { assertDeclaredArtifacts } from "./build-package.mjs"
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+
+test("resolves transitive host adapter and UI imports to workspace source", () => {
+  const config = ts.readConfigFile(resolve(packageRoot, "tsconfig.json"), ts.sys.readFile)
+  assert.equal(config.error, undefined)
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, packageRoot)
+  const containingFile = resolve(packageRoot, "src/index.ts")
+
+  for (const subpath of [
+    "agent-a2a/client",
+    "agent-acp/feature-profile",
+    "agent-aider/manifest",
+    "agent-claude-code/manifest",
+    "agent-codex/app-server-client",
+    "agent-dsh/managed-launch",
+    "agent-opencode/discovery",
+    "agent-pi/auth",
+    "plugin-ui/motion-tokens",
+  ]) {
+    const resolved = ts.resolveModuleName(
+      `@cognia/${subpath}`,
+      containingFile,
+      parsed.options,
+      ts.sys
+    ).resolvedModule
+    const [name, ...entry] = subpath.split("/")
+    assert.equal(
+      resolved?.resolvedFileName,
+      resolve(packageRoot, "..", name, "src", `${entry.join("/")}.ts`),
+      `${subpath} must resolve without prebuilt declarations`
+    )
+  }
+})
 
 function fixture(t) {
   const root = mkdtempSync(resolve(tmpdir(), "sdk-artifact-check-"))
@@ -65,4 +98,12 @@ test("requires direct dependency metadata for public declaration imports", (t) =
   manifest.peerDependencies = { zod: "^4.0.0" }
   writeFileSync(resolve(root, "package.json"), JSON.stringify(manifest))
   assert.doesNotThrow(() => assertDeclaredArtifacts(root))
+})
+
+test("declares the schema dependency exposed by portable handoff policy types", () => {
+  const manifest = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8"))
+  const agentManifest = JSON.parse(
+    readFileSync(resolve(packageRoot, "../agent/package.json"), "utf8")
+  )
+  assert.equal(manifest.dependencies.valibot, agentManifest.dependencies.valibot)
 })

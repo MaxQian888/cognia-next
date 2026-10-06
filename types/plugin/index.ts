@@ -3,6 +3,7 @@
  */
 
 export * from "./plugin"
+export * from "./plugin-node-runtime"
 export * from "./plugin-host-tools"
 export * from "./plugin-cli-tool"
 export * from "./plugin-pi-package"

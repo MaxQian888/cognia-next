@@ -1,0 +1,11 @@
+# This is an isolated plugin runtime, installed only by explicit host action.
+packages:
+  - .
+
+# Keep the normal supply-chain waiting period; do not inherit unrelated exceptions.
+minimumReleaseAge: 1440
+
+# koffi ships platform prebuilds. Its optional local build must never run here.
+# All other lifecycle scripts remain undecided and therefore blocked by pnpm 11.
+allowBuilds:
+  "koffi@3.1.1": false

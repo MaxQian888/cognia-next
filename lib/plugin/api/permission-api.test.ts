@@ -154,6 +154,45 @@ describe("Permission API", () => {
   })
 
   describe("requestPermission", () => {
+    it.each(["shell:execute", "network:fetch"] as const)(
+      "waits for the explicit %s host grant before exposing it to runtime calls",
+      async (permission) => {
+        let finish!: () => void
+        transport.grantPluginPermission.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finish = resolve
+            })
+        )
+        ;(requestPluginPermission as jest.Mock).mockResolvedValue(true)
+        const api = createPermissionAPI(testPluginId, [])
+        const pending = api.requestPermission(permission, "Prepare an optional plugin runtime")
+        await Promise.resolve()
+        expect(api.hasPermission(permission)).toBe(false)
+        expect(transport.grantPluginPermission).toHaveBeenCalledWith(testPluginId, permission)
+        finish()
+        await expect(pending).resolves.toBe(true)
+        expect(api.hasPermission(permission)).toBe(true)
+        expect(transport.grantPluginPermission).toHaveBeenCalledTimes(1)
+      }
+    )
+
+    it.each(["shell:execute", "network:fetch"] as const)(
+      "keeps %s denied when host grant persistence fails",
+      async (permission) => {
+        transport.grantPluginPermission.mockRejectedValueOnce(new Error("host unavailable"))
+        ;(requestPluginPermission as jest.Mock).mockResolvedValue(true)
+        const api = createPermissionAPI(testPluginId, [])
+        await expect(api.requestPermission(permission)).resolves.toBe(false)
+        expect(api.hasPermission(permission)).toBe(false)
+        expect(diag.recordSilentFailure).toHaveBeenCalledWith(
+          testPluginId,
+          expect.objectContaining({ site: "permission.grantHost" }),
+          expect.any(Error)
+        )
+      }
+    )
+
     it("should grant requested permission", async () => {
       const api = createPermissionAPI(testPluginId, [])
 
@@ -431,6 +470,8 @@ describe("Permission API", () => {
     // compile time: adding a union member without listing it here (and
     // mapping it in permissionMapping) is a typecheck error.
     const ALL_API_PERMISSIONS = [
+      "shell:execute",
+      "network:fetch",
       "filesystem:read",
       "filesystem:write",
       "session:read",

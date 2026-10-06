@@ -1,7 +1,9 @@
 // Stage the curated on-disk plugins into the Tauri resource tree.
 //
 // Frontend plugins ride inside the JS bundle and are curated by
-// `lib/plugin/core/browser-builtin-registry.ts`. Everything else -- Python and
+// `lib/plugin/core/browser-builtin-registry.ts`. Those declaring nodeRuntime
+// also need a disk package of their UI and bounded provisioning sources.
+// Everything else -- Python and
 // WASM -- needs a real directory before the Tauri host can run it, and the
 // host only ever scans `<appDataDir>/cognia/plugins`. Nothing copied anything
 // there, and `plugins/` was not in `bundle.resources`, so RepoWiki (ADR-0146,
@@ -24,6 +26,7 @@ import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { buildFrontendPlugin } from "../plugin/build-frontend-plugins.mjs"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
 const PLUGINS_ROOT = path.join(ROOT, "plugins")
@@ -78,6 +81,24 @@ export function readDistribution(fsImpl = fs) {
  * refuses an unfamiliar pattern.
  */
 export function expandInclude(pluginDir, pattern, fsImpl = fs) {
+  if (typeof pattern !== "string" || !pattern)
+    throw new Error(`stage-bundled-plugins: unsafe include path "${pattern}"`)
+  const segments = pattern.split("/")
+  if (
+    path.isAbsolute(pattern) ||
+    /[\\:\0]/.test(pattern) ||
+    segments.some((part) => part === ".." || part === "." || !part)
+  )
+    throw new Error(`stage-bundled-plugins: unsafe include path "${pattern}"`)
+  if (segments.some((part) => NEVER_STAGE.has(part))) return []
+  const assertSource = (relative) => {
+    let current = pluginDir
+    for (const part of relative.split("/")) {
+      current = path.join(current, part)
+      if (fsImpl.lstatSync(current).isSymbolicLink())
+        throw new Error(`stage-bundled-plugins: symlink source "${relative}"`)
+    }
+  }
   const recursive = pattern.match(/^(.*)\/\*\*\/\*(\.[A-Za-z0-9]+)?$/u)
   if (!recursive) {
     if (pattern.includes("*")) {
@@ -87,23 +108,31 @@ export function expandInclude(pluginDir, pattern, fsImpl = fs) {
     }
     const absolute = path.join(pluginDir, pattern)
     if (!fsImpl.existsSync(absolute)) return []
+    assertSource(pattern)
+    if (!fsImpl.statSync(absolute).isFile())
+      throw new Error(`stage-bundled-plugins: expected file "${pattern}"`)
     return [pattern]
   }
 
   const [, subdir, extension] = recursive
   const base = path.join(pluginDir, subdir)
   if (!fsImpl.existsSync(base)) return []
+  assertSource(subdir)
 
   const found = []
   const walk = (dir, relative) => {
     for (const entry of fsImpl.readdirSync(dir, { withFileTypes: true })) {
       if (NEVER_STAGE.has(entry.name)) continue
+      if (entry.isSymbolicLink())
+        throw new Error(`stage-bundled-plugins: symlink source "${entry.name}"`)
       const next = path.join(dir, entry.name)
       const nextRelative = relative ? `${relative}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
         walk(next, nextRelative)
         continue
       }
+      if (!entry.isFile())
+        throw new Error(`stage-bundled-plugins: unsupported source "${entry.name}"`)
       if (extension && !entry.name.endsWith(extension)) continue
       found.push(`${subdir}/${nextRelative}`)
     }
@@ -117,16 +146,32 @@ export function expandInclude(pluginDir, pattern, fsImpl = fs) {
  * catalog. Throws when a declared `include` matches nothing, because that is
  * always a rename that would otherwise ship a plugin missing its own code.
  */
-export function stageBundledPlugins({ outDir, catalogFile, fsImpl = fs } = {}) {
-  const target = outDir ?? path.join(ROOT, STAGED_PLUGIN_DIR)
-  const { bundled } = readDistribution(fsImpl)
+export async function stageBundledPlugins({
+  outDir,
+  catalogFile,
+  fsImpl = fs,
+  root = ROOT,
+  buildFrontend = buildFrontendPlugin,
+} = {}) {
+  const target = outDir ?? path.join(root, STAGED_PLUGIN_DIR)
+  const pluginsRoot = path.join(root, "plugins")
+  const { bundled = {} } = JSON.parse(
+    fsImpl.readFileSync(path.join(pluginsRoot, "distribution.json"), "utf8")
+  )
+  const browserBuiltins = JSON.parse(
+    fsImpl.readFileSync(path.join(pluginsRoot, "browser-builtins.json"), "utf8")
+  )
 
   fsImpl.rmSync(target, { recursive: true, force: true })
   fsImpl.mkdirSync(target, { recursive: true })
 
   const catalog = { entries: {} }
   for (const [dir, entry] of Object.entries(bundled)) {
-    const source = path.join(PLUGINS_ROOT, dir)
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(dir))
+      throw new Error(`Unsafe bundled plugin directory: ${dir}`)
+    const source = path.join(pluginsRoot, dir)
+    if (fsImpl.lstatSync(source).isSymbolicLink())
+      throw new Error(`Unsafe bundled plugin directory (symlink): ${dir}`)
     const manifestPath = path.join(source, "plugin.json")
     if (!fsImpl.existsSync(manifestPath)) {
       throw new Error(
@@ -177,7 +222,43 @@ export function stageBundledPlugins({ outDir, catalogFile, fsImpl = fs } = {}) {
     }
   }
 
-  const catalogPath = catalogFile ?? path.join(ROOT, CATALOG_FILE)
+  // Frontend UI stays on the existing builtin registration path. Only those
+  // declaring a host runtime also need an installable package on disk.
+  for (const dir of browserBuiltins) {
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(dir))
+      throw new Error(`Unsafe bundled plugin directory: ${dir}`)
+    const source = path.join(pluginsRoot, dir)
+    if (fsImpl.lstatSync(source).isSymbolicLink())
+      throw new Error(`Unsafe bundled plugin directory (symlink): ${dir}`)
+    const manifest = JSON.parse(fsImpl.readFileSync(path.join(source, "plugin.json"), "utf8"))
+    if (manifest.type !== "frontend" || !manifest.nodeRuntime) continue
+    if (catalog.entries[dir]) throw new Error(`Duplicate bundled plugin directory: ${dir}`)
+    const built = await buildFrontend({ root, directory: dir })
+    const staged = []
+    for (const [relative, bytes] of [...built.files].sort(([left], [right]) =>
+      left.localeCompare(right)
+    )) {
+      if (
+        path.isAbsolute(relative) ||
+        /[\\:\0]/.test(relative) ||
+        relative
+          .split("/")
+          .some((part) => part === ".." || part === "." || !part || NEVER_STAGE.has(part))
+      )
+        throw new Error(`Unsafe built plugin path: ${relative}`)
+      const to = path.join(target, dir, relative)
+      fsImpl.mkdirSync(path.dirname(to), { recursive: true })
+      fsImpl.writeFileSync(to, bytes)
+      staged.push({
+        path: relative,
+        bytes: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      })
+    }
+    catalog.entries[dir] = { id: built.manifest.id, version: built.manifest.version, files: staged }
+  }
+
+  const catalogPath = catalogFile ?? path.join(root, CATALOG_FILE)
   fsImpl.mkdirSync(path.dirname(catalogPath), { recursive: true })
   fsImpl.writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`)
   return { stagedDir: target, catalogPath, catalog }
@@ -186,7 +267,7 @@ export function stageBundledPlugins({ outDir, catalogFile, fsImpl = fs } = {}) {
 const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (invokedDirectly) {
-  const { stagedDir, catalog } = stageBundledPlugins()
+  const { stagedDir, catalog } = await stageBundledPlugins()
   const ids = Object.values(catalog.entries).map((e) => `${e.id}@${e.version}`)
   console.log(
     ids.length > 0

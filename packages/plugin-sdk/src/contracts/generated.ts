@@ -2798,6 +2798,21 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.workspace.walk": {
     kind: "none",
   },
+  "ctx.nodeRuntime.status": {
+    kind: "none",
+  },
+  "ctx.nodeRuntime.prepare": {
+    kind: "none",
+  },
+  "ctx.nodeRuntime.cancel": {
+    kind: "none",
+  },
+  "ctx.nodeRuntime.probe": {
+    kind: "none",
+  },
+  "ctx.nodeRuntime.remove": {
+    kind: "none",
+  },
 } as const
 export const PLUGIN_API_WIRE_OPS = {
   "db:beginTransaction": {
@@ -3054,5 +3069,60 @@ export const PLUGIN_API_WIRE_OPS = {
     scopeBinding: "plugin",
     executionPlacement: "ui",
     introducedIn: "0.9.0",
+  },
+  "nodeRuntime:status": {
+    id: "nodeRuntime:status",
+    idempotent: true,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["filesystem:read"],
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.1.0",
+  },
+  "nodeRuntime:prepare": {
+    id: "nodeRuntime:prepare",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["filesystem:read", "filesystem:write", "shell:execute", "network:fetch"],
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.1.0",
+  },
+  "nodeRuntime:cancel": {
+    id: "nodeRuntime:cancel",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["filesystem:read", "filesystem:write", "shell:execute"],
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.1.0",
+  },
+  "nodeRuntime:probe": {
+    id: "nodeRuntime:probe",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["filesystem:read", "filesystem:write", "shell:execute"],
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.1.0",
+  },
+  "nodeRuntime:remove": {
+    id: "nodeRuntime:remove",
+    idempotent: false,
+    resourceEffect: {
+      kind: "none",
+    },
+    requiredPermissions: ["filesystem:read", "filesystem:write", "shell:execute"],
+    scopeBinding: "plugin",
+    executionPlacement: "host-service",
+    introducedIn: "0.1.0",
   },
 } as const

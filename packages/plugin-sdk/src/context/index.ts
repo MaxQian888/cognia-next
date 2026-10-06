@@ -397,6 +397,10 @@ export type {
  * host could name.
  */
 export type { BuiltInSkillResult } from "@/lib/skills/built-in/types"
+export type {
+  PluginNodeRuntimeAPI,
+  PluginNodeRuntimeStatus,
+} from "@/types/plugin/plugin-node-runtime"
 
 // =============================================================================
 // Author-callable host tools (`ctx.agent.invokeTool`)

@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { SlashCommandContext } from "@/lib/slash-commands/registry"
 import { usePluginStore } from "@/stores/plugin-runtime"
+import stagedPluginCatalog from "@/lib/plugin/distribution/bundled-plugins.generated.json"
 import type {
   ExtensionCompatibilityDiagnostic,
   ExtensionDescriptor,
@@ -2470,6 +2471,45 @@ export class PluginManager {
     return { ...packaged, ...contributions }
   }
 
+  /** Keep the browser UI canonical; a seeded Node runtime is a disk companion, not another UI install. */
+  private async isBundledRuntimeCompanion(
+    manifest: PluginManifest,
+    diskPath: string
+  ): Promise<boolean> {
+    const builtin = getBrowserBuiltinRegistryEntry(manifest.id)
+    if (!builtin || !manifest.nodeRuntime) return false
+    const current = usePluginStore.getState().plugins[manifest.id]
+    const runtime = builtin.manifest.nodeRuntime
+    if (
+      !runtime ||
+      current?.source !== "builtin" ||
+      current.path !== builtin.path ||
+      manifest.type !== "frontend" ||
+      manifest.version !== builtin.manifest.version ||
+      manifest.nodeRuntime.directory !== runtime.directory ||
+      manifest.nodeRuntime.entry !== runtime.entry
+    )
+      return false
+    const shipped = Object.values(stagedPluginCatalog.entries).find(
+      (entry) => entry.id === manifest.id
+    )
+    if (!shipped || shipped.version !== manifest.version) return false
+    const normalize = (value: string) => value.replaceAll("\\", "/").replace(/\/+$/, "")
+    if (
+      !this.config.pluginDirectory ||
+      normalize(diskPath) !== `${normalize(this.config.pluginDirectory)}/${manifest.id}`
+    )
+      return false
+    try {
+      const { getInstallOrigin } = await import("@/lib/db/plugin-install-origins")
+      const origin = await getInstallOrigin(manifest.id)
+      return origin?.origin.kind === "builtin" && origin.version === shipped.version
+    } catch {
+      // Without installer provenance this remains an ordinary local discovery.
+      return false
+    }
+  }
+
   async scanPlugins(): Promise<DiscoveredPlugin[]> {
     // Browser AND mobile discover built-ins from the static registry; only the
     // Tauri shell additionally scans the on-disk plugin directory below.
@@ -2502,6 +2542,7 @@ export class PluginManager {
 
       for (const entry of localPlugins) {
         const { path } = entry
+        if (await this.isBundledRuntimeCompanion(entry.manifest, path)) continue
         const manifest = this.hydrateDiscoveredManifest(entry.manifest, path)
         // Validate manifest
         const validation = validatePluginManifest(manifest, {

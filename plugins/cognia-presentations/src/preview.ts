@@ -1,6 +1,7 @@
 import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import type { PresentationTranslate } from "./i18n"
 import {
+  chartSeries,
   normalizeHexColor,
   parsePresentation,
   validatePresentation,
@@ -303,7 +304,8 @@ function renderChart(
   deck: PresentationDeck,
   t: PresentationTranslate
 ): void {
-  const values = element.values.filter((value) => Number.isFinite(value))
+  const series = chartSeries(element)
+  const values = series.flatMap((entry) => entry.values).filter((value) => Number.isFinite(value))
   const max = Math.max(...values, 0)
   const min = Math.min(...values, 0)
   const range = max - min || 1
@@ -332,15 +334,19 @@ function renderChart(
   const baseline = document.createElement("div")
   baseline.style.cssText = `position:absolute;left:0;right:0;top:${baselineTop}%;height:1px;background:#${foreground};background:color-mix(in srgb, #${foreground} 40%, transparent)`
   plot.appendChild(baseline)
-  element.values.forEach((value, index) => {
+  element.labels.forEach((_, index) => {
     const column = document.createElement("div")
     column.style.cssText = "position:relative;flex:1;min-width:0"
-    const bar = document.createElement("div")
-    const height = Math.abs(value / range) * 100
-    const top = ((max - Math.max(value, 0)) / range) * 100
-    bar.style.cssText = `position:absolute;left:8%;right:8%;top:${top}%;height:${height}%;min-height:1px;background:#${accent};border-radius:2px 2px 0 0`
-    bar.title = `${element.labels[index] ?? index + 1}: ${value}`
-    column.appendChild(bar)
+    series.forEach((entry, seriesIndex) => {
+      const value = entry.values[index]
+      const bar = document.createElement("div")
+      const height = Math.abs(value / range) * 100
+      const top = ((max - Math.max(value, 0)) / range) * 100
+      const width = 84 / series.length
+      bar.style.cssText = `position:absolute;left:${8 + seriesIndex * width}%;width:${width}%;top:${top}%;height:${height}%;min-height:1px;background:#${accent};opacity:${1 - (seriesIndex / (series.length + 1)) * 0.65};border-radius:2px 2px 0 0`
+      bar.title = `${entry.name ? `${entry.name} — ` : ""}${element.labels[index] ?? index + 1}: ${value}`
+      column.appendChild(bar)
+    })
     plot.appendChild(column)
   })
   node.appendChild(plot)
@@ -355,4 +361,15 @@ function renderChart(
     labels.appendChild(label)
   })
   node.appendChild(labels)
+  if (series.length > 1) {
+    const legend = document.createElement("div")
+    legend.style.cssText = `display:flex;gap:0.75em;flex-wrap:wrap;justify-content:center;${scaledFontSize(9, deck)}`
+    series.forEach((entry, index) => {
+      const item = document.createElement("span")
+      item.textContent = entry.name
+      item.style.cssText = `color:#${accent};opacity:${1 - (index / (series.length + 1)) * 0.65}`
+      legend.appendChild(item)
+    })
+    node.appendChild(legend)
+  }
 }

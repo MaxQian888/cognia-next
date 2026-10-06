@@ -212,13 +212,54 @@
         },
         {
           "path": "plugin.json",
-          "bytes": 7586,
-          "sha256": "d30fa0f593e2d28761496ff42f462d621a1cc52290f676f28c25ef6cb8bc93b7"
+          "bytes": 7610,
+          "sha256": "2df9beda57894b6c895060d0982e539fefee8f06477b03222ca29a0f128ad035"
         },
         {
           "path": "pyproject.toml",
           "bytes": 575,
           "sha256": "e5982f1b7e2a3cadefe78b437a940676c72f85e4c90f77179ae50f82f58b79f4"
+        }
+      ]
+    },
+    "cognia-office": {
+      "id": "cognia-office",
+      "version": "0.1.0",
+      "files": [
+        {
+          "path": "assets/icon.png",
+          "bytes": 74906,
+          "sha256": "4e622894865c459bbde7ecdc46b827149df1aeb5828cada2d358680f0934f038"
+        },
+        {
+          "path": "dist/index.js",
+          "bytes": 1812848,
+          "sha256": "d523f72b54e44d14be3438ced4ca16eaecc2906e8a2e1faad25432d58f1e8429"
+        },
+        {
+          "path": "plugin.json",
+          "bytes": 14141,
+          "sha256": "b75e0417a6f04aae45d6c2c9babca416fb9bce6156eb8d2e7a6026ef819f036d"
+        },
+        {
+          "path": "runtime/package.json",
+          "bytes": 354,
+          "sha256": "59b365a4adfdf3b5bbda07c70594c5ed8e4330bec66bb73318bf83176405e0e3"
+        },
+        {
+          "path": "runtime/pnpm-lock.yaml",
+          "bytes": 10293,
+          "sha256": "611186a8d5f6bbfa321d845c694fa5a16401361a3fef9a55e37d8b7ae24ee27a"
+        },
+        {
+          "path": "runtime/pnpm-workspace.yaml",
+          "bytes": 401,
+          "sha256": "b4b4012329ee05c1bc846a2ee84580e7e5d28610c1a410cdc8329d689f2aa4be"
+        },
+        {
+          "path": "runtime/probe.mjs",
+          "bytes": 7647,
+          "sha256": "f6e8a6ed860fb27d4b43051d8e76475e016ab82b27884527193cbb6ce5779d2a"
         }
       ]
     }

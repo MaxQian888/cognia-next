@@ -3,6 +3,7 @@
 import * as XLSX from "xlsx"
 import type { Artifact } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
+import { createOfficeEngineController } from "./engine-runtime"
 import {
   applyWorkbookOperations,
   createWorkbook,
@@ -65,6 +66,45 @@ beforeAll(async () => {
 })
 
 afterEach(() => document.body.replaceChildren())
+
+it("shows explicit engine controls without loading and reacts to shared runtime state", async () => {
+  const t = translator()
+  const probe = jest.fn()
+  const engine = createOfficeEngineController({
+    nodeRuntime: {
+      status: async () => ({
+        state: "prepared",
+        prepared: true,
+        fingerprint: "f",
+        updatedAt: 1,
+        packageManager: "pnpm@11.18.0",
+      }),
+      probe,
+    },
+    i18n: { t },
+  } as never)
+  const container = document.createElement("div")
+  const handle = createRenderer({ t, engine, onLocaleChange: () => () => {} }).mount(
+    artifact(
+      JSON.stringify(
+        applyWorkbookOperations(createWorkbook("Preview", "Data"), [
+          { op: "setCell", sheet: "Data", cell: "A1", value: { type: "string", value: "Ready" } },
+        ])
+      )
+    ),
+    container
+  )
+  document.body.append(container)
+  expect(container.querySelector('[data-focus-key="engine:prepare"]')).toBeInTheDocument()
+  expect(probe).not.toHaveBeenCalled()
+  await engine.run("status")
+  expect(container.querySelector('[data-focus-key="engine:probe"]')).toBeInTheDocument()
+  expect(container.querySelector(".copv-table")).toBeInTheDocument()
+  handle.dispose()
+  await engine.run("status")
+  expect(container).toBeEmptyDOMElement()
+  await engine.dispose()
+})
 
 it("renders sheet tabs, row and column headers, formulas, and updates in place", () => {
   const first = applyWorkbookOperations(createWorkbook("PnL", "Trades"), [

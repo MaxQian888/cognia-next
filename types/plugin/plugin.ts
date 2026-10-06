@@ -553,6 +553,9 @@ export interface PluginManifest {
   /** Main entry point for frontend code */
   main?: string
 
+  /** Optional, explicitly prepared Node package; never loaded during plugin activation. */
+  nodeRuntime?: import("./plugin-node-runtime").PluginNodeRuntimeDeclaration
+
   /** Entry point for Python code */
   pythonMain?: string
 
@@ -5517,6 +5520,8 @@ export interface PluginExtensionAPI {
  * Plugin API permissions for extended features
  */
 export type PluginAPIPermission =
+  | "shell:execute"
+  | "network:fetch"
   | "filesystem:read"
   | "filesystem:write"
   | "session:read"
@@ -5642,6 +5647,9 @@ export interface PluginContextAPI {
 
   /** Cross-platform user-selected and authorized attachment bytes. */
   files: PluginFilesAPI
+
+  /** Optional plugin-owned Node dependencies on a supported connected host. */
+  nodeRuntime: import("./plugin-node-runtime").PluginNodeRuntimeAPI
 
   /** Controlled access to allowlisted first-party built-in skills. */
   skills: PluginSkillsAPI

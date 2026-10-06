@@ -1,0 +1,19 @@
+{
+  "name": "@cognia/office-file-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "probe.mjs",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "README.md"
+  ],
+  "dependencies": {
+    "@deepseek-ai/libreoffice-kit": "0.1.5"
+  }
+}

@@ -2,6 +2,11 @@ export const PRESENTATION_SCHEMA_VERSION = 1 as const
 export const PRESENTATION_ARTIFACT_KIND = "cognia-presentations/deck"
 export const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
+export interface PresentationChartSeries {
+  name: string
+  values: number[]
+}
+
 export type SlideElement =
   | {
       id: string
@@ -56,6 +61,8 @@ export type SlideElement =
       height: number
       labels: string[]
       values: number[]
+      /** All clustered-column series; values remains the first series for schema-v1 readers. */
+      series?: PresentationChartSeries[]
       title?: string
     }
 
@@ -65,6 +72,12 @@ export interface PresentationSlide {
   elements: SlideElement[]
   speakerNotes?: string
   sourceNote?: string
+}
+
+export function chartSeries(
+  element: Extract<SlideElement, { type: "chart" }>
+): PresentationChartSeries[] {
+  return element.series ?? [{ name: element.title ?? "", values: element.values }]
 }
 export interface PresentationDeck {
   schemaVersion: typeof PRESENTATION_SCHEMA_VERSION
@@ -225,6 +238,26 @@ export function assertSlideElements(
         element.values.some((v) => !isFiniteNumber(v))
       )
         throw new Error(`Chart element ${label} requires string labels and finite values.`)
+      const labels = element.labels
+      const values = element.values
+      if (element.series !== undefined) {
+        if (
+          !Array.isArray(element.series) ||
+          !element.series.length ||
+          element.series.some(
+            (series) =>
+              !isRecord(series) ||
+              typeof series.name !== "string" ||
+              !Array.isArray(series.values) ||
+              series.values.length !== labels.length ||
+              series.values.some((value) => !isFiniteNumber(value))
+          )
+        )
+          throw new Error(`Chart element ${label} requires named series matching its labels.`)
+        const first = (element.series[0] as unknown as PresentationChartSeries).values
+        if (first.length !== values.length || first.some((value, index) => value !== values[index]))
+          throw new Error(`Chart element ${label} values must match its first series.`)
+      }
     }
   }
 }
@@ -419,7 +452,7 @@ export function validatePresentation(deck: PresentationDeck) {
           })
       }
       if (element.type === "chart") {
-        if (element.labels.length !== element.values.length)
+        if (chartSeries(element).some((series) => element.labels.length !== series.values.length))
           findings.push({
             severity: "error",
             code: "chart.length",
@@ -435,7 +468,11 @@ export function validatePresentation(deck: PresentationDeck) {
             slideId: slide.id,
             elementId: element.id,
           })
-        if (element.values.some((value) => !Number.isFinite(value)))
+        if (
+          chartSeries(element).some((series) =>
+            series.values.some((value) => !Number.isFinite(value))
+          )
+        )
           findings.push({
             severity: "error",
             code: "chart.values",

@@ -3223,6 +3223,7 @@ describe("python host-call parity (ADR-0145)", () => {
         "i18n",
         "integrations",
         "logger",
+        "nodeRuntime",
         "notifications",
         "secrets",
         "storage",
@@ -3306,6 +3307,17 @@ describe("python host-call parity (ADR-0145)", () => {
 })
 
 describe("ctx → catalog parity", () => {
+  it("mounts optional Node runtime operations without executing a preparation or probe", () => {
+    const context = createFullPluginContext(createMockPlugin(), mockManager)
+    expect(Object.keys(context.nodeRuntime).sort()).toEqual([
+      "cancel",
+      "prepare",
+      "probe",
+      "remove",
+      "status",
+    ])
+  })
+
   /**
    * The governed context throws `unmapped` for any callable `ctx.*` path the
    * contract catalog does not list, whatever the plugin's permissions. The

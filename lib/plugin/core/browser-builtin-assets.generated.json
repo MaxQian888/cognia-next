@@ -3245,6 +3245,15 @@
               "feature.embedded-external-content": "embedded external content",
               "feature.merged-table-cells": "merged table cells",
               "feature.page-breaks": "page breaks",
+              "feature.inline-formatting": "inline fonts, colors, emphasis, and character formatting",
+              "feature.paragraph-formatting": "paragraph alignment, spacing, borders, and pagination",
+              "feature.table-formatting": "table dimensions, borders, and cell formatting",
+              "feature.nested-tables": "nested table structure",
+              "feature.styles": "document styles and default fonts",
+              "feature.custom-numbering": "list formats, numbering sequences, and restarts",
+              "feature.equations-symbols": "equations, font symbols, and special hyphens",
+              "feature.comment-metadata": "comment dates, initials, rich formatting, and reply relationships",
+              "feature.comment-anchors": "exact comment ranges and table-cell anchors",
               "finding.block.list_level": "List item {id} has unsupported nesting level {level}.",
               "preview.code": "Code",
               "export.toolbar": "Document actions",
@@ -3349,6 +3358,15 @@
               "feature.embedded-external-content": "嵌入的外部内容",
               "feature.merged-table-cells": "合并的单元格",
               "feature.page-breaks": "分页符",
+              "feature.inline-formatting": "行内字体、颜色、强调及字符格式",
+              "feature.paragraph-formatting": "段落对齐、间距、边框及分页设置",
+              "feature.table-formatting": "表格尺寸、边框及单元格格式",
+              "feature.nested-tables": "嵌套表格结构",
+              "feature.styles": "文档样式及默认字体",
+              "feature.custom-numbering": "列表格式、编号序列及重新编号",
+              "feature.equations-symbols": "公式、字体符号及特殊连字符",
+              "feature.comment-metadata": "批注日期、姓名缩写、富文本格式及回复关系",
+              "feature.comment-anchors": "精确批注范围及表格单元格锚点",
               "finding.block.list_level": "列表项 {id} 的嵌套级别 {level} 不受支持。",
               "preview.code": "代码",
               "export.toolbar": "文档操作",
@@ -3407,8 +3425,8 @@
       "path": "builtin://cognia-documents",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-documents/02ce5c3e7e49febedd6976d35dbd756c3c8f1a0226d5ae433137b8c23f083343.cjs",
-        "sha256": "02ce5c3e7e49febedd6976d35dbd756c3c8f1a0226d5ae433137b8c23f083343",
+        "url": "/_cognia/builtin-plugins/cognia-documents/709e28e18ee395257f52c47bff51223238c83f2acaacd6ec0dc1b83ec58fae17.cjs",
+        "sha256": "709e28e18ee395257f52c47bff51223238c83f2acaacd6ec0dc1b83ec58fae17",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",
@@ -3418,7 +3436,7 @@
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-documents/resources/",
         "entryHashes": {
-          "dist/index.js": "02ce5c3e7e49febedd6976d35dbd756c3c8f1a0226d5ae433137b8c23f083343"
+          "dist/index.js": "709e28e18ee395257f52c47bff51223238c83f2acaacd6ec0dc1b83ec58fae17"
         }
       }
     },
@@ -5956,7 +5974,26 @@
               "edit.saving": "Saving the edit…",
               "edit.failed": "The edit was not applied: {error}",
               "edit.conflict": "The workbook changed while you were editing, so the edit was not applied. Edit the current version again.",
-              "edit.changeDescription": "Edited a cell in the preview"
+              "edit.changeDescription": "Edited a cell in the preview",
+              "engine.title": "Optional Office engine",
+              "engine.check": "Check engine",
+              "engine.install": "Install engine on demand",
+              "engine.probe": "Load and check module",
+              "engine.remove": "Remove engine",
+              "engine.cancel": "Cancel installation",
+              "engine.working": "Working…",
+              "engine.loaded": "Module check passed. Document conversion is not enabled by this check.",
+              "engine.error": "Office engine: {error}",
+              "engine.state.unchecked": "Optional download; never loaded at startup.",
+              "engine.state.missing": "Engine is not installed.",
+              "engine.state.preparing": "Installing pinned engine packages…",
+              "engine.state.prepared": "Installed; module loads only when requested.",
+              "engine.state.failed": "Installation failed. Check the error and retry.",
+              "engine.permission": "Install or check this plugin’s optional Office engine on this host. Downloads about 67 MB for Mac ARM64; other platforms vary.",
+              "engine.permissionDenied": "Permission was not granted; no engine action was started.",
+              "engine.busy": "An engine action is already in progress.",
+              "engine.disposed": "The Office plugin is no longer active or the action was superseded.",
+              "engine.invalidAction": "Unsupported Office engine action."
             },
             "zh-CN": {
               "manifest.name": "Cognia 表格",
@@ -6030,7 +6067,26 @@
               "edit.saving": "正在保存编辑…",
               "edit.failed": "编辑未生效：{error}",
               "edit.conflict": "编辑期间工作簿已被修改，本次编辑未生效。请在当前版本上重新编辑。",
-              "edit.changeDescription": "在预览中编辑了单元格"
+              "edit.changeDescription": "在预览中编辑了单元格",
+              "engine.title": "可选 Office 引擎",
+              "engine.check": "检查引擎",
+              "engine.install": "按需安装引擎",
+              "engine.probe": "加载并检查模块",
+              "engine.remove": "移除引擎",
+              "engine.cancel": "取消安装",
+              "engine.working": "处理中…",
+              "engine.loaded": "模块检查通过。本次检查不代表文档转换已启用。",
+              "engine.error": "Office 引擎：{error}",
+              "engine.state.unchecked": "可选下载，不会在启动时加载。",
+              "engine.state.missing": "尚未安装引擎。",
+              "engine.state.preparing": "正在安装锁定版本的引擎依赖…",
+              "engine.state.prepared": "已安装，仅在请求时加载模块。",
+              "engine.state.failed": "安装失败，请查看错误后重试。",
+              "engine.permission": "在此宿主安装或检查本插件的可选 Office 引擎。Mac ARM64 约需下载 67 MB，其他平台大小不同。",
+              "engine.permissionDenied": "未授予权限，未启动引擎操作。",
+              "engine.busy": "已有引擎操作正在进行。",
+              "engine.disposed": "Office 插件已停用或操作已被取代。",
+              "engine.invalidAction": "不支持的 Office 引擎操作。"
             }
           }
         },
@@ -6044,21 +6100,34 @@
             "entrypoint": "dist/index.js"
           },
           "headless": {
-            "availability": "blocked",
-            "reason": "Office file open/save requires an interactive browser or Tauri file port."
+            "availability": "degraded",
+            "entrypoint": "dist/index.js",
+            "reason": "Optional engine preparation/status/probing uses the connected host. File pickers and interactive workbook preview require a UI. Module probing does not enable document conversion."
           },
           "mobile": {
             "availability": "supported",
             "entrypoint": "dist/index.js",
             "reason": "Workbook authoring, preview, and Lark sync work on mobile; XLSX import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
           }
-        }
+        },
+        "nodeRuntime": {
+          "directory": "runtime",
+          "entry": "probe.mjs"
+        },
+        "optionalPermissions": [
+          "shell:execute",
+          "network:fetch"
+        ],
+        "shellCommands": [
+          "node",
+          "pnpm"
+        ]
       },
       "path": "builtin://cognia-office",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-office/702c1611e9ee947cfa19e12087a88d62946b2a41c7ecf5eeef4fdedd7ceb3b33.cjs",
-        "sha256": "702c1611e9ee947cfa19e12087a88d62946b2a41c7ecf5eeef4fdedd7ceb3b33",
+        "url": "/_cognia/builtin-plugins/cognia-office/d523f72b54e44d14be3438ced4ca16eaecc2906e8a2e1faad25432d58f1e8429.cjs",
+        "sha256": "d523f72b54e44d14be3438ced4ca16eaecc2906e8a2e1faad25432d58f1e8429",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",
@@ -6068,7 +6137,7 @@
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-office/resources/",
         "entryHashes": {
-          "dist/index.js": "702c1611e9ee947cfa19e12087a88d62946b2a41c7ecf5eeef4fdedd7ceb3b33"
+          "dist/index.js": "d523f72b54e44d14be3438ced4ca16eaecc2906e8a2e1faad25432d58f1e8429"
         }
       }
     },
@@ -6310,8 +6379,8 @@
       "path": "builtin://cognia-presentations",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-presentations/e351ff5e36a2d0739dc8879bca100c24cbe55377b3318ee7e48a5d3e920ba13c.cjs",
-        "sha256": "e351ff5e36a2d0739dc8879bca100c24cbe55377b3318ee7e48a5d3e920ba13c",
+        "url": "/_cognia/builtin-plugins/cognia-presentations/a7a71fffdad5e5bdeb84921615e921159c8f04b083c07f021a848fbc2b1bab6e.cjs",
+        "sha256": "a7a71fffdad5e5bdeb84921615e921159c8f04b083c07f021a848fbc2b1bab6e",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",
@@ -6321,7 +6390,7 @@
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-presentations/resources/",
         "entryHashes": {
-          "dist/index.js": "e351ff5e36a2d0739dc8879bca100c24cbe55377b3318ee7e48a5d3e920ba13c"
+          "dist/index.js": "a7a71fffdad5e5bdeb84921615e921159c8f04b083c07f021a848fbc2b1bab6e"
         }
       }
     },

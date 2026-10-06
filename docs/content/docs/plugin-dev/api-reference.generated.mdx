@@ -92,6 +92,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.window` | 4 | None | frontend, hybrid | internal |
 | `ctx.workflow` | 25 | `canvas:write`, `canvas:run`, `workflow:read`, `connectors:send`, `session:read` | frontend, hybrid | internal |
 | `ctx.workspace` | 11 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write`, `git:write`, `integrations:execute` | frontend, hybrid, python | internal |
+| `ctx.nodeRuntime` | 5 | `filesystem:read`, `filesystem:write`, `shell:execute`, `network:fetch` | frontend, hybrid, python | internal |
 
 ## Adapter error codes
 
@@ -1388,3 +1389,13 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `workspace.release` | `filesystem:write` | medium | Yes |
 | `workspace.snapshot` | `filesystem:read`, `git:read` | medium | Yes |
 | `workspace.walk` | `filesystem:read` | medium | Yes |
+
+## `ctx.nodeRuntime`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `nodeRuntime.status` | `filesystem:read` | low | Yes |
+| `nodeRuntime.prepare` | `filesystem:read`, `filesystem:write`, `shell:execute`, `network:fetch` | high | No |
+| `nodeRuntime.cancel` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No |
+| `nodeRuntime.probe` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No |
+| `nodeRuntime.remove` | `filesystem:read`, `filesystem:write`, `shell:execute` | high | No |

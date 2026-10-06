@@ -20,6 +20,7 @@ import JSZip from "jszip"
 import { writeIfChanged } from "../build/esbuild-input-cache.mjs"
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
+export const NODE_RUNTIME_SOURCE_MAX_BYTES = 1024 * 1024
 register()
 const requireSource = createRequire(import.meta.url)
 const catalog = JSON.parse(
@@ -71,6 +72,80 @@ async function exists(file) {
     if (["ENOENT", "ENOTDIR"].includes(error.code)) return false
     throw error
   }
+}
+
+/** Only declarative provisioning inputs and the declared probe ship; never installed dependencies. */
+export async function collectNodeRuntimeSources(pluginRoot, declaration) {
+  if (declaration === undefined) return { files: new Map(), inputs: [] }
+  if (!declaration || typeof declaration !== "object" || Array.isArray(declaration))
+    throw new Error("Invalid nodeRuntime declaration")
+  const confined = (value) => {
+    const relative = relativePath(value)
+    if (
+      relative !== value ||
+      relative
+        .split("/")
+        .some(
+          (part) =>
+            !part ||
+            part === "." ||
+            [
+              "node_modules",
+              "tests",
+              "test",
+              "__tests__",
+              ".git",
+              ".cache",
+              "cache",
+              "__pycache__",
+              ".venv",
+              "venv",
+              "target",
+              ".pytest_cache",
+            ].includes(part)
+        )
+    )
+      throw new Error(`Unsafe nodeRuntime path: ${value}`)
+    return relative
+  }
+  const directory = confined(declaration.directory)
+  const entry = confined(declaration.entry)
+  if (!/\.(?:mjs|cjs|js)$/.test(entry)) throw new Error("nodeRuntime entry must be JavaScript")
+  if (/\.(?:test|spec)\.[cm]?js$/.test(entry)) throw new Error("Unsafe nodeRuntime test entry")
+  const files = new Map()
+  const inputs = []
+  let totalBytes = 0
+  for (const relative of new Set([
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    entry,
+  ])) {
+    const packagedPath = `${directory}/${relative}`
+    let source = pluginRoot
+    const parts = packagedPath.split("/")
+    for (const [index, part] of parts.entries()) {
+      source = path.join(source, part)
+      const info = await lstat(source)
+      if (
+        info.isSymbolicLink() ||
+        (index < parts.length - 1 ? !info.isDirectory() : !info.isFile())
+      )
+        throw new Error(`Unsafe nodeRuntime path (symlink or non-file): ${packagedPath}`)
+      if (index === parts.length - 1 && info.size > NODE_RUNTIME_SOURCE_MAX_BYTES)
+        throw new Error(`nodeRuntime sources exceed ${NODE_RUNTIME_SOURCE_MAX_BYTES} bytes`)
+    }
+    const realRoot = await realpath(pluginRoot)
+    if (!(await realpath(source)).startsWith(`${realRoot}${path.sep}`))
+      throw new Error(`Unsafe nodeRuntime path: ${packagedPath}`)
+    const bytes = await readFile(source)
+    totalBytes += bytes.length
+    if (totalBytes > NODE_RUNTIME_SOURCE_MAX_BYTES)
+      throw new Error(`nodeRuntime sources exceed ${NODE_RUNTIME_SOURCE_MAX_BYTES} bytes`)
+    files.set(packagedPath, bytes)
+    inputs.push(source)
+  }
+  return { files, inputs }
 }
 
 async function sourceEntry(pluginRoot, manifest) {
@@ -131,12 +206,16 @@ export async function buildFrontendPlugin({
   const files = new Map()
   const fileModes = new Map()
   const inputs = new Set([path.join(pluginRoot, "plugin.json"), source])
+  const nodeRuntime = await collectNodeRuntimeSources(pluginRoot, manifest.nodeRuntime)
+  for (const [relative, bytes] of nodeRuntime.files) files.set(relative, bytes)
+  for (const input of nodeRuntime.inputs) inputs.add(input)
   const mapping = {
     [manifest.main]: "dist/index.js",
     [path.relative(pluginRoot, source).replaceAll(path.sep, "/")]: "dist/index.js",
   }
   const entries = new Map([[source, "dist/index.js"]])
   for (const contract of catalog.pathFields.filter((field) => field.runtime === "javascript")) {
+    if (contract.path.startsWith("nodeRuntime.")) continue
     for (const value of pathValues(manifest, contract.path)) {
       if (contract.sentinels?.includes(value)) continue
       const relative = relativePath(value)
@@ -154,11 +233,19 @@ export async function buildFrontendPlugin({
     return value
   }
   const packaged = normalize(manifest)
+  if (manifest.nodeRuntime) packaged.nodeRuntime = structuredClone(manifest.nodeRuntime)
   delete packaged.tsEntry
   if (manifest.styles && typeof moduleStyles === "string")
     files.set(relativePath(manifest.styles), Buffer.from(moduleStyles))
   async function collect(relative, required = true, origin = pluginRoot) {
     relative = relativePath(relative)
+    // Even bundle_include or the public mirror cannot bypass the runtime source allowlist.
+    if (
+      manifest.nodeRuntime &&
+      (relative === manifest.nodeRuntime.directory ||
+        relative.startsWith(`${manifest.nodeRuntime.directory}/`))
+    )
+      return
     const sourceFile = path.join(origin, relative)
     if (!(await exists(sourceFile))) {
       if (files.has(relative)) return
@@ -190,6 +277,7 @@ export async function buildFrontendPlugin({
   for (const contract of catalog.pathFields.filter(
     (field) => field.runtime === "asset" && field.kind !== "contained-only"
   )) {
+    if (contract.path.startsWith("nodeRuntime.")) continue
     for (const value of pathValues(manifest, contract.path)) await collect(value)
   }
   if (

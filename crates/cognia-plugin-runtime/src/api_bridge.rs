@@ -1519,6 +1519,8 @@ async fn run_shell_exec(
 /// parity test keeps the two in lockstep.
 fn required_permission(domain: &str, op: &str) -> Option<&'static str> {
     match (domain, op) {
+        ("nodeRuntime", "status") => Some("filesystem:read"),
+        ("nodeRuntime", "prepare" | "cancel" | "probe" | "remove") => Some("shell:execute"),
         ("fs", "readText" | "readBinary" | "exists" | "readDir" | "stat") => {
             Some("filesystem:read")
         }
@@ -1566,6 +1568,9 @@ async fn dispatch(
         }
     }
     match domain {
+        "nodeRuntime" => crate::node_runtime::handle(state, plugin_id, op, payload)
+            .await
+            .map_err(|error| PluginApiError::new(&error.code, error.message)),
         "fs" => handle_fs(state, plugin_id, op, payload),
         "secrets" => handle_secrets(plugin_id, op, payload),
         "managedIdeState" => handle_managed_ide_state(state, plugin_id, op, payload),
@@ -1889,6 +1894,36 @@ fn capability_table() -> Vec<PluginApiCapability> {
         required_permissions: perms.iter().map(|p| p.to_string()).collect(),
     };
     vec![
+        cap("nodeRuntime:status", true, false, &["filesystem:read"]),
+        cap(
+            "nodeRuntime:prepare",
+            true,
+            true,
+            &[
+                "shell:execute",
+                "filesystem:read",
+                "filesystem:write",
+                "network:fetch",
+            ],
+        ),
+        cap(
+            "nodeRuntime:cancel",
+            true,
+            true,
+            &["shell:execute", "filesystem:read", "filesystem:write"],
+        ),
+        cap(
+            "nodeRuntime:probe",
+            true,
+            true,
+            &["shell:execute", "filesystem:read", "filesystem:write"],
+        ),
+        cap(
+            "nodeRuntime:remove",
+            true,
+            true,
+            &["shell:execute", "filesystem:read", "filesystem:write"],
+        ),
         cap("fs:readText", true, false, &["filesystem:read"]),
         cap("fs:readBinary", true, false, &["filesystem:read"]),
         cap("fs:writeText", true, true, &["filesystem:write"]),

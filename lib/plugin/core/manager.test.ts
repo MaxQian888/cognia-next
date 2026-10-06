@@ -156,6 +156,7 @@ jest.mock("@/lib/db/plugins", () => ({
 const PINNED_SHA = "0123456789abcdef0123456789abcdef01234567"
 jest.mock("@/lib/db/plugin-install-origins", () => ({
   putInstallOrigin: jest.fn(async () => undefined),
+  getInstallOrigin: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/plugin/package/github-source", () => ({
   ...jest.requireActual("@/lib/plugin/package/github-source"),
@@ -285,6 +286,10 @@ describe("PluginManager", () => {
   })
 
   beforeEach(() => {
+    jest
+      .requireMock("@/lib/db/plugin-install-origins")
+      .getInstallOrigin.mockReset()
+      .mockResolvedValue(undefined)
     mockInvoke.mockReset()
     mockTransportCall.mockReset()
     mockTransportSubscribe.mockReset()
@@ -1863,6 +1868,108 @@ describe("PluginManager", () => {
   })
 
   describe("scanPlugins", () => {
+    it.each([false, true])(
+      "keeps one canonical builtin UI for its seeded runtime companion (strict signatures: %s)",
+      async (strict) => {
+        const { getBrowserBuiltinRegistryEntry } = await import("./browser-builtin-registry")
+        const entry = getBrowserBuiltinRegistryEntry("cognia-office")!
+        expect(entry.manifest.nodeRuntime).toBeDefined()
+        const store = {
+          plugins: {} as Record<string, Plugin>,
+          discoverPlugin: jest.fn(
+            (manifest: PluginManifest, source: Plugin["source"], path: string) => {
+              store.plugins[manifest.id] = {
+                manifest,
+                source,
+                path,
+                status: "installed",
+                config: {},
+              }
+            }
+          ),
+          installPlugin: jest.fn(async () => undefined),
+        }
+        mockGetState.mockReturnValue(store)
+        jest.requireMock("@/lib/db/plugin-install-origins").getInstallOrigin.mockResolvedValue({
+          pluginId: entry.manifest.id,
+          version: entry.manifest.version,
+          origin: { kind: "builtin" },
+        })
+        mockVerifier.getConfig.mockReturnValue({
+          requireSignatures: strict,
+          allowUntrusted: !strict,
+        })
+        mockVerifier.verify.mockResolvedValue({ valid: false })
+        mockInvoke.mockResolvedValueOnce([
+          { manifest: entry.manifest, path: "/plugins/cognia-office", source: "local" },
+        ])
+        const manager = new PluginManager({ pluginDirectory: "/plugins", runtimeProfile: "tauri" })
+        const discovered = await manager.scanPlugins()
+        expect(store.plugins[entry.manifest.id]).toMatchObject({
+          source: "builtin",
+          path: entry.path,
+        })
+        expect(
+          discovered.filter((plugin) => plugin.manifest.id === entry.manifest.id)
+        ).toHaveLength(1)
+        expect(
+          store.discoverPlugin.mock.calls.filter(([manifest]) => manifest.id === entry.manifest.id)
+        ).toHaveLength(1)
+        expect(mockVerifier.verify).not.toHaveBeenCalledWith("/plugins/cognia-office")
+        expect(mockInvoke).toHaveBeenCalledWith("plugin_scan_directory", { directory: "/plugins" })
+        mockVerifier.getConfig.mockReturnValue({ requireSignatures: false, allowUntrusted: true })
+      }
+    )
+
+    it.each(["origin", "version", "path", "runtime"])(
+      "does not exempt an unrelated local install with a matching builtin id (%s mismatch)",
+      async (mismatch) => {
+        const { getBrowserBuiltinRegistryEntry } = await import("./browser-builtin-registry")
+        const entry = getBrowserBuiltinRegistryEntry("cognia-office")!
+        const manifest = {
+          ...entry.manifest,
+          ...(mismatch === "version" ? { version: "99.0.0" } : {}),
+          ...(mismatch === "runtime"
+            ? { nodeRuntime: { directory: "other", entry: "probe.mjs" } }
+            : {}),
+        }
+        const diskPath = mismatch === "path" ? "/another/cognia-office" : "/plugins/cognia-office"
+        const store = {
+          plugins: {} as Record<string, Plugin>,
+          discoverPlugin: jest.fn(
+            (manifest: PluginManifest, source: Plugin["source"], path: string) => {
+              store.plugins[manifest.id] = {
+                manifest,
+                source,
+                path,
+                status: "installed",
+                config: {},
+              }
+            }
+          ),
+          installPlugin: jest.fn(async () => undefined),
+        }
+        mockGetState.mockReturnValue(store)
+        jest.requireMock("@/lib/db/plugin-install-origins").getInstallOrigin.mockResolvedValue({
+          version: entry.manifest.version,
+          origin: { kind: mismatch === "origin" ? "local" : "builtin" },
+        })
+        mockVerifier.getConfig.mockReturnValue({ requireSignatures: true, allowUntrusted: false })
+        mockVerifier.verify.mockResolvedValue({ valid: false })
+        mockInvoke.mockResolvedValueOnce([{ manifest, path: diskPath, source: "local" }])
+        await new PluginManager({
+          pluginDirectory: "/plugins",
+          runtimeProfile: "tauri",
+        }).scanPlugins()
+        expect(mockVerifier.verify).toHaveBeenCalledWith(diskPath)
+        expect(store.plugins[entry.manifest.id]).toMatchObject({
+          source: "builtin",
+          path: entry.path,
+        })
+        mockVerifier.getConfig.mockReturnValue({ requireSignatures: false, allowUntrusted: true })
+      }
+    )
+
     it("discovers browser built-ins without calling native directory scan in browser runtime", async () => {
       const store: {
         plugins: Record<string, Plugin>

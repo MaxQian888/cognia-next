@@ -63,6 +63,29 @@ function deps(over: Partial<SeedBundledPluginsDeps> = {}) {
 }
 
 describe("seedBundledPlugins", () => {
+  it("installs a frontend runtime package through the same host registration path", async () => {
+    const { base, installed, marker } = deps({
+      catalog: {
+        entries: {
+          "office-example": {
+            id: "office-example",
+            version: "1.0.0",
+            files: [
+              { path: "plugin.json", bytes: 100, sha256: "a".repeat(64) },
+              { path: "dist/index.js", bytes: 100, sha256: "b".repeat(64) },
+              { path: "runtime/probe.mjs", bytes: 100, sha256: "c".repeat(64) },
+            ],
+          },
+        },
+      },
+      readInstalled: async () => undefined,
+    })
+    const outcome = await seedBundledPlugins(base)
+    expect(outcome.seeded).toEqual(["office-example"])
+    expect(installed).toEqual([`/Bundle/${STAGED_PLUGIN_ROOT}/office-example`])
+    expect(marker).toEqual({ "office-example": "1.0.0" })
+  })
+
   it("never downgrades a newer seed marker", async () => {
     const { base, installed } = deps({ readMarker: () => ({ repowiki: "2.0.0" }) })
     expect((await seedBundledPlugins(base)).upToDate).toEqual(["repowiki"])

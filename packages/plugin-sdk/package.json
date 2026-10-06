@@ -359,7 +359,8 @@
     "@cognia/ocr": "workspace:*",
     "@cognia/provider-core": "workspace:*",
     "@cognia/provider-routing": "workspace:*",
-    "@cognia/provider-types": "workspace:*"
+    "@cognia/provider-types": "workspace:*",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@cognia/security-findings": "workspace:*"

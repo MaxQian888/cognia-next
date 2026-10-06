@@ -6,6 +6,7 @@ import {
 } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { createWorkbookResultCard } from "./card"
+import { createOfficeEngineController, createOfficeEngineTool } from "./engine-runtime"
 import { WORKBOOK_ARTIFACT_KIND, type WorkbookDocument } from "./model"
 import { createWorkbookRenderer } from "./preview"
 import { createOfficeRuntime } from "./runtime"
@@ -53,6 +54,14 @@ export default definePlugin({
   activate: async (ctx) => {
     const t: Translate = (key, params) => ctx.i18n.t(key, params)
     const runtime = createOfficeRuntime(ctx)
+    const engine = ctx.nodeRuntime ? createOfficeEngineController(ctx) : undefined
+    if (engine) {
+      ctx.lifecycle.onDispose(() => engine.dispose(), "cognia-office:engine")
+      ctx.lifecycle.onDispose(
+        ctx.agent.registerTool(createOfficeEngineTool(engine)),
+        "cognia-office:engine-tool"
+      )
+    }
     // Labels resolve through `t` at render time and the renderer re-renders on
     // a locale switch, so a mounted workbook restyles without a remount. The
     // preview's Export button runs the same validated save as office_export_xlsx.
@@ -61,6 +70,7 @@ export default definePlugin({
         WORKBOOK_ARTIFACT_KIND,
         createWorkbookRenderer({
           t,
+          engine,
           onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler),
           exportWorkbook: (artifactId, allowUnsupportedFeatureLoss) =>
             runtime.exportXlsx(artifactId, undefined, allowUnsupportedFeatureLoss),

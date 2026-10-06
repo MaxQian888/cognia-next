@@ -149,6 +149,7 @@ import {
   createTemplatesAPI,
 } from "../api"
 import { createCommandsAPI } from "../api/commands-api"
+import { createNodeRuntimeAPI } from "../api/node-runtime-api"
 import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
 import { createToolResultAPI } from "../api/tool-result-api"
@@ -357,6 +358,7 @@ export function createFullPluginContext(
     canvas: createCanvasAPI(pluginId),
     artifact: createArtifactAPI(pluginId),
     files: createFilesAPI(pluginId),
+    nodeRuntime: createNodeRuntimeAPI(pluginId, plugin.manifest.nodeRuntime),
     skills: createSkillsAPI(pluginId, plugin.manifest.builtInSkills),
     media: createMediaAPI(pluginId, manager),
     notifications: createNotificationCenterAPI(pluginId),

@@ -1,6 +1,7 @@
 import type { ArtifactRenderer } from "@cognia/plugin-sdk"
 import { decodeRange, encodeCell, encodeColumn } from "./a1"
 import { createCellEditor, type CellEditor } from "./cell-editor"
+import { renderOfficeEngineBar, type OfficeEngineController } from "./engine-runtime"
 import {
   createExportController,
   renderExportBar,
@@ -26,6 +27,7 @@ export type PreviewTranslator = (key: string, params?: Record<string, string | n
 
 export interface WorkbookPreviewDeps {
   t: PreviewTranslator
+  engine?: OfficeEngineController
   /** Called once per mount; must return a disposer. */
   onLocaleChange: (handler: () => void) => () => void
   /**
@@ -224,6 +226,7 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
         const editStatus = editor?.renderStatus()
         if (editStatus) root.prepend(editStatus)
         if (exporter) root.prepend(renderExportBar(exporter, t, "copv"))
+        if (deps.engine) root.prepend(renderOfficeEngineBar(deps.engine, t))
         const next = root.querySelector<HTMLElement>(".copv-grid")
         if (next && scroll) {
           next.scrollTop = scroll.top
@@ -233,6 +236,7 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
       }
 
       const disposeLocale = deps.onLocaleChange(render)
+      const disposeEngine = deps.engine?.subscribe(render)
       render()
       // Settles once the grid (or the load error) is painted — what an
       // off-screen capture waits for instead of the loading line.
@@ -257,6 +261,7 @@ export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRende
         dispose: () => {
           disposed = true
           disposeLocale()
+          disposeEngine?.()
           container.replaceChildren()
         },
       }

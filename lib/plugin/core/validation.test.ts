@@ -19,6 +19,57 @@ import type { ContextResourceKind } from "@/types/context-workbench"
 
 describe("Plugin Validation", () => {
   describe("validatePluginManifest", () => {
+    describe("optional Node runtime", () => {
+      const withRuntime = () => ({
+        ...createValidManifest(),
+        nodeRuntime: { directory: "runtime", entry: "probe.mjs" },
+        permissions: ["filesystem:read", "filesystem:write"],
+        optionalPermissions: ["shell:execute", "network:fetch"],
+        shellCommands: ["node", "pnpm"],
+      })
+
+      it("accepts plugin-owned runtime sources with explicitly optional execution grants", () => {
+        expect(validatePluginManifest(withRuntime()).valid).toBe(true)
+      })
+
+      it.each([
+        "../escape",
+        "/absolute",
+        "C:\\escape",
+        "..\\escape",
+        "%2e%2e/escape",
+        ".",
+        " ",
+        "a\u0000b",
+      ])("rejects unsafe runtime directory %s", (directory) => {
+        const manifest = withRuntime()
+        manifest.nodeRuntime.directory = directory
+        expect(validatePluginManifest(manifest).valid).toBe(false)
+      })
+
+      it.each(["../probe.mjs", "/probe.mjs", "..\\probe.mjs", "probe.py", "", "."])(
+        "rejects unsafe or non-JavaScript entry %s",
+        (entry) => {
+          const manifest = withRuntime()
+          manifest.nodeRuntime.entry = entry
+          expect(validatePluginManifest(manifest).valid).toBe(false)
+        }
+      )
+
+      it("requires execution permissions and both executable allowlist entries", () => {
+        const manifest = withRuntime()
+        manifest.optionalPermissions = []
+        manifest.shellCommands = []
+        const codes = validatePluginManifest(manifest).diagnostics?.map((entry) => entry.code)
+        expect(codes).toContain("manifest.nodeRuntime.permission.required")
+        expect(codes).toContain("manifest.nodeRuntime.command.required")
+      })
+
+      it.each([null, [], "runtime"])("rejects a malformed declaration %p", (nodeRuntime) => {
+        expect(validatePluginManifest({ ...withRuntime(), nodeRuntime }).valid).toBe(false)
+      })
+    })
+
     it("validates runtime service ids, provider versions, and consumer constraints", () => {
       const manifest = createValidManifest()
       Object.assign(manifest, {

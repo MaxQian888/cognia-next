@@ -64,7 +64,11 @@ import {
   PI_PACKAGE_PREPARE_PROGRAMS,
   PI_PACKAGE_TOOL_NAME_PATTERN,
 } from "@/types/plugin/plugin-pi-package"
-import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
+import {
+  getPluginPathViolations,
+  normalizePluginRelativePath,
+  type PluginPathViolation,
+} from "@/lib/plugin/core/plugin-path"
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
 import { validateTemplateDefinition } from "@/lib/templates/contracts"
 import { validateTemplatePackageManifest } from "@/lib/templates/package-manifest"
@@ -1555,6 +1559,64 @@ export function validatePluginManifest(
               `WASM preopen path at index ${i} must be a non-empty string without NUL bytes`
             )
           }
+        }
+      }
+    }
+  }
+
+  if (m.nodeRuntime !== undefined) {
+    if (!isPlainObject(m.nodeRuntime)) {
+      pushError("nodeRuntime", "manifest.nodeRuntime.invalid", '"nodeRuntime" must be an object')
+    } else {
+      for (const field of ["directory", "entry"] as const) {
+        const value = m.nodeRuntime[field]
+        try {
+          if (typeof value !== "string" || !value.trim()) throw new Error("missing path")
+          normalizePluginRelativePath(value)
+        } catch {
+          pushError(
+            `nodeRuntime.${field}`,
+            `manifest.nodeRuntime.${field}.invalid`,
+            `"nodeRuntime.${field}" must be a nonempty, confined relative path`
+          )
+        }
+      }
+      if (
+        typeof m.nodeRuntime.entry === "string" &&
+        !/\.(?:js|mjs|cjs)$/i.test(m.nodeRuntime.entry)
+      ) {
+        pushError(
+          "nodeRuntime.entry",
+          "manifest.nodeRuntime.entry.extension",
+          '"nodeRuntime.entry" must be a JavaScript file relative to nodeRuntime.directory'
+        )
+      }
+      const permissions = new Set([
+        ...(Array.isArray(m.permissions) ? m.permissions : []),
+        ...(Array.isArray(m.optionalPermissions) ? m.optionalPermissions : []),
+      ])
+      for (const permission of [
+        "filesystem:read",
+        "filesystem:write",
+        "shell:execute",
+        "network:fetch",
+      ]) {
+        if (!permissions.has(permission)) {
+          pushError(
+            "nodeRuntime",
+            "manifest.nodeRuntime.permission.required",
+            `Optional Node runtimes must declare ${permission} in permissions or optionalPermissions`
+          )
+        }
+      }
+      const commands = Array.isArray(m.shellCommands) ? m.shellCommands : []
+      for (const command of ["node", "pnpm"]) {
+        if (!commands.includes(command)) {
+          pushError(
+            "shellCommands",
+            "manifest.nodeRuntime.command.required",
+            `Optional Node runtimes require ${command} in shellCommands`
+          )
         }
       }
     }

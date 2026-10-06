@@ -2,8 +2,9 @@
  * Copy the plugins that ship inside the installer into the host's plugin
  * directory, once per version.
  *
- * Frontend plugins live in the JS bundle and need no disk presence. Python and
- * WASM plugins do: the Tauri host discovers a plugin by finding a
+ * Ordinary frontend plugins live in the JS bundle. A frontend plugin declaring
+ * nodeRuntime additionally needs a disk package for host provisioning, just as
+ * Python and WASM plugins do: the Tauri host discovers a plugin by finding a
  * `plugin.json` under `<appDataDir>/cognia/plugins`, and nothing ever put one
  * there. `plugins/` was not in `bundle.resources` either, so RepoWiki
  * (ADR-0146, a whole subsystem with its own 213-case gate suite) was present

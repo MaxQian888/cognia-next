@@ -1594,6 +1594,13 @@ PLUGIN_PATH_FIELD_CONTRACTS = [
         "requiredFor": [],
         "executable": True,
     },
+    {
+        "path": "nodeRuntime.directory",
+        "runtime": "asset",
+        "requiredFor": [],
+        "executable": False,
+        "kind": "directory",
+    },
 ]
 
 PLUGIN_POINT_SCHEMA_VERSION = 1
@@ -17904,6 +17911,113 @@ API_NAMESPACE_CONTRACTS = [
             },
         ],
     },
+    {
+        "id": "nodeRuntime",
+        "authorPath": "ctx.nodeRuntime",
+        "type": "PluginNodeRuntimeAPI",
+        "stability": "stable",
+        "introducedIn": "0.1.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+            "python",
+        ],
+        "platforms": [
+            "desktop",
+            "web",
+            "mobile",
+            "headless",
+        ],
+        "transport": "gateway",
+        "factory": "context.nodeRuntime",
+        "enforcement": "active",
+        "dataClassification": "internal",
+        "timeoutMs": 40000,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "nodeRuntime.status",
+                "name": "status",
+                "requiredPermissions": [
+                    "filesystem:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "nodeRuntime.prepare",
+                "name": "prepare",
+                "requiredPermissions": [
+                    "filesystem:read",
+                    "filesystem:write",
+                    "shell:execute",
+                    "network:fetch",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "nodeRuntime.cancel",
+                "name": "cancel",
+                "requiredPermissions": [
+                    "filesystem:read",
+                    "filesystem:write",
+                    "shell:execute",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "nodeRuntime.probe",
+                "name": "probe",
+                "requiredPermissions": [
+                    "filesystem:read",
+                    "filesystem:write",
+                    "shell:execute",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "nodeRuntime.remove",
+                "name": "remove",
+                "requiredPermissions": [
+                    "filesystem:read",
+                    "filesystem:write",
+                    "shell:execute",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+        ],
+    },
 ]
 
 PLUGIN_PATH_FIELDS = (
@@ -17964,4 +18078,5 @@ PLUGIN_PATH_FIELDS = (
     "vscodeExtension.contributes.chatPromptFiles[].path",
     "bots[].entry",
     "bots[].lifecycle.entry",
+    "nodeRuntime.directory",
 )

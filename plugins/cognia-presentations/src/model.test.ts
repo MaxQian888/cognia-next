@@ -296,3 +296,28 @@ describe("normalizeHexColor", () => {
     expect(normalizeHexColor(input as string | undefined, "000000")).toBe(expected)
   })
 })
+
+it("validates all named series and their schema-v1 first-series mirror", () => {
+  const chart = {
+    id: "c",
+    type: "chart",
+    x: 1,
+    y: 1,
+    width: 5,
+    height: 3,
+    labels: ["A", "B"],
+    values: [1, 2],
+    series: [
+      { name: "One", values: [1, 2] },
+      { name: "Two", values: [-3, 0] },
+    ],
+  }
+  expect(() => assertSlideElements([chart])).not.toThrow()
+  expect(() => assertSlideElements([{ ...chart, values: [1, 3] }])).toThrow("first series")
+  expect(() => assertSlideElements([{ ...chart, series: [{ name: "One", values: [1] }] }])).toThrow(
+    "matching its labels"
+  )
+  expect(() =>
+    assertSlideElements([{ ...chart, series: [{ name: "One", values: [1, Number.NaN] }] }])
+  ).toThrow("matching its labels")
+})

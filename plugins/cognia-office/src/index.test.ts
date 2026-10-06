@@ -84,6 +84,29 @@ it("declares its manifest and a complete en/zh-CN bundle from plugin.json", () =
   expect(manifest.id).toBe("cognia-office")
   expect(Object.keys(LOCALES["zh-CN"]).sort()).toEqual(Object.keys(LOCALES.en).sort())
   expect(manifest.runtimeCompatibility?.mobile?.reason).toContain("Documents/cognia/exports")
+  expect(manifest.nodeRuntime).toEqual({ directory: "runtime", entry: "probe.mjs" })
+  expect(manifest.optionalPermissions).toEqual(
+    expect.arrayContaining(["shell:execute", "network:fetch"])
+  )
+  expect(manifest.permissions).not.toContain("shell:execute")
+  expect(manifest.runtimeCompatibility?.headless?.availability).toBe("degraded")
+})
+
+it("registers the optional engine tool without inspecting, installing, or loading packages", async () => {
+  const env = makeCtx()
+  const nodeRuntime = {
+    status: jest.fn(),
+    prepare: jest.fn(),
+    probe: jest.fn(),
+    cancel: jest.fn(),
+    remove: jest.fn(),
+  }
+  Object.assign(env.ctx, { nodeRuntime })
+  await definition.activate?.(env.ctx as never)
+  expect(env.registerTool.mock.calls.map(([tool]) => tool.name)).toContain("office_engine_runtime")
+  for (const method of Object.values(nodeRuntime)) expect(method).not.toHaveBeenCalled()
+  await env.dispose()
+  for (const method of Object.values(nodeRuntime)) expect(method).not.toHaveBeenCalled()
 })
 
 it("registers the workbook renderer, XLSX importer, and all Office tools", async () => {

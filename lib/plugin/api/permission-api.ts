@@ -28,14 +28,14 @@ const grantedPermissions = new Map<string, Set<PluginAPIPermission>>()
 
 // Permission mapping from manifest permissions to API permissions
 const permissionMapping: Record<string, PluginAPIPermission[]> = {
-  "network:fetch": [],
+  "network:fetch": ["network:fetch"],
   "filesystem:read": ["filesystem:read"],
   "filesystem:write": ["filesystem:write"],
   "fs:read": [],
   "fs:write": [],
   "clipboard:read": [],
   "clipboard:write": [],
-  "shell:execute": [],
+  "shell:execute": ["shell:execute"],
   "process:spawn": [],
   "database:read": [],
   "database:write": [],
@@ -237,6 +237,30 @@ export function createPermissionAPI(
         return false
 
       if (granted) {
+        // These grants authorize immediate native execution/download, rather
+        // than a local UI API. Do not report success until the host has stored
+        // the user's decision, or an immediately following prepare/probe races
+        // the grant and fails (and a failed host write looks like permission).
+        const hostExecutionGrant = permission === "shell:execute" || permission === "network:fetch"
+        if (hostExecutionGrant && isPluginGatewayAvailable()) {
+          try {
+            await grantHostPermission(pluginId, permission)
+          } catch (error) {
+            recordSilentFailure(
+              pluginId,
+              {
+                site: "permission.grantHost",
+                message: `Failed to persist grant for ${permission}`,
+                expected: false,
+              },
+              error
+            )
+            return false
+          }
+          if (getPermissionGuard().getTier(pluginId, permission as PluginPermission) === "forbid") {
+            return false
+          }
+        }
         if (getPermissionGuard().isRevoked(pluginId, permission as PluginPermission)) {
           getPermissionGuard().grant(pluginId, permission as PluginPermission, {
             grantedBy: "user",
@@ -244,12 +268,14 @@ export function createPermissionAPI(
         }
         existing.add(permission)
         contextPanelRegistry.refresh()
-        persistToHost(
-          pluginId,
-          () => grantHostPermission(pluginId, permission),
-          "permission.grantHost",
-          `Failed to persist grant for ${permission}`
-        )
+        if (!hostExecutionGrant) {
+          persistToHost(
+            pluginId,
+            () => grantHostPermission(pluginId, permission),
+            "permission.grantHost",
+            `Failed to persist grant for ${permission}`
+          )
+        }
         logger.info(`Granted permission: ${permission}`)
       } else {
         logger.info(`Denied permission: ${permission}`)

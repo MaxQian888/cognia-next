@@ -139,3 +139,38 @@ it("renders shapes, charts, notes, and validation findings", () => {
   handle.dispose()
   expect(container.childElementCount).toBe(0)
 })
+
+it("previews every chart series, negative values and series names", () => {
+  const deck = applyPresentationOperations(createPresentation("Deck"), [
+    {
+      op: "addSlide",
+      title: "Data",
+      elements: [
+        {
+          id: "c",
+          type: "chart",
+          x: 1,
+          y: 1,
+          width: 5,
+          height: 3,
+          labels: ["A", "B"],
+          values: [1, -2],
+          series: [
+            { name: "去年", values: [1, -2] },
+            { name: "今年", values: [3, 0] },
+          ],
+        },
+      ],
+    },
+  ])
+  const container = document.createElement("div")
+  const handle = createPresentationRenderer(t, noLocale).mount(
+    { content: JSON.stringify(deck) } as never,
+    container
+  )
+  expect(container.querySelector('[title="去年 — B: -2"]')).not.toBeNull()
+  expect(container.querySelector('[title="今年 — A: 3"]')).not.toBeNull()
+  expect(container.querySelector('[title="今年 — B: 0"]')).not.toBeNull()
+  expect(container.textContent).toContain("去年今年")
+  handle.dispose()
+})

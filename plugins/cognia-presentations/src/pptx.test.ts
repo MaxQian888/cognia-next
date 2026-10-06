@@ -53,8 +53,11 @@ it("exports a native PPTX package and reopens slide text", async () => {
   const text = imported.slides[0].elements.find((el) => el.type === "text")
   expect(text?.x).toBeCloseTo(1, 1)
   expect(text?.y).toBeCloseTo(1, 1)
-  // Chart bars export as shapes; nothing is flagged as lost on our own output.
-  expect(imported.importedFeatures).toEqual([])
+  // Data survives; imported workbook formulas/links are intentionally not modeled.
+  expect(imported.slides[0].elements).toEqual(
+    expect.arrayContaining([expect.objectContaining({ type: "chart", values: [10, 20] })])
+  )
+  expect(imported.importedFeatures).toEqual(["chart source workbook links/formulas"])
 })
 
 it("rejects a non-ZIP payload", async () => {
@@ -145,4 +148,134 @@ it("imports slide order, geometry, images, tables, charts, and notes from a real
   expect(first.speakerNotes).toBe("Talk about pricing.")
   // The chart part was consumed; only the transition remains flagged.
   expect(deck.importedFeatures).toEqual(["animations/transitions"])
+})
+
+it("keeps native tables and all chart series with an editable embedded workbook", async () => {
+  const deck = applyPresentationOperations(createPresentation("季度结果"), [
+    {
+      op: "addSlide",
+      title: "数据",
+      elements: [
+        {
+          id: "table",
+          type: "table",
+          x: 1,
+          y: 1,
+          width: 4,
+          height: 2,
+          rows: [
+            ["区域", "营收"],
+            ["华东\n上海", "10 & 20"],
+          ],
+        },
+        {
+          id: "chart",
+          type: "chart",
+          x: 5,
+          y: 1,
+          width: 6,
+          height: 4,
+          labels: ["Q1", "Q2"],
+          values: [10, -20],
+          title: "营收 <预测>",
+          series: [
+            { name: "去年", values: [10, -20] },
+            { name: "今年", values: [30, 0] },
+          ],
+        },
+      ],
+    },
+  ])
+  const bytes = await exportPptx(deck)
+  const zip = await JSZip.loadAsync(bytes)
+  const slide = await zip.file("ppt/slides/slide1.xml")!.async("string")
+  expect(slide).toContain("<a:tbl>")
+  expect(slide).toContain("<c:chart")
+  expect(slide.match(/<p:graphicFrame>/g)).toHaveLength(2)
+  const chart = await zip.file("ppt/charts/chart1.xml")!.async("string")
+  expect(chart.match(/<c:ser>/g)).toHaveLength(2)
+  expect(chart).toContain("Data!$C$2:$C$3")
+  expect(chart).toContain("<c:v>-20</c:v>")
+  const loaded = await import("exceljs")
+  const ExcelJS = loaded.default ?? loaded
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await zip.file("ppt/embeddings/chart1.xlsx")!.async("arraybuffer"))
+  expect(workbook.getWorksheet("Data")!.getRow(1).values).toEqual([undefined, "", "去年", "今年"])
+  expect(workbook.getWorksheet("Data")!.getRow(3).values).toEqual([undefined, "Q2", -20, 0])
+  const imported = await importPptx(bytes)
+  expect(imported.slides[0].elements).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        type: "table",
+        rows: [
+          ["区域", "营收"],
+          ["华东\n上海", "10 & 20"],
+        ],
+      }),
+      expect.objectContaining({
+        type: "chart",
+        title: "营收 <预测>",
+        labels: ["Q1", "Q2"],
+        values: [10, -20],
+        series: [
+          { name: "去年", values: [10, -20] },
+          { name: "今年", values: [30, 0] },
+        ],
+      }),
+    ])
+  )
+  expect(imported.importedFeatures).toEqual(
+    expect.arrayContaining(["table formatting", "chart source workbook links/formulas"])
+  )
+  expect(imported.importedFeatures).not.toContain("embedded objects")
+})
+
+it.each([
+  ["unsupported chart type", (xml: string) => xml.replaceAll("c:barChart", "c:lineChart")],
+  [
+    "sparse or inconsistent",
+    (xml: string) => xml.replace('<c:pt idx="1"><c:v>20</c:v></c:pt>', ""),
+  ],
+  ["unsupported chart type", (xml: string) => xml.replace('val="clustered"', 'val="stacked"')],
+])("reports %s instead of silently projecting a lossy chart", async (warning, mutate) => {
+  const deck = applyPresentationOperations(createPresentation("Input"), [
+    {
+      op: "addSlide",
+      title: "Chart",
+      elements: [
+        {
+          id: "c",
+          type: "chart",
+          x: 1,
+          y: 1,
+          width: 5,
+          height: 3,
+          labels: ["A", "B"],
+          values: [10, 20],
+        },
+      ],
+    },
+  ])
+  const zip = await JSZip.loadAsync(await exportPptx(deck))
+  zip.file(
+    "ppt/charts/chart1.xml",
+    mutate(await zip.file("ppt/charts/chart1.xml")!.async("string"))
+  )
+  const imported = await importPptx(await zip.generateAsync({ type: "uint8array" }))
+  expect(imported.slides[0].elements.some((element) => element.type === "chart")).toBe(false)
+  expect(imported.importedFeatures.some((feature) => feature.includes(warning))).toBe(true)
+  expect(imported.importedFeatures).toContain("native charts")
+})
+
+it("rejects empty charts instead of writing invalid workbook ranges", async () => {
+  const deck = applyPresentationOperations(createPresentation("Input"), [
+    {
+      op: "addSlide",
+      title: "Chart",
+      elements: [
+        { id: "c", type: "chart", x: 1, y: 1, width: 5, height: 3, labels: [], values: [] },
+      ],
+    },
+  ])
+  await expect(exportPptx(deck)).rejects.toThrow("non-empty labels")
 })

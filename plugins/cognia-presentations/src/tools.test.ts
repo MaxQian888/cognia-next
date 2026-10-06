@@ -38,3 +38,28 @@ it("marks read-only tools retryable and file-bound tools with timeouts", () => {
   expect(byName.get("presentations_export_pptx")).toMatchObject({ timeoutMs: 120_000 })
   expect(byName.get("presentations_validate")).toMatchObject({ timeoutMs: 60_000 })
 })
+
+it("describes closed multi-series chart data in the existing element schema", () => {
+  const create = tools.find((tool) => tool.name === "presentations_create")!
+  expect(create.definition.parametersSchema).toMatchObject({
+    properties: {
+      operations: {
+        items: {
+          properties: {
+            elements: {
+              items: {
+                properties: {
+                  series: {
+                    type: "array",
+                    minItems: 1,
+                    items: { additionalProperties: false, required: ["name", "values"] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+})

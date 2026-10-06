@@ -1036,6 +1036,13 @@
       "runtime": "javascript",
       "requiredFor": [],
       "executable": true
+    },
+    {
+      "path": "nodeRuntime.directory",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false,
+      "kind": "directory"
     }
   ],
   "manifestContributions": [
@@ -13579,6 +13586,90 @@
           }
         }
       ]
+    },
+    {
+      "id": "nodeRuntime",
+      "authorPath": "ctx.nodeRuntime",
+      "type": "PluginNodeRuntimeAPI",
+      "stability": "stable",
+      "introducedIn": "0.1.0",
+      "runtimes": ["frontend", "hybrid", "python"],
+      "platforms": ["desktop", "web", "mobile", "headless"],
+      "transport": "gateway",
+      "factory": "context.nodeRuntime",
+      "enforcement": "active",
+      "dataClassification": "internal",
+      "timeoutMs": 40000,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "nodeRuntime.status",
+          "name": "status",
+          "requiredPermissions": ["filesystem:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "nodeRuntime.prepare",
+          "name": "prepare",
+          "requiredPermissions": [
+            "filesystem:read",
+            "filesystem:write",
+            "shell:execute",
+            "network:fetch"
+          ],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "nodeRuntime.cancel",
+          "name": "cancel",
+          "requiredPermissions": ["filesystem:read", "filesystem:write", "shell:execute"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "nodeRuntime.probe",
+          "name": "probe",
+          "requiredPermissions": ["filesystem:read", "filesystem:write", "shell:execute"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "nodeRuntime.remove",
+          "name": "remove",
+          "requiredPermissions": ["filesystem:read", "filesystem:write", "shell:execute"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        }
+      ]
     }
   ],
   "wireOps": [
@@ -13836,6 +13927,66 @@
       "scopeBinding": "plugin",
       "executionPlacement": "ui",
       "introducedIn": "0.9.0"
+    },
+    {
+      "id": "nodeRuntime:status",
+      "idempotent": true,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["filesystem:read"],
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "nodeRuntime:prepare",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": [
+        "filesystem:read",
+        "filesystem:write",
+        "shell:execute",
+        "network:fetch"
+      ],
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "nodeRuntime:cancel",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["filesystem:read", "filesystem:write", "shell:execute"],
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "nodeRuntime:probe",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["filesystem:read", "filesystem:write", "shell:execute"],
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.1.0"
+    },
+    {
+      "id": "nodeRuntime:remove",
+      "idempotent": false,
+      "resourceEffect": {
+        "kind": "none"
+      },
+      "requiredPermissions": ["filesystem:read", "filesystem:write", "shell:execute"],
+      "scopeBinding": "plugin",
+      "executionPlacement": "host-service",
+      "introducedIn": "0.1.0"
     }
   ]
 }

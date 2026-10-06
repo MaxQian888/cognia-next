@@ -41,6 +41,7 @@ pub mod github;
 pub mod lifecycle;
 pub mod managed_ide_dev;
 pub mod marketplace;
+pub mod node_runtime;
 /// OS notifications through the Tauri plugin; `tauri-host` only (ADR-0196).
 #[cfg(feature = "tauri-host")]
 pub mod notification;
@@ -133,6 +134,7 @@ pub enum NodePluginProcessState {
 /// Tauri-managed state for the plugin runtime. Cloning a field's `Arc` is
 /// cheap; the lock granularity is per-field so map traversal doesn't block
 /// permission grants and vice-versa.
+#[derive(Clone)]
 pub struct PluginRuntimeState {
     pub plugins: Arc<RwLock<HashMap<String, PluginRecord>>>,
     pub permissions: Arc<RwLock<HashMap<String, Vec<PermissionGrant>>>>,
