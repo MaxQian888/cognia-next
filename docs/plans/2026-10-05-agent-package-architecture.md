@@ -121,9 +121,18 @@ forwards seven members, and the wrapper now reports or supplies the rest), nativ
 persisting the instance id, headless squad bootstrap, workflow lease-renew result,
 `__team__:` resume skip, CLI spawn allowlist and its duplicated `cline` (the CLI now builds
 its allowlist from the security policy and `audit:agent-capabilities` refuses a literal copy).
-Open (Phase 3, in progress) — Goose row, OpenCode V1 dead client (moved to the package
-unregistered; dormancy is labelled by `getUnsupportedProtocolReason`), `pluginEcosystem`
-nulls, Pi session dir readers, OpenCode SQLite path lists.
+Also closed in Phase 3: the Goose ecosystem row; the Pi session-dir readers (the desktop
+`list_pi_sessions` now takes its root from the shared vendor-root table and the CLI's
+`listPiSessions` from `piSessionsRoot`, so both honour `$PI_CODING_AGENT_SESSION_DIR` like the
+importer); the OpenCode SQLite path lists (the Rust reader in `crates/cognia-agent-state` and
+the CLI's `node:sqlite` reader probe the same candidates in the same order, and the TS watch
+roots are a superset; two host readers behind `setOpencodeReader` is the design). Labelled, not
+removed: the OpenCode V1 client (moved to the package unregistered; `getUnsupportedProtocolReason`
+explains it). Left as a decision for the plugin-conversion owners: `pluginEcosystem` stays `null`
+for ecosystems that have a converter (Kimi, Cursor, Copilot, Devin, Droid, Qoder, OpenCode, Pi);
+nothing reads the field at runtime, and Kimi's `null` is pinned deliberately
+(`lib/agent-ecosystem/catalog.test.ts`), so filling the others would be a guess. The conformance
+test now reads the converter's own `PLUGIN_ECOSYSTEMS` instead of a stale four-entry copy.
 
 ## 3. Target packages and dependency direction
 

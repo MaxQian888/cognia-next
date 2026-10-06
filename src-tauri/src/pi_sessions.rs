@@ -3,8 +3,11 @@
 //! Pi's RPC protocol has no session listing (`switch_session` takes a path
 //! the caller must already know), and the renderer cannot read the disk. So
 //! the host reads Pi's own store the way Pi's `SessionManager.list` does:
-//! `$PI_CODING_AGENT_DIR` (default `~/.pi/agent`) `/sessions/<encoded cwd>/*.jsonl`,
-//! header line first, last `session_info` entry for the display name. Nothing
+//! `<sessions root>/<encoded cwd>/*.jsonl`, header line first, last
+//! `session_info` entry for the display name. The sessions root comes from the
+//! shared vendor-root table (`$PI_CODING_AGENT_SESSION_DIR`, else
+//! `<$PI_CODING_AGENT_DIR or ~/.pi/agent>/sessions`), the same one the session
+//! importer reads, so a relocated store is listed where Pi writes it. Nothing
 //! is written, and message bodies never leave this module. The CLI's answer is
 //! `cli/src/agent/tool-host/pi-sessions.ts`, and both emit the same record shape.
 
@@ -29,14 +32,10 @@ pub struct PiSessionRecord {
 /// Files larger than this keep their header but skip the name scan.
 const NAME_SCAN_LIMIT: u64 = 16 * 1024 * 1024;
 
-pub fn pi_agent_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("PI_CODING_AGENT_DIR") {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
-    }
-    dirs::home_dir().map(|home| home.join(".pi").join("agent"))
+/// Pi's session store, from the shared vendor-root table.
+fn pi_sessions_root() -> Option<PathBuf> {
+    let dir = crate::agents::paths::vendor_roots().pi_session_dir;
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
 }
 
 /// Pi's session directory name for a working directory (`session-manager.js`).
@@ -136,8 +135,7 @@ fn read_records(dir: &Path, cwd_filter: Option<&str>) -> Vec<PiSessionRecord> {
 
 /// Sessions for one working directory, or for every directory when `cwd` is
 /// absent. Newest activity first.
-pub fn list_in_agent_dir(agent_dir: &Path, cwd: Option<&str>) -> Vec<PiSessionRecord> {
-    let root = agent_dir.join("sessions");
+pub fn list_in_sessions_root(root: &Path, cwd: Option<&str>) -> Vec<PiSessionRecord> {
     let mut records = match cwd {
         Some(cwd) => read_records(&root.join(pi_session_dir_name(cwd)), Some(cwd)),
         None => std::fs::read_dir(&root)
@@ -156,17 +154,17 @@ pub fn list_in_agent_dir(agent_dir: &Path, cwd: Option<&str>) -> Vec<PiSessionRe
 
 #[tauri::command]
 pub fn list_pi_sessions(cwd: Option<String>) -> Result<Vec<PiSessionRecord>, String> {
-    let agent_dir = pi_agent_dir().ok_or_else(|| "no home directory".to_string())?;
+    let root = pi_sessions_root().ok_or_else(|| "no home directory".to_string())?;
     let cwd = cwd.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-    Ok(list_in_agent_dir(&agent_dir, cwd.as_deref()))
+    Ok(list_in_sessions_root(&root, cwd.as_deref()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn write(agent_dir: &Path, cwd: &str, file: &str, lines: &[&str]) {
-        let dir = agent_dir.join("sessions").join(pi_session_dir_name(cwd));
+    fn write(root: &Path, cwd: &str, file: &str, lines: &[&str]) {
+        let dir = root.join(pi_session_dir_name(cwd));
         std::fs::create_dir_all(&dir).expect("mkdir");
         std::fs::write(dir.join(file), format!("{}\n", lines.join("\n"))).expect("write");
     }
@@ -214,7 +212,7 @@ mod tests {
             &[r#"{"type":"session","id":"id-b","cwd":"/w/other"}"#],
         );
 
-        let scoped = list_in_agent_dir(tmp.path(), Some(cwd));
+        let scoped = list_in_sessions_root(tmp.path(), Some(cwd));
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].id, "id-a");
         assert_eq!(scoped[0].name.as_deref(), Some("final"));
@@ -224,7 +222,7 @@ mod tests {
         );
         assert!(scoped[0].updated_at.is_some());
 
-        let mut all: Vec<String> = list_in_agent_dir(tmp.path(), None)
+        let mut all: Vec<String> = list_in_sessions_root(tmp.path(), None)
             .into_iter()
             .map(|r| r.id)
             .collect();
@@ -235,6 +233,6 @@ mod tests {
     #[test]
     fn a_missing_store_is_empty_not_an_error() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        assert!(list_in_agent_dir(&tmp.path().join("absent"), Some("/x")).is_empty());
+        assert!(list_in_sessions_root(&tmp.path().join("absent"), Some("/x")).is_empty());
     }
 }

@@ -7,7 +7,9 @@
  * host's answer, and it deliberately mirrors what Pi's own `SessionManager.list`
  * does rather than inventing a second notion of "a session":
  *
- *   - the store is `$PI_CODING_AGENT_DIR` (default `~/.pi/agent`) `/sessions/`
+ *   - the store is `$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR`
+ *     (default `~/.pi/agent`) `/sessions/` — the rule the desktop's vendor-root
+ *     table (`crates/cognia-agents/src/paths.rs`) and the session importer use
  *   - one sub-directory per working directory, named by Pi's own encoding
  *     (`--` + path with `/`, `\` and `:` replaced by `-` + `--`)
  *   - one `.jsonl` file per session whose first line is the header
@@ -39,6 +41,17 @@ const NAME_SCAN_LIMIT = 16 * 1024 * 1024
 export function piAgentDir(env: Record<string, string | undefined> = process.env): string {
   const override = env.PI_CODING_AGENT_DIR?.trim()
   return override || path.join(os.homedir(), ".pi", "agent")
+}
+
+/**
+ * Pi's session store: `$PI_CODING_AGENT_SESSION_DIR` relocates it independently
+ * of the agent dir; otherwise it is `<agent dir>/sessions`.
+ */
+export function piSessionsRoot(
+  env: Record<string, string | undefined> = process.env,
+  agentDir: string = piAgentDir(env)
+): string {
+  return env.PI_CODING_AGENT_SESSION_DIR?.trim() || path.join(agentDir, "sessions")
 }
 
 /** Pi's session directory name for a working directory (`session-manager.js`). */
@@ -150,9 +163,10 @@ function listDir(dir: string, cwdFilter: string | undefined): PiSessionRecord[] 
  * absent. Newest activity first.
  */
 export function listPiSessions(
-  options: { cwd?: string; agentDir?: string } = {}
+  options: { cwd?: string; agentDir?: string; env?: Record<string, string | undefined> } = {}
 ): PiSessionRecord[] {
-  const root = path.join(options.agentDir ?? piAgentDir(), "sessions")
+  const env = options.env ?? process.env
+  const root = piSessionsRoot(env, options.agentDir ?? piAgentDir(env))
   let records: PiSessionRecord[]
   if (options.cwd) {
     records = listDir(path.join(root, piSessionDirName(options.cwd)), path.resolve(options.cwd))

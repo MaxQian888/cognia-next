@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { listPiSessions, piAgentDir, piSessionDirName } from "./pi-sessions"
+import { listPiSessions, piAgentDir, piSessionDirName, piSessionsRoot } from "./pi-sessions"
 
 function scratch(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "pi-sessions-"))
@@ -34,7 +34,37 @@ describe("piAgentDir", () => {
   })
 })
 
+describe("piSessionsRoot", () => {
+  it("honours PI_CODING_AGENT_SESSION_DIR independently of the agent dir", () => {
+    expect(piSessionsRoot({ PI_CODING_AGENT_SESSION_DIR: " /elsewhere " }, "/agent")).toBe(
+      "/elsewhere"
+    )
+    expect(piSessionsRoot({ PI_CODING_AGENT_DIR: "/custom" })).toBe(
+      path.join("/custom", "sessions")
+    )
+    expect(piSessionsRoot({ PI_CODING_AGENT_SESSION_DIR: "  " }, "/agent")).toBe(
+      path.join("/agent", "sessions")
+    )
+  })
+})
+
 describe("listPiSessions", () => {
+  it("lists a store relocated by PI_CODING_AGENT_SESSION_DIR, not the agent dir's", () => {
+    const agentDir = scratch()
+    const relocated = scratch()
+    const cwd = path.join(agentDir, "work")
+    writeSession(agentDir, cwd, "stale.jsonl", [{ type: "session", id: "id-stale", cwd }])
+    const dir = path.join(relocated, piSessionDirName(cwd))
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, "live.jsonl"),
+      JSON.stringify({ type: "session", id: "id-live", cwd }) + "\n"
+    )
+    const env = { PI_CODING_AGENT_SESSION_DIR: relocated }
+    expect(listPiSessions({ cwd, agentDir, env }).map((r) => r.id)).toEqual(["id-live"])
+    expect(listPiSessions({ cwd, agentDir, env: {} }).map((r) => r.id)).toEqual(["id-stale"])
+  })
+
   it("reads the header id, cwd, created time and the last session_info name", () => {
     const agentDir = scratch()
     const cwd = path.join(agentDir, "work")

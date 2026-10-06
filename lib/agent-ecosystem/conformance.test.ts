@@ -12,12 +12,12 @@ import { MIGRATION_VENDORS } from "@/lib/agent-migration/types"
 import { EXTERNAL_AGENT_RUNTIMES } from "@/lib/ai/agent/external/config/install-catalog"
 import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/config/presets"
 import { SUBAGENT_SOURCE_ADAPTERS } from "@/lib/claude/subagent-importers"
+// The converter's own list, not a copy: a copy went stale as converters were added.
+import { PLUGIN_ECOSYSTEMS } from "@/lib/plugin/convert/delivery"
 import { STATIC_SESSION_SOURCE_IDS } from "@/lib/session-import/registry"
 
 import { AGENT_ECOSYSTEMS } from "./catalog"
 import { presetIdsForEcosystem, primaryPresetIdForMigrationVendor } from "./runtime-link"
-
-const PLUGIN_ECOSYSTEMS = ["cognia", "claude-code", "codex", "gemini-cli"]
 
 describe("agent ecosystem catalog conformance", () => {
   it("has a non-empty table with unique ids", () => {
