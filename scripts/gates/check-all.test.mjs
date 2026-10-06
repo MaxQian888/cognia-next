@@ -48,6 +48,7 @@ test("registry covers the read-only gates", () => {
     "audit:companion-command-manifest",
     "audit:e2e-governance",
     "audit:pii-boundaries",
+    "audit:package-boundaries",
     "lint:static-export",
     "config:sync:check",
     "test:db-fixture:audit",

@@ -252,6 +252,7 @@ const REGISTRY = [
   // directions.
   { script: "audit:hooks", group: "audit" },
   { script: "audit:root-loading", group: "audit" },
+  { script: "audit:package-boundaries", group: "audit" },
   { script: "lint:static-export", group: "audit" },
   { script: "lint:plugin-sdk-wit", group: "audit" },
   { script: "lint:frozen-wasm-api", group: "audit" },
@@ -326,6 +327,7 @@ const REGISTRY = [
   // The plugin SDK's cross-language contract surface.
   { script: "sdk:ts:build", group: "plugin-sdk", resource: "package-build" },
   { script: "sdk:ts:pack:test", group: "plugin-sdk" },
+  { script: "plugin:packages:verify", group: "plugin-sdk" },
   // ADR-0217: every agent package installs from its tarball and loads its entries.
   { script: "agent:packages:pack-test", group: "plugin-sdk" },
   { script: "sdk:scaffold:test", group: "plugin-sdk" },

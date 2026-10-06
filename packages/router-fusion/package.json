@@ -34,6 +34,9 @@
     "@xmldom/xmldom": "*",
     "zod": "*"
   },
+  "devDependencies": {
+    "zod": "catalog:"
+  },
   "engines": {
     "node": ">=26.0.0"
   }

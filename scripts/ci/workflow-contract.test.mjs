@@ -3,8 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { execFileSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 import { parse } from "yaml"
+import { ESLint } from "eslint"
 
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
@@ -162,6 +164,15 @@ test("workspace pnpm caches account for the sidecar lock installed by root posti
       for (const step of job.steps ?? []) {
         if (!step.uses?.startsWith("actions/setup-node@") || step.with?.cache !== "pnpm") continue
         const locks = step.with["cache-dependency-path"]
+        const installs = (job.steps ?? []).filter((entry) => /pnpm install\b/.test(entry.run ?? ""))
+        if (
+          installs.length > 0 &&
+          installs.every((entry) => {
+            const directory = entry["working-directory"] ?? job.defaults?.run?.["working-directory"]
+            return directory?.startsWith("services/") && locks === `${directory}/pnpm-lock.yaml`
+          })
+        )
+          continue
         assert.ok(
           locks?.includes("sidecar/pnpm-lock.yaml") || locks === "**/pnpm-lock.yaml",
           `${name}:${jobName} caches both independently locked stores`
@@ -466,6 +477,28 @@ test("formatting and lint exclude generated test and extension artifacts", async
   assert.match(eslintConfig, /"public\/_cognia\/\*\*"/)
   assert.match(eslintConfig, /"playwright-report\/\*\*"/)
   assert.match(eslintConfig, /"test-results\/\*\*"/)
+  assert.match(eslintConfig, /"\.cache\/\*\*"/)
+  assert.match(eslintConfig, /"\.tmp\/\*\*"/)
+  const eslint = new ESLint({ cwd: fileURLToPath(new URL("../..", import.meta.url)) })
+  for (const path of [
+    ".cache/capture/chunks/app.js",
+    ".tmp/coverage/report.js",
+    ".codex-tmp/coverage/lcov-report/block-navigation.js",
+    "tmp/repro.mjs",
+    "plugins/example/.venv/lib/vendor.js",
+    "services/status-server/admin/dist/index.mjs",
+    "services/status-server/worker/assets/_next/static/chunks/app.js",
+    "public/plugins/cognia-pdf/dist/index.js",
+  ]) {
+    assert.equal(await eslint.isPathIgnored(path), true, path)
+  }
+  for (const path of [
+    "public/_worker.js",
+    "services/status-server/worker/src/index.ts",
+    "plugins/cognia-laya-guard/src/index.ts",
+  ]) {
+    assert.equal(await eslint.isPathIgnored(path), false, path)
+  }
 })
 
 test("dependency audit waives only unpublished image-size fixes", async () => {

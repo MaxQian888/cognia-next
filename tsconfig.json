@@ -120,6 +120,7 @@
         "./packages/plugin-sdk/src/api/message-renderer.ts"
       ],
       "@cognia/plugin-sdk/api/ocr-provider": ["./packages/plugin-sdk/src/api/ocr-provider.ts"],
+      "@cognia/plugin-sdk/api/pet": ["./packages/plugin-sdk/src/api/pet.ts"],
       "@cognia/plugin-sdk/api/sandbox": ["./packages/plugin-sdk/src/api/sandbox.ts"],
       "@cognia/plugin-sdk/api/scheduled-task": ["./packages/plugin-sdk/src/api/scheduled-task.ts"],
       "@cognia/plugin-sdk/api/security-findings": [
@@ -205,10 +206,12 @@
     "web",
     "mobile",
     "sidecar",
+    "services/identity-server",
     "services/share-server",
     "services/sync-server",
     "services/status-server",
     "out",
+    "dist",
     ".next",
     ".next-mobile-dev",
     "target",

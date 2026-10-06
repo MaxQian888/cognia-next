@@ -120,6 +120,7 @@ const baseTestPathIgnorePatterns = [
   "/node_modules/",
   "/.next/",
   "/out/",
+  "<rootDir>/dist/",
   "/src-tauri/",
   "/sidecar/",
   // Git worktrees for parallel agent sessions (see `modulePathIgnorePatterns`).
@@ -736,6 +737,7 @@ const globalConfig: Config = {
     "/node_modules/",
     "/.next/",
     "/out/",
+    "<rootDir>/dist/",
     "/coverage/",
     "/components/ui/",
     "/components/ai-elements/",

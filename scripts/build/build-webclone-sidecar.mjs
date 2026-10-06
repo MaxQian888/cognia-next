@@ -46,6 +46,9 @@ function run(cmd, args, opts = {}) {
     cwd: sidecarRoot,
     stdio: "inherit",
     reject: false,
+    // pnpm exports its own configuration to child processes, but npm rejects
+    // this pnpm-only option. Keep npm's registry/proxy/auth settings intact.
+    ...(cmd === "npm" ? { env: { npm_config_manage_package_manager_versions: undefined } } : {}),
     ...opts,
   })
   if (result.exitCode !== 0 || result.signal) {

@@ -11,9 +11,17 @@ const eslintConfig = defineConfig([
   // Story-specific lint rules (only target *.stories.* and .storybook/*).
   ...storybook.configs["flat/recommended"],
   globalIgnores([
+    // Local build/test caches contain generated bundles and temporary fixtures.
+    // Flat ESLint does not inherit these exclusions from .gitignore.
+    ".cache/**",
+    ".tmp/**",
+    ".codex-tmp/**",
+    "tmp/**",
+    "**/.venv/**",
     ".next/**",
     ".next-mobile-dev/**",
     "out/**",
+    "dist/**",
     "build/**",
     // Storybook static build output (`pnpm build-storybook`) — minified vendor
     // JS bundles, gitignored and never authored here. eslint's flat config does
@@ -46,6 +54,7 @@ const eslintConfig = defineConfig([
     "plugins/**/skills/**",
     "plugins/**/types/**",
     "plugins/**/dist/**",
+    "public/plugins/**/dist/**",
     "plugins/**/target/**",
     // Untouched upstream snapshot (plugins/pi-latex-workbench/VENDOR.md) with
     // its own strict tsconfig; verified byte-for-byte by
@@ -76,6 +85,9 @@ const eslintConfig = defineConfig([
     // toolchain, tsconfig, and lockfile (like sidecar/). Its src is linted
     // by its own config; its dist/ is a minified build artifact.
     "services/share-server/**",
+    // Standalone status-service bundles and copied static-export assets.
+    "services/status-server/*/dist/**",
+    "services/status-server/worker/assets/**",
     "services/update-server/worker/dist/**",
     "services/update-server/worker/.wrangler/**",
     // ADR-0215 identity spike: wrangler dev cache and dry-run bundle.

@@ -81,8 +81,12 @@ export const EMIT_SOURCE_ROOTS = ["lib/", "components/", "hooks/", "stores/", "p
  * STREAMING command, and the RPC plane has no channel concept. Those are
  * reported separately (`channel-command`) rather than silently dropped.
  */
+// `Webview` belongs alongside `Window` and `WebviewWindow`: Tauri injects the
+// calling webview and the caller never sends it. Its absence here made every
+// command taking one look as though the caller had omitted a required argument
+// (`set_window_background_color`, `reveal_pet_window`).
 const INJECTED_TYPE =
-  /^(?:tauri::)?(?:AppHandle|Window|WebviewWindow|State|Runtime|Manager|Emitter|Listener)\b/
+  /^(?:tauri::)?(?:AppHandle|Window|Webview|WebviewWindow|State|Runtime|Manager|Emitter|Listener)\b/
 
 const CHANNEL_TYPE = /^(?:tauri::)?(?:ipc::)?Channel\s*</
 

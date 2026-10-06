@@ -1,11 +1,16 @@
 import { execSync } from "node:child_process"
 import path from "node:path"
 
+import createBundleAnalyzer from "@next/bundle-analyzer"
 import createNextIntlPlugin from "next-intl/plugin"
 import withSerwistInit from "@serwist/next"
 import type { NextConfig } from "next"
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
+const withBundleAnalyzer = createBundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+  openAnalyzer: false,
+})
 
 const isProd = process.env.NODE_ENV === "production"
 
@@ -311,6 +316,7 @@ const nextConfig: NextConfig = {
     "@ai-sdk/mcp",
     "@ai-sdk/mistral",
     "@ai-sdk/openai",
+    "@ai-sdk/typesafe-ai",
     "@ai-sdk/openai-compatible",
     "@ai-sdk/provider",
     "@ai-sdk/provider-utils",
@@ -357,6 +363,9 @@ const nextConfig: NextConfig = {
   // both Tauri and Capacitor consume. `lucide-react`/`date-fns` are already in
   // Next's built-in default list, so they are intentionally omitted here.
   experimental: {
+    // Release each mobile compiler's graph before the next one starts. Keeping
+    // all graphs in the main process pushed iOS exports past 18 GiB locally.
+    ...(isMobileBuild ? { webpackBuildWorker: true, webpackMemoryOptimizations: true } : {}),
     // Hosted builds repeatedly lost their runner at static generation with
     // three workers. Each loads the full client graph; serialize pages on CI
     // so its memory use is bounded independently of the machine's CPU count.
@@ -493,4 +502,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default withNextIntl(withSerwist(nextConfig))
+export default withBundleAnalyzer(withNextIntl(withSerwist(nextConfig)))
