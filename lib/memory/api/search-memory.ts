@@ -19,7 +19,7 @@
  */
 
 import type { Memory, MemoryType } from "@/types/memory/memory"
-import { memoryRowWithinNamespaces, type TrustedMemoryCaller } from "@cognia/memory/types/caller"
+import type { TrustedMemoryCaller } from "@cognia/memory/types/caller"
 
 export interface SearchMemoriesExternalInput {
   query: string
@@ -72,6 +72,7 @@ export async function searchMemoriesExternal(
   const authorized = await authorizeMemoryRead(caller)
   if (!authorized.ok) return authorized
   const { config, read } = authorized
+  caller = authorized.caller
 
   const reader = narrowReaderToCaller(
     {
@@ -127,6 +128,6 @@ export async function searchMemoriesExternal(
   // but the principal may not). Re-check before anything leaves the process.
   return {
     ok: true,
-    hits: hits.filter((hit) => memoryRowWithinNamespaces(hit.memory, caller.namespaces)),
+    hits: hits.filter((hit) => read.isAuthorized(hit.memory)),
   }
 }

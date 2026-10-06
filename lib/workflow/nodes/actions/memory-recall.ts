@@ -76,7 +76,7 @@ export async function runMemoryRecall(ctx: StepExecutionContext): Promise<StepEx
       branch: params.branch,
       path: params.path,
     },
-    caller
+    authorized.caller
   )
   if (!reader) {
     ctx.log(

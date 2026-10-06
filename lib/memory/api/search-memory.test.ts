@@ -22,7 +22,7 @@ jest.mock("@/lib/memory/agent-policy", () => ({
   resolvePersistedAgentMemoryPolicy: (...args: unknown[]) => mockResolvePolicy(...args),
 }))
 
-const HIT = { memory: { id: "m1", text: "fact" }, relevance: 0.9, score: 0.8 }
+const HIT = { memory: { id: "m1", text: "fact", scope: "global" }, relevance: 0.9, score: 0.8 }
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -36,6 +36,15 @@ beforeEach(() => {
 })
 
 describe("searchMemoriesExternal", () => {
+  it("applies freshly revoked principal restrictions to final hits", async () => {
+    mockGetSettings.mockResolvedValue({
+      memory: { principalGrants: { "plugin:p": { scopes: [] } } },
+    })
+    expect(await searchMemoriesExternal({ query: "q" }, pluginCaller("p"))).toEqual({
+      ok: true,
+      hits: [],
+    })
+  })
   it("throws on an empty query", async () => {
     await expect(searchMemoriesExternal({ query: "   " }, localUserCaller())).rejects.toThrow(
       /non-empty 'query'/
@@ -112,8 +121,8 @@ describe("searchMemoriesExternal", () => {
       namespaces: { projects: ["p1"] },
     }
     mockRetrieveMemories.mockResolvedValue([
-      { memory: { id: "in", projectId: "p1" }, relevance: 0.9, score: 0.8 },
-      { memory: { id: "out", projectId: "p9" }, relevance: 0.9, score: 0.8 },
+      { memory: { id: "in", scope: "workspace", projectId: "p1" }, relevance: 0.9, score: 0.8 },
+      { memory: { id: "out", scope: "workspace", projectId: "p9" }, relevance: 0.9, score: 0.8 },
     ])
     const result = await searchMemoriesExternal({ query: "q" }, caller)
     expect(result).toEqual({

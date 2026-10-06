@@ -296,6 +296,8 @@ export interface MemoryReaderContext {
  * JSON blob (no Dexie migration, same pattern as `goalConsoleView`).
  */
 export interface MemoryConfig {
+  /** Persisted host-principal restrictions; resolved afresh for every operation. */
+  principalGrants?: Record<string, import("./caller").MemoryCallerNamespaces>
   /** Master switch. When false, neither read nor write paths run. */
   enabled: boolean
   /** Whether eligible chats may recall saved memories. */

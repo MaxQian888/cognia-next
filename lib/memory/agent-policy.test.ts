@@ -9,6 +9,14 @@ const restrictive = {
 }
 
 describe("resolveAgentMemoryPolicy", () => {
+  it("allows authorized forgetting while learning and recall are disabled", () => {
+    const policy = resolveAgentMemoryPolicy({
+      config: { ...DEFAULT_MEMORY_CONFIG, enabled: false, temporary: true },
+    })
+    expect(policy.canForget).toBe(true)
+    expect(policy.canRecall).toBe(false)
+    expect(policy.canCreate).toBe(false)
+  })
   it("keeps the application policy as an upper bound", () => {
     const resolved = resolveAgentMemoryPolicy({
       config: { ...DEFAULT_MEMORY_CONFIG, enabled: false },

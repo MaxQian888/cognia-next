@@ -77,6 +77,7 @@ describe("MemorySection", () => {
 
     fireEvent.click(screen.getByTestId("memory-nav-item-privacy"))
     expect(screen.getByRole("heading", { name: "Privacy" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Memory access by caller" })).toBeInTheDocument()
     expect(screen.getByTestId("memory-danger-zone")).toBeInTheDocument()
   })
 

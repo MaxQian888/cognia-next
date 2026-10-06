@@ -6,6 +6,7 @@ import {
   mcpCaller,
   pluginCaller,
   workflowCaller,
+  resolveMemoryCaller,
 } from "./caller"
 
 describe("memory caller constructors", () => {
@@ -52,7 +53,7 @@ describe("memory caller constructors", () => {
     })
   })
 
-  it("never grants namespaces — the account-scope default until grants land", () => {
+  it("constructs identities without caching mutable grants", () => {
     for (const caller of [
       localUserCaller(),
       cliCaller(),
@@ -64,5 +65,40 @@ describe("memory caller constructors", () => {
     ]) {
       expect(caller.namespaces).toBeUndefined()
     }
+  })
+
+  it("intersects host, transport, and principal restrictions without mutating the caller", () => {
+    const caller = { ...pluginCaller("p"), namespaces: { projects: ["a", "b"] } }
+    expect(
+      resolveMemoryCaller(caller, {
+        principalGrants: {
+          "transport:plugin": { scopes: ["workspace"], projects: ["a", "c"] },
+          "plugin:p": { projects: ["a", "b", "c"] },
+        },
+      }).namespaces
+    ).toEqual({ scopes: ["workspace"], projects: ["a"] })
+    expect(caller.namespaces.projects).toEqual(["a", "b"])
+    expect(
+      resolveMemoryCaller(caller, { principalGrants: { "plugin:p": { scopes: [] } } }).namespaces
+        ?.scopes
+    ).toEqual([])
+  })
+
+  it("fails closed on malformed restrictions and ignores prototype keys", () => {
+    expect(
+      resolveMemoryCaller(pluginCaller("p"), { principalGrants: { "plugin:p": null } as never })
+        .namespaces
+    ).toEqual({ scopes: [] })
+    expect(
+      resolveMemoryCaller(pluginCaller("p"), {
+        principalGrants: { "plugin:p": { projects: 3 } } as never,
+      }).namespaces
+    ).toEqual({ projects: [] })
+    const caller = pluginCaller("p")
+    expect(
+      resolveMemoryCaller(caller, {
+        principalGrants: Object.create({ "plugin:p": { scopes: [] } }),
+      })
+    ).toEqual({ ...caller, namespaces: undefined })
   })
 })

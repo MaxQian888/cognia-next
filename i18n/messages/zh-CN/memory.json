@@ -19,6 +19,7 @@
     "typeLabel": "类型"
   },
   "bulk": {
+    "partialFailure": "{succeeded} 项成功，{failed} 项失败。失败的记忆仍保持选中，可以重试。",
     "archive": "归档",
     "archiveConfirm": {
       "cancel": "取消",
@@ -161,6 +162,7 @@
     "yes": "是"
   },
   "errors": {
+    "partial_failure": "部分记忆未能删除，请重试失败项。",
     "disabled": "记忆功能已在设置中关闭",
     "idempotency_key_reused": "该操作 ID 已被用于不同的请求",
     "mutation_failed": "记忆操作失败，请重试",

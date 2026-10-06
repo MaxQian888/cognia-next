@@ -407,6 +407,22 @@ describe("MemoryConsole — inspector", () => {
 })
 
 describe("MemoryConsole — add & bulk", () => {
+  it("retains failed bulk items for retry instead of clearing the selection", async () => {
+    mockData = [mem({ id: "a" }), mem({ id: "b" })]
+    mockManage
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, reason: "policy_denied" })
+    render(<MemoryConsole />)
+    await userEvent.click(within(rows()[0]!).getByTestId("memory-row-select"))
+    await userEvent.click(screen.getByTestId("memory-bulk-select-all"))
+    await userEvent.click(screen.getByTestId("memory-bulk-archive"))
+    await userEvent.click(screen.getByRole("button", { name: "Archive" }))
+    await waitFor(() =>
+      expect(screen.getByTestId("memory-bulk-count")).toHaveTextContent("1 selected")
+    )
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("1 succeeded; 1 failed"))
+  })
   it("creates a memory with explicit provenance", async () => {
     render(<MemoryConsole />)
     await userEvent.click(screen.getByTestId("memory-add-button"))

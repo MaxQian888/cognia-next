@@ -62,6 +62,16 @@ beforeEach(() => {
 })
 
 describe("runMemoryRecall", () => {
+  it("respects transport namespace restrictions without trusting node parameters", async () => {
+    mockGetSettings.mockResolvedValue({
+      memory: { principalGrants: { "transport:workflow": { projects: ["allowed"] } } },
+    })
+    const result = await runMemoryRecall(
+      makeCtx({ query: "q", scope: "workspace", projectId: "other" })
+    )
+    expect(result.output).toEqual({ entries: [], degraded: true, reason: "unauthorized_namespace" })
+    expect(mockRetrieveMemories).not.toHaveBeenCalled()
+  })
   it("rejects an empty query (non-retryable)", async () => {
     await expect(runMemoryRecall(makeCtx({}))).rejects.toThrow(/non-empty 'query'/)
     try {

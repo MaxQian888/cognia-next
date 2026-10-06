@@ -1,4 +1,29 @@
 {
+  "access": {
+    "title": "Memory access by caller",
+    "description": "Restrict shared memory API access for a trusted caller or transport. Unconfigured callers keep account access; restrictions are intersected on each operation. Existing tool permissions still apply. The account owner can still manage and delete data in the memory console.",
+    "principal": "Caller identity",
+    "principalHelp": "Use plugin:PLUGIN_ID, companion:DEVICE_ID, workflow:RUN_ID, mcp:bridge, or transport:plugin / transport:companion / transport:workflow / transport:mcp for all callers on that transport.",
+    "scopes": "Allowed memory scopes",
+    "scope": {
+      "global": "Global",
+      "workspace": "Workspace",
+      "character": "Character",
+      "agent": "Agent"
+    },
+    "projects": "Project IDs",
+    "characterIds": "Character IDs",
+    "agentIds": "Agent IDs",
+    "namespaceHelp": "Separate IDs with commas. * allows all IDs in that dimension; an empty field allows none. Clear every scope to deny all memory access.",
+    "save": "Save restriction",
+    "edit": "Edit",
+    "revoke": "Deny all",
+    "inherit": "Restore inherited access",
+    "denied": "All memory access denied",
+    "restricted": "Custom restrictions",
+    "saveFailed": "Could not save restrictions. Your draft is retained; try again.",
+    "invalidPrincipal": "Enter a supported caller identity or transport identity."
+  },
   "autoExtract": {
     "description": "After each turn, quietly extract durable facts from what you said.",
     "heading": "Learn automatically",

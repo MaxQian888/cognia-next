@@ -62,6 +62,25 @@ beforeEach(() => {
 })
 
 describe("authorizeMemoryRead", () => {
+  it("rechecks persisted principal grants on every call and excludes global data", async () => {
+    const caller: TrustedMemoryCaller = { principalId: "plugin:p", transport: "plugin" }
+    mockGetSettings.mockResolvedValue({
+      memory: { principalGrants: { "plugin:p": { scopes: ["workspace"], projects: ["p1"] } } },
+    })
+    const first = await authorizeMemoryRead(caller)
+    expect(first.ok && first.read.isAuthorized(row())).toBe(false)
+    expect(first.ok && first.read.isAuthorized(row({ scope: "workspace", projectId: "p1" }))).toBe(
+      true
+    )
+    mockGetSettings.mockResolvedValue({
+      memory: { principalGrants: { "plugin:p": { scopes: [] } } },
+    })
+    const revoked = await authorizeMemoryRead(caller)
+    expect(
+      revoked.ok && revoked.read.isAuthorized(row({ scope: "workspace", projectId: "p1" }))
+    ).toBe(false)
+  })
+
   it("denies when memory is disabled or temporary", async () => {
     mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
     expect(await authorizeMemoryRead(localUserCaller())).toEqual({

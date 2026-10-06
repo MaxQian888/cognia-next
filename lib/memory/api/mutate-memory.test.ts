@@ -93,6 +93,21 @@ function appliedPatch(row: Partial<Memory> = {}) {
 }
 
 describe("updateExternalMemory", () => {
+  it("rechecks stored grants for both update and forgetting", async () => {
+    mockGetSettings.mockResolvedValue({
+      memory: { principalGrants: { "plugin:p": { scopes: [] } } },
+    })
+    const context = { caller: { principalId: "plugin:p", transport: "plugin" as const } }
+    expect(await updateExternalMemory("m1", { text: "new" }, context)).toEqual({
+      ok: false,
+      reason: "unauthorized_namespace",
+    })
+    expect(await forgetExternalMemory("m1", context)).toEqual({
+      ok: false,
+      reason: "unauthorized_namespace",
+    })
+    expect(mockRunMutation).not.toHaveBeenCalled()
+  })
   it("rejects an empty text patch and an empty patch", async () => {
     await expect(updateExternalMemory("m1", { text: "  " })).rejects.toThrow(/non-empty/)
     await expect(updateExternalMemory("m1", {})).rejects.toThrow(/at least one field/)
@@ -331,9 +346,16 @@ describe("forgetExternalMemory", () => {
     expect(await forgetExternalMemory("m1")).toEqual({ ok: true, version: 4 })
   })
 
-  it("returns policy results for disabled / missing row", async () => {
+  it("allows forgetting with memory disabled, but still rejects missing rows", async () => {
     mockGetSettings.mockResolvedValue({ memory: { enabled: false } })
-    expect(await forgetExternalMemory("m1")).toEqual({ ok: false, reason: "disabled" })
+    const remove = jest.fn(async () => undefined)
+    mockVectorSink.mockResolvedValue({ delete: remove })
+    expect(await forgetExternalMemory("m1")).toEqual({ ok: true, version: 4 })
+    expect(mockVectorSink).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, temporary: false })
+    )
+    expect(remove).toHaveBeenCalledWith(["m1"])
+    mockRunMutation.mockClear()
     mockGetSettings.mockResolvedValue({ memory: { enabled: true } })
     mockGetMemory.mockResolvedValue(undefined)
     expect(await forgetExternalMemory("m1")).toEqual({ ok: false, reason: "not_found" })

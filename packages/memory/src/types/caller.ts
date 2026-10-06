@@ -33,6 +33,7 @@ export type MemoryCallerTransport =
 
 /** Namespace values a caller is authorized for. An absent key is unconstrained. */
 export interface MemoryCallerNamespaces {
+  scopes?: readonly string[]
   projects?: readonly string[]
   characterIds?: readonly string[]
   agentIds?: readonly string[]
@@ -68,10 +69,13 @@ export interface TrustedMemoryCaller {
  * a `global`-scoped row has no `projectId` and is not project data.
  */
 export function memoryRowWithinNamespaces(
-  row: { projectId?: string; characterId?: string; agentId?: string },
+  row: { scope?: string; projectId?: string; characterId?: string; agentId?: string },
   namespaces: MemoryCallerNamespaces | undefined
 ): boolean {
   if (!namespaces) return true
+  if (namespaces.scopes !== undefined && (!row.scope || !namespaces.scopes.includes(row.scope))) {
+    return false
+  }
   if (
     row.projectId !== undefined &&
     namespaces.projects !== undefined &&

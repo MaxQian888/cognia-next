@@ -59,7 +59,7 @@ export function resolveAgentMemoryPolicy(input: {
     canRecall,
     canCreate: globallyWritable && operations.create && writableScopes.length > 0,
     canUpdate: globallyWritable && operations.update && writableScopes.length > 0,
-    canForget: config.enabled && operations.forget && writableScopes.length > 0,
+    canForget: operations.forget && writableScopes.length > 0,
     canAutoLearn,
     readableScopes,
     writableScopes,

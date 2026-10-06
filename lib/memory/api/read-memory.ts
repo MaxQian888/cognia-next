@@ -26,6 +26,7 @@ import {
   type TrustedMemoryCaller,
 } from "@cognia/memory/types/caller"
 import type { ResolvedAgentMemoryPolicy } from "@/lib/memory/agent-policy"
+import { resolveMemoryCaller } from "./caller"
 
 export interface AuthorizedMemoryRead {
   policy: ResolvedAgentMemoryPolicy
@@ -39,7 +40,12 @@ export interface AuthorizedMemoryRead {
 export type MemoryReadDenyReason = "disabled" | "temporary" | "policy_denied"
 
 export type AuthorizeMemoryReadResult =
-  | { ok: true; config: import("@/types/memory/memory").MemoryConfig; read: AuthorizedMemoryRead }
+  | {
+      ok: true
+      config: import("@/types/memory/memory").MemoryConfig
+      caller: TrustedMemoryCaller
+      read: AuthorizedMemoryRead
+    }
   | { ok: false; reason: MemoryReadDenyReason }
 
 export async function authorizeMemoryRead(
@@ -49,8 +55,9 @@ export async function authorizeMemoryRead(
     import("@/lib/db/settings"),
     import("@/types/memory/memory"),
   ])
-  const settings = await getSettings().catch(() => undefined)
+  const settings = await getSettings()
   const config = resolveMemoryConfig(settings?.memory)
+  caller = resolveMemoryCaller(caller, config)
   if (!config.enabled) return { ok: false, reason: "disabled" }
   if (config.temporary) return { ok: false, reason: "temporary" }
 
@@ -66,6 +73,7 @@ export async function authorizeMemoryRead(
   return {
     ok: true,
     config,
+    caller,
     read: {
       policy,
       isAuthorized: (memory) =>
@@ -118,7 +126,7 @@ export async function listMemoriesExternal(
 ): Promise<ListMemoriesExternalResult> {
   const authorized = await authorizeMemoryRead(caller)
   if (!authorized.ok) return authorized
-  const reader = narrowReaderToCaller(input, caller)
+  const reader = narrowReaderToCaller(input, authorized.caller)
   if (!reader) return { ok: true, memories: [] }
 
   const { listMemories } = await import("@/lib/db/memories")
@@ -161,6 +169,7 @@ export async function countMemoriesExternal(
 ): Promise<number> {
   const authorized = await authorizeMemoryRead(caller)
   if (!authorized.ok) return 0
+  caller = authorized.caller
   if (!authorized.read.policy.readableScopes.includes(scope)) return 0
   if (
     characterId !== undefined &&

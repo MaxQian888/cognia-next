@@ -65,6 +65,7 @@ const CONTAMINATION_STATES: Record<MemoryContaminationState, true> = {
 
 const DENIALS: Record<ManageMemoryDenial, true> = {
   not_found: true,
+  partial_failure: true,
   disabled: true,
   temporary: true,
   pii_blocked: true,

@@ -7,14 +7,41 @@
  * in-process account owner. Nothing here reads request payload fields — that
  * is the whole point of the type.
  *
- * `namespaces` stays `undefined` on every transport today: the documented
- * `memory:read`/`memory:write` scope is the account's own data plane, and the
- * per-principal grant store that would populate the sets has not landed yet.
- * The sets exist so grants slot in at these constructors without another
- * signature change on the api/* functions.
+ * Constructors bind identity only. Persisted namespace restrictions are
+ * intersected at each operation, so revocation also affects cached callers.
  */
 
-import type { TrustedMemoryCaller } from "@cognia/memory/types/caller"
+import type { MemoryCallerNamespaces, TrustedMemoryCaller } from "@cognia/memory/types/caller"
+import type { MemoryConfig } from "@/types/memory/memory"
+
+/** Stored restrictions can narrow a host binding, never widen it. */
+export function resolveMemoryCaller(
+  caller: TrustedMemoryCaller,
+  config: Pick<MemoryConfig, "principalGrants">
+): TrustedMemoryCaller {
+  const grants = config.principalGrants
+  if (!grants) return caller
+  const keys = [`transport:${caller.transport}`, caller.principalId]
+  let namespaces = caller.namespaces
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(grants, key)) continue
+    const grant = grants[key]
+    if (!grant || typeof grant !== "object" || Array.isArray(grant)) {
+      namespaces = { scopes: [] }
+      continue
+    }
+    const merged: MemoryCallerNamespaces = { ...namespaces }
+    for (const dimension of ["scopes", "projects", "characterIds", "agentIds"] as const) {
+      if (!Object.prototype.hasOwnProperty.call(grant, dimension)) continue
+      const value = grant[dimension]
+      const allowed =
+        Array.isArray(value) && value.every((id) => typeof id === "string") ? value : []
+      merged[dimension] = namespaces?.[dimension]?.filter((id) => allowed.includes(id)) ?? allowed
+    }
+    namespaces = merged
+  }
+  return { ...caller, namespaces }
+}
 
 /** The interactive account owner — `/memory` surfaces, slash commands. */
 export function localUserCaller(): TrustedMemoryCaller {

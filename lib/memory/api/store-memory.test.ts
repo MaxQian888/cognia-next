@@ -64,6 +64,18 @@ jest.mock("@/lib/memory/agent-policy", () => ({
 const PII_TEXT = "reach me at bob@example.com"
 const ATTRIBUTION = { channel: "plugin" as const, pluginId: "com.example.notes" }
 
+it("rejects a revoked principal before replaying a stored operation receipt", async () => {
+  mockGetSettings.mockResolvedValue({ memory: { principalGrants: { "plugin:p": { scopes: [] } } } })
+  const result = await storeExternalMemory(
+    { text: "fact", operationId: "already-applied" },
+    ATTRIBUTION,
+    { principalId: "plugin:p", transport: "plugin" }
+  )
+  expect(result).toEqual({ ok: false, reason: "unauthorized_namespace" })
+  expect(mockReserve).not.toHaveBeenCalled()
+  expect(mockConsolidate).not.toHaveBeenCalled()
+})
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockGetSettings.mockResolvedValue({ memory: { enabled: true } })

@@ -1,10 +1,17 @@
 import {
   PROJECT_MEMORY_KINDS,
+  resolveMemoryConfig,
   isMemorySourceChannel,
   isProjectClaim,
   isProjectMemoryKind,
   type Memory,
 } from "./memory"
+
+it("preserves explicitly empty access grants across config resolution", () => {
+  expect(
+    resolveMemoryConfig({ principalGrants: { "plugin:p": { scopes: [] } } }).principalGrants
+  ).toEqual({ "plugin:p": { scopes: [] } })
+})
 
 describe("isProjectMemoryKind", () => {
   it.each([...PROJECT_MEMORY_KINDS])("accepts %s", (kind) => {

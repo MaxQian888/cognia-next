@@ -1,4 +1,29 @@
 {
+  "access": {
+    "title": "按调用方限制记忆访问",
+    "description": "限制可信调用方或整个通道对共享记忆 API 的访问。未配置的调用方保留账户级访问；每次操作会取各层限制的交集，并继续检查已有工具权限。账户所有者仍可在记忆控制台管理和删除数据。",
+    "principal": "调用方身份",
+    "principalHelp": "填写 plugin:插件ID、companion:设备ID、workflow:运行ID、mcp:bridge；或使用 transport:plugin / transport:companion / transport:workflow / transport:mcp 限制整个通道。",
+    "scopes": "允许的记忆范围",
+    "scope": {
+      "global": "全局",
+      "workspace": "工作区",
+      "character": "角色",
+      "agent": "智能体"
+    },
+    "projects": "项目 ID",
+    "characterIds": "角色 ID",
+    "agentIds": "智能体 ID",
+    "namespaceHelp": "多个 ID 用逗号分隔。* 表示允许该维度全部 ID，留空表示全部禁止。取消所有范围可禁止全部记忆访问。",
+    "save": "保存限制",
+    "edit": "编辑",
+    "revoke": "全部禁止",
+    "inherit": "恢复继承权限",
+    "denied": "已禁止全部记忆访问",
+    "restricted": "自定义限制",
+    "saveFailed": "无法保存限制，草稿已保留，请重试。",
+    "invalidPrincipal": "请输入支持的调用方身份或通道身份。"
+  },
   "autoExtract": {
     "description": "每轮对话后，悄悄从你说的话里抽取耐久事实。",
     "heading": "自动学习",

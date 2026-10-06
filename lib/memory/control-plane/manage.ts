@@ -12,11 +12,7 @@ import {
   type ListMemoriesQuery,
 } from "@/lib/db/memories"
 import type { RetrievalFeedbackVerdict } from "@cognia/memory/lifecycle/retrieval-feedback"
-import {
-  appendMemoryAuditEvent,
-  createMemoryEvidence,
-  deleteMemoryEvidence,
-} from "@/lib/db/memory-governance"
+import { appendMemoryAuditEvent, createMemoryEvidence } from "@/lib/db/memory-governance"
 import { noteMemoryVectorFailure } from "@/lib/memory/lifecycle/enqueue-reconcile"
 import { tryBuildMemoryVectorSink } from "@/lib/memory/runtime/build-deps"
 import { storeMemoryCore } from "@/lib/memory/api/store-memory"
@@ -93,7 +89,10 @@ export type ManageMemoryResult =
   | { ok: true; memoryId?: string; piiRedacted?: boolean; clearedCount?: number }
   | {
       ok: false
+      clearedCount?: number
+      failedIds?: string[]
       reason:
+        | "partial_failure"
         | "not_found"
         | "disabled"
         | "temporary"
@@ -136,8 +135,23 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
         ? { ...command.query, includeRevisions: true }
         : command.query
     )
-    for (const row of rows) await manageMemory({ kind: "delete", id: row.id })
-    return { ok: true, clearedCount: rows.length }
+    const selectedIds = new Set(rows.map((row) => row.id))
+    let clearedCount = 0
+    const failedIds: string[] = []
+    for (const row of rows) {
+      // The owner's delete also deletes its revision snapshots.
+      if (row.revisionOf && selectedIds.has(row.revisionOf)) continue
+      try {
+        const result = await manageMemory({ kind: "delete", id: row.id })
+        if (result.ok) clearedCount += 1
+        else if (result.reason !== "not_found") failedIds.push(row.id)
+      } catch {
+        failedIds.push(row.id)
+      }
+    }
+    return failedIds.length
+      ? { ok: false, reason: "partial_failure", clearedCount, failedIds }
+      : { ok: true, clearedCount }
   }
 
   if (command.kind === "resolve-conflict") {
@@ -304,19 +318,24 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
 
   const settings = await getSettings().catch(() => undefined)
   const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) return { ok: false, reason: "disabled" }
+  if (!config.enabled && command.kind !== "delete" && command.kind !== "invalidate") {
+    return { ok: false, reason: "disabled" }
+  }
 
   if (command.kind === "delete") {
-    const sink = await tryBuildMemoryVectorSink(config)
     try {
+      // Deletion never embeds text; the learning switch must not disable cleanup.
+      const sink = await tryBuildMemoryVectorSink({ ...config, enabled: true, temporary: false })
       await sink?.delete([existing.vectorDocId ?? existing.id])
+      if (!sink && existing.vectorDocId) noteMemoryVectorFailure()
     } catch {
       // Canonical deletion still proceeds; reconciliation removes stale vectors later.
       noteMemoryVectorFailure()
     }
     await hardDeleteMemory(command.id)
-    await deleteMemoryEvidence(command.id)
-    await appendMemoryAuditEvent({ action: "deleted", memoryId: command.id, reason: "user" })
+    // The canonical transaction already deletes evidence/history and appends
+    // the audit event. A second projection must not turn a committed delete
+    // into an apparent failure.
     return { ok: true, memoryId: command.id }
   }
 
@@ -364,8 +383,9 @@ export async function manageMemory(command: ManageMemoryCommand): Promise<Manage
     await invalidateMemory(command.id, command.supersededById)
     if (existing.vectorDocId) {
       try {
-        const sink = await tryBuildMemoryVectorSink(config)
+        const sink = await tryBuildMemoryVectorSink({ ...config, enabled: true, temporary: false })
         await sink?.delete([existing.vectorDocId])
+        if (!sink) noteMemoryVectorFailure()
       } catch {
         // Canonical invalidation is authoritative; vector cleanup is best-effort.
         noteMemoryVectorFailure()

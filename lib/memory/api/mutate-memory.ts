@@ -7,7 +7,7 @@
  *   doc is re-upserted best-effort so semantic search stays in sync.
  * - `forgetExternalMemory`: soft-invalidate (the consolidation-path contract —
  *   hard deletes stay user-panel-only). No PII risk, so it only requires
- *   `memory.enabled` (allowed even in temporary mode: forgetting reduces data).
+ *   the caller's forget permission (also while disabled or temporary).
  *
  * Both go through `runMemoryMutation`: one Dexie transaction that replays an
  * `operationId` receipt, compares `expectedVersion`, re-verifies the row's
@@ -19,6 +19,7 @@
 import type { TrustedMemoryCaller } from "@cognia/memory/types/caller"
 import { memoryRowWithinNamespaces } from "@cognia/memory/types/caller"
 import { clampImportance } from "./store-memory"
+import { localUserCaller, resolveMemoryCaller } from "./caller"
 
 export interface UpdateExternalMemoryPatch {
   text?: string
@@ -86,7 +87,7 @@ export async function updateExternalMemory(
     import("@/lib/db/settings"),
     import("@/types/memory/memory"),
   ])
-  const settings = await getSettings().catch(() => undefined)
+  const settings = await getSettings()
   const config = resolveMemoryConfig(settings?.memory)
   if (!config.enabled) return { ok: false, reason: "disabled" }
   if (config.temporary) return { ok: false, reason: "temporary" }
@@ -102,7 +103,7 @@ export async function updateExternalMemory(
   // forgotten on its own (deleting its owner removes it).
   if (!existing || existing.revisionOf !== undefined) return { ok: false, reason: "not_found" }
 
-  const caller = context.caller
+  const caller = resolveMemoryCaller(context.caller ?? localUserCaller(), config)
   if (caller?.namespaces && !memoryRowWithinNamespaces(existing, caller.namespaces)) {
     return { ok: false, reason: "unauthorized_namespace" }
   }
@@ -206,17 +207,15 @@ export async function forgetExternalMemory(
     import("@/lib/db/settings"),
     import("@/types/memory/memory"),
   ])
-  const settings = await getSettings().catch(() => undefined)
+  const settings = await getSettings()
   const config = resolveMemoryConfig(settings?.memory)
-  if (!config.enabled) return { ok: false, reason: "disabled" }
-
   const memDb = await import("@/lib/db/memories")
   const existing = await memDb.getMemory(id)
   // A revision snapshot is history, not a memory: it cannot be edited or
   // forgotten on its own (deleting its owner removes it).
   if (!existing || existing.revisionOf !== undefined) return { ok: false, reason: "not_found" }
 
-  const caller = context.caller
+  const caller = resolveMemoryCaller(context.caller ?? localUserCaller(), config)
   if (caller?.namespaces && !memoryRowWithinNamespaces(existing, caller.namespaces)) {
     return { ok: false, reason: "unauthorized_namespace" }
   }
@@ -273,8 +272,12 @@ export async function forgetExternalMemory(
   if (existing.vectorDocId) {
     try {
       const { tryBuildMemoryVectorSink } = await import("@/lib/memory/runtime/build-deps")
-      const sink = await tryBuildMemoryVectorSink(config)
-      await sink?.delete([existing.vectorDocId])
+      const sink = await tryBuildMemoryVectorSink({ ...config, enabled: true, temporary: false })
+      if (sink) await sink.delete([existing.vectorDocId])
+      else {
+        const { noteMemoryVectorFailure } = await import("@/lib/memory/lifecycle/enqueue-reconcile")
+        noteMemoryVectorFailure()
+      }
     } catch {
       // Canonical invalidation is authoritative; vector cleanup is best-effort.
       const { noteMemoryVectorFailure } = await import("@/lib/memory/lifecycle/enqueue-reconcile")

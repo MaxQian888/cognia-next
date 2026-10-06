@@ -33,6 +33,7 @@ import {
 } from "@/components/settings/common/settings-master-detail"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { MemoryDangerZone } from "@/components/settings/memory/danger-zone"
+import { MemoryPrincipalAccess } from "@/components/settings/memory/principal-access"
 import { MemoryToggleRow } from "@/components/settings/memory/memory-controls"
 import { MemoryNav } from "@/components/settings/memory/memory-nav"
 import { DEFAULT_MEMORY_PANEL, type MemoryPanelId } from "@/components/settings/memory/nav-config"
@@ -96,6 +97,12 @@ export function MemorySection() {
               description={t("cloudEmbedding.description")}
               checked={config.allowCloudEmbedding}
               onCheckedChange={(allowCloudEmbedding) => update({ allowCloudEmbedding })}
+            />
+            <MemoryPrincipalAccess
+              grants={config.principalGrants}
+              save={async (principalGrants) => {
+                await save({ memory: { ...config, principalGrants } })
+              }}
             />
             <MemoryDangerZone />
           </div>

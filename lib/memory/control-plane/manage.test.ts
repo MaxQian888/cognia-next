@@ -113,8 +113,8 @@ describe("manageMemory", () => {
     await manageMemory({ kind: "delete", id: "m1" })
     expect(mockSinkDelete).toHaveBeenCalledWith(["m1"])
     expect(mockDelete).toHaveBeenCalledWith("m1")
-    expect(mockDeleteEvidence).toHaveBeenCalledWith("m1")
-    expect(mockAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "deleted" }))
+    expect(mockDeleteEvidence).not.toHaveBeenCalled()
+    expect(mockAudit).not.toHaveBeenCalled()
   })
 
   it("records pin and review decisions", async () => {
@@ -331,6 +331,43 @@ describe("manageMemory", () => {
     expect(mockDelete).toHaveBeenCalledTimes(2)
     expect(mockSinkDelete).toHaveBeenCalledTimes(2)
     expect(result).toEqual({ ok: true, clearedCount: 2 })
+  })
+
+  it("allows deletion and archival while learning and recall are disabled", async () => {
+    getSettingsMock.mockResolvedValueOnce({ memory: { enabled: false, temporary: true } })
+    await expect(manageMemory({ kind: "delete", id: "m1" })).resolves.toMatchObject({ ok: true })
+    expect(mockDelete).toHaveBeenCalledWith("m1")
+    getSettingsMock.mockResolvedValueOnce({ memory: { enabled: false } })
+    await expect(manageMemory({ kind: "invalidate", id: "m1" })).resolves.toMatchObject({
+      ok: true,
+    })
+    expect(mockInvalidate).toHaveBeenCalledWith("m1", undefined)
+  })
+
+  it("continues a partial clear and counts only successful owner deletions", async () => {
+    mockList.mockResolvedValue([
+      { id: "m1" },
+      { id: "history", revisionOf: "m1" },
+      { id: "m2" },
+      { id: "m3" },
+    ])
+    mockGet.mockImplementation(async (id) => ({ id, version: 1 }))
+    mockDelete.mockRejectedValueOnce(new Error("storage unavailable"))
+    await expect(manageMemory({ kind: "clear" })).resolves.toEqual({
+      ok: false,
+      reason: "partial_failure",
+      clearedCount: 2,
+      failedIds: ["m1"],
+    })
+    expect(mockDelete.mock.calls.map(([id]) => id)).toEqual(["m1", "m2", "m3"])
+  })
+
+  it("still deletes canonical data when constructing the vector sink fails", async () => {
+    const { tryBuildMemoryVectorSink } = await import("@/lib/memory/runtime/build-deps")
+    jest.mocked(tryBuildMemoryVectorSink).mockRejectedValueOnce(new Error("backend unavailable"))
+    await expect(manageMemory({ kind: "delete", id: "m1" })).resolves.toMatchObject({ ok: true })
+    expect(mockDelete).toHaveBeenCalledWith("m1")
+    expect(mockNoteVectorFailure).toHaveBeenCalled()
   })
 
   it("clears everything — active and invalidated — when no query is given", async () => {

@@ -28,6 +28,7 @@ import type {
   MemoryType,
 } from "@/types/memory/memory"
 import { memoryRowWithinNamespaces, type TrustedMemoryCaller } from "@cognia/memory/types/caller"
+import { localUserCaller, resolveMemoryCaller } from "./caller"
 import {
   consolidationCorroboratedId,
   consolidationOpMemoryId,
@@ -138,28 +139,30 @@ export async function storeMemoryCore(input: StoreMemoryCoreInput): Promise<Stor
     )
   }
 
+  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
+    import("@/lib/db/settings"),
+    import("@/types/memory/memory"),
+  ])
+  const settings = await getSettings()
+  const config = resolveMemoryConfig(settings?.memory)
+  const caller = resolveMemoryCaller(input.caller ?? localUserCaller(), config)
   // A bound caller constrains the write's namespace — request fields narrow
   // the caller's authorization set, they can never widen it.
   if (
-    input.caller?.namespaces &&
+    caller.namespaces &&
     !memoryRowWithinNamespaces(
       {
+        scope,
         projectId: input.projectId,
         characterId: input.characterId,
         agentId: input.agentId,
       },
-      input.caller.namespaces
+      caller.namespaces
     )
   ) {
     return { ok: false, reason: "unauthorized_namespace" }
   }
 
-  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
-    import("@/lib/db/settings"),
-    import("@/types/memory/memory"),
-  ])
-  const settings = await getSettings().catch(() => undefined)
-  const config = resolveMemoryConfig(settings?.memory)
   if (!config.enabled) return { ok: false, reason: "disabled" }
   if (config.temporary) return { ok: false, reason: "temporary" }
   const { resolvePersistedAgentMemoryPolicy, scopeAllowedByAgentMemoryPolicy } =
@@ -470,10 +473,19 @@ export async function storeExternalMemory(
   if ((input.type as MemoryType | undefined) === "procedural") {
     throw new Error("memory store: external surfaces may not create procedural memories.")
   }
+  const [{ getSettings }, { resolveMemoryConfig }] = await Promise.all([
+    import("@/lib/db/settings"),
+    import("@/types/memory/memory"),
+  ])
+  caller = resolveMemoryCaller(
+    caller ?? localUserCaller(),
+    resolveMemoryConfig((await getSettings())?.memory)
+  )
   if (
     caller?.namespaces &&
     !memoryRowWithinNamespaces(
       {
+        scope: input.scope ?? "global",
         projectId: input.projectId,
         characterId: input.characterId,
         agentId: input.agentId,

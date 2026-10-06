@@ -19,6 +19,7 @@
     "typeLabel": "Type"
   },
   "bulk": {
+    "partialFailure": "{succeeded} succeeded; {failed} failed. Failed memories remain selected for retry.",
     "archive": "Archive",
     "archiveConfirm": {
       "cancel": "Cancel",
@@ -161,6 +162,7 @@
     "yes": "Yes"
   },
   "errors": {
+    "partial_failure": "Some memories could not be deleted. Retry the failed items.",
     "disabled": "Memory is disabled in settings",
     "idempotency_key_reused": "That operation ID was already used for a different request",
     "mutation_failed": "The memory operation failed — please try again",

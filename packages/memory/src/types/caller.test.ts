@@ -1,6 +1,16 @@
 import { memoryRowWithinNamespaces, narrowNamespaceValue } from "./caller"
 
 describe("memoryRowWithinNamespaces", () => {
+  it("distinguishes global access from project access and denies missing scopes", () => {
+    expect(memoryRowWithinNamespaces({ scope: "global" }, { scopes: ["workspace"] })).toBe(false)
+    expect(
+      memoryRowWithinNamespaces(
+        { scope: "workspace", projectId: "p1" },
+        { scopes: ["workspace"], projects: ["p1"] }
+      )
+    ).toBe(true)
+    expect(memoryRowWithinNamespaces({}, { scopes: [] })).toBe(false)
+  })
   it("admits every row for an unconstrained caller", () => {
     expect(memoryRowWithinNamespaces({ projectId: "p1", agentId: "a1" }, undefined)).toBe(true)
   })

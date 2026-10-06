@@ -80,6 +80,7 @@ export interface MemoryConsoleProps {
 export function MemoryConsole({ initialSelectedId, initialProjectId }: MemoryConsoleProps = {}) {
   const t = useTranslations("memory.panel")
   const tErrors = useTranslations("memory.errors")
+  const tBulk = useTranslations("memory.bulk")
 
   const memoriesQuery = useLiveQueryState(() => listMemories({}), [])
   const all = memoriesQuery.data ?? EMPTY_MEMORIES
@@ -275,15 +276,17 @@ export function MemoryConsole({ initialSelectedId, initialProjectId }: MemoryCon
   )
   const handleArchive = useCallback(
     (id: string) => {
-      void runManaged({ kind: "invalidate", id })
-      forgetId(id)
+      void runManaged({ kind: "invalidate", id }).then((ok) => {
+        if (ok) forgetId(id)
+      })
     },
     [runManaged, forgetId]
   )
   const handleDelete = useCallback(
     (id: string) => {
-      void runManaged({ kind: "delete", id })
-      forgetId(id)
+      void runManaged({ kind: "delete", id }).then((ok) => {
+        if (ok) forgetId(id)
+      })
     },
     [runManaged, forgetId]
   )
@@ -339,15 +342,23 @@ export function MemoryConsole({ initialSelectedId, initialProjectId }: MemoryCon
   // Bulk ops keep the selection visible (toolbar disabled) until every mutation
   // settles, so in-flight work has a pending state instead of vanishing.
   const runBulk = useCallback(
-    (commands: ManageMemoryCommand[], onDone?: () => void) => {
+    (commands: ManageMemoryCommand[], onDone?: (succeeded: number) => void) => {
       setBulkBusy(true)
-      void Promise.all(commands.map(runManaged)).finally(() => {
-        setBulkBusy(false)
-        setSelectedIds(EMPTY_SELECTION)
-        onDone?.()
-      })
+      void Promise.all(commands.map(runManaged))
+        .then((results) => {
+          const failedIds = commands.flatMap((command, index) =>
+            !results[index] && "id" in command ? [command.id] : []
+          )
+          setSelectedIds(new Set(failedIds))
+          const succeeded = results.filter(Boolean).length
+          if (succeeded > 0) onDone?.(succeeded)
+          if (succeeded < commands.length) {
+            toast.error(tBulk("partialFailure", { succeeded, failed: commands.length - succeeded }))
+          }
+        })
+        .finally(() => setBulkBusy(false))
     },
-    [runManaged]
+    [runManaged, tBulk]
   )
 
   const visibleIds = useMemo(() => rows.map((row) => row.id), [rows])
@@ -604,12 +615,11 @@ export function MemoryConsole({ initialSelectedId, initialProjectId }: MemoryCon
         cancelLabel={t("clearFilteredConfirm.cancel")}
         tone="destructive"
         onConfirm={() => {
-          const count = rows.length
           const ids = rows.map((row) => row.id)
           setSelectedId(null)
           runBulk(
             ids.map((id) => ({ kind: "delete", id })),
-            () => toast.success(t("clearedToast", { count }))
+            (count) => toast.success(t("clearedToast", { count }))
           )
         }}
       />
