@@ -1,5 +1,5 @@
 import type { ParsedError, ParsedNode } from "../types"
-import type { StackFrame } from "@/lib/terminal/stack-trace"
+import type { StackFrame } from "../stack-trace"
 
 // `  File "/path/script.py", line 10, in func` (the `, in func` tail is absent
 // for the bottom-most C-extension / module frame in some tracebacks).

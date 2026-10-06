@@ -1,4 +1,4 @@
-import { matchFileLinks } from "@/lib/terminal/terminal-links"
+import { matchFileLinks } from "../file-links"
 import type { ParsedError, ParsedNode } from "../types"
 
 const URL_RE = /https?:\/\/[^\s<>"{}|\\^\[\]`]+/g

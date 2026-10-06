@@ -1,3 +1,5 @@
+export { parseStackTrace, type StackFrame } from "./stack-trace"
+export { matchFileLinks, type FileLinkMatch } from "./file-links"
 export * from "./types"
 export * from "./registry"
 export { defaultPreset } from "./default-preset"

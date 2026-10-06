@@ -1,4 +1,4 @@
-import { parseStackTrace } from "@/lib/terminal/stack-trace"
+import { parseStackTrace } from "../stack-trace"
 import type { ParsedError, ParsedNode } from "../types"
 
 export const stackTraceParser = {

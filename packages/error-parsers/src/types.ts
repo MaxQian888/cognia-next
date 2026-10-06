@@ -1,4 +1,4 @@
-import type { StackFrame } from "@/lib/terminal/stack-trace"
+import type { StackFrame } from "./stack-trace"
 
 /** A run of text sharing one ANSI SGR style, produced by the ANSI parser. */
 export interface AnsiSegment {
