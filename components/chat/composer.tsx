@@ -277,6 +277,11 @@ import {
   type DraftAttachmentMeta,
 } from "@/lib/db/chat-drafts"
 import { draftAttachmentsFromFiles } from "@/lib/chat/draft-attachments"
+import {
+  useExternalSessionLinkForSession,
+  useRuntimeRefForSession,
+} from "@/stores/agent/agent-runtime-store"
+import { ExternalAgentExtensionUi } from "@/components/agent/external/extension-ui"
 import { mergeComposerIntentPrompt } from "@/lib/chat/merge-composer-intent"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { DraftRestoredAttachments } from "./composer/draft-restored-attachments"
@@ -476,6 +481,7 @@ const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
 // --- Inner box with full state wiring --------------------------------------
 
 interface InnerProps {
+  externalSessionLink?: { agentId: string; sessionId: string }
   session?: ChatSession | null
   status: PromptStatus
   disabled?: boolean
@@ -2920,17 +2926,32 @@ function ComposerInner(props: InnerProps) {
     setPastedBlocks,
   ])
 
+  const intentSessionRef = useRef("")
+  const intentIdentity = `${sessionId ?? ""}:${props.externalSessionLink?.agentId ?? ""}:${props.externalSessionLink?.sessionId ?? ""}`
+  useEffect(() => {
+    intentSessionRef.current = intentIdentity
+    return () => {
+      intentSessionRef.current = ""
+    }
+  }, [intentIdentity])
+
   // A system-selection action arrives while the main window and target session
   // are being activated. Consume it only after the saved draft has finished
   // hydrating, otherwise the async draft read can overwrite the inserted stock
   // instruction. Ask has no stock prompt and only focuses the textarea.
   useEffect(() => {
-    if (!sessionId || !pendingComposerIntent) return
+    if (!sessionId || !pendingComposerIntent || isComposing) return
     if (persistDrafts && draftHydratedFor !== sessionId) return
     const intent = consumeComposerIntent(sessionId, pendingComposerIntent.candidateId)
     if (!intent) return
-    if (intent.prompt) {
-      const merged = mergeComposerIntentPrompt(textInput.value, intent.prompt)
+    if (
+      intent.externalSession &&
+      (intent.externalSession.agentId !== props.externalSessionLink?.agentId ||
+        intent.externalSession.sessionId !== props.externalSessionLink?.sessionId)
+    )
+      return
+    if (intent.prompt !== null) {
+      const merged = mergeComposerIntentPrompt(textInput.value, intent.prompt, intent.mode)
       textInput.setInput(merged)
       // Auto-send (tray quick panel) is armed here but fired by the effect
       // below, once the input state has actually flushed: `submit` builds the
@@ -2939,9 +2960,41 @@ function ComposerInner(props: InnerProps) {
       // until the next commit.
       if (intent.autoSend) pendingAutoSendRef.current = merged
     }
+    if (intent.images?.length) {
+      const identity = intentIdentity
+      void attachmentToFiles({
+        kind: "photos",
+        items: intent.images.map((image) => ({
+          uri: `data:${image.mimeType};base64,${image.data}`,
+          mime: image.mimeType,
+        })),
+      })
+        .then(async (files) => {
+          const isCurrent = () => intentSessionRef.current === identity
+          const accepted = await acceptFiles(files, { isCurrent })
+          if (!isCurrent() && accepted.length === 0) {
+            useComposerIntentStore.getState().stage(sessionId, {
+              ...intent,
+              candidateId: `${intent.candidateId}:attachments`,
+              prompt: null,
+              mode: "append",
+            })
+          }
+        })
+        .catch((error) => {
+          loggers.chat.error("restoring queued attachments failed", error)
+          toast.error(error instanceof Error ? error.message : tCommands("failed"))
+        })
+    }
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [
+    acceptFiles,
+    intentIdentity,
+    tCommands,
     consumeComposerIntent,
+    isComposing,
+    props.externalSessionLink?.agentId,
+    props.externalSessionLink?.sessionId,
     textInput,
     draftHydratedFor,
     pendingComposerIntent,
@@ -3637,6 +3690,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   },
   ref
 ) {
+  const runtimeRef = useRuntimeRefForSession(session?.id)
+  const liveExternalLink = useExternalSessionLinkForSession(session?.id)
+  const retainedLink = liveExternalLink ?? session?.externalAgentSession
+  const externalSessionLink =
+    runtimeRef.kind === "external" && retainedLink?.agentId === runtimeRef.agentId
+      ? retainedLink
+      : undefined
   const tCommands = useTranslations("chat.composer.commands")
   const tShell = useTranslations("chat.composer.shell")
   // The shell the `!` line will run under, and whether it can run at all. The
@@ -4413,63 +4473,66 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   </Button>
                 </div>
               )}
-              <ComposerInner
-                session={session}
-                videoRoute={videoRoute}
-                status={promptStatus}
-                disabled={disabled}
-                onSubmit={handleSubmit}
-                attachmentCitations={attachmentCitations}
-                onStop={commandProgress ? cancelPluginCommand : onStop}
-                commandRunning={!!commandProgress}
-                onCommand={handleSlashCommand}
-                onSubmitMemory={handleMemorySubmit}
-                onSubmitShell={handleBashSubmit}
-                onOpenCheatsheet={() => setCheatsheetOpen(true)}
-                onOpenSettings={onOpenSettings}
-                pendingDraftCount={session?.platformBinding ? pendingDrafts.length : 0}
-                onReviewDrafts={openDraftReview}
-                handleRef={ref}
-                placeholder={
-                  session?.platformBinding
-                    ? tPlatform("destination", {
-                        platform: tPlatformName.has(session.platformBinding.platform)
-                          ? tPlatformName(session.platformBinding.platform)
-                          : session.platformBinding.platform,
-                        destination: session.title ?? session.platformBinding.conversationKey,
-                      })
-                    : placeholder
-                }
-                disabledPlaceholder={disabledPlaceholder}
-                workflowMention={workflowMention}
-                routing={routing}
-                placeholderHints={placeholderHints}
-                compactLayout={compactLayout}
-                skin={skin}
-                runStatus={runStatus}
-                toolbar={
-                  // The skin decides WHERE the status row sits. `detached` keeps
-                  // it below the box (today's desktop default); every other
-                  // arrangement puts it inside, and the toolbar itself decides
-                  // how much of the roster is spelled out vs. folded. A host
-                  // `toolbar` always renders inside the box, ahead of it.
-                  toolbar || toolbarInBox ? (
-                    <>
-                      {toolbar}
-                      {toolbarInBox ? (
-                        <BottomToolbar
-                          session={session ?? null}
-                          status={status}
-                          variant={
-                            skin.toolbarLayout === "detached" ? "embedded" : skin.toolbarLayout
-                          }
-                          onOpenProviderSettings={() => onOpenSettings("api-key")}
-                        />
-                      ) : null}
-                    </>
-                  ) : null
-                }
-              />
+              <ExternalAgentExtensionUi chatSessionId={session?.id} link={externalSessionLink}>
+                <ComposerInner
+                  externalSessionLink={externalSessionLink}
+                  session={session}
+                  videoRoute={videoRoute}
+                  status={promptStatus}
+                  disabled={disabled}
+                  onSubmit={handleSubmit}
+                  attachmentCitations={attachmentCitations}
+                  onStop={commandProgress ? cancelPluginCommand : onStop}
+                  commandRunning={!!commandProgress}
+                  onCommand={handleSlashCommand}
+                  onSubmitMemory={handleMemorySubmit}
+                  onSubmitShell={handleBashSubmit}
+                  onOpenCheatsheet={() => setCheatsheetOpen(true)}
+                  onOpenSettings={onOpenSettings}
+                  pendingDraftCount={session?.platformBinding ? pendingDrafts.length : 0}
+                  onReviewDrafts={openDraftReview}
+                  handleRef={ref}
+                  placeholder={
+                    session?.platformBinding
+                      ? tPlatform("destination", {
+                          platform: tPlatformName.has(session.platformBinding.platform)
+                            ? tPlatformName(session.platformBinding.platform)
+                            : session.platformBinding.platform,
+                          destination: session.title ?? session.platformBinding.conversationKey,
+                        })
+                      : placeholder
+                  }
+                  disabledPlaceholder={disabledPlaceholder}
+                  workflowMention={workflowMention}
+                  routing={routing}
+                  placeholderHints={placeholderHints}
+                  compactLayout={compactLayout}
+                  skin={skin}
+                  runStatus={runStatus}
+                  toolbar={
+                    // The skin decides WHERE the status row sits. `detached` keeps
+                    // it below the box (today's desktop default); every other
+                    // arrangement puts it inside, and the toolbar itself decides
+                    // how much of the roster is spelled out vs. folded. A host
+                    // `toolbar` always renders inside the box, ahead of it.
+                    toolbar || toolbarInBox ? (
+                      <>
+                        {toolbar}
+                        {toolbarInBox ? (
+                          <BottomToolbar
+                            session={session ?? null}
+                            status={status}
+                            variant={
+                              skin.toolbarLayout === "detached" ? "embedded" : skin.toolbarLayout
+                            }
+                            onOpenProviderSettings={() => onOpenSettings("api-key")}
+                          />
+                        ) : null}
+                      </>
+                    ) : null
+                  }
+                />
+              </ExternalAgentExtensionUi>
               {toolbarInBox ? null : (
                 <BottomToolbar
                   session={session ?? null}

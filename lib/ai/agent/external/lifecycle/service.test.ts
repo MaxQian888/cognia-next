@@ -664,12 +664,15 @@ describe("uninstallRuntime", () => {
     })
   })
 
-  it("records what the probe saw onto every agent bound to that runtime", async () => {
+  it("records the probe only onto configurations that launch the observed runtime", async () => {
     // The consent check compares an approval against the binding. If a probe's
     // findings never land there, the binding has no digest and no version, and
     // the executable/version invalidations can never fire.
     const { service, store, host } = withHost([
-      stdioConfig({ runtimeBinding: { runtimeId: "codex-acp", ownership: "system" } }),
+      stdioConfig({
+        process: { command: "codex-acp" },
+        runtimeBinding: { runtimeId: "codex-acp", ownership: "system" },
+      }),
       stdioConfig({
         id: "agent-2",
         runtimeBinding: { runtimeId: "droid", ownership: "system" },
@@ -686,7 +689,26 @@ describe("uninstallRuntime", () => {
       },
     })
 
+    for (const [id, command, args] of [
+      ["legacy", "npx", ["-y", "@agentclientprotocol/codex-acp"]],
+      ["custom", "/custom/codex-acp", []],
+    ] as const) {
+      store.agents.set(
+        id,
+        stdioConfig({
+          id,
+          process: { command, args: [...args] },
+          runtimeBinding: { runtimeId: "codex-acp", ownership: "system" },
+        })
+      )
+    }
     await service.inspectRuntime("codex-acp")
+    for (const id of ["legacy", "custom"]) {
+      expect(store.getAgent(id)?.runtimeBinding).toEqual({
+        runtimeId: "codex-acp",
+        ownership: "system",
+      })
+    }
 
     expect(store.getAgent("agent-1")?.runtimeBinding).toMatchObject({
       resolvedExecutablePath: "/usr/bin/codex-acp",

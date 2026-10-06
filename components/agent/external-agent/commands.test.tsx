@@ -27,6 +27,27 @@ const renderCmds = (props: Partial<React.ComponentProps<typeof ExternalAgentComm
   )
 
 describe("ExternalAgentCommands", () => {
+  it("accepts command arguments and permits only explicitly live commands during execution", () => {
+    const onExecute = jest.fn()
+    renderCmds({
+      isExecuting: true,
+      onExecute,
+      commands: [cmds[0], { ...cmds[1], supportsDuringExecution: true }],
+    })
+    fireEvent.click(screen.getByRole("button", { name: /commands/i }))
+    expect(screen.getByRole("button", { name: /Run \/review/i })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: /Run \/ping/i }))
+    expect(onExecute).toHaveBeenCalledWith("/ping", undefined)
+  })
+
+  it("forwards editable arguments", () => {
+    const onExecute = jest.fn()
+    renderCmds({ onExecute })
+    fireEvent.click(screen.getByRole("button", { name: /commands/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "src/index.ts" } })
+    fireEvent.click(screen.getByRole("button", { name: /Run \/review/i }))
+    expect(onExecute).toHaveBeenCalledWith("/review", "src/index.ts")
+  })
   it("returns null when there are no commands", () => {
     const { container } = renderCmds({ commands: [] })
     expect(container).toBeEmptyDOMElement()

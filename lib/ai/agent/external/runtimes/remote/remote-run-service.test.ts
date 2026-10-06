@@ -1,7 +1,9 @@
-import type { ExternalAgentEvent } from "@/types/agent/external-agent"
+import type { ExternalAgentEvent, ExternalAgentSession } from "@/types/agent/external-agent"
+import type { ExternalAgentSessionEntry } from "@cognia/agent-contracts/session-operations"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 
 import {
+  executeRemoteSessionOperation,
   DECISION_TIMEOUT_MS,
   EXTERNAL_RUN_EVENT_TOPIC,
   MODEL_REPORT_TIMEOUT_MS,
@@ -808,5 +810,201 @@ describe("the decision timeout", () => {
     await jest.advanceTimersByTimeAsync(DECISION_TIMEOUT_MS + 1)
     expect(h.manager.permissions).toHaveLength(1)
     jest.useRealTimers()
+  })
+})
+
+describe("owned remote session operations", () => {
+  const target = {
+    stamp: STAMP,
+    chatSessionId: "chat-1",
+    externalSessionId: "native-1",
+    callerDeviceId: "phone",
+  }
+  let listeners: Set<(event: ExternalAgentEvent) => void>
+  beforeEach(async () => {
+    listeners = new Set()
+    h.manager.addEventListener = jest.fn((_id, listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    })
+    h.manager.getSession = jest.fn((): ExternalAgentSession => ({
+      id: "native-1",
+      agentId: "eac_1",
+      status: "idle",
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+    }))
+    h.manager.renameSession = jest.fn(async () => {})
+    h.manager.steerSession = jest.fn(async () => {})
+    h.manager.getSessionEntries = jest.fn(async (): Promise<ExternalAgentSessionEntry[]> => [
+      {
+        id: "turn-2",
+        parentId: null,
+        type: "turn",
+        forkAt: { kind: "turn", id: "turn-2", boundary: "before" },
+      },
+    ])
+    await startRemoteExternalRun({
+      runId: "owner",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+      callerDeviceId: "phone",
+    })
+    h.emit(evt({ type: "session_start", sessionId: "native-1" }))
+    h.finish()
+    await flush()
+  })
+  it("denies a different device or conversation before mutation", async () => {
+    for (const override of [
+      { callerDeviceId: "other" },
+      { chatSessionId: "other" },
+      { externalSessionId: "other" },
+    ]) {
+      await expect(
+        executeRemoteSessionOperation(
+          {
+            ...target,
+            ...override,
+            requestId: "bad",
+            action: { operation: "rename", name: "Name" },
+          },
+          false
+        )
+      ).rejects.toThrow("does not belong")
+    }
+    expect(h.manager.renameSession).not.toHaveBeenCalled()
+  })
+  it("requires the mutation channel, rejects arbitrary arguments and preserves typed fork boundaries", async () => {
+    await expect(
+      executeRemoteSessionOperation(
+        { ...target, requestId: "bad", action: { operation: "rename", name: "Name" } },
+        true
+      )
+    ).rejects.toThrow("interactive")
+    await expect(
+      executeRemoteSessionOperation(
+        { ...target, requestId: "bad", action: { operation: "entries", path: "/tmp" } as never },
+        true
+      )
+    ).rejects.toThrow()
+    await expect(
+      executeRemoteSessionOperation(
+        { ...target, requestId: "read", action: { operation: "entries" } },
+        true
+      )
+    ).resolves.toMatchObject({ value: [{ forkAt: { kind: "turn", boundary: "before" } }] })
+    await executeRemoteSessionOperation(
+      { ...target, requestId: "rename", action: { operation: "rename", name: "Name" } },
+      false
+    )
+    expect(h.manager.renameSession).toHaveBeenCalledWith("eac_1", "native-1", "Name")
+    expect(h.released).toContain("rename")
+  })
+  it("replays early background delivery and routes device-scoped decisions through a live watch", async () => {
+    const background = evt({
+      type: "message_delta",
+      sessionId: "native-1",
+      delivery: "out_of_band",
+      delta: { type: "text", text: "later" },
+    })
+    for (const listener of listeners) listener(background)
+    await executeRemoteSessionOperation(
+      { ...target, requestId: "watch", action: { operation: "watch", watchId: "watch" } },
+      true
+    )
+    expect(
+      h.frames.filter((frame) => frame.runId === "watch").map((frame) => frame.event)
+    ).toContainEqual(background)
+    const permission = evt({
+      type: "permission_request",
+      sessionId: "native-1",
+      delivery: "out_of_band",
+      request: { id: "p", requestId: "p", toolInfo: { name: "read" }, options: [] },
+    } as never)
+    for (const listener of listeners) listener(permission)
+    await flush()
+    await expect(
+      resolveRemoteDecision({ decisionId: "watch:p", decision: "allow", callerDeviceId: "other" })
+    ).resolves.toEqual({ resolved: false, reason: "wrong-device" })
+    await executeRemoteSessionOperation(
+      { ...target, requestId: "close", action: { operation: "unwatch", watchId: "watch" } },
+      true
+    )
+    expect(h.manager.permissions.at(-1)?.response).toMatchObject({ granted: false })
+    expect(h.released).toContain("watch")
+  })
+  it("never infers a session while steering", async () => {
+    await executeRemoteSessionOperation(
+      { ...target, requestId: "steer", action: { operation: "steer", text: "Continue" } },
+      false
+    )
+    expect(h.manager.steerSession).toHaveBeenCalledWith("eac_1", "native-1", "Continue")
+  })
+  it("accepts shell promptly, keeps approval on its own watch, and publishes the awaited result", async () => {
+    const result = { output: "ok", exitCode: 0, cancelled: false, truncated: false }
+    h.manager.executeSessionShell = jest.fn(async (_agent, _session, _command, options) => {
+      const response = await options.onPermissionRequest({
+        id: "shell-permission",
+        requestId: "shell-permission",
+        toolInfo: { name: "bash" },
+        options: [],
+      } as never)
+      expect(response.granted).toBe(true)
+      return result
+    })
+    await executeRemoteSessionOperation(
+      {
+        ...target,
+        requestId: "shell-watch",
+        action: { operation: "watch", watchId: "shell-watch", purpose: "shell" },
+      },
+      true
+    )
+    await expect(
+      executeRemoteSessionOperation(
+        {
+          ...target,
+          requestId: "shell-run",
+          action: { operation: "shell", watchId: "shell-watch", command: "pwd" },
+        },
+        false
+      )
+    ).resolves.toEqual({ value: { started: true } })
+    expect(h.released).not.toContain("shell-run")
+    await resolveRemoteDecision({
+      decisionId: "shell-watch:shell-permission",
+      decision: "allow",
+      callerDeviceId: "phone",
+    })
+    await flush()
+    expect(
+      h.frames.find((frame) => frame.operationResult?.requestId === "shell-run")?.operationResult
+        ?.value
+    ).toEqual(result)
+    expect(h.released).toContain("shell-run")
+  })
+  it("presentation watches do not duplicate transcript permissions", async () => {
+    await executeRemoteSessionOperation(
+      {
+        ...target,
+        requestId: "display",
+        action: { operation: "watch", watchId: "display", purpose: "presentation" },
+      },
+      true
+    )
+    for (const listener of listeners)
+      listener(
+        evt({
+          type: "permission_request",
+          sessionId: "native-1",
+          delivery: "out_of_band",
+          request: { id: "p", toolInfo: { name: "read" }, options: [] },
+        } as never)
+      )
+    await flush()
+    expect(h.frames.filter((frame) => frame.runId === "display")).toHaveLength(0)
   })
 })

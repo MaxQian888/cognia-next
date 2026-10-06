@@ -11,6 +11,7 @@ import { useState } from "react"
 import { Command, ChevronRight, Terminal } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -30,6 +31,7 @@ export interface ExternalAgentCommandsProps {
   onExecute: (command: string, args?: string) => void
   /** Whether the agent is currently executing */
   isExecuting?: boolean
+  disabled?: boolean
   /** Custom class name */
   className?: string
 }
@@ -42,14 +44,17 @@ interface CommandItemProps {
   command: AcpAvailableCommand
   onExecute: (command: string, args?: string) => void
   isExecuting?: boolean
+  disabled?: boolean
 }
 
-function CommandItem({ command, onExecute, isExecuting }: CommandItemProps) {
+function CommandItem({ command, onExecute, isExecuting, disabled }: CommandItemProps) {
   const t = useTranslations("externalAgent")
   const [args, setArgs] = useState("")
   const hasInput = command.input !== null && command.input !== undefined
+  const blocked = disabled || (isExecuting && !command.supportsDuringExecution)
 
   const handleExecute = () => {
+    if (blocked) return
     onExecute(`/${command.name}`, hasInput ? args : undefined)
     setArgs("")
   }
@@ -67,13 +72,23 @@ function CommandItem({ command, onExecute, isExecuting }: CommandItemProps) {
           )}
         </div>
         <p className="text-xs text-muted-foreground truncate">{command.description}</p>
+        {hasInput && (
+          <Input
+            className="mt-1"
+            value={args}
+            onChange={(event) => setArgs(event.target.value)}
+            aria-label={t("commandDefaultArgs")}
+            placeholder={command.input?.hint || t("commandDefaultArgs")}
+            disabled={blocked}
+          />
+        )}
       </div>
       <Button
         variant="ghost"
         size="sm"
         className={HOVER_REVEAL_CONTROL_CLASS}
         onClick={handleExecute}
-        disabled={isExecuting}
+        disabled={blocked}
         aria-label={t("runCommand", { name: command.name })}
       >
         <ChevronRight className="h-4 w-4" />
@@ -90,6 +105,7 @@ export function ExternalAgentCommands({
   commands,
   onExecute,
   isExecuting,
+  disabled,
   className,
 }: ExternalAgentCommandsProps) {
   const t = useTranslations("externalAgent")
@@ -108,7 +124,10 @@ export function ExternalAgentCommands({
               variant="outline"
               size="sm"
               className={cn("gap-2", className)}
-              disabled={isExecuting}
+              disabled={
+                disabled ||
+                (isExecuting && !commands.some((command) => command.supportsDuringExecution))
+              }
             >
               <Command className="h-4 w-4" />
               <span className="hidden sm:inline">{t("commands")}</span>
@@ -136,6 +155,7 @@ export function ExternalAgentCommands({
                   setOpen(false)
                 }}
                 isExecuting={isExecuting}
+                disabled={disabled}
               />
             ))}
           </div>

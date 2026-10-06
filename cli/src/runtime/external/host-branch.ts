@@ -1,5 +1,5 @@
 import { constants } from "node:fs"
-import { open, realpath, stat, unlink, type FileHandle } from "node:fs/promises"
+import { open, readdir, realpath, stat, unlink, type FileHandle } from "node:fs/promises"
 import path from "node:path"
 
 import type { AcpHostCapabilities } from "@cognia/agent-acp/feature-profile"
@@ -51,6 +51,7 @@ export function getAcpHostCapabilities(
     elicitation: { form: true, url: true, durableInteraction: true },
     preview: {
       compaction: true,
+      notices: true,
       providers: true,
       dynamicMcp: true,
       nes: false,
@@ -122,7 +123,8 @@ export async function agentReadTextFile(filePath: string, allowedRoots: string[]
 export async function agentWriteTextFile(
   filePath: string,
   content: string,
-  allowedRoots: string[]
+  allowedRoots: string[],
+  encoding: BufferEncoding = "utf8"
 ): Promise<void> {
   if (!path.isAbsolute(filePath)) {
     throw new Error(`ACP file path must be absolute: ${filePath}`)
@@ -153,10 +155,50 @@ export async function agentWriteTextFile(
     // is written. Once validated, subsequent writes target this fixed inode.
     await assertOpenedFileWithinRoots(handle, filePath, roots)
     await handle.truncate(0)
-    await handle.writeFile(content, "utf8")
+    await handle.writeFile(content, encoding)
   } finally {
     await handle.close()
   }
+}
+
+export async function agentWriteBinaryFile(
+  filePath: string,
+  base64: string,
+  allowedRoots: string[]
+): Promise<void> {
+  if (
+    base64.length > 28 * 1024 * 1024 ||
+    base64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(base64) ||
+    Buffer.byteLength(base64, "base64") > 20 * 1024 * 1024
+  )
+    throw new Error("Invalid or oversized base64 attachment")
+  await agentWriteTextFile(filePath, base64, allowedRoots, "base64")
+}
+
+export async function agentReadBinaryFile(
+  filePath: string,
+  allowedRoots: string[]
+): Promise<string> {
+  if (!path.isAbsolute(filePath)) throw new Error("Attachment path must be absolute")
+  const roots = await canonicalRoots(allowedRoots)
+  const handle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  try {
+    await assertOpenedFileWithinRoots(handle, filePath, roots)
+    if ((await handle.stat()).size > 20 * 1024 * 1024) throw new Error("Attachment exceeds 20 MiB")
+    return (await handle.readFile()).toString("base64")
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function agentListFiles(directory: string, allowedRoots: string[]): Promise<string[]> {
+  const roots = await canonicalRoots(allowedRoots)
+  const resolved = await realpath(directory)
+  assertWithinRoots(resolved, roots, directory)
+  return (await readdir(resolved, { withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(directory, entry.name))
 }
 
 /** Delete a file, never a directory or a symlink target, inside a session root. */
@@ -205,6 +247,9 @@ export function createCliExternalAgentHost(
       readTextFile: agentReadTextFile,
       writeTextFile: agentWriteTextFile,
       deleteTextFile: agentDeleteTextFile,
+      readBinaryFile: agentReadBinaryFile,
+      writeBinaryFile: agentWriteBinaryFile,
+      listFiles: agentListFiles,
     }),
     terminals: cliTerminalPlane,
     hooks: cliAgentHookPlane,

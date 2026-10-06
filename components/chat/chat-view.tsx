@@ -993,7 +993,11 @@ export function ChatPane({
           <ArchivedConversationBanner session={activeSession} />
         </ChatColumn>
       ) : null}
-      <ExternalAgentSessionPanel sessionId={activeSession.id} />
+      <ExternalAgentSessionPanel
+        sessionId={activeSession.id}
+        externalSession={activeSession.externalAgentSession}
+        onExecuteCommand={handleSend}
+      />
       {/* The surface swap (loader / welcome ⇄ transcript) is a crossfade IN
           PLACE, not a reflow. `popLayout` lifts the exiting branch out of the
           flex column for the duration of its exit, so the entering branch owns

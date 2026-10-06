@@ -4,6 +4,41 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "nod
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { test } from "node:test"
+import { fileURLToPath } from "node:url"
+import ts from "typescript"
+
+test("CLI source resolution retains workspace aliases and the shared host modules", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url))
+  const cliRoot = path.join(root, "cli")
+  const rootConfig = ts.readConfigFile(path.join(root, "tsconfig.json"), ts.sys.readFile)
+  const cliConfig = ts.readConfigFile(path.join(cliRoot, "tsconfig.json"), ts.sys.readFile)
+  assert.equal(rootConfig.error, undefined)
+  assert.equal(cliConfig.error, undefined)
+  assert.equal(cliConfig.config.compilerOptions.baseUrl, undefined)
+  for (const [alias, targets] of Object.entries(rootConfig.config.compilerOptions.paths)) {
+    assert.deepEqual(
+      cliConfig.config.compilerOptions.paths[alias]?.map((target) => path.resolve(cliRoot, target)),
+      targets.map((target) => path.resolve(root, target)),
+      `CLI must retain the canonical ${alias} mapping`
+    )
+  }
+  const parsed = ts.parseJsonConfigFileContent(cliConfig.config, ts.sys, cliRoot)
+  // The CLI installs its external-agent host at boot (ADR-0217), so these
+  // host-bound modules resolve to the shared implementations, never to a remap.
+  for (const alias of [
+    "@/lib/native/external-agent",
+    "@/lib/ai/agent/external/agent-transport",
+    "@/lib/ai/agent/external/agent-hooks",
+  ]) {
+    const resolved = ts.resolveModuleName(
+      alias,
+      path.join(cliRoot, "src/index.ts"),
+      parsed.options,
+      ts.sys
+    ).resolvedModule
+    assert.equal(resolved?.resolvedFileName, path.join(root, `${alias.slice(2)}.ts`))
+  }
+})
 
 // Copy the real runner into an isolated tree; build is a no-op and the child
 // models the CLI consuming terminal SIGINT while an interactive command exits.

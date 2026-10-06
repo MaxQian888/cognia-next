@@ -1,3 +1,7 @@
+import {
+  createExternalAgentUiState,
+  reduceExternalAgentUiState,
+} from "@/lib/ai/agent/external/session/extension-ui-state"
 import { settingsSections } from "../runtime/settings-sections"
 import { agentStatusLimits } from "../runtime/limits-data"
 import { backendModelMetaTarget } from "../runtime/backend-identity"
@@ -66,6 +70,7 @@ import type {
 } from "./types"
 import {
   bufferText,
+  bufferFromText,
   insertText,
   insertNewline,
   backspace,
@@ -904,19 +909,27 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     }
 
     // ── Turn lifecycle ──────────────────────────────────────────────────────────
+    case "REMOTE_USER_INPUT":
+      return {
+        ...state,
+        cells: [...state.cells, { id: makeId(state.seq), kind: "user", text: action.text }],
+        seq: state.seq + 1,
+      }
     case "TURN_START": {
       // A queue can survive a turn that never reached a commit boundary. Flush
       // it ahead of the new prompt rather than losing it or letting it drift
       // into the next turn's output.
       const cells = [
         ...drained(state.cells, state.pendingCells),
-        { id: makeId(state.seq), kind: "user", text: action.prompt } as Cell,
+        ...(action.echo === false
+          ? []
+          : [{ id: makeId(state.seq), kind: "user", text: action.prompt } as Cell]),
       ]
       return {
         ...state,
         cells,
         pendingCells: [],
-        seq: state.seq + 1,
+        seq: state.seq + (action.echo === false ? 0 : 1),
         inflight: { text: "", thinking: "", tools: [] },
         // A new turn's reveal must start from zero rather than inherit the
         // previous turn's character count.
@@ -1445,6 +1458,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         sessionId: action.sessionId,
+        extensionUi: undefined,
         cells: [],
         inflight: { text: "", thinking: "", tools: [] },
         overlay: { kind: "none" },
@@ -1872,6 +1886,31 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     }
 
     // ── Input editor ─────────────────────────────────────────────────────────────
+    case "RESTORE_QUEUED_INPUT": {
+      const draft = bufferText(state.input.buffer)
+      const text = action.text ? (draft ? `${draft}\n\n${action.text}` : action.text) : draft
+      const next = tuiReducer(state, { type: "INPUT_SET", buffer: bufferFromText(text) })
+      return action.imagePaths.length
+        ? tuiReducer(next, { type: "INPUT_ADD_IMAGES", paths: action.imagePaths })
+        : next
+    }
+    case "EXTENSION_UI_UPDATE": {
+      const prior = state.extensionUi ?? createExternalAgentUiState()
+      const extensionUi = reduceExternalAgentUiState(prior, action.event)
+      const next = { ...state, extensionUi }
+      const update = action.event.update
+      if (update.kind === "editor" && prior.editor?.id !== action.event.id) {
+        return tuiReducer(next, { type: "INPUT_SET", buffer: bufferFromText(update.text) })
+      }
+      if (update.kind === "notification" && extensionUi !== prior) {
+        return tuiReducer(next, {
+          type: "TOAST_PUSH",
+          severity: update.level === "warning" ? "warn" : update.level,
+          message: update.message,
+        })
+      }
+      return next
+    }
     case "INPUT_SET": {
       // Snapshot the prior buffer onto the undo stack only when the TEXT changed
       // — a cursor-only move (arrows, home/end) shouldn't create an undo step.
@@ -2116,6 +2155,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       } = state
       return {
         ...rest,
+        extensionUi: undefined,
         rateLimits: undefined,
         agentRateLimits: undefined,
         overlay: state.overlay.kind === "limits" ? { kind: "none" } : state.overlay,

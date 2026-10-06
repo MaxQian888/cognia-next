@@ -324,6 +324,7 @@ describe("isolated gateway task configuration", () => {
     ],
   ])("preserves documented nonrouting options for %s", (preset, protocol, args) => {
     const source = config(preset as string, protocol as string)
+    if (preset === "qwen-code") source.process!.command = "npx"
     source.process!.args = args as string[]
     expect(prepare(source).config.process!.args!.slice(0, args.length)).toEqual(args)
   })
@@ -332,6 +333,7 @@ describe("isolated gateway task configuration", () => {
     "preserves the supported npx runner prefix %j",
     (...prefix) => {
       const source = config("codex-acp")
+      source.process!.command = "npx"
       source.process!.args = [...prefix, "@agentclientprotocol/codex-acp"]
       expect(prepare(source).config.process!.args).toEqual(source.process!.args)
     }
@@ -407,6 +409,18 @@ describe("isolated gateway task configuration", () => {
       expect(prepared.config.process!.env!.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:9000")
   })
 
+  it("rejects substituted packages and runner flags in persisted npx launches", () => {
+    for (const args of [
+      ["-y", "@other/agent"],
+      ["--offline", "-y", "@agentclientprotocol/codex-acp"],
+    ]) {
+      const source = config("codex-acp")
+      source.process!.command = "npx"
+      source.process!.args = args
+      expect(() => prepare(source)).toThrow(/catalogued package launch/)
+    }
+  })
+
   it.each(["codex-acp", "qwen-code"])(
     "isolates the %s provider and preserves its ACP model identity",
     (preset) => {
@@ -433,7 +447,8 @@ describe("isolated gateway task configuration", () => {
       const payload = JSON.parse(env.COGNIA_GATEWAY_TASK_CONFIG)
       expect(JSON.stringify(payload)).not.toContain("task-lease")
       if (preset === "codex-acp") {
-        expect(prepared.config.process!.args).toEqual(["-y", "@agentclientprotocol/codex-acp"])
+        expect(prepared.config.process!.command).toBe("codex-acp")
+        expect(prepared.config.process!.args).toEqual([])
         expect(env.MODEL_PROVIDER).toBe("cognia")
         expect(JSON.parse(env.CODEX_CONFIG)).toMatchObject({
           model: "model",
@@ -451,8 +466,6 @@ describe("isolated gateway task configuration", () => {
         expect(prepared.model).toBe("model(openai)")
         expect(env.OPENAI_API_KEY).toBe("task-lease")
         expect(prepared.config.process!.args).toEqual([
-          "-y",
-          "@qwen-code/qwen-code",
           "--acp",
           "--auth-type",
           "openai",

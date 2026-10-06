@@ -1,3 +1,4 @@
+import type { ExternalAgentUiState, ExternalAgentUiUpdateEvent } from "@/types/agent/external-agent"
 import type { ToolBrowserEntry } from "../components/ToolBrowser"
 import type { HookPanelRow } from "../runtime/hooks-controller"
 /**
@@ -981,6 +982,7 @@ export interface TuiState {
   pendingCells: Cell[]
   overlay: Overlay
   input: InputState
+  extensionUi?: ExternalAgentUiState
   /** The latest turn's usage — drives the context-window gauge. */
   usage?: UsageInfo
   /**
@@ -1112,6 +1114,8 @@ export interface TuiState {
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 export type TuiAction =
+  | { type: "RESTORE_QUEUED_INPUT"; text: string; imagePaths: string[] }
+  | { type: "EXTENSION_UI_UPDATE"; event: ExternalAgentUiUpdateEvent }
   // Streaming (from the capture stream via event-mapper)
   | { type: "INFLIGHT_TEXT"; delta: string }
   | { type: "INFLIGHT_THINKING"; delta: string }
@@ -1191,7 +1195,8 @@ export type TuiAction =
   // Active model's resolved context window + pricing (from the catalog)
   | { type: "SET_MODEL_META"; meta: ModelMeta }
   // Turn lifecycle (from the turn engine)
-  | { type: "TURN_START"; prompt: string }
+  | { type: "TURN_START"; prompt: string; echo?: boolean }
+  | { type: "REMOTE_USER_INPUT"; text: string }
   | { type: "TURN_COMMIT"; result: RunAndCaptureResult }
   | { type: "TURN_ERROR"; message: string; hint?: string; category?: string; title?: string }
   | { type: "TURN_ABORTED" }

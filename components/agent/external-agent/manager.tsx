@@ -1,6 +1,7 @@
 "use client"
 
 import { ExternalAgentAuthentication } from "./authentication"
+import { ExternalAgentSessionOperations } from "./session-operations"
 
 /**
  * External Agent Manager
@@ -573,6 +574,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
       title?: string
       createdAt?: string
       updatedAt?: string
+      archived?: boolean
     }>
   >([])
   const [isLoadingSessions, setIsLoadingSessions] = useState(false)
@@ -610,6 +612,9 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
     connect,
     disconnect,
     execute,
+    executeSessionCommand,
+    executeSessionShell,
+    cloneSession,
     setActiveAgent,
     respondToPermission,
     respondToElicitation,
@@ -617,6 +622,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
     listSessions,
     forkSession,
     resumeSession,
+    unarchiveSession,
     deleteSession,
     getAuthMethods,
     authenticate,
@@ -715,8 +721,10 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
     async (command: string, args?: string) => {
       const prompt = args ? `${command} ${args}` : command
       try {
-        await execute(prompt)
-      } catch {
+        if (isExecuting) await executeSessionCommand(prompt)
+        else await execute(prompt)
+      } catch (error) {
+        if (isExecuting) toast.error(String(error))
         // `execute` records the failure against the agent before it rethrows,
         // so the report is already on screen in that agent's row. Swallowing
         // here is only about the rejection itself: `onExecute` is typed
@@ -724,7 +732,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
         // unhandled rejection out of a failure the user can already see.
       }
     },
-    [execute]
+    [execute, executeSessionCommand, isExecuting]
   )
 
   const activeAgent = activeAgentId
@@ -872,7 +880,10 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
         const options = source?.cwd
           ? { cwd: source.cwd, additionalDirectories: source.additionalDirectories }
           : undefined
-        await resumeSession(sessionId, options)
+        if (source?.archived) {
+          setIsLoadingSessions(true)
+          await unarchiveSession(sessionId)
+        } else await resumeSession(sessionId, options)
         await refreshSessions()
       } catch (err) {
         const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(
@@ -884,9 +895,11 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
           return
         }
         toast.error(getErrorMessage(err, tManager("resumeSessionFailed")))
+      } finally {
+        setIsLoadingSessions(false)
       }
     },
-    [resumeSession, refreshSessions, sessionList, tManager, getErrorMessage]
+    [resumeSession, unarchiveSession, refreshSessions, sessionList, tManager, getErrorMessage]
   )
 
   const handleForkSession = useCallback(
@@ -1222,13 +1235,15 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
                                 isLoading ||
                                 isAuthenticating ||
                                 isDeletingSession ||
-                                activeSession?.id === session.sessionId ||
+                                (!session.archived && activeSession?.id === session.sessionId) ||
                                 !isActiveAgentExecutable ||
                                 !isActiveAgentConnected ||
-                                resumeSupport?.state === "unsupported"
+                                (!session.archived && resumeSupport?.state === "unsupported")
                               }
                             >
-                              {tManager("resume")}
+                              {session.archived
+                                ? t("sessionOperations.unarchive")
+                                : tManager("resume")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -1241,6 +1256,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
                                 isDeletingSession ||
                                 !isActiveAgentExecutable ||
                                 !isActiveAgentConnected ||
+                                session.archived ||
                                 forkSupport?.state === "unsupported"
                               }
                             >
@@ -1533,6 +1549,7 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
                   commands={availableCommands}
                   onExecute={handleCommandExecute}
                   isExecuting={commandsDisabled}
+                  disabled={!isActiveAgentConnected || !isActiveAgentExecutable || !activeSession}
                 />
               </div>
               <ExternalAgentPlan
@@ -1542,6 +1559,17 @@ export function ExternalAgentManager({ className, headerActions }: ExternalAgent
               />
             </div>
           )}
+        {activeAgentId && activeSession && isActiveAgentConnected && isActiveAgentExecutable && (
+          <ExternalAgentSessionOperations
+            key={`${activeAgentId}:${activeSession.id}`}
+            agentId={activeAgentId}
+            sessionId={activeSession.id}
+            isExecuting={isExecuting || isCompacting || isProviderUndoing}
+            onFork={(options) => forkSession(activeSession.id, options)}
+            onClone={() => cloneSession(activeSession.id)}
+            onShell={executeSessionShell}
+          />
+        )}
       </div>
 
       {/* Add Agent Dialog */}

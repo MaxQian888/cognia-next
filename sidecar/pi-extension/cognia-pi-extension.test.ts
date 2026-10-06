@@ -13,7 +13,75 @@ import cogniaPiExtension, {
   readMcpServers,
   __readPolicyForTests,
   __markerPayloadForTests,
+  redactUserBashOperations,
+  registerUserBashGuard,
 } from "./cognia-pi-extension.ts"
+
+test("user shell redacts chunk boundaries before context and preserves execution options", async () => {
+  const signal = new AbortController().signal
+  const received: Buffer[] = []
+  const operations = redactUserBashOperations({
+    async exec(command, cwd, options) {
+      assert.equal(command, "fixture")
+      assert.equal(cwd, "/workspace")
+      assert.equal(options.signal, signal)
+      assert.equal(options.timeout, 3)
+      options.onData(Buffer.from("alice@"))
+      options.onData(Buffer.from("example.com"))
+      assert.equal(received.length, 0)
+      return { exitCode: 7 }
+    },
+  })
+  assert.deepEqual(
+    await operations.exec("fixture", "/workspace", {
+      signal,
+      timeout: 3,
+      onData: (chunk) => received.push(chunk),
+    }),
+    { exitCode: 7 }
+  )
+  assert.ok(!Buffer.concat(received).toString().includes("alice@example.com"))
+})
+
+test("user shell scrubs errors and bounds captured output", async () => {
+  const received: Buffer[] = []
+  const operations = redactUserBashOperations({
+    async exec(_command, _cwd, options) {
+      options.onData(Buffer.alloc(32 * 1024, "x"))
+      throw new Error("failed alice@example.com")
+    },
+  })
+  await assert.rejects(
+    operations.exec("fixture", "/workspace", {
+      onData: (chunk) => received.push(chunk),
+    }),
+    (error: Error) => !error.message.includes("alice@example.com")
+  )
+  assert.ok(Buffer.concat(received).length < 16 * 1024 + 100)
+  assert.match(Buffer.concat(received).toString(), /Earlier shell output truncated/)
+})
+
+test("user shell denies restrictive policy and rejected approval before loading execution", async () => {
+  const previous = process.env.COGNIA_TOOLHOST_PI_POLICY
+  try {
+    for (const decision of ["deny", "ask"]) {
+      process.env.COGNIA_TOOLHOST_PI_POLICY = JSON.stringify({
+        mode: "plan",
+        decisions: { bash: decision },
+        fallback: "deny",
+      })
+      const { pi, handlers, ctx } = fakePi()
+      ctx.ui.confirm = async () => false
+      registerUserBashGuard(pi)
+      const result = await handlers.get("user_bash")![0]({ command: "touch should-not-exist" }, ctx)
+      assert.equal(result.result.exitCode, 1)
+      assert.equal(result.operations, undefined)
+    }
+  } finally {
+    if (previous === undefined) delete process.env.COGNIA_TOOLHOST_PI_POLICY
+    else process.env.COGNIA_TOOLHOST_PI_POLICY = previous
+  }
+})
 
 function fakePi() {
   const tools = new Map<string, any>()
@@ -570,7 +638,7 @@ test("native Pi results pass the same PII gate and lifecycle announces only afte
     status = text
   }
   await f.handlers.get("session_start")![0]({}, f.ctx)
-  assert.match(status, /cognia-ready v2/)
+  assert.match(status, /cognia-ready v3/)
   await f.handlers.get("before_agent_start")!.at(-1)!({}, f.ctx)
   await f.handlers.get("session_shutdown")![0]({}, f.ctx)
 })

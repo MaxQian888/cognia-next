@@ -71,6 +71,7 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "opencode",
     "cursor-agent",
     "gemini",
+    "qwen",
     "copilot",
     "kiro-cli",
     "droid",
@@ -1346,6 +1347,14 @@ mod tests {
         // Paths are rejected even when the file name is allowlisted.
         assert!(p.validate(config("/usr/bin/claude", &[])).is_err());
         assert!(p.validate(config("..\\claude", &[])).is_err());
+    }
+
+    #[test]
+    fn installed_acp_defaults_are_allowlisted() {
+        let (_tmp, p) = policy(false);
+        for command in ["codex-acp", "gemini", "qwen"] {
+            assert!(p.validate(config(command, &["--acp"])).is_ok());
+        }
     }
 
     #[test]

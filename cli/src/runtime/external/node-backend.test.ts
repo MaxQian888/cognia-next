@@ -86,7 +86,7 @@ describe("CLI spawn allowlist", () => {
 describe("NodeExternalAgentBackend", () => {
   it("does not inherit Kimi host model credentials into an isolated Bot", () => {
     const env = buildExternalAgentChildEnv(
-      { KIMI_MODEL_API_KEY: "ambient-host-key", KIMI_CODE_HOME: "/host/kimi" },
+      { NODE_ENV: "test", KIMI_MODEL_API_KEY: "ambient-host-key", KIMI_CODE_HOME: "/host/kimi" },
       {
         COGNIA_BOT_ISOLATION: "1",
         COGNIA_BOT_STATE_DIR: "/work/state",
@@ -100,7 +100,7 @@ describe("NodeExternalAgentBackend", () => {
     expect(env.KIMI_CODE_HOME).toBe("/work/state/kimi")
     expect(env.KIMI_MODEL_API_KEY).toBe("explicit-bot-key")
     const noCredential = buildExternalAgentChildEnv(
-      { KIMI_MODEL_API_KEY: "ambient-host-key" },
+      { NODE_ENV: "test", KIMI_MODEL_API_KEY: "ambient-host-key" },
       { COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/work/state" },
       false,
       false,
@@ -110,7 +110,7 @@ describe("NodeExternalAgentBackend", () => {
   })
   it("forwards Kimi model settings without client identity, OAuth or executable injection", () => {
     const env = buildExternalAgentChildEnv(
-      { KIMI_MODEL_NAME: "ambient", KIMI_MODEL_PROVIDER_TYPE: "anthropic" },
+      { NODE_ENV: "test", KIMI_MODEL_NAME: "ambient", KIMI_MODEL_PROVIDER_TYPE: "anthropic" },
       {
         KIMI_MODEL_NAME: "explicit",
         KIMI_MODEL_API_KEY: "synthetic",
@@ -175,7 +175,7 @@ describe("NodeExternalAgentBackend", () => {
 
   it("forwards Cline BYOK and config selectors without binary or storage injection", () => {
     const env = buildExternalAgentChildEnv(
-      { CLINE_API_KEY: "ambient", CLINE_PROVIDER: "deepseek" },
+      { NODE_ENV: "test", CLINE_API_KEY: "ambient", CLINE_PROVIDER: "deepseek" },
       {
         CLINE_API_KEY: "synthetic",
         CLINE_MODEL: "deepseek-flash",

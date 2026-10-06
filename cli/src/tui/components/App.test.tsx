@@ -210,6 +210,34 @@ describe("App", () => {
 
   beforeEach(() => __resetInk())
 
+  it("renders extension UI received while no turn is running", async () => {
+    const session = fakeSession().create({} as never)
+    let listener:
+      ((event: import("../../agent/session-runner").AgentSessionUiEvent) => void) | undefined
+    const detach = jest.fn()
+    session.subscribeUiEvents = (callback) => {
+      listener = callback
+      return detach
+    }
+    const view = render(<App config={config} sessionId="s1" createSession={() => session} />)
+    type("hello")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(listener).toBeDefined())
+    act(() =>
+      listener?.({
+        kind: "extension-ui",
+        id: "idle",
+        update: { kind: "status", key: "ext", text: "Idle extension ready" },
+      })
+    )
+    expect(view.getByText("Idle extension ready")).toBeInTheDocument()
+    view.unmount()
+    expect(detach).toHaveBeenCalled()
+  })
+
   it("persists a submitted line to the durable history store", async () => {
     const { appendHistory } = jest.requireMock("../input/history-store") as {
       appendHistory: jest.Mock

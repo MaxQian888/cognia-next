@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
+import type { ChatStatus } from "@/stores/chat/chat-store"
 
 const liveQueryMock = jest.fn()
 jest.mock("dexie-react-hooks", () => ({
@@ -92,7 +93,7 @@ const chatStoreState = {
   hydrateSessionActiveBranches: jest.fn(),
   activeSessionId: null as string | null,
   messages: [] as Array<{ id: string }>,
-  sessions: {} as Record<string, { messages: Array<{ id: string }> }>,
+  sessions: {} as Record<string, { messages: Array<{ id: string }>; status?: ChatStatus }>,
   messagesReloadNonce: 0,
 }
 

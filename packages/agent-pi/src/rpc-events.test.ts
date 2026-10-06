@@ -93,6 +93,37 @@ describe("mapPiEvent — messages", () => {
     ])
   })
 
+  it("preserves user text and images without turning them into assistant deltas", () => {
+    const events = map({
+      type: "message_start",
+      message: {
+        role: "user",
+        timestamp: 7,
+        content: [
+          { type: "text", text: "extension follow-up" },
+          { type: "image", data: "YQ==", mimeType: "image/png" },
+        ],
+      },
+    })
+    expect(events[0]).toMatchObject({ type: "message_start", role: "user", messageId: "pi-user-7" })
+    expect(events.filter((event) => event.type === "content_block_start")).toEqual([
+      expect.objectContaining({
+        role: "user",
+        messageId: "pi-user-7",
+        block: { type: "text", text: "extension follow-up" },
+      }),
+      expect.objectContaining({
+        role: "user",
+        messageId: "pi-user-7",
+        block: { type: "image", data: "YQ==", mimeType: "image/png" },
+      }),
+    ])
+    expect(events.some((event) => event.type === "message_delta")).toBe(false)
+    expect(map({ type: "message_start", message: { role: "toolResult" } })[0]).toMatchObject({
+      role: "tool",
+    })
+  })
+
   it("routes thinking deltas to the thinking event, not message text", () => {
     expect(map(update({ type: "thinking_delta", delta: "hmm" }))).toEqual([
       { sessionId: "sess-1", timestamp: TS, type: "thinking", thinking: "hmm" },
@@ -145,6 +176,41 @@ describe("mapPiEvent — messages", () => {
     expect(
       types(update({ type: "toolcall_delta", delta: '{"cmd', toolCall: { id: "c1" } }))
     ).toEqual(["tool_use_delta"])
+  })
+})
+
+describe("Pi 1.0.2 streamed tool correlation", () => {
+  it("correlates interleaved argument blocks without duplicate execution starts", () => {
+    const state = {
+      toolCallsByIndex: new Map<number, string>(),
+      startedToolCalls: new Set<string>(),
+    }
+    const context = { ...ctx, streamState: state }
+    const events = [
+      update({ type: "toolcall_start", contentIndex: 0, id: "a", toolName: "read" }),
+      update({ type: "toolcall_start", contentIndex: 1, id: "b", toolName: "bash" }),
+      update({ type: "toolcall_delta", contentIndex: 1, delta: '{"command":"pwd"}' }),
+      update({ type: "toolcall_delta", contentIndex: 0, delta: '{"path":"a"}' }),
+      update({
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: { id: "a", name: "read", arguments: { path: "a" } },
+      }),
+      { type: "tool_execution_start", toolCallId: "a", toolName: "read", args: { path: "a" } },
+    ].flatMap((event) => mapPiEvent(event, context))
+    expect(events.filter((event) => event.type === "tool_use_start")).toHaveLength(2)
+    expect(events.filter((event) => event.type === "tool_use_delta")).toMatchObject([
+      { toolUseId: "b", delta: '{"command":"pwd"}' },
+      { toolUseId: "a", delta: '{"path":"a"}' },
+    ])
+    expect(events.at(-1)).toMatchObject({
+      type: "tool_call_update",
+      toolCallId: "a",
+      rawInput: { path: "a" },
+    })
+    mapPiEvent({ type: "agent_settled" }, context)
+    expect(state.toolCallsByIndex.size).toBe(0)
+    expect(state.startedToolCalls.size).toBe(0)
   })
 })
 
@@ -276,11 +342,46 @@ describe("mapPiEvent — completion", () => {
 })
 
 describe("mapPiEvent — extension UI", () => {
-  it("maps fire-and-forget methods to progress", () => {
-    for (const method of ["notify", "setStatus", "setWidget", "setTitle", "set_editor_text"]) {
-      const [event] = map({ type: "extension_ui_request", id: "u1", method, title: "hi" })
-      expect(event).toMatchObject({ type: "progress" })
-    }
+  it.each([
+    [
+      "notify",
+      { message: "hello", notifyType: "warning" },
+      { kind: "notification", message: "hello", level: "warning" },
+    ],
+    [
+      "setStatus",
+      { statusKey: "ext", statusText: "working" },
+      { kind: "status", key: "ext", text: "working" },
+    ],
+    ["setStatus", { statusKey: "ext" }, { kind: "status", key: "ext", text: null }],
+    [
+      "setWidget",
+      { widgetKey: "ext", widgetLines: ["a", "b"], widgetPlacement: "belowEditor" },
+      { kind: "widget", key: "ext", lines: ["a", "b"], placement: "belowEditor" },
+    ],
+    [
+      "setWidget",
+      { widgetKey: "ext" },
+      { kind: "widget", key: "ext", lines: null, placement: "aboveEditor" },
+    ],
+    ["setTitle", { title: "window" }, { kind: "title", title: "window" }],
+    ["set_editor_text", { text: "" }, { kind: "editor", text: "" }],
+  ])("maps %s without losing UI semantics", (method, fields, update) => {
+    expect(map({ type: "extension_ui_request", id: "u1", method, ...fields })).toEqual([
+      expect.objectContaining({ type: "extension_ui_update", id: "u1", update }),
+    ])
+  })
+
+  it("rejects malformed widget lines and missing keys", () => {
+    expect(
+      map({
+        type: "extension_ui_request",
+        method: "setWidget",
+        widgetKey: "x",
+        widgetLines: ["ok", 7],
+      })
+    ).toEqual([])
+    expect(map({ type: "extension_ui_request", method: "setStatus", statusText: "x" })).toEqual([])
   })
 
   it("maps a select dialog to an elicitation with its options", () => {
@@ -497,31 +598,13 @@ describe("a turn the provider refused", () => {
 })
 
 describe("Pi protocol fallback payloads", () => {
-  it("marks bookkeeping for audit while leaving notifications and text unmarked", () => {
-    const frame = {
-      type: "extension_ui_request",
-      id: "w",
-      method: "setWidget",
-      widgetLines: ["bg", 7, "done"],
-    }
-    const [widget] = map(frame)
-    expect(widget).toMatchObject({ piDiagnostic: frame, message: "bg done" })
-    expect(isPiDiagnosticProgressEvent(widget)).toBe(true)
-    expect(isPiDiagnosticProgressEvent(map({ type: "agent_start" })[0])).toBe(false)
+  it("keeps lifecycle diagnostics distinct from extension presentation", () => {
+    expect(isPiDiagnosticProgressEvent(map({ type: "agent_end" })[0])).toBe(true)
     expect(
-      isPiDiagnosticProgressEvent(map(update({ type: "text_delta", delta: "answer" }))[0])
+      isPiDiagnosticProgressEvent(
+        map({ type: "extension_ui_request", method: "setTitle", title: "Pi" })[0]
+      )
     ).toBe(false)
-  })
-
-  it.each([
-    ["setStatus", { statusText: "status" }, "status"],
-    ["setTitle", { title: "title" }, "title"],
-    ["set_editor_text", { text: "editor" }, "editor"],
-    ["notify", {}, "pi.notify"],
-  ])("retains %s's method-specific payload", (method, fields, message) => {
-    expect(map({ type: "extension_ui_request", id: "u", method, ...fields })[0]).toMatchObject({
-      message,
-    })
   })
 
   it("handles incomplete usage without inventing tokens", () => {
@@ -567,4 +650,16 @@ describe("Pi protocol fallback payloads", () => {
       request: { requestedSchema: { properties: { select: { type: "string", enum: ["Yes"] } } } },
     })
   })
+})
+
+it("consumes the internal Cognia readiness marker without exposing implementation status", () => {
+  expect(
+    map({
+      type: "extension_ui_request",
+      id: "ready",
+      method: "setStatus",
+      statusKey: "cognia",
+      statusText: "cognia-ready:1",
+    })
+  ).toEqual([])
 })

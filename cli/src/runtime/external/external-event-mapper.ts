@@ -19,6 +19,7 @@ import type {
 import type { TuiAction } from "../../tui/state/types"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
 import { externalTokenUsageToUsageInfo } from "@/lib/claude/usage"
+import { contentBlocksText } from "@cognia/agent-runtime-kit/content-blocks"
 
 function contentBlockEvent(
   event: Extract<
@@ -101,6 +102,20 @@ export function externalAgentEventToCanonicalFallback(
   event: ExternalAgentEvent
 ): CanonicalAgentEvent {
   switch (event.type) {
+    case "artifact_update":
+      return {
+        kind: "content-part",
+        partId: event.artifactId,
+        operation: "upsert",
+        part: {
+          type: "custom",
+          customType: "external:artifact",
+          summary: contentBlocksText(event.blocks),
+          data: { complete: event.complete, name: event.name },
+        },
+      }
+    case "extension_ui_update":
+      return { kind: "extension-ui", id: event.id, update: event.update }
     case "session_start":
       return { kind: "lifecycle", phase: "started", detail: "External agent session started" }
     case "session_end":
@@ -289,6 +304,8 @@ export function externalAgentEventToActions(
   options: ExternalEventMapperOptions = {}
 ): TuiAction[] {
   switch (event.type) {
+    case "extension_ui_update":
+      return [{ type: "EXTENSION_UI_UPDATE", event }]
     case "message_delta":
       if (!event.delta.text) return []
       return [

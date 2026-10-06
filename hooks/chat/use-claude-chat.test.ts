@@ -446,6 +446,12 @@ const respondExternalPermissionMock = jest.fn(async (..._args: unknown[]) => {})
 const externalProtocolMock = { value: "acp" }
 const externalPresetMock = { value: "" }
 const externalMcpLevelMock = { value: "native" }
+const backgroundTurnsMock = { value: "unsupported" }
+const externalBackgroundListeners = new Set<
+  (event: import("@/types/agent/external-agent").ExternalAgentEvent) => void
+>()
+const steerExternalSessionMock = jest.fn(async (..._args: unknown[]) => {})
+const cancelExternalSessionMock = jest.fn(async (..._args: unknown[]) => {})
 jest.mock("@/lib/ai/agent/external/session/renderer-tool-host", () => ({
   RENDERER_TOOL_HOST_APPROVAL_PREFIX: "external-tool-host:",
   createRendererToolHost: (...args: unknown[]) => createRendererToolHostMock(...args),
@@ -478,6 +484,17 @@ jest.mock("@/lib/agent/ensure-external-agent-ready", () => ({
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: (...a: unknown[]) => executeOnExternalAgentMock(...(a as [])),
   getExternalAgentManager: () => ({
+    addEventListener: (
+      _agentId: string,
+      listener: (event: import("@/types/agent/external-agent").ExternalAgentEvent) => void
+    ) => {
+      externalBackgroundListeners.add(listener)
+      return () => externalBackgroundListeners.delete(listener)
+    },
+    getSessionOperationCapabilities: async () => ({ backgroundTurns: backgroundTurnsMock.value }),
+    cancel: (...args: unknown[]) => cancelExternalSessionMock(...args),
+    supportsSteering: () => true,
+    steerSession: (...args: unknown[]) => steerExternalSessionMock(...args),
     getConnectedAgents: () => getConnectedAgentsMock(),
     getAgentCapabilityProfile: () => ({
       effective: {
@@ -1174,6 +1191,9 @@ beforeEach(() => {
   externalProtocolMock.value = "acp"
   externalPresetMock.value = ""
   externalMcpLevelMock.value = "native"
+  backgroundTurnsMock.value = "unsupported"
+  externalBackgroundListeners.clear()
+  cancelExternalSessionMock.mockClear()
   respondExternalPermissionMock.mockClear()
   getConnectedAgentsMock.mockReset().mockReturnValue([])
   checkDelegationMock.mockReset().mockReturnValue({ shouldDelegate: false })
@@ -1200,6 +1220,7 @@ afterEach(() => {
     runtime: "claude-sdk",
     externalAgentId: null,
     sessionCompositions: {},
+    sessionExternalLinks: {},
   })
   useExternalAgentStore.setState({ delegationRules: [], chatFailurePolicy: "fallback" })
 })
@@ -3756,6 +3777,115 @@ describe("useClaudeChat — actions", () => {
     })
     expect(closeExternalSessionMock).toHaveBeenCalledWith("ext-1", "native-1")
     expect(rendererToolHostCloseMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains the external background broker after ACK and pauses it on a branch switch", async () => {
+    backgroundTurnsMock.value = "supported"
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "ack",
+      sessionId: "native-background",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("/later")
+    })
+    expect(rendererToolHostPauseMock).not.toHaveBeenCalled()
+    expect(setSessionHostFactsMock).not.toHaveBeenCalledWith("ext-1", "sess-1", null)
+    await act(async () => {
+      useAgentRuntimeStore
+        .getState()
+        .setSessionExternalLink("sess-1", { agentId: "ext-1", sessionId: "forked-background" })
+    })
+    expect(rendererToolHostPauseMock).toHaveBeenCalledTimes(1)
+    expect(setSessionHostFactsMock).toHaveBeenCalledWith("ext-1", "sess-1", null)
+  })
+
+  it("stops an external background turn through its native session after the owned send ended", async () => {
+    backgroundTurnsMock.value = "supported"
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "ack",
+      sessionId: "native-background",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("/later")
+    })
+    await act(async () => {
+      for (const listener of externalBackgroundListeners)
+        listener({
+          type: "session_start",
+          sessionId: "native-background",
+          timestamp: new Date(),
+          delivery: "out_of_band",
+        })
+    })
+    await flush()
+    await act(async () => {
+      await result.current.stop("sess-1")
+    })
+    expect(cancelExternalSessionMock).toHaveBeenCalledWith("ext-1", "native-background")
+    expect(interruptSessionMock).not.toHaveBeenCalled()
+  })
+
+  it("buffers an external background handoff until the owned ACK finishes persistence", async () => {
+    backgroundTurnsMock.value = "supported"
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    let finish!: () => void
+    executeOnExternalAgentMock.mockImplementation(
+      async (_prompt: string, options: { onEvent: (event: unknown) => void }) => {
+        options.onEvent({
+          type: "session_start",
+          sessionId: "native-background",
+          timestamp: new Date(),
+        })
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+        return { success: true, finalResponse: "ack", sessionId: "native-background" }
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    let sending!: Promise<unknown>
+    await act(async () => {
+      sending = result.current.send("/later")
+    })
+    await flush()
+    const base = {
+      sessionId: "native-background",
+      timestamp: new Date(),
+      delivery: "out_of_band" as const,
+    }
+    await act(async () => {
+      for (const listener of externalBackgroundListeners) {
+        listener({ ...base, type: "session_start" })
+        listener({ ...base, type: "message_delta", delta: { type: "text", text: "background" } })
+        listener({ ...base, type: "done", success: true })
+      }
+    })
+    await flush()
+    expect(chatState.sessions["sess-1"].messages).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: "assistant" })])
+    )
+    await act(async () => {
+      finish()
+      await sending
+    })
+    await flush()
+    const messages = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+      role: string
+      parts: Array<{ text?: string }>
+    }>
+    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(2)
+    expect(messages.some((message) => message.parts.some((part) => part.text === "ack"))).toBe(true)
+    expect(messages.some((message) => message.parts.some((part) => part.text === "x"))).toBe(true)
+    expect(rendererToolHostPauseMock).not.toHaveBeenCalled()
   })
 
   it.each(["pi-rpc", "codex-app-server", "opencode-v2", "acp"])(
@@ -9517,5 +9647,70 @@ describe("durable background result admission", () => {
     })
     expect(onAccepted).not.toHaveBeenCalled()
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("precise external steering ownership", () => {
+  beforeEach(() => {
+    steerExternalSessionMock.mockClear()
+  })
+  it.each([true, false])(
+    "never guesses a native session when the exact link is available=%s",
+    async (linked) => {
+      const { setSessionExternalLane } = await import("./steer-runtime")
+      chatState.status = "streaming"
+      useAgentRuntimeStore
+        .getState()
+        .setSessionRuntimeRef("sess-1", { kind: "external", agentId: "ext-1" })
+      useAgentRuntimeStore
+        .getState()
+        .setSessionRuntimeRef("other-chat", { kind: "external", agentId: "ext-1" })
+      useAgentRuntimeStore
+        .getState()
+        .setSessionExternalLink("other-chat", { agentId: "ext-1", sessionId: "wrong-native" })
+      if (linked)
+        useAgentRuntimeStore
+          .getState()
+          .setSessionExternalLink("sess-1", { agentId: "ext-1", sessionId: "correct-native" })
+      setSessionExternalLane("sess-1", "ext-1")
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("continue")
+      })
+      if (linked)
+        expect(steerExternalSessionMock).toHaveBeenCalledWith("ext-1", "correct-native", "continue")
+      else {
+        expect(steerExternalSessionMock).not.toHaveBeenCalled()
+        expect(chatState.enqueueSteer).toHaveBeenCalled()
+      }
+      setSessionExternalLane("sess-1", null)
+    }
+  )
+  it("keeps mixed image follow-ups queued rather than falsely accepting text-only steering", async () => {
+    const { setSessionExternalLane } = await import("./steer-runtime")
+    chatState.status = "streaming"
+    useAgentRuntimeStore
+      .getState()
+      .setSessionRuntimeRef("sess-1", { kind: "external", agentId: "ext-1" })
+    useAgentRuntimeStore
+      .getState()
+      .setSessionExternalLink("sess-1", { agentId: "ext-1", sessionId: "native" })
+    setSessionExternalLane("sess-1", "ext-1")
+    const image = {
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: "image/png", data: "AAAA" },
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send([image, { type: "text", text: "use this" }])
+    })
+    expect(steerExternalSessionMock).not.toHaveBeenCalled()
+    expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ text: "use this", blocks: [image] })
+    )
+    setSessionExternalLane("sess-1", null)
   })
 })

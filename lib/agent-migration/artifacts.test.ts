@@ -1,3 +1,9 @@
+jest.mock("@/lib/claude/sync", () => ({
+  previewAgentImport: jest.fn(async () => ({ drafts: [], parseError: undefined })),
+  importFromAgent: jest.fn(async () => ({ created: 1, updated: 0, skipped: 0 })),
+}))
+
+import { previewAgentImport, importFromAgent } from "@/lib/claude/sync"
 import { applyMigrationArtifact, previewMigrationArtifact } from "./artifacts"
 import type { MigrationPlan, MigrationPreviewCell } from "./types"
 
@@ -46,4 +52,23 @@ describe("migration artifact delegation", () => {
     expect(applyProjectMcp).toHaveBeenCalledWith("/repo", "overwrite")
     expect(result.imported).toBe(3)
   })
+})
+
+it("routes Pi MCP preview and import to mcp.json, never settings.json", async () => {
+  await previewMigrationArtifact("pi", "mcp")
+  expect(previewAgentImport).toHaveBeenCalledWith("pi-mcp-adapter")
+  const result = await applyMigrationArtifact(
+    "pi",
+    "mcp",
+    {
+      artifact: "mcp",
+      status: "ready",
+      count: 1,
+      warnings: [],
+      items: [],
+    },
+    { vendor: "pi", strategy: "overwrite" } as MigrationPlan
+  )
+  expect(importFromAgent).toHaveBeenCalledWith("pi-mcp-adapter", "overwrite")
+  expect(result.imported).toBe(1)
 })

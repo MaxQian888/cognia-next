@@ -1,5 +1,6 @@
 import {
   hasMcpContent,
+  isSourcesPart,
   isGroundingPart,
   isSubagentPart,
   isToolUseSummaryPart,
@@ -136,4 +137,32 @@ describe("parts-extensions: isVerificationVerdictPart", () => {
     ).toBe(false)
     expect(isVerificationVerdictPart({ type: "squad-run", runId: "r", squadId: "s" })).toBe(false)
   })
+})
+
+it("accepts versioned source locations after a JSON persistence round trip", () => {
+  const part = {
+    type: "sources",
+    sources: [
+      {
+        id: "source",
+        title: "Manual",
+        origin: "agent-knowledge-base",
+        knowledgeBaseRef: {
+          knowledgeBaseId: "kb",
+          sourceId: "document",
+          chunkId: "chunk",
+          generationId: "revision",
+          documentVersion: "hash",
+          sectionId: "section",
+          charStart: 10,
+          charEnd: 40,
+          pageNumber: 2,
+          lineStart: 5,
+        },
+      },
+    ],
+  }
+  const restored = JSON.parse(JSON.stringify(part))
+  expect(isSourcesPart(restored)).toBe(true)
+  expect(restored.sources[0].knowledgeBaseRef).toEqual(part.sources[0].knowledgeBaseRef)
 })

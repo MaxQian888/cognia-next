@@ -286,15 +286,15 @@ function customizedGatewayLaunch(
     ?.replace(/\.(exe|cmd)$/i, "")
   const systemCommand =
     entry?.systemCommand ?? (config.protocol === "opencode-v2" ? "opencode" : undefined)
-  const globalCodexAcp = entry?.runtimeId === "codex-acp" && basename === "codex-acp"
-  if (basename !== systemCommand && !globalCodexAcp) {
+  const legacyLaunch = entry?.legacyLaunches?.find((launch) => launch.command === basename)
+  if (basename !== systemCommand && !legacyLaunch) {
     throw new Error(
       "Cognia model customization requires an executable matching the selected runtime"
     )
   }
-  const required = globalCodexAcp ? [] : [...(entry?.launchArgs ?? [])]
+  const required = [...(legacyLaunch?.args ?? entry?.launchArgs ?? [])]
   const configured = config.process?.args ?? required
-  if (systemCommand === "npx" && !globalCodexAcp && required[0] === "-y") {
+  if (basename === "npx" && required[0] === "-y") {
     if (configured[0] === "--yes" || configured[0] === "--no-install") required[0] = configured[0]
     else if (configured[0] === required[1]) required.shift()
   }
@@ -309,7 +309,7 @@ function customizedGatewayLaunch(
       continue
     }
     // npx package selection is fixed before any agent-owned option is parsed.
-    if (systemCommand === "npx" && prefixIndex < required.length && !globalCodexAcp) {
+    if (basename === "npx" && prefixIndex < required.length) {
       throw new Error("Cognia model customization cannot replace the catalogued package launch")
     }
     const separator = token.indexOf("=")

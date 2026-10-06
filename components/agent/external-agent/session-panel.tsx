@@ -12,16 +12,31 @@
  * so the chat surface stays unchanged for built-in runs.
  */
 
-import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
+import {
+  useRuntimeRefForSession,
+  useExternalSessionLinkForSession,
+  useAgentRuntimeStore,
+} from "@/stores/agent/agent-runtime-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { ExternalAgentCommands } from "./commands"
 import { ExternalAgentConfigOptions } from "./config-options"
 import { ExternalAgentPlan } from "./plan"
+import { ExternalAgentSessionOperations } from "./session-operations"
+import { ToolApprovalDialog } from "./tool-approval-dialog"
+import { ExternalAgentElicitationDialog } from "./elicitation-dialog"
+import { approvalInput } from "@/lib/ai/agent/external/session/chat-decision-bridge"
 import {
   PluginExtensionSlot,
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
-import { useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useChatStore } from "@/stores/chat/chat-store"
+import {
+  createRemoteSessionOperationsClient,
+  watchRemoteSession,
+} from "@/lib/ai/agent/external/runtimes/remote/remote-run-client"
+import type { AcpPermissionRequest, AcpPermissionResponse } from "@/types/agent/external-agent"
+import type { ExternalSessionLink } from "@/stores/agent/agent-runtime-store"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -56,9 +71,178 @@ interface Props {
    * conversation happens to be on.
    */
   sessionId?: string
+  externalSession?: { agentId: string; sessionId: string }
+  onExecuteCommand?: (command: string) => Promise<void>
 }
 
-export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
+export function ExternalAgentSessionPanel(props: Props) {
+  const runtime = useRuntimeRefForSession(props.sessionId)
+  const live = useExternalSessionLinkForSession(props.sessionId)
+  if (runtime.kind === "host")
+    return live?.host && props.sessionId ? (
+      <RemoteSessionPanel
+        key={`${live.agentId}:${live.sessionId}`}
+        {...props}
+        chatSessionId={props.sessionId}
+        link={live}
+      />
+    ) : null
+  return <LocalExternalAgentSessionPanel {...props} />
+}
+
+function RemoteSessionPanel({
+  link,
+  chatSessionId,
+  className,
+  onExecuteCommand,
+}: Props & { link: ExternalSessionLink; chatSessionId: string }) {
+  const target = useMemo(
+    () => ({ stamp: link.host!, chatSessionId, externalSessionId: link.sessionId }),
+    [link, chatSessionId]
+  )
+  const manager = useMemo(() => createRemoteSessionOperationsClient(target), [target])
+  const isExecuting = useChatStore((state) =>
+    ["streaming", "awaiting_approval"].includes(state.sessions[chatSessionId]?.status ?? "idle")
+  )
+  const [commands, setCommands] = useState<
+    import("@/types/agent/external-agent").AcpAvailableCommand[]
+  >([])
+  useEffect(() => {
+    let disposed = false
+    let close: (() => Promise<void>) | undefined
+    void manager
+      .getSessionOperationCapabilities(link.agentId, link.sessionId)
+      .then(async (capabilities) => {
+        if (capabilities.commands === "supported") {
+          const value = await manager.refreshSessionCommands(link.agentId, link.sessionId)
+          if (!disposed) setCommands(value)
+        }
+        if (disposed) return
+        const watcher = await watchRemoteSession(
+          target,
+          {
+            onEvent: (event) => {
+              if (!disposed && event.type === "commands_update") setCommands(event.commands)
+            },
+            onTerminal: (_status, error) => {
+              if (!disposed && error) toast.error(error)
+            },
+          },
+          "presentation"
+        )
+        close = watcher.close
+        if (disposed) await close()
+      })
+      .catch((error) => {
+        if (!disposed) toast.error(String(error))
+      })
+    return () => {
+      disposed = true
+      void close?.()
+    }
+  }, [manager, target, link.agentId, link.sessionId])
+  const [permission, setPermission] = useState<AcpPermissionRequest>()
+  const permissionReply = useRef<((response: AcpPermissionResponse) => void) | undefined>(undefined)
+  useEffect(
+    () => () => {
+      permissionReply.current?.({ requestId: "", granted: false })
+    },
+    []
+  )
+  const finishPermission = (granted: boolean, rememberChoice = false) => {
+    if (!permission) return
+    permissionReply.current?.({
+      requestId: permission.requestId ?? permission.id,
+      granted,
+      rememberChoice,
+    })
+    permissionReply.current = undefined
+    setPermission(undefined)
+  }
+  const selectSession = (next: { id: string }) => {
+    useAgentRuntimeStore
+      .getState()
+      .setSessionExternalLink(chatSessionId, { ...link, sessionId: next.id })
+    return next
+  }
+  return (
+    <div className={className}>
+      {commands.length > 0 && (
+        <ExternalAgentCommands
+          commands={commands}
+          isExecuting={isExecuting}
+          onExecute={(command, args) => {
+            const input = `${command}${args ? ` ${args}` : ""}`
+            void (
+              isExecuting
+                ? manager.executeSessionCommand(link.agentId, link.sessionId, input)
+                : onExecuteCommand?.(input)
+            )?.catch((error) => toast.error(String(error)))
+          }}
+        />
+      )}
+      <ExternalAgentSessionOperations
+        manager={manager}
+        agentId={link.agentId}
+        sessionId={link.sessionId}
+        isExecuting={isExecuting}
+        onFork={async (options) =>
+          selectSession(await manager.forkSession(link.agentId, link.sessionId, options))
+        }
+        onClone={async () =>
+          selectSession(await manager.cloneSession(link.agentId, link.sessionId))
+        }
+        onShell={(command, options) =>
+          manager.executeSessionShell(link.agentId, link.sessionId, command, {
+            ...options,
+            onPermissionRequest: (request) =>
+              new Promise((resolve) => {
+                permissionReply.current = resolve
+                setPermission(request)
+              }),
+          })
+        }
+      />
+      <ToolApprovalDialog
+        request={
+          permission
+            ? {
+                id: permission.requestId ?? permission.id,
+                toolName: permission.title ?? permission.toolInfo.name,
+                toolDescription: permission.reason ?? permission.toolInfo.description ?? "",
+                args: approvalInput(permission),
+                riskLevel:
+                  permission.riskLevel === "critical" ? "high" : (permission.riskLevel ?? "medium"),
+                acpOptions: permission.options,
+              }
+            : null
+        }
+        open={Boolean(permission)}
+        onOpenChange={(open) => {
+          if (!open) finishPermission(false)
+        }}
+        onApprove={(_id, always) => finishPermission(true, always)}
+        onDeny={() => finishPermission(false)}
+        onSelectOption={(_id, optionId) => {
+          const option = permission?.options?.find((item) => item.optionId === optionId)
+          finishPermission(
+            option?.kind === "allow_once" || option?.kind === "allow_always",
+            option?.kind === "allow_always"
+          )
+        }}
+      />
+    </div>
+  )
+}
+
+function LocalExternalAgentSessionPanel({
+  className,
+  sessionId,
+  externalSession,
+  onExecuteCommand,
+}: Props) {
+  const liveSessionLink = useExternalSessionLinkForSession(sessionId)
+  const sessionLink = liveSessionLink ?? externalSession
   const [focusOpen, setFocusOpen] = useState(false)
   const [focus, setFocus] = useState("")
   const [providerUndoWarningOpen, setProviderUndoWarningOpen] = useState(false)
@@ -67,6 +251,14 @@ export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
   const {
     isExecuting,
     activeSession,
+    activeAgentId,
+    cloneSession,
+    executeSessionCommand,
+    executeSessionShell,
+    pendingPermission,
+    pendingElicitation,
+    respondToPermission,
+    respondToElicitation,
     availableCommands,
     planEntries,
     planStep,
@@ -84,11 +276,18 @@ export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
     providerUndoAcknowledged,
     acknowledgeProviderUndoWarning,
     isProviderUndoing,
-  } = useExternalAgent()
+  } = useExternalAgent(sessionLink)
 
   const hasPluginToolbar = usePluginSlotHasExtensions("agent.external-session.toolbar")
 
   if (runtime !== "external") return null
+  if (
+    sessionId &&
+    (!sessionLink ||
+      sessionLink.agentId !== activeAgentId ||
+      sessionLink.sessionId !== activeSession?.id)
+  )
+    return null
 
   const hasCommands = availableCommands.length > 0
   const hasPlan = planEntries.length > 0 || Boolean(planDocument)
@@ -101,10 +300,18 @@ export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
   // control — otherwise the panel chrome would show empty.
   if (!hasCommands && !hasPlan && !hasConfigOptions && !canFork && !hasPluginToolbar) return null
 
+  const selectSession = (next: { id: string }) => {
+    if (sessionId && activeAgentId)
+      useAgentRuntimeStore
+        .getState()
+        .setSessionExternalLink(sessionId, { agentId: activeAgentId, sessionId: next.id })
+    return next
+  }
+
   const handleFork = async () => {
     if (!activeSession) return
     try {
-      await forkSession(activeSession.id)
+      selectSession(await forkSession(activeSession.id))
       toast.success(t("forkSuccess"))
     } catch (err) {
       if (isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/fork")) {
@@ -182,9 +389,16 @@ export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
               commands={availableCommands}
               onExecute={(command, args) => {
                 const prompt = args ? `${command} ${args}` : command
-                void execute(prompt)
+                void (
+                  isExecuting
+                    ? executeSessionCommand(prompt)
+                    : onExecuteCommand
+                      ? onExecuteCommand(prompt)
+                      : execute(prompt)
+                ).catch((err: unknown) => toast.error(String(err)))
               }}
-              isExecuting={sessionBusy}
+              isExecuting={isExecuting}
+              disabled={isCompacting || isProviderUndoing}
             />
           )}
           {hasConfigOptions && (
@@ -266,6 +480,71 @@ export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
           />
         </div>
       )}
+      {activeAgentId && activeSession && (
+        <ExternalAgentSessionOperations
+          key={`${activeAgentId}:${activeSession.id}`}
+          agentId={activeAgentId}
+          sessionId={activeSession.id}
+          isExecuting={sessionBusy}
+          onFork={async (options) => selectSession(await forkSession(activeSession.id, options))}
+          onClone={async () => selectSession(await cloneSession(activeSession.id))}
+          onShell={executeSessionShell}
+        />
+      )}
+      <ToolApprovalDialog
+        request={
+          pendingPermission
+            ? {
+                id: pendingPermission.requestId || pendingPermission.id,
+                toolName: pendingPermission.title || pendingPermission.toolInfo.name,
+                toolDescription:
+                  pendingPermission.reason || pendingPermission.toolInfo.description || "",
+                args: approvalInput(pendingPermission),
+                riskLevel:
+                  pendingPermission.riskLevel === "critical"
+                    ? "high"
+                    : pendingPermission.riskLevel || "medium",
+                acpOptions: pendingPermission.options,
+              }
+            : null
+        }
+        open={Boolean(pendingPermission)}
+        onOpenChange={(open) => {
+          if (!open && pendingPermission)
+            void respondToPermission({
+              requestId: pendingPermission.requestId || pendingPermission.id,
+              granted: false,
+            })
+        }}
+        onApprove={() => {
+          if (pendingPermission)
+            void respondToPermission({
+              requestId: pendingPermission.requestId || pendingPermission.id,
+              granted: true,
+            })
+        }}
+        onDeny={() => {
+          if (pendingPermission)
+            void respondToPermission({
+              requestId: pendingPermission.requestId || pendingPermission.id,
+              granted: false,
+            })
+        }}
+        onSelectOption={(requestId, optionId) => {
+          const option = pendingPermission?.options?.find((item) => item.optionId === optionId)
+          void respondToPermission({
+            requestId,
+            optionId,
+            granted: Boolean(option?.kind.startsWith("allow")),
+          })
+        }}
+      />
+      <ExternalAgentElicitationDialog
+        request={pendingElicitation ?? null}
+        onRespond={(response) => {
+          void respondToElicitation(response)
+        }}
+      />
       {hasPlan && (
         <ExternalAgentPlan
           entries={planEntries}

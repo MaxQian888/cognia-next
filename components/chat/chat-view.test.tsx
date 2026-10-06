@@ -130,7 +130,23 @@ jest.mock("./workspace-changes-card", () => ({
   ),
 }))
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
-  ExternalAgentSessionPanel: () => null,
+  ExternalAgentSessionPanel: ({
+    sessionId,
+    externalSession,
+    onExecuteCommand,
+  }: {
+    sessionId: string
+    externalSession?: { agentId: string; sessionId: string }
+    onExecuteCommand?: (command: string) => Promise<void>
+  }) => (
+    <div
+      data-testid="external-session-panel"
+      data-chat-session={sessionId}
+      data-native-session={externalSession?.sessionId ?? ""}
+    >
+      <button onClick={() => void onExecuteCommand?.("/review")}>Run external command</button>
+    </div>
+  ),
 }))
 // Transparent spy over the real AnimatePresence: behavior is untouched, but
 // the surface-swap tests can assert the presence mode the pane mounts with.
@@ -278,7 +294,7 @@ jest.mock("@/lib/db/messages", () => ({
   listMessages: (sessionId: string) => listMessagesMock(sessionId),
 }))
 
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
@@ -327,6 +343,27 @@ function makeProps() {
 }
 
 describe("ChatPane shared blocking capabilities", () => {
+  it("passes native identity and the owning send path to the shared runtime panel", async () => {
+    const props = makeProps()
+    render(
+      <ChatPane
+        {...props}
+        activeSession={{
+          ...mockSession,
+          externalAgentSession: { agentId: "agent", sessionId: "native-session" },
+        }}
+      />
+    )
+    expect(screen.getByTestId("external-session-panel")).toHaveAttribute("data-chat-session", "s1")
+    expect(screen.getByTestId("external-session-panel")).toHaveAttribute(
+      "data-native-session",
+      "native-session"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Run external command" }))
+    await waitFor(() =>
+      expect(props.onSend).toHaveBeenCalledWith("/review", undefined, undefined, undefined)
+    )
+  })
   it("mounts the project pause banner only in a project coordinator or thread", () => {
     const { rerender } = render(<ChatPane {...makeProps()} />)
     expect(screen.queryByTestId("project-paused-banner-stub")).not.toBeInTheDocument()

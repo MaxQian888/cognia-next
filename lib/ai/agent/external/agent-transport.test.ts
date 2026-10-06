@@ -33,6 +33,9 @@ import {
   agentReadTextFile,
   agentWriteTextFile,
   agentDeleteTextFile,
+  agentWriteBinaryFile,
+  agentReadBinaryFile,
+  agentListFiles,
   getAcpHostCapabilities,
   runsExternalAgentProcessesLocally,
   supportsAgentFs,
@@ -73,13 +76,47 @@ afterEach(() => {
   jest.clearAllMocks()
 })
 
+it("routes binary attachments and manifest discovery through the confined host filesystem", async () => {
+  setTauri(true)
+  invokeMock
+    .mockResolvedValueOnce(undefined)
+    .mockResolvedValueOnce("AAEC")
+    .mockResolvedValueOnce([
+      { absolute_path: "/work/session.json", is_dir: false },
+      { absolute_path: "/work/sub", is_dir: true },
+    ])
+  await agentWriteBinaryFile("/work/image.png", "AAEC", ["/work"])
+  expect(invokeMock).toHaveBeenCalledWith("fs_write_workspace_file", {
+    root: "/work",
+    relPath: "image.png",
+    content: "AAEC",
+    encoding: "base64",
+  })
+  expect(await agentReadBinaryFile("/work/image.png", ["/work"])).toBe("AAEC")
+  expect(await agentListFiles("/work", ["/work"])).toEqual(["/work/session.json"])
+  await expect(agentWriteBinaryFile("/outside/image.png", "AAEC", ["/work"])).rejects.toThrow(
+    "outside"
+  )
+})
+
 describe("capability predicates", () => {
+  it("rejects malformed and oversized binary writes before invoking the host", async () => {
+    setTauri(true)
+    await expect(agentWriteBinaryFile("/work/image.png", "invalid!", ["/work"])).rejects.toThrow(
+      "base64"
+    )
+    await expect(
+      agentWriteBinaryFile("/work/image.png", "AAAA".repeat(7 * 1024 * 1024), ["/work"])
+    ).rejects.toThrow("oversized")
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
   it("browser: nothing supported", () => {
     expect(supportsExternalAgents()).toBe(false)
     expect(supportsAgentFs()).toBe(false)
     expect(supportsAgentTerminal()).toBe(false)
     expect(getAcpHostCapabilities()).toMatchObject({
       kind: "headless",
+      preview: { notices: false },
       fs: { read: false, write: false },
       terminal: false,
     })
@@ -124,6 +161,7 @@ describe("capability predicates", () => {
     expect(supportsAgentTerminal()).toBe(true)
     expect(getAcpHostCapabilities()).toMatchObject({
       kind: "desktop",
+      preview: { notices: true },
       terminal: true,
       elicitation: { durableInteraction: true },
     })
@@ -136,6 +174,7 @@ describe("capability predicates", () => {
     expect(supportsAgentTerminal()).toBe(false)
     expect(getAcpHostCapabilities()).toMatchObject({
       kind: "headless",
+      preview: { notices: false },
       terminal: false,
       elicitation: { durableInteraction: false },
     })
@@ -472,6 +511,9 @@ describe("installed external-agent host (ADR-0217)", () => {
       readTextFile: jest.fn(async () => "text"),
       writeTextFile: jest.fn(async () => undefined),
       deleteTextFile: jest.fn(async () => undefined),
+      readBinaryFile: jest.fn(async () => "AAEC"),
+      writeBinaryFile: jest.fn(async () => undefined),
+      listFiles: jest.fn(async () => ["/w/a.png"]),
     }
   }
 
@@ -510,6 +552,10 @@ describe("installed external-agent host (ADR-0217)", () => {
       expect(plane.readTextFile).toHaveBeenCalledWith("/w/a.txt", ["/w"])
       expect(plane.writeTextFile).toHaveBeenCalledWith("/w/a.txt", "x", ["/w"])
       expect(plane.deleteTextFile).toHaveBeenCalledWith("/w/a.txt", ["/w"])
+      await expect(agentReadBinaryFile("/w/a.png", ["/w"])).resolves.toBe("AAEC")
+      await agentWriteBinaryFile("/w/a.png", "AAEC", ["/w"])
+      await expect(agentListFiles("/w", ["/w"])).resolves.toEqual(["/w/a.png"])
+      expect(plane.writeBinaryFile).toHaveBeenCalledWith("/w/a.png", "AAEC", ["/w"])
 
       expect(invokeMock).not.toHaveBeenCalled()
       expect(listenMock).not.toHaveBeenCalled()

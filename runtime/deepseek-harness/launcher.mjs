@@ -13,7 +13,7 @@ import { createRequire } from "node:module"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-export const DSH_VERSION = "0.1.5-rc.1"
+export const DSH_VERSION = "0.2.0-rc.2"
 export const PROFILE_BY_COMPOSITION = Object.freeze({
   "host.sdk-readonly.yml": "cognia-sdk-readonly",
   "host.sdk-workspace.yml": "cognia-sdk-workspace",
@@ -130,6 +130,7 @@ export function resolveProductLauncher(require = createRequire(import.meta.url))
     "dsh-attachment-local",
     "dsh-mcp-client",
     "dsh-llm-pi-ai",
+    "dsh-llm-deepseek-api-key",
   ]) {
     const pkg = JSON.parse(
       readFileSync(require.resolve(`@deepseek-ai/${name}/package.json`), "utf8")
@@ -294,11 +295,11 @@ export async function apply(ctx) {
   )
   if (services.gateway) {
     const adapter = await import("@deepseek-ai/dsh-llm-pi-ai")
-    await ctx.plugin(adapter, adapter.Config(services.gateway))
+    await ctx.plugin(adapter, services.gateway)
   }
   if (services.mcp.length) {
     const bridge = await import("@deepseek-ai/dsh-mcp-client")
-    for (const config of services.mcp) await ctx.plugin(bridge, bridge.Config(config))
+    for (const config of services.mcp) await ctx.plugin(bridge, config)
   }
   // allowedTools is preapproval, not a visibility mask. Broker authorization
   // owns those grants and extra roots; native tools keep the profile sandbox.

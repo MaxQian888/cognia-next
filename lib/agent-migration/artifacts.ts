@@ -142,7 +142,7 @@ async function defaultPreviewDeps(): Promise<ArtifactPreviewDeps> {
     },
     previewMcp: async (vendor, cwd) => {
       const sync = await import("@/lib/claude/sync")
-      const user = await sync.previewAgentImport(vendor)
+      const user = await sync.previewAgentImport(vendor === "pi" ? "pi-mcp-adapter" : vendor)
       const project =
         vendor === "claude-code" && cwd ? await sync.previewProjectMcpImport(cwd) : undefined
       return {
@@ -264,7 +264,9 @@ async function defaultApplyDeps(): Promise<ArtifactApplyDeps> {
     },
     applyMcp: async (vendor, strategy) =>
       normalizeMcpResult(
-        await (await import("@/lib/claude/sync")).importFromAgent(vendor, strategy)
+        await (
+          await import("@/lib/claude/sync")
+        ).importFromAgent(vendor === "pi" ? "pi-mcp-adapter" : vendor, strategy)
       ),
     applyProjectMcp: async (cwd, strategy) =>
       normalizeMcpResult(

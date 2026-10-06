@@ -267,3 +267,13 @@ test("Cognia service config enforces scoped MCP and explicit gateway lease", () 
     { mcp: [], gateway: undefined }
   )
 })
+
+test("pins one complete DSH release without overriding unrelated infrastructure packages", () => {
+  const manifest = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"))
+  assert.equal(manifest.dependencies["@deepseek-ai/dsh-llm-deepseek-api-key"], DSH_VERSION)
+  for (const [name, version] of Object.entries(manifest.overrides)) {
+    assert.match(name, /^@deepseek-ai\/dsh(?:-|$)/)
+    assert.equal(version, manifest.dependencies[name] ? `$${name}` : DSH_VERSION)
+  }
+  assert.equal(manifest.overrides["@deepseek-ai/dsh-settings-file"], undefined)
+})

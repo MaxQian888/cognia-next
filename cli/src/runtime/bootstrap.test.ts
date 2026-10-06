@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import { PassThrough } from "node:stream"
+import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web"
 import { spawn as nodeSpawn } from "node:child_process"
 
 jest.mock("node:child_process", () => ({ spawn: jest.fn() }))

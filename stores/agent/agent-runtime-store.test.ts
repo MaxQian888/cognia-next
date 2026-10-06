@@ -2,6 +2,8 @@
 import { act, renderHook } from "@testing-library/react"
 import {
   compositionForSession,
+  externalSessionLinkForSession,
+  useExternalSessionLinkForSession,
   runtimeRefForSession,
   useAgentRuntimeStore,
 } from "./agent-runtime-store"
@@ -320,4 +322,89 @@ describe("the lanes are exclusive by construction", () => {
     expect(useAgentRuntimeStore.getState().externalHostConfig).toBeNull()
     expect(useAgentRuntimeStore.getState().externalAgentId).toBeNull()
   })
+})
+
+describe("device-local external session links", () => {
+  beforeEach(() =>
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "builtin" },
+      sessionRuntimeRefs: {},
+      sessionExternalLinks: {},
+    })
+  )
+
+  it("publishes native and gateway identities reactively without persisting host-owned ids", () => {
+    const store = useAgentRuntimeStore.getState()
+    store.setSessionRuntimeRef("chat", { kind: "external", agentId: "pi" })
+    const { result } = renderHook(() => useExternalSessionLinkForSession("chat"))
+    act(() => store.setSessionExternalLink("chat", { agentId: "pi", sessionId: "native-1" }))
+    expect(result.current).toEqual({ agentId: "pi", sessionId: "native-1" })
+    act(() =>
+      store.setSessionExternalLink("chat", {
+        agentId: "pi",
+        sessionId: "cognia-gateway:task:session",
+      })
+    )
+    expect(result.current?.sessionId).toBe("cognia-gateway:task:session")
+    const saved = JSON.parse(window.localStorage.getItem("cognia-next.agent-runtime")!)
+    expect(saved.state).not.toHaveProperty("sessionExternalLinks")
+    expect(JSON.stringify(saved)).not.toContain("native-1")
+  })
+
+  it("refuses late old-runtime events and clears the link on lane changes", () => {
+    const store = useAgentRuntimeStore.getState()
+    store.setSessionRuntimeRef("chat", { kind: "external", agentId: "pi" })
+    store.setSessionExternalLink("chat", { agentId: "pi", sessionId: "native-1" })
+    store.setSessionRuntimeRef("chat", { kind: "external", agentId: "codex" })
+    store.setSessionExternalLink("chat", { agentId: "pi", sessionId: "late-pi" })
+    expect(externalSessionLinkForSession("chat")).toBeUndefined()
+    expect(useAgentRuntimeStore.getState().sessionExternalLinks).toEqual({})
+  })
+
+  it("retargets default conversations without touching an explicitly bound conversation", () => {
+    const store = useAgentRuntimeStore.getState()
+    store.setRuntimeRef({ kind: "external", agentId: "pi" })
+    store.setSessionRuntimeRef("pinned", { kind: "external", agentId: "pi" })
+    store.setSessionExternalLink("pinned", { agentId: "pi", sessionId: "pinned-native" })
+    store.setSessionExternalLink("default", { agentId: "pi", sessionId: "default-native" })
+    store.setRuntimeRef({ kind: "external", agentId: "codex" })
+    expect(externalSessionLinkForSession("default")).toBeUndefined()
+    expect(externalSessionLinkForSession("pinned")?.sessionId).toBe("pinned-native")
+    store.clearSessionRuntimeRef("pinned")
+    expect(externalSessionLinkForSession("pinned")).toBeUndefined()
+  })
+
+  it("does not hydrate another device's accidentally supplied live link", () => {
+    const options = useAgentRuntimeStore.persist.getOptions()
+    const merged = options.merge?.(
+      { sessionExternalLinks: { chat: { agentId: "pi", sessionId: "foreign" } } },
+      useAgentRuntimeStore.getState()
+    )
+    expect(merged?.sessionExternalLinks).toEqual({})
+  })
+})
+
+it("binds paired-host native links to exact configuration lifecycle without persisting them", () => {
+  const store = useAgentRuntimeStore.getState()
+  const stamp = { configId: "host-pi", revision: "revision-1", lifecycleGeneration: 1 }
+  store.setSessionRuntimeRef("remote-chat", { kind: "host", ...stamp, name: "Pi" })
+  store.setSessionExternalLink("remote-chat", {
+    agentId: stamp.configId,
+    sessionId: "remote-native",
+    host: stamp,
+  })
+  expect(externalSessionLinkForSession("remote-chat")?.sessionId).toBe("remote-native")
+  store.setSessionRuntimeRef("remote-chat", {
+    kind: "host",
+    ...stamp,
+    lifecycleGeneration: 2,
+    name: "Pi",
+  })
+  expect(externalSessionLinkForSession("remote-chat")).toBeUndefined()
+  store.setSessionExternalLink("remote-chat", {
+    agentId: stamp.configId,
+    sessionId: "late",
+    host: stamp,
+  })
+  expect(externalSessionLinkForSession("remote-chat")).toBeUndefined()
 })

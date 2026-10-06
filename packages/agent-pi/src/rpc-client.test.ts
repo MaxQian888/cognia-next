@@ -151,8 +151,11 @@ describe("classifyPiVersion", () => {
     expect(classifyPiVersion(` v${PI_CERTIFIED_VERSION} `).status).toBe("certified")
   })
 
-  it("allows a newer version but marks it unverified", () => {
+  it("allows supported versions around the certification target without certifying them", () => {
     // A Pi upgrade must degrade to a warning, not an outage.
+    expect(classifyPiVersion("0.85.1").status).toBe("unverified")
+    expect(classifyPiVersion("1.0.3").status).toBe("unverified")
+    expect(classifyPiVersion("1.0.2-beta.1").status).toBe("unverified")
     expect(classifyPiVersion("0.85.2").status).toBe("unverified")
     expect(classifyPiVersion("0.86.0").status).toBe("unverified")
     expect(classifyPiVersion("1.0.0").status).toBe("unverified")
@@ -382,6 +385,8 @@ interface FakeHost extends ProcessPlane {
 /** Commands the fake answers on its own, mirroring Pi's own behaviour. */
 const AUTO_REPLY = new Map<string, unknown>([
   ["abort", null],
+  ["get_commands", { commands: [] }],
+  ["clear_queue", { steering: [], followUp: [] }],
   ["get_session_stats", { tokens: { input: 1, output: 1, total: 2 } }],
 ])
 
@@ -394,6 +399,7 @@ const VERIFIED_EXTENSION: PiExtensionVerdict = {
   status: "ok",
   path: "/opt/cognia/sidecar/pi-extension/cognia-pi-extension.ts",
   sha256: "d1g3st",
+  shellGuardPath: "/opt/cognia/sidecar/pi-extension/cognia-pi-shell-guard.ts",
 }
 
 interface FakeHostOptions {
@@ -423,6 +429,9 @@ interface FakeHostOptions {
    * failed side query (usage stats) still lets the turn complete.
    */
   failCommands?: readonly string[]
+  sessionStats?: unknown[]
+  commands?: Array<{ name: string; description?: string; source: string }>
+  clearedQueue?: { steering: string[]; followUp: string[] }
 }
 
 function createFakeHost(options: FakeHostOptions = {}): FakeHost {
@@ -437,6 +446,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
   const spawns: FakeHost["spawns"] = []
   const listSessionCalls: Array<Record<string, unknown>> = []
   let listedSessions: unknown = []
+  const sessionStats = [...(options.sessionStats ?? [])]
   const sent: FakeHost["sent"] = []
   const killed: string[] = []
 
@@ -523,6 +533,14 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
         const frame = JSON.parse(message) as { type: string; id: string }
         if (AUTO_REPLY.has(frame.type)) {
           const failed = failCommands.includes(frame.type)
+          const data =
+            frame.type === "get_commands"
+              ? { commands: options.commands ?? [] }
+              : frame.type === "clear_queue"
+                ? (options.clearedQueue ?? AUTO_REPLY.get(frame.type))
+                : frame.type === "get_session_stats" && sessionStats.length
+                  ? sessionStats.shift()
+                  : AUTO_REPLY.get(frame.type)
           queueMicrotask(() =>
             emitFrame(
               agentId,
@@ -531,9 +549,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
                 type: "response",
                 command: frame.type,
                 success: !failed,
-                ...(failed
-                  ? { error: `${frame.type} unavailable` }
-                  : { data: AUTO_REPLY.get(frame.type) }),
+                ...(failed ? { error: `${frame.type} unavailable` } : { data }),
               }) + "\n"
             )
           )
@@ -1613,6 +1629,77 @@ describe("PiRpcClientAdapter — streaming", () => {
     })
   })
 
+  it("reports turn deltas and provider cost while retaining session totals", async () => {
+    const host = createFakeHost({
+      sessionStats: [
+        { tokens: { input: 10, output: 5, total: 15 }, cost: 0.25 },
+        { tokens: { input: 18, output: 9, total: 27 }, cost: 0.75 },
+      ],
+    })
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const results: ExternalAgentEvent[] = []
+    for (let turn = 0; turn < 2; turn++) {
+      const collecting = (async () => {
+        for await (const event of adapter.prompt("sess-1", message)) {
+          if (event.type === "done") results.push(event)
+        }
+      })()
+      replyTo(host, "prompt", { disposition: "started" })
+      host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+      await collecting
+    }
+    expect(results).toMatchObject([
+      {
+        tokenUsage: {
+          promptTokens: 10,
+          completionTokens: 5,
+          totalTokens: 15,
+          providerCost: { amount: 0.25 },
+        },
+      },
+      {
+        tokenUsage: {
+          promptTokens: 8,
+          completionTokens: 4,
+          totalTokens: 12,
+          providerCost: { amount: 0.5 },
+        },
+      },
+    ])
+    expect(adapter.getSession("sess-1")?.tokenUsage).toMatchObject({
+      totalTokens: 27,
+      providerCost: { amount: 0.75 },
+    })
+  })
+
+  it("excludes persisted usage when resuming a session", async () => {
+    const host = createFakeHost({
+      sessionStats: [
+        { tokens: { input: 100, output: 20, total: 120 }, cost: 1 },
+        { tokens: { input: 130, output: 25, total: 155 }, cost: 1.5 },
+      ],
+    })
+    const adapter = await connected(host)
+    await adapter.resumeSession("persisted", { cwd: "/w" })
+    const collecting = (async () => {
+      const events: ExternalAgentEvent[] = []
+      for await (const event of adapter.prompt("persisted", message)) events.push(event)
+      return events
+    })()
+    replyTo(host, "prompt", { disposition: "started" })
+    host.emitStdout("agent-1:persisted", JSON.stringify({ type: "agent_settled" }) + "\n")
+    const events = await collecting
+    expect(events.find((event) => event.type === "done")).toMatchObject({
+      tokenUsage: {
+        promptTokens: 30,
+        completionTokens: 5,
+        totalTokens: 35,
+        providerCost: { amount: 0.5 },
+      },
+    })
+  })
+
   it("still completes the turn when the stats query fails", async () => {
     // Usage is reporting, not correctness: a failed `get_session_stats` must
     // never strand a turn that already succeeded.
@@ -1666,6 +1753,127 @@ describe("PiRpcClientAdapter — streaming", () => {
       "require base64 image data"
     )
     expect(host.lastCommand("prompt")).toBeUndefined()
+  })
+
+  it("delivers extension dialogs before prompt acceptance", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const iterator = adapter.prompt("sess-1", message)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "preflight-dialog",
+        method: "confirm",
+        title: "Continue?",
+        message: "Confirm the extension command",
+      }) + "\n"
+    )
+    const result = await Promise.race([
+      first,
+      new Promise<string>((resolve) => setTimeout(() => resolve("blocked before acceptance"), 50)),
+    ])
+    // Always release the fixture before asserting, even on the old deadlock.
+    replyTo(host, "prompt", { disposition: "handled" })
+    await adapter.closeSession("sess-1")
+    await iterator.return?.()
+    expect(result).toMatchObject({
+      value: { type: "elicitation_request", request: { id: "preflight-dialog" } },
+    })
+  })
+
+  it("retires a timed-out preflight before accepting late dialog answers", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const iterator = adapter.prompt("sess-1", message, { timeout: 20 })[Symbol.asyncIterator]()
+    const first = iterator.next()
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "timeout-dialog",
+        method: "confirm",
+        title: "Continue?",
+        message: "Confirm the extension command",
+      }) + "\n"
+    )
+    await expect(first).resolves.toMatchObject({ value: { type: "elicitation_request" } })
+    await expect(iterator.next()).rejects.toThrow("Pi RPC command timed out: prompt")
+    expect(host.killed).toContain("agent-1:sess-1")
+    const written = host.sent.length
+    await adapter.respondToElicitation({
+      requestId: "timeout-dialog",
+      action: "accept",
+      content: { confirm: true },
+    })
+    expect(host.sent).toHaveLength(written)
+    await expect(adapter.prompt("sess-1", message)[Symbol.asyncIterator]().next()).rejects.toThrow(
+      "Unknown Pi session"
+    )
+    // Only an explicit resume may create a new process after the failed preflight.
+    await expect(adapter.resumeSession("sess-1")).resolves.toMatchObject({ id: "sess-1" })
+    await adapter.disconnect()
+  })
+
+  it("keeps a failed preflight unavailable until process termination completes", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const invoke = host.invoke.bind(host)
+    let releaseKill!: () => void
+    let killStarted!: () => void
+    const killing = new Promise<void>((resolve) => {
+      killStarted = resolve
+    })
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      if (name === "kill_external_agent" && args.agentId === "agent-1:sess-1") {
+        killStarted()
+        await new Promise<void>((resolve) => {
+          releaseKill = resolve
+        })
+      }
+      return invoke<T>(name, args)
+    }
+    const iterator = adapter.prompt("sess-1", message, { timeout: 20 })[Symbol.asyncIterator]()
+    const first = iterator.next()
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "timeout-dialog",
+        method: "confirm",
+        title: "Continue?",
+        message: "Confirm the extension command",
+      }) + "\n"
+    )
+    await first
+    const failed = expect(iterator.next()).rejects.toThrow("Pi RPC command timed out: prompt")
+    await killing
+    const reentry = adapter.prompt("sess-1", message)[Symbol.asyncIterator]().next()
+    await expect(reentry).rejects.toThrow("is closing")
+    releaseKill()
+    await failed
+  })
+
+  it("completes a handled prompt without waiting for agent_settled", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const collecting = (async () => {
+      const events: string[] = []
+      for await (const event of adapter.prompt("sess-1", message)) events.push(event.type)
+      return events
+    })()
+    replyTo(host, "prompt", { disposition: "handled" })
+    const result = await Promise.race([
+      collecting,
+      new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 50)),
+    ])
+    await adapter.closeSession("sess-1")
+    expect(result).toEqual(["done"])
   })
 
   it("streams text and completes only on agent_settled", async () => {
@@ -1843,7 +2051,7 @@ describe("PiRpcClientAdapter — controls", () => {
     await expect(adapter.supportsSteering()).resolves.toBe(true)
     await expect(adapter.getCompactionCapability()).resolves.toEqual({
       status: "supported",
-      routes: [{ kind: "native", supportsFocus: false }],
+      routes: [{ kind: "native", supportsFocus: true }],
     })
     const compacting = adapter.compactSession("sess-1")
     expect(host.lastCommand("compact")).toMatchObject({ type: "compact" })
@@ -1945,8 +2153,9 @@ describe("PiRpcClientAdapter — controls", () => {
       await new Promise((resolve) => setImmediate(resolve))
       replyTo(host, "set_thinking_level")
     } else {
-      expect(host.lastCommand("set_model")).toMatchObject({ modelId: "bare" })
-      expect(host.lastCommand("set_model")).not.toHaveProperty("provider")
+      replyTo(host, "get_state", { model: { provider: "deepseek", id: "old" } })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(host.lastCommand("set_model")).toMatchObject({ modelId: "bare", provider: "deepseek" })
       replyTo(host, "set_model")
     }
     await new Promise((resolve) => setImmediate(resolve))
@@ -2000,8 +2209,11 @@ describe("PiRpcClientAdapter — controls", () => {
     const cancelling = adapter.cancel("sess-1")
     await Promise.resolve()
     replyTo(host, "abort")
-    await cancelling
+    await expect(cancelling).resolves.toEqual({ steering: [], followUp: [] })
     expect(host.lastCommand("abort")).toBeDefined()
+    const commands = host.sent.map(({ message }) => JSON.parse(message).type)
+    expect(commands).toContain("clear_queue")
+    expect(commands.indexOf("clear_queue")).toBeLessThan(commands.indexOf("abort"))
   })
 
   it("clamps a thinking level against what the model reports", async () => {
@@ -2025,6 +2237,44 @@ describe("PiRpcClientAdapter — controls", () => {
     replyTo(host, "get_available_thinking_levels", { levels: ["off", "high"] })
     await expect(setting).resolves.toBeUndefined()
     expect(host.lastCommand("set_thinking_level")).toBeUndefined()
+  })
+
+  it("resolves the active provider for a bare model id", async () => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const setting = adapter.setSessionModel("sess-1", "deepseek-v4-pro")
+    replyTo(host, "get_state", { model: { provider: "deepseek", id: "deepseek-v4-flash" } })
+    await new Promise((resolve) => setImmediate(resolve))
+    replyTo(host, "set_model")
+    await setting
+    expect(host.lastCommand("set_model")).toMatchObject({
+      provider: "deepseek",
+      modelId: "deepseek-v4-pro",
+    })
+  })
+
+  it("blocks PII in steering and compaction focus before writing to Pi", async () => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    await expect(
+      adapter.steerTurn("sess-1", "Email alice.smith@example.com")
+    ).rejects.toBeInstanceOf(PiOutboundBlockedError)
+    await expect(
+      adapter.compactSession("sess-1", { focus: "Email alice.smith@example.com" })
+    ).rejects.toBeInstanceOf(PiOutboundBlockedError)
+    expect(host.lastCommand("steer")).toBeUndefined()
+    expect(host.lastCommand("compact")).toBeUndefined()
+  })
+
+  it("forwards compaction focus through customInstructions", async () => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const compacting = adapter.compactSession("sess-1", { focus: "Preserve failing tests" })
+    replyTo(host, "compact")
+    await compacting
+    expect(host.lastCommand("compact")).toMatchObject({
+      customInstructions: "Preserve failing tests",
+    })
   })
 
   it("splits provider/model when switching models", async () => {
@@ -3137,6 +3387,606 @@ describe("PiRpcClientAdapter — plugin Pi packages", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("Pi common session operations", () => {
+  const input: ExternalAgentMessage = {
+    id: "start",
+    role: "user",
+    content: [{ type: "text", text: "start" }],
+    timestamp: new Date(),
+  }
+
+  it("discovers extension, template and skill commands in the shared session metadata", async () => {
+    const host = createFakeHost({
+      commands: [
+        { name: "inspect", description: "Inspect", source: "extension" },
+        { name: "review", source: "prompt" },
+      ],
+    })
+    const adapter = await connected(host)
+    const session = await adapter.createSession()
+    expect(session.metadata?.availableCommands).toEqual([
+      {
+        name: "inspect",
+        description: "Inspect",
+        input: { hint: "" },
+        supportsDuringExecution: true,
+      },
+      { name: "review", description: "", input: { hint: "" }, supportsDuringExecution: false },
+    ])
+    const events: ExternalAgentEvent[] = []
+    const unsubscribe = adapter.subscribeSessionEvents(session.id, (event) => events.push(event))
+    await adapter.refreshSessionCommands(session.id)
+    expect(events).toEqual([expect.objectContaining({ type: "commands_update" })])
+    unsubscribe()
+    await adapter.disconnect()
+  })
+
+  it("executes an extension command during a turn without settling or duplicating its event consumer", async () => {
+    const host = createFakeHost({
+      commands: [
+        { name: "inspect", source: "extension" },
+        { name: "review", source: "prompt" },
+      ],
+    })
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const events: ExternalAgentEvent[] = []
+    adapter.subscribeSessionEvents("sess-1", (event) => events.push(event))
+    const iterator = adapter.prompt("sess-1", input)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    expect(adapter.getSession("sess-1")?.status).toBe("executing")
+    replyTo(host, "prompt", { disposition: "started" })
+    const command = adapter.executeSessionCommand("sess-1", "/inspect")
+    replyTo(host, "prompt", { disposition: "handled" })
+    await expect(command).resolves.toEqual({ mode: "steer", disposition: "handled" })
+    expect((await first).value).toMatchObject({ type: "commands_update" })
+    expect(events).toHaveLength(0)
+    await expect(adapter.executeSessionCommand("sess-1", "/review")).rejects.toThrow(
+      "extension command"
+    )
+    await iterator.return?.()
+    await adapter.disconnect()
+  })
+
+  it("queues multimodal follow-ups and restores their images when cleared", async () => {
+    const host = createFakeHost({ clearedQueue: { steering: [], followUp: ["next"] } })
+    const adapter = await connected(host)
+    await adapter.createSession()
+    await expect(
+      adapter.enqueueSessionInput("sess-1", { text: "next" }, "follow_up")
+    ).rejects.toThrow("active turn")
+    const iterator = adapter.prompt("sess-1", input)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    expect(adapter.getSession("sess-1")?.status).toBe("executing")
+    replyTo(host, "prompt", { disposition: "started" })
+    const consumed = adapter.enqueueSessionInput(
+      "sess-1",
+      { text: "next", images: [{ data: "b2xk", mimeType: "image/png" }] },
+      "follow_up"
+    )
+    // Pi may begin consuming before the enqueue acknowledgment reaches us.
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "message_start",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "next" },
+            { type: "image", data: "b2xk", mimeType: "image/png" },
+          ],
+        },
+      }) + "\n"
+    )
+    replyTo(host, "follow_up", { disposition: "queued" })
+    await consumed
+    const followUp = { text: "next", images: [{ data: "aGVsbG8=", mimeType: "image/png" }] }
+    const queued = adapter.enqueueSessionInput("sess-1", followUp, "follow_up")
+    expect(host.lastCommand("follow_up")).toMatchObject({
+      message: "next",
+      images: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+    })
+    replyTo(host, "follow_up", { disposition: "queued" })
+    await expect(queued).resolves.toEqual({ mode: "follow_up", disposition: "queued" })
+    await expect(adapter.clearSessionInputQueue("sess-1")).resolves.toEqual({
+      steering: [],
+      followUp: [followUp],
+    })
+    await adapter.closeSession("sess-1")
+    await first
+    await iterator.return?.()
+  })
+
+  it("persists out-of-band extension presentation before the first prompt", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const session = await adapter.createSession()
+    const events: ExternalAgentEvent[] = []
+    adapter.subscribeSessionEvents(session.id, (event) => events.push(event))
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "title",
+        method: "setTitle",
+        title: "Runtime title",
+      }) + "\n"
+    )
+    expect(events).toContainEqual(expect.objectContaining({ type: "extension_ui_update" }))
+    expect(session.metadata?.extensionUi).toMatchObject({ title: "Runtime title" })
+    expect(session.metadata?.title).toBeUndefined()
+    await adapter.disconnect()
+  })
+
+  it("normalizes tree and message entries without requiring vendor shapes in consumers", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const raw = {
+      id: "entry-1",
+      parentId: null,
+      type: "message",
+      timestamp: "2026-10-05T00:00:00.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "reason" },
+          { type: "text", text: "answer" },
+        ],
+      },
+    }
+    const entries = adapter.getSessionEntries("sess-1", "previous")
+    expect(host.lastCommand("get_entries")).toMatchObject({ since: "previous" })
+    replyTo(host, "get_entries", { entries: [raw], leafId: "entry-1" })
+    expect(await entries).toEqual([
+      expect.objectContaining({
+        id: "entry-1",
+        message: expect.objectContaining({
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "reason" },
+            { type: "text", text: "answer" },
+          ],
+        }),
+      }),
+    ])
+    const tree = adapter.getSessionTree("sess-1")
+    replyTo(host, "get_tree", { tree: [{ entry: raw, children: [] }], leafId: "entry-1" })
+    expect(await tree).toMatchObject({
+      roots: [{ entry: { id: "entry-1" }, children: [] }],
+      leafId: "entry-1",
+    })
+    await adapter.disconnect()
+  })
+
+  it("exposes actual runtime state without inventing unknown retry settings", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const state = adapter.getSessionRuntimeState("sess-1")
+    replyTo(host, "get_state", {
+      steeringMode: "all",
+      followUpMode: "one-at-a-time",
+      autoCompactionEnabled: true,
+      pendingMessageCount: 2,
+    })
+    await expect(state).resolves.toEqual({
+      queuePolicy: { steering: "all", followUp: "one-at-a-time" },
+      controls: { autoCompaction: true },
+      pendingInputCount: 2,
+    })
+    const controls = adapter.setSessionRuntimeControls("sess-1", { autoRetry: false })
+    replyTo(host, "set_auto_retry")
+    await controls
+    expect(adapter.getSession("sess-1")?.metadata?.runtimeControls).toEqual({ autoRetry: false })
+    const policy = adapter.setSessionQueuePolicy("sess-1", { followUp: "all" })
+    replyTo(host, "set_follow_up_mode")
+    await policy
+    const abort = adapter.abortSessionRetry("sess-1")
+    replyTo(host, "abort_retry")
+    await abort
+    await adapter.disconnect()
+  })
+
+  it("keeps native rename separate from terminal title and exports only to the runtime destination", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const rename = adapter.renameSession("sess-1", "Investigation")
+    replyTo(host, "set_session_name")
+    await rename
+    expect(adapter.getSession("sess-1")?.metadata?.title).toBe("Investigation")
+    const exporting = adapter.exportSessionHtml("sess-1")
+    expect(host.lastCommand("export_html")).not.toHaveProperty("outputPath")
+    replyTo(host, "export_html", { path: "/workspace/pi-session.html" })
+    await expect(exporting).resolves.toEqual({ path: "/workspace/pi-session.html" })
+    const scoped = await adapter.createSession({ cwd: "/workspace" })
+    const relativeExport = adapter.exportSessionHtml(scoped.id)
+    replyTo(host, "export_html", { path: "pi-session-native.html" })
+    await expect(relativeExport).resolves.toEqual({ path: "/workspace/pi-session-native.html" })
+    await adapter.disconnect()
+  })
+
+  it("refuses direct shell unless the runtime proves user-bash interception", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    await expect(adapter.getSessionOperationCapabilities("sess-1")).resolves.toMatchObject({
+      shell: "unsupported",
+    })
+    await expect(
+      adapter.executeSessionShell("sess-1", "pwd", {
+        onPermissionRequest: async (request) => ({ requestId: request.id, granted: true }),
+      })
+    ).rejects.toThrow("interception")
+    expect(host.lastCommand("bash")).toBeUndefined()
+    await adapter.disconnect()
+  })
+
+  it("forks a selected entry in an isolated process, remaps its identity, and preserves source policy", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/workspace", permissionMode: "plan" })
+    const pending = adapter.forkSession("sess-1", { forkAtEntryId: "entry-1" })
+    for (let i = 0; i < 60 && !host.lastCommand("fork"); i++) await Promise.resolve()
+    expect(host.spawns.at(-1)?.args).toEqual(
+      expect.arrayContaining(["--fork", "sess-1", "--tools", "read,grep,find,ls"])
+    )
+    expect(host.lastCommand("fork")).toMatchObject({ entryId: "entry-1" })
+    replyTo(host, "fork", { cancelled: false, text: "Selected message" })
+    for (let i = 0; i < 20 && !host.lastCommand("get_state"); i++) await Promise.resolve()
+    replyTo(host, "get_state", { sessionId: "native-fork", sessionName: "Branch" })
+    const branch = await pending
+    expect(branch.id).toBe("native-fork")
+    expect(adapter.getSession("sess-1")?.id).toBe("sess-1")
+    expect(adapter.getSession("sess-2")).toBeUndefined()
+    expect(branch.metadata).toMatchObject({
+      piSessionId: "native-fork",
+      forkInput: "Selected message",
+      cwd: "/workspace",
+    })
+    const events: ExternalAgentEvent[] = []
+    adapter.subscribeSessionEvents(branch.id, (event) => events.push(event))
+    host.emitStdout(
+      "agent-1:sess-2",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "branch-status",
+        method: "setTitle",
+        title: "Branch terminal",
+      }) + "\n"
+    )
+    expect(events).toContainEqual(
+      expect.objectContaining({ sessionId: "native-fork", type: "extension_ui_update" })
+    )
+    await adapter.disconnect()
+  })
+
+  it("routes an idle shell approval through the normal permission response and serializes against prompts", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "guard",
+        method: "setStatus",
+        statusKey: "cognia-shell-guard",
+        statusText: "cognia-shell-guard-ready v1",
+      }) + "\n"
+    )
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "ready-v3",
+        method: "setStatus",
+        statusKey: "cognia",
+        statusText: "cognia-ready v3 user-bash=1",
+      }) + "\n"
+    )
+    const onPermissionRequest = jest.fn(async (request) => ({
+      requestId: request.id,
+      granted: true,
+    }))
+    const execution = adapter.executeSessionShell("sess-1", "pwd", { onPermissionRequest })
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "shell-approval",
+        method: "confirm",
+        title: encodePiPermissionTitle({ tool: "bash", mode: "default" }),
+        message: "pwd",
+      }) + "\n"
+    )
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(onPermissionRequest).toHaveBeenCalledTimes(1)
+    expect(host.lastFrame("extension_ui_response")).toMatchObject({
+      id: "shell-approval",
+      confirmed: true,
+    })
+    await expect(adapter.prompt("sess-1", input)[Symbol.asyncIterator]().next()).rejects.toThrow(
+      "turn in flight"
+    )
+    replyTo(host, "bash", {
+      output: "/workspace\n",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+    })
+    await expect(execution).resolves.toEqual({
+      output: "/workspace\n",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+    })
+    await adapter.disconnect()
+  })
+
+  it("does not present provider-injected custom messages as user entries eligible for fork", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const entries = adapter.getSessionEntries("sess-1")
+    replyTo(host, "get_entries", {
+      entries: [
+        {
+          id: "custom",
+          parentId: null,
+          type: "message",
+          message: { role: "custom", customType: "runtime-context", content: "Injected context" },
+        },
+        {
+          id: "bash",
+          parentId: "custom",
+          type: "message",
+          message: { role: "bashExecution", command: "pwd", output: "/workspace", exitCode: 0 },
+        },
+      ],
+    })
+    expect(await entries).toMatchObject([
+      { message: { role: "system", metadata: { customType: "runtime-context" } } },
+      {
+        message: {
+          role: "tool",
+          content: [
+            { type: "text", text: "$ pwd" },
+            { type: "text", text: "/workspace" },
+          ],
+        },
+      },
+    ])
+    await adapter.disconnect()
+  })
+
+  it("answers the original shell request when a dismissed UI callback returns an empty ID", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "guard",
+        method: "setStatus",
+        statusKey: "cognia-shell-guard",
+        statusText: "cognia-shell-guard-ready v1",
+      }) + "\n"
+    )
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "ready-v3",
+        method: "setStatus",
+        statusKey: "cognia",
+        statusText: "cognia-ready v3",
+      }) + "\n"
+    )
+    const execution = adapter.executeSessionShell("sess-1", "pwd", {
+      onPermissionRequest: async () => ({ requestId: "", granted: false }),
+    })
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "shell-original",
+        method: "confirm",
+        title: encodePiPermissionTitle({ tool: "bash", mode: "default" }),
+        message: "pwd",
+      }) + "\n"
+    )
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(host.lastFrame("extension_ui_response")).toMatchObject({
+      id: "shell-original",
+      cancelled: true,
+    })
+    replyTo(host, "bash", { output: "Denied", exitCode: 1, cancelled: false, truncated: false })
+    await execution
+    await adapter.disconnect()
+  })
+
+  it("does not certify newly added operations on the retained minimum Pi version", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host, "0.85.1")
+    await adapter.createSession()
+    await expect(adapter.getSessionOperationCapabilities("sess-1")).resolves.toMatchObject({
+      entries: "unknown",
+      tree: "unknown",
+      clone: "unknown",
+      backgroundTurns: "unknown",
+      forkAtEntry: "unknown",
+      shell: "unsupported",
+    })
+    await adapter.disconnect()
+  })
+
+  it("loads the verified shell guard before configured and plugin extensions", async () => {
+    const host = createFakeHost()
+    const adapter = new PiRpcClientAdapter(piDeps(host, { generateSessionId: () => "guard-first" }))
+    const connecting = adapter.connect({
+      ...config,
+      metadata: { ...config.metadata, piShellGuardPath: "/unverified/guard.ts" },
+      process: { command: "pi", args: ["-e", "/plugins/custom.ts", "--mode", "rpc"] },
+    })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    await adapter.createSession()
+    expect(host.spawns.at(-1)?.args.slice(0, 4)).toEqual([
+      "-e",
+      VERIFIED_EXTENSION.status === "ok" ? VERIFIED_EXTENSION.shellGuardPath : "",
+      "-e",
+      "/plugins/custom.ts",
+    ])
+    expect(host.spawns.at(-1)?.args.at(-1)).toBe(
+      VERIFIED_EXTENSION.status === "ok" ? VERIFIED_EXTENSION.path : ""
+    )
+    await adapter.disconnect()
+  })
+
+  it("retires a shell awaiting approval and preserves the session identity for recovery", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "guard",
+        method: "setStatus",
+        statusKey: "cognia-shell-guard",
+        statusText: "cognia-shell-guard-ready v1",
+      }) + "\n"
+    )
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "main",
+        method: "setStatus",
+        statusKey: "cognia",
+        statusText: "cognia-ready v3",
+      }) + "\n"
+    )
+    const execution = adapter.executeSessionShell("sess-1", "touch no", {
+      onPermissionRequest: async () => new Promise(() => {}),
+    })
+    await expect(adapter.abortSessionShell("sess-1")).resolves.toEqual({ resumeRequired: true })
+    await expect(execution).resolves.toMatchObject({ cancelled: true })
+    expect(host.killed).toContain("agent-1:sess-1")
+    expect(adapter.getSession("sess-1")?.id).toBe("sess-1")
+    const resumed = await adapter.resumeSession("sess-1")
+    expect(resumed.id).toBe("sess-1")
+    await adapter.disconnect()
+  })
+
+  it("does not settle a handled extension command while its native agent run remains active", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const iterator = adapter
+      .prompt("sess-1", { ...input, content: [{ type: "text", text: "/trigger" }] })
+      [Symbol.asyncIterator]()
+    const first = iterator.next()
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_start" }) + "\n")
+    replyTo(host, "prompt", { disposition: "handled" })
+    expect((await first).value.type).toBe("progress")
+    const second = iterator.next()
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    const events = [(await second).value]
+    for await (const event of { [Symbol.asyncIterator]: () => iterator }) events.push(event)
+    expect(events.filter((event) => event?.type === "done")).toHaveLength(1)
+    await adapter.disconnect()
+  })
+
+  it("delivers autonomous run completion through the idle session subscription", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    expect(await adapter.getSessionOperationCapabilities("sess-1")).toMatchObject({
+      backgroundTurns: "supported",
+    })
+    const events: ExternalAgentEvent[] = []
+    adapter.subscribeSessionEvents("sess-1", (event) => events.push(event))
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_start" }) + "\n")
+    expect(adapter.getSession("sess-1")?.status).toBe("executing")
+    await expect(adapter.prompt("sess-1", input)[Symbol.asyncIterator]().next()).rejects.toThrow(
+      "turn in flight"
+    )
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(events.filter((event) => event.type === "done")).toHaveLength(1)
+    expect(events.some((event) => event.type === "session_start")).toBe(true)
+    expect(adapter.getSession("sess-1")?.status).toBe("active")
+    await adapter.disconnect()
+  })
+
+  it("hands triggered events to subscribers immediately after a handled ACK before iterator cleanup", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const events: ExternalAgentEvent[] = []
+    adapter.subscribeSessionEvents("sess-1", (event) => events.push(event))
+    const iterator = adapter
+      .prompt("sess-1", { ...input, content: [{ type: "text", text: "/trigger" }] })
+      [Symbol.asyncIterator]()
+    const first = iterator.next()
+    replyTo(host, "prompt", { disposition: "handled" })
+    expect((await first).value.type).toBe("done")
+    await expect(
+      adapter.enqueueSessionInput("sess-1", { text: "unowned" }, "follow_up")
+    ).rejects.toThrow("active turn")
+    // Leave the generator suspended at its terminal yield while the extension's
+    // fire-and-forget sendUserMessage starts a real native run.
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_start" }) + "\n")
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "triggered output" },
+      }) + "\n"
+    )
+    expect(events.some((event) => event.type === "session_start")).toBe(true)
+    expect(
+      events.some(
+        (event) => event.type === "message_delta" && event.delta.text === "triggered output"
+      )
+    ).toBe(true)
+    await iterator.next()
+    expect(adapter.getSession("sess-1")?.status).toBe("executing")
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(events.filter((event) => event.type === "done")).toHaveLength(1)
+    expect(adapter.getSession("sess-1")?.status).toBe("active")
+    await adapter.disconnect()
+  })
+
+  it("blocks PII in new outbound command, queue, rename and shell paths before RPC", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession()
+    const secret = "alice.smith@example.com"
+    await expect(
+      adapter.executeSessionCommand("sess-1", `/inspect ${secret}`)
+    ).rejects.toBeInstanceOf(PiOutboundBlockedError)
+    await expect(
+      adapter.enqueueSessionInput("sess-1", { text: secret }, "follow_up")
+    ).rejects.toBeInstanceOf(PiOutboundBlockedError)
+    await expect(adapter.renameSession("sess-1", secret)).rejects.toBeInstanceOf(
+      PiOutboundBlockedError
+    )
+    await expect(
+      adapter.executeSessionShell("sess-1", `echo ${secret}`, {
+        onPermissionRequest: async () => ({ requestId: "", granted: true }),
+      })
+    ).rejects.toBeInstanceOf(PiOutboundBlockedError)
+    await adapter.disconnect()
   })
 })
 

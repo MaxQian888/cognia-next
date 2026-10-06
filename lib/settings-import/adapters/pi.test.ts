@@ -56,6 +56,34 @@ describe("settingsFromPi", () => {
     expect(byKey(drafts, "defaultThinkingLevel")!.incoming).toBe("low")
   })
 
+  it.each(["low", "medium", "high", "xhigh", "max"])(
+    "imports Pi 1.0.2's %s thinking level without losing depth",
+    (thinking) => {
+      const drafts = settingsFromPi({}, { defaultThinkingLevel: thinking })
+      expect(byKey(drafts, "defaultThinkingLevel")).toMatchObject({
+        target: "defaultEffort",
+        incoming: thinking,
+        supported: true,
+        warnings: [],
+      })
+    }
+  )
+
+  it.each(["off", "minimal"])(
+    "recognizes Pi's %s level without silently changing its meaning",
+    (thinking) => {
+      const drafts = settingsFromPi({}, { defaultThinkingLevel: thinking })
+      const draft = byKey(drafts, "defaultThinkingLevel")!
+      expect(draft).toMatchObject({
+        target: "unsupported",
+        incoming: thinking,
+        supported: false,
+      })
+      expect(draft.warnings.join(" ")).toContain("no equivalent")
+      expect(draft.warnings.join(" ")).not.toContain("Unknown")
+    }
+  )
+
   it("flags a thinking level it does not recognise instead of guessing", () => {
     const drafts = settingsFromPi({}, { defaultThinkingLevel: "ludicrous" })
     const draft = byKey(drafts, "defaultThinkingLevel")!

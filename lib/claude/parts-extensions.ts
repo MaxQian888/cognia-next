@@ -300,11 +300,20 @@ export interface SourcesPartItem {
     /** vector doc id of the chunk (matches `TwinChunk.vectorDocId`). */
     chunkId: string
   }
-  /** Reusable Knowledge Base provenance for future source-manager deep links. */
+  /** Immutable document location carried through persisted chat citations. */
   knowledgeBaseRef?: {
     knowledgeBaseId: string
     sourceId: string
     chunkId: string
+    generationId?: string
+    documentVersion?: string
+    sectionId?: string
+    charStart?: number
+    charEnd?: number
+    pageNumber?: number
+    pageEnd?: number
+    lineStart?: number
+    lineEnd?: number
   }
   /**
    * The message this source came from, for `project-claim` / `project-history`.

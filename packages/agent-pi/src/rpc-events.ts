@@ -21,6 +21,7 @@
  */
 
 import type {
+  AcpContentBlock,
   ExternalAgentEvent,
   ExternalAgentTokenUsage,
 } from "@cognia/agent-contracts/external-agent"
@@ -44,6 +45,8 @@ export interface PiAssistantMessageEvent {
     | "toolcall_delta"
     | "toolcall_end"
   contentIndex?: number
+  id?: string
+  toolName?: string
   delta?: string
   content?: string
   toolCall?: { id?: string; name?: string; arguments?: unknown }
@@ -77,8 +80,15 @@ export interface PiEvent {
 // Mapping
 // ============================================================================
 
+export interface PiStreamState {
+  toolCallsByIndex: Map<number, string>
+  startedToolCalls: Set<string>
+}
+
 export interface PiEventMapContext {
   sessionId: string
+  /** Per-process state for delta-only tool arguments; never shared across sessions. */
+  streamState?: PiStreamState
   /** Injected so tests get stable timestamps instead of wall-clock drift. */
   now?: () => Date
 }
@@ -110,6 +120,7 @@ export function piStatsToTokenUsage(
     cacheWriteTokens: t.cacheWrite,
     contextTokens: stats.contextUsage?.tokens,
     modelContextWindow: stats.contextUsage?.contextWindow,
+    ...(typeof stats.cost === "number" ? { providerCost: { amount: stats.cost } } : {}),
   }
 }
 
@@ -137,15 +148,6 @@ const PROGRESS_EVENTS: Record<string, string> = {
   bash_execution_update: "pi.bashOutput",
 }
 
-/** Fire-and-forget extension UI methods — informational, never blocking. */
-const INFORMATIONAL_UI_METHODS = new Set([
-  "notify",
-  "setStatus",
-  "setWidget",
-  "setTitle",
-  "set_editor_text",
-])
-
 /** Pi UI bookkeeping remains available to audit consumers, without activity text. */
 export type PiDiagnosticProgressEvent = Extract<ExternalAgentEvent, { type: "progress" }> & {
   piDiagnostic: PiEvent
@@ -171,8 +173,38 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
   const base = { sessionId, timestamp }
 
   switch (event.type) {
-    case "message_start":
-      return [{ ...base, type: "message_start", role: "assistant" }]
+    case "message_start": {
+      const message = asRecord(event.message)
+      const role =
+        message?.role === "user" ? "user" : message?.role === "toolResult" ? "tool" : "assistant"
+      if (role === "assistant") ctx.streamState?.toolCallsByIndex.clear()
+      if (role !== "user") return [{ ...base, type: "message_start", role }]
+      const messageId =
+        asString(message?.id) ?? `pi-user-${message?.timestamp ?? timestamp.getTime()}`
+      const content =
+        typeof message?.content === "string"
+          ? [{ type: "text", text: message.content }]
+          : Array.isArray(message?.content)
+            ? message.content
+            : []
+      const mapped: ExternalAgentEvent[] = [{ ...base, type: "message_start", role, messageId }]
+      for (const item of content) {
+        const raw = asRecord(item)
+        let block: AcpContentBlock | undefined
+        if (raw?.type === "text" && typeof raw.text === "string")
+          block = { type: "text", text: raw.text }
+        if (
+          raw?.type === "image" &&
+          typeof raw.data === "string" &&
+          typeof raw.mimeType === "string"
+        )
+          block = { type: "image", data: raw.data, mimeType: raw.mimeType }
+        if (!block) continue
+        mapped.push({ ...base, type: "content_block_start", messageId, role: "user", block })
+        mapped.push({ ...base, type: "content_block_end", messageId, block })
+      }
+      return mapped
+    }
 
     case "message_end": {
       // Pi reports a failed turn HERE, on the assistant message it could not
@@ -210,12 +242,24 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
     case "message_update":
       return mapAssistantMessageEvent(
         event.assistantMessageEvent as PiAssistantMessageEvent | undefined,
-        base
+        base,
+        ctx.streamState
       )
 
     case "tool_execution_start": {
       const toolUseId = asString(event.toolCallId)
       if (!toolUseId) return []
+      if (ctx.streamState?.startedToolCalls.has(toolUseId)) {
+        return [
+          {
+            ...base,
+            type: "tool_call_update",
+            toolCallId: toolUseId,
+            status: "in_progress",
+            rawInput: asRecord(event.args),
+          },
+        ]
+      }
       return [
         {
           ...base,
@@ -248,6 +292,7 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
     case "tool_execution_end": {
       const toolUseId = asString(event.toolCallId)
       if (!toolUseId) return []
+      ctx.streamState?.startedToolCalls.delete(toolUseId)
       const isError = event.isError === true
       const result = event.result as PiToolResultPayload | undefined
       return [
@@ -267,6 +312,8 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
     // The ONLY completion signal. `agent_end` and `turn_end` both precede
     // possible retries and queued continuations.
     case "agent_settled":
+      ctx.streamState?.toolCallsByIndex.clear()
+      ctx.streamState?.startedToolCalls.clear()
       return [{ ...base, type: "done", success: true }]
 
     case "extension_error":
@@ -303,7 +350,8 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
 
 function mapAssistantMessageEvent(
   delta: PiAssistantMessageEvent | undefined,
-  base: { sessionId: string; timestamp: Date }
+  base: { sessionId: string; timestamp: Date },
+  state?: PiStreamState
 ): ExternalAgentEvent[] {
   if (!delta || typeof delta.type !== "string") return []
 
@@ -316,10 +364,21 @@ function mapAssistantMessageEvent(
     case "thinking_delta":
       return delta.delta ? [{ ...base, type: "thinking", thinking: delta.delta }] : []
 
+    case "toolcall_start": {
+      const id = asString(delta.id)
+      const toolName = asString(delta.toolName)
+      if (!id || !toolName || !state || typeof delta.contentIndex !== "number") return []
+      state.toolCallsByIndex.set(delta.contentIndex, id)
+      state.startedToolCalls.add(id)
+      return [{ ...base, type: "tool_use_start", toolUseId: id, toolName }]
+    }
+
     case "toolcall_delta": {
-      // Arguments stream as text before the call is complete. There is no id
-      // until `toolcall_end`, so this is only useful as a live preview.
-      const id = asString(delta.toolCall?.id)
+      const id =
+        asString(delta.toolCall?.id) ??
+        (typeof delta.contentIndex === "number"
+          ? state?.toolCallsByIndex.get(delta.contentIndex)
+          : undefined)
       return id && delta.delta
         ? [{ ...base, type: "tool_use_delta", toolUseId: id, delta: delta.delta }]
         : []
@@ -352,31 +411,78 @@ function mapExtensionUiRequest(
   const method = asString(event.method)
   if (!method) return []
 
-  if (INFORMATIONAL_UI_METHODS.has(method)) {
-    // Each fire-and-forget method carries its payload under its OWN field
-    // name (verified against Pi 0.84.1's docs and its real output): `notify`
-    // uses `message`, `setStatus` uses `statusText`, `setWidget` uses
-    // `widgetLines`, `setTitle` uses `title`, `set_editor_text` uses `text`.
-    // Reading only a generic `text` would render most of them blank.
-    const widget = Array.isArray(event.widgetLines)
-      ? (event.widgetLines as unknown[]).filter((l): l is string => typeof l === "string").join(" ")
-      : undefined
-    const text =
-      asString(event.message) ??
-      asString(event.statusText) ??
-      widget ??
-      asString(event.title) ??
-      asString(event.text) ??
-      `pi.${method}`
-    return [
-      {
-        ...base,
-        type: "progress",
-        progress: -1,
-        message: text,
-        ...(method !== "notify" ? { piDiagnostic: event } : {}),
-      },
-    ]
+  const uiBase = {
+    ...base,
+    type: "extension_ui_update" as const,
+    id: asString(event.id) ?? `${base.sessionId}:${base.timestamp.getTime()}:${method}`,
+  }
+  switch (method) {
+    case "notify":
+      return typeof event.message === "string"
+        ? [
+            {
+              ...uiBase,
+              update: {
+                kind: "notification",
+                message: event.message,
+                level:
+                  event.notifyType === "warning" || event.notifyType === "error"
+                    ? event.notifyType
+                    : "info",
+              },
+            },
+          ]
+        : []
+    case "setStatus": {
+      const key = asString(event.statusKey)
+      if (
+        key === "cognia" &&
+        typeof event.statusText === "string" &&
+        /^cognia-ready/.test(event.statusText)
+      )
+        return []
+      return key
+        ? [
+            {
+              ...uiBase,
+              update: {
+                kind: "status",
+                key,
+                text: typeof event.statusText === "string" ? event.statusText : null,
+              },
+            },
+          ]
+        : []
+    }
+    case "setWidget": {
+      const key = asString(event.widgetKey)
+      if (!key) return []
+      if (
+        event.widgetLines !== undefined &&
+        (!Array.isArray(event.widgetLines) ||
+          !event.widgetLines.every((line) => typeof line === "string"))
+      )
+        return []
+      return [
+        {
+          ...uiBase,
+          update: {
+            kind: "widget",
+            key,
+            lines: (event.widgetLines as string[] | undefined) ?? null,
+            placement: event.widgetPlacement === "belowEditor" ? "belowEditor" : "aboveEditor",
+          },
+        },
+      ]
+    }
+    case "setTitle":
+      return typeof event.title === "string"
+        ? [{ ...uiBase, update: { kind: "title", title: event.title } }]
+        : []
+    case "set_editor_text":
+      return typeof event.text === "string"
+        ? [{ ...uiBase, update: { kind: "editor", text: event.text } }]
+        : []
   }
 
   // Dialog methods block the extension until answered. Most are the extension

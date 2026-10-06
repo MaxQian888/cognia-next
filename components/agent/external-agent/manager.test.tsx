@@ -144,12 +144,33 @@ const baseHookValue = () => ({
   listSessions: jest.fn().mockResolvedValue([]),
   forkSession: jest.fn().mockResolvedValue(undefined),
   resumeSession: jest.fn().mockResolvedValue(undefined),
+  unarchiveSession: jest.fn().mockResolvedValue(undefined),
   deleteSession: jest.fn().mockResolvedValue(undefined),
   refresh: jest.fn(),
   clearError: jest.fn(),
 })
 
 describe("ExternalAgentManager", () => {
+  it("mounts shared controls for a connected active session", async () => {
+    const agent = makeAgent({
+      transport: "http",
+      process: undefined,
+      network: { endpoint: "http://localhost:4096" },
+    })
+    agent.connectionStatus = "connected"
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: agent.config.id,
+      activeSession: { id: "native-session" },
+      cloneSession: jest.fn(),
+      executeSessionShell: jest.fn(),
+    })
+    await act(async () => {
+      render(wrap(<ExternalAgentManager />))
+    })
+    expect(screen.getByText(en.externalAgent.sessionOperations.title)).toBeInTheDocument()
+  })
   it("opens the External Agents settings section from the header", async () => {
     const { useUIStore } = jest.requireActual<typeof import("@/stores/ui")>("@/stores/ui")
     useUIStore.setState({ pendingSettingsRequest: null })
@@ -1501,6 +1522,56 @@ describe("ExternalAgentManager", () => {
       cwd: "/work",
       additionalDirectories: ["/shared"],
     })
+  })
+
+  it("restores listed archived history without resuming it", async () => {
+    const unarchiveSession = jest.fn().mockResolvedValue(undefined)
+    const resumeSession = jest.fn().mockResolvedValue(undefined)
+    const listSessions = jest.fn().mockResolvedValue([
+      {
+        sessionId: "s1",
+        title: "Saved",
+        archived: true,
+        cwd: "/work",
+        additionalDirectories: ["/shared"],
+      },
+    ])
+    const agent = makeAgent({
+      transport: "http",
+      process: undefined,
+      network: { endpoint: "http://localhost:9999" },
+    } as never)
+    agent.connectionStatus = "connected"
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: "agent-1",
+      activeAgentValidity: {
+        executable: true,
+        contractVersion: 1,
+        sessionExtensions: {
+          "session/list": { state: "supported" },
+          "session/fork": { state: "supported" },
+          "session/resume": { state: "supported" },
+        },
+        lifecycleStage: "execution",
+        canonicalReasonCode: "ok",
+        canonicalReason: "ok",
+      },
+      listSessions,
+      resumeSession,
+      unarchiveSession,
+    })
+    await act(async () => {
+      render(wrap(<ExternalAgentManager />))
+    })
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: en.externalAgent.sessionOperations.unarchive })
+      )
+    })
+    expect(unarchiveSession).toHaveBeenCalledWith("s1")
+    expect(resumeSession).not.toHaveBeenCalled()
   })
 
   it("invokes forkSession when the fork button is clicked", async () => {

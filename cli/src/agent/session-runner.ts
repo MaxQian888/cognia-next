@@ -240,7 +240,19 @@ export interface SendTurnOptions {
   timeoutMs?: number
 }
 
+export type AgentSessionUiEvent =
+  | Extract<
+      import("@cognia/agent-config-types/agent-execution").CanonicalAgentEvent,
+      { kind: "extension-ui" }
+    >
+  | { kind: "input-queue-cleared"; text: string; imagePaths: string[] }
+
 export interface AgentSession {
+  /** Canonical autonomous turns emitted outside send(), with normal transcript semantics. */
+  subscribeEvents?(listener: (event: AgentEventEnvelope) => void): () => void
+  cancel?(): Promise<void>
+  /** Ephemeral UI requests emitted outside a send turn. */
+  subscribeUiEvents?(listener: (event: AgentSessionUiEvent) => void): () => void
   readonly sessionId: string
   send(prompt: string, opts: SendTurnOptions): Promise<RunAndCaptureResult>
   /** Drop the cached SendOptions so the next `send` re-resolves them — used

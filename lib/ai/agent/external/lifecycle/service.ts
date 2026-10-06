@@ -882,9 +882,21 @@ export class ExternalAgentLifecycleService {
     runtimeId: string,
     assessment: ExternalAgentVersionAssessment
   ): void {
+    const entry = findRuntimeById(runtimeId) ?? this.discoveredRuntimes.get(runtimeId)
     for (const config of this.deps.store.getAllAgents()) {
       const binding = config.runtimeBinding
       if (binding?.runtimeId !== runtimeId) continue
+      // Runtime inspection probes the catalog command, not every custom launch
+      // sharing its preset. Never certify an npx runner or another executable
+      // using the installed binary's identity.
+      const command = config.process?.command
+      if (
+        entry?.ownership === "system" &&
+        command &&
+        command !== entry.systemCommand &&
+        command !== assessment.executablePath
+      )
+        continue
       this.deps.store.patchLifecycle(config.id, {
         runtimeBinding: {
           ...binding,

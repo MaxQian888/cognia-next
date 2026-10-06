@@ -307,7 +307,7 @@ describe("Composer — data-hooks integration", () => {
   it.each([true, false])(
     "registers camera recovery after draft readiness (persistDrafts=%s)",
     async (persistDrafts) => {
-      let hydrate!: (value: undefined) => void
+      let hydrate!: (value: Awaited<ReturnType<typeof getDraft>>) => void
       if (persistDrafts) {
         jest.mocked(getDraft).mockImplementationOnce(
           () =>
@@ -337,7 +337,7 @@ describe("Composer — data-hooks integration", () => {
           true
         )
         await act(async () => {
-          hydrate(undefined)
+          hydrate(null)
         })
       }
       await waitFor(() =>
@@ -348,6 +348,67 @@ describe("Composer — data-hooks integration", () => {
       )
     }
   )
+
+  it("applies explicit editor replacement and empty clears after IME completes", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const textarea = screen.getByRole("textbox")
+    fireEvent.change(textarea, { target: { value: "human draft" } })
+    fireEvent.compositionStart(textarea)
+    await act(async () => {
+      useComposerIntentStore
+        .getState()
+        .stage("ses_42", { candidateId: "replace", prompt: "replacement", mode: "replace" })
+    })
+    expect(textarea).toHaveValue("human draft")
+    fireEvent.compositionEnd(textarea)
+    await waitFor(() => expect(textarea).toHaveValue("replacement"))
+    await act(async () => {
+      useComposerIntentStore
+        .getState()
+        .stage("ses_42", { candidateId: "clear", prompt: "", mode: "replace" })
+    })
+    await waitFor(() => expect(textarea).toHaveValue(""))
+  }, 20_000)
+
+  it("rejects a stale external editor intent without changing the draft", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <Composer
+          session={mkSession()}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const textarea = screen.getByRole("textbox")
+    fireEvent.change(textarea, { target: { value: "human draft" } })
+    await act(async () => {
+      useComposerIntentStore.getState().stage("ses_42", {
+        candidateId: "stale",
+        prompt: "wrong",
+        mode: "replace",
+        externalSession: { agentId: "old", sessionId: "native" },
+      })
+    })
+    await waitFor(() =>
+      expect(useComposerIntentStore.getState().pendingBySession.ses_42).toBeUndefined()
+    )
+    expect(textarea).toHaveValue("human draft")
+  }, 20_000)
 
   it("consumes a selection intent after draft hydration without overwriting typed text", async () => {
     const Wrapper = withAdapter(makeAdapter())

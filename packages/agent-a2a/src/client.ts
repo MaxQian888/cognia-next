@@ -25,6 +25,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentExecutionOptions,
   AcpCapabilities,
+  AcpContentBlock,
 } from "@cognia/agent-contracts/external-agent"
 import type { SessionCreateOptions } from "@cognia/agent-contracts/adapter"
 import type { AgentFetch, AgentOutboundGate } from "@cognia/agent-contracts/host"
@@ -180,13 +181,33 @@ interface A2aSessionCtx {
   contextId?: string
   taskId?: string
   options?: SessionCreateOptions
+  artifacts?: Map<string, AcpContentBlock[]>
+}
+
+function blocksOfParts(parts: A2aPart[] | undefined): AcpContentBlock[] {
+  return (parts ?? []).flatMap((part): AcpContentBlock[] => {
+    if (typeof part.text === "string") return [{ type: "text", text: part.text }]
+    const data = part.file?.bytes ?? part.raw
+    const uri = part.file?.uri ?? part.url
+    const name = part.file?.name ?? part.filename ?? "file"
+    const mimeType = part.file?.mimeType ?? part.mediaType ?? "application/octet-stream"
+    if (data !== undefined)
+      return [
+        {
+          type: "resource",
+          resource: { uri: `a2a:${encodeURIComponent(name)}`, mimeType, blob: data },
+        },
+      ]
+    if (uri !== undefined) return [{ type: "resource_link", uri, name, mimeType }]
+    if (part.data !== undefined) return [{ type: "text", text: textOfParts([part]) }]
+    return []
+  })
 }
 
 /**
  * Render an A2A part list to a text representation. Text parts pass through;
- * file and data parts are surfaced as a compact, human-readable marker rather
- * than being silently dropped (the canonical event stream has no file/data
- * delta, so a textual projection is the lossless-enough fallback).
+ * file and data parts become compact human-readable markers for status errors.
+ * Artifact delivery uses blocksOfParts so binary bodies remain intact.
  */
 function textOfParts(parts: A2aPart[] | undefined): string {
   if (!parts) return ""
@@ -237,6 +258,31 @@ export function mapA2aResult(
   const pushText = (text: string) => {
     if (text) events.push({ type: "message_delta", timestamp: now, delta: { type: "text", text } })
   }
+  const pushParts = (parts: A2aPart[] | undefined, id: string) => {
+    const blocks = blocksOfParts(parts)
+    if (blocks.every((block) => block.type === "text")) {
+      for (const block of blocks) if (block.type === "text") pushText(block.text)
+    } else {
+      events.push({
+        type: "artifact_update",
+        artifactId: id,
+        blocks,
+        complete: true,
+        timestamp: now,
+      })
+    }
+  }
+  const pushArtifact = (
+    artifact: A2aArtifactUpdate["artifact"],
+    id: string,
+    append = false,
+    complete = false
+  ) => {
+    const artifacts = (ctx.artifacts ??= new Map())
+    const blocks = [...(append ? (artifacts.get(id) ?? []) : []), ...blocksOfParts(artifact.parts)]
+    artifacts.set(id, blocks)
+    events.push({ type: "artifact_update", artifactId: id, blocks, complete, timestamp: now })
+  }
   const kind =
     result.kind ??
     ("artifact" in result
@@ -251,7 +297,7 @@ export function mapA2aResult(
     const msg = result as A2aMessage
     if (msg.contextId) ctx.contextId = msg.contextId
     if (msg.taskId) ctx.taskId = msg.taskId
-    pushText(textOfParts(msg.parts))
+    pushParts(msg.parts, `message:${msg.messageId ?? msg.taskId ?? crypto.randomUUID()}`)
     // A bare message reply (no task) is a complete turn.
     events.push({ type: "done", timestamp: now, success: true })
     return { events, done: true }
@@ -261,7 +307,12 @@ export function mapA2aResult(
     const upd = result as A2aArtifactUpdate
     ctx.taskId = upd.taskId
     if (upd.contextId) ctx.contextId = upd.contextId
-    pushText(textOfParts(upd.artifact?.parts))
+    pushArtifact(
+      upd.artifact,
+      `${upd.taskId}:${upd.artifact.artifactId ?? "default"}`,
+      upd.append,
+      upd.lastChunk
+    )
     return { events, done: false }
   }
 
@@ -273,13 +324,26 @@ export function mapA2aResult(
   if (contextId) ctx.contextId = contextId
 
   // The status carries an optional message; emit its text.
-  pushText(textOfParts(status?.message?.parts))
+  pushParts(status?.message?.parts, `status:${taskId}`)
   // A full Task object may also carry artifacts.
   if (kind === "task") {
-    for (const art of (result as A2aTask).artifacts ?? []) pushText(textOfParts(art.parts))
+    for (const [index, art] of ((result as A2aTask).artifacts ?? []).entries())
+      pushArtifact(art, `${taskId}:${art.artifactId ?? index}`, false, true)
   }
 
   const state = normalizeTaskState(status?.state)
+  if (["completed", "canceled", "failed", "rejected"].includes(state ?? "")) {
+    // A conversation outlives its tasks. Interrupted tasks remain addressable;
+    // terminal tasks must never be targeted by the next user message.
+    delete ctx.taskId
+    for (const [artifactId, blocks] of ctx.artifacts ?? []) {
+      if (
+        !events.some((event) => event.type === "artifact_update" && event.artifactId === artifactId)
+      )
+        events.push({ type: "artifact_update", artifactId, blocks, complete: true, timestamp: now })
+    }
+    delete ctx.artifacts
+  }
   const isFinal = "final" in result ? Boolean((result as A2aStatusUpdate).final) : false
 
   switch (state) {
@@ -505,7 +569,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
         throw new Error("A2A outbound payload blocked by the PII gate")
       }
 
-      const streaming = this.card?.capabilities?.streaming !== false
+      const streaming = this.card?.capabilities?.streaming === true
       if (streaming) {
         yield* this.streamPrompt(a2aMessage, ctx, options?.signal)
       } else {
@@ -668,10 +732,15 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
   async cancel(sessionId: string): Promise<void> {
     const ctx = this.sessionCtx.get(sessionId)
     if (ctx?.taskId) {
-      await this.rpc(
+      const taskId = ctx.taskId
+      const response = await this.rpc(
         this.method("tasks/cancel", "CancelTask"),
-        this.params({ id: ctx.taskId })
-      ).catch(() => undefined)
+        this.params({ id: taskId })
+      )
+      // Only a confirmed terminal response retires the task. A failed or
+      // nonterminal cancellation must retain its identity for recovery.
+      if (ctx.taskId === taskId && response)
+        mapA2aResult((response.result ?? response) as A2aWireResult, ctx)
     }
   }
 

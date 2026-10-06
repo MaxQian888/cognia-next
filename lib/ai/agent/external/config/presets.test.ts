@@ -124,6 +124,7 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
   it("materializes the native Pi preset onto the pi-rpc protocol", () => {
     const piRpc = EXTERNAL_AGENT_PRESETS["pi-rpc"]!
     expect(piRpc.protocol).toBe("pi-rpc")
+    expect(piRpc.setupHint).toContain("@earendil-works/pi-coding-agent@1.0.2")
     expect(piRpc.adapterId).toBe("pi")
     expect(piRpc.surfaceId).toBe("rpc-stdio")
     expect(piRpc.process).toEqual({ command: "pi", args: ["--mode", "rpc"] })
@@ -296,7 +297,7 @@ describe("createAgentFromPreset", () => {
     expect(cfg!.metadata?.preset).toBe("codex")
     expect(cfg!.metadata?.ecosystemAdapterId).toBe("codex")
     expect(cfg!.metadata?.ecosystemSurfaceId).toBe("acp-stdio")
-    expect(cfg!.process?.command).toBe("npx")
+    expect(cfg!.process?.command).toBe("codex-acp")
     expect(cfg!.network).toBeUndefined()
   })
 
@@ -328,7 +329,8 @@ describe("createAgentFromPreset", () => {
   it("falls back to preset defaults when overrides are missing", () => {
     const cfg = createAgentFromPreset("gemini-cli")!
     expect(cfg.name).toBeDefined()
-    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--acp"])
+    expect(cfg.process?.command).toBe("gemini")
+    expect(cfg.process?.args).toEqual(["--acp"])
   })
 
   it("preserves network field when preset has one (synthetic)", () => {

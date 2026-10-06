@@ -68,12 +68,12 @@ export const CODEX_RUNTIMES: readonly ExternalAgentRuntimeCatalogEntry[] = [
     protocol: "acp",
     transport: "stdio",
     platforms: ["darwin", "linux", "win32"],
-    systemCommand: "npx",
-    launchArgs: ["-y", "@agentclientprotocol/codex-acp"],
+    systemCommand: "codex-acp",
+    launchArgs: [],
     versionProbe: {
-      args: ["-y", "@agentclientprotocol/codex-acp", "--version"],
+      args: ["--version"],
       parser: "semver-anywhere",
-      timeoutMs: 20000,
+      timeoutMs: 10000,
     },
     distributions: [],
     sandbox: {
@@ -83,8 +83,14 @@ export const CODEX_RUNTIMES: readonly ExternalAgentRuntimeCatalogEntry[] = [
     docsUrl: "https://github.com/agentclientprotocol/codex-acp",
     notes: {
       certification:
-        "Deliberately uncertified. This runtime launches through `npx -y @agentclientprotocol/codex-acp`, which re-resolves the package on every start, so a pinned supportedRange would describe a version that is not necessarily what launches. See unpinnedLaunchWaivers.",
+        "System-installed executable; detected path, digest and version remain subject to lifecycle consent until authenticated acceptance certifies a release. Legacy saved launch commands are not rewritten.",
     },
+    legacyLaunches: [
+      {
+        command: "npx",
+        args: ["-y", "@agentclientprotocol/codex-acp"],
+      },
+    ],
   },
 ]
 
@@ -110,10 +116,6 @@ export const codexManifest: AgentIntegrationManifest = Object.freeze({
     { protocol: CODEX_APP_SERVER_PROTOCOL, semantics: CODEX_APP_SERVER_EXECUTION_SEMANTICS },
   ],
   runtimes: CODEX_RUNTIMES,
-  unpinnedLaunchWaivers: {
-    "codex-acp":
-      "Maintained Codex ACP app-server adapter. No vetted lock asset has been curated for a pinned version yet; the preset keeps `npx -y @agentclientprotocol/codex-acp` until one is.",
-  },
 }) as AgentIntegrationManifest
 
 /**

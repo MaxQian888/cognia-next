@@ -26,13 +26,12 @@
       "opencode",
       "pi",
       "qoder",
-      "kimi"
+      "kimi",
+      "qwen"
     ],
     "manualOnly": {
       "claude": "The Claude Code CLI itself. No preset spawns it (the `claude-code` preset uses the ACP adapter binary), but hand-configured agents and the container/kube backends do.",
-      "claude-code-acp": "Zed's ACP bridge, installed globally by users who prefer it over the first-party adapter. It is also the default command in `container_backend.rs` / `kube_backend.rs`.",
-      "codex-acp": "The Codex ACP adapter as a GLOBAL install; the shipped preset uses the maintained `npx @agentclientprotocol/codex-acp` form. `workspace_runtime_backend.rs` spawns the bare name.",
-      "gemini": "The Gemini CLI as a global install; the shipped preset uses the `npx @google/gemini-cli` form."
+      "claude-code-acp": "Zed's ACP bridge, installed globally by users who prefer it over the first-party adapter. It is also the default command in `container_backend.rs` / `kube_backend.rs`."
     }
   },
   "npxPackageAllowlist": {

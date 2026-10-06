@@ -1117,6 +1117,146 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
     await expect(a.closeSession("s1")).resolves.toBeUndefined()
   })
 
+  it("exposes precise message forks, command refresh, normalized history and native rename", async () => {
+    await a.createSession()
+    client.session.message.mockResolvedValueOnce({ data: { info: { id: "before" }, parts: [] } })
+    await a.forkSession("s1", { forkAt: { kind: "entry", id: "before", boundary: "before" } })
+    expect(client.session.fork).toHaveBeenLastCalledWith({
+      path: { id: "s1" },
+      body: { messageID: "before" },
+    })
+    client.session.fork.mockClear()
+    await expect(
+      a.forkSession("s1", { forkAt: { kind: "turn", id: "bad", boundary: "through" } })
+    ).rejects.toThrow(/before/)
+    expect(client.session.fork).not.toHaveBeenCalled()
+    client.command.list.mockResolvedValueOnce({ data: [{ name: "review", description: "Review" }] })
+    expect(await a.refreshSessionCommands("s1")).toEqual([
+      {
+        name: "review",
+        description: "Review",
+        input: { hint: "" },
+        supportsDuringExecution: false,
+      },
+    ])
+    client.session.update.mockResolvedValueOnce({ data: { id: "s1", title: "Renamed" } })
+    await a.renameSession("s1", "Renamed")
+    expect(a.getSession("s1")?.metadata?.title).toBe("Renamed")
+    client.session.messages.mockResolvedValueOnce({
+      data: [
+        {
+          info: { id: "m1", role: "user", time: { created: 1000 } },
+          parts: [{ type: "text", text: "hello" }],
+        },
+      ],
+    })
+    expect(await a.getSessionEntries("s1")).toEqual([
+      expect.objectContaining({
+        id: "m1",
+        parentId: null,
+        message: expect.objectContaining({
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+        }),
+        forkAt: { kind: "entry", id: "m1", boundary: "before" },
+      }),
+    ])
+    expect(await a.getSessionOperationCapabilities()).toMatchObject({
+      shell: "unsupported",
+      abortShell: "unsupported",
+      backgroundTurns: "supported",
+    })
+    expect(a.capabilities?.custom?.shellUnsupportedReason).toMatch(/PII/)
+  })
+
+  it("shares one native subscription across an owned turn and later background work", async () => {
+    await a.createSession()
+    const pending: unknown[] = [{ type: "server.connected", properties: {} }]
+    let wake: (() => void) | undefined
+    const push = (event: unknown) => {
+      pending.push(event)
+      wake?.()
+    }
+    client.event.subscribe.mockImplementation(async ({ signal }: { signal: AbortSignal }) => ({
+      stream: (async function* () {
+        signal.addEventListener("abort", () => wake?.(), { once: true })
+        while (!signal.aborted) {
+          const event = pending.shift()
+          if (event) yield event
+          else
+            await new Promise<void>((resolve) => {
+              wake = resolve
+            })
+        }
+      })(),
+    }))
+    const status = (type: string) => ({
+      type: "session.status",
+      properties: { sessionID: "s1", status: { type } },
+    })
+    const text = (value: string) => ({
+      type: "message.part.updated",
+      properties: {
+        part: { type: "text", sessionID: "s1", messageID: "m", text: value },
+        delta: value,
+      },
+    })
+    client.session.promptAsync.mockImplementation(async () => {
+      push(status("busy"))
+      push(text("owned"))
+      push(status("idle"))
+      return { data: undefined }
+    })
+    const background: unknown[] = []
+    const stop = a.subscribeSessionEvents("s1", (event) => background.push(event))
+    const owned = []
+    for await (const event of a.prompt("s1", {
+      id: "input",
+      role: "user",
+      timestamp: new Date(),
+      content: [{ type: "text", text: "go" }],
+    }))
+      owned.push(event)
+    expect(owned.filter((event) => event.type === "done")).toHaveLength(1)
+    expect(background).toEqual([])
+    push(status("busy"))
+    push(text("background"))
+    push({ type: "session.updated", properties: { info: { id: "s1", title: "Native title" } } })
+    push(status("idle"))
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    expect(background).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "session_start" }),
+        expect.objectContaining({
+          type: "message_delta",
+          delta: { type: "text", text: "background" },
+        }),
+        expect.objectContaining({ type: "session_info_update", title: "Native title" }),
+        expect.objectContaining({ type: "done", success: true }),
+      ])
+    )
+    expect(client.event.subscribe).toHaveBeenCalledTimes(1)
+    stop()
+    await a.disconnect()
+  })
+
+  it("does not apply assistant errors from another session", () => {
+    expect(
+      a.translateSdkEvent("s1", {
+        type: "message.updated",
+        properties: {
+          info: {
+            sessionID: "other",
+            id: "m",
+            role: "assistant",
+            error: { name: "error", data: { message: "wrong session" } },
+            time: { completed: 1 },
+          },
+        },
+      } as never)
+    ).toEqual([])
+  })
+
   it("maps OpenCode millisecond timestamps without scaling them again", async () => {
     const created = 1_750_000_000_000
     const updated = 1_750_000_060_000
@@ -1206,6 +1346,13 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
     await expect(a.getPath()).resolves.toBeTruthy()
     await expect(a.setSessionModel("s1", "anthropic/claude")).resolves.toBeUndefined()
     expect(a.getSdkClient()).toBe(client)
+  })
+
+  it("blocks private command arguments, shell commands and titles before SDK calls", async () => {
+    const secret = "alice.smith@example.com"
+    await expect(a.executeCommand("s1", "compact", secret)).rejects.toThrow(/PII/)
+    await expect(a.executeShell("s1", `echo ${secret}`)).rejects.toThrow(/PII/)
+    await expect(a.updateSessionTitle("s1", secret)).rejects.toThrow(/PII/)
   })
 
   it("compacts with the session model before an advertised command", async () => {

@@ -5,6 +5,8 @@ description: "Adds a built-in `pi-rpc` protocol that controls `pi --mode rpc` di
 
 # ADR-0119 — Pi native RPC integration
 
+**Current verification (2026-10-05):** Pi `1.0.2` is the certified target; `0.85.1` remains the minimum accepted version. Other accepted versions remain unverified. The latest audit covers the real Pi process, Cognia extension and production macOS sandbox launcher, including native codemode nested-tool approval. Native Pi now supports MCP; Cognia's existing `pi-mcp-adapter` configuration target is retained as a stable persisted ID for `mcp.json`, without requiring the former third-party extension. See `docs/research/2026-10-05-pi-agent-compatibility.md` for fixes, checks and explicit limits. Earlier version statements below describe the historical decisions.
+
 **Status**: Accepted (2026-08-14)
 
 ## Context
@@ -209,3 +211,17 @@ Plugins can now ship Pi packages (capability `pi-package`, manifest `piPackages`
 - **Handshake budget.** `session_start` waits for plugin extensions too, so the budget grows by `PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS` per plugin extension, inside the existing 120 s cap, and a timeout names them.
 - **Double load.** A package that is also installed in a Pi scope the session loads (`global`: user; `trusted-project`: user and project), whose hosted extensions lie outside the package directory, is refused with `double-load`: Pi deduplicates `-e` against installed-package extensions only by canonical path (`ResourceLoader.mergePaths`) and has no per-session package exclusion. Hosted extensions inside the package directory keep their `-e` and load once.
 - **Sandbox.** The desktop wrapper mounts package directories read-only for Pi only, from `COGNIA_TOOLHOST_PI_PACKAGE_ROOTS`, keeping an entry only when it canonicalizes to an existing directory under the host-derived plugin store and does not touch a forbidden, protected or denied root (ADR-0210 §4); remote spawns drop the key. Packages are not loadable when the agent runs on a paired host or under Bot isolation.
+
+
+### 2026-10-05 — Shared session operations and Pi 1.0.2
+
+The certified target is Pi `1.0.2`. Optional session operations now belong to the common `ExternalAgentProtocolAdapter` contract and manager: structured steering/follow-up input and queue recovery, queue policy, runtime controls, command refresh/execution, entry/tree inspection, entry-specific fork, clone, rename, HTML export, and direct shell execution/cancellation. Capability reporting combines actual adapter methods with runtime advertisement; adding Pi methods does not advertise them on ACP, Codex or other runtimes.
+
+Extension presentation uses a shared structured event and reducer for status, above/below-editor widgets, title, editor replacement and notifications. Desktop chat and CLI consume the same payload; prompts and queued-image recovery use the existing composer intent path. Native session identity is held in the existing transient per-chat runtime store, so the displayed controls address the current native session after a fork or clone. It is separate from persisted gateway routing.
+
+Direct shell execution uses the existing permission callback and hook policy. Pi's `user_bash` hook accepts the first handler result, so a separate, pinned shell guard loads before configured extensions; Cognia's main extension remains the last explicit `-e` argument for native tool-result redaction. Both files are checked by the Node and Rust host verifiers and packaged together. Shell capability requires the verified host path and the guard handshake; a metadata path alone does not grant it. The guard preserves Pi's configured shell and redacts bounded output before it enters native session context. Cancellation retires and resumes the process when necessary to stop preflight work as well as an already-running shell.
+
+See the dated compatibility report at `docs/research/2026-10-05-pi-agent-compatibility.md` for verification scope and remaining platform/provider limits.
+
+
+Background execution is an explicit shared `backgroundTurns` capability, requiring event subscription support and an affirmative runtime advertisement. Command support alone does not imply it. A supporting native session retains the existing tool-host lease across prompt acknowledgements, while per-call permissions remain active. The current chat/session link controls ownership; switching runtime or native session, resetting or closing releases that ownership. Normal owned streams and out-of-band turns use the same transcript/event reducers, with handoff ordering preventing the old turn's cleanup from overwriting the next run.

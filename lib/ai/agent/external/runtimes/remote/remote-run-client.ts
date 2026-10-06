@@ -15,6 +15,9 @@
  * exactly like a turn that went quiet.
  */
 
+import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { ExternalAgentManager } from "../../manager"
+import type { RemoteSessionTarget, RemoteSessionOperation } from "./remote-run-service"
 import { transport } from "@/lib/tauri"
 import type {
   AcpElicitationResponse,
@@ -56,6 +59,7 @@ export type RemoteTurnStart =
 
 export interface RemoteRunSubscription {
   onEvent: (event: ExternalAgentEvent, frame: RemoteRunFrame) => void
+  onOperationResult?: (result: NonNullable<RemoteRunFrame["operationResult"]>) => void
   /** Called once, with how the run ended. */
   onTerminal: (terminal: NonNullable<RemoteRunFrame["terminal"]>, error: string | undefined) => void
   /**
@@ -91,7 +95,8 @@ export function subscribeRemoteExternalRun(
     if (frame.seq > lastSeq + 1) handlers.onGap?.(lastSeq + 1, frame.seq)
     lastSeq = frame.seq
 
-    handlers.onEvent(frame.event, frame)
+    if (frame.operationResult) handlers.onOperationResult?.(frame.operationResult)
+    else handlers.onEvent(frame.event, frame)
     if (frame.terminal) {
       settled = true
       handlers.onTerminal(frame.terminal, frame.error)
@@ -235,5 +240,238 @@ async function resolve(payload: Record<string, unknown>): Promise<RemoteDecision
   return {
     resolved: false,
     reason: result.reason === "wrong-device" ? "wrong-device" : "unknown",
+  }
+}
+
+export type RemoteSessionOperationsClient = Pick<
+  ExternalAgentManager,
+  | "getSessionOperationCapabilities"
+  | "getSessionRuntimeState"
+  | "refreshSessionCommands"
+  | "executeSessionCommand"
+  | "enqueueSessionInput"
+  | "clearSessionInputQueue"
+  | "setSessionQueuePolicy"
+  | "setSessionRuntimeControls"
+  | "abortSessionRetry"
+  | "getSessionEntries"
+  | "getSessionTree"
+  | "forkSession"
+  | "cloneSession"
+  | "renameSession"
+  | "archiveSession"
+  | "unarchiveSession"
+  | "exportSessionHtml"
+  | "executeSessionShell"
+  | "abortSessionShell"
+  | "cancel"
+  | "steerSession"
+>
+
+export async function callRemoteSessionOperation<T>(
+  target: RemoteSessionTarget,
+  action: RemoteSessionOperation,
+  requestId = crypto.randomUUID()
+): Promise<T> {
+  const reads = [
+    "capabilities",
+    "snapshot",
+    "commands",
+    "runtimeState",
+    "entries",
+    "tree",
+    "watch",
+    "unwatch",
+  ]
+  const read = reads.includes(action.operation)
+  const result = await (read ? callHostConfigCommand : callApprovedHostConfigCommand)<{ value: T }>(
+    read ? HOST_CONFIG_COMMANDS.sessionQuery : HOST_CONFIG_COMMANDS.sessionMutate,
+    { ...target, stamp: { ...target.stamp }, requestId, action }
+  )
+  return result.value
+}
+
+/** Subscribe before mutation; renew its admission while this surface owns it. */
+export async function watchRemoteSession(
+  target: RemoteSessionTarget,
+  handlers: RemoteRunSubscription,
+  purpose: "transcript" | "presentation" | "shell" = "transcript"
+) {
+  const identity = getActiveRemoteTransport()
+  const watchId = crypto.randomUUID()
+  let closed = false
+  const assertTarget = () => {
+    if (getActiveRemoteTransport() !== identity)
+      throw new Error("External session belongs to a different Host")
+  }
+  const unsubscribe = subscribeRemoteExternalRun(watchId, handlers)
+  let timer: ReturnType<typeof setInterval> | undefined
+  try {
+    await whenRemoteRunChannelSubscribed()
+    assertTarget()
+    const initial = await callRemoteSessionOperation<{
+      session: import("@/types/agent/external-agent").ExternalAgentSession
+    }>(target, { operation: "watch", watchId, purpose }, watchId)
+    timer = setInterval(() => {
+      if (closed) return
+      try {
+        assertTarget()
+      } catch {
+        handlers.onTerminal("failed", "External session belongs to a different Host")
+        void close()
+        return
+      }
+      void callRemoteSessionOperation(target, { operation: "watch", watchId, purpose }).catch(
+        (error) => {
+          handlers.onTerminal("failed", String(error))
+          void close()
+        }
+      )
+    }, 60_000)
+    ;(timer as { unref?: () => void }).unref?.()
+    return { watchId, session: initial.session, close }
+  } catch (error) {
+    unsubscribe()
+    throw error
+  }
+  async function close() {
+    if (closed) return
+    closed = true
+    if (timer) clearInterval(timer)
+    unsubscribe()
+    if (getActiveRemoteTransport() === identity)
+      await callRemoteSessionOperation(target, { operation: "unwatch", watchId }).catch(
+        () => undefined
+      )
+  }
+}
+
+/** The same session API consumed by the local operations component. */
+export function createRemoteSessionOperationsClient(
+  target: RemoteSessionTarget
+): RemoteSessionOperationsClient {
+  const identity = getActiveRemoteTransport()
+  const call = <T>(agentId: string, sessionId: string, action: RemoteSessionOperation) => {
+    if (
+      getActiveRemoteTransport() !== identity ||
+      agentId !== target.stamp.configId ||
+      sessionId !== target.externalSessionId
+    )
+      return Promise.reject(new Error("External session target changed"))
+    return callRemoteSessionOperation<T>(target, action)
+  }
+  return {
+    getSessionOperationCapabilities: (a, s) => call(a, s, { operation: "capabilities" }),
+    getSessionRuntimeState: (a, s) => call(a, s, { operation: "runtimeState" }),
+    refreshSessionCommands: (a, s) => call(a, s, { operation: "commands" }),
+    executeSessionCommand: (a, s, command) =>
+      call(a, s, { operation: "commandExecution", command }),
+    enqueueSessionInput: async (a, s, input, mode) => {
+      const images = input.images?.map((image) => {
+        const mimeType = image.mimeType
+        if (
+          mimeType !== "image/png" &&
+          mimeType !== "image/jpeg" &&
+          mimeType !== "image/webp" &&
+          mimeType !== "image/gif"
+        )
+          throw new Error("Unsupported image MIME type")
+        return { data: image.data, mimeType } as const
+      })
+      return call(a, s, { operation: "inputQueue", input: { text: input.text, images }, mode })
+    },
+    clearSessionInputQueue: (a, s) => call(a, s, { operation: "clearQueue" }),
+    setSessionQueuePolicy: (a, s, policy) => call(a, s, { operation: "queuePolicy", policy }),
+    setSessionRuntimeControls: (a, s, controls) =>
+      call(a, s, { operation: "runtimeControls", controls }),
+    abortSessionRetry: (a, s) => call(a, s, { operation: "abortRetry" }),
+    getSessionEntries: (a, s) => call(a, s, { operation: "entries" }),
+    getSessionTree: (a, s) => call(a, s, { operation: "tree" }),
+    forkSession: (a, s, options) =>
+      call(a, s, {
+        operation: "fork",
+        forkAt: options?.forkAt,
+        forkAtEntryId: options?.forkAtEntryId,
+      }),
+    cloneSession: (a, s) => call(a, s, { operation: "clone" }),
+    renameSession: (a, s, name) => call(a, s, { operation: "rename", name }),
+    archiveSession: (a, s) => call(a, s, { operation: "archive" }),
+    unarchiveSession: (a, s) => call(a, s, { operation: "unarchive" }),
+    exportSessionHtml: (a, s) => call(a, s, { operation: "exportHtml" }),
+    abortSessionShell: (a, s) => call(a, s, { operation: "abortShell" }),
+    cancel: (a, s) => call(a, s, { operation: "cancel" }),
+    steerSession: (a, s, text) =>
+      s
+        ? call(a, s, { operation: "steer", text })
+        : Promise.reject(new Error("A native session id is required for steering")),
+    executeSessionShell: async (a, s, command, options) => {
+      if (
+        getActiveRemoteTransport() !== identity ||
+        a !== target.stamp.configId ||
+        s !== target.externalSessionId
+      )
+        throw new Error("External session target changed")
+      const requestId = crypto.randomUUID()
+      let resolveResult!: (
+        value: import("@cognia/agent-contracts/session-operations").ExternalAgentSessionShellResult
+      ) => void
+      let rejectResult!: (error: Error) => void
+      const result = new Promise<
+        import("@cognia/agent-contracts/session-operations").ExternalAgentSessionShellResult
+      >((resolve, reject) => {
+        resolveResult = resolve
+        rejectResult = reject
+      })
+      void result.catch(() => undefined)
+      const watcher = await watchRemoteSession(
+        target,
+        {
+          onEvent: (event, frame) => {
+            if (event.type !== "permission_request") return
+            void options
+              .onPermissionRequest(event.request)
+              .then((response) =>
+                resolveRemotePermission(
+                  `${frame.runId}:${event.request.requestId ?? event.request.id}`,
+                  response.granted ? (response.rememberChoice ? "allow_always" : "allow") : "deny"
+                )
+              )
+              .catch(() =>
+                resolveRemotePermission(
+                  `${frame.runId}:${event.request.requestId ?? event.request.id}`,
+                  "deny"
+                )
+              )
+          },
+          onOperationResult: (reply) => {
+            if (reply.requestId !== requestId) return
+            if (reply.error) rejectResult(new Error(reply.error))
+            else
+              resolveResult(
+                reply.value as import("@cognia/agent-contracts/session-operations").ExternalAgentSessionShellResult
+              )
+          },
+          onTerminal: (_terminal, error) =>
+            rejectResult(new Error(error ?? "Remote session closed")),
+          onGap: () => rejectResult(new Error("Remote shell result stream has a gap")),
+        },
+        "shell"
+      )
+      try {
+        await callRemoteSessionOperation(
+          target,
+          {
+            operation: "shell",
+            command,
+            excludeFromContext: options.excludeFromContext,
+            watchId: watcher.watchId,
+          },
+          requestId
+        )
+        return await result
+      } finally {
+        await watcher.close()
+      }
+    },
   }
 }

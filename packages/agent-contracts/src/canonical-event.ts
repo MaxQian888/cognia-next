@@ -9,6 +9,7 @@
  */
 
 import type { AgentCapabilityId } from "./capability-ids"
+import type { AgentExtensionUiUpdate } from "./extension-ui"
 
 export interface CanonicalSourceReference {
   id: string
@@ -73,6 +74,7 @@ export const MODEL_REQUEST_PURPOSES: readonly ModelRequestPurpose[] = [
 ]
 
 export type CanonicalAgentEvent =
+  | { kind: "extension-ui"; id: string; update: AgentExtensionUiUpdate }
   | { kind: "lifecycle"; phase: "started" | "ended" | "interrupted"; detail?: string }
   | {
       /**
@@ -601,6 +603,7 @@ const CANONICAL_EVENT_KINDS: readonly string[] = [
   "task",
   "task-inventory",
   "notification",
+  "extension-ui",
   "informational",
   "commands-changed",
   "memory-recall",

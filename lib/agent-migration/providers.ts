@@ -50,11 +50,8 @@ const SUPPORT: Record<MigrationVendor, Record<MigrationArtifact, ArtifactSupport
     sessions: "supported",
     skills: "supported",
     subagents: "supported",
-    // Pi's core has no MCP at all — `mcpServers` appears nowhere in its
-    // distribution and pi.dev has no MCP page. MCP reaches Pi only through the
-    // third-party `pi-mcp-adapter` package, so there is nothing to import from
-    // a stock Pi install and claiming otherwise would offer an empty preview.
-    mcp: "unsupported",
+    // Pi 0.99+ reads native user-scope mcp.json.
+    mcp: "supported",
     commands: "supported",
     // Pi reads the same AGENTS.md / CLAUDE.md chain the other agents do.
     memory: "shared",

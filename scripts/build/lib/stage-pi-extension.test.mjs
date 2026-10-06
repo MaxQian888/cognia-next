@@ -9,6 +9,7 @@ import { tmpdir } from "node:os"
 
 import {
   PI_EXTENSION_FILE,
+  PI_SHELL_GUARD_FILE,
   PI_INTEGRITY_FILE,
   stagePiExtension,
 } from "./stage-pi-extension.mjs"
@@ -21,7 +22,7 @@ test("standalone packaged extension loads its MCP and PII dependencies without n
   const out = mkdtempSync(join(tmpdir(), "cognia-pi-standalone-"))
   t.after(() => rmSync(out, { recursive: true, force: true }))
   const staged = stagePiExtension({ root, sidecarOutDir: join(out, "sidecar") })
-  const run = spawnSync(process.execPath, ["--input-type=module", "-e", `const extension = await import(${JSON.stringify(staged.files[0])}); if(typeof extension.createMcpProjection !== 'function') throw new Error('missing MCP projection');`], { cwd: out, encoding: "utf8" })
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", `const extension = await import(${JSON.stringify(staged.files[0])}); if(typeof extension.createMcpProjection !== 'function') throw new Error('missing MCP projection'); const guard = await import(${JSON.stringify(join(staged.dir, PI_SHELL_GUARD_FILE))}); if(typeof guard.default !== 'function') throw new Error('missing shell guard');`], { cwd: out, encoding: "utf8" })
   assert.equal(run.status, 0, run.stderr)
   assert.ok(!existsSync(join(out, "node_modules")))
 })
@@ -153,4 +154,23 @@ test("stages the exact relative path the CLI resolver looks for", () => {
 
   assert.deepEqual(literals("EXTENSION_RELATIVE"), ["sidecar", "pi-extension", PI_EXTENSION_FILE])
   assert.deepEqual(literals("INTEGRITY_RELATIVE"), ["sidecar", "pi-extension", PI_INTEGRITY_FILE])
+})
+
+
+test("stages a pinned shell guard and rejects missing or changed guard before writing", (t) => {
+  const guard = "export default function guard() {}\n"
+  const shellGuardSha256 = createHash("sha256").update(guard).digest("hex")
+  const root = makeRoot({ manifest: { sha256: DIGEST, shellGuardSha256 } })
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const out = join(root, "out", "sidecar")
+  const source = join(root, "sidecar", "pi-extension", PI_SHELL_GUARD_FILE)
+  assert.throws(() => stagePiExtension({ root, sidecarOutDir: out }), /missing .*shell-guard/)
+  assert.ok(!existsSync(out))
+  writeFileSync(source, "tampered")
+  assert.throws(() => stagePiExtension({ root, sidecarOutDir: out }), /shell-guard.*pinned digest/)
+  assert.ok(!existsSync(out))
+  writeFileSync(source, guard)
+  const staged = stagePiExtension({ root, sidecarOutDir: out })
+  assert.equal(readFileSync(join(staged.dir, PI_SHELL_GUARD_FILE), "utf8"), guard)
+  assert.equal(JSON.parse(readFileSync(join(staged.dir, PI_INTEGRITY_FILE), "utf8")).shellGuardSha256, shellGuardSha256)
 })

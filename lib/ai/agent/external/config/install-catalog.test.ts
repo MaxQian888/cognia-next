@@ -477,7 +477,13 @@ describe("binding a saved configuration to a runtime", () => {
     ]
     for (const [pkg, runtimeId] of cases) {
       const entry = findRuntimeForConfig(
-        saved({ protocol: "acp", process: { command: "npx", args: ["-y", pkg] } })
+        saved({
+          protocol: "acp",
+          process: {
+            command: "npx",
+            args: ["-y", pkg, ...(runtimeId === "codex-acp" ? [] : ["--acp"])],
+          },
+        })
       )
       expect(entry?.runtimeId).toBe(runtimeId)
     }
@@ -531,4 +537,27 @@ describe("binding a saved configuration to a runtime", () => {
   it("derives nothing when nothing matches", () => {
     expect(deriveRuntimeBinding(saved({ process: undefined }))).toBeUndefined()
   })
+})
+
+it.each([
+  ["codex-acp", "codex-acp", []],
+  ["gemini-cli", "gemini", ["--acp"]],
+  ["qwen-code", "qwen", ["--acp"]],
+] as const)("launches %s through its inspected system binary", (runtimeId, command, args) => {
+  const runtime = findRuntimeById(runtimeId)!
+  expect(runtime).toMatchObject({
+    ownership: "system",
+    systemCommand: command,
+    launchArgs: args,
+    versionProbe: { args: ["--version"] },
+    distributions: [],
+  })
+  expect(hasUnpinnedLaunchWaiver(runtimeId)).toBe(false)
+  expect(findRuntimeForConfig({ protocol: "acp", process: { command } })?.runtimeId).toBe(runtimeId)
+  expect(
+    findRuntimeForConfig({
+      protocol: "acp",
+      process: { command: "npx", args: [...runtime.legacyLaunches![0].args, "--custom"] },
+    })
+  ).toBeUndefined()
 })

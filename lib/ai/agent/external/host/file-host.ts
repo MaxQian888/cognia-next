@@ -12,7 +12,10 @@ import type { AgentFileHost } from "@cognia/agent-contracts/host"
 import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
 import {
   agentDeleteTextFile,
+  agentListFiles,
+  agentReadBinaryFile,
   agentReadTextFile,
+  agentWriteBinaryFile,
   agentWriteTextFile,
   supportsAgentFs,
 } from "../agent-transport"
@@ -28,5 +31,9 @@ export function createAgentTransportFileHost(): AgentFileHost {
     writeText: (path, content, allowedRoots) =>
       agentWriteTextFile(path, content, [...allowedRoots]),
     delete: (path, allowedRoots) => agentDeleteTextFile(path, [...allowedRoots]),
+    readBinary: (path, allowedRoots) => agentReadBinaryFile(path, [...allowedRoots]),
+    writeBinary: (path, base64, allowedRoots) =>
+      agentWriteBinaryFile(path, base64, [...allowedRoots]),
+    listFiles: (path, allowedRoots) => agentListFiles(path, [...allowedRoots]),
   }
 }

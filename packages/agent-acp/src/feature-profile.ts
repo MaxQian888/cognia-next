@@ -6,6 +6,7 @@ export type AcpRole = "client" | "agent"
 export type AcpHostKind = "desktop" | "cli" | "headless" | "server"
 export type AcpPreviewFeature =
   | "compaction"
+  | "notices"
   | "providers"
   | "dynamicMcp"
   | "nes"
@@ -53,6 +54,7 @@ export interface ResolveAcpFeatureProfileOptions {
 
 const PREVIEW_FEATURES: readonly AcpPreviewFeature[] = [
   "compaction",
+  "notices",
   "providers",
   "dynamicMcp",
   "nes",
@@ -83,6 +85,7 @@ export function resolveAcpFeatureProfile({
   const clientCapabilities: ClientCapabilities = {
     session: {
       configOptions: { boolean: {} },
+      ...(previewState.notices.advertised ? { notices: {} } : {}),
       ...(previewState.compaction.advertised ? { compaction: {} } : {}),
     },
     ...(host.fs.read || host.fs.write

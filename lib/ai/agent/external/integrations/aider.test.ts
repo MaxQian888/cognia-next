@@ -28,6 +28,11 @@ function fileHost(files = new Map<string, string>()): AgentFileHost {
     delete: async (path) => {
       files.delete(path)
     },
+    readBinary: async (path) => files.get(path) ?? "",
+    writeBinary: async (path, content) => {
+      files.set(path, content)
+    },
+    listFiles: async (dir) => [...files.keys()].filter((path) => path.startsWith(`${dir}/`)),
   }
 }
 

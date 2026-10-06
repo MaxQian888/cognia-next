@@ -1440,3 +1440,52 @@ describe("sessionRestartNotice", () => {
     expect(sessionRestartNotice({ ...config, agentBackend: undefined })).toContain("the agent")
   })
 })
+
+it("subscribes the created session to idle UI and detaches before clearing", async () => {
+  const actions: TuiAction[] = []
+  let listener:
+    ((event: import("../../agent/session-runner").AgentSessionUiEvent) => void) | undefined
+  const unsubscribe = jest.fn()
+  const create: CreateSession = () => ({
+    sessionId: "native",
+    send: async () => result(),
+    close: async () => undefined,
+    subscribeUiEvents: (callback) => {
+      listener = callback
+      return unsubscribe
+    },
+  })
+  const { result: hook } = renderHook(() =>
+    useAgentSession({
+      config,
+      dispatch: (action) => actions.push(action),
+      createSession: create,
+      subscribeSidecar: () => () => undefined,
+      createHooks: spyHookRunner,
+    })
+  )
+  await act(async () => {
+    await hook.current.send("hello")
+  })
+  act(() =>
+    listener?.({
+      kind: "extension-ui",
+      id: "one",
+      update: { kind: "status", key: "ext", text: "idle" },
+    })
+  )
+  expect(actions).toContainEqual({
+    type: "EXTENSION_UI_UPDATE",
+    event: expect.objectContaining({
+      id: "one",
+      update: { kind: "status", key: "ext", text: "idle" },
+    }),
+  })
+  await act(async () => {
+    await hook.current.clear("next")
+  })
+  expect(unsubscribe).toHaveBeenCalledTimes(1)
+  const count = actions.length
+  act(() => listener?.({ kind: "input-queue-cleared", text: "stale", imagePaths: [] }))
+  expect(actions).toHaveLength(count)
+})

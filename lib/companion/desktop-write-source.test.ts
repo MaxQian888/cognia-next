@@ -32,7 +32,9 @@ const remoteRunStartMock = jest.fn(async (_request: unknown) => ({
   runId: "run",
   agentId: "agent",
 }))
+const remoteSessionOperationMock = jest.fn(async (..._args: unknown[]) => ({ value: null }))
 jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-service", () => ({
+  executeRemoteSessionOperation: (...args: unknown[]) => remoteSessionOperationMock(...args),
   startRemoteExternalRun: (...args: unknown[]) => remoteRunStartMock(args[0]),
 }))
 const cogniaCatalogMock = jest.fn()
@@ -2768,4 +2770,28 @@ it("handles rejected native unregister promises during source teardown", async (
   const attached = catchSpies.map((spy) => spy.mock.calls.length)
   await Promise.all(failures.map((failure) => failure.catch(() => {})))
   expect(attached).toEqual([1])
+})
+
+it("routes advanced session operations through the admitted native-session service", async () => {
+  const request = {
+    requestId: "request",
+    chatSessionId: "chat",
+    externalSessionId: "native",
+    stamp: { configId: "agent", revision: "revision", lifecycleGeneration: 1 },
+    action: { operation: "entries" },
+    callerDeviceId: "phone",
+  }
+  await dispatchCommand("external_agent_session_query", request)
+  expect(remoteSessionOperationMock).toHaveBeenLastCalledWith(request, true)
+  await dispatchCommand("external_agent_session_mutate", {
+    ...request,
+    action: { operation: "rename", name: "Title" },
+  })
+  expect(remoteSessionOperationMock).toHaveBeenLastCalledWith(
+    { ...request, action: { operation: "rename", name: "Title" } },
+    false
+  )
+  await expect(
+    dispatchCommand("external_agent_session_mutate", { ...request, externalSessionId: "" })
+  ).rejects.toThrow("identities")
 })

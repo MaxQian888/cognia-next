@@ -26,6 +26,8 @@ import {
   __setRemoteHostConfigDepsForTests,
 } from "./remote-host-configs"
 import {
+  createRemoteSessionOperationsClient,
+  watchRemoteSession,
   EXTERNAL_RUN_EVENT_TOPIC,
   REMOTE_RUN_COMMANDS,
   cancelRemoteExternalTurn,
@@ -419,4 +421,85 @@ describe("whenRemoteRunChannelSubscribed", () => {
       delete transport.whenSubscribed
     }
   })
+})
+
+describe("remote native session facade", () => {
+  const target = {
+    stamp: { configId: "host", revision: "r1", lifecycleGeneration: 1 },
+    chatSessionId: "chat",
+    externalSessionId: "native",
+  }
+  it("uses the same exact session and preserves turn fork boundaries through the mutation command", async () => {
+    reply = { value: { id: "fork" } }
+    const client = createRemoteSessionOperationsClient(target)
+    expect(
+      await client.forkSession("host", "native", {
+        forkAt: { kind: "turn", id: "turn-1", boundary: "before" },
+      })
+    ).toEqual({ id: "fork" })
+    expect(calls.at(-1)).toMatchObject({
+      command: "external_agent_session_mutate",
+      payload: {
+        ...target,
+        action: { operation: "fork", forkAt: { kind: "turn", id: "turn-1", boundary: "before" } },
+      },
+    })
+    await expect(client.steerSession("host", undefined, "hello")).rejects.toThrow("required")
+    await expect(client.renameSession("host", "another-chat", "name")).rejects.toThrow(
+      "target changed"
+    )
+    expect(calls).toHaveLength(1)
+  })
+  it("queries capabilities through the read channel", async () => {
+    reply = { value: { steering: "supported" } }
+    await expect(
+      createRemoteSessionOperationsClient(target).getSessionOperationCapabilities("host", "native")
+    ).resolves.toEqual({ steering: "supported" })
+    expect(calls.at(-1)?.command).toBe("external_agent_session_query")
+  })
+})
+
+it("reports watch renewal failure before unsubscribing so pending operations settle", async () => {
+  jest.useFakeTimers()
+  const terminal = jest.fn()
+  reply = { value: { session: { id: "native" } } }
+  const target = {
+    stamp: { configId: "host", revision: "r1", lifecycleGeneration: 1 },
+    chatSessionId: "chat",
+    externalSessionId: "native",
+  }
+  const watcher = await watchRemoteSession(
+    target,
+    { onEvent: jest.fn(), onTerminal: terminal },
+    "shell"
+  )
+  restoreDeps?.()
+  restoreDeps = __setRemoteHostConfigDepsForTests({
+    hasLocalAuthority: () => false,
+    isRemoteHostActive: () => true,
+    activeHostFeatureManifest: () => null,
+  })
+  await jest.advanceTimersByTimeAsync(60_000)
+  expect(terminal).toHaveBeenCalledWith("failed", expect.any(String))
+  expect(unsubscribe).toHaveBeenCalled()
+  await watcher.close()
+  jest.useRealTimers()
+})
+
+it("rejects unsupported image MIME types before sending a queued host input", async () => {
+  const target = {
+    stamp: { configId: "host", revision: "r1", lifecycleGeneration: 1 },
+    chatSessionId: "chat",
+    externalSessionId: "native",
+  }
+  const client = createRemoteSessionOperationsClient(target)
+  await expect(
+    client.enqueueSessionInput(
+      "host",
+      "native",
+      { text: "image", images: [{ data: "AAAA", mimeType: "text/html" }] },
+      "follow_up"
+    )
+  ).rejects.toThrow("MIME")
+  expect(calls).toHaveLength(0)
 })

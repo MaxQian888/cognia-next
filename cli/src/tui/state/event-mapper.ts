@@ -54,6 +54,7 @@ export const CANONICAL_TUI_CLASSIFICATION = {
   task: "status",
   "task-inventory": "status",
   notification: "status",
+  "extension-ui": "status",
   informational: "transcript",
   "commands-changed": "audit",
   "memory-recall": "audit",
@@ -265,6 +266,7 @@ function eventSummary(event: CanonicalAgentEvent): string {
     case "tool-result":
     case "usage":
     case "compact":
+    case "extension-ui":
       return event.kind
   }
 }
@@ -285,7 +287,7 @@ function eventLevel(event: CanonicalAgentEvent): "info" | "warning" | "error" {
 /** Map the preferred canonical stream without falling back to legacy events. */
 export function canonicalEnvelopeToActions(
   envelope: AgentEventEnvelope,
-  options: { permissionHandledByGate?: boolean } = {}
+  options: { permissionHandledByGate?: boolean; autonomous?: boolean } = {}
 ): TuiAction[] {
   const event = envelope.event
   // The Pi adapter marks noninteractive UI/lifecycle bookkeeping as diagnostics.
@@ -313,6 +315,58 @@ export function canonicalEnvelopeToActions(
   }
 
   switch (event.kind) {
+    case "lifecycle":
+      if (!options.autonomous) return []
+      if (event.phase === "started") return [{ type: "TURN_START", prompt: "", echo: false }]
+      return event.phase === "interrupted"
+        ? [{ type: "TURN_ABORTED" }]
+        : [
+            {
+              type: "TURN_COMMIT",
+              result: {
+                text: "",
+                messageId: envelope.eventId,
+                a2uiSurfaces: {},
+                a2uiSurfaceOrder: [],
+              },
+            },
+          ]
+    case "user-input":
+      return options.autonomous
+        ? [
+            {
+              type: "REMOTE_USER_INPUT",
+              text: [event.text, ...(event.attachments ?? []).map((item) => `@${item.ref}`)]
+                .filter(Boolean)
+                .join("\n"),
+            },
+          ]
+        : []
+    case "failure":
+      if (options.autonomous)
+        return [{ type: "TURN_ERROR", message: event.message, category: event.code }]
+      return [
+        {
+          type: "CANONICAL_EVENT_NOTICE",
+          eventId: envelope.eventId,
+          level: "error",
+          title: eventTitle(event),
+          summary: event.message,
+        },
+      ]
+    case "extension-ui":
+      return [
+        {
+          type: "EXTENSION_UI_UPDATE",
+          event: {
+            type: "extension_ui_update",
+            id: event.id,
+            update: event.update,
+            timestamp: new Date(envelope.timestamp),
+            sessionId: envelope.sessionId,
+          },
+        },
+      ]
     case "rate-limit":
       return [
         {

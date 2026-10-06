@@ -25,6 +25,9 @@
  * one-time and device-scoped.
  */
 
+import { z } from "zod"
+import type { ExternalAgentManager } from "../../manager"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { publishHostEvent } from "@/lib/companion/host-event-publisher"
 import type {
   AcpConfigOption,
@@ -110,6 +113,7 @@ export interface RemoteRunFrame {
    */
   seq: number
   event: ExternalAgentEvent
+  operationResult?: { requestId: string; value?: unknown; error?: string }
   /** Set on the single frame that ends the run. */
   terminal?: "completed" | "failed" | "cancelled"
   /** Present on `failed`. Never carries a stack or a host path. */
@@ -135,6 +139,7 @@ interface PendingDecision {
   /** Only this device may answer. Undefined when the host started the run. */
   deviceId?: string
   options?: AcpPermissionOption[]
+  reply?: (response: AcpPermissionResponse) => void
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -172,7 +177,34 @@ export interface RemoteRunDeps {
 }
 
 /** The slice of `ExternalAgentManager` this module uses. */
-export interface ExternalRunManager {
+export interface ExternalRunManager extends Partial<
+  Pick<
+    ExternalAgentManager,
+    | "getSession"
+    | "getSessionOperationCapabilities"
+    | "refreshSessionCommands"
+    | "executeSessionCommand"
+    | "enqueueSessionInput"
+    | "clearSessionInputQueue"
+    | "setSessionQueuePolicy"
+    | "setSessionRuntimeControls"
+    | "getSessionRuntimeState"
+    | "abortSessionRetry"
+    | "getSessionEntries"
+    | "getSessionTree"
+    | "forkSession"
+    | "cloneSession"
+    | "renameSession"
+    | "archiveSession"
+    | "unarchiveSession"
+    | "exportSessionHtml"
+    | "executeSessionShell"
+    | "abortSessionShell"
+    | "cancel"
+    | "steerSession"
+    | "addEventListener"
+  >
+> {
   getAgent(agentId: string): unknown | undefined
   addAgent(config: ExternalAgentConfig, options?: { connect?: boolean }): Promise<unknown>
   removeAgent(agentId: string): Promise<void>
@@ -248,6 +280,16 @@ export function __setRemoteRunDepsForTests(next: Partial<RemoteRunDeps>): () => 
 /** Test seam — forget every run, decision and mount. */
 export function __resetRemoteRunStateForTests(): void {
   for (const decision of decisions.values()) clearTimeout(decision.timer)
+  for (const watch of sessionWatches.values()) {
+    clearTimeout(watch.timer)
+    watch.unsubscribe()
+  }
+  sessionWatches.clear()
+  for (const owner of sessionOwners.values()) {
+    owner.unsubscribe?.()
+    if (owner.timer) clearTimeout(owner.timer)
+  }
+  sessionOwners.clear()
   runs.clear()
   decisions.clear()
   resetHostConfigMountsForTests()
@@ -275,7 +317,8 @@ function emit(
   run: ActiveRun,
   event: ExternalAgentEvent,
   terminal?: RemoteRunFrame["terminal"],
-  error?: string
+  error?: string,
+  operationResult?: RemoteRunFrame["operationResult"]
 ): Promise<void> {
   run.seq += 1
   const frame: RemoteRunFrame = {
@@ -285,6 +328,7 @@ function emit(
     event,
     ...(terminal ? { terminal } : {}),
     ...(error ? { error } : {}),
+    ...(operationResult ? { operationResult } : {}),
   }
   const published = run.publishing.then(() => deps.publish(EXTERNAL_RUN_EVENT_TOPIC, frame))
   run.publishing = published.catch(() => undefined)
@@ -473,11 +517,13 @@ async function expireDecision(id: string): Promise<void> {
   const manager = await deps.getManager()
   try {
     if (decision.kind === "permission") {
-      await manager.respondToPermission(decision.agentId, decision.externalSessionId, {
+      const response = {
         requestId: decision.responseRequestId,
         granted: false,
         optionId: pickPermissionOptionId("deny", decision.options),
-      })
+      }
+      if (decision.reply) decision.reply(response)
+      else await manager.respondToPermission(decision.agentId, decision.externalSessionId, response)
     } else {
       await manager.respondToElicitation(decision.agentId, {
         requestId: decision.responseRequestId,
@@ -519,12 +565,14 @@ export async function resolveRemoteDecision(input: {
   const manager = await deps.getManager()
   if (held.kind === "permission") {
     const decision: ApprovalDecision = input.decision ?? "deny"
-    await manager.respondToPermission(held.agentId, held.externalSessionId, {
+    const response: AcpPermissionResponse = {
       requestId: held.responseRequestId,
       granted: decision !== "deny",
       ...(decision === "allow_always" ? { rememberChoice: true, scope: "session" as const } : {}),
       optionId: pickPermissionOptionId(decision, held.options),
-    })
+    }
+    if (held.reply) held.reply(response)
+    else await manager.respondToPermission(held.agentId, held.externalSessionId, response)
   } else {
     await manager.respondToElicitation(held.agentId, {
       ...(input.elicitation ?? { action: "cancel" }),
@@ -605,7 +653,14 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
   // instead of costing that frame.
   void (async () => {
     try {
-      await manager.execute(agentId, request.prompt, {
+      if (request.externalSessionId && !isGatewayTaskSessionId(request.externalSessionId))
+        assertSessionOwner(
+          agentId,
+          request.externalSessionId,
+          request.chatSessionId,
+          request.callerDeviceId
+        )
+      const result = await manager.execute(agentId, request.prompt, {
         sessionId: request.externalSessionId,
         // Omitted rather than passed as undefined so the manager's own
         // `if (options?.model)` gate reads the same on both lanes: an absent
@@ -632,6 +687,11 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
           if (run.settled) return
           if (event.sessionId) {
             run.externalSessionId = event.sessionId
+            bindSessionOwner(manager, agentId, event.sessionId, {
+              chatSessionId: request.chatSessionId,
+              deviceId: request.callerDeviceId,
+              revision: request.stamp.revision,
+            })
           }
           if (event.type === "permission_request" || event.type === "elicitation_request") {
             registerDecision(run, event)
@@ -641,6 +701,15 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
           void emit(run, event).catch(() => undefined)
         },
       })
+      const completedSessionId = (result as { sessionId?: string } | null)?.sessionId
+      if (completedSessionId) {
+        run.externalSessionId = completedSessionId
+        bindSessionOwner(manager, agentId, completedSessionId, {
+          chatSessionId: request.chatSessionId,
+          deviceId: request.callerDeviceId,
+          revision: request.stamp.revision,
+        })
+      }
       await reportSessionModels(run, manager)
       await settle(run, "completed")
     } catch (cause) {
@@ -692,4 +761,510 @@ export function activeRemoteExternalRuns(): Array<{
     agentId,
     seq,
   }))
+}
+
+// Session operations reuse the run admission and decision channels. Native IDs
+// alone never confer authority over another paired device's conversation.
+interface SessionOwner {
+  chatSessionId: string
+  deviceId?: string
+  revision: string
+  pending?: ExternalAgentEvent[]
+  unsubscribe?: () => void
+  timer?: ReturnType<typeof setTimeout>
+}
+const sessionOwners = new Map<string, SessionOwner>()
+function bindSessionOwner(
+  manager: ExternalRunManager,
+  agentId: string,
+  sessionId: string,
+  identity: SessionOwner
+) {
+  const key = `${agentId}:${sessionId}`
+  const existing = sessionOwners.get(key)
+  if (existing) return
+  const owner: SessionOwner = {
+    chatSessionId: identity.chatSessionId,
+    deviceId: identity.deviceId,
+    revision: identity.revision,
+    pending: [],
+  }
+  sessionOwners.set(key, owner)
+  // Bridge the brief native-session creation -> browser watch admission gap.
+  // Once attached, the existing companion event bus owns replay and ordering.
+  owner.unsubscribe = manager.addEventListener?.(agentId, (event) => {
+    if (event.sessionId !== sessionId || event.delivery !== "out_of_band") return
+    if (
+      [...sessionWatches.values()].some(
+        (watch) =>
+          watch.run.agentId === agentId &&
+          watch.run.externalSessionId === sessionId &&
+          watch.purpose === "transcript"
+      )
+    )
+      return
+    if (owner.pending!.length >= 256) {
+      owner.pending = [
+        {
+          type: "error",
+          timestamp: new Date(deps.now()),
+          sessionId,
+          delivery: "out_of_band",
+          error: "Remote session events exceeded the handoff buffer",
+          code: "REMOTE_SESSION_GAP",
+          recoverable: true,
+        } as ExternalAgentEvent,
+      ]
+      void manager.cancel?.(agentId, sessionId).catch(() => undefined)
+      return
+    }
+    owner.pending!.push(event)
+  })
+  owner.timer = setTimeout(() => {
+    owner.unsubscribe?.()
+    owner.unsubscribe = undefined
+    owner.pending = []
+  }, SESSION_WATCH_TTL_MS)
+  ;(owner.timer as { unref?: () => void }).unref?.()
+}
+const sessionWatches = new Map<
+  string,
+  {
+    run: ActiveRun
+    unsubscribe: () => void
+    timer: ReturnType<typeof setTimeout>
+    stopShell?: () => Promise<void>
+    purpose: "transcript" | "presentation" | "shell"
+  }
+>()
+const SESSION_WATCH_TTL_MS = 180_000
+const forkTargetSchema = z
+  .object({
+    kind: z.enum(["entry", "turn"]),
+    id: z.string().min(1),
+    boundary: z.enum(["before", "through"]),
+  })
+  .strict()
+const sessionOperationSchema = z.discriminatedUnion("operation", [
+  z
+    .object({
+      operation: z.literal("watch"),
+      watchId: z.string().min(1),
+      purpose: z.enum(["transcript", "presentation", "shell"]).optional(),
+    })
+    .strict(),
+  z.object({ operation: z.literal("unwatch"), watchId: z.string().min(1) }).strict(),
+  z.object({ operation: z.literal("rename"), name: z.string().trim().min(1) }).strict(),
+  z.object({ operation: z.literal("steer"), text: z.string().min(1) }).strict(),
+  z.object({ operation: z.literal("commandExecution"), command: z.string().min(1) }).strict(),
+  z
+    .object({
+      operation: z.enum([
+        "capabilities",
+        "snapshot",
+        "commands",
+        "runtimeState",
+        "entries",
+        "tree",
+        "exportHtml",
+        "clearQueue",
+        "abortRetry",
+        "archive",
+        "unarchive",
+        "abortShell",
+        "cancel",
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("inputQueue"),
+      input: z
+        .object({
+          text: z.string(),
+          images: z
+            .array(
+              z
+                .object({
+                  data: z.string().max(14_000_000),
+                  mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+                })
+                .strict()
+            )
+            .max(20)
+            .optional(),
+        })
+        .strict(),
+      mode: z.enum(["steer", "follow_up"]),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("queuePolicy"),
+      policy: z
+        .object({
+          steering: z.enum(["all", "one-at-a-time"]).optional(),
+          followUp: z.enum(["all", "one-at-a-time"]).optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("runtimeControls"),
+      controls: z
+        .object({ autoCompaction: z.boolean().optional(), autoRetry: z.boolean().optional() })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("fork"),
+      forkAt: forkTargetSchema.optional(),
+      forkAtEntryId: z.string().min(1).optional(),
+    })
+    .strict(),
+  z.object({ operation: z.literal("clone") }).strict(),
+  z
+    .object({
+      operation: z.literal("shell"),
+      command: z.string().min(1),
+      excludeFromContext: z.boolean().optional(),
+      watchId: z.string().min(1),
+    })
+    .strict(),
+])
+export type RemoteSessionOperation = z.infer<typeof sessionOperationSchema>
+export interface RemoteSessionTarget {
+  stamp: ExternalAgentConfigStamp
+  chatSessionId: string
+  externalSessionId: string
+}
+export interface RemoteSessionRequest extends RemoteSessionTarget {
+  requestId: string
+  action: RemoteSessionOperation
+  callerDeviceId?: string
+}
+export const REMOTE_SESSION_READS = new Set<RemoteSessionOperation["operation"]>([
+  "capabilities",
+  "snapshot",
+  "commands",
+  "runtimeState",
+  "entries",
+  "tree",
+  "watch",
+  "unwatch",
+])
+
+function assertSessionOwner(
+  agentId: string,
+  sessionId: string,
+  chatSessionId: string,
+  callerDeviceId?: string
+) {
+  const owner = sessionOwners.get(`${agentId}:${sessionId}`)
+  if (!owner || owner.chatSessionId !== chatSessionId || owner.deviceId !== callerDeviceId)
+    throw new Error("External session does not belong to this caller and conversation")
+  return owner
+}
+
+async function closeSessionWatch(id: string) {
+  const watch = sessionWatches.get(id)
+  if (!watch) return
+  sessionWatches.delete(id)
+  clearTimeout(watch.timer)
+  watch.unsubscribe()
+  await watch.stopShell?.().catch(() => undefined)
+  for (const [decisionId, decision] of decisions)
+    if (decision.runId === id) await expireDecision(decisionId)
+  watch.run.settled = true
+  await deps.release(id)
+}
+
+export async function executeRemoteSessionOperation(
+  request: RemoteSessionRequest,
+  readOnly: boolean
+): Promise<{ value: unknown }> {
+  const action = sessionOperationSchema.parse(request.action)
+  if (readOnly && !REMOTE_SESSION_READS.has(action.operation))
+    throw new Error("Session mutation requires interactive authorization")
+  const owner = assertSessionOwner(
+    request.stamp.configId,
+    request.externalSessionId,
+    request.chatSessionId,
+    request.callerDeviceId
+  )
+  if (owner.revision !== request.stamp.revision)
+    throw new Error("External session belongs to a different configuration revision")
+  if (
+    (action.operation === "commandExecution" && !hasNoLeakingPiiDeep(action.command)) ||
+    (action.operation === "inputQueue" && !hasNoLeakingPiiDeep(action.input)) ||
+    (action.operation === "steer" && !hasNoLeakingPiiDeep(action.text))
+  )
+    throw new Error("External input rejected by the PII gate")
+  if (action.operation === "unwatch") {
+    const watch = sessionWatches.get(action.watchId)
+    if (
+      watch &&
+      (watch.run.deviceId !== request.callerDeviceId ||
+        watch.run.externalSessionId !== request.externalSessionId ||
+        watch.run.agentId !== request.stamp.configId)
+    )
+      throw new Error("Session watch does not belong to this caller")
+    await closeSessionWatch(action.watchId)
+    return { value: null }
+  }
+  const admission = await deps.admit(request.requestId, request.stamp)
+  if (!admission.ok) throw new Error("External agent configuration is not currently admitted")
+  let retainLease = false
+  try {
+    const manager = await deps.getManager()
+    const id = request.stamp.configId
+    const sid = request.externalSessionId
+    if (!manager.getSession?.(id, sid)) throw new Error("External session is no longer available")
+    const call = async (name: keyof ExternalRunManager, ...args: unknown[]) => {
+      const method = manager[name]
+      if (typeof method !== "function")
+        throw new Error(`Host does not support session operation ${action.operation}`)
+      return (method as (...values: unknown[]) => Promise<unknown>).apply(manager, [
+        id,
+        sid,
+        ...args,
+      ])
+    }
+    let value: unknown
+    switch (action.operation) {
+      case "capabilities":
+        value = await call("getSessionOperationCapabilities")
+        break
+      case "snapshot":
+        value = manager.getSession(id, sid)
+        break
+      case "commands":
+        value = await call("refreshSessionCommands")
+        break
+      case "runtimeState":
+        value = await call("getSessionRuntimeState")
+        break
+      case "entries":
+        value = await call("getSessionEntries")
+        break
+      case "tree":
+        value = await call("getSessionTree")
+        break
+      case "clearQueue":
+        value = await call("clearSessionInputQueue")
+        break
+      case "abortRetry":
+        value = await call("abortSessionRetry")
+        break
+      case "rename":
+        value = await call("renameSession", action.name)
+        break
+      case "archive":
+        value = await call("archiveSession")
+        break
+      case "unarchive":
+        value = await call("unarchiveSession")
+        break
+      case "exportHtml":
+        value = await call("exportSessionHtml")
+        break
+      case "abortShell":
+        value = await call("abortSessionShell")
+        break
+      case "cancel":
+        value = await call("cancel")
+        break
+      case "steer":
+        value = await call("steerSession", action.text)
+        break
+      case "commandExecution":
+        value = await call("executeSessionCommand", action.command)
+        break
+      case "inputQueue":
+        value = await call("enqueueSessionInput", action.input, action.mode)
+        break
+      case "queuePolicy":
+        value = await call("setSessionQueuePolicy", action.policy)
+        break
+      case "runtimeControls":
+        value = await call("setSessionRuntimeControls", action.controls)
+        break
+      case "fork":
+      case "clone": {
+        value = await call(
+          action.operation === "fork" ? "forkSession" : "cloneSession",
+          action.operation === "fork"
+            ? { forkAt: action.forkAt, forkAtEntryId: action.forkAtEntryId }
+            : undefined
+        )
+        const newId = (value as { id?: string })?.id
+        if (newId) bindSessionOwner(manager, id, newId, owner)
+        break
+      }
+      case "watch": {
+        const previous = sessionWatches.get(action.watchId)
+        if (previous) {
+          if (
+            previous.run.deviceId !== request.callerDeviceId ||
+            previous.run.externalSessionId !== sid ||
+            previous.run.agentId !== id
+          )
+            throw new Error("Session watch does not belong to this caller")
+          clearTimeout(previous.timer)
+          previous.timer = setTimeout(() => {
+            void closeSessionWatch(action.watchId).catch(() => undefined)
+          }, SESSION_WATCH_TTL_MS)
+          ;(previous.timer as { unref?: () => void }).unref?.()
+        } else {
+          if (!manager.addEventListener)
+            throw new Error("Host does not support session event subscriptions")
+          if (action.watchId !== request.requestId || runs.has(action.watchId))
+            throw new Error("Invalid session watch identity")
+          const run: ActiveRun = {
+            runId: action.watchId,
+            chatSessionId: request.chatSessionId,
+            agentId: id,
+            revision: request.stamp.revision,
+            deviceId: request.callerDeviceId,
+            seq: 0,
+            settled: false,
+            externalSessionId: sid,
+            cogniaBound: false,
+            publishing: Promise.resolve(),
+          }
+          const purpose = action.purpose ?? "transcript"
+          const unsubscribe = manager.addEventListener(id, (event) => {
+            if (purpose === "shell") return
+            if (
+              purpose === "presentation" &&
+              ![
+                "commands_update",
+                "session_info_update",
+                "extension_ui_update",
+                "plan_update",
+                "config_options_update",
+              ].includes(event.type)
+            )
+              return
+            if (event.sessionId !== sid || run.settled) return
+            if (
+              event.delivery !== "out_of_band" &&
+              !["session_info_update", "input_queue_cleared", "commands_update"].includes(
+                event.type
+              )
+            )
+              return
+            if (event.type === "permission_request" || event.type === "elicitation_request")
+              registerDecision(run, event)
+            void emit(run, event).catch(() => undefined)
+          })
+          const timer = setTimeout(() => {
+            void closeSessionWatch(action.watchId).catch(() => undefined)
+          }, SESSION_WATCH_TTL_MS)
+          ;(timer as { unref?: () => void }).unref?.()
+          sessionWatches.set(action.watchId, { run, unsubscribe, timer, purpose })
+          retainLease = true
+          for (const event of purpose === "transcript" ? (owner.pending?.splice(0) ?? []) : []) {
+            if (event.type === "permission_request" || event.type === "elicitation_request")
+              registerDecision(run, event)
+            await emit(run, event)
+          }
+        }
+        value = { watchId: action.watchId, session: manager.getSession(id, sid) }
+        break
+      }
+      case "shell": {
+        const watch = sessionWatches.get(action.watchId)
+        if (
+          !watch ||
+          watch.run.deviceId !== request.callerDeviceId ||
+          watch.run.externalSessionId !== sid ||
+          watch.run.agentId !== id ||
+          watch.purpose !== "shell"
+        )
+          throw new Error("A live session watch is required for native shell approval")
+        const execution = call("executeSessionShell", action.command, {
+          excludeFromContext: action.excludeFromContext,
+          onPermissionRequest: (
+            permission: import("@/types/agent/external-agent").AcpPermissionRequest
+          ) =>
+            new Promise<AcpPermissionResponse>((resolve) => {
+              const event: ExternalAgentEvent = {
+                type: "permission_request",
+                request: permission,
+                sessionId: sid,
+                timestamp: new Date(deps.now()),
+                delivery: "out_of_band",
+              }
+              registerDecision(watch.run, event)
+              const decision = decisions.get(
+                remoteDecisionId(watch.run.runId, permission.requestId ?? permission.id)
+              )
+              if (!decision) {
+                resolve({ requestId: permission.requestId ?? permission.id, granted: false })
+                return
+              }
+              decision.reply = resolve
+              void emit(watch.run, event).catch(() => {
+                void expireDecision(
+                  remoteDecisionId(watch.run.runId, permission.requestId ?? permission.id)
+                )
+              })
+            }),
+        })
+        retainLease = true
+        watch.stopShell = async () => {
+          await call("abortSessionShell")
+        }
+        void execution
+          .then(
+            (result) =>
+              emit(
+                watch.run,
+                {
+                  type: "progress",
+                  timestamp: new Date(deps.now()),
+                  sessionId: sid,
+                  message: "",
+                  progress: 100,
+                },
+                undefined,
+                undefined,
+                { requestId: request.requestId, value: result }
+              ),
+            (error) =>
+              emit(
+                watch.run,
+                {
+                  type: "progress",
+                  timestamp: new Date(deps.now()),
+                  sessionId: sid,
+                  message: "",
+                  progress: 100,
+                },
+                undefined,
+                undefined,
+                {
+                  requestId: request.requestId,
+                  error: error instanceof Error ? error.message : String(error),
+                }
+              )
+          )
+          .catch(() => undefined)
+          .finally(async () => {
+            watch.stopShell = undefined
+            await deps.release(request.requestId)
+          })
+          .catch(() => undefined)
+        value = { started: true }
+
+        break
+      }
+    }
+    return { value: value ?? null }
+  } finally {
+    if (!retainLease) await deps.release(request.requestId)
+  }
 }

@@ -7,17 +7,16 @@ It uses the official `@deepseek-ai/dsh` product launcher and the shipped
 
 ## Supported release and protocol
 
-The supported npm `latest` release is **0.1.5-rc.1**, verified on 2026-09-12.
-`0.1.5-rc.2` is the separate `next` channel. The runtime manifest pins the product,
-transport packages, and the complete DSH dependency namespace to rc.1: upstream's
-caret dependencies otherwise resolve 210 transitive packages from the next channel.
+The managed release is **0.2.0-rc.2**, verified against the published package
+sources on 2026-10-05. The runtime pins the product, transport packages, and
+DSH dependency namespace together so caret dependencies cannot mix releases.
 The explicit overrides come from the installed product's dependency closure and
 must be refreshed together on the next supported release upgrade. The installer
 retains a lockfile and validates its digest.
 
 The SDK requests are `initialize`, `session/prompt`, and `shutdown`; notifications
 remain `session.event`, `session.status`, `subagent.started`, and `subagent.finished`.
-Durable sessions use format **3**. The transport's `serverInfo.version` is still
+Durable sessions use format **4**. The transport's `serverInfo.version` is still
 `0.0.1`, so it cannot establish package compatibility. The launcher checks installed
 package versions before loading upstream code and rejects older releases.
 
@@ -57,7 +56,7 @@ with `failOnStartupError:true`. For ACP, use the same declarations through
 MCP tools retain `mcp__cognia-tools__<tool>` / `mcp__cognia-plugin-tools__<tool>`
 identity. Cognia's broker owns permissions, approvals, extra workspace roots,
 and actual tool execution; the DSH bridge does not duplicate those decisions.
-MCP resources/prompts are not upstream bridged capabilities.
+MCP tools are mounted through the upstream client; the minimal bundle also owns its resource services.
 
 A Cognia model lease sets `COGNIA_DSH_PROVIDER=cognia`, `COGNIA_DSH_MODEL`,
 `COGNIA_DSH_GATEWAY_TOKEN`, and `COGNIA_DSH_GATEWAY_CONFIG`. The latter contains
@@ -115,5 +114,5 @@ The package carries the full official launcher closure, including optional nativ
 providers. The smoke results establish the local macOS installation; other platforms
 still need their own native-binding and sandbox checks before claiming device support.
 
-Upstream: [product launcher](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.1.5-rc.1),
-[SDK minimal bundle](https://www.npmjs.com/package/@deepseek-ai/dsh-sdk-minimal/v/0.1.5-rc.1).
+Upstream: [product launcher](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.2.0-rc.2),
+[SDK minimal bundle](https://www.npmjs.com/package/@deepseek-ai/dsh-sdk-minimal/v/0.2.0-rc.2).

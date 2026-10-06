@@ -52,8 +52,8 @@ import { piSessionTree } from "./session-tree"
 /** The Pi version this reader was last verified against. */
 export const PI_HISTORY_FORMAT: HistoryFormatInfo = Object.freeze({
   sourceId: PI_SESSION_SOURCE_ID,
-  verifiedVersion: "0.84.4",
-  verifiedAt: "2026-08-29",
+  verifiedVersion: "1.0.2",
+  verifiedAt: "2026-10-05",
   acceptedExtensions: Object.freeze([".jsonl"]),
 })
 
@@ -61,7 +61,7 @@ export const PI_HISTORY_FORMAT: HistoryFormatInfo = Object.freeze({
 export const PI_SUPPORTED_SESSION_VERSIONS: ReadonlySet<number> = new Set([1, 2, 3])
 
 // ============================================================================
-// Wire types (docs/session-format.md, Pi 0.84.1)
+// Wire types (docs/session-format.md and pi-ai declarations, Pi 1.0.2)
 // ============================================================================
 
 export interface PiHeader {
@@ -91,6 +91,8 @@ export interface PiMessage {
   toolCallId?: string
   toolName?: string
   isError?: boolean
+  /** Pi records bounded child-call metadata, but never the child results. */
+  nestedCalls?: { calls: unknown[]; complete: boolean }
   provider?: string
   model?: string
   usage?: Record<string, unknown>
@@ -223,7 +225,8 @@ function plainText(parts: readonly HistoryPart[]): string {
 /**
  * Pi's on-disk token counts as neutral usage.
  *
- * Pi writes `{ input, output, reasoning, cacheRead, cacheWrite, costUsd }`.
+ * Pi writes `{ input, output, cacheRead, cacheWrite, cost: { total } }`;
+ * legacy import files may instead carry numeric `costUsd` or `cost`.
  * Passing the raw blob through — as the app's adapter once did, alone among
  * the seven readers — produced a usage row per assistant turn whose every
  * figure was ZERO while the session still reported imported usage, so the
@@ -247,13 +250,22 @@ function usageFields(
   const hasUsage = !!raw && typeof raw === "object" && Object.keys(raw).length > 0
   if (!hasUsage) return message.model ? { annotations: { model: message.model } } : {}
 
-  const cost = num("costUsd", "totalCostUsd", "cost")
+  const nativeCost = raw?.cost
+  const cost = [
+    raw?.costUsd,
+    raw?.totalCostUsd,
+    nativeCost && typeof nativeCost === "object"
+      ? (nativeCost as Record<string, unknown>).total
+      : nativeCost,
+  ].find(
+    (value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
+  )
   const usage: HistoryUsage = {
     inputTokens: num("input", "inputTokens", "promptTokens"),
     outputTokens: num("output", "outputTokens", "completionTokens") + num("reasoning"),
     cacheReadInputTokens: num("cacheRead", "cacheReadInputTokens"),
     cacheCreationInputTokens: num("cacheWrite", "cacheCreationInputTokens"),
-    ...(cost > 0 ? { totalCostUsd: cost } : {}),
+    ...(cost !== undefined ? { totalCostUsd: cost } : {}),
   }
   return { usage, ...(message.model ? { usageModel: message.model } : {}) }
 }
@@ -300,23 +312,41 @@ function buildTurns(chain: readonly PiEntry[]): BuiltTurns {
           // Attach to the assistant turn that issued the call.
           const ownerIndex = message.toolCallId ? toolOwner.get(message.toolCallId) : undefined
           const owner = ownerIndex !== undefined ? messages[ownerIndex] : undefined
-          const output = plainText(blocksToParts(contentBlocks(message.content)))
+          const resultParts = blocksToParts(contentBlocks(message.content))
+          const resultText = plainText(resultParts)
+          const attachments = resultParts.filter((part) => part.type === "file")
+          // Structured output survives the canonical codec's resultText JSON
+          // conversion. Do not invent separate child results: Pi does not store them.
+          const output: unknown = message.nestedCalls
+            ? { text: resultText, nestedCalls: message.nestedCalls }
+            : resultText
+          if (message.nestedCalls?.complete === false) note("incomplete_nested_calls")
           if (owner) {
-            owner.parts = owner.parts.map((part) => {
-              if (!isToolPart(part) || part.toolCallId !== message.toolCallId) return part
-              return historyTool({
-                name: message.toolName ?? "unknown",
-                toolCallId: message.toolCallId!,
-                input: part.input,
-                result:
-                  message.isError === true
-                    ? { ok: false, errorText: stringifyToolResult(output) }
-                    : { ok: true, output },
-              })
+            owner.parts = owner.parts.flatMap((part) => {
+              if (!isToolPart(part) || part.toolCallId !== message.toolCallId) return [part]
+              return [
+                historyTool({
+                  name: message.toolName ?? "unknown",
+                  toolCallId: message.toolCallId!,
+                  input: part.input,
+                  result:
+                    message.isError === true
+                      ? { ok: false, errorText: stringifyToolResult(output) }
+                      : { ok: true, output },
+                }),
+                ...attachments,
+              ]
             })
           } else {
             // No matching call — keep the output rather than dropping it.
-            messages.push({ role: "assistant", parts: [historyText(output)], createdAt })
+            messages.push({
+              role: "assistant",
+              parts: [
+                historyText(typeof output === "string" ? output : JSON.stringify(output)),
+                ...attachments,
+              ],
+              createdAt,
+            })
             note("orphan_tool_result")
           }
           break
@@ -412,6 +442,13 @@ function lossesFromNotes(notes: Readonly<Record<string, number>>): SessionLossEn
         path: "lines",
         kind: "dropped",
         detail: `${count} unparseable line(s), typically a write cut short, were skipped.`,
+      }
+    }
+    if (note === "incomplete_nested_calls") {
+      return {
+        path: "entries.toolResult.nestedCalls",
+        kind: "summarized",
+        detail: `${count} tool result(s) carry only part of their nested calls; Pi stores no child results.`,
       }
     }
     if (note === "orphan_tool_result") {
@@ -540,6 +577,13 @@ export function readPiSession(content: string, fallbackSessionId: string): Parse
     if (chain.length === 0) continue
     const branch = buildTurns(chain)
     if (branch.messages.length === 0) continue
+    if (branch.lossy.size > 0) {
+      const first = branch.messages[0]!
+      first.annotations = {
+        ...first.annotations,
+        piImport: { sessionVersion, notes: Object.fromEntries(branch.lossy) },
+      }
+    }
     branches.push({
       leafId,
       session: {

@@ -10,9 +10,10 @@
  *   pnpm exec tsx packages/sync-protocol/scripts/generate-fixtures.ts
  */
 
+// static-export-exempt: manual Node fixture writer, outside package src exports and app imports.
 import { writeFileSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
+import path from "node:path" // static-export-exempt: manual Node fixture writer resolves its output path; not shipped to clients.
+import { fileURLToPath } from "node:url" // static-export-exempt: manual Node fixture writer locates its script directory; not shipped to clients.
 
 import { concatBytes, toBase64Url, utf8 } from "../src/bytes"
 import { formatRecoveryKey } from "../src/crockford"

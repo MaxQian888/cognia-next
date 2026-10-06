@@ -22,7 +22,9 @@ import { createMockDeepSeek } from "./mock-deepseek.mjs"
 const source = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 // Dependencies must come from the exact managed package installation.
-const modules = join(dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh/package.json")))))
+const modules =
+  process.env.COGNIA_DSH_TEST_MODULES ??
+  join(dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh/package.json")))))
 
 for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
   test(
@@ -158,10 +160,7 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
             : {
                 cwd: root,
                 provider: "deepseek-official",
-                model:
-                  profile === "sdk-workspace"
-                    ? "deepseek-v4-flash-vision-exp"
-                    : "deepseek-v4-flash",
+                model: "deepseek-flash",
               }
         const initialized = await request(1, "initialize", params)
         assert.equal(initialized.error, undefined, JSON.stringify(initialized))
@@ -219,7 +218,10 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
           }
           if (profile === "sdk-workspace") {
             assert.equal(readFileSync(join(root, "must-not-exist.txt"), "utf8"), "forbidden")
-            assert.ok(JSON.stringify(requests[0].messages).includes("image_url"))
+            assert.ok(
+              JSON.stringify(requests[0].messages).includes("base64"),
+              JSON.stringify(requests[0].messages)
+            )
           }
           const shutdown = await request(4, "shutdown", {})
           assert.equal(shutdown.error, undefined)
@@ -234,7 +236,7 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
         )
         assert.ok(logs.length > 0, "session persistence must produce a durable log")
         const header = JSON.parse(readFileSync(join(sessionRoot, logs[0]), "utf8").split("\n")[0])
-        assert.equal(header.version, 3)
+        assert.equal(header.version, 4)
       } finally {
         child?.kill("SIGKILL")
         await backend?.close()

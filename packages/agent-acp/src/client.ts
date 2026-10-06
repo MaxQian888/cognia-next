@@ -1,3 +1,7 @@
+import {
+  createExternalAgentUiState,
+  reduceExternalAgentUiState,
+} from "@cognia/agent-runtime-kit/extension-ui-state"
 /**
  * ACP (Agent Client Protocol) Client Adapter
  *
@@ -786,6 +790,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private networkSocket?: AgentWebSocket
   /** Aborts the SSE subscription; replaces the old `EventSource` handle. */
   private networkEventAbort?: AbortController
+  private noticeId = 0
+  private presentationListeners = new Map<string, Set<(event: ExternalAgentEvent) => void>>()
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
   // Autonomous post-disconnect reconnection parameters. Derived from the
   // agent's `config.retryConfig` in `applyRetryConfig()` so a user-tuned retry
@@ -1133,6 +1139,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       await this.cleanupNativeSessionTerminals(sessionId)
     }
     this._sessions.clear()
+    this.presentationListeners.clear()
     this.pendingForkMcpRebind.clear()
     this.toolCallStates.clear()
     this.terminalSessions.clear()
@@ -2064,6 +2071,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.presentationListeners.delete(sessionId)
     this.pendingForkMcpRebind.delete(sessionId)
     this.clearUsageTracking(sessionId)
     this.log.info("Closed session", { sessionId })
@@ -2100,6 +2108,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.presentationListeners.delete(sessionId)
     this.pendingForkMcpRebind.delete(sessionId)
     this.clearUsageTracking(sessionId)
   }
@@ -4792,31 +4801,69 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
       }
 
+      case "notice": {
+        if (!this.featureProfile?.preview.notices?.advertised) return null
+        if (
+          typeof update.title !== "string" ||
+          !update.title.trim() ||
+          typeof update.severity !== "string"
+        )
+          return null
+        const event: Extract<ExternalAgentEvent, { type: "extension_ui_update" }> = {
+          type: "extension_ui_update",
+          sessionId,
+          timestamp,
+          id: `acp-notice-${++this.noticeId}`,
+          update: {
+            kind: "notification",
+            level:
+              update.severity === "warning" || update.severity === "error"
+                ? update.severity
+                : "info",
+            sourceSeverity: update.severity,
+            message: update.description ? `${update.title}\n${update.description}` : update.title,
+          },
+        }
+        const session = this._sessions.get(sessionId)
+        if (session)
+          session.metadata = {
+            ...session.metadata,
+            extensionUi: reduceExternalAgentUiState(
+              (session.metadata?.extensionUi as
+                | import("@cognia/agent-contracts/external-agent").ExternalAgentUiState
+                | undefined) ?? createExternalAgentUiState(),
+              event
+            ),
+          }
+        return event
+      }
+
       case "session_info_update": {
-        // Session metadata (title / last-activity). Stored locally; not a
-        // user-visible event in the chat stream.
         const infoSession = this._sessions.get(sessionId)
         const previousTitle = infoSession?.metadata?.title
         if (infoSession) {
-          infoSession.metadata = {
-            ...infoSession.metadata,
-            ...(typeof update.title === "string" ? { title: update.title } : {}),
-          }
+          const metadata = { ...infoSession.metadata }
+          if (update.title === null) delete metadata.title
+          else if (typeof update.title === "string") metadata.title = update.title
+          // Native timestamps are nullable; local activity remains a required Date.
+          if (update.updatedAt !== undefined) metadata.acpUpdatedAt = update.updatedAt
+          if (update._meta === null) delete metadata.acpSessionInfo
+          else if (update._meta !== undefined) metadata.acpSessionInfo = { ...update._meta }
+          infoSession.metadata = metadata
           if (typeof update.updatedAt === "string") {
             const ts = new Date(update.updatedAt)
             if (!Number.isNaN(ts.getTime())) infoSession.lastActivityAt = ts
           }
         }
-        // Only a NEW title is news: `updatedAt` ticks on every turn and agents
-        // republish the same title alongside it, and the event mapper can only
-        // render a title anyway.
-        if (typeof update.title !== "string" || update.title === previousTitle) return null
+        const changedTitle = update.title !== undefined && update.title !== previousTitle
+        if (!changedTitle && update._meta === undefined && update.updatedAt !== null) return null
         return {
           type: "session_info_update",
           sessionId,
           timestamp,
-          title: update.title,
-          updatedAt: update.updatedAt,
+          ...(update.title !== undefined ? { title: update.title } : {}),
+          ...(update.updatedAt !== undefined ? { updatedAt: update.updatedAt } : {}),
+          ...(update._meta !== undefined ? { metadata: update._meta } : {}),
         }
       }
 
@@ -5061,7 +5108,33 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   /**
    * Emit an event to all listeners
    */
+  /** Presentation emitted while idle still reaches existing desktop/CLI consumers. */
+  subscribeSessionEvents(
+    sessionId: string,
+    listener: (event: ExternalAgentEvent) => void
+  ): () => void {
+    const listeners = this.presentationListeners.get(sessionId) ?? new Set()
+    listeners.add(listener)
+    this.presentationListeners.set(sessionId, listeners)
+    return () => {
+      listeners.delete(listener)
+      if (listeners.size === 0) this.presentationListeners.delete(sessionId)
+    }
+  }
+
   private emitEvent(event: ExternalAgentEvent): void {
+    if (
+      (event.type === "extension_ui_update" || event.type === "session_info_update") &&
+      this._sessions.get(event.sessionId ?? "")?.status !== "executing"
+    ) {
+      for (const listener of this.presentationListeners.get(event.sessionId ?? "") ?? []) {
+        try {
+          listener(event)
+        } catch (error) {
+          this.log.error("Presentation listener error", { error })
+        }
+      }
+    }
     const listeners = this.eventListeners.get(event.sessionId ?? "")
     if (listeners) {
       for (const listener of listeners) {

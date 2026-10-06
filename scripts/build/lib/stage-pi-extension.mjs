@@ -22,6 +22,7 @@ import { buildSync } from "esbuild"
 /** Mirrors `EXTENSION_RELATIVE` / `INTEGRITY_RELATIVE` in cli/src/agent/tool-host/pi-extension.ts. */
 export const PI_EXTENSION_DIR = "pi-extension"
 export const PI_EXTENSION_FILE = "cognia-pi-extension.ts"
+export const PI_SHELL_GUARD_FILE = "cognia-pi-shell-guard.ts"
 export const PI_INTEGRITY_FILE = "integrity.json"
 
 /** SHA-256 of a file's bytes, lowercase hex — the digest form the manifest pins. */
@@ -61,8 +62,10 @@ export function stagePiExtension({ root, sidecarOutDir, fsImpl = fs } = {}) {
   }
 
   let pinned
+  let shellGuardPinned
   try {
     const parsed = JSON.parse(fsImpl.readFileSync(srcIntegrity, "utf8"))
+    shellGuardPinned = typeof parsed?.shellGuardSha256 === "string" ? parsed.shellGuardSha256.toLowerCase() : undefined
     pinned = typeof parsed?.sha256 === "string" ? parsed.sha256.toLowerCase() : undefined
   } catch (error) {
     throw new Error(
@@ -83,6 +86,14 @@ export function stagePiExtension({ root, sidecarOutDir, fsImpl = fs } = {}) {
     )
   }
 
+  const srcShellGuard = path.join(srcDir, PI_SHELL_GUARD_FILE)
+  if (shellGuardPinned !== undefined) {
+    if (!fsImpl.existsSync(srcShellGuard)) throw new Error(`stagePiExtension: missing ${PI_SHELL_GUARD_FILE}`)
+    if (digestOf(srcShellGuard, (p) => fsImpl.readFileSync(p)) !== shellGuardPinned) {
+      throw new Error(`stagePiExtension: ${PI_SHELL_GUARD_FILE} does not match its pinned digest`)
+    }
+  }
+
   const destDir = path.join(sidecarOutDir, PI_EXTENSION_DIR)
   fsImpl.mkdirSync(destDir, { recursive: true })
   const destExtension = path.join(destDir, PI_EXTENSION_FILE)
@@ -94,7 +105,13 @@ export function stagePiExtension({ root, sidecarOutDir, fsImpl = fs } = {}) {
   }).outputFiles[0].contents
   const sha256 = createHash("sha256").update(bundled).digest("hex")
   fsImpl.writeFileSync(destExtension, bundled)
-  fsImpl.writeFileSync(destIntegrity, JSON.stringify({ sha256, sourceSha256: actual }, null, 2) + "\n")
+  fsImpl.writeFileSync(destIntegrity, JSON.stringify({ sha256, sourceSha256: actual, shellGuardSha256: shellGuardPinned }, null, 2) + "\n")
 
-  return { sha256, dir: destDir, files: [destExtension, destIntegrity] }
+  const files = [destExtension, destIntegrity]
+  if (shellGuardPinned !== undefined) {
+    const destShellGuard = path.join(destDir, PI_SHELL_GUARD_FILE)
+    fsImpl.writeFileSync(destShellGuard, fsImpl.readFileSync(srcShellGuard))
+    files.push(destShellGuard)
+  }
+  return { sha256, dir: destDir, files }
 }

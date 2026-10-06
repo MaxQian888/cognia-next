@@ -9,6 +9,38 @@ import type {
 // ── pure mapper ──────────────────────────────────────────────────────────────
 
 describe("mapA2aResult", () => {
+  it("folds artifact append/replacement updates into complete snapshots without losing files", () => {
+    const ctx = {}
+    const update = (parts: unknown[], append = false) =>
+      mapA2aResult(
+        {
+          kind: "artifact-update",
+          taskId: "t",
+          artifact: { artifactId: "a", parts },
+          append,
+        } as never,
+        ctx
+      ).events[0]
+    expect(update([{ text: "draft" }])).toMatchObject({
+      type: "artifact_update",
+      blocks: [{ type: "text", text: "draft" }],
+    })
+    expect(update([{ text: " more" }], true)).toMatchObject({
+      blocks: [
+        { type: "text", text: "draft" },
+        { type: "text", text: " more" },
+      ],
+    })
+    expect(
+      update([{ raw: "AAEC", filename: "result.bin", mediaType: "application/octet-stream" }])
+    ).toMatchObject({
+      type: "artifact_update",
+      artifactId: "t:a",
+      blocks: [
+        { type: "resource", resource: { blob: "AAEC", mimeType: "application/octet-stream" } },
+      ],
+    })
+  })
   it("renders current inline and structured artifacts and preserves nonterminal states", () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
@@ -27,8 +59,8 @@ describe("mapA2aResult", () => {
       {}
     )
     const rendered = JSON.stringify(events)
-    expect(rendered).toContain("[file: file (inline)]")
-    expect(rendered).toContain("[file: empty]")
+    expect(rendered).toContain('"blob":"AA=="')
+    expect(rendered).toContain('"blob":""')
     expect(rendered).toContain("[data]")
     expect(mapA2aResult({ status: { state: "TASK_STATE_WORKING" } } as never, {}).done).toBe(false)
     expect(
@@ -46,7 +78,10 @@ describe("mapA2aResult", () => {
     expect(
       mapA2aResult({ artifact: { parts: [{ text: "artifact" }] } } as never, {}).events
     ).toEqual([
-      expect.objectContaining({ type: "message_delta", delta: { text: "artifact", type: "text" } }),
+      expect.objectContaining({
+        type: "artifact_update",
+        blocks: [{ text: "artifact", type: "text" }],
+      }),
     ])
   })
 
@@ -66,7 +101,7 @@ describe("mapA2aResult", () => {
       ctx
     )
     expect(done).toBe(true)
-    expect(ctx).toEqual({ contextId: "c-v1", taskId: "t-v1" })
+    expect(ctx).toEqual({ contextId: "c-v1" })
     expect(events[0]).toMatchObject({ type: "message_delta", delta: { text: "v1 done" } })
     expect(events.at(-1)).toMatchObject({ type: "done", success: true })
   })
@@ -87,8 +122,15 @@ describe("mapA2aResult", () => {
     )
     expect(done).toBe(false)
     expect(events[0]).toMatchObject({
-      type: "message_delta",
-      delta: { text: "[file: report.pdf application/pdf (https://x/r)]" },
+      type: "artifact_update",
+      blocks: [
+        {
+          type: "resource_link",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          uri: "https://x/r",
+        },
+      ],
     })
   })
 
@@ -130,7 +172,10 @@ describe("mapA2aResult", () => {
       events
         .filter((e) => e.type === "message_delta")
         .map((e) => (e as { delta: { text: string } }).delta.text)
-    ).toEqual(["final", " art"])
+    ).toEqual(["final"])
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "artifact_update", blocks: [{ type: "text", text: " art" }] })
+    )
     expect(events.at(-1)).toMatchObject({ type: "done", success: true })
   })
 
@@ -171,13 +216,19 @@ describe("mapA2aResult", () => {
       },
       { contextId: "c" }
     )
-    const text = events
-      .filter((e) => e.type === "message_delta")
-      .map((e) => (e as { delta: { text: string } }).delta.text)
-      .join("")
-    expect(text).toContain("see ")
-    expect(text).toContain("[file: report.pdf application/pdf (https://x/r.pdf)]")
-    expect(text).toContain('"score": 0.9')
+    expect(events[0]).toMatchObject({
+      type: "artifact_update",
+      blocks: [
+        { type: "text", text: "see " },
+        {
+          type: "resource_link",
+          uri: "https://x/r.pdf",
+          mimeType: "application/pdf",
+          name: "report.pdf",
+        },
+        { type: "text", text: expect.stringContaining('"score": 0.9') },
+      ],
+    })
   })
 
   it("maps canceled to a non-success done", () => {
@@ -207,7 +258,10 @@ describe("mapA2aResult", () => {
       { contextId: "c" }
     )
     expect(done).toBe(false)
-    expect(events[0]).toMatchObject({ type: "message_delta", delta: { text: "chunk" } })
+    expect(events[0]).toMatchObject({
+      type: "artifact_update",
+      blocks: [{ type: "text", text: "chunk" }],
+    })
   })
 })
 
@@ -275,6 +329,95 @@ async function collect(it: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe("A2aClientAdapter", () => {
+  it.each([true, false])(
+    "retires a cancelled task only after confirmation: %s",
+    async (confirmed) => {
+      const fetchImpl = jest.fn().mockResolvedValueOnce(cardResponse(false))
+      const task = {
+        kind: "task",
+        id: "pending",
+        contextId: "conversation",
+        status: { state: "input-required" },
+        artifacts: [{ artifactId: "old", parts: [{ text: "previous" }] }],
+      }
+      fetchImpl.mockResolvedValueOnce({ ok: true, json: async () => ({ result: task }) })
+      const adapter = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
+      await adapter.connect(makeConfig())
+      const session = await adapter.createSession()
+      await collect(adapter.prompt(session.id, userMessage("first")))
+      if (confirmed) {
+        fetchImpl.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ result: { ...task, artifacts: [], status: { state: "canceled" } } }),
+        })
+        await adapter.cancel(session.id)
+      } else {
+        fetchImpl.mockRejectedValueOnce(new Error("Cancellation unavailable"))
+        await expect(adapter.cancel(session.id)).rejects.toThrow("Cancellation unavailable")
+      }
+      fetchImpl.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: {
+            kind: "task",
+            id: confirmed ? "new" : "pending",
+            status: { state: "completed" },
+          },
+        }),
+      })
+      const events = await collect(adapter.prompt(session.id, userMessage("next")))
+      const next = JSON.parse(fetchImpl.mock.calls[3][1].body).params.message
+      expect(next.taskId).toBe(confirmed ? undefined : "pending")
+      expect(next.contextId).toBe("conversation")
+      if (confirmed)
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: "artifact_update", artifactId: "pending:old" })
+        )
+    }
+  )
+
+  it.each(["completed", "failed", "canceled", "rejected"])(
+    "starts a new task in the same context after %s",
+    async (state) => {
+      const fetchImpl = jest
+        .fn()
+        .mockResolvedValueOnce(cardResponse(false))
+        .mockImplementation(async () => ({
+          ok: true,
+          json: async () => ({
+            result: { kind: "task", id: "finished", contextId: "conversation", status: { state } },
+          }),
+        }))
+      const adapter = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
+      await adapter.connect(makeConfig())
+      const session = await adapter.createSession()
+      await collect(adapter.prompt(session.id, userMessage("first")))
+      await collect(adapter.prompt(session.id, userMessage("next")))
+      const next = JSON.parse(fetchImpl.mock.calls[2][1].body).params.message
+      expect(next.contextId).toBe("conversation")
+      expect(next).not.toHaveProperty("taskId")
+    }
+  )
+
+  it("uses non-streaming when the card omits streaming support", async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(
+        interfacesCardResponse([
+          { url: "https://x/rpc", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+        ])
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: { message: { parts: [{ text: "ok" }] } } }),
+      })
+    const adapter = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
+    await adapter.connect(makeConfig())
+    const session = await adapter.createSession()
+    await collect(adapter.prompt(session.id, userMessage("hello")))
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).method).toBe("SendMessage")
+  })
+
   it("cleans local sessions and reports unavailable service health", async () => {
     const fetchImpl = jest.fn().mockResolvedValue(v1CardResponse(false))
     const a = new A2aClientAdapter({ fetch: fetchImpl, outboundGate: hasNoLeakingPiiDeep })
@@ -747,7 +890,7 @@ describe("A2aClientAdapter", () => {
                 statusUpdate: {
                   taskId: "task-v1",
                   contextId: "context-v1",
-                  status: { state: "TASK_STATE_COMPLETED" },
+                  status: { state: "TASK_STATE_INPUT_REQUIRED" },
                 },
               },
             })}\n\n`
@@ -1078,7 +1221,7 @@ describe("A2aClientAdapter", () => {
       start(c) {
         c.enqueue(
           new TextEncoder().encode(
-            `data: ${JSON.stringify({ result: { kind: "status-update", taskId: "task-9", status: { state: "completed" } } })}\n\n`
+            `data: ${JSON.stringify({ result: { kind: "status-update", taskId: "task-9", status: { state: "input-required" } } })}\n\n`
           )
         )
         c.close()

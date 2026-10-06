@@ -55,6 +55,23 @@ export interface ExternalHostConfigSelection {
   name: string
 }
 
+export interface ExternalSessionLink {
+  agentId: string
+  sessionId: string
+  host?: import("@/types/agent/external-agent-config-store").ExternalAgentConfigStamp
+}
+
+function linkMatchesRuntime(link: ExternalSessionLink | undefined, ref: AgentRuntimeRef): boolean {
+  if (!link) return false
+  return ref.kind === "external"
+    ? !link.host && ref.agentId === link.agentId
+    : ref.kind === "host" &&
+        Boolean(link.host) &&
+        ref.configId === link.agentId &&
+        ref.revision === link.host?.revision &&
+        ref.lifecycleGeneration === link.host?.lifecycleGeneration
+}
+
 interface AgentRuntimeState {
   /**
    * What runs the next turn: Cognia's own runtime, a locally configured
@@ -78,6 +95,9 @@ interface AgentRuntimeState {
    * other conversation's next turn would run.
    */
   sessionRuntimeRefs: Record<string, AgentRuntimeRef>
+  /** Live process identity for this device only; never persisted or synced. */
+  sessionExternalLinks: Record<string, ExternalSessionLink>
+  setSessionExternalLink: (chatSessionId: string, link: ExternalSessionLink | undefined) => void
   /** @deprecated Mirror of the DEFAULT `runtimeRef.kind`. Written only by `setRuntimeRef`. */
   runtime: AgentRuntime
   /**
@@ -224,6 +244,7 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
     (set) => ({
       runtimeRef: BUILTIN_RUNTIME_REF,
       sessionRuntimeRefs: {},
+      sessionExternalLinks: {},
       runtime: "claude-sdk",
       modeId: "general",
       defaultComposition: { presetId: STANDARD_PRESET_ID },
@@ -231,17 +252,57 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
       externalAgentId: null,
       externalHostConfig: null,
 
-      setRuntimeRef: (runtimeRef) => set({ runtimeRef, ...legacyMirrors(runtimeRef) }),
-      setSessionRuntimeRef: (sessionId, ref) =>
+      setRuntimeRef: (runtimeRef) =>
         set((state) => ({
-          sessionRuntimeRefs: { ...state.sessionRuntimeRefs, [sessionId]: ref },
+          runtimeRef,
+          ...legacyMirrors(runtimeRef),
+          sessionExternalLinks: Object.fromEntries(
+            Object.entries(state.sessionExternalLinks).filter(([id, link]) => {
+              const ref = state.sessionRuntimeRefs[id] ?? runtimeRef
+              return linkMatchesRuntime(link, ref)
+            })
+          ),
         })),
+      setSessionRuntimeRef: (sessionId, ref) =>
+        set((state) => {
+          const links = { ...state.sessionExternalLinks }
+          if (!linkMatchesRuntime(links[sessionId], ref)) delete links[sessionId]
+          return {
+            sessionRuntimeRefs: { ...state.sessionRuntimeRefs, [sessionId]: ref },
+            sessionExternalLinks: links,
+          }
+        }),
       clearSessionRuntimeRef: (sessionId) =>
         set((state) => {
-          if (!Object.hasOwn(state.sessionRuntimeRefs, sessionId)) return state
+          if (
+            !Object.hasOwn(state.sessionRuntimeRefs, sessionId) &&
+            !Object.hasOwn(state.sessionExternalLinks, sessionId)
+          )
+            return state
           const next = { ...state.sessionRuntimeRefs }
           delete next[sessionId]
-          return { sessionRuntimeRefs: next }
+          const links = { ...state.sessionExternalLinks }
+          if (!linkMatchesRuntime(links[sessionId], state.runtimeRef)) delete links[sessionId]
+          return { sessionRuntimeRefs: next, sessionExternalLinks: links }
+        }),
+      setSessionExternalLink: (sessionId, link) =>
+        set((state) => {
+          const ref = selectRuntimeRefForSession(state, sessionId)
+          // A late event from the previously selected runtime must not retarget
+          // controls in the newly selected conversation lane.
+          if (link && !linkMatchesRuntime(link, ref)) return state
+          if (
+            link &&
+            state.sessionExternalLinks[sessionId]?.agentId === link.agentId &&
+            state.sessionExternalLinks[sessionId]?.sessionId === link.sessionId &&
+            JSON.stringify(state.sessionExternalLinks[sessionId]?.host) ===
+              JSON.stringify(link.host)
+          )
+            return state
+          const links = { ...state.sessionExternalLinks }
+          if (link) links[sessionId] = link
+          else delete links[sessionId]
+          return { sessionExternalLinks: links }
         }),
       setModeId: (modeId) => set({ modeId, defaultComposition: selectionFromModeId(modeId) }),
       setDefaultComposition: (selection) =>
@@ -276,6 +337,12 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
       name: "cognia-next.agent-runtime",
       storage: persistLocalStorage(),
       version: 3,
+      partialize: ({ sessionExternalLinks: _liveLinks, ...state }) => state,
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Partial<AgentRuntimeState>),
+        sessionExternalLinks: current.sessionExternalLinks,
+      }),
       migrate: (persisted, version) => {
         let state = (persisted ?? {}) as Partial<AgentRuntimeState>
 
@@ -339,4 +406,27 @@ export function compositionForSession(sessionId: string | undefined): AgentCompo
     return state.sessionCompositions[sessionId]
   }
   return state.defaultComposition
+}
+
+/** The current process-owned link, scoped to the selected local runtime. */
+export function externalSessionLinkForSession(
+  sessionId: string | undefined
+): ExternalSessionLink | undefined {
+  return selectExternalSessionLinkForSession(useAgentRuntimeStore.getState(), sessionId)
+}
+
+export function useExternalSessionLinkForSession(
+  sessionId: string | undefined
+): ExternalSessionLink | undefined {
+  return useAgentRuntimeStore((state) => selectExternalSessionLinkForSession(state, sessionId))
+}
+
+function selectExternalSessionLinkForSession(
+  state: AgentRuntimeState,
+  sessionId: string | undefined
+): ExternalSessionLink | undefined {
+  if (!sessionId) return undefined
+  const ref = selectRuntimeRefForSession(state, sessionId)
+  const link = state.sessionExternalLinks[sessionId]
+  return linkMatchesRuntime(link, ref) ? link : undefined
 }

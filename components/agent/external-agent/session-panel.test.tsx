@@ -30,13 +30,31 @@ jest.mock("@/hooks/agent/use-external-agent", () => ({
   useExternalAgent: () => useExternalAgentMock(),
 }))
 
-const useAgentRuntimeMock = jest.fn()
+const mockAgentRuntime = jest.fn()
+const mockSessionLink = jest.fn(() => undefined as unknown)
+const mockSetSessionLink = jest.fn()
+const mockRemoteManager = {
+  getSessionOperationCapabilities: jest.fn(),
+  getSessionRuntimeState: jest.fn(),
+  refreshSessionCommands: jest.fn(),
+  getSessionEntries: jest.fn(),
+  forkSession: jest.fn(),
+  archiveSession: jest.fn(),
+}
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-client", () => ({
+  createRemoteSessionOperationsClient: jest.fn(() => mockRemoteManager),
+  watchRemoteSession: jest.fn(async () => ({ close: jest.fn() })),
+}))
 
 jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useExternalSessionLinkForSession: () => mockSessionLink(),
+  useAgentRuntimeStore: { getState: () => ({ setSessionExternalLink: mockSetSessionLink }) },
   useRuntimeRefForSession: () =>
-    (useAgentRuntimeMock() as { runtime?: string })?.runtime === "external"
-      ? { kind: "external", agentId: "a1" }
-      : { kind: "builtin" },
+    mockAgentRuntime()?.runtime === "host"
+      ? { kind: "host" }
+      : (mockAgentRuntime() as { runtime?: string })?.runtime === "external"
+        ? { kind: "external", agentId: "a1" }
+        : { kind: "builtin" },
 }))
 
 const hasPluginToolbarMock = jest.fn(() => false)
@@ -78,29 +96,61 @@ const baseAgentState = {
 }
 
 describe("ExternalAgentSessionPanel", () => {
+  it("mounts shared session controls for the active native session", () => {
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      activeAgentId: "agent",
+      activeSession: { id: "session" },
+      forkSession: jest.fn(),
+      cloneSession: jest.fn(),
+      executeSessionShell: jest.fn(),
+    })
+    render(wrap(<ExternalAgentSessionPanel />))
+    expect(screen.getByText(en.externalAgent.sessionOperations.title)).toBeInTheDocument()
+  })
   beforeEach(() => {
     jest.clearAllMocks()
-    useAgentRuntimeMock.mockReset()
+    mockAgentRuntime.mockReset()
     useExternalAgentMock.mockReset()
     hasPluginToolbarMock.mockReturnValue(false)
+    mockSessionLink.mockReturnValue(undefined)
   })
 
   it("renders nothing when runtime is claude-sdk", () => {
-    useAgentRuntimeMock.mockReturnValue({ runtime: "claude-sdk" })
+    mockAgentRuntime.mockReturnValue({ runtime: "claude-sdk" })
     useExternalAgentMock.mockReturnValue(baseAgentState)
     const { container } = render(wrap(<ExternalAgentSessionPanel />))
     expect(container.firstChild).toBeNull()
   })
 
   it("renders nothing when runtime is external but no session data is present", () => {
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue(baseAgentState)
     const { container } = render(wrap(<ExternalAgentSessionPanel />))
     expect(container.firstChild).toBeNull()
   })
 
+  it("never shows controls for another chat's native session", () => {
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      activeAgentId: "agent",
+      activeSession: { id: "other-native-session" },
+    })
+    const { container } = render(
+      wrap(
+        <ExternalAgentSessionPanel
+          sessionId="chat"
+          externalSession={{ agentId: "agent", sessionId: "this-native-session" }}
+        />
+      )
+    )
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it("renders the commands button when commands are available", () => {
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       availableCommands: [{ name: "test", description: "run tests", input: null }],
@@ -109,9 +159,27 @@ describe("ExternalAgentSessionPanel", () => {
     expect(screen.getByText(en.externalAgent.commands)).toBeInTheDocument()
   })
 
+  it("routes idle commands through the owning chat send path", async () => {
+    const onExecuteCommand = jest.fn(async () => {})
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      availableCommands: [{ name: "review", description: "Review changes", input: null }],
+    })
+    render(wrap(<ExternalAgentSessionPanel onExecuteCommand={onExecuteCommand} />))
+    fireEvent.click(screen.getByRole("button", { name: /Commands/ }))
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: en.externalAgent.runCommand.replace("{name}", "review"),
+      })
+    )
+    await waitFor(() => expect(onExecuteCommand).toHaveBeenCalledWith("/review"))
+    expect(baseAgentState.execute).not.toHaveBeenCalled()
+  })
+
   it("still renders (with the plugin slot) when a plugin contributes a toolbar control and there is no native session data", () => {
     hasPluginToolbarMock.mockReturnValue(true)
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue(baseAgentState)
     render(wrap(<ExternalAgentSessionPanel />))
     const slot = screen.getByTestId("slot-agent.external-session.toolbar")
@@ -121,7 +189,7 @@ describe("ExternalAgentSessionPanel", () => {
 
   it("shows the compact button only when the adapter supports compaction and triggers it", async () => {
     const compactSession = jest.fn(async () => {})
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       activeSession: { id: "thr_1" },
@@ -136,7 +204,7 @@ describe("ExternalAgentSessionPanel", () => {
   })
 
   it("hides the compact button when compaction is unsupported", () => {
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       activeSession: { id: "thr_1" },
@@ -152,7 +220,7 @@ describe("ExternalAgentSessionPanel", () => {
     const compactSession = jest.fn(async () => {
       throw new Error("provider timeout")
     })
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       activeSession: { id: "thr_1" },
@@ -175,7 +243,7 @@ describe("ExternalAgentSessionPanel", () => {
 
   it("routes optional focus text only when the advertised command accepts input", async () => {
     const compactSession = jest.fn(async () => {})
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       activeSession: { id: "thr_1" },
@@ -202,7 +270,7 @@ describe("ExternalAgentSessionPanel", () => {
   it("warns once before executing provider undo", async () => {
     const acknowledgeProviderUndoWarning = jest.fn()
     const undoLastProviderChange = jest.fn(async () => {})
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       activeSession: { id: "thr_1" },
@@ -226,7 +294,7 @@ describe("ExternalAgentSessionPanel", () => {
   })
 
   it("hides provider undo when the runtime does not advertise it", () => {
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       activeSession: { id: "thr_1" },
@@ -237,7 +305,7 @@ describe("ExternalAgentSessionPanel", () => {
   })
 
   it("renders the execution plan when entries are available", () => {
-    useAgentRuntimeMock.mockReturnValue({ runtime: "external" })
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({
       ...baseAgentState,
       planEntries: [
@@ -250,5 +318,39 @@ describe("ExternalAgentSessionPanel", () => {
     expect(screen.getByText(en.externalAgent.executionPlan)).toBeInTheDocument()
     expect(screen.getByText("Plan A")).toBeInTheDocument()
     expect(screen.getByText("Plan B")).toBeInTheDocument()
+  })
+})
+
+it("uses the paired-host facade and carries the host identity when selecting a turn fork", async () => {
+  const host = { configId: "remote", revision: "r1", lifecycleGeneration: 1 }
+  const link = { agentId: "remote", sessionId: "native", host }
+  mockAgentRuntime.mockReturnValue({ runtime: "host" })
+  mockSessionLink.mockReturnValue(link)
+  mockRemoteManager.getSessionOperationCapabilities.mockResolvedValue({
+    entries: "supported",
+    forkAtEntry: "supported",
+  })
+  mockRemoteManager.getSessionEntries.mockResolvedValue([
+    {
+      id: "t1",
+      type: "turn",
+      parentId: null,
+      forkAt: { kind: "turn", id: "t1", boundary: "before" },
+    },
+  ])
+  mockRemoteManager.forkSession.mockResolvedValue({ id: "branch" })
+  render(wrap(<ExternalAgentSessionPanel sessionId="chat" />))
+  fireEvent.click(screen.getByText(en.externalAgent.sessionOperations.title))
+  fireEvent.click(
+    await screen.findByRole("button", { name: en.externalAgent.sessionOperations.loadEntries })
+  )
+  fireEvent.click(
+    await screen.findByRole("button", { name: en.externalAgent.sessionOperations.forkHere })
+  )
+  await waitFor(() =>
+    expect(mockSetSessionLink).toHaveBeenCalledWith("chat", { ...link, sessionId: "branch" })
+  )
+  expect(mockRemoteManager.forkSession).toHaveBeenCalledWith("remote", "native", {
+    forkAt: { kind: "turn", id: "t1", boundary: "before" },
   })
 })

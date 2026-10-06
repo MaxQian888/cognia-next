@@ -5,6 +5,9 @@ const transport = {
   agentReadTextFile: jest.fn(async () => "body"),
   agentWriteTextFile: jest.fn(async () => undefined),
   agentDeleteTextFile: jest.fn(async () => undefined),
+  agentReadBinaryFile: jest.fn(async () => "AAE="),
+  agentWriteBinaryFile: jest.fn(async () => undefined),
+  agentListFiles: jest.fn(async () => ["/w/a.json"]),
 }
 
 jest.mock("../agent-transport", () => ({
@@ -12,6 +15,9 @@ jest.mock("../agent-transport", () => ({
   agentReadTextFile: (...args: unknown[]) => transport.agentReadTextFile(...(args as [])),
   agentWriteTextFile: (...args: unknown[]) => transport.agentWriteTextFile(...(args as [])),
   agentDeleteTextFile: (...args: unknown[]) => transport.agentDeleteTextFile(...(args as [])),
+  agentReadBinaryFile: (...args: unknown[]) => transport.agentReadBinaryFile(...(args as [])),
+  agentWriteBinaryFile: (...args: unknown[]) => transport.agentWriteBinaryFile(...(args as [])),
+  agentListFiles: (...args: unknown[]) => transport.agentListFiles(...(args as [])),
 }))
 
 describe("createAgentTransportFileHost", () => {
@@ -33,6 +39,16 @@ describe("createAgentTransportFileHost", () => {
     expect(transport.agentReadTextFile).toHaveBeenCalledWith("/w/a.md", ["/w"])
     expect(transport.agentWriteTextFile).toHaveBeenCalledWith("/w/b.md", "text", ["/w"])
     expect(transport.agentDeleteTextFile).toHaveBeenCalledWith("/w/c.md", ["/w"])
+  })
+
+  it("routes binary reads, writes and listings through the same confined commands", async () => {
+    const host = createAgentTransportFileHost()
+    await expect(host.readBinary("/w/i.png", ["/w"])).resolves.toBe("AAE=")
+    await host.writeBinary("/w/o.png", "AAE=", ["/w"])
+    await expect(host.listFiles("/w", ["/w"])).resolves.toEqual(["/w/a.json"])
+    expect(transport.agentReadBinaryFile).toHaveBeenCalledWith("/w/i.png", ["/w"])
+    expect(transport.agentWriteBinaryFile).toHaveBeenCalledWith("/w/o.png", "AAE=", ["/w"])
+    expect(transport.agentListFiles).toHaveBeenCalledWith("/w", ["/w"])
   })
 
   it("surfaces transport failures unchanged", async () => {

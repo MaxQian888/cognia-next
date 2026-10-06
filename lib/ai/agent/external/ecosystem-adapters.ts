@@ -278,10 +278,10 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         envVarHint:
           "Supports ChatGPT sign-in or API-key auth through the local adapter route. Common automation setup uses OPENAI_API_KEY or CODEX_API_KEY.",
         setupHint:
-          "Current Cognia executable route uses the ACP adapter (`npx -y @agentclientprotocol/codex-acp`) rather than the native OpenAI Codex runtime directly.",
+          "Requires the installed `codex-acp` binary from @agentclientprotocol/codex-acp on PATH. Cognia checks executable identity and version through runtime inspection.",
         process: {
-          command: "npx",
-          args: ["-y", "@agentclientprotocol/codex-acp"],
+          command: "codex-acp",
+          args: [],
         },
         icon: "openai",
       },
@@ -410,10 +410,10 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         envVarHint:
           "Authenticate Gemini CLI with a Gemini API key, Vertex AI, gateway, or enterprise Code Assist credentials; GOOGLE_API_KEY is one supported path, not a universal requirement.",
         setupHint:
-          "Launches Gemini CLI in its current ACP mode (`gemini --acp`); the deprecated `--experimental-acp` alias is intentionally not used.",
+          "Requires the installed `gemini` binary from @google/gemini-cli on PATH and launches `gemini --acp`. Runtime inspection checks the installed executable and version.",
         process: {
-          command: "npx",
-          args: ["-y", "@google/gemini-cli", "--acp"],
+          command: "gemini",
+          args: ["--acp"],
         },
         icon: "google",
       },
@@ -500,9 +500,11 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         docsUrl: "https://qwenlm.github.io/qwen-code-docs/en/users/integration-zed/",
         envVarHint:
           "Uses Qwen OAuth device login on first run, or OpenAI-compatible auth via OPENAI_API_KEY / OPENAI_BASE_URL (config in ~/.qwen/).",
+        setupHint:
+          "Requires the installed `qwen` binary from @qwen-code/qwen-code on PATH. Launches `qwen --acp` using the inspected executable and version.",
         process: {
-          command: "npx",
-          args: ["-y", "@qwen-code/qwen-code", "--acp"],
+          command: "qwen",
+          args: ["--acp"],
         },
         icon: "qwen",
       },
@@ -533,7 +535,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "pi", "native", "preview"],
         docsUrl: "https://pi.dev/docs/latest/rpc",
         setupHint:
-          "Requires Pi 0.84.3 (`npm install -g @earendil-works/pi-coding-agent@0.84.3`) on PATH and Node.js >= 22.19.0. Pi owns its own provider credentials in ~/.pi — Cognia never reads or injects them. Newer Pi versions run but are reported as unverified.",
+          "Requires Pi 1.0.2 (`npm install -g @earendil-works/pi-coding-agent@1.0.2`) on PATH and Node.js >= 22.19.0. Pi owns its own provider credentials in ~/.pi — Cognia never reads or injects them. Newer Pi versions run but are reported as unverified.",
         limitationNote:
           "Preview surface. macOS and Linux only: external agents always run inside the strict sandbox and there is no unsandboxed fallback.",
         process: {

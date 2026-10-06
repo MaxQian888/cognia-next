@@ -9,6 +9,7 @@ describe("resolveAcpFeatureProfile", () => {
     elicitation: { form: true, url: true, durableInteraction: true },
     preview: {
       compaction: true,
+      notices: true,
       providers: true,
       dynamicMcp: true,
       nes: true,
@@ -74,6 +75,24 @@ describe("resolveAcpFeatureProfile", () => {
     expect(profile.clientCapabilities.session?.compaction).toEqual({})
     expect(profile.clientCapabilities.nes).toEqual({})
     expect(profile.clientCapabilities.plan).toBeUndefined()
+  })
+
+  it("negotiates notices only with explicit preview opt-in and a presentation host", () => {
+    expect(
+      resolveAcpFeatureProfile({ role: "client", host: desktopHost }).clientCapabilities.session
+        ?.notices
+    ).toBeUndefined()
+    expect(
+      resolveAcpFeatureProfile({ role: "client", host: desktopHost, preview: { notices: true } })
+        .clientCapabilities.session?.notices
+    ).toEqual({})
+    expect(
+      resolveAcpFeatureProfile({
+        role: "client",
+        host: { ...desktopHost, preview: { ...desktopHost.preview, notices: false } },
+        preview: { notices: true },
+      }).clientCapabilities.session?.notices
+    ).toBeUndefined()
   })
 
   it("never advertises ACP v2 from the v1 feature profile", () => {

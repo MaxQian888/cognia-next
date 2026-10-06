@@ -211,6 +211,24 @@ describe("canonicalEnvelopeToActions", () => {
     ])
   })
 
+  it("commits autonomous completion without treating the local session as an SDK session", () => {
+    expect(
+      canonicalEnvelopeToActions(envelope({ kind: "lifecycle", phase: "ended" }), {
+        autonomous: true,
+      })
+    ).toEqual([
+      {
+        type: "TURN_COMMIT",
+        result: {
+          text: "",
+          messageId: "e-lifecycle",
+          a2uiSurfaces: {},
+          a2uiSurfaceOrder: [],
+        },
+      },
+    ])
+  })
+
   it("clears turn activity on the provider's idle phase and drops the toast path", () => {
     expect(canonicalEnvelopeToActions(envelope({ kind: "activity", phase: "idle" }))).toEqual([
       { type: "SET_TURN_ACTIVITY", activity: null },
@@ -237,22 +255,48 @@ describe("canonicalEnvelopeToActions", () => {
   })
 
   it.each<PiEvent>([
-    { type: "extension_ui_request", id: "w", method: "setWidget", widgetLines: ["bg status"] },
-    { type: "extension_ui_request", id: "s", method: "setStatus", statusText: "working" },
+    {
+      type: "extension_ui_request",
+      id: "w",
+      method: "setWidget",
+      widgetKey: "bg",
+      widgetLines: ["bg status"],
+    },
+    {
+      type: "extension_ui_request",
+      id: "s",
+      method: "setStatus",
+      statusKey: "bg",
+      statusText: "working",
+    },
     { type: "turn_end" },
     { type: "agent_end" },
   ])("retains Pi $type audit envelopes without rendering a diagnostic placeholder", (frame) => {
     const [mapped] = mapPiEvent(frame, { sessionId: "s1" })
     const diagnostic = externalAgentEventToCanonicalFallback(mapped)
     const persisted = envelope(diagnostic)
-    expect(diagnostic).toMatchObject({
-      kind: "diagnostic",
-      runtime: "pi-rpc",
-      payload: { piDiagnostic: frame },
-    })
-    expect(canonicalEnvelopeToActions(persisted)).toEqual([])
+    if (frame.type === "extension_ui_request") {
+      expect(diagnostic.kind).toBe("extension-ui")
+      expect(canonicalEnvelopeToActions(persisted)).toEqual([
+        {
+          type: "EXTENSION_UI_UPDATE",
+          event: expect.objectContaining({
+            type: "extension_ui_update",
+            update: expect.any(Object),
+          }),
+        },
+      ])
+      expect(classifyCanonicalEvent(diagnostic.kind)).toBe("status")
+    } else {
+      expect(diagnostic).toMatchObject({
+        kind: "diagnostic",
+        runtime: "pi-rpc",
+        payload: { piDiagnostic: frame },
+      })
+      expect(canonicalEnvelopeToActions(persisted)).toEqual([])
+      expect(classifyCanonicalEvent(diagnostic.kind)).toBe("audit")
+    }
     expect(persisted.event).toBe(diagnostic)
-    expect(classifyCanonicalEvent(diagnostic.kind)).toBe("audit")
   })
 
   it("does not suppress other diagnostics or actionable Pi errors", () => {

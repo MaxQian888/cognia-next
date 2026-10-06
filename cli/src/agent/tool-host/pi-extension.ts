@@ -80,10 +80,11 @@ export function digestFile(file: string, read: (p: string) => Buffer = fs.readFi
 export interface PiExtensionIntegrity {
   /** Expected SHA-256 of `cognia-pi-extension.ts`. */
   sha256: string
+  shellGuardSha256?: string
 }
 
 export type PiExtensionVerdict =
-  | { status: "ok"; path: string; sha256: string }
+  | { status: "ok"; path: string; sha256: string; shellGuardPath?: string }
   | { status: "missing" }
   | { status: "unreadable"; path: string; detail: string }
   /** Found, but not the file Cognia shipped. */
@@ -122,9 +123,14 @@ export function verifyPiExtension(opts: VerifyPiExtensionOptions = {}): PiExtens
     INTEGRITY_RELATIVE
   )
 
+  let shellGuardExpected: string | undefined
   let expected: string | undefined
   try {
     const parsed = JSON.parse(readIntegrity(manifestPath)) as Partial<PiExtensionIntegrity>
+    shellGuardExpected =
+      typeof parsed.shellGuardSha256 === "string"
+        ? parsed.shellGuardSha256.toLowerCase()
+        : undefined
     expected = typeof parsed.sha256 === "string" ? parsed.sha256.toLowerCase() : undefined
   } catch {
     expected = undefined
@@ -132,6 +138,24 @@ export function verifyPiExtension(opts: VerifyPiExtensionOptions = {}): PiExtens
 
   if (!expected) return { status: "unpinned", path: resolved, sha256: actual }
   if (expected !== actual) return { status: "tampered", path: resolved, expected, actual }
+  if (shellGuardExpected !== undefined) {
+    const shellGuardPath = path.join(path.dirname(resolved), "cognia-pi-shell-guard.ts")
+    let guardActual: string
+    try {
+      guardActual = digestFile(shellGuardPath, readFile)
+    } catch (error) {
+      return { status: "unreadable", path: shellGuardPath, detail: String(error) }
+    }
+    if (guardActual !== shellGuardExpected) {
+      return {
+        status: "tampered",
+        path: shellGuardPath,
+        expected: shellGuardExpected,
+        actual: guardActual,
+      }
+    }
+    return { status: "ok", path: resolved, sha256: actual, shellGuardPath }
+  }
   return { status: "ok", path: resolved, sha256: actual }
 }
 

@@ -43,6 +43,7 @@ function fixture(target, executable) {
 
   const resources = {
     "sidecar/pi-extension/cognia-pi-extension.ts": "extension",
+    "sidecar/pi-extension/cognia-pi-shell-guard.ts": "guard",
     "sidecar/pi-extension/integrity.json": "{}",
     "tree-sitter.wasm": "tree-sitter",
     "grammars/tree-sitter-python.wasm": "python",

@@ -7,6 +7,9 @@ import {
   agentReadTextFile,
   agentWriteTextFile,
   agentDeleteTextFile,
+  agentWriteBinaryFile,
+  agentReadBinaryFile,
+  agentListFiles,
   createCliAgentHost,
   createCliExternalAgentHost,
   getAcpHostCapabilities,
@@ -15,6 +18,26 @@ import { cliAgentHookPlane } from "./hook-plane"
 import { cliTerminalPlane } from "./pty-terminals"
 
 describe("CLI external-agent host branch", () => {
+  it("round trips binary attachments and refuses symlink escapes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aider-binary-"))
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "aider-binary-outside-"))
+    try {
+      const file = path.join(root, "image.png")
+      await agentWriteBinaryFile(file, "AAEC/w==", [root])
+      expect(fs.readFileSync(file)).toEqual(Buffer.from([0, 1, 2, 255]))
+      expect(await agentReadBinaryFile(file, [root])).toBe("AAEC/w==")
+      expect(await agentListFiles(root, [root])).toEqual([file])
+      fs.symlinkSync(path.join(outside, "keep.png"), path.join(root, "link.png"))
+      await expect(
+        agentWriteBinaryFile(path.join(root, "link.png"), "AA==", [root])
+      ).rejects.toThrow()
+      await expect(agentWriteBinaryFile(file, "invalid!", [root])).rejects.toThrow("base64")
+      expect(fs.readFileSync(file)).toEqual(Buffer.from([0, 1, 2, 255]))
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+      fs.rmSync(outside, { recursive: true, force: true })
+    }
+  })
   it("deletes owned files idempotently and refuses symlinks and directory escapes", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "aider-host-delete-"))
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "aider-host-outside-"))
@@ -41,6 +64,7 @@ describe("CLI external-agent host branch", () => {
     expect(getAcpHostCapabilities("win32")).toMatchObject({ terminal: false, terminalAuth: false })
     expect(getAcpHostCapabilities()).toMatchObject({
       kind: "cli",
+      preview: { notices: true },
       terminal: process.platform !== "win32",
       terminalAuth: process.platform !== "win32",
       elicitation: { form: true, url: true, durableInteraction: true },
@@ -134,6 +158,9 @@ describe("CLI external-agent host installation", () => {
     expect(host.process.readTextFile).toBe(agentReadTextFile)
     expect(host.process.writeTextFile).toBe(agentWriteTextFile)
     expect(host.process.deleteTextFile).toBe(agentDeleteTextFile)
+    expect(host.process.readBinaryFile).toBe(agentReadBinaryFile)
+    expect(host.process.writeBinaryFile).toBe(agentWriteBinaryFile)
+    expect(host.process.listFiles).toBe(agentListFiles)
     await expect(host.process.invoke("check_command_exists", { command: "pi" })).resolves.toBe(true)
     expect(backend.invoke).toHaveBeenCalledWith("check_command_exists", { command: "pi" })
     expect(Object.isFrozen(host)).toBe(true)

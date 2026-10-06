@@ -73,6 +73,18 @@ const fileHost = {
   delete: jest.fn(async (file: string) => {
     mockFiles.delete(file)
   }),
+  readBinary: jest.fn(async (file: string) => {
+    if (!mockFiles.has(file)) throw new Error("ENOENT")
+    return mockFiles.get(file)!
+  }),
+  writeBinary: jest.fn(async (file: string, content: string) => {
+    mockFiles.set(file, content)
+  }),
+  listFiles: jest.fn(async (dir: string) =>
+    [...mockFiles.keys()].filter(
+      (file) => file.startsWith(`${dir}/`) && !file.slice(dir.length + 1).includes("/")
+    )
+  ),
 } as unknown as jest.Mocked<AgentFileHost & Record<string, jest.Mock>>
 
 /** Stands in for the host's PII gate: refuses anything naming an e-mail address. */
@@ -169,6 +181,91 @@ it("uses the official one-shot CLI and keeps instructions out of argv and enviro
     [cwd]
   )
   expect([...mockListeners.values()].every((listeners) => listeners.size === 0)).toBe(true)
+})
+
+it("discovers persisted sessions after restart without crossing agent identity", async () => {
+  const adapter = await connected()
+  const session = await adapter.createSession()
+  await adapter.closeSession(session.id)
+  await adapter.disconnect()
+  const fresh = await connected()
+  expect(await fresh.listSessions()).toEqual([
+    expect.objectContaining({ sessionId: session.id, cwd }),
+  ])
+  const other = await connected({ ...config, id: "different" })
+  expect(await other.listSessions()).toEqual([])
+})
+
+it.each([false, true])(
+  "applies new resume instructions, model and permissions with cold=%s",
+  async (cold) => {
+    const adapter = await connected()
+    const session = await adapter.createSession({ systemPrompt: "Old instruction" })
+    if (cold) {
+      await adapter.disconnect()
+      await adapter.connect(config)
+    }
+    await adapter.resumeSession(session.id, {
+      systemPrompt: "New instruction",
+      permissionMode: "plan",
+      metadata: { selectedModel: "new-model" },
+    })
+    await adapter.execute(session.id, message())
+    expect(mockSpawned[0].args).toEqual(
+      expect.arrayContaining(["--model", "new-model", "--chat-mode", "ask"])
+    )
+    const prompts = jest
+      .mocked(fileHost.writeText)
+      .mock.calls.filter(([file, content]) => file.endsWith(".prompt") && content)
+    expect(prompts.at(-1)?.[1]).toContain("New instruction")
+    expect(prompts.at(-1)?.[1]).not.toContain("Old instruction")
+  }
+)
+
+it("rejects unsafe resume instructions without replacing the persisted preamble", async () => {
+  const adapter = await connected()
+  const session = await adapter.createSession({ systemPrompt: "Original instruction" })
+  await expect(
+    adapter.resumeSession(session.id, { systemPrompt: "Contact alice@example.com" })
+  ).rejects.toThrow(/PII/)
+  await adapter.execute(session.id, message())
+  const prompts = jest
+    .mocked(fileHost.writeText)
+    .mock.calls.filter(([file, content]) => file.endsWith(".prompt") && content)
+  expect(prompts.at(-1)?.[1]).toContain("Original instruction")
+})
+
+it("reads workspace images as binary and leaves user files in place", async () => {
+  const adapter = await connected()
+  const session = await adapter.createSession()
+  mockFiles.set(`${cwd}/photo.png`, "iVBORw0KGgo=")
+  const result = await adapter.execute(session.id, message(), { files: [{ path: "photo.png" }] })
+  expect(result.success).toBe(true)
+  expect(fileHost.readBinary).toHaveBeenCalledWith(`${cwd}/photo.png`, [cwd])
+  expect(mockSpawned[0].args).toContain(`${cwd}/photo.png`)
+  expect(mockFiles.has(`${cwd}/photo.png`)).toBe(true)
+})
+
+it.each([0, 1])("materializes an inline image and removes it after CLI exit %s", async (code) => {
+  const adapter = await connected()
+  const session = await adapter.createSession()
+  let imagePath = ""
+  mockOnSpawn = (spawn) => {
+    imagePath = spawn.args.find((arg) => arg.endsWith(".png")) ?? ""
+    expect(imagePath).toMatch(/^\/workspace\/project\/\.aider\.cognia-/)
+    expect(mockFiles.get(imagePath)).toBe("iVBORw0KGgo=")
+    complete(spawn.id, "Updated", code)
+  }
+  const result = await adapter.execute(session.id, {
+    ...message(),
+    content: [
+      ...message().content,
+      { type: "image", source: { type: "base64", data: "iVBORw0KGgo=", mediaType: "image/png" } },
+    ],
+  })
+  expect(result.success).toBe(code === 0)
+  expect(imagePath).not.toBe("")
+  expect(mockFiles.has(imagePath)).toBe(false)
 })
 
 it("isolates concurrent sessions and restores only the same agent/workspace history", async () => {

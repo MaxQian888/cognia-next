@@ -453,6 +453,48 @@ export class OpenCodeV2EventMapper {
         return [{ ...base, type: "progress", progress: 0, message: "context_compaction" }]
       case "session.compaction.ended":
         return [{ ...base, type: "progress", progress: 1, message: "context_compaction_complete" }]
+      case "session.compaction.failed":
+        return [
+          {
+            ...base,
+            type: "error",
+            error: event.data.error.message,
+            code: "opencode_compaction_failed",
+            recoverable: true,
+          },
+        ]
+      case "session.retry.scheduled":
+        return [
+          {
+            ...base,
+            type: "progress",
+            progress: 0,
+            step: event.data.attempt,
+            message: event.data.error.message,
+          },
+        ]
+      case "session.tool.progress": {
+        const metadata = event.data.metadata
+        const message =
+          typeof metadata.title === "string"
+            ? metadata.title
+            : typeof metadata.description === "string"
+              ? metadata.description
+              : undefined
+        return [
+          {
+            ...base,
+            type: "progress",
+            progress:
+              typeof metadata.progress === "number"
+                ? Math.max(0, Math.min(1, metadata.progress))
+                : 0,
+            ...(message ? { message } : {}),
+          },
+        ]
+      }
+      case "session.renamed":
+        return [{ ...base, type: "session_info_update", title: event.data.title }]
       case "session.agent.selected":
         return [{ ...base, type: "mode_update", modeId: event.data.agent }]
       default:

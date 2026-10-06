@@ -240,3 +240,12 @@ describe("useTerminalChrome — resize repaint", () => {
     expect(on).not.toHaveBeenCalled()
   })
 })
+
+it("honors the extension presentation title through the existing terminal title sink", () => {
+  renderHook(() => useTerminalChrome(baseOpts({ extensionTitle: "Extension workspace" })))
+  expect(titleMod.applyTerminalTitle).toHaveBeenLastCalledWith(
+    "Extension workspace",
+    titleSink,
+    undefined
+  )
+})

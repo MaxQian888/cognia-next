@@ -739,6 +739,9 @@ export async function dispatchCommand(
       return externalAgentAdmitRun(payload)
     case "external_agent_release_run":
       return externalAgentReleaseRun(payload)
+    case "external_agent_session_query":
+    case "external_agent_session_mutate":
+      return externalAgentSessionOperation(payload, command === "external_agent_session_query")
     case "external_agent_run_turn":
       return externalAgentRunTurn(payload)
     case "external_agent_cancel_run":
@@ -3552,4 +3555,49 @@ async function externalAgentResolveDecision(
     elicitation: payload.elicitation as never,
   })
   return outcome.resolved ? { resolved: true } : { resolved: false, reason: outcome.reason }
+}
+
+async function externalAgentSessionOperation(
+  payload: Record<string, unknown>,
+  readOnly: boolean
+): Promise<{ value: unknown }> {
+  const { requestId, chatSessionId, externalSessionId, stamp, action, callerDeviceId } = payload
+  if (
+    typeof requestId !== "string" ||
+    !requestId ||
+    typeof chatSessionId !== "string" ||
+    !chatSessionId ||
+    typeof externalSessionId !== "string" ||
+    !externalSessionId
+  )
+    throw new Error("External session operation requires request and conversation identities")
+  const binding = stamp as
+    { configId?: unknown; revision?: unknown; lifecycleGeneration?: unknown } | undefined
+  if (
+    !binding ||
+    typeof binding.configId !== "string" ||
+    !binding.configId ||
+    typeof binding.revision !== "string" ||
+    !binding.revision ||
+    !Number.isInteger(binding.lifecycleGeneration)
+  )
+    throw new Error("External session operation requires a configuration stamp")
+  const { executeRemoteSessionOperation } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
+  return executeRemoteSessionOperation(
+    {
+      requestId,
+      chatSessionId,
+      externalSessionId,
+      stamp: {
+        configId: binding.configId,
+        revision: binding.revision,
+        lifecycleGeneration: binding.lifecycleGeneration as number,
+      },
+      action:
+        action as import("@/lib/ai/agent/external/runtimes/remote/remote-run-service").RemoteSessionOperation,
+      callerDeviceId: typeof callerDeviceId === "string" ? callerDeviceId : undefined,
+    },
+    readOnly
+  )
 }

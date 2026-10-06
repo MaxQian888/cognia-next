@@ -7,12 +7,8 @@
     "distributions": "An empty `distributions` array means no managed distribution is approved for this host yet. It is never a licence to fall back to an unpinned install -- a runtime that still launches through a resolving package runner must be accounted for in `unpinnedLaunchWaivers`."
   },
   "unpinnedLaunchWaivers": {
-    "note": "Presets that still launch through a network-resolving package runner (`npx -y <pkg>`), which re-resolves the package on every start and can change under the user without consent. Each entry is a KNOWN governance hole, not an approved pattern. An entry may only be removed by adding a fully pinned distribution (exact version + approved frozen lock + integrity); the list may only shrink. `pnpm audit:external-agent-runtimes` fails on any unpinned launch that is not listed here.",
-    "runtimes": {
-      "codex-acp": "Maintained Codex ACP app-server adapter. No vetted lock asset has been curated for a pinned version yet; the preset keeps `npx -y @agentclientprotocol/codex-acp` until one is.",
-      "gemini-cli": "Google's Gemini CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @google/gemini-cli --acp`.",
-      "qwen-code": "Qwen Code CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @qwen-code/qwen-code --acp`."
-    }
+    "note": "Default presets that still use a network-resolving package runner require a documented waiver. Remove a waiver when replacing the default with either a verified pinned distribution or an installed system executable governed by executable identity and version consent. Saved custom launch commands are preserved.",
+    "runtimes": {}
   },
   "runtimes": [
     {
@@ -200,12 +196,12 @@
       "protocol": "acp",
       "transport": "stdio",
       "platforms": ["darwin", "linux", "win32"],
-      "systemCommand": "npx",
-      "launchArgs": ["-y", "@agentclientprotocol/codex-acp"],
+      "systemCommand": "codex-acp",
+      "launchArgs": [],
       "versionProbe": {
-        "args": ["-y", "@agentclientprotocol/codex-acp", "--version"],
+        "args": ["--version"],
         "parser": "semver-anywhere",
-        "timeoutMs": 20000
+        "timeoutMs": 10000
       },
       "distributions": [],
       "sandbox": {
@@ -214,8 +210,14 @@
       },
       "docsUrl": "https://github.com/agentclientprotocol/codex-acp",
       "notes": {
-        "certification": "Deliberately uncertified. This runtime launches through `npx -y @agentclientprotocol/codex-acp`, which re-resolves the package on every start, so a pinned supportedRange would describe a version that is not necessarily what launches. See unpinnedLaunchWaivers."
-      }
+        "certification": "System-installed executable; detected path, digest and version remain subject to lifecycle consent until authenticated acceptance certifies a release. Legacy saved launch commands are not rewritten."
+      },
+      "legacyLaunches": [
+        {
+          "command": "npx",
+          "args": ["-y", "@agentclientprotocol/codex-acp"]
+        }
+      ]
     },
     {
       "runtimeId": "claude-agent-acp",
@@ -247,19 +249,28 @@
       "protocol": "acp",
       "transport": "stdio",
       "platforms": ["darwin", "linux", "win32"],
-      "systemCommand": "npx",
-      "launchArgs": ["-y", "@google/gemini-cli", "--acp"],
+      "systemCommand": "gemini",
+      "launchArgs": ["--acp"],
       "versionProbe": {
-        "args": ["-y", "@google/gemini-cli", "--version"],
+        "args": ["--version"],
         "parser": "semver-anywhere",
-        "timeoutMs": 20000
+        "timeoutMs": 10000
       },
       "distributions": [],
       "sandbox": {
         "required": true,
         "windowsExceptionEligible": true
       },
-      "docsUrl": "https://github.com/google-gemini/gemini-cli"
+      "docsUrl": "https://github.com/google-gemini/gemini-cli",
+      "legacyLaunches": [
+        {
+          "command": "npx",
+          "args": ["-y", "@google/gemini-cli", "--acp"]
+        }
+      ],
+      "notes": {
+        "certification": "System-installed executable; detected path, digest and version remain subject to lifecycle consent until authenticated acceptance certifies a release. Legacy saved launch commands are not rewritten."
+      }
     },
     {
       "runtimeId": "copilot-cli",
@@ -313,19 +324,28 @@
       "protocol": "acp",
       "transport": "stdio",
       "platforms": ["darwin", "linux", "win32"],
-      "systemCommand": "npx",
-      "launchArgs": ["-y", "@qwen-code/qwen-code", "--acp"],
+      "systemCommand": "qwen",
+      "launchArgs": ["--acp"],
       "versionProbe": {
-        "args": ["-y", "@qwen-code/qwen-code", "--version"],
+        "args": ["--version"],
         "parser": "semver-anywhere",
-        "timeoutMs": 20000
+        "timeoutMs": 10000
       },
       "distributions": [],
       "sandbox": {
         "required": true,
         "windowsExceptionEligible": true
       },
-      "docsUrl": "https://github.com/QwenLM/qwen-code"
+      "docsUrl": "https://github.com/QwenLM/qwen-code",
+      "legacyLaunches": [
+        {
+          "command": "npx",
+          "args": ["-y", "@qwen-code/qwen-code", "--acp"]
+        }
+      ],
+      "notes": {
+        "certification": "System-installed executable; detected path, digest and version remain subject to lifecycle consent until authenticated acceptance certifies a release. Legacy saved launch commands are not rewritten."
+      }
     },
     {
       "runtimeId": "pi",

@@ -34,7 +34,8 @@ import { createHookRunner, type HookRunner } from "../runtime/hook-runner"
 import { createCheckpointCapture, type CheckpointCapture } from "../runtime/checkpoint-capture"
 import { realCheckpointFs } from "../runtime/checkpoint-store"
 import { createGateController, runTurn } from "./turn-engine"
-import { captureEventToActions } from "../state/event-mapper"
+import { captureEventToActions, canonicalEnvelopeToActions } from "../state/event-mapper"
+import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { sidecarEventToMcpLog } from "../runtime/mcp-log-model"
 import { defaultMcpLogFileWriter, type McpLogFileWriter } from "../runtime/mcp-log-file"
 import { resumeContinuityNotice } from "../../agent/external-session-link"
@@ -270,6 +271,63 @@ export function useAgentSession({
     sessionIdRef.current = sessionId
   }, [sessionId])
   const sessionRef = useRef<AgentSession | null>(null)
+  const sendInFlightCountRef = useRef(0)
+  const uiUnsubscribeRef = useRef<(() => void) | undefined>(undefined)
+  const runtimeUnsubscribeRef = useRef<(() => void) | undefined>(undefined)
+  const autonomousBusyRef = useRef(false)
+  const pendingRuntimeEventsRef = useRef<AgentEventEnvelope[]>([])
+  const dispatchRuntimeEnvelope = useCallback(
+    (envelope: AgentEventEnvelope) => {
+      for (const action of canonicalEnvelopeToActions(envelope, {
+        autonomous: true,
+        permissionHandledByGate: true,
+      }))
+        dispatch(action)
+    },
+    [dispatch]
+  )
+  const attachSessionUi = useCallback(
+    (session: AgentSession): AgentSession => {
+      uiUnsubscribeRef.current?.()
+      runtimeUnsubscribeRef.current?.()
+      pendingRuntimeEventsRef.current = []
+      autonomousBusyRef.current = false
+      uiUnsubscribeRef.current = session.subscribeUiEvents?.((event) => {
+        if (sessionRef.current !== session) return
+        if (event.kind === "input-queue-cleared") {
+          dispatch({ type: "RESTORE_QUEUED_INPUT", text: event.text, imagePaths: event.imagePaths })
+        } else {
+          dispatch({
+            type: "EXTENSION_UI_UPDATE",
+            event: {
+              type: "extension_ui_update",
+              id: event.id,
+              update: event.update,
+              sessionId: session.sessionId,
+              timestamp: new Date(),
+            },
+          })
+        }
+      })
+      runtimeUnsubscribeRef.current = session.subscribeEvents?.((envelope) => {
+        if (sessionRef.current !== session) return
+        if (envelope.event.kind === "lifecycle")
+          autonomousBusyRef.current = envelope.event.phase === "started"
+        if (envelope.event.kind === "failure") autonomousBusyRef.current = false
+        if (sendInFlightCountRef.current > 0) pendingRuntimeEventsRef.current.push(envelope)
+        else dispatchRuntimeEnvelope(envelope)
+      })
+      return session
+    },
+    [dispatch, dispatchRuntimeEnvelope]
+  )
+  useEffect(
+    () => () => {
+      uiUnsubscribeRef.current?.()
+      runtimeUnsubscribeRef.current?.()
+    },
+    []
+  )
   const executionHandleRef = useRef<AgentExecutionHandle | null>(null)
   const checkpointAuthorityRef = useRef<{
     sessionId: string
@@ -286,7 +344,6 @@ export function useAgentSession({
   // and two live turns on one session fan every notification out to both
   // prompt listeners, which is how transcript rows render twice.
   const sendChainRef = useRef<Promise<unknown>>(Promise.resolve())
-  const sendInFlightCountRef = useRef(0)
   // Session-only grants (for example when persistence fails). Persisted rules
   // are reread at each request so external revocations take effect live.
   const approvedToolsRef = useRef<Set<string>>(new Set())
@@ -544,17 +601,19 @@ export function useAgentSession({
       // reflects the latest `/clear`/`/resume` id.
 
       const boundId = sessionIdRef.current
-      sessionRef.current = createSession({
-        config: configRef.current,
-        ...(boundId ? { sessionId: boundId } : {}),
-        onResolvedExecutionSpec: captureExecutionSpec,
-      })
+      sessionRef.current = attachSessionUi(
+        createSession({
+          config: configRef.current,
+          ...(boundId ? { sessionId: boundId } : {}),
+          onResolvedExecutionSpec: captureExecutionSpec,
+        })
+      )
       // A chat session just began — fire SessionStart so hook scripts can seed
       // context / log the session (Claude Code parity).
       hookRunner.onSessionStart(sessionRef.current.sessionId)
     }
     return sessionRef.current
-  }, [captureExecutionSpec, createSession, hookRunner])
+  }, [attachSessionUi, captureExecutionSpec, createSession, hookRunner])
 
   const dropSession = useCallback(async () => {
     // Abort any in-flight turn FIRST. /clear, /resume, fork, and model/provider/
@@ -563,6 +622,12 @@ export function useAgentSession({
     // capture would reject it as a non-abort error → a stray "error" cell landing
     // in the freshly-RESET session. Aborting first routes it through the clean
     // (recoverable) interrupt path before the reset wipes the old cells.
+    uiUnsubscribeRef.current?.()
+    uiUnsubscribeRef.current = undefined
+    runtimeUnsubscribeRef.current?.()
+    runtimeUnsubscribeRef.current = undefined
+    autonomousBusyRef.current = false
+    pendingRuntimeEventsRef.current = []
     abortRef.current?.abort()
     const current = sessionRef.current
     if (current) {
@@ -759,7 +824,10 @@ export function useAgentSession({
     ]
   )
 
-  const sendInFlight = useCallback(() => sendInFlightCountRef.current > 0, [])
+  const sendInFlight = useCallback(
+    () => sendInFlightCountRef.current > 0 || autonomousBusyRef.current,
+    []
+  )
 
   const send = useCallback(
     (prompt: string, preparePrompt?: () => Promise<string>) => {
@@ -774,13 +842,18 @@ export function useAgentSession({
       sendChainRef.current = chained.catch(() => undefined)
       return chained.finally(() => {
         sendInFlightCountRef.current -= 1
+        if (sendInFlightCountRef.current === 0) {
+          const pending = pendingRuntimeEventsRef.current.splice(0)
+          pending.forEach(dispatchRuntimeEnvelope)
+        }
       })
     },
-    [sendInner]
+    [sendInner, dispatchRuntimeEnvelope]
   )
 
   const abort = useCallback(() => {
     abortRef.current?.abort()
+    if (autonomousBusyRef.current) void sessionRef.current?.cancel?.().catch(() => undefined)
   }, [])
 
   const resolvePermission = useCallback(
@@ -842,11 +915,13 @@ export function useAgentSession({
       // Adopt the prior session id so further turns append to its transcript;
       // its past cells are restored to the view (a fresh sidecar — model
       // context re-injection is the separate `resume` command's job).
-      sessionRef.current = createSession({
-        config: configRef.current,
-        sessionId,
-        onResolvedExecutionSpec: captureExecutionSpec,
-      })
+      sessionRef.current = attachSessionUi(
+        createSession({
+          config: configRef.current,
+          sessionId,
+          onResolvedExecutionSpec: captureExecutionSpec,
+        })
+      )
       dispatch({ type: "RESET", sessionId })
       dispatch({ type: "LOAD_CELLS", cells })
       // On an external backend the transcript coming back does NOT mean the
@@ -859,7 +934,7 @@ export function useAgentSession({
       )
       if (notice) dispatch({ type: "NOTICE", message: notice })
     },
-    [captureExecutionSpec, createSession, dispatch, dropSession, supportsResume]
+    [attachSessionUi, captureExecutionSpec, createSession, dispatch, dropSession, supportsResume]
   )
 
   const switchModel = useCallback(
@@ -1113,15 +1188,17 @@ export function useAgentSession({
       const kept = cells.slice(0, cellCount)
       writeTranscript(resolveHome(process.env, os.homedir()), sid, cellsToEntries(kept))
       await dropSession()
-      sessionRef.current = createSession({
-        config: configRef.current,
-        sessionId: sid,
-        onResolvedExecutionSpec: captureExecutionSpec,
-      })
+      sessionRef.current = attachSessionUi(
+        createSession({
+          config: configRef.current,
+          sessionId: sid,
+          onResolvedExecutionSpec: captureExecutionSpec,
+        })
+      )
       dispatch({ type: "RESET", sessionId: sid })
       dispatch({ type: "LOAD_CELLS", cells: kept })
     },
-    [captureExecutionSpec, createSession, dispatch, dropSession]
+    [attachSessionUi, captureExecutionSpec, createSession, dispatch, dropSession]
   )
 
   const rewind = useCallback(

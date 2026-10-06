@@ -22,6 +22,26 @@ import {
 
 const timestamp = new Date("2026-07-16T00:00:00.000Z")
 
+it("upserts artifact snapshots with stable identity and keeps raw binary out of the TUI log", () => {
+  expect(
+    externalAgentEventToCanonicalFallback({
+      type: "artifact_update",
+      timestamp,
+      artifactId: "task:report",
+      complete: true,
+      blocks: [
+        { type: "text", text: "final" },
+        { type: "resource", resource: { uri: "a2a:file.bin", blob: "AAEC" } },
+      ],
+    })
+  ).toMatchObject({
+    kind: "content-part",
+    operation: "upsert",
+    partId: "task:report",
+    part: { summary: "final[file: a2a:file.bin]", data: { complete: true } },
+  })
+})
+
 function event(value: Record<string, unknown>): ExternalAgentEvent {
   return { timestamp, ...value } as ExternalAgentEvent
 }
@@ -848,6 +868,7 @@ describe("Pi diagnostic progress stays in audit", () => {
       type: "extension_ui_request",
       id: "status",
       method: "setStatus",
+      statusKey: "bg",
       statusText: "still working",
     },
     { type: "extension_ui_request", id: "title", method: "setTitle", title: "Pi" },
@@ -857,9 +878,17 @@ describe("Pi diagnostic progress stays in audit", () => {
   ])("retains $type $method without transcript chatter", (frame) => {
     const [mapped] = mapPiEvent(frame, { sessionId: "pi-session", now: () => timestamp })
     const projected = externalAgentEventToCanonicalFallback(mapped)
-    expect(projected).toMatchObject({ kind: "diagnostic", payload: { piDiagnostic: frame } })
-    expect(classifyCanonicalEvent(projected.kind)).toBe("audit")
-    expect(externalAgentEventToActions(mapped)).toEqual([])
+    if (frame.type === "extension_ui_request") {
+      expect(projected.kind).toBe("extension-ui")
+      expect(classifyCanonicalEvent(projected.kind)).toBe("status")
+      expect(externalAgentEventToActions(mapped)).toEqual([
+        { type: "EXTENSION_UI_UPDATE", event: mapped },
+      ])
+    } else {
+      expect(projected).toMatchObject({ kind: "diagnostic", payload: { piDiagnostic: frame } })
+      expect(classifyCanonicalEvent(projected.kind)).toBe("audit")
+      expect(externalAgentEventToActions(mapped)).toEqual([])
+    }
   })
 
   it("keeps explicit extension notifications visible", () => {
@@ -874,8 +903,8 @@ describe("Pi diagnostic progress stays in audit", () => {
       { sessionId: "pi-session" }
     )
     expect(externalAgentEventToCanonicalFallback(mapped)).toMatchObject({
-      kind: "activity",
-      detail: "Provider is rate limited",
+      kind: "extension-ui",
+      update: { kind: "notification", level: "warning", message: "Provider is rate limited" },
     })
   })
 })

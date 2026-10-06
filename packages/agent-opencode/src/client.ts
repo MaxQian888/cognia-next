@@ -44,6 +44,9 @@ import {
   type ExternalAgentCompactionCapability,
   type ExternalAgentCompactionOptions,
   type ExternalAgentCommandCompactionRoute,
+  type ExternalAgentSessionEntry,
+  type ExternalAgentSessionOperationCapabilities,
+  type ExternalAgentSessionInputAcceptance,
 } from "@cognia/agent-contracts/session-operations"
 import type {
   ExternalAgentConfig,
@@ -218,6 +221,45 @@ type OcEventStream = { stream: AsyncIterable<OcEvent> }
 
 type OpenCodeInteractionKind = "permission" | "permissionV2" | "question" | "questionV2"
 
+class SessionEventQueue {
+  private events: ExternalAgentEvent[] = []
+  private wake?: () => void
+  private ended = false
+  private failure?: Error
+  push(event: ExternalAgentEvent) {
+    if (!this.ended) {
+      this.events.push(event)
+      this.wake?.()
+    }
+  }
+  end(error?: Error) {
+    this.ended = true
+    this.failure = error
+    this.wake?.()
+  }
+  async *drain(): AsyncGenerator<ExternalAgentEvent> {
+    while (!this.ended || this.events.length) {
+      const event = this.events.shift()
+      if (event) yield event
+      else
+        await new Promise<void>((resolve) => {
+          this.wake = resolve
+        })
+    }
+    if (this.failure) throw this.failure
+  }
+}
+interface SessionSubscription {
+  controller: AbortController
+  listeners: Set<(event: ExternalAgentEvent) => void>
+  ready: Promise<void>
+  failure?: Error
+  queue?: SessionEventQueue
+  running: boolean
+  discarding?: boolean
+  interrupt?: Promise<unknown>
+}
+
 interface PendingOpenCodeInteraction {
   kind: OpenCodeInteractionKind
   sessionId: string
@@ -320,6 +362,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   private requestFetch?: (request: Request) => ReturnType<typeof fetch>
   private pendingInteractions = new Map<string, PendingOpenCodeInteraction>()
   private summarizeUnsupported = false
+  private subscriptions = new Map<string, SessionSubscription>()
 
   /** Agent id of an auto-spawned `opencode serve` process, if any. */
   private spawnedServerId: string | null = null
@@ -379,6 +422,10 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         codeExecution: true,
         multiTurn: true,
         thinking: true,
+        custom: {
+          shellUnsupportedReason:
+            "Native shell output enters session context before Cognia can enforce output PII redaction or excludeFromContext.",
+        },
       }
 
       this._connectionStatus = "connected"
@@ -662,6 +709,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
+    for (const id of this.subscriptions.keys()) this.stopSubscription(id)
     for (const [, controller] of this.abortControllers) {
       controller.abort()
     }
@@ -773,6 +821,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       body.parentID = options.metadata.parentID
     }
 
+    if (!this.outboundGate(body))
+      throw new Error("OpenCode session metadata blocked by the PII gate")
     const resp = await this.client.session.create({ body })
     const ocSession = unwrap<OcSession>(resp)
 
@@ -789,6 +839,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   }
 
   async closeSession(sessionId: string): Promise<void> {
+    this.stopSubscription(sessionId)
     try {
       await this.cancel(sessionId)
     } catch {
@@ -818,14 +869,31 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     }))
   }
 
-  async forkSession(sessionId: string): Promise<ExternalAgentSession> {
+  async forkSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    const target =
+      options?.forkAt ??
+      (options?.forkAtEntryId
+        ? { kind: "entry", id: options.forkAtEntryId, boundary: "before" }
+        : undefined)
+    if (target && (target.kind !== "entry" || target.boundary !== "before" || !target.id.trim()))
+      throw new Error("OpenCode only supports forking before a message entry")
+    if (target && (await this.getSessionMessage(sessionId, target.id)).info.id !== target.id)
+      throw new Error("OpenCode fork boundary was not found")
     const resp = await this.client.session.fork({
       path: { id: sessionId },
-      body: {},
+      body: target ? { messageID: target.id } : {},
     })
     const ocSession = unwrap<OcSession>(resp)
     const session = this.mapOcSessionToExternal(ocSession)
     this._sessions.set(session.id, session)
+    const systemPrompt = options?.systemPrompt ?? this.sessionSystemPrompts.get(sessionId)
+    if (systemPrompt) this.sessionSystemPrompts.set(session.id, systemPrompt)
+    const model = this.sessionModelOverrides.get(sessionId)
+    if (model) this.sessionModelOverrides.set(session.id, model)
+    await this.refreshSessionConfigOptions(session.id)
     return session
   }
 
@@ -911,19 +979,81 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       throw new Error("OpenCode outbound prompt blocked by the PII gate")
     }
 
+    if (this.abortControllers.has(sessionId))
+      throw new Error("OpenCode session already has an active turn")
     const abortController = new AbortController()
     this.abortControllers.set(sessionId, abortController)
 
-    if (options?.signal) {
-      if (options.signal.aborted) {
-        abortController.abort()
-      } else {
-        options.signal.addEventListener("abort", () => abortController.abort())
-      }
-    }
+    const onAbort = () => abortController.abort(options?.signal?.reason)
+    if (options?.signal?.aborted) onAbort()
+    else options?.signal?.addEventListener("abort", onAbort, { once: true })
+    const turnTimeout = setTimeout(
+      () => abortController.abort(new Error("OpenCode turn timed out")),
+      options?.timeout ?? this._config?.timeout ?? 300000
+    )
 
     let asyncPromptAccepted = false
     try {
+      const channel = this.subscriptions.get(sessionId)
+      if (channel) {
+        asyncPromptAccepted = true // Subscription failures must not replay through another transport.
+        if (channel.failure) throw channel.failure
+        abortController.signal.throwIfAborted()
+        await new Promise<void>((resolve, reject) => {
+          const cancelled = () => reject(abortController.signal.reason)
+          abortController.signal.addEventListener("abort", cancelled, { once: true })
+          channel.ready
+            .then(resolve, reject)
+            .finally(() => abortController.signal.removeEventListener("abort", cancelled))
+        })
+        abortController.signal.throwIfAborted()
+        if (channel.running || channel.queue)
+          throw new Error("OpenCode session already has an active turn")
+        const queue = new SessionEventQueue()
+        channel.queue = queue
+        channel.interrupt = undefined
+        let submitted = false
+        let completed = false
+        const interrupt = () =>
+          (channel.interrupt ??= this.client.session.abort({
+            path: { id: sessionId },
+            signal: AbortSignal.timeout(5000),
+          }))
+        const cancel = () => {
+          queue.end(new Error("OpenCode turn cancelled"))
+          if (submitted) {
+            channel.discarding = true
+            void interrupt().catch(() => undefined)
+          }
+        }
+        abortController.signal.addEventListener("abort", cancel, { once: true })
+        try {
+          abortController.signal.throwIfAborted()
+          // A failure after this point is never replayed through synchronous prompt.
+          asyncPromptAccepted = true
+          submitted = true
+          unwrap(
+            await this.client.session.promptAsync({
+              path: { id: sessionId },
+              body: promptBody,
+              signal: abortController.signal,
+            })
+          )
+          for await (const event of queue.drain()) {
+            if (event.type === "done") completed = true
+            yield event
+          }
+        } finally {
+          abortController.signal.removeEventListener("abort", cancel)
+          if (submitted && !completed) {
+            channel.discarding = true
+            await interrupt()
+          }
+          if (channel.queue === queue) channel.queue = undefined
+          if (!channel.listeners.size) this.stopSubscription(sessionId)
+        }
+        return
+      }
       // Subscribe to the event stream BEFORE sending the prompt. The SSE stream
       // has no replay, so opening it first guarantees we don't miss the early
       // message.part.updated events the assistant emits right after promptAsync.
@@ -984,6 +1114,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         donePayload = { success: false }
       }
     } finally {
+      clearTimeout(turnTimeout)
+      options?.signal?.removeEventListener("abort", onAbort)
       // Aborting the controller tears down the SSE fetch now that the turn is
       // over (whether it completed, errored, or was cancelled).
       abortController.abort()
@@ -1098,6 +1230,11 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     }
 
     try {
+      const pending = this.subscriptions.get(sessionId)?.interrupt
+      if (pending) {
+        await pending
+        return
+      }
       await this.client.session.abort({ path: { id: sessionId } })
     } catch {
       // Best effort - session may already be idle
@@ -1182,6 +1319,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     sessionId: string,
     options: ExternalAgentCompactionOptions = {}
   ): Promise<void> {
+    if (!this.outboundGate(options)) throw new Error("OpenCode compaction blocked by the PII gate")
     const commandRoute = resolveCommandCompactionCapability(
       this.getAvailableCommands()
     ).routes.find(
@@ -1329,6 +1467,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     command: string,
     args?: string
   ): Promise<{ info: OcMessage; parts: OcPart[] }> {
+    if (!this.outboundGate({ command, args }))
+      throw new Error("OpenCode command blocked by the PII gate")
     const resp = await this.client.session.command({
       path: { id: sessionId },
       body: {
@@ -1348,6 +1488,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     agent?: string,
     model?: { providerID: string; modelID: string }
   ): Promise<unknown> {
+    if (!this.outboundGate({ command, agent, model }))
+      throw new Error("OpenCode shell blocked by the PII gate")
     const resp = await this.client.session.shell({
       path: { id: sessionId },
       body: {
@@ -1411,6 +1553,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
    * Update session title
    */
   async updateSessionTitle(sessionId: string, title: string): Promise<OcSession> {
+    if (!this.outboundGate(title)) throw new Error("OpenCode title blocked by the PII gate")
     const resp = await this.client.session.update({
       path: { id: sessionId },
       body: { title },
@@ -1849,8 +1992,264 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     return this.availableCommands.map((cmd) => ({
       name: cmd.name,
       description: cmd.description ?? "",
-      input: cmd.args ? { hint: JSON.stringify(cmd.args) } : null,
+      input: { hint: cmd.args ? JSON.stringify(cmd.args) : "" },
+      supportsDuringExecution: false,
     }))
+  }
+
+  async getSessionOperationCapabilities(): Promise<
+    Partial<ExternalAgentSessionOperationCapabilities>
+  > {
+    return {
+      forkAtEntry: "supported",
+      backgroundTurns: "supported",
+      shell: "unsupported",
+      abortShell: "unsupported",
+    }
+  }
+
+  async refreshSessionCommands(sessionId: string): Promise<AcpAvailableCommand[]> {
+    const session = this.getSession(sessionId)
+    if (!session) throw new Error(`Unknown OpenCode session: ${sessionId}`)
+    this.availableCommands = unwrap(await this.client.command.list())
+    const commands = this.getAvailableCommands()
+    session.metadata = { ...session.metadata, availableCommands: commands }
+    this.publishSessionEvent(sessionId, {
+      type: "commands_update",
+      sessionId,
+      timestamp: new Date(),
+      commands,
+    })
+    return commands
+  }
+
+  async executeSessionCommand(
+    sessionId: string,
+    command: string
+  ): Promise<ExternalAgentSessionInputAcceptance> {
+    if (!this.outboundGate(command)) throw new Error("OpenCode command blocked by the PII gate")
+    const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(command)
+    if (!match || !this.getAvailableCommands().some((item) => item.name === match[1]))
+      throw new Error("Unknown OpenCode command")
+    const subscription = this.subscriptions.get(sessionId)
+    if (!subscription?.listeners.size)
+      throw new Error("OpenCode commands require a session event subscriber")
+    if (subscription.failure) throw subscription.failure
+    await subscription.ready
+    if (this.abortControllers.has(sessionId) || subscription.running)
+      throw new Error("OpenCode V1 commands require an idle session")
+    await this.executeCommand(sessionId, match[1], match[2] ?? "")
+    return { disposition: "handled", mode: "follow_up" }
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    if (!title.trim()) throw new Error("OpenCode session title cannot be empty")
+    const result = await this.updateSessionTitle(sessionId, title)
+    const session = this.getSession(sessionId)
+    if (session) session.metadata = { ...session.metadata, title: result.title }
+    this.publishSessionEvent(sessionId, {
+      type: "session_info_update",
+      sessionId,
+      timestamp: new Date(),
+      title: result.title,
+    })
+  }
+
+  async getSessionEntries(sessionId: string, since?: string): Promise<ExternalAgentSessionEntry[]> {
+    const messages = await this.getSessionMessages(sessionId)
+    const start = since ? messages.findIndex(({ info }) => info.id === since) : -1
+    if (since && start < 0) throw new Error("OpenCode history cursor was not found")
+    return messages.slice(start + 1).map(({ info, parts }, offset) => {
+      const content: ExternalAgentContent[] = []
+      for (const part of parts) {
+        if (part.type === "text") content.push({ type: "text", text: part.text })
+        else if (part.type === "reasoning") content.push({ type: "thinking", thinking: part.text })
+        else if (part.type === "file")
+          content.push({
+            type: "resource_link",
+            uri: part.url,
+            name: part.filename ?? "attachment",
+            mimeType: part.mime,
+          })
+        else if (part.type === "tool") {
+          content.push({
+            type: "tool_use",
+            id: part.callID,
+            name: part.tool,
+            input: part.state.input,
+          })
+          if (part.state.status === "completed")
+            content.push({
+              type: "tool_result",
+              toolUseId: part.callID,
+              content: part.state.output,
+            })
+          if (part.state.status === "error")
+            content.push({
+              type: "tool_result",
+              toolUseId: part.callID,
+              content: part.state.error,
+              isError: true,
+            })
+        }
+      }
+      const index = start + 1 + offset
+      return {
+        id: info.id,
+        parentId: messages[index - 1]?.info.id ?? null,
+        type: "message",
+        timestamp: new Date(info.time.created).toISOString(),
+        message: { id: info.id, role: info.role, content, timestamp: new Date(info.time.created) },
+        forkAt: { kind: "entry", id: info.id, boundary: "before" },
+      }
+    })
+  }
+
+  private publishSessionEvent(sessionId: string, event: ExternalAgentEvent): void {
+    const subscription = this.subscriptions.get(sessionId)
+    if (
+      subscription?.discarding &&
+      !["session_info_update", "config_options_update", "commands_update"].includes(event.type)
+    ) {
+      if (event.type === "done") subscription.discarding = false
+      return
+    }
+    if (subscription?.queue) {
+      subscription.queue.push(event)
+      if (event.type === "done") {
+        subscription.queue.end()
+        subscription.queue = undefined
+      }
+    } else {
+      for (const listener of subscription?.listeners ?? []) listener(event)
+    }
+  }
+
+  private stopSubscription(sessionId: string): void {
+    const subscription = this.subscriptions.get(sessionId)
+    subscription?.controller.abort()
+    subscription?.queue?.end(new Error("OpenCode event subscription closed"))
+    this.subscriptions.delete(sessionId)
+  }
+
+  subscribeSessionEvents(
+    sessionId: string,
+    listener: (event: ExternalAgentEvent) => void
+  ): () => void {
+    if (!this.getSession(sessionId)) throw new Error(`Unknown OpenCode session: ${sessionId}`)
+    let subscription = this.subscriptions.get(sessionId)
+    if (!subscription) {
+      let ready!: () => void
+      let failed!: (error: Error) => void
+      const channel: SessionSubscription = {
+        controller: new AbortController(),
+        listeners: new Set(),
+        running: false,
+        ready: new Promise<void>((resolve, reject) => {
+          ready = resolve
+          failed = reject
+        }),
+      }
+      subscription = channel
+      this.subscriptions.set(sessionId, channel)
+      void channel.ready.catch(() => undefined)
+      const timer = setTimeout(() => {
+        channel.failure = new Error("OpenCode event subscription timed out")
+        failed(channel.failure)
+        channel.controller.abort()
+      }, this._config?.timeout ?? 30000)
+      void (async () => {
+        try {
+          const stream = await this.client.event.subscribe({ signal: channel.controller.signal })
+          for await (const event of stream.stream) {
+            if (channel.controller.signal.aborted) break
+            if (event.type === "server.connected") {
+              clearTimeout(timer)
+              ready()
+              continue
+            }
+            const properties = (event as unknown as OpenCodeWireEvent).properties
+            const info = properties?.info as { sessionID?: string; id?: string } | undefined
+            const owner =
+              properties?.sessionID ??
+              info?.sessionID ??
+              (properties?.part as { sessionID?: string } | undefined)?.sessionID ??
+              (event.type.startsWith("session.") ? info?.id : undefined)
+            if (owner !== sessionId) continue
+            const idle =
+              event.type === "session.idle" ||
+              (event.type === "session.status" && event.properties.status.type === "idle")
+            const running =
+              event.type === "session.status" && event.properties.status.type !== "idle"
+            if (running && !channel.running) {
+              channel.discarding = false
+              channel.running = true
+              this.assistantOutcome.delete(sessionId)
+              this.updateSession(sessionId, { status: "executing" })
+              if (!channel.queue)
+                this.publishSessionEvent(sessionId, {
+                  type: "session_start",
+                  sessionId,
+                  timestamp: new Date(),
+                })
+            }
+            for (const translated of this.translateSdkEvent(sessionId, event))
+              this.publishSessionEvent(sessionId, translated)
+            if (idle && (channel.running || channel.queue)) {
+              const outcome = this.assistantOutcome.get(sessionId)
+              this.assistantOutcome.delete(sessionId)
+              channel.running = false
+              this.updateSession(sessionId, { status: "active" })
+              this.publishSessionEvent(sessionId, {
+                type: "done",
+                sessionId,
+                timestamp: new Date(),
+                success: !outcome?.error,
+                ...(outcome?.tokenUsage ? { tokenUsage: outcome.tokenUsage } : {}),
+              })
+            }
+          }
+          if (!channel.controller.signal.aborted)
+            throw new Error("OpenCode event subscription ended")
+        } catch (error) {
+          channel.failure = error instanceof Error ? error : new Error(String(error))
+          failed(channel.failure)
+          if (!channel.controller.signal.aborted) {
+            const owned = Boolean(channel.queue)
+            channel.queue?.end(channel.failure)
+            channel.queue = undefined
+            if (channel.running)
+              await this.client.session.abort({ path: { id: sessionId } }).catch(() => undefined)
+            if (!owned) {
+              this.publishSessionEvent(sessionId, {
+                type: "error",
+                sessionId,
+                timestamp: new Date(),
+                error: channel.failure.message,
+                recoverable: false,
+              })
+              if (channel.running)
+                this.publishSessionEvent(sessionId, {
+                  type: "done",
+                  sessionId,
+                  timestamp: new Date(),
+                  success: false,
+                })
+            }
+            this.updateSession(sessionId, { status: "error" })
+          }
+        } finally {
+          clearTimeout(timer)
+          failed(channel.failure ?? new Error("OpenCode event subscription closed"))
+        }
+      })()
+    }
+    subscription.listeners.add(listener)
+    const channel = subscription
+    return () => {
+      channel.listeners.delete(listener)
+      if (!channel.listeners.size && !channel.queue) this.stopSubscription(sessionId)
+    }
   }
 
   getProviders(): ProviderListData | null {
@@ -1925,6 +2324,12 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
    * The SDK provides typed discriminated union events.
    */
   translateSdkEvent(sessionId: string, event: OcEvent): ExternalAgentEvent[] {
+    const properties = (event as unknown as OpenCodeWireEvent).properties
+    const owner =
+      properties?.sessionID ??
+      (properties?.info as { sessionID?: string; id?: string } | undefined)?.sessionID ??
+      (properties?.part as { sessionID?: string } | undefined)?.sessionID
+    if (owner && owner !== sessionId) return []
     const now = new Date()
     const events: ExternalAgentEvent[] = []
     const interactive = this.translateCurrentInteractionEvent(sessionId, event, now)
@@ -1934,8 +2339,15 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       case "server.connected":
         break
 
+      case "session.updated": {
+        const info = event.properties.info
+        if (info.id !== sessionId) break
+        const session = this._sessions.get(sessionId)
+        if (session) session.metadata = { ...session.metadata, title: info.title }
+        events.push({ type: "session_info_update", sessionId, timestamp: now, title: info.title })
+        break
+      }
       case "session.created":
-      case "session.updated":
       case "session.deleted":
         break
 
@@ -2479,6 +2891,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
         version: ocSession.version,
         projectID: ocSession.projectID,
         directory: ocSession.directory,
+        cwd: ocSession.directory,
+        availableCommands: this.getAvailableCommands(),
       },
     }
   }

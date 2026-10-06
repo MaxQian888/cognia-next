@@ -147,9 +147,10 @@ export async function syncToAgent(
     // hard failure that would scare the user.
   }
 
-  const nextTree = adapter.project(cfg.parsed, resolvedTargets, managedNames)
-
   try {
+    // Projectors may reject unsupported transports. Return the failure before
+    // writing so an invalid projection cannot erase an existing configuration.
+    const nextTree = adapter.project(cfg.parsed, resolvedTargets, managedNames)
     const result = await writeAgentConfig(agentId, nextTree)
     const verified = await readAgentConfig(agentId)
     if (verified.parseError || verified.parsed == null) {

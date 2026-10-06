@@ -2552,7 +2552,11 @@
     "projectClaimsHeader": "Project context ({count})",
     "projectHistoryHeader": "From this project's history ({count})",
     "viewInChat": "View in chat",
-    "jumpMissing": "That message is no longer available."
+    "jumpMissing": "That message is no longer available.",
+    "citationExpired": "The cited document version is no longer available.",
+    "sourceUnavailable": "This source is unavailable or access has been revoked.",
+    "sourceLoadFailed": "Could not open the original source. Try again.",
+    "sourceLoading": "Opening source…"
   },
   "steer": {
     "accepted": "Delivered",

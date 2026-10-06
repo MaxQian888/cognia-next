@@ -2552,7 +2552,11 @@
     "projectClaimsHeader": "项目上下文（{count}）",
     "projectHistoryHeader": "来自本项目历史（{count}）",
     "viewInChat": "在会话中查看",
-    "jumpMissing": "该消息已不存在。"
+    "jumpMissing": "该消息已不存在。",
+    "citationExpired": "引用的文档版本已不可用。",
+    "sourceUnavailable": "此来源已不可用或访问权限已被撤销。",
+    "sourceLoadFailed": "无法打开原文，请重试。",
+    "sourceLoading": "正在打开来源…"
   },
   "steer": {
     "accepted": "已送达",

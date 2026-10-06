@@ -26,6 +26,7 @@ import type {
   ExternalAgentAsyncQuestion,
   ExternalAgentAsyncQuestionsEvent,
   ExternalAgentEvent,
+  ExternalAgentArtifactUpdateEvent,
   ExternalAgentCommentaryDeltaEvent,
   ExternalAgentPermissionResponseEvent,
   ExternalAgentHookFireEvent,
@@ -86,6 +87,8 @@ export function applyExternalAgentEventToParts(
   options?: ExternalAgentPartsOptions
 ): Part[] {
   switch (event.type) {
+    case "artifact_update":
+      return applyArtifactSnapshot(parts, event)
     case "message_delta":
       return applyMessageDelta(parts, event as ExternalAgentMessageDeltaEvent)
     case "thinking":
@@ -109,6 +112,65 @@ export function applyExternalAgentEventToParts(
     default:
       return parts as Part[]
   }
+}
+
+function applyArtifactSnapshot(
+  parts: readonly Part[],
+  event: ExternalAgentArtifactUpdateEvent
+): Part[] {
+  const belongs = (part: Part) => (part as MutablePart).externalArtifactId === event.artifactId
+  const first = parts.findIndex(belongs)
+  const next = event.blocks.map((block): Part => {
+    const identity = { externalArtifactId: event.artifactId }
+    if (block.type === "text")
+      return {
+        ...identity,
+        type: "text",
+        text: block.text,
+        state: event.complete ? "done" : "streaming",
+      } as Part
+    if (block.type === "resource") {
+      const resource = block.resource
+      const mediaType = resource.mimeType ?? "application/octet-stream"
+      return {
+        ...identity,
+        type: "file",
+        filename: resource.uri.split(/[/:]/).pop() || event.name || "file",
+        mediaType,
+        url:
+          "blob" in resource
+            ? `data:${mediaType};base64,${resource.blob}`
+            : `data:${mediaType};charset=utf-8,${encodeURIComponent(resource.text)}`,
+      } as Part
+    }
+    if (block.type === "resource_link") {
+      // Provider resource identifiers may be opaque URIs, not browser links.
+      // Keep those visible without handing executable schemes to a file view.
+      if (!/^https?:\/\//i.test(block.uri))
+        return {
+          ...identity,
+          type: "text",
+          text: `${block.name} (${block.uri})`,
+          state: "done",
+        } as Part
+      return {
+        ...identity,
+        type: "file",
+        filename: block.name,
+        mediaType: block.mimeType ?? "application/octet-stream",
+        url: block.uri,
+      } as Part
+    }
+    return {
+      ...identity,
+      type: "file",
+      filename: event.name ?? block.type,
+      mediaType: block.mimeType,
+      url: `data:${block.mimeType};base64,${block.data}`,
+    } as Part
+  })
+  if (first < 0) return [...parts, ...next]
+  return [...parts.slice(0, first), ...next, ...parts.slice(first).filter((part) => !belongs(part))]
 }
 
 // Project a consequential hook fire into an inline `hook-notice` part, sitting
@@ -288,7 +350,7 @@ function appendToOrCreateLast(
 ): Part[] {
   if (!text) return parts as Part[]
   const last = parts[parts.length - 1] as MutablePart | undefined
-  if (last && last.type === type) {
+  if (last && last.type === type && !last.externalArtifactId) {
     const merged: MutablePart = {
       ...last,
       text: `${last.text ?? ""}${text}`,

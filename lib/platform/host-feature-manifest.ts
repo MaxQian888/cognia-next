@@ -449,6 +449,8 @@ export function buildLocalHostFeatureManifest({
         // answer a turn with a raw "unknown command" instead of the structured
         // "this host is too old" every sibling operation gets.
         "external_agent_run_turn",
+        "external_agent_session_query",
+        "external_agent_session_mutate",
         "external_agent_cancel_run",
         "external_agent_resolve_decision",
         // Host-lane Cognia models (ADR-0090, 2026-10-02): the catalog read,

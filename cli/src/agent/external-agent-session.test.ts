@@ -49,9 +49,11 @@ import { DEFAULT_PERMISSION_CHOICES } from "../tui/components/overlays/Permissio
 import { createGateController, runTurn } from "../tui/hooks/turn-engine"
 import { createInitialState } from "../tui/state/initial"
 import { tuiReducer } from "../tui/state/reducer"
+import { canonicalEnvelopeToActions } from "../tui/state/event-mapper"
 import type { TranscriptFs } from "./transcript"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import * as externalPresets from "@/lib/ai/agent/external/config/presets"
+import { useAskUserStore } from "@/stores/agent/ask-user-store"
 
 import {
   acpPermissionRequestToCli,
@@ -2490,5 +2492,323 @@ it("keeps stale native rows unknown and reports failed inventory refresh", async
     error: "inventory unavailable",
     servers: [expect.objectContaining({ name: "native", state: "unknown" })],
   })
+  await session.close()
+})
+
+it("delivers idle UI events only from its own native session and unsubscribes", async () => {
+  const { manager } = fakeManager()
+  let listener:
+    ((event: import("@/types/agent/external-agent").ExternalAgentEvent) => void) | undefined
+  const detach = jest.fn()
+  manager.addEventListener = jest.fn((_id, callback) => {
+    listener = callback
+    return detach
+  })
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "opencode-server" },
+    manager,
+    transcriptFs: memoryTranscript().fs,
+  })
+  const onUi = jest.fn()
+  const unsubscribe = session.subscribeUiEvents?.(onUi)
+  await session.send("hello", { gate: async () => ({ decision: "allow" }) })
+  const event = {
+    type: "extension_ui_update" as const,
+    id: "ui",
+    update: { kind: "title" as const, title: "background" },
+    timestamp: new Date(0),
+  }
+  listener?.({ ...event, sessionId: "other" })
+  expect(onUi).not.toHaveBeenCalled()
+  listener?.({ ...event, sessionId: "acp-session-1" })
+  expect(onUi).toHaveBeenCalledWith({ kind: "extension-ui", id: "ui", update: event.update })
+  unsubscribe?.()
+  expect(detach).toHaveBeenCalledTimes(1)
+  await session.close()
+})
+
+it("hydrates startup extension UI once when the first turn creates a native session", async () => {
+  const { manager } = fakeManager()
+  const metadata = {
+    extensionUi: {
+      statuses: { state: "ready" },
+      widgets: { help: { lines: ["startup widget"], placement: "aboveEditor" } },
+      title: "startup title",
+      editor: { id: "editor-start", text: "startup draft" },
+      notifications: [{ id: "notice-start", message: "ready", level: "info" }],
+    },
+  }
+  manager.getSession = jest.fn((_agentId, nativeId) =>
+    nativeId === "acp-session-1" ? ({ id: nativeId, metadata } as never) : undefined
+  )
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "opencode-server" },
+    manager,
+    transcriptFs: memoryTranscript().fs,
+  })
+  const onUi = jest.fn()
+  const unsubscribe = session.subscribeUiEvents?.(onUi)
+  expect(onUi).not.toHaveBeenCalled()
+  await session.send("hello", { gate: async () => ({ decision: "allow" }) })
+  expect(onUi).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "extension-ui",
+      update: { kind: "status", key: "state", text: "ready" },
+    })
+  )
+  expect(onUi).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind: "extension-ui",
+      update: { kind: "widget", key: "help", lines: ["startup widget"], placement: "aboveEditor" },
+    })
+  )
+  expect(onUi).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "editor-start",
+      update: { kind: "editor", text: "startup draft" },
+    })
+  )
+  const count = onUi.mock.calls.length
+  await session.send("again", { gate: async () => ({ decision: "allow" }) })
+  expect(onUi).toHaveBeenCalledTimes(count)
+  unsubscribe?.()
+  await session.close()
+})
+
+it("persists and renders an autonomous user, assistant and tool turn without replaying owned events", async () => {
+  const { manager } = fakeManager()
+  let listener:
+    ((event: import("@/types/agent/external-agent").ExternalAgentEvent) => void) | undefined
+  const detach = jest.fn()
+  manager.addEventListener = (_id, callback) => {
+    listener = callback
+    return detach
+  }
+  const transcript = memoryTranscript()
+  const config = {
+    ...DEFAULT_RESOLVED_CONFIG,
+    cwd: "/work",
+    agentBackend: "opencode-server" as const,
+  }
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config,
+    manager,
+    transcriptFs: transcript.fs,
+  })
+  let state = createInitialState(config, session.sessionId)
+  const envelopes: import("@cognia/agent-config-types/agent-execution").AgentEventEnvelope[] = []
+  session.subscribeEvents?.((envelope) => {
+    envelopes.push(envelope)
+    for (const action of canonicalEnvelopeToActions(envelope, { autonomous: true }))
+      state = tuiReducer(state, action)
+  })
+  await session.send("owned", { gate: async () => ({ decision: "allow" }) })
+  listener?.({
+    type: "message_delta",
+    sessionId: "acp-session-1",
+    timestamp: new Date(),
+    delta: { type: "text", text: "owned echo" },
+  })
+  expect(envelopes).toHaveLength(0)
+  const emit = (event: Record<string, unknown>) =>
+    listener?.({
+      ...event,
+      delivery: "out_of_band",
+      sessionId: "acp-session-1",
+      timestamp: new Date(),
+    } as never)
+  emit({ type: "commands_update", commands: [] })
+  expect(envelopes).toHaveLength(0)
+  emit({ type: "session_start" })
+  expect(state.turnStatus).toBe("streaming")
+  await expect(
+    session.send("racing", { gate: async () => ({ decision: "allow" }) })
+  ).rejects.toThrow("autonomous")
+  emit({ type: "message_start", role: "user", messageId: "background-user" })
+  emit({
+    type: "content_block_start",
+    role: "user",
+    messageId: "background-user",
+    block: { type: "text", text: "follow up" },
+  })
+  emit({ type: "message_end" })
+  emit({ type: "message_start", role: "assistant" })
+  emit({ type: "message_delta", delta: { type: "text", text: "checking" } })
+  emit({ type: "tool_use_start", toolUseId: "tool", toolName: "read", rawInput: { path: "file" } })
+  emit({ type: "tool_result", toolUseId: "tool", toolName: "read", result: "ok", isError: false })
+  emit({ type: "message_delta", delta: { type: "text", text: "done" } })
+  emit({ type: "done", success: true })
+  expect(state.turnStatus).toBe("idle")
+  expect(state.cells.filter((cell) => cell.kind === "user")).toEqual([
+    expect.objectContaining({ text: "follow up" }),
+  ])
+  expect(state.cells.some((cell) => cell.kind === "tool")).toBe(true)
+  expect(
+    state.cells
+      .filter((cell) => cell.kind === "assistant")
+      .map((cell) => cell.raw)
+      .join("")
+  ).toBe("checkingdone")
+  const records = transcript.lines.map((line) => JSON.parse(line))
+  expect(records.slice(-2)).toMatchObject([
+    { role: "user", content: "follow up" },
+    { role: "assistant", content: "checkingdone" },
+  ])
+  expect(records.at(-1).parts.some((part: { type: string }) => part.type.startsWith("tool-"))).toBe(
+    true
+  )
+  await session.close()
+  expect(detach).toHaveBeenCalledTimes(1)
+})
+
+it("answers an autonomous elicitation through the manager's response contract", async () => {
+  const { manager } = fakeManager()
+  let listener:
+    ((event: import("@/types/agent/external-agent").ExternalAgentEvent) => void) | undefined
+  manager.addEventListener = (_id, callback) => {
+    listener = callback
+    return () => undefined
+  }
+  const respond = jest.fn(async () => undefined)
+  manager.respondToElicitation = respond
+  const ask = jest.spyOn(useAskUserStore.getState(), "enqueue").mockResolvedValue({
+    selected: ["true"],
+    text: "",
+    cancelled: false,
+  })
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "opencode-server" },
+    manager,
+    transcriptFs: memoryTranscript().fs,
+  })
+  try {
+    session.subscribeEvents?.(() => undefined)
+    await session.send("owned", { gate: async () => ({ decision: "allow" }) })
+    listener?.({
+      type: "elicitation_request",
+      delivery: "out_of_band",
+      sessionId: "acp-session-1",
+      timestamp: new Date(),
+      request: { id: "question-1", mode: "url", message: "Finished signing in?", raw: {} },
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(respond).toHaveBeenCalledWith(expect.any(String), {
+      requestId: "question-1",
+      action: "accept",
+    })
+    expect(manager.cancel).not.toHaveBeenCalled()
+  } finally {
+    ask.mockRestore()
+    await session.close()
+  }
+})
+
+it.each([true, false])(
+  "keeps the tool-host lease only with explicit backgroundTurns support (%s)",
+  async (supported) => {
+    const { manager } = fakeManager()
+    manager.getSessionOperationCapabilities = async () =>
+      ({ backgroundTurns: supported ? "supported" : "unsupported" }) as never
+    const execute = manager.execute
+    manager.execute = async (agent, prompt, options) => {
+      options?.onEvent?.({
+        type: "session_start",
+        sessionId: "acp-session-1",
+        timestamp: new Date(),
+      })
+      return execute(agent, prompt, options)
+    }
+    let live: (() => boolean) | undefined
+    let brokerGate: import("./permission-gate").PermissionResponder | undefined
+    const close = jest.fn(async () => undefined)
+    const gate = jest.fn(async () => ({ decision: "allow" as const }))
+    const session = createExternalAgentSession({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      startToolHost: async (options) => {
+        live = options.isTurnActive
+        brokerGate = options.gate
+        return {
+          endpoint: "http://127.0.0.1:1234",
+          token: "token",
+          isClosed: () => false,
+          connections: () => 0,
+          cancelInFlight: jest.fn(),
+          close,
+        } as never
+      },
+      buildToolHostServers: () => [],
+    })
+    await session.send("command", { gate })
+    expect(live?.()).toBe(supported)
+    const response = await brokerGate?.({
+      type: "permission_request",
+      sessionId: session.sessionId,
+      requestId: "later-tool",
+      toolUseID: "later-tool",
+      toolName: "read",
+      input: {},
+    })
+    expect(response?.decision).toBe(supported ? "allow" : "deny")
+    await session.close()
+    expect(live?.()).toBe(false)
+    expect(close).toHaveBeenCalledTimes(1)
+  }
+)
+
+it("buffers immediate autonomous output until the owned command commits and supports Stop", async () => {
+  const { manager } = fakeManager()
+  let listener:
+    ((event: import("@/types/agent/external-agent").ExternalAgentEvent) => void) | undefined
+  manager.addEventListener = (_id, callback) => {
+    listener = callback
+    return () => undefined
+  }
+  const execute = manager.execute
+  manager.execute = async (agent, prompt, options) => {
+    options?.onEvent?.({ type: "session_start", sessionId: "acp-session-1", timestamp: new Date() })
+    listener?.({
+      type: "session_start",
+      delivery: "out_of_band",
+      sessionId: "acp-session-1",
+      timestamp: new Date(),
+    })
+    listener?.({
+      type: "message_delta",
+      delivery: "out_of_band",
+      sessionId: "acp-session-1",
+      timestamp: new Date(),
+      delta: { type: "text", text: "immediate reply" },
+    })
+    return execute(agent, prompt, options)
+  }
+  const session = createExternalAgentSession({
+    disableToolHost: true,
+    config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "opencode-server" },
+    manager,
+    transcriptFs: memoryTranscript().fs,
+  })
+  const events: import("@cognia/agent-config-types/agent-execution").AgentEventEnvelope[] = []
+  session.subscribeEvents?.((event) => events.push(event))
+  await session.send("trigger", { gate: async () => ({ decision: "allow" }) })
+  expect(events.map((event) => event.event)).toEqual([
+    { kind: "lifecycle", phase: "started" },
+    { kind: "text-delta", delta: "immediate reply" },
+  ])
+  await session.cancel?.()
+  expect(manager.cancel).toHaveBeenCalledWith(expect.any(String), "acp-session-1")
+  listener?.({
+    type: "done",
+    delivery: "out_of_band",
+    sessionId: "acp-session-1",
+    timestamp: new Date(),
+    success: false,
+  })
+  expect(events.at(-1)?.event).toMatchObject({ kind: "lifecycle", phase: "interrupted" })
   await session.close()
 })

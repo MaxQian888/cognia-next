@@ -19,9 +19,16 @@ import {
   dispatchTokenUsage,
 } from "@/lib/claude/adapter-hooks"
 import os from "node:os"
+import path from "node:path"
+import { createHash } from "node:crypto"
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
-import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
+import type {
+  AgentEventEnvelope,
+  CanonicalAgentEvent,
+} from "@cognia/agent-config-types/agent-execution"
+import { applyExternalAgentEventToParts } from "@/lib/ai/agent/external/session/event-to-parts"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import { useAskUserStore } from "@/stores/agent/ask-user-store"
@@ -42,6 +49,8 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentResult,
   ExternalAgentEvent,
+  ExternalAgentSession,
+  ExternalAgentUiState,
 } from "@/types/agent/external-agent"
 import {
   getExternalAgentManager,
@@ -217,6 +226,23 @@ export function classifyExternalFailure(
 }
 
 export interface ExternalAgentSessionManager {
+  getSessionOperationCapabilities?: (
+    agentId: string,
+    sessionId: string
+  ) => Promise<
+    import("@cognia/agent-contracts/session-operations").ExternalAgentSessionOperationCapabilities
+  >
+  respondToPermission?: (
+    agentId: string,
+    sessionId: string,
+    response: import("@/types/agent/external-agent").AcpPermissionResponse
+  ) => Promise<void>
+  respondToElicitation?: (
+    agentId: string,
+    response: import("@/types/agent/external-agent").AcpElicitationResponse
+  ) => Promise<void>
+  getSession?: (agentId: string, sessionId: string) => ExternalAgentSession | undefined
+  addEventListener?: (agentId: string, listener: (event: ExternalAgentEvent) => void) => () => void
   /** Typed vendor extensions on the live adapter (ADR-0217), e.g. Codex's app-server controls. */
   getAdapterExtension?: <T>(agentId: string, extension: AdapterExtension<T>) => T | null
   getAgentCapabilities?: (
@@ -547,6 +573,8 @@ function actionToCanonicalEvent(action: TuiAction): CanonicalAgentEvent {
   const capture = actionToCaptureEvent(action)
   if (capture) return canonicalFromCapture(capture)
   switch (action.type) {
+    case "EXTENSION_UI_UPDATE":
+      return { kind: "extension-ui", id: action.event.id, update: action.event.update }
     case "TOOL_UPDATE":
       return {
         kind: "tool-call",
@@ -694,7 +722,37 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   // the context version changes, so a bridge can never outlive the context it
   // was minted for.
   let broker: ToolHostBroker | null = null
+  const seenUiEffects = new Set<string>()
+  const uiHydrators = new Set<(nativeSessionId?: string) => void>()
+  const hydrateSessionUi = (nativeId = externalSessionId) => {
+    if (nativeId) for (const hydrate of uiHydrators) hydrate(nativeId)
+  }
+  const restoredImageDirectories = new Set<string>()
   let activeTurnOptions: SendTurnOptions | undefined
+  let autonomousGate: PermissionResponder | undefined
+  let autonomousOptions: SendTurnOptions | undefined
+  let backgroundTurnsSupported = false
+  let probedBackgroundSession: string | undefined
+  let backgroundCapabilityProbe: Promise<void> = Promise.resolve()
+  let releaseBackgroundContext: (() => void) | undefined
+  const probeBackgroundTurns = (nativeId: string) => {
+    if (probedBackgroundSession === nativeId) return
+    probedBackgroundSession = nativeId
+    backgroundTurnsSupported = false
+    backgroundCapabilityProbe = (
+      manager.getSessionOperationCapabilities?.(agentId, nativeId) ?? Promise.resolve(undefined)
+    )
+      .then((capabilities) => {
+        if (!closed && probedBackgroundSession === nativeId)
+          backgroundTurnsSupported = capabilities?.backgroundTurns === "supported"
+      })
+      .catch(() => undefined)
+  }
+  let autonomousBusy = false
+  const runtimeListeners = new Set<(event: AgentEventEnvelope) => void>()
+  let runtimeUnsubscribe: (() => void) | undefined
+  const pendingRuntimeEvents: ExternalAgentEvent[] = []
+  let handleRuntimeEvent: ((event: ExternalAgentEvent) => void) | undefined
   let emitTurnAction: ((action: TuiAction) => void) | undefined
   let activeWatchdog: ReturnType<typeof createIdleWatchdog> | undefined
   let activeToolScope: { turnId: string; attemptId: string } | undefined
@@ -793,6 +851,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
 
   /** Tear down the current tool host, if any. Safe to call repeatedly. */
   const stopToolHost = async (): Promise<void> => {
+    releaseBackgroundContext?.()
+    releaseBackgroundContext = undefined
+    backgroundTurnsSupported = false
+    probedBackgroundSession = undefined
     if (!broker) return
     const current = broker
     broker = null
@@ -828,7 +890,9 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         session,
         attempt: brokerAttempt,
         gate: async (request) => {
-          const turnOptions = activeTurnOptions
+          const turnOptions =
+            activeTurnOptions ??
+            (backgroundTurnsSupported && !closed ? autonomousOptions : undefined)
           const watchdog = activeWatchdog
           if (!turnOptions || turnOptions.signal?.aborted) {
             return { decision: "deny", message: "No active turn" }
@@ -836,7 +900,9 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           watchdog?.pause()
           try {
             const decision = await turnOptions.gate(request)
-            return activeTurnOptions === turnOptions && !turnOptions.signal?.aborted
+            return (activeTurnOptions === turnOptions ||
+              (backgroundTurnsSupported && autonomousOptions === turnOptions && !closed)) &&
+              !turnOptions.signal?.aborted
               ? decision
               : { decision: "deny", message: "The turn was interrupted" }
           } finally {
@@ -845,8 +911,16 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         },
         // Read per call, not captured: the barrier belongs to whichever turn is
         // live, and the broker outlives any one of them.
-        awaitApprovals: async () => activeTurnOptions?.awaitApprovals?.(),
-        isTurnActive: () => Boolean(activeTurnOptions && !activeTurnOptions.signal?.aborted),
+        awaitApprovals: async () =>
+          (
+            activeTurnOptions ?? (backgroundTurnsSupported ? autonomousOptions : undefined)
+          )?.awaitApprovals?.(),
+        isTurnActive: () => {
+          const options =
+            activeTurnOptions ??
+            (backgroundTurnsSupported && !closed ? autonomousOptions : undefined)
+          return Boolean(options && !options.signal?.aborted)
+        },
         execHostTool,
         onToolCall: nativeToolEvents
           ? undefined
@@ -1044,6 +1118,9 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     }
     const created = await manager.createSession(agentId, options)
     externalSessionId = created.id
+    probeBackgroundTurns(created.id)
+    await backgroundCapabilityProbe
+    hydrateSessionUi()
     sessionContextVersion = resolved.contextVersion
     publishMcp(resolved, cogniaServers)
     writeExternalLink(
@@ -1092,8 +1169,349 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
 
   return {
     sessionId,
+    subscribeEvents(listener) {
+      runtimeListeners.add(listener)
+      if (!runtimeUnsubscribe) {
+        let emitter: ReturnType<typeof createEnvelopeEmitter> | undefined
+        let parts: import("ai").UIMessage["parts"] = []
+        let user: { id?: string; parts: import("ai").UIMessage["parts"] } | undefined
+        const flushUser = () => {
+          if (!user) return
+          const text = user.parts
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("")
+          appendTranscript(
+            home,
+            sessionId,
+            { role: "user", content: text, parts: user.parts, schemaVersion: 1, id: user.id },
+            params.transcriptFs,
+            now()
+          )
+          const attachments = user.parts
+            .filter((part) => part.type === "file")
+            .map((part) => ({
+              kind: "image",
+              ref: `transcript:${sessionId}:${user?.id ?? "user"}:${createHash("sha256").update(part.url).digest("hex")}`,
+              mediaType: part.mediaType,
+            }))
+          emitter?.emit({
+            kind: "user-input",
+            text,
+            ...(attachments.length ? { attachments } : {}),
+          })
+          user = undefined
+        }
+        handleRuntimeEvent = (event) => {
+          if (closed || event.delivery !== "out_of_band" || event.sessionId !== externalSessionId)
+            return
+          if (
+            event.type === "extension_ui_update" ||
+            event.type === "session_info_update" ||
+            event.type === "input_queue_cleared"
+          )
+            return
+          if (
+            !emitter &&
+            (event.type === "done" ||
+              event.type === "session_end" ||
+              event.type === "message_end" ||
+              event.type === "error")
+          )
+            return
+          if (
+            !emitter &&
+            ![
+              "session_start",
+              "message_start",
+              "message_delta",
+              "thinking",
+              "tool_use_start",
+              "permission_request",
+              "elicitation_request",
+            ].includes(event.type)
+          )
+            return
+          const requestOnly =
+            !emitter &&
+            (event.type === "permission_request" || event.type === "elicitation_request")
+          if (event.type === "session_start" || !emitter) {
+            const index = turnSequence++
+            emitter = createEnvelopeEmitter({
+              identity: {
+                sessionId,
+                runId: `${sessionId}:oob${index}`,
+                turnId: `${sessionId}:oob${index}`,
+                attemptId: `${sessionId}:oob${index}:a0`,
+                hostRef: `external-agent:${backend}`,
+                runtime: backend,
+              },
+              now: () => new Date(now()),
+              onEnvelope: (envelope) => {
+                for (const callback of runtimeListeners) callback(envelope)
+              },
+            })
+            parts = []
+            autonomousBusy = true
+            emitter.emit({ kind: "lifecycle", phase: "started" })
+            if (event.type === "session_start") return
+          }
+          if (event.type === "message_start" && event.role === "user") {
+            flushUser()
+            user = { id: event.messageId, parts: [] }
+            return
+          }
+          if (event.type === "content_block_start" && event.role === "user") {
+            user ??= { id: event.messageId, parts: [] }
+            if (event.block.type === "text")
+              user.parts.push({ type: "text", text: event.block.text })
+            if (event.block.type === "image")
+              user.parts.push({
+                type: "file",
+                mediaType: event.block.mimeType,
+                url: `data:${event.block.mimeType};base64,${event.block.data}`,
+              })
+            return
+          }
+          if (event.type === "content_block_end") return
+          flushUser()
+          if (event.type === "permission_request") {
+            const requestEmitter = emitter
+            void (async () => {
+              const decision = autonomousGate
+                ? await autonomousGate(acpPermissionRequestToCli(event.request, sessionId))
+                : { decision: "deny" as const, message: "No interactive permission responder" }
+              if (!manager.respondToPermission)
+                throw new Error("Permission responses are not supported")
+              await manager.respondToPermission(
+                agentId,
+                event.sessionId!,
+                captureDecisionToAcp(
+                  event.request,
+                  closed ? { decision: "deny", message: "Session closed" } : decision
+                )
+              )
+              if (requestOnly && emitter === requestEmitter) {
+                emitter.emit({ kind: "lifecycle", phase: "ended" })
+                emitter = undefined
+                autonomousBusy = false
+              }
+            })().catch((error) => {
+              requestEmitter.emit({
+                kind: "failure",
+                code: "permission_response",
+                message: String(error),
+              })
+              autonomousBusy = false
+              if (emitter === requestEmitter) emitter = undefined
+              void manager.cancel(agentId, event.sessionId!).catch(() => undefined)
+            })
+            return
+          }
+          if (event.type === "elicitation_request") {
+            const requestEmitter = emitter
+            void answerElicitationThroughAskUser(event.request, (question) =>
+              useAskUserStore.getState().enqueue(question, sessionId)
+            )
+              .then(async (response) => {
+                if (!manager.respondToElicitation)
+                  throw new Error("Elicitation responses are not supported")
+                await manager.respondToElicitation(agentId, response)
+                if (requestOnly && emitter === requestEmitter) {
+                  emitter.emit({ kind: "lifecycle", phase: "ended" })
+                  emitter = undefined
+                  autonomousBusy = false
+                }
+              })
+              .catch((error) => {
+                requestEmitter.emit({
+                  kind: "failure",
+                  code: "elicitation_response",
+                  message: String(error),
+                })
+                autonomousBusy = false
+                if (emitter === requestEmitter) emitter = undefined
+                void manager.cancel(agentId, event.sessionId!).catch(() => undefined)
+              })
+            return
+          }
+          parts = applyExternalAgentEventToParts(parts, event)
+          const actions = externalAgentEventToActions(event)
+          for (const action of actions) emitter.emit(actionToCanonicalEvent(action))
+          if (!actions.length && event.type !== "done" && event.type !== "session_end")
+            emitter.emit(externalAgentEventToCanonicalFallback(event))
+          if (event.type === "done" || event.type === "session_end" || event.type === "error") {
+            const text = parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("")
+            appendTranscript(
+              home,
+              sessionId,
+              { role: "assistant", content: text, parts, schemaVersion: 1, meta: { backend } },
+              params.transcriptFs,
+              now()
+            )
+            autonomousBusy = false
+            if (event.type !== "error")
+              emitter.emit({
+                kind: "lifecycle",
+                phase: event.type === "done" && event.success ? "ended" : "interrupted",
+              })
+            emitter = undefined
+          }
+        }
+        runtimeUnsubscribe = manager.addEventListener?.(agentId, (event) => {
+          if (
+            closed ||
+            event.delivery !== "out_of_band" ||
+            event.sessionId !== (externalSessionId ?? probedBackgroundSession)
+          )
+            return
+          if (sendingTurn || activeTurnOptions) {
+            pendingRuntimeEvents.push(event)
+            if (event.type === "session_start") autonomousBusy = true
+          } else handleRuntimeEvent?.(event)
+        })
+      }
+      return () => {
+        runtimeListeners.delete(listener)
+      }
+    },
+    async cancel() {
+      if (externalSessionId) await manager.cancel(agentId, externalSessionId)
+    },
+    subscribeUiEvents(listener) {
+      let disposed = false
+      let hydratedSessionId: string | undefined
+      let hydratedUi: ExternalAgentUiState | undefined
+      const emptyUi: ExternalAgentUiState = { statuses: {}, widgets: {}, notifications: [] }
+      const statusKeys = new Set<string>()
+      const widgetKeys = new Set<string>()
+      let hasTitle = false
+      const track = (
+        update: import("@cognia/agent-config-types/agent-execution").AgentExtensionUiUpdate
+      ) => {
+        if (update.kind === "status") {
+          if (update.text === null) statusKeys.delete(update.key)
+          else statusKeys.add(update.key)
+        } else if (update.kind === "widget") {
+          if (update.lines === null) widgetKeys.delete(update.key)
+          else widgetKeys.add(update.key)
+        } else if (update.kind === "title") hasTitle = Boolean(update.title)
+      }
+      const hydrate = (nativeId = externalSessionId) => {
+        if (closed || disposed || !nativeId) return
+        const nativeSession = manager.getSession?.(agentId, nativeId)
+        if (!nativeSession) return
+        const saved =
+          (nativeSession.metadata?.extensionUi as ExternalAgentUiState | undefined) ?? emptyUi
+        if (hydratedSessionId === nativeId && hydratedUi === saved) return
+        hydratedSessionId = nativeId
+        hydratedUi = saved
+        const emit = (
+          id: string,
+          update: import("@cognia/agent-config-types/agent-execution").AgentExtensionUiUpdate
+        ) => {
+          track(update)
+          listener({ kind: "extension-ui", id, update })
+        }
+        for (const key of statusKeys)
+          if (!Object.hasOwn(saved.statuses, key))
+            emit(`${nativeId}:snapshot:clear-status:${key}`, { kind: "status", key, text: null })
+        for (const key of widgetKeys)
+          if (!Object.hasOwn(saved.widgets, key))
+            emit(`${nativeId}:snapshot:clear-widget:${key}`, {
+              kind: "widget",
+              key,
+              lines: null,
+              placement: "aboveEditor",
+            })
+        if (hasTitle && saved.title === undefined)
+          emit(`${nativeId}:snapshot:clear-title`, { kind: "title", title: "" })
+        for (const [key, text] of Object.entries(saved.statuses))
+          emit(`${nativeId}:snapshot:status:${key}`, { kind: "status", key, text })
+        for (const [key, widget] of Object.entries(saved.widgets))
+          emit(`${nativeId}:snapshot:widget:${key}`, { kind: "widget", key, ...widget })
+        if (saved.title !== undefined)
+          emit(`${nativeId}:snapshot:title`, { kind: "title", title: saved.title })
+        if (saved.editor && !seenUiEffects.has(`${nativeId}:${saved.editor.id}`)) {
+          seenUiEffects.add(`${nativeId}:${saved.editor.id}`)
+          emit(saved.editor.id, { kind: "editor", text: saved.editor.text })
+        }
+        for (const notification of saved.notifications) {
+          const key = `${nativeId}:${notification.id}`
+          if (seenUiEffects.has(key)) continue
+          seenUiEffects.add(key)
+          emit(notification.id, {
+            kind: "notification",
+            message: notification.message,
+            level: notification.level,
+          })
+        }
+      }
+      uiHydrators.add(hydrate)
+      const unsubscribe = manager.addEventListener?.(agentId, (event) => {
+        if (closed || disposed || event.sessionId !== externalSessionId) return
+        if (event.type === "session_info_update" && event.extensionUi) {
+          hydratedUi = undefined
+          hydrate()
+          return
+        }
+        if (event.type === "extension_ui_update") {
+          track(event.update)
+          seenUiEffects.add(`${event.sessionId}:${event.id}`)
+        }
+        if (event.type === "input_queue_cleared") {
+          const inputs = [...event.queue.steering, ...event.queue.followUp]
+          const images = inputs.flatMap((input) => input.images ?? [])
+          const imagePaths: string[] = []
+          if (images.length) {
+            const directory = mkdtempSync(path.join(os.tmpdir(), "cognia-restored-queue-"))
+            restoredImageDirectories.add(directory)
+            for (const [index, image] of images.entries()) {
+              const extension = (
+                {
+                  "image/png": "png",
+                  "image/jpeg": "jpg",
+                  "image/gif": "gif",
+                  "image/webp": "webp",
+                } as Record<string, string>
+              )[image.mimeType]
+              if (!extension) throw new Error(`Unsupported queued image type: ${image.mimeType}`)
+              const imagePath = path.join(directory, `${index}.${extension}`)
+              writeFileSync(imagePath, Buffer.from(image.data, "base64"), { mode: 0o600 })
+              imagePaths.push(imagePath)
+            }
+          }
+          listener({
+            kind: "input-queue-cleared",
+            text: inputs
+              .map((input) => input.text)
+              .filter(Boolean)
+              .join("\n\n"),
+            imagePaths,
+          })
+          return
+        }
+        // In-flight updates already travel through the send envelope stream.
+        if (activeTurnOptions || event.type !== "extension_ui_update") return
+        listener({ kind: "extension-ui", id: event.id, update: event.update })
+      })
+      hydrate()
+      return () => {
+        disposed = true
+        uiHydrators.delete(hydrate)
+        unsubscribe?.()
+      }
+    },
     async send(prompt: string, opts: SendTurnOptions) {
       if (closed) throw new Error("agent session is closed")
+      if (autonomousBusy) throw new Error("An autonomous agent turn is already active")
+      autonomousGate = opts.gate
+      autonomousOptions = opts
+      releaseBackgroundContext?.()
+      releaseBackgroundContext = undefined
       if (applyingMcp) throw new Error("MCP configuration is being applied")
       if (sendingTurn) throw new Error("An agent turn is already active")
       sendingTurn = true
@@ -1378,12 +1796,21 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
             },
             onEvent: (event) => {
               if (activeTurnOptions !== opts || opts.signal?.aborted) return
+              if (
+                (event.type === "content_block_start" || event.type === "content_block_delta") &&
+                event.role === "user"
+              )
+                return
               watchdog.bump()
               if (event.type === "message_delta" && event.delta.type === "text") {
                 streamedText += event.delta.text
                 dispatchStreamChunk(sessionId, event.delta.text, streamedText)
               }
-              if (event.sessionId) observedSessionId = event.sessionId
+              if (event.sessionId) {
+                observedSessionId = event.sessionId
+                probeBackgroundTurns(event.sessionId)
+                hydrateSessionUi(event.sessionId)
+              }
               const actions = externalAgentEventToActions(event)
               if (envelopeEmitter && actions.length === 0) {
                 envelopeEmitter.emit(
@@ -1449,11 +1876,20 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           }
           result = outcome.value
         } finally {
-          releaseSkillScope()
-          activeToolScope = undefined
+          await backgroundCapabilityProbe
+          if (backgroundTurnsSupported && !closed)
+            releaseBackgroundContext = () => {
+              releaseSkillScope()
+              clearDispatch()
+              activeToolScope = undefined
+            }
+          else {
+            releaseSkillScope()
+            clearDispatch()
+            activeToolScope = undefined
+          }
           watchdog.stop()
           activeWatchdog = undefined
-          clearDispatch()
           activeTurnOptions = undefined
           emitTurnAction = undefined
         }
@@ -1474,6 +1910,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
             params.transcriptFs
           )
         }
+        hydrateSessionUi()
         const mcpSnapshot = readSessionMcpStatus(sessionId)
         if (mcpSnapshot) publishSessionMcpStatus(sessionId, { ...mcpSnapshot, externalSessionId })
         if (!result.success) {
@@ -1515,6 +1952,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         throw error
       } finally {
         sendingTurn = false
+        pendingRuntimeEvents.splice(0).forEach((event) => handleRuntimeEvent?.(event))
       }
     },
     invalidateOptions() {
@@ -1704,6 +2142,14 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     async close() {
       if (closed) return
       closed = true
+      runtimeUnsubscribe?.()
+      runtimeListeners.clear()
+      pendingRuntimeEvents.length = 0
+      uiHydrators.clear()
+      seenUiEffects.clear()
+      for (const directory of restoredImageDirectories)
+        rmSync(directory, { recursive: true, force: true })
+      restoredImageDirectories.clear()
       // Shutdown order: stop accepting tool calls → reject pending broker calls
       // → cancel the external turn → close the protocol session → drop the
       // bridge → remove the agent. Doing it in any other order can leave a

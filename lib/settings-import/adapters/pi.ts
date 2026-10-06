@@ -24,15 +24,16 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Pi's thinking levels map onto Cognia's reasoning effort one-for-one. Pi also
- * accepts `none`, which Cognia expresses as `low` rather than dropping the
- * setting entirely.
+ * Pi 1.0.2 shares the five effort levels Cognia can persist. Keep the legacy
+ * `none` alias, but do not turn Pi's `off` into an enabled reasoning effort.
  */
-const THINKING_TO_EFFORT: Record<string, string> = {
+const THINKING_TO_EFFORT: Record<string, NonNullable<SettingsSnapshot["defaultEffort"]>> = {
   none: "low",
   low: "low",
   medium: "medium",
   high: "high",
+  xhigh: "xhigh",
+  max: "max",
 }
 
 /**
@@ -101,7 +102,11 @@ export function settingsFromPi(current: SettingsSnapshot, input: unknown): Setti
           ? {}
           : {
               supported: false,
-              warnings: [`Unknown Pi thinking level "${source.defaultThinkingLevel}".`],
+              warnings: [
+                thinking === "off" || thinking === "minimal"
+                  ? `Pi's "${thinking}" thinking level has no equivalent in Cognia's default reasoning effort.`
+                  : `Unknown Pi thinking level "${source.defaultThinkingLevel}".`,
+              ],
             }
       )
     )

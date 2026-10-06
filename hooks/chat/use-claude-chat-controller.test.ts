@@ -1,5 +1,14 @@
+jest.mock("@/lib/db/messages", () => ({
+  ...jest.requireActual("@/lib/db/messages"),
+  persistMessages: jest.fn().mockResolvedValue(undefined),
+  persistStreamingMessages: jest.fn().mockResolvedValue(undefined),
+}))
+
+import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import {
+  createExternalIdleEventConsumer,
   resolveChatTurnAttemptIdentity,
+  resolveNativeExternalSessionId,
   useClaudeChat,
   userPromptText,
   rewriteUserPromptText,
@@ -206,5 +215,192 @@ describe("redirectSendToBundleAliases", () => {
 
     expect(redirected).not.toHaveProperty("trustedWorkspaceRoots")
     expect(redirected.cwd).toBe("/isolated/app")
+  })
+})
+
+describe("native external session continuation", () => {
+  beforeEach(() => {
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "external", agentId: "pi" },
+      sessionRuntimeRefs: {},
+      sessionExternalLinks: {},
+    })
+  })
+
+  it("continues the selected fork instead of the original tool-host session", () => {
+    useAgentRuntimeStore
+      .getState()
+      .setSessionExternalLink("chat", { agentId: "pi", sessionId: "forked-native" })
+    expect(
+      resolveNativeExternalSessionId("chat", "pi", {
+        agentId: "pi",
+        nativeSessionId: "original-native",
+      })
+    ).toBe("forked-native")
+  })
+
+  it("retains the native lane when the most recent link names a gateway task", () => {
+    useAgentRuntimeStore
+      .getState()
+      .setSessionExternalLink("chat", { agentId: "pi", sessionId: "cognia-gateway:task:session" })
+    expect(
+      resolveNativeExternalSessionId("chat", "pi", {
+        agentId: "pi",
+        nativeSessionId: "original-native",
+      })
+    ).toBe("original-native")
+    expect(
+      resolveNativeExternalSessionId("chat", "codex", {
+        agentId: "pi",
+        nativeSessionId: "original-native",
+      })
+    ).toBeUndefined()
+  })
+})
+
+describe("autonomous external turns", () => {
+  it("persists delayed output and scopes approval while ignoring ordinary delivery and old links", async () => {
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    const messagesDb = await import("@/lib/db/messages")
+    const { SessionCoalescingRegistry } = await import("./stream-coalescing")
+    const persist = jest.mocked(messagesDb.persistMessages).mockClear()
+    const persistStreaming = jest.mocked(messagesDb.persistStreamingMessages).mockClear()
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "external", agentId: "pi" },
+      sessionRuntimeRefs: {},
+      sessionExternalLinks: {},
+    })
+    useAgentRuntimeStore
+      .getState()
+      .setSessionExternalLink("idle-chat", { agentId: "pi", sessionId: "native-idle" })
+    useChatStore.getState().replaceSessionMessages("idle-chat", [])
+    const registry = new SessionCoalescingRegistry({
+      onCommit: (id, messages) => useChatStore.getState().replaceSessionMessages(id, messages),
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
+    const consume = createExternalIdleEventConsumer("idle-chat", "pi", "native-idle", registry)
+    const base = {
+      sessionId: "native-idle",
+      timestamp: new Date(),
+      delivery: "out_of_band" as const,
+    }
+    try {
+      await consume({ ...base, type: "session_start" })
+      await consume({
+        ...base,
+        type: "content_block_start",
+        role: "user",
+        messageId: "extension-user",
+        block: { type: "text", text: "background request" },
+      })
+      await consume({
+        ...base,
+        type: "message_delta",
+        delta: { type: "text", text: "delayed answer" },
+      })
+      await consume({
+        ...base,
+        delivery: undefined,
+        type: "message_delta",
+        delta: { type: "text", text: "duplicate" },
+      })
+      await consume({
+        ...base,
+        type: "permission_request",
+        request: {
+          id: "idle-approve",
+          toolInfo: {
+            id: "bash",
+            name: "bash",
+            description: "Run shell",
+            parameters: { type: "object" },
+          },
+        },
+      })
+      expect(
+        useChatStore
+          .getState()
+          .sessions["idle-chat"].pendingApprovals.some(
+            (approval) =>
+              approval.sessionId === "idle-chat" && approval.requestId.includes("idle-approve")
+          )
+      ).toBe(true)
+      await consume({ ...base, type: "done", success: true })
+      expect(persist).toHaveBeenCalledWith(
+        "idle-chat",
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            parts: [expect.objectContaining({ type: "text", text: "background request" })],
+          }),
+          expect.objectContaining({
+            role: "assistant",
+            parts: [expect.objectContaining({ type: "text", text: "delayed answer" })],
+          }),
+        ])
+      )
+      expect(useChatStore.getState().sessions["idle-chat"].status).toBe("idle")
+      const count = persist.mock.calls.length
+      useAgentRuntimeStore
+        .getState()
+        .setSessionExternalLink("idle-chat", { agentId: "pi", sessionId: "forked" })
+      await consume({ ...base, type: "session_start" })
+      await consume({
+        ...base,
+        type: "message_delta",
+        delta: { type: "text", text: "old process" },
+      })
+      await consume({ ...base, type: "done", success: true })
+      expect(persist).toHaveBeenCalledTimes(count)
+    } finally {
+      persist.mockClear()
+      persistStreaming.mockClear()
+      registry.release("idle-chat")
+    }
+  })
+  it("flushes a detached autonomous reply and refuses late events", async () => {
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    const { SessionCoalescingRegistry } = await import("./stream-coalescing")
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "external", agentId: "pi" },
+      sessionRuntimeRefs: {},
+      sessionExternalLinks: {},
+    })
+    useAgentRuntimeStore
+      .getState()
+      .setSessionExternalLink("detach-chat", { agentId: "pi", sessionId: "detached-native" })
+    useChatStore.getState().replaceSessionMessages("detach-chat", [])
+    const persist = jest.fn()
+    const registry = new SessionCoalescingRegistry({
+      onCommit: (id, messages) => useChatStore.getState().replaceSessionMessages(id, messages),
+      onPersist: persist,
+      persistDelayMs: 10000,
+    })
+    const consume = createExternalIdleEventConsumer(
+      "detach-chat",
+      "pi",
+      "detached-native",
+      registry
+    )
+    const base = {
+      delivery: "out_of_band" as const,
+      sessionId: "detached-native",
+      timestamp: new Date(),
+    }
+    await consume({ ...base, type: "session_start" })
+    await consume({
+      ...base,
+      type: "message_delta",
+      delta: { type: "text", text: "retained partial" },
+    })
+    expect(persist).not.toHaveBeenCalled()
+    await consume.dispose()
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(useChatStore.getState().sessions["detach-chat"].messages[0].parts).toEqual([
+      expect.objectContaining({ type: "text", text: "retained partial" }),
+    ])
+    await consume({ ...base, type: "message_delta", delta: { type: "text", text: "discard late" } })
+    expect(persist).toHaveBeenCalledTimes(1)
   })
 })

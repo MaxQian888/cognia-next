@@ -87,6 +87,8 @@ async function boot(): Promise<number> {
   // global before any `@/lib` module (and the eager Dexie databases they
   // construct at import) is evaluated. See ../db/install-indexeddb.
   await import("../db/install-indexeddb")
+  const { installVectorRuntimeAdapters } = await import("@/lib/vector/runtime-adapters")
+  installVectorRuntimeAdapters()
   // The shared external-agent code reaches this process's own process table,
   // PTY terminals and hook policy through the host installed here (ADR-0217).
   const { installCliExternalAgentHost } = await import("../runtime/external/host-branch")

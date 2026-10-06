@@ -157,9 +157,23 @@ import type {
   ExternalAgentHostCeilings,
   ExternalAgentHostFacts,
 } from "@cognia/agent-config-types/external-agent-capability"
+import { resolveSessionOperationCapabilities } from "@cognia/agent-contracts/session-operations"
 import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
+  ExternalAgentSessionOperationCapabilities,
+  ExternalAgentSessionInput,
+  ExternalAgentSessionInputMode,
+  ExternalAgentSessionInputAcceptance,
+  ExternalAgentSessionInputQueue,
+  ExternalAgentSessionQueuePolicy,
+  ExternalAgentSessionRuntimeControls,
+  ExternalAgentSessionRuntimeState,
+  ExternalAgentSessionEntry,
+  ExternalAgentSessionTree,
+  ExternalAgentSessionHtmlExport,
+  ExternalAgentSessionShellOptions,
+  ExternalAgentSessionShellResult,
   ExternalAgentProviderUndoCapability,
 } from "@cognia/agent-contracts/session-operations"
 import type { AcpAvailableCommand } from "@/types/agent/external-agent"
@@ -415,6 +429,9 @@ export class ExternalAgentManager {
   private kimiDeletedSessions = new Map<string, Map<string, { cwd?: string; expiresAt: number }>>()
   private delegationRules: ExternalAgentDelegationRule[] = []
   private healthCheckTimer?: ReturnType<typeof setInterval>
+  private sessionCancellations = new Map<string, Promise<void>>()
+  private sessionEventSubscriptions = new Map<string, Map<string, () => void>>()
+  private sessionShellApprovals = new Set<string>()
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
   private lifecycleListeners: Set<(event: ExternalAgentLifecycleEvent) => void> = new Set()
   private processExitUnlisten?: Promise<() => void>
@@ -881,6 +898,7 @@ export class ExternalAgentManager {
       connectionStatus: "disconnected",
       status: "idle",
     })
+    this.detachSessionEvents(agentId)
     instance.sessions.clear()
     // The adapter keeps its own copy, and `disconnect()` is not on this path,
     // so without this the reconnect leaves ids from the dead process visible
@@ -935,6 +953,341 @@ export class ExternalAgentManager {
     await adapter.setSessionMode(sessionId, modeId)
   }
 
+  private sessionOperationTarget(agentId: string, sessionId: string) {
+    const target = this.gatewaySessionTarget(agentId, sessionId)
+    const adapter = this.adapters.get(target.agentId)
+    const instance = this.instances.get(target.agentId)
+    if (!adapter || !instance) throw new Error(`Agent not found: ${agentId}`)
+    if (!adapter.getSession(target.sessionId)) throw new Error(`Session not found: ${sessionId}`)
+    return { ...target, adapter, instance }
+  }
+
+  async getSessionOperationCapabilities(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentSessionOperationCapabilities> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    const advertised = await target.adapter.getSessionOperationCapabilities?.(target.sessionId)
+    return resolveSessionOperationCapabilities(target.adapter, advertised)
+  }
+
+  async refreshSessionCommands(agentId: string, sessionId: string): Promise<AcpAvailableCommand[]> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.refreshSessionCommands)
+      throw new Error("Agent does not support command discovery")
+    const commands = await target.adapter.refreshSessionCommands(target.sessionId)
+    const session = target.adapter.getSession(target.sessionId)
+    if (session) {
+      session.metadata = { ...session.metadata, availableCommands: commands }
+      target.instance.sessions.set(session.id, session)
+    }
+    // Subscribing adapters publish the same update themselves, including during
+    // extension-driven refreshes. Synthesize it only for request-only adapters.
+    if (!target.adapter.subscribeSessionEvents)
+      this.emitEvent(target.agentId, {
+        type: "commands_update",
+        sessionId: target.sessionId,
+        commands,
+        timestamp: new Date(),
+      })
+    return commands
+  }
+
+  async executeSessionCommand(
+    agentId: string,
+    sessionId: string,
+    command: string
+  ): Promise<ExternalAgentSessionInputAcceptance> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.executeSessionCommand)
+      throw new Error("Agent does not support live commands")
+    return target.adapter.executeSessionCommand(target.sessionId, command)
+  }
+
+  async enqueueSessionInput(
+    agentId: string,
+    sessionId: string,
+    input: ExternalAgentSessionInput,
+    mode: ExternalAgentSessionInputMode
+  ): Promise<ExternalAgentSessionInputAcceptance> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.enqueueSessionInput) throw new Error("Agent does not support queued input")
+    return target.adapter.enqueueSessionInput(target.sessionId, input, mode)
+  }
+
+  async clearSessionInputQueue(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentSessionInputQueue> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.clearSessionInputQueue)
+      throw new Error("Agent does not support clearing input queues")
+    return target.adapter.clearSessionInputQueue(target.sessionId)
+  }
+
+  async setSessionQueuePolicy(
+    agentId: string,
+    sessionId: string,
+    policy: ExternalAgentSessionQueuePolicy
+  ): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.setSessionQueuePolicy)
+      throw new Error("Agent does not support queue policy changes")
+    await target.adapter.setSessionQueuePolicy(target.sessionId, policy)
+  }
+
+  async setSessionRuntimeControls(
+    agentId: string,
+    sessionId: string,
+    controls: ExternalAgentSessionRuntimeControls
+  ): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.setSessionRuntimeControls)
+      throw new Error("Agent does not support runtime controls")
+    await target.adapter.setSessionRuntimeControls(target.sessionId, controls)
+  }
+
+  async getSessionRuntimeState(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentSessionRuntimeState> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.getSessionRuntimeState)
+      throw new Error("Agent does not support runtime state")
+    return target.adapter.getSessionRuntimeState(target.sessionId)
+  }
+
+  async abortSessionRetry(agentId: string, sessionId: string): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.abortSessionRetry)
+      throw new Error("Agent does not support stopping retries")
+    await target.adapter.abortSessionRetry(target.sessionId)
+  }
+
+  async getSessionEntries(
+    agentId: string,
+    sessionId: string,
+    since?: string
+  ): Promise<ExternalAgentSessionEntry[]> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.getSessionEntries) throw new Error("Agent does not support session entries")
+    return target.adapter.getSessionEntries(target.sessionId, since)
+  }
+
+  async getSessionTree(agentId: string, sessionId: string): Promise<ExternalAgentSessionTree> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.getSessionTree) throw new Error("Agent does not support session trees")
+    return target.adapter.getSessionTree(target.sessionId)
+  }
+
+  async cloneSession(
+    agentId: string,
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    // Gateway sessions require their own ticket/lease lifecycle, not a native clone.
+    if (parseGatewaySessionId(sessionId))
+      throw new Error("Gateway sessions cannot be cloned natively")
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.cloneSession) throw new Error("Agent does not support session cloning")
+    await this.ensureSessionCapacity(target.agentId)
+    const cloned = await target.adapter.cloneSession(target.sessionId, options)
+    target.instance.sessions.set(cloned.id, cloned)
+    this.attachSessionEvents(target.agentId, cloned.id)
+    return cloned
+  }
+
+  async renameSession(agentId: string, sessionId: string, name: string): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.renameSession) throw new Error("Agent does not support session renaming")
+    await target.adapter.renameSession(target.sessionId, name)
+    const session = target.adapter.getSession(target.sessionId)
+    if (session) target.instance.sessions.set(session.id, session)
+  }
+
+  async archiveSession(agentId: string, sessionId: string): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.archiveSession) throw new Error("Agent does not support archiving sessions")
+    await target.adapter.archiveSession(target.sessionId)
+    const session = target.adapter.getSession(target.sessionId)
+    if (session) target.instance.sessions.set(session.id, session)
+    else target.instance.sessions.delete(target.sessionId)
+    this.detachSessionEvents(target.agentId, target.sessionId)
+  }
+
+  async unarchiveSession(agentId: string, sessionId: string): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.unarchiveSession)
+      throw new Error("Agent does not support unarchiving sessions")
+    await target.adapter.unarchiveSession(target.sessionId)
+    const session = target.adapter.getSession(target.sessionId)
+    if (session) target.instance.sessions.set(session.id, session)
+    this.attachSessionEvents(target.agentId, target.sessionId)
+  }
+
+  async exportSessionHtml(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentSessionHtmlExport> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.exportSessionHtml) throw new Error("Agent does not support HTML export")
+    return target.adapter.exportSessionHtml(target.sessionId)
+  }
+
+  async executeSessionShell(
+    agentId: string,
+    sessionId: string,
+    command: string,
+    options: ExternalAgentSessionShellOptions
+  ): Promise<ExternalAgentSessionShellResult> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.executeSessionShell)
+      throw new Error("Agent does not support native shell execution")
+    const sessionCwd = target.adapter.getSession(target.sessionId)?.metadata?.cwd
+    let deniedReason = "Native shell execution was blocked by policy"
+    const blocked = await gateExternalAgentPermission(
+      {
+        agentId: target.agentId,
+        sessionId: target.sessionId,
+        agentKind: "external",
+        agentRef: target.agentId,
+        cwd: typeof sessionCwd === "string" ? sessionCwd : target.instance.config.process?.cwd,
+      },
+      {
+        type: "permission_request",
+        sessionId: target.sessionId,
+        timestamp: new Date(),
+        request: {
+          id: `native-shell:${target.sessionId}`,
+          rawInput: { command },
+          toolInfo: {
+            id: "bash",
+            name: "bash",
+            description: "Run shell",
+            parameters: { type: "object" },
+          },
+        },
+      },
+      async (_requestId, reason) => {
+        deniedReason = reason
+      },
+      (notice) =>
+        this.emitEvent(target.agentId, {
+          type: "hook_fire",
+          sessionId: target.sessionId,
+          timestamp: new Date(),
+          ...notice,
+        })
+    )
+    if (blocked) throw new Error(deniedReason)
+    const ownerKey = JSON.stringify([target.agentId, target.sessionId])
+    this.sessionShellApprovals.add(ownerKey)
+    try {
+      return await target.adapter.executeSessionShell(target.sessionId, command, options)
+    } finally {
+      this.sessionShellApprovals.delete(ownerKey)
+    }
+  }
+
+  async abortSessionShell(agentId: string, sessionId: string): Promise<void> {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.abortSessionShell)
+      throw new Error("Agent does not support stopping native shell execution")
+    const result = await target.adapter.abortSessionShell(target.sessionId)
+    if (result?.resumeRequired) await this.resumeSession(target.agentId, target.sessionId)
+  }
+
+  private attachSessionEvents(agentId: string, sessionId: string): void {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.subscribeSessionEvents || !adapter.getSession(sessionId)) return
+    const subscriptions =
+      this.sessionEventSubscriptions.get(agentId) ?? new Map<string, () => void>()
+    // Adapters may reclaim idle processes themselves. Release channels that no
+    // longer have a session owner before attaching the next one.
+    for (const [id, unsubscribe] of subscriptions) {
+      if (!adapter.getSession(id)) {
+        unsubscribe()
+        subscriptions.delete(id)
+      }
+    }
+    if (subscriptions.has(sessionId)) return
+    let active = true
+    const unsubscribe = adapter.subscribeSessionEvents(sessionId, (event) => {
+      const current = adapter.getSession(sessionId)
+      if (!active || !current || this.adapters.get(agentId) !== adapter) return
+      this.instances.get(agentId)?.sessions.set(sessionId, current)
+      const hookContext = {
+        agentId,
+        sessionId,
+        agentKind: "external" as const,
+        agentRef: agentId,
+        cwd:
+          typeof current.metadata?.cwd === "string"
+            ? current.metadata.cwd
+            : this.instances.get(agentId)?.config.process?.cwd,
+      }
+      const emitHookNotice: EmitHookNotice = (notice) =>
+        this.emitEvent(agentId, {
+          type: "hook_fire",
+          sessionId,
+          timestamp: new Date(),
+          delivery: "out_of_band",
+          ...notice,
+        })
+      if (event.type === "permission_request") {
+        // A direct shell has already passed the common preflight hook and
+        // owns its dialog through executeSessionShell's existing callback.
+        if (this.sessionShellApprovals.has(JSON.stringify([agentId, sessionId]))) return
+        void (async () => {
+          const blocked = await gateExternalAgentPermission(
+            hookContext,
+            event,
+            (requestId, reason) =>
+              this.respondToPermission(agentId, sessionId, {
+                requestId,
+                granted: false,
+                reason: `hook denied: ${reason}`,
+              }),
+            emitHookNotice
+          )
+          if (blocked || !active || this.adapters.get(agentId) !== adapter) return
+          if (await this.applyConfiguredAutoApproval(agentId, sessionId, event)) return
+          if (active) this.emitEvent(agentId, { ...event, delivery: "out_of_band" })
+        })().catch(() => {
+          // A failed policy evaluation must never expose an approval that can
+          // accidentally allow the waiting native operation.
+          if (active)
+            void this.respondToPermission(agentId, sessionId, {
+              requestId: event.request.requestId ?? event.request.id,
+              granted: false,
+              reason: "Permission policy evaluation failed",
+            }).catch(() => undefined)
+        })
+        return
+      }
+      void observeExternalAgentEvent(hookContext, event, emitHookNotice)
+      this.emitEvent(agentId, { ...event, delivery: "out_of_band" })
+    })
+    subscriptions.set(sessionId, () => {
+      active = false
+      unsubscribe()
+    })
+    this.sessionEventSubscriptions.set(agentId, subscriptions)
+  }
+
+  private detachSessionEvents(agentId: string, sessionId?: string): void {
+    const subscriptions = this.sessionEventSubscriptions.get(agentId)
+    if (!subscriptions) return
+    if (sessionId !== undefined) {
+      subscriptions.get(sessionId)?.()
+      subscriptions.delete(sessionId)
+    } else {
+      for (const unsubscribe of subscriptions.values()) unsubscribe()
+      subscriptions.clear()
+    }
+    if (subscriptions.size === 0) this.sessionEventSubscriptions.delete(agentId)
+  }
+
   /**
    * Append user input to a session's in-flight turn without interrupting it
    * (Codex `turn/steer`). Throws when the adapter lacks the capability or no
@@ -946,14 +1299,9 @@ export class ExternalAgentManager {
     if (!adapter?.steerTurn) {
       throw new Error("Agent does not support steering an active turn")
     }
-    // The chat layer knows its own session id, not the external thread id —
-    // resolve the agent's single executing session when omitted.
-    const targetSessionId =
-      sessionId ?? adapter.getSessions().find((session) => session.status === "executing")?.id
-    if (!targetSessionId) {
-      throw new Error("No executing session to steer")
-    }
-    await adapter.steerTurn(targetSessionId, text)
+    if (!sessionId) throw new Error("A native session id is required for steering")
+    if (!adapter.getSession(sessionId)) throw new Error("Session not found for this agent")
+    await adapter.steerTurn(sessionId, text)
   }
 
   /** Whether the agent's adapter can steer an in-flight turn. */
@@ -1311,6 +1659,7 @@ export class ExternalAgentManager {
       title?: string
       createdAt?: string
       updatedAt?: string
+      archived?: boolean
     }>
   > {
     const adapter = this.adapters.get(agentId)
@@ -1418,6 +1767,15 @@ export class ExternalAgentManager {
       throw createExternalAgentUnsupportedSessionExtensionError("session/fork")
     }
 
+    if (parseGatewaySessionId(sessionId))
+      throw new Error("Gateway sessions cannot be forked natively")
+    if (options?.forkAtEntryId || options?.forkAt) {
+      const capabilities = await this.getSessionOperationCapabilities(agentId, sessionId)
+      if (capabilities.forkAtEntry !== "supported") {
+        throw new Error("Agent does not support forking at a session entry")
+      }
+    }
+
     const support = this.getSessionExtensionSupport(adapter, instance)["session/fork"]
     if (support.state === "unsupported") {
       this.updateInstanceState(agentId, instance, {
@@ -1437,6 +1795,7 @@ export class ExternalAgentManager {
       await this.ensureSessionCapacity(agentId)
       const forked = await adapter.forkSession(sessionId, options)
       instance.sessions.set(forked.id, forked)
+      this.attachSessionEvents(agentId, forked.id)
       this.setSessionExtensionSupport(agentId, instance, "session/fork", "supported", "ok")
       return forked
     } catch (error) {
@@ -1505,7 +1864,20 @@ export class ExternalAgentManager {
 
     try {
       const resumed = await adapter.resumeSession(sessionId, options)
+      this.detachSessionEvents(agentId, sessionId)
       instance.sessions.set(resumed.id, resumed)
+      this.attachSessionEvents(agentId, resumed.id)
+      this.emitEvent(agentId, {
+        type: "session_info_update",
+        sessionId: resumed.id,
+        timestamp: new Date(),
+        extensionUi: (resumed.metadata?.extensionUi as
+          import("@/types/agent/external-agent").ExternalAgentUiState | undefined) ?? {
+          statuses: {},
+          widgets: {},
+          notifications: [],
+        },
+      })
       this.setSessionExtensionSupport(agentId, instance, "session/resume", "supported", "ok")
       return resumed
     } catch (error) {
@@ -2771,6 +3143,7 @@ export class ExternalAgentManager {
   }
 
   private async disconnectAdapter(agentId: string): Promise<void> {
+    this.detachSessionEvents(agentId)
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
     this.nesSessions.delete(agentId)
@@ -2977,6 +3350,7 @@ export class ExternalAgentManager {
       } else {
         try {
           session = await resumeSession.call(adapter, preferredSessionId, sessionOptions)
+          this.detachSessionEvents(instance.config.id, preferredSessionId)
         } catch (error) {
           if (
             isExternalAgentMethodNotFoundError(error) ||
@@ -3077,6 +3451,7 @@ export class ExternalAgentManager {
     }
 
     instance.sessions.set(session.id, session)
+    this.attachSessionEvents(instance.config.id, session.id)
     return session
   }
 
@@ -3343,6 +3718,7 @@ export class ExternalAgentManager {
     await this.ensureSessionCapacity(agentId)
     const session = await adapter.createSession(options)
     instance.sessions.set(session.id, session)
+    this.attachSessionEvents(agentId, session.id)
 
     return session
   }
@@ -3428,6 +3804,7 @@ export class ExternalAgentManager {
 
     if (adapter) {
       await adapter.closeSession(sessionId)
+      this.detachSessionEvents(agentId, sessionId)
     }
 
     if (instance) {
@@ -3784,22 +4161,47 @@ export class ExternalAgentManager {
     }
   }
 
-  private async cancelAdapterSession(
+  private cancelAdapterSession(
     agentId: string,
     sessionId: string,
     adapter: ProtocolAdapter
   ): Promise<void> {
-    await adapter.cancel(sessionId)
-    // A cancel that retires the session (DeepSeek Harness has no wire
-    // cancel and closes the session's process) must not leave the session
-    // cached: the next turn would be routed to a runtime that no longer
-    // exists. Turn-scoped cancels keep the session for the next turn.
-    if (
-      requiresReconnectAfterCancel(executionSemanticsOf(adapter)) &&
-      !adapter.getSession(sessionId)
-    ) {
-      this.instances.get(agentId)?.sessions.delete(sessionId)
+    const key = JSON.stringify([agentId, sessionId])
+    const current = this.sessionCancellations.get(key)
+    if (current) return current
+    const pending = (async () => {
+      const queue = await adapter.cancel(sessionId)
+      // A cancel that retires the session (DeepSeek Harness has no wire
+      // cancel and closes the session's process) must not leave the session
+      // cached: the next turn would be routed to a runtime that no longer
+      // exists. Turn-scoped cancels keep the session for the next turn.
+      if (
+        requiresReconnectAfterCancel(executionSemanticsOf(adapter)) &&
+        !adapter.getSession(sessionId)
+      ) {
+        this.instances.get(agentId)?.sessions.delete(sessionId)
+      }
+      if (queue && (queue.steering.length > 0 || queue.followUp.length > 0)) {
+        const event: Extract<ExternalAgentEvent, { type: "input_queue_cleared" }> = {
+          type: "input_queue_cleared",
+          sessionId,
+          timestamp: new Date(),
+          queue,
+        }
+        const session = adapter.getSession(sessionId)
+        if (session) {
+          session.metadata = { ...session.metadata, clearedInputQueueEvent: event }
+          this.instances.get(agentId)?.sessions.set(sessionId, session)
+        }
+        this.emitEvent(agentId, event)
+      }
+    })()
+    this.sessionCancellations.set(key, pending)
+    const cleanup = () => {
+      if (this.sessionCancellations.get(key) === pending) this.sessionCancellations.delete(key)
     }
+    void pending.then(cleanup, cleanup)
+    return pending
   }
 
   /**

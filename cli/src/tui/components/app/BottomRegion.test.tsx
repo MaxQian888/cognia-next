@@ -250,3 +250,21 @@ describe("permission waiting with constrained layouts and background work", () =
     }
   )
 })
+
+it("places extension widgets around the input and status outside the transcript", () => {
+  const state = baseState({
+    extensionUi: {
+      statuses: { ext: "Ready for review" },
+      notifications: [],
+      widgets: {
+        upper: { lines: ["Upper widget"], placement: "aboveEditor" },
+        lower: { lines: ["Lower widget"], placement: "belowEditor" },
+      },
+    },
+  })
+  const rendered = wrap(<BottomRegion {...baseProps({ state })} />)
+  expect(rendered.getByText("Ready for review")).toBeInTheDocument()
+  const upper = rendered.getByText("Upper widget")
+  const lower = rendered.getByText("Lower widget")
+  expect(upper.compareDocumentPosition(lower) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})

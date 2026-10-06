@@ -9,6 +9,7 @@ import {
   type AgentCapabilitySupport,
   type AgentRuntimeAdapterId,
 } from "@cognia/agent-contracts/capability-ids"
+import type { AgentExtensionUiUpdate } from "@cognia/agent-contracts/extension-ui"
 import {
   CANONICAL_AGENT_EVENT_KINDS,
   MODEL_REQUEST_PURPOSES,
@@ -44,6 +45,7 @@ export type {
   AgentCapabilityEvidence,
   AgentCapabilityId,
   AgentCapabilitySupport,
+  AgentExtensionUiUpdate,
   AgentRuntimeAdapterId,
 }
 

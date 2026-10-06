@@ -39,6 +39,11 @@ export interface InstalledExternalAgentProcessPlane {
   readTextFile(path: string, allowedRoots: string[]): Promise<string>
   writeTextFile(path: string, content: string, allowedRoots: string[]): Promise<void>
   deleteTextFile(path: string, allowedRoots: string[]): Promise<void>
+  /** Base64 content of a runtime attachment inside the session roots. */
+  readBinaryFile(path: string, allowedRoots: string[]): Promise<string>
+  writeBinaryFile(path: string, base64: string, allowedRoots: string[]): Promise<void>
+  /** Immediate files of a directory inside the session roots. */
+  listFiles(path: string, allowedRoots: string[]): Promise<string[]>
 }
 
 /** The ACP terminal commands (`acp_terminal_*` in the desktop app). */

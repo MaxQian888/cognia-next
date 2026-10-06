@@ -107,6 +107,10 @@ function fakeClient() {
       switchAgent: jest.fn().mockResolvedValue(undefined),
       instructions: { entry: { put: jest.fn().mockResolvedValue(undefined) } },
       update: jest.fn().mockResolvedValue(undefined),
+      inbox: {
+        list: jest.fn().mockResolvedValue([]),
+        cancel: jest.fn().mockResolvedValue(undefined),
+      },
       form: {
         list: jest.fn().mockResolvedValue([]),
         reply: jest.fn().mockResolvedValue(undefined),
@@ -1725,6 +1729,225 @@ describe("current OpenCode V2 adapter", () => {
     await expect(stream.next()).rejects.toThrow("paused caller aborted")
     expect(client.session.interrupt).toHaveBeenCalledTimes(1)
     expect(adapter.getSession("s1")?.status).toBe("active")
+  })
+
+  it("maps precise before-message forks and rejects unsupported boundaries before mutation", async () => {
+    await adapter.connect(config)
+    await adapter.createSession()
+    await adapter.forkSession("s1", {
+      forkAt: { kind: "entry", id: "msg_before", boundary: "before" },
+    })
+    expect(client.session.fork).toHaveBeenCalledWith({ sessionID: "s1", before: "msg_before" })
+    client.session.fork.mockClear()
+    await expect(
+      adapter.forkSession("s1", { forkAt: { kind: "turn", id: "turn", boundary: "through" } })
+    ).rejects.toThrow(/boundary/)
+    expect(client.session.fork).not.toHaveBeenCalled()
+  })
+
+  it("restores only successfully cancelled native inbox items with their images", async () => {
+    await adapter.connect(config)
+    await adapter.createSession()
+    client.session.inbox.list.mockResolvedValueOnce([
+      {
+        id: "q1",
+        type: "user",
+        delivery: "steer",
+        payload: {
+          text: "same",
+          files: [{ mime: "image/png", data: "aW1hZ2U=", source: { type: "inline" } }],
+        },
+      },
+      { id: "q2", type: "user", delivery: "queue", payload: { text: "pending" } },
+    ] as never)
+    client.session.inbox.cancel
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("already delivered"))
+    await expect(adapter.clearSessionInputQueue("s1")).resolves.toEqual({
+      steering: [{ text: "same", images: [{ mimeType: "image/png", data: "aW1hZ2U=" }] }],
+      followUp: [],
+    })
+    expect(client.session.inbox.cancel).toHaveBeenNthCalledWith(1, {
+      sessionID: "s1",
+      inboxID: "q1",
+    })
+  })
+
+  it("exposes normalized entries, updates titles, and blocks private operations", async () => {
+    await adapter.connect(config)
+    await adapter.createSession()
+    client.message.list.mockResolvedValueOnce({
+      data: [{ id: "m1", type: "user", text: "hello", time: { created: 1000 } }],
+      cursor: {},
+    } as never)
+    expect(await adapter.getSessionEntries("s1")).toMatchObject([
+      {
+        id: "m1",
+        parentId: null,
+        message: { role: "user" },
+        forkAt: { kind: "entry", id: "m1", boundary: "before" },
+      },
+    ])
+    await adapter.renameSession("s1", "Investigation")
+    expect(adapter.getSession("s1")?.metadata?.title).toBe("Investigation")
+    await expect(adapter.renameSession("s1", "alice.smith@example.com")).rejects.toThrow(/PII/)
+    await expect(
+      adapter.enqueueSessionInput("s1", { text: "alice.smith@example.com" }, "follow_up")
+    ).rejects.toThrow(/PII/)
+  })
+
+  it("reports failed persistent subscriptions and rejects later turns without resubmission", async () => {
+    await adapter.connect(config)
+    await adapter.createSession()
+    client.event.subscribe.mockImplementation(() =>
+      (async function* () {
+        yield event("server.connected")
+        throw new Error("stream disconnected")
+      })()
+    )
+    const seen: ExternalAgentEvent[] = []
+    const stop = adapter.subscribeSessionEvents("s1", (event) => seen.push(event))
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    expect(seen).toEqual([expect.objectContaining({ type: "error", error: "stream disconnected" })])
+    await expect(collect(adapter.prompt("s1", message))).rejects.toThrow("stream disconnected")
+    expect(client.session.prompt).not.toHaveBeenCalled()
+    stop()
+    await adapter.disconnect()
+  })
+
+  it("cancels while waiting for persistent event readiness without submitting a turn", async () => {
+    client.event.subscribe.mockImplementation((options) =>
+      (async function* () {
+        await new Promise<void>((resolve) =>
+          options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+        )
+      })()
+    )
+    await adapter.connect(config)
+    await adapter.createSession()
+    const stop = adapter.subscribeSessionEvents("s1", () => undefined)
+    const controller = new AbortController()
+    const running = collect(adapter.prompt("s1", message, { signal: controller.signal }))
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    controller.abort(new Error("cancel readiness"))
+    await expect(running).rejects.toThrow("cancel readiness")
+    expect(client.session.prompt).not.toHaveBeenCalled()
+    expect(client.session.interrupt).not.toHaveBeenCalled()
+    stop()
+    await adapter.disconnect()
+  })
+
+  it("keeps native shell unavailable until output can be scrubbed before context", async () => {
+    await adapter.connect(config)
+    await adapter.createSession()
+    expect(await adapter.getSessionOperationCapabilities()).toMatchObject({
+      shell: "unsupported",
+      abortShell: "unsupported",
+    })
+    expect(adapter.capabilities?.custom?.shellUnsupportedReason).toMatch(/PII/)
+  })
+
+  it("keeps one session event stream across owned completion and autonomous follow-up", async () => {
+    const pending: ReturnType<typeof event>[] = [event("server.connected")]
+    let wake: (() => void) | undefined
+    const push = (value: ReturnType<typeof event>) => {
+      pending.push(value)
+      wake?.()
+    }
+    client.event.subscribe.mockImplementation((options) =>
+      (async function* () {
+        const abort = () => wake?.()
+        options?.signal?.addEventListener("abort", abort)
+        try {
+          while (!options?.signal?.aborted) {
+            const value = pending.shift()
+            if (value) yield value
+            else
+              await new Promise<void>((resolve) => {
+                wake = resolve
+              })
+          }
+        } finally {
+          options?.signal?.removeEventListener("abort", abort)
+        }
+      })()
+    )
+    await adapter.connect(config)
+    await adapter.createSession()
+    const idle: ExternalAgentEvent[] = []
+    const stop = adapter.subscribeSessionEvents("s1", (value) => idle.push(value))
+    client.session.prompt.mockImplementationOnce(async () => {
+      push(event("session.execution.started"))
+      push(event("session.text.delta", { assistantMessageID: "a1", ordinal: 0, delta: "owned" }))
+      push(event("session.execution.succeeded"))
+      return { id: "u1" }
+    })
+    const owned = await collect(adapter.prompt("s1", message))
+    expect(owned.filter((value) => value.type === "done")).toHaveLength(1)
+    expect(idle).toEqual([])
+    push(event("session.execution.started"))
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    await adapter.enqueueSessionInput(
+      "s1",
+      { text: "Look at this", images: [{ mimeType: "image/png", data: "aW1hZ2U=" }] },
+      "steer"
+    )
+    expect(client.session.prompt).toHaveBeenLastCalledWith({
+      sessionID: "s1",
+      text: "Look at this",
+      files: [{ uri: "data:image/png;base64,aW1hZ2U=" }],
+      delivery: "steer",
+    })
+    await adapter.enqueueSessionInput("s1", { text: "Next" }, "follow_up")
+    expect(client.session.prompt).toHaveBeenLastCalledWith({
+      sessionID: "s1",
+      text: "Next",
+      delivery: "queue",
+    })
+    await expect(
+      adapter.enqueueSessionInput(
+        "s1",
+        {
+          text: "SVG",
+          images: [{ mimeType: "image/svg+xml", data: btoa("<svg>alice.smith@example.com</svg>") }],
+        },
+        "steer"
+      )
+    ).rejects.toThrow(/PII/)
+    await adapter.executeSessionCommand("s1", "/review changes")
+    expect(client.session.command).toHaveBeenLastCalledWith({
+      sessionID: "s1",
+      name: "review",
+      text: "changes",
+      delivery: "queue",
+    })
+    push(event("command.updated"))
+    push(
+      event("session.model.selected", {
+        model: { providerID: "vendor", id: "model", variant: "deep" },
+      })
+    )
+    push(event("session.text.delta", { assistantMessageID: "a2", ordinal: 0, delta: "background" }))
+    push(event("session.renamed", { title: "Native rename" }))
+    push(event("session.execution.succeeded"))
+    for (let i = 0; i < 30; i++) await Promise.resolve()
+    expect(idle.some((value) => value.type === "session_start")).toBe(true)
+    expect(
+      idle.some((value) => value.type === "message_delta" && value.delta.text === "background")
+    ).toBe(true)
+    expect(adapter.getSession("s1")?.metadata?.title).toBe("Native rename")
+    expect(idle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "commands_update",
+          commands: [expect.objectContaining({ name: "review", supportsDuringExecution: true })],
+        }),
+        expect.objectContaining({ type: "config_options_update" }),
+      ])
+    )
+    expect(client.event.subscribe).toHaveBeenCalledTimes(1)
+    stop()
+    await adapter.disconnect()
   })
 })
 

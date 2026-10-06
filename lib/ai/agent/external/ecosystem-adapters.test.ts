@@ -100,13 +100,13 @@ describe("new ACP agent surfaces", () => {
     },
     {
       presetId: "gemini-cli",
-      command: "npx",
-      args: ["-y", "@google/gemini-cli", "--acp"],
+      command: "gemini",
+      args: ["--acp"],
     },
     { presetId: "cursor-cli", command: "cursor-agent", args: ["acp"] },
     { presetId: "copilot-cli", command: "copilot", args: ["--acp"] },
     { presetId: "kiro", command: "kiro-cli", args: ["acp"] },
-    { presetId: "qwen-code", command: "npx", args: ["-y", "@qwen-code/qwen-code", "--acp"] },
+    { presetId: "qwen-code", command: "qwen", args: ["--acp"] },
     {
       presetId: "droid",
       command: "droid",

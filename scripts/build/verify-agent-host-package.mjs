@@ -33,6 +33,7 @@ const HELPER_PURPOSE = {
 
 const REQUIRED_RESOURCES = [
   "sidecar/pi-extension/cognia-pi-extension.ts",
+  "sidecar/pi-extension/cognia-pi-shell-guard.ts",
   "sidecar/pi-extension/integrity.json",
   "tree-sitter.wasm",
   "grammars/tree-sitter-python.wasm",

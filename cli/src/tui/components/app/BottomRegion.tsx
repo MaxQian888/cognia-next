@@ -206,6 +206,13 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
               />
             </Box>
           ) : null}
+          {Object.entries(state.extensionUi?.widgets ?? {})
+            .filter(([, widget]) => widget.placement === "aboveEditor")
+            .map(([key, widget]) => (
+              <Text key={key} wrap="truncate-end">
+                {widget.lines.join("\n")}
+              </Text>
+            ))}
           <Input
             input={state.input}
             dispatch={dispatch}
@@ -233,8 +240,21 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
             agentComplete={agentComplete}
             suggestDebounceMs={suggestDebounceMs}
           />
+          {Object.entries(state.extensionUi?.widgets ?? {})
+            .filter(([, widget]) => widget.placement === "belowEditor")
+            .map(([key, widget]) => (
+              <Text key={key} wrap="truncate-end">
+                {widget.lines.join("\n")}
+              </Text>
+            ))}
         </Box>
       )}
+      {!overlayOpen &&
+        Object.entries(state.extensionUi?.statuses ?? {}).map(([key, text]) => (
+          <Text key={key} dimColor wrap="truncate-end">
+            {text}
+          </Text>
+        ))}
       {layout.tier !== "tiny" ? (
         <Footer
           config={state.config}

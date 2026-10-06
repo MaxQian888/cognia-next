@@ -107,6 +107,34 @@ afterEach(() => {
 })
 
 describe("syncToAgent — gating", () => {
+  it("rejects unsupported Pi SSE without writing or deleting existing configuration", async () => {
+    const existing = {
+      mcpServers: { events: { url: "https://example.com/sse", httpTransport: "sse" } },
+    }
+    mList.mockResolvedValue([
+      makeServer({
+        name: "events",
+        transport: "sse",
+        config: { url: "https://example.com/sse" },
+        appsEnabled: { "pi-mcp-adapter": true },
+      }),
+    ])
+    mRead.mockResolvedValue({
+      path: "/pi/mcp.json",
+      exists: true,
+      writable: true,
+      format: "json",
+      parsed: existing,
+    })
+    await expect(syncToAgent("pi-mcp-adapter")).resolves.toMatchObject({
+      ok: false,
+      skipped: false,
+      error: expect.stringContaining("does not support SSE"),
+    })
+    expect(mWrite).not.toHaveBeenCalled()
+    expect(existing.mcpServers.events.httpTransport).toBe("sse")
+  })
+
   it("skips with not-tauri when not running in Tauri", async () => {
     mIsTauri.mockReturnValue(false)
     const r = await syncToAgent("claude-code")

@@ -126,7 +126,7 @@
     },
     {
       "id": "pi",
-      "version": "0.87.1",
+      "version": "1.0.2",
       "libc": ["glibc", "musl"],
       "commands": [
         {

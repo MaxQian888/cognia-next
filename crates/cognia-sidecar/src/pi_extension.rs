@@ -31,7 +31,12 @@ use sha2::{Digest, Sha256};
 pub enum PiExtensionVerdict {
     /// Found, and the digest matches the pinned manifest.
     #[serde(rename_all = "camelCase")]
-    Ok { path: String, sha256: String },
+    Ok {
+        path: String,
+        sha256: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        shell_guard_path: Option<String>,
+    },
     /// No extension on disk.
     Missing,
     /// Present but unreadable.
@@ -83,15 +88,15 @@ pub fn verify_in_sidecar_dir(sidecar_dir: &Path) -> PiExtensionVerdict {
     };
 
     let manifest = sidecar_dir.join("pi-extension").join("integrity.json");
-    let expected = std::fs::read_to_string(&manifest)
+    let parsed = std::fs::read_to_string(&manifest)
         .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|value| {
-            value
-                .get("sha256")
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_ascii_lowercase())
-        });
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    let expected = parsed.as_ref().and_then(|value| {
+        value
+            .get("sha256")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_ascii_lowercase())
+    });
 
     match expected {
         None => PiExtensionVerdict::Unpinned {
@@ -103,10 +108,41 @@ pub fn verify_in_sidecar_dir(sidecar_dir: &Path) -> PiExtensionVerdict {
             expected,
             actual,
         },
-        Some(_) => PiExtensionVerdict::Ok {
-            path,
-            sha256: actual,
-        },
+        Some(_) => {
+            let guard_pin = parsed
+                .as_ref()
+                .and_then(|value| value.get("shellGuardSha256"))
+                .and_then(|value| value.as_str());
+            let mut shell_guard_path = None;
+            if let Some(expected) = guard_pin {
+                let guard = sidecar_dir
+                    .join("pi-extension")
+                    .join("cognia-pi-shell-guard.ts");
+                let guard_path = guard.display().to_string();
+                let guard_actual = match std::fs::read(&guard) {
+                    Ok(bytes) => digest_bytes(&bytes),
+                    Err(error) => {
+                        return PiExtensionVerdict::Unreadable {
+                            path: guard_path,
+                            detail: error.to_string(),
+                        }
+                    }
+                };
+                if guard_actual != expected.to_ascii_lowercase() {
+                    return PiExtensionVerdict::Tampered {
+                        path: guard_path,
+                        expected: expected.to_ascii_lowercase(),
+                        actual: guard_actual,
+                    };
+                }
+                shell_guard_path = Some(guard_path);
+            }
+            PiExtensionVerdict::Ok {
+                path,
+                sha256: actual,
+                shell_guard_path,
+            }
+        }
     }
 }
 
@@ -179,6 +215,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shell_guard_is_verified_and_missing_or_substituted_bytes_are_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write(tmp.path(), "cognia-pi-extension.ts", "main");
+        write(
+            tmp.path(),
+            "integrity.json",
+            &format!(
+                "{{\"sha256\":\"{}\",\"shellGuardSha256\":\"{}\"}}",
+                digest_bytes(b"main"),
+                digest_bytes(b"guard")
+            ),
+        );
+        assert!(matches!(
+            verify_in_sidecar_dir(tmp.path()),
+            PiExtensionVerdict::Unreadable { .. }
+        ));
+        write(tmp.path(), "cognia-pi-shell-guard.ts", "guard");
+        match verify_in_sidecar_dir(tmp.path()) {
+            PiExtensionVerdict::Ok {
+                shell_guard_path: Some(path),
+                ..
+            } => assert!(path.ends_with("cognia-pi-shell-guard.ts")),
+            other => panic!("expected verified guard, got {other:?}"),
+        }
+        write(tmp.path(), "cognia-pi-shell-guard.ts", "substituted");
+        assert!(matches!(
+            verify_in_sidecar_dir(tmp.path()),
+            PiExtensionVerdict::Tampered { .. }
+        ));
+    }
+
     /// The case the pin exists for: a substituted extension would otherwise
     /// take charge of the permission gate.
     #[test]
@@ -244,11 +312,13 @@ mod tests {
         let value = serde_json::to_value(PiExtensionVerdict::Ok {
             path: "/x/cognia-pi-extension.ts".into(),
             sha256: "abc".into(),
+            shell_guard_path: Some("/x/cognia-pi-shell-guard.ts".into()),
         })
         .expect("serialize");
         assert_eq!(value["status"], "ok");
         assert_eq!(value["path"], "/x/cognia-pi-extension.ts");
         assert_eq!(value["sha256"], "abc");
+        assert_eq!(value["shellGuardPath"], "/x/cognia-pi-shell-guard.ts");
 
         let missing = serde_json::to_value(PiExtensionVerdict::Missing).expect("serialize");
         assert_eq!(missing["status"], "missing");

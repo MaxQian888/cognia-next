@@ -6,6 +6,47 @@ const at = (millis = 0): Date => new Date(millis)
 const ev = (overrides: Partial<ExternalAgentEvent>): ExternalAgentEvent =>
   ({ timestamp: at(), ...overrides }) as ExternalAgentEvent
 
+it("replaces artifact snapshots in place and preserves downloadable binary content", () => {
+  let parts = buildPartsFromExternalAgentEvents([
+    ev({ type: "message_delta", delta: { type: "text", text: "Summary" } }),
+    ev({
+      type: "artifact_update",
+      artifactId: "a",
+      complete: false,
+      blocks: [
+        { type: "text", text: "draft" },
+        { type: "text", text: "stale" },
+      ],
+    }),
+    ev({ type: "message_delta", delta: { type: "text", text: "After" } }),
+  ])
+  parts = applyExternalAgentEventToParts(
+    parts,
+    ev({
+      type: "artifact_update",
+      artifactId: "a",
+      complete: true,
+      blocks: [
+        {
+          type: "resource",
+          resource: { uri: "a2a:report.bin", mimeType: "application/octet-stream", blob: "AAEC" },
+        },
+      ],
+    })
+  )
+  expect(parts).toMatchObject([
+    { type: "text", text: "Summary" },
+    {
+      type: "file",
+      filename: "report.bin",
+      mediaType: "application/octet-stream",
+      url: "data:application/octet-stream;base64,AAEC",
+    },
+    { type: "text", text: "After" },
+  ])
+  expect(JSON.stringify(parts)).not.toMatch(/draft|stale/)
+})
+
 describe("applyExternalAgentEventToParts — text deltas", () => {
   it("creates a text part on the first delta and concatenates further deltas", () => {
     let parts = applyExternalAgentEventToParts(
@@ -595,6 +636,21 @@ describe("applyExternalAgentEventToParts — async_questions", () => {
     const data = (parts[0] as { data: Record<string, unknown> }).data
     expect(data.closed).toBeUndefined()
   })
+})
+
+it("keeps opaque and executable artifact URIs as text instead of browser file URLs", () => {
+  const parts = applyExternalAgentEventToParts(
+    [],
+    ev({
+      type: "artifact_update",
+      artifactId: "unsafe",
+      complete: true,
+      blocks: [{ type: "resource_link", name: "Result", uri: "javascript:alert(1)" }],
+    })
+  )
+  expect(parts).toEqual([
+    expect.objectContaining({ type: "text", text: "Result (javascript:alert(1))" }),
+  ])
 })
 
 describe("applyExternalAgentEventToParts — hook_fire", () => {

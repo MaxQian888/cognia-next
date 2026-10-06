@@ -10,6 +10,7 @@ import {
   validateResolvedAgentExecutionSpec,
 } from "./agent-execution"
 import type {
+  CanonicalAgentEvent,
   AgentExecutionPolicy,
   AgentExecutionSendSpec,
   ResolvedAgentExecutionSpec,
@@ -445,4 +446,14 @@ describe("isRemoteExternalBinding", () => {
       })
     ).toBe(true)
   })
+})
+
+it("recognizes the generic extension presentation event", () => {
+  expect(isKnownCanonicalAgentEventKind("extension-ui")).toBe(true)
+  const event: CanonicalAgentEvent = {
+    kind: "extension-ui",
+    id: "widget-1",
+    update: { kind: "widget", key: "extension", lines: ["hello"], placement: "belowEditor" },
+  }
+  expect(JSON.parse(JSON.stringify(event))).toEqual(event)
 })

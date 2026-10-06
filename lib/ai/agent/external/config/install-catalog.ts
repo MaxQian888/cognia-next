@@ -86,6 +86,16 @@ export function findRuntimeForConfig(
   if (!command) return undefined
 
   const base = baseCommandName(command)
+  const legacy = EXTERNAL_AGENT_RUNTIMES.filter(
+    (entry) =>
+      entry.protocol === config.protocol &&
+      entry.legacyLaunches?.some(
+        (launch) =>
+          baseCommandName(launch.command) === base &&
+          JSON.stringify(launch.args) === JSON.stringify(config.process?.args ?? [])
+      )
+  )
+  if (legacy.length === 1) return legacy[0]
   const candidates = EXTERNAL_AGENT_RUNTIMES.filter(
     (entry) =>
       entry.systemCommand &&

@@ -127,3 +127,10 @@ describe("agentStateWritableRoots", () => {
     }
   })
 })
+
+it("allows the installed ACP binaries and retains their writable state roots", () => {
+  for (const command of ["codex-acp", "gemini", "qwen"]) {
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain(command)
+    expect(agentStateWritableRoots(command)).not.toEqual([])
+  }
+})

@@ -119,7 +119,7 @@ function readPolicy(raw: string | undefined): PiToolPolicy {
 // Extension entry point
 // ---------------------------------------------------------------------------
 
-export const COGNIA_PI_EXTENSION_VERSION = 2
+export const COGNIA_PI_EXTENSION_VERSION = 3
 
 /**
  * Marker prefixing the title of a native-tool approval dialog.
@@ -267,6 +267,101 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
       return { block: true, reason: `Cognia permission check failed: ${String(error)}` }
     }
   })
+}
+
+/** First-loaded guard: user_bash stops at the first extension returning a result. */
+export function registerUserBashGuard(pi: PiExtensionApi): void {
+  const policy = readPolicy(process.env.COGNIA_TOOLHOST_PI_POLICY)
+  let approvals: Promise<unknown> = Promise.resolve()
+  const behindApprovals = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = approvals.then(work, work)
+    approvals = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
+  pi.on("session_start", (_event: never, ctx: PiCtx) => {
+    ctx.ui.setStatus("cognia-shell-guard", "cognia-shell-guard-ready v1")
+  })
+  // RPC user commands bypass tool_call. Apply the same native policy before
+  // handing execution to Pi, and redact before Pi records output in context.
+  pi.on("user_bash", async (event: never, ctx: PiCtx) => {
+    const { command } = event as { command: string }
+    const signal = ctx.signal
+    const refused = (output: string) => ({
+      result: { output, exitCode: 1, cancelled: false, truncated: false },
+    })
+    try {
+      if (!hasNoLeakingPiiDeep(command)) return refused("Blocked by Cognia PII policy")
+      const decision = policy.decisions.bash ?? policy.fallback
+      if (decision === "deny") return refused(`Blocked by Cognia (${policy.mode} mode)`)
+      const approved = await behindApprovals(async () => {
+        if (signal?.aborted) return false
+        if (decision === "allow") return true
+        if (ctx.hasUI === false) return false
+        return ctx.ui.confirm(
+          `${COGNIA_PERMISSION_MARKER} ${JSON.stringify(markerPayload("bash", policy.mode, { command }))}`,
+          describeCall("bash", { command }),
+          { signal }
+        )
+      })
+      if (!approved || signal?.aborted) return refused("Denied or cancelled by the user")
+      // Pi resolves its public SDK through the extension loader, including
+      // standalone installations. Load only when this capability is requested.
+      const packageName = "@earendil-works/pi-coding-agent"
+      const sdk = (await import(packageName)) as {
+        createLocalBashOperations: (options?: { shellPath?: string }) => PiBashOperations
+        SettingsManager: { create(cwd: string): { getShellPath(): string | undefined } }
+      }
+      if (signal?.aborted) return refused("Denied or cancelled by the user")
+      const shellPath = sdk.SettingsManager.create(ctx.cwd ?? process.cwd()).getShellPath()
+      return { operations: redactUserBashOperations(sdk.createLocalBashOperations({ shellPath })) }
+    } catch (error) {
+      return refused(`Cognia shell execution refused: ${safeText(String(error))}`)
+    }
+  })
+}
+
+interface PiBashOperations {
+  exec(
+    command: string,
+    cwd: string,
+    options: {
+      onData: (data: Buffer) => void
+      signal?: AbortSignal
+      timeout?: number
+      env?: NodeJS.ProcessEnv
+    }
+  ): Promise<{ exitCode: number | null }>
+}
+
+/** Buffer before redaction so a secret split across stdout chunks cannot leak. */
+export function redactUserBashOperations(operations: PiBashOperations): PiBashOperations {
+  return {
+    async exec(command, cwd, options) {
+      const limit = 16 * 1024
+      let output = Buffer.alloc(0)
+      let truncated = false
+      try {
+        return await operations.exec(command, cwd, {
+          ...options,
+          onData(chunk) {
+            output = Buffer.concat([output, chunk])
+            if (output.length > limit) {
+              output = output.subarray(output.length - limit)
+              truncated = true
+            }
+          },
+        })
+      } catch (error) {
+        throw new Error(safeText(error instanceof Error ? error.message : String(error)))
+      } finally {
+        const text = `${truncated ? "[Earlier shell output truncated]\n" : ""}${output.toString("utf8")}`
+        options.onData(Buffer.from(safeText(text)))
+      }
+    },
+  }
 }
 
 /**

@@ -47,6 +47,7 @@ export interface TerminalChromeOptions {
   clearScreen: () => void
   dispatch: Dispatch<TuiAction>
   /** Whether the dynamic terminal title is enabled (`config.terminalTitle !== false`). */
+  extensionTitle?: string
   titleEnabled: boolean
   /** Sink for the title escapes (kept distinct from `screen`). */
   titleSink: TitleStream
@@ -89,6 +90,7 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
     clearScreen,
     dispatch,
     titleEnabled,
+    extensionTitle,
     titleSink,
     titleEnv,
     busy,
@@ -135,13 +137,14 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
   // it writes to its own sink and is terminal-type-adapted by the module.
   const titleText = useMemo(
     () =>
+      extensionTitle ??
       computeTitle({
         busy,
         awaitingInput,
         activity: activityKind,
         dir: baseName(cwd),
       }),
-    [busy, awaitingInput, activityKind, cwd]
+    [busy, awaitingInput, activityKind, cwd, extensionTitle]
   )
   useEffect(() => {
     if (titleEnabled) applyTerminalTitle(titleText, titleSink, titleEnv)

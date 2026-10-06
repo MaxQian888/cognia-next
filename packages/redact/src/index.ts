@@ -448,6 +448,34 @@ export interface RedactableOffsetEntry {
   charEnd: number
 }
 
+interface RedactionSpan {
+  origStart: number
+  origEnd: number
+  redStart: number
+  redEnd: number
+}
+
+function redactionSpans(redacted: string, map: Record<string, RedactionRecord>): RedactionSpan[] {
+  const spans: RedactionSpan[] = []
+  let redCursor = 0
+  let origCursor = 0
+  for (const match of redacted.matchAll(PLACEHOLDER_SCAN_RE)) {
+    const record = map[match[0]]
+    if (!record) continue
+    const redStart = match.index
+    const origStart = origCursor + (redStart - redCursor)
+    spans.push({
+      origStart,
+      origEnd: origStart + record.original.length,
+      redStart,
+      redEnd: redStart + match[0].length,
+    })
+    origCursor = origStart + record.original.length
+    redCursor = redStart + match[0].length
+  }
+  return spans
+}
+
 /**
  * Translate char offsets from pre-redaction space into redacted space.
  *
@@ -470,29 +498,7 @@ export function translateOffsetsThroughRedaction<T extends RedactableOffsetEntry
   redacted: string,
   map: Record<string, RedactionRecord>
 ): T[] {
-  interface Span {
-    origStart: number
-    origEnd: number
-    redStart: number
-    redEnd: number
-  }
-  const spans: Span[] = []
-  let redCursor = 0
-  let origCursor = 0
-  for (const match of redacted.matchAll(PLACEHOLDER_SCAN_RE)) {
-    const record = map[match[0]]
-    if (!record) continue // placeholder-shaped text that isn't ours
-    const redStart = match.index
-    const origStart = origCursor + (redStart - redCursor)
-    spans.push({
-      origStart,
-      origEnd: origStart + record.original.length,
-      redStart,
-      redEnd: redStart + match[0].length,
-    })
-    origCursor = origStart + record.original.length
-    redCursor = redStart + match[0].length
-  }
+  const spans = redactionSpans(redacted, map)
 
   const translate = (offset: number): number => {
     let result = offset
@@ -514,6 +520,47 @@ export function translateOffsetsThroughRedaction<T extends RedactableOffsetEntry
     charStart: translate(entry.charStart),
     charEnd: translate(entry.charEnd),
   }))
+}
+
+/**
+ * Restore chunk ranges from redacted space to canonical original-text space.
+ * A boundary inside a placeholder has no exact original position: expand the
+ * start/end outwards to the original span. Callers must slice the original
+ * text with these ranges, rather than unredacting an incomplete placeholder.
+ * All offsets use UTF-16 half-open ranges, as String.slice does.
+ */
+export function restoreOffsetsThroughRedaction<T extends RedactableOffsetEntry>(
+  entries: T[],
+  redacted: string,
+  map: Record<string, RedactionRecord>
+): T[] {
+  const spans = redactionSpans(redacted, map)
+  const last = spans.at(-1)
+  const originalLength = redacted.length + (last ? last.origEnd - last.redEnd : 0)
+  const restore = (offset: number, end: boolean): number => {
+    const bounded = Math.max(0, Math.min(offset, redacted.length))
+    let delta = 0
+    for (const span of spans) {
+      if (bounded <= span.redStart) break
+      if (bounded < span.redEnd) return end ? span.origEnd : span.origStart
+      delta = span.origEnd - span.redEnd
+    }
+    return Math.max(0, Math.min(bounded + delta, originalLength))
+  }
+  return entries.map((entry) => {
+    if (
+      !Number.isSafeInteger(entry.charStart) ||
+      !Number.isSafeInteger(entry.charEnd) ||
+      entry.charEnd < entry.charStart
+    ) {
+      throw new RangeError("Redacted offsets must be ordered finite integers")
+    }
+    return {
+      ...entry,
+      charStart: restore(entry.charStart, false),
+      charEnd: restore(entry.charEnd, true),
+    }
+  })
 }
 
 /**

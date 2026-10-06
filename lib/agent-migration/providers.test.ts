@@ -61,17 +61,15 @@ describe("artifactSupportFor", () => {
         sessions: "supported",
         skills: "supported",
         subagents: "supported",
-        // Pi's core ships no MCP support at all — it arrives only via the
-        // third-party pi-mcp-adapter package.
-        mcp: "unsupported",
+        mcp: "supported",
         commands: "supported",
         memory: "shared",
       },
     })
   })
 
-  it("does not offer Pi an MCP import a stock Pi install cannot satisfy", () => {
-    expect(artifactSupportFor("pi", "mcp")).toBe("unsupported")
+  it("offers native Pi MCP configuration import", () => {
+    expect(artifactSupportFor("pi", "mcp")).toBe("supported")
   })
 
   /** Fail closed: an unrecognised pair must never be reported as importable. */

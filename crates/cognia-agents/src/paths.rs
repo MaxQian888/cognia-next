@@ -451,13 +451,9 @@ pub fn spec_for(agent: &str) -> Option<AgentSpec> {
             writable = true;
         }
         "pi-mcp-adapter" => {
-            // Pi's core ships no MCP support at all; MCP arrives only with the
-            // third-party `pi-mcp-adapter` package, which reads six layers and
-            // lets the LAST one win: ~/.config/mcp/mcp.json, ~/.agents/mcp.json,
-            // ~/.agents/mcp/mcp.json, this file, ./.mcp.json, then
-            // ./.pi/mcp.json (highest). We write only this user-scope layer —
-            // the two project layers outrank it and belong to the repo, so the
-            // UI warns about them via `mcp-drift-banner.tsx` instead.
+            // Native Pi MCP (0.99+) and the legacy extension share this file.
+            // Keep the historical ID: "pi" addresses settings.json instead.
+            // Project .pi/mcp.json can override this user-scope configuration.
             path = pi_agent_dir().map(|d| d.join("mcp.json"));
             format = AgentFormat::Json;
             writable = true;

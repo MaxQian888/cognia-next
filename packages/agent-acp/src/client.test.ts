@@ -92,6 +92,7 @@ function hostCapabilities(): AcpHostCapabilities {
     elicitation: { form: desktop, url: desktop, durableInteraction: desktop },
     preview: {
       compaction: true,
+      notices: desktop,
       providers: desktop,
       dynamicMcp: desktop,
       nes: desktop,
@@ -179,6 +180,15 @@ function acpDeps(): AcpClientDeps {
       delete: async () => {
         throw new Error("delete is not used by the ACP client")
       },
+      readBinary: async () => {
+        throw new Error("readBinary is not used by the ACP client")
+      },
+      writeBinary: async () => {
+        throw new Error("writeBinary is not used by the ACP client")
+      },
+      listFiles: async () => {
+        throw new Error("listFiles is not used by the ACP client")
+      },
     },
     terminals: {
       get available() {
@@ -238,6 +248,107 @@ describe("AcpClientAdapter — prompt deadlines and host response envelopes", ()
         .map(([, args]) => JSON.parse(args.message))
     return { adapter, peer, frames }
   }
+
+  it("clears native session metadata through an incoming ACP notification", async () => {
+    const { adapter, peer } = await connectedAdapter()
+    try {
+      const session = adapter.getSession("s")!
+      session.metadata = { ...session.metadata, title: "Old", acpSessionInfo: { custom: 1 } }
+      const events: ExternalAgentEvent[] = []
+      adapter.subscribeSessionEvents("s", (event) => events.push(event))
+      peer.ingest(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "s",
+            update: {
+              sessionUpdate: "session_info_update",
+              title: null,
+              updatedAt: null,
+              _meta: null,
+            },
+          },
+        })
+      )
+      expect(session.metadata?.title).toBeUndefined()
+      expect(session.metadata?.acpSessionInfo).toBeUndefined()
+      expect(session.metadata?.acpUpdatedAt).toBeNull()
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: "session_info_update",
+          title: null,
+          updatedAt: null,
+          metadata: null,
+        }),
+      ])
+      peer.ingest(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "s",
+            update: { sessionUpdate: "session_info_update", _meta: { fresh: true } },
+          },
+        })
+      )
+      expect(session.metadata?.acpSessionInfo).toEqual({ fresh: true })
+      expect(session.metadata?.title).toBeUndefined()
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("delivers negotiated notices as transient UI with unique ids and unknown severity preserved", async () => {
+    const { adapter, peer } = await connectedAdapter()
+    try {
+      adapter.getSession("s")!.status = "active"
+      ;(adapter as unknown as { featureProfile: unknown }).featureProfile = {
+        preview: { notices: { advertised: true } },
+      }
+      const events: ExternalAgentEvent[] = []
+      const unsubscribe = adapter.subscribeSessionEvents("s", (event) => events.push(event))
+      const notification = {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "s",
+          update: {
+            sessionUpdate: "notice",
+            title: "Model rerouted",
+            description: "Continuing",
+            severity: "_custom",
+          },
+        },
+      }
+      peer.ingest(JSON.stringify(notification))
+      peer.ingest(JSON.stringify(notification))
+      expect(events).toHaveLength(2)
+      expect(events[0]).toMatchObject({
+        type: "extension_ui_update",
+        update: {
+          kind: "notification",
+          level: "info",
+          sourceSeverity: "_custom",
+          message: "Model rerouted\nContinuing",
+        },
+      })
+      expect((events[0] as { id?: string }).id).not.toBe((events[1] as { id?: string }).id)
+      expect(adapter.getSession("s")?.messages ?? []).toHaveLength(0)
+      expect(adapter.getSession("s")?.status).toBe("active")
+      unsubscribe()
+      peer.ingest(JSON.stringify(notification))
+      expect(events).toHaveLength(2)
+      ;(adapter as unknown as { featureProfile: unknown }).featureProfile = {
+        preview: { notices: { advertised: false } },
+      }
+      adapter.subscribeSessionEvents("s", (event) => events.push(event))
+      peer.ingest(JSON.stringify(notification))
+      expect(events).toHaveLength(2)
+    } finally {
+      await adapter.disconnect()
+    }
+  })
 
   it("retains baseline stdio MCP support without optional HTTP or SSE capabilities", async () => {
     const { adapter } = await connectedAdapter()

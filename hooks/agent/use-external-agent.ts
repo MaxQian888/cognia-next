@@ -14,6 +14,7 @@ import type {
   ExternalAgentBenchmarkCapabilityEntry,
   ExternalAgentSession,
   ExternalAgentEvent,
+  ExternalAgentUiState,
   ExternalAgentResult,
   ExternalAgentExecutionOptions,
   ExternalAgentInstance,
@@ -60,6 +61,11 @@ import {
   normalizeExternalAgentConfigInput,
 } from "@/lib/ai/agent/external/config/config-normalizer"
 
+import {
+  createExternalAgentUiState,
+  reduceExternalAgentUiState,
+} from "@/lib/ai/agent/external/session/extension-ui-state"
+
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@cognia/agent-runtime-kit/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
@@ -74,6 +80,8 @@ import type {
 } from "@/lib/ai/agent/external/protocol-adapter"
 import type {
   ExternalAgentCompactionCapability,
+  ExternalAgentSessionInputAcceptance,
+  ExternalAgentSessionShellResult,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
 } from "@cognia/agent-contracts/session-operations"
@@ -211,6 +219,7 @@ export interface UseExternalAgentState {
   /** Pending blocking question from the agent (not a tool approval) */
   pendingElicitation: AcpElicitationRequest | null
   /** Available slash commands for the active session */
+  extensionUi: ExternalAgentUiState
   availableCommands: AcpAvailableCommand[]
   /** Current plan entries for the active session */
   planEntries: AcpPlanEntry[]
@@ -260,6 +269,8 @@ export interface UseExternalAgentActions {
   closeSession: (sessionId: string) => Promise<void>
   /** Permanently delete provider-owned history, only when negotiated. */
   deleteSession: (sessionId: string) => Promise<void>
+  /** Restore provider history without attaching or resuming it. */
+  unarchiveSession: (sessionId: string) => Promise<void>
   /** List existing sessions (ACP extension) */
   listSessions: (
     agentId?: string,
@@ -272,15 +283,22 @@ export interface UseExternalAgentActions {
       title?: string
       createdAt?: string
       updatedAt?: string
+      archived?: boolean
     }>
   >
   /** Fork a session (ACP extension) */
   forkSession: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
+  cloneSession: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
+  executeSessionCommand: (command: string) => Promise<ExternalAgentSessionInputAcceptance>
+  executeSessionShell: (
+    command: string,
+    options?: { excludeFromContext?: boolean }
+  ) => Promise<ExternalAgentSessionShellResult>
   /** Trigger provider-owned context compaction. */
   compactSession: (sessionId: string, options?: ExternalAgentCompactionOptions) => Promise<void>
   /** Whether the active agent supports provider-owned context compaction. */
   supportsCompaction: boolean
-  /** Whether an advertised compaction command accepts focus instructions. */
+  /** Whether an advertised compaction route accepts focus instructions. */
   supportsCompactionFocus: boolean
   /** Provider capability snapshot used by advanced UI affordances. */
   compactionCapability: ExternalAgentCompactionCapability
@@ -423,7 +441,10 @@ function getExternalAgentErrorMessage(error: unknown): string {
  * console.log(result.finalResponse);
  * ```
  */
-export function useExternalAgent(): UseExternalAgentReturn {
+export function useExternalAgent(scope?: {
+  agentId: string
+  sessionId: string
+}): UseExternalAgentReturn {
   const storeActiveAgentId = useExternalAgentStore((state) => state.activeAgentId)
   const storeGetAllAgents = useExternalAgentStore((state) => state.getAllAgents)
   const storeGetConnectionStatus = useExternalAgentStore((state) => state.getConnectionStatus)
@@ -442,7 +463,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   // State
   const [agents, setAgents] = useState<ExternalAgentInstance[]>([])
-  const [activeSession, setActiveSession] = useState<ExternalAgentSession | null>(null)
+  const [sessionState, setActiveSession] = useState<ExternalAgentSession | null>(null)
+  const scopedAgentId = scope?.agentId
+  const scopedSessionId = scope?.sessionId
+  const activeSession =
+    scopedAgentId && scopedSessionId
+      ? sessionState?.id === scopedSessionId && sessionState.agentId === scopedAgentId
+        ? sessionState
+        : null
+      : sessionState
   const [isLoading, setIsLoading] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -459,6 +488,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
    * leaving the agent blocked for the whole turn.
    */
   const [pendingElicitation, setPendingElicitation] = useState<AcpElicitationRequest | null>(null)
+  const [extensionUi, setExtensionUi] = useState(createExternalAgentUiState)
   const [availableCommands, setAvailableCommands] = useState<AcpAvailableCommand[]>([])
   const [planEntries, setPlanEntries] = useState<AcpPlanEntry[]>([])
   const [planStep, setPlanStep] = useState<number | null>(null)
@@ -486,10 +516,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
     useState<ExternalAgentProviderUndoCapability>({ status: "unknown" })
   const [isCompacting, setIsCompacting] = useState(false)
   const [isProviderUndoing, setIsProviderUndoing] = useState(false)
-  const activeAgentId = storeActiveAgentId
-  const supportsCompactionFocus = compactionCapability.routes.some(
-    (route) => route.kind === "command" && route.supportsFocus
-  )
+  const activeAgentId = scopedAgentId ?? storeActiveAgentId
+  const supportsCompactionFocus = compactionCapability.routes.some((route) => route.supportsFocus)
   const providerUndoAcknowledged = Boolean(
     agents.find((agent) => agent.config.id === activeAgentId)?.config.metadata
       ?.providerUndoWarningAcknowledged
@@ -503,6 +531,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
   // Refs for managing execution
   const abortControllerRef = useRef<AbortController | null>(null)
   const managerRef = useRef<ExternalAgentManagerType | null>(null)
+  const commandOperationCountRef = useRef(0)
+  const pendingAutonomousEventsRef = useRef<ExternalAgentEvent[]>([])
   const permissionResolveRef = useRef<((response: AcpPermissionResponse) => void) | null>(null)
   const elicitationResolveRef = useRef<((response: AcpElicitationResponse) => void) | null>(null)
   const resumedInteractionsRef = useRef<ResumedInteractions | null>(null)
@@ -840,12 +870,69 @@ export function useExternalAgent(): UseExternalAgentReturn {
     storeGetBenchmarkCapabilities,
   ])
 
+  // A chat panel binds an existing native session without changing the global agent picker.
+  useEffect(() => {
+    if (!scopedAgentId || !scopedSessionId) return
+    let disposed = false
+    void getManager().then((manager) => {
+      if (disposed) return
+      const session = manager.getSession(scopedAgentId, scopedSessionId)
+      setActiveSession(session ?? null)
+      executingSessionIdRef.current = session?.id ?? null
+      setIsExecuting(session?.status === "executing")
+      executionInProgressRef.current = session?.status === "executing"
+    })
+    return () => {
+      disposed = true
+    }
+  }, [getManager, scopedAgentId, scopedSessionId])
+
+  const applyStreamPresentation = useCallback(
+    (event: ExternalAgentEvent, ownsInteractions = true) => {
+      if (event.type === "message_delta" && event.delta.type === "text") {
+        setStreamingResponse((previous) => previous + event.delta.text)
+      }
+      if (event.type === "progress") setProgress(event.progress)
+      if (ownsInteractions && event.type === "permission_request")
+        setPendingPermission(event.request)
+      if (ownsInteractions && event.type === "elicitation_request")
+        setPendingElicitation(event.request)
+      if (ownsInteractions && event.type === "elicitation_complete") setPendingElicitation(null)
+    },
+    []
+  )
+
+  const applyAutonomousPresentation = useCallback(
+    (event: ExternalAgentEvent) => {
+      if (event.type === "session_start") {
+        setStreamingResponse("")
+        setError(null)
+        setProgress(0)
+        setIsExecuting(true)
+        executionInProgressRef.current = true
+        executingSessionIdRef.current = event.sessionId ?? null
+      }
+      // A scoped chat's controller owns its approval and question dialogs.
+      applyStreamPresentation(event, !scopedSessionId)
+      if (event.type === "error") setError(event.error)
+      if (event.type === "done" || event.type === "session_end") {
+        setIsExecuting(false)
+        executionInProgressRef.current = false
+        setProgress(100)
+        setPendingPermission(null)
+        setPendingElicitation(null)
+      }
+    },
+    [applyStreamPresentation, scopedSessionId]
+  )
+
   // Subscribe to ACP session updates for commands/plan
   useEffect(() => {
     let unsubscribe: (() => void) | null = null
     let isActive = true
 
     const attach = async () => {
+      setExtensionUi(createExternalAgentUiState())
       if (!activeAgentId) {
         setAvailableCommands([])
         setPlanEntries([])
@@ -871,6 +958,55 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!isActive) return
 
       unsubscribe = manager.addEventListener(activeAgentId, (event) => {
+        if (scopedSessionId && event.sessionId !== scopedSessionId) return
+        if (activeSession && event.sessionId && event.sessionId !== activeSession.id) return
+        if (event.delivery === "out_of_band" && event.sessionId === activeSession?.id) {
+          if (abortControllerRef.current) pendingAutonomousEventsRef.current.push(event)
+          else applyAutonomousPresentation(event)
+        }
+        if (
+          event.type === "session_info_update" &&
+          event.extensionUi &&
+          event.sessionId &&
+          event.sessionId === activeSession?.id
+        ) {
+          setExtensionUi(event.extensionUi)
+          const session = manager.getSession(activeAgentId, event.sessionId)
+          if (session) {
+            setActiveSession(session)
+            setIsExecuting(session.status === "executing")
+            executionInProgressRef.current = session.status === "executing"
+          }
+          return
+        }
+        if (scopedSessionId && event.sessionId === scopedSessionId) {
+          if (event.type === "message_start" || event.type === "session_start") {
+            setIsExecuting(true)
+            executionInProgressRef.current = true
+          }
+          if (event.type === "done" || event.type === "session_end") {
+            setIsExecuting(false)
+            executionInProgressRef.current = false
+          }
+        }
+        if (
+          event.sessionId &&
+          event.sessionId === activeSession?.id &&
+          !executionInProgressRef.current &&
+          commandOperationCountRef.current > 0 &&
+          manager.getSession(activeAgentId, event.sessionId)?.status !== "executing"
+        ) {
+          if (event.type === "elicitation_request") setPendingElicitation(event.request)
+          if (event.type === "permission_request") setPendingPermission(event.request)
+          if (event.type === "elicitation_complete") setPendingElicitation(null)
+        }
+        if (event.type === "extension_ui_update") {
+          // Extension state belongs to one runtime session, not every chat using this agent.
+          if (event.sessionId && event.sessionId === activeSession?.id) {
+            setExtensionUi((current) => reduceExternalAgentUiState(current, event))
+          }
+          return
+        }
         if (event.type === "commands_update") {
           setAvailableCommands(event.commands)
         }
@@ -919,6 +1055,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
       if (activeSession) {
         const session = manager.getSession(activeAgentId, activeSession.id)
+        const sessionUi = session?.metadata?.extensionUi as ExternalAgentUiState | undefined
+        if (sessionUi) setExtensionUi(sessionUi)
         const sessionCommands = session?.metadata?.availableCommands as
           AcpAvailableCommand[] | undefined
         const sessionPlan = session?.metadata?.plan as AcpPlanEntry[] | undefined
@@ -962,7 +1100,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       isActive = false
       unsubscribe?.()
     }
-  }, [activeAgentId, activeSession, getManager])
+  }, [activeAgentId, activeSession, applyAutonomousPresentation, getManager, scopedSessionId])
 
   // Ask the agent for its config options once a session exists.
   //
@@ -1398,7 +1536,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
       agentId?: string,
       options?: SessionListOptions
     ): Promise<
-      Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
+      Array<{
+        sessionId: string
+        title?: string
+        createdAt?: string
+        updatedAt?: string
+        archived?: boolean
+      }>
     > => {
       const targetAgentId = agentId || activeAgentId
       if (!targetAgentId) {
@@ -1452,6 +1596,84 @@ export function useExternalAgent(): UseExternalAgentReturn {
       }
     },
     [getManager, activeAgentId, syncActiveAgentValidityFromRuntime]
+  )
+
+  const cloneSession = useCallback(
+    async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current ||
+        sessionMutationCountRef.current > 0
+      ) {
+        throw new Error("Cannot clone a session while the agent is busy")
+      }
+      sessionMutationCountRef.current += 1
+      let manager: ExternalAgentManagerType | null = null
+      try {
+        manager = await getManager()
+        const cloned = await manager.cloneSession(activeAgentId, sessionId, options)
+        if (activeAgentIdRef.current === activeAgentId) {
+          setActiveSession(cloned)
+          executingSessionIdRef.current = cloned.id
+        }
+        return cloned
+      } catch (err) {
+        setError(getExternalAgentErrorMessage(err))
+        throw err
+      } finally {
+        sessionMutationCountRef.current -= 1
+        syncActiveAgentValidityFromRuntime(activeAgentId, manager)
+      }
+    },
+    [getManager, activeAgentId, syncActiveAgentValidityFromRuntime]
+  )
+
+  const executeSessionCommand = useCallback(
+    async (command: string) => {
+      if (!activeAgentId || !activeSession) throw new Error("No active session selected")
+      commandOperationCountRef.current += 1
+      try {
+        const manager = await getManager()
+        return await manager.executeSessionCommand(activeAgentId, activeSession.id, command)
+      } finally {
+        commandOperationCountRef.current -= 1
+      }
+    },
+    [activeAgentId, activeSession, getManager]
+  )
+
+  const executeSessionShell = useCallback(
+    async (command: string, options?: { excludeFromContext?: boolean }) => {
+      if (!activeAgentId || !activeSession) throw new Error("No active session selected")
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current ||
+        sessionMutationCountRef.current > 0
+      ) {
+        throw new Error("Cannot execute shell while the agent is busy")
+      }
+      sessionMutationCountRef.current += 1
+      try {
+        const manager = await getManager()
+        return await manager.executeSessionShell(activeAgentId, activeSession.id, command, {
+          ...options,
+          onPermissionRequest: async (request) => {
+            setPendingPermission(request)
+            return new Promise<AcpPermissionResponse>((resolve) => {
+              permissionResolveRef.current = resolve
+            })
+          },
+        })
+      } finally {
+        sessionMutationCountRef.current -= 1
+        setPendingPermission(null)
+        permissionResolveRef.current = null
+      }
+    },
+    [activeAgentId, activeSession, getManager]
   )
 
   // Probe session-level provider capabilities whenever the active runtime
@@ -1568,6 +1790,25 @@ export function useExternalAgent(): UseExternalAgentReturn {
       metadata: { providerUndoWarningAcknowledged: false },
     })
   }, [activeAgentId, storeUpdateAgent])
+
+  const unarchiveSession = useCallback(
+    async (sessionId: string): Promise<void> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      if (compactionInProgressRef.current || providerUndoInProgressRef.current)
+        throw new Error("Cannot restore a session during another session mutation")
+      sessionMutationCountRef.current += 1
+      try {
+        const manager = await getManager()
+        await manager.unarchiveSession(activeAgentId, sessionId)
+      } catch (err) {
+        setError(getExternalAgentErrorMessage(err))
+        throw err
+      } finally {
+        sessionMutationCountRef.current -= 1
+      }
+    },
+    [activeAgentId, getManager]
+  )
 
   const resumeSession = useCallback(
     async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
@@ -1724,9 +1965,10 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setProgress(100)
         setPendingPermission(null)
         abortControllerRef.current = null
+        pendingAutonomousEventsRef.current.splice(0).forEach(applyAutonomousPresentation)
       }
     },
-    [getManager, activeAgentId, activeSession, storeRecordFailure]
+    [getManager, activeAgentId, activeSession, applyAutonomousPresentation, storeRecordFailure]
   )
 
   // Execute with streaming
@@ -1773,7 +2015,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
           signal: abortControllerRef.current.signal,
         })) {
           if ("sessionId" in event && typeof event.sessionId === "string") {
-            executingSessionIdRef.current = event.sessionId
+            executingSessionIdRef.current = event.sessionId ?? null
           }
 
           if (event.type === "session_start" && typeof event.sessionId === "string") {
@@ -1783,27 +2025,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
             }
           }
 
-          // Update streaming response for text events
-          if (event.type === "message_delta" && event.delta.type === "text") {
-            setStreamingResponse((prev) => prev + event.delta.text)
-          }
-
-          // Update progress
-          if (event.type === "progress") {
-            setProgress(event.progress)
-          }
-
-          // Handle permission request
-          if (event.type === "permission_request") {
-            setPendingPermission(event.request)
-          }
-
-          // The streaming path has no promise bridge — the caller drives the
-          // iterator — so the answer goes back through the manager. Surfacing
-          // it is what turns a stalled turn into a question the user can see.
-          if (event.type === "elicitation_request") {
-            setPendingElicitation(event.request)
-          }
+          applyStreamPresentation(event)
 
           yield event
         }
@@ -1818,9 +2040,17 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setProgress(100)
         setPendingPermission(null)
         abortControllerRef.current = null
+        pendingAutonomousEventsRef.current.splice(0).forEach(applyAutonomousPresentation)
       }
     },
-    [getManager, activeAgentId, activeSession, storeRecordFailure]
+    [
+      getManager,
+      activeAgentId,
+      activeSession,
+      applyStreamPresentation,
+      applyAutonomousPresentation,
+      storeRecordFailure,
+    ]
   )
 
   // Cancel execution
@@ -2178,6 +2408,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     progress,
     pendingPermission,
     pendingElicitation,
+    extensionUi,
     availableCommands,
     planEntries,
     planStep,
@@ -2203,6 +2434,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
     deleteSession,
     listSessions,
     forkSession,
+    cloneSession,
+    executeSessionCommand,
+    executeSessionShell,
     compactSession,
     supportsCompaction,
     supportsCompactionFocus,
@@ -2215,6 +2449,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     resetProviderUndoWarning,
     isProviderUndoing,
     resumeSession,
+    unarchiveSession,
     execute,
     executeStreaming,
     cancel,

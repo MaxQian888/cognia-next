@@ -264,7 +264,10 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useExternalAgentStore } from "@/stores/agent"
-import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
+import {
+  externalSessionLinkForSession,
+  runtimeRefForSession,
+} from "@/stores/agent/agent-runtime-store"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
@@ -455,6 +458,269 @@ export function redirectSendToBundleAliases(
  * Owns the direct-chat runtime. Only ClaudeChatRuntimeProvider mounts this
  * controller; surfaces consume the shared public useClaudeChat hook.
  */
+/** A UI-created fork/clone takes precedence over the tool host's previous native session. */
+export function resolveNativeExternalSessionId(
+  chatSessionId: string,
+  agentId: string,
+  hosted?: { agentId: string; nativeSessionId?: string }
+): string | undefined {
+  const link = externalSessionLinkForSession(chatSessionId)
+  if (link?.agentId === agentId && !isGatewaySessionLink(link.sessionId)) return link.sessionId
+  return hosted?.agentId === agentId && !isGatewaySessionLink(hosted.nativeSessionId)
+    ? hosted.nativeSessionId
+    : undefined
+}
+
+/** Consume runtime-owned turns through the same parts, approval and durable
+ * message seams as prompted external turns. Callers serialize events per chat. */
+export function createExternalIdleEventConsumer(
+  chatSessionId: string,
+  agentId: string,
+  nativeSessionId: string,
+  registry: SessionCoalescingRegistry,
+  remoteDecisionRunId?: () => string | undefined
+) {
+  let disposed = false
+  const approvalIds = new Set<string>()
+  const elicitationIds = new Set<string>()
+  let run:
+    | {
+        id: string
+        startedAt: number
+        parts: UIMessage["parts"]
+        usage?: import("@/types/agent/external-agent").ExternalAgentTokenUsage
+      }
+    | undefined
+  const cleanupDecisions = async () => {
+    const { resolveExternalApproval, elicitationCancelResponse, getExternalApprovalTarget } =
+      await import("@/lib/ai/agent/external/session/chat-decision-bridge")
+    const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+    const manager = getExternalAgentManager()
+    for (const id of approvalIds) {
+      useChatStore.getState().clearApproval(id, chatSessionId)
+      const remoteId = getExternalApprovalTarget(id)?.remoteDecisionId
+      await resolveExternalApproval(id, "deny", async (agent, session, response) => {
+        if (remoteId) {
+          const { resolveRemotePermission } =
+            await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+          await resolveRemotePermission(remoteId, "deny")
+        } else await manager.respondToPermission(agent, session, response)
+      }).catch(() => undefined)
+    }
+    const { useExternalElicitationStore } =
+      await import("@/stores/agent/external-elicitation-store")
+    for (const entry of useExternalElicitationStore.getState().bySession[chatSessionId] ?? []) {
+      if (!elicitationIds.has(entry.request.id)) continue
+      useExternalElicitationStore.getState().remove(chatSessionId, entry.request.id)
+      if (entry.remoteDecisionId) {
+        const { resolveRemoteElicitation } =
+          await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+        await resolveRemoteElicitation(
+          entry.remoteDecisionId,
+          elicitationCancelResponse(entry)
+        ).catch(() => undefined)
+      } else
+        await manager
+          .respondToElicitation(entry.agentId, elicitationCancelResponse(entry))
+          .catch(() => undefined)
+    }
+    approvalIds.clear()
+    elicitationIds.clear()
+  }
+  const consume = async (event: import("@/types/agent/external-agent").ExternalAgentEvent) => {
+    const link = externalSessionLinkForSession(chatSessionId)
+    if (
+      disposed ||
+      event.delivery !== "out_of_band" ||
+      event.sessionId !== nativeSessionId ||
+      link?.agentId !== agentId ||
+      link.sessionId !== nativeSessionId
+    )
+      return
+    const {
+      registerExternalApproval,
+      registerExternalElicitation,
+      registerExternalQuestionTarget,
+    } = await import("@/lib/ai/agent/external/session/chat-decision-bridge")
+    const { useExternalElicitationStore } =
+      await import("@/stores/agent/external-elicitation-store")
+    const currentLink = externalSessionLinkForSession(chatSessionId)
+    if (disposed || currentLink?.agentId !== agentId || currentLink.sessionId !== nativeSessionId)
+      return
+    const state = useChatStore.getState()
+    if (event.type === "session_end") {
+      if (event.error) state.setSessionError(chatSessionId, event.error)
+      event = { ...event, type: "done", success: event.reason === "completed" }
+    }
+    if (event.type === "permission_request") {
+      const runId = remoteDecisionRunId?.()
+      const approval = registerExternalApproval({
+        agentId,
+        chatSessionId,
+        event,
+        ...(runId
+          ? { remoteDecisionId: `${runId}:${event.request.requestId ?? event.request.id}` }
+          : {}),
+      })
+      if (approval) {
+        approvalIds.add(approval.requestId)
+        state.pushApproval(approval)
+      }
+      return
+    }
+    if (event.type === "elicitation_request") {
+      const runId = remoteDecisionRunId?.()
+      const pending = registerExternalElicitation({
+        agentId,
+        chatSessionId,
+        event,
+        ...(runId ? { remoteDecisionId: `${runId}:${event.request.id}` } : {}),
+      })
+      if (pending) {
+        elicitationIds.add(pending.request.id)
+        useExternalElicitationStore.getState().push(pending)
+      }
+      return
+    }
+    if (event.type === "elicitation_complete") {
+      useExternalElicitationStore.getState().remove(chatSessionId, event.elicitationId)
+      return
+    }
+    if (event.type === "session_start" && !run) {
+      run = { id: crypto.randomUUID(), startedAt: Date.now(), parts: [] }
+      state.setSessionStatus(chatSessionId, "streaming")
+      setSessionExternalLane(chatSessionId, agentId)
+    }
+    if (!run) return
+    if (event.type === "content_block_start" && event.role === "user") {
+      const id = event.messageId ?? `external-user:${run.id}`
+      const current = useChatStore.getState().sessions[chatSessionId]?.messages ?? []
+      const existing = current.find((message) => message.id === id)
+      const block = event.block
+      const part =
+        block.type === "text"
+          ? { type: "text" as const, text: block.text }
+          : block.type === "image"
+            ? {
+                type: "file" as const,
+                mediaType: block.mimeType,
+                url: `data:${block.mimeType};base64,${block.data}`,
+              }
+            : undefined
+      if (!part) return
+      const message: UIMessage = { id, role: "user", parts: [...(existing?.parts ?? []), part] }
+      const messages = existing
+        ? current.map((item) => (item.id === id ? message : item))
+        : [...current, message]
+      useChatStore.getState().replaceSessionMessages(chatSessionId, messages)
+      await persistStreamingMessages(chatSessionId, messages)
+      return
+    }
+    const capture = captureEventFromCanonical(canonicalEventFromExternalEvent(event))
+    if (capture) void projectDirectChatCaptureEvent(chatSessionId, capture)
+    const inlineQuestions =
+      !remoteDecisionRunId &&
+      useSettingsStore.getState().settings?.inlineQuestions?.enabled === true
+    const questionRequestId =
+      event.type === "async_questions" && event.requestId && inlineQuestions
+        ? registerExternalQuestionTarget({ agentId, chatSessionId, event })
+        : null
+    const { applyExternalAgentEventToParts } =
+      await import("@/lib/ai/agent/external/session/event-to-parts")
+    if (disposed || !run) return
+    if (questionRequestId) approvalIds.add(questionRequestId)
+    run.parts = applyExternalAgentEventToParts(run.parts, event, {
+      inlineQuestions,
+      sessionId: chatSessionId,
+      ...(questionRequestId ? { questionRequestId } : {}),
+    }) as UIMessage["parts"]
+    if (event.type === "usage_update" || event.type === "done")
+      run.usage = event.tokenUsage ?? run.usage
+    if (event.type === "error") state.setSessionError(chatSessionId, event.error)
+    if (!run.parts.length) {
+      if (event.type === "done") {
+        run = undefined
+        registry.release(chatSessionId)
+        state.setSessionStatus(chatSessionId, event.success ? "idle" : "error")
+        setSessionExternalLane(chatSessionId, null)
+        await cleanupDecisions()
+      }
+      return
+    }
+    const message: UIMessage = {
+      id: run.id,
+      role: "assistant",
+      parts: run.parts,
+      metadata: {
+        run: {
+          providerId: "external",
+          startedAt: run.startedAt,
+          externalAgent: {
+            agentId,
+            route: externalAgentRouteKey({ sessionId: nativeSessionId }),
+          },
+        },
+      },
+    }
+    const current = useChatStore.getState().sessions[chatSessionId]?.messages ?? []
+    let messages = [...current.filter((item) => item.id !== run!.id), message]
+    const coalescer = registry.get(chatSessionId)
+    if (event.type !== "done") {
+      coalescer.commit.call(messages)
+      coalescer.persist.call(messages)
+      return
+    }
+    coalescer.commit.flush()
+    coalescer.persist.cancel()
+    messages = attachRunMetadataToLastAssistant(
+      messages,
+      buildCompletedRunMetadata({
+        providerId: "external",
+        startedAt: run.startedAt,
+        completedAt: Date.now(),
+        reportedDurationMs: event.durationMs,
+        externalAgent: { agentId, route: externalAgentRouteKey({ sessionId: nativeSessionId }) },
+      })
+    )
+    if (run.usage)
+      messages = attachUsageToLastAssistant(
+        messages,
+        externalTokenUsageToUsageInfo(run.usage) as unknown as Record<string, unknown>
+      )
+    useChatStore.getState().replaceSessionMessages(chatSessionId, messages)
+    await persistMessages(chatSessionId, messages)
+    if (disposed || !run) return
+    if (run.usage)
+      await recordExternalAgentUsage({
+        sessionId: chatSessionId,
+        messageId: run.id,
+        usage: run.usage,
+        durationMs: event.durationMs,
+        at: Date.now(),
+      }).catch((error) => console.warn("recordExternalAgentUsage failed", error))
+    run = undefined
+    registry.release(chatSessionId)
+    useChatStore.getState().setSessionStatus(chatSessionId, event.success ? "idle" : "error")
+    setSessionExternalLane(chatSessionId, null)
+    await cleanupDecisions()
+  }
+  return Object.assign(consume, {
+    async dispose() {
+      disposed = true
+      if (run) {
+        const coalescer = registry.get(chatSessionId)
+        coalescer.commit.flush()
+        coalescer.persist.flush()
+        registry.release(chatSessionId)
+        run = undefined
+        useChatStore.getState().setSessionStatus(chatSessionId, "idle")
+        setSessionExternalLane(chatSessionId, null)
+      }
+      await cleanupDecisions()
+    },
+  })
+}
+
 export function useClaudeChat() {
   const store = useChatStore
   const tRouting = useTranslations("providers.routingView")
@@ -669,6 +935,7 @@ export function useClaudeChat() {
   // `interruptSession` instead).
   const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
   const externalGatewayAbortRef = useRef<Map<string, AbortController>>(new Map())
+  const externalTurnSettlementsRef = useRef<Map<string, Promise<void>>>(new Map())
   const externalToolHostsRef = useRef(
     new Map<
       string,
@@ -684,14 +951,22 @@ export function useClaudeChat() {
   )
   const releaseExternalToolHost = useCallback(async (sessionId: string) => {
     const entry = externalToolHostsRef.current.get(sessionId)
+    const link = externalSessionLinkForSession(sessionId)
+    useAgentRuntimeStore.getState().setSessionExternalLink(sessionId, undefined)
     if (!entry) return
     externalToolHostsRef.current.delete(sessionId)
     try {
       const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
       if (getExternalAgentManager().getAgent(entry.agentId))
         getExternalAgentManager().setSessionHostFacts(entry.agentId, sessionId, null)
-      if (entry.nativeSessionId) {
-        await getExternalAgentManager().closeSession(entry.agentId, entry.nativeSessionId)
+      const nativeIds = new Set([
+        entry.nativeSessionId,
+        link?.agentId === entry.agentId && !isGatewaySessionLink(link.sessionId)
+          ? link.sessionId
+          : undefined,
+      ])
+      for (const nativeId of nativeIds) {
+        if (nativeId) await getExternalAgentManager().closeSession(entry.agentId, nativeId)
       }
     } finally {
       await entry.host.close()
@@ -736,6 +1011,127 @@ export function useClaudeChat() {
         persistDelayMs: PERSIST_DEBOUNCE_MS,
       })
   )
+  useEffect(() => {
+    let disposed = false
+    const subscriptions = new Map<string, { key: string; unsubscribe: () => void }>()
+    let sync: (() => void) | undefined
+    const unsubscribeRuntime = useAgentRuntimeStore.subscribe(() => sync?.())
+    void import("@/lib/ai/agent/external/manager").then(({ getExternalAgentManager }) => {
+      if (disposed) return
+      const manager = getExternalAgentManager()
+      sync = () => {
+        const links = useAgentRuntimeStore.getState().sessionExternalLinks
+        for (const [id, subscription] of subscriptions) {
+          const link = links[id]
+          if (!link || subscription.key !== JSON.stringify(link)) {
+            subscription.unsubscribe()
+            subscriptions.delete(id)
+            if (!externalTurnSettlementsRef.current.has(id)) {
+              const hosted = externalToolHostsRef.current.get(id)
+              if (hosted) {
+                manager.setSessionHostFacts(hosted.agentId, id, null)
+                void hosted.host
+                  .pause()
+                  .catch((error) => console.warn("External tool host pause failed", error))
+              }
+            }
+          }
+        }
+        for (const [id, link] of Object.entries(links)) {
+          if (subscriptions.has(id)) continue
+          let decisionRunId: string | undefined
+          const consume = createExternalIdleEventConsumer(
+            id,
+            link.agentId,
+            link.sessionId,
+            registry,
+            link.host ? () => decisionRunId : undefined
+          )
+          const accept = (event: import("@/types/agent/external-agent").ExternalAgentEvent) => {
+            if (event.delivery !== "out_of_band" || event.sessionId !== link.sessionId) return
+            const previous = eventQueuesRef.current.get(id) ?? Promise.resolve()
+            const ownedTurn = externalTurnSettlementsRef.current.get(id)
+            const next = previous
+              .then(async () => {
+                // A runtime can hand off immediately after its command ACK,
+                // before the owned send finishes its final persistence.
+                await ownedTurn
+                if (!disposed) await consume(event)
+              })
+              .catch((error) => {
+                console.error("External background event failed", error)
+                useChatStore
+                  .getState()
+                  .setSessionError(id, error instanceof Error ? error.message : String(error))
+              })
+            eventQueuesRef.current.set(id, next)
+          }
+          const failRemoteBackground = (error: string) => {
+            accept({
+              type: "error",
+              error,
+              sessionId: link.sessionId,
+              timestamp: new Date(),
+              delivery: "out_of_band",
+            })
+            accept({
+              type: "done",
+              success: false,
+              sessionId: link.sessionId,
+              timestamp: new Date(),
+              delivery: "out_of_band",
+            })
+          }
+          let unsubscribe: () => void
+          if (link.host) {
+            let cancelled = false
+            let close: (() => Promise<void>) | undefined
+            void import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+              .then(async ({ watchRemoteSession }) => {
+                if (cancelled) return
+                const watcher = await watchRemoteSession(
+                  { stamp: link.host!, chatSessionId: id, externalSessionId: link.sessionId },
+                  {
+                    onEvent: (event, frame) => {
+                      decisionRunId = frame.runId
+                      accept(event)
+                    },
+                    onTerminal: (_status, error) =>
+                      failRemoteBackground(error ?? "Remote session closed"),
+                    onGap: () => failRemoteBackground("Remote session event stream has a gap"),
+                  }
+                )
+                close = watcher.close
+                if (cancelled) await close()
+              })
+              .catch((error) => {
+                if (!cancelled) useChatStore.getState().setSessionError(id, String(error))
+              })
+            unsubscribe = () => {
+              cancelled = true
+              void close?.()
+            }
+          } else unsubscribe = manager.addEventListener(link.agentId, accept)
+          subscriptions.set(id, {
+            key: JSON.stringify(link),
+            unsubscribe: () => {
+              unsubscribe()
+              void consume
+                .dispose()
+                .catch((error) => console.warn("External background cleanup failed", error))
+            },
+          })
+        }
+      }
+      sync()
+    })
+    return () => {
+      disposed = true
+      unsubscribeRuntime()
+      for (const subscription of subscriptions.values()) subscription.unsubscribe()
+    }
+  }, [registry])
+
   const handleTranscriptInvalidated = useCallback(
     (sessionId: string) => {
       registry.release(sessionId)
@@ -1488,12 +1884,32 @@ export function useClaudeChat() {
           } else if (externalAgentId) {
             // Adapter steering carries text only (`turn/steer` takes a string),
             // so an attachment-only follow-up has to queue on this lane.
-            if (text) {
+            if (text && blocks.length === 0) {
               try {
                 const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
                 const mgr = getExternalAgentManager()
-                if (mgr.supportsSteering(externalAgentId)) {
-                  await mgr.steerSession(externalAgentId, undefined, text)
+                const link = externalSessionLinkForSession(sessionId)
+                const remoteClient = link?.host
+                  ? (
+                      await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+                    ).createRemoteSessionOperationsClient({
+                      stamp: link.host,
+                      chatSessionId: sessionId,
+                      externalSessionId: link.sessionId,
+                    })
+                  : undefined
+                const canSteer =
+                  link?.agentId === externalAgentId &&
+                  (remoteClient
+                    ? (
+                        await remoteClient.getSessionOperationCapabilities(
+                          externalAgentId,
+                          link.sessionId
+                        )
+                      ).steering === "supported"
+                    : mgr.supportsSteering(externalAgentId))
+                if (link && canSteer) {
+                  await (remoteClient ?? mgr).steerSession(externalAgentId, link.sessionId, text)
                   mergeSteerWebSearchIntoLastSend(sessionId, callOptions?.webSearchContext)
                   setSteerMessageState(sessionId, entryId, "accepted")
                   return
@@ -3743,6 +4159,11 @@ export function useClaudeChat() {
         const gatewayController = !hostSelection ? new AbortController() : undefined
         if (gatewayController) externalGatewayAbortRef.current.set(sessionId, gatewayController)
         let externalTurnCompleted = false
+        let settleExternalTurn!: () => void
+        const externalTurnSettlement = new Promise<void>((resolve) => {
+          settleExternalTurn = resolve
+        })
+        externalTurnSettlementsRef.current.set(sessionId, externalTurnSettlement)
         try {
           await persistMessages(sessionId, next)
           await touchSession(sessionId)
@@ -3855,6 +4276,20 @@ export function useClaudeChat() {
           let externalSessionWrite = Promise.resolve()
           let externalSessionWriteError: unknown
           const persistExternalSession = (nativeId?: string) => {
+            if (nativeId)
+              useAgentRuntimeStore.getState().setSessionExternalLink(sessionId, {
+                agentId: extAgentId,
+                sessionId: nativeId,
+                ...(hostSelection
+                  ? {
+                      host: {
+                        configId: hostSelection.configId,
+                        revision: hostSelection.revision,
+                        lifecycleGeneration: hostSelection.lifecycleGeneration,
+                      },
+                    }
+                  : {}),
+              })
             const hosted = externalToolHostsRef.current.get(sessionId)
             // The tool host remembers the agent's OWN session only. A gateway
             // link is resumed from the row, and only when its binding is the
@@ -4188,6 +4623,7 @@ export function useClaudeChat() {
                 permissionMode: sendOptions.permissionMode,
                 allowedTools: sendOptions.allowedTools,
               })
+              entry.nativeSessionId = resolveNativeExternalSessionId(sessionId, extAgentId, entry)
               if (
                 entry.launchContextSignature &&
                 entry.launchContextSignature !== launchContextSignature &&
@@ -4203,6 +4639,7 @@ export function useClaudeChat() {
                   )
                   resetExternalSession = true
                   entry.nativeSessionId = undefined
+                  useAgentRuntimeStore.getState().setSessionExternalLink(sessionId, undefined)
                 }
               }
               entry.launchContextSignature = launchContextSignature
@@ -4227,11 +4664,12 @@ export function useClaudeChat() {
             } = compositionForSession(sessionId)
             useAgentRuntimeStore.getState().setSessionComposition(sessionId, composition)
           }
+          if (resetExternalSession)
+            useAgentRuntimeStore.getState().setSessionExternalLink(sessionId, undefined)
           const hostedSession = externalToolHostsRef.current.get(sessionId)
-          const matchingHostedNativeSessionId =
-            nativeRoute && hostedSession?.agentId === extAgentId
-              ? hostedSession.nativeSessionId
-              : undefined
+          const matchingHostedNativeSessionId = nativeRoute
+            ? resolveNativeExternalSessionId(sessionId, extAgentId, hostedSession)
+            : undefined
           // A session on THIS route: the gateway task the selection names, or
           // the agent's own session on a native turn. A session on the other
           // route is not one, however recently it ran: switching between the
@@ -4346,7 +4784,9 @@ export function useClaudeChat() {
                   // after a Cognia one must not hand the Host that task.
                   ...(modelSelection.gatewayLink && !modelSelection.rebind
                     ? { externalSessionId: modelSelection.gatewayLink }
-                    : {}),
+                    : externalSessionLinkForSession(sessionId)?.host
+                      ? { externalSessionId: externalSessionLinkForSession(sessionId)?.sessionId }
+                      : {}),
                   newRunId: () => remoteRunId,
                   ...externalModelAxes,
                   systemPrompt: externalSystemPrompt || undefined,
@@ -4541,29 +4981,48 @@ export function useClaudeChat() {
           const error = err instanceof Error ? err : new Error(String(err))
           await handleExternalFailure(error.message, error)
         } finally {
-          // A turn that wrote no reply (stopped, or failed before its first
-          // frame) still has its regenerate slot and edit owner armed, and no
-          // `session_ended` drops them on this lane. A sidecar fallback has
-          // already armed its own by now, which this leaves alone.
-          disarmBranch()
-          const hosted = externalToolHostsRef.current.get(sessionId)
-          if (hosted) {
-            const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-            if (getExternalAgentManager().getAgent(extAgentId))
-              getExternalAgentManager().setSessionHostFacts(extAgentId, sessionId, null)
+          try {
+            // A turn that wrote no reply (stopped, or failed before its first
+            // frame) still has its regenerate slot and edit owner armed, and no
+            // `session_ended` drops them on this lane. A sidecar fallback has
+            // already armed its own by now, which this leaves alone.
+            disarmBranch()
+            const hosted = externalToolHostsRef.current.get(sessionId)
+            if (hosted) {
+              const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+              const manager = getExternalAgentManager()
+              const link = externalSessionLinkForSession(sessionId)
+              const backgroundTurns =
+                link?.agentId === extAgentId && !isGatewaySessionLink(link.sessionId)
+                  ? await manager
+                      .getSessionOperationCapabilities(extAgentId, link.sessionId)
+                      .then((caps) => caps.backgroundTurns === "supported")
+                      .catch(() => false)
+                  : false
+              // Runtime-advertised autonomous turns retain the session broker
+              // and its per-call permission gate between explicit prompts.
+              if (!backgroundTurns) {
+                if (manager.getAgent(extAgentId))
+                  manager.setSessionHostFacts(extAgentId, sessionId, null)
+                await hosted.host
+                  .pause()
+                  .catch((error) => console.error("external tool host pause failed", error))
+              }
+            }
+            if (externalGatewayAbortRef.current.get(sessionId) === gatewayController) {
+              externalGatewayAbortRef.current.delete(sessionId)
+            }
+            // However this turn ended, the adapter's waiters are gone. An entry
+            // left behind would be an unanswerable dialog pinned over the pane —
+            // the approval dialog has no close button, because on the SDK path
+            // closing it would orphan a live promise. Released here rather than
+            // on each exit path so a throw between them cannot skip it.
+            await releaseExternalDecisionSurfaces()
+          } finally {
+            settleExternalTurn()
+            if (externalTurnSettlementsRef.current.get(sessionId) === externalTurnSettlement)
+              externalTurnSettlementsRef.current.delete(sessionId)
           }
-          await hosted?.host.pause().catch((error) => {
-            console.error("external tool host pause failed", error)
-          })
-          if (externalGatewayAbortRef.current.get(sessionId) === gatewayController) {
-            externalGatewayAbortRef.current.delete(sessionId)
-          }
-          // However this turn ended, the adapter's waiters are gone. An entry
-          // left behind would be an unanswerable dialog pinned over the pane —
-          // the approval dialog has no close button, because on the SDK path
-          // closing it would orphan a live promise. Released here rather than
-          // on each exit path so a throw between them cannot skip it.
-          await releaseExternalDecisionSurfaces()
         }
         // A clean end replays what the user queued behind this turn — the
         // sidecar does this on `session_ended`, and without it a follow-up
@@ -5257,6 +5716,21 @@ export function useClaudeChat() {
           // with the same action id after reconnect.
         } else if (gatewayController) {
           gatewayController.abort()
+        } else if (
+          sessionExternalLane(sessionId) &&
+          externalSessionLinkForSession(sessionId)?.agentId === sessionExternalLane(sessionId)
+        ) {
+          const link = externalSessionLinkForSession(sessionId)!
+          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+          if (link.host) {
+            const { createRemoteSessionOperationsClient } =
+              await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+            await createRemoteSessionOperationsClient({
+              stamp: link.host,
+              chatSessionId: sessionId,
+              externalSessionId: link.sessionId,
+            }).cancel(link.agentId, link.sessionId)
+          } else await getExternalAgentManager().cancel(link.agentId, link.sessionId)
         } else if (standaloneController) {
           standaloneController.abort()
           standaloneAbortRef.current.delete(sessionId)

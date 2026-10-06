@@ -1,4 +1,4 @@
-# Cognia overlay over the official sdk-minimal bundle (0.1.5-rc.1).
+# Cognia overlay over the official sdk-minimal bundle (0.2.0-rc.2).
 # Patch config replaces the whole upstream config; keep required values explicit.
 - id: llm-deepseek
   disabled: !!js process.env.COGNIA_DSH_PROVIDER === 'cognia'

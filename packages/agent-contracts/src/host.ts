@@ -92,6 +92,12 @@ export interface AgentFileHost {
   writeText(path: string, content: string, allowedRoots: readonly string[]): Promise<void>
   /** Deletes one file. */
   delete(path: string, allowedRoots: readonly string[]): Promise<void>
+  /** Base64 content of one file, bounded by the host (attachments, images). */
+  readBinary(path: string, allowedRoots: readonly string[]): Promise<string>
+  /** Writes base64 content; the host validates the encoding and size. */
+  writeBinary(path: string, base64: string, allowedRoots: readonly string[]): Promise<void>
+  /** Absolute paths of the immediate files (not directories) in `path`. */
+  listFiles(path: string, allowedRoots: readonly string[]): Promise<string[]>
 }
 
 /** What the host's agent fetch honours beyond `RequestInit`. */

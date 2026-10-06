@@ -14,7 +14,59 @@ import {
   normalizeForRedaction,
   redactText,
   unredactText,
+  restoreOffsetsThroughRedaction,
+  translateOffsetsThroughRedaction,
 } from "./index"
+
+describe("restoreOffsetsThroughRedaction", () => {
+  it("round-trips canonical page boundaries across multiple length changes and Unicode", () => {
+    const pages = ["第一😀 alice.long.name@example.com", "Bob C++ tail"]
+    const original = pages.join("\n\n")
+    const redaction = redactText(original, ["Bob", "C++"])
+    const ranges = [
+      { pageNumber: 1, charStart: 0, charEnd: pages[0].length },
+      { pageNumber: 2, charStart: pages[0].length + 2, charEnd: original.length },
+    ]
+    const redactedRanges = translateOffsetsThroughRedaction(
+      ranges,
+      redaction.redacted,
+      redaction.map
+    )
+    expect(
+      restoreOffsetsThroughRedaction(redactedRanges, redaction.redacted, redaction.map)
+    ).toEqual(ranges)
+  })
+
+  it("expands partial placeholder ranges outwards without shifted trailing citations", () => {
+    const original = "Start alice.long.name@example.com then Bob end"
+    const { redacted, map } = redactText(original, ["Bob"])
+    const email = redacted.indexOf("<EMAIL_")
+    const ranges = restoreOffsetsThroughRedaction(
+      [
+        { charStart: email + 2, charEnd: email + 5 },
+        { charStart: redacted.indexOf(" end"), charEnd: redacted.length },
+      ],
+      redacted,
+      map
+    )
+    expect(original.slice(ranges[0].charStart, ranges[0].charEnd)).toBe(
+      "alice.long.name@example.com"
+    )
+    expect(original.slice(ranges[1].charStart, ranges[1].charEnd)).toBe(" end")
+  })
+
+  it("preserves literal unknown placeholders, clamps ranges and rejects malformed offsets", () => {
+    expect(
+      restoreOffsetsThroughRedaction([{ charStart: -5, charEnd: 100 }], "<EMAIL_999>", {})
+    ).toEqual([{ charStart: 0, charEnd: 11 }])
+    expect(() =>
+      restoreOffsetsThroughRedaction([{ charStart: NaN, charEnd: 2 }], "text", {})
+    ).toThrow(RangeError)
+    expect(() =>
+      restoreOffsetsThroughRedaction([{ charStart: 3, charEnd: 2 }], "text", {})
+    ).toThrow(RangeError)
+  })
+})
 
 describe("redactText", () => {
   it("redacts emails and round-trips perfectly", () => {

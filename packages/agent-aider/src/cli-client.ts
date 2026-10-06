@@ -51,6 +51,10 @@ interface SessionRecord {
   preamble: string
   contextFiles?: string[]
   model?: string
+  instructions?: Pick<
+    SessionCreateOptions,
+    "systemPrompt" | "instructionEnvelope" | "context" | "briefMode"
+  >
 }
 
 interface Turn {
@@ -166,6 +170,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       cwd,
       session,
       preamble: preamble(options),
+      instructions: instructionOptions(options),
       contextFiles: Array.isArray(options.context?.files)
         ? options.context.files.map((file) => workspaceFile(this.files, String(file), cwd))
         : [],
@@ -212,11 +217,12 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       if (known.turn) throw new Error("Aider session already has a turn in flight")
       if (options.cwd && options.cwd !== known.record.cwd)
         throw new Error("Aider workspace cannot change on resume")
-      return known.record.session
     }
-    const cwd = this.workspace(options.cwd)
+    const cwd = known?.record.cwd ?? this.workspace(options.cwd)
     const files = stateFiles(cwd, sessionId)
-    const raw: unknown = JSON.parse(await this.files.readText(files.manifest, [cwd]))
+    const raw: unknown = known
+      ? structuredClone(known.record)
+      : JSON.parse(await this.files.readText(files.manifest, [cwd]))
     if (!isSessionRecord(this.files, raw, this._config!.id, cwd, sessionId))
       throw new Error("Aider history does not belong to this agent and workspace")
     // Validate state paths and all restored provider-visible history before a
@@ -232,20 +238,53 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
     if (options.permissionMode) raw.session.permissionMode = permissionMode(options.permissionMode)
     if (textValue(options.metadata?.selectedModel))
       raw.model = textValue(options.metadata?.selectedModel)
+    const updatedInstructions = instructionOptions(options)
+    if (Object.keys(updatedInstructions).length > 0) {
+      raw.instructions = { ...raw.instructions, ...updatedInstructions }
+      raw.preamble = preamble(raw.instructions)
+    }
+    if (options.context?.files !== undefined) {
+      if (
+        !Array.isArray(options.context.files) ||
+        options.context.files.some((file) => typeof file !== "string")
+      )
+        throw new Error("Aider context files must be an array of workspace paths")
+      raw.contextFiles = options.context.files.map((file: string) =>
+        workspaceFile(this.files, file, cwd)
+      )
+    }
+    if (!this.outboundGate(raw.preamble))
+      throw new Error("Aider instructions blocked by the PII gate")
+    await this.persist(raw)
     this.states.set(sessionId, { record: raw })
     this._sessions.set(sessionId, raw.session)
     return raw.session
   }
 
   async listSessions(options?: { cwd?: string }) {
-    return [...this.states.values()]
-      .filter(({ record }) => !options?.cwd || options.cwd === record.cwd)
-      .map(({ record }) => ({
-        sessionId: record.session.id,
-        cwd: record.cwd,
-        createdAt: new Date(record.session.createdAt).toISOString(),
-        updatedAt: new Date(record.session.lastActivityAt).toISOString(),
-      }))
+    this.assertConnected()
+    const cwd = this.workspace(options?.cwd)
+    const records = new Map<string, SessionRecord>()
+    for (const file of await this.files.listFiles(cwd, [cwd])) {
+      const name = file.slice(cwd.length + 1)
+      const id =
+        name.startsWith(".aider.cognia-") && name.endsWith(".json") ? name.slice(14, -5) : ""
+      if (!SESSION_ID.test(id) || file !== stateFiles(cwd, id).manifest) continue
+      try {
+        const record: unknown = JSON.parse(await this.files.readText(file, [cwd]))
+        if (isSessionRecord(this.files, record, this._config!.id, cwd, id)) records.set(id, record)
+      } catch {
+        /* An invalid or inaccessible manifest cannot become a resumable session. */
+      }
+    }
+    for (const { record } of this.states.values())
+      if (!options?.cwd || options.cwd === record.cwd) records.set(record.session.id, record)
+    return [...records.values()].map((record) => ({
+      sessionId: record.session.id,
+      cwd: record.cwd,
+      createdAt: new Date(record.session.createdAt).toISOString(),
+      updatedAt: new Date(record.session.lastActivityAt).toISOString(),
+    }))
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -351,6 +390,7 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
     }
     const base = () => ({ sessionId: record.session.id, timestamp: new Date() })
     const unlisten: Array<() => void> = []
+    const attachments: string[] = []
     let timeout: ReturnType<typeof setTimeout> | undefined
     let success = false
     let error: string | undefined
@@ -367,9 +407,33 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       if (turn.cancelled) return
       const texts: string[] = []
       const filenames: string[] = [...(record.contextFiles ?? [])]
+      const images: Array<{ path: string; data: string }> = []
+      const addImage = (data: string, mime: string) => {
+        const extension = imageExtension(mime)
+        if (
+          data.length > 28 * 1024 * 1024 ||
+          data.length % 4 !== 0 ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(data)
+        )
+          throw new Error("Invalid or oversized Aider image attachment")
+        const path = `${record.cwd}/.aider.cognia-${record.session.id}-${crypto.randomUUID()}.${extension}`
+        images.push({ path, data })
+      }
       for (const block of message.content) {
         if (block.type === "text") texts.push(block.text)
-        else if (block.type === "file") {
+        else if (block.type === "image") {
+          if (block.source.type !== "base64" || !block.source.data)
+            throw new Error("Aider images require inline content")
+          addImage(block.source.data, block.source.mediaType)
+        } else if (block.type === "file") {
+          if (
+            block.encoding === "base64" &&
+            block.mimeType?.startsWith("image/") &&
+            block.content !== undefined
+          ) {
+            addImage(block.content, block.mimeType)
+            continue
+          }
           filenames.push(workspaceFile(this.files, block.path, record.cwd))
           if (block.content !== undefined) {
             if (block.encoding === "base64")
@@ -389,9 +453,14 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
         context: options.context as Record<string, unknown> | undefined,
       })
       const payload = [record.preamble, instructions, ...texts].filter(Boolean).join("\n\n")
-      if (!payload.trim()) throw new Error("Aider prompt must contain text")
+      if (!payload.trim() && images.length === 0)
+        throw new Error("Aider prompt must contain text or an image")
       const existingFiles = await Promise.all(
-        [...new Set(filenames)].map((file) => this.files.readText(file, [record.cwd]))
+        [...new Set(filenames)].map((file) =>
+          /\.(png|jpe?g|gif|webp)$/i.test(file)
+            ? this.files.readBinary(file, [record.cwd]).then(() => "")
+            : this.files.readText(file, [record.cwd])
+        )
       )
       const history = await this.files.readText(files.chat, [record.cwd])
       if (
@@ -399,6 +468,11 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
         !this.outboundGate([payload, filenames, existingFiles, history])
       )
         throw new Error("Aider prompt, file context, or history blocked by the PII gate")
+      for (const image of images) {
+        attachments.push(image.path)
+        await this.files.writeBinary(image.path, image.data, [record.cwd])
+        filenames.push(image.path)
+      }
       const mode = permissionMode(options.permissionMode ?? record.session.permissionMode)
       const model = options.model ?? record.model
       const args = [
@@ -565,6 +639,14 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
         }
       }
       for (const off of unlisten) off()
+      for (const attachment of attachments) {
+        try {
+          await this.files.delete(attachment, [record.cwd])
+        } catch (failure) {
+          success = false
+          error ??= redact(String(failure))
+        }
+      }
       try {
         await this.files.writeText(files.prompt, "", [record.cwd])
         record.session.lastActivityAt = new Date()
@@ -619,6 +701,27 @@ export class AiderCliClientAdapter extends BaseProtocolAdapter {
       [record.cwd]
     )
   }
+}
+
+function instructionOptions(
+  options: SessionCreateOptions
+): NonNullable<SessionRecord["instructions"]> {
+  return Object.fromEntries(
+    ["systemPrompt", "instructionEnvelope", "context", "briefMode"]
+      .filter((key) => options[key as keyof SessionCreateOptions] !== undefined)
+      .map((key) => [key, options[key as keyof SessionCreateOptions]])
+  )
+}
+
+function imageExtension(mime: string): string {
+  const extension: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+  }
+  if (!extension[mime]) throw new Error(`Unsupported Aider image type: ${mime}`)
+  return extension[mime]
 }
 
 function stateFiles(cwd: string, id: string) {

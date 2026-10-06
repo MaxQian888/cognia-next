@@ -1,3 +1,9 @@
+jest.mock("./agent-hooks", () => {
+  const actual = jest.requireActual("./agent-hooks")
+  return { ...actual, gateExternalAgentPermission: jest.fn(actual.gateExternalAgentPermission) }
+})
+import * as sessionHooks from "./agent-hooks"
+import type { ExternalAgentSessionShellOptions } from "@cognia/agent-contracts/session-operations"
 // Mock heavyweight adapter modules so requiring manager.ts does not pull in
 // the real ACP/OpenCode adapters.
 let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
@@ -1316,7 +1322,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
     await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
     const session = await m.createSession("agent-1")
     session.metadata = { cwd: "/work" }
-    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.deleteSessionImpl = jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined)
     currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: session.id }])
     await m.deleteSession("agent-1", session.id)
     expect(await m.listSessions("agent-1", { cwd: "/work" })).toEqual([])
@@ -1340,7 +1346,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   it("expires Kimi deletion tombstones without hiding native history indefinitely", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
-    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.deleteSessionImpl = jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined)
     currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "deleted" }])
     const now = Date.now()
     await m.deleteSession("agent-1", "deleted")
@@ -1355,7 +1361,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   it.each(["remove", "dispose"])("clears Kimi deletion markers on %s", async (operation) => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig({ metadata: { preset: "kimi" } }))
-    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.deleteSessionImpl = jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined)
     await m.deleteSession("agent-1", "deleted")
     if (operation === "remove") await m.removeAgent("agent-1")
     else await m.dispose()
@@ -1367,7 +1373,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   it("keeps other runtimes' native listings unchanged after deletion", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
-    currentMock.deleteSessionImpl = jest.fn(async () => {})
+    currentMock.deleteSessionImpl = jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined)
     currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "listed" }])
     await m.deleteSession("agent-1", "listed")
     expect(await m.listSessions("agent-1")).toEqual([{ sessionId: "listed" }])
@@ -2232,19 +2238,26 @@ describe("steerSession / supportsSteering", () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
     expect(m.supportsSteering("agent-1")).toBe(true)
-    await m.steerSession("agent-1", "s_explicit", "focus on tests")
-    expect(steerTurn).toHaveBeenCalledWith("s_explicit", "focus on tests")
+    const session = await m.createSession("agent-1")
+    await m.steerSession("agent-1", session.id, "focus on tests")
+    expect(steerTurn).toHaveBeenCalledWith(session.id, "focus on tests")
   })
 
-  it("resolves the executing session when no session id is given", async () => {
+  it("refuses ambiguous steering when two chats share an executing agent", async () => {
     const steerTurn = jest.fn(async () => {})
     ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
     const session = await m.createSession("agent-1")
     currentMock.getSession(session.id)!.status = "executing"
-    await m.steerSession("agent-1", undefined, "look here")
-    expect(steerTurn).toHaveBeenCalledWith(session.id, "look here")
+    const second = await m.createSession("agent-1")
+    currentMock.getSession(second.id)!.status = "executing"
+    await expect(m.steerSession("agent-1", undefined, "look here")).rejects.toThrow(
+      /session id is required/i
+    )
+    expect(steerTurn).not.toHaveBeenCalled()
+    await m.steerSession("agent-1", second.id, "chat B only")
+    expect(steerTurn).toHaveBeenCalledWith(second.id, "chat B only")
   })
 
   it("throws when no session is executing and none was specified", async () => {
@@ -2254,7 +2267,7 @@ describe("steerSession / supportsSteering", () => {
     await m.addAgent(buildBaseConfig())
     await m.createSession("agent-1")
     await expect(m.steerSession("agent-1", undefined, "hint")).rejects.toThrow(
-      /no executing session/i
+      /session id is required/i
     )
   })
 })
@@ -4242,4 +4255,372 @@ describe("official Aider CLI registration", () => {
     expect(adapter?.protocol).toBe("aider-cli")
     expect(adapter?.isConnected()).toBe(false)
   })
+})
+
+describe("shared session operations", () => {
+  it("fails closed for missing methods and sessions owned by another adapter", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const session = await manager.createSession("agent-1")
+    expect(await manager.getSessionOperationCapabilities("agent-1", session.id)).toMatchObject({
+      inputQueue: "unsupported",
+      forkAtEntry: "unsupported",
+      shell: "unsupported",
+    })
+    await expect(
+      manager.enqueueSessionInput("agent-1", session.id, { text: "hello" }, "follow_up")
+    ).rejects.toThrow("does not support queued input")
+    const enqueueSessionInput = jest.fn()
+    Object.assign(currentMock, { enqueueSessionInput })
+    await expect(
+      manager.enqueueSessionInput("agent-1", "another-session", { text: "hello" }, "steer")
+    ).rejects.toThrow("Session not found")
+    expect(enqueueSessionInput).not.toHaveBeenCalled()
+  })
+
+  it("preserves multimodal queue input, acceptance and discarded input for restoration", async () => {
+    const input = { text: "Look here", images: [{ data: "aGVsbG8=", mimeType: "image/png" }] }
+    const accepted = { disposition: "queued", mode: "follow_up" }
+    const discarded = { steering: [], followUp: [input] }
+    const enqueueSessionInput = jest.fn().mockResolvedValue(accepted)
+    const clearSessionInputQueue = jest.fn().mockResolvedValue(discarded)
+    const executeSessionCommand = jest
+      .fn()
+      .mockResolvedValue({ disposition: "handled", mode: "steer" })
+    Object.assign(currentMock, {
+      enqueueSessionInput,
+      clearSessionInputQueue,
+      executeSessionCommand,
+    })
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const session = await manager.createSession("agent-1")
+    await expect(
+      manager.enqueueSessionInput("agent-1", session.id, input, "follow_up")
+    ).resolves.toEqual(accepted)
+    expect(enqueueSessionInput).toHaveBeenCalledWith(session.id, input, "follow_up")
+    await expect(manager.clearSessionInputQueue("agent-1", session.id)).resolves.toEqual(discarded)
+    await expect(
+      manager.executeSessionCommand("agent-1", session.id, "/extension arg")
+    ).resolves.toMatchObject({ disposition: "handled" })
+    expect(executeSessionCommand).toHaveBeenCalledWith(session.id, "/extension arg")
+  })
+
+  it("refreshes the shared command metadata and existing command event", async () => {
+    const commands = [{ name: "review", description: "Review" }]
+    Object.assign(currentMock, { refreshSessionCommands: jest.fn().mockResolvedValue(commands) })
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const session = await manager.createSession("agent-1")
+    const listener = jest.fn()
+    manager.addEventListener("agent-1", listener)
+    await manager.refreshSessionCommands("agent-1", session.id)
+    expect(
+      manager.getAgent("agent-1")?.sessions.get(session.id)?.metadata?.availableCommands
+    ).toEqual(commands)
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "commands_update", commands })
+    )
+  })
+
+  it("routes runtime controls without inventing unknown state", async () => {
+    const getSessionRuntimeState = jest
+      .fn()
+      .mockResolvedValue({ queuePolicy: { steering: "all" }, controls: {} })
+    const setSessionRuntimeControls = jest.fn().mockResolvedValue(undefined)
+    const setSessionQueuePolicy = jest.fn().mockResolvedValue(undefined)
+    const abortSessionRetry = jest.fn().mockResolvedValue(undefined)
+    Object.assign(currentMock, {
+      getSessionRuntimeState,
+      setSessionRuntimeControls,
+      setSessionQueuePolicy,
+      abortSessionRetry,
+    })
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const session = await manager.createSession("agent-1")
+    expect(await manager.getSessionRuntimeState("agent-1", session.id)).toEqual({
+      queuePolicy: { steering: "all" },
+      controls: {},
+    })
+    await manager.setSessionRuntimeControls("agent-1", session.id, { autoRetry: false })
+    await manager.setSessionQueuePolicy("agent-1", session.id, { followUp: "one-at-a-time" })
+    await manager.abortSessionRetry("agent-1", session.id)
+    expect(setSessionRuntimeControls).toHaveBeenCalledWith(session.id, { autoRetry: false })
+    expect(setSessionQueuePolicy).toHaveBeenCalledWith(session.id, { followUp: "one-at-a-time" })
+    expect(abortSessionRetry).toHaveBeenCalledWith(session.id)
+  })
+
+  it("keeps clone ownership and guards entry-specific forks on their own capability", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const session = await manager.createSession("agent-1")
+    await expect(
+      manager.forkSession("agent-1", session.id, { forkAtEntryId: "entry-1" })
+    ).rejects.toThrow("does not support forking at a session entry")
+    const cloned = { ...session, id: "cloned" }
+    const cloneSession = jest.fn().mockImplementation(async () => {
+      currentMock.sessions.set(cloned.id, cloned)
+      return cloned
+    })
+    Object.assign(currentMock, { cloneSession })
+    await expect(manager.cloneSession("agent-1", session.id)).resolves.toEqual(cloned)
+    expect(manager.getAgent("agent-1")?.sessions.get(cloned.id)).toEqual(cloned)
+  })
+
+  it("forwards out-of-band events once and unsubscribes when the session closes", async () => {
+    let publish: ((event: ExternalAgentEvent) => void) | undefined
+    const unsubscribe = jest.fn()
+    const subscribeSessionEvents = jest.fn((_id: string, listener: typeof publish) => {
+      publish = listener
+      return unsubscribe
+    })
+    Object.assign(currentMock, { subscribeSessionEvents })
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const listener = jest.fn()
+    manager.addEventListener("agent-1", listener)
+    const session = await manager.createSession("agent-1")
+    const event: ExternalAgentEvent = {
+      type: "commands_update",
+      sessionId: session.id,
+      timestamp: new Date(),
+      commands: [],
+    }
+    publish?.(event)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith({ ...event, delivery: "out_of_band" })
+    expect(subscribeSessionEvents).toHaveBeenCalledTimes(1)
+    await manager.closeSession("agent-1", session.id)
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    publish?.(event)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("unsubscribes out-of-band channels before disconnecting", async () => {
+    const unsubscribe = jest.fn()
+    Object.assign(currentMock, { subscribeSessionEvents: jest.fn(() => unsubscribe) })
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    await manager.createSession("agent-1")
+    await manager.disconnect("agent-1")
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("reattaches out-of-band delivery when resume replaces a process with the same session id", async () => {
+  const subscriptions: Array<{
+    listener: (event: ExternalAgentEvent) => void
+    unsubscribe: jest.Mock
+  }> = []
+  Object.assign(currentMock, {
+    subscribeSessionEvents: jest.fn(
+      (_id: string, listener: (event: ExternalAgentEvent) => void) => {
+        const unsubscribe = jest.fn()
+        subscriptions.push({ listener, unsubscribe })
+        return unsubscribe
+      }
+    ),
+  })
+  const manager = freshManager()
+  await manager.addAgent(buildBaseConfig())
+  const original = await manager.createSession("agent-1")
+  currentMock.resumeSessionImpl = jest.fn(async (_sessionId: string) => {
+    const restarted = { ...original, metadata: { restarted: true } }
+    currentMock.sessions.set(restarted.id, restarted)
+    return restarted
+  })
+  await manager.resumeSession("agent-1", original.id)
+  const listener = jest.fn()
+  manager.addEventListener("agent-1", listener)
+  const event: ExternalAgentEvent = {
+    type: "commands_update",
+    sessionId: original.id,
+    timestamp: new Date(),
+    commands: [],
+  }
+  expect(subscriptions).toHaveLength(2)
+  expect(subscriptions[0].unsubscribe).toHaveBeenCalledTimes(1)
+  subscriptions[0].listener(event)
+  subscriptions[1].listener(event)
+  expect(listener).toHaveBeenCalledTimes(1)
+})
+
+it("routes tree, incremental entries, naming and runtime-owned exports without rewriting identities", async () => {
+  const entry = { id: "entry-1", parentId: null, type: "message" }
+  const getSessionEntries = jest.fn().mockResolvedValue([entry])
+  const getSessionTree = jest
+    .fn()
+    .mockResolvedValue({ roots: [{ entry, children: [] }], leafId: entry.id })
+  const renameSession = jest.fn().mockResolvedValue(undefined)
+  const exportSessionHtml = jest.fn().mockResolvedValue({ path: "/runtime/session.html" })
+  Object.assign(currentMock, {
+    getSessionEntries,
+    getSessionTree,
+    renameSession,
+    exportSessionHtml,
+  })
+  const manager = freshManager()
+  await manager.addAgent(buildBaseConfig())
+  const session = await manager.createSession("agent-1")
+  expect(await manager.getSessionEntries("agent-1", session.id, "before")).toEqual([entry])
+  expect(getSessionEntries).toHaveBeenCalledWith(session.id, "before")
+  expect(await manager.getSessionTree("agent-1", session.id)).toMatchObject({ leafId: entry.id })
+  await manager.renameSession("agent-1", session.id, "Session title")
+  expect(renameSession).toHaveBeenCalledWith(session.id, "Session title")
+  expect(await manager.exportSessionHtml("agent-1", session.id)).toEqual({
+    path: "/runtime/session.html",
+  })
+  expect(exportSessionHtml).toHaveBeenCalledWith(session.id)
+})
+
+it("applies the shared PreToolUse gate before invoking native shell approval", async () => {
+  const gate = jest
+    .mocked(sessionHooks.gateExternalAgentPermission)
+    .mockImplementationOnce(async (_ctx, event, deny) => {
+      await deny(event.request.id, "Blocked by policy")
+      return true
+    })
+  try {
+    const approve = jest.fn().mockResolvedValue({ requestId: "shell-approval", granted: true })
+    const executeSessionShell = jest.fn(
+      async (_id: string, _command: string, options: ExternalAgentSessionShellOptions) => {
+        await options.onPermissionRequest({
+          id: "shell-approval",
+          rawInput: { command: "echo test" },
+          toolInfo: {
+            id: "bash",
+            name: "bash",
+            description: "Run shell",
+            parameters: { type: "object" },
+          },
+        })
+        return { output: "", exitCode: null, cancelled: true, truncated: false }
+      }
+    )
+    const abortSessionShell = jest.fn().mockResolvedValue(undefined)
+    Object.assign(currentMock, { executeSessionShell, abortSessionShell })
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    const session = await manager.createSession("agent-1")
+    session.metadata = { ...session.metadata, cwd: "/session-specific-workspace" }
+    await expect(
+      manager.executeSessionShell("agent-1", session.id, "echo test", {
+        onPermissionRequest: approve,
+      })
+    ).rejects.toThrow("Blocked by policy")
+    expect(gate).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/session-specific-workspace" }),
+      expect.any(Object),
+      expect.any(Function),
+      expect.any(Function)
+    )
+    expect(executeSessionShell).not.toHaveBeenCalled()
+    expect(approve).not.toHaveBeenCalled()
+    await manager.abortSessionShell("agent-1", session.id)
+    expect(abortSessionShell).toHaveBeenCalledWith(session.id)
+  } finally {
+    gate.mockImplementation(jest.requireActual("./agent-hooks").gateExternalAgentPermission)
+  }
+})
+
+it("restores discarded input once when UI cancellation races execution abort", async () => {
+  const manager = freshManager()
+  await manager.addAgent(buildBaseConfig())
+  const session = await manager.createSession("agent-1")
+  const queue = {
+    steering: [{ text: "preserve", images: [{ data: "aGVsbG8=", mimeType: "image/png" }] }],
+    followUp: [],
+  }
+  let finish!: (value: typeof queue) => void
+  const cancel = jest.fn(
+    () =>
+      new Promise<typeof queue>((resolve) => {
+        finish = resolve
+      })
+  )
+  Object.assign(currentMock, { cancel })
+  const listener = jest.fn()
+  manager.addEventListener("agent-1", listener)
+  const first = manager.cancel("agent-1", session.id)
+  const second = manager.cancel("agent-1", session.id)
+  expect(cancel).toHaveBeenCalledTimes(1)
+  finish(queue)
+  await Promise.all([first, second])
+  expect(listener).toHaveBeenCalledTimes(1)
+  expect(listener).toHaveBeenCalledWith(
+    expect.objectContaining({ type: "input_queue_cleared", queue, sessionId: session.id })
+  )
+})
+
+it("resumes and rebinds only when shell cancellation explicitly retired the runtime", async () => {
+  const detach = jest.fn()
+  const subscribeSessionEvents = jest.fn(() => detach)
+  const abortSessionShell = jest.fn().mockResolvedValue({ resumeRequired: true })
+  Object.assign(currentMock, { subscribeSessionEvents, abortSessionShell })
+  const manager = freshManager()
+  await manager.addAgent(buildBaseConfig())
+  const session = await manager.createSession("agent-1")
+  currentMock.resumeSessionImpl = jest.fn(async (_sessionId: string) => {
+    const resumed = { ...session }
+    currentMock.sessions.set(session.id, resumed)
+    return resumed
+  })
+  await manager.abortSessionShell("agent-1", session.id)
+  expect(currentMock.resumeSessionImpl).toHaveBeenCalledWith(session.id)
+  expect(detach).toHaveBeenCalledTimes(1)
+  expect(subscribeSessionEvents).toHaveBeenCalledTimes(2)
+})
+
+it("gates out-of-band permission requests before publishing or auto-approving them", async () => {
+  let publish!: (event: ExternalAgentEvent) => void
+  const respondToPermission = jest.fn().mockResolvedValue(undefined)
+  Object.assign(currentMock, {
+    respondToPermission,
+    subscribeSessionEvents: (_id: string, listener: typeof publish) => {
+      publish = listener
+      return () => {}
+    },
+  })
+  const manager = freshManager()
+  await manager.addAgent(buildBaseConfig())
+  const session = await manager.createSession("agent-1")
+  const listener = jest.fn()
+  manager.addEventListener("agent-1", listener)
+  const gate = jest
+    .mocked(sessionHooks.gateExternalAgentPermission)
+    .mockImplementationOnce(async (_ctx, event, deny) => {
+      await deny(event.request.id, "Idle policy denied")
+      return true
+    })
+  try {
+    publish({
+      type: "permission_request",
+      sessionId: session.id,
+      timestamp: new Date(),
+      request: {
+        id: "idle-permission",
+        rawInput: { command: "echo idle" },
+        toolInfo: {
+          id: "bash",
+          name: "bash",
+          description: "Run shell",
+          parameters: { type: "object" },
+        },
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(respondToPermission).toHaveBeenCalledWith(
+      session.id,
+      expect.objectContaining({
+        requestId: "idle-permission",
+        granted: false,
+      })
+    )
+    expect(listener).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "permission_request" })
+    )
+  } finally {
+    gate.mockImplementation(jest.requireActual("./agent-hooks").gateExternalAgentPermission)
+  }
 })

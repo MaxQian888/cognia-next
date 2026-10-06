@@ -3623,3 +3623,36 @@ it("refreshes workspace rows after removing an additional root", () => {
   expect(rows.some((row) => row.id === "root:2")).toBe(false)
   expect(state.overlay.index).toBeLessThan(rows.length)
 })
+
+it("applies extension UI without transcript noise, preserves editor undo and deduplicates notifications", () => {
+  const emit = (
+    update: import("@/types/agent/external-agent").ExternalAgentUiUpdate,
+    id = "ui"
+  ) => ({
+    type: "EXTENSION_UI_UPDATE" as const,
+    event: { type: "extension_ui_update" as const, id, update, timestamp: new Date(0) },
+  })
+  let state = reduce(base(), emit({ kind: "editor", text: "draft" }))
+  expect(state.input.buffer.lines).toEqual(["draft"])
+  state = reduce(state, emit({ kind: "editor", text: "" }, "clear"))
+  expect(state.input.buffer.lines).toEqual([""])
+  expect(state.input.undo.length).toBeGreaterThan(0)
+  const notice = emit({ kind: "notification", level: "warning", message: "rate limited" })
+  state = reduce(state, notice, notice)
+  expect(state.toasts.filter((toast) => toast.message === "rate limited")).toHaveLength(1)
+  expect(state.toasts.at(-1)?.severity).toBe("warn")
+  expect(state.cells).toHaveLength(0)
+  state = reduce(state, emit({ kind: "status", key: "build", text: "running" }))
+  expect(state.extensionUi?.statuses).toEqual({ build: "running" })
+  expect(reduce(state, { type: "SET_BACKEND", backend: "builtin" }).extensionUi).toBeUndefined()
+})
+
+it("appends cancelled queued input while preserving the human draft", () => {
+  const state = reduce(
+    base(),
+    { type: "RESTORE_QUEUED_INPUT", text: "existing", imagePaths: [] },
+    { type: "RESTORE_QUEUED_INPUT", text: "cancelled", imagePaths: ["/tmp/restored.png"] }
+  )
+  expect(state.input.buffer.lines.join("\n")).toContain("existing\n\ncancelled")
+  expect(Object.values(state.input.pastes)).toContain('@"/tmp/restored.png"')
+})

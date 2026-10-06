@@ -193,7 +193,11 @@ interface FakeManager {
   closeSession: jest.Mock
   deleteSession: jest.Mock
   listSessions: jest.Mock
+  cloneSession: jest.Mock
+  executeSessionCommand: jest.Mock
+  executeSessionShell: jest.Mock
   forkSession: jest.Mock
+  unarchiveSession: jest.Mock
   resumeSession: jest.Mock
   execute: jest.Mock
   executeStreaming: jest.Mock
@@ -244,7 +248,16 @@ function makeManager(): FakeManager {
     closeSession: jest.fn(async () => undefined),
     deleteSession: jest.fn(async () => undefined),
     listSessions: jest.fn(async () => []),
+    cloneSession: jest.fn(async () => ({ id: "sess-clone" })),
+    executeSessionCommand: jest.fn(async () => ({ disposition: "handled" })),
+    executeSessionShell: jest.fn(async () => ({
+      output: "ok",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+    })),
     forkSession: jest.fn(async () => ({ id: "sess-fork" })),
+    unarchiveSession: jest.fn(async () => undefined),
     resumeSession: jest.fn(async () => ({ id: "sess-resume" })),
     execute: jest.fn(async () => ({
       success: true,
@@ -813,6 +826,18 @@ describe("useExternalAgent core actions", () => {
     expect(result.current.activeSession?.id).toBe("sess-1")
   })
 
+  it("restores archived history through its owner without resuming or switching chats", async () => {
+    seedAgent("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.unarchiveSession("archived")
+    })
+    expect(fakeManager.unarchiveSession).toHaveBeenCalledWith("a1", "archived")
+    expect(fakeManager.resumeSession).not.toHaveBeenCalled()
+    expect(result.current.activeSession).toBeNull()
+  })
+
   it("listSessions returns [] when neither argument nor active agent is available", async () => {
     const { result } = renderHook(() => useExternalAgent())
     await flush()
@@ -835,6 +860,225 @@ describe("useExternalAgent core actions", () => {
       })
     ).rejects.toThrow("Method not found")
     expect(result.current.error).toBeNull()
+  })
+
+  it("binds a chat's existing native session without mutating the global selection", async () => {
+    seedAgent("global")
+    const linked = {
+      id: "native",
+      agentId: "linked",
+      status: "executing",
+      metadata: { extensionUi: { statuses: { ext: "busy" }, widgets: {}, notifications: [] } },
+    }
+    fakeManager.getSession.mockImplementation((agentId, sessionId) =>
+      agentId === "linked" && sessionId === "native" ? linked : undefined
+    )
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation((_id, cb) => {
+      listener = cb
+      return () => undefined
+    })
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useExternalAgent({ agentId: "linked", sessionId }),
+      { initialProps: { sessionId: "native" } }
+    )
+    await flush()
+    expect(result.current.activeSession?.id).toBe("native")
+    expect(result.current.activeAgentId).toBe("linked")
+    expect(storeStateRef.current.activeAgentId).toBe("global")
+    expect(result.current.isExecuting).toBe(true)
+    act(() => {
+      listener?.({
+        type: "permission_request",
+        sessionId: "native",
+        request: { id: "main-approval" },
+      })
+      listener?.({
+        type: "elicitation_request",
+        sessionId: "native",
+        request: { id: "main-question" },
+      })
+    })
+    expect(result.current.pendingPermission).toBeNull()
+    expect(result.current.pendingElicitation).toBeNull()
+    act(() => listener?.({ type: "done", sessionId: "different", success: true }))
+    expect(result.current.isExecuting).toBe(true)
+    act(() => listener?.({ type: "done", sessionId: "native", success: true }))
+    expect(result.current.isExecuting).toBe(false)
+    act(() =>
+      listener?.({
+        type: "elicitation_request",
+        sessionId: "native",
+        delivery: "out_of_band",
+        request: { id: "autonomous-question" },
+      })
+    )
+    expect(result.current.pendingElicitation).toBeNull()
+    rerender({ sessionId: "missing" })
+    expect(result.current.activeSession).toBeNull()
+    await flush()
+    expect(result.current.activeSession).toBeNull()
+  })
+
+  it("clones through the shared manager and tracks the returned session", async () => {
+    seedAgent("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.cloneSession("s1")
+    })
+    expect(fakeManager.cloneSession).toHaveBeenCalledWith("a1", "s1", undefined)
+    expect(result.current.activeSession?.id).toBe("sess-clone")
+  })
+
+  it("scopes extension UI to the active session and forwards live commands", async () => {
+    seedAgent("a1")
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation((_id, cb) => {
+      listener = cb
+      return () => undefined
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await flush()
+    act(() => {
+      listener?.({
+        type: "extension_ui_update",
+        sessionId: "other",
+        id: "wrong",
+        update: { kind: "editor", text: "wrong" },
+      })
+      listener?.({
+        type: "extension_ui_update",
+        sessionId: "sess-1",
+        id: "right",
+        update: { kind: "status", key: "ext", text: "ready" },
+      })
+    })
+    expect(result.current.extensionUi.editor).toBeUndefined()
+    expect(result.current.extensionUi.statuses).toEqual({ ext: "ready" })
+    await act(async () => {
+      await result.current.executeSessionCommand("/demo")
+    })
+    expect(fakeManager.executeSessionCommand).toHaveBeenCalledWith("a1", "sess-1", "/demo")
+  })
+
+  it("uses the existing permission bridge for direct shell execution", async () => {
+    seedAgent("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    fakeManager.executeSessionShell.mockImplementation(
+      async (_agent, _session, _command, options) => {
+        const response = await options.onPermissionRequest({
+          id: "shell",
+          requestId: "shell",
+          options: [],
+        })
+        return {
+          output: response.granted ? "ok" : "denied",
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+        }
+      }
+    )
+    let execution: Promise<unknown> | undefined
+    act(() => {
+      execution = result.current.executeSessionShell("pwd")
+    })
+    await flush()
+    expect(result.current.pendingPermission?.id).toBe("shell")
+    await act(async () => {
+      await result.current.respondToPermission({ requestId: "shell", granted: true })
+      await execution
+    })
+    expect(result.current.pendingPermission).toBeNull()
+  })
+
+  it("renders an autonomous session stream after an extension command has completed", async () => {
+    seedAgent("a1")
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation((_id, cb) => {
+      listener = cb
+      return () => undefined
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await flush()
+    await act(async () => {
+      await result.current.executeSessionCommand("/later")
+    })
+    const emit = (event: Record<string, unknown>) =>
+      act(() =>
+        listener?.({
+          ...event,
+          sessionId: "sess-1",
+          delivery: "out_of_band",
+        })
+      )
+    emit({ type: "session_start" })
+    emit({ type: "message_delta", delta: { type: "text", text: "delayed " } })
+    emit({ type: "message_delta", delta: { type: "text", text: "answer" } })
+    emit({ type: "elicitation_request", request: { id: "question" } })
+    expect(result.current.isExecuting).toBe(true)
+    expect(result.current.streamingResponse).toBe("delayed answer")
+    expect(result.current.pendingElicitation?.id).toBe("question")
+    emit({ type: "done", success: true })
+    expect(result.current.isExecuting).toBe(false)
+    expect(result.current.pendingElicitation).toBeNull()
+    emit({
+      type: "extension_ui_update",
+      id: "old",
+      update: { kind: "status", key: "old", text: "stale" },
+    })
+    emit({
+      type: "session_info_update",
+      extensionUi: { statuses: {}, widgets: {}, notifications: [] },
+    })
+    expect(result.current.extensionUi.statuses).toEqual({})
+  })
+
+  it("replays an immediate autonomous stream after owned execution cleanup", async () => {
+    seedAgent("a1")
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation((_id, callback) => {
+      listener = callback
+      return () => undefined
+    })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await flush()
+    fakeManager.execute.mockImplementation(async () => {
+      listener?.({ type: "session_start", sessionId: "sess-1", delivery: "out_of_band" })
+      listener?.({
+        type: "message_delta",
+        sessionId: "sess-1",
+        delivery: "out_of_band",
+        delta: { type: "text", text: "immediate" },
+      })
+      return { success: true, sessionId: "sess-1", finalResponse: "" }
+    })
+    await act(async () => {
+      await result.current.execute("/trigger")
+    })
+    expect(result.current.streamingResponse).toBe("immediate")
+    expect(result.current.isExecuting).toBe(true)
+    act(() =>
+      listener?.({ type: "done", sessionId: "sess-1", delivery: "out_of_band", success: true })
+    )
+    expect(result.current.isExecuting).toBe(false)
   })
 
   it("forkSession requires active agent", async () => {
@@ -1102,6 +1346,32 @@ describe("useExternalAgent core actions", () => {
     expect(result.current.pendingPermission?.id).toBe("p1")
     expect(result.current.pendingPermission?.sessionId).toBe("second")
   })
+
+  it.each([true, false])(
+    "uses the native provider's focus capability (%s)",
+    async (supportsFocus) => {
+      seedAgent("a1")
+      fakeManager.getCompactionCapability.mockResolvedValue({
+        status: "supported",
+        routes: [{ kind: "native", supportsFocus }],
+      })
+      const { result } = renderHook(() => useExternalAgent())
+      await flush()
+      await act(async () => {
+        await result.current.createSession()
+      })
+      await flush()
+      expect(result.current.supportsCompactionFocus).toBe(supportsFocus)
+      if (supportsFocus) {
+        await act(async () => {
+          await result.current.compactSession("sess-1", { focus: "Preserve failing tests" })
+        })
+        expect(fakeManager.compactSession).toHaveBeenCalledWith("a1", "sess-1", {
+          focus: "Preserve failing tests",
+        })
+      }
+    }
+  )
 
   it("locks session mutations until provider-confirmed compaction completes", async () => {
     seedAgent("a1")

@@ -18,7 +18,9 @@ import { createMockDeepSeek } from "./mock-deepseek.mjs"
 
 const source = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
-const modules = dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh/package.json"))))
+const modules =
+  process.env.COGNIA_DSH_TEST_MODULES ??
+  dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh/package.json"))))
 const mcpFixture = `import {createInterface} from 'node:readline'; import {appendFileSync} from 'node:fs';
 createInterface({input:process.stdin}).on('line',line=>{
  const frame=JSON.parse(line);if(frame.id===undefined)return;

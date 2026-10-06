@@ -33,6 +33,7 @@ export const SIDECAR_ENTRY_POINTS = [
   "sidecar/mcp-stdio-relay.mjs",
   "sidecar/codex-app-control/control-cli.mjs",
   "sidecar/pi-extension/cognia-pi-extension.ts",
+  "sidecar/pi-extension/cognia-pi-shell-guard.ts",
 ]
 
 /**

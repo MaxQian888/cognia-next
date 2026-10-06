@@ -13,6 +13,40 @@ describe("OpenCodeV2EventMapper", () => {
     mapper = new OpenCodeV2EventMapper("ses_test")
   })
 
+  it("normalizes rename, retry, tool progress and compaction failures", () => {
+    expect(mapper.map(event("session.renamed", { ...scope, title: "Native title" }))).toEqual([
+      expect.objectContaining({ type: "session_info_update", title: "Native title" }),
+    ])
+    expect(
+      mapper.map(
+        event("session.retry.scheduled", {
+          ...scope,
+          attempt: 2,
+          at: 100,
+          error: { message: "Rate limit" },
+        })
+      )
+    ).toEqual([expect.objectContaining({ type: "progress", step: 2, message: "Rate limit" })])
+    expect(
+      mapper.map(
+        event("session.tool.progress", {
+          ...scope,
+          id: "tool",
+          metadata: { title: "Reading", progress: 150 },
+        })
+      )
+    ).toEqual([expect.objectContaining({ type: "progress", progress: 1, message: "Reading" })])
+    expect(
+      mapper.map(event("session.compaction.failed", { ...scope, error: { message: "Failed" } }))
+    ).toEqual([
+      expect.objectContaining({
+        type: "error",
+        code: "opencode_compaction_failed",
+        recoverable: true,
+      }),
+    ])
+  })
+
   it("canonicalizes only the current session's mounted Cognia tool namespaces", () => {
     mapper = new OpenCodeV2EventMapper("ses_test", ["cognia-tools"])
     const start = mapper.map(

@@ -1302,6 +1302,7 @@ export function App({
     stdout,
     clearScreen,
     dispatch,
+    extensionTitle: state.extensionUi?.title,
     titleEnabled,
     titleSink,
     titleEnv,

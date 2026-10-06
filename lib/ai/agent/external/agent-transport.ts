@@ -138,6 +138,7 @@ export function getAcpHostCapabilities(): AcpHostCapabilities {
     },
     preview: {
       compaction: true,
+      notices: desktop,
       providers: desktop || headless,
       dynamicMcp: desktop || headless,
       nes: desktop,
@@ -366,4 +367,55 @@ export async function agentDeleteTextFile(path: string, allowedRoots: string[]):
   if (!supportsAgentFs()) throw new Error("File system access not available in browser")
   const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
   await agentInvoke("fs_delete_workspace_entry", { root, relPath, recursive: false })
+}
+
+/** Runtime attachments use the same confined host filesystem as text files. */
+export async function agentWriteBinaryFile(
+  path: string,
+  base64: string,
+  allowedRoots: string[]
+): Promise<void> {
+  const installed = installedPlane()
+  if (installed) return installed.writeBinaryFile(path, base64, allowedRoots)
+  if (!supportsAgentFs()) throw new Error("File system access not available in browser")
+  const decodedLength =
+    (base64.length / 4) * 3 - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0)
+  if (
+    base64.length % 4 !== 0 ||
+    decodedLength > 20 * 1024 * 1024 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)
+  )
+    throw new Error("Invalid or oversized base64 attachment")
+  const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
+  await agentInvoke("fs_write_workspace_file", {
+    root,
+    relPath,
+    content: base64,
+    encoding: "base64",
+  })
+}
+
+export async function agentReadBinaryFile(path: string, allowedRoots: string[]): Promise<string> {
+  const installed = installedPlane()
+  if (installed) return installed.readBinaryFile(path, allowedRoots)
+  if (!supportsAgentFs()) throw new Error("File system access not available in browser")
+  const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
+  return agentInvoke<string>("fs_read_workspace_file_base64", {
+    root,
+    relPath,
+    maxBytes: 20 * 1024 * 1024,
+  })
+}
+
+/** List only immediate files; adapters validate their own manifest names and contents. */
+export async function agentListFiles(path: string, allowedRoots: string[]): Promise<string[]> {
+  const installed = installedPlane()
+  if (installed) return installed.listFiles(path, allowedRoots)
+  if (!supportsAgentFs()) throw new Error("File system access not available in browser")
+  const { root, relPath } = resolveSessionWorkspacePath(path, allowedRoots)
+  const entries = await agentInvoke<Array<{ absolute_path: string; is_dir: boolean }>>(
+    "fs_list_workspace_dir",
+    { root, relPath, includeIgnored: true }
+  )
+  return entries.filter((entry) => !entry.is_dir).map((entry) => entry.absolute_path)
 }

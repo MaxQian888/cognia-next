@@ -95,6 +95,36 @@ describe("verifyPiExtension", () => {
     }
   })
 
+  it("verifies the shell guard and refuses missing or substituted guard bytes", () => {
+    const { root, file, execPath } = makeTree(content, sha)
+    const shellGuardPath = path.join(path.dirname(file), "cognia-pi-shell-guard.ts")
+    const guard = "export default function guard() {}\n"
+    fs.writeFileSync(
+      path.join(root, INTEGRITY),
+      JSON.stringify({ sha256: sha, shellGuardSha256: digestFile("", () => Buffer.from(guard)) })
+    )
+    try {
+      expect(verifyPiExtension({ env: env(), execPath })).toMatchObject({
+        status: "unreadable",
+        path: shellGuardPath,
+      })
+      fs.writeFileSync(shellGuardPath, guard)
+      expect(verifyPiExtension({ env: env(), execPath })).toEqual({
+        status: "ok",
+        path: file,
+        sha256: sha,
+        shellGuardPath,
+      })
+      fs.writeFileSync(shellGuardPath, "untrusted()")
+      expect(verifyPiExtension({ env: env(), execPath })).toMatchObject({
+        status: "tampered",
+        path: shellGuardPath,
+      })
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   /**
    * The whole point of the pin. The handshake cannot catch this: a modified
    * extension can still announce itself while holding the permission gate open.

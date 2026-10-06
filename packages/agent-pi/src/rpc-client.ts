@@ -22,9 +22,27 @@
  */
 
 import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
-import type { ExternalAgentCompactionCapability } from "@cognia/agent-contracts/session-operations"
+import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
+  ExternalAgentSessionInput,
+  ExternalAgentSessionInputMode,
+  ExternalAgentSessionInputAcceptance,
+  ExternalAgentSessionInputQueue,
+  ExternalAgentSessionQueuePolicy,
+  ExternalAgentSessionRuntimeControls,
+  ExternalAgentSessionRuntimeState,
+  ExternalAgentSessionEntry,
+  ExternalAgentSessionTreeNode,
+  ExternalAgentSessionOperationCapabilities,
+  ExternalAgentSessionShellOptions,
+  ExternalAgentSessionShellResult,
+  ExternalAgentSessionShellAbortResult,
+} from "@cognia/agent-contracts/session-operations"
 import type {
   AcpConfigOption,
+  AcpAvailableCommand,
+  ExternalAgentUiState,
   AcpElicitationResponse,
   AcpPermissionResponse,
   AcpSessionModelState,
@@ -37,6 +55,11 @@ import type {
 } from "@cognia/agent-contracts/external-agent"
 
 import {
+  createExternalAgentUiState,
+  reduceExternalAgentUiState,
+} from "@cognia/agent-runtime-kit/extension-ui-state"
+
+import {
   buildPiAuthCheckArgs,
   classifyPiAuthProbe,
   parsePiModelProviders,
@@ -44,7 +67,13 @@ import {
   type PiProviderListing,
 } from "./auth"
 import { parsePiModelListing, type PiModelListing } from "./auth"
-import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./rpc-events"
+import {
+  mapPiEvent,
+  piStatsToTokenUsage,
+  type PiEvent,
+  type PiSessionStats,
+  type PiStreamState,
+} from "./rpc-events"
 import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
 import {
   PI_BUILTIN_TOOLS,
@@ -71,21 +100,23 @@ import { PI_RPC_EXECUTION_SEMANTICS, PI_RPC_PROTOCOL } from "./manifest"
 // ============================================================================
 
 /** The one version this integration is certified against (ADR-0119). */
-export const PI_CERTIFIED_VERSION = "0.85.1"
+export const PI_CERTIFIED_VERSION = "1.0.2"
+/** Retain compatibility with the original RPC contract, including responses without disposition. */
+export const PI_MINIMUM_VERSION = "0.85.1"
 
 export type PiVersionVerdict =
   /** Exactly the certified version. */
   | { status: "certified"; version: string }
   /**
-   * Newer than certified. Allowed to run so a Pi upgrade degrades to a
-   * warning rather than an outage, but reported so the user knows why an
+   * Within the supported range, but not exactly certified. Allowed to run so
+   * upgrading Pi produces a warning rather than an outage, but reported so an
    * unexpected behaviour is not necessarily a Cognia bug.
    */
   | { status: "unverified"; version: string }
-  /** Older than certified, or unparseable. Refused. */
+  /** Older than the compatibility floor, or unparseable. Refused. */
   | { status: "unsupported"; version: string | null; reason: string }
 
-/** Compare dotted numeric versions. Non-numeric suffixes sort before release. */
+/** Compare numeric release components; certification separately requires an exact version. */
 function compareVersions(a: string, b: string): number {
   const parse = (v: string) => v.split(".").map((part) => Number.parseInt(part, 10))
   const left = parse(a)
@@ -118,8 +149,8 @@ export function classifyPiVersion(raw: string | null | undefined): PiVersionVerd
   if (Number.isNaN(delta)) {
     return { status: "unsupported", version, reason: "unparseable_version" }
   }
-  if (delta === 0) return { status: "certified", version }
-  if (delta > 0) return { status: "unverified", version }
+  if (version === PI_CERTIFIED_VERSION) return { status: "certified", version }
+  if (compareVersions(version, PI_MINIMUM_VERSION) >= 0) return { status: "unverified", version }
   return { status: "unsupported", version, reason: "below_certified_version" }
 }
 
@@ -285,7 +316,7 @@ export interface PiHostServices {
  * asks rather than looks.
  */
 export type PiExtensionVerdict =
-  | { status: "ok"; path: string; sha256: string }
+  | { status: "ok"; path: string; sha256: string; shellGuardPath?: string }
   | { status: "missing" }
   | { status: "unreadable"; path: string; detail: string }
   | { status: "tampered"; path: string; expected: string; actual: string }
@@ -484,6 +515,8 @@ interface PiProcess {
   framing: "unknown" | "raw" | "line"
   /** Consumers waiting on `prompt()`. */
   queues: Set<EventQueue>
+  streamState: PiStreamState
+  usageBaseline?: ExternalAgentTokenUsage
   busy: boolean
   cancelling?: boolean
   closing?: Promise<void>
@@ -504,6 +537,17 @@ interface PiProcess {
    * event it precedes. Buffered here and flushed straight after `done`.
    */
   deferredWhileSettling?: ExternalAgentEvent[]
+  commandSources?: Map<string, string>
+  listeners: Set<(event: ExternalAgentEvent) => void>
+  extensionUi: ExternalAgentUiState
+  queuedInputs?: ExternalAgentSessionInputQueue
+  shellStopped?: boolean
+  shellGuardReady?: boolean
+  terminalDelivered?: boolean
+  nativeRunning?: boolean
+  nativeRunCount?: number
+  shellRunning?: boolean
+  shellInterception?: boolean
 }
 
 /**
@@ -777,7 +821,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         JSON.stringify(existing.createOptions) === JSON.stringify(options)
       )
         return this.requireSession(sessionId)
-      if (existing.busy)
+      if (existing.busy || existing.shellRunning)
         throw new Error("Cannot replace Pi session configuration during an active turn")
     }
     buildPiSystemPrompt(options, this.outboundGate)
@@ -785,7 +829,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       // Retire the dead peer/listeners before reusing its host process id.
       if (existing) await this.closeSession(sessionId)
       try {
-        return await this.startSession(sessionId, options)
+        return await this.startSession(sessionId, options, { resumed: true })
       } catch (error) {
         await this.closeSession(sessionId)
         throw error
@@ -806,13 +850,44 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   ): Promise<ExternalAgentSession> {
     const source = this.processes.get(sessionId)
     const sourcePiId = source?.piSessionId ?? sessionId
-    return this.startSession(
+    const forked = await this.startSession(
       this.newSessionId(),
-      options ?? source?.createOptions ?? this.sessionOptions.get(sessionId) ?? {},
+      { ...(source?.createOptions ?? this.sessionOptions.get(sessionId) ?? {}), ...options },
       {
         forkFrom: sourcePiId,
       }
     )
+    if (!options?.forkAtEntryId) return forked
+    try {
+      const record = this.requireProcess(forked.id)
+      const result = await record.peer.sendCommand<{ cancelled: boolean; text: string }>("fork", {
+        entryId: options.forkAtEntryId,
+      })
+      if (result.cancelled) throw new Error("Pi session fork was cancelled")
+      const session = await this.refreshSessionIdentity(forked.id)
+      session.metadata = { ...session.metadata, forkInput: result.text }
+      return session
+    } catch (error) {
+      await this.closeSession(forked.id)
+      throw error
+    }
+  }
+
+  async cloneSession(
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    const forked = await this.forkSession(sessionId, { ...options, forkAtEntryId: undefined })
+    try {
+      const result = await this.requireProcess(forked.id).peer.sendCommand<{ cancelled: boolean }>(
+        "clone"
+      )
+      if (result.cancelled) throw new Error("Pi session clone was cancelled")
+      return await this.refreshSessionIdentity(forked.id)
+    } catch (error) {
+      await this.closeSession(forked.id)
+      throw error
+    }
   }
 
   private sessionOptions = new Map<string, SessionCreateOptions>()
@@ -821,7 +896,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   private async startSession(
     piSessionId: string,
     options: SessionCreateOptions,
-    extra: { forkFrom?: string } = {}
+    extra: { forkFrom?: string; resumed?: boolean } = {}
   ): Promise<ExternalAgentSession> {
     if (!this._config) throw new Error("Pi adapter is not connected")
     // Checked per session rather than at connect: an operator flipping the
@@ -861,20 +936,20 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
     const peer = new PiRpcPeer({
       writeRaw: (frame) => this.processHost.send(agentId, frame).then(() => undefined),
-      onEvent: (event) => this.dispatchEvent(piSessionId, event as PiEvent),
+      onEvent: (event) => this.dispatchEvent(record.piSessionId, event as PiEvent),
       onOrphanResponse: (response) => {
         // Pi rejecting our own input. Never fails a pending command (it has
         // no id), but it means a frame we wrote was malformed.
         if (response.command === "parse") {
           this.dispatchError(
-            piSessionId,
+            record.piSessionId,
             `Pi rejected a malformed command: ${response.error ?? ""}`
           )
         }
       },
       onProtocolError: (error: PiFrameError) => {
-        this.dispatchError(piSessionId, error.message)
-        void this.closeSession(piSessionId)
+        this.dispatchError(record.piSessionId, error.message)
+        void this.closeSession(record.piSessionId)
       },
     })
 
@@ -887,6 +962,17 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       unlisten: [],
       framing: "unknown",
       queues: new Set(),
+      listeners: new Set(),
+      extensionUi: createExternalAgentUiState(),
+      streamState: { toolCallsByIndex: new Map(), startedToolCalls: new Set() },
+      usageBaseline:
+        extra.resumed || extra.forkFrom
+          ? undefined
+          : {
+              promptTokens: 0,
+              completionTokens: 0,
+              totalTokens: 0,
+            },
       busy: false,
       lastUsedAt: Date.now(),
       exited: false,
@@ -941,9 +1027,10 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
           record.exitCode = payload.code
           record.settleHandshake?.()
           peer.endOfStream()
-          this.cancelPendingDialogs(piSessionId, record)
+          this.cancelPendingDialogs(record.piSessionId, record)
           peer.rejectAll(`Pi process exited (code ${payload.code})`)
-          this.dispatchError(piSessionId, `Pi process exited with code ${payload.code}`)
+          if (!record.shellStopped)
+            this.dispatchError(record.piSessionId, `Pi process exited with code ${payload.code}`)
           this.finishQueues(record)
         })
       )
@@ -1036,6 +1123,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         lastActivityAt: new Date(),
         metadata: {
           piSessionId,
+          extensionUi: record.extensionUi,
           piVersion: this.versionVerdict?.version,
           piVersionStatus: this.versionVerdict?.status,
           cwd,
@@ -1045,6 +1133,10 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         },
       }
       this._sessions.set(piSessionId, session)
+      await this.refreshSessionCommands(piSessionId)
+      // Persisted sessions already contain paid work. Establish the baseline
+      // before the first new prompt so historical usage is never charged twice.
+      if (extra.resumed || extra.forkFrom) await this.readSessionUsage(piSessionId)
       return session
     } catch (error) {
       try {
@@ -1064,7 +1156,8 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     packages: SessionPackages = EMPTY_SESSION_PACKAGES
   ): string[] {
     const configured = this._config?.process?.args ?? ["--mode", "rpc"]
-    const args = [...configured]
+    const guard = this.shellGuardPath()
+    const args = [...(guard ? ["-e", guard] : []), ...configured]
     if (!args.includes("--mode")) args.push("--mode", "rpc")
     if (typeof options.metadata?.selectedModel === "string") {
       const selected = parsePiModel(options.metadata.selectedModel)
@@ -1199,6 +1292,12 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     return resolvePiExtensionPolicy(this._config?.metadata?.piExtensionPolicy)
   }
 
+  private shellGuardPath(): string | undefined {
+    // A metadata string is not integrity evidence. Unlike the legacy main
+    // extension override, the new shell surface requires the host's verdict.
+    return this.extensionVerdict?.status === "ok" ? this.extensionVerdict.shellGuardPath : undefined
+  }
+
   private extensionPath(): string | undefined {
     const configured = this._config?.metadata?.piExtensionPath as string | undefined
     if (configured) return configured
@@ -1233,7 +1332,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   private async reclaimCapacity(): Promise<void> {
     if (this.processes.size < this.maxProcesses) return
     const idle = [...this.processes.values()]
-      .filter((record) => !record.busy)
+      .filter((record) => !record.busy && !record.nativeRunning && !record.shellRunning)
       .sort((a, b) => a.lastUsedAt - b.lastUsedAt)
     if (idle.length === 0) {
       throw new PiResourceLimitError(this.maxProcesses)
@@ -1254,6 +1353,8 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   }
 
   private async disposeSession(sessionId: string, record: PiProcess): Promise<void> {
+    const session = this._sessions.get(sessionId)
+    if (session) session.status = "closed"
     this._sessions.delete(sessionId)
     record.cancelling = true
     record.settleHandshake?.()
@@ -1264,9 +1365,10 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       // Ask Pi to stop cleanly first; a hard kill mid-tool-call can leave a
       // half-written file behind.
       try {
+        const cleared = record.peer.sendCommand("clear_queue", {}, 5000)
         const aborted = record.peer.sendCommand("abort", {}, 5000)
         this.cancelPendingDialogs(sessionId, record)
-        await withTimeout(aborted, 5000, undefined)
+        await withTimeout(Promise.all([cleared, aborted]), 5000, undefined)
       } catch {
         // Already gone, or refused — the kill below is the real guarantee.
       }
@@ -1324,7 +1426,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       await this.resumeSession(sessionId)
     }
     const record = this.requireProcess(sessionId)
-    if (record.busy) {
+    if (record.busy || record.nativeRunning || record.shellRunning) {
       throw new Error(`Pi session ${sessionId} already has a turn in flight`)
     }
     const prompt = messageToPiPrompt(message)
@@ -1332,25 +1434,60 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const queue = new EventQueue()
     record.queues.add(queue)
     record.busy = true
+    record.terminalDelivered = false
+    this.requireSession(sessionId).status = "executing"
     record.lastUsedAt = Date.now()
 
-    try {
-      // The response only means Pi ACCEPTED the prompt. Completion is
-      // `agent_settled`, which arrives later on the event stream.
-      await record.peer.sendCommand("prompt", prompt, options?.timeout ?? 60000)
-    } catch (error) {
-      record.busy = false
-      record.queues.delete(queue)
-      throw error
-    }
+    // Newer Pi acknowledges after extension/input preflight. A preflight can
+    // itself wait for a dialog, so consume events while acceptance is pending.
+    const runCount = record.nativeRunCount ?? 0
+    const accepted = record.peer
+      .sendCommand<{
+        disposition?: "started" | "queued" | "handled"
+      } | null>("prompt", prompt, options?.timeout ?? 60000)
+      .then((response) => {
+        // Consumed commands have no agent_settled. Older versions omit data.
+        if (response?.disposition === "handled" && (record.nativeRunCount ?? 0) === runCount) {
+          // A handled command has no model usage of its own. Release its
+          // consumer atomically: extension-triggered runs may start immediately
+          // after this ACK and must belong to the out-of-band subscription.
+          this.publishSessionEvent(record, {
+            type: "done",
+            success: true,
+            sessionId,
+            timestamp: new Date(),
+          })
+          record.terminalDelivered = true
+        }
+      })
+    let acceptanceCleanup: Promise<void> | undefined
+    void accepted.catch((error: unknown) => {
+      // A preflight dialog can still be running when acceptance times out.
+      // Abort alone cannot stop an extension that has not started its agent run;
+      // retire the process before permitting a retry or a late dialog answer.
+      if ([...this.pendingDialogs.values()].some((dialog) => dialog.sessionId === sessionId)) {
+        acceptanceCleanup = this.closeSession(sessionId)
+        // The finally block propagates a failed cleanup and retains the busy
+        // guard. Attach a handler immediately while a consumer is still yielding.
+        void acceptanceCleanup.catch(() => undefined)
+      }
+      queue.end(error instanceof Error ? error : new Error(String(error)))
+    })
 
     try {
       for await (const event of queue.drain()) {
+        // Even an exceptionally fast run must not hide a rejected command.
+        if (event.type === "done") await accepted
         yield event
         if (event.type === "done") return
       }
     } finally {
+      await acceptanceCleanup
       record.busy = false
+      const session = this._sessions.get(sessionId)
+      if (session && session.status !== "closed")
+        session.status = record.exited ? "error" : record.nativeRunning ? "executing" : "active"
+      if (!record.nativeRunning) record.queuedInputs = undefined
       record.queues.delete(queue)
       record.lastUsedAt = Date.now()
     }
@@ -1360,11 +1497,74 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const record = this.processes.get(sessionId)
     if (!record) return
 
+    if (
+      event.type === "extension_ui_request" &&
+      event.method === "setStatus" &&
+      event.statusText === "cognia-shell-guard-ready v1" &&
+      this.shellGuardPath()
+    ) {
+      record.shellGuardReady = true
+    }
+    if (event.type === "agent_start") {
+      record.nativeRunning = true
+      record.nativeRunCount = (record.nativeRunCount ?? 0) + 1
+      const session = this._sessions.get(sessionId)
+      if (session) session.status = "executing"
+      if (!record.busy || record.terminalDelivered || record.deferredWhileSettling) {
+        const start: ExternalAgentEvent = {
+          type: "session_start",
+          sessionId,
+          timestamp: new Date(),
+        }
+        if (record.deferredWhileSettling) record.deferredWhileSettling.push(start)
+        else this.publishSessionEvent(record, start)
+      }
+    }
+    if (event.type === "agent_settled" && event.cogniaSynthetic !== true) {
+      record.nativeRunning = false
+      const session = this._sessions.get(sessionId)
+      if (session) session.status = "active"
+    }
     if (isCogniaHandshake(event)) {
+      record.shellInterception =
+        record.shellGuardReady === true &&
+        typeof event.statusText === "string" &&
+        /user-bash=1|cognia-ready v3\b/.test(event.statusText)
       record.settleHandshake?.()
     }
-    const mapped = mapPiEvent(event, { sessionId })
+    if (event.type === "message_start" && record.queuedInputs) {
+      const message = event.message as { role?: string; content?: unknown } | undefined
+      if (message?.role === "user") {
+        const blocks = Array.isArray(message.content) ? message.content : []
+        const text =
+          typeof message.content === "string"
+            ? message.content
+            : blocks
+                .filter((block) => block.type === "text")
+                .map((block) => block.text)
+                .join("\n")
+        const images = blocks
+          .filter((block) => block.type === "image")
+          .map((block) => ({ data: block.data, mimeType: block.mimeType }))
+        for (const inputs of [record.queuedInputs.steering, record.queuedInputs.followUp]) {
+          const index = inputs.findIndex(
+            (input) =>
+              input.text === text && JSON.stringify(input.images ?? []) === JSON.stringify(images)
+          )
+          if (index >= 0) {
+            inputs.splice(index, 1)
+            break
+          }
+        }
+      }
+    }
+    const mapped = mapPiEvent(event, { sessionId, streamState: record.streamState })
     for (const canonical of mapped) {
+      if (canonical.type === "extension_ui_update") {
+        record.extensionUi = reduceExternalAgentUiState(record.extensionUi, canonical)
+        const session = this._sessions.get(sessionId)
+        if (session) session.metadata = { ...session.metadata, extensionUi: record.extensionUi }
+      }
       // A Pi dialog BLOCKS its extension until answered. Remember which session
       // owns each open request so `respondToElicitation` — which the canonical
       // contract calls with only a `requestId` — can route the answer back, and
@@ -1392,6 +1592,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         // (`applyConfiguredApprovalToPiPolicy`): answer it here, unseen.
         if (
           canonical.type === "permission_request" &&
+          ((record.busy && !record.terminalDelivered) || record.listeners.size === 0) &&
           this.approvalPolicy(this._config ?? undefined, canonical.request) === "approve"
         ) {
           void this.respondToPermission(sessionId, {
@@ -1431,7 +1632,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         record.deferredWhileSettling.push(canonical)
         continue
       }
-      for (const queue of record.queues) queue.push(canonical)
+      this.publishSessionEvent(record, canonical)
     }
   }
 
@@ -1458,18 +1659,17 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // A canonical `usage_update` before `done` as well, so a streaming consumer
     // that never inspects the terminal event still sees the turn's cost.
     if (tokenUsage) {
-      for (const queue of record.queues) {
-        queue.push({
-          type: "usage_update",
-          sessionId,
-          timestamp: new Date(),
-          used: tokenUsage.contextTokens ?? tokenUsage.totalTokens,
-          size: tokenUsage.modelContextWindow ?? 0,
-        })
-      }
+      this.publishSessionEvent(record, {
+        type: "usage_update",
+        sessionId,
+        timestamp: new Date(),
+        used: tokenUsage.contextTokens ?? tokenUsage.totalTokens,
+        size: tokenUsage.modelContextWindow ?? 0,
+      })
     }
     const settled = tokenUsage ? { ...done, tokenUsage } : done
-    for (const queue of record.queues) queue.push(settled)
+    this.publishSessionEvent(record, settled)
+    record.terminalDelivered = true
     // Release anything that arrived behind the held `done`, in arrival order.
     const deferred = record.deferredWhileSettling ?? []
     record.deferredWhileSettling = undefined
@@ -1484,22 +1684,23 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         void this.emitSettledWithUsage(sessionId, record, event)
         return
       }
-      for (const queue of record.queues) queue.push(event)
+      this.publishSessionEvent(record, event)
     }
   }
 
   private dispatchError(sessionId: string, error: string): void {
     const record = this.processes.get(sessionId)
     if (!record) return
-    for (const queue of record.queues) {
-      queue.push({ type: "error", error, sessionId, timestamp: new Date() })
-    }
+    const session = this._sessions.get(sessionId)
+    if (session && record.exited) session.status = "error"
+    this.publishSessionEvent(record, { type: "error", error, sessionId, timestamp: new Date() })
   }
 
   private finishQueues(record: PiProcess): void {
     for (const queue of record.queues) queue.end()
     record.queues.clear()
     record.busy = false
+    record.nativeRunning = false
   }
 
   /**
@@ -1516,26 +1717,59 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     try {
       const stats = await record.peer.sendCommand<PiSessionStats>("get_session_stats")
       const tokenUsage = piStatsToTokenUsage(stats)
+      const baseline = record.usageBaseline
+      record.usageBaseline = tokenUsage
       session.tokenUsage = tokenUsage
       session.lastActivityAt = new Date()
-      return tokenUsage
+      if (!tokenUsage || !baseline) return undefined
+      return {
+        ...tokenUsage,
+        promptTokens: Math.max(0, tokenUsage.promptTokens - baseline.promptTokens),
+        completionTokens: Math.max(0, tokenUsage.completionTokens - baseline.completionTokens),
+        totalTokens: Math.max(0, tokenUsage.totalTokens - baseline.totalTokens),
+        cacheReadTokens:
+          tokenUsage.cacheReadTokens === undefined
+            ? undefined
+            : Math.max(0, tokenUsage.cacheReadTokens - (baseline.cacheReadTokens ?? 0)),
+        cacheWriteTokens:
+          tokenUsage.cacheWriteTokens === undefined
+            ? undefined
+            : Math.max(0, tokenUsage.cacheWriteTokens - (baseline.cacheWriteTokens ?? 0)),
+        ...(tokenUsage.providerCost
+          ? {
+              providerCost: {
+                amount: Math.max(
+                  0,
+                  tokenUsage.providerCost.amount - (baseline.providerCost?.amount ?? 0)
+                ),
+              },
+            }
+          : {}),
+      }
     } catch {
+      // The next successful query restores the baseline without attributing
+      // multiple unobserved turns to a single result.
+      record.usageBaseline = undefined
       return undefined
     }
   }
 
   // ------------------------------------------------------------- turn control
 
-  async cancel(sessionId: string): Promise<void> {
+  async cancel(sessionId: string): Promise<void | ExternalAgentSessionInputQueue> {
     const record = this.processes.get(sessionId)
     if (!record || record.exited) return
     record.cancelling = true
     // Send abort before releasing dialogs so a denied tool cannot start another
     // turn in the gap. Do not await it: Pi waits for the blocked hook to unwind.
+    // Pi resumes queued inputs after abort unless clear_queue precedes it.
+    // Write both before releasing a blocking dialog; stdin preserves this order.
+    const cleared = this.clearQueueForRecord(sessionId, record)
     const aborted = record.peer.sendCommand("abort")
     this.cancelPendingDialogs(sessionId, record)
     try {
-      await aborted
+      const [queue] = await Promise.all([cleared, aborted])
+      return queue
     } finally {
       record.cancelling = false
     }
@@ -1543,24 +1777,422 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
   /** Deliver a message into a live turn (Pi's `steer`). */
   async steerTurn(sessionId: string, message: string): Promise<void> {
+    if (!this.outboundGate(message)) throw new PiOutboundBlockedError()
     const record = this.requireProcess(sessionId)
     await record.peer.sendCommand("steer", { message })
+  }
+
+  subscribeSessionEvents(
+    sessionId: string,
+    listener: (event: ExternalAgentEvent) => void
+  ): () => void {
+    const record = this.requireProcess(sessionId)
+    record.listeners.add(listener)
+    return () => {
+      record.listeners.delete(listener)
+    }
+  }
+
+  private publishSessionEvent(record: PiProcess, event: ExternalAgentEvent): void {
+    if (record.busy && !record.terminalDelivered) {
+      for (const queue of record.queues) queue.push(event)
+    } else {
+      for (const listener of record.listeners) listener(event)
+    }
+  }
+
+  async refreshSessionCommands(sessionId: string): Promise<AcpAvailableCommand[]> {
+    const record = this.requireProcess(sessionId)
+    const result = await record.peer.sendCommand<{
+      commands?: Array<{ name: string; description?: string; source?: string }>
+    }>("get_commands")
+    const commands = (result.commands ?? []).filter(
+      (command) => typeof command.name === "string" && command.name.length > 0
+    )
+    record.commandSources = new Map(commands.map((command) => [command.name, command.source ?? ""]))
+    const normalized = commands.map((command) => ({
+      name: command.name,
+      description: command.description ?? "",
+      input: { hint: "" },
+      supportsDuringExecution: command.source === "extension",
+    }))
+    const session = this.requireSession(sessionId)
+    session.metadata = { ...session.metadata, availableCommands: normalized }
+    this.publishSessionEvent(record, {
+      type: "commands_update",
+      sessionId,
+      timestamp: new Date(),
+      commands: normalized,
+    })
+    return normalized
+  }
+
+  async executeSessionCommand(
+    sessionId: string,
+    command: string
+  ): Promise<ExternalAgentSessionInputAcceptance> {
+    if (!this.outboundGate(command)) throw new PiOutboundBlockedError()
+    const record = this.requireProcess(sessionId)
+    if (
+      !(record.busy && !record.terminalDelivered) &&
+      !(record.nativeRunning && record.listeners.size > 0)
+    )
+      throw new Error(
+        "Pi live commands require an active turn; use the normal prompt flow while idle"
+      )
+    const name = /^\/([^\s]+)(?:\s|$)/.exec(command)?.[1]
+    // Only registered extensions are guaranteed to be handled without starting
+    // a competing agent run. Templates and skills use the ordinary prompt flow.
+    if (!name || record.commandSources?.get(name) !== "extension")
+      throw new Error("Pi command must be an advertised extension command")
+    try {
+      const result = await record.peer.sendCommand<{ disposition?: string }>("prompt", {
+        message: command,
+      })
+      if (result.disposition !== "handled")
+        throw new Error("Pi extension command unexpectedly started an agent run")
+      await this.refreshSessionCommands(sessionId)
+      return { disposition: "handled", mode: "steer" }
+    } catch (error) {
+      if ([...this.pendingDialogs.values()].some((dialog) => dialog.sessionId === sessionId))
+        await this.closeSession(sessionId)
+      throw error
+    }
+  }
+
+  async enqueueSessionInput(
+    sessionId: string,
+    input: ExternalAgentSessionInput,
+    mode: ExternalAgentSessionInputMode
+  ): Promise<ExternalAgentSessionInputAcceptance> {
+    if (!this.outboundGate(input)) throw new PiOutboundBlockedError()
+    if (mode !== "steer" && mode !== "follow_up") throw new Error("Unknown session input mode")
+    const record = this.requireProcess(sessionId)
+    // Pi can queue input while idle but cannot start an owned consumer for it.
+    // Require the existing turn to own all events generated by queued work.
+    if (
+      !(record.busy && !record.terminalDelivered) &&
+      !(record.nativeRunning && record.listeners.size > 0)
+    )
+      throw new Error("Pi queued input requires an active turn")
+    const message: ExternalAgentMessage = {
+      id: this.generateMessageId(),
+      role: "user",
+      timestamp: new Date(),
+      content: [
+        { type: "text", text: input.text },
+        ...(input.images ?? []).map((image) => ({
+          type: "image" as const,
+          source: { type: "base64" as const, data: image.data, mediaType: image.mimeType },
+        })),
+      ],
+    }
+    if (!promptInputPassesGate(message, this.outboundGate, { sessionId }))
+      throw new PiOutboundBlockedError()
+    record.queuedInputs ??= { steering: [], followUp: [] }
+    const pending = record.queuedInputs[mode === "steer" ? "steering" : "followUp"]
+    const queuedInput = structuredClone(input)
+    pending.push(queuedInput)
+    // Acceptance can time out after Pi queued the input. Keep its images
+    // until clear_queue confirms what remains, or the owned turn settles.
+    const result = await record.peer.sendCommand<{ disposition?: "queued" | "handled" }>(
+      mode,
+      messageToPiPrompt(message)
+    )
+    const disposition = result?.disposition ?? "queued"
+    if (disposition === "handled") {
+      const index = pending.indexOf(queuedInput)
+      if (index >= 0) pending.splice(index, 1)
+    }
+    return { mode, disposition }
+  }
+
+  private async clearQueueForRecord(
+    sessionId: string,
+    record: PiProcess
+  ): Promise<ExternalAgentSessionInputQueue> {
+    const result = await record.peer.sendCommand<{ steering?: string[]; followUp?: string[] }>(
+      "clear_queue"
+    )
+    const restore = (
+      texts: string[],
+      cached: ExternalAgentSessionInput[]
+    ): ExternalAgentSessionInput[] =>
+      texts.map((text) => {
+        const index = cached.findIndex((input) => input.text === text)
+        return index < 0 ? { text } : cached.splice(index, 1)[0]
+      })
+    const restored = {
+      steering: restore(result?.steering ?? [], record.queuedInputs?.steering ?? []),
+      followUp: restore(result?.followUp ?? [], record.queuedInputs?.followUp ?? []),
+    }
+    record.queuedInputs = undefined
+    const session = this._sessions.get(sessionId)
+    if (session) session.metadata = { ...session.metadata, clearedInputQueue: restored }
+    return restored
+  }
+
+  async clearSessionInputQueue(sessionId: string): Promise<ExternalAgentSessionInputQueue> {
+    return this.clearQueueForRecord(sessionId, this.requireProcess(sessionId))
+  }
+
+  async setSessionQueuePolicy(
+    sessionId: string,
+    policy: ExternalAgentSessionQueuePolicy
+  ): Promise<void> {
+    const record = this.requireProcess(sessionId)
+    for (const [key, command] of [
+      ["steering", "set_steering_mode"],
+      ["followUp", "set_follow_up_mode"],
+    ] as const) {
+      const mode = policy[key]
+      if (mode === undefined) continue
+      if (mode !== "all" && mode !== "one-at-a-time")
+        throw new Error("Unknown session queue policy")
+      await record.peer.sendCommand(command, { mode })
+    }
+    const session = this.requireSession(sessionId)
+    session.metadata = {
+      ...session.metadata,
+      queuePolicy: { ...(session.metadata?.queuePolicy as object), ...policy },
+    }
+  }
+
+  async setSessionRuntimeControls(
+    sessionId: string,
+    controls: ExternalAgentSessionRuntimeControls
+  ): Promise<void> {
+    const record = this.requireProcess(sessionId)
+    for (const [key, command] of [
+      ["autoCompaction", "set_auto_compaction"],
+      ["autoRetry", "set_auto_retry"],
+    ] as const) {
+      if (controls[key] === undefined) continue
+      if (typeof controls[key] !== "boolean")
+        throw new Error("Session runtime controls require booleans")
+      await record.peer.sendCommand(command, { enabled: controls[key] })
+    }
+    const session = this.requireSession(sessionId)
+    session.metadata = {
+      ...session.metadata,
+      runtimeControls: { ...(session.metadata?.runtimeControls as object), ...controls },
+    }
+  }
+
+  async getSessionRuntimeState(sessionId: string): Promise<ExternalAgentSessionRuntimeState> {
+    const record = this.requireProcess(sessionId)
+    const state = await record.peer.sendCommand<{
+      steeringMode?: "all" | "one-at-a-time"
+      followUpMode?: "all" | "one-at-a-time"
+      autoCompactionEnabled?: boolean
+      pendingMessageCount?: number
+    }>("get_state")
+    const saved = this.requireSession(sessionId).metadata?.runtimeControls as
+      ExternalAgentSessionRuntimeControls | undefined
+    return {
+      queuePolicy: { steering: state.steeringMode, followUp: state.followUpMode },
+      controls: { ...saved, autoCompaction: state.autoCompactionEnabled },
+      pendingInputCount: state.pendingMessageCount,
+    }
+  }
+
+  async abortSessionRetry(sessionId: string): Promise<void> {
+    await this.requireProcess(sessionId).peer.sendCommand("abort_retry")
+  }
+
+  async getSessionEntries(sessionId: string, since?: string): Promise<ExternalAgentSessionEntry[]> {
+    const result = await this.requireProcess(sessionId).peer.sendCommand<{
+      entries?: Record<string, unknown>[]
+    }>("get_entries", since ? { since } : {})
+    return (result.entries ?? []).map(normalizePiSessionEntry)
+  }
+
+  async getSessionTree(
+    sessionId: string
+  ): Promise<{ roots: ExternalAgentSessionTreeNode[]; leafId: string | null }> {
+    const result = await this.requireProcess(sessionId).peer.sendCommand<{
+      tree: PiSessionTreeNode[]
+      leafId: string | null
+    }>("get_tree")
+    const normalize = (node: PiSessionTreeNode): ExternalAgentSessionTreeNode => ({
+      entry: normalizePiSessionEntry(node.entry),
+      children: node.children.map(normalize),
+    })
+    return { roots: result.tree.map(normalize), leafId: result.leafId }
+  }
+
+  async renameSession(sessionId: string, name: string): Promise<void> {
+    if (!this.outboundGate(name)) throw new PiOutboundBlockedError()
+    if (!name.trim()) throw new Error("Session name cannot be empty")
+    await this.requireProcess(sessionId).peer.sendCommand("set_session_name", { name })
+    const session = this.requireSession(sessionId)
+    session.metadata = { ...session.metadata, title: name }
+  }
+
+  async exportSessionHtml(sessionId: string): Promise<{ path: string }> {
+    const record = this.requireProcess(sessionId)
+    const result = await record.peer.sendCommand<{ path: string }>("export_html")
+    return { path: resolveAgainstCwd(record.cwd, result.path) }
+  }
+
+  async executeSessionShell(
+    sessionId: string,
+    command: string,
+    options: ExternalAgentSessionShellOptions
+  ): Promise<ExternalAgentSessionShellResult> {
+    if (!this.outboundGate(command)) throw new PiOutboundBlockedError()
+    const record = this.requireProcess(sessionId)
+    if (
+      !record.shellInterception ||
+      compareVersions(this.versionVerdict?.version ?? "0", PI_CERTIFIED_VERSION) < 0
+    )
+      throw new Error("Pi shell requires the Cognia user-bash interception extension")
+    if (record.busy || record.nativeRunning) throw new Error("Pi shell requires an idle session")
+    if (record.shellRunning) throw new Error("Pi shell command is already running")
+    record.shellStopped = false
+    record.shellRunning = true
+    const unsubscribe = this.subscribeSessionEvents(sessionId, (event) => {
+      if (event.type !== "permission_request") return
+      void Promise.resolve()
+        .then(() => options.onPermissionRequest(event.request))
+        .then((response) =>
+          this.respondToPermission(sessionId, { ...response, requestId: event.request.id })
+        )
+        .catch(() =>
+          this.respondToPermission(sessionId, { requestId: event.request.id, granted: false })
+        )
+    })
+    try {
+      const result = await record.peer.sendCommand<{
+        output: string
+        exitCode?: number
+        cancelled: boolean
+        truncated: boolean
+      }>("bash", { command, excludeFromContext: options.excludeFromContext ?? false }, 120000)
+      return {
+        output: result.output,
+        exitCode: result.exitCode ?? null,
+        cancelled: result.cancelled,
+        truncated:
+          result.truncated || result.output.startsWith("[Earlier shell output truncated]\n"),
+      }
+    } catch (error) {
+      if (record.shellStopped)
+        return { output: "", exitCode: null, cancelled: true, truncated: false }
+      // A timed-out RPC is not proof that the shell stopped. Retire the process
+      // before releasing ownership so a subsequent prompt cannot race its effects.
+      await this.closeSession(sessionId)
+      throw error
+    } finally {
+      unsubscribe()
+      record.shellRunning = false
+    }
+  }
+
+  async abortSessionShell(sessionId: string): Promise<void | ExternalAgentSessionShellAbortResult> {
+    const record = this.requireProcess(sessionId)
+    if (!record.shellRunning) return
+    // abort_bash only reaches shells whose controller Pi already installed.
+    // Retiring the process also cancels approved hooks still awaiting import.
+    const aborted = record.peer.sendCommand("abort_bash", {}, 5000)
+    void aborted.catch(() => undefined)
+    this.cancelPendingDialogs(sessionId, record)
+    record.shellStopped = true
+    try {
+      await this.processHost.kill(record.agentId)
+    } catch (error) {
+      record.shellStopped = false
+      throw error
+    }
+    record.exited = true
+    record.peer.rejectAll("Pi shell stopped")
+    this.finishQueues(record)
+    const session = this._sessions.get(sessionId)
+    if (session) session.status = "idle"
+    return { resumeRequired: true }
+  }
+
+  async getSessionOperationCapabilities(
+    sessionId: string
+  ): Promise<Partial<ExternalAgentSessionOperationCapabilities>> {
+    const record = this.requireProcess(sessionId)
+    const currentContract =
+      compareVersions(this.versionVerdict?.version ?? "0", PI_CERTIFIED_VERSION) >= 0
+    // Older accepted Pi releases keep their original integration, but do not
+    // acquire an unverified claim for APIs only exercised against 1.0.2.
+    const extensions: Partial<ExternalAgentSessionOperationCapabilities> = currentContract
+      ? {}
+      : Object.fromEntries(
+          [
+            "commandExecution",
+            "inputQueue",
+            "clearQueue",
+            "queuePolicy",
+            "runtimeControls",
+            "runtimeState",
+            "abortRetry",
+            "entries",
+            "tree",
+            "clone",
+            "rename",
+            "exportHtml",
+          ].map((operation) => [operation, "unknown"])
+        )
+    return {
+      ...extensions,
+      backgroundTurns: currentContract ? "supported" : "unknown",
+      forkAtEntry: currentContract ? "supported" : "unknown",
+      shell: currentContract && record.shellInterception ? "supported" : "unsupported",
+      abortShell: currentContract && record.shellInterception ? "supported" : "unsupported",
+    }
+  }
+
+  private async refreshSessionIdentity(previousId: string): Promise<ExternalAgentSession> {
+    const record = this.requireProcess(previousId)
+    const state = await record.peer.sendCommand<{ sessionId: string; sessionName?: string }>(
+      "get_state"
+    )
+    if (!state.sessionId) throw new Error("Pi did not return the forked session identity")
+    const session = this.requireSession(previousId)
+    if (state.sessionId !== previousId) {
+      if (this.processes.has(state.sessionId))
+        throw new Error("Pi returned an already active session identity")
+      this.processes.delete(previousId)
+      this._sessions.delete(previousId)
+      this.sessionOptions.delete(previousId)
+      record.piSessionId = state.sessionId
+      session.id = state.sessionId
+      this.processes.set(session.id, record)
+      this._sessions.set(session.id, session)
+      this.sessionOptions.set(session.id, record.createOptions)
+    }
+    session.metadata = {
+      ...session.metadata,
+      piSessionId: state.sessionId,
+      title: state.sessionName,
+    }
+    record.streamState = { toolCallsByIndex: new Map(), startedToolCalls: new Set() }
+    await this.readSessionUsage(session.id)
+    await this.refreshSessionCommands(session.id)
+    return session
   }
 
   async supportsSteering(): Promise<boolean> {
     return true
   }
 
-  async compactSession(sessionId: string): Promise<void> {
+  async compactSession(sessionId: string, options?: ExternalAgentCompactionOptions): Promise<void> {
+    if (!this.outboundGate(options?.focus)) throw new PiOutboundBlockedError()
     const record = this.requireProcess(sessionId)
-    await record.peer.sendCommand("compact", {}, 120000)
+    await record.peer.sendCommand(
+      "compact",
+      options?.focus ? { customInstructions: options.focus } : {},
+      120000
+    )
   }
 
   async getCompactionCapability(): Promise<ExternalAgentCompactionCapability> {
-    // Native `compact` command, not a slash-command heuristic. `supportsFocus`
-    // is part of the native route's shape and was missing from the hand-written
-    // return type this used to declare.
-    return { status: "supported", routes: [{ kind: "native", supportsFocus: false }] }
+    return { status: "supported", routes: [{ kind: "native", supportsFocus: true }] }
   }
 
   // ------------------------------------------------------------------ config
@@ -1584,13 +2216,18 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {
     const record = this.requireProcess(sessionId)
-    const { provider, modelId: id } = parsePiModel(modelId)
+    const parsed = parsePiModel(modelId)
     try {
-      await record.peer.sendCommand(
-        "set_model",
-        provider ? { provider, modelId: id } : { modelId: id }
-      )
-      record.createOptions.metadata = { ...record.createOptions.metadata, selectedModel: modelId }
+      const provider =
+        parsed.provider ??
+        (await record.peer.sendCommand<{ model?: { provider?: string } }>("get_state")).model
+          ?.provider
+      if (!provider) throw new Error("Pi has no active provider; select a provider-qualified model")
+      await record.peer.sendCommand("set_model", { provider, modelId: parsed.modelId })
+      record.createOptions.metadata = {
+        ...record.createOptions.metadata,
+        selectedModel: `${provider}/${parsed.modelId}`,
+      }
     } catch (error) {
       throw new Error(this.explainModelRefusal(modelId, error), { cause: error })
     }
@@ -2046,6 +2683,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const record = this.processes.get(sessionId)
     if (!record) throw new Error(`Unknown Pi session: ${sessionId}`)
     if (record.exited) throw new Error(`Pi session ${sessionId} is no longer running`)
+    if (record.closing || record.cancelling) throw new Error(`Pi session ${sessionId} is closing`)
     return record
   }
 
@@ -2062,8 +2700,8 @@ export class PiVersionError extends Error {
   constructor(readonly verdict: PiVersionVerdict) {
     super(
       verdict.status === "unsupported" && verdict.version
-        ? `Pi ${verdict.version} is not supported (requires ${PI_CERTIFIED_VERSION} or newer)`
-        : `Could not determine the Pi version (requires ${PI_CERTIFIED_VERSION} or newer)`
+        ? `Pi ${verdict.version} is not supported (requires ${PI_MINIMUM_VERSION} or newer)`
+        : `Could not determine the Pi version (requires ${PI_MINIMUM_VERSION} or newer)`
     )
     this.name = "PiVersionError"
   }
@@ -2427,6 +3065,98 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
   } finally {
     if (timer) clearTimeout(timer)
   }
+}
+
+interface PiSessionTreeNode {
+  entry: Record<string, unknown>
+  children: PiSessionTreeNode[]
+}
+
+/** Project durable entries without leaking vendor message shapes into shared consumers. */
+function normalizePiSessionEntry(raw: Record<string, unknown>): ExternalAgentSessionEntry {
+  const { id, parentId, type, timestamp, message, ...metadata } = raw
+  const entry: ExternalAgentSessionEntry = {
+    id: String(id),
+    parentId: typeof parentId === "string" ? parentId : null,
+    type: String(type),
+    ...(typeof timestamp === "string" ? { timestamp } : {}),
+    ...(Object.keys(metadata).length ? { metadata } : {}),
+  }
+  if (message && typeof message === "object") {
+    const input = message as Record<string, unknown>
+    const content: ExternalAgentMessage["content"] = []
+    if (typeof input.content === "string") content.push({ type: "text", text: input.content })
+    if (Array.isArray(input.content))
+      for (const block of input.content) {
+        if (block.type === "text" && typeof block.text === "string")
+          content.push({ type: "text", text: block.text })
+        else if (block.type === "thinking" && typeof block.thinking === "string")
+          content.push({ type: "thinking", thinking: block.thinking })
+        else if (
+          block.type === "image" &&
+          typeof block.data === "string" &&
+          typeof block.mimeType === "string"
+        )
+          content.push({
+            type: "image",
+            source: { type: "base64", data: block.data, mediaType: block.mimeType },
+          })
+        else if (block.type === "toolCall")
+          content.push({
+            type: "tool_use",
+            id: block.id,
+            name: block.name,
+            input: block.arguments ?? {},
+          })
+      }
+    if (input.role === "bashExecution") {
+      if (typeof input.command === "string")
+        content.push({ type: "text", text: `$ ${input.command}` })
+      if (typeof input.output === "string") content.push({ type: "text", text: input.output })
+    }
+    const { content: _content, role: _role, timestamp: _timestamp, ...messageMetadata } = input
+    entry.message = {
+      id: entry.id,
+      metadata: messageMetadata,
+      role:
+        input.role === "assistant"
+          ? "assistant"
+          : input.role === "toolResult" || input.role === "bashExecution"
+            ? "tool"
+            : input.role === "user"
+              ? "user"
+              : "system",
+      content,
+      timestamp: new Date(
+        typeof input.timestamp === "number"
+          ? input.timestamp
+          : typeof timestamp === "string"
+            ? timestamp
+            : 0
+      ),
+    }
+    if (input.role === "toolResult")
+      entry.metadata = {
+        ...entry.metadata,
+        toolCallId: input.toolCallId,
+        toolName: input.toolName,
+        isError: input.isError,
+      }
+  }
+  return entry
+}
+
+/**
+ * A path Pi reported, resolved against the session's working directory when
+ * relative, in the cwd's own separator. Same rule as the terminal's link
+ * resolver (`lib/terminal/terminal-links.ts`), which this package cannot import.
+ */
+function resolveAgainstCwd(cwd: string | null | undefined, path: string): string {
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) return path
+  if (!cwd) return path
+  const stripped = path.replace(/^\.\//, "")
+  const sep = cwd.includes("\\") && !cwd.includes("/") ? "\\" : "/"
+  return cwd.replace(/[\\/]+$/, "") + sep + stripped
 }
 
 /**

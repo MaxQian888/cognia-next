@@ -65,6 +65,8 @@ export const HOST_CONFIG_COMMANDS = Object.freeze({
   // is not a runnable target, and a client has to be told which of the two it
   // is looking at rather than getting "unknown command" from the transport.
   run: "external_agent_run_turn",
+  sessionQuery: "external_agent_session_query",
+  sessionMutate: "external_agent_session_mutate",
   cancel: "external_agent_cancel_run",
   resolve: "external_agent_resolve_decision",
   // Which Cognia models a configuration can run on through the Host's own

@@ -221,6 +221,88 @@ describe("parsePiSession", () => {
     expect(tool.output).toBe("a.ts\nb.ts")
   })
 
+  it("preserves Pi 1.0.2 codemode images and bounded nested calls", () => {
+    const entries = fixture()
+      .split("\n")
+      .map((row) => JSON.parse(row))
+    const result = entries.find((entry) => entry.message?.role === "toolResult").message
+    result.content.push({ type: "image", mimeType: "image/png", data: "aW1hZ2U=" })
+    result.nestedCalls = {
+      calls: [
+        {
+          id: "child-1",
+          name: "mcp__docs__read",
+          arguments: { path: "guide" },
+          status: "ok",
+          durationMs: 8,
+        },
+      ],
+      complete: true,
+    }
+    const conversation = parsePiSession(REF, entries.map(line).join("\n"))
+    expect(conversation.messages[1].parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool-bash",
+          output: { text: "a.ts\nb.ts", nestedCalls: result.nestedCalls },
+        }),
+        { type: "file", mediaType: "image/png", url: "data:image/png;base64,aW1hZ2U=" },
+      ])
+    )
+    const canonical = piSessionSource.codec!.toCanonical(conversation)
+    expect(canonical.session.turns[1].toolCalls?.[0].resultText).toContain('"child-1"')
+    expect(notesOf(conversation.messages)).toBeUndefined()
+  })
+
+  it("preserves orphan tool-result images and reports upstream nested-call truncation", () => {
+    const entries = fixture()
+      .split("\n")
+      .map((row) => JSON.parse(row))
+    const result = entries.find((entry) => entry.message?.role === "toolResult").message
+    result.toolCallId = "missing"
+    result.content = [{ type: "image", mimeType: "image/webp", data: "aW1hZ2U=" }]
+    result.nestedCalls = {
+      calls: [{ id: "child", name: "read", argumentsBytes: 10000, status: "unfinished" }],
+      complete: false,
+    }
+    const { messages } = parsePiSession(REF, entries.map(line).join("\n"))
+    expect(messages[2].parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          text: expect.stringContaining('"argumentsBytes":10000'),
+        }),
+        { type: "file", mediaType: "image/webp", url: "data:image/webp;base64,aW1hZ2U=" },
+      ])
+    )
+    expect(notesOf(messages)).toMatchObject({ orphan_tool_result: 1, incomplete_nested_calls: 1 })
+  })
+
+  it("retains incomplete nested-call notes on alternate branches", () => {
+    const entries = fixture()
+      .split("\n")
+      .map((row) => JSON.parse(row))
+    entries.find((entry) => entry.message?.role === "toolResult").message.nestedCalls = {
+      calls: [],
+      complete: false,
+    }
+    entries.push({
+      type: "message",
+      id: "alternate",
+      parentId: "e4",
+      timestamp: "2026-10-05T00:00:00.000Z",
+      message: {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "bash",
+        content: [{ type: "text", text: "another branch" }],
+      },
+    })
+    const conversation = parsePiSession(REF, entries.map(line).join("\n"))
+    expect(notesOf(conversation.messages)).toBeUndefined()
+    expect(notesOf(conversation.nested![0].messages)).toMatchObject({ incomplete_nested_calls: 1 })
+  })
+
   it("marks a failed tool result as an error", () => {
     const content = fixture().replace('"isError":false', '"isError":true')
     const { messages } = parsePiSession(REF, content)
@@ -711,6 +793,41 @@ describe("piSessionSource", () => {
           costKnown: true,
         })
       )
+    })
+
+    it.each([0, 0.25])("imports Pi 1.0.2 native cost.total=%s as known spend", (total) => {
+      const entries = fixture()
+        .split("\n")
+        .map((row) => JSON.parse(row))
+      const assistant = entries.find((entry) => entry.message?.role === "assistant").message
+      assistant.usage = {
+        input: 10,
+        output: 5,
+        cacheRead: 3,
+        cacheWrite: 2,
+        totalTokens: 20,
+        cost: { input: 0.1, output: 0.1, cacheRead: 0.03, cacheWrite: 0.02, total },
+      }
+      const { messages } = parsePiSession(REF, entries.map(line).join("\n"))
+      expect(deriveImportedUsageRows(messages)[0]).toMatchObject({
+        costUsd: total,
+        costKnown: true,
+        costSource: "sdk",
+      })
+    })
+
+    it("does not manufacture a known zero cost for malformed native cost", () => {
+      const entries = fixture()
+        .split("\n")
+        .map((row) => JSON.parse(row))
+      entries.find((entry) => entry.message?.role === "assistant").message.usage.cost = {
+        total: "invalid",
+      }
+      const { messages } = parsePiSession(REF, entries.map(line).join("\n"))
+      expect(deriveImportedUsageRows(messages)[0]).toMatchObject({
+        costKnown: false,
+        costSource: "unknown",
+      })
     })
 
     it("keeps the per-message model when the turn reports no usage at all", () => {
