@@ -48,8 +48,8 @@ const readJson = (rel) => JSON.parse(read(rel))
 
 const CAPABILITY_MANIFEST = "protocol/agent-capabilities.json"
 const SECURITY_POLICY = "protocol/external-agent-security-policy.json"
-const CONTRACT_TS = "packages/agent-config-types/src/external-agent-capability.ts"
-const EXECUTION_TS = "packages/agent-config-types/src/agent-execution.ts"
+const CONTRACT_TS = "packages/agent-contracts/src/external-agent-capability.ts"
+const EXECUTION_TS = "packages/agent-contracts/src/capability-ids.ts"
 const MANAGER_TS = "lib/ai/agent/external/manager.ts"
 const RUST_PRESETS = "crates/cognia-external-agent/src/presets.rs"
 const RUST_SANDBOX = "crates/cognia-external-agent/src/sandbox.rs"

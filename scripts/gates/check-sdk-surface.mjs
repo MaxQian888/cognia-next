@@ -44,7 +44,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const MANIFEST_PATH = join(REPO_ROOT, "protocol", "agent-sdk-surface.json")
 const SDK_DIR = join(REPO_ROOT, "sidecar", "node_modules", "@anthropic-ai", "claude-agent-sdk")
 const DTS_PATH = join(SDK_DIR, "sdk.d.ts")
-const CONTRACT_PATH = join(REPO_ROOT, "packages", "agent-config-types", "src", "agent-execution.ts")
+const CONTRACT_PATH = join(REPO_ROOT, "packages", "agent-contracts", "src", "canonical-event.ts")
 const CONTRACT_INDEX_PATH = join(REPO_ROOT, "packages", "agent-config-types", "src", "index.ts")
 
 /**
@@ -58,7 +58,7 @@ const CONTRACT_INDEX_PATH = join(REPO_ROOT, "packages", "agent-config-types", "s
  */
 export function extractCanonicalEventKinds(source) {
   const body = source.match(/CANONICAL_EVENT_KINDS: readonly string\[\] = \[([\s\S]*?)\n\]/)?.[1]
-  if (!body) throw new Error("agent-execution.ts: `CANONICAL_EVENT_KINDS` not found")
+  if (!body) throw new Error("canonical-event.ts: `CANONICAL_EVENT_KINDS` not found")
   return new Set([...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]))
 }
 

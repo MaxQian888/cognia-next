@@ -51,7 +51,7 @@ export function validateOpenCodeV2Discovery(result: unknown): OpenCodeV2Discover
  * the host's fetch.
  */
 export async function discoverOpenCodeV2InProcess(
-  fetch: AgentFetch,
+  hostFetch: AgentFetch,
   signal: AbortSignal
 ): Promise<OpenCodeV2Discovery> {
   const { Service } = await import("@opencode/client/service")
@@ -72,7 +72,7 @@ export async function discoverOpenCodeV2InProcess(
       ([name, value]) => name.trim() && typeof value === "string"
     )
   )
-  const probe = await fetch(new URL("/api/info", url), {
+  const probe = await hostFetch(new URL("/api/info", url), {
     headers,
     signal: AbortSignal.any([signal, AbortSignal.timeout(2_000)]),
   })

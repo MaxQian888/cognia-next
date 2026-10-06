@@ -510,9 +510,7 @@ export function loadAndVerify(read = (p) => readFileSync(resolve(REPO_ROOT, p), 
   const manifest = JSON.parse(read("protocol/agent-control-methods.json"))
   const surface = JSON.parse(read("protocol/agent-sdk-surface.json"))
   const contract = read("packages/agent-config-types/src/index.ts")
-  const capabilityIds = extractCapabilityIds(
-    read("packages/agent-config-types/src/agent-execution.ts")
-  )
+  const capabilityIds = extractCapabilityIds(read("packages/agent-contracts/src/capability-ids.ts"))
 
   const sites = {}
   for (const [site, extract] of Object.entries(SITES)) {

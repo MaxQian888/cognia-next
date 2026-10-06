@@ -42,7 +42,7 @@ const TS_PATH = join(
 )
 const SIDECAR_PATH = join(REPO_ROOT, "sidecar", "src", "runtimes", "capabilities.ts")
 const CONTROL_PATH = join(REPO_ROOT, "sidecar", "src", "host", "control", "control.ts")
-const CONTRACT_PATH = join(REPO_ROOT, "packages", "agent-config-types", "src", "agent-execution.ts")
+const CONTRACT_PATH = join(REPO_ROOT, "packages", "agent-contracts", "src", "capability-ids.ts")
 
 /** Adapters both tables describe. `external` has no sidecar dispatcher. */
 export const SHARED_ADAPTERS = ["claude-agent-sdk", "ai-sdk"]
@@ -111,7 +111,7 @@ export function extractCapabilityIds(source) {
   const body = source.match(
     /AGENT_CAPABILITY_IDS: readonly AgentCapabilityId\[\] = \[([\s\S]*?)\n\]/
   )?.[1]
-  if (!body) throw new Error("agent-execution.ts: `AGENT_CAPABILITY_IDS` not found")
+  if (!body) throw new Error("capability-ids.ts: `AGENT_CAPABILITY_IDS` not found")
   return stringsIn(body)
 }
 
