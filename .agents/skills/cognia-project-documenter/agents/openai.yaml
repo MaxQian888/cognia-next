@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cognia Project Documenter"
+  short_description: "Audit and document every Cognia architecture module"
+  default_prompt: "Use $cognia-project-documenter to inventory and document every module in the current Cognia snapshot."
