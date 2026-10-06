@@ -149,6 +149,7 @@ const REGISTRY = [
   // Repo-specific structural audits (see the ADRs each one cites).
   { script: "audit:slots", group: "audit" },
   { script: "audit:plugin-surfaces", group: "audit" },
+  { script: "audit:plugin-externals", group: "audit" },
   { script: "plugin:pi-latex-workbench:check", group: "audit" },
   // How much of the VS Code API level the extension host claims it provides;
   // the install-time compatibility hint reads the report.

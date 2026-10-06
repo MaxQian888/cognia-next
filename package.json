@@ -292,6 +292,8 @@
     "audit:network-egress:test": "node --test scripts/gates/check-network-egress.test.mjs",
     "audit:pii-boundaries": "node scripts/gates/check-pii-boundaries.mjs",
     "audit:pii-boundaries:test": "node --test scripts/gates/check-pii-boundaries.test.mjs",
+    "audit:plugin-externals": "node scripts/gates/check-plugin-externals.mjs",
+    "audit:plugin-externals:test": "node --test scripts/gates/check-plugin-externals.test.mjs",
     "audit:plugin-surfaces": "ts-node --project scripts/tsconfig.audit.json scripts/gates/audit-plugin-surfaces.ts",
     "audit:pro-ide-constants": "node scripts/gates/check-pro-ide-constants.mjs",
     "audit:pro-ide-perf": "node scripts/gates/check-pro-ide-perf.mjs",

@@ -10,7 +10,7 @@
 //! authors' lockfiles. If esbuild isn't reachable, the error explains
 //! how to add it.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -257,7 +257,9 @@ fn resolve_ts_entry(crate_root: &Path, manifest: &serde_json::Value) -> Result<P
             return contained_existing(crate_root, candidate);
         }
     }
-    bail!("no TypeScript entry point found. Set `tsEntry` in plugin.json or use --skip-build for prebuilt plugins.")
+    bail!(
+        "no TypeScript entry point found. Set `tsEntry` in plugin.json or use --skip-build for prebuilt plugins."
+    )
 }
 
 pub(crate) fn build_only(crate_root: &Path, manifest: &serde_json::Value) -> Result<()> {
@@ -267,32 +269,29 @@ pub(crate) fn build_only(crate_root: &Path, manifest: &serde_json::Value) -> Res
 
 /// Specifiers the bundle must leave for the host to resolve.
 ///
-/// The first two are the host's path aliases. The rest mirror the loader's
-/// shared-module whitelist (`lib/plugin/core/shared-modules.ts`) exactly, and
-/// the mirroring is load-bearing in both directions:
+/// Mirrors the loader's shared-module whitelist (`lib/plugin/core/shared-modules.ts`)
+/// plus `react-dom`, with SDK subpaths covered by one wildcard. This contract
+/// is load-bearing in both directions:
 ///
 ///   * Inlining any of them is fatal for `react` and its jsx runtimes — a
 ///     second React instance carries its own hook dispatcher, so a plugin
 ///     component rendered inside the host's tree throws `Invalid hook call`.
-///     Note `--external:react` does NOT cover `react/jsx-runtime`: esbuild
-///     matches the import path literally, so the subpaths esbuild's own
-///     automatic JSX transform emits need their own entries or they get
-///     bundled and silently reintroduce the second copy.
+///     Keep the JSX runtime specifiers explicit alongside the host whitelist.
 ///   * Externalising something the host does *not* share only moves the
 ///     failure to `require()` time — which is the intent for `react-dom`.
 ///     Keeping it external means it is never bundled, and the author gets the
 ///     loader's explicit "not available to plugins" error instead of a second
 ///     reconciler quietly rendering into a detached tree.
+///
+/// Host-private `@/` aliases must never survive as externals: the loader rejects
+/// them. Author import validation belongs to the existing source lint gate.
 const ESBUILD_EXTERNALS: &[&str] = &[
-    "@/types/plugin",
-    "@/lib/*",
     "react",
     "react/jsx-runtime",
     "react/jsx-dev-runtime",
     "react-dom",
     "@cognia/plugin-sdk",
-    // esbuild matches import paths literally, so the bare package above does
-    // not cover its subpaths. Every published subpath is host-shared: most are
+    // Every published subpath is host-shared: most are
     // registries (`api/skill`, `api/i18n`, …) and `api/effort-surface` reads
     // host stores, so a bundled copy registers into — or answers from — state
     // the host never sees. The loader primes the ones a bundle requires.
@@ -397,7 +396,9 @@ fn bundle_styles(root: &Path, plan: &mut FrontendBuildPlan) -> Result<()> {
             .iter()
             .any(|source| source.canonicalize().ok() == outfile.canonicalize().ok())
     {
-        bail!("styles output would overwrite an authored stylesheet; keep sources outside dist/styles.bundle.css");
+        bail!(
+            "styles output would overwrite an authored stylesheet; keep sources outside dist/styles.bundle.css"
+        );
     }
     let input = root.join(format!("dist/.cognia-styles-{}.css", uuid::Uuid::new_v4()));
     let imports = styles
@@ -603,22 +604,56 @@ mod tests {
     /// that the host does not hand out). Keep this list in sync with
     /// `PLUGIN_SHARED_MODULES` in `lib/plugin/core/shared-modules.ts`.
     #[test]
-    fn esbuild_externalises_every_host_shared_module() {
+    fn externals_match_host_shared_modules() {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lib/plugin/core/shared-modules.ts"),
+        )
+        .expect("read host shared-module whitelist");
+        let array = source
+            .split_once("PLUGIN_SHARED_MODULES = [")
+            .expect("shared-module declaration changed; update the parser")
+            .1;
+        let uncommented = array
+            .lines()
+            .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = uncommented
+            .split_once(']')
+            .expect("unterminated whitelist")
+            .0;
+        let shared: Vec<&str> = body
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| {
+                entry
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .expect("shared-module whitelist must contain string literals")
+            })
+            .collect();
+        assert!(
+            shared.contains(&"react"),
+            "whitelist parser returned no React"
+        );
+        assert!(shared.contains(&"@cognia/plugin-sdk"));
+        let mut expected: Vec<&str> = shared
+            .into_iter()
+            .filter(|module| !module.starts_with("@cognia/plugin-sdk/"))
+            .chain(["react-dom", "@cognia/plugin-sdk/*"])
+            .collect();
         let args = esbuild_args(Path::new("src/index.ts"), Path::new("dist/index.js"));
-        for shared in [
-            "react",
-            "react/jsx-runtime",
-            "react/jsx-dev-runtime",
-            "@cognia/plugin-sdk",
-            "@cognia/plugin-sdk/*",
-            "@cognia/plugin-ui",
-            "lucide-react",
-        ] {
-            assert!(
-                args.iter().any(|a| a == &format!("--external:{shared}")),
-                "missing --external:{shared} — it would be inlined into the plugin bundle"
-            );
-        }
+        let mut actual: Vec<&str> = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--external:"))
+            .collect();
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(
+            actual, expected,
+            "missing externals get bundled; extra externals fail at load"
+        );
     }
 
     #[test]
@@ -878,13 +913,15 @@ mod tests {
         std::fs::create_dir_all(root.join("dist")).unwrap();
         std::fs::write(root.join("dist/index.js"), "main").unwrap();
         std::os::unix::fs::symlink(outside.path(), root.join("assets")).unwrap();
-        assert!(pack_frontend_bundle(
-            &root.join("plugin.zip"),
-            root,
-            &json!({"main":"dist/index.js"}),
-            "dist/index.js"
-        )
-        .is_err());
+        assert!(
+            pack_frontend_bundle(
+                &root.join("plugin.zip"),
+                root,
+                &json!({"main":"dist/index.js"}),
+                "dist/index.js"
+            )
+            .is_err()
+        );
     }
     #[test]
     fn archive_includes_plugin_owned_lsp_and_ide_executables() {

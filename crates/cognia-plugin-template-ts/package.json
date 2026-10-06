@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.18.0",
   "description": "Cognia frontend TypeScript plugin template",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --external:react --external:react/jsx-runtime --external:react/jsx-dev-runtime --external:@cognia/plugin-sdk --external:@cognia/plugin-ui --log-level=info",
+    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --external:react --external:react/jsx-runtime --external:react/jsx-dev-runtime --external:@cognia/plugin-sdk \"--external:@cognia/plugin-sdk/*\" --external:@cognia/plugin-ui --external:lucide-react --log-level=info",
     "test": "jest",
     "test:watch": "jest --watch"
   },

@@ -155,6 +155,7 @@ export const EXEMPTIONS = {
   // --- per-script self-tests, all covered by a scripts:test:* aggregate ---
   "check:all:test": "covered by scripts:test:gates",
   "audit:command-parity:test": "covered by scripts:test:gates",
+  "audit:plugin-externals:test": "covered by scripts:test:gates",
   "audit:pro-ide-perf:test": "covered by scripts:test:gates and scripts:test:ci",
   "audit:companion-command-manifest:test": "covered by scripts:test:gates",
   "audit:command-grammar:test": "covered by scripts:test:gates",
