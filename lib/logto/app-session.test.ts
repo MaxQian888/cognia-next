@@ -47,6 +47,7 @@ function base(over: Partial<LogtoAppSessionDeps>): LogtoAppSessionDeps {
     markReauth: jest.fn(async () => {}),
     clearReauth: jest.fn(async () => {}),
     save: jest.fn(async () => {}),
+    locks: null,
     ...over,
   }
 }
@@ -146,6 +147,68 @@ describe("resolveLogtoSession", () => {
     expect(resolved).toMatchObject({ status: "reauth-required", reason: "revoked" })
     expect(save).not.toHaveBeenCalled()
     expect(markReauth).toHaveBeenCalledTimes(1)
+  })
+
+  it("concurrent callers share one refresh instead of racing the rotated token", async () => {
+    let stored = session({ expiresAt: NOW - 1 })
+    const refreshed = session({ accessToken: "at2", refreshToken: "rt2" })
+    let release!: () => void
+    const refresh = jest.fn(async () => {
+      await new Promise<void>((resolve) => (release = resolve))
+      return refreshed
+    })
+    const deps = base({
+      load: jest.fn(async () => stored),
+      refresh,
+      save: jest.fn(async (next: LogtoSession) => {
+        stored = next
+      }),
+      localAccountId: "acct_race",
+    })
+    const results = Promise.all([resolveLogtoSession(deps), resolveLogtoSession(deps)])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    release()
+    expect(await results).toEqual([
+      { status: "active", session: refreshed },
+      { status: "active", session: refreshed },
+    ])
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-reads the session once it holds the lock, so a refresh another tab made is reused", async () => {
+    const stale = session({ expiresAt: NOW - 1 })
+    const fresh = session({ accessToken: "at2", refreshToken: "rt2" })
+    const load = jest.fn().mockResolvedValueOnce(stale).mockResolvedValue(fresh)
+    const refresh = jest.fn()
+    const request = jest.fn((_name: string, task: () => Promise<unknown>) => task())
+    const resolved = await resolveLogtoSession(
+      base({ load, refresh, locks: { request } as never, localAccountId: "acct_tabs" })
+    )
+    expect(request).toHaveBeenCalledWith("cognia-logto-refresh:acct_tabs", expect.any(Function))
+    expect(refresh).not.toHaveBeenCalled()
+    expect(resolved).toEqual({ status: "active", session: fresh })
+  })
+
+  it("a refusal after someone else rotated the token returns their session, not a dead login", async () => {
+    const stale = session({ expiresAt: NOW - 1 })
+    const theirs = session({ accessToken: "at2", refreshToken: "rt2" })
+    const load = jest
+      .fn()
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValue(theirs)
+    const refresh = jest.fn(async () => {
+      throw new LogtoRefreshError("invalid_grant", "refused", {
+        status: 400,
+        oauthError: "invalid_grant",
+      })
+    })
+    const markReauth = jest.fn(async () => {})
+    const resolved = await resolveLogtoSession(
+      base({ load, refresh, markReauth, localAccountId: "acct_rotated" })
+    )
+    expect(resolved).toEqual({ status: "active", session: theirs })
+    expect(markReauth).not.toHaveBeenCalled()
   })
 
   it("reads an expiry description as `expired` rather than `revoked`", async () => {

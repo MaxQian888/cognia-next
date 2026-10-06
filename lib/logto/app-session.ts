@@ -18,6 +18,15 @@
  * `reauth-required` marker with the tokens cleared, and an unreachable issuer
  * is `offline` with the material kept for the next attempt.
  *
+ * # One refresh at a time
+ *
+ * The issuer rotates the refresh token on use, so two refreshes with the same
+ * token race: the first wins and the second is refused. Callers ask for a
+ * token concurrently (account sync's push, pull and poller, other tabs), so
+ * refreshes are serialized per profile: one in flight per tab, and a Web Lock
+ * across tabs. Inside it the session is read again, and a refusal is believed
+ * only if nobody else stored a newer refresh token meanwhile.
+ *
  * Every effect is injectable so the orchestration unit-tests without a real
  * browser round-trip, network, or keyring.
  */
@@ -67,6 +76,8 @@ export interface LogtoAppSessionDeps {
   clearReauth?: typeof clearLogtoReauthMarker
   fetchImpl?: typeof fetch
   now?: () => number
+  /** Serializes refreshes across tabs; `null` for none (Node, tests). Defaults to `navigator.locks`. */
+  locks?: Pick<LockManager, "request"> | null
 }
 
 /**
@@ -133,38 +144,72 @@ export async function resolveLogtoSession(
   const markReauth = deps.markReauth ?? markLogtoSessionForReauth
   const now = deps.now ?? Date.now
 
-  const session = await load(deps.localAccountId)
-  if (!session) {
-    const marker = await loadReauth(deps.localAccountId)
-    if (marker) {
-      return { status: "reauth-required", reason: marker.reason, metadata: marker.metadata }
+  const stored = async (): Promise<LogtoSessionResolution | LogtoSession> => {
+    const session = await load(deps.localAccountId)
+    if (!session) {
+      const marker = await loadReauth(deps.localAccountId)
+      if (marker) {
+        return { status: "reauth-required", reason: marker.reason, metadata: marker.metadata }
+      }
+      return { status: "none" }
     }
-    return { status: "none" }
+    if (!isStale(session, now())) return { status: "active", session }
+    return session
   }
 
-  if (!isStale(session, now())) return { status: "active", session }
+  const first = await stored()
+  if (!isStaleSession(first)) return first
 
-  const metadata = toLogtoSessionMetadata(session)
-  if (!session.refreshToken) {
-    // Nothing to refresh with. The token is past its expiry and the only way
-    // forward is a new interactive sign-in, so say so and drop the token. It
-    // is not a credential any more, only a liability.
-    const marker: LogtoReauthMarker = { reason: "expired", metadata, at: now() }
-    await markReauth(marker, deps.localAccountId)
-    return { status: "reauth-required", reason: "expired", metadata }
+  const key = deps.localAccountId ?? ""
+  const pending = refreshesInFlight.get(key)
+  if (pending) return pending
+  const run = withRefreshLock(key, deps, async () => {
+    // Another caller (or tab) may have refreshed while this one waited.
+    const session = await stored()
+    if (!isStaleSession(session)) return session
+    return refreshStale(session)
+  }).finally(() => {
+    if (refreshesInFlight.get(key) === run) refreshesInFlight.delete(key)
+  })
+  refreshesInFlight.set(key, run)
+  return run
+
+  async function refreshStale(session: LogtoSession): Promise<LogtoSessionResolution> {
+    const metadata = toLogtoSessionMetadata(session)
+    if (!session.refreshToken) {
+      // Nothing to refresh with. The token is past its expiry and the only way
+      // forward is a new interactive sign-in, so say so and drop the token. It
+      // is not a credential any more, only a liability.
+      const marker: LogtoReauthMarker = { reason: "expired", metadata, at: now() }
+      await markReauth(marker, deps.localAccountId)
+      return { status: "reauth-required", reason: "expired", metadata }
+    }
+    try {
+      const refreshed = await refresh(
+        refreshConfigFor(session),
+        session.refreshToken,
+        issuerFetch(deps)
+      )
+      await save(refreshed, deps.localAccountId)
+      return { status: "active", session: refreshed }
+    } catch (error) {
+      return refreshFailed(session, metadata, error)
+    }
   }
 
-  try {
-    const refreshed = await refresh(
-      refreshConfigFor(session),
-      session.refreshToken,
-      issuerFetch(deps)
-    )
-    await save(refreshed, deps.localAccountId)
-    return { status: "active", session: refreshed }
-  } catch (error) {
+  async function refreshFailed(
+    session: LogtoSession,
+    metadata: LogtoSessionMetadata,
+    error: unknown
+  ): Promise<LogtoSessionResolution> {
     if (isLogtoRefreshError(error)) {
       if (error.permanent) {
+        // Refused because someone else already used (and rotated) this refresh
+        // token? Then their session is the one to use, not a dead login.
+        const latest = await load(deps.localAccountId)
+        if (latest && latest.refreshToken !== session.refreshToken && !isStale(latest, now())) {
+          return { status: "active", session: latest }
+        }
         const marker: LogtoReauthMarker = { reason: error.reauthReason, metadata, at: now() }
         await markReauth(marker, deps.localAccountId)
         return { status: "reauth-required", reason: marker.reason, metadata }
@@ -180,6 +225,28 @@ export async function resolveLogtoSession(
       metadata,
     }
   }
+}
+
+/** Refreshes in flight in this tab, by profile. */
+const refreshesInFlight = new Map<string, Promise<LogtoSessionResolution>>()
+
+function isStaleSession(value: LogtoSessionResolution | LogtoSession): value is LogtoSession {
+  return !("status" in value)
+}
+
+function withRefreshLock<T>(
+  key: string,
+  deps: LogtoAppSessionDeps,
+  task: () => Promise<T>
+): Promise<T> {
+  const locks =
+    deps.locks !== undefined
+      ? deps.locks
+      : typeof navigator !== "undefined" && navigator.locks
+        ? navigator.locks
+        : null
+  if (!locks) return task()
+  return locks.request(`cognia-logto-refresh:${key}`, task) as Promise<T>
 }
 
 /**
