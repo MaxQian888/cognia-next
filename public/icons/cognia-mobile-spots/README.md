@@ -19,19 +19,28 @@ identity and are outside this feature-illustration inventory.
 
 - `style-spec.json` freezes the palette and construction system for later custom batches.
 - `icon-manifest.json` records assets and coverage mappings. `grid` and
-  `position` describe only the original 4×4 sheet.
+  `position` describe only the original 4×4 sheet. Each icon's `source` is
+  relative to `sourceRoot`, which is resolved from this manifest's directory.
 - `generation-prompt.md` stores the original sheet prompt.
 - `expansion-prompts.json` stores the shared prompt, individual subjects,
   reference, and built-in generation settings for the additions.
-- `raw/cognia-chibi-companion.png` is the generated 4×4 source sheet.
-- `raw/expansion/*.png` preserves the individual built-in image generation outputs.
+- `../../../assets/icons/cognia-mobile-spots/raw/cognia-chibi-companion.png` is the
+  generated 4×4 source sheet.
+- `../../../assets/icons/cognia-mobile-spots/raw/expansion/*.png` preserves the
+  individual built-in image generation outputs.
 - `png/*.png` are transparent runtime assets; new icons are 512×512.
 - `webp/*.webp` contains lossless alternatives for the additions.
-- `qa/contact-sheet-magenta.png` is the contrasting-background QA sheet.
-- `qa/expanded-light.png`, `qa/expanded-magenta.png`, and
-  `qa/expanded-dark-48.png` show all 81 icons after the expansion.
-- `qa/index.html` previews the complete inventory on light, dark, and magenta
+- `../../../assets/icons/cognia-mobile-spots/qa/contact-sheet-magenta.png` is the
+  contrasting-background QA sheet. The same directory's `expanded-light.png`,
+  `expanded-magenta.png`, and `expanded-dark-48.png` show all 81 icons.
+- [Authoring preview](../../../assets/icons/cognia-mobile-spots/qa/index.html)
+  previews the complete inventory on light, dark, and magenta
   backgrounds, with search and adjustable sizes.
+
+Authoring files live outside `public/` so Next.js exports and PWA precaching
+only receive runtime assets. Open the preview locally from the checkout; its
+relative image paths point back to the PNG sources here. Preserve these source
+PNGs because the sign-in icon generator also consumes them.
 
 For additions, use `png/chat.png` as the shared identity/style reference and
 generate one transparent image per feature. Preserve the palette, face,

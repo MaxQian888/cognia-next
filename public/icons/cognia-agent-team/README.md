@@ -6,13 +6,20 @@ expressions, and compact props to distinguish Agent Team roles.
 
 ## Deliverables
 
-- `raw/concept-sheet.png` — approved 4×4 source concept on grey
-- `contact-sheet-transparent.png` — production 4×4 transparent sheet, 2048×2048
+- `../../../assets/icons/cognia-agent-team/raw/concept-sheet.png` — approved 4×4
+  source concept on grey
+- `../../../assets/icons/cognia-agent-team/contact-sheet-transparent.png` —
+  production 4×4 transparent sheet, 2048×2048
 - `png/*.png` — 16 transparent 512×512 PNG avatars
 - `webp/*.webp` — 16 lossless transparent 512×512 WebP avatars
-- `qa/contact-sheet-magenta.png` — contrast-background cutout QA
+- `../../../assets/icons/cognia-agent-team/qa/contact-sheet-magenta.png` —
+  contrast-background cutout QA
 - `icon-manifest.json` — stable IDs, bilingual labels, and grid order
 - `style-spec.json` — frozen identity, palette, and construction rules
+
+Source sheets and QA files are preserved under `assets/icons/cognia-agent-team/`
+at the repository root, outside Next.js's `public/` export and PWA precache.
+Runtime PNG/WebP paths remain in this directory.
 
 ## Recommended use
 

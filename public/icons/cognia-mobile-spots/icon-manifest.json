@@ -1,5 +1,6 @@
 {
   "style": "cognia-chibi-companion",
+  "sourceRoot": "../../../assets/icons/cognia-mobile-spots",
   "grid": 4,
   "runtimeFormats": {
     "default": "png",

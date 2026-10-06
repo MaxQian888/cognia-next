@@ -1,7 +1,7 @@
 # Generation prompt
 
 Built-in image generation was used with `public/icons/icon-512.png` as the strict
-identity reference and `public/icons/cognia-mobile-spots/raw/cognia-chibi-companion.png`
+identity reference and `assets/icons/cognia-mobile-spots/raw/cognia-chibi-companion.png`
 as the chibi simplification reference.
 
 ## Core direction
