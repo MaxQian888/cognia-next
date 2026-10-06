@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
 import { startAccountSyncEngine, type AccountSyncEngineDeps } from "@/lib/account-sync/data/engine"
+import { publishRemoteChanges } from "@/lib/account-sync/data/remote-changes"
 import {
   ownAccountDatabase,
   subscribeDatabaseAuthority,
@@ -96,6 +97,8 @@ export function useAccountSyncEngine(options: UseAccountSyncEngineOptions): void
       },
       onApplied: (tables) => {
         if (tables.has("settings")) void reload().catch(() => undefined)
+        // The open chat and other store-held views refresh from what landed.
+        publishRemoteChanges(tables)
       },
       onRegistryChanged: () => store().requestRefresh(),
     })

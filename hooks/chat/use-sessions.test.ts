@@ -168,6 +168,7 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => {
   return { ...actual, emitSystemBusEvent: jest.fn() }
 })
 
+import { publishRemoteChanges } from "@/lib/account-sync/data/remote-changes"
 import { useSessions } from "./use-sessions"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 
@@ -484,6 +485,32 @@ describe("useSessions", () => {
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
     expect(chatStoreState.hydrateSessionActiveBranches).toHaveBeenCalledWith("s1", {})
+  })
+
+  it("reloads the open transcript when account sync applies another device's messages", async () => {
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: chatStoreState.messages }
+    listMessagesMock.mockResolvedValueOnce([{ id: "m1" }])
+    renderHook(() => useSessions())
+    await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
+
+    listMessagesMock.mockResolvedValueOnce([{ id: "m1" }, { id: "m2" }])
+    act(() => publishRemoteChanges(new Set(["sessions"])))
+    act(() => publishRemoteChanges(new Set(["messages"])))
+    await waitFor(() =>
+      expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }, { id: "m2" }])
+    )
+    expect(listMessagesMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("leaves a transcript this tab is streaming alone when remote messages land", async () => {
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: chatStoreState.messages, status: "streaming" }
+    renderHook(() => useSessions())
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledTimes(1))
+    act(() => publishRemoteChanges(new Set(["messages"])))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(listMessagesMock).toHaveBeenCalledTimes(1)
   })
 
   it("closes tool calls a failed turn left running, and writes only those rows back", async () => {

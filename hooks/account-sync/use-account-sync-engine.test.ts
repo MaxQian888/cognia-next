@@ -15,6 +15,7 @@ import { useAccountSyncStore } from "@/stores/account-sync/account-sync-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { reloadSettingsFromDatabase, useAccountSyncEngine } from "./use-account-sync-engine"
+import { subscribeRemoteChanges } from "@/lib/account-sync/data/remote-changes"
 
 const context = { session: { localAccountId: "acct_1" } } as unknown as AccountSyncContext
 const db = { name: "own-db" } as CogniaDB
@@ -123,7 +124,11 @@ describe("useAccountSyncEngine", () => {
     expect(useAccountSyncStore.getState().engineStatus).toEqual(removed)
     expect(useAccountSyncStore.getState().refreshNonce).toBe(1)
 
+    const heard: string[][] = []
+    const stop = subscribeRemoteChanges((tables) => heard.push([...tables]))
     act(() => deps.onApplied?.(new Set(["sessions"])))
+    stop()
+    expect(heard).toEqual([["sessions"]])
     expect(h.reloadSettings).not.toHaveBeenCalled()
     act(() => deps.onApplied?.(new Set(["settings"])))
     expect(h.reloadSettings).toHaveBeenCalledTimes(1)

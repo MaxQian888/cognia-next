@@ -31,6 +31,7 @@ import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { subscribeRemoteChanges } from "@/lib/account-sync/data/remote-changes"
 import { dedupeSessionsById, shareUnchangedSessions } from "@/lib/chat/conversation-list-model"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
@@ -231,6 +232,20 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     })
   }, [activeSessionId])
 
+  // Account sync writes another device's messages straight into Dexie; reload
+  // the visible transcript when they land, unless this tab is mid-turn there
+  // (the hydration below also yields to any newer in-memory messages).
+  const [remoteMessagesNonce, setRemoteMessagesNonce] = useState(0)
+  useEffect(() => {
+    if (!activeSessionId) return
+    return subscribeRemoteChanges((tables) => {
+      if (!tables.has("messages")) return
+      const status = useChatStore.getState().sessions[activeSessionId]?.status
+      if (status === "streaming" || status === "awaiting_approval") return
+      setRemoteMessagesNonce((value) => value + 1)
+    })
+  }, [activeSessionId])
+
   // Shared projections commit their messages and cursor together. Subscribe to
   // that cursor so incoming events refresh the currently visible transcript.
   const sharedProjectionCursor = exposedSessions.find((row) => row.id === activeSessionId)
@@ -350,6 +365,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     messagesReloadNonce,
     historyInvalidationNonce,
     sharedProjectionCursor,
+    remoteMessagesNonce,
   ])
 
   const select = useCallback(
