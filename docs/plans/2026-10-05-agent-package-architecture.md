@@ -332,7 +332,7 @@ root instead of `built-ins/index.ts` importing `../teams`), `TeamRunContextRegis
 - Plugin ABI wrapper (§4.3) and Python proxy completeness.
 - Accept: every matrix row has a package home; manager has no `instanceof` vendor classes;
   `lib/agent-ecosystem` derives from manifests (Goose included); CLI allowlist gated.
-- Status: in progress. Plugin ABI wrapper done (`c932f3275`). Aider done: `@cognia/agent-aider`
+- Status: done. Plugin ABI wrapper done (`c932f3275`). Aider done: `@cognia/agent-aider`
   over the process host plus a new `AgentFileHost`; the prompt-gate decoding moved to
   `@cognia/agent-runtime-kit/prompt-gate` (the app's `outbound-prompt-pii` binds it to the PII
   gate). The remaining files carry another workstream's uncommitted changes that span Rust
