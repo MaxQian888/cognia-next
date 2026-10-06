@@ -14110,6 +14110,10 @@
         "hint": "Cognia couldn't reach the paired device — check that both are on the same network.",
         "label": "Device unreachable"
       },
+      "hostSessionRefused": {
+        "hint": "The paired host refused this new chat — its workspace or agent doesn't exist on that host, or this device lacks Agent Control. Pick a workspace and agent the host has, then start the chat again.",
+        "label": "Conversation not created on the host"
+      },
       "hostUnavailable": {
         "hint": "The remote host that should run this turn isn't reachable — retry, or check its configuration.",
         "label": "Remote host unavailable"

@@ -31,6 +31,8 @@
  *   - `src-tauri/src/companion_api/workflow_api.rs` (`workflow_api_*`)
  *   - `src-tauri/src/gateway_brain_bridge.rs` (`router_fusion_run_*` and
  *     `router_fusion_passthrough_*`, ADR-0188 B2)
+ *   - `src-tauri/src/companion_api/rpc/chat.rs` (`paired_turn_*`, a paired
+ *     device's direct turn admitted before the sidecar sees it)
  * An arm with no counterpart there is unreachable; a Rust route with no arm
  * here fails with `unknown desktop-write command`.
  *
@@ -319,6 +321,13 @@ export async function dispatchCommand(
     return dispatchRouterFusionCompanionCommand(command, payload, {
       settings: await currentRouterFusionGateSettings(),
     })
+  }
+  // Durable admission of a paired device's direct turn, asked for by the
+  // companion server before it hands the prompt to the sidecar (`send_arm` in
+  // `src-tauri/src/companion_api/rpc/chat.rs`). Internal: no device reaches it.
+  const pairedTurn = await import("@/lib/work-submission/paired-turn-adapter")
+  if (pairedTurn.isPairedTurnCommand(command)) {
+    return pairedTurn.dispatchPairedTurnCommand(command, payload)
   }
   if (
     command === "workflow_api_run_create" ||

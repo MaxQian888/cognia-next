@@ -1,4 +1,5 @@
-import { createSession, updateSession } from "@/lib/db/sessions"
+import { createSession, deleteSession, updateSession } from "@/lib/db/sessions"
+import { createSessionOnPairedHost, HostSessionRefusedError } from "@/lib/chat/host-session-create"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { projectDefaultAgentId } from "@/lib/workspace/project-default-agent"
 import { useChatStore } from "@/stores/chat"
@@ -327,6 +328,23 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
   // pick becomes the workspace default for the next new chat. "" clears it.
   if (ownerProjectId && environmentId !== undefined && rememberChoice) {
     updateProject(ownerProjectId, { defaultEnvironmentId: environmentId || undefined })
+  }
+
+  // A paired Host has to hold the row before the conversation is shown: its
+  // turns run there, and every Host-side write for it needs the row. Last,
+  // because the workspace attribution above can still move. A refusal means
+  // the Host will not run this conversation, so it is not created here either.
+  try {
+    await createSessionOnPairedHost(session, { title: sessionSeed.title })
+  } catch (error) {
+    if (!(error instanceof HostSessionRefusedError)) throw error
+    if (ownerProjectId)
+      useProjectStore.getState().removeSessionFromProject(ownerProjectId, session.id)
+    await deleteSession(session.id)
+    dispatchDiagnostic(
+      createDiagnostic("hostSessionRefused", { source: "chat", message: error.code })
+    )
+    throw error
   }
 
   if (partial?.activate ?? true) {

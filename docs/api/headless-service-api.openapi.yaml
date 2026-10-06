@@ -2635,6 +2635,9 @@ paths:
                 command_id:
                   type: string
                   description: Also accepted as `commandId`.
+                message_id:
+                  type: string
+                  description: Also accepted as `messageId`.
                 sessionId:
                   type: string
                   example: ""
@@ -2642,6 +2645,9 @@ paths:
                 commandId:
                   type: string
                   description: Also accepted as `commandId`.
+                messageId:
+                  type: string
+                  description: Also accepted as `messageId`.
               additionalProperties: false
               allOf:
                 - anyOf:
@@ -76923,7 +76929,6 @@ paths:
                   items:
                     type: object
                     required:
-                      - protocolVersion
                       - channel
                       - accountId
                       - runtimeTargetId
@@ -76935,9 +76940,6 @@ paths:
                       - createdAt
                       - action
                     properties:
-                      protocolVersion:
-                        type: integer
-                        const: 1
                       channel:
                         type: string
                         pattern: ^cognia://target/

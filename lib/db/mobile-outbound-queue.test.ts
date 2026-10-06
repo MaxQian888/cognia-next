@@ -12,6 +12,7 @@ import {
   enqueueHostStateAction,
   enqueueHostStateIntentIfAvailable,
   enqueueUnlessQueued,
+  awaitHostStateIntentSettlement,
   hostOwnsSessionState,
   hostStateSessionIntentAvailable,
   isAbandonedClaim,
@@ -772,6 +773,83 @@ describe("mobile outbound queue target isolation", () => {
     expect(action).not.toHaveProperty("sessionId")
     // Folder intents are last-writer-wins: no base revision rides along.
     expect(action).not.toHaveProperty("baseRevision")
+  })
+
+  it("stamps a brand-new conversation's create from the session index", async () => {
+    const indexChannel = sessionIndexChannel(scope.targetId)
+    await getDb().hostStateChannels.put({
+      channel: indexChannel,
+      hostId: "host-authority",
+      hostGeneration: 7,
+      hostSeq: 11,
+      revision: 4,
+      digest: "digest",
+      state: { kind: "session-index", channel: indexChannel, revision: 4, sessions: [] },
+      updatedAt: 100,
+    })
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations: ["host_state_submit"], grants: [] },
+    })
+
+    const row = await enqueueHostStateIntentIfAvailable({
+      sessionId: "session-new",
+      actionId: "create-1",
+      clientId: "client-a",
+      nowMs: 300,
+      action: { kind: "session.create", seed: { projectId: "p1", model: "m" } },
+    })
+
+    // Addressed to the conversation, stamped with the index's Host and generation.
+    const channel = sessionStateChannel(scope.targetId, "session-new")
+    expect(row?.channel).toBe(channel)
+    const [action] = (row?.payload as { actions: Array<Record<string, unknown>> }).actions
+    expect(action).toMatchObject({
+      channel,
+      sessionId: "session-new",
+      hostId: "host-authority",
+      hostGeneration: 7,
+      action: { kind: "session.create", seed: { projectId: "p1", model: "m" } },
+    })
+    expect(action).not.toHaveProperty("baseRevision")
+
+    // Any other intent for an unconfirmed conversation still waits for its snapshot.
+    await expect(
+      enqueueHostStateIntentIfAvailable({
+        sessionId: "session-new",
+        action: { kind: "session.rename", title: "x" },
+      })
+    ).resolves.toBeNull()
+  })
+
+  it("reports a queued row's Host answer, or that it is still pending", async () => {
+    await getDb().mobileOutboundQueue.bulkPut([
+      { id: "r-sent", status: "sent" },
+      { id: "r-refused", status: "rejected", rejectionCode: "host_state_project_not_found" },
+      { id: "r-dead", status: "deadlettered" },
+      { id: "r-pending", status: "pending" },
+    ] as never)
+    await expect(awaitHostStateIntentSettlement("r-sent", { timeoutMs: 0 })).resolves.toEqual({
+      outcome: "applied",
+    })
+    await expect(awaitHostStateIntentSettlement("r-refused", { timeoutMs: 0 })).resolves.toEqual({
+      outcome: "rejected",
+      code: "host_state_project_not_found",
+    })
+    await expect(awaitHostStateIntentSettlement("r-dead", { timeoutMs: 0 })).resolves.toEqual({
+      outcome: "rejected",
+      code: "host_state_deadlettered",
+    })
+    await expect(
+      awaitHostStateIntentSettlement("r-pending", { timeoutMs: 30, pollMs: 5 })
+    ).resolves.toEqual({ outcome: "pending" })
+
+    // A row that settles while the caller waits is reported as soon as it lands.
+    const waiting = awaitHostStateIntentSettlement("r-pending", { timeoutMs: 2_000, pollMs: 5 })
+    await getDb().mobileOutboundQueue.update("r-pending", { status: "sent" })
+    await expect(waiting).resolves.toEqual({ outcome: "applied" })
   })
 
   it("refuses to address a folder intent to a session, or a session intent to nothing", async () => {

@@ -41,6 +41,14 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
   isStandaloneChatMode: () => mockIsStandaloneChatMode(),
 }))
 
+// The paired-Host create is unit-tested in its own module; here only its
+// placement (after attribution, before activation) and a refusal's rollback.
+const mockCreateOnHost = jest.fn(async (..._args: unknown[]) => "local" as string)
+jest.mock("@/lib/chat/host-session-create", () => ({
+  ...jest.requireActual("@/lib/chat/host-session-create"),
+  createSessionOnPairedHost: (...args: unknown[]) => mockCreateOnHost(...args),
+}))
+
 const emitMock = emitSystemBusEvent as jest.MockedFunction<typeof emitSystemBusEvent>
 
 const dbFixture = createDbTestFixture()
@@ -51,6 +59,7 @@ beforeEach(async () => {
   await dbFixture.restore()
   emitMock.mockClear()
   mockDispatchDiagnostic.mockClear()
+  mockCreateOnHost.mockReset().mockResolvedValue("local")
   mockIsStandaloneChatMode.mockReset().mockReturnValue(false)
   mockLoadDeclaredWorkspace.mockReset().mockResolvedValue(null)
   mockEnsureDefaultWorkspace
@@ -68,6 +77,51 @@ describe("startNewSession", () => {
 
     await expect(getSession(session.id)).resolves.toMatchObject({ id: session.id })
     expect(useChatStore.getState().activeSessionId).toBe(session.id)
+  })
+
+  it("creates the conversation on a paired Host before showing it", async () => {
+    let activeWhenCreated: string | null | undefined
+    mockCreateOnHost.mockImplementation(async () => {
+      activeWhenCreated = useChatStore.getState().activeSessionId
+      return "host"
+    })
+
+    const session = await startNewSession({ title: "Plan the launch", characterId: "c_ada" })
+
+    expect(mockCreateOnHost).toHaveBeenCalledWith(
+      expect.objectContaining({ id: session.id, characterId: "c_ada" }),
+      { title: "Plan the launch" }
+    )
+    expect(activeWhenCreated).not.toBe(session.id)
+    expect(useChatStore.getState().activeSessionId).toBe(session.id)
+  })
+
+  it("creates nothing anywhere when the paired Host refuses the conversation", async () => {
+    const { HostSessionRefusedError } = jest.requireActual("@/lib/chat/host-session-create")
+    let createdId = ""
+    mockCreateOnHost.mockImplementation(async (...args: unknown[]) => {
+      createdId = (args[0] as { id: string }).id
+      throw new HostSessionRefusedError("host_state_project_not_found")
+    })
+
+    await expect(startNewSession()).rejects.toMatchObject({
+      code: "host_state_project_not_found",
+    })
+
+    await expect(getSession(createdId)).resolves.toBeUndefined()
+    expect(useChatStore.getState().activeSessionId).not.toBe(createdId)
+    expect(emitMock).not.toHaveBeenCalledWith(SystemEvents.SESSION_CREATED, expect.anything())
+    expect(mockDispatchDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "hostSessionRefused" })
+    )
+  })
+
+  it("lets a failure that is not the Host's answer propagate untouched", async () => {
+    mockCreateOnHost.mockRejectedValue(new Error("host_state_outbox_full"))
+    await expect(startNewSession()).rejects.toThrow("host_state_outbox_full")
+    expect(mockDispatchDiagnostic).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "hostSessionRefused" })
+    )
   })
 
   it("announces the new session on the plugin bus", async () => {

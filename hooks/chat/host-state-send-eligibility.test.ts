@@ -1,6 +1,7 @@
 import { hostStateSendEligible, type HostStateSendFacts } from "./host-state-send-eligibility"
 
 const plain: HostStateSendFacts = {
+  pairedHost: false,
   fusionRun: false,
   routerFusionStamped: false,
   skipAppend: false,
@@ -25,6 +26,7 @@ describe("hostStateSendEligible", () => {
   })
 
   it.each<[string, Partial<HostStateSendFacts>]>([
+    ["a turn using the paired host transport", { pairedHost: true }],
     ["a re-issued turn", { skipAppend: true }],
     ["block content", { contentIsString: false }],
     ["a workbench resource", { hasResourceContext: true }],

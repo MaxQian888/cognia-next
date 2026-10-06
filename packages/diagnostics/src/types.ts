@@ -315,6 +315,13 @@ export type DiagnosticCode =
   // settings page that could never fix any of them.
   | "workspaceUnavailable"
   /**
+   * A paired Host refused to create the conversation a client started on it:
+   * the workspace or agent it was started with does not exist on that Host,
+   * or the device lacks Agent Control. The chat is not created anywhere, so
+   * this is an event about the attempt, not a state of some conversation.
+   */
+  | "hostSessionRefused"
+  /**
    * The working copy exists and resolves fine — it is simply held by a turn
    * that has not finished. Split out of `workspaceUnavailable` because the two
    * want opposite advice: `workspaceUnavailable` tells the reader to bind a

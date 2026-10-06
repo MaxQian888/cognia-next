@@ -15,6 +15,7 @@ import {
   type HostStateAppliedAction,
   type HostStateChannelState,
   type HostStateMutation,
+  type HostStateSessionSeed,
   type HostStateSessionSummary,
   type HostStateSnapshot,
 } from "@cognia/agent-config-types/host-state"
@@ -604,6 +605,33 @@ export async function getHostStateAction(
   return getDb().hostStateActions.get([hostGeneration, actionId])
 }
 
+/**
+ * A seed may only name what this Host owns. A paired client's workspace and
+ * agent lists are replicas of the Host's, so an id the Host does not have is a
+ * stale or foreign pick; creating the row anyway would leave a conversation
+ * attributed to nothing on the machine that runs it.
+ */
+async function validateSessionSeed(
+  seed: HostStateSessionSeed
+): Promise<{ code: string; message: string } | undefined> {
+  if (seed.projectId && !(await getDb().projects.get(seed.projectId))) {
+    return {
+      code: "host_state_project_not_found",
+      message: "The workspace does not exist on this Host.",
+    }
+  }
+  if (seed.characterId) {
+    const { resolveCharacterById } = await import("@/lib/db/characters")
+    if (!(await resolveCharacterById(seed.characterId))) {
+      return {
+        code: "host_state_character_not_found",
+        message: "The agent does not exist on this Host.",
+      }
+    }
+  }
+  return undefined
+}
+
 export async function validateHostStateBusinessAction(
   action: HostStateAction
 ): Promise<{ code: string; message: string } | undefined> {
@@ -616,11 +644,14 @@ export async function validateHostStateBusinessAction(
   const db = getDb()
   const session = await db.sessions.get(action.sessionId)
   if (action.action.kind === "session.create" || action.action.kind === "session.import") {
-    return session
-      ? {
-          code: "host_state_session_exists",
-          message: "The continuation session id already exists.",
-        }
+    if (session) {
+      return {
+        code: "host_state_session_exists",
+        message: "The continuation session id already exists.",
+      }
+    }
+    return action.action.kind === "session.create" && action.action.seed
+      ? validateSessionSeed(action.action.seed)
       : undefined
   }
   if (!session) {
@@ -890,7 +921,8 @@ async function persistBusinessProjection(
     throw new HostStateStoreError("host_state_session_not_found")
   }
   switch (action.action.kind) {
-    case "session.create":
+    case "session.create": {
+      const seed = action.action.seed
       await db.sessions.add({
         id: action.sessionId,
         title: action.action.title?.trim() || "New conversation",
@@ -898,8 +930,13 @@ async function persistBusinessProjection(
         transcriptRevision: 0,
         createdAt: now,
         updatedAt: now,
+        ...(seed?.projectId ? { projectId: seed.projectId } : {}),
+        ...(seed?.characterId ? { characterId: seed.characterId } : {}),
+        ...(seed?.model ? { model: seed.model } : {}),
+        ...(seed?.provider ? { providerOverride: seed.provider } : {}),
       })
       return
+    }
     case "session.import": {
       if (!isCanonicalSession(action.action.envelope)) {
         throw new HostStateStoreError("host_state_invalid_action")

@@ -390,6 +390,105 @@ describe("HostState durable store", () => {
     })
   })
 
+  describe("session.create seed", () => {
+    const createChannel = sessionStateChannel(scope.targetId, "session-new")
+    function createAction(
+      intent: Extract<AllowedHostStateIntent, { kind: "session.create" }>
+    ): HostStateAction {
+      return draftAction({
+        channel: createChannel,
+        sessionId: "session-new",
+        actionId: "create-action",
+        baseRevision: undefined,
+        action: intent,
+      })
+    }
+
+    beforeEach(async () => {
+      await getDb().projects.put({
+        id: "project-host",
+        name: "Host workspace",
+        roots: [],
+        createdAt: 1,
+        updatedAt: 1,
+        lastAccessedAt: 1,
+      } as never)
+      await getDb().characters.put({
+        id: "agent-host",
+        name: "Host agent",
+        isBuiltIn: false,
+        updatedAt: 1,
+      } as never)
+    })
+
+    it("refuses a workspace or agent this Host does not own", async () => {
+      await expect(
+        validateHostStateBusinessAction(
+          createAction({ kind: "session.create", seed: { projectId: "project-browser-only" } })
+        )
+      ).resolves.toMatchObject({ code: "host_state_project_not_found" })
+      await expect(
+        validateHostStateBusinessAction(
+          createAction({ kind: "session.create", seed: { characterId: "agent-elsewhere" } })
+        )
+      ).resolves.toMatchObject({ code: "host_state_character_not_found" })
+      await expect(
+        validateHostStateBusinessAction(
+          createAction({
+            kind: "session.create",
+            seed: { projectId: "project-host", characterId: "agent-host", model: "m" },
+          })
+        )
+      ).resolves.toBeUndefined()
+      // A title-only create from an older client is still admitted.
+      await expect(
+        validateHostStateBusinessAction(createAction({ kind: "session.create", title: "t" }))
+      ).resolves.toBeUndefined()
+    })
+
+    it("writes the seeded choices onto the Host's session row", async () => {
+      await acquireWritableLease()
+      await commitHostStateAction({
+        action: createAction({
+          kind: "session.create",
+          title: "Plan the launch",
+          seed: {
+            projectId: "project-host",
+            characterId: "agent-host",
+            model: "gpt-test",
+            provider: "openai",
+          },
+        }),
+        mutation: { kind: "session.renamed", title: "Plan the launch", revision: 1 },
+        now: 20,
+      })
+      await expect(getDb().sessions.get("session-new")).resolves.toMatchObject({
+        title: "Plan the launch",
+        titleAuto: false,
+        projectId: "project-host",
+        characterId: "agent-host",
+        model: "gpt-test",
+        providerOverride: "openai",
+        createdAt: 20,
+      })
+    })
+
+    it("keeps a title-only create to the bare row it always wrote", async () => {
+      await acquireWritableLease()
+      await commitHostStateAction({
+        action: createAction({ kind: "session.create" }),
+        mutation: { kind: "session.renamed", title: "New conversation", revision: 1 },
+        now: 21,
+      })
+      const row = await getDb().sessions.get("session-new")
+      expect(row).toMatchObject({ title: "New conversation", titleAuto: true })
+      expect(row).not.toHaveProperty("projectId")
+      expect(row).not.toHaveProperty("characterId")
+      expect(row).not.toHaveProperty("model")
+      expect(row).not.toHaveProperty("providerOverride")
+    })
+  })
+
   it("persists queued messages and transcript edits in the ledger transaction", async () => {
     await getDb().sessions.update("session-1", { title: "New conversation", titleAuto: true })
     await acquireWritableLease()

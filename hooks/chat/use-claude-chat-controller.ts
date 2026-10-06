@@ -94,6 +94,7 @@ import {
   onClaudeMessage,
   sendPrompt,
   setSessionModel,
+  turnsRunOnPairedHost,
 } from "@/lib/claude/ipc"
 import { recordChatToolApprovalDecision } from "@/lib/policy/action-review/chat-tool-channel"
 import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
@@ -2149,6 +2150,7 @@ export function useClaudeChat() {
         !opts &&
         routerFusionGate(useSettingsStore.getState().settings, "chat") === "on" &&
         hostStateSendEligible({
+          pairedHost: turnsRunOnPairedHost(),
           fusionRun: false,
           routerFusionStamped: false,
           skipAppend: callOptions?.skipUserAppend === true || callOptions?.steerDrain === true,
@@ -2738,6 +2740,7 @@ export function useClaudeChat() {
       // foresee as host-state) is dispatched here, where its run is created:
       // host-state sends never stamp (ADR-0188 B1).
       const hostStateEligible = hostStateSendEligible({
+        pairedHost: turnsRunOnPairedHost(),
         fusionRun: Boolean(sendOptions.routerFusionRun),
         routerFusionStamped: Boolean(sendOptions.routerFusion),
         skipAppend,
@@ -5281,14 +5284,20 @@ export function useClaudeChat() {
               })
             }
             chatTurnPerformance.markDispatched(sessionId)
+            // A paired host admits the turn under the id of the user row shown
+            // here, so its copy of the transcript keeps the same row.
+            const pairedMessage =
+              turnMessage && turnsRunOnPairedHost() ? { messageId: turnMessage } : {}
             if (dispatchClaim === "claimed") {
               await sendPrompt(sessionId, effectiveContent, sendOptions, {
                 commandId: chatSubmissionId(executionRunId),
                 transcriptRuntime: "prepared",
+                ...pairedMessage,
               })
             } else {
               await sendPrompt(sessionId, effectiveContent, sendOptions, {
                 transcriptRuntime: "prepared",
+                ...pairedMessage,
               })
             }
           }

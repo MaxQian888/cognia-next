@@ -61,6 +61,7 @@ import {
   sendPluginToolResponse,
   callReserveDecision,
   sendPrompt,
+  turnsRunOnPairedHost,
   sessionControl,
   steerSession,
   subscribePluginToolExec,
@@ -135,6 +136,18 @@ describe("subscribePluginToolExec", () => {
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({ type: "plugin_tool_exec", toolUseId: "t" })
     )
+  })
+})
+
+describe("turnsRunOnPairedHost", () => {
+  it("distinguishes the local desktop from the same desktop driving a paired host", () => {
+    expect(turnsRunOnPairedHost()).toBe(false)
+    setActiveRemoteTransport({ call: jest.fn(), subscribe: jest.fn(() => () => {}) } as never)
+    try {
+      expect(turnsRunOnPairedHost()).toBe(true)
+    } finally {
+      __resetRoutingForTests()
+    }
   })
 })
 
@@ -1139,6 +1152,15 @@ describe("transcript generation dispatch", () => {
     expect(mockPrepareTranscriptRuntimeSend).not.toHaveBeenCalled()
   })
 
+  it("keeps the message id off a local send, which no host admits", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await sendPrompt("sess-1", "hello", {}, { transcriptRuntime: "prepared", messageId: "user-1" })
+    expect(callSpy).toHaveBeenLastCalledWith(
+      "claude_send",
+      expect.not.objectContaining({ messageId: expect.anything() })
+    )
+  })
+
   it("rejects frozen replay without its original session", async () => {
     await expect(
       sendPrompt("deleted", "prompt", {}, { transcriptRuntime: "frozen" })
@@ -1164,6 +1186,14 @@ describe("remote transcript authority", () => {
     expect(callSpy).toHaveBeenCalledWith(
       "claude_send",
       expect.objectContaining({ options: { transcriptInvalidationId: "host-generation" } })
+    )
+  })
+
+  it("names the user message on a paired send so the host keeps the same row", async () => {
+    await sendPrompt("remote", "prompt", {}, { messageId: "user-1" })
+    expect(callSpy).toHaveBeenCalledWith(
+      "agent_send",
+      expect.objectContaining({ sessionId: "remote", messageId: "user-1" })
     )
   })
 

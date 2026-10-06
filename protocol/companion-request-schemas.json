@@ -688,6 +688,10 @@
         "command_id": {
           "type": "string",
           "description": "Also accepted as `commandId`."
+        },
+        "message_id": {
+          "type": "string",
+          "description": "Also accepted as `messageId`."
         }
       },
       "additionalProperties": false
@@ -8297,7 +8301,6 @@
           "items": {
             "type": "object",
             "required": [
-              "protocolVersion",
               "channel",
               "accountId",
               "runtimeTargetId",
@@ -8310,10 +8313,6 @@
               "action"
             ],
             "properties": {
-              "protocolVersion": {
-                "type": "integer",
-                "const": 1
-              },
               "channel": {
                 "type": "string",
                 "pattern": "^cognia://target/"

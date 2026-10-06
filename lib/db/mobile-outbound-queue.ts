@@ -144,8 +144,15 @@ export async function enqueueHostStateIntentIfAvailable(
   const now = input.nowMs ?? Date.now()
   const actionId = input.actionId ?? randomHostStateId()
 
+  // A conversation the Host has never heard of has no confirmed channel to
+  // stamp against. Its creation is still addressed to the session's own
+  // channel, but stamped from the session index, which names the same Host and
+  // generation; every other intent waits for its own channel's snapshot.
+  const confirmationChannel =
+    input.action.kind === "session.create" ? sessionIndexChannel(scope.targetId) : channel
+
   return db.transaction("rw", db.hostStateChannels, db.mobileOutboundQueue, async () => {
-    const confirmed = await db.hostStateChannels.get(channel)
+    const confirmed = await db.hostStateChannels.get(confirmationChannel)
     if (!confirmed?.hostId || confirmed.hostGeneration < 1) return null
 
     const rows = await db.mobileOutboundQueue
@@ -200,6 +207,45 @@ export async function enqueueHostStateIntentIfAvailable(
     if (superseded.length > 0) await db.mobileOutboundQueue.bulkDelete(superseded)
     return row
   })
+}
+
+export type HostStateIntentSettlement =
+  | { outcome: "applied" }
+  | { outcome: "rejected"; code: string }
+  /** Still queued or in flight when the wait ended (Host away, slow link). */
+  | { outcome: "pending" }
+
+const HOST_STATE_SETTLEMENT_POLL_MS = 100
+
+/**
+ * Wait for the Host's answer to one queued HostState row.
+ *
+ * The runner drains on its own (a new row wakes it); this only watches the
+ * row's terminal status. `pending` is an honest answer, not a failure: the row
+ * stays queued and is delivered in order once the Host is reachable.
+ */
+export async function awaitHostStateIntentSettlement(
+  rowId: string,
+  options: { timeoutMs: number; pollMs?: number }
+): Promise<HostStateIntentSettlement> {
+  const deadline = Date.now() + options.timeoutMs
+  const pollMs = options.pollMs ?? HOST_STATE_SETTLEMENT_POLL_MS
+  for (;;) {
+    const row = await getDb().mobileOutboundQueue.get(rowId)
+    switch (row?.status) {
+      case "sent":
+        return { outcome: "applied" }
+      case "rejected":
+      case "conflicted":
+        return { outcome: "rejected", code: row.rejectionCode ?? row.status }
+      case "deadlettered":
+        return { outcome: "rejected", code: row.rejectionCode ?? "host_state_deadlettered" }
+      default:
+        break
+    }
+    if (Date.now() >= deadline) return { outcome: "pending" }
+    await new Promise((resolve) => setTimeout(resolve, pollMs))
+  }
 }
 
 export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow> {

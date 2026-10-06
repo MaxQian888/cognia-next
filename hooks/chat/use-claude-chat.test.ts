@@ -129,6 +129,7 @@ const onClaudeMessageMock = jest.fn(async (cb: (evt: unknown) => void) => {
   _messageCallback = cb
   return onClaudeUnsub
 })
+const turnsRunOnPairedHostMock = jest.fn(() => false)
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
 const sessionControlMock = jest.fn().mockResolvedValue({ retained: false })
 const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
@@ -155,6 +156,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   interruptSession: (id: string) => interruptSessionMock(id),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
   sendPrompt: (...a: unknown[]) => sendPromptMock(...a),
+  turnsRunOnPairedHost: () => turnsRunOnPairedHostMock(),
   sessionControl: (...a: unknown[]) => sessionControlMock(...a),
   steerSession: (...a: unknown[]) => steerSessionMock(...a),
 }))
@@ -1032,6 +1034,7 @@ beforeEach(() => {
   busEmitMock.mockClear()
   onClaudeMessageMock.mockClear()
   onClaudeUnsub.mockClear()
+  turnsRunOnPairedHostMock.mockReset().mockReturnValue(false)
   sendPromptMock.mockReset().mockResolvedValue(undefined)
   sessionControlMock.mockReset().mockResolvedValue({ retained: false })
   prepareRouterFusionSendMock
@@ -1452,6 +1455,45 @@ describe("useClaudeChat — actions", () => {
     })
     expect(consoleError).toHaveBeenCalledWith("acceptChatTurn failed", expect.any(Error))
     consoleError.mockRestore()
+  })
+
+  it("sends browser-selected provider credentials directly to the paired host", async () => {
+    turnsRunOnPairedHostMock.mockReturnValue(true)
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "action-1", status: "pending" })
+    const providerCredentials = { apiKey: "browser-provider-key", protocol: "openai" as const }
+    resolveSendOptionsMock.mockResolvedValue({
+      provider: "openai",
+      model: "gpt-test",
+      providerCredentials,
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("use my connection")
+    })
+
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: expect.objectContaining({ kind: "message.enqueue" }) })
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      "use my connection",
+      expect.objectContaining({ providerCredentials, provider: "openai", model: "gpt-test" }),
+      // The host admits the turn under the id of the user row shown here.
+      expect.objectContaining({ messageId: expect.any(String) })
+    )
+    const [, , , delivery] = sendPromptMock.mock.calls.at(-1) as [
+      string,
+      unknown,
+      unknown,
+      { messageId: string },
+    ]
+    const userRow = (chatState.messages as Array<{ id: string; role: string }>).find(
+      (message) => message.role === "user"
+    )
+    expect(userRow).toBeDefined()
+    expect(delivery.messageId).toBe(userRow?.id)
   })
 
   it("persists an attached HostState action before rendering optimism and skips direct RPC", async () => {

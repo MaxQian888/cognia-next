@@ -72,7 +72,12 @@ pub(super) async fn dispatch(
             let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let prompt: Value = required(&args, "prompt")?;
             let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
-            send_arm(state, host, device_id, session_id, prompt, options, None).await
+            let caller = SendCaller {
+                device_id,
+                account_id,
+                scope,
+            };
+            send_arm(state, host, caller, session_id, prompt, options, None, None).await
         }
 
         // The canonical send adds exactly what the desktop `agent_send` command
@@ -83,6 +88,9 @@ pub(super) async fn dispatch(
             let prompt: Value = required(&args, "prompt")?;
             let options: Option<claude_commands::SendOptions> = optional(&args, "options")?;
             let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
+            // The client's id for the user message this turn sends, so the
+            // Host's copy of the transcript keeps the row the client shows.
+            let message_id: Option<String> = optional_aliased(&args, "message_id", "messageId")?;
             if let Some(execution) = options.as_ref().and_then(|o| o.extra.get("execution")) {
                 if !claude_commands::execution_spec_is_acceptable(execution) {
                     return Err(RpcError::malformed(
@@ -90,8 +98,13 @@ pub(super) async fn dispatch(
                     ));
                 }
             }
+            let caller = SendCaller {
+                device_id,
+                account_id,
+                scope,
+            };
             send_arm(
-                state, host, device_id, session_id, prompt, options, command_id,
+                state, host, caller, session_id, prompt, options, command_id, message_id,
             )
             .await
         }
@@ -639,16 +652,86 @@ fn authorize_approval(
     ))
 }
 
+/// Who sent a turn, as the authenticated request established it.
+#[derive(Clone, Copy)]
+struct SendCaller<'a> {
+    device_id: &'a str,
+    account_id: Option<&'a str>,
+    scope: Option<&'a str>,
+}
+
+/// Make a device's turn durable on this Host before the sidecar sees it, so
+/// the brain's terminal-event persister keeps the reply. Synchronous on
+/// purpose: the persister looks for the open submission on the first frame.
+async fn admit_paired_turn(
+    state: &SharedState,
+    caller: SendCaller<'_>,
+    session_id: &str,
+    prompt: &Value,
+    message_id: Option<&str>,
+    request_id: &str,
+) -> Result<Option<String>, (StatusCode, Json<RpcError>)> {
+    let Some(args) = super::super::paired_turn::admission_args(
+        caller.scope,
+        caller.account_id,
+        session_id,
+        prompt,
+        message_id,
+        request_id,
+    ) else {
+        return Ok(None);
+    };
+    // Same binding HostState uses: the account and Host id come from the
+    // authenticated request, overwriting anything a client could send.
+    let args = super::host_state::bind_authority(args, state, caller.account_id, caller.device_id)?;
+    let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+        .map_err(RpcError::service_unavailable)?;
+    let result = std::sync::Arc::clone(&state.desktop_writes_bridge)
+        .dispatch(
+            transport.as_ref(),
+            super::super::paired_turn::ADMIT,
+            args,
+            crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| map_desktop_write_bridge_error(super::super::paired_turn::ADMIT, error))?;
+    super::super::paired_turn::interpret_admission(result)
+}
+
+/// The turn was admitted but never reached the runtime: seal it as failed so
+/// the session holds no open submission that nothing will end. Best effort —
+/// the client already gets the send's own error, and the brain's outbox
+/// settles an orphan once its lease lapses.
+async fn abandon_paired_turn(state: &SharedState, submission_id: &str, error_code: &str) {
+    let outcome = async {
+        let transport = super::super::ws_bridge::resolve_bridge_transport(state)?;
+        std::sync::Arc::clone(&state.desktop_writes_bridge)
+            .dispatch(
+                transport.as_ref(),
+                super::super::paired_turn::ABANDON,
+                serde_json::json!({ "submissionId": submission_id, "errorCode": error_code }),
+                crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+            )
+            .await
+    }
+    .await;
+    if let Err(error) = outcome {
+        tracing::warn!(submission_id, %error, "could not settle an abandoned paired turn");
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn send_arm(
     state: &SharedState,
     host: &super::super::dispatch_host::DispatchHost,
-    device_id: &str,
+    caller: SendCaller<'_>,
     session_id: String,
     prompt: Value,
     options: Option<claude_commands::SendOptions>,
     command_id: Option<String>,
+    message_id: Option<String>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    let device_id = caller.device_id;
     let mut options = options;
     let context = super::super::remote_execution::global().register(
         &opaque_host_id(state),
@@ -656,6 +739,7 @@ async fn send_arm(
         &session_id,
         unix_time_ms(),
     );
+    let request_id = context.request_id.clone();
     options
         .get_or_insert_with(claude_commands::SendOptions::default)
         .extra
@@ -677,7 +761,17 @@ async fn send_arm(
             send_options.cwd = Some(run.execution_root);
         }
     }
-    claude_commands::claude_send_with_host_and_id(
+    // Last before the handoff, so no refusal above can strand an admission.
+    let admission = admit_paired_turn(
+        state,
+        caller,
+        &session_id,
+        &prompt,
+        message_id.as_deref(),
+        &request_id,
+    )
+    .await?;
+    let sent = claude_commands::claude_send_with_host_and_id(
         host.sidecar_host(),
         host.sidecar_state(),
         session_id,
@@ -685,9 +779,16 @@ async fn send_arm(
         options,
         command_id,
     )
-    .await
-    .map(|_| Value::Null)
-    .map_err(RpcError::internal)
+    .await;
+    match sent {
+        Ok(_) => Ok(Value::Null),
+        Err(error) => {
+            if let Some(submission_id) = admission.as_deref() {
+                abandon_paired_turn(state, submission_id, "dispatch_failed").await;
+            }
+            Err(RpcError::internal(error))
+        }
+    }
 }
 
 #[cfg(test)]

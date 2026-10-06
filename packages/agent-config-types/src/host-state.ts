@@ -141,8 +141,32 @@ export interface HostStatePromptPreamble {
   }>
 }
 
+/**
+ * What a paired client chose for a conversation it starts on the Host.
+ *
+ * Closed and id-only on purpose: every member names something the Host already
+ * owns (a workspace, an agent) or a picker value (model, provider). Credentials
+ * travel with each turn's direct Agent RPC options and never ride a replicated
+ * action, so there is no key, token, path or prompt here. The Host refuses a
+ * workspace or agent it does not have rather than creating a conversation that
+ * points at nothing.
+ */
+export interface HostStateSessionSeed {
+  /** Owning workspace; must be one of the Host's projects. */
+  projectId?: string
+  /** Agent (character) the conversation runs as; must resolve on the Host. */
+  characterId?: string
+  /** Composer model pick. */
+  model?: string
+  /** Composer provider pick, stored as the session's `providerOverride`. */
+  provider?: string
+}
+
+/** Longest seed id/pick the wire accepts. */
+export const MAX_SESSION_SEED_VALUE_LENGTH = 200
+
 export type AllowedHostStateIntent =
-  | { kind: "session.create"; title?: string }
+  | { kind: "session.create"; title?: string; seed?: HostStateSessionSeed }
   | { kind: "session.rename"; title: string }
   | { kind: "session.archive"; archived: boolean }
   /**
@@ -1811,7 +1835,11 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
   if (!isRecord(value) || !nonEmptyString(value.kind)) return false
   switch (value.kind) {
     case "session.create":
-      return hasOnlyKeys(value, ["kind", "title"]) && isOptionalString(value.title)
+      return (
+        hasOnlyKeys(value, ["kind", "title", "seed"]) &&
+        isOptionalString(value.title) &&
+        (value.seed === undefined || isSessionSeed(value.seed))
+      )
     case "session.rename":
       return hasOnlyKeys(value, ["kind", "title"]) && typeof value.title === "string"
     case "session.archive":
@@ -2170,6 +2198,28 @@ function isFolderName(value: unknown): value is string {
   if (typeof value !== "string") return false
   const trimmed = value.trim()
   return trimmed.length > 0 && trimmed.length <= MAX_FOLDER_NAME_LENGTH
+}
+
+function isSeedValue(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (typeof value === "string" &&
+      value.trim().length > 0 &&
+      value.length <= MAX_SESSION_SEED_VALUE_LENGTH)
+  )
+}
+
+/** An empty seed is refused: a client with nothing to seed omits the field. */
+function isSessionSeed(value: unknown): value is HostStateSessionSeed {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length > 0 &&
+    hasOnlyKeys(value, ["projectId", "characterId", "model", "provider"]) &&
+    isSeedValue(value.projectId) &&
+    isSeedValue(value.characterId) &&
+    isSeedValue(value.model) &&
+    isSeedValue(value.provider)
+  )
 }
 
 function isOptionalString(value: unknown): boolean {

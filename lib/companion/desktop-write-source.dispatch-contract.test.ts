@@ -91,6 +91,12 @@ jest.mock("@/lib/ai/agent/external/config/host-config-service", () => ({
   })),
 }))
 
+jest.mock("@/lib/work-submission/paired-turn-adapter", () => ({
+  isPairedTurnCommand: (command: string) =>
+    command === "paired_turn_admit" || command === "paired_turn_abandon",
+  dispatchPairedTurnCommand: jest.fn(async () => ({ admitted: true, submissionId: "work:r" })),
+}))
+
 import { dispatchCommand } from "./desktop-write-source"
 
 const workflows = jest.requireMock("@/lib/db/workflows") as Record<string, jest.Mock>
@@ -128,6 +134,25 @@ describe("dispatchCommand: team_run_start", () => {
     handleTeamRunStart.mockResolvedValueOnce(outcome)
     expect(await dispatchCommand("team_run_start", payload)).toBe(outcome)
     expect(handleTeamRunStart).toHaveBeenCalledWith(payload)
+  })
+})
+
+describe("dispatchCommand: paired_turn_*", () => {
+  it("hands a paired direct turn's admission to the work-submission adapter", async () => {
+    const adapter = jest.requireMock("@/lib/work-submission/paired-turn-adapter") as Record<
+      string,
+      jest.Mock
+    >
+    const payload = { sessionId: "s1", runId: "paired:r", prompt: "hi", callerAccountId: "a" }
+    await expect(dispatchCommand("paired_turn_admit", payload)).resolves.toEqual({
+      admitted: true,
+      submissionId: "work:r",
+    })
+    expect(adapter.dispatchPairedTurnCommand).toHaveBeenCalledWith("paired_turn_admit", payload)
+    await dispatchCommand("paired_turn_abandon", { submissionId: "work:r" })
+    expect(adapter.dispatchPairedTurnCommand).toHaveBeenLastCalledWith("paired_turn_abandon", {
+      submissionId: "work:r",
+    })
   })
 })
 

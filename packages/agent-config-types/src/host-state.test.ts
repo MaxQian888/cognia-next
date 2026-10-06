@@ -13,6 +13,7 @@ import {
   hostStateIntentRequiresLiveControl,
   hostStateIntentTargetsSessionIndex,
   MAX_FOLDER_NAME_LENGTH,
+  MAX_SESSION_SEED_VALUE_LENGTH,
   MAX_FOLDER_REORDER_IDS,
   intentRequiresRuntimeDispatch,
   isHostStateAction,
@@ -894,6 +895,10 @@ describe("reconcileHostStateReplica", () => {
 describe("wire guards", () => {
   const EVERY_INTENT: AllowedHostStateIntent[] = [
     { kind: "session.create", title: "t" },
+    {
+      kind: "session.create",
+      seed: { projectId: "p1", characterId: "c1", model: "gpt-test", provider: "openai" },
+    },
     { kind: "session.rename", title: "t" },
     { kind: "session.archive", archived: true },
     { kind: "session.pin", pinned: false },
@@ -981,6 +986,15 @@ describe("wire guards", () => {
   it("rejects a malformed field on every intent kind", () => {
     const broken: unknown[] = [
       { kind: "session.create", title: 1 },
+      // The seed is closed and id-only: no credentials, no empty ids.
+      { kind: "session.create", seed: {} },
+      { kind: "session.create", seed: { projectId: "" } },
+      { kind: "session.create", seed: { model: "  " } },
+      { kind: "session.create", seed: { projectId: 1 } },
+      { kind: "session.create", seed: { apiKey: "sk-test" } },
+      { kind: "session.create", seed: { model: "m", providerCredentials: { apiKey: "k" } } },
+      { kind: "session.create", seed: { model: "x".repeat(MAX_SESSION_SEED_VALUE_LENGTH + 1) } },
+      { kind: "session.create", seed: "p1" },
       { kind: "session.rename" },
       { kind: "session.archive", archived: "yes" },
       { kind: "session.pin" },

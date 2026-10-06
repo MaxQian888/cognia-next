@@ -67,6 +67,15 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     ],
     icon: "settings",
   },
+  // Nothing to retry: the same workspace or agent is refused again until the
+  // user picks one the Host has. The log names the Host's refusal code.
+  hostSessionRefused: {
+    severity: "error",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "view-logs" }],
+    icon: "settings",
+  },
   workspaceBusy: {
     severity: "error",
     retryable: true,

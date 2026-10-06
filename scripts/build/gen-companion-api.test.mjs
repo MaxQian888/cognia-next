@@ -5,6 +5,43 @@ import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
 import { buildCompanionRequestSchemaContracts } from "./companion-request-schema-contracts.mjs"
 
+test("HostState submit admits the current closed action envelope on both API planes", () => {
+  const inspected = inspectCommittedContract()
+  const action = {
+    channel: "cognia://target/tauri/sessions/s1",
+    accountId: "local_acct_a",
+    runtimeTargetId: "tauri",
+    hostId: "host-1",
+    hostGeneration: 1,
+    sessionId: "s1",
+    clientId: "browser",
+    clientSeq: 1,
+    actionId: "action-1",
+    baseRevision: 0,
+    createdAt: 1,
+    action: { kind: "draft.replace", text: "", attachments: [] },
+  }
+  const body = { accountId: action.accountId, runtimeTargetId: action.runtimeTargetId, actions: [action] }
+  const committed = JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"))
+  // The device plane is interactive: the outbound queue attaches the step-up
+  // lease (lib/queue/outbound-approval.ts); the loopback service plane is exempt.
+  const planes = [
+    [committed.commands.host_state_submit, body],
+    [inspected.desiredPublicSpec.paths["/api/_rpc/host_state_submit"].post.requestBody.content["application/json"].schema, { ...body, adminLease: "lease" }],
+    [inspected.desiredHeadlessSpec.paths["/internal/_rpc/host_state_submit"].post.requestBody.content["application/json"].schema, body],
+  ]
+  for (const [schema, admitted] of planes) {
+    const validate = new Ajv2020({ strict: false }).compile(schema)
+    assert.equal(validate(admitted), true, JSON.stringify(validate.errors))
+    assert.equal(validate({ ...admitted, actions: [{ ...action, protocolVersion: 1 }] }), false)
+    for (const key of ["channel", "accountId", "runtimeTargetId", "hostId", "hostGeneration", "clientId", "clientSeq", "actionId", "createdAt", "action"]) {
+      const missing = { ...action }
+      delete missing[key]
+      assert.equal(validate({ ...admitted, actions: [missing] }), false, key)
+    }
+  }
+})
+
 test("Headless notifications admit the native bounded source field", () => {
   const inspected = inspectCommittedContract()
   const schema = inspected.desiredHeadlessSpec.paths["/internal/_rpc/remote_notification_publish"].post.requestBody.content["application/json"].schema

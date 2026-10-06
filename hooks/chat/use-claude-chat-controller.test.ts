@@ -52,7 +52,8 @@ describe("Claude chat controller seam", () => {
     expect(retry).toEqual({ runId: "r1", turnId: "user-1", attemptId: "a2" })
   })
 
-  // HostState send/steer/abort/approval branches are exercised by the public
+  // Paired sends preserve provider credentials on direct Agent RPC; that behavior
+  // and HostState send/steer/abort/approval branches are exercised by the public
   // hook contract suite in `use-claude-chat.test.ts`; this seam test remains
   // intentionally dependency-free so import regressions fail quickly.
 })

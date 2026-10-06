@@ -421,6 +421,10 @@
       "label": "Agent already running",
       "hint": "This conversation's agent is still running in another process, so a second copy was not started. Wait for that run to finish, then retry."
     },
+    "hostSessionRefused": {
+      "label": "Conversation not created on the host",
+      "hint": "The paired host refused this new chat — its workspace or agent doesn't exist on that host, or this device lacks Agent Control. Pick a workspace and agent the host has, then start the chat again."
+    },
     "workspaceUnavailable": {
       "label": "Workspace unavailable",
       "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel."

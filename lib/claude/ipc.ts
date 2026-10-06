@@ -119,6 +119,12 @@ type PromptDelivery = {
    * without history on every turn.
    */
   transcriptRuntime?: "prepared" | "frozen" | "host-owned"
+  /**
+   * The user message this turn sends. Only a paired host receives it: the
+   * host admits the turn under this id (`paired_turn_admit`), so its copy of
+   * the transcript keeps the row this client already shows.
+   */
+  messageId?: string
 }
 
 export async function sendPrompt(
@@ -138,7 +144,7 @@ export async function sendPrompt(
     if (mirror?.runtimeTranscriptGeneration || mirror?.runtimeTranscriptInvalidated) {
       throw new TranscriptRuntimeRecoveryError("transcript_authoritative_host_required")
     }
-    return sendPromptToTransport(sessionId, prompt, options, delivery)
+    return sendPromptToTransport(sessionId, prompt, options, delivery, { pairedHost: true })
   }
   if (delivery?.transcriptRuntime === "prepared" || delivery?.transcriptRuntime === "host-owned") {
     return sendPromptToTransport(sessionId, prompt, options, delivery)
@@ -171,7 +177,8 @@ async function sendPromptToTransport(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions,
-  delivery?: PromptDelivery
+  delivery?: PromptDelivery,
+  route: { pairedHost?: boolean } = {}
 ): Promise<void> {
   const sdk = options?.claudeAgentSdk
   if (
@@ -202,7 +209,9 @@ async function sendPromptToTransport(
   }
   // Sends carrying a frozen execution spec use the canonical command (same
   // impl body Rust-side; the alias split feeds the Phase 9 telemetry).
-  const command = options?.execution || delivery?.commandId ? "agent_send" : "claude_send"
+  const messageId = route.pairedHost ? delivery?.messageId : undefined
+  const command =
+    options?.execution || delivery?.commandId || messageId ? "agent_send" : "claude_send"
   // Router + Fusion's routing inputs are renderer-only (a reseal reads them
   // from the cached or frozen options); the host never needs the prompt twice.
   let wireOptions = options
@@ -215,6 +224,7 @@ async function sendPromptToTransport(
     prompt,
     options: wireOptions,
     ...(delivery?.commandId ? { commandId: delivery.commandId } : {}),
+    ...(messageId ? { messageId } : {}),
   })
 }
 
@@ -964,7 +974,7 @@ export async function toolResultDecision(
  * host. Keyed on the host profile, never on `isTauri()` (which every node and
  * jsdom suite would read as "paired").
  */
-function turnsRunOnPairedHost(): boolean {
+export function turnsRunOnPairedHost(): boolean {
   const profile = detectHostProfile()
   return profile === "mobile-companion" || profile === "cloud-companion" || isRemoteHostActive()
 }

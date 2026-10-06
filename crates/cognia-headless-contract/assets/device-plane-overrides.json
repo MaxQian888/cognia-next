@@ -5198,7 +5198,6 @@
             "items": {
               "type": "object",
               "required": [
-                "protocolVersion",
                 "channel",
                 "accountId",
                 "runtimeTargetId",
@@ -5211,10 +5210,6 @@
                 "action"
               ],
               "properties": {
-                "protocolVersion": {
-                  "type": "integer",
-                  "const": 1
-                },
                 "channel": {
                   "type": "string",
                   "pattern": "^cognia://target/"

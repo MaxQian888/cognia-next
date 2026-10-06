@@ -19,6 +19,8 @@
  */
 
 export interface HostStateSendFacts {
+  /** Per-turn options and credentials must reach the paired execution host. */
+  pairedHost: boolean
   /** The send resolved to a cascade or panel run, which runs in this window. */
   fusionRun: boolean
   /** The send was sealed as a ledgered Router + Fusion direct run. */
@@ -44,6 +46,10 @@ export interface HostStateSendFacts {
 
 export function hostStateSendEligible(facts: HostStateSendFacts): boolean {
   return (
+    // The durable intent contains only the prompt. Rebuilding options on a
+    // paired Host drops the caller's provider/model and device-local key;
+    // direct Agent RPC already carries those credentials for this turn only.
+    !facts.pairedHost &&
     !facts.fusionRun &&
     !facts.routerFusionStamped &&
     !facts.skipAppend &&
