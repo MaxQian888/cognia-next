@@ -32,18 +32,18 @@ export const DetailsBlock = memo(function DetailsBlock({
     <Collapsible
       open={isOpen}
       onOpenChange={setIsOpen}
-      className={cn("my-3", variantClasses[variant], className)}
+      className={cn("my-(--rich-block-gap)", variantClasses[variant], className)}
     >
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 text-left font-medium text-sm hover:text-primary transition-colors",
+          "flex w-full items-center gap-2 text-left font-medium text-[0.95em] hover:text-primary transition-colors",
           "group cursor-pointer select-none",
           variant !== "default" && "p-3"
         )}
       >
         <ChevronRight
           className={cn(
-            "h-4 w-4 shrink-0 transition-transform duration-200",
+            "size-[1.1em] shrink-0 transition-transform duration-200",
             isOpen && "rotate-90"
           )}
         />
@@ -55,7 +55,7 @@ export const DetailsBlock = memo(function DetailsBlock({
           variant !== "default" ? "px-3 pb-3 pt-0" : "pl-6 pt-2"
         )}
       >
-        <div className="text-sm text-muted-foreground">{children}</div>
+        <div className="text-[0.95em] text-muted-foreground [&>:first-child]:mt-0">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   )

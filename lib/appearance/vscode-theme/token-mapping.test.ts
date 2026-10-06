@@ -7,7 +7,7 @@ import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS, VSCODE_COLOR_MAP } from "./token-m
  * set); the other 29 — status, charts, workflow, effort, brand — are optional
  * and filled by `normalizeThemeColors` when a theme leaves them out.
  */
-const EXPECTED_THEME_KEY_COUNT = 56
+const EXPECTED_THEME_KEY_COUNT = 58
 
 describe("VSCODE_COLOR_MAP", () => {
   it("is a projection of the catalog's vscode lists", () => {
@@ -33,6 +33,7 @@ describe("VSCODE_COLOR_MAP", () => {
       "brandAction",
       "brandApproval",
       "brandWash",
+      "mark",
       "successForeground",
       "warningForeground",
       "infoForeground",

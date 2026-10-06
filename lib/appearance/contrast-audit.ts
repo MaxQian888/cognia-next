@@ -36,6 +36,9 @@ const CRITICAL_PAIRS: ReadonlyArray<[keyof ThemeColors, keyof ThemeColors]> = [
   ["successForeground", "success"],
   ["warningForeground", "warning"],
   ["infoForeground", "info"],
+  // ADR-0218 — chat links are body text set in a colour, so they owe the
+  // same 4.5:1 the foreground does.
+  ["link", "background"],
 ]
 
 /**

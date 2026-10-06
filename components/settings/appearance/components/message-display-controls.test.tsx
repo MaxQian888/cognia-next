@@ -3,7 +3,7 @@
  */
 
 import * as ReactForMock from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import { MessageDisplayControls } from "./message-display-controls"
 
@@ -116,9 +116,10 @@ describe("MessageDisplayControls", () => {
       })
     }
 
-    // Selects 9–11 are the ADR-0127 content-rendering selects (body font,
-    // math size, math alignment); metadata placement starts at 12.
-    fireEvent.change(selects[14], { target: { value: "details" } })
+    // Selects 9–10 are reading (ADR-0218), 11–13 links (ADR-0218), 14–19 the
+    // content-rendering selects (body font, math size, math alignment, code
+    // theme, code height, block density); metadata placement starts at 20.
+    fireEvent.change(selects[22], { target: { value: "details" } })
     expect(onChange).toHaveBeenCalledWith({
       preset: "balanced",
       overrides: { layout: "cards", metadata: { model: "details" } },
@@ -131,23 +132,25 @@ describe("MessageDisplayControls", () => {
     it("emits bodyFont and the math selects as typed override values", () => {
       const onChange = jest.fn()
       render(<MessageDisplayControls value={{ preset: "balanced" }} onChange={onChange} />)
-      const selects = screen.getAllByRole("combobox")
+      const selects = within(screen.getByTestId("message-display-markdown")).getAllByRole(
+        "combobox"
+      )
       // Fallbacks reflect the resolved preset defaults.
-      expect(selects[9]).toHaveValue("sans")
-      expect(selects[10]).toHaveValue("1")
-      expect(selects[11]).toHaveValue("center")
+      expect(selects[0]).toHaveValue("sans")
+      expect(selects[1]).toHaveValue("1")
+      expect(selects[2]).toHaveValue("center")
 
-      fireEvent.change(selects[9], { target: { value: "serif" } })
+      fireEvent.change(selects[0], { target: { value: "serif" } })
       expect(onChange).toHaveBeenLastCalledWith({
         preset: "balanced",
         overrides: { bodyFont: "serif" },
       })
-      fireEvent.change(selects[10], { target: { value: "1.2" } })
+      fireEvent.change(selects[1], { target: { value: "1.2" } })
       expect(onChange).toHaveBeenLastCalledWith({
         preset: "balanced",
         overrides: { markdown: { mathFontScale: 1.2 } },
       })
-      fireEvent.change(selects[11], { target: { value: "left" } })
+      fireEvent.change(selects[2], { target: { value: "left" } })
       expect(onChange).toHaveBeenLastCalledWith({
         preset: "balanced",
         overrides: { markdown: { mathAlign: "left" } },
@@ -164,8 +167,11 @@ describe("MessageDisplayControls", () => {
       )
       const group = screen.getByTestId("message-display-markdown")
       const switches = group.querySelectorAll("[role=switch]")
-      expect(switches).toHaveLength(6)
+      expect(switches).toHaveLength(9)
       const byId = (id: string) => document.getElementById(`message-display-markdown-${id}`)!
+      // ADR-0218 frame chrome: both on by default.
+      expect(byId("blockBorder")).toHaveAttribute("data-state", "checked")
+      expect(byId("blockHeader")).toHaveAttribute("data-state", "checked")
       // Own override wins over the preset default …
       expect(byId("mermaid")).toHaveAttribute("data-state", "unchecked")
       // … and untouched knobs show the resolved default.
@@ -181,6 +187,84 @@ describe("MessageDisplayControls", () => {
       expect(onChange).toHaveBeenLastCalledWith({
         preset: "balanced",
         overrides: { markdown: { mermaid: false, math: false } },
+      })
+    })
+  })
+  describe("reading, link and block knobs (ADR-0218)", () => {
+    it("emits reading overrides and shows the resolved defaults", () => {
+      const onChange = jest.fn()
+      render(<MessageDisplayControls value={{ preset: "balanced" }} onChange={onChange} />)
+      const [textSize, spacing] = within(
+        screen.getByTestId("message-display-reading")
+      ).getAllByRole("combobox")
+      expect(textSize).toHaveValue("md")
+      expect(spacing).toHaveValue("comfortable")
+      fireEvent.change(textSize, { target: { value: "lg" } })
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { reading: { textSize: "lg" } },
+      })
+    })
+
+    it("merges link overrides and toggles the site icon", () => {
+      const onChange = jest.fn()
+      render(
+        <MessageDisplayControls
+          value={{ preset: "balanced", overrides: { links: { color: "text" } } }}
+          onChange={onChange}
+        />
+      )
+      const group = screen.getByTestId("message-display-links")
+      const [color, underline, preview] = within(group).getAllByRole("combobox")
+      expect(color).toHaveValue("text")
+      expect(underline).toHaveValue("subtle")
+      expect(preview).toHaveValue("hover")
+      fireEvent.change(preview, { target: { value: "off" } })
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { links: { color: "text", preview: "off" } },
+      })
+      const siteIcon = document.getElementById("message-display-links-siteIcon")!
+      expect(siteIcon).toHaveAttribute("data-state", "checked")
+      fireEvent.click(siteIcon)
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { links: { color: "text", siteIcon: false } },
+      })
+    })
+
+    it("emits code theme, code height, block density and the chart switch", () => {
+      const onChange = jest.fn()
+      render(<MessageDisplayControls value={{ preset: "balanced" }} onChange={onChange} />)
+      const group = screen.getByTestId("message-display-markdown")
+      const [, , , codeTheme, codeMaxHeight, blockDensity] = within(group).getAllByRole("combobox")
+      expect(codeTheme).toHaveValue("one")
+      expect(codeMaxHeight).toHaveValue("tall")
+      expect(blockDensity).toHaveValue("compact")
+      fireEvent.change(codeTheme, { target: { value: "catppuccin" } })
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { markdown: { codeTheme: "catppuccin" } },
+      })
+      fireEvent.change(codeMaxHeight, { target: { value: "none" } })
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { markdown: { codeMaxHeight: "none" } },
+      })
+      fireEvent.change(blockDensity, { target: { value: "comfortable" } })
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { markdown: { blockDensity: "comfortable" } },
+      })
+      fireEvent.click(document.getElementById("message-display-markdown-charts")!)
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { markdown: { charts: false } },
+      })
+      fireEvent.click(document.getElementById("message-display-markdown-blockHeader")!)
+      expect(onChange).toHaveBeenLastCalledWith({
+        preset: "balanced",
+        overrides: { markdown: { blockHeader: false } },
       })
     })
   })

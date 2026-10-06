@@ -2,15 +2,17 @@
 
 import { useState, memo, useCallback, useRef, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Expand, ListOrdered, WrapText } from "lucide-react"
+import { Code2, Expand, ListOrdered, WrapText } from "lucide-react"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { cn } from "@/lib/utils"
-import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
+import { RichBlockFrame } from "@/components/chat/renderers/rich-block/rich-block-frame"
 import { CodeBlockFullscreen } from "@/components/chat/renderers/code-block-fullscreen"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFile } from "@/lib/files/download"
 import { loggers } from "@cognia/logging"
+import { CHAT_CODE_THEME, type ChatCodeThemePair } from "@/lib/chat/code-theme"
 import {
   getCachedHighlight,
   highlightCached,
@@ -59,6 +61,19 @@ export interface CodeBlockProps {
    * download name independently.
    */
   headerTitle?: React.ReactNode
+  /**
+   * ADR-0218 — the resolved `markdown.codeTheme` pair, the same one the
+   * streaming branch hands Streamdown. Defaults to `CHAT_CODE_THEME`.
+   */
+  theme?: ChatCodeThemePair
+  /**
+   * ADR-0218 — cap the body at `--rich-code-max-h` (the `codeMaxHeight`
+   * setting) and scroll inside it. Chat messages opt in; tool cards, which
+   * own their own height, do not. Fullscreen is never capped.
+   */
+  capHeight?: boolean
+  /** Extra header actions (the chat renderer's "create artifact"). */
+  extraActions?: React.ReactNode
 }
 
 /**
@@ -79,7 +94,6 @@ export const CODE_AUTO_RENDER_MAX_LINES = 2000
  * as the tool-row blocks it nests among) rather than as a Shiki theme card.
  */
 const CODE_SURFACE = "bg-muted/40"
-const HEADER_SURFACE = "bg-muted/70"
 
 export const CodeBlock = memo(function CodeBlock({
   code,
@@ -93,6 +107,9 @@ export const CodeBlock = memo(function CodeBlock({
   isStreaming = false,
   compact = false,
   headerTitle,
+  theme = CHAT_CODE_THEME,
+  capHeight = false,
+  extraActions,
 }: CodeBlockProps) {
   const t = useTranslations("chat.renderers.code")
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -138,13 +155,14 @@ export const CodeBlock = memo(function CodeBlock({
   const [highlight, setHighlight] = useState<{
     code: string
     language: string
+    theme: ChatCodeThemePair
     html: HighlightHtml
   } | null>(() => {
     const html =
       language && visibleCode && !isStreaming
-        ? getCachedHighlight(visibleCode, language)
+        ? getCachedHighlight(visibleCode, language, theme)
         : undefined
-    return html && language ? { code: visibleCode, language, html } : null
+    return html && language ? { code: visibleCode, language, theme, html } : null
   })
 
   useEffect(() => {
@@ -153,23 +171,23 @@ export const CodeBlock = memo(function CodeBlock({
     // the streaming render path. The plain-pre fallback below still renders
     // the code with line numbers and copy/download affordances, so there is no
     // visual gap; only the syntax colours are deferred. Theme/colour parity
-    // with the streaming Streamdown view comes from `CHAT_CODE_THEME`, baked
-    // into the cache.
+    // with the streaming Streamdown view comes from the shared theme pair
+    // (ADR-0218), baked into the cache key.
     if (!language || !visibleCode || isStreaming) {
       setHighlight(null)
       return
     }
 
-    const cached = getCachedHighlight(visibleCode, language)
+    const cached = getCachedHighlight(visibleCode, language, theme)
     if (cached) {
-      setHighlight({ code: visibleCode, language, html: cached })
+      setHighlight({ code: visibleCode, language, theme, html: cached })
       return
     }
 
     let cancelled = false
-    void highlightCached(visibleCode, language)
+    void highlightCached(visibleCode, language, theme)
       .then((result) => {
-        if (!cancelled) setHighlight({ code: visibleCode, language, html: result })
+        if (!cancelled) setHighlight({ code: visibleCode, language, theme, html: result })
       })
       .catch(() => {
         if (!cancelled) setHighlight(null)
@@ -178,12 +196,16 @@ export const CodeBlock = memo(function CodeBlock({
     return () => {
       cancelled = true
     }
-  }, [visibleCode, language, isStreaming])
+  }, [visibleCode, language, isStreaming, theme])
 
   // A prop change must show the new source immediately, while its async
   // highlight is pending; retaining the previous HTML would display old code.
   const currentHighlight =
-    !isStreaming && highlight?.code === visibleCode && highlight.language === language
+    !isStreaming &&
+    highlight?.code === visibleCode &&
+    highlight.language === language &&
+    highlight.theme.light === theme.light &&
+    highlight.theme.dark === theme.dark
       ? highlight.html
       : null
   const highlightedHtml = currentHighlight?.light ?? ""
@@ -355,119 +377,82 @@ export const CodeBlock = memo(function CodeBlock({
     </div>
   ) : null
 
-  const controlBtn = compact ? "size-5" : "size-6"
-  // `size-*`, not `h-*`/`w-*`: Button pins any svg child without a `size-`
-  // class to 16px, which would silently override these.
-  const controlIcon = compact ? "size-2.5" : "size-3"
+  const actions = (
+    <>
+      {extraActions}
+      <RichBlockAction
+        compact={compact}
+        onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
+        label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
+        tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
+        aria-pressed={localShowLineNumbers}
+      >
+        <ListOrdered />
+      </RichBlockAction>
+      <RichBlockAction
+        compact={compact}
+        onClick={() => setWordWrap(!wordWrap)}
+        label={wordWrap ? t("unwrapAria") : t("wrapAria")}
+        tooltip={wordWrap ? t("unwrap") : t("wrap")}
+        aria-pressed={wordWrap}
+      >
+        <WrapText />
+      </RichBlockAction>
+      <RichBlockAction
+        compact={compact}
+        onClick={handleCopy}
+        label={t("copyAria")}
+        tooltip={t("copy")}
+      >
+        <CopyFeedbackIcon copied={copied} size={compact ? 10 : 12} />
+      </RichBlockAction>
+      <RichBlockAction
+        compact={compact}
+        onClick={handleDownload}
+        label={t("downloadAria")}
+        tooltip={t("download")}
+      >
+        <AnimatedActionIcon icon={AnimatedDownloadIcon} size={compact ? 10 : 12} />
+      </RichBlockAction>
+      <RichBlockAction
+        compact={compact}
+        onClick={() => setIsFullscreen(true)}
+        label={t("fullscreenAria")}
+        tooltip={t("fullscreen")}
+      >
+        <Expand />
+      </RichBlockAction>
+    </>
+  )
+
+  const headerLabel = headerTitle ? (
+    <span className="font-mono">{headerTitle}</span>
+  ) : (
+    <span className="font-mono">
+      {language || (filename ? null : /* i18n-exempt: generic fallback label */ "code")}
+    </span>
+  )
+  const headerMeta = headerTitle ? (language ? `· ${language}` : null) : filename || null
 
   return (
     <>
-      <div
-        className={cn(
-          "group relative overflow-hidden border",
-          compact ? "my-1 rounded-md" : "my-3 rounded-lg",
-          className
-        )}
+      <RichBlockFrame
+        kind="code"
+        compact={compact}
+        className={className}
         role="figure"
         aria-label={language ? t("figureLabelWithLang", { language }) : t("figureLabel")}
+        icon={<Code2 />}
+        label={headerLabel}
+        meta={headerMeta}
+        actions={actions}
+        bodyClassName={cn(
+          capHeight && "max-h-(--rich-code-max-h) overflow-y-auto overscroll-contain"
+        )}
+        footer={truncationFooter}
       >
-        <div
-          className={cn(
-            "flex items-center justify-between gap-2 border-b",
-            HEADER_SURFACE,
-            compact ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-            {headerTitle ? (
-              <>
-                <span className="min-w-0 truncate font-mono font-medium text-foreground">
-                  {headerTitle}
-                </span>
-                {language && (
-                  <span className="shrink-0 text-muted-foreground/60">· {language}</span>
-                )}
-              </>
-            ) : (
-              <>
-                {language && <span className="font-mono font-medium">{language}</span>}
-                {filename && <span className="text-muted-foreground/60">{filename}</span>}
-                {!language && !filename && (
-                  <span className="font-mono">{/* i18n-exempt: generic fallback label */}code</span>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Hover-revealed on fine pointers; always visible on touch, where
-              there is no hover to reveal it (copy/download/fullscreen would
-              otherwise be unreachable on mobile). */}
-          <div
-            data-message-rich-control
-            className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity"
-          >
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className={controlBtn}
-              onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
-              aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
-              aria-pressed={localShowLineNumbers}
-              tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
-            >
-              <ListOrdered className={controlIcon} />
-            </TooltipIconButton>
-
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className={controlBtn}
-              onClick={() => setWordWrap(!wordWrap)}
-              aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
-              aria-pressed={wordWrap}
-              tooltip={wordWrap ? t("unwrap") : t("wrap")}
-            >
-              <WrapText className={controlIcon} />
-            </TooltipIconButton>
-
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className={controlBtn}
-              onClick={handleCopy}
-              aria-label={t("copyAria")}
-              tooltip={t("copy")}
-            >
-              <CopyFeedbackIcon copied={copied} size={compact ? 10 : 12} />
-            </TooltipIconButton>
-
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className={controlBtn}
-              onClick={handleDownload}
-              aria-label={t("downloadAria")}
-              tooltip={t("download")}
-            >
-              <AnimatedActionIcon icon={AnimatedDownloadIcon} size={compact ? 10 : 12} />
-            </TooltipIconButton>
-
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className={controlBtn}
-              onClick={() => setIsFullscreen(true)}
-              aria-label={t("fullscreenAria")}
-              tooltip={t("fullscreen")}
-            >
-              <Expand className={controlIcon} />
-            </TooltipIconButton>
-          </div>
-        </div>
-
         {renderCode(false)}
-        {truncationFooter}
-      </div>
+      </RichBlockFrame>
 
       <CodeBlockFullscreen
         open={isFullscreen}

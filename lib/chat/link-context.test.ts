@@ -8,6 +8,7 @@ jest.mock("@/lib/capture/enrich", () => ({
 import {
   buildLinkContextBlocks,
   extractHttpUrls,
+  isUrlSafeToDereference,
   mergeContextBlocks,
   normalizeHttpUrl,
 } from "./link-context"
@@ -95,6 +96,13 @@ describe("chat link context", () => {
     expect(encoded.rejected).toEqual(["https://example.com/?email=alice%2540example.com"])
     expect(malformed.rejected).toEqual(["https://example.com/%E0%A4%A"])
     expect(overEncoded.rejected).toEqual(["https://example.com/?email=alice%25252540example.com"])
+  })
+
+  it("isUrlSafeToDereference accepts clean URLs and refuses raw, encoded or malformed PII", () => {
+    expect(isUrlSafeToDereference("https://github.com/deepseek-ai/dsh-libreoffice-kit")).toBe(true)
+    expect(isUrlSafeToDereference("https://example.com/?email=alice@example.com")).toBe(false)
+    expect(isUrlSafeToDereference("https://example.com/?email=alice%2540example.com")).toBe(false)
+    expect(isUrlSafeToDereference("https://example.com/%E0%A4%A")).toBe(false)
   })
 
   it("keeps the original prompt when every link fetch fails", async () => {

@@ -212,4 +212,26 @@ describe("parseChartPayload", () => {
       )
     })
   })
+  describe("title (ADR-0218)", () => {
+    it("carries a non-empty string title from an object payload", () => {
+      const contract = parseChartPayload(
+        JSON.stringify({ type: "bar", title: "  Render cost ", data: [{ name: "a", v: 1 }] })
+      )
+      expect(contract.title).toBe("Render cost")
+      const scatter = parseChartPayload(
+        JSON.stringify({ type: "scatter", title: "XY", data: [{ x: 1, y: 2 }] })
+      )
+      expect(scatter.title).toBe("XY")
+    })
+
+    it("omits a missing, blank or non-string title", () => {
+      expect(parseChartPayload(JSON.stringify([{ name: "a", v: 1 }]))).not.toHaveProperty("title")
+      expect(
+        parseChartPayload(JSON.stringify({ type: "bar", title: "  ", data: [{ name: "a", v: 1 }] }))
+      ).not.toHaveProperty("title")
+      expect(
+        parseChartPayload(JSON.stringify({ type: "bar", title: 7, data: [{ name: "a", v: 1 }] }))
+      ).not.toHaveProperty("title")
+    })
+  })
 })

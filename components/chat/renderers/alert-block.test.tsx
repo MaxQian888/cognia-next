@@ -31,6 +31,22 @@ describe("AlertBlock", () => {
   })
 })
 
+describe("AlertBlock tokens (ADR-0218)", () => {
+  it.each([
+    ["note", "info"],
+    ["tip", "success"],
+    ["important", "primary"],
+    ["warning", "warning"],
+    ["caution", "destructive"],
+  ] as const)("draws %s with the %s token", (type, token) => {
+    const { container } = render(<AlertBlock type={type}>body</AlertBlock>)
+    const box = container.firstElementChild as HTMLElement
+    expect(box.className).toContain(`border-${token}/`)
+    expect(box.className).not.toMatch(/(blue|green|purple|yellow|red)-500/)
+    expect(box).toHaveClass("my-(--rich-block-gap)", "border-l-[3px]")
+  })
+})
+
 describe("extractAlertFromChildren", () => {
   it("returns null for an ordinary quote", () => {
     expect(extractAlertFromChildren(<p>just a quote</p>)).toBeNull()

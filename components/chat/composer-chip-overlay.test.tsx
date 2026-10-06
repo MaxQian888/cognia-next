@@ -301,9 +301,13 @@ describe("ComposerChipOverlay — link pills", () => {
     const pills = container.querySelectorAll('[data-chip="link"]')
     expect(pills).toHaveLength(1)
     expect(pills[0].textContent).toBe("https://github.com/svenstaro/genact")
-    // Conventional link styling — blue and underlined, no pill box.
-    expect(pills[0].className).toMatch(/text-blue-600/)
+    // Conventional link styling — the shared `--link` colour (ADR-0218) and
+    // underlined, no pill box.
+    expect(pills[0].className).toMatch(/text-\(--link\)/)
     expect(pills[0].className).toMatch(/underline/)
+    // Offsets for the composer's hover preview, which hit-tests these spans.
+    expect(pills[0]).toHaveAttribute("data-link-start", "4")
+    expect(pills[0]).toHaveAttribute("data-link-end", String(4 + pills[0].textContent!.length))
     expect(container.textContent).toBe(value)
   })
 

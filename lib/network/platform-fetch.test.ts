@@ -192,6 +192,15 @@ describe("createPlatformFetch", () => {
     expect(proxied).toHaveBeenCalledWith("https://cdn.test/v.mp4", { timeout: 600_000 })
   })
 
+  it("forwards the private-host block to the desktop bridge", async () => {
+    const proxied = jest.fn().mockResolvedValue(new Response("{}", { status: 200 }))
+    createProxyFetch.mockReturnValue(proxied)
+    await createPlatformFetch({ kind: "tauri" })("https://example.com/", {
+      blockPrivateHosts: true,
+    })
+    expect(proxied).toHaveBeenCalledWith("https://example.com/", { blockPrivateHosts: true })
+  })
+
   it("never hands a body to a status that forbids one", async () => {
     const request = jest.fn().mockResolvedValue({
       data: "",
@@ -307,6 +316,7 @@ describe("platform fetch operation measurements", () => {
       const result = createPlatformFetch({ kind: "browser" })("https://private.test", {
         timeout: 100,
         binaryResponse: true,
+        blockPrivateHosts: true,
         credentials: "include",
         signal: controller.signal,
       })

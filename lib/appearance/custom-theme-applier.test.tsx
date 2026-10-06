@@ -162,10 +162,10 @@ describe("CustomThemeApplier", () => {
     expect(html.style.getPropertyValue("--sidebar-primary-foreground")).toBe("#000")
 
     // Every key in the canonical list should be set to a non-empty value —
-    // all 56, not just the 27 a theme is required to author.
+    // all 58, not just the 27 a theme is required to author.
     const blank = CSS_VAR_KEYS.filter((v) => html.style.getPropertyValue(v) === "")
     expect(blank).toEqual([])
-    expect(CSS_VAR_KEYS.length).toBe(56)
+    expect(CSS_VAR_KEYS.length).toBe(58)
   })
 
   /**

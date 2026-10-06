@@ -2167,6 +2167,26 @@
       "skipForward": "+10 秒",
       "unmute": "取消静音"
     },
+    "chart": {
+      "copyJson": "复制图表 JSON",
+      "downloadPng": "下载 PNG",
+      "error": "无法绘制此图表",
+      "exportFailed": "无法导出图表",
+      "fullscreen": "全屏查看",
+      "label": "图表",
+      "points": "{count, plural, other {# 个数据点}}",
+      "showChart": "查看图表",
+      "showData": "查看数据",
+      "types": {
+        "area": "面积图",
+        "bar": "柱状图",
+        "doughnut": "环形图",
+        "line": "折线图",
+        "pie": "饼图",
+        "radar": "雷达图",
+        "scatter": "散点图"
+      }
+    },
     "code": {
       "ariaInLanguage": "{language} 代码",
       "close": "关闭",
@@ -2260,7 +2280,18 @@
       "showSource": "查看源码",
       "tooLarge": "这张图较大（{chars, number} 个字符），绘制可能需要一些时间。",
       "viewFullscreen": "全屏查看",
-      "viewSource": "查看源码"
+      "viewSource": "查看源码",
+      "zoomIn": "放大",
+      "zoomOut": "缩小"
+    },
+    "richBlock": {
+      "close": "关闭",
+      "closeAria": "关闭全屏视图",
+      "copied": "已复制",
+      "copy": "复制",
+      "download": "下载",
+      "fullscreen": "全屏",
+      "fullscreenAria": "全屏查看"
     },
     "table": {
       "actionFailed": "表格操作失败",
@@ -2269,11 +2300,13 @@
       "copyCsv": "复制为 CSV",
       "copyMarkdown": "复制为 Markdown",
       "copyTsv": "复制为 TSV",
+      "dimensions": "{rows, plural, other {# 行}} × {columns, plural, other {# 列}}",
       "download": "下载表格",
       "downloadCsv": "下载为 CSV",
       "downloadMarkdown": "下载为 Markdown",
       "fullscreen": "全屏查看表格",
       "showAllRows": "显示全部行",
+      "title": "表格",
       "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
     },
     "video": {
@@ -2966,5 +2999,14 @@
     "stopWaiting": "停止等待",
     "stopWaitingHint": "{provider} 不支持取消已开始的任务。这里只会停止查询，提供商仍可能完成生成并计费。",
     "tryAgain": "重新生成"
+  },
+  "linkPreview": {
+    "browserOnly": "完整预览仅在桌面端和移动端可用。",
+    "copied": "已复制",
+    "copy": "复制链接",
+    "label": "{host} 的预览",
+    "loading": "正在加载预览",
+    "open": "打开",
+    "unavailable": "此页面没有可用的预览。"
   }
 }

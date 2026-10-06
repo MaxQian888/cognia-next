@@ -2,7 +2,8 @@
 //
 // Unlike the 8 color PRESETS (which are accent tints over a shared neutral
 // surface), each theme here ships a complete, hand-authored 27-token palette
-// with its own surfaces, borders, and signal colors — the "more styles and
+// with its own surfaces, borders, and signal colors (plus the ADR-0218 chat
+// `link` colour, picked from each palette's own link hue) — the "more styles and
 // systems" the appearance system was missing. They surface in the same
 // unified theme grid as the built-in VSCode presets and, on activation, are
 // cloned into a persistent `customThemes` row (structured, full-fidelity).
@@ -62,6 +63,8 @@ const NORD_DARK: ThemeColors = {
   sidebarAccentForeground: "#eceff4",
   sidebarBorder: "#3b4252",
   sidebarRing: "#88c0d0",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#88c0d0",
 }
 
 const NORD_LIGHT: ThemeColors = {
@@ -92,6 +95,8 @@ const NORD_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#2e3440",
   sidebarBorder: "#d8dee9",
   sidebarRing: "#5e81ac",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#4c6a92",
 }
 
 // ── Rosé Pine ─────────────────────────────────────────────────────────────────
@@ -123,6 +128,8 @@ const ROSE_PINE: ThemeColors = {
   sidebarAccentForeground: "#e0def4",
   sidebarBorder: "#26233a",
   sidebarRing: "#9ccfd8",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#9ccfd8",
 }
 
 const ROSE_PINE_DAWN: ThemeColors = {
@@ -153,6 +160,8 @@ const ROSE_PINE_DAWN: ThemeColors = {
   sidebarAccentForeground: "#575279",
   sidebarBorder: "#dfdad9",
   sidebarRing: "#286983",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#286983",
 }
 
 // ── Catppuccin ────────────────────────────────────────────────────────────────
@@ -184,6 +193,8 @@ const CATPPUCCIN_MOCHA: ThemeColors = {
   sidebarAccentForeground: "#cdd6f4",
   sidebarBorder: "#313244",
   sidebarRing: "#89b4fa",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#89b4fa",
 }
 
 const CATPPUCCIN_LATTE: ThemeColors = {
@@ -214,6 +225,8 @@ const CATPPUCCIN_LATTE: ThemeColors = {
   sidebarAccentForeground: "#4c4f69",
   sidebarBorder: "#bcc0cc",
   sidebarRing: "#1e66f5",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#1a5ce0",
 }
 
 // ── Gruvbox ───────────────────────────────────────────────────────────────────
@@ -245,6 +258,8 @@ const GRUVBOX_DARK: ThemeColors = {
   sidebarAccentForeground: "#ebdbb2",
   sidebarBorder: "#3c3836",
   sidebarRing: "#fabd2f",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#83a598",
 }
 
 const GRUVBOX_LIGHT: ThemeColors = {
@@ -275,6 +290,8 @@ const GRUVBOX_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#3c3836",
   sidebarBorder: "#d5c4a1",
   sidebarRing: "#af3a03",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#076678",
 }
 
 // ── Solarized ─────────────────────────────────────────────────────────────────
@@ -306,6 +323,8 @@ const SOLARIZED_DARK: ThemeColors = {
   sidebarAccentForeground: "#93a1a1",
   sidebarBorder: "#073642",
   sidebarRing: "#268bd2",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#4aa3e0",
 }
 
 const SOLARIZED_LIGHT: ThemeColors = {
@@ -336,6 +355,8 @@ const SOLARIZED_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#002b36",
   sidebarBorder: "#93a1a1",
   sidebarRing: "#268bd2",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#1f6fa8",
 }
 
 // ── 二次元 / anime themes ────────────────────────────────────────────────────
@@ -380,6 +401,8 @@ const SAKURA_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#40182b",
   sidebarBorder: "#f6bed1",
   sidebarRing: "#c2185b",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#c2185b",
 }
 
 const SAKURA_DARK: ThemeColors = {
@@ -410,6 +433,8 @@ const SAKURA_DARK: ThemeColors = {
   sidebarAccentForeground: "#ffe7f0",
   sidebarBorder: "#33203a",
   sidebarRing: "#ff8fb8",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#ff8fb8",
 }
 
 // ── Mahou — magical girl (violet + cyan) ─────────────────────────────────────
@@ -441,6 +466,8 @@ const MAHOU_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#2a1a52",
   sidebarBorder: "#d5c8ff",
   sidebarRing: "#6d28d9",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#6d28d9",
 }
 
 const MAHOU_DARK: ThemeColors = {
@@ -471,6 +498,8 @@ const MAHOU_DARK: ThemeColors = {
   sidebarAccentForeground: "#ece6ff",
   sidebarBorder: "#2a2150",
   sidebarRing: "#a78bfa",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#a78bfa",
 }
 
 // ── Neon Idol — stage lighting (magenta + cyan on near-black) ────────────────
@@ -502,6 +531,8 @@ const NEON_IDOL_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#1d1533",
   sidebarBorder: "#ddd0fb",
   sidebarRing: "#0e7490",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#c2005f",
 }
 
 const NEON_IDOL_DARK: ThemeColors = {
@@ -532,6 +563,8 @@ const NEON_IDOL_DARK: ThemeColors = {
   sidebarAccentForeground: "#f4f2ff",
   sidebarBorder: "#211d3f",
   sidebarRing: "#22d3ee",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#ff3d9e",
 }
 
 // ── Yozora — night sky (indigo + starlight gold) ─────────────────────────────
@@ -563,6 +596,8 @@ const YOZORA_LIGHT: ThemeColors = {
   sidebarAccentForeground: "#16204a",
   sidebarBorder: "#c6d4ff",
   sidebarRing: "#2f5fd0",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#2f5fd0",
 }
 
 const YOZORA_DARK: ThemeColors = {
@@ -593,6 +628,8 @@ const YOZORA_DARK: ThemeColors = {
   sidebarAccentForeground: "#e6ecff",
   sidebarBorder: "#1f2b5e",
   sidebarRing: "#ffd166",
+  // ADR-0218 — chat link colour from the palette's own link/accent hue.
+  link: "#8ab4ff",
 }
 
 /**

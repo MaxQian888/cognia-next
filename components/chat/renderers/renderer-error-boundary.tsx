@@ -1,10 +1,10 @@
 "use client"
 
 import { Component, type ReactNode } from "react"
-import { AlertTriangle, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { RichBlockError } from "@/components/chat/renderers/rich-block/rich-block-error"
 import { loggers } from "@cognia/logging"
 
 interface RendererErrorBoundaryProps {
@@ -79,28 +79,20 @@ function RendererErrorFallback({
 }: RendererErrorFallbackProps) {
   const t = useTranslations("chat.renderers.errorBoundary")
   const title = rendererName ? t("titleNamed", { name: rendererName }) : t("titleFallback")
+  // The shared block failure state (ADR-0218), so a crashed renderer keeps
+  // the block rhythm instead of drawing a third kind of red box.
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center gap-3 p-4 rounded-lg border border-destructive/30 bg-destructive/5 my-3",
-        className
-      )}
-      role="alert"
-    >
-      <div className="flex items-center gap-2 text-destructive">
-        <AlertTriangle className="h-5 w-5" />
-        <span className="font-medium text-sm">{title}</span>
-      </div>
-      {error && (
-        <pre className="max-w-md whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs text-muted-foreground">
-          {error.message}
-        </pre>
-      )}
-      <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
-        <RefreshCw className="h-3 w-3" />
-        {t("retry")}
-      </Button>
-    </div>
+    <RichBlockError
+      className={className}
+      title={title}
+      detail={error?.message}
+      action={
+        <Button variant="outline" size="sm" onClick={onRetry} className="h-7 gap-1.5 px-2 text-xs">
+          <RefreshCw className="size-3" />
+          {t("retry")}
+        </Button>
+      }
+    />
   )
 }
 

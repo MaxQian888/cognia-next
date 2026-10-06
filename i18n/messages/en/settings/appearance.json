@@ -372,6 +372,8 @@
       "info": "Info",
       "infoForeground": "Info text",
       "input": "Input",
+      "link": "Link",
+      "mark": "Highlight",
       "muted": "Muted",
       "mutedForeground": "Muted text",
       "popover": "Popover",
@@ -517,9 +519,45 @@
       "label": "Layout"
     },
     "markdown": {
+      "blockBorder": {
+        "hint": "Outline code, tables, diagrams and charts; off lets them sit flush in the reply.",
+        "label": "Block borders"
+      },
+      "blockDensity": {
+        "comfortable": "Comfortable",
+        "compact": "Compact",
+        "label": "Block density"
+      },
+      "blockHeader": {
+        "hint": "Show the title bar on code, tables, diagrams and charts; off keeps the toolbar as a floating button group inside the block.",
+        "label": "Block headers"
+      },
+      "charts": {
+        "hint": "Draw ```chart fences as charts; off shows the JSON.",
+        "label": "Inline charts"
+      },
       "codeLineNumbers": {
         "hint": "Default for the line-number gutter; each block can still toggle it.",
         "label": "Code line numbers"
+      },
+      "codeMaxHeight": {
+        "label": "Code block height",
+        "medium": "Medium",
+        "none": "No limit",
+        "short": "Short",
+        "tall": "Tall"
+      },
+      "codeTheme": {
+        "catppuccin": "Catppuccin",
+        "everforest": "Everforest",
+        "github": "GitHub",
+        "label": "Code theme",
+        "min": "Min",
+        "one": "One",
+        "rose-pine": "Rosé Pine",
+        "solarized": "Solarized",
+        "vitesse": "Vitesse",
+        "vscode": "VS Code"
       },
       "codeWrap": {
         "hint": "Default for soft wrapping; each block can still toggle it.",
@@ -609,6 +647,46 @@
       "collapsed": "Collapsed",
       "expanded": "Expanded",
       "hidden": "Hidden"
+    },
+    "reading": {
+      "label": "Reading",
+      "spacing": {
+        "comfortable": "Comfortable",
+        "compact": "Compact",
+        "label": "Paragraph spacing",
+        "relaxed": "Relaxed"
+      },
+      "textSize": {
+        "label": "Text size",
+        "lg": "Large",
+        "md": "Default",
+        "sm": "Small"
+      }
+    },
+    "links": {
+      "color": {
+        "label": "Link color",
+        "link": "Link blue",
+        "primary": "Theme primary",
+        "text": "Same as text"
+      },
+      "label": "Links",
+      "preview": {
+        "hint": "Shows the page's title, summary and image. Off also stops fetching anything about a link.",
+        "hover": "Card on hover",
+        "label": "Link preview",
+        "off": "Off"
+      },
+      "siteIcon": {
+        "hint": "Show the site's icon before external links.",
+        "label": "Site icon"
+      },
+      "underline": {
+        "hover": "On hover only",
+        "label": "Underline",
+        "solid": "Solid",
+        "subtle": "Subtle"
+      }
     }
   },
   "nav": {

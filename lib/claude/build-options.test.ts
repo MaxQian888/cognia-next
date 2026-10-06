@@ -1747,6 +1747,28 @@ describe("resolveSendOptions — visual output routing (ADR-0139)", () => {
     expect(opts.appendSystemPrompt).not.toContain("chart-design")
   })
 
+  it("routes the inline chart fence in the app, never to IM, and not when charts are off (ADR-0218)", async () => {
+    const inApp = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(inApp.appendSystemPrompt).toContain("fenced `chart` block")
+
+    const im = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      session: makeSession({
+        id: "im-session",
+        platformBinding: { adapterId: "adp_1", platform: "lark", conversationKey: "oc_1" },
+      } as Partial<ChatSession>),
+    })
+    expect(im.appendSystemPrompt).not.toContain("fenced `chart`")
+
+    const off = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        messageDisplay: { preset: "balanced", overrides: { markdown: { charts: false } } },
+      } as unknown as AppSettings,
+    })
+    expect(off.appendSystemPrompt).not.toContain("fenced `chart`")
+  })
+
   it("uses the fenced route when the final filter removes artifact tools", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", toolFilter: { mode: "allow", tools: ["Read"] } }),

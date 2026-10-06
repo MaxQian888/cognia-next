@@ -124,6 +124,15 @@ describe("ImageBlock", () => {
     expect(container.querySelector(".animate-pulse")).not.toBeInTheDocument()
   })
 
+  it("puts its toolbar under the shared rich-controls policy (ADR-0218)", () => {
+    const { container } = renderBlock()
+    const toolbar = container.querySelector("figure [data-message-rich-control]")!
+    expect(toolbar).toBeInTheDocument()
+    expect(toolbar).toHaveClass("group-hover/rich:opacity-100", "pointer-coarse:opacity-100")
+    expect(toolbar.querySelectorAll("button")).toHaveLength(3)
+    expect(container.querySelector("figure")).toHaveClass("my-(--rich-block-gap)")
+  })
+
   it("opens the fullscreen viewer on image click", () => {
     renderBlock()
     openFullscreen()

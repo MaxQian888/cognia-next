@@ -58,6 +58,12 @@ export interface PlatformRequestInit extends RequestInit {
    * corrupts it. Desktop and browser read bytes either way.
    */
   binaryResponse?: boolean
+  /**
+   * Ask the desktop proxy to refuse loopback / private-network targets,
+   * including ones reached through a redirect. Only the Tauri transport can
+   * enforce it; the caller still runs `assertFetchTargetAllowed` up front.
+   */
+  blockPrivateHosts?: boolean
 }
 
 /** A `fetch`-compatible function. Narrower than `typeof fetch` on purpose. */
@@ -195,7 +201,12 @@ function selectPlatformFetch(
         deps.browser ??
         ((input, init) => {
           if (!init) return fetch(input)
-          const { timeout: _timeout, binaryResponse: _binary, ...rest } = init
+          const {
+            timeout: _timeout,
+            binaryResponse: _binary,
+            blockPrivateHosts: _blockPrivate,
+            ...rest
+          } = init
           return fetch(input, rest)
         })
       )

@@ -44,7 +44,7 @@ const toOklch = converter("oklch")
 export type ThemeTokenKey = keyof ThemeColors
 
 /**
- * Editor clusters. A complete, disjoint partition of all 56 tokens — the
+ * Editor clusters. A complete, disjoint partition of all 58 tokens — the
  * partition test in `theme-token-catalog.test.ts` fails if a token is missing
  * or lands in two groups, which is the forcing function that stops a new token
  * from shipping unreachable in the UI.
@@ -114,7 +114,7 @@ export interface ThemeTokenDef {
 
 // ----------------------------------------------------------------------------
 // The catalog. Order is the UI order: the 27 base tokens first (unchanged from
-// the previous `THEME_COLOR_KEYS`), then the 29 advanced ones.
+// the previous `THEME_COLOR_KEYS`), then the 31 advanced ones.
 // ----------------------------------------------------------------------------
 
 function lit(light: string, dark: string): TokenDefault {
@@ -307,6 +307,25 @@ export const THEME_TOKEN_CATALOG: readonly ThemeTokenDef[] = [
     group: "brand",
     base: false,
     default: { kind: "mix", from: "brandAction", into: "background", percent: 7 },
+  },
+
+  // ----- advanced: reading (ADR-0218) -----
+  // Prose tokens for rendered markdown. They sit with surface & text in the
+  // editor because they ARE text colours, just optional ones.
+  {
+    key: "link",
+    cssVar: "--link",
+    group: "surfaceText",
+    base: false,
+    default: lit("oklch(0.52 0.17 255)", "oklch(0.74 0.13 250)"),
+    vscode: ["textLink.foreground", "textLink.activeForeground"],
+  },
+  {
+    key: "mark",
+    cssVar: "--mark",
+    group: "surfaceText",
+    base: false,
+    default: lit("oklch(0.86 0.17 95)", "oklch(0.72 0.15 90)"),
   },
 
   // ----- status -----
@@ -703,7 +722,7 @@ function resolveDerived(
 }
 
 /**
- * Fill a partial palette out to all 56 tokens.
+ * Fill a partial palette out to all 58 tokens.
  *
  * This is the whole of "old 27-token themes keep working": nothing is migrated
  * on disk, the gaps are closed on read. Two passes, because the derived tokens

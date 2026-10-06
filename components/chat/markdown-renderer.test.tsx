@@ -36,21 +36,34 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
     language,
     showLineNumbers,
     wrapLines,
+    capHeight,
+    theme,
+    extraActions,
   }: {
     code: string
     language?: string
     showLineNumbers?: boolean
     wrapLines?: boolean
+    capHeight?: boolean
+    theme?: { light: string; dark: string }
+    extraActions?: React.ReactNode
   }) => (
     <div
       data-test="code-block"
       data-lang={language}
       data-line-numbers={String(showLineNumbers)}
       data-wrap={String(wrapLines)}
+      data-cap-height={String(Boolean(capHeight))}
+      data-theme={theme ? `${theme.light}|${theme.dark}` : undefined}
     >
       {code}
+      {extraActions}
     </div>
   ),
+}))
+
+jest.mock("@/components/chat/renderers/chart-block", () => ({
+  ChartBlock: ({ content }: { content: string }) => <div data-test="chart-block">{content}</div>,
 }))
 
 jest.mock("@/components/chat/renderers/math-block", () => ({
@@ -134,10 +147,6 @@ import path from "node:path"
 import { MarkdownRenderer, addMarkdownHeadingIds, parseTaskListItem } from "./markdown-renderer"
 import { openExternal } from "@/lib/tauri/opener"
 import { clearAllLinkMatchers, registerLinkMatcher } from "@/lib/plugin/api/link-matchers"
-import {
-  HOVER_REVEAL_FORBIDDEN_CLASSES,
-  HOVER_REVEAL_REQUIRED_VARIANTS,
-} from "@/lib/ui/hover-reveal"
 
 const mockOpenExternal = openExternal as jest.Mock
 
@@ -369,22 +378,30 @@ describe("MarkdownRenderer", () => {
     expect(document.querySelector("[data-test='code-block']")).toHaveAttribute("data-lang", "c++")
   })
 
-  it("keeps the code-block artifact control reachable without a hover", () => {
+  it("hands the code block its artifact action, theme pair and height cap", () => {
     mockArtifactCreateClick.mockClear()
     render(<MarkdownRenderer content={"```js\nconst a = 1\nconst b = 2\n```"} />)
+    const block = document.querySelector("[data-test='code-block']")!
+    expect(block).toHaveAttribute("data-cap-height", "true")
+    expect(block).toHaveAttribute("data-theme", "one-light|one-dark-pro")
+    // The artifact button rides in the block's own toolbar (ADR-0218), which
+    // owns the hover reveal; the mock renders `extraActions` inline.
     const button = screen.getByRole("button", { name: "create artifact" })
-    const wrapper = button.closest("[data-message-rich-control]")
-    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
-      expect(wrapper).toHaveClass(variant)
-    }
-    expect(wrapper).toHaveClass("group-hover/code:opacity-100")
-    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
-      expect(wrapper).not.toHaveClass(forbidden)
-    }
+    expect(block).toContainElement(button)
     button.focus()
     expect(button).toHaveFocus()
     fireEvent.click(button)
     expect(mockArtifactCreateClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("draws a ```chart fence as an inline chart unless charts are off (ADR-0218)", () => {
+    const fence = '```chart\n{"type":"bar","data":[{"name":"a","v":1}]}\n```'
+    const { rerender } = render(<MarkdownRenderer content={fence} />)
+    expect(document.querySelector("[data-test='chart-block']")).toHaveTextContent('"type":"bar"')
+    expect(document.querySelector("[data-test='code-block']")).toBeNull()
+    rerender(<MarkdownRenderer content={fence} enableCharts={false} />)
+    expect(document.querySelector("[data-test='chart-block']")).toBeNull()
+    expect(document.querySelector("[data-test='code-block']")).toHaveAttribute("data-lang", "chart")
   })
 
   it("renders inline code as <code> element (not CodeBlock)", () => {
@@ -546,8 +563,10 @@ describe("MarkdownRenderer", () => {
     render(<MarkdownRenderer content={"| A | B |\n|---|---|\n| 1 | 2 |"} />)
     const table = document.querySelector("table")
     expect(table).toBeTruthy()
+    // The table scrolls inside the shared block frame's body (ADR-0218).
     const scrollWrapper = table?.parentElement
-    expect(scrollWrapper?.className).toContain("typeset-scroll")
+    expect(scrollWrapper).toHaveAttribute("data-rich-block-body")
+    expect(scrollWrapper?.className).toContain("overflow-x-auto")
   })
 
   it("renders table headers and cells", () => {
@@ -792,6 +811,12 @@ describe("parseTaskListItem", () => {
       mathFontScale: 1.2 as const,
       mathAlign: "left" as const,
       mathCopy: false,
+      charts: false,
+      blockDensity: "comfortable" as const,
+      blockBorder: true,
+      blockHeader: true,
+      codeMaxHeight: "none" as const,
+      codeTheme: "github" as const,
     }
 
     it("seeds the renderer toggles from the resolved knobs", () => {

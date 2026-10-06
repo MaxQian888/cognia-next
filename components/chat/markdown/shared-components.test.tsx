@@ -24,6 +24,7 @@ jest.mock("@/lib/files/download", () => {
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 import {
   TABLE_AUTO_RENDER_MAX_ROWS,
@@ -33,6 +34,7 @@ import {
   isAudioUrl,
   isVideoUrl,
   MarkdownInlineCode,
+  numericColumns,
   parseTaskListItem,
 } from "./shared-components"
 
@@ -114,9 +116,11 @@ const messages = {
 }
 
 function renderNode(node: React.ReactNode) {
+  // `TooltipProvider` is mounted once in `app/layout.tsx`; the block toolbars
+  // need it here too.
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      {node}
+      <TooltipProvider>{node}</TooltipProvider>
     </NextIntlClientProvider>
   )
 }
@@ -329,7 +333,7 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
     expect(quote?.className).not.toMatch(/\bpl-\d|\bmy-\d/)
   })
 
-  it("wraps tables in typeset's own wide-block scroller", () => {
+  it("draws tables in the shared block frame with density-driven cells", () => {
     const c = createSharedMarkdownComponents()
     const { container } = renderNode(
       <c.table>
@@ -345,13 +349,23 @@ describe("createSharedMarkdownComponents — lists and inline", () => {
         </tbody>
       </c.table>
     )
-    expect(container.querySelector(".typeset-scroll")).toBeInTheDocument()
+    // ADR-0218: the table sits in a `not-typeset` RichBlockFrame whose body
+    // scrolls horizontally, so a wide table scrolls instead of compressing.
+    const frame = container.querySelector('[data-rich-block="table"]')!
+    expect(frame).toHaveClass("not-typeset", "rounded-lg")
+    expect(frame.querySelector("[data-rich-block-body]")).toHaveClass("overflow-x-auto")
+    expect(frame.querySelector("table")).toHaveClass("border-separate", "tabular-nums")
     expect(screen.getByText("head").tagName).toBe("TH")
     expect(screen.getByText("cell").tagName).toBe("TD")
-    // The grid and the header fill stay ours, and the cell padding has to as
-    // well — typeset zeroes `padding-inline-start` on first-column cells.
-    expect(screen.getByText("head")).toHaveClass("border", "bg-muted", "px-4", "py-2")
-    expect(screen.getByText("cell")).toHaveClass("border", "px-4", "py-2")
+    // Row separators only (no vertical grid), padding from the density vars.
+    expect(screen.getByText("head")).toHaveClass(
+      "border-b",
+      "bg-muted/60",
+      "px-(--rich-cell-px)",
+      "py-(--rich-cell-py)"
+    )
+    expect(screen.getByText("cell")).toHaveClass("border-b", "px-(--rich-cell-px)")
+    expect(screen.getByText("cell")).not.toHaveClass("border")
   })
 
   it("preserves GFM table alignment without forwarding arbitrary styles", () => {
@@ -623,7 +637,8 @@ describe("table actions", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Show all rows" }))
     expect(dialog.querySelectorAll("tbody tr")).toHaveLength(TABLE_AUTO_RENDER_MAX_ROWS + 2)
     expect(within(dialog).getByText("row 201")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Close fullscreen table" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Close fullscreen view" })).toBeInTheDocument()
+    expect(dialog).toHaveTextContent("202 rows × 2 columns")
   })
 
   it("runs every copy and download action through the shared table controls", async () => {
@@ -744,5 +759,80 @@ describe("MarkdownInlineCode", () => {
       line: 9,
       column: 2,
     })
+  })
+})
+
+describe("numeric table columns (ADR-0218)", () => {
+  it("detects columns whose every filled cell is a number", () => {
+    const numeric = numericColumns({
+      headers: ["Name", "Cost", "Share", "Note"],
+      rows: [
+        ["Code", "$1,200", "12%", "fast"],
+        ["Table", "-", "4.5%", "3"],
+        ["Chart", "−30", "", "slow"],
+      ],
+    })
+    expect([...numeric]).toEqual([1, 2])
+  })
+
+  it("right-aligns numeric cells unless the author aligned them", () => {
+    const c = createSharedMarkdownComponents()
+    const node = {
+      type: "element",
+      tagName: "table",
+      children: [
+        {
+          tagName: "thead",
+          children: [
+            {
+              tagName: "tr",
+              children: [
+                { tagName: "th", children: [{ type: "text", value: "Name" }] },
+                { tagName: "th", children: [{ type: "text", value: "ms" }] },
+                { tagName: "th", children: [{ type: "text", value: "Δ" }] },
+              ],
+            },
+          ],
+        },
+        {
+          tagName: "tbody",
+          children: [
+            {
+              tagName: "tr",
+              children: [
+                { tagName: "td", children: [{ type: "text", value: "Code" }] },
+                { tagName: "td", children: [{ type: "text", value: "12" }] },
+                { tagName: "td", children: [{ type: "text", value: "3" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const Table = c.table as React.ComponentType<{ node: unknown; children: React.ReactNode }>
+    renderNode(
+      <Table node={node}>
+        {"\n"}
+        <thead>
+          <tr>
+            <c.th>Name</c.th>
+            <c.th>ms</c.th>
+            <c.th align="center">Δ</c.th>
+          </tr>
+        </thead>
+        <c.tbody>
+          <tr>
+            <c.td>Code</c.td>
+            <c.td>12</c.td>
+            <c.td align="center">3</c.td>
+          </tr>
+        </c.tbody>
+      </Table>
+    )
+    expect(screen.getByText("Code")).not.toHaveAttribute("align")
+    expect(screen.getByText("12")).toHaveAttribute("align", "right")
+    expect(screen.getByText("ms")).toHaveAttribute("align", "right")
+    // An explicit GFM alignment wins over the numeric default.
+    expect(screen.getByText("3")).toHaveAttribute("align", "center")
   })
 })

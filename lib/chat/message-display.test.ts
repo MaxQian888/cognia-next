@@ -2,7 +2,9 @@ import { DEFAULT_APPEARANCE_SLICE } from "@/types/appearance"
 import { DEFAULTS } from "@/lib/db/settings"
 import {
   DEFAULT_MESSAGE_DISPLAY_OPTIONS,
+  DEFAULT_MESSAGE_LINK_OPTIONS,
   DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
+  DEFAULT_MESSAGE_READING_OPTIONS,
   resolveMessageDisplayOptions,
 } from "./message-display"
 
@@ -137,6 +139,12 @@ describe("resolveMessageDisplayOptions", () => {
         mathFontScale: 1,
         mathAlign: "center",
         mathCopy: true,
+        charts: true,
+        blockDensity: "compact",
+        blockBorder: true,
+        blockHeader: true,
+        codeMaxHeight: "tall",
+        codeTheme: "one",
       })
     })
 
@@ -185,6 +193,95 @@ describe("resolveMessageDisplayOptions", () => {
       expect(resolved.markdown.mermaid).toBe(true)
       expect(resolved.markdown.math).toBe(false)
       expect(resolved.bodyFont).toBe("sans")
+    })
+  })
+  describe("reading / links / block knobs (ADR-0218)", () => {
+    it("every preset keeps the pre-ADR prose rhythm and the new link defaults", () => {
+      for (const preset of ["focused", "balanced", "inspector"] as const) {
+        const resolved = resolveMessageDisplayOptions({ preset })
+        expect(resolved.reading).toEqual(DEFAULT_MESSAGE_READING_OPTIONS)
+        expect(resolved.links).toEqual(DEFAULT_MESSAGE_LINK_OPTIONS)
+      }
+      expect(DEFAULT_MESSAGE_READING_OPTIONS).toEqual({ textSize: "md", spacing: "comfortable" })
+      expect(DEFAULT_MESSAGE_LINK_OPTIONS).toEqual({
+        color: "link",
+        underline: "subtle",
+        siteIcon: true,
+        preview: "hover",
+      })
+    })
+
+    it("applies reading, link and block overrides field-by-field", () => {
+      const resolved = resolveMessageDisplayOptions(
+        {
+          preset: "balanced",
+          overrides: {
+            reading: { textSize: "lg" },
+            links: { color: "primary", preview: "off" },
+            markdown: { charts: false, blockDensity: "comfortable", codeTheme: "github" },
+          },
+        },
+        { preset: "balanced", overrides: { reading: { spacing: "compact" } } }
+      )
+      // The session layer re-applies its preset, so the global reading
+      // override does not survive — the same precedence every other knob has.
+      expect(resolved.reading).toEqual({ textSize: "md", spacing: "compact" })
+      const globalOnly = resolveMessageDisplayOptions({
+        preset: "balanced",
+        overrides: {
+          reading: { textSize: "lg" },
+          links: { color: "primary", preview: "off", siteIcon: false, underline: "hover" },
+          markdown: {
+            charts: false,
+            blockDensity: "comfortable",
+            blockBorder: false,
+            blockHeader: false,
+            codeMaxHeight: "none",
+            codeTheme: "github",
+          },
+        },
+      })
+      expect(globalOnly.reading).toEqual({ textSize: "lg", spacing: "comfortable" })
+      expect(globalOnly.links).toEqual({
+        color: "primary",
+        underline: "hover",
+        siteIcon: false,
+        preview: "off",
+      })
+      expect(globalOnly.markdown).toMatchObject({
+        charts: false,
+        blockDensity: "comfortable",
+        blockBorder: false,
+        blockHeader: false,
+        codeMaxHeight: "none",
+        codeTheme: "github",
+      })
+    })
+
+    it("ignores invalid reading, link and block values", () => {
+      const resolved = resolveMessageDisplayOptions({
+        preset: "balanced",
+        overrides: {
+          reading: { textSize: "xl" as never, spacing: 2 as never },
+          links: {
+            color: "red" as never,
+            underline: "dotted" as never,
+            siteIcon: "yes" as never,
+            preview: "click" as never,
+          },
+          markdown: {
+            charts: "on" as never,
+            blockDensity: "airy" as never,
+            blockBorder: "no" as never,
+            blockHeader: 0 as never,
+            codeMaxHeight: 300 as never,
+            codeTheme: "monokai" as never,
+          },
+        },
+      })
+      expect(resolved.reading).toEqual(DEFAULT_MESSAGE_READING_OPTIONS)
+      expect(resolved.links).toEqual(DEFAULT_MESSAGE_LINK_OPTIONS)
+      expect(resolved.markdown).toEqual(DEFAULT_MESSAGE_MARKDOWN_OPTIONS)
     })
   })
 })

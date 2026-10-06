@@ -598,17 +598,18 @@ describe("CustomThemeTab", () => {
     // The badge counts BOTH variants — a clean light side must not hide a dark
     // one that fails. Our i18n mock embeds the vars as JSON.
     const failureBadge = screen.getByTestId("custom-theme-audit-summary")
-    // Grey-on-grey on both sides: 8 of the 11 pairs fail, twice over. The three
-    // status pairs resolve to the shipped defaults and still pass.
-    expect(failureBadge.textContent).toContain('"count":16')
-    expect(failureBadge.textContent).toContain('"total":22')
+    // Grey-on-grey on both sides: 9 of the 12 pairs fail, twice over. The three
+    // status pairs resolve to the shipped defaults and still pass; the default
+    // link colour (ADR-0218) fails against a grey background like the rest.
+    expect(failureBadge.textContent).toContain('"count":18')
+    expect(failureBadge.textContent).toContain('"total":24')
     // Per-row chips appear next to flagged tokens in the open groups.
     expect(screen.getAllByText("audit.lowContrast").length).toBeGreaterThan(0)
     // Group headers surface their own failure counts.
     expect(screen.getByTestId("token-group-surfaceText-failures")).toBeInTheDocument()
     // And the per-variant tab badges say which side is at fault.
-    expect(screen.getByTestId("custom-theme-edit-light").textContent).toContain("8")
-    expect(screen.getByTestId("custom-theme-edit-dark").textContent).toContain("8")
+    expect(screen.getByTestId("custom-theme-edit-light").textContent).toContain("9")
+    expect(screen.getByTestId("custom-theme-edit-dark").textContent).toContain("9")
   })
 
   it("export from the rail menu creates a download for the theme", () => {

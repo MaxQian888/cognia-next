@@ -46,11 +46,11 @@ const LIGHT_DECLARED = declaredBlock(":root,")
 const DARK_DECLARED = declaredBlock(".dark,")
 
 describe("theme token catalog", () => {
-  it("covers exactly 56 tokens, 27 required and 29 optional", () => {
-    expect(THEME_TOKEN_CATALOG).toHaveLength(56)
+  it("covers exactly 58 tokens, 27 required and 31 optional", () => {
+    expect(THEME_TOKEN_CATALOG).toHaveLength(58)
     expect(BASE_THEME_COLOR_KEYS).toHaveLength(27)
-    expect(ADVANCED_THEME_COLOR_KEYS).toHaveLength(29)
-    expect(THEME_COLOR_KEYS).toHaveLength(56)
+    expect(ADVANCED_THEME_COLOR_KEYS).toHaveLength(31)
+    expect(THEME_COLOR_KEYS).toHaveLength(58)
   })
 
   it("lists the required tokens before the optional ones", () => {
@@ -144,10 +144,10 @@ describe("theme token catalog", () => {
 })
 
 describe("editor groups", () => {
-  it("partitions all 56 tokens with no gap and no overlap", () => {
+  it("partitions all 58 tokens with no gap and no overlap", () => {
     const flattened = THEME_TOKEN_GROUPS.flatMap((g) => g.tokens)
-    expect(flattened).toHaveLength(56)
-    expect(new Set(flattened).size).toBe(56)
+    expect(flattened).toHaveLength(58)
+    expect(new Set(flattened).size).toBe(58)
     expect(new Set(flattened)).toEqual(new Set(THEME_COLOR_KEYS))
   })
 
@@ -165,7 +165,7 @@ describe("editor groups", () => {
 })
 
 describe("normalizeThemeColors", () => {
-  it("fills a legacy 27-token palette out to 56", () => {
+  it("fills a legacy 27-token palette out to 58", () => {
     const legacy: Record<string, string> = {}
     for (const key of BASE_THEME_COLOR_KEYS) legacy[key] = "#123456"
     const resolved = normalizeThemeColors(legacy, "dark")

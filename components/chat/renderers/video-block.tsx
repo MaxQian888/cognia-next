@@ -138,7 +138,7 @@ export const VideoBlock = memo(function VideoBlock({
     return (
       <div
         className={cn(
-          "flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8 my-4",
+          "flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8 my-(--rich-block-gap)",
           className
         )}
         style={{ aspectRatio: "16/9" }}
@@ -155,7 +155,7 @@ export const VideoBlock = memo(function VideoBlock({
 
   if (youtubeId) {
     return (
-      <figure className={cn("my-4", className)}>
+      <figure className={cn("my-(--rich-block-gap)", className)}>
         <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "16/9" }}>
           <iframe
             src={`https://www.youtube.com/embed/${youtubeId}${autoPlay ? "?autoplay=1" : ""}`}
@@ -176,7 +176,7 @@ export const VideoBlock = memo(function VideoBlock({
 
   if (vimeoId) {
     return (
-      <figure className={cn("my-4", className)}>
+      <figure className={cn("my-(--rich-block-gap)", className)}>
         <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "16/9" }}>
           <iframe
             src={`https://player.vimeo.com/video/${vimeoId}${autoPlay ? "?autoplay=1" : ""}`}
@@ -200,7 +200,7 @@ export const VideoBlock = memo(function VideoBlock({
       ? `https://player.bilibili.com/player.html?bvid=${bilibiliId.bvid}&autoplay=${autoPlay ? 1 : 0}`
       : `https://player.bilibili.com/player.html?aid=${bilibiliId.aid}&autoplay=${autoPlay ? 1 : 0}`
     return (
-      <figure className={cn("my-4", className)}>
+      <figure className={cn("my-(--rich-block-gap)", className)}>
         <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "16/9" }}>
           <iframe
             src={bilibiliSrc}
@@ -219,7 +219,7 @@ export const VideoBlock = memo(function VideoBlock({
   }
 
   return (
-    <figure className={cn("my-4", className)}>
+    <figure className={cn("my-(--rich-block-gap)", className)}>
       <div className="relative rounded-lg overflow-hidden group bg-black">
         <video
           ref={videoRef}

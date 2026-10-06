@@ -31,9 +31,9 @@
  * contravariant).
  */
 
-import { Children, isValidElement, useMemo, useState } from "react"
+import { Children, cloneElement, isValidElement, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, DownloadIcon, Maximize2Icon, XIcon } from "lucide-react"
+import { CopyIcon, DownloadIcon, Maximize2Icon, TableIcon } from "lucide-react"
 import { tableDataToCSV, tableDataToMarkdown, tableDataToTSV, type TableData } from "streamdown"
 import { toast } from "sonner"
 import { downloadBlob, type DownloadOutcome } from "@/lib/files/download"
@@ -52,8 +52,13 @@ import { KbdInline } from "@/components/chat/renderers/kbd-inline"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { TaskListItem } from "@/components/chat/renderers/task-list"
 import { VideoBlock } from "@/components/chat/renderers/video-block"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
+import { RichBlockFrame } from "@/components/chat/renderers/rich-block/rich-block-frame"
+import {
+  RICH_BLOCK_FULLSCREEN_ACTION_CLASS,
+  RichBlockFullscreen,
+} from "@/components/chat/renderers/rich-block/rich-block-fullscreen"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -135,7 +140,7 @@ function MarkdownTableBody({ children }: { children?: React.ReactNode }) {
       <tr>
         <td
           colSpan={countRowCells(rows[0])}
-          className="border border-border bg-muted/40 px-4 py-2 text-xs"
+          className="bg-muted/40 px-(--rich-cell-px) py-(--rich-cell-py) text-xs"
         >
           <span className="text-muted-foreground">
             {t("truncatedNotice", { shown: TABLE_AUTO_RENDER_MAX_ROWS, total: rows.length })}
@@ -223,6 +228,64 @@ function downloadTable(data: TableData, format: TableDownloadFormat): Promise<Do
   return downloadBlob(new Blob([prefix, content], { type: mimeType }), `table.${extension}`)
 }
 
+/** Matches a plain number cell: sign, grouping, decimals, %, currency, units. */
+const NUMERIC_CELL =
+  /^[+\-−]?[$€£¥₹]?\s?(?:\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?\s?(?:%|[kKmMbB]|ms|s|x|×)?$/
+
+/**
+ * Columns whose every non-empty body cell is a number. They right-align (and
+ * read in tabular figures) unless the author set an alignment, which is how a
+ * reader compares magnitudes down a column.
+ */
+export function numericColumns(data: TableData): Set<number> {
+  const numeric = new Set<number>()
+  const width = Math.max(data.headers.length, ...data.rows.map((row) => row.length))
+  for (let column = 0; column < width; column++) {
+    let sawNumber = false
+    let allNumeric = true
+    for (const row of data.rows) {
+      const cell = (row[column] ?? "").trim()
+      if (!cell || cell === "-" || cell === "—") continue
+      if (NUMERIC_CELL.test(cell)) sawNumber = true
+      else {
+        allNumeric = false
+        break
+      }
+    }
+    if (sawNumber && allNumeric) numeric.add(column)
+  }
+  return numeric
+}
+
+/**
+ * Right-align the numeric columns by cloning `align` onto their cells. The cell
+ * overrides cannot do it themselves: react-markdown hands a cell no column
+ * index. Cells the author aligned keep their alignment.
+ */
+function alignNumericColumns(children: React.ReactNode, numeric: Set<number>): React.ReactNode {
+  if (numeric.size === 0) return children
+  const alignRow = (row: React.ReactNode) => {
+    if (!isValidElement(row)) return row
+    let column = 0
+    const cells = Children.map((row.props as { children?: React.ReactNode }).children, (cell) => {
+      if (!isValidElement(cell)) return cell
+      const index = column++
+      const props = cell.props as { align?: string; style?: React.CSSProperties }
+      if (!numeric.has(index) || props.align || props.style?.textAlign) return cell
+      return cloneElement(cell as React.ReactElement<{ align?: string }>, { align: "right" })
+    })
+    return cloneElement(row, undefined, cells)
+  }
+  return Children.map(children, (section) => {
+    if (!isValidElement(section)) return section
+    const rows = Children.map((section.props as { children?: React.ReactNode }).children, alignRow)
+    return cloneElement(section, undefined, rows)
+  })
+}
+
+const TABLE_CLASS =
+  "w-max min-w-full border-separate border-spacing-0 text-left tabular-nums [&_tbody_tr:last-child>td]:border-b-0 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-muted/40"
+
 function MarkdownTable({
   children,
   node,
@@ -235,6 +298,14 @@ function MarkdownTable({
   const t = useTranslations("chat.renderers.table")
   const [fullscreen, setFullscreen] = useState(false)
   const data = useMemo(() => extractMarkdownTableData(node), [node])
+  const aligned = useMemo(
+    () => alignNumericColumns(children, numericColumns(data)),
+    [children, data]
+  )
+  const dimensions = t("dimensions", {
+    rows: data.rows.length,
+    columns: Math.max(data.headers.length, ...data.rows.map((row) => row.length), 0),
+  })
 
   const copy = async (format: TableCopyFormat) => {
     try {
@@ -253,101 +324,100 @@ function MarkdownTable({
     }
   }
 
-  const controls = (
-    <div
-      className="not-typeset flex items-center justify-end gap-1"
-      data-testid="markdown-table-actions"
-      data-message-rich-control
-    >
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            disabled={isStreaming}
-            aria-label={t("copy")}
-          >
-            <CopyIcon aria-hidden />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => void copy("markdown")}>
-            {t("copyMarkdown")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void copy("csv")}>{t("copyCsv")}</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void copy("tsv")}>{t("copyTsv")}</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+  const menus = (fullscreenSize: boolean) => {
+    // An element factory, not a component: `DropdownMenuTrigger asChild` needs
+    // the button's own ref, which both of these forward.
+    const trigger = (label: string, icon: React.ReactNode) =>
+      fullscreenSize ? (
+        <TooltipIconButton
+          variant="ghost"
+          size="icon"
+          className={RICH_BLOCK_FULLSCREEN_ACTION_CLASS}
+          disabled={isStreaming}
+          aria-label={label}
+          tooltip={label}
+        >
+          {icon}
+        </TooltipIconButton>
+      ) : (
+        <RichBlockAction label={label} disabled={isStreaming}>
+          {icon}
+        </RichBlockAction>
+      )
+    return (
+      <>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            {trigger(t("copy"), <CopyIcon aria-hidden />)}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => void copy("markdown")}>
+              {t("copyMarkdown")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void copy("csv")}>{t("copyCsv")}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void copy("tsv")}>{t("copyTsv")}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            {trigger(t("download"), <DownloadIcon aria-hidden />)}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => void download("csv")}>
+              {t("downloadCsv")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void download("markdown")}>
+              {t("downloadMarkdown")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </>
+    )
+  }
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            disabled={isStreaming}
-            aria-label={t("download")}
-          >
-            <DownloadIcon aria-hidden />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => void download("csv")}>
-            {t("downloadCsv")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void download("markdown")}>
-            {t("downloadMarkdown")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        disabled={isStreaming}
-        aria-label={t("fullscreen")}
-        onClick={() => setFullscreen(true)}
-      >
-        <Maximize2Icon aria-hidden />
-      </Button>
-    </div>
-  )
-
+  // The toolbar floats over the table's corner instead of taking a row of its
+  // own (ADR-0218): the header row already reads as the block's header.
   return (
     <>
-      <div className="typeset-scroll flex flex-col gap-1" data-streamdown="table-wrapper">
-        {controls}
-        <table className="min-w-full border-collapse border border-border" data-streamdown="table">
-          {children}
+      <RichBlockFrame
+        kind="table"
+        header="overlay"
+        data-streamdown="table-wrapper"
+        aria-label={dimensions}
+        role="group"
+        actions={
+          <>
+            {menus(false)}
+            <RichBlockAction
+              label={t("fullscreen")}
+              disabled={isStreaming}
+              onClick={() => setFullscreen(true)}
+            >
+              <Maximize2Icon aria-hidden />
+            </RichBlockAction>
+          </>
+        }
+        bodyClassName="overflow-x-auto overscroll-x-contain"
+      >
+        <table className={TABLE_CLASS} data-streamdown="table">
+          {aligned}
         </table>
-      </div>
-      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-        <DialogContent
-          showCloseButton={false}
-          className="flex h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] flex-col p-4"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <DialogTitle>{t("fullscreen")}</DialogTitle>
-            <DialogClose asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("closeFullscreen")}
-              >
-                <XIcon aria-hidden />
-              </Button>
-            </DialogClose>
-          </div>
-          <div className="typeset min-h-0 flex-1 overflow-auto">
-            <div className="typeset-scroll">
-              <table className="min-w-full border-collapse border border-border">{children}</table>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      </RichBlockFrame>
+      <RichBlockFullscreen
+        open={fullscreen}
+        onOpenChange={setFullscreen}
+        testId="table-fullscreen"
+        icon={<TableIcon />}
+        title={t("title")}
+        subtitle={<span className="tabular-nums">{dimensions}</span>}
+        actions={menus(true)}
+      >
+        {fullscreen ? (
+          <table className={cn(TABLE_CLASS, "[&_thead_th]:sticky [&_thead_th]:top-0")}>
+            {aligned}
+          </table>
+        ) : null}
+      </RichBlockFullscreen>
     </>
   )
 }
@@ -472,12 +542,10 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
       }
       return <li>{children}</li>
     },
-    // `typeset-scroll` is typeset's own wide-block wrapper: it owns the flow
-    // margin, zeroes the child's, and widens the table to `max-content` so a
-    // wide table scrolls instead of compressing. The grid rules and the header
-    // fill stay Cognia's — including the cell padding, which has to outrank
-    // typeset's `th:first-child { padding-inline-start: 0 }` or the first
-    // column's text would sit flush against the border.
+    // Tables draw in the shared `RichBlockFrame` (ADR-0218): rounded, row
+    // separators only, a tinted header, row hover and a hover toolbar over the
+    // corner. The frame is `not-typeset`, so the cell padding (from the
+    // block-density variables) is the only padding, first column included.
     table({ children, node }: MarkdownElementProps<"table">) {
       return (
         <MarkdownTable node={node} isStreaming={isStreaming}>
@@ -496,7 +564,7 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
           colSpan={colSpan}
           rowSpan={rowSpan}
           style={textAlign ? { textAlign } : undefined}
-          className="border border-border bg-muted px-4 py-2 text-left font-semibold"
+          className="border-b bg-muted/60 px-(--rich-cell-px) py-(--rich-cell-py) text-left text-xs font-semibold whitespace-nowrap text-foreground/90"
         >
           {children}
         </th>
@@ -510,7 +578,7 @@ export function createSharedMarkdownComponents(options: SharedMarkdownComponentO
           colSpan={colSpan}
           rowSpan={rowSpan}
           style={textAlign ? { textAlign } : undefined}
-          className="border border-border px-4 py-2"
+          className="border-b border-border/60 px-(--rich-cell-px) py-(--rich-cell-py) align-top"
         >
           {children}
         </td>

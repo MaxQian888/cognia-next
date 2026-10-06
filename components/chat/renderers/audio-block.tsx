@@ -65,7 +65,7 @@ export const AudioBlock = memo(function AudioBlock({
     return (
       <div
         className={cn(
-          "my-4 flex flex-col gap-3 rounded-lg border border-dashed bg-muted/30 p-4",
+          "my-(--rich-block-gap) flex flex-col gap-3 rounded-lg border border-dashed bg-muted/30 p-3",
           className
         )}
       >
@@ -85,7 +85,7 @@ export const AudioBlock = memo(function AudioBlock({
   return (
     <div
       className={cn(
-        "my-4 flex items-center gap-4 rounded-lg border bg-card p-4",
+        "my-(--rich-block-gap) flex items-center gap-3 rounded-lg border bg-card p-3",
         // Reclaim 16px of chrome on a phone; see the control-bar note below for
         // why this card is width-critical.
         "max-sm:gap-3 max-sm:p-3",

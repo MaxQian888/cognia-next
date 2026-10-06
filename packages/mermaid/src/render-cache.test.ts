@@ -96,6 +96,31 @@ describe("mermaid render-cache", () => {
     expect(renderMock).toHaveBeenCalledTimes(2)
   })
 
+  it("renders with the base theme and the host palette when given a style", async () => {
+    const style = {
+      key: "palette-a",
+      themeVariables: { primaryColor: "#112233", darkMode: true },
+      fontFamily: "Inter, sans-serif",
+    }
+    await renderMermaidCached("dark", "graph TD; S-->T", style)
+    expect(initializeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: "base",
+        themeVariables: style.themeVariables,
+        fontFamily: "Inter, sans-serif",
+      })
+    )
+  })
+
+  it("keys on the style so a palette change re-renders", async () => {
+    const a = await renderMermaidCached("dark", "graph TD; P-->Q", { key: "a", themeVariables: {} })
+    const b = await renderMermaidCached("dark", "graph TD; P-->Q", { key: "b", themeVariables: {} })
+    expect(renderMock).toHaveBeenCalledTimes(2)
+    expect(getCachedMermaid("dark", "graph TD; P-->Q", { key: "a" })).toBe(a)
+    expect(getCachedMermaid("dark", "graph TD; P-->Q", { key: "b" })).toBe(b)
+    expect(getCachedMermaid("dark", "graph TD; P-->Q")).toBeUndefined()
+  })
+
   it("de-dupes concurrent renders of the same key", async () => {
     const [a, b] = await Promise.all([
       renderMermaidCached("dark", "racing"),

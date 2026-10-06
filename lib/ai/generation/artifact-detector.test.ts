@@ -134,6 +134,15 @@ describe("detectArtifacts", () => {
     expect(unknown[0].rendererProfile).toBeUndefined()
   })
 
+  it("leaves an inline ```chart fence in the transcript but still lifts a ```json chart", () => {
+    const payload = ["{", '  "type": "bar",', '  "data": [{ "name": "a", "v": 1 }]', "}"].join("\n")
+    expect(detectArtifacts(`\`\`\`chart\n${payload}\n\`\`\``)).toEqual([])
+    expect(detectArtifacts(`\`\`\`CHART\n${payload}\n\`\`\``)).toEqual([])
+    const lifted = detectArtifacts(`\`\`\`json\n${payload}\n\`\`\``)
+    expect(lifted).toHaveLength(1)
+    expect(lifted[0]).toMatchObject({ type: "chart", chartType: "bar" })
+  })
+
   it("returns artifacts only above the line threshold", () => {
     const md = "```js\n" + "a\n".repeat(15) + "```"
     const out = detectArtifacts(md)

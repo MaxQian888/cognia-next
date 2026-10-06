@@ -52,6 +52,17 @@ describe("highlight-cache", () => {
     expect(a).toBe(b)
   })
 
+  it("keys on the theme pair and highlights with the requested themes", async () => {
+    const github = { light: "github-light-default", dark: "github-dark-default" }
+    const byDefault = await highlightCached("themed", "ts")
+    const byGithub = await highlightCached("themed", "ts", github)
+    expect(byGithub).not.toBe(byDefault)
+    expect(getCachedHighlight("themed", "ts")).toBe(byDefault)
+    expect(getCachedHighlight("themed", "ts", github)).toBe(byGithub)
+    const themes = (codeToHtml as jest.Mock).mock.calls.map(([, opts]) => opts.theme)
+    expect(themes).toEqual(["one-light", "one-dark-pro", github.light, github.dark])
+  })
+
   it("keys on language so the same code under different langs is distinct", async () => {
     const ts = await highlightCached("value", "ts")
     const py = await highlightCached("value", "python")

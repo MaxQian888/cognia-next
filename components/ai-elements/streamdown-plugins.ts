@@ -3,7 +3,13 @@ import { createCodePlugin } from "@streamdown/code"
 import { math } from "@streamdown/math"
 import { mermaid } from "@streamdown/mermaid"
 import type { PluginConfig } from "streamdown"
-import { CHAT_CODE_THEME } from "@/lib/chat/code-theme"
+import type { BundledTheme } from "shiki"
+import {
+  CHAT_CODE_THEME,
+  resolveChatCodeTheme,
+  type ChatCodeThemePair,
+} from "@/lib/chat/code-theme"
+import type { ChatCodeThemeId } from "@/types/appearance"
 
 /**
  * Shared Streamdown plugin set for streaming chat surfaces (assistant
@@ -31,28 +37,53 @@ export const streamdownPlugins = {
 } satisfies PluginConfig
 
 /**
- * ADR-0127 — plugin set honouring the resolved `messageDisplay.markdown`
- * toggles. Streamdown treats an absent `math` / `mermaid` plugin as "render as
- * code", which is exactly the finalized renderer's behaviour when
- * `enableMath` / `enableMermaid` are off, so both branches stay in lockstep.
- * The four variants are built once so `plugins` keeps a stable identity and
- * `<Streamdown>`'s memo does not re-parse every block on each token.
+ * ADR-0127 / ADR-0218 — plugin set honouring the resolved
+ * `messageDisplay.markdown` knobs. Streamdown treats an absent `math` /
+ * `mermaid` plugin as "render as code", which is exactly the finalized
+ * renderer's behaviour when `enableMath` / `enableMermaid` are off, so both
+ * branches stay in lockstep. The code plugin is built for the resolved theme
+ * PAIR (the same pair the finalized highlight cache keys on), so a code block
+ * keeps its colours across the stream → finalize swap whichever theme is set.
+ *
+ * Each combination is built once and memoised, so `plugins` keeps a stable
+ * identity and `<Streamdown>`'s memo does not re-parse every block per token.
  */
-const PLUGIN_VARIANTS: Record<string, PluginConfig> = {
-  "math+mermaid": streamdownPlugins,
-  math: { cjk, code, math },
-  mermaid: { cjk, code, mermaid },
-  none: { cjk, code },
+const codePlugins = new Map<string, NonNullable<PluginConfig["code"]>>([
+  [`${CHAT_CODE_THEME.light}|${CHAT_CODE_THEME.dark}`, code],
+])
+const pluginSets = new Map<string, PluginConfig>()
+
+function codePluginFor(theme: ChatCodeThemePair): NonNullable<PluginConfig["code"]> {
+  const key = `${theme.light}|${theme.dark}`
+  let plugin = codePlugins.get(key)
+  if (!plugin) {
+    plugin = createCodePlugin({
+      themes: [theme.light, theme.dark] as [BundledTheme, BundledTheme],
+    }) as NonNullable<PluginConfig["code"]>
+    codePlugins.set(key, plugin)
+  }
+  return plugin
 }
 
 export function selectStreamdownPlugins(options?: {
   math?: boolean
   mermaid?: boolean
+  codeTheme?: ChatCodeThemeId
 }): PluginConfig {
   const mathOn = options?.math ?? true
   const mermaidOn = options?.mermaid ?? true
-  if (mathOn && mermaidOn) return PLUGIN_VARIANTS["math+mermaid"]
-  if (mathOn) return PLUGIN_VARIANTS.math
-  if (mermaidOn) return PLUGIN_VARIANTS.mermaid
-  return PLUGIN_VARIANTS.none
+  const theme = resolveChatCodeTheme(options?.codeTheme)
+  const key = `${mathOn ? 1 : 0}${mermaidOn ? 1 : 0}|${theme.light}|${theme.dark}`
+  if (key === `11|${CHAT_CODE_THEME.light}|${CHAT_CODE_THEME.dark}`) return streamdownPlugins
+  let set = pluginSets.get(key)
+  if (!set) {
+    set = {
+      cjk,
+      code: codePluginFor(theme),
+      ...(mathOn ? { math } : {}),
+      ...(mermaidOn ? { mermaid } : {}),
+    }
+    pluginSets.set(key, set)
+  }
+  return set
 }

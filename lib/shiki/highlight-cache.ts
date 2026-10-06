@@ -8,10 +8,10 @@
  * memoizes the rendered HTML so a remount of already-seen code is synchronous
  * and flash-free. It mirrors the bespoke KaTeX cache in `lib/latex/cache.ts`.
  *
- * The theme pair comes from `CHAT_CODE_THEME` (the single source of truth shared
- * with streaming via Streamdown), so it is baked into the cache key for safety
- * — if the theme ever changes, old entries simply miss instead of returning
- * stale colors.
+ * The theme pair is the resolved `markdown.codeTheme` setting (ADR-0218;
+ * `CHAT_CODE_THEME` by default), the same pair the streaming branch hands
+ * Streamdown. It is baked into the cache key, so switching themes misses
+ * instead of returning the previous theme's colours.
  */
 import {
   bundledLanguages,
@@ -21,7 +21,7 @@ import {
   type LanguageRegistration,
 } from "shiki"
 import { LruCache } from "@cognia/primitives"
-import { CHAT_CODE_THEME } from "@/lib/chat/code-theme"
+import { CHAT_CODE_THEME, type ChatCodeThemePair } from "@/lib/chat/code-theme"
 import { createMutex } from "@cognia/primitives"
 import { findGrammarsByLanguage } from "@/lib/plugin/bridge/grammars-bridge"
 
@@ -64,8 +64,8 @@ const highlightGate = createMutex()
  * the middle. Length-prefix the language so even embedded separators remain
  * unambiguous. The full source key counts toward the retained payload budget.
  */
-function cacheKey(code: string, language: string): string {
-  return `${CHAT_CODE_THEME.light}\0${CHAT_CODE_THEME.dark}\0${language.length}:${language}${code}`
+function cacheKey(code: string, language: string, theme: ChatCodeThemePair): string {
+  return `${theme.light}\0${theme.dark}\0${language.length}:${language}${code}`
 }
 
 /**
@@ -73,16 +73,24 @@ function cacheKey(code: string, language: string): string {
  * highlighted before, else `undefined`. Used to seed component state on mount
  * so a re-scrolled row paints highlighted immediately (no flash).
  */
-export function getCachedHighlight(code: string, language: string): HighlightHtml | undefined {
-  return cache.get(cacheKey(code, language))
+export function getCachedHighlight(
+  code: string,
+  language: string,
+  theme: ChatCodeThemePair = CHAT_CODE_THEME
+): HighlightHtml | undefined {
+  return cache.get(cacheKey(code, language, theme))
 }
 
 /**
  * Highlight `code` to light + dark HTML, returning a cached result when
  * available. Concurrent calls for the same key share one in-flight pass.
  */
-export async function highlightCached(code: string, language: string): Promise<HighlightHtml> {
-  const key = cacheKey(code, language)
+export async function highlightCached(
+  code: string,
+  language: string,
+  theme: ChatCodeThemePair = CHAT_CODE_THEME
+): Promise<HighlightHtml> {
+  const key = cacheKey(code, language, theme)
   const hit = cache.get(key)
   if (hit) return hit
 
@@ -108,11 +116,11 @@ export async function highlightCached(code: string, language: string): Promise<H
         // between them.
         const light = await codeToHtml(code, {
           lang: language as BundledLanguage,
-          theme: CHAT_CODE_THEME.light,
+          theme: theme.light,
         })
         const dark = await codeToHtml(code, {
           lang: language as BundledLanguage,
-          theme: CHAT_CODE_THEME.dark,
+          theme: theme.dark,
         })
         const result: HighlightHtml = { light, dark }
         // Clearing invalidates active and queued writes, without interrupting

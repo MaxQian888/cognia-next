@@ -32,6 +32,16 @@ describe("MessageShell", () => {
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-preset", "balanced")
     // ADR-0127: body font travels as a data attribute the typeset CSS reads.
     expect(screen.getByTestId("message-shell")).toHaveAttribute("data-body-font", "sans")
+    // ADR-0218: reading, link and block knobs travel the same way.
+    const shell = screen.getByTestId("message-shell")
+    expect(shell).toHaveAttribute("data-chat-text-size", "md")
+    expect(shell).toHaveAttribute("data-chat-spacing", "comfortable")
+    expect(shell).toHaveAttribute("data-link-color", "link")
+    expect(shell).toHaveAttribute("data-link-underline", "subtle")
+    expect(shell).toHaveAttribute("data-block-density", "compact")
+    expect(shell).toHaveAttribute("data-code-max-height", "tall")
+    expect(shell).toHaveAttribute("data-block-border", "on")
+    expect(shell).toHaveAttribute("data-block-header", "on")
     expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument()
     expect(screen.getByRole("time")).toHaveAttribute("dateTime", "2023-11-14T22:13:20.000Z")
   })

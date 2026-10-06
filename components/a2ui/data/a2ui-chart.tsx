@@ -35,10 +35,8 @@ import {
 import type { A2UIComponentProps, A2UIChartComponent } from "@/types/a2ui/schema"
 import { useA2UIData } from "@/hooks/a2ui"
 import { resolveArrayOrPath } from "@/lib/a2ui/data-model"
-import {
-  DEFAULT_CHART_COLORS as DEFAULT_COLORS,
-  CHART_TOOLTIP_STYLE as TOOLTIP_STYLE,
-} from "@/lib/a2ui/chart-constants"
+import { CHART_TOOLTIP_STYLE as TOOLTIP_STYLE } from "@/lib/a2ui/chart-constants"
+import { useChatDiagramPalette } from "@/lib/chat/diagram-palette"
 
 function ChartAxes({
   xKey,
@@ -78,6 +76,7 @@ export const A2UIChart = memo(function A2UIChart({
   const { dataModel } = useA2UIData()
 
   // Resolve data - can be static array or data-bound
+  const palette = useChatDiagramPalette()
   const data = useMemo(() => {
     if (Array.isArray(component.data)) {
       return component.data
@@ -89,7 +88,10 @@ export const A2UIChart = memo(function A2UIChart({
   const height = component.height || 300
   const xKey = component.xKey || "name"
   const yKeys = component.yKeys || ["value"]
-  const colors = component.colors || DEFAULT_COLORS
+  // ADR-0218: an A2UI chart that names no colours takes the app palette
+  // (`--chart-1…5`), like the inline and artifact charts, instead of
+  // recharts' demo hex values.
+  const colors = component.colors || palette.colors.chart
 
   const handleDataPointClick = (dataPoint: Record<string, unknown>, index: number) => {
     if (component.clickAction) {

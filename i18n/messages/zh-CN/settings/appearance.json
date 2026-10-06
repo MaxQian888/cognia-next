@@ -372,6 +372,8 @@
       "info": "信息",
       "infoForeground": "信息文字",
       "input": "输入框",
+      "link": "链接",
+      "mark": "高亮标记",
       "muted": "弱化色",
       "mutedForeground": "弱化色文字",
       "popover": "弹出层",
@@ -517,9 +519,45 @@
       "label": "布局"
     },
     "markdown": {
+      "blockBorder": {
+        "hint": "为代码、表格、图表和示意图绘制边框；关闭后它们与回复正文齐平。",
+        "label": "块边框"
+      },
+      "blockDensity": {
+        "comfortable": "适中",
+        "compact": "紧凑",
+        "label": "内容块密度"
+      },
+      "blockHeader": {
+        "hint": "在代码、表格、示意图和图表上显示标题栏；关闭后工具栏改为块内的悬浮按钮组。",
+        "label": "块标题栏"
+      },
+      "charts": {
+        "hint": "把 ```chart 代码块绘制成图表；关闭则显示 JSON。",
+        "label": "内联图表"
+      },
       "codeLineNumbers": {
         "hint": "行号栏的默认值；每个代码块仍可单独切换。",
         "label": "代码行号"
+      },
+      "codeMaxHeight": {
+        "label": "代码块高度",
+        "medium": "中",
+        "none": "不限制",
+        "short": "矮",
+        "tall": "高"
+      },
+      "codeTheme": {
+        "catppuccin": "Catppuccin",
+        "everforest": "Everforest",
+        "github": "GitHub",
+        "label": "代码主题",
+        "min": "Min",
+        "one": "One",
+        "rose-pine": "Rosé Pine",
+        "solarized": "Solarized",
+        "vitesse": "Vitesse",
+        "vscode": "VS Code"
       },
       "codeWrap": {
         "hint": "软换行的默认值；每个代码块仍可单独切换。",
@@ -609,6 +647,46 @@
       "collapsed": "折叠",
       "expanded": "展开",
       "hidden": "隐藏"
+    },
+    "reading": {
+      "label": "阅读",
+      "spacing": {
+        "comfortable": "适中",
+        "compact": "紧凑",
+        "label": "段落间距",
+        "relaxed": "宽松"
+      },
+      "textSize": {
+        "label": "文字大小",
+        "lg": "大",
+        "md": "默认",
+        "sm": "小"
+      }
+    },
+    "links": {
+      "color": {
+        "label": "链接颜色",
+        "link": "链接蓝",
+        "primary": "主题主色",
+        "text": "与正文相同"
+      },
+      "label": "链接",
+      "preview": {
+        "hint": "显示网页的标题、摘要和图片。关闭后不会再抓取链接的任何信息。",
+        "hover": "悬停显示卡片",
+        "label": "链接预览",
+        "off": "关闭"
+      },
+      "siteIcon": {
+        "hint": "在外部链接前显示网站图标。",
+        "label": "站点图标"
+      },
+      "underline": {
+        "hover": "仅悬停时",
+        "label": "下划线",
+        "solid": "实线",
+        "subtle": "浅色"
+      }
     }
   },
   "nav": {

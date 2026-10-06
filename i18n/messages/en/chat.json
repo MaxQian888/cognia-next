@@ -2167,6 +2167,26 @@
       "skipForward": "+10s",
       "unmute": "Unmute"
     },
+    "chart": {
+      "copyJson": "Copy chart JSON",
+      "downloadPng": "Download PNG",
+      "error": "This chart could not be drawn",
+      "exportFailed": "Could not export the chart",
+      "fullscreen": "View fullscreen",
+      "label": "Chart",
+      "points": "{count, plural, =1 {# data point} other {# data points}}",
+      "showChart": "Show chart",
+      "showData": "Show data",
+      "types": {
+        "area": "Area chart",
+        "bar": "Bar chart",
+        "doughnut": "Doughnut chart",
+        "line": "Line chart",
+        "pie": "Pie chart",
+        "radar": "Radar chart",
+        "scatter": "Scatter plot"
+      }
+    },
     "code": {
       "ariaInLanguage": "Code in {language}",
       "close": "Close",
@@ -2260,7 +2280,18 @@
       "showSource": "Show source",
       "tooLarge": "This diagram is large ({chars, number} characters) and may take a while to draw.",
       "viewFullscreen": "View fullscreen",
-      "viewSource": "View source"
+      "viewSource": "View source",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
+    },
+    "richBlock": {
+      "close": "Close",
+      "closeAria": "Close fullscreen view",
+      "copied": "Copied",
+      "copy": "Copy",
+      "download": "Download",
+      "fullscreen": "Fullscreen",
+      "fullscreenAria": "View fullscreen"
     },
     "table": {
       "actionFailed": "Table action failed",
@@ -2269,11 +2300,13 @@
       "copyCsv": "Copy as CSV",
       "copyMarkdown": "Copy as Markdown",
       "copyTsv": "Copy as TSV",
+      "dimensions": "{rows, plural, =1 {# row} other {# rows}} × {columns, plural, =1 {# column} other {# columns}}",
       "download": "Download table",
       "downloadCsv": "Download as CSV",
       "downloadMarkdown": "Download as Markdown",
       "fullscreen": "View table fullscreen",
       "showAllRows": "Show all rows",
+      "title": "Table",
       "truncatedNotice": "Showing the first {shown, number} of {total, number} rows."
     },
     "video": {
@@ -2966,5 +2999,14 @@
     "stopWaiting": "Stop waiting",
     "stopWaitingHint": "{provider} cannot cancel a started job. Stopping here only stops checking; the provider may still finish and bill for it.",
     "tryAgain": "Try again"
+  },
+  "linkPreview": {
+    "browserOnly": "Full previews are available in the desktop and mobile apps.",
+    "copied": "Copied",
+    "copy": "Copy link",
+    "label": "Preview of {host}",
+    "loading": "Loading preview",
+    "open": "Open",
+    "unavailable": "No preview available for this page."
   }
 }

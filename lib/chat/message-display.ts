@@ -1,8 +1,16 @@
 import {
   isAgentFlowMode,
+  isChatCodeThemeId,
+  isMessageBlockDensity,
   isMessageBodyFont,
+  isMessageCodeMaxHeight,
+  isMessageLinkColor,
+  isMessageLinkPreview,
+  isMessageLinkUnderline,
   isMessageMathAlign,
   isMessageMathFontScale,
+  isMessageSpacing,
+  isMessageTextSize,
   type AgentFlowMode,
   type MessageActionVisibility,
   type MessageBodyFont,
@@ -10,7 +18,9 @@ import {
   type MessageDisplayMetadataOptions,
   type MessageDisplayPreferences,
   type MessageDisplayPreset,
+  type MessageLinkOptions,
   type MessageMarkdownOptions,
+  type MessageReadingOptions,
   type MessageMotion,
   type MessagePartVisibility,
   type MessageRichControls,
@@ -31,6 +41,10 @@ export interface ResolvedMessageDisplayOptions {
   markdown: MessageMarkdownOptions
   /** ADR-0127 — body-copy font for message prose. */
   bodyFont: MessageBodyFont
+  /** ADR-0218 — prose size and spacing. */
+  reading: MessageReadingOptions
+  /** ADR-0218 — link colour, underline, site mark and previews. */
+  links: MessageLinkOptions
 }
 
 /**
@@ -47,6 +61,32 @@ export const DEFAULT_MESSAGE_MARKDOWN_OPTIONS: MessageMarkdownOptions = {
   mathFontScale: 1,
   mathAlign: "center",
   mathCopy: true,
+  charts: true,
+  blockDensity: "compact",
+  blockBorder: true,
+  blockHeader: true,
+  codeMaxHeight: "tall",
+  codeTheme: "one",
+}
+
+/**
+ * ADR-0218 — `md` / `comfortable` are exactly the size and rhythm chat had
+ * before these became settings, so nothing moves until someone picks another.
+ */
+export const DEFAULT_MESSAGE_READING_OPTIONS: MessageReadingOptions = {
+  textSize: "md",
+  spacing: "comfortable",
+}
+
+/**
+ * ADR-0218 — the one deliberate default change: links take the `--link` token
+ * instead of the neutral `--primary`, and external links carry a site mark.
+ */
+export const DEFAULT_MESSAGE_LINK_OPTIONS: MessageLinkOptions = {
+  color: "link",
+  underline: "subtle",
+  siteIcon: true,
+  preview: "hover",
 }
 
 const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
@@ -76,6 +116,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     motion: "restrained",
     markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
     bodyFont: "sans",
+    reading: DEFAULT_MESSAGE_READING_OPTIONS,
+    links: DEFAULT_MESSAGE_LINK_OPTIONS,
   },
   balanced: {
     preset: "balanced",
@@ -100,6 +142,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     motion: "restrained",
     markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
     bodyFont: "sans",
+    reading: DEFAULT_MESSAGE_READING_OPTIONS,
+    links: DEFAULT_MESSAGE_LINK_OPTIONS,
   },
   inspector: {
     preset: "inspector",
@@ -123,6 +167,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
     motion: "restrained",
     markdown: DEFAULT_MESSAGE_MARKDOWN_OPTIONS,
     bodyFont: "sans",
+    reading: DEFAULT_MESSAGE_READING_OPTIONS,
+    links: DEFAULT_MESSAGE_LINK_OPTIONS,
   },
 }
 
@@ -177,6 +223,32 @@ function applyPreferences(
     motion: isMotion(overrides.motion) ? overrides.motion : base.motion,
     markdown: resolveMarkdownOverrides(base.markdown, overrides.markdown),
     bodyFont: isMessageBodyFont(overrides.bodyFont) ? overrides.bodyFont : base.bodyFont,
+    reading: resolveReadingOverrides(base.reading, overrides.reading),
+    links: resolveLinkOverrides(base.links, overrides.links),
+  }
+}
+
+function resolveReadingOverrides(
+  base: MessageReadingOptions,
+  overrides: Partial<MessageReadingOptions> | undefined
+): MessageReadingOptions {
+  if (!overrides) return base
+  return {
+    textSize: isMessageTextSize(overrides.textSize) ? overrides.textSize : base.textSize,
+    spacing: isMessageSpacing(overrides.spacing) ? overrides.spacing : base.spacing,
+  }
+}
+
+function resolveLinkOverrides(
+  base: MessageLinkOptions,
+  overrides: Partial<MessageLinkOptions> | undefined
+): MessageLinkOptions {
+  if (!overrides) return base
+  return {
+    color: isMessageLinkColor(overrides.color) ? overrides.color : base.color,
+    underline: isMessageLinkUnderline(overrides.underline) ? overrides.underline : base.underline,
+    siteIcon: isBool(overrides.siteIcon) ? overrides.siteIcon : base.siteIcon,
+    preview: isMessageLinkPreview(overrides.preview) ? overrides.preview : base.preview,
   }
 }
 
@@ -200,6 +272,16 @@ function resolveMarkdownOverrides(
       : base.mathFontScale,
     mathAlign: isMessageMathAlign(overrides.mathAlign) ? overrides.mathAlign : base.mathAlign,
     mathCopy: isBool(overrides.mathCopy) ? overrides.mathCopy : base.mathCopy,
+    charts: isBool(overrides.charts) ? overrides.charts : base.charts,
+    blockDensity: isMessageBlockDensity(overrides.blockDensity)
+      ? overrides.blockDensity
+      : base.blockDensity,
+    blockBorder: isBool(overrides.blockBorder) ? overrides.blockBorder : base.blockBorder,
+    blockHeader: isBool(overrides.blockHeader) ? overrides.blockHeader : base.blockHeader,
+    codeMaxHeight: isMessageCodeMaxHeight(overrides.codeMaxHeight)
+      ? overrides.codeMaxHeight
+      : base.codeMaxHeight,
+    codeTheme: isChatCodeThemeId(overrides.codeTheme) ? overrides.codeTheme : base.codeTheme,
   }
 }
 

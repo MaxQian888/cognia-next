@@ -55,4 +55,22 @@ describe("MathBlock", () => {
     expect(screen.getByRole("alert")).toBeInTheDocument()
     expect(screen.getByText("bad latex")).toBeInTheDocument()
   })
+
+  it("draws in the shared frame with an overlay toolbar and a shared fullscreen", () => {
+    const { container } = renderBlock("$$x^2$$")
+    const frame = container.querySelector('[data-rich-block="math"]')!
+    expect(frame).toHaveAttribute("role", "math")
+    expect(frame.querySelector("[data-rich-block-header]")).toBeNull()
+    expect(frame.querySelector("[data-message-rich-control]")).toHaveClass("absolute")
+    fireEvent.click(screen.getByRole("button", { name: /fullscreen/i }))
+    expect(screen.getByTestId("math-fullscreen")).toBeInTheDocument()
+  })
+
+  it("offers the source and copy, not a retry, when KaTeX fails", () => {
+    renderMathSafe.mockReturnValue({ html: "", error: "bad latex" })
+    renderBlock("$$\\bad$$")
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /copy/i }))
+    expect(copy).toHaveBeenCalledWith("\\bad")
+  })
 })

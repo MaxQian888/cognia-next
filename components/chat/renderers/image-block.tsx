@@ -9,7 +9,9 @@ import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
 import { Image } from "@/components/ai-elements/image"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
+import { RICH_BLOCK_ACTIONS_HOVER_CLASS } from "@/components/chat/renderers/rich-block/rich-block-frame"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { useMediaUrl } from "@/hooks/chat/use-media-url"
 import { downloadFromUrl } from "@/lib/files/download"
@@ -117,7 +119,7 @@ export const ImageBlock = memo(function ImageBlock({
     return (
       <div
         className={cn(
-          "my-4 flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8",
+          "my-(--rich-block-gap) flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8",
           className
         )}
       >
@@ -157,7 +159,7 @@ export const ImageBlock = memo(function ImageBlock({
       <figure
         style={reserveStyle}
         className={cn(
-          "group relative my-4 inline-block max-w-full overflow-hidden rounded-lg",
+          "group/rich relative my-(--rich-block-gap) inline-block max-w-full overflow-hidden rounded-lg",
           pending && !hasIntrinsicSize && "min-h-32 min-w-48",
           className
         )}
@@ -185,7 +187,7 @@ export const ImageBlock = memo(function ImageBlock({
               setHasError(true)
             }}
             className={cn(
-              "cursor-zoom-in rounded-lg transition-[opacity,transform] duration-300 group-hover:scale-[1.01]",
+              "cursor-zoom-in rounded-lg transition-[opacity,transform] duration-300 group-hover/rich:scale-[1.01]",
               pending && "opacity-0"
             )}
             onClick={(event) => openViewer(event.currentTarget)}
@@ -197,40 +199,31 @@ export const ImageBlock = memo(function ImageBlock({
           />
         )}
 
-        <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
-          <TooltipIconButton
-            variant="secondary"
-            size="icon"
-            className="size-7 bg-background/80 backdrop-blur-sm"
+        {/* The shared block toolbar (ADR-0218): same buttons, same overlay pill
+            and the same rich-controls reveal as every other block. */}
+        <div
+          data-message-rich-control
+          className={cn(
+            "absolute end-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded-md border bg-background/85 p-0.5 shadow-xs backdrop-blur-sm",
+            HOVER_REVEAL_GROUP_BASE_CLASS,
+            RICH_BLOCK_ACTIONS_HOVER_CLASS
+          )}
+        >
+          <RichBlockAction
+            label={t("viewFullscreen")}
             onClick={(event) => openViewer(event.currentTarget)}
-            aria-label={t("viewFullscreen")}
-            tooltip={t("viewFullscreen")}
           >
-            <Maximize2Icon className="size-3" />
-          </TooltipIconButton>
-          <TooltipIconButton
-            variant="secondary"
-            size="icon"
-            className="size-7 bg-background/80 backdrop-blur-sm"
-            onClick={() => void handleDownload()}
-            aria-label={t("download")}
-            tooltip={t("download")}
-          >
+            <Maximize2Icon />
+          </RichBlockAction>
+          <RichBlockAction label={t("download")} onClick={() => void handleDownload()}>
             <AnimatedActionIcon icon={AnimatedDownloadIcon} size={12} />
-          </TooltipIconButton>
+          </RichBlockAction>
           {/* A store reference is meaningless outside this app, and the object
               URL behind it dies with the document — neither is worth copying. */}
           {isRef ? null : (
-            <TooltipIconButton
-              variant="secondary"
-              size="icon"
-              className="size-7 bg-background/80 backdrop-blur-sm"
-              onClick={() => void copy(src)}
-              aria-label={t("copyUrl")}
-              tooltip={t("copyUrl")}
-            >
+            <RichBlockAction label={t("copyUrl")} onClick={() => void copy(src)}>
               <CopyFeedbackIcon copied={copied} size={12} />
-            </TooltipIconButton>
+            </RichBlockAction>
           )}
         </div>
 

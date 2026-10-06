@@ -470,6 +470,39 @@ export type MessageMathAlign = "center" | "left"
  * Both the streaming (Streamdown) and finalized (react-markdown) branches
  * consume the same resolved object.
  */
+/** ADR-0218 — curated Shiki light/dark pairs; ids resolve through `CHAT_CODE_THEMES`. */
+export type ChatCodeThemeId =
+  | "one"
+  | "github"
+  | "vscode"
+  | "vitesse"
+  | "catppuccin"
+  | "rose-pine"
+  | "solarized"
+  | "everforest"
+  | "min"
+export const CHAT_CODE_THEME_IDS: readonly ChatCodeThemeId[] = [
+  "one",
+  "github",
+  "vscode",
+  "vitesse",
+  "catppuccin",
+  "rose-pine",
+  "solarized",
+  "everforest",
+  "min",
+]
+/** ADR-0218 — padding and margins of rich blocks (code, tables, diagrams, charts). */
+export type MessageBlockDensity = "compact" | "comfortable"
+/** ADR-0218 — cap on a code block's height before it scrolls (`none` = no cap). */
+export type MessageCodeMaxHeight = "none" | "short" | "medium" | "tall"
+export const MESSAGE_CODE_MAX_HEIGHTS: readonly MessageCodeMaxHeight[] = [
+  "none",
+  "short",
+  "medium",
+  "tall",
+]
+
 export interface MessageMarkdownOptions {
   /** Render `$…$` / `$$…$$` math with KaTeX; off ⇒ shown as plain code. */
   math: boolean
@@ -485,6 +518,46 @@ export interface MessageMarkdownOptions {
   mathAlign: MessageMathAlign
   /** Show the copy affordance on inline math. */
   mathCopy: boolean
+  /** ADR-0218 — draw ```chart fences as inline charts; off ⇒ shown as JSON code. */
+  charts: boolean
+  /** ADR-0218 — padding and margins of rich blocks. */
+  blockDensity: MessageBlockDensity
+  /** ADR-0218 — draw the rich-block frame's border; off ⇒ blocks sit flush in the prose. */
+  blockBorder: boolean
+  /**
+   * ADR-0218 — show the rich-block header bar (icon, label, meta). Off hides
+   * it and moves the toolbar into the block as a floating pill, so no action
+   * is lost; the rich-controls setting still governs its reveal.
+   */
+  blockHeader: boolean
+  /** ADR-0218 — height cap for code blocks in both branches. */
+  codeMaxHeight: MessageCodeMaxHeight
+  /** ADR-0218 — syntax-highlighting theme pair for both branches. */
+  codeTheme: ChatCodeThemeId
+}
+
+/** ADR-0218 — chat prose size relative to the 14px chat column. */
+export type MessageTextSize = "sm" | "md" | "lg"
+/** ADR-0218 — vertical rhythm between paragraphs, lists and blocks. */
+export type MessageSpacing = "compact" | "comfortable" | "relaxed"
+
+export interface MessageReadingOptions {
+  textSize: MessageTextSize
+  spacing: MessageSpacing
+}
+
+/** ADR-0218 — `link` reads the `--link` token, `primary` the theme primary, `text` inherits. */
+export type MessageLinkColor = "link" | "primary" | "text"
+export type MessageLinkUnderline = "subtle" | "solid" | "hover"
+export type MessageLinkPreview = "hover" | "off"
+
+export interface MessageLinkOptions {
+  color: MessageLinkColor
+  underline: MessageLinkUnderline
+  /** Leading site mark (brand icon, favicon or globe) on external links. */
+  siteIcon: boolean
+  /** Preview card on hover / tap; `off` also stops every link metadata fetch. */
+  preview: MessageLinkPreview
 }
 
 export interface MessageDisplayOverrides {
@@ -499,6 +572,10 @@ export interface MessageDisplayOverrides {
   motion?: MessageMotion
   markdown?: Partial<MessageMarkdownOptions>
   bodyFont?: MessageBodyFont
+  /** ADR-0218 — prose size and spacing. */
+  reading?: Partial<MessageReadingOptions>
+  /** ADR-0218 — link colour, underline, site mark and previews. */
+  links?: Partial<MessageLinkOptions>
 }
 
 export const MESSAGE_MATH_FONT_SCALES: readonly MessageMathFontScale[] = [0.8, 1, 1.2]
@@ -511,6 +588,30 @@ export function isMessageMathFontScale(value: unknown): value is MessageMathFont
 }
 export function isMessageMathAlign(value: unknown): value is MessageMathAlign {
   return value === "center" || value === "left"
+}
+export function isChatCodeThemeId(value: unknown): value is ChatCodeThemeId {
+  return CHAT_CODE_THEME_IDS.includes(value as ChatCodeThemeId)
+}
+export function isMessageBlockDensity(value: unknown): value is MessageBlockDensity {
+  return value === "compact" || value === "comfortable"
+}
+export function isMessageCodeMaxHeight(value: unknown): value is MessageCodeMaxHeight {
+  return MESSAGE_CODE_MAX_HEIGHTS.includes(value as MessageCodeMaxHeight)
+}
+export function isMessageTextSize(value: unknown): value is MessageTextSize {
+  return value === "sm" || value === "md" || value === "lg"
+}
+export function isMessageSpacing(value: unknown): value is MessageSpacing {
+  return value === "compact" || value === "comfortable" || value === "relaxed"
+}
+export function isMessageLinkColor(value: unknown): value is MessageLinkColor {
+  return value === "link" || value === "primary" || value === "text"
+}
+export function isMessageLinkUnderline(value: unknown): value is MessageLinkUnderline {
+  return value === "subtle" || value === "solid" || value === "hover"
+}
+export function isMessageLinkPreview(value: unknown): value is MessageLinkPreview {
+  return value === "hover" || value === "off"
 }
 
 export interface MessageDisplayPreferences {

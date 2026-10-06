@@ -2,10 +2,11 @@
 
 import { useState, memo, useCallback, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Columns, Rows, Plus, Minus } from "lucide-react"
+import { Columns, FileDiff, Minus, Plus, Rows } from "lucide-react"
 import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { cn } from "@/lib/utils"
-import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
+import { RichBlockFrame } from "@/components/chat/renderers/rich-block/rich-block-frame"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@cognia/logging"
 import { computeIntralineDiff, type IntralineSegment } from "@/lib/chat/intraline-diff"
@@ -101,69 +102,61 @@ export const DiffBlock = memo(function DiffBlock({
     return { additions, deletions }
   }, [parsedDiff])
 
+  // The shared block frame (ADR-0218); it also brings the rich-controls
+  // reveal this toolbar used to lack.
   return (
-    <div className={cn("group rounded-lg border overflow-hidden my-4 bg-muted/30", className)}>
-      <div className="flex items-center justify-between px-3 py-2 bg-muted/80 border-b text-xs">
-        <div className="flex items-center gap-3">
-          <span className="font-mono font-medium">
-            {filename || oldFilename || newFilename || t("defaultName")}
+    <RichBlockFrame
+      kind="diff"
+      className={className}
+      icon={<FileDiff />}
+      label={
+        <span className="font-mono">
+          {filename || oldFilename || newFilename || t("defaultName")}
+        </span>
+      }
+      meta={
+        <span className="flex items-center gap-2 tabular-nums">
+          <span className="flex items-center gap-0.5 text-success">
+            <Plus className="size-3" />
+            {stats.additions}
           </span>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="flex items-center gap-0.5 text-green-600">
-              <Plus className="h-3 w-3" />
-              {stats.additions}
-            </span>
-            <span className="flex items-center gap-0.5 text-red-600">
-              <Minus className="h-3 w-3" />
-              {stats.deletions}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            className={cn("h-6 w-6", viewMode === "unified" && "bg-accent")}
+          <span className="flex items-center gap-0.5 text-destructive">
+            <Minus className="size-3" />
+            {stats.deletions}
+          </span>
+        </span>
+      }
+      actions={
+        <>
+          <RichBlockAction
+            label={t("unifiedView")}
+            aria-pressed={viewMode === "unified"}
+            className={cn(viewMode === "unified" && "bg-accent text-foreground")}
             onClick={() => setViewMode("unified")}
-            aria-label={t("unifiedView")}
-            tooltip={t("unifiedView")}
           >
-            <Rows className="h-3 w-3" />
-          </TooltipIconButton>
-
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            className={cn("h-6 w-6", viewMode === "split" && "bg-accent")}
+            <Rows />
+          </RichBlockAction>
+          <RichBlockAction
+            label={t("splitView")}
+            aria-pressed={viewMode === "split"}
+            className={cn(viewMode === "split" && "bg-accent text-foreground")}
             onClick={() => setViewMode("split")}
-            aria-label={t("splitView")}
-            tooltip={t("splitView")}
           >
-            <Columns className="h-3 w-3" />
-          </TooltipIconButton>
-
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={handleCopy}
-            aria-label={t("copy")}
-            tooltip={t("copy")}
-          >
+            <Columns />
+          </RichBlockAction>
+          <RichBlockAction label={t("copy")} onClick={handleCopy}>
             <CopyFeedbackIcon copied={copied} size={12} />
-          </TooltipIconButton>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        {viewMode === "unified" ? (
-          <UnifiedDiffView lines={parsedDiff} />
-        ) : (
-          <SplitDiffView lines={parsedDiff} />
-        )}
-      </div>
-    </div>
+          </RichBlockAction>
+        </>
+      }
+      bodyClassName="overflow-x-auto bg-muted/30"
+    >
+      {viewMode === "unified" ? (
+        <UnifiedDiffView lines={parsedDiff} />
+      ) : (
+        <SplitDiffView lines={parsedDiff} />
+      )}
+    </RichBlockFrame>
   )
 })
 
@@ -175,34 +168,34 @@ const UnifiedDiffView = memo(function UnifiedDiffView({ lines }: { lines: DiffLi
           <tr
             key={index}
             className={cn(
-              line.type === "add" && "bg-green-500/10",
-              line.type === "remove" && "bg-red-500/10",
-              line.type === "info" && "bg-blue-500/10"
+              line.type === "add" && "bg-success/10",
+              line.type === "remove" && "bg-destructive/10",
+              line.type === "info" && "bg-info/10"
             )}
           >
-            <td className="w-10 px-2 text-right text-muted-foreground select-none border-r border-muted">
+            <td className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
               {line.oldLineNumber || ""}
             </td>
-            <td className="w-10 px-2 text-right text-muted-foreground select-none border-r border-muted">
+            <td className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
               {line.newLineNumber || ""}
             </td>
             <td className="w-4 text-center select-none">
-              {line.type === "add" && <span className="text-green-600">+</span>}
-              {line.type === "remove" && <span className="text-red-600">-</span>}
-              {line.type === "info" && <span className="text-blue-600">@</span>}
+              {line.type === "add" && <span className="text-success">+</span>}
+              {line.type === "remove" && <span className="text-destructive">-</span>}
+              {line.type === "info" && <span className="text-info">@</span>}
             </td>
             <td
               className={cn(
                 "px-2 py-0.5 whitespace-pre",
-                line.type === "add" && "text-green-700 dark:text-green-400",
-                line.type === "remove" && "text-red-700 dark:text-red-400",
-                line.type === "info" && "text-blue-600 font-semibold"
+                line.type === "add" && "text-success",
+                line.type === "remove" && "text-destructive",
+                line.type === "info" && "text-info font-semibold"
               )}
             >
               <IntralineContent
                 segments={line.segments}
                 content={line.content}
-                emphasis={line.type === "add" ? "bg-green-500/30" : "bg-red-500/30"}
+                emphasis={line.type === "add" ? "bg-success/25" : "bg-destructive/20"}
               />
             </td>
           </tr>
@@ -250,30 +243,30 @@ const SplitDiffView = memo(function SplitDiffView({ lines }: { lines: DiffLine[]
           <tr key={index}>
             <td
               className={cn(
-                "w-1/2 border-r border-muted",
-                pair.left?.type === "remove" && "bg-red-500/10",
-                pair.left?.type === "info" && "bg-blue-500/10"
+                "w-1/2 border-r border-border/60",
+                pair.left?.type === "remove" && "bg-destructive/10",
+                pair.left?.type === "info" && "bg-info/10"
               )}
             >
               <div className="flex">
-                <span className="w-10 px-2 text-right text-muted-foreground select-none border-r border-muted">
+                <span className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
                   {pair.left?.oldLineNumber || ""}
                 </span>
                 <span className="w-4 text-center select-none">
-                  {pair.left?.type === "remove" && <span className="text-red-600">-</span>}
-                  {pair.left?.type === "info" && <span className="text-blue-600">@</span>}
+                  {pair.left?.type === "remove" && <span className="text-destructive">-</span>}
+                  {pair.left?.type === "info" && <span className="text-info">@</span>}
                 </span>
                 <span
                   className={cn(
                     "flex-1 px-2 py-0.5 whitespace-pre",
-                    pair.left?.type === "remove" && "text-red-700 dark:text-red-400",
-                    pair.left?.type === "info" && "text-blue-600 font-semibold"
+                    pair.left?.type === "remove" && "text-destructive",
+                    pair.left?.type === "info" && "text-info font-semibold"
                   )}
                 >
                   <IntralineContent
                     segments={pair.left?.segments}
                     content={pair.left?.content ?? ""}
-                    emphasis="bg-red-500/30"
+                    emphasis="bg-destructive/20"
                   />
                 </span>
               </div>
@@ -282,29 +275,29 @@ const SplitDiffView = memo(function SplitDiffView({ lines }: { lines: DiffLine[]
             <td
               className={cn(
                 "w-1/2",
-                pair.right?.type === "add" && "bg-green-500/10",
-                pair.right?.type === "info" && "bg-blue-500/10"
+                pair.right?.type === "add" && "bg-success/10",
+                pair.right?.type === "info" && "bg-info/10"
               )}
             >
               <div className="flex">
-                <span className="w-10 px-2 text-right text-muted-foreground select-none border-r border-muted">
+                <span className="w-10 px-2 text-right text-muted-foreground select-none border-r border-border/60">
                   {pair.right?.newLineNumber || ""}
                 </span>
                 <span className="w-4 text-center select-none">
-                  {pair.right?.type === "add" && <span className="text-green-600">+</span>}
-                  {pair.right?.type === "info" && <span className="text-blue-600">@</span>}
+                  {pair.right?.type === "add" && <span className="text-success">+</span>}
+                  {pair.right?.type === "info" && <span className="text-info">@</span>}
                 </span>
                 <span
                   className={cn(
                     "flex-1 px-2 py-0.5 whitespace-pre",
-                    pair.right?.type === "add" && "text-green-700 dark:text-green-400",
-                    pair.right?.type === "info" && "text-blue-600 font-semibold"
+                    pair.right?.type === "add" && "text-success",
+                    pair.right?.type === "info" && "text-info font-semibold"
                   )}
                 >
                   <IntralineContent
                     segments={pair.right?.segments}
                     content={pair.right?.content ?? ""}
-                    emphasis="bg-green-500/30"
+                    emphasis="bg-success/25"
                   />
                 </span>
               </div>

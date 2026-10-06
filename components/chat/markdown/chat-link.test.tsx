@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { lazy, type ComponentType } from "react"
 import { ChatLink } from "./chat-link"
+import { ChatLinkOptionsProvider } from "./chat-link-options"
+import { DEFAULT_MESSAGE_LINK_OPTIONS } from "@/lib/chat/message-display"
 import {
   clearAllLinkMatchers,
   clearLinkMatchersForPlugin,
@@ -197,5 +199,55 @@ describe("ChatLink", () => {
     expect(container.querySelector("p div")).toBeNull()
     expect(screen.queryByRole("alert")).toBeNull()
     errorSpy.mockRestore()
+  })
+
+  describe("presentation (ADR-0218)", () => {
+    it("styles web links, adds the site mark and shortens a bare URL", () => {
+      const href = "https://github.com/deepseek-ai/dsh-libreoffice-kit"
+      render(<ChatLink href={href}>{href}</ChatLink>)
+      const link = screen.getByRole("link")
+      expect(link).toHaveClass("chat-link")
+      expect(link).toHaveAttribute("data-chat-link", "web")
+      expect(link).toHaveAttribute("title", href)
+      expect(link).toHaveTextContent("deepseek-ai/dsh-libreoffice-kit")
+      expect(link.querySelector("[data-link-site-icon]")).toHaveAttribute(
+        "data-link-site-icon",
+        "brand"
+      )
+    })
+
+    it("keeps authored link text as written", () => {
+      render(<ChatLink href="https://example.com/a">the docs</ChatLink>)
+      const link = screen.getByRole("link", { name: "the docs" })
+      expect(link).not.toHaveAttribute("title")
+    })
+
+    it("leaves non-web links undecorated", () => {
+      render(<ChatLink href="mailto:hello@example.com">Email</ChatLink>)
+      const link = screen.getByRole("link")
+      expect(link).toHaveClass("chat-link")
+      expect(link).toHaveAttribute("data-chat-link", "other")
+      expect(link.querySelector("[data-link-site-icon]")).toBeNull()
+    })
+
+    it("follows the site icon and preview settings", () => {
+      render(
+        <ChatLinkOptionsProvider
+          value={{ ...DEFAULT_MESSAGE_LINK_OPTIONS, siteIcon: false, preview: "off" }}
+        >
+          <ChatLink href="https://example.com/a">docs</ChatLink>
+        </ChatLinkOptionsProvider>
+      )
+      const link = screen.getByRole("link")
+      expect(link.querySelector("[data-link-site-icon]")).toBeNull()
+      // With previews off there is no preview trigger around the link.
+      expect(link.closest("[data-link-preview-anchor]")).toBeNull()
+    })
+
+    it("wraps web links in a preview trigger when previews are on", () => {
+      // jsdom's matchMedia reports no hover, so this is the long-press path.
+      render(<ChatLink href="https://example.com/a">docs</ChatLink>)
+      expect(screen.getByRole("link").closest("[data-link-preview-anchor]")).not.toBeNull()
+    })
   })
 })

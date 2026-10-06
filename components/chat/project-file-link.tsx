@@ -27,7 +27,10 @@ export function ProjectFileLink({
   return (
     <button
       type="button"
-      className="inline cursor-pointer [font:inherit] text-primary underline underline-offset-2 hover:text-primary/80"
+      // `chat-link` (app/typeset.css, ADR-0218): one link style for web and
+      // file links, following the same colour / underline settings. Preflight
+      // already gives a button `font: inherit`, so the link weight applies.
+      className="chat-link inline cursor-pointer"
       onClick={() => {
         if (onOpenFile) {
           onOpenFile(target)

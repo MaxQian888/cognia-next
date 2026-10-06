@@ -408,7 +408,15 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
                     <span
                       key={`${seg.start}-${i}`}
                       data-chip="link"
-                      className="text-blue-600 underline decoration-blue-600/50 underline-offset-2 dark:text-blue-400 dark:decoration-blue-400/50"
+                      // Read by `ComposerLinkPreview` (ADR-0218), which
+                      // hit-tests these spans because the overlay itself
+                      // takes no pointer events.
+                      data-link-url={seg.url}
+                      data-link-start={seg.start}
+                      data-link-end={seg.start + seg.raw.length}
+                      // The same `--link` token message links use, so a link
+                      // looks the same before and after it is sent.
+                      className="text-(--link) underline decoration-(--link)/50 underline-offset-2"
                     >
                       {hasMarker ? <LinkMarker url={seg.url} /> : null}
                       {rest}

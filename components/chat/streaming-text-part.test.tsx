@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { act, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
@@ -67,6 +67,12 @@ const MARKDOWN_DEFAULTS: MessageMarkdownOptions = {
   mathFontScale: 1,
   mathAlign: "center",
   mathCopy: true,
+  charts: true,
+  blockDensity: "compact",
+  blockBorder: true,
+  blockHeader: true,
+  codeMaxHeight: "tall",
+  codeTheme: "one",
 }
 
 describe("StreamingTextPart", () => {
@@ -425,6 +431,24 @@ describe("markdown knobs (ADR-0127)", () => {
     expect(selectStreamdownPlugins({ math: false, mermaid: false })).toBe(none)
   })
 
+  it("builds the code plugin for the selected theme pair and memoises it", () => {
+    const github = selectStreamdownPlugins({ codeTheme: "github" })
+    expect(github).not.toBe(streamdownPlugins)
+    expect(github.code).not.toBe(streamdownPlugins.code)
+    // `@streamdown/code` is stubbed under Jest; the stub records its options.
+    expect((github.code as unknown as { options: { themes: string[] } }).options.themes).toEqual([
+      "github-light-default",
+      "github-dark-default",
+    ])
+    expect(selectStreamdownPlugins({ codeTheme: "github" })).toBe(github)
+    // The default theme id resolves to the historical shared set.
+    expect(selectStreamdownPlugins({ codeTheme: "one" })).toBe(streamdownPlugins)
+    // Toggles and theme combine; the code plugin is shared across toggles.
+    const githubNoMath = selectStreamdownPlugins({ codeTheme: "github", math: false })
+    expect(githubNoMath).not.toHaveProperty("math")
+    expect(githubNoMath.code).toBe(github.code)
+  })
+
   it("forwards plugins, lineNumbers and the wrap class to Streamdown from the resolved knobs", () => {
     render(
       <StreamingTextPart
@@ -434,11 +458,14 @@ describe("markdown knobs (ADR-0127)", () => {
       />
     )
     const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
-      plugins: Record<string, unknown>
+      plugins: Record<string, unknown> & { renderers?: unknown[] }
       lineNumbers: boolean
       className: string
     }
     expect(props.plugins).not.toHaveProperty("mermaid")
+    // Mermaid off ⇒ no mermaid fence renderer either, so the fence streams
+    // as code; the chart renderer stays.
+    expect(props.plugins.renderers).toEqual([expect.objectContaining({ language: "chart" })])
     expect(props.plugins).toHaveProperty("math")
     expect(props.lineNumbers).toBe(false)
     expect(props.className).toContain("[&_pre]:whitespace-pre-wrap")
@@ -496,9 +523,39 @@ describe("markdown knobs (ADR-0127)", () => {
       lineNumbers: boolean
       className: string
     }
-    expect(props.plugins).toBe(streamdownPlugins)
+    // The shared plugin set plus the app's mermaid fence renderer (ADR-0218).
+    expect(props.plugins).toMatchObject({ ...streamdownPlugins })
+    expect(props.plugins.renderers).toEqual([
+      expect.objectContaining({ language: "mermaid" }),
+      expect.objectContaining({ language: "chart" }),
+    ])
     expect(props.lineNumbers).toBe(true)
+    expect((props as unknown as { codeBlockMaxHeight: string }).codeBlockMaxHeight).toBe(
+      "var(--rich-code-max-h)"
+    )
     expect(props.className).not.toContain("whitespace-pre-wrap")
+  })
+
+  it("restyles exactly the Streamdown hooks Streamdown still ships (ADR-0218)", () => {
+    // globals.css restyles the streaming code block through `data-streamdown`
+    // attributes. Pin every name it uses against the installed Streamdown
+    // bundle, so an upgrade that renames one fails here, not in the layout.
+    const css = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8")
+    const used = new Set(
+      [...css.matchAll(/\[data-streamdown="([a-z-]+)"\]/g)].map((match) => match[1])
+    )
+    expect(used).toEqual(
+      new Set(["code-block", "code-block-header", "code-block-actions", "code-block-body"])
+    )
+    // `streamdown` is mapped to a stub under Jest, so read the installed copy.
+    const distDir = path.join(process.cwd(), "node_modules", "streamdown", "dist")
+    const bundle = readdirSync(distDir)
+      .filter((file) => file.endsWith(".js"))
+      .map((file) => readFileSync(path.join(distDir, file), "utf8"))
+      .join("\n")
+    for (const name of used) {
+      expect(bundle).toContain(`"data-streamdown":"${name}"`)
+    }
   })
 
   it("re-renders when only the markdown knobs change (memo comparator)", () => {

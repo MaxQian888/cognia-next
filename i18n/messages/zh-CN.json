@@ -8484,6 +8484,15 @@
       "notFound": "该消息已不在此对话中。",
       "toBottom": "回到最新"
     },
+    "linkPreview": {
+      "browserOnly": "完整预览仅在桌面端和移动端可用。",
+      "copied": "已复制",
+      "copy": "复制链接",
+      "label": "{host} 的预览",
+      "loading": "正在加载预览",
+      "open": "打开",
+      "unavailable": "此页面没有可用的预览。"
+    },
     "list": {
       "clear": "清空",
       "clearAction": "删除消息",
@@ -8942,6 +8951,26 @@
         "skipForward": "+10 秒",
         "unmute": "取消静音"
       },
+      "chart": {
+        "copyJson": "复制图表 JSON",
+        "downloadPng": "下载 PNG",
+        "error": "无法绘制此图表",
+        "exportFailed": "无法导出图表",
+        "fullscreen": "全屏查看",
+        "label": "图表",
+        "points": "{count, plural, other {# 个数据点}}",
+        "showChart": "查看图表",
+        "showData": "查看数据",
+        "types": {
+          "area": "面积图",
+          "bar": "柱状图",
+          "doughnut": "环形图",
+          "line": "折线图",
+          "pie": "饼图",
+          "radar": "雷达图",
+          "scatter": "散点图"
+        }
+      },
       "code": {
         "ariaInLanguage": "{language} 代码",
         "close": "关闭",
@@ -9035,7 +9064,18 @@
         "showSource": "查看源码",
         "tooLarge": "这张图较大（{chars, number} 个字符），绘制可能需要一些时间。",
         "viewFullscreen": "全屏查看",
-        "viewSource": "查看源码"
+        "viewSource": "查看源码",
+        "zoomIn": "放大",
+        "zoomOut": "缩小"
+      },
+      "richBlock": {
+        "close": "关闭",
+        "closeAria": "关闭全屏视图",
+        "copied": "已复制",
+        "copy": "复制",
+        "download": "下载",
+        "fullscreen": "全屏",
+        "fullscreenAria": "全屏查看"
       },
       "table": {
         "actionFailed": "表格操作失败",
@@ -9044,11 +9084,13 @@
         "copyCsv": "复制为 CSV",
         "copyMarkdown": "复制为 Markdown",
         "copyTsv": "复制为 TSV",
+        "dimensions": "{rows, plural, other {# 行}} × {columns, plural, other {# 列}}",
         "download": "下载表格",
         "downloadCsv": "下载为 CSV",
         "downloadMarkdown": "下载为 Markdown",
         "fullscreen": "全屏查看表格",
         "showAllRows": "显示全部行",
+        "title": "表格",
         "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
       },
       "video": {
@@ -39129,6 +39171,8 @@
           "info": "信息",
           "infoForeground": "信息文字",
           "input": "输入框",
+          "link": "链接",
+          "mark": "高亮标记",
           "muted": "弱化色",
           "mutedForeground": "弱化色文字",
           "popover": "弹出层",
@@ -39321,10 +39365,71 @@
           "hybrid": "混合",
           "label": "布局"
         },
+        "links": {
+          "color": {
+            "label": "链接颜色",
+            "link": "链接蓝",
+            "primary": "主题主色",
+            "text": "与正文相同"
+          },
+          "label": "链接",
+          "preview": {
+            "hint": "显示网页的标题、摘要和图片。关闭后不会再抓取链接的任何信息。",
+            "hover": "悬停显示卡片",
+            "label": "链接预览",
+            "off": "关闭"
+          },
+          "siteIcon": {
+            "hint": "在外部链接前显示网站图标。",
+            "label": "站点图标"
+          },
+          "underline": {
+            "hover": "仅悬停时",
+            "label": "下划线",
+            "solid": "实线",
+            "subtle": "浅色"
+          }
+        },
         "markdown": {
+          "blockBorder": {
+            "hint": "为代码、表格、图表和示意图绘制边框；关闭后它们与回复正文齐平。",
+            "label": "块边框"
+          },
+          "blockDensity": {
+            "comfortable": "适中",
+            "compact": "紧凑",
+            "label": "内容块密度"
+          },
+          "blockHeader": {
+            "hint": "在代码、表格、示意图和图表上显示标题栏；关闭后工具栏改为块内的悬浮按钮组。",
+            "label": "块标题栏"
+          },
+          "charts": {
+            "hint": "把 ```chart 代码块绘制成图表；关闭则显示 JSON。",
+            "label": "内联图表"
+          },
           "codeLineNumbers": {
             "hint": "行号栏的默认值；每个代码块仍可单独切换。",
             "label": "代码行号"
+          },
+          "codeMaxHeight": {
+            "label": "代码块高度",
+            "medium": "中",
+            "none": "不限制",
+            "short": "矮",
+            "tall": "高"
+          },
+          "codeTheme": {
+            "catppuccin": "Catppuccin",
+            "everforest": "Everforest",
+            "github": "GitHub",
+            "label": "代码主题",
+            "min": "Min",
+            "one": "One",
+            "rose-pine": "Rosé Pine",
+            "solarized": "Solarized",
+            "vitesse": "Vitesse",
+            "vscode": "VS Code"
           },
           "codeWrap": {
             "hint": "软换行的默认值；每个代码块仍可单独切换。",
@@ -39392,6 +39497,21 @@
           "inherit": "继承全局设置",
           "inspector": "检查器",
           "label": "展示预设"
+        },
+        "reading": {
+          "label": "阅读",
+          "spacing": {
+            "comfortable": "适中",
+            "compact": "紧凑",
+            "label": "段落间距",
+            "relaxed": "宽松"
+          },
+          "textSize": {
+            "label": "文字大小",
+            "lg": "大",
+            "md": "默认",
+            "sm": "小"
+          }
         },
         "reasoning": {
           "label": "推理"

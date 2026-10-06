@@ -90,6 +90,11 @@ describe("buildVisualOutputSection", () => {
     // did, so the ceiling still forces this conversation rather than drifting.
     const section = buildVisualOutputSection(inApp)!
     expect(section.length).toBeLessThan(1_700)
+    // ADR-0218 raised the ceiling for the one variant that also routes the
+    // inline chart fence, by exactly that line (~200 chars, ~50 tokens, in
+    // the cached prefix). It stays a ceiling, not a target.
+    const withInline = buildVisualOutputSection({ ...inApp, inlineCharts: true })!
+    expect(withInline.length).toBeLessThan(1_900)
   })
 
   it("keeps the channel with no dock the cheapest one", () => {
@@ -134,5 +139,32 @@ describe("buildVisualOutputSection", () => {
 
   it("opens with a heading so it reads as its own section when appended", () => {
     expect(buildVisualOutputSection(inApp)!.startsWith("## ")).toBe(true)
+  })
+  describe("inline chart fence (ADR-0218)", () => {
+    it("offers the fence beside the artifact, and keeps the artifact for charts to keep", () => {
+      const section = buildVisualOutputSection({ ...inApp, inlineCharts: true })!
+      expect(section).toContain("fenced `chart` block")
+      expect(section).toContain("artifact_create")
+      expect(section.indexOf("artifact_create")).toBeLessThan(section.indexOf("fenced `chart`"))
+    })
+
+    it("offers it on the fenced route and to an in-app user who turned authoring off", () => {
+      expect(
+        buildVisualOutputSection({ artifacts: "fenced", a2ui: false, inlineCharts: true })
+      ).toContain("fenced `chart` block")
+      const noAuthoring = buildVisualOutputSection({
+        artifacts: "disabled",
+        a2ui: false,
+        inlineCharts: true,
+      })!
+      expect(noAuthoring).toContain("fenced `chart` block")
+      expect(noAuthoring).not.toContain("artifact_create")
+      expect(noAuthoring).not.toContain("never emit raw chart JSON")
+    })
+
+    it("never reaches an IM thread or a session with charts off", () => {
+      expect(buildVisualOutputSection(imThread)).not.toContain("fenced `chart`")
+      expect(buildVisualOutputSection(inApp)).not.toContain("fenced `chart`")
+    })
   })
 })

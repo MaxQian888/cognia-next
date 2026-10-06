@@ -20,9 +20,9 @@ import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
-import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
-import type { MessageMarkdownOptions } from "@/types/appearance"
+import type { ChatCodeThemeId, MessageMarkdownOptions } from "@/types/appearance"
+import { resolveChatCodeTheme, type ChatCodeThemePair } from "@/lib/chat/code-theme"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import {
   createSharedMarkdownComponents,
@@ -74,6 +74,15 @@ const MermaidBlock = dynamic(
   }
 )
 
+// ADR-0218 — the inline ```chart block pulls in recharts, so it is split too.
+const ChartBlock = dynamic(
+  () => import("@/components/chat/renderers/chart-block").then((m) => ({ default: m.ChartBlock })),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="my-3 h-64" />,
+  }
+)
+
 const DiffBlock = dynamic(
   () => import("@/components/chat/renderers/diff-block").then((m) => ({ default: m.DiffBlock })),
   {
@@ -99,6 +108,7 @@ const A2UIBlock = dynamic(
 // to the overrides that use them.
 const SafeMermaidBlock = withRendererErrorBoundary(MermaidBlock, "Mermaid")
 const SafeDiffBlock = withRendererErrorBoundary(DiffBlock, "Diff")
+const SafeChartBlock = withRendererErrorBoundary(ChartBlock, "Chart")
 const SafeA2UIBlock = withRendererErrorBoundary(A2UIBlock, "A2UI")
 
 type RemarkPlugins = NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]>
@@ -208,6 +218,8 @@ export interface MarkdownRendererProps {
   enableMermaid?: boolean
   enableMath?: boolean
   enableDiff?: boolean
+  /** ADR-0218 — draw ```chart fences inline; off ⇒ shown as code. */
+  enableCharts?: boolean
   enableAlerts?: boolean
   enableEnhancedImages?: boolean
   enableVideoEmbed?: boolean
@@ -218,6 +230,8 @@ export interface MarkdownRendererProps {
   mathFontScale?: number
   mathDisplayAlignment?: "center" | "left"
   mathShowCopyButton?: boolean
+  /** ADR-0218 — syntax theme pair id; both branches resolve the same pair. */
+  codeThemeId?: ChatCodeThemeId
   /**
    * Source message id used to attribute manually-created artifacts back to a
    * specific assistant message; passed through to the per-block
@@ -255,6 +269,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   enableMermaid = markdown?.mermaid ?? true,
   enableMath = markdown?.math ?? true,
   enableDiff = markdown?.diff ?? true,
+  enableCharts = markdown?.charts ?? true,
   enableAlerts = true,
   enableEnhancedImages = true,
   enableVideoEmbed = true,
@@ -264,6 +279,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   mathFontScale = markdown?.mathFontScale ?? 1,
   mathDisplayAlignment = markdown?.mathAlign ?? "center",
   mathShowCopyButton = markdown?.mathCopy ?? true,
+  codeThemeId = markdown?.codeTheme,
   messageId,
   isStreaming = false,
   rhythm = "chat",
@@ -282,6 +298,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         enableMermaid,
         enableMath,
         enableDiff,
+        enableCharts,
         enableAlerts,
         enableEnhancedImages,
         enableVideoEmbed,
@@ -291,6 +308,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         mathFontScale,
         mathDisplayAlignment,
         mathShowCopyButton,
+        codeTheme: resolveChatCodeTheme(codeThemeId),
         messageId,
         isStreaming,
         projectRoot,
@@ -300,6 +318,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       enableMermaid,
       enableMath,
       enableDiff,
+      enableCharts,
       enableAlerts,
       enableEnhancedImages,
       enableVideoEmbed,
@@ -309,6 +328,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       mathFontScale,
       mathDisplayAlignment,
       mathShowCopyButton,
+      codeThemeId,
       messageId,
       isStreaming,
       projectRoot,
@@ -338,6 +358,7 @@ interface BuildComponentsOptions {
   enableMermaid: boolean
   enableMath: boolean
   enableDiff: boolean
+  enableCharts: boolean
   enableAlerts: boolean
   enableEnhancedImages: boolean
   enableVideoEmbed: boolean
@@ -347,6 +368,7 @@ interface BuildComponentsOptions {
   mathFontScale: number
   mathDisplayAlignment: "center" | "left"
   mathShowCopyButton: boolean
+  codeTheme: ChatCodeThemePair
   messageId?: string
   isStreaming: boolean
   projectRoot?: string | null
@@ -360,6 +382,7 @@ function buildComponents(
     enableMermaid,
     enableMath,
     enableDiff,
+    enableCharts,
     enableAlerts,
     enableEnhancedImages,
     enableVideoEmbed,
@@ -369,6 +392,7 @@ function buildComponents(
     mathFontScale,
     mathDisplayAlignment,
     mathShowCopyButton,
+    codeTheme,
     messageId,
     isStreaming,
     projectRoot,
@@ -448,6 +472,14 @@ function buildComponents(
         )
       }
 
+      if (enableCharts && language === "chart") {
+        return (
+          <div className="not-typeset">
+            <SafeChartBlock content={codeContent} />
+          </div>
+        )
+      }
+
       if (language === "a2ui") {
         return (
           <div className="not-typeset">
@@ -456,33 +488,31 @@ function buildComponents(
         )
       }
 
+      // The artifact button joins the block's own toolbar (ADR-0218); it used
+      // to float over the header and cover its last two actions.
       const showArtifactButton = codeContent.includes("\n")
       return (
-        <div className="not-typeset relative group/code">
+        <div className="not-typeset">
           <CodeBlock
             code={codeContent}
             language={language}
             showLineNumbers={showLineNumbers}
             wrapLines={wrapLines}
             isStreaming={isStreaming}
+            theme={codeTheme}
+            capHeight
+            extraActions={
+              showArtifactButton ? (
+                <ArtifactCreateButton
+                  content={codeContent}
+                  language={language}
+                  messageId={messageId}
+                  variant="icon"
+                  className="size-6 text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
+                />
+              ) : null
+            }
           />
-          {showArtifactButton && (
-            <div
-              data-message-rich-control
-              className={cn(
-                "absolute right-1 top-1",
-                HOVER_REVEAL_GROUP_BASE_CLASS,
-                "group-hover/code:opacity-100"
-              )}
-            >
-              <ArtifactCreateButton
-                content={codeContent}
-                language={language}
-                messageId={messageId}
-                variant="icon"
-              />
-            </div>
-          )}
         </div>
       )
     },

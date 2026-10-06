@@ -31,6 +31,7 @@ const FOREGROUND_PAIRS: ReadonlyArray<readonly [keyof ThemeColors, keyof ThemeCo
   ["success", "successForeground"],
   ["warning", "warningForeground"],
   ["info", "infoForeground"],
+  ["background", "link"],
   ["sidebar", "sidebarForeground"],
   ["sidebarPrimary", "sidebarPrimaryForeground"],
   ["sidebarAccent", "sidebarAccentForeground"],

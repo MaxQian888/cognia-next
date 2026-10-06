@@ -103,6 +103,11 @@ export interface ChartContract {
   /** `false` means render the empty state. The findings still apply. */
   drawable: boolean
   findings: ChartFinding[]
+  /**
+   * ADR-0218 — the payload's own `title`, when an object payload carries a
+   * non-empty string one. Shown as the inline chart's header label.
+   */
+  title?: string
 }
 
 export interface ParseChartPayloadOptions {
@@ -174,6 +179,7 @@ export function parseChartPayload(
 
   let declaredType: unknown
   let rawRows: unknown
+  let title: string | undefined
 
   if (chartData) {
     rawRows = chartData
@@ -189,6 +195,7 @@ export function parseChartPayload(
     } else if (isRow(parsed) && "data" in parsed && Array.isArray(parsed.data)) {
       rawRows = parsed.data
       declaredType = parsed.type
+      if (typeof parsed.title === "string" && parsed.title.trim()) title = parsed.title.trim()
     } else {
       return fatal("unsupportedShape")
     }
@@ -237,6 +244,7 @@ export function parseChartPayload(
       valueKey: null,
       drawable,
       findings: sortFindings(findings),
+      ...(title ? { title } : {}),
     }
   }
 
@@ -270,6 +278,7 @@ export function parseChartPayload(
       valueKey: null,
       drawable: false,
       findings: sortFindings(findings),
+      ...(title ? { title } : {}),
     }
   }
 
@@ -305,6 +314,7 @@ export function parseChartPayload(
     valueKey,
     drawable: true,
     findings: sortFindings(findings),
+    ...(title ? { title } : {}),
   }
 }
 

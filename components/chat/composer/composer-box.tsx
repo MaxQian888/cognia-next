@@ -37,6 +37,7 @@ import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { cn } from "@/lib/utils"
 import type { PermissionMode } from "@/stores/chat/chat-store"
 
+import { ComposerLinkPreview } from "@/components/chat/composer/composer-link-preview"
 import {
   ComposerChipOverlay,
   OVERLAY_FONT_SIZE,
@@ -735,6 +736,13 @@ export function ComposerBox({
           rows={1}
           style={{ maxHeight: `${maxHeightRem}rem` }}
           value={textInput.value}
+        />
+        {/* ADR-0218 — preview card over folded links. The overlay takes no
+            pointer events, so this hit-tests it from the textarea. */}
+        <ComposerLinkPreview
+          textareaRef={textareaRef}
+          chipOverlayRef={chipOverlayRef}
+          touchInput={touchInput}
         />
         {saveAsTemplate ? (
           <Tooltip>

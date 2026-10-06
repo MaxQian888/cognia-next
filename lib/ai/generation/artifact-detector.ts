@@ -57,6 +57,9 @@ export interface DetectedArtifact {
   confidence: number // 0-1, higher means more confident in detection
 }
 
+/** ADR-0218 — the fence language the message renderer draws as an inline chart. */
+export const INLINE_CHART_FENCE = "chart"
+
 // Code block regex - matches ```language\n...\n```
 const CODE_BLOCK_REGEX = /```(\w+)?\n([\s\S]*?)```/g
 
@@ -214,6 +217,11 @@ export function detectArtifacts(
   const codeBlocks = extractCodeBlocks(responseContent)
 
   for (const block of codeBlocks) {
+    // ADR-0218: a ```chart fence is the inline chart, drawn in the transcript
+    // by the message renderer. Lifting it into the dock as well would show the
+    // same chart twice; a chart meant for the dock arrives as an artifact call
+    // or a ```json payload, which still lift as before.
+    if (block.language.toLowerCase() === INLINE_CHART_FENCE) continue
     const { type, confidence } = detectArtifactType(block.code, block.language)
     const language =
       LANGUAGE_MAP[block.language.toLowerCase()] || (block.language as ArtifactLanguage)

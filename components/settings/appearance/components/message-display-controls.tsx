@@ -17,8 +17,20 @@ import {
 import { cn } from "@/lib/utils"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 import {
+  CHAT_CODE_THEME_IDS,
+  MESSAGE_CODE_MAX_HEIGHTS,
   MESSAGE_MATH_FONT_SCALES,
   type AgentFlowMode,
+  type ChatCodeThemeId,
+  type MessageBlockDensity,
+  type MessageCodeMaxHeight,
+  type MessageLinkColor,
+  type MessageLinkOptions,
+  type MessageLinkPreview,
+  type MessageLinkUnderline,
+  type MessageReadingOptions,
+  type MessageSpacing,
+  type MessageTextSize,
   type MessageActionVisibility,
   type MessageBodyFont,
   type MessageDisplayLayout,
@@ -55,6 +67,12 @@ const PLACEMENTS: MessageDisplayMetadataOptions[keyof MessageDisplayMetadataOpti
 ]
 const BODY_FONTS: MessageBodyFont[] = ["sans", "serif"]
 const MATH_ALIGNS: MessageMathAlign[] = ["center", "left"]
+const TEXT_SIZES: MessageTextSize[] = ["sm", "md", "lg"]
+const SPACINGS: MessageSpacing[] = ["compact", "comfortable", "relaxed"]
+const LINK_COLORS: MessageLinkColor[] = ["link", "primary", "text"]
+const LINK_UNDERLINES: MessageLinkUnderline[] = ["subtle", "solid", "hover"]
+const LINK_PREVIEWS: MessageLinkPreview[] = ["hover", "off"]
+const BLOCK_DENSITIES: MessageBlockDensity[] = ["compact", "comfortable"]
 /** ADR-0127 boolean markdown knobs rendered as switches, in display order. */
 const MARKDOWN_TOGGLES = [
   "math",
@@ -63,6 +81,9 @@ const MARKDOWN_TOGGLES = [
   "codeLineNumbers",
   "codeWrap",
   "mathCopy",
+  "charts",
+  "blockBorder",
+  "blockHeader",
 ] as const satisfies readonly (keyof MessageMarkdownOptions)[]
 const METADATA_FIELDS: Array<keyof MessageDisplayMetadataOptions> = [
   "identity",
@@ -109,6 +130,17 @@ export function MessageDisplayControls({
     next: MessageMarkdownOptions[K]
   ) => {
     updateOverride("markdown", { ...(ownOverrides?.markdown ?? {}), [key]: next })
+  }
+
+  const updateReading = <K extends keyof MessageReadingOptions>(
+    key: K,
+    next: MessageReadingOptions[K]
+  ) => {
+    updateOverride("reading", { ...(ownOverrides?.reading ?? {}), [key]: next })
+  }
+
+  const updateLinks = <K extends keyof MessageLinkOptions>(key: K, next: MessageLinkOptions[K]) => {
+    updateOverride("links", { ...(ownOverrides?.links ?? {}), [key]: next })
   }
 
   return (
@@ -205,6 +237,72 @@ export function MessageDisplayControls({
             />
           </div>
 
+          {/* ADR-0218: prose size and rhythm. Applied as attributes on the
+              message shell, so both renderer branches pick them up. */}
+          <div className="space-y-2" data-testid="message-display-reading">
+            <Label className="text-xs">{t("reading.label")}</Label>
+            <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
+              <PreferenceSelect
+                label={t("reading.textSize.label")}
+                value={ownOverrides?.reading?.textSize}
+                fallback={resolved.reading.textSize}
+                options={TEXT_SIZES}
+                getLabel={(option) => t(`reading.textSize.${option}`)}
+                onChange={(next) => updateReading("textSize", next as MessageTextSize)}
+              />
+              <PreferenceSelect
+                label={t("reading.spacing.label")}
+                value={ownOverrides?.reading?.spacing}
+                fallback={resolved.reading.spacing}
+                options={SPACINGS}
+                getLabel={(option) => t(`reading.spacing.${option}`)}
+                onChange={(next) => updateReading("spacing", next as MessageSpacing)}
+              />
+            </div>
+          </div>
+
+          {/* ADR-0218: link style and previews. Preview `off` also stops every
+              metadata fetch, so it is the privacy switch as well. */}
+          <div className="space-y-2" data-testid="message-display-links">
+            <Label className="text-xs">{t("links.label")}</Label>
+            <div className="grid gap-3 @md/appearance-pane:grid-cols-2">
+              <PreferenceSelect
+                label={t("links.color.label")}
+                value={ownOverrides?.links?.color}
+                fallback={resolved.links.color}
+                options={LINK_COLORS}
+                getLabel={(option) => t(`links.color.${option}`)}
+                onChange={(next) => updateLinks("color", next as MessageLinkColor)}
+              />
+              <PreferenceSelect
+                label={t("links.underline.label")}
+                value={ownOverrides?.links?.underline}
+                fallback={resolved.links.underline}
+                options={LINK_UNDERLINES}
+                getLabel={(option) => t(`links.underline.${option}`)}
+                onChange={(next) => updateLinks("underline", next as MessageLinkUnderline)}
+              />
+              <PreferenceSelect
+                label={t("links.preview.label")}
+                value={ownOverrides?.links?.preview}
+                fallback={resolved.links.preview}
+                options={LINK_PREVIEWS}
+                getLabel={(option) => t(`links.preview.${option}`)}
+                onChange={(next) => updateLinks("preview", next as MessageLinkPreview)}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">{t("links.preview.hint")}</p>
+            <div className="grid gap-2 @md/appearance-pane:grid-cols-2">
+              <PreferenceSwitch
+                id="message-display-links-siteIcon"
+                label={t("links.siteIcon.label")}
+                description={t("links.siteIcon.hint")}
+                checked={ownOverrides?.links?.siteIcon ?? resolved.links.siteIcon}
+                onCheckedChange={(next) => updateLinks("siteIcon", next)}
+              />
+            </div>
+          </div>
+
           {/* ADR-0127: markdown / code / math knobs — both renderer branches read
               the resolved values, the per-block toolbar can still override. */}
           <div className="space-y-2" data-testid="message-display-markdown">
@@ -239,6 +337,30 @@ export function MessageDisplayControls({
                 options={MATH_ALIGNS}
                 getLabel={(option) => t(`markdown.mathAlign.${option}`)}
                 onChange={(next) => updateMarkdown("mathAlign", next as MessageMathAlign)}
+              />
+              <PreferenceSelect
+                label={t("markdown.codeTheme.label")}
+                value={ownOverrides?.markdown?.codeTheme}
+                fallback={resolved.markdown.codeTheme}
+                options={CHAT_CODE_THEME_IDS}
+                getLabel={(option) => t(`markdown.codeTheme.${option}`)}
+                onChange={(next) => updateMarkdown("codeTheme", next as ChatCodeThemeId)}
+              />
+              <PreferenceSelect
+                label={t("markdown.codeMaxHeight.label")}
+                value={ownOverrides?.markdown?.codeMaxHeight}
+                fallback={resolved.markdown.codeMaxHeight}
+                options={MESSAGE_CODE_MAX_HEIGHTS}
+                getLabel={(option) => t(`markdown.codeMaxHeight.${option}`)}
+                onChange={(next) => updateMarkdown("codeMaxHeight", next as MessageCodeMaxHeight)}
+              />
+              <PreferenceSelect
+                label={t("markdown.blockDensity.label")}
+                value={ownOverrides?.markdown?.blockDensity}
+                fallback={resolved.markdown.blockDensity}
+                options={BLOCK_DENSITIES}
+                getLabel={(option) => t(`markdown.blockDensity.${option}`)}
+                onChange={(next) => updateMarkdown("blockDensity", next as MessageBlockDensity)}
               />
             </div>
             <div className="grid gap-2 @md/appearance-pane:grid-cols-2">

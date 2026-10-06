@@ -8484,6 +8484,15 @@
       "notFound": "That message is no longer in this conversation.",
       "toBottom": "Jump to latest"
     },
+    "linkPreview": {
+      "browserOnly": "Full previews are available in the desktop and mobile apps.",
+      "copied": "Copied",
+      "copy": "Copy link",
+      "label": "Preview of {host}",
+      "loading": "Loading preview",
+      "open": "Open",
+      "unavailable": "No preview available for this page."
+    },
     "list": {
       "clear": "Clear",
       "clearAction": "Delete messages",
@@ -8942,6 +8951,26 @@
         "skipForward": "+10s",
         "unmute": "Unmute"
       },
+      "chart": {
+        "copyJson": "Copy chart JSON",
+        "downloadPng": "Download PNG",
+        "error": "This chart could not be drawn",
+        "exportFailed": "Could not export the chart",
+        "fullscreen": "View fullscreen",
+        "label": "Chart",
+        "points": "{count, plural, =1 {# data point} other {# data points}}",
+        "showChart": "Show chart",
+        "showData": "Show data",
+        "types": {
+          "area": "Area chart",
+          "bar": "Bar chart",
+          "doughnut": "Doughnut chart",
+          "line": "Line chart",
+          "pie": "Pie chart",
+          "radar": "Radar chart",
+          "scatter": "Scatter plot"
+        }
+      },
       "code": {
         "ariaInLanguage": "Code in {language}",
         "close": "Close",
@@ -9035,7 +9064,18 @@
         "showSource": "Show source",
         "tooLarge": "This diagram is large ({chars, number} characters) and may take a while to draw.",
         "viewFullscreen": "View fullscreen",
-        "viewSource": "View source"
+        "viewSource": "View source",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out"
+      },
+      "richBlock": {
+        "close": "Close",
+        "closeAria": "Close fullscreen view",
+        "copied": "Copied",
+        "copy": "Copy",
+        "download": "Download",
+        "fullscreen": "Fullscreen",
+        "fullscreenAria": "View fullscreen"
       },
       "table": {
         "actionFailed": "Table action failed",
@@ -9044,11 +9084,13 @@
         "copyCsv": "Copy as CSV",
         "copyMarkdown": "Copy as Markdown",
         "copyTsv": "Copy as TSV",
+        "dimensions": "{rows, plural, =1 {# row} other {# rows}} × {columns, plural, =1 {# column} other {# columns}}",
         "download": "Download table",
         "downloadCsv": "Download as CSV",
         "downloadMarkdown": "Download as Markdown",
         "fullscreen": "View table fullscreen",
         "showAllRows": "Show all rows",
+        "title": "Table",
         "truncatedNotice": "Showing the first {shown, number} of {total, number} rows."
       },
       "video": {
@@ -39129,6 +39171,8 @@
           "info": "Info",
           "infoForeground": "Info text",
           "input": "Input",
+          "link": "Link",
+          "mark": "Highlight",
           "muted": "Muted",
           "mutedForeground": "Muted text",
           "popover": "Popover",
@@ -39321,10 +39365,71 @@
           "hybrid": "Hybrid",
           "label": "Layout"
         },
+        "links": {
+          "color": {
+            "label": "Link color",
+            "link": "Link blue",
+            "primary": "Theme primary",
+            "text": "Same as text"
+          },
+          "label": "Links",
+          "preview": {
+            "hint": "Shows the page's title, summary and image. Off also stops fetching anything about a link.",
+            "hover": "Card on hover",
+            "label": "Link preview",
+            "off": "Off"
+          },
+          "siteIcon": {
+            "hint": "Show the site's icon before external links.",
+            "label": "Site icon"
+          },
+          "underline": {
+            "hover": "On hover only",
+            "label": "Underline",
+            "solid": "Solid",
+            "subtle": "Subtle"
+          }
+        },
         "markdown": {
+          "blockBorder": {
+            "hint": "Outline code, tables, diagrams and charts; off lets them sit flush in the reply.",
+            "label": "Block borders"
+          },
+          "blockDensity": {
+            "comfortable": "Comfortable",
+            "compact": "Compact",
+            "label": "Block density"
+          },
+          "blockHeader": {
+            "hint": "Show the title bar on code, tables, diagrams and charts; off keeps the toolbar as a floating button group inside the block.",
+            "label": "Block headers"
+          },
+          "charts": {
+            "hint": "Draw ```chart fences as charts; off shows the JSON.",
+            "label": "Inline charts"
+          },
           "codeLineNumbers": {
             "hint": "Default for the line-number gutter; each block can still toggle it.",
             "label": "Code line numbers"
+          },
+          "codeMaxHeight": {
+            "label": "Code block height",
+            "medium": "Medium",
+            "none": "No limit",
+            "short": "Short",
+            "tall": "Tall"
+          },
+          "codeTheme": {
+            "catppuccin": "Catppuccin",
+            "everforest": "Everforest",
+            "github": "GitHub",
+            "label": "Code theme",
+            "min": "Min",
+            "one": "One",
+            "rose-pine": "Rosé Pine",
+            "solarized": "Solarized",
+            "vitesse": "Vitesse",
+            "vscode": "VS Code"
           },
           "codeWrap": {
             "hint": "Default for soft wrapping; each block can still toggle it.",
@@ -39392,6 +39497,21 @@
           "inherit": "Inherit global setting",
           "inspector": "Inspector",
           "label": "Presentation preset"
+        },
+        "reading": {
+          "label": "Reading",
+          "spacing": {
+            "comfortable": "Comfortable",
+            "compact": "Compact",
+            "label": "Paragraph spacing",
+            "relaxed": "Relaxed"
+          },
+          "textSize": {
+            "label": "Text size",
+            "lg": "Large",
+            "md": "Default",
+            "sm": "Small"
+          }
         },
         "reasoning": {
           "label": "Reasoning"

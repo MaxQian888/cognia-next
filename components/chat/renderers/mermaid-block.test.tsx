@@ -1,7 +1,9 @@
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { MERMAID_AUTO_RENDER_MAX_CHARS, MermaidBlock } from "./mermaid-block"
-import { getCachedMermaid, renderMermaidCached, subscribeMermaidTheme } from "@cognia/mermaid"
+import { act } from "@testing-library/react"
+import { getCachedMermaid, renderMermaidCached } from "@cognia/mermaid"
+import { __resetChatDiagramPaletteForTesting } from "@/lib/chat/diagram-palette"
 
 jest.mock("@cognia/mermaid", () => ({
   getCachedMermaid: jest.fn(),
@@ -10,8 +12,13 @@ jest.mock("@cognia/mermaid", () => ({
   // the dark-theme test below drive it through `document`.
   readMermaidTheme: () =>
     document.documentElement.classList.contains("dark") ? "dark" : "default",
-  subscribeMermaidTheme: jest.fn(() => () => {}),
 }))
+
+/** The render style every call carries: the app palette on the base theme. */
+const STYLE = expect.objectContaining({
+  key: expect.any(String),
+  themeVariables: expect.objectContaining({ primaryTextColor: expect.any(String) }),
+})
 
 // `MermaidBlock`'s render callback depends on the next-intl translator `t`.
 // Production next-intl returns a referentially-stable `t`, but the global test
@@ -24,7 +31,6 @@ jest.mock("next-intl", () => {
 
 const getCached = getCachedMermaid as jest.MockedFunction<typeof getCachedMermaid>
 const renderCached = renderMermaidCached as jest.MockedFunction<typeof renderMermaidCached>
-const subscribeTheme = subscribeMermaidTheme as jest.MockedFunction<typeof subscribeMermaidTheme>
 
 function renderInProvider(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -37,9 +43,9 @@ describe("MermaidBlock", () => {
   beforeEach(() => {
     getCached.mockReset()
     renderCached.mockReset()
-    subscribeTheme.mockReset()
-    subscribeTheme.mockReturnValue(() => {})
     document.documentElement.classList.remove("dark")
+    document.documentElement.removeAttribute("style")
+    __resetChatDiagramPaletteForTesting()
   })
 
   it("paints synchronously from cache with no Skeleton flash (remount path)", () => {
@@ -60,14 +66,18 @@ describe("MermaidBlock", () => {
 
     const { container } = renderInProvider(<MermaidBlock content="graph LR; X-->Y" />)
 
-    // Cold: no figure yet (Skeleton branch).
+    // Cold: the frame is already there (no layout jump), but busy, not a figure.
     expect(container.querySelector('[role="figure"]')).toBeNull()
+    expect(container.querySelector('[data-rich-block="mermaid"]')).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
 
     await waitFor(() => {
       expect(container.querySelector('[role="figure"]')).toBeTruthy()
     })
     expect(container.innerHTML).toContain("fresh-diagram")
-    expect(renderCached).toHaveBeenCalledWith("default", "graph LR; X-->Y")
+    expect(renderCached).toHaveBeenCalledWith("default", "graph LR; X-->Y", STYLE)
   })
 
   it("requests the dark theme when the global .dark class is set", async () => {
@@ -78,7 +88,11 @@ describe("MermaidBlock", () => {
     renderInProvider(<MermaidBlock content="pie" />)
 
     await waitFor(() => {
-      expect(renderCached).toHaveBeenCalledWith("dark", "pie")
+      expect(renderCached).toHaveBeenCalledWith(
+        "dark",
+        "pie",
+        expect.objectContaining({ themeVariables: expect.objectContaining({ darkMode: true }) })
+      )
     })
   })
 
@@ -94,36 +108,48 @@ describe("MermaidBlock", () => {
     expect(getByText("bad syntax")).toBeInTheDocument()
   })
 
-  it("subscribes to the shared theme watcher instead of owning an observer", () => {
-    getCached.mockReturnValue("<svg>cached</svg>")
-
-    const unsubscribe = jest.fn()
-    subscribeTheme.mockReturnValue(unsubscribe)
-    const { unmount } = renderInProvider(<MermaidBlock content="graph TD; A-->B" />)
-
-    expect(subscribeTheme).toHaveBeenCalledTimes(1)
-
-    unmount()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
-  })
-
-  it("re-renders when the shared watcher reports a theme flip", async () => {
+  it("re-renders with the new palette when the theme flips", async () => {
     getCached.mockReturnValue(undefined)
     renderCached.mockResolvedValue("<svg>light</svg>")
-    let notify: (() => void) | undefined
-    subscribeTheme.mockImplementation((listener) => {
-      notify = () => listener("dark")
-      return () => {}
-    })
 
     renderInProvider(<MermaidBlock content="pie" />)
     await waitFor(() => expect(renderCached).toHaveBeenCalledTimes(1))
 
-    document.documentElement.classList.add("dark")
     renderCached.mockResolvedValue("<svg>dark</svg>")
-    notify!()
+    await act(async () => {
+      document.documentElement.classList.add("dark")
+      await Promise.resolve()
+    })
 
-    await waitFor(() => expect(renderCached).toHaveBeenCalledWith("dark", "pie"))
+    await waitFor(() =>
+      expect(renderCached).toHaveBeenLastCalledWith(
+        "dark",
+        "pie",
+        expect.objectContaining({ themeVariables: expect.objectContaining({ darkMode: true }) })
+      )
+    )
+  })
+
+  it("draws in the shared frame with a hover toolbar and zoomable fullscreen", async () => {
+    getCached.mockReturnValue("<svg>cached</svg>")
+    const { container, getByRole, findByTestId } = renderInProvider(
+      <MermaidBlock content="graph TD; A-->B" />
+    )
+    const frame = container.querySelector('[data-rich-block="mermaid"]')!
+    expect(frame).toHaveAttribute("role", "figure")
+    expect(frame.querySelector("[data-message-rich-control]")).toBeTruthy()
+
+    fireEvent.click(getByRole("button", { name: "showSource" }))
+    expect(frame.querySelector("pre")).toHaveTextContent("graph TD; A-->B")
+
+    fireEvent.click(getByRole("button", { name: "viewFullscreen" }))
+    const canvas = await findByTestId("mermaid-fullscreen-canvas")
+    expect(canvas).toHaveAttribute("data-zoom", "1")
+    fireEvent.click(getByRole("button", { name: "zoomIn" }))
+    expect(canvas).toHaveAttribute("data-zoom", "1.25")
+    fireEvent.click(getByRole("button", { name: "zoomOut" }))
+    fireEvent.click(getByRole("button", { name: "zoomOut" }))
+    expect(canvas).toHaveAttribute("data-zoom", "0.75")
   })
 
   it("defers a diagram past the auto-render budget instead of laying it out", () => {

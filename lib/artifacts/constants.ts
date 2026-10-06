@@ -399,20 +399,6 @@ export const ARTIFACT_I18N_TYPE_KEYS: Record<ArtifactType, string> = {
 }
 
 /**
- * Chart color palette for recharts-based chart rendering
- */
-export const CHART_COLORS = [
-  "#8884d8",
-  "#82ca9d",
-  "#ffc658",
-  "#ff7300",
-  "#0088fe",
-  "#00C49F",
-  "#FFBB28",
-  "#FF8042",
-]
-
-/**
  * How much content an artifact card in the chat transcript will render
  * unprompted. Mirrors `MERMAID_AUTO_RENDER_MAX_CHARS` and exists for the same
  * reason: a transcript full of open artifact cards mounts one live iframe each

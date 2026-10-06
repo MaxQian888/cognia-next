@@ -1,11 +1,11 @@
 "use client"
 
 import React from "react"
-import { AlertCircle, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { useTranslations } from "next-intl"
-import { cn } from "@/lib/utils"
-import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
+import { RichBlockError } from "@/components/chat/renderers/rich-block/rich-block-error"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@cognia/logging"
 
@@ -78,58 +78,35 @@ export function MathErrorFallback({ error, latex, onRetry, className }: MathErro
     await copy(latex)
   }
 
+  // The shared block failure state (ADR-0218).
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20",
-        className
-      )}
-      role="alert"
-      aria-label={t("renderError")}
+    <RichBlockError
+      className={className}
+      title={t("renderError")}
+      detail={error?.message}
+      action={
+        onRetry || latex ? (
+          <div className="flex items-center gap-0.5">
+            {onRetry && (
+              <RichBlockAction label={t("retry")} onClick={onRetry}>
+                <RefreshCw />
+              </RichBlockAction>
+            )}
+            {latex && (
+              <RichBlockAction label={t("copySource")} onClick={handleCopy}>
+                <CopyFeedbackIcon copied={copied} size={12} />
+              </RichBlockAction>
+            )}
+          </div>
+        ) : undefined
+      }
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          <span className="text-sm font-medium">{t("renderError")}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {onRetry && (
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={onRetry}
-              aria-label={t("retry")}
-              tooltip={t("retry")}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </TooltipIconButton>
-          )}
-          {latex && (
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleCopy}
-              aria-label={t("copySource")}
-              tooltip={t("copySource")}
-            >
-              <CopyFeedbackIcon copied={copied} size={14} />
-            </TooltipIconButton>
-          )}
-        </div>
-      </div>
-      {error && (
-        <pre className="whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs text-muted-foreground">
-          {error.message}
-        </pre>
-      )}
-      {latex && (
-        <pre className="mt-1 p-2 rounded bg-muted text-xs overflow-auto font-mono">
+      {latex ? (
+        <pre className="overflow-auto rounded-md bg-muted/60 p-2 font-mono text-xs">
           <code>{latex}</code>
         </pre>
-      )}
-    </div>
+      ) : null}
+    </RichBlockError>
   )
 }
 

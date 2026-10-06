@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
+import { ChatLinkOptionsProvider } from "@/components/chat/markdown/chat-link-options"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import type { MessageDisplayMetadataOptions } from "@/types/appearance"
@@ -304,115 +305,129 @@ export function MessageShell({
 
   return (
     <MessageMotionProvider motion={display.motion}>
-      <section
-        data-testid="message-shell"
-        data-layout={display.layout}
-        data-preset={display.preset}
-        data-rich-controls={display.richControls}
-        data-body-font={display.bodyFont}
-        className={cn(
-          "min-w-0",
-          (isAssistant || display.layout === "cards") && "w-full",
-          // Same module as the user bubble (ADR-0148). The two sides sit on
-          // different elements — the user's hugs its content, the assistant's
-          // is this shell — so the strings, not the DOM, are what is shared.
-          messageCardClass(display.layout),
-          isAssistant && assistantBubbleClass(display.layout)
-        )}
-      >
-        {(showIdentity ||
-          display.metadata.timestamp === "header" ||
-          headerItems.length > 0 ||
-          routingChip ||
-          statusDot) && (
-          <header
-            className={cn(
-              "mb-1.5 flex min-h-6 flex-wrap items-center gap-1.5 text-xs text-muted-foreground",
-              !isAssistant && "justify-end"
-            )}
-            data-testid="message-shell-header"
-          >
-            {statusDot ? (
-              <span data-testid="message-status-dot" className="inline-flex items-center">
-                <ToolStatusDot status={statusDot} />
-              </span>
-            ) : null}
-            {showIdentity && (
-              <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                {speakerAvatar ? (
-                  <AvatarBadge subject={speakerAvatar} size={14} textClassName="text-[8px]" />
-                ) : route?.brandId ? (
-                  <BrandIcon id={route.brandId} label={identity} size={14} />
-                ) : isAssistant ? (
-                  (agentIconNode(run?.agent?.icon, "size-3.5", speakerColor) ?? (
-                    <BotIcon
-                      className="size-3.5"
-                      style={speakerColor ? { color: speakerColor } : undefined}
-                    />
-                  ))
-                ) : (
-                  <UserIcon className="size-3.5" />
-                )}
-                <span style={speakerColor ? { color: speakerColor } : undefined}>{identity}</span>
-                {route ? (
-                  <span
-                    className="font-normal text-muted-foreground"
-                    data-testid="message-route-via"
-                    data-route-runtime={route.runtimeKind}
-                  >
-                    {t("routedVia", { handle: route.handle })}
-                  </span>
-                ) : null}
-              </span>
-            )}
-            {onStopSpeaker ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={onStopSpeaker}
-                aria-label={t("stopSpeaker", { name: identity })}
-                title={t("stopSpeaker", { name: identity })}
-                className="size-5 text-muted-foreground hover:text-destructive"
-                data-testid="message-stop-speaker"
-              >
-                <SquareIcon className="size-3 fill-current" />
-              </Button>
-            ) : null}
-            {headerItems.map((item) => (
-              <Badge key={item} variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
-                {item}
-              </Badge>
-            ))}
-            {routingChip && run?.routing ? <RoutingIndicator routing={run.routing} /> : null}
-            {display.metadata.timestamp === "header" && createdAt !== undefined && (
-              <time dateTime={new Date(createdAt).toISOString()} className="tabular-nums">
-                {formatTimestamp(createdAt)}
-              </time>
-            )}
-            {isAssistant && (isStreaming || isError) && (
-              <span className="inline-flex items-center gap-1" role="status" aria-live="polite">
-                {isStreaming ? (
-                  <Spinner className="size-3" />
-                ) : (
-                  <CircleAlertIcon className="size-3 text-destructive" aria-hidden />
-                )}
-                {isStreaming ? t("status.streaming") : t("status.error")}
-              </span>
-            )}
-          </header>
-        )}
+      <ChatLinkOptionsProvider value={display.links}>
+        <section
+          data-testid="message-shell"
+          data-layout={display.layout}
+          data-preset={display.preset}
+          data-rich-controls={display.richControls}
+          data-body-font={display.bodyFont}
+          data-chat-text-size={display.reading.textSize}
+          data-chat-spacing={display.reading.spacing}
+          data-link-color={display.links.color}
+          data-link-underline={display.links.underline}
+          data-block-density={display.markdown.blockDensity}
+          data-code-max-height={display.markdown.codeMaxHeight}
+          data-block-border={display.markdown.blockBorder ? "on" : "off"}
+          data-block-header={display.markdown.blockHeader ? "on" : "off"}
+          className={cn(
+            "min-w-0",
+            (isAssistant || display.layout === "cards") && "w-full",
+            // Same module as the user bubble (ADR-0148). The two sides sit on
+            // different elements — the user's hugs its content, the assistant's
+            // is this shell — so the strings, not the DOM, are what is shared.
+            messageCardClass(display.layout),
+            isAssistant && assistantBubbleClass(display.layout)
+          )}
+        >
+          {(showIdentity ||
+            display.metadata.timestamp === "header" ||
+            headerItems.length > 0 ||
+            routingChip ||
+            statusDot) && (
+            <header
+              className={cn(
+                "mb-1.5 flex min-h-6 flex-wrap items-center gap-1.5 text-xs text-muted-foreground",
+                !isAssistant && "justify-end"
+              )}
+              data-testid="message-shell-header"
+            >
+              {statusDot ? (
+                <span data-testid="message-status-dot" className="inline-flex items-center">
+                  <ToolStatusDot status={statusDot} />
+                </span>
+              ) : null}
+              {showIdentity && (
+                <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                  {speakerAvatar ? (
+                    <AvatarBadge subject={speakerAvatar} size={14} textClassName="text-[8px]" />
+                  ) : route?.brandId ? (
+                    <BrandIcon id={route.brandId} label={identity} size={14} />
+                  ) : isAssistant ? (
+                    (agentIconNode(run?.agent?.icon, "size-3.5", speakerColor) ?? (
+                      <BotIcon
+                        className="size-3.5"
+                        style={speakerColor ? { color: speakerColor } : undefined}
+                      />
+                    ))
+                  ) : (
+                    <UserIcon className="size-3.5" />
+                  )}
+                  <span style={speakerColor ? { color: speakerColor } : undefined}>{identity}</span>
+                  {route ? (
+                    <span
+                      className="font-normal text-muted-foreground"
+                      data-testid="message-route-via"
+                      data-route-runtime={route.runtimeKind}
+                    >
+                      {t("routedVia", { handle: route.handle })}
+                    </span>
+                  ) : null}
+                </span>
+              )}
+              {onStopSpeaker ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={onStopSpeaker}
+                  aria-label={t("stopSpeaker", { name: identity })}
+                  title={t("stopSpeaker", { name: identity })}
+                  className="size-5 text-muted-foreground hover:text-destructive"
+                  data-testid="message-stop-speaker"
+                >
+                  <SquareIcon className="size-3 fill-current" />
+                </Button>
+              ) : null}
+              {headerItems.map((item) => (
+                <Badge
+                  key={item}
+                  variant="secondary"
+                  className="h-5 px-1.5 text-[10px] font-normal"
+                >
+                  {item}
+                </Badge>
+              ))}
+              {routingChip && run?.routing ? <RoutingIndicator routing={run.routing} /> : null}
+              {display.metadata.timestamp === "header" && createdAt !== undefined && (
+                <time dateTime={new Date(createdAt).toISOString()} className="tabular-nums">
+                  {formatTimestamp(createdAt)}
+                </time>
+              )}
+              {isAssistant && (isStreaming || isError) && (
+                <span className="inline-flex items-center gap-1" role="status" aria-live="polite">
+                  {isStreaming ? (
+                    <Spinner className="size-3" />
+                  ) : (
+                    <CircleAlertIcon className="size-3 text-destructive" aria-hidden />
+                  )}
+                  {isStreaming ? t("status.streaming") : t("status.error")}
+                </span>
+              )}
+            </header>
+          )}
 
-        <div data-testid="message-shell-body">{children}</div>
+          <div data-testid="message-shell-body">{children}</div>
 
-        {/* Router + Fusion run card (ADR-0188): only a turn that went through it
+          {/* Router + Fusion run card (ADR-0188): only a turn that went through it
             carries `run.routerFusion`, so every other message renders as before. */}
-        {isAssistant && run?.routerFusion ? (
-          <div className="mt-1.5 flex">
-            <RouterFusionRunCard routerFusion={run.routerFusion} />
-          </div>
-        ) : null}
-      </section>
+          {isAssistant && run?.routerFusion ? (
+            <div className="mt-1.5 flex">
+              <RouterFusionRunCard routerFusion={run.routerFusion} />
+            </div>
+          ) : null}
+        </section>
+      </ChatLinkOptionsProvider>
     </MessageMotionProvider>
   )
 }

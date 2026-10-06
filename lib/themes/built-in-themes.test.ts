@@ -43,7 +43,7 @@ describe("BUILT_IN_DESIGNED_THEMES", () => {
    * one of these surfaces. They resolve on read instead.
    */
   it.each(BUILT_IN_DESIGNED_THEMES.map((t) => [t.name, t] as const))(
-    "%s resolves to a complete 56-token palette",
+    "%s resolves to a complete 58-token palette",
     (_name, theme) => {
       for (const variant of ["light", "dark"] as const) {
         const resolved = normalizeThemeColors(theme.tokens![variant], variant)
@@ -109,6 +109,18 @@ describe("BUILT_IN_DESIGNED_THEMES", () => {
         for (const [fg, bg] of CHIP_PAIRS) {
           expect(wcagContrast(p[fg], p[bg])).toBeGreaterThanOrEqual(3.0)
         }
+      }
+    }
+  )
+
+  // ADR-0218 — a chat link is body text in a colour, so it owes body-text AA.
+  it.each(BUILT_IN_DESIGNED_THEMES.map((t) => [t.name, t] as const))(
+    "%s authors a link colour at AA normal (4.5:1) against its background",
+    (_name, theme) => {
+      for (const variant of ["light", "dark"] as const) {
+        const p = theme.tokens![variant]
+        expect(p.link).toBeDefined()
+        expect(wcagContrast(p.link!, p.background)).toBeGreaterThanOrEqual(4.5)
       }
     }
   )

@@ -37,8 +37,9 @@ describe("DiffBlock", () => {
   it("renders add/remove counts from the parsed diff", () => {
     render(<DiffBlock content={SAMPLE} />)
     // one addition + one deletion
-    expect(screen.getByText("1", { selector: ".text-green-600" })).toBeInTheDocument()
-    expect(screen.getByText("1", { selector: ".text-red-600" })).toBeInTheDocument()
+    // Status tokens, not raw Tailwind hues (ADR-0218).
+    expect(screen.getByText("1", { selector: ".text-success" })).toBeInTheDocument()
+    expect(screen.getByText("1", { selector: ".text-destructive" })).toBeInTheDocument()
   })
 
   it("highlights the intraline changed run on a remove→add pair (unified view)", () => {
@@ -63,5 +64,15 @@ describe("DiffBlock", () => {
   it("does not emphasize a context-only diff", () => {
     render(<DiffBlock content={[" just context", " more context"].join("\n")} />)
     expect(screen.queryAllByTestId("diff-intraline")).toHaveLength(0)
+  })
+
+  it("draws in the shared frame whose toolbar follows the rich-controls setting", () => {
+    const { container } = render(<DiffBlock content={SAMPLE} />)
+    const frame = container.querySelector('[data-rich-block="diff"]')!
+    expect(frame).toBeInTheDocument()
+    const toolbar = frame.querySelector("[data-message-rich-control]")!
+    expect(toolbar).toContainElement(screen.getByRole("button", { name: "copy" }))
+    fireEvent.click(screen.getByRole("button", { name: "splitView" }))
+    expect(container.querySelector(".bg-success\\/10, .bg-destructive\\/10")).toBeTruthy()
   })
 })

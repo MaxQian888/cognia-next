@@ -2,10 +2,16 @@
 
 import { useMemo, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircle, Maximize2, Code2, RefreshCw } from "lucide-react"
+import { Code2, Maximize2, Sigma } from "lucide-react"
 import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { cn } from "@/lib/utils"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { RichBlockAction } from "@/components/chat/renderers/rich-block/rich-block-action"
+import { RichBlockError } from "@/components/chat/renderers/rich-block/rich-block-error"
+import { RichBlockFrame } from "@/components/chat/renderers/rich-block/rich-block-frame"
+import {
+  RICH_BLOCK_FULLSCREEN_ACTION_CLASS,
+  RichBlockFullscreen,
+} from "@/components/chat/renderers/rich-block/rich-block-fullscreen"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { renderMathSafe } from "@cognia/latex"
 import { withMathErrorBoundary } from "./math-error-boundary"
@@ -42,158 +48,106 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
     await copy(cleanContent)
   }, [copy, cleanContent])
 
-  const handleRetry = useCallback(() => {
-    setShowSource(false)
-  }, [])
-
   if (result.error) {
+    // KaTeX is deterministic, so a retry could only fail again: the error
+    // offers the source and a copy action instead.
     return (
-      <div
-        className={cn(
-          "flex flex-col gap-2 p-4 rounded-lg bg-destructive/10 border border-destructive/20",
-          className
-        )}
-        role="alert"
-        aria-label={t("error")}
+      <RichBlockError
+        className={className}
+        title={t("error")}
+        detail={result.error}
+        action={
+          <RichBlockAction label={t("copyLatex")} onClick={handleCopy}>
+            <CopyFeedbackIcon copied={copied} size={12} />
+          </RichBlockAction>
+        }
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-destructive">
-            <AlertCircle className="h-4 w-4" aria-hidden="true" />
-            <span className="text-sm font-medium">{t("error")}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleRetry}
-              aria-label={t("retry")}
-              tooltip={t("retry")}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </TooltipIconButton>
-            <TooltipIconButton
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleCopy}
-              aria-label={t("copyLatex")}
-              tooltip={t("copyLatex")}
-            >
-              <CopyFeedbackIcon copied={copied} size={14} />
-            </TooltipIconButton>
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground">{result.error}</p>
-        <pre className="mt-2 p-2 rounded bg-muted text-xs overflow-auto">
+        <pre className="overflow-auto rounded-md bg-muted/60 p-2 font-mono text-xs">
           <code>{cleanContent}</code>
         </pre>
-      </div>
+      </RichBlockError>
     )
   }
 
   const scaleStyle = scale !== 1 ? { fontSize: `${scale}em` } : undefined
 
+  // Display math reads as prose, so the frame stays invisible until hovered
+  // (ADR-0218): no border, no fill, the toolbar floating over the formula.
   return (
     <>
-      <div
-        className={cn("group relative my-4 rounded-lg", className)}
+      <RichBlockFrame
+        kind="math"
+        header="overlay"
+        className={cn(
+          "border-transparent bg-transparent transition-colors hover:border-border/60",
+          className
+        )}
         role="math"
         aria-label={t("expressionLabel")}
+        actions={
+          <>
+            <RichBlockAction
+              label={showSource ? t("hideSource") : t("showSource")}
+              aria-pressed={showSource}
+              onClick={() => setShowSource(!showSource)}
+            >
+              <Code2 />
+            </RichBlockAction>
+            <RichBlockAction label={t("copyLatex")} onClick={handleCopy}>
+              <CopyFeedbackIcon copied={copied} size={12} />
+            </RichBlockAction>
+            <RichBlockAction label={t("viewFullscreen")} onClick={() => setIsFullscreen(true)}>
+              <Maximize2 />
+            </RichBlockAction>
+          </>
+        }
       >
-        <div
-          data-message-rich-control
-          className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5"
-        >
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => setShowSource(!showSource)}
-            aria-label={showSource ? t("hideSource") : t("showSource")}
-            aria-pressed={showSource}
-            tooltip={showSource ? t("hideSource") : t("showSource")}
-          >
-            <Code2 className="h-3.5 w-3.5" />
-          </TooltipIconButton>
-
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={handleCopy}
-            aria-label={t("copyLatex")}
-            tooltip={t("copyLatex")}
-          >
-            <CopyFeedbackIcon copied={copied} size={14} />
-          </TooltipIconButton>
-
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => setIsFullscreen(true)}
-            aria-label={t("viewFullscreen")}
-            tooltip={t("viewFullscreen")}
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </TooltipIconButton>
-        </div>
-
         {showSource && (
-          <pre className="mb-2 p-3 rounded-lg bg-muted/50 border text-xs overflow-auto font-mono">
+          <pre className="border-b bg-muted/40 px-3 py-2 font-mono text-xs overflow-auto">
             <code>{cleanContent}</code>
           </pre>
         )}
-
         <div
           className={cn(
-            "overflow-x-auto py-2 katex-block",
+            "overflow-x-auto px-3 py-2 katex-block",
             alignment === "left" ? "text-left" : "text-center"
           )}
           style={scaleStyle}
           dangerouslySetInnerHTML={{ __html: result.html }}
         />
-      </div>
+      </RichBlockFrame>
 
-      <Dialog open={isFullscreen} onOpenChange={setIsFullscreen}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span>{t("expressionLabel")}</span>
-              <div className="flex items-center gap-1 ml-auto">
-                <TooltipIconButton
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleCopy}
-                  aria-label={t("copyLatex")}
-                  tooltip={t("copyLatex")}
-                >
-                  <CopyFeedbackIcon copied={copied} size={14} />
-                </TooltipIconButton>
-              </div>
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
+      <RichBlockFullscreen
+        open={isFullscreen}
+        onOpenChange={setIsFullscreen}
+        testId="math-fullscreen"
+        icon={<Sigma />}
+        title={t("expressionLabel")}
+        actions={
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className={RICH_BLOCK_FULLSCREEN_ACTION_CLASS}
+            onClick={handleCopy}
+            aria-label={t("copyLatex")}
+            tooltip={t("copyLatex")}
+          >
+            <CopyFeedbackIcon copied={copied} size={16} />
+          </TooltipIconButton>
+        }
+      >
+        {isFullscreen ? (
+          <div className="space-y-4 p-6">
             <div
               className="flex items-center justify-center p-8 text-2xl katex-block"
               dangerouslySetInnerHTML={{ __html: result.html }}
             />
-
-            <details className="group">
-              <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2">
-                <Code2 className="h-4 w-4" />
-                <span>{t("viewSource")}</span>
-              </summary>
-              <pre className="mt-2 p-4 rounded-lg bg-muted text-sm overflow-auto font-mono">
-                <code>{cleanContent}</code>
-              </pre>
-            </details>
+            <pre className="overflow-auto rounded-lg bg-muted p-4 font-mono text-sm">
+              <code>{cleanContent}</code>
+            </pre>
           </div>
-        </DialogContent>
-      </Dialog>
+        ) : null}
+      </RichBlockFullscreen>
     </>
   )
 }

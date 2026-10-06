@@ -58,7 +58,7 @@ describe("auditThemeContrast", () => {
   it("returns no failures for a well-formed light palette", () => {
     const audit = auditThemeContrast(buildTokens())
     expect(audit.failureCount).toBe(0)
-    expect(audit.totalPairs).toBe(11)
+    expect(audit.totalPairs).toBe(12)
   })
 
   it("flags low-contrast foreground/background pair", () => {

@@ -133,6 +133,7 @@ import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
 import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
 import { buildAgentA2UICatalogSection } from "@/lib/a2ui/agent-catalog-prompt"
 import { buildVisualOutputSection } from "@/lib/ai/prompts/visual-output-prompts"
+import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
 import { finalizeToolSurface } from "@/lib/claude/tool-surface-finalizer"
 import {
   createProviderSettingsSnapshot,
@@ -5231,9 +5232,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // to be recomputed under a second name, so a change to what counts as a
   // fenced route had to be made twice, and doing it once would have
   // desynchronised the Skill-delivery capability check from this prompt.
+  // ADR-0218 — a fenced `chart` block draws inline wherever Cognia's own
+  // markdown renders the reply (the artifact channel's condition: no IM
+  // binding, not the CLI) and the user left inline charts on. It is not an
+  // artifact, so turning artifact authoring off does not withdraw it.
+  const inlineCharts =
+    artifactsChannelAvailable &&
+    resolveMessageDisplayOptions(appSettings?.messageDisplay).markdown.charts
   const visualOutputSection = buildVisualOutputSection({
     artifacts: artifactToolAvailable ? "tools" : artifactFencedAvailable ? "fenced" : "disabled",
     a2ui: a2uiEnabled,
+    inlineCharts,
   })
   if (visualOutputSection) {
     // Resolved only after the final tool clamp, so it arrives after the

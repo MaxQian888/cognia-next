@@ -39,9 +39,11 @@ export const TaskListItem = memo(function TaskListItem({
   return (
     <li className={cn("flex items-start gap-2 list-none", className)}>
       {checked ? (
-        <SquareCheck className="h-4 w-4 mt-0.5 shrink-0 text-green-500" />
+        // `em` sizing tracks the chat text size; `text-success` follows the
+        // theme instead of a fixed green (ADR-0218).
+        <SquareCheck className="mt-[0.2em] size-[1.1em] shrink-0 text-success" />
       ) : (
-        <Square className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground/50" />
+        <Square className="mt-[0.2em] size-[1.1em] shrink-0 text-muted-foreground/50" />
       )}
       <span
         className={cn(

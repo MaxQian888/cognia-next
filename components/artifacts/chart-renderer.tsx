@@ -1,7 +1,9 @@
 "use client"
 
 /**
- * ChartRenderer - Recharts-based chart rendering for artifact preview.
+ * ChartRenderer - chart artifact preview: the contract notices around the
+ * shared themed `ChartPlot` (ADR-0218), which the chat's inline chart block
+ * draws with too.
  * Lazy-loaded by artifact-renderers to keep recharts (~200KB) out of the
  * initial bundle.
  */
@@ -11,33 +13,11 @@ import { useTranslations } from "next-intl"
 import { AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { CHART_COLORS, parseChartPayload } from "@/lib/artifacts"
+import { parseChartPayload } from "@/lib/artifacts"
+import { useChatDiagramPalette } from "@/lib/chat/diagram-palette"
+import { ChartPlot } from "./chart-plot"
 import { loggers } from "@cognia/logging"
 import type { ArtifactChartType, ChartDataPoint } from "@/types"
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  AreaChart,
-  Area,
-  ScatterChart,
-  Scatter,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  Cell,
-} from "recharts"
 
 export type { ChartDataPoint } from "@/types"
 
@@ -50,6 +30,9 @@ interface ChartRendererProps {
 
 export function ChartRenderer({ content, chartType, chartData, className }: ChartRendererProps) {
   const t = useTranslations("artifactPreview")
+  // ADR-0218: the shared themed plot, in the app palette (it used to draw in
+  // recharts' demo colours whatever the theme).
+  const palette = useChatDiagramPalette()
 
   // One place decides what a payload means: `lib/artifacts/chart-contract.ts`.
   // The module returns codes, this component translates them, so the rules
@@ -117,139 +100,17 @@ export function ChartRenderer({ content, chartType, chartData, className }: Char
     )
   }
 
-  const { data, chartType: detectedType, series: numericKeys, valueKey } = contract
-
-  const renderChart = () => {
-    switch (detectedType) {
-      case "bar":
-        return (
-          <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            {numericKeys.map((key, index) => (
-              <Bar key={key} dataKey={key} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-            ))}
-          </BarChart>
-        )
-
-      case "pie":
-      case "doughnut":
-        return (
-          <PieChart>
-            <Pie
-              data={data}
-              dataKey={valueKey ?? "value"}
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius={detectedType === "doughnut" ? 45 : 0}
-              outerRadius={80}
-              label
-            >
-              {data.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip />
-            <Legend />
-          </PieChart>
-        )
-
-      case "area":
-        return (
-          <AreaChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            {numericKeys.map((key, index) => (
-              <Area
-                key={key}
-                type="monotone"
-                dataKey={key}
-                fill={CHART_COLORS[index % CHART_COLORS.length]}
-                stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                fillOpacity={0.3}
-              />
-            ))}
-          </AreaChart>
-        )
-
-      case "scatter":
-        return (
-          <ScatterChart>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="x" type="number" name="X" />
-            <YAxis dataKey="y" type="number" name="Y" />
-            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-            <Legend />
-            <Scatter name={t("chartSeriesFallbackName")} data={data} fill={CHART_COLORS[0]} />
-          </ScatterChart>
-        )
-
-      case "radar":
-        return (
-          <RadarChart cx="50%" cy="50%" outerRadius="80%" data={data}>
-            <PolarGrid />
-            <PolarAngleAxis dataKey="name" />
-            <PolarRadiusAxis />
-            <Tooltip />
-            <Legend />
-            {numericKeys.map((key, index) => (
-              <Radar
-                key={key}
-                name={key}
-                dataKey={key}
-                stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                fill={CHART_COLORS[index % CHART_COLORS.length]}
-                fillOpacity={0.3}
-              />
-            ))}
-          </RadarChart>
-        )
-
-      case "line":
-      default:
-        return (
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            {numericKeys.map((key, index) => (
-              <Line
-                key={key}
-                type="monotone"
-                dataKey={key}
-                stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                strokeWidth={2}
-              />
-            ))}
-          </LineChart>
-        )
-    }
-  }
-
   // The notice takes rows off the top and the chart gives them up, rather than
   // overlaying it. Same shape `artifact-preview.tsx` uses for its own bars.
   return (
     <div className={cn("flex h-[300px] w-full flex-col", className)}>
       {notice}
       <div className="min-h-0 flex-1 p-4">
-        <ResponsiveContainer
-          width="100%"
-          height="100%"
-          minWidth={1}
-          minHeight={1}
-          initialDimension={{ width: 320, height: 300 }}
-        >
-          {renderChart()}
-        </ResponsiveContainer>
+        <ChartPlot
+          contract={contract}
+          palette={palette}
+          scatterSeriesName={t("chartSeriesFallbackName")}
+        />
       </div>
     </div>
   )

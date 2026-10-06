@@ -88,6 +88,17 @@ function redactDerivedText(text: string): string | null {
   return hasNoLeakingPii(redacted) ? redacted : null
 }
 
+/**
+ * Whether `url` may be dereferenced from the user's machine: its path and query,
+ * raw and percent-decoded, must carry no credentials or PII. Shared by the
+ * send-time link context and the hover link preview (ADR-0218), so a URL that
+ * one refuses to fetch the other refuses too.
+ */
+export function isUrlSafeToDereference(url: string): boolean {
+  const decodedUrl = decodeUrlForPiiScan(url)
+  return Boolean(decodedUrl) && hasNoLeakingPii(url) && hasNoLeakingPii(decodedUrl as string)
+}
+
 function decodeUrlForPiiScan(url: string): string | null {
   let decoded = url
   for (let pass = 0; pass < 3; pass++) {
@@ -134,10 +145,7 @@ export async function buildLinkContextBlocks(
       try {
         // Do not dereference URLs whose path/query itself contains credentials
         // or PII. The explicitly typed URL remains in the user's prompt.
-        const decodedUrl = decodeUrlForPiiScan(url)
-        if (!decodedUrl || !hasNoLeakingPii(url) || !hasNoLeakingPii(decodedUrl)) {
-          return { url, block: null }
-        }
+        if (!isUrlSafeToDereference(url)) return { url, block: null }
         const page = await readUrl(url)
         if (!page?.markdown.trim()) return { url, block: null }
         const safeText = redactDerivedText(formatLinkedPage(url, page))

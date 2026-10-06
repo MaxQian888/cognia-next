@@ -1,4 +1,4 @@
-import { act, fireEvent, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CODE_AUTO_RENDER_MAX_LINES, CodeBlock } from "./code-block"
 import { highlightCached, clearHighlightCache } from "@/lib/shiki/highlight-cache"
@@ -327,6 +327,45 @@ describe("CodeBlock", () => {
     })
   })
 
+  describe("ADR-0218 frame options", () => {
+    it("highlights with the theme pair it is given", async () => {
+      clearHighlightCache()
+      const github = { light: "github-light-default", dark: "github-dark-default" }
+      ;(highlightCached as jest.Mock).mockClear()
+      renderInProvider(<CodeBlock code="const themed = 1" language="ts" theme={github} />)
+      await waitFor(() =>
+        expect(highlightCached).toHaveBeenCalledWith("const themed = 1", "ts", github)
+      )
+    })
+
+    it("caps the body height only when asked", () => {
+      const { container, rerender } = renderInProvider(
+        <CodeBlock code={"a\nb"} language="ts" isStreaming capHeight />
+      )
+      const body = () => container.querySelector("[data-rich-block-body]")!
+      expect(body().className).toContain("max-h-(--rich-code-max-h)")
+      rerender(
+        <TooltipProvider>
+          <CodeBlock code={"a\nb"} language="ts" isStreaming />
+        </TooltipProvider>
+      )
+      expect(body().className).not.toContain("max-h-(--rich-code-max-h)")
+    })
+
+    it("puts extra actions in the header toolbar", () => {
+      renderInProvider(
+        <CodeBlock
+          code={"a\nb"}
+          language="ts"
+          isStreaming
+          extraActions={<button type="button">extra</button>}
+        />
+      )
+      const toolbar = screen.getByRole("button", { name: "extra" }).parentElement!
+      expect(toolbar).toHaveAttribute("data-message-rich-control")
+    })
+  })
+
   describe("compact density", () => {
     it("packs tighter chrome than the standalone prose variant", () => {
       const { container } = renderInProvider(
@@ -336,20 +375,26 @@ describe("CodeBlock", () => {
       expect(figure.className).toContain("my-1")
       expect(figure.className).toContain("rounded-md")
       expect(figure.className).not.toContain("my-3")
-      // Slim header + tight code padding; controls shrink too.
-      const header = figure.firstElementChild!
-      expect(header.className).toContain("py-1")
-      expect(header.querySelector("button")?.className).toContain("size-5")
-      // `size-*` classes exempt the svgs from Button's 16px default — h-/w-
-      // would be silently overridden and render bigger than the animated icons.
-      expect(header.querySelector("svg")?.getAttribute("class")).toContain("size-2.5")
+      // Slim header + tight code padding; controls shrink too (the shared
+      // RichBlockFrame / RichBlockAction compact metrics, ADR-0218).
+      const header = figure.querySelector("[data-rich-block-header]")!
+      expect(header.className).toContain("h-7")
+      const button = header.querySelector("button")!
+      expect(button.className).toContain("size-5")
+      // The glyph size is set from the button (`[&_svg]:size-*`), which also
+      // outranks Button's own 16px svg default.
+      expect(button.className).toContain("[&_svg]:size-3")
       expect(container.querySelector("pre")?.className).toContain("p-2.5")
       expect(container.querySelector("pre")?.className).toContain("text-xs")
     })
 
     it("keeps the loose prose chrome by default", () => {
       const { container } = renderInProvider(<CodeBlock code={"a\nb"} language="ts" isStreaming />)
-      expect(container.querySelector('[role="figure"]')?.className).toContain("my-3")
+      const figure = container.querySelector('[role="figure"]')!
+      // Prose blocks take their gap from the block-density setting.
+      expect(figure.className).toContain("my-(--rich-block-gap)")
+      expect(figure).toHaveAttribute("data-rich-block", "code")
+      expect(figure.querySelector("[data-rich-block-header]")?.className).toContain("h-8")
       expect(container.querySelector("pre")?.className).toContain("p-4")
     })
   })

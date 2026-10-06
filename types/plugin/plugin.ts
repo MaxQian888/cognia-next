@@ -4365,6 +4365,10 @@ export interface ThemeColors {
   info?: string
   infoForeground?: string
 
+  /** ADR-0218 — link colour and `<mark>` highlight in rendered markdown. */
+  link?: string
+  mark?: string
+
   /** Categorical chart series. Writes `--chart-1` … `--chart-5`. */
   chart1?: string
   chart2?: string
@@ -4400,7 +4404,7 @@ export interface ThemeColors {
 }
 
 /**
- * A palette with every one of the 56 tokens resolved to a concrete value.
+ * A palette with every one of the 58 tokens resolved to a concrete value.
  *
  * `ThemeColors` is the *authoring* shape — advanced tokens are optional so a
  * theme only records what it deliberately set. This is the *runtime* shape,

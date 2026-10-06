@@ -33,30 +33,33 @@ const alertConfig: Record<
     iconClassName: string
   }
 > = {
+  // Semantic tokens (ADR-0218), so alerts follow dark mode and custom themes
+  // instead of fixed Tailwind hues. `important` takes the theme primary: a
+  // neutral theme draws it as plain emphasis, a coloured theme in its accent.
   note: {
     icon: Info,
-    className: "border-blue-500/50 bg-blue-500/10",
-    iconClassName: "text-blue-500",
+    className: "border-info/60 bg-info/8",
+    iconClassName: "text-info",
   },
   tip: {
     icon: Lightbulb,
-    className: "border-green-500/50 bg-green-500/10",
-    iconClassName: "text-green-500",
+    className: "border-success/60 bg-success/8",
+    iconClassName: "text-success",
   },
   important: {
     icon: AlertCircle,
-    className: "border-purple-500/50 bg-purple-500/10",
-    iconClassName: "text-purple-500",
+    className: "border-primary/50 bg-primary/5",
+    iconClassName: "text-primary",
   },
   warning: {
     icon: AlertTriangle,
-    className: "border-yellow-500/50 bg-yellow-500/10",
-    iconClassName: "text-yellow-500",
+    className: "border-warning/70 bg-warning/10",
+    iconClassName: "text-warning",
   },
   caution: {
     icon: Flame,
-    className: "border-red-500/50 bg-red-500/10",
-    iconClassName: "text-red-500",
+    className: "border-destructive/60 bg-destructive/8",
+    iconClassName: "text-destructive",
   },
 }
 
@@ -77,18 +80,20 @@ export const AlertBlock = memo(function AlertBlock({
   const content = (
     <div
       className={cn(
-        "rounded-lg border-l-4 p-4 my-4 transition-all duration-200",
+        // Compact, and on the shared block rhythm (ADR-0218). Sizes are `em`,
+        // so the alert follows the chat text-size setting.
+        "my-(--rich-block-gap) rounded-md border-l-[3px] px-3 py-2.5 transition-all duration-200",
         config.className,
         collapsible &&
           "cursor-pointer hover:brightness-95 dark:hover:brightness-110 hover:shadow-sm",
         className
       )}
     >
-      <div className="flex items-start gap-3">
-        <Icon className={cn("h-5 w-5 mt-0.5 shrink-0", config.iconClassName)} />
+      <div className="flex items-start gap-2.5">
+        <Icon className={cn("mt-[0.2em] size-[1.1em] shrink-0", config.iconClassName)} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className={cn("font-semibold text-sm", config.iconClassName)}>
+            <span className={cn("text-[0.9em] font-semibold", config.iconClassName)}>
               {displayTitle}
             </span>
             {collapsible && (
@@ -102,11 +107,11 @@ export const AlertBlock = memo(function AlertBlock({
             )}
           </div>
           {collapsible ? (
-            <CollapsibleContent className="mt-2 text-sm transition-all duration-300 ease-out">
+            <CollapsibleContent className="mt-1 transition-all duration-300 ease-out [&>:first-child]:mt-0">
               {children}
             </CollapsibleContent>
           ) : (
-            <div className="mt-2 text-sm">{children}</div>
+            <div className="mt-1 [&>:first-child]:mt-0">{children}</div>
           )}
         </div>
       </div>

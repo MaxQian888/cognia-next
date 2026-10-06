@@ -37,6 +37,7 @@ import type {
   MessageRichControls,
 } from "@/types/appearance"
 import { selectStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
+import { withStreamingFenceRenderers } from "@/components/chat/markdown/streaming-fence-renderers"
 import {
   createIncrementalMarkdownBlockParser,
   type MarkdownBlockParser,
@@ -288,7 +289,12 @@ function StreamingTextPartInner({
   // variants are prebuilt (stable identity); `lineNumbers` is a Streamdown
   // prop; soft-wrap has no Streamdown prop, so it is applied to the fenced
   // `<pre>` through the wrapper class the code plugin renders into.
-  const plugins = selectStreamdownPlugins(markdown)
+  // ADR-0218: fences the finalised branch draws with its own blocks (mermaid,
+  // inline charts) render through the same components while streaming.
+  const plugins = withStreamingFenceRenderers(selectStreamdownPlugins(markdown), {
+    mermaid: markdown?.mermaid ?? true,
+    charts: markdown?.charts ?? true,
+  })
   const lineNumbers = markdown?.codeLineNumbers ?? true
   const codeWrap = markdown?.codeWrap ?? false
   // ADR-0127 requires BOTH branches to honour the same resolved knobs. The
@@ -341,6 +347,8 @@ function StreamingTextPartInner({
       data-rich-controls={richControls}
       isAnimating={isStreaming}
       lineNumbers={lineNumbers}
+      // ADR-0218: the same `codeMaxHeight` cap the finalised block reads.
+      codeBlockMaxHeight="var(--rich-code-max-h)"
       mode="streaming"
       parseMarkdownIntoBlocksFn={parser}
       plugins={plugins}

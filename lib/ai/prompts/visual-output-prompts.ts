@@ -40,7 +40,23 @@ export interface VisualOutputChannels {
   artifacts: "tools" | "fenced" | "disabled"
   /** A2UI surfaces are enabled for this send. */
   a2ui: boolean
+  /**
+   * ADR-0218 — the reply is drawn by Cognia's own markdown renderer (no IM
+   * binding, not the CLI) and `messageDisplay.markdown.charts` is on, so a
+   * fenced `chart` block draws inline. Absent means false.
+   */
+  inlineCharts?: boolean
 }
+
+/**
+ * The inline chart line. The payload is `chart-design`'s contract verbatim;
+ * the renderer that draws it (`components/chat/renderers/chart-block.tsx`)
+ * and the dock artifact read it through the same `parseChartPayload`.
+ */
+const INLINE_CHART_LINES = [
+  "- **A quick quantitative aside** the reader only needs to see: a fenced `chart` block",
+  '  holding the chart JSON (`{"type":"bar","data":[…]}`). It draws inline, themed.',
+]
 
 /**
  * Build the routing section, or `null` when there is nothing to route — which
@@ -75,6 +91,7 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
       "- Never hand-draw a chart as SVG while the dock is available. A drawing is a",
       "  picture of a chart; the artifact is the chart."
     )
+    if (channels.inlineCharts) lines.push(...INLINE_CHART_LINES)
   } else if (channels.artifacts === "fenced") {
     lines.push(
       "- **Quantitative**: emit one supported fenced chart payload for Cognia's",
@@ -84,6 +101,14 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
       "  unavailable artifact tools, and never expose raw JSON or HTML outside the",
       "  fenced payload.",
       "- **Editable documents**: answer inline; direct canvas authoring is unavailable."
+    )
+    if (channels.inlineCharts) lines.push(...INLINE_CHART_LINES)
+  } else if (channels.inlineCharts) {
+    // A Cognia chat surface whose user turned artifact authoring off: no dock,
+    // but the transcript still draws an inline chart, which is not an artifact.
+    lines.push(
+      ...INLINE_CHART_LINES,
+      "- **Editable documents**: answer inline; do not emit a canvas payload."
     )
   } else {
     // An A2UI Chart is offered only when A2UI is on for this send: a bot that

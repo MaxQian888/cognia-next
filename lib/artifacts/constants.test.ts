@@ -13,7 +13,6 @@ import {
   DETECTION_PATTERNS,
   MERMAID_TYPE_NAMES,
   LANGUAGE_DISPLAY_NAMES,
-  CHART_COLORS,
   getArtifactExtension,
   mapToArtifactLanguage,
   getShikiLanguage,
@@ -37,9 +36,8 @@ describe("artifact type tables", () => {
     }
   })
 
-  it("MERMAID_TYPE_NAMES + CHART_COLORS are non-empty", () => {
+  it("MERMAID_TYPE_NAMES is non-empty", () => {
     expect(Object.keys(MERMAID_TYPE_NAMES).length).toBeGreaterThan(0)
-    expect(CHART_COLORS.length).toBeGreaterThan(0)
   })
 
   it("keeps doughnut in the shared chart detector union", () => {

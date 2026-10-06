@@ -375,6 +375,12 @@ const mockMarkdown = {
   mathFontScale: 1 as number,
   mathAlign: "center" as "center" | "left",
   mathCopy: true,
+  charts: true,
+  blockDensity: "compact" as "compact" | "comfortable",
+  blockBorder: true,
+  blockHeader: true,
+  codeMaxHeight: "tall" as "none" | "short" | "medium" | "tall",
+  codeTheme: "one" as const,
 }
 jest.mock("@/hooks/chat/use-agent-flow-mode", () => ({
   useAgentFlowMode: () => ({ mode: mockFlowMode, setMode: jest.fn() }),
@@ -402,6 +408,8 @@ jest.mock("@/hooks/chat/use-message-display", () => ({
     motion: "off",
     markdown: mockMarkdown,
     bodyFont: "sans",
+    reading: { textSize: "md", spacing: "comfortable" },
+    links: { color: "link", underline: "subtle", siteIcon: true, preview: "hover" },
   }),
 }))
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
