@@ -1,3 +1,7 @@
+import {
+  getVectorRuntimeAdapters,
+  resetVectorRuntimeAdaptersForTesting,
+} from "@cognia/vector/runtime-adapters"
 import { bootstrapHeadlessRuntimes } from "./bootstrap"
 import { __resetHeadlessRuntimesForTesting, registerHeadlessRuntime } from "./registry"
 import type { HeadlessRuntimeContext } from "./types"
@@ -19,6 +23,20 @@ function ctx(): HeadlessRuntimeContext {
 
 describe("bootstrapHeadlessRuntimes", () => {
   beforeEach(() => __resetHeadlessRuntimesForTesting())
+
+  it("installs vector adapters before the first runtime starts", async () => {
+    resetVectorRuntimeAdaptersForTesting()
+    registerHeadlessRuntime({
+      name: "vector-consumer",
+      hosts: ["brain"],
+      start: () => {
+        expect(getVectorRuntimeAdapters().isTauri()).toBe(false)
+      },
+    })
+    const result = await bootstrapHeadlessRuntimes(ctx())
+    expect(result.failed).toEqual([])
+    expect(result.started).toEqual(["vector-consumer"])
+  })
 
   it("starts registered runtimes and tears down in reverse order", async () => {
     const order: string[] = []

@@ -1,15 +1,15 @@
-import { isTauri } from "@/lib/utils"
-import { updateStorageBackendReadiness } from "@/lib/storage/persistence/backend-readiness"
+import { isTauri } from "./runtime-adapters"
+import { updateStorageBackendReadiness } from "./backend-readiness"
 import {
   createStorageBackendDiagnostic,
   type StorageBackendVerificationOptions,
   type StorageBackendVerifier,
-} from "@/lib/storage/persistence/backend-verifier"
+} from "./backend-readiness"
 import type {
   StorageBackendId,
   StorageBackendReadinessRecord,
   StorageBackendReadinessState,
-} from "@/lib/storage/persistence/types"
+} from "./backend-readiness"
 import { createVectorStore, type VectorStoreConfig, type VectorStoreProvider } from "./store"
 
 const VECTOR_BACKEND_ID: Record<VectorStoreProvider, StorageBackendId> = {

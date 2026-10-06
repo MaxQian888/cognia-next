@@ -1,7 +1,8 @@
+import { setVectorRuntimeAdapters } from "./runtime-adapters"
 import {
   getStorageBackendReadiness,
   resetStorageBackendReadinessRegistryForTest,
-} from "@/lib/storage/persistence/backend-readiness"
+} from "./backend-readiness"
 import { verifyVectorBackendReadiness } from "./readiness"
 
 const mockListCollections = jest.fn()
@@ -17,18 +18,17 @@ jest.mock("./store", () => ({
   })),
 }))
 
-// isTauri is re-exported from @/lib/tauri through @/lib/utils.
-// We mock @/lib/utils so readiness.ts (which imports from there) can be
-// controlled per-test.
 const mockIsTauri = jest.fn<boolean, []>(() => false)
-jest.mock("@/lib/utils", () => ({
-  ...jest.requireActual("@/lib/utils"),
-  isTauri: () => mockIsTauri(),
-}))
 
 describe("verifyVectorBackendReadiness", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    setVectorRuntimeAdapters({
+      isTauri: mockIsTauri,
+      createBedrockEmbeddingModel: jest.fn(),
+      dispatchDocumentsIndexed: jest.fn(),
+      dispatchVectorSearch: jest.fn(),
+    })
     resetStorageBackendReadinessRegistryForTest()
     // Default: non-Tauri environment
     mockIsTauri.mockReturnValue(false)

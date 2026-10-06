@@ -1,4 +1,19 @@
 /** @jest-environment jsdom */
+import { setVectorRuntimeAdapters } from "./runtime-adapters"
+
+const indexedSpy = jest.fn()
+const searchSpy = jest.fn()
+beforeEach(() => {
+  indexedSpy.mockReset()
+  searchSpy.mockReset()
+  setVectorRuntimeAdapters({
+    isTauri: () => "__TAURI_INTERNALS__" in window,
+    createBedrockEmbeddingModel: jest.fn(),
+    dispatchDocumentsIndexed: indexedSpy,
+    dispatchVectorSearch: searchSpy,
+  })
+})
+
 import {
   ChromaVectorStore,
   MilvusVectorStore,
@@ -168,18 +183,27 @@ describe("createVectorStore factory", () => {
 })
 
 describe("createVectorStore plugin-event proxy", () => {
+  it("does not dispatch success hooks after an underlying write fails", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("write failed"))
+    const store = createVectorStore(mockConfig)
+    await expect(
+      store.addDocuments("failed", [{ id: "a", content: "hello", embedding: [1] }])
+    ).rejects.toThrow("write failed")
+    expect(indexedSpy).not.toHaveBeenCalled()
+  })
+
+  it("propagates hook failures after the underlying write completes", async () => {
+    mockInvoke.mockResolvedValueOnce(true)
+    indexedSpy.mockRejectedValueOnce(new Error("hook failed"))
+    const store = createVectorStore(mockConfig)
+    await expect(
+      store.addDocuments("failed-hook", [{ id: "a", content: "hello", embedding: [1] }])
+    ).rejects.toThrow("hook failed")
+    expect(mockInvoke).toHaveBeenCalled()
+  })
+
   it("dispatches onDocumentsIndexed after addDocuments resolves", async () => {
     mockInvoke.mockResolvedValue(true)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
-      getPluginEventHooks: () => {
-        dispatchDocumentsIndexed: (collection: string, count: number) => void
-        dispatchVectorSearch: (collection: string, query: string, count: number) => void
-      }
-    }
-    const indexedSpy = jest
-      .spyOn(getPluginEventHooks(), "dispatchDocumentsIndexed")
-      .mockImplementation(() => {})
 
     const store = createVectorStore(mockConfig)
     const docs: VectorDocument[] = [
@@ -192,16 +216,6 @@ describe("createVectorStore plugin-event proxy", () => {
 
   it("dispatches onVectorSearch after searchDocuments resolves", async () => {
     mockInvoke.mockResolvedValue({ results: [], total: 0 })
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
-      getPluginEventHooks: () => {
-        dispatchDocumentsIndexed: (collection: string, count: number) => void
-        dispatchVectorSearch: (collection: string, query: string, count: number) => void
-      }
-    }
-    const searchSpy = jest
-      .spyOn(getPluginEventHooks(), "dispatchVectorSearch")
-      .mockImplementation(() => {})
 
     const store = createVectorStore(mockConfig)
     const results = await store.searchDocuments("plugins-test", "hello")

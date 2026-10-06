@@ -8,9 +8,7 @@
     // tsconfig); scope the overrides to this package's build.
     "incremental": false,
     "ignoreDeprecations": "6.0",
-    "paths": {
-      "@/*": ["../../*"]
-    }
+    "paths": {}
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist"]

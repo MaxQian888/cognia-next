@@ -14,16 +14,28 @@ import {
   getNativeVectorStoreSize,
   getSupportedVectorStoreProviders,
 } from "./index"
-import { isTauri } from "@/lib/platform/detect"
+import { setVectorRuntimeAdapters, resetVectorRuntimeAdaptersForTesting } from "./runtime-adapters"
 import { invoke } from "@tauri-apps/api/core"
 
-const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+const mockIsTauri = jest.fn()
 const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
 
 describe("vector package barrel", () => {
   beforeEach(() => {
+    setVectorRuntimeAdapters({
+      isTauri: mockIsTauri,
+      createBedrockEmbeddingModel: jest.fn(),
+      dispatchDocumentsIndexed: jest.fn(),
+      dispatchVectorSearch: jest.fn(),
+    })
     mockIsTauri.mockReset()
     mockInvoke.mockReset()
+  })
+
+  it("allows informational size queries before host bootstrap", async () => {
+    resetVectorRuntimeAdaptersForTesting()
+    await expect(getNativeVectorStoreSize()).resolves.toBe(0)
+    expect(mockInvoke).not.toHaveBeenCalled()
   })
 
   it("re-exports vector store factory and provider metadata", () => {

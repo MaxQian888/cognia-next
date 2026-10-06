@@ -6,6 +6,7 @@
  * reported in `failed` and the rest keep starting) and reverse-order teardown
  * (later runtimes may depend on earlier ones).
  */
+import { installVectorRuntimeAdapters } from "@/lib/vector/runtime-adapters"
 import { listHeadlessRuntimes } from "./registry"
 import type { HeadlessRuntimeContext, HeadlessTeardown } from "./types"
 
@@ -21,6 +22,7 @@ export interface BootstrapResult {
 export async function bootstrapHeadlessRuntimes(
   ctx: HeadlessRuntimeContext
 ): Promise<BootstrapResult> {
+  installVectorRuntimeAdapters()
   const started: string[] = []
   const failed: Array<{ name: string; error: unknown }> = []
   const teardowns: Array<{ name: string; teardown: HeadlessTeardown }> = []

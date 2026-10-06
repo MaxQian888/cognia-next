@@ -11,11 +11,7 @@ import type {
   ModelMappingSpecialFallbacks,
 } from "./model-mapping"
 import type { FilterNotes } from "./deployment-filter"
-// Type-only cross-domain reference to the shared agent-mode union. Erased at
-// runtime (JS output has zero coupling); resolved via the `@/*` path alias in
-// app typecheck, jest, and this package's tsconfig (`@/* → ../../*`). Kept as a
-// single source of truth rather than duplicated to avoid drift.
-import type { AgentModeType } from "@/types/agent/agent-mode"
+import type { AgentModeType } from "./agent-mode"
 
 // Routing mode - how the router decides which model to use
 export type RoutingMode = "rule-based" | "llm-based" | "hybrid"

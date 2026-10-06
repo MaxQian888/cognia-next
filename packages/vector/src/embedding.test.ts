@@ -21,10 +21,6 @@ jest.mock("@cognia/transformers-runtime", () => ({
 const createBedrockSidecarEmbeddingModel = jest.fn((..._args: unknown[]) => ({
   modelId: "bedrock-sidecar",
 }))
-jest.mock("@/lib/claude/feature-call", () => ({
-  createBedrockSidecarEmbeddingModel: (...args: unknown[]) =>
-    createBedrockSidecarEmbeddingModel(...args),
-}))
 
 import {
   DEFAULT_EMBEDDING_MODELS,
@@ -46,6 +42,22 @@ import {
   resolveEmbeddingApiKey,
   type EmbeddingProvider,
 } from "./embedding"
+
+import {
+  setVectorRuntimeAdapters,
+  resetVectorRuntimeAdaptersForTesting,
+  type VectorRuntimeAdapters,
+} from "./runtime-adapters"
+
+beforeEach(() => {
+  setVectorRuntimeAdapters({
+    isTauri: () => false,
+    createBedrockEmbeddingModel:
+      createBedrockSidecarEmbeddingModel as unknown as VectorRuntimeAdapters["createBedrockEmbeddingModel"],
+    dispatchDocumentsIndexed: jest.fn(),
+    dispatchVectorSearch: jest.fn(),
+  })
+})
 
 import * as providerEmbedding from "@cognia/provider-embedding/embedding"
 
@@ -117,6 +129,40 @@ describe("DEFAULT_EMBEDDING_MODELS", () => {
 })
 
 describe("Amazon Bedrock embedding wiring", () => {
+  it("uses the same host model for default-chain batch embeddings", async () => {
+    mockGenerateAiEmbeddings.mockResolvedValueOnce({ embeddings: [[0.1], [0.2]] })
+    await generateEmbeddings(
+      ["first", "second"],
+      {
+        provider: "amazon-bedrock",
+        model: "titan",
+        bedrock: { authMode: "default-chain", region: "us-east-1" },
+      },
+      ""
+    )
+    expect(mockGenerateAiEmbeddings).toHaveBeenCalledWith(
+      ["first", "second"],
+      expect.objectContaining({ bedrockModel: { modelId: "bedrock-sidecar" } })
+    )
+  })
+
+  it("fails before model execution when default-chain capabilities are missing", async () => {
+    resetVectorRuntimeAdaptersForTesting()
+    mockGenerateAiEmbedding.mockClear()
+    await expect(
+      generateEmbedding(
+        "text",
+        {
+          provider: "amazon-bedrock",
+          model: "titan",
+          bedrock: { authMode: "default-chain", region: "us-east-1" },
+        },
+        ""
+      )
+    ).rejects.toThrow("Vector runtime adapters have not been installed")
+    expect(mockGenerateAiEmbedding).not.toHaveBeenCalled()
+  })
+
   it("uses the sidecar proxy for a default-chain embedding", async () => {
     mockGenerateAiEmbedding.mockResolvedValueOnce({ embedding: [0.1, 0.2] })
     await generateEmbedding(

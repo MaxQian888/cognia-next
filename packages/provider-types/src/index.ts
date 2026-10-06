@@ -1,3 +1,4 @@
+export type { AgentModeType } from "./agent-mode"
 export * from "./provider"
 export * from "./bedrock"
 export * from "./local-provider"

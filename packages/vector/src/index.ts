@@ -16,7 +16,7 @@
  * - Native (Tauri-local sqlite-vec)
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { isTauri } from "./runtime-adapters"
 
 // Embedding utilities
 export * from "./embedding"

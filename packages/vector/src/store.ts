@@ -4,7 +4,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { isTauri } from "@/lib/platform/detect"
+import { getVectorRuntimeAdapters, isTauri } from "./runtime-adapters"
 import type { EmbeddingModelConfig } from "./embedding"
 import { generateEmbedding, generateEmbeddings } from "./embedding"
 import { vectorCloudInvoke, type CloudProvider, type FilterOpWire, type FilterWire } from "./invoke"
@@ -1071,6 +1071,7 @@ export class MilvusVectorStore extends CloudVectorStore {
  * Create a vector store instance based on provider
  */
 export function createVectorStore(config: VectorStoreConfig): IVectorStore {
+  const runtime = getVectorRuntimeAdapters()
   let store: IVectorStore
   switch (config.provider) {
     case "chroma":
@@ -1109,7 +1110,7 @@ export function createVectorStore(config: VectorStoreConfig): IVectorStore {
     default:
       throw new Error(`Unsupported vector store provider: ${config.provider}`)
   }
-  return wrapVectorStoreWithPluginHooks(store)
+  return wrapVectorStoreWithPluginHooks(store, runtime)
 }
 
 /**
@@ -1119,7 +1120,10 @@ export function createVectorStore(config: VectorStoreConfig): IVectorStore {
  * happens after the underlying call resolves so plugins observe completed
  * work, not in-flight intent.
  */
-function wrapVectorStoreWithPluginHooks(inner: IVectorStore): IVectorStore {
+function wrapVectorStoreWithPluginHooks(
+  inner: IVectorStore,
+  runtime: ReturnType<typeof getVectorRuntimeAdapters>
+): IVectorStore {
   return new Proxy(inner, {
     get(target, prop, receiver) {
       const original = Reflect.get(target, prop, receiver) as unknown
@@ -1132,16 +1136,7 @@ function wrapVectorStoreWithPluginHooks(inner: IVectorStore): IVectorStore {
       if (prop === "addDocuments") {
         return async (collectionName: string, documents: VectorDocument[]) => {
           const result = await (bound as IVectorStore["addDocuments"])(collectionName, documents)
-          // Lazy-load the hooks module so importing the vector store doesn't
-          // pull in the plugin runtime (which transitively touches `@tauri-
-          // apps/api/core` and breaks tests that mock it via jest.mock).
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
-            getPluginEventHooks: () => {
-              dispatchDocumentsIndexed: (c: string, n: number) => void
-            }
-          }
-          getPluginEventHooks().dispatchDocumentsIndexed(collectionName, documents.length)
+          await runtime.dispatchDocumentsIndexed(collectionName, documents.length)
           return result
         }
       }
@@ -1156,13 +1151,7 @@ function wrapVectorStoreWithPluginHooks(inner: IVectorStore): IVectorStore {
             query,
             options
           )
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
-            getPluginEventHooks: () => {
-              dispatchVectorSearch: (c: string, q: string, n: number) => void
-            }
-          }
-          getPluginEventHooks().dispatchVectorSearch(collectionName, query, results.length)
+          await runtime.dispatchVectorSearch(collectionName, query, results.length)
           return results
         }
       }

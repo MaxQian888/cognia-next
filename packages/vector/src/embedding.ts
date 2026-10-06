@@ -18,7 +18,7 @@ import {
   type BedrockConnectionSettings,
   type ProviderName,
 } from "@cognia/provider-types"
-import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
+import { getVectorRuntimeAdapters } from "./runtime-adapters"
 import type { TransformersErrorCode } from "@cognia/transformers-runtime"
 
 /**
@@ -211,18 +211,9 @@ export async function generateEmbedding(
     bedrock: config.bedrock,
     bedrockModel:
       config.provider === "amazon-bedrock" && config.bedrock?.authMode === "default-chain"
-        ? createBedrockSidecarEmbeddingModel({
+        ? await getVectorRuntimeAdapters().createBedrockEmbeddingModel({
             modelId: config.model,
-            providerId: "bedrock",
-            credentials: {
-              protocol: "bedrock",
-              bedrockAuthMode: "default-chain",
-              region: config.bedrock.region,
-              baseURL: config.bedrock.baseURL,
-              profile: config.bedrock.profile,
-              roleArn: config.bedrock.roleArn,
-              roleSessionName: config.bedrock.roleSessionName,
-            },
+            bedrock: config.bedrock,
           })
         : undefined,
   })
@@ -265,18 +256,9 @@ export async function generateEmbeddings(
     bedrock: config.bedrock,
     bedrockModel:
       config.provider === "amazon-bedrock" && config.bedrock?.authMode === "default-chain"
-        ? createBedrockSidecarEmbeddingModel({
+        ? await getVectorRuntimeAdapters().createBedrockEmbeddingModel({
             modelId: config.model,
-            providerId: "bedrock",
-            credentials: {
-              protocol: "bedrock",
-              bedrockAuthMode: "default-chain",
-              region: config.bedrock.region,
-              baseURL: config.bedrock.baseURL,
-              profile: config.bedrock.profile,
-              roleArn: config.bedrock.roleArn,
-              roleSessionName: config.bedrock.roleSessionName,
-            },
+            bedrock: config.bedrock,
           })
         : undefined,
   })
