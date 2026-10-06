@@ -49,7 +49,7 @@ Access tokens for the sync API (`resource=https://sync.cognia.cn`) are ES256
 - `GET`/`POST`/`DELETE /api/account/deletion` with a bearer access token.
 - Requesting a deletion also needs an ID token from a sign-in at most 10 minutes old.
 - After a 7-day cooling-off period the hourly cron purges the person: tokens, consents, sessions, linked accounts and the user. The `account_deletion` row stays as the record.
-- First the person's sync space is deleted through the `SYNC_ADMIN` service binding (the sync Worker's `SyncAdmin` entrypoint, `services/sync-server`). Staging binds it; production binds it once `cognia-sync` is deployed. Without the binding no hook runs.
+- First the person's sync space is deleted through the `SYNC_ADMIN` service binding (the sync Worker's `SyncAdmin` entrypoint, `services/sync-server`). Staging and production both bind it. Without the binding no hook runs.
 
 **Rate limits.** Better Auth's limiter, counted in D1, per `cf-connecting-ip`.
 

@@ -250,7 +250,7 @@ Phase 2 ships keys and enrollment: device keys, the sync recovery key, approving
 - It accepts the identity Worker's sync access tokens, reading the JWKS through the `IDENTITY` service binding.
 - It checks a device proof on every device action, and refuses a revoked device before reading anything.
 - It enforces complete envelope sets, the atomic recovery batch and the approval's request state, transcript and approver.
-- `SyncAdmin.purgeSpace` deletes a space. The identity Worker calls it through its `SYNC_ADMIN` binding when it purges an account: bound on staging, and on production once `cognia-sync` is deployed.
+- `SyncAdmin.purgeSpace` deletes a space. The identity Worker calls it through its `SYNC_ADMIN` binding when it purges an account, on staging and on production.
 - Operator guide: its README. Incidents: `docs/runbooks/sync-worker.md`.
 
 **The client.**
@@ -335,7 +335,7 @@ The schema is v236. The two-and-three-client convergence suite (`sync.integratio
 - No snapshots or compaction (3b): a new device replays the whole log, and the log grows until 3b. Above the read-only cap, deletes are refused too, because the server cannot tell them apart.
 - Ops do not carry the signer's registry head yet (protocol §4.2), so equivocation is still detected only by fingerprint.
 - A message referencing an attachment or image shows it as unavailable on other devices until blobs arrive (phase 6).
-- The staging end-to-end run, the production deploy of `cognia-sync`, and the WebView spikes on the phone shells are pending.
+- The staging end-to-end run passed in browsers (join, live updates, offline conflicts, deletes, merge and replace, revoke) and on a headless host's command line; the headless brain's engine has not run end to end yet. `cognia-sync` is deployed to production with the flag still off in production builds. The WebView spikes on the phone shells are pending.
 
 ## Roadmap
 

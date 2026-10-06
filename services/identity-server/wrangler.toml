@@ -39,6 +39,14 @@ database_name = "cognia-identity"
 database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
+# Account deletion also deletes the person's sync space (services/sync-server).
+# The sync Worker must be deployed first: a binding to a Worker that does not
+# exist yet fails the deploy.
+[[services]]
+binding = "SYNC_ADMIN"
+service = "cognia-sync"
+entrypoint = "SyncAdmin"
+
 [vars]
 SERVICE_ENV = "production"
 BASE_URL = "https://id.cognia.cn"
@@ -59,9 +67,7 @@ binding = "DB"
 database_name = "cognia-identity-staging"
 database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"
 migrations_dir = "migrations"
-# Account deletion also deletes the person's sync space (services/sync-server).
-# Production gets the same binding once `cognia-sync` is deployed: a binding
-# to a Worker that does not exist yet fails the deploy.
+# As in production, the sync space goes with the account.
 [[env.staging.services]]
 binding = "SYNC_ADMIN"
 service = "cognia-sync-staging"
