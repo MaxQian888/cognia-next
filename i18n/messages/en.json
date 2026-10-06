@@ -52083,12 +52083,15 @@
       "clearFilters": "Clear filters",
       "configure": "Configure this Squad",
       "control": {
+        "awaitingProjection": "Waiting for the Host run to sync…",
         "failed": {
           "pause": "Couldn't pause the Squad",
           "resume": "Couldn't resume the Squad",
           "start": "Couldn't start the Squad",
           "stop": "Couldn't stop the Squad"
         },
+        "openRun": "Open run",
+        "pending": "Sending…",
         "refusal": {
           "already_terminal": "The run has already finished.",
           "not_pausable": "The run can't be paused in its current state.",
@@ -52096,11 +52099,24 @@
           "recovery_required": "The last checkpoint isn't verified as safe. Decide how to recover the run first.",
           "run_not_found": "There is no run to control."
         },
+        "remoteReadiness": "The Host checks readiness when you start this Squad.",
+        "retryStart": "Retry this start",
         "startRefusal": {
           "already_running": "This Squad is already running.",
-          "not_ready": "It isn't ready yet. The checklist below says what's missing.",
+          "approval_required": "Host authorization expired or is missing. Retry to request fresh authorization.",
+          "caller_device_required": "Pair this device with the Host before starting.",
+          "dispatch_error": "The Host could not dispatch this Squad.",
+          "host_changed": "The selected Host changed. Start again on the intended Host.",
+          "host_consent_required": "Authorize this device on the Host, then retry this start.",
+          "invalid_payload": "The Host did not accept the start request. Update both apps and try again.",
+          "journal_failed": "The Host could not save the run. Nothing was started.",
+          "no_squad_id": "Choose a Squad before starting.",
+          "not_ready": "The Host cannot start this Squad yet. Resolve the blockers below.",
+          "offline": "Connect to the Host before starting. This request was not queued.",
+          "permission_denied": "This device is not allowed to start a Squad on the Host.",
           "runtime_not_ready": "The Squad runtime is still starting. Try again in a moment.",
-          "squad_not_found": "This Squad no longer exists."
+          "squad_not_found": "This Squad no longer exists.",
+          "start_failed": "The start could not be confirmed. Check the Host connection, then retry this same start."
         }
       },
       "createCta": "New Squad",

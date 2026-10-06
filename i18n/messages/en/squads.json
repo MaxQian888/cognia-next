@@ -33,10 +33,26 @@
       },
       "startRefusal": {
         "already_running": "This Squad is already running.",
-        "not_ready": "It isn't ready yet. The checklist below says what's missing.",
+        "not_ready": "The Host cannot start this Squad yet. Resolve the blockers below.",
         "runtime_not_ready": "The Squad runtime is still starting. Try again in a moment.",
-        "squad_not_found": "This Squad no longer exists."
-      }
+        "squad_not_found": "This Squad no longer exists.",
+        "no_squad_id": "Choose a Squad before starting.",
+        "dispatch_error": "The Host could not dispatch this Squad.",
+        "journal_failed": "The Host could not save the run. Nothing was started.",
+        "invalid_payload": "The Host did not accept the start request. Update both apps and try again.",
+        "caller_device_required": "Pair this device with the Host before starting.",
+        "host_consent_required": "Authorize this device on the Host, then retry this start.",
+        "approval_required": "Host authorization expired or is missing. Retry to request fresh authorization.",
+        "permission_denied": "This device is not allowed to start a Squad on the Host.",
+        "start_failed": "The start could not be confirmed. Check the Host connection, then retry this same start.",
+        "host_changed": "The selected Host changed. Start again on the intended Host.",
+        "offline": "Connect to the Host before starting. This request was not queued."
+      },
+      "pending": "Sending…",
+      "awaitingProjection": "Waiting for the Host run to sync…",
+      "remoteReadiness": "The Host checks readiness when you start this Squad.",
+      "retryStart": "Retry this start",
+      "openRun": "Open run"
     },
     "createCta": "New Squad",
     "defaultLeadName": "Team Lead",

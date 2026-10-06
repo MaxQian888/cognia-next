@@ -52083,12 +52083,15 @@
       "clearFilters": "清除筛选",
       "configure": "配置这个小队",
       "control": {
+        "awaitingProjection": "正在等待 Host 运行记录同步…",
         "failed": {
           "pause": "无法暂停小队",
           "resume": "无法恢复小队",
           "start": "无法启动小队",
           "stop": "无法停止小队"
         },
+        "openRun": "查看运行",
+        "pending": "正在发送…",
         "refusal": {
           "already_terminal": "该运行已经结束。",
           "not_pausable": "该运行当前状态无法暂停。",
@@ -52096,11 +52099,24 @@
           "recovery_required": "最近的检查点未被确认安全，请先决定如何恢复该运行。",
           "run_not_found": "没有可控制的运行。"
         },
+        "remoteReadiness": "启动时将由 Host 检查此 Squad 是否就绪。",
+        "retryStart": "重试此次启动",
         "startRefusal": {
           "already_running": "该小队已在运行。",
-          "not_ready": "尚未就绪，下方清单列出了缺少的内容。",
+          "approval_required": "Host 授权已过期或缺失，请重试以重新请求授权。",
+          "caller_device_required": "请先将此设备与 Host 配对。",
+          "dispatch_error": "Host 无法调度此 Squad。",
+          "host_changed": "所选 Host 已更改，请在目标 Host 上重新启动。",
+          "host_consent_required": "请在 Host 上授权此设备，然后重试此次启动。",
+          "invalid_payload": "Host 未接受启动请求，请更新两端应用后重试。",
+          "journal_failed": "Host 无法保存运行记录，未启动任何任务。",
+          "no_squad_id": "请先选择一个 Squad。",
+          "not_ready": "Host 暂时无法启动此 Squad，请先解决下方问题。",
+          "offline": "请连接 Host 后再启动。此请求未加入离线队列。",
+          "permission_denied": "此设备没有在 Host 上启动 Squad 的权限。",
           "runtime_not_ready": "小队运行时仍在启动，请稍后再试。",
-          "squad_not_found": "该小队已不存在。"
+          "squad_not_found": "该小队已不存在。",
+          "start_failed": "无法确认启动结果，请检查 Host 连接后重试此次启动。"
         }
       },
       "createCta": "新建小队",

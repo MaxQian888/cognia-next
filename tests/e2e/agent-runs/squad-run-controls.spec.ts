@@ -114,10 +114,10 @@ test.describe("squads — one runtime, one cockpit, one review contract", () => 
     await expect(page.getByRole("heading", { name: OBJECTIVE, level: 2 })).toBeVisible()
 
     // A paused run offers Resume and Stop. Abort is gone from the vocabulary.
-    const resume = page.getByRole("button", { name: "Resume", exact: true })
+    const resume = panel.getByRole("button", { name: "Resume", exact: true })
     await expect(resume).toBeVisible()
-    await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0)
+    await expect(panel.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
+    await expect(panel.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0)
     await expect(page.getByRole("button", { name: /abort/i })).toHaveCount(0)
 
     // The Squad has readiness blockers, so the resume does not re-enter: the

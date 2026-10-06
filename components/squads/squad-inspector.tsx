@@ -4,26 +4,33 @@
  * One Squad's identity and its run controls.
  *
  * Extracted from the fleet console so the phone sheet and the desktop right
- * pane cannot drift. The six `agentTeamManager` calls live here and only here.
- * Duplicating them into a mobile body is how one surface ends up able to stop a
- * run and the other only to pause it.
+ * pane cannot drift. Starts route to the execution host and controls use the
+ * canonical execution journal, including the remote mirror.
  *
  * The body arrives as `children` rather than as a `bodyTab` prop. A prop only
  * one host would ever set is dormancy the repo's dormancy rule would make me
  * label on three axes, and composition owes nothing.
  */
 
+import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { ExternalLinkIcon, SettingsIcon } from "lucide-react"
 import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
+import { useClientLiveQuery } from "@/hooks/data"
+import { useHostProfile, useRemoteHostActive } from "@/hooks/use-host-profile"
+import { getDb } from "@/lib/db/schema"
+import {
+  createSquadStartAttempt,
+  type SquadStartOutcome,
+} from "@/lib/execution/squad-start-dispatch"
+import { dispatchRunControl } from "@/lib/execution/run-control-dispatch"
 
 import { TeamRunControls } from "@/components/agent/workspace/team-run-controls"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
 import { SquadReadinessCard } from "@/components/squads/squad-readiness-card"
 import { useSquadReadiness } from "@/hooks/squads/use-squad-readiness"
-import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
-import type { SquadControlResult } from "@/lib/ai/agent/team/squad/squad-control"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { settingsHref } from "@/lib/settings/deep-link"
 import { cn } from "@/lib/utils"
@@ -40,15 +47,11 @@ export interface SquadInspectorProps {
   showIdentity?: boolean
 }
 
-/** Start refusals with copy of their own; anything else prints as thrown. */
-const START_REFUSALS: ReadonlySet<string> = new Set([
-  "runtime_not_ready",
-  "already_running",
-  "not_ready",
-  "squad_not_found",
-])
+export function SquadInspector(props: SquadInspectorProps) {
+  return <SquadInspectorContent key={props.squadId} {...props} />
+}
 
-export function SquadInspector({
+function SquadInspectorContent({
   squadId,
   children,
   className,
@@ -58,48 +61,107 @@ export function SquadInspector({
   const tReadiness = useTranslations("squads.readiness")
   const squad = useAgentTeamStore((s) => s.teams[squadId])
   const readiness = useSquadReadiness(squadId)
-  // The first blocker is the disabled reason on Start. The card below says
-  // all of them, with the action that clears each.
-  const firstBlocker = readiness.loading ? undefined : readiness.blockers[0]
-  const startDisabledReason = readiness.loading
-    ? tReadiness("loading")
-    : firstBlocker
-      ? tReadiness(`blockers.${firstBlocker.code}`, {
-          versionId: firstBlocker.detail?.versionId ?? "",
-          environmentId: firstBlocker.detail?.environmentId ?? "",
-          repositoryIds: (firstBlocker.detail?.repositoryIds ?? []).join(", "),
-          missingCapabilities: (firstBlocker.detail?.missingCapabilities ?? []).join(", "),
-        })
-      : undefined
-
+  const hostProfile = useHostProfile()
+  const activeRemote = useRemoteHostActive()
+  const remote =
+    hostProfile === "mobile-companion" || hostProfile === "cloud-companion" || activeRemote
   const tControl = useTranslations("squads.fleet.control")
-  // `start` throws "Squad run refused: <code>[:detail]"; the code is what a
-  // reader can act on, the rest is for logs.
-  const reportStartRefused = (err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err)
-    const code = /Squad run refused: ([a-z_]+)/.exec(message)?.[1]
-    toast.error(tControl("failed.start"), {
-      description:
-        code && START_REFUSALS.has(code) ? tControl(`startRefusal.${code}` as never) : message,
+  const tRun = useTranslations("agentRuns.outcome")
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const attemptRef = useRef<ReturnType<typeof createSquadStartAttempt> | null>(null)
+  const [startOutcome, setStartOutcome] = useState<SquadStartOutcome | null>(null)
+  const run = useClientLiveQuery(
+    async () => {
+      const rows = await getDb()
+        .executionRuns.where("kind")
+        .equals("team")
+        .filter((row) => row.latestSnapshot?.teamId === squadId)
+        .sortBy("updatedAt")
+      return rows.at(-1) ?? null
+    },
+    [squadId],
+    undefined
+  )
+  const blockerText = (blocker: NonNullable<SquadStartOutcome["blockers"]>[number]) =>
+    tReadiness(`blockers.${blocker.code}`, {
+      versionId: blocker.detail?.versionId ?? "",
+      environmentId: blocker.detail?.environmentId ?? "",
+      repositoryIds: (blocker.detail?.repositoryIds ?? []).join(", "),
+      missingCapabilities: (blocker.detail?.missingCapabilities ?? []).join(", "),
     })
-  }
-  const control = async (
-    action: "pause" | "resume" | "stop",
-    pending: Promise<SquadControlResult>
-  ) => {
+  // Environment and native workspace state are not mirrored to the companion.
+  // Its admission belongs to the authoritative host, which returns blockers.
+  const firstBlocker = readiness.loading ? undefined : readiness.blockers[0]
+  const startDisabledReason = busy
+    ? tControl("pending")
+    : startOutcome?.started && run?.id !== startOutcome.executionRunId
+      ? tControl("awaitingProjection")
+      : !remote && readiness.loading
+        ? tReadiness("loading")
+        : !remote && firstBlocker
+          ? blockerText(firstBlocker)
+          : undefined
+  const retryable =
+    startOutcome &&
+    !startOutcome.started &&
+    ["host_consent_required", "approval_required", "start_failed", "offline"].includes(
+      startOutcome.reason ?? ""
+    )
+  const start = async (ultracode?: boolean, retry = false) => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
     try {
-      const result = await pending
-      if (!result.ok) {
-        toast.error(tControl(`failed.${action}`), {
-          description: result.reason ? tControl(`refusal.${result.reason}`) : undefined,
+      if (!retry || !attemptRef.current) {
+        attemptRef.current = createSquadStartAttempt({
+          teamId: squadId,
+          hostProfile,
+          ...(ultracode !== undefined ? { ultracode } : {}),
         })
       }
-    } catch (err) {
-      toast.error(tControl(`failed.${action}`), {
-        description: err instanceof Error ? err.message : String(err),
-      })
+      setStartOutcome(await attemptRef.current.dispatch())
+    } finally {
+      busyRef.current = false
+      setBusy(false)
     }
   }
+  const control = async (action: "pause" | "resume" | "stop") => {
+    if (busyRef.current || !run) return
+    busyRef.current = true
+    setBusy(true)
+    try {
+      const result = await dispatchRunControl({
+        runId: run.id,
+        action,
+        surface: "squad-inspector",
+        hostProfile,
+      })
+      if (!result.accepted) {
+        toast.error(tControl(`failed.${action}`), {
+          description: [
+            tRun(result.reason ?? "control_failed"),
+            result.consentCode ? `${tRun("consentCode")} ${result.consentCode}` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        })
+      }
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+  const allowed = run?.latestSnapshot?.allowedActions ?? []
+  const terminal = run && ["completed", "failed", "cancelled"].includes(run.status)
+  const status = run
+    ? terminal
+      ? (run.status as "completed" | "failed" | "cancelled")
+      : allowed.includes("resume")
+        ? "paused"
+        : "executing"
+    : (squad?.status ?? "idle")
+  const refusalKey = `startRefusal.${startOutcome?.reason ?? "start_failed"}`
 
   if (!squad) return null
 
@@ -117,30 +179,57 @@ export function SquadInspector({
             ) : null}
           </>
         ) : null}
-        {/* Start, pause, resume, stop. Without them a fleet console could say
-            what every Squad was doing and do nothing about any of it, and these
-            controls only ever existed on a tab of the retired
-            `/agent-teams/workspace`. Acting on a run is runtime, not
-            configuration, so this is the surface for it.
-
-            Fire-and-forget: every one of these settles at terminal state and
-            the row's own status is what reports back. A refusal is the one
-            answer the row cannot give (nothing changed), so it is toasted;
-            swallowing it made a refused tap look like a dead button. */}
         <TeamRunControls
-          status={squad.status}
+          status={status}
           ultracodeEnabled={squad.config?.ultracode?.enabled}
-          onStart={() => void agentTeamManager.start(squad.id).catch(reportStartRefused)}
-          onStartUltracode={() =>
-            void agentTeamManager.start(squad.id, { ultracode: true }).catch(reportStartRefused)
-          }
-          onPause={() => void control("pause", agentTeamManager.pause(squad.id))}
-          onResume={() => void control("resume", agentTeamManager.resume(squad.id))}
-          onStop={() => void control("stop", agentTeamManager.shutdown(squad.id))}
+          onStart={() => void start(undefined, Boolean(retryable))}
+          onStartUltracode={() => void start(true)}
+          onPause={!busy && allowed.includes("pause") ? () => void control("pause") : undefined}
+          onResume={!busy && allowed.includes("resume") ? () => void control("resume") : undefined}
+          onStop={!busy && allowed.includes("stop") ? () => void control("stop") : undefined}
           {...(startDisabledReason ? { startDisabledReason } : {})}
           className="pt-1"
         />
-        <SquadReadinessCard squadId={squad.id} className="mt-2" />
+        {remote ? (
+          <p className="pt-2 text-xs text-muted-foreground">{tControl("remoteReadiness")}</p>
+        ) : (
+          <SquadReadinessCard squadId={squad.id} className="mt-2" />
+        )}
+        {startOutcome && !startOutcome.started && (
+          <div role="alert" className="space-y-2 pt-2 text-sm">
+            <p>{tControl(tControl.has(refusalKey) ? refusalKey : "startRefusal.start_failed")}</p>
+            {startOutcome.consentCode && (
+              <p>
+                {tRun("consentCode")} <code>{startOutcome.consentCode}</code>
+              </p>
+            )}
+            {startOutcome.blockers?.length ? (
+              <ul>
+                {startOutcome.blockers.map((blocker) => (
+                  <li key={blocker.code}>{blockerText(blocker)}</li>
+                ))}
+              </ul>
+            ) : null}
+            {retryable && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void start(undefined, true)}
+              >
+                {tControl("retryStart")}
+              </Button>
+            )}
+          </div>
+        )}
+        {(startOutcome?.executionRunId || run?.id) && (
+          <Link
+            className="block pt-2 text-sm underline"
+            href={`/agent-runs?kind=team&run=${encodeURIComponent(startOutcome?.executionRunId ?? run!.id)}`}
+          >
+            {tControl("openRun")}
+          </Link>
+        )}
         <Link
           href={settingsHref("squads", { params: { squadTab: squadPanelId(squad.id) } })}
           className="inline-flex items-center gap-1 pt-1 text-xs text-muted-foreground hover:text-foreground"
