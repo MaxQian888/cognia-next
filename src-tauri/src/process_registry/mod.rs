@@ -654,7 +654,9 @@ async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
 /// is never dropped and every one of these needs an explicit call.
 pub async fn teardown(app: &AppHandle) {
     for subsystem in ALL_SUBSYSTEMS {
+        log::info!("stopping managed subsystem: {subsystem:?}");
         teardown_subsystem(app, subsystem).await;
+        log::info!("stopped managed subsystem: {subsystem:?}");
     }
 }
 
