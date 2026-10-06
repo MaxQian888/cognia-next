@@ -12,6 +12,7 @@ import {
   type OpPayload,
 } from "@cognia/sync-protocol"
 
+import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 import { CogniaDB } from "@/lib/db/schema"
 
 import type { DeviceKeys, EpochKeyChain } from "../crypto"
@@ -46,8 +47,23 @@ export async function armCapture(db: CogniaDB, deviceId: string): Promise<void> 
   await db.accountSyncState.put(state)
 }
 
-async function deviceFrom(name: string, context: AccountSyncContext): Promise<SyncDevice> {
-  const db = new CogniaDB(`account-sync-data-${name}-${++databases}`, "account-sync-test")
+async function deviceFrom(
+  name: string,
+  context: AccountSyncContext,
+  encrypted = false
+): Promise<SyncDevice> {
+  const index = ++databases
+  // An account database (`cognia-account-…`) gets the content-encryption
+  // middleware, as in the app; the process holds one active cipher.
+  const dbName = encrypted
+    ? `cognia-account-acct_sync_${index}-encrypted-v1`
+    : `account-sync-data-${name}-${index}`
+  if (encrypted) {
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(`acct_sync_${index}`, dbName)
+    )
+  }
+  const db = new CogniaDB(dbName, "account-sync-test")
   await db.open()
   const keys = async () => {
     const found = await context.vault.loadDeviceKeys()
@@ -69,18 +85,23 @@ async function deviceFrom(name: string, context: AccountSyncContext): Promise<Sy
   }
 }
 
-/** A space with `names.length` enrolled devices: the first creates it, the rest recover into it. */
+/**
+ * A space with `names.length` enrolled devices: the first creates it, the rest
+ * recover into it. `encrypted` names the one device whose database encrypts
+ * its content at rest, as an app profile's does.
+ */
 export async function syncedDevices(
   names: readonly string[],
-  server: FakeSyncServer = createFakeSyncServer({ spaceId: TEST_SPACE })
+  server: FakeSyncServer = createFakeSyncServer({ spaceId: TEST_SPACE }),
+  options: { encrypted?: string } = {}
 ): Promise<{ server: FakeSyncServer; devices: SyncDevice[]; recoveryKeyText: string }> {
   const [firstName, ...rest] = names
   const first = await spaceWithFirstDevice(server, firstName)
-  const devices = [await deviceFrom(firstName!, first.context)]
+  const devices = [await deviceFrom(firstName!, first.context, options.encrypted === firstName)]
   for (const name of rest) {
     const context = testContext(server, name)
     await recoverWithKey(context, first.recoveryKeyText, identity(name))
-    devices.push(await deviceFrom(name, context))
+    devices.push(await deviceFrom(name, context, options.encrypted === name))
   }
   return { server, devices, recoveryKeyText: first.recoveryKeyText }
 }

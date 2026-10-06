@@ -151,10 +151,11 @@ async function applyRecord(db: CogniaDB, payload: OpPayload, now: number): Promi
   const table = payload.t as SyncedTableName
   const policy = TABLE_POLICIES[table]
   const store = db.table(table)
-  const [row, held] = (await Promise.all([
-    store.get(payload.id),
-    db.syncFieldClocks.get([table, payload.id]),
-  ])) as [Record<string, unknown> | undefined, SyncFieldClocksRow | undefined]
+  // One read at a time: both tables are encrypted at rest, and each read holds
+  // the transaction open with `Dexie.waitFor` while it decrypts. Two holds at
+  // once in one transaction never settle (`lib/db/encrypted-content-middleware.ts`).
+  const row = (await store.get(payload.id)) as Record<string, unknown> | undefined
+  const held = (await db.syncFieldClocks.get([table, payload.id])) as SyncFieldClocksRow | undefined
   const clocks: RowClocks | undefined = held
   if (payload.k === "delete") {
     const result = mergeDelete(row !== undefined, clocks, payload.at)

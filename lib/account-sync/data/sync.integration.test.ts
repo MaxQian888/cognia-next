@@ -163,6 +163,45 @@ describe("replicating data", () => {
     closeAll(devices)
   })
 
+  it("applies another device's chat into a database that encrypts its content, and back", async () => {
+    // As in the app: B's rows and clocks are encrypted at rest, so every read
+    // inside the apply transaction decrypts while holding it open.
+    const { devices } = await syncedDevices(["a", "b"], undefined, { encrypted: "b" })
+    const [a, b] = devices as [SyncDevice, SyncDevice]
+    expect(b.db.name.startsWith("cognia-account-")).toBe(true)
+    await a.db.sessions.put(session("s1"))
+    await a.db.messages.put({
+      id: "m1",
+      sessionId: "s1",
+      role: "user",
+      parts: [{ type: "text", text: "hello from a" }],
+      createdAt: 5,
+    } as never)
+    await settleAll(devices)
+    expect((await b.db.sessions.get("s1"))!.title).toBe("Plan")
+    expect((await b.db.messages.get("m1"))!.parts).toEqual([{ type: "text", text: "hello from a" }])
+
+    // A second write to rows B already holds reads them back (and their clocks) to merge.
+    await a.db.messages.put({
+      id: "m1",
+      sessionId: "s1",
+      role: "user",
+      parts: [{ type: "text", text: "hello again" }],
+      createdAt: 5,
+    } as never)
+    await b.db.messages.put({
+      id: "m2",
+      sessionId: "s1",
+      role: "assistant",
+      parts: [{ type: "text", text: "reply from b" }],
+      createdAt: 6,
+    } as never)
+    await settleAll(devices)
+    expect((await b.db.messages.get("m1"))!.parts).toEqual([{ type: "text", text: "hello again" }])
+    expect((await a.db.messages.get("m2"))!.parts).toEqual([{ type: "text", text: "reply from b" }])
+    closeAll(devices)
+  })
+
   it("leaves a class alone on a device that switched it off", async () => {
     const { devices } = await syncedDevices(["a", "b"])
     const [a, b] = devices as [SyncDevice, SyncDevice]
