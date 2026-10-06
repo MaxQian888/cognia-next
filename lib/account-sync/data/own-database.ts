@@ -13,7 +13,6 @@
 import { encryptedAccountDatabaseName } from "@/lib/accounts/account-db"
 import { getDb, type CogniaDB } from "@/lib/db/schema"
 import { subscribeRuntimeSnapshot, getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
-import { subscribeRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 export interface OwnDatabaseDeps {
@@ -34,11 +33,15 @@ export function ownAccountDatabase(
   return db.name === encryptedAccountDatabaseName(localAccountId) ? db : null
 }
 
-/** Calls `listener` whenever the answer of `ownAccountDatabase` may have changed. */
+/**
+ * Calls `listener` whenever the answer of `ownAccountDatabase` may have changed.
+ * Every switch of the active database (`activateAccountDatabase`,
+ * `clearAccountDatabaseSelection`) is followed by a runtime snapshot naming the
+ * new target, so the snapshot and the remote transport are the two signals.
+ */
 export function subscribeDatabaseAuthority(listener: () => void): () => void {
   const stops = [
     subscribeRuntimeSnapshot(listener),
-    subscribeRuntimeTargetContext(listener),
     subscribeActiveRemoteTransport(() => listener()),
   ]
   return () => {

@@ -1,10 +1,8 @@
 import { encryptedAccountDatabaseName } from "@/lib/accounts/account-db"
 import type { CogniaDB } from "@/lib/db/schema"
 import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
-import {
-  clearActiveRuntimeTargetContext,
-  setActiveRuntimeTargetContext,
-} from "@/lib/runtime/runtime-target-context"
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
 
 import { ownAccountDatabase, subscribeDatabaseAuthority } from "./own-database"
 
@@ -41,15 +39,22 @@ describe("ownAccountDatabase", () => {
 })
 
 describe("subscribeDatabaseAuthority", () => {
-  it("hears target and runtime changes until unsubscribed", () => {
+  afterEach(() => __resetRoutingForTests())
+
+  it("hears target and remote-host changes until unsubscribed", () => {
     const listener = jest.fn()
     const stop = subscribeDatabaseAuthority(listener)
-    setActiveRuntimeTargetContext(ACCOUNT, "desk-1")
-    setRuntimeSnapshot({ target: null, vaultState: "unlocked", connectionState: "online" } as never)
-    const heard = listener.mock.calls.length
-    expect(heard).toBeGreaterThanOrEqual(2)
+    setRuntimeSnapshot({
+      target: { id: "desk-1", kind: "companion", platform: "web" },
+      vaultState: "unlocked",
+      connectionState: "online",
+    } as never)
+    expect(listener).toHaveBeenCalledTimes(1)
+    setActiveRemoteTransport({} as Transport)
+    expect(listener).toHaveBeenCalledTimes(2)
     stop()
-    clearActiveRuntimeTargetContext()
-    expect(listener).toHaveBeenCalledTimes(heard)
+    setRuntimeSnapshot({ target: null, vaultState: "unlocked", connectionState: "online" } as never)
+    setActiveRemoteTransport(null)
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 })
