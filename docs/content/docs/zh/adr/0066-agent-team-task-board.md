@@ -35,7 +35,7 @@ Zustand代理团队存储仍然是**单一写入源**（ADR-0022对运行时状�
 - **Dexie v104 `agentTeamBoard`**（`lib/db/agent-team-board.ts`）：任务列（id = taskId）+ 每队一列团队元行（`team:<teamId>`携带状态、容量、阵容含双绑定`knowledgeTwinIds`）。纪元/MS时间戳、限制评论帖、截断result/error预览。
 - **仅桌面投影器**（`lib/db/agent-team-projection.ts`）：商店订阅身份差异`tasks`/`teams`/`teammates`，整合为微任务刷新，修改`bulkPut`s，并与同步墓碑配对删除;关于安装修剪孤儿的完整和解。由桌面同步源提供商和无头 Brain 运行时安装——从未安装在手机上，因为手机的空存储会抹去镜子。
 - **同步**：`agentTeamBoard` 加入`SyncableTable`、桌面 delta 读取器（光标 `updatedAt`）、处理器 注册表和Rust `sync_registry`（墓碑）。Dexie从不回信给店里。
-- **控制平面**：六个远程控制门控RPCs（`team_task_move|create|comment`、`team_run_pause|resume|stop`）通过通用桌面写入桥接器传输。TS手臂（`lib/companion/agent-team-write-handlers.ts`）通过实时`canMoveTask`重新验证，回应`{ ok, reason }`——一个陈旧的手机快照永远无法推动桌面板拒绝的操作。它们被故意**不*放在移动端离线队列中：命令必须根据实时运行状态进行验证，而不是几个小时后重放。`team_run_resume` acks 触发后不等待（生命周期很长）。
+- **控制平面**：`team_task_move|create|comment` 和 `team_run_start` 通过桌面写入桥接器传输，由命令清单中的 `agent.run` 授权和绑定设备的审批租约共同保护。任务板变更经过实时 `canMoveTask` 验证。手动启动在宿主调用 `startSquadRun`，返回完整准入结果，包括就绪阻塞原因和规范执行记录 ID。稳定的启动 UUID 与已认证设备共同确定运行身份，避免重试重复调度；手动启动保留可持久化的交互式计划审批。已有运行统一使用 `execution_run_control`（ADR-0169）；退役的 `team_run_pause|resume|stop` 返回 `upgrade-required`。这些实时命令不进入移动端离线队列，重连不能自动启动过时任务。
 - **移动板**（`components/mobile/agent-teams/team-board-mobile.tsx`）：通过liveQuery渲染镜像（在最后同步快照中离线工作），通过动作表移动，目标来自同一守卫，评论通过RPC。当本地商店空闲但存在同步的元行时，移动工作区会退回到该板——修复了桌面隐形的漏洞。
 
 ### 4. 暂停/继续（关闭第二次延期ADR-0022）

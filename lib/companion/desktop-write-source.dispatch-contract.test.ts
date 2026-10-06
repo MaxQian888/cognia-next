@@ -10,6 +10,13 @@
 
 import "fake-indexeddb/auto"
 
+jest.mock("@/lib/companion/agent-team-write-handlers", () => ({
+  handleTeamRunStart: jest.fn(),
+  handleTeamTaskMove: jest.fn(),
+  handleTeamTaskCreate: jest.fn(),
+  handleTeamTaskComment: jest.fn(),
+}))
+
 jest.mock("@/lib/db/workflows", () => ({
   createWorkflow: jest.fn(async (draft: Record<string, unknown>) => ({ id: "wf1", ...draft })),
   updateWorkflow: jest.fn(async () => undefined),
@@ -104,6 +111,25 @@ const references = jest.requireMock("@/lib/chat/mentions/host-reference-rpc") as
 >
 
 beforeEach(() => jest.clearAllMocks())
+
+describe("dispatchCommand: team_run_start", () => {
+  it("passes the authenticated host payload and returns canonical admission unchanged", async () => {
+    const { handleTeamRunStart } = jest.requireMock("@/lib/companion/agent-team-write-handlers")
+    const payload = {
+      teamId: "squad-1",
+      launchId: "e04469bc-e100-43f8-9e15-a96c0d7f1847",
+      callerDeviceId: "phone",
+    }
+    const outcome = {
+      started: false,
+      reason: "not_ready",
+      blockers: [{ code: "missing_environment_ref" }],
+    }
+    handleTeamRunStart.mockResolvedValueOnce(outcome)
+    expect(await dispatchCommand("team_run_start", payload)).toBe(outcome)
+    expect(handleTeamRunStart).toHaveBeenCalledWith(payload)
+  })
+})
 
 describe("dispatchCommand: external_agent_config_duplicate", () => {
   const hostConfigs = jest.requireMock(

@@ -80,6 +80,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "team_task_move",
     "team_task_create",
     "team_task_comment",
+    "team_run_start",
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
@@ -810,6 +811,7 @@ pub(super) async fn dispatch(
         | "team_task_move"
         | "team_task_create"
         | "team_task_comment"
+        | "team_run_start"
         | "team_run_pause"
         | "team_run_resume"
         | "team_run_stop"

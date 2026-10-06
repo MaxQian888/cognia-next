@@ -588,6 +588,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "team_task_move",
     "team_task_create",
     "team_task_comment",
+    "team_run_start",
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
@@ -1581,6 +1582,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "team_task_move",
     "team_task_create",
     "team_task_comment",
+    "team_run_start",
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
@@ -1958,6 +1960,9 @@ pub(super) const BROWSER_COMPANION_COMMANDS: &[&str] = &[
 ];
 
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    // A manual Squad launch is namespaced by the authenticated device, never
+    // by a caller-supplied identity. Its approval policy is interactive.
+    "team_run_start",
     // ADR-0169 run control. The command's actor is the authenticated device:
     // it becomes the operator the control gate authorizes and the actor the
     // receipt names, so a payload must not be able to borrow another one.

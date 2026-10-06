@@ -10,16 +10,65 @@
  * results, not thrown errors — the caller renders them as toasts.
  *
  * Wired into `dispatchCommand` in `lib/companion/desktop-write-source.ts`;
- * the Rust side gates all six commands behind the remote-control
- * capability (`CONTROL_COMMANDS` in `companion_api/rpc.rs`).
+ * the Rust canonical remote-execution boundary enforces each command's
+ * capability, approval lease, schema and idempotency before dispatch.
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { loggers } from "@cognia/logging"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
 import type { TeamTaskStatus } from "@/types/agent/agent-team"
+import type { StartSquadRunResult } from "@/lib/ai/agent/team/squad/start-squad-run"
+import { sha256Hex } from "@/lib/share/hash"
 
 const log = loggers.agent.child("team-rpc")
+
+export type TeamRunStartResult = Omit<StartSquadRunResult, "reason"> & {
+  reason?: StartSquadRunResult["reason"] | "invalid_payload" | "caller_device_required"
+}
+
+const LAUNCH_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** A live manual gesture on a paired device, admitted by the execution host. */
+export async function handleTeamRunStart(
+  payload: Record<string, unknown>
+): Promise<TeamRunStartResult> {
+  const teamId = readString(payload, "teamId")?.trim()
+  const launchId = readString(payload, "launchId")
+  if (
+    !teamId ||
+    !launchId ||
+    !LAUNCH_UUID.test(launchId) ||
+    (payload.goal !== undefined && typeof payload.goal !== "string") ||
+    (payload.ultracode !== undefined && typeof payload.ultracode !== "boolean")
+  )
+    return { started: false, reason: "invalid_payload" }
+
+  // This field is overwritten by Rust after authenticating the request. It is
+  // absent from the public schema: a client cannot borrow another device ID.
+  const callerDeviceId = readString(payload, "callerDeviceId")
+  if (!callerDeviceId?.trim()) return { started: false, reason: "caller_device_required" }
+
+  try {
+    // Bound the identifier's size and namespace it by the authenticated device.
+    // A refreshed consent lease changes the transport attempt, not the run.
+    const runId = `squad-companion:${await sha256Hex(JSON.stringify([callerDeviceId, launchId.toLowerCase()]))}`
+    const { startSquadRun } = await import("@/lib/ai/agent/team/squad/start-squad-run")
+    return await startSquadRun({
+      squadId: teamId,
+      runId,
+      goal: typeof payload.goal === "string" ? payload.goal : "",
+      // The manual console has the same durable review channel as desktop.
+      // `companion` would mean unattended and fail a required plan review.
+      origin: "interactive",
+      triggeredFrom: { source: "api", deviceId: callerDeviceId },
+      ...(typeof payload.ultracode === "boolean" ? { ultracode: payload.ultracode } : {}),
+    })
+  } catch (error) {
+    log.warn("team_run_start admission failed", { teamId, error })
+    return { started: false, reason: "dispatch_error" }
+  }
+}
 
 export interface TeamCommandResult {
   ok: boolean

@@ -12000,6 +12000,98 @@
     "task_workspace_undo": {
       "$ref": "#/$defs/ApplyOutcome"
     },
+    "team_run_start": {
+      "type": "object",
+      "required": ["started"],
+      "properties": {
+        "started": {
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "executionRunId": {
+          "type": "string"
+        },
+        "squadName": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "squad_not_found",
+            "no_squad_id",
+            "dispatch_error",
+            "not_ready",
+            "already_running",
+            "journal_failed",
+            "runtime_not_ready",
+            "invalid_payload",
+            "caller_device_required"
+          ]
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "missing_primary_repository",
+                  "ambiguous_primary_repository",
+                  "missing_environment_ref",
+                  "environment_not_found",
+                  "environment_unenforceable",
+                  "workspace_controller_unavailable",
+                  "host_unavailable",
+                  "no_teammates"
+                ]
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "configure_repository",
+                  "configure_environment",
+                  "add_teammate",
+                  "open_on_host"
+                ]
+              },
+              "detail": {
+                "type": "object",
+                "properties": {
+                  "environmentId": {
+                    "type": "string"
+                  },
+                  "versionId": {
+                    "type": "string"
+                  },
+                  "repositoryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "missingCapabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "team_run_pause": {
       "$ref": "#/$defs/LegacyResult"
     },

@@ -139388,6 +139388,256 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/team_run_start:
+    post:
+      operationId: internalRpcTeamRunStart
+      tags:
+        - headless-rpc
+      summary: team_run_start (agent.run)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - teamId
+                - launchId
+              properties:
+                teamId:
+                  type: string
+                  minLength: 1
+                  pattern: \S
+                launchId:
+                  type: string
+                  format: uuid
+                  pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                  description: Stable logical manual launch UUID. Preserve across consent and network retries; a fresh intentional launch
+                    uses a new UUID. The host namespaces the run by the authenticated device.
+                goal:
+                  type: string
+                  description: Optional objective; absent or blank preserves the Squad's current objective.
+                ultracode:
+                  type: boolean
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - started
+                properties:
+                  started:
+                    type: boolean
+                  runId:
+                    type: string
+                  executionRunId:
+                    type: string
+                  squadName:
+                    type: string
+                  reason:
+                    type: string
+                    enum:
+                      - squad_not_found
+                      - no_squad_id
+                      - dispatch_error
+                      - not_ready
+                      - already_running
+                      - journal_failed
+                      - runtime_not_ready
+                      - invalid_payload
+                      - caller_device_required
+                  duplicate:
+                    type: boolean
+                  blockers:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - code
+                      properties:
+                        code:
+                          type: string
+                          enum:
+                            - missing_primary_repository
+                            - ambiguous_primary_repository
+                            - missing_environment_ref
+                            - environment_not_found
+                            - environment_unenforceable
+                            - workspace_controller_unavailable
+                            - host_unavailable
+                            - no_teammates
+                        action:
+                          type: string
+                          enum:
+                            - configure_repository
+                            - configure_environment
+                            - add_teammate
+                            - open_on_host
+                        detail:
+                          type: object
+                          properties:
+                            environmentId:
+                              type: string
+                            versionId:
+                              type: string
+                            repositoryIds:
+                              type: array
+                              items:
+                                type: string
+                            missingCapabilities:
+                              type: array
+                              items:
+                                type: string
+                          additionalProperties: false
+                      additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/team_run_stop:
     post:
       operationId: internalRpcTeamRunStop
@@ -156913,6 +157163,7 @@ components:
           - task_workspace_undo
           - team_run_pause
           - team_run_resume
+          - team_run_start
           - team_run_stop
           - team_task_comment
           - team_task_create
@@ -157255,10 +157506,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 744
-  generatedRequestSchemaCount: 744
+  internalCommandCount: 745
+  generatedRequestSchemaCount: 745
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 744
+  contractRequestSchemaCount: 745
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 744
+  generatedResponseSchemaCount: 745
   loopbackOnly: true

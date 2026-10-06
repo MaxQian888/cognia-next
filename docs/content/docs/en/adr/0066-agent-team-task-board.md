@@ -72,13 +72,16 @@ on runtime state is unchanged). Cross-device visibility is a **one-way projectio
 - **Sync**: `agentTeamBoard` joins `SyncableTable`, the desktop delta reader
   (cursors `updatedAt`), the handler registry, and the Rust `sync_registry`
   (tombstoned). Dexie never writes back to the store.
-- **Control plane**: six Companion-control-gated RPCs (`team_task_move|create|comment`,
-  `team_run_pause|resume|stop`) travel the generic desktop-writes bridge. The TS
-  arms (`lib/companion/agent-team-write-handlers.ts`) revalidate through the live
-  `canMoveTask`, answering `{ ok, reason }` — a stale phone snapshot can never
-  push a move the desktop board would refuse. They are deliberately **not** in the
-  mobile offline queue: a command must validate against live run state, not replay
-  hours later. `team_run_resume` acks fire-and-forget (the lifecycle runs long).
+- **Control plane**: `team_task_move|create|comment` and `team_run_start` travel
+  the desktop-writes bridge under the manifest's `agent.run` grant and a
+  device-bound approval lease. Board changes revalidate through live `canMoveTask`.
+  Manual Start calls `startSquadRun` on the host and returns its complete admission
+  result, including readiness blockers and the canonical execution run ID. Its
+  stable launch UUID is namespaced by the authenticated device, so a retry cannot
+  dispatch twice. Manual starts retain interactive durable plan reviews. Existing
+  runs use `execution_run_control` (ADR-0169); the retired
+  `team_run_pause|resume|stop` return `upgrade-required`. These live commands stay
+  out of the mobile offline queue: reconnection must not launch stale work.
 - **Mobile board** (`components/mobile/agent-teams/team-board-mobile.tsx`): renders
   the mirror via liveQuery (works offline on the last-synced snapshot), moves via
   an action sheet whose targets come from the same guard, comments via RPC. The

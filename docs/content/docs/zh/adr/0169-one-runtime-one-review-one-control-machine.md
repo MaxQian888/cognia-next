@@ -52,6 +52,8 @@ description: "统一小队执行：durable-v2 为唯一运行时，ExecutionRunI
 `/squads` 保留定义、成员、就绪状态和任务板。它的「运行」页签就是规范的 `/agent-runs` 面板，钉住 `kind = team`（以及选中的小队）。运行卡片深链到 `/agent-runs?run=…`。退役的指挥中心和逐小队运行列表，连同它们各自的历史查询，已删除。桌面、Web、移动端、聊天、连接器、CLI 读同一份投影快照和同一份 `allowedActions`。伴侣壳把控制命令以 `execution_run_control` 提交给桌面宿主，那就是驾驶舱自己的命令，走同一道门。
 退役的 `team_run_pause|resume|stop` 回答 `upgrade-required`。
 
+配对控制台通过 `team_run_start` 启动新任务：绑定设备的审批租约授权这次手动操作，宿主根据已认证设备和稳定的启动 UUID 生成运行 ID。`startSquadRun` 执行就绪检查、权限约束和事务准入，响应保留阻塞原因及规范执行 ID。远程手动启动使用交互式审批策略，同一份持久化审批可在驾驶舱回答。启动仅在线执行，不进入移动端离线队列。
+
 ### 用码，不用句子
 
 原始状态和运行时写的英文句子换成原因码与事件码，在 `en` 和 `zh-CN` 里本地化（`waitingReason` 是 `waiting_review` 或 `recovery_required`，阻塞码经 `squads.readiness.blockers` 渲染，决策与交付节点状态各有自己的表）。

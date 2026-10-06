@@ -1135,6 +1135,130 @@ mod tests {
     }
 
     #[test]
+    fn squad_start_requires_agent_grant_and_device_bound_approval_on_every_transport() {
+        let descriptor = super::super::command_manifest::descriptor("team_run_start")
+            .expect("manual Squad start must be registered");
+        assert_eq!(descriptor.idempotency, CommandIdempotency::Required);
+        assert_eq!(descriptor.approval, CommandApproval::Interactive);
+        assert_eq!(descriptor.capability, "agent.run");
+        let device_id = "squad-start-approval-test";
+        let lease = super::super::admin_lease::issue(
+            device_id,
+            vec!["team_run_start".into()],
+            Some(120),
+            true,
+        )
+        .unwrap();
+        for transport in [
+            ExecutionTransport::Http,
+            ExecutionTransport::WebSocket,
+            ExecutionTransport::WebRtc,
+        ] {
+            let mut request = execution_request("device", Some(vec![]));
+            request.command = "team_run_start".into();
+            request.transport = transport;
+            request.principal.device_id = device_id.into();
+            assert!(authorize_transport(&request, descriptor).is_ok());
+            assert_eq!(
+                authorize_capability(&request, descriptor).unwrap_err().code,
+                "missing_capability"
+            );
+            request.principal.authorization_capabilities = Some(vec!["agent.run".into()]);
+            assert!(authorize_capability(&request, descriptor).is_ok());
+            assert_eq!(
+                authorize_approval(&request, descriptor).unwrap_err().code,
+                "interactive_approval_required"
+            );
+            request.args = json!({ "adminLease": lease.token });
+            assert!(authorize_approval(&request, descriptor).is_ok());
+            request.principal.device_id = "another-device".into();
+            assert!(authorize_approval(&request, descriptor).is_err());
+        }
+        super::super::admin_lease::revoke_device(device_id);
+        let mut revoked = execution_request("device", Some(vec!["agent.run".into()]));
+        revoked.command = "team_run_start".into();
+        revoked.principal.device_id = device_id.into();
+        revoked.args = json!({ "adminLease": lease.token });
+        assert!(authorize_approval(&revoked, descriptor).is_err());
+    }
+
+    #[test]
+    fn squad_start_contract_preserves_admission_and_rejects_client_authority() {
+        use cognia_headless_contract::{ContractDirection, ContractPlane};
+        let input = json!({
+            "teamId": "squad-1", "launchId": "e04469bc-e100-43f8-9e15-a96c0d7f1847",
+            "goal": "Review release", "ultracode": true, "adminLease": "lease",
+        });
+        assert!(validate_contract_value(
+            "squad-request",
+            "team_run_start",
+            &input,
+            ContractDirection::Input,
+            ContractPlane::Device
+        )
+        .is_ok());
+        for (key, value) in [
+            ("launchId", json!("not-a-uuid")),
+            ("teamId", json!(" ")),
+            ("callerDeviceId", json!("spoofed")),
+            ("permissionCeiling", json!({})),
+            ("origin", json!("scheduler")),
+            ("parentRunId", json!("replace-other-run")),
+        ] {
+            let mut invalid = input.clone();
+            invalid[key] = value;
+            assert!(
+                validate_contract_value(
+                    "squad-request",
+                    "team_run_start",
+                    &invalid,
+                    ContractDirection::Input,
+                    ContractPlane::Device
+                )
+                .is_err(),
+                "must reject {key}"
+            );
+        }
+        for missing in ["teamId", "launchId", "adminLease"] {
+            let mut invalid = input.clone();
+            invalid.as_object_mut().unwrap().remove(missing);
+            assert!(
+                validate_contract_value(
+                    "squad-request",
+                    "team_run_start",
+                    &invalid,
+                    ContractDirection::Input,
+                    ContractPlane::Device
+                )
+                .is_err(),
+                "must require {missing}"
+            );
+        }
+        for output in [
+            json!({"started": true, "runId": "run", "executionRunId": "execution:team:run", "squadName": "S", "duplicate": true}),
+            json!({"started": false, "reason": "not_ready", "blockers": [{"code": "environment_unenforceable", "action": "configure_environment", "detail": {"environmentId": "env", "missingCapabilities": ["sandbox"]}}]}),
+            json!({"started": false, "reason": "already_running", "runId": "live", "executionRunId": "execution:team:live"}),
+        ] {
+            assert!(validate_contract_value(
+                "squad-request",
+                "team_run_start",
+                &output,
+                ContractDirection::Output,
+                ContractPlane::Device
+            )
+            .is_ok());
+        }
+        assert!(validate_contract_value(
+            "squad-request",
+            "team_run_start",
+            &json!({"ok": true}),
+            ContractDirection::Output,
+            ContractPlane::Device
+        )
+        .is_err());
+    }
+
+    #[test]
     fn agent_control_grant_authorizes_the_external_agent_process_plane() {
         for command in [
             "spawn_external_agent",

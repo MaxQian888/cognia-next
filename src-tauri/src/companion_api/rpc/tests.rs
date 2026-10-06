@@ -4039,6 +4039,20 @@ fn inject_caller_device_id_overwrites_spoofed_values() {
 }
 
 #[test]
+fn squad_start_is_reachable_and_bound_to_the_authenticated_device() {
+    assert!(KNOWN_COMMANDS_SET.contains("team_run_start"));
+    assert!(data_sync::COMMANDS.contains(&"team_run_start"));
+    let out = inject_caller_device_id(
+        "team_run_start",
+        json!({ "teamId": "squad", "launchId": "e04469bc-e100-43f8-9e15-a96c0d7f1847", "callerDeviceId": "spoofed" }),
+        "real-device",
+    );
+    assert_eq!(out["callerDeviceId"], "real-device");
+    assert_eq!(out["teamId"], "squad");
+    assert_eq!(out["launchId"], "e04469bc-e100-43f8-9e15-a96c0d7f1847");
+}
+
+#[test]
 fn inject_caller_device_id_only_touches_allowlisted_commands() {
     let args = json!({ "id": "c_1" });
     let out = inject_caller_device_id("character_upsert", args, "dev-real");

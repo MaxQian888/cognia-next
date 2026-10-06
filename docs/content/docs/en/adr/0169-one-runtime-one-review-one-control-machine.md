@@ -116,6 +116,14 @@ its control command to the desktop host as `execution_run_control`, which is
 the cockpit's own command through the same gate. The retired
 `team_run_pause|resume|stop` answer `upgrade-required`.
 
+A paired console starts new work with `team_run_start`: a device-bound approval
+lease permits the manual gesture, and the host derives the run ID from the
+authenticated device and stable launch UUID. `startSquadRun` performs readiness,
+permission and transactional admission; the response retains blockers and the
+canonical execution ID. Manual remote starts use interactive review policy, so
+the same durable review can be answered from the cockpit. Start is online-only
+and does not enter the mobile offline queue.
+
 ### Codes, not sentences
 
 Raw statuses and runtime-authored English are replaced by reason and event

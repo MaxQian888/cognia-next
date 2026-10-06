@@ -6,7 +6,23 @@ import {
   handleTeamTaskComment,
   handleTeamTaskCreate,
   handleTeamTaskMove,
+  handleTeamRunStart,
 } from "./agent-team-write-handlers"
+import { startSquadRun } from "@/lib/ai/agent/team/squad/start-squad-run"
+import { resolveGatePolicy } from "@/lib/ai/agent/team/gates/gate-policy"
+
+jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
+  startSquadRun: jest.fn(),
+}))
+
+jest.mock("@/lib/share/hash", () => ({
+  sha256Hex: async (value: string) =>
+    jest
+      .requireActual<typeof import("node:crypto")>("node:crypto")
+      .createHash("sha256")
+      .update(value)
+      .digest("hex"),
+}))
 
 jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
@@ -156,5 +172,112 @@ describe("handleTeamTaskComment", () => {
       ok: false,
       reason: "task-not-found",
     })
+  })
+})
+
+describe("handleTeamRunStart", () => {
+  const launchId = "e04469bc-e100-43f8-9e15-a96c0d7f1847"
+  const request = { teamId: "squad-1", launchId, callerDeviceId: "phone-1" }
+  const start = jest.mocked(startSquadRun)
+
+  it.each([
+    {},
+    { ...request, teamId: " " },
+    { ...request, launchId: "invalid" },
+    { ...request, goal: 1 },
+    { ...request, ultracode: "yes" },
+  ])("refuses invalid input without dispatch: %j", async (payload) => {
+    expect(await handleTeamRunStart(payload)).toEqual({ started: false, reason: "invalid_payload" })
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, "", " "])(
+    "requires authenticated device provenance: %j",
+    async (callerDeviceId) => {
+      expect(await handleTeamRunStart({ ...request, callerDeviceId })).toEqual({
+        started: false,
+        reason: "caller_device_required",
+      })
+      expect(start).not.toHaveBeenCalled()
+    }
+  )
+
+  it("hands manual intent to the only launch seam without accepting caller authority", async () => {
+    const accepted = {
+      started: true,
+      runId: "r1",
+      executionRunId: "execution:team:r1",
+      squadName: "S",
+    }
+    start.mockResolvedValueOnce(accepted)
+    expect(
+      await handleTeamRunStart({
+        ...request,
+        goal: "Review release",
+        ultracode: true,
+        origin: "scheduler",
+        permissionCeiling: { permissionMode: "bypassPermissions" },
+        parentRunId: "victim",
+        executionConstraints: {},
+        runId: "borrowed",
+      })
+    ).toBe(accepted)
+    const input = start.mock.calls[0][0]
+    expect(input).toEqual({
+      squadId: "squad-1",
+      goal: "Review release",
+      ultracode: true,
+      runId: expect.stringMatching(/^squad-companion:[a-f0-9]{64}$/),
+      origin: "interactive",
+      triggeredFrom: { source: "api", deviceId: "phone-1" },
+    })
+    expect(resolveGatePolicy(input.origin as "interactive").planApproval).toBe("block")
+  })
+
+  it("keeps logical run identity across lease retries and UUID casing, but isolates devices", async () => {
+    start.mockResolvedValue({ started: true, duplicate: true })
+    await handleTeamRunStart(request)
+    await handleTeamRunStart({
+      ...request,
+      launchId: launchId.toUpperCase(),
+      adminLease: "new-lease",
+    })
+    await handleTeamRunStart({ ...request, callerDeviceId: "phone-2" })
+    await handleTeamRunStart({ ...request, launchId: "090283fb-a337-4f1b-8c11-2a29c33f0b7d" })
+    const ids = start.mock.calls.map(([input]) => input.runId)
+    expect(ids[0]).toBe(ids[1])
+    expect(new Set(ids)).toHaveProperty("size", 3)
+    expect(start.mock.calls[0][0]).toMatchObject({ goal: "" })
+  })
+
+  it.each([
+    { started: false, reason: "squad_not_found" },
+    { started: false, reason: "runtime_not_ready" },
+    { started: false, reason: "journal_failed" },
+    {
+      started: false,
+      reason: "already_running",
+      runId: "busy",
+      executionRunId: "execution:team:busy",
+    },
+    {
+      started: false,
+      reason: "not_ready",
+      blockers: [{ code: "missing_primary_repository", action: "configure_repository" }],
+    },
+    {
+      started: true,
+      runId: "existing",
+      executionRunId: "execution:team:existing",
+      duplicate: true,
+    },
+  ] as const)("preserves the canonical admission result: %j", async (outcome) => {
+    start.mockResolvedValueOnce(outcome as Awaited<ReturnType<typeof startSquadRun>>)
+    expect(await handleTeamRunStart(request)).toBe(outcome)
+  })
+
+  it("returns a structured dispatch refusal if the launch boundary throws", async () => {
+    start.mockRejectedValueOnce(new Error("storage failed"))
+    expect(await handleTeamRunStart(request)).toEqual({ started: false, reason: "dispatch_error" })
   })
 })

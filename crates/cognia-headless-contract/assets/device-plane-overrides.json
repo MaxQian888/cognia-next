@@ -7428,6 +7428,42 @@
         "additionalProperties": false
       }
     },
+    "team_run_start": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "teamId",
+          "launchId",
+          "adminLease"
+        ],
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "launchId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "description": "Stable logical manual launch UUID. Preserve across consent and network retries; a fresh intentional launch uses a new UUID. The host namespaces the run by the authenticated device."
+          },
+          "goal": {
+            "type": "string",
+            "description": "Optional objective; absent or blank preserves the Squad's current objective."
+          },
+          "ultracode": {
+            "type": "boolean"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "team_run_stop": {
       "inputSchemaSource": "contract",
       "inputSchema": {

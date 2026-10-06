@@ -83,6 +83,7 @@ import {
   handleTeamTaskComment,
   handleTeamTaskCreate,
   handleTeamTaskMove,
+  handleTeamRunStart,
 } from "@/lib/companion/agent-team-write-handlers"
 import { roomSend, roomStop } from "@/lib/companion/room-write-handlers"
 import {
@@ -605,6 +606,8 @@ export async function dispatchCommand(
       return handleTeamTaskComment(payload)
     // Retired with ADR-0169: a team-addressed control carried no revision and
     // no decision. An older client that still sends one is told to upgrade.
+    case "team_run_start":
+      return handleTeamRunStart(payload)
     case "team_run_pause":
     case "team_run_resume":
     case "team_run_stop":
