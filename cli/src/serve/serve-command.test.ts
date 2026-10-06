@@ -261,6 +261,9 @@ describe("serveCommand", () => {
         env: env({
           COGNIA_SERVER_URL: controlPlane.url,
           COGNIA_SERVICE_TOKEN: "svc-token-e2e",
+          // Account sync on, with a CLI home that holds no sign-in.
+          COGNIA_ACCOUNT_SYNC: "1",
+          COGNIA_HOME: path.join(home, "cli-home"),
         }),
         wsFactory: (url) => new FakeServerSocket(url),
         shutdown,
@@ -274,6 +277,8 @@ describe("serveCommand", () => {
     const joined = out.logs.join("")
     expect(joined).toContain("bridge connected")
     expect(joined).toContain("desktop-sync-source")
+    expect(joined).toContain("account-sync")
+    expect(joined).toContain("account sync: not signed in; run `cognia-agent logto login`")
 
     // The shutdown flush persisted the seeded row.
     const snapshotDirectory = path.join(home, "db-local_acct_a.json.tables")

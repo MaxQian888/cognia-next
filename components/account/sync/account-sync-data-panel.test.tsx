@@ -7,6 +7,7 @@ jest.mock("next-intl", () => ({
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { AccountSyncEngine, EngineStatus } from "@/lib/account-sync/data/engine"
+import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { useAccountSyncStore } from "@/stores/account-sync/account-sync-store"
 
 import { AccountSyncDataPanel } from "./account-sync-data-panel"
@@ -43,6 +44,28 @@ describe("AccountSyncDataPanel", () => {
   it("says data syncs where it lives when this window runs no engine", () => {
     render(<AccountSyncDataPanel />)
     expect(screen.getByTestId("account-sync-data")).toHaveTextContent("notHere")
+    expect(screen.queryByTestId("account-sync-headless-hint")).toBeNull()
+  })
+
+  it("points at the host's terminal when this window shows a headless host", () => {
+    render(<AccountSyncDataPanel />)
+    act(() =>
+      setRuntimeSnapshot({
+        target: { id: "web-companion", kind: "companion", platform: "web", hostKind: "cloud" },
+        vaultState: "unlocked",
+        connectionState: "online",
+      } as never)
+    )
+    expect(screen.getByTestId("account-sync-headless-hint")).toHaveTextContent(
+      "headlessHint(cognia-agent account-sync status)"
+    )
+    act(() =>
+      setRuntimeSnapshot({
+        target: null,
+        vaultState: "unavailable",
+        connectionState: "offline",
+      } as never)
+    )
   })
 
   it("shows starting, follower and seeding progress", () => {

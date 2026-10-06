@@ -38,6 +38,7 @@ import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { setTransport } from "@/lib/tauri"
 import { CompanionTransport, type CompanionConfig } from "@/lib/tauri/transport-companion"
 
+import { brainAccountSyncHost, brainBackup } from "../account-sync/headless-sync"
 import type { ParsedArgs } from "../cli/args"
 import { numberFlag, stringFlag } from "../cli/args"
 import type { OutputSink } from "../cli/output"
@@ -217,12 +218,23 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // ── 6. Runtimes ────────────────────────────────────────────────────────────
   await import("@/lib/headless/runtimes")
   const resolveMessage = await loadMessageResolver("en")
+  const backupFilesystem = createNodeBackupFilesystem()
+  // Account sync (ADR-0215 phase 3a): the host's own `logto login` and the
+  // key store `cognia-agent account-sync` enrolls into; absent unless
+  // COGNIA_ACCOUNT_SYNC is on.
+  const accountSync = brainAccountSyncHost({
+    cliHome,
+    localAccountId,
+    env,
+    backup: brainBackup({ filesystem: backupFilesystem, fallbackDir: path.join(home, "backups") }),
+  })
   const runtimes = await bootstrapHeadlessRuntimes({
     host: "brain",
     localAccountId,
     bridge,
     notifyDbWrite: durability.notifyDbWrite,
-    backupFilesystem: createNodeBackupFilesystem(),
+    backupFilesystem,
+    ...(accountSync ? { accountSync } : {}),
     pluginRuntime: createNodePluginRuntimeAdapter(),
     resolveMessage,
     log: (level, message) => {

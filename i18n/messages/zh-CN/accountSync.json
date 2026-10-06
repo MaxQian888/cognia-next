@@ -151,6 +151,7 @@
   "data": {
     "title": "你的数据",
     "notHere": "数据在持有它的设备上同步。此窗口显示的是另一台主机的数据，因此不会从这里同步。",
+    "headlessHint": "如果那台主机是 Cognia 服务器，请在它的终端里登记：{command}",
     "starting": "正在启动同步…",
     "follower": "正在另一个 Cognia 窗口中同步。",
     "seeding": "正在为同步准备你的数据…",

@@ -5,10 +5,11 @@
  * data engine of this window reports, and what this device syncs.
  *
  * Shown for an enrolled device. With no engine (this window shows a companion
- * mirror of another host) it says the data syncs where it lives.
+ * mirror of another host) it says the data syncs where it lives, and for a
+ * headless host, which command enrolls it there.
  */
 
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -17,6 +18,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { EngineStatus } from "@/lib/account-sync/data/engine"
 import type { SyncClasses } from "@/lib/account-sync/data/types"
+import {
+  getRuntimeSnapshot,
+  getServerRuntimeSnapshot,
+  subscribeRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
 import { useAccountSyncStore } from "@/stores/account-sync/account-sync-store"
 
 type Running = Extract<EngineStatus, { kind: "running" }>
@@ -35,10 +41,26 @@ export function AccountSyncDataPanel() {
   const engine = useAccountSyncStore((state) => state.engine)
   const status = useAccountSyncStore((state) => state.engineStatus)
   const openJoinDialog = useAccountSyncStore((state) => state.setJoinDialogOpen)
+  const target = useSyncExternalStore(
+    subscribeRuntimeSnapshot,
+    () => getRuntimeSnapshot().target,
+    () => getServerRuntimeSnapshot().target
+  )
+  // A headless host enrolls and syncs on its own, from its terminal.
+  const cloudHost = target?.kind === "companion" && target.hostKind === "cloud"
 
   let body: React.ReactNode
   if (!engine) {
-    body = <p className="text-xs text-muted-foreground">{t("notHere")}</p>
+    body = (
+      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+        <p>{t("notHere")}</p>
+        {cloudHost ? (
+          <p data-testid="account-sync-headless-hint">
+            {t("headlessHint", { command: "cognia-agent account-sync status" })}
+          </p>
+        ) : null}
+      </div>
+    )
   } else if (!status || status.kind === "starting" || status.kind === "stopped") {
     body = <Waiting text={t("starting")} />
   } else if (status.kind === "follower") {

@@ -85,6 +85,13 @@ export interface HeadlessRuntimeContext {
   /** Node plugin host adapter; native disk lifecycle stays in cognia-server. */
   pluginRuntime?: HeadlessPluginRuntimeAdapter
   /**
+   * Account sync for this host (ADR-0215 phase 3a): its own sign-in and the
+   * key store the `cognia-agent account-sync` commands write. Absent when the
+   * serve process has account sync off (`COGNIA_ACCOUNT_SYNC`); the
+   * `account-sync` runtime then does nothing.
+   */
+  accountSync?: import("@/lib/account-sync/data/headless-host").HeadlessAccountSyncHost
+  /**
    * Resolve a user-facing message key (both locales live in `i18n/messages`)
    * — the headless stand-in for `useTranslations()`.
    */

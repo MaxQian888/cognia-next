@@ -25,6 +25,9 @@ export interface ParsedArgs {
 /** Flags that never consume a following token. */
 export const BOOLEAN_FLAGS = new Set([
   "yes",
+  // `account-sync data --merge | --replace`.
+  "merge",
+  "replace",
   "json",
   "help",
   "version",
@@ -87,6 +90,7 @@ export const GROUPED_COMMANDS = new Set([
   "auth",
   "config",
   "logto",
+  "account-sync",
   "lark",
   "eval",
   "durability",

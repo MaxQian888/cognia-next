@@ -33,6 +33,9 @@
  * - `bot-delivery-runner` — drains the Bot delivery queue. The brain is
  *   awake when nobody is at a desktop, and integration ingress only exists
  *   there and here.
+ * - `account-sync` — runs the account sync engine on the brain's own database
+ *   once the host is enrolled from its terminal (ADR-0215 phase 3a); inert
+ *   unless the serve process turned account sync on.
  * - `router-fusion` — Router + Fusion boot recovery and daily retention for the
  *   runs the brain hosts (ADR-0188 B2); inert while every wired surface is off.
  * - `backup-scheduler` — the shared encrypted local/WebDAV scheduler with an
@@ -177,5 +180,6 @@ import "./room-runner"
 import "./sftp-transfer-pump"
 import "./bots"
 import "./router-fusion"
+import "./account-sync"
 
 export {}

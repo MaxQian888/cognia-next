@@ -15,6 +15,7 @@ export const KNOWN_COMMANDS = new Set([
   "chat",
   "serve",
   "logto",
+  "account-sync",
   "lark",
   "eval",
   "durability",

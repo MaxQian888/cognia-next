@@ -151,6 +151,7 @@
   "data": {
     "title": "Your data",
     "notHere": "Data syncs on the device that holds it. This window shows another host's data, so it does not sync from here.",
+    "headlessHint": "If that host is a Cognia server, enroll it from its terminal: {command}",
     "starting": "Starting sync…",
     "follower": "Syncing in another Cognia window.",
     "seeding": "Preparing your data for sync…",

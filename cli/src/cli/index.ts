@@ -11,6 +11,7 @@ import { configCommand as defaultConfig } from "./config-command"
 import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from "./handoff-cmd"
 import { chatCommand as defaultChat } from "./chat"
 import { logtoCommand as defaultLogto } from "./logto-command"
+import { accountSyncCommand as defaultAccountSync } from "./account-sync-command"
 import { larkCommand as defaultLark } from "./lark-command"
 import { evalCommand as defaultEval } from "./eval-command"
 import { durabilityCommand as defaultDurability } from "./durability-command"
@@ -66,6 +67,11 @@ Usage:
   cognia-agent logto <login|status|logout>          Cognia account (default) or Logto session
                      [--provider feishu|github|google|apple]
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
+  cognia-agent account-sync <status|setup|join|recover|approve|deny|devices|
+                             revoke|rotate|recovery-key|data> [--name n] [--kit file]
+                     [--merge|--replace] [--account id]
+                     enroll this host in account sync (preview; COGNIA_ACCOUNT_SYNC=1);
+                     sign in first with \`cognia-agent logto login\`
   cognia-agent config <get|set|path>
                      config set agentBackends.<backend>.piExtensionPolicy
                        isolated|global|trusted-project
@@ -150,6 +156,7 @@ export interface MainDeps {
   resume?: typeof defaultResume
   chat?: typeof defaultChat
   logto?: typeof defaultLogto
+  accountSync?: typeof defaultAccountSync
   serve?: typeof defaultServe
   lark?: typeof defaultLark
   eval?: typeof defaultEval
@@ -231,6 +238,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.chat ?? defaultChat)(args, { out })
     case "logto":
       return (deps.logto ?? defaultLogto)(args, { out })
+    case "account-sync":
+      return (deps.accountSync ?? defaultAccountSync)(args, { out })
     case "serve":
       return (deps.serve ?? defaultServe)(args, { out })
     case "lark":

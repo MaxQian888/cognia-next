@@ -9,22 +9,10 @@ import {
 } from "@/lib/collab/refresh-scheduler"
 import { refreshCollabPlaneQuietly } from "@/lib/collab/refresh"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
-import {
-  isLogtoRefreshError,
-  refreshConfigFor,
-  refreshLogtoToken,
-  type LogtoSession,
-} from "@/lib/logto/client"
+import { refreshLogtoToken, type LogtoSession } from "@/lib/logto/client"
 
 import type { CollabCliConfig } from "../config/schema"
-import {
-  readLogtoSessionFile,
-  removeLogtoSessionFile,
-  writeLogtoSessionFile,
-  type LogtoSessionFs,
-} from "../config/logto-session"
-
-const TOKEN_REFRESH_SKEW_MS = 60_000
+import { freshLogtoSessionFile, type LogtoSessionFs } from "../config/logto-session"
 
 export interface HeadlessCollabReaderDeps {
   sessionFs?: LogtoSessionFs
@@ -49,40 +37,16 @@ function jwtSubject(token: string): string | null {
   }
 }
 
-async function freshSession(
+function freshSession(
   cliHome: string,
   deps: HeadlessCollabReaderDeps
 ): Promise<LogtoSession | null> {
-  const session = readLogtoSessionFile(cliHome, deps.sessionFs)
-  if (!session) return null
-  const now = deps.now ?? Date.now
-  if (
-    session.expiresAt === undefined ||
-    session.expiresAt - now() > TOKEN_REFRESH_SKEW_MS ||
-    !session.refreshToken
-  ) {
-    return session
-  }
-  const config = refreshConfigFor(session)
-  try {
-    const refreshed = await (deps.refreshToken ?? refreshLogtoToken)(
-      config,
-      session.refreshToken,
-      deps.fetchImpl as typeof fetch | undefined
-    )
-    writeLogtoSessionFile(cliHome, refreshed, deps.sessionFs)
-    return refreshed
-  } catch (error) {
-    // A refused refresh is a dead login: keeping the file would make every
-    // later poll present the same spent token and read every 401 as a
-    // server fault. A transient failure keeps the file, because the next
-    // poll may succeed, but hands out no token now: the stored one has
-    // expired and presenting it is pointless.
-    if (isLogtoRefreshError(error) && error.permanent) {
-      removeLogtoSessionFile(cliHome, deps.sessionFs)
-    }
-    return null
-  }
+  return freshLogtoSessionFile(cliHome, {
+    sessionFs: deps.sessionFs,
+    fetchImpl: deps.fetchImpl as typeof fetch | undefined,
+    refreshToken: deps.refreshToken,
+    now: deps.now,
+  })
 }
 
 export interface HeadlessCollabReader {

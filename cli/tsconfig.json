@@ -47,7 +47,9 @@
       "@cognia/companion-client": ["packages/companion-client/src/index.ts"],
       "@cognia/companion-client/*": ["packages/companion-client/src/*"],
       "@cognia/web-search": ["packages/web-search/src/index.ts"],
-      "@cognia/web-search/*": ["packages/web-search/src/*"]
+      "@cognia/web-search/*": ["packages/web-search/src/*"],
+      "@cognia/sync-protocol": ["packages/sync-protocol/src/index.ts"],
+      "@cognia/sync-protocol/*": ["packages/sync-protocol/src/*"]
     }
   }
 }

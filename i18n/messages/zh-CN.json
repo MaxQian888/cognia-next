@@ -2064,6 +2064,7 @@
       },
       "error": "同步遇到问题：{message}",
       "follower": "正在另一个 Cognia 窗口中同步。",
+      "headlessHint": "如果那台主机是 Cognia 服务器，请在它的终端里登记：{command}",
       "lastSynced": "上次同步于 {time}",
       "live": {
         "connecting": "正在连接…",
