@@ -17,6 +17,31 @@ describe("plugin import boundary", () => {
     ])
   })
 
+  it("covers every directory under the alias, not a hand-kept list", () => {
+    // The old four-prefix list (@/lib, @/types, @/components, @/stores) let
+    // `plugins/web-tools` import `@/packages/plugin-sdk/src/host` — a subpath
+    // the SDK deliberately keeps out of package.json#exports and the tarball —
+    // and the bundle still loaded. Nothing under `@/` resolves outside this
+    // monorepo, so the alias itself is the boundary.
+    expect(
+      findHostPrivateImports(`
+        import { gate } from "@/packages/plugin-sdk/src/host"
+        import { useThing } from "@/hooks/ui/use-thing"
+        import { thing } from "@/app/internal"
+        import { other } from "@/plugins/sibling/src/index"
+        import { util } from "@/utils/private"
+        import { Button } from "@/ui/button"
+      `)
+    ).toEqual([
+      "@/packages/plugin-sdk/src/host",
+      "@/hooks/ui/use-thing",
+      "@/app/internal",
+      "@/plugins/sibling/src/index",
+      "@/utils/private",
+      "@/ui/button",
+    ])
+  })
+
   it("allows public SDK, UI, and third-party modules", () => {
     expect(
       findHostPrivateImports(`

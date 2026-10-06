@@ -20,9 +20,11 @@ use crate::ui::RuntimeUi;
 
 mod report;
 mod rules;
+mod source_imports;
 
 pub use report::{Diagnostic, LintError, LintReport, Severity};
 pub use rules::validate_manifest;
+pub use source_imports::scan_author_imports;
 
 /// CLI entry: `cognia plugin lint`. Prints human-readable diagnostics by
 /// default or JSON when `as_json` is true, and returns `LintError` when
@@ -58,7 +60,11 @@ pub fn run(
         }
         Err(err) => return Err(err),
     };
-    let diagnostics = validate_manifest(&manifest);
+    let mut diagnostics = validate_manifest(&manifest);
+    // The author's own source is part of what `lint` validates: a `@/` alias
+    // resolves only inside this repository, and esbuild would happily inline it
+    // rather than leave a specifier the loader's post-bundle scan could catch.
+    diagnostics.extend(scan_author_imports(&crate_root));
     // `valid` describes the manifest (no errors); `ok` describes this run's
     // gate. Under `--warnings-as-errors`, warnings escalate the exit but do
     // not change `valid`. Notices never gate on either axis.
@@ -98,7 +104,10 @@ fn run_passes(diagnostics: &[Diagnostic], warnings_as_errors: bool) -> bool {
 /// it in context and abort the build itself.
 pub fn validate_at(path: &Path) -> Result<LintReport> {
     let (manifest, manifest_path) = read_plugin_manifest(path)?;
-    let diagnostics = validate_manifest(&manifest);
+    let mut diagnostics = validate_manifest(&manifest);
+    // Same scan `run` performs — `build` calls this instead, and a forbidden
+    // import has to stop the build before esbuild can inline it away.
+    diagnostics.extend(scan_author_imports(path));
     let valid = !diagnostics.iter().any(|d| d.severity == Severity::Error);
     Ok(LintReport {
         schema_version: 2,

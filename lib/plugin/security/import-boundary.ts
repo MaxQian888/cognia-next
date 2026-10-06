@@ -1,12 +1,33 @@
-const HOST_PRIVATE_IMPORT_PREFIXES = ["@/lib", "@/types", "@/components", "@/stores"] as const
+/**
+ * Defence in depth for `evaluatePluginCode`: refuse a plugin bundle whose text
+ * still names a host-private module.
+ *
+ * `@/` is this repo's tsconfig alias for its own root. Nothing under it exists
+ * outside the monorepo, so any surviving `@/` specifier means the bundle was
+ * built against app internals — it will fail at `require()` time with an
+ * unreadable error, or worse, silently bind to something the host never meant
+ * to publish. Refusing the whole bundle up front names the offending specifier
+ * instead.
+ *
+ * This deliberately matches the ALIAS, not a hand-kept list of directories
+ * under it. The previous four-prefix list (`@/lib`, `@/types`, `@/components`,
+ * `@/stores`) is exactly why `plugins/web-tools` could reach
+ * `@/packages/plugin-sdk/src/host` — a subpath the SDK deliberately keeps out
+ * of `package.json#exports` and the npm tarball — and still load cleanly.
+ *
+ * This is the LAST line, not the first: the text scan cannot see an alias that
+ * esbuild already resolved and inlined. `cognia plugin build` scans the
+ * author's source tree before bundling for that reason, and
+ * `pnpm plugin:author-imports` ratchets first-party plugins in CI.
+ */
+
+const HOST_PRIVATE_IMPORT_ALIAS = "@/"
 
 const IMPORT_SPECIFIER_PATTERN =
   /(?:from\s*|import\s*\(|require\s*\(|import\s+(?=["']))\s*["']([^"']+)["']/g
 
 function isHostPrivateImport(specifier: string): boolean {
-  return HOST_PRIVATE_IMPORT_PREFIXES.some(
-    (prefix) => specifier === prefix || specifier.startsWith(`${prefix}/`)
-  )
+  return specifier.startsWith(HOST_PRIVATE_IMPORT_ALIAS)
 }
 
 export function findHostPrivateImports(source: string): string[] {
