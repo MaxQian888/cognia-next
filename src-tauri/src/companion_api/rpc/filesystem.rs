@@ -235,8 +235,9 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             let content: String = required(&args, "content")?;
+            let encoding: Option<String> = optional(&args, "encoding")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_write_workspace_file(root, rel_path, content)
+                crate::files::fs_write_workspace_file(root, rel_path, content, encoding)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?

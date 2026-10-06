@@ -1670,7 +1670,7 @@ function operationIdFor(method, path) {
 
 function authForPath(path) {
   if (
-    ["/healthz", "/livez", "/readyz", "/.well-known/agent-card.json"].includes(path) ||
+    ["/healthz", "/livez", "/readyz", "/.well-known/agent-card.json", "/api/auth/config"].includes(path) ||
     path.startsWith("/api/auth/device/")
   ) {
     return []
@@ -2080,6 +2080,19 @@ function canonicalAuthPaths() {
   const authenticationRejected = { $ref: "#/components/responses/AuthenticationRejected" }
   const publicApiError = { $ref: "#/components/responses/PublicApiError" }
   return {
+    "/api/auth/config": {
+      get: {
+        operationId: "getCompanionAuthConfig",
+        tags: ["device-auth"],
+        summary: "Discover the canonical browser pairing and signaling configuration.",
+        security: [],
+        responses: {
+          200: jsonResponse("CompanionAuthConfig", "Deployment-safe public authentication configuration."),
+          429: publicApiError,
+          503: publicApiError,
+        },
+      },
+    },
     "/api/auth/device/challenge": {
       post: {
         operationId: "issueDeviceChallenge",
@@ -2710,6 +2723,42 @@ function orderPaths(paths, contract, prefix) {
   return ordered
 }
 
+export function removeUnusedPublicComponents(spec) {
+  const used = new Set()
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return
+    if (typeof value.$ref === "string") {
+      const match = value.$ref.match(/^#\/components\/(schemas|responses)\/([^/]+)/)
+      if (match && !used.has(match[0])) {
+        used.add(match[0])
+        visit(spec.components?.[match[1]]?.[match[2]])
+      }
+    }
+    for (const child of Object.values(value)) visit(child)
+  }
+  for (const [key, value] of Object.entries(spec)) {
+    if (key !== "components") visit(value)
+  }
+  for (const [category, entries] of Object.entries(spec.components ?? {})) {
+    if (!["schemas", "responses"].includes(category)) {
+      visit(entries)
+    } else {
+      // Public reference aliases remain available to existing generated clients.
+      for (const entry of Object.values(entries)) {
+        if (entry.$ref) visit(entry)
+      }
+    }
+  }
+  for (const category of ["schemas", "responses"]) {
+    for (const [name, entry] of Object.entries(spec.components?.[category] ?? {})) {
+      if (!entry.$ref && !used.has(`#/components/${category}/${name}`)) {
+        delete spec.components[category][name]
+      }
+    }
+  }
+  return spec
+}
+
 function buildPublicSpec(base, contract, manifest, remoteNames, argumentSchemas) {
   const classified = classifyCommands(manifest, remoteNames)
   const reconciled = reconcileRpcPaths({
@@ -2726,7 +2775,7 @@ function buildPublicSpec(base, contract, manifest, remoteNames, argumentSchemas)
     const operation = paths[`/api/_rpc/${name}`]?.post
     if (operation) operation.security = [{ dpopAccess: [] }]
   }
-  return rewriteLegacyComponentReferences(normalizeOpenApi31({
+  return removeUnusedPublicComponents(rewriteLegacyComponentReferences(normalizeOpenApi31({
     ...base,
     info: {
       ...base.info,
@@ -2767,7 +2816,7 @@ function buildPublicSpec(base, contract, manifest, remoteNames, argumentSchemas)
       ).length,
       legacyCompatibility: false,
     },
-  }))
+  })))
 }
 
 function normalizeOpenApi31(value) {

@@ -67,7 +67,58 @@ import {
   reconcileRpcPaths,
   validateCommandCoverage,
   validateRouteContract,
+  removeUnusedPublicComponents,
 } from "./gen-companion-api.mjs"
+
+test("public components retain reachable schemas and compatibility aliases only", () => {
+  const spec = {
+    paths: { "/example": { get: { responses: { 200: { $ref: "#/components/responses/Used" } } } } },
+    components: {
+      responses: { Used: { schema: { $ref: "#/components/schemas/Used" } }, Unused: {} },
+      schemas: {
+        Used: { properties: { child: { $ref: "#/components/schemas/Child" } } },
+        Child: { type: "string" },
+        LegacyAlias: { $ref: "#/components/schemas/Used" },
+        Unused: { properties: { orphan: { $ref: "#/components/schemas/Orphan" } } },
+        Orphan: { type: "string" },
+      },
+    },
+  }
+  removeUnusedPublicComponents(spec)
+  assert.deepEqual(Object.keys(spec.components.schemas), ["Used", "Child", "LegacyAlias"])
+  assert.deepEqual(Object.keys(spec.components.responses), ["Used"])
+})
+
+test("authentication discovery is public and documents pre-auth throttling", () => {
+  const operation = inspectCommittedContract().desiredPublicSpec.paths["/api/auth/config"].get
+  assert.deepEqual(operation.security, [])
+  assert.ok(operation.responses[429])
+  assert.ok(!operation.parameters?.some((parameter) => parameter.$ref === "#/components/parameters/DpopProof"))
+})
+
+test("host actions retain their discriminator and extensible intent payloads", () => {
+  const inspected = inspectCommittedContract()
+  for (const [spec, prefix] of [[inspected.desiredPublicSpec, "/api"], [inspected.desiredHeadlessSpec, "/internal"]]) {
+    const schema = spec.paths[`${prefix}/_rpc/host_state_submit`].post.requestBody.content["application/json"].schema.properties.actions.items.properties.action
+    const validate = new Ajv2020({ strict: false }).compile(schema)
+    assert.ok(validate({ kind: "draft.replace", text: "draft", attachments: [] }))
+    assert.ok(validate({ kind: "turn.abort" }))
+    assert.equal(validate({}), false)
+    assert.equal(validate({ kind: 42 }), false)
+    if (schema.example) assert.ok(validate(schema.example))
+  }
+})
+
+test("WebSocket send accepts exactly one text or binary payload", () => {
+  const schema = inspectCommittedContract().desiredHeadlessSpec.paths["/internal/_rpc/connectors_ws_send"].post.requestBody.content["application/json"].schema
+  const validate = new Ajv2020({ strict: false }).compile(schema)
+  for (const payload of [{ data: "hello" }, { data: "" }, { binary: [] }, { binary: [0, 255] }]) {
+    assert.ok(validate({ handleId: "handle", ...payload }), JSON.stringify(validate.errors))
+  }
+  for (const payload of [{}, { data: "", binary: [] }, { data: null }, { binary: [256] }]) {
+    assert.equal(validate({ handleId: "handle", ...payload }), false)
+  }
+})
 
 test("published recursive schemas retain local scope without changing runtime schemas", () => {
   const schema = {

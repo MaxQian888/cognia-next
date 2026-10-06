@@ -350,7 +350,7 @@ pub fn run() {
         log::error!("initialize task workspace service: {error}");
     }
 
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().manage(shutdown::ExitState::default());
 
     // single-instance MUST be registered first per Tauri docs. When a duplicate
     // launch is attempted, focus the existing window and forward args/cwd. The
@@ -1309,8 +1309,10 @@ pub fn run() {
             companion_api::signaling::commands::companion_signaling_reconnect_device,
             companion_api::commands::companion_push_configure_fcm,
             companion_api::commands::companion_push_configure_apns,
+            companion_api::commands::companion_push_configure_hms,
             companion_api::commands::companion_push_clear_fcm,
             companion_api::commands::companion_push_clear_apns,
+            companion_api::commands::companion_push_clear_hms,
             companion_api::commands::companion_push_status,
             companion_api::commands::companion_push_notification,
             companion_api::commands::companion_test_local_reachability,
@@ -1491,6 +1493,9 @@ pub fn run() {
             plugin_api::wasm::installer::plugin_wasm_install_from_url,
             plugin_api::wasm::installer::plugin_wasm_install_from_git,
             plugin_api::wasm::installer::plugin_wasm_install_from_file,
+            plugin_api::wasm::installer::plugin_bundle_install_from_file,
+            plugin_api::wasm::installer::plugin_bundle_install_from_url,
+            plugin_api::wasm::installer::plugin_stage_from_directory,
             plugin_api::github::installer::plugin_install_from_github,
             plugin_api::vscode::commands::plugin_vscode_install_vsix,
             plugin_api::vscode::commands::plugin_vscode_install_vsix_from_path,
@@ -1879,67 +1884,25 @@ pub fn run() {
         .setup(startup::run)
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            // Graceful teardown — stop the loopback CLI bridge before the
-            // process tears down its tokio runtime so the axum socket is
-            // released cleanly. `shutdown` is idempotent and safe to call
-            // even when the bridge was never spawned (mobile, init failures).
-            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-                let state = app_handle.state::<cli_bridge::CliBridgeServerState>();
-                cli_bridge::shutdown(state.inner());
-                // ADR-0201 — release the loopback file server's listeners. It
-                // is an in-process axum server, not a child, so it is not in
-                // `process_registry` (the local Chromium runtime is).
-                if let Some(local_content) =
-                    app_handle.try_state::<browser::local_content::LocalContentState>()
-                {
-                    tauri::async_runtime::block_on(local_content.inner().shutdown());
-                }
-                // ADR-0020 remote-target. Drop the cached driver connections
-                // and leave the containers running. A sandbox the user started
-                // is a machine they expect to still be there next launch, and
-                // `start` adopts it by its deterministic name rather than
-                // creating a second one. Stopping here would silently discard
-                // whatever the machine was in the middle of.
-                let cua = app_handle
-                    .state::<cua_sandbox::CuaSandboxRegistry>()
-                    .inner()
-                    .clone();
-                tauri::async_runtime::block_on(cua.disconnect_all());
-                // ADR-0106 — a quit mid-recording must leave a recoverable
-                // bundle rather than a half-written one. `interrupt_blocking`
-                // detaches the input hook and stamps the journal `Interrupted`
-                // from this thread; it never deletes.
-                app_handle
-                    .state::<automation::commands::AutomationState>()
-                    .recorder
-                    .interrupt_blocking(
-                        automation::record::journal::InterruptReason::AppShutdown,
-                    );
-                // Stop every cognia-spawned child process — external agents,
-                // ACP terminals, chat sidecar, integrated terminal PTYs, the
-                // MCP server, code-server instances, and the cloudflared
-                // tunnel. `process_registry::teardown` is the single
-                // exhaustive list; do NOT add subsystems here instead.
-                tauri::async_runtime::block_on(process_registry::teardown(app_handle));
-                // Flush the recovery audit spool before the sentinel clears —
-                // a shutdown that loses the audit trail loses the only record
-                // of why this session entered recovery.
-                if let Some(controller) =
-                    app_handle.try_state::<std::sync::Arc<recovery::RecoveryController>>()
-                {
-                    controller.close();
-                }
-
-                // Graceful shutdown — clear the crash sentinel so the next
-                // launch doesn't mistake this clean exit for a crash.
-                crash::sentinel::mark_clean_exit();
-            }
-        });
+        .run(shutdown::handle_run_event);
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn exit_cleanup_keeps_the_ui_event_loop_available() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(source.contains("shutdown::handle_run_event"));
+        assert!(!source.contains("block_on(process_registry::teardown"));
+    }
+
+    #[test]
+    fn hms_push_commands_are_registered_for_desktop_invocation() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(source.contains("companion_api::commands::companion_push_configure_hms,"));
+        assert!(source.contains("companion_api::commands::companion_push_clear_hms,"));
+    }
+
     #[test]
     fn session_history_filesystem_command_remains_registered() {
         let production_source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();

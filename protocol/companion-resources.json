@@ -43,6 +43,7 @@
       "children": {
         "tool_host": {},
         "gateway_lease": {},
+        "host_gateway_task": {},
         "account_env": {},
         "api_key": {},
         "call_reservation": {},
@@ -311,7 +312,8 @@
         "push": {
           "children": {
             "apns": {},
-            "fcm": {}
+            "fcm": {},
+            "hms": {}
           }
         },
         "reachability": {},

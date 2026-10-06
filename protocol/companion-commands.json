@@ -18535,7 +18535,7 @@
     {
       "name": "ssh_list_host_keys",
       "resource": "ssh.host_key",
-      "verb": "list",
+      "verb": "read",
       "arm": "ssh_list_host_keys",
       "target": "client",
       "operation": "read",
@@ -24077,7 +24077,7 @@
     {
       "name": "plugin_bundle_install_from_file",
       "resource": "plugin",
-      "verb": "bundle_install_from_file",
+      "verb": "install_bundle_from_file",
       "arm": "plugin_bundle_install_from_file",
       "target": "client",
       "operation": "side-effect",
@@ -24094,7 +24094,7 @@
     {
       "name": "plugin_bundle_install_from_url",
       "resource": "plugin",
-      "verb": "bundle_install_from_url",
+      "verb": "install_bundle_from_url",
       "arm": "plugin_bundle_install_from_url",
       "target": "client",
       "operation": "side-effect",

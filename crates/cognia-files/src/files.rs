@@ -983,7 +983,25 @@ pub fn fs_write_workspace_file(
     root: String,
     rel_path: String,
     content: String,
+    encoding: Option<String>,
 ) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = match encoding.as_deref().unwrap_or("utf-8") {
+        "utf-8" => content.into_bytes(),
+        "base64" => {
+            if content.len() > 28 * 1024 * 1024 {
+                return Err("binary attachment exceeds size limit".into());
+            }
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(content)
+                .map_err(|_| "invalid base64 attachment".to_string())?;
+            if decoded.len() > 20 * 1024 * 1024 {
+                return Err("binary attachment exceeds size limit".into());
+            }
+            decoded
+        }
+        _ => return Err("unsupported workspace file encoding".into()),
+    };
     let root_path = PathBuf::from(&root)
         .canonicalize()
         .map_err(|e| format!("canonicalize root {}: {}", root, e))?;
@@ -1030,7 +1048,7 @@ pub fn fs_write_workspace_file(
         .ok_or_else(|| format!("invalid target path: {}", target.display()))?;
     let final_path = canonical_parent.join(file_name);
     reject_symlinked_final(&final_path)?;
-    std::fs::write(&final_path, content).map_err(|e| format!("write {}: {}", rel_path, e))
+    std::fs::write(&final_path, bytes).map_err(|e| format!("write {}: {}", rel_path, e))
 }
 
 /// List the immediate children of `root`/`rel_path` (empty/None `rel_path` =
@@ -2149,6 +2167,7 @@ mod tests {
             root.to_string_lossy().to_string(),
             "nested/dir/out.txt".into(),
             "payload".into(),
+            None,
         )
         .unwrap();
         let written =
@@ -2160,9 +2179,47 @@ mod tests {
             root.to_string_lossy().to_string(),
             "../escape.txt".into(),
             "x".into(),
+            None,
         );
         assert!(escape.is_err(), "traversal write must be rejected");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_workspace_binary_round_trip_and_validation() {
+        let root = make_sandbox("binary-write");
+        let root_name = root.to_string_lossy().to_string();
+        fs_write_workspace_file(
+            root_name.clone(),
+            "image.bin".into(),
+            "AAEC/w==".into(),
+            Some("base64".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(root.join("image.bin")).unwrap(),
+            [0, 1, 2, 255]
+        );
+        assert!(
+            fs_write_workspace_file(
+                root_name.clone(),
+                "invalid.bin".into(),
+                "not base64".into(),
+                Some("base64".into())
+            )
+            .is_err()
+        );
+        assert!(!root.join("invalid.bin").exists());
+        assert!(
+            fs_write_workspace_file(
+                root_name,
+                "../escape.bin".into(),
+                "AA==".into(),
+                Some("base64".into())
+            )
+            .is_err()
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2179,6 +2236,7 @@ mod tests {
             root.to_string_lossy().to_string(),
             format!("../{outside_name}/evil.txt"),
             "x".into(),
+            None,
         );
 
         assert!(escape.is_err(), "traversal write must be rejected");

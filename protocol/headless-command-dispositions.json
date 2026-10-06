@@ -3,6 +3,15 @@
   "groups": [
     {
       "disposition": "local-only",
+      "reason": "Standalone frontend bundle and directory installation is coordinated by the interactive client's trust prompts and staged activation transaction. File/directory sources name client-local filesystem paths; the URL variant participates in the same client-owned activation flow.",
+      "commands": [
+        "plugin_bundle_install_from_file",
+        "plugin_bundle_install_from_url",
+        "plugin_stage_from_directory"
+      ]
+    },
+    {
+      "disposition": "local-only",
       "reason": "Sandbox desktop observation and human input belong to the client-local virtual computer. Controller leases arbitrate the local renderer and agent; these commands must not be exposed to remote agents or follow the selected remote Host.",
       "commands": [
         "cua_sandbox_desktop_acquire_control",

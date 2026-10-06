@@ -161,6 +161,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "external_agent_release_run",
     "external_agent_resolve_decision",
     "external_agent_run_turn",
+    "external_agent_session_query",
+    "external_agent_session_mutate",
     "browser_companion_capability",
     "browser_context_submit",
     "browser_context_list",
@@ -236,9 +238,10 @@ pub(super) async fn dispatch(
             let provider = match provider_str.as_str() {
                 "fcm" => crate::companion_api::push::PushProvider::Fcm,
                 "apns" => crate::companion_api::push::PushProvider::Apns,
+                "hms" => crate::companion_api::push::PushProvider::Hms,
                 other => {
                     return Err(RpcError::malformed(format!(
-                        "register_push_token.provider must be 'fcm' or 'apns', got '{other}'"
+                        "register_push_token.provider must be 'fcm', 'apns', or 'hms', got '{other}'"
                     )));
                 }
             };
@@ -928,6 +931,8 @@ pub(super) async fn dispatch(
         // as the run is accepted — a client holding an RPC open for a whole
         // turn would lose it to any reconnect.
         | "external_agent_run_turn"
+        | "external_agent_session_query"
+        | "external_agent_session_mutate"
         | "external_agent_cancel_run"
         | "external_agent_resolve_decision"
         // Browser Companion — a captured page becomes a new session on the
@@ -1229,6 +1234,41 @@ fn bridged_page_result(name: &str, paging: Option<BridgedPaging>, result: Value)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn hms_registration_and_revocation_work_on_a_headless_host() {
+        let state = super::super::tests::test_state();
+        let host = crate::companion_api::dispatch_host::DispatchHost::Headless(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        );
+        dispatch(
+            "register_push_token",
+            serde_json::json!({"provider":"hms", "token":"huawei-token"}),
+            &state,
+            &host,
+            "hms-test-phone",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.push_tokens.get("hms-test-phone").unwrap().provider,
+            crate::companion_api::push::PushProvider::Hms
+        );
+        dispatch(
+            "revoke_push_token",
+            serde_json::json!({}),
+            &state,
+            &host,
+            "hms-test-phone",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(state.push_tokens.get("hms-test-phone").is_none());
+    }
 
     #[test]
     fn a_reservation_answer_is_refused_unless_the_caller_sent_the_turn() {

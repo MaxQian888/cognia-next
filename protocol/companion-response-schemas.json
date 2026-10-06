@@ -3796,12 +3796,15 @@
     "PushConfigStatus": {
       "type": "object",
       "x-cognia-wire-source": "companion_api::commands::PushConfigStatus",
-      "required": ["fcmConfigured", "apnsConfigured"],
+      "required": ["fcmConfigured", "apnsConfigured", "hmsConfigured"],
       "properties": {
         "fcmConfigured": {
           "type": "boolean"
         },
         "apnsConfigured": {
+          "type": "boolean"
+        },
+        "hmsConfigured": {
           "type": "boolean"
         }
       },
@@ -9530,6 +9533,12 @@
     "companion_push_clear_apns": {
       "$ref": "#/$defs/NullResult"
     },
+    "companion_push_configure_hms": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_push_clear_hms": {
+      "$ref": "#/$defs/NullResult"
+    },
     "companion_push_notification": {
       "$ref": "#/$defs/PushBroadcastResult"
     },
@@ -10430,6 +10439,22 @@
           "type": "string",
           "enum": ["unknown", "wrong-device"]
         }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_session_query": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "external_agent_session_mutate": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": {}
       },
       "additionalProperties": false
     },

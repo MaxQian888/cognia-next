@@ -826,6 +826,12 @@
     "companion_push_configure_fcm": {
       "to": "companion.push.fcm.configure"
     },
+    "companion_push_configure_hms": {
+      "to": "companion.push.hms.configure"
+    },
+    "companion_push_clear_hms": {
+      "to": "companion.push.hms.clear"
+    },
     "companion_push_notification": {
       "to": "companion.push.notify"
     },

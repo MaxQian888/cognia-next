@@ -132,8 +132,7 @@ paths:
       tags:
         - device-auth
       summary: Discover the canonical browser pairing and signaling configuration.
-      security:
-        - dpopAccess: []
+      security: []
       responses:
         "200":
           description: Deployment-safe public authentication configuration.
@@ -141,10 +140,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CompanionAuthConfig"
+        "429":
+          $ref: "#/components/responses/PublicApiError"
         "503":
           $ref: "#/components/responses/PublicApiError"
-      parameters:
-        - $ref: "#/components/parameters/DpopProof"
   /api/auth/device/challenge:
     post:
       operationId: issueDeviceChallenge
@@ -28871,6 +28870,185 @@ paths:
                 $ref: "#/components/schemas/Problem"
       security:
         - dpopAccess: []
+  /api/_rpc/companion_push_clear_hms:
+    post:
+      operationId: publicRpcCompanionPushClearHms
+      tags:
+        - rpc-dispatch
+      summary: companion_push_clear_hms (host.admin)
+      description: "Device-reachable write command. Risk: high; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
   /api/_rpc/companion_push_configure_apns:
     post:
       operationId: publicRpcCompanionPushConfigureApns
@@ -29141,6 +29319,212 @@ paths:
                         - service_account_json
                     - required:
                         - serviceAccountJson
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+  /api/_rpc/companion_push_configure_hms:
+    post:
+      operationId: publicRpcCompanionPushConfigureHms
+      tags:
+        - rpc-dispatch
+      summary: companion_push_configure_hms (host.admin)
+      description: "Device-reachable write command. Risk: high; approval: none."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                app_id:
+                  type: string
+                  pattern: ^[0-9]+$
+                  description: AppGallery Connect OAuth client ID. Also accepted as `appId`.
+                client_secret:
+                  type: string
+                  minLength: 1
+                  description: Host-only client secret. Also accepted as `clientSecret`.
+                appId:
+                  type: string
+                  pattern: ^[0-9]+$
+                  description: AppGallery Connect OAuth client ID. Also accepted as `appId`.
+                clientSecret:
+                  type: string
+                  minLength: 1
+                  description: Host-only client secret. Also accepted as `clientSecret`.
+              additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - app_id
+                    - required:
+                        - appId
+                - anyOf:
+                    - required:
+                        - client_secret
+                    - required:
+                        - clientSecret
       responses:
         "200":
           description: Command completed.
@@ -41839,6 +42223,443 @@ paths:
                 $ref: "#/components/schemas/Problem"
       security:
         - dpopAccess: []
+  /api/_rpc/external_agent_session_mutate:
+    post:
+      operationId: publicRpcExternalAgentSessionMutate
+      tags:
+        - rpc-dispatch
+      summary: external_agent_session_mutate (process.spawn)
+      description: "Device-reachable side-effect command. Risk: critical; approval: interactive."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/DpopProof"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - requestId
+                - chatSessionId
+                - stamp
+                - externalSessionId
+                - action
+                - adminLease
+              properties:
+                chatSessionId:
+                  type: string
+                stamp:
+                  type: object
+                  required:
+                    - configId
+                    - revision
+                    - lifecycleGeneration
+                  properties:
+                    configId:
+                      type: string
+                    revision:
+                      type: string
+                    lifecycleGeneration:
+                      type: integer
+                  additionalProperties: false
+                callerDeviceId:
+                  type: string
+                requestId:
+                  type: string
+                  minLength: 1
+                externalSessionId:
+                  type: string
+                  minLength: 1
+                action:
+                  type: object
+                  required:
+                    - operation
+                  properties:
+                    operation:
+                      type: string
+                  additionalProperties: false
+                adminLease:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+  /api/_rpc/external_agent_session_query:
+    post:
+      operationId: publicRpcExternalAgentSessionQuery
+      tags:
+        - rpc-dispatch
+      summary: external_agent_session_query (process.spawn)
+      description: "Device-reachable read command. Risk: critical; approval: none."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - requestId
+                - chatSessionId
+                - stamp
+                - externalSessionId
+                - action
+              properties:
+                chatSessionId:
+                  type: string
+                stamp:
+                  type: object
+                  required:
+                    - configId
+                    - revision
+                    - lifecycleGeneration
+                  properties:
+                    configId:
+                      type: string
+                    revision:
+                      type: string
+                    lifecycleGeneration:
+                      type: integer
+                  additionalProperties: false
+                callerDeviceId:
+                  type: string
+                requestId:
+                  type: string
+                  minLength: 1
+                externalSessionId:
+                  type: string
+                  minLength: 1
+                action:
+                  type: object
+                  required:
+                    - operation
+                  properties:
+                    operation:
+                      type: string
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - requestId
+                  - result
+                additionalProperties: false
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+                  operationId:
+                    type: string
+                    format: uuid
+                  result:
+                    $ref: "#/components/schemas/RpcResult"
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+        - dpopAccess: []
+      parameters:
+        - $ref: "#/components/parameters/DpopProof"
   /api/_rpc/external_agent_update:
     post:
       operationId: publicRpcExternalAgentUpdate
@@ -48631,6 +49452,11 @@ paths:
                   type: string
                 content:
                   type: string
+                encoding:
+                  type: string
+                  enum:
+                    - utf-8
+                    - base64
                 adminLease:
                   type: string
                   minLength: 1
@@ -66154,7 +66980,9 @@ paths:
                         required:
                           - kind
                         additionalProperties: {}
-                        example: {}
+                        properties:
+                          kind:
+                            type: string
                     additionalProperties: false
                 adminLease:
                   type: string
@@ -81449,6 +82277,7 @@ paths:
                   enum:
                     - fcm
                     - apns
+                    - hms
                 token:
                   type: string
                 app_version:
@@ -118695,8 +119524,10 @@ components:
           - companion_endpoints
           - companion_push_clear_apns
           - companion_push_clear_fcm
+          - companion_push_clear_hms
           - companion_push_configure_apns
           - companion_push_configure_fcm
+          - companion_push_configure_hms
           - companion_push_notification
           - companion_push_status
           - companion_server_status
@@ -118762,6 +119593,8 @@ components:
           - external_agent_release_run
           - external_agent_resolve_decision
           - external_agent_run_turn
+          - external_agent_session_mutate
+          - external_agent_session_query
           - external_agent_update
           - external_bridge_client_create
           - external_bridge_client_list
@@ -119160,12 +119993,6 @@ components:
         type: string
       description: Signed proof bound to the access-token jti, HTTP method, and request path.
   responses:
-    AgentTaskCommandResult:
-      description: A live single-Agent task command verdict.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/AgentTaskCommandResult"
     WorkflowApiError:
       description: Stable Cognia workflow API error.
       content:
@@ -119195,36 +120022,6 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
-    AgentTaskCommandArgs:
-      type: object
-      required:
-        - agentId
-        - taskId
-      properties:
-        agentId:
-          type: string
-          minLength: 1
-        taskId:
-          type: string
-          minLength: 1
-    AgentTaskCommandResult:
-      type: object
-      required:
-        - ok
-      properties:
-        ok:
-          type: boolean
-        reason:
-          type: string
-          enum:
-            - invalid-payload
-            - invalid-status
-            - task-not-found
-            - transition-denied
-        executionId:
-          type: string
-        commentId:
-          type: string
     WorkflowRunAccepted:
       type: object
       required:
@@ -119339,529 +120136,6 @@ components:
       $ref: "#/components/schemas/RpcError"
     RpcError:
       $ref: "#/components/schemas/Problem"
-    SendOptions:
-      type: object
-      additionalProperties: true
-      description: |
-        Per-call options forwarded verbatim to the Claude Agent SDK (or the
-        AI SDK dispatch path for non-Anthropic providers). Unrecognised
-        fields ride along under `extra` (serde flatten). `null` is rejected
-        for optional fields — use `undefined`/missing instead, otherwise the
-        SDK's option parser crashes with "Cannot read properties of null".
-      properties:
-        cwd:
-          type: string
-        model:
-          type: string
-        fallbackModel:
-          type: string
-        systemPrompt:
-          type: string
-          description: Replaces the SDK default system prompt. Mutually exclusive with appendSystemPrompt.
-        appendSystemPrompt:
-          type: string
-          description: Appended to the SDK default. Mutually exclusive with systemPrompt.
-        allowedTools:
-          type: array
-          items:
-            type: string
-        disallowedTools:
-          type: array
-          items:
-            type: string
-        additionalDirectories:
-          type: array
-          items:
-            type: string
-        permissionMode:
-          type: string
-        env:
-          type: object
-          additionalProperties:
-            type: string
-        mcpServers:
-          type: object
-          additionalProperties: true
-          description: Per-name MCP server config map; forwarded to the SDK verbatim.
-        maxTurns:
-          type: integer
-          minimum: 1
-          maximum: 100
-        includePartialMessages:
-          type: boolean
-        settingSources:
-          type: array
-          items:
-            type: string
-            enum:
-              - user
-              - project
-              - local
-        agents:
-          type: object
-          additionalProperties: true
-          description: Dynamic subagent definitions keyed by name.
-        strictMcpConfig:
-          type: boolean
-          description: When true, only `mcpServers` from this object are loaded — settings.json is ignored.
-        effort:
-          type: string
-          enum:
-            - low
-            - medium
-            - high
-            - xhigh
-            - max
-        resumeSessionId:
-          type: string
-          description: Resume an existing SDK session by id. Mutually exclusive with forkFromSessionId.
-        forkFromSessionId:
-          type: string
-          description: Fork a new branch from an existing SDK session id.
-        provider:
-          type: string
-          description: |
-            Provider id this turn dispatches against. `null`/missing or
-            `"anthropic"` keeps the Claude Agent SDK path; any other value
-            (`openai`, `google`, `mistral`, `cohere`, `openrouter`, custom)
-            flows through the AI SDK dispatcher.
-        providerCredentials:
-          $ref: "#/components/schemas/ProviderCredentials"
-        aliasResolution:
-          type: object
-          additionalProperties: true
-          description: Renderer-side metadata; the sidecar ignores this.
-        routingDecision:
-          type: object
-          additionalProperties: true
-    ProviderCredentials:
-      type: object
-      additionalProperties: false
-      properties:
-        apiKey:
-          type: string
-        baseUrl:
-          type: string
-        protocol:
-          type: string
-          enum:
-            - openai
-            - anthropic
-            - google
-            - mistral
-            - cohere
-          description: AI SDK protocol family (required for custom provider ids).
-    SidecarStatus:
-      type: object
-      required:
-        - ready
-      additionalProperties: false
-      properties:
-        ready:
-          type: boolean
-    SubscriptionCredential:
-      type: object
-      required:
-        - accessToken
-        - refreshToken
-        - expiresAtMs
-        - mode
-      additionalProperties: false
-      properties:
-        accessToken:
-          type: string
-          description: OAuth bearer token. Treat as secret.
-        refreshToken:
-          type: string
-          description: Long-lived refresh token. May rotate on every refresh — persist the latest.
-        expiresAtMs:
-          type: integer
-          format: int64
-        mode:
-          type: string
-          enum:
-            - subscription
-            - console
-          description: '"subscription" = Pro/Max, "console" = API billing.'
-        scope:
-          type: string
-        email:
-          type: string
-          format: email
-        plan:
-          type: string
-          description: pro | max | team | console (provider may not return).
-        storedAtMs:
-          type: integer
-          format: int64
-          description: Last-write timestamp.
-    AgentReadResult:
-      type: object
-      required:
-        - exists
-        - writable
-        - format
-        - raw
-        - parsed
-      additionalProperties: false
-      properties:
-        path:
-          oneOf:
-            - type: string
-            - type: "null"
-        exists:
-          type: boolean
-        writable:
-          type: boolean
-        format:
-          type: string
-          enum:
-            - json
-            - jsonc
-            - toml
-        raw:
-          type: string
-        parsed:
-          description: Canonical JSON tree, or null when the file is missing or unparseable.
-          oneOf:
-            - type: object
-              additionalProperties: true
-            - type: array
-              items: {}
-            - type: string
-            - type: number
-            - type: boolean
-            - type: "null"
-        parseError:
-          type: string
-          description: Filled when exists=true but parse failed.
-    AgentWriteResult:
-      type: object
-      required:
-        - path
-      additionalProperties: false
-      properties:
-        path:
-          type: string
-        backupPath:
-          type: string
-          description: "`.bak` next to the original. Null when the file did not exist before."
-    NativeSkillResource:
-      type: object
-      required:
-        - kind
-        - path
-        - name
-        - content
-        - encoding
-        - size
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          enum:
-            - script
-            - reference
-            - asset
-        path:
-          type: string
-          description: Relative to the skill directory.
-        name:
-          type: string
-        content:
-          type: string
-          description: UTF-8 or base64-encoded; encoding given in `encoding`.
-        encoding:
-          type: string
-          enum:
-            - utf-8
-            - base64
-        mimeType:
-          type: string
-        size:
-          type: integer
-          format: int64
-    NativeSkill:
-      type: object
-      required:
-        - dirName
-        - filePath
-        - content
-        - resources
-      additionalProperties: false
-      properties:
-        dirName:
-          type: string
-          description: Directory name under ~/.claude/skills/ (kebab-case slug).
-        filePath:
-          type: string
-          description: Absolute path to SKILL.md.
-        content:
-          type: string
-          description: Raw SKILL.md including YAML frontmatter.
-        resources:
-          type: array
-          items:
-            $ref: "#/components/schemas/NativeSkillResource"
-    InstallSkillRequest:
-      type: object
-      required:
-        - dirName
-        - content
-        - resources
-        - clean
-      additionalProperties: false
-      properties:
-        dirName:
-          type: string
-        content:
-          type: string
-          description: Serialised SKILL.md including YAML frontmatter.
-        resources:
-          type: array
-          items:
-            $ref: "#/components/schemas/NativeSkillResource"
-        clean:
-          type: boolean
-          description: When true, blow away pre-existing files in the directory before writing.
-    InstallSkillResponse:
-      type: object
-      required:
-        - directory
-        - writtenFiles
-      additionalProperties: false
-      properties:
-        directory:
-          type: string
-        writtenFiles:
-          type: array
-          items:
-            type: string
-    RegistryEntry:
-      type: object
-      required:
-        - id
-        - source
-        - sourceType
-      additionalProperties: false
-      properties:
-        id:
-          type: string
-        source:
-          type: string
-        sourceType:
-          type: string
-        skillPath:
-          type: string
-        computedHash:
-          type: string
-        displayName:
-          type: string
-        description:
-          type: string
-        category:
-          type: string
-        tags:
-          type: array
-          items:
-            type: string
-        author:
-          type: string
-        iconUrl:
-          type: string
-        rawSkillUrl:
-          type: string
-    PluginApiInvokeRequest:
-      type: object
-      required:
-        - sdkVersion
-        - pluginId
-        - requestId
-        - api
-        - payload
-      additionalProperties: false
-      properties:
-        sdkVersion:
-          type: string
-        pluginId:
-          type: string
-        requestId:
-          type: string
-        api:
-          type: string
-          pattern: ^[^:]+:[^:]+$
-        payload: {}
-        timeoutMs:
-          type: integer
-          minimum: 1
-        context: {}
-    PluginApiError:
-      type: object
-      required:
-        - code
-        - message
-      additionalProperties: false
-      properties:
-        code:
-          type: string
-          enum:
-            - INVALID_REQUEST
-            - PERMISSION_REQUIRED
-            - PERMISSION_DENIED
-            - NOT_SUPPORTED
-            - NOT_FOUND
-            - CONFLICT
-            - TIMEOUT
-            - INCOMPATIBLE_SDK
-            - UNAVAILABLE
-            - INTERNAL
-        message:
-          type: string
-        details: {}
-    PluginApiCompat:
-      type: object
-      required:
-        - sdkVersion
-        - minSupportedSdk
-        - compatible
-      additionalProperties: false
-      properties:
-        sdkVersion:
-          type: string
-        minSupportedSdk:
-          type: string
-        compatible:
-          type: boolean
-    PluginApiInvokeResponse:
-      type: object
-      required:
-        - requestId
-        - success
-        - runtimeVersion
-        - compat
-      additionalProperties: false
-      properties:
-        requestId:
-          type: string
-        success:
-          type: boolean
-        data: {}
-        error:
-          $ref: "#/components/schemas/PluginApiError"
-        runtimeVersion:
-          type: string
-        compat:
-          $ref: "#/components/schemas/PluginApiCompat"
-    PluginApiBatchItem:
-      type: object
-      required:
-        - requestId
-        - api
-        - payload
-      additionalProperties: false
-      properties:
-        requestId:
-          type: string
-        api:
-          type: string
-          pattern: ^[^:]+:[^:]+$
-        payload: {}
-        timeoutMs:
-          type: integer
-          minimum: 1
-        context: {}
-    PluginApiBatchRequest:
-      type: object
-      required:
-        - sdkVersion
-        - pluginId
-        - requests
-      additionalProperties: false
-      properties:
-        sdkVersion:
-          type: string
-        pluginId:
-          type: string
-        strategy:
-          type: string
-          enum:
-            - continueOnError
-            - abortOnError
-        requests:
-          type: array
-          items:
-            $ref: "#/components/schemas/PluginApiBatchItem"
-    PluginApiBatchResponse:
-      type: object
-      required:
-        - success
-        - results
-      additionalProperties: false
-      properties:
-        success:
-          type: boolean
-        results:
-          type: array
-          items:
-            $ref: "#/components/schemas/PluginApiInvokeResponse"
-    PluginApiCapability:
-      type: object
-      required:
-        - api
-        - supported
-        - highRisk
-        - requiredPermissions
-      additionalProperties: false
-      properties:
-        api:
-          type: string
-        supported:
-          type: boolean
-        highRisk:
-          type: boolean
-        requiredPermissions:
-          type: array
-          items:
-            type: string
-    McpServerStatus:
-      type: object
-      required:
-        - running
-      additionalProperties: false
-      properties:
-        running:
-          type: boolean
-        port:
-          type: integer
-          format: int32
-          minimum: 0
-          maximum: 65535
-        startedAt:
-          type: string
-          format: date-time
-          description: ISO-8601.
-    McpServerLifecycleRequest:
-      type: object
-      required:
-        - port
-        - token
-        - settingsJson
-      additionalProperties: false
-      properties:
-        port:
-          type: integer
-          minimum: 0
-          maximum: 65535
-        token:
-          type: string
-          minLength: 32
-        settingsJson:
-          type: string
-          description: Serialized ExternalBridgeSettings snapshot.
-        sidecarPath:
-          type: string
-          deprecated: true
-          description: Legacy local-Tauri hint; ignored by the headless Companion facade, which resolves the packaged host sidecar.
     EventFrame:
       type: object
       required:
@@ -119919,43 +120193,6 @@ components:
           type: string
           enum:
             - resync_required
-    SubscribeFrame:
-      type: object
-      description: |
-        Client → server. Widen or narrow which event channels this connection
-        receives.
-
-        A connection starts on the host's default channel set, so a client that
-        never sends this frame keeps the stream it has always had. Naming a
-        channel the host does not publish, or one this connection's scope may
-        not receive, does not fail the request — the valid channels still apply
-        and the refusals come back named in `SubscribedFrame.rejected`.
-      required:
-        - type
-        - channels
-      additionalProperties: false
-      properties:
-        type:
-          type: string
-          enum:
-            - subscribe
-        mode:
-          type: string
-          default: replace
-          description: |
-            `replace` (the default) sets the subscription to exactly `channels`.
-            `add` and `remove` adjust the current set.
-          enum:
-            - replace
-            - add
-            - remove
-        channels:
-          type: array
-          description: |
-            Channel names, or a family pattern ending in `*` where the host
-            publishes runtime-minted names (`connectors://*`).
-          items:
-            type: string
     SubscribedFrame:
       type: object
       description: Server → client. The resulting subscription, refusals included.
@@ -120306,31 +120543,6 @@ components:
           type: integer
           format: int64
         updatedAt:
-          type: integer
-          format: int64
-    RoomDescriptor:
-      type: object
-      required:
-        - v
-        - roomId
-        - roomNonce
-        - desktopSigningKey
-        - mobileSigningKey
-        - notAfter
-      additionalProperties: false
-      properties:
-        v:
-          type: integer
-          const: 2
-        roomId:
-          type: string
-        roomNonce:
-          type: string
-        desktopSigningKey:
-          type: string
-        mobileSigningKey:
-          type: string
-        notAfter:
           type: integer
           format: int64
     ReplaceCapabilitiesRequest:
@@ -121077,9 +121289,9 @@ x-cognia-generated:
     - protocol/companion-request-schemas.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  publicCommandCount: 591
-  generatedRequestSchemaCount: 591
+  publicCommandCount: 595
+  generatedRequestSchemaCount: 595
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 591
+  contractRequestSchemaCount: 595
   genericRequestSchemaCount: 0
   legacyCompatibility: false

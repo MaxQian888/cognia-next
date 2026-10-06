@@ -3212,6 +3212,11 @@
       "properties": {},
       "additionalProperties": false
     },
+    "companion_push_clear_hms": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "companion_push_configure_apns": {
       "type": "object",
       "required": [
@@ -3259,6 +3264,26 @@
           "type": "string",
           "example": "",
           "description": "Also accepted as `serviceAccountJson`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "companion_push_configure_hms": {
+      "type": "object",
+      "required": [
+        "app_id",
+        "client_secret"
+      ],
+      "properties": {
+        "app_id": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "AppGallery Connect OAuth client ID. Also accepted as `appId`."
+        },
+        "client_secret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Host-only client secret. Also accepted as `clientSecret`."
         }
       },
       "additionalProperties": false
@@ -4324,22 +4349,12 @@
         {
           "required": [
             "data"
-          ],
-          "not": {
-            "required": [
-              "binary"
-            ]
-          }
+          ]
         },
         {
           "required": [
             "binary"
-          ],
-          "not": {
-            "required": [
-              "data"
-            ]
-          }
+          ]
         }
       ],
       "additionalProperties": false
@@ -5217,6 +5232,124 @@
       },
       "additionalProperties": false
     },
+    "external_agent_session_mutate": {
+      "type": "object",
+      "required": [
+        "requestId",
+        "chatSessionId",
+        "stamp",
+        "externalSessionId",
+        "action"
+      ],
+      "properties": {
+        "chatSessionId": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "object",
+          "required": [
+            "configId",
+            "revision",
+            "lifecycleGeneration"
+          ],
+          "properties": {
+            "configId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            },
+            "lifecycleGeneration": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "callerDeviceId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "externalSessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "object",
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_agent_session_query": {
+      "type": "object",
+      "required": [
+        "requestId",
+        "chatSessionId",
+        "stamp",
+        "externalSessionId",
+        "action"
+      ],
+      "properties": {
+        "chatSessionId": {
+          "type": "string"
+        },
+        "stamp": {
+          "type": "object",
+          "required": [
+            "configId",
+            "revision",
+            "lifecycleGeneration"
+          ],
+          "properties": {
+            "configId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            },
+            "lifecycleGeneration": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "callerDeviceId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "externalSessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "object",
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
     "external_agent_update": {
       "type": "object",
       "required": [
@@ -5837,6 +5970,13 @@
         },
         "content": {
           "type": "string"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "base64"
+          ]
         }
       },
       "additionalProperties": false
@@ -8223,7 +8363,12 @@
                 "required": [
                   "kind"
                 ],
-                "additionalProperties": true
+                "additionalProperties": {},
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  }
+                }
               }
             },
             "additionalProperties": false
@@ -11235,7 +11380,8 @@
           "type": "string",
           "enum": [
             "fcm",
-            "apns"
+            "apns",
+            "hms"
           ]
         },
         "token": {

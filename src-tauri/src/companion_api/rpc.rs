@@ -282,8 +282,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "companion_push_status",
     "companion_push_configure_fcm",
     "companion_push_configure_apns",
+    "companion_push_configure_hms",
     "companion_push_clear_fcm",
     "companion_push_clear_apns",
+    "companion_push_clear_hms",
     "companion_push_notification",
     "companion_create_owner_invitation",
     "companion_server_status",
@@ -406,6 +408,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "external_agent_release_run",
     "external_agent_resolve_decision",
     "external_agent_run_turn",
+    "external_agent_session_query",
+    "external_agent_session_mutate",
     // ADR-0059 R11 — headless external-agent execution plane. Service-scope
     // only (SERVICE_ONLY_COMMANDS) + SpawnPolicy allowlist + audit trail;
     // a public device principal can never reach these.
@@ -1291,6 +1295,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // The Cognia model catalog follows the Host's provider settings, which can
     // change between two polls; never serve it from the idempotency cache.
     "external_agent_cognia_models",
+    "external_agent_session_query",
     // ADR-0059 R11 — read-only status probe on the headless exec backend.
     "get_external_agent_status",
     // ADR-0059 R12 — read-only projection of the webhook ingress registry.
@@ -2053,6 +2058,8 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     // device — otherwise any paired device could deny another's turn, or
     // approve a tool call it was never shown.
     "external_agent_run_turn",
+    "external_agent_session_query",
+    "external_agent_session_mutate",
     "external_agent_cancel_run",
     "external_agent_resolve_decision",
     // Long-term memory (ADR-0069, Memory V2 caller binding). The memory

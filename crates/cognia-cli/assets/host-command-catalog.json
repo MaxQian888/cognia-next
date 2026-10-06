@@ -11321,6 +11321,30 @@
       "outputTyped": true
     },
     {
+      "name": "companion_push_clear_hms",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_clear_hms (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "companion_push_configure_apns",
       "category": "system",
       "resource": "companion",
@@ -11502,6 +11526,81 @@
       "outputTyped": true
     },
     {
+      "name": "companion_push_configure_hms",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_configure_hms (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "AppGallery Connect OAuth client ID. Also accepted as `appId`."
+          },
+          "client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Host-only client secret. Also accepted as `clientSecret`."
+          },
+          "appId": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "AppGallery Connect OAuth client ID. Also accepted as `appId`."
+          },
+          "clientSecret": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Host-only client secret. Also accepted as `clientSecret`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "app_id"
+                ]
+              },
+              {
+                "required": [
+                  "appId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "client_secret"
+                ]
+              },
+              {
+                "required": [
+                  "clientSecret"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "companion_push_notification",
       "category": "system",
       "resource": "companion",
@@ -11601,13 +11700,17 @@
         "x-cognia-wire-source": "companion_api::commands::PushConfigStatus",
         "required": [
           "fcmConfigured",
-          "apnsConfigured"
+          "apnsConfigured",
+          "hmsConfigured"
         ],
         "properties": {
           "fcmConfigured": {
             "type": "boolean"
           },
           "apnsConfigured": {
+            "type": "boolean"
+          },
+          "hmsConfigured": {
             "type": "boolean"
           }
         },
@@ -14643,22 +14746,12 @@
           {
             "required": [
               "data"
-            ],
-            "not": {
-              "required": [
-                "binary"
-              ]
-            }
+            ]
           },
           {
             "required": [
               "binary"
-            ],
-            "not": {
-              "required": [
-                "data"
-              ]
-            }
+            ]
           }
         ],
         "additionalProperties": false,
@@ -20027,6 +20120,176 @@
       "outputTyped": true
     },
     {
+      "name": "external_agent_session_mutate",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "external_agent_session_mutate (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "chatSessionId",
+          "stamp",
+          "externalSessionId",
+          "action"
+        ],
+        "properties": {
+          "chatSessionId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "callerDeviceId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "externalSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "operation"
+            ],
+            "properties": {
+              "operation": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {}
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_session_query",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "process.spawn",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "external_agent_session_query (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "chatSessionId",
+          "stamp",
+          "externalSessionId",
+          "action"
+        ],
+        "properties": {
+          "chatSessionId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "callerDeviceId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "externalSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "operation"
+            ],
+            "properties": {
+              "operation": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {}
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "external_agent_update",
       "category": "agents",
       "resource": "external-agents",
@@ -22015,6 +22278,13 @@
           },
           "content": {
             "type": "string"
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf-8",
+              "base64"
+            ]
           }
         },
         "additionalProperties": false
@@ -27661,7 +27931,11 @@
                     "kind"
                   ],
                   "additionalProperties": {},
-                  "example": {}
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    }
+                  }
                 }
               },
               "additionalProperties": false
@@ -38754,7 +39028,8 @@
             "type": "string",
             "enum": [
               "fcm",
-              "apns"
+              "apns",
+              "hms"
             ]
           },
           "token": {
@@ -65410,5 +65685,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "36f99f01b3f1df9dfc2aa034c0ae8ac82429210f996409bb4d3dba42f7c8abb8"
+  "catalogHash": "9a05de2db0652f269761050ffc08cd3bf0fc5d80d09398e455d4c2e2acf6c25d"
 }

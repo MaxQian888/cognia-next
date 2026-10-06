@@ -2162,6 +2162,73 @@
         "additionalProperties": false
       }
     },
+    "external_agent_session_mutate": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "chatSessionId",
+          "stamp",
+          "externalSessionId",
+          "action",
+          "adminLease"
+        ],
+        "properties": {
+          "chatSessionId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "callerDeviceId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "externalSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "operation"
+            ],
+            "properties": {
+              "operation": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "external_agent_update": {
       "inputSchemaSource": "contract",
       "inputSchema": {
@@ -2792,6 +2859,13 @@
           },
           "content": {
             "type": "string"
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf-8",
+              "base64"
+            ]
           },
           "adminLease": {
             "type": "string",
@@ -5191,7 +5265,11 @@
                     "kind"
                   ],
                   "additionalProperties": {},
-                  "example": {}
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    }
+                  }
                 }
               },
               "additionalProperties": false
