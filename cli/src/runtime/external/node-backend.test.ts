@@ -58,7 +58,8 @@ describe("CLI spawn allowlist", () => {
   })
 
   it("refuses anything the policy does not list", () => {
-    for (const command of ["sh", "bash", "node", "python3", "qwen", "kiro"]) {
+    // Shells, interpreters and an invented name: none can ever be a policy entry.
+    for (const command of ["sh", "bash", "node", "python3", "not-an-agent"]) {
       expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain(command)
       expect(() => validateCommand({ command }, false, root)).toThrow(
         /not in the external-agent allowlist/
