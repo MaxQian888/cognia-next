@@ -87,7 +87,7 @@ flowchart BT
 | `@cognia/agent-pi` | `./manifest`、`./rpc-client`、`./rpc-peer`、`./rpc-events`、`./permission`、`./auth` | contracts、runtime kit |
 | `@cognia/agent-opencode` | `./manifest`、`./v2-client`、`./v2-events`、`./v2-launcher`、`./discovery`、`./client` | contracts、runtime kit；peer 依赖 `@opencode/client`、`@opencode-ai/sdk` |
 | `@cognia/agent-a2a` | `./manifest`、`./client` | contracts、runtime kit |
-| `@cognia/agent-acp` | `./manifest`、`./client`、`./devin-adapter`、`./devin-model-axis`、`./registry`、`./wire-codec`、`./feature-profile`、`./permission-input` | contracts、runtime kit、仅类型的 `@agentclientprotocol/sdk` |
+| `@cognia/agent-acp` | `./manifest`、`./client`、`./devin-adapter`、`./devin-model-axis`、`./registry`、`./vendor-profile`、`./vendor-profiles`、`./vendors/<id>`、`./wire-codec`、`./feature-profile`、`./permission-input` | contracts、runtime kit、仅类型的 `@agentclientprotocol/sdk` |
 | `@cognia/agent-codex` | `./manifest`、`./app-server-client`、`./history`、`./mcp-config`、… | contracts、runtime kit |
 | `@cognia/agent-orchestration` | `./coordinator`、`./store`、`./memory-store`、`./store-contract`、`./decision-ledger`、`./evidence`、… | 无 |
 
@@ -128,8 +128,8 @@ flowchart BT
 | Pi | 完成：`@cognia/agent-pi`（RPC 适配器、对端、事件映射、工具表、认证探测），基于进程端口与 `PiHostServices`；声明每会话一个进程的语义，取消为回合级的 `abort`。Pi 会话历史读取器仍在 `lib/session-import` |
 | OpenCode | 完成：`@cognia/agent-opencode`（V2 服务适配器、事件、会话自有的启动器、服务发现；以及 Cognia 不注册的旧版 server 适配器），基于 `AgentFetch`、进程端口与放置策略 |
 | A2A | 完成：`@cognia/agent-a2a`，基于 `AgentFetch`；远程、任务级取消。Cognia 自己的远程宿主运行平面留在应用中（见 ADR-0217 的范围决策） |
-| ACP 与 Devin | 完成：`@cognia/agent-acp`（客户端、wire codec、feature profile、permission input、ACP Registry v1、每个会话独占进程的 Devin 适配器），基于进程、文件、终端、fetch 与 WebSocket 端口；声明了回合级的 `session/cancel`，被取消的 ACP 会话会被保留。厂商特例（Devin、Kimi、Goose、Qoder、Cline、经 ACP 的 OpenCode）仍是客户端内部的分支 |
-| ACP 厂商 profile、Claude Code、Kimi 及其他 ACP 行生态 | 尚未完成（阶段 3 进行中） |
+| ACP 与 Devin | 完成：`@cognia/agent-acp`（客户端、wire codec、feature profile、permission input、ACP Registry v1、每个会话独占进程的 Devin 适配器），基于进程、文件、终端、fetch 与 WebSocket 端口；声明了回合级的 `session/cancel`，被取消的 ACP 会话会被保留。厂商特例（Kimi、Cline、Qoder、Goose、Devin、经 ACP 的 OpenCode）是客户端套用的 `AcpVendorProfile` 数据；宿主可以提供自己的 profile |
+| Claude Code 以及其他运行时的会话读取器 | 尚未完成（阶段 3 进行中） |
 | 由 manifest 生成目录行、CLI 端口注入、移除管理器 `instanceof` | 尚未完成（阶段 3） |
 | 引擎与工具 | 完成：AI SDK 引擎与宿主无需 Claude Agent SDK 即可运行；wire 与共享运行时模块不再引用它，连类型也不引用 |
 | 编排 | 运行状态、账本、协调器、调度与恢复已完成；团队闸门、队友池、波次运行器与合成工作流仍留在应用中（它们以应用的 `AgentTeam` 模型为类型） |

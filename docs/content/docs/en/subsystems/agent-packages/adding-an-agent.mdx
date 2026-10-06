@@ -34,9 +34,12 @@ flowchart LR
 ## 1. Decide whether it needs a package
 
 - **A plain ACP agent needs no package of its own.** It is a row in the runtime
-  catalog run by the ACP client in `@cognia/agent-acp`. Vendor quirks belong in
-  an ACP vendor profile (Phase 3; today they are still branches inside the
-  client).
+  catalog run by the ACP client in `@cognia/agent-acp`. If it deviates from
+  the protocol (its own mode names, a tool identity in metadata, a capability
+  it advertises but ignores), add an `AcpVendorProfile` under
+  `packages/agent-acp/src/vendors/` and list it in `vendor-profiles.ts`, or
+  pass it from the host as `vendorProfiles`; the client has no vendor
+  branches.
 - **A runtime with its own protocol** (an RPC dialect, an SDK, a CLI per turn)
   or **its own session store** gets a package.
 

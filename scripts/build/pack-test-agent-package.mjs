@@ -259,8 +259,11 @@ const SPECS = {
       "./wire-codec",
       "./feature-profile",
       "./permission-input",
+      "./vendor-profile",
+      "./vendor-profiles",
+      "./vendors/kimi",
     ],
-    dataOnly: ["./manifest"],
+    dataOnly: ["./manifest", "./vendor-profile", "./vendor-profiles", "./vendors/kimi"],
     runtimeModules: ["client", "base-adapter", "json-rpc-peer", "prompt-gate", "sse"],
     smoke: `
       import { ACP_EXECUTION_SEMANTICS, DEVIN_ACP_EXECUTION_SEMANTICS } from "@cognia/agent-acp/manifest"
@@ -292,6 +295,9 @@ const SPECS = {
       const catalog = { version: "1.0.0", agents: [] }
       const fetched = await fetchAcpRegistry({ fetcher: async () => new Response(JSON.stringify(catalog), { status: 200 }) })
       if (fetched.version !== "1.0.0") throw new Error("registry")
+      import { resolveAcpVendorProfile } from "@cognia/agent-acp/vendor-profile"
+      import { ACP_VENDOR_PROFILES } from "@cognia/agent-acp/vendor-profiles"
+      if (resolveAcpVendorProfile({ process: { command: "/usr/bin/goose" } }, ACP_VENDOR_PROFILES)?.id !== "goose") throw new Error("vendor profile")
     `,
     types: `
       import { AcpClientAdapter, type AcpClientDeps } from "@cognia/agent-acp/client"
@@ -300,7 +306,11 @@ const SPECS = {
       declare const deps: AcpClientDeps
       const adapter: ProtocolAdapter = new AcpClientAdapter(deps)
       const devin: ProtocolAdapter = new DevinAcpAdapter(new AcpClientAdapter(deps), () => new AcpClientAdapter(deps))
-      export { adapter, devin }
+      import type { AcpVendorProfile } from "@cognia/agent-acp/vendor-profile"
+      import { kimiAcpProfile } from "@cognia/agent-acp/vendors/kimi"
+      const profiles: readonly AcpVendorProfile[] = [kimiAcpProfile]
+      const custom: ProtocolAdapter = new AcpClientAdapter({ ...deps, vendorProfiles: profiles })
+      export { adapter, devin, custom }
     `,
   },
   "agent-aider": {

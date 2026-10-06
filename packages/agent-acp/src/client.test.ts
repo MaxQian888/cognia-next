@@ -27,6 +27,7 @@ import {
   MAX_RAPID_EXITS,
   type AcpClientDeps,
 } from "./client"
+import type { AcpVendorProfile } from "./vendor-profile"
 import type { AcpHostCapabilities } from "./feature-profile"
 import type {
   ExternalAgentConfig,
@@ -5320,5 +5321,56 @@ describe("AcpClientAdapter — per-turn token usage accounting", () => {
     expect(events.find((e) => e.type === "done")).toMatchObject({
       tokenUsage: { providerCost: { amount: 1.6, currency: "ACU" } },
     })
+  })
+})
+
+describe("AcpClientAdapter — vendor profiles from the host", () => {
+  const acme: AcpVendorProfile = {
+    id: "acme",
+    label: "Acme",
+    commandNames: ["acme"],
+    launchEnv: { ACME_MODE: "safe" },
+    permissionModes: {
+      toNative: (mode) => (mode === "plan" ? "read-only" : "write"),
+      toCanonical: (nativeMode, current) =>
+        nativeMode === "read-only" ? "plan" : (current ?? "default"),
+    },
+  }
+  const internals = (adapter: AcpClientAdapter) =>
+    adapter as unknown as {
+      initialize: () => Promise<unknown>
+      nativePermissionMode: (mode: AcpPermissionMode) => string
+    }
+
+  async function connect(adapter: AcpClientAdapter, command: string) {
+    mockIsTauri.mockReturnValue(true)
+    internals(adapter).initialize = jest.fn(async () => ({
+      protocolVersion: 1,
+      agentCapabilities: {},
+    }))
+    await adapter.connect({ ...stdioConfig(), process: { command, args: [] } })
+    const spawn = mockInvoke.mock.calls.find(([command]) => command === "spawn_external_agent")
+    return (spawn?.[1] as { config: { env: Record<string, string> } }).config.env
+  }
+
+  it("applies a profile the host supplies", async () => {
+    const adapter = new AcpClientAdapter({ ...acpDeps(), vendorProfiles: [acme] })
+    try {
+      expect(await connect(adapter, "/opt/bin/acme")).toMatchObject({ ACME_MODE: "safe" })
+      expect(internals(adapter).nativePermissionMode("plan")).toBe("read-only")
+      expect(internals(adapter).nativePermissionMode("acceptEdits")).toBe("write")
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("replaces the shipped profiles rather than adding to them", async () => {
+    const adapter = new AcpClientAdapter({ ...acpDeps(), vendorProfiles: [acme] })
+    try {
+      expect(await connect(adapter, "/usr/bin/goose")).not.toHaveProperty("GOOSE_MODE")
+      expect(internals(adapter).nativePermissionMode("acceptEdits")).toBe("acceptEdits")
+    } finally {
+      await adapter.disconnect()
+    }
   })
 })

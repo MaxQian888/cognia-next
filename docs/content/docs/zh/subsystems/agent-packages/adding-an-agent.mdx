@@ -33,7 +33,9 @@ flowchart LR
 ## 1. 判断是否需要一个包
 
 - **普通 ACP agent 不需要自己的包**：它只是运行时目录中由 `@cognia/agent-acp` 的 ACP
-  客户端运行的一行。厂商特例属于 ACP 厂商 profile（阶段 3；目前仍是客户端内部的分支）。
+  客户端运行的一行。若它偏离协议（自有的模式名、放在元数据里的工具标识、宣告了却不遵守的
+  能力），就在 `packages/agent-acp/src/vendors/` 下新增一个 `AcpVendorProfile` 并列入
+  `vendor-profiles.ts`，或由宿主通过 `vendorProfiles` 传入；客户端里没有厂商分支。
 - **拥有自己协议的运行时**（某种 RPC 方言、SDK、每回合一个 CLI 进程）或**拥有自己
   会话存储的运行时**，才需要一个包。
 

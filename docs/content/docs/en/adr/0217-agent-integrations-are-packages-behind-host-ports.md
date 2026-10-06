@@ -308,6 +308,11 @@ Team↔Workflow import cycle is broken. A boundary test keeps it that way.
   `dynamicMcpHost` dependency, and `resolve-acp-mcp-servers` (the app's MCP
   server store) and the official-SDK conformance harness stay beside it in
   `lib/ai/agent/external/runtimes/acp/`.
+- **ACP vendor profiles live in `@cognia/agent-acp`, not in per-vendor
+  packages.** A profile (`./vendors/<id>`) is a few lines of protocol data and
+  pure functions with no dependency of its own; a package per vendor would add
+  six artifacts that can only be used together with the ACP client. The
+  profile set is an `AcpClientDeps` input, so a host can still ship its own.
 
 ### Compatibility
 
@@ -330,7 +335,7 @@ Team↔Workflow import cycle is broken. A boundary test keeps it that way.
 | --- | --- | --- |
 | 1 | Baseline, identity model, migration matrix (`docs/plans/2026-10-05-agent-package-architecture.md`) | Done |
 | 2 | `agent-contracts`, `agent-runtime-kit`, `agent-dsh`, `agent-codex` (runtime + history); DSH cancel semantics; native-resume binding | Done |
-| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`), Aider (`@cognia/agent-aider`, with the file port) Pi (`@cognia/agent-pi`, with `PiHostServices`) OpenCode (`@cognia/agent-opencode`, with `AgentFetch`), A2A (`@cognia/agent-a2a`) and ACP with Devin (`@cognia/agent-acp`, with the terminal and WebSocket ports) are done; the remote-host run plane and ACP's MCP plumbing stay in the app (Scope decisions). The ACP vendor profiles, the remaining history readers, catalog generation, CLI port injection and the `instanceof` removal follow. Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
+| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`), Aider (`@cognia/agent-aider`, with the file port) Pi (`@cognia/agent-pi`, with `PiHostServices`) OpenCode (`@cognia/agent-opencode`, with `AgentFetch`), A2A (`@cognia/agent-a2a`) and ACP with Devin (`@cognia/agent-acp`, with the terminal and WebSocket ports) are done, with the ACP vendor branches extracted into `AcpVendorProfile`s; the remote-host run plane and ACP's MCP plumbing stay in the app (Scope decisions). The remaining history readers, catalog generation, CLI port injection and the `instanceof` removal follow. Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
 | 4 | Neutral tools; the AI SDK engine and the host run without the Claude SDK; SDK-free wire; vendor gate | Done (`44d622df7`, `c4ae605bd`); see Scope decisions for the tool-kernel package |
 | 5 | Orchestration package behind store/journal/redaction/path/remote-session ports; ledgers; Team↔Workflow cycle broken; session-ending cancel never reported as pause | Done (`6bf0a830a`, `a4f1dd183`, `3719c8d51`, `ed4ea6611`, `e931feec0`); gates, pool, wave runner and synthesized workflow stay in the app (Scope decisions) |
 | 6 | Docs, gates, CI and final regression | Done for the landed phases; Phase 3 docs follow its migration |

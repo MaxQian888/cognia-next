@@ -228,6 +228,9 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
   （`acp-dynamic-mcp-controller`，基于应用的 MCP 传输与凭据解析器）以 `dynamicMcpHost`
   依赖的形式交给客户端，`resolve-acp-mcp-servers`（应用的 MCP 服务器存储）与官方 SDK
   一致性测试工具留在 `lib/ai/agent/external/runtimes/acp/` 中。
+- **ACP 厂商 profile 放在 `@cognia/agent-acp` 中，而不是每个厂商一个包。** profile
+  （`./vendors/<id>`）只是几行协议数据与纯函数，没有自己的依赖；每个厂商一个包会多出六个
+  只能与 ACP 客户端一起使用的产物。profile 集合是 `AcpClientDeps` 的输入，宿主仍可提供自己的。
 
 ### 兼容性
 
@@ -249,7 +252,7 @@ wire 不依赖 SDK。sidecar 的 `SendOptions` 中的 `permissionMode`、`settin
 | --- | --- | --- |
 | 1 | 基线、身份模型、迁移矩阵（`docs/plans/2026-10-05-agent-package-architecture.md`） | 完成 |
 | 2 | `agent-contracts`、`agent-runtime-kit`、`agent-dsh`、`agent-codex`（运行时 + 历史）；DSH 取消语义；原生恢复绑定 | 完成 |
-| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。ACP 厂商 profile、其余历史读取器、目录生成、CLI 端口注入和移除 `instanceof` 随后进行。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
+| 3 | ACP 和其余集成、插件兼容包装层、由清单生成目录行、CLI 端口注入 | 进行中：插件兼容包装层（`c932f3275`）、Aider（`@cognia/agent-aider`，连同文件端口）、Pi（`@cognia/agent-pi`，连同 `PiHostServices`）、OpenCode（`@cognia/agent-opencode`，连同 `AgentFetch`）、A2A（`@cognia/agent-a2a`）以及 ACP 与 Devin（`@cognia/agent-acp`，连同终端与 WebSocket 端口）已完成，ACP 厂商分支已抽成 `AcpVendorProfile`；远程宿主运行平面与 ACP 的 MCP 管线留在应用中（见范围决策）。其余历史读取器、目录生成、CLI 端口注入和移除 `instanceof` 随后进行。这些文件带有另一工作流未提交的跨栈修改（依赖尚未提交的 Rust 命令）；这些修改会作为未提交的改动随代码一起移动，本次迁移不会提交它们 |
 | 4 | 中立工具；AI SDK 引擎与宿主无需 Claude SDK 即可运行；不依赖 SDK 的 wire；厂商闸门 | 完成（`44d622df7`、`c4ae605bd`）；工具内核包见范围决定 |
 | 5 | 位于存储/日志/脱敏/路径/远程会话端口之后的编排包；账本；打破 Team↔Workflow 导入环；结束会话的取消从不被报告为暂停 | 完成（`6bf0a830a`、`a4f1dd183`、`3719c8d51`、`ed4ea6611`、`e931feec0`）；闸门、队友池、波次运行器与合成工作流留在应用中（见范围决定） |
 | 6 | 文档、闸门、CI 和最终回归 | 已落地阶段已完成；阶段 3 的文档随其迁移补充 |
