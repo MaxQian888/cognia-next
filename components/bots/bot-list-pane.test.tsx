@@ -196,3 +196,9 @@ describe("BotListPane", () => {
     expect(screen.getByTestId("bot-row-boti_1")).not.toHaveAttribute("aria-current")
   })
 })
+
+it("keeps room for the clear action in the minimum-width rail", () => {
+  renderPane({ search: "rev" })
+  expect(screen.getByRole("textbox", { name: "Search Bots" })).toHaveClass("min-w-0")
+  expect(screen.getByTestId("bot-search-clear")).toBeEnabled()
+})

@@ -124,7 +124,7 @@ export function FileSourceInput({ twinId, busy, setBusy, onStaged, onError }: So
         accept={FILE_PICKER_ACCEPT}
         disabled={busy}
         onChange={(e) => void handleFiles(e.target.files)}
-        className="text-sm"
+        className="min-w-0 max-w-full text-sm"
         aria-label={t("pickFilesAria")}
       />
       {busy ? (

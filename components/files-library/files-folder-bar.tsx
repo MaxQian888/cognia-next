@@ -39,17 +39,20 @@ export function FilesFolderBar({ folders }: { folders: readonly LibraryFolder[] 
   const children = childLibraryFolders(folders, folderId)
 
   return (
-    <div className="flex flex-col gap-3 px-4 pt-4" data-testid="files-folder-bar">
-      <div className="flex items-center gap-2">
+    <div
+      className="@container/files-folder flex flex-col gap-3 px-4 pt-4"
+      data-testid="files-folder-bar"
+    >
+      <div className="flex flex-wrap items-center gap-2">
         <nav
           aria-label={t("folders.breadcrumbAria")}
-          className="flex min-w-0 flex-1 items-center gap-1 text-sm text-muted-foreground"
+          className="flex min-w-0 flex-1 basis-full items-center gap-1 overflow-x-auto text-sm text-muted-foreground @sm/files-folder:basis-auto"
         >
           <button
             type="button"
             onClick={() => enterFolder(ROOT_LIBRARY_FOLDER_ID)}
             className={cn(
-              "inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground",
+              "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1 py-0.5 hover:text-foreground",
               folderId === ROOT_LIBRARY_FOLDER_ID && "font-medium text-foreground"
             )}
             data-testid="files-breadcrumb-root"
@@ -58,7 +61,7 @@ export function FilesFolderBar({ folders }: { folders: readonly LibraryFolder[] 
             {t("folders.root")}
           </button>
           {path.map((folder, index) => (
-            <span key={folder.id} className="flex min-w-0 items-center gap-1">
+            <span key={folder.id} className="flex min-w-0 shrink-0 items-center gap-1">
               <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden />
               <button
                 type="button"

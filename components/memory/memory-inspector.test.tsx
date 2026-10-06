@@ -394,3 +394,12 @@ describe("corroboration and compaction", () => {
     expect(screen.queryByTestId("memory-inspector-compacted")).toBeNull()
   })
 })
+
+it("contains long memory content and tags in a narrow inspector", () => {
+  const text = "memory".repeat(200)
+  const tag = "tag".repeat(100)
+  setup({ memory: mem({ text, tags: [tag] }) })
+  expect(screen.getByText(text)).toHaveClass("break-words")
+  expect(screen.getByText(tag)).toHaveClass("max-w-full", "whitespace-normal", "break-all")
+  expect(screen.getByTestId("memory-inspector").querySelector("footer")).toHaveClass("flex-wrap")
+})

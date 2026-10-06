@@ -11,6 +11,7 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { isTauri } from "@/lib/tauri"
+import { cn } from "@/lib/utils"
 import type { LocalPersistenceVisibilityProjection } from "@/lib/storage"
 
 interface LocalPersistenceVisibilityPanelProps {
@@ -28,7 +29,10 @@ export function LocalPersistenceVisibilityPanel({
   if (!data) return null
 
   return (
-    <div className={className} data-testid="local-persistence-visibility">
+    <div
+      className={cn("[overflow-wrap:anywhere]", className)}
+      data-testid="local-persistence-visibility"
+    >
       <div className="space-y-1">
         <p className="text-xs font-medium">{t("title")}</p>
         <p className="text-[10px] text-muted-foreground">{t("description")}</p>

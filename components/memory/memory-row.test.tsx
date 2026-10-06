@@ -234,3 +234,11 @@ describe("MemoryRow", () => {
     expect(screen.getByTestId("memory-row-actions")).not.toHaveClass("opacity-0")
   })
 })
+
+it("wraps long memory text and tag labels without displacing row actions", () => {
+  const text = "memory".repeat(200)
+  const tag = "tag".repeat(100)
+  setup({ text, tags: [tag] })
+  expect(screen.getByText(text)).toHaveClass("break-words")
+  expect(screen.getByText(tag)).toHaveClass("max-w-full", "whitespace-normal", "break-all")
+})

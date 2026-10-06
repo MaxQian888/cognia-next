@@ -100,7 +100,11 @@ export function LarkAccountPicker({ value, onChange, disabled }: LarkAccountPick
         onValueChange={(next) => onChange(next || null)}
         disabled={disabled}
       >
-        <SelectTrigger id="twin-lark-account" aria-label={t("accountLabel")}>
+        <SelectTrigger
+          id="twin-lark-account"
+          aria-label={t("accountLabel")}
+          className="min-w-0 max-w-full [&_[data-slot=select-value]]:min-w-0"
+        >
           <SelectValue placeholder={t("accountPlaceholder")} />
         </SelectTrigger>
         <SelectContent>

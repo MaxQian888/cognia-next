@@ -104,13 +104,13 @@ export function BatchExportDialog({ trigger }: Props) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto [overflow-wrap:anywhere] sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("batchTitle")}</DialogTitle>
           <DialogDescription>{t("batchDescription")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
+        <div className="min-w-0 space-y-3 py-2">
           <div className="space-y-1">
             <Label className="text-xs">{t("formatLabel")}</Label>
             <Select value={format} onValueChange={(v) => setFormat(v as SingleExportFormat)}>
@@ -137,7 +137,7 @@ export function BatchExportDialog({ trigger }: Props) {
                 {allSelected ? t("batch.deselectAll") : t("batch.selectAll")}
               </button>
             </div>
-            <ScrollArea className="h-44 rounded border bg-muted/20">
+            <ScrollArea className="h-44 rounded border bg-muted/20 [&_[data-slot=scroll-area-viewport]>div]:!block">
               <ul className="divide-y">
                 {sessions.map((s) => (
                   <li key={s.id} className="flex items-center gap-2 px-2 py-1.5 text-sm">

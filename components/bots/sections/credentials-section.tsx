@@ -130,7 +130,7 @@ function CredentialItem({ credential, candidates, canBind, busy, onBind }: Crede
             }
           >
             <SelectTrigger
-              className="mt-1 h-8 text-xs"
+              className="mt-1 h-8 min-w-0 max-w-full text-xs"
               aria-label={t("credentials.bindAria", { slot: credential.label })}
               data-testid={`bot-credential-select-${credential.id}`}
             >

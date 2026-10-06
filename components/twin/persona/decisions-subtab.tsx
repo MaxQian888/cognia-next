@@ -134,9 +134,12 @@ export function DecisionsSubtab({
         <ul className="flex flex-col gap-2">
           {filtered.map((decision) => (
             <li key={decision.id} className="list-none">
-              <Card className="flex flex-col gap-2 p-3" data-testid={`decision-row-${decision.id}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+              <Card
+                className="@container/persona-row flex flex-col gap-2 p-3"
+                data-testid={`decision-row-${decision.id}`}
+              >
+                <div className="flex flex-col items-start justify-between gap-3 @sm/persona-row:flex-row">
+                  <div className="min-w-0 max-w-full break-words">
                     <p className="font-medium">{decision.context}</p>
                     <p className="text-sm">{decision.choice}</p>
                     {decision.rationale ? (

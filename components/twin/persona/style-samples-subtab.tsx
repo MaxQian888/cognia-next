@@ -130,16 +130,21 @@ export function StyleSamplesSubtab({ twinId, styleSamples }: StyleSamplesSubtabP
           {filtered.map((sample) => (
             <li key={sample.id} className="list-none">
               <Card
-                className="flex flex-col gap-2 p-3"
+                className="@container/persona-row flex flex-col gap-2 p-3"
                 data-testid={`style-sample-row-${sample.id}`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 flex-col gap-1">
+                <div className="flex flex-col items-start justify-between gap-3 @sm/persona-row:flex-row">
+                  <div className="flex min-w-0 max-w-full flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-medium">{sample.contextLabel}</span>
                       {sample.tone.slice(0, 3).map((tone) => (
-                        <Badge key={tone} variant="outline" className="shrink-0">
-                          {tone}
+                        <Badge
+                          key={tone}
+                          variant="outline"
+                          className="max-w-full shrink-0"
+                          title={tone}
+                        >
+                          <span className="truncate">{tone}</span>
                         </Badge>
                       ))}
                       {sample.pinned ? (

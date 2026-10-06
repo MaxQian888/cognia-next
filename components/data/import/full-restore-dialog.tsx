@@ -39,18 +39,18 @@ export function FullRestoreDialog() {
   }
 
   return (
-    <Card className="space-y-3 p-4">
+    <Card className="@container/full-restore space-y-3 p-4 [overflow-wrap:anywhere]">
       <div className="flex items-center gap-2">
         <UploadIcon className="size-4" />
         <Label className="text-sm">{t("importTitle")}</Label>
       </div>
       <p className="text-xs text-muted-foreground">{t("importHint")}</p>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 @md/full-restore:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-[11px]">{t("mergeStrategyLabel")}</Label>
           <Select value={strategy} onValueChange={(v) => setStrategy(v as ImportMergeStrategy)}>
-            <SelectTrigger>
+            <SelectTrigger className="min-w-0 max-w-full [&_[data-slot=select-value]]:min-w-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

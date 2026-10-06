@@ -79,3 +79,11 @@ it("labels an uploaded video as a video", () => {
   )
   expect(screen.getByRole("button", { name: "Open A paper boat.mp4" })).toHaveTextContent("Video")
 })
+
+it("reuses the shared touch-aware reveal policy for the item menu", () => {
+  render(<FilesRow entry={entry()} actions={actions()} selected={false} />)
+  expect(screen.getByTestId("files-item-menu-upload:u")).toHaveClass(
+    "pointer-coarse:opacity-100",
+    "group-focus-within:opacity-100"
+  )
+})

@@ -129,9 +129,12 @@ export function PlaybooksSubtab({ twinId, playbooks }: PlaybooksSubtabProps) {
         <ul className="flex flex-col gap-2">
           {filtered.map((playbook) => (
             <li key={playbook.id} className="list-none">
-              <Card className="flex flex-col gap-2 p-3" data-testid={`playbook-row-${playbook.id}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 flex-col gap-1">
+              <Card
+                className="@container/persona-row flex flex-col gap-2 p-3"
+                data-testid={`playbook-row-${playbook.id}`}
+              >
+                <div className="flex flex-col items-start justify-between gap-3 @sm/persona-row:flex-row">
+                  <div className="flex min-w-0 max-w-full flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-medium">{playbook.title}</span>
                       <Badge variant="outline" className="shrink-0">

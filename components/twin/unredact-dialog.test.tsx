@@ -145,3 +145,21 @@ describe("UnredactDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
+
+it("wraps restore controls and placeholder metadata in narrow dialogs", () => {
+  render(
+    <UnredactDialog
+      open
+      onOpenChange={jest.fn()}
+      placeholders={PLACEHOLDERS}
+      onConfirm={jest.fn()}
+    />
+  )
+  expect(screen.getByRole("button", { name: /restore all/i }).parentElement).toHaveClass(
+    "flex-wrap"
+  )
+  expect(screen.getByTestId("twin-unredact-row-<EMAIL_001>")).toHaveClass("flex-wrap")
+  expect(screen.getByText("alice@example.com").closest('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-viewport]>div]:!block"
+  )
+})

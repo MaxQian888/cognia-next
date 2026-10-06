@@ -216,3 +216,11 @@ describe("BotDeliveriesSection", () => {
     expect(screen.getByTestId("bot-delivery-bdl_1")).toHaveTextContent("Waiting")
   })
 })
+
+it("allows delivery metadata and run links to wrap in narrow cards", () => {
+  deliveries = { rows: [delivery({ status: "deadletter", runId: "run_1" })], loading: false }
+  render(<BotDeliveriesSection row={row()} />)
+  expect(screen.getByText("pull_request.opened").parentElement).toHaveClass("flex-wrap")
+  expect(screen.getByRole("link").parentElement).toHaveClass("flex-wrap")
+  expect(screen.getByTestId("bot-delivery-replay-bdl_1")).toBeEnabled()
+})

@@ -11,10 +11,10 @@ jest.mock("@/components/desktop/title-bar-nav-arrows", () => ({
     <div data-testid="seg-navArrows" className={className} />
   ),
 }))
+let mockWorkspaceVisible = true
 jest.mock("@/components/desktop/title-bar-workspace", () => ({
-  TitleBarWorkspace: ({ className }: { className?: string }) => (
-    <div data-testid="seg-workspace" className={className} />
-  ),
+  TitleBarWorkspace: ({ className }: { className?: string }) =>
+    mockWorkspaceVisible ? <div data-testid="seg-workspace" className={className} /> : null,
 }))
 jest.mock("@/components/desktop/title-bar-search-pill", () => ({
   TitleBarSearchPill: ({
@@ -95,6 +95,7 @@ const ctx: TitleBarItemContext = {
 
 beforeEach(() => {
   onCommandPalette.mockClear()
+  mockWorkspaceVisible = true
 })
 
 describe("TitleBarZone", () => {
@@ -167,4 +168,11 @@ it("folds secondary chat navigation while preserving its existing controls and h
 it("does not add an empty navigation menu when the user keeps only search", () => {
   render(<TitleBarZone items={pick("search")} ctx={ctx} compact />)
   expect(screen.queryByTestId("title-bar-navigation-menu")).not.toBeInTheDocument()
+})
+
+it("does not leave a workspace heading when the shared switcher hides itself", () => {
+  mockWorkspaceVisible = false
+  render(<TitleBarZone items={pick("navArrows", "workspace", "commandCenter")} ctx={ctx} compact />)
+  fireEvent.click(screen.getByTestId("title-bar-navigation-menu"))
+  expect(screen.queryByText("Workspace")).not.toBeInTheDocument()
 })

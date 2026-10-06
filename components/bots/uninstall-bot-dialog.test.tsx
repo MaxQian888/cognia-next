@@ -101,3 +101,9 @@ describe("UninstallBotDialog", () => {
     expect(onUninstalled).not.toHaveBeenCalled()
   })
 })
+
+it("wraps an unbroken Bot name within the confirmation dialog", () => {
+  const name = "Bot".repeat(100)
+  render(<UninstallBotDialog row={row({ name })} open onOpenChange={jest.fn()} />)
+  expect(screen.getByRole("heading")).toHaveClass("break-words")
+})

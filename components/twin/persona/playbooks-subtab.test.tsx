@@ -118,3 +118,12 @@ describe("PlaybooksSubtab", () => {
     })
   })
 })
+
+it("lets playbook actions stack within a narrow row", () => {
+  render(<PlaybooksSubtab twinId={TWIN_ID} playbooks={[makePlaybook("narrow")]} />)
+  const row = screen.getByTestId("playbook-row-narrow")
+  expect(row).toHaveClass("@container/persona-row")
+  expect(row.firstElementChild).toHaveClass("flex-col", "@sm/persona-row:flex-row")
+  expect(row.firstElementChild?.firstElementChild).toHaveClass("max-w-full")
+  expect(screen.getByTestId("playbook-edit-narrow")).toBeEnabled()
+})

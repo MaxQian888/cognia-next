@@ -83,3 +83,11 @@ it("marks favorites, deleted sources, Files uploads and shared images", () => {
   expect(screen.getByTestId("files-card-used-in")).toHaveTextContent("In 2 conversations")
   expect(screen.getByText("Uploaded to Files")).toBeInTheDocument()
 })
+
+it("reuses the shared touch-aware reveal policy for the item menu", () => {
+  render(<FilesCard entry={entry()} actions={actions()} selected={false} />)
+  expect(screen.getByTestId("files-item-menu-artifact:a")).toHaveClass(
+    "pointer-coarse:opacity-100",
+    "group-focus-within:opacity-100"
+  )
+})

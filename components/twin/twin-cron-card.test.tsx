@@ -163,3 +163,14 @@ describe("TwinCronCard", () => {
     expect(ingestInput.value).toBe(firstReal!.value)
   })
 })
+
+it("stacks cron controls in a narrow card while retaining the wide row", () => {
+  render(<TwinCronCard twinId="twin_alice" />)
+  for (const field of ["twin-cron-ingest", "twin-cron-distill"]) {
+    expect(screen.getByTestId(field).parentElement).toHaveClass(
+      "flex-col",
+      "@sm/twin-cron:flex-row"
+    )
+  }
+  expect(screen.getByTestId("twin-cron-card")).toHaveClass("@container/twin-cron")
+})

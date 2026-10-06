@@ -70,3 +70,9 @@ describe("BotHero", () => {
     expect(screen.queryAllByTestId("bot-stat-deadLetters")).toHaveLength(1)
   })
 })
+
+it("wraps an unbroken description without widening the masthead", () => {
+  const description = "repository/".repeat(40)
+  render(<BotHero row={row({ description })} />)
+  expect(screen.getByText(description)).toHaveClass("break-words")
+})

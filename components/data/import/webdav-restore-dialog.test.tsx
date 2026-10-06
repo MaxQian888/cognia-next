@@ -101,3 +101,21 @@ it("explains unsupported mobile certificate policy without exposing an error cod
   ).toBeInTheDocument()
   expect(screen.queryByText(/native_certificate_override_unavailable/)).not.toBeInTheDocument()
 })
+
+it("bounds restore controls and the dialog for narrow and short screens", async () => {
+  const user = userEvent.setup()
+  render(<WebDavRestoreDialog trigger={<Button>Open</Button>} />)
+  await user.click(screen.getByRole("button", { name: "Open" }))
+  await screen.findByLabelText("Passphrase")
+  expect(screen.getByRole("dialog")).toHaveClass(
+    "max-h-[85vh]",
+    "overflow-y-auto",
+    "[overflow-wrap:anywhere]"
+  )
+  expect(screen.getAllByRole("combobox")[0].parentElement?.parentElement).toHaveClass("min-w-0")
+  for (const trigger of screen.getAllByRole("combobox")) {
+    expect(trigger).toHaveClass("max-w-full", "min-w-0", "[&_[data-slot=select-value]]:min-w-0")
+  }
+  await user.click(screen.getAllByRole("combobox")[0])
+  expect(screen.getByRole("listbox")).toHaveClass("max-w-[calc(100vw-2rem)]")
+})

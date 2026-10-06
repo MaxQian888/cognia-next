@@ -87,7 +87,7 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
           </p>
         ) : null}
 
-        <dl className="mx-4 mb-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+        <dl className="mx-4 mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
           <dt className="text-muted-foreground">{t("preview.details.type")}</dt>
           <dd className="truncate">
             {entry.mediaType ?? entry.subtype ?? t(`kinds.${entryKindLabelKey(entry)}`)}
@@ -95,7 +95,7 @@ export function FilesPreviewPane({ entry, actions, onClose }: FilesPreviewPanePr
           {entry.language ? (
             <>
               <dt className="text-muted-foreground">{t("preview.details.language")}</dt>
-              <dd>{entry.language}</dd>
+              <dd className="[overflow-wrap:anywhere]">{entry.language}</dd>
             </>
           ) : null}
           {entry.byteSize !== undefined ? (

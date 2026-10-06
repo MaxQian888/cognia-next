@@ -31,9 +31,12 @@ export function FilesDeleteDialog({
 
   return (
     <AlertDialog open={target !== null} onOpenChange={(next) => (next ? undefined : close())}>
-      <AlertDialogContent data-testid="files-delete-dialog">
+      <AlertDialogContent
+        className="max-h-[85vh] overflow-y-auto"
+        data-testid="files-delete-dialog"
+      >
         <AlertDialogHeader>
-          <AlertDialogTitle>
+          <AlertDialogTitle className="[overflow-wrap:anywhere]">
             {t("deleteDialog.title", { title: entry ? displayTitle(entry, t) : "" })}
           </AlertDialogTitle>
           <AlertDialogDescription>{t("deleteDialog.description")}</AlertDialogDescription>

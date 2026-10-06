@@ -83,8 +83,10 @@ function DeliveryRow({
         className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", STATUS_DOT[delivery.status])}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">{delivery.type}</span>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="min-w-0 flex-1 basis-24 truncate text-xs font-medium">
+            {delivery.type}
+          </span>
           <span className="shrink-0 text-[11px] text-muted-foreground">
             {t(`delivery.status.${delivery.status}`)}
           </span>
@@ -99,7 +101,7 @@ function DeliveryRow({
               full rather than truncated: half a stack trace is not a clue. */}
           {delivery.lastError ? ` · ${delivery.lastError}` : ""}
         </p>
-        <div className="flex gap-2 text-[11px]">
+        <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px]">
           {delivery.runId ? (
             <Link
               href={`/agent-runs?run=${encodeURIComponent(delivery.runId)}`}

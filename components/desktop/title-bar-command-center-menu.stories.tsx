@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { TitleBarCommandCenterMenu } from "./title-bar-command-center-menu"
+import { TitleBarZone } from "./title-bar-zone"
+import { getBarCatalog } from "@/lib/shell/bar-items"
 
 // The command-center caret dropdown beside the title-bar pill. Carries no store
 // subscriptions — data + handlers are injected by `TitleBar`. Click the caret to
@@ -31,4 +33,25 @@ export const WithRecentSessions: Story = {}
 
 export const NoRecentSessions: Story = {
   args: { recentSessions: [] },
+}
+
+export const CompactNavigation: Story = {
+  parameters: { layout: "fullscreen", nextjs: { appDirectory: true } },
+  render: (args) => (
+    <div className="flex h-10 min-w-0 items-center justify-end gap-1 border-b px-2">
+      <TitleBarZone
+        compact
+        items={getBarCatalog("title", "tauri").filter((item) =>
+          ["navArrows", "workspace", "search", "commandCenter"].includes(item.id)
+        )}
+        ctx={{
+          ...args,
+          appName: "Cognia",
+          separator: " — ",
+          searchPlaceholder: "",
+          kbdHint: "⌘K",
+        }}
+      />
+    </div>
+  ),
 }

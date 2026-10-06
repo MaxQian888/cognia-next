@@ -43,9 +43,12 @@ export function FilesDeleteFolderDialog({ folders }: { folders: readonly Library
         }
       }}
     >
-      <AlertDialogContent data-testid="files-delete-folder-dialog">
+      <AlertDialogContent
+        className="max-h-[85vh] overflow-y-auto"
+        data-testid="files-delete-folder-dialog"
+      >
         <AlertDialogHeader>
-          <AlertDialogTitle>
+          <AlertDialogTitle className="[overflow-wrap:anywhere]">
             {t("deleteFolderDialog.title", { name: folder?.name ?? "" })}
           </AlertDialogTitle>
           <AlertDialogDescription>{t("deleteFolderDialog.description")}</AlertDialogDescription>

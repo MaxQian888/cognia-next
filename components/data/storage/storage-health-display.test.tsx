@@ -88,3 +88,15 @@ describe("StorageHealthDisplay", () => {
     expect(onAction).toHaveBeenCalledWith("Clear something")
   })
 })
+
+it("wraps long diagnostic text and recommendation descriptions", () => {
+  const text = "LongDiagnostic".repeat(40)
+  const { container } = renderHealth({
+    status: "warning",
+    usagePercent: 80,
+    issues: [{ severity: "medium", message: text }],
+    recommendations: [],
+  })
+  expect(container.firstChild).toHaveClass("[overflow-wrap:anywhere]")
+  expect(screen.getByText(text)).toBeInTheDocument()
+})

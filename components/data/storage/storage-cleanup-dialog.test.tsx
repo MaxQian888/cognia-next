@@ -74,3 +74,9 @@ describe("StorageCleanupDialog", () => {
     expect(await within(dialog).findByText(/pick which categories/i)).toBeInTheDocument()
   })
 })
+
+it("keeps phone margins and makes long cleanup panels vertically scrollable", () => {
+  renderDialog()
+  fireEvent.click(screen.getByRole("button", { name: /cleanup/i }))
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto", "sm:max-w-lg")
+})

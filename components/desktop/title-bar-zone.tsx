@@ -72,7 +72,7 @@ export function TitleBarZone({
         <TitleBarSegment key={item.id} item={item} ctx={ctx} compact={compact} />
       ))}
       {folded.length > 0 && (
-        <Popover>
+        <Popover modal>
           <PopoverTrigger asChild>
             <Button
               type="button"
@@ -88,19 +88,29 @@ export function TitleBarZone({
           </PopoverTrigger>
           <PopoverContent
             align="end"
-            className="w-64 space-y-3"
+            collisionPadding={8}
+            className="flex max-h-[var(--radix-popover-content-available-height)] w-64 max-w-[calc(100vw-1rem)] flex-col gap-1 overflow-y-auto p-2"
             aria-label={t("titleBar.navigationMenu")}
           >
-            {folded.map((item) => (
-              <div key={item.id} className="space-y-1">
-                <p className="text-xs text-muted-foreground">
-                  {t(`barCustomize.items.${item.i18nKey}`)}
-                </p>
-                <div className="flex min-w-0 items-center gap-1">
-                  <TitleBarSegment item={{ ...item, minWidth: undefined }} ctx={ctx} />
+            {folded.map((item) =>
+              item.id === "workspace" || item.id === "commandCenter" ? (
+                <div key={item.id} className="min-w-0 empty:hidden">
+                  <TitleBarSegment item={{ ...item, minWidth: undefined }} ctx={ctx} inMenu />
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div
+                  key={item.id}
+                  className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md px-2 py-1"
+                >
+                  <p className="text-xs text-muted-foreground break-words">
+                    {t(`barCustomize.items.${item.i18nKey}`)}
+                  </p>
+                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                    <TitleBarSegment item={{ ...item, minWidth: undefined }} ctx={ctx} />
+                  </div>
+                </div>
+              )
+            )}
           </PopoverContent>
         </Popover>
       )}
@@ -112,10 +122,12 @@ function TitleBarSegment({
   item,
   ctx,
   compact = false,
+  inMenu = false,
 }: {
   item: BarCatalogItem
   ctx: TitleBarItemContext
   compact?: boolean
+  inMenu?: boolean
 }) {
   switch (item.id) {
     case "appIcon":
@@ -129,7 +141,11 @@ function TitleBarSegment({
     case "navArrows":
       return <TitleBarNavArrows className="shrink-0" />
     case "workspace":
-      return <TitleBarWorkspace className={`shrink-0 ${minWidthClass(item.minWidth)}`} />
+      return (
+        <TitleBarWorkspace
+          className={inMenu ? "w-full min-w-0" : `shrink-0 ${minWidthClass(item.minWidth)}`}
+        />
+      )
     case "search":
       return (
         <TitleBarSearchPill
@@ -144,6 +160,7 @@ function TitleBarSegment({
     case "commandCenter":
       return (
         <TitleBarCommandCenterMenu
+          variant={inMenu ? "menu" : "toolbar"}
           className={minWidthClass(item.minWidth, true)}
           recentSessions={ctx.recentSessions}
           onCommandPalette={ctx.onCommandPalette}

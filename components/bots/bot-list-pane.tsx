@@ -168,7 +168,7 @@ export function BotListPane({
             placeholder={t("listPane.searchPlaceholder")}
             aria-label={t("listPane.searchAria")}
             tabIndex={expanded ? 0 : -1}
-            className="h-8 min-w-40 flex-1 border-0 bg-transparent px-2 shadow-none focus-visible:ring-0"
+            className="h-8 min-w-0 flex-1 border-0 bg-transparent px-2 shadow-none focus-visible:ring-0"
             data-testid="bot-search"
           />
           {search ? (

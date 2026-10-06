@@ -103,3 +103,9 @@ describe("MemoryRevisionHistory", () => {
     expect(onRestore).not.toHaveBeenCalled()
   })
 })
+
+it("wraps unbroken revision text while retaining the line limit", () => {
+  const text = "revision".repeat(100)
+  render(<MemoryRevisionHistory revisions={[revision({ text })]} />)
+  expect(screen.getByText(text)).toHaveClass("break-words", "line-clamp-4")
+})

@@ -38,3 +38,10 @@ it("cascades when asked", async () => {
   await user.click(screen.getByRole("button", { name: "Delete folder" }))
   expect(remove).toHaveBeenCalledWith("lbf_a", "cascade")
 })
+
+it("wraps long folder names inside a viewport-bounded confirmation", () => {
+  useFilesLibraryStore.setState({ deleteFolderTarget: "lbf_a" })
+  render(<FilesDeleteFolderDialog folders={[{ ...folders[0]!, name: "folder".repeat(20) }]} />)
+  expect(screen.getByRole("alertdialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByRole("heading")).toHaveClass("[overflow-wrap:anywhere]")
+})

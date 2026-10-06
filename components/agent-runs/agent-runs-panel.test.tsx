@@ -491,3 +491,20 @@ it("renders past run starts as elapsed time instead of overdue deadlines", () =>
   expect(screen.getByText("5 minutes ago")).toBeInTheDocument()
   expect(screen.queryByText("Overdue")).not.toBeInTheDocument()
 })
+
+it("wraps the shared status filters inside a narrow embedded Bot panel", () => {
+  const onStatusGroup = jest.fn()
+  render(
+    <AgentRunsPanel
+      embedded
+      compact
+      filterKind="bot"
+      onStatusGroup={onStatusGroup}
+      onSelect={jest.fn()}
+    />
+  )
+  const tabs = screen.getByRole("tablist", { name: "filters.statusLabel" })
+  expect(tabs).toHaveClass("flex-wrap")
+  fireEvent.click(within(tabs).getByRole("tab", { name: /filters.failed/ }))
+  expect(onStatusGroup).toHaveBeenCalledWith("failed")
+})

@@ -76,3 +76,11 @@ describe("LocalPersistenceVisibilityPanel", () => {
     expect(screen.getByText("warn-1")).toBeInTheDocument()
   })
 })
+
+it("contains long backend diagnostics and preserves caller styling", () => {
+  renderPanel({ className: "mt-4" })
+  expect(screen.getByTestId("local-persistence-visibility")).toHaveClass(
+    "[overflow-wrap:anywhere]",
+    "mt-4"
+  )
+})

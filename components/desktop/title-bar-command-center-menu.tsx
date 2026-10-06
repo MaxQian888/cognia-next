@@ -72,12 +72,14 @@ export function TitleBarCommandCenterMenu({
   onOpenRecentSession,
   onGo,
   className,
+  variant = "toolbar",
 }: {
   recentSessions: RecentSessionEntry[]
   onCommandPalette: () => void
   onOpenRecentSession: (sessionId: string) => void
   onGo: (id: MenuActionId) => void
   className?: string
+  variant?: "toolbar" | "menu"
 }) {
   const t = useTranslations("desktop.titleBar.commandCenter")
   const tMenu = useTranslations("desktop.menu")
@@ -94,16 +96,23 @@ export function TitleBarCommandCenterMenu({
           aria-label={t("menuLabel")}
           title={t("menuLabel")}
           className={cn(
-            "h-6 w-5 shrink-0 rounded-md rounded-l-none border border-l-0 border-border",
+            variant === "menu"
+              ? "h-auto min-h-8 w-full justify-between gap-2 rounded-md px-2 py-1.5 text-left whitespace-normal"
+              : "h-6 w-5 shrink-0 rounded-md rounded-l-none border border-l-0 border-border",
             "bg-background/60 text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
             "motion-safe:transition-transform motion-safe:active:scale-90",
             className
           )}
         >
-          <ChevronDownIcon className="size-3" aria-hidden />
+          {variant === "menu" && <span className="min-w-0">{t("menuLabel")}</span>}
+          <ChevronDownIcon className="size-3 shrink-0" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="center" className={cn("w-64", MENU_CONTENT_PERF)}>
+      <DropdownMenuContent
+        align={variant === "menu" ? "end" : "center"}
+        collisionPadding={8}
+        className={cn("w-64 max-w-[calc(100vw-1rem)]", MENU_CONTENT_PERF)}
+      >
         <DropdownMenuItem onSelect={onCommandPalette} data-testid="cc-command-palette">
           <SearchIcon aria-hidden />
           <span className="min-w-0 flex-1 truncate">{tMenu("view.commandPalette")}</span>

@@ -53,13 +53,13 @@ export function ChatImportDialog({ trigger, defaultPlatform, open, onOpenChange 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto [overflow-wrap:anywhere] sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("dialog.title")}</DialogTitle>
           <DialogDescription>{t("dialog.description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
+        <div className="min-w-0 space-y-3 py-2">
           {flow.state.status === "idle" && (
             <Card className="space-y-2 p-4 text-center">
               <p className="text-sm text-muted-foreground">{t("dialog.pickPrompt")}</p>
@@ -87,7 +87,7 @@ export function ChatImportDialog({ trigger, defaultPlatform, open, onOpenChange 
                   messages: flow.state.conversations.reduce((s, c) => s + c.messages.length, 0),
                 })}
               </p>
-              <ScrollArea className="h-44 rounded border bg-muted/20">
+              <ScrollArea className="h-44 rounded border bg-muted/20 [&_[data-slot=scroll-area-viewport]>div]:!block">
                 <ul className="divide-y">
                   {flow.state.conversations.map((c) => (
                     <li key={c.session.id} className="px-3 py-2 text-xs">

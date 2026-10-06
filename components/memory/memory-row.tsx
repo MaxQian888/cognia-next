@@ -204,7 +204,7 @@ function MemoryRowImpl({
         ) : (
           <p
             className={cn(
-              "text-sm leading-snug",
+              "break-words text-sm leading-snug",
               compact ? "line-clamp-2" : "line-clamp-3",
               invalidated && "line-through decoration-muted-foreground/50"
             )}
@@ -267,7 +267,10 @@ function MemoryRowImpl({
               <Badge
                 key={tag}
                 variant={activeTags?.has(tag) ? "default" : "secondary"}
-                className={cn("h-5 px-1.5 font-normal", onTagClick && "cursor-pointer")}
+                className={cn(
+                  "min-h-5 max-w-full whitespace-normal break-all px-1.5 py-px font-normal",
+                  onTagClick && "cursor-pointer"
+                )}
                 onClick={
                   onTagClick
                     ? (event) => {

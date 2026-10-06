@@ -50,7 +50,7 @@ export function FilesMoveDialog({ entries, folders, actions }: FilesMoveDialogPr
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
-      <DialogContent data-testid="files-move-dialog">
+      <DialogContent className="max-h-[85vh] overflow-y-auto" data-testid="files-move-dialog">
         <DialogHeader>
           <DialogTitle>{t("moveDialog.title")}</DialogTitle>
           <DialogDescription>
@@ -117,8 +117,8 @@ function FolderOption({
   const inputId = `files-move-${id}`
   return (
     <div
-      className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/50"
-      style={{ paddingLeft: `${0.5 + depth}rem` }}
+      className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-accent/50"
+      style={{ paddingLeft: `min(${0.5 + depth}rem, 40%)` }}
     >
       <RadioGroupItem value={id} id={inputId} data-testid={`files-move-option-${id}`} />
       <Label

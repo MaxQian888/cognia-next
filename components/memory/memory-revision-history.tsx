@@ -72,7 +72,7 @@ export function MemoryRevisionHistory({ revisions, onRestore }: MemoryRevisionHi
                 </Button>
               ) : null}
             </div>
-            <p className="line-clamp-4 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+            <p className="line-clamp-4 break-words text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
               {revision.text}
             </p>
           </li>

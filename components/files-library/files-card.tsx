@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files-actions"
 import type { FilesEntry } from "@/lib/files-library/types"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { FilesEntryIcon } from "./files-entry-icon"
 import { FilesImageThumb } from "./files-image-thumb"
 import { FilesItemMenu } from "./files-item-menu"
@@ -116,7 +117,8 @@ export function FilesCard({ entry, actions, selected }: FilesCardProps) {
           title={title}
           actions={actions}
           className={cn(
-            "size-7 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100",
+            HOVER_REVEAL_CONTROL_CLASS,
+            "size-7 group-focus-within:opacity-100",
             isImage && "bg-black/40 text-white hover:bg-black/60"
           )}
         />

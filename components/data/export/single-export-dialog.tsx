@@ -166,7 +166,7 @@ export function SingleExportDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[80vh] overflow-y-auto [overflow-wrap:anywhere] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("singleTitle")}</DialogTitle>
           <DialogDescription>{t("singleDescription", { title: session.title })}</DialogDescription>
@@ -176,7 +176,7 @@ export function SingleExportDialog({
           <div className="space-y-1">
             <Label className="text-xs">{t("formatLabel")}</Label>
             <Select value={format} onValueChange={(v) => setFormat(v as SingleExportFormat)}>
-              <SelectTrigger>
+              <SelectTrigger className="min-w-0 max-w-full [&_[data-slot=select-value]]:min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -244,7 +244,7 @@ export function SingleExportDialog({
           {pngError && <p className="text-xs text-destructive">{pngError}</p>}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="sm:flex-wrap">
           {isHtml && (
             <Button
               variant="outline"

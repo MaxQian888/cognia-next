@@ -350,3 +350,8 @@ describe("GitSourceInput", () => {
     expect(props.onError).not.toHaveBeenCalled()
   })
 })
+
+it("bounds the native file input to its dialog column", () => {
+  render(<FileSourceInput {...makeProps()} />)
+  expect(screen.getByLabelText(/pick text files/i)).toHaveClass("min-w-0", "max-w-full")
+})

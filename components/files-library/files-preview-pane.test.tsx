@@ -246,3 +246,16 @@ it("lists no generation details for an ordinary upload", async () => {
   expect(screen.queryByTestId("files-preview-prompt")).not.toBeInTheDocument()
   expect(screen.getByText("File")).toBeInTheDocument()
 })
+
+it("allows long metadata to wrap within a narrow details column", () => {
+  const language = "language".repeat(50)
+  render(
+    <FilesPreviewPane
+      entry={entry({ kind: "artifact", language })}
+      actions={actions()}
+      onClose={jest.fn()}
+    />
+  )
+  expect(screen.getByText(language).closest("dl")).toHaveClass("grid-cols-[auto_minmax(0,1fr)]")
+  expect(screen.getByText(language)).toHaveClass("[overflow-wrap:anywhere]")
+})

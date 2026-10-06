@@ -122,3 +122,20 @@ describe("StyleSamplesSubtab", () => {
     })
   })
 })
+
+it("lets sample actions stack within a narrow row and bounds long tone tags", () => {
+  const tone = "longtone".repeat(40)
+  render(
+    <StyleSamplesSubtab
+      twinId={TWIN_ID}
+      styleSamples={[makeStyleSample("narrow", { tone: [tone] })]}
+    />
+  )
+  const row = screen.getByTestId("style-sample-row-narrow")
+  expect(row).toHaveClass("@container/persona-row")
+  expect(row.firstElementChild).toHaveClass("flex-col", "@sm/persona-row:flex-row")
+  expect(row.firstElementChild?.firstElementChild).toHaveClass("max-w-full")
+  expect(screen.getByText(tone)).toHaveClass("truncate")
+  expect(screen.getByText(tone).parentElement).toHaveClass("max-w-full")
+  expect(screen.getByText(tone).parentElement).toHaveAttribute("title", tone)
+})

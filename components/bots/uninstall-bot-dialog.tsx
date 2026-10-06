@@ -61,7 +61,9 @@ export function UninstallBotDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent data-testid="uninstall-bot-dialog">
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("uninstall.title", { name: row.name })}</AlertDialogTitle>
+          <AlertDialogTitle className="break-words">
+            {t("uninstall.title", { name: row.name })}
+          </AlertDialogTitle>
           <AlertDialogDescription>
             {row.orphaned ? t("uninstall.orphanBody") : t("uninstall.body")}
           </AlertDialogDescription>

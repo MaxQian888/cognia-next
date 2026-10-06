@@ -81,7 +81,10 @@ export function MemoryConflictResolver({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl" data-testid="memory-conflict-resolver">
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+        data-testid="memory-conflict-resolver"
+      >
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -230,13 +233,13 @@ function ConflictSide({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-lg border border-border/60 p-3",
+        "flex min-w-0 flex-col gap-2 rounded-lg border border-border/60 p-3",
         "bg-card/60 text-sm"
       )}
       data-testid={`conflict-side-${memory.id}`}
     >
       <p className="flex-1 break-words leading-snug">{memory.text}</p>
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
         <Badge variant="outline" className="px-1 py-0 text-[10px]">
           {tProv(memory.provenance)}
         </Badge>

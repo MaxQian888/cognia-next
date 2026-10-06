@@ -33,6 +33,10 @@ export const IconTrigger: Story = {
   args: { variant: "icon" },
 }
 
+export const ShareTrigger: Story = {
+  args: { variant: "share", className: "size-7 text-muted-foreground" },
+}
+
 // Labeled outline button variant.
 export const LabeledTrigger: Story = {
   args: { variant: "labeled" },

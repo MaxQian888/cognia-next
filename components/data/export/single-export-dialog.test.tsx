@@ -119,3 +119,18 @@ describe("SingleExportDialog", () => {
     )
   })
 })
+
+it("wraps long titles and lets export actions wrap without changing desktop widths", () => {
+  render(
+    <SingleExportDialog
+      session={{ ...session, title: "LongTitle".repeat(40) }}
+      open
+      onOpenChange={() => {}}
+    />
+  )
+  expect(screen.getByRole("dialog")).toHaveClass("[overflow-wrap:anywhere]", "sm:max-w-2xl")
+  expect(screen.getByText("Share via link").closest('[data-slot="dialog-footer"]')).toHaveClass(
+    "sm:flex-wrap"
+  )
+  expect(screen.getByRole("combobox")).toHaveClass("max-w-full", "min-w-0")
+})

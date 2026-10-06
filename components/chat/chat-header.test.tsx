@@ -101,7 +101,9 @@ jest.mock("./header-account-switcher", () => ({
 // Single-export trigger pulls in lots of unrelated machinery (multiple
 // renderers, html-formatter, etc.). Logic test of the header doesn't need it.
 jest.mock("@/components/chat/dialogs/single-export-trigger", () => ({
-  SingleExportTrigger: () => null,
+  SingleExportTrigger: ({ session, variant }: { session: { id: string }; variant: string }) => (
+    <span data-share-session={session.id} data-share-variant={variant} />
+  ),
 }))
 
 // The live cost badge subscribes to the chat store + a Dexie liveQuery; the
@@ -206,6 +208,25 @@ const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 
 describe("ChatHeader", () => {
+  it("reuses the share trigger for the current conversation after switching sessions", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container, rerender } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(container.querySelector('[data-share-session="ses_1"]')).toHaveAttribute(
+      "data-share-variant",
+      "share"
+    )
+    rerender(
+      <Wrapper>
+        <ChatHeader session={mkSession({ id: "ses_2" })} />
+      </Wrapper>
+    )
+    expect(container.querySelector('[data-share-session="ses_1"]')).toBeNull()
+    expect(container.querySelector('[data-share-session="ses_2"]')).toBeInTheDocument()
+  })
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
     mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })

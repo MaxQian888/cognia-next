@@ -90,7 +90,7 @@ export function TwinCronCard({ twinId }: { twinId: string }) {
   }
 
   return (
-    <Card className="flex flex-col gap-3 p-4" data-testid="twin-cron-card">
+    <Card className="@container/twin-cron flex flex-col gap-3 p-4" data-testid="twin-cron-card">
       <header className="flex items-center justify-between">
         <h3 className="text-sm font-medium">{t("title")}</h3>
         {savedAt ? (
@@ -160,7 +160,7 @@ function CronField({ label, value, onChange, preview, disabled, testid }: CronFi
   return (
     <div className="grid gap-1">
       <Label htmlFor={testid}>{label}</Label>
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 @sm/twin-cron:flex-row">
         <Input
           id={testid}
           data-testid={testid}
@@ -181,7 +181,7 @@ function CronField({ label, value, onChange, preview, disabled, testid }: CronFi
         >
           <SelectTrigger
             aria-label={t("presetAria", { label })}
-            className="w-[12rem] shrink-0"
+            className="w-full min-w-0 shrink-0 @sm/twin-cron:w-[12rem]"
             data-testid={`${testid}-preset`}
           >
             <SelectValue placeholder={t("presetHint")} />

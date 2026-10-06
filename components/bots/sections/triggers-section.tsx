@@ -78,7 +78,7 @@ function TriggerRow({ trigger, canArm, busy, onArmedChange }: TriggerRowProps) {
             data-testid={`bot-trigger-switch-${trigger.id}`}
           />
         </div>
-        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+        <p className="mt-0.5 break-words text-[11px] leading-snug text-muted-foreground">
           {t(`trigger.kind.${trigger.kind}`)}
           {detail ? ` · ${detail}` : ""}
         </p>

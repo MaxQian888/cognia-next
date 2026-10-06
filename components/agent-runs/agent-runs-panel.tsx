@@ -171,7 +171,7 @@ export function AgentRunsPanel({
 
   const controls = (
     <div className="flex flex-wrap items-center gap-1.5">
-      <div className="flex gap-1.5" role="tablist" aria-label={t("filters.statusLabel")}>
+      <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("filters.statusLabel")}>
         {/* `statusTotal`, never `allRows.length`. This chip is "release the
             status axis", not "every run in the journal": under a host that
             pins the kind or the Squad, those are two different numbers, and

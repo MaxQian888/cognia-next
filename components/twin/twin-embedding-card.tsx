@@ -175,7 +175,7 @@ export function TwinEmbeddingCard({ twinId }: { twinId: string }) {
       </header>
 
       <div className="grid gap-3 @md/twin:grid-cols-2">
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <Label htmlFor="twin-embedding-provider">{t("providerLabel")}</Label>
           <Select
             value={draft.choice}
@@ -187,7 +187,7 @@ export function TwinEmbeddingCard({ twinId }: { twinId: string }) {
               id="twin-embedding-provider"
               aria-label={t("providerLabel")}
               data-testid="twin-embedding-provider"
-              className="w-full"
+              className="w-full min-w-0 [&_[data-slot=select-value]]:min-w-0"
             >
               <SelectValue />
             </SelectTrigger>
@@ -206,7 +206,7 @@ export function TwinEmbeddingCard({ twinId }: { twinId: string }) {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <Label htmlFor="twin-embedding-model">{t("modelLabel")}</Label>
           <Input
             id="twin-embedding-model"

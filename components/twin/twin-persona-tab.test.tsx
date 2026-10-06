@@ -141,3 +141,9 @@ describe("TwinPersonaTab", () => {
     })
   })
 })
+
+it("keeps persona navigation in a local horizontal scroller", () => {
+  render(<TwinPersonaTab twinId="twin_empty" />)
+  expect(screen.getByRole("tablist").parentElement).toHaveClass("overflow-x-auto")
+  expect(screen.getAllByRole("tab")).toHaveLength(4)
+})

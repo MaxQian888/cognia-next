@@ -80,3 +80,8 @@ describe("ImportPreview", () => {
     expect(screen.queryByText(/trace-1234-5678/)).not.toBeInTheDocument()
   })
 })
+
+it("allows technical payload keys to wrap inside narrow grid columns", () => {
+  render(<PayloadRowCounts payload={payload({ localStorageSnapshots: { theme: "x" } as never })} />)
+  expect(screen.getByRole("list")).toHaveClass("[overflow-wrap:anywhere]")
+})

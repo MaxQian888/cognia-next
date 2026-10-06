@@ -116,7 +116,7 @@ export function UnredactDialog({
           <p className="text-muted-foreground py-4 text-sm">{t("noPlaceholders")}</p>
         ) : (
           <>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={restoreAll} disabled={busy}>
                 {t("restoreAll")}
               </Button>
@@ -124,12 +124,12 @@ export function UnredactDialog({
                 {t("keepAll")}
               </Button>
             </div>
-            <ScrollArea className="max-h-72">
+            <ScrollArea className="max-h-72 [&_[data-slot=scroll-area-viewport]>div]:!block">
               <ul className="flex flex-col gap-2 pr-2">
                 {selection.map((p) => (
                   <li
                     key={p.placeholder}
-                    className="border-border flex items-center gap-3 rounded border p-2"
+                    className="border-border flex flex-wrap items-center gap-3 rounded border p-2"
                     data-testid={`twin-unredact-row-${p.placeholder}`}
                   >
                     <Checkbox

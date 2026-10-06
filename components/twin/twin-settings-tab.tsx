@@ -437,7 +437,7 @@ function RuntimeConfigCard() {
           />
         </fieldset>
       ) : (
-        <fieldset className="border-border rounded border p-3">
+        <fieldset className="border-border min-w-0 rounded border p-3">
           <legend className="text-muted-foreground px-1 text-xs uppercase tracking-wide">
             {t("vectorStore")}
           </legend>
@@ -727,7 +727,7 @@ interface FieldDef {
 
 function FieldGroup({ legend, fields }: { legend: string; fields: FieldDef[] }) {
   return (
-    <fieldset className="border-border flex flex-col gap-3 rounded border p-3">
+    <fieldset className="border-border flex min-w-0 flex-col gap-3 rounded border p-3">
       <legend className="text-muted-foreground px-1 text-xs uppercase tracking-wide">
         {legend}
       </legend>

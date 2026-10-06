@@ -53,9 +53,13 @@ export function RunBotNowButton({ row }: { row: BotConsoleRow }) {
   const busy = actions.pending.has(`run:${row.id}`)
 
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="bot-run-now-row">
+    <div
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-2"
+      data-testid="bot-run-now-row"
+    >
       {manuals.length > 1 && (
         <NativeSelect
+          wrapperClassName="min-w-0 max-w-full"
           aria-label={t("run.trigger")}
           value={manual?.id}
           onChange={(event) => setSelected(event.target.value)}

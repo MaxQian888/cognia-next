@@ -167,3 +167,14 @@ describe("BotTriggersSection", () => {
     expect(screen.getByText("Definition missing")).toBeInTheDocument()
   })
 })
+
+it("wraps long trigger details while keeping the switch available", () => {
+  const detail = "repository/".repeat(40)
+  render(
+    <BotTriggersSection
+      row={row({ triggers: [{ id: "push", kind: "event", armed: true, detail }] })}
+    />
+  )
+  expect(screen.getByText(`Event · ${detail}`)).toHaveClass("break-words")
+  expect(screen.getByRole("switch")).toBeEnabled()
+})

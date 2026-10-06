@@ -49,7 +49,7 @@ const FIELDS: Array<{
 export function PayloadRowCounts({ payload }: { payload: BackupPayloadV3 }) {
   const snapshotCount = Object.keys(payload.localStorageSnapshots ?? {}).length
   return (
-    <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground">
+    <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground [overflow-wrap:anywhere]">
       {FIELDS.map((f) => {
         const v = payload[f.key]
         const count = Array.isArray(v) ? v.length : v ? 1 : 0
@@ -74,7 +74,7 @@ export function ImportPreview({ pkg }: { pkg: BackupPackageV3 }) {
   const t = useTranslations("settings.data")
   const integrityShort = pkg.manifest.integrity.checksum.slice(0, 12)
   return (
-    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+    <div className="rounded-md border bg-muted/30 p-3 text-xs [overflow-wrap:anywhere]">
       <p className="mb-2 font-medium">{t("preview")}</p>
       <p className="text-[11px] text-muted-foreground">
         {t("backup.previewBackend", {

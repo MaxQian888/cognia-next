@@ -20,6 +20,7 @@ import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { PlanModeTasksSheet } from "@/components/chat/plan-mode-tasks-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSummaryButton } from "@/components/context-workbench/session-summary-card/session-summary-trigger"
+import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
 import { ScheduledOriginChip } from "@/components/chat/scheduled-origin-chip"
@@ -239,6 +240,13 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           )}
         </Button>
       ) : null}
+
+      <SingleExportTrigger
+        key={session.id}
+        session={session}
+        variant="share"
+        className={HEADER_ICON_BUTTON}
+      />
 
       {ownsActions
         ? actionsOutlet

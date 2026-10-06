@@ -259,3 +259,11 @@ describe("DomainImportDialog review step", () => {
     expect(screen.queryByTestId("domain-import-preview")).not.toBeInTheDocument()
   })
 })
+
+it("keeps a tall import preview scrollable with a bounded strategy picker", async () => {
+  const user = userEvent.setup()
+  setup()
+  await openDialog(user)
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByRole("combobox")).toHaveClass("max-w-full", "min-w-0")
+})

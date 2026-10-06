@@ -111,3 +111,8 @@ describe("AddMemoryDialog", () => {
     expect((screen.getByLabelText("Memory") as HTMLTextAreaElement).value).toBe("")
   })
 })
+
+it("keeps the expanded form scrollable inside short viewports", () => {
+  setup()
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+})

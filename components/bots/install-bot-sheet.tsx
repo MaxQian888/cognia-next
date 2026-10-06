@@ -109,10 +109,10 @@ function CatalogRow({ entry, busy, canInstall, onInstall }: CatalogRowProps) {
           <span aria-hidden>·</span>
           <span>{t(`executor.${entry.executor}`)}</span>
           <span aria-hidden>·</span>
-          <span className="font-mono">{entry.version}</span>
+          <span className="min-w-0 break-all font-mono">{entry.version}</span>
         </p>
         {entry.description ? (
-          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+          <p className="mt-1 line-clamp-2 break-words text-[11px] leading-snug text-muted-foreground">
             {entry.description}
           </p>
         ) : null}

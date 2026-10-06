@@ -108,7 +108,7 @@ export function WebDavRestoreDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto [overflow-wrap:anywhere]">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -123,19 +123,23 @@ export function WebDavRestoreDialog({
         )}
 
         {phase.status === "ready" && snapshots.length > 0 && (
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             <div className="space-y-1">
               <Label className="text-xs">{t("snapshotLabel")}</Label>
               <Select value={selected} onValueChange={setSelected}>
-                <SelectTrigger>
+                <SelectTrigger className="min-w-0 max-w-full [&_[data-slot=select-value]]:min-w-0">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  className="max-w-[calc(100vw-2rem)] [&_[data-slot=select-item]>span:last-child]:min-w-0 [&_[data-slot=select-item]>span:last-child]:truncate"
+                >
                   <SelectItem value={LATEST_VALUE}>{t("latest")}</SelectItem>
                   {snapshots
                     .filter((s) => !s.isLatestPointer)
                     .map((s) => (
-                      <SelectItem key={s.path} value={s.path}>
+                      <SelectItem key={s.path} value={s.path} title={s.name}>
                         {s.name}
                       </SelectItem>
                     ))}
@@ -146,7 +150,7 @@ export function WebDavRestoreDialog({
             <div className="space-y-1">
               <Label className="text-xs">{t("strategyLabel")}</Label>
               <Select value={strategy} onValueChange={(v) => setStrategy(v as ImportMergeStrategy)}>
-                <SelectTrigger>
+                <SelectTrigger className="min-w-0 max-w-full [&_[data-slot=select-value]]:min-w-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

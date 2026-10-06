@@ -163,3 +163,9 @@ describe("MemoryConflictResolver — thrown failures", () => {
     expect(keep.hasAttribute("disabled")).toBe(false)
   })
 })
+
+it("contains long conflict text and keeps tall comparisons scrollable", () => {
+  setup({ memory: mem({ text: "claim".repeat(200) }) })
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByTestId("conflict-side-a")).toHaveClass("min-w-0")
+})

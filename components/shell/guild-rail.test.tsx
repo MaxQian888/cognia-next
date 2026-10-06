@@ -123,6 +123,10 @@ jest.mock("@/lib/shell/start-guild-conversation", () => ({
 }))
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
+let sidebarCollapsed = false
+const setSidebarCollapsed = jest.fn((collapsed: boolean) => {
+  sidebarCollapsed = collapsed
+})
 const setSelectedGuild = jest.fn((g: SelectedGuild) => {
   selectedGuild = g
 })
@@ -132,8 +136,10 @@ jest.mock("@/stores/ui", () => ({
     selector: (s: {
       selectedGuild: SelectedGuild
       setSelectedGuild: (g: SelectedGuild) => void
+      sidebarCollapsed: boolean
+      setSidebarCollapsed: typeof setSidebarCollapsed
     }) => T
-  ): T => selector({ selectedGuild, setSelectedGuild }),
+  ): T => selector({ selectedGuild, setSelectedGuild, sidebarCollapsed, setSidebarCollapsed }),
 }))
 
 let platformValue: "tauri" | "mobile" | "web" = "tauri"
@@ -166,6 +172,8 @@ beforeEach(() => {
     selectedGuild = g
   })
   selectedGuild = { kind: "dm" }
+  sidebarCollapsed = false
+  setSidebarCollapsed.mockClear()
   teamsRef.current = []
   guildUnread = { dm: 0, teams: new Map(), total: 0 }
   markGuildRead.mockClear()
@@ -191,6 +199,71 @@ test("renders the DM, Canvas, and Settings rail buttons", () => {
   expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
     "[&_[data-slot=scroll-area-scrollbar]]:hidden"
   )
+})
+
+test("restores the collapsed home sidebar from directly below Settings", () => {
+  sidebarCollapsed = true
+  const { rerender } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  const button = screen.getByRole("button", { name: "expandSidebar" })
+  const settings = screen.getByTestId("guild-open-settings")
+  expect(settings.parentElement?.nextElementSibling).toBe(button)
+  expect(button).toHaveAttribute("aria-controls", "conversation-sidebar")
+  expect(button).toHaveAttribute("aria-expanded", "false")
+  fireEvent.click(button)
+  expect(setSidebarCollapsed).toHaveBeenCalledWith(false)
+  rerender(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.queryByRole("button", { name: "expandSidebar" })).toBeNull()
+})
+
+test("the expand control joins the rail's arrow-key order after Settings", async () => {
+  sidebarCollapsed = true
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  const settings = screen.getByTestId("guild-open-settings")
+  act(() => settings.focus())
+  await user.keyboard("{ArrowDown}")
+  expect(screen.getByRole("button", { name: "expandSidebar" })).toHaveFocus()
+  await user.keyboard("{Enter}")
+  expect(setSidebarCollapsed).toHaveBeenCalledWith(false)
+})
+
+test("uses a right-facing icon when the sidebar is on the right", () => {
+  sidebarCollapsed = true
+  act(() => {
+    useSettingsStore.setState({
+      settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT }, sidebarSide: "right" } as never,
+    })
+  })
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.getByRole("button", { name: "expandSidebar" }).querySelector("svg")).toHaveClass(
+    "lucide-panel-right-open"
+  )
+})
+
+test.each(["/settings", "/inbox"])("does not show a home-sidebar control on %s", (route) => {
+  sidebarCollapsed = true
+  pathname = route
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.queryByRole("button", { name: "expandSidebar" })).toBeNull()
+})
+
+test("keeps the mobile drawer free of desktop sidebar controls", () => {
+  sidebarCollapsed = true
+  render(
+    withTooltipProvider(
+      <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+    )
+  )
+  expect(screen.queryByRole("button", { name: "expandSidebar" })).toBeNull()
+})
+
+test("does not offer a conversation-sidebar action in the Canvas workspace", () => {
+  sidebarCollapsed = true
+  selectedGuild = { kind: "canvas" }
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.queryByRole("button", { name: "expandSidebar" })).toBeNull()
 })
 
 test.each(["inbox", "logs"])(
@@ -417,12 +490,12 @@ test("clicking DM/team from a feature route routes back to /", async () => {
   expect(routerPush).toHaveBeenCalledWith("/")
 })
 
-test("hides desktop-only overflow items on mobile but keeps the rest in More", async () => {
+test("keeps renderer performance in mobile More while hiding desktop-only features", async () => {
   platformValue = "mobile"
   const user = userEvent.setup()
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   await user.click(screen.getByTestId("guild-more"))
-  expect(screen.queryByTestId("guild-more-item-performance")).not.toBeInTheDocument()
+  expect(screen.getByTestId("guild-more-item-performance")).toBeInTheDocument()
   expect(screen.queryByTestId("guild-more-item-source-control")).not.toBeInTheDocument()
   expect(screen.getByTestId("guild-more-item-logs")).toBeInTheDocument()
   expect(screen.getByTestId("guild-more-item-me")).toBeInTheDocument()

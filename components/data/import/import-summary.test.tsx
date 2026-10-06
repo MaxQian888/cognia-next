@@ -77,3 +77,20 @@ it("shows nothing about the pet when there was no collision", () => {
   )
   expect(screen.queryByText(/summaryPetConflict/)).not.toBeInTheDocument()
 })
+
+it("wraps unbroken imported profile identifiers without removing their content", () => {
+  const id = "LongProfile".repeat(40)
+  const { container } = render(
+    <ImportSummary
+      summary={{
+        added: {},
+        overwritten: {},
+        skipped: {},
+        builtInsSkipped: {},
+        restoredRetrievalKeyProfiles: [id],
+      }}
+    />
+  )
+  expect(container.firstChild).toHaveClass("[overflow-wrap:anywhere]")
+  expect(screen.getByText(new RegExp(id))).toBeInTheDocument()
+})

@@ -194,3 +194,12 @@ it("does not bind a paired installation to a client-only active project", async 
   expect(screen.getByTestId("bot-install-acme:digest")).toBeDisabled()
   expect(install).not.toHaveBeenCalled()
 })
+
+it("wraps long catalog versions and descriptions inside the installation row", () => {
+  const version = "1.0.0-" + "preview".repeat(30)
+  const description = "repository/".repeat(40)
+  catalog = { entries: [entry({ version, description })], loading: false }
+  render(<InstallBotSheet open onOpenChange={jest.fn()} />)
+  expect(screen.getByText(version)).toHaveClass("break-all")
+  expect(screen.getByText(description)).toHaveClass("break-words")
+})

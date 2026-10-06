@@ -53,3 +53,15 @@ it("shows the path, creates inside, and renames or deletes the folder in view", 
   await user.click(screen.getByRole("button", { name: "Folders" }))
   expect(useFilesLibraryStore.getState().folderId).toBe("root")
 })
+
+it("keeps deep breadcrumbs locally scrollable beside folder actions", () => {
+  useFilesLibraryStore.setState({ folderId: "b" })
+  render(<FilesFolderBar folders={folders} />)
+  expect(screen.getByRole("navigation", { name: "Folder path" })).toHaveClass(
+    "overflow-x-auto",
+    "basis-full",
+    "@sm/files-folder:basis-auto"
+  )
+  expect(screen.getByTestId("files-breadcrumb-root")).toHaveClass("shrink-0")
+  expect(screen.getByTestId("files-breadcrumb-b").parentElement).toHaveClass("shrink-0")
+})

@@ -83,6 +83,21 @@ describe("FileViewerDialog", () => {
     expect(screen.getByTestId("terminal-file-viewer")).toHaveTextContent("src/a.ts:2:4")
   })
 
+  it("preserves mobile dialog insets and reserves space for closing a long filename", async () => {
+    renderDialog()
+    const displayName = `folder/${"long-file-name-".repeat(30)}.ts`
+    await act(async () => {
+      useFileViewerStore.getState().openFailure("outside-workspace", displayName)
+    })
+
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("max-w-[calc(100%-2rem)]")
+    expect(dialog).not.toHaveClass("max-w-4xl")
+    const title = screen.getByRole("heading", { name: displayName })
+    expect(title).toHaveAttribute("title", displayName)
+    expect(title.parentElement).toHaveClass("pr-12")
+  })
+
   it("opens on a refusal instead of doing nothing", async () => {
     renderDialog()
 

@@ -96,3 +96,18 @@ describe("ChatImportDialog", () => {
     expect(screen.getByText("picker exploded")).toBeInTheDocument()
   })
 })
+
+it("contains imported titles in the scroll viewport and bounds dialog height", async () => {
+  flow.state = {
+    status: "preview",
+    format: "chatgpt",
+    conversations: [{ session: { id: "s1", title: "LongTitle".repeat(40) }, messages: [] }],
+  }
+  const user = userEvent.setup()
+  setup()
+  await openDialog(user)
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByText("LongTitle".repeat(40)).closest('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-viewport]>div]:!block"
+  )
+})

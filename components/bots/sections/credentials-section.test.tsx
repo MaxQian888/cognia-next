@@ -183,3 +183,12 @@ it("shows a host read failure instead of empty credential choices", () => {
   render(<BotCredentialsSection row={row()} />)
   expect(screen.getByRole("alert")).toBeInTheDocument()
 })
+
+it("constrains long account labels to the credential column", () => {
+  candidates = [candidate({ label: "LongAccount".repeat(30) })]
+  render(<BotCredentialsSection row={row()} />)
+  expect(screen.getByRole("combobox", { name: /GitHub token/ })).toHaveClass(
+    "min-w-0",
+    "max-w-full"
+  )
+})

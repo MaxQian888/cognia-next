@@ -34,12 +34,15 @@ import {
   BellOffIcon,
   EllipsisIcon,
   MessagesSquareIcon,
+  PanelLeftOpenIcon,
+  PanelRightOpenIcon,
   PencilRulerIcon,
   PlusIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useUIStore } from "@/stores/ui"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -165,6 +168,8 @@ export function GuildRail({
   const t = useTranslations("desktop.guildRail")
   const listT = useTranslations("desktop.channelList")
   const commonT = useTranslations("common")
+  const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
+  const setSidebarCollapsed = useUIStore((state) => state.setSidebarCollapsed)
   // Same order the expanded sidebar's accordion shows — the rail is that
   // sidebar folded up, so a team dragged there is in the same slot here.
   const { teams, teamIds, reorderTeams, moveTeam } = useOrderedTeams()
@@ -578,6 +583,28 @@ export function GuildRail({
             </ContextMenuContent>
           </ContextMenu>
 
+          {variant === "rail" &&
+          pathname === "/" &&
+          selected.kind !== "canvas" &&
+          sidebarCollapsed ? (
+            <RailButton
+              ariaLabel={listT("expandSidebar")}
+              tooltip={listT("expandSidebar")}
+              ariaControls="conversation-sidebar"
+              ariaExpanded={false}
+              onClick={() => setSidebarCollapsed(false)}
+              testId="guild-expand-sidebar"
+              shortcutId="shell.sidebar.toggle"
+              className="mt-1.5"
+            >
+              {side === "right" ? (
+                <PanelRightOpenIcon className={RAIL_ICON_CLASS} aria-hidden />
+              ) : (
+                <PanelLeftOpenIcon className={RAIL_ICON_CLASS} aria-hidden />
+              )}
+            </RailButton>
+          ) : null}
+
           <SidebarRovingGroup groupKey="rail-plugins-bottom" className="contents">
             <PluginExtensionSlot
               point="sidebar.left.bottom"
@@ -669,6 +696,8 @@ interface RailButtonProps {
   active?: boolean
   pending?: boolean
   ariaLabel: string
+  ariaControls?: string
+  ariaExpanded?: boolean
   tooltip: string
   onClick: () => void
   children: React.ReactNode
@@ -707,6 +736,8 @@ function RailButtonBase({
   active = false,
   pending = false,
   ariaLabel,
+  ariaControls,
+  ariaExpanded,
   tooltip,
   onClick,
   children,
@@ -734,6 +765,8 @@ function RailButtonBase({
           onKeyDown={roving.onKeyDown}
           onFocus={roving.onFocus}
           aria-label={showBadge && badgeLabel ? `${ariaLabel}, ${badgeLabel(badge)}` : ariaLabel}
+          aria-controls={ariaControls}
+          aria-expanded={ariaExpanded}
           aria-current={active ? "page" : undefined}
           aria-busy={pending}
           aria-keyshortcuts={shortcut?.aria}

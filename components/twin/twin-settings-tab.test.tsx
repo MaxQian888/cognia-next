@@ -653,3 +653,11 @@ describe("TwinSettingsTab — per-twin embedding card", () => {
     expect(screen.getByText("Embedding for this twin")).toBeInTheDocument()
   })
 })
+
+it("allows runtime fieldsets to shrink within their grid tracks", async () => {
+  render(<TwinSettingsTab twinId="twin_layout" />)
+  const groups = await screen.findAllByRole("group")
+  const fieldsets = groups.filter((group) => group.tagName === "FIELDSET")
+  expect(fieldsets.length).toBeGreaterThanOrEqual(2)
+  for (const fieldset of fieldsets) expect(fieldset).toHaveClass("min-w-0")
+})

@@ -41,3 +41,15 @@ it("does nothing for a target that vanished", async () => {
   await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }))
   expect(deleteOwned).not.toHaveBeenCalled()
 })
+
+it("wraps long file names inside a viewport-bounded confirmation", () => {
+  useFilesLibraryStore.setState({ deleteTarget: entry.key })
+  render(
+    <FilesDeleteDialog
+      entries={[{ ...entry, title: "longfilename".repeat(40) }]}
+      actions={{ deleteOwned: jest.fn() }}
+    />
+  )
+  expect(screen.getByRole("alertdialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByRole("heading")).toHaveClass("[overflow-wrap:anywhere]")
+})

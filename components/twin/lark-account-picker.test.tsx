@@ -77,3 +77,11 @@ describe("LarkAccountPicker", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 })
+
+it("bounds a long account label without expanding the picker", async () => {
+  listMock.mockResolvedValue([larkRow("long", { displayName: "LongAccount".repeat(30) })])
+  render(<LarkAccountPicker value="long" onChange={() => {}} />)
+  const trigger = await screen.findByRole("combobox", { name: /account/i })
+  expect(trigger).toHaveClass("min-w-0", "max-w-full")
+  expect(trigger).toHaveClass("[&_[data-slot=select-value]]:min-w-0")
+})

@@ -170,10 +170,10 @@ export function ExternalMemoryEditor({
       </DialogContent>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-h-[85vh] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>{t("confirm.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogDescription className="[overflow-wrap:anywhere]">
               {t("confirm.description", { path: file.absPath })}
             </AlertDialogDescription>
           </AlertDialogHeader>

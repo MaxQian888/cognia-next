@@ -291,3 +291,10 @@ describe("TwinEmbeddingCard", () => {
     )
   })
 })
+
+it("keeps the inherited embedding label within its grid column", async () => {
+  render(<TwinEmbeddingCard twinId="twin_alice" />)
+  const provider = await screen.findByTestId("twin-embedding-provider")
+  expect(provider.parentElement).toHaveClass("min-w-0")
+  expect(screen.getByTestId("twin-embedding-model").parentElement).toHaveClass("min-w-0")
+})

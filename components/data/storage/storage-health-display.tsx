@@ -58,7 +58,7 @@ export function StorageHealthDisplay({
   const StatusIcon = config.icon
 
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn("space-y-3 [overflow-wrap:anywhere]", className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className={cn("rounded-full p-1", config.bgColor)}>

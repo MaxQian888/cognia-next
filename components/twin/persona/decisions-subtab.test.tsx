@@ -94,3 +94,12 @@ it("pins and deletes an existing decision", async () => {
     expect((await getTwinProfile(TWIN_ID))?.decisions).toEqual([])
   })
 })
+
+it("wraps long decision text and stacks actions within a narrow row", () => {
+  const context = "longcontext".repeat(40)
+  render(<DecisionsSubtab twinId={TWIN_ID} decisions={[{ ...decision, context }]} />)
+  const row = screen.getByTestId("decision-row-d1")
+  expect(row).toHaveClass("@container/persona-row")
+  expect(row.firstElementChild).toHaveClass("flex-col", "@sm/persona-row:flex-row")
+  expect(screen.getByText(context).parentElement).toHaveClass("break-words")
+})

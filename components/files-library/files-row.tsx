@@ -8,6 +8,7 @@ import { displayTitle, type FilesActions } from "@/hooks/files-library/use-files
 import { entryKindLabelKey, type FilesEntry } from "@/lib/files-library/types"
 import { formatBytes } from "@/lib/storage/usage"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { FilesEntryIcon } from "./files-entry-icon"
 import { FilesImageThumb } from "./files-image-thumb"
 import { FilesItemMenu } from "./files-item-menu"
@@ -85,7 +86,7 @@ export function FilesRow({ entry, actions, selected }: FilesRowProps) {
         entry={entry}
         title={title}
         actions={actions}
-        className="size-7 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100"
+        className={cn(HOVER_REVEAL_CONTROL_CLASS, "size-7 shrink-0 group-focus-within:opacity-100")}
       />
     </div>
   )

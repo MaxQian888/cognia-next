@@ -61,7 +61,7 @@ export function CustomThemeEditor({ selectedId, builtInBase, onSelect }: Props) 
   }
 
   return (
-    <Card className="space-y-3 p-3 text-sm">
+    <Card className="@container/theme-editor space-y-3 p-3 text-sm">
       <div className="flex items-center justify-between">
         <Label>{t("customTitle")}</Label>
         {selected && (
@@ -109,7 +109,7 @@ export function CustomThemeEditor({ selectedId, builtInBase, onSelect }: Props) 
         ))}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 @xl/theme-editor:grid-cols-2">
         {TOKEN_KEYS.map((key) => (
           <div key={key} className="flex items-center gap-2">
             <Label htmlFor={`tk-${key}`} className="w-24 text-[11px] uppercase tracking-wide">
@@ -163,14 +163,15 @@ function SavedThemeChip({
     <Button
       variant={active ? "default" : "outline"}
       size="sm"
-      className="h-7 text-[11px]"
+      className="h-7 max-w-full text-[11px]"
+      title={theme.name}
       onClick={onSelect}
     >
       <span
         className="mr-1 inline-block size-3 rounded-full border"
         style={{ background: theme.tokens.accent }}
       />
-      {theme.name}
+      <span className="truncate">{theme.name}</span>
     </Button>
   )
 }

@@ -251,8 +251,8 @@ export function MemoryInspector({
         </Button>
       </header>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 p-3">
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
+        <div className="flex min-w-0 flex-col gap-4 break-words p-3">
           <Section title={t("sections.content")}>
             {editing ? (
               <div className="flex flex-col gap-3">
@@ -297,7 +297,9 @@ export function MemoryInspector({
                 </div>
               </div>
             ) : (
-              <p className="text-sm leading-relaxed whitespace-pre-wrap">{memory.text}</p>
+              <p className="break-words text-sm leading-relaxed whitespace-pre-wrap">
+                {memory.text}
+              </p>
             )}
           </Section>
 
@@ -305,7 +307,11 @@ export function MemoryInspector({
             <Section title={t("sections.tags")}>
               <div className="flex flex-wrap gap-1">
                 {memory.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="font-normal">
+                  <Badge
+                    key={tag}
+                    variant="secondary"
+                    className="max-w-full whitespace-normal break-all font-normal"
+                  >
                     {tag}
                   </Badge>
                 ))}
@@ -584,7 +590,7 @@ export function MemoryInspector({
         </div>
       </ScrollArea>
 
-      <footer className="flex shrink-0 items-center gap-1 border-t px-3 py-2">
+      <footer className="flex shrink-0 flex-wrap items-center gap-1 border-t px-3 py-2">
         <Button
           size="sm"
           variant="ghost"

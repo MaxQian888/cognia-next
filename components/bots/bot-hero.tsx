@@ -91,7 +91,9 @@ export function BotHero({ row, onUninstalled }: BotHeroProps) {
             <span>{t(`scope.${row.scope.kind}`)}</span>
           </div>
           {row.description ? (
-            <p className="mt-1.5 text-xs leading-snug text-muted-foreground">{row.description}</p>
+            <p className="mt-1.5 break-words text-xs leading-snug text-muted-foreground">
+              {row.description}
+            </p>
           ) : null}
         </div>
       </div>

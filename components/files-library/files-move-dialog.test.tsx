@@ -68,3 +68,19 @@ it("is closed without a target and cancels cleanly", async () => {
   await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }))
   expect(useFilesLibraryStore.getState().moveTarget).toBeNull()
 })
+
+it("bounds a deep folder picker and keeps confirmation reachable in short viewports", () => {
+  useFilesLibraryStore.setState({ moveTarget: ["a"] })
+  render(
+    <FilesMoveDialog
+      entries={[entry("a")]}
+      folders={folders}
+      actions={{ moveToFolder: jest.fn() }}
+    />
+  )
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByTestId("files-move-option-lbf_b").parentElement).toHaveClass("min-w-0")
+  expect(screen.getByTestId("files-move-option-lbf_b").parentElement).toHaveStyle({
+    paddingLeft: "min(2.5rem, 40%)",
+  })
+})

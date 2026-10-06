@@ -149,3 +149,19 @@ describe("RunBotNowButton", () => {
     expect(screen.getByTestId("bot-run-now")).toBeDisabled()
   })
 })
+
+it("constrains the manual trigger picker without losing long option names", () => {
+  const label = "Manual trigger ".repeat(20)
+  render(
+    <RunBotNowButton
+      row={row({
+        triggers: [
+          { id: "one", kind: "manual", armed: true, label },
+          { id: "two", kind: "manual", armed: true, label: "Second" },
+        ],
+      })}
+    />
+  )
+  expect(screen.getByRole("combobox").parentElement).toHaveClass("min-w-0", "max-w-full")
+  expect(screen.getByRole("option", { name: label.trim() })).toBeInTheDocument()
+})

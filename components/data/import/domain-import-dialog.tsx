@@ -118,7 +118,7 @@ export function DomainImportDialog({ domain, labelKey, trigger }: Props) {
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t(`domain.${labelKey}.importTitle` as never)}</DialogTitle>
           <DialogDescription>{t(`domain.${labelKey}.importBody` as never)}</DialogDescription>
@@ -128,7 +128,7 @@ export function DomainImportDialog({ domain, labelKey, trigger }: Props) {
           <div className="space-y-1">
             <Label className="text-xs">{t("mergeStrategyLabel")}</Label>
             <Select value={strategy} onValueChange={(v) => setStrategy(v as ImportMergeStrategy)}>
-              <SelectTrigger>
+              <SelectTrigger className="min-w-0 max-w-full [&_[data-slot=select-value]]:min-w-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

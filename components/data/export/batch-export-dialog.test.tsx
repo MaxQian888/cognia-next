@@ -82,3 +82,11 @@ describe("BatchExportDialog", () => {
     await waitFor(() => expect(notifyMock).toHaveBeenCalledWith(outcome, expect.anything()))
   })
 })
+
+it("contains long titles and keeps the export dialog scrollable on short screens", async () => {
+  await openDialog()
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(screen.getByText("First").closest('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-viewport]>div]:!block"
+  )
+})

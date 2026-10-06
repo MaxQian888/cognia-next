@@ -116,4 +116,13 @@ describe("TitleBarCommandCenterMenu", () => {
       "desktop.titleBar.commandCenter.menuLabel"
     )
   })
+
+  it("reuses the same menu with a labelled trigger inside an overflow panel", () => {
+    const { props } = setup({ variant: "menu" })
+    expect(screen.getByTestId("title-bar-command-center-menu")).toHaveTextContent(
+      "desktop.titleBar.commandCenter.menuLabel"
+    )
+    fireEvent.click(screen.getByTestId("cc-recent-s2"))
+    expect(props.onOpenRecentSession).toHaveBeenCalledWith("s2")
+  })
 })

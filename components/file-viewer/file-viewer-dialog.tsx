@@ -49,10 +49,10 @@ export function FileViewerDialog() {
       }}
     >
       <DialogContent
-        className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0"
+        className="flex h-[80vh] flex-col gap-0 p-0"
         data-testid="terminal-file-viewer"
       >
-        <DialogHeader className="border-b px-4 py-3">
+        <DialogHeader className="border-b px-4 py-3 pr-12">
           <DialogTitle className="truncate font-mono text-sm" title={displayName ?? undefined}>
             {displayName ? `${displayName}${locationSuffix}` : t("title")}
           </DialogTitle>

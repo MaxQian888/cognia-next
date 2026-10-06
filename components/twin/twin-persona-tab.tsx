@@ -105,12 +105,14 @@ export function TwinPersonaTab({ twinId }: { twinId: string }) {
       </header>
 
       <Tabs value={sub} onValueChange={(v) => setSub(v as SubTab)} className="flex flex-col gap-3">
-        <TabsList className="w-max">
-          <TabsTrigger value="entities">{t("tabs.entities")}</TabsTrigger>
-          <TabsTrigger value="playbooks">{t("tabs.playbooks")}</TabsTrigger>
-          <TabsTrigger value="style">{t("tabs.styleSamples")}</TabsTrigger>
-          <TabsTrigger value="decisions">{t("tabs.decisions")}</TabsTrigger>
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto px-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="entities">{t("tabs.entities")}</TabsTrigger>
+            <TabsTrigger value="playbooks">{t("tabs.playbooks")}</TabsTrigger>
+            <TabsTrigger value="style">{t("tabs.styleSamples")}</TabsTrigger>
+            <TabsTrigger value="decisions">{t("tabs.decisions")}</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="entities">
           <EntitiesSubtab twinId={twinId} entities={safeProfile.entities} />

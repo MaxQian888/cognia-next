@@ -182,3 +182,24 @@ describe("ExternalMemoryEditor", () => {
     expect(container.querySelector("[data-testid='external-memory-editor']")).toBeNull()
   })
 })
+
+it("keeps a long file path inside the scrollable save confirmation", async () => {
+  const absPath = `/Users/x/.claude/${"file".repeat(60)}.md`
+  render(
+    <ExternalMemoryEditor
+      file={file({ absPath })}
+      open
+      onOpenChange={jest.fn()}
+      allowedRoots={ROOTS}
+    />
+  )
+  await waitFor(() => expect(screen.getByTestId("external-memory-editor")).toHaveValue("original"))
+  fireEvent.click(screen.getByTestId("external-edit"))
+  fireEvent.change(screen.getByTestId("external-memory-editor"), { target: { value: "changed" } })
+  fireEvent.click(screen.getByTestId("external-save"))
+  const confirmation = screen.getByRole("alertdialog")
+  expect(confirmation).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+  expect(confirmation.querySelector("[data-slot=alert-dialog-description]")).toHaveClass(
+    "[overflow-wrap:anywhere]"
+  )
+})
