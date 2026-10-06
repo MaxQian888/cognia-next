@@ -10,8 +10,17 @@ import {
   readPairParams,
   resolveParamSelection,
 } from "./pair-onboarding-client"
+import { OnboardingGate } from "@/components/providers/onboarding-gate"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
+
+const mockCountSessions = jest.fn().mockResolvedValue(0)
+jest.mock("@/lib/db/sessions", () => ({
+  ...jest.requireActual("@/lib/db/sessions"),
+  countSessions: () => mockCountSessions(),
+}))
 
 const PAIR_PAYLOAD = encodePairPayload({
   baseUrl: "https://desktop.example:27890",
@@ -166,6 +175,8 @@ const replaceMock = jest.fn()
 const backMock = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock, replace: replaceMock, back: backMock }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+  usePathname: () => window.location.pathname,
 }))
 
 /** Stand in for the Navigation API: `canGoBack` is what the Back gate reads. */
@@ -270,7 +281,10 @@ jest.mock("next-intl", () => ({
   },
 }))
 
+const initialSettingsState = useSettingsStore.getState()
+
 beforeEach(() => {
+  useSettingsStore.setState({ loaded: true, settings: { id: "singleton", onboardingProgress: { version: 2, path: "completed", completedAt: "2026-10-05T00:00:00Z" } } as AppSettings })
   platformMock = "mobile"
   runtimeContextMock = { accountId: "local_acct_a", targetId: "host-old" }
   activeAccountIdMock = "local_acct_a"
@@ -310,6 +324,7 @@ beforeEach(() => {
   }
 })
 afterEach(() => {
+  act(() => useSettingsStore.setState(initialSettingsState, true))
   jest.clearAllMocks()
 })
 
@@ -419,6 +434,24 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     )
     // The one-shot invitation is spent — it must not survive in the address bar.
     expect(window.location.hash).toBe("")
+  })
+
+  it.each(["query", "fragment"])("redeems a new %s invitation while Discover is already mounted", async (carrier) => {
+    const { rerender } = render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-discover-step")
+    const separator = carrier === "query" ? "?" : "#"
+    act(() => {
+      window.history.replaceState({}, "", `/pair${separator}payload=${encodeURIComponent(PAIR_PAYLOAD)}`)
+      if (carrier === "fragment") window.dispatchEvent(new HashChangeEvent("hashchange"))
+    })
+    rerender(<PairOnboardingClient />)
+
+    await waitFor(() => expect(mockRegisterPairPayload).toHaveBeenCalledWith(PAIR_PAYLOAD))
+    await screen.findByTestId("pair-paired-step")
+    expect(window.location.search).toBe("")
+    expect(window.location.hash).toBe("")
+    rerender(<PairOnboardingClient />)
+    expect(mockRegisterPairPayload).toHaveBeenCalledTimes(1)
   })
 
   it("add mode skips the existing-pair shortcut and preserves the current Host until submit", async () => {
@@ -653,6 +686,71 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     render(<PairOnboardingClient />)
     await user.click(await screen.findByTestId("pair-continue-cta"))
     expect(pushMock).toHaveBeenCalledWith("/")
+  })
+
+  it("Continue to chat releases the first-run gate after mobile pairing", async () => {
+    window.localStorage.setItem(COMPANION_KEY, JSON.stringify({
+      baseUrl: "http://test:7890", deviceId: "dev-existing", serverVersion: "9.9.9",
+    }))
+    const previous = useSettingsStore.getState()
+    const complete = jest.fn(async () => {
+      useSettingsStore.setState({ settings: {
+        ...useSettingsStore.getState().settings,
+        onboardingProgress: { version: 2, path: "completed", completedAt: new Date().toISOString() },
+      } as AppSettings })
+    })
+    useSettingsStore.setState({
+      loaded: true,
+      settings: { id: "singleton", mobileRuntimeMode: "paired" } as AppSettings,
+      completeOnboarding: complete,
+    })
+    const tree = () => <OnboardingGate>{window.location.pathname === "/pair"
+      ? <PairOnboardingClient /> : <p>Chat workspace</p>}</OnboardingGate>
+    try {
+      const { rerender } = render(tree())
+      const user = userEvent.setup()
+      await user.click(await screen.findByTestId("pair-continue-cta"))
+      await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/"))
+      window.history.replaceState({}, "", "/")
+      rerender(tree())
+      expect(screen.getByText("Chat workspace")).toBeInTheDocument()
+      expect(replaceMock).not.toHaveBeenCalledWith("/onboarding")
+    } finally {
+      act(() => useSettingsStore.setState(previous, true))
+    }
+  })
+
+  it("keeps pairing intact and allows retry when saving the mobile setup exit fails", async () => {
+    window.localStorage.setItem(COMPANION_KEY, JSON.stringify({
+      baseUrl: "http://test:7890", deviceId: "dev-existing", serverVersion: "9.9.9",
+    }))
+    const complete = jest.fn().mockRejectedValueOnce(new Error("Storage unavailable"))
+      .mockResolvedValueOnce(undefined)
+    useSettingsStore.setState({ settings: { id: "singleton" } as AppSettings, completeOnboarding: complete })
+    render(<PairOnboardingClient />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByTestId("pair-continue-cta"))
+    expect(await screen.findByText("Storage unavailable")).toBeInTheDocument()
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(COMPANION_KEY)).not.toBeNull()
+    await user.click(screen.getByTestId("pair-continue-cta"))
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/"))
+    expect(screen.queryByText("Storage unavailable")).not.toBeInTheDocument()
+  })
+
+  it.each(["web", "tauri", "settled-mobile"])("does not overwrite setup progress for %s", async (mode) => {
+    platformMock = mode === "settled-mobile" ? "mobile" : mode as "web" | "tauri"
+    window.localStorage.setItem(COMPANION_KEY, JSON.stringify({
+      baseUrl: "http://test:7890", deviceId: "dev-existing", serverVersion: "9.9.9",
+    }))
+    const complete = jest.fn()
+    useSettingsStore.setState({ completeOnboarding: complete,
+      ...(mode !== "settled-mobile" ? { settings: { id: "singleton" } as AppSettings } : {}),
+    })
+    render(<PairOnboardingClient />)
+    await userEvent.setup().click(await screen.findByTestId("pair-continue-cta"))
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/"))
+    expect(complete).not.toHaveBeenCalled()
   })
 
   it("sign-out completion routes back to discover", async () => {

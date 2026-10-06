@@ -96,7 +96,6 @@ export type PairRemedy =
   | "updateHost"
   | "checkHostLogs"
   | "removeStaleDevice"
-  | "reloadAndRetry"
 
 export interface PairFailure {
   stage: PairFailureStage
@@ -220,11 +219,11 @@ export function diagnosePairFailure(error: unknown, context: PairFailureContext)
       ...base,
       kind: activationFailed ? "activate_failed" : "persist_failed",
       invitationSpent: true,
-      // Activation is retryable without a new invitation — the credential is
-      // already stored, so reconnecting is a local operation.
-      retryable: activationFailed,
+      // Host orchestration rolls back the new credential after activation
+      // fails. The one-shot invitation is spent even though activation failed.
+      retryable: false,
       remedies: activationFailed
-        ? ["reloadAndRetry", "checkHostRunning", "checkHostLogs"]
+        ? ["checkHostRunning", "freshInvitation", "checkHostLogs", "removeStaleDevice"]
         : ["unlockAccount", "freshInvitation", "removeStaleDevice"],
     }
   }

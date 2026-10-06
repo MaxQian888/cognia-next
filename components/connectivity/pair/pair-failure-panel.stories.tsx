@@ -68,7 +68,7 @@ export const VaultLocked: Story = {
   },
 }
 
-/** Paired successfully; only bringing the Host online failed. Retry is safe. */
+/** Activation rolled back the local credential; the invitation is already spent. */
 export const ActivationFailed: Story = {
   args: {
     failure: {
@@ -76,11 +76,10 @@ export const ActivationFailed: Story = {
       stage: "activate",
       kind: "activate_failed",
       detail: "host_feature_manifest timed out after 10000ms",
-      remedies: ["reloadAndRetry", "checkHostRunning", "checkHostLogs"],
-      retryable: true,
+      remedies: ["checkHostRunning", "freshInvitation", "checkHostLogs", "removeStaleDevice"],
+      retryable: false,
       invitationSpent: true,
     },
-    onRetry: fn(),
   },
 }
 

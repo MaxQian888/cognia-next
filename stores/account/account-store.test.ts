@@ -26,10 +26,12 @@ const mockSaveDeviceUnlockSecret = jest.fn<Promise<void>, [string, string]>()
 const mockClearDeviceUnlockSecret = jest.fn<Promise<void>, [string]>()
 jest.mock("@/lib/accounts/desktop-local-account", () => ({
   DESKTOP_LOCAL_ACCOUNT_ID: "acct_desktop_local_workspace",
-  isDesktopLocalAccountEnabled: () => mockDesktopLocalEnabled,
+  deviceLocalAccountId: () => (mockIsCapacitor ? "local_acct_a" : "acct_desktop_local_workspace"),
+  isDeviceLocalAccountEnabled: () => mockDesktopLocalEnabled,
   isDeviceUnlockSupported: () => mockDeviceUnlockSupported ?? mockDesktopLocalEnabled,
   isDeviceManagedAccount: (record: LocalAccountRecord | null | undefined) =>
-    record?.id === "acct_desktop_local_workspace" && record.protection === "device",
+    (record?.id === "acct_desktop_local_workspace" || record?.id === "local_acct_a") &&
+    record.protection === "device",
   isRememberedOnDevice: (record: LocalAccountRecord | null | undefined) =>
     !!record && record.protection !== "device" && record.rememberOnDevice === true,
   readDeviceUnlockSecret: (id: string) => mockReadDeviceUnlockSecret(id),
@@ -201,6 +203,7 @@ const mockPurgeAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockPurgeAccountFiles = jest.fn<Promise<void>, [string]>()
 const mockActivateAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockClearAccountLocalState = jest.fn<void, []>()
+const mockReadActiveRuntimeTarget = jest.fn().mockResolvedValue(null)
 const mockPrepareRuntimeTarget = jest.fn()
 const mockPrepareDatabase = jest.fn<Promise<unknown>, []>()
 const mockRemoveRuntimeTargets = jest.fn<Promise<void>, [string]>()
@@ -262,6 +265,7 @@ function makeStore() {
     activateAccountLocalState: mockActivateAccountLocalState,
     clearAccountLocalState: mockClearAccountLocalState,
     prepareRuntimeTarget: mockPrepareRuntimeTarget,
+    readActiveRuntimeTarget: mockReadActiveRuntimeTarget,
     prepareDatabase: mockPrepareDatabase,
     removeRuntimeTargets: mockRemoveRuntimeTargets,
     clearSubscriptionRuntime: mockClearSubscriptionRuntime,
@@ -636,6 +640,7 @@ beforeEach(() => {
   window.sessionStorage.clear()
   mockIsTauri = true
   mockIsCapacitor = false
+  mockReadActiveRuntimeTarget.mockReset().mockResolvedValue(null)
   mockProvisionBrowserVault.mockResolvedValue("recovery-key")
   mockProvisionBrowserVault.mockImplementation(async (accountId) => {
     mockActiveBrowserVaultAccountId = accountId
@@ -1475,6 +1480,28 @@ describe("account store switching, locking, and lifecycle", () => {
 
     expect(mockSetActiveAccountId).not.toHaveBeenCalled()
     expect(mockActivateAccountDatabase).not.toHaveBeenCalled()
+  })
+
+  it("blocks new runtime work immediately while lock teardown is still pending", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+    let release!: () => void
+    mockStopRuntimeSubscriptions.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    const locking = store.getState().lock()
+    expect(store.getState().locked).toBe(true)
+    expect(store.getState().unlockedAccountId).toBe("acct_alpha")
+    release()
+    await locking
+    expect(store.getState().unlockedAccountId).toBeNull()
   })
 
   it("clears the active database selection when locked", async () => {
@@ -2859,5 +2886,80 @@ describe("recovery key acknowledgement", () => {
 
     expect(store.getState().unlockedAccountId).toBe(localId)
     expect(store.getState().pendingRecoveryKey).toBeNull()
+  })
+})
+
+describe("device-managed mobile workspace", () => {
+  it("provisions an encrypted mobile profile in the existing pairing namespace", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    mockDesktopLocalEnabled = true
+    mockBrowserVaultExists.mockResolvedValue(false)
+    let records: LocalAccountRecord[] = []
+    mockListAccounts.mockImplementation(async () => records)
+    mockGetState.mockImplementation(async () => ({ activeAccountId: records[0]?.id ?? null }))
+    mockCreateRegistryAccount.mockImplementation(async () => {
+      const created = { ...account("local_acct_a", "Local"), protection: "device" as const }
+      records = [created]
+      return created
+    })
+    const store = makeStore()
+    await store.getState().load()
+    expect(mockProvisionBrowserVault).toHaveBeenCalledWith("local_acct_a", "device-random-secret")
+    expect(mockSaveDesktopRecovery).toHaveBeenCalledWith("recovery-key")
+    expect(store.getState()).toMatchObject({
+      unlockedAccountId: "local_acct_a",
+      locked: false,
+      pendingRecoveryKey: null,
+    })
+  })
+
+  it("resumes the mobile vault without generating replacement key material", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    mockDesktopLocalEnabled = true
+    const saved = { ...account("local_acct_a", "Local"), protection: "device" as const }
+    mockListAccounts.mockResolvedValue([saved])
+    mockGetState.mockResolvedValue({ activeAccountId: saved.id })
+    const store = makeStore()
+    await store.getState().load()
+    expect(mockUnlockBrowserVault).toHaveBeenCalledWith(saved.id, "device-random-secret")
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+    expect(store.getState()).toMatchObject({ unlockedAccountId: saved.id, locked: false })
+  })
+
+  it("opens the saved mobile target before settings and other account state hydrate", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    mockDesktopLocalEnabled = true
+    const saved = { ...account("local_acct_a", "Local"), protection: "device" as const }
+    mockListAccounts.mockResolvedValue([saved])
+    mockGetState.mockResolvedValue({ activeAccountId: saved.id })
+    mockReadActiveRuntimeTarget.mockResolvedValue({ id: "host-saved", kind: "companion" })
+    const store = makeStore()
+    await store.getState().load()
+    expect(mockActivateAccountDatabase).toHaveBeenCalledWith(saved.id, "host-saved")
+    expect(mockActivateAccountDatabase).not.toHaveBeenCalledWith(saved.id)
+    expect(mockPrepareRuntimeTarget).not.toHaveBeenCalled()
+    expect(mockMigrateLocalContentDatabase).not.toHaveBeenCalled()
+    expect(mockActivateAccountDatabase.mock.invocationCallOrder[0]).toBeLessThan(
+      mockActivateAccountLocalState.mock.invocationCallOrder[0]
+    )
+    expect(store.getState()).toMatchObject({ unlockedAccountId: saved.id, locked: false })
+  })
+
+  it("keeps mobile locked when its existing device credential is missing", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    mockDesktopLocalEnabled = true
+    const saved = { ...account("local_acct_a", "Local"), protection: "device" as const }
+    mockListAccounts.mockResolvedValue([saved])
+    mockGetState.mockResolvedValue({ activeAccountId: saved.id })
+    mockDesktopLocalPassword.mockResolvedValue(null)
+    const store = makeStore()
+    await expect(store.getState().load()).rejects.toThrow("device credential is missing")
+    expect(store.getState()).toMatchObject({ locked: true, unlockedAccountId: null })
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
   })
 })

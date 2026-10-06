@@ -11,8 +11,8 @@ import { AccountRegistryError } from "@/lib/accounts/account-types"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import { withAccountProvisioningLock } from "@/lib/accounts/provisioning-lock"
 import {
-  DESKTOP_LOCAL_ACCOUNT_ID,
-  isDesktopLocalAccountEnabled,
+  deviceLocalAccountId,
+  isDeviceLocalAccountEnabled,
   isDeviceManagedAccount,
   isDeviceUnlockSupported,
   isRememberedOnDevice,
@@ -84,6 +84,7 @@ import {
 } from "@/lib/runtime/account-runtime-target"
 import {
   encryptedRuntimeTargetDatabaseName,
+  RuntimeTargetRegistry,
   type RuntimeTargetRecord,
 } from "@/lib/runtime/target-registry"
 import {
@@ -280,6 +281,7 @@ export interface AccountStoreDependencies {
   activateAccountLocalState: (localAccountId: string) => Promise<void>
   clearAccountLocalState: () => void
   prepareRuntimeTarget: (localAccountId: string) => Promise<RuntimeTargetRecord>
+  readActiveRuntimeTarget: (localAccountId: string) => Promise<RuntimeTargetRecord | null>
   prepareDatabase: () => Promise<unknown>
   removeRuntimeTargets: (localAccountId: string) => Promise<unknown>
   clearSubscriptionRuntime: (localAccountId: string) => Promise<void>
@@ -344,6 +346,7 @@ const DEFAULT_STATE = {
 export function createAccountStore(
   dependencyOverrides: Partial<AccountStoreDependencies> = {}
 ): AccountStore {
+  const runtimeTargets = new RuntimeTargetRegistry()
   const dependencies: AccountStoreDependencies = {
     registry: new LocalAccountRegistry(),
     dropAccountDatabase: dropDexieAccountDatabase,
@@ -352,6 +355,7 @@ export function createAccountStore(
     activateAccountLocalState: activateBrowserAccountLocalState,
     clearAccountLocalState: clearBrowserAccountLocalState,
     prepareRuntimeTarget: prepareAccountRuntimeTarget,
+    readActiveRuntimeTarget: (localAccountId) => runtimeTargets.getActiveTarget(localAccountId),
     prepareDatabase: async () => {
       const { ensureActiveDatabaseReady } = await import("@/lib/db/boot")
       return ensureActiveDatabaseReady()
@@ -470,6 +474,13 @@ export function createAccountStore(
         publishUnlockStage(localAccountId, "preparing-runtime")
         target = await dependencies.prepareRuntimeTarget(localAccountId)
         assertCurrent?.()
+      } else if (isCapacitor()) {
+        // Restore the selected host before settings hydrate. Opening the base
+        // database first reads stale onboarding/cloud choices on every boot.
+        // A new phone retains its base database; do not create a browser target
+        // or migrate the phone's standalone history just to resume a pairing.
+        target = await dependencies.readActiveRuntimeTarget(localAccountId)
+        assertCurrent?.()
       }
       // The long pole. `lock()` closed the cached Dexie connection, so this
       // re-opens the schema, re-adopts plugin tables and re-seeds — seconds of
@@ -486,8 +497,8 @@ export function createAccountStore(
       assertCurrent?.()
       const record = get().accounts.find((account) => account.id === localAccountId)
       const pendingDesktopRecovery =
-        isTauri() &&
-        localAccountId === DESKTOP_LOCAL_ACCOUNT_ID &&
+        (isTauri() || isCapacitor()) &&
+        localAccountId === deviceLocalAccountId() &&
         record?.protection === "password"
           ? await readDesktopLocalAccountRecoveryKey().catch(() => null)
           : null
@@ -743,9 +754,9 @@ export function createAccountStore(
             dependencies.registry.getState(),
           ])
           let desktopLocalAccountId: string | null = null
-          if (isDesktopLocalAccountEnabled()) {
+          if (isDeviceLocalAccountEnabled()) {
             desktopLocalAccountId = await withAccountProvisioningLock(
-              DESKTOP_LOCAL_ACCOUNT_ID,
+              deviceLocalAccountId(),
               async () => {
                 const current = await dependencies.registry.listAccounts()
                 const currentState = await dependencies.registry.getState()
@@ -755,7 +766,7 @@ export function createAccountStore(
                 if (current.length === 0) {
                   desktopBootstrapAttempted = true
                   // An orphaned vault is data, not permission to mint a new DEK.
-                  if (await browserVaultExists(DESKTOP_LOCAL_ACCOUNT_ID)) {
+                  if (await browserVaultExists(deviceLocalAccountId())) {
                     throw new AccountUnlockError(
                       "vault-not-provisioned",
                       "The local workspace registry is missing; restore it before continuing."
@@ -764,7 +775,7 @@ export function createAccountStore(
                   const password = (await desktopLocalAccountPassword(true)) ?? undefined
                   assertPasswordProvided(password)
                   const created = await get().createAccount({
-                    id: DESKTOP_LOCAL_ACCOUNT_ID,
+                    id: deviceLocalAccountId(),
                     displayName: "Local",
                     password,
                     protection: "device",
@@ -879,7 +890,7 @@ export function createAccountStore(
           }))
         } catch (error) {
           if (desktopBootstrapAttempted) {
-            const rollbackFailures = await rollbackNativeAccountActivation(DESKTOP_LOCAL_ACCOUNT_ID)
+            const rollbackFailures = await rollbackNativeAccountActivation(deviceLocalAccountId())
             try {
               dependencies.clearAccountLocalState()
             } catch (rollbackError) {
@@ -912,10 +923,10 @@ export function createAccountStore(
         try {
           if (
             input.protection === "device" &&
-            (!isTauri() || input.id !== DESKTOP_LOCAL_ACCOUNT_ID)
+            (!(isTauri() || isCapacitor()) || input.id !== deviceLocalAccountId())
           ) {
             throw new Error(
-              "Device-managed protection is reserved for the local desktop workspace."
+              "Device-managed protection is reserved for this native device workspace."
             )
           }
           const existingAccounts = get().loaded
@@ -1023,7 +1034,9 @@ export function createAccountStore(
           if (shouldActivate) {
             const target = useBrowserVault
               ? await dependencies.prepareRuntimeTarget(account.id)
-              : null
+              : isCapacitor()
+                ? await dependencies.readActiveRuntimeTarget(account.id)
+                : null
             await prepareSelectedDatabase(account.id, target?.id)
             setActiveRuntimeTargetContext(
               account.id,
@@ -1049,7 +1062,11 @@ export function createAccountStore(
         try {
           const account = await findAccount(localAccountId)
           if (isDeviceManagedAccount(account)) {
-            if (!isTauri() || !(await browserVaultExists(account.id))) {
+            if (
+              !(isTauri() || isCapacitor()) ||
+              account.id !== deviceLocalAccountId() ||
+              !(await browserVaultExists(account.id))
+            ) {
               throw new AccountUnlockError(
                 "vault-not-provisioned",
                 "The local workspace vault is missing."
@@ -1418,7 +1435,12 @@ export function createAccountStore(
           // against the host yet, so resolving it early widens nothing.
           const account = await findAccount(localAccountId)
           let credentialFromDevice = false
-          if (!password && isDeviceManagedAccount(account) && isTauri()) {
+          if (
+            !password &&
+            isDeviceManagedAccount(account) &&
+            account.id === deviceLocalAccountId() &&
+            (isTauri() || isCapacitor())
+          ) {
             if (!(await browserVaultExists(account.id))) {
               throw new AccountUnlockError(
                 "vault-not-provisioned",
@@ -1504,7 +1526,11 @@ export function createAccountStore(
           const deviceManaged = isDeviceManagedAccount(account)
           let managedRecoveryKey: string | null = null
           if (deviceManaged) {
-            if (!isTauri() || get().unlockedAccountId !== localAccountId) {
+            if (
+              !(isTauri() || isCapacitor()) ||
+              account.id !== deviceLocalAccountId() ||
+              get().unlockedAccountId !== localAccountId
+            ) {
               throw new AccountUnlockError(
                 "invalid-password",
                 "Unlock the local workspace before setting its password."
@@ -1723,7 +1749,7 @@ export function createAccountStore(
             .then(() => true)
             .catch(() => false)
           await deleteBrowserVault(localAccountId)
-          if (localAccountId === DESKTOP_LOCAL_ACCOUNT_ID) {
+          if (localAccountId === deviceLocalAccountId()) {
             await clearDesktopLocalAccountPassword()
             await clearDesktopLocalAccountRecoveryKey()
           } else if (isTauri()) {
@@ -1797,7 +1823,12 @@ export function createAccountStore(
       lock: async () => {
         const unlockedAccountId = get().unlockedAccountId
         // Invalidate pending native enrollment/unlock before teardown yields.
-        set((state) => ({ accountRevision: state.accountRevision + 1 }))
+        // Prevent a scoped runtime from being recreated while async cleanup
+        // still has the old account's database and vault selected.
+        set((state) => ({
+          accountRevision: state.accountRevision + 1,
+          locked: Boolean(unlockedAccountId) || state.locked,
+        }))
         if (unlockedAccountId) {
           bumpPerformanceSecurityGeneration(unlockedAccountId, "account-locked")
         }
@@ -1848,7 +1879,10 @@ export function createAccountStore(
         // second profile created from the manage dialog is not activated, and
         // acknowledging ITS key used to delete the Local workspace's stored
         // one, which "set a password" then needed and could not find.
-        if (isTauri() && get().pendingRecoveryKeyAccountId === DESKTOP_LOCAL_ACCOUNT_ID) {
+        if (
+          (isTauri() || isCapacitor()) &&
+          get().pendingRecoveryKeyAccountId === deviceLocalAccountId()
+        ) {
           void clearDesktopLocalAccountRecoveryKey()
             .then(() =>
               set({ pendingRecoveryKey: null, pendingRecoveryKeyAccountId: null, error: null })

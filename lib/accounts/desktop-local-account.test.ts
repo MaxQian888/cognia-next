@@ -1,6 +1,8 @@
 import type { LocalAccountRecord } from "./account-types"
 import {
   desktopLocalAccountPassword,
+  deviceLocalAccountId,
+  isDeviceLocalAccountEnabled,
   clearDesktopLocalAccountPassword,
   clearDeviceUnlockSecret,
   deviceUnlockSecretRef,
@@ -139,10 +141,10 @@ it("preserves recovery in native storage until explicit handover", async () => {
   )
 })
 
-it("refuses recovery storage outside desktop", async () => {
+it("refuses recovery storage in a plain browser", async () => {
   mockTauri = false
   await expect(saveDesktopLocalAccountRecoveryKey("recovery")).rejects.toThrow(
-    "desktop credential store"
+    "native credential store"
   )
   expect(await readDesktopLocalAccountRecoveryKey()).toBeNull()
   await clearDesktopLocalAccountRecoveryKey()
@@ -318,8 +320,30 @@ describe("device unlock on native mobile", () => {
     await expect(clearDeviceUnlockSecret("acct_mine")).rejects.toThrow("Remove failed")
   })
 
-  it("never provisions the desktop workspace credential on mobile", async () => {
-    expect(await desktopLocalAccountPassword(true)).toBeNull()
+  it("provisions and resumes the historical mobile namespace in secure storage", async () => {
+    expect(deviceLocalAccountId()).toBe("local_acct_a")
+    expect(isDeviceLocalAccountEnabled()).toBe(true)
+    const secret = await desktopLocalAccountPassword(true)
+    expect(secret).toMatch(/^[a-f0-9]{64}$/)
+    expect(await desktopLocalAccountPassword()).toBe(secret)
+    expect(plugin.set).toHaveBeenCalledTimes(1)
+    expect(plugin.set).toHaveBeenCalledWith({
+      key: "cognia.desktop-local-account.local_acct_a",
+      value: secret,
+    })
+    expect(
+      isDeviceManagedAccount({ id: "local_acct_a", protection: "device" } as LocalAccountRecord)
+    ).toBe(true)
+    await saveDesktopLocalAccountRecoveryKey("mobile-recovery")
+    expect(await readDesktopLocalAccountRecoveryKey()).toBe("mobile-recovery")
+    await clearDesktopLocalAccountRecoveryKey()
+    expect(await readDesktopLocalAccountRecoveryKey()).toBeNull()
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it("never replaces the mobile credential when secure storage refuses a read", async () => {
+    plugin.get.mockRejectedValueOnce(new Error("Keychain locked"))
+    await expect(desktopLocalAccountPassword(true)).rejects.toThrow("Keychain locked")
     expect(plugin.set).not.toHaveBeenCalled()
   })
 })

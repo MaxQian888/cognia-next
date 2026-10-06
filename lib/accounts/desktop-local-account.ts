@@ -1,12 +1,12 @@
 /**
- * Desktop device unlock: the secret that opens a local profile without a
+ * Native device unlock: the secret that opens a local profile without a
  * prompt, held in the native encrypted secret store (ADR-0054).
  *
  * Two shapes share one keyring slot per profile
  * (`desktop-local-account` / `<localAccountId>`):
  *
- *  - **Device-managed** (`protection: "device"`). Only the reserved
- *    `acct_desktop_local_workspace` a fresh desktop install creates. Its
+ *  - **Device-managed** (`protection: "device"`). The reserved desktop workspace
+ *    and historical mobile account namespace. Its
  *    credential is random, nobody ever typed it, and the stored copy is the
  *    only way in besides the recovery key kept beside it.
  *  - **Remembered** (`rememberOnDevice: true`). Any password profile whose
@@ -16,8 +16,8 @@
  *    rather than to a dead end.
  *
  * Either way the secret never leaves the native store for browser storage.
- * The device-managed workspace exists only in the desktop shell. A remembered
- * profile also works in the native mobile app, where the slot lives in the
+ * The device-managed workspace uses a separate reserved id on each native shell.
+ * A remembered profile also works in the native mobile app, where the slot lives in the
  * platform's own secure storage (Android Keystore / iOS Keychain, through
  * `capacitor-secure-storage-plugin`) instead of the desktop secret store. A
  * plain browser has no store whose threat model covers it, so it gets neither.
@@ -30,6 +30,8 @@ import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 import { isNativeMobile, isTauri } from "@/lib/platform/detect"
 
 export const DESKTOP_LOCAL_ACCOUNT_ID = "acct_desktop_local_workspace"
+// Historical companion namespace; importing active-account-id here would cycle through DB boot.
+const MOBILE_LOCAL_ACCOUNT_ID = "local_acct_a"
 const SECRET_NAMESPACE = "desktop-local-account"
 
 /** The keyring slot holding one profile's device unlock secret. */
@@ -37,9 +39,17 @@ export function deviceUnlockSecretRef(localAccountId: string): KeyringRef {
   return { namespace: SECRET_NAMESPACE, key: localAccountId }
 }
 
-const RECOVERY_REF: KeyringRef = {
-  namespace: SECRET_NAMESPACE,
-  key: `${DESKTOP_LOCAL_ACCOUNT_ID}:recovery`,
+function recoveryRef(): KeyringRef {
+  return { namespace: SECRET_NAMESPACE, key: `${deviceLocalAccountId()}:recovery` }
+}
+
+/** Keep existing mobile pairings in their historical account namespace. */
+export function deviceLocalAccountId(): string {
+  return isNativeMobile() ? MOBILE_LOCAL_ACCOUNT_ID : DESKTOP_LOCAL_ACCOUNT_ID
+}
+
+export function isDeviceLocalAccountEnabled(): boolean {
+  return (isTauri() || isNativeMobile()) && !isAccountGateForced()
 }
 
 /**
@@ -66,7 +76,10 @@ export function isDeviceUnlockSupported(): boolean {
 export function isDeviceManagedAccount(
   account: LocalAccountRecord | null | undefined
 ): account is LocalAccountRecord & { protection: "device" } {
-  return account?.id === DESKTOP_LOCAL_ACCOUNT_ID && account.protection === "device"
+  return (
+    (account?.id === DESKTOP_LOCAL_ACCOUNT_ID || account?.id === MOBILE_LOCAL_ACCOUNT_ID) &&
+    account.protection === "device"
+  )
 }
 
 /**
@@ -99,7 +112,8 @@ export function isRememberedOnDevice(
  * nothing from being locked, so offering the button would be theatre.
  */
 export function unlocksWithoutPrompt(account: LocalAccountRecord | null | undefined): boolean {
-  if (isDeviceManagedAccount(account)) return isDesktopLocalAccountEnabled()
+  if (isDeviceManagedAccount(account))
+    return account.id === deviceLocalAccountId() && isDeviceLocalAccountEnabled()
   return isDeviceUnlockSupported() && isRememberedOnDevice(account)
 }
 
@@ -113,10 +127,22 @@ interface MobileSecureStorage {
   remove(options: { key: string }): Promise<{ value: boolean }>
 }
 
-const loadMobileSecureStorage = makeDefaultLoader<MobileSecureStorage>(
+const resolveMobileSecureStorage = makeDefaultLoader<MobileSecureStorage>(
   "capacitor-secure-storage-plugin",
   "SecureStoragePlugin"
 )
+
+async function loadMobileSecureStorage(): Promise<MobileSecureStorage> {
+  // Account boot precedes CompanionBootProvider, which normally wires proxies.
+  if (
+    !(globalThis as { Capacitor?: { Plugins?: Record<string, unknown> } }).Capacitor?.Plugins
+      ?.SecureStoragePlugin
+  ) {
+    const { registerNativePlugins } = await import("@/lib/capacitor/register-plugins")
+    await registerNativePlugins()
+  }
+  return resolveMobileSecureStorage()
+}
 
 /**
  * Both native implementations reject a missing key with this exact message
@@ -200,28 +226,31 @@ export async function clearDeviceUnlockSecret(localAccountId: string): Promise<v
 
 /** Only fresh profile provisioning may mint a secret; resume must never replace one. */
 export async function desktopLocalAccountPassword(create = false): Promise<string | null> {
-  if (!isTauri()) return null
-  const existing = await readDeviceUnlockSecret(DESKTOP_LOCAL_ACCOUNT_ID)
+  if (!isTauri() && !isNativeMobile()) return null
+  const existing = await readDeviceUnlockSecret(deviceLocalAccountId())
   if (existing || !create) return existing
   const bytes = crypto.getRandomValues(new Uint8Array(32))
   const password = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
-  await saveDeviceUnlockSecret(DESKTOP_LOCAL_ACCOUNT_ID, password)
+  await saveDeviceUnlockSecret(deviceLocalAccountId(), password)
   return password
 }
 
 export async function clearDesktopLocalAccountPassword(): Promise<void> {
-  await clearDeviceUnlockSecret(DESKTOP_LOCAL_ACCOUNT_ID)
+  await clearDeviceUnlockSecret(deviceLocalAccountId())
 }
 
 export async function saveDesktopLocalAccountRecoveryKey(recoveryKey: string): Promise<void> {
-  if (!isTauri()) throw new Error("Device-managed recovery requires the desktop credential store.")
-  await setSecret(RECOVERY_REF, recoveryKey)
+  if (isTauri()) await setSecret(recoveryRef(), recoveryKey)
+  else if (isNativeMobile()) await writeMobileSecret(recoveryRef(), recoveryKey)
+  else throw new Error("Device-managed recovery requires a native credential store.")
 }
 
 export async function readDesktopLocalAccountRecoveryKey(): Promise<string | null> {
-  return isTauri() ? getSecret(RECOVERY_REF, { strict: true }) : null
+  if (isTauri()) return getSecret(recoveryRef(), { strict: true })
+  return isNativeMobile() ? readMobileSecret(recoveryRef()) : null
 }
 
 export async function clearDesktopLocalAccountRecoveryKey(): Promise<void> {
-  if (isTauri()) await clearSecret(RECOVERY_REF, { strict: true })
+  if (isTauri()) await clearSecret(recoveryRef(), { strict: true })
+  else if (isNativeMobile()) await removeMobileSecret(recoveryRef())
 }

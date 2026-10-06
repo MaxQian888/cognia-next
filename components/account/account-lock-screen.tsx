@@ -69,6 +69,7 @@ import type { AutoUnlockFailure, UnlockAccountOptions } from "@/stores/account/a
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { usePlatform } from "@/hooks/use-platform"
+import { isMobile } from "@/lib/capacitor/_shared"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 import { QuickUnlockPanel } from "./quick-unlock/quick-unlock-panel"
 import { LockScreenBackdrop } from "./lock-screen-backdrop"
@@ -191,6 +192,8 @@ export function AccountLockScreen({
   stuckAfterMs = DEFAULT_STUCK_AFTER_MS,
 }: AccountLockScreenProps) {
   const t = useTranslations("account.gate")
+  const tQuick = useTranslations("account.quickUnlock")
+  const mobile = isMobile()
   const passwordId = useId()
   const recoveryKeyId = useId()
   const newPasswordId = useId()
@@ -206,13 +209,17 @@ export function AccountLockScreen({
   // the password is one click away from it. Landing on the password field when
   // the user set up a PIN would make the PIN pointless.
   const quickEnrollments = (
-    accounts.find((candidate) => candidate.id === (activeAccountId ?? accounts[0]?.id))
-      ?.quickUnlock ?? []
-  ).filter(() => onQuickUnlock !== undefined)
+    accounts.find((candidate) => candidate.id === selectedId)?.quickUnlock ?? []
+  ).filter(
+    (entry) =>
+      onQuickUnlock !== undefined &&
+      (entry.method === "biometric" ? mobile : entry.method !== "passkey" || !mobile)
+  )
   const lockAppearance: LockScreenSettings = { ...DEFAULT_LOCK_SCREEN, ...(appearance ?? {}) }
   const [mode, setMode] = useState<Mode>(() =>
     quickEnrollments.some(isEnrollmentUsable) ? "quick" : "password"
   )
+  const [autoPromptBiometric, setAutoPromptBiometric] = useState(true)
   const [password, setPassword] = useState("")
   const [recoveryKey, setRecoveryKey] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -259,6 +266,8 @@ export function AccountLockScreen({
     setErrorCode(null)
     setLocalError(null)
     setRememberOnDevice(account?.rememberOnDevice === true)
+    setMode(quickEnrollments.some(isEnrollmentUsable) ? "quick" : "password")
+    setAutoPromptBiometric(true)
   }
 
   useEffect(() => {
@@ -495,12 +504,16 @@ export function AccountLockScreen({
             accounts.find((candidate) => candidate.id === localAccountId)?.quickUnlock ?? []
           }
           disabled={submitting}
+          autoPromptBiometric={autoPromptBiometric}
           onQuickUnlock={(method, canonicalSecret, signal) =>
             signal
               ? onQuickUnlock(localAccountId, method, canonicalSecret, signal)
               : onQuickUnlock(localAccountId, method, canonicalSecret)
           }
-          onUsePassword={() => setMode("password")}
+          onUsePassword={() => {
+            setAutoPromptBiometric(false)
+            setMode("password")
+          }}
         />
       ) : mode === "password" ? (
         <form
@@ -799,6 +812,20 @@ export function AccountLockScreen({
         </Alert>
       )}
 
+      {mode === "password" && !submitting && quickEnrollments.length > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            setAutoPromptBiometric(false)
+            setMode("quick")
+          }}
+          data-testid="account-lock-screen-use-quick"
+        >
+          {tQuick("panelLabel")}
+        </Button>
+      )}
+
       {supportsRecoveryKey && !submitting && (
         <Button
           type="button"
@@ -807,6 +834,7 @@ export function AccountLockScreen({
           className="self-center text-muted-foreground"
           data-testid="account-lock-screen-recovery-toggle"
           onClick={() => {
+            setAutoPromptBiometric(false)
             setMode((current) => (current === "password" ? "recovery" : "password"))
             setErrorCode(null)
             setLocalError(null)

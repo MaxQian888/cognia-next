@@ -1,3 +1,9 @@
+import { measureOperation } from "@/lib/perf/operation-performance"
+
+jest.mock("@/lib/perf/operation-performance", () => ({
+  measureOperation: jest.fn((_name: string, callback: () => Promise<unknown>) => callback()),
+}))
+
 import type { Transport } from "./transport-types"
 import {
   RoutingTransport,
@@ -33,9 +39,78 @@ function fakeTransport(tag: string) {
 describe("RoutingTransport", () => {
   beforeEach(() => {
     __resetRoutingForTests()
+    jest.mocked(measureOperation).mockClear()
   })
   afterEach(() => {
     __resetRoutingForTests()
+  })
+
+  it("attributes only actual selected calls with fixed operation names", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    await routing.call("git_status", { cwd: "/private/path" })
+    setActiveRemoteTransport(remote.transport)
+    await routing.call("git_status")
+    await routing.call("app_settings_update", { secret: "private" })
+    await expect(routing.call("companion_server_status")).rejects.toThrow("host-admin")
+    await expect(routing.call("keyring_secret_get")).rejects.toThrow("service-only")
+
+    expect(jest.mocked(measureOperation).mock.calls.map(([name]) => name)).toEqual([
+      "transport.local.call",
+      "transport.remote.call",
+      "transport.local.call",
+    ])
+    for (const call of jest.mocked(measureOperation).mock.calls) {
+      expect(call).toHaveLength(2)
+      expect(call[1]).toEqual(expect.any(Function))
+    }
+  })
+
+  it.each(["perf_snapshot", "perf_lease_snapshot", "perf_hotspots", "telemetry_otlp_export"])(
+    "excludes diagnostic polling and telemetry command %s",
+    async (name) => {
+      const local = fakeTransport("local")
+      const routing = new RoutingTransport(local.transport)
+      await routing.call(name)
+      expect(local.transport.call).toHaveBeenCalledWith(name, undefined, undefined)
+      expect(measureOperation).not.toHaveBeenCalled()
+    }
+  )
+
+  it("preserves promise, result, arguments and call option identity", async () => {
+    const local = fakeTransport("local")
+    const result = { private: "result" }
+    const pending = Promise.resolve(result)
+    jest.mocked(local.transport.call).mockReturnValue(pending)
+    const routing = new RoutingTransport(local.transport)
+    const args = { cwd: "/private/path" }
+    const options = { idempotencyKey: "private-operation" }
+    expect(routing.call("git_status", args, options)).toBe(pending)
+    expect(local.transport.call).toHaveBeenCalledWith("git_status", args, options)
+    expect(await pending).toBe(result)
+  })
+
+  it.each([new Error("failure"), new DOMException("cancelled", "AbortError")])(
+    "preserves rejected promise and error %s",
+    async (error) => {
+      const local = fakeTransport("local")
+      const pending = Promise.reject(error)
+      jest.mocked(local.transport.call).mockReturnValue(pending)
+      const routing = new RoutingTransport(local.transport)
+      expect(routing.call("git_status")).toBe(pending)
+      await expect(pending).rejects.toBe(error)
+    }
+  )
+
+  it("preserves synchronous dispatch exceptions", () => {
+    const local = fakeTransport("local")
+    const error = new Error("dispatch failed")
+    jest.mocked(local.transport.call).mockImplementation(() => {
+      throw error
+    })
+    const routing = new RoutingTransport(local.transport)
+    expect(() => routing.call("git_status")).toThrow(error)
   })
 
   it("routes to local when no remote is active (zero-regression baseline)", async () => {

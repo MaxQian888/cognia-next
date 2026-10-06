@@ -103,18 +103,34 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
     return <PageLoading variant="workspace" milestone="accounts" allowReload />
   }
 
-  // Native mobile retains the established runtime chooser / pairing gate.
-  // Ordinary browsers use the same local account gate as desktop, backed by
-  // the Web Crypto PBKDF2 verifier instead of a Tauri command.
-  //
-  // The exception is a password-protected account that is still locked. Mobile
-  // itself never creates one, but builds whose native bridge failed to load ran
-  // as a plain browser and created one through the browser flow. Passing it
-  // through left the app open with no account unlocked, and every turn failed
-  // ("A local account must be unlocked…"), so it gets the same unlock screen
-  // as a browser instead.
-  if (isCapacitor() && !(locked && targetAccount)) {
-    return <>{children}</>
+  // Mobile now provisions its encrypted local workspace during account boot.
+  // A failed secure-store read must stay at this gate, before paired-host sync.
+  if (isCapacitor() && !targetAccount) {
+    if (onShareViewer) return <>{guestView}</>
+    return (
+      <GateShell>
+        <section className="flex w-full max-w-sm flex-col gap-4">
+          <p>{t("localWorkspaceUnavailable")}</p>
+          {visibleError && <ErrorText>{visibleError}</ErrorText>}
+          <Button
+            disabled={submitting}
+            onClick={async () => {
+              setSubmitting(true)
+              setActionError(null)
+              try {
+                await useAccountStore.getState().load()
+              } catch (error) {
+                setActionError(toErrorMessage(error, t("operationFailed")))
+              } finally {
+                setSubmitting(false)
+              }
+            }}
+          >
+            {t("openLocalWorkspace")}
+          </Button>
+        </section>
+      </GateShell>
+    )
   }
 
   if (pendingRecoveryKey) {

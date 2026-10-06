@@ -79,6 +79,74 @@ beforeEach(() => {
 })
 
 describe("idle state", () => {
+  it("uses the selected account's supported unlock methods when switching accounts", () => {
+    mockNativeMobile = true
+    renderScreen({
+      accounts: [
+        ALPHA,
+        {
+          ...BETA,
+          quickUnlock: [{ method: "pin", verifier: {}, createdAt: 0, failedAttempts: 0 }],
+        },
+      ],
+      onQuickUnlock: jest.fn(),
+    })
+    expect(screen.getByLabelText("passwordLabel")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
+      target: { value: BETA.id },
+    })
+    expect(screen.getByTestId("pin-pad")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
+      target: { value: ALPHA.id },
+    })
+    expect(screen.getByLabelText("passwordLabel")).toBeInTheDocument()
+  })
+
+  it("lands on the password when mobile only has an unsupported web passkey", () => {
+    mockNativeMobile = true
+    renderScreen({
+      accounts: [
+        {
+          ...ALPHA,
+          quickUnlock: [{ method: "passkey", verifier: {}, createdAt: 0, failedAttempts: 0 }],
+        },
+      ],
+      onQuickUnlock: jest.fn(),
+    })
+    expect(screen.getByLabelText("passwordLabel")).toBeInTheDocument()
+    expect(screen.queryByTestId("account-lock-screen-use-quick")).not.toBeInTheDocument()
+  })
+
+  it("prompts on mobile lock entry but not when returning from password fallback", async () => {
+    mockNativeMobile = true
+    mockReadNative.mockResolvedValue({ ok: false, reason: "cancelled" })
+    renderScreen({
+      accounts: [
+        {
+          ...ALPHA,
+          quickUnlock: [
+            {
+              method: "biometric",
+              verifier: { nativeKeyId: "key" },
+              createdAt: 0,
+              failedAttempts: 0,
+            },
+          ],
+        },
+      ],
+      onQuickUnlock: jest.fn(),
+    })
+    await waitFor(() => expect(mockReadNative).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByTestId("quick-unlock-use-password")).toBeEnabled())
+    fireEvent.click(screen.getByTestId("quick-unlock-use-password"))
+    expect(screen.getByLabelText("passwordLabel")).toHaveFocus()
+    fireEvent.click(screen.getByTestId("account-lock-screen-use-quick"))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(mockReadNative).toHaveBeenCalledTimes(1)
+  })
+
   it("forwards native unlock cancellation when switching the selected account during backend work", async () => {
     mockNativeMobile = true
     mockReadNative.mockResolvedValue({ ok: true, value: "biometric:synthetic-proof" })

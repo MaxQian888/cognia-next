@@ -46,7 +46,7 @@ export interface PairedStepProps {
   baseUrl: string
   deviceId: string
   serverVersion: string
-  onContinue: () => void
+  onContinue: () => void | Promise<void>
   /** Fires after the storage is cleared and the user passed the biometric guard. */
   onAfterSignOut: () => void
 }
@@ -266,7 +266,7 @@ interface ConnectionHealthProps {
   lastHeartbeatMs: number
   latencyMs: number | null
   onRefresh: () => void
-  onContinue: () => void
+  onContinue: () => void | Promise<void>
   t: Translator
 }
 
@@ -282,6 +282,19 @@ function ConnectionHealth({
   onContinue,
   t,
 }: ConnectionHealthProps) {
+  const [continuing, setContinuing] = useState(false)
+  const [continueError, setContinueError] = useState<string | null>(null)
+  const continueToChat = async () => {
+    setContinuing(true)
+    setContinueError(null)
+    try {
+      await onContinue()
+    } catch (err) {
+      setContinueError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setContinuing(false)
+    }
+  }
   const dotClass =
     healthState === "live"
       ? "bg-emerald-500"
@@ -353,6 +366,12 @@ function ConnectionHealth({
           <AlertDescription>{healthError}</AlertDescription>
         </Alert>
       ) : null}
+      {continueError ? (
+        <Alert variant="destructive">
+          <AlertCircleIcon />
+          <AlertDescription>{continueError}</AlertDescription>
+        </Alert>
+      ) : null}
       <div className="grid grid-cols-[auto_1fr] gap-2">
         <Button
           type="button"
@@ -371,7 +390,9 @@ function ConnectionHealth({
         <Button
           type="button"
           className="touch-target"
-          onClick={onContinue}
+          onClick={() => void continueToChat()}
+          disabled={continuing}
+          aria-busy={continuing}
           data-testid="pair-continue-cta"
         >
           <MessageCircleIcon className="size-4" aria-hidden="true" />

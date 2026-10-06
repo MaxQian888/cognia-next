@@ -32,9 +32,9 @@ function signedIn(): SignedInIdentity {
       userId: USER,
       logtoSubject: USER,
       logtoIssuer: ISSUER,
-      createdAt: 1,
+      boundAt: 1,
       updatedAt: 1,
-    } as SignedInIdentity["binding"],
+    },
   }
 }
 

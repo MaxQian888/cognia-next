@@ -45,14 +45,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { isOnboardingSettled } from "@cognia/agent-config-types"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { canPopWithinApp, useMobileBack } from "@/components/mobile/shell/mobile-back-button"
 import { usePlatform } from "@/hooks/use-platform"
 import { useAccountStore } from "@/stores/account/account-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { companionCredentialBook, type CompanionHostRecord } from "@/lib/companion/credential-book"
 import {
   pairAndActivateCompanionHost,
@@ -190,6 +192,7 @@ const CEILING_MS = 8000
 
 export function PairOnboardingClient() {
   const router = useRouter()
+  const search = useSearchParams().toString()
   const t = useTranslations("mobile.pair")
   // A plain browser has no camera plugin or LAN discovery, so it lands on the
   // form where the user pastes the complete one-shot cgnp3 payload.
@@ -227,13 +230,27 @@ export function PairOnboardingClient() {
   const [recentServers] = useState<DiscoveredServer[]>(() =>
     recentServersToDiscovered(loadRecentServers())
   )
-  // Incoming `?baseUrl=…` / `?switchTo=…` navigation (scan sheet / switch
-  // sheet). Read once on mount; resolved against the recent-server log.
-  const [paramSelection] = useState<Selection | null>(() =>
-    resolveParamSelection(readPairParams(), loadRecentServers())
+  const [pairParams, setPairParams] = useState<PairPageParams>(() => readPairParams())
+  const paramSelection = useMemo(
+    () => resolveParamSelection(pairParams, loadRecentServers()),
+    [pairParams]
   )
-  const [pairParams] = useState<PairPageParams>(() => readPairParams())
   const switchToParam = pairParams.switchTo
+
+  // App Router preserves this page for same-path deep links. Capture a new
+  // invitation before stripping it, retaining it when replaceState removes
+  // the secret from the URL. Reset the form so each new invitation can submit.
+  useEffect(() => {
+    const receiveInvitation = () => {
+      const incoming = readPairParams()
+      if (!incoming.payload || incoming.payload === pairParams.payload) return
+      setPhase({ kind: "loading" })
+      setPairParams(incoming)
+    }
+    receiveInvitation()
+    window.addEventListener("hashchange", receiveInvitation)
+    return () => window.removeEventListener("hashchange", receiveInvitation)
+  }, [search, pairParams.payload])
 
   // Spend the link the moment it is read into state. A one-shot invitation is
   // consumed by the first registration, so leaving it in the address bar turns
@@ -345,7 +362,7 @@ export function PairOnboardingClient() {
       finish()
     }
     // unpairedStep/-Selection are platform-derived and stable after mount;
-    // paramSelection/switchToParam are read-once mount state.
+    // new invitation parameters restart hydration without reloading the app.
   }, [unpairedStep, unpairedSelection, pairParams.mode, paramSelection, switchToParam])
 
   const onSkipLoading = useCallback(() => {
@@ -399,9 +416,18 @@ export function PairOnboardingClient() {
     [activeAccountId, isWebHost, t]
   )
 
-  const onContinueToChat = useCallback(() => {
+  const onContinueToChat = useCallback(async () => {
+    if (platform === "mobile") {
+      if (!useSettingsStore.getState().loaded) await useSettingsStore.getState().load()
+      const { settings, completeOnboarding } = useSettingsStore.getState()
+      // Pairing supplies the phone's runtime and credentials. Persist its
+      // first-run exit before navigating, or OnboardingGate sends it back.
+      if (!isOnboardingSettled(settings?.onboardingProgress) && !settings?.onboardingDismissedAt) {
+        await completeOnboarding()
+      }
+    }
     router.push("/")
-  }, [router])
+  }, [platform, router])
 
   // Leaving the flow. A browser can always leave: chat works without a Host,
   // and the Inbox / Account / unavailable-surface buttons that open this page

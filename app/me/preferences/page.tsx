@@ -17,6 +17,7 @@
 import { useTranslations } from "next-intl"
 import { useEffect, useState } from "react"
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
+import { QuickUnlockSettings } from "@/components/account/quick-unlock/quick-unlock-settings"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item"
@@ -33,12 +34,14 @@ import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useBiometricPolicyUpdate } from "@/hooks/use-biometric-policy-update"
 import { isImeComposing } from "@/lib/ui/ime"
+import { isDeviceManagedAccount } from "@/lib/accounts/desktop-local-account"
 import {
   getBehaviorTelemetrySettings,
   setBehaviorTelemetryEnabled,
 } from "@/lib/telemetry/events/settings"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useSettingsStore } from "@/stores/settings"
+import { useAccountStore } from "@/stores/account/account-store"
 
 export default function MobilePreferencesPage() {
   const t = useTranslations("mobile.me")
@@ -46,6 +49,12 @@ export default function MobilePreferencesPage() {
   const tSec = useTranslations("mobile.security")
 
   const settings = useSettingsStore((s) => s.settings)
+  const unlockedAccount = useAccountStore((s) =>
+    s.accounts.find((account) => account.id === s.unlockedAccountId)
+  )
+  const enrollQuickUnlockMethod = useAccountStore((s) => s.enrollQuickUnlockMethod)
+  const removeQuickUnlockMethod = useAccountStore((s) => s.removeQuickUnlockMethod)
+  const clearQuickUnlockLockout = useAccountStore((s) => s.clearQuickUnlockLockout)
   const update = useSettingsPatch()
   const { updatePolicy: updateBiometric, pending: policyPending } = useBiometricPolicyUpdate(update)
 
@@ -90,6 +99,23 @@ export default function MobilePreferencesPage() {
       testid="mobile-preferences-page"
     >
       <div className="flex flex-col gap-4">
+        {unlockedAccount && !isDeviceManagedAccount(unlockedAccount) && (
+          <MeSection
+            title={tSec("accountUnlockTitle")}
+            description={tSec("accountUnlockDescription")}
+            testid="me-section-pref-account-unlock"
+          >
+            <div className="p-3">
+              <QuickUnlockSettings
+                account={unlockedAccount}
+                onEnroll={enrollQuickUnlockMethod}
+                onRemove={removeQuickUnlockMethod}
+                onClearLockout={clearQuickUnlockLockout}
+              />
+            </div>
+          </MeSection>
+        )}
+
         {/* Titled for both rows: "Font scale" headed a section whose second
             row is the default model. */}
         <MeSection title={tPanel("displayAndModelTitle")} testid="me-section-pref-display">

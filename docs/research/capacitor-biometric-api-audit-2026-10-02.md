@@ -2,6 +2,39 @@
 
 Date: 2026-10-02. The original audit below records the pre-repair state. The repair update records the subsequently authorized implementation. No real authentication, enrollment, credential access, sign-out or device setting changes were performed.
 
+## Mobile unlock usability follow-up — 2026-10-04
+
+Current installed versions remain Capacitor **8.5.2** and `@capgo/capacitor-native-biometric` **8.7.0** with the existing native policy patch. Native vault unlock was already implemented; the remaining friction was setup discoverability, manual prompt activation, and losing the quick-unlock entry after choosing password fallback.
+
+| Device                                           | Account biometric unlock         | Boundary                                                                                                      |
+| ------------------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Android with GMS                                 | Supported native code path       | Requires enrolled Class 3 fingerprint or face and compatible Keystore                                         |
+| Android-compatible domestic ROM without GMS      | Same native code path            | The biometric chain has no GMS/network dependency; OEM API and Keystore behavior still require device testing |
+| Android with only Class 2 face                   | Unavailable for vault unlock     | Can confirm ordinary sensitive actions; cannot release the authentication-bound vault key                     |
+| Android Class 1 or lock-screen-only face         | Unavailable through this app API | Lock-screen face support does not imply third-party app support                                               |
+| iOS Face ID / Touch ID                           | Supported native code path       | Enrolled biometrics, system permission, and device passcode required                                          |
+| HarmonyOS NEXT without Android app compatibility | No native implementation         | This is outside the Android Capacitor target                                                                  |
+
+The app targets Android API 24+ and iOS 16+. Android uses AndroidX BiometricPrompt; older Android versions use its fingerprint compatibility dialog. iOS uses LocalAuthentication and biometric-protected Keychain storage. The app has other GMS-related dependencies; the no-GMS conclusion applies specifically to biometric authentication. No blanket claim is made for every Xiaomi, OPPO, vivo, Honor, or Huawei model.
+
+Changes in this follow-up:
+
+- **Me → Preferences & security → Account unlock** now embeds the existing quick-unlock setup for the currently unlocked local account. Enter the account password once to enroll native biometrics; this does not save the password or enable biometrics without consent.
+- Enrolled, usable native biometrics take priority over a recently used PIN on mobile. Entering the lock screen automatically requests the protected native read once. Background idle locking waits until the WebView becomes visible before requesting authentication.
+- Cancellation or failure leaves manual retry, other enrolled methods, and password fallback available. Returning from the password form does not automatically reopen the system prompt. Switching accounts selects the destination account's supported methods and aborts stale native results.
+- Unsupported web passkeys no longer select an empty quick-unlock surface on mobile. PIN and pattern remain optional fallbacks; weak face recognition is not silently promoted to cryptographic account unlock.
+
+Verification on 2026-10-04:
+
+- Six focused Jest suites passed: **187 tests** covering mobile preferences, lock screen, quick-unlock panel/settings, native protected storage helper, and biometric facade. Includes StrictMode deduplication, foreground waiting, cancellation, successful native proof, unsupported/disabled methods, account switching, and password return.
+- Native patch source contracts: **2 passed**. These are source-policy checks, not sensor tests.
+- Scoped ESLint, translation generation/freshness, and i18n lint passed.
+- Full TypeScript checking did not complete: both the default heap and a 12 GiB retry terminated with `JavaScript heap out of memory`. This is not a passing typecheck; no production build result is claimed.
+- An isolated browser harness rendered the actual lock screen and panel with synthetic native authentication and account-unlock boundaries. It verified one automatic cancelled prompt, no unlock after cancellation, password fallback and return without another prompt, then successful manual retry. At a 390px viewport there was no horizontal overflow. This is UI evidence, not native/device acceptance.
+- No APK/IPA was rebuilt or installed in this follow-up; physical Android GMS/non-GMS and iOS tests remain outstanding. Use the device acceptance procedure below, additionally checking automatic foreground prompting and password return.
+
+Sources: [AOSP biometric classes](https://source.android.com/docs/security/features/biometric), [AndroidX BiometricPrompt and CryptoObject restrictions](https://developer.android.com/reference/androidx/biometric/BiometricPrompt), [Apple Face ID / Touch ID integration](https://developer.apple.com/documentation/localauthentication/logging-a-user-into-your-app-with-face-id-or-touch-id), [Android enrollment invalidation](<https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec.Builder#setInvalidatedByBiometricEnrollment(boolean)>).
+
 ## Repair update — 2026-10-02
 
 - Upgraded `@capgo/capacitor-native-biometric` from installed **8.6.11** to **8.7.0** and refreshed Android/iOS native dependency references.

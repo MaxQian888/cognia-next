@@ -4,6 +4,10 @@ jest.mock("@/lib/tauri/transport-routing", () => ({
   isRemoteHostActive: () => routing.active,
 }))
 const profileState = { value: "desktop" as string }
+const pairing = { config: { baseUrl: "https://host.test" } as { baseUrl: string } | null }
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  loadCompanionConfig: () => pairing.config,
+}))
 jest.mock("@/lib/platform/capabilities", () => ({
   ...jest.requireActual("@/lib/platform/capabilities"),
   detectHostProfile: () => profileState.value,
@@ -28,10 +32,21 @@ beforeEach(() => {
   __resetSchedulerTargetHostCacheForTesting()
   routing.active = false
   profileState.value = "desktop"
+  pairing.config = { baseUrl: "https://host.test" }
   callMock.mockReset()
 })
 
 describe("scheduler host target", () => {
+  it("uses the local schedule on an unpaired phone and restores the paired preference after pairing", () => {
+    profileState.value = "mobile-companion"
+    pairing.config = null
+    setPreferredSchedulerHostTarget("paired")
+    expect(isPairedSchedulerHostAvailable()).toBe(false)
+    expect(getEffectiveSchedulerHostTarget()).toBe("local")
+    pairing.config = { baseUrl: "https://host.test" }
+    expect(getEffectiveSchedulerHostTarget()).toBe("paired")
+  })
+
   it("defaults to local on a plain desktop and paired on companions / while driving a remote host", () => {
     expect(isPairedSchedulerHostAvailable()).toBe(false)
     expect(defaultSchedulerHostTarget()).toBe("local")

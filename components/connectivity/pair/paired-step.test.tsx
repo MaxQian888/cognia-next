@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { PairedStep } from "./paired-step"
@@ -147,11 +147,31 @@ describe("<PairedStep />", () => {
     expect(screen.getByTestId("pair-signout")).toHaveTextContent("Sign out and re-pair.")
   })
 
-  it("Continue to chat fires the onContinue callback", () => {
+  it("Continue to chat fires the onContinue callback", async () => {
     const onContinue = jest.fn()
     render(<PairedStep {...baseProps} onContinue={onContinue} />)
-    fireEvent.click(screen.getByTestId("pair-continue-cta"))
+    await userEvent.setup().click(screen.getByTestId("pair-continue-cta"))
     expect(onContinue).toHaveBeenCalled()
+  })
+
+  it("waits for Continue to chat persistence and prevents repeated submissions", async () => {
+    let finish!: () => void
+    const onContinue = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<PairedStep {...baseProps} onContinue={onContinue} />)
+    const user = userEvent.setup()
+    const button = screen.getByTestId("pair-continue-cta")
+    await user.click(button)
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute("aria-busy", "true")
+    await user.click(button)
+    expect(onContinue).toHaveBeenCalledTimes(1)
+    await act(async () => finish())
+    expect(button).toBeEnabled()
   })
 
   it("Refresh records latency on a successful RPC", async () => {

@@ -53,10 +53,10 @@ export const DEFAULT_MIRRORED_PREFERENCES: MirroredLockScreenPreferences = {
  * lock screen that cannot render is far worse than one that renders plainly.
  */
 export function readLockScreenPreferences(): MirroredLockScreenPreferences {
-  if (typeof localStorage === "undefined") return DEFAULT_MIRRORED_PREFERENCES
+  if (typeof window === "undefined") return DEFAULT_MIRRORED_PREFERENCES
   let raw: string | null
   try {
-    raw = localStorage.getItem(STORAGE_KEY)
+    raw = window.localStorage?.getItem(STORAGE_KEY) ?? null
   } catch {
     return DEFAULT_MIRRORED_PREFERENCES
   }
@@ -81,9 +81,9 @@ export function readLockScreenPreferences(): MirroredLockScreenPreferences {
 
 /** Write the mirror. Silently gives up where storage is unavailable. */
 export function writeLockScreenPreferences(value: MirroredLockScreenPreferences): void {
-  if (typeof localStorage === "undefined") return
+  if (typeof window === "undefined") return
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
+    window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(value))
   } catch {
     // A full or disabled quota costs the customisation, not the lock screen.
   }
@@ -91,9 +91,9 @@ export function writeLockScreenPreferences(value: MirroredLockScreenPreferences)
 
 /** Drop the mirror. Used when the last account is removed. */
 export function clearLockScreenPreferences(): void {
-  if (typeof localStorage === "undefined") return
+  if (typeof window === "undefined") return
   try {
-    localStorage.removeItem(STORAGE_KEY)
+    window.localStorage?.removeItem(STORAGE_KEY)
   } catch {
     // Nothing to do, and nothing that depends on it succeeding.
   }

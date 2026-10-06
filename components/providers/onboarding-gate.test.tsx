@@ -54,6 +54,68 @@ function enterTauri(): void {
 }
 
 describe("OnboardingGate", () => {
+  it.each(["/pair", "/pair/", "/pair.html"])(
+    "keeps pairing reachable from first-run setup at %s",
+    (route) => {
+      pathname = "/onboarding"
+      gate.mockReturnValue({ status: "enter", shell: "mobile-paired" })
+      const { rerender } = render(
+        <OnboardingGate>
+          <p>setup</p>
+        </OnboardingGate>
+      )
+      pathname = route
+      rerender(
+        <OnboardingGate>
+          <p>pairing</p>
+        </OnboardingGate>
+      )
+      expect(replace).not.toHaveBeenCalled()
+      expect(screen.getByText("pairing")).toBeInTheDocument()
+      expect(screen.queryByTestId("page-loading")).not.toBeInTheDocument()
+
+      pathname = "/"
+      rerender(
+        <OnboardingGate>
+          <p>app</p>
+        </OnboardingGate>
+      )
+      expect(replace).toHaveBeenCalledWith("/onboarding")
+      expect(screen.queryByText("app")).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["mobile-paired", "mobile-standalone", "web"])(
+    "renders pairing while the %s onboarding verdict resolves",
+    (shell) => {
+      pathname = "/pair"
+      gate.mockReturnValue({ status: "resolving", shell })
+      render(
+        <OnboardingGate>
+          <p>pairing</p>
+        </OnboardingGate>
+      )
+      expect(screen.getByText("pairing")).toBeInTheDocument()
+      expect(screen.queryByTestId("page-loading")).not.toBeInTheDocument()
+      expect(replace).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["/pairing", "/pair-admin", "/pair/settings"])(
+    "still requires onboarding at %s",
+    (route) => {
+      pathname = route
+      gate.mockReturnValue({ status: "enter", shell: "mobile-paired" })
+      render(
+        <OnboardingGate>
+          <p>app</p>
+        </OnboardingGate>
+      )
+      expect(replace).toHaveBeenCalledWith("/onboarding")
+      expect(screen.queryByText("app")).not.toBeInTheDocument()
+    }
+  )
+
   it.each(["/lark/workbench", "/lark/workbench/", "/lark/workbench.html"])(
     "lets the workbench capture its SSO fragment before first-run routing at %s",
     (route) => {

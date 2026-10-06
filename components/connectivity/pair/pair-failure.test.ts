@@ -217,15 +217,16 @@ describe("failures after the Host has already registered the device", () => {
     expect(failure.retryable).toBe(false)
   })
 
-  it("separates a stored-but-not-activated pairing from a lost credential", () => {
+  it("requires a fresh invitation after activation rolls back the new pairing", () => {
     const activation = diagnosePairFailure(
       new CompanionPairPhaseError("activate", new Error("manifest negotiation failed")),
       { stage: "persist", baseUrl: LOOPBACK, online: true }
     )
     expect(activation.kind).toBe("activate_failed")
-    // The credential is on disk, so reconnecting needs no new invitation.
-    expect(activation.retryable).toBe(true)
-    expect(activation.remedies[0]).toBe("reloadAndRetry")
+    // Host orchestration rolls back the new credential on activation failure.
+    expect(activation.retryable).toBe(false)
+    expect(activation.remedies).toContain("freshInvitation")
+    expect(activation.remedies).not.toContain("reloadAndRetry")
 
     const credential = diagnosePairFailure(
       new CompanionPairPhaseError("credential", new Error("quota exceeded")),
@@ -436,7 +437,6 @@ describe("message-catalogue coverage", () => {
     "updateHost",
     "checkHostLogs",
     "removeStaleDevice",
-    "reloadAndRetry",
   ]
 
   function lookup(messages: Record<string, unknown>, path: string): unknown {

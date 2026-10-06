@@ -66,7 +66,7 @@
   "errorTitle": "Pairing failed",
   "failure": {
     "body": {
-      "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one.",
+      "activateFailed": "The Host registered this device, but activation failed: {message}. The new pairing was rolled back. Check the connection, then use a fresh invitation to pair again.",
       "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
       "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help.",
       "vaultLockedPending": "Your local account is locked, so this browser cannot store the device key yet. Nothing has been sent — the invitation in the field is still valid. Unlock your account, then submit it again."
@@ -81,7 +81,6 @@
       "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
       "enableBrowserAccess": "On the Host: Settings → Connectivity → Local host → Browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
       "freshInvitation": "Issue a new invitation on the Host — Settings → Connectivity → Pairing, or “cognia-server pair” — and paste it here.",
-      "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
       "removeStaleDevice": "On the Host, remove this device in the device console (Devices) before pairing again.",
       "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
       "unlockAccount": "Sign in to your local account with its password, then pair again.",
@@ -92,7 +91,7 @@
     "startOver": "Paste a new invitation",
     "technicalDetail": "Technical detail",
     "title": {
-      "activate_failed": "Paired, but the Host didn't come online",
+      "activate_failed": "Device registered, but connection failed",
       "clipboard_unavailable": "Clipboard unavailable",
       "fingerprint_mismatch": "Host identity mismatch",
       "http": "The Host rejected the pairing request",

@@ -13,7 +13,7 @@
 // enrolled, enrolled and available, and enrolled but disabled after too many
 // attempts. The user needs to tell those apart.
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { FingerprintIcon, GridIcon, KeyRoundIcon, LockKeyholeIcon } from "lucide-react"
 
@@ -50,6 +50,8 @@ export interface QuickUnlockPanelProps {
   /** Switches the lock screen back to the password form. */
   onUsePassword: () => void
   disabled?: boolean
+  /** Prompt once on lock entry; explicit password fallback disables this on return. */
+  autoPromptBiometric?: boolean
 }
 
 const METHOD_ICON: Record<QuickUnlockMethod, typeof KeyRoundIcon> = {
@@ -69,6 +71,7 @@ function AccountQuickUnlockPanel({
   onQuickUnlock,
   onUsePassword,
   disabled = false,
+  autoPromptBiometric = false,
 }: QuickUnlockPanelProps) {
   const t = useTranslations("account.quickUnlock")
   const mobile = isMobile()
@@ -84,6 +87,8 @@ function AccountQuickUnlockPanel({
         .sort((a, b) => {
           const usable = Number(isEnrollmentUsable(b)) - Number(isEnrollmentUsable(a))
           if (usable !== 0) return usable
+          if (mobile && (a.method === "biometric" || b.method === "biometric"))
+            return Number(b.method === "biometric") - Number(a.method === "biometric")
           return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)
         }),
     [enrollments, mobile]
@@ -96,6 +101,7 @@ function AccountQuickUnlockPanel({
   const [busy, setBusy] = useState(false)
   const nativeOperation = useRef<AbortController | null>(null)
   const mounted = useRef(false)
+  const prompted = useRef(false)
   useLayoutEffect(() => {
     mounted.current = true
     return () => {
@@ -161,8 +167,9 @@ function AccountQuickUnlockPanel({
     }
   }
 
-  const runBiometric = async () => {
+  const runBiometric = useCallback(async () => {
     if (inputsDisabled || !mobile || nativeOperation.current) return
+    prompted.current = true
     if (!active || typeof active.verifier.nativeKeyId !== "string") {
       setError(t("failure.not-enrolled"))
       return
@@ -196,7 +203,37 @@ function AccountQuickUnlockPanel({
       if (nativeOperation.current === controller) nativeOperation.current = null
       if (mounted.current) setBusy(false)
     }
-  }
+  }, [active, inputsDisabled, localAccountId, mobile, onQuickUnlock, t])
+
+  useEffect(() => {
+    if (
+      !autoPromptBiometric ||
+      prompted.current ||
+      inputsDisabled ||
+      !mobile ||
+      active?.method !== "biometric" ||
+      typeof nativeKeyId !== "string"
+    )
+      return
+    // Defer until after mount so StrictMode's setup/cleanup replay cannot start
+    // a native prompt whose result would immediately be discarded.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const promptWhenVisible = () => {
+      clearTimeout(timer)
+      if (document.visibilityState === "hidden" || prompted.current) return
+      timer = setTimeout(() => {
+        if (document.visibilityState !== "hidden" && !prompted.current) void runBiometric()
+      }, 0)
+    }
+    // Idle locking can mount this screen in the background. Wait until the
+    // WebView is visible before consuming the one automatic prompt.
+    document.addEventListener("visibilitychange", promptWhenVisible)
+    promptWhenVisible()
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener("visibilitychange", promptWhenVisible)
+    }
+  }, [autoPromptBiometric, inputsDisabled, mobile, active?.method, nativeKeyId, runBiometric])
 
   if (enrollments.length === 0) return null
 

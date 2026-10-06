@@ -52,6 +52,7 @@ jest.mock("@/lib/tauri/recovery", () => ({
   unlockSecretStore: () => mockUnlockSecretStore(),
 }))
 
+const mockLoadAccounts = jest.fn<Promise<void>, []>()
 const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
 const mockUnlockAccount = jest.fn<Promise<void>, [string, string]>()
 const mockUnlockWithRecoveryKey = jest.fn<Promise<void>, [string, string, string]>()
@@ -75,7 +76,10 @@ let mockState: Pick<
 >
 
 jest.mock("@/stores/account/account-store", () => ({
-  useAccountStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+  useAccountStore: Object.assign(
+    (selector: (state: typeof mockState) => unknown) => selector(mockState),
+    { getState: () => ({ ...mockState, load: mockLoadAccounts }) }
+  ),
   selectActiveAccount: (state: typeof mockState) =>
     state.accounts.find((account) => account.id === state.activeAccountId) ?? null,
   usesBrowserVault: () => mockUsesBrowserVault,
@@ -214,7 +218,7 @@ describe("AccountGate", () => {
     expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
   })
 
-  it("passes through to the native mobile pairing gate", () => {
+  it("holds mobile pairing behind failed local workspace provisioning", () => {
     mockIsTauri = false
     mockIsCapacitor = true
     setGateState({ accounts: [] })
@@ -223,8 +227,24 @@ describe("AccountGate", () => {
         <div>child</div>
       </AccountGate>
     )
-    expect(screen.getByText("child")).toBeInTheDocument()
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "openLocalWorkspace" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "createAccount" })).not.toBeInTheDocument()
+  })
+
+  it("retries native account boot without mounting the paired-host runtime", async () => {
+    mockIsTauri = false
+    mockIsCapacitor = true
+    mockLoadAccounts.mockResolvedValue(undefined)
+    setGateState({ accounts: [], error: "Keychain unavailable" })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "openLocalWorkspace" }))
+    await waitFor(() => expect(mockLoadAccounts).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
   it("shows the unlock screen on native mobile for a locked password account", () => {
@@ -934,12 +954,12 @@ describe("share viewer route", () => {
     expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
   })
 
-  it("leaves native mobile to its own pairing gate", () => {
+  it("keeps anonymous mobile shares outside the unavailable workspace", () => {
     mockIsCapacitor = true
     setGateState({ accounts: [] })
     renderShareRoute()
-    expect(screen.getByText("app viewer")).toBeInTheDocument()
-    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+    expect(screen.queryByText("app viewer")).not.toBeInTheDocument()
+    expect(screen.getByText("guest viewer")).toBeInTheDocument()
   })
 
   it("is the ordinary gate on any other route", () => {

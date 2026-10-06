@@ -22,6 +22,8 @@
  * drives it via {@link setActiveRemoteTransport}.
  */
 
+import { measureOperation } from "@/lib/perf/operation-performance"
+
 import type {
   Transport,
   TransportBinaryResource,
@@ -166,7 +168,7 @@ export class RoutingTransport implements Transport {
   ): Promise<T> {
     const descriptor = getCommandDescriptor(name)
     if (!descriptor || descriptor.target === "client") {
-      return this.local.call<T>(name, args, options)
+      return this.dispatch<T>(this.local, name, args, options)
     }
     if (descriptor.target === "execution") {
       // `target` alone is not the routing answer. Twenty-two commands are
@@ -177,23 +179,39 @@ export class RoutingTransport implements Transport {
       // token must not land on whichever Host is selected just because a
       // different client needed the same command over the wire.
       if (isClientDataPlaneCommand(name)) {
-        return this.local.call<T>(name, args, options)
+        return this.dispatch<T>(this.local, name, args, options)
       }
-      return (activeRemote ?? this.local).call<T>(name, args, options)
+      return this.dispatch<T>(activeRemote ?? this.local, name, args, options)
     }
     if (descriptor.target === "host-admin") {
       // This renderer owns its local Tauri host. The explicit-context guard
       // prevents ambiguous remote administration, not local desktop IPC.
-      if (!activeRemote) return this.local.call<T>(name, args, options)
+      if (!activeRemote) return this.dispatch<T>(this.local, name, args, options)
       return Promise.reject(
         new Error(`Command "${name}" requires an explicit host-admin execution context`)
       )
     }
     if (!activeRemote) {
-      return this.local.call<T>(name, args, options)
+      return this.dispatch<T>(this.local, name, args, options)
     }
     return Promise.reject(
       new Error(`Command "${name}" is service-only and cannot use the device routing plane`)
+    )
+  }
+
+  private dispatch<T>(
+    target: Transport,
+    name: string,
+    args?: Record<string, unknown>,
+    options?: TransportCallOptions
+  ): Promise<T> {
+    // Observing the performance panel must not manufacture its own activity.
+    if (name.startsWith("perf_") || name.startsWith("telemetry_")) {
+      return target.call<T>(name, args, options)
+    }
+    return measureOperation(
+      target === this.local ? "transport.local.call" : "transport.remote.call",
+      () => target.call<T>(name, args, options)
     )
   }
 

@@ -1,4 +1,6 @@
 {
+  "accountUnlockTitle": "Account unlock",
+  "accountUnlockDescription": "Enter your account password once to set up fingerprint or face unlock on this phone. After setup, the lock screen automatically asks for biometrics. Sensitive-action protection below is configured separately.",
   "deletePairing": {
     "help": "Ask for biometric before revoking a device's pairing.",
     "label": "Revoke a paired device"

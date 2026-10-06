@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { StrictMode } from "react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { QuickUnlockPanel } from "./quick-unlock-panel"
 import {
@@ -67,6 +68,130 @@ beforeEach(() => {
 })
 
 describe("QuickUnlockPanel", () => {
+  it("waits for foreground after an idle lock and does not retry a cancelled prompt on resume", async () => {
+    mockMobile = true
+    const visibility = jest.spyOn(document, "visibilityState", "get")
+    visibility.mockReturnValue("hidden")
+    mockReadNative.mockResolvedValue({ ok: false, reason: "cancelled" })
+    try {
+      render(
+        <QuickUnlockPanel
+          localAccountId="acct-001"
+          enrollments={[enrollment({ method: "biometric", verifier: { nativeKeyId: "key" } })]}
+          onQuickUnlock={jest.fn()}
+          onUsePassword={jest.fn()}
+          autoPromptBiometric
+        />
+      )
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      })
+      expect(mockReadNative).not.toHaveBeenCalled()
+      visibility.mockReturnValue("visible")
+      fireEvent(document, new Event("visibilitychange"))
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent("biometricFailure.cancelled")
+      )
+      fireEvent(document, new Event("visibilitychange"))
+      await flush()
+      expect(mockReadNative).toHaveBeenCalledTimes(1)
+    } finally {
+      visibility.mockRestore()
+    }
+  })
+
+  it("prefers enrolled mobile biometrics over a recently used PIN", () => {
+    mockMobile = true
+    renderPanel([
+      enrollment({ method: "pin", lastUsedAt: 100 }),
+      enrollment({ method: "biometric", verifier: { nativeKeyId: "key" } }),
+    ])
+    expect(screen.getByTestId("quick-unlock-biometric")).toBeInTheDocument()
+    expect(screen.queryByTestId("pin-pad")).not.toBeInTheDocument()
+  })
+
+  it("automatically unlocks only after the native protected read succeeds", async () => {
+    mockMobile = true
+    mockReadNative.mockResolvedValue({ ok: true, value: "biometric:protected-secret" })
+    const onQuickUnlock = jest.fn(async () => ({ ok: true }))
+    render(
+      <QuickUnlockPanel
+        localAccountId="acct-001"
+        enrollments={[enrollment({ method: "biometric", verifier: { nativeKeyId: "key" } })]}
+        onQuickUnlock={onQuickUnlock}
+        onUsePassword={jest.fn()}
+        autoPromptBiometric
+      />
+    )
+    await waitFor(() =>
+      expect(onQuickUnlock).toHaveBeenCalledWith(
+        "biometric",
+        "biometric:protected-secret",
+        expect.any(AbortSignal)
+      )
+    )
+    expect(mockReadNative).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["disabled", "locked-out", "web", "no-key"])(
+    "does not automatically prompt when %s",
+    async (condition) => {
+      mockMobile = condition !== "web"
+      render(
+        <QuickUnlockPanel
+          localAccountId="acct-001"
+          enrollments={[
+            enrollment({
+              method: "biometric",
+              verifier: condition === "no-key" ? {} : { nativeKeyId: "key" },
+              ...(condition === "locked-out" ? { lockedOutAt: 1 } : {}),
+            }),
+          ]}
+          onQuickUnlock={jest.fn()}
+          onUsePassword={jest.fn()}
+          autoPromptBiometric
+          disabled={condition === "disabled"}
+        />
+      )
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      })
+      expect(mockReadNative).not.toHaveBeenCalled()
+    }
+  )
+
+  it("automatically prompts once in StrictMode and permits manual retry after cancellation", async () => {
+    mockMobile = true
+    mockReadNative.mockResolvedValue({ ok: false, reason: "cancelled" })
+    const props = {
+      localAccountId: "acct-001",
+      enrollments: [enrollment({ method: "biometric", verifier: { nativeKeyId: "key" } })],
+      onQuickUnlock: jest.fn(),
+      onUsePassword: jest.fn(),
+      autoPromptBiometric: true,
+    }
+    const { rerender } = render(
+      <StrictMode>
+        <QuickUnlockPanel {...props} />
+      </StrictMode>
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("biometricFailure.cancelled")
+    )
+    rerender(
+      <StrictMode>
+        <QuickUnlockPanel {...props} />
+      </StrictMode>
+    )
+    await flush()
+    expect(mockReadNative).toHaveBeenCalledTimes(1)
+    expect(props.onQuickUnlock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("quick-unlock-biometric"))
+    await flush()
+    expect(mockReadNative).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("quick-unlock-use-password")).toBeEnabled()
+  })
+
   it("uses the native protected read to unlock on mobile", async () => {
     mockMobile = true
     mockReadNative.mockResolvedValue({ ok: true, value: "biometric:protected-secret" })

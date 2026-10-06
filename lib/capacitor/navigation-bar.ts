@@ -30,10 +30,18 @@ interface NavigationBarShape {
 
 export type NavigationBarLoader = () => Promise<NavigationBarShape>
 
-const defaultLoader: NavigationBarLoader = makeDefaultLoader<NavigationBarShape>(
+const loadNativePlugin = makeDefaultLoader<NavigationBarShape>(
   "@capgo/capacitor-navigation-bar",
   "NavigationBar"
 )
+
+const defaultLoader: NavigationBarLoader = async () => {
+  const platform = (
+    globalThis as { Capacitor?: { getPlatform?: () => string } }
+  ).Capacitor?.getPlatform?.()
+  if (platform !== "android") throw new Error("NavigationBar is only supported on Android")
+  return loadNativePlugin()
+}
 
 /**
  * Set the navigation bar background color and icon contrast. Hex

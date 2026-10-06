@@ -38,6 +38,7 @@ import {
 } from "@/lib/connectivity/capacitor-http"
 import { createProxyFetch } from "@/lib/network/proxy-fetch"
 import { detectPlatform } from "@/lib/platform/detect"
+import { measureOperation } from "@/lib/perf/operation-performance"
 
 export type PlatformFetchKind = "tauri" | "capacitor" | "browser"
 
@@ -156,7 +157,23 @@ export function createPlatformFetch(
     browser?: PlatformFetch
   } = {}
 ): PlatformFetch {
-  switch (deps.kind ?? platformFetchKind()) {
+  const kind = deps.kind ?? platformFetchKind()
+  const implementation = selectPlatformFetch(kind, deps)
+  // Browser fetch resolves at response headers; native bridges buffer the body.
+  // Only the fixed transport name and outcome enter the performance recorder.
+  return (input, init) =>
+    measureOperation(
+      `network.${kind}.fetch`,
+      () => implementation(input, init),
+      (response) => (response.ok ? "success" : "error")
+    )
+}
+
+function selectPlatformFetch(
+  kind: PlatformFetchKind,
+  deps: { capacitor?: PlatformFetch; proxied?: PlatformFetch; browser?: PlatformFetch }
+): PlatformFetch {
+  switch (kind) {
     case "capacitor":
       return deps.capacitor ?? capacitorFetch
     case "tauri": {

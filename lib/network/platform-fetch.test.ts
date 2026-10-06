@@ -5,6 +5,12 @@ import {
   PlatformFetchUnavailableError,
 } from "./platform-fetch"
 
+import { measureOperation } from "@/lib/perf/operation-performance"
+
+jest.mock("@/lib/perf/operation-performance", () => ({
+  measureOperation: jest.fn((_name: string, callback: () => Promise<unknown>) => callback()),
+}))
+
 const detectPlatform = jest.fn<string, []>()
 const getCapacitorHttp = jest.fn<unknown, []>()
 const createProxyFetch = jest.fn()
@@ -24,6 +30,7 @@ beforeEach(() => {
   detectPlatform.mockReturnValue("web")
   getCapacitorHttp.mockReturnValue(null)
   createProxyFetch.mockReset()
+  jest.mocked(measureOperation).mockClear()
 })
 
 describe("platformFetchKind", () => {
@@ -219,5 +226,98 @@ describe("createPlatformFetch", () => {
 
     expect(createProxyFetch).toHaveBeenCalledTimes(1)
     expect(proxied).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("platform fetch operation measurements", () => {
+  it.each(["browser", "tauri", "capacitor"] as const)(
+    "measures %s calls without changing the request or returned promise",
+    async (kind) => {
+      const response = new Response("private response", { status: 200 })
+      const pending = Promise.resolve(response)
+      const implementation = jest.fn(() => pending)
+      const controller = new AbortController()
+      const init = {
+        method: "POST",
+        credentials: "include" as const,
+        signal: controller.signal,
+        headers: { Authorization: "Bearer private-token" },
+        body: "private body",
+      }
+      const input = new Request("https://private.test/path?secret=token")
+      const platformFetch = createPlatformFetch({
+        kind,
+        browser: implementation,
+        proxied: implementation,
+        capacitor: implementation,
+      })
+
+      expect(platformFetch(input, init)).toBe(pending)
+      expect(implementation).toHaveBeenCalledWith(input, init)
+      expect(measureOperation).toHaveBeenCalledTimes(1)
+      const [name, , classify] = jest.mocked(measureOperation).mock.calls[0]
+      expect(name).toBe(`network.${kind}.fetch`)
+      expect(classify?.(response)).toBe("success")
+      expect(await pending).toBe(response)
+      expect(response.bodyUsed).toBe(false)
+    }
+  )
+
+  it("classifies HTTP failures without consuming or rejecting the response", async () => {
+    const response = new Response("private failure", { status: 500 })
+    const pending = Promise.resolve(response)
+    const platformFetch = createPlatformFetch({ kind: "browser", browser: () => pending })
+
+    expect(platformFetch("https://private.test")).toBe(pending)
+    const classify = jest.mocked(measureOperation).mock.calls[0][2]
+    expect(classify?.(response)).toBe("error")
+    expect(await pending).toBe(response)
+    expect(response.bodyUsed).toBe(false)
+  })
+
+  it.each([new Error("network failure"), new DOMException("cancelled", "AbortError")])(
+    "preserves rejected promise and original error %s",
+    async (error) => {
+      const pending = Promise.reject(error)
+      const platformFetch = createPlatformFetch({ kind: "browser", browser: () => pending })
+      expect(platformFetch("https://private.test")).toBe(pending)
+      await expect(pending).rejects.toBe(error)
+    }
+  )
+
+  it("preserves synchronous transport errors", () => {
+    const error = new Error("synchronous failure")
+    const platformFetch = createPlatformFetch({
+      kind: "tauri",
+      proxied: () => {
+        throw error
+      },
+    })
+    expect(() => platformFetch("https://private.test")).toThrow(error)
+  })
+
+  it("keeps browser option filtering and original cancellation signal", async () => {
+    const originalFetch = global.fetch
+    const response = new Response("ok")
+    const pending = Promise.resolve(response)
+    const fetchMock = jest.fn(() => pending)
+    global.fetch = fetchMock
+    const controller = new AbortController()
+    try {
+      const result = createPlatformFetch({ kind: "browser" })("https://private.test", {
+        timeout: 100,
+        binaryResponse: true,
+        credentials: "include",
+        signal: controller.signal,
+      })
+      expect(result).toBe(pending)
+      expect(fetchMock).toHaveBeenCalledWith("https://private.test", {
+        credentials: "include",
+        signal: controller.signal,
+      })
+      expect(await result).toBe(response)
+    } finally {
+      global.fetch = originalFetch
+    }
   })
 })

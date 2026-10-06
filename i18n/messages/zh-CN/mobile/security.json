@@ -1,4 +1,6 @@
 {
+  "accountUnlockTitle": "账号解锁",
+  "accountUnlockDescription": "输入一次账号密码，即可为这台手机设置指纹或面部解锁。设置后，锁屏会自动发起生物识别验证。下方的敏感操作保护需单独配置。",
   "deletePairing": {
     "help": "撤销某台设备的配对前先验证生物识别。",
     "label": "撤销已配对设备"

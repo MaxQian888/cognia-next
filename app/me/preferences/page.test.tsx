@@ -3,12 +3,38 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
+import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 const mockIsMobile = jest.fn(() => false)
 const mockGuard = jest.fn()
+const mockEnrollQuickUnlock = jest.fn().mockResolvedValue(undefined)
+const mockRemoveQuickUnlock = jest.fn().mockResolvedValue(undefined)
+const mockClearQuickUnlockLockout = jest.fn().mockResolvedValue(undefined)
+const mockNativeEnrollment = jest.fn()
+const mockAccountState: {
+  accounts: LocalAccountRecord[]
+  unlockedAccountId: string | null
+  activeAccountId: string | null
+} = { accounts: [], unlockedAccountId: null, activeAccountId: null }
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) =>
+      selector({
+        ...mockAccountState,
+        enrollQuickUnlockMethod: mockEnrollQuickUnlock,
+        removeQuickUnlockMethod: mockRemoveQuickUnlock,
+        clearQuickUnlockLockout: mockClearQuickUnlockLockout,
+      }),
+    { getState: () => mockAccountState }
+  ),
+}))
+jest.mock("@/lib/accounts/quick-unlock/native-biometric", () => ({
+  enrollNativeBiometric: (...args: unknown[]) => mockNativeEnrollment(...args),
+}))
 jest.mock("@/lib/capacitor/_shared", () => ({
   ...jest.requireActual("@/lib/capacitor/_shared"),
   isMobile: () => mockIsMobile(),
@@ -97,6 +123,13 @@ jest.mock("@/components/ui/select", () => {
 import Page from "./page"
 
 beforeEach(() => {
+  mockAccountState.accounts = []
+  mockAccountState.unlockedAccountId = null
+  mockAccountState.activeAccountId = null
+  mockEnrollQuickUnlock.mockClear()
+  mockRemoveQuickUnlock.mockClear()
+  mockClearQuickUnlockLockout.mockClear()
+  mockNativeEnrollment.mockReset()
   saveMock.mockReset()
   enqueueMock.mockReset()
   mockTrackEvent.mockClear()
@@ -111,6 +144,89 @@ beforeEach(() => {
 })
 
 describe("MobilePreferencesPage", () => {
+  const account: LocalAccountRecord = {
+    id: "acct_local",
+    displayName: "Local account",
+    passwordVerifier: { algorithm: "test", salt: "s", hash: "h", params: {} },
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  it("enrolls biometrics for the unlocked account rather than the selected account", async () => {
+    mockIsMobile.mockReturnValue(true)
+    mockAccountState.accounts = [{ ...account, id: "acct_other" }, account]
+    mockAccountState.activeAccountId = "acct_other"
+    mockAccountState.unlockedAccountId = account.id
+    mockNativeEnrollment.mockImplementation(async ({ commit }) => {
+      await commit("biometric:secret", "native-key")
+      return { ok: true }
+    })
+    render(<Page />)
+
+    const add = screen.getByRole("button", { name: "Add Fingerprint / Face ID" })
+    expect(add).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("Account password"), {
+      target: { value: "account-password" },
+    })
+    fireEvent.click(add)
+    fireEvent.click(screen.getByRole("button", { name: "Set up fingerprint / Face ID" }))
+
+    await waitFor(() =>
+      expect(mockEnrollQuickUnlock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: account.id,
+          method: "biometric",
+          password: "account-password",
+          canonicalSecret: "biometric:secret",
+          verifier: { nativeKeyId: "native-key" },
+        })
+      )
+    )
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
+  it("wires removal and password-verified re-enabling to the unlocked account", () => {
+    mockAccountState.accounts = [
+      {
+        ...account,
+        quickUnlock: [{ method: "biometric", verifier: {}, createdAt: 0, failedAttempts: 5 }],
+      },
+    ]
+    mockAccountState.unlockedAccountId = account.id
+    render(<Page />)
+
+    expect(screen.getByRole("button", { name: "Re-enable" })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("Account password"), {
+      target: { value: "account-password" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Re-enable" }))
+    expect(mockClearQuickUnlockLockout).toHaveBeenCalledWith(
+      account.id,
+      "biometric",
+      "account-password"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Remove Fingerprint / Face ID" }))
+    expect(mockRemoveQuickUnlock).toHaveBeenCalledWith(account.id, "biometric")
+  })
+
+  it.each([null, "acct_missing", "acct_desktop_local_workspace"])(
+    "does not offer account setup for an unavailable or device-managed account (%s)",
+    (unlockedAccountId) => {
+      mockAccountState.accounts = [
+        account,
+        {
+          ...account,
+          id: "acct_desktop_local_workspace",
+          protection: "device",
+        },
+      ]
+      mockAccountState.activeAccountId = account.id
+      mockAccountState.unlockedAccountId = unlockedAccountId
+      render(<Page />)
+      expect(screen.queryByLabelText("Account password")).not.toBeInTheDocument()
+    }
+  )
+
   it("renders font-scale + default-model + four biometric rows", () => {
     render(<Page />)
     expect(screen.getByTestId("pref-font-scale")).toBeInTheDocument()

@@ -10,10 +10,16 @@
  * static export build (`output: "export"`) can render a shell.
  */
 
+import { Suspense } from "react"
+
 import { PairOnboardingClient } from "@/components/mobile/pair-onboarding-client"
 
 export const dynamicParams = false
 
 export default function MobilePairPage() {
-  return <PairOnboardingClient />
+  return (
+    <Suspense fallback={null}>
+      <PairOnboardingClient />
+    </Suspense>
+  )
 }

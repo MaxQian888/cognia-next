@@ -10,6 +10,43 @@ function makeNb() {
 }
 
 describe("navigation-bar wrapper", () => {
+  it("keeps the native navigation bar enabled on Android", async () => {
+    const nb = makeNb()
+    Object.defineProperty(window, "Capacitor", {
+      configurable: true,
+      value: {
+        isNativePlatform: () => true,
+        getPlatform: () => "android",
+        Plugins: { NavigationBar: nb },
+      },
+    })
+    try {
+      expect(await syncWithTheme("dark")).toEqual({ kind: "ok" })
+      expect(nb.setNavigationBarColor).toHaveBeenCalledWith({
+        color: "#0a0a0a",
+        darkButtons: false,
+      })
+    } finally {
+      Reflect.deleteProperty(window, "Capacitor")
+    }
+  })
+
+  it("does not invoke the Android-only native API on iOS", async () => {
+    const nb = makeNb()
+    const cap = {
+      isNativePlatform: () => true,
+      getPlatform: () => "ios",
+      Plugins: { NavigationBar: nb },
+    }
+    Object.defineProperty(window, "Capacitor", { configurable: true, value: cap })
+    try {
+      expect(await syncWithTheme("dark")).toEqual({ kind: "unsupported" })
+      expect(nb.setNavigationBarColor).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(window, "Capacitor")
+    }
+  })
+
   it("setNavigationBarColor forwards the hex color with dark buttons by default", async () => {
     const nb = makeNb()
     const out = await setNavigationBarColor("#abcdef", undefined, async () => nb)

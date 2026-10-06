@@ -66,7 +66,7 @@
   "errorTitle": "配对失败",
   "failure": {
     "body": {
-      "activateFailed": "设备密钥已保存、配对已生效，但让 Host 上线时失败：{message}。配对本身没有问题，这是连接问题。",
+      "activateFailed": "Host 已注册此设备，但启用连接失败：{message}。本次新配对已回滚。请检查连接，然后使用新的邀请码重新配对。",
       "expired": "配对邀请码有效期为 5 分钟。请在 Host 上重新生成一个并粘贴到这里。",
       "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。",
       "vaultLockedPending": "本地账户已锁定，因此当前浏览器还无法保存设备密钥。请求尚未发出——输入框里的邀请码依然有效。解锁账户后再提交一次即可。"
@@ -81,7 +81,6 @@
       "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
       "enableBrowserAccess": "在 Host 上打开 设置 → 连接 → 本机主机 → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
       "freshInvitation": "在 Host 上重新生成邀请码（设置 → 连接 → 配对，或执行 “cognia-server pair”），然后粘贴到这里。",
-      "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。",
       "removeStaleDevice": "在 Host 的设备控制台（设备）中移除这台设备，然后重新配对。",
       "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
       "unlockAccount": "用密码登录本地账户后再配对。",
@@ -92,7 +91,7 @@
     "startOver": "粘贴新的邀请码",
     "technicalDetail": "技术细节",
     "title": {
-      "activate_failed": "配对已完成，但 Host 未能上线",
+      "activate_failed": "设备已注册，但连接失败",
       "clipboard_unavailable": "无法读取剪贴板",
       "fingerprint_mismatch": "主机身份不匹配",
       "http": "Host 拒绝了本次配对请求",

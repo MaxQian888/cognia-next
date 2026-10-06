@@ -113,6 +113,6 @@ describe("sidebar nav meta", () => {
     // `browser` is a feature-group entry rather than an auxiliary one, but the
     // embedded webview only exists in the Tauri shell, so it is desktop-only too.
     // `pet` is the desktop shell's own subsystem (ADR-0058 D9).
-    expect(desktopOnly.sort()).toEqual(["browser", "performance", "pet"])
+    expect(desktopOnly.sort()).toEqual(["browser", "pet"])
   })
 })

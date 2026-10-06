@@ -40,6 +40,9 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const onOnboardingRoute = pathname?.startsWith(ONBOARDING_ROUTE) ?? false
+  // Pairing is a step of first-run setup. Redirecting it back into the flow
+  // prevents an unpaired phone from ever satisfying the flow's pairing gate.
+  const onPairRoute = /^\/pair(?:\/|\.html)?$/.test(pathname ?? "")
   // Let the entry capture its Feishu session before a first-run redirect.
   // Entering the normal app afterwards still requires onboarding.
   const onLarkWorkbench = /^\/lark\/workbench(?:\/|\.html)?$/.test(pathname ?? "")
@@ -63,15 +66,24 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (devLocalAccount) return
-    if (status !== "enter" || onOnboardingRoute || onLarkWorkbench || onShareViewer) return
+    if (status !== "enter" || onOnboardingRoute || onPairRoute || onLarkWorkbench || onShareViewer)
+      return
     router.replace(ONBOARDING_ROUTE)
-  }, [devLocalAccount, status, onOnboardingRoute, onLarkWorkbench, onShareViewer, router])
+  }, [
+    devLocalAccount,
+    status,
+    onOnboardingRoute,
+    onPairRoute,
+    onLarkWorkbench,
+    onShareViewer,
+    router,
+  ])
 
   // The flow's own route renders regardless of the verdict: entering it from
   // Settings ("re-run setup") is a deliberate revisit by someone the gate has
   // already decided is onboarded, and blocking that would make the re-run
   // entry point dead.
-  if (onOnboardingRoute || onLarkWorkbench || onShareViewer) return <>{children}</>
+  if (onOnboardingRoute || onPairRoute || onLarkWorkbench || onShareViewer) return <>{children}</>
 
   if (devLocalAccount) return <>{children}</>
 

@@ -25,6 +25,7 @@
 
 import { detectHostProfile } from "@/lib/platform/capabilities"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { CapabilityId } from "@/lib/platform/capabilities"
 import type { Platform } from "@/lib/platform/detect"
 import { describeLocalSchedulerHost, type SchedulerHostDescriptor } from "./host-support"
@@ -60,7 +61,12 @@ function writeStoredPreference(target: SchedulerHostTarget | null): void {
 export function isPairedSchedulerHostAvailable(): boolean {
   if (isRemoteHostActive()) return true
   const profile = detectHostProfile()
-  return profile === "cloud-companion" || profile === "mobile-companion"
+  // The mobile profile describes the shell even before the user pairs it.
+  // Only a selected pairing gives its companion transport a host to query.
+  return (
+    profile === "cloud-companion" ||
+    (profile === "mobile-companion" && loadCompanionConfig() !== null)
+  )
 }
 
 /** The default target for this client shape (see module docs). */
