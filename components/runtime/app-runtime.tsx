@@ -112,6 +112,16 @@ import { LightweightRouteShell } from "@/components/runtime/lightweight-route-sh
 import { TtsNowPlayingBar } from "@/components/tts/tts-now-playing-bar"
 import { AskUserDialog } from "@/components/chat/ask-user-dialog"
 import { SkillRecorderRoot } from "@/components/skills/recorder/recorder-root"
+import { installVectorRuntimeAdapters } from "@/lib/vector/runtime-adapters"
+
+// Vector capabilities are registered when this module loads: every route's
+// layout imports it, so it runs on web, Tauri and Capacitor before any
+// provider, initializer or page can reach the vector store. Not in
+// `instrumentation-client.ts`: the adapters lazily import the chat and plugin
+// graphs, which use `next/dynamic`, and Turbopack cannot place a dynamic import
+// outside the app's client graph ("Parent client reference not found for
+// next/dynamic import" on every route in `next dev`).
+installVectorRuntimeAdapters()
 
 /**
  * Compose the existing client runtime inside one RSC boundary. Passing the route

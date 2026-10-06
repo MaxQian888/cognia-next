@@ -68,6 +68,7 @@ jest.mock("@/components/account/account-gate", () => ({
 }))
 
 import { renderToStaticMarkup } from "react-dom/server"
+import { getVectorRuntimeAdapters } from "@cognia/vector/runtime-adapters"
 import { AppRuntime } from "./app-runtime"
 
 const pluginHosts = [
@@ -89,6 +90,15 @@ const renderRuntime = () =>
       <main>page content</main>
     </AppRuntime>
   )
+
+// Installed when the module loads, before anything renders: the vector store
+// throws on use without it. Pinned here because the install used to live in
+// `instrumentation-client.ts`, where it broke every route in `next dev`.
+describe("AppRuntime module", () => {
+  it("registers the vector runtime adapters on load", () => {
+    expect(getVectorRuntimeAdapters().isTauri()).toBe(false)
+  })
+})
 
 describe("AppRuntime boot boundaries", () => {
   afterEach(() => {

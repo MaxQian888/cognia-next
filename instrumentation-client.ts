@@ -1,8 +1,3 @@
-import { installVectorRuntimeAdapters } from "@/lib/vector/runtime-adapters"
-
-// Synchronous registration precedes hydration on web, Tauri and Capacitor.
-installVectorRuntimeAdapters()
-
 import { installConsoleBridge } from "@cognia/logging/console-bridge"
 
 // Next.js executes this module before hydration, so legacy console calls made
