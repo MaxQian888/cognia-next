@@ -1,4 +1,4 @@
-// Tree helpers for Pi session files (ADR-0119 / ADR-0062 fidelity rules).
+// Tree helpers for Pi session files (ADR-0119 / ADR-0062 fidelity rules, ADR-0217).
 //
 // A `~/.pi/agent/sessions/--<cwd>--/<ts>_<uuid>.jsonl` file is a TREE, not a
 // list: every entry after the header carries an 8-char `id` and a `parentId`,
@@ -6,15 +6,15 @@
 // new file. Read in file order, an abandoned branch interleaves into the
 // conversation.
 //
-// The structural work is shared with `claude-code-dag.ts` — the active-leaf
-// walk there already handles the two things that are easy to get wrong (a
-// cycle guard so a corrupt file cannot hang the importer, and degradation to
-// file order when no entry carries an id). That helper is reused via a view
-// object rather than reimplemented; only the parts Pi needs and Claude does
-// not — enumerating EVERY leaf, because Pi's alternate branches import as
-// nested conversations — live here.
+// The structural work is shared with `@cognia/agent-runtime-kit/history-dag`:
+// the active-leaf walk there already handles the two things that are easy to
+// get wrong (a cycle guard so a corrupt file cannot hang the importer, and
+// degradation to file order when no entry carries an id). That helper is
+// reused via a view object rather than reimplemented; only the parts Pi needs
+// and Claude does not — enumerating EVERY leaf, because Pi's alternate
+// branches import as nested conversations — live here.
 
-import { linearizeActiveLeaf, type DagNode } from "./claude-code-dag"
+import { linearizeActiveLeaf, type DagNode } from "@cognia/agent-runtime-kit/history-dag"
 
 /** The structural fields a Pi session entry contributes to the tree. */
 export interface PiEntryNode {

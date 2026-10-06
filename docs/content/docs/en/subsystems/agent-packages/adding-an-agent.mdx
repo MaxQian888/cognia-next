@@ -141,10 +141,12 @@ const acme = manager.getAdapterExtension(agentId, acmeControls)
 ## 5. The history reader (when the runtime keeps sessions)
 
 `./history` turns file content into `ParsedHistorySession`
-(`packages/agent-contracts/src/history.ts:85`): neutral `HistoryPart`s, turn
+(`packages/agent-contracts/src/history.ts:87`): neutral `HistoryPart`s, turn
 usage, canonical state and an explicit list of what it dropped. Build parts
 with the runtime kit's `historyText` / `historyTool` / … helpers
-(`packages/agent-runtime-kit/src/history.ts`).
+(`packages/agent-runtime-kit/src/history.ts`). A format that stores a
+parent-linked tree (Claude Code, Pi) resolves its active branch with
+`@cognia/agent-runtime-kit/history-dag`.
 
 A reader never reads the filesystem, never builds host rows and never stores
 anything. Every diagnostic string passes through `HistoryReaderHost.redactText`

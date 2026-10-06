@@ -26,7 +26,7 @@ import {
   linearizeActiveLeaf,
   splitMainAndSidechain,
   type SidechainGroup,
-} from "./claude-code-dag"
+} from "@cognia/agent-runtime-kit/history-dag"
 import { buildSubagentSnapshot } from "./claude-code-subagent"
 import {
   buildMessage,

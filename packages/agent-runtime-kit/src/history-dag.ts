@@ -1,6 +1,8 @@
-// DAG helpers for Claude Code transcripts (ADR-0062 fidelity upgrade).
+// DAG helpers for parent-linked session transcripts (ADR-0062 fidelity upgrade,
+// shared by the history readers since ADR-0217).
 //
-// A `~/.claude/projects/*/…​.jsonl` transcript is NOT a flat list: every record
+// Claude Code and Pi both write transcripts that are trees, not lists. A
+// `~/.claude/projects/*/….jsonl` transcript is the motivating case: every record
 // carries a `uuid` and a `parentUuid`, forming a forest. Two things create
 // branches:
 //   • rewind + edit + re-run — the file keeps BOTH the abandoned continuation
@@ -12,9 +14,9 @@
 // These helpers resolve both structurally, independent of the message-content
 // mapping (they only read `uuid` / `parentUuid` / `isSidechain` / `timestamp`),
 // so they're pure and unit-testable with tiny fixtures. Generic over the record
-// type so the adapter passes its own `ClaudeLine` through unchanged.
+// type so a reader passes its own record type through unchanged.
 
-/** The structural fields these helpers need. `ClaudeLine` satisfies this. */
+/** The structural fields these helpers need; a reader's record type satisfies this. */
 export interface DagNode {
   uuid?: string
   parentUuid?: string | null

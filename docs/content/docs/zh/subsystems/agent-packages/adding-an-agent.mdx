@@ -124,9 +124,10 @@ const acme = manager.getAdapterExtension(agentId, acmeControls)
 ## 5. 历史读取器（运行时保存会话时）
 
 `./history` 把文件内容转换为 `ParsedHistorySession`
-（`packages/agent-contracts/src/history.ts:85`）：中立的 `HistoryPart`、回合用量、
+（`packages/agent-contracts/src/history.ts:87`）：中立的 `HistoryPart`、回合用量、
 规范状态，以及一份明确列出它丢弃了什么的清单。使用 runtime kit 的 `historyText` /
-`historyTool` / … 辅助函数构建 part（`packages/agent-runtime-kit/src/history.ts`）。
+`historyTool` / … 辅助函数构建 part（`packages/agent-runtime-kit/src/history.ts`）。以父链接树存储的格式（Claude Code、Pi）用
+`@cognia/agent-runtime-kit/history-dag` 解析当前分支。
 
 读取器从不读取文件系统，从不构建宿主行，也从不存储任何东西。每条诊断字符串都要经过
 `HistoryReaderHost.redactText`（必需）；无法映射的记录使用 `boundedDiagnostic`。

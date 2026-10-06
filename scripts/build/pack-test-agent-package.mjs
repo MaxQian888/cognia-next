@@ -98,12 +98,13 @@ const SPECS = {
       "./lf-frame-decoder",
       "./spawn-reclaim",
       "./history",
+      "./history-dag",
       "./plugin-compat",
       "./prompt-gate",
       "./elicitation",
       "./sse",
     ],
-    dataOnly: ["./history"],
+    dataOnly: ["./history", "./history-dag"],
     runtimeModules: ["base-adapter", "json-rpc-peer", "lf-frame-decoder", "spawn-reclaim"],
     smoke: `
       import { LfFrameDecoder } from "@cognia/agent-runtime-kit/lf-frame-decoder"
@@ -352,8 +353,18 @@ const SPECS = {
     `,
   },
   "agent-pi": {
-    entries: [".", "./manifest", "./rpc-client", "./rpc-peer", "./rpc-events", "./permission", "./auth"],
-    dataOnly: ["./manifest"],
+    entries: [
+      ".",
+      "./manifest",
+      "./history",
+      "./session-tree",
+      "./rpc-client",
+      "./rpc-peer",
+      "./rpc-events",
+      "./permission",
+      "./auth",
+    ],
+    dataOnly: ["./manifest", "./history", "./session-tree"],
     runtimeModules: ["rpc-client", "rpc-peer", "base-adapter", "spawn-reclaim", "prompt-gate"],
     smoke: `
       import { piManifest, PI_RPC_EXECUTION_SEMANTICS } from "@cognia/agent-pi/manifest"
@@ -374,6 +385,10 @@ const SPECS = {
       try { buildPiSystemPrompt({ systemPrompt: "x" }, () => false) } catch (error) { blocked = error instanceof PiOutboundBlockedError }
       if (!blocked) throw new Error("the gate must refuse a system prompt")
       if (decodePiToolPolicy(undefined).fallback !== "deny") throw new Error("permission")
+      import { readPiSession } from "@cognia/agent-pi/history"
+      const piFile = [JSON.stringify({ type: "session", version: 3, id: "p1", cwd: "/w" }), JSON.stringify({ type: "message", id: "a", parentId: null, timestamp: "2026-01-01T00:00:00Z", message: { role: "user", content: "hi" } })].join("\\n")
+      const read = readPiSession(piFile, "p1.jsonl")
+      if (read.session.originalSessionId !== "p1" || read.session.messages[0]?.parts[0]?.type !== "text") throw new Error("history")
     `,
     types: `
       import { PiRpcClientAdapter, type PiHostServices } from "@cognia/agent-pi/rpc-client"
@@ -390,7 +405,11 @@ const SPECS = {
         isDisabled: () => false,
         resolvePiPackages: async () => [],
       })
-      export { adapter }
+      import { readPiSession, type ParsedPiHistory } from "@cognia/agent-pi/history"
+      import type { ParsedHistorySession } from "@cognia/agent-contracts/history"
+      const read: ParsedPiHistory = readPiSession("", "p.jsonl")
+      const main: ParsedHistorySession = read.session
+      export { adapter, main }
     `,
   },
   "agent-opencode": {

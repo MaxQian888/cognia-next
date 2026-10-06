@@ -133,7 +133,7 @@ Rules every package holds:
 | Codex | Done: `@cognia/agent-codex` (app-server adapter, history reader); native resume binds its configuration |
 | Plugin adapters | Done: read against the adapter core when created (`./plugin-compat`) |
 | Aider | Done: `@cognia/agent-aider` (CLI adapter over the process and file ports, history reader); per-turn semantics declared, so a cancelled Aider session is kept rather than retired |
-| Pi | Done: `@cognia/agent-pi` (RPC adapter, peer, event mapping, tool table, auth probes) over the process port plus `PiHostServices`; per-session semantics with a turn-scoped `abort`. The Pi session-history reader is still in `lib/session-import` |
+| Pi | Done: `@cognia/agent-pi` (RPC adapter, peer, event mapping, tool table, auth probes, session-history reader with its tree walk) over the process port plus `PiHostServices`; per-session semantics with a turn-scoped `abort` |
 | OpenCode | Done: `@cognia/agent-opencode` (V2 service adapter, events, session-owned launcher, discovery, session-history reader; the legacy server adapter, which Cognia does not register) over `AgentFetch`, the process port and a placement policy |
 | A2A | Done: `@cognia/agent-a2a` over `AgentFetch`; remote, task-scoped cancel. Cognia's own remote-host run plane stays in the app (scope decision in ADR-0217) |
 | ACP and Devin | Done: `@cognia/agent-acp` (client, wire codec, feature profile, permission input, ACP Registry v1, the per-conversation Devin adapter) over the process, file, terminal, fetch and WebSocket ports; a turn-scoped `session/cancel` is declared, so a cancelled ACP session is kept. Vendor quirks (Kimi, Cline, Qoder, Goose, Devin, OpenCode over ACP) are `AcpVendorProfile` data the client applies; a host can supply its own profiles |

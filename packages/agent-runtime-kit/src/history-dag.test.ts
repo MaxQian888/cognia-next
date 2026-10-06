@@ -1,11 +1,11 @@
-// DAG-resolution tests for the Claude Code transcript parser (ADR-0062).
+// DAG-resolution tests for the transcript DAG helpers (ADR-0062, ADR-0217).
 
 import {
   linearizeActiveLeaf,
   splitMainAndSidechain,
   extractSidechains,
   type DagNode,
-} from "./claude-code-dag"
+} from "./history-dag"
 
 interface Rec extends DagNode {
   tag?: string

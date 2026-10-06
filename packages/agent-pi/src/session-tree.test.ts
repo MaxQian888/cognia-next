@@ -1,4 +1,4 @@
-import { piActiveChain, piAlternateLeafIds, piChainToLeaf, piSessionTree } from "./pi-tree"
+import { piActiveChain, piAlternateLeafIds, piChainToLeaf, piSessionTree } from "./session-tree"
 
 interface Node {
   id?: string
