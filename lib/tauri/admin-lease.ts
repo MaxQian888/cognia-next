@@ -1,4 +1,5 @@
 import { transport } from "@/lib/tauri"
+import type { Transport } from "./transport-types"
 
 export interface HostAdminLease {
   token: string
@@ -53,13 +54,16 @@ export function hostConsentCodeFrom(error: unknown): string | null {
  * a fiction: the caller asserted its own confirmation and the host believed
  * it. The host now obtains the confirmation itself and refuses until it has
  * one — see ADR-0153 and `companion_api::host_consent`.
+ * An execution gesture may pass its captured host transport explicitly; the
+ * generic router intentionally refuses ambiguous remote host administration.
  */
 export async function issueHostAdminLease(
   operations: string[],
-  ttlSeconds = 10 * 60
+  ttlSeconds = 10 * 60,
+  target: Pick<Transport, "call"> = transport
 ): Promise<HostAdminLease> {
   try {
-    return await transport.call<HostAdminLease>("host_admin_lease_issue", {
+    return await target.call<HostAdminLease>("host_admin_lease_issue", {
       operations,
       ttlSeconds,
     })

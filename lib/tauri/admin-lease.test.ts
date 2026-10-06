@@ -1,4 +1,5 @@
 import { transport } from "@/lib/tauri"
+import type { Transport } from "./transport-types"
 import {
   HostConsentRequiredError,
   hostConsentCodeFrom,
@@ -61,6 +62,20 @@ describe("host admin lease", () => {
     const call = jest.spyOn(transport, "call").mockResolvedValue(undefined)
     await revokeHostAdminLeases()
     expect(call).toHaveBeenCalledWith("host_admin_lease_revoke")
+  })
+
+  it("requests consent only from an explicitly selected execution host", async () => {
+    const implicit = jest.spyOn(transport, "call")
+    const call = jest.fn().mockResolvedValue({ token: "remote-lease" })
+    const target = { call } as Pick<Transport, "call">
+    await expect(issueHostAdminLease(["team_run_start"], 120, target)).resolves.toEqual({
+      token: "remote-lease",
+    })
+    expect(call).toHaveBeenCalledWith("host_admin_lease_issue", {
+      operations: ["team_run_start"],
+      ttlSeconds: 120,
+    })
+    expect(implicit).not.toHaveBeenCalled()
   })
 })
 

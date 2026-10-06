@@ -17,13 +17,28 @@ const executeRunControlCommand = jest.fn()
 jest.mock("@/lib/execution/run-control", () => ({
   executeRunControlCommand: (...args: unknown[]) => executeRunControlCommand(...args),
 }))
-let remoteHostActive = false
-jest.mock("@/lib/tauri/transport-routing", () => ({
-  isRemoteHostActive: () => remoteHostActive,
+import {
+  RoutingTransport,
+  setActiveRemoteTransport,
+  __resetRoutingForTests,
+} from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
+jest.mock("@/lib/perf/operation-performance", () => ({
+  measureOperation: (_name: string, callback: () => Promise<unknown>) => callback(),
 }))
+let configGeneration = 0
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  getCompanionConfigGeneration: () => configGeneration,
+}))
+const localCall = jest.fn()
+const remoteTransport = {
+  call: (...args: unknown[]) => transportCall(...args),
+  subscribe: () => () => {},
+} as Transport
+let routedTransport: RoutingTransport
 const transportCall = jest.fn()
 jest.mock("@/lib/tauri/transport-instance", () => ({
-  transport: { call: (...args: unknown[]) => transportCall(...args) },
+  transport: { call: (...args: Parameters<Transport["call"]>) => routedTransport.call(...args) },
 }))
 
 function storedRun(allowedActions: RunControlAction[], pendingInterruptId?: string): ExecutionRun {
@@ -66,11 +81,17 @@ const press = (over: Partial<RunControlDispatch> = {}): RunControlDispatch => ({
 })
 
 beforeEach(() => {
-  remoteHostActive = false
+  __resetRoutingForTests()
+  configGeneration = 0
+  localCall.mockReset()
+  routedTransport = new RoutingTransport({ call: localCall, subscribe: () => () => {} })
+  jest.mocked(issueHostAdminLease).mockReset()
   getExecutionRun.mockReset()
   executeRunControlCommand.mockReset().mockResolvedValue({ accepted: true })
   transportCall.mockReset()
 })
+
+afterEach(() => __resetRoutingForTests())
 
 describe("dispatchRunControl", () => {
   it("decides the approval the surface named, keyed by surface and fresh revision", async () => {
@@ -134,14 +155,25 @@ describe("dispatchRunControl", () => {
   })
 
   it("sends the command to an active remote host with a fresh lease", async () => {
-    remoteHostActive = true
+    setActiveRemoteTransport(remoteTransport)
     getExecutionRun.mockResolvedValue(storedRun(["stop"]))
-    ;(issueHostAdminLease as jest.Mock).mockResolvedValue({ token: "lease" })
-    transportCall.mockResolvedValue({ accepted: false, reason: "revision_conflict" })
+    jest
+      .mocked(issueHostAdminLease)
+      .mockImplementation(jest.requireActual("@/lib/tauri/admin-lease").issueHostAdminLease)
+    transportCall.mockImplementation(async (command) =>
+      command === "host_admin_lease_issue"
+        ? { token: "lease" }
+        : { accepted: false, reason: "revision_conflict" }
+    )
     await expect(dispatchRunControl(press({ action: "stop" }))).resolves.toEqual({
       accepted: false,
       reason: "revision_conflict",
     })
+    expect(transportCall).toHaveBeenCalledWith("host_admin_lease_issue", {
+      operations: ["execution_run_control"],
+      ttlSeconds: 120,
+    })
+    expect(localCall).not.toHaveBeenCalled()
     expect(transportCall).toHaveBeenCalledWith(
       "execution_run_control",
       expect.objectContaining({ adminLease: "lease", action: "stop" })
@@ -150,7 +182,7 @@ describe("dispatchRunControl", () => {
   })
 
   it("reports consent and transport failures as their own reasons", async () => {
-    remoteHostActive = true
+    setActiveRemoteTransport(remoteTransport)
     getExecutionRun.mockResolvedValue(storedRun(["stop"]))
     ;(issueHostAdminLease as jest.Mock).mockRejectedValue(
       new HostConsentRequiredError("consent", "ABC")
@@ -160,7 +192,7 @@ describe("dispatchRunControl", () => {
       reason: "host_consent_required",
       consentCode: "ABC",
     })
-    remoteHostActive = false
+    setActiveRemoteTransport(null)
     getExecutionRun.mockRejectedValue(new Error("db closed"))
     await expect(dispatchRunControl(press())).resolves.toEqual({
       accepted: false,
@@ -168,3 +200,23 @@ describe("dispatchRunControl", () => {
     })
   })
 })
+
+it.each(["selection", "pairing"])(
+  "refuses a host %s change while awaiting consent",
+  async (change) => {
+    setActiveRemoteTransport(remoteTransport)
+    getExecutionRun.mockResolvedValue(storedRun(["stop"]))
+    jest.mocked(issueHostAdminLease).mockImplementation(async () => {
+      if (change === "selection") setActiveRemoteTransport(null)
+      else configGeneration += 1
+      return { token: "stale", operations: ["execution_run_control"], expiresAt: 1 }
+    })
+    await expect(dispatchRunControl(press({ action: "stop" }))).resolves.toEqual({
+      accepted: false,
+      reason: "control_failed",
+    })
+    expect(transportCall).not.toHaveBeenCalled()
+    expect(localCall).not.toHaveBeenCalled()
+    expect(executeRunControlCommand).not.toHaveBeenCalled()
+  }
+)

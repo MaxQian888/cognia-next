@@ -40,7 +40,8 @@ import { localConsoleActor, localConsoleOperatorIds } from "@/lib/execution/loca
 import type { HostProfile } from "@/lib/platform/capabilities"
 import { HostConsentRequiredError, issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import { transport } from "@/lib/tauri/transport-instance"
-import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import { getCompanionConfigGeneration } from "@/lib/tauri/transport-companion"
 import type { ExecutionRun, RunControlAction, SquadReviewDecision } from "@/types/execution/run"
 
 /**
@@ -114,12 +115,19 @@ function outcomeFrom(result: RunControlResult): RunControlOutcome {
   }
 }
 
-function remoteControlHost(profile: HostProfile): boolean {
-  return profile === "mobile-companion" || profile === "cloud-companion" || isRemoteHostActive()
-}
-
 export async function dispatchRunControl(input: RunControlDispatch): Promise<RunControlOutcome> {
   const { action } = input
+  const initialTransport = transport
+  const initialRemote = getActiveRemoteTransport()
+  const configGeneration = getCompanionConfigGeneration()
+  const sameHost = () =>
+    transport === initialTransport &&
+    getActiveRemoteTransport() === initialRemote &&
+    getCompanionConfigGeneration() === configGeneration
+  const remoteHost =
+    input.hostProfile === "mobile-companion" ||
+    input.hostProfile === "cloud-companion" ||
+    initialRemote !== null
   try {
     const reviewing = action === "approve" || action === "deny"
     if (reviewing && input.reviewedRun && input.reviewedRun.id !== input.runId) {
@@ -156,12 +164,15 @@ export async function dispatchRunControl(input: RunControlDispatch): Promise<Run
       ...(input.steerMessage ? { steerMessage: input.steerMessage } : {}),
       ...(input.reviewDecision ? { reviewDecision: input.reviewDecision } : {}),
     }
-    if (remoteControlHost(input.hostProfile)) {
+    if (!sameHost()) return { accepted: false, reason: "control_failed" }
+    if (remoteHost) {
       const { actor: _actor, ...payload } = command
       // This dispatch is the explicit user gesture. Mint only for this command
       // and use it immediately; never pre-grant on render or retry.
-      const lease = await issueHostAdminLease(["execution_run_control"], 120)
-      const remote = (await transport.call("execution_run_control", {
+      const target = initialRemote ?? initialTransport
+      const lease = await issueHostAdminLease(["execution_run_control"], 120, target)
+      if (!sameHost()) return { accepted: false, reason: "control_failed" }
+      const remote = (await target.call("execution_run_control", {
         ...payload,
         adminLease: lease.token,
       })) as RunControlResult | { ok: false; reason: string } | null
