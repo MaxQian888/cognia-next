@@ -477,9 +477,9 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
     const { __setBrowserBridgeDepsForTests, __resetBrowserBridgeForTests } =
       await import("./browser")
     __resetBrowserBridgeForTests()
-    const invoke = jest.fn(async () => ({ pages: [] }))
+    const invokeTool = jest.fn(async () => ({ pages: [] }))
     __setBrowserBridgeDepsForTests({
-      invoke,
+      invokeTool,
       requestConsent: jest.fn(async () => true),
       isSurfaceVisible: () => true,
       revealPane: () => true,
@@ -490,7 +490,7 @@ describe("runOrchestrationExec (renderer dispatch entry for the sidecar path)", 
     expect(
       await runOrchestrationExec("browser_tool", { tool: "browser_pages", clientId: "mcp:a" })
     ).toEqual({ ok: true, result: { pages: [] } })
-    expect(invoke).toHaveBeenCalledWith(
+    expect(invokeTool).toHaveBeenCalledWith(
       "browser_pages",
       {},
       {
