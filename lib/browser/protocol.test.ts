@@ -201,6 +201,16 @@ describe("formatSelectionsComment", () => {
 })
 
 describe("normalizePreviewUrl", () => {
+  it.each([
+    "chrome-error://chromewebdata/",
+    "https://chrome-error//chromewebdata/",
+    "http://chrome-error//chromewebdata/",
+    "chrome-error//chromewebdata/",
+    "chrome://settings/",
+    "ftp://example.com/file",
+  ])("does not turn an internal or unsupported URL into a web address: %s", (input) => {
+    expect(normalizePreviewUrl(input)).toBeNull()
+  })
   it("defaults a bare local host to http://", () => {
     expect(normalizePreviewUrl("localhost:3000")).toBe("http://localhost:3000/")
     expect(normalizePreviewUrl("127.0.0.1:5173")).toBe("http://127.0.0.1:5173/")

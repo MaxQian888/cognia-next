@@ -15,3 +15,8 @@ it("does not add a third newline when the draft already ends with one", () => {
     "Existing draft\n\nTranslate this."
   )
 })
+
+it("replaces the draft only for an explicit replacement, including clearing it", () => {
+  expect(mergeComposerIntentPrompt("draft", "new", "replace")).toBe("new")
+  expect(mergeComposerIntentPrompt("draft", "", "replace")).toBe("")
+})

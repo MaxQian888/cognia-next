@@ -18,6 +18,7 @@ import {
   type PointerEvent,
   type ReactNode,
   useMemo,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -26,6 +27,7 @@ import { toast } from "sonner"
 
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
+import { BrowserLoadError } from "@/components/browser/browser-load-error"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
 import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
@@ -233,6 +235,9 @@ export function RemoteBrowserPreview({
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const [lease, setLease] = useState<RemoteBrowserLease | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  const [navigationFailure, setNavigationFailure] = useState<string | null>(null)
+  const navigationAttemptRef = useRef(0)
+  const urlInputRef = useRef<HTMLInputElement>(null)
   /** Why the runtime is not usable, straight from the gateway. */
   const [runtimeReason, setRuntimeReason] = useState<string | null>(null)
   /** Whether the dock's readouts are on screen; polling slows while they are not. */
@@ -364,7 +369,14 @@ export function RemoteBrowserPreview({
           enabled: status?.enabled ?? true,
           healthy: status?.healthy ?? true,
         })
-        if (initialUrl) await engine.navigate(initialUrl)
+        if (initialUrl) {
+          try {
+            await engine.navigate(initialUrl)
+          } catch {
+            // The runtime can still connect and offer navigation recovery.
+            if (!disposed) setNavigationFailure(initialUrl)
+          }
+        }
         const currentPages = await engine.listPages()
         if (disposed) return
         setPages(currentPages)
@@ -446,7 +458,7 @@ export function RemoteBrowserPreview({
     pushHistory,
   ])
 
-  const refreshPages = async () => {
+  const refreshPages = useCallback(async () => {
     const next = await engineRef.current?.listPages()
     if (!next) return
     setPages(next)
@@ -456,7 +468,35 @@ export function RemoteBrowserPreview({
       setUrlInput(active.url)
       pushHistory(active.url)
     }
-  }
+  }, [pushHistory])
+
+  const runNavigation = useCallback(
+    async (url: string, work: () => Promise<unknown>, refresh = true) => {
+      const attempt = ++navigationAttemptRef.current
+      setNavigationFailure(null)
+      try {
+        await work()
+        if (attempt !== navigationAttemptRef.current) return
+        if (refresh) await refreshPages()
+        else pushHistory(url)
+      } catch (error) {
+        if (attempt !== navigationAttemptRef.current) return
+        setNavigationFailure(url)
+        setErrorCode(error instanceof Error ? error.message : "browser_navigation_failed")
+      }
+    },
+    [refreshPages, pushHistory]
+  )
+
+  const navigatePage = useCallback(
+    async (url: string) => {
+      const current = engineRef.current
+      if (!current) return
+      setUrlInput(url)
+      await runNavigation(url, () => current.navigate(url))
+    },
+    [runNavigation]
+  )
 
   // Follow an address the host states. Recorded during render so the toolbar
   // shows it on the same frame the panel appears, then navigated once an engine
@@ -490,35 +530,27 @@ export function RemoteBrowserPreview({
     if (!appliedRequestedUrl || !engine) return
     if (deliveredKeyRef.current === appliedKey) return
     deliveredKeyRef.current = appliedKey
-    void engine
-      .navigate(appliedRequestedUrl)
-      .then(() => {
-        pushHistory(appliedRequestedUrl)
-      })
-      .catch((error: unknown) =>
-        setErrorCode(error instanceof Error ? error.message : "browser_navigation_failed")
-      )
+    void runNavigation(appliedRequestedUrl, () => engine.navigate(appliedRequestedUrl), false)
     // `appliedKey` is the dependency that makes a repeat of the same address
     // re-run this effect. `appliedRequestedUrl` alone would not change.
-  }, [appliedKey, appliedRequestedUrl, engine, pushHistory])
+  }, [appliedKey, appliedRequestedUrl, engine, runNavigation])
 
   const navigate = async (event: FormEvent) => {
     event.preventDefault()
     if (!urlInput.trim()) return
-    try {
-      await engineRef.current?.navigate(urlInput.trim())
-      await refreshPages()
-    } catch (error) {
-      setErrorCode(error instanceof Error ? error.message : "browser_navigation_failed")
-    }
+    await navigatePage(urlInput.trim())
   }
 
   const switchPage = async (pageId: string) => {
+    navigationAttemptRef.current += 1
+    setNavigationFailure(null)
     await engineRef.current?.activatePage(pageId)
     await refreshPages()
   }
 
   const closePage = async (pageId: string) => {
+    navigationAttemptRef.current += 1
+    setNavigationFailure(null)
     await engineRef.current?.closePage(pageId)
     await refreshPages()
   }
@@ -534,13 +566,7 @@ export function RemoteBrowserPreview({
     void engineRef.current?.findClear().catch(() => {})
   }
   const navigateHistory = (url: string) => {
-    setUrlInput(url)
-    void engineRef.current
-      ?.navigate(url)
-      .then(refreshPages)
-      .catch((error) =>
-        setErrorCode(error instanceof Error ? error.message : "browser_navigation_failed")
-      )
+    void navigatePage(url)
   }
 
   const captureToChat = async () => {
@@ -676,6 +702,7 @@ export function RemoteBrowserPreview({
           toolbarRef={toolbarRef}
           loading={connection === "connecting" || connection === "reconnecting"}
           url={urlInput}
+          urlInputRef={urlInputRef}
           onUrlChange={setUrlInput}
           onSubmit={(event) => void navigate(event)}
           addressDisplay={
@@ -712,24 +739,20 @@ export function RemoteBrowserPreview({
               backDisabled={!canGoBack}
               forwardDisabled={!canGoForward}
               onBack={() => {
-                if (!historyGoBack()) return
-                void engineRef.current
-                  ?.back()
-                  .then(refreshPages)
-                  .catch(() => {})
+                const url = historyGoBack()
+                const current = engineRef.current
+                if (url && current) void runNavigation(url, () => current.back())
               }}
               onForward={() => {
-                if (!historyGoForward()) return
-                void engineRef.current
-                  ?.forward()
-                  .then(refreshPages)
-                  .catch(() => {})
+                const url = historyGoForward()
+                const current = engineRef.current
+                if (url && current) void runNavigation(url, () => current.forward())
               }}
               onReload={() => {
-                void engineRef.current
-                  ?.reload()
-                  .then(refreshPages)
-                  .catch(() => {})
+                const current = engineRef.current
+                if (navigationFailure) void navigatePage(navigationFailure)
+                else if (current)
+                  void runNavigation(activePage?.url ?? urlInput, () => current.reload())
               }}
             />
           }
@@ -935,6 +958,16 @@ export function RemoteBrowserPreview({
                     ? t("runtimeUnavailable", { reason: runtimeReason })
                     : t("waiting")}
               </p>
+            </div>
+          )}
+          {connection === "connected" && navigationFailure && (
+            <div className="absolute inset-0">
+              <BrowserLoadError
+                url={navigationFailure}
+                onRetry={() => void navigatePage(navigationFailure)}
+                onEditAddress={() => urlInputRef.current?.focus()}
+                onOpenExternal={() => void openExternal(navigationFailure)}
+              />
             </div>
           )}
           {selection && (

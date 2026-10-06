@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { toast } from "sonner"
 
 import { BrowserWebFallback } from "./browser-web-fallback"
@@ -34,6 +34,35 @@ jest.mock("@/hooks/browser/use-recent-pages", () => ({
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 describe("BrowserWebFallback", () => {
+  it("offers recovery for an embed that is blank despite firing load", () => {
+    render(<BrowserWebFallback initialUrl="https://blocked.example/" />)
+    const frame = screen.getByTitle("browser.webFallback.frameTitle")
+    fireEvent.load(frame)
+    fireEvent.click(screen.getByRole("button", { name: "browser.loadError.frameHelp" }))
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("browser.loadError.frameHint")
+    expect(frame).not.toBeVisible()
+    fireEvent.click(within(alert).getByRole("button", { name: "browser.actions.openExternal" }))
+    expect(openExternal).toHaveBeenCalledWith("https://blocked.example/")
+    fireEvent.click(within(alert).getByRole("button", { name: "browser.loadError.retry" }))
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).not.toBe(frame)
+  })
+
+  it("offers a timeout state and can reveal an unconfirmed page", () => {
+    jest.useFakeTimers()
+    try {
+      render(<BrowserWebFallback initialUrl="https://slow.example/" />)
+      act(() => jest.advanceTimersByTime(20_000))
+      expect(screen.getByRole("alert")).toHaveTextContent("browser.loadError.timeoutTitle")
+      fireEvent.click(screen.getByRole("button", { name: "browser.loadError.continue" }))
+      expect(screen.queryByRole("alert")).toBeNull()
+      expect(screen.getByTitle("browser.webFallback.frameTitle")).toBeVisible()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
     mockFrameViewportWidth = 1280

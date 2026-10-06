@@ -9,9 +9,10 @@ import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 /**
  * `idle` — no committed target; `loading` — a navigation is in flight;
- * `ready` — the current page has finished loading.
+ * `ready` — the page finished loading; `timeout` — completion is unconfirmed;
+ * `error` — the navigation or webview creation explicitly failed.
  */
-export type BrowserLoadPhase = "idle" | "loading" | "ready"
+export type BrowserLoadPhase = "idle" | "loading" | "ready" | "timeout" | "error"
 
 export interface UseBrowserLoading {
   phase: BrowserLoadPhase
@@ -21,9 +22,7 @@ export interface UseBrowserLoading {
    * The URL of the last settled document — the point at which a page has
    * genuinely been arrived at, which is what the back/forward stack keys off.
    * A redirect chain reports one `browser://navigated` per hop but settles
-   * once, so this collapses to the final address. Falls back to the committed
-   * target when the safety timeout settles without a signal, so the history
-   * menu is still populated for a page that never reports a load.
+   * once, so this collapses to the final address. A timeout is not a visit.
    */
   loadedUrl: string | null
   /**
@@ -32,16 +31,19 @@ export interface UseBrowserLoading {
    * doesn't change so the url-change effect can't infer a new load.
    */
   begin: () => void
+  fail: () => void
+  /** Reveal an unconfirmed page at the user's request without recording a visit. */
+  reveal: () => void
 }
 
 export interface UseBrowserLoadingOptions {
   /** The committed target URL (null when the pane is empty → idle). */
   url: string | null
+  /** A repeat request for the same address starts a new loading episode. */
+  navigateNonce?: number
   /**
-   * Force `ready` (and thus reveal) if no `browser://loaded` signal arrives in
-   * time — a page that blocks the sentinel navigation, or an SPA route change
-   * that never fires a full document load, must never leave the pane stuck on
-   * its loading placeholder.
+   * Offer recovery if no completion signal arrives. A healthy page can block
+   * that signal, so a timeout must not claim a known network failure.
    */
   settleTimeoutMs?: number
 }
@@ -58,52 +60,80 @@ const DEFAULT_SETTLE_TIMEOUT_MS = 20_000
  */
 export function useBrowserLoading({
   url,
+  navigateNonce = 0,
   settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS,
 }: UseBrowserLoadingOptions): UseBrowserLoading {
-  const [phase, setPhase] = useState<BrowserLoadPhase>(url ? "loading" : "idle")
-  const [hasPainted, setHasPainted] = useState(false)
-  const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
-  const [trackedUrl, setTrackedUrl] = useState<string | null>(url)
-  // Bumped on each new load episode so the safety-timeout effect re-arms.
-  const [loadSeq, setLoadSeq] = useState(0)
+  const [load, setLoad] = useState({
+    phase: (url ? "loading" : "idle") as BrowserLoadPhase,
+    hasPainted: false,
+    loadedUrl: null as string | null,
+    trackedUrl: url,
+    trackedNonce: navigateNonce,
+    sequence: 0,
+  })
+  const { phase, hasPainted, loadedUrl, sequence } = load
 
-  // Start loading whenever the committed target changes (typed URL, quick-open
-  // chip, redirect commit). React's "adjust state on prop change" pattern —
-  // done during render, not a setState-in-effect. Same-URL reloads / history
-  // navigations go through `begin()` since the url doesn't change for them.
-  if (url !== trackedUrl) {
-    setTrackedUrl(url)
-    if (url) {
-      setPhase("loading")
-      setLoadSeq((n) => n + 1)
-    } else {
-      setPhase("idle")
-      setHasPainted(false)
-      setLoadedUrl(null)
-    }
+  if (url !== load.trackedUrl || navigateNonce !== load.trackedNonce) {
+    setLoad({
+      ...load,
+      trackedUrl: url,
+      trackedNonce: navigateNonce,
+      phase: url ? "loading" : "idle",
+      hasPainted: url ? load.hasPainted : false,
+      loadedUrl: url ? load.loadedUrl : null,
+      sequence: sequence + 1,
+    })
   }
 
   const begin = useCallback(() => {
-    setPhase("loading")
-    setLoadSeq((n) => n + 1)
+    setLoad((current) => ({ ...current, phase: "loading", sequence: current.sequence + 1 }))
   }, [])
 
   const settle = useCallback((settledUrl: string | null) => {
-    setHasPainted(true)
-    setPhase("ready")
-    if (settledUrl) setLoadedUrl(settledUrl)
+    setLoad((current) =>
+      current.phase === "error" || current.phase === "idle"
+        ? current
+        : {
+            ...current,
+            phase: "ready",
+            hasPainted: true,
+            loadedUrl: settledUrl ?? current.loadedUrl,
+          }
+    )
   }, [])
 
-  // Safety timeout: a load episode that never receives a `browser://loaded`
-  // must still resolve, so the pane can't get stuck on its placeholder. Keyed
-  // on `loadSeq` so each new episode resets the deadline.
+  const fail = useCallback(() => {
+    setLoad((current) => ({ ...current, phase: "error", hasPainted: false }))
+  }, [])
+
+  const reveal = useCallback(() => {
+    setLoad((current) =>
+      current.phase !== "timeout"
+        ? current
+        : {
+            ...current,
+            phase: "ready",
+            hasPainted: true,
+          }
+    )
+  }, [])
+
+  // Stop the spinner without presenting an unconfirmed or failed load as ready.
   useEffect(() => {
     if (phase !== "loading") return
-    // No signal arrived: settle against the committed target so the pane is
-    // revealed and the history menu still learns where it went.
-    const timer = setTimeout(() => settle(url), settleTimeoutMs)
+    const timer = setTimeout(() => {
+      setLoad((current) =>
+        current.phase !== "loading" || current.sequence !== sequence
+          ? current
+          : {
+              ...current,
+              phase: "timeout",
+              hasPainted: false,
+            }
+      )
+    }, settleTimeoutMs)
     return () => clearTimeout(timer)
-  }, [phase, loadSeq, settleTimeoutMs, settle, url])
+  }, [phase, sequence, settleTimeoutMs])
 
   // Load-complete signal from the embedded page.
   useEffect(() => {
@@ -111,7 +141,7 @@ export function useBrowserLoading({
     let cancelled = false
     let unlisten: (() => void) | null = null
     void onTauriEvent<BrowserLoaded>(BROWSER_EVENTS.loaded, (payload) => {
-      if (!cancelled) settle(payload?.url ?? null)
+      if (!cancelled && payload?.paneId === "browser-embed") settle(payload.url ?? null)
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn
@@ -122,5 +152,5 @@ export function useBrowserLoading({
     }
   }, [settle])
 
-  return { phase, hasPainted, loadedUrl, begin }
+  return { phase, hasPainted, loadedUrl, begin, fail, reveal }
 }

@@ -340,6 +340,13 @@ export function isLocalHostname(hostname: string): boolean {
   )
 }
 
+/** Chromium's error document, including addresses corrupted by older normalization. */
+export function isBrowserErrorUrl(input: string): boolean {
+  return /^(?:chrome-error:|(?:https?:\/\/)?chrome-error\/+chromewebdata(?:[/?#]|$))/i.test(
+    input.trim()
+  )
+}
+
 /**
  * Normalize a user-typed address into a loadable http(s) URL. A bare host
  * defaults to `https://` for public hosts and `http://` for local/private ones
@@ -347,9 +354,12 @@ export function isLocalHostname(hostname: string): boolean {
  */
 export function normalizePreviewUrl(input: string): string | null {
   const trimmed = input.trim()
-  if (!trimmed) return null
+  if (!trimmed || isBrowserErrorUrl(trimmed)) return null
   try {
     if (/^https?:\/\//i.test(trimmed)) return new URL(trimmed).toString()
+    // Only bare hosts need a scheme. An explicit non-web scheme must not be
+    // reinterpreted as a hostname (e.g. chrome-error:// → https://chrome-error/).
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) return null
     const probe = new URL(`http://${trimmed}`)
     const scheme = isLocalHostname(probe.hostname) ? "http" : "https"
     return new URL(`${scheme}://${trimmed}`).toString()

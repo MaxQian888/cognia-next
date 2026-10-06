@@ -31,6 +31,7 @@ jest.mock("@/lib/browser/local-chromium-engine", () => ({
 
 import { configureLocalBrowserEngine } from "@/lib/browser/agent-engine"
 import { localBrowser, type LocalBrowserEvent } from "@/lib/browser/local-client"
+import { LocalChromiumEngine } from "@/lib/browser/local-chromium-engine"
 
 import { useLocalBrowserSession } from "./use-local-browser-session"
 
@@ -223,4 +224,22 @@ it("refreshes pages on demand", async () => {
   await waitFor(() => expect(result.current.state).toBe("ready"))
   await act(async () => result.current.refreshPages())
   expect(result.current.engine?.listPages).toHaveBeenCalledTimes(2)
+})
+
+it("recovers after editing an address whose initial navigation failed", async () => {
+  const factory = LocalChromiumEngine as jest.Mock
+  const implementation = factory.getMockImplementation()!
+  factory.mockImplementationOnce((...args) => {
+    const engine = implementation(...args)
+    engine.navigate.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"))
+    return engine
+  })
+  const { result } = renderSession()
+  await waitFor(() => expect(result.current.state).toBe("failed"))
+  await act(async () => {
+    await result.current.engine!.navigate("https://working.test/")
+    await result.current.refreshPages()
+  })
+  expect(result.current.state).toBe("ready")
+  expect(result.current.error).toBeNull()
 })

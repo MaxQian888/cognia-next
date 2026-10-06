@@ -341,6 +341,41 @@ test("clamps page zoom and re-applies it after navigation", async (t) => {
   await service.navigate("session-1", "http://localhost:3000/next")
 })
 
+test("page summaries retain the main-frame destination when Chromium commits an error document", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "session-1" })
+  t.after(() => service.closeSession("session-1"))
+  const page = chromium.launches[0].context.pages[0]
+  const destination = "http://localhost:8765/spa"
+  page.emit("request", {
+    isNavigationRequest: () => true,
+    frame: () => page.mainFrame,
+    url: () => destination,
+  })
+  // A child frame or a failed subresource must not replace the top-level address.
+  page.emit("request", {
+    isNavigationRequest: () => true,
+    frame: () => new FakeFrame(),
+    url: () => "https://iframe.example/",
+  })
+  page.emit("request", {
+    isNavigationRequest: () => false,
+    frame: () => page.mainFrame,
+    url: () => "https://cdn.example/script.js",
+  })
+  page._url = "chrome-error://chromewebdata/"
+  page.mainFrame._url = page._url
+  page.emit("framenavigated", page.mainFrame)
+  assert.equal((await service.listPages("session-1"))[0].url, destination)
+
+  await page.goto("http://localhost:8765/recovered#section")
+  page.emit("framenavigated", page.mainFrame)
+  assert.equal(
+    (await service.listPages("session-1"))[0].url,
+    "http://localhost:8765/recovered#section"
+  )
+})
+
 test("runs find-in-page via the injected helper, not the gated evaluate", async (t) => {
   const { service } = await fixture(t)
   await service.createSession({ id: "session-1", grants: ["app.example.com"] })

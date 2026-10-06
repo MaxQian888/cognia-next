@@ -6,7 +6,7 @@ import { listMessages } from "@/lib/db/messages"
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import { dispatchConversationToCodexApp } from "@/lib/native/codex-app-dispatch"
 import { materializeMessageMedia } from "@/lib/chat/media/normalize-message-media"
-import { openUrl } from "@/lib/native/opener"
+import { openCodexAppTask } from "@/lib/native/codex-app-control"
 import { dispatchSessionToCodexApp, returnSessionFromCodexApp } from "./dispatch-to-codex-app"
 
 jest.mock("@/lib/db/sessions", () => ({
@@ -23,7 +23,7 @@ jest.mock("@/lib/native/codex-app-dispatch", () => ({
 jest.mock("@/lib/chat/media/normalize-message-media", () => ({
   materializeMessageMedia: jest.fn(async (message: UIMessage) => message),
 }))
-jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
+jest.mock("@/lib/native/codex-app-control", () => ({ openCodexAppTask: jest.fn() }))
 
 const mockListMessages = listMessages as jest.MockedFunction<typeof listMessages>
 const mockResolveCwd = resolveEffectiveCwdForSession as jest.MockedFunction<
@@ -32,7 +32,7 @@ const mockResolveCwd = resolveEffectiveCwdForSession as jest.MockedFunction<
 const mockNativeDispatch = dispatchConversationToCodexApp as jest.MockedFunction<
   typeof dispatchConversationToCodexApp
 >
-const mockOpenUrl = openUrl as jest.MockedFunction<typeof openUrl>
+const mockOpenTask = openCodexAppTask as jest.MockedFunction<typeof openCodexAppTask>
 
 const session: ChatSession = {
   id: "session-1",
@@ -64,7 +64,7 @@ beforeEach(() => {
     threadId: "thread-1",
     deepLink: "codex://threads/thread-1",
   })
-  mockOpenUrl.mockResolvedValue(undefined)
+  mockOpenTask.mockResolvedValue({ threadId: "thread-1", deepLink: "codex://threads/thread-1" })
 })
 
 test("dispatches a role-preserving snapshot and opens the imported Codex task", async () => {
@@ -112,7 +112,7 @@ test("dispatches a role-preserving snapshot and opens the imported Codex task", 
       },
     ],
   })
-  expect(mockOpenUrl).toHaveBeenCalledWith("codex://threads/thread-1")
+  expect(mockOpenTask).toHaveBeenCalledWith("thread-1")
   expect(updateSession).toHaveBeenCalledWith("session-1", {
     codexHandoff: {
       threadId: "thread-1",
@@ -164,7 +164,7 @@ test("deduplicates simultaneous clicks but allows a later snapshot", async () =>
 
 test("persists the target before opening so an opener failure retains a recoverable binding", async () => {
   mockListMessages.mockResolvedValue([message("u1", "user", [{ type: "text", text: "Fix auth" }])])
-  mockOpenUrl.mockRejectedValueOnce(new Error("opener unavailable"))
+  mockOpenTask.mockRejectedValueOnce(new Error("opener unavailable"))
   await expect(dispatchSessionToCodexApp(session)).rejects.toThrow("opener unavailable")
   expect(updateSession).toHaveBeenCalledWith("session-1", {
     codexHandoff: expect.objectContaining({ threadId: "thread-1" }),

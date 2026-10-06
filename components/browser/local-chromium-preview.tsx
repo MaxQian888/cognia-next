@@ -58,6 +58,7 @@ import {
 } from "@/components/browser/browser-devtools-panels"
 import { BrowserDownloadsButton } from "@/components/browser/browser-downloads-panel"
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
+import { BrowserLoadError } from "@/components/browser/browser-load-error"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
@@ -287,6 +288,8 @@ function LocalPreviewBody({
 
   const { canvasRef, frameSizeRef } = canvas
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const urlInputRef = useRef<HTMLInputElement>(null)
+  const navigationAttemptRef = useRef(0)
   const moveInFlightRef = useRef(false)
 
   const { engine, sessionId, pages, activePageId, state, refreshPages } = session
@@ -295,13 +298,22 @@ function LocalPreviewBody({
   const activePage =
     pages.find((page) => page.id === activePageId) ?? pages.find((page) => page.active)
   const ready = state === "ready" && !!engine
+  const [navigationFailure, setNavigationFailure] = useState<{
+    url: string
+    pageId: string | null
+  } | null>(null)
+  const pageFailure = navigationFailure?.pageId === activePageId ? navigationFailure : null
+  // Use the same destination as the error screen, including when an older
+  // runtime reports Chromium's internal error document as the active URL.
+  const pageUrl =
+    pageFailure?.url ?? (state === "failed" && engine ? initialUrl : undefined) ?? activePage?.url
 
   const [urlInput, setUrlInput] = useState(initialUrl ?? "")
   const [syncedUrl, setSyncedUrl] = useState<string | null>(null)
   const [editingUrl, setEditingUrl] = useState(false)
-  if (activePage?.url && activePage.url !== syncedUrl) {
-    setSyncedUrl(activePage.url)
-    if (!editingUrl) setUrlInput(activePage.url)
+  if (pageUrl && !pageUrl.startsWith("chrome-error:") && pageUrl !== syncedUrl) {
+    setSyncedUrl(pageUrl)
+    if (!editingUrl) setUrlInput(pageUrl)
   }
 
   const [zoom, setZoom] = useState(1)
@@ -390,7 +402,9 @@ function LocalPreviewBody({
   const go = useCallback(
     async (input: string) => {
       if (!engine) return
+      const attempt = ++navigationAttemptRef.current
       const resolved = await resolveBrowserAddress(input, "chromium")
+      if (attempt !== navigationAttemptRef.current) return
       if (resolved.kind === "invalid") {
         toast.error(browserT("errors.navigate"))
         return
@@ -399,15 +413,20 @@ function LocalPreviewBody({
         toast.error(tAddress("localFileFailed", { message: resolved.message }))
         return
       }
+      setNavigationFailure(null)
       setUrlInput(resolved.url)
       try {
         await engine.navigate(resolved.url)
+        if (attempt !== navigationAttemptRef.current) return
         await refreshPages()
       } catch (error) {
-        fail(error)
+        if (attempt === navigationAttemptRef.current) {
+          setNavigationFailure({ url: resolved.url, pageId: activePageId })
+          fail(error)
+        }
       }
     },
-    [engine, refreshPages, browserT, tAddress, fail]
+    [engine, refreshPages, browserT, tAddress, fail, activePageId]
   )
 
   // A host-stated address (a link clicked in the conversation), applied once
@@ -432,10 +451,17 @@ function LocalPreviewBody({
     void go(urlInput)
   }
 
-  const run = (work: () => Promise<unknown> | undefined) => {
+  const run = (work: () => Promise<unknown> | undefined, navigationUrl?: string) => {
+    const attempt = navigationUrl ? ++navigationAttemptRef.current : null
+    if (navigationUrl) setNavigationFailure(null)
     void Promise.resolve(work())
       .then(() => refreshPages())
-      .catch(fail)
+      .catch((error: unknown) => {
+        if (navigationUrl && attempt === navigationAttemptRef.current) {
+          setNavigationFailure({ url: navigationUrl, pageId: activePageId })
+        }
+        fail(error)
+      })
   }
 
   const captureToChat = async () => {
@@ -507,13 +533,12 @@ function LocalPreviewBody({
           toolbarRef={toolbarRef}
           loading={state === "starting"}
           url={urlInput}
+          urlInputRef={urlInputRef}
           onUrlChange={setUrlInput}
           onSubmit={submit}
           onUrlFocus={() => setEditingUrl(true)}
           onUrlBlur={() => setEditingUrl(false)}
-          addressDisplay={
-            urlInput === (activePage?.url ?? "") ? addressDisplayParts(urlInput) : null
-          }
+          addressDisplay={urlInput === (pageUrl ?? "") ? addressDisplayParts(urlInput) : null}
           collapsedActive={findOpen || zoom !== 1}
           overflowExtras={backendSwitcher}
           navigation={
@@ -522,14 +547,18 @@ function LocalPreviewBody({
               backDisabled={!canGoBack}
               forwardDisabled={!canGoForward}
               onBack={() => {
-                if (!historyGoBack()) return
-                run(() => engine?.back())
+                const url = historyGoBack()
+                if (url) run(() => engine?.back(), url)
               }}
               onForward={() => {
-                if (!historyGoForward()) return
-                run(() => engine?.forward())
+                const url = historyGoForward()
+                if (url) run(() => engine?.forward(), url)
               }}
-              onReload={() => run(() => engine?.reload())}
+              onReload={() =>
+                pageFailure
+                  ? void go(pageFailure.url)
+                  : run(() => engine?.reload(), activePage?.url)
+              }
             />
           }
           inspectActions={
@@ -617,9 +646,9 @@ function LocalPreviewBody({
               <TooltipIconButton
                 tooltip={actionsT("openExternal")}
                 aria-label={actionsT("openExternal")}
-                disabled={!activePage?.url}
+                disabled={!pageUrl || pageUrl.startsWith("chrome-error:")}
                 onClick={() => {
-                  if (activePage?.url) void openExternal(activePage.url)
+                  if (pageUrl) void openExternal(pageUrl)
                 }}
               >
                 <ExternalLinkIcon />
@@ -773,6 +802,20 @@ function LocalPreviewBody({
                 <BrowserEmptyState onOpen={(url) => void go(url)} recent={recentHistory} />
               </div>
             )}
+            {(ready || state === "failed") && pageFailure && (
+              <div className="absolute inset-0">
+                <BrowserLoadError
+                  url={pageFailure.url}
+                  onRetry={() => void go(pageFailure.url)}
+                  onEditAddress={() => urlInputRef.current?.focus()}
+                  onOpenExternal={
+                    /^https?:/i.test(pageFailure.url)
+                      ? () => void openExternal(pageFailure.url)
+                      : undefined
+                  }
+                />
+              </div>
+            )}
             {state === "starting" && (
               <div
                 className="absolute inset-0 flex items-center justify-center gap-2 bg-background/80 p-6 text-center"
@@ -785,22 +828,35 @@ function LocalPreviewBody({
                 </p>
               </div>
             )}
-            {(state === "failed" || state === "closed") && (
-              <div
-                className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center"
-                role="alert"
-              >
-                <MonitorXIcon className="size-6 text-muted-foreground" />
-                <p className="max-w-sm text-sm text-muted-foreground">
-                  {state === "failed"
-                    ? t("failed", { code: session.error ?? "browser_local_unavailable" })
-                    : t("closed")}
-                </p>
-                <Button size="sm" variant="outline" onClick={session.restart}>
-                  {t("restart")}
-                </Button>
-                {backendSwitcher && <div className="w-64 text-left">{backendSwitcher}</div>}
+            {!pageFailure && state === "failed" && engine && initialUrl ? (
+              <div className="absolute inset-0">
+                <BrowserLoadError
+                  url={initialUrl}
+                  onRetry={session.restart}
+                  onEditAddress={() => urlInputRef.current?.focus()}
+                  onOpenExternal={
+                    /^https?:/i.test(initialUrl) ? () => void openExternal(initialUrl) : undefined
+                  }
+                />
               </div>
+            ) : (
+              ((state === "failed" && !pageFailure) || state === "closed") && (
+                <div
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center"
+                  role="alert"
+                >
+                  <MonitorXIcon className="size-6 text-muted-foreground" />
+                  <p className="max-w-sm text-sm text-muted-foreground">
+                    {state === "failed"
+                      ? t("failed", { code: session.error ?? "browser_local_unavailable" })
+                      : t("closed")}
+                  </p>
+                  <Button size="sm" variant="outline" onClick={session.restart}>
+                    {t("restart")}
+                  </Button>
+                  {backendSwitcher && <div className="w-64 text-left">{backendSwitcher}</div>}
+                </div>
+              )
             )}
           </div>
           <BrowserInspectionRail

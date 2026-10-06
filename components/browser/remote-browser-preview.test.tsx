@@ -243,6 +243,28 @@ it("ensures a user-gated session and connects through a one-time ticket", async 
   })
 })
 
+it("shows failed navigation while connected and retries the same address", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  navigate.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"))
+  act(() => streamOptions?.onState?.("connected"))
+  const input = screen.getByRole("textbox", { name: "browser.url.placeholder" })
+  fireEvent.change(input, { target: { value: "https://failed.example/" } })
+  fireEvent.submit(input.closest("form")!)
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("https://failed.example/")
+  )
+  fireEvent.click(screen.getByRole("button", { name: "browser.loadError.retry" }))
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+  expect(navigate).toHaveBeenLastCalledWith("https://failed.example/")
+})
+
 it("follows an address the host states after connecting", async () => {
   const { rerender } = render(
     <RemoteBrowserPreview

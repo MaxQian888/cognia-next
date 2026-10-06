@@ -108,6 +108,7 @@ import {
 import { useLocalFileChooser } from "@/hooks/browser/use-local-file-chooser"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { localBrowser } from "@/lib/browser/local-client"
+import { openExternal } from "@/lib/tauri/opener"
 
 import { LocalChromiumPreview } from "./local-chromium-preview"
 
@@ -286,6 +287,73 @@ it("explains an address it cannot open", async () => {
     fireEvent.submit(input.closest("form") as HTMLFormElement)
   })
   expect(toast.error).toHaveBeenCalledWith("Could not open that local file: not_found")
+})
+
+it("keeps navigation failures visible and retries the failed address", async () => {
+  const session = makeSession()
+  const engine = session.engine as unknown as ReturnType<typeof makeEngine>
+  engine.navigate.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"))
+  resolveMock.mockResolvedValue({ kind: "url", url: "http://localhost:9999/", local: false })
+  renderPreview(session)
+  const input = screen.getByRole("textbox")
+  fireEvent.change(input, { target: { value: "http://localhost:9999/" } })
+  await act(async () => fireEvent.submit(input.closest("form") as HTMLFormElement))
+  expect(screen.getByRole("alert")).toHaveTextContent("localhost:9999")
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Try again" })))
+  expect(engine.navigate).toHaveBeenLastCalledWith("http://localhost:9999/")
+  expect(screen.queryByRole("alert")).toBeNull()
+})
+
+it("shows the latest failed address when editing an unsuccessful first load", async () => {
+  const session = makeSession({ state: "failed", error: "net::ERR_CONNECTION_REFUSED" })
+  const engine = session.engine as unknown as ReturnType<typeof makeEngine>
+  engine.navigate.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"))
+  resolveMock.mockResolvedValue({ kind: "url", url: "https://edited.test/", local: false })
+  renderPreview(session, { initialUrl: "https://initial.test/" })
+  const input = screen.getByRole("textbox")
+  fireEvent.change(input, { target: { value: "https://edited.test/" } })
+  await act(async () => fireEvent.submit(input.closest("form") as HTMLFormElement))
+  expect(screen.getAllByRole("alert")).toHaveLength(1)
+  expect(screen.getByRole("alert")).toHaveTextContent("https://edited.test/")
+  expect(screen.getByRole("alert")).not.toHaveTextContent("https://initial.test/")
+})
+
+it("keeps the failed destination in the address bar when Chromium reports its internal error page", () => {
+  renderPreview(
+    makeSession({
+      state: "failed",
+      error: "net::ERR_CONNECTION_REFUSED",
+      pages: [{ id: "p1", url: "chrome-error://chromewebdata/", title: "", active: true }],
+    }),
+    { initialUrl: "http://localhost:8765/spa" }
+  )
+  expect(screen.getByRole("alert")).toHaveTextContent("http://localhost:8765/spa")
+  expect(screen.getByRole("textbox")).toHaveValue("http://localhost:8765/spa")
+  fireEvent.click(screen.getAllByRole("button", { name: "Open in external browser" })[0])
+  expect(openExternal).toHaveBeenCalledWith("http://localhost:8765/spa")
+})
+
+it("ignores late error-page updates without replacing edits or another tab's address", async () => {
+  const session = makeSession()
+  const engine = session.engine as unknown as ReturnType<typeof makeEngine>
+  engine.navigate.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_REFUSED"))
+  resolveMock.mockResolvedValue({ kind: "url", url: "http://localhost:8765/spa", local: false })
+  const { rerender } = renderPreview(session)
+  const input = screen.getByRole("textbox")
+  fireEvent.change(input, { target: { value: "http://localhost:8765/spa" } })
+  await act(async () => fireEvent.submit(input.closest("form") as HTMLFormElement))
+  session.pages[0].url = "chrome-error://chromewebdata/"
+  rerender(<LocalChromiumPreview backend="local-chromium" />)
+  expect(input).toHaveValue("http://localhost:8765/spa")
+  fireEvent.click(screen.getByRole("button", { name: "Edit address" }))
+  fireEvent.change(input, { target: { value: "http://localhost:8765/fixed" } })
+  rerender(<LocalChromiumPreview backend="local-chromium" />)
+  expect(input).toHaveValue("http://localhost:8765/fixed")
+  fireEvent.blur(input)
+  session.activePageId = "p2"
+  rerender(<LocalChromiumPreview backend="local-chromium" />)
+  expect(input).toHaveValue("https://other.example/")
+  expect(screen.queryByRole("alert")).toBeNull()
 })
 
 it("follows a host-requested address once the session is ready", async () => {

@@ -102,7 +102,7 @@ let mockNavigated: BrowserNavigated | null = null
 let mockTauri = true
 let mockSelectMode = false
 let mockRect: ElementRect | null = { x: 0, y: 0, width: 100, height: 100 }
-let mockPhase: "idle" | "loading" | "ready" = "idle"
+let mockPhase: "idle" | "loading" | "ready" | "timeout" | "error" = "idle"
 let mockHasPainted = false
 const mockBeginLoad = jest.fn()
 let mockRegionVisible = true
@@ -228,6 +228,8 @@ jest.mock("@/hooks/browser/use-browser-loading", () => ({
     hasPainted: mockHasPainted,
     loadedUrl: mockLoadedUrl,
     begin: mockBeginLoad,
+    fail: jest.fn(),
+    reveal: jest.fn(),
   }),
 }))
 jest.mock("@/hooks/browser/use-region-visibility", () => ({
@@ -452,6 +454,36 @@ it("shows a localized error when the embedded WebView rejects an HTTPS proxy", (
   expect(toast.error).toHaveBeenCalledWith(
     "HTTPS proxying is not supported in this browser preview."
   )
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "HTTPS proxying is not supported in this browser preview."
+  )
+  expect(mockWebviewVisible).toBe(false)
+})
+
+it("retries a failed native page and clears the error for an edited address", async () => {
+  renderPane(<BrowserPreviewPane initialUrl="https://broken.test/" />)
+  act(() => mockWebviewErrorCallback?.(new Error("connection refused")))
+  const previousNonce = mockPaneNavigateNonce ?? 0
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+  expect(mockPaneUrl).toBe("https://broken.test/")
+  expect(mockPaneNavigateNonce).toBeGreaterThan(previousNonce)
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  act(() => mockWebviewErrorCallback?.(new Error("connection refused")))
+  fireEvent.click(screen.getByRole("button", { name: "Edit address" }))
+  expect(urlBar()).toHaveFocus()
+  commitUrl("https://working.test/")
+  await waitFor(() => expect(mockPaneUrl).toBe("https://working.test/"))
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})
+
+it("shows timeout recovery instead of a blank native webview", () => {
+  mockPhase = "timeout"
+  mockHasPainted = true
+  renderPane(<BrowserPreviewPane initialUrl="https://slow.test/" />)
+  expect(screen.getByRole("alert")).toHaveTextContent("This page is taking too long to load")
+  expect(screen.getByRole("button", { name: "Show page anyway" })).toBeInTheDocument()
+  expect(screen.queryByTestId("browser-loading")).not.toBeInTheDocument()
+  expect(mockWebviewVisible).toBe(false)
 })
 
 it("keeps the iframe and says why when the cloud browser has nothing to talk to", () => {
@@ -506,6 +538,21 @@ it("opens a caller-provided initial URL without requiring address-bar input", as
   await waitFor(() => expect(mockPaneUrl).toBe("http://localhost:4173/"))
   expect(urlBar()).toHaveValue("http://localhost:4173/")
 })
+
+it.each(["chrome-error://chromewebdata/", "https://chrome-error//chromewebdata/"])(
+  "does not forward an internal error address to the remote browser: %s",
+  (url) => {
+    mockTauri = false
+    mockRemoteBrowserEnabled = true
+    mockDefaultBackend = "remote"
+    renderPane(<BrowserPreviewPane initialUrl={url} requestedUrl={url} requestId={1} />)
+    const props = JSON.parse(
+      screen.getByTestId("remote-browser-preview").getAttribute("data-props") ?? "{}"
+    )
+    expect(props.initialUrl).toBeUndefined()
+    expect(props.requestedUrl).toBeUndefined()
+  }
+)
 
 it("persists the selected annotation detail level", () => {
   renderPane(<BrowserPreviewPane />)
@@ -604,12 +651,12 @@ it("renders the empty state and URL bar in Tauri", () => {
   expect(urlBar()).toBeInTheDocument()
 })
 
-it("keeps the toolbar on one row with the address bar taking the slack", () => {
+it("lets navigation wrap before squeezing the address below its readable width", () => {
   mockToolbarWidth = 320
   renderPane(<BrowserPreviewPane />)
 
-  expect(toolbar()).not.toHaveClass("flex-wrap")
-  expect(toolbar().querySelector("form")).toHaveClass("min-w-0", "flex-1")
+  expect(screen.getByTestId("browser-navigation-row")).toHaveClass("flex-wrap")
+  expect(toolbar().querySelector("form")).toHaveClass("min-w-[min(100%,10rem)]", "flex-1")
 })
 
 it("keeps every toolbar action inline on a wide pane", () => {

@@ -256,6 +256,8 @@ export function useLocalBrowserSession({
     const next = await engine.listPages()
     setPages(next)
     setActivePageId(next.find((page) => page.active)?.id ?? null)
+    setError(null)
+    setState((current) => (current === "failed" ? "ready" : current))
   }, [engine])
 
   const dismissDialog = useCallback(() => setDialog(null), [])

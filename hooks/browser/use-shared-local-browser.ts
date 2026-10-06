@@ -200,13 +200,30 @@ export function useSharedLocalBrowser({
 
   const refreshPages = useCallback(async () => {
     await refreshSharedPages()
+    if (mountedRef.current) setError(null)
   }, [])
 
   const restart = useCallback(() => {
     setError(null)
+    const url = initialUrlRef.current
+    if (error && status === "ready" && engine && url) {
+      // The page already exists after a failed first navigation. Merely bumping
+      // generation skips the !hasPage creation effect and never retries its URL.
+      setRestoring(true)
+      void engine
+        .navigate(url)
+        .then(refreshSharedPages)
+        .catch((cause: unknown) => {
+          if (mountedRef.current) setError(errorCode(cause))
+        })
+        .finally(() => {
+          if (mountedRef.current) setRestoring(false)
+        })
+      return
+    }
     setGeneration((value) => value + 1)
     void ensureSharedLocalBrowser().catch((cause: unknown) => setError(errorCode(cause)))
-  }, [])
+  }, [error, status, engine])
 
   const answerDialog = useCallback(
     async (answer: { accept: boolean; promptText?: string }) => {

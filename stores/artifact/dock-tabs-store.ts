@@ -36,6 +36,7 @@ import { persist } from "zustand/middleware"
 
 import { persistLocalStorage } from "@/stores/persist-storage"
 import { pruneByLastUsed } from "@/stores/context-workbench/context-workbench-store"
+import { isBrowserErrorUrl } from "@/lib/browser/protocol"
 
 /** A tab's identity across kinds: `panel:<panelId>`, `artifact:<artifactId>` or `page:<tabId>`. */
 export type DockTabKey = `panel:${string}` | `artifact:${string}` | `page:${string}`
@@ -187,12 +188,18 @@ function touch(
   )
 }
 
+function normalizePage(tab: DockPageTab): DockPageTab {
+  // Old builds could persist the error document itself. It contains no way to
+  // recover the requested URL, so preserve the tab as an editable New Tab.
+  return isBrowserErrorUrl(tab.url) ? { ...tab, url: "", title: "" } : tab
+}
+
 /** An entry as stored, filling what an older version of it did not have. */
 function normalizeEntry(entry: Partial<SessionDockTabs> | undefined, now: number): SessionDockTabs {
   return {
     ...EMPTY_ENTRY,
     ...entry,
-    pages: Array.isArray(entry?.pages) ? entry.pages : [],
+    pages: Array.isArray(entry?.pages) ? entry.pages.map(normalizePage) : [],
     activePageTabId: entry?.activePageTabId ?? null,
     lastUsedAt: entry?.lastUsedAt ?? now,
   }
@@ -256,13 +263,14 @@ export const useDockTabsStore = create<DockTabsState>()(
             return {
               ...entry,
               order,
-              pages: [...entry.pages.filter((page) => page.id !== tab.id), tab],
+              pages: [...entry.pages.filter((page) => page.id !== tab.id), normalizePage(tab)],
               activePageTabId: options.activate ? tab.id : (entry.activePageTabId ?? tab.id),
             }
           }),
         })),
       updatePageTab: (sessionId, tabId, patch) =>
         set((state) => {
+          if (patch.url !== undefined && isBrowserErrorUrl(patch.url)) return state
           const page = state.bySession[sessionId]?.pages?.find((entry) => entry.id === tabId)
           if (!page) return state
           if (

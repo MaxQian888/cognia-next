@@ -108,6 +108,41 @@ function renderPane(options: Partial<Parameters<typeof useSharedLocalBrowser>[0]
 }
 
 describe("a dock page tab", () => {
+  it("clears a failed first load after navigating to an edited address", async () => {
+    const rpc = client.rpc.getMockImplementation()!
+    client.rpc.mockImplementation(async (op, payload) => {
+      if (op === "browser.navigate" && payload.url === "https://broken.test/") {
+        throw new Error("net::ERR_CONNECTION_REFUSED")
+      }
+      return rpc(op, payload)
+    })
+    const { result } = renderPane({ tag: "t1", initialUrl: "https://broken.test/" })
+    await waitFor(() => expect(result.current.state).toBe("failed"))
+    await act(async () => {
+      await result.current.engine!.navigate("https://working.test/")
+      await result.current.refreshPages()
+    })
+    expect(result.current.state).toBe("ready")
+    expect(result.current.error).toBeNull()
+  })
+
+  it("retries the address when a page was created but its first navigation failed", async () => {
+    const rpc = client.rpc.getMockImplementation()!
+    let failed = false
+    client.rpc.mockImplementation(async (op, payload) => {
+      if (op === "browser.navigate" && !failed) {
+        failed = true
+        throw new Error("net::ERR_CONNECTION_REFUSED")
+      }
+      return rpc(op, payload)
+    })
+    const { result } = renderPane({ tag: "t1", initialUrl: "https://retry.test/" })
+    await waitFor(() => expect(result.current.state).toBe("failed"))
+    act(() => result.current.restart())
+    await waitFor(() => expect(result.current.state).toBe("ready"))
+    expect(client.rpc.mock.calls.filter(([op]) => op === "browser.navigate")).toHaveLength(2)
+  })
+
   it("reopens the tab's page at its address, showing it as restoring meanwhile", async () => {
     const { result } = renderPane({ tag: "t1", initialUrl: "https://slow.test/" })
     await waitFor(() => expect(result.current.restoring).toBe(true))

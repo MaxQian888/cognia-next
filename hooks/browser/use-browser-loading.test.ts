@@ -73,7 +73,7 @@ it("re-enters loading on begin() but stays painted", async () => {
   expect(result.current.phase).toBe("loading")
 })
 
-it("force-settles when no loaded signal arrives before the timeout", () => {
+it("offers recovery without claiming a successful visit when loading times out", () => {
   jest.useFakeTimers()
   try {
     const { result } = renderHook(() =>
@@ -83,11 +83,47 @@ it("force-settles when no loaded signal arrives before the timeout", () => {
     act(() => {
       jest.advanceTimersByTime(5000)
     })
+    expect(result.current.phase).toBe("timeout")
+    expect(result.current.hasPainted).toBe(false)
+    expect(result.current.loadedUrl).toBeNull()
+    act(() => result.current.reveal())
     expect(result.current.phase).toBe("ready")
     expect(result.current.hasPainted).toBe(true)
+    expect(result.current.loadedUrl).toBeNull()
   } finally {
     jest.useRealTimers()
   }
+})
+
+it("keeps an explicit failure until retry and ignores late completion", async () => {
+  const { result } = renderHook(() => useBrowserLoading({ url: "http://a/" }))
+  await waitFor(() => expect(mockListeners[BROWSER_EVENTS.loaded]).toBeDefined())
+  act(() => result.current.fail())
+  emitLoaded()
+  expect(result.current.phase).toBe("error")
+  expect(result.current.hasPainted).toBe(false)
+  expect(result.current.loadedUrl).toBeNull()
+  act(() => result.current.begin())
+  emitLoaded()
+  expect(result.current.phase).toBe("ready")
+})
+
+it("ignores another pane's completion signal", async () => {
+  const { result } = renderHook(() => useBrowserLoading({ url: "http://a/" }))
+  await waitFor(() => expect(mockListeners[BROWSER_EVENTS.loaded]).toBeDefined())
+  act(() => mockListeners[BROWSER_EVENTS.loaded]?.({ paneId: "other", url: "http://other/" }))
+  expect(result.current.phase).toBe("loading")
+})
+
+it("starts a fresh loading episode for another request of the same address", () => {
+  const { result, rerender } = renderHook(
+    ({ navigateNonce }) => useBrowserLoading({ url: "https://same.test/", navigateNonce }),
+    { initialProps: { navigateNonce: 0 } }
+  )
+  act(() => result.current.fail())
+  rerender({ navigateNonce: 1 })
+  expect(result.current.phase).toBe("loading")
+  expect(result.current.hasPainted).toBe(false)
 })
 
 it("returns to idle and forgets painting when the url clears", async () => {

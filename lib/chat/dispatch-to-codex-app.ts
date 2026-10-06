@@ -15,7 +15,7 @@ import {
   dispatchConversationToCodexApp,
   type CodexAppDispatchMessage,
 } from "@/lib/native/codex-app-dispatch"
-import { openUrl } from "@/lib/native/opener"
+import { openCodexAppTask } from "@/lib/native/codex-app-control"
 
 export type CodexAppDispatchErrorCode =
   "NO_CWD" | "NO_USER_MESSAGE" | "UNTRANSFERABLE_CONTENT" | "TARGET_NOT_FOUND" | "PII_BLOCKED"
@@ -164,7 +164,7 @@ async function createAndOpenSnapshot(session: ChatSession): Promise<{ threadId: 
         : {}),
     },
   })
-  await openUrl(result.deepLink)
+  await openCodexAppTask(result.threadId)
   return { threadId: result.threadId }
 }
 

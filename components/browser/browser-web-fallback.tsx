@@ -3,10 +3,11 @@
 import { ExternalLinkIcon } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { type FormEvent, useRef, useState } from "react"
+import { type FormEvent, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
+import { BrowserLoadError } from "@/components/browser/browser-load-error"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
 import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
@@ -71,6 +72,7 @@ export function BrowserWebFallback({
 }: BrowserWebFallbackProps) {
   const t = useTranslations("browser")
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const urlInputRef = useRef<HTMLInputElement>(null)
   const frameViewportRef = useRef<HTMLDivElement>(null)
   const frameViewportWidth = useElementWidth(frameViewportRef)
   const pageScale =
@@ -96,9 +98,26 @@ export function BrowserWebFallback({
    * progress at all while the other two drew the toolbar's bar.
    */
   const [loading, setLoading] = useState(!!normalizedInitialUrl)
+  const [frameIssue, setFrameIssue] = useState<"error" | "timeout" | null>(null)
+  useEffect(() => {
+    if (!loading) return
+    const timer = setTimeout(() => {
+      setLoading(false)
+      setFrameIssue("timeout")
+    }, 20_000)
+    return () => clearTimeout(timer)
+  }, [loading, currentUrl, reloadKey])
+
+  const reload = () => {
+    setFrameIssue(null)
+    setReloadKey((key) => key + 1)
+    setLoading(true)
+  }
 
   /** Open a brand-new address (quick-open chip): a push, not a traversal. */
   const goToNew = (url: string) => {
+    setFrameIssue(null)
+    if (url === currentUrl) setReloadKey((key) => key + 1)
     push(url)
     setCurrentUrl(url)
     setDraftUrl(url)
@@ -129,6 +148,7 @@ export function BrowserWebFallback({
 
   const goTo = (url: string | null) => {
     if (!url) return
+    setFrameIssue(null)
     setCurrentUrl(url)
     setDraftUrl(url)
     setLoading(true)
@@ -155,6 +175,7 @@ export function BrowserWebFallback({
         <BrowserToolbar
           toolbarRef={toolbarRef}
           url={draftUrl}
+          urlInputRef={urlInputRef}
           onUrlChange={setDraftUrl}
           onSubmit={navigate}
           addressDisplay={draftUrl === currentUrl ? addressDisplayParts(draftUrl) : null}
@@ -166,10 +187,7 @@ export function BrowserWebFallback({
               reloadDisabled={!currentUrl}
               onBack={() => goTo(goBack())}
               onForward={() => goTo(goForward())}
-              onReload={() => {
-                setReloadKey((key) => key + 1)
-                setLoading(true)
-              }}
+              onReload={reload}
             />
           }
           inspectActions={
@@ -201,6 +219,21 @@ export function BrowserWebFallback({
             </Button>
           )}
         </div>
+        {currentUrl && !frameIssue && (
+          <div className="flex shrink-0 justify-end border-b px-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-auto whitespace-normal py-1 text-xs"
+              onClick={() => {
+                setLoading(false)
+                setFrameIssue("error")
+              }}
+            >
+              {t("loadError.frameHelp")}
+            </Button>
+          </div>
+        )}
         <div
           ref={frameViewportRef}
           className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
@@ -212,7 +245,7 @@ export function BrowserWebFallback({
             className="absolute left-0 top-0 max-w-none bg-background"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
             src={currentUrl || undefined}
-            hidden={!currentUrl}
+            hidden={!currentUrl || !!frameIssue}
             style={{
               width: `${100 / pageScale}%`,
               height: `${100 / pageScale}%`,
@@ -220,9 +253,28 @@ export function BrowserWebFallback({
               transformOrigin: "top left",
             }}
             title={t("webFallback.frameTitle")}
-            onLoad={() => setLoading(false)}
-            onError={() => setLoading(false)}
+            onLoad={() => {
+              setLoading(false)
+              setFrameIssue((issue) => (issue === "timeout" ? null : issue))
+            }}
+            onError={() => {
+              setLoading(false)
+              setFrameIssue("error")
+            }}
           />
+          {currentUrl && frameIssue && (
+            <div className="absolute inset-0">
+              <BrowserLoadError
+                url={currentUrl}
+                timedOut={frameIssue === "timeout"}
+                message={frameIssue === "error" ? t("loadError.frameHint") : undefined}
+                onRetry={reload}
+                onEditAddress={() => urlInputRef.current?.focus()}
+                onOpenExternal={() => void openExternal(currentUrl)}
+                onContinue={() => setFrameIssue(null)}
+              />
+            </div>
+          )}
         </div>
       </WebPreview>
     </TooltipProvider>

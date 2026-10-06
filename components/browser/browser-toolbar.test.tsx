@@ -60,6 +60,32 @@ describe("toolbarTier", () => {
 })
 
 describe("BrowserToolbar packing", () => {
+  it.each([300, 500, 680, 800])("reserves the address row for navigation at %ipx", (width) => {
+    mockWidth = width
+    renderToolbar({ trailing: <button type="button">take control</button> })
+    const addressRow = screen.getByTestId("browser-navigation-row")
+    expect(within(addressRow).getByRole("textbox")).toBeInTheDocument()
+    expect(within(addressRow).getByRole("button", { name: "nav" })).toBeInTheDocument()
+    expect(within(addressRow).queryByRole("button", { name: "take control" })).toBeNull()
+    expect(within(addressRow).queryByText("inspect")).toBeNull()
+    expect(within(addressRow).queryByText("page")).toBeNull()
+    expect(
+      within(screen.getByTestId("browser-tools-row")).getByText("take control")
+    ).toBeInTheDocument()
+  })
+
+  it("does not offer an empty overflow menu when all actions are visible", () => {
+    mockWidth = 800
+    renderToolbar({ overflowExtras: undefined })
+    expect(screen.queryByTestId("browser-toolbar-more")).toBeNull()
+  })
+
+  it("omits the tools row for navigation-only surfaces", () => {
+    renderToolbar({ inspectActions: undefined, pageActions: undefined, overflowExtras: undefined })
+    expect(screen.getByRole("textbox")).toBeInTheDocument()
+    expect(screen.queryByTestId("browser-tools-row")).toBeNull()
+  })
+
   it("keeps every control inline when wide", () => {
     mockWidth = 800
     renderToolbar()
@@ -110,9 +136,43 @@ describe("BrowserToolbar packing", () => {
     )
     expect(screen.getByTestId("browser-toolbar-more-active")).toBeInTheDocument()
   })
+
+  it("preserves the address draft and every action when the panel is resized", () => {
+    const props = {
+      navigation: <button type="button">nav</button>,
+      inspectActions: <button type="button">inspect</button>,
+      pageActions: <button type="button">page</button>,
+      url: "https://example.com/unfinished-draft",
+      onUrlChange: jest.fn(),
+      onSubmit: jest.fn(),
+    }
+    const { rerender } = renderToolbar(props)
+    for (const width of [280, 460, 680, 320]) {
+      mockWidth = width
+      rerender(
+        <TooltipProvider>
+          <BrowserToolbar {...props} toolbarRef={toolbarRef} />
+        </TooltipProvider>
+      )
+      expect(screen.getByRole("textbox")).toHaveValue(props.url)
+      expect(screen.getAllByRole("button", { name: "inspect" })).toHaveLength(1)
+      expect(screen.getAllByRole("button", { name: "page" })).toHaveLength(1)
+    }
+  })
 })
 
 describe("BrowserToolbar address bar", () => {
+  it("keeps editing and submitting the address independent of tool actions", () => {
+    const onUrlChange = jest.fn()
+    const onSubmit = jest.fn((event) => event.preventDefault())
+    renderToolbar({ onUrlChange, onSubmit })
+    const field = screen.getByRole("textbox")
+    fireEvent.change(field, { target: { value: "https://example.com/docs" } })
+    expect(onUrlChange).toHaveBeenCalledWith("https://example.com/docs")
+    fireEvent.submit(field.closest("form")!)
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
   it("paints the pretty form over the field without rewriting its value", () => {
     renderToolbar({
       url: "https://www.example.com/docs",

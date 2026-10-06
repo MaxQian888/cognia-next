@@ -224,5 +224,16 @@
     "level": "{percent}%",
     "out": "Zoom out",
     "reset": "Reset zoom"
+  },
+  "loadError": {
+    "title": "This page could not be opened",
+    "hint": "Check the address and your network connection. If this is a local site, make sure its server is running.",
+    "timeoutTitle": "This page is taking too long to load",
+    "timeoutHint": "Check your connection or try again. If the page has already loaded, you can choose to show it anyway.",
+    "retry": "Try again",
+    "editAddress": "Edit address",
+    "continue": "Show page anyway",
+    "frameHint": "Some websites do not allow embedded previews. If the page is blank or refuses to connect, try opening it in your browser.",
+    "frameHelp": "Trouble viewing this page?"
   }
 }

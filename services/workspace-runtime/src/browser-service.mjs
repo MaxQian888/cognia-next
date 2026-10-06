@@ -66,7 +66,9 @@ function pageSummary(record, pageId, activePageId) {
   return Promise.all([record.page.title(), Promise.resolve(record.page.url())]).then(
     ([title, url]) => ({
       id: pageId,
-      url,
+      // Chromium commits this internal document after a network failure. It is
+      // not an address the user can revisit; retain the main-frame destination.
+      url: url.startsWith("chrome-error:") ? record.navigationUrl : url,
       title,
       active: pageId === activePageId,
       ...(record.openerPageId ? { openerId: record.openerPageId } : {}),
@@ -949,6 +951,7 @@ export class RemoteChromiumService {
     const pageId = this.createId()
     const record = {
       page,
+      navigationUrl: page.url(),
       generation: 0,
       cdp: null,
       emulationCdp: null,
@@ -978,7 +981,10 @@ export class RemoteChromiumService {
       this.schedulePagesChanged(session)
     })
     page.on("framenavigated", (frame) => {
-      if (frame === pageMainFrame(page)) this.schedulePagesChanged(session)
+      if (frame !== pageMainFrame(page)) return
+      const url = page.url()
+      if (!url.startsWith("chrome-error:")) record.navigationUrl = url
+      this.schedulePagesChanged(session)
     })
     if (session.uploadRoots?.length) {
       // Local mode with upload roots (ADR-0201): a headless page has no native file dialog, so
@@ -1038,7 +1044,12 @@ export class RemoteChromiumService {
       })
     })
     const started = new WeakMap()
-    page.on("request", (request) => started.set(request, Date.now()))
+    page.on("request", (request) => {
+      started.set(request, Date.now())
+      if (request.isNavigationRequest() && request.frame() === pageMainFrame(page)) {
+        record.navigationUrl = request.url()
+      }
+    })
     page.on("response", (response) => {
       const request = response.request()
       const requestUrl = new URL(request.url())

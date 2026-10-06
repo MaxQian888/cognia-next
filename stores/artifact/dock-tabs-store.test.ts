@@ -120,6 +120,17 @@ function page(id: string, url = `https://${id}.test/`): DockPageTab {
 }
 
 describe("page tabs", () => {
+  it.each(["chrome-error://chromewebdata/", "https://chrome-error//chromewebdata/"])(
+    "keeps the last real address when the runtime reports %s",
+    (url) => {
+      const store = useDockTabsStore.getState()
+      store.addPageTab("s1", page("a", "http://localhost:8765/spa"))
+      store.updatePageTab("s1", "a", { url, title: "Error" })
+      expect(selectActivePageTab(useDockTabsStore.getState(), "s1")).toEqual(
+        page("a", "http://localhost:8765/spa")
+      )
+    }
+  )
   it("adds a tab, showing the first one opened", () => {
     const store = useDockTabsStore.getState()
     store.addPageTab("s1", page("a"))
@@ -181,6 +192,35 @@ describe("page tabs", () => {
 })
 
 describe("persistence", () => {
+  it("restores a previously corrupted address as New Tab without losing the tab or its engine", async () => {
+    window.localStorage.setItem(
+      "cognia-dock-tabs-v1",
+      JSON.stringify({
+        version: 2,
+        state: {
+          bySession: {
+            s1: {
+              order: [pageTabKey("a")],
+              activePageTabId: "a",
+              lastUsedAt: Date.now(),
+              pages: [
+                {
+                  ...page("a", "https://chrome-error//chromewebdata/"),
+                  title: "Error",
+                  engine: "remote",
+                },
+              ],
+            },
+          },
+        },
+      })
+    )
+    await useDockTabsStore.persist.rehydrate()
+    expect(selectActivePageTab(useDockTabsStore.getState(), "s1")).toEqual({
+      ...page("a", ""),
+      engine: "remote",
+    })
+  })
   it("reads a version-1 entry as one with no page tabs", async () => {
     window.localStorage.setItem(
       "cognia-dock-tabs-v1",

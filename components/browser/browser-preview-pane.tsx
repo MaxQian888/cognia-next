@@ -30,6 +30,7 @@ import {
   BrowserNetworkPanel,
 } from "@/components/browser/browser-devtools-panels"
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
+import { BrowserLoadError } from "@/components/browser/browser-load-error"
 import { BrowserBackendSwitcher } from "@/components/browser/browser-backend-switcher"
 import { BrowserDownloadsButton } from "@/components/browser/browser-downloads-panel"
 import { BrowserEngineChip } from "@/components/browser/browser-engine-chip"
@@ -185,6 +186,8 @@ export function BrowserPreviewPane({
   const [urlInput, setUrlInput] = useState(normalizedInitialUrl ?? "")
   const [editingUrl, setEditingUrl] = useState(false)
   const [committedUrl, setCommittedUrl] = useState<string | null>(normalizedInitialUrl)
+  const [loadError, setLoadError] = useState<{ url: string; message: string } | null>(null)
+  const [loadingUrl, setLoadingUrl] = useState(normalizedInitialUrl)
   /**
    * The address the web and remote surfaces follow.
    *
@@ -217,6 +220,8 @@ export function BrowserPreviewPane({
   // this state is derived from it. An effect would paint one frame of the
   // previous page first, which on the native branch is a real navigation.
   if (normalizedRequestedUrl && requestKey !== consumedRequestKey) {
+    setLoadError(null)
+    setLoadingUrl(normalizedRequestedUrl)
     setConsumedRequestKey(requestKey)
     setUrlInput(normalizedRequestedUrl)
     setCommittedUrl(normalizedRequestedUrl)
@@ -300,10 +305,21 @@ export function BrowserPreviewPane({
     phase,
     hasPainted,
     loadedUrl,
-    begin: beginLoad,
+    begin: startLoad,
+    fail: failLoad,
+    reveal: revealPage,
   } = useBrowserLoading({
     url: committedUrl,
+    navigateNonce: surfaceRequest?.nonce,
   })
+  const beginLoad = useCallback(
+    (url?: string | null) => {
+      setLoadingUrl(url ?? committedUrl)
+      setLoadError(null)
+      startLoad()
+    },
+    [startLoad, committedUrl]
+  )
   const regionVisible = useRegionVisibility(reservedRef)
   // `owned` is resolved by `useBrowserPaneWebview` below; the visibility it
   // consumes is computed there from the same three inputs plus the lease.
@@ -402,14 +418,17 @@ export function BrowserPreviewPane({
 
   const handleWebviewReady = useCallback(() => setWebviewReady(true), [])
   const handleWebviewError = useCallback(
-    (error: unknown) => {
-      if (String(error).includes("PROXY_TRANSPORT_UNSUPPORTED")) {
-        toast.error(t("errors.httpsProxyUnsupported"))
-        return
-      }
-      toast.error(t("errors.navigate"))
+    (error: unknown, failedUrl?: string) => {
+      const message = String(error).includes("PROXY_TRANSPORT_UNSUPPORTED")
+        ? t("errors.httpsProxyUnsupported")
+        : t("loadError.hint")
+      setLoadError({ url: failedUrl ?? loadingUrl ?? committedUrl ?? "", message })
+      failLoad()
+      toast.error(
+        String(error).includes("PROXY_TRANSPORT_UNSUPPORTED") ? message : t("errors.navigate")
+      )
     },
-    [t]
+    [t, failLoad, loadingUrl, committedUrl]
   )
   const { getRect, refreshBounds, owned, contended, takeLease } = useBrowserPaneWebview(
     reservedRef,
@@ -422,7 +441,14 @@ export function BrowserPreviewPane({
       onReady: handleWebviewReady,
       onError: handleWebviewError,
       onRectChange: handleRectChange,
-      visible: embeddedActive && !!committedUrl && hasPainted && regionVisible,
+      visible:
+        embeddedActive &&
+        !!committedUrl &&
+        hasPainted &&
+        regionVisible &&
+        !loadError &&
+        phase !== "timeout" &&
+        phase !== "error",
       // The same nonce the web and remote surfaces follow. `committedUrl` alone
       // cannot express "go to A again": React bails out of the identical
       // `setState`, so a pane whose page had drifted to B (an in-page navigation,
@@ -529,17 +555,19 @@ export function BrowserPreviewPane({
   const commitAddress = useCallback(
     (next: string) => {
       setUrlInput(next)
-      beginLoad()
+      beginLoad(next)
       if (next === committedUrl) {
         // Re-committing the same address still navigates — the page may have
         // moved elsewhere since (in-page navigation, redirect).
-        void browserClient.embedNavigate(next).catch(() => {})
+        void browserClient
+          .embedNavigate(next)
+          .catch((error: unknown) => handleWebviewError(error, next))
       } else {
         setCommittedUrl(next)
       }
       urlInputRef.current?.blur()
     },
-    [committedUrl, beginLoad]
+    [committedUrl, beginLoad, handleWebviewError]
   )
 
   const commitUrl = useCallback(
@@ -607,6 +635,8 @@ export function BrowserPreviewPane({
   }, [getRect, sendScreenshot, effectiveSessionId, currentUrl, t])
 
   const openQuickUrl = useCallback((url: string) => {
+    setLoadingUrl(url)
+    setLoadError(null)
     setUrlInput(url)
     setCommittedUrl(url)
     // Left out, a claim made by a *visible* pane on the web or remote shell set
@@ -654,8 +684,11 @@ export function BrowserPreviewPane({
 
   const reloadAfterCookieImport = useCallback(async () => {
     beginLoad()
-    await browserClient.embedReload()
-  }, [beginLoad])
+    await browserClient.embedReload().catch((error: unknown) => {
+      handleWebviewError(error)
+      throw error
+    })
+  }, [beginLoad, handleWebviewError])
 
   const runFind = useCallback(
     (query: string, options: { forward: boolean }) => browserClient.embedFind(query, options),
@@ -668,11 +701,20 @@ export function BrowserPreviewPane({
   const navigateHistory = useCallback(
     (url: string) => {
       setUrlInput(url)
-      beginLoad()
+      beginLoad(url)
       setCommittedUrl(url)
     },
     [beginLoad]
   )
+
+  const retryPage = () => {
+    const url = loadError?.url ?? loadingUrl ?? committedUrl
+    if (!url) return
+    beginLoad(url)
+    setCommittedUrl(url)
+    // Also retries creation if the native webview never became ready.
+    setSurfaceRequest((previous) => ({ url, nonce: (previous?.nonce ?? 0) + 1 }))
+  }
 
   // Outside Tauri (web / Capacitor) there is no native webview to track a
   // reserved region, so element-selection is unavailable. Fall back to the
@@ -932,19 +974,25 @@ export function BrowserPreviewPane({
               const target = historyGoBack()
               if (!target) return
               expectedTraversalRef.current = target
-              beginLoad()
-              void browserClient.embedBack()
+              beginLoad(target)
+              void browserClient
+                .embedBack()
+                .catch((error: unknown) => handleWebviewError(error, target))
             }}
             onForward={() => {
               const target = historyGoForward()
               if (!target) return
               expectedTraversalRef.current = target
-              beginLoad()
-              void browserClient.embedForward()
+              beginLoad(target)
+              void browserClient
+                .embedForward()
+                .catch((error: unknown) => handleWebviewError(error, target))
             }}
             onReload={() => {
-              beginLoad()
-              void browserClient.embedReload()
+              beginLoad(currentUrl)
+              void browserClient
+                .embedReload()
+                .catch((error: unknown) => handleWebviewError(error, currentUrl ?? undefined))
             }}
             onStop={() => {
               void browserClient.embedStop().catch(() => {})
@@ -989,27 +1037,49 @@ export function BrowserPreviewPane({
               </Button>
             </div>
           )}
-          {!contended && committedUrl && !hasPainted && (
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center animate-in fade-in duration-200"
-              role="status"
-              aria-live="polite"
-              data-testid="browser-loading"
-            >
-              <div className="flex flex-col items-center gap-3">
-                <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  {t("loading.title", { host: hostOf(currentUrl) })}
-                </p>
+          {!contended &&
+            committedUrl &&
+            !loadError &&
+            phase !== "timeout" &&
+            phase !== "error" &&
+            !hasPainted && (
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center animate-in fade-in duration-200"
+                role="status"
+                aria-live="polite"
+                data-testid="browser-loading"
+              >
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    {t("loading.title", { host: hostOf(currentUrl) })}
+                  </p>
+                </div>
+                <div className="w-full max-w-sm space-y-2.5" aria-hidden>
+                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-5/6" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
               </div>
-              <div className="w-full max-w-sm space-y-2.5" aria-hidden>
-                <Skeleton className="h-3 w-1/2" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-5/6" />
-                <Skeleton className="h-3 w-2/3" />
+            )}
+          {!contended &&
+            committedUrl &&
+            (loadError || phase === "timeout" || phase === "error") && (
+              <div className="absolute inset-0">
+                <BrowserLoadError
+                  url={loadError?.url ?? loadingUrl ?? committedUrl}
+                  message={loadError?.message}
+                  timedOut={phase === "timeout" && !loadError}
+                  onRetry={retryPage}
+                  onEditAddress={() => urlInputRef.current?.focus()}
+                  onOpenExternal={() =>
+                    void openExternal(loadError?.url ?? loadingUrl ?? committedUrl)
+                  }
+                  onContinue={phase === "timeout" && !loadError ? revealPage : undefined}
+                />
               </div>
-            </div>
-          )}
+            )}
           {!contended && !committedUrl && (
             <BrowserEmptyState onOpen={openQuickUrl} recent={recentHistory} />
           )}

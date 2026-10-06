@@ -4,12 +4,9 @@
  * The browser chrome shared by all three preview surfaces: the embedded pane,
  * the remote-Chromium canvas, and the web iframe fallback.
  *
- * It exists because the remote preview had grown its own flat row of ten
- * controls with no responsive behaviour at all, while the embedded pane
- * measured its width and packed into three tiers with a "⋯" overflow. The
- * pane's narrowest host is the chat rail at 24% of the window, so the flat row
- * simply overflowed there. Copying the tier constants across would be how the
- * two diverged in the first place; this is the one implementation.
+ * Navigation owns the first row so engine, inspection, zoom and driver controls
+ * cannot squeeze the address field out of view. Tools occupy a separate row,
+ * pack into three tiers and wrap within their groups if labels need more space.
  *
  * `modal` on the overflow popover is load-bearing, not a style choice: the
  * native webview is always-on-top and cannot be clipped, so a non-modal popover
@@ -30,12 +27,9 @@ import { useElementWidth } from "@/hooks/use-element-width"
 import { cn } from "@/lib/utils"
 
 /**
- * Measured toolbar widths at which the secondary controls stop being inline and
- * pack into the "⋯" popover instead. The pane is docked in the chat right rail
- * as often as it fills the `/browser` page, and that rail's floor is 24% of the
- * window (~300px on a laptop) — well under the ~620px the full control row
- * needs. Wrapping instead of packing cost four toolbar rows and pushed the
- * address bar onto a line of its own.
+ * Measured toolbar widths at which secondary tools pack into the "⋯" popover.
+ * These tiers limit the tools row's height in a narrow chat rail; the address
+ * row's space is independent of the number or width of those tools.
  */
 export const COMPACT_TOOLBAR_PX = 460
 export const WIDE_TOOLBAR_PX = 680
@@ -142,12 +136,16 @@ export function BrowserToolbar({
   const SchemeIcon = display?.secure ? LockIcon : GlobeIcon
   // Each tier renders the identical control roster, only in a different
   // container, so nothing mounts twice and no action becomes unreachable.
-  const hasOverflow = !!overflowExtras || !!inspectActions || !!pageActions
+  const hasOverflow =
+    !!overflowExtras ||
+    (tier === "compact" && !!inspectActions) ||
+    (tier !== "wide" && !!pageActions)
+  const hasTools = !!inspectActions || !!pageActions || !!trailing || hasOverflow
 
   return (
     <div
       ref={toolbarRef}
-      className="relative flex items-center gap-1.5 border-b px-2 py-1.5"
+      className="relative flex min-w-0 shrink-0 flex-col gap-1 border-b px-2 py-1.5"
       data-testid="browser-toolbar"
       data-tier={tier}
     >
@@ -161,96 +159,118 @@ export function BrowserToolbar({
           <div className="browser-progress-bar h-full w-1/3 rounded-full bg-primary" />
         </div>
       )}
-      {navigation}
-      <form onSubmit={onSubmit} className="min-w-0 flex-1">
-        <div className="relative">
-          <SchemeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Surface asChild layer="raised" radius="pill">
-            <Input
-              ref={urlInputRef}
-              type="text"
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              value={url}
-              onChange={(event) => onUrlChange(event.target.value)}
-              onFocus={(event) => {
-                setUrlFocused(true)
-                onUrlFocus?.()
-                event.target.select()
-              }}
-              onBlur={() => {
-                setUrlFocused(false)
-                onUrlBlur?.()
-              }}
-              onKeyDown={onUrlKeyDown}
-              placeholder={t("url.placeholder")}
-              aria-label={t("url.placeholder")}
-              className={cn(
-                "h-8 border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background",
-                // Read mode paints the pretty form over the field instead of
-                // rewriting `value`, so copying still yields the real URL and
-                // focusing reveals it without a reformat flicker.
-                display && "text-transparent"
-              )}
-            />
-          </Surface>
-          {display && (
-            <div
-              aria-hidden
-              data-testid="browser-url-display"
-              // Same border + padding as the Input so the content boxes line up
-              // to the pixel and focusing doesn't nudge the text sideways.
-              className="pointer-events-none absolute inset-0 flex items-center border border-transparent pl-8 pr-3"
-            >
-              <span className="min-w-0 truncate text-sm">
-                {display.host}
-                {display.rest && <span className="text-muted-foreground">{display.rest}</span>}
-              </span>
+      <div
+        className="flex min-w-0 flex-wrap items-center gap-1.5"
+        data-testid="browser-navigation-row"
+      >
+        {navigation}
+        <form onSubmit={onSubmit} className="min-w-[min(100%,10rem)] flex-1">
+          <div className="relative">
+            <SchemeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Surface asChild layer="raised" radius="pill">
+              <Input
+                ref={urlInputRef}
+                type="text"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={url}
+                onChange={(event) => onUrlChange(event.target.value)}
+                onFocus={(event) => {
+                  setUrlFocused(true)
+                  onUrlFocus?.()
+                  event.target.select()
+                }}
+                onBlur={() => {
+                  setUrlFocused(false)
+                  onUrlBlur?.()
+                }}
+                onKeyDown={onUrlKeyDown}
+                placeholder={t("url.placeholder")}
+                aria-label={t("url.placeholder")}
+                className={cn(
+                  "h-8 border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background",
+                  // Read mode paints the pretty form over the field instead of
+                  // rewriting `value`, so copying still yields the real URL and
+                  // focusing reveals it without a reformat flicker.
+                  display && "text-transparent"
+                )}
+              />
+            </Surface>
+            {display && (
+              <div
+                aria-hidden
+                data-testid="browser-url-display"
+                // Same border + padding as the Input so the content boxes line up
+                // to the pixel and focusing doesn't nudge the text sideways.
+                className="pointer-events-none absolute inset-0 flex items-center border border-transparent pl-8 pr-3"
+              >
+                <span className="min-w-0 truncate text-sm">
+                  {display.host}
+                  {display.rest && <span className="text-muted-foreground">{display.rest}</span>}
+                </span>
+              </div>
+            )}
+          </div>
+        </form>
+      </div>
+      {hasTools && (
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1"
+          data-testid="browser-tools-row"
+        >
+          {tier !== "compact" && inspectActions && (
+            <div className="flex min-w-0 max-w-full shrink-0 flex-wrap items-center">
+              {inspectActions}
             </div>
           )}
-        </div>
-      </form>
-      {tier !== "compact" && inspectActions && (
-        <div className="flex shrink-0 items-center">{inspectActions}</div>
-      )}
-      {tier === "wide" && pageActions && (
-        <div className="flex shrink-0 items-center">{pageActions}</div>
-      )}
-      {trailing}
-      {hasOverflow && (
-        <Popover modal>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("actions.more")}
-              data-testid="browser-toolbar-more"
-              className="relative shrink-0"
-            >
-              <MoreHorizontalIcon />
-              {collapsedActive && (
-                <span
-                  aria-hidden
-                  data-testid="browser-toolbar-more-active"
-                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
-                />
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-56 p-2">
-            <div className="flex flex-col gap-2">
-              {tier === "compact" && inspectActions && (
-                <div className="flex flex-wrap items-center gap-0.5">{inspectActions}</div>
-              )}
-              {tier !== "wide" && pageActions && (
-                <div className="flex flex-wrap items-center gap-0.5">{pageActions}</div>
-              )}
-              {overflowExtras}
+          {tier === "wide" && pageActions && (
+            <div className="flex min-w-0 max-w-full shrink-0 flex-wrap items-center">
+              {pageActions}
             </div>
-          </PopoverContent>
-        </Popover>
+          )}
+          <div className="ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5 [&>*]:max-w-full">
+            {trailing}
+            {hasOverflow && (
+              <Popover modal>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("actions.more")}
+                    data-testid="browser-toolbar-more"
+                    className="relative shrink-0"
+                  >
+                    <MoreHorizontalIcon />
+                    {collapsedActive && (
+                      <span
+                        aria-hidden
+                        data-testid="browser-toolbar-more-active"
+                        className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+                      />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  collisionPadding={8}
+                  className="max-h-[var(--radix-popover-content-available-height)] w-56 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain p-2"
+                >
+                  <div className="flex flex-col gap-2">
+                    {tier === "compact" && inspectActions && (
+                      <div className="flex flex-wrap items-center gap-0.5">{inspectActions}</div>
+                    )}
+                    {tier !== "wide" && pageActions && (
+                      <div className="flex flex-wrap items-center gap-0.5">{pageActions}</div>
+                    )}
+                    {overflowExtras}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
