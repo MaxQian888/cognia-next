@@ -147,6 +147,7 @@
       "companion_api",
       "fleet",
       "fonts.rs",
+      "gateway_agent.rs",
       "gateway_brain_bridge.rs",
       "github",
       "headless",
