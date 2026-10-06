@@ -821,6 +821,18 @@ test("classifies every client-only command outside the Headless surface", () => 
   assert.equal(headlessDispositions.get("scheduler_create_task").disposition, "covered-by-headless")
 })
 
+test("keeps pet geometry and reviewed cogpack file trees on the local client", () => {
+  const { manifest, headlessDispositions } = inspectCommittedContract()
+  for (const name of ["pet_window_set_size", "plugin_export_tree", "plugin_install_from_files"]) {
+    const command = manifest.commands.find((entry) => entry.name === name)
+    assert.ok(command, `${name} must remain inventoried`)
+    assert.equal(command.target, "client")
+    assert.equal(command.capability, "client.local")
+    assert.deepEqual(command.transports, ["internal"])
+    assert.equal(headlessDispositions.get(name)?.disposition, "local-only")
+  }
+})
+
 test("rejects versioned committed RPC paths instead of silently migrating them", () => {
   const publicPaths = {
     "/api/v1/_rpc/{name}": { post: { operationId: "rpcDispatch" } },
