@@ -10,26 +10,24 @@
  * forbids; see jest-gotchas #7).
  *
  * Phases (defaults):
- *   t < 3s   → just the avatar pulse + dots + shimmer label (both booleans false)
- *   t ≥ 3s   → `showSkeleton` flips on (skeleton placeholder lines fade in)
- *   t ≥ 4s   → `showTips` flips on (a built-in tip appears) and, unless motion
- *              is reduced, `tipIndex` advances every `tipRotateMs`.
+ *   t < 8s   → just the avatar and the shimmering status word (`showTips` false)
+ *   t ≥ 8s   → `showTips` flips on (a built-in tip appears) and, unless motion
+ *              is reduced, `tipIndex` advances every `tipRotateMs`. A short
+ *              reply finishes before then, so it never shows a tip at all.
  *
  * Orthogonally, `verbIndex` advances every `verbRotateMs` from mount so the
  * label can cycle playful "working" verbs (the Claude Code touch). It starts at
  * 0 — callers put the plain label first — and, unlike the phase flips, it is
  * purely decorative, so reduced motion freezes it.
  *
- * Reduced motion (`reduce`): phases still advance — they are informational, not
+ * Reduced motion (`reduce`): the tip still appears — it is informational, not
  * decorative — but tip and verb rotation are suppressed so the text stays put.
  */
 
 import { useEffect, useState } from "react"
 
-/** Skeleton placeholder lines fade in once the wait crosses this threshold. */
-export const SKELETON_AT_MS = 3000
 /** Built-in tips appear once the wait crosses this threshold. */
-export const TIPS_AT_MS = 4000
+export const TIPS_AT_MS = 8000
 /** Interval between rotated tips (suppressed under reduced motion). */
 export const TIP_ROTATE_MS = 5000
 /** Interval between rotated label verbs (suppressed under reduced motion). */
@@ -42,8 +40,6 @@ export interface ThinkingPhaseOptions {
   verbCount?: number
   /** Suppress tip / verb rotation when motion is reduced. */
   reduce?: boolean
-  /** Override the skeleton threshold (testing / tuning). */
-  skeletonAtMs?: number
   /** Override the tips threshold (testing / tuning). */
   tipsAtMs?: number
   /** Override the tip rotation interval (testing / tuning). */
@@ -53,7 +49,6 @@ export interface ThinkingPhaseOptions {
 }
 
 export interface ThinkingPhase {
-  showSkeleton: boolean
   showTips: boolean
   tipIndex: number
   verbIndex: number
@@ -64,13 +59,11 @@ export function useThinkingPhase(options: ThinkingPhaseOptions = {}): ThinkingPh
     tipCount = 0,
     verbCount = 0,
     reduce = false,
-    skeletonAtMs = SKELETON_AT_MS,
     tipsAtMs = TIPS_AT_MS,
     tipRotateMs = TIP_ROTATE_MS,
     verbRotateMs = VERB_ROTATE_MS,
   } = options
 
-  const [showSkeleton, setShowSkeleton] = useState(false)
   const [showTips, setShowTips] = useState(false)
   const [tipIndex, setTipIndex] = useState(0)
   const [verbIndex, setVerbIndex] = useState(0)
@@ -79,7 +72,6 @@ export function useThinkingPhase(options: ThinkingPhaseOptions = {}): ThinkingPh
     const timers: ReturnType<typeof setTimeout>[] = []
     let interval: ReturnType<typeof setInterval> | undefined
 
-    timers.push(setTimeout(() => setShowSkeleton(true), skeletonAtMs))
     timers.push(setTimeout(() => setShowTips(true), tipsAtMs))
 
     // Rotate tips only when there's more than one to rotate through and the
@@ -98,7 +90,7 @@ export function useThinkingPhase(options: ThinkingPhaseOptions = {}): ThinkingPh
       for (const timer of timers) clearTimeout(timer)
       if (interval) clearInterval(interval)
     }
-  }, [reduce, tipCount, skeletonAtMs, tipsAtMs, tipRotateMs])
+  }, [reduce, tipCount, tipsAtMs, tipRotateMs])
 
   // Verb rotation runs on its own clock from mount (no threshold): the label is
   // visible from frame one, so it is the only motion during a long tool-heavy
@@ -111,5 +103,5 @@ export function useThinkingPhase(options: ThinkingPhaseOptions = {}): ThinkingPh
     return () => clearInterval(interval)
   }, [reduce, verbCount, verbRotateMs])
 
-  return { showSkeleton, showTips, tipIndex, verbIndex }
+  return { showTips, tipIndex, verbIndex }
 }

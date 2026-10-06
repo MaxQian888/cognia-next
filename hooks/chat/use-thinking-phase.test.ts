@@ -1,12 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 
-import {
-  SKELETON_AT_MS,
-  TIPS_AT_MS,
-  TIP_ROTATE_MS,
-  VERB_ROTATE_MS,
-  useThinkingPhase,
-} from "./use-thinking-phase"
+import { TIPS_AT_MS, TIP_ROTATE_MS, VERB_ROTATE_MS, useThinkingPhase } from "./use-thinking-phase"
 
 describe("useThinkingPhase", () => {
   beforeEach(() => {
@@ -19,22 +13,22 @@ describe("useThinkingPhase", () => {
     jest.useRealTimers()
   })
 
-  it("starts in phase 1 with nothing revealed", () => {
+  it("starts with only the status word: no tip yet", () => {
     const { result } = renderHook(() => useThinkingPhase({ tipCount: 3 }))
     expect(result.current).toEqual({
-      showSkeleton: false,
       showTips: false,
       tipIndex: 0,
       verbIndex: 0,
     })
   })
 
-  it("reveals the skeleton at the skeleton threshold", () => {
+  // A short reply is over well before this, so it never flashes a tip.
+  it("waits eight seconds before the first tip", () => {
     const { result } = renderHook(() => useThinkingPhase({ tipCount: 3 }))
+    expect(TIPS_AT_MS).toBe(8000)
     act(() => {
-      jest.advanceTimersByTime(SKELETON_AT_MS)
+      jest.advanceTimersByTime(TIPS_AT_MS - 1)
     })
-    expect(result.current.showSkeleton).toBe(true)
     expect(result.current.showTips).toBe(false)
   })
 
@@ -43,7 +37,6 @@ describe("useThinkingPhase", () => {
     act(() => {
       jest.advanceTimersByTime(TIPS_AT_MS)
     })
-    expect(result.current.showSkeleton).toBe(true)
     expect(result.current.showTips).toBe(true)
     expect(result.current.tipIndex).toBe(0)
   })
@@ -89,15 +82,14 @@ describe("useThinkingPhase", () => {
 
   it("honors custom thresholds", () => {
     const { result } = renderHook(() =>
-      useThinkingPhase({ tipCount: 2, skeletonAtMs: 100, tipsAtMs: 200, tipRotateMs: 300 })
+      useThinkingPhase({ tipCount: 2, tipsAtMs: 200, tipRotateMs: 300 })
     )
     act(() => {
-      jest.advanceTimersByTime(100)
+      jest.advanceTimersByTime(199)
     })
-    expect(result.current.showSkeleton).toBe(true)
     expect(result.current.showTips).toBe(false)
     act(() => {
-      jest.advanceTimersByTime(100)
+      jest.advanceTimersByTime(1)
     })
     expect(result.current.showTips).toBe(true)
     act(() => {

@@ -1,5 +1,9 @@
 import { render } from "@testing-library/react"
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => (key === "tipLabel" ? "Tip:" : key),
+}))
+
 const flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => flowMotion,
@@ -45,13 +49,23 @@ describe("ThinkingTips", () => {
     expect(getByRole("note")).toHaveAttribute("aria-live", "polite")
   })
 
-  it("holds a fixed two-line box whatever the tip's length", () => {
+  it("leads the tip with a quiet label and no icon", () => {
+    const { getByRole } = render(<ThinkingTips tips={["alpha"]} index={0} />)
+    const note = getByRole("note")
+    expect(note.textContent).toBe("Tip: alpha")
+    expect(note.querySelector("svg")).toBeNull()
+  })
+
+  it("holds a fixed single line whatever the tip's length", () => {
     // ADR-0138 — the tip rotates every 5s for the whole of a tool-heavy turn.
-    // Tips of different lengths wrapped to one line or two, so the row's height
-    // changed under the reply on every rotation. The box is now a constant.
+    // Tips of different lengths wrapped to different heights, so the row
+    // changed height under the reply on every rotation. The box is a constant
+    // one line now; a long tip is truncated and keeps its full text as a title.
     for (const tip of ["a", "a".repeat(400)]) {
       const { container, unmount } = render(<ThinkingTips tips={[tip]} index={0} />)
-      expect(container.querySelector(".line-clamp-2")).toHaveClass("h-8")
+      const line = container.querySelector(".truncate")
+      expect(line).toHaveClass("h-4")
+      expect(line).toHaveAttribute("title", tip)
       unmount()
     }
   })

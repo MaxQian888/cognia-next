@@ -8484,6 +8484,7 @@
       "exported": "Exported as markdown.",
       "nothingToExport": "Nothing to export yet.",
       "thinking": "Claude is thinking…",
+      "tipLabel": "Tip:",
       "tips": [
         "Type / to run a slash command.",
         "Mention a teammate with @ in team chats.",

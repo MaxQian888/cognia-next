@@ -22,12 +22,12 @@ jest.mock("next-intl", () => ({
 }))
 
 // Drive the phase machine directly — no real timers in the component test.
-const phase = { showSkeleton: false, showTips: false, tipIndex: 0, verbIndex: 0 }
+const phase = { showTips: false, tipIndex: 0, verbIndex: 0 }
 jest.mock("@/hooks/chat/use-thinking-phase", () => ({
   useThinkingPhase: () => phase,
 }))
 
-// Control reduced-motion for the indicator's own animate-pulse / dots classes.
+// Control reduced motion: the in-app setting reaches the indicator through here.
 const flowMotion = { reduce: false, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => {
   const actual = jest.requireActual("@/components/chat/motion/motion-reveal")
@@ -38,7 +38,6 @@ import { ChatThinkingIndicator } from "./thinking-indicator"
 
 describe("ChatThinkingIndicator", () => {
   beforeEach(() => {
-    phase.showSkeleton = false
     phase.showTips = false
     phase.tipIndex = 0
     phase.verbIndex = 0
@@ -49,19 +48,16 @@ describe("ChatThinkingIndicator", () => {
     rawState.throws = false
   })
 
-  it("renders the shimmer label and bouncing dots in phase 1", () => {
-    const { getByTestId, queryByTestId } = render(<ChatThinkingIndicator />)
+  it("shows one shimmering status word and nothing else at first", () => {
+    const { getByTestId, queryByRole } = render(<ChatThinkingIndicator />)
     const root = getByTestId("chat-thinking-indicator")
     expect(root.textContent).toContain("Thinking now")
     expect(root.querySelector(".shimmer")).toBeInTheDocument()
-    // No skeleton or tip yet.
-    expect(queryByTestId("thinking-skeleton")).toBeNull()
-  })
-
-  it("reveals the skeleton placeholder lines once showSkeleton is set", () => {
-    phase.showSkeleton = true
-    const { getByTestId } = render(<ChatThinkingIndicator />)
-    expect(getByTestId("thinking-skeleton")).toBeInTheDocument()
+    // One moving thing: no bouncing dots, no pulsing avatar, no skeleton bars.
+    expect(root.querySelector(".animate-bounce")).toBeNull()
+    expect(root.querySelector(".animate-pulse")).toBeNull()
+    expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
+    expect(queryByRole("note")).toBeNull()
   })
 
   it("renders the rotating tip once showTips is set", () => {
@@ -78,31 +74,25 @@ describe("ChatThinkingIndicator", () => {
     expect(getByTestId("chat-thinking-indicator").textContent).toContain("🤖")
   })
 
-  it("sizes the label cell to every verb, so rotating it cannot move the dots", () => {
-    // ADR-0138 — the label was a plain <span> that changed width with the verb,
-    // shunting the bouncing dots sideways every 3 seconds for the whole turn.
-    // Every verb is now stacked invisibly in one grid cell behind the visible
-    // one, so the cell is as wide as the longest from the first frame.
-    const verbs = ["Thinking…", "Pondering…", "Cogitating at considerable length…"]
-    rawState.verbs = verbs
+  it("swaps words inside one grid cell, so a rotation never changes the row's height", () => {
+    // ADR-0138 — this row runs for minutes. The outgoing and incoming words
+    // overlap in a single cell while they cross-fade; nothing sits to their
+    // right, so a width change moves nothing either.
+    rawState.verbs = ["Thinking…", "Pondering…"]
     const { getByTestId } = render(<ChatThinkingIndicator />)
-    const sizers = Array.from(
-      getByTestId("chat-thinking-indicator").querySelectorAll("span.invisible")
-    )
-    expect(sizers.map((node) => node.textContent)).toEqual(verbs)
-    for (const sizer of sizers) {
-      expect(sizer).toHaveClass("col-start-1", "row-start-1")
-    }
-    // The visible label shares the cell rather than sitting beside it.
     const shimmer = getByTestId("chat-thinking-indicator").querySelector(".shimmer")!
-    expect(shimmer).toHaveClass("col-start-1", "row-start-1")
+    expect(shimmer.parentElement).toHaveClass("col-start-1", "row-start-1")
+    expect(shimmer.parentElement?.parentElement).toHaveClass("grid")
   })
 
-  it("drops the pulse animation under reduced motion", () => {
+  it("shows the word as static text under reduced motion, in-app setting included", () => {
+    // `Shimmer` alone follows only the OS preference; the in-app setting
+    // arrives through useFlowMotion and must stop the sweep too.
     flowMotion.reduce = true
     const { getByTestId } = render(<ChatThinkingIndicator />)
     const root = getByTestId("chat-thinking-indicator")
-    expect(root.querySelector(".animate-pulse")).toBeNull()
+    expect(root.querySelector(".shimmer")).toBeNull()
+    expect(root.textContent).toContain("Thinking now")
   })
 
   it("renders no tip when the tips key is not an array", () => {
@@ -148,14 +138,20 @@ describe("ChatThinkingIndicator", () => {
     expect(getByTestId("chat-thinking-indicator").textContent).toContain("Thinking now")
   })
 
-  // Compact mode: the assistant already has visible content on screen, so the
-  // skeleton would read as a phantom second reply. Label + tips still run.
-  it("drops the skeleton in compact mode even once showSkeleton is set", () => {
-    phase.showSkeleton = true
+  it("leads with the avatar while nothing of the reply is on screen", () => {
+    const { getByTestId } = render(<ChatThinkingIndicator />)
+    expect(getByTestId("thinking-avatar")).toBeInTheDocument()
+  })
+
+  // Compact mode: the reply above already shows who is answering, so the row
+  // drops its avatar and lines up with the reply's text. The label still runs.
+  it("drops the avatar in compact mode and aligns the label with the reply", () => {
     const { queryByTestId, getByTestId } = render(<ChatThinkingIndicator compact />)
-    expect(queryByTestId("thinking-skeleton")).toBeNull()
-    // Still alive: the label is what signals the turn is running.
-    expect(getByTestId("chat-thinking-indicator").textContent).toContain("Thinking now")
+    expect(queryByTestId("thinking-avatar")).toBeNull()
+    const root = getByTestId("chat-thinking-indicator")
+    expect(root).toHaveAttribute("data-compact", "true")
+    expect(root.firstElementChild).toHaveClass("pl-8")
+    expect(root.textContent).toContain("Thinking now")
   })
 
   it("still renders tips in compact mode (a tool-heavy stretch is a long wait)", () => {

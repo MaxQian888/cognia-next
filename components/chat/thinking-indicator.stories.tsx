@@ -3,9 +3,9 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 import { ChatThinkingIndicator } from "./thinking-indicator"
 import type { Character } from "@cognia/agent-config-types"
 
-// The indicator is phase-driven by timers: avatar pulse → (≥3s) skeleton →
-// (≥4s) rotating tip, with the label cycling verbs every 3s throughout. Leave a
-// story open a few seconds to watch it advance.
+// The indicator is phase-driven by timers: one shimmering status word that
+// cycles every 3s, then (≥8s) a rotating tip line. Leave a story open a few
+// seconds to watch it advance.
 const character = {
   id: "char_1",
   name: "Ada",
@@ -27,7 +27,7 @@ export const WithDirectCharacter: Story = {
 }
 
 // How the tail of a running turn looks once a tool block / streamed text is
-// already on screen: same live label + tips, no skeleton placeholder.
+// already on screen: same live label + tips, no avatar, aligned with the reply.
 export const Compact: Story = {
   args: { compact: true },
 }

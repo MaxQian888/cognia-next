@@ -1720,6 +1720,7 @@
     "exported": "已导出为 Markdown。",
     "nothingToExport": "暂无内容可导出。",
     "thinking": "Claude 正在思考…",
+    "tipLabel": "提示：",
     "tips": [
       "输入 / 可调用斜杠命令。",
       "在团队会话中用 @ 提及某位成员。",
