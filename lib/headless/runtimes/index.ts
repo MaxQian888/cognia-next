@@ -70,6 +70,11 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - `renderer-diagnostics` — opt-in Resource/Event/Navigation Timing and frame
+ *   measurements owned by the renderer's live/capture/HUD sampling demand.
+ *   Headless hosts have no document; their metrics use `performance-runtime`.
+ * - `operation-performance` — local renderer startup/storage/transport/network
+ *   summaries. Instrumented shared helpers are inert without a browser window.
  * - renderer `GatewayProvider` — desktop-only settings/vault projection and
  *   account-generation event filtering. Rust owns gateway lock/switch/vault
  *   invalidation even without a renderer; the headless gateway owns its own
