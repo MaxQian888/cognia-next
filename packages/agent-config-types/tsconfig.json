@@ -15,7 +15,12 @@
       "@cognia/memory": ["../memory/src/index.ts"],
       "@cognia/memory/*": ["../memory/src/*"],
       "@cognia/ocr": ["../ocr/src/index.ts"],
-      "@cognia/ocr/*": ["../ocr/src/*"]
+      "@cognia/ocr/*": ["../ocr/src/*"],
+      // The ADR-0217 shims here re-export the contracts package. Mapping it to
+      // source keeps the standalone typecheck off a stale `dist/`, and lets a
+      // bundler that externalises packages still inline it.
+      "@cognia/agent-contracts": ["../agent-contracts/src/index.ts"],
+      "@cognia/agent-contracts/*": ["../agent-contracts/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
