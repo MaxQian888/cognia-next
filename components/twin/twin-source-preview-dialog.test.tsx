@@ -164,3 +164,29 @@ describe("TwinSourcePreviewDialog", () => {
     expect(screen.getByText(/\+10 more rows/i)).toBeInTheDocument()
   })
 })
+
+it("keeps large table previews scrollable inside the viewport", () => {
+  render(
+    <TwinSourcePreviewDialog
+      source={makeSource({ source: MARKDOWN_WITH_TABLE })}
+      open
+      onOpenChange={() => {}}
+    />
+  )
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[85vh]", "overflow-y-auto")
+})
+
+it("shows historical revision provenance with the highlighted original page passage", () => {
+  render(
+    <TwinSourcePreviewDialog
+      source={{ title: "Saved version", source: "old original text" }}
+      open
+      onOpenChange={() => {}}
+      historicalVersion
+      location={{ charStart: 4, charEnd: 12, pageNumber: 2, pageEnd: 3 }}
+    />
+  )
+  expect(screen.getByRole("status")).toHaveTextContent("earlier document version")
+  expect(screen.getByTestId("source-preview-location")).toHaveTextContent("Pages 2–3")
+  expect(screen.getByTestId("source-preview-highlight")).toHaveTextContent("original")
+})

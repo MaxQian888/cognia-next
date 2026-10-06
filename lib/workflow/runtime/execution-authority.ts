@@ -35,6 +35,7 @@ import type {
 import { runWorkflow, type RunWorkflowResult } from "./orchestrator"
 import { getRunStepOutputs } from "./run-from-step"
 import { isWorkflowDeploymentControlPlaneEnabled } from "./feature-flags"
+import { resolveTeamWorkflowKnowledgeBaseIds } from "../nodes/teams/team-runtime-port"
 
 export class WorkflowAdmissionError extends Error {
   constructor(
@@ -167,12 +168,32 @@ export async function createWorkflowDependencyLockForVersion(
     }
   }
   for (const node of version.definition.nodes) {
-    if (node.type !== "knowledge.retrieve") continue
+    if (
+      node.type !== "knowledge.retrieve" &&
+      node.type !== "action.agent.turn" &&
+      node.type !== "action.team.run"
+    )
+      continue
     const params = node.data.params as {
       knowledgeBaseIds?: string[]
       revisionBindings?: Record<string, string | string[]>
+      characterId?: string
+      teamId?: string
     }
-    for (const knowledgeBaseId of [...new Set(params.knowledgeBaseIds ?? [])]) {
+    const knowledgeBaseIds = [...(params.knowledgeBaseIds ?? [])]
+    if (node.type === "action.team.run" && params.teamId?.trim() && !params.teamId.includes("{{")) {
+      knowledgeBaseIds.push(...(await resolveTeamWorkflowKnowledgeBaseIds(params.teamId.trim())))
+    }
+    if (
+      node.type === "action.agent.turn" &&
+      params.characterId &&
+      !params.characterId.includes("{{")
+    ) {
+      const { resolveCharacterById } = await import("@/lib/db/characters")
+      const character = await resolveCharacterById(params.characterId)
+      knowledgeBaseIds.push(...(character?.knowledgeBaseIds ?? []))
+    }
+    for (const knowledgeBaseId of [...new Set(knowledgeBaseIds)]) {
       const authored = params.revisionBindings?.[knowledgeBaseId]
       const generationIds = Array.isArray(authored) ? authored : authored ? [authored] : []
       if (generationIds.length > 0) {

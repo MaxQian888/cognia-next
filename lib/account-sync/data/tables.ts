@@ -71,6 +71,8 @@ const SESSION_FIELDS = {
   memoryLearn: "sync",
   messageDisplayOverride: "sync",
   executionPolicy: "sync",
+  // Reading provider ids and corpus bindings belong to this device's runtime.
+  knowledgeReading: "local",
   permissionMode: "sync",
   pinned: "sync",
   manualOrder: "sync",
@@ -225,6 +227,7 @@ const CHARACTER_FIELDS = {
   updatedAt: "sync",
   // References to tables account sync does not carry yet.
   knowledgeBaseIds: "local",
+  knowledgeReading: "local",
   mcpServerIds: "local",
   pluginSkillIds: "local",
   accountIdOverride: "local",

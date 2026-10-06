@@ -3,6 +3,7 @@ import {
   hasTeamWorkflowNodes,
   installTeamWorkflowNodes,
   loadTeamWorkflowNodes,
+  resolveTeamWorkflowKnowledgeBaseIds,
   type TeamWorkflowNodes,
 } from "./team-runtime-port"
 
@@ -37,6 +38,37 @@ describe("team workflow node port", () => {
     installTeamWorkflowNodes(load)
     await expect(loadTeamWorkflowNodes("action.team.run")).rejects.toThrow("chunk load failed")
     expect(await loadTeamWorkflowNodes("action.team.run")).toBe(nodes)
+  })
+
+  it("discovers static knowledge through the installed host without loading execution", async () => {
+    const load = jest.fn(async () => nodes)
+    const dependencies = jest.fn(async () => ["kb-1"])
+    installTeamWorkflowNodes(load, dependencies)
+    await expect(resolveTeamWorkflowKnowledgeBaseIds("team-1")).resolves.toEqual(["kb-1"])
+    expect(dependencies).toHaveBeenCalledWith("team-1")
+    expect(load).not.toHaveBeenCalled()
+  })
+
+  it("does not retain dependency scope when a host is replaced with a legacy host", async () => {
+    const load = async () => nodes
+    installTeamWorkflowNodes(load, async () => ["private-kb"])
+    installTeamWorkflowNodes(load)
+    await expect(resolveTeamWorkflowKnowledgeBaseIds("team-1")).resolves.toEqual([])
+    __resetTeamWorkflowNodesForTesting()
+    await expect(resolveTeamWorkflowKnowledgeBaseIds("team-1")).rejects.toMatchObject({
+      retryable: false,
+      message: expect.stringContaining("not installed"),
+    })
+  })
+
+  it("propagates host discovery failure without granting a fallback scope", async () => {
+    installTeamWorkflowNodes(
+      async () => nodes,
+      async () => {
+        throw new Error("team disappeared")
+      }
+    )
+    await expect(resolveTeamWorkflowKnowledgeBaseIds("team-1")).rejects.toThrow("team disappeared")
   })
 })
 

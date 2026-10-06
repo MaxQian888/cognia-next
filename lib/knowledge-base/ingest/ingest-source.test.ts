@@ -1,8 +1,13 @@
 jest.mock("@cognia/vector/embedding", () => ({
   generateEmbeddings: jest.fn(),
 }))
+jest.mock("@/lib/twin/ingest/ocr-fallback", () => ({
+  runTwinPdfOcrWithProvenance: jest.fn().mockResolvedValue(null),
+}))
 
 import { generateEmbeddings } from "@cognia/vector/embedding"
+import { runTwinPdfOcrWithProvenance } from "@/lib/twin/ingest/ocr-fallback"
+import { buildDocumentStructure } from "@cognia/document/document-structure"
 import type { IVectorStore, VectorDocument } from "@cognia/vector/store"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDb } from "@/lib/db/schema"
@@ -13,6 +18,7 @@ import {
   listKnowledgeBaseIngestJobs,
   listKnowledgeBaseSources,
   listKnowledgeBases,
+  getKnowledgeBaseDocumentSnapshot,
 } from "@/lib/db/knowledge-bases"
 import { __resetTwinEmbeddingCache } from "@/lib/twin/ingest/embed"
 import type { ParsedSource, RawSource } from "@/lib/twin/ingest/parse"
@@ -38,6 +44,7 @@ beforeEach(async () => {
   await dbFixture.restore()
   __resetTwinEmbeddingCache()
   generateEmbeddingsMock.mockReset()
+  jest.mocked(runTwinPdfOcrWithProvenance).mockReset().mockResolvedValue(null)
 })
 afterAll(dbFixture.dispose)
 
@@ -90,6 +97,72 @@ const embedding = {
 }
 
 describe("ingestKnowledgeBaseSource", () => {
+  it("reuses OCR provenance and retains canonical page ranges in the immutable snapshot", async () => {
+    await seedSource()
+    const originalText = "Recognized email alice@example.com\nPage two"
+    const structure = buildDocumentStructure({
+      content: originalText,
+      pages: [
+        {
+          pageNumber: 1,
+          charStart: 0,
+          charEnd: originalText.length,
+          lineStart: 1,
+          lineEnd: 2,
+          provenance: "ocr",
+        },
+      ],
+    })
+    jest.mocked(runTwinPdfOcrWithProvenance).mockResolvedValueOnce({
+      originalText,
+      embeddableText: originalText,
+      pageMap: [{ pageNumber: 1, charStart: 0, charEnd: originalText.length }],
+      structure,
+    })
+    generateEmbeddingsMock.mockResolvedValue({ embeddings: [[1, 2]] })
+    await ingestKnowledgeBaseSource({
+      sourceId: "source-1",
+      deps: { store: createStore(), embedding, vectorBackend: "qdrant" },
+    })
+    expect(
+      await getKnowledgeBaseDocumentSnapshot({ knowledgeBaseId: "kb-1", sourceId: "source-1" })
+    ).toMatchObject({ originalText, structure })
+    const [chunk] = await listKnowledgeBaseChunks("kb-1")
+    expect(chunk.charEnd).toBe(originalText.length)
+    expect(chunk.metadata).toMatchObject({
+      pageNumber: 1,
+      lineStart: 1,
+      lineEnd: 2,
+      documentVersion: structure.contentHash,
+    })
+  })
+
+  it("does not overwrite replacement source state when stale ingest publication fails", async () => {
+    await seedSource()
+    generateEmbeddingsMock.mockImplementation(async () => {
+      await getDb().knowledgeBaseSources.update("source-1", {
+        content: "new version",
+        fingerprint: "new-version",
+        status: "pending",
+      })
+      return { embeddings: [[1, 2]] }
+    })
+    await expect(
+      ingestKnowledgeBaseSource({
+        sourceId: "source-1",
+        deps: { store: createStore(), embedding, vectorBackend: "native" },
+      })
+    ).rejects.toMatchObject({ code: "source_changed" })
+    expect((await listKnowledgeBaseSources("kb-1"))[0]).toMatchObject({
+      status: "pending",
+      fingerprint: "new-version",
+      content: "new version",
+    })
+    expect((await listKnowledgeBaseIngestJobs("kb-1"))[0]).toMatchObject({
+      status: "failed",
+      errorCode: "source_changed",
+    })
+  })
   it("parses, redacts, chunks, embeds, persists, and completes its durable job", async () => {
     await seedSource()
     const store = createStore()

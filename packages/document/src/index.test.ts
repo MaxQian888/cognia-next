@@ -19,3 +19,10 @@ describe("document package barrel", () => {
     expect(table?.headers).toEqual(["Name", "Value"])
   })
 })
+
+it("exports shared canonical navigation builders", async () => {
+  const { buildTextDocumentStructure, documentContentHash } = await import("./index")
+  expect(buildTextDocumentStructure("# Chapter\nBody").contentHash).toBe(
+    documentContentHash("# Chapter\nBody")
+  )
+})

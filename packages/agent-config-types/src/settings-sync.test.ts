@@ -23,6 +23,12 @@ function keysOf(category: SettingsSyncCategory): Key[] {
 }
 
 describe("SETTINGS_SYNC", () => {
+  it("keeps document reading budgets and locally registered summary providers on their owning device", () => {
+    expect(SETTINGS_SYNC.knowledgeReading.category).toBe("device-local")
+    expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain("knowledgeReading")
+    expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain("knowledgeReading")
+    expect(NON_SYNCED_SETTING_REASONS.knowledgeReading).toContain("local document runtime")
+  })
   it("classifies every field with a known category", () => {
     const allowed: SettingsSyncCategory[] = [
       "shared",

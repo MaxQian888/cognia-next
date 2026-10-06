@@ -10,11 +10,16 @@
  * own thin orchestration + storage.
  */
 
+import { documentContentHash } from "@cognia/document/document-structure"
 import type { KnowledgeFile } from "@/types"
 import type { ChunkingStrategy } from "@cognia/provider-embedding/chunking"
 import { prepareChunks } from "@/lib/twin/ingest/chunk"
 import { embedRedactedChunks, type EmbeddingConfig } from "@/lib/twin/ingest/embed"
-import { redactText, unredactText } from "@cognia/redact"
+import {
+  redactText,
+  restoreOffsetsThroughRedaction,
+  translateOffsetsThroughRedaction,
+} from "@cognia/redact"
 import type { IVectorStore } from "@cognia/vector/store"
 import type { TwinSourceFormat, VectorBackend } from "@/types/twin"
 import { getIndexedContentHash } from "@/lib/db/project-chunks"
@@ -62,7 +67,7 @@ const KIND_TO_STRATEGY: Record<KnowledgeFile["type"], ChunkingStrategy> = {
 
 /** Best-effort `TwinSourceFormat` for the chunk metadata (cosmetic when a
  *  strategy is passed explicitly). */
-const KIND_TO_FORMAT: Record<KnowledgeFile["type"], TwinSourceFormat> = {
+export const PROJECT_KNOWLEDGE_SOURCE_FORMATS: Record<KnowledgeFile["type"], TwinSourceFormat> = {
   text: "rtf",
   markdown: "markdown",
   pdf: "pdf",
@@ -82,12 +87,18 @@ const KIND_TO_FORMAT: Record<KnowledgeFile["type"], TwinSourceFormat> = {
  * only to decide whether a file's content changed since the last ingest.
  */
 export function hashContent(text: string): string {
-  let hash = 5381
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
-  }
-  // Fold in the length so two same-hash-but-different-length strings differ.
-  return `${(hash >>> 0).toString(36)}_${text.length.toString(36)}`
+  return documentContentHash(text)
+}
+
+/** Structure and projection changes rebuild derived generations; legacy hashes remain valid. */
+export function hashKnowledgeFile(
+  file: Pick<KnowledgeFile, "content" | "structure" | "embeddableContent">
+): string {
+  const content = file.content ?? ""
+  if (!file.structure && file.embeddableContent === undefined) return hashContent(content)
+  return hashContent(
+    JSON.stringify([content, file.structure ?? null, file.embeddableContent ?? null])
+  )
 }
 
 export async function ingestKnowledgeFile(
@@ -95,7 +106,7 @@ export async function ingestKnowledgeFile(
 ): Promise<IngestKnowledgeFileResult> {
   const { projectId, file, deps } = input
   const content = file.content ?? ""
-  const contentHash = hashContent(content)
+  const contentHash = hashKnowledgeFile(file)
 
   if (input.skipUnchanged !== false) {
     const indexed = await getIndexedContentHash(projectId, file.id)
@@ -111,6 +122,7 @@ export async function ingestKnowledgeFile(
       vectorBackend: deps.vectorBackend,
       store: deps.store,
       contentHash,
+      expectedSource: file,
       chunks: [],
       embeddings: [],
     })
@@ -126,13 +138,25 @@ export async function ingestKnowledgeFile(
   const redaction = redactForCloud ? redactText(content) : null
   const redactedText = redaction ? redaction.redacted : content
 
+  const structure =
+    file.structure?.contentHash === documentContentHash(content) &&
+    file.structure.textLength === content.length
+      ? file.structure
+      : undefined
   const prepared = prepareChunks({
     redactedText,
     originalText: content,
     // Both maps are exhaustive over `KnowledgeFile["type"]`, so these always
     // resolve to a concrete format/strategy.
-    format: KIND_TO_FORMAT[file.type],
+    format: PROJECT_KNOWLEDGE_SOURCE_FORMATS[file.type],
     strategy: KIND_TO_STRATEGY[file.type],
+    ...(structure?.pages.length
+      ? {
+          pageMap: redaction
+            ? translateOffsetsThroughRedaction(structure.pages, redactedText, redaction.map)
+            : structure.pages,
+        }
+      : {}),
   })
 
   if (prepared.length === 0) {
@@ -142,6 +166,7 @@ export async function ingestKnowledgeFile(
       vectorBackend: deps.vectorBackend,
       store: deps.store,
       contentHash,
+      expectedSource: file,
       chunks: [],
       embeddings: [],
     })
@@ -153,17 +178,21 @@ export async function ingestKnowledgeFile(
     deps.embedding
   )
 
+  const sourceChunks = redaction
+    ? restoreOffsetsThroughRedaction(prepared, redactedText, redaction.map)
+    : prepared
   await persistProjectChunks({
     projectId,
     fileId: file.id,
     vectorBackend: deps.vectorBackend,
     store: deps.store,
     contentHash,
-    chunks: prepared.map((c) => ({
+    expectedSource: file,
+    chunks: sourceChunks.map((c) => ({
       // `c.content` is the (possibly redacted) slice. `contentRedacted` is what
       // gets embedded + sent to the remote store; `content` is the displayable
-      // original (un-redacted locally for cloud backends, identical otherwise).
-      content: redaction ? unredactText(c.content, redaction.map) : c.content,
+      // original, recovered from canonical source ranges after inverse redaction.
+      content: content.slice(c.charStart, c.charEnd),
       contentRedacted: c.content,
       charStart: c.charStart,
       charEnd: c.charEnd,

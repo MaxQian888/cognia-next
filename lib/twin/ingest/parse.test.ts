@@ -233,9 +233,9 @@ describe("computePdfPageMap", () => {
     expect(map![1].bboxUnion).toBeUndefined()
   })
 
-  it("returns undefined when no page carries items (pdfjs path)", () => {
+  it("preserves page ranges without spatial items (pdfjs path)", () => {
     const result = pdfResult([{ text: "plain" }, { text: "pages" }])
-    expect(computePdfPageMap("pdf", result, result.text)).toBeUndefined()
+    expect(computePdfPageMap("pdf", result, result.text)).toHaveLength(2)
   })
 
   it("returns undefined for non-pdf formats", () => {

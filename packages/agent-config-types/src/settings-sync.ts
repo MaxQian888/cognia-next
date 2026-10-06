@@ -78,6 +78,11 @@ export const SETTINGS_SYNC = {
   backgroundTasks: { category: "desktop-only" },
   webTools: { category: "desktop-only" },
   selfInvokeTools: { category: "desktop-only" },
+  knowledgeReading: {
+    category: "device-local",
+    rationale:
+      "Reading budgets and summary provider registrations belong to this host's local document runtime; another device may not have the same bound sources or registered provider.",
+  },
   cliBridge: { category: "desktop-only" },
   updates: { category: "desktop-only" },
   updateCenter: { category: "desktop-only" },

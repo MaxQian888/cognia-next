@@ -5,8 +5,8 @@
  * scoped to a project's `cognia_project_{projectId}` collection and loading from
  * the `projectChunks` table. Reuses the same provider-agnostic leaf utilities:
  * embedding, the dimension guard, RRF, LLM query expansion, the reranker, and
- * the corrective-RAG filter. The hybrid BM25 leg is intentionally omitted in v1
- * (a project-scoped keyword index is a later add).
+ * the corrective-RAG filter. Keyword and hybrid selection reuse BM25 and RRF
+ * through an opt-in candidate adapter.
  *
  * Never throws — any failure degrades to an empty result set (mirrors the twin /
  * memory runtimes).
@@ -24,7 +24,7 @@ import {
   ensureCollectionDimensionCompatible,
   EmbeddingDimensionMismatchError,
 } from "@cognia/vector/dimension-guard"
-import { reciprocalRankFusion } from "@cognia/rag/hybrid-search"
+import { BM25Index, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { generateHypotheticalAnswer, generateStepBackQuery } from "@cognia/rag/query-expansion"
 import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 import type { IVectorStore } from "@cognia/vector/store"
@@ -36,7 +36,7 @@ import { rerank, type RerankCandidate } from "@/lib/twin/runtime/reranker"
 import { filterByGrade } from "@/lib/ai/retrieval/corrective-filter"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { ProjectChunk } from "@/types/project-knowledge"
-import { getProjectChunksByVectorDocIds } from "@/lib/db/project-chunks"
+import { getProjectChunksByVectorDocIds, listProjectChunksByProject } from "@/lib/db/project-chunks"
 import { projectVectorCollectionName } from "../ingest/persist"
 
 export interface ProjectKnowledgeRuntimeDeps {
@@ -80,12 +80,15 @@ export interface RetrieveProjectChunksInput {
   userMessage: string
   topK: number
   precomputedQueryEmbedding?: number[]
+  strategy?: "vector" | "hybrid" | "keyword"
+  /** Current host-owned project files; removed files cannot become candidates. */
+  fileIds?: readonly string[]
   /** Run LLM query expansion when a model dep is present. Default true. */
   enableQueryExpansion?: boolean
   /** Run the heuristic corrective-RAG filter. Default true. */
   enableCorrectiveFilter?: boolean
   correctiveMinKeep?: number
-  deps: ProjectKnowledgeRuntimeDeps
+  deps?: ProjectKnowledgeRuntimeDeps
 }
 
 export interface RetrieveProjectChunksResult {
@@ -139,8 +142,15 @@ export async function retrieveProjectChunks(
   input: RetrieveProjectChunksInput
 ): Promise<RetrieveProjectChunksResult> {
   const { projectId, userMessage, topK, deps } = input
-  if (topK <= 0 || !userMessage.trim()) return EMPTY
-  if (typeof deps.store.searchByEmbedding !== "function") return EMPTY
+  if (!Number.isFinite(topK) || topK <= 0 || !userMessage.trim()) return EMPTY
+  if (input.strategy === "keyword" || input.strategy === "hybrid") {
+    try {
+      return await retrieveProjectCandidates(input)
+    } catch {
+      return { chunks: [], degraded: true, degradedReason: "keyword-retrieve-failed" }
+    }
+  }
+  if (!deps || typeof deps.store.searchByEmbedding !== "function") return EMPTY
 
   const collection = deps.vectorCollection ?? projectVectorCollectionName(projectId)
   let degraded = false
@@ -227,7 +237,12 @@ export async function retrieveProjectChunks(
     let enriched: RetrievedProjectChunk[] = []
     for (const id of orderedIds) {
       const chunk = chunkById.get(id)
-      if (!chunk) continue
+      if (
+        !chunk ||
+        chunk.projectId !== projectId ||
+        (input.fileIds && !input.fileIds.includes(chunk.fileId))
+      )
+        continue
       enriched.push({ chunk, score: scoreById.get(id) ?? 0 })
     }
 
@@ -275,5 +290,44 @@ export async function retrieveProjectChunks(
       degraded: true,
       degradedReason: err instanceof Error ? `retrieve-failed: ${err.message}` : "retrieve-failed",
     }
+  }
+}
+
+/** Reuse the existing vector pipeline and shared lexical/fusion implementations. */
+async function retrieveProjectCandidates(
+  input: RetrieveProjectChunksInput
+): Promise<RetrieveProjectChunksResult> {
+  const rows = (await listProjectChunksByProject(input.projectId)).filter(
+    (row) =>
+      row.projectId === input.projectId && (!input.fileIds || input.fileIds.includes(row.fileId))
+  )
+  if (rows.length === 0) return EMPTY
+  const index = new BM25Index()
+  for (const row of rows) index.addDocument(row.vectorDocId, row.contentRedacted || row.content)
+  const limit = Math.min(100, Math.max(1, Math.floor(input.topK)))
+  const lexical = index.search(input.userMessage, limit * 4)
+  const vector =
+    input.strategy === "hybrid"
+      ? typeof input.deps?.store.searchByEmbedding === "function"
+        ? await retrieveProjectChunks({ ...input, strategy: "vector", topK: limit * 4 })
+        : { chunks: [], degraded: true, degradedReason: "vector-not-configured" }
+      : EMPTY
+  const ranking =
+    input.strategy === "hybrid" && vector.chunks.length
+      ? reciprocalRankFusion(
+          [vector.chunks.map(({ chunk, score }) => ({ id: chunk.vectorDocId, score })), lexical],
+          [0.6, 0.4]
+        )
+      : lexical
+  const byId = new Map(rows.map((row) => [row.vectorDocId, row]))
+  return {
+    chunks: ranking
+      .flatMap(({ id, score }) => {
+        const chunk = byId.get(id)
+        return chunk ? [{ chunk, score }] : []
+      })
+      .slice(0, limit),
+    degraded: vector.degraded,
+    ...(vector.degradedReason ? { degradedReason: vector.degradedReason } : {}),
   }
 }

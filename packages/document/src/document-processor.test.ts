@@ -1368,3 +1368,12 @@ describe("complete source locators", () => {
     ).rejects.toMatchObject({ name: "AbortError" })
   })
 })
+
+it("keeps source segments canonical when the Markdown embedding projection removes structure", () => {
+  const content = "# Heading\n\nOriginal body\n```ts\nconst value = 3\n```"
+  const processed = processDocument("source", "guide.md", content)
+  expect(processed.structure?.contentHash).toBeDefined()
+  expect(processed.structure?.nodes[1].title).toBe("Heading")
+  expect(processed.sourceSegments?.[0].text).toBe(content)
+  expect(processed.embeddableContent).not.toBe(content)
+})

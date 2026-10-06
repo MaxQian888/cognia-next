@@ -278,3 +278,157 @@ describe("persistChunks", () => {
     ])
   })
 })
+
+it("atomically activates an empty snapshot and retires old chunks/vectors", async () => {
+  const { buildTextDocumentStructure } = await import("@cognia/document/document-structure")
+  const { getTwinSource } = await import("@/lib/db/twin-sources")
+  const { getDb } = await import("@/lib/db/schema")
+  const store = fakeStore()
+  await makeSource("twin_empty", "src_empty")
+  const first = await persistChunks({
+    twinId: "twin_empty",
+    sourceId: "src_empty",
+    vectorBackend: "qdrant",
+    store,
+    chunks: [
+      {
+        content: "Old",
+        contentRedacted: "Old",
+        charStart: 0,
+        charEnd: 3,
+        strategy: "paragraph",
+        tokenCount: 1,
+        metadata: {},
+      },
+    ],
+    embeddings: [[0.1, 0.2]],
+    documentSnapshot: {
+      originalText: "Old",
+      structure: buildTextDocumentStructure("Old"),
+      title: "Original",
+      format: "markdown",
+    },
+  })
+  const second = await persistChunks({
+    twinId: "twin_empty",
+    sourceId: "src_empty",
+    vectorBackend: "qdrant",
+    store,
+    chunks: [],
+    embeddings: [],
+    sourceRevision: { fingerprint: "fp", source: "raw" },
+    documentSnapshot: {
+      originalText: "",
+      structure: buildTextDocumentStructure(""),
+      title: "Empty",
+      format: "markdown",
+    },
+  })
+  expect(await listTwinChunksBySource("src_empty")).toEqual([])
+  expect(store.deletedIds).toEqual(first.vectorDocIds)
+  expect(await getTwinSource("src_empty")).toMatchObject({
+    chunkCount: 0,
+    status: "parsed",
+    documentSnapshot: { originalText: "", generationId: second.generationId, title: "Empty" },
+  })
+  const active = await getDb().retrievalGenerations.get(second.generationId!)
+  expect(active?.status).toBe("active")
+  expect((await getDb().retrievalGenerations.get(first.generationId!))?.status).toBe("retiring")
+})
+
+it("preserves the current snapshot when a replacement fails or the source changes", async () => {
+  const { getTwinSource, updateTwinSource } = await import("@/lib/db/twin-sources")
+  const store = fakeStore()
+  await makeSource("twin_snapshot", "src_snapshot")
+  const input = {
+    twinId: "twin_snapshot",
+    sourceId: "src_snapshot",
+    vectorBackend: "qdrant" as const,
+    store,
+    chunks: [
+      {
+        content: "Old",
+        contentRedacted: "Old",
+        charStart: 0,
+        charEnd: 3,
+        strategy: "paragraph" as const,
+        tokenCount: 1,
+        metadata: {},
+      },
+    ],
+    embeddings: [[0.1, 0.2]],
+    documentSnapshot: { originalText: "Old", title: "Original", format: "markdown" as const },
+    sourceMetadata: {
+      kind: "document" as const,
+      title: "Original",
+      bytes: 3,
+      redacted: true,
+      redactionMapEnc: "enc-old",
+    },
+  }
+  const first = await persistChunks(input)
+  const addDocuments = store.addDocuments
+  store.addDocuments = jest.fn(async () => {
+    throw new Error("remote write failure")
+  })
+  await expect(
+    persistChunks({
+      ...input,
+      sourceMetadata: { ...input.sourceMetadata, title: "Replacement", redactionMapEnc: "enc-new" },
+    })
+  ).rejects.toThrow("remote write failure")
+  expect(await getTwinSource("src_snapshot")).toMatchObject({
+    title: "Original",
+    redactionMapEnc: "enc-old",
+    documentSnapshot: { generationId: first.generationId },
+  })
+  store.addDocuments = addDocuments
+  await updateTwinSource("src_snapshot", { fingerprint: "changed" })
+  await expect(
+    persistChunks({
+      ...input,
+      sourceRevision: { fingerprint: "fp", source: "raw" },
+      documentSnapshot: { ...input.documentSnapshot, originalText: "New" },
+    })
+  ).rejects.toThrow("changed or was deleted")
+  expect((await getTwinSource("src_snapshot"))?.documentSnapshot?.generationId).toBe(
+    first.generationId
+  )
+  expect((await listTwinChunksBySource("src_snapshot"))[0].content).toBe("Old")
+})
+
+it("cannot recreate a deleted source after the remote write completes", async () => {
+  const { deleteTwinSource, getTwinSource } = await import("@/lib/db/twin-sources")
+  const store = fakeStore()
+  await makeSource("twin_deleted", "src_deleted")
+  const addDocuments = store.addDocuments.bind(store)
+  store.addDocuments = async (collection, documents) => {
+    await addDocuments(collection, documents)
+    await deleteTwinSource("src_deleted")
+  }
+  await expect(
+    persistChunks({
+      twinId: "twin_deleted",
+      sourceId: "src_deleted",
+      vectorBackend: "qdrant",
+      store,
+      chunks: [
+        {
+          content: "Source",
+          contentRedacted: "Source",
+          charStart: 0,
+          charEnd: 6,
+          strategy: "paragraph",
+          tokenCount: 1,
+          metadata: {},
+        },
+      ],
+      embeddings: [[0.1, 0.2]],
+      sourceRevision: { fingerprint: "fp", source: "raw" },
+      documentSnapshot: { originalText: "Source", title: "Source", format: "markdown" },
+    })
+  ).rejects.toThrow("changed or was deleted")
+  expect(await getTwinSource("src_deleted")).toBeUndefined()
+  expect(await listTwinChunksBySource("src_deleted")).toEqual([])
+  expect(store.deletedIds).toEqual(store.addedIds)
+})

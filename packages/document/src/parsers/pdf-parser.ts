@@ -69,6 +69,16 @@ export interface PDFAnnotation {
   rect?: { x: number; y: number; width: number; height: number }
 }
 
+/** Reuse one worker configuration for bookmarks and full text extraction. */
+function configurePdfWorker(pdfjs: {
+  GlobalWorkerOptions: { workerSrc: string }
+  version: string
+}): void {
+  if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
+    pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
+  }
+}
+
 /**
  * Parse PDF from ArrayBuffer.
  *
@@ -86,10 +96,7 @@ export async function parsePDF(
   // The native path parses whole documents only; page ranges and
   // outline/annotation extraction are pdfjs-specific features.
   const nativeEligible =
-    options.startPage === undefined &&
-    options.endPage === undefined &&
-    !options.extractOutline &&
-    !options.extractAnnotations
+    options.startPage === undefined && options.endPage === undefined && !options.extractAnnotations
   let fallbackDiagnostic: ParseDiagnostic | undefined
 
   if (nativeEligible && isTauri()) {
@@ -109,6 +116,33 @@ export async function parsePDF(
               "Native parser found little or no text layer — the PDF is likely scanned; OCR may be required.",
           },
         ]
+      }
+      if (options.extractOutline) {
+        let outlineTask: ReturnType<(typeof import("pdfjs-dist"))["getDocument"]> | undefined
+        try {
+          const pdfjs = await import("pdfjs-dist")
+          configurePdfWorker(pdfjs)
+          outlineTask = pdfjs.getDocument({
+            data: data.slice(0),
+            ...(options.password ? { password: options.password } : {}),
+          })
+          const outlinePdf = await outlineTask.promise
+          options.signal?.throwIfAborted()
+          const outline = await extractOutline(outlinePdf)
+          if (outline.length) native.outline = outline
+        } catch {
+          options.signal?.throwIfAborted()
+          native.diagnostics = [
+            ...(native.diagnostics ?? []),
+            {
+              code: "unsupported_feature",
+              severity: "warning",
+              message: "PDF bookmarks could not be read; page navigation remains available.",
+            },
+          ]
+        } finally {
+          await outlineTask?.destroy().catch(() => undefined)
+        }
       }
       return native
     } catch (err) {
@@ -131,9 +165,7 @@ export async function parsePDF(
 
   // Set worker source - use CDN for reliable cross-platform support
   // Note: We use CDN instead of bundled worker to avoid Next.js/Turbopack URL resolution issues
-  if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
-  }
+  configurePdfWorker(pdfjsLib)
 
   const docParams: Record<string, unknown> = { data: data.slice(0) }
   if (options.password) {
@@ -310,49 +342,44 @@ function extractTextWithLayout(textContent: { items: unknown[] }, _pageHeight: n
  */
 async function extractOutline(pdf: {
   getOutline: () => Promise<unknown[] | null>
+  getDestination?: (id: string) => Promise<unknown[] | null>
+  getPageIndex?: (ref: { num: number; gen: number }) => Promise<number>
 }): Promise<PDFOutlineItem[]> {
   try {
     const rawOutline = await pdf.getOutline()
-    if (!rawOutline || rawOutline.length === 0) return []
-
-    return convertOutlineItems(rawOutline)
+    if (!rawOutline?.length) return []
+    const convert = async (items: unknown[]): Promise<PDFOutlineItem[]> => {
+      const result: PDFOutlineItem[] = []
+      for (const value of items) {
+        if (!value || typeof value !== "object") continue
+        const item = value as Record<string, unknown>
+        const title = String(item.title ?? "")
+        if (!title) continue
+        let pageNumber: number | undefined
+        try {
+          const dest =
+            typeof item.dest === "string" ? await pdf.getDestination?.(item.dest) : item.dest
+          if (Array.isArray(dest) && dest.length) {
+            if (typeof dest[0] === "number" && Number.isInteger(dest[0]) && dest[0] >= 0)
+              pageNumber = dest[0] + 1
+            else if (dest[0] && typeof dest[0] === "object" && pdf.getPageIndex)
+              pageNumber = (await pdf.getPageIndex(dest[0] as { num: number; gen: number })) + 1
+          }
+        } catch {
+          // An unresolved bookmark remains navigable through its parent/page tree.
+        }
+        result.push({
+          title,
+          pageNumber,
+          children: Array.isArray(item.items) ? await convert(item.items) : [],
+        })
+      }
+      return result
+    }
+    return await convert(rawOutline)
   } catch {
     return []
   }
-}
-
-/**
- * Recursively convert raw PDF outline items to PDFOutlineItem format
- */
-function convertOutlineItems(items: unknown[]): PDFOutlineItem[] {
-  return items
-    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-    .map((item) => {
-      const dest = item.dest
-      let pageNumber: number | undefined
-
-      // dest can be a string ref or array; for arrays, first element is the page ref
-      if (
-        Array.isArray(dest) &&
-        dest.length > 0 &&
-        typeof dest[0] === "object" &&
-        dest[0] !== null
-      ) {
-        const pageRef = dest[0] as { num?: number }
-        if (typeof pageRef.num === "number") {
-          pageNumber = pageRef.num + 1 // 0-indexed to 1-indexed
-        }
-      }
-
-      const children = Array.isArray(item.items) ? convertOutlineItems(item.items) : []
-
-      return {
-        title: String(item.title || ""),
-        pageNumber,
-        children,
-      }
-    })
-    .filter((item) => item.title.length > 0)
 }
 
 /**

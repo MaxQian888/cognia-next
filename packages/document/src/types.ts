@@ -64,6 +64,51 @@ export interface DocumentSourceSegment {
     | { type: "text"; start: number; end: number }
 }
 
+/** UTF-16 character offsets are half-open in ProcessedDocument.content.
+ * Lines and pages are 1-based and inclusive. Summaries are navigation only. */
+export interface DocumentSection {
+  id: string
+  parentId?: string
+  title: string
+  level: number
+  charStart: number
+  charEnd: number
+  lineStart: number
+  lineEnd: number
+  pageStart?: number
+  pageEnd?: number
+  summary?: string
+}
+
+export interface DocumentPageRange {
+  pageNumber: number
+  charStart: number
+  charEnd: number
+  lineStart: number
+  lineEnd: number
+  provenance: "text-layer" | "ocr"
+  bboxUnion?: { x: number; y: number; width: number; height: number }
+}
+
+export interface DocumentStructure {
+  version: 1
+  contentHash: string
+  textLength: number
+  nodes: DocumentSection[]
+  pages: DocumentPageRange[]
+}
+
+/** Canonical parsed source frozen with a successfully activated index generation. */
+export interface DocumentSnapshot<TFormat extends string = string> {
+  generationId: string
+  contentHash: string
+  originalText: string
+  structure?: DocumentStructure
+  title: string
+  format: TFormat
+  createdAt: number
+}
+
 export interface ProcessedDocument {
   id: string
   filename: string
@@ -73,6 +118,7 @@ export interface ProcessedDocument {
   metadata: DocumentMetadata
   chunks?: DocumentChunk[]
   sourceSegments?: DocumentSourceSegment[]
+  structure?: DocumentStructure
   parseResult?:
     | PDFParseResult
     | WordParseResult
@@ -94,6 +140,8 @@ export interface KnowledgeFile {
   size: number
   mimeType?: string
   originalSize?: number
+  embeddableContent?: string
+  structure?: DocumentStructure
   pageCount?: number
   createdAt: Date
   updatedAt: Date

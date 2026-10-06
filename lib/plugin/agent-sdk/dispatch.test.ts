@@ -125,6 +125,18 @@ beforeEach(() => {
 })
 
 describe("dispatchSubagent", () => {
+  it("forwards host-captured knowledge authority without dropping its revision ceiling", async () => {
+    const knowledgeAccess = {
+      entrypoint: "mcp" as const,
+      allowedKnowledgeBaseIds: ["kb"],
+      revisionBindings: { kb: ["frozen"] },
+    }
+    await dispatchSubagent(subagent, "read original", { _knowledgeAccess: knowledgeAccess })
+    expect(mockExecute).toHaveBeenCalledWith(
+      "read original",
+      expect.objectContaining({ knowledgeAccess })
+    )
+  })
   it("maps an inline subagent def onto executeAgent and returns the result", async () => {
     const res = await dispatchSubagent(subagent, "review this PR")
     expect(mockExecute).toHaveBeenCalledWith("review this PR", {

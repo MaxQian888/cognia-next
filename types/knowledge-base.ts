@@ -5,6 +5,10 @@ import type {
   TwinSourceKind,
   VectorBackend,
 } from "@/types/twin"
+import type { DocumentSnapshot } from "@cognia/document/types"
+
+/** Original parsed text and navigation data frozen with one immutable index revision. */
+export type KnowledgeBaseDocumentSnapshot = DocumentSnapshot<TwinSourceFormat>
 
 /** A reusable, Agent-bindable knowledge collection independent of any Project or Twin. */
 export interface KnowledgeBase {
@@ -47,6 +51,8 @@ export interface KnowledgeBaseSource {
   errorCode?: string
   /** Missing on legacy rows and therefore private to trusted local execution. */
   acl?: KnowledgeBaseSourceAcl
+  /** Locally owned snapshots; never included in content-free generation diagnostics. */
+  generationSnapshots?: Record<string, KnowledgeBaseDocumentSnapshot>
   createdAt: number
   updatedAt: number
 }

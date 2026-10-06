@@ -13,10 +13,16 @@ import {
 import { prepareChunks } from "@/lib/twin/ingest/chunk"
 import { embedRedactedChunks, type EmbeddingConfig } from "@/lib/twin/ingest/embed"
 import { parseSource, type RawSource } from "@/lib/twin/ingest/parse"
-import { persistKnowledgeBaseChunks } from "./persist"
+import { runTwinPdfOcrWithProvenance } from "@/lib/twin/ingest/ocr-fallback"
+import { getDb } from "@/lib/db/schema"
+import { KnowledgeBaseSourceChangedError, persistKnowledgeBaseChunks } from "./persist"
 import { EmbeddingDimensionMismatchError } from "@cognia/vector/dimension-guard"
 import type { IVectorStore } from "@cognia/vector/store"
-import { redactText, translateOffsetsThroughRedaction, unredactText } from "@cognia/redact"
+import {
+  redactText,
+  translateOffsetsThroughRedaction,
+  restoreOffsetsThroughRedaction,
+} from "@cognia/redact"
 import type { VectorBackend } from "@/types/twin"
 import type { KnowledgeBaseReference, KnowledgeBaseSource } from "@/types/knowledge-base"
 
@@ -149,8 +155,29 @@ function rawSourceFromRow(source: KnowledgeBaseSource): RawSource {
 }
 
 function failureCode(error: unknown, phase: IngestPhase): string {
+  if (error instanceof KnowledgeBaseSourceChangedError) return "source_changed"
   if (error instanceof EmbeddingDimensionMismatchError) return "embedding_dimension_mismatch"
   return `${phase}_failed`
+}
+
+async function updateUnchangedSource(
+  source: KnowledgeBaseSource,
+  patch: Parameters<typeof updateKnowledgeBaseSource>[1],
+  now = Date.now()
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.knowledgeBaseSources, async () => {
+    const current = await db.knowledgeBaseSources.get(source.id)
+    if (
+      !current ||
+      current.fingerprint !== source.fingerprint ||
+      current.content !== source.content ||
+      current.format !== source.format ||
+      current.contentEncoding !== source.contentEncoding
+    )
+      return
+    await updateKnowledgeBaseSource(source.id, patch, now)
+  })
 }
 
 export async function ingestKnowledgeBaseSource(
@@ -170,7 +197,7 @@ export async function ingestKnowledgeBaseSource(
       completedAt: Date.now(),
     })
     if (source.status !== "processing") {
-      await updateKnowledgeBaseSource(source.id, {
+      await updateUnchangedSource(source, {
         status: source.status,
         chunkCount: source.chunkCount,
         errorCode: source.errorCode,
@@ -189,14 +216,17 @@ export async function ingestKnowledgeBaseSource(
     startedAt: Date.now(),
     errorCode: undefined,
   })
-  await updateKnowledgeBaseSource(source.id, {
+  await updateUnchangedSource(source, {
     status: "processing",
     errorCode: undefined,
   })
 
   let phase: IngestPhase = "parsing"
   try {
-    const parsed = await (input.parse ?? parseSource)(rawSourceFromRow(source))
+    const raw = rawSourceFromRow(source)
+    const parsed = await (input.parse ?? parseSource)(raw)
+    const ocr = await runTwinPdfOcrWithProvenance(raw, parsed)
+    if (ocr) Object.assign(parsed, ocr)
     if (input.signal?.aborted) return cancelled()
 
     phase = "redacting"
@@ -221,11 +251,13 @@ export async function ingestKnowledgeBaseSource(
       baseMetadata: parsed.baseMetadata,
       ...(pageMap ? { pageMap } : {}),
     })
-    const chunks = prepared.map((chunk) => ({
-      ...chunk,
-      contentRedacted: chunk.content,
-      content: redaction ? unredactText(chunk.content, redaction.map) : chunk.content,
-    }))
+    const chunks = restoreOffsetsThroughRedaction(prepared, redactedText, redaction?.map ?? {}).map(
+      (chunk) => ({
+        ...chunk,
+        contentRedacted: chunk.content,
+        content: parsed.originalText.slice(chunk.charStart, chunk.charEnd),
+      })
+    )
     if (input.signal?.aborted) return cancelled()
 
     phase = "embedding"
@@ -245,16 +277,19 @@ export async function ingestKnowledgeBaseSource(
       store: input.deps.store,
       vectorCollection: input.deps.vectorCollection,
       contentHash: source.fingerprint,
+      expectedSource: source,
+      signal: input.signal,
+      documentSnapshot: {
+        originalText: parsed.originalText,
+        structure: parsed.structure,
+        title: parsed.title,
+        format: parsed.format,
+      },
       chunks,
       embeddings: embeddingResult.embeddings,
     })
 
     const completedAt = Date.now()
-    await updateKnowledgeBaseSource(
-      source.id,
-      { status: "ready", chunkCount: persisted.rows.length, errorCode: undefined },
-      completedAt
-    )
     await updateKnowledgeBaseIngestJob(
       job.id,
       {
@@ -273,10 +308,12 @@ export async function ingestKnowledgeBaseSource(
       tokensUsed: embeddingResult.tokensUsed ?? 0,
     }
   } catch (error) {
+    if (input.signal?.aborted && error instanceof DOMException && error.name === "AbortError")
+      return cancelled()
     const errorCode = failureCode(error, phase)
     const failedAt = Date.now()
     await Promise.all([
-      updateKnowledgeBaseSource(source.id, { status: "failed", errorCode }, failedAt),
+      updateUnchangedSource(source, { status: "failed", errorCode }, failedAt),
       updateKnowledgeBaseIngestJob(
         job.id,
         {

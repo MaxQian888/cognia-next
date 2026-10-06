@@ -28,6 +28,7 @@ import { collectRendererBackgroundResult } from "@/lib/background-tasks/renderer
 import { cancelSubagentRun } from "./cancel-subagent"
 import { renderDispatchOutcomeForModel } from "./dispatch-error"
 import { resolveCaller, startDispatchRun, DEFAULT_NESTING_MAX_DEPTH } from "./dispatch-run"
+import { clearKnowledgeReaderForSession } from "@/lib/knowledge-base/runtime/session-reader"
 
 export { DEFAULT_NESTING_MAX_DEPTH }
 
@@ -221,6 +222,7 @@ export function releaseDispatchBudgetForSession(sessionId: string): void {
  * long-lived chat session needs this teardown hook.
  */
 export function releaseDispatchStateForSession(sessionId: string): void {
+  clearKnowledgeReaderForSession(sessionId)
   releaseDispatchBudgetForSession(sessionId)
   clearResolvedPermissionCeiling(sessionId)
 }

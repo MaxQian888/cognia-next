@@ -288,6 +288,7 @@ export async function dispatchSubagent(
       // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
       // below is for its grandchildren; this is the ceiling that bounds the child.
       ...(options._permissionCeiling ? { permissionCeiling: options._permissionCeiling } : {}),
+      ...(options._knowledgeAccess ? { knowledgeAccess: options._knowledgeAccess } : {}),
       ...(typeof def.maxTurns === "number" ? { maxSteps: def.maxTurns } : {}),
       ...(options.cwd ? { cwd: options.cwd } : {}),
       ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),

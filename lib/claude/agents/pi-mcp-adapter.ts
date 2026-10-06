@@ -1,50 +1,19 @@
-// Pi's MCP, which Pi itself does not have.
-//
-// Pi's core ships zero MCP support — `mcpServers` appears nowhere in its
-// distribution. MCP arrives only when the user installs the third-party
-// `pi-mcp-adapter` package, which is why this adapter's id is
-// `pi-mcp-adapter` rather than `pi`: the two ids address two different files
-// owned by two different projects, and conflating them would let a user with
-// no adapter installed believe Cognia had wired MCP into Pi.
-//
-// **Layering.** The adapter reads six sources and lets the LAST one win:
-//
-//   1. ~/.config/mcp/mcp.json      4. <pi agent dir>/mcp.json   ← we write here
-//   2. ~/.agents/mcp.json          5. ./.mcp.json
-//   3. ~/.agents/mcp/mcp.json      6. ./.pi/mcp.json            ← highest
-//
-// This is the inverse of every other agent in this registry, where the user
-// scope is authoritative and project files are the exception. We still write
-// only the user scope — the two project layers are version-controlled repo
-// files that are not ours to edit — and surface the inversion through
-// `mcp-drift-banner.tsx` so a user whose repo pins a server understands why
-// their edit here had no effect.
-//
-// **Shape.** `ServerEntry` (pi-mcp-adapter's own `types.ts`) has no `type` /
-// `transport` discriminator at all: transport is inferred from `command` vs
-// `url` vs `socket`. So we omit the type key entirely — stamping one would
-// leave a field the adapter never reads. SSE is the one case that needs a
-// marker, because a bare `url` is read back as HTTP; `httpTransport: "sse"` is
-// the adapter's own field for pinning that, so the round-trip stays lossless.
+// Pi native MCP configuration, verified against Pi 1.0.2 (introduced in 0.99).
+// The persisted `pi-mcp-adapter` ID remains stable: `pi` addresses settings.json,
+// and registering two writable targets for mcp.json would race during syncAll.
+// Native Pi and the optional legacy extension read the same user-scope file.
+// Native Pi supports stdio and streamable HTTP; project .pi/mcp.json wins after
+// project trust. OAuth, exposure and enabled-state fields belong to Pi.
 
 import type { McpServer } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 import type { McpAgentAdapter } from "./index"
 import { denormalizeMcpEntry, dropInvalidDrafts, normalizeMcpEntry } from "./shared"
 
-/**
- * The npm identity of the package that provides this file. The UI gates the
- * whole surface on this being installed — without it, writing `mcp.json` would
- * produce a file nothing reads.
- */
+/** Optional legacy extension; native Pi no longer requires this package. */
 export const PI_MCP_ADAPTER_PACKAGE = "pi-mcp-adapter"
 
-/**
- * Both key spellings the adapter accepts (`config.ts` reads
- * `raw.mcpServers ?? raw["mcp-servers"]`). We preserve whichever one the file
- * already uses rather than normalising, exactly as the adapter's own writer
- * does — rewriting the key would look like a hand-edit in a user's diff.
- */
+// Accept legacy key spelling on import; always write the native spelling.
 const SERVERS_KEY = "mcpServers"
 const SERVERS_KEY_ALT = "mcp-servers"
 
@@ -100,8 +69,13 @@ function project(
   servers: McpServer[],
   managedNames?: ReadonlySet<string>
 ): unknown {
+  const unsupported = servers.find((server) => server.transport === "sse")
+  if (unsupported) {
+    throw new TypeError(
+      `Native Pi MCP does not support SSE server "${unsupported.name}"; use a streamable HTTP endpoint.`
+    )
+  }
   const root: RawPiMcpConfig = asRoot(existing) ?? {}
-  const key = serversKeyOf(asRoot(existing))
   const current = serversOf(asRoot(existing)) ?? {}
   const managedSet = managedNames ?? new Set(servers.map((s) => s.name))
   const next: Record<string, unknown> = {}
@@ -111,23 +85,26 @@ function project(
   }
 
   for (const server of servers) {
-    // `typeKey: null` — `ServerEntry` has no discriminator; transport is read
-    // off `command` / `url` / `socket`.
+    // Both native Pi and the legacy extension infer transport from command/url.
     const entry = denormalizeMcpEntry(server.transport, server.config, { typeKey: null })
-    if (server.transport === "sse") entry.httpTransport = "sse"
+    delete entry.httpTransport
+    delete entry.type
+    delete entry.transport
     next[server.name] = entry
   }
 
   // Preserve every unmanaged top-level key: this file also carries the
   // adapter's own `settings`, `imports` and per-server `disabled` overrides,
   // none of which Cognia models.
-  return { ...root, [key]: next }
+  const result = { ...root, [SERVERS_KEY]: next }
+  delete result[SERVERS_KEY_ALT]
+  return result
 }
 
 export const PI_MCP_ADAPTER_AGENT: McpAgentAdapter = {
   id: "pi-mcp-adapter",
-  displayName: "Pi (MCP adapter)",
-  description: "~/.pi/agent/mcp.json — requires the pi-mcp-adapter package",
+  displayName: "Pi",
+  description: "~/.pi/agent/mcp.json — native Pi MCP (0.99+)",
   writable: true,
   format: "json",
   parse,

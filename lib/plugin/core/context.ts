@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { toast } from "sonner"
 import { createPluginSystemLogger, loggers } from "./logger"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import {
@@ -344,7 +345,9 @@ export function createFullPluginContext(
   // Create feature APIs
   const contextAPI: PluginContextAPI = {
     session: createSessionAPI(pluginId),
-    project: createProjectAPI(pluginId),
+    project: createProjectAPI(pluginId, {
+      getReadingSettings: () => useSettingsStore.getState().settings?.knowledgeReading,
+    }),
     vector: createVectorAPI(pluginId),
     theme: createThemeAPI(pluginId),
     export: createExportAPI(pluginId),
@@ -1143,7 +1146,10 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
           'agent.dispatchSubagent to an external agent also requires the "agent:dispatch-external" permission — declare it in the plugin manifest.'
         )
       }
-      return dispatchSubagent(idOrDef, prompt, options)
+      // Public plugin arguments cannot manufacture a trusted workflow identity.
+      const { _knowledgeAccess: ignoredKnowledgeAccess, ...publicOptions } = options ?? {}
+      void ignoredKnowledgeAccess
+      return dispatchSubagent(idOrDef, prompt, options ? publicOptions : undefined)
     },
 
     runTeam: async (teamOrConfig: string | AgentTeamConfig, options?: PluginRunTeamOptions) => {

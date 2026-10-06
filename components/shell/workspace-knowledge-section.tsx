@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Spinner } from "@/components/ui/spinner"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { StatusBadge } from "@/components/status-badge"
@@ -34,7 +35,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import { getDb } from "@/lib/db/schema"
-import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
+import { hashKnowledgeFile } from "@/lib/project-knowledge/ingest/ingest-file"
 import { createProjectKnowledgeIngestController } from "@/lib/project-knowledge/wire-ingest"
 import { resolveProjectKnowledgeSettings } from "@/types/project-knowledge"
 import type { KnowledgeFile, Project } from "@/types"
@@ -90,7 +91,7 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
   const statusFor = (file: KnowledgeFile): { value: string; count: number } => {
     const entry = chunkStatus?.get(file.id)
     if (!entry || entry.count === 0) return { value: "pending", count: 0 }
-    if (entry.contentHash !== hashContent(file.content ?? "")) {
+    if (entry.contentHash !== hashKnowledgeFile(file)) {
       return { value: "outdated", count: entry.count }
     }
     return { value: "indexed", count: entry.count }
@@ -108,18 +109,68 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
       for (const file of Array.from(fileList)) {
         try {
           const data = isBinaryFilename(file.name) ? await file.arrayBuffer() : await file.text()
-          const processed = await processDocumentAsync(
+          let processed = await processDocumentAsync(
             `${project.id}:${file.name}:${file.lastModified}`,
             file.name,
             data,
             { extractEmbeddable: true }
           )
-          const content = (processed.embeddableContent || processed.content || "").trim()
-          if (!content) throw new Error(t("emptyFile"))
+          if (processed.type === "pdf" && data instanceof ArrayBuffer) {
+            const [{ runTwinPdfOcrWithProvenance }, { computePdfPageMap }] = await Promise.all([
+              import("@/lib/twin/ingest/ocr-fallback"),
+              import("@/lib/twin/ingest/parse"),
+            ])
+            const pageMap = computePdfPageMap("pdf", processed.parseResult, processed.content)
+            if (processed.structure && pageMap) {
+              processed = {
+                ...processed,
+                structure: {
+                  ...processed.structure,
+                  pages: processed.structure.pages.map((page) => {
+                    const bboxUnion = pageMap.find(
+                      (entry) => entry.pageNumber === page.pageNumber
+                    )?.bboxUnion
+                    return { ...page, ...(bboxUnion ? { bboxUnion } : {}) }
+                  }),
+                },
+              }
+            }
+            const ocr = await runTwinPdfOcrWithProvenance(
+              { id: processed.id, filename: file.name, format: "pdf", binary: data },
+              {
+                id: processed.id,
+                kind: "document",
+                format: "pdf",
+                title: processed.metadata.title || file.name,
+                originalText: processed.content,
+                embeddableText: processed.content,
+                structure: processed.structure,
+                pageMap,
+                bytes: file.size,
+                baseMetadata: {},
+              }
+            )
+            if (ocr)
+              processed = {
+                ...processed,
+                content: ocr.originalText,
+                embeddableContent: ocr.embeddableText,
+                structure: ocr.structure,
+              }
+          }
+          const content = processed.content || processed.embeddableContent || ""
+          if (!content.trim()) throw new Error(t("emptyFile"))
           addKnowledgeFile(project.id, {
             name: file.name,
             type: inferKnowledgeFileTypeFromFilename(file.name) as KnowledgeFile["type"],
             content,
+            embeddableContent: processed.embeddableContent,
+            structure: processed.structure,
+            mimeType: file.type,
+            pageCount:
+              typeof processed.metadata?.pageCount === "number"
+                ? processed.metadata.pageCount
+                : undefined,
             size: file.size,
           })
         } catch (error) {
@@ -337,6 +388,28 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
           onCommit={setTopK}
           className="h-7 w-20 text-xs"
         />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor="project-rag-strategy" className="text-xs font-normal text-muted-foreground">
+          {t("retrievalStrategy")}
+        </Label>
+        <NativeSelect
+          id="project-rag-strategy"
+          aria-label={t("retrievalStrategy")}
+          value={settings.retrievalStrategy}
+          className="h-7 text-xs"
+          onChange={(event) => {
+            const strategy = event.target.value
+            if (strategy !== "vector" && strategy !== "hybrid" && strategy !== "keyword") return
+            updateProject(project.id, {
+              knowledgeSettings: { ...project.knowledgeSettings, retrievalStrategy: strategy },
+            })
+          }}
+        >
+          <NativeSelectOption value="vector">{t("strategyVector")}</NativeSelectOption>
+          <NativeSelectOption value="hybrid">{t("strategyHybrid")}</NativeSelectOption>
+          <NativeSelectOption value="keyword">{t("strategyKeyword")}</NativeSelectOption>
+        </NativeSelect>
       </div>
       <p className="text-[11px] text-muted-foreground">{t("backendHint")}</p>
 

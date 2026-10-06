@@ -1127,6 +1127,32 @@ describe("dispatchTeammate — degraded text-channel diagnostic", () => {
 })
 
 describe("dispatchTeammate — tool-enabled sidecar path", () => {
+  it("forwards public workflow knowledge authority and clears the reader when the teammate finishes", async () => {
+    const { registerKnowledgeAccessForSession, getKnowledgeAccessForSession } =
+      await import("@/lib/knowledge-base/runtime/session-reader")
+    const knowledgeAccess = {
+      entrypoint: "http" as const,
+      allowedKnowledgeBaseIds: ["kb"],
+      revisionBindings: { kb: ["gen"] },
+    }
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "knowledge-team-session" })
+    getSessionMock.mockResolvedValue({ id: "knowledge-team-session", kind: "team" })
+    resolveSendOptionsMock.mockImplementationOnce(async () => {
+      registerKnowledgeAccessForSession("knowledge-team-session", {
+        knowledgeBaseIds: ["kb"],
+        knowledgeAccess,
+      })
+      return {}
+    })
+    runAndCaptureMock.mockResolvedValue({ text: "result" })
+    const { ctx } = makeCtx(makeTeammate())
+    await dispatchTeammate({ ...ctx, knowledgeAccess }, { taskId: "t1", prompt: "read" })
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ knowledgeAccess })
+    )
+    expect(getKnowledgeAccessForSession("knowledge-team-session")).toBeUndefined()
+  })
   it("sets sendOptions.maxTurns from the resolved maxSteps", async () => {
     isTauriMock.mockReturnValue(true)
     createSessionMock.mockResolvedValue({ id: "sess1" })

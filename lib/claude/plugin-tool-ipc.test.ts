@@ -32,12 +32,48 @@ import {
 import { TEAM_TOOL_NAMES } from "./team-builtin-tools"
 import { createSkillLoadContext, releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import type { Skill } from "@cognia/agent-config-types"
+import {
+  registerKnowledgeReaderForSession,
+  clearKnowledgeReaderForSession,
+} from "@/lib/knowledge-base/runtime/session-reader"
+
+jest.mock("@/lib/plugin/api/project-api", () => {
+  const actual = jest.requireActual("@/lib/plugin/api/project-api")
+  return { ...actual, createInvocationProjectAPI: jest.fn(actual.createInvocationProjectAPI) }
+})
 
 // Default `resolveWebToolDeps` reads the settings store and lazily imports the
 // utility-model client, the fetch-extractor and the search cache. Mock all four
 // so the default-resolver path can be exercised deterministically; existing
 // tests use `__setWebToolDepsForTesting` and bypass these.
 let mockSettings: Record<string, unknown> = {}
+it("routes knowledge reads through captured host session authority and fails closed unbound", async () => {
+  const request = {
+    type: "plugin_tool_exec" as const,
+    sessionId: "knowledge-session",
+    toolUseId: "read",
+    name: "knowledge_list_documents",
+    args: {},
+  }
+  expect((await handlePluginToolExec(request)).result).toMatchObject({
+    ok: false,
+    code: "knowledge_scope_unavailable",
+  })
+  registerKnowledgeReaderForSession(request.sessionId, {
+    knowledgeBaseIds: [],
+    settings: { enabled: true },
+    deps: {
+      listSources: async () => [],
+      getSources: async () => [],
+      getSnapshot: async () => undefined,
+    },
+  })
+  try {
+    expect((await handlePluginToolExec(request)).result).toMatchObject({ ok: true, documents: [] })
+  } finally {
+    clearKnowledgeReaderForSession(request.sessionId)
+  }
+})
 let mockClient: unknown = { complete: jest.fn() }
 
 jest.mock("@/stores/settings", () => ({
@@ -106,6 +142,37 @@ describe("handlePluginToolExec", () => {
     __setSessionPeerToolDepsForTesting(null)
     __setTemplateToolDepsForTesting(null)
     __setProjectCoordinatorToolDepsForTesting(null)
+  })
+
+  it("binds the project API to the trusted invocation session and disposes on success or error", async () => {
+    const projectApi = await import("@/lib/plugin/api/project-api")
+    const dispose = jest.fn()
+    const api = { listKnowledgeDocuments: jest.fn() } as never
+    const create = jest
+      .mocked(projectApi.createInvocationProjectAPI)
+      .mockReturnValueOnce({ api, dispose })
+      .mockReturnValueOnce({ api, dispose })
+    const execute = jest.fn(
+      async (_args: Record<string, unknown>, context: { project?: unknown }) => ({
+        hasInvocationApi: context.project === api,
+      })
+    )
+    __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "plugin", execute }) })
+    try {
+      const request = makeRequest({
+        name: "custom_read",
+        sessionId: "trusted-session",
+        args: { sessionId: "forged" },
+      })
+      expect((await handlePluginToolExec(request)).result).toMatchObject({ hasInvocationApi: true })
+      expect(create).toHaveBeenCalledWith("plugin", "trusted-session")
+      expect(dispose).toHaveBeenCalledTimes(1)
+      execute.mockRejectedValueOnce(new Error("read failed"))
+      expect((await handlePluginToolExec(request)).error).toContain("read failed")
+      expect(dispose).toHaveBeenCalledTimes(2)
+    } finally {
+      create.mockClear()
+    }
   })
 
   it("routes project-coordinator tools to the host runner before the plugin registry", async () => {

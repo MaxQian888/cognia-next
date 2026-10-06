@@ -22,6 +22,13 @@ export async function assertKnowledgeBaseRevisionBindings(
 ): Promise<void> {
   if (generationIds.length === 0) return
   const rows = await getDb().retrievalGenerations.bulkGet([...generationIds])
+  const sources = await getDb()
+    .knowledgeBaseSources.where("knowledgeBaseId")
+    .equals(knowledgeBaseId)
+    .toArray()
+  const ownedCorpora = new Set(
+    sources.map((source) => knowledgeBaseSourceCorpusId(knowledgeBaseId, source.id))
+  )
   const prefix = `knowledge_base:${knowledgeBaseId}:source:`
   const invalid = generationIds.filter((id, index) => {
     const row = rows[index]
@@ -29,6 +36,7 @@ export async function assertKnowledgeBaseRevisionBindings(
       !row ||
       row.domain !== "kb" ||
       !row.corpusId.startsWith(prefix) ||
+      !ownedCorpora.has(row.corpusId) ||
       !row.validation?.valid ||
       (row.status !== "active" && row.status !== "retiring")
     )
@@ -70,41 +78,54 @@ export async function rollbackKnowledgeBaseSourceRevision(input: {
   const db = getDb()
   const corpusId = knowledgeBaseSourceCorpusId(input.knowledgeBaseId, input.sourceId)
   const now = input.now ?? Date.now()
-  return db.transaction("rw", [db.retrievalGenerations, db.retrievalActivePointers], async () => {
-    const target = await db.retrievalGenerations.get(input.generationId)
-    if (
-      !target ||
-      target.corpusId !== corpusId ||
-      target.domain !== "kb" ||
-      !target.validation?.valid ||
-      (target.status !== "active" && target.status !== "retiring")
-    ) {
-      throw new Error("Knowledge Base revision is not a validated revision of this source")
-    }
-    const pointer = await db.retrievalActivePointers.get(corpusId)
-    if (pointer?.generationId === target.id) return target
-    const previous = pointer ? await db.retrievalGenerations.get(pointer.generationId) : undefined
-    if (previous?.status === "active") {
-      await db.retrievalGenerations.put({
-        ...previous,
-        status: "retiring",
-        retiredAt: now,
+  return db.transaction(
+    "rw",
+    [db.knowledgeBaseSources, db.retrievalGenerations, db.retrievalActivePointers],
+    async () => {
+      const source = await db.knowledgeBaseSources.get(input.sourceId)
+      if (!source || source.knowledgeBaseId !== input.knowledgeBaseId)
+        throw new Error("Knowledge Base source is unavailable")
+      const target = await db.retrievalGenerations.get(input.generationId)
+      if (
+        !target ||
+        target.corpusId !== corpusId ||
+        target.domain !== "kb" ||
+        !target.validation?.valid ||
+        (target.status !== "active" && target.status !== "retiring")
+      ) {
+        throw new Error("Knowledge Base revision is not a validated revision of this source")
+      }
+      const pointer = await db.retrievalActivePointers.get(corpusId)
+      if (pointer?.generationId === target.id) return target
+      const previous = pointer ? await db.retrievalGenerations.get(pointer.generationId) : undefined
+      if (previous?.status === "active") {
+        await db.retrievalGenerations.put({
+          ...previous,
+          status: "retiring",
+          retiredAt: now,
+        })
+      }
+      const active: RetrievalGenerationRow = {
+        ...target,
+        status: "active",
+        activatedAt: now,
+        retiredAt: undefined,
+      }
+      await db.retrievalGenerations.put(active)
+      await db.retrievalActivePointers.put({
+        corpusId,
+        generationId: active.id,
+        domain: "kb",
+        profileFingerprint: active.profileFingerprint,
+        updatedAt: now,
       })
+      await db.knowledgeBaseSources.update(input.sourceId, {
+        status: "ready",
+        chunkCount: target.validation.count,
+        errorCode: undefined,
+        updatedAt: now,
+      })
+      return active
     }
-    const active: RetrievalGenerationRow = {
-      ...target,
-      status: "active",
-      activatedAt: now,
-      retiredAt: undefined,
-    }
-    await db.retrievalGenerations.put(active)
-    await db.retrievalActivePointers.put({
-      corpusId,
-      generationId: active.id,
-      domain: "kb",
-      profileFingerprint: active.profileFingerprint,
-      updatedAt: now,
-    })
-    return active
-  })
+  )
 }

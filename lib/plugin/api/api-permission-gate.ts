@@ -31,9 +31,15 @@ export function hasApiOrGuardPermission(
   pluginId: string,
   permission: PluginAPIPermission
 ): boolean {
+  const guard = getPermissionGuard()
+  if (
+    guard.getTier(pluginId, permission as PluginPermission) === "forbid" ||
+    guard.isRevoked(pluginId, permission as PluginPermission)
+  )
+    return false
   return (
     pluginHasApiPermission(pluginId, permission) ||
-    getPermissionGuard().check(pluginId, permission as unknown as PluginPermission, "api-gate")
+    guard.check(pluginId, permission as unknown as PluginPermission, "api-gate")
   )
 }
 

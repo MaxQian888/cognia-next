@@ -23,10 +23,14 @@ import type { IVectorStore } from "@cognia/vector/store"
 import type { TwinJob, TwinSource, VectorBackend } from "@/types/twin"
 import { type EmbeddingConfig, embedRedactedChunks } from "./embed"
 import { parseSource, type RawSource } from "./parse"
-import { runTwinPdfOcr } from "./ocr-fallback"
+import { runTwinPdfOcrWithProvenance } from "./ocr-fallback"
 import { persistChunks, vectorCollectionName } from "./persist"
 import { prepareChunks } from "./chunk"
-import { redactText, translateOffsetsThroughRedaction, unredactText } from "@cognia/redact"
+import {
+  redactText,
+  translateOffsetsThroughRedaction,
+  restoreOffsetsThroughRedaction,
+} from "@cognia/redact"
 import { encryptRedactionMap } from "./redaction-key"
 import { throwIfTwinJobInterrupted } from "@/lib/twin/job-control"
 import { twinEmbeddingFingerprint } from "@/lib/twin/runtime/twin-embedding"
@@ -163,7 +167,12 @@ async function progress(jobId: string, phase: string, ratio: number, signal?: Ab
  */
 async function ensureSourceRow(twinId: string, raw: RawSource): Promise<TwinSource> {
   const existing = await getTwinSource(raw.id)
-  if (existing) return existing
+  if (existing) {
+    if (existing.twinId !== twinId || existing.status === "deleted") {
+      throw new Error("Twin source is unavailable to this ingest job")
+    }
+    return existing
+  }
   return createTwinSource({
     id: raw.id,
     twinId,
@@ -207,7 +216,9 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
     throwIfTwinJobInterrupted(input.signal)
     const raw = rawSources[s]
     const stageBase = (s / rawSources.length) * TOTAL_STAGES
-    let row = await ensureSourceRow(job.twinId, raw)
+    const row = await ensureSourceRow(job.twinId, raw)
+    const hadServingSnapshot = !!row.documentSnapshot || row.status === "parsed"
+    const sourceRevision = { fingerprint: row.fingerprint, source: row.source }
     await updateTwinSource(row.id, { status: "parsing" })
 
     try {
@@ -224,13 +235,12 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
       // Stage 2.5 — OCR fallback for scanned/image-only PDFs (ADR-0024). When
       // the text layer came back (near-)empty, re-extract via the OCR PDF
       // router and use that text for redaction + chunking. Best-effort.
-      const ocrText = await runTwinPdfOcr(raw, parsed).catch(() => null)
+      const ocrText = await runTwinPdfOcrWithProvenance(raw, parsed).catch(() => null)
       throwIfTwinJobInterrupted(input.signal)
       if (ocrText) {
-        // OCR replaced the text wholesale — the native pageMap's char
-        // offsets index the abandoned text layer, so spatial provenance
-        // is invalid and must be dropped.
-        parsed = { ...parsed, embeddableText: ocrText, originalText: ocrText, pageMap: undefined }
+        // OCR publishes a new canonical text and matching per-page ranges.
+        // Native boxes do not apply to rasterized OCR pages.
+        parsed = { ...parsed, ...ocrText }
       }
 
       // Stage 3 — redact PII.
@@ -262,15 +272,6 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         }
       }
 
-      await updateTwinSource(row.id, {
-        kind: parsed.kind,
-        title: parsed.title,
-        bytes: parsed.bytes,
-        redacted: true,
-        ...(redactionMapEnc ? { redactionMapEnc } : {}),
-      })
-      row = (await getTwinSource(row.id)) as TwinSource
-
       // Stage 4 — chunk. The PDF pageMap (when the native parser produced
       // one) is translated from embeddable space into redacted space first
       // — chunk offsets index the redacted text (see T1.1 below).
@@ -290,24 +291,17 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         baseMetadata: parsed.baseMetadata,
         ...(pageMap ? { pageMap } : {}),
       })
-      if (chunks.length === 0) {
-        await updateTwinSource(row.id, { status: "parsed", chunkCount: 0, parsedAt: Date.now() })
-        parsedIds.push(row.id)
-        continue
-      }
 
-      // Each row stores both the embedded redacted form and the displayable
-      // original. Reconstruct the original by *un-redacting the redacted chunk*
-      // via the redaction map — NOT by slicing parsed.originalText with these
-      // offsets. The offsets index the redacted text (placeholders differ in
-      // length from the originals, so every offset after the first redaction in
-      // a chunk is shifted), and `originalText` can also differ from the
-      // `embeddableText` that was actually chunked. Un-redacting the chunk is
-      // exact by construction.
-      const enriched = chunks.map((c) => ({
+      // Persist source offsets after inverse redaction mapping. Boundaries inside
+      // placeholders expand to whole original spans; source slices remain exact.
+      const enriched = restoreOffsetsThroughRedaction(
+        chunks,
+        redaction.redacted,
+        redaction.map
+      ).map((c) => ({
         ...c,
         contentRedacted: c.content,
-        content: unredactText(c.content, redaction.map),
+        content: parsed.originalText.slice(c.charStart, c.charEnd),
       }))
 
       // Stage 5 — embed.
@@ -317,11 +311,14 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         (stageBase + 4) / TOTAL_STAGES,
         input.signal
       )
-      const embeddingResult = await embedRedactedChunks(
-        enriched.map((c) => c.contentRedacted),
-        embedding,
-        input.signal
-      )
+      const embeddingResult =
+        enriched.length > 0
+          ? await embedRedactedChunks(
+              enriched.map((c) => c.contentRedacted),
+              embedding,
+              input.signal
+            )
+          : { embeddings: [], tokensUsed: 0 }
       totalTokens += embeddingResult.tokensUsed ?? 0
 
       // Stage 6 — persist (Dexie + remote double write).
@@ -342,6 +339,20 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
         vectorCollection: collection,
         store,
         contentHash: row.fingerprint,
+        sourceRevision,
+        sourceMetadata: {
+          kind: parsed.kind,
+          title: parsed.title,
+          bytes: parsed.bytes,
+          redacted: true,
+          redactionMapEnc,
+        },
+        documentSnapshot: {
+          originalText: parsed.originalText,
+          structure: parsed.structure,
+          title: parsed.title,
+          format: parsed.format,
+        },
         chunks: enriched,
         embeddings: embeddingResult.embeddings,
         profileFingerprint: twinEmbeddingFingerprint({
@@ -357,7 +368,17 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
     } catch (err) {
       if (input.signal?.aborted) throw err
       const message = err instanceof Error ? err.message : String(err)
-      await updateTwinSource(row.id, { status: "failed", errorMessage: message })
+      const current = await getTwinSource(row.id)
+      if (
+        current?.twinId === job.twinId &&
+        current.fingerprint === sourceRevision.fingerprint &&
+        current.source === sourceRevision.source
+      ) {
+        await updateTwinSource(row.id, {
+          status: hadServingSnapshot ? "parsed" : "failed",
+          errorMessage: message,
+        })
+      }
       failures.push({ sourceId: row.id, filename: raw.filename, message })
       // Per-source failure is non-fatal: continue to the next source so a
       // single bad PDF doesn't kill the whole batch. `finalizeIngestRun`

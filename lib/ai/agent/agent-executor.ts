@@ -98,6 +98,8 @@ export interface AgentTool {
 }
 
 export interface ExecuteAgentConfig {
+  /** Trusted workflow execution identity, never inferred from prompt text. */
+  knowledgeAccess?: import("@/lib/knowledge-base/runtime/progressive-reading").KnowledgeReadingAccess
   systemPrompt?: string
   model?: string
   tools?: AgentTool[]
@@ -472,7 +474,7 @@ export async function buildAgentBoundContext(
   if (!prompt.trim() || (!hasKnowledge && !hasTwin)) return {}
   const { tryBuildTwinDeps } = await import("@/lib/twin/runtime/build-deps")
   const deps = await tryBuildTwinDeps().catch(() => undefined)
-  if (!deps) return {}
+  if (!deps) return hasKnowledge ? { projectKnowledgeUserMessage: prompt } : {}
   return {
     ...(hasKnowledge ? { projectKnowledgeDeps: deps, projectKnowledgeUserMessage: prompt } : {}),
     ...(hasTwin ? { twinDeps: deps, twinUserMessage: prompt } : {}),
@@ -571,6 +573,7 @@ async function runToolEnabledStandalone(
       character,
       appSettings: appSettings ?? null,
       ...boundContext,
+      ...(config.knowledgeAccess ? { knowledgeAccess: config.knowledgeAccess } : {}),
       ...(config.dispatchContext ? { dispatchContext: config.dispatchContext } : {}),
       ...(config.isDispatchedSubagent ? { isDispatchedSubagent: true } : {}),
       ...(config.permissionCeiling ? { permissionCeiling: config.permissionCeiling } : {}),
@@ -786,6 +789,9 @@ async function runToolEnabledStandalone(
     // Drop the ceiling resolveSendOptions deposited for this run's session id so
     // a re-used ephemeral id never inherits a stale ceiling.
     clearResolvedPermissionCeiling(session.id)
+    const { clearKnowledgeReaderForSession } =
+      await import("@/lib/knowledge-base/runtime/session-reader")
+    clearKnowledgeReaderForSession(session.id)
     // Ephemeral sessions are torn down; persistent ones survive for resume.
     if (!persistent) void sessionsDb.deleteSession(session.id).catch(() => undefined)
   }

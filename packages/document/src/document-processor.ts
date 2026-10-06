@@ -28,6 +28,7 @@ import {
   normalizeCSVSummary,
   normalizeHTMLSummary,
 } from "./parse-summary"
+import { buildDocumentStructure } from "./document-structure"
 import { mapWordMessages, attachDiagnosticToError } from "./parse-diagnostics"
 
 export type { DocumentType, DocumentMetadata, ProcessedDocument } from "./types"
@@ -46,6 +47,8 @@ export interface ProcessingOptions {
   generateChunks?: boolean
   chunkingOptions?: Partial<ChunkingOptions>
   maxFileSize?: number
+  /** PDF bookmarks default on; native spatial extraction is retained. */
+  extractPdfOutline?: boolean
   /** Opt-in rollout gate for the experimental AnyDoc legacy Office adapter. */
   anyDoc?: {
     enabled?: boolean
@@ -252,11 +255,16 @@ export function processDocument(
     metadata,
     parseSummary,
     parseDiagnostics: [],
+    structure: buildDocumentStructure({
+      content,
+      title: metadata.title,
+      ...(type === "markdown" ? { markdown: parseMarkdown(content) } : {}),
+    }),
     sourceSegments: [
       {
         id: `${id}:text`,
-        text: embeddableContent,
-        locator: { type: "text", start: 0, end: embeddableContent.length },
+        text: content,
+        locator: { type: "text", start: 0, end: content.length },
       },
     ],
   }
@@ -315,7 +323,10 @@ export async function processDocumentAsync(
       // Dynamic import to reduce bundle size and memory usage
       const { parsePDF, extractPDFEmbeddableContent } = await import("./parsers/pdf-parser")
       const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
-      const parsed = await parsePDF(buffer, { signal: opts.signal })
+      const parsed = await parsePDF(buffer, {
+        signal: opts.signal,
+        extractOutline: opts.extractPdfOutline !== false,
+      })
       content = parsed.text
       embeddableContent = opts.extractEmbeddable ? extractPDFEmbeddableContent(parsed) : content
       metadata = {
@@ -650,6 +661,13 @@ export async function processDocumentAsync(
     parseResult,
     parseSummary,
     parseDiagnostics,
+    structure: buildDocumentStructure({
+      content,
+      title: metadata.title,
+      ...(parseResult && "pages" in parseResult
+        ? { pdf: parseResult }
+        : { markdown: parseMarkdown(content) }),
+    }),
   }
 
   opts.signal?.throwIfAborted()
@@ -692,8 +710,8 @@ export async function processDocumentAsync(
     result.sourceSegments = [
       {
         id: `${id}:text`,
-        text: embeddableContent,
-        locator: { type: "text", start: 0, end: embeddableContent.length },
+        text: content,
+        locator: { type: "text", start: 0, end: content.length },
       },
     ]
   }

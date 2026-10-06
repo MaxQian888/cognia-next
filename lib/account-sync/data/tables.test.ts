@@ -32,6 +32,11 @@ describe("account sync table policies", () => {
   })
 
   it("keep machine-bound fields on the device", () => {
+    expect(TABLE_POLICIES.sessions.fields.knowledgeReading).toBe("local")
+    expect(TABLE_POLICIES.characters.fields.knowledgeReading).toBe("local")
+    expect(TABLE_POLICIES.settings.fields.knowledgeReading).toBe("local")
+    expect(syncedFields(TABLE_POLICIES.sessions)).not.toContain("knowledgeReading")
+    expect(syncedFields(TABLE_POLICIES.characters)).not.toContain("knowledgeReading")
     expect(TABLE_POLICIES.sessions.fields.workingDir).toBe("local")
     expect(TABLE_POLICIES.sessions.fields.sdkSessionId).toBe("local")
     expect(TABLE_POLICIES.sessions.fields.platformBinding).toBe("local")

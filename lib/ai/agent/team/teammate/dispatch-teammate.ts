@@ -307,6 +307,7 @@ async function runToolEnabled(
       character,
       appSettings: appSettings ?? null,
       ...(ceiling ? { permissionCeiling: ceiling } : {}),
+      ...(teamCtx.knowledgeAccess ? { knowledgeAccess: teamCtx.knowledgeAccess } : {}),
       // The teammate's resolved `subagentIds` narrow the team session's native
       // subagents to the ones this member was given. An empty list means the
       // team configured none, so the whole team surface stays (as for MCP).
@@ -518,6 +519,9 @@ async function runToolEnabled(
     return { text: result.text ?? "", usage: readUsage(result) }
   } finally {
     releaseLiveControl?.()
+    const { clearKnowledgeReaderForSession } =
+      await import("@/lib/knowledge-base/runtime/session-reader")
+    clearKnowledgeReaderForSession(session.id)
     clearResolvedPermissionCeiling(session.id)
     clearTeamDispatchContext(session.id)
     void sessionsDb.deleteSession(session.id).catch(() => undefined)
@@ -676,7 +680,8 @@ async function runTextOnly(
   systemPrompt: string,
   modelHint: string | undefined,
   signal: AbortSignal,
-  maxSteps?: number
+  maxSteps?: number,
+  knowledgeAccess?: TeamRunContext["knowledgeAccess"]
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const { executeAgent } = await import("../../agent-executor")
   const result = await executeAgent(prompt, {
@@ -684,6 +689,7 @@ async function runTextOnly(
     ...(modelHint ? { model: modelHint } : {}),
     ...(typeof maxSteps === "number" && maxSteps > 0 ? { maxSteps } : {}),
     abortSignal: signal,
+    ...(knowledgeAccess ? { knowledgeAccess } : {}),
   })
   return { text: result.text ?? "", usage: readUsage(result) }
 }
@@ -1667,7 +1673,14 @@ export async function dispatchTeammate(
         })
         textSystemPrompt = injected.systemPrompt
       }
-      return runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
+      return runTextOnly(
+        promptText,
+        textSystemPrompt,
+        modelHint,
+        combinedSignal,
+        maxSteps,
+        teamCtx.knowledgeAccess
+      )
     }
     const turn = durableDispatch
       ? await durableDispatch.run(executeTurn, combinedSignal)

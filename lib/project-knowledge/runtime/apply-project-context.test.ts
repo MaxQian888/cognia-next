@@ -17,6 +17,21 @@ function hit(fileId: string, content: string, score = 1) {
 beforeEach(() => retrieveMock.mockReset())
 
 describe("applyProjectKnowledgeContext", () => {
+  it("passes host-selected candidate strategy and current file scope to retrieval", async () => {
+    retrieveMock.mockResolvedValue({ chunks: [], degraded: false })
+    await applyProjectKnowledgeContext({
+      projectId: "p",
+      userMessage: "q",
+      topK: 3,
+      strategy: "hybrid",
+      fileIds: ["f1"],
+      deps,
+    })
+    expect(retrieveMock).toHaveBeenCalledWith(
+      expect.objectContaining({ strategy: "hybrid", fileIds: ["f1"] })
+    )
+  })
+
   it("returns empty (no retrieve) for a blank message", async () => {
     const res = await applyProjectKnowledgeContext({
       projectId: "p",

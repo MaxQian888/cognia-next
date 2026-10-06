@@ -45,6 +45,10 @@
 //!   keys are agent ids, and a phone's local agents are not the desktop's, so a default
 //!   mirrored across devices would name agents the other side does not have.
 //!
+//! `knowledgeReading` — device-local (never crosses the wire).
+//!   Reading budgets and summary provider registrations belong to this host's local document
+//!   runtime; another device may not have the same bound sources or registered provider.
+//!
 //! `languageMode` — device-local (never crosses the wire).
 //!   Following the operating system is a per-device choice; each device resolves its own
 //!   language.

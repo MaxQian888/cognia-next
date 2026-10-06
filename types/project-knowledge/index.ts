@@ -69,22 +69,30 @@ export interface ProjectKnowledgeSettings {
   enableProjectRag?: boolean
   /** Number of chunks to retrieve per turn. Default 5. */
   ragTopK?: number
+  /** Candidate lane. Vector retains the historical fast-RAG behavior. */
+  retrievalStrategy?: "vector" | "hybrid" | "keyword"
 }
 
 export interface ResolvedProjectKnowledgeSettings {
   enableProjectRag: boolean
   ragTopK: number
+  retrievalStrategy: "vector" | "hybrid" | "keyword"
 }
 
 export const DEFAULT_PROJECT_KNOWLEDGE_SETTINGS: ResolvedProjectKnowledgeSettings = {
   enableProjectRag: true,
   ragTopK: 5,
+  retrievalStrategy: "vector",
 }
 
 export function resolveProjectKnowledgeSettings(
   settings?: ProjectKnowledgeSettings | null
 ): ResolvedProjectKnowledgeSettings {
   return {
+    retrievalStrategy:
+      settings?.retrievalStrategy === "hybrid" || settings?.retrievalStrategy === "keyword"
+        ? settings.retrievalStrategy
+        : "vector",
     enableProjectRag:
       settings?.enableProjectRag ?? DEFAULT_PROJECT_KNOWLEDGE_SETTINGS.enableProjectRag,
     ragTopK:

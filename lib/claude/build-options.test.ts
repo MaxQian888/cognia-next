@@ -6857,6 +6857,79 @@ describe("resolveSendOptions — reusable Agent Knowledge Bases", () => {
     vectorBackend: "native",
   } as never
 
+  it("registers opt-in source tools with session settings and immutable workflow authority", async () => {
+    const { getKnowledgeReaderForSession, clearKnowledgeReaderForSession } =
+      await import("@/lib/knowledge-base/runtime/session-reader")
+    const character = makeChar({
+      id: "reading-agent",
+      knowledgeBaseIds: ["kb-1"],
+      knowledgeReading: { maxCalls: 4 },
+    })
+    const session = {
+      id: "reading-session",
+      knowledgeReading: { maxCalls: 2, retrievalStrategy: "keyword" },
+    } as never
+    const opts = await resolveSendOptions({
+      session,
+      character,
+      appSettings: { knowledgeReading: { enabled: true, maxCalls: 8 } } as never,
+      knowledgeAccess: { entrypoint: "http", revisionBindings: { "kb-1": ["gen"] } },
+    })
+    expect(opts.pluginTools?.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        "knowledge_list_documents",
+        "knowledge_read_outline",
+        "knowledge_read_original",
+        "knowledge_locate",
+      ])
+    )
+    expect(getKnowledgeReaderForSession("reading-session")?.settings).toMatchObject({
+      maxCalls: 2,
+      retrievalStrategy: "keyword",
+    })
+    const disabled = await resolveSendOptions({
+      session: { id: "reading-session", knowledgeReading: { enabled: false } } as never,
+      character,
+      appSettings: { knowledgeReading: { enabled: true } } as never,
+    })
+    expect(disabled.pluginTools?.map((tool) => tool.name)).not.toContain("knowledge_read_original")
+    expect(getKnowledgeReaderForSession("reading-session")).toBeUndefined()
+    clearKnowledgeReaderForSession("reading-session")
+  })
+
+  it("uses configurable lexical retrieval without vector deps and enforces HTTP source ACL", async () => {
+    mApplyAgentKnowledge.mockResolvedValue({
+      systemPromptSection: null,
+      retrievedChunks: [],
+      citations: [],
+      failures: [],
+      degraded: false,
+      budget: { limit: 33, used: 0, truncated: false },
+    })
+    await resolveSendOptions({
+      character: makeChar({ knowledgeBaseIds: ["kb-1"] }),
+      appSettings: {
+        knowledgeReading: { retrievalStrategy: "keyword", topKPerBase: 3, ragTokenBudget: 33 },
+      } as never,
+      projectKnowledgeUserMessage: "query",
+      knowledgeAccess: { entrypoint: "http", revisionBindings: { "kb-1": ["revision"] } },
+    })
+    const input = mApplyAgentKnowledge.mock.calls.at(-1)![0]
+    expect(input).toMatchObject({
+      retrievalStrategy: "keyword",
+      topKPerBase: 3,
+      tokenBudget: 33,
+      revisionBindings: { "kb-1": ["revision"] },
+    })
+    expect(input.authorizeChunk({ source: { knowledgeBaseId: "kb-1" } })).toBe(false)
+    expect(
+      input.authorizeChunk({ source: { knowledgeBaseId: "kb-1", acl: { visibility: "public" } } })
+    ).toBe(true)
+    expect(
+      input.authorizeChunk({ source: { knowledgeBaseId: "other", acl: { visibility: "public" } } })
+    ).toBe(false)
+  })
+
   it("appends bound-library context and preserves citation metadata", async () => {
     mApplyAgentKnowledge.mockResolvedValue({
       systemPromptSection: "## Agent knowledge bases\nanswer context",

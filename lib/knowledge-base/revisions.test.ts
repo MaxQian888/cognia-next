@@ -11,7 +11,14 @@ import {
 const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
-beforeEach(dbFixture.restore)
+beforeEach(async () => {
+  await dbFixture.restore()
+  await getDb().knowledgeBaseSources.put({
+    id: "source-1",
+    knowledgeBaseId: "kb-1",
+    updatedAt: 1,
+  } as never)
+})
 afterAll(dbFixture.dispose)
 
 function generation(
@@ -58,6 +65,11 @@ it("atomically rolls current back to a retained validated revision", async () =>
     status: "retiring",
     retiredAt: 3,
   })
+  expect(await db.knowledgeBaseSources.get("source-1")).toMatchObject({
+    status: "ready",
+    chunkCount: 1,
+    updatedAt: 3,
+  })
 })
 
 it("rejects missing, cross-library, and failed frozen revisions", async () => {
@@ -101,4 +113,17 @@ it("resolves the current channel as source-scoped dependency lock entries", asyn
   await expect(resolveCurrentKnowledgeBaseRevisionBindings("kb-1")).resolves.toEqual({
     "knowledge:kb-1:source-1": "current",
   })
+})
+
+it("cannot bind or roll back a deleted source even when orphan control rows exist", async () => {
+  await getDb().retrievalGenerations.put(generation("old", "retiring"))
+  await getDb().knowledgeBaseSources.delete("source-1")
+  await expect(assertKnowledgeBaseRevisionBindings("kb-1", ["old"])).rejects.toThrow("unavailable")
+  await expect(
+    rollbackKnowledgeBaseSourceRevision({
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      generationId: "old",
+    })
+  ).rejects.toThrow("source is unavailable")
 })

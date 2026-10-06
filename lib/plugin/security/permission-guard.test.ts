@@ -453,6 +453,22 @@ describe("createGuardedAPI", () => {
     expect(() => guarded.writeFile()).toThrow(PermissionError)
   })
 
+  it("honors forbid on granted synchronous and consent-exempt APIs", () => {
+    const read = jest.fn(() => "private document")
+    const guarded = createGuardedAPI("plugin-a", { read }, { read: "clipboard:read" })
+    const exempt = createGuardedAPI(
+      "plugin-a",
+      { read },
+      { read: "clipboard:read" },
+      { consentExempt: ["read"] }
+    )
+    guard.setTier("plugin-a", "clipboard:read", "forbid")
+    expect(guard.check("plugin-a", "clipboard:read")).toBe(false)
+    expect(() => guarded.read()).toThrow(PermissionError)
+    expect(() => exempt.read()).toThrow(PermissionError)
+    expect(read).not.toHaveBeenCalled()
+  })
+
   it("fails closed: an unmapped, non-unguarded method throws on call", () => {
     const api = {
       publicMethod: () => "public",

@@ -2,12 +2,26 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SourcesPart } from "./sources-part"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
 import en from "@/i18n/messages/en.json"
 import zhCN from "@/i18n/messages/zh-CN.json"
 
+const mockLocate = jest.fn()
+const mockReadRange = jest.fn()
+const mockCreateReader = jest.fn((_input: unknown) => ({
+  locate: mockLocate,
+  readRange: mockReadRange,
+}))
+jest.mock("@/lib/knowledge-base/runtime/progressive-reading", () => ({
+  createKnowledgeReader: (input: unknown) => mockCreateReader(input),
+  KnowledgeReadingError: class extends Error {
+    constructor(public code: string) {
+      super(code)
+    }
+  },
+}))
 const mockJump = jest.fn()
 jest.mock("@/lib/chat/cross-session-jump", () => ({
   jumpToSessionMessage: (...args: unknown[]) => mockJump(...args),
@@ -496,4 +510,189 @@ describe("retrieval feedback on a recalled memory", () => {
       }
     }
   })
+})
+
+const knowledgePart: SourcesPartType = {
+  type: "sources",
+  sources: [
+    {
+      id: "kb-source",
+      title: "Manual",
+      origin: "agent-knowledge-base",
+      knowledgeBaseRef: {
+        knowledgeBaseId: "kb-1",
+        sourceId: "source-1",
+        chunkId: "chunk-1",
+        generationId: "generation-1",
+        charStart: 25_000,
+        charEnd: 25_008,
+        pageNumber: 8,
+        pageEnd: 8,
+      },
+    },
+  ],
+}
+
+function readyKnowledgeReader() {
+  mockLocate.mockResolvedValue({
+    generationId: "generation-1",
+    charStart: 25_000,
+    charEnd: 25_008,
+    pageNumber: 8,
+  })
+  mockReadRange.mockResolvedValue({
+    generationId: "generation-1",
+    title: "Original manual",
+    text: "x".repeat(1000) + "Evidence" + " context",
+    charStart: 24_000,
+    charEnd: 25_016,
+    versionStatus: "historical",
+  })
+}
+
+it("opens a bounded original passage in the reused reader and returns to chat on close", async () => {
+  readyKnowledgeReader()
+  render(<SourcesPart part={knowledgePart} />)
+  fireEvent.click(screen.getByTestId("sources-part-view-knowledge"))
+  expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("source-preview-highlight")).toHaveTextContent("Evidence")
+  expect(screen.getByTestId("source-preview-location")).toHaveTextContent("Pages 8–8")
+  expect(screen.getByRole("status")).toHaveTextContent("earlier document version")
+  expect(mockLocate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      generationId: "generation-1",
+      sourceId: "source-1",
+      charStart: 25_000,
+      pageStart: 8,
+    })
+  )
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  expect(screen.getByTestId("sources-part-view-knowledge")).toBeInTheDocument()
+})
+
+it("deduplicates pending clicks and rechecks a deleted source on the next open", async () => {
+  mockLocate.mockClear()
+  mockReadRange.mockClear()
+  let resolve!: (value: unknown) => void
+  mockLocate.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done
+      })
+  )
+  readyKnowledgeReader()
+  render(<SourcesPart part={knowledgePart} />)
+  const button = screen.getByTestId("sources-part-view-knowledge")
+  fireEvent.click(button)
+  fireEvent.click(button)
+  await waitFor(() => expect(mockLocate).toHaveBeenCalledTimes(1))
+  expect(button).toBeDisabled()
+  resolve({ generationId: "generation-1", charStart: 25_000, charEnd: 25_008 })
+  await screen.findByRole("dialog")
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  mockLocate.mockRejectedValueOnce({ code: "source_unavailable" })
+  fireEvent.click(button)
+  await waitFor(() =>
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("unavailable"))
+  )
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  expect(button).not.toBeDisabled()
+})
+
+it("reports an expired revision without substituting current text and permits recovery", async () => {
+  mockToastError.mockClear()
+  mockReadRange.mockClear()
+  mockLocate.mockRejectedValueOnce({ code: "revision_unavailable" })
+  render(<SourcesPart part={knowledgePart} />)
+  const button = screen.getByTestId("sources-part-view-knowledge")
+  fireEvent.click(button)
+  await waitFor(() =>
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("version"))
+  )
+  expect(mockReadRange).not.toHaveBeenCalled()
+  readyKnowledgeReader()
+  fireEvent.click(button)
+  expect(await screen.findByTestId("source-preview-highlight")).toHaveTextContent("Evidence")
+})
+
+it("rejects a changed document hash before reading replacement text", async () => {
+  mockReadRange.mockClear()
+  mockToastError.mockClear()
+  readyKnowledgeReader()
+  mockLocate.mockResolvedValueOnce({
+    generationId: "generation-1",
+    contentHash: "saved-hash",
+    documentVersion: "different-canonical-hash",
+    charStart: 25_000,
+    charEnd: 25_008,
+  })
+  const part = {
+    ...knowledgePart,
+    sources: knowledgePart.sources.map((source) => ({
+      ...source,
+      knowledgeBaseRef: { ...source.knowledgeBaseRef!, documentVersion: "saved-hash" },
+    })),
+  }
+  render(<SourcesPart part={part} />)
+  fireEvent.click(screen.getByTestId("sources-part-view-knowledge"))
+  await waitFor(() =>
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("version"))
+  )
+  expect(mockReadRange).not.toHaveBeenCalled()
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+})
+
+it("discards an in-flight source read when its chat row is removed", async () => {
+  mockToastError.mockClear()
+  mockLocate.mockClear()
+  mockReadRange.mockClear()
+  let reject!: (value: unknown) => void
+  mockLocate.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail
+      })
+  )
+  const { unmount } = render(<SourcesPart part={knowledgePart} />)
+  fireEvent.click(screen.getByTestId("sources-part-view-knowledge"))
+  await waitFor(() => expect(mockLocate).toHaveBeenCalledTimes(1))
+  unmount()
+  reject(new Error("late load failure"))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(mockToastError).not.toHaveBeenCalled()
+  expect(mockReadRange).not.toHaveBeenCalled()
+})
+
+it("matches canonical document versions independently of binary source fingerprints", async () => {
+  mockReadRange.mockClear()
+  mockToastError.mockClear()
+  readyKnowledgeReader()
+  mockLocate.mockResolvedValueOnce({
+    generationId: "generation-1",
+    contentHash: "binary-sha256",
+    documentVersion: "canonical-text-sha256",
+    charStart: 25_000,
+    charEnd: 25_008,
+    pageNumber: 8,
+  })
+  const part = {
+    ...knowledgePart,
+    sources: knowledgePart.sources.map((source) => ({
+      ...source,
+      knowledgeBaseRef: { ...source.knowledgeBaseRef!, documentVersion: "canonical-text-sha256" },
+    })),
+  }
+  render(<SourcesPart part={part} />)
+  fireEvent.click(screen.getByTestId("sources-part-view-knowledge"))
+  expect(await screen.findByTestId("source-preview-highlight")).toHaveTextContent("Evidence")
+  expect(mockToastError).not.toHaveBeenCalled()
+  expect(mockReadRange).toHaveBeenCalledWith(
+    expect.objectContaining({
+      generationId: "generation-1",
+      documentVersion: "canonical-text-sha256",
+      charStart: 24_000,
+    })
+  )
 })

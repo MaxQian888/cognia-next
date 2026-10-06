@@ -395,7 +395,19 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           return {
             ...p,
             knowledgeBase: p.knowledgeBase.map((f) =>
-              f.id === fileId ? { ...f, content, size: content.length, updatedAt: now } : f
+              f.id === fileId
+                ? {
+                    ...f,
+                    content,
+                    size: content.length,
+                    updatedAt: now,
+                    // A text edit invalidates the old embedding projection and
+                    // physical page/section ranges. Readers backfill text trees.
+                    ...(f.content !== content
+                      ? { embeddableContent: undefined, structure: undefined, pageCount: undefined }
+                      : {}),
+                  }
+                : f
             ),
             updatedAt: now,
           }

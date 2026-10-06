@@ -3,6 +3,11 @@ import { getDb } from "@/lib/db/schema"
 import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import {
+  __resetTeamWorkflowNodesForTesting,
+  installTeamWorkflowNodes,
+  type TeamWorkflowNodes,
+} from "../nodes/teams/team-runtime-port"
+import {
   createWorkflowDependencyLockForVersion,
   createPublishedWorkflowDependencyBinding,
   executeDeployedWorkflow,
@@ -13,6 +18,7 @@ const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(dbFixture.restore)
+afterEach(__resetTeamWorkflowNodesForTesting)
 afterAll(dbFixture.dispose)
 
 describe("ExecutionAuthority", () => {
@@ -86,51 +92,180 @@ describe("ExecutionAuthority", () => {
     })
   })
 
-  it("freezes each Knowledge Base source current revision into the dependency lock", async () => {
+  it.each([
+    { type: "knowledge.retrieve" as const, characterBound: false },
+    { type: "action.agent.turn" as const, characterBound: false },
+    { type: "action.agent.turn" as const, characterBound: true },
+  ])(
+    "freezes $type Knowledge Base revisions with characterBound=$characterBound",
+    async ({ type, characterBound }) => {
+      if (characterBound)
+        await getDb().characters.put({
+          id: "knowledge-agent",
+          name: "Knowledge Agent",
+          knowledgeBaseIds: ["kb-1"],
+        } as never)
+      const workflow = await createWorkflow({
+        name: "Knowledge app",
+        nodes: [
+          {
+            id: "retrieve",
+            type,
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: {
+              label: "Retrieve",
+              params: {
+                ...(characterBound
+                  ? { characterId: "knowledge-agent" }
+                  : { knowledgeBaseIds: ["kb-1"] }),
+                ...(type === "knowledge.retrieve"
+                  ? { query: "{{ $trigger.payload.query }}" }
+                  : { prompt: "Read library" }),
+              },
+            },
+          },
+        ],
+        edges: [],
+      })
+      const publication = await publishWorkflow(workflow.id, 10)
+      const corpusId = "knowledge_base:kb-1:source:source-1"
+      await getDb().knowledgeBaseSources.put({
+        id: "source-1",
+        knowledgeBaseId: "kb-1",
+        updatedAt: 1,
+      } as never)
+      await getDb().retrievalGenerations.put({
+        id: "gen-1",
+        corpusId,
+        domain: "kb",
+        profileFingerprint: "profile",
+        status: "active",
+        createdAt: 1,
+        validation: { count: 1, contentHash: "hash", valid: true },
+      })
+      await getDb().retrievalActivePointers.put({
+        corpusId,
+        generationId: "gen-1",
+        domain: "kb",
+        profileFingerprint: "profile",
+        updatedAt: 1,
+      })
+      const version = (await getDb().workflowVersions.get(publication.versionId))!
+
+      await expect(createWorkflowDependencyLockForVersion(version)).resolves.toMatchObject({
+        indexes: { "knowledge:kb-1:source-1": "gen-1" },
+      })
+    }
+  )
+
+  it("pins a static team's effective variant knowledge through its canonical host port", async () => {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const { installTeamWorkflowNodeRuntime } =
+      await import("@/lib/ai/agent/team/workflow-nodes/install")
+    const initialState = useAgentTeamStore.getState()
+    try {
+      installTeamWorkflowNodeRuntime()
+      await getDb().characters.bulkPut([
+        { id: "team-base", name: "Base", knowledgeBaseIds: ["kb-team"] },
+        { id: "team-variant", name: "Variant", variant: { baseId: "team-base", ownFields: [] } },
+      ] as never)
+      const team = initialState.createTeam({
+        name: "Knowledge team",
+        task: "Read the library",
+        config: { capabilities: { characterPackIds: ["ignored-default"] } },
+      })
+      initialState.updateTeammateCapabilities(team.leadId, { characterPackIds: { replace: [] } })
+      initialState.addTeammate({
+        teamId: team.id,
+        name: "Reader",
+        config: {
+          capabilities: { characterPackIds: { replace: ["team-variant", "ignored-second"] } },
+        },
+      })
+      const workflow = await createWorkflow({
+        name: "Static team workflow",
+        nodes: [
+          {
+            id: "team",
+            type: "action.team.run",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "Run", params: { teamId: team.id } },
+          },
+        ],
+        edges: [],
+      })
+      const publication = await publishWorkflow(workflow.id, 10)
+      const corpusId = "knowledge_base:kb-team:source:source-team"
+      await getDb().knowledgeBaseSources.put({
+        id: "source-team",
+        knowledgeBaseId: "kb-team",
+        updatedAt: 1,
+      } as never)
+      await getDb().retrievalGenerations.put({
+        id: "gen-team",
+        corpusId,
+        domain: "kb",
+        profileFingerprint: "profile",
+        status: "active",
+        createdAt: 1,
+        validation: { count: 1, contentHash: "hash", valid: true },
+      })
+      await getDb().retrievalActivePointers.put({
+        corpusId,
+        generationId: "gen-team",
+        domain: "kb",
+        profileFingerprint: "profile",
+        updatedAt: 1,
+      })
+      const version = (await getDb().workflowVersions.get(publication.versionId))!
+      const lock = await createWorkflowDependencyLockForVersion(version)
+      expect(lock.indexes).toEqual({ "knowledge:kb-team:source-team": "gen-team" })
+
+      // Editing the saved backing profile cannot widen a previously admitted run.
+      await getDb().characters.update("team-base", { knowledgeBaseIds: ["late-kb"] })
+      const { resolveWorkflowKnowledgeAccess } = await import("../knowledge/access")
+      await expect(
+        resolveWorkflowKnowledgeAccess({
+          runId: "admitted-team-run",
+          executionBinding: { entrypoint: "http", dependencyLock: lock } as never,
+        })
+      ).resolves.toMatchObject({
+        allowedKnowledgeBaseIds: ["kb-team"],
+        revisionBindings: { "kb-team": ["gen-team"] },
+      })
+    } finally {
+      useAgentTeamStore.setState(initialState, true)
+    }
+  })
+
+  it("leaves dynamically selected teams within the already admitted knowledge scope", async () => {
+    const discover = jest.fn(async () => ["private-kb"])
+    installTeamWorkflowNodes(
+      async () => ({ run: jest.fn() }) as unknown as TeamWorkflowNodes,
+      discover
+    )
     const workflow = await createWorkflow({
-      name: "Knowledge app",
+      name: "Dynamic team workflow",
       nodes: [
         {
-          id: "retrieve",
-          type: "knowledge.retrieve",
+          id: "team",
+          type: "action.team.run",
           typeVersion: 1,
           position: { x: 0, y: 0 },
-          data: {
-            label: "Retrieve",
-            params: { knowledgeBaseIds: ["kb-1"], query: "{{ $trigger.payload.query }}" },
-          },
+          data: { label: "Run", params: { teamId: "{{ $trigger.payload.teamId }}" } },
         },
       ],
       edges: [],
     })
     const publication = await publishWorkflow(workflow.id, 10)
-    const corpusId = "knowledge_base:kb-1:source:source-1"
-    await getDb().knowledgeBaseSources.put({
-      id: "source-1",
-      knowledgeBaseId: "kb-1",
-      updatedAt: 1,
-    } as never)
-    await getDb().retrievalGenerations.put({
-      id: "gen-1",
-      corpusId,
-      domain: "kb",
-      profileFingerprint: "profile",
-      status: "active",
-      createdAt: 1,
-      validation: { count: 1, contentHash: "hash", valid: true },
-    })
-    await getDb().retrievalActivePointers.put({
-      corpusId,
-      generationId: "gen-1",
-      domain: "kb",
-      profileFingerprint: "profile",
-      updatedAt: 1,
-    })
     const version = (await getDb().workflowVersions.get(publication.versionId))!
-
-    await expect(createWorkflowDependencyLockForVersion(version)).resolves.toMatchObject({
-      indexes: { "knowledge:kb-1:source-1": "gen-1" },
+    await expect(createWorkflowDependencyLockForVersion(version)).resolves.toEqual({
+      workflows: {},
+      indexes: {},
     })
+    expect(discover).not.toHaveBeenCalled()
   })
 
   it("runs the deployed version and stamps immutable provenance on the run", async () => {

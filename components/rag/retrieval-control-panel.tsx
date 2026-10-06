@@ -104,7 +104,11 @@ export function RetrievalControlPanel({
   const hasRows = (snapshot?.generations.length ?? 0) > 0 || (snapshot?.jobs.length ?? 0) > 0
 
   return (
-    <Card data-testid="retrieval-control-panel" data-account-revision={accountRevision}>
+    <Card
+      className="@container/retrieval min-w-0"
+      data-testid="retrieval-control-panel"
+      data-account-revision={accountRevision}
+    >
       <CardHeader className={compact ? "p-3 pb-2" : undefined}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -115,7 +119,7 @@ export function RetrievalControlPanel({
             )}
             {t("title")}
           </CardTitle>
-          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 @min-[640px]/retrieval:w-auto @min-[640px]/retrieval:justify-end">
             <Badge variant="outline">{vaultLabel}</Badge>
             {snapshot?.runtime.killSwitchEngaged ? (
               <Button
@@ -156,7 +160,7 @@ export function RetrievalControlPanel({
         </div>
       </CardHeader>
       <CardContent className={compact ? "space-y-3 p-3 pt-0" : "space-y-4"}>
-        <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 @min-[360px]/retrieval:grid-cols-2 @2xl/retrieval:grid-cols-4">
           <Metric label={t("metrics.activeGenerations")} value={activeGenerations.length} />
           <Metric label={t("metrics.activeJobs")} value={activeJobs.length} />
           <Metric label={t("metrics.quarantined")} value={quarantined} />

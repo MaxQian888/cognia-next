@@ -14,6 +14,8 @@ import { isTeamWorkflowId } from "../team-workflow-id"
 
 const loadTeamWorkflowNodeImplementations = () =>
   import("./index").then((module) => module.teamWorkflowNodes)
+const resolveTeamKnowledgeDependencies = (teamId: string) =>
+  import("./index").then((module) => module.resolveTeamKnowledgeBaseIds(teamId))
 
 /**
  * Synthesized team runs are recovered by the team's durable coordinator
@@ -28,6 +30,6 @@ const teamRunRecoveryOwner: RunRecoveryOwner = {
 }
 
 export function installTeamWorkflowNodeRuntime(): void {
-  installTeamWorkflowNodes(loadTeamWorkflowNodeImplementations)
+  installTeamWorkflowNodes(loadTeamWorkflowNodeImplementations, resolveTeamKnowledgeDependencies)
   registerRunRecoveryOwner(teamRunRecoveryOwner)
 }

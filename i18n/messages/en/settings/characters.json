@@ -480,7 +480,29 @@
         "ready": "Ready"
       },
       "titlePlaceholder": "Source title",
-      "unsupportedFormat": "Choose a source format for this file."
+      "unsupportedFormat": "Choose a source format for this file.",
+      "reading": {
+        "title": "Agent knowledge reading defaults",
+        "description": "Global defaults for all Agents. Character and session settings can override these values. Retrieval settings also apply to fast RAG when progressive reading is off.",
+        "enabled": "Enable progressive document reading",
+        "retrievalStrategy": "Candidate retrieval strategy",
+        "topKPerBase": "Candidates per Knowledge Base",
+        "ragTokenBudget": "Fast RAG token budget",
+        "maxCalls": "Maximum reading tool calls",
+        "maxReadChars": "Characters per read",
+        "totalReadChars": "Total reading characters",
+        "maxOutlineNodes": "Outline sections per call",
+        "summaryMaxChars": "Navigation summary characters",
+        "summaryProviderId": "Navigation summary provider",
+        "summaryProviderPlaceholder": "Optional registered provider ID",
+        "summaryProviderHint": "Optional provider ID registered by a plugin. Leave empty to use stored navigation summaries. Summaries help navigate; answers use original text.",
+        "saveFailed": "Could not save knowledge reading settings. Try again.",
+        "strategies": {
+          "vector": "Vector",
+          "hybrid": "Hybrid (keyword + vector)",
+          "keyword": "Keyword"
+        }
+      }
     },
     "title": "Knowledge Bases"
   },

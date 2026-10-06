@@ -257,10 +257,16 @@ export async function reorderPresets(orderedIds: string[]): Promise<void> {
  * here is non-fatal — the UI's "Recent" filter is a nice-to-have, not a
  * load-bearing invariant.
  */
-export async function recordPresetUsage(id: string): Promise<void> {
-  const existing = await getDb().promptPresets.get(id)
+export async function recordPresetUsage(
+  id: string,
+  scope?: { db: ReturnType<typeof getDb>; assertActive(): void }
+): Promise<void> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
+  const existing = await db.promptPresets.get(id)
+  scope?.assertActive()
   if (!existing) return
-  await getDb().promptPresets.update(id, {
+  await db.promptPresets.update(id, {
     usageCount: (existing.usageCount ?? 0) + 1,
     lastUsedAt: Date.now(),
   })

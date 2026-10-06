@@ -26,6 +26,12 @@ export interface AgentKnowledgeCitation {
   sourceId: string
   sourceTitle: string
   chunkId: string
+  generationId?: string
+  documentVersion?: string
+  sectionId?: string
+  pageEnd?: number
+  lineStart?: number
+  lineEnd?: number
   charStart: number
   charEnd: number
   pageNumber?: number
@@ -50,11 +56,12 @@ export interface ApplyAgentKnowledgeContextInput {
   tokenBudget: number
   minScore?: number
   revisionBindings?: Readonly<Record<string, readonly string[]>>
+  retrievalStrategy?: "vector" | "hybrid" | "keyword"
   /** Optional document-level authorization applied before content enters the prompt. */
   authorizeChunk?: (input: {
     chunk: KnowledgeBaseChunk
     source: KnowledgeBaseSource | undefined
-  }) => boolean
+  }) => boolean | Promise<boolean>
   deps: ApplyAgentKnowledgeContextDeps
 }
 
@@ -62,7 +69,7 @@ export interface ApplyAgentKnowledgeContextFromDbInput extends Omit<
   ApplyAgentKnowledgeContextInput,
   "deps"
 > {
-  runtimeDeps: KnowledgeBaseRuntimeDeps
+  runtimeDeps?: KnowledgeBaseRuntimeDeps
   precomputedQueryEmbedding?: number[]
 }
 
@@ -97,7 +104,9 @@ export async function applyAgentKnowledgeContext(
 ): Promise<ApplyAgentKnowledgeContextResult> {
   const knowledgeBaseIds = [...new Set(input.knowledgeBaseIds.filter(Boolean))]
   const query = input.userMessage.trim()
-  const tokenLimit = Math.max(0, Math.floor(input.tokenBudget))
+  const tokenLimit = Number.isFinite(input.tokenBudget)
+    ? Math.max(0, Math.floor(input.tokenBudget))
+    : 0
   const empty: ApplyAgentKnowledgeContextResult = {
     systemPromptSection: null,
     retrievedChunks: [],
@@ -151,11 +160,20 @@ export async function applyAgentKnowledgeContext(
   const scoredCandidates = candidates.filter(
     (candidate) => input.minScore === undefined || candidate.score >= input.minScore
   )
-  const authorizedCandidates = input.authorizeChunk
-    ? scoredCandidates.filter(({ chunk }) =>
-        input.authorizeChunk?.({ chunk, source: candidateSourceById.get(chunk.sourceId) })
-      )
-    : scoredCandidates
+  const authorizedCandidates: RetrievedAgentKnowledgeChunk[] = []
+  for (const candidate of scoredCandidates) {
+    const source = candidateSourceById.get(candidate.chunk.sourceId)
+    if (!knowledgeBaseIds.includes(candidate.chunk.knowledgeBaseId)) continue
+    const revisions = input.revisionBindings?.[candidate.chunk.knowledgeBaseId]
+    if (
+      revisions &&
+      (!candidate.chunk.generationId || !revisions.includes(candidate.chunk.generationId))
+    )
+      continue
+    if (input.authorizeChunk && !(await input.authorizeChunk({ chunk: candidate.chunk, source })))
+      continue
+    authorizedCandidates.push(candidate)
+  }
 
   authorizedCandidates.sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id))
   const seenContent = new Set<string>()
@@ -169,7 +187,9 @@ export async function applyAgentKnowledgeContext(
       continue
     }
     seenContent.add(key)
-    const tokens = Math.max(0, Math.floor(candidate.chunk.tokenCount))
+    const tokens = Number.isFinite(candidate.chunk.tokenCount)
+      ? Math.max(1, Math.floor(candidate.chunk.tokenCount))
+      : Math.max(1, Math.ceil(candidate.chunk.content.length / 4))
     if (used + tokens > tokenLimit) {
       truncated = true
       continue
@@ -190,6 +210,17 @@ export async function applyAgentKnowledgeContext(
       sourceId: chunk.sourceId,
       sourceTitle,
       chunkId: chunk.id,
+      generationId: chunk.generationId,
+      documentVersion:
+        typeof chunk.metadata.documentVersion === "string"
+          ? chunk.metadata.documentVersion
+          : undefined,
+      sectionId:
+        typeof chunk.metadata.sectionId === "string" ? chunk.metadata.sectionId : undefined,
+      pageEnd: typeof chunk.metadata.pageEnd === "number" ? chunk.metadata.pageEnd : undefined,
+      lineStart:
+        typeof chunk.metadata.lineStart === "number" ? chunk.metadata.lineStart : undefined,
+      lineEnd: typeof chunk.metadata.lineEnd === "number" ? chunk.metadata.lineEnd : undefined,
       charStart: chunk.charStart,
       charEnd: chunk.charEnd,
       pageNumber:
@@ -237,15 +268,27 @@ export function applyAgentKnowledgeContextFromDb(
   return applyAgentKnowledgeContext({
     ...input,
     deps: {
-      retrieveLibrary: ({ knowledgeBaseId, userMessage, topK }) =>
-        retrieveKnowledgeBaseChunks({
+      retrieveLibrary: async ({ knowledgeBaseId, userMessage, topK }) => {
+        return retrieveKnowledgeBaseChunks({
           knowledgeBaseId,
           userMessage,
           topK,
           precomputedQueryEmbedding: input.precomputedQueryEmbedding,
           generationIds: input.revisionBindings?.[knowledgeBaseId],
+          strategy: input.retrievalStrategy,
+          tokenBudget: input.tokenBudget,
+          ...(input.authorizeChunk
+            ? {
+                authorizeChunk: async (chunk) => {
+                  const [source] = await getKnowledgeBaseSourcesByIds([chunk.sourceId])
+                  if (!source || source.knowledgeBaseId !== knowledgeBaseId) return false
+                  return input.authorizeChunk!({ chunk, source })
+                },
+              }
+            : {}),
           deps: input.runtimeDeps,
-        }),
+        })
+      },
       loadLibraries: getKnowledgeBasesByIds,
       loadSources: getKnowledgeBaseSourcesByIds,
     },

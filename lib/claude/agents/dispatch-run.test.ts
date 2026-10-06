@@ -16,6 +16,10 @@ import { __clearAllDispatchBudgetsForTesting, getOrCreateDispatchBudget } from "
 import { requestCancelSubagentRun, liveSubagentRunCount } from "./subagent-cancel-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
+import {
+  registerKnowledgeAccessForSession,
+  clearKnowledgeReaderForSession,
+} from "@/lib/knowledge-base/runtime/session-reader"
 
 jest.mock("@/lib/plugin/agent-sdk/dispatch", () => ({
   __esModule: true,
@@ -64,6 +68,45 @@ jest.mock("@/lib/background-tasks/redispatch", () => ({
 }))
 
 const mockDispatch = dispatchSubagent as jest.MockedFunction<typeof dispatchSubagent>
+afterEach(() => clearKnowledgeReaderForSession("knowledge-parent"))
+
+it("inherits verified public knowledge authority and frozen revisions into nested dispatch", async () => {
+  nesting()
+  registerKnowledgeAccessForSession("knowledge-parent", {
+    knowledgeBaseIds: ["kb-bound"],
+    knowledgeAccess: {
+      entrypoint: "http",
+      triggeredBy: { source: "api", initiator: { authenticated: true, principalId: "subject-1" } },
+      revisionBindings: { "kb-bound": ["gen-frozen"] },
+    },
+  })
+  const resolved = await resolveCaller("knowledge-parent")
+  expect(resolved.knowledgeAccess).toMatchObject({
+    entrypoint: "http",
+    allowedKnowledgeBaseIds: ["kb-bound"],
+    revisionBindings: { "kb-bound": ["gen-frozen"] },
+  })
+  await startDispatchRun({
+    subagentId: "coder",
+    prompt: "read",
+    toolsEnabled: true,
+    background: false,
+    parentSessionId: "knowledge-parent",
+    caller: resolved,
+  })
+  expect(mockDispatch).toHaveBeenCalledWith(
+    expect.anything(),
+    "read",
+    expect.objectContaining({ _knowledgeAccess: resolved.knowledgeAccess })
+  )
+})
+
+it("gives an unknown caller an empty knowledge ceiling", async () => {
+  nesting()
+  expect((await resolveCaller("missing-knowledge-parent")).knowledgeAccess).toEqual({
+    allowedKnowledgeBaseIds: [],
+  })
+})
 const mockGetDef = getDispatchableSubagentDef as jest.MockedFunction<
   typeof getDispatchableSubagentDef
 >

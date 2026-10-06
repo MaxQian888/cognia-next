@@ -73,3 +73,29 @@ describe("twin source persistence", () => {
     expect(await getTwinSource(source.id)).toBeUndefined()
   })
 })
+
+it("stores a canonical source snapshot and removes it with source deletion", async () => {
+  const snapshot = {
+    generationId: "generation",
+    contentHash: "source-hash",
+    originalText: "Source",
+    title: "Source",
+    format: "markdown" as const,
+    createdAt: 1,
+  }
+  const source = await createTwinSource({
+    id: "snapshot_source",
+    twinId: "twin_snapshot",
+    kind: "document",
+    format: "markdown",
+    source: "Source",
+    title: "Source",
+    bytes: 6,
+    fingerprint: "fingerprint",
+    redacted: false,
+    documentSnapshot: snapshot,
+  })
+  expect((await getTwinSource(source.id))?.documentSnapshot).toEqual(snapshot)
+  await deleteTwinSource(source.id)
+  expect(await getTwinSource(source.id)).toBeUndefined()
+})

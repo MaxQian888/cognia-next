@@ -11,9 +11,12 @@ import {
   deleteKnowledgeBaseSource,
   getKnowledgeBasesByIds,
   getKnowledgeBaseChunksByVectorDocIds,
+  getKnowledgeBaseChunkById,
   getKnowledgeBaseReferences,
   getKnowledgeBaseSourcesByIds,
   listKnowledgeBaseChunks,
+  listKnowledgeBaseRevisionChunks,
+  getKnowledgeBaseDocumentSnapshot,
   listKnowledgeBaseIngestJobs,
   listKnowledgeBaseSources,
   listKnowledgeBases,
@@ -36,6 +39,74 @@ beforeEach(dbFixture.restore)
 afterAll(dbFixture.dispose)
 
 describe("knowledge base persistence", () => {
+  it("does not expose orphan, failed, or staging revisions without a valid active pointer", async () => {
+    await createKnowledgeBase({ id: "kb-1", name: "Docs" })
+    await createKnowledgeBaseSource({
+      id: "source-1",
+      knowledgeBaseId: "kb-1",
+      kind: "document",
+      format: "markdown",
+      title: "Guide",
+      content: "text",
+      fingerprint: "hash",
+    })
+    const corpusId = "knowledge_base:kb-1:source:source-1"
+    await getDb().retrievalGenerations.bulkPut(
+      ["failed", "staging", "retiring"].map((status) => ({
+        id: status,
+        corpusId,
+        domain: "kb" as const,
+        profileFingerprint: "profile",
+        status: status as "failed" | "staging" | "retiring",
+        createdAt: 1,
+        validation: { valid: status === "retiring", contentHash: "hash", count: 1 },
+      }))
+    )
+    const base = {
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      content: "text",
+      contentRedacted: "text",
+      charStart: 0,
+      charEnd: 4,
+      vectorBackend: "native" as const,
+      vectorCollection: "collection",
+      strategy: "paragraph" as const,
+      tokenCount: 1,
+      metadata: {},
+      contentHash: "hash",
+      createdAt: 1,
+    }
+    await putKnowledgeBaseChunks(
+      ["failed", "staging", "retiring", "orphan"].map((generationId) => ({
+        ...base,
+        id: generationId,
+        vectorDocId: generationId,
+        generationId,
+      }))
+    )
+    expect(await listKnowledgeBaseRevisionChunks("kb-1")).toEqual([])
+    expect(
+      (
+        await listKnowledgeBaseRevisionChunks("kb-1", ["failed", "staging", "retiring", "orphan"])
+      ).map((row) => row.id)
+    ).toEqual(["retiring"])
+    await getDb().retrievalActivePointers.put({
+      corpusId,
+      generationId: "failed",
+      domain: "kb",
+      profileFingerprint: "profile",
+      updatedAt: 1,
+    })
+    expect(await listKnowledgeBaseRevisionChunks("kb-1")).toEqual([])
+    expect(
+      await getKnowledgeBaseDocumentSnapshot({
+        knowledgeBaseId: "kb-1",
+        sourceId: "source-1",
+        generationId: "failed",
+      })
+    ).toBeUndefined()
+  })
   it("creates, updates, and lists reusable libraries by recency", async () => {
     const first = await createKnowledgeBase({
       id: "kb-first",
@@ -143,6 +214,8 @@ describe("knowledge base persistence", () => {
     expect(await listKnowledgeBaseChunks("kb-1")).toEqual([
       expect.objectContaining({ id: "chunk-1", sourceId: "source-1" }),
     ])
+    expect(await getKnowledgeBaseChunkById("chunk-1")).toMatchObject({ sourceId: "source-1" })
+    expect(await getKnowledgeBaseChunkById("unknown")).toBeUndefined()
     expect(await listKnowledgeBaseIngestJobs("kb-1")).toEqual([
       expect.objectContaining({
         id: "job-1",
@@ -322,6 +395,21 @@ describe("knowledge base deletion guard", () => {
       sourceId: "source-1",
       now: 3,
     })
+    await getDb().retrievalGenerations.put({
+      id: "orphan",
+      corpusId: "knowledge_base:kb-shared:source:removed",
+      domain: "kb",
+      profileFingerprint: "profile",
+      status: "retiring",
+      createdAt: 1,
+    })
+    await getDb().retrievalActivePointers.put({
+      corpusId: "knowledge_base:kb-shared:source:removed",
+      generationId: "orphan",
+      domain: "kb",
+      profileFingerprint: "profile",
+      updatedAt: 1,
+    })
 
     const result = await deleteKnowledgeBase("kb-shared", { detachReferences: true, now: 9 })
 
@@ -329,6 +417,11 @@ describe("knowledge base deletion guard", () => {
     expect(await getDb().knowledgeBases.get("kb-shared")).toBeUndefined()
     expect(await listKnowledgeBaseSources("kb-shared")).toEqual([])
     expect(await listKnowledgeBaseIngestJobs("kb-shared")).toEqual([])
+    expect(await getDb().retrievalGenerations.get("orphan")).toBeUndefined()
+    expect(
+      await getDb().retrievalActivePointers.get("knowledge_base:kb-shared:source:removed")
+    ).toBeUndefined()
+    expect(await getDb().retrievalTombstones.get("knowledge_base:kb-shared")).toBeDefined()
     expect((await getDb().characters.get("agent-1"))?.knowledgeBaseIds).toEqual(["kb-other"])
     expect((await getDb().workflows.get("workflow-1"))?.knowledgeBaseIds).toEqual([])
     expect((await getDb().characters.get("agent-1"))?.updatedAt).toBe(9)

@@ -18,6 +18,41 @@ import type { TeamWorkflowNodes } from "@/lib/workflow/nodes/teams/team-runtime-
 import { nonRetryable } from "@/lib/workflow/nodes/shared/executor-support"
 import { runTeamCompose, runTeamDelegate, runTeamMessage, runTeamStatus } from "./team-ops"
 
+/** Use the same roster, capability overlays and effective backing profiles as dispatch. */
+export async function resolveTeamKnowledgeBaseIds(teamId: string): Promise<readonly string[]> {
+  const [
+    { useAgentTeamStore },
+    { resolveCharacterById },
+    { resolveTeammateCapabilities },
+    { teammateBaseAgentId },
+  ] = await Promise.all([
+    import("@/stores/agent/agent-team-store"),
+    import("@/lib/db/characters"),
+    import("../teammate/capability-resolver"),
+    import("../teammate/teammate-character"),
+  ])
+  const state = useAgentTeamStore.getState()
+  const team = state.getTeam(teamId)
+  if (!team) throw nonRetryable(`team ${teamId} not found during knowledge admission`)
+  const characterIds = new Set(
+    state
+      .getTeammates(teamId)
+      .map((teammate) => teammateBaseAgentId(resolveTeammateCapabilities(team, teammate)))
+      .filter((id): id is string => id !== undefined)
+  )
+  const knowledgeBaseIds = new Set<string>()
+  for (const characterId of characterIds) {
+    const character = await resolveCharacterById(characterId)
+    if (!character)
+      throw nonRetryable(
+        `team ${teamId} backing agent ${characterId} not found during knowledge admission`
+      )
+    for (const knowledgeBaseId of character.knowledgeBaseIds ?? [])
+      knowledgeBaseIds.add(knowledgeBaseId)
+  }
+  return [...knowledgeBaseIds]
+}
+
 // ── action.team.run ───────────────────────────────────────────────────────
 // Per ADR-0022 §5 PR 4. Kicks off a team lifecycle via the F-path synthesizer.
 // Wires storeReader/storeWriter from the live Zustand store; the runtime
@@ -66,8 +101,11 @@ export async function runTeamNode(ctx: StepExecutionContext): Promise<StepExecut
     typeof triggerPayload?.chainDepth === "number" ? triggerPayload.chainDepth : 0
 
   const partial = buildAgentTeamRuntimeDeps()
+  const { resolveWorkflowKnowledgeAccess } = await import("@/lib/workflow/knowledge/access")
+  const knowledgeAccess = await resolveWorkflowKnowledgeAccess(ctx)
   const deps = {
     ...partial,
+    ...(knowledgeAccess ? { knowledgeAccess } : {}),
     ...(triggeredFrom ? { triggeredFrom } : {}),
     triggerChainDepth,
     // IM-originated workflows run headless (gate policy "im"); UI-launched

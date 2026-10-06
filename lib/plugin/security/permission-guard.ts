@@ -6,6 +6,7 @@
  */
 
 import type { PluginPermission } from "@/types/plugin"
+import { CANONICAL_PLUGIN_PERMISSION_IDS } from "@/packages/plugin-sdk/src/contracts/generated"
 
 import { getPluginConsentBroker } from "./consent-broker"
 import { pluginRuntimeAccountAvailable } from "./account-runtime-gate"
@@ -163,6 +164,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "session:write": "Modify chat sessions",
   "session:delete": "Delete chat sessions",
   "project:read": "Read project metadata and files through scoped APIs",
+  "knowledge:read": "Read original documents in the libraries authorized for an active Agent run",
   "project:write": "Create and modify projects, their knowledge files, tags, and linked sessions",
   "project:delete": "Delete projects",
   "canvas:read": "Read Canvas document metadata and selection",
@@ -426,6 +428,8 @@ export const WASM_UNIMPLEMENTED_PERMISSIONS: PluginPermission[] = []
 // =============================================================================
 
 export class PermissionGuard {
+  /** Explicit host revocations also override grants in the legacy API store. */
+  private revokedPermissions = new Map<string, Set<PluginPermission>>()
   private config: PermissionGuardConfig
   private grants: Map<string, Map<PluginPermission, PermissionGrant>> = new Map()
   private denials: Map<string, PermissionDenial[]> = new Map()
@@ -462,6 +466,7 @@ export class PermissionGuard {
   // ===========================================================================
 
   registerPlugin(pluginId: string, permissions: PluginPermission[]): void {
+    this.revokedPermissions.delete(pluginId)
     const grantMap = new Map<PluginPermission, PermissionGrant>()
     const effective = expandLegacyPermissions(permissions)
 
@@ -491,6 +496,7 @@ export class PermissionGuard {
   }
 
   unregisterPlugin(pluginId: string): void {
+    this.revokedPermissions.set(pluginId, new Set(CANONICAL_PLUGIN_PERMISSION_IDS))
     this.grants.delete(pluginId)
     this.denials.delete(pluginId)
     this.tiers.delete(pluginId)
@@ -601,13 +607,25 @@ export class PermissionGuard {
   // Permission Checking
   // ===========================================================================
 
+  isRevoked(pluginId: string, permission: PluginPermission): boolean {
+    return this.revokedPermissions.get(pluginId)?.has(permission) ?? false
+  }
+
+  /** Host lifecycle reinitialization; never exposed on a plugin context. */
+  resetRevocations(pluginId: string): void {
+    this.revokedPermissions.delete(pluginId)
+  }
+
   check(pluginId: string, permission: PluginPermission, context?: string): boolean {
     if (!pluginRuntimeAccountAvailable()) {
       this.audit(pluginId, permission, "check", false, context)
       return false
     }
     const grant = this.grants.get(pluginId)?.get(permission)
-    const allowed = this.isGrantValid(grant)
+    const allowed =
+      !this.isRevoked(pluginId, permission) &&
+      this.getTier(pluginId, permission) !== "forbid" &&
+      this.isGrantValid(grant)
 
     this.audit(pluginId, permission, "check", allowed, context)
 
@@ -675,6 +693,7 @@ export class PermissionGuard {
       expiresAt: options.expiresIn ? Date.now() + options.expiresIn : undefined,
       grantedBy: options.grantedBy || "system",
     })
+    this.revokedPermissions.get(pluginId)?.delete(permission)
 
     this.audit(pluginId, permission, "grant", true)
   }
@@ -690,6 +709,9 @@ export class PermissionGuard {
   // ===========================================================================
 
   revoke(pluginId: string, permission: PluginPermission): void {
+    const revoked = this.revokedPermissions.get(pluginId) ?? new Set<PluginPermission>()
+    revoked.add(permission)
+    this.revokedPermissions.set(pluginId, revoked)
     this.grants.get(pluginId)?.delete(permission)
     this.audit(pluginId, permission, "revoke", false)
   }
@@ -701,6 +723,7 @@ export class PermissionGuard {
   }
 
   revokeAll(pluginId: string): void {
+    this.revokedPermissions.set(pluginId, new Set(CANONICAL_PLUGIN_PERMISSION_IDS))
     const grantMap = this.grants.get(pluginId)
     if (grantMap) {
       for (const permission of grantMap.keys()) {
@@ -911,6 +934,7 @@ export class PermissionGuard {
   // ===========================================================================
 
   clear(): void {
+    this.revokedPermissions.clear()
     this.grants.clear()
     this.denials.clear()
     this.auditLog = []
@@ -1089,6 +1113,8 @@ export function createGuardedAPI<T extends object>(
                 permission
               )
             }
+            // Consent can wait while the user revokes or forbids this grant.
+            guard.require(pluginId, permission, context)
             if (options.onConsentGranted) {
               try {
                 options.onConsentGranted(permission)
@@ -1098,6 +1124,7 @@ export function createGuardedAPI<T extends object>(
               }
             }
           }
+          for (const permission of permissions) guard.require(pluginId, permission, context)
           return (value as (...args: unknown[]) => unknown).apply(target, args)
         })()
       }

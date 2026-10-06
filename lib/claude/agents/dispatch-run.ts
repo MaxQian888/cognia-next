@@ -23,6 +23,8 @@ import type {
   PluginSubagentDispatchResult,
 } from "@/types/plugin/plugin-agent-sdk"
 import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-context-registry"
+import { getKnowledgeAccessForSession } from "@/lib/knowledge-base/runtime/session-reader"
+import type { KnowledgeReadingAccess } from "@/lib/knowledge-base/runtime/progressive-reading"
 import { getOrCreateDispatchBudget, isDispatchBudgetExhausted } from "./dispatch-budget"
 import {
   journalRendererForegroundRun,
@@ -55,6 +57,7 @@ import {
 export const DEFAULT_NESTING_MAX_DEPTH = 2
 
 export interface ResolvedCaller {
+  knowledgeAccess?: KnowledgeReadingAccess
   /**
    * The directory the caller's own turn runs in, so every child inherits it
    * (project instruction discovery, relative paths in the prompt, the sandbox
@@ -145,6 +148,10 @@ async function fallbackCeilingFromSession(
  * subtree budget once.
  */
 export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> {
+  const authority = getKnowledgeAccessForSession(sessionId)
+  const knowledgeAccess: KnowledgeReadingAccess = authority
+    ? { ...authority.knowledgeAccess, allowedKnowledgeBaseIds: [...authority.knowledgeBaseIds] }
+    : { allowedKnowledgeBaseIds: [] }
   // The caller's resolved ceiling is deposited by `resolveSendOptions` under the
   // caller's own session id — whether the caller is the top-level chat or a
   // running subagent. Read it once and clamp every child it dispatches.
@@ -165,6 +172,7 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
       maxConcurrent: settings.maxConcurrent,
       ...(cwd ? { cwd } : {}),
       ...(parentCeiling ? { parentCeiling } : {}),
+      knowledgeAccess,
     }
   }
   // Top-level chat: derive from settings and seed the subtree budget once.
@@ -179,6 +187,7 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
     ...(cwd ? { cwd } : {}),
     ...(settings.timeoutMs > 0 ? { deadlineMs: Date.now() + settings.timeoutMs } : {}),
     ...(parentCeiling ? { parentCeiling } : {}),
+    knowledgeAccess,
   }
 }
 
@@ -298,6 +307,7 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
   const attemptDispatch = (): Promise<PluginSubagentDispatchResult> =>
     dispatchSubagent(target, p.prompt, {
       toolsEnabled: p.toolsEnabled,
+      _knowledgeAccess: effectiveCaller.knowledgeAccess ?? { allowedKnowledgeBaseIds: [] },
       _runId: childRunId,
       ...(recovery ? { _sessionId: recovery.executionSessionId } : {}),
       _depth: effectiveCaller.parentDepth,

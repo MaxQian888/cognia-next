@@ -333,6 +333,26 @@ describe("parseProposedPlan", () => {
 })
 
 describe("runTeamLifecycle (F-path synthesizer)", () => {
+  it("registers a defensive copy of workflow knowledge authority for all teammate turns", async () => {
+    const observed: unknown[] = []
+    const knowledgeAccess = {
+      entrypoint: "http" as const,
+      allowedKnowledgeBaseIds: ["kb"],
+      revisionBindings: { kb: ["gen"] },
+    }
+    ;(executeAgent as jest.Mock).mockImplementation(async () => {
+      observed.push(getTeamRunContext("run_team_knowledge")?.knowledgeAccess)
+      return { text: "result" }
+    })
+    const result = await runTeamLifecycle("team-1", {
+      ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId: "run_team_knowledge",
+      knowledgeAccess,
+    })
+    expect(result.status).toBe("completed")
+    expect(observed).toContainEqual(knowledgeAccess)
+    expect(observed[0]).not.toBe(knowledgeAccess)
+  })
   it("fails fast when team not found", async () => {
     const deps = buildDeps(baseTeam, [], [lead, worker("w1")])
     const result = await runTeamLifecycle("missing", deps)

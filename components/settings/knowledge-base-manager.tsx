@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -9,6 +9,16 @@ import { RetrievalControlPanel } from "@/components/rag/retrieval-control-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
+import { useSettingDraft } from "@/hooks/settings/use-setting-draft"
+import { useSettingsStore } from "@/stores/settings"
+import {
+  KNOWLEDGE_READING_BOUNDS,
+  resolveKnowledgeReadingSettings,
+  type KnowledgeReadingSettings,
+} from "@/lib/knowledge-base/runtime/reading-settings"
 import {
   Select,
   SelectContent,
@@ -62,6 +72,31 @@ function encodeBase64(buffer: ArrayBuffer): string {
 
 export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: KnowledgeBase[] }) {
   const t = useTranslations("settings.characters.knowledgeBases.sources")
+  const readingSettings = useSettingsStore((state) => state.settings?.knowledgeReading)
+  const reading = resolveKnowledgeReadingSettings(readingSettings)
+  const readingSaves = useRef<Promise<void>>(Promise.resolve())
+  const saveReading = (patch: Partial<KnowledgeReadingSettings>): Promise<void> => {
+    const task = readingSaves.current
+      .then(async () => {
+        const state = useSettingsStore.getState()
+        await state.save({
+          knowledgeReading: resolveKnowledgeReadingSettings(
+            state.settings?.knowledgeReading,
+            patch
+          ),
+        })
+      })
+      .catch(() => {
+        toast.error(t("reading.saveFailed"))
+      })
+    readingSaves.current = task
+    return task
+  }
+  const summaryProvider = useSettingDraft(
+    reading.summaryProviderId ?? "",
+    (value) => saveReading({ summaryProviderId: value }),
+    { normalize: (value) => value.trim().slice(0, 128) }
+  )
   const [selectedId, setSelectedId] = useState(knowledgeBases[0]?.id ?? "")
   const [sources, setSources] = useState<KnowledgeBaseSource[]>([])
   const [jobs, setJobs] = useState<KnowledgeBaseIngestJob[]>([])
@@ -227,6 +262,83 @@ export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: Knowl
   return (
     <div className="space-y-3 border-t pt-3">
       <RetrievalControlPanel corpusPrefixes={[`knowledge_base:${activeSelectedId}:`]} compact />
+      <fieldset className="space-y-3 rounded-md border p-3">
+        <legend className="px-1 text-sm font-medium">{t("reading.title")}</legend>
+        <p className="text-xs text-muted-foreground">{t("reading.description")}</p>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="knowledge-reading-enabled">{t("reading.enabled")}</Label>
+          <Switch
+            id="knowledge-reading-enabled"
+            data-testid="knowledge-reading-enabled"
+            checked={reading.enabled}
+            onCheckedChange={(enabled) => void saveReading({ enabled })}
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="knowledge-reading-strategy">{t("reading.retrievalStrategy")}</Label>
+            <NativeSelect
+              id="knowledge-reading-strategy"
+              data-testid="knowledge-reading-strategy"
+              value={reading.retrievalStrategy}
+              onChange={(event) =>
+                void saveReading({
+                  retrievalStrategy: event.target
+                    .value as KnowledgeReadingSettings["retrievalStrategy"],
+                })
+              }
+              wrapperClassName="w-full"
+            >
+              {(["vector", "hybrid", "keyword"] as const).map((strategy) => (
+                <NativeSelectOption key={strategy} value={strategy}>
+                  {t(`reading.strategies.${strategy}`)}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+          {Object.entries(KNOWLEDGE_READING_BOUNDS).map(([key, [min, max]]) => {
+            const field = key as keyof typeof KNOWLEDGE_READING_BOUNDS
+            const id = `knowledge-reading-${field}`
+            return (
+              <div key={field} className="space-y-1">
+                <Label htmlFor={id}>{t(`reading.${field}`)}</Label>
+                <ClampedNumberInput
+                  id={id}
+                  data-testid={id}
+                  value={reading[field]}
+                  min={min}
+                  max={max}
+                  integer
+                  commitWhileTyping={false}
+                  onCommit={(value) => void saveReading({ [field]: value })}
+                />
+              </div>
+            )
+          })}
+          <div className="space-y-1 sm:col-span-2">
+            <Label htmlFor="knowledge-reading-summary-provider">
+              {t("reading.summaryProviderId")}
+            </Label>
+            <Input
+              id="knowledge-reading-summary-provider"
+              data-testid="knowledge-reading-summary-provider"
+              value={summaryProvider.value}
+              onChange={(event) => summaryProvider.set(event.target.value)}
+              onBlur={summaryProvider.commit}
+              onKeyDown={summaryProvider.commitOnEnter}
+              maxLength={128}
+              placeholder={t("reading.summaryProviderPlaceholder")}
+              aria-describedby="knowledge-reading-summary-provider-hint"
+            />
+            <p
+              id="knowledge-reading-summary-provider-hint"
+              className="text-xs text-muted-foreground"
+            >
+              {t("reading.summaryProviderHint")}
+            </p>
+          </div>
+        </div>
+      </fieldset>
       <div className="space-y-1">
         <Label>{t("library")}</Label>
         <Select value={activeSelectedId} onValueChange={setSelectedId}>

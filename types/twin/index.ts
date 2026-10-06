@@ -65,6 +65,9 @@ export type TwinSourceFormat =
 
 export type TwinSourceStatus = "pending" | "parsing" | "parsed" | "failed" | "deleted"
 
+export type TwinDocumentSnapshot =
+  import("@cognia/document/types").DocumentSnapshot<TwinSourceFormat>
+
 export interface TwinSource {
   /** nanoid */
   id: string
@@ -114,6 +117,8 @@ export interface TwinSource {
    * full raw text.
    */
   speakers?: string[]
+  /** Current canonical text/tree; replaced atomically with its active generation. */
+  documentSnapshot?: TwinDocumentSnapshot
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

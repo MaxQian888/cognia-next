@@ -174,3 +174,37 @@ it("recovers the kill-switch control and reports a failed request", async () => 
   expect(await screen.findByRole("alert")).toHaveTextContent("The retrieval control action failed.")
   expect(screen.getByRole("button", { name: "Stop new retrieval work" })).toBeEnabled()
 })
+
+it("sizes the metric grid and header actions from the panel rather than the viewport", () => {
+  render(<RetrievalControlPanel />)
+  const panel = screen.getByTestId("retrieval-control-panel")
+  expect(panel).toHaveClass("@container/retrieval", "min-w-0")
+  const metrics = screen.getByText("Active generations").parentElement?.parentElement
+  expect(metrics).toHaveClass("@min-[360px]/retrieval:grid-cols-2", "@2xl/retrieval:grid-cols-4")
+  expect(metrics).not.toHaveClass("lg:grid-cols-4")
+  expect(screen.getByText("Vault unlocked").parentElement).toHaveClass(
+    "@min-[640px]/retrieval:w-auto"
+  )
+})
+
+it("keeps compact mode summary-only while retaining the shared controls", () => {
+  snapshot = controlSnapshot({
+    jobs: [
+      {
+        id: "compact-job",
+        dedupeKey: "compact-job",
+        kind: "reindex",
+        corpusId: "memory:test",
+        status: "running",
+        queuedAt: 1,
+        attempt: 1,
+        maxAttempts: 3,
+      },
+    ],
+  })
+  render(<RetrievalControlPanel compact />)
+  expect(screen.queryByText("compact-job")).not.toBeInTheDocument()
+  expect(screen.queryByText("Recent jobs")).not.toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Stop new retrieval work" })).toBeEnabled()
+  expect(screen.getByText("Active jobs")).toBeInTheDocument()
+})

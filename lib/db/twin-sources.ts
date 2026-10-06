@@ -38,6 +38,7 @@ export async function createTwinSource(draft: TwinSourceDraft): Promise<TwinSour
     redacted: draft.redacted,
     redactionMapEnc: draft.redactionMapEnc,
     speakers: draft.speakers,
+    documentSnapshot: draft.documentSnapshot,
   }
   await getDb().twinSources.add(row)
   return row

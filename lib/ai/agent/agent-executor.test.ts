@@ -956,6 +956,15 @@ describe("executeAgent", () => {
       expect(ctx.permissionCeiling).toEqual({ allowedTools: ["Read"], permissionMode: "plan" })
     })
 
+    it("forwards verified workflow knowledge authority to send options", async () => {
+      const knowledgeAccess = {
+        entrypoint: "http" as const,
+        revisionBindings: { kb: ["revision"] },
+      }
+      await executeAgent("x", { toolsEnabled: true, knowledgeAccess })
+      expect(mockResolveSendOptions.mock.calls[0][0].knowledgeAccess).toEqual(knowledgeAccess)
+    })
+
     it("omits permissionCeiling from resolveSendOptions when none is given", async () => {
       await executeAgent("x", { toolsEnabled: true })
       const ctx = mockResolveSendOptions.mock.calls[0][0]
@@ -1341,6 +1350,13 @@ describe("buildAgentBoundContext", () => {
       twinDeps: deps,
       twinUserMessage: "q",
     })
+  })
+
+  it("retains a bound knowledge query when no vector runtime exists for keyword retrieval", async () => {
+    mockTryBuildTwinDeps.mockResolvedValueOnce(undefined)
+    expect(
+      await buildAgentBoundContext("q", persona({ knowledgeBaseIds: ["kb"] }), undefined)
+    ).toEqual({ projectKnowledgeUserMessage: "q" })
   })
 
   it("degrades to no retrieval when the vector store is not configured or the prompt is empty", async () => {

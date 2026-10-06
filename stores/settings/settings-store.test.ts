@@ -2188,13 +2188,10 @@ describe("appearance setters", () => {
     const languages = jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-Hans-CN"])
     try {
       useSettingsStore.setState({
-        settings: {
-          id: "singleton",
-          permissionMode: "default",
-          alwaysAllowTools: [],
+        settings: baseSettings({
           language: "en",
           languageMode: "system",
-        },
+        }),
       })
       useSettingsStore.getState().refreshSystemLanguage()
       expect(useSettingsStore.getState().settings?.language).toBe("zh-CN")

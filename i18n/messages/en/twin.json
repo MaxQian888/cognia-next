@@ -575,7 +575,12 @@
     "previewDescription": "Detected tables and the stored source text.",
     "previewTitle": "Preview: {title}",
     "tableStats": "{rows} rows × {cols} cols · {numeric} numeric",
-    "tablesHeading": "Detected tables ({count})"
+    "tablesHeading": "Detected tables ({count})",
+    "contentWindow": "Showing original characters {start}–{end} around the citation.",
+    "historicalVersion": "This citation refers to an earlier document version. The original version is shown.",
+    "pageLocation": "Pages {start}–{end}",
+    "lineLocation": "Lines {start}–{end}",
+    "characterLocation": "Characters {start}–{end}"
   },
   "status": {
     "accepted": "Accepted",

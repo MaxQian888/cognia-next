@@ -8,6 +8,10 @@
  */
 
 const runTeamLifecycle = jest.fn().mockResolvedValue({ runId: "team_run_1", status: "completed" })
+const readWorkflowRun = jest.fn()
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ workflowRuns: { get: (...args: unknown[]) => readWorkflowRun(...args) } }),
+}))
 
 jest.mock("@/lib/ai/agent/team/agent-team-runtime", () => ({
   runTeamLifecycle: (...args: unknown[]) =>
@@ -72,6 +76,35 @@ async function run(binding?: WorkflowTriggerBinding) {
 }
 
 describe("action.team.run — IM origin derivation", () => {
+  it("takes knowledge ACL identity from the durable public invocation and pins only admitted indexes", async () => {
+    readWorkflowRun.mockResolvedValue({
+      triggeredBy: { source: "api", initiator: { authenticated: true, principalId: "verified" } },
+    })
+    const ctx = ctxWithBinding()
+    ctx.executionBinding = {
+      entrypoint: "http",
+      dependencyLock: {
+        workflows: {},
+        indexes: { "knowledge:kb:source": "gen", "other:index": "ignored" },
+      },
+    } as never
+    await getExecutor("action.team.run", 1)!.execute(ctx)
+    expect(runTeamLifecycle).toHaveBeenLastCalledWith(
+      "team-1",
+      expect.objectContaining({
+        knowledgeAccess: {
+          entrypoint: "http",
+          triggeredBy: {
+            source: "api",
+            initiator: { authenticated: true, principalId: "verified" },
+          },
+          revisionBindings: { kb: ["gen"] },
+          allowedKnowledgeBaseIds: ["kb"],
+        },
+      }),
+      ctx.signal
+    )
+  })
   it("derives an IM triggeredFrom from a complete trigger binding", async () => {
     const deps = await run({
       adapterId: "lark:a1",

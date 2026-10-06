@@ -70,3 +70,51 @@ describe("SourceContentPreview", () => {
     expect(await screen.findByText(/Copied/i)).toBeInTheDocument()
   })
 })
+
+it("contains table width and wraps long source tokens inside the shared preview", () => {
+  render(<SourceContentPreview text={MARKDOWN_WITH_TABLE + "x".repeat(500)} active />)
+  expect(screen.getByTestId("twin-source-preview-tables")).toHaveClass("min-w-0")
+  expect(
+    screen.getByTestId("twin-source-preview-body").closest('[data-slot="scroll-area"]')
+  ).toHaveClass("[&_[data-slot=scroll-area-viewport]>div]:!block")
+  expect(screen.getByTestId("twin-source-preview-copy-0").parentElement).toHaveClass("flex-wrap")
+})
+
+it("centers a bounded window on citations beyond the first preview page", () => {
+  const text = "x".repeat(25000) + "CITED ORIGINAL" + "y".repeat(25000)
+  render(
+    <SourceContentPreview text={text} active highlight={{ charStart: 25000, charEnd: 25014 }} />
+  )
+  expect(screen.getByTestId("source-preview-highlight")).toHaveTextContent("CITED ORIGINAL")
+  expect(screen.getByTestId("twin-source-preview-body").textContent?.length).toBe(MAX_PREVIEW_CHARS)
+  expect(screen.getByText(/around the citation/i)).toBeInTheDocument()
+})
+
+it("rejects invalid ranges and clears highlighting when another source opens", () => {
+  const { rerender } = render(
+    <SourceContentPreview text="Original text" active highlight={{ charStart: 0, charEnd: 8 }} />
+  )
+  expect(screen.getByTestId("source-preview-highlight")).toHaveTextContent("Original")
+  rerender(
+    <SourceContentPreview text="New source" active highlight={{ charStart: 100, charEnd: 200 }} />
+  )
+  expect(screen.queryByTestId("source-preview-highlight")).not.toBeInTheDocument()
+  expect(screen.getByTestId("twin-source-preview-body")).toHaveTextContent("New source")
+})
+
+it("keeps canonical highlight offsets correct when an excerpt window is truncated again", () => {
+  const text = "x".repeat(25000) + "Evidence" + "y".repeat(25000)
+  render(
+    <SourceContentPreview
+      text={text}
+      active
+      textOffset={50000}
+      highlight={{ charStart: 75000, charEnd: 75008 }}
+    />
+  )
+  const body = screen.getByTestId("twin-source-preview-body")
+  expect(body.textContent?.length).toBe(MAX_PREVIEW_CHARS)
+  expect(body.textContent?.slice(1000, 1008)).toBe("Evidence")
+  expect(screen.getByTestId("source-preview-highlight")).toHaveTextContent("Evidence")
+  expect(screen.getByText(/74001–94000/)).toBeInTheDocument()
+})

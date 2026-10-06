@@ -564,3 +564,28 @@ code
     expect(result).not.toContain("```")
   })
 })
+
+describe("original source section positions", () => {
+  it("counts frontmatter lines and ignores fenced headings", () => {
+    const result = parseMarkdown(
+      "---\ntitle: Test\n---\n# Real\n~~~md\n# Example\n~~~\n## Child\nBody"
+    )
+    expect(result.sections.map((section) => [section.title, section.startLine])).toEqual([
+      ["Real", 3],
+      ["Child", 7],
+    ])
+  })
+})
+
+it("preserves Setext headings and excludes fenced examples with language markers", () => {
+  const parsed = parseMarkdown(
+    "Setext title\n============\n\n```md\n```js\n# Example\n```\nChild\n-----\nBody"
+  )
+  expect(parsed.title).toBe("Setext title")
+  expect(
+    parsed.sections.map((section) => [section.title, section.level, section.startLine])
+  ).toEqual([
+    ["Setext title", 1, 0],
+    ["Child", 2, 7],
+  ])
+})

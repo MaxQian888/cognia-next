@@ -46,6 +46,7 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "session:write": ["session:write"],
   "session:delete": ["session:delete"],
   "project:read": ["project:read"],
+  "knowledge:read": ["knowledge:read"],
   "project:write": ["project:write"],
   "project:delete": ["project:delete"],
   "vector:read": ["vector:read"],
@@ -137,6 +138,7 @@ export function expandManifestPermission(permission: string): string[] {
  * Initialize permissions for a plugin based on its manifest
  */
 export function initializePluginPermissions(pluginId: string, manifestPermissions: string[]) {
+  getPermissionGuard().resetRevocations(pluginId)
   const permissions = new Set<PluginAPIPermission>()
 
   // Map manifest permissions to API permissions
@@ -205,7 +207,7 @@ export function createPermissionAPI(
   // the PermissionGuard (manifest-level perms like `git:write`), which the
   // API-permission set knows nothing about. Consult both stores.
   const checkEither = (permission: IntrospectablePluginPermission): boolean =>
-    getPermissions().has(permission as PluginAPIPermission) ||
+    pluginHasApiPermission(pluginId, permission as PluginAPIPermission) ||
     getPermissionGuard().check(pluginId, permission as PluginPermission, "permission-api")
 
   return {
@@ -217,8 +219,10 @@ export function createPermissionAPI(
       permission: PluginAPIPermission,
       reason?: string
     ): Promise<boolean> => {
+      if (getPermissionGuard().getTier(pluginId, permission as PluginPermission) === "forbid")
+        return false
       const existing = getPermissions()
-      if (existing.has(permission)) {
+      if (checkEither(permission)) {
         return true
       }
 
@@ -229,7 +233,15 @@ export function createPermissionAPI(
         kind: "api",
       })
 
+      if (getPermissionGuard().getTier(pluginId, permission as PluginPermission) === "forbid")
+        return false
+
       if (granted) {
+        if (getPermissionGuard().isRevoked(pluginId, permission as PluginPermission)) {
+          getPermissionGuard().grant(pluginId, permission as PluginPermission, {
+            grantedBy: "user",
+          })
+        }
         existing.add(permission)
         contextPanelRegistry.refresh()
         persistToHost(
@@ -251,7 +263,7 @@ export function createPermissionAPI(
           ...getPermissions(),
           ...getPermissionGuard().getPluginPermissions(pluginId),
         ])
-      )
+      ).filter(checkEither)
     },
 
     hasAllPermissions: (permissions: IntrospectablePluginPermission[]): boolean => {
@@ -273,6 +285,12 @@ export function createPermissionAPI(
  */
 export function pluginHasApiPermission(pluginId: string, permission: PluginAPIPermission): boolean {
   if (!pluginRuntimeAccountAvailable()) return false
+  const guard = getPermissionGuard()
+  if (
+    guard.isRevoked(pluginId, permission as PluginPermission) ||
+    guard.getTier(pluginId, permission as PluginPermission) === "forbid"
+  )
+    return false
   return grantedPermissions.get(pluginId)?.has(permission) ?? false
 }
 
@@ -294,6 +312,9 @@ export function revokePluginPermissions(pluginId: string) {
  * Grant a specific permission to a plugin
  */
 export function grantPermission(pluginId: string, permission: PluginAPIPermission) {
+  if (getPermissionGuard().isRevoked(pluginId, permission as PluginPermission)) {
+    getPermissionGuard().grant(pluginId, permission as PluginPermission, { grantedBy: "user" })
+  }
   const permissions = grantedPermissions.get(pluginId) || new Set()
   permissions.add(permission)
   grantedPermissions.set(pluginId, permissions)
@@ -310,6 +331,7 @@ export function grantPermission(pluginId: string, permission: PluginAPIPermissio
  * Revoke a specific permission from a plugin
  */
 export function revokePermission(pluginId: string, permission: PluginAPIPermission) {
+  getPermissionGuard().revoke(pluginId, permission as PluginPermission)
   const permissions = grantedPermissions.get(pluginId)
   if (permissions) {
     permissions.delete(permission)

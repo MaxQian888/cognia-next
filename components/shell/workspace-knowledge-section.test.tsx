@@ -7,7 +7,7 @@ jest.mock("next-intl", () => ({
 }))
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ projectChunks: {} }) }))
-jest.mock("@/lib/project-knowledge/ingest/ingest-file", () => ({ hashContent: () => "hash" }))
+jest.mock("@/lib/project-knowledge/ingest/ingest-file", () => ({ hashKnowledgeFile: () => "hash" }))
 const processDocumentAsync = jest.fn()
 jest.mock("@cognia/document/document-processor", () => ({
   processDocumentAsync: (...args: unknown[]) => processDocumentAsync(...args),
@@ -16,6 +16,11 @@ jest.mock("@cognia/document/support-matrix", () => ({
   getDocumentAcceptString: () => ".txt,.pdf,.docx",
   inferKnowledgeFileTypeFromFilename: (name: string) => (name.endsWith(".pdf") ? "pdf" : "text"),
   isBinaryFilename: (name: string) => name.endsWith(".pdf"),
+}))
+
+const runTwinPdfOcrWithProvenance = jest.fn()
+jest.mock("@/lib/twin/ingest/ocr-fallback", () => ({
+  runTwinPdfOcrWithProvenance: (...args: unknown[]) => runTwinPdfOcrWithProvenance(...args),
 }))
 
 const toastError = jest.fn()
@@ -83,6 +88,7 @@ beforeEach(() => {
     embeddableContent: typeof data === "string" ? data : "extracted binary text",
   }))
   toastError.mockReset()
+  runTwinPdfOcrWithProvenance.mockReset().mockResolvedValue(null)
 })
 
 describe("WorkspaceKnowledgeSection", () => {
@@ -280,5 +286,147 @@ describe("WorkspaceKnowledgeSection", () => {
         knowledgeSettings: expect.objectContaining({ enableProjectRag: false }),
       })
     )
+  })
+})
+
+it("preserves canonical source text, embedding projection, and structure on upload", async () => {
+  liveQueryMock.mockReturnValue(new Map())
+  const structure = { version: 1, contentHash: "v", textLength: 19, nodes: [], pages: [] }
+  processDocumentAsync.mockResolvedValue({
+    content: "# Source\nExact text\n",
+    embeddableContent: "Exact text",
+    structure,
+    metadata: {},
+  })
+  render(<WorkspaceKnowledgeSection project={project()} />)
+  const file = new File(["source"], "guide.txt", { type: "text/plain" })
+  Object.defineProperty(file, "text", { value: async () => "source" })
+  await userEvent.setup().upload(screen.getByTestId("knowledge-file-input"), file)
+  await waitFor(() =>
+    expect(addKnowledgeFile).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({
+        content: "# Source\nExact text\n",
+        embeddableContent: "Exact text",
+        structure,
+      })
+    )
+  )
+})
+
+it("updates retrieval strategy while preserving other project overrides", async () => {
+  liveQueryMock.mockReturnValue(new Map())
+  render(
+    <WorkspaceKnowledgeSection
+      project={project({ knowledgeSettings: { ragTopK: 7, enableProjectRag: false } })}
+    />
+  )
+  await userEvent
+    .setup()
+    .selectOptions(screen.getByRole("combobox", { name: "retrievalStrategy" }), "hybrid")
+  expect(updateProject).toHaveBeenCalledWith("ws1", {
+    knowledgeSettings: { ragTopK: 7, enableProjectRag: false, retrievalStrategy: "hybrid" },
+  })
+})
+
+it("uploads scanned PDFs through the shared OCR route and preserves page ranges", async () => {
+  liveQueryMock.mockReturnValue(new Map())
+  processDocumentAsync.mockResolvedValue({
+    id: "scan",
+    type: "pdf",
+    content: "",
+    embeddableContent: "",
+    metadata: { pageCount: 2 },
+  })
+  const structure = {
+    version: 1,
+    contentHash: "ocr",
+    textLength: 12,
+    nodes: [],
+    pages: [
+      { pageNumber: 2, charStart: 0, charEnd: 12, lineStart: 1, lineEnd: 1, provenance: "ocr" },
+    ],
+  }
+  runTwinPdfOcrWithProvenance.mockResolvedValue({
+    originalText: "Exact source",
+    embeddableText: "Exact source",
+    structure,
+  })
+  render(<WorkspaceKnowledgeSection project={project()} />)
+  const file = new File(["scan"], "scan.pdf", { type: "application/pdf" })
+  Object.defineProperty(file, "arrayBuffer", { value: async () => new ArrayBuffer(4) })
+  await userEvent.setup().upload(screen.getByTestId("knowledge-file-input"), file)
+  await waitFor(() =>
+    expect(addKnowledgeFile).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({
+        content: "Exact source",
+        structure,
+        pageCount: 2,
+        mimeType: "application/pdf",
+      })
+    )
+  )
+  expect(runTwinPdfOcrWithProvenance).toHaveBeenCalledTimes(1)
+})
+
+it("threads native digital-page boxes into mixed PDF OCR without recomputing coordinates", async () => {
+  liveQueryMock.mockReturnValue(new Map())
+  const content = "Digital page body long enough to skip OCR.\n\n"
+  const structure = {
+    version: 1,
+    contentHash: "hash",
+    textLength: content.length,
+    nodes: [],
+    pages: [
+      {
+        pageNumber: 1,
+        charStart: 0,
+        charEnd: content.length - 2,
+        lineStart: 1,
+        lineEnd: 1,
+        provenance: "text-layer",
+      },
+      {
+        pageNumber: 2,
+        charStart: content.length,
+        charEnd: content.length,
+        lineStart: 3,
+        lineEnd: 3,
+        provenance: "text-layer",
+      },
+    ],
+  }
+  processDocumentAsync.mockResolvedValue({
+    id: "mixed",
+    type: "pdf",
+    content,
+    embeddableContent: content,
+    metadata: { pageCount: 2 },
+    structure,
+    parseResult: {
+      text: content,
+      pages: [
+        {
+          pageNumber: 1,
+          text: content.slice(0, -2),
+          width: 1,
+          height: 1,
+          items: [{ text: "Digital", x: 1, y: 2, width: 3, height: 4 }],
+        },
+        { pageNumber: 2, text: "", width: 1, height: 1 },
+      ],
+    },
+  })
+  render(<WorkspaceKnowledgeSection project={project()} />)
+  const file = new File(["mixed"], "mixed.pdf", { type: "application/pdf" })
+  Object.defineProperty(file, "arrayBuffer", { value: async () => new ArrayBuffer(4) })
+  await userEvent.setup().upload(screen.getByTestId("knowledge-file-input"), file)
+  await waitFor(() => expect(runTwinPdfOcrWithProvenance).toHaveBeenCalled())
+  expect(runTwinPdfOcrWithProvenance.mock.calls[0][1].pageMap[0].bboxUnion).toEqual({
+    x: 1,
+    y: 2,
+    width: 3,
+    height: 4,
   })
 })

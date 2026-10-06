@@ -46,6 +46,27 @@ describe("createApiGuardedAPI", () => {
     expect(() => guarded.write()).toThrow(PermissionError)
   })
 
+  it("honors forbid even when the separate API grant store retains an existing grant", () => {
+    initializePluginPermissions(pluginId, ["vector:read"])
+    getPermissionGuard().setTier(pluginId, "vector:read", "forbid")
+    expect(hasApiOrGuardPermission(pluginId, "vector:read")).toBe(false)
+    expect(() => guarded.read()).toThrow(PermissionError)
+    expect(api.read).not.toHaveBeenCalled()
+  })
+
+  it("honors individual and all host revocations over stale API-store grants", () => {
+    initializePluginPermissions(pluginId, ["vector:read", "vector:write"])
+    const guard = getPermissionGuard()
+    guard.registerPlugin(pluginId, ["vector:read", "vector:write"])
+    guard.revoke(pluginId, "vector:read")
+    expect(() => guarded.read()).toThrow(PermissionError)
+    expect(guarded.write()).toBe("write-ok")
+    guard.revokeAll(pluginId)
+    expect(() => guarded.write()).toThrow(PermissionError)
+    guard.grant(pluginId, "vector:read", { grantedBy: "user" })
+    expect(guarded.read()).toBe("read-ok")
+  })
+
   it("passes through when the PermissionGuard grants the same string", () => {
     getPermissionGuard().registerPlugin(pluginId, [
       "vector:write" as unknown as import("@/types/plugin").PluginPermission,

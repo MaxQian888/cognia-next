@@ -13,7 +13,7 @@
  */
 
 import type { Project } from "@/types"
-import { hashContent, ingestKnowledgeFile } from "./ingest/ingest-file"
+import { hashKnowledgeFile, ingestKnowledgeFile } from "./ingest/ingest-file"
 import { tryBuildProjectKnowledgeDeps } from "./runtime/build-deps"
 import { deleteProjectChunksByFile, listProjectChunksByFile } from "@/lib/db/project-chunks"
 import { projectVectorCollectionName } from "./ingest/persist"
@@ -40,7 +40,7 @@ export function snapshotOf(projects: Project[]): KnowledgeSnapshot {
   const snap: KnowledgeSnapshot = new Map()
   for (const p of projects) {
     const files = new Map<string, string>()
-    for (const f of p.knowledgeBase ?? []) files.set(f.id, hashContent(f.content ?? ""))
+    for (const f of p.knowledgeBase ?? []) files.set(f.id, hashKnowledgeFile(f))
     snap.set(p.id, files)
   }
   return snap
@@ -139,13 +139,13 @@ export function createProjectKnowledgeIngestController(): ProjectKnowledgeIngest
       // Refresh the snapshot so the next reconcile doesn't re-ingest.
       snapshot.set(
         project.id,
-        new Map((project.knowledgeBase ?? []).map((f) => [f.id, hashContent(f.content ?? "")]))
+        new Map((project.knowledgeBase ?? []).map((f) => [f.id, hashKnowledgeFile(f)]))
       )
     },
     reindexFile: async (projectId, file) => {
       await enqueue(() => ingest(projectId, file, false).catch(() => undefined))
       const files = snapshot.get(projectId) ?? new Map<string, string>()
-      files.set(file.id, hashContent(file.content ?? ""))
+      files.set(file.id, hashKnowledgeFile(file))
       snapshot.set(projectId, files)
     },
   }

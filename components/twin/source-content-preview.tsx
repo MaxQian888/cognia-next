@@ -12,7 +12,7 @@
  * while hidden.
  */
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CopyIcon, CheckIcon } from "lucide-react"
 import {
@@ -45,12 +45,18 @@ export interface SourceContentPreviewProps {
   active: boolean
   /** Height class for the body scroll area (defaults to `h-64`). */
   bodyHeightClassName?: string
+  /** Original-text offsets; the preview window follows the cited passage. */
+  highlight?: { charStart: number; charEnd: number }
+  /** Canonical offset when text is an authorized excerpt window. */
+  textOffset?: number
 }
 
 export function SourceContentPreview({
   text,
   active,
   bodyHeightClassName = "h-64",
+  highlight,
+  textOffset = 0,
 }: SourceContentPreviewProps) {
   const t = useTranslations("twin.sources")
 
@@ -60,8 +66,29 @@ export function SourceContentPreview({
     [active, text]
   )
 
-  const truncatedBody = text.length > MAX_PREVIEW_CHARS ? text.slice(0, MAX_PREVIEW_CHARS) : text
+  const validHighlight =
+    highlight &&
+    Number.isFinite(highlight.charStart) &&
+    Number.isFinite(highlight.charEnd) &&
+    highlight.charStart >= textOffset &&
+    highlight.charStart < highlight.charEnd &&
+    highlight.charEnd <= textOffset + text.length
+      ? { charStart: highlight.charStart - textOffset, charEnd: highlight.charEnd - textOffset }
+      : undefined
+  const windowStart = validHighlight
+    ? Math.max(0, Math.min(validHighlight.charStart - 1000, text.length - MAX_PREVIEW_CHARS))
+    : 0
+  const truncatedBody = text.slice(windowStart, windowStart + MAX_PREVIEW_CHARS)
   const bodyTruncated = text.length > MAX_PREVIEW_CHARS
+  const highlightStart = validHighlight ? validHighlight.charStart - windowStart : 0
+  const highlightEnd = validHighlight
+    ? Math.min(validHighlight.charEnd - windowStart, truncatedBody.length)
+    : 0
+  const highlightRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (active && highlightEnd > highlightStart)
+      highlightRef.current?.scrollIntoView?.({ block: "center" })
+  }, [active, highlightStart, highlightEnd, windowStart, text])
 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -80,7 +107,7 @@ export function SourceContentPreview({
 
   return (
     <>
-      <section className="flex flex-col gap-2" data-testid="twin-source-preview-tables">
+      <section className="flex min-w-0 flex-col gap-2" data-testid="twin-source-preview-tables">
         <h3 className="text-sm font-medium">{t("tablesHeading", { count: tables.length })}</h3>
         {tables.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("noTables")}</p>
@@ -96,7 +123,7 @@ export function SourceContentPreview({
                   className="flex flex-col gap-1.5"
                   data-testid="twin-source-preview-table"
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-muted-foreground text-xs">
                       {t("tableStats", {
                         rows: stats.rowCount,
@@ -156,19 +183,40 @@ export function SourceContentPreview({
         )}
       </section>
 
-      <section className="flex min-h-0 flex-col gap-2">
+      <section className="flex min-h-0 min-w-0 flex-col gap-2">
         <h3 className="text-sm font-medium">{t("contentHeading")}</h3>
-        <ScrollArea className={`${bodyHeightClassName} rounded-md border`}>
+        <ScrollArea
+          className={`${bodyHeightClassName} rounded-md border [&_[data-slot=scroll-area-viewport]>div]:!block`}
+        >
           <pre
             className="p-3 text-xs break-words whitespace-pre-wrap"
             data-testid="twin-source-preview-body"
           >
-            {truncatedBody}
+            {validHighlight ? (
+              <>
+                {truncatedBody.slice(0, highlightStart)}
+                <mark
+                  ref={highlightRef}
+                  data-testid="source-preview-highlight"
+                  className="rounded bg-yellow-200 text-foreground dark:bg-yellow-900"
+                >
+                  {truncatedBody.slice(highlightStart, highlightEnd)}
+                </mark>
+                {truncatedBody.slice(highlightEnd)}
+              </>
+            ) : (
+              truncatedBody
+            )}
           </pre>
         </ScrollArea>
         {bodyTruncated ? (
           <p className="text-muted-foreground text-xs">
-            {t("contentTruncated", { count: MAX_PREVIEW_CHARS })}
+            {validHighlight
+              ? t("contentWindow", {
+                  start: textOffset + windowStart + 1,
+                  end: textOffset + windowStart + truncatedBody.length,
+                })
+              : t("contentTruncated", { count: MAX_PREVIEW_CHARS })}
           </p>
         ) : null}
       </section>

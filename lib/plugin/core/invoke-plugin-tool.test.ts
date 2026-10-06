@@ -211,6 +211,19 @@ describe("invokePluginTool", () => {
     expect(deps.toolUseRefreshes).toEqual(["plug-a"])
   })
 
+  it("forwards only the host-supplied invocation API, never a tool argument posing as authority", async () => {
+    const execute = jest.fn().mockResolvedValue({ ok: true })
+    __setInvokePluginToolDepsForTesting(makeDeps({ tools: [makeTool({ execute })] }))
+    const project = {
+      readKnowledgeRange: jest.fn(),
+    } as unknown as import("@/types/plugin").PluginProjectAPI
+    await invokePluginTool("plug-a", "demo_tool", { project: "forged" }, { project })
+    expect(execute.mock.calls[0][1].project).toBe(project)
+    execute.mockClear()
+    await invokePluginTool("plug-a", "demo_tool", { project: "forged" })
+    expect(execute.mock.calls[0][1]).not.toHaveProperty("project")
+  })
+
   it("does not refresh the idle clock when the plugin is disabled (throws before use)", async () => {
     const deps = makeDeps({ plugins: { "plug-a": { status: "disabled" } } })
     __setInvokePluginToolDepsForTesting(deps)

@@ -55,6 +55,7 @@ describe("Permission API", () => {
   const testPluginId = "test-plugin"
 
   beforeEach(() => {
+    getPermissionGuard().clear()
     activatePluginRuntimeAccount("acct-permission-test")
     // Revoke all permissions before each test
     clearAllPluginApiPermissions()
@@ -275,6 +276,23 @@ describe("Permission API", () => {
 
       expect(api.hasPermission("ai:chat")).toBe(false)
     })
+
+    it("reports host UI revocation and forbid over retained API grants", async () => {
+      const api = createPermissionAPI(testPluginId, ["knowledge:read"])
+      const guard = getPermissionGuard()
+      guard.revoke(testPluginId, "knowledge:read")
+      expect(api.hasPermission("knowledge:read")).toBe(false)
+      expect(pluginHasApiPermission(testPluginId, "knowledge:read")).toBe(false)
+      expect(api.getGrantedPermissions()).not.toContain("knowledge:read")
+      grantPermission(testPluginId, "knowledge:read")
+      expect(api.hasPermission("knowledge:read")).toBe(true)
+      expect(api.getGrantedPermissions()).toContain("knowledge:read")
+      guard.setTier(testPluginId, "knowledge:read", "forbid")
+      expect(api.hasPermission("knowledge:read")).toBe(false)
+      expect(api.getGrantedPermissions()).not.toContain("knowledge:read")
+      await expect(api.requestPermission("knowledge:read")).resolves.toBe(false)
+      expect(requestPluginPermission).not.toHaveBeenCalled()
+    })
   })
 
   describe("revokePluginPermissions", () => {
@@ -419,6 +437,7 @@ describe("Permission API", () => {
       "session:write",
       "session:delete",
       "project:read",
+      "knowledge:read",
       "project:write",
       "project:delete",
       "vector:read",

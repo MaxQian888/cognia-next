@@ -3,6 +3,8 @@ jest.mock("@cognia/vector/dimension-guard", () => ({
 }))
 
 import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { getDb } from "@/lib/db/schema"
+import type { KnowledgeFile } from "@/types"
 import { countProjectChunksByFile, listProjectChunksByFile } from "@/lib/db/project-chunks"
 import { persistProjectChunks, projectVectorCollectionName } from "./persist"
 import type { IVectorStore } from "@cognia/vector/store"
@@ -53,6 +55,84 @@ function chunk(content: string, redacted = content) {
 afterAll(dbFixture.dispose)
 
 describe("persistProjectChunks", () => {
+  function source(content = "Original"): KnowledgeFile {
+    return {
+      id: "file-1",
+      name: "Guide.md",
+      type: "markdown",
+      content,
+      size: content.length,
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    }
+  }
+
+  it("rejects a source removed during vector publication without replacing its serving generation", async () => {
+    const file = source()
+    await getDb().projects.put({ id: "proj-a", knowledgeBase: [file] } as never)
+    const { store } = fakeStore()
+    const base = {
+      projectId: "proj-a",
+      fileId: "file-1",
+      vectorBackend: "native" as const,
+      store,
+      contentHash: "hash",
+      expectedSource: file,
+      chunks: [chunk(file.content!)],
+      embeddings: [[1, 2]],
+    }
+    const first = await persistProjectChunks(base)
+    jest.mocked(store.addDocuments).mockImplementationOnce(async () => {
+      await getDb().projects.update("proj-a", { knowledgeBase: [] })
+    })
+    await expect(persistProjectChunks(base)).rejects.toMatchObject({ code: "source_changed" })
+    expect((await listProjectChunksByFile("proj-a", "file-1"))[0].generationId).toBe(
+      first.generationId
+    )
+    expect(await getDb().retrievalActivePointers.get("project:proj-a:file:file-1")).toMatchObject({
+      generationId: first.generationId,
+    })
+    expect(store.deleteDocuments).toHaveBeenCalled()
+  })
+
+  it("rejects changed text, structure or projection before outbound vector writes", async () => {
+    const file = source()
+    await getDb().projects.put({
+      id: "proj-a",
+      knowledgeBase: [{ ...file, embeddableContent: "different projection" }],
+    } as never)
+    const { store } = fakeStore()
+    await expect(
+      persistProjectChunks({
+        projectId: "proj-a",
+        fileId: "file-1",
+        vectorBackend: "native",
+        store,
+        contentHash: "hash",
+        expectedSource: file,
+        chunks: [chunk(file.content!)],
+        embeddings: [[1, 2]],
+      })
+    ).rejects.toMatchObject({ code: "source_changed" })
+    expect(store.addDocuments).not.toHaveBeenCalled()
+  })
+
+  it("does not recreate a deleted project after embedding completes", async () => {
+    const { store } = fakeStore()
+    await expect(
+      persistProjectChunks({
+        projectId: "deleted",
+        fileId: "file-1",
+        vectorBackend: "native",
+        store,
+        contentHash: "hash",
+        expectedSource: source(),
+        chunks: [],
+        embeddings: [],
+      })
+    ).rejects.toMatchObject({ code: "source_changed" })
+    expect(store.addDocuments).not.toHaveBeenCalled()
+  })
   it("throws on chunks/embeddings length mismatch", async () => {
     const { store } = fakeStore()
     await expect(

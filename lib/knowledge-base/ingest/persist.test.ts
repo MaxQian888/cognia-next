@@ -5,7 +5,12 @@ import {
   createKnowledgeBaseSource,
   listKnowledgeBaseChunks,
   listKnowledgeBaseRevisionChunks,
+  getKnowledgeBaseDocumentSnapshot,
+  deleteKnowledgeBaseSource,
 } from "@/lib/db/knowledge-bases"
+import { getDb } from "@/lib/db/schema"
+import { buildDocumentStructure } from "@cognia/document/document-structure"
+import { rollbackKnowledgeBaseSourceRevision } from "@/lib/knowledge-base/revisions"
 import { knowledgeBaseVectorCollectionName } from "@/lib/knowledge-base/runtime/retrieve"
 import { persistKnowledgeBaseChunks } from "./persist"
 
@@ -66,6 +71,159 @@ const chunk = {
 }
 
 describe("persistKnowledgeBaseChunks", () => {
+  it("uses the enclosing section when a heading chunk spans sibling sections", async () => {
+    await seedSource()
+    const originalText = "# One\nFirst answer\n\n# Two\nSecond answer"
+    const structure = buildDocumentStructure({
+      content: originalText,
+      markdown: (await import("@cognia/document/parsers/markdown-parser")).parseMarkdown(
+        originalText
+      ),
+    })
+    const result = await persistKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      vectorBackend: "native",
+      store: createStore(),
+      contentHash: "sha256:guide",
+      documentSnapshot: { originalText, structure, title: "Guide", format: "markdown" },
+      chunks: [
+        {
+          ...chunk,
+          content: originalText,
+          contentRedacted: originalText,
+          charEnd: originalText.length,
+        },
+      ],
+      embeddings: [[1, 2]],
+    })
+    expect(structure.nodes).toHaveLength(3)
+    expect(result.rows[0].metadata.sectionId).toBe("root")
+  })
+  it("freezes original structure with revisions, serves rollback, and deletes all source history", async () => {
+    await seedSource()
+    const store = createStore()
+    const base = {
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      vectorBackend: "native" as const,
+      store,
+      contentHash: "sha256:guide",
+      chunks: [chunk],
+      embeddings: [[1, 2]],
+    }
+    const originalText = "# Guide\nOriginal code: `critical()`"
+    const first = await persistKnowledgeBaseChunks({
+      ...base,
+      documentSnapshot: {
+        originalText,
+        structure: buildDocumentStructure({ content: originalText }),
+        title: "Guide",
+        format: "markdown",
+      },
+    })
+    const second = await persistKnowledgeBaseChunks({
+      ...base,
+      chunks: [],
+      embeddings: [],
+      documentSnapshot: {
+        originalText: "",
+        structure: buildDocumentStructure({ content: "" }),
+        title: "Empty",
+        format: "markdown",
+      },
+    })
+    expect(
+      await getKnowledgeBaseDocumentSnapshot({ knowledgeBaseId: "kb-1", sourceId: "source-1" })
+    ).toMatchObject({ generationId: second.generationId, originalText: "" })
+    expect(
+      await getKnowledgeBaseDocumentSnapshot({
+        knowledgeBaseId: "kb-other",
+        sourceId: "source-1",
+        generationId: first.generationId,
+      })
+    ).toBeUndefined()
+    await rollbackKnowledgeBaseSourceRevision({
+      knowledgeBaseId: "kb-1",
+      sourceId: "source-1",
+      generationId: first.generationId!,
+    })
+    expect(
+      await getKnowledgeBaseDocumentSnapshot({ knowledgeBaseId: "kb-1", sourceId: "source-1" })
+    ).toMatchObject({
+      generationId: first.generationId,
+      originalText,
+      structure: { textLength: originalText.length },
+    })
+    await deleteKnowledgeBaseSource("source-1")
+    expect(
+      await getKnowledgeBaseDocumentSnapshot({
+        knowledgeBaseId: "kb-1",
+        sourceId: "source-1",
+        generationId: first.generationId,
+      })
+    ).toBeUndefined()
+    expect(
+      await getDb().retrievalActivePointers.get("knowledge_base:kb-1:source:source-1")
+    ).toBeUndefined()
+    expect(
+      await getDb()
+        .retrievalGenerations.where("corpusId")
+        .equals("knowledge_base:kb-1:source:source-1")
+        .count()
+    ).toBe(0)
+    expect(await getDb().retrievalTombstones.get("knowledge_base_source:source-1")).toBeDefined()
+  })
+
+  it("rejects stale structures before outbound writes", async () => {
+    await seedSource()
+    const store = createStore()
+    await expect(
+      persistKnowledgeBaseChunks({
+        knowledgeBaseId: "kb-1",
+        sourceId: "source-1",
+        vectorBackend: "native",
+        store,
+        contentHash: "hash",
+        chunks: [chunk],
+        embeddings: [[1, 2]],
+        documentSnapshot: {
+          originalText: "changed",
+          structure: buildDocumentStructure({ content: "previous" }),
+          title: "Guide",
+          format: "markdown",
+        },
+      })
+    ).rejects.toThrow("does not match")
+    expect(store.addDocuments).not.toHaveBeenCalled()
+  })
+
+  it("does not publish a source changed while remote vectors are written", async () => {
+    await seedSource()
+    const [expectedSource] = await getDb().knowledgeBaseSources.bulkGet(["source-1"])
+    const store = createStore()
+    store.addDocuments.mockImplementationOnce(async () => {
+      await getDb().knowledgeBaseSources.update("source-1", {
+        content: "new source",
+        fingerprint: "new-hash",
+      })
+    })
+    await expect(
+      persistKnowledgeBaseChunks({
+        knowledgeBaseId: "kb-1",
+        sourceId: "source-1",
+        vectorBackend: "native",
+        store,
+        contentHash: "sha256:guide",
+        expectedSource,
+        chunks: [chunk],
+        embeddings: [[1, 2]],
+        documentSnapshot: { originalText: chunk.content, title: "Guide", format: "markdown" },
+      })
+    ).rejects.toMatchObject({ code: "source_changed" })
+    expect(await listKnowledgeBaseRevisionChunks("kb-1")).toEqual([])
+    expect(store.deleteDocuments).toHaveBeenCalled()
+  })
   it("stores full local provenance while sending only redacted content to the vector store", async () => {
     await seedSource()
     const store = createStore()

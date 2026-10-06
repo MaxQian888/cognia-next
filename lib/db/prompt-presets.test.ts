@@ -2,6 +2,7 @@
 // fake-indexeddb so the real Dexie indexes / transactions / upgrade hook
 // run against an in-memory IDB.
 
+import Dexie from "dexie"
 import {
   clearDefaultPreset,
   createPreset,
@@ -234,6 +235,31 @@ describe("reorderPresets", () => {
 })
 
 describe("recordPresetUsage", () => {
+  it("does not update preset usage after the scoped read becomes stale", async () => {
+    const db = getDb()
+    const preset = await createPreset({ name: "Scoped", content: "Private" })
+    let active = true
+    const read = jest.spyOn(db.promptPresets, "get").mockImplementationOnce(() => {
+      active = false
+      return Dexie.Promise.resolve(preset)
+    })
+    const update = jest.spyOn(db.promptPresets, "update")
+    try {
+      await expect(
+        recordPresetUsage(preset.id, {
+          db,
+          assertActive: () => {
+            if (!active) throw new Error("Scope changed")
+          },
+        })
+      ).rejects.toThrow("Scope changed")
+      expect(update).not.toHaveBeenCalled()
+    } finally {
+      read.mockRestore()
+      update.mockRestore()
+    }
+  })
+
   it("bumps usageCount and stamps lastUsedAt", async () => {
     const a = await createPreset({ name: "A", content: "x" })
     await recordPresetUsage(a.id)

@@ -140,7 +140,7 @@
     "empty": "No workspaces yet",
     "knowledge": {
       "addFile": "Upload files",
-      "backendHint": "Retrieval needs a configured vector backend and embedding model (Twin settings). Without one, ingestion and retrieval are skipped.",
+      "backendHint": "Keyword retrieval is available without an embedding model. Semantic and hybrid retrieval use the configured vector backend and embedding model (Twin settings).",
       "chunkCount": "{count, plural, one {# chunk} other {# chunks}}",
       "emptyFile": "No readable text was found in the file.",
       "enableRag": "Inject knowledge into chat",
@@ -167,6 +167,10 @@
       },
       "summary": "{files, plural, one {# file} other {# files}} · {chunks, plural, one {# chunk} other {# chunks}}",
       "title": "Knowledge base",
+      "retrievalStrategy": "Retrieval strategy",
+      "strategyVector": "Semantic",
+      "strategyHybrid": "Semantic + keyword",
+      "strategyKeyword": "Keyword",
       "topK": "Chunks per message"
     },
     "listLabel": "Workspaces",

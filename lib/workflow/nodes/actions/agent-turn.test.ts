@@ -39,6 +39,16 @@ jest.mock("@/lib/db/settings", () => ({
   }),
 }))
 
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    workflowRuns: {
+      get: jest.fn(async () => ({
+        triggeredBy: { initiator: { authenticated: true, principalId: "verified-subject" } },
+      })),
+    },
+  }),
+}))
+
 function makeCtx(
   params: Record<string, unknown>,
   extra: Partial<StepExecutionContext> = {}
@@ -73,6 +83,38 @@ beforeEach(() => {
 })
 
 describe("runAgentTurn", () => {
+  it("carries durable public-entry identity and frozen revisions into agent execution", async () => {
+    await runAgentTurn(
+      makeCtx(
+        { prompt: "read library", triggeredBy: { initiator: { principalId: "forged" } } },
+        {
+          executionBinding: {
+            versionId: "v1",
+            deploymentId: "deployment",
+            deploymentRevision: 1,
+            entrypoint: "http",
+            caller: "caller",
+            dependencyLock: {
+              workflows: {},
+              indexes: { "knowledge:kb-1:source-1": "generation-1" },
+            },
+          },
+        }
+      )
+    )
+    expect(mockRunCompletionRail).toHaveBeenCalledWith(
+      "read library",
+      expect.objectContaining({
+        knowledgeAccess: {
+          entrypoint: "http",
+          triggeredBy: { initiator: { authenticated: true, principalId: "verified-subject" } },
+          revisionBindings: { "kb-1": ["generation-1"] },
+          allowedKnowledgeBaseIds: ["kb-1"],
+        },
+      })
+    )
+  })
+
   it("forces connector-origin prompts through the block/redact policy", async () => {
     const extra = {
       securityContext: {

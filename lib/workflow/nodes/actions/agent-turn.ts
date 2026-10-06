@@ -159,6 +159,10 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
     // Provider snapshot for the text channel (the sidecar channel resolves
     // its own provider through resolveSendOptions).
     const settings = await getSettings().catch(() => undefined)
+    // Read verified invocation identity from the durable run, never node params
+    // or trigger payload. Public entrypoints must not inherit desktop access.
+    const { resolveWorkflowKnowledgeAccess } = await import("@/lib/workflow/knowledge/access")
+    const knowledgeAccess = await resolveWorkflowKnowledgeAccess(ctx)
 
     // Single turn runner through the unified service: `surface` and
     // `requireTools` become resolver policy, and the host-unavailable failure
@@ -206,6 +210,7 @@ export async function runAgentTurn(ctx: StepExecutionContext): Promise<StepExecu
       ...(capabilityGrant ? { capabilityGrants: [capabilityGrant] } : {}),
       timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       permissionCeiling: ctx.securityContext?.permissionCeiling,
+      ...(knowledgeAccess ? { knowledgeAccess } : {}),
       onDelta: ctx.emitStream,
       onEvent: (event: CaptureStreamEvent) => {
         if (event.type === "commentary-delta" && event.delta) {

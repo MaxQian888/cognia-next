@@ -12,8 +12,21 @@ import {
   reconcileTeamRun,
   reviewTeamTask,
   runTeamNode,
+  resolveTeamKnowledgeBaseIds,
   teamWorkflowNodes,
 } from "./index"
+
+const getStoredTeam = jest.fn()
+const getStoredTeammates = jest.fn()
+const resolveCharacterById = jest.fn()
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: {
+    getState: () => ({ getTeam: getStoredTeam, getTeammates: getStoredTeammates }),
+  },
+}))
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (...args: unknown[]) => resolveCharacterById(...args),
+}))
 
 const getTeamRunContext = jest.fn()
 jest.mock("@/lib/ai/agent/team/team-run-context", () => ({
@@ -99,6 +112,63 @@ describe("teamWorkflowNodes", () => {
       delegate: runTeamDelegate,
       message: runTeamMessage,
     })
+  })
+})
+
+describe("resolveTeamKnowledgeBaseIds", () => {
+  beforeEach(() => {
+    getStoredTeam.mockReturnValue({
+      config: { capabilities: { characterPackIds: ["base", "unused"] } },
+    })
+    getStoredTeammates.mockReturnValue([
+      { role: "lead", config: {} },
+      {
+        role: "teammate",
+        config: { capabilities: { characterPackIds: { replace: ["variant", "unused"] } } },
+      },
+      {
+        role: "teammate",
+        config: { capabilities: { characterPackIds: { remove: ["base"], add: ["additional"] } } },
+      },
+      { role: "teammate", config: { capabilities: { characterPackIds: { replace: [] } } } },
+      { role: "teammate", config: {} },
+    ])
+    resolveCharacterById.mockImplementation(async (id: string) => ({
+      knowledgeBaseIds:
+        id === "base"
+          ? ["kb-base", "shared"]
+          : id === "variant"
+            ? ["kb-variant", "shared"]
+            : ["kb-unused"],
+    }))
+  })
+
+  it("matches dispatch's first effective backing character after per-member overlays", async () => {
+    await expect(resolveTeamKnowledgeBaseIds("team-1")).resolves.toEqual([
+      "kb-base",
+      "shared",
+      "kb-variant",
+      "kb-unused",
+    ])
+    expect(resolveCharacterById.mock.calls.map(([id]) => id)).toEqual(["base", "variant", "unused"])
+    expect(getStoredTeammates).toHaveBeenCalledWith("team-1")
+  })
+
+  it("rejects missing teams and disappeared backing characters at admission", async () => {
+    getStoredTeam.mockReturnValueOnce(undefined)
+    await expect(resolveTeamKnowledgeBaseIds("missing")).rejects.toMatchObject({ retryable: false })
+    resolveCharacterById.mockResolvedValueOnce(undefined)
+    await expect(resolveTeamKnowledgeBaseIds("team-1")).rejects.toMatchObject({
+      retryable: false,
+      message: expect.stringContaining("base"),
+    })
+  })
+
+  it("returns no dependencies for teammates with no backing character", async () => {
+    getStoredTeam.mockReturnValue({ config: {} })
+    getStoredTeammates.mockReturnValue([{ config: {} }])
+    await expect(resolveTeamKnowledgeBaseIds("team-1")).resolves.toEqual([])
+    expect(resolveCharacterById).not.toHaveBeenCalled()
   })
 })
 

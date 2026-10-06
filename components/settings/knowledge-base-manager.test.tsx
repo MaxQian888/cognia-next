@@ -1,4 +1,22 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+
+const mockSettingsSave = jest.fn()
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: jest.fn(),
+  },
+}))
+jest.mock("@/stores/settings", () => {
+  const { create } = jest.requireActual("zustand")
+  return {
+    useSettingsStore: create(() => ({
+      settings: null,
+      save: (...args: unknown[]) => mockSettingsSave(...args),
+    })),
+  }
+})
 
 jest.mock("@/components/rag/retrieval-control-panel", () => ({
   RetrievalControlPanel: ({ corpusPrefixes }: { corpusPrefixes: string[] }) => (
@@ -37,6 +55,7 @@ jest.mock("@/lib/knowledge-base/ingest/ingest-source", () => ({
 }))
 
 import { KnowledgeBaseManager } from "./knowledge-base-manager"
+import { useSettingsStore } from "@/stores/settings"
 
 const knowledgeBases = [
   { id: "kb-1", name: "Product", createdAt: 1, updatedAt: 1 },
@@ -45,6 +64,17 @@ const knowledgeBases = [
 const deps = { store: {}, embedding: {}, vectorBackend: "native" }
 
 beforeEach(() => {
+  mockToastError.mockReset()
+  useSettingsStore.setState({
+    settings: {
+      id: "settings",
+      locale: "en",
+      knowledgeReading: { summaryProviderId: "existing-provider", totalReadChars: 456_789 },
+    } as never,
+  })
+  mockSettingsSave.mockReset().mockImplementation(async (patch) => {
+    useSettingsStore.setState((state) => ({ settings: { ...state.settings, ...patch } }))
+  })
   listSourcesMock.mockReset().mockResolvedValue([])
   listJobsMock.mockReset().mockResolvedValue([])
   createSourceMock.mockReset().mockImplementation(async (draft) => ({
@@ -66,6 +96,119 @@ beforeEach(() => {
   rebuildMock
     .mockReset()
     .mockResolvedValue({ completedSourceIds: ["source-1"], failedSourceIds: [] })
+})
+
+it("saves global reading enablement and strategy while preserving other current settings", async () => {
+  render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
+  await screen.findByTestId("knowledge-reading-enabled")
+  act(() => {
+    useSettingsStore.setState((state) => ({
+      settings: {
+        ...state.settings,
+        locale: "zh-CN",
+        knowledgeReading: { ...state.settings?.knowledgeReading, maxCalls: 77 },
+      } as never,
+    }))
+  })
+  fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
+  fireEvent.change(screen.getByTestId("knowledge-reading-strategy"), {
+    target: { value: "hybrid" },
+  })
+  await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(2))
+  expect(useSettingsStore.getState().settings).toMatchObject({
+    locale: "zh-CN",
+    knowledgeReading: {
+      enabled: true,
+      retrievalStrategy: "hybrid",
+      maxCalls: 77,
+      totalReadChars: 456789,
+      summaryProviderId: "existing-provider",
+    },
+  })
+  expect(
+    mockSettingsSave.mock.calls.every(([patch]) => Object.keys(patch).join() === "knowledgeReading")
+  ).toBe(true)
+})
+
+it("commits and clamps every numeric reading budget using the shared controls", async () => {
+  render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
+  const values = {
+    topKPerBase: 9,
+    ragTokenBudget: 7000,
+    maxCalls: 90,
+    maxReadChars: 21000,
+    totalReadChars: 120000,
+    maxOutlineNodes: 300,
+    summaryMaxChars: 900,
+  }
+  for (const [field, value] of Object.entries(values)) {
+    const input = screen.getByTestId(`knowledge-reading-${field}`)
+    fireEvent.change(input, { target: { value: String(value) } })
+    fireEvent.blur(input)
+  }
+  await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(7))
+  expect(useSettingsStore.getState().settings?.knowledgeReading).toMatchObject(values)
+  const input = screen.getByTestId("knowledge-reading-maxCalls")
+  fireEvent.change(input, { target: { value: "99999" } })
+  fireEvent.blur(input)
+  await waitFor(() =>
+    expect(useSettingsStore.getState().settings?.knowledgeReading?.maxCalls).toBe(1000)
+  )
+})
+
+it("queues rapid saves and commits an optional summary provider without dropping earlier changes", async () => {
+  let release!: () => void
+  mockSettingsSave.mockImplementationOnce(async (patch) => {
+    await new Promise<void>((resolve) => {
+      release = resolve
+    })
+    useSettingsStore.setState((state) => ({ settings: { ...state.settings, ...patch } }))
+  })
+  render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
+  fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
+  await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(1))
+  fireEvent.change(screen.getByTestId("knowledge-reading-strategy"), {
+    target: { value: "keyword" },
+  })
+  const provider = screen.getByTestId("knowledge-reading-summary-provider")
+  fireEvent.change(provider, { target: { value: " navigation-provider " } })
+  fireEvent.blur(provider)
+  expect(mockSettingsSave).toHaveBeenCalledTimes(1)
+  await act(async () => release())
+  await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(3))
+  expect(useSettingsStore.getState().settings?.knowledgeReading).toMatchObject({
+    enabled: true,
+    retrievalStrategy: "keyword",
+    summaryProviderId: "navigation-provider",
+  })
+  fireEvent.change(provider, { target: { value: "" } })
+  fireEvent.blur(provider)
+  await waitFor(() =>
+    expect(
+      useSettingsStore.getState().settings?.knowledgeReading?.summaryProviderId
+    ).toBeUndefined()
+  )
+})
+
+it("reports a failed settings write and continues queued edits and retries", async () => {
+  mockSettingsSave.mockRejectedValueOnce(new Error("storage unavailable"))
+  render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
+  fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
+  fireEvent.change(screen.getByTestId("knowledge-reading-strategy"), {
+    target: { value: "hybrid" },
+  })
+  await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(2))
+  expect(mockToastError).toHaveBeenCalledWith(expect.any(String))
+  expect(useSettingsStore.getState().settings?.knowledgeReading).toMatchObject({
+    enabled: false,
+    retrievalStrategy: "hybrid",
+    totalReadChars: 456_789,
+  })
+  fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
+  await waitFor(() =>
+    expect(useSettingsStore.getState().settings?.knowledgeReading?.enabled).toBe(true)
+  )
+  expect(mockToastError).toHaveBeenCalledTimes(1)
 })
 
 it("wires the selected library into the shared retrieval control plane", async () => {

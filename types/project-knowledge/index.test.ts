@@ -1,6 +1,16 @@
 import { DEFAULT_PROJECT_KNOWLEDGE_SETTINGS, resolveProjectKnowledgeSettings } from "./index"
 
 describe("resolveProjectKnowledgeSettings", () => {
+  it("keeps vector compatibility while allowing keyword and hybrid candidates", () => {
+    expect(resolveProjectKnowledgeSettings({}).retrievalStrategy).toBe("vector")
+    expect(resolveProjectKnowledgeSettings({ retrievalStrategy: "hybrid" }).retrievalStrategy).toBe(
+      "hybrid"
+    )
+    expect(
+      resolveProjectKnowledgeSettings({ retrievalStrategy: "keyword" }).retrievalStrategy
+    ).toBe("keyword")
+  })
+
   it("returns defaults for undefined / null", () => {
     expect(resolveProjectKnowledgeSettings(undefined)).toEqual(DEFAULT_PROJECT_KNOWLEDGE_SETTINGS)
     expect(resolveProjectKnowledgeSettings(null)).toEqual(DEFAULT_PROJECT_KNOWLEDGE_SETTINGS)

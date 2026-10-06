@@ -22,7 +22,7 @@ jest.mock("./parse", () => ({
   parseSource: jest.fn(),
 }))
 jest.mock("./ocr-fallback", () => ({
-  runTwinPdfOcr: jest.fn(),
+  runTwinPdfOcrWithProvenance: jest.fn(),
 }))
 jest.mock("./embed", () => ({
   embedRedactedChunks: jest.fn(),
@@ -47,7 +47,7 @@ import type { IVectorStore } from "@cognia/vector/store"
 import type { TwinJob, TwinSource } from "@/types/twin"
 import { embedRedactedChunks, type EmbeddingConfig } from "./embed"
 import { deriveNameHints, runIngestJob } from "./job-runner"
-import { runTwinPdfOcr } from "./ocr-fallback"
+import { runTwinPdfOcrWithProvenance } from "./ocr-fallback"
 import { parseSource, type ParsedSource, type RawSource } from "./parse"
 import { persistChunks } from "./persist"
 import { encryptRedactionMap } from "./redaction-key"
@@ -61,7 +61,9 @@ const mockUpdateTwinSource = updateTwinSource as jest.MockedFunction<typeof upda
 const mockEnsureTwinProfile = ensureTwinProfile as jest.MockedFunction<typeof ensureTwinProfile>
 const mockUpdateJobProgress = updateJobProgress as jest.MockedFunction<typeof updateJobProgress>
 const mockParseSource = parseSource as jest.MockedFunction<typeof parseSource>
-const mockRunTwinPdfOcr = runTwinPdfOcr as jest.MockedFunction<typeof runTwinPdfOcr>
+const mockRunTwinPdfOcr = runTwinPdfOcrWithProvenance as jest.MockedFunction<
+  typeof runTwinPdfOcrWithProvenance
+>
 const mockEmbed = embedRedactedChunks as jest.MockedFunction<typeof embedRedactedChunks>
 const mockPersist = persistChunks as jest.MockedFunction<typeof persistChunks>
 
@@ -183,15 +185,19 @@ describe("runIngestJob — pageMap threading", () => {
     )
   })
 
-  it("drops the pageMap when the OCR fallback replaced the text", async () => {
-    mockRunTwinPdfOcr.mockResolvedValue("OCR REPLACEMENT TEXT FROM THE SCANNED DOCUMENT")
+  it("uses the OCR page map when the fallback replaces the text", async () => {
+    mockRunTwinPdfOcr.mockResolvedValue({
+      originalText: "OCR REPLACEMENT TEXT FROM THE SCANNED DOCUMENT",
+      embeddableText: "OCR REPLACEMENT TEXT FROM THE SCANNED DOCUMENT",
+      pageMap: [{ pageNumber: 2, charStart: 0, charEnd: 45 }],
+    })
 
     const result = await runIngestJob(runInput())
 
     expect(result.totalChunks).toBeGreaterThan(0)
     const persisted = mockPersist.mock.calls[0][0]
     for (const chunk of persisted.chunks) {
-      expect(chunk.metadata.pageNumber).toBeUndefined()
+      expect(chunk.metadata.pageNumber).toBe(2)
       expect(chunk.metadata.bboxUnion).toBeUndefined()
     }
   })
@@ -354,8 +360,8 @@ describe("runIngestJob — redaction map persistence", () => {
   })
 
   function redactionMapEncFromCalls(): string | undefined {
-    for (const [, patch] of mockUpdateTwinSource.mock.calls) {
-      const enc = (patch as { redactionMapEnc?: string }).redactionMapEnc
+    for (const [input] of mockPersist.mock.calls) {
+      const enc = input.sourceMetadata?.redactionMapEnc
       if (typeof enc === "string") return enc
     }
     return undefined
@@ -391,4 +397,63 @@ describe("runIngestJob — redaction map persistence", () => {
     expect(mockEncryptRedactionMap).not.toHaveBeenCalled()
     expect(redactionMapEncFromCalls()).toBeUndefined()
   })
+})
+
+it("activates an empty replacement instead of retaining previously serving chunks", async () => {
+  jest.clearAllMocks()
+  mockGetTwinSource.mockResolvedValue(sourceRow())
+  mockEnsureTwinProfile.mockResolvedValue({} as never)
+  mockParseSource.mockResolvedValue({
+    ...parsedSource(),
+    originalText: "",
+    embeddableText: "",
+    pageMap: [],
+  })
+  mockRunTwinPdfOcr.mockResolvedValue(null)
+  mockPersist.mockResolvedValue({ rows: [], vectorDocIds: [], generationId: "empty-generation" })
+  const result = await runIngestJob(runInput())
+  expect(mockEmbed).not.toHaveBeenCalled()
+  expect(mockPersist).toHaveBeenCalledWith(
+    expect.objectContaining({
+      chunks: [],
+      embeddings: [],
+      documentSnapshot: expect.objectContaining({ originalText: "" }),
+    })
+  )
+  expect(result.writtenSourceIds).toEqual(["src1"])
+  expect(result.totalChunks).toBe(0)
+})
+
+it("keeps the previous serving source status when replacement indexing fails", async () => {
+  jest.clearAllMocks()
+  mockGetTwinSource.mockResolvedValue({
+    ...sourceRow(),
+    status: "parsed",
+    documentSnapshot: {
+      generationId: "old",
+      contentHash: "old",
+      originalText: "Old",
+      title: "Old",
+      format: "markdown",
+      createdAt: 1,
+    },
+  })
+  mockParseSource.mockResolvedValue(parsedSource())
+  mockRunTwinPdfOcr.mockResolvedValue(null)
+  mockEmbed.mockResolvedValue({ embeddings: [[0.1, 0.2]], tokensUsed: 0 })
+  mockPersist.mockRejectedValue(new Error("remote write failed"))
+  const result = await runIngestJob(runInput())
+  expect(mockUpdateTwinSource).toHaveBeenLastCalledWith("src1", {
+    status: "parsed",
+    errorMessage: "remote write failed",
+  })
+  expect(result.failureSummary.failureCount).toBe(1)
+})
+
+it("denies a source owned by another Twin before parsing or changing status", async () => {
+  jest.clearAllMocks()
+  mockGetTwinSource.mockResolvedValue({ ...sourceRow(), twinId: "another-twin" })
+  await expect(runIngestJob(runInput())).rejects.toThrow("unavailable to this ingest job")
+  expect(mockParseSource).not.toHaveBeenCalled()
+  expect(mockUpdateTwinSource).not.toHaveBeenCalled()
 })

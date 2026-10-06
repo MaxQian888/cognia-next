@@ -33,6 +33,16 @@ describe("TeamRunContext registry", () => {
     expect(getTeamRunContext("run-1")).toBe(ctx)
   })
 
+  it("retains the workflow knowledge ceiling and frozen revisions on the run context", () => {
+    const knowledgeAccess = {
+      entrypoint: "http" as const,
+      allowedKnowledgeBaseIds: ["kb"],
+      revisionBindings: { kb: ["gen"] },
+    }
+    registerTeamRunContext({ ...fakeCtx("knowledge-run"), knowledgeAccess })
+    expect(getTeamRunContext("knowledge-run")?.knowledgeAccess).toEqual(knowledgeAccess)
+  })
+
   it("get returns undefined for unknown runId", () => {
     expect(getTeamRunContext("missing")).toBeUndefined()
   })

@@ -8,7 +8,7 @@
  * "View source" link that deep-links into the Twin workbench.
  */
 
-import { memo, useCallback, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import {
@@ -43,6 +43,8 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
 } from "lucide-react"
+import { MAX_PREVIEW_CHARS } from "@/components/twin/source-content-preview"
+import { TwinSourcePreviewDialog } from "@/components/twin/twin-source-preview-dialog"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
 
 interface SourcesPartProps {
@@ -419,6 +421,144 @@ function buildTwinDeepLink(ref: NonNullable<SourcesPartItem["chunkRef"]>): strin
   return `/twin?${params.toString()}`
 }
 
+/** Re-authorize every click; persisted citation provenance never grants access. */
+const KnowledgeSourceButton = memo(function KnowledgeSourceButton({
+  reference,
+}: {
+  reference: NonNullable<SourcesPartItem["knowledgeBaseRef"]>
+}) {
+  const t = useTranslations("chat.sourcesPart")
+  const [loading, setLoading] = useState(false)
+  const [preview, setPreview] = useState<{
+    title: string
+    text: string
+    textOffset: number
+    historicalVersion: boolean
+    location: {
+      charStart: number
+      charEnd: number
+      pageNumber?: number
+      pageEnd?: number
+      lineStart?: number
+      lineEnd?: number
+    }
+  } | null>(null)
+  const request = useRef(0)
+  useEffect(
+    () => () => {
+      request.current++
+    },
+    []
+  )
+  const open = async () => {
+    if (loading) return
+    const current = ++request.current
+    setLoading(true)
+    try {
+      const { createKnowledgeReader, KnowledgeReadingError } =
+        await import("@/lib/knowledge-base/runtime/progressive-reading")
+      const reader = createKnowledgeReader({
+        knowledgeBaseIds: [reference.knowledgeBaseId],
+        settings: {
+          enabled: true,
+          maxCalls: 4,
+          maxReadChars: MAX_PREVIEW_CHARS,
+          totalReadChars: MAX_PREVIEW_CHARS,
+        },
+      })
+      const identity = {
+        knowledgeBaseId: reference.knowledgeBaseId,
+        sourceId: reference.sourceId,
+        generationId: reference.generationId,
+      }
+      const location = await reader.locate({
+        ...identity,
+        chunkId:
+          reference.charStart === undefined || reference.charEnd === undefined
+            ? reference.chunkId
+            : undefined,
+        documentVersion: reference.documentVersion,
+        sectionId: reference.sectionId,
+        charStart: reference.charStart,
+        charEnd: reference.charEnd,
+        pageStart: reference.pageNumber,
+        pageEnd: reference.pageEnd,
+      })
+      if (reference.documentVersion && reference.documentVersion !== location.documentVersion) {
+        throw new KnowledgeReadingError("revision_unavailable")
+      }
+      const start = Math.max(0, location.charStart - 1_000)
+      const result = await reader.readRange({
+        ...identity,
+        generationId: location.generationId,
+        documentVersion: reference.documentVersion,
+        charStart: start,
+        maxChars: MAX_PREVIEW_CHARS,
+      })
+      if (current !== request.current) return
+      setPreview({
+        title: result.title,
+        text: result.text,
+        textOffset: result.charStart,
+        historicalVersion: result.versionStatus === "historical",
+        location: {
+          charStart: location.charStart,
+          charEnd: Math.min(location.charEnd, result.charEnd),
+          pageNumber: location.pageNumber ?? reference.pageNumber,
+          pageEnd: reference.pageEnd,
+          lineStart: reference.lineStart,
+          lineEnd: reference.lineEnd,
+        },
+      })
+    } catch (error) {
+      if (current !== request.current) return
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+      toast.error(
+        t(
+          code === "revision_unavailable" ||
+            code === "revision_out_of_scope" ||
+            code === "chunk_unavailable"
+            ? "citationExpired"
+            : code === "source_unavailable"
+              ? "sourceUnavailable"
+              : "sourceLoadFailed"
+        )
+      )
+    } finally {
+      if (current === request.current) setLoading(false)
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        disabled={loading}
+        aria-busy={loading}
+        className="ml-auto rounded-sm text-[10px] text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
+        data-testid="sources-part-view-knowledge"
+        onClick={() => void open()}
+      >
+        {t(loading ? "sourceLoading" : "viewSource")}
+      </button>
+      {preview ? (
+        <TwinSourcePreviewDialog
+          source={{ title: preview.title, source: preview.text }}
+          open
+          onOpenChange={(isOpen) => {
+            if (!isOpen) {
+              request.current++
+              setPreview(null)
+            }
+          }}
+          location={preview.location}
+          textOffset={preview.textOffset}
+          historicalVersion={preview.historicalVersion}
+        />
+      ) : null}
+    </>
+  )
+})
+
 const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem }) {
   const t = useTranslations("chat.sourcesPart")
   const body = (
@@ -455,7 +595,8 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
               {t("viewSource")}
             </Link>
           )}
-          {source.messageRef && !source.chunkRef && (
+          {source.knowledgeBaseRef && <KnowledgeSourceButton reference={source.knowledgeBaseRef} />}
+          {source.messageRef && !source.chunkRef && !source.knowledgeBaseRef && (
             <JumpToSourceButton messageRef={source.messageRef} />
           )}
           {source.memoryRef && <MemoryFeedbackButtons memoryId={source.memoryRef} />}

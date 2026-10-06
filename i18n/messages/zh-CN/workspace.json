@@ -140,7 +140,7 @@
     "empty": "暂无工作区",
     "knowledge": {
       "addFile": "上传文件",
-      "backendHint": "检索需要已配置的向量后端和嵌入模型（Twin 设置）。未配置时将跳过入库与检索。",
+      "backendHint": "关键词检索无需嵌入模型。语义与混合检索使用已配置的向量后端和嵌入模型（Twin 设置）。",
       "chunkCount": "{count, plural, other {# 个片段}}",
       "emptyFile": "未能从该文件中提取到可读文本。",
       "enableRag": "将知识注入对话",
@@ -167,6 +167,10 @@
       },
       "summary": "{files, plural, other {# 个文件}} · {chunks, plural, other {# 个片段}}",
       "title": "知识库",
+      "retrievalStrategy": "检索策略",
+      "strategyVector": "语义检索",
+      "strategyHybrid": "语义与关键词",
+      "strategyKeyword": "关键词检索",
       "topK": "每条消息片段数"
     },
     "listLabel": "工作区",

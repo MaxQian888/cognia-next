@@ -13,6 +13,8 @@
  */
 
 import { processDocument, processDocumentAsync } from "@cognia/document/document-processor"
+import { buildTextDocumentStructure } from "@cognia/document/document-structure"
+import type { DocumentStructure } from "@cognia/document/types"
 import type { PDFParseResult } from "@/types/document"
 import type {
   TwinBoundingBox,
@@ -47,22 +49,19 @@ export interface ParsedSource {
   format: TwinSourceFormat
   /** Display title — preferred over the raw filename when available. */
   title: string
-  /** Full original text, byte-for-byte (PII still present). */
+  /** Full original extracted text (PII still present). */
   originalText: string
-  /** Best-effort embeddable subset (drops markdown frontmatter / nav HTML / …). */
+  /** Canonical text used for offset-preserving chunking; embedding projection is separate upstream. */
   embeddableText: string
   /** Format-aware metadata to seed `twinChunks.metadata`. */
   baseMetadata: TwinChunkMetadata
   /** Original artefact size (for `twinSources.bytes`). */
   bytes: number
-  /**
-   * PDF only, native (liteparse) parses only — per-page char ranges within
-   * `embeddableText` + per-page bbox unions. The job runner translates the
-   * offsets into redacted space and threads them into the chunk stage so
-   * chunks carry `pageNumber` / `bboxUnion` provenance. Absent whenever the
-   * pdfjs path parsed the document (no spatial items).
-   */
+  /** Per-page UTF-16 ranges within canonical text, with optional native boxes.
+   * OCR replacements publish fresh ranges; redaction translates them before chunking. */
   pageMap?: TwinPageMapEntry[]
+  /** Canonical original-text hierarchy; never indexes an embedding projection. */
+  structure?: DocumentStructure
 }
 
 function bufferByteLength(input: ArrayBuffer | Uint8Array): number {
@@ -97,8 +96,8 @@ function unionBoxes(items: PDFParseResult["pages"][number]["items"]): TwinBoundi
  * Locate each PDF page's char range within `embeddableText` (the text that
  * gets redacted + chunked downstream) and union its native text-item boxes.
  *
- * Pure. Returns `undefined` — never throws — whenever the spatial mapping
- * cannot be established: non-PDF formats, pdfjs parses (no `items`), or an
+ * Pure. Returns `undefined` — never throws — whenever page mapping
+ * cannot be established: non-PDF formats, or an
  * embeddable text the joined page text can't be located in. `parsePDF`
  * joins pages with "\n\n" on both the native and pdfjs paths, and
  * `extractPDFEmbeddableContent` embeds `result.text` verbatim, so the
@@ -111,7 +110,7 @@ export function computePdfPageMap(
 ): TwinPageMapEntry[] | undefined {
   if (format !== "pdf" || !isPdfParseResult(parseResult)) return undefined
   const { pages, text } = parseResult
-  if (!text || pages.length === 0 || !pages.some((p) => p.items?.length)) return undefined
+  if (pages.length === 0) return undefined
 
   const base = embeddableText.indexOf(text)
   if (base < 0) return undefined
@@ -163,7 +162,7 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
       const processed = await processDocumentAsync(raw.id, filename, arrayBuffer, {
         extractEmbeddable: true,
       })
-      const embeddableText = processed.embeddableContent || processed.content
+      const embeddableText = processed.content
       const pageMap = computePdfPageMap(raw.format, processed.parseResult, embeddableText)
       return {
         id: processed.id,
@@ -174,6 +173,7 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
         embeddableText,
         baseMetadata,
         bytes: bufferByteLength(raw.binary),
+        structure: processed.structure,
         ...(pageMap ? { pageMap } : {}),
       }
     }
@@ -191,7 +191,8 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
       format: raw.format,
       title: processed.metadata.title || filename,
       originalText: processed.content,
-      embeddableText: processed.embeddableContent || processed.content,
+      embeddableText: processed.content,
+      structure: processed.structure,
       baseMetadata,
       bytes: raw.text.length,
     }
@@ -277,6 +278,7 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
     format: raw.format,
     title: produced.title,
     originalText: produced.markdown,
+    structure: buildTextDocumentStructure(produced.markdown, produced.title),
     embeddableText: produced.markdown,
     baseMetadata: {
       ...(raw.baseMetadata ?? {}),

@@ -34,6 +34,8 @@ import {
 import { getExecutor } from "../registry"
 import {
   runKnowledgeEmbed,
+  runKnowledgeTransform,
+  runKnowledgeChunk,
   runKnowledgeIndex,
   runKnowledgePublish,
   runKnowledgeRetrieve,
@@ -264,6 +266,9 @@ it("publishes only validated artifacts through the generation swap repository", 
     vectorBackend: "native",
     dimensions: 2,
     validated: true,
+    originalText: "# Guide\nOriginal",
+    title: "Guide",
+    format: "markdown",
   })
   jest.mocked(persistKnowledgeBaseChunks).mockResolvedValue({
     rows: [{ id: "row_1" }],
@@ -275,6 +280,54 @@ it("publishes only validated artifacts through the generation swap repository", 
     output: { generationId: "gen_1", chunkCount: 1 },
   })
   expect(persistKnowledgeBaseChunks).toHaveBeenCalledWith(
-    expect.objectContaining({ sourceId: "src_1", contentHash: "hash", embeddings: [[0.1, 0.2]] })
+    expect.objectContaining({
+      sourceId: "src_1",
+      contentHash: "hash",
+      embeddings: [[0.1, 0.2]],
+      expectedSourceFingerprint: "hash",
+      documentSnapshot: {
+        originalText: "# Guide\nOriginal",
+        title: "Guide",
+        format: "markdown",
+        structure: undefined,
+      },
+    })
   )
+})
+
+it("carries canonical text and navigation through transform and chunk artifacts", async () => {
+  const originalText = "# Contact\nEmail alice@example.com for details."
+  const structure = {
+    version: 1,
+    contentHash: "test",
+    textLength: originalText.length,
+    nodes: [],
+    pages: [],
+  }
+  jest.mocked(openWorkflowKnowledgeArtifact).mockResolvedValueOnce({
+    knowledgeBaseId: "kb_1",
+    sourceId: "src_1",
+    fingerprint: "hash",
+    document: {
+      format: "markdown",
+      title: "Contact",
+      originalText,
+      embeddableText: originalText,
+      baseMetadata: {},
+      structure,
+    },
+  })
+  await runKnowledgeTransform(context({ artifactId: "parsed" }))
+  const transformed = jest.mocked(storeWorkflowKnowledgeArtifact).mock.calls.at(-1)![0].value
+  expect(transformed).toMatchObject({ originalText, structure, title: "Contact" })
+  jest.mocked(openWorkflowKnowledgeArtifact).mockResolvedValueOnce(transformed)
+  await runKnowledgeChunk(context({ artifactId: "transformed" }))
+  const chunked = jest.mocked(storeWorkflowKnowledgeArtifact).mock.calls.at(-1)![0].value as {
+    originalText: string
+    structure: unknown
+    chunks: Array<{ charStart: number; charEnd: number; content: string }>
+  }
+  expect(chunked).toMatchObject({ originalText, structure })
+  expect(chunked.chunks[0].charEnd).toBe(originalText.length)
+  expect(chunked.chunks[0].content).toContain("alice@example.com")
 })

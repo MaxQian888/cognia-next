@@ -189,3 +189,18 @@ describe("controller manual reindex", () => {
     expect(ingestMock).not.toHaveBeenCalled()
   })
 })
+
+it("reconciles structure-only edits so stale navigation cannot survive a generation", () => {
+  const current = project("p", [{ id: "f1", content: "a" }])
+  const previous = snapshotOf([current])
+  current.knowledgeBase[0].structure = {
+    version: 1,
+    contentHash: hashContent("a"),
+    textLength: 1,
+    nodes: [],
+    pages: [],
+  }
+  expect(diffKnowledgeBases(previous, [current]).toIngest).toEqual([
+    { projectId: "p", fileId: "f1" },
+  ])
+})

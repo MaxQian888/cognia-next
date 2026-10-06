@@ -117,3 +117,47 @@ describe("runTwinPdfOcr (production wrapper)", () => {
     expect(out).toBe("FROM SETTINGS")
   })
 })
+
+describe("OCR provenance", () => {
+  it("routes mixed PDFs and replaces stale native offsets with per-page original ranges", async () => {
+    const { maybeTwinPdfOcrWithProvenance } = await import("./ocr-fallback")
+    const source = parsed("A substantial digital text layer on the first page.\n\n")
+    source.structure = {
+      version: 1,
+      contentHash: "old",
+      textLength: source.originalText.length,
+      nodes: [],
+      pages: [
+        {
+          pageNumber: 1,
+          charStart: 0,
+          charEnd: 50,
+          lineStart: 1,
+          lineEnd: 1,
+          provenance: "text-layer",
+        },
+        {
+          pageNumber: 2,
+          charStart: 52,
+          charEnd: 52,
+          lineStart: 3,
+          lineEnd: 3,
+          provenance: "text-layer",
+        },
+      ],
+    }
+    const extractPdf = jest.fn(async () => ({
+      ...ocrResult("ignored"),
+      pages: [
+        { pageNumber: 1, text: "Digital page", markdown: "Digital page", fromTextLayer: true },
+        { pageNumber: 2, text: "Scanned answer", markdown: "Scanned answer", fromTextLayer: false },
+      ],
+    }))
+    const result = await maybeTwinPdfOcrWithProvenance(raw(), source, deps({ extractPdf }))
+    expect(extractPdf).toHaveBeenCalledTimes(1)
+    expect(result?.originalText).toBe("Digital page\n\nScanned answer")
+    expect(result?.pageMap?.[1]).toMatchObject({ pageNumber: 2, charStart: 14, charEnd: 28 })
+    expect(result?.structure?.pages[1].provenance).toBe("ocr")
+    expect(result?.structure?.pages[0].provenance).toBe("text-layer")
+  })
+})

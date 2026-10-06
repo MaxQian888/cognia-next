@@ -2,9 +2,16 @@ import {
   __resetTeamWorkflowNodesForTesting,
   hasTeamWorkflowNodes,
   loadTeamWorkflowNodes,
+  resolveTeamWorkflowKnowledgeBaseIds,
 } from "@/lib/workflow/nodes/teams/team-runtime-port"
 import { installTeamWorkflowNodeRuntime } from "./install"
 import { teamWorkflowNodes } from "./index"
+
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: {
+    getState: () => ({ getTeam: () => ({ config: {} }), getTeammates: () => [] }),
+  },
+}))
 
 afterEach(() => __resetTeamWorkflowNodesForTesting())
 
@@ -13,6 +20,7 @@ describe("installTeamWorkflowNodeRuntime", () => {
     installTeamWorkflowNodeRuntime()
     expect(hasTeamWorkflowNodes()).toBe(true)
     expect(await loadTeamWorkflowNodes("action.team.run")).toBe(teamWorkflowNodes)
+    await expect(resolveTeamWorkflowKnowledgeBaseIds("team-1")).resolves.toEqual([])
   })
 
   it("is idempotent across composition roots", async () => {

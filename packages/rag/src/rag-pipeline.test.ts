@@ -2,6 +2,17 @@
  * Tests for RAG Pipeline
  */
 
+import { setVectorRuntimeAdapters } from "@cognia/vector/runtime-adapters"
+
+beforeEach(() => {
+  setVectorRuntimeAdapters({
+    isTauri: () => false,
+    createBedrockEmbeddingModel: jest.fn(),
+    dispatchDocumentsIndexed: jest.fn(),
+    dispatchVectorSearch: jest.fn(),
+  })
+})
+
 import { RAGPipeline } from "./rag-pipeline"
 import type { RAGPipelineConfig, IndexingOptions } from "./rag-pipeline"
 import { chunkDocument, chunkDocumentAsync } from "@cognia/provider-embedding/chunking"

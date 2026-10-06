@@ -2,9 +2,16 @@
  * Tests for Project Plugin API
  */
 
-import { createProjectAPI } from "./project-api"
-import { initializePluginPermissions } from "./permission-api"
+import { createProjectAPI, createInvocationProjectAPI } from "./project-api"
+import { initializePluginPermissions, grantPermission, revokePermission } from "./permission-api"
 import type { Project, KnowledgeFile } from "@/types"
+import { buildTextDocumentStructure, documentContentHash } from "@cognia/document"
+import {
+  registerKnowledgeReaderForSession,
+  clearKnowledgeReaderForSession,
+} from "@/lib/knowledge-base/runtime/session-reader"
+import type { KnowledgeBaseSource } from "@/types/knowledge-base"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 
 // Mock project store
 const mockProjects: Project[] = []
@@ -691,5 +698,202 @@ describe("permission gate", () => {
     const api = createProjectAPI("no-perms-plugin")
     expect(() => api.listProjects()).toThrow(/project:read/)
     expect(() => api.deleteProject("x")).toThrow(/project:delete/)
+  })
+})
+
+describe("progressive document API", () => {
+  const scope = { kind: "project" as const, projectId: "reading-project" }
+  const original = "# Guide\nOpening\n## Procedure\n```sh\nkeep-original-code\n```\nFinal text"
+  beforeEach(() => {
+    mockProjects.length = 0
+    mockProjects.push({
+      id: scope.projectId,
+      knowledgeBase: [{ id: "doc", name: "guide.md", type: "markdown", content: original }],
+    } as Project)
+    revokePermission("test-plugin", "knowledge:read")
+  })
+  afterEach(() => clearKnowledgeReaderForSession("reading-session"))
+
+  it("lists metadata, reads directory and original code through the same canonical parser", async () => {
+    const api = createProjectAPI("test-plugin")
+    const directory = await api.listKnowledgeDocuments({ scope })
+    expect(directory.documents).toHaveLength(1)
+    expect(directory.documents[0]).not.toHaveProperty("text")
+    const document = directory.documents[0]
+    const identity = { scope, ...document }
+    const outline = await api.readKnowledgeOutline(identity)
+    const section = outline.nodes.find((node) => node.title === "Procedure")!
+    expect(section.parentId).toBeDefined()
+    const read = await api.readKnowledgeRange({ ...identity, sectionId: section.id, maxChars: 100 })
+    expect(read.text).toContain("```sh\nkeep-original-code")
+    const location = await api.locateKnowledgeDocument({ ...identity, sectionId: section.id })
+    expect(location.charStart).toBe(section.charStart)
+    expect(location.generationId).toBe(documentContentHash(original))
+  })
+
+  it("rejects cross-project identity, stale versions and deleted originals", async () => {
+    const api = createProjectAPI("test-plugin")
+    const document = (await api.listKnowledgeDocuments({ scope })).documents[0]
+    const identity = { scope, ...document }
+    await expect(
+      api.readKnowledgeRange({ ...identity, knowledgeBaseId: "project:other" })
+    ).rejects.toThrow("source_unavailable")
+    mockProjects[0].knowledgeBase[0].structure = buildTextDocumentStructure(original)
+    mockProjects[0].knowledgeBase[0].content = "# Replacement\nNew original"
+    await expect(api.readKnowledgeRange(identity)).rejects.toThrow("revision_unavailable")
+    const newDocument = (await api.listKnowledgeDocuments({ scope })).documents[0]
+    const newOutline = await api.readKnowledgeOutline({ scope, ...newDocument })
+    expect(newOutline.nodes.some((node) => node.title === "Replacement")).toBe(true)
+    mockProjects[0].knowledgeBase = []
+    await expect(api.readKnowledgeRange({ scope, ...newDocument })).rejects.toThrow(
+      "source_unavailable"
+    )
+  })
+
+  it("enforces bounded range arguments and retains the per-plugin project call budget", async () => {
+    const api = createProjectAPI("test-plugin")
+    const document = (await api.listKnowledgeDocuments({ scope })).documents[0]
+    await expect(api.readKnowledgeRange({ scope, ...document, maxChars: 100_000 })).rejects.toThrow(
+      "invalid_arguments"
+    )
+    await expect(api.readKnowledgeRange({ scope, ...document, charStart: -1 })).rejects.toThrow(
+      "invalid_arguments"
+    )
+    const bounded = await api.readKnowledgeRange({ scope, ...document, maxChars: 5 })
+    expect(bounded.text).toHaveLength(5)
+    expect(bounded.nextCharStart).toBe(5)
+    for (let i = 0; i < 28; i++) await api.listKnowledgeDocuments({ scope })
+    await expect(api.listKnowledgeDocuments({ scope })).rejects.toThrow("call_budget_exhausted")
+  })
+
+  it("requires live explicit grants and a real host session reader; plugin input cannot expand scope", async () => {
+    const api = createProjectAPI("test-plugin")
+    const agentScope = { kind: "agent" as const, sessionId: "reading-session" }
+    await expect(api.listKnowledgeDocuments({ scope: agentScope })).rejects.toThrow(
+      "permission_denied"
+    )
+    grantPermission("test-plugin", "knowledge:read")
+    await expect(api.listKnowledgeDocuments({ scope: agentScope })).rejects.toThrow(
+      "session_scope_unavailable"
+    )
+    const source: KnowledgeBaseSource = {
+      id: "authorized",
+      knowledgeBaseId: "bound",
+      title: "Public guide",
+      kind: "document",
+      format: "markdown",
+      content: original,
+      bytes: original.length,
+      fingerprint: "hash",
+      status: "ready",
+      chunkCount: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      acl: { visibility: "public" },
+    }
+    registerKnowledgeReaderForSession("reading-session", {
+      knowledgeBaseIds: ["bound"],
+      entrypoint: "mcp",
+      settings: { enabled: true },
+      deps: {
+        listSources: async () => [source],
+        getSources: async () => [source],
+        getSnapshot: async () => ({
+          generationId: "v1",
+          contentHash: "hash",
+          originalText: original,
+          title: source.title,
+          format: "markdown",
+          createdAt: 0,
+          structure: buildTextDocumentStructure(original),
+        }),
+      },
+    })
+    const invocation = createInvocationProjectAPI("test-plugin", "reading-session")
+    await expect(api.listKnowledgeDocuments({ scope: agentScope })).rejects.toThrow(
+      "session_scope_unavailable"
+    )
+    await expect(
+      invocation.api.listKnowledgeDocuments({
+        scope: { kind: "agent", sessionId: "foreign-session" },
+      })
+    ).rejects.toThrow("session_scope_unavailable")
+    const directory = await invocation.api.listKnowledgeDocuments({ scope: agentScope })
+    await expect(invocation.api.listKnowledgeDocuments({ scope })).rejects.toThrow(
+      "source_unavailable"
+    )
+    expect(() => invocation.api.getCurrentProject()).toThrow("source_unavailable")
+    expect(() => invocation.api.getProject(scope.projectId)).toThrow("source_unavailable")
+    expect(() => invocation.api.listProjects()).toThrow("source_unavailable")
+    expect(() => invocation.api.getKnowledgeFiles(scope.projectId)).toThrow("source_unavailable")
+    expect(directory.documents[0].knowledgeBaseId).toBe("bound")
+    await expect(
+      invocation.api.readKnowledgeRange({
+        scope: agentScope,
+        knowledgeBaseId: "other",
+        sourceId: source.id,
+      })
+    ).rejects.toThrow("source_unavailable")
+    source.acl = { visibility: "private" }
+    await expect(
+      invocation.api.readKnowledgeRange({
+        scope: agentScope,
+        knowledgeBaseId: "bound",
+        sourceId: source.id,
+      })
+    ).rejects.toThrow("source_unavailable")
+    source.acl = { visibility: "public" }
+    invocation.dispose()
+    await expect(invocation.api.listKnowledgeDocuments({ scope: agentScope })).rejects.toThrow(
+      "session_scope_unavailable"
+    )
+    const currentInvocation = createInvocationProjectAPI("test-plugin", "reading-session")
+    clearKnowledgeReaderForSession("reading-session")
+    await expect(
+      currentInvocation.api.listKnowledgeDocuments({ scope: agentScope })
+    ).rejects.toThrow("session_scope_unavailable")
+    revokePermission("test-plugin", "knowledge:read")
+    await expect(api.listKnowledgeDocuments({ scope: agentScope })).rejects.toThrow(
+      "permission_denied"
+    )
+  })
+
+  it("passes originals, embedding projection and navigation into existing project indexing writes", async () => {
+    const api = createProjectAPI("test-plugin")
+    const structure = buildTextDocumentStructure(original)
+    const added = await api.addKnowledgeFile(scope.projectId, {
+      name: "new.md",
+      content: original,
+      embeddableContent: "projection",
+      structure,
+    })
+    expect(added).toMatchObject({ content: original, embeddableContent: "projection", structure })
+  })
+
+  it("uses the host's configurable budgets and observes a live reading switch", async () => {
+    let settings = { enabled: true, maxCalls: 2, maxReadChars: 3 }
+    const api = createProjectAPI("test-plugin", { getReadingSettings: () => settings })
+    const doc = (await api.listKnowledgeDocuments({ scope })).documents[0]
+    const read = await api.readKnowledgeRange({ scope, ...doc })
+    expect(read.text).toHaveLength(3)
+    await expect(api.readKnowledgeRange({ scope, ...doc })).rejects.toThrow("call_budget_exhausted")
+    settings = { ...settings, enabled: false }
+    await expect(api.listKnowledgeDocuments({ scope })).rejects.toThrow("reading_disabled")
+  })
+
+  it("denies document reads under forbid even with a retained project grant", () => {
+    const guard = getPermissionGuard()
+    const api = createProjectAPI("test-plugin")
+    guard.setTier("test-plugin", "project:read", "forbid")
+    expect(() => api.listKnowledgeDocuments({ scope })).toThrow(/project:read/)
+    guard.setTier("test-plugin", "project:read", "silent")
+  })
+
+  it("immediately denies a host UI revocation without recreating the document API", () => {
+    const guard = getPermissionGuard()
+    const api = createProjectAPI("test-plugin")
+    guard.revoke("test-plugin", "project:read")
+    expect(() => api.listKnowledgeDocuments({ scope })).toThrow(/project:read/)
+    grantPermission("test-plugin", "project:read")
   })
 })

@@ -5,6 +5,10 @@ import {
   resolveDispatchWidth,
 } from "./dispatch-agent-handler"
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
+import {
+  registerKnowledgeAccessForSession,
+  getKnowledgeAccessForSession,
+} from "@/lib/knowledge-base/runtime/session-reader"
 import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
 import { getSettings } from "@/lib/db/settings"
 import { getSession } from "@/lib/db/sessions"
@@ -471,6 +475,7 @@ describe("runDispatchAgentTool — call modes", () => {
   })
 
   it("releaseDispatchStateForSession drops the budget guard AND the resolved ceiling", () => {
+    registerKnowledgeAccessForSession("chat-xyz", { knowledgeBaseIds: ["kb"] })
     getOrCreateDispatchBudget("dispatch:chat-xyz", 1000)
     recordResolvedPermissionCeiling("chat-xyz", { allowedTools: ["Read"] })
     expect(getDispatchBudget("dispatch:chat-xyz")).toBeDefined()
@@ -478,6 +483,7 @@ describe("runDispatchAgentTool — call modes", () => {
     releaseDispatchStateForSession("chat-xyz")
     expect(getDispatchBudget("dispatch:chat-xyz")).toBeUndefined()
     expect(getResolvedPermissionCeiling("chat-xyz")).toBeUndefined()
+    expect(getKnowledgeAccessForSession("chat-xyz")).toBeUndefined()
   })
 })
 

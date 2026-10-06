@@ -1,6 +1,33 @@
 import type { KnowledgeBaseSource } from "@/types/knowledge-base"
 import type { WorkflowEntrypoint } from "@/types/workflow/deployment"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { StepExecutionContext } from "@/types/workflow/visual"
+import type { KnowledgeReadingAccess } from "@/lib/knowledge-base/runtime/progressive-reading"
+
+/** Verified workflow authority is shared by Agent turns and nested Team runs. */
+export async function resolveWorkflowKnowledgeAccess(
+  ctx: Pick<StepExecutionContext, "executionBinding" | "runId">
+): Promise<KnowledgeReadingAccess | undefined> {
+  if (!ctx.executionBinding) return undefined
+  const { getDb } = await import("@/lib/db/schema")
+  const run = await getDb().workflowRuns.get(ctx.runId)
+  const revisionBindings: Record<string, string[]> = {}
+  for (const [key, generationId] of Object.entries(
+    ctx.executionBinding.dependencyLock?.indexes ?? {}
+  )) {
+    const parts = key.split(":")
+    if (parts[0] !== "knowledge" || !parts[1]) continue
+    const revisions = revisionBindings[parts[1]] ?? []
+    if (!revisions.includes(generationId)) revisions.push(generationId)
+    revisionBindings[parts[1]] = revisions
+  }
+  return {
+    entrypoint: ctx.executionBinding.entrypoint,
+    triggeredBy: run?.triggeredBy,
+    revisionBindings,
+    allowedKnowledgeBaseIds: Object.keys(revisionBindings),
+  }
+}
 
 export interface KnowledgeAccessDecision {
   allowed: boolean

@@ -480,7 +480,29 @@
         "ready": "就绪"
       },
       "titlePlaceholder": "来源标题",
-      "unsupportedFormat": "请为此文件选择来源格式。"
+      "unsupportedFormat": "请为此文件选择来源格式。",
+      "reading": {
+        "title": "Agent 知识阅读默认设置",
+        "description": "所有 Agent 的全局默认设置，可由角色和会话设置覆盖。关闭渐进阅读时，检索设置仍适用于快速 RAG。",
+        "enabled": "启用渐进式文档阅读",
+        "retrievalStrategy": "候选检索策略",
+        "topKPerBase": "每个知识库的候选数量",
+        "ragTokenBudget": "快速 RAG Token 预算",
+        "maxCalls": "阅读工具调用次数上限",
+        "maxReadChars": "每次读取的字符数",
+        "totalReadChars": "读取字符总预算",
+        "maxOutlineNodes": "每次目录返回的章节数",
+        "summaryMaxChars": "导航摘要字符数",
+        "summaryProviderId": "导航摘要提供方",
+        "summaryProviderPlaceholder": "可选的已注册提供方 ID",
+        "summaryProviderHint": "可填写插件注册的提供方 ID，留空则使用已保存的导航摘要。摘要用于导航，回答依据原文。",
+        "saveFailed": "无法保存知识阅读设置，请重试。",
+        "strategies": {
+          "vector": "向量检索",
+          "hybrid": "混合检索（关键词 + 向量）",
+          "keyword": "关键词检索"
+        }
+      }
     },
     "title": "知识库"
   },

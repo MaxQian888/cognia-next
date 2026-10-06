@@ -36,18 +36,32 @@ export interface TeamWorkflowNodes {
 }
 
 type TeamWorkflowNodesLoader = () => Promise<TeamWorkflowNodes>
+type TeamKnowledgeDependencyResolver = (teamId: string) => Promise<readonly string[]>
 
 let loader: TeamWorkflowNodesLoader | null = null
 let loaded: Promise<TeamWorkflowNodes> | null = null
+let knowledgeDependencies: TeamKnowledgeDependencyResolver | undefined
 
 /**
  * Install the team node implementations. Idempotent for the same loader; a
  * different loader replaces the previous one (tests, host reconfiguration).
  */
-export function installTeamWorkflowNodes(load: TeamWorkflowNodesLoader): void {
-  if (loader === load) return
+export function installTeamWorkflowNodes(
+  load: TeamWorkflowNodesLoader,
+  resolveKnowledgeDependencies?: TeamKnowledgeDependencyResolver
+): void {
+  if (loader === load && knowledgeDependencies === resolveKnowledgeDependencies) return
   loader = load
   loaded = null
+  knowledgeDependencies = resolveKnowledgeDependencies
+}
+
+/** Static team knowledge is discovered at admission; legacy hosts grant no extra scope. */
+export async function resolveTeamWorkflowKnowledgeBaseIds(
+  teamId: string
+): Promise<readonly string[]> {
+  if (!loader) await loadTeamWorkflowNodes("action.team.run admission")
+  return knowledgeDependencies ? knowledgeDependencies(teamId) : []
 }
 
 /** Whether a host has installed the team node implementations. */
@@ -77,4 +91,5 @@ export async function loadTeamWorkflowNodes(kind: string): Promise<TeamWorkflowN
 export function __resetTeamWorkflowNodesForTesting(): void {
   loader = null
   loaded = null
+  knowledgeDependencies = undefined
 }

@@ -10,6 +10,8 @@
  * and replay vectors without re-embedding.
  */
 
+import { documentContentHash } from "@cognia/document/document-structure"
+import type { TwinDocumentSnapshot, TwinSource } from "@/types/twin"
 import { bulkCreateTwinChunks, listTwinChunksBySource } from "@/lib/db/twin-chunks"
 import { getDb } from "@/lib/db/schema"
 import { updateTwinSource } from "@/lib/db/twin-sources"
@@ -45,6 +47,12 @@ export interface PersistInput {
   profileFingerprint?: string
   /** Source revision hash used to validate and reconcile the generation. */
   contentHash?: string
+  /** Canonical snapshot from parse; published only with a successful activation. */
+  documentSnapshot?: Omit<TwinDocumentSnapshot, "generationId" | "createdAt" | "contentHash">
+  /** The source version observed before parsing/remote work began. */
+  sourceRevision?: { fingerprint: string; source: string }
+  /** Parsed source metadata and redaction map move with the same active pointer. */
+  sourceMetadata?: Pick<TwinSource, "kind" | "title" | "bytes" | "redacted" | "redactionMapEnc">
 }
 
 export interface PersistResult {
@@ -80,6 +88,28 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
     )
   }
 
+  const snapshot = input.documentSnapshot
+  if (
+    snapshot?.structure &&
+    (snapshot.structure.version !== 1 ||
+      snapshot.structure.textLength !== snapshot.originalText.length ||
+      snapshot.structure.contentHash !== documentContentHash(snapshot.originalText))
+  ) {
+    throw new Error("Twin source structure no longer matches original text; parse again")
+  }
+  const canonicalHash = snapshot ? documentContentHash(snapshot.originalText) : undefined
+  const generationHash = snapshot
+    ? documentContentHash(
+        JSON.stringify([
+          input.contentHash ?? null,
+          canonicalHash,
+          snapshot.title,
+          snapshot.format,
+          snapshot.structure ?? null,
+        ])
+      )
+    : (input.contentHash ?? `legacy-source:${input.sourceId}`)
+  let builtGenerationId: string | undefined
   const collection = input.vectorCollection ?? vectorCollectionName(input.twinId)
   const now = Date.now()
 
@@ -87,19 +117,21 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
   //    dimension (e.g. the embedding model was changed after the first
   //    ingest), block before writing mismatched vectors instead of silently
   //    corrupting the index.
-  await ensureCollectionDimensionCompatible(input.store, collection, input.embeddings[0]?.length)
+  if (input.chunks.length > 0) {
+    await ensureCollectionDimensionCompatible(input.store, collection, input.embeddings[0]?.length)
 
-  // 0a. Ensure the collection exists. Most vector backends raise on
-  //     addDocuments-before-create; calling this once per persist call is
-  //     cheap (clients short-circuit when the collection is already there).
-  //     Failures here are non-fatal — if the upsert below works anyway, the
-  //     backend already had the collection or auto-created it.
-  try {
-    await input.store.createCollection(collection, {
-      dimension: input.embeddings[0]?.length,
-    })
-  } catch {
-    // ignore — most clients throw "already exists" which we treat as success
+    // 0a. Ensure the collection exists. Most vector backends raise on
+    //     addDocuments-before-create; calling this once per persist call is
+    //     cheap (clients short-circuit when the collection is already there).
+    //     Failures here are non-fatal — if the upsert below works anyway, the
+    //     backend already had the collection or auto-created it.
+    try {
+      await input.store.createCollection(collection, {
+        dimension: input.embeddings[0]?.length,
+      })
+    } catch {
+      // ignore — most clients throw "already exists" which we treat as success
+    }
   }
 
   // Keep the active generation intact until the replacement has passed
@@ -118,12 +150,13 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
       input.profileFingerprint ?? `legacy:${input.vectorBackend}:${dimension ?? "none"}`,
     collection,
     store: input.store,
-    contentHash: input.contentHash ?? `legacy-source:${input.sourceId}`,
+    contentHash: generationHash,
     expectedCount: input.chunks.length,
     expectedDimension: dimension,
     oldVectors,
     now,
     build: (generationId) => {
+      builtGenerationId = generationId
       const rows: TwinChunk[] = input.chunks.map((chunk, index) => ({
         id: `twc_${now.toString(36)}_${index}_${Math.random().toString(36).slice(2, 6)}`,
         twinId: input.twinId,
@@ -164,12 +197,35 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
         "rw",
         [db.twinChunks, db.twinSources, db.retrievalGenerations, db.retrievalActivePointers],
         async () => {
+          const current = await db.twinSources.get(input.sourceId)
+          if (
+            !current ||
+            current.twinId !== input.twinId ||
+            current.status === "deleted" ||
+            (input.sourceRevision &&
+              (current.fingerprint !== input.sourceRevision.fingerprint ||
+                current.source !== input.sourceRevision.source))
+          ) {
+            throw new Error("Twin source changed or was deleted while indexing")
+          }
           await db.twinChunks.where("sourceId").equals(input.sourceId).delete()
           await bulkCreateTwinChunks(rows)
           await updateTwinSource(input.sourceId, {
+            ...input.sourceMetadata,
             chunkCount: rows.length,
             status: "parsed",
             parsedAt: now,
+            errorMessage: undefined,
+            ...(snapshot && builtGenerationId
+              ? {
+                  documentSnapshot: {
+                    ...snapshot,
+                    generationId: builtGenerationId,
+                    contentHash: canonicalHash!,
+                    createdAt: now,
+                  },
+                }
+              : { documentSnapshot: undefined }),
           })
           await activate()
         }

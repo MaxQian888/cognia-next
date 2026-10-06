@@ -3,11 +3,14 @@
 import type {
   KnowledgeBase,
   KnowledgeBaseChunk,
+  KnowledgeBaseDocumentSnapshot,
   KnowledgeBaseIngestJob,
   KnowledgeBaseReference,
   KnowledgeBaseSource,
 } from "@/types/knowledge-base"
+import type { RetrievalGenerationRow } from "./retrieval-control-types"
 import { getDb, withDbReopenRetry } from "./schema"
+import { deleteRetrievalEntity } from "./retrieval-control"
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -154,11 +157,18 @@ export async function deleteKnowledgeBaseSource(id: string): Promise<void> {
     if (!source) return
     await db.transaction(
       "rw",
-      db.knowledgeBases,
-      db.knowledgeBaseSources,
-      db.knowledgeBaseChunks,
-      db.knowledgeBaseIngestJobs,
+      [
+        db.knowledgeBases,
+        db.knowledgeBaseSources,
+        db.knowledgeBaseChunks,
+        db.knowledgeBaseIngestJobs,
+        db.retrievalGenerations,
+        db.retrievalActivePointers,
+        db.retrievalEncryptedContent,
+        db.retrievalTombstones,
+      ],
       async () => {
+        await deleteKnowledgeBaseSourceIndex(source)
         await Promise.all([
           db.knowledgeBaseChunks.where("sourceId").equals(id).delete(),
           db.knowledgeBaseIngestJobs.where("sourceId").equals(id).delete(),
@@ -167,6 +177,20 @@ export async function deleteKnowledgeBaseSource(id: string): Promise<void> {
         ])
       }
     )
+  })
+}
+
+async function deleteKnowledgeBaseSourceIndex(source: KnowledgeBaseSource): Promise<void> {
+  const db = getDb()
+  const corpusId = `knowledge_base:${source.knowledgeBaseId}:source:${source.id}`
+  await db.retrievalGenerations.where("corpusId").equals(corpusId).delete()
+  await db.retrievalActivePointers.delete(corpusId)
+  await db.retrievalEncryptedContent.where("corpusId").equals(corpusId).delete()
+  await deleteRetrievalEntity({
+    entityType: "knowledge_base_source",
+    entityId: source.id,
+    corpusId,
+    knownDeviceIds: [],
   })
 }
 
@@ -198,12 +222,12 @@ export async function listKnowledgeBaseRevisionChunks(
   generationIds?: readonly string[]
 ): Promise<KnowledgeBaseChunk[]> {
   const rows = await listKnowledgeBaseChunks(knowledgeBaseId)
-  if (generationIds) {
-    const allowed = new Set(generationIds)
-    return rows.filter((row) => row.generationId && allowed.has(row.generationId))
-  }
   const sourceIds = [...new Set(rows.map((row) => row.sourceId))]
   const db = getDb()
+  const sources = await db.knowledgeBaseSources.bulkGet(sourceIds)
+  const ownedSourceIds = new Set(
+    sources.flatMap((source) => (source?.knowledgeBaseId === knowledgeBaseId ? [source.id] : []))
+  )
   const pointers = await db.retrievalActivePointers.bulkGet(
     sourceIds.map((sourceId) => `knowledge_base:${knowledgeBaseId}:source:${sourceId}`)
   )
@@ -212,10 +236,70 @@ export async function listKnowledgeBaseRevisionChunks(
       pointer ? ([[sourceIds[index], pointer.generationId]] as const) : []
     )
   )
+  const revisionIds = generationIds ?? [...activeBySourceId.values()]
+  const revisions = await db.retrievalGenerations.bulkGet([...revisionIds])
+  const validById = new Map(
+    revisions.flatMap((revision) => (revision ? [[revision.id, revision] as const] : []))
+  )
+  const allowed = generationIds ? new Set(generationIds) : undefined
   return rows.filter((row) => {
+    if (!ownedSourceIds.has(row.sourceId)) return false
+    if (allowed && (!row.generationId || !allowed.has(row.generationId))) return false
     const active = activeBySourceId.get(row.sourceId)
-    return active ? row.generationId === active : true
+    if (!row.generationId) return !allowed && !active
+    if (!allowed && row.generationId !== active) return false
+    return isReadableKnowledgeBaseGeneration(
+      validById.get(row.generationId),
+      knowledgeBaseId,
+      row.sourceId
+    )
   })
+}
+
+function isReadableKnowledgeBaseGeneration(
+  generation: RetrievalGenerationRow | undefined,
+  knowledgeBaseId: string,
+  sourceId: string
+): boolean {
+  return (
+    !!generation &&
+    generation.domain === "kb" &&
+    generation.corpusId === `knowledge_base:${knowledgeBaseId}:source:${sourceId}` &&
+    generation.validation?.valid === true &&
+    (generation.status === "active" || generation.status === "retiring")
+  )
+}
+
+/** Internal storage accessor. Callers must apply their entrypoint ACL before reading. */
+export async function getKnowledgeBaseDocumentSnapshot(input: {
+  knowledgeBaseId: string
+  sourceId: string
+  generationId?: string
+}): Promise<KnowledgeBaseDocumentSnapshot | undefined> {
+  const db = getDb()
+  return db.transaction(
+    "r",
+    [db.knowledgeBaseSources, db.retrievalGenerations, db.retrievalActivePointers],
+    async () => {
+      const source = await db.knowledgeBaseSources.get(input.sourceId)
+      if (!source || source.knowledgeBaseId !== input.knowledgeBaseId) return undefined
+      const corpusId = `knowledge_base:${input.knowledgeBaseId}:source:${input.sourceId}`
+      const generationId =
+        input.generationId ?? (await db.retrievalActivePointers.get(corpusId))?.generationId
+      if (!generationId) return undefined
+      const generation = await db.retrievalGenerations.get(generationId)
+      if (!isReadableKnowledgeBaseGeneration(generation, input.knowledgeBaseId, input.sourceId))
+        return undefined
+      const snapshot = source.generationSnapshots?.[generationId]
+      if (
+        !snapshot ||
+        snapshot.generationId !== generationId ||
+        snapshot.contentHash !== generation?.validation?.contentHash
+      )
+        return undefined
+      return snapshot
+    }
+  )
 }
 
 export async function listKnowledgeBaseVectorCollections(
@@ -232,6 +316,13 @@ export async function listKnowledgeBaseChunksBySource(
   sourceId: string
 ): Promise<KnowledgeBaseChunk[]> {
   return getDb().knowledgeBaseChunks.where("sourceId").equals(sourceId).toArray()
+}
+
+/** Internal identity lookup; reader services must check source ownership and ACL. */
+export async function getKnowledgeBaseChunkById(
+  id: string
+): Promise<KnowledgeBaseChunk | undefined> {
+  return getDb().knowledgeBaseChunks.get(id)
 }
 
 export async function deleteKnowledgeBaseChunksBySource(sourceId: string): Promise<number> {
@@ -353,9 +444,26 @@ export async function deleteKnowledgeBase(
         db.knowledgeBaseIngestJobs,
         db.characters,
         db.workflows,
+        db.retrievalGenerations,
+        db.retrievalActivePointers,
+        db.retrievalEncryptedContent,
+        db.retrievalTombstones,
       ],
       async () => {
         const now = options.now ?? Date.now()
+        const sources = await db.knowledgeBaseSources.where("knowledgeBaseId").equals(id).toArray()
+        for (const source of sources) await deleteKnowledgeBaseSourceIndex(source)
+        const corpusPrefix = `knowledge_base:${id}:source:`
+        await db.retrievalGenerations.where("corpusId").startsWith(corpusPrefix).delete()
+        await db.retrievalActivePointers.where("corpusId").startsWith(corpusPrefix).delete()
+        await db.retrievalEncryptedContent.where("corpusId").startsWith(corpusPrefix).delete()
+        await deleteRetrievalEntity({
+          entityType: "knowledge_base",
+          entityId: id,
+          corpusId: `knowledge_base:${id}`,
+          knownDeviceIds: [],
+          now,
+        })
         if (options.detachReferences) {
           await Promise.all([
             ...references

@@ -1,5 +1,59 @@
 import type { KnowledgeBaseSource } from "@/types/knowledge-base"
-import { authorizeKnowledgeSource } from "./access"
+import { authorizeKnowledgeSource, resolveWorkflowKnowledgeAccess } from "./access"
+const getWorkflowRun = jest.fn()
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ workflowRuns: { get: (...args: unknown[]) => getWorkflowRun(...args) } }),
+}))
+
+describe("resolveWorkflowKnowledgeAccess", () => {
+  it("does not manufacture public or local authority from an unbound workflow", async () => {
+    await expect(resolveWorkflowKnowledgeAccess({ runId: "unbound" })).resolves.toBeUndefined()
+  })
+  it("uses the durable principal and narrows scope to immutable admitted revisions", async () => {
+    const triggeredBy = {
+      source: "api" as const,
+      initiator: { authenticated: true, principalId: "verified" },
+    }
+    getWorkflowRun.mockResolvedValue({ triggeredBy })
+    await expect(
+      resolveWorkflowKnowledgeAccess({
+        runId: "public",
+        executionBinding: {
+          entrypoint: "http",
+          dependencyLock: {
+            workflows: {},
+            indexes: {
+              "knowledge:kb:s1": "g1",
+              "knowledge:kb:s2": "g2",
+              "knowledge:kb:duplicate": "g1",
+              "other:index": "unrelated",
+            },
+          },
+        } as never,
+      })
+    ).resolves.toEqual({
+      entrypoint: "http",
+      triggeredBy,
+      revisionBindings: { kb: ["g1", "g2"] },
+      allowedKnowledgeBaseIds: ["kb"],
+    })
+    expect(getWorkflowRun).toHaveBeenCalledWith("public")
+  })
+  it("gives admitted workflows without index bindings an empty knowledge ceiling", async () => {
+    getWorkflowRun.mockResolvedValue(undefined)
+    await expect(
+      resolveWorkflowKnowledgeAccess({
+        runId: "missing-principal",
+        executionBinding: { entrypoint: "mcp" } as never,
+      })
+    ).resolves.toEqual({
+      entrypoint: "mcp",
+      triggeredBy: undefined,
+      revisionBindings: {},
+      allowedKnowledgeBaseIds: [],
+    })
+  })
+})
 
 const source = (acl?: KnowledgeBaseSource["acl"]): KnowledgeBaseSource =>
   ({ id: "src", acl }) as KnowledgeBaseSource

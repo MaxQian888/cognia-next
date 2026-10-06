@@ -81,6 +81,7 @@ export interface TeamTwinSummary {
 }
 
 export interface TeamRunContext {
+  readonly knowledgeAccess?: import("@/lib/knowledge-base/runtime/progressive-reading").KnowledgeReadingAccess
   readonly runId: string
   readonly teamId: string
   /**

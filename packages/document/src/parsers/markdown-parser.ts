@@ -184,10 +184,28 @@ function extractSections(content: string): MarkdownSection[] {
   const sections: MarkdownSection[] = []
   let currentSection: MarkdownSection | null = null
   let contentLines: string[] = []
+  let fence: string | undefined
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      if (!fence) fence = fenceMatch[1]
+      else if (
+        fenceMatch[1][0] === fence[0] &&
+        fenceMatch[1].length >= fence.length &&
+        !line.slice(fenceMatch[0].length).trim()
+      )
+        fence = undefined
+      if (currentSection) contentLines.push(line)
+      continue
+    }
+    let headingMatch = !fence ? line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/) : null
+    const underline =
+      !fence && line.trim() && !headingMatch
+        ? (lines[i + 1] ?? "").match(/^\s{0,3}(=+|-+)\s*$/)
+        : null
+    if (underline) headingMatch = [line, underline[1][0] === "=" ? "#" : "##", line.trim()]
 
     if (headingMatch) {
       // Save previous section
@@ -206,6 +224,7 @@ function extractSections(content: string): MarkdownSection[] {
         endLine: i,
       }
       contentLines = []
+      if (underline) i += 1
     } else if (currentSection) {
       contentLines.push(line)
     }
@@ -278,13 +297,12 @@ function extractImages(content: string): { alt: string; url: string }[] {
 /**
  * Get title from markdown (first h1 or frontmatter title)
  */
-function extractTitle(content: string, frontmatter?: Record<string, unknown>): string | undefined {
-  if (frontmatter?.title && typeof frontmatter.title === "string") {
-    return frontmatter.title
-  }
-
-  const h1Match = content.match(/^#\s+(.+)$/m)
-  return h1Match ? h1Match[1].trim() : undefined
+function extractTitle(
+  sections: MarkdownSection[],
+  frontmatter?: Record<string, unknown>
+): string | undefined {
+  if (frontmatter?.title && typeof frontmatter.title === "string") return frontmatter.title
+  return sections.find((section) => section.level === 1)?.title
 }
 
 /**
@@ -292,11 +310,16 @@ function extractTitle(content: string, frontmatter?: Record<string, unknown>): s
  */
 export function parseMarkdown(content: string): MarkdownParseResult {
   const { frontmatter, body } = parseFrontmatter(content)
-  const sections = extractSections(body)
+  const bodyLineOffset = content.slice(0, content.length - body.length).split("\n").length - 1
+  const sections = extractSections(body).map((section) => ({
+    ...section,
+    startLine: section.startLine + bodyLineOffset,
+    endLine: section.endLine + bodyLineOffset,
+  }))
   const links = extractLinks(body)
   const codeBlocks = extractCodeBlocks(body)
   const images = extractImages(body)
-  const title = extractTitle(body, frontmatter)
+  const title = extractTitle(sections, frontmatter)
   const taskLists = extractTaskLists(body)
   const mathBlocks = extractMathBlocks(body)
   const footnotes = extractFootnotes(body)

@@ -19,9 +19,11 @@ export interface ApplyProjectKnowledgeContextInput {
   userMessage: string
   topK: number
   precomputedQueryEmbedding?: number[]
+  strategy?: "vector" | "hybrid" | "keyword"
+  fileIds?: readonly string[]
   /** Map of `KnowledgeFile.id` → display name, for citations. */
   fileNames?: Record<string, string>
-  deps: ProjectKnowledgeRuntimeDeps
+  deps?: ProjectKnowledgeRuntimeDeps
 }
 
 export interface AppliedProjectChunk {
@@ -61,6 +63,8 @@ export async function applyProjectKnowledgeContext(
       userMessage: query,
       topK: input.topK,
       precomputedQueryEmbedding: input.precomputedQueryEmbedding,
+      strategy: input.strategy,
+      fileIds: input.fileIds,
       deps: input.deps,
     })
 

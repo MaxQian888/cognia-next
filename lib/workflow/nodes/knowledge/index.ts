@@ -3,7 +3,6 @@ import {
   createKnowledgeBaseSource,
   getKnowledgeBasesByIds,
   getKnowledgeBaseSourcesByIds,
-  updateKnowledgeBaseSource,
 } from "@/lib/db/knowledge-bases"
 import { getDb } from "@/lib/db/schema"
 import { persistKnowledgeBaseChunks } from "@/lib/knowledge-base/ingest/persist"
@@ -13,8 +12,13 @@ import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { prepareChunks } from "@/lib/twin/ingest/chunk"
 import { parseSource, type ParsedSource } from "@/lib/twin/ingest/parse"
+import { runTwinPdfOcrWithProvenance } from "@/lib/twin/ingest/ocr-fallback"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
-import { redactText, translateOffsetsThroughRedaction, unredactText } from "@cognia/redact"
+import {
+  redactText,
+  translateOffsetsThroughRedaction,
+  restoreOffsetsThroughRedaction,
+} from "@cognia/redact"
 import type { TwinSourceFormat, TwinSourceKind } from "@/types/twin"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import {
@@ -37,6 +41,8 @@ interface ParsedArtifact {
 }
 
 interface TransformedArtifact extends Omit<ParsedArtifact, "document"> {
+  title: string
+  structure?: ParsedSource["structure"]
   format: TwinSourceFormat
   originalText: string
   redactedText: string
@@ -47,7 +53,7 @@ interface TransformedArtifact extends Omit<ParsedArtifact, "document"> {
 
 interface ChunkArtifact extends Pick<
   TransformedArtifact,
-  "knowledgeBaseId" | "sourceId" | "fingerprint"
+  "knowledgeBaseId" | "sourceId" | "fingerprint" | "originalText" | "structure" | "title" | "format"
 > {
   chunks: Array<ReturnType<typeof prepareChunks>[number] & { contentRedacted: string }>
 }
@@ -205,14 +211,17 @@ export async function runKnowledgeParse(ctx: StepExecutionContext): Promise<Step
   const sourceId = required((ctx.params as { sourceId?: string }).sourceId, "sourceId")
   const [source] = await getKnowledgeBaseSourcesByIds([sourceId])
   if (!source) throw nonRetryable("Knowledge Base source was not found")
-  const document = await parseSource({
+  const raw = {
     id: source.id,
     filename: source.originalLocation ?? source.title,
     format: source.format,
     ...(source.contentEncoding === "base64"
       ? { binary: base64Bytes(source.content) }
       : { text: source.content }),
-  })
+  }
+  const document = await parseSource(raw)
+  const ocr = await runTwinPdfOcrWithProvenance(raw, document)
+  if (ocr) Object.assign(document, ocr)
   const ref = await storeWorkflowKnowledgeArtifact({
     ...artifactScope(ctx),
     stepId: ctx.stepId,
@@ -252,6 +261,8 @@ export async function runKnowledgeTransform(
       sourceId: parsed.sourceId,
       fingerprint: parsed.fingerprint,
       format: parsed.document.format,
+      title: parsed.document.title,
+      structure: parsed.document.structure,
       originalText: parsed.document.originalText,
       redactedText: redaction.redacted,
       redactionMap: redaction.map,
@@ -275,16 +286,21 @@ export async function runKnowledgeChunk(ctx: StepExecutionContext): Promise<Step
     artifactId,
     expectedStage: "transformed",
   })
-  const chunks = prepareChunks({
+  const prepared = prepareChunks({
     redactedText: transformed.redactedText,
     originalText: transformed.originalText,
     format: transformed.format,
     baseMetadata: transformed.baseMetadata,
     ...(transformed.pageMap ? { pageMap: transformed.pageMap } : {}),
-  }).map((chunk) => ({
+  })
+  const chunks = restoreOffsetsThroughRedaction(
+    prepared,
+    transformed.redactedText,
+    transformed.redactionMap
+  ).map((chunk) => ({
     ...chunk,
     contentRedacted: chunk.content,
-    content: unredactText(chunk.content, transformed.redactionMap),
+    content: transformed.originalText.slice(chunk.charStart, chunk.charEnd),
   }))
   const ref = await storeWorkflowKnowledgeArtifact({
     ...artifactScope(ctx),
@@ -294,6 +310,10 @@ export async function runKnowledgeChunk(ctx: StepExecutionContext): Promise<Step
       knowledgeBaseId: transformed.knowledgeBaseId,
       sourceId: transformed.sourceId,
       fingerprint: transformed.fingerprint,
+      originalText: transformed.originalText,
+      structure: transformed.structure,
+      title: transformed.title,
+      format: transformed.format,
       chunks,
     } satisfies ChunkArtifact,
   })
@@ -374,20 +394,24 @@ export async function runKnowledgePublish(ctx: StepExecutionContext): Promise<St
   })
   const deps = await tryBuildTwinDeps()
   if (!deps) throw nonRetryable("Knowledge vector runtime is not configured")
+  if (!indexed.validated) throw nonRetryable("Knowledge publish requires a validated artifact")
   const result = await persistKnowledgeBaseChunks({
     knowledgeBaseId: indexed.knowledgeBaseId,
     sourceId: indexed.sourceId,
     vectorBackend: indexed.vectorBackend,
     store: deps.store,
     contentHash: indexed.fingerprint,
+    expectedSourceFingerprint: indexed.fingerprint,
+    signal: ctx.signal,
+    documentSnapshot: {
+      originalText: indexed.originalText,
+      structure: indexed.structure,
+      title: indexed.title,
+      format: indexed.format,
+    },
     profileFingerprint: `workflow:${indexed.vectorBackend}:${indexed.dimensions ?? "none"}`,
     chunks: indexed.chunks,
     embeddings: indexed.embeddings,
-  })
-  await updateKnowledgeBaseSource(indexed.sourceId, {
-    status: "ready",
-    chunkCount: result.rows.length,
-    errorCode: undefined,
   })
   return {
     output: {

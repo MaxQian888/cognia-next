@@ -8,13 +8,15 @@ function server(partial: Partial<McpServer> & Pick<McpServer, "name" | "transpor
 }
 
 describe("PI_MCP_ADAPTER_AGENT metadata", () => {
-  it("is a writable JSON adapter under its own id, not Pi's", () => {
+  it("keeps the persisted MCP target id separate from Pi settings", () => {
     expect(PI_MCP_ADAPTER_AGENT.id).toBe("pi-mcp-adapter")
+    expect(PI_MCP_ADAPTER_AGENT.displayName).toBe("Pi")
+    expect(PI_MCP_ADAPTER_AGENT.description).not.toContain("requires")
     expect(PI_MCP_ADAPTER_AGENT.writable).toBe(true)
     expect(PI_MCP_ADAPTER_AGENT.format).toBe("json")
   })
 
-  it("names the npm package the whole surface is gated on", () => {
+  it("retains the optional legacy package identity", () => {
     expect(PI_MCP_ADAPTER_PACKAGE).toBe("pi-mcp-adapter")
   })
 })
@@ -91,14 +93,46 @@ describe("project", () => {
     expect(out).toEqual({ mcpServers: { fs: { command: "npx" } } })
   })
 
-  it("pins SSE with httpTransport so the round-trip is lossless", () => {
-    const written = project(null, [
-      server({ name: "api", transport: "sse", config: { url: "https://example.com/sse" } }),
-    ])
+  it("rejects unsupported SSE before producing a destructive projection", () => {
+    const existing = {
+      autoEnableCodemode: false,
+      mcpServers: {
+        sse: { url: "https://example.com/sse", httpTransport: "sse" },
+        unmanaged: { command: "keep" },
+      },
+    }
+    const snapshot = structuredClone(existing)
+    const projectUnsupported = () =>
+      project(
+        existing,
+        [server({ name: "sse", transport: "sse", config: { url: "https://example.com/sse" } })],
+        new Set(["sse"])
+      )
+    expect(projectUnsupported).toThrow(TypeError)
+    expect(projectUnsupported).toThrow(/Pi.*does not support SSE.*sse/)
+    expect(existing).toEqual(snapshot)
+  })
+
+  it("preserves native OAuth, exposure, enabled state and project override entries", () => {
+    const config = {
+      url: "https://example.com/mcp",
+      enabled: false,
+      exposure: "deferred",
+      toolExposure: { "read_*": "direct" },
+      oauth: { clientRegistration: "cimd", authServerMetadataUrl: "https://example.com/oauth" },
+    }
+    const written = project(
+      {
+        autoEnableCodemode: false,
+        mcpServers: { override: { enabled: false, exposure: "hidden" } },
+      },
+      [server({ name: "api", transport: "http", config })]
+    )
     expect(written).toEqual({
-      mcpServers: { api: { url: "https://example.com/sse", httpTransport: "sse" } },
+      autoEnableCodemode: false,
+      mcpServers: { override: { enabled: false, exposure: "hidden" }, api: config },
     })
-    expect(parse(written)[0].transport).toBe("sse")
+    expect(parse(written)).toEqual([{ name: "api", transport: "http", config }])
   })
 
   it("leaves HTTP unpinned so the adapter can negotiate", () => {
@@ -138,12 +172,12 @@ describe("project", () => {
   })
 
   /** Rewriting the key would show up as an unexplained hand-edit in a diff. */
-  it("keeps the hyphenated key when the file already uses it", () => {
+  it("migrates the legacy hyphenated key to native Pi mcpServers", () => {
     const out = project({ "mcp-servers": { old: { command: "x" } } }, [
       server({ name: "fs", transport: "stdio", config: { command: "npx" } }),
     ]) as Record<string, unknown>
-    expect(out["mcp-servers"]).toEqual({ old: { command: "x" }, fs: { command: "npx" } })
-    expect(out.mcpServers).toBeUndefined()
+    expect(out.mcpServers).toEqual({ old: { command: "x" }, fs: { command: "npx" } })
+    expect(out["mcp-servers"]).toBeUndefined()
   })
 
   it("defaults to the canonical key on a fresh file", () => {

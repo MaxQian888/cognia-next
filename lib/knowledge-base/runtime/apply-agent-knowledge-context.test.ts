@@ -317,3 +317,98 @@ describe("applyAgentKnowledgeContext", () => {
     )
   })
 })
+
+it("preserves immutable document locations in citations", async () => {
+  const hit = chunk("location", "kb-a", "source-a", "Original text", 0.9)
+  hit.chunk.generationId = "generation-1"
+  hit.chunk.charStart = 100
+  hit.chunk.charEnd = 113
+  hit.chunk.metadata = {
+    documentVersion: "sha256:version",
+    sectionId: "section-1",
+    pageNumber: 3,
+    pageEnd: 4,
+    lineStart: 20,
+    lineEnd: 22,
+  }
+  const result = await applyAgentKnowledgeContext({
+    knowledgeBaseIds: ["kb-a"],
+    userMessage: "q",
+    topKPerBase: 1,
+    tokenBudget: 100,
+    deps: {
+      retrieveLibrary: async () => ({ chunks: [hit], degraded: false }),
+      loadLibraries: async () => libraries,
+      loadSources: async () => sources,
+    },
+  })
+  expect(result.citations[0]).toMatchObject({
+    generationId: "generation-1",
+    documentVersion: "sha256:version",
+    sectionId: "section-1",
+    charStart: 100,
+    charEnd: 113,
+    pageNumber: 3,
+    pageEnd: 4,
+    lineStart: 20,
+    lineEnd: 22,
+  })
+})
+
+it("awaits authorization and rejects foreign libraries and unbound revisions", async () => {
+  const current = chunk("current", "kb-a", "source-a", "allowed", 0.8)
+  current.chunk.generationId = "current"
+  const old = chunk("old", "kb-a", "source-a", "old", 1)
+  old.chunk.generationId = "old"
+  const denied = chunk("denied", "kb-a", "source-b", "secret", 1)
+  denied.chunk.generationId = "current"
+  const foreign = chunk("foreign", "kb-b", "source-b", "foreign", 1)
+  const result = await applyAgentKnowledgeContext({
+    knowledgeBaseIds: ["kb-a"],
+    userMessage: "q",
+    topKPerBase: 5,
+    tokenBudget: 100,
+    revisionBindings: { "kb-a": ["current"] },
+    authorizeChunk: async ({ source }) => source?.id === "source-a",
+    deps: {
+      retrieveLibrary: async () => ({ chunks: [old, denied, foreign, current], degraded: false }),
+      loadLibraries: async () => libraries,
+      loadSources: async () => sources,
+    },
+  })
+  expect(result.retrievedChunks.map(({ chunk }) => chunk.id)).toEqual(["current"])
+  expect(result.systemPromptSection).not.toContain("secret")
+})
+
+it("forwards hybrid strategy and a fresh source authorization gate before retrieval", async () => {
+  const loadSources = knowledgeBaseDb.getKnowledgeBaseSourcesByIds as jest.Mock
+  loadSources.mockResolvedValue([sources[0]])
+  ;(knowledgeBaseDb.getKnowledgeBasesByIds as jest.Mock).mockResolvedValue(libraries)
+  const retrieve = retrieval.retrieveKnowledgeBaseChunks as jest.Mock
+  retrieve.mockResolvedValue({ chunks: [], degraded: false })
+  const authorize = jest.fn(
+    async ({ source }: { source: KnowledgeBaseSource | undefined }) =>
+      source?.acl?.visibility === "public"
+  )
+  await applyAgentKnowledgeContextFromDb({
+    knowledgeBaseIds: ["kb-a"],
+    userMessage: "q",
+    topKPerBase: 3,
+    tokenBudget: 100,
+    retrievalStrategy: "hybrid",
+    authorizeChunk: authorize,
+    runtimeDeps: {
+      store: { getCollectionInfo: jest.fn() },
+      embedding: { provider: "openai", model: "embedding", apiKey: "test" },
+      vectorBackend: "native",
+    },
+  })
+  const args = retrieve.mock.calls.at(-1)![0]
+  expect(args).toMatchObject({ strategy: "hybrid", tokenBudget: 100 })
+  const candidate = chunk("a", "kb-a", "source-a", "x", 1).chunk
+  expect(await args.authorizeChunk(candidate)).toBe(false)
+  loadSources.mockResolvedValue([{ ...sources[0], acl: { visibility: "public" } }])
+  expect(await args.authorizeChunk(candidate)).toBe(true)
+  loadSources.mockResolvedValue([])
+  expect(await args.authorizeChunk(candidate)).toBe(false)
+})

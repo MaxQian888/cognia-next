@@ -2964,6 +2964,18 @@ describe("agent imperative API", () => {
   })
 
   describe("dispatchSubagent to an external agent", () => {
+    it("strips plugin-supplied knowledge authority before host subagent dispatch", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:dispatch"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.dispatchSubagent({ id: "local", prompt: "read" } as never, "read", {
+        toolsEnabled: false,
+        _knowledgeAccess: { entrypoint: "desktop", allowedKnowledgeBaseIds: ["private"] },
+      } as never)
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "read",
+        expect.not.objectContaining({ knowledgeAccess: expect.anything() })
+      )
+    })
     it("also requires agent:dispatch-external for an inline external def", async () => {
       initializePluginPermissions(PLUGIN_ID, ["agent:dispatch"])
       const ctx = createPluginContext(createMockPlugin(), mockManager)

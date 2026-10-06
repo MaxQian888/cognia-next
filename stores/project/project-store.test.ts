@@ -636,3 +636,54 @@ describe("project-store roots", () => {
     })
   })
 })
+
+it("invalidates derived source structure and embedding text on a knowledge edit", () => {
+  const project = useProjectStore.getState().createProject({ name: "Knowledge lifecycle" })
+  const structure = { version: 1 as const, contentHash: "old", textLength: 3, nodes: [], pages: [] }
+  useProjectStore.getState().addKnowledgeFile(project.id, {
+    name: "guide.pdf",
+    type: "pdf",
+    content: "old",
+    size: 3,
+    mimeType: "application/pdf",
+    embeddableContent: "old projection",
+    structure,
+    pageCount: 3,
+  })
+  const fileId = useProjectStore.getState().projects.find((p) => p.id === project.id)!
+    .knowledgeBase[0].id
+  useProjectStore.getState().updateKnowledgeFile(project.id, fileId, "changed text")
+  const updated = useProjectStore.getState().projects.find((p) => p.id === project.id)!
+    .knowledgeBase[0]
+  expect(updated.structure).toBeUndefined()
+  expect(updated.embeddableContent).toBeUndefined()
+  expect(updated.pageCount).toBeUndefined()
+  expect(updated.mimeType).toBe("application/pdf")
+  expect(updated.content).toBe("changed text")
+})
+
+it("preserves valid derived metadata when a knowledge edit leaves source text unchanged", () => {
+  const project = useProjectStore.getState().createProject({ name: "Knowledge unchanged" })
+  const structure = {
+    version: 1 as const,
+    contentHash: "original",
+    textLength: 3,
+    nodes: [],
+    pages: [],
+  }
+  useProjectStore.getState().addKnowledgeFile(project.id, {
+    name: "guide.md",
+    type: "markdown",
+    content: "old",
+    size: 3,
+    embeddableContent: "projection",
+    structure,
+  })
+  const fileId = useProjectStore.getState().projects.find((p) => p.id === project.id)!
+    .knowledgeBase[0].id
+  useProjectStore.getState().updateKnowledgeFile(project.id, fileId, "old")
+  const updated = useProjectStore.getState().projects.find((p) => p.id === project.id)!
+    .knowledgeBase[0]
+  expect(updated.structure).toEqual(structure)
+  expect(updated.embeddableContent).toBe("projection")
+})

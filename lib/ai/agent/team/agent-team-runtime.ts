@@ -151,6 +151,7 @@ export interface RunTeamLifecycleDeps {
   traceId?: string
   /** Parent IM ceiling inherited by every teammate dispatch in this run. */
   parentPermissionCeiling?: import("@/types/agent/permission-ceiling").AgentPermissionCeiling
+  knowledgeAccess?: import("@/lib/knowledge-base/runtime/progressive-reading").KnowledgeReadingAccess
   /**
    * The conversation's resolved working directory (ADR-0144), when the surface
    * that started this run has one.
@@ -1076,6 +1077,7 @@ export async function runTeamLifecycle(
       // IM/workflow trigger origin — lets run-scoped consumers (e.g. the
       // team_post_to_chat collaboration tool) resolve the bound conversation.
       ...(deps.triggeredFrom ? { triggeredFrom: deps.triggeredFrom } : {}),
+      ...(deps.knowledgeAccess ? { knowledgeAccess: structuredClone(deps.knowledgeAccess) } : {}),
       ...(deps.parentPermissionCeiling
         ? { parentPermissionCeiling: deps.parentPermissionCeiling }
         : {}),

@@ -33,6 +33,7 @@ import type {
   PluginResilienceConfig,
   PluginTool,
   PluginToolContext,
+  PluginProjectAPI,
 } from "@/types/plugin"
 import { TimeoutError } from "@cognia/primitives"
 import { SandboxRuntimeError } from "@cognia/plugin-sdk/api/sandbox"
@@ -83,6 +84,8 @@ export class PluginToolInvocationError extends Error {
 }
 
 export interface InvokePluginToolOptions {
+  /** Host-created invocation-bound API; not derived from tool/model arguments. */
+  project?: PluginProjectAPI
   /** Abort signal threaded into `PluginToolContext.signal`. */
   signal?: AbortSignal
   /** Chat/workflow session id surfaced to the tool. */
@@ -367,6 +370,7 @@ export async function invokePluginTool(
     sandboxRuntimeRef,
     config: plugin.config ?? {},
     signal: options.signal,
+    ...(options.project ? { project: options.project } : {}),
   }
 
   // ── Resilience: timeout + retry + per-plugin circuit breaker ───────────

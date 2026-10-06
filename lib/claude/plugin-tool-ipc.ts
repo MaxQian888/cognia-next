@@ -104,6 +104,7 @@ import {
   type AttachmentToolDeps,
 } from "./attachment-builtin-tools"
 import type { RemoteExecutionContext } from "./remote-execution"
+import { isKnowledgeBuiltinTool, runKnowledgeBuiltinTool } from "./knowledge-builtin-tools"
 
 const PLUGIN_TOOL_RESULT_PII_ERROR = "Plugin tool result blocked by the PII redaction gate"
 
@@ -645,6 +646,10 @@ export async function handlePluginToolExec(
   }
   try {
     request.abortSignal?.throwIfAborted()
+    if (isKnowledgeBuiltinTool(request.name)) {
+      const result = await runKnowledgeBuiltinTool(request.name, request.args, request)
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
     // ── Promoted web built-ins — web_search / web_fetch ────────────────────
     // Resolved BEFORE the plugin registry so the first-class built-in
     // supersedes any duplicate the web-tools plugin still registers. Always
@@ -853,14 +858,21 @@ export async function handlePluginToolExec(
       // historical contract. Production never takes this branch.
       const tool = resolverOverride.getTool(request.name)
       if (tool) {
+        const { createInvocationProjectAPI } = await import("@/lib/plugin/api/project-api")
+        const invocationProject = createInvocationProjectAPI(tool.pluginId, request.sessionId)
         const context: PluginToolContext = {
           sessionId: request.sessionId,
           sandboxRuntimeRef: request.sandboxRuntimeRef,
           config: resolverOverride.getPluginConfig?.(tool.pluginId) ?? {},
           signal: request.abortSignal,
+          project: invocationProject.api,
         }
-        const result = await tool.execute(request.args, context)
-        return { ...baseResponse, result: assertSafePluginToolResult(result) }
+        try {
+          const result = await tool.execute(request.args, context)
+          return { ...baseResponse, result: assertSafePluginToolResult(result) }
+        } finally {
+          invocationProject.dispose()
+        }
       }
     } else {
       // Production path — resolve the owning plugin by bare tool name,
@@ -877,13 +889,20 @@ export async function handlePluginToolExec(
         // API (`ctx.agent.invokeTool` / `ctx.ai`), and the host resolves those
         // per session. Injecting private dependencies for one hard-coded tool
         // name is what made those capabilities available to exactly one plugin.
-        const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
-          signal: request.abortSignal,
-          sessionId: request.sessionId,
-          sandboxRuntimeRef: request.sandboxRuntimeRef,
-          reason: `chat:plugin_tool_exec:${request.name}`,
-        })
-        return { ...baseResponse, result: assertSafePluginToolResult(result) }
+        const { createInvocationProjectAPI } = await import("@/lib/plugin/api/project-api")
+        const invocationProject = createInvocationProjectAPI(resolved.pluginId, request.sessionId)
+        try {
+          const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
+            signal: request.abortSignal,
+            sessionId: request.sessionId,
+            sandboxRuntimeRef: request.sandboxRuntimeRef,
+            reason: `chat:plugin_tool_exec:${request.name}`,
+            project: invocationProject.api,
+          })
+          return { ...baseResponse, result: assertSafePluginToolResult(result) }
+        } finally {
+          invocationProject.dispose()
+        }
       }
     }
     // ── Typed workflow runner fallback ─────────────────────────────────

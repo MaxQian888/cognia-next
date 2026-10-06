@@ -575,7 +575,12 @@
     "previewDescription": "检测到的表格与已存储的源文本。",
     "previewTitle": "预览：{title}",
     "tableStats": "{rows} 行 × {cols} 列 · {numeric} 个数值列",
-    "tablesHeading": "检测到的表格（{count}）"
+    "tablesHeading": "检测到的表格（{count}）",
+    "contentWindow": "显示引用附近的原文字符 {start}–{end}。",
+    "historicalVersion": "此引用来自文档的旧版本，当前显示引用时的原文。",
+    "pageLocation": "第 {start}–{end} 页",
+    "lineLocation": "第 {start}–{end} 行",
+    "characterLocation": "字符 {start}–{end}"
   },
   "status": {
     "accepted": "已接受",

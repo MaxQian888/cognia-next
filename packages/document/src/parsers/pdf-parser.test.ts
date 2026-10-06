@@ -139,14 +139,24 @@ describe("parsePDF native-first seam", () => {
     expect(mockParsePdfNative).not.toHaveBeenCalled()
   })
 
-  it("skips the native path when pdfjs-specific options are requested", async () => {
+  it("skips the native path when page ranges are requested", async () => {
     mockIsTauri.mockReturnValue(true)
     installPdfjsDocument()
 
-    await parsePDF(new ArrayBuffer(8), { extractOutline: true })
     await parsePDF(new ArrayBuffer(8), { startPage: 2 })
 
     expect(mockParsePdfNative).not.toHaveBeenCalled()
+  })
+
+  it("reads bookmarks alongside native spatial extraction", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockParsePdfNative.mockResolvedValue(nativeResult("Long enough native chapter text"))
+    const pdf = installPdfjsDocument()
+    pdf.getOutline.mockResolvedValue([{ title: "Chapter", dest: [0], items: [] }] as never)
+    const result = await parsePDF(new ArrayBuffer(8), { extractOutline: true })
+    expect(result.pages[0].items).toHaveLength(1)
+    expect(result.outline?.[0]).toMatchObject({ title: "Chapter", pageNumber: 1 })
+    expect(pdf.getPage).not.toHaveBeenCalled()
   })
 
   it("threads the password into the native options", async () => {
@@ -377,4 +387,20 @@ describe("PDF cancellation and resource lifetime", () => {
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(destroy).toHaveBeenCalledTimes(1)
   })
+})
+
+it("resolves named destinations and page object references instead of treating object ids as pages", async () => {
+  mockIsTauri.mockReturnValue(true)
+  mockParsePdfNative.mockResolvedValue(nativeResult("Long enough native chapter text"))
+  const pdf = installPdfjsDocument()
+  const ref = { num: 99, gen: 0 }
+  pdf.getOutline.mockResolvedValue([
+    { title: "Named chapter", dest: "chapter", items: [] },
+  ] as never)
+  Object.assign(pdf, {
+    getDestination: jest.fn(async () => [ref]),
+    getPageIndex: jest.fn(async () => 2),
+  })
+  const result = await parsePDF(new ArrayBuffer(8), { extractOutline: true })
+  expect(result.outline?.[0].pageNumber).toBe(3)
 })

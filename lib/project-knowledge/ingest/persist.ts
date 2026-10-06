@@ -15,6 +15,7 @@ import type { IVectorStore } from "@cognia/vector/store"
 import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
 import type { ProjectChunk } from "@/types/project-knowledge"
 import type { ChunkingStrategyId, TwinChunkMetadata, VectorBackend } from "@/types/twin"
+import type { KnowledgeFile } from "@/types"
 
 const COLLECTION_PREFIX = "cognia_project_"
 
@@ -42,6 +43,8 @@ export interface PersistProjectChunksInput {
   contentHash: string
   /** Stable profile fingerprint; legacy callers derive a backend/dimension fingerprint. */
   profileFingerprint?: string
+  /** Canonical file captured by ingestion before embedding; validates source ownership at commit. */
+  expectedSource?: Pick<KnowledgeFile, "content" | "structure" | "embeddableContent" | "type">
   /** Per-chunk arrays. `chunks` and `embeddings` MUST share the same length. */
   chunks: Array<{
     content: string
@@ -53,6 +56,23 @@ export interface PersistProjectChunksInput {
     metadata: TwinChunkMetadata
   }>
   embeddings: number[][]
+}
+
+export class ProjectKnowledgeSourceChangedError extends Error {
+  readonly code = "source_changed"
+  constructor() {
+    super("Project Knowledge source changed or was removed during ingestion")
+    this.name = "ProjectKnowledgeSourceChangedError"
+  }
+}
+
+function sourceIdentity(file: NonNullable<PersistProjectChunksInput["expectedSource"]>): string {
+  return JSON.stringify([
+    file.content ?? "",
+    file.structure ?? null,
+    file.embeddableContent ?? null,
+    file.type,
+  ])
 }
 
 export interface PersistProjectChunksResult {
@@ -69,6 +89,16 @@ export async function persistProjectChunks(
     throw new Error(
       `persistProjectChunks: chunks (${input.chunks.length}) and embeddings (${input.embeddings.length}) length mismatch`
     )
+  }
+  const initialProject = await getDb().projects.get(input.projectId)
+  const initialSource = initialProject?.knowledgeBase?.find((file) => file.id === input.fileId)
+  const expectedSource = input.expectedSource ?? initialSource
+  const expectedIdentity = expectedSource ? sourceIdentity(expectedSource) : undefined
+  if (
+    input.expectedSource &&
+    (!initialSource || sourceIdentity(initialSource) !== sourceIdentity(input.expectedSource))
+  ) {
+    throw new ProjectKnowledgeSourceChangedError()
   }
 
   const collection = input.vectorCollection ?? projectVectorCollectionName(input.projectId)
@@ -152,8 +182,15 @@ export async function persistProjectChunks(
       const db = getDb()
       await db.transaction(
         "rw",
-        [db.projectChunks, db.retrievalGenerations, db.retrievalActivePointers],
+        [db.projects, db.projectChunks, db.retrievalGenerations, db.retrievalActivePointers],
         async () => {
+          if (expectedIdentity !== undefined) {
+            const project = await db.projects.get(input.projectId)
+            const source = project?.knowledgeBase?.find((file) => file.id === input.fileId)
+            if (!source || sourceIdentity(source) !== expectedIdentity) {
+              throw new ProjectKnowledgeSourceChangedError()
+            }
+          }
           await db.projectChunks
             .where("[projectId+fileId]")
             .equals([input.projectId, input.fileId])

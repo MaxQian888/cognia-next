@@ -75,7 +75,7 @@ describe("ingestKnowledgeFile", () => {
       skipUnchanged: false,
     })
     expect(result.skipped).toBe(false)
-    expect(persistMock).toHaveBeenCalled()
+    expect(persistMock).toHaveBeenCalledWith(expect.objectContaining({ expectedSource: f }))
   })
 
   it("activates an empty generation so stale chunks are removed", async () => {
@@ -135,4 +135,91 @@ describe("ingestKnowledgeFile", () => {
     expect(arg.vectorBackend).toBe("qdrant")
     expect(arg.contentHash).toBe(hashContent(f.content))
   })
+})
+
+it("retains original markdown headings and records PDF page locations", async () => {
+  const content = "# Original heading\nCanonical answer on page two."
+  const structure = {
+    version: 1 as const,
+    contentHash: hashContent(content),
+    textLength: content.length,
+    nodes: [],
+    pages: [
+      {
+        pageNumber: 2,
+        charStart: 0,
+        charEnd: content.length,
+        lineStart: 1,
+        lineEnd: 2,
+        provenance: "text-layer" as const,
+      },
+    ],
+  }
+  await ingestKnowledgeFile({
+    projectId: "p",
+    file: file({ content, embeddableContent: "Canonical answer", structure }),
+    deps: nativeDeps,
+  })
+  const chunks = persistMock.mock.calls[0][0].chunks
+  expect(chunks[0].content).toContain("# Original heading")
+  expect(chunks[0].metadata.pageNumber).toBe(2)
+})
+
+it("invalidates a generation on structure-only changes while retaining legacy hashes", async () => {
+  const { hashKnowledgeFile } = await import("./ingest-file")
+  const original = file({ content: "source" })
+  expect(hashKnowledgeFile(original)).toBe(hashContent("source"))
+  const structured = {
+    ...original,
+    structure: {
+      version: 1 as const,
+      contentHash: hashContent("source"),
+      textLength: 6,
+      nodes: [],
+      pages: [],
+    },
+  }
+  expect(hashKnowledgeFile(structured)).not.toBe(hashKnowledgeFile(original))
+  expect(hashKnowledgeFile({ ...structured, embeddableContent: "projection" })).not.toBe(
+    hashKnowledgeFile(structured)
+  )
+})
+
+it("rejects stale page ranges after editing the canonical source", async () => {
+  await ingestKnowledgeFile({
+    projectId: "p",
+    file: file({
+      structure: {
+        version: 1,
+        contentHash: "stale",
+        textLength: 1,
+        nodes: [],
+        pages: [
+          {
+            pageNumber: 99,
+            charStart: 0,
+            charEnd: 100,
+            lineStart: 1,
+            lineEnd: 1,
+            provenance: "ocr",
+          },
+        ],
+      },
+    }),
+    deps: nativeDeps,
+  })
+  expect(persistMock.mock.calls[0][0].chunks[0].metadata.pageNumber).toBeUndefined()
+})
+
+it("exports the existing source format mapping for plugin readers", async () => {
+  const { PROJECT_KNOWLEDGE_SOURCE_FORMATS } = await import("./ingest-file")
+  expect(PROJECT_KNOWLEDGE_SOURCE_FORMATS).toMatchObject({
+    pdf: "pdf",
+    markdown: "markdown",
+    code: "code",
+    word: "docx",
+    presentation: "pptx",
+    epub: "epub",
+  })
+  expect(Object.keys(PROJECT_KNOWLEDGE_SOURCE_FORMATS)).toHaveLength(12)
 })

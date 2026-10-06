@@ -22,6 +22,7 @@ jest.mock("@cognia/vector/dimension-guard", () => ({
 }))
 jest.mock("@/lib/db/project-chunks", () => ({
   getProjectChunksByVectorDocIds: jest.fn(),
+  listProjectChunksByProject: jest.fn(),
 }))
 jest.mock("@/lib/ai/retrieval/corrective-filter", () => ({
   filterByGrade: jest.fn(async (_q: string, chunks: unknown[]) => chunks),
@@ -34,7 +35,7 @@ jest.mock("@cognia/rag/query-expansion", () => ({
 import { retrieveProjectChunks, type ProjectKnowledgeRuntimeDeps } from "./retrieve"
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
-import { getProjectChunksByVectorDocIds } from "@/lib/db/project-chunks"
+import { getProjectChunksByVectorDocIds, listProjectChunksByProject } from "@/lib/db/project-chunks"
 import { filterByGrade } from "@/lib/ai/retrieval/corrective-filter"
 import { generateHypotheticalAnswer } from "@cognia/rag/query-expansion"
 
@@ -59,7 +60,7 @@ const loadHostMock = loadRouterFusionHost as jest.Mock
 const twinSettingsMock = getTwinRuntimeSettings as jest.Mock
 
 function chunkRow(vectorDocId: string, content: string) {
-  return { vectorDocId, content, fileId: "file-1", contentRedacted: content }
+  return { projectId: "p", vectorDocId, content, fileId: "file-1", contentRedacted: content }
 }
 
 function makeDeps(
@@ -84,6 +85,57 @@ beforeEach(() => {
 })
 
 describe("retrieveProjectChunks", () => {
+  it("uses keyword candidates without models and excludes removed or foreign files", async () => {
+    ;(listProjectChunksByProject as jest.Mock).mockResolvedValue([
+      chunkRow("allowed", "ORBIT warranty"),
+      { ...chunkRow("removed", "ORBIT warranty"), fileId: "removed" },
+      { ...chunkRow("foreign", "ORBIT warranty"), projectId: "other" },
+    ])
+    const deps = makeDeps([])
+    const result = await retrieveProjectChunks({
+      projectId: "p",
+      userMessage: "ORBIT",
+      topK: 5,
+      strategy: "keyword",
+      fileIds: ["file-1"],
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["allowed"])
+    expect(result.degraded).toBe(false)
+    expect(embedMock).not.toHaveBeenCalled()
+  })
+
+  it("retains lexical matches and reports degradation when vectors are unavailable", async () => {
+    ;(listProjectChunksByProject as jest.Mock).mockResolvedValue([
+      chunkRow("allowed", "ORBIT warranty"),
+    ])
+    const deps = makeDeps([])
+    ;(deps.store.searchByEmbedding as jest.Mock).mockRejectedValue(new Error("offline"))
+    const result = await retrieveProjectChunks({
+      projectId: "p",
+      userMessage: "ORBIT",
+      topK: 5,
+      strategy: "hybrid",
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["allowed"])
+    expect(result.degraded).toBe(true)
+  })
+
+  it("reads existing lexical rows with no configured vector dependencies", async () => {
+    ;(listProjectChunksByProject as jest.Mock).mockResolvedValue([
+      chunkRow("allowed", "ORBIT warranty"),
+    ])
+    const result = await retrieveProjectChunks({
+      projectId: "p",
+      userMessage: "ORBIT",
+      topK: 5,
+      strategy: "keyword",
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["allowed"])
+    expect(embedMock).not.toHaveBeenCalled()
+  })
+
   it("returns empty for topK<=0 or blank message (no store call)", async () => {
     const deps = makeDeps([])
     expect(

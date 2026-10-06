@@ -9,6 +9,15 @@ jest.mock("@/lib/db/knowledge-bases", () => ({
   getKnowledgeBaseChunksByVectorDocIds: jest.fn(),
   listKnowledgeBaseRevisionChunks: jest.fn(),
 }))
+jest.mock("@/lib/db/retrieval-control", () => ({
+  isRetrievalKillSwitchEngaged: jest.fn(async () => false),
+}))
+jest.mock("@/lib/db/twin-runtime-settings", () => ({
+  getTwinRuntimeSettings: jest.fn(async () => ({
+    embedding: { provider: "openai", model: "text-embedding-3-small" },
+    storage: { vectorBackend: "native" },
+  })),
+}))
 
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
@@ -17,6 +26,7 @@ import {
   listKnowledgeBaseRevisionChunks,
 } from "@/lib/db/knowledge-bases"
 import { retrieveKnowledgeBaseChunks, type KnowledgeBaseRuntimeDeps } from "./retrieve"
+import { isRetrievalKillSwitchEngaged } from "@/lib/db/retrieval-control"
 
 const embedMock = generateEmbedding as jest.Mock
 const dimGuardMock = ensureCollectionDimensionCompatible as jest.Mock
@@ -62,6 +72,7 @@ function row(id: string, knowledgeBaseId = "kb-1") {
 }
 
 beforeEach(() => {
+  ;(isRetrievalKillSwitchEngaged as jest.Mock).mockResolvedValue(false)
   embedMock.mockClear().mockResolvedValue({ embedding: [1, 0, 0] })
   dimGuardMock.mockClear().mockResolvedValue(undefined)
   loadMock.mockReset()
@@ -183,5 +194,174 @@ describe("retrieveKnowledgeBaseChunks", () => {
     })
 
     expect(revisionsMock).toHaveBeenCalledWith("kb-1", ["gen-frozen"])
+  })
+
+  it("finds lexical evidence without embeddings and enforces authorization before scoring", async () => {
+    const allowed = {
+      ...row("allowed"),
+      content: "The ORBIT-729 warranty is seven years.",
+      contentRedacted: "The ORBIT-729 warranty is seven years.",
+    }
+    const denied = {
+      ...row("denied"),
+      sourceId: "secret",
+      content: "ORBIT-729",
+      contentRedacted: "ORBIT-729",
+    }
+    revisionsMock.mockResolvedValue([allowed, denied])
+    const deps = makeDeps([])
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "ORBIT-729",
+      topK: 5,
+      strategy: "keyword",
+      authorizeChunk: (chunk) => chunk.sourceId !== "secret",
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["allowed"])
+    expect(result.degraded).toBe(false)
+    expect(embedMock).not.toHaveBeenCalled()
+    expect(deps.store.searchByEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("honors the shared retrieval kill switch while retaining safe lexical reads", async () => {
+    ;(isRetrievalKillSwitchEngaged as jest.Mock).mockResolvedValue(true)
+    revisionsMock.mockResolvedValue([row("fact")])
+    const deps = makeDeps([])
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "content",
+      topK: 3,
+      strategy: "hybrid",
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["fact"])
+    expect(result).toMatchObject({ degraded: true, degradedReason: "kill_switch_active" })
+    expect(embedMock).not.toHaveBeenCalled()
+    expect(deps.store.searchByEmbedding).not.toHaveBeenCalled()
+  })
+
+  it("keeps lexical results with an explicit degradation when vector search fails", async () => {
+    revisionsMock.mockResolvedValue([
+      { ...row("fact"), content: "neutrino warranty", contentRedacted: "neutrino warranty" },
+    ])
+    const deps = makeDeps([])
+    ;(deps.store.searchByEmbedding as jest.Mock).mockRejectedValue(new Error("offline"))
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "neutrino",
+      topK: 2,
+      strategy: "hybrid",
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["fact"])
+    expect(result).toMatchObject({ degraded: true, degradedReason: "retrieve-failed" })
+  })
+
+  it("returns no lexical answer for unmatched terms and respects a zero token budget", async () => {
+    revisionsMock.mockResolvedValue([row("fact")])
+    const input = {
+      knowledgeBaseId: "kb-1",
+      userMessage: "astronaut",
+      topK: 3,
+      strategy: "keyword" as const,
+      deps: makeDeps([]),
+    }
+    expect((await retrieveKnowledgeBaseChunks(input)).chunks).toEqual([])
+    expect(
+      (await retrieveKnowledgeBaseChunks({ ...input, userMessage: "content", tokenBudget: 0 }))
+        .chunks
+    ).toEqual([])
+    expect((await retrieveKnowledgeBaseChunks({ ...input, topK: NaN })).chunks).toEqual([])
+  })
+
+  it("uses existing lexical rows when no vector runtime can be constructed", async () => {
+    revisionsMock.mockResolvedValue([row("fact")])
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "content",
+      topK: 3,
+      strategy: "keyword",
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["fact"])
+    expect(result.degraded).toBe(false)
+    expect(embedMock).not.toHaveBeenCalled()
+  })
+
+  it("rechecks vector authorization after search and applies the direct-call token budget", async () => {
+    const deps = makeDeps([
+      { id: "v-high", content: "", score: 1 },
+      { id: "v-low", content: "", score: 0.5 },
+    ])
+    loadMock.mockResolvedValue([row("v-high"), row("v-low")])
+    const authorize = jest
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "q",
+      topK: 3,
+      tokenBudget: 2,
+      authorizeChunk: authorize,
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["v-low"])
+    expect(authorize).toHaveBeenCalledTimes(4)
+    expect(
+      (
+        await retrieveKnowledgeBaseChunks({
+          knowledgeBaseId: "kb-1",
+          userMessage: "q",
+          topK: 3,
+          tokenBudget: 1,
+          deps,
+        })
+      ).chunks
+    ).toEqual([])
+  })
+
+  it("stops the default vector lane when the shared kill switch is engaged", async () => {
+    ;(isRetrievalKillSwitchEngaged as jest.Mock).mockResolvedValue(true)
+    revisionsMock.mockResolvedValue([row("fact")])
+    const deps = makeDeps([])
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "content",
+      topK: 3,
+      deps,
+    })
+    expect(result).toMatchObject({ degraded: true, degradedReason: "kill_switch_active" })
+    expect(result.chunks).toHaveLength(1)
+    expect(embedMock).not.toHaveBeenCalled()
+  })
+
+  it("filters foreign hits before limiting the vector result", async () => {
+    const deps = makeDeps([
+      { id: "foreign", content: "", score: 1 },
+      { id: "v-high", content: "", score: 0.9 },
+    ])
+    loadMock.mockResolvedValue([row("v-high")])
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "query",
+      topK: 1,
+      deps,
+    })
+    expect(result.chunks.map(({ chunk }) => chunk.vectorDocId)).toEqual(["v-high"])
+  })
+
+  it("keeps malformed stored token counts from bypassing lexical budgets", async () => {
+    revisionsMock.mockResolvedValue([{ ...row("fact"), tokenCount: Number.NaN }])
+    const result = await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "content",
+      topK: 3,
+      tokenBudget: 1,
+      strategy: "keyword",
+    })
+    expect(result.chunks).toEqual([])
   })
 })
