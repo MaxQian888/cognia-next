@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { createExecutionRun } from "@/lib/db/execution-runs"
+import { createExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import {
   createRunInterrupt,
   executeRunControlCommand,
@@ -30,6 +30,103 @@ describe("execution run controls", () => {
       updatedAt: 1,
     })
   }
+
+  it("does not publish a settled interrupt before its resolution event commits", async () => {
+    await seed()
+    await createRunInterrupt({
+      id: "approval-atomic",
+      runId: "run-1",
+      type: "tool_approval",
+      title: "Allow",
+      status: "pending",
+      createdAt: 1,
+      expiresAt: Date.now() + 60_000,
+    })
+    const unregister = registerRunControlHandler("agent-turn", async () => undefined)
+    const db = getDb()
+    const before = await db.executionRuns.get("run-1")
+    const beforeOutbox = await db.notificationProjectionWork.toArray()
+    const failResolution = (_key: unknown, event: { type: string }) => {
+      if (event.type === "interrupt.resolved") throw new Error("journal unavailable")
+    }
+    db.executionRunEvents.hook("creating", failResolution)
+    try {
+      await expect(
+        executeRunControlCommand({
+          runId: "run-1",
+          action: "approve",
+          interruptId: "approval-atomic",
+          expectedRevision: 1,
+          idempotencyKey: "atomic-approval",
+          actor: { remoteUserId: "owner" },
+        })
+      ).rejects.toThrow("journal unavailable")
+      expect(await getDb().executionRunInterrupts.get("approval-atomic")).toMatchObject({
+        status: "pending",
+      })
+      expect(await db.executionRuns.get("run-1")).toEqual(before)
+      expect(await db.executionRunEvents.where("runId").equals("run-1").count()).toBe(1)
+      expect(await db.notificationProjectionWork.toArray()).toEqual(beforeOutbox)
+    } finally {
+      db.executionRunEvents.hook("creating").unsubscribe(failResolution)
+      unregister()
+    }
+  })
+
+  it.each(["approve", "deny"] as const)(
+    "commits %s with its projection and notification outbox",
+    async (action) => {
+      await seed()
+      await createRunInterrupt({
+        id: "approval-success",
+        runId: "run-1",
+        type: "tool_approval",
+        title: "Allow",
+        status: "pending",
+        createdAt: 1,
+        expiresAt: Date.now() + 60_000,
+      })
+      const unregister = registerRunControlHandler("agent-turn", async () => undefined)
+      const append = jest.spyOn(runEventJournal, "append")
+      try {
+        await expect(
+          executeRunControlCommand({
+            runId: "run-1",
+            action,
+            interruptId: "approval-success",
+            expectedRevision: 1,
+            idempotencyKey: `success-${action}`,
+            actor: { remoteUserId: "owner" },
+          })
+        ).resolves.toMatchObject({ accepted: true, currentRevision: 3 })
+        const db = getDb()
+        expect(await db.executionRunInterrupts.get("approval-success")).toMatchObject({
+          status: action === "approve" ? "approved" : "denied",
+        })
+        expect(
+          (await db.executionRuns.get("run-1"))?.latestSnapshot?.pendingInterrupt
+        ).toBeUndefined()
+        expect(await db.executionRunEvents.where("runId").equals("run-1").sortBy("seq")).toEqual([
+          expect.objectContaining({ type: "interrupt.requested", seq: 1 }),
+          expect.objectContaining({ type: "interrupt.resolved", seq: 2 }),
+          expect.objectContaining({ type: "control.accepted", seq: 3 }),
+        ])
+        expect(await db.notificationProjectionWork.toArray()).toEqual([
+          expect.objectContaining({ runId: "run-1", desiredRunSeq: 3 }),
+        ])
+        // Only the independent acknowledgement uses the retrying journal. The
+        // resolution must remain on the interrupt's bound transaction.
+        expect(append).toHaveBeenCalledTimes(1)
+        expect(append).toHaveBeenCalledWith(
+          "run-1",
+          expect.objectContaining({ type: "control.accepted" })
+        )
+      } finally {
+        append.mockRestore()
+        unregister()
+      }
+    }
+  )
 
   it("allows only the initiator or configured operators", async () => {
     await seed()

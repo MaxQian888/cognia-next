@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db/schema"
 import {
   adoptExecutionRun,
+  appendRunEventInsideTransaction,
   getExecutionRun,
   listExecutionRunEvents,
   runEventJournal,
@@ -484,18 +485,32 @@ async function executeRunControlCommandUnlocked(
 
   const now = options.now ?? Date.now()
   if (interrupt) {
-    await getDb().executionRunInterrupts.update(interrupt.id, {
-      status: command.action === "approve" ? "approved" : "denied",
-      resolvedAt: now,
-      resolvedBy: command.actor,
-    })
-    await runEventJournal.append(
-      run.id,
-      semanticRunEvent(
-        "interrupt.resolved",
-        { interruptId: interrupt.id, resolution: command.action },
-        { ts: now, sourceEventId: `interrupt:${interrupt.id}:resolved` }
-      )
+    // A waiting lifecycle must see the decision and its projected resolution
+    // together, or its next review can be erased by this older resolution.
+    const db = getDb()
+    const resolvedInterrupt = interrupt
+    await db.transaction(
+      "rw",
+      db.executionRunInterrupts,
+      db.executionRuns,
+      db.executionRunEvents,
+      db.notificationProjectionWork,
+      async () => {
+        await db.executionRunInterrupts.update(resolvedInterrupt.id, {
+          status: command.action === "approve" ? "approved" : "denied",
+          resolvedAt: now,
+          resolvedBy: command.actor,
+        })
+        await appendRunEventInsideTransaction(
+          db,
+          run.id,
+          semanticRunEvent(
+            "interrupt.resolved",
+            { interruptId: resolvedInterrupt.id, resolution: command.action },
+            { ts: now, sourceEventId: `interrupt:${resolvedInterrupt.id}:resolved` }
+          )
+        )
+      }
     )
   }
   const steerReceiptIds = outcome?.steerReceiptIds ?? []
