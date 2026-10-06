@@ -1,4 +1,4 @@
-import { isPiDiagnosticProgressEvent } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-events"
+import { isPiDiagnosticProgressEvent } from "@cognia/agent-pi/rpc-events"
 import type {
   AcpPlanEntry,
   AcpToolCallDiffContent,

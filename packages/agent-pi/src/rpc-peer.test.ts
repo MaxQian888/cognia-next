@@ -8,7 +8,7 @@ import {
   PI_MAX_BUFFER_BYTES,
   type PiEventFrame,
   type PiResponseFrame,
-} from "./pi-rpc-peer"
+} from "./rpc-peer"
 
 const enc = (s: string) => new TextEncoder().encode(s)
 

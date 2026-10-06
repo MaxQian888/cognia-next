@@ -1,4 +1,5 @@
 /** @jest-environment node */
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   PiRpcClientAdapter,
   PiExtensionHandshakeError,
@@ -24,7 +25,7 @@ import {
   PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS,
   parsePiModel,
   processToolFloor,
-  type PiRpcHost,
+  type PiRpcAdapterOptions,
   PiPackageUnavailableError,
   PI_PACKAGE_ROOTS_ENV,
   PI_PLUGIN_EXTENSION_HANDSHAKE_EXTRA_MS,
@@ -32,16 +33,110 @@ import {
   piPackageRefsFromMetadata,
   type PiHostedPackage,
   type PiPackageResolver,
-} from "./pi-rpc-client"
-import { decodePiToolPolicy, PI_TOOL_POLICY_ENV } from "./pi-permission"
-import { PI_AUTH_FORBIDDEN_FLAGS, PI_AUTH_FORBIDDEN_SUBCOMMANDS } from "./pi-auth"
-import { LeaseConflictError } from "@/lib/execution/lease-conflict"
-import { encodePiPermissionTitle } from "./pi-permission"
+} from "./rpc-client"
+import { decodePiToolPolicy, PI_TOOL_POLICY_ENV } from "./permission"
+import { PI_RPC_EXECUTION_SEMANTICS } from "./manifest"
+import { PI_AUTH_FORBIDDEN_FLAGS, PI_AUTH_FORBIDDEN_SUBCOMMANDS } from "./auth"
+import { encodePiPermissionTitle } from "./permission"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
   ExternalAgentMessage,
-} from "@/types/agent/external-agent"
+} from "@cognia/agent-contracts/external-agent"
+
+// ============================================================================
+// Host ports over the fake process plane
+// ============================================================================
+
+/** The string-command process plane every Cognia host speaks; the fake host implements it. */
+interface ProcessPlane {
+  invoke<T>(name: string, args: Record<string, unknown>): Promise<T>
+  listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>
+}
+
+/** The app's PII gate, the outbound gate Cognia hands this adapter. */
+const outboundGate = hasNoLeakingPiiDeep
+
+/** Stands in for the host's typed process-lease conflict. */
+class TestLeaseConflictError extends Error {
+  constructor(
+    readonly resource: string,
+    message: string,
+    readonly holder?: string
+  ) {
+    super(message)
+  }
+}
+
+/** Stands in for the host's approval-list glob: `*` within a name. */
+const matchToolPattern = (pattern: string, toolName: string) =>
+  new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(
+    toolName
+  )
+
+/**
+ * The adapter's ports over a fake plane, mapped the way the app's process host
+ * maps them (every call reaches `plane` at call time, so a test may swap
+ * `host.invoke` after construction).
+ */
+function piDeps(
+  plane: ProcessPlane,
+  overrides: Partial<PiRpcAdapterOptions> = {}
+): PiRpcAdapterOptions {
+  const output =
+    (channel: string) => (listener: (event: { processId: string; data: string }) => void) =>
+      plane.listen<{ agentId: string; data: string }>(channel, (payload) =>
+        listener({ processId: payload.agentId, data: payload.data })
+      )
+  return {
+    processHost: {
+      available: true,
+      spawn: async (spec) => {
+        const registered = await plane.invoke<unknown>("spawn_external_agent", { config: spec })
+        return typeof registered === "string" && registered.length > 0 ? registered : spec.id
+      },
+      send: async (processId, message) => {
+        await plane.invoke("send_to_external_agent", { agentId: processId, message })
+      },
+      kill: async (processId) => {
+        await plane.invoke("kill_external_agent", { agentId: processId })
+      },
+      commandExists: async (command) =>
+        (await plane.invoke<unknown>("check_command_exists", { command })) === true,
+      onStdoutLine: output("external-agent://stdout"),
+      onStdoutRaw: output("external-agent://stdout-raw"),
+      onStderr: output("external-agent://stderr"),
+      onExit: (listener) =>
+        plane.listen<{ agentId: string; code: number; signal?: string | null }>(
+          "external-agent://exit",
+          (payload) =>
+            listener({
+              processId: payload.agentId,
+              code: payload.code,
+              ...(payload.signal !== undefined ? { signal: payload.signal } : {}),
+            })
+        ),
+    },
+    hostServices: {
+      resolveExtension: () => plane.invoke<PiExtensionVerdict>("resolve_pi_extension", {}),
+      listSessions: (cwd) => plane.invoke("list_pi_sessions", cwd ? { cwd } : {}),
+    },
+    outboundGate,
+    approvalPolicy: () => null,
+    matchToolPattern,
+    isDisabled: () => isPiRpcDisabled(),
+    classifySpawnConflict: (error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      const holder = /Agent\s+(\S+)\s+is already running/i.exec(message)?.[1]
+      return holder ? new TestLeaseConflictError("agent-process", message, holder) : null
+    },
+    resolvePiPackages: async (refs) => {
+      if (refs.length > 0) throw new Error("no plugin manager in this test host")
+      return []
+    },
+    ...overrides,
+  }
+}
 
 // ============================================================================
 // Pure helpers
@@ -251,7 +346,7 @@ describe("processToolFloor", () => {
 // Adapter, against a fake host
 // ============================================================================
 
-interface FakeHost extends PiRpcHost {
+interface FakeHost extends ProcessPlane {
   spawns: Array<{
     id: string
     command: string
@@ -534,13 +629,14 @@ function replyTo(
 }
 
 async function connected(host: FakeHost, version = PI_CERTIFIED_VERSION) {
-  const adapter = new PiRpcClientAdapter({
-    host,
-    generateSessionId: (() => {
-      let n = 0
-      return () => `sess-${++n}`
-    })(),
-  })
+  const adapter = new PiRpcClientAdapter(
+    piDeps(host, {
+      generateSessionId: (() => {
+        let n = 0
+        return () => `sess-${++n}`
+      })(),
+    })
+  )
   const connecting = adapter.connect(config)
   await Promise.resolve()
   // The probe spawns `pi --version` and waits for its exit.
@@ -553,7 +649,7 @@ async function connected(host: FakeHost, version = PI_CERTIFIED_VERSION) {
 describe("credential diagnostics", () => {
   it("loads plugin models in both catalog discovery and sessions without a saved isolation policy", async () => {
     const host = createFakeHost()
-    const adapter = new PiRpcClientAdapter({ host })
+    const adapter = new PiRpcClientAdapter(piDeps(host))
     const connecting = adapter.connect({ ...config, metadata: undefined })
     await Promise.resolve()
     host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
@@ -587,7 +683,7 @@ describe("credential diagnostics", () => {
       ...config,
       process: { command: "pi", args: ["--mode", "rpc"], env: { DEEPSEEK_API_KEY: "k" } },
     }
-    const adapter = new PiRpcClientAdapter({ host })
+    const adapter = new PiRpcClientAdapter(piDeps(host))
     const connecting = adapter.connect(withEnv)
     await Promise.resolve()
     host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
@@ -707,7 +803,7 @@ describe("session-less model discovery", () => {
     reply: { stdout: string; code?: number }
   ): Promise<{ result: T; args: string[] }> {
     const host = createFakeHost()
-    const adapter = new PiRpcClientAdapter({ host })
+    const adapter = new PiRpcClientAdapter(piDeps(host))
     const connecting = adapter.connect(config)
     await Promise.resolve()
     host.emitVersion(
@@ -799,36 +895,12 @@ describe("session-less model discovery", () => {
   })
 
   it("refuses to guess when the adapter never connected", async () => {
-    const adapter = new PiRpcClientAdapter({ host: createFakeHost() })
+    const adapter = new PiRpcClientAdapter(piDeps(createFakeHost()))
     // No spawn may happen: there is no resolved command to spawn.
     await expect(adapter.checkProviderAuth("deepseek")).resolves.toMatchObject({
       status: "unreadable",
     })
     await expect(adapter.listModelProviders()).resolves.toEqual({ status: "unreadable" })
-  })
-})
-
-describe("protocol registration", () => {
-  /**
-   * The `dsh-sdk` trap this integration had to avoid: a protocol can be in the
-   * type union, the permission table, the supported list and a preset while
-   * `registerDefaultAdapters()` never registers its adapter — so `addAgent`
-   * throws `Unsupported protocol` only at the point of use. Importing the
-   * manager here proves the registration actually ran.
-   */
-  it("is registered as a built-in adapter, not merely declared", async () => {
-    const { protocolAdapterRegistry } = await import("../../protocol-adapter")
-    await import("../../manager")
-    const { ExternalAgentManager } = await import("../../manager")
-    ExternalAgentManager.getInstance()
-
-    expect(protocolAdapterRegistry.has("pi-rpc")).toBe(true)
-    expect(protocolAdapterRegistry.create("pi-rpc")?.protocol).toBe("pi-rpc")
-  })
-
-  it("declares itself in the supported protocol list", async () => {
-    const { SUPPORTED_EXTERNAL_AGENT_PROTOCOLS } = await import("../../config/config-normalizer")
-    expect([...SUPPORTED_EXTERNAL_AGENT_PROTOCOLS]).toContain("pi-rpc")
   })
 })
 
@@ -857,7 +929,7 @@ describe("PiRpcClientAdapter — connect", () => {
 
   it("refuses an older version and reports the diagnostic reason code", async () => {
     const host = createFakeHost()
-    const adapter = new PiRpcClientAdapter({ host })
+    const adapter = new PiRpcClientAdapter(piDeps(host))
     const connecting = adapter.connect(config)
     await Promise.resolve()
     const probe = host.spawns.find((s) => s.args.includes("--version"))!
@@ -1103,14 +1175,15 @@ describe("PiRpcClientAdapter — sessions", () => {
 
   it("reclaims the least-recently-used idle process at the cap", async () => {
     const host = createFakeHost()
-    const adapter = new PiRpcClientAdapter({
-      host,
-      maxProcesses: 2,
-      generateSessionId: (() => {
-        let n = 0
-        return () => `s${++n}`
-      })(),
-    })
+    const adapter = new PiRpcClientAdapter(
+      piDeps(host, {
+        maxProcesses: 2,
+        generateSessionId: (() => {
+          let n = 0
+          return () => `s${++n}`
+        })(),
+      })
+    )
     const connecting = adapter.connect(config)
     await Promise.resolve()
     host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
@@ -1136,13 +1209,14 @@ describe("PiRpcClientAdapter — bundled extension", () => {
   }
 
   async function connectWithExtension(host: FakeHost) {
-    const adapter = new PiRpcClientAdapter({
-      host,
-      generateSessionId: (() => {
-        let n = 0
-        return () => `sess-${++n}`
-      })(),
-    })
+    const adapter = new PiRpcClientAdapter(
+      piDeps(host, {
+        generateSessionId: (() => {
+          let n = 0
+          return () => `sess-${++n}`
+        })(),
+      })
+    )
     const connecting = adapter.connect(withExtension)
     await Promise.resolve()
     host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
@@ -1315,26 +1389,34 @@ describe("isCogniaHandshake", () => {
 describe("buildPiSystemPrompt", () => {
   it("includes semantic task context but omits transport routing and empty custom data", () => {
     expect(
-      buildPiSystemPrompt({
-        context: { parentTask: "Current task", custom: { cwd: "/w", traceId: "trace" } },
-      })
+      buildPiSystemPrompt(
+        {
+          context: { parentTask: "Current task", custom: { cwd: "/w", traceId: "trace" } },
+        },
+        outboundGate
+      )
     ).toBe('Task context: {"parentTask":"Current task"}')
-    expect(buildPiSystemPrompt({ context: { workingDirectory: "/w" } })).toBeUndefined()
-    expect(buildPiSystemPrompt({ context: { custom: [] } })).toBeUndefined()
+    expect(
+      buildPiSystemPrompt({ context: { workingDirectory: "/w" } }, outboundGate)
+    ).toBeUndefined()
+    expect(buildPiSystemPrompt({ context: { custom: [] } }, outboundGate)).toBeUndefined()
     expect(() =>
-      buildPiSystemPrompt({ context: { parentTask: "Email alice@example.com" } })
+      buildPiSystemPrompt({ context: { parentTask: "Email alice@example.com" } }, outboundGate)
     ).toThrow(PiOutboundBlockedError)
   })
   it("joins the system prompt, envelope and brief-mode instruction", () => {
-    const prompt = buildPiSystemPrompt({
-      systemPrompt: "You are Cognia.",
-      instructionEnvelope: {
-        hash: "h",
-        developerInstructions: "Follow the repo rules.",
-        projectContextSummary: "A Next.js app.",
+    const prompt = buildPiSystemPrompt(
+      {
+        systemPrompt: "You are Cognia.",
+        instructionEnvelope: {
+          hash: "h",
+          developerInstructions: "Follow the repo rules.",
+          projectContextSummary: "A Next.js app.",
+        },
+        briefMode: true,
       },
-      briefMode: true,
-    })!
+      outboundGate
+    )!
     expect(prompt).toContain("You are Cognia.")
     expect(prompt).toContain("Follow the repo rules.")
     expect(prompt).toContain("A Next.js app.")
@@ -1342,8 +1424,8 @@ describe("buildPiSystemPrompt", () => {
   })
 
   it("returns nothing when there is nothing to inject", () => {
-    expect(buildPiSystemPrompt({})).toBeUndefined()
-    expect(buildPiSystemPrompt({ systemPrompt: "   " })).toBeUndefined()
+    expect(buildPiSystemPrompt({}, outboundGate)).toBeUndefined()
+    expect(buildPiSystemPrompt({ systemPrompt: "   " }, outboundGate)).toBeUndefined()
   })
 
   /**
@@ -1352,7 +1434,10 @@ describe("buildPiSystemPrompt", () => {
    */
   it("refuses to send a prompt that would leak PII", () => {
     expect(() =>
-      buildPiSystemPrompt({ systemPrompt: "Email the user at alice.smith@example.com" })
+      buildPiSystemPrompt(
+        { systemPrompt: "Email the user at alice.smith@example.com" },
+        outboundGate
+      )
     ).toThrow(PiOutboundBlockedError)
   })
 
@@ -2475,7 +2560,7 @@ describe("PiRpcClientAdapter — teardown", () => {
       return invoke<T>(name, args)
     }
     const failure = await adapter.createSession({ cwd: "/w" }).catch((error: unknown) => error)
-    expect(failure).toBeInstanceOf(LeaseConflictError)
+    expect(failure).toBeInstanceOf(TestLeaseConflictError)
     expect(failure).toMatchObject({ resource: "agent-process", holder: "agent-1:sess-1" })
     await adapter.disconnect()
   })
@@ -2571,14 +2656,15 @@ describe("PiRpcClientAdapter — teardown", () => {
 describe("PiRpcClientAdapter — resource limit", () => {
   it("refuses a new session when every process is mid-turn", async () => {
     const host = createFakeHost()
-    const adapter = new PiRpcClientAdapter({
-      host,
-      maxProcesses: 1,
-      generateSessionId: (() => {
-        let n = 0
-        return () => `s${++n}`
-      })(),
-    })
+    const adapter = new PiRpcClientAdapter(
+      piDeps(host, {
+        maxProcesses: 1,
+        generateSessionId: (() => {
+          let n = 0
+          return () => `s${++n}`
+        })(),
+      })
+    )
     const connecting = adapter.connect(config)
     await Promise.resolve()
     host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
@@ -2748,7 +2834,7 @@ describe("Pi session recovery and host defaults", () => {
     "supplies the native command and RPC mode for minimal process config %j",
     async (processConfig) => {
       const host = createFakeHost()
-      const adapter = new PiRpcClientAdapter({ host })
+      const adapter = new PiRpcClientAdapter(piDeps(host))
       await expect(adapter.createSession()).rejects.toThrow("not connected")
       const connecting = adapter.connect({ ...config, process: processConfig })
       await Promise.resolve()
@@ -2873,14 +2959,15 @@ describe("PiRpcClientAdapter — plugin Pi packages", () => {
     refs: string[] = [LATEX.ref],
     version = PI_CERTIFIED_VERSION
   ) {
-    const adapter = new PiRpcClientAdapter({
-      host,
-      resolvePiPackages,
-      generateSessionId: (() => {
-        let n = 0
-        return () => `pk-${++n}`
-      })(),
-    })
+    const adapter = new PiRpcClientAdapter(
+      piDeps(host, {
+        resolvePiPackages,
+        generateSessionId: (() => {
+          let n = 0
+          return () => `pk-${++n}`
+        })(),
+      })
+    )
     const connecting = adapter.connect({
       ...config,
       metadata: { piExtensionPolicy: "isolated", piPackages: refs },
@@ -2935,7 +3022,7 @@ describe("PiRpcClientAdapter — plugin Pi packages", () => {
     const resolver = jest.fn<ReturnType<PiPackageResolver>, Parameters<PiPackageResolver>>(
       async () => [LATEX]
     )
-    const adapter = new PiRpcClientAdapter({ host, resolvePiPackages: resolver })
+    const adapter = new PiRpcClientAdapter(piDeps(host, { resolvePiPackages: resolver }))
     const connecting = adapter.connect({
       ...config,
       process: { ...config.process!, env: { PI_CODING_AGENT_DIR: "/task/pi" } },
@@ -2955,7 +3042,7 @@ describe("PiRpcClientAdapter — plugin Pi packages", () => {
   it("refuses packages for a Bot-isolated agent before resolving anything", async () => {
     const host = createFakeHost()
     const resolver = jest.fn(async () => [LATEX])
-    const adapter = new PiRpcClientAdapter({ host, resolvePiPackages: resolver })
+    const adapter = new PiRpcClientAdapter(piDeps(host, { resolvePiPackages: resolver }))
     const connecting = adapter.connect({
       ...config,
       process: { ...config.process!, env: { COGNIA_BOT_ISOLATION: "1" } },
@@ -2972,7 +3059,7 @@ describe("PiRpcClientAdapter — plugin Pi packages", () => {
 
   it("never forwards a package-roots value typed into the agent's own env", async () => {
     const host = createFakeHost()
-    const adapter = new PiRpcClientAdapter({ host, resolvePiPackages: async () => [] })
+    const adapter = new PiRpcClientAdapter(piDeps(host, { resolvePiPackages: async () => [] }))
     const connecting = adapter.connect({
       ...config,
       process: { ...config.process!, env: { [PI_PACKAGE_ROOTS_ENV]: '["/"]', KEEP: "1" } },
@@ -3050,5 +3137,63 @@ describe("PiRpcClientAdapter — plugin Pi packages", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("PiRpcClientAdapter — host ports", () => {
+  async function connectedWith(
+    host: FakeHost,
+    overrides: Partial<PiRpcAdapterOptions>,
+    settings = config
+  ) {
+    const adapter = new PiRpcClientAdapter(piDeps(host, overrides))
+    const connecting = adapter.connect(settings)
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    return adapter
+  }
+
+  it("declares per-session, turn-scoped cancel semantics", () => {
+    expect(new PiRpcClientAdapter(piDeps(createFakeHost())).semantics).toBe(
+      PI_RPC_EXECUTION_SEMANTICS
+    )
+  })
+
+  it("asks the host's kill switch at every session start", async () => {
+    let disabled = false
+    const host = createFakeHost()
+    const adapter = await connectedWith(host, { isDisabled: () => disabled })
+    await adapter.createSession({ cwd: "/a" })
+    disabled = true
+    await expect(adapter.createSession({ cwd: "/b" })).rejects.toBeInstanceOf(PiDisabledError)
+    await adapter.disconnect()
+  })
+
+  it("lays the configuration's approval lists over the tool table with the host's matcher", async () => {
+    const host = createFakeHost()
+    const match = jest.fn((pattern: string, tool: string) => pattern === tool)
+    const adapter = await connectedWith(
+      host,
+      { matchToolPattern: match },
+      { ...config, requireApprovalFor: ["write"] }
+    )
+    await adapter.createSession({ cwd: "/w", permissionMode: "acceptEdits" })
+    const spawn = host.spawns.find((entry) => entry.env?.[PI_TOOL_POLICY_ENV])!
+    expect(decodePiToolPolicy(spawn.env![PI_TOOL_POLICY_ENV]).decisions.write).toBe("ask")
+    expect(match).toHaveBeenCalledWith("write", "write")
+    await adapter.disconnect()
+  })
+
+  it("leaves a spawn failure unchanged when the host classifies no conflict", async () => {
+    const host = createFakeHost()
+    const adapter = await connectedWith(host, { classifySpawnConflict: () => null })
+    const invoke = host.invoke.bind(host)
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      if (name === "spawn_external_agent") throw new Error("spawn refused")
+      return invoke<T>(name, args)
+    }
+    await expect(adapter.createSession({ cwd: "/w" })).rejects.toThrow("spawn refused")
+    await adapter.disconnect()
   })
 })

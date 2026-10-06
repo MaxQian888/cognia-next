@@ -20,9 +20,12 @@
  *     a running `message` field silently renders nothing.
  */
 
-import type { ExternalAgentEvent, ExternalAgentTokenUsage } from "@/types/agent/external-agent"
+import type {
+  ExternalAgentEvent,
+  ExternalAgentTokenUsage,
+} from "@cognia/agent-contracts/external-agent"
 
-import { decodePiPermissionTitle } from "./pi-permission"
+import { decodePiPermissionTitle } from "./permission"
 
 // ============================================================================
 // Pi wire types (docs/rpc.md, Pi 0.84.1)
@@ -457,7 +460,7 @@ function piDialogSchema(
   method: string,
   title: string | undefined,
   event: PiEvent
-): import("@/types/agent/external-agent").AcpElicitationSchema {
+): import("@cognia/agent-contracts/external-agent").AcpElicitationSchema {
   const options = Array.isArray(event.options)
     ? (event.options as unknown[]).filter((o): o is string => typeof o === "string")
     : undefined
@@ -467,7 +470,7 @@ function piDialogSchema(
   // belongs to the fire-and-forget `set_editor_text` — meant an editor dialog
   // lost its prefill and an input lost its hint, so the user was asked to retype
   // content the extension had already supplied.
-  const property: import("@/types/agent/external-agent").AcpElicitationPropertySchema =
+  const property: import("@cognia/agent-contracts/external-agent").AcpElicitationPropertySchema =
     method === "confirm"
       ? { type: "boolean", title }
       : {

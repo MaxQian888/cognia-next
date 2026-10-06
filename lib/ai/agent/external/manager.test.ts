@@ -86,7 +86,7 @@ import {
   type SessionCreateOptions,
 } from "./protocol-adapter"
 import { AiderCliClientAdapter } from "@cognia/agent-aider/cli-client"
-import { PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
+import { PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
 import { AcpClientAdapter } from "./runtimes/acp/acp-client"
 import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
 import {
@@ -541,6 +541,27 @@ describe("fetchSessionModelSurface (the async twin the sync capabilities could n
      * by `instanceof`. Everything that would touch a process is overridden.
      */
     class FakePi extends PiRpcClientAdapter {
+      constructor() {
+        super({
+          processHost: {
+            available: false,
+            spawn: jest.fn(),
+            send: jest.fn(),
+            kill: jest.fn(),
+            commandExists: jest.fn(),
+            onStdoutLine: jest.fn(),
+            onStdoutRaw: jest.fn(),
+            onStderr: jest.fn(),
+            onExit: jest.fn(),
+          },
+          hostServices: { resolveExtension: jest.fn(), listSessions: jest.fn() },
+          outboundGate: () => true,
+          approvalPolicy: () => null,
+          matchToolPattern: () => false,
+          isDisabled: () => false,
+          resolvePiPackages: async () => [],
+        })
+      }
       viaRpc: jest.Mock = jest.fn(async () => null)
       viaCli: jest.Mock = jest.fn(async () => ({ status: "unreadable" }))
       isConnected() {

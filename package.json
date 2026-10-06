@@ -24,7 +24,7 @@
     "// 02 ─── Build & generated assets ───": "",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next build --webpack",
     "postbuild": "node scripts/build/clean-stale-webpack-cache.mjs --backups-only",
-    "build:packages": "cross-env NODE_OPTIONS=--max-old-space-size=16384 pnpm --filter @cognia/agent --filter @cognia/agent-contracts --filter @cognia/agent-runtime-kit --filter @cognia/agent-dsh --filter @cognia/agent-codex --filter @cognia/agent-aider --filter @cognia/agent-orchestration --filter @cognia/eval-core --filter @cognia/router-fusion --filter @cognia/provider-types --filter @cognia/provider-core --filter @cognia/memory --filter @cognia/network-guard --filter @cognia/ocr --filter @cognia/plugin-ui --filter @cognia/security-findings run build",
+    "build:packages": "cross-env NODE_OPTIONS=--max-old-space-size=16384 pnpm --filter @cognia/agent --filter @cognia/agent-contracts --filter @cognia/agent-runtime-kit --filter @cognia/agent-dsh --filter @cognia/agent-codex --filter @cognia/agent-aider --filter @cognia/agent-pi --filter @cognia/agent-orchestration --filter @cognia/eval-core --filter @cognia/router-fusion --filter @cognia/provider-types --filter @cognia/provider-core --filter @cognia/memory --filter @cognia/network-guard --filter @cognia/ocr --filter @cognia/plugin-ui --filter @cognia/security-findings run build",
     "build:profile": "node scripts/build/build-profile.mjs",
     "artifact-runtime:build": "node scripts/build/build-artifact-runtime.mjs",
     "artifact-runtime:test": "node --test scripts/build/build-artifact-runtime.test.mjs",

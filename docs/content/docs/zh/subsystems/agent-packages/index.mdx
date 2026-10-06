@@ -23,7 +23,7 @@ ADR-0217 把这些代码移到契约之后：包拥有协议、格式和编排�
         ▲                      spawn reclaim, content blocks, history builders
 @cognia/agent-<integration>    ./manifest, the runtime client(s), ./history when the
         ▲                      runtime keeps its own session store
-        │                      (today: agent-dsh, agent-codex, agent-aider)
+        │                      (today: agent-dsh, agent-codex, agent-aider, agent-pi)
 host (app, CLI, headless)      registers integrations, implements the ports, owns policy,
                                PII, sandbox, persistence and the mapping into its own rows
 
@@ -43,6 +43,7 @@ flowchart BT
   dsh["@cognia/agent-dsh"] --> kit
   codex["@cognia/agent-codex"] --> kit
   aider["@cognia/agent-aider"] --> kit
+  pi["@cognia/agent-pi"] --> kit
   orch["@cognia/agent-orchestration"]
   subgraph host["应用宿主"]
     manager["ExternalAgentManager<br/>lib/ai/agent/external"]
@@ -59,6 +60,7 @@ flowchart BT
   manager --> dsh
   manager --> codex
   manager --> aider
+  manager --> pi
   ports --> contracts
   team --> orch
   dexie --> orch
@@ -74,6 +76,7 @@ flowchart BT
 | `@cognia/agent-runtime-kit` | `./base-adapter`、`./json-rpc-peer`、`./history`、`./prompt-gate`、`./plugin-compat`、… | contracts |
 | `@cognia/agent-dsh` | `./manifest`、`./sdk-client`、`./transport`、`./managed-launch`、… | contracts、runtime kit |
 | `@cognia/agent-aider` | `./manifest`、`./cli-client`、`./history` | contracts、runtime kit |
+| `@cognia/agent-pi` | `./manifest`、`./rpc-client`、`./rpc-peer`、`./rpc-events`、`./permission`、`./auth` | contracts、runtime kit |
 | `@cognia/agent-codex` | `./manifest`、`./app-server-client`、`./history`、`./mcp-config`、… | contracts、runtime kit |
 | `@cognia/agent-orchestration` | `./coordinator`、`./store`、`./memory-store`、`./store-contract`、`./decision-ledger`、`./evidence`、… | 无 |
 
@@ -111,7 +114,8 @@ flowchart BT
 | Codex | 完成：`@cognia/agent-codex`（app-server 适配器、历史读取器）；原生恢复绑定其配置 |
 | 插件适配器 | 完成：创建时即按适配器核心检查（`./plugin-compat`） |
 | Aider | 完成：`@cognia/agent-aider`（基于进程与文件端口的 CLI 适配器、历史读取器）；声明了每回合一个进程的语义，因此取消后的 Aider 会话会被保留而不是被退役 |
-| ACP、Pi、OpenCode、Claude Code、A2A、Devin、Kimi 以及 ACP 行生态 | 尚未迁移（阶段 3 进行中） |
+| Pi | 完成：`@cognia/agent-pi`（RPC 适配器、对端、事件映射、工具表、认证探测），基于进程端口与 `PiHostServices`；声明每会话一个进程的语义，取消为回合级的 `abort`。Pi 会话历史读取器仍在 `lib/session-import` |
+| ACP、OpenCode、Claude Code、A2A、Devin、Kimi 以及 ACP 行生态 | 尚未迁移（阶段 3 进行中） |
 | 由 manifest 生成目录行、CLI 端口注入、移除管理器 `instanceof` | 尚未完成（阶段 3） |
 | 引擎与工具 | 完成：AI SDK 引擎与宿主无需 Claude Agent SDK 即可运行；wire 与共享运行时模块不再引用它，连类型也不引用 |
 | 编排 | 运行状态、账本、协调器、调度与恢复已完成；团队闸门、队友池、波次运行器与合成工作流仍留在应用中（它们以应用的 `AgentTeam` 模型为类型） |

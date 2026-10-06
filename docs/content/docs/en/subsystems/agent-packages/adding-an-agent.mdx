@@ -7,8 +7,8 @@ description: How to add an external agent integration as a package — manifest,
 
 An integration is a package that knows one runtime's protocol and formats. It
 never touches the machine itself, never decides policy and never stores
-anything. `@cognia/agent-dsh`, `@cognia/agent-codex` and `@cognia/agent-aider`
-are the reference implementations; copy their layout.
+anything. `@cognia/agent-dsh`, `@cognia/agent-codex`, `@cognia/agent-aider` and
+`@cognia/agent-pi` are the reference implementations; copy their layout.
 
 ```mermaid
 flowchart LR
@@ -102,6 +102,10 @@ and take everything machine-facing from the constructor:
   the plane (Aider's chat files and context files);
 - `AgentOutboundGate` (`host.ts:145`), **required**, called on every prompt or
   payload the adapter sends;
+- a runtime-specific services interface for questions only the host can
+  answer, typed in the package and implemented by the host (Pi's
+  `PiHostServices`: verify the bundled extension, list stored sessions), never
+  a string command the package invokes;
 - `AgentLaunchEnvironmentResolver`, `AgentApprovalPolicy`,
   `AgentDiagnosticRedactor` (credential redaction for process output) and
   `AgentLogger` when the runtime needs them.

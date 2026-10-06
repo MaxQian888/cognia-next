@@ -18,8 +18,6 @@
  *      which holds even if the extension never loads.
  */
 
-import { matchGlob } from "@/lib/claude/permissions/ruleset"
-
 /** Pi's built-in tools, as reported by `pi --help` and `tool-policy.ts`. */
 export const PI_BUILTIN_TOOLS = ["read", "grep", "find", "ls", "edit", "write", "bash"] as const
 export type PiBuiltinTool = (typeof PI_BUILTIN_TOOLS)[number]
@@ -130,13 +128,16 @@ export function resolvePiToolPolicy(
  * judged per call (asking more is the safe reading), and a bare
  * `autoApprovePatterns` entry relaxes `ask` to `allow`. A specifier-qualified
  * auto-approval is applied per call instead, when Pi's prompt reaches Cognia
- * (`configuredApprovalPolicy` in `pi-rpc-client`). Modes whose promise is "no
+ * (the host's `AgentApprovalPolicy`, asked by `rpc-client`). `match` is the
+ * host's own approval-list glob, so the launch-time table and the per-call
+ * policy read the same patterns the same way. Modes whose promise is "no
  * prompts" keep it: under `plan` and `dontAsk` an `ask` becomes `deny`, and
  * nothing here ever relaxes a `deny`.
  */
 export function applyConfiguredApprovalToPiPolicy(
   policy: PiToolPolicy,
   lists: { autoApprovePatterns?: string[]; requireApprovalFor?: string[] } | undefined,
+  match: PiToolPatternMatcher,
   tools: readonly string[] = PI_BUILTIN_TOOLS
 ): PiToolPolicy {
   if (!lists?.autoApprovePatterns?.length && !lists?.requireApprovalFor?.length) return policy
@@ -148,17 +149,24 @@ export function applyConfiguredApprovalToPiPolicy(
   const decisions = { ...policy.decisions }
   for (const tool of new Set([...tools, ...Object.keys(policy.decisions)])) {
     const current = decisions[tool] ?? policy.fallback
-    if ((lists.requireApprovalFor ?? []).some((entry) => matchGlob(toolPart(entry), tool))) {
+    if ((lists.requireApprovalFor ?? []).some((entry) => match(toolPart(entry), tool))) {
       if (current !== "deny") decisions[tool] = silent ? "deny" : "ask"
       continue
     }
     const bareApproval = (lists.autoApprovePatterns ?? []).some(
-      (entry) => !entry.includes("(") && matchGlob(entry.trim(), tool)
+      (entry) => !entry.includes("(") && match(entry.trim(), tool)
     )
     if (bareApproval && current === "ask") decisions[tool] = "allow"
   }
   return { ...policy, decisions }
 }
+
+/**
+ * The host's approval-list pattern matcher (Cognia: `matchGlob` from its
+ * permission ruleset). Passed in rather than reimplemented so a pattern can
+ * never mean one thing in Pi's table and another in the host's policy.
+ */
+export type PiToolPatternMatcher = (pattern: string, toolName: string) => boolean
 
 /** Look up one tool's decision, falling back for unknown/extension tools. */
 export function decidePiTool(policy: PiToolPolicy, toolName: string): PiToolDecision {

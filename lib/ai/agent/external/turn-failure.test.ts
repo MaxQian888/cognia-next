@@ -9,7 +9,7 @@ import {
   PiProcessExitedError,
   PiResourceLimitError,
   PiPackageUnavailableError,
-} from "./runtimes/pi/pi-rpc-client"
+} from "@cognia/agent-pi/rpc-client"
 
 describe("classifyExternalTurnFailure", () => {
   it("reads a Pi startup exit as an agent that failed to start", () => {

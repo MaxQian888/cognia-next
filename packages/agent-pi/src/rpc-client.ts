@@ -8,11 +8,11 @@
  *
  * Structural choices worth knowing before editing:
  *
- * - **Host access goes through `../../agent-transport`**, like `acp-client.ts` and
- *   unlike `codex-app-server-client.ts` (which imports the Tauri-only native
- *   module directly and only works in the CLI thanks to a tsconfig alias).
- *   That keeps this adapter working on desktop, headless and CLI alike. The
- *   host is injectable so tests need no Tauri at all.
+ * - **Host access goes through ports** (ADR-0217): the process plane
+ *   (`AgentProcessHost`), the Pi-specific questions only a host can answer
+ *   (`PiHostServices`), the outbound gate, the approval policy and the
+ *   approval-list matcher all arrive through the constructor, so the same
+ *   adapter runs on desktop, headless and the CLI, and tests need no Tauri.
  * - **One Pi process per Cognia session.** Pi *can* switch sessions inside one
  *   process, but sharing a process would interleave two conversations' events
  *   and permission answers on one stream. Isolation is worth the memory.
@@ -33,37 +33,37 @@ import type {
   ExternalAgentMessage,
   ExternalAgentSession,
   ExternalAgentTokenUsage,
-} from "@/types/agent/external-agent"
+} from "@cognia/agent-contracts/external-agent"
 
-import { hasNoLeakingPiiDeep } from "@cognia/redact"
-
-import { agentInvoke, agentListen } from "../../agent-transport"
 import {
   buildPiAuthCheckArgs,
   classifyPiAuthProbe,
   parsePiModelProviders,
   type PiAuthVerdict,
   type PiProviderListing,
-} from "./pi-auth"
-import { parsePiModelListing, type PiModelListing } from "./pi-auth"
-import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./pi-rpc-events"
-import { hasNoLeakingExternalAgentPromptInput } from "../../policy/outbound-prompt-pii"
+} from "./auth"
+import { parsePiModelListing, type PiModelListing } from "./auth"
+import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./rpc-events"
+import { promptInputPassesGate } from "@cognia/agent-runtime-kit/prompt-gate"
 import {
   PI_BUILTIN_TOOLS,
   PI_TOOL_POLICY_ENV,
   applyConfiguredApprovalToPiPolicy,
+  type PiToolPatternMatcher,
   encodePiToolPolicy,
   resolvePiToolPolicy,
-} from "./pi-permission"
-import { configuredApprovalPolicy } from "../../policy/tool-preapproval"
-import { PiRpcPeer, type PiFrameError } from "./pi-rpc-peer"
+} from "./permission"
+import { PiRpcPeer, type PiFrameError } from "./rpc-peer"
 import { spawnReclaimingOrphan } from "@cognia/agent-runtime-kit/spawn-reclaim"
-import { agentProcessConflictFrom } from "@/lib/execution/lease-conflict"
-import {
-  BaseProtocolAdapter,
-  type SessionCreateOptions,
-  type SessionListOptions,
-} from "../../protocol-adapter"
+import type { SessionCreateOptions, SessionListOptions } from "@cognia/agent-contracts/adapter"
+import type {
+  AgentApprovalPolicy,
+  AgentOutboundGate,
+  AgentProcessHost,
+  AgentProcessSpawnSpec,
+} from "@cognia/agent-contracts/host"
+import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
+import { PI_RPC_EXECUTION_SEMANTICS, PI_RPC_PROTOCOL } from "./manifest"
 
 // ============================================================================
 // Version policy
@@ -259,13 +259,20 @@ export function processToolFloor(
 // Adapter
 // ============================================================================
 
-/** Host seam, injectable so tests need no Tauri/companion transport. */
-export interface PiRpcHost {
-  invoke<T>(name: string, args: Record<string, unknown>): Promise<T>
-  listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>
+/**
+ * The Pi-specific questions only the host can answer: the adapter runs in the
+ * renderer under static export and has no filesystem of its own.
+ */
+export interface PiHostServices {
+  /**
+   * Resolve and hash the bundled Cognia Pi extension. Rejects on a host that
+   * does not implement the check; the adapter then refuses sessions unless a
+   * host-side resolver already put a verified path on the config.
+   */
+  resolveExtension(): Promise<PiExtensionVerdict>
+  /** Header records of the stored Pi sessions, optionally for one cwd. */
+  listSessions(cwd?: string): Promise<PiSessionRecord[] | null | undefined>
 }
-
-const defaultHost: PiRpcHost = { invoke: agentInvoke, listen: agentListen }
 
 /**
  * The host's answer to "is the bundled Pi extension the one Cognia shipped?".
@@ -386,20 +393,6 @@ export function piPackageRefsFromMetadata(metadata: Record<string, unknown> | un
   return [...new Set(raw.filter((ref): ref is string => typeof ref === "string" && ref.length > 0))]
 }
 
-/**
- * The resolver used when none is injected: the plugin registry, via
- * `lib/plugin/pi-packages/session.ts`.
- */
-export async function defaultPiPackageResolver(
-  refs: readonly string[],
-  context: PiPackageResolverContext
-): Promise<PiHostedPackage[]> {
-  // Lazy: only a session that opted into a package pays for the plugin
-  // registry, and hosts without a plugin manager (the CLI) never load it.
-  const { resolveHostedPiPackages } = await import("@/lib/plugin/pi-packages/session")
-  return resolveHostedPiPackages(refs, context)
-}
-
 /** Combine resolved packages into what one spawn needs. Throws on an env clash. */
 export function combinePiHostedPackages(packages: readonly PiHostedPackage[]): {
   extensions: string[]
@@ -443,15 +436,35 @@ export function combinePiHostedPackages(packages: readonly PiHostedPackage[]): {
 const PI_MODEL_DISCOVERY_TIMEOUT_MS = 20000
 
 export interface PiRpcAdapterOptions {
-  host?: PiRpcHost
+  /** Runs `pi --mode rpc` per session (raw framing) and the CLI probes. */
+  processHost: AgentProcessHost
+  /** Extension verification and session listing. */
+  hostServices: PiHostServices
+  /** Every prompt, steer, command and system prompt passes it. */
+  outboundGate: AgentOutboundGate
+  /** The configuration's approval lists, asked per permission request. */
+  approvalPolicy: AgentApprovalPolicy
+  /** The host's approval-list glob, used for the launch-time tool table. */
+  matchToolPattern: PiToolPatternMatcher
+  /**
+   * The operator kill switch (`PI_KILL_SWITCH_ENV`), read per session start so
+   * flipping it stops the next session without a restart.
+   */
+  isDisabled: () => boolean
+  /**
+   * Turns a host spawn failure into the host's typed conflict when another
+   * holder owns the process id (Cognia: `agentProcessConflictFrom`); `null`
+   * leaves the error unchanged.
+   */
+  classifySpawnConflict?: (error: unknown) => Error | null
   maxProcesses?: number
   /** Overrides the session-id generator so tests get deterministic ids. */
   generateSessionId?: () => string
   /**
-   * Resolves `metadata.piPackages` references (ADR-0210). Defaults to the
-   * plugin registry; injectable so tests need no plugin manager.
+   * Resolves `metadata.piPackages` references (ADR-0210). Cognia passes its
+   * plugin registry; a host without a plugin manager rejects every reference.
    */
-  resolvePiPackages?: PiPackageResolver
+  resolvePiPackages: PiPackageResolver
 }
 
 interface PiProcess {
@@ -548,9 +561,16 @@ class EventQueue {
 }
 
 export class PiRpcClientAdapter extends BaseProtocolAdapter {
-  readonly protocol = "pi-rpc"
+  readonly protocol = PI_RPC_PROTOCOL
+  readonly semantics = PI_RPC_EXECUTION_SEMANTICS
 
-  private readonly host: PiRpcHost
+  private readonly processHost: AgentProcessHost
+  private readonly services: PiHostServices
+  private readonly outboundGate: AgentOutboundGate
+  private readonly approvalPolicy: AgentApprovalPolicy
+  private readonly matchToolPattern: PiToolPatternMatcher
+  private readonly isDisabled: () => boolean
+  private readonly classifySpawnConflict: (error: unknown) => Error | null
   private readonly maxProcesses: number
   private readonly newSessionId: () => string
   private readonly resolvePiPackages: PiPackageResolver
@@ -573,11 +593,17 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     }
   >()
 
-  constructor(options: PiRpcAdapterOptions = {}) {
+  constructor(options: PiRpcAdapterOptions) {
     super()
-    this.host = options.host ?? defaultHost
+    this.processHost = options.processHost
+    this.services = options.hostServices
+    this.outboundGate = options.outboundGate
+    this.approvalPolicy = options.approvalPolicy
+    this.matchToolPattern = options.matchToolPattern
+    this.isDisabled = options.isDisabled
+    this.classifySpawnConflict = options.classifySpawnConflict ?? (() => null)
     this.maxProcesses = options.maxProcesses ?? PI_MAX_CONCURRENT_PROCESSES
-    this.resolvePiPackages = options.resolvePiPackages ?? defaultPiPackageResolver
+    this.resolvePiPackages = options.resolvePiPackages
     this.newSessionId =
       options.generateSessionId ??
       (() =>
@@ -622,7 +648,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
   private async resolveExtension(): Promise<PiExtensionVerdict | undefined> {
     try {
-      return await this.host.invoke<PiExtensionVerdict>("resolve_pi_extension", {})
+      return await this.services.resolveExtension()
     } catch {
       return undefined
     }
@@ -673,12 +699,9 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     let stdout = ""
     let exitCode: number | null = null
 
-    const offStdout = await this.host.listen<{ agentId: string; data: string }>(
-      "external-agent://stdout",
-      (payload) => {
-        if (payload.agentId === probeId) stdout += `${payload.data}\n`
-      }
-    )
+    const offStdout = await this.processHost.onStdoutLine((payload) => {
+      if (payload.processId === probeId) stdout += `${payload.data}\n`
+    })
     let resolveExit: () => void = () => {}
     const exited = new Promise<void>((resolve) => {
       resolveExit = resolve
@@ -690,28 +713,23 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // long before a spawned process can exit. Awaiting it as well would push
     // the spawn another turn down the microtask queue, which is timing the
     // adapter's callers are entitled not to have shift under them.
-    const exitHandle = this.host.listen<{ agentId: string; code?: number | null }>(
-      "external-agent://exit",
-      (payload) => {
-        if (payload.agentId !== probeId) return
-        exitCode = payload.code ?? null
-        resolveExit()
-      }
-    )
+    const exitHandle = this.processHost.onExit((payload) => {
+      if (payload.processId !== probeId) return
+      exitCode = payload.code ?? null
+      resolveExit()
+    })
 
     try {
-      await this.host.invoke("spawn_external_agent", {
-        config: {
-          id: probeId,
-          command,
-          args,
-          cwd: config.process?.cwd,
-          // A probe that answers about the user's Pi has to run as the user's
-          // Pi runs. Provider credentials and base URLs live in this env, so a
-          // probe without it can report a version, a provider set or a
-          // credential verdict that no real session would ever see.
-          env: config.process?.env,
-        },
+      await this.processHost.spawn({
+        id: probeId,
+        command,
+        args,
+        cwd: config.process?.cwd,
+        // A probe that answers about the user's Pi has to run as the user's
+        // Pi runs. Provider credentials and base URLs live in this env, so a
+        // probe without it can report a version, a provider set or a
+        // credential verdict that no real session would ever see.
+        env: config.process?.env,
       })
       await withTimeout(exited, timeoutMs, undefined)
       return { stdout, exitCode }
@@ -761,7 +779,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       if (existing.busy)
         throw new Error("Cannot replace Pi session configuration during an active turn")
     }
-    buildPiSystemPrompt(options)
+    buildPiSystemPrompt(options, this.outboundGate)
     const restart = (async () => {
       // Retire the dead peer/listeners before reusing its host process id.
       if (existing) await this.closeSession(sessionId)
@@ -807,7 +825,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     if (!this._config) throw new Error("Pi adapter is not connected")
     // Checked per session rather than at connect: an operator flipping the
     // switch should stop the next session, not require a restart.
-    if (isPiRpcDisabled()) throw new PiDisabledError()
+    if (this.isDisabled()) throw new PiDisabledError()
 
     // Refuse before anything is spawned or reclaimed. A session that cannot
     // intercept Pi's native tools must not reach the point of having a process.
@@ -828,7 +846,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // Gate BEFORE the value can reach the process env — once it is in the
     // spawn config it has already crossed the boundary. Mirrors
     // `cli/src/agent/external-agent-session.ts`.
-    const systemPrompt = buildPiSystemPrompt(options)
+    const systemPrompt = buildPiSystemPrompt(options, this.outboundGate)
     const cwd = options.cwd ?? this._config.process?.cwd
     const additionalDirectories = options.additionalDirectories ?? []
     if (additionalDirectories.some((entry) => !/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(entry)))
@@ -841,10 +859,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const args = this.buildArgs(piSessionId, options, extra, extension, packages)
 
     const peer = new PiRpcPeer({
-      writeRaw: (frame) =>
-        this.host
-          .invoke("send_to_external_agent", { agentId, message: frame })
-          .then(() => undefined),
+      writeRaw: (frame) => this.processHost.send(agentId, frame).then(() => undefined),
       onEvent: (event) => this.dispatchEvent(piSessionId, event as PiEvent),
       onOrphanResponse: (response) => {
         // Pi rejecting our own input. Never fails a pending command (it has
@@ -898,51 +913,42 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       // line events for this session are ignored, so a host that later emitted
       // both cannot double-feed the decoder.
       record.unlisten.push(
-        await this.host.listen<{ agentId: string; data: string }>(
-          "external-agent://stdout-raw",
-          (payload) => {
-            if (payload.agentId !== agentId) return
-            record.framing = "raw"
-            peer.ingest(base64ToBytes(payload.data))
-          }
-        )
+        await this.processHost.onStdoutRaw((payload) => {
+          if (payload.processId !== agentId) return
+          record.framing = "raw"
+          peer.ingest(base64ToBytes(payload.data))
+        })
       )
       record.unlisten.push(
-        await this.host.listen<{ agentId: string; data: string }>(
-          "external-agent://stdout",
-          (payload) => {
-            if (payload.agentId !== agentId) return
-            if (record.framing === "raw") return
-            record.framing = "line"
-            // Re-append exactly the one byte the line reader stripped, so the
-            // strict LF codec sees the frame Pi actually wrote. Safe because the
-            // Rust reader splits on the `\n` BYTE only: U+2028/U+2029 do not
-            // split there (that is a Node `readline` defect, ADR-0119), and a raw
-            // `\r` cannot occur inside a Pi frame because `JSON.stringify`
-            // escapes it as `\\r`.
-            peer.ingest(textToBytes(`${payload.data}\n`))
-          }
-        )
+        await this.processHost.onStdoutLine((payload) => {
+          if (payload.processId !== agentId) return
+          if (record.framing === "raw") return
+          record.framing = "line"
+          // Re-append exactly the one byte the line reader stripped, so the
+          // strict LF codec sees the frame Pi actually wrote. Safe because the
+          // Rust reader splits on the `\n` BYTE only: U+2028/U+2029 do not
+          // split there (that is a Node `readline` defect, ADR-0119), and a raw
+          // `\r` cannot occur inside a Pi frame because `JSON.stringify`
+          // escapes it as `\\r`.
+          peer.ingest(textToBytes(`${payload.data}\n`))
+        })
       )
       record.unlisten.push(
-        await this.host.listen<{ agentId: string; code: number }>(
-          "external-agent://exit",
-          (payload) => {
-            if (payload.agentId !== agentId) return
-            record.exited = true
-            record.exitCode = payload.code
-            record.settleHandshake?.()
-            peer.endOfStream()
-            this.cancelPendingDialogs(piSessionId, record)
-            peer.rejectAll(`Pi process exited (code ${payload.code})`)
-            this.dispatchError(piSessionId, `Pi process exited with code ${payload.code}`)
-            this.finishQueues(record)
-          }
-        )
+        await this.processHost.onExit((payload) => {
+          if (payload.processId !== agentId) return
+          record.exited = true
+          record.exitCode = payload.code
+          record.settleHandshake?.()
+          peer.endOfStream()
+          this.cancelPendingDialogs(piSessionId, record)
+          peer.rejectAll(`Pi process exited (code ${payload.code})`)
+          this.dispatchError(piSessionId, `Pi process exited with code ${payload.code}`)
+          this.finishQueues(record)
+        })
       )
 
       if (record.cancelling) throw new Error("Pi session closed during startup")
-      const spawnConfig = {
+      const spawnConfig: { config: AgentProcessSpawnSpec } = {
         config: {
           id: agentId,
           command: this._config.process?.command ?? "pi",
@@ -966,6 +972,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
               applyConfiguredApprovalToPiPolicy(
                 resolvePiToolPolicy(options.permissionMode, options.allowedTools, packages.tools),
                 this._config,
+                this.matchToolPattern,
                 [...PI_BUILTIN_TOOLS, ...packages.tools]
               )
             ),
@@ -987,10 +994,10 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       // surfaces as a typed conflict, never as a generic spawn failure.
       record.spawning = spawnReclaimingOrphan({
         id: agentId,
-        spawn: () => this.host.invoke("spawn_external_agent", spawnConfig),
-        kill: (id) => this.host.invoke("kill_external_agent", { agentId: id }),
+        spawn: () => this.processHost.spawn(spawnConfig.config),
+        kill: (id) => this.processHost.kill(id),
       }).catch((error: unknown) => {
-        throw agentProcessConflictFrom(error) ?? error
+        throw this.classifySpawnConflict(error) ?? error
       })
 
       await record.spawning
@@ -1269,7 +1276,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
     if (!record.exited) {
       try {
-        await this.host.invoke("kill_external_agent", { agentId: record.agentId })
+        await this.processHost.kill(record.agentId)
       } catch (error) {
         if (!record.exited) throw error
       }
@@ -1285,7 +1292,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     message: ExternalAgentMessage,
     options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
-    if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+    if (!promptInputPassesGate(message, this.outboundGate, { sessionId })) {
       throw new PiOutboundBlockedError()
     }
     const currentOptions =
@@ -1384,7 +1391,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         // (`applyConfiguredApprovalToPiPolicy`): answer it here, unseen.
         if (
           canonical.type === "permission_request" &&
-          configuredApprovalPolicy(this._config ?? undefined, canonical.request) === "approve"
+          this.approvalPolicy(this._config ?? undefined, canonical.request) === "approve"
         ) {
           void this.respondToPermission(sessionId, {
             // The dialog id, the key `pendingDialogs` was filed under above.
@@ -1912,10 +1919,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     if (!config) return null
     const probeId = `${config.id}:models-rpc-probe:${Date.now()}`
     const peer = new PiRpcPeer({
-      writeRaw: (frame) =>
-        this.host
-          .invoke("send_to_external_agent", { agentId: probeId, message: frame })
-          .then(() => undefined),
+      writeRaw: (frame) => this.processHost.send(probeId, frame).then(() => undefined),
       // A discovery process is asked one question and answers it. Pi still
       // emits startup events on the same stream. None of them belong to a
       // session, so none of them are dispatched anywhere.
@@ -1930,48 +1934,37 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const unlisten: Array<() => void> = []
     try {
       unlisten.push(
-        await this.host.listen<{ agentId: string; data: string }>(
-          "external-agent://stdout-raw",
-          (payload) => {
-            if (payload.agentId !== probeId) return
-            framing = "raw"
-            peer.ingest(base64ToBytes(payload.data))
-          }
-        )
+        await this.processHost.onStdoutRaw((payload) => {
+          if (payload.processId !== probeId) return
+          framing = "raw"
+          peer.ingest(base64ToBytes(payload.data))
+        })
       )
       unlisten.push(
-        await this.host.listen<{ agentId: string; data: string }>(
-          "external-agent://stdout",
-          (payload) => {
-            if (payload.agentId !== probeId || framing === "raw") return
-            framing = "line"
-            peer.ingest(textToBytes(`${payload.data}\n`))
-          }
-        )
+        await this.processHost.onStdoutLine((payload) => {
+          if (payload.processId !== probeId || framing === "raw") return
+          framing = "line"
+          peer.ingest(textToBytes(`${payload.data}\n`))
+        })
       )
       unlisten.push(
-        await this.host.listen<{ agentId: string; code?: number | null }>(
-          "external-agent://exit",
-          (payload) => {
-            if (payload.agentId !== probeId) return
-            peer.endOfStream()
-            peer.rejectAll(`Pi discovery process exited (code ${payload.code ?? "unknown"})`)
-          }
-        )
+        await this.processHost.onExit((payload) => {
+          if (payload.processId !== probeId) return
+          peer.endOfStream()
+          peer.rejectAll(`Pi discovery process exited (code ${payload.code ?? "unknown"})`)
+        })
       )
 
-      await this.host.invoke("spawn_external_agent", {
-        config: {
-          id: probeId,
-          command: config.process?.command ?? "pi",
-          args: ["--mode", "rpc", "--no-session", ...extensionPolicyArgs(this.extensionPolicy())],
-          cwd: config.process?.cwd,
-          // The same env a session gets. Provider credentials live here, and
-          // reading the catalog under a different environment is exactly how
-          // two lists of the same thing learn to disagree.
-          env: config.process?.env,
-          framing: "raw",
-        },
+      await this.processHost.spawn({
+        id: probeId,
+        command: config.process?.command ?? "pi",
+        args: ["--mode", "rpc", "--no-session", ...extensionPolicyArgs(this.extensionPolicy())],
+        cwd: config.process?.cwd,
+        // The same env a session gets. Provider credentials live here, and
+        // reading the catalog under a different environment is exactly how
+        // two lists of the same thing learn to disagree.
+        env: config.process?.env,
+        framing: "raw",
       })
       const reply = await peer.sendCommand<{
         models?: Array<{ id?: string; provider?: string; name?: string }>
@@ -1994,7 +1987,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       peer.close("Pi model discovery finished")
       for (const off of unlisten) off()
       try {
-        await this.host.invoke("kill_external_agent", { agentId: probeId })
+        await this.processHost.kill(probeId)
       } catch {
         // Already exited, or never started.
       }
@@ -2018,10 +2011,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     }>
   > {
     const cwd = options?.cwd ?? this._config?.process?.cwd
-    const records = await this.host.invoke<PiSessionRecord[] | null | undefined>(
-      "list_pi_sessions",
-      cwd ? { cwd } : {}
-    )
+    const records = await this.services.listSessions(cwd)
     const list = Array.isArray(records) ? records : []
     return list
       .filter((record) => typeof record?.id === "string" && record.id.length > 0)
@@ -2112,7 +2102,10 @@ export const PI_SYSTEM_PROMPT_ENV = "COGNIA_TOOLHOST_PI_SYSTEM_PROMPT"
  * something upstream put personal data somewhere it should not be, and
  * quietly sending a scrubbed version would hide that.
  */
-export function buildPiSystemPrompt(options: SessionCreateOptions): string | undefined {
+export function buildPiSystemPrompt(
+  options: SessionCreateOptions,
+  gate: AgentOutboundGate
+): string | undefined {
   const envelope = options.instructionEnvelope
   const pieces = [
     options.systemPrompt,
@@ -2153,7 +2146,7 @@ export function buildPiSystemPrompt(options: SessionCreateOptions): string | und
 
   if (pieces.length === 0) return undefined
 
-  if (!hasNoLeakingPiiDeep(pieces)) {
+  if (!gate(pieces)) {
     throw new PiOutboundBlockedError()
   }
   return pieces.join("\n\n")

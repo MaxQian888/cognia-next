@@ -2321,8 +2321,8 @@ describe("useClaudeChat — actions", () => {
   it("keeps a turn that died during start-up on screen, marked failed with a typed reason", async () => {
     useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
     const { PiProcessExitedError } = jest.requireActual<
-      typeof import("@/lib/ai/agent/external/runtimes/pi/pi-rpc-client")
-    >("@/lib/ai/agent/external/runtimes/pi/pi-rpc-client")
+      typeof import("@cognia/agent-pi/rpc-client")
+    >("@cognia/agent-pi/rpc-client")
     executeOnExternalAgentMock.mockRejectedValue(new PiProcessExitedError(1))
     const { result } = renderHook(() => useClaudeChat())
     await flush()

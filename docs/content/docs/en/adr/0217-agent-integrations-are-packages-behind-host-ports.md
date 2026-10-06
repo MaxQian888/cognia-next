@@ -5,7 +5,7 @@ description: "External-agent integrations, the shared adapter contract and the r
 
 # ADR 0217 — Agent integrations are packages behind host ports
 
-**Status:** Accepted (in progress: contracts, runtime kit, DeepSeek Harness, Codex, Aider, the engine split and the orchestration core landed; the remaining Phase 3 integrations are in progress, see Implementation status)
+**Status:** Accepted (in progress: contracts, runtime kit, DeepSeek Harness, Codex, Aider, Pi, the engine split and the orchestration core landed; the remaining Phase 3 integrations are in progress, see Implementation status)
 **Date:** 2026-10-05
 **Amends:** [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility) (the adapter contract and the canonical event contract move to `@cognia/agent-contracts`), [ADR-0062](./0062-external-agent-session-import) (a runtime's session-store reader lives in its integration package and returns a neutral transcript), [ADR-0216](./0216-each-agent-configuration-keeps-its-own-state) (native resume records and returns to its configuration), [ADR-0051](./0051-external-agent-adapter-plugin-type) (plugin adapters are read against the new core)
 **Related:** [ADR-0068](./0068-frontend-package-extraction-and-compile-speed) (package extraction rules), [ADR-0107](./0107-coding-agent-migration) (migration readers stay in the migration subsystem), [ADR-0142](./0142-agent-sdk-two-layer-product), [ADR-0169](./0169-one-runtime-one-review-one-control-machine), [ADR-0197](./0197-the-sidecar-runs-its-typescript-unbuilt)
@@ -314,15 +314,15 @@ Team↔Workflow import cycle is broken. A boundary test keeps it that way.
 | --- | --- | --- |
 | 1 | Baseline, identity model, migration matrix (`docs/plans/2026-10-05-agent-package-architecture.md`) | Done |
 | 2 | `agent-contracts`, `agent-runtime-kit`, `agent-dsh`, `agent-codex` (runtime + history); DSH cancel semantics; native-resume binding | Done |
-| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`) and Aider (`@cognia/agent-aider`, with the file port) are done. ACP, Pi, OpenCode, the remote runtimes, catalog generation, CLI port injection and the `instanceof` removal follow. Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
+| 3 | ACP and the remaining integrations, the plugin compatibility wrapper, catalog rows from manifests, CLI port injection | In progress: the plugin compatibility wrapper (`c932f3275`), Aider (`@cognia/agent-aider`, with the file port) and Pi (`@cognia/agent-pi`, with `PiHostServices`) are done. ACP, OpenCode, the remote runtimes, catalog generation, CLI port injection and the `instanceof` removal follow. Their files carry another workstream's uncommitted, cross-stack changes (they depend on Rust commands that are not committed); those changes move with the code as uncommitted edits and are not committed by this migration |
 | 4 | Neutral tools; the AI SDK engine and the host run without the Claude SDK; SDK-free wire; vendor gate | Done (`44d622df7`, `c4ae605bd`); see Scope decisions for the tool-kernel package |
 | 5 | Orchestration package behind store/journal/redaction/path/remote-session ports; ledgers; Team↔Workflow cycle broken; session-ending cancel never reported as pause | Done (`6bf0a830a`, `a4f1dd183`, `3719c8d51`, `ed4ea6611`, `e931feec0`); gates, pool, wave runner and synthesized workflow stay in the app (Scope decisions) |
 | 6 | Docs, gates, CI and final regression | Done for the landed phases; Phase 3 docs follow its migration |
 
 ## Consequences
 
-- **Reuse:** a host gets an integration by implementing the ports it uses. The DSH, Codex
-  and Aider adapters no longer import the app.
+- **Reuse:** a host gets an integration by implementing the ports it uses. The DSH, Codex,
+  Aider and Pi adapters no longer import the app.
 - **Contract enforcement:** the integration packages are type-checked and pack-tested in
   isolation. A contract change that breaks an installed consumer fails
   `agent:packages:pack-test`, not a later app build. That test already caught two real

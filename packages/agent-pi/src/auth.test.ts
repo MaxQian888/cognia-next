@@ -7,7 +7,7 @@ import {
   parsePiModelListing,
   parsePiModelProviders,
   reconcilePiAuthVerdict,
-} from "./pi-auth"
+} from "./auth"
 
 // Every fixture below is a verbatim capture from Pi 0.84.1 on macOS, not a
 // hand-written approximation. The point of the module is that Pi's real

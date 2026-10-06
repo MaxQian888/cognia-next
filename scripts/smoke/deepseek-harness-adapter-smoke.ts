@@ -13,7 +13,8 @@ import { OpenCodeV2ClientAdapter } from "@/lib/ai/agent/external/runtimes/openco
 import { launchOpenCodeV2Service } from "@/lib/ai/agent/external/runtimes/opencode/opencode-v2-launcher"
 import { buildGatewayTaskConfig } from "@/lib/ai/agent/external/config/gateway-task"
 import { prepareGatewayTask } from "@/cli/src/runtime/external/gateway-task"
-import { PiRpcClientAdapter } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
+import { PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
+import { createPiRpcAdapter } from "@/lib/ai/agent/external/integrations/pi"
 import { verifyPiExtension } from "@/cli/src/agent/tool-host/pi-extension"
 import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "@cognia/agent-dsh/transport"
 import { buildDshLaunchSpec } from "@cognia/agent-dsh/install"
@@ -277,22 +278,27 @@ async function main() {
           })
         )
       : pi
-        ? new PiRpcClientAdapter({
-            host: {
-              invoke: async <T>(name: string, args: Record<string, unknown>): Promise<T> =>
-                name === "resolve_pi_extension"
-                  ? (verifyPiExtension({
-                      env: { NODE_ENV: "test", COGNIA_PI_EXTENSION_PATH: stagedExtension },
-                    }) as T)
-                  : host.invoke<T>(name, args),
-              listen: async <T>(name: string, callback: (payload: T) => void) =>
-                host.listen<T>(name, (payload) => {
-                  if (process.env.COGNIA_PI_SMOKE_DEBUG && /stdout|stderr/.test(name))
-                    process.stderr.write(`[pi-smoke ${name}] ${JSON.stringify(payload)}\n`)
-                  callback(payload)
+        ? createPiRpcAdapter(
+            createProcessPlaneHost(
+              {
+                invoke: (name, args) => host.invoke(name, args),
+                listen: async (name, callback) =>
+                  host.listen(name, (payload) => {
+                    if (process.env.COGNIA_PI_SMOKE_DEBUG && /stdout|stderr/.test(name))
+                      process.stderr.write(`[pi-smoke ${name}] ${JSON.stringify(payload)}\n`)
+                    callback(payload as never)
+                  }),
+              },
+              () => true
+            ),
+            {
+              resolveExtension: async () =>
+                verifyPiExtension({
+                  env: { NODE_ENV: "test", COGNIA_PI_EXTENSION_PATH: stagedExtension },
                 }),
-            },
-          })
+              listSessions: (cwd) => host.invoke("list_pi_sessions", cwd ? { cwd } : {}),
+            }
+          )
         : new DshSdkClientAdapter({
             createTransport: (config) =>
               createDshRuntimeTransport(

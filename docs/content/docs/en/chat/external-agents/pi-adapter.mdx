@@ -27,7 +27,7 @@ not escape them. A single valid Pi frame whose payload contains U+2028 — which
 copied from the web and in model output — arrives split into several unparseable fragments.
 
 So `pi-rpc` opts into a raw-chunk forwarding mode (`framing: "raw"` on the spawn config, delivered
-base64 on `external-agent://stdout-raw`) and frames the bytes itself in `pi-rpc-peer.ts`:
+base64 on `external-agent://stdout-raw`) and frames the bytes itself in `@cognia/agent-pi/rpc-peer`:
 
 - split on the `0x0A` byte only; strip one trailing `\r` so CRLF still parses
 - a lone `\r` is **not** a delimiter — inside JSON a carriage return must be escaped, so treating
@@ -86,7 +86,7 @@ Pi's built-in `read` / `grep` / `find` / `ls` / `edit` / `write` / `bash` execut
 process and never reach Cognia's tool-host broker. A first-party extension intercepts them via
 `pi.on("tool_call")`.
 
-It **owns no policy**. The matrix is computed in `lib/ai/agent/external/runtimes/pi/pi-permission.ts`, where it
+It **owns no policy**. The matrix is computed in `packages/agent-pi/src/permission.ts`, where it
 is typechecked and tested, and handed to the extension as data — `sidecar/` sits outside both the
 root tsconfig and Jest, so decision logic living there would be permanently unverified.
 

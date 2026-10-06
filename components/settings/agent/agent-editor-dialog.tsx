@@ -74,7 +74,7 @@ import {
   piPackageRefsFromMetadata,
   resolvePiExtensionPolicy,
   type PiExtensionPolicy,
-} from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
+} from "@cognia/agent-pi/rpc-client"
 import { PiPluginPackagesField } from "./pi-plugin-packages-field"
 import {
   useExternalAgentStore,

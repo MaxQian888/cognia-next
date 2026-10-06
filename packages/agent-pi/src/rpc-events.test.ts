@@ -4,9 +4,9 @@ import {
   piResultToText,
   piStatsToTokenUsage,
   type PiEvent,
-} from "./pi-rpc-events"
-import { PI_PERMISSION_MARKER, encodePiPermissionTitle } from "./pi-permission"
-import type { ExternalAgentEvent } from "@/types/agent/external-agent"
+} from "./rpc-events"
+import { PI_PERMISSION_MARKER, encodePiPermissionTitle } from "./permission"
+import type { ExternalAgentEvent } from "@cognia/agent-contracts/external-agent"
 
 const TS = new Date("2026-08-14T00:00:00.000Z")
 const ctx = { sessionId: "sess-1", now: () => TS }

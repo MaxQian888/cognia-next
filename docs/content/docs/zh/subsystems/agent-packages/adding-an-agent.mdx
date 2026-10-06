@@ -6,8 +6,8 @@ description: 如何把一个外部 agent 集成做成包——manifest、基于�
 # 新增 Agent
 
 一个集成就是一个了解某个运行时协议与格式的包。它从不直接触碰机器，从不决定策略，
-也从不存储任何东西。`@cognia/agent-dsh`、`@cognia/agent-codex` 与
-`@cognia/agent-aider` 是参考实现，照着它们的布局做即可。
+也从不存储任何东西。`@cognia/agent-dsh`、`@cognia/agent-codex`、`@cognia/agent-aider` 与
+`@cognia/agent-pi` 是参考实现，照着它们的布局做即可。
 
 ```mermaid
 flowchart LR
@@ -93,6 +93,8 @@ importer），在根 `tsconfig.json` 中加入 `@cognia/agent-<id>` 的 paths，
   要指明允许的根目录；`isWithinRoot` 会在 agent 进程有机会绕过文件平面打开某个路径之前
   拒绝它（例如 Aider 的聊天文件与上下文文件）；
 - `AgentOutboundGate`（`host.ts:145`）：**必需**，适配器发出的每个提示或载荷都要经过它；
+- 只有宿主能回答的问题，用包内定义类型、由宿主实现的运行时专属服务接口来表达（例如 Pi 的
+  `PiHostServices`：校验内置扩展、列出已存会话），而不是由包去调用字符串命令；
 - 运行时需要时，再传入 `AgentLaunchEnvironmentResolver`、`AgentApprovalPolicy`、
   `AgentDiagnosticRedactor`（对进程输出做凭证脱敏）与 `AgentLogger`。
 

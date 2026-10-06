@@ -42,10 +42,7 @@
  * scope is checked.
  */
 
-import type {
-  PiHostedPackage,
-  PiPackageResolverContext,
-} from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
+import type { PiHostedPackage, PiPackageResolverContext } from "@cognia/agent-pi/rpc-client"
 import { piPackageIdentity } from "@/lib/pi-packages/identity"
 import type { PiPackageScope, PiPackageSource } from "@/lib/pi-packages/types"
 import { piPackageSourceString } from "@/lib/pi-packages/types"

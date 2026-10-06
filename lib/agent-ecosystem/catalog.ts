@@ -12,6 +12,7 @@
 import { aiderManifest } from "@cognia/agent-aider/manifest"
 import { codexManifest } from "@cognia/agent-codex/manifest"
 import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
+import { piManifest } from "@cognia/agent-pi/manifest"
 
 import type { AgentEcosystemEntry } from "./types"
 
@@ -94,18 +95,7 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     subagentSourceId: "opencode",
     memoryAgentId: "opencode",
   },
-  {
-    id: "pi",
-    runtimeIds: ["pi"],
-    sessionSourceIds: ["pi"],
-    migrationVendor: "pi",
-    vendorRootKeys: ["piAgentDir", "piSessionDir"],
-    configRootKey: "piAgentDir",
-    probeRootKeys: ["piAgentDir"],
-    pluginEcosystem: null,
-    subagentSourceId: "pi",
-    memoryAgentId: "pi",
-  },
+  piManifest.ecosystem,
   {
     id: "gemini-cli",
     runtimeIds: ["gemini-cli"],

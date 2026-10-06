@@ -1127,6 +1127,19 @@ importers:
 
   packages/agent-orchestration: {}
 
+  packages/agent-pi:
+    dependencies:
+      '@cognia/agent-contracts':
+        specifier: workspace:*
+        version: link:../agent-contracts
+      '@cognia/agent-runtime-kit':
+        specifier: workspace:*
+        version: link:../agent-runtime-kit
+    devDependencies:
+      '@cognia/redact':
+        specifier: workspace:*
+        version: link:../redact
+
   packages/agent-trace: {}
 
   packages/companion-client: {}

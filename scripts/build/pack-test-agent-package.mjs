@@ -259,6 +259,48 @@ const SPECS = {
       export { adapter, parsed }
     `,
   },
+  "agent-pi": {
+    entries: [".", "./manifest", "./rpc-client", "./rpc-peer", "./rpc-events", "./permission", "./auth"],
+    dataOnly: ["./manifest"],
+    runtimeModules: ["rpc-client", "rpc-peer", "base-adapter", "spawn-reclaim", "prompt-gate"],
+    smoke: `
+      import { piManifest, PI_RPC_EXECUTION_SEMANTICS } from "@cognia/agent-pi/manifest"
+      import { PiRpcClientAdapter, buildPiSystemPrompt, PiOutboundBlockedError } from "@cognia/agent-pi/rpc-client"
+      import { decodePiToolPolicy } from "@cognia/agent-pi/permission"
+      if (piManifest.ecosystem.id !== "pi") throw new Error("manifest")
+      const adapter = new PiRpcClientAdapter({
+        processHost: { available: false },
+        hostServices: { resolveExtension: async () => ({ status: "missing" }), listSessions: async () => [] },
+        outboundGate: () => true,
+        approvalPolicy: () => null,
+        matchToolPattern: () => false,
+        isDisabled: () => false,
+        resolvePiPackages: async () => [],
+      })
+      if (adapter.semantics !== PI_RPC_EXECUTION_SEMANTICS) throw new Error("semantics")
+      let blocked = false
+      try { buildPiSystemPrompt({ systemPrompt: "x" }, () => false) } catch (error) { blocked = error instanceof PiOutboundBlockedError }
+      if (!blocked) throw new Error("the gate must refuse a system prompt")
+      if (decodePiToolPolicy(undefined).fallback !== "deny") throw new Error("permission")
+    `,
+    types: `
+      import { PiRpcClientAdapter, type PiHostServices } from "@cognia/agent-pi/rpc-client"
+      import type { AgentProcessHost } from "@cognia/agent-contracts/host"
+      import type { ProtocolAdapter } from "@cognia/agent-contracts/adapter"
+      declare const processHost: AgentProcessHost
+      declare const hostServices: PiHostServices
+      const adapter: ProtocolAdapter = new PiRpcClientAdapter({
+        processHost,
+        hostServices,
+        outboundGate: () => true,
+        approvalPolicy: () => null,
+        matchToolPattern: (pattern, tool) => pattern === tool,
+        isDisabled: () => false,
+        resolvePiPackages: async () => [],
+      })
+      export { adapter }
+    `,
+  },
   "agent-orchestration": {
     entries: [
       ".",

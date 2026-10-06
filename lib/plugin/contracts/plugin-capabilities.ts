@@ -1519,7 +1519,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/plugin/pi-packages/operations.ts",
       "lib/plugin/pi-packages/session.ts",
       "lib/plugin/contracts/capability-bridge-map.ts",
-      "lib/ai/agent/external/runtimes/pi/pi-rpc-client.ts",
+      "lib/ai/agent/external/integrations/pi.ts",
+      "packages/agent-pi/src/rpc-client.ts",
     ],
     typescriptSdk: [
       "packages/plugin-sdk/src/define/define-pi-package.ts",

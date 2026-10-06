@@ -88,7 +88,8 @@ import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { prepareDshManagedLaunch } from "@cognia/agent-dsh/managed-launch"
 import { createDshSdkAdapterFactory, dshManagedLaunchHost } from "./integrations/dsh"
-import { clampThinkingLevel, PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
+import { clampThinkingLevel, PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
+import { createPiRpcAdapterFactory } from "./integrations/pi"
 import {
   catalogModelSurface,
   EMPTY_THINKING_SURFACE,
@@ -347,7 +348,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   // hands DSH the local process host (paired remote installation is not exposed).
   registry.register("dsh-sdk", createDshSdkAdapterFactory())
   // Pi's own RPC protocol, not ACP (ADR-0119).
-  registry.register("pi-rpc", () => new PiRpcClientAdapter())
+  registry.register("pi-rpc", createPiRpcAdapterFactory())
   registry.register("aider-cli", createAiderCliAdapterFactory())
   // Future: registry.register("http", () => new HttpClientAdapter())
 }

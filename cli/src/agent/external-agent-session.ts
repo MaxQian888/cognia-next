@@ -49,7 +49,7 @@ import {
   type ExternalAgentManager,
 } from "@/lib/ai/agent/external/manager"
 import { resolveExternalAgentThinking } from "@/lib/ai/agent/external/session/session-models"
-import { clampThinkingLevel } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
+import { clampThinkingLevel } from "@cognia/agent-pi/rpc-client"
 import { projectAgentLevels, type EffortTier } from "@/lib/ai/thinking-level"
 import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"
 import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
